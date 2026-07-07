@@ -14,11 +14,48 @@ type Message = {
   content: string;
 };
 
-const SUGGESTIONS = [
-  "Which state is my strongest market?",
-  "What are my top 3 products?",
-  "How does FY26-27 order momentum compare to last year?",
-  "Who is the top performing regional head?"
+const SUGGESTION_GROUPS: { label: string; questions: string[] }[] = [
+  {
+    label: "Start here",
+    questions: [
+      "What are the 3 highest-impact moves to grow sales this quarter, based on the data?",
+    ],
+  },
+  {
+    label: "Where sales come from",
+    questions: [
+      "Which State Heads and states are driving sales, and which are underperforming relative to their partner base?",
+      "Show the top and bottom 5 states by sales — what's different about them?",
+    ],
+  },
+  {
+    label: "Resources deployed",
+    questions: [
+      "Rank State Heads by sales per partner — where is the biggest productivity gap to close?",
+      "We have 604 distributors and 169 dealers across 11 heads — which territories are over- or under-resourced for the sales they produce?",
+    ],
+  },
+  {
+    label: "Coverage",
+    questions: [
+      "Where is coverage thin, and which states or districts should we expand into next?",
+      "How much of our 31-state, 378-district footprint actually produces sales, and where are the whitespace gaps?",
+    ],
+  },
+  {
+    label: "Most-sold items",
+    questions: [
+      "What are our top-selling items and categories by value?",
+      "Which categories earn the most after cost (gross margin), not just revenue?",
+      "How is the product mix shifting from FY24-25 to the FY26-27 order book?",
+    ],
+  },
+  {
+    label: "Momentum",
+    questions: [
+      "Where is order-book demand growing fastest, and are we resourced to capture it?",
+    ],
+  },
 ];
 
 export default function Analyst() {
@@ -113,23 +150,34 @@ export default function Analyst() {
                   </div>
                 </div>
               )}
+
+              {messages.length === 1 && !analyzeSales.isPending && (
+                <div className="pt-2 space-y-5">
+                  <p className="text-sm text-muted-foreground">Pick a question to get started, or type your own below.</p>
+                  {SUGGESTION_GROUPS.map((group) => (
+                    <div key={group.label}>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                        {group.label}
+                      </p>
+                      <div className="flex flex-col gap-2">
+                        {group.questions.map((question, i) => (
+                          <button
+                            key={i}
+                            onClick={() => handleSend(question)}
+                            className="text-left text-sm px-3.5 py-2.5 rounded-lg bg-background border border-border text-foreground/80 hover:bg-muted hover:text-foreground hover:border-primary/40 transition-colors"
+                          >
+                            {question}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </ScrollArea>
           
           <div className="p-4 bg-muted/20 border-t border-border/50">
-            {messages.length === 1 && (
-              <div className="flex flex-wrap gap-2 mb-3">
-                {SUGGESTIONS.map((suggestion, i) => (
-                  <button
-                    key={i}
-                    onClick={() => handleSend(suggestion)}
-                    className="text-xs px-3 py-1.5 rounded-full bg-background border border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            )}
             <form 
               onSubmit={(e) => {
                 e.preventDefault();
