@@ -22,6 +22,7 @@ import type {
 import type {
   AnalyzeRequest,
   AnalyzeResponse,
+  DashboardResponse,
   DriveFileList,
   HealthStatus,
   ListDriveFilesParams
@@ -286,5 +287,154 @@ export const useAnalyzeSales = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getAnalyzeSalesMutationOptions(options));
+    }
+
+export const getGetDashboardUrl = () => {
+
+
+
+
+  return `/api/dashboard`
+}
+
+/**
+ * Returns the most recent aggregated dashboard dataset, built from the connected Google Sheets. Falls back to a seeded baseline before the first live sync completes.
+ * @summary Get the latest dashboard snapshot
+ */
+export const getDashboard = async ( options?: RequestInit): Promise<DashboardResponse> => {
+
+  return customFetch<DashboardResponse>(getGetDashboardUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetDashboardQueryKey = () => {
+    return [
+    `/api/dashboard`
+    ] as const;
+    }
+
+
+export const getGetDashboardQueryOptions = <TData = Awaited<ReturnType<typeof getDashboard>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDashboard>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDashboardQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDashboard>>> = ({ signal }) => getDashboard({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDashboard>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetDashboardQueryResult = NonNullable<Awaited<ReturnType<typeof getDashboard>>>
+export type GetDashboardQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the latest dashboard snapshot
+ */
+
+export function useGetDashboard<TData = Awaited<ReturnType<typeof getDashboard>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDashboard>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetDashboardQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRefreshDashboardUrl = () => {
+
+
+
+
+  return `/api/dashboard/refresh`
+}
+
+/**
+ * Re-reads the source Google Sheets, rebuilds the aggregate dataset, and stores a new snapshot. If the refresh fails, the last good snapshot is returned with a refreshError message.
+ * @summary Rebuild the dashboard from Google Sheets
+ */
+export const refreshDashboard = async ( options?: RequestInit): Promise<DashboardResponse> => {
+
+  return customFetch<DashboardResponse>(getRefreshDashboardUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRefreshDashboardMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshDashboard>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof refreshDashboard>>, TError,void, TContext> => {
+
+const mutationKey = ['refreshDashboard'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshDashboard>>, void> = () => {
+
+
+          return  refreshDashboard(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RefreshDashboardMutationResult = NonNullable<Awaited<ReturnType<typeof refreshDashboard>>>
+
+    export type RefreshDashboardMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Rebuild the dashboard from Google Sheets
+ */
+export const useRefreshDashboard = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshDashboard>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof refreshDashboard>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getRefreshDashboardMutationOptions(options));
     }
 

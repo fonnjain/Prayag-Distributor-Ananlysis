@@ -14,6 +14,8 @@ tags:
     description: AI sales analyst operations
   - name: drive
     description: Google Drive file operations
+  - name: dashboard
+    description: Live dashboard data operations
 paths:
   /drive/files:
     get:
@@ -80,6 +82,38 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AnalyzeResponse"
+  /dashboard:
+    get:
+      operationId: getDashboard
+      tags: [dashboard]
+      summary: Get the latest dashboard snapshot
+      description: >
+        Returns the most recent aggregated dashboard dataset, built from the
+        connected Google Sheets. Falls back to a seeded baseline before the
+        first live sync completes.
+      responses:
+        "200":
+          description: Dashboard snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardResponse"
+  /dashboard/refresh:
+    post:
+      operationId: refreshDashboard
+      tags: [dashboard]
+      summary: Rebuild the dashboard from Google Sheets
+      description: >
+        Re-reads the source Google Sheets, rebuilds the aggregate dataset, and
+        stores a new snapshot. If the refresh fails, the last good snapshot is
+        returned with a refreshError message.
+      responses:
+        "200":
+          description: Refreshed dashboard snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardResponse"
 components:
   schemas:
     DriveFile:
@@ -147,4 +181,29 @@ components:
           description: Markdown-formatted analysis from the AI analyst.
       required:
         - answer
+    DashboardResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          additionalProperties: true
+          description: The aggregated dashboard dataset payload.
+        manifest:
+          type: object
+          additionalProperties: true
+          description: Source manifest (file listing, counts, notes).
+        syncedAt:
+          type: string
+          description: ISO timestamp of when this snapshot was built.
+        sourceStatus:
+          type: string
+          description: "\"live\" if built from Google Sheets, \"seed\" if baseline."
+        refreshError:
+          type: string
+          description: Present only when a refresh failed and stale data is served.
+      required:
+        - data
+        - manifest
+        - syncedAt
+        - sourceStatus
 

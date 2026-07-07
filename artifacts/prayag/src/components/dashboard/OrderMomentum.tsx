@@ -1,4 +1,5 @@
-import { data, formatCompact, CHART_COLORS, CHART_COLOR_LIST } from "@/data/dataset";
+import { formatCompact, CHART_COLORS, CHART_COLOR_LIST } from "@/data/dataset";
+import { useDashboard } from "@/data/dashboard-context";
 import { KPICard, CustomTooltip, CustomLegend } from "./shared";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line, Legend } from "recharts";
@@ -7,6 +8,7 @@ import { Download, TrendingUp } from "lucide-react";
 import { useTheme } from "next-themes";
 
 export default function OrderMomentum() {
+  const { data } = useDashboard();
   const { theme } = useTheme();
   const isDark = theme === "dark";
   

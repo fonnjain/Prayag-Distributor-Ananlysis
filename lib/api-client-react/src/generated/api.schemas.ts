@@ -46,6 +46,29 @@ export interface AnalyzeResponse {
   answer: string;
 }
 
+/**
+ * The aggregated dashboard dataset payload.
+ */
+export type DashboardResponseData = { [key: string]: unknown };
+
+/**
+ * Source manifest (file listing, counts, notes).
+ */
+export type DashboardResponseManifest = { [key: string]: unknown };
+
+export interface DashboardResponse {
+  /** The aggregated dashboard dataset payload. */
+  data: DashboardResponseData;
+  /** Source manifest (file listing, counts, notes). */
+  manifest: DashboardResponseManifest;
+  /** ISO timestamp of when this snapshot was built. */
+  syncedAt: string;
+  /** "live" if built from Google Sheets, "seed" if baseline. */
+  sourceStatus: string;
+  /** Present only when a refresh failed and stale data is served. */
+  refreshError?: string;
+}
+
 export type ListDriveFilesParams = {
 /**
  * Optional search text matched against file names.

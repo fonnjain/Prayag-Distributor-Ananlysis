@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { ensureSeeded, syncDashboard } from "./lib/dashboard/sync";
 
 const rawPort = process.env["PORT"];
 
@@ -22,4 +23,15 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+
+  // Ensure baseline data exists, then kick off a live sync in the background so
+  // the first load is instant and subsequent loads reflect the latest sheets.
+  void (async () => {
+    try {
+      await ensureSeeded();
+      await syncDashboard();
+    } catch (syncErr) {
+      logger.error({ err: syncErr }, "initial dashboard sync failed");
+    }
+  })();
 });

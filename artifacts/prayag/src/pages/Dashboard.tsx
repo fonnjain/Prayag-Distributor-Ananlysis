@@ -11,7 +11,8 @@ import DataSources from "@/components/dashboard/DataSources";
 import DriveFiles from "@/components/dashboard/DriveFiles";
 import Analyst from "@/components/dashboard/Analyst";
 import { cn } from "@/lib/utils";
-import { manifest } from "@/data/dataset";
+import { RefreshCw } from "lucide-react";
+import { useDashboard } from "@/data/dashboard-context";
 
 const AREAS = [
   { id: "overview", label: "Overview", icon: LayoutGrid, component: Overview },
@@ -38,11 +39,14 @@ export default function Dashboard() {
   }, [theme, setTheme]);
 
   const ActiveComponent = AREAS.find(a => a.id === activeArea)?.component || Overview;
-  
-  const d = new Date(manifest.generated);
+
+  const { syncedAt, sourceStatus, isRefreshing, refresh, refreshError } = useDashboard();
+  const d = new Date(syncedAt ?? Date.now());
   const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }).toLowerCase();
   const date = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const lastRefreshed = `${time} on ${date}`;
+  const isLive = sourceStatus === "live";
+  const statusLabel = isLive ? "Live from Google Sheets" : "Baseline dataset";
 
   return (
     <div className="min-h-screen bg-background flex flex-col md:flex-row">
@@ -119,26 +123,53 @@ export default function Dashboard() {
       <main className="flex-1 flex flex-col min-w-0">
         <div className="p-4 md:p-8 max-w-7xl mx-auto w-full">
           <header className="mb-8 hidden md:block">
-            <div className="flex items-start justify-between">
+            <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-display text-3xl font-bold tracking-tight">
                   {AREAS.find(a => a.id === activeArea)?.label}
                 </h2>
                 <div className="flex items-center gap-3 mt-2">
-                  <span className="text-sm font-medium px-2 py-0.5 rounded bg-muted text-muted-foreground">Static dataset</span>
-                  <span className="text-xs text-muted-foreground">Data generated {lastRefreshed}</span>
+                  <span className={cn(
+                    "text-sm font-medium px-2 py-0.5 rounded",
+                    isLive ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
+                  )}>{statusLabel}</span>
+                  <span className="text-xs text-muted-foreground">Last synced {lastRefreshed}</span>
+                  {refreshError && (
+                    <span className="text-xs text-destructive">{refreshError}</span>
+                  )}
                 </div>
               </div>
+              <button
+                onClick={refresh}
+                disabled={isRefreshing}
+                className="flex items-center gap-2 px-3 py-2 rounded-md border border-border/50 text-sm font-medium hover:bg-muted transition-colors disabled:opacity-60 disabled:cursor-not-allowed shrink-0"
+              >
+                <RefreshCw className={cn("w-4 h-4", isRefreshing && "animate-spin")} />
+                {isRefreshing ? "Refreshing" : "Refresh data"}
+              </button>
             </div>
           </header>
 
           <div className="md:hidden mb-6">
-             <h2 className="font-display text-2xl font-bold tracking-tight">
-              {AREAS.find(a => a.id === activeArea)?.label}
-            </h2>
-            <div className="flex items-center gap-2 mt-2">
-              <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground">Static dataset</span>
-              <span className="text-[10px] text-muted-foreground">Generated {lastRefreshed}</span>
+            <div className="flex items-start justify-between gap-3">
+              <h2 className="font-display text-2xl font-bold tracking-tight">
+                {AREAS.find(a => a.id === activeArea)?.label}
+              </h2>
+              <button
+                onClick={refresh}
+                disabled={isRefreshing}
+                className="flex items-center justify-center w-9 h-9 rounded-md border border-border/50 hover:bg-muted transition-colors disabled:opacity-60 shrink-0"
+                aria-label="Refresh data"
+              >
+                <RefreshCw className={cn("w-4 h-4", isRefreshing && "animate-spin")} />
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 mt-2">
+              <span className={cn(
+                "text-xs font-medium px-1.5 py-0.5 rounded",
+                isLive ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
+              )}>{statusLabel}</span>
+              <span className="text-[10px] text-muted-foreground">Synced {lastRefreshed}</span>
             </div>
           </div>
 

@@ -1,9 +1,11 @@
-import { data, formatCompact, CHART_COLORS, CHART_COLOR_LIST } from "@/data/dataset";
+import { formatCompact, CHART_COLORS, CHART_COLOR_LIST } from "@/data/dataset";
+import { useDashboard } from "@/data/dashboard-context";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { CustomTooltip } from "./shared";
 
 export default function Products() {
+  const { data } = useDashboard();
   const topProducts = [...data.fy2425.products]
     .sort((a, b) => b.annual - a.annual)
     .slice(0, 15);

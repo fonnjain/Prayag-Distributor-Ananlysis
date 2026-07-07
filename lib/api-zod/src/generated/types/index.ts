@@ -8,6 +8,9 @@
 
 export * from './analyzeRequest';
 export * from './analyzeResponse';
+export * from './dashboardResponse';
+export * from './dashboardResponseData';
+export * from './dashboardResponseManifest';
 export * from './driveFile';
 export * from './driveFileList';
 export * from './healthStatus';

@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "next-themes";
 import Dashboard from "@/pages/Dashboard";
 import NotFound from "@/pages/not-found";
+import { DashboardProvider } from "@/data/dashboard-context";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -29,9 +30,11 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
         <TooltipProvider>
-          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-            <Router />
-          </WouterRouter>
+          <DashboardProvider>
+            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+              <Router />
+            </WouterRouter>
+          </DashboardProvider>
           <Toaster />
         </TooltipProvider>
       </ThemeProvider>

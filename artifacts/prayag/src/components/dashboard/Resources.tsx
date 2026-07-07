@@ -1,9 +1,10 @@
-import { data } from "@/data/dataset";
+import { useDashboard } from "@/data/dashboard-context";
 import { KPICard } from "./shared";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Map, MapPin, Building2, Store } from "lucide-react";
 
 export default function Resources() {
+  const { data } = useDashboard();
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

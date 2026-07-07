@@ -1,8 +1,9 @@
-import { manifest } from "@/data/dataset";
+import { useDashboard } from "@/data/dashboard-context";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { FileText, Database, FolderGit2, CheckCircle2, Clock, Link as LinkIcon } from "lucide-react";
 
 export default function DataSources() {
+  const { manifest } = useDashboard();
   const generatedDate = new Date(manifest.generated);
 
   return (

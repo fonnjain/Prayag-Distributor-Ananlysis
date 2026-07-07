@@ -61,3 +61,29 @@ export const AnalyzeSalesResponse = zod.object({
 })
 
 
+/**
+ * Returns the most recent aggregated dashboard dataset, built from the connected Google Sheets. Falls back to a seeded baseline before the first live sync completes.
+ * @summary Get the latest dashboard snapshot
+ */
+export const GetDashboardResponse = zod.object({
+  "data": zod.record(zod.string(), zod.unknown()).describe('The aggregated dashboard dataset payload.'),
+  "manifest": zod.record(zod.string(), zod.unknown()).describe('Source manifest (file listing, counts, notes).'),
+  "syncedAt": zod.string().describe('ISO timestamp of when this snapshot was built.'),
+  "sourceStatus": zod.string().describe('\"live\" if built from Google Sheets, \"seed\" if baseline.'),
+  "refreshError": zod.string().optional().describe('Present only when a refresh failed and stale data is served.')
+})
+
+
+/**
+ * Re-reads the source Google Sheets, rebuilds the aggregate dataset, and stores a new snapshot. If the refresh fails, the last good snapshot is returned with a refreshError message.
+ * @summary Rebuild the dashboard from Google Sheets
+ */
+export const RefreshDashboardResponse = zod.object({
+  "data": zod.record(zod.string(), zod.unknown()).describe('The aggregated dashboard dataset payload.'),
+  "manifest": zod.record(zod.string(), zod.unknown()).describe('Source manifest (file listing, counts, notes).'),
+  "syncedAt": zod.string().describe('ISO timestamp of when this snapshot was built.'),
+  "sourceStatus": zod.string().describe('\"live\" if built from Google Sheets, \"seed\" if baseline.'),
+  "refreshError": zod.string().optional().describe('Present only when a refresh failed and stale data is served.')
+})
+
+

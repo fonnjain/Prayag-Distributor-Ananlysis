@@ -1,31 +1,9 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { AnalyzeSalesBody, AnalyzeSalesResponse } from "@workspace/api-zod";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
+import { ensureSeeded } from "../lib/dashboard/sync.js";
 
 const router: IRouter = Router();
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-function loadDataset(): string {
-  const candidates = [
-    join(__dirname, "../../data/prayag_data.json"),
-    join(process.cwd(), "data/prayag_data.json"),
-    join(process.cwd(), "artifacts/api-server/data/prayag_data.json"),
-  ];
-  for (const path of candidates) {
-    try {
-      return readFileSync(path, "utf-8");
-    } catch {
-      // try next candidate
-    }
-  }
-  throw new Error("prayag_data.json dataset not found");
-}
-
-const datasetJson = loadDataset();
 
 const EMOJI_PATTERN =
   /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FE0F}\u{1F1E6}-\u{1F1FF}\u{200D}\u{2122}\u{2139}\u{2328}\u{23E9}-\u{23FA}\u{24C2}\u{25AA}\u{25AB}\u{25B6}\u{25C0}\u{25FB}-\u{25FE}]/gu;
@@ -34,7 +12,8 @@ function stripEmojis(text: string): string {
   return text.replace(EMOJI_PATTERN, "").replace(/[ \t]+\n/g, "\n").trim();
 }
 
-const SYSTEM_PROMPT = `You are the "Prayag India Sales Analyst", an expert data analyst for Prayag India, an Indian manufacturer of retail and resource products.
+function buildSystemPrompt(datasetJson: string): string {
+  return `You are the "Prayag India Sales Analyst", an expert data analyst for Prayag India, an Indian manufacturer of retail and resource products.
 
 You answer questions strictly using the JSON dataset provided below. Do not invent numbers that are not derivable from the data. If a question cannot be answered from the data, say so plainly and suggest what related insight IS available.
 
@@ -56,6 +35,7 @@ Formatting rules:
 
 Dataset (JSON):
 ${datasetJson}`;
+}
 
 router.post("/analyze", async (req: Request, res: Response): Promise<void> => {
   const parsed = AnalyzeSalesBody.safeParse(req.body);
@@ -65,10 +45,13 @@ router.post("/analyze", async (req: Request, res: Response): Promise<void> => {
   }
 
   try {
+    const snapshot = await ensureSeeded();
+    const systemPrompt = buildSystemPrompt(JSON.stringify(snapshot.data));
+
     const message = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
       max_tokens: 8192,
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       messages: [{ role: "user", content: parsed.data.question }],
     });
 

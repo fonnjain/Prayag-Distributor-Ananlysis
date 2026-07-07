@@ -1,4 +1,5 @@
-import { data, formatCompact, CHART_COLORS } from "@/data/dataset";
+import { formatCompact, CHART_COLORS } from "@/data/dataset";
+import { useDashboard } from "@/data/dashboard-context";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { CSVLink } from "react-csv";
@@ -7,6 +8,7 @@ import { useTheme } from "next-themes";
 import { CustomTooltip } from "./shared";
 
 export default function Regional() {
+  const { data } = useDashboard();
   const { theme } = useTheme();
   const isDark = theme === "dark";
   
