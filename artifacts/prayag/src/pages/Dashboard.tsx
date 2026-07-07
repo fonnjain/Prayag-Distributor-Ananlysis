@@ -1,14 +1,13 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useTheme } from "next-themes";
-import { Sun, Moon, Printer, Menu, X, BarChart3, Map, LayoutGrid, Package, TrendingUp, Database, Bot, HardDrive } from "lucide-react";
+import { Sun, Moon, Printer, Menu, X, BarChart3, Map, LayoutGrid, Package, TrendingUp, Database, Bot } from "lucide-react";
 import Overview from "@/components/dashboard/Overview";
 import Regional from "@/components/dashboard/Regional";
 import Resources from "@/components/dashboard/Resources";
 import Products from "@/components/dashboard/Products";
 import OrderMomentum from "@/components/dashboard/OrderMomentum";
 import DataSources from "@/components/dashboard/DataSources";
-import DriveFiles from "@/components/dashboard/DriveFiles";
 import Analyst from "@/components/dashboard/Analyst";
 import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
@@ -21,7 +20,6 @@ const AREAS = [
   { id: "products", label: "Products", icon: Package, component: Products },
   { id: "momentum", label: "Momentum", icon: TrendingUp, component: OrderMomentum },
   { id: "analyst", label: "AI Analyst", icon: Bot, component: Analyst },
-  { id: "drive", label: "Drive Files", icon: HardDrive, component: DriveFiles },
   { id: "sources", label: "Data Sources", icon: Database, component: DataSources },
 ];
 
