@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "9Lj7u3WrNwdj6I_nNnQMV"
+uri = "file://artifacts/prayag/Prayag_Sales_Intelligence_Report.md"
+type = "text"
+title = "Prayag India — Sales Intelligence Executive Report"
