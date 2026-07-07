@@ -104,6 +104,50 @@ export default function Analyst() {
         </CardHeader>
         
         <CardContent className="flex-1 p-0 flex flex-col overflow-hidden">
+          <div className="p-4 bg-muted/20 border-b border-border/50 space-y-3">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSend(input);
+              }}
+              className="flex gap-2"
+            >
+              <Input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Ask about sales, regions, or products..."
+                className="flex-1 bg-background"
+                disabled={analyzeSales.isPending}
+              />
+              <Button type="submit" size="icon" disabled={analyzeSales.isPending || !input.trim()}>
+                <Send className="w-4 h-4" />
+                <span className="sr-only">Send</span>
+              </Button>
+            </form>
+
+            <div className="space-y-3 max-h-[34vh] md:max-h-[220px] overflow-y-auto pr-1">
+              {SUGGESTION_GROUPS.map((group) => (
+                <div key={group.label}>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+                    {group.label}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {group.questions.map((question, i) => (
+                      <button
+                        key={i}
+                        onClick={() => handleSend(question)}
+                        disabled={analyzeSales.isPending}
+                        className="text-left text-xs px-3 py-1.5 rounded-full bg-background border border-border text-foreground/80 hover:bg-muted hover:text-foreground hover:border-primary/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {question}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
           <ScrollArea className="flex-1 p-4 md:p-6">
             <div className="space-y-6">
               {messages.map((msg, i) => (
@@ -150,54 +194,8 @@ export default function Analyst() {
                   </div>
                 </div>
               )}
-
-              {messages.length === 1 && !analyzeSales.isPending && (
-                <div className="pt-2 space-y-5">
-                  <p className="text-sm text-muted-foreground">Pick a question to get started, or type your own below.</p>
-                  {SUGGESTION_GROUPS.map((group) => (
-                    <div key={group.label}>
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                        {group.label}
-                      </p>
-                      <div className="flex flex-col gap-2">
-                        {group.questions.map((question, i) => (
-                          <button
-                            key={i}
-                            onClick={() => handleSend(question)}
-                            className="text-left text-sm px-3.5 py-2.5 rounded-lg bg-background border border-border text-foreground/80 hover:bg-muted hover:text-foreground hover:border-primary/40 transition-colors"
-                          >
-                            {question}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           </ScrollArea>
-          
-          <div className="p-4 bg-muted/20 border-t border-border/50">
-            <form 
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleSend(input);
-              }}
-              className="flex gap-2"
-            >
-              <Input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Ask about sales, regions, or products..."
-                className="flex-1 bg-background"
-                disabled={analyzeSales.isPending}
-              />
-              <Button type="submit" size="icon" disabled={analyzeSales.isPending || !input.trim()}>
-                <Send className="w-4 h-4" />
-                <span className="sr-only">Send</span>
-              </Button>
-            </form>
-          </div>
         </CardContent>
       </Card>
     </div>
