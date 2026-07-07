@@ -9,6 +9,33 @@ import * as zod from 'zod';
 
 
 /**
+ * Lists files from the connected Google Drive account, optionally filtered by a search query. Results are ordered by most recently modified.
+ * @summary List Google Drive files
+ */
+export const listDriveFilesQueryQMax = 200;
+
+
+
+export const ListDriveFilesQueryParams = zod.object({
+  "q": zod.coerce.string().max(listDriveFilesQueryQMax).optional().describe('Optional search text matched against file names.'),
+  "pageToken": zod.coerce.string().optional().describe('Token for fetching the next page of results.')
+})
+
+export const ListDriveFilesResponse = zod.object({
+  "files": zod.array(zod.object({
+  "id": zod.string().describe('Google Drive file id.'),
+  "name": zod.string().describe('File name.'),
+  "mimeType": zod.string().describe('MIME type of the file.'),
+  "iconLink": zod.string().optional().describe('URL to a small icon representing the file type.'),
+  "webViewLink": zod.string().optional().describe('URL to open the file in the browser.'),
+  "modifiedTime": zod.string().optional().describe('ISO timestamp of the last modification.'),
+  "size": zod.string().optional().describe('File size in bytes, as a string (absent for folders and native Google files).')
+})),
+  "nextPageToken": zod.string().optional().describe('Token to fetch the next page, if more results exist.')
+})
+
+
+/**
  * Returns server health status
  * @summary Health check
  */

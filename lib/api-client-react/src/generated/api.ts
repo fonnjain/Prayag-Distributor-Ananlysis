@@ -22,7 +22,9 @@ import type {
 import type {
   AnalyzeRequest,
   AnalyzeResponse,
-  HealthStatus
+  DriveFileList,
+  HealthStatus,
+  ListDriveFilesParams
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -51,6 +53,91 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getListDriveFilesUrl = (params?: ListDriveFilesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/drive/files?${stringifiedParams}` : `/api/drive/files`
+}
+
+/**
+ * Lists files from the connected Google Drive account, optionally filtered by a search query. Results are ordered by most recently modified.
+ * @summary List Google Drive files
+ */
+export const listDriveFiles = async (params?: ListDriveFilesParams, options?: RequestInit): Promise<DriveFileList> => {
+
+  return customFetch<DriveFileList>(getListDriveFilesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListDriveFilesQueryKey = (params?: ListDriveFilesParams,) => {
+    return [
+    `/api/drive/files`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListDriveFilesQueryOptions = <TData = Awaited<ReturnType<typeof listDriveFiles>>, TError = ErrorType<unknown>>(params?: ListDriveFilesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDriveFiles>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListDriveFilesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDriveFiles>>> = ({ signal }) => listDriveFiles(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listDriveFiles>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListDriveFilesQueryResult = NonNullable<Awaited<ReturnType<typeof listDriveFiles>>>
+export type ListDriveFilesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List Google Drive files
+ */
+
+export function useListDriveFiles<TData = Awaited<ReturnType<typeof listDriveFiles>>, TError = ErrorType<unknown>>(
+ params?: ListDriveFilesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDriveFiles>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListDriveFilesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getHealthCheckUrl = () => {
 

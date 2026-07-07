@@ -5,6 +5,29 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export interface DriveFile {
+  /** Google Drive file id. */
+  id: string;
+  /** File name. */
+  name: string;
+  /** MIME type of the file. */
+  mimeType: string;
+  /** URL to a small icon representing the file type. */
+  iconLink?: string;
+  /** URL to open the file in the browser. */
+  webViewLink?: string;
+  /** ISO timestamp of the last modification. */
+  modifiedTime?: string;
+  /** File size in bytes, as a string (absent for folders and native Google files). */
+  size?: string;
+}
+
+export interface DriveFileList {
+  files: DriveFile[];
+  /** Token to fetch the next page, if more results exist. */
+  nextPageToken?: string;
+}
+
 export interface HealthStatus {
   status: string;
 }
@@ -22,4 +45,16 @@ export interface AnalyzeResponse {
   /** Markdown-formatted analysis from the AI analyst. */
   answer: string;
 }
+
+export type ListDriveFilesParams = {
+/**
+ * Optional search text matched against file names.
+ * @maxLength 200
+ */
+q?: string;
+/**
+ * Token for fetching the next page of results.
+ */
+pageToken?: string;
+};
 

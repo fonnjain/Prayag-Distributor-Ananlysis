@@ -8,4 +8,7 @@
 
 export * from './analyzeRequest';
 export * from './analyzeResponse';
+export * from './driveFile';
+export * from './driveFileList';
 export * from './healthStatus';
+export * from './listDriveFilesParams';

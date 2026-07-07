@@ -12,7 +12,39 @@ tags:
     description: Health operations
   - name: analyst
     description: AI sales analyst operations
+  - name: drive
+    description: Google Drive file operations
 paths:
+  /drive/files:
+    get:
+      operationId: listDriveFiles
+      tags: [drive]
+      summary: List Google Drive files
+      description: >
+        Lists files from the connected Google Drive account, optionally
+        filtered by a search query. Results are ordered by most recently
+        modified.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Optional search text matched against file names.
+          schema:
+            type: string
+            maxLength: 200
+        - name: pageToken
+          in: query
+          required: false
+          description: Token for fetching the next page of results.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of Drive files
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriveFileList"
   /healthz:
     get:
       operationId: healthCheck
@@ -50,6 +82,46 @@ paths:
                 $ref: "#/components/schemas/AnalyzeResponse"
 components:
   schemas:
+    DriveFile:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Google Drive file id.
+        name:
+          type: string
+          description: File name.
+        mimeType:
+          type: string
+          description: MIME type of the file.
+        iconLink:
+          type: string
+          description: URL to a small icon representing the file type.
+        webViewLink:
+          type: string
+          description: URL to open the file in the browser.
+        modifiedTime:
+          type: string
+          description: ISO timestamp of the last modification.
+        size:
+          type: string
+          description: File size in bytes, as a string (absent for folders and native Google files).
+      required:
+        - id
+        - name
+        - mimeType
+    DriveFileList:
+      type: object
+      properties:
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/DriveFile"
+        nextPageToken:
+          type: string
+          description: Token to fetch the next page, if more results exist.
+      required:
+        - files
     HealthStatus:
       type: object
       properties:
