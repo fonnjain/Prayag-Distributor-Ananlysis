@@ -1,0 +1,37 @@
+{
+  "_comment": "Drive file IDs from the Prayag catalog (public/file_ids.json origin). Registers are the 'State Head Sale' files (line-item detail). The register tab is auto-detected (the tab whose header row contains CODE + QTY + AMOUNT), so no fixed A1 range is needed.",
+
+  "sale_register": {
+    "desc": "Line-item sales ledger: one row per invoice line with CODE, QTY, AMOUNT, GROUP, STATION, STATE, STATE HEAD, DATE.",
+    "files_by_year": {
+      "2026-27": "1QIpcfgOVCFjcCmgU_DXKn8h7Bfa8rm2q2wB2HneTvKs",
+      "2025-26": "1RuXHIXfusOT-VDdDqeuB-Nx-pxyVkmrJsqr21BB-NUA",
+      "2024-25": "1iL1su3xwe40eG0QJHVwat97rhlMmADzeKQVfMw6ZrE0"
+    },
+    "tab": "__auto__"
+  },
+
+  "order_book": {
+    "desc": "Order intake; monthly tabs (Apr..Mar).",
+    "files_by_year": {
+      "2026-27": "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A",
+      "2025-26": "1Xzq-gmB6K7iuMcE6gb-O7OpvGgSDU33DzEVyK60LK6E",
+      "2024-25": "1cT6lWRPJ3oSeYhab-cqeVjJidGitFQsr0DOq-vNn6cI",
+      "2023-24": "1jtSUGE6iT8WuUKi56F4LYqjJgZF42oR1mk51imG8yq8"
+    },
+    "monthly_tabs": ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"]
+  },
+
+  "rate_master": {
+    "desc": "IMPORTRANGE source for item rates/groups. Dirty: duplicate rows per code, zeros, Sale Price==MRP. Cost source only, needs dedup (see normalize).",
+    "id": "1njO-srsS29qiE4t45-zr5njbB7R2Zb-oSnv2NL1ONY4",
+    "tab": "__auto__"
+  },
+
+  "cost_master": {
+    "desc": "RECOMMENDED — create this: one row per Item Code -> Finished-Good Cost, fed from BOM/GP sheets. The clean cost source for margins. Leave id empty until created; margins will be skipped and flagged (low cost coverage) until then.",
+    "id": "",
+    "tab": "__auto__",
+    "columns": { "code": "Item Code", "cost": "Finished-Good Cost" }
+  }
+}

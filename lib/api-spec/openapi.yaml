@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: analyst
+    description: AI sales analyst operations
 paths:
   /healthz:
     get:
@@ -24,6 +26,28 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /analyze:
+    post:
+      operationId: analyzeSales
+      tags: [analyst]
+      summary: Ask the AI sales analyst
+      description: >
+        Sends a natural-language question about Prayag India sales, orders,
+        coverage, and product data to the AI analyst and returns a markdown
+        answer grounded in the embedded dataset.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalyzeRequest"
+      responses:
+        "200":
+          description: Analyst answer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyzeResponse"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +57,22 @@ components:
           type: string
       required:
         - status
+    AnalyzeRequest:
+      type: object
+      properties:
+        question:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: The user's question for the sales analyst.
+      required:
+        - question
+    AnalyzeResponse:
+      type: object
+      properties:
+        answer:
+          type: string
+          description: Markdown-formatted analysis from the AI analyst.
+      required:
+        - answer
 

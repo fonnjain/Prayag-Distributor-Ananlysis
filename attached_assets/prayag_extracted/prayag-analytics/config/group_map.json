@@ -1,0 +1,12 @@
+{
+  "_comment": "Canonical group <- register GROUP values. Match on UPPER/trimmed GROUP. Any GROUP not found here must be reported in build_meta.unmapped_groups (never silently bucketed).",
+  "canonical": {
+    "PTMT / Faucets":              ["PTMT", "CISTERN", "SEAT COVER"],
+    "CP (Chrome-Plated)":          ["C P", "CP", "CP ACCESSORIES"],
+    "Plumbing (Pipes & Fittings)": ["CPVC", "CPVC PIPE", "UPVC", "UPVC PIPE", "SWR", "HDPE PIPE", "WATER TANK", "GARDEN PIPE", "AGRI"],
+    "Sink":                        ["SINK"],
+    "Sanitaryware":                ["SANITARYWARE"],
+    "Connection / Waste":          ["WASTE PIPE", "CONNECTION"],
+    "Hardware":                    ["HARDWARE"]
+  }
+}

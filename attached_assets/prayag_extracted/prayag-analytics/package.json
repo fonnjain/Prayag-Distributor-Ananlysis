@@ -1,0 +1,17 @@
+{
+  "name": "prayag-analytics",
+  "version": "1.0.0",
+  "description": "Prayag sales intelligence — Sheets-sourced dashboard + Claude sanity-check audit",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "refresh": "node -e \"require('./src/pipeline').refresh(process.env.FY||'2025-26').then(m=>console.log(JSON.stringify(m,null,2)))\"",
+    "audit": "node -e \"require('./src/audit').runAudit().then(v=>console.log(JSON.stringify(v,null,2)))\""
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "googleapis": "^140.0.1"
+  },
+  "engines": { "node": ">=18" }
+}

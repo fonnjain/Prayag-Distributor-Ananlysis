@@ -1,0 +1,30 @@
+{
+  "_comment": "State-head and state normalization. Register values are UPPERCASE and dirty. Non-territory tokens are channels, not heads — bucketed separately so they neither inflate a head nor get dropped.",
+
+  "heads": {
+    "SANDEEP JI": "Sandeep ji",
+    "RIZVI JI": "Rizvi ji",
+    "ANANT SINGH": "Anant Singh",
+    "SUNIL PATEL": "Sunil Patel",
+    "BABU": "Babu",
+    "LALAN": "Lalan",
+    "PAWAN KUMAR": "Pawan Kumar",
+    "SURESH NAIR": "Suresh Nair",
+    "BIJJU": "Bijju",
+    "NASIR HUSAIN": "Nasir Husain",
+    "SULINDER PAL": "Sulinder Pal"
+  },
+
+  "non_territory": ["PROJECT", "OTHER", "GOVT"],
+  "non_territory_label": "Non-territory / Project / Govt",
+
+  "state_variants": {
+    "W-BENGAL": "WEST BENGAL",
+    "UP ( R )": "UTTAR PRADESH",
+    "UP(R)": "UTTAR PRADESH",
+    "MAHARASTRA L": "MAHARASHTRA",
+    "MAHARASTRA R": "MAHARASHTRA",
+    "MAHARASTRA S": "MAHARASHTRA",
+    "MAHARASTRA": "MAHARASHTRA"
+  }
+}

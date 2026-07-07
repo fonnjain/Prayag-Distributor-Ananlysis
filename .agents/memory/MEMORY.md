@@ -1,0 +1,2 @@
+- [Prayag dataset shapes](prayag-dataset.md) — manifest.primary_sources is a nested object; sales_files/order_and_support_files are object arrays, not strings.
+- [No-emoji analyst enforcement](analyst-no-emoji.md) — LLM ignores prose-only emoji rules; enforce with a programmatic strip pass server-side as the real guarantee.

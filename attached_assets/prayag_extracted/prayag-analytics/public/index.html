@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Prayag Sales Intelligence</title>
+<style>
+  :root{--bg:#0f1216;--panel:#161b22;--line:#232a33;--ink:#e6edf3;--mut:#8b98a5;--acc:#3b82f6;--good:#22c55e;--warn:#eab308;--bad:#ef4444}
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+  header{padding:16px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0;font-weight:650}
+  .pill{font-size:12px;color:var(--mut);border:1px solid var(--line);border-radius:999px;padding:3px 10px}
+  nav{display:flex;gap:4px;padding:10px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  nav button{background:none;border:1px solid transparent;color:var(--mut);padding:7px 12px;border-radius:8px;cursor:pointer;font-size:13px}
+  nav button.on{background:var(--panel);color:var(--ink);border-color:var(--line)}
+  main{padding:20px 22px;max-width:1100px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card .k{color:var(--mut);font-size:12px}
+  .card .v{font-size:22px;font-weight:650;margin-top:4px}
+  table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);font-size:13px}
+  th{color:var(--mut);font-weight:550;background:#12161c}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+  .bar{height:6px;background:#0d1117;border-radius:4px;overflow:hidden;margin-top:4px}
+  .bar > i{display:block;height:100%;background:var(--acc)}
+  .muted{color:var(--mut)}
+  button.act{background:var(--acc);border:none;color:#fff;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px}
+  button.ghost{background:none;border:1px solid var(--line);color:var(--ink);padding:8px 14px;border-radius:8px;cursor:pointer}
+  textarea,select{width:100%;background:#0d1117;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px;font:inherit}
+  .status{font-weight:600}.status.pass{color:var(--good)}.status.warn{color:var(--warn)}.status.fail{color:var(--bad)}
+  .ans{white-space:pre-wrap;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-top:12px}
+  h2{font-size:14px;color:var(--mut);font-weight:600;margin:22px 0 10px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Prayag Sales Intelligence</h1>
+  <span class="pill" id="fyPill">FY —</span>
+  <span class="pill" id="drivePill">Drive —</span>
+  <span class="pill" id="auditPill">Audit —</span>
+  <span style="flex:1"></span>
+  <button class="ghost" id="refreshBtn">Refresh from Sheets</button>
+</header>
+<nav id="tabs">
+  <button data-t="overview" class="on">Overview</button>
+  <button data-t="regional">Regional</button>
+  <button data-t="products">Products</button>
+  <button data-t="margins">Margins</button>
+  <button data-t="analyst">Analyst</button>
+  <button data-t="audit">Data &amp; Audit</button>
+</nav>
+<main id="view"><p class="muted">Loading…</p></main>
+
+<script>
+const fmtCr = n => '₹' + (n/1e7).toFixed(2) + ' Cr';
+const pct = n => n==null ? '—' : (n*100).toFixed(1) + '%';
+let D = null;
+
+async function api(path, opts){ const r = await fetch(path, opts); if(!r.ok) throw new Error((await r.json().catch(()=>({}))).error||r.status); return r.json(); }
+
+async function boot(){
+  try{ const h = await api('/api/health');
+    document.getElementById('drivePill').textContent = 'Drive ' + (h.driveConfigured?'✓':'✗');
+    document.getElementById('fyPill').textContent = 'FY ' + (h.defaultFy||'—');
+    if(h.lastAudit) setAuditPill(h.lastAudit.status);
+  }catch(e){}
+  try{ D = await api('/api/data'); document.getElementById('fyPill').textContent='FY '+D.fy; render('overview'); }
+  catch(e){ document.getElementById('view').innerHTML = '<div class="card">No dataset yet. Configure Drive + Anthropic secrets, then click <b>Refresh from Sheets</b>.<br><span class="muted">'+e.message+'</span></div>'; }
+}
+function setAuditPill(s){ const el=document.getElementById('auditPill'); el.textContent='Audit '+(s||'—'); el.className='pill'; }
+
+document.getElementById('tabs').onclick = e => {
+  if(e.target.tagName!=='BUTTON') return;
+  [...document.querySelectorAll('#tabs button')].forEach(b=>b.classList.toggle('on', b===e.target));
+  render(e.target.dataset.t);
+};
+document.getElementById('refreshBtn').onclick = async () => {
+  const btn = document.getElementById('refreshBtn'); btn.textContent='Refreshing…'; btn.disabled=true;
+  try{ await api('/api/refresh',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}); D=await api('/api/data'); render('overview'); }
+  catch(e){ alert('Refresh failed: '+e.message); }
+  btn.textContent='Refresh from Sheets'; btn.disabled=false;
+};
+
+function bars(rows, key, label, val){
+  const max = Math.max(...rows.map(r=>r[key]||0),1);
+  return '<table><thead><tr><th>'+label+'</th><th class="n">'+val+'</th><th></th></tr></thead><tbody>'+
+    rows.map(r=>`<tr><td>${r._name}</td><td class="n">${fmtCr(r[key])}</td>
+      <td style="width:38%"><div class="bar"><i style="width:${(100*(r[key]||0)/max).toFixed(1)}%"></i></div></td></tr>`).join('')+
+    '</tbody></table>';
+}
+
+function render(tab){
+  const v = document.getElementById('view'); if(!D){ return; }
+  if(tab==='overview'){
+    const t=D.totals, o=D.orders||[];
+    const ordCr=o.reduce((a,x)=>a+(x.amount||0),0);
+    v.innerHTML = `<div class="grid">
+      <div class="card"><div class="k">Sales (FY ${D.fy})</div><div class="v">${fmtCr(t.grand_total_amount)}</div></div>
+      <div class="card"><div class="k">Order book (YTD)</div><div class="v">${fmtCr(ordCr)}</div></div>
+      <div class="card"><div class="k">State Heads</div><div class="v">${D.channel.length}</div></div>
+      <div class="card"><div class="k">Partners</div><div class="v">${t.partners}</div></div>
+      <div class="card"><div class="k">Retailers</div><div class="v">${t.retailers}</div></div>
+      <div class="card"><div class="k">Cost coverage</div><div class="v">${pct(D.build_meta.cost_coverage_pct)}</div></div>
+    </div>
+    <h2>Sales by group</h2>${bars(D.by_group.map(g=>({...g,_name:g.group})),'amount','Group','Sales')}`;
+  }
+  else if(tab==='regional'){
+    const rows=D.by_head.map(h=>({...h,_name:h.head}));
+    v.innerHTML = '<h2>State Head performance (live sales × seeded partners)</h2>'+
+      '<table><thead><tr><th>State Head</th><th class="n">Sales</th><th class="n">Partners</th><th class="n">Cr / partner</th></tr></thead><tbody>'+
+      rows.map(h=>`<tr><td>${h.head}</td><td class="n">${fmtCr(h.amount)}</td><td class="n">${h.partners||'—'}</td><td class="n">${h.cr_per_partner!=null?h.cr_per_partner:'—'}</td></tr>`).join('')+
+      '</tbody></table><h2>Top states</h2>'+bars((D.by_state||[]).slice(0,12).map(s=>({...s,_name:s.state})),'amount','State','Sales');
+  }
+  else if(tab==='products'){
+    v.innerHTML='<h2>Top items (by value)</h2><table><thead><tr><th>Code</th><th>Group</th><th class="n">Qty</th><th class="n">Sales</th></tr></thead><tbody>'+
+      (D.items||[]).slice(0,30).map(i=>`<tr><td>${i.code}</td><td class="muted">${i.group}</td><td class="n">${i.qty.toLocaleString()}</td><td class="n">${fmtCr(i.amount)}</td></tr>`).join('')+'</tbody></table>';
+  }
+  else if(tab==='margins'){
+    const m=D.margin_by_group||[];
+    v.innerHTML='<h2>Gross margin by group <span class="muted">(cost coverage '+pct(D.build_meta.cost_coverage_pct)+')</span></h2>'+
+      (m.length? '<table><thead><tr><th>Group</th><th class="n">Revenue</th><th class="n">Cost</th><th class="n">GP%</th></tr></thead><tbody>'+
+      m.map(x=>`<tr><td>${x.group}</td><td class="n">${fmtCr(x.revenue)}</td><td class="n">${fmtCr(x.cost)}</td><td class="n">${pct(x.gp_pct)}</td></tr>`).join('')+'</tbody></table>'
+      : '<div class="card">No margins yet — add a <b>Cost Master</b> tab (Item Code → Finished-Good Cost) and set its id in config/sources.json.</div>');
+  }
+  else if(tab==='analyst'){
+    v.innerHTML=`<h2>Ask the analyst</h2>
+      <select id="mode"><option value="growth">Growth</option><option value="regional">Regional</option><option value="product">Product</option><option value="margin">Margin</option></select>
+      <textarea id="q" rows="3" placeholder="e.g. Which State Heads are most under-productive, and what would closing half the gap add?"></textarea>
+      <div style="margin-top:8px"><button class="act" id="ask">Ask</button></div><div id="ans"></div>`;
+    document.getElementById('ask').onclick=async()=>{
+      const btn=document.getElementById('ask'); btn.textContent='Thinking…'; btn.disabled=true;
+      try{ const r=await api('/api/analyze',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mode:document.getElementById('mode').value,question:document.getElementById('q').value})});
+        document.getElementById('ans').innerHTML='<div class="ans">'+r.answer.replace(/</g,'&lt;')+'</div>'; }
+      catch(e){ document.getElementById('ans').innerHTML='<div class="ans">Error: '+e.message+'</div>'; }
+      btn.textContent='Ask'; btn.disabled=false;
+    };
+  }
+  else if(tab==='audit'){
+    const bm=D.build_meta, rc=D.reconcile||{checks:[]};
+    v.innerHTML=`<div class="grid">
+      <div class="card"><div class="k">Rows aggregated</div><div class="v">${bm.rows_aggregated}</div></div>
+      <div class="card"><div class="k">Register tab</div><div class="v" style="font-size:14px">${bm.register_tab||'—'}</div></div>
+      <div class="card"><div class="k">Reconcile</div><div class="v status ${rc.status}">${(rc.status||'—').toUpperCase()}</div></div>
+    </div>
+    <h2>Reconciliation (Layer B — exact, in code)</h2>
+    <table><thead><tr><th>Check</th><th>Result</th></tr></thead><tbody>${(rc.checks||[]).map(c=>`<tr><td>${c.name}</td><td class="status ${c.result}">${c.result}</td></tr>`).join('')}</tbody></table>
+    ${(bm.unmapped_groups.length||bm.unmapped_heads.length)?'<div class="card" style="margin-top:12px">Unmapped — groups: '+(bm.unmapped_groups.join(', ')||'none')+' · heads: '+(bm.unmapped_heads.join(', ')||'none')+'</div>':''}
+    <h2>Claude audit (Layer C — 2×/day)</h2>
+    <div><button class="ghost" id="runAudit">Run audit now</button></div><div id="av"></div>`;
+    document.getElementById('runAudit').onclick=async()=>{
+      const btn=document.getElementById('runAudit'); btn.textContent='Auditing…'; btn.disabled=true;
+      try{ const a=await api('/api/audit',{method:'POST'}); setAuditPill(a.status);
+        document.getElementById('av').innerHTML='<div class="ans"><b class="status '+a.status+'">'+a.status.toUpperCase()+'</b> — '+(a.summary_for_human||'')+'<br><br>'+
+          (a.anomalies||[]).map(x=>`• (${x.severity}) ${x.what} → <span class="muted">${x.inspect}</span>`).join('<br>')+'</div>'; }
+      catch(e){ document.getElementById('av').innerHTML='<div class="ans">Error: '+e.message+'</div>'; }
+      btn.textContent='Run audit now'; btn.disabled=false;
+    };
+  }
+}
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "_comment": "SEEDED channel network — the only data entered into the app (owner's rule). Everything else is derived live from Sheets. Source: Prayag_StateHead_Mapping.xlsx + Prayag_Retailers_StateHead.xlsx. Sales are NOT stored here; the app joins live register sales to these heads at runtime.",
+  "heads": [
+    { "head": "Rizvi ji",     "distributors": 75,  "dealers": 54, "partners": 129, "states": "CHATTISGARH, East U.P, MADHYA PRADESH, MAHARASHTRA" },
+    { "head": "Sandeep ji",   "distributors": 97,  "dealers": 16, "partners": 113, "states": "ASSAM, BIHAR, JHARKHAND, ODISHA, TRIPURA, WEST BENGAL" },
+    { "head": "Anant Singh",  "distributors": 70,  "dealers": 36, "partners": 106, "states": "DELHI, Delhi NCR, UTTARAKHAND, West U.P" },
+    { "head": "Pawan Kumar",  "distributors": 101, "dealers": 4,  "partners": 105, "states": "HARYANA, RAJASTHAN" },
+    { "head": "Bijju",        "distributors": 68,  "dealers": 5,  "partners": 73,  "states": "KARNATAKA, KERALA" },
+    { "head": "Babu",         "distributors": 53,  "dealers": 13, "partners": 66,  "states": "PONDICHERRY, TAMIL NADU" },
+    { "head": "Lalan",        "distributors": 52,  "dealers": 6,  "partners": 58,  "states": "GOA, MAHARASHTRA" },
+    { "head": "Nasir Husain", "distributors": 18,  "dealers": 24, "partners": 42,  "states": "JAMMU AND KASHMIR" },
+    { "head": "Suresh Nair",  "distributors": 24,  "dealers": 8,  "partners": 32,  "states": "ANDHRA PRADESH, TELANGANA" },
+    { "head": "Sulinder Pal", "distributors": 23,  "dealers": 3,  "partners": 26,  "states": "HIMACHAL PRADESH, PUNJAB" },
+    { "head": "Sunil Patel",  "distributors": 23,  "dealers": 0,  "partners": 23,  "states": "GUJARAT" }
+  ],
+  "totals": {
+    "distributors": 604, "dealers": 169, "partners": 773,
+    "retailers": 5065, "states": 31, "districts": 378, "cities": 1557
+  }
+}
