@@ -3,55 +3,68 @@ import { desc } from "drizzle-orm";
 import { db, dashboardSnapshots, type DashboardSnapshot } from "@workspace/db";
 import { logger } from "../logger.js";
 import { exportWorkbook } from "../sheets.js";
-import { buildFy2425, buildFromOrders } from "./transform.js";
+import { buildFy2425, buildFromOrders, buildResources } from "./transform.js";
 import { seed } from "./seed.js";
 
 // Live source workbooks (see manifest.primary_sources).
 const ITEMWISE_SALES_FY2425 = "1HgWelwHy73Ybc-1fBQMXhKxo2ctJToxgZLDWwJPmqz8";
 const ORDER_BOOK_FY2627 = "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A";
+const RETAILER_DISTRIBUTOR_ROSTER = "1EbWoXm-LC9L_nsh4JUzMU7v0H6Q3Lq8FEmKgFT9FXHc";
+const STATE_HEAD_DASHBOARD_FY2627 = "1E1jEY_yO8LmpqBDpcesS_fu2SBPEQ0eKO5xN29XyTEM";
 
 export interface DashboardPayload {
   data: Record<string, unknown>;
   manifest: Record<string, unknown>;
 }
 
-// Builds the aggregate dashboard payload from the live Google Sheets, merging in
-// the seeded parts that are not available in those sheets.
+// Builds the aggregate dashboard payload entirely from the live Google Sheets.
 export async function buildSnapshot(): Promise<DashboardPayload> {
-  const [itemwiseWb, orderWb] = await Promise.all([
+  const [itemwiseWb, orderWb, rosterWb, headDashWb] = await Promise.all([
     exportWorkbook(ITEMWISE_SALES_FY2425),
     exportWorkbook(ORDER_BOOK_FY2627),
+    exportWorkbook(RETAILER_DISTRIBUTOR_ROSTER),
+    exportWorkbook(STATE_HEAD_DASHBOARD_FY2627),
   ]);
 
   const fy2425 = buildFy2425(itemwiseWb);
   const orders = buildFromOrders(orderWb);
-
-  const seedData = seed.data as Record<string, unknown>;
-  const seedTotals = (seedData.totals ?? {}) as Record<string, number>;
+  const resources = buildResources(rosterWb, headDashWb);
 
   const data = {
     fy2425,
     orders_fy2627: orders.orders_fy2627,
     by_state: orders.by_state,
     heads_retail: orders.heads_retail,
-    heads_resources: seedData.heads_resources,
-    coverage: seedData.coverage,
-    coverage_totals: seedData.coverage_totals,
+    heads_resources: resources.heads_resources,
+    coverage: resources.coverage,
+    coverage_totals: resources.coverage_totals,
     top_retailers: orders.top_retailers,
     totals: {
-      state_heads: seedTotals.state_heads,
-      distributors: seedTotals.distributors,
-      dealers: seedTotals.dealers,
-      channel_partners: seedTotals.channel_partners,
-      retailers: seedTotals.retailers,
-      retailer_sales_inr: seedTotals.retailer_sales_inr,
+      state_heads: resources.state_heads,
+      distributors: resources.distributors,
+      dealers: resources.dealers,
+      channel_partners: resources.channel_partners,
+      retailers: resources.retailers,
+      retailer_sales_inr: resources.retailer_sales_inr,
       fy2425_sales_inr: fy2425.grand_total,
       orders_fy2627_ytd_cr: orders.orders_ytd_cr,
     },
   };
 
+  const seedManifest = seed.manifest as Record<string, unknown>;
   const manifest = {
-    ...seed.manifest,
+    ...seedManifest,
+    primary_sources: {
+      ...(seedManifest.primary_sources as Record<string, unknown>),
+      retailer_distributor_roster: {
+        desc: 'Registered retailer roster ("Retailer" tab -> coverage) and distributor roster ("Distributor" tab -> distributor counts).',
+        id: RETAILER_DISTRIBUTOR_ROSTER,
+      },
+      state_head_dashboard: {
+        desc: 'Per-head team dashboard. "Data" tab -> states covered per head; "SECONDARY ORDER BOOKING REPORT" tab -> dealer network and secondary order value per head.',
+        id: STATE_HEAD_DASHBOARD_FY2627,
+      },
+    },
     generated: new Date().toISOString(),
     data_mode: "live",
   };

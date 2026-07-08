@@ -41,7 +41,8 @@ _Replace the heading above with the project's name, and this line with one sente
 - `GET /dashboard` always returns data via `ensureSeeded()` (seeds bundled baseline if empty). `POST /dashboard/refresh` runs a live sync and, on failure, returns the last good snapshot plus a `refreshError` string — the UI never goes blank.
 - On startup the server seeds synchronously then kicks off a background live sync, so first paint is instant (seed) and upgrades to live shortly after.
 - FY24-25 totals come from the item-wise SALE tab (only PRODUCT_GROUP-mapped codes → exact 3,417,311,917). Orders come from the per-month MONTHLY tabs, not the formula-driven Combined tab (which is not cached in the export).
-- Monthly order tabs have no retail/resource flag, so Regional aggregates over all order customers; distributors/dealers/coverage remain seed-sourced. See `.agents/memory/prayag-sheets-transform.md`.
+- Resources and coverage are live too: retailer/distributor rosters come from the "Retailer-Distributor Data" workbook; per-head dealers, states, and secondary order value come from "STATE HEAD DASHBOARD(2026-27)". The live sync no longer merges any seed fields. See `.agents/memory/prayag-sheets-transform.md` for tab/column mappings and alias rules.
+- Monthly order tabs have no retail/resource flag, so Regional aggregates over all order customers.
 
 ## Product
 

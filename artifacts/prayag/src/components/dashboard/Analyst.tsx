@@ -32,7 +32,7 @@ const SUGGESTION_GROUPS: { label: string; questions: string[] }[] = [
     label: "Resources deployed",
     questions: [
       "Rank State Heads by sales per partner — where is the biggest productivity gap to close?",
-      "We have 604 distributors and 169 dealers across 11 heads — which territories are over- or under-resourced for the sales they produce?",
+      "Which territories are over- or under-resourced for the sales they produce?",
     ],
   },
   {

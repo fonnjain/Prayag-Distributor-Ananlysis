@@ -1,9 +1,13 @@
 // Transforms raw Google Sheet workbooks into the aggregate dashboard shape.
 //
-// Two live sources:
+// Four live sources:
 //  1. Item-wise product sales workbook, tab "SALE " -> fy2425 (FY2024-25).
 //  2. Order book workbook, monthly tabs (Apr/May/Jun/...) -> orders_fy2627 and
 //     the regional / state-head / top-retailer rollups.
+//  3. "Retailer-Distributor Data" workbook -> retailer roster (coverage by
+//     state) and distributor roster (distributor counts).
+//  4. "STATE HEAD DASHBOARD(2026-27)" workbook -> per-head dealer network,
+//     states covered, and secondary order value (heads_resources, totals).
 //
 // The order book's "Combined" tab is formula-driven and does not cache its rows
 // in the Drive XLSX export, so we read the per-month tabs directly.
@@ -351,5 +355,240 @@ export function buildFromOrders(workbook: Workbook): OrdersResult {
     top_retailers,
     orders_ytd_cr: Number(monthly.reduce((a, b) => a + b.value_cr, 0).toFixed(2)),
     order_customers: custAgg.size,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Channel resources: heads_resources, coverage, coverage_totals, channel totals.
+//
+// Sources:
+//  - "Retailer-Distributor Data" workbook:
+//      "Retailer" tab    -> registered retailer roster (RET# rows) with
+//                           State(10)/District(11)/City(12) -> coverage.
+//      "Distributor" tab -> distributor roster (DIST# rows) with
+//                           Billing State(8) -> distributor counts per head.
+//  - "STATE HEAD DASHBOARD(2026-27)" workbook:
+//      "Data" tab -> one row per team member: State Head(1), State(2),
+//                    Total Retailers(14). Gives the live state -> head mapping
+//                    and the states covered per head.
+//      "SECONDARY ORDER BOOKING REPORT " tab -> one row per secondary team
+//                    member: State Head(2), Member(3), Total Dealer 26-27(11),
+//                    Order Booked 26-27(13). Gives dealer network per head and
+//                    the secondary (retail network) order value.
+
+// The same state head appears under different spellings across the order book
+// and the state-head dashboard tabs. Canonicalize to the order-book labels so
+// heads line up across dashboard sections.
+const HEAD_ALIAS: Record<string, string> = {
+  "SANDEEP DADHEECH": "DADHEECH JI",
+  "SYED AQIL RIZVI": "RIZVI JI",
+  "AQIL RIZVI": "RIZVI JI",
+  "BIJU C.O": "BIJJU",
+  "BIJU CO": "BIJJU",
+  "LALAN KUMAR": "LALAN",
+  "PAWAN SHARMA": "PAWAN KUMAR",
+  "PAWAN KUMAR SHARMA": "PAWAN KUMAR",
+  "SULINDAR PAL": "SULINDER PAL",
+  "NASIR HUSSAIN KHAN": "NASIR HUSAIN",
+};
+
+function canonicalHead(raw: string): string {
+  const key = raw.trim().toUpperCase().replace(/\s+/g, " ");
+  if (!key || key === "LEFT TEAM MEMBERS") return "";
+  return HEAD_ALIAS[key] ?? key;
+}
+
+// Distributor roster billing-state names that differ from the state-head
+// dashboard's state names (uppercased on both sides).
+const STATE_ALIAS: Record<string, string> = {
+  ASSAM: "NORTH EAST",
+  PONDICHERRY: "TAMIL NADU",
+  "JAMMU AND KASHMIR": "JAMMU AND KASHMIR",
+};
+
+function canonicalState(raw: string): string {
+  const key = raw
+    .trim()
+    .toUpperCase()
+    .replace(/\s+\d+$/, "") // "Maharashtra 2" -> "MAHARASHTRA"
+    .replace(/\s+/g, " ");
+  return STATE_ALIAS[key] ?? key;
+}
+
+export interface HeadResource {
+  head: string;
+  distributors: number;
+  dealers: number;
+  total: number;
+  states: string;
+}
+export interface CoverageRow {
+  state: string;
+  districts: number;
+  cities: number;
+  retailers: number;
+}
+export interface CoverageTotals {
+  states: number;
+  districts: number;
+  cities: number;
+  retailers: number;
+}
+export interface ResourcesResult {
+  heads_resources: HeadResource[];
+  coverage: CoverageRow[];
+  coverage_totals: CoverageTotals;
+  state_heads: number;
+  distributors: number;
+  dealers: number;
+  channel_partners: number;
+  retailers: number;
+  retailer_sales_inr: number;
+}
+
+export function buildResources(
+  rosterWb: Workbook,
+  headDashWb: Workbook,
+): ResourcesResult {
+  const retailerSheet = rosterWb.getWorksheet("Retailer");
+  const distributorSheet = rosterWb.getWorksheet("Distributor");
+  if (!retailerSheet || !distributorSheet) {
+    throw new Error(
+      'Retailer-Distributor workbook is missing the "Retailer" or "Distributor" tab',
+    );
+  }
+  const dataSheet = headDashWb.getWorksheet("Data");
+  const secondarySheet = headDashWb.worksheets.find(
+    (w) => w.name.trim().toUpperCase() === "SECONDARY ORDER BOOKING REPORT",
+  );
+  if (!dataSheet || !secondarySheet) {
+    throw new Error(
+      'State-head dashboard workbook is missing the "Data" or "SECONDARY ORDER BOOKING REPORT" tab',
+    );
+  }
+
+  // --- State-head dashboard "Data" tab: state -> head, states per head.
+  // Header rows occupy 1-3; member rows start at 4.
+  const stateHeadVotes = new Map<string, Map<string, number>>();
+  const headStates = new Map<string, Set<string>>();
+  dataSheet.eachRow((row, r) => {
+    if (r < 4) return;
+    const head = canonicalHead(cellString(row.getCell(1)));
+    if (!head) return;
+    const state = cellString(row.getCell(2));
+    if (!headStates.has(head)) headStates.set(head, new Set());
+    if (!state) return;
+    headStates.get(head)!.add(state.replace(/\s+\d+$/, ""));
+    const key = canonicalState(state);
+    let votes = stateHeadVotes.get(key);
+    if (!votes) {
+      votes = new Map();
+      stateHeadVotes.set(key, votes);
+    }
+    votes.set(head, (votes.get(head) ?? 0) + 1);
+  });
+  const stateToHead = new Map<string, string>();
+  for (const [state, votes] of stateHeadVotes) {
+    stateToHead.set(state, dominant(votes));
+  }
+
+  // --- Secondary order booking report: dealers + secondary order value per head.
+  // Rows 1-6 are banner/header rows; member rows start at 7.
+  const dealersByHead = new Map<string, number>();
+  let dealersTotal = 0;
+  let secondaryOrderValue = 0;
+  secondarySheet.eachRow((row, r) => {
+    if (r < 7) return;
+    const head = canonicalHead(cellString(row.getCell(2)));
+    const member = cellString(row.getCell(3));
+    if (!head || !member || /total/i.test(member)) return;
+    const dealers = cellNumber(row.getCell(11));
+    dealersByHead.set(head, (dealersByHead.get(head) ?? 0) + dealers);
+    dealersTotal += dealers;
+    secondaryOrderValue += cellNumber(row.getCell(13));
+  });
+
+  // --- Distributor roster: distributor counts, attributed to heads by state.
+  const distByHead = new Map<string, number>();
+  let distributorsTotal = 0;
+  distributorSheet.eachRow((row, r) => {
+    if (r < 2) return;
+    if (!cellString(row.getCell(1)).startsWith("DIST#")) return;
+    if (!cellString(row.getCell(2))) return;
+    distributorsTotal++;
+    const head = stateToHead.get(canonicalState(cellString(row.getCell(8))));
+    if (head) distByHead.set(head, (distByHead.get(head) ?? 0) + 1);
+  });
+
+  // --- Retailer roster: coverage by state.
+  const coverageByState = new Map<
+    string,
+    { state: string; districts: Set<string>; cities: Set<string>; retailers: number }
+  >();
+  let retailersTotal = 0;
+  retailerSheet.eachRow((row, r) => {
+    if (r < 2) return;
+    if (!cellString(row.getCell(1)).startsWith("RET#")) return;
+    retailersTotal++;
+    const state = cellString(row.getCell(10));
+    if (!state) return;
+    const key = state.toUpperCase();
+    let s = coverageByState.get(key);
+    if (!s) {
+      s = { state: key, districts: new Set(), cities: new Set(), retailers: 0 };
+      coverageByState.set(key, s);
+    }
+    s.retailers++;
+    const district = cellString(row.getCell(11)).toUpperCase();
+    const city = cellString(row.getCell(12)).toUpperCase();
+    if (district && district !== "NA") s.districts.add(district);
+    if (city && city !== "NA") s.cities.add(city);
+  });
+
+  const coverage = [...coverageByState.values()]
+    .map((s) => ({
+      state: s.state,
+      districts: s.districts.size,
+      cities: s.cities.size,
+      retailers: s.retailers,
+    }))
+    .sort((a, b) => b.retailers - a.retailers);
+  const coverage_totals = {
+    states: coverage.length,
+    districts: coverage.reduce((a, c) => a + c.districts, 0),
+    cities: coverage.reduce((a, c) => a + c.cities, 0),
+    retailers: retailersTotal,
+  };
+
+  // --- heads_resources: union of heads seen in any per-head source.
+  const headNames = new Set<string>([
+    ...headStates.keys(),
+    ...dealersByHead.keys(),
+    ...distByHead.keys(),
+  ]);
+  const heads_resources = [...headNames]
+    .map((head) => {
+      const distributors = distByHead.get(head) ?? 0;
+      const dealers = dealersByHead.get(head) ?? 0;
+      return {
+        head,
+        distributors,
+        dealers,
+        total: distributors + dealers,
+        states: [...(headStates.get(head) ?? [])].join(", "),
+      };
+    })
+    .sort((a, b) => b.total - a.total);
+
+  return {
+    heads_resources,
+    coverage,
+    coverage_totals,
+    state_heads: heads_resources.length,
+    distributors: distributorsTotal,
+    dealers: dealersTotal,
+    channel_partners: distributorsTotal + dealersTotal,
+    retailers: retailersTotal,
+    retailer_sales_inr: Math.round(secondaryOrderValue),
   };
 }
