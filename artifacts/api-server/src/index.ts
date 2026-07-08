@@ -1,6 +1,10 @@
 import app from "./app";
 import { logger } from "./lib/logger";
-import { ensureSeeded, syncDashboard } from "./lib/dashboard/sync";
+import {
+  ensureSeeded,
+  syncDashboard,
+  startScheduledSync,
+} from "./lib/dashboard/sync";
 
 const rawPort = process.env["PORT"];
 
@@ -34,4 +38,8 @@ app.listen(port, (err) => {
       logger.error({ err: syncErr }, "initial dashboard sync failed");
     }
   })();
+
+  // Keep the served snapshot fresh with a periodic background sync
+  // (interval configurable via DASHBOARD_SYNC_INTERVAL_MINUTES, 0 disables).
+  startScheduledSync();
 });

@@ -111,6 +111,74 @@ export function syncDashboard(): Promise<DashboardSnapshot> {
   return syncInFlight;
 }
 
+const DEFAULT_SYNC_INTERVAL_MINUTES = 60;
+
+// Resolves the scheduled sync interval in milliseconds from
+// DASHBOARD_SYNC_INTERVAL_MINUTES. Returns null when scheduling is disabled
+// (value of 0), and falls back to the default on missing/invalid values.
+export function resolveSyncIntervalMs(): number | null {
+  const raw = process.env["DASHBOARD_SYNC_INTERVAL_MINUTES"];
+  if (raw === undefined || raw.trim() === "") {
+    return DEFAULT_SYNC_INTERVAL_MINUTES * 60_000;
+  }
+
+  const minutes = Number(raw);
+  if (!Number.isFinite(minutes) || minutes < 0) {
+    logger.warn(
+      { value: raw, defaultMinutes: DEFAULT_SYNC_INTERVAL_MINUTES },
+      "invalid DASHBOARD_SYNC_INTERVAL_MINUTES, using default",
+    );
+    return DEFAULT_SYNC_INTERVAL_MINUTES * 60_000;
+  }
+
+  if (minutes === 0) return null;
+
+  return minutes * 60_000;
+}
+
+let scheduledSyncTimer: NodeJS.Timeout | null = null;
+
+// Starts a periodic background live sync. Overlapping runs are impossible:
+// syncDashboard() shares a single in-flight build across all callers, so a
+// tick that fires while a sync is running just joins the existing one.
+// Failures are logged and never touch persisted data (snapshots are only
+// appended on success), so the last good snapshot always remains served.
+export function startScheduledSync(): void {
+  if (scheduledSyncTimer) return;
+
+  const intervalMs = resolveSyncIntervalMs();
+  if (intervalMs === null) {
+    logger.info(
+      "scheduled dashboard sync disabled (DASHBOARD_SYNC_INTERVAL_MINUTES=0)",
+    );
+    return;
+  }
+
+  logger.info(
+    { intervalMinutes: intervalMs / 60_000 },
+    "scheduled dashboard sync enabled",
+  );
+
+  scheduledSyncTimer = setInterval(() => {
+    syncDashboard().catch((err: unknown) => {
+      logger.error(
+        { err },
+        "scheduled dashboard sync failed; keeping last good snapshot",
+      );
+    });
+  }, intervalMs);
+
+  // Do not keep the process alive solely for the scheduler.
+  scheduledSyncTimer.unref();
+}
+
+export function stopScheduledSync(): void {
+  if (scheduledSyncTimer) {
+    clearInterval(scheduledSyncTimer);
+    scheduledSyncTimer = null;
+  }
+}
+
 let seedInFlight: Promise<DashboardSnapshot> | null = null;
 
 // Ensures at least one snapshot exists so the dashboard always has data, even
