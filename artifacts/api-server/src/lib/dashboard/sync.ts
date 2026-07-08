@@ -2,8 +2,13 @@
 import { desc } from "drizzle-orm";
 import { db, dashboardSnapshots, type DashboardSnapshot } from "@workspace/db";
 import { logger } from "../logger.js";
-import { exportWorkbook } from "../sheets.js";
-import { buildFy2425, buildFromOrders, buildResources } from "./transform.js";
+import { fetchWorkbook } from "../sheets.js";
+import {
+  buildFy2425,
+  buildFromOrders,
+  buildResources,
+  isMonthlyTabTitle,
+} from "./transform.js";
 import { seed } from "./seed.js";
 
 // Live source workbooks (see manifest.primary_sources).
@@ -19,11 +24,20 @@ export interface DashboardPayload {
 
 // Builds the aggregate dashboard payload entirely from the live Google Sheets.
 export async function buildSnapshot(): Promise<DashboardPayload> {
+  // Each workbook fetch pulls only the tabs the transforms read; anything
+  // more burns through the Sheets API per-minute read quota.
   const [itemwiseWb, orderWb, rosterWb, headDashWb] = await Promise.all([
-    exportWorkbook(ITEMWISE_SALES_FY2425),
-    exportWorkbook(ORDER_BOOK_FY2627),
-    exportWorkbook(RETAILER_DISTRIBUTOR_ROSTER),
-    exportWorkbook(STATE_HEAD_DASHBOARD_FY2627),
+    fetchWorkbook(ITEMWISE_SALES_FY2425, (t) => t.trim() === "SALE"),
+    fetchWorkbook(ORDER_BOOK_FY2627, isMonthlyTabTitle),
+    fetchWorkbook(RETAILER_DISTRIBUTOR_ROSTER, (t) =>
+      /^(retailer|distributor)$/i.test(t.trim()),
+    ),
+    fetchWorkbook(
+      STATE_HEAD_DASHBOARD_FY2627,
+      (t) =>
+        t.trim() === "Data" ||
+        t.trim().toUpperCase().startsWith("SECONDARY ORDER BOOKING REPORT"),
+    ),
   ]);
 
   const fy2425 = buildFy2425(itemwiseWb);

@@ -9,10 +9,14 @@
 //  4. "STATE HEAD DASHBOARD(2026-27)" workbook -> per-head dealer network,
 //     states covered, and secondary order value (heads_resources, totals).
 //
-// The order book's "Combined" tab is formula-driven and does not cache its rows
-// in the Drive XLSX export, so we read the per-month tabs directly.
-import type { Workbook, Worksheet } from "exceljs";
-import { cellNumber, cellString } from "../sheets.js";
+// The order book's "Combined" tab is formula-driven, so we read the per-month
+// tabs directly.
+import {
+  cellNumber,
+  cellString,
+  type WorkbookLike as Workbook,
+  type WorksheetLike as Worksheet,
+} from "../sheets.js";
 
 export const MONTHS = [
   "Apr", "May", "Jun", "Jul", "Aug", "Sep",
@@ -195,12 +199,16 @@ export interface OrdersResult {
   order_customers: number;
 }
 
-function isMonthlyTab(ws: Worksheet): boolean {
-  const n = ws.name.trim();
+export function isMonthlyTabTitle(title: string): boolean {
+  const n = title.trim();
   if (/last month|combined|index|report|^wt$/i.test(n)) return false;
   return (MONTHS as readonly string[]).some((m) =>
     n.toLowerCase().startsWith(m.toLowerCase()),
   );
+}
+
+function isMonthlyTab(ws: Worksheet): boolean {
+  return isMonthlyTabTitle(ws.name);
 }
 
 // Monthly tab layout: col C(3)=Document No, E(5)=Customer, J(10)=Quantity,
@@ -458,8 +466,11 @@ export function buildResources(
     );
   }
   const dataSheet = headDashWb.getWorksheet("Data");
-  const secondarySheet = headDashWb.worksheets.find(
-    (w) => w.name.trim().toUpperCase() === "SECONDARY ORDER BOOKING REPORT",
+  // Matched by prefix: the live tab is "SECONDARY ORDER BOOKING REPORT
+  // 2026-27" (the old xlsx export truncated names to 31 chars, hiding the
+  // year suffix).
+  const secondarySheet = headDashWb.worksheets.find((w) =>
+    w.name.trim().toUpperCase().startsWith("SECONDARY ORDER BOOKING REPORT"),
   );
   if (!dataSheet || !secondarySheet) {
     throw new Error(

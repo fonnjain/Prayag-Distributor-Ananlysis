@@ -1,0 +1,9 @@
+{
+  "comment": "Verified row counts per source file and FY (spec section A). Used as ingestion assertions.",
+  "registers": {
+    "2024-25": { "FY-2023-24": 137619, "FY-2024-25": 141201 },
+    "2025-26": { "FY-2024-25": 141201, "FY-2025-26": 145657 },
+    "2026-27": { "FY-2025-26": 145657, "FY-2026-27": 30658 }
+  },
+  "total_distinct_sale_lines": 424477
+}

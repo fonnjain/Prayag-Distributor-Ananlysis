@@ -1,6 +1,7 @@
 import { useDashboard } from "@/data/dashboard-context";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { FileText, Database, FolderGit2, CheckCircle2, Clock, Link as LinkIcon } from "lucide-react";
+import DataHealth from "./DataHealth";
 
 export default function DataSources() {
   const { manifest } = useDashboard();
@@ -8,6 +9,7 @@ export default function DataSources() {
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-4xl mx-auto">
+      <DataHealth />
       <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
         <CardHeader className="px-6 pt-6 pb-4">
           <CardTitle className="text-xl flex items-center gap-2">

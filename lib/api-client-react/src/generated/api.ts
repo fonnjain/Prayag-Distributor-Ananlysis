@@ -20,12 +20,19 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AnalyticsReport,
   AnalyzeRequest,
   AnalyzeResponse,
   DashboardResponse,
   DriveFileList,
+  ErrorResponse,
+  GetAnalyticsParams,
+  GetVerifyReportParams,
   HealthStatus,
-  ListDriveFilesParams
+  ListDriveFilesParams,
+  VerifyBackfillRequest,
+  VerifyBackfillResponse,
+  VerifyReport
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -437,4 +444,245 @@ export const useRefreshDashboard = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getRefreshDashboardMutationOptions(options));
     }
+
+export const getGetVerifyReportUrl = (params?: GetVerifyReportParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/verify?${stringifiedParams}` : `/api/verify`
+}
+
+/**
+ * Compares three sources for the same fiscal year — xlsx as ingested, live Google Sheets read now, and the database — reporting row counts, amount sums, distinct invoices/customers, by-group and by-head breakdowns, deltas over 0.5 percent, and live rows missing from the database.
+ * @summary Data health reconciliation report
+ */
+export const getVerifyReport = async (params?: GetVerifyReportParams, options?: RequestInit): Promise<VerifyReport> => {
+
+  return customFetch<VerifyReport>(getGetVerifyReportUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetVerifyReportQueryKey = (params?: GetVerifyReportParams,) => {
+    return [
+    `/api/verify`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetVerifyReportQueryOptions = <TData = Awaited<ReturnType<typeof getVerifyReport>>, TError = ErrorType<ErrorResponse>>(params?: GetVerifyReportParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVerifyReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetVerifyReportQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getVerifyReport>>> = ({ signal }) => getVerifyReport(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getVerifyReport>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetVerifyReportQueryResult = NonNullable<Awaited<ReturnType<typeof getVerifyReport>>>
+export type GetVerifyReportQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Data health reconciliation report
+ */
+
+export function useGetVerifyReport<TData = Awaited<ReturnType<typeof getVerifyReport>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetVerifyReportParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVerifyReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetVerifyReportQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRunVerifyBackfillUrl = () => {
+
+
+
+
+  return `/api/verify/backfill`
+}
+
+/**
+ * Re-reads the live register for the fiscal year and inserts any lines whose uid is not yet in the database. Idempotent.
+ * @summary Backfill rows missing from the database
+ */
+export const runVerifyBackfill = async (verifyBackfillRequest?: VerifyBackfillRequest, options?: RequestInit): Promise<VerifyBackfillResponse> => {
+
+  return customFetch<VerifyBackfillResponse>(getRunVerifyBackfillUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(verifyBackfillRequest)
+  }
+);}
+
+
+
+
+export const getRunVerifyBackfillMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runVerifyBackfill>>, TError,{data?: BodyType<VerifyBackfillRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof runVerifyBackfill>>, TError,{data?: BodyType<VerifyBackfillRequest>}, TContext> => {
+
+const mutationKey = ['runVerifyBackfill'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof runVerifyBackfill>>, {data?: BodyType<VerifyBackfillRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  runVerifyBackfill(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RunVerifyBackfillMutationResult = NonNullable<Awaited<ReturnType<typeof runVerifyBackfill>>>
+    export type RunVerifyBackfillMutationBody = BodyType<VerifyBackfillRequest> | undefined
+    export type RunVerifyBackfillMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Backfill rows missing from the database
+ */
+export const useRunVerifyBackfill = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runVerifyBackfill>>, TError,{data?: BodyType<VerifyBackfillRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof runVerifyBackfill>>,
+        TError,
+        {data?: BodyType<VerifyBackfillRequest>},
+        TContext
+      > => {
+      return useMutation(getRunVerifyBackfillMutationOptions(options));
+    }
+
+export const getGetAnalyticsUrl = (params?: GetAnalyticsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analytics?${stringifiedParams}` : `/api/analytics`
+}
+
+/**
+ * Year-over-year growth over complete months only (partial months are flagged and excluded), split into territory vs institutional business, plus per-head totals, customer retention over the comparable period, and margins (empty until a cost master is loaded).
+ * @summary Corrected analytics on the invoice-line register
+ */
+export const getAnalytics = async (params?: GetAnalyticsParams, options?: RequestInit): Promise<AnalyticsReport> => {
+
+  return customFetch<AnalyticsReport>(getGetAnalyticsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalyticsQueryKey = (params?: GetAnalyticsParams,) => {
+    return [
+    `/api/analytics`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalyticsQueryOptions = <TData = Awaited<ReturnType<typeof getAnalytics>>, TError = ErrorType<ErrorResponse>>(params?: GetAnalyticsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalytics>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalyticsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalytics>>> = ({ signal }) => getAnalytics(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalytics>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalyticsQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalytics>>>
+export type GetAnalyticsQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Corrected analytics on the invoice-line register
+ */
+
+export function useGetAnalytics<TData = Awaited<ReturnType<typeof getAnalytics>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetAnalyticsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalytics>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalyticsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 

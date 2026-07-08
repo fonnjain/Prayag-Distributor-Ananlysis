@@ -14,14 +14,14 @@ import {
 
 vi.mock("../lib/sheets.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/sheets.js")>();
-  return { ...actual, exportWorkbook: vi.fn() };
+  return { ...actual, fetchWorkbook: vi.fn() };
 });
 
-import { exportWorkbook } from "../lib/sheets.js";
+import { fetchWorkbook } from "../lib/sheets.js";
 import dashboardRouter from "../routes/dashboard.js";
 import { ensureSeeded } from "../lib/dashboard/sync.js";
 
-const exportWorkbookMock = vi.mocked(exportWorkbook);
+const fetchWorkbookMock = vi.mocked(fetchWorkbook);
 
 function makeApp() {
   const app = express();
@@ -48,7 +48,7 @@ beforeEach(async () => {
 
 describe("POST /api/dashboard/refresh", () => {
   it("builds a live snapshot from the fixture workbooks with correct totals", async () => {
-    exportWorkbookMock.mockImplementation(fixtureForFileId);
+    fetchWorkbookMock.mockImplementation(fixtureForFileId);
 
     const res = await request(app).post("/api/dashboard/refresh");
 
@@ -74,7 +74,7 @@ describe("POST /api/dashboard/refresh", () => {
     await ensureSeeded();
     expect(await snapshotCount()).toBe(1);
 
-    exportWorkbookMock.mockRejectedValue(
+    fetchWorkbookMock.mockRejectedValue(
       new Error("Google Drive export failed (simulated)"),
     );
 
@@ -92,7 +92,7 @@ describe("POST /api/dashboard/refresh", () => {
   });
 
   it("returns 502 when the sync throws and no previous snapshot exists", async () => {
-    exportWorkbookMock.mockRejectedValue(new Error("simulated failure"));
+    fetchWorkbookMock.mockRejectedValue(new Error("simulated failure"));
 
     const res = await request(app).post("/api/dashboard/refresh");
 

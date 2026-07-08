@@ -1,0 +1,8 @@
+{
+  "comment": "Live Google Sheets spreadsheet IDs for the invoice-line sale registers, by the fiscal year the workbook is named for. Each workbook also contains the prior FY block; verification filters rows to the requested FY.",
+  "registers": {
+    "2024-25": "1iL1su3xwe40eG0QJHVwat97rhlMmADzeKQVfMw6ZrE0",
+    "2025-26": "1RuXHIXfusOT-VDdDqeuB-Nx-pxyVkmrJsqr21BB-NUA",
+    "2026-27": "1QIpcfgOVCFjcCmgU_DXKn8h7Bfa8rm2q2wB2HneTvKs"
+  }
+}

@@ -87,3 +87,190 @@ export const RefreshDashboardResponse = zod.object({
 })
 
 
+/**
+ * Compares three sources for the same fiscal year — xlsx as ingested, live Google Sheets read now, and the database — reporting row counts, amount sums, distinct invoices/customers, by-group and by-head breakdowns, deltas over 0.5 percent, and live rows missing from the database.
+ * @summary Data health reconciliation report
+ */
+export const getVerifyReportQueryFyRegExp = new RegExp('^\\d{4}-\\d{2}$');
+
+
+export const GetVerifyReportQueryParams = zod.object({
+  "fy": zod.coerce.string().regex(getVerifyReportQueryFyRegExp).optional().describe('Fiscal year, e.g. 2026-27 (default).')
+})
+
+export const GetVerifyReportResponse = zod.object({
+  "fy": zod.string().describe('Fiscal year verified.'),
+  "generatedAt": zod.string().describe('ISO timestamp of report generation.'),
+  "sources": zod.object({
+  "xlsx": zod.object({
+  "rows": zod.number().describe('Row count for the fiscal year.'),
+  "amount": zod.number().describe('SUM(amount) in INR.'),
+  "invoices": zod.number().describe('Distinct invoice numbers.'),
+  "customers": zod.number().describe('Distinct customers.'),
+  "byGroup": zod.array(zod.object({
+  "key": zod.string().describe('Canonical group or head name.'),
+  "amount": zod.number().describe('Amount in INR.')
+})),
+  "byHead": zod.array(zod.object({
+  "key": zod.string().describe('Canonical group or head name.'),
+  "amount": zod.number().describe('Amount in INR.')
+}))
+}),
+  "sheets": zod.object({
+  "rows": zod.number().describe('Row count for the fiscal year.'),
+  "amount": zod.number().describe('SUM(amount) in INR.'),
+  "invoices": zod.number().describe('Distinct invoice numbers.'),
+  "customers": zod.number().describe('Distinct customers.'),
+  "byGroup": zod.array(zod.object({
+  "key": zod.string().describe('Canonical group or head name.'),
+  "amount": zod.number().describe('Amount in INR.')
+})),
+  "byHead": zod.array(zod.object({
+  "key": zod.string().describe('Canonical group or head name.'),
+  "amount": zod.number().describe('Amount in INR.')
+}))
+}),
+  "db": zod.object({
+  "rows": zod.number().describe('Row count for the fiscal year.'),
+  "amount": zod.number().describe('SUM(amount) in INR.'),
+  "invoices": zod.number().describe('Distinct invoice numbers.'),
+  "customers": zod.number().describe('Distinct customers.'),
+  "byGroup": zod.array(zod.object({
+  "key": zod.string().describe('Canonical group or head name.'),
+  "amount": zod.number().describe('Amount in INR.')
+})),
+  "byHead": zod.array(zod.object({
+  "key": zod.string().describe('Canonical group or head name.'),
+  "amount": zod.number().describe('Amount in INR.')
+}))
+})
+}),
+  "comparisons": zod.array(zod.object({
+  "label": zod.string().describe('Which two sources are compared.'),
+  "deltas": zod.array(zod.object({
+  "metric": zod.string().describe('Metric compared (rows, amount, invoices, customers).'),
+  "a": zod.number().describe('Value from the first source.'),
+  "b": zod.number().describe('Value from the second source.'),
+  "deltaPct": zod.number().describe('Absolute percentage difference.'),
+  "flagged": zod.boolean().describe('True when the delta exceeds 0.5 percent.')
+})),
+  "flagged": zod.boolean().describe('True when any delta is over threshold.')
+})),
+  "missingFromDb": zod.object({
+  "count": zod.number().describe('Live rows whose uid is not in the database.'),
+  "sample": zod.array(zod.object({
+  "invoiceNo": zod.string().nullish(),
+  "code": zod.string(),
+  "qty": zod.number().nullish(),
+  "amount": zod.number(),
+  "monthLabel": zod.string().nullish(),
+  "customer": zod.string().nullish()
+})).describe('Up to 50 example missing rows.')
+}),
+  "healthy": zod.boolean().describe('True when nothing is missing and no delta is flagged.')
+})
+
+
+/**
+ * Re-reads the live register for the fiscal year and inserts any lines whose uid is not yet in the database. Idempotent.
+ * @summary Backfill rows missing from the database
+ */
+export const RunVerifyBackfillBody = zod.object({
+  "fy": zod.string().optional().describe('Fiscal year, e.g. 2026-27 (default).')
+})
+
+export const RunVerifyBackfillResponse = zod.object({
+  "fy": zod.string(),
+  "rowsRead": zod.number().describe('Live rows read for the fiscal year.'),
+  "inserted": zod.number().describe('Rows inserted (0 when already in sync).')
+})
+
+
+/**
+ * Year-over-year growth over complete months only (partial months are flagged and excluded), split into territory vs institutional business, plus per-head totals, customer retention over the comparable period, and margins (empty until a cost master is loaded).
+ * @summary Corrected analytics on the invoice-line register
+ */
+export const getAnalyticsQueryFyRegExp = new RegExp('^\\d{4}-\\d{2}$');
+export const getAnalyticsQueryCompareRegExp = new RegExp('^\\d{4}-\\d{2}$');
+
+
+export const GetAnalyticsQueryParams = zod.object({
+  "fy": zod.coerce.string().regex(getAnalyticsQueryFyRegExp).optional().describe('Fiscal year, e.g. 2026-27 (default).'),
+  "compare": zod.coerce.string().regex(getAnalyticsQueryCompareRegExp).optional().describe('Comparison fiscal year (defaults to the prior year).')
+})
+
+export const GetAnalyticsResponse = zod.object({
+  "fy": zod.string(),
+  "compareFy": zod.string(),
+  "months": zod.array(zod.object({
+  "monthLabel": zod.string().describe('Month label like Apr-26.'),
+  "monthName": zod.string().describe('Three-letter month name like Apr.'),
+  "amount": zod.number(),
+  "territoryAmount": zod.number(),
+  "institutionalAmount": zod.number(),
+  "maxInvoiceDate": zod.string().nullable(),
+  "complete": zod.boolean().describe('True only if the max invoice date reaches the last calendar day of the month. Incomplete months are excluded from YoY.\n')
+})),
+  "compareMonths": zod.array(zod.object({
+  "monthLabel": zod.string().describe('Month label like Apr-26.'),
+  "monthName": zod.string().describe('Three-letter month name like Apr.'),
+  "amount": zod.number(),
+  "territoryAmount": zod.number(),
+  "institutionalAmount": zod.number(),
+  "maxInvoiceDate": zod.string().nullable(),
+  "complete": zod.boolean().describe('True only if the max invoice date reaches the last calendar day of the month. Incomplete months are excluded from YoY.\n')
+})),
+  "comparableMonths": zod.array(zod.string()).describe('Month names complete in both fiscal years.'),
+  "yoy": zod.object({
+  "overall": zod.object({
+  "current": zod.number(),
+  "prior": zod.number(),
+  "pct": zod.number().nullable().describe('Percent change; null when the prior period is zero.')
+}),
+  "territory": zod.object({
+  "current": zod.number(),
+  "prior": zod.number(),
+  "pct": zod.number().nullable().describe('Percent change; null when the prior period is zero.')
+}),
+  "institutional": zod.object({
+  "current": zod.number(),
+  "prior": zod.number(),
+  "pct": zod.number().nullable().describe('Percent change; null when the prior period is zero.')
+})
+}),
+  "invoicesInPeriod": zod.number(),
+  "customersInPeriod": zod.number(),
+  "byHead": zod.array(zod.object({
+  "head": zod.string(),
+  "amount": zod.number(),
+  "sharePct": zod.number(),
+  "isTerritory": zod.boolean()
+})),
+  "compareByHead": zod.array(zod.object({
+  "head": zod.string(),
+  "amount": zod.number(),
+  "sharePct": zod.number(),
+  "isTerritory": zod.boolean()
+})),
+  "retention": zod.object({
+  "periodMonths": zod.array(zod.string()),
+  "retained": zod.number(),
+  "newCustomers": zod.number(),
+  "lost": zod.number(),
+  "retainedRevenue": zod.number(),
+  "newRevenue": zod.number(),
+  "lostPriorRevenue": zod.number().describe('Revenue lost customers generated in the prior period.')
+}),
+  "margins": zod.object({
+  "byGroup": zod.array(zod.object({
+  "group": zod.string(),
+  "revenue": zod.number(),
+  "margin": zod.number()
+})).describe('Empty until a cost master is loaded.'),
+  "coveragePct": zod.number().describe('Share of revenue whose codes have a real cost.'),
+  "provisional": zod.boolean(),
+  "message": zod.string().nullable()
+})
+})
+
+

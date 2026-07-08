@@ -1,0 +1,31 @@
+{
+  "territory_heads": [
+    "SANDEEP JI",
+    "RIZVI JI",
+    "ANANT SINGH",
+    "SUNIL PATEL",
+    "BABU",
+    "LALAN",
+    "PAWAN KUMAR",
+    "SURESH NAIR",
+    "BIJJU",
+    "NASIR HUSAIN",
+    "SULINDER PAL",
+    "ANUJ SHARMA",
+    "SHAILESH SHARMA"
+  ],
+  "institutional": ["PROJECT", "GOVT", "JJM", "GEM", "OTHER"],
+  "non_territory_bucket": "Non-territory / Project / Govt",
+  "state_map": {
+    "W-BENGAL": "WEST BENGAL",
+    "UP ( R )": "UTTAR PRADESH",
+    "UP": "UTTAR PRADESH",
+    "MP": "MADHYA PRADESH",
+    "MAHARASTRA L": "MAHARASHTRA",
+    "MAHARASTRA R": "MAHARASHTRA",
+    "MAHARASTRA S": "MAHARASHTRA",
+    "MAHARASTRA": "MAHARASHTRA",
+    "TAMILNADU": "TAMIL NADU"
+  },
+  "state_channel_tokens": ["PROJECT", "GOVT", "OTHER"]
+}

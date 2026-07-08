@@ -25,6 +25,9 @@ export const ITEMWISE_SALES_FILE_ID =
   "1HgWelwHy73Ybc-1fBQMXhKxo2ctJToxgZLDWwJPmqz8";
 export const ORDER_BOOK_FILE_ID =
   "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A";
+export const ROSTER_FILE_ID = "1EbWoXm-LC9L_nsh4JUzMU7v0H6Q3Lq8FEmKgFT9FXHc";
+export const STATE_HEAD_DASH_FILE_ID =
+  "1E1jEY_yO8LmpqBDpcesS_fu2SBPEQ0eKO5xN29XyTEM";
 
 export async function loadFixtureWorkbook(
   path: string,
@@ -32,6 +35,30 @@ export async function loadFixtureWorkbook(
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(path);
   return workbook;
+}
+
+// Minimal in-memory roster workbook: one distributor and two retailers.
+function makeRosterFixture(): ExcelJS.Workbook {
+  const wb = new ExcelJS.Workbook();
+  const dist = wb.addWorksheet("Distributor");
+  dist.getRow(1).values = ["ID", "Name"];
+  dist.getRow(2).values = ["DIST#1", "Test Distributor", "", "", "", "", "", "MADHYA PRADESH"];
+  const ret = wb.addWorksheet("Retailer");
+  ret.getRow(1).values = ["ID"];
+  ret.getRow(2).values = ["RET#1", "", "", "", "", "", "", "", "", "MADHYA PRADESH", "INDORE", "INDORE"];
+  ret.getRow(3).values = ["RET#2", "", "", "", "", "", "", "", "", "MADHYA PRADESH", "BHOPAL", "BHOPAL"];
+  return wb;
+}
+
+// Minimal in-memory state-head dashboard workbook: one head covering one
+// state, one team member with dealers and secondary order value.
+function makeStateHeadDashFixture(): ExcelJS.Workbook {
+  const wb = new ExcelJS.Workbook();
+  const data = wb.addWorksheet("Data");
+  data.getRow(4).values = ["TEST HEAD", "MADHYA PRADESH"];
+  const sec = wb.addWorksheet("SECONDARY ORDER BOOKING REPORT");
+  sec.getRow(7).values = ["1", "TEST HEAD", "Test Member", "", "", "", "", "", "", "", 5, "", 100000];
+  return wb;
 }
 
 export async function fixtureForFileId(
@@ -42,6 +69,12 @@ export async function fixtureForFileId(
   }
   if (fileId === ORDER_BOOK_FILE_ID) {
     return loadFixtureWorkbook(ORDER_BOOK_FIXTURE);
+  }
+  if (fileId === ROSTER_FILE_ID) {
+    return makeRosterFixture();
+  }
+  if (fileId === STATE_HEAD_DASH_FILE_ID) {
+    return makeStateHeadDashFixture();
   }
   throw new Error(`No fixture for file id ${fileId}`);
 }

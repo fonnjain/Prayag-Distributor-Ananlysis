@@ -69,6 +69,174 @@ export interface DashboardResponse {
   refreshError?: string;
 }
 
+export interface ErrorResponse {
+  /** Human-readable error message. */
+  error: string;
+}
+
+export interface VerifyBreakdown {
+  /** Canonical group or head name. */
+  key: string;
+  /** Amount in INR. */
+  amount: number;
+}
+
+export interface VerifySourceAggregates {
+  /** Row count for the fiscal year. */
+  rows: number;
+  /** SUM(amount) in INR. */
+  amount: number;
+  /** Distinct invoice numbers. */
+  invoices: number;
+  /** Distinct customers. */
+  customers: number;
+  byGroup: VerifyBreakdown[];
+  byHead: VerifyBreakdown[];
+}
+
+export interface VerifyDelta {
+  /** Metric compared (rows, amount, invoices, customers). */
+  metric: string;
+  /** Value from the first source. */
+  a: number;
+  /** Value from the second source. */
+  b: number;
+  /** Absolute percentage difference. */
+  deltaPct: number;
+  /** True when the delta exceeds 0.5 percent. */
+  flagged: boolean;
+}
+
+export interface VerifyComparison {
+  /** Which two sources are compared. */
+  label: string;
+  deltas: VerifyDelta[];
+  /** True when any delta is over threshold. */
+  flagged: boolean;
+}
+
+export interface VerifyMissingRow {
+  invoiceNo?: string | null;
+  code: string;
+  qty?: number | null;
+  amount: number;
+  monthLabel?: string | null;
+  customer?: string | null;
+}
+
+export type VerifyReportSources = {
+  xlsx: VerifySourceAggregates;
+  sheets: VerifySourceAggregates;
+  db: VerifySourceAggregates;
+};
+
+export type VerifyReportMissingFromDb = {
+  /** Live rows whose uid is not in the database. */
+  count: number;
+  /** Up to 50 example missing rows. */
+  sample: VerifyMissingRow[];
+};
+
+export interface VerifyReport {
+  /** Fiscal year verified. */
+  fy: string;
+  /** ISO timestamp of report generation. */
+  generatedAt: string;
+  sources: VerifyReportSources;
+  comparisons: VerifyComparison[];
+  missingFromDb: VerifyReportMissingFromDb;
+  /** True when nothing is missing and no delta is flagged. */
+  healthy: boolean;
+}
+
+export interface VerifyBackfillRequest {
+  /** Fiscal year, e.g. 2026-27 (default). */
+  fy?: string;
+}
+
+export interface VerifyBackfillResponse {
+  fy: string;
+  /** Live rows read for the fiscal year. */
+  rowsRead: number;
+  /** Rows inserted (0 when already in sync). */
+  inserted: number;
+}
+
+export interface AnalyticsMonthStat {
+  /** Month label like Apr-26. */
+  monthLabel: string;
+  /** Three-letter month name like Apr. */
+  monthName: string;
+  amount: number;
+  territoryAmount: number;
+  institutionalAmount: number;
+  maxInvoiceDate: string | null;
+  /** True only if the max invoice date reaches the last calendar day of the month. Incomplete months are excluded from YoY. */
+  complete: boolean;
+}
+
+export interface AnalyticsYoy {
+  current: number;
+  prior: number;
+  /** Percent change; null when the prior period is zero. */
+  pct: number | null;
+}
+
+export interface AnalyticsHeadStat {
+  head: string;
+  amount: number;
+  sharePct: number;
+  isTerritory: boolean;
+}
+
+export interface AnalyticsRetention {
+  periodMonths: string[];
+  retained: number;
+  newCustomers: number;
+  lost: number;
+  retainedRevenue: number;
+  newRevenue: number;
+  /** Revenue lost customers generated in the prior period. */
+  lostPriorRevenue: number;
+}
+
+export interface AnalyticsMarginGroup {
+  group: string;
+  revenue: number;
+  margin: number;
+}
+
+export interface AnalyticsMargins {
+  /** Empty until a cost master is loaded. */
+  byGroup: AnalyticsMarginGroup[];
+  /** Share of revenue whose codes have a real cost. */
+  coveragePct: number;
+  provisional: boolean;
+  message: string | null;
+}
+
+export type AnalyticsReportYoy = {
+  overall: AnalyticsYoy;
+  territory: AnalyticsYoy;
+  institutional: AnalyticsYoy;
+};
+
+export interface AnalyticsReport {
+  fy: string;
+  compareFy: string;
+  months: AnalyticsMonthStat[];
+  compareMonths: AnalyticsMonthStat[];
+  /** Month names complete in both fiscal years. */
+  comparableMonths: string[];
+  yoy: AnalyticsReportYoy;
+  invoicesInPeriod: number;
+  customersInPeriod: number;
+  byHead: AnalyticsHeadStat[];
+  compareByHead: AnalyticsHeadStat[];
+  retention: AnalyticsRetention;
+  margins: AnalyticsMargins;
+}
+
 export type ListDriveFilesParams = {
 /**
  * Optional search text matched against file names.
@@ -79,5 +247,26 @@ q?: string;
  * Token for fetching the next page of results.
  */
 pageToken?: string;
+};
+
+export type GetVerifyReportParams = {
+/**
+ * Fiscal year, e.g. 2026-27 (default).
+ * @pattern ^\d{4}-\d{2}$
+ */
+fy?: string;
+};
+
+export type GetAnalyticsParams = {
+/**
+ * Fiscal year, e.g. 2026-27 (default).
+ * @pattern ^\d{4}-\d{2}$
+ */
+fy?: string;
+/**
+ * Comparison fiscal year (defaults to the prior year).
+ * @pattern ^\d{4}-\d{2}$
+ */
+compare?: string;
 };
 

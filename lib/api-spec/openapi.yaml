@@ -16,6 +16,8 @@ tags:
     description: Google Drive file operations
   - name: dashboard
     description: Live dashboard data operations
+  - name: verify
+    description: Data health and reconciliation operations
 paths:
   /drive/files:
     get:
@@ -114,6 +116,121 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DashboardResponse"
+  /verify:
+    get:
+      operationId: getVerifyReport
+      tags: [verify]
+      summary: Data health reconciliation report
+      description: >
+        Compares three sources for the same fiscal year — xlsx as ingested,
+        live Google Sheets read now, and the database — reporting row counts,
+        amount sums, distinct invoices/customers, by-group and by-head
+        breakdowns, deltas over 0.5 percent, and live rows missing from the
+        database.
+      parameters:
+        - name: fy
+          in: query
+          required: false
+          description: Fiscal year, e.g. 2026-27 (default).
+          schema:
+            type: string
+            pattern: "^\\d{4}-\\d{2}$"
+      responses:
+        "200":
+          description: Verification report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyReport"
+        "400":
+          description: Unknown fiscal year
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Report could not be built
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /verify/backfill:
+    post:
+      operationId: runVerifyBackfill
+      tags: [verify]
+      summary: Backfill rows missing from the database
+      description: >
+        Re-reads the live register for the fiscal year and inserts any lines
+        whose uid is not yet in the database. Idempotent.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyBackfillRequest"
+      responses:
+        "200":
+          description: Backfill result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyBackfillResponse"
+        "400":
+          description: Unknown fiscal year
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Backfill failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /analytics:
+    get:
+      operationId: getAnalytics
+      tags: [verify]
+      summary: Corrected analytics on the invoice-line register
+      description: >
+        Year-over-year growth over complete months only (partial months are
+        flagged and excluded), split into territory vs institutional business,
+        plus per-head totals, customer retention over the comparable period,
+        and margins (empty until a cost master is loaded).
+      parameters:
+        - name: fy
+          in: query
+          required: false
+          description: Fiscal year, e.g. 2026-27 (default).
+          schema:
+            type: string
+            pattern: "^\\d{4}-\\d{2}$"
+        - name: compare
+          in: query
+          required: false
+          description: Comparison fiscal year (defaults to the prior year).
+          schema:
+            type: string
+            pattern: "^\\d{4}-\\d{2}$"
+      responses:
+        "200":
+          description: Analytics report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsReport"
+        "400":
+          description: Bad fiscal year
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Analytics could not be computed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     DriveFile:
@@ -207,3 +324,373 @@ components:
         - syncedAt
         - sourceStatus
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+      required:
+        - error
+    VerifyBreakdown:
+      type: object
+      properties:
+        key:
+          type: string
+          description: Canonical group or head name.
+        amount:
+          type: number
+          description: Amount in INR.
+      required:
+        - key
+        - amount
+    VerifySourceAggregates:
+      type: object
+      properties:
+        rows:
+          type: integer
+          description: Row count for the fiscal year.
+        amount:
+          type: number
+          description: SUM(amount) in INR.
+        invoices:
+          type: integer
+          description: Distinct invoice numbers.
+        customers:
+          type: integer
+          description: Distinct customers.
+        byGroup:
+          type: array
+          items:
+            $ref: "#/components/schemas/VerifyBreakdown"
+        byHead:
+          type: array
+          items:
+            $ref: "#/components/schemas/VerifyBreakdown"
+      required:
+        - rows
+        - amount
+        - invoices
+        - customers
+        - byGroup
+        - byHead
+    VerifyDelta:
+      type: object
+      properties:
+        metric:
+          type: string
+          description: Metric compared (rows, amount, invoices, customers).
+        a:
+          type: number
+          description: Value from the first source.
+        b:
+          type: number
+          description: Value from the second source.
+        deltaPct:
+          type: number
+          description: Absolute percentage difference.
+        flagged:
+          type: boolean
+          description: True when the delta exceeds 0.5 percent.
+      required:
+        - metric
+        - a
+        - b
+        - deltaPct
+        - flagged
+    VerifyComparison:
+      type: object
+      properties:
+        label:
+          type: string
+          description: Which two sources are compared.
+        deltas:
+          type: array
+          items:
+            $ref: "#/components/schemas/VerifyDelta"
+        flagged:
+          type: boolean
+          description: True when any delta is over threshold.
+      required:
+        - label
+        - deltas
+        - flagged
+    VerifyMissingRow:
+      type: object
+      properties:
+        invoiceNo:
+          type: string
+          nullable: true
+        code:
+          type: string
+        qty:
+          type: number
+          nullable: true
+        amount:
+          type: number
+        monthLabel:
+          type: string
+          nullable: true
+        customer:
+          type: string
+          nullable: true
+      required:
+        - code
+        - amount
+    VerifyReport:
+      type: object
+      properties:
+        fy:
+          type: string
+          description: Fiscal year verified.
+        generatedAt:
+          type: string
+          description: ISO timestamp of report generation.
+        sources:
+          type: object
+          properties:
+            xlsx:
+              $ref: "#/components/schemas/VerifySourceAggregates"
+            sheets:
+              $ref: "#/components/schemas/VerifySourceAggregates"
+            db:
+              $ref: "#/components/schemas/VerifySourceAggregates"
+          required:
+            - xlsx
+            - sheets
+            - db
+        comparisons:
+          type: array
+          items:
+            $ref: "#/components/schemas/VerifyComparison"
+        missingFromDb:
+          type: object
+          properties:
+            count:
+              type: integer
+              description: Live rows whose uid is not in the database.
+            sample:
+              type: array
+              description: Up to 50 example missing rows.
+              items:
+                $ref: "#/components/schemas/VerifyMissingRow"
+          required:
+            - count
+            - sample
+        healthy:
+          type: boolean
+          description: True when nothing is missing and no delta is flagged.
+      required:
+        - fy
+        - generatedAt
+        - sources
+        - comparisons
+        - missingFromDb
+        - healthy
+    VerifyBackfillRequest:
+      type: object
+      properties:
+        fy:
+          type: string
+          description: Fiscal year, e.g. 2026-27 (default).
+    VerifyBackfillResponse:
+      type: object
+      properties:
+        fy:
+          type: string
+        rowsRead:
+          type: integer
+          description: Live rows read for the fiscal year.
+        inserted:
+          type: integer
+          description: Rows inserted (0 when already in sync).
+      required:
+        - fy
+        - rowsRead
+        - inserted
+    AnalyticsMonthStat:
+      type: object
+      properties:
+        monthLabel:
+          type: string
+          description: Month label like Apr-26.
+        monthName:
+          type: string
+          description: Three-letter month name like Apr.
+        amount:
+          type: number
+        territoryAmount:
+          type: number
+        institutionalAmount:
+          type: number
+        maxInvoiceDate:
+          type: string
+          nullable: true
+        complete:
+          type: boolean
+          description: >
+            True only if the max invoice date reaches the last calendar day
+            of the month. Incomplete months are excluded from YoY.
+      required:
+        - monthLabel
+        - monthName
+        - amount
+        - territoryAmount
+        - institutionalAmount
+        - maxInvoiceDate
+        - complete
+    AnalyticsYoy:
+      type: object
+      properties:
+        current:
+          type: number
+        prior:
+          type: number
+        pct:
+          type: number
+          nullable: true
+          description: Percent change; null when the prior period is zero.
+      required:
+        - current
+        - prior
+        - pct
+    AnalyticsHeadStat:
+      type: object
+      properties:
+        head:
+          type: string
+        amount:
+          type: number
+        sharePct:
+          type: number
+        isTerritory:
+          type: boolean
+      required:
+        - head
+        - amount
+        - sharePct
+        - isTerritory
+    AnalyticsRetention:
+      type: object
+      properties:
+        periodMonths:
+          type: array
+          items:
+            type: string
+        retained:
+          type: integer
+        newCustomers:
+          type: integer
+        lost:
+          type: integer
+        retainedRevenue:
+          type: number
+        newRevenue:
+          type: number
+        lostPriorRevenue:
+          type: number
+          description: Revenue lost customers generated in the prior period.
+      required:
+        - periodMonths
+        - retained
+        - newCustomers
+        - lost
+        - retainedRevenue
+        - newRevenue
+        - lostPriorRevenue
+    AnalyticsMarginGroup:
+      type: object
+      properties:
+        group:
+          type: string
+        revenue:
+          type: number
+        margin:
+          type: number
+      required:
+        - group
+        - revenue
+        - margin
+    AnalyticsMargins:
+      type: object
+      properties:
+        byGroup:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsMarginGroup"
+          description: Empty until a cost master is loaded.
+        coveragePct:
+          type: number
+          description: Share of revenue whose codes have a real cost.
+        provisional:
+          type: boolean
+        message:
+          type: string
+          nullable: true
+      required:
+        - byGroup
+        - coveragePct
+        - provisional
+        - message
+    AnalyticsReport:
+      type: object
+      properties:
+        fy:
+          type: string
+        compareFy:
+          type: string
+        months:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsMonthStat"
+        compareMonths:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsMonthStat"
+        comparableMonths:
+          type: array
+          items:
+            type: string
+          description: Month names complete in both fiscal years.
+        yoy:
+          type: object
+          properties:
+            overall:
+              $ref: "#/components/schemas/AnalyticsYoy"
+            territory:
+              $ref: "#/components/schemas/AnalyticsYoy"
+            institutional:
+              $ref: "#/components/schemas/AnalyticsYoy"
+          required:
+            - overall
+            - territory
+            - institutional
+        invoicesInPeriod:
+          type: integer
+        customersInPeriod:
+          type: integer
+        byHead:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsHeadStat"
+        compareByHead:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsHeadStat"
+        retention:
+          $ref: "#/components/schemas/AnalyticsRetention"
+        margins:
+          $ref: "#/components/schemas/AnalyticsMargins"
+      required:
+        - fy
+        - compareFy
+        - months
+        - compareMonths
+        - comparableMonths
+        - yoy
+        - invoicesInPeriod
+        - customersInPeriod
+        - byHead
+        - compareByHead
+        - retention
+        - margins

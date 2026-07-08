@@ -6,6 +6,14 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './analyticsHeadStat';
+export * from './analyticsMarginGroup';
+export * from './analyticsMargins';
+export * from './analyticsMonthStat';
+export * from './analyticsReport';
+export * from './analyticsReportYoy';
+export * from './analyticsRetention';
+export * from './analyticsYoy';
 export * from './analyzeRequest';
 export * from './analyzeResponse';
 export * from './dashboardResponse';
@@ -13,5 +21,18 @@ export * from './dashboardResponseData';
 export * from './dashboardResponseManifest';
 export * from './driveFile';
 export * from './driveFileList';
+export * from './errorResponse';
+export * from './getAnalyticsParams';
+export * from './getVerifyReportParams';
 export * from './healthStatus';
 export * from './listDriveFilesParams';
+export * from './verifyBackfillRequest';
+export * from './verifyBackfillResponse';
+export * from './verifyBreakdown';
+export * from './verifyComparison';
+export * from './verifyDelta';
+export * from './verifyMissingRow';
+export * from './verifyReport';
+export * from './verifyReportMissingFromDb';
+export * from './verifyReportSources';
+export * from './verifySourceAggregates';

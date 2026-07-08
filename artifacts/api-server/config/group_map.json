@@ -1,0 +1,23 @@
+{
+  "PTMT / Faucets": ["PTMT", "CISTERN", "SEAT COVER"],
+  "CP (Chrome-Plated)": ["C P", "CP", "CP ACCESSORIES", "CP ALLIED"],
+  "Plumbing (Pipes & Fittings)": [
+    "CPVC",
+    "CPVC PIPE",
+    "UPVC",
+    "UPVC PIPE",
+    "OPVC",
+    "SWR",
+    "HDPE PIPE",
+    "CORRUGATED PIPE",
+    "WATER TANK",
+    "WT LID",
+    "GARDEN PIPE",
+    "AGRI",
+    "COLUMN"
+  ],
+  "Sink": ["SINK", "PLATE RACK", "CABINET", "GLASS"],
+  "Sanitaryware": ["SANITARYWARE", "GEYSER"],
+  "Connection / Waste": ["WASTE PIPE", "CONNECTION", "FLOOR TRAP"],
+  "Hardware": ["HARDWARE", "TEFELON TAPE", "QUAA", "OTHER"]
+}
