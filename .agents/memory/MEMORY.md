@@ -1,2 +1,3 @@
+- [Prayag live register quirks](prayag-live-registers.md) — historical live Sheets registers have no DATE column (null invoice_date rows); analytics uses a calendar fallback; FY23-24 only via xlsx CLI.
 - [Prayag Sheets transform](prayag-sheets-transform.md) — tab/column mapping + control total 3,417,311,917; use MONTHLY not Combined; cell helpers coerce string cells; snapshot/fallback model.
 - [Prayag register ingestion](prayag-register-ingestion.md) — line_uid excludes invoice_no; occurrence counted over all rows pre-filter; month year from FY column; Sheets chunked reads + 429 backoff.

@@ -46,6 +46,30 @@ function lastDayOfMonth(label: string): Date | null {
   return new Date(Date.UTC(year, monthIdx + 1, 0));
 }
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+// A month is complete when its max invoice date reaches the month's last
+// calendar day. Some live register workbooks (historical FYs) have no
+// per-invoice DATE column, so every row's invoice_date is null; for those
+// months fall back to the calendar — the month is complete once it has fully
+// elapsed.
+export function isMonthComplete(
+  monthLabel: string,
+  maxInvoiceDate: string | null,
+  now: number = Date.now(),
+): boolean {
+  const lastDay = lastDayOfMonth(monthLabel);
+  if (lastDay == null) return false;
+  if (maxInvoiceDate != null) {
+    return (
+      new Date(`${maxInvoiceDate}T00:00:00Z`).getTime() >= lastDay.getTime()
+    );
+  }
+  // Fully elapsed means the whole last day is over, i.e. we are at or past
+  // the first moment of the following month.
+  return now >= lastDay.getTime() + MS_PER_DAY;
+}
+
 export type MonthStat = {
   monthLabel: string;
   monthName: string;
@@ -72,11 +96,7 @@ async function monthlyStats(fy: string): Promise<MonthStat[]> {
   for (const row of rows) {
     const parsed = parseMonthLabel(row.monthLabel);
     if (!parsed) continue;
-    const lastDay = lastDayOfMonth(row.monthLabel);
-    const complete =
-      lastDay != null &&
-      row.maxDate != null &&
-      new Date(`${row.maxDate}T00:00:00Z`).getTime() >= lastDay.getTime();
+    const complete = isMonthComplete(row.monthLabel, row.maxDate);
     stats.push({
       monthLabel: row.monthLabel,
       monthName: parsed.name,
