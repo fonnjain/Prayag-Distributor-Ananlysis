@@ -5,6 +5,7 @@ _Replace the heading above with the project's name, and this line with one sente
 ## Run & Operate
 
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/api-server run test` — run the API server test suite (vitest; uses an isolated `dashboard_test` DB schema)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
@@ -44,6 +45,7 @@ _Replace the heading above with the project's name, and this line with one sente
 - FY24-25 totals come from the item-wise SALE tab (only PRODUCT_GROUP-mapped codes → exact 3,417,311,917). Orders come from the per-month MONTHLY tabs, not the formula-driven Combined tab (which is not cached in the export).
 - Resources and coverage are live too: retailer/distributor rosters come from the "Retailer-Distributor Data" workbook; per-head dealers, states, and secondary order value come from "STATE HEAD DASHBOARD(2026-27)". The live sync no longer merges any seed fields. See `.agents/memory/prayag-sheets-transform.md` for tab/column mappings and alias rules.
 - Monthly order tabs have no retail/resource flag, so Regional aggregates over all order customers.
+- The refresh pipeline is regression-tested against fixture workbooks (`artifacts/api-server/src/__tests__/`): control totals, failure fallback, and first-run seeding. Tests run against a `dashboard_test` Postgres schema, never the real table.
 
 ## Product
 

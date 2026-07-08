@@ -104,9 +104,14 @@ export function syncDashboard(): Promise<DashboardSnapshot> {
     return row;
   })();
 
-  syncInFlight.finally(() => {
-    syncInFlight = null;
-  });
+  // Reset via a side chain that swallows the rejection; callers still receive
+  // the original (rejecting) promise. Without the catch, the .finally() chain
+  // itself becomes an unhandled rejection whenever a sync fails.
+  syncInFlight
+    .catch(() => undefined)
+    .finally(() => {
+      syncInFlight = null;
+    });
 
   return syncInFlight;
 }
@@ -202,9 +207,11 @@ export async function ensureSeeded(): Promise<DashboardSnapshot> {
         .returning();
       return row;
     })();
-    seedInFlight.finally(() => {
-      seedInFlight = null;
-    });
+    seedInFlight
+      .catch(() => undefined)
+      .finally(() => {
+        seedInFlight = null;
+      });
   }
 
   return seedInFlight;

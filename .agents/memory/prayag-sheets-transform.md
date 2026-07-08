@@ -59,6 +59,19 @@ NOT inferable from the sheets themselves.
   `Buffer`. Cast via `Parameters<typeof workbook.xlsx.load>[0]`. If the error
   line number looks stale, delete the package's `*.tsbuildinfo` and recheck.
 
+## Regression tests
+- Fixture workbooks (real XLSX exports of both sheets) live in the api-server
+  test dir; tests assert FY24-25 total exactly 3,417,311,917 and orders YTD
+  79.17 cr. If the live sheets get new data, refresh the fixtures AND the
+  expected orders value together — fixture and expectation are a frozen pair.
+- Tests run against an isolated `dashboard_test` Postgres schema by appending
+  `?options=-csearch_path=...` to DATABASE_URL *before* importing the db
+  package (pool reads env at import time). Never let tests truncate the real
+  `dashboard_snapshots` table.
+- Shared in-flight promise pattern gotcha: resetting via `p.finally(...)`
+  creates an unhandled rejection when p rejects — reset via
+  `p.catch(() => {}).finally(...)` side chain instead.
+
 ## Snapshot / serving model
 - Data persists as immutable rows in `dashboard_snapshots` (jsonb data+manifest,
   sourceStatus, syncedAt). Latest row is served.
