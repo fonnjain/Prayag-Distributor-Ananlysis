@@ -1,5 +1,9 @@
 import { formatCompact, CHART_COLORS, CHART_COLOR_LIST } from "@/data/dataset";
 import { useDashboard } from "@/data/dashboard-context";
+import {
+  useGetAnalytics,
+  getGetAnalyticsQueryKey,
+} from "@workspace/api-client-react";
 import { KPICard, CustomTooltip, CustomLegend } from "./shared";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
@@ -9,6 +13,21 @@ import { useTheme } from "next-themes";
 
 export default function Overview() {
   const { data } = useDashboard();
+  // FY25-26 total sales come from the invoice-line register (all 12 months
+  // are final), served by the analytics endpoint.
+  const fy2526Query = useGetAnalytics(
+    { fy: "2025-26" },
+    {
+      query: {
+        queryKey: getGetAnalyticsQueryKey({ fy: "2025-26" }),
+        staleTime: 5 * 60 * 1000,
+        refetchOnWindowFocus: false,
+      },
+    },
+  );
+  const fy2526Total = fy2526Query.data
+    ? fy2526Query.data.months.reduce((sum, m) => sum + m.amount, 0)
+    : null;
   const { theme } = useTheme();
   const isDark = theme === "dark";
   
@@ -27,10 +46,15 @@ export default function Overview() {
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <KPICard 
           title="FY24-25 Total Sales" 
           value={formatCompact(data.totals.fy2425_sales_inr)} 
+          icon={<IndianRupee className="w-5 h-5" />}
+        />
+        <KPICard
+          title="FY25-26 Total Sales"
+          value={fy2526Total != null ? formatCompact(fy2526Total) : "—"}
           icon={<IndianRupee className="w-5 h-5" />}
         />
         <KPICard 
