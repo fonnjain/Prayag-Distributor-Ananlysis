@@ -27,8 +27,9 @@
     "comment": "Drive folder 'State Heads': one dispatched-sale register workbook per head per FY, titled '<Head> <FY>' (e.g. 'Anant Singh JI 2026-27'). Each workbook holds two fiscal years; rows are filtered on the FY column, never the file title."
   },
   "party_tm_map": {
-    "comment": "Party -> Team Member bridge. No consolidated 'Party TM Map' sheet exists yet and the per-member 'Copy of <Name>' working files list RETAILERS (RET# ids), not the register's distributor parties, so no bridge can be derived. Until the client creates the sheet (cols: Party/Customer | Team Member | State Head), Sale fills at State-Head grain only.",
-    "sheetName": "Party TM Map"
+    "comment": "Party -> Team Member bridge. If a consolidated 'Party TM Map' sheet exists in Drive it is read directly; otherwise it is auto-built from the 'STATE HEAD (Team Member Report)' folder tree (memberReportFolderId): every per-member file with a 'Distributor Visit Report'/'Retailer Report' tab contributes DIST#/RET# rows, and the result is cached back to a created 'Party TM Map' sheet so the ~700-file walk never runs on a report request.",
+    "sheetName": "Party TM Map",
+    "memberReportFolderId": "1-guQptN9S4NrW024jGizKo0V4nFDtHMv"
   },
   "target_master": {
     "sheetId": "1ZLok3_8AZHdfrUm4T2lJmonAjngQFz4TuNLkHtU3p2I",

@@ -23,7 +23,7 @@ import {
   type RegisterLoadStatus,
   type FyRegisterAgg,
 } from "./stateHeadRegisters.js";
-import { loadPartyBridge, type PartyBridge } from "./bridge.js";
+import { loadPartyBridge, lookupParty, type PartyBridge } from "./bridge.js";
 import {
   fyBoundsSerial,
   fyShort,
@@ -31,6 +31,8 @@ import {
   fyStartYear,
   serialToDate,
   normState,
+  normName,
+  buildHeadResolver,
 } from "./names.js";
 import {
   loadTargetsForFy,
@@ -302,7 +304,8 @@ export type HeadSaleSummary = {
 };
 
 // Per-head cross-foot when the bridge splits Sale to member grain:
-// Σ(members' sale) must reproduce the head's register total within ₹1.
+// Σ(members' sale) + the head's Unassigned bucket must reproduce the head's
+// register total within ₹1.
 export type SaleCrossFoot = {
   head: string;
   headTotal: number;
@@ -310,6 +313,61 @@ export type SaleCrossFoot = {
   unbridgedParties: number;
   unbridgedAmount: number;
 };
+
+// Bridge join diagnostics for the Missing Data tab: how much register revenue
+// matched a team member, plus what fell into the Unassigned buckets.
+export type UnassignedParty = { party: string; amount: number };
+export type SaleMatchInfo = {
+  fy: string;
+  totalAmount: number;
+  matchedAmount: number;
+  matchedPct: number; // 0..1
+  unassigned: Array<{
+    head: string;
+    amount: number;
+    parties: number;
+    topParties: UnassignedParty[];
+  }>;
+  bridgeMembersNotInRoster: string[];
+};
+
+// Display name for a bridge member key (falls back to the key itself).
+function bridgeMemberName(bridge: PartyBridge, memberKey: string): string {
+  for (const row of bridge.rows) {
+    if (row.memberKey === memberKey) return row.memberName;
+  }
+  return memberKey;
+}
+
+// State head recorded in the bridge for a member key, if any.
+function bridgeMemberHead(bridge: PartyBridge, memberKey: string): string {
+  for (const row of bridge.rows) {
+    if (row.memberKey === memberKey && row.stateHead) return row.stateHead;
+  }
+  return "";
+}
+
+// A synthetic roster spine for report rows that carry real register revenue
+// but have no roster member: Unassigned buckets and bridge members missing
+// from the roster. Every non-sale column stays blank on these rows.
+function syntheticMember(name: string, stateHead: string): RosterMember {
+  return {
+    stateHead,
+    state: "",
+    name,
+    normKey: normName(name),
+    workingState: "",
+    headquarter: "",
+    dojSerial: null,
+    contactNumber: "",
+    weekOff: "",
+    marketHours: "",
+    monthlyCtc: null,
+    leftDateSerial: null,
+    activeLeft: "",
+    channel: "",
+  };
+}
 
 export async function assembleRows(
   filters: ReportFilters,
@@ -330,6 +388,7 @@ export async function assembleRows(
   registerStatuses: RegisterLoadStatus[];
   registerGroupCheck: SegmentCheck | null;
   saleCrossFoot: SaleCrossFoot[];
+  saleMatch: SaleMatchInfo | null;
 }> {
   const roster = await loadRoster();
   const scope = expandScope(filters);
@@ -365,6 +424,21 @@ export async function assembleRows(
   const saleAvailable = bridge.status === "ok" && registers.byHead.size > 0;
   const memberSales = new Map<string, MemberSale>();
   const saleCrossFoot: SaleCrossFoot[] = [];
+  let saleMatch: SaleMatchInfo | null = null;
+  // Register head spellings ("ANANT SINGH JI") and bridge head spellings
+  // resolve to the roster's State Head display so Unassigned buckets and
+  // synthetic rows group with the right head.
+  const resolveHead = buildHeadResolver(
+    roster.members.map((m) => m.stateHead).filter(Boolean),
+  );
+  // Per-head Unassigned bucket: revenue whose party has no bridge match.
+  // It is never dropped — it becomes an "Unassigned (<Head>)" report row.
+  type UnassignedBucket = {
+    head: string;
+    sale: MemberSale;
+    parties: Map<string, number>;
+  };
+  const unassignedByHead = new Map<string, UnassignedBucket>();
   if (saleAvailable) {
     const memberSaleFor = (key: string): MemberSale => {
       let ms = memberSales.get(key);
@@ -379,20 +453,49 @@ export async function assembleRows(
       }
       return ms;
     };
+    const bucketFor = (headDisplay: string): UnassignedBucket => {
+      let b = unassignedByHead.get(headDisplay);
+      if (!b) {
+        b = {
+          head: headDisplay,
+          sale: {
+            amount: 0,
+            priorAmount: null,
+            monthAmount: new Array(12).fill(0) as number[],
+            monthInvoices: new Array(12).fill(0) as number[],
+          },
+          parties: new Map(),
+        };
+        unassignedByHead.set(headDisplay, b);
+      }
+      return b;
+    };
+    let matchedAmount = 0;
+    let totalAmount = 0;
     for (const head of registers.byHead.values()) {
       const fyAgg = head.byFy.get(filters.fy);
       const priorAgg = head.byFy.get(pFy);
+      const headDisplay = resolveHead(head.headDisplay) ?? head.headDisplay;
       let memberSum = 0;
       let unbridgedParties = 0;
       let unbridgedAmount = 0;
       if (fyAgg) {
         for (const [party, pa] of fyAgg.parties) {
-          const entry = bridge.entries.get(party);
+          totalAmount += pa.amount;
+          const entry = lookupParty(bridge, party);
           if (!entry) {
             unbridgedParties++;
             unbridgedAmount += pa.amount;
+            const b = bucketFor(headDisplay);
+            b.sale.amount += pa.amount;
+            b.parties.set(party, (b.parties.get(party) ?? 0) + pa.amount);
+            for (let i = 0; i < 12; i++) {
+              b.sale.monthAmount[i] += pa.monthAmount[i];
+              b.sale.monthInvoices[i] += pa.monthInvoiceIds[i].size;
+            }
             continue;
           }
+          matchedAmount += pa.amount;
           const ms = memberSaleFor(entry.memberKey);
           ms.amount += pa.amount;
           memberSum += pa.amount;
@@ -402,7 +505,7 @@ export async function assembleRows(
           }
         }
         saleCrossFoot.push({
-          head: head.headDisplay,
+          head: headDisplay,
           headTotal: fyAgg.amount,
           memberSum: memberSum + unbridgedAmount,
           unbridgedParties,
@@ -411,26 +514,83 @@ export async function assembleRows(
       }
       if (priorAgg) {
         for (const [party, pa] of priorAgg.parties) {
-          const entry = bridge.entries.get(party);
-          if (!entry) continue;
+          const entry = lookupParty(bridge, party);
+          if (!entry) {
+            const b = bucketFor(headDisplay);
+            b.sale.priorAmount = (b.sale.priorAmount ?? 0) + pa.amount;
+            continue;
+          }
           const ms = memberSaleFor(entry.memberKey);
           ms.priorAmount = (ms.priorAmount ?? 0) + pa.amount;
         }
       }
     }
+    // Cross-foot: member split + Unassigned bucket must reproduce the head
+    // register total within ₹1. Unmatched parties are informational (they
+    // live in the bucket), so only a genuine sum mismatch warns.
     for (const cf of saleCrossFoot) {
       const diff = Math.abs(cf.headTotal - cf.memberSum);
-      if (diff > 1 || cf.unbridgedParties > 0) {
+      if (diff > 1) {
         logger.warn(
           { ...cf, diff: Math.round(diff) },
-          "dispatched-sale cross-foot: member split does not fully reproduce the head register total",
+          "dispatched-sale cross-foot: member split + Unassigned bucket does not reproduce the head register total",
         );
       } else {
         logger.info(
-          { head: cf.head, headTotal: Math.round(cf.headTotal) },
-          "dispatched-sale cross-foot ok (members reproduce the head register total)",
+          {
+            head: cf.head,
+            headTotal: Math.round(cf.headTotal),
+            unbridgedParties: cf.unbridgedParties,
+            unbridgedAmount: Math.round(cf.unbridgedAmount),
+          },
+          "dispatched-sale cross-foot ok (members + Unassigned reproduce the head register total)",
         );
       }
+    }
+    // Bridge members with revenue but no roster row (logged + Missing Data;
+    // their revenue gets a synthetic row below, never dropped).
+    const rosterKeysAll = new Set(roster.members.map((m) => m.normKey));
+    const bridgeMembersNotInRoster = [
+      ...new Set(
+        [...memberSales.keys()]
+          .filter((k) => !rosterKeysAll.has(k))
+          .map((k) => bridgeMemberName(bridge, k)),
+      ),
+    ].sort();
+    const matchedPct = totalAmount > 0 ? matchedAmount / totalAmount : 1;
+    saleMatch = {
+      fy: filters.fy,
+      totalAmount,
+      matchedAmount,
+      matchedPct,
+      unassigned: [...unassignedByHead.values()]
+        .map((b) => ({
+          head: b.head,
+          amount: b.sale.amount,
+          parties: b.parties.size,
+          topParties: [...b.parties.entries()]
+            .map(([party, amount]) => ({ party, amount }))
+            .sort((a, b2) => b2.amount - a.amount)
+            .slice(0, 15),
+        }))
+        .sort((a, b2) => b2.amount - a.amount),
+      bridgeMembersNotInRoster,
+    };
+    const matchLog = {
+      fy: filters.fy,
+      totalAmount: Math.round(totalAmount),
+      matchedAmount: Math.round(matchedAmount),
+      matchedPct: Math.round(matchedPct * 1000) / 10,
+      unassignedHeads: unassignedByHead.size,
+      bridgeMembersNotInRoster,
+    };
+    if (matchedPct < 0.9) {
+      logger.warn(
+        matchLog,
+        "party-tm bridge matched-revenue below the 90% target — extend the bridge sheet or the name normaliser",
+      );
+    } else {
+      logger.info(matchLog, "party-tm bridge matched-revenue");
     }
   }
   // Head-grain summary for the Missing Data tab (always computed so the
@@ -481,6 +641,37 @@ export async function assembleRows(
     target: targetMap.get(m.normKey) ?? null,
     sale: saleAvailable ? (memberSales.get(m.normKey) ?? null) : null,
   }));
+  // Synthetic rows so register revenue is never dropped from a full report:
+  // bridge members missing from the roster, and per-head Unassigned buckets.
+  // Scoped (state/region-filtered) reports skip them — buckets are not
+  // state-scoped, and the Missing Data tab covers them either way.
+  if (saleAvailable && scope == null) {
+    const rosterKeysAll = new Set(roster.members.map((m) => m.normKey));
+    const synthRow = (m: RosterMember, sale: MemberSale): MemberRow => ({
+      m,
+      orders: null,
+      priorAmount: null,
+      oldNew: "",
+      target: null,
+      sale,
+    });
+    for (const [key, ms] of memberSales) {
+      if (rosterKeysAll.has(key)) continue;
+      const head = bridgeMemberHead(bridge, key);
+      rows.push(
+        synthRow(
+          syntheticMember(
+            bridgeMemberName(bridge, key),
+            resolveHead(head) ?? head,
+          ),
+          ms,
+        ),
+      );
+    }
+    for (const b of unassignedByHead.values()) {
+      rows.push(synthRow(syntheticMember(`Unassigned (${b.head})`, b.head), b.sale));
+    }
+  }
   // Name-match diagnostics against the FULL roster (not the filtered scope)
   // for every order file that feeds columns in this report.
   const rosterKeys = new Set(roster.members.map((m) => m.normKey));
@@ -656,6 +847,7 @@ export async function assembleRows(
     registerStatuses: registers.statuses,
     registerGroupCheck,
     saleCrossFoot,
+    saleMatch,
   };
 }
 
@@ -1106,6 +1298,7 @@ export async function buildManagementWorkbook(
     registerStatuses,
     registerGroupCheck,
     saleCrossFoot,
+    saleMatch,
   } = await assembleRows(filters);
   const fy = filters.fy;
   const s = fyShort(fy);
@@ -1693,16 +1886,18 @@ export async function buildManagementWorkbook(
       }
       rowNum++;
     }
-    // Cross-foot check when the bridge splits Sale to member grain.
+    // Cross-foot check when the bridge splits Sale to member grain. The
+    // Unassigned bucket is part of the member split, so only a genuine sum
+    // mismatch counts as a problem.
     if (saleAvailable && saleCrossFoot.length > 0) {
       const problems = saleCrossFoot.filter(
-        (cf) => Math.abs(cf.headTotal - cf.memberSum) > 1 || cf.unbridgedParties > 0,
+        (cf) => Math.abs(cf.headTotal - cf.memberSum) > 1,
       );
       const head = ws.getCell(rowNum, 1);
       head.value =
         problems.length > 0
-          ? `Sale cross-foot (${fy}): ${problems.length} of ${saleCrossFoot.length} heads where the member split does not fully reproduce the register total`
-          : `Sale cross-foot (${fy}): all ${saleCrossFoot.length} heads reproduce their register totals within 1`;
+          ? `Sale cross-foot (${fy}): ${problems.length} of ${saleCrossFoot.length} heads where the member split (incl. Unassigned) does not reproduce the register total`
+          : `Sale cross-foot (${fy}): all ${saleCrossFoot.length} heads reproduce their register totals within 1 (member split incl. Unassigned rows)`;
       head.font = { bold: true };
       head.fill = HEADER_FILL;
       head.alignment = { wrapText: true, vertical: "top" };
@@ -1711,10 +1906,52 @@ export async function buildManagementWorkbook(
       for (const cf of problems) {
         ws.getCell(rowNum, 2).value =
           `${cf.head}: register total ${Math.round(cf.headTotal).toLocaleString("en-IN")}, ` +
-          `member split ${Math.round(cf.memberSum).toLocaleString("en-IN")}` +
-          (cf.unbridgedParties > 0
-            ? `, ${cf.unbridgedParties} parties (${Math.round(cf.unbridgedAmount).toLocaleString("en-IN")}) not in the Party TM Map`
-            : "");
+          `member split ${Math.round(cf.memberSum).toLocaleString("en-IN")}`;
+        ws.getCell(rowNum, 2).alignment = { wrapText: true, vertical: "top" };
+        rowNum++;
+      }
+      rowNum++;
+    }
+    // Bridge match quality: how much register revenue joined to a member,
+    // what sits in the Unassigned buckets, and bridge hygiene findings.
+    if (saleAvailable && saleMatch) {
+      const pct = Math.round(saleMatch.matchedPct * 1000) / 10;
+      const head = ws.getCell(rowNum, 1);
+      head.value =
+        `Party TM Map match (${fy}): ${pct}% of register revenue ` +
+        `(${Math.round(saleMatch.matchedAmount).toLocaleString("en-IN")} of ` +
+        `${Math.round(saleMatch.totalAmount).toLocaleString("en-IN")}) is assigned to a team member` +
+        (pct < 90 ? " — below the 90% target" : "");
+      head.font = { bold: true };
+      head.fill = HEADER_FILL;
+      head.alignment = { wrapText: true, vertical: "top" };
+      ws.getCell(rowNum, 2).fill = HEADER_FILL;
+      rowNum++;
+      for (const u of saleMatch.unassigned) {
+        ws.getCell(rowNum, 2).value =
+          `Unassigned (${u.head}): ${Math.round(u.amount).toLocaleString("en-IN")} across ` +
+          `${u.parties} parties. Top parties: ` +
+          u.topParties
+            .map((p) => `${p.party} (${Math.round(p.amount).toLocaleString("en-IN")})`)
+            .join("; ") +
+          ". Add these to the Party TM Map sheet to assign them.";
+        ws.getCell(rowNum, 2).alignment = { wrapText: true, vertical: "top" };
+        rowNum++;
+      }
+      if (saleMatch.bridgeMembersNotInRoster.length > 0) {
+        ws.getCell(rowNum, 2).value =
+          `Bridge team members not found in the roster (their sale is shown on synthetic rows): ` +
+          saleMatch.bridgeMembersNotInRoster.join(", ");
+        ws.getCell(rowNum, 2).alignment = { wrapText: true, vertical: "top" };
+        rowNum++;
+      }
+      if (bridge.conflicts.length > 0) {
+        ws.getCell(rowNum, 2).value =
+          `Party TM Map conflicts (same party mapped to several members; the first listed won): ` +
+          bridge.conflicts
+            .slice(0, 20)
+            .map((c) => `${c.party}${c.partyId ? ` [${c.partyId}]` : ""}: ${c.members.join(" / ")} -> ${c.kept}`)
+            .join("; ");
         ws.getCell(rowNum, 2).alignment = { wrapText: true, vertical: "top" };
         rowNum++;
       }

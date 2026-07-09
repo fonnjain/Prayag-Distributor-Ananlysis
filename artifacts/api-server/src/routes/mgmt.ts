@@ -12,7 +12,12 @@ import {
   getCachedStateHeadRegisters,
   countStateHeadWorkbooks,
 } from "../lib/mgmt/stateHeadRegisters.js";
-import { loadPartyBridge } from "../lib/mgmt/bridge.js";
+import {
+  loadPartyBridge,
+  invalidatePartyBridgeCache,
+  startBridgeBuild,
+  getBridgeBuildState,
+} from "../lib/mgmt/bridge.js";
 
 const router: IRouter = Router();
 
@@ -144,7 +149,12 @@ router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> =
       {
         key: "salebridge",
         name: "Party to team member sale bridge",
-        status: bridge.status === "ok" ? "connected" : "missing",
+        status:
+          bridge.status === "ok"
+            ? "connected"
+            : bridge.status === "building"
+              ? "partial"
+              : "missing",
         detail: bridge.detail,
       },
       await targetsSource(req),
@@ -244,6 +254,43 @@ router.post("/mgmt/report", async (req: Request, res: Response): Promise<void> =
     } else {
       res.end();
     }
+  }
+});
+
+// Force a fresh auto-build of the Party TM Map from the member report
+// folder. Returns immediately; poll GET /mgmt/bridge/status for progress.
+router.post(
+  "/mgmt/bridge/rebuild",
+  (req: Request, res: Response): void => {
+    invalidatePartyBridgeCache();
+    const started = startBridgeBuild();
+    const state = getBridgeBuildState();
+    req.log.info({ started, state }, "party-tm bridge rebuild requested");
+    res.status(202).json({
+      started,
+      alreadyRunning: !started,
+      state,
+    });
+  },
+);
+
+router.get("/mgmt/bridge/status", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const bridge = await loadPartyBridge();
+    res.json({
+      bridge: {
+        status: bridge.status,
+        detail: bridge.detail,
+        fileId: bridge.fileId ?? null,
+        rows: bridge.rows.length,
+        distributorParties: bridge.entries.size,
+        conflicts: bridge.conflicts.length,
+      },
+      build: getBridgeBuildState(),
+    });
+  } catch (err) {
+    req.log.error({ err }, "bridge status failed");
+    res.status(500).json({ error: "Could not load bridge status." });
   }
 });
 

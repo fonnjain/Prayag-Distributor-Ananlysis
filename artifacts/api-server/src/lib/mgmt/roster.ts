@@ -49,7 +49,7 @@ type MgmtSources = {
     files_by_year: Record<string, string>;
   };
   state_head_registers: { folderId: string };
-  party_tm_map: { sheetName: string };
+  party_tm_map: { sheetName: string; memberReportFolderId: string };
   target_master: { sheetId: string; name: string; tab: string };
   group_index: { sheetId: string; tab: string };
 };

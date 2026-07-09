@@ -214,6 +214,32 @@ async function sheetsSend(
   throw lastError ?? new Error("Sheets API write failed");
 }
 
+// Creates a brand-new spreadsheet owned by the connected account and returns
+// its id. The caller must registerWritableSheet() before writing to it. This
+// does not touch any existing sheet, so it needs no allowlist check itself.
+export async function createSpreadsheet(title: string): Promise<string> {
+  const data = (await sheetsSend("", "POST", {
+    properties: { title },
+  })) as { spreadsheetId?: string };
+  if (!data.spreadsheetId) {
+    throw new Error("Sheets API returned no spreadsheetId on create");
+  }
+  return data.spreadsheetId;
+}
+
+// Clears every value in the given A1 range (formatting is kept).
+export async function clearValues(
+  spreadsheetId: string,
+  range: string,
+): Promise<void> {
+  assertWritable(spreadsheetId);
+  await sheetsSend(
+    `/${spreadsheetId}/values/${encodeURIComponent(range)}:clear`,
+    "POST",
+    {},
+  );
+}
+
 // Updates one or more explicit ranges in a single batch (RAW input).
 export async function updateValuesBatch(
   spreadsheetId: string,

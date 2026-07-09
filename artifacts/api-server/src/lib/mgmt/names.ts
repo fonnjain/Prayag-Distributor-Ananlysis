@@ -13,6 +13,67 @@ export function normName(raw: unknown): string {
     .replace(/[^a-z0-9]+/g, "");
 }
 
+// Party (customer/distributor) name normalization for the register <-> bridge
+// join. Register customers carry city suffixes ("LOHIA & SONS (GHAZIABAD)")
+// and casing/punctuation noise; bridge party names carry the same city inline
+// ("P S Corporation(Calicut)"). Both collapse to lowercase alphanumerics with
+// every parenthetical segment removed.
+export function normParty(raw: unknown): string {
+  if (raw == null) return "";
+  return String(raw)
+    .replace(/\([^)]*\)/g, " ")
+    .toLowerCase()
+    .replace(/\bm\/s\.?\s*/g, " ")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+// Head-name key: normName plus stripping the honorific "ji"/"sir" suffix, so
+// "ANANT SINGH JI" (register) and "Anant Singh" (bridge/roster) share a key.
+export function normHead(raw: unknown): string {
+  const n = normName(raw);
+  return n.replace(/(?:ji|sir)+$/, "");
+}
+
+// Explicit head aliases (normHead key -> normHead key) for spellings that no
+// mechanical rule can align, e.g. the register says "RIZVI JI" but the roster
+// says "Syed Aqil Rizvi". Extend as new spellings appear in the logs.
+const HEAD_ALIASES: Record<string, string> = {
+  rizvi: "syedaqilrizvi",
+  aqilrizvi: "syedaqilrizvi",
+  sandeep: "sandeepdadheech",
+  snadeep: "sandeepdadheech",
+};
+
+// Resolves head-name spellings from any source (register, bridge, folder
+// names) to the canonical display used by the provided reference set
+// (normally the roster's State Head column). Matching order: exact normHead,
+// explicit alias, then unique substring containment ("aqilrizvi" is contained
+// in "syedaqilrizvi"). Returns null when no unambiguous match exists.
+export function buildHeadResolver(
+  canonicalHeads: Iterable<string>,
+): (raw: unknown) => string | null {
+  const byKey = new Map<string, string>();
+  for (const display of canonicalHeads) {
+    const key = normHead(display);
+    if (key && !byKey.has(key)) byKey.set(key, display);
+  }
+  const keys = [...byKey.keys()];
+  return (raw: unknown): string | null => {
+    let key = normHead(raw);
+    if (!key) return null;
+    key = HEAD_ALIASES[key] ?? key;
+    const exact = byKey.get(key);
+    if (exact) return exact;
+    if (key.length >= 5) {
+      const contains = keys.filter(
+        (k) => k.includes(key) || key.includes(k),
+      );
+      if (contains.length === 1) return byKey.get(contains[0]) ?? null;
+    }
+    return null;
+  };
+}
+
 export function normState(raw: unknown): string {
   if (raw == null) return "";
   return String(raw)
