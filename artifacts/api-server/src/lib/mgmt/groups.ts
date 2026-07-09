@@ -9,8 +9,7 @@
 // INDEX key; the INDEX tab stays the single authority for the final TYPE, so
 // an alias pointing at a key the INDEX does not carry still counts as
 // unmapped.
-import fs from "node:fs";
-import path from "node:path";
+import segmentAliasJson from "../../../config/segment_alias.json";
 import { readAllTabRows } from "../registers/sheetsApi.js";
 import { mgmtSources } from "./roster.js";
 
@@ -37,14 +36,11 @@ function squash(s: unknown): string {
 
 let aliasCache: Map<string, string> | null = null;
 
-// Squashed raw segment -> INDEX key (both sides config-driven).
+// Squashed raw segment -> INDEX key (both sides config-driven). Statically
+// imported so esbuild bundles it — a cwd-relative read breaks in production.
 function segmentAlias(): Map<string, string> {
   if (!aliasCache) {
-    const p = path.resolve(process.cwd(), "config/segment_alias.json");
-    const parsed = JSON.parse(fs.readFileSync(p, "utf8")) as Record<
-      string,
-      string
-    >;
+    const parsed = segmentAliasJson as Record<string, string>;
     aliasCache = new Map(
       Object.entries(parsed).map(([raw, key]) => [squash(raw), key]),
     );

@@ -6,8 +6,7 @@
 // expenses, retailer-to-TM sale bridge) are left BLANK with a light grey fill
 // and listed in the "Missing Data" tab. Never 0 for an unknown.
 import ExcelJS from "exceljs";
-import fs from "node:fs";
-import path from "node:path";
+import regionMapJson from "../../../config/region_map.json";
 import { loadRoster, type RosterMember } from "./roster.js";
 import {
   loadOrderFile,
@@ -52,17 +51,10 @@ export type ReportFilters = {
 
 export type RegionMap = Record<string, string[]>;
 
-let regionMapCache: RegionMap | null = null;
-
+// Statically imported so esbuild bundles it — a cwd-relative read breaks in
+// production, where the server does not run from the artifact directory.
 export function regionMap(): RegionMap {
-  if (!regionMapCache) {
-    const p = path.resolve(process.cwd(), "config/region_map.json");
-    const parsed = JSON.parse(fs.readFileSync(p, "utf8")) as {
-      regions: RegionMap;
-    };
-    regionMapCache = parsed.regions;
-  }
-  return regionMapCache;
+  return (regionMapJson as { regions: RegionMap }).regions;
 }
 
 // Missing-source registry. Keys tag columns; the Missing Data tab explains.

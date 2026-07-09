@@ -7,8 +7,7 @@
 // live STATE HEAD DASHBOARD workbook (Data tab + SECONDARY tab fixed columns).
 // Only identity/roster fields are read from the fallback; scorecard metrics
 // are always computed from raw sources or left blank.
-import fs from "node:fs";
-import path from "node:path";
+import mgmtSourcesJson from "../../../config/mgmt_sources.json";
 import { logger } from "../logger.js";
 import { readAllTabRows, listSheetTabs, getGoogleAccessToken } from "../registers/sheetsApi.js";
 import { normName } from "./names.js";
@@ -54,14 +53,10 @@ type MgmtSources = {
   group_index: { sheetId: string; tab: string };
 };
 
-let sourcesCache: MgmtSources | null = null;
-
+// Statically imported so esbuild bundles it — a cwd-relative read breaks in
+// production, where the server does not run from the artifact directory.
 export function mgmtSources(): MgmtSources {
-  if (!sourcesCache) {
-    const p = path.resolve(process.cwd(), "config/mgmt_sources.json");
-    sourcesCache = JSON.parse(fs.readFileSync(p, "utf8")) as MgmtSources;
-  }
-  return sourcesCache;
+  return mgmtSourcesJson as MgmtSources;
 }
 
 const ROSTER_TTL_MS = 15 * 60_000;

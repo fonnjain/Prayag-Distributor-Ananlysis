@@ -70,6 +70,7 @@ Prayag India — Sales Intelligence: a mobile-first dashboard over live Google S
 ## Gotchas
 
 - New API routes require restarting the `artifacts/api-server` workflow to take effect.
+- Server config JSON (`artifacts/api-server/config/*.json`) must be statically imported so esbuild bundles it. Never read it with `fs.readFileSync(process.cwd(), ...)` — in production the server does not run from the artifact directory, so cwd-relative reads 500 with ENOENT.
 - Never `console.log` in server code — use `req.log` in handlers, `logger` elsewhere.
 - Monthly numeric cells in the order sheets are stored as strings; use the `src/lib/sheets.ts` cell helpers, which coerce them.
 - If `sheets.ts` fails to typecheck with a `Buffer<ArrayBufferLike>` mismatch on `xlsx.load`, cast via `Parameters<typeof workbook.xlsx.load>[0]` (multi-version `@types/node`). Delete stale `*.tsbuildinfo` if line numbers look wrong.
