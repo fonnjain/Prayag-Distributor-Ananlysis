@@ -3,3 +3,4 @@
 - [Prayag register ingestion](prayag-register-ingestion.md) — line_uid excludes invoice_no; occurrence counted over all rows pre-filter; month year from FY column; Sheets chunked reads + 429 backoff.
 - [Sheets loader concurrency rules](sheets-loader-concurrency.md) — dedupe in-flight Sheets reads next to TTL caches; never keep per-request report state in module-level mutables.
 - [Prayag Target Master conventions](prayag-target-master.md) — single writable-sheet allowlist; split rule = per-capita for no-data members then pro-rata; serialized upserts overwrite all key duplicates.
+- [Secondary Order Booking files](prayag-order-booking.md) — per-FY Drive workbooks; Sub Total is the reconciling measure; segment brands map via alias config to the INDEX tab; prior-FY name match < 95% is attrition, not a bug.

@@ -12,8 +12,11 @@ import { loadRoster, type RosterMember } from "./roster.js";
 import {
   loadOrderFile,
   loadRetailerFirstSeen,
+  getOrderLoadStatus,
   type OrderFileAgg,
+  type OrderLoadStatus,
 } from "./orders.js";
+import { loadGroupIndex, canonicalGroup } from "./groups.js";
 import {
   fyBoundsSerial,
   fyShort,
@@ -246,6 +249,27 @@ export function expandScope(filters: ReportFilters): Set<string> | null {
   return picked.size > 0 ? picked : null;
 }
 
+// Order-booking <-> roster name-match diagnostics for one FY file. Unmatched
+// names are listed on the Missing Data tab, never dropped silently.
+export type NameMatchInfo = {
+  fy: string;
+  fileNames: number;
+  matched: number;
+  matchRate: number; // matched / fileNames, 0..1
+  unmatchedFromFile: string[]; // order-booking names with no roster match
+  unmatchedFromRoster: string[]; // roster names with no rows in the file
+};
+
+// Raw segments whose INDEX-map lookup failed, with the amount at stake.
+export type UnmappedSegment = { segment: string; amount: number };
+
+export type SegmentCheck = {
+  fy: string;
+  segments: number;
+  unmapped: UnmappedSegment[];
+  indexError: string | null;
+};
+
 export async function assembleRows(
   filters: ReportFilters,
 ): Promise<{
@@ -254,6 +278,10 @@ export async function assembleRows(
   ordersAvailable: boolean;
   priorAvailable: boolean;
   targetsAvailable: boolean;
+  orderStatus: OrderLoadStatus | null;
+  priorStatus: OrderLoadStatus | null;
+  nameMatches: NameMatchInfo[];
+  segmentCheck: SegmentCheck | null;
 }> {
   const roster = await loadRoster();
   const scope = expandScope(filters);
@@ -262,6 +290,8 @@ export async function assembleRows(
   );
   const agg = await loadOrderFile(filters.fy);
   const prior = await loadOrderFile(priorFy(filters.fy));
+  const orderStatus = getOrderLoadStatus(filters.fy) ?? null;
+  const priorStatus = getOrderLoadStatus(priorFy(filters.fy)) ?? null;
   const firstSeen = agg
     ? await loadRetailerFirstSeen(filters.fy)
     : new Map<string, number>();
@@ -294,12 +324,121 @@ export async function assembleRows(
     oldNew: m.dojSerial != null && m.dojSerial >= fyStart ? "New" : "Old",
     target: targetMap.get(m.normKey) ?? null,
   }));
+  // Name-match diagnostics against the FULL roster (not the filtered scope)
+  // for every order file that feeds columns in this report.
+  const rosterKeys = new Set(roster.members.map((m) => m.normKey));
+  const nameMatches: NameMatchInfo[] = [];
+  for (const fileAgg of [agg, prior]) {
+    if (!fileAgg) continue;
+    const unmatchedFromFile = [...fileAgg.perTm.entries()]
+      .filter(([key]) => !rosterKeys.has(key))
+      .map(([, v]) => v.displayName)
+      .sort();
+    const matched = fileAgg.perTm.size - unmatchedFromFile.length;
+    const unmatchedFromRoster = roster.members
+      .filter((m) => !fileAgg.perTm.has(m.normKey))
+      .map((m) => m.name)
+      .sort();
+    const info: NameMatchInfo = {
+      fy: fileAgg.fy,
+      fileNames: fileAgg.perTm.size,
+      matched,
+      matchRate: fileAgg.perTm.size > 0 ? matched / fileAgg.perTm.size : 1,
+      unmatchedFromFile,
+      unmatchedFromRoster,
+    };
+    nameMatches.push(info);
+    const logPayload = {
+      fy: fileAgg.fy,
+      fileNames: info.fileNames,
+      matched,
+      matchRatePct: Math.round(info.matchRate * 1000) / 10,
+      unmatchedFromFile,
+      rosterWithoutRows: unmatchedFromRoster.length,
+    };
+    // A prior-year file legitimately carries sellers who have since left, so
+    // the <95% warning only applies to the report-FY file.
+    if (info.matchRate < 0.95 && fileAgg.fy === filters.fy) {
+      logger.warn(
+        logPayload,
+        "order booking team-member match rate below 95% — check the name normaliser",
+      );
+    } else {
+      logger.info(logPayload, "order booking team-member name match");
+    }
+  }
+  // Cross-foot: the sum of matched members' order booking vs the total read
+  // from the file. Differences come from unmatched names or a month filter.
+  if (agg) {
+    let memberSum = 0;
+    for (const r of rows) memberSum += r.orders?.amount ?? 0;
+    logger.info(
+      {
+        fy: filters.fy,
+        fileTotal: Math.round(agg.totalAmount),
+        memberSum: Math.round(memberSum),
+        scoped: scope != null,
+        monthFrom: filters.monthFrom,
+        monthTo: filters.monthTo,
+      },
+      "order booking cross-foot (file total vs member sum)",
+    );
+  }
+  // Segment split reconciliation through the INDEX map for the file that
+  // feeds this report's order columns (report FY, else prior FY).
+  const segSource = agg ?? prior;
+  let segmentCheck: SegmentCheck | null = null;
+  if (segSource) {
+    try {
+      const index = await loadGroupIndex();
+      const unmapped: UnmappedSegment[] = [];
+      for (const [segment, amount] of segSource.segmentTotals) {
+        if (canonicalGroup(index, segment) == null) {
+          unmapped.push({ segment, amount: Math.round(amount) });
+        }
+      }
+      unmapped.sort((a, b) => b.amount - a.amount);
+      segmentCheck = {
+        fy: segSource.fy,
+        segments: segSource.segmentTotals.size,
+        unmapped,
+        indexError: null,
+      };
+      if (unmapped.length > 0) {
+        logger.warn(
+          { fy: segSource.fy, unmapped },
+          "order booking segments missing from the INDEX map",
+        );
+      } else {
+        logger.info(
+          { fy: segSource.fy, segments: segSource.segmentTotals.size },
+          "all order booking segments mapped through the INDEX map",
+        );
+      }
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      segmentCheck = {
+        fy: segSource.fy,
+        segments: segSource.segmentTotals.size,
+        unmapped: [],
+        indexError: detail,
+      };
+      logger.warn(
+        { err, fy: segSource.fy },
+        "INDEX map read failed; segment mapping not verified",
+      );
+    }
+  }
   return {
     rows,
     rosterSource: roster.source,
     ordersAvailable: agg != null,
     priorAvailable: prior != null,
     targetsAvailable: targetMap.size > 0,
+    orderStatus,
+    priorStatus,
+    nameMatches,
+    segmentCheck,
   };
 }
 
@@ -702,10 +841,32 @@ export async function buildManagementWorkbook(
 ): Promise<{ workbook: ExcelJS.Workbook; memberCount: number }> {
   // Request-scoped: parallel report builds must not share missing-data state.
   const missing: MissingUsed = new Map();
-  const { rows, rosterSource, ordersAvailable, targetsAvailable } =
-    await assembleRows(filters);
+  const {
+    rows,
+    rosterSource,
+    ordersAvailable,
+    targetsAvailable,
+    orderStatus,
+    priorStatus,
+    nameMatches,
+    segmentCheck,
+  } = await assembleRows(filters);
   const fy = filters.fy;
   const s = fyShort(fy);
+  // Exact reason the report-FY order columns are blank (not a generic
+  // "source needed"): file missing from the folder, 403 not shared, etc.
+  const ordersReason = ordersAvailable
+    ? null
+    : (() => {
+        const base =
+          orderStatus?.detail ??
+          `The ${fy} Secondary Order Booking workbook could not be read.`;
+        const priorNote =
+          priorStatus?.status === "ok"
+            ? ` The ${priorFy(fy)} file was still read (${priorStatus.rowsRead ?? 0} rows) for the prior-year comparison columns.`
+            : "";
+        return `${base}${priorNote}`;
+      })();
   const ordersMissingKey = ordersAvailable ? null : "orders";
   const targetsMissingKey = targetsAvailable ? null : "target";
   const wb = new ExcelJS.Workbook();
@@ -1098,13 +1259,62 @@ export async function buildManagementWorkbook(
     const keys = [...missing.keys()].sort();
     for (const key of keys) {
       const src = ws.getCell(rowNum, 1);
-      src.value = `Source needed: ${MISSING_SOURCES[key] ?? key}`;
+      // The orders block carries the exact load failure (file not in the
+      // folder, 403 not shared, 404 wrong id) instead of a generic source.
+      src.value =
+        key === "orders" && ordersReason
+          ? ordersReason
+          : `Source needed: ${MISSING_SOURCES[key] ?? key}`;
       src.font = { bold: true };
       src.fill = HEADER_FILL;
+      src.alignment = { wrapText: true, vertical: "top" };
       ws.getCell(rowNum, 2).fill = HEADER_FILL;
       rowNum++;
       for (const where of [...(missing.get(key) ?? [])].sort()) {
         ws.getCell(rowNum, 2).value = where;
+        rowNum++;
+      }
+      rowNum++;
+    }
+    // Team-member name matching between the order files and the roster.
+    for (const nm of nameMatches) {
+      const head = ws.getCell(rowNum, 1);
+      head.value = `Team member name matching — ${nm.fy} order booking vs roster: ${nm.matched}/${nm.fileNames} names matched (${(nm.matchRate * 100).toFixed(1)}%)`;
+      head.font = { bold: true };
+      head.fill = HEADER_FILL;
+      ws.getCell(rowNum, 2).fill = HEADER_FILL;
+      rowNum++;
+      for (const name of nm.unmatchedFromFile) {
+        ws.getCell(rowNum, 2).value =
+          `unmatched team member (in ${nm.fy} order file, not in roster): ${name}`;
+        rowNum++;
+      }
+      for (const name of nm.unmatchedFromRoster) {
+        ws.getCell(rowNum, 2).value =
+          `unmatched team member (in roster, no ${nm.fy} order rows): ${name}`;
+        rowNum++;
+      }
+      if (nm.unmatchedFromFile.length === 0 && nm.unmatchedFromRoster.length === 0) {
+        ws.getCell(rowNum, 2).value = "All names matched.";
+        rowNum++;
+      }
+      rowNum++;
+    }
+    // Segment-to-group mapping through the INDEX file.
+    if (segmentCheck) {
+      const head = ws.getCell(rowNum, 1);
+      head.value = segmentCheck.indexError
+        ? `Segment mapping (${segmentCheck.fy}): INDEX map could not be read — ${segmentCheck.indexError}`
+        : segmentCheck.unmapped.length > 0
+          ? `Segment mapping (${segmentCheck.fy}): ${segmentCheck.unmapped.length} of ${segmentCheck.segments} segments missing from the INDEX map`
+          : `Segment mapping (${segmentCheck.fy}): all ${segmentCheck.segments} segments mapped through the INDEX file`;
+      head.font = { bold: true };
+      head.fill = HEADER_FILL;
+      head.alignment = { wrapText: true, vertical: "top" };
+      ws.getCell(rowNum, 2).fill = HEADER_FILL;
+      rowNum++;
+      for (const u of segmentCheck.unmapped) {
+        ws.getCell(rowNum, 2).value = `unmapped segment: ${u.segment} (${u.amount})`;
         rowNum++;
       }
       rowNum++;

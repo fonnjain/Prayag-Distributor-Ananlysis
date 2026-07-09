@@ -2,6 +2,15 @@
 // the company's SALE COMPARISON workbook (never hardcoded). Used to classify
 // order-booking segments; unmapped segments are surfaced in the report's
 // source notes rather than silently bucketed.
+//
+// The order files label segments with product-line brand names ("CPVC
+// DURALIFE", "SWR DRAINTECH") while the INDEX tab keys are item types ("CPVC
+// PIPE", "SWR PIPE"). config/segment_alias.json translates brand line ->
+// INDEX key; the INDEX tab stays the single authority for the final TYPE, so
+// an alias pointing at a key the INDEX does not carry still counts as
+// unmapped.
+import fs from "node:fs";
+import path from "node:path";
 import { readAllTabRows } from "../registers/sheetsApi.js";
 import { mgmtSources } from "./roster.js";
 
@@ -18,6 +27,29 @@ function norm(s: unknown): string {
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, " ")
     .trim();
+}
+
+function squash(s: unknown): string {
+  return String(s ?? "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "");
+}
+
+let aliasCache: Map<string, string> | null = null;
+
+// Squashed raw segment -> INDEX key (both sides config-driven).
+function segmentAlias(): Map<string, string> {
+  if (!aliasCache) {
+    const p = path.resolve(process.cwd(), "config/segment_alias.json");
+    const parsed = JSON.parse(fs.readFileSync(p, "utf8")) as Record<
+      string,
+      string
+    >;
+    aliasCache = new Map(
+      Object.entries(parsed).map(([raw, key]) => [squash(raw), key]),
+    );
+  }
+  return aliasCache;
 }
 
 export async function loadGroupIndex(): Promise<GroupIndex> {
@@ -37,11 +69,35 @@ export async function loadGroupIndex(): Promise<GroupIndex> {
 }
 
 export function canonicalGroup(index: GroupIndex, segment: string): string | null {
-  const key = norm(segment);
+  const aliasKey = segmentAlias().get(squash(segment));
+  const key = aliasKey ? norm(aliasKey) : norm(segment);
   if (!key) return null;
   const direct = index.map.get(key);
   if (direct) return direct;
   // Segments arrive like "C.P-CDA" — try the part before the first hyphen.
   const prefix = norm(segment.split("-")[0]);
-  return index.map.get(prefix) ?? null;
+  const byHyphen = index.map.get(prefix);
+  if (byHyphen) return byHyphen;
+  // Word-boundary prefix on the space-normalised label, longest key first:
+  // "C P 5000 SERIES" matches key "C P" but "CPVC DURALIFE" does not.
+  let best: string | null = null;
+  let bestLen = -1;
+  for (const [k, v] of index.map) {
+    if (key.startsWith(`${k} `) && k.length > bestLen) {
+      best = v;
+      bestLen = k.length;
+    }
+  }
+  if (best) return best;
+  // Squashed prefix for keys of 4+ characters: "PTMTSYMET" starts with
+  // "PTMT". Short keys like "CP" are excluded so "CPVC..." cannot mis-hit.
+  const sq = squash(aliasKey ?? segment);
+  for (const [k, v] of index.map) {
+    const ks = squash(k);
+    if (ks.length >= 4 && sq.startsWith(ks) && ks.length > bestLen) {
+      best = v;
+      bestLen = ks.length;
+    }
+  }
+  return best;
 }

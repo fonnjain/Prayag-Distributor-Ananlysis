@@ -2,9 +2,23 @@
 //
 // Source: "Secondary Order Booking Segment Wise(<FY>)" Google Sheets, tab
 // "Data Sheet" (~380k rows per FY). Read via chunked values.get only — never
-// files.export. Measure = the per-line "Sub Total" column, which reconciles
-// exactly with the workbook's own header total (verified for 2025-26:
-// 2,310,913,869). Order count = distinct Order ID.
+// files.export (the 2025-26 file is ~8.3 MB; export has a 10 MB cap). Measure
+// = the per-line "Sub Total" column, which reconciles exactly with the
+// workbook's own header total (verified for 2025-26: 2,310,913,869; the
+// "Order Value" column is the gross MRP value before discount). In the older
+// files (2023-24 and earlier) Sub Total is a per-discount-block subtotal on
+// the block's first line with blank continuation lines, so summing per-line
+// values still reproduces the workbook total.
+//
+// Header names drift across years (Team member vs TEAM MEMBER vs Team Member
+// Name, ID vs Retailer Id, Retailers vs Retailer) — columns are detected by
+// content, never by position, and the header row is found by scanning past
+// any leading totals/ids rows.
+//
+// Every load records an OrderLoadStatus so the report and the options
+// endpoint can surface the real reason a file was not read (403 = not
+// shared, 404 = wrong id, no file in folder, header not detected) instead of
+// a silent "source needed".
 //
 // Aggregates are cached in-process per FY (the sheets change slowly and a
 // full read costs ~8 API calls per file).
@@ -19,6 +33,8 @@ import {
   parseOrderDate,
   fiscalMonthIndex,
   fyBoundsSerial,
+  fyShort,
+  fyStartYear,
 } from "./names.js";
 import { mgmtSources } from "./roster.js";
 
@@ -42,15 +58,34 @@ export type OrderFileAgg = {
   perTm: Map<string, TmOrderAgg>;
   // retailerId -> earliest order date serial seen in this file
   retailerFirst: Map<string, number>;
+  // raw Segment label -> total in-FY amount (for INDEX-map reconciliation)
+  segmentTotals: Map<string, number>;
   totalAmount: number;
   rowsRead: number;
   loadedAt: number;
 };
 
+// Why a file did or did not load. "no-file" = nothing to read (id blank and
+// folder autodiscovery found no match); "error" = the read itself failed and
+// detail carries the exact reason (Google HTTP status included when known).
+export type OrderLoadStatus = {
+  fy: string;
+  status: "ok" | "no-file" | "error";
+  httpStatus?: number;
+  detail: string;
+  rowsRead?: number;
+  spreadsheetId?: string;
+};
+
 const ORDERS_TTL_MS = 15 * 60_000;
 const cache = new Map<string, OrderFileAgg>();
+const loadStatus = new Map<string, OrderLoadStatus>();
 let discoveredCurrent: { fy: string; id: string | null; at: number } | null =
   null;
+
+export function getOrderLoadStatus(fy: string): OrderLoadStatus | undefined {
+  return loadStatus.get(fy);
+}
 
 function isDirectDealer(distributor: string): boolean {
   const d = distributor.toLowerCase().replace(/[^a-z]/g, "");
@@ -58,7 +93,10 @@ function isDirectDealer(distributor: string): boolean {
 }
 
 // The 2026-27 file id is blank in config until the company creates it;
-// autodiscover it from the folder by name.
+// autodiscover it from the folder by name. Per spec, match a title containing
+// the full FY ("2026-27"), the short form ("26-27"), or the start year
+// ("2026") — sibling files are named like "...(2025-26)" so a bare start-year
+// match cannot collide with them.
 export async function resolveOrderFileId(fy: string): Promise<string | null> {
   const cfg = mgmtSources().secondary_order_booking;
   const configured = cfg.files_by_year[fy];
@@ -71,26 +109,35 @@ export async function resolveOrderFileId(fy: string): Promise<string | null> {
   ) {
     return discoveredCurrent.id;
   }
-  try {
-    const token = await getGoogleAccessToken();
-    const q = encodeURIComponent(
-      `'${cfg.folderId}' in parents and trashed=false and mimeType='application/vnd.google-apps.spreadsheet'`,
+  const token = await getGoogleAccessToken();
+  const q = encodeURIComponent(
+    `'${cfg.folderId}' in parents and trashed=false and mimeType='application/vnd.google-apps.spreadsheet'`,
+  );
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=100`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `Drive folder listing failed (${res.status}): ${body.slice(0, 200)}`,
     );
-    const res = await fetch(
-      `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=50`,
-      { headers: { Authorization: `Bearer ${token}` } },
-    );
-    if (!res.ok) throw new Error(`Drive folder list failed (${res.status})`);
-    const data = (await res.json()) as {
-      files?: Array<{ id: string; name: string }>;
-    };
-    const hit = (data.files ?? []).find((f) => f.name.includes(fy));
-    discoveredCurrent = { fy, id: hit?.id ?? null, at: Date.now() };
-    return hit?.id ?? null;
-  } catch (err) {
-    logger.warn({ err, fy }, "order booking folder autodiscovery failed");
-    return null;
   }
+  const data = (await res.json()) as {
+    files?: Array<{ id: string; name: string }>;
+  };
+  const needles = [fy, fyShort(fy), String(fyStartYear(fy))];
+  const hit = (data.files ?? []).find((f) =>
+    needles.some((n) => f.name.includes(n)),
+  );
+  if (hit) {
+    logger.info(
+      { fy, fileId: hit.id, fileName: hit.name },
+      "order booking file autodiscovered in Drive folder",
+    );
+  }
+  discoveredCurrent = { fy, id: hit?.id ?? null, at: Date.now() };
+  return hit?.id ?? null;
 }
 
 // Header names drift across years (Team member vs Team Member Name, ID vs
@@ -102,15 +149,17 @@ type ColMap = {
   subTotal: number;
   distributor: number;
   teamMember: number;
+  segment: number;
 };
 
 function detectColumns(row: SheetCellValue[]): ColMap | null {
   const idx: Record<string, number> = {};
   row.forEach((c, i) => {
     const label = String(c ?? "")
-      .toLowerCase()
-      .replace(/[^a-z]/g, "");
-    if (label) idx[label] = i;
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "")
+      .toLowerCase();
+    if (label && !(label in idx)) idx[label] = i;
   });
   const find = (...names: string[]): number => {
     for (const n of names) {
@@ -119,18 +168,51 @@ function detectColumns(row: SheetCellValue[]): ColMap | null {
     return -1;
   };
   const date = find("date", "orderdate");
-  const retailerId = find("retailerid", "retid", "id");
+  const retailerId = find("retailerid", "retid", "id", "retailers", "retailer", "retailername");
   const orderId = find("orderid", "orderno");
-  const subTotal = find("subtotal");
+  // "Sub Total" is the measure that reconciles with the workbook's own
+  // totals; fall back to "Order Value" (gross) only if Sub Total is absent.
+  const subTotal = find("subtotal", "ordervalue");
   const distributor = find("distributor", "distributorname");
   const teamMember = find("teammembername", "teammember");
-  if (date < 0 || teamMember < 0 || subTotal < 0) return null;
-  return { date, retailerId, orderId, subTotal, distributor, teamMember };
+  const segment = find("segment");
+  // Require a retailer/id column too, so a stray banner row that happens to
+  // carry date/team/segment/value labels cannot be mistaken for the header.
+  if (date < 0 || teamMember < 0 || subTotal < 0 || segment < 0 || retailerId < 0)
+    return null;
+  return { date, retailerId, orderId, subTotal, distributor, teamMember, segment };
+}
+
+// Extract the Google HTTP status from a Sheets/Drive error message like
+// "Sheets API request failed (403): ...".
+function googleStatus(err: unknown): number | undefined {
+  const m = /\((\d{3})\)/.exec(err instanceof Error ? err.message : String(err));
+  return m ? Number(m[1]) : undefined;
+}
+
+function errorDetail(fy: string, spreadsheetId: string, err: unknown): OrderLoadStatus {
+  const httpStatus = googleStatus(err);
+  const raw = err instanceof Error ? err.message : String(err);
+  let detail: string;
+  if (httpStatus === 403) {
+    detail =
+      `Google returned 403 (not shared) reading spreadsheet ${spreadsheetId} for ${fy}. ` +
+      `Share the file with the connected Google account, then refresh.`;
+  } else if (httpStatus === 404) {
+    detail =
+      `Google returned 404 (file not found) for spreadsheet id ${spreadsheetId} (${fy}). ` +
+      `The configured id looks wrong or the file was deleted.`;
+  } else {
+    detail = `Reading spreadsheet ${spreadsheetId} for ${fy} failed: ${raw.slice(0, 300)}`;
+  }
+  return { fy, status: "error", httpStatus, detail, spreadsheetId };
 }
 
 // Concurrent requests for the same uncached FY share one Sheets read.
 const inFlight = new Map<string, Promise<OrderFileAgg | null>>();
 
+// Never throws: any failure is recorded in the per-FY load status (visible
+// via getOrderLoadStatus) and logged with the exact reason.
 export async function loadOrderFile(
   fy: string,
 ): Promise<OrderFileAgg | null> {
@@ -148,34 +230,89 @@ export async function loadOrderFile(
 async function loadOrderFileUncached(
   fy: string,
 ): Promise<OrderFileAgg | null> {
-  const spreadsheetId = await resolveOrderFileId(fy);
-  if (!spreadsheetId) return null;
+  let spreadsheetId: string | null;
+  try {
+    spreadsheetId = await resolveOrderFileId(fy);
+  } catch (err) {
+    const st: OrderLoadStatus = {
+      fy,
+      status: "error",
+      httpStatus: googleStatus(err),
+      detail: `Could not list the order-booking Drive folder for ${fy}: ${err instanceof Error ? err.message : String(err)}`,
+    };
+    loadStatus.set(fy, st);
+    logger.error({ fy, detail: st.detail }, "order booking folder listing failed");
+    return null;
+  }
+  if (!spreadsheetId) {
+    const st: OrderLoadStatus = {
+      fy,
+      status: "no-file",
+      detail:
+        `${fy} Secondary Order Booking file not found in the Drive folder ` +
+        `(no configured id and no spreadsheet titled with "${fy}", "${fyShort(fy)}" or "${fyStartYear(fy)}").`,
+    };
+    loadStatus.set(fy, st);
+    logger.warn({ fy }, st.detail);
+    return null;
+  }
   const tab = mgmtSources().secondary_order_booking.tab;
   const bounds = fyBoundsSerial(fy);
   const perTm = new Map<string, TmOrderAgg>();
   const retailerFirst = new Map<string, number>();
+  const segmentTotals = new Map<string, number>();
   let cols: ColMap | null = null;
   let totalAmount = 0;
   let skippedOutOfFy = 0;
+  // Multi-line orders can leave Date/Retailer/Order ID/Team Member blank on
+  // continuation rows — forward-fill them down the block. Carried across
+  // chunk boundaries (chunks arrive sequentially).
+  const carry: {
+    date: SheetCellValue;
+    retailerId: string;
+    orderId: string;
+    teamMember: SheetCellValue;
+    distributor: string;
+    segment: string;
+  } = { date: null, retailerId: "", orderId: "", teamMember: null, distributor: "", segment: "" };
 
-  const { rowsRead } = await readTabRowsChunked(
-    spreadsheetId,
-    tab,
-    (rows, startRowNumber) => {
+  const cellStr = (v: SheetCellValue): string => String(v ?? "").trim();
+  const blank = (v: SheetCellValue): boolean => v == null || cellStr(v) === "";
+
+  let rowsRead = 0;
+  try {
+    ({ rowsRead } = await readTabRowsChunked(spreadsheetId, tab, (rows) => {
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i] ?? [];
         if (!cols) {
           cols = detectColumns(r);
           continue;
         }
-        const tmRaw = r[cols.teamMember];
+        // Forward-fill the order-block header fields.
+        if (!blank(r[cols.date])) carry.date = r[cols.date];
+        if (!blank(r[cols.teamMember])) carry.teamMember = r[cols.teamMember];
+        if (cols.retailerId >= 0 && !blank(r[cols.retailerId])) {
+          carry.retailerId = cellStr(r[cols.retailerId]);
+        }
+        if (cols.orderId >= 0 && !blank(r[cols.orderId])) {
+          carry.orderId = cellStr(r[cols.orderId]);
+        }
+        if (cols.distributor >= 0 && !blank(r[cols.distributor])) {
+          carry.distributor = cellStr(r[cols.distributor]);
+        }
+        if (!blank(r[cols.segment])) carry.segment = cellStr(r[cols.segment]);
+
+        const tmRaw = carry.teamMember;
         if (tmRaw == null || tmRaw === "") continue;
-        const dateSerial = parseOrderDate(r[cols.date]);
+        const dateSerial = parseOrderDate(carry.date);
         if (dateSerial == null) continue;
-        const amount = Number(r[cols.subTotal]);
-        const lineAmount = Number.isFinite(amount) ? amount : 0;
-        const retailerId =
-          cols.retailerId >= 0 ? String(r[cols.retailerId] ?? "").trim() : "";
+        // A fully blank row inherits everything and carries no amount — it
+        // contributes nothing (blank Sub Total coerces to 0 below).
+        const amountRaw = r[cols.subTotal];
+        const amount = Number(amountRaw);
+        const lineAmount =
+          !blank(amountRaw) && Number.isFinite(amount) ? amount : 0;
+        const retailerId = carry.retailerId;
         if (retailerId) {
           const prev = retailerFirst.get(retailerId);
           if (prev === undefined || dateSerial < prev) {
@@ -208,8 +345,13 @@ async function loadOrderFileUncached(
         agg.amount += lineAmount;
         agg.monthAmount[monthIdx] += lineAmount;
         totalAmount += lineAmount;
-        const orderId =
-          cols.orderId >= 0 ? String(r[cols.orderId] ?? "").trim() : "";
+        if (carry.segment && lineAmount !== 0) {
+          segmentTotals.set(
+            carry.segment,
+            (segmentTotals.get(carry.segment) ?? 0) + lineAmount,
+          );
+        }
+        const orderId = carry.orderId;
         if (orderId) {
           agg.orderIds.add(orderId);
           agg.monthOrderIds[monthIdx].add(orderId);
@@ -223,8 +365,7 @@ async function loadOrderFileUncached(
           rs.amount += lineAmount;
           if (orderId) rs.orderIds.add(orderId);
         }
-        const distributor =
-          cols.distributor >= 0 ? String(r[cols.distributor] ?? "").trim() : "";
+        const distributor = carry.distributor;
         if (isDirectDealer(distributor)) {
           agg.directAmount += lineAmount;
           if (retailerId) agg.directRetailers.add(retailerId);
@@ -232,12 +373,28 @@ async function loadOrderFileUncached(
           agg.distributors.add(distributor.toLowerCase());
         }
       }
-      // keep referenced to satisfy the callback signature
-      void startRowNumber;
-    },
-  );
+    }));
+  } catch (err) {
+    const st = errorDetail(fy, spreadsheetId, err);
+    loadStatus.set(fy, st);
+    logger.error(
+      { fy, spreadsheetId, httpStatus: st.httpStatus, detail: st.detail },
+      "order booking file read failed",
+    );
+    return null;
+  }
   if (!cols) {
-    logger.warn({ fy, spreadsheetId }, "order file header row not detected");
+    const st: OrderLoadStatus = {
+      fy,
+      status: "error",
+      detail:
+        `Header row not detected in tab "${tab}" of spreadsheet ${spreadsheetId} (${fy}); ` +
+        `expected a row containing Date, a team-member column, Segment and Sub Total/Order Value.`,
+      spreadsheetId,
+      rowsRead,
+    };
+    loadStatus.set(fy, st);
+    logger.error({ fy, spreadsheetId, rowsRead }, st.detail);
     return null;
   }
   const agg: OrderFileAgg = {
@@ -245,20 +402,30 @@ async function loadOrderFileUncached(
     spreadsheetId,
     perTm,
     retailerFirst,
+    segmentTotals,
     totalAmount,
     rowsRead,
     loadedAt: Date.now(),
   };
+  loadStatus.set(fy, {
+    fy,
+    status: "ok",
+    detail: `Read ${rowsRead} rows from spreadsheet ${spreadsheetId}.`,
+    rowsRead,
+    spreadsheetId,
+  });
   logger.info(
     {
       fy,
+      spreadsheetId,
       rowsRead,
       teamMembers: perTm.size,
       retailers: retailerFirst.size,
+      segments: segmentTotals.size,
       totalAmount: Math.round(totalAmount),
       skippedOutOfFy,
     },
-    "order booking file aggregated",
+    "order booking file opened and aggregated",
   );
   cache.set(fy, agg);
   return agg;
@@ -288,5 +455,6 @@ export async function loadRetailerFirstSeen(
 
 export function invalidateOrderCache(): void {
   cache.clear();
+  loadStatus.clear();
   discoveredCurrent = null;
 }

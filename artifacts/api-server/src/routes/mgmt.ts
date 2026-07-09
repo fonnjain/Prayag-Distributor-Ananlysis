@@ -1,7 +1,7 @@
 // Management Reports: filter options + Excel generation.
 import { Router, type IRouter, type Request, type Response } from "express";
 import { loadRoster, mgmtSources } from "../lib/mgmt/roster.js";
-import { resolveOrderFileId } from "../lib/mgmt/orders.js";
+import { resolveOrderFileId, getOrderLoadStatus } from "../lib/mgmt/orders.js";
 import {
   buildManagementWorkbook,
   regionMap,
@@ -57,7 +57,30 @@ router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> =
     const cfg = mgmtSources();
     const fys = Object.keys(cfg.secondary_order_booking.files_by_year).sort().reverse();
     const states = [...new Set(roster.members.map((m) => m.state).filter(Boolean))].sort();
-    const currentFyFile = await resolveOrderFileId(DEFAULT_FY);
+    // Cheap folder check only — never trigger a full 380k-row read here. If a
+    // report build already recorded a precise load status, surface that.
+    let ordersStatus: string;
+    let ordersDetail: string;
+    const recorded = getOrderLoadStatus(DEFAULT_FY);
+    if (recorded && recorded.status !== "no-file") {
+      ordersStatus = recorded.status === "ok" ? "connected" : "partial";
+      ordersDetail =
+        recorded.status === "ok"
+          ? `Order booking workbook connected for ${DEFAULT_FY} (${recorded.rowsRead ?? 0} rows read). Earlier years (2021-22 to 2025-26) are connected.`
+          : `${recorded.detail} Earlier years (2021-22 to 2025-26) are connected.`;
+    } else {
+      try {
+        const currentFyFile = await resolveOrderFileId(DEFAULT_FY);
+        ordersStatus = currentFyFile ? "connected" : "partial";
+        ordersDetail = currentFyFile
+          ? "Order booking workbooks found for the selected years."
+          : `No ${DEFAULT_FY} order booking workbook exists in the Drive folder yet; ${DEFAULT_FY} order columns will be blank until it is created. Earlier years (2021-22 to 2025-26) are connected.`;
+      } catch (err) {
+        req.log.warn({ err }, "order booking folder check failed");
+        ordersStatus = "partial";
+        ordersDetail = `The order booking Drive folder could not be listed: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
     const sources = [
       {
         key: "roster",
@@ -71,10 +94,8 @@ router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> =
       {
         key: "orders",
         name: "Secondary order booking",
-        status: currentFyFile ? "connected" : "partial",
-        detail: currentFyFile
-          ? "Order booking workbooks found for the selected years."
-          : "No 2026-27 order booking workbook exists in Drive yet; 2026-27 order columns will be blank until it is created. Earlier years (2021-22 to 2025-26) are connected.",
+        status: ordersStatus,
+        detail: ordersDetail,
       },
       await targetsSource(req),
       {
