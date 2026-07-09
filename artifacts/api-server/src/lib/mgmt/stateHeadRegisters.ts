@@ -17,15 +17,59 @@
 // workbook load records a status so the report and the options endpoint can
 // surface the real failure (403 not shared / 404 wrong id / no register tab)
 // instead of a silent blank.
+import headAliasJson from "../../../config/head_alias.json";
 import { logger } from "../logger.js";
 import {
   readTabRowsChunked,
+  readTabSample,
   listSheetTabs,
   getGoogleAccessToken,
   type SheetCellValue,
 } from "../registers/sheetsApi.js";
-import { normName, fiscalMonthIndex } from "./names.js";
+import { normHead, fiscalMonthIndex } from "./names.js";
 import { mgmtSources } from "./roster.js";
+
+// Canonical bucket for register STATE HEAD values that are channels, not
+// people (PROJECT / GOVT / GEM / JJM / OTHER and blanks in channel files).
+// Their sale stays in the company total on its own summary line and is never
+// attributed to a team member.
+export const NON_TERRITORY_HEAD = "Non-territory (Project/Govt/GeM/JJM)";
+// Canonical bucket for STATE HEAD values that are neither in the alias map
+// nor institutional. Never silently dropped: bucketed here and listed on the
+// Missing Data tab as "unmapped state head: <value>".
+export const UNMAPPED_HEAD = "Unmapped (review)";
+
+const INSTITUTIONAL_KEYS = new Set(["project", "govt", "gem", "jjm", "other"]);
+
+// normHead(register spelling) -> canonical roster display name. Canonical
+// names map to themselves so already-correct spellings pass through.
+const headAliasByKey: Map<string, string> = (() => {
+  const m = new Map<string, string>();
+  for (const [raw, canonical] of Object.entries(
+    headAliasJson as Record<string, string>,
+  )) {
+    const key = normHead(raw);
+    if (key) m.set(key, canonical);
+    const selfKey = normHead(canonical);
+    if (selfKey && !m.has(selfKey)) m.set(selfKey, canonical);
+  }
+  return m;
+})();
+
+// Resolve a raw register STATE HEAD value. Blank values are decided by the
+// caller (they inherit the file's dominant head when one exists).
+function resolveRegisterHead(
+  raw: string,
+): { display: string; kind: HeadKind } | null {
+  const key = normHead(raw);
+  if (!key) return null;
+  const canonical = headAliasByKey.get(key);
+  if (canonical) return { display: canonical, kind: "head" };
+  if (INSTITUTIONAL_KEYS.has(key)) {
+    return { display: NON_TERRITORY_HEAD, kind: "nonTerritory" };
+  }
+  return { display: raw, kind: "unmapped" };
+}
 
 export type PartyAgg = {
   amount: number;
@@ -49,11 +93,19 @@ export type FyRegisterAgg = {
   groupAmount: Map<string, number>;
 };
 
+// "head" = a canonical team-member state head (alias-mapped). "nonTerritory"
+// = the institutional channel bucket. "unmapped" = a STATE HEAD value the
+// alias map does not know; kept per raw value so the Missing Data tab can
+// list it, and bucketed under UNMAPPED_HEAD on the report.
+export type HeadKind = "head" | "nonTerritory" | "unmapped";
+
 export type HeadRegisterAgg = {
-  // normName of the dominant State Head column value in the file.
+  // normHead of the canonical display (kind "head"), or a fixed bucket key.
   headKey: string;
-  // The State Head column value as written in the register.
+  // Canonical roster display name, NON_TERRITORY_HEAD, or the raw unmapped
+  // register value.
   headDisplay: string;
+  kind: HeadKind;
   fileId: string;
   fileName: string;
   registerTab: string;
@@ -142,17 +194,11 @@ async function detectRegisterTab(
 ): Promise<string | null> {
   const tabs = await listSheetTabs(spreadsheetId);
   const ordered = [...tabs].sort((a, b) => b.rowCount - a.rowCount);
-  const token = await getGoogleAccessToken();
   for (const tab of ordered) {
     if (tab.rowCount < 2) continue;
-    const range = encodeURIComponent(`'${tab.title}'!A1:O8`);
-    const res = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`,
-      { headers: { Authorization: `Bearer ${token}` } },
-    );
-    if (!res.ok) continue;
-    const data = (await res.json()) as { values?: SheetCellValue[][] };
-    const rows = data.values ?? [];
+    // readTabSample retries 429/5xx — a quota hiccup here used to silently
+    // skip the tab and mis-report the workbook as having no register.
+    const rows = await readTabSample(spreadsheetId, tab.title, "A1:O8");
     let hits = 0;
     for (const r of rows) if (looksLikeRegisterRow(r)) hits++;
     if (hits >= 2) return tab.title;
@@ -183,18 +229,54 @@ function failureDetail(file: FolderFile, err: unknown): RegisterLoadStatus {
   return { fileId: file.id, fileName: file.name, status: "error", httpStatus, detail };
 }
 
+// Merge a source per-FY aggregate map into a target (used when several raw
+// head spellings collapse to one canonical head, and when several workbooks
+// carry the same head).
+function mergeFyMaps(
+  target: Map<string, FyRegisterAgg>,
+  src: Map<string, FyRegisterAgg>,
+): void {
+  for (const [fy, fyAgg] of src) {
+    const cur = target.get(fy);
+    if (!cur) {
+      target.set(fy, fyAgg);
+      continue;
+    }
+    cur.amount += fyAgg.amount;
+    cur.rows += fyAgg.rows;
+    for (const id of fyAgg.invoiceIds) cur.invoiceIds.add(id);
+    for (const [p, pa] of fyAgg.parties) {
+      const curPa = cur.parties.get(p);
+      if (!curPa) {
+        cur.parties.set(p, pa);
+        continue;
+      }
+      curPa.amount += pa.amount;
+      for (const id of pa.invoiceIds) curPa.invoiceIds.add(id);
+      for (let i = 0; i < 12; i++) {
+        curPa.monthAmount[i] += pa.monthAmount[i];
+        for (const id of pa.monthInvoiceIds[i]) curPa.monthInvoiceIds[i].add(id);
+      }
+    }
+    for (let i = 0; i < 12; i++) cur.monthAmount[i] += fyAgg.monthAmount[i];
+    for (const [g, a] of fyAgg.groupAmount) {
+      cur.groupAmount.set(g, (cur.groupAmount.get(g) ?? 0) + a);
+    }
+  }
+}
+
 async function loadOneWorkbook(
   file: FolderFile,
-): Promise<{ agg: HeadRegisterAgg | null; status: RegisterLoadStatus }> {
+): Promise<{ aggs: HeadRegisterAgg[]; status: RegisterLoadStatus }> {
   let registerTab: string | null;
   try {
     registerTab = await detectRegisterTab(file.id);
   } catch (err) {
-    return { agg: null, status: failureDetail(file, err) };
+    return { aggs: [], status: failureDetail(file, err) };
   }
   if (!registerTab) {
     return {
-      agg: null,
+      aggs: [],
       status: {
         fileId: file.id,
         fileName: file.name,
@@ -205,8 +287,11 @@ async function loadOneWorkbook(
       },
     };
   }
-  const byFy = new Map<string, FyRegisterAgg>();
-  const headCounts = new Map<string, { display: string; n: number }>();
+  // First pass: aggregate per raw STATE HEAD value ("" for blank cells).
+  // Grouping is per ROW, never per file — one workbook can carry several
+  // heads plus institutional channel rows.
+  type RawGroup = { byFy: Map<string, FyRegisterAgg>; rows: number };
+  const rawGroups = new Map<string, RawGroup>();
   let rowsRead = 0;
   let skippedNonRegister = 0;
   try {
@@ -219,7 +304,14 @@ async function loadOneWorkbook(
           skippedNonRegister++;
           continue;
         }
-        let agg = byFy.get(fy);
+        const rawHead = String(r[11] ?? "").trim();
+        let grp = rawGroups.get(rawHead);
+        if (!grp) {
+          grp = { byFy: new Map<string, FyRegisterAgg>(), rows: 0 };
+          rawGroups.set(rawHead, grp);
+        }
+        grp.rows++;
+        let agg = grp.byFy.get(fy);
         if (!agg) {
           agg = {
             fy,
@@ -230,7 +322,7 @@ async function loadOneWorkbook(
             monthAmount: new Array(12).fill(0) as number[],
             groupAmount: new Map<string, number>(),
           };
-          byFy.set(fy, agg);
+          grp.byFy.set(fy, agg);
         }
         agg.amount += amount;
         agg.rows++;
@@ -267,40 +359,68 @@ async function loadOneWorkbook(
         if (group) {
           agg.groupAmount.set(group, (agg.groupAmount.get(group) ?? 0) + amount);
         }
-        const head = String(r[11] ?? "").trim();
-        if (head) {
-          const key = normName(head);
-          const hc = headCounts.get(key);
-          if (hc) hc.n++;
-          else headCounts.set(key, { display: head, n: 1 });
-        }
       }
     }));
   } catch (err) {
-    return { agg: null, status: failureDetail(file, err) };
+    return { aggs: [], status: failureDetail(file, err) };
   }
-  let headKey = "";
-  let headDisplay = file.name.replace(/\s*\d{4}-\d{2}\s*$/, "").trim();
-  let best = 0;
-  for (const [key, hc] of headCounts) {
-    if (hc.n > best) {
-      best = hc.n;
-      headKey = key;
-      headDisplay = hc.display;
+  // Second pass: resolve raw values to canonical heads / buckets. Blank
+  // values inherit the file's dominant canonical head when one exists (a
+  // head's own workbook often leaves the column empty on some rows); a file
+  // with no head values at all is an institutional channel file.
+  let dominantHead: string | null = null;
+  let dominantRows = 0;
+  for (const [raw, grp] of rawGroups) {
+    if (!raw) continue;
+    const res = resolveRegisterHead(raw);
+    if (res && res.kind === "head" && grp.rows > dominantRows) {
+      dominantHead = res.display;
+      dominantRows = grp.rows;
     }
   }
-  if (!headKey) headKey = normName(headDisplay);
-  const agg: HeadRegisterAgg = {
-    headKey,
-    headDisplay,
-    fileId: file.id,
-    fileName: file.name,
-    registerTab,
-    rowsRead,
-    byFy,
+  const byDisplay = new Map<string, HeadRegisterAgg>();
+  const fold = (display: string, kind: HeadKind, grp: RawGroup): void => {
+    const headKey =
+      kind === "head"
+        ? normHead(display)
+        : kind === "nonTerritory"
+          ? "bucket:nonterritory"
+          : `unmapped:${normHead(display)}`;
+    const existing = byDisplay.get(display);
+    if (existing) {
+      existing.rowsRead += grp.rows;
+      mergeFyMaps(existing.byFy, grp.byFy);
+      return;
+    }
+    byDisplay.set(display, {
+      headKey,
+      headDisplay: display,
+      kind,
+      fileId: file.id,
+      fileName: file.name,
+      registerTab: registerTab as string,
+      rowsRead: grp.rows,
+      byFy: grp.byFy,
+    });
   };
-  const fySummary = [...byFy.values()]
-    .map((f) => `${f.fy}: ${Math.round(f.amount)} across ${f.rows} rows`)
+  for (const [raw, grp] of rawGroups) {
+    if (!raw) {
+      if (dominantHead) fold(dominantHead, "head", grp);
+      else fold(NON_TERRITORY_HEAD, "nonTerritory", grp);
+      continue;
+    }
+    const res = resolveRegisterHead(raw);
+    if (!res) continue;
+    fold(res.display, res.kind, grp);
+  }
+  const aggs = [...byDisplay.values()];
+  const headSummary = aggs
+    .map((a) => {
+      const fyPart = [...a.byFy.values()]
+        .map((f) => `${f.fy}: ${Math.round(f.amount)}`)
+        .join(", ");
+      return `${a.headDisplay} [${a.kind}] (${fyPart})`;
+    })
     .join("; ");
   logger.info(
     {
@@ -309,18 +429,18 @@ async function loadOneWorkbook(
       registerTab,
       rowsRead,
       skippedNonRegister,
-      head: headDisplay,
-      fySummary,
+      heads: aggs.length,
+      headSummary,
     },
     "state-head register read via chunked values.get",
   );
   return {
-    agg,
+    aggs,
     status: {
       fileId: file.id,
       fileName: file.name,
       status: "ok",
-      detail: `Read ${rowsRead} rows from tab "${registerTab}" (${fySummary}).`,
+      detail: `Read ${rowsRead} rows from tab "${registerTab}" (${headSummary}).`,
       rowsRead,
     },
   };
@@ -349,7 +469,7 @@ async function loadUncached(): Promise<StateHeadRegisters> {
       loadedAt: Date.now(),
     };
   }
-  const results: Array<{ agg: HeadRegisterAgg | null; status: RegisterLoadStatus }> =
+  const results: Array<{ aggs: HeadRegisterAgg[]; status: RegisterLoadStatus }> =
     new Array(files.length);
   // Modest concurrency: each workbook costs a tab listing + a handful of
   // sample reads + 1-2 chunked reads; 3 in parallel stays well under quota.
@@ -366,40 +486,16 @@ async function loadUncached(): Promise<StateHeadRegisters> {
   const statuses: RegisterLoadStatus[] = [];
   for (const r of results) {
     statuses.push(r.status);
-    if (!r.agg) continue;
-    const existing = byHead.get(r.agg.headKey);
-    if (!existing) {
-      byHead.set(r.agg.headKey, r.agg);
-      continue;
-    }
-    // Two workbooks for the same head (different FY files): merge FY blocks.
-    existing.rowsRead += r.agg.rowsRead;
-    for (const [fy, fyAgg] of r.agg.byFy) {
-      const cur = existing.byFy.get(fy);
-      if (!cur) {
-        existing.byFy.set(fy, fyAgg);
+    for (const agg of r.aggs) {
+      const existing = byHead.get(agg.headKey);
+      if (!existing) {
+        byHead.set(agg.headKey, agg);
         continue;
       }
-      cur.amount += fyAgg.amount;
-      cur.rows += fyAgg.rows;
-      for (const id of fyAgg.invoiceIds) cur.invoiceIds.add(id);
-      for (const [p, pa] of fyAgg.parties) {
-        const curPa = cur.parties.get(p);
-        if (!curPa) {
-          cur.parties.set(p, pa);
-          continue;
-        }
-        curPa.amount += pa.amount;
-        for (const id of pa.invoiceIds) curPa.invoiceIds.add(id);
-        for (let i = 0; i < 12; i++) {
-          curPa.monthAmount[i] += pa.monthAmount[i];
-          for (const id of pa.monthInvoiceIds[i]) curPa.monthInvoiceIds[i].add(id);
-        }
-      }
-      for (let i = 0; i < 12; i++) cur.monthAmount[i] += fyAgg.monthAmount[i];
-      for (const [g, a] of fyAgg.groupAmount) {
-        cur.groupAmount.set(g, (cur.groupAmount.get(g) ?? 0) + a);
-      }
+      // Same canonical head across workbooks (different FY files, or the
+      // same head appearing in several files): merge FY blocks.
+      existing.rowsRead += agg.rowsRead;
+      mergeFyMaps(existing.byFy, agg.byFy);
     }
   }
   const failed = statuses.filter((s) => s.status === "error");

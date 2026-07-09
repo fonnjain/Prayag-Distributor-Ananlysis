@@ -152,6 +152,20 @@ export async function readTabRowsChunked(
   return { rowsRead };
 }
 
+// Reads a small A1-range sample of one tab (used for register-tab detection).
+// Goes through sheetsGet so 429/5xx are retried instead of silently failing.
+export async function readTabSample(
+  spreadsheetId: string,
+  title: string,
+  cellRange: string,
+): Promise<SheetCellValue[][]> {
+  const range = `${quoteTitle(title)}!${cellRange}`;
+  const data = (await sheetsGet(
+    `/${spreadsheetId}/values/${encodeURIComponent(range)}?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`,
+  )) as { values?: SheetCellValue[][] };
+  return data.values ?? [];
+}
+
 export async function readAllTabRows(
   spreadsheetId: string,
   title: string,

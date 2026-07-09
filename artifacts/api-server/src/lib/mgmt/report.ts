@@ -18,6 +18,7 @@ import {
 import { loadGroupIndex, canonicalGroup } from "./groups.js";
 import {
   loadStateHeadRegisters,
+  UNMAPPED_HEAD,
   type StateHeadRegisters,
   type RegisterLoadStatus,
   type FyRegisterAgg,
@@ -431,6 +432,10 @@ export async function assembleRows(
     parties: Map<string, number>;
   };
   const unassignedByHead = new Map<string, UnassignedBucket>();
+  // Channel/bucket rows (Non-territory institutional sale and unmapped
+  // heads): never attributed to a person, never dropped — each becomes its
+  // own summary line named after the bucket itself.
+  const bucketSales = new Map<string, MemberSale>();
   if (saleAvailable) {
     const memberSaleFor = (key: string): MemberSale => {
       let ms = memberSales.get(key);
@@ -467,6 +472,36 @@ export async function assembleRows(
     for (const head of registers.byHead.values()) {
       const fyAgg = head.byFy.get(filters.fy);
       const priorAgg = head.byFy.get(pFy);
+      if (head.kind !== "head") {
+        // Non-territory (institutional channels) and unmapped head values:
+        // keep the sale in the company total on a single bucket line; never
+        // run it through the Party TM bridge and never assign it a person.
+        const label =
+          head.kind === "nonTerritory" ? head.headDisplay : UNMAPPED_HEAD;
+        let bs = bucketSales.get(label);
+        if (!bs) {
+          bs = {
+            amount: 0,
+            priorAmount: null,
+            monthAmount: new Array(12).fill(0) as number[],
+            monthInvoices: new Array(12).fill(0) as number[],
+          };
+          bucketSales.set(label, bs);
+        }
+        if (fyAgg) {
+          bs.amount += fyAgg.amount;
+          for (let i = 0; i < 12; i++) bs.monthAmount[i] += fyAgg.monthAmount[i];
+          for (const pa of fyAgg.parties.values()) {
+            for (let i = 0; i < 12; i++) {
+              bs.monthInvoices[i] += pa.monthInvoiceIds[i].size;
+            }
+          }
+        }
+        if (priorAgg) {
+          bs.priorAmount = (bs.priorAmount ?? 0) + priorAgg.amount;
+        }
+        continue;
+      }
       const headDisplay = resolveHead(head.headDisplay) ?? head.headDisplay;
       let memberSum = 0;
       let unbridgedParties = 0;
@@ -662,6 +697,11 @@ export async function assembleRows(
     }
     for (const b of unassignedByHead.values()) {
       rows.push(synthRow(syntheticMember(`Unassigned (${b.head})`, b.head), b.sale));
+    }
+    // Bucket lines (Non-territory / Unmapped (review)): the row IS the
+    // bucket — named after itself, never a person.
+    for (const [label, bs] of bucketSales) {
+      rows.push(synthRow(syntheticMember(label, label), bs));
     }
   }
   // Name-match diagnostics against the FULL roster (not the filtered scope)
@@ -1834,6 +1874,28 @@ export async function buildManagementWorkbook(
       tCell.value = `TOTAL — ${fy} Sale ${inr(totalFy)}; ${priorFy(fy)} Sale ${inr(totalPrior)}`;
       tCell.font = { bold: true };
       rowNum += 2;
+      // STATE HEAD values the alias map does not know: bucketed under
+      // "Unmapped (review)" on the report, itemised here — never dropped.
+      const unmappedHeads = [...registers.byHead.values()].filter(
+        (h) => h.kind === "unmapped",
+      );
+      if (unmappedHeads.length > 0) {
+        const head2 = ws.getCell(rowNum, 1);
+        head2.value = `Unmapped state heads (${unmappedHeads.length}): add them to config/head_alias.json — their sale sits under "${UNMAPPED_HEAD}"`;
+        head2.font = { bold: true };
+        head2.fill = HEADER_FILL;
+        head2.alignment = { wrapText: true, vertical: "top" };
+        ws.getCell(rowNum, 2).fill = HEADER_FILL;
+        rowNum++;
+        for (const h of unmappedHeads) {
+          const fyAmt = h.byFy.get(fy)?.amount ?? 0;
+          const priorAmt = h.byFy.get(priorFy(fy))?.amount ?? 0;
+          ws.getCell(rowNum, 2).value =
+            `unmapped state head: ${h.headDisplay} (${fy}: ${inr(fyAmt)}; ${priorFy(fy)}: ${inr(priorAmt)})`;
+          rowNum++;
+        }
+        rowNum++;
+      }
     }
     // Register workbooks that could not be read (403 / 404 / no register tab).
     const registerFailures = registerStatuses.filter((st) => st.status === "error");
