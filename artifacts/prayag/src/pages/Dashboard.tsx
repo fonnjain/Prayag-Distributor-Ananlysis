@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useTheme } from "next-themes";
-import { Sun, Moon, Printer, Menu, X, BarChart3, Map, LayoutGrid, Package, TrendingUp, LineChart, Database, Bot } from "lucide-react";
+import { Sun, Moon, Printer, Menu, X, BarChart3, Map, LayoutGrid, Package, TrendingUp, LineChart, Database, Bot, FileSpreadsheet } from "lucide-react";
 import Overview from "@/components/dashboard/Overview";
 import Regional from "@/components/dashboard/Regional";
 import Resources from "@/components/dashboard/Resources";
@@ -10,6 +10,7 @@ import OrderMomentum from "@/components/dashboard/OrderMomentum";
 import DataSources from "@/components/dashboard/DataSources";
 import Growth from "@/components/dashboard/Growth";
 import Analyst from "@/components/dashboard/Analyst";
+import MgmtReports from "@/components/dashboard/MgmtReports";
 import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
 import { useDashboard } from "@/data/dashboard-context";
@@ -22,6 +23,7 @@ const AREAS = [
   { id: "momentum", label: "Momentum", icon: TrendingUp, component: OrderMomentum },
   { id: "growth", label: "Growth", icon: LineChart, component: Growth },
   { id: "analyst", label: "AI Analyst", icon: Bot, component: Analyst },
+  { id: "reports", label: "Reports", icon: FileSpreadsheet, component: MgmtReports },
   { id: "sources", label: "Data Sources", icon: Database, component: DataSources },
 ];
 

@@ -1,0 +1,29 @@
+{
+  "comment": "Sources for the Management Reports (STATE HEAD DASHBOARD) generator. hr_roster is the intended roster spine (Team Member Details.xlsx) but that Drive file is not shared with the connected account yet; until it is, the roster falls back to the identity columns of the live STATE HEAD DASHBOARD workbook.",
+  "hr_roster": {
+    "fileId": "1Nb8gRcdzY-iambAzwExTmeVY_ob6vnQ2",
+    "name": "Team Member Details.xlsx"
+  },
+  "roster_fallback": {
+    "sheetId": "1E1jEY_yO8LmpqBDpcesS_fu2SBPEQ0eKO5xN29XyTEM",
+    "name": "STATE HEAD DASHBOARD(2026-27)",
+    "dataTab": "Data",
+    "secondaryTabPrefix": "SECONDARY ORDER BOOKING REPORT"
+  },
+  "secondary_order_booking": {
+    "folderId": "1Ww2B1FKjpshRTcOa_F7OUBiBsBzpVCPZ",
+    "tab": "Data Sheet",
+    "files_by_year": {
+      "2026-27": "",
+      "2025-26": "1aNQ2TczEMHcSeB26yKoKayiq1CWc4dXdTQORrgxdl80",
+      "2024-25": "1sejEhXCaPXwYZ99mP0tPGo_pA623FQaBN2JBcreIy2g",
+      "2023-24": "1c5ZmmcKUbp9hvW0aS_HQjkjL-FJyyZ2P8Orbc0uaPbY",
+      "2022-23": "1wj96uhny-eBC2umGa8bP9M1j1T9YEt-DsThduzoC-2c",
+      "2021-22": "1RtRByRmNQorYOEeHsZuOy1GIkB7dVu7MNv9P_pg97Bs"
+    }
+  },
+  "group_index": {
+    "sheetId": "1g-4_lDCeXQfUmp-VQ_mEWXQJyLMJXUGmRwGgughYHFY",
+    "tab": "INDEX"
+  }
+}

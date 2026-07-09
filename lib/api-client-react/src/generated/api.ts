@@ -30,6 +30,8 @@ import type {
   GetVerifyReportParams,
   HealthStatus,
   ListDriveFilesParams,
+  MgmtOptions,
+  MgmtReportRequest,
   VerifyBackfillRequest,
   VerifyBackfillResponse,
   VerifyReport
@@ -685,4 +687,153 @@ export function useGetAnalytics<TData = Awaited<ReturnType<typeof getAnalytics>>
 
 
 
+
+export const getGetMgmtOptionsUrl = () => {
+
+
+
+
+  return `/api/mgmt/options`
+}
+
+/**
+ * Returns the available fiscal years, region-to-state map, roster states, and the connection status of each data source used by the STATE HEAD DASHBOARD report.
+ * @summary Filter options for management reports
+ */
+export const getMgmtOptions = async ( options?: RequestInit): Promise<MgmtOptions> => {
+
+  return customFetch<MgmtOptions>(getGetMgmtOptionsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMgmtOptionsQueryKey = () => {
+    return [
+    `/api/mgmt/options`
+    ] as const;
+    }
+
+
+export const getGetMgmtOptionsQueryOptions = <TData = Awaited<ReturnType<typeof getMgmtOptions>>, TError = ErrorType<ErrorResponse>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMgmtOptions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMgmtOptionsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMgmtOptions>>> = ({ signal }) => getMgmtOptions({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMgmtOptions>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMgmtOptionsQueryResult = NonNullable<Awaited<ReturnType<typeof getMgmtOptions>>>
+export type GetMgmtOptionsQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Filter options for management reports
+ */
+
+export function useGetMgmtOptions<TData = Awaited<ReturnType<typeof getMgmtOptions>>, TError = ErrorType<ErrorResponse>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMgmtOptions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMgmtOptionsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGenerateMgmtReportUrl = () => {
+
+
+
+
+  return `/api/mgmt/report`
+}
+
+/**
+ * Builds the STATE HEAD DASHBOARD workbook from live Google Sheets for the selected fiscal year and scope, and streams it as an xlsx download. Columns whose source is not connected yet are left blank with a grey fill and listed in the Missing Data tab.
+ * @summary Generate the STATE HEAD DASHBOARD Excel report
+ */
+export const generateMgmtReport = async (mgmtReportRequest: MgmtReportRequest, options?: RequestInit): Promise<Blob> => {
+
+  return customFetch<Blob>(getGenerateMgmtReportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(mgmtReportRequest)
+  }
+);}
+
+
+
+
+export const getGenerateMgmtReportMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateMgmtReport>>, TError,{data: BodyType<MgmtReportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof generateMgmtReport>>, TError,{data: BodyType<MgmtReportRequest>}, TContext> => {
+
+const mutationKey = ['generateMgmtReport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof generateMgmtReport>>, {data: BodyType<MgmtReportRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  generateMgmtReport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GenerateMgmtReportMutationResult = NonNullable<Awaited<ReturnType<typeof generateMgmtReport>>>
+    export type GenerateMgmtReportMutationBody = BodyType<MgmtReportRequest>
+    export type GenerateMgmtReportMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Generate the STATE HEAD DASHBOARD Excel report
+ */
+export const useGenerateMgmtReport = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateMgmtReport>>, TError,{data: BodyType<MgmtReportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof generateMgmtReport>>,
+        TError,
+        {data: BodyType<MgmtReportRequest>},
+        TContext
+      > => {
+      return useMutation(getGenerateMgmtReportMutationOptions(options));
+    }
 

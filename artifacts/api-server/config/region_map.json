@@ -1,0 +1,32 @@
+{
+  "comment": "State -> Region map for the Management Reports region filter. Draft pending client confirmation: Rajasthan (N vs W), Madhya Pradesh and Chattisgarh (W vs Central).",
+  "regions": {
+    "North": [
+      "Delhi",
+      "Delhi NCR",
+      "Haryana",
+      "Punjab",
+      "Himachal Pradesh",
+      "JAMMU AND KASHMIR",
+      "Uttarakhand",
+      "West U.P",
+      "East U.P",
+      "Rajasthan"
+    ],
+    "West": [
+      "Gujarat",
+      "Maharashtra",
+      "Maharashtra 2",
+      "Madhya Pradesh",
+      "Chattisgarh"
+    ],
+    "South": [
+      "Andhra Pradesh",
+      "Telangana",
+      "Karnataka",
+      "Kerala",
+      "Tamil Nadu"
+    ],
+    "East": ["Bihar", "Jharkhand", "Odisha", "West Bengal", "North East"]
+  }
+}

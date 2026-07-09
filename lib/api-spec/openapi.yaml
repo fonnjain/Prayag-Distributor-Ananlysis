@@ -18,6 +18,8 @@ tags:
     description: Live dashboard data operations
   - name: verify
     description: Data health and reconciliation operations
+  - name: mgmt
+    description: Management report generation
 paths:
   /drive/files:
     get:
@@ -227,6 +229,70 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Analytics could not be computed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /mgmt/options:
+    get:
+      operationId: getMgmtOptions
+      tags: [mgmt]
+      summary: Filter options for management reports
+      description: >
+        Returns the available fiscal years, region-to-state map, roster
+        states, and the connection status of each data source used by the
+        STATE HEAD DASHBOARD report.
+      responses:
+        "200":
+          description: Report filter options
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MgmtOptions"
+        "500":
+          description: Options could not be loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /mgmt/report:
+    post:
+      operationId: generateMgmtReport
+      tags: [mgmt]
+      summary: Generate the STATE HEAD DASHBOARD Excel report
+      description: >
+        Builds the STATE HEAD DASHBOARD workbook from live Google Sheets for
+        the selected fiscal year and scope, and streams it as an xlsx
+        download. Columns whose source is not connected yet are left blank
+        with a grey fill and listed in the Missing Data tab.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MgmtReportRequest"
+      responses:
+        "200":
+          description: The generated Excel workbook
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Invalid filters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: No team members match the filters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Report generation failed
           content:
             application/json:
               schema:
@@ -694,3 +760,102 @@ components:
         - compareByHead
         - retention
         - margins
+    MgmtRegion:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Region name (North, West, South, East).
+        states:
+          type: array
+          items:
+            type: string
+          description: States that the region expands to.
+      required:
+        - name
+        - states
+    MgmtSourceStatus:
+      type: object
+      properties:
+        key:
+          type: string
+          description: Stable source key.
+        name:
+          type: string
+          description: Human-readable source name.
+        status:
+          type: string
+          enum: [connected, partial, missing]
+          description: Whether the source currently feeds the report.
+        detail:
+          type: string
+          description: What is connected or what is needed.
+      required:
+        - key
+        - name
+        - status
+        - detail
+    MgmtOptions:
+      type: object
+      properties:
+        fys:
+          type: array
+          items:
+            type: string
+          description: Fiscal years selectable in the report, newest first.
+        defaultFy:
+          type: string
+          description: Fiscal year preselected in the UI.
+        regions:
+          type: array
+          items:
+            $ref: "#/components/schemas/MgmtRegion"
+        states:
+          type: array
+          items:
+            type: string
+          description: All states present in the roster.
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/MgmtSourceStatus"
+      required:
+        - fys
+        - defaultFy
+        - regions
+        - states
+        - sources
+    MgmtReportRequest:
+      type: object
+      properties:
+        fy:
+          type: string
+          pattern: "^\\d{4}-\\d{2}$"
+          description: Fiscal year, e.g. 2026-27.
+        regions:
+          type: array
+          items:
+            type: string
+          description: Region names to include (expanded to states server-side).
+        states:
+          type: array
+          items:
+            type: string
+          description: Individual states to include (combined with regions).
+        monthFrom:
+          type: integer
+          minimum: 1
+          maximum: 12
+          description: First fiscal month included (1 = April).
+        monthTo:
+          type: integer
+          minimum: 1
+          maximum: 12
+          description: Last fiscal month included (12 = March).
+        lowPerfPct:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Low-performer achievement threshold percent (default 60).
+      required:
+        - fy

@@ -274,3 +274,49 @@ export const GetAnalyticsResponse = zod.object({
 })
 
 
+/**
+ * Returns the available fiscal years, region-to-state map, roster states, and the connection status of each data source used by the STATE HEAD DASHBOARD report.
+ * @summary Filter options for management reports
+ */
+export const GetMgmtOptionsResponse = zod.object({
+  "fys": zod.array(zod.string()).describe('Fiscal years selectable in the report, newest first.'),
+  "defaultFy": zod.string().describe('Fiscal year preselected in the UI.'),
+  "regions": zod.array(zod.object({
+  "name": zod.string().describe('Region name (North, West, South, East).'),
+  "states": zod.array(zod.string()).describe('States that the region expands to.')
+})),
+  "states": zod.array(zod.string()).describe('All states present in the roster.'),
+  "sources": zod.array(zod.object({
+  "key": zod.string().describe('Stable source key.'),
+  "name": zod.string().describe('Human-readable source name.'),
+  "status": zod.enum(['connected', 'partial', 'missing']).describe('Whether the source currently feeds the report.'),
+  "detail": zod.string().describe('What is connected or what is needed.')
+}))
+})
+
+
+/**
+ * Builds the STATE HEAD DASHBOARD workbook from live Google Sheets for the selected fiscal year and scope, and streams it as an xlsx download. Columns whose source is not connected yet are left blank with a grey fill and listed in the Missing Data tab.
+ * @summary Generate the STATE HEAD DASHBOARD Excel report
+ */
+export const generateMgmtReportBodyFyRegExp = new RegExp('^\\d{4}-\\d{2}$');
+export const generateMgmtReportBodyMonthFromMax = 12;
+
+export const generateMgmtReportBodyMonthToMax = 12;
+
+export const generateMgmtReportBodyLowPerfPctMax = 100;
+
+
+
+export const GenerateMgmtReportBody = zod.object({
+  "fy": zod.string().regex(generateMgmtReportBodyFyRegExp).describe('Fiscal year, e.g. 2026-27.'),
+  "regions": zod.array(zod.string()).optional().describe('Region names to include (expanded to states server-side).'),
+  "states": zod.array(zod.string()).optional().describe('Individual states to include (combined with regions).'),
+  "monthFrom": zod.number().min(1).max(generateMgmtReportBodyMonthFromMax).optional().describe('First fiscal month included (1 = April).'),
+  "monthTo": zod.number().min(1).max(generateMgmtReportBodyMonthToMax).optional().describe('Last fiscal month included (12 = March).'),
+  "lowPerfPct": zod.number().min(1).max(generateMgmtReportBodyLowPerfPctMax).optional().describe('Low-performer achievement threshold percent (default 60).')
+})
+
+export const GenerateMgmtReportResponse = zod.unknown()
+
+

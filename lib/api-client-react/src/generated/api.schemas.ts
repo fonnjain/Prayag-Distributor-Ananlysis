@@ -237,6 +237,77 @@ export interface AnalyticsReport {
   margins: AnalyticsMargins;
 }
 
+export interface MgmtRegion {
+  /** Region name (North, West, South, East). */
+  name: string;
+  /** States that the region expands to. */
+  states: string[];
+}
+
+/**
+ * Whether the source currently feeds the report.
+ */
+export type MgmtSourceStatusStatus = typeof MgmtSourceStatusStatus[keyof typeof MgmtSourceStatusStatus];
+
+
+export const MgmtSourceStatusStatus = {
+  connected: 'connected',
+  partial: 'partial',
+  missing: 'missing',
+} as const;
+
+export interface MgmtSourceStatus {
+  /** Stable source key. */
+  key: string;
+  /** Human-readable source name. */
+  name: string;
+  /** Whether the source currently feeds the report. */
+  status: MgmtSourceStatusStatus;
+  /** What is connected or what is needed. */
+  detail: string;
+}
+
+export interface MgmtOptions {
+  /** Fiscal years selectable in the report, newest first. */
+  fys: string[];
+  /** Fiscal year preselected in the UI. */
+  defaultFy: string;
+  regions: MgmtRegion[];
+  /** All states present in the roster. */
+  states: string[];
+  sources: MgmtSourceStatus[];
+}
+
+export interface MgmtReportRequest {
+  /**
+     * Fiscal year, e.g. 2026-27.
+     * @pattern ^\d{4}-\d{2}$
+     */
+  fy: string;
+  /** Region names to include (expanded to states server-side). */
+  regions?: string[];
+  /** Individual states to include (combined with regions). */
+  states?: string[];
+  /**
+     * First fiscal month included (1 = April).
+     * @minimum 1
+     * @maximum 12
+     */
+  monthFrom?: number;
+  /**
+     * Last fiscal month included (12 = March).
+     * @minimum 1
+     * @maximum 12
+     */
+  monthTo?: number;
+  /**
+     * Low-performer achievement threshold percent (default 60).
+     * @minimum 1
+     * @maximum 100
+     */
+  lowPerfPct?: number;
+}
+
 export type ListDriveFilesParams = {
 /**
  * Optional search text matched against file names.
