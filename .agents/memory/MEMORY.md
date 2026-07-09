@@ -2,3 +2,4 @@
 - [Prayag Sheets transform](prayag-sheets-transform.md) — tab/column mapping + control total 3,417,311,917; use MONTHLY not Combined; cell helpers coerce string cells; snapshot/fallback model.
 - [Prayag register ingestion](prayag-register-ingestion.md) — line_uid excludes invoice_no; occurrence counted over all rows pre-filter; month year from FY column; Sheets chunked reads + 429 backoff.
 - [Sheets loader concurrency rules](sheets-loader-concurrency.md) — dedupe in-flight Sheets reads next to TTL caches; never keep per-request report state in module-level mutables.
+- [Prayag Target Master conventions](prayag-target-master.md) — single writable-sheet allowlist; split rule = per-capita for no-data members then pro-rata; serialized upserts overwrite all key duplicates.

@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "next-themes";
-import Dashboard from "@/pages/Dashboard";
+import Dashboard, { AREA_IDS } from "@/pages/Dashboard";
 import NotFound from "@/pages/not-found";
 import { DashboardProvider } from "@/data/dashboard-context";
 
@@ -20,6 +20,11 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
+      <Route path="/:area">
+        {(params) =>
+          AREA_IDS.includes(params.area) ? <Dashboard /> : <NotFound />
+        }
+      </Route>
       <Route component={NotFound} />
     </Switch>
   );

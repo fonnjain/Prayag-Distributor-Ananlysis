@@ -7,11 +7,49 @@ import {
   regionMap,
   type ReportFilters,
 } from "../lib/mgmt/report.js";
+import { loadTargetsForFy } from "../lib/mgmt/targets.js";
 
 const router: IRouter = Router();
 
 const FY_PATTERN = /^\d{4}-\d{2}$/;
 const DEFAULT_FY = "2026-27";
+
+// The Target Master sheet is provisioned and writable; the status reflects
+// whether any targets have actually been saved for the default FY yet.
+async function targetsSource(req: Request): Promise<{
+  key: string;
+  name: string;
+  status: string;
+  detail: string;
+}> {
+  try {
+    const map = await loadTargetsForFy(DEFAULT_FY);
+    if (map.size > 0) {
+      return {
+        key: "targets",
+        name: "Targets and business plans",
+        status: "connected",
+        detail: `${map.size} member target${map.size === 1 ? "" : "s"} saved in the Prayag Target Master sheet for ${DEFAULT_FY}. Achievement % columns fill from these.`,
+      };
+    }
+    return {
+      key: "targets",
+      name: "Targets and business plans",
+      status: "partial",
+      detail:
+        "The Prayag Target Master sheet is connected but has no saved targets for the current year yet. Set them in the Targets tab.",
+    };
+  } catch (err) {
+    req.log.warn({ err }, "target master status check failed");
+    return {
+      key: "targets",
+      name: "Targets and business plans",
+      status: "missing",
+      detail:
+        "The Prayag Target Master sheet could not be read. Target and achievement % columns stay blank until it is reachable.",
+    };
+  }
+}
 
 router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> => {
   try {
@@ -38,13 +76,7 @@ router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> =
           ? "Order booking workbooks found for the selected years."
           : "No 2026-27 order booking workbook exists in Drive yet; 2026-27 order columns will be blank until it is created. Earlier years (2021-22 to 2025-26) are connected.",
       },
-      {
-        key: "targets",
-        name: "Targets and business plans",
-        status: "missing",
-        detail:
-          "Target, plan, and achievement % columns stay blank until a consolidated Target Master sheet is connected.",
-      },
+      await targetsSource(req),
       {
         key: "sfa",
         name: "Field visits (SFA)",

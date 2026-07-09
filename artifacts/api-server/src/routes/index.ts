@@ -6,6 +6,7 @@ import dashboardRouter from "./dashboard";
 import verifyRouter from "./verify";
 import analyticsRouter from "./analytics";
 import mgmtRouter from "./mgmt";
+import targetsRouter from "./targets";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use(dashboardRouter);
 router.use(verifyRouter);
 router.use(analyticsRouter);
 router.use(mgmtRouter);
+router.use(targetsRouter);
 
 export default router;

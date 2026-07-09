@@ -27,11 +27,17 @@ import type {
   DriveFileList,
   ErrorResponse,
   GetAnalyticsParams,
+  GetTargetSplitPreviewParams,
+  GetTargetsParams,
   GetVerifyReportParams,
   HealthStatus,
   ListDriveFilesParams,
   MgmtOptions,
   MgmtReportRequest,
+  SaveTargetsRequest,
+  SaveTargetsResult,
+  SplitPreviewResponse,
+  TargetsResponse,
   VerifyBackfillRequest,
   VerifyBackfillResponse,
   VerifyReport
@@ -836,4 +842,245 @@ export const useGenerateMgmtReport = <TError = ErrorType<ErrorResponse>,
       > => {
       return useMutation(getGenerateMgmtReportMutationOptions(options));
     }
+
+export const getGetTargetsUrl = (params?: GetTargetsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/targets?${stringifiedParams}` : `/api/targets`
+}
+
+/**
+ * Returns the active roster (optionally scoped to one State Head) with each member's prior-year order actuals and any targets already saved in the Prayag Target Master sheet.
+ * @summary Team members with saved targets for a fiscal year
+ */
+export const getTargets = async (params?: GetTargetsParams, options?: RequestInit): Promise<TargetsResponse> => {
+
+  return customFetch<TargetsResponse>(getGetTargetsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTargetsQueryKey = (params?: GetTargetsParams,) => {
+    return [
+    `/api/targets`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetTargetsQueryOptions = <TData = Awaited<ReturnType<typeof getTargets>>, TError = ErrorType<ErrorResponse>>(params?: GetTargetsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTargets>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTargetsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTargets>>> = ({ signal }) => getTargets(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTargets>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTargetsQueryResult = NonNullable<Awaited<ReturnType<typeof getTargets>>>
+export type GetTargetsQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Team members with saved targets for a fiscal year
+ */
+
+export function useGetTargets<TData = Awaited<ReturnType<typeof getTargets>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetTargetsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTargets>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTargetsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSaveTargetsUrl = () => {
+
+
+
+
+  return `/api/targets`
+}
+
+/**
+ * Validates and upserts one row per team member into the Prayag Target Master Google Sheet, keyed by fiscal year and team member. Monthly cells left blank fall back to an equal twelfth of the annual figure.
+ * @summary Save targets to the Target Master sheet
+ */
+export const saveTargets = async (saveTargetsRequest: SaveTargetsRequest, options?: RequestInit): Promise<SaveTargetsResult> => {
+
+  return customFetch<SaveTargetsResult>(getSaveTargetsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(saveTargetsRequest)
+  }
+);}
+
+
+
+
+export const getSaveTargetsMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveTargets>>, TError,{data: BodyType<SaveTargetsRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveTargets>>, TError,{data: BodyType<SaveTargetsRequest>}, TContext> => {
+
+const mutationKey = ['saveTargets'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveTargets>>, {data: BodyType<SaveTargetsRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveTargets(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveTargetsMutationResult = NonNullable<Awaited<ReturnType<typeof saveTargets>>>
+    export type SaveTargetsMutationBody = BodyType<SaveTargetsRequest>
+    export type SaveTargetsMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Save targets to the Target Master sheet
+ */
+export const useSaveTargets = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveTargets>>, TError,{data: BodyType<SaveTargetsRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveTargets>>,
+        TError,
+        {data: BodyType<SaveTargetsRequest>},
+        TContext
+      > => {
+      return useMutation(getSaveTargetsMutationOptions(options));
+    }
+
+export const getGetTargetSplitPreviewUrl = (params: GetTargetSplitPreviewParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/targets/split-preview?${stringifiedParams}` : `/api/targets/split-preview`
+}
+
+/**
+ * Splits annual totals across the selected State Head's active team members pro-rata by each member's prior-year order actuals. Members with no prior-year data receive an average-sized share. Allocations are rounded to whole rupees and always sum exactly to the entered totals.
+ * @summary Pro-rata split of State Head totals across team members
+ */
+export const getTargetSplitPreview = async (params: GetTargetSplitPreviewParams, options?: RequestInit): Promise<SplitPreviewResponse> => {
+
+  return customFetch<SplitPreviewResponse>(getGetTargetSplitPreviewUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTargetSplitPreviewQueryKey = (params?: GetTargetSplitPreviewParams,) => {
+    return [
+    `/api/targets/split-preview`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetTargetSplitPreviewQueryOptions = <TData = Awaited<ReturnType<typeof getTargetSplitPreview>>, TError = ErrorType<ErrorResponse>>(params: GetTargetSplitPreviewParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTargetSplitPreview>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTargetSplitPreviewQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTargetSplitPreview>>> = ({ signal }) => getTargetSplitPreview(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTargetSplitPreview>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTargetSplitPreviewQueryResult = NonNullable<Awaited<ReturnType<typeof getTargetSplitPreview>>>
+export type GetTargetSplitPreviewQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Pro-rata split of State Head totals across team members
+ */
+
+export function useGetTargetSplitPreview<TData = Awaited<ReturnType<typeof getTargetSplitPreview>>, TError = ErrorType<ErrorResponse>>(
+ params: GetTargetSplitPreviewParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTargetSplitPreview>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTargetSplitPreviewQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 

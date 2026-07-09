@@ -30,6 +30,7 @@ A mobile-first dashboard over live Google Sheets sales data: sales trends, growt
   - `src/components/dashboard/*` — Overview, Regional, Resources, Products, OrderMomentum, Growth (YoY/retention/margins), DataSources (+ DataHealth reconciliation panel), Analyst
   - `src/data/dashboard-context.tsx` — `DashboardProvider` / `useDashboard()`; fetches live data via generated hooks, falls back to bundled seed
   - `src/data/dataset.ts` — formatters/colors; `src/data/prayag_data.json` — bundled seed + canonical payload shape (drives TS types)
+  - Tabs are deep-linkable (`/targets`, `/reports`, ...); `Dashboard.tsx` derives the active tab from the wouter route
 - API: `artifacts/api-server` (Express, proxied at `/api`)
   - `src/lib/sheets.ts` — Google Drive connector XLSX export + exceljs cell helpers
   - `src/lib/dashboard/{transform,seed,sync}.ts` — Sheets→aggregate transform, seed loader, snapshot sync/persistence
@@ -53,6 +54,7 @@ A mobile-first dashboard over live Google Sheets sales data: sales trends, growt
 - The refresh pipeline is regression-tested against fixture workbooks (`artifacts/api-server/src/__tests__/`): control totals, failure fallback, and first-run seeding. Tests run against a `dashboard_test` Postgres schema, never the real table.
 - Invoice-line data lives in `sale_line` keyed by a deterministic `line_uid` (fy|month|customer|code|qty|rate|amount|occurrence — invoice number excluded; occurrence counter must see all rows in source order). Inserts are `ON CONFLICT DO NOTHING`, so xlsx backfill and live Sheets reads are idempotent and never overwrite each other.
 - Live registers are read with `spreadsheets.values.get` in 50k-row chunks (never `files.export`); the dashboard sync fetches only the tabs it needs and retries 429/5xx with backoff.
+- Targets: the Sheets client is read-only except for sheets registered in a writable allowlist (only the "Prayag Target Master" sheet, `lib/mgmt/targets.ts` + `routes/targets.ts`). Upserts are keyed (fy, team member), serialized via an in-process lock, and overwrite all duplicate rows. Pro-rata split: no-data members get an equal per-capita share first, remainder pro-rata by prior-FY actuals. Report target columns: monthly = override else annual/12; missing targets render blank/grey, never zero.
 - Analytics rules: YoY/trends use complete months only (a month is complete when its max invoice date reaches the month's last calendar day); territory and institutional are never blended; QTY is never summed across groups; margins come only from `cost_master` (empty → `[]` + "Add a Cost Master" message; Purchase Price is a list price and must NEVER be used as cost).
 - Ingestion guardrails (spec Task 8) in `lib/registers/ingest.ts`: expected per-FY row counts, zero unmapped groups/heads/states, sum consistency (±1 rupee), no negative amounts. Any failure writes `ingest_run.status='fail'` and blocks the insert.
 - Sanity baselines (must reproduce exactly): FY25-26 ₹361.14 Cr; Q1 26-27 ₹73.09 Cr vs Q1 25-26 ₹74.56 Cr (YoY −2.0%); Territory +7.8%, Institutional −54.1%; top head FY25-26 Sandeep Ji ₹164.22 Cr (45.5%); Q1 invoices/customers 5,714/439.

@@ -297,6 +297,139 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /targets:
+    get:
+      operationId: getTargets
+      tags: [mgmt]
+      summary: Team members with saved targets for a fiscal year
+      description: >
+        Returns the active roster (optionally scoped to one State Head) with
+        each member's prior-year order actuals and any targets already saved
+        in the Prayag Target Master sheet.
+      parameters:
+        - name: fy
+          in: query
+          schema: { type: string }
+          description: Fiscal year like 2026-27. Defaults to the current FY.
+        - name: stateHead
+          in: query
+          schema: { type: string }
+          description: Limit rows to one State Head's team.
+      responses:
+        "200":
+          description: Roster with saved targets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TargetsResponse"
+        "400":
+          description: Invalid fiscal year
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Targets could not be loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: saveTargets
+      tags: [mgmt]
+      summary: Save targets to the Target Master sheet
+      description: >
+        Validates and upserts one row per team member into the Prayag Target
+        Master Google Sheet, keyed by fiscal year and team member. Monthly
+        cells left blank fall back to an equal twelfth of the annual figure.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveTargetsRequest"
+      responses:
+        "200":
+          description: Save result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SaveTargetsResult"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Save failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /targets/split-preview:
+    get:
+      operationId: getTargetSplitPreview
+      tags: [mgmt]
+      summary: Pro-rata split of State Head totals across team members
+      description: >
+        Splits annual totals across the selected State Head's active team
+        members pro-rata by each member's prior-year order actuals. Members
+        with no prior-year data receive an average-sized share. Allocations
+        are rounded to whole rupees and always sum exactly to the entered
+        totals.
+      parameters:
+        - name: fy
+          in: query
+          schema: { type: string }
+          description: Fiscal year like 2026-27. Defaults to the current FY.
+        - name: stateHead
+          in: query
+          required: true
+          schema: { type: string }
+        - name: primary
+          in: query
+          schema: { type: number }
+        - name: secondary
+          in: query
+          schema: { type: number }
+        - name: directDealer
+          in: query
+          schema: { type: number }
+        - name: businessPlan
+          in: query
+          schema: { type: number }
+      responses:
+        "200":
+          description: Split preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SplitPreviewResponse"
+        "400":
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: No active team members for the State Head
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Split could not be computed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     DriveFile:
@@ -859,3 +992,185 @@ components:
           description: Low-performer achievement threshold percent (default 60).
       required:
         - fy
+    TargetFieldValues:
+      type: object
+      properties:
+        primary:
+          type: number
+          nullable: true
+          description: Primary target in rupees.
+        secondary:
+          type: number
+          nullable: true
+          description: Secondary target in rupees.
+        directDealer:
+          type: number
+          nullable: true
+          description: Direct Dealer target in rupees.
+        businessPlan:
+          type: number
+          nullable: true
+          description: Business Plan in rupees.
+      required:
+        - primary
+        - secondary
+        - directDealer
+        - businessPlan
+    TargetFieldMonthly:
+      type: object
+      description: >
+        Twelve fiscal-month values (April..March) per field. Null cells fall
+        back to an equal twelfth of the annual figure.
+      properties:
+        primary:
+          type: array
+          items: { type: number, nullable: true }
+        secondary:
+          type: array
+          items: { type: number, nullable: true }
+        directDealer:
+          type: array
+          items: { type: number, nullable: true }
+        businessPlan:
+          type: array
+          items: { type: number, nullable: true }
+      required:
+        - primary
+        - secondary
+        - directDealer
+        - businessPlan
+    SavedTarget:
+      type: object
+      properties:
+        level:
+          type: string
+          enum: [TM, STATE_HEAD]
+        annual:
+          $ref: "#/components/schemas/TargetFieldValues"
+        monthly:
+          $ref: "#/components/schemas/TargetFieldMonthly"
+        updatedBy:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - level
+        - annual
+        - monthly
+        - updatedBy
+        - updatedAt
+    TargetsMember:
+      type: object
+      properties:
+        name:
+          type: string
+        stateHead:
+          type: string
+        state:
+          type: string
+        headquarter:
+          type: string
+        priorYearActual:
+          type: number
+          description: Prior fiscal year order-booking actual in rupees.
+        saved:
+          allOf:
+            - $ref: "#/components/schemas/SavedTarget"
+          nullable: true
+      required:
+        - name
+        - stateHead
+        - state
+        - headquarter
+        - priorYearActual
+        - saved
+    TargetsResponse:
+      type: object
+      properties:
+        fy:
+          type: string
+        stateHeads:
+          type: array
+          items: { type: string }
+          description: All State Heads in the active roster.
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/TargetsMember"
+      required:
+        - fy
+        - stateHeads
+        - members
+    SplitPreviewMember:
+      type: object
+      properties:
+        name:
+          type: string
+        priorYearActual:
+          type: number
+        allocated:
+          $ref: "#/components/schemas/TargetFieldValues"
+      required:
+        - name
+        - priorYearActual
+        - allocated
+    SplitPreviewResponse:
+      type: object
+      properties:
+        fy:
+          type: string
+        stateHead:
+          type: string
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/SplitPreviewMember"
+      required:
+        - fy
+        - stateHead
+        - members
+    SaveTargetRow:
+      type: object
+      properties:
+        teamMember:
+          type: string
+        level:
+          type: string
+          enum: [TM, STATE_HEAD]
+        annual:
+          $ref: "#/components/schemas/TargetFieldValues"
+        monthly:
+          $ref: "#/components/schemas/TargetFieldMonthly"
+      required:
+        - teamMember
+        - annual
+    SaveTargetsRequest:
+      type: object
+      properties:
+        fy:
+          type: string
+          pattern: "^\\d{4}-\\d{2}$"
+        updatedBy:
+          type: string
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/SaveTargetRow"
+      required:
+        - fy
+        - rows
+    SaveTargetsResult:
+      type: object
+      properties:
+        fy:
+          type: string
+        updated:
+          type: integer
+          description: Rows updated in place in the Target Master sheet.
+        appended:
+          type: integer
+          description: New rows appended to the Target Master sheet.
+      required:
+        - fy
+        - updated
+        - appended

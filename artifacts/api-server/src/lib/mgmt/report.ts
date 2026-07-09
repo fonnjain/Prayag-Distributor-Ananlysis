@@ -22,6 +22,12 @@ import {
   serialToDate,
   normState,
 } from "./names.js";
+import {
+  loadTargetsForFy,
+  type TargetRow,
+  type TargetField,
+} from "./targets.js";
+import { logger } from "../logger.js";
 
 export type ReportFilters = {
   fy: string;
@@ -87,7 +93,46 @@ export type MemberRow = {
   orders: OrderStats | null;
   priorAmount: number | null;
   oldNew: string;
+  target: TargetRow | null;
 };
+
+// Effective monthly target: explicit override, else an equal twelfth of the
+// annual figure. Null when neither exists — blank must never read as zero.
+function tgtMonthly(t: TargetRow, f: TargetField, monthIdx: number): number | null {
+  const override = t.monthly[f][monthIdx];
+  if (override != null) return override;
+  const annual = t.annual[f];
+  return annual == null ? null : annual / 12;
+}
+
+function tgtRange(
+  r: MemberRow,
+  f: TargetField,
+  monthFrom: number,
+  monthTo: number,
+): number | null {
+  if (!r.target) return null;
+  let sum = 0;
+  let any = false;
+  for (let i = monthFrom - 1; i <= monthTo - 1; i++) {
+    const v = tgtMonthly(r.target, f, i);
+    if (v != null) {
+      sum += v;
+      any = true;
+    }
+  }
+  return any ? sum : null;
+}
+
+function tgtAnnual(r: MemberRow, f: TargetField): number | null {
+  return r.target ? r.target.annual[f] : null;
+}
+
+// Achievement ratio as a fraction (pct cells use a percent number format).
+function achievement(num: number | null | undefined, den: number | null): number | null {
+  if (num == null || den == null || den <= 0) return null;
+  return num / den;
+}
 
 function computeOrderStats(
   member: RosterMember,
@@ -208,6 +253,7 @@ export async function assembleRows(
   rosterSource: string;
   ordersAvailable: boolean;
   priorAvailable: boolean;
+  targetsAvailable: boolean;
 }> {
   const roster = await loadRoster();
   const scope = expandScope(filters);
@@ -219,6 +265,17 @@ export async function assembleRows(
   const firstSeen = agg
     ? await loadRetailerFirstSeen(filters.fy)
     : new Map<string, number>();
+  // Targets come from the writable Target Master sheet. A read failure only
+  // downgrades the target columns to "missing" — it never blocks the report.
+  let targetMap = new Map<string, TargetRow>();
+  try {
+    targetMap = await loadTargetsForFy(filters.fy);
+  } catch (err) {
+    logger.warn(
+      { err, fy: filters.fy },
+      "target master read failed; target columns left blank",
+    );
+  }
   const fyStart = fyBoundsSerial(filters.fy).start;
   const rows: MemberRow[] = members.map((m) => ({
     m,
@@ -235,12 +292,14 @@ export async function assembleRows(
       : null,
     priorAmount: prior ? (prior.perTm.get(m.normKey)?.amount ?? 0) : null,
     oldNew: m.dojSerial != null && m.dojSerial >= fyStart ? "New" : "Old",
+    target: targetMap.get(m.normKey) ?? null,
   }));
   return {
     rows,
     rosterSource: roster.source,
     ordersAvailable: agg != null,
     priorAvailable: prior != null,
+    targetsAvailable: targetMap.size > 0,
   };
 }
 
@@ -291,10 +350,16 @@ function ord(
   return r.orders == null ? null : pick(r.orders);
 }
 
-function summaryCols(fy: string, ordersMissingKey: string | null): ColSpec[] {
+function summaryCols(
+  filters: ReportFilters,
+  ordersMissingKey: string | null,
+  targetsMissingKey: string | null,
+): ColSpec[] {
+  const fy = filters.fy;
   const s = fyShort(fy);
   const p = fyShort(priorFy(fy));
   const om = ordersMissingKey ?? undefined;
+  const tm = targetsMissingKey ?? undefined;
   const o = (
     header: string,
     kind: ColKind,
@@ -304,6 +369,16 @@ function summaryCols(fy: string, ordersMissingKey: string | null): ColSpec[] {
     om
       ? { header, kind, missing: om, total: false }
       : { header, kind, get: (r) => ord(r, pick), total };
+  const t = (
+    header: string,
+    kind: ColKind,
+    get: (r: MemberRow) => unknown,
+    total = kind === "money",
+  ): ColSpec =>
+    tm
+      ? { header, kind, missing: tm, total: false }
+      : { header, kind, get, total };
+  const { monthFrom, monthTo } = filters;
   return [
     { header: "State Head", kind: "text", get: (r) => r.m.stateHead, width: 18 },
     { header: "State", kind: "text", get: (r) => r.m.state, width: 14 },
@@ -320,19 +395,27 @@ function summaryCols(fy: string, ordersMissingKey: string | null): ColSpec[] {
     },
     { header: `Sale ${p}`, kind: "money", missing: "salebridge" },
     { header: "CTC Monthly", kind: "money", missing: "payroll" },
-    { header: "Target monthly", kind: "money", missing: "target" },
-    { header: "Direct Dealer Target", kind: "money", missing: "target" },
-    { header: "Secondary Target", kind: "money", missing: "target" },
+    t("Target monthly", "money", (r) => {
+      const a = tgtAnnual(r, "secondary");
+      return a == null ? null : a / 12;
+    }),
+    t("Direct Dealer Target", "money", (r) => tgtAnnual(r, "directDealer")),
+    t("Secondary Target", "money", (r) => tgtAnnual(r, "secondary")),
     o("Order Booking", "money", (x) => x.amount),
     o("Direct Dealers Order", "money", (x) => x.directAmount),
     { header: `Sale Report ${s}`, kind: "money", missing: "salebridge" },
-    { header: "Target Achievement (%)", kind: "pct", missing: "target" },
-    {
-      header: "Direct Dealer/Primary target achievement (%)",
-      kind: "pct",
-      missing: "target",
-    },
-    { header: "Target Achievement (%) (Sale)", kind: "pct", missing: "target" },
+    t("Target Achievement (%)", "pct", (r) =>
+      achievement(r.orders?.amount, tgtRange(r, "secondary", monthFrom, monthTo)),
+    ),
+    t("Direct Dealer/Primary target achievement (%)", "pct", (r) =>
+      achievement(
+        r.orders?.directAmount,
+        tgtRange(r, "directDealer", monthFrom, monthTo) ??
+          tgtRange(r, "primary", monthFrom, monthTo),
+      ),
+    ),
+    // Needs dispatched-sale-per-member data even with targets connected.
+    { header: "Target Achievement (%) (Sale)", kind: "pct", missing: "salebridge" },
     o("Total Old Retailers", "int", (x) => x.oldRetailers),
     { header: "Visited Parties", kind: "int", missing: "sfa" },
     o("New Retailers", "int", (x) => x.newRetailers),
@@ -391,9 +474,15 @@ function summaryCols(fy: string, ordersMissingKey: string | null): ColSpec[] {
   ];
 }
 
-function dataCols(fy: string, ordersMissingKey: string | null): ColSpec[] {
+function dataCols(
+  filters: ReportFilters,
+  ordersMissingKey: string | null,
+  targetsMissingKey: string | null,
+): ColSpec[] {
+  const fy = filters.fy;
   const s = fyShort(fy);
   const om = ordersMissingKey ?? undefined;
+  const tmk = targetsMissingKey ?? undefined;
   const o = (
     header: string,
     kind: ColKind,
@@ -403,6 +492,18 @@ function dataCols(fy: string, ordersMissingKey: string | null): ColSpec[] {
     om
       ? { header, kind, missing: om, total: false }
       : { header, kind, get: (r) => ord(r, pick), total };
+  const t = (
+    header: string,
+    kind: ColKind,
+    get: (r: MemberRow) => unknown,
+    total = kind === "money",
+  ): ColSpec =>
+    tmk
+      ? { header, kind, missing: tmk, total: false }
+      : { header, kind, get, total };
+  const { monthFrom, monthTo } = filters;
+  const secondaryAchievement = (r: MemberRow): number | null =>
+    achievement(r.orders?.amount, tgtRange(r, "secondary", monthFrom, monthTo));
   return [
     { header: "State Head", kind: "text", get: (r) => r.m.stateHead, width: 18 },
     { header: "State", kind: "text", get: (r) => r.m.state, width: 14 },
@@ -410,8 +511,8 @@ function dataCols(fy: string, ordersMissingKey: string | null): ColSpec[] {
     { header: "Working State", kind: "text", get: (r) => r.m.workingState, width: 14 },
     { header: "Headquarter", kind: "text", get: (r) => r.m.headquarter, width: 14 },
     { header: "D.O.J", kind: "date", get: (r) => dateVal(r.m.dojSerial), width: 12 },
-    { header: "Primary Target", kind: "money", missing: "target" },
-    { header: "Target", kind: "money", missing: "target" },
+    t("Primary Target", "money", (r) => tgtAnnual(r, "primary")),
+    t("Target", "money", (r) => tgtRange(r, "secondary", monthFrom, monthTo)),
     o("Achievement", "money", (x) => x.amount),
     o("Direct Dealers order", "money", (x) => x.directAmount),
     o("Total Old Retailers", "int", (x) => x.oldRetailers),
@@ -452,12 +553,18 @@ function dataCols(fy: string, ordersMissingKey: string | null): ColSpec[] {
     { header: "T.A. Bill ST. Cost", kind: "money", missing: "expense" },
     { header: "Cost Ratio (%)", kind: "pct", missing: "expense" },
     o("Business Per Retailer", "money", (x) => x.businessPerRetailer, false),
-    { header: "Target Achievement (%)", kind: "pct", missing: "target" },
-    {
-      header: "Direct Dealer/Primary target achievement (%)",
-      kind: "pct",
-      missing: "target",
-    },
+    t("Target Achievement (%)", "pct", secondaryAchievement, false),
+    t(
+      "Direct Dealer/Primary target achievement (%)",
+      "pct",
+      (r) =>
+        achievement(
+          r.orders?.directAmount,
+          tgtRange(r, "directDealer", monthFrom, monthTo) ??
+            tgtRange(r, "primary", monthFrom, monthTo),
+        ),
+      false,
+    ),
     o("No of Orders", "int", (x) => x.orderCount),
     { header: "Total Working Hours", kind: "int", missing: "sfa" },
     { header: "Total GPS KM", kind: "int", missing: "gps" },
@@ -474,7 +581,19 @@ function dataCols(fy: string, ordersMissingKey: string | null): ColSpec[] {
     },
     { header: "Active/ Left", kind: "text", get: (r) => r.m.activeLeft || null },
     { header: "old new", kind: "text", get: (r) => r.oldNew },
-    { header: "Target range", kind: "text", missing: "target" },
+    t(
+      "Target range",
+      "text",
+      (r) => {
+        const a = secondaryAchievement(r);
+        if (a == null) return null;
+        if (a < 0.5) return "Below 50%";
+        if (a < 0.75) return "50-75%";
+        if (a < 1) return "75-100%";
+        return "Above 100%";
+      },
+      false,
+    ),
   ];
 }
 
@@ -583,10 +702,12 @@ export async function buildManagementWorkbook(
 ): Promise<{ workbook: ExcelJS.Workbook; memberCount: number }> {
   // Request-scoped: parallel report builds must not share missing-data state.
   const missing: MissingUsed = new Map();
-  const { rows, rosterSource, ordersAvailable } = await assembleRows(filters);
+  const { rows, rosterSource, ordersAvailable, targetsAvailable } =
+    await assembleRows(filters);
   const fy = filters.fy;
   const s = fyShort(fy);
   const ordersMissingKey = ordersAvailable ? null : "orders";
+  const targetsMissingKey = targetsAvailable ? null : "target";
   const wb = new ExcelJS.Workbook();
   wb.creator = "Prayag Sales Intelligence";
   wb.created = new Date();
@@ -604,15 +725,42 @@ export async function buildManagementWorkbook(
       { header: "Week Off", kind: "text", get: (r) => r.m.weekOff || null, width: 10 },
       { header: "Market Hours", kind: "text", get: (r) => r.m.marketHours || null, width: 11 },
       { header: `Monthly CTC ${fyShort(priorFy(fy))}`, kind: "money", missing: "payroll" },
-      { header: `Monthly Target ${s}`, kind: "money", missing: "target" },
+      targetsMissingKey
+        ? { header: `Monthly Target ${s}`, kind: "money", missing: targetsMissingKey }
+        : {
+            header: `Monthly Target ${s}`,
+            kind: "money",
+            get: (r) => {
+              const a = tgtAnnual(r, "secondary");
+              return a == null ? null : a / 12;
+            },
+            total: true,
+          },
       ordersMissingKey
         ? { header: `Total Dealer ${s}`, kind: "int", missing: ordersMissingKey }
         : { header: `Total Dealer ${s}`, kind: "int", get: (r) => ord(r, (x) => x.totalRetailers), total: true },
-      { header: `Business Plan ${s}`, kind: "money", missing: "target" },
+      targetsMissingKey
+        ? { header: `Business Plan ${s}`, kind: "money", missing: targetsMissingKey }
+        : {
+            header: `Business Plan ${s}`,
+            kind: "money",
+            get: (r) => tgtAnnual(r, "businessPlan"),
+            total: true,
+          },
       ordersMissingKey
         ? { header: `Order Booked ${s}`, kind: "money", missing: ordersMissingKey }
         : { header: `Order Booked ${s}`, kind: "money", get: (r) => ord(r, (x) => x.amount), total: true },
-      { header: "Final Achievement", kind: "pct", missing: "target" },
+      targetsMissingKey
+        ? { header: "Final Achievement", kind: "pct", missing: targetsMissingKey }
+        : {
+            header: "Final Achievement",
+            kind: "pct",
+            get: (r) =>
+              achievement(
+                r.orders?.amount,
+                tgtRange(r, "secondary", filters.monthFrom, filters.monthTo),
+              ),
+          },
       { header: `Sales ${s}`, kind: "money", missing: "salebridge" },
     ];
     collectMissing(missing, fixed, ws.name.trim());
@@ -669,7 +817,11 @@ export async function buildManagementWorkbook(
         cursor += g.span;
       }
     }
-    note(missing, "target", `${ws.name.trim()}: monthly Plan Amount/Count, % of Achievement`);
+    if (targetsMissingKey) {
+      note(missing, "target", `${ws.name.trim()}: monthly Plan Amount/Count, % of Achievement`);
+    } else {
+      note(missing, "target", `${ws.name.trim()}: monthly Plan Count (the Target Master holds amounts, not order counts)`);
+    }
     note(missing, "salebridge", `${ws.name.trim()}: monthly Sales Received Amount/Count`);
     if (ordersMissingKey) {
       note(missing, "orders", `${ws.name.trim()}: monthly Order Booked Amount/Count`);
@@ -681,8 +833,15 @@ export async function buildManagementWorkbook(
       for (let mIdx = 0; mIdx < 12; mIdx++) {
         const base = 16 + mIdx * 7;
         const inRange = mIdx + 1 >= filters.monthFrom && mIdx + 1 <= filters.monthTo;
-        // Plan Amount/Count -> target missing
-        ws.getCell(rowNum, base).fill = GREY_FILL;
+        // Plan Amount from the Target Master; Plan Count has no source.
+        const planA = ws.getCell(rowNum, base);
+        const plan = r.target ? tgtMonthly(r.target, "secondary", mIdx) : null;
+        if (!targetsMissingKey && plan != null) {
+          planA.value = plan;
+          planA.numFmt = FMT_INT;
+        } else {
+          planA.fill = GREY_FILL;
+        }
         ws.getCell(rowNum, base + 1).fill = GREY_FILL;
         // Order Booked Amount/Count
         const obA = ws.getCell(rowNum, base + 2);
@@ -696,8 +855,18 @@ export async function buildManagementWorkbook(
           obA.fill = GREY_FILL;
           obC.fill = GREY_FILL;
         }
-        // % of Achievement -> target missing
-        ws.getCell(rowNum, base + 4).fill = GREY_FILL;
+        // % of Achievement = month order booking vs month plan.
+        const achCell = ws.getCell(rowNum, base + 4);
+        const monthAch =
+          !targetsMissingKey && r.orders && inRange
+            ? achievement(r.orders.monthAmount[mIdx], plan)
+            : null;
+        if (monthAch != null) {
+          achCell.value = monthAch;
+          achCell.numFmt = "0.0%";
+        } else {
+          achCell.fill = GREY_FILL;
+        }
         // Sales Received -> bridge missing
         ws.getCell(rowNum, base + 5).fill = GREY_FILL;
         ws.getCell(rowNum, base + 6).fill = GREY_FILL;
@@ -726,7 +895,20 @@ export async function buildManagementWorkbook(
     });
     for (let mIdx = 0; mIdx < 12; mIdx++) {
       const base = 16 + mIdx * 7;
-      ws.getCell(totalRow, base).fill = GREY_FILL;
+      const planTotal = ws.getCell(totalRow, base);
+      if (!targetsMissingKey && rows.some((r) => r.target)) {
+        let sum = 0;
+        for (const r of rows) {
+          const v = r.target ? tgtMonthly(r.target, "secondary", mIdx) : null;
+          if (v != null) sum += v;
+        }
+        planTotal.value = sum;
+        planTotal.numFmt = FMT_INT;
+        planTotal.fill = TOTAL_FILL;
+        planTotal.font = { bold: true };
+      } else {
+        planTotal.fill = GREY_FILL;
+      }
       ws.getCell(totalRow, base + 1).fill = GREY_FILL;
       const obA = ws.getCell(totalRow, base + 2);
       const obC = ws.getCell(totalRow, base + 3);
@@ -822,10 +1004,10 @@ export async function buildManagementWorkbook(
     });
   }
 
-  // --- Tab 3: Low Performers (needs targets; empty until Target Master lands)
+  // --- Tab 3: Low Performers (flagged from Target Master achievement)
   {
     const ws = wb.addWorksheet(`Low Performers `);
-    const cols = summaryCols(fy, ordersMissingKey);
+    const cols = summaryCols(filters, ordersMissingKey, targetsMissingKey);
     ws.mergeCells(1, 2, 1, 6);
     const title = ws.getCell(1, 2);
     title.value = `Below ${filters.lowPerfPct}% Acheivement & Cost Ratio Above 5%`;
@@ -833,7 +1015,16 @@ export async function buildManagementWorkbook(
     ws.getCell(1, 7).value = fy;
     ws.getCell(2, 2).value = "Count";
     ws.getCell(2, 2).font = { bold: true };
-    ws.getCell(2, 3).value = 0;
+    const lowRows = targetsMissingKey
+      ? []
+      : rows.filter((r) => {
+          const a = achievement(
+            r.orders?.amount,
+            tgtRange(r, "secondary", filters.monthFrom, filters.monthTo),
+          );
+          return a != null && a < filters.lowPerfPct / 100;
+        });
+    ws.getCell(2, 3).value = lowRows.length;
     cols.forEach((c, i) => {
       const cell = ws.getCell(3, 1 + i);
       cell.value = c.header;
@@ -842,18 +1033,23 @@ export async function buildManagementWorkbook(
       cell.alignment = { wrapText: true, vertical: "middle", horizontal: "center" };
       ws.getColumn(1 + i).width = c.width ?? 12;
     });
-    note(
-      missing,
-      "target",
-      "Low Performers: achievement % cannot be computed until a Target Master is connected, so no members can be flagged",
-    );
+    lowRows.forEach((r, ri) => {
+      cols.forEach((c, ci) => writeCell(ws, 4 + ri, 1 + ci, c, r));
+    });
+    if (targetsMissingKey) {
+      note(
+        missing,
+        "target",
+        "Low Performers: achievement % cannot be computed until a Target Master is connected, so no members can be flagged",
+      );
+    }
   }
 
   // --- Tab 4: Summary
   {
     const ws = wb.addWorksheet(`Summary ${s}`);
     ws.views = [{ state: "frozen", xSplit: 3, ySplit: 6 }];
-    const cols = summaryCols(fy, ordersMissingKey);
+    const cols = summaryCols(filters, ordersMissingKey, targetsMissingKey);
     collectMissing(missing, cols, ws.name);
     const fyStart = fyBoundsSerial(fy).start;
     const newMembers = rows.filter(
@@ -882,7 +1078,7 @@ export async function buildManagementWorkbook(
   {
     const ws = wb.addWorksheet("Data");
     ws.views = [{ state: "frozen", xSplit: 3, ySplit: 3 }];
-    const cols = dataCols(fy, ordersMissingKey);
+    const cols = dataCols(filters, ordersMissingKey, targetsMissingKey);
     collectMissing(missing, cols, ws.name);
     writeGrid(ws, cols, rows, 3, null);
   }

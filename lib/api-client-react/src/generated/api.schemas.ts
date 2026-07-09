@@ -308,6 +308,102 @@ export interface MgmtReportRequest {
   lowPerfPct?: number;
 }
 
+export interface TargetFieldValues {
+  /** Primary target in rupees. */
+  primary: number | null;
+  /** Secondary target in rupees. */
+  secondary: number | null;
+  /** Direct Dealer target in rupees. */
+  directDealer: number | null;
+  /** Business Plan in rupees. */
+  businessPlan: number | null;
+}
+
+/**
+ * Twelve fiscal-month values (April..March) per field. Null cells fall back to an equal twelfth of the annual figure.
+ */
+export interface TargetFieldMonthly {
+  primary: (number | null)[];
+  secondary: (number | null)[];
+  directDealer: (number | null)[];
+  businessPlan: (number | null)[];
+}
+
+export type SavedTargetLevel = typeof SavedTargetLevel[keyof typeof SavedTargetLevel];
+
+
+export const SavedTargetLevel = {
+  TM: 'TM',
+  STATE_HEAD: 'STATE_HEAD',
+} as const;
+
+export interface SavedTarget {
+  level: SavedTargetLevel;
+  annual: TargetFieldValues;
+  monthly: TargetFieldMonthly;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+export interface TargetsMember {
+  name: string;
+  stateHead: string;
+  state: string;
+  headquarter: string;
+  /** Prior fiscal year order-booking actual in rupees. */
+  priorYearActual: number;
+  saved: SavedTarget | null;
+}
+
+export interface TargetsResponse {
+  fy: string;
+  /** All State Heads in the active roster. */
+  stateHeads: string[];
+  members: TargetsMember[];
+}
+
+export interface SplitPreviewMember {
+  name: string;
+  priorYearActual: number;
+  allocated: TargetFieldValues;
+}
+
+export interface SplitPreviewResponse {
+  fy: string;
+  stateHead: string;
+  members: SplitPreviewMember[];
+}
+
+export type SaveTargetRowLevel = typeof SaveTargetRowLevel[keyof typeof SaveTargetRowLevel];
+
+
+export const SaveTargetRowLevel = {
+  TM: 'TM',
+  STATE_HEAD: 'STATE_HEAD',
+} as const;
+
+export interface SaveTargetRow {
+  teamMember: string;
+  level?: SaveTargetRowLevel;
+  annual: TargetFieldValues;
+  monthly?: TargetFieldMonthly;
+}
+
+export interface SaveTargetsRequest {
+  /** @pattern ^\d{4}-\d{2}$ */
+  fy: string;
+  updatedBy?: string;
+  rows: SaveTargetRow[];
+}
+
+export interface SaveTargetsResult {
+  fy: string;
+  /** Rows updated in place in the Target Master sheet. */
+  updated: number;
+  /** New rows appended to the Target Master sheet. */
+  appended: number;
+}
+
 export type ListDriveFilesParams = {
 /**
  * Optional search text matched against file names.
@@ -339,5 +435,28 @@ fy?: string;
  * @pattern ^\d{4}-\d{2}$
  */
 compare?: string;
+};
+
+export type GetTargetsParams = {
+/**
+ * Fiscal year like 2026-27. Defaults to the current FY.
+ */
+fy?: string;
+/**
+ * Limit rows to one State Head's team.
+ */
+stateHead?: string;
+};
+
+export type GetTargetSplitPreviewParams = {
+/**
+ * Fiscal year like 2026-27. Defaults to the current FY.
+ */
+fy?: string;
+stateHead: string;
+primary?: number;
+secondary?: number;
+directDealer?: number;
+businessPlan?: number;
 };
 

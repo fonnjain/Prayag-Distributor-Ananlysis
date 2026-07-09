@@ -320,3 +320,106 @@ export const GenerateMgmtReportBody = zod.object({
 export const GenerateMgmtReportResponse = zod.unknown()
 
 
+/**
+ * Returns the active roster (optionally scoped to one State Head) with each member's prior-year order actuals and any targets already saved in the Prayag Target Master sheet.
+ * @summary Team members with saved targets for a fiscal year
+ */
+export const GetTargetsQueryParams = zod.object({
+  "fy": zod.coerce.string().optional().describe('Fiscal year like 2026-27. Defaults to the current FY.'),
+  "stateHead": zod.coerce.string().optional().describe('Limit rows to one State Head\'s team.')
+})
+
+export const GetTargetsResponse = zod.object({
+  "fy": zod.string(),
+  "stateHeads": zod.array(zod.string()).describe('All State Heads in the active roster.'),
+  "members": zod.array(zod.object({
+  "name": zod.string(),
+  "stateHead": zod.string(),
+  "state": zod.string(),
+  "headquarter": zod.string(),
+  "priorYearActual": zod.number().describe('Prior fiscal year order-booking actual in rupees.'),
+  "saved": zod.object({
+  "level": zod.enum(['TM', 'STATE_HEAD']),
+  "annual": zod.object({
+  "primary": zod.number().nullable().describe('Primary target in rupees.'),
+  "secondary": zod.number().nullable().describe('Secondary target in rupees.'),
+  "directDealer": zod.number().nullable().describe('Direct Dealer target in rupees.'),
+  "businessPlan": zod.number().nullable().describe('Business Plan in rupees.')
+}),
+  "monthly": zod.object({
+  "primary": zod.array(zod.number().nullable()),
+  "secondary": zod.array(zod.number().nullable()),
+  "directDealer": zod.array(zod.number().nullable()),
+  "businessPlan": zod.array(zod.number().nullable())
+}).describe('Twelve fiscal-month values (April..March) per field. Null cells fall back to an equal twelfth of the annual figure.\n'),
+  "updatedBy": zod.string(),
+  "updatedAt": zod.string()
+}).nullable()
+}))
+})
+
+
+/**
+ * Validates and upserts one row per team member into the Prayag Target Master Google Sheet, keyed by fiscal year and team member. Monthly cells left blank fall back to an equal twelfth of the annual figure.
+ * @summary Save targets to the Target Master sheet
+ */
+export const saveTargetsBodyFyRegExp = new RegExp('^\\d{4}-\\d{2}$');
+
+
+export const SaveTargetsBody = zod.object({
+  "fy": zod.string().regex(saveTargetsBodyFyRegExp),
+  "updatedBy": zod.string().optional(),
+  "rows": zod.array(zod.object({
+  "teamMember": zod.string(),
+  "level": zod.enum(['TM', 'STATE_HEAD']).optional(),
+  "annual": zod.object({
+  "primary": zod.number().nullable().describe('Primary target in rupees.'),
+  "secondary": zod.number().nullable().describe('Secondary target in rupees.'),
+  "directDealer": zod.number().nullable().describe('Direct Dealer target in rupees.'),
+  "businessPlan": zod.number().nullable().describe('Business Plan in rupees.')
+}),
+  "monthly": zod.object({
+  "primary": zod.array(zod.number().nullable()),
+  "secondary": zod.array(zod.number().nullable()),
+  "directDealer": zod.array(zod.number().nullable()),
+  "businessPlan": zod.array(zod.number().nullable())
+}).optional().describe('Twelve fiscal-month values (April..March) per field. Null cells fall back to an equal twelfth of the annual figure.\n')
+}))
+})
+
+export const SaveTargetsResponse = zod.object({
+  "fy": zod.string(),
+  "updated": zod.number().describe('Rows updated in place in the Target Master sheet.'),
+  "appended": zod.number().describe('New rows appended to the Target Master sheet.')
+})
+
+
+/**
+ * Splits annual totals across the selected State Head's active team members pro-rata by each member's prior-year order actuals. Members with no prior-year data receive an average-sized share. Allocations are rounded to whole rupees and always sum exactly to the entered totals.
+ * @summary Pro-rata split of State Head totals across team members
+ */
+export const GetTargetSplitPreviewQueryParams = zod.object({
+  "fy": zod.coerce.string().optional().describe('Fiscal year like 2026-27. Defaults to the current FY.'),
+  "stateHead": zod.coerce.string(),
+  "primary": zod.coerce.number().optional(),
+  "secondary": zod.coerce.number().optional(),
+  "directDealer": zod.coerce.number().optional(),
+  "businessPlan": zod.coerce.number().optional()
+})
+
+export const GetTargetSplitPreviewResponse = zod.object({
+  "fy": zod.string(),
+  "stateHead": zod.string(),
+  "members": zod.array(zod.object({
+  "name": zod.string(),
+  "priorYearActual": zod.number(),
+  "allocated": zod.object({
+  "primary": zod.number().nullable().describe('Primary target in rupees.'),
+  "secondary": zod.number().nullable().describe('Secondary target in rupees.'),
+  "directDealer": zod.number().nullable().describe('Direct Dealer target in rupees.'),
+  "businessPlan": zod.number().nullable().describe('Business Plan in rupees.')
+})
+}))
+})
+
+

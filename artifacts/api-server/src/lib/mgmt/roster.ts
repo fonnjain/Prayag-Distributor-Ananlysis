@@ -48,6 +48,7 @@ type MgmtSources = {
     tab: string;
     files_by_year: Record<string, string>;
   };
+  target_master: { sheetId: string; name: string; tab: string };
   group_index: { sheetId: string; tab: string };
 };
 

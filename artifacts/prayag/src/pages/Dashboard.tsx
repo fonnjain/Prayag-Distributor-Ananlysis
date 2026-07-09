@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { Link, useLocation } from "wouter";
+import { useLocation } from "wouter";
 import { useTheme } from "next-themes";
-import { Sun, Moon, Printer, Menu, X, BarChart3, Map, LayoutGrid, Package, TrendingUp, LineChart, Database, Bot, FileSpreadsheet } from "lucide-react";
+import { Sun, Moon, Printer, Menu, X, BarChart3, Map, LayoutGrid, Package, TrendingUp, LineChart, Database, Bot, FileSpreadsheet, Target } from "lucide-react";
 import Overview from "@/components/dashboard/Overview";
 import Regional from "@/components/dashboard/Regional";
 import Resources from "@/components/dashboard/Resources";
@@ -11,6 +11,7 @@ import DataSources from "@/components/dashboard/DataSources";
 import Growth from "@/components/dashboard/Growth";
 import Analyst from "@/components/dashboard/Analyst";
 import MgmtReports from "@/components/dashboard/MgmtReports";
+import Targets from "@/components/dashboard/Targets";
 import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
 import { useDashboard } from "@/data/dashboard-context";
@@ -24,12 +25,19 @@ const AREAS = [
   { id: "growth", label: "Growth", icon: LineChart, component: Growth },
   { id: "analyst", label: "AI Analyst", icon: Bot, component: Analyst },
   { id: "reports", label: "Reports", icon: FileSpreadsheet, component: MgmtReports },
+  { id: "targets", label: "Targets", icon: Target, component: Targets },
   { id: "sources", label: "Data Sources", icon: Database, component: DataSources },
 ];
 
+export const AREA_IDS = AREAS.map((a) => a.id);
+
 export default function Dashboard() {
   const { theme, setTheme } = useTheme();
-  const [activeArea, setActiveArea] = useState(AREAS[0].id);
+  const [location, setLocation] = useLocation();
+  const activeArea =
+    AREAS.find((a) => location === `/${a.id}`)?.id ?? AREAS[0].id;
+  const setActiveArea = (id: string) =>
+    setLocation(id === AREAS[0].id ? "/" : `/${id}`);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const isDark = theme === "dark";
 

@@ -22,6 +22,11 @@
       "2021-22": "1RtRByRmNQorYOEeHsZuOy1GIkB7dVu7MNv9P_pg97Bs"
     }
   },
+  "target_master": {
+    "sheetId": "1ZLok3_8AZHdfrUm4T2lJmonAjngQFz4TuNLkHtU3p2I",
+    "name": "Prayag Target Master",
+    "tab": "targets"
+  },
   "group_index": {
     "sheetId": "1g-4_lDCeXQfUmp-VQ_mEWXQJyLMJXUGmRwGgughYHFY",
     "tab": "INDEX"

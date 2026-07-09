@@ -162,3 +162,83 @@ export async function readAllTabRows(
   });
   return all;
 }
+
+// ---------------------------------------------------------------------------
+// Writes — allowlisted spreadsheets only.
+//
+// The whole pipeline is read-only except the Target Master sheet. Every write
+// path goes through assertWritable, so a bug elsewhere can never write to a
+// register, order, roster, or index sheet.
+// ---------------------------------------------------------------------------
+
+const writableSheetIds = new Set<string>();
+
+export function registerWritableSheet(spreadsheetId: string): void {
+  if (spreadsheetId) writableSheetIds.add(spreadsheetId);
+}
+
+function assertWritable(spreadsheetId: string): void {
+  if (!writableSheetIds.has(spreadsheetId)) {
+    throw new Error(
+      `Refusing to write to spreadsheet ${spreadsheetId}: it is not registered as writable`,
+    );
+  }
+}
+
+async function sheetsSend(
+  path: string,
+  method: "POST" | "PUT",
+  body: unknown,
+): Promise<unknown> {
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const token = await getGoogleAccessToken();
+    const res = await fetch(`${SHEETS_BASE}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) return res.json();
+    const text = await res.text().catch(() => "");
+    lastError = new Error(
+      `Sheets API write failed (${res.status}): ${text.slice(0, 300)}`,
+    );
+    if (!RETRYABLE_STATUS.has(res.status) || attempt === MAX_ATTEMPTS) {
+      throw lastError;
+    }
+    await sleep(attempt * 15_000);
+  }
+  throw lastError ?? new Error("Sheets API write failed");
+}
+
+// Updates one or more explicit ranges in a single batch (RAW input).
+export async function updateValuesBatch(
+  spreadsheetId: string,
+  data: Array<{ range: string; values: SheetCellValue[][] }>,
+): Promise<void> {
+  assertWritable(spreadsheetId);
+  if (data.length === 0) return;
+  await sheetsSend(`/${spreadsheetId}/values:batchUpdate`, "POST", {
+    valueInputOption: "RAW",
+    data,
+  });
+}
+
+// Appends rows after the last data row of the tab (RAW input).
+export async function appendValues(
+  spreadsheetId: string,
+  title: string,
+  values: SheetCellValue[][],
+): Promise<void> {
+  assertWritable(spreadsheetId);
+  if (values.length === 0) return;
+  const range = encodeURIComponent(`${quoteTitle(title)}!A1`);
+  await sheetsSend(
+    `/${spreadsheetId}/values/${range}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+    "POST",
+    { values },
+  );
+}
