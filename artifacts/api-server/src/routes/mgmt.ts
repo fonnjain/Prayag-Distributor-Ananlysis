@@ -8,6 +8,11 @@ import {
   type ReportFilters,
 } from "../lib/mgmt/report.js";
 import { loadTargetsForFy } from "../lib/mgmt/targets.js";
+import {
+  getCachedStateHeadRegisters,
+  countStateHeadWorkbooks,
+} from "../lib/mgmt/stateHeadRegisters.js";
+import { loadPartyBridge } from "../lib/mgmt/bridge.js";
 
 const router: IRouter = Router();
 
@@ -81,6 +86,39 @@ router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> =
         ordersDetail = `The order booking Drive folder could not be listed: ${err instanceof Error ? err.message : String(err)}`;
       }
     }
+    // State-Head sale registers: use the precise per-workbook statuses if a
+    // report already loaded them; otherwise a cheap folder count only.
+    let registersStatus: string;
+    let registersDetail: string;
+    const cachedRegisters = getCachedStateHeadRegisters();
+    if (cachedRegisters) {
+      const ok = cachedRegisters.statuses.filter((st) => st.status === "ok").length;
+      const failed = cachedRegisters.statuses.length - ok;
+      if (cachedRegisters.folderError) {
+        registersStatus = "missing";
+        registersDetail = cachedRegisters.folderError;
+      } else {
+        registersStatus = failed === 0 ? "connected" : ok > 0 ? "partial" : "missing";
+        registersDetail =
+          `${ok} of ${cachedRegisters.statuses.length} State-Head sale register workbooks read ` +
+          `(${cachedRegisters.byHead.size} heads).` +
+          (failed > 0 ? ` ${failed} failed — see the report's Missing Data tab.` : "");
+      }
+    } else {
+      try {
+        const count = await countStateHeadWorkbooks();
+        registersStatus = count > 0 ? "connected" : "missing";
+        registersDetail =
+          count > 0
+            ? `${count} register workbooks found in the State Heads Drive folder; they are read when a report is generated.`
+            : "The State Heads Drive folder contains no register workbooks.";
+      } catch (err) {
+        req.log.warn({ err }, "state heads folder check failed");
+        registersStatus = "missing";
+        registersDetail = `The State Heads Drive folder could not be listed: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
+    const bridge = await loadPartyBridge();
     const sources = [
       {
         key: "roster",
@@ -96,6 +134,18 @@ router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> =
         name: "Secondary order booking",
         status: ordersStatus,
         detail: ordersDetail,
+      },
+      {
+        key: "registers",
+        name: "State-Head sale registers",
+        status: registersStatus,
+        detail: registersDetail,
+      },
+      {
+        key: "salebridge",
+        name: "Party to team member sale bridge",
+        status: bridge.status === "ok" ? "connected" : "missing",
+        detail: bridge.detail,
       },
       await targetsSource(req),
       {
