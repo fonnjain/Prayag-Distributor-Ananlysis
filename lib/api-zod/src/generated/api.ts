@@ -342,6 +342,16 @@ export const VerifyMgmtReportResponse = zod.object({
   "deltaPct": zod.number().nullable().describe('Percentage difference of actual vs expected.'),
   "status": zod.enum(['pass', 'warn', 'fail'])
 })),
+  "context": zod.object({
+  "registeredRetailers": zod.number().nullable().describe('Registered retailers (retailer master; null when not loaded in-app).'),
+  "activeRetailers": zod.number().describe('Retailers with at least one order in the FY.'),
+  "activeRetailerPct": zod.number().nullable().describe('Active retailers as a percent of registered retailers.'),
+  "registeredMembers": zod.number().describe('Registered team members in the roster spine.'),
+  "activeMembers": zod.number().describe('Distinct team-member names that booked at least one order.'),
+  "activeMemberPct": zod.number().nullable().describe('Roster-matched active members as a percent of registered members.'),
+  "unmatchedNames": zod.number().describe('Order-booking names that matched no roster member.'),
+  "unmatchedSale": zod.number().describe('Net Sale carried by unmatched names (company total minus roster-attributed total).')
+}).describe('Registered vs Active counts and Active% for retailers and members, plus roster-match remainder.').nullable(),
   "crossFoot": zod.object({
   "memberSaleTotal": zod.number().describe('Sum of per-member Sale.'),
   "headSaleTotal": zod.number().describe('Sum of per-head Sale.'),

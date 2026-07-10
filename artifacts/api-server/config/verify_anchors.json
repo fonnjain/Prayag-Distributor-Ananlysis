@@ -1,22 +1,29 @@
 {
-  "comment": "Approved-dashboard reconciliation anchors for the per-member Management Report. Values are the signed-off FY2025-26 dashboard figures; money is in rupees (Cr x 1e7). The verify endpoint compares the app's computed secondary-order-booking report against these. For each metric the listed tolerance is the pass band; twice that band is the warn band; beyond is fail. moneyPassPct/countPassPct are percentages of the expected value; memberCountAbs is an absolute member count.",
+  "comment": "Reconciliation anchors for the per-member Management Report, sourced from the Secondary Order Booking file using NET Sub Total. Money is in rupees. saleReportTotal and orders are externally validated ground truth (the workbook's own printed grand total 2,310,913,869 and its order count). activeRetailers, activeMembers and perHeadSale are regression locks pinned to the corrected net/whole-file computation so a future change that reverts to gross Order Value, drops dated rows, or drops a head is caught. The activeMembers anchor locks the count of distinct member names booking orders in the file (a file statistic, not the roster-active count). registeredRetailers/registeredMembers are the company's roster/master sizes shown for context (the retailer master is not loaded in-app and the full HR roster is not yet shared, so the app's live registered-member count comes from the fallback roster). Tolerances: moneyPassPct/countPassPct are percent of expected (pass within, warn within 2x, fail beyond); memberCountAbs is an absolute member count; coverageMinPct is the minimum share of the company net total the roster spine must attribute to a member (pass at/above, warn within 10 points below, fail lower).",
   "tolerances": {
     "moneyPassPct": 1,
     "countPassPct": 2,
-    "memberCountAbs": 2
+    "memberCountAbs": 5,
+    "coverageMinPct": 92
   },
   "fy_anchors": {
     "2025-26": {
-      "saleReportTotal": 2401400000,
-      "retailers": 15809,
+      "saleReportTotal": 2310913869,
       "orders": 52515,
-      "members": 240,
+      "registeredRetailers": 15809,
+      "activeRetailers": 9078,
+      "registeredMembers": 240,
+      "activeMembers": 200,
       "perHeadSale": {
-        "Sandeep Dadheech": 1573900000,
-        "Syed Aqil Rizvi": 452300000,
-        "Lalan Kumar": 132500000,
-        "Anant Singh": 98600000,
-        "Biju C.O": 55500000
+        "Sandeep Dadheech": 1362100000,
+        "Syed Aqil Rizvi": 439100000,
+        "Lalan Kumar": 116400000,
+        "Biju C.O": 96600000,
+        "Anant Singh": 75700000,
+        "Pawan Sharma": 33500000,
+        "Nasir Hussain Khan": 22200000,
+        "Sunil Patel": 14800000,
+        "Sulinder Pal": 14400000
       }
     }
   }

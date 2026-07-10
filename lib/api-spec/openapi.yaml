@@ -1067,6 +1067,46 @@ components:
         - actual
         - deltaPct
         - status
+    MgmtVerifyContext:
+      type: object
+      description: Registered vs Active counts and Active% for retailers and members, plus roster-match remainder.
+      properties:
+        registeredRetailers:
+          type: number
+          nullable: true
+          description: Registered retailers (retailer master; null when not loaded in-app).
+        activeRetailers:
+          type: number
+          description: Retailers with at least one order in the FY.
+        activeRetailerPct:
+          type: number
+          nullable: true
+          description: Active retailers as a percent of registered retailers.
+        registeredMembers:
+          type: number
+          description: Registered team members in the roster spine.
+        activeMembers:
+          type: number
+          description: Distinct team-member names that booked at least one order.
+        activeMemberPct:
+          type: number
+          nullable: true
+          description: Roster-matched active members as a percent of registered members.
+        unmatchedNames:
+          type: number
+          description: Order-booking names that matched no roster member.
+        unmatchedSale:
+          type: number
+          description: Net Sale carried by unmatched names (company total minus roster-attributed total).
+      required:
+        - registeredRetailers
+        - activeRetailers
+        - activeRetailerPct
+        - registeredMembers
+        - activeMembers
+        - activeMemberPct
+        - unmatchedNames
+        - unmatchedSale
     MgmtVerifyCrossFoot:
       type: object
       properties:
@@ -1105,6 +1145,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MgmtVerifyCheck"
+        context:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/MgmtVerifyContext"
         crossFoot:
           nullable: true
           allOf:
@@ -1119,6 +1163,7 @@ components:
         - available
         - overall
         - checks
+        - context
         - crossFoot
         - missingHeads
     TargetFieldValues:

@@ -426,6 +426,47 @@ export default function MgmtReports() {
                   <CheckRow key={c.key} check={c} />
                 ))}
               </div>
+              {verify.data.context && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-lg border border-border/50 bg-background/50 p-3">
+                    <p className="text-xs text-muted-foreground">Retailers</p>
+                    <p className="text-sm font-medium">
+                      {verify.data.context.activeRetailers.toLocaleString("en-IN")} active
+                      {verify.data.context.registeredRetailers != null && (
+                        <>
+                          {" / "}
+                          {verify.data.context.registeredRetailers.toLocaleString("en-IN")} registered
+                        </>
+                      )}
+                    </p>
+                    {verify.data.context.activeRetailerPct != null && (
+                      <p className="text-xs text-muted-foreground">
+                        Active {verify.data.context.activeRetailerPct}%
+                      </p>
+                    )}
+                  </div>
+                  <div className="rounded-lg border border-border/50 bg-background/50 p-3">
+                    <p className="text-xs text-muted-foreground">Members</p>
+                    <p className="text-sm font-medium">
+                      {verify.data.context.activeMembers.toLocaleString("en-IN")} active /{" "}
+                      {verify.data.context.registeredMembers.toLocaleString("en-IN")} registered
+                    </p>
+                    {verify.data.context.activeMemberPct != null && (
+                      <p className="text-xs text-muted-foreground">
+                        Active {verify.data.context.activeMemberPct}%
+                      </p>
+                    )}
+                  </div>
+                  {verify.data.context.unmatchedNames > 0 && (
+                    <div className="col-span-2 text-xs text-muted-foreground border border-border/50 rounded-md p-2">
+                      {verify.data.context.unmatchedNames} order-booking name
+                      {verify.data.context.unmatchedNames === 1 ? "" : "s"} did not match the
+                      roster, carrying {formatCr(verify.data.context.unmatchedSale)} of net Sale
+                      that is counted in the company total but not attributed to a member or head.
+                    </div>
+                  )}
+                </div>
+              )}
               {verify.data.crossFoot && (
                 <div className="flex items-start gap-2 text-xs text-muted-foreground">
                   {verify.data.crossFoot.withinTolerance ? (

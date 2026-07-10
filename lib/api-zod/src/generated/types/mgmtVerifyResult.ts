@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { MgmtVerifyCheck } from './mgmtVerifyCheck';
+import type { MgmtVerifyContext } from './mgmtVerifyContext';
 import type { MgmtVerifyCrossFoot } from './mgmtVerifyCrossFoot';
 import type { MgmtVerifyResultOverall } from './mgmtVerifyResultOverall';
 
@@ -17,6 +18,7 @@ export interface MgmtVerifyResult {
   reason?: string;
   overall: MgmtVerifyResultOverall;
   checks: MgmtVerifyCheck[];
+  context: MgmtVerifyContext | null;
   crossFoot: MgmtVerifyCrossFoot | null;
   /** Anchor heads that computed to zero (dropped in output). */
   missingHeads: string[];

@@ -31,8 +31,7 @@ import {
 import {
   normName,
   parseOrderDate,
-  fiscalMonthIndex,
-  fyBoundsSerial,
+  mgmtMonthIndex,
   fyShort,
   fyStartYear,
 } from "./names.js";
@@ -44,8 +43,10 @@ export type TmOrderAgg = {
   displayName: string;
   amount: number;
   monthAmount: number[];
-  // Sale Report measure = Σ "Order Value" (gross MRP, per-line) — distinct
-  // from `amount`/`monthAmount`, which are Σ "Sub Total" (net Order Booked).
+  // Sale Report measure = Σ net "Sub Total" — identical to `amount`. The report
+  // keeps a separate field so the Sale and Order Booked columns stay wired, but
+  // both are NET after discount now (the gross "Order Value" column is never
+  // used, per the signed-off definition).
   saleAmount: number;
   saleMonthAmount: number[];
   monthOrderIds: Array<Set<string>>;
@@ -65,7 +66,8 @@ export type OrderFileAgg = {
   // raw Segment label -> total in-FY amount (for INDEX-map reconciliation)
   segmentTotals: Map<string, number>;
   totalAmount: number;
-  // Σ "Order Value" (gross MRP) across in-FY rows = the Sale Report total.
+  // Σ net "Sub Total" across all counted rows = the Sale Report total.
+  // Equal to totalAmount (both net); kept for the report's Sale columns.
   totalSaleAmount: number;
   rowsRead: number;
   loadedAt: number;
@@ -153,8 +155,6 @@ type ColMap = {
   retailerId: number;
   orderId: number;
   subTotal: number;
-  // Gross MRP per line ("Order Value"); -1 in older files that lack it.
-  orderValue: number;
   distributor: number;
   teamMember: number;
   segment: number;
@@ -178,12 +178,10 @@ function detectColumns(row: SheetCellValue[]): ColMap | null {
   const date = find("date", "orderdate");
   const retailerId = find("retailerid", "retid", "id", "retailers", "retailer", "retailername");
   const orderId = find("orderid", "orderno");
-  // "Sub Total" (net) is the Order Booked measure and reconciles with the
-  // workbook's own header total; fall back to "Order Value" only if Sub Total
-  // is absent. "Order Value" (gross MRP) is captured separately as the Sale
-  // Report measure — it may be absent in older files.
+  // "Sub Total" (net after discount) is the reconciling measure for BOTH the
+  // Order Booked and Sale Report columns; it matches the workbook's own header
+  // total. Fall back to "Order Value" only if Sub Total is absent (older files).
   const subTotal = find("subtotal", "ordervalue");
-  const orderValue = find("ordervalue");
   const distributor = find("distributor", "distributorname");
   const teamMember = find("teammembername", "teammember");
   const segment = find("segment");
@@ -191,7 +189,7 @@ function detectColumns(row: SheetCellValue[]): ColMap | null {
   // carry date/team/segment/value labels cannot be mistaken for the header.
   if (date < 0 || teamMember < 0 || subTotal < 0 || segment < 0 || retailerId < 0)
     return null;
-  return { date, retailerId, orderId, subTotal, orderValue, distributor, teamMember, segment };
+  return { date, retailerId, orderId, subTotal, distributor, teamMember, segment };
 }
 
 // Extract the Google HTTP status from a Sheets/Drive error message like
@@ -268,14 +266,12 @@ async function loadOrderFileUncached(
     return null;
   }
   const tab = mgmtSources().secondary_order_booking.tab;
-  const bounds = fyBoundsSerial(fy);
   const perTm = new Map<string, TmOrderAgg>();
   const retailerFirst = new Map<string, number>();
   const segmentTotals = new Map<string, number>();
   let cols: ColMap | null = null;
   let totalAmount = 0;
   let totalSaleAmount = 0;
-  let skippedOutOfFy = 0;
   // Multi-line orders can leave Date/Retailer/Order ID/Team Member blank on
   // continuation rows — forward-fill them down the block. Carried across
   // chunk boundaries (chunks arrive sequentially).
@@ -324,14 +320,8 @@ async function loadOrderFileUncached(
         const amount = Number(amountRaw);
         const lineAmount =
           !blank(amountRaw) && Number.isFinite(amount) ? amount : 0;
-        // Order Value (gross MRP) is per-line, never forward-filled; absent in
-        // older files (orderValue < 0) so Sale Report stays 0 for those years.
-        let lineSale = 0;
-        if (cols.orderValue >= 0) {
-          const saleRaw = r[cols.orderValue];
-          const saleNum = Number(saleRaw);
-          if (!blank(saleRaw) && Number.isFinite(saleNum)) lineSale = saleNum;
-        }
+        // Sale Report and Order Booked are both the NET Sub Total now.
+        const lineSale = lineAmount;
         const retailerId = carry.retailerId;
         if (retailerId) {
           const prev = retailerFirst.get(retailerId);
@@ -339,12 +329,11 @@ async function loadOrderFileUncached(
             retailerFirst.set(retailerId, dateSerial);
           }
         }
-        if (dateSerial < bounds.start || dateSerial > bounds.end) {
-          skippedOutOfFy++;
-          continue;
-        }
-        const monthIdx = fiscalMonthIndex(dateSerial, fy);
-        if (monthIdx == null) continue;
+        // Count the whole file the way the company does: every dated row is
+        // bucketed by calendar month (Apr->0 .. Mar->11), never dropped for
+        // being out of the fiscal year, so the annual total reconciles to the
+        // workbook's own grand total and the signed-off per-head figures.
+        const monthIdx = mgmtMonthIndex(dateSerial);
         const key = normName(tmRaw);
         if (!key) continue;
         let agg = perTm.get(key);
@@ -450,7 +439,6 @@ async function loadOrderFileUncached(
       segments: segmentTotals.size,
       totalAmount: Math.round(totalAmount),
       totalSaleAmount: Math.round(totalSaleAmount),
-      skippedOutOfFy,
     },
     "order booking file opened and aggregated",
   );

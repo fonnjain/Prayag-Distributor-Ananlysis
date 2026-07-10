@@ -36,6 +36,7 @@ export * from './mgmtSourceStatusStatus';
 export * from './mgmtVerifyCheck';
 export * from './mgmtVerifyCheckStatus';
 export * from './mgmtVerifyCheckUnit';
+export * from './mgmtVerifyContext';
 export * from './mgmtVerifyCrossFoot';
 export * from './mgmtVerifyResult';
 export * from './mgmtVerifyResultOverall';

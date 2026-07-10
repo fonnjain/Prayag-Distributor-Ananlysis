@@ -1303,11 +1303,19 @@ export async function buildManagementWorkbook(
     const leftMembers = rows.filter(
       (r) => r.m.leftDateSerial != null || r.m.activeLeft.toLowerCase() === "left",
     ).length;
+    // Active = booked at least one order this FY (>=1 order), Registered = roster
+    // spine. Active% = active / registered.
+    const orderedMembers = rows.filter(
+      (r) => (r.orders?.orderCount ?? 0) > 0,
+    ).length;
     ws.getCell(4, 2).value = "New Team Members";
     ws.getCell(4, 3).value = "No. Of Active Team Members";
     ws.getCell(4, 4).value = "Left Team Members";
     ws.getCell(4, 5).value = "Total";
-    for (let c = 2; c <= 5; c++) {
+    ws.getCell(4, 6).value = "Registered Team Members";
+    ws.getCell(4, 7).value = "Active Team Members (>=1 order)";
+    ws.getCell(4, 8).value = "Active %";
+    for (let c = 2; c <= 8; c++) {
       ws.getCell(4, c).font = { bold: true, size: 9 };
       ws.getCell(4, c).fill = HEADER_FILL;
       ws.getCell(4, c).alignment = { wrapText: true };
@@ -1316,7 +1324,75 @@ export async function buildManagementWorkbook(
     ws.getCell(5, 3).value = rows.length - leftMembers;
     ws.getCell(5, 4).value = leftMembers;
     ws.getCell(5, 5).value = rows.length;
+    ws.getCell(5, 6).value = rows.length;
+    ws.getCell(5, 7).value = orderedMembers;
+    const activePctCell = ws.getCell(5, 8);
+    activePctCell.value = rows.length > 0 ? orderedMembers / rows.length : null;
+    activePctCell.numFmt = "0.0%";
     writeGrid(ws, cols, rows, 6, 5);
+  }
+
+  // --- Tab 4b: Head Summary (Registered vs Active members + Active% + net Sale)
+  {
+    const ws = wb.addWorksheet(`Head Summary ${s}`);
+    ws.views = [{ state: "frozen", ySplit: 2 }];
+    type HeadAgg = { registered: number; active: number; sale: number };
+    const byHead = new Map<string, HeadAgg>();
+    for (const r of rows) {
+      const head = r.m.stateHead?.trim() || "(unassigned)";
+      const e = byHead.get(head) ?? { registered: 0, active: 0, sale: 0 };
+      e.registered++;
+      if ((r.orders?.orderCount ?? 0) > 0) e.active++;
+      e.sale += r.orders?.amount ?? 0;
+      byHead.set(head, e);
+    }
+    const title = ws.getCell(1, 1);
+    title.value = `Head Summary ${fy} — Registered vs Active team members (net Sale)`;
+    title.font = { bold: true, size: 12 };
+    const headers = [
+      "State Head",
+      "Registered Members",
+      "Active Members (>=1 order)",
+      "Active %",
+      "Sale (net)",
+    ];
+    headers.forEach((h, i) => {
+      const cell = ws.getCell(2, i + 1);
+      cell.value = h;
+      cell.font = { bold: true, size: 9 };
+      cell.fill = HEADER_FILL;
+      cell.alignment = { wrapText: true };
+    });
+    ws.getColumn(1).width = 22;
+    for (let c = 2; c <= 5; c++) ws.getColumn(c).width = 16;
+    const ordered = [...byHead.entries()].sort((a, b) => b[1].sale - a[1].sale);
+    let rowNum = 3;
+    let totReg = 0;
+    let totActive = 0;
+    let totSale = 0;
+    for (const [head, e] of ordered) {
+      ws.getCell(rowNum, 1).value = head;
+      ws.getCell(rowNum, 2).value = e.registered;
+      ws.getCell(rowNum, 3).value = e.active;
+      const p = ws.getCell(rowNum, 4);
+      p.value = e.registered > 0 ? e.active / e.registered : null;
+      p.numFmt = "0.0%";
+      ws.getCell(rowNum, 5).value = Math.round(e.sale);
+      totReg += e.registered;
+      totActive += e.active;
+      totSale += e.sale;
+      rowNum++;
+    }
+    const totalCell = ws.getCell(rowNum, 1);
+    totalCell.value = "Total";
+    totalCell.font = { bold: true };
+    ws.getCell(rowNum, 2).value = totReg;
+    ws.getCell(rowNum, 3).value = totActive;
+    const tp = ws.getCell(rowNum, 4);
+    tp.value = totReg > 0 ? totActive / totReg : null;
+    tp.numFmt = "0.0%";
+    ws.getCell(rowNum, 5).value = Math.round(totSale);
+    for (let c = 1; c <= 5; c++) ws.getCell(rowNum, c).font = { bold: true };
   }
 
   // --- Tab 5: Data

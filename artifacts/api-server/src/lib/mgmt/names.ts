@@ -93,18 +93,22 @@ export function dateToSerial(d: Date): number {
   return Math.round((d.getTime() - EXCEL_EPOCH_MS) / MS_PER_DAY);
 }
 
-// Order sheet dates arrive either as dd-mm-yyyy strings or Excel serials.
-// Returns an Excel serial day number, or null when unparseable.
+// Order sheet dates arrive as dd-mm-yyyy OR dd-mm-yy strings, or Excel serials.
+// The live 2025-26 file mixes serials (older rows) with dd-mm-yy strings like
+// "18-04-25"/"31-07-25" (newer rows) — a two-digit year MUST be accepted or
+// ~28k genuine FY rows (~₹14 Cr) silently drop. Returns an Excel serial day
+// number, or null when unparseable.
 export function parseOrderDate(v: unknown): number | null {
   if (v == null || v === "") return null;
   if (typeof v === "number" && Number.isFinite(v)) {
     return v > 20_000 && v < 80_000 ? Math.round(v) : null;
   }
-  const m = /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/.exec(String(v).trim());
+  const m = /^(\d{1,2})[-/](\d{1,2})[-/](\d{2}|\d{4})$/.exec(String(v).trim());
   if (!m) return null;
   const day = Number(m[1]);
   const month = Number(m[2]);
-  const year = Number(m[3]);
+  let year = Number(m[3]);
+  if (m[3].length === 2) year += 2000; // "25" -> 2025
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
   return dateToSerial(new Date(Date.UTC(year, month - 1, day)));
 }
@@ -137,4 +141,18 @@ export function fiscalMonthIndex(serial: number, fy: string): number | null {
   const y = fyStartYear(fy);
   const idx = (d.getUTCFullYear() - y) * 12 + d.getUTCMonth() - 3;
   return idx >= 0 && idx < 12 ? idx : null;
+}
+
+// Management-report month index (Apr->0 .. Mar->11) by MONTH-OF-YEAR only.
+//
+// The per-FY secondary order file is counted the way the company counts it: its
+// own printed grand total and the signed-off per-head figures are Σ of every
+// "Sub Total" row, regardless of the row's year. The file carries a messy tail
+// of off-year dates (prior-quarter Jan-Mar and stray prior-FY rows) that the
+// company's total INCLUDES, so we bucket purely by calendar month and never
+// drop a dated row for being out of the fiscal year. This keeps the monthly
+// columns footing to the annual total that reconciles to the anchors.
+export function mgmtMonthIndex(serial: number): number {
+  const d = serialToDate(serial);
+  return (d.getUTCMonth() - 3 + 12) % 12; // Jan=9,Feb=10,Mar=11,Apr=0,...
 }

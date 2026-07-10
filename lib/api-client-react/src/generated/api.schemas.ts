@@ -344,6 +344,28 @@ export interface MgmtVerifyCheck {
   status: MgmtVerifyCheckStatus;
 }
 
+/**
+ * Registered vs Active counts and Active% for retailers and members, plus roster-match remainder.
+ */
+export interface MgmtVerifyContext {
+  /** Registered retailers (retailer master; null when not loaded in-app). */
+  registeredRetailers: number | null;
+  /** Retailers with at least one order in the FY. */
+  activeRetailers: number;
+  /** Active retailers as a percent of registered retailers. */
+  activeRetailerPct: number | null;
+  /** Registered team members in the roster spine. */
+  registeredMembers: number;
+  /** Distinct team-member names that booked at least one order. */
+  activeMembers: number;
+  /** Roster-matched active members as a percent of registered members. */
+  activeMemberPct: number | null;
+  /** Order-booking names that matched no roster member. */
+  unmatchedNames: number;
+  /** Net Sale carried by unmatched names (company total minus roster-attributed total). */
+  unmatchedSale: number;
+}
+
 export interface MgmtVerifyCrossFoot {
   /** Sum of per-member Sale. */
   memberSaleTotal: number;
@@ -372,6 +394,7 @@ export interface MgmtVerifyResult {
   reason?: string;
   overall: MgmtVerifyResultOverall;
   checks: MgmtVerifyCheck[];
+  context: MgmtVerifyContext | null;
   crossFoot: MgmtVerifyCrossFoot | null;
   /** Anchor heads that computed to zero (dropped in output). */
   missingHeads: string[];
