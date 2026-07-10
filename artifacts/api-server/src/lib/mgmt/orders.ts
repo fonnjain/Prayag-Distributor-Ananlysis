@@ -44,6 +44,10 @@ export type TmOrderAgg = {
   displayName: string;
   amount: number;
   monthAmount: number[];
+  // Sale Report measure = Σ "Order Value" (gross MRP, per-line) — distinct
+  // from `amount`/`monthAmount`, which are Σ "Sub Total" (net Order Booked).
+  saleAmount: number;
+  saleMonthAmount: number[];
   monthOrderIds: Array<Set<string>>;
   orderIds: Set<string>;
   retailers: Map<string, RetailerStat>;
@@ -61,6 +65,8 @@ export type OrderFileAgg = {
   // raw Segment label -> total in-FY amount (for INDEX-map reconciliation)
   segmentTotals: Map<string, number>;
   totalAmount: number;
+  // Σ "Order Value" (gross MRP) across in-FY rows = the Sale Report total.
+  totalSaleAmount: number;
   rowsRead: number;
   loadedAt: number;
 };
@@ -147,6 +153,8 @@ type ColMap = {
   retailerId: number;
   orderId: number;
   subTotal: number;
+  // Gross MRP per line ("Order Value"); -1 in older files that lack it.
+  orderValue: number;
   distributor: number;
   teamMember: number;
   segment: number;
@@ -170,9 +178,12 @@ function detectColumns(row: SheetCellValue[]): ColMap | null {
   const date = find("date", "orderdate");
   const retailerId = find("retailerid", "retid", "id", "retailers", "retailer", "retailername");
   const orderId = find("orderid", "orderno");
-  // "Sub Total" is the measure that reconciles with the workbook's own
-  // totals; fall back to "Order Value" (gross) only if Sub Total is absent.
+  // "Sub Total" (net) is the Order Booked measure and reconciles with the
+  // workbook's own header total; fall back to "Order Value" only if Sub Total
+  // is absent. "Order Value" (gross MRP) is captured separately as the Sale
+  // Report measure — it may be absent in older files.
   const subTotal = find("subtotal", "ordervalue");
+  const orderValue = find("ordervalue");
   const distributor = find("distributor", "distributorname");
   const teamMember = find("teammembername", "teammember");
   const segment = find("segment");
@@ -180,7 +191,7 @@ function detectColumns(row: SheetCellValue[]): ColMap | null {
   // carry date/team/segment/value labels cannot be mistaken for the header.
   if (date < 0 || teamMember < 0 || subTotal < 0 || segment < 0 || retailerId < 0)
     return null;
-  return { date, retailerId, orderId, subTotal, distributor, teamMember, segment };
+  return { date, retailerId, orderId, subTotal, orderValue, distributor, teamMember, segment };
 }
 
 // Extract the Google HTTP status from a Sheets/Drive error message like
@@ -263,6 +274,7 @@ async function loadOrderFileUncached(
   const segmentTotals = new Map<string, number>();
   let cols: ColMap | null = null;
   let totalAmount = 0;
+  let totalSaleAmount = 0;
   let skippedOutOfFy = 0;
   // Multi-line orders can leave Date/Retailer/Order ID/Team Member blank on
   // continuation rows — forward-fill them down the block. Carried across
@@ -312,6 +324,14 @@ async function loadOrderFileUncached(
         const amount = Number(amountRaw);
         const lineAmount =
           !blank(amountRaw) && Number.isFinite(amount) ? amount : 0;
+        // Order Value (gross MRP) is per-line, never forward-filled; absent in
+        // older files (orderValue < 0) so Sale Report stays 0 for those years.
+        let lineSale = 0;
+        if (cols.orderValue >= 0) {
+          const saleRaw = r[cols.orderValue];
+          const saleNum = Number(saleRaw);
+          if (!blank(saleRaw) && Number.isFinite(saleNum)) lineSale = saleNum;
+        }
         const retailerId = carry.retailerId;
         if (retailerId) {
           const prev = retailerFirst.get(retailerId);
@@ -333,6 +353,8 @@ async function loadOrderFileUncached(
             displayName: String(tmRaw).trim(),
             amount: 0,
             monthAmount: new Array(12).fill(0) as number[],
+            saleAmount: 0,
+            saleMonthAmount: new Array(12).fill(0) as number[],
             monthOrderIds: Array.from({ length: 12 }, () => new Set<string>()),
             orderIds: new Set<string>(),
             retailers: new Map<string, RetailerStat>(),
@@ -345,6 +367,9 @@ async function loadOrderFileUncached(
         agg.amount += lineAmount;
         agg.monthAmount[monthIdx] += lineAmount;
         totalAmount += lineAmount;
+        agg.saleAmount += lineSale;
+        agg.saleMonthAmount[monthIdx] += lineSale;
+        totalSaleAmount += lineSale;
         if (carry.segment && lineAmount !== 0) {
           segmentTotals.set(
             carry.segment,
@@ -404,6 +429,7 @@ async function loadOrderFileUncached(
     retailerFirst,
     segmentTotals,
     totalAmount,
+    totalSaleAmount,
     rowsRead,
     loadedAt: Date.now(),
   };
@@ -423,6 +449,7 @@ async function loadOrderFileUncached(
       retailers: retailerFirst.size,
       segments: segmentTotals.size,
       totalAmount: Math.round(totalAmount),
+      totalSaleAmount: Math.round(totalSaleAmount),
       skippedOutOfFy,
     },
     "order booking file opened and aggregated",

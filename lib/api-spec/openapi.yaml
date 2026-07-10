@@ -297,6 +297,47 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /mgmt/verify:
+    get:
+      operationId: verifyMgmtReport
+      tags: [mgmt]
+      summary: Reconcile the computed report against signed-off dashboard anchors
+      description: >
+        Compares the app's computed secondary-order-booking report for the
+        requested fiscal year against the approved dashboard anchors in
+        config/verify_anchors.json. Returns per-check pass/warn/fail with app
+        value vs expected vs delta%, an internal cross-foot, and any roster
+        head missing from output.
+      parameters:
+        - name: fy
+          in: query
+          schema: { type: string }
+          description: Fiscal year like 2025-26. Defaults to 2025-26.
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MgmtVerifyResult"
+        "400":
+          description: Invalid fiscal year
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: No anchors configured for the fiscal year
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Verification failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /targets:
     get:
       operationId: getTargets
@@ -992,6 +1033,94 @@ components:
           description: Low-performer achievement threshold percent (default 60).
       required:
         - fy
+    MgmtVerifyCheck:
+      type: object
+      properties:
+        key:
+          type: string
+          description: Stable identifier for the check.
+        label:
+          type: string
+          description: Human-readable label for the check.
+        unit:
+          type: string
+          enum: [money, count]
+          description: Whether the values are rupees or a count.
+        expected:
+          type: number
+          description: Signed-off anchor value.
+        actual:
+          type: number
+          description: The app's computed value.
+        deltaPct:
+          type: number
+          nullable: true
+          description: Percentage difference of actual vs expected.
+        status:
+          type: string
+          enum: [pass, warn, fail]
+      required:
+        - key
+        - label
+        - unit
+        - expected
+        - actual
+        - deltaPct
+        - status
+    MgmtVerifyCrossFoot:
+      type: object
+      properties:
+        memberSaleTotal:
+          type: number
+          description: Sum of per-member Sale.
+        headSaleTotal:
+          type: number
+          description: Sum of per-head Sale.
+        companyTotal:
+          type: number
+          description: Company Sale Report total.
+        withinTolerance:
+          type: boolean
+          description: True when all three totals agree within tolerance.
+      required:
+        - memberSaleTotal
+        - headSaleTotal
+        - companyTotal
+        - withinTolerance
+    MgmtVerifyResult:
+      type: object
+      properties:
+        fy:
+          type: string
+        available:
+          type: boolean
+          description: False when the file or anchors could not be loaded.
+        reason:
+          type: string
+          description: Why verification could not run (present when unavailable).
+        overall:
+          type: string
+          enum: [pass, warn, fail]
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/MgmtVerifyCheck"
+        crossFoot:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/MgmtVerifyCrossFoot"
+        missingHeads:
+          type: array
+          items:
+            type: string
+          description: Anchor heads that computed to zero (dropped in output).
+      required:
+        - fy
+        - available
+        - overall
+        - checks
+        - crossFoot
+        - missingHeads
     TargetFieldValues:
       type: object
       properties:

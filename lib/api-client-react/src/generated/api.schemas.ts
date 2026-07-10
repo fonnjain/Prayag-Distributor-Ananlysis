@@ -308,6 +308,75 @@ export interface MgmtReportRequest {
   lowPerfPct?: number;
 }
 
+/**
+ * Whether the values are rupees or a count.
+ */
+export type MgmtVerifyCheckUnit = typeof MgmtVerifyCheckUnit[keyof typeof MgmtVerifyCheckUnit];
+
+
+export const MgmtVerifyCheckUnit = {
+  money: 'money',
+  count: 'count',
+} as const;
+
+export type MgmtVerifyCheckStatus = typeof MgmtVerifyCheckStatus[keyof typeof MgmtVerifyCheckStatus];
+
+
+export const MgmtVerifyCheckStatus = {
+  pass: 'pass',
+  warn: 'warn',
+  fail: 'fail',
+} as const;
+
+export interface MgmtVerifyCheck {
+  /** Stable identifier for the check. */
+  key: string;
+  /** Human-readable label for the check. */
+  label: string;
+  /** Whether the values are rupees or a count. */
+  unit: MgmtVerifyCheckUnit;
+  /** Signed-off anchor value. */
+  expected: number;
+  /** The app's computed value. */
+  actual: number;
+  /** Percentage difference of actual vs expected. */
+  deltaPct: number | null;
+  status: MgmtVerifyCheckStatus;
+}
+
+export interface MgmtVerifyCrossFoot {
+  /** Sum of per-member Sale. */
+  memberSaleTotal: number;
+  /** Sum of per-head Sale. */
+  headSaleTotal: number;
+  /** Company Sale Report total. */
+  companyTotal: number;
+  /** True when all three totals agree within tolerance. */
+  withinTolerance: boolean;
+}
+
+export type MgmtVerifyResultOverall = typeof MgmtVerifyResultOverall[keyof typeof MgmtVerifyResultOverall];
+
+
+export const MgmtVerifyResultOverall = {
+  pass: 'pass',
+  warn: 'warn',
+  fail: 'fail',
+} as const;
+
+export interface MgmtVerifyResult {
+  fy: string;
+  /** False when the file or anchors could not be loaded. */
+  available: boolean;
+  /** Why verification could not run (present when unavailable). */
+  reason?: string;
+  overall: MgmtVerifyResultOverall;
+  checks: MgmtVerifyCheck[];
+  crossFoot: MgmtVerifyCrossFoot | null;
+  /** Anchor heads that computed to zero (dropped in output). */
+  missingHeads: string[];
+}
+
 export interface TargetFieldValues {
   /** Primary target in rupees. */
   primary: number | null;
@@ -435,6 +504,13 @@ fy?: string;
  * @pattern ^\d{4}-\d{2}$
  */
 compare?: string;
+};
+
+export type VerifyMgmtReportParams = {
+/**
+ * Fiscal year like 2025-26. Defaults to 2025-26.
+ */
+fy?: string;
 };
 
 export type GetTargetsParams = {

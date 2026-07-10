@@ -34,12 +34,14 @@ import type {
   ListDriveFilesParams,
   MgmtOptions,
   MgmtReportRequest,
+  MgmtVerifyResult,
   SaveTargetsRequest,
   SaveTargetsResult,
   SplitPreviewResponse,
   TargetsResponse,
   VerifyBackfillRequest,
   VerifyBackfillResponse,
+  VerifyMgmtReportParams,
   VerifyReport
 } from './api.schemas';
 
@@ -842,6 +844,91 @@ export const useGenerateMgmtReport = <TError = ErrorType<ErrorResponse>,
       > => {
       return useMutation(getGenerateMgmtReportMutationOptions(options));
     }
+
+export const getVerifyMgmtReportUrl = (params?: VerifyMgmtReportParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/mgmt/verify?${stringifiedParams}` : `/api/mgmt/verify`
+}
+
+/**
+ * Compares the app's computed secondary-order-booking report for the requested fiscal year against the approved dashboard anchors in config/verify_anchors.json. Returns per-check pass/warn/fail with app value vs expected vs delta%, an internal cross-foot, and any roster head missing from output.
+ * @summary Reconcile the computed report against signed-off dashboard anchors
+ */
+export const verifyMgmtReport = async (params?: VerifyMgmtReportParams, options?: RequestInit): Promise<MgmtVerifyResult> => {
+
+  return customFetch<MgmtVerifyResult>(getVerifyMgmtReportUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getVerifyMgmtReportQueryKey = (params?: VerifyMgmtReportParams,) => {
+    return [
+    `/api/mgmt/verify`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getVerifyMgmtReportQueryOptions = <TData = Awaited<ReturnType<typeof verifyMgmtReport>>, TError = ErrorType<ErrorResponse>>(params?: VerifyMgmtReportParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof verifyMgmtReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getVerifyMgmtReportQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof verifyMgmtReport>>> = ({ signal }) => verifyMgmtReport(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof verifyMgmtReport>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type VerifyMgmtReportQueryResult = NonNullable<Awaited<ReturnType<typeof verifyMgmtReport>>>
+export type VerifyMgmtReportQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Reconcile the computed report against signed-off dashboard anchors
+ */
+
+export function useVerifyMgmtReport<TData = Awaited<ReturnType<typeof verifyMgmtReport>>, TError = ErrorType<ErrorResponse>>(
+ params?: VerifyMgmtReportParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof verifyMgmtReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getVerifyMgmtReportQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetTargetsUrl = (params?: GetTargetsParams,) => {
   const normalizedParams = new URLSearchParams();

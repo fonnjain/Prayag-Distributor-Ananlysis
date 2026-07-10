@@ -2,7 +2,10 @@ import { useMemo, useState } from "react";
 import {
   useGetMgmtOptions,
   useGenerateMgmtReport,
+  useVerifyMgmtReport,
+  getVerifyMgmtReportQueryKey,
   type MgmtSourceStatus,
+  type MgmtVerifyCheck,
 } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -13,6 +16,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   XCircle,
+  ShieldCheck,
 } from "lucide-react";
 
 const FISCAL_MONTHS = [
@@ -44,6 +48,68 @@ function SourceBadge({ source }: { source: MgmtSourceStatus }) {
   );
 }
 
+function formatCr(rupees: number): string {
+  return `${(rupees / 1e7).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} Cr`;
+}
+
+function CheckChip({ status }: { status: MgmtVerifyCheck["status"] }) {
+  const map = {
+    pass: {
+      Icon: CheckCircle2,
+      cls: "text-green-600 dark:text-green-400 bg-green-500/10 border-green-500/30",
+      label: "Pass",
+    },
+    warn: {
+      Icon: AlertTriangle,
+      cls: "text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/30",
+      label: "Warn",
+    },
+    fail: {
+      Icon: XCircle,
+      cls: "text-destructive bg-destructive/10 border-destructive/30",
+      label: "Fail",
+    },
+  } as const;
+  const { Icon, cls, label } = map[status];
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border shrink-0",
+        cls,
+      )}
+    >
+      <Icon className="w-3 h-3" />
+      {label}
+    </span>
+  );
+}
+
+function CheckRow({ check }: { check: MgmtVerifyCheck }) {
+  const fmt = (v: number) =>
+    check.unit === "money" ? formatCr(v) : v.toLocaleString("en-IN");
+  return (
+    <div className="flex items-center justify-between gap-3 py-2 border-b border-border/40 last:border-0">
+      <div className="min-w-0">
+        <p className="text-sm font-medium truncate">{check.label}</p>
+        <p className="text-xs text-muted-foreground">
+          App {fmt(check.actual)} · Expected {fmt(check.expected)}
+          {check.deltaPct != null && (
+            <>
+              {" "}
+              · Δ {check.deltaPct > 0 ? "+" : ""}
+              {check.deltaPct}%
+            </>
+          )}
+        </p>
+      </div>
+      <CheckChip status={check.status} />
+    </div>
+  );
+}
+
 export default function MgmtReports() {
   const options = useGetMgmtOptions();
   const report = useGenerateMgmtReport();
@@ -57,6 +123,16 @@ export default function MgmtReports() {
 
   const data = options.data;
   const effectiveFy = fy ?? data?.defaultFy ?? "2026-27";
+
+  const verify = useVerifyMgmtReport(
+    { fy: effectiveFy },
+    {
+      query: {
+        retry: false,
+        queryKey: getVerifyMgmtReportQueryKey({ fy: effectiveFy }),
+      },
+    },
+  );
 
   const regionStates = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -302,6 +378,73 @@ export default function MgmtReports() {
               </>
             )}
           </button>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+        <CardHeader className="px-6 pt-6 pb-4">
+          <CardTitle className="text-base flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-primary" />
+            Data health
+          </CardTitle>
+          <CardDescription>
+            Reconciles the computed {effectiveFy} report against the signed-off
+            dashboard figures. A failed check blocks a final export.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="px-6 pb-6">
+          {verify.isLoading ? (
+            <div className="flex items-center py-6 text-sm text-muted-foreground">
+              <Loader2 className="w-4 h-4 animate-spin mr-2" /> Reconciling {effectiveFy}
+            </div>
+          ) : verify.isError || !verify.data?.available ? (
+            <div className="text-sm text-muted-foreground border border-border/50 rounded-md p-3">
+              {verify.data?.reason ??
+                `No verification anchors are configured for ${effectiveFy}. Data health checks run for years with a signed-off dashboard (e.g. 2025-26).`}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">Overall</span>
+                <CheckChip status={verify.data.overall} />
+                <button
+                  onClick={() => verify.refetch()}
+                  disabled={verify.isFetching}
+                  className="ml-auto text-xs text-muted-foreground hover:text-foreground disabled:opacity-60"
+                >
+                  {verify.isFetching ? "Refreshing…" : "Re-run"}
+                </button>
+              </div>
+              {verify.data.missingHeads.length > 0 && (
+                <div className="text-xs text-destructive border border-destructive/30 rounded-md p-2">
+                  Missing from output (computed to zero):{" "}
+                  {verify.data.missingHeads.join(", ")}
+                </div>
+              )}
+              <div className="rounded-lg border border-border/50 bg-background/50 px-3">
+                {verify.data.checks.map((c) => (
+                  <CheckRow key={c.key} check={c} />
+                ))}
+              </div>
+              {verify.data.crossFoot && (
+                <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                  {verify.data.crossFoot.withinTolerance ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 text-green-600 dark:text-green-400 shrink-0" />
+                  ) : (
+                    <XCircle className="w-3.5 h-3.5 mt-0.5 text-destructive shrink-0" />
+                  )}
+                  <span>
+                    Cross-foot: member split {formatCr(verify.data.crossFoot.memberSaleTotal)},
+                    head split {formatCr(verify.data.crossFoot.headSaleTotal)}, company total{" "}
+                    {formatCr(verify.data.crossFoot.companyTotal)}
+                    {verify.data.crossFoot.withinTolerance
+                      ? " agree."
+                      : " do not agree."}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 

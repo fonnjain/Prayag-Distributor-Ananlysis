@@ -321,6 +321,38 @@ export const GenerateMgmtReportResponse = zod.unknown()
 
 
 /**
+ * Compares the app's computed secondary-order-booking report for the requested fiscal year against the approved dashboard anchors in config/verify_anchors.json. Returns per-check pass/warn/fail with app value vs expected vs delta%, an internal cross-foot, and any roster head missing from output.
+ * @summary Reconcile the computed report against signed-off dashboard anchors
+ */
+export const VerifyMgmtReportQueryParams = zod.object({
+  "fy": zod.coerce.string().optional().describe('Fiscal year like 2025-26. Defaults to 2025-26.')
+})
+
+export const VerifyMgmtReportResponse = zod.object({
+  "fy": zod.string(),
+  "available": zod.boolean().describe('False when the file or anchors could not be loaded.'),
+  "reason": zod.string().optional().describe('Why verification could not run (present when unavailable).'),
+  "overall": zod.enum(['pass', 'warn', 'fail']),
+  "checks": zod.array(zod.object({
+  "key": zod.string().describe('Stable identifier for the check.'),
+  "label": zod.string().describe('Human-readable label for the check.'),
+  "unit": zod.enum(['money', 'count']).describe('Whether the values are rupees or a count.'),
+  "expected": zod.number().describe('Signed-off anchor value.'),
+  "actual": zod.number().describe('The app\'s computed value.'),
+  "deltaPct": zod.number().nullable().describe('Percentage difference of actual vs expected.'),
+  "status": zod.enum(['pass', 'warn', 'fail'])
+})),
+  "crossFoot": zod.object({
+  "memberSaleTotal": zod.number().describe('Sum of per-member Sale.'),
+  "headSaleTotal": zod.number().describe('Sum of per-head Sale.'),
+  "companyTotal": zod.number().describe('Company Sale Report total.'),
+  "withinTolerance": zod.boolean().describe('True when all three totals agree within tolerance.')
+}).nullable(),
+  "missingHeads": zod.array(zod.string()).describe('Anchor heads that computed to zero (dropped in output).')
+})
+
+
+/**
  * Returns the active roster (optionally scoped to one State Head) with each member's prior-year order actuals and any targets already saved in the Prayag Target Master sheet.
  * @summary Team members with saved targets for a fiscal year
  */
