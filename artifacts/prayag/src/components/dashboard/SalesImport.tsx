@@ -269,8 +269,8 @@ export default function SalesImport() {
           <CardContent className="px-6 pb-6 space-y-6">
             <div className="flex flex-wrap gap-2">
               <StatBadge
-                ok={report.match.rowsPct >= report.match.targetPct}
-                label={`Customer match ${pct(report.match.rowsPct)} rows / ${pct(report.match.revenuePct)} revenue`}
+                ok={report.match.revenuePct > report.match.targetPct}
+                label={`Customer match ${pct(report.match.revenuePct)} revenue / ${pct(report.match.rowsPct)} rows`}
               />
               <StatBadge
                 ok={report.benchmark.ok}

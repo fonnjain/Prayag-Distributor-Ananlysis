@@ -17,7 +17,7 @@ import {
   normCode,
   type RateListMaps,
 } from "./rateList.js";
-import type { SapRow } from "./sapStream.js";
+import { dateToMonthLabel, type SapRow } from "./sapStream.js";
 
 export const UNMAPPED_GROUP = "Unmapped";
 export const UNMAPPED_HEAD = "Unmapped (review)";
@@ -86,9 +86,25 @@ function bump(map: Map<string, number>, key: string, amount: number): void {
 // addRow) so the caller can stream the workbook straight from object storage
 // without ever holding the whole file in memory; finish() materializes the
 // summary. deriveMonthSummary() below is a thin wrapper used by tests.
+// Audit of how the streamed rows map onto the requested month. The month label
+// is authoritative from each row's invoice date (SAP col C), NOT the month the
+// user selected — a row dated outside the requested month is excluded from the
+// aggregation and reported here so the route can reject a mislabeled or
+// mixed-month upload instead of silently misclassifying revenue.
+export type MonthAudit = {
+  expectedMonth: string;
+  scannedRows: number;
+  inMonthRows: number;
+  undatedRows: number;
+  offMonthRows: number;
+  offMonthAmount: number;
+  monthsDetected: Array<{ month: string; rows: number; amount: number }>;
+};
+
 export type MonthAccumulator = {
   addRow: (row: SapRow) => void;
   finish: () => MonthSummary;
+  audit: () => MonthAudit;
 };
 
 export function createMonthAccumulator(
@@ -102,6 +118,11 @@ export function createMonthAccumulator(
   let matchedRevenue = 0;
   let maxDateMs: number | null = null;
   let rowsRead = 0;
+  let scannedRows = 0;
+  let undatedRows = 0;
+  let offMonthRows = 0;
+  let offMonthAmount = 0;
+  const monthsDetected = new Map<string, { rows: number; amount: number }>();
 
   const byHead = new Map<string, { amount: number; isTerritory: boolean }>();
   const byState = new Map<string, number>();
@@ -114,14 +135,32 @@ export function createMonthAccumulator(
   const unmappedGroups = new Map<string, number>();
 
   function addRow(row: SapRow): void {
-    rowsRead++;
+    scannedRows++;
     const rev = row.taxable;
-    amount += rev;
 
+    // Month is authoritative from the invoice date. A dated row outside the
+    // requested month is excluded and recorded for the route to reject on;
+    // an undated row falls back to the requested month (historical exports and
+    // manual files sometimes omit a date).
     if (row.date) {
+      const label = dateToMonthLabel(row.date);
+      const seen = monthsDetected.get(label) ?? { rows: 0, amount: 0 };
+      seen.rows++;
+      seen.amount += rev;
+      monthsDetected.set(label, seen);
+      if (label !== monthLabel) {
+        offMonthRows++;
+        offMonthAmount += rev;
+        return;
+      }
       const ms = row.date.getTime();
       if (maxDateMs == null || ms > maxDateMs) maxDateMs = ms;
+    } else {
+      undatedRows++;
     }
+
+    rowsRead++;
+    amount += rev;
     if (row.invoiceNo) invoices.add(row.invoiceNo);
 
     // Item -> group
@@ -211,7 +250,21 @@ export function createMonthAccumulator(
     };
   }
 
-  return { addRow, finish };
+  function audit(): MonthAudit {
+    return {
+      expectedMonth: monthLabel,
+      scannedRows,
+      inMonthRows: rowsRead,
+      undatedRows,
+      offMonthRows,
+      offMonthAmount: Math.round(offMonthAmount),
+      monthsDetected: [...monthsDetected.entries()]
+        .map(([month, v]) => ({ month, rows: v.rows, amount: Math.round(v.amount) }))
+        .sort((a, b) => b.amount - a.amount),
+    };
+  }
+
+  return { addRow, finish, audit };
 }
 
 export function deriveMonthSummary(

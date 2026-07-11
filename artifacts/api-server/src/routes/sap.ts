@@ -62,14 +62,35 @@ router.post(
 
       const maps = await getRateListMaps();
       const acc = createMonthAccumulator(maps, fy, month);
-      let rowsRead = 0;
       const nodeStream = file.createReadStream();
       await streamSapWorkbook(nodeStream as unknown as Readable, (row) => {
-        rowsRead++;
         acc.addRow(row);
       });
 
-      if (rowsRead === 0) {
+      const stats = acc.audit();
+      if (stats.scannedRows === 0) {
+        res.status(422).json({ error: "No data rows found in the uploaded file." });
+        return;
+      }
+      // Month is derived from each invoice date, not the selected month. Reject
+      // a file whose rows are dated in a different month so a mislabeled or
+      // mixed-month upload cannot silently distort monthly analytics.
+      if (stats.offMonthRows > 0) {
+        const detected = stats.monthsDetected
+          .filter((m) => m.month !== month)
+          .map((m) => `${m.month} (${m.rows})`)
+          .join(", ");
+        res.status(422).json({
+          error:
+            `This file has ${stats.offMonthRows} row(s) dated outside ${month}` +
+            (detected ? ` — detected ${detected}. ` : ". ") +
+            `Select the matching month or upload only ${month} data.`,
+          offMonthRows: stats.offMonthRows,
+          monthsDetected: stats.monthsDetected,
+        });
+        return;
+      }
+      if (stats.inMonthRows === 0) {
         res.status(422).json({ error: "No data rows found in the uploaded file." });
         return;
       }

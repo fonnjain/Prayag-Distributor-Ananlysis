@@ -3,7 +3,7 @@
 // dimension sums back to the grand total), the territory/institutional split,
 // customer matching, and unmapped-group surfacing.
 import { describe, expect, it } from "vitest";
-import { deriveMonthSummary } from "../lib/sap/derive.js";
+import { createMonthAccumulator, deriveMonthSummary } from "../lib/sap/derive.js";
 import type { RateListMaps } from "../lib/sap/rateList.js";
 import { normParty } from "../lib/mgmt/names.js";
 import type { SapRow } from "../lib/sap/sapStream.js";
@@ -99,5 +99,53 @@ describe("deriveMonthSummary", () => {
     expect(s.unmappedGroups[0].amount).toBe(200);
     const unmapped = s.byGroup.find((g) => g.key === "Unmapped");
     expect(unmapped?.amount).toBe(200);
+  });
+});
+
+describe("month derivation from invoice date", () => {
+  const maps = buildMaps();
+  const d = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
+
+  it("derives the month label from each row's date", () => {
+    const acc = createMonthAccumulator(maps, "2026-27", "Apr-26");
+    acc.addRow(row({ customer: "Acme Traders", code: "ITEM-A", date: d("2026-04-15"), taxable: 1000 }));
+    const stats = acc.audit();
+    expect(stats.monthsDetected).toEqual([{ month: "Apr-26", rows: 1, amount: 1000 }]);
+    expect(stats.offMonthRows).toBe(0);
+    expect(stats.inMonthRows).toBe(1);
+    expect(acc.finish().amount).toBe(1000);
+  });
+
+  it("excludes rows dated outside the requested month and flags them", () => {
+    const acc = createMonthAccumulator(maps, "2026-27", "Apr-26");
+    acc.addRow(row({ customer: "Acme Traders", code: "ITEM-A", date: d("2026-04-10"), taxable: 1000 }));
+    acc.addRow(row({ customer: "Acme Traders", code: "ITEM-A", date: d("2026-05-02"), taxable: 500 }));
+    const stats = acc.audit();
+    expect(stats.offMonthRows).toBe(1);
+    expect(stats.offMonthAmount).toBe(500);
+    expect(stats.inMonthRows).toBe(1);
+    // Only the in-month row lands in the aggregation.
+    const s = acc.finish();
+    expect(s.amount).toBe(1000);
+    expect(stats.monthsDetected.map((m) => m.month).sort()).toEqual(["Apr-26", "May-26"]);
+  });
+
+  it("detects a fully wrong-month file (no in-month rows)", () => {
+    const acc = createMonthAccumulator(maps, "2026-27", "Apr-26");
+    acc.addRow(row({ customer: "Acme Traders", code: "ITEM-A", date: d("2026-06-01"), taxable: 700 }));
+    const stats = acc.audit();
+    expect(stats.scannedRows).toBe(1);
+    expect(stats.offMonthRows).toBe(1);
+    expect(stats.inMonthRows).toBe(0);
+  });
+
+  it("falls back to the requested month for undated rows", () => {
+    const acc = createMonthAccumulator(maps, "2026-27", "Apr-26");
+    acc.addRow(row({ customer: "Acme Traders", code: "ITEM-A", taxable: 300 }));
+    const stats = acc.audit();
+    expect(stats.undatedRows).toBe(1);
+    expect(stats.offMonthRows).toBe(0);
+    expect(stats.inMonthRows).toBe(1);
+    expect(acc.finish().amount).toBe(300);
   });
 });

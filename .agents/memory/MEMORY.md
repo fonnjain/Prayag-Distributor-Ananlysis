@@ -5,4 +5,4 @@
 - [Prayag Target Master conventions](prayag-target-master.md) — single writable-sheet allowlist; split rule = per-capita for no-data members then pro-rata; serialized upserts overwrite all key duplicates.
 - [Secondary Order Booking files](prayag-order-booking.md) — per-FY Drive workbooks; Sub Total is the reconciling measure; segment brands map via alias config to the INDEX tab; prior-FY name match < 95% is attrition, not a bug.
 - [Mgmt report sale pipeline](mgmt-report-sale-pipeline.md) — register tabs detected by content not title; per-member Sale needs the Party TM Map bridge; anchor Anant FY26-27 2,57,08,142/245/29.
-- [SAP primary-sales pipeline](sap-primary-sales.md) — FY26-27 from monthly SAP xlsx uploads; verified-gated non-destructive cutover; cross-foot by construction; never take cost/MRP from rate list; no endpoint auth (app-wide).
+- [SAP primary-sales pipeline](sap-primary-sales.md) — FY26-27 monthly SAP xlsx uploads; month derived from invoice date; verified-gated cutover; cross-foot by construction; rate list never supplies cost/MRP.
