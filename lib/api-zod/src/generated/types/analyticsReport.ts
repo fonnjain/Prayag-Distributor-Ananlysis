@@ -8,6 +8,7 @@
 import type { AnalyticsHeadStat } from './analyticsHeadStat';
 import type { AnalyticsMargins } from './analyticsMargins';
 import type { AnalyticsMonthStat } from './analyticsMonthStat';
+import type { AnalyticsReportSource } from './analyticsReportSource';
 import type { AnalyticsReportYoy } from './analyticsReportYoy';
 import type { AnalyticsRetention } from './analyticsRetention';
 
@@ -25,4 +26,6 @@ export interface AnalyticsReport {
   compareByHead: AnalyticsHeadStat[];
   retention: AnalyticsRetention;
   margins: AnalyticsMargins;
+  /** Which data source produced this report. */
+  source: AnalyticsReportSource;
 }

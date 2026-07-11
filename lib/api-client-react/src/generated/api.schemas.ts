@@ -5,6 +5,130 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export interface SapUploadUrl {
+  uploadUrl: string;
+}
+
+export interface SapRegisterRequest {
+  /** @pattern ^\d{4}-\d{2}$ */
+  fy: string;
+  /** Month label like Apr-26 */
+  month: string;
+  uploadUrl: string;
+  originalName?: string | null;
+}
+
+export interface SapByAmount {
+  key: string;
+  amount: number;
+}
+
+export interface SapHeadAmount {
+  head: string;
+  amount: number;
+  isTerritory: boolean;
+}
+
+export interface SapCodeAgg {
+  code: string;
+  qty: number;
+  revenue: number;
+  group: string;
+}
+
+export interface SapUnmatchedCustomer {
+  name: string;
+  amount: number;
+}
+
+export interface SapMonthSummary {
+  fy: string;
+  monthLabel: string;
+  rowsRead: number;
+  amount: number;
+  territoryAmount: number;
+  institutionalAmount: number;
+  maxInvoiceDate: string | null;
+  invoiceCount: number;
+  customerCount: number;
+  byHead: SapHeadAmount[];
+  byState: SapByAmount[];
+  byGroup: SapByAmount[];
+  byCustomer: unknown[][];
+  byCode: SapCodeAgg[];
+  matchedRows: number;
+  matchedRevenue: number;
+  unmatchedCustomers: SapUnmatchedCustomer[];
+  unmappedGroups: SapByAmount[];
+}
+
+export type SapVerifyReportMatch = {
+  rowsPct: number;
+  revenuePct: number;
+  matchedRows: number;
+  totalRows: number;
+  matchedRevenue: number;
+  totalRevenue: number;
+  targetPct: number;
+};
+
+export type SapVerifyReportBenchmark = {
+  months: string[];
+  presentMonths: string[];
+  actual: number;
+  expected: number;
+  tolerancePct: number;
+  deltaPct: number | null;
+  ok: boolean;
+};
+
+export type SapVerifyReportCrossFoot = {
+  grand: number;
+  byGroup: number;
+  byHead: number;
+  byState: number;
+  maxDeltaRupees: number;
+  ok: boolean;
+};
+
+export interface SapVerifyReport {
+  fy: string;
+  uploadedMonths: string[];
+  rowsRead: number;
+  grandTotal: number;
+  match: SapVerifyReportMatch;
+  benchmark: SapVerifyReportBenchmark;
+  crossFoot: SapVerifyReportCrossFoot;
+  unmatchedCustomers: SapUnmatchedCustomer[];
+  unmappedGroups: SapByAmount[];
+  verified: boolean;
+}
+
+export interface SapRegisterResponse {
+  summary: SapMonthSummary;
+  report: SapVerifyReport;
+}
+
+export interface SapStatusMonth {
+  monthLabel: string;
+  rowsRead: number;
+  amount: number;
+  originalName: string | null;
+  uploadedAt: string | null;
+}
+
+export interface SapStatus {
+  fy: string;
+  allMonths: string[];
+  months: SapStatusMonth[];
+  verified: boolean;
+}
+
+export interface SapDeleteResponse {
+  deleted: boolean;
+  report: SapVerifyReport;
+}
+
 export interface RepNode {
   key: string;
   name: string;
@@ -396,6 +520,17 @@ export type AnalyticsReportYoy = {
   institutional: AnalyticsYoy;
 };
 
+/**
+ * Which data source produced this report.
+ */
+export type AnalyticsReportSource = typeof AnalyticsReportSource[keyof typeof AnalyticsReportSource];
+
+
+export const AnalyticsReportSource = {
+  sap: 'sap',
+  register: 'register',
+} as const;
+
 export interface AnalyticsReport {
   fy: string;
   compareFy: string;
@@ -410,6 +545,8 @@ export interface AnalyticsReport {
   compareByHead: AnalyticsHeadStat[];
   retention: AnalyticsRetention;
   margins: AnalyticsMargins;
+  /** Which data source produced this report. */
+  source: AnalyticsReportSource;
 }
 
 export interface MgmtRegion {
@@ -769,5 +906,27 @@ export type VerifySalesPeopleParams = {
  * Fiscal year like 2025-26. Defaults to 2025-26.
  */
 fy?: string;
+};
+
+export type GetSapVerifyParams = {
+/**
+ * @pattern ^\d{4}-\d{2}$
+ */
+fy: string;
+};
+
+export type GetSapStatusParams = {
+/**
+ * @pattern ^\d{4}-\d{2}$
+ */
+fy: string;
+};
+
+export type DeleteSapUploadParams = {
+/**
+ * @pattern ^\d{4}-\d{2}$
+ */
+fy: string;
+month: string;
 };
 

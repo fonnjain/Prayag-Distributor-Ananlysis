@@ -270,7 +270,8 @@ export const GetAnalyticsResponse = zod.object({
   "coveragePct": zod.number().describe('Share of revenue whose codes have a real cost.'),
   "provisional": zod.boolean(),
   "message": zod.string().nullable()
-})
+}),
+  "source": zod.enum(['sap', 'register']).describe('Which data source produced this report.')
 })
 
 
@@ -686,6 +687,252 @@ export const AnalyzeSalesPersonBody = zod.object({
 
 export const AnalyzeSalesPersonResponse = zod.object({
   "answer": zod.string()
+})
+
+
+/**
+ * Returns a short-lived signed PUT URL. The browser uploads the SAP primary-sales xlsx directly to object storage; the API never buffers it.
+ * @summary Get a signed URL for uploading a SAP file
+ */
+export const GetSapUploadUrlResponse = zod.object({
+  "uploadUrl": zod.string()
+})
+
+
+/**
+ * Streams the just-uploaded SAP xlsx for the given fiscal year and month, enriches each line via the rate list (item -> group, customer -> state head / state / channel), derives the per-month summary, and stores it. Re-uploading the same month overwrites the previous import.
+ * @summary Process an uploaded SAP primary-sales file
+ */
+export const registerSapUploadBodyFyRegExp = new RegExp('^\\d{4}-\\d{2}$');
+
+
+export const RegisterSapUploadBody = zod.object({
+  "fy": zod.string().regex(registerSapUploadBodyFyRegExp),
+  "month": zod.string().describe('Month label like Apr-26'),
+  "uploadUrl": zod.string(),
+  "originalName": zod.string().nullish()
+})
+
+export const RegisterSapUploadResponse = zod.object({
+  "summary": zod.object({
+  "fy": zod.string(),
+  "monthLabel": zod.string(),
+  "rowsRead": zod.number(),
+  "amount": zod.number(),
+  "territoryAmount": zod.number(),
+  "institutionalAmount": zod.number(),
+  "maxInvoiceDate": zod.string().nullable(),
+  "invoiceCount": zod.number(),
+  "customerCount": zod.number(),
+  "byHead": zod.array(zod.object({
+  "head": zod.string(),
+  "amount": zod.number(),
+  "isTerritory": zod.boolean()
+})),
+  "byState": zod.array(zod.object({
+  "key": zod.string(),
+  "amount": zod.number()
+})),
+  "byGroup": zod.array(zod.object({
+  "key": zod.string(),
+  "amount": zod.number()
+})),
+  "byCustomer": zod.array(zod.array(zod.unknown())),
+  "byCode": zod.array(zod.object({
+  "code": zod.string(),
+  "qty": zod.number(),
+  "revenue": zod.number(),
+  "group": zod.string()
+})),
+  "matchedRows": zod.number(),
+  "matchedRevenue": zod.number(),
+  "unmatchedCustomers": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
+  "unmappedGroups": zod.array(zod.object({
+  "key": zod.string(),
+  "amount": zod.number()
+}))
+}),
+  "report": zod.object({
+  "fy": zod.string(),
+  "uploadedMonths": zod.array(zod.string()),
+  "rowsRead": zod.number(),
+  "grandTotal": zod.number(),
+  "match": zod.object({
+  "rowsPct": zod.number(),
+  "revenuePct": zod.number(),
+  "matchedRows": zod.number(),
+  "totalRows": zod.number(),
+  "matchedRevenue": zod.number(),
+  "totalRevenue": zod.number(),
+  "targetPct": zod.number()
+}),
+  "benchmark": zod.object({
+  "months": zod.array(zod.string()),
+  "presentMonths": zod.array(zod.string()),
+  "actual": zod.number(),
+  "expected": zod.number(),
+  "tolerancePct": zod.number(),
+  "deltaPct": zod.number().nullable(),
+  "ok": zod.boolean()
+}),
+  "crossFoot": zod.object({
+  "grand": zod.number(),
+  "byGroup": zod.number(),
+  "byHead": zod.number(),
+  "byState": zod.number(),
+  "maxDeltaRupees": zod.number(),
+  "ok": zod.boolean()
+}),
+  "unmatchedCustomers": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
+  "unmappedGroups": zod.array(zod.object({
+  "key": zod.string(),
+  "amount": zod.number()
+})),
+  "verified": zod.boolean()
+})
+})
+
+
+/**
+ * Reconciles all uploaded SAP months for a fiscal year: customer match rate, the Apr-Jul benchmark against the signed-off total, the cross-foot (group = head = state = grand), unmatched customers, and unmapped groups. The verified flag gates the analytics cutover.
+ * @summary SAP reconciliation and verified-gate report
+ */
+export const getSapVerifyQueryFyRegExp = new RegExp('^\\d{4}-\\d{2}$');
+
+
+export const GetSapVerifyQueryParams = zod.object({
+  "fy": zod.coerce.string().regex(getSapVerifyQueryFyRegExp)
+})
+
+export const GetSapVerifyResponse = zod.object({
+  "fy": zod.string(),
+  "uploadedMonths": zod.array(zod.string()),
+  "rowsRead": zod.number(),
+  "grandTotal": zod.number(),
+  "match": zod.object({
+  "rowsPct": zod.number(),
+  "revenuePct": zod.number(),
+  "matchedRows": zod.number(),
+  "totalRows": zod.number(),
+  "matchedRevenue": zod.number(),
+  "totalRevenue": zod.number(),
+  "targetPct": zod.number()
+}),
+  "benchmark": zod.object({
+  "months": zod.array(zod.string()),
+  "presentMonths": zod.array(zod.string()),
+  "actual": zod.number(),
+  "expected": zod.number(),
+  "tolerancePct": zod.number(),
+  "deltaPct": zod.number().nullable(),
+  "ok": zod.boolean()
+}),
+  "crossFoot": zod.object({
+  "grand": zod.number(),
+  "byGroup": zod.number(),
+  "byHead": zod.number(),
+  "byState": zod.number(),
+  "maxDeltaRupees": zod.number(),
+  "ok": zod.boolean()
+}),
+  "unmatchedCustomers": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
+  "unmappedGroups": zod.array(zod.object({
+  "key": zod.string(),
+  "amount": zod.number()
+})),
+  "verified": zod.boolean()
+})
+
+
+/**
+ * Lists which months have a SAP file uploaded (with row count, amount, and upload time), the full month roster for the year, and whether the SAP source is verified.
+ * @summary Uploaded SAP months for a fiscal year
+ */
+export const getSapStatusQueryFyRegExp = new RegExp('^\\d{4}-\\d{2}$');
+
+
+export const GetSapStatusQueryParams = zod.object({
+  "fy": zod.coerce.string().regex(getSapStatusQueryFyRegExp)
+})
+
+export const GetSapStatusResponse = zod.object({
+  "fy": zod.string(),
+  "allMonths": zod.array(zod.string()),
+  "months": zod.array(zod.object({
+  "monthLabel": zod.string(),
+  "rowsRead": zod.number(),
+  "amount": zod.number(),
+  "originalName": zod.string().nullable(),
+  "uploadedAt": zod.string().nullable()
+})),
+  "verified": zod.boolean()
+})
+
+
+/**
+ * Removes the stored SAP file and its cached summary for one month, then returns the refreshed FY verification report.
+ * @summary Delete an uploaded SAP month
+ */
+export const deleteSapUploadQueryFyRegExp = new RegExp('^\\d{4}-\\d{2}$');
+
+
+export const DeleteSapUploadQueryParams = zod.object({
+  "fy": zod.coerce.string().regex(deleteSapUploadQueryFyRegExp),
+  "month": zod.coerce.string()
+})
+
+export const DeleteSapUploadResponse = zod.object({
+  "deleted": zod.boolean(),
+  "report": zod.object({
+  "fy": zod.string(),
+  "uploadedMonths": zod.array(zod.string()),
+  "rowsRead": zod.number(),
+  "grandTotal": zod.number(),
+  "match": zod.object({
+  "rowsPct": zod.number(),
+  "revenuePct": zod.number(),
+  "matchedRows": zod.number(),
+  "totalRows": zod.number(),
+  "matchedRevenue": zod.number(),
+  "totalRevenue": zod.number(),
+  "targetPct": zod.number()
+}),
+  "benchmark": zod.object({
+  "months": zod.array(zod.string()),
+  "presentMonths": zod.array(zod.string()),
+  "actual": zod.number(),
+  "expected": zod.number(),
+  "tolerancePct": zod.number(),
+  "deltaPct": zod.number().nullable(),
+  "ok": zod.boolean()
+}),
+  "crossFoot": zod.object({
+  "grand": zod.number(),
+  "byGroup": zod.number(),
+  "byHead": zod.number(),
+  "byState": zod.number(),
+  "maxDeltaRupees": zod.number(),
+  "ok": zod.boolean()
+}),
+  "unmatchedCustomers": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
+  "unmappedGroups": zod.array(zod.object({
+  "key": zod.string(),
+  "amount": zod.number()
+})),
+  "verified": zod.boolean()
+})
 })
 
 

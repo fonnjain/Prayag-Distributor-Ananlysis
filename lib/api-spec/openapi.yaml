@@ -20,6 +20,8 @@ tags:
     description: Data health and reconciliation operations
   - name: mgmt
     description: Management report generation
+  - name: sap
+    description: SAP primary-sales upload, reconciliation, and cutover
 paths:
   /drive/files:
     get:
@@ -613,8 +615,392 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /sap/upload-url:
+    post:
+      operationId: getSapUploadUrl
+      tags: [sap]
+      summary: Get a signed URL for uploading a SAP file
+      description: >
+        Returns a short-lived signed PUT URL. The browser uploads the SAP
+        primary-sales xlsx directly to object storage; the API never buffers it.
+      responses:
+        "200":
+          description: Signed upload URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SapUploadUrl"
+        "500":
+          description: Could not create an upload URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /sap/register:
+    post:
+      operationId: registerSapUpload
+      tags: [sap]
+      summary: Process an uploaded SAP primary-sales file
+      description: >
+        Streams the just-uploaded SAP xlsx for the given fiscal year and month,
+        enriches each line via the rate list (item -> group, customer -> state
+        head / state / channel), derives the per-month summary, and stores it.
+        Re-uploading the same month overwrites the previous import.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SapRegisterRequest"
+      responses:
+        "200":
+          description: Per-month summary and FY verification report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SapRegisterResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Uploaded file not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: No data rows found in the file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Processing failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /sap/verify:
+    get:
+      operationId: getSapVerify
+      tags: [sap]
+      summary: SAP reconciliation and verified-gate report
+      description: >
+        Reconciles all uploaded SAP months for a fiscal year: customer match
+        rate, the Apr-Jul benchmark against the signed-off total, the cross-foot
+        (group = head = state = grand), unmatched customers, and unmapped
+        groups. The verified flag gates the analytics cutover.
+      parameters:
+        - name: fy
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: "^\\d{4}-\\d{2}$"
+      responses:
+        "200":
+          description: Verification report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SapVerifyReport"
+        "400":
+          description: Invalid fiscal year
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Report could not be built
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /sap/status:
+    get:
+      operationId: getSapStatus
+      tags: [sap]
+      summary: Uploaded SAP months for a fiscal year
+      description: >
+        Lists which months have a SAP file uploaded (with row count, amount, and
+        upload time), the full month roster for the year, and whether the SAP
+        source is verified.
+      parameters:
+        - name: fy
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: "^\\d{4}-\\d{2}$"
+      responses:
+        "200":
+          description: Import status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SapStatus"
+        "400":
+          description: Invalid fiscal year
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Status could not be loaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /sap/upload:
+    delete:
+      operationId: deleteSapUpload
+      tags: [sap]
+      summary: Delete an uploaded SAP month
+      description: >
+        Removes the stored SAP file and its cached summary for one month, then
+        returns the refreshed FY verification report.
+      parameters:
+        - name: fy
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: "^\\d{4}-\\d{2}$"
+        - name: month
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Delete result and refreshed report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SapDeleteResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Delete failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
+    SapUploadUrl:
+      type: object
+      required: [uploadUrl]
+      properties:
+        uploadUrl: { type: string }
+    SapRegisterRequest:
+      type: object
+      required: [fy, month, uploadUrl]
+      properties:
+        fy: { type: string, pattern: "^\\d{4}-\\d{2}$" }
+        month: { type: string, description: "Month label like Apr-26" }
+        uploadUrl: { type: string }
+        originalName: { type: string, nullable: true }
+    SapByAmount:
+      type: object
+      required: [key, amount]
+      properties:
+        key: { type: string }
+        amount: { type: number }
+    SapHeadAmount:
+      type: object
+      required: [head, amount, isTerritory]
+      properties:
+        head: { type: string }
+        amount: { type: number }
+        isTerritory: { type: boolean }
+    SapCodeAgg:
+      type: object
+      required: [code, qty, revenue, group]
+      properties:
+        code: { type: string }
+        qty: { type: number }
+        revenue: { type: number }
+        group: { type: string }
+    SapUnmatchedCustomer:
+      type: object
+      required: [name, amount]
+      properties:
+        name: { type: string }
+        amount: { type: number }
+    SapMonthSummary:
+      type: object
+      required:
+        [
+          fy,
+          monthLabel,
+          rowsRead,
+          amount,
+          territoryAmount,
+          institutionalAmount,
+          maxInvoiceDate,
+          invoiceCount,
+          customerCount,
+          byHead,
+          byState,
+          byGroup,
+          byCustomer,
+          byCode,
+          matchedRows,
+          matchedRevenue,
+          unmatchedCustomers,
+          unmappedGroups,
+        ]
+      properties:
+        fy: { type: string }
+        monthLabel: { type: string }
+        rowsRead: { type: integer }
+        amount: { type: number }
+        territoryAmount: { type: number }
+        institutionalAmount: { type: number }
+        maxInvoiceDate: { type: string, nullable: true }
+        invoiceCount: { type: integer }
+        customerCount: { type: integer }
+        byHead:
+          type: array
+          items: { $ref: "#/components/schemas/SapHeadAmount" }
+        byState:
+          type: array
+          items: { $ref: "#/components/schemas/SapByAmount" }
+        byGroup:
+          type: array
+          items: { $ref: "#/components/schemas/SapByAmount" }
+        byCustomer:
+          type: array
+          items:
+            type: array
+            items: {}
+        byCode:
+          type: array
+          items: { $ref: "#/components/schemas/SapCodeAgg" }
+        matchedRows: { type: integer }
+        matchedRevenue: { type: number }
+        unmatchedCustomers:
+          type: array
+          items: { $ref: "#/components/schemas/SapUnmatchedCustomer" }
+        unmappedGroups:
+          type: array
+          items: { $ref: "#/components/schemas/SapByAmount" }
+    SapVerifyReport:
+      type: object
+      required:
+        [
+          fy,
+          uploadedMonths,
+          rowsRead,
+          grandTotal,
+          match,
+          benchmark,
+          crossFoot,
+          unmatchedCustomers,
+          unmappedGroups,
+          verified,
+        ]
+      properties:
+        fy: { type: string }
+        uploadedMonths:
+          type: array
+          items: { type: string }
+        rowsRead: { type: integer }
+        grandTotal: { type: number }
+        match:
+          type: object
+          required:
+            [
+              rowsPct,
+              revenuePct,
+              matchedRows,
+              totalRows,
+              matchedRevenue,
+              totalRevenue,
+              targetPct,
+            ]
+          properties:
+            rowsPct: { type: number }
+            revenuePct: { type: number }
+            matchedRows: { type: integer }
+            totalRows: { type: integer }
+            matchedRevenue: { type: number }
+            totalRevenue: { type: number }
+            targetPct: { type: number }
+        benchmark:
+          type: object
+          required:
+            [months, presentMonths, actual, expected, tolerancePct, deltaPct, ok]
+          properties:
+            months:
+              type: array
+              items: { type: string }
+            presentMonths:
+              type: array
+              items: { type: string }
+            actual: { type: number }
+            expected: { type: number }
+            tolerancePct: { type: number }
+            deltaPct: { type: number, nullable: true }
+            ok: { type: boolean }
+        crossFoot:
+          type: object
+          required: [grand, byGroup, byHead, byState, maxDeltaRupees, ok]
+          properties:
+            grand: { type: number }
+            byGroup: { type: number }
+            byHead: { type: number }
+            byState: { type: number }
+            maxDeltaRupees: { type: number }
+            ok: { type: boolean }
+        unmatchedCustomers:
+          type: array
+          items: { $ref: "#/components/schemas/SapUnmatchedCustomer" }
+        unmappedGroups:
+          type: array
+          items: { $ref: "#/components/schemas/SapByAmount" }
+        verified: { type: boolean }
+    SapRegisterResponse:
+      type: object
+      required: [summary, report]
+      properties:
+        summary: { $ref: "#/components/schemas/SapMonthSummary" }
+        report: { $ref: "#/components/schemas/SapVerifyReport" }
+    SapStatusMonth:
+      type: object
+      required: [monthLabel, rowsRead, amount, originalName, uploadedAt]
+      properties:
+        monthLabel: { type: string }
+        rowsRead: { type: integer }
+        amount: { type: number }
+        originalName: { type: string, nullable: true }
+        uploadedAt: { type: string, nullable: true }
+    SapStatus:
+      type: object
+      required: [fy, allMonths, months, verified]
+      properties:
+        fy: { type: string }
+        allMonths:
+          type: array
+          items: { type: string }
+        months:
+          type: array
+          items: { $ref: "#/components/schemas/SapStatusMonth" }
+        verified: { type: boolean }
+    SapDeleteResponse:
+      type: object
+      required: [deleted, report]
+      properties:
+        deleted: { type: boolean }
+        report: { $ref: "#/components/schemas/SapVerifyReport" }
     RepNode:
       type: object
       required: [key, name, state, isMember, hasTeam, ownNet, teamNet, children]
@@ -1233,6 +1619,10 @@ components:
           $ref: "#/components/schemas/AnalyticsRetention"
         margins:
           $ref: "#/components/schemas/AnalyticsMargins"
+        source:
+          type: string
+          enum: [sap, register]
+          description: Which data source produced this report.
       required:
         - fy
         - compareFy
@@ -1246,6 +1636,7 @@ components:
         - compareByHead
         - retention
         - margins
+        - source
     MgmtRegion:
       type: object
       properties:

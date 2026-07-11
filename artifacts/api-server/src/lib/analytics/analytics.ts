@@ -11,6 +11,9 @@
 //   cross-group aggregate used here.
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, saleLines, costMaster } from "@workspace/db";
+import { SAP_FY } from "../sap/config.js";
+import { isSapVerified } from "../sap/verify.js";
+import { getSapAggregate, type SapAggregate } from "../sap/source.js";
 
 const MONTH_NAMES = [
   "Apr",
@@ -255,8 +258,164 @@ async function margins(fy: string): Promise<Margins> {
   };
 }
 
+async function saleLinePeriodCounts(
+  fy: string,
+  monthLabels: string[],
+): Promise<{ invoices: number; customers: number }> {
+  if (monthLabels.length === 0) return { invoices: 0, customers: 0 };
+  const [row] = await db
+    .select({
+      invoices: sql<number>`count(distinct ${saleLines.invoiceNo})::int`,
+      customers: sql<number>`count(distinct ${saleLines.customer})::int`,
+    })
+    .from(saleLines)
+    .where(and(eq(saleLines.fy, fy), inArray(saleLines.monthLabel, monthLabels)));
+  return { invoices: row?.invoices ?? 0, customers: row?.customers ?? 0 };
+}
+
+// A fiscal year's analytics can be sourced either from the invoice-line
+// register (sale_line) or, once verified, from the uploaded SAP primary-sales
+// files. Both implementations produce identical shapes so the /analytics route
+// is agnostic to which source is active for a given FY.
+export interface FyAnalyticsSource {
+  monthlyStats(): Promise<MonthStat[]>;
+  headStats(): Promise<HeadStat[]>;
+  customerRevenue(monthLabels: string[]): Promise<Map<string, number>>;
+  periodCounts(monthLabels: string[]): Promise<{ invoices: number; customers: number }>;
+  margins(): Promise<Margins>;
+}
+
+function saleLineSource(fy: string): FyAnalyticsSource {
+  return {
+    monthlyStats: () => monthlyStats(fy),
+    headStats: () => headStats(fy),
+    customerRevenue: (labels) => customerRevenue(fy, labels),
+    periodCounts: (labels) => saleLinePeriodCounts(fy, labels),
+    margins: () => margins(fy),
+  };
+}
+
+// Margins over the SAP aggregate: identical rule to sale_line — margin is
+// revenue minus qty*fg_cost, only for codes present in cost_master. MRP/list
+// price is NEVER used as a cost input.
+async function sapMargins(agg: SapAggregate): Promise<Margins> {
+  const total = agg.byCode.reduce((s, c) => s + c.revenue, 0);
+  if (total === 0) {
+    return {
+      byGroup: [],
+      coveragePct: 0,
+      provisional: false,
+      message: "Add a Cost Master to enable margins.",
+    };
+  }
+  const codes = agg.byCode.map((c) => c.code);
+  const costRows = codes.length
+    ? await db
+        .select({ code: costMaster.code, fgCost: costMaster.fgCost })
+        .from(costMaster)
+        .where(inArray(costMaster.code, codes))
+    : [];
+  const costMap = new Map<string, number>();
+  for (const r of costRows) {
+    if (r.fgCost != null) costMap.set(String(r.code).toUpperCase(), Number(r.fgCost));
+  }
+  let covered = 0;
+  const byGroup = new Map<string, { revenue: number; cost: number }>();
+  for (const c of agg.byCode) {
+    const fgCost = costMap.get(c.code.toUpperCase());
+    if (fgCost == null) continue;
+    covered += c.revenue;
+    const g = byGroup.get(c.group) ?? { revenue: 0, cost: 0 };
+    g.revenue += c.revenue;
+    g.cost += c.qty * fgCost;
+    byGroup.set(c.group, g);
+  }
+  const coveragePct = total === 0 ? 0 : Math.round((covered / total) * 1000) / 10;
+  if (covered === 0) {
+    return {
+      byGroup: [],
+      coveragePct: 0,
+      provisional: false,
+      message: "Add a Cost Master to enable margins.",
+    };
+  }
+  return {
+    byGroup: [...byGroup.entries()]
+      .map(([group, v]) => ({
+        group,
+        revenue: Math.round(v.revenue),
+        margin: Math.round(v.revenue - v.cost),
+      }))
+      .sort((a, b) => b.revenue - a.revenue),
+    coveragePct,
+    provisional: coveragePct < 75,
+    message:
+      coveragePct < 75
+        ? "Cost coverage is below 75 percent; margins are provisional."
+        : null,
+  };
+}
+
+function sapSource(agg: SapAggregate): FyAnalyticsSource {
+  return {
+    monthlyStats: async () => {
+      const stats: MonthStat[] = agg.months
+        .map((m) => ({
+          monthLabel: m.monthLabel,
+          monthName: m.monthName,
+          amount: m.amount,
+          territoryAmount: m.territoryAmount,
+          institutionalAmount: m.institutionalAmount,
+          maxInvoiceDate: m.maxInvoiceDate,
+          complete: isMonthComplete(m.monthLabel, m.maxInvoiceDate),
+        }))
+        .filter((m) => parseMonthLabel(m.monthLabel) != null);
+      stats.sort(
+        (a, b) =>
+          (parseMonthLabel(a.monthLabel)?.fyIndex ?? 0) -
+          (parseMonthLabel(b.monthLabel)?.fyIndex ?? 0),
+      );
+      return stats;
+    },
+    headStats: async () => {
+      const total = agg.byHead.reduce((s, h) => s + h.amount, 0);
+      return agg.byHead
+        .map((h) => ({
+          head: h.head,
+          amount: Math.round(h.amount),
+          sharePct: total === 0 ? 0 : Math.round((h.amount / total) * 1000) / 10,
+          isTerritory: h.isTerritory,
+        }))
+        .sort((a, b) => b.amount - a.amount);
+    },
+    customerRevenue: async (labels) => {
+      const map = new Map<string, number>();
+      for (const label of labels) {
+        const cust = agg.customerByMonth.get(label);
+        if (!cust) continue;
+        for (const [name, amount] of cust) {
+          map.set(name, (map.get(name) ?? 0) + amount);
+        }
+      }
+      return map;
+    },
+    periodCounts: async (labels) => {
+      let invoices = 0;
+      const customers = new Set<string>();
+      for (const label of labels) {
+        invoices += agg.invoiceCountByMonth.get(label) ?? 0;
+        const cust = agg.customerByMonth.get(label);
+        if (cust) for (const name of cust.keys()) customers.add(name);
+      }
+      return { invoices, customers: customers.size };
+    },
+    margins: () => sapMargins(agg),
+  };
+}
+
 export type AnalyticsReport = {
   fy: string;
+  source: "sap" | "register";
   compareFy: string;
   months: MonthStat[];
   compareMonths: MonthStat[];
@@ -284,13 +443,23 @@ export async function buildAnalytics(
   fy: string,
   compareFy: string,
 ): Promise<AnalyticsReport> {
+  // Verification-gated cutover: FY2026-27 reads from the SAP primary-sales
+  // upload only once it is verified; otherwise (and for every other FY) it
+  // falls back to the invoice-line register. The comparison FY is ALWAYS
+  // sourced from the register.
+  const useSap = fy === SAP_FY && (await isSapVerified(fy));
+  const currentSource: FyAnalyticsSource = useSap
+    ? sapSource(await getSapAggregate(fy))
+    : saleLineSource(fy);
+  const compareSource = saleLineSource(compareFy);
+
   const [months, compareMonths, byHead, compareByHead, marginData] =
     await Promise.all([
-      monthlyStats(fy),
-      monthlyStats(compareFy),
-      headStats(fy),
-      headStats(compareFy),
-      margins(fy),
+      currentSource.monthlyStats(),
+      compareSource.monthlyStats(),
+      currentSource.headStats(),
+      compareSource.headStats(),
+      currentSource.margins(),
     ]);
 
   // Comparable months: complete in the current FY AND complete in the prior
@@ -312,21 +481,11 @@ export async function buildAnalytics(
   const currentLabels = comparable.map((m) => m.monthLabel);
   const priorLabels = priorComparable.map((m) => m.monthLabel);
 
-  const [periodCounts] = currentLabels.length
-    ? await db
-        .select({
-          invoices: sql<number>`count(distinct ${saleLines.invoiceNo})::int`,
-          customers: sql<number>`count(distinct ${saleLines.customer})::int`,
-        })
-        .from(saleLines)
-        .where(
-          and(eq(saleLines.fy, fy), inArray(saleLines.monthLabel, currentLabels)),
-        )
-    : [{ invoices: 0, customers: 0 }];
+  const periodCounts = await currentSource.periodCounts(currentLabels);
 
   const [currentCustomers, priorCustomers] = await Promise.all([
-    customerRevenue(fy, currentLabels),
-    customerRevenue(compareFy, priorLabels),
+    currentSource.customerRevenue(currentLabels),
+    compareSource.customerRevenue(priorLabels),
   ]);
 
   let retained = 0;
@@ -353,6 +512,7 @@ export async function buildAnalytics(
 
   return {
     fy,
+    source: useSap ? "sap" : "register",
     compareFy,
     months,
     compareMonths,

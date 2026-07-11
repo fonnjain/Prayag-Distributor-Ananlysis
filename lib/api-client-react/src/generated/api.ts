@@ -25,11 +25,14 @@ import type {
   AnalyzeResponse,
   DashboardResponse,
   DeepDive,
+  DeleteSapUploadParams,
   DriveFileList,
   ErrorResponse,
   GetAnalyticsParams,
   GetSalesPeopleTreeParams,
   GetSalesPersonDeepDiveParams,
+  GetSapStatusParams,
+  GetSapVerifyParams,
   GetTargetSplitPreviewParams,
   GetTargetsParams,
   GetVerifyReportParams,
@@ -42,6 +45,12 @@ import type {
   SalesVerify,
   SalespersonAnalyzeRequest,
   SalespersonAnalyzeResponse,
+  SapDeleteResponse,
+  SapRegisterRequest,
+  SapRegisterResponse,
+  SapStatus,
+  SapUploadUrl,
+  SapVerifyReport,
   SaveTargetsRequest,
   SaveTargetsResult,
   SplitPreviewResponse,
@@ -1503,5 +1512,395 @@ export const useAnalyzeSalesPerson = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getAnalyzeSalesPersonMutationOptions(options));
+    }
+
+export const getGetSapUploadUrlUrl = () => {
+
+
+
+
+  return `/api/sap/upload-url`
+}
+
+/**
+ * Returns a short-lived signed PUT URL. The browser uploads the SAP primary-sales xlsx directly to object storage; the API never buffers it.
+ * @summary Get a signed URL for uploading a SAP file
+ */
+export const getSapUploadUrl = async ( options?: RequestInit): Promise<SapUploadUrl> => {
+
+  return customFetch<SapUploadUrl>(getGetSapUploadUrlUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getGetSapUploadUrlMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getSapUploadUrl>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof getSapUploadUrl>>, TError,void, TContext> => {
+
+const mutationKey = ['getSapUploadUrl'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof getSapUploadUrl>>, void> = () => {
+
+
+          return  getSapUploadUrl(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GetSapUploadUrlMutationResult = NonNullable<Awaited<ReturnType<typeof getSapUploadUrl>>>
+
+    export type GetSapUploadUrlMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Get a signed URL for uploading a SAP file
+ */
+export const useGetSapUploadUrl = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getSapUploadUrl>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof getSapUploadUrl>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getGetSapUploadUrlMutationOptions(options));
+    }
+
+export const getRegisterSapUploadUrl = () => {
+
+
+
+
+  return `/api/sap/register`
+}
+
+/**
+ * Streams the just-uploaded SAP xlsx for the given fiscal year and month, enriches each line via the rate list (item -> group, customer -> state head / state / channel), derives the per-month summary, and stores it. Re-uploading the same month overwrites the previous import.
+ * @summary Process an uploaded SAP primary-sales file
+ */
+export const registerSapUpload = async (sapRegisterRequest: SapRegisterRequest, options?: RequestInit): Promise<SapRegisterResponse> => {
+
+  return customFetch<SapRegisterResponse>(getRegisterSapUploadUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(sapRegisterRequest)
+  }
+);}
+
+
+
+
+export const getRegisterSapUploadMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof registerSapUpload>>, TError,{data: BodyType<SapRegisterRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof registerSapUpload>>, TError,{data: BodyType<SapRegisterRequest>}, TContext> => {
+
+const mutationKey = ['registerSapUpload'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof registerSapUpload>>, {data: BodyType<SapRegisterRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  registerSapUpload(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RegisterSapUploadMutationResult = NonNullable<Awaited<ReturnType<typeof registerSapUpload>>>
+    export type RegisterSapUploadMutationBody = BodyType<SapRegisterRequest>
+    export type RegisterSapUploadMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Process an uploaded SAP primary-sales file
+ */
+export const useRegisterSapUpload = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof registerSapUpload>>, TError,{data: BodyType<SapRegisterRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof registerSapUpload>>,
+        TError,
+        {data: BodyType<SapRegisterRequest>},
+        TContext
+      > => {
+      return useMutation(getRegisterSapUploadMutationOptions(options));
+    }
+
+export const getGetSapVerifyUrl = (params: GetSapVerifyParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/sap/verify?${stringifiedParams}` : `/api/sap/verify`
+}
+
+/**
+ * Reconciles all uploaded SAP months for a fiscal year: customer match rate, the Apr-Jul benchmark against the signed-off total, the cross-foot (group = head = state = grand), unmatched customers, and unmapped groups. The verified flag gates the analytics cutover.
+ * @summary SAP reconciliation and verified-gate report
+ */
+export const getSapVerify = async (params: GetSapVerifyParams, options?: RequestInit): Promise<SapVerifyReport> => {
+
+  return customFetch<SapVerifyReport>(getGetSapVerifyUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSapVerifyQueryKey = (params?: GetSapVerifyParams,) => {
+    return [
+    `/api/sap/verify`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetSapVerifyQueryOptions = <TData = Awaited<ReturnType<typeof getSapVerify>>, TError = ErrorType<ErrorResponse>>(params: GetSapVerifyParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSapVerify>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSapVerifyQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSapVerify>>> = ({ signal }) => getSapVerify(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSapVerify>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSapVerifyQueryResult = NonNullable<Awaited<ReturnType<typeof getSapVerify>>>
+export type GetSapVerifyQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary SAP reconciliation and verified-gate report
+ */
+
+export function useGetSapVerify<TData = Awaited<ReturnType<typeof getSapVerify>>, TError = ErrorType<ErrorResponse>>(
+ params: GetSapVerifyParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSapVerify>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSapVerifyQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetSapStatusUrl = (params: GetSapStatusParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/sap/status?${stringifiedParams}` : `/api/sap/status`
+}
+
+/**
+ * Lists which months have a SAP file uploaded (with row count, amount, and upload time), the full month roster for the year, and whether the SAP source is verified.
+ * @summary Uploaded SAP months for a fiscal year
+ */
+export const getSapStatus = async (params: GetSapStatusParams, options?: RequestInit): Promise<SapStatus> => {
+
+  return customFetch<SapStatus>(getGetSapStatusUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSapStatusQueryKey = (params?: GetSapStatusParams,) => {
+    return [
+    `/api/sap/status`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetSapStatusQueryOptions = <TData = Awaited<ReturnType<typeof getSapStatus>>, TError = ErrorType<ErrorResponse>>(params: GetSapStatusParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSapStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSapStatusQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSapStatus>>> = ({ signal }) => getSapStatus(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSapStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSapStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getSapStatus>>>
+export type GetSapStatusQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Uploaded SAP months for a fiscal year
+ */
+
+export function useGetSapStatus<TData = Awaited<ReturnType<typeof getSapStatus>>, TError = ErrorType<ErrorResponse>>(
+ params: GetSapStatusParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSapStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSapStatusQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getDeleteSapUploadUrl = (params: DeleteSapUploadParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/sap/upload?${stringifiedParams}` : `/api/sap/upload`
+}
+
+/**
+ * Removes the stored SAP file and its cached summary for one month, then returns the refreshed FY verification report.
+ * @summary Delete an uploaded SAP month
+ */
+export const deleteSapUpload = async (params: DeleteSapUploadParams, options?: RequestInit): Promise<SapDeleteResponse> => {
+
+  return customFetch<SapDeleteResponse>(getDeleteSapUploadUrl(params),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteSapUploadMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSapUpload>>, TError,{params: DeleteSapUploadParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteSapUpload>>, TError,{params: DeleteSapUploadParams}, TContext> => {
+
+const mutationKey = ['deleteSapUpload'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteSapUpload>>, {params: DeleteSapUploadParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  deleteSapUpload(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteSapUploadMutationResult = NonNullable<Awaited<ReturnType<typeof deleteSapUpload>>>
+
+    export type DeleteSapUploadMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Delete an uploaded SAP month
+ */
+export const useDeleteSapUpload = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSapUpload>>, TError,{params: DeleteSapUploadParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteSapUpload>>,
+        TError,
+        {params: DeleteSapUploadParams},
+        TContext
+      > => {
+      return useMutation(getDeleteSapUploadMutationOptions(options));
     }
 
