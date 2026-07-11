@@ -1,9 +1,9 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { Readable } from "node:stream";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage.js";
-import { streamSapWorkbook, type SapRow } from "../lib/sap/sapStream.js";
+import { streamSapWorkbook } from "../lib/sap/sapStream.js";
 import { getRateListMaps } from "../lib/sap/rateList.js";
-import { deriveMonthSummary } from "../lib/sap/derive.js";
+import { createMonthAccumulator } from "../lib/sap/derive.js";
 import { upsertUpload, getUploadsForFy, deleteUpload } from "../lib/sap/store.js";
 import { buildSapVerifyReport, clearVerifiedCache } from "../lib/sap/verify.js";
 import { fyMonthLabels } from "../lib/sap/util.js";
@@ -61,18 +61,20 @@ router.post(
       const file = await service.getObjectEntityFile(objectPath);
 
       const maps = await getRateListMaps();
-      const rows: SapRow[] = [];
+      const acc = createMonthAccumulator(maps, fy, month);
+      let rowsRead = 0;
       const nodeStream = file.createReadStream();
       await streamSapWorkbook(nodeStream as unknown as Readable, (row) => {
-        rows.push(row);
+        rowsRead++;
+        acc.addRow(row);
       });
 
-      if (rows.length === 0) {
+      if (rowsRead === 0) {
         res.status(422).json({ error: "No data rows found in the uploaded file." });
         return;
       }
 
-      const summary = deriveMonthSummary(rows, maps, fy, month);
+      const summary = acc.finish();
       await upsertUpload({ fy, monthLabel: month, objectPath, originalName, summary });
       clearVerifiedCache();
       const report = await buildSapVerifyReport(fy);

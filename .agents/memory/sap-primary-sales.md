@@ -14,7 +14,7 @@ FY2026-27 primary sales come from monthly SAP Excel exports (cols A-M) uploaded 
 - **Re-upload overwrites** a month (UNIQUE(fy, month_label), onConflictDoUpdate). The object path is a fresh UUID per upload; the register endpoint normalizes the signed URL to that path.
 
 ## Verified gate
-`buildSapVerifyReport` checks: customer match % (rows + revenue) vs target, the Apr-Jul benchmark vs the signed-off total within tolerance, cross-foot ok, and zero unmapped groups. `isSapVerified` caches ~30s; `clearVerifiedCache()` is called after every register/delete so the UI reflects changes immediately.
+`buildSapVerifyReport` reports customer match % (rows + revenue), the Apr-Jul benchmark vs the signed-off total, cross-foot balance, and any unmatched customers / unmapped groups. The `verified` gate itself is exactly three conditions: revenue match % > target, benchmark ok (all months present + within tolerance), and cross-foot ok. Unmapped groups are surfaced for review but do NOT block the gate (they still land in an explicit bucket, so the cross-foot stays balanced regardless). `isSapVerified` caches ~30s; `clearVerifiedCache()` is called after every register/delete so the UI reflects changes immediately.
 
 ## Auth gap (known, out of scope of the build task)
 None of the mutating API endpoints in this app are authenticated — `POST /targets`, `POST /verify/backfill`, and the SAP `POST /sap/upload-url|/register` + `DELETE /sap/upload` all mutate with no authz. This is an app-wide characteristic, not specific to SAP. Adding auth should be done across all mutating endpoints together, not piecemeal on SAP.

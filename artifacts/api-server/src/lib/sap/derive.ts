@@ -82,17 +82,26 @@ function bump(map: Map<string, number>, key: string, amount: number): void {
   map.set(key, (map.get(key) ?? 0) + amount);
 }
 
-export function deriveMonthSummary(
-  rows: SapRow[],
+// A single-pass accumulator for SAP rows. Rows are folded in one at a time (via
+// addRow) so the caller can stream the workbook straight from object storage
+// without ever holding the whole file in memory; finish() materializes the
+// summary. deriveMonthSummary() below is a thin wrapper used by tests.
+export type MonthAccumulator = {
+  addRow: (row: SapRow) => void;
+  finish: () => MonthSummary;
+};
+
+export function createMonthAccumulator(
   maps: RateListMaps,
   fy: string,
   monthLabel: string,
-): MonthSummary {
+): MonthAccumulator {
   let amount = 0;
   let territoryAmount = 0;
   let matchedRows = 0;
   let matchedRevenue = 0;
   let maxDateMs: number | null = null;
+  let rowsRead = 0;
 
   const byHead = new Map<string, { amount: number; isTerritory: boolean }>();
   const byState = new Map<string, number>();
@@ -104,7 +113,8 @@ export function deriveMonthSummary(
   const unmatched = new Map<string, number>();
   const unmappedGroups = new Map<string, number>();
 
-  for (const row of rows) {
+  function addRow(row: SapRow): void {
+    rowsRead++;
     const rev = row.taxable;
     amount += rev;
 
@@ -160,42 +170,57 @@ export function deriveMonthSummary(
     bump(byState, state, rev);
   }
 
-  const round = (n: number) => Math.round(n);
-  return {
-    fy,
-    monthLabel,
-    rowsRead: rows.length,
-    amount: round(amount),
-    territoryAmount: round(territoryAmount),
-    institutionalAmount: round(amount - territoryAmount),
-    maxInvoiceDate:
-      maxDateMs == null ? null : new Date(maxDateMs).toISOString().slice(0, 10),
-    invoiceCount: invoices.size,
-    customerCount: customers.size,
-    byHead: [...byHead.entries()]
-      .map(([head, v]) => ({ head, amount: round(v.amount), isTerritory: v.isTerritory }))
-      .sort((a, b) => b.amount - a.amount),
-    byState: [...byState.entries()]
-      .map(([key, v]) => ({ key, amount: round(v) }))
-      .sort((a, b) => b.amount - a.amount),
-    byGroup: [...byGroup.entries()]
-      .map(([key, v]) => ({ key, amount: round(v) }))
-      .sort((a, b) => b.amount - a.amount),
-    byCustomer: [...byCustomer.entries()].map(([k, v]) => [k, round(v)] as [string, number]),
-    byCode: [...byCode.values()].map((c) => ({
-      code: c.code,
-      qty: c.qty,
-      revenue: round(c.revenue),
-      group: c.group,
-    })),
-    matchedRows,
-    matchedRevenue: round(matchedRevenue),
-    unmatchedCustomers: [...unmatched.entries()]
-      .map(([name, v]) => ({ name, amount: round(v) }))
-      .sort((a, b) => b.amount - a.amount)
-      .slice(0, 200),
-    unmappedGroups: [...unmappedGroups.entries()]
-      .map(([key, v]) => ({ key, amount: round(v) }))
-      .sort((a, b) => b.amount - a.amount),
-  };
+  function finish(): MonthSummary {
+    const round = (n: number) => Math.round(n);
+    return {
+      fy,
+      monthLabel,
+      rowsRead,
+      amount: round(amount),
+      territoryAmount: round(territoryAmount),
+      institutionalAmount: round(amount - territoryAmount),
+      maxInvoiceDate:
+        maxDateMs == null ? null : new Date(maxDateMs).toISOString().slice(0, 10),
+      invoiceCount: invoices.size,
+      customerCount: customers.size,
+      byHead: [...byHead.entries()]
+        .map(([head, v]) => ({ head, amount: round(v.amount), isTerritory: v.isTerritory }))
+        .sort((a, b) => b.amount - a.amount),
+      byState: [...byState.entries()]
+        .map(([key, v]) => ({ key, amount: round(v) }))
+        .sort((a, b) => b.amount - a.amount),
+      byGroup: [...byGroup.entries()]
+        .map(([key, v]) => ({ key, amount: round(v) }))
+        .sort((a, b) => b.amount - a.amount),
+      byCustomer: [...byCustomer.entries()].map(([k, v]) => [k, round(v)] as [string, number]),
+      byCode: [...byCode.values()].map((c) => ({
+        code: c.code,
+        qty: c.qty,
+        revenue: round(c.revenue),
+        group: c.group,
+      })),
+      matchedRows,
+      matchedRevenue: round(matchedRevenue),
+      unmatchedCustomers: [...unmatched.entries()]
+        .map(([name, v]) => ({ name, amount: round(v) }))
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 200),
+      unmappedGroups: [...unmappedGroups.entries()]
+        .map(([key, v]) => ({ key, amount: round(v) }))
+        .sort((a, b) => b.amount - a.amount),
+    };
+  }
+
+  return { addRow, finish };
+}
+
+export function deriveMonthSummary(
+  rows: SapRow[],
+  maps: RateListMaps,
+  fy: string,
+  monthLabel: string,
+): MonthSummary {
+  const acc = createMonthAccumulator(maps, fy, monthLabel);
+  for (const row of rows) acc.addRow(row);
+  return acc.finish();
 }
