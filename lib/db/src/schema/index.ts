@@ -19,3 +19,4 @@
 
 export * from "./dashboardSnapshot";
 export * from "./salesRegister";
+export * from "./sapSales";

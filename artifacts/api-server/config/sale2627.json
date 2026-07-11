@@ -1,0 +1,16 @@
+{
+  "comment": "FY2026-27 SAP primary-sales pipeline config. The rate list is a live Google Sheet: Sheet1 is the item master (code -> item type -> product group), Sheet2 is the customer master (name -> state head / state / channel). Cost/MRP columns are NEVER read for margins.",
+  "rateList": {
+    "spreadsheetId": "1njO-srsS29qiE4t45-zr5njbB7R2Zb-oSnv2NL1ONY4",
+    "itemTab": "Sheet1",
+    "customerTab": "Sheet2"
+  },
+  "benchmark": {
+    "fy": "2026-27",
+    "months": ["Apr-26", "May-26", "Jun-26", "Jul-26"],
+    "amount": 730000000,
+    "tolerancePct": 5
+  },
+  "matchTargetPct": 95,
+  "crossFootToleranceRupees": 1
+}

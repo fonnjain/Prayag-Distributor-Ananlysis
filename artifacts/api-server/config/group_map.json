@@ -8,6 +8,7 @@
     "UPVC PIPE",
     "OPVC",
     "SWR",
+    "PPR",
     "HDPE PIPE",
     "CORRUGATED PIPE",
     "WATER TANK",
@@ -18,6 +19,6 @@
   ],
   "Sink": ["SINK", "PLATE RACK", "CABINET", "GLASS"],
   "Sanitaryware": ["SANITARYWARE", "GEYSER"],
-  "Connection / Waste": ["WASTE PIPE", "CONNECTION", "FLOOR TRAP"],
+  "Connection / Waste": ["WASTE PIPE", "CONNECTION", "CONECTION", "FLOOR TRAP"],
   "Hardware": ["HARDWARE", "TEFELON TAPE", "QUAA", "OTHER"]
 }
