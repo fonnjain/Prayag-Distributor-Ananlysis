@@ -8,13 +8,21 @@
 import type { DeepRow } from './deepRow';
 import type { SalesRepReportSecondaryMovers } from './salesRepReportSecondaryMovers';
 import type { SalesRepReportSecondaryParties } from './salesRepReportSecondaryParties';
+import type { SalesRepReportSecondaryPartyByState } from './salesRepReportSecondaryPartyByState';
+import type { SalesRepReportSecondarySaleCollection } from './salesRepReportSecondarySaleCollection';
+import type { SalesRepReportSecondarySegmentByState } from './salesRepReportSecondarySegmentByState';
 import type { SalesRepReportSecondaryTiles } from './salesRepReportSecondaryTiles';
 
 export type SalesRepReportSecondary = {
   tiles: SalesRepReportSecondaryTiles;
   byState: DeepRow[];
+  /** State name -> list of parties with this-FY and prior-FY amounts. */
+  partyByState: SalesRepReportSecondaryPartyByState;
+  /** State name -> segment comparison rows. */
+  segmentByState: SalesRepReportSecondarySegmentByState;
   byGroup: DeepRow[];
   bySegment: DeepRow[];
   parties: SalesRepReportSecondaryParties;
   movers: SalesRepReportSecondaryMovers;
+  saleCollection: SalesRepReportSecondarySaleCollection;
 };

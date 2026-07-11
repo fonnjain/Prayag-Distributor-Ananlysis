@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { GetSalesPersonReportsBasis } from './getSalesPersonReportsBasis';
 import type { GetSalesPersonReportsScope } from './getSalesPersonReportsScope';
 
 export type GetSalesPersonReportsParams = {
@@ -16,4 +17,16 @@ fy?: string;
  * own = this rep only; team = rep plus rolled-up juniors.
  */
 scope?: GetSalesPersonReportsScope;
+/**
+ * secondary = order booking file; primary = dispatched-sale registers.
+ */
+basis?: GetSalesPersonReportsBasis;
+/**
+ * Optional state filter applied server-side before returning partyByState/segmentByState slices.
+ */
+state?: string;
+/**
+ * Optional party (retailer ID) filter applied server-side.
+ */
+party?: string;
 };

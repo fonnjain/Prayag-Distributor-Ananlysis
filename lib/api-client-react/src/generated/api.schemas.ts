@@ -249,12 +249,33 @@ export interface PrimaryReport {
   unbridgedParties: PrimaryParty[];
 }
 
+export interface RepPartyRow {
+  id: string;
+  name: string;
+  amount: number;
+  priorAmount: number;
+}
+
+export interface ItemCodeRow {
+  code: string;
+  description: string;
+  amount: number;
+}
+
 export type SalesRepReportScope = typeof SalesRepReportScope[keyof typeof SalesRepReportScope];
 
 
 export const SalesRepReportScope = {
   own: 'own',
   team: 'team',
+} as const;
+
+export type SalesRepReportBasis = typeof SalesRepReportBasis[keyof typeof SalesRepReportBasis];
+
+
+export const SalesRepReportBasis = {
+  secondary: 'secondary',
+  primary: 'primary',
 } as const;
 
 export type SalesRepReportSecondaryTiles = {
@@ -269,6 +290,16 @@ export type SalesRepReportSecondaryTiles = {
   target: number | null;
   achievementPct: number | null;
 };
+
+/**
+ * State name -> list of parties with this-FY and prior-FY amounts.
+ */
+export type SalesRepReportSecondaryPartyByState = {[key: string]: RepPartyRow[]};
+
+/**
+ * State name -> segment comparison rows.
+ */
+export type SalesRepReportSecondarySegmentByState = {[key: string]: DeepRow[]};
 
 export type SalesRepReportSecondaryParties = {
   top: DeepRow[];
@@ -285,13 +316,60 @@ export type SalesRepReportSecondaryMovers = {
   segmentsDown: DeepRow[];
 };
 
+export type SalesRepReportSecondarySaleCollection = {
+  sale: number;
+  saleLast: number;
+  collection?: number | null;
+};
+
 export type SalesRepReportSecondary = {
   tiles: SalesRepReportSecondaryTiles;
   byState: DeepRow[];
+  /** State name -> list of parties with this-FY and prior-FY amounts. */
+  partyByState: SalesRepReportSecondaryPartyByState;
+  /** State name -> segment comparison rows. */
+  segmentByState: SalesRepReportSecondarySegmentByState;
   byGroup: DeepRow[];
   bySegment: DeepRow[];
   parties: SalesRepReportSecondaryParties;
   movers: SalesRepReportSecondaryMovers;
+  saleCollection: SalesRepReportSecondarySaleCollection;
+};
+
+export type SalesRepReportPrimary = {
+  available: boolean;
+  reason?: string | null;
+  headTotal: number;
+  bridgedToAnyTmAmount: number;
+  totalBridged: number;
+  bridgeCoverage: number;
+  bridgedParties: PrimaryParty[];
+  unbridgedParties: PrimaryParty[];
+  /** Item-code breakdown from invoice registers. Empty on Secondary basis or when no sale_line data matched. */
+  byItemCode: ItemCodeRow[];
+  itemCodeNote?: string | null;
+};
+
+export type SalesRepReportReconciliationSecondary = {
+  repTotal: number;
+  fileTotal?: number | null;
+  delta: number;
+  ok: boolean;
+  note: string;
+};
+
+export type SalesRepReportReconciliationPrimary = {
+  bridgedAmount: number;
+  unbridgedAmount: number;
+  headTotal: number;
+  delta: number;
+  ok: boolean;
+  note: string;
+};
+
+export type SalesRepReportReconciliation = {
+  secondary: SalesRepReportReconciliationSecondary;
+  primary: SalesRepReportReconciliationPrimary;
 };
 
 export interface SalesRepReport {
@@ -303,9 +381,13 @@ export interface SalesRepReport {
   hasTeam: boolean;
   available: boolean;
   reason?: string | null;
+  basis: SalesRepReportBasis;
   monthly: SalesRepMonthRow[];
+  /** Sorted list of states for the 3A/3B/3C state selector. */
+  stateOptions: string[];
   secondary: SalesRepReportSecondary;
-  primary: PrimaryReport;
+  primary: SalesRepReportPrimary;
+  reconciliation: SalesRepReportReconciliation;
 }
 
 export type SalesVerifyHeadStatus = typeof SalesVerifyHeadStatus[keyof typeof SalesVerifyHeadStatus];
@@ -994,6 +1076,18 @@ fy?: string;
  * own = this rep only; team = rep plus rolled-up juniors.
  */
 scope?: GetSalesPersonReportsScope;
+/**
+ * secondary = order booking file; primary = dispatched-sale registers.
+ */
+basis?: GetSalesPersonReportsBasis;
+/**
+ * Optional state filter applied server-side before returning partyByState/segmentByState slices.
+ */
+state?: string;
+/**
+ * Optional party (retailer ID) filter applied server-side.
+ */
+party?: string;
 };
 
 export type GetSalesPersonReportsScope = typeof GetSalesPersonReportsScope[keyof typeof GetSalesPersonReportsScope];
@@ -1002,6 +1096,14 @@ export type GetSalesPersonReportsScope = typeof GetSalesPersonReportsScope[keyof
 export const GetSalesPersonReportsScope = {
   own: 'own',
   team: 'team',
+} as const;
+
+export type GetSalesPersonReportsBasis = typeof GetSalesPersonReportsBasis[keyof typeof GetSalesPersonReportsBasis];
+
+
+export const GetSalesPersonReportsBasis = {
+  secondary: 'secondary',
+  primary: 'primary',
 } as const;
 
 export type GetSalesPersonReportsDownloadParams = {

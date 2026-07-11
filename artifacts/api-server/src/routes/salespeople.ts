@@ -153,6 +153,9 @@ router.get(
     const repKey = typeof req.params.key === "string" ? req.params.key.trim() : "";
     const fy = fyParam(req.query.fy);
     const scope = req.query.scope === "team" ? "team" : "own";
+    const basis = req.query.basis === "primary" ? "primary" : "secondary";
+    const filterState = typeof req.query.state === "string" ? req.query.state.trim() : undefined;
+    const filterParty = typeof req.query.party === "string" ? req.query.party.trim() : undefined;
     if (!repKey) {
       res.status(400).json({ error: "repKey is required" });
       return;
@@ -162,7 +165,13 @@ router.get(
       return;
     }
     try {
-      res.json(await buildSalesReports(fy, repKey, scope));
+      res.json(
+        await buildSalesReports(fy, repKey, scope, {
+          basis,
+          filterState,
+          filterParty,
+        }),
+      );
     } catch (err) {
       req.log.error({ err, repKey, fy }, "salespeople reports failed");
       res.status(500).json({ error: "Could not build the report. Try again in a minute." });

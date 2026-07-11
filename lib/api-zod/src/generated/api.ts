@@ -644,7 +644,10 @@ export const GetSalesPersonReportsParams = zod.object({
 
 export const GetSalesPersonReportsQueryParams = zod.object({
   "fy": zod.coerce.string().optional().describe('Fiscal year like 2025-26. Defaults to 2025-26.'),
-  "scope": zod.enum(['own', 'team']).optional().describe('own = this rep only; team = rep plus rolled-up juniors.')
+  "scope": zod.enum(['own', 'team']).optional().describe('own = this rep only; team = rep plus rolled-up juniors.'),
+  "basis": zod.enum(['secondary', 'primary']).optional().describe('secondary = order booking file; primary = dispatched-sale registers.'),
+  "state": zod.coerce.string().optional().describe('Optional state filter applied server-side before returning partyByState\/segmentByState slices.'),
+  "party": zod.coerce.string().optional().describe('Optional party (retailer ID) filter applied server-side.')
 })
 
 export const GetSalesPersonReportsResponse = zod.object({
@@ -656,12 +659,14 @@ export const GetSalesPersonReportsResponse = zod.object({
   "hasTeam": zod.boolean(),
   "available": zod.boolean(),
   "reason": zod.string().nullish(),
+  "basis": zod.enum(['secondary', 'primary']),
   "monthly": zod.array(zod.object({
   "month": zod.string().describe('Fiscal month label e.g. Apr-25'),
   "orderAmount": zod.number(),
   "orders": zod.number(),
   "saleAmount": zod.number()
 })),
+  "stateOptions": zod.array(zod.string()).describe('Sorted list of states for the 3A\/3B\/3C state selector.'),
   "secondary": zod.object({
   "tiles": zod.object({
   "netOrderBooked": zod.number(),
@@ -684,6 +689,21 @@ export const GetSalesPersonReportsResponse = zod.object({
   "sharePct": zod.number().nullable(),
   "flag": zod.enum(['new', 'old', 'churned']).nullish()
 })),
+  "partyByState": zod.record(zod.string(), zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "amount": zod.number(),
+  "priorAmount": zod.number()
+}))).describe('State name -> list of parties with this-FY and prior-FY amounts.'),
+  "segmentByState": zod.record(zod.string(), zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+}))).describe('State name -> segment comparison rows.'),
   "byGroup": zod.array(zod.object({
   "label": zod.string(),
   "thisFy": zod.number(),
@@ -770,6 +790,11 @@ export const GetSalesPersonReportsResponse = zod.object({
   "sharePct": zod.number().nullable(),
   "flag": zod.enum(['new', 'old', 'churned']).nullish()
 }))
+}),
+  "saleCollection": zod.object({
+  "sale": zod.number(),
+  "saleLast": zod.number(),
+  "collection": zod.number().nullish()
 })
 }),
   "primary": zod.object({
@@ -778,7 +803,7 @@ export const GetSalesPersonReportsResponse = zod.object({
   "headTotal": zod.number(),
   "bridgedToAnyTmAmount": zod.number(),
   "totalBridged": zod.number(),
-  "bridgeCoverage": zod.number().describe('% of head register bridged to any TM'),
+  "bridgeCoverage": zod.number(),
   "bridgedParties": zod.array(zod.object({
   "party": zod.string(),
   "amount": zod.number()
@@ -786,7 +811,30 @@ export const GetSalesPersonReportsResponse = zod.object({
   "unbridgedParties": zod.array(zod.object({
   "party": zod.string(),
   "amount": zod.number()
-}))
+})),
+  "byItemCode": zod.array(zod.object({
+  "code": zod.string(),
+  "description": zod.string(),
+  "amount": zod.number()
+})).describe('Item-code breakdown from invoice registers. Empty on Secondary basis or when no sale_line data matched.'),
+  "itemCodeNote": zod.string().nullish()
+}),
+  "reconciliation": zod.object({
+  "secondary": zod.object({
+  "repTotal": zod.number(),
+  "fileTotal": zod.number().nullish(),
+  "delta": zod.number(),
+  "ok": zod.boolean(),
+  "note": zod.string()
+}),
+  "primary": zod.object({
+  "bridgedAmount": zod.number(),
+  "unbridgedAmount": zod.number(),
+  "headTotal": zod.number(),
+  "delta": zod.number(),
+  "ok": zod.boolean(),
+  "note": zod.string()
+})
 })
 })
 

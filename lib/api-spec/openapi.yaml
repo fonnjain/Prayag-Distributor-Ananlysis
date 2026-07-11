@@ -573,6 +573,18 @@ paths:
           in: query
           schema: { type: string, enum: [own, team] }
           description: own = this rep only; team = rep plus rolled-up juniors.
+        - name: basis
+          in: query
+          schema: { type: string, enum: [secondary, primary] }
+          description: secondary = order booking file; primary = dispatched-sale registers.
+        - name: state
+          in: query
+          schema: { type: string }
+          description: Optional state filter applied server-side before returning partyByState/segmentByState slices.
+        - name: party
+          in: query
+          schema: { type: string }
+          description: Optional party (retailer ID) filter applied server-side.
       responses:
         "200":
           description: Sales rep report
@@ -1233,9 +1245,24 @@ components:
         unbridgedParties:
           type: array
           items: { $ref: "#/components/schemas/PrimaryParty" }
+    RepPartyRow:
+      type: object
+      required: [id, name, amount, priorAmount]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        amount: { type: number }
+        priorAmount: { type: number }
+    ItemCodeRow:
+      type: object
+      required: [code, description, amount]
+      properties:
+        code: { type: string }
+        description: { type: string }
+        amount: { type: number }
     SalesRepReport:
       type: object
-      required: [fy, priorFy, repKey, repName, scope, hasTeam, available, monthly, secondary, primary]
+      required: [fy, priorFy, repKey, repName, scope, hasTeam, available, basis, monthly, stateOptions, secondary, primary, reconciliation]
       properties:
         fy: { type: string }
         priorFy: { type: string }
@@ -1245,12 +1272,17 @@ components:
         hasTeam: { type: boolean }
         available: { type: boolean }
         reason: { type: string, nullable: true }
+        basis: { type: string, enum: [secondary, primary] }
         monthly:
           type: array
           items: { $ref: "#/components/schemas/SalesRepMonthRow" }
+        stateOptions:
+          type: array
+          items: { type: string }
+          description: Sorted list of states for the 3A/3B/3C state selector.
         secondary:
           type: object
-          required: [tiles, byState, byGroup, bySegment, parties, movers]
+          required: [tiles, byState, partyByState, segmentByState, byGroup, bySegment, parties, movers, saleCollection]
           properties:
             tiles:
               type: object
@@ -1269,6 +1301,18 @@ components:
             byState:
               type: array
               items: { $ref: "#/components/schemas/DeepRow" }
+            partyByState:
+              type: object
+              additionalProperties:
+                type: array
+                items: { $ref: "#/components/schemas/RepPartyRow" }
+              description: State name -> list of parties with this-FY and prior-FY amounts.
+            segmentByState:
+              type: object
+              additionalProperties:
+                type: array
+                items: { $ref: "#/components/schemas/DeepRow" }
+              description: State name -> segment comparison rows.
             byGroup:
               type: array
               items: { $ref: "#/components/schemas/DeepRow" }
@@ -1306,8 +1350,57 @@ components:
                 segmentsDown:
                   type: array
                   items: { $ref: "#/components/schemas/DeepRow" }
+            saleCollection:
+              type: object
+              required: [sale, saleLast]
+              properties:
+                sale: { type: number }
+                saleLast: { type: number }
+                collection: { type: number, nullable: true }
         primary:
-          $ref: "#/components/schemas/PrimaryReport"
+          type: object
+          required: [available, headTotal, bridgedToAnyTmAmount, totalBridged, bridgeCoverage, bridgedParties, unbridgedParties, byItemCode]
+          properties:
+            available: { type: boolean }
+            reason: { type: string, nullable: true }
+            headTotal: { type: number }
+            bridgedToAnyTmAmount: { type: number }
+            totalBridged: { type: number }
+            bridgeCoverage: { type: number }
+            bridgedParties:
+              type: array
+              items: { $ref: "#/components/schemas/PrimaryParty" }
+            unbridgedParties:
+              type: array
+              items: { $ref: "#/components/schemas/PrimaryParty" }
+            byItemCode:
+              type: array
+              items: { $ref: "#/components/schemas/ItemCodeRow" }
+              description: Item-code breakdown from invoice registers. Empty on Secondary basis or when no sale_line data matched.
+            itemCodeNote: { type: string, nullable: true }
+        reconciliation:
+          type: object
+          required: [secondary, primary]
+          properties:
+            secondary:
+              type: object
+              required: [repTotal, delta, ok, note]
+              properties:
+                repTotal: { type: number }
+                fileTotal: { type: number, nullable: true }
+                delta: { type: number }
+                ok: { type: boolean }
+                note: { type: string }
+            primary:
+              type: object
+              required: [bridgedAmount, unbridgedAmount, headTotal, delta, ok, note]
+              properties:
+                bridgedAmount: { type: number }
+                unbridgedAmount: { type: number }
+                headTotal: { type: number }
+                delta: { type: number }
+                ok: { type: boolean }
+                note: { type: string }
     SalesVerifyHead:
       type: object
       required: [name, repCount, repSaleTotal, nodeTeamNet, anchor, deltaPct, status, withinCrossFoot]

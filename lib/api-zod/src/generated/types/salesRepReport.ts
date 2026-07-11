@@ -5,8 +5,10 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { PrimaryReport } from './primaryReport';
 import type { SalesRepMonthRow } from './salesRepMonthRow';
+import type { SalesRepReportBasis } from './salesRepReportBasis';
+import type { SalesRepReportPrimary } from './salesRepReportPrimary';
+import type { SalesRepReportReconciliation } from './salesRepReportReconciliation';
 import type { SalesRepReportScope } from './salesRepReportScope';
 import type { SalesRepReportSecondary } from './salesRepReportSecondary';
 
@@ -19,7 +21,11 @@ export interface SalesRepReport {
   hasTeam: boolean;
   available: boolean;
   reason?: string | null;
+  basis: SalesRepReportBasis;
   monthly: SalesRepMonthRow[];
+  /** Sorted list of states for the 3A/3B/3C state selector. */
+  stateOptions: string[];
   secondary: SalesRepReportSecondary;
-  primary: PrimaryReport;
+  primary: SalesRepReportPrimary;
+  reconciliation: SalesRepReportReconciliation;
 }

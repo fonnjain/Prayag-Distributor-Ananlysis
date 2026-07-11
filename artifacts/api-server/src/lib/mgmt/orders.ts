@@ -58,6 +58,17 @@ export type TmOrderAgg = {
   // Additive: the management report/verify never read this; it drives the
   // Sales People deep-dive's By Segment and By Group (via the INDEX map) tables.
   perSegment: Map<string, number>;
+  // retailerId -> segment -> amount. Populated at read time (both party and
+  // segment appear on every order row). Drives the 3A/3B/3C per-state/party/
+  // segment cross-dimensional report tables in the per-salesperson Reports tab.
+  perPartyPerSegment: Map<string, Map<string, number>>;
+  // retailerId -> state. Populated at read time if the source file carries a
+  // State/Territory column; otherwise filled lazily via enrichOrderAggWithRosterState.
+  partyState: Map<string, string>;
+  // state -> retailerId -> cumulative amount (same source as partyState).
+  perStatePerParty: Map<string, Map<string, number>>;
+  // state -> 12-element fiscal-month amount array (same source).
+  perStatePerMonth: Map<string, number[]>;
   directAmount: number;
   directRetailers: Set<string>;
   distributors: Set<string>;
@@ -236,6 +247,8 @@ type ColMap = {
   distributor: number;
   teamMember: number;
   segment: number;
+  // -1 when the file has no State/Territory column (populate from roster instead).
+  state: number;
 };
 
 function detectColumns(row: SheetCellValue[]): ColMap | null {
@@ -268,11 +281,14 @@ function detectColumns(row: SheetCellValue[]): ColMap | null {
   const distributor = find("distributor", "distributorname");
   const teamMember = find("teammembername", "teammember");
   const segment = find("segment");
+  // Optional: State/Territory column allows state-based cross-dimensional reports.
+  // When absent (-1), callers derive state from the roster spine.
+  const state = find("state", "statename", "territory", "stateterritory");
   // Require a retailer/id column too, so a stray banner row that happens to
   // carry date/team/segment/value labels cannot be mistaken for the header.
   if (date < 0 || teamMember < 0 || subTotal < 0 || segment < 0 || retailerId < 0)
     return null;
-  return { date, retailerId, retailerName, orderId, subTotal, distributor, teamMember, segment };
+  return { date, retailerId, retailerName, orderId, subTotal, distributor, teamMember, segment, state };
 }
 
 // Extract the Google HTTP status from a Sheets/Drive error message like
@@ -350,7 +366,8 @@ async function loadOrderFileUncached(
     teamMember: SheetCellValue;
     distributor: string;
     segment: string;
-  } = { date: null, retailerId: "", retailerName: "", orderId: "", teamMember: null, distributor: "", segment: "" };
+    state: string;
+  } = { date: null, retailerId: "", retailerName: "", orderId: "", teamMember: null, distributor: "", segment: "", state: "" };
 
   const cellStr = (v: SheetCellValue): string => String(v ?? "").trim();
   const blank = (v: SheetCellValue): boolean => v == null || cellStr(v) === "";
@@ -371,6 +388,7 @@ async function loadOrderFileUncached(
     carry.teamMember = null;
     carry.distributor = "";
     carry.segment = "";
+    carry.state = "";
   };
 
   const handleBatch = (rows: SheetCellValue[][]): void => {
@@ -396,6 +414,7 @@ async function loadOrderFileUncached(
           carry.distributor = cellStr(r[cols.distributor]);
         }
         if (!blank(r[cols.segment])) carry.segment = cellStr(r[cols.segment]);
+        if (cols.state >= 0 && !blank(r[cols.state])) carry.state = cellStr(r[cols.state]);
 
         const tmRaw = carry.teamMember;
         if (tmRaw == null || tmRaw === "") continue;
@@ -435,6 +454,10 @@ async function loadOrderFileUncached(
             orderIds: new Set<string>(),
             retailers: new Map<string, RetailerStat>(),
             perSegment: new Map<string, number>(),
+            perPartyPerSegment: new Map<string, Map<string, number>>(),
+            partyState: new Map<string, string>(),
+            perStatePerParty: new Map<string, Map<string, number>>(),
+            perStatePerMonth: new Map<string, number[]>(),
             directAmount: 0,
             directRetailers: new Set<string>(),
             distributors: new Set<string>(),
@@ -456,6 +479,12 @@ async function loadOrderFileUncached(
             carry.segment,
             (agg.perSegment.get(carry.segment) ?? 0) + lineAmount,
           );
+          // perPartyPerSegment: always populated (party + segment both available).
+          if (retailerId) {
+            let pps = agg.perPartyPerSegment.get(retailerId);
+            if (!pps) { pps = new Map(); agg.perPartyPerSegment.set(retailerId, pps); }
+            pps.set(carry.segment, (pps.get(carry.segment) ?? 0) + lineAmount);
+          }
         }
         const orderId = carry.orderId;
         if (orderId) {
@@ -472,6 +501,20 @@ async function loadOrderFileUncached(
           }
           rs.amount += lineAmount;
           if (orderId) rs.orderIds.add(orderId);
+          // State-based maps: populated when the file carries a State column.
+          // When absent, buildSalesReports derives state from the roster spine instead.
+          if (carry.state && lineAmount !== 0) {
+            if (!agg.partyState.has(retailerId)) {
+              agg.partyState.set(retailerId, carry.state);
+            }
+            const st = agg.partyState.get(retailerId) ?? carry.state;
+            let spp = agg.perStatePerParty.get(st);
+            if (!spp) { spp = new Map(); agg.perStatePerParty.set(st, spp); }
+            spp.set(retailerId, (spp.get(retailerId) ?? 0) + lineAmount);
+            let spm = agg.perStatePerMonth.get(st);
+            if (!spm) { spm = new Array(12).fill(0) as number[]; agg.perStatePerMonth.set(st, spm); }
+            spm[monthIdx] += lineAmount;
+          }
         }
         const distributor = carry.distributor;
         if (isDirectDealer(distributor)) {
