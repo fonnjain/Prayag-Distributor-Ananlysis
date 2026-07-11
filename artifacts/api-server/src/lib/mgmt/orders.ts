@@ -22,6 +22,8 @@
 //
 // Aggregates are cached in-process per FY (the sheets change slowly and a
 // full read costs ~8 API calls per file).
+import { existsSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import { logger } from "../logger.js";
 import {
   readTabRowsChunked,
@@ -37,7 +39,7 @@ import {
 } from "./names.js";
 import { mgmtSources } from "./roster.js";
 
-export type RetailerStat = { amount: number; orderIds: Set<string> };
+export type RetailerStat = { amount: number; orderIds: Set<string>; name: string };
 
 export type TmOrderAgg = {
   displayName: string;
@@ -52,6 +54,10 @@ export type TmOrderAgg = {
   monthOrderIds: Array<Set<string>>;
   orderIds: Set<string>;
   retailers: Map<string, RetailerStat>;
+  // Raw segment label -> net Sub Total for THIS member (per-rep segment mix).
+  // Additive: the management report/verify never read this; it drives the
+  // Sales People deep-dive's By Segment and By Group (via the INDEX map) tables.
+  perSegment: Map<string, number>;
   directAmount: number;
   directRetailers: Set<string>;
   distributors: Set<string>;
@@ -148,11 +154,83 @@ export async function resolveOrderFileId(fy: string): Promise<string | null> {
   return hit?.id ?? null;
 }
 
+// Uploaded-copy fallback. When the live Sheets read fails (403 not shared, 404,
+// folder listing error) or the file does not exist in Drive yet, a manually
+// placed xlsx copy of the same Secondary Order Booking workbook is parsed by
+// the SAME content-based parser so the dashboard still populates instead of
+// going blank. Location: ORDER_UPLOAD_DIR (or ./uploads under the process cwd)
+// / secondary-order-booking-<fy>.xlsx.
+function orderUploadDir(): string {
+  return resolve(process.env.ORDER_UPLOAD_DIR ?? join(process.cwd(), "uploads"));
+}
+export function orderUploadPath(fy: string): string {
+  return join(orderUploadDir(), `secondary-order-booking-${fy}.xlsx`);
+}
+function findUploadedOrderFile(fy: string): string | null {
+  const p = orderUploadPath(fy);
+  return existsSync(p) ? p : null;
+}
+
+// Coerce an exceljs cell into the same value shape the Sheets values.get path
+// produces (string | number | boolean | null). Date cells become an Excel
+// serial so parseOrderDate treats them exactly like a Sheets serial.
+function xlsxCellValue(v: unknown): SheetCellValue {
+  if (v == null) return null;
+  if (typeof v === "number" || typeof v === "boolean" || typeof v === "string") {
+    return v;
+  }
+  if (v instanceof Date) {
+    return Math.round(v.getTime() / 86_400_000) + 25_569;
+  }
+  const o = v as Record<string, unknown>;
+  if ("result" in o) return xlsxCellValue(o.result);
+  if ("text" in o) return xlsxCellValue(o.text);
+  if (Array.isArray(o.richText)) {
+    return (o.richText as Array<{ text?: string }>)
+      .map((t) => t?.text ?? "")
+      .join("");
+  }
+  return String(v);
+}
+
+// Streams an uploaded xlsx copy of the order workbook and feeds its rows to the
+// same batch handler the live path uses. Rows are emitted 0-indexed to match
+// the Sheets values.get shape.
+async function readUploadedOrderXlsx(
+  filePath: string,
+  tab: string,
+  onBatch: (rows: SheetCellValue[][]) => void,
+): Promise<{ rowsRead: number }> {
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(filePath);
+  // xlsx truncates tab titles to 31 chars; match by startsWith, never equality.
+  const needle = tab.slice(0, 31);
+  const ws =
+    wb.worksheets.find((w) => w.name === tab || w.name.startsWith(needle)) ??
+    wb.worksheets[0];
+  if (!ws) return { rowsRead: 0 };
+  let rowsRead = 0;
+  let batch: SheetCellValue[][] = [];
+  ws.eachRow({ includeEmpty: true }, (row) => {
+    const raw = Array.isArray(row.values) ? row.values.slice(1) : [];
+    batch.push(raw.map((c) => xlsxCellValue(c)));
+    rowsRead++;
+    if (batch.length >= 5_000) {
+      onBatch(batch);
+      batch = [];
+    }
+  });
+  if (batch.length) onBatch(batch);
+  return { rowsRead };
+}
+
 // Header names drift across years (Team member vs Team Member Name, ID vs
 // Retailer Id) — detect columns by content, not position.
 type ColMap = {
   date: number;
   retailerId: number;
+  retailerName: number;
   orderId: number;
   subTotal: number;
   distributor: number;
@@ -177,6 +255,11 @@ function detectColumns(row: SheetCellValue[]): ColMap | null {
   };
   const date = find("date", "orderdate");
   const retailerId = find("retailerid", "retid", "id", "retailers", "retailer", "retailername");
+  // A separate display-name column when the file carries both an id and a name
+  // (newer files). If the only retailer column is the one already chosen as the
+  // id, there is no distinct name (-1) and the deep-dive falls back to the id.
+  let retailerName = find("retailername", "party", "partyname", "customer", "customername", "retailer");
+  if (retailerName === retailerId) retailerName = -1;
   const orderId = find("orderid", "orderno");
   // "Sub Total" (net after discount) is the reconciling measure for BOTH the
   // Order Booked and Sale Report columns; it matches the workbook's own header
@@ -189,7 +272,7 @@ function detectColumns(row: SheetCellValue[]): ColMap | null {
   // carry date/team/segment/value labels cannot be mistaken for the header.
   if (date < 0 || teamMember < 0 || subTotal < 0 || segment < 0 || retailerId < 0)
     return null;
-  return { date, retailerId, orderId, subTotal, distributor, teamMember, segment };
+  return { date, retailerId, retailerName, orderId, subTotal, distributor, teamMember, segment };
 }
 
 // Extract the Google HTTP status from a Sheets/Drive error message like
@@ -239,31 +322,15 @@ export async function loadOrderFile(
 async function loadOrderFileUncached(
   fy: string,
 ): Promise<OrderFileAgg | null> {
-  let spreadsheetId: string | null;
+  let spreadsheetId: string | null = null;
+  // A folder-listing failure is a live-source failure: defer it so an uploaded
+  // copy can still populate the dashboard, and surface the real reason only if
+  // no upload exists.
+  let resolveError: unknown = null;
   try {
     spreadsheetId = await resolveOrderFileId(fy);
   } catch (err) {
-    const st: OrderLoadStatus = {
-      fy,
-      status: "error",
-      httpStatus: googleStatus(err),
-      detail: `Could not list the order-booking Drive folder for ${fy}: ${err instanceof Error ? err.message : String(err)}`,
-    };
-    loadStatus.set(fy, st);
-    logger.error({ fy, detail: st.detail }, "order booking folder listing failed");
-    return null;
-  }
-  if (!spreadsheetId) {
-    const st: OrderLoadStatus = {
-      fy,
-      status: "no-file",
-      detail:
-        `${fy} Secondary Order Booking file not found in the Drive folder ` +
-        `(no configured id and no spreadsheet titled with "${fy}", "${fyShort(fy)}" or "${fyStartYear(fy)}").`,
-    };
-    loadStatus.set(fy, st);
-    logger.warn({ fy }, st.detail);
-    return null;
+    resolveError = err;
   }
   const tab = mgmtSources().secondary_order_booking.tab;
   const perTm = new Map<string, TmOrderAgg>();
@@ -278,18 +345,35 @@ async function loadOrderFileUncached(
   const carry: {
     date: SheetCellValue;
     retailerId: string;
+    retailerName: string;
     orderId: string;
     teamMember: SheetCellValue;
     distributor: string;
     segment: string;
-  } = { date: null, retailerId: "", orderId: "", teamMember: null, distributor: "", segment: "" };
+  } = { date: null, retailerId: "", retailerName: "", orderId: "", teamMember: null, distributor: "", segment: "" };
 
   const cellStr = (v: SheetCellValue): string => String(v ?? "").trim();
   const blank = (v: SheetCellValue): boolean => v == null || cellStr(v) === "";
 
-  let rowsRead = 0;
-  try {
-    ({ rowsRead } = await readTabRowsChunked(spreadsheetId, tab, (rows) => {
+  // Fresh accumulators can be discarded and rebuilt if the live read fails
+  // partway and we fall back to the uploaded copy.
+  const resetAccumulators = (): void => {
+    perTm.clear();
+    retailerFirst.clear();
+    segmentTotals.clear();
+    cols = null;
+    totalAmount = 0;
+    totalSaleAmount = 0;
+    carry.date = null;
+    carry.retailerId = "";
+    carry.retailerName = "";
+    carry.orderId = "";
+    carry.teamMember = null;
+    carry.distributor = "";
+    carry.segment = "";
+  };
+
+  const handleBatch = (rows: SheetCellValue[][]): void => {
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i] ?? [];
         if (!cols) {
@@ -301,6 +385,9 @@ async function loadOrderFileUncached(
         if (!blank(r[cols.teamMember])) carry.teamMember = r[cols.teamMember];
         if (cols.retailerId >= 0 && !blank(r[cols.retailerId])) {
           carry.retailerId = cellStr(r[cols.retailerId]);
+        }
+        if (cols.retailerName >= 0 && !blank(r[cols.retailerName])) {
+          carry.retailerName = cellStr(r[cols.retailerName]);
         }
         if (cols.orderId >= 0 && !blank(r[cols.orderId])) {
           carry.orderId = cellStr(r[cols.orderId]);
@@ -347,6 +434,7 @@ async function loadOrderFileUncached(
             monthOrderIds: Array.from({ length: 12 }, () => new Set<string>()),
             orderIds: new Set<string>(),
             retailers: new Map<string, RetailerStat>(),
+            perSegment: new Map<string, number>(),
             directAmount: 0,
             directRetailers: new Set<string>(),
             distributors: new Set<string>(),
@@ -364,6 +452,10 @@ async function loadOrderFileUncached(
             carry.segment,
             (segmentTotals.get(carry.segment) ?? 0) + lineAmount,
           );
+          agg.perSegment.set(
+            carry.segment,
+            (agg.perSegment.get(carry.segment) ?? 0) + lineAmount,
+          );
         }
         const orderId = carry.orderId;
         if (orderId) {
@@ -373,8 +465,10 @@ async function loadOrderFileUncached(
         if (retailerId) {
           let rs = agg.retailers.get(retailerId);
           if (!rs) {
-            rs = { amount: 0, orderIds: new Set<string>() };
+            rs = { amount: 0, orderIds: new Set<string>(), name: carry.retailerName || retailerId };
             agg.retailers.set(retailerId, rs);
+          } else if (!rs.name && carry.retailerName) {
+            rs.name = carry.retailerName;
           }
           rs.amount += lineAmount;
           if (orderId) rs.orderIds.add(orderId);
@@ -387,33 +481,104 @@ async function loadOrderFileUncached(
           agg.distributors.add(distributor.toLowerCase());
         }
       }
-    }));
+  };
+
+  let rowsRead = 0;
+  // sourceId records what was actually read: the Drive spreadsheet id, or
+  // "uploaded:<file>" when the fallback copy was used.
+  let sourceId: string = spreadsheetId ?? "";
+  const upload = findUploadedOrderFile(fy);
+  const LIVE_MISSING = "__no_live_file__";
+  try {
+    if (resolveError) throw resolveError;
+    if (!spreadsheetId) throw new Error(LIVE_MISSING);
+    ({ rowsRead } = await readTabRowsChunked(spreadsheetId, tab, handleBatch));
   } catch (err) {
-    const st = errorDetail(fy, spreadsheetId, err);
-    loadStatus.set(fy, st);
-    logger.error(
-      { fy, spreadsheetId, httpStatus: st.httpStatus, detail: st.detail },
-      "order booking file read failed",
-    );
-    return null;
+    const liveMissing = err instanceof Error && err.message === LIVE_MISSING;
+    if (!upload) {
+      if (liveMissing) {
+        const st: OrderLoadStatus = {
+          fy,
+          status: "no-file",
+          detail:
+            `${fy} Secondary Order Booking file not found in the Drive folder ` +
+            `(no configured id and no spreadsheet titled with "${fy}", "${fyShort(fy)}" or "${fyStartYear(fy)}"), ` +
+            `and no uploaded copy was found at ${orderUploadPath(fy)}.`,
+        };
+        loadStatus.set(fy, st);
+        logger.warn({ fy }, st.detail);
+        return null;
+      }
+      if (resolveError) {
+        const st: OrderLoadStatus = {
+          fy,
+          status: "error",
+          httpStatus: googleStatus(err),
+          detail:
+            `Could not list the order-booking Drive folder for ${fy} ` +
+            `(${err instanceof Error ? err.message : String(err)}), ` +
+            `and no uploaded copy was found at ${orderUploadPath(fy)}.`,
+        };
+        loadStatus.set(fy, st);
+        logger.error({ fy, detail: st.detail }, "order booking folder listing failed");
+        return null;
+      }
+      const st = errorDetail(fy, spreadsheetId ?? "(none)", err);
+      loadStatus.set(fy, st);
+      logger.error(
+        { fy, spreadsheetId, httpStatus: st.httpStatus, detail: st.detail },
+        "order booking file read failed",
+      );
+      return null;
+    }
+    // Live read unavailable but an uploaded copy exists: rebuild from it with
+    // the SAME content-based parser so the dashboard still populates.
+    resetAccumulators();
+    try {
+      ({ rowsRead } = await readUploadedOrderXlsx(upload, tab, handleBatch));
+      sourceId = `uploaded:${basename(upload)}`;
+      logger.warn(
+        {
+          fy,
+          upload,
+          reason: liveMissing
+            ? "no-live-file"
+            : err instanceof Error
+              ? err.message
+              : String(err),
+        },
+        "order booking live read unavailable; used uploaded copy",
+      );
+    } catch (uErr) {
+      const st: OrderLoadStatus = {
+        fy,
+        status: "error",
+        detail:
+          `Live read for ${fy} was unavailable and the uploaded copy at ${upload} ` +
+          `could not be read: ${uErr instanceof Error ? uErr.message : String(uErr)}`,
+      };
+      loadStatus.set(fy, st);
+      logger.error({ fy, upload }, st.detail);
+      return null;
+    }
   }
   if (!cols) {
     const st: OrderLoadStatus = {
       fy,
       status: "error",
       detail:
-        `Header row not detected in tab "${tab}" of spreadsheet ${spreadsheetId} (${fy}); ` +
+        `Header row not detected in tab "${tab}" of source ${sourceId} (${fy}); ` +
         `expected a row containing Date, a team-member column, Segment and Sub Total/Order Value.`,
-      spreadsheetId,
+      spreadsheetId: sourceId,
       rowsRead,
     };
     loadStatus.set(fy, st);
-    logger.error({ fy, spreadsheetId, rowsRead }, st.detail);
+    logger.error({ fy, sourceId, rowsRead }, st.detail);
     return null;
   }
   const agg: OrderFileAgg = {
     fy,
-    spreadsheetId,
+    spreadsheetId: sourceId,
     perTm,
     retailerFirst,
     segmentTotals,
@@ -425,14 +590,14 @@ async function loadOrderFileUncached(
   loadStatus.set(fy, {
     fy,
     status: "ok",
-    detail: `Read ${rowsRead} rows from spreadsheet ${spreadsheetId}.`,
+    detail: `Read ${rowsRead} rows from source ${sourceId}.`,
     rowsRead,
-    spreadsheetId,
+    spreadsheetId: sourceId,
   });
   logger.info(
     {
       fy,
-      spreadsheetId,
+      sourceId,
       rowsRead,
       teamMembers: perTm.size,
       retailers: retailerFirst.size,

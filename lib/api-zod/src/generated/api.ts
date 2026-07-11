@@ -465,3 +465,227 @@ export const GetTargetSplitPreviewResponse = zod.object({
 })
 
 
+/**
+ * Returns the roster-derived reporting tree (State Heads as roots, sales people nested underneath by Reporting Manager) with each node's own and rolled-up team NET secondary order booking for the fiscal year.
+ * @summary Reporting tree of State Heads and their sales people
+ */
+export const GetSalesPeopleTreeQueryParams = zod.object({
+  "fy": zod.coerce.string().optional().describe('Fiscal year like 2025-26. Defaults to 2025-26.')
+})
+
+export const GetSalesPeopleTreeResponse = zod.object({
+  "fy": zod.string(),
+  "available": zod.boolean(),
+  "reason": zod.string().nullish(),
+  "rosterSource": zod.string(),
+  "multiLevel": zod.boolean(),
+  "loadDetail": zod.string().nullable(),
+  "heads": zod.array(zod.object({
+  "key": zod.string(),
+  "name": zod.string(),
+  "state": zod.string(),
+  "isMember": zod.boolean(),
+  "hasTeam": zod.boolean(),
+  "ownNet": zod.number(),
+  "teamNet": zod.number(),
+  "children": zod.array(zod.unknown())
+}))
+})
+
+
+/**
+ * Headline tiles plus By State, By Party, By Group and By Segment tables (this FY vs last FY, with diff, growth% and share%), plus top movers, for one sales person's own book or their own + rolled-up team.
+ * @summary Per-rep deep dive with FY-vs-FY breakdowns
+ */
+export const GetSalesPersonDeepDiveQueryParams = zod.object({
+  "fy": zod.coerce.string().optional().describe('Fiscal year like 2025-26. Defaults to 2025-26.'),
+  "repKey": zod.coerce.string().describe('Normalised rep key from the tree node.'),
+  "scope": zod.enum(['own', 'team']).optional().describe('own = this rep only; team = rep plus rolled-up juniors.')
+})
+
+export const GetSalesPersonDeepDiveResponse = zod.object({
+  "fy": zod.string(),
+  "priorFy": zod.string(),
+  "repKey": zod.string(),
+  "repName": zod.string(),
+  "scope": zod.enum(['own', 'team']),
+  "hasTeam": zod.boolean(),
+  "available": zod.boolean(),
+  "reason": zod.string().nullish(),
+  "tiles": zod.object({
+  "netOrderBooked": zod.number(),
+  "netOrderBookedLast": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "orders": zod.number(),
+  "activeRetailers": zod.number(),
+  "newRetailers": zod.number(),
+  "avgOrderValue": zod.number().nullable(),
+  "businessPerRetailer": zod.number().nullable(),
+  "target": zod.number().nullable(),
+  "achievementPct": zod.number().nullable()
+}),
+  "byState": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+})),
+  "byGroup": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+})),
+  "bySegment": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+})),
+  "parties": zod.object({
+  "top": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+})),
+  "bottom": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+})),
+  "newTop": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+})),
+  "churned": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+})),
+  "newCount": zod.number(),
+  "oldCount": zod.number(),
+  "churnedCount": zod.number()
+}),
+  "movers": zod.object({
+  "partiesUp": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+})),
+  "partiesDown": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+})),
+  "segmentsUp": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+})),
+  "segmentsDown": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+}))
+})
+})
+
+
+/**
+ * Cross-foots each head's rolled-up rep total against the signed-off net anchors, reports name-match coverage between the file and the roster, and lists unmatched names in both directions.
+ * @summary Reconcile sales-people rollups against locked head anchors
+ */
+export const VerifySalesPeopleQueryParams = zod.object({
+  "fy": zod.coerce.string().optional().describe('Fiscal year like 2025-26. Defaults to 2025-26.')
+})
+
+export const VerifySalesPeopleResponse = zod.object({
+  "fy": zod.string(),
+  "available": zod.boolean(),
+  "reason": zod.string().nullish(),
+  "rosterSource": zod.string(),
+  "multiLevel": zod.boolean(),
+  "overall": zod.enum(['pass', 'warn', 'fail']),
+  "companyTotal": zod.number(),
+  "attributedTotal": zod.number(),
+  "coveragePct": zod.number().nullable(),
+  "heads": zod.array(zod.object({
+  "name": zod.string(),
+  "repCount": zod.number(),
+  "repSaleTotal": zod.number(),
+  "nodeTeamNet": zod.number(),
+  "anchor": zod.number().nullable(),
+  "deltaPct": zod.number().nullable(),
+  "status": zod.enum(['pass', 'warn', 'fail']),
+  "withinCrossFoot": zod.boolean()
+})),
+  "nameMatch": zod.object({
+  "rosterCount": zod.number(),
+  "fileNameCount": zod.number(),
+  "matchedCount": zod.number(),
+  "matchPct": zod.number().nullable(),
+  "unmatchedFileNames": zod.array(zod.string()),
+  "unmatchedRosterNames": zod.array(zod.string())
+})
+})
+
+
+/**
+ * In narrative mode, produces an executive summary for one sales person (or their team). In compare mode, ranks and contrasts the sales people under one State Head. Grounded strictly in the passed net numbers.
+ * @summary AI narrative or head-level comparison for sales people
+ */
+export const AnalyzeSalesPersonBody = zod.object({
+  "mode": zod.enum(['narrative', 'compare']),
+  "fy": zod.string(),
+  "repKey": zod.string().nullish(),
+  "scope": zod.enum(['own', 'team']).nullish(),
+  "head": zod.string().nullish()
+})
+
+export const AnalyzeSalesPersonResponse = zod.object({
+  "answer": zod.string()
+})
+
+

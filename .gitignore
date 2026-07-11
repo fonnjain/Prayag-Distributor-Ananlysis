@@ -47,3 +47,6 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Uploaded fallback copies of source workbooks (never committed)
+artifacts/api-server/uploads/

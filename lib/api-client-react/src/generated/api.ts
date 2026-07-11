@@ -24,9 +24,12 @@ import type {
   AnalyzeRequest,
   AnalyzeResponse,
   DashboardResponse,
+  DeepDive,
   DriveFileList,
   ErrorResponse,
   GetAnalyticsParams,
+  GetSalesPeopleTreeParams,
+  GetSalesPersonDeepDiveParams,
   GetTargetSplitPreviewParams,
   GetTargetsParams,
   GetVerifyReportParams,
@@ -35,6 +38,10 @@ import type {
   MgmtOptions,
   MgmtReportRequest,
   MgmtVerifyResult,
+  SalesTree,
+  SalesVerify,
+  SalespersonAnalyzeRequest,
+  SalespersonAnalyzeResponse,
   SaveTargetsRequest,
   SaveTargetsResult,
   SplitPreviewResponse,
@@ -42,7 +49,8 @@ import type {
   VerifyBackfillRequest,
   VerifyBackfillResponse,
   VerifyMgmtReportParams,
-  VerifyReport
+  VerifyReport,
+  VerifySalesPeopleParams
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -1170,4 +1178,330 @@ export function useGetTargetSplitPreview<TData = Awaited<ReturnType<typeof getTa
 
 
 
+
+export const getGetSalesPeopleTreeUrl = (params?: GetSalesPeopleTreeParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/salespeople/tree?${stringifiedParams}` : `/api/salespeople/tree`
+}
+
+/**
+ * Returns the roster-derived reporting tree (State Heads as roots, sales people nested underneath by Reporting Manager) with each node's own and rolled-up team NET secondary order booking for the fiscal year.
+ * @summary Reporting tree of State Heads and their sales people
+ */
+export const getSalesPeopleTree = async (params?: GetSalesPeopleTreeParams, options?: RequestInit): Promise<SalesTree> => {
+
+  return customFetch<SalesTree>(getGetSalesPeopleTreeUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSalesPeopleTreeQueryKey = (params?: GetSalesPeopleTreeParams,) => {
+    return [
+    `/api/salespeople/tree`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetSalesPeopleTreeQueryOptions = <TData = Awaited<ReturnType<typeof getSalesPeopleTree>>, TError = ErrorType<ErrorResponse>>(params?: GetSalesPeopleTreeParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSalesPeopleTree>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSalesPeopleTreeQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSalesPeopleTree>>> = ({ signal }) => getSalesPeopleTree(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSalesPeopleTree>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSalesPeopleTreeQueryResult = NonNullable<Awaited<ReturnType<typeof getSalesPeopleTree>>>
+export type GetSalesPeopleTreeQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Reporting tree of State Heads and their sales people
+ */
+
+export function useGetSalesPeopleTree<TData = Awaited<ReturnType<typeof getSalesPeopleTree>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetSalesPeopleTreeParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSalesPeopleTree>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSalesPeopleTreeQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetSalesPersonDeepDiveUrl = (params: GetSalesPersonDeepDiveParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/salespeople/deep-dive?${stringifiedParams}` : `/api/salespeople/deep-dive`
+}
+
+/**
+ * Headline tiles plus By State, By Party, By Group and By Segment tables (this FY vs last FY, with diff, growth% and share%), plus top movers, for one sales person's own book or their own + rolled-up team.
+ * @summary Per-rep deep dive with FY-vs-FY breakdowns
+ */
+export const getSalesPersonDeepDive = async (params: GetSalesPersonDeepDiveParams, options?: RequestInit): Promise<DeepDive> => {
+
+  return customFetch<DeepDive>(getGetSalesPersonDeepDiveUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSalesPersonDeepDiveQueryKey = (params?: GetSalesPersonDeepDiveParams,) => {
+    return [
+    `/api/salespeople/deep-dive`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetSalesPersonDeepDiveQueryOptions = <TData = Awaited<ReturnType<typeof getSalesPersonDeepDive>>, TError = ErrorType<ErrorResponse>>(params: GetSalesPersonDeepDiveParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSalesPersonDeepDive>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSalesPersonDeepDiveQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSalesPersonDeepDive>>> = ({ signal }) => getSalesPersonDeepDive(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSalesPersonDeepDive>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSalesPersonDeepDiveQueryResult = NonNullable<Awaited<ReturnType<typeof getSalesPersonDeepDive>>>
+export type GetSalesPersonDeepDiveQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Per-rep deep dive with FY-vs-FY breakdowns
+ */
+
+export function useGetSalesPersonDeepDive<TData = Awaited<ReturnType<typeof getSalesPersonDeepDive>>, TError = ErrorType<ErrorResponse>>(
+ params: GetSalesPersonDeepDiveParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSalesPersonDeepDive>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSalesPersonDeepDiveQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getVerifySalesPeopleUrl = (params?: VerifySalesPeopleParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/salespeople/verify?${stringifiedParams}` : `/api/salespeople/verify`
+}
+
+/**
+ * Cross-foots each head's rolled-up rep total against the signed-off net anchors, reports name-match coverage between the file and the roster, and lists unmatched names in both directions.
+ * @summary Reconcile sales-people rollups against locked head anchors
+ */
+export const verifySalesPeople = async (params?: VerifySalesPeopleParams, options?: RequestInit): Promise<SalesVerify> => {
+
+  return customFetch<SalesVerify>(getVerifySalesPeopleUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getVerifySalesPeopleQueryKey = (params?: VerifySalesPeopleParams,) => {
+    return [
+    `/api/salespeople/verify`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getVerifySalesPeopleQueryOptions = <TData = Awaited<ReturnType<typeof verifySalesPeople>>, TError = ErrorType<ErrorResponse>>(params?: VerifySalesPeopleParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof verifySalesPeople>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getVerifySalesPeopleQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof verifySalesPeople>>> = ({ signal }) => verifySalesPeople(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof verifySalesPeople>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type VerifySalesPeopleQueryResult = NonNullable<Awaited<ReturnType<typeof verifySalesPeople>>>
+export type VerifySalesPeopleQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Reconcile sales-people rollups against locked head anchors
+ */
+
+export function useVerifySalesPeople<TData = Awaited<ReturnType<typeof verifySalesPeople>>, TError = ErrorType<ErrorResponse>>(
+ params?: VerifySalesPeopleParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof verifySalesPeople>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getVerifySalesPeopleQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getAnalyzeSalesPersonUrl = () => {
+
+
+
+
+  return `/api/salesperson/analyze`
+}
+
+/**
+ * In narrative mode, produces an executive summary for one sales person (or their team). In compare mode, ranks and contrasts the sales people under one State Head. Grounded strictly in the passed net numbers.
+ * @summary AI narrative or head-level comparison for sales people
+ */
+export const analyzeSalesPerson = async (salespersonAnalyzeRequest: SalespersonAnalyzeRequest, options?: RequestInit): Promise<SalespersonAnalyzeResponse> => {
+
+  return customFetch<SalespersonAnalyzeResponse>(getAnalyzeSalesPersonUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(salespersonAnalyzeRequest)
+  }
+);}
+
+
+
+
+export const getAnalyzeSalesPersonMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof analyzeSalesPerson>>, TError,{data: BodyType<SalespersonAnalyzeRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof analyzeSalesPerson>>, TError,{data: BodyType<SalespersonAnalyzeRequest>}, TContext> => {
+
+const mutationKey = ['analyzeSalesPerson'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof analyzeSalesPerson>>, {data: BodyType<SalespersonAnalyzeRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  analyzeSalesPerson(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AnalyzeSalesPersonMutationResult = NonNullable<Awaited<ReturnType<typeof analyzeSalesPerson>>>
+    export type AnalyzeSalesPersonMutationBody = BodyType<SalespersonAnalyzeRequest>
+    export type AnalyzeSalesPersonMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary AI narrative or head-level comparison for sales people
+ */
+export const useAnalyzeSalesPerson = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof analyzeSalesPerson>>, TError,{data: BodyType<SalespersonAnalyzeRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof analyzeSalesPerson>>,
+        TError,
+        {data: BodyType<SalespersonAnalyzeRequest>},
+        TContext
+      > => {
+      return useMutation(getAnalyzeSalesPersonMutationOptions(options));
+    }
 

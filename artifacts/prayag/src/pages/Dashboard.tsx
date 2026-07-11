@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useTheme } from "next-themes";
-import { Sun, Moon, Printer, Menu, X, BarChart3, Map, LayoutGrid, Package, TrendingUp, LineChart, Database, Bot, FileSpreadsheet, Target } from "lucide-react";
+import { Sun, Moon, Printer, Menu, X, BarChart3, Map, LayoutGrid, Package, TrendingUp, LineChart, Database, Bot, FileSpreadsheet, Target, Users } from "lucide-react";
 import Overview from "@/components/dashboard/Overview";
 import Regional from "@/components/dashboard/Regional";
 import Resources from "@/components/dashboard/Resources";
@@ -12,6 +12,7 @@ import Growth from "@/components/dashboard/Growth";
 import Analyst from "@/components/dashboard/Analyst";
 import MgmtReports from "@/components/dashboard/MgmtReports";
 import Targets from "@/components/dashboard/Targets";
+import SalesPeople from "@/components/dashboard/SalesPeople";
 import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
 import { useDashboard } from "@/data/dashboard-context";
@@ -25,6 +26,7 @@ const AREAS = [
   { id: "growth", label: "Growth", icon: LineChart, component: Growth },
   { id: "analyst", label: "AI Analyst", icon: Bot, component: Analyst },
   { id: "reports", label: "Reports", icon: FileSpreadsheet, component: MgmtReports },
+  { id: "sales-people", label: "Sales People", icon: Users, component: SalesPeople },
   { id: "targets", label: "Targets", icon: Target, component: Targets },
   { id: "sources", label: "Data Sources", icon: Database, component: DataSources },
 ];

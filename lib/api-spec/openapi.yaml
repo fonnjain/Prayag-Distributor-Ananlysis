@@ -471,8 +471,320 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /salespeople/tree:
+    get:
+      operationId: getSalesPeopleTree
+      tags: [mgmt]
+      summary: Reporting tree of State Heads and their sales people
+      description: >
+        Returns the roster-derived reporting tree (State Heads as roots, sales
+        people nested underneath by Reporting Manager) with each node's own and
+        rolled-up team NET secondary order booking for the fiscal year.
+      parameters:
+        - name: fy
+          in: query
+          schema: { type: string }
+          description: Fiscal year like 2025-26. Defaults to 2025-26.
+      responses:
+        "200":
+          description: Reporting tree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesTree"
+        "400":
+          description: Invalid fiscal year
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Tree could not be built
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /salespeople/deep-dive:
+    get:
+      operationId: getSalesPersonDeepDive
+      tags: [mgmt]
+      summary: Per-rep deep dive with FY-vs-FY breakdowns
+      description: >
+        Headline tiles plus By State, By Party, By Group and By Segment tables
+        (this FY vs last FY, with diff, growth% and share%), plus top movers,
+        for one sales person's own book or their own + rolled-up team.
+      parameters:
+        - name: fy
+          in: query
+          schema: { type: string }
+          description: Fiscal year like 2025-26. Defaults to 2025-26.
+        - name: repKey
+          in: query
+          required: true
+          schema: { type: string }
+          description: Normalised rep key from the tree node.
+        - name: scope
+          in: query
+          schema: { type: string, enum: [own, team] }
+          description: own = this rep only; team = rep plus rolled-up juniors.
+      responses:
+        "200":
+          description: Deep dive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeepDive"
+        "400":
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Deep dive could not be computed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /salespeople/verify:
+    get:
+      operationId: verifySalesPeople
+      tags: [mgmt]
+      summary: Reconcile sales-people rollups against locked head anchors
+      description: >
+        Cross-foots each head's rolled-up rep total against the signed-off net
+        anchors, reports name-match coverage between the file and the roster,
+        and lists unmatched names in both directions.
+      parameters:
+        - name: fy
+          in: query
+          schema: { type: string }
+          description: Fiscal year like 2025-26. Defaults to 2025-26.
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesVerify"
+        "400":
+          description: Invalid fiscal year
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Verification failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /salesperson/analyze:
+    post:
+      operationId: analyzeSalesPerson
+      tags: [mgmt]
+      summary: AI narrative or head-level comparison for sales people
+      description: >
+        In narrative mode, produces an executive summary for one sales person
+        (or their team). In compare mode, ranks and contrasts the sales people
+        under one State Head. Grounded strictly in the passed net numbers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SalespersonAnalyzeRequest"
+      responses:
+        "200":
+          description: Analysis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalespersonAnalyzeResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: The analyst is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
+    RepNode:
+      type: object
+      required: [key, name, state, isMember, hasTeam, ownNet, teamNet, children]
+      properties:
+        key: { type: string }
+        name: { type: string }
+        state: { type: string }
+        isMember: { type: boolean }
+        hasTeam: { type: boolean }
+        ownNet: { type: number }
+        teamNet: { type: number }
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/RepNode"
+    SalesTree:
+      type: object
+      required: [fy, available, rosterSource, multiLevel, loadDetail, heads]
+      properties:
+        fy: { type: string }
+        available: { type: boolean }
+        reason: { type: string, nullable: true }
+        rosterSource: { type: string }
+        multiLevel: { type: boolean }
+        loadDetail: { type: string, nullable: true }
+        heads:
+          type: array
+          items:
+            $ref: "#/components/schemas/RepNode"
+    DeepRow:
+      type: object
+      required: [label, thisFy, lastFy, diff, growthPct, sharePct]
+      properties:
+        label: { type: string }
+        thisFy: { type: number }
+        lastFy: { type: number }
+        diff: { type: number }
+        growthPct: { type: number, nullable: true }
+        sharePct: { type: number, nullable: true }
+        flag: { type: string, enum: [new, old, churned], nullable: true }
+    DeepDive:
+      type: object
+      required:
+        [fy, priorFy, repKey, repName, scope, hasTeam, available, tiles, byState, byGroup, bySegment, parties, movers]
+      properties:
+        fy: { type: string }
+        priorFy: { type: string }
+        repKey: { type: string }
+        repName: { type: string }
+        scope: { type: string, enum: [own, team] }
+        hasTeam: { type: boolean }
+        available: { type: boolean }
+        reason: { type: string, nullable: true }
+        tiles:
+          type: object
+          required:
+            [netOrderBooked, netOrderBookedLast, growthPct, orders, activeRetailers, newRetailers, avgOrderValue, businessPerRetailer, target, achievementPct]
+          properties:
+            netOrderBooked: { type: number }
+            netOrderBookedLast: { type: number }
+            growthPct: { type: number, nullable: true }
+            orders: { type: number }
+            activeRetailers: { type: number }
+            newRetailers: { type: number }
+            avgOrderValue: { type: number, nullable: true }
+            businessPerRetailer: { type: number, nullable: true }
+            target: { type: number, nullable: true }
+            achievementPct: { type: number, nullable: true }
+        byState:
+          type: array
+          items: { $ref: "#/components/schemas/DeepRow" }
+        byGroup:
+          type: array
+          items: { $ref: "#/components/schemas/DeepRow" }
+        bySegment:
+          type: array
+          items: { $ref: "#/components/schemas/DeepRow" }
+        parties:
+          type: object
+          required: [top, bottom, newTop, churned, newCount, oldCount, churnedCount]
+          properties:
+            top:
+              type: array
+              items: { $ref: "#/components/schemas/DeepRow" }
+            bottom:
+              type: array
+              items: { $ref: "#/components/schemas/DeepRow" }
+            newTop:
+              type: array
+              items: { $ref: "#/components/schemas/DeepRow" }
+            churned:
+              type: array
+              items: { $ref: "#/components/schemas/DeepRow" }
+            newCount: { type: number }
+            oldCount: { type: number }
+            churnedCount: { type: number }
+        movers:
+          type: object
+          required: [partiesUp, partiesDown, segmentsUp, segmentsDown]
+          properties:
+            partiesUp:
+              type: array
+              items: { $ref: "#/components/schemas/DeepRow" }
+            partiesDown:
+              type: array
+              items: { $ref: "#/components/schemas/DeepRow" }
+            segmentsUp:
+              type: array
+              items: { $ref: "#/components/schemas/DeepRow" }
+            segmentsDown:
+              type: array
+              items: { $ref: "#/components/schemas/DeepRow" }
+    SalesVerifyHead:
+      type: object
+      required: [name, repCount, repSaleTotal, nodeTeamNet, anchor, deltaPct, status, withinCrossFoot]
+      properties:
+        name: { type: string }
+        repCount: { type: number }
+        repSaleTotal: { type: number }
+        nodeTeamNet: { type: number }
+        anchor: { type: number, nullable: true }
+        deltaPct: { type: number, nullable: true }
+        status: { type: string, enum: [pass, warn, fail] }
+        withinCrossFoot: { type: boolean }
+    SalesVerify:
+      type: object
+      required:
+        [fy, available, rosterSource, multiLevel, overall, companyTotal, attributedTotal, coveragePct, heads, nameMatch]
+      properties:
+        fy: { type: string }
+        available: { type: boolean }
+        reason: { type: string, nullable: true }
+        rosterSource: { type: string }
+        multiLevel: { type: boolean }
+        overall: { type: string, enum: [pass, warn, fail] }
+        companyTotal: { type: number }
+        attributedTotal: { type: number }
+        coveragePct: { type: number, nullable: true }
+        heads:
+          type: array
+          items: { $ref: "#/components/schemas/SalesVerifyHead" }
+        nameMatch:
+          type: object
+          required:
+            [rosterCount, fileNameCount, matchedCount, matchPct, unmatchedFileNames, unmatchedRosterNames]
+          properties:
+            rosterCount: { type: number }
+            fileNameCount: { type: number }
+            matchedCount: { type: number }
+            matchPct: { type: number, nullable: true }
+            unmatchedFileNames:
+              type: array
+              items: { type: string }
+            unmatchedRosterNames:
+              type: array
+              items: { type: string }
+    SalespersonAnalyzeRequest:
+      type: object
+      required: [mode, fy]
+      properties:
+        mode: { type: string, enum: [narrative, compare] }
+        fy: { type: string }
+        repKey: { type: string, nullable: true }
+        scope: { type: string, enum: [own, team], nullable: true }
+        head: { type: string, nullable: true }
+    SalespersonAnalyzeResponse:
+      type: object
+      required: [answer]
+      properties:
+        answer: { type: string }
     DriveFile:
       type: object
       properties:

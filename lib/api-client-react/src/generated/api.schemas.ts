@@ -5,6 +5,181 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export interface RepNode {
+  key: string;
+  name: string;
+  state: string;
+  isMember: boolean;
+  hasTeam: boolean;
+  ownNet: number;
+  teamNet: number;
+  children: RepNode[];
+}
+
+export interface SalesTree {
+  fy: string;
+  available: boolean;
+  reason?: string | null;
+  rosterSource: string;
+  multiLevel: boolean;
+  loadDetail: string | null;
+  heads: RepNode[];
+}
+
+export type DeepRowFlag = typeof DeepRowFlag[keyof typeof DeepRowFlag] | null;
+
+
+export const DeepRowFlag = {
+  new: 'new',
+  old: 'old',
+  churned: 'churned',
+} as const;
+
+export interface DeepRow {
+  label: string;
+  thisFy: number;
+  lastFy: number;
+  diff: number;
+  growthPct: number | null;
+  sharePct: number | null;
+  flag?: DeepRowFlag;
+}
+
+export type DeepDiveScope = typeof DeepDiveScope[keyof typeof DeepDiveScope];
+
+
+export const DeepDiveScope = {
+  own: 'own',
+  team: 'team',
+} as const;
+
+export type DeepDiveTiles = {
+  netOrderBooked: number;
+  netOrderBookedLast: number;
+  growthPct: number | null;
+  orders: number;
+  activeRetailers: number;
+  newRetailers: number;
+  avgOrderValue: number | null;
+  businessPerRetailer: number | null;
+  target: number | null;
+  achievementPct: number | null;
+};
+
+export type DeepDiveParties = {
+  top: DeepRow[];
+  bottom: DeepRow[];
+  newTop: DeepRow[];
+  churned: DeepRow[];
+  newCount: number;
+  oldCount: number;
+  churnedCount: number;
+};
+
+export type DeepDiveMovers = {
+  partiesUp: DeepRow[];
+  partiesDown: DeepRow[];
+  segmentsUp: DeepRow[];
+  segmentsDown: DeepRow[];
+};
+
+export interface DeepDive {
+  fy: string;
+  priorFy: string;
+  repKey: string;
+  repName: string;
+  scope: DeepDiveScope;
+  hasTeam: boolean;
+  available: boolean;
+  reason?: string | null;
+  tiles: DeepDiveTiles;
+  byState: DeepRow[];
+  byGroup: DeepRow[];
+  bySegment: DeepRow[];
+  parties: DeepDiveParties;
+  movers: DeepDiveMovers;
+}
+
+export type SalesVerifyHeadStatus = typeof SalesVerifyHeadStatus[keyof typeof SalesVerifyHeadStatus];
+
+
+export const SalesVerifyHeadStatus = {
+  pass: 'pass',
+  warn: 'warn',
+  fail: 'fail',
+} as const;
+
+export interface SalesVerifyHead {
+  name: string;
+  repCount: number;
+  repSaleTotal: number;
+  nodeTeamNet: number;
+  anchor: number | null;
+  deltaPct: number | null;
+  status: SalesVerifyHeadStatus;
+  withinCrossFoot: boolean;
+}
+
+export type SalesVerifyOverall = typeof SalesVerifyOverall[keyof typeof SalesVerifyOverall];
+
+
+export const SalesVerifyOverall = {
+  pass: 'pass',
+  warn: 'warn',
+  fail: 'fail',
+} as const;
+
+export type SalesVerifyNameMatch = {
+  rosterCount: number;
+  fileNameCount: number;
+  matchedCount: number;
+  matchPct: number | null;
+  unmatchedFileNames: string[];
+  unmatchedRosterNames: string[];
+};
+
+export interface SalesVerify {
+  fy: string;
+  available: boolean;
+  reason?: string | null;
+  rosterSource: string;
+  multiLevel: boolean;
+  overall: SalesVerifyOverall;
+  companyTotal: number;
+  attributedTotal: number;
+  coveragePct: number | null;
+  heads: SalesVerifyHead[];
+  nameMatch: SalesVerifyNameMatch;
+}
+
+export type SalespersonAnalyzeRequestMode = typeof SalespersonAnalyzeRequestMode[keyof typeof SalespersonAnalyzeRequestMode];
+
+
+export const SalespersonAnalyzeRequestMode = {
+  narrative: 'narrative',
+  compare: 'compare',
+} as const;
+
+export type SalespersonAnalyzeRequestScope = typeof SalespersonAnalyzeRequestScope[keyof typeof SalespersonAnalyzeRequestScope] | null;
+
+
+export const SalespersonAnalyzeRequestScope = {
+  own: 'own',
+  team: 'team',
+} as const;
+
+export interface SalespersonAnalyzeRequest {
+  mode: SalespersonAnalyzeRequestMode;
+  fy: string;
+  repKey?: string | null;
+  scope?: SalespersonAnalyzeRequestScope;
+  head?: string | null;
+}
+
+export interface SalespersonAnalyzeResponse {
+  answer: string;
+}
+
 export interface DriveFile {
   /** Google Drive file id. */
   id: string;
@@ -557,5 +732,42 @@ primary?: number;
 secondary?: number;
 directDealer?: number;
 businessPlan?: number;
+};
+
+export type GetSalesPeopleTreeParams = {
+/**
+ * Fiscal year like 2025-26. Defaults to 2025-26.
+ */
+fy?: string;
+};
+
+export type GetSalesPersonDeepDiveParams = {
+/**
+ * Fiscal year like 2025-26. Defaults to 2025-26.
+ */
+fy?: string;
+/**
+ * Normalised rep key from the tree node.
+ */
+repKey: string;
+/**
+ * own = this rep only; team = rep plus rolled-up juniors.
+ */
+scope?: GetSalesPersonDeepDiveScope;
+};
+
+export type GetSalesPersonDeepDiveScope = typeof GetSalesPersonDeepDiveScope[keyof typeof GetSalesPersonDeepDiveScope];
+
+
+export const GetSalesPersonDeepDiveScope = {
+  own: 'own',
+  team: 'team',
+} as const;
+
+export type VerifySalesPeopleParams = {
+/**
+ * Fiscal year like 2025-26. Defaults to 2025-26.
+ */
+fy?: string;
 };
 

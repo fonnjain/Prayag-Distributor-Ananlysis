@@ -7,6 +7,7 @@ import verifyRouter from "./verify";
 import analyticsRouter from "./analytics";
 import mgmtRouter from "./mgmt";
 import targetsRouter from "./targets";
+import salespeopleRouter from "./salespeople";
 
 const router: IRouter = Router();
 
@@ -18,5 +19,6 @@ router.use(verifyRouter);
 router.use(analyticsRouter);
 router.use(mgmtRouter);
 router.use(targetsRouter);
+router.use(salespeopleRouter);
 
 export default router;
