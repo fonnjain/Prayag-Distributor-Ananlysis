@@ -13,7 +13,7 @@ import {
   type RepNode,
 } from "../lib/mgmt/salespeople.js";
 import { priorFy } from "../lib/mgmt/names.js";
-import { loadOrderFile } from "../lib/mgmt/orders.js";
+import { buildSalesReports } from "../lib/mgmt/salesReports.js";
 import { buildRepReportWorkbook } from "../lib/mgmt/repReports.js";
 
 const router: IRouter = Router();
@@ -148,6 +148,29 @@ async function compareContext(fy: string, head: RepNode, priorHead: RepNode | nu
 }
 
 router.get(
+  "/salespeople/:key/reports",
+  async (req: Request, res: Response): Promise<void> => {
+    const repKey = typeof req.params.key === "string" ? req.params.key.trim() : "";
+    const fy = fyParam(req.query.fy);
+    const scope = req.query.scope === "team" ? "team" : "own";
+    if (!repKey) {
+      res.status(400).json({ error: "repKey is required" });
+      return;
+    }
+    if (!FY_PATTERN.test(fy)) {
+      res.status(400).json({ error: "fy must look like 2025-26" });
+      return;
+    }
+    try {
+      res.json(await buildSalesReports(fy, repKey, scope));
+    } catch (err) {
+      req.log.error({ err, repKey, fy }, "salespeople reports failed");
+      res.status(500).json({ error: "Could not build the report. Try again in a minute." });
+    }
+  },
+);
+
+router.get(
   "/salespeople/:key/reports/download",
   async (req: Request, res: Response): Promise<void> => {
     const repKey = typeof req.params.key === "string" ? req.params.key.trim() : "";
@@ -163,21 +186,17 @@ router.get(
       return;
     }
     try {
-      const [dive, orderFile] = await Promise.all([
-        buildDeepDive(fy, repKey, scope),
-        loadOrderFile(fy),
-      ]);
-      const tmAgg = orderFile?.perTm.get(repKey) ?? null;
-      const wb = await buildRepReportWorkbook(dive, tmAgg, basis);
+      const report = await buildSalesReports(fy, repKey, scope);
+      const wb = await buildRepReportWorkbook(report, basis);
       const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-      const safeName = dive.repName.replace(/[^a-z0-9 ]/gi, "").trim().replace(/\s+/g, "_") || repKey;
+      const safeName = report.repName.replace(/[^a-z0-9 ]/gi, "").trim().replace(/\s+/g, "_") || repKey;
       res.setHeader(
         "Content-Type",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       );
       res.setHeader(
         "Content-Disposition",
-        `attachment; filename="SalesReport_${safeName}_${fy}_${basis}_${dateStr}.xlsx"`,
+        `attachment; filename="SalesReports_${safeName}_${fy}_${basis}_${dateStr}.xlsx"`,
       );
       await wb.xlsx.write(res);
       res.end();

@@ -548,6 +548,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /salespeople/{key}/reports:
+    get:
+      operationId: getSalesPersonReports
+      tags: [mgmt]
+      summary: Full per-salesperson report payload (secondary + primary)
+      description: >
+        Returns monthly booking (team-rolled up), secondary order-booking
+        breakdowns (by state/group/segment/parties/movers), and primary
+        dispatched-sale data (bridged parties via Party TM Map, unbridged
+        parties, bridge coverage). Used to render the Reports tab and to
+        generate the Excel workbook.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+          description: Normalised rep key from the tree node.
+        - name: fy
+          in: query
+          schema: { type: string }
+          description: Fiscal year like 2025-26. Defaults to 2025-26.
+        - name: scope
+          in: query
+          schema: { type: string, enum: [own, team] }
+          description: own = this rep only; team = rep plus rolled-up juniors.
+      responses:
+        "200":
+          description: Sales rep report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesRepReport"
+        "400":
+          description: Invalid parameters
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          description: Report could not be built
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /salespeople/{key}/reports/download:
     get:
       operationId: getSalesPersonReportsDownload
@@ -1161,6 +1203,111 @@ components:
             segmentsDown:
               type: array
               items: { $ref: "#/components/schemas/DeepRow" }
+    SalesRepMonthRow:
+      type: object
+      required: [month, orderAmount, orders, saleAmount]
+      properties:
+        month: { type: string, description: "Fiscal month label e.g. Apr-25" }
+        orderAmount: { type: number }
+        orders: { type: number }
+        saleAmount: { type: number }
+    PrimaryParty:
+      type: object
+      required: [party, amount]
+      properties:
+        party: { type: string }
+        amount: { type: number }
+    PrimaryReport:
+      type: object
+      required: [available, headTotal, bridgedToAnyTmAmount, totalBridged, bridgeCoverage, bridgedParties, unbridgedParties]
+      properties:
+        available: { type: boolean }
+        reason: { type: string, nullable: true }
+        headTotal: { type: number }
+        bridgedToAnyTmAmount: { type: number }
+        totalBridged: { type: number }
+        bridgeCoverage: { type: number, description: "% of head register bridged to any TM" }
+        bridgedParties:
+          type: array
+          items: { $ref: "#/components/schemas/PrimaryParty" }
+        unbridgedParties:
+          type: array
+          items: { $ref: "#/components/schemas/PrimaryParty" }
+    SalesRepReport:
+      type: object
+      required: [fy, priorFy, repKey, repName, scope, hasTeam, available, monthly, secondary, primary]
+      properties:
+        fy: { type: string }
+        priorFy: { type: string }
+        repKey: { type: string }
+        repName: { type: string }
+        scope: { type: string, enum: [own, team] }
+        hasTeam: { type: boolean }
+        available: { type: boolean }
+        reason: { type: string, nullable: true }
+        monthly:
+          type: array
+          items: { $ref: "#/components/schemas/SalesRepMonthRow" }
+        secondary:
+          type: object
+          required: [tiles, byState, byGroup, bySegment, parties, movers]
+          properties:
+            tiles:
+              type: object
+              required: [netOrderBooked, netOrderBookedLast, growthPct, orders, activeRetailers, newRetailers, avgOrderValue, businessPerRetailer, target, achievementPct]
+              properties:
+                netOrderBooked: { type: number }
+                netOrderBookedLast: { type: number }
+                growthPct: { type: number, nullable: true }
+                orders: { type: number }
+                activeRetailers: { type: number }
+                newRetailers: { type: number }
+                avgOrderValue: { type: number, nullable: true }
+                businessPerRetailer: { type: number, nullable: true }
+                target: { type: number, nullable: true }
+                achievementPct: { type: number, nullable: true }
+            byState:
+              type: array
+              items: { $ref: "#/components/schemas/DeepRow" }
+            byGroup:
+              type: array
+              items: { $ref: "#/components/schemas/DeepRow" }
+            bySegment:
+              type: array
+              items: { $ref: "#/components/schemas/DeepRow" }
+            parties:
+              type: object
+              required: [top, newTop, churned, newCount, churnedCount]
+              properties:
+                top:
+                  type: array
+                  items: { $ref: "#/components/schemas/DeepRow" }
+                newTop:
+                  type: array
+                  items: { $ref: "#/components/schemas/DeepRow" }
+                churned:
+                  type: array
+                  items: { $ref: "#/components/schemas/DeepRow" }
+                newCount: { type: number }
+                churnedCount: { type: number }
+            movers:
+              type: object
+              required: [partiesUp, partiesDown, segmentsUp, segmentsDown]
+              properties:
+                partiesUp:
+                  type: array
+                  items: { $ref: "#/components/schemas/DeepRow" }
+                partiesDown:
+                  type: array
+                  items: { $ref: "#/components/schemas/DeepRow" }
+                segmentsUp:
+                  type: array
+                  items: { $ref: "#/components/schemas/DeepRow" }
+                segmentsDown:
+                  type: array
+                  items: { $ref: "#/components/schemas/DeepRow" }
+        primary:
+          $ref: "#/components/schemas/PrimaryReport"
     SalesVerifyHead:
       type: object
       required: [name, repCount, repSaleTotal, nodeTeamNet, anchor, deltaPct, status, withinCrossFoot]

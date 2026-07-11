@@ -589,8 +589,6 @@ export default function SalesPeople() {
                 )
               ) : (
                 <SalesReports
-                  dive={dive}
-                  isLoading={deepDive.isLoading}
                   fy={fy}
                   selectedKey={selectedKey ?? ""}
                   effectiveScope={effectiveScope}

@@ -31,6 +31,8 @@ import type {
   GetAnalyticsParams,
   GetSalesPeopleTreeParams,
   GetSalesPersonDeepDiveParams,
+  GetSalesPersonReportsDownloadParams,
+  GetSalesPersonReportsParams,
   GetSapStatusParams,
   GetSapVerifyParams,
   GetTargetSplitPreviewParams,
@@ -41,6 +43,7 @@ import type {
   MgmtOptions,
   MgmtReportRequest,
   MgmtVerifyResult,
+  SalesRepReport,
   SalesTree,
   SalesVerify,
   SalespersonAnalyzeRequest,
@@ -1346,6 +1349,186 @@ export function useGetSalesPersonDeepDive<TData = Awaited<ReturnType<typeof getS
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetSalesPersonDeepDiveQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetSalesPersonReportsUrl = (key: string,
+    params?: GetSalesPersonReportsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/salespeople/${key}/reports?${stringifiedParams}` : `/api/salespeople/${key}/reports`
+}
+
+/**
+ * Returns monthly booking (team-rolled up), secondary order-booking breakdowns (by state/group/segment/parties/movers), and primary dispatched-sale data (bridged parties via Party TM Map, unbridged parties, bridge coverage). Used to render the Reports tab and to generate the Excel workbook.
+ * @summary Full per-salesperson report payload (secondary + primary)
+ */
+export const getSalesPersonReports = async (key: string,
+    params?: GetSalesPersonReportsParams, options?: RequestInit): Promise<SalesRepReport> => {
+
+  return customFetch<SalesRepReport>(getGetSalesPersonReportsUrl(key,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSalesPersonReportsQueryKey = (key: string,
+    params?: GetSalesPersonReportsParams,) => {
+    return [
+    `/api/salespeople/${key}/reports`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetSalesPersonReportsQueryOptions = <TData = Awaited<ReturnType<typeof getSalesPersonReports>>, TError = ErrorType<ErrorResponse>>(key: string,
+    params?: GetSalesPersonReportsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSalesPersonReports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSalesPersonReportsQueryKey(key,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSalesPersonReports>>> = ({ signal }) => getSalesPersonReports(key,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: key !== null && key !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSalesPersonReports>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSalesPersonReportsQueryResult = NonNullable<Awaited<ReturnType<typeof getSalesPersonReports>>>
+export type GetSalesPersonReportsQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Full per-salesperson report payload (secondary + primary)
+ */
+
+export function useGetSalesPersonReports<TData = Awaited<ReturnType<typeof getSalesPersonReports>>, TError = ErrorType<ErrorResponse>>(
+ key: string,
+    params?: GetSalesPersonReportsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSalesPersonReports>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSalesPersonReportsQueryOptions(key,params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetSalesPersonReportsDownloadUrl = (key: string,
+    params?: GetSalesPersonReportsDownloadParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/salespeople/${key}/reports/download?${stringifiedParams}` : `/api/salespeople/${key}/reports/download`
+}
+
+/**
+ * Builds a 9-tab Excel workbook (Cover, Monthly Booking, By State, By Group, By Segment, Top Parties, New Parties, Churned Parties, Movers) for the selected salesperson and fiscal year. Returns the file as an xlsx stream. Call via direct fetch — the browser can trigger a native download.
+ * @summary Download per-salesperson report workbook (xlsx)
+ */
+export const getSalesPersonReportsDownload = async (key: string,
+    params?: GetSalesPersonReportsDownloadParams, options?: RequestInit): Promise<Blob> => {
+
+  return customFetch<Blob>(getGetSalesPersonReportsDownloadUrl(key,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSalesPersonReportsDownloadQueryKey = (key: string,
+    params?: GetSalesPersonReportsDownloadParams,) => {
+    return [
+    `/api/salespeople/${key}/reports/download`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetSalesPersonReportsDownloadQueryOptions = <TData = Awaited<ReturnType<typeof getSalesPersonReportsDownload>>, TError = ErrorType<ErrorResponse>>(key: string,
+    params?: GetSalesPersonReportsDownloadParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSalesPersonReportsDownload>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSalesPersonReportsDownloadQueryKey(key,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSalesPersonReportsDownload>>> = ({ signal }) => getSalesPersonReportsDownload(key,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: key !== null && key !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSalesPersonReportsDownload>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSalesPersonReportsDownloadQueryResult = NonNullable<Awaited<ReturnType<typeof getSalesPersonReportsDownload>>>
+export type GetSalesPersonReportsDownloadQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Download per-salesperson report workbook (xlsx)
+ */
+
+export function useGetSalesPersonReportsDownload<TData = Awaited<ReturnType<typeof getSalesPersonReportsDownload>>, TError = ErrorType<ErrorResponse>>(
+ key: string,
+    params?: GetSalesPersonReportsDownloadParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSalesPersonReportsDownload>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSalesPersonReportsDownloadQueryOptions(key,params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

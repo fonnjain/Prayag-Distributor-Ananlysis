@@ -635,6 +635,180 @@ export const GetSalesPersonDeepDiveResponse = zod.object({
 
 
 /**
+ * Returns monthly booking (team-rolled up), secondary order-booking breakdowns (by state/group/segment/parties/movers), and primary dispatched-sale data (bridged parties via Party TM Map, unbridged parties, bridge coverage). Used to render the Reports tab and to generate the Excel workbook.
+ * @summary Full per-salesperson report payload (secondary + primary)
+ */
+export const GetSalesPersonReportsParams = zod.object({
+  "key": zod.coerce.string().describe('Normalised rep key from the tree node.')
+})
+
+export const GetSalesPersonReportsQueryParams = zod.object({
+  "fy": zod.coerce.string().optional().describe('Fiscal year like 2025-26. Defaults to 2025-26.'),
+  "scope": zod.enum(['own', 'team']).optional().describe('own = this rep only; team = rep plus rolled-up juniors.')
+})
+
+export const GetSalesPersonReportsResponse = zod.object({
+  "fy": zod.string(),
+  "priorFy": zod.string(),
+  "repKey": zod.string(),
+  "repName": zod.string(),
+  "scope": zod.enum(['own', 'team']),
+  "hasTeam": zod.boolean(),
+  "available": zod.boolean(),
+  "reason": zod.string().nullish(),
+  "monthly": zod.array(zod.object({
+  "month": zod.string().describe('Fiscal month label e.g. Apr-25'),
+  "orderAmount": zod.number(),
+  "orders": zod.number(),
+  "saleAmount": zod.number()
+})),
+  "secondary": zod.object({
+  "tiles": zod.object({
+  "netOrderBooked": zod.number(),
+  "netOrderBookedLast": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "orders": zod.number(),
+  "activeRetailers": zod.number(),
+  "newRetailers": zod.number(),
+  "avgOrderValue": zod.number().nullable(),
+  "businessPerRetailer": zod.number().nullable(),
+  "target": zod.number().nullable(),
+  "achievementPct": zod.number().nullable()
+}),
+  "byState": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+})),
+  "byGroup": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+})),
+  "bySegment": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+})),
+  "parties": zod.object({
+  "top": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+})),
+  "newTop": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+})),
+  "churned": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+})),
+  "newCount": zod.number(),
+  "churnedCount": zod.number()
+}),
+  "movers": zod.object({
+  "partiesUp": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+})),
+  "partiesDown": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+})),
+  "segmentsUp": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+})),
+  "segmentsDown": zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+}))
+})
+}),
+  "primary": zod.object({
+  "available": zod.boolean(),
+  "reason": zod.string().nullish(),
+  "headTotal": zod.number(),
+  "bridgedToAnyTmAmount": zod.number(),
+  "totalBridged": zod.number(),
+  "bridgeCoverage": zod.number().describe('% of head register bridged to any TM'),
+  "bridgedParties": zod.array(zod.object({
+  "party": zod.string(),
+  "amount": zod.number()
+})),
+  "unbridgedParties": zod.array(zod.object({
+  "party": zod.string(),
+  "amount": zod.number()
+}))
+})
+})
+
+
+/**
+ * Builds a 9-tab Excel workbook (Cover, Monthly Booking, By State, By Group, By Segment, Top Parties, New Parties, Churned Parties, Movers) for the selected salesperson and fiscal year. Returns the file as an xlsx stream. Call via direct fetch — the browser can trigger a native download.
+ * @summary Download per-salesperson report workbook (xlsx)
+ */
+export const GetSalesPersonReportsDownloadParams = zod.object({
+  "key": zod.coerce.string().describe('Normalised rep key from the tree node.')
+})
+
+export const GetSalesPersonReportsDownloadQueryParams = zod.object({
+  "fy": zod.coerce.string().optional().describe('Fiscal year like 2025-26. Defaults to 2025-26.'),
+  "basis": zod.enum(['secondary', 'primary']).optional().describe('secondary = secondary order booking (default); primary = SAP dispatched sale via Party TM Map bridge (~37% coverage).\n'),
+  "scope": zod.enum(['own', 'team']).optional().describe('own = this rep only; team = rep plus rolled-up juniors.')
+})
+
+export const GetSalesPersonReportsDownloadResponse = zod.unknown()
+
+
+/**
  * Cross-foots each head's rolled-up rep total against the signed-off net anchors, reports name-match coverage between the file and the roster, and lists unmatched names in both directions.
  * @summary Reconcile sales-people rollups against locked head anchors
  */

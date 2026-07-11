@@ -224,6 +224,90 @@ export interface DeepDive {
   movers: DeepDiveMovers;
 }
 
+export interface SalesRepMonthRow {
+  /** Fiscal month label e.g. Apr-25 */
+  month: string;
+  orderAmount: number;
+  orders: number;
+  saleAmount: number;
+}
+
+export interface PrimaryParty {
+  party: string;
+  amount: number;
+}
+
+export interface PrimaryReport {
+  available: boolean;
+  reason?: string | null;
+  headTotal: number;
+  bridgedToAnyTmAmount: number;
+  totalBridged: number;
+  /** % of head register bridged to any TM */
+  bridgeCoverage: number;
+  bridgedParties: PrimaryParty[];
+  unbridgedParties: PrimaryParty[];
+}
+
+export type SalesRepReportScope = typeof SalesRepReportScope[keyof typeof SalesRepReportScope];
+
+
+export const SalesRepReportScope = {
+  own: 'own',
+  team: 'team',
+} as const;
+
+export type SalesRepReportSecondaryTiles = {
+  netOrderBooked: number;
+  netOrderBookedLast: number;
+  growthPct: number | null;
+  orders: number;
+  activeRetailers: number;
+  newRetailers: number;
+  avgOrderValue: number | null;
+  businessPerRetailer: number | null;
+  target: number | null;
+  achievementPct: number | null;
+};
+
+export type SalesRepReportSecondaryParties = {
+  top: DeepRow[];
+  newTop: DeepRow[];
+  churned: DeepRow[];
+  newCount: number;
+  churnedCount: number;
+};
+
+export type SalesRepReportSecondaryMovers = {
+  partiesUp: DeepRow[];
+  partiesDown: DeepRow[];
+  segmentsUp: DeepRow[];
+  segmentsDown: DeepRow[];
+};
+
+export type SalesRepReportSecondary = {
+  tiles: SalesRepReportSecondaryTiles;
+  byState: DeepRow[];
+  byGroup: DeepRow[];
+  bySegment: DeepRow[];
+  parties: SalesRepReportSecondaryParties;
+  movers: SalesRepReportSecondaryMovers;
+};
+
+export interface SalesRepReport {
+  fy: string;
+  priorFy: string;
+  repKey: string;
+  repName: string;
+  scope: SalesRepReportScope;
+  hasTeam: boolean;
+  available: boolean;
+  reason?: string | null;
+  monthly: SalesRepMonthRow[];
+  secondary: SalesRepReportSecondary;
+  primary: PrimaryReport;
+}
+
 export type SalesVerifyHeadStatus = typeof SalesVerifyHeadStatus[keyof typeof SalesVerifyHeadStatus];
 
 
@@ -897,6 +981,56 @@ export type GetSalesPersonDeepDiveScope = typeof GetSalesPersonDeepDiveScope[key
 
 
 export const GetSalesPersonDeepDiveScope = {
+  own: 'own',
+  team: 'team',
+} as const;
+
+export type GetSalesPersonReportsParams = {
+/**
+ * Fiscal year like 2025-26. Defaults to 2025-26.
+ */
+fy?: string;
+/**
+ * own = this rep only; team = rep plus rolled-up juniors.
+ */
+scope?: GetSalesPersonReportsScope;
+};
+
+export type GetSalesPersonReportsScope = typeof GetSalesPersonReportsScope[keyof typeof GetSalesPersonReportsScope];
+
+
+export const GetSalesPersonReportsScope = {
+  own: 'own',
+  team: 'team',
+} as const;
+
+export type GetSalesPersonReportsDownloadParams = {
+/**
+ * Fiscal year like 2025-26. Defaults to 2025-26.
+ */
+fy?: string;
+/**
+ * secondary = secondary order booking (default); primary = SAP dispatched sale via Party TM Map bridge (~37% coverage).
+ */
+basis?: GetSalesPersonReportsDownloadBasis;
+/**
+ * own = this rep only; team = rep plus rolled-up juniors.
+ */
+scope?: GetSalesPersonReportsDownloadScope;
+};
+
+export type GetSalesPersonReportsDownloadBasis = typeof GetSalesPersonReportsDownloadBasis[keyof typeof GetSalesPersonReportsDownloadBasis];
+
+
+export const GetSalesPersonReportsDownloadBasis = {
+  secondary: 'secondary',
+  primary: 'primary',
+} as const;
+
+export type GetSalesPersonReportsDownloadScope = typeof GetSalesPersonReportsDownloadScope[keyof typeof GetSalesPersonReportsDownloadScope];
+
+
+export const GetSalesPersonReportsDownloadScope = {
   own: 'own',
   team: 'team',
 } as const;

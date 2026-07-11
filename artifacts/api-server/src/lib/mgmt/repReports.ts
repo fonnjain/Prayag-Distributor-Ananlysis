@@ -1,13 +1,14 @@
 // Per-salesperson Excel report workbook builder.
 //
-// Builds a 9-tab xlsx (Cover, Monthly Booking, By State, By Group, By Segment,
-// Top Parties, New Parties, Churned Parties, Movers) from the existing DeepDive
-// output. No new Sheets reads are required; everything comes from the in-memory
-// aggregates that buildDeepDive already computed.
+// Builds a 10-tab xlsx from the SalesRepReport payload:
+//   Cover, Monthly Booking, By State, By Group, By Segment,
+//   Top Parties, New Parties, Churned Parties, Movers, Primary Sale.
+// No new Sheets reads are required; everything comes from the in-memory
+// aggregates already computed by buildSalesReports().
 import ExcelJS from "exceljs";
-import { fyShort, fyStartYear } from "./names.js";
-import type { DeepDive, DeepRow } from "./salespeople.js";
-import type { TmOrderAgg } from "./orders.js";
+import { fyShort } from "./names.js";
+import type { SalesRepReport, PrimaryParty } from "./salesReports.js";
+import type { DeepRow } from "./salespeople.js";
 
 const HEADER_FILL: ExcelJS.Fill = {
   type: "pattern",
@@ -21,18 +22,6 @@ const TOTAL_FILL: ExcelJS.Fill = {
 };
 const FMT_INT = "#,##0";
 const FMT_PCT = "0.00%";
-
-const MONTH_NAMES = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
-
-// Apr = fiscal month 0 -> calendar month 3 (April)
-function fiscalMonthLabel(idx: number, startYear: number): string {
-  const calMonth = (idx + 3) % 12;
-  const calYear = calMonth < 3 ? startYear + 1 : startYear;
-  return `${MONTH_NAMES[calMonth]}-${String(calYear).slice(2)}`;
-}
 
 function hdr(ws: ExcelJS.Worksheet, row: number, col: number, text: string, width?: number): void {
   const cell = ws.getCell(row, col);
@@ -140,18 +129,52 @@ function writePartySheet(
   });
 }
 
+function writePrimaryPartyBlock(
+  ws: ExcelJS.Worksheet,
+  title: string,
+  rows: PrimaryParty[],
+  startRow: number,
+): number {
+  const h1 = ws.getCell(startRow, 1);
+  h1.value = title;
+  h1.font = { bold: true };
+  h1.fill = HEADER_FILL;
+  ws.getCell(startRow, 2).fill = HEADER_FILL;
+  ws.getCell(startRow, 2).value = "Amount";
+  ws.getCell(startRow, 2).font = { bold: true };
+  ws.getCell(startRow, 2).alignment = { horizontal: "right" };
+  let r = startRow + 1;
+  for (const p of rows) {
+    ws.getCell(r, 1).value = p.party;
+    ws.getCell(r, 2).value = p.amount;
+    ws.getCell(r, 2).numFmt = FMT_INT;
+    r++;
+  }
+  if (rows.length > 0) {
+    const total = ws.getCell(r, 1);
+    total.value = "Total";
+    total.font = { bold: true };
+    total.fill = TOTAL_FILL;
+    const totalAmt = ws.getCell(r, 2);
+    totalAmt.value = rows.reduce((a, p) => a + p.amount, 0);
+    totalAmt.numFmt = FMT_INT;
+    totalAmt.font = { bold: true };
+    totalAmt.fill = TOTAL_FILL;
+    r++;
+  }
+  return r;
+}
+
 export async function buildRepReportWorkbook(
-  dive: DeepDive,
-  tmAgg: TmOrderAgg | null,
+  report: SalesRepReport,
   basis: "secondary" | "primary",
 ): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
   wb.creator = "Prayag Sales Intelligence";
   wb.created = new Date();
 
-  const thisFy = fyShort(dive.fy);
-  const lastFy = fyShort(dive.priorFy);
-  const startYear = fyStartYear(dive.fy);
+  const thisFy = fyShort(report.fy);
+  const lastFy = fyShort(report.priorFy);
 
   // --- Sheet 1: Cover ---
   {
@@ -164,21 +187,22 @@ export async function buildRepReportWorkbook(
     title.font = { bold: true, size: 14 };
     ws.mergeCells(1, 1, 1, 2);
 
+    const t = report.secondary.tiles;
     const infoRows: [string, string | number | null][] = [
-      ["Sales Person", dive.repName],
-      ["Fiscal Year", dive.fy],
+      ["Sales Person", report.repName],
+      ["Fiscal Year", report.fy],
       ["Basis", basis === "primary" ? "Primary (SAP dispatched sale)" : "Secondary (order booking)"],
-      ["Scope", dive.scope === "team" ? "Own + rolled-up team" : "Own book only"],
+      ["Scope", report.scope === "team" ? "Own + rolled-up team" : "Own book only"],
       ["Generated", new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })],
       ["", ""],
-      ["Net Order Booked", dive.tiles.netOrderBooked],
-      ["Prior FY Net", dive.tiles.netOrderBookedLast],
-      ["Growth", dive.tiles.growthPct != null ? `${dive.tiles.growthPct}%` : "n/a"],
-      ["Orders", dive.tiles.orders],
-      ["Active Retailers", dive.tiles.activeRetailers],
-      ["New Retailers", dive.tiles.newRetailers],
-      ["Target", dive.tiles.target],
-      ["Achievement", dive.tiles.achievementPct != null ? `${dive.tiles.achievementPct}%` : "n/a"],
+      ["Net Order Booked", t.netOrderBooked],
+      ["Prior FY Net", t.netOrderBookedLast],
+      ["Growth", t.growthPct != null ? `${t.growthPct}%` : "n/a"],
+      ["Orders", t.orders],
+      ["Active Retailers", t.activeRetailers],
+      ["New Retailers", t.newRetailers],
+      ["Target", t.target],
+      ["Achievement", t.achievementPct != null ? `${t.achievementPct}%` : "n/a"],
     ];
     infoRows.forEach(([label, value], i) => {
       if (!label) return;
@@ -196,7 +220,8 @@ export async function buildRepReportWorkbook(
       const note = ws.getCell(noteRow, 1);
       note.value =
         "Note: Primary basis uses SAP dispatched-sale data via the Party TM Map bridge. " +
-        "Bridge coverage is approximately 37%. Unbridged amounts remain at State Head level.";
+        `Bridge coverage is ${report.primary.bridgeCoverage.toFixed(1)}% for this ` +
+        "head's register. Unbridged amounts are listed on the Primary Sale tab.";
       note.font = { italic: true, size: 9 };
       note.alignment = { wrapText: true };
       ws.mergeCells(noteRow, 1, noteRow, 2);
@@ -215,27 +240,23 @@ export async function buildRepReportWorkbook(
     ];
     cols.forEach((c, i) => hdr(ws, 1, i + 1, c.label, c.width));
 
-    for (let mIdx = 0; mIdx < 12; mIdx++) {
-      const rowNum = mIdx + 2;
-      ws.getCell(rowNum, 1).value = fiscalMonthLabel(mIdx, startYear);
-      if (tmAgg) {
-        ws.getCell(rowNum, 2).value = tmAgg.monthAmount[mIdx];
-        ws.getCell(rowNum, 2).numFmt = FMT_INT;
-        ws.getCell(rowNum, 3).value = tmAgg.monthOrderIds[mIdx].size;
-        ws.getCell(rowNum, 4).value = tmAgg.saleMonthAmount[mIdx];
-        ws.getCell(rowNum, 4).numFmt = FMT_INT;
-      }
-    }
+    report.monthly.forEach((m, i) => {
+      const rowNum = i + 2;
+      ws.getCell(rowNum, 1).value = m.month;
+      ws.getCell(rowNum, 2).value = m.orderAmount;
+      ws.getCell(rowNum, 2).numFmt = FMT_INT;
+      ws.getCell(rowNum, 3).value = m.orders;
+      ws.getCell(rowNum, 4).value = m.saleAmount;
+      ws.getCell(rowNum, 4).numFmt = FMT_INT;
+    });
 
     const totalRow = 14;
     ws.getCell(totalRow, 1).value = "Total";
-    if (tmAgg) {
-      ws.getCell(totalRow, 2).value = tmAgg.amount;
-      ws.getCell(totalRow, 2).numFmt = FMT_INT;
-      ws.getCell(totalRow, 3).value = tmAgg.orderIds.size;
-      ws.getCell(totalRow, 4).value = tmAgg.saleAmount;
-      ws.getCell(totalRow, 4).numFmt = FMT_INT;
-    }
+    ws.getCell(totalRow, 2).value = report.monthly.reduce((a, m) => a + m.orderAmount, 0);
+    ws.getCell(totalRow, 2).numFmt = FMT_INT;
+    ws.getCell(totalRow, 3).value = report.monthly.reduce((a, m) => a + m.orders, 0);
+    ws.getCell(totalRow, 4).value = report.monthly.reduce((a, m) => a + m.saleAmount, 0);
+    ws.getCell(totalRow, 4).numFmt = FMT_INT;
     for (let c = 1; c <= 4; c++) {
       ws.getCell(totalRow, c).fill = TOTAL_FILL;
       ws.getCell(totalRow, c).font = { bold: true };
@@ -243,14 +264,14 @@ export async function buildRepReportWorkbook(
   }
 
   // --- Sheets 3-5: Comparison tables ---
-  writeComparisonSheet(wb, "By State", dive.byState, thisFy, lastFy);
-  writeComparisonSheet(wb, "By Group", dive.byGroup, thisFy, lastFy);
-  writeComparisonSheet(wb, "By Segment", dive.bySegment, thisFy, lastFy);
+  writeComparisonSheet(wb, "By State", report.secondary.byState, thisFy, lastFy);
+  writeComparisonSheet(wb, "By Group", report.secondary.byGroup, thisFy, lastFy);
+  writeComparisonSheet(wb, "By Segment", report.secondary.bySegment, thisFy, lastFy);
 
   // --- Sheets 6-8: Party tables ---
-  writePartySheet(wb, "Top Parties", dive.parties.top, thisFy, lastFy);
-  writePartySheet(wb, "New Parties", dive.parties.newTop, thisFy, lastFy);
-  writePartySheet(wb, "Churned Parties", dive.parties.churned, thisFy, lastFy);
+  writePartySheet(wb, "Top Parties", report.secondary.parties.top, thisFy, lastFy);
+  writePartySheet(wb, "New Parties", report.secondary.parties.newTop, thisFy, lastFy);
+  writePartySheet(wb, "Churned Parties", report.secondary.parties.churned, thisFy, lastFy);
 
   // --- Sheet 9: Movers ---
   {
@@ -265,17 +286,11 @@ export async function buildRepReportWorkbook(
     hdr(ws, 1, 3, "Parties Declining");
     hdr(ws, 1, 4, "Decline (vs Prior FY)");
 
-    const maxRows = Math.max(
-      dive.movers.partiesUp.length,
-      dive.movers.partiesDown.length,
-      dive.movers.segmentsUp.length,
-      dive.movers.segmentsDown.length,
-    );
-    // Parties up/down: rows 2+
-    for (let i = 0; i < Math.max(dive.movers.partiesUp.length, dive.movers.partiesDown.length); i++) {
+    const movers = report.secondary.movers;
+    for (let i = 0; i < Math.max(movers.partiesUp.length, movers.partiesDown.length); i++) {
       const rowNum = i + 2;
-      const up = dive.movers.partiesUp[i];
-      const down = dive.movers.partiesDown[i];
+      const up = movers.partiesUp[i];
+      const down = movers.partiesDown[i];
       if (up) {
         ws.getCell(rowNum, 1).value = up.label;
         ws.getCell(rowNum, 2).value = up.diff;
@@ -288,15 +303,15 @@ export async function buildRepReportWorkbook(
       }
     }
 
-    const segOffset = Math.max(dive.movers.partiesUp.length, dive.movers.partiesDown.length) + 3;
+    const segOffset = Math.max(movers.partiesUp.length, movers.partiesDown.length) + 3;
     hdr(ws, segOffset, 1, "Segments Gaining");
     hdr(ws, segOffset, 2, "Gain (vs Prior FY)");
     hdr(ws, segOffset, 3, "Segments Declining");
     hdr(ws, segOffset, 4, "Decline (vs Prior FY)");
-    for (let i = 0; i < Math.max(dive.movers.segmentsUp.length, dive.movers.segmentsDown.length); i++) {
+    for (let i = 0; i < Math.max(movers.segmentsUp.length, movers.segmentsDown.length); i++) {
       const rowNum = segOffset + i + 1;
-      const up = dive.movers.segmentsUp[i];
-      const down = dive.movers.segmentsDown[i];
+      const up = movers.segmentsUp[i];
+      const down = movers.segmentsDown[i];
       if (up) {
         ws.getCell(rowNum, 1).value = up.label;
         ws.getCell(rowNum, 2).value = up.diff;
@@ -308,7 +323,43 @@ export async function buildRepReportWorkbook(
         ws.getCell(rowNum, 4).numFmt = FMT_INT;
       }
     }
-    void maxRows;
+  }
+
+  // --- Sheet 10: Primary Sale ---
+  {
+    const ws = wb.addWorksheet("Primary Sale");
+    ws.getColumn(1).width = 36;
+    ws.getColumn(2).width = 18;
+
+    const heading = ws.getCell(1, 1);
+    heading.value = "SAP Dispatched Sale — Party TM Bridge";
+    heading.font = { bold: true, size: 12 };
+    ws.mergeCells(1, 1, 1, 2);
+
+    const p = report.primary;
+    if (!p.available) {
+      ws.getCell(3, 1).value = p.reason ?? "Primary data not available.";
+      ws.getCell(3, 1).font = { italic: true };
+    } else {
+      ws.getCell(3, 1).value = "Bridge coverage (this head)";
+      ws.getCell(3, 1).font = { bold: true };
+      ws.getCell(3, 2).value = p.headTotal > 0 ? p.bridgeCoverage / 100 : "No register data";
+      if (p.headTotal > 0) ws.getCell(3, 2).numFmt = FMT_PCT;
+
+      ws.getCell(4, 1).value = "Head register total";
+      ws.getCell(4, 1).font = { bold: true };
+      ws.getCell(4, 2).value = p.headTotal;
+      ws.getCell(4, 2).numFmt = FMT_INT;
+
+      ws.getCell(5, 1).value = "Bridged to this rep";
+      ws.getCell(5, 1).font = { bold: true };
+      ws.getCell(5, 2).value = p.totalBridged;
+      ws.getCell(5, 2).numFmt = FMT_INT;
+
+      let nextRow = writePrimaryPartyBlock(ws, "Bridged Parties", p.bridgedParties, 7);
+      nextRow += 1;
+      writePrimaryPartyBlock(ws, "Unbridged Parties (not mapped to any TM)", p.unbridgedParties, nextRow);
+    }
   }
 
   return wb;

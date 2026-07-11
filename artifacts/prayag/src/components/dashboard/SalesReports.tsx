@@ -1,13 +1,20 @@
 // Per-salesperson report view and Excel download.
 //
-// Secondary tab under the Sales page. Reuses the already-loaded DeepDive data
-// to render 7 breakdowns in a report-oriented layout. Monthly data is only
-// available in the Excel download (the server fetches TmOrderAgg directly).
+// Calls GET /api/salespeople/:key/reports independently (no dive prop needed).
+// Secondary tab: breakdowns by state/group/segment + parties + movers.
+// Primary tab:   bridged/unbridged party tables from SAP dispatch register.
+// Monthly:       12-row booking + sale table from the team rollup.
 import { useState } from "react";
 import { Download, Loader2, FileSpreadsheet, Info } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import type { DeepDive, DeepRow } from "@workspace/api-client-react";
+import {
+  useGetSalesPersonReports,
+  getGetSalesPersonReportsQueryKey,
+  type DeepRow,
+  type PrimaryParty,
+  type SalesRepReport,
+} from "@workspace/api-client-react";
 
 function formatCr(rupees: number): string {
   return `${(rupees / 1e7).toLocaleString("en-IN", {
@@ -204,15 +211,196 @@ function MoverPairCard({
   );
 }
 
+function PrimaryPartyTable({
+  title,
+  parties,
+  limit = 25,
+}: {
+  title: string;
+  parties: PrimaryParty[];
+  limit?: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const displayRows = expanded ? parties : parties.slice(0, limit);
+  const hasMore = parties.length > limit;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        {parties.length === 0 ? (
+          <p className="text-sm text-muted-foreground px-6 pb-4">None</p>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-muted-foreground border-b border-border/40 bg-muted/30">
+                    <th className="text-left font-medium py-2 px-4">Party</th>
+                    <th className="text-right font-medium py-2 px-4">Dispatched Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayRows.map((p, i) => (
+                    <tr
+                      key={`${p.party}-${i}`}
+                      className="border-b border-border/20 last:border-0 hover:bg-muted/20"
+                    >
+                      <td className="py-1.5 px-4 max-w-[220px] truncate">{p.party}</td>
+                      <td className="text-right tabular-nums py-1.5 px-4">{formatCr(p.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-border/40 bg-muted/30 font-medium">
+                    <td className="py-1.5 px-4">Total</td>
+                    <td className="text-right tabular-nums py-1.5 px-4">
+                      {formatCr(parties.reduce((a, p) => a + p.amount, 0))}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            {hasMore && !expanded && (
+              <button
+                className="w-full py-2 text-xs text-muted-foreground hover:text-foreground border-t border-border/30"
+                onClick={() => setExpanded(true)}
+              >
+                Show all {parties.length} parties
+              </button>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function MonthlyTable({ report }: { report: SalesRepReport }) {
+  const { monthly } = report;
+  const totalOrder = monthly.reduce((a, m) => a + m.orderAmount, 0);
+  const totalOrders = monthly.reduce((a, m) => a + m.orders, 0);
+  const totalSale = monthly.reduce((a, m) => a + m.saleAmount, 0);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium">Monthly Booking</CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-muted-foreground border-b border-border/40 bg-muted/30">
+                <th className="text-left font-medium py-2 px-4">Month</th>
+                <th className="text-right font-medium py-2 px-3">Order Amount</th>
+                <th className="text-right font-medium py-2 px-3">Orders</th>
+                <th className="text-right font-medium py-2 px-3">Sale Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {monthly.map((m) => (
+                <tr
+                  key={m.month}
+                  className="border-b border-border/20 last:border-0 hover:bg-muted/20"
+                >
+                  <td className="py-1.5 px-4">{m.month}</td>
+                  <td className="text-right tabular-nums py-1.5 px-3">
+                    {m.orderAmount > 0 ? formatCr(m.orderAmount) : <span className="text-muted-foreground">-</span>}
+                  </td>
+                  <td className="text-right tabular-nums py-1.5 px-3">
+                    {m.orders > 0 ? formatInt(m.orders) : <span className="text-muted-foreground">-</span>}
+                  </td>
+                  <td className="text-right tabular-nums py-1.5 px-3">
+                    {m.saleAmount > 0 ? formatCr(m.saleAmount) : <span className="text-muted-foreground">-</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-border/40 bg-muted/30 font-medium">
+                <td className="py-1.5 px-4">Total</td>
+                <td className="text-right tabular-nums py-1.5 px-3">{formatCr(totalOrder)}</td>
+                <td className="text-right tabular-nums py-1.5 px-3">{formatInt(totalOrders)}</td>
+                <td className="text-right tabular-nums py-1.5 px-3">{formatCr(totalSale)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PrimarySection({ report }: { report: SalesRepReport }) {
+  const p = report.primary;
+
+  if (!p.available) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-sm text-muted-foreground">
+          {p.reason ?? "Primary data not available."}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-3 gap-3 text-sm">
+        <div className="p-3 rounded-lg border border-border/50 bg-background/50">
+          <p className="text-xs text-muted-foreground">Head register total</p>
+          <p className="text-base font-semibold tabular-nums mt-0.5">
+            {p.headTotal > 0 ? formatCr(p.headTotal) : "-"}
+          </p>
+        </div>
+        <div className="p-3 rounded-lg border border-border/50 bg-background/50">
+          <p className="text-xs text-muted-foreground">Bridged to this rep</p>
+          <p className="text-base font-semibold tabular-nums mt-0.5">
+            {p.totalBridged > 0 ? formatCr(p.totalBridged) : "-"}
+          </p>
+        </div>
+        <div className="p-3 rounded-lg border border-border/50 bg-background/50">
+          <p className="text-xs text-muted-foreground">Bridge coverage (head)</p>
+          <p className="text-base font-semibold tabular-nums mt-0.5">
+            {p.headTotal > 0 ? `${p.bridgeCoverage.toFixed(1)}%` : "-"}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            of head register mapped to any TM
+          </p>
+        </div>
+      </div>
+
+      {p.headTotal === 0 ? (
+        <Card>
+          <CardContent className="py-6 text-sm text-muted-foreground">
+            No dispatch register data found for this head and FY. Load the relevant
+            register via Data Sources to enable primary view.
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <PrimaryPartyTable
+            title={`Bridged Parties — mapped to this rep (${formatInt(p.bridgedParties.length)})`}
+            parties={p.bridgedParties}
+          />
+          <PrimaryPartyTable
+            title={`Unbridged Parties — not mapped to any TM (${formatInt(p.unbridgedParties.length)})`}
+            parties={p.unbridgedParties}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
 export function SalesReports({
-  dive,
-  isLoading,
   fy,
   selectedKey,
   effectiveScope,
 }: {
-  dive: DeepDive | undefined;
-  isLoading: boolean;
   fy: string;
   selectedKey: string;
   effectiveScope: "own" | "team";
@@ -221,15 +409,23 @@ export function SalesReports({
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
+  const reportQuery = useGetSalesPersonReports(
+    selectedKey,
+    { fy, scope: effectiveScope },
+    {
+      query: {
+        enabled: !!selectedKey,
+        queryKey: getGetSalesPersonReportsQueryKey(selectedKey, { fy, scope: effectiveScope }),
+      },
+    },
+  );
+  const report = reportQuery.data;
+
   const handleDownload = async () => {
     setDownloading(true);
     setDownloadError(null);
     try {
-      const params = new URLSearchParams({
-        fy,
-        basis,
-        scope: effectiveScope,
-      });
+      const params = new URLSearchParams({ fy, basis, scope: effectiveScope });
       const url = `/api/salespeople/${encodeURIComponent(selectedKey)}/reports/download?${params.toString()}`;
       const res = await fetch(url);
       if (!res.ok) {
@@ -242,7 +438,7 @@ export function SalesReports({
       a.href = href;
       const cd = res.headers.get("Content-Disposition");
       const match = cd?.match(/filename="([^"]+)"/);
-      a.download = match?.[1] ?? `SalesReport_${fy}_${basis}.xlsx`;
+      a.download = match?.[1] ?? `SalesReports_${fy}_${basis}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -254,27 +450,27 @@ export function SalesReports({
     }
   };
 
-  if (isLoading) {
+  if (reportQuery.isLoading) {
     return (
       <Card>
         <CardContent className="py-12 flex items-center justify-center gap-2 text-muted-foreground">
-          <Loader2 className="w-4 h-4 animate-spin" /> Loading report data...
+          <Loader2 className="w-4 h-4 animate-spin" /> Loading report...
         </CardContent>
       </Card>
     );
   }
 
-  if (!dive?.available) {
+  if (!report?.available) {
     return (
       <Card>
         <CardContent className="py-8 text-sm text-muted-foreground">
-          {dive?.reason ?? "No data available for this selection."}
+          {report?.reason ?? "No data available for this selection."}
         </CardContent>
       </Card>
     );
   }
 
-  const priorFyLabel = dive.priorFy;
+  const sec = report.secondary;
 
   return (
     <div className="space-y-4">
@@ -282,7 +478,7 @@ export function SalesReports({
         <div className="flex items-center gap-2">
           <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
           <span className="text-sm text-muted-foreground">
-            {dive.fy} vs {priorFyLabel} &middot; {dive.scope === "team" ? "Own + team" : "Own book"}
+            {report.fy} vs {report.priorFy} &middot; {report.scope === "team" ? "Own + team" : "Own book"}
           </span>
         </div>
 
@@ -312,77 +508,77 @@ export function SalesReports({
         </div>
       </div>
 
-      {basis === "primary" && (
-        <div className="flex items-start gap-2 p-3 rounded-lg border border-border/50 bg-muted/40 text-sm">
-          <Info className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" />
-          <p className="text-muted-foreground">
-            Primary basis uses SAP dispatched-sale data via the Party TM Map bridge.
-            Bridge coverage is approximately 37%. Amounts appear in the downloaded workbook; in-browser tables
-            always show secondary order booking.
-          </p>
-        </div>
-      )}
-
       {downloadError && (
         <p className="text-sm text-destructive">{downloadError}</p>
       )}
 
-      <div className="grid grid-cols-3 gap-3 text-sm">
-        <div className="p-3 rounded-lg border border-border/50 bg-background/50">
-          <p className="text-xs text-muted-foreground">Net order booked</p>
-          <p className="text-base font-semibold tabular-nums mt-0.5">{formatCr(dive.tiles.netOrderBooked)}</p>
-          <p className="text-xs text-muted-foreground">vs {formatCr(dive.tiles.netOrderBookedLast)} last year</p>
+      <MonthlyTable report={report} />
+
+      {basis === "secondary" ? (
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-3 text-sm">
+            <div className="p-3 rounded-lg border border-border/50 bg-background/50">
+              <p className="text-xs text-muted-foreground">Net order booked</p>
+              <p className="text-base font-semibold tabular-nums mt-0.5">{formatCr(sec.tiles.netOrderBooked)}</p>
+              <p className="text-xs text-muted-foreground">vs {formatCr(sec.tiles.netOrderBookedLast)} last year</p>
+            </div>
+            <div className="p-3 rounded-lg border border-border/50 bg-background/50">
+              <p className="text-xs text-muted-foreground">Orders</p>
+              <p className="text-base font-semibold tabular-nums mt-0.5">{formatInt(sec.tiles.orders)}</p>
+            </div>
+            <div className="p-3 rounded-lg border border-border/50 bg-background/50">
+              <p className="text-xs text-muted-foreground">Active retailers</p>
+              <p className="text-base font-semibold tabular-nums mt-0.5">{formatInt(sec.tiles.activeRetailers)}</p>
+              <p className="text-xs text-muted-foreground">{formatInt(sec.tiles.newRetailers)} new</p>
+            </div>
+          </div>
+
+          <ReportTable title="By State" rows={sec.byState} />
+          <ReportTable title="By Group" rows={sec.byGroup} />
+          <ReportTable title="By Segment" rows={sec.bySegment} />
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <ReportTable title="Top Parties" rows={sec.parties.top} showFlag />
+            <ReportTable
+              title={`New Parties this year (${formatInt(sec.parties.newCount)})`}
+              rows={sec.parties.newTop}
+              showFlag
+            />
+            <ReportTable
+              title={`Churned Parties (${formatInt(sec.parties.churnedCount)} ordered last year, none this)`}
+              rows={sec.parties.churned}
+              showFlag
+            />
+          </div>
+
+          <MoverPairCard
+            upTitle="Parties gaining"
+            downTitle="Parties declining"
+            upRows={sec.movers.partiesUp}
+            downRows={sec.movers.partiesDown}
+          />
+          <MoverPairCard
+            upTitle="Segments gaining"
+            downTitle="Segments declining"
+            upRows={sec.movers.segmentsUp}
+            downRows={sec.movers.segmentsDown}
+          />
         </div>
-        <div className="p-3 rounded-lg border border-border/50 bg-background/50">
-          <p className="text-xs text-muted-foreground">Orders</p>
-          <p className="text-base font-semibold tabular-nums mt-0.5">{formatInt(dive.tiles.orders)}</p>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-start gap-2 p-3 rounded-lg border border-border/50 bg-muted/40 text-sm">
+            <Info className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" />
+            <p className="text-muted-foreground">
+              Primary basis uses SAP dispatched-sale data from the state-head dispatch
+              register, matched to this rep via the Party TM Map bridge.
+              {report.primary.available && report.primary.headTotal > 0 && (
+                <> Bridge coverage for this head: {report.primary.bridgeCoverage.toFixed(1)}%.</>
+              )}
+            </p>
+          </div>
+          <PrimarySection report={report} />
         </div>
-        <div className="p-3 rounded-lg border border-border/50 bg-background/50">
-          <p className="text-xs text-muted-foreground">Active retailers</p>
-          <p className="text-base font-semibold tabular-nums mt-0.5">{formatInt(dive.tiles.activeRetailers)}</p>
-          <p className="text-xs text-muted-foreground">{formatInt(dive.tiles.newRetailers)} new</p>
-        </div>
-      </div>
-
-      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-        <Info className="w-3 h-3 shrink-0" />
-        Monthly booking breakdown is available in the Excel download (Cover + 8 detail sheets).
-      </p>
-
-      <ReportTable title="By State" rows={dive.byState} />
-      <ReportTable title="By Group" rows={dive.byGroup} />
-      <ReportTable title="By Segment" rows={dive.bySegment} />
-
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <ReportTable
-          title={`Top Parties (largest active)`}
-          rows={dive.parties.top}
-          showFlag
-        />
-        <ReportTable
-          title={`New Parties this year (${formatInt(dive.parties.newCount)})`}
-          rows={dive.parties.newTop}
-          showFlag
-        />
-        <ReportTable
-          title={`Churned Parties (${formatInt(dive.parties.churnedCount)} ordered last year, none this)`}
-          rows={dive.parties.churned}
-          showFlag
-        />
-      </div>
-
-      <MoverPairCard
-        upTitle="Parties gaining"
-        downTitle="Parties declining"
-        upRows={dive.movers.partiesUp}
-        downRows={dive.movers.partiesDown}
-      />
-      <MoverPairCard
-        upTitle="Segments gaining"
-        downTitle="Segments declining"
-        upRows={dive.movers.segmentsUp}
-        downRows={dive.movers.segmentsDown}
-      />
+      )}
     </div>
   );
 }
