@@ -155,6 +155,7 @@ function BreakdownTable({
                   <th className="text-left font-medium py-1.5 pr-2">Name</th>
                   <th className="text-right font-medium py-1.5 px-2">This FY</th>
                   <th className="text-right font-medium py-1.5 px-2">Last FY</th>
+                  <th className="text-right font-medium py-1.5 px-2">Difference</th>
                   <th className="text-right font-medium py-1.5 px-2">Growth</th>
                   <th className="text-right font-medium py-1.5 pl-2">Share</th>
                 </tr>
@@ -180,6 +181,17 @@ function BreakdownTable({
                     <td className="text-right tabular-nums py-1.5 px-2">{formatCr(r.thisFy)}</td>
                     <td className="text-right tabular-nums py-1.5 px-2 text-muted-foreground">
                       {formatCr(r.lastFy)}
+                    </td>
+                    <td
+                      className={cn(
+                        "text-right tabular-nums py-1.5 px-2",
+                        r.diff > 0 && "text-green-600 dark:text-green-400",
+                        r.diff < 0 && "text-destructive",
+                        r.diff === 0 && "text-muted-foreground",
+                      )}
+                    >
+                      {r.diff > 0 ? "+" : ""}
+                      {formatCr(r.diff)}
                     </td>
                     <td className="text-right py-1.5 px-2">
                       <GrowthBadge pct={r.growthPct} />
@@ -243,6 +255,7 @@ function HeadCheckChip({ status }: { status: SalesVerifyHead["status"] }) {
 
 export default function SalesPeople() {
   const [fy, setFy] = useState("2025-26");
+  const [headKey, setHeadKey] = useState<string>("");
   const [selected, setSelected] = useState<RepNode | null>(null);
   const [scope, setScope] = useState<"own" | "team">("team");
   const [analysis, setAnalysis] = useState<string | null>(null);
@@ -274,6 +287,7 @@ export default function SalesPeople() {
   );
 
   const heads = tree.data?.heads ?? [];
+  const visibleHeads = headKey ? heads.filter((h) => h.key === headKey) : heads;
   const dive = deepDive.data;
 
   const selectNode = (n: RepNode) => {
@@ -322,6 +336,7 @@ export default function SalesPeople() {
             value={fy}
             onChange={(e) => {
               setFy(e.target.value);
+              setHeadKey("");
               setSelected(null);
               setAnalysis(null);
             }}
@@ -354,7 +369,7 @@ export default function SalesPeople() {
         <Card className="lg:sticky lg:top-4 h-fit">
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Reporting tree</CardTitle>
-            <CardDescription>State Heads and their sales people</CardDescription>
+            <CardDescription>Pick a State Head, then drill into their sales people</CardDescription>
           </CardHeader>
           <CardContent>
             {tree.isLoading ? (
@@ -366,11 +381,33 @@ export default function SalesPeople() {
             ) : heads.length === 0 ? (
               <p className="text-sm text-muted-foreground">No sales people found.</p>
             ) : (
-              <div className="max-h-[70vh] overflow-y-auto -mx-1">
-                {heads.map((h) => (
-                  <TreeRow key={h.key} node={h} depth={0} selectedKey={selectedKey} onSelect={selectNode} />
-                ))}
-              </div>
+              <>
+                <div className="mb-3">
+                  <label className="text-xs text-muted-foreground">State Head</label>
+                  <select
+                    className="mt-1 w-full h-9 rounded-md border border-border bg-background px-2 text-sm"
+                    value={headKey}
+                    onChange={(e) => {
+                      const key = e.target.value;
+                      setHeadKey(key);
+                      const head = heads.find((h) => h.key === key) ?? null;
+                      if (head) selectNode(head);
+                    }}
+                  >
+                    <option value="">All State Heads</option>
+                    {heads.map((h) => (
+                      <option key={h.key} value={h.key}>
+                        {h.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="max-h-[70vh] overflow-y-auto -mx-1">
+                  {visibleHeads.map((h) => (
+                    <TreeRow key={h.key} node={h} depth={0} selectedKey={selectedKey} onSelect={selectNode} />
+                  ))}
+                </div>
+              </>
             )}
           </CardContent>
         </Card>
@@ -509,13 +546,23 @@ export default function SalesPeople() {
                     <BreakdownTable title="By Group" rows={dive.byGroup} />
                     <BreakdownTable title="By Segment" rows={dive.bySegment} />
                     <BreakdownTable
-                      title={`By Party — top (${formatInt(dive.parties.newCount)} new, ${formatInt(dive.parties.churnedCount)} churned)`}
+                      title="By Party — top (largest active)"
                       rows={dive.parties.top}
                       showFlag
                     />
                     <BreakdownTable
                       title="By Party — bottom (weakest active)"
                       rows={dive.parties.bottom}
+                      showFlag
+                    />
+                    <BreakdownTable
+                      title={`By Party — new this year (${formatInt(dive.parties.newCount)})`}
+                      rows={dive.parties.newTop}
+                      showFlag
+                    />
+                    <BreakdownTable
+                      title={`By Party — churned (${formatInt(dive.parties.churnedCount)} ordered last year, none this year)`}
+                      rows={dive.parties.churned}
                       showFlag
                     />
                   </div>
