@@ -1,5 +1,6 @@
 // Sales People deep-dive endpoints: reporting tree, per-rep drill-down, an
-// AI narrative/compare analyst, and a verify/data-health reconciliation.
+// AI narrative/compare analyst, a verify/data-health reconciliation, and a
+// per-rep Excel report download.
 import { Router, type IRouter, type Request, type Response } from "express";
 import { AnalyzeSalesPersonBody } from "@workspace/api-zod";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
@@ -12,6 +13,8 @@ import {
   type RepNode,
 } from "../lib/mgmt/salespeople.js";
 import { priorFy } from "../lib/mgmt/names.js";
+import { loadOrderFile } from "../lib/mgmt/orders.js";
+import { buildRepReportWorkbook } from "../lib/mgmt/repReports.js";
 
 const router: IRouter = Router();
 
@@ -143,6 +146,47 @@ async function compareContext(fy: string, head: RepNode, priorHead: RepNode | nu
     lines || "No sales people found under this head.",
   ].join("\n");
 }
+
+router.get(
+  "/salespeople/:key/reports/download",
+  async (req: Request, res: Response): Promise<void> => {
+    const repKey = typeof req.params.key === "string" ? req.params.key.trim() : "";
+    const fy = fyParam(req.query.fy);
+    const basis = req.query.basis === "primary" ? "primary" : "secondary";
+    const scope = req.query.scope === "team" ? "team" : "own";
+    if (!repKey) {
+      res.status(400).json({ error: "repKey is required" });
+      return;
+    }
+    if (!FY_PATTERN.test(fy)) {
+      res.status(400).json({ error: "fy must look like 2025-26" });
+      return;
+    }
+    try {
+      const [dive, orderFile] = await Promise.all([
+        buildDeepDive(fy, repKey, scope),
+        loadOrderFile(fy),
+      ]);
+      const tmAgg = orderFile?.perTm.get(repKey) ?? null;
+      const wb = await buildRepReportWorkbook(dive, tmAgg, basis);
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const safeName = dive.repName.replace(/[^a-z0-9 ]/gi, "").trim().replace(/\s+/g, "_") || repKey;
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      );
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="SalesReport_${safeName}_${fy}_${basis}_${dateStr}.xlsx"`,
+      );
+      await wb.xlsx.write(res);
+      res.end();
+    } catch (err) {
+      req.log.error({ err, repKey, fy }, "salespeople reports download failed");
+      res.status(500).json({ error: "Could not generate the report. Try again in a minute." });
+    }
+  },
+);
 
 router.post("/salesperson/analyze", async (req: Request, res: Response): Promise<void> => {
   const parsed = AnalyzeSalesPersonBody.safeParse(req.body);

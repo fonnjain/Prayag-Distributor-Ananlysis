@@ -27,7 +27,7 @@ const AREAS = [
   { id: "growth", label: "Growth", icon: LineChart, component: Growth },
   { id: "analyst", label: "AI Analyst", icon: Bot, component: Analyst },
   { id: "reports", label: "Reports", icon: FileSpreadsheet, component: MgmtReports },
-  { id: "sales-people", label: "Sales People", icon: Users, component: SalesPeople },
+  { id: "sales", label: "Sales", icon: Users, component: SalesPeople },
   { id: "targets", label: "Targets", icon: Target, component: Targets },
   { id: "sales-import", label: "Sales Import", icon: UploadCloud, component: SalesImport },
   { id: "sources", label: "Data Sources", icon: Database, component: DataSources },

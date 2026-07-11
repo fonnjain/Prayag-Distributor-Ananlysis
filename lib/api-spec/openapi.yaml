@@ -548,6 +548,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /salespeople/{key}/reports/download:
+    get:
+      operationId: getSalesPersonReportsDownload
+      tags: [mgmt]
+      summary: Download per-salesperson report workbook (xlsx)
+      description: >
+        Builds a 9-tab Excel workbook (Cover, Monthly Booking, By State, By Group,
+        By Segment, Top Parties, New Parties, Churned Parties, Movers) for the
+        selected salesperson and fiscal year. Returns the file as an xlsx stream.
+        Call via direct fetch — the browser can trigger a native download.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+          description: Normalised rep key from the tree node.
+        - name: fy
+          in: query
+          schema: { type: string }
+          description: Fiscal year like 2025-26. Defaults to 2025-26.
+        - name: basis
+          in: query
+          schema: { type: string, enum: [secondary, primary] }
+          description: >
+            secondary = secondary order booking (default);
+            primary = SAP dispatched sale via Party TM Map bridge (~37% coverage).
+        - name: scope
+          in: query
+          schema: { type: string, enum: [own, team] }
+          description: own = this rep only; team = rep plus rolled-up juniors.
+      responses:
+        "200":
+          description: Excel workbook stream
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Invalid parameters
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          description: Workbook could not be built
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /salespeople/verify:
     get:
       operationId: verifySalesPeople

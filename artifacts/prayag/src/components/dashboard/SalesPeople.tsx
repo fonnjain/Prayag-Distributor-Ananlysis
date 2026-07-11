@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { SalesReports } from "@/components/dashboard/SalesReports";
 import {
   useGetSalesPeopleTree,
   useGetSalesPersonDeepDive,
@@ -259,6 +260,7 @@ export default function SalesPeople() {
   const [selected, setSelected] = useState<RepNode | null>(null);
   const [scope, setScope] = useState<"own" | "team">("team");
   const [analysis, setAnalysis] = useState<string | null>(null);
+  const [subTab, setSubTab] = useState<"overview" | "reports">("overview");
 
   const tree = useGetSalesPeopleTree({ fy });
   const analyze = useAnalyzeSalesPerson();
@@ -294,6 +296,7 @@ export default function SalesPeople() {
     setSelected(n);
     setAnalysis(null);
     setScope(n.hasTeam ? "team" : "own");
+    setSubTab("overview");
   };
 
   const runAnalysis = async (mode: "narrative" | "compare") => {
@@ -323,7 +326,7 @@ export default function SalesPeople() {
         <div>
           <h2 className="text-xl font-semibold flex items-center gap-2">
             <Users className="w-5 h-5" />
-            Sales People
+            Sales
           </h2>
           <p className="text-sm text-muted-foreground">
             One level below State Heads. Pick a person to see their book, team roll-up and year-on-year movements. Net secondary order booking.
@@ -467,19 +470,35 @@ export default function SalesPeople() {
                 </div>
               </div>
 
-              {deepDive.isLoading ? (
+              <div className="inline-flex rounded-md border border-border overflow-hidden text-sm">
+                {(["overview", "reports"] as const).map((t) => (
+                  <button
+                    key={t}
+                    className={cn(
+                      "px-4 py-1.5 capitalize",
+                      subTab === t ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted",
+                    )}
+                    onClick={() => setSubTab(t)}
+                  >
+                    {t === "overview" ? "Overview" : "Reports"}
+                  </button>
+                ))}
+              </div>
+
+              {subTab === "overview" ? (
+                deepDive.isLoading ? (
                 <Card>
                   <CardContent className="py-12 flex items-center justify-center gap-2 text-muted-foreground">
                     <Loader2 className="w-4 h-4 animate-spin" /> Computing deep dive...
                   </CardContent>
                 </Card>
-              ) : !dive?.available ? (
+                ) : !dive?.available ? (
                 <Card>
                   <CardContent className="py-8 text-sm text-muted-foreground">
                     {dive?.reason ?? "No data available for this selection."}
                   </CardContent>
                 </Card>
-              ) : (
+                ) : (
                 <>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <Tile
@@ -567,6 +586,15 @@ export default function SalesPeople() {
                     />
                   </div>
                 </>
+                )
+              ) : (
+                <SalesReports
+                  dive={dive}
+                  isLoading={deepDive.isLoading}
+                  fy={fy}
+                  selectedKey={selectedKey ?? ""}
+                  effectiveScope={effectiveScope}
+                />
               )}
             </>
           )}
