@@ -222,6 +222,7 @@ export default function DataHealth() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastRun, setLastRun] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
   const { syncedAt } = useDashboard();
 
@@ -249,6 +250,35 @@ export default function DataHealth() {
 
   // Run on mount and when FY changes.
   useEffect(() => { runAudit(); }, [runAudit]);
+
+  const downloadAudit = useCallback(() => {
+    setDownloading(true);
+    fetch(`/api/audit/download?fy=${encodeURIComponent(fy)}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`Server returned ${r.status}`);
+        return r.blob();
+      })
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const now = new Date();
+        const ts =
+          now.getFullYear().toString() +
+          String(now.getMonth() + 1).padStart(2, "0") +
+          String(now.getDate()).padStart(2, "0") +
+          "-" +
+          String(now.getHours()).padStart(2, "0") +
+          String(now.getMinutes()).padStart(2, "0");
+        a.download = `Audit_${fy.replace("-", "")}_${ts}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      })
+      .catch((err: Error) => setError(`Download failed: ${err.message}`))
+      .finally(() => setDownloading(false));
+  }, [fy]);
 
   // Auto-rerun after a dashboard refresh (syncedAt advances).
   const prevSyncedAt = useRef<string | null>(null);
@@ -292,19 +322,14 @@ export default function DataHealth() {
           {loading ? "Running" : "Run Checks"}
         </button>
 
-        <a
-          href={`/api/audit/download?fy=${encodeURIComponent(fy)}`}
-          download
-          className={cn(
-            "flex items-center gap-2 h-8 px-3 rounded-md border border-border/60 text-sm font-medium hover:bg-muted transition-colors",
-            !report && "pointer-events-none opacity-40",
-          )}
-          aria-disabled={!report}
-          tabIndex={report ? 0 : -1}
+        <button
+          onClick={downloadAudit}
+          disabled={!report || downloading}
+          className="flex items-center gap-2 h-8 px-3 rounded-md border border-border/60 text-sm font-medium hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          <Download className="w-3.5 h-3.5" />
-          Download Audit (Excel)
-        </a>
+          <Download className={cn("w-3.5 h-3.5", downloading && "animate-pulse")} />
+          {downloading ? "Generating..." : "Download Audit (Excel)"}
+        </button>
 
         {lastRun && !loading && (
           <span className="text-xs text-muted-foreground self-end pb-1.5">
