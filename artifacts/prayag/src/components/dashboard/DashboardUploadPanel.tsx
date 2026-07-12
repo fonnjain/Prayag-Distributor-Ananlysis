@@ -15,7 +15,7 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
-import { UploadCloud, CheckCircle2, AlertTriangle, FileSpreadsheet, Loader2 } from "lucide-react";
+import { UploadCloud, CheckCircle2, AlertTriangle, FileSpreadsheet, Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const UPLOAD_FYS = ["2025-26", "2026-27"] as const;
@@ -24,6 +24,12 @@ type UploadFy = (typeof UPLOAD_FYS)[number];
 const FY_LABELS: Record<UploadFy, string> = {
   "2025-26": "FY 2025-26 (annual targets)",
   "2026-27": "FY 2026-27 (Q1 Apr-Jun targets)",
+};
+
+type TargetDiagnostic = {
+  xlsxRowCount: number;
+  matchedCount: number;
+  unmatchedRows: Array<{ name: string; target: number | null }>;
 };
 
 function fmtDate(iso: string): string {
@@ -38,6 +44,11 @@ function fmtDate(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+function fmtCr(n: number | null): string {
+  if (n == null) return "";
+  return `\u20b9${(n / 1e7).toFixed(2)} Cr`;
 }
 
 function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
@@ -56,10 +67,17 @@ function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
-function FyPanel({ fy }: { fy: UploadFy }) {
+function FyPanel({
+  fy,
+  targetDiagnostic,
+}: {
+  fy: UploadFy;
+  targetDiagnostic: TargetDiagnostic | null;
+}) {
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showUnmatched, setShowUnmatched] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const statusQuery = useGetMgmtDashboardXlsxStatus(fy);
   const status: DashboardXlsxStatus | undefined = statusQuery.data?.status;
@@ -114,6 +132,8 @@ function FyPanel({ fy }: { fy: UploadFy }) {
     [handleFile],
   );
 
+  const unmatchedCount = targetDiagnostic?.unmatchedRows.length ?? 0;
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -163,6 +183,52 @@ function FyPanel({ fy }: { fy: UploadFy }) {
                   : `${status.unmatchedSample.length} unmatched names`
               }
             />
+          </div>
+        )}
+
+        {/* Target match diagnostic — shown when this panel's FY is the currently loaded one */}
+        {targetDiagnostic && (
+          <div className="rounded-lg border p-3 space-y-2">
+            <p className="text-xs font-semibold">Target match diagnostic</p>
+            <div className="flex flex-wrap gap-4 text-xs">
+              <span className="text-muted-foreground">{targetDiagnostic.xlsxRowCount} rows read</span>
+              <span className="text-green-700 dark:text-green-400">
+                {targetDiagnostic.matchedCount} matched to a member
+              </span>
+              {unmatchedCount > 0 && (
+                <span className="text-amber-700 dark:text-amber-400">
+                  {unmatchedCount} unmatched (target lost)
+                </span>
+              )}
+            </div>
+            {unmatchedCount > 0 && (
+              <div>
+                <button
+                  type="button"
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={() => setShowUnmatched((v) => !v)}
+                >
+                  {showUnmatched ? (
+                    <ChevronUp className="h-3.5 w-3.5" />
+                  ) : (
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  )}
+                  {showUnmatched ? "Hide" : "Show"} unmatched names
+                </button>
+                {showUnmatched && (
+                  <ul className="mt-2 space-y-1 max-h-48 overflow-y-auto rounded border p-2">
+                    {targetDiagnostic.unmatchedRows.map((r, i) => (
+                      <li key={i} className="flex items-center justify-between gap-3 text-xs py-0.5">
+                        <span className="text-muted-foreground">{r.name}</span>
+                        {r.target != null && (
+                          <span className="tabular-nums font-medium shrink-0">{fmtCr(r.target)}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -223,7 +289,13 @@ function FyPanel({ fy }: { fy: UploadFy }) {
   );
 }
 
-export default function DashboardUploadPanel() {
+export default function DashboardUploadPanel({
+  targetDiagnostic,
+  selectedFy,
+}: {
+  targetDiagnostic?: TargetDiagnostic | null;
+  selectedFy?: string;
+}) {
   return (
     <div className="space-y-4">
       <div>
@@ -236,7 +308,11 @@ export default function DashboardUploadPanel() {
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         {UPLOAD_FYS.map((fy) => (
-          <FyPanel key={fy} fy={fy} />
+          <FyPanel
+            key={fy}
+            fy={fy}
+            targetDiagnostic={fy === selectedFy ? (targetDiagnostic ?? null) : null}
+          />
         ))}
       </div>
     </div>

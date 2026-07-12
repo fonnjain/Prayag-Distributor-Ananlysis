@@ -140,6 +140,22 @@ function achievement(num: number | null | undefined, den: number | null): number
   return num / den;
 }
 
+// Sorted-token key for fuzzy name matching across name-order variations.
+// "Raj Kumar" and "Kumar Raj" both produce "kumarraj" (tokens sorted, then joined).
+// This resolves first-name/last-name swap differences between the xlsx and roster.
+function sortedTokenKey(raw: unknown): string {
+  if (raw == null) return "";
+  return String(raw)
+    .replace(/\([^)]*\)/g, " ")
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .sort()
+    .join("");
+}
+
 // Convert a dashboard-xlsx record into a TargetRow so it can fill the targetMap
 // for members not already present in the Prayag Target Master (Sheets).
 // Target Master entries always take precedence — this is only a gap-filler.
@@ -309,6 +325,13 @@ export type SegmentCheck = {
   indexError: string | null;
 };
 
+/** Diagnostic for how many uploaded dashboard-xlsx target rows matched roster members. */
+export type XlsxTargetDiagnostic = {
+  xlsxRowCount: number;
+  matchedCount: number;
+  /** xlsx rows whose name matched no roster member by normKey or sorted-token fallback. */
+  unmatchedRows: Array<{ name: string; target: number | null }>;
+};
 
 export async function assembleRows(
   filters: ReportFilters,
@@ -323,6 +346,7 @@ export async function assembleRows(
   nameMatches: NameMatchInfo[];
   segmentCheck: SegmentCheck | null;
   saleAvailable: boolean;
+  xlsxTargetDiagnostic: XlsxTargetDiagnostic | null;
 }> {
   const roster = await loadRoster();
   const scope = expandScope(filters);
@@ -353,15 +377,61 @@ export async function assembleRows(
   // designation). The xlsx covers the full roster including departed members,
   // so it also provides stateHead for supplemental rows. Entries from the
   // Prayag Target Master (Sheets) always override the xlsx on conflict.
+  let xlsxTargetDiagnostic: XlsxTargetDiagnostic | null = null;
   try {
     const xlsxLookup = await buildDashboardXlsxLookup(filters.fy);
-    for (const [key, rec] of xlsxLookup) {
-      if (targetMap.has(key)) continue;
-      targetMap.set(key, xlsxRecordToTargetRow(rec, filters.fy));
-    }
     if (xlsxLookup.size > 0) {
-      logger.debug(
-        { fy: filters.fy, xlsxCount: xlsxLookup.size },
+      // Build a sorted-token secondary index: handles first-name/last-name swap
+      // differences between the xlsx names and roster names.
+      const xlsxBySortedToken = new Map<string, DashboardXlsxRecord>();
+      for (const [, rec] of xlsxLookup) {
+        const stk = sortedTokenKey(rec.name);
+        if (stk && !xlsxBySortedToken.has(stk)) xlsxBySortedToken.set(stk, rec);
+      }
+
+      // Primary join: normKey exact match.
+      for (const [key, rec] of xlsxLookup) {
+        if (targetMap.has(key)) continue;
+        targetMap.set(key, xlsxRecordToTargetRow(rec, filters.fy));
+      }
+
+      // Secondary join: sorted-token fallback for roster members still unmatched.
+      const rosterSortedTokens = new Map<string, string>(); // sortedToken → normKey
+      for (const m of roster.members) {
+        const stk = sortedTokenKey(m.name);
+        if (stk && !rosterSortedTokens.has(stk)) rosterSortedTokens.set(stk, m.normKey);
+      }
+      let tokenFallbacks = 0;
+      for (const m of roster.members) {
+        if (targetMap.has(m.normKey)) continue;
+        const rec = xlsxBySortedToken.get(sortedTokenKey(m.name));
+        if (rec) {
+          targetMap.set(m.normKey, xlsxRecordToTargetRow(rec, filters.fy));
+          tokenFallbacks++;
+        }
+      }
+
+      // Diagnostic: xlsx records that matched no roster member by either method.
+      const rosterNormKeys = new Set(roster.members.map((m) => m.normKey));
+      const unmatchedRows: Array<{ name: string; target: number | null }> = [];
+      for (const [, rec] of xlsxLookup) {
+        if (rosterNormKeys.has(rec.normKey)) continue;
+        if (rosterSortedTokens.has(sortedTokenKey(rec.name))) continue;
+        unmatchedRows.push({ name: rec.name, target: rec.secondaryTarget });
+      }
+      xlsxTargetDiagnostic = {
+        xlsxRowCount: xlsxLookup.size,
+        matchedCount: xlsxLookup.size - unmatchedRows.length,
+        unmatchedRows,
+      };
+      logger.info(
+        {
+          fy: filters.fy,
+          xlsxCount: xlsxLookup.size,
+          matched: xlsxTargetDiagnostic.matchedCount,
+          unmatched: unmatchedRows.length,
+          tokenFallbacks,
+        },
         "targetMap augmented from dashboard xlsx",
       );
     }
@@ -564,6 +634,7 @@ export async function assembleRows(
     nameMatches,
     segmentCheck,
     saleAvailable,
+    xlsxTargetDiagnostic,
   };
 }
 

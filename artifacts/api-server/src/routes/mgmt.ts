@@ -217,7 +217,7 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
       assembleRows(filters),
       loadHrSfaDashboard().catch((): Map<string, HrSfaRecord> => new Map()),
     ]);
-    const { rows, ordersAvailable, targetsAvailable, rosterSource, orderStatus, nameMatches } = assembled;
+    const { rows, ordersAvailable, targetsAvailable, rosterSource, orderStatus, nameMatches, xlsxTargetDiagnostic } = assembled;
 
     // Load head-level Sale (primary dispatch, Taxable Value) from the appropriate
     // per-FY sheet. Sale is head-level only — member saleAmount stays null so the
@@ -225,7 +225,7 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
     // conflate individual TMs who share a head.
     //
     // FY2025-26 → State Head Sale 2025-26 sheet
-    // FY2026-27 → Order Book FY2026-27 (no primary-sale sheet yet; Taxable Value)
+    // FY2026-27 → Order Sheet 26-27 (primary dispatch register; falls back to Order Book Taxable Value if unreachable)
     let saleByHead: Map<string, number> | null = null;
     let saleSourceLabel: string | null = null;
     try {
@@ -238,7 +238,7 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
           "mgmt: loaded primary sale data",
         );
       } else if (fy === "2026-27") {
-        // No primary-sale sheet for FY2026-27; use Order Book Taxable Value.
+        // Primary sale sheet for FY2026-27 returned zero or errored; fallback to Order Book Taxable Value.
         const obs = await loadOrderBookSaleByHead();
         if (!obs.error && obs.total > 0) {
           saleByHead = obs.byHead;
@@ -317,6 +317,7 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         saleSource: saleSourceLabel,
         orderBookingSource: ordersAvailable ? `Secondary Order Booking ${fy}` : null,
         orderBookingNameMatches: nameMatches,
+        ...(xlsxTargetDiagnostic ? { targetMatchDiagnostic: xlsxTargetDiagnostic } : {}),
       },
     });
   } catch (err) {

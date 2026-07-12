@@ -25,8 +25,12 @@ const SALE_SHEETS: Record<string, { id: string; label: string }> = {
     id: "1RuXHIXfusOT-VDdDqeuB-Nx-pxyVkmrJsqr21BB-NUA",
     label: "State Head Sale 2025-26",
   },
-  // FY2026-27 does not have a separate primary-sale sheet yet;
-  // mgmt.ts falls back to Order Book (orderBookSale.ts) for that FY.
+  // FY2026-27 primary dispatch register: per-invoice rows with STATE HEAD column.
+  // Fallback in mgmt.ts to "State Head Sale 2026-27" if this sheet is unreachable.
+  "2026-27": {
+    id: "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A",
+    label: "Order Sheet 26-27 (Primary Sale)",
+  },
 };
 
 const NON_TERRITORY_RE = /^(other|project|govt|gem|jjm|nonterrit)/i;

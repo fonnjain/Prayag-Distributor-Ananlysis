@@ -68,6 +68,12 @@ type DashboardMeta = {
   saleSource?: string | null;
   /** Source label for Order Booking tile (e.g. "Secondary Order Booking 2025-26") */
   orderBookingSource?: string | null;
+  /** Diagnostic from the dashboard xlsx target-to-roster join. */
+  targetMatchDiagnostic?: {
+    xlsxRowCount: number;
+    matchedCount: number;
+    unmatchedRows: Array<{ name: string; target: number | null }>;
+  } | null;
 };
 
 type DashboardData = { rows: Member[]; meta: DashboardMeta };
@@ -800,7 +806,10 @@ export default function StateHeadDashboard() {
             <div className="py-8 text-center text-sm text-muted-foreground">Loading...</div>
           }
         >
-          <DashboardUploadPanel />
+          <DashboardUploadPanel
+            targetDiagnostic={data?.meta?.targetMatchDiagnostic ?? null}
+            selectedFy={fy}
+          />
         </Suspense>
       )}
 
