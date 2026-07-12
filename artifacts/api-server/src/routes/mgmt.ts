@@ -60,10 +60,18 @@ async function targetsSource(req: Request): Promise<{
 
 router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> => {
   try {
-    const roster = await loadRoster();
+    // Roster load may fail when Google Sheets is unreachable; degrade gracefully.
+    let roster: Awaited<ReturnType<typeof loadRoster>> | null = null;
+    try {
+      roster = await loadRoster();
+    } catch (rErr) {
+      req.log.warn({ err: rErr }, "roster unavailable for mgmt options; using empty fallback");
+    }
     const cfg = mgmtSources();
     const fys = Object.keys(cfg.secondary_order_booking.files_by_year).sort().reverse();
-    const states = [...new Set(roster.members.map((m) => m.state).filter(Boolean))].sort();
+    const states = roster
+      ? [...new Set(roster.members.map((m) => m.state).filter(Boolean))].sort()
+      : [];
     // Cheap folder check only — never trigger a full 380k-row read here. If a
     // report build already recorded a precise load status, surface that.
     let ordersStatus: string;
@@ -92,11 +100,14 @@ router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> =
       {
         key: "roster",
         name: "Team member roster",
-        status: roster.source === "hr_roster" ? "connected" : "partial",
-        detail:
-          roster.source === "hr_roster"
+        status: roster
+          ? roster.source === "hr_roster" ? "connected" : "partial"
+          : "missing",
+        detail: roster
+          ? roster.source === "hr_roster"
             ? `${roster.members.length} team members from the HR roster workbook`
-            : `${roster.members.length} team members. The Team Member Details (HR) file is not shared with the connected Google account yet, so the roster comes from the live STATE HEAD DASHBOARD identity columns.`,
+            : `${roster.members.length} team members. The Team Member Details (HR) file is not shared with the connected Google account yet, so the roster comes from the live STATE HEAD DASHBOARD identity columns.`
+          : "The roster could not be loaded. Connect the Google account to enable state and member filtering.",
       },
       {
         key: "orders",

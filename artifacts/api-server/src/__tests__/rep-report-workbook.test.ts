@@ -195,7 +195,7 @@ const CORE_SHEETS = [
 
 async function wbFromBuffer(buf: Buffer): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(buf as Parameters<typeof wb.xlsx.load>[0]);
+  await wb.xlsx.load(buf as unknown as Parameters<typeof wb.xlsx.load>[0]);
   return wb;
 }
 
@@ -227,7 +227,7 @@ describe("buildRepReportWorkbook — secondary basis", () => {
   it("builds without throwing", async () => {
     const report = makeFixtureReport();
     const result = await buildRepReportWorkbook(report, "secondary");
-    buf = (await result.xlsx.writeBuffer()) as Buffer;
+    buf = (await result.xlsx.writeBuffer()) as unknown as Buffer;
     wb = await wbFromBuffer(buf);
   });
 
@@ -314,7 +314,7 @@ describe("buildRepReportWorkbook — primary basis with primary data", () => {
   it("builds without throwing", async () => {
     const report = makePrimaryReport();
     const result = await buildRepReportWorkbook(report, "primary");
-    buf = (await result.xlsx.writeBuffer()) as Buffer;
+    buf = (await result.xlsx.writeBuffer()) as unknown as Buffer;
     wb = await wbFromBuffer(buf);
   });
 
@@ -350,7 +350,7 @@ describe("buildRepReportWorkbook — primary basis without primary data", () => 
   it("builds without throwing", async () => {
     const report = makeFixtureReport();
     const result = await buildRepReportWorkbook(report, "primary");
-    const buf = (await result.xlsx.writeBuffer()) as Buffer;
+    const buf = (await result.xlsx.writeBuffer()) as unknown as Buffer;
     wb = await wbFromBuffer(buf);
   });
 
@@ -411,7 +411,7 @@ describe("buildRepReportWorkbook — edge cases", () => {
       hasTeam: true,
     };
     const wb = await buildRepReportWorkbook(report, "secondary");
-    const buf = (await wb.xlsx.writeBuffer()) as Buffer;
+    const buf = (await wb.xlsx.writeBuffer()) as unknown as Buffer;
     const loaded = await wbFromBuffer(buf);
     const v = cellValue(loaded, "Cover", 3, 2);
     expect(String(v)).toContain("Own + Team");
