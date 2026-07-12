@@ -1,0 +1,42 @@
+{
+  "fy": "2026-27",
+
+  "roster":            "1Nb8gRcdzY-iambAzwExTmeVY_ob6vnQ2",
+  "target_master":     "1ZLok3_8AZHdfrUm4T2lJmonAjngQFz4TuNLkHtU3p2I",
+  "rate_list":         "1njO-srsS29qiE4t45-zr5njbB7R2Zb-oSnv2NL1ONY4",
+  "group_index":       "1g-4_lDCeXQfUmp-VQ_mEWXQJyLMJXUGmRwGgughYHFY",
+
+  "order_sheet_26_27":       "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A",
+  "sale_sheet_26_27":        "19LQGpkbZiecGaXdBvl48rPZT2LUz3sKekeKX5fHu7Ps",
+  "sale_26_27":              "1rW9fvrdcmTy7Yd6RVV5dVpvZQ5knZMeKoMx8enZ6j24",
+  "state_head_sale_26_27":   "1QIpcfgOVCFjcCmgU_DXKn8h7Bfa8rm2q2wB2HneTvKs",
+  "state_head_sale_summary": "1qs2R4Nb1Za_BCPcWY6EzrC5ZsGtWJgRtZFJMFe4033w",
+  "state_head_wise_sale":    "14QYZN6JjWGZXM6dtkGs2uGC1STsN7lSS",
+  "party_os_payment_26_27":  "1oHFpXqVDPRF3Vi3WV9MdNcxkHNjgytLPxXUQgM6o1ok",
+  "sale_comparison_25_27":   "16fFG3xkDt3rlGbiHKSIaj38hi7c3K8gHXm8G2dCTcvU",
+
+  "state_head_workbooks_26_27": {
+    "Sandeep Dadheech":  "18zT-a0a8d7rDIy2UpJGWyrWivFGKkBwdyRocPzgg8EA",
+    "Syed Aqil Rizvi":   "19mz3gsT70ai4T2YYT029gZBKfz-YewQjT14sI-wshzI",
+    "Anant Singh":       "1G3z_gOk5JR8yFmcVCadFCgpltjY1y0pI4ZBmGwrF2pU",
+    "Biju C.O":          "1bq6XgCIt6_-tBW3m3c_quqz1Hrbg1xVA-0X8Ve-E4H8",
+    "Lalan Kumar":       "1ZkddXZhhC3OpK4fUGiDf64LrlAKrXIUGW4NzgxaYaJo",
+    "Pawan Sharma":      "1H7zfz2BQyy5n5SJAAKfm9S3VJw89LF8dcU9GVgk-J8Q",
+    "Nasir Hussain Khan":"1OI6q1QYaoSfY7fC4QcwvYeGEV6q6CRX6hTlFaVFmqFM",
+    "Sulinder Pal":      "1zX1UEQAiAOsEafRx9WKchi2BGbsrxp5_k11TXAn_p6U",
+    "Sunil Patel":       "1nOEDqVQ0X1eYSbDhq-9x5yoBWTFJm9VpX9tjptDV4m8",
+    "Tamil Nadu":        "1kATkh-w4zebYIzlyoK0_GzPR1DD1n0ryEow4Ng26bH8",
+    "AP Telangana":      "1km-8e4Jw3X_1BoKJDeSTps6h9j3_o7m0g1TdrQzkVA4",
+    "PROJECT":           "12rxWN5Wyh3J_z5PyLpyGFWkIibzlkHfsD2VDkt-NXFI",
+    "OTHER":             "1ITKHwizpmqMNPA5D0eI2dJhzGhTGra0flEcn2fcSDew"
+  },
+
+  "folders": {
+    "state_head_workbooks":     "1xjBSMrF43omlScNQTavwunSt2oQbtGrq",
+    "team_member_report":       "1-guQptN9S4NrW024jGizKo0V4nFDtHMv",
+    "secondary_order_booking":  "1Ww2B1FKjpshRTcOa_F7OUBiBsBzpVCPZ"
+  },
+
+  "secondary_order_booking_26_27": null,
+  "hr_sfa_dashboard_26_27":        null
+}
