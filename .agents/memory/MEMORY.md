@@ -7,3 +7,4 @@
 - [Mgmt report sale pipeline](mgmt-report-sale-pipeline.md) — register tabs detected by content not title; per-member Sale needs the Party TM Map bridge; anchor Anant FY26-27 2,57,08,142/245/29.
 - [SAP primary-sales pipeline](sap-primary-sales.md) — FY26-27 monthly SAP xlsx uploads; month derived from invoice date; verified-gated cutover; cross-foot by construction; rate list never supplies cost/MRP.
 - [api-zod types re-export conflict](prayag-api-zod-types.md) — never re-export ./generated/types from api-zod/src/index.ts; causes TS2308 when Zod schema constants and TypeScript types share names.
+- [Prayag historical roster gap](prayag-historical-roster-gap.md) — for FY<current, departed TMs in order file are recovered via target-master stateHead supplement in assembleRows; 40 zero-booking members require a historical roster file.

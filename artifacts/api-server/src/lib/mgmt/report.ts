@@ -264,6 +264,7 @@ export type NameMatchInfo = {
   matched: number;
   matchRate: number; // matched / fileNames, 0..1
   unmatchedFromFile: string[]; // order-booking names with no roster match
+  unmatchedFromFileWithAmounts: Array<{ name: string; amount: number }>; // same, with values
   unmatchedFromRoster: string[]; // roster names with no rows in the file
 };
 
@@ -341,16 +342,66 @@ export async function assembleRows(
     oldNew: m.dojSerial != null && m.dojSerial >= fyStart ? "New" : "Old",
     target: targetMap.get(m.normKey) ?? null,
   }));
+  // Supplement with historical TMs: those present in the current FY order file
+  // who have no match in the active roster (departed employees). Their stateHead
+  // is resolved from the target master for this FY; without it we cannot assign
+  // them to a head so they are skipped rather than dumped into an Unknown bucket.
+  if (agg) {
+    const rosterNormKeys = new Set(members.map((m) => m.normKey));
+    for (const [key, tm] of agg.perTm) {
+      if (rosterNormKeys.has(key)) continue;
+      const targetRow = targetMap.get(key);
+      const stateHead = targetRow?.stateHead ?? "";
+      if (!stateHead) continue; // cannot assign to a head — skip
+      const syntheticMember: RosterMember = {
+        stateHead,
+        state: "",
+        name: tm.displayName,
+        normKey: key,
+        workingState: "",
+        headquarter: "",
+        dojSerial: null,
+        contactNumber: "",
+        weekOff: "",
+        marketHours: "",
+        monthlyCtc: null,
+        leftDateSerial: null,
+        activeLeft: "Left",
+        channel: "",
+      };
+      // Respect any active state scope filter. Departed TMs have no known
+      // state, so they are excluded when a state filter is active.
+      if (scope && !scope.has(normState(syntheticMember.state))) continue;
+      rows.push({
+        m: syntheticMember,
+        orders: computeOrderStats(
+          syntheticMember,
+          filters.fy,
+          agg,
+          prior,
+          firstSeen,
+          filters.monthFrom,
+          filters.monthTo,
+        ),
+        priorAmount: prior ? (prior.perTm.get(key)?.amount ?? 0) : null,
+        priorSaleAmount: prior ? (prior.perTm.get(key)?.saleAmount ?? 0) : null,
+        oldNew: "Old",
+        target: targetRow ?? null,
+      });
+    }
+  }
   // Name-match diagnostics against the FULL roster (not the filtered scope)
   // for every order file that feeds columns in this report.
   const rosterKeys = new Set(roster.members.map((m) => m.normKey));
   const nameMatches: NameMatchInfo[] = [];
   for (const fileAgg of [agg, prior]) {
     if (!fileAgg) continue;
-    const unmatchedFromFile = [...fileAgg.perTm.entries()]
+    // Sort unmatched by descending amount so the biggest gaps surface first.
+    const unmatchedFromFileWithAmounts = [...fileAgg.perTm.entries()]
       .filter(([key]) => !rosterKeys.has(key))
-      .map(([, v]) => v.displayName)
-      .sort();
+      .map(([, v]) => ({ name: v.displayName, amount: Math.round(v.amount) }))
+      .sort((a, b) => b.amount - a.amount);
+    const unmatchedFromFile = unmatchedFromFileWithAmounts.map((e) => e.name);
     const matched = fileAgg.perTm.size - unmatchedFromFile.length;
     const unmatchedFromRoster = roster.members
       .filter((m) => !fileAgg.perTm.has(m.normKey))
@@ -362,6 +413,7 @@ export async function assembleRows(
       matched,
       matchRate: fileAgg.perTm.size > 0 ? matched / fileAgg.perTm.size : 1,
       unmatchedFromFile,
+      unmatchedFromFileWithAmounts,
       unmatchedFromRoster,
     };
     nameMatches.push(info);

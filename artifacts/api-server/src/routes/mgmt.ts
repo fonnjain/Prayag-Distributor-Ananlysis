@@ -207,7 +207,7 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
       assembleRows(filters),
       loadHrSfaDashboard().catch((): Map<string, HrSfaRecord> => new Map()),
     ]);
-    const { rows, ordersAvailable, targetsAvailable, rosterSource, orderStatus } = assembled;
+    const { rows, ordersAvailable, targetsAvailable, rosterSource, orderStatus, nameMatches } = assembled;
 
     // Load head-level Sale (primary dispatch, Taxable Value) from the appropriate
     // per-FY sheet. Sale is head-level only — member saleAmount stays null so the
@@ -306,6 +306,7 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         ...(headSales ? { headSales } : {}),
         saleSource: saleSourceLabel,
         orderBookingSource: ordersAvailable ? `Secondary Order Booking ${fy}` : null,
+        orderBookingNameMatches: nameMatches,
       },
     });
   } catch (err) {
