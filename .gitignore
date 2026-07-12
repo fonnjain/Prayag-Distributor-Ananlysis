@@ -50,3 +50,7 @@ Thumbs.db
 
 # Uploaded fallback copies of source workbooks (never committed)
 artifacts/api-server/uploads/
+
+# Playwright test output (run artefacts, not source)
+**/test-results/
+**/playwright-report/
