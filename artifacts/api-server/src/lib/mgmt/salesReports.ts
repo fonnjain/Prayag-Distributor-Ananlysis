@@ -533,24 +533,41 @@ export async function buildSalesReports(
   const byGroup = comparisonRows(thisGroupMap, priorGroupMap, totalSec);
   const bySegment = comparisonRows(thisSegMap, priorSegMap, totalSec);
 
-  // Report 2: State × Month growth grid (perStatePerMonth across team members).
+  // Report 2: State × Month growth grid.
+  // Primary source: perStatePerMonth (requires a State/Territory column in the order file).
+  // Fallback: when perStatePerMonth is absent (no State column), allocate the TM's monthly
+  // totals (tm.monthAmount) to the TM's roster state — the same fallback buildPartyByState uses.
   const stateMonthThis = new Map<string, number[]>();
   const stateMonthPrior = new Map<string, number[]>();
   for (const k of teamKeys) {
+    const tmState = stateOf.get(k) ?? "";
     const tm = orderFile?.perTm.get(k);
     if (tm) {
-      for (const [state, months] of tm.perStatePerMonth) {
-        let arr = stateMonthThis.get(state);
-        if (!arr) { arr = new Array(12).fill(0) as number[]; stateMonthThis.set(state, arr); }
-        for (let i = 0; i < 12; i++) arr[i] += months[i] ?? 0;
+      if (tm.perStatePerMonth.size > 0) {
+        for (const [state, months] of tm.perStatePerMonth) {
+          let arr = stateMonthThis.get(state);
+          if (!arr) { arr = new Array(12).fill(0) as number[]; stateMonthThis.set(state, arr); }
+          for (let i = 0; i < 12; i++) arr[i] += months[i] ?? 0;
+        }
+      } else if (tmState) {
+        // No per-state column in file — fall back to roster state for monthly totals.
+        let arr = stateMonthThis.get(tmState);
+        if (!arr) { arr = new Array(12).fill(0) as number[]; stateMonthThis.set(tmState, arr); }
+        for (let i = 0; i < 12; i++) arr[i] += tm.monthAmount[i] ?? 0;
       }
     }
     const tmP = priorOrderFile?.perTm.get(k);
     if (tmP) {
-      for (const [state, months] of tmP.perStatePerMonth) {
-        let arr = stateMonthPrior.get(state);
-        if (!arr) { arr = new Array(12).fill(0) as number[]; stateMonthPrior.set(state, arr); }
-        for (let i = 0; i < 12; i++) arr[i] += months[i] ?? 0;
+      if (tmP.perStatePerMonth.size > 0) {
+        for (const [state, months] of tmP.perStatePerMonth) {
+          let arr = stateMonthPrior.get(state);
+          if (!arr) { arr = new Array(12).fill(0) as number[]; stateMonthPrior.set(state, arr); }
+          for (let i = 0; i < 12; i++) arr[i] += months[i] ?? 0;
+        }
+      } else if (tmState) {
+        let arr = stateMonthPrior.get(tmState);
+        if (!arr) { arr = new Array(12).fill(0) as number[]; stateMonthPrior.set(tmState, arr); }
+        for (let i = 0; i < 12; i++) arr[i] += tmP.monthAmount[i] ?? 0;
       }
     }
   }
