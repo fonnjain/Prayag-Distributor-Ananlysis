@@ -19,6 +19,7 @@ import {
   type SalesRepReport,
   type RepPartyRow,
   type ItemCodeRow,
+  type PartyGroupRow,
 } from "@workspace/api-client-react";
 
 // -------------------------------------------------------------------------
@@ -661,6 +662,204 @@ function MonthlyTable({ report }: { report: SalesRepReport }) {
 }
 
 // -------------------------------------------------------------------------
+// Report 2: State × Month growth grid
+// -------------------------------------------------------------------------
+
+const MONTH_ABBR = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
+
+function getFiscalMonthLabels(fy: string): string[] {
+  const startYear = parseInt(fy.split("-")[0], 10);
+  return MONTH_ABBR.map((name, i) => {
+    const yr = i < 9 ? startYear : startYear + 1;
+    return `${name} '${String(yr).slice(2)}`;
+  });
+}
+
+type StateMonthItem = SalesRepReport["secondary"]["byStateByMonth"][number];
+
+function StateMonthGrid({
+  rows,
+  fy,
+  priorFy,
+}: {
+  rows: StateMonthItem[];
+  fy: string;
+  priorFy: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const LIMIT = 15;
+  const displayRows = expanded ? rows : rows.slice(0, LIMIT);
+  const monthLabels = getFiscalMonthLabels(fy);
+  const grandTotal = rows.reduce((a, r) => a + r.thisFy, 0);
+  const grandTotalPrior = rows.reduce((a, r) => a + r.lastFy, 0);
+  const grandMonths = MONTH_ABBR.map((_, i) =>
+    rows.reduce((a, r) => a + (r.months[i] ?? 0), 0),
+  );
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium">
+          By State — Monthly ({fy} vs {priorFy})
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground px-6 pb-4">No state/month data available.</p>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs whitespace-nowrap">
+                <thead>
+                  <tr className="text-muted-foreground border-b border-border/40 bg-muted/30">
+                    <th className="text-left font-medium py-2 px-4 sticky left-0 bg-muted/40 z-10">State</th>
+                    <th className="text-right font-medium py-2 px-3">{fy}</th>
+                    <th className="text-right font-medium py-2 px-3">{priorFy}</th>
+                    <th className="text-right font-medium py-2 px-3">Growth</th>
+                    {monthLabels.map((m) => (
+                      <th key={m} className="text-right font-medium py-2 px-2">{m}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayRows.map((r) => (
+                    <tr key={r.state} className="border-b border-border/20 last:border-0 hover:bg-muted/20">
+                      <td className="py-1.5 px-4 sticky left-0 bg-background z-10">{r.state}</td>
+                      <td className="text-right tabular-nums py-1.5 px-3">{formatCr(r.thisFy)}</td>
+                      <td className="text-right tabular-nums py-1.5 px-3 text-muted-foreground">
+                        {formatCr(r.lastFy)}
+                      </td>
+                      <td className="text-right py-1.5 px-3">
+                        <GrowthCell pct={r.growthPct} />
+                      </td>
+                      {r.months.map((v, i) => (
+                        <td key={i} className="text-right tabular-nums py-1.5 px-2">
+                          {v > 0 ? formatCr(v) : <span className="text-muted-foreground/40">-</span>}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-border/40 bg-muted/30 font-medium">
+                    <td className="py-1.5 px-4 sticky left-0 bg-muted/30 z-10">Total</td>
+                    <td className="text-right tabular-nums py-1.5 px-3">{formatCr(grandTotal)}</td>
+                    <td className="text-right tabular-nums py-1.5 px-3 text-muted-foreground">
+                      {formatCr(grandTotalPrior)}
+                    </td>
+                    <td className="py-1.5 px-3" />
+                    {grandMonths.map((v, i) => (
+                      <td key={i} className="text-right tabular-nums py-1.5 px-2">
+                        {v > 0 ? formatCr(v) : <span className="text-muted-foreground/40">-</span>}
+                      </td>
+                    ))}
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            {rows.length > LIMIT && !expanded && (
+              <button
+                className="w-full py-2 text-xs text-muted-foreground hover:text-foreground border-t border-border/30"
+                onClick={() => setExpanded(true)}
+              >
+                Show all {rows.length} states
+              </button>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// -------------------------------------------------------------------------
+// Report 7: Party × Group matrix
+// -------------------------------------------------------------------------
+
+function PartyGroupMatrix({ rows }: { rows: PartyGroupRow[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const LIMIT = 30;
+  const displayRows = expanded ? rows : rows.slice(0, LIMIT);
+  const groupCols = Array.from(
+    new Set(rows.flatMap((r) => Object.keys(r.byGroup))),
+  ).sort();
+  const grandTotal = rows.reduce((a, r) => a + r.total, 0);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium">Party by Group</CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground px-6 pb-4">No party/group data available.</p>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs whitespace-nowrap">
+                <thead>
+                  <tr className="text-muted-foreground border-b border-border/40 bg-muted/30">
+                    <th className="text-left font-medium py-2 px-4 sticky left-0 bg-muted/40 z-10">Party</th>
+                    <th className="text-left font-medium py-2 px-3">State</th>
+                    <th className="text-right font-medium py-2 px-3">Total</th>
+                    {groupCols.map((g) => (
+                      <th key={g} className="text-right font-medium py-2 px-2">{g}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayRows.map((r, i) => (
+                    <tr key={`${r.party}-${i}`} className="border-b border-border/20 last:border-0 hover:bg-muted/20">
+                      <td className="py-1.5 px-4 max-w-[180px] truncate sticky left-0 bg-background z-10">
+                        {r.party}
+                      </td>
+                      <td className="py-1.5 px-3 text-muted-foreground">{r.state || "-"}</td>
+                      <td className="text-right tabular-nums py-1.5 px-3">{formatCr(r.total)}</td>
+                      {groupCols.map((g) => {
+                        const v = r.byGroup[g] ?? 0;
+                        return (
+                          <td key={g} className="text-right tabular-nums py-1.5 px-2">
+                            {v > 0 ? formatCr(v) : <span className="text-muted-foreground/40">-</span>}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-border/40 bg-muted/30 font-medium">
+                    <td className="py-1.5 px-4 sticky left-0 bg-muted/30 z-10" colSpan={2}>
+                      Grand Total
+                    </td>
+                    <td className="text-right tabular-nums py-1.5 px-3">{formatCr(grandTotal)}</td>
+                    {groupCols.map((g) => {
+                      const colTotal = rows.reduce((a, r) => a + (r.byGroup[g] ?? 0), 0);
+                      return (
+                        <td key={g} className="text-right tabular-nums py-1.5 px-2">
+                          {colTotal > 0 ? formatCr(colTotal) : <span className="text-muted-foreground/40">-</span>}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            {rows.length > LIMIT && !expanded && (
+              <button
+                className="w-full py-2 text-xs text-muted-foreground hover:text-foreground border-t border-border/30"
+                onClick={() => setExpanded(true)}
+              >
+                Show all {rows.length} parties
+              </button>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// -------------------------------------------------------------------------
 // State selector
 // -------------------------------------------------------------------------
 
@@ -922,12 +1121,19 @@ export function SalesReports({
         </div>
       </div>
 
-      {/* 2: By State */}
+      {/* 2: By State (YoY totals) */}
       <ReportTable
         title="By State"
         rows={sec.byState}
         thisFyLabel={report.fy}
         lastFyLabel={report.priorFy}
+      />
+
+      {/* 2: By State — Monthly grid */}
+      <StateMonthGrid
+        rows={sec.byStateByMonth}
+        fy={report.fy}
+        priorFy={report.priorFy}
       />
 
       {/* 3A/3B/3C: State cross-dimensional tables */}
@@ -952,6 +1158,13 @@ export function SalesReports({
                 thisFyLabel={report.fy}
                 lastFyLabel={report.priorFy}
               />
+              {/* 3A: By Group — filtered to selected state */}
+              <ReportTable
+                title={`By Group — ${activeState}`}
+                rows={sec.byGroupByState[activeState] ?? []}
+                thisFyLabel={report.fy}
+                lastFyLabel={report.priorFy}
+              />
             </>
           )}
         </div>
@@ -964,7 +1177,7 @@ export function SalesReports({
         basis={basis}
       />
 
-      {/* 6: By Group */}
+      {/* 6: By Group (all states) */}
       <ReportTable
         title="By Group"
         rows={sec.byGroup}
@@ -980,7 +1193,10 @@ export function SalesReports({
         lastFyLabel={report.priorFy}
       />
 
-      {/* 7: Parties */}
+      {/* 7: Party × Group matrix */}
+      <PartyGroupMatrix rows={sec.partyGroupMatrix} />
+
+      {/* Parties */}
       <SectionHeading title="Parties" />
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <ReportTable

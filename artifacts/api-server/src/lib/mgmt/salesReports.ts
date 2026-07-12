@@ -55,6 +55,23 @@ export type RepPartyRow = {
   priorAmount: number;
 };
 
+export type StateMonthRow = {
+  state: string;
+  thisFy: number;
+  lastFy: number;
+  diff: number;
+  growthPct: number | null;
+  months: number[];
+  monthsPrior: number[];
+};
+
+export type PartyGroupRow = {
+  party: string;
+  state: string;
+  total: number;
+  byGroup: Record<string, number>;
+};
+
 export type PrimaryReport = {
   available: boolean;
   reason?: string;
@@ -88,19 +105,14 @@ export type SalesRepReport = {
 
   monthly: SalesRepMonthRow[];
 
-  // Available states for the 3A / 3B / 3C selectors (sorted).
   stateOptions: string[];
 
   secondary: {
     tiles: DeepDive["tiles"];
-    // 2: By State (YoY)
     byState: DeepRow[];
-    // 3A: All parties for each state. Filter client-side to selected state.
     partyByState: Record<string, RepPartyRow[]>;
-    // 3B: Segments for each state (from perPartyPerSegment + group index).
     segmentByState: Record<string, DeepRow[]>;
     byGroup: DeepRow[];
-    // 3C: By Segment (global, filterable client-side)
     bySegment: DeepRow[];
     parties: {
       top: DeepRow[];
@@ -115,8 +127,10 @@ export type SalesRepReport = {
       segmentsUp: DeepRow[];
       segmentsDown: DeepRow[];
     };
-    // Sale & Collection (Report 9): collection is always null until ingested.
     saleCollection: { sale: number; saleLast: number; collection: null };
+    byStateByMonth: StateMonthRow[];
+    byGroupByState: Record<string, DeepRow[]>;
+    partyGroupMatrix: PartyGroupRow[];
   };
 
   primary: PrimaryReport;
@@ -519,6 +533,86 @@ export async function buildSalesReports(
   const byGroup = comparisonRows(thisGroupMap, priorGroupMap, totalSec);
   const bySegment = comparisonRows(thisSegMap, priorSegMap, totalSec);
 
+  // Report 2: State × Month growth grid (perStatePerMonth across team members).
+  const stateMonthThis = new Map<string, number[]>();
+  const stateMonthPrior = new Map<string, number[]>();
+  for (const k of teamKeys) {
+    const tm = orderFile?.perTm.get(k);
+    if (tm) {
+      for (const [state, months] of tm.perStatePerMonth) {
+        let arr = stateMonthThis.get(state);
+        if (!arr) { arr = new Array(12).fill(0) as number[]; stateMonthThis.set(state, arr); }
+        for (let i = 0; i < 12; i++) arr[i] += months[i] ?? 0;
+      }
+    }
+    const tmP = priorOrderFile?.perTm.get(k);
+    if (tmP) {
+      for (const [state, months] of tmP.perStatePerMonth) {
+        let arr = stateMonthPrior.get(state);
+        if (!arr) { arr = new Array(12).fill(0) as number[]; stateMonthPrior.set(state, arr); }
+        for (let i = 0; i < 12; i++) arr[i] += months[i] ?? 0;
+      }
+    }
+  }
+  const byStateByMonth: StateMonthRow[] = stateOptions
+    .map((state) => {
+      const months = stateMonthThis.get(state) ?? (new Array(12).fill(0) as number[]);
+      const monthsPrior = stateMonthPrior.get(state) ?? (new Array(12).fill(0) as number[]);
+      const thisFy = months.reduce((a, v) => a + v, 0);
+      const lastFy = monthsPrior.reduce((a, v) => a + v, 0);
+      const diff = thisFy - lastFy;
+      const growthPct = lastFy > 0 ? round1((diff / Math.abs(lastFy)) * 100) : null;
+      return { state, thisFy, lastFy, diff, growthPct, months, monthsPrior };
+    })
+    .filter((r) => r.thisFy > 0 || r.lastFy > 0);
+
+  // Report 3A: Group-wise by State (map segmentByState rows to groups via group index).
+  const groupIndex = await loadGroupIndex();
+  const byGroupByState: Record<string, DeepRow[]> = {};
+  for (const [state, segRows] of Object.entries(segmentByState)) {
+    const thisGrpMap = new Map<string, number>();
+    const priorGrpMap = new Map<string, number>();
+    let stateTotal = 0;
+    for (const row of segRows) {
+      const group = canonicalGroup(groupIndex, row.label) ?? "Unmapped";
+      thisGrpMap.set(group, (thisGrpMap.get(group) ?? 0) + row.thisFy);
+      priorGrpMap.set(group, (priorGrpMap.get(group) ?? 0) + row.lastFy);
+      stateTotal += row.thisFy;
+    }
+    byGroupByState[state] = comparisonRows(thisGrpMap, priorGrpMap, stateTotal);
+  }
+
+  // Report 7: Party × Group matrix (perPartyPerSegment mapped to canonical groups).
+  const partyGroupAccum = new Map<string, {
+    name: string; state: string; byGroup: Map<string, number>; total: number;
+  }>();
+  for (const k of teamKeys) {
+    const tm = orderFile?.perTm.get(k);
+    if (!tm) continue;
+    const tmState = stateOf.get(k) ?? "";
+    for (const [rid, segMap] of tm.perPartyPerSegment) {
+      const state = tm.partyState.get(rid) || tmState;
+      let entry = partyGroupAccum.get(rid);
+      if (!entry) {
+        entry = { name: rid, state, byGroup: new Map(), total: 0 };
+        partyGroupAccum.set(rid, entry);
+      }
+      for (const [seg, amt] of segMap) {
+        const group = canonicalGroup(groupIndex, seg) ?? "Unmapped";
+        entry.byGroup.set(group, (entry.byGroup.get(group) ?? 0) + amt);
+        entry.total += amt;
+      }
+    }
+  }
+  const partyGroupMatrix: PartyGroupRow[] = [...partyGroupAccum.values()]
+    .sort((a, b) => b.total - a.total)
+    .map(({ name, state, total, byGroup }) => ({
+      party: name,
+      state,
+      total,
+      byGroup: Object.fromEntries(byGroup),
+    }));
+
   // Sale & Collection: Sale = this FY net secondary total, Collection = pending.
   const saleTotal = dive.available ? dive.tiles.netOrderBooked : 0;
   const saleTotalPrior = dive.available ? dive.tiles.netOrderBookedLast : 0;
@@ -543,6 +637,9 @@ export async function buildSalesReports(
       saleLast: saleTotalPrior,
       collection: null as null,
     },
+    byStateByMonth,
+    byGroupByState,
+    partyGroupMatrix,
   };
 
   // Reconciliation — secondary: rep rollup vs file total.

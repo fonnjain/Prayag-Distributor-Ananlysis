@@ -262,6 +262,15 @@ export interface ItemCodeRow {
   amount: number;
 }
 
+export type PartyGroupRowByGroup = {[key: string]: number};
+
+export interface PartyGroupRow {
+  party: string;
+  state: string;
+  total: number;
+  byGroup: PartyGroupRowByGroup;
+}
+
 export type SalesRepReportScope = typeof SalesRepReportScope[keyof typeof SalesRepReportScope];
 
 
@@ -322,6 +331,21 @@ export type SalesRepReportSecondarySaleCollection = {
   collection?: number | null;
 };
 
+export type SalesRepReportSecondaryByStateByMonthItem = {
+  state: string;
+  thisFy: number;
+  lastFy: number;
+  diff: number;
+  growthPct: number | null;
+  months: number[];
+  monthsPrior: number[];
+};
+
+/**
+ * Report 3A — State to group comparison rows.
+ */
+export type SalesRepReportSecondaryByGroupByState = {[key: string]: DeepRow[]};
+
 export type SalesRepReportSecondary = {
   tiles: SalesRepReportSecondaryTiles;
   byState: DeepRow[];
@@ -334,6 +358,12 @@ export type SalesRepReportSecondary = {
   parties: SalesRepReportSecondaryParties;
   movers: SalesRepReportSecondaryMovers;
   saleCollection: SalesRepReportSecondarySaleCollection;
+  /** Report 2 — State totals with month-by-month columns and growth vs prior FY. */
+  byStateByMonth: SalesRepReportSecondaryByStateByMonthItem[];
+  /** Report 3A — State to group comparison rows. */
+  byGroupByState: SalesRepReportSecondaryByGroupByState;
+  /** Report 7 — Party by Group matrix. */
+  partyGroupMatrix: PartyGroupRow[];
 };
 
 export type SalesRepReportPrimary = {

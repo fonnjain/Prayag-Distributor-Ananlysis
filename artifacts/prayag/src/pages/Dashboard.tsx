@@ -12,7 +12,6 @@ import Growth from "@/components/dashboard/Growth";
 import Analyst from "@/components/dashboard/Analyst";
 import MgmtReports from "@/components/dashboard/MgmtReports";
 import Targets from "@/components/dashboard/Targets";
-import SalesPeople from "@/components/dashboard/SalesPeople";
 import SalesImport from "@/components/dashboard/SalesImport";
 import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
@@ -27,7 +26,6 @@ const AREAS = [
   { id: "growth", label: "Growth", icon: LineChart, component: Growth },
   { id: "analyst", label: "AI Analyst", icon: Bot, component: Analyst },
   { id: "reports", label: "Reports", icon: FileSpreadsheet, component: MgmtReports },
-  { id: "sales", label: "Sales", icon: Users, component: SalesPeople },
   { id: "targets", label: "Targets", icon: Target, component: Targets },
   { id: "sales-import", label: "Sales Import", icon: UploadCloud, component: SalesImport },
   { id: "sources", label: "Data Sources", icon: Database, component: DataSources },
@@ -89,6 +87,14 @@ export default function Dashboard() {
         </div>
         
         <nav className="flex-1 px-4 py-6 md:py-2 space-y-1 overflow-y-auto">
+          <button
+            onClick={() => { setLocation("/sales"); setMobileMenuOpen(false); }}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <Users className="w-4 h-4 opacity-70" />
+            Sales
+          </button>
+          <div className="pt-1 pb-1 border-b border-border/30" />
           {AREAS.map((area) => {
             const Icon = area.icon;
             const isActive = activeArea === area.id;

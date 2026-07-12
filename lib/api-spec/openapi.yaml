@@ -1260,6 +1260,16 @@ components:
         code: { type: string }
         description: { type: string }
         amount: { type: number }
+    PartyGroupRow:
+      type: object
+      required: [party, state, total, byGroup]
+      properties:
+        party: { type: string }
+        state: { type: string }
+        total: { type: number }
+        byGroup:
+          type: object
+          additionalProperties: { type: number }
     SalesRepReport:
       type: object
       required: [fy, priorFy, repKey, repName, scope, hasTeam, available, basis, monthly, stateOptions, secondary, primary, reconciliation]
@@ -1282,7 +1292,7 @@ components:
           description: Sorted list of states for the 3A/3B/3C state selector.
         secondary:
           type: object
-          required: [tiles, byState, partyByState, segmentByState, byGroup, bySegment, parties, movers, saleCollection]
+          required: [tiles, byState, partyByState, segmentByState, byGroup, bySegment, parties, movers, saleCollection, byStateByMonth, byGroupByState, partyGroupMatrix]
           properties:
             tiles:
               type: object
@@ -1357,6 +1367,34 @@ components:
                 sale: { type: number }
                 saleLast: { type: number }
                 collection: { type: number, nullable: true }
+            byStateByMonth:
+              type: array
+              description: Report 2 — State totals with month-by-month columns and growth vs prior FY.
+              items:
+                type: object
+                required: [state, thisFy, lastFy, diff, growthPct, months, monthsPrior]
+                properties:
+                  state: { type: string }
+                  thisFy: { type: number }
+                  lastFy: { type: number }
+                  diff: { type: number }
+                  growthPct: { type: number, nullable: true }
+                  months:
+                    type: array
+                    items: { type: number }
+                  monthsPrior:
+                    type: array
+                    items: { type: number }
+            byGroupByState:
+              type: object
+              additionalProperties:
+                type: array
+                items: { $ref: "#/components/schemas/DeepRow" }
+              description: Report 3A — State to group comparison rows.
+            partyGroupMatrix:
+              type: array
+              items: { $ref: "#/components/schemas/PartyGroupRow" }
+              description: Report 7 — Party by Group matrix.
         primary:
           type: object
           required: [available, headTotal, bridgedToAnyTmAmount, totalBridged, bridgeCoverage, bridgedParties, unbridgedParties, byItemCode]

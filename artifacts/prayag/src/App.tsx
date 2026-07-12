@@ -4,6 +4,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "next-themes";
 import Dashboard, { AREA_IDS } from "@/pages/Dashboard";
+import SalesPage from "@/pages/SalesPage";
 import NotFound from "@/pages/not-found";
 import { DashboardProvider } from "@/data/dashboard-context";
 
@@ -19,6 +20,7 @@ const queryClient = new QueryClient({
 function Router() {
   return (
     <Switch>
+      <Route path="/sales" component={SalesPage} />
       <Route path="/" component={Dashboard} />
       <Route path="/:area">
         {(params) =>

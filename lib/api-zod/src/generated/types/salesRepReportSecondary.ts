@@ -6,6 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { DeepRow } from './deepRow';
+import type { PartyGroupRow } from './partyGroupRow';
+import type { SalesRepReportSecondaryByGroupByState } from './salesRepReportSecondaryByGroupByState';
+import type { SalesRepReportSecondaryByStateByMonthItem } from './salesRepReportSecondaryByStateByMonthItem';
 import type { SalesRepReportSecondaryMovers } from './salesRepReportSecondaryMovers';
 import type { SalesRepReportSecondaryParties } from './salesRepReportSecondaryParties';
 import type { SalesRepReportSecondaryPartyByState } from './salesRepReportSecondaryPartyByState';
@@ -25,4 +28,10 @@ export type SalesRepReportSecondary = {
   parties: SalesRepReportSecondaryParties;
   movers: SalesRepReportSecondaryMovers;
   saleCollection: SalesRepReportSecondarySaleCollection;
+  /** Report 2 — State totals with month-by-month columns and growth vs prior FY. */
+  byStateByMonth: SalesRepReportSecondaryByStateByMonthItem[];
+  /** Report 3A — State to group comparison rows. */
+  byGroupByState: SalesRepReportSecondaryByGroupByState;
+  /** Report 7 — Party by Group matrix. */
+  partyGroupMatrix: PartyGroupRow[];
 };

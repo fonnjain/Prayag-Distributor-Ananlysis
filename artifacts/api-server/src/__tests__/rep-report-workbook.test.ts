@@ -100,6 +100,18 @@ function makeFixtureReport(): SalesRepReport {
         segmentsDown: [deepRow("NUTRACEUTICALS", 400_000, 450_000)],
       },
       saleCollection: { sale: 1_650_000, saleLast: 1_500_000, collection: null },
+      byStateByMonth: [
+        { state: "MADHYA PRADESH", thisFy: 1_200_000, lastFy: 1_000_000, diff: 200_000, growthPct: 20.0, months: [1_200_000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], monthsPrior: [1_000_000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+        { state: "RAJASTHAN", thisFy: 600_000, lastFy: 650_000, diff: -50_000, growthPct: -7.69, months: [600_000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], monthsPrior: [650_000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+      ],
+      byGroupByState: {
+        "MADHYA PRADESH": [deepRow("OTC", 700_000, 600_000), deepRow("ETHICAL", 500_000, 400_000)],
+        "RAJASTHAN": [deepRow("OTC", 600_000, 650_000)],
+      },
+      partyGroupMatrix: [
+        { party: "Party Alpha", state: "MADHYA PRADESH", total: 700_000, byGroup: { OTC: 700_000 } },
+        { party: "Party Beta", state: "MADHYA PRADESH", total: 500_000, byGroup: { ETHICAL: 500_000 } },
+      ],
     },
 
     primary: {
@@ -180,10 +192,13 @@ const CORE_SHEETS = [
   "Cover",
   "Monthly Booking",
   "By State",
+  "By State Monthly",
   "By Party",
+  "By Group By State",
   "By Segment",
   "Item Code",
   "By Group",
+  "Party By Group",
   "Parties",
   "Movers",
   "Sale & Collection",

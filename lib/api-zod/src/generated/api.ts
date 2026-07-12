@@ -795,7 +795,31 @@ export const GetSalesPersonReportsResponse = zod.object({
   "sale": zod.number(),
   "saleLast": zod.number(),
   "collection": zod.number().nullish()
-})
+}),
+  "byStateByMonth": zod.array(zod.object({
+  "state": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "months": zod.array(zod.number()),
+  "monthsPrior": zod.array(zod.number())
+})).describe('Report 2 — State totals with month-by-month columns and growth vs prior FY.'),
+  "byGroupByState": zod.record(zod.string(), zod.array(zod.object({
+  "label": zod.string(),
+  "thisFy": zod.number(),
+  "lastFy": zod.number(),
+  "diff": zod.number(),
+  "growthPct": zod.number().nullable(),
+  "sharePct": zod.number().nullable(),
+  "flag": zod.enum(['new', 'old', 'churned']).nullish()
+}))).describe('Report 3A — State to group comparison rows.'),
+  "partyGroupMatrix": zod.array(zod.object({
+  "party": zod.string(),
+  "state": zod.string(),
+  "total": zod.number(),
+  "byGroup": zod.record(zod.string(), zod.number())
+})).describe('Report 7 — Party by Group matrix.')
 }),
   "primary": zod.object({
   "available": zod.boolean(),

@@ -11,7 +11,7 @@
 //  "Not available on Secondary" when basis=secondary.
 import ExcelJS from "exceljs";
 import { fyShort } from "./names.js";
-import type { SalesRepReport, PrimaryParty, ItemCodeRow, RepPartyRow } from "./salesReports.js";
+import type { SalesRepReport, PrimaryParty, ItemCodeRow, RepPartyRow, StateMonthRow, PartyGroupRow } from "./salesReports.js";
 import type { DeepRow } from "./salespeople.js";
 
 const HEADER_FILL: ExcelJS.Fill = {
@@ -372,6 +372,155 @@ function writePrimaryPartySheet(
   }
 }
 
+function writeStateMonthSheet(
+  wb: ExcelJS.Workbook,
+  rows: StateMonthRow[],
+  thisFyLabel: string,
+  priorFyLabel: string,
+): void {
+  const MONTHS = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
+  const ws = wb.addWorksheet("By State Monthly");
+  ws.views = [{ state: "frozen", xSplit: 1, ySplit: 1 }];
+
+  hdr(ws, 1, 1, "State", 22);
+  hdr(ws, 1, 2, `Total ${thisFyLabel}`, 16);
+  hdr(ws, 1, 3, `Total ${priorFyLabel}`, 16);
+  hdr(ws, 1, 4, "Growth %", 11);
+  MONTHS.forEach((m, i) => hdr(ws, 1, 5 + i, m, 12));
+
+  rows.forEach((r, ri) => {
+    const rowNum = ri + 2;
+    ws.getCell(rowNum, 1).value = r.state;
+    ws.getCell(rowNum, 2).value = Math.round(r.thisFy);
+    ws.getCell(rowNum, 2).numFmt = FMT_MONEY;
+    ws.getCell(rowNum, 3).value = Math.round(r.lastFy);
+    ws.getCell(rowNum, 3).numFmt = FMT_MONEY;
+    if (r.growthPct != null) {
+      ws.getCell(rowNum, 4).value = r.growthPct / 100;
+      ws.getCell(rowNum, 4).numFmt = FMT_PCT;
+    }
+    r.months.forEach((v, i) => {
+      if (v > 0) {
+        ws.getCell(rowNum, 5 + i).value = Math.round(v);
+        ws.getCell(rowNum, 5 + i).numFmt = FMT_MONEY;
+      }
+    });
+  });
+
+  if (rows.length > 0) {
+    const totalRow = rows.length + 2;
+    ws.getCell(totalRow, 1).value = "Grand Total";
+    ws.getCell(totalRow, 1).font = { bold: true };
+    ws.getCell(totalRow, 1).fill = TOTAL_FILL;
+    totalCell(ws, totalRow, 2, rows.reduce((a, r) => a + r.thisFy, 0), FMT_MONEY);
+    totalCell(ws, totalRow, 3, rows.reduce((a, r) => a + r.lastFy, 0), FMT_MONEY);
+    MONTHS.forEach((_, i) => {
+      const colTotal = rows.reduce((a, r) => a + (r.months[i] ?? 0), 0);
+      if (colTotal > 0) totalCell(ws, totalRow, 5 + i, colTotal, FMT_MONEY);
+    });
+  }
+}
+
+function writeGroupByStateSheet(
+  wb: ExcelJS.Workbook,
+  byGroupByState: Record<string, DeepRow[]>,
+  stateOptions: string[],
+  thisFyLabel: string,
+  priorFyLabel: string,
+): void {
+  const ws = wb.addWorksheet("By Group By State");
+  ws.views = [{ state: "frozen", ySplit: 2 }];
+  hdr(ws, 1, 1, "State", 22);
+  hdr(ws, 1, 2, "Group", 30);
+  hdr(ws, 1, 3, `Amount ${thisFyLabel}`, 16);
+  hdr(ws, 1, 4, `Amount ${priorFyLabel}`, 16);
+  hdr(ws, 1, 5, "Difference", 14);
+  hdr(ws, 1, 6, "Growth %", 11);
+  hdr(ws, 1, 7, "Share %", 11);
+
+  let rowNum = 2;
+  for (const state of stateOptions) {
+    const groups = byGroupByState[state] ?? [];
+    if (groups.length === 0) continue;
+    const stateTotal = groups.reduce((a, r) => a + r.thisFy, 0);
+
+    ws.mergeCells(rowNum, 1, rowNum, 7);
+    const stHdr = ws.getCell(rowNum, 1);
+    stHdr.value = state;
+    stHdr.font = { bold: true, size: 9 };
+    stHdr.fill = HEADER_FILL;
+    rowNum++;
+
+    groups.forEach((r) => {
+      ws.getCell(rowNum, 1).value = state;
+      ws.getCell(rowNum, 2).value = r.label;
+      ws.getCell(rowNum, 3).value = Math.round(r.thisFy);
+      ws.getCell(rowNum, 3).numFmt = FMT_MONEY;
+      ws.getCell(rowNum, 4).value = Math.round(r.lastFy);
+      ws.getCell(rowNum, 4).numFmt = FMT_MONEY;
+      ws.getCell(rowNum, 5).value = Math.round(r.diff);
+      ws.getCell(rowNum, 5).numFmt = FMT_MONEY;
+      if (r.growthPct != null) { ws.getCell(rowNum, 6).value = r.growthPct / 100; ws.getCell(rowNum, 6).numFmt = FMT_PCT; }
+      if (r.sharePct != null) { ws.getCell(rowNum, 7).value = r.sharePct / 100; ws.getCell(rowNum, 7).numFmt = FMT_PCT; }
+      rowNum++;
+    });
+
+    if (groups.length > 0) {
+      ws.getCell(rowNum, 2).value = "Total";
+      ws.getCell(rowNum, 2).font = { bold: true };
+      totalCell(ws, rowNum, 3, stateTotal, FMT_MONEY);
+      ws.getCell(rowNum, 1).fill = TOTAL_FILL;
+      ws.getCell(rowNum, 2).fill = TOTAL_FILL;
+      rowNum++;
+    }
+    rowNum++;
+  }
+}
+
+function writePartyGroupMatrixSheet(
+  wb: ExcelJS.Workbook,
+  rows: PartyGroupRow[],
+  thisFyLabel: string,
+): void {
+  const groupCols = Array.from(
+    new Set(rows.flatMap((r) => Object.keys(r.byGroup))),
+  ).sort();
+
+  const ws = wb.addWorksheet("Party By Group");
+  ws.views = [{ state: "frozen", xSplit: 1, ySplit: 1 }];
+  hdr(ws, 1, 1, "Party", 32);
+  hdr(ws, 1, 2, "State", 18);
+  hdr(ws, 1, 3, `Total ${thisFyLabel}`, 16);
+  groupCols.forEach((g, i) => hdr(ws, 1, 4 + i, g, 16));
+
+  rows.forEach((r, ri) => {
+    const rowNum = ri + 2;
+    ws.getCell(rowNum, 1).value = r.party;
+    ws.getCell(rowNum, 2).value = r.state || "";
+    ws.getCell(rowNum, 3).value = Math.round(r.total);
+    ws.getCell(rowNum, 3).numFmt = FMT_MONEY;
+    groupCols.forEach((g, i) => {
+      const v = r.byGroup[g] ?? 0;
+      if (v > 0) {
+        ws.getCell(rowNum, 4 + i).value = Math.round(v);
+        ws.getCell(rowNum, 4 + i).numFmt = FMT_MONEY;
+      }
+    });
+  });
+
+  if (rows.length > 0) {
+    const totalRow = rows.length + 2;
+    ws.getCell(totalRow, 1).value = "Grand Total";
+    ws.getCell(totalRow, 1).font = { bold: true };
+    ws.getCell(totalRow, 1).fill = TOTAL_FILL;
+    totalCell(ws, totalRow, 3, rows.reduce((a, r) => a + r.total, 0), FMT_MONEY);
+    groupCols.forEach((g, i) => {
+      const colTotal = rows.reduce((a, r) => a + (r.byGroup[g] ?? 0), 0);
+      if (colTotal > 0) totalCell(ws, totalRow, 4 + i, colTotal, FMT_MONEY);
+    });
+  }
+}
+
 function writeCoverSheet(
   wb: ExcelJS.Workbook,
   report: SalesRepReport,
@@ -478,11 +627,17 @@ export async function buildRepReportWorkbook(
     totalCell(ws, totalRow, 4, totSale, FMT_MONEY);
   }
 
-  // --- By State (Report 2 / 3A) ---
+  // --- By State (Report 2: YoY totals) ---
   writeComparisonSheet(wb, "By State", sec.byState, s, prior);
+
+  // --- By State Monthly (Report 2: month-by-month grid) ---
+  writeStateMonthSheet(wb, sec.byStateByMonth, s, prior);
 
   // --- By Party (Report 3B): cross-state party breakdown ---
   writePartyByStateSheet(wb, sec.partyByState, report.stateOptions, s, prior);
+
+  // --- By Group By State (Report 3A) ---
+  writeGroupByStateSheet(wb, sec.byGroupByState, report.stateOptions, s, prior);
 
   // --- By Segment (Report 3C) ---
   writeComparisonSheet(wb, "By Segment", sec.bySegment, s, prior);
@@ -495,8 +650,11 @@ export async function buildRepReportWorkbook(
     s,
   );
 
-  // --- By Group ---
+  // --- By Group (Report 6: all states) ---
   writeComparisonSheet(wb, "By Group", sec.byGroup, s, prior);
+
+  // --- Party × Group Matrix (Report 7) ---
+  writePartyGroupMatrixSheet(wb, sec.partyGroupMatrix, s);
 
   // --- Parties (Top / New / Churned) ---
   {

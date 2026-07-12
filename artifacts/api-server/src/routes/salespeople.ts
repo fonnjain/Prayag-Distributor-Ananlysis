@@ -76,6 +76,15 @@ function makeFixtureReport(fy: string): SalesRepReport {
       },
       movers: { partiesUp: [], partiesDown: [], segmentsUp: [], segmentsDown: [] },
       saleCollection: { sale: 1_800_000, saleLast: 1_650_000, collection: null },
+      byStateByMonth: [
+        { state: "MADHYA PRADESH", thisFy: 1_800_000, lastFy: 1_650_000, diff: 150_000, growthPct: 9.09, months: [1_800_000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], monthsPrior: [1_650_000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+      ],
+      byGroupByState: {
+        "MADHYA PRADESH": [{ label: "OTC", thisFy: 1_800_000, lastFy: 1_650_000, diff: 150_000, growthPct: 9.09, sharePct: 100 }],
+      },
+      partyGroupMatrix: [
+        { party: "Fixture Party A", state: "MADHYA PRADESH", total: 1_800_000, byGroup: { OTC: 1_800_000 } },
+      ],
     },
     primary: {
       available: false,
