@@ -1,4 +1,7 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, lazy, Suspense } from "react";
+const DashboardUploadPanel = lazy(
+  () => import("./DashboardUploadPanel"),
+);
 import {
   Download,
   ChevronUp,
@@ -69,7 +72,7 @@ type DashboardMeta = {
 
 type DashboardData = { rows: Member[]; meta: DashboardMeta };
 
-type View = "data" | "lowPerf" | "summary" | "secondary" | "primary";
+type View = "data" | "lowPerf" | "summary" | "secondary" | "primary" | "settings";
 
 type SortState = { key: string; dir: "asc" | "desc" };
 
@@ -111,6 +114,7 @@ const VIEWS: { id: View; label: string }[] = [
   { id: "summary", label: "Summary by Head" },
   { id: "secondary", label: "Secondary" },
   { id: "primary", label: "Primary" },
+  { id: "settings", label: "Settings" },
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -789,8 +793,19 @@ export default function StateHeadDashboard() {
         </div>
       )}
 
+      {/* Settings view */}
+      {activeView === "settings" && (
+        <Suspense
+          fallback={
+            <div className="py-8 text-center text-sm text-muted-foreground">Loading...</div>
+          }
+        >
+          <DashboardUploadPanel />
+        </Suspense>
+      )}
+
       {/* Row count footer */}
-      {!loading && data && activeView !== "summary" && (
+      {!loading && data && activeView !== "summary" && activeView !== "settings" && (
         <p className="text-xs text-muted-foreground text-right">
           {viewRows().length} of {filteredRows.length} members
         </p>

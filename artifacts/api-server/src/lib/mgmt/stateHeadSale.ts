@@ -120,10 +120,10 @@ export async function loadStateHeadSale(fy: string): Promise<StateHeadSaleResult
           const globalRow = startRow + ri;
 
           if (!headerFound) {
-            // Header can appear in first 10 rows (some sheets have merged title rows).
-            if (globalRow > 10) continue;
+            // Header can appear in first 30 rows (some sheets have multi-row titles).
+            if (globalRow > 30) continue;
             const tIdx = findCol(row, /taxable\s*value/i);
-            const hIdx = findCol(row, /^state\s*head$/i);
+            const hIdx = findCol(row, /state\s*head/i);
             if (tIdx >= 0 && hIdx >= 0) {
               taxColIdx = tIdx;
               headColIdx = hIdx;

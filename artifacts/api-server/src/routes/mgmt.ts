@@ -19,6 +19,16 @@ import {
 } from "../lib/mgmt/bridge.js";
 import { loadStateHeadSale } from "../lib/mgmt/stateHeadSale.js";
 import { loadOrderBookSaleByHead } from "../lib/mgmt/orderBookSale.js";
+import {
+  parseDashboardXlsx,
+  storeDashboardXlsxData,
+  loadDashboardXlsxData,
+  invalidateDashboardXlsxCache,
+  dashboardXlsxPath,
+} from "../lib/mgmt/dashboardXlsx.js";
+import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage.js";
+import { createWriteStream, existsSync, mkdirSync } from "node:fs";
+import { resolve, join, dirname } from "node:path";
 
 const router: IRouter = Router();
 
@@ -456,5 +466,120 @@ router.get("/mgmt/bridge/status", async (req: Request, res: Response): Promise<v
     res.status(500).json({ error: "Could not load bridge status." });
   }
 });
+
+// ── Dashboard xlsx upload ──────────────────────────────────────────────────────
+
+// Step 1: Get a short-lived presigned PUT URL for the browser to upload directly.
+router.get(
+  "/mgmt/dashboard-xlsx/upload-url",
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const service = new ObjectStorageService();
+      const uploadUrl = await service.getObjectEntityUploadURL();
+      res.json({ uploadUrl });
+    } catch (err) {
+      req.log.error({ err }, "dashboard-xlsx upload-url failed");
+      res.status(500).json({ error: "Could not create an upload URL." });
+    }
+  },
+);
+
+// Step 2: Register an uploaded file — download from object storage, parse, persist.
+router.post(
+  "/mgmt/dashboard-xlsx/register",
+  async (req: Request, res: Response): Promise<void> => {
+    const body = (req.body ?? {}) as {
+      fy?: unknown;
+      uploadUrl?: unknown;
+      fileName?: unknown;
+    };
+    const fy = typeof body.fy === "string" ? body.fy.trim() : "";
+    const uploadUrl = typeof body.uploadUrl === "string" ? body.uploadUrl.trim() : "";
+    const fileName =
+      typeof body.fileName === "string" && body.fileName.trim()
+        ? body.fileName.trim()
+        : `dashboard-state-head-${fy}.xlsx`;
+
+    if (!FY_PATTERN.test(fy) || !uploadUrl) {
+      res.status(400).json({ error: "fy and uploadUrl are required." });
+      return;
+    }
+
+    try {
+      const service = new ObjectStorageService();
+      const objectPath = service.normalizeObjectEntityPath(uploadUrl);
+      const file = await service.getObjectEntityFile(objectPath);
+
+      // Write the xlsx to the local uploads directory so the fallback order-file
+      // loader and the dashboard parser can read it without re-fetching.
+      const dest = dashboardXlsxPath(fy);
+      const destDir = dirname(dest);
+      if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true });
+
+      await new Promise<void>((ok, fail) => {
+        const ws = createWriteStream(dest);
+        const nodeStream = file.createReadStream();
+        (nodeStream as NodeJS.ReadableStream).pipe(ws);
+        ws.on("finish", ok);
+        ws.on("error", fail);
+        (nodeStream as NodeJS.ReadableStream).on("error", fail);
+      });
+
+      const data = await parseDashboardXlsx(dest, fy, fileName);
+      await storeDashboardXlsxData(data);
+      invalidateDashboardXlsxCache(fy);
+
+      req.log.info(
+        {
+          fy,
+          fileName,
+          totalRecords: data.status.totalRecords,
+          headerRow: data.status.headerRow,
+          targetPeriod: data.status.targetPeriod,
+        },
+        "dashboard-xlsx registered",
+      );
+
+      res.json({ status: data.status });
+    } catch (err) {
+      if (err instanceof ObjectNotFoundError) {
+        res.status(404).json({ error: "Uploaded file not found in object storage." });
+        return;
+      }
+      req.log.error({ err, fy }, "dashboard-xlsx register failed");
+      res
+        .status(500)
+        .json({
+          error:
+            err instanceof Error
+              ? err.message
+              : "Could not parse the uploaded file.",
+        });
+    }
+  },
+);
+
+// Step 3: Get status / parsed summary for a FY.
+router.get(
+  "/mgmt/dashboard-xlsx/:fy",
+  async (req: Request, res: Response): Promise<void> => {
+    const fy = String(req.params.fy ?? "").trim();
+    if (!FY_PATTERN.test(fy)) {
+      res.status(400).json({ error: "Invalid fiscal year." });
+      return;
+    }
+    try {
+      const data = await loadDashboardXlsxData(fy);
+      if (!data) {
+        res.status(404).json({ error: `No dashboard xlsx uploaded for ${fy}.` });
+        return;
+      }
+      res.json({ status: data.status });
+    } catch (err) {
+      req.log.error({ err, fy }, "dashboard-xlsx status failed");
+      res.status(500).json({ error: "Could not load dashboard xlsx status." });
+    }
+  },
+);
 
 export default router;

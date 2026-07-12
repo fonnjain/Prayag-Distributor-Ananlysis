@@ -717,6 +717,104 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /mgmt/dashboard-xlsx/upload-url:
+    get:
+      operationId: getMgmtDashboardXlsxUploadUrl
+      tags: [mgmt]
+      summary: Get a presigned PUT URL for uploading a STATE HEAD DASHBOARD xlsx
+      description: >
+        Returns a short-lived presigned PUT URL. The browser uploads the xlsx
+        file directly to object storage; the API never buffers it.
+      responses:
+        "200":
+          description: Presigned upload URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardXlsxUploadUrlResponse"
+        "500":
+          description: Could not create an upload URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /mgmt/dashboard-xlsx/register:
+    post:
+      operationId: registerMgmtDashboardXlsx
+      tags: [mgmt]
+      summary: Parse and persist an uploaded STATE HEAD DASHBOARD xlsx
+      description: >
+        Downloads the just-uploaded xlsx from object storage, parses the Data
+        tab, and stores the result. Subsequent report requests for the same FY
+        will draw targets and stateHead from this data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DashboardXlsxRegisterRequest"
+      responses:
+        "200":
+          description: Parse summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardXlsxStatusResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Uploaded file not found in object storage
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Parse failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /mgmt/dashboard-xlsx/{fy}:
+    get:
+      operationId: getMgmtDashboardXlsxStatus
+      tags: [mgmt]
+      summary: Get parse status for an uploaded STATE HEAD DASHBOARD xlsx
+      parameters:
+        - name: fy
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^\\d{4}-\\d{2}$"
+      responses:
+        "200":
+          description: Parse status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardXlsxStatusResponse"
+        "400":
+          description: Invalid fiscal year
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No dashboard xlsx uploaded for this FY yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /sap/upload-url:
     post:
       operationId: getSapUploadUrl
@@ -2377,3 +2475,66 @@ components:
         - fy
         - updated
         - appended
+    DashboardXlsxUploadUrlResponse:
+      type: object
+      properties:
+        uploadUrl:
+          type: string
+      required:
+        - uploadUrl
+    DashboardXlsxRegisterRequest:
+      type: object
+      properties:
+        fy:
+          type: string
+          pattern: "^\\d{4}-\\d{2}$"
+        uploadUrl:
+          type: string
+        fileName:
+          type: string
+      required:
+        - fy
+        - uploadUrl
+    DashboardXlsxStatusResponse:
+      type: object
+      properties:
+        status:
+          $ref: "#/components/schemas/DashboardXlsxStatus"
+      required:
+        - status
+    DashboardXlsxStatus:
+      type: object
+      properties:
+        fy:
+          type: string
+        parsedAt:
+          type: string
+        fileName:
+          type: string
+        totalRecords:
+          type: integer
+        activeRecords:
+          type: integer
+        leftRecords:
+          type: integer
+        isQuarterly:
+          type: boolean
+        targetPeriod:
+          type: string
+        headerRow:
+          type: integer
+        unmatchedSample:
+          type: array
+          items:
+            type: string
+      required:
+        - fy
+        - parsedAt
+        - fileName
+        - totalRecords
+        - activeRecords
+        - leftRecords
+        - isQuarterly
+        - targetPeriod
+        - headerRow
+        - unmatchedSample

@@ -8,3 +8,4 @@
 - [SAP primary-sales pipeline](sap-primary-sales.md) — FY26-27 monthly SAP xlsx uploads; month derived from invoice date; verified-gated cutover; cross-foot by construction; rate list never supplies cost/MRP.
 - [api-zod types re-export conflict](prayag-api-zod-types.md) — never re-export ./generated/types from api-zod/src/index.ts; causes TS2308 when Zod schema constants and TypeScript types share names.
 - [Prayag historical roster gap](prayag-historical-roster-gap.md) — for FY<current, departed TMs in order file are recovered via target-master stateHead supplement in assembleRows; 40 zero-booking members require a historical roster file.
+- [Dashboard xlsx upload pattern](prayag-dashboard-xlsx-upload.md) — FY-specific quarterly vs annual rules; header auto-detected (not hardcoded); xlsx fills target-map gaps; departed TMs get stateHead from xlsx.

@@ -937,6 +937,70 @@ export const AnalyzeSalesPersonResponse = zod.object({
 
 
 /**
+ * Returns a short-lived presigned PUT URL. The browser uploads the xlsx file directly to object storage; the API never buffers it.
+ * @summary Get a presigned PUT URL for uploading a STATE HEAD DASHBOARD xlsx
+ */
+export const GetMgmtDashboardXlsxUploadUrlResponse = zod.object({
+  "uploadUrl": zod.string()
+})
+
+
+/**
+ * Downloads the just-uploaded xlsx from object storage, parses the Data tab, and stores the result. Subsequent report requests for the same FY will draw targets and stateHead from this data.
+ * @summary Parse and persist an uploaded STATE HEAD DASHBOARD xlsx
+ */
+export const registerMgmtDashboardXlsxBodyFyRegExp = new RegExp('^\\d{4}-\\d{2}$');
+
+
+export const RegisterMgmtDashboardXlsxBody = zod.object({
+  "fy": zod.string().regex(registerMgmtDashboardXlsxBodyFyRegExp),
+  "uploadUrl": zod.string(),
+  "fileName": zod.string().optional()
+})
+
+export const RegisterMgmtDashboardXlsxResponse = zod.object({
+  "status": zod.object({
+  "fy": zod.string(),
+  "parsedAt": zod.string(),
+  "fileName": zod.string(),
+  "totalRecords": zod.number(),
+  "activeRecords": zod.number(),
+  "leftRecords": zod.number(),
+  "isQuarterly": zod.boolean(),
+  "targetPeriod": zod.string(),
+  "headerRow": zod.number(),
+  "unmatchedSample": zod.array(zod.string())
+})
+})
+
+
+/**
+ * @summary Get parse status for an uploaded STATE HEAD DASHBOARD xlsx
+ */
+export const getMgmtDashboardXlsxStatusPathFyRegExp = new RegExp('^\\d{4}-\\d{2}$');
+
+
+export const GetMgmtDashboardXlsxStatusParams = zod.object({
+  "fy": zod.coerce.string().regex(getMgmtDashboardXlsxStatusPathFyRegExp)
+})
+
+export const GetMgmtDashboardXlsxStatusResponse = zod.object({
+  "status": zod.object({
+  "fy": zod.string(),
+  "parsedAt": zod.string(),
+  "fileName": zod.string(),
+  "totalRecords": zod.number(),
+  "activeRecords": zod.number(),
+  "leftRecords": zod.number(),
+  "isQuarterly": zod.boolean(),
+  "targetPeriod": zod.string(),
+  "headerRow": zod.number(),
+  "unmatchedSample": zod.array(zod.string())
+})
+})
+
+
+/**
  * Returns a short-lived signed PUT URL. The browser uploads the SAP primary-sales xlsx directly to object storage; the API never buffers it.
  * @summary Get a signed URL for uploading a SAP file
  */

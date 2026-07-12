@@ -30,6 +30,10 @@ import {
   type TargetRow,
   type TargetField,
 } from "./targets.js";
+import {
+  buildDashboardXlsxLookup,
+  type DashboardXlsxRecord,
+} from "./dashboardXlsx.js";
 import { logger } from "../logger.js";
 import {
   loadHrSfaDashboard,
@@ -134,6 +138,33 @@ function tgtAnnual(r: MemberRow, f: TargetField): number | null {
 function achievement(num: number | null | undefined, den: number | null): number | null {
   if (num == null || den == null || den <= 0) return null;
   return num / den;
+}
+
+// Convert a dashboard-xlsx record into a TargetRow so it can fill the targetMap
+// for members not already present in the Prayag Target Master (Sheets).
+// Target Master entries always take precedence — this is only a gap-filler.
+function xlsxRecordToTargetRow(rec: DashboardXlsxRecord, fy: string): TargetRow {
+  return {
+    fy,
+    teamMember: rec.name,
+    stateHead: rec.stateHead,
+    level: "TM" as const,
+    annual: {
+      primary: rec.primaryTarget,
+      // FY2026-27 targets are quarterly — leave annual blank.
+      secondary: rec.secondaryTarget,
+      directDealer: rec.directDealerTarget,
+      businessPlan: null,
+    },
+    monthly: {
+      primary: Array(12).fill(null) as (number | null)[],
+      secondary: rec.secondaryMonthly,
+      directDealer: Array(12).fill(null) as (number | null)[],
+      businessPlan: Array(12).fill(null) as (number | null)[],
+    },
+    updatedBy: "dashboard-xlsx",
+    updatedAt: "",
+  };
 }
 
 function computeOrderStats(
@@ -316,6 +347,28 @@ export async function assembleRows(
     logger.warn(
       { err, fy: filters.fy },
       "target master read failed; target columns left blank",
+    );
+  }
+  // Augment targetMap with uploaded dashboard xlsx data (manual targets, CTC,
+  // designation). The xlsx covers the full roster including departed members,
+  // so it also provides stateHead for supplemental rows. Entries from the
+  // Prayag Target Master (Sheets) always override the xlsx on conflict.
+  try {
+    const xlsxLookup = await buildDashboardXlsxLookup(filters.fy);
+    for (const [key, rec] of xlsxLookup) {
+      if (targetMap.has(key)) continue;
+      targetMap.set(key, xlsxRecordToTargetRow(rec, filters.fy));
+    }
+    if (xlsxLookup.size > 0) {
+      logger.debug(
+        { fy: filters.fy, xlsxCount: xlsxLookup.size },
+        "targetMap augmented from dashboard xlsx",
+      );
+    }
+  } catch (err) {
+    logger.warn(
+      { err, fy: filters.fy },
+      "dashboard xlsx lookup failed; xlsx targets skipped",
     );
   }
   // Sale Report now comes from the secondary order file (Σ Order Value), so

@@ -24,6 +24,9 @@ import type {
   AnalyzeRequest,
   AnalyzeResponse,
   DashboardResponse,
+  DashboardXlsxRegisterRequest,
+  DashboardXlsxStatusResponse,
+  DashboardXlsxUploadUrlResponse,
   DeepDive,
   DeleteSapUploadParams,
   DriveFileList,
@@ -1696,6 +1699,232 @@ export const useAnalyzeSalesPerson = <TError = ErrorType<ErrorResponse>,
       > => {
       return useMutation(getAnalyzeSalesPersonMutationOptions(options));
     }
+
+export const getGetMgmtDashboardXlsxUploadUrlUrl = () => {
+
+
+
+
+  return `/api/mgmt/dashboard-xlsx/upload-url`
+}
+
+/**
+ * Returns a short-lived presigned PUT URL. The browser uploads the xlsx file directly to object storage; the API never buffers it.
+ * @summary Get a presigned PUT URL for uploading a STATE HEAD DASHBOARD xlsx
+ */
+export const getMgmtDashboardXlsxUploadUrl = async ( options?: RequestInit): Promise<DashboardXlsxUploadUrlResponse> => {
+
+  return customFetch<DashboardXlsxUploadUrlResponse>(getGetMgmtDashboardXlsxUploadUrlUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMgmtDashboardXlsxUploadUrlQueryKey = () => {
+    return [
+    `/api/mgmt/dashboard-xlsx/upload-url`
+    ] as const;
+    }
+
+
+export const getGetMgmtDashboardXlsxUploadUrlQueryOptions = <TData = Awaited<ReturnType<typeof getMgmtDashboardXlsxUploadUrl>>, TError = ErrorType<ErrorResponse>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMgmtDashboardXlsxUploadUrl>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMgmtDashboardXlsxUploadUrlQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMgmtDashboardXlsxUploadUrl>>> = ({ signal }) => getMgmtDashboardXlsxUploadUrl({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMgmtDashboardXlsxUploadUrl>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMgmtDashboardXlsxUploadUrlQueryResult = NonNullable<Awaited<ReturnType<typeof getMgmtDashboardXlsxUploadUrl>>>
+export type GetMgmtDashboardXlsxUploadUrlQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get a presigned PUT URL for uploading a STATE HEAD DASHBOARD xlsx
+ */
+
+export function useGetMgmtDashboardXlsxUploadUrl<TData = Awaited<ReturnType<typeof getMgmtDashboardXlsxUploadUrl>>, TError = ErrorType<ErrorResponse>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMgmtDashboardXlsxUploadUrl>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMgmtDashboardXlsxUploadUrlQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRegisterMgmtDashboardXlsxUrl = () => {
+
+
+
+
+  return `/api/mgmt/dashboard-xlsx/register`
+}
+
+/**
+ * Downloads the just-uploaded xlsx from object storage, parses the Data tab, and stores the result. Subsequent report requests for the same FY will draw targets and stateHead from this data.
+ * @summary Parse and persist an uploaded STATE HEAD DASHBOARD xlsx
+ */
+export const registerMgmtDashboardXlsx = async (dashboardXlsxRegisterRequest: DashboardXlsxRegisterRequest, options?: RequestInit): Promise<DashboardXlsxStatusResponse> => {
+
+  return customFetch<DashboardXlsxStatusResponse>(getRegisterMgmtDashboardXlsxUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(dashboardXlsxRegisterRequest)
+  }
+);}
+
+
+
+
+export const getRegisterMgmtDashboardXlsxMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof registerMgmtDashboardXlsx>>, TError,{data: BodyType<DashboardXlsxRegisterRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof registerMgmtDashboardXlsx>>, TError,{data: BodyType<DashboardXlsxRegisterRequest>}, TContext> => {
+
+const mutationKey = ['registerMgmtDashboardXlsx'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof registerMgmtDashboardXlsx>>, {data: BodyType<DashboardXlsxRegisterRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  registerMgmtDashboardXlsx(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RegisterMgmtDashboardXlsxMutationResult = NonNullable<Awaited<ReturnType<typeof registerMgmtDashboardXlsx>>>
+    export type RegisterMgmtDashboardXlsxMutationBody = BodyType<DashboardXlsxRegisterRequest>
+    export type RegisterMgmtDashboardXlsxMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Parse and persist an uploaded STATE HEAD DASHBOARD xlsx
+ */
+export const useRegisterMgmtDashboardXlsx = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof registerMgmtDashboardXlsx>>, TError,{data: BodyType<DashboardXlsxRegisterRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof registerMgmtDashboardXlsx>>,
+        TError,
+        {data: BodyType<DashboardXlsxRegisterRequest>},
+        TContext
+      > => {
+      return useMutation(getRegisterMgmtDashboardXlsxMutationOptions(options));
+    }
+
+export const getGetMgmtDashboardXlsxStatusUrl = (fy: string,) => {
+
+
+
+
+  return `/api/mgmt/dashboard-xlsx/${fy}`
+}
+
+/**
+ * @summary Get parse status for an uploaded STATE HEAD DASHBOARD xlsx
+ */
+export const getMgmtDashboardXlsxStatus = async (fy: string, options?: RequestInit): Promise<DashboardXlsxStatusResponse> => {
+
+  return customFetch<DashboardXlsxStatusResponse>(getGetMgmtDashboardXlsxStatusUrl(fy),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMgmtDashboardXlsxStatusQueryKey = (fy: string,) => {
+    return [
+    `/api/mgmt/dashboard-xlsx/${fy}`
+    ] as const;
+    }
+
+
+export const getGetMgmtDashboardXlsxStatusQueryOptions = <TData = Awaited<ReturnType<typeof getMgmtDashboardXlsxStatus>>, TError = ErrorType<ErrorResponse>>(fy: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMgmtDashboardXlsxStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMgmtDashboardXlsxStatusQueryKey(fy);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMgmtDashboardXlsxStatus>>> = ({ signal }) => getMgmtDashboardXlsxStatus(fy, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: fy !== null && fy !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMgmtDashboardXlsxStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMgmtDashboardXlsxStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getMgmtDashboardXlsxStatus>>>
+export type GetMgmtDashboardXlsxStatusQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get parse status for an uploaded STATE HEAD DASHBOARD xlsx
+ */
+
+export function useGetMgmtDashboardXlsxStatus<TData = Awaited<ReturnType<typeof getMgmtDashboardXlsxStatus>>, TError = ErrorType<ErrorResponse>>(
+ fy: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMgmtDashboardXlsxStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMgmtDashboardXlsxStatusQueryOptions(fy,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetSapUploadUrlUrl = () => {
 

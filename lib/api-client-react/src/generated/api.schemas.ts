@@ -1004,6 +1004,34 @@ export interface SaveTargetsResult {
   appended: number;
 }
 
+export interface DashboardXlsxUploadUrlResponse {
+  uploadUrl: string;
+}
+
+export interface DashboardXlsxRegisterRequest {
+  /** @pattern ^\d{4}-\d{2}$ */
+  fy: string;
+  uploadUrl: string;
+  fileName?: string;
+}
+
+export interface DashboardXlsxStatus {
+  fy: string;
+  parsedAt: string;
+  fileName: string;
+  totalRecords: number;
+  activeRecords: number;
+  leftRecords: number;
+  isQuarterly: boolean;
+  targetPeriod: string;
+  headerRow: number;
+  unmatchedSample: string[];
+}
+
+export interface DashboardXlsxStatusResponse {
+  status: DashboardXlsxStatus;
+}
+
 export type ListDriveFilesParams = {
 /**
  * Optional search text matched against file names.
