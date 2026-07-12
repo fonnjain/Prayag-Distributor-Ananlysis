@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useTheme } from "next-themes";
-import { Sun, Moon, Printer, Menu, X, BarChart3, Map, LayoutGrid, Package, TrendingUp, LineChart, Database, Bot, FileSpreadsheet, Target, Users, UploadCloud } from "lucide-react";
+import { Sun, Moon, Printer, Menu, X, BarChart3, Map, LayoutGrid, Package, TrendingUp, LineChart, Database, Bot, FileSpreadsheet, Target, Users, UploadCloud, LayoutDashboard } from "lucide-react";
 import Overview from "@/components/dashboard/Overview";
 import Regional from "@/components/dashboard/Regional";
 import Resources from "@/components/dashboard/Resources";
@@ -13,6 +13,7 @@ import Analyst from "@/components/dashboard/Analyst";
 import MgmtReports from "@/components/dashboard/MgmtReports";
 import Targets from "@/components/dashboard/Targets";
 import SalesImport from "@/components/dashboard/SalesImport";
+import StateHeadDashboard from "@/components/dashboard/StateHeadDashboard";
 import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
 import { useDashboard } from "@/data/dashboard-context";
@@ -29,6 +30,7 @@ const AREAS = [
   { id: "targets", label: "Targets", icon: Target, component: Targets },
   { id: "sales-import", label: "Sales Import", icon: UploadCloud, component: SalesImport },
   { id: "sources", label: "Data Sources", icon: Database, component: DataSources },
+  { id: "state-head", label: "State Head", icon: LayoutDashboard, component: StateHeadDashboard },
 ];
 
 export const AREA_IDS = AREAS.map((a) => a.id);

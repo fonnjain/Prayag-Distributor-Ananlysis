@@ -4,10 +4,12 @@ import { loadRoster, mgmtSources } from "../lib/mgmt/roster.js";
 import { resolveOrderFileId, getOrderLoadStatus } from "../lib/mgmt/orders.js";
 import {
   buildManagementWorkbook,
+  assembleRows,
   regionMap,
   type ReportFilters,
 } from "../lib/mgmt/report.js";
-import { loadTargetsForFy } from "../lib/mgmt/targets.js";
+import { loadTargetsForFy, type TargetRow } from "../lib/mgmt/targets.js";
+import { loadHrSfaDashboard, type HrSfaRecord } from "../lib/mgmt/hrSfaDashboard.js";
 import { runVerify, hasVerifyAnchors, verifyFyList } from "../lib/mgmt/verify.js";
 import {
   loadPartyBridge,
@@ -139,6 +141,136 @@ router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> =
   } catch (err) {
     req.log.error({ err }, "mgmt options failed");
     res.status(500).json({ error: "Could not load report options." });
+  }
+});
+
+// Inline helpers used only by GET /mgmt/data.
+function tgtPeriod(
+  target: TargetRow | null,
+  field: "secondary" | "primary" | "businessPlan",
+  mFrom: number,
+  mTo: number,
+): number | null {
+  if (!target) return null;
+  let sum = 0, any = false;
+  for (let i = mFrom - 1; i <= mTo - 1; i++) {
+    const ov = target.monthly[field][i];
+    const ann = target.annual[field];
+    const v = ov != null ? ov : ann != null ? ann / 12 : null;
+    if (v != null) { sum += v; any = true; }
+  }
+  return any ? sum : null;
+}
+
+function serialDate(n: number | null): string | null {
+  if (n == null || n <= 0) return null;
+  return new Date((n - 25569) * 86400000).toLocaleDateString("en-IN", {
+    day: "2-digit", month: "short", year: "numeric",
+  });
+}
+
+function achBand(pct: number | null, hasTarget: boolean): string {
+  if (!hasTarget || pct == null) return "noTarget";
+  if (pct < 0.25) return "below25";
+  if (pct < 0.50) return "below50";
+  if (pct < 0.70) return "50to70";
+  if (pct < 0.90) return "70to90";
+  if (pct < 1.00) return "90to100";
+  return "above100";
+}
+
+// GET /api/mgmt/data — live JSON view of the State Head Dashboard.
+// Accepts: fy, monthFrom, monthTo (all optional, with defaults).
+// Returns: { rows, meta }
+router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
+  const fy =
+    typeof req.query.fy === "string" && req.query.fy.trim() !== ""
+      ? req.query.fy.trim()
+      : DEFAULT_FY;
+  if (!FY_PATTERN.test(fy)) {
+    res.status(400).json({ error: "fy must look like 2026-27" });
+    return;
+  }
+  const intQ = (k: string, lo: number, hi: number, dflt: number): number => {
+    const v = Number(req.query[k]);
+    return Number.isFinite(v) && v >= lo && v <= hi ? Math.round(v) : dflt;
+  };
+  const monthFrom = intQ("monthFrom", 1, 12, 1);
+  const monthTo = intQ("monthTo", monthFrom, 12, 12);
+  const filters: ReportFilters = {
+    fy, states: [], regions: [], monthFrom, monthTo, lowPerfPct: 50,
+  };
+  try {
+    const [assembled, hrSfa] = await Promise.all([
+      assembleRows(filters),
+      loadHrSfaDashboard().catch((): Map<string, HrSfaRecord> => new Map()),
+    ]);
+    const { rows, ordersAvailable, targetsAvailable, rosterSource, orderStatus } = assembled;
+
+    const members = rows.map((r) => {
+      const tgtSec = tgtPeriod(r.target, "secondary", monthFrom, monthTo);
+      const tgtPri = tgtPeriod(r.target, "primary", monthFrom, monthTo);
+      const tgtBp = tgtPeriod(r.target, "businessPlan", monthFrom, monthTo);
+      const booking = r.orders?.amount ?? null;
+      const achPct =
+        booking != null && tgtSec != null && tgtSec > 0 ? booking / tgtSec : null;
+      const sfa = hrSfa.get(r.m.normKey);
+      return {
+        normKey: r.m.normKey,
+        name: r.m.name,
+        stateHead: r.m.stateHead,
+        state: r.m.state,
+        hq: r.m.headquarter,
+        dojLabel: serialDate(r.m.dojSerial),
+        workingState: r.m.workingState,
+        channel: r.m.channel,
+        oldNew: r.oldNew,
+        activeLeft: r.m.activeLeft,
+        targetSecondary: tgtSec,
+        targetPrimary: tgtPri,
+        targetBusinessPlan: tgtBp,
+        orderBooking: booking,
+        saleAmount: r.orders?.saleAmount ?? null,
+        priorOrderBooking: r.priorAmount,
+        totalRetailers: r.orders?.totalRetailers ?? null,
+        oldRetailers: r.orders?.oldRetailers ?? null,
+        newRetailers: r.orders?.newRetailers ?? null,
+        distributorCount: r.orders?.distributorCount ?? null,
+        directDealerCount: r.orders?.directDealerCount ?? null,
+        orderCount: r.orders?.orderCount ?? null,
+        achievementPct: achPct,
+        band: achBand(achPct, tgtSec != null),
+        visitedParties: sfa?.visitedParties ?? null,
+        workingDays: sfa?.workingDays ?? null,
+        ctcMonthly: sfa?.ctcMonthly ?? null,
+        costRatioPct: sfa?.costRatioPct ?? null,
+        designation: sfa?.designation ?? null,
+      };
+    });
+
+    const orderBookingNote = !ordersAvailable
+      ? (orderStatus?.detail ??
+          `FY${fy} Secondary Order Booking file not yet created. Order Booking and Achievement are pending until the file exists in Drive.`)
+      : null;
+
+    res.json({
+      rows: members,
+      meta: {
+        fy,
+        monthFrom,
+        monthTo,
+        ordersAvailable,
+        targetsAvailable,
+        orderBookingNote,
+        rosterSource,
+      },
+    });
+  } catch (err) {
+    req.log.error({ err, fy }, "mgmt data failed");
+    res.status(500).json({
+      error:
+        "Could not load dashboard data. Google Sheets may be unavailable; try again in a minute.",
+    });
   }
 });
 
