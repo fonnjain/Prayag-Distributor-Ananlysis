@@ -395,17 +395,19 @@ export async function assembleRows(
     oldNew: m.dojSerial != null && m.dojSerial >= fyStart ? "New" : "Old",
     target: targetMap.get(m.normKey) ?? null,
   }));
-  // Supplement with historical TMs: those present in the current FY order file
-  // who have no match in the active roster (departed employees). Their stateHead
-  // is resolved from the target master for this FY; without it we cannot assign
-  // them to a head so they are skipped rather than dumped into an Unknown bucket.
+  // Supplement with order-file TMs not in the active roster. These may be
+  // departed employees, off-roll staff, or members added to the OB file before
+  // the roster was updated. We include them regardless of whether a stateHead
+  // is known — dropping them would silently lose their order amounts and member
+  // count. Their stateHead comes from the target master or uploaded dashboard
+  // xlsx; if neither has it, stateHead is blank and they appear under "Unknown"
+  // in the summary view.
   if (agg) {
     const rosterNormKeys = new Set(members.map((m) => m.normKey));
     for (const [key, tm] of agg.perTm) {
       if (rosterNormKeys.has(key)) continue;
       const targetRow = targetMap.get(key);
       const stateHead = targetRow?.stateHead ?? "";
-      if (!stateHead) continue; // cannot assign to a head — skip
       const syntheticMember: RosterMember = {
         stateHead,
         state: "",

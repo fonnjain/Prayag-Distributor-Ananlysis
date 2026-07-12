@@ -355,6 +355,9 @@ async function loadOrderFileUncached(
   let cols: ColMap | null = null;
   let totalAmount = 0;
   let totalSaleAmount = 0;
+  let dateParseFailures = 0;
+  let earliestDate: number | null = null;
+  let latestDate: number | null = null;
   // Multi-line orders can leave Date/Retailer/Order ID/Team Member blank on
   // continuation rows — forward-fill them down the block. Carried across
   // chunk boundaries (chunks arrive sequentially).
@@ -381,6 +384,9 @@ async function loadOrderFileUncached(
     cols = null;
     totalAmount = 0;
     totalSaleAmount = 0;
+    dateParseFailures = 0;
+    earliestDate = null;
+    latestDate = null;
     carry.date = null;
     carry.retailerId = "";
     carry.retailerName = "";
@@ -419,7 +425,9 @@ async function loadOrderFileUncached(
         const tmRaw = carry.teamMember;
         if (tmRaw == null || tmRaw === "") continue;
         const dateSerial = parseOrderDate(carry.date);
-        if (dateSerial == null) continue;
+        if (dateSerial == null) { dateParseFailures++; continue; }
+        if (earliestDate == null || dateSerial < earliestDate) earliestDate = dateSerial;
+        if (latestDate == null || dateSerial > latestDate) latestDate = dateSerial;
         // A fully blank row inherits everything and carries no amount — it
         // contributes nothing (blank Sub Total coerces to 0 below).
         const amountRaw = r[cols.subTotal];
@@ -647,6 +655,9 @@ async function loadOrderFileUncached(
       segments: segmentTotals.size,
       totalAmount: Math.round(totalAmount),
       totalSaleAmount: Math.round(totalSaleAmount),
+      dateParseFailures,
+      earliestDate,
+      latestDate,
     },
     "order booking file opened and aggregated",
   );
