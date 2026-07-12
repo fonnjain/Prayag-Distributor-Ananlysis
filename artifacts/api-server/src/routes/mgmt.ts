@@ -20,6 +20,14 @@ import {
 import { loadStateHeadSale } from "../lib/mgmt/stateHeadSale.js";
 import { loadOrderBookSaleByHead } from "../lib/mgmt/orderBookSale.js";
 import {
+  getDistributorTmMapIfReady,
+  loadDistributorTmMap,
+} from "../lib/mgmt/distributorTmMap.js";
+import {
+  loadPrimaryAttribution,
+  type PrimaryAttributionDiagnostics,
+} from "../lib/mgmt/primaryAttribution.js";
+import {
   parseDashboardXlsx,
   storeDashboardXlsxData,
   loadDashboardXlsxData,
@@ -219,38 +227,67 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
     ]);
     const { rows, ordersAvailable, targetsAvailable, rosterSource, orderStatus, nameMatches, xlsxTargetDiagnostic } = assembled;
 
-    // Load head-level Sale (primary dispatch, Taxable Value) from the appropriate
-    // per-FY sheet. Sale is head-level only — member saleAmount stays null so the
-    // Summary view and KPI tile use meta.headSales, not a member-sum that would
-    // conflate individual TMs who share a head.
-    //
-    // FY2025-26 → State Head Sale 2025-26 sheet
-    // FY2026-27 → Order Sheet 26-27 (primary dispatch register; falls back to Order Book Taxable Value if unreachable)
-    let saleByHead: Map<string, number> | null = null;
-    let saleSourceLabel: string | null = null;
+    // ── Primary sale (dispatched invoices, Taxable Value by STATE HEAD) ──────────
+    // State Head Sale sheets per FY — after the FY2026-27 sheet-ID fix these now
+    // correctly point to invoice-date dispatched sale, not booked orders.
+    let dispatchSaleByHead: Map<string, number> | null = null;
+    let dispatchSaleSource: string | null = null;
     try {
-      const primarySaleData = await loadStateHeadSale(fy);
-      if (!primarySaleData.error && primarySaleData.total > 0) {
-        saleByHead = primarySaleData.byHead;
-        saleSourceLabel = primarySaleData.label;
-        req.log.info(
-          { fy, total: primarySaleData.total, heads: primarySaleData.byHead.size },
-          "mgmt: loaded primary sale data",
-        );
-      } else if (fy === "2026-27") {
-        // Primary sale sheet for FY2026-27 returned zero or errored; fallback to Order Book Taxable Value.
-        const obs = await loadOrderBookSaleByHead();
-        if (!obs.error && obs.total > 0) {
-          saleByHead = obs.byHead;
-          saleSourceLabel = "Order Book FY2026-27 (Taxable Value)";
-          req.log.info({ fy, total: obs.total }, "mgmt: loaded Order Book sale for FY2026-27");
-        }
+      const sd = await loadStateHeadSale(fy);
+      if (!sd.error && sd.total > 0) {
+        dispatchSaleByHead = sd.byHead;
+        dispatchSaleSource = sd.label;
+        req.log.info({ fy, total: sd.total, heads: sd.byHead.size }, "mgmt: dispatch sale loaded");
       }
     } catch (err) {
-      req.log.warn({ err, fy }, "mgmt: sale-by-head load failed; Sale tile will be blank");
+      req.log.warn({ err, fy }, "mgmt: dispatch sale load failed");
     }
-    const headSales: Record<string, number> | undefined = saleByHead
-      ? Object.fromEntries(saleByHead)
+
+    // ── Primary order booking (booked orders — FY2026-27 Order Sheet only) ────
+    let orderBookingPrimaryByHead: Map<string, number> | null = null;
+    let orderBookingPrimarySource: string | null = null;
+    if (fy === "2026-27") {
+      try {
+        const ob = await loadOrderBookSaleByHead();
+        if (!ob.error && ob.total > 0) {
+          orderBookingPrimaryByHead = ob.byHead;
+          orderBookingPrimarySource = "Order Sheet 26-27 (Primary Order Booking)";
+          req.log.info({ total: ob.total, heads: ob.byHead.size }, "mgmt: primary order booking loaded");
+        }
+      } catch (err) {
+        req.log.warn({ err }, "mgmt: primary order booking load failed");
+      }
+    }
+
+    // ── Distributor-to-TM map + per-member primary attribution ─────────────────
+    // The map is built once (60-min cache) by reading ~180 member files. On the
+    // first request after a cache miss, getDistributorTmMapIfReady() returns null
+    // immediately and kicks off a background build — per-member columns will be
+    // blank on that one request, then populated on subsequent calls once the cache
+    // is warm. loadDistributorTmMap() is called if the cache is already warm so
+    // we never block the request path.
+    const distMap = getDistributorTmMapIfReady();
+    let primaryAttrib: Awaited<ReturnType<typeof loadPrimaryAttribution>> | null = null;
+    let primaryDiagnostics: PrimaryAttributionDiagnostics | null = null;
+    if (distMap && !distMap.error && distMap.byPartyKey.size > 0) {
+      try {
+        primaryAttrib = await loadPrimaryAttribution(fy, distMap);
+        primaryDiagnostics = primaryAttrib.diagnostics;
+      } catch (err) {
+        req.log.warn({ err, fy }, "mgmt: primary attribution failed");
+      }
+    } else if (!distMap) {
+      // Warm up the cache in the background on first request
+      loadDistributorTmMap().catch((err) =>
+        req.log.warn({ err }, "mgmt: dist-map background build failed"),
+      );
+    }
+
+    const headSales: Record<string, number> | undefined = dispatchSaleByHead
+      ? Object.fromEntries(dispatchSaleByHead)
+      : undefined;
+    const orderBookingPrimary: Record<string, number> | undefined = orderBookingPrimaryByHead
+      ? Object.fromEntries(orderBookingPrimaryByHead)
       : undefined;
 
     const members = rows.map((r) => {
@@ -261,6 +298,7 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
       const achPct =
         booking != null && tgtSec != null && tgtSec > 0 ? booking / tgtSec : null;
       const sfa = hrSfa.get(r.m.normKey);
+      const primStats = primaryAttrib?.perMember.get(r.m.normKey);
       return {
         normKey: r.m.normKey,
         name: r.m.name,
@@ -276,10 +314,8 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         targetPrimary: tgtPri,
         targetBusinessPlan: tgtBp,
         orderBooking: booking,
-        // Sale is sourced from a separate primary-dispatch sheet (Taxable Value),
-        // not from the secondary order booking file. It is head-level only, so
-        // saleAmount on individual member rows is null — the frontend reads
-        // meta.headSales for the Summary and KPI tile.
+        // saleAmount on individual rows is null — the frontend reads meta.headSales
+        // for the Summary view and KPI tile (head-level only, no per-member split).
         saleAmount: null,
         priorOrderBooking: r.priorAmount,
         totalRetailers: r.orders?.totalRetailers ?? null,
@@ -295,6 +331,11 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         ctcMonthly: sfa?.ctcMonthly ?? null,
         costRatioPct: sfa?.costRatioPct ?? null,
         designation: sfa?.designation ?? null,
+        // Primary attribution (from distributor-TM map + primary sheets)
+        primaryOrderAmount: primStats?.orderAmount ?? null,
+        primarySaleAmount: primStats?.saleAmount ?? null,
+        primaryDistributors: distMap?.distributorCountByMember.get(r.m.normKey) ?? null,
+        primaryDirectDealers: distMap?.directDealerCountByMember.get(r.m.normKey) ?? null,
       };
     });
 
@@ -302,6 +343,16 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
       ? (orderStatus?.detail ??
           `FY${fy} Secondary Order Booking file not yet created. Order Booking and Achievement are pending until the file exists in Drive.`)
       : null;
+
+    // Pending orders = primary order booking minus dispatched sale (company-wide)
+    const obTotal = orderBookingPrimary
+      ? Object.values(orderBookingPrimary).reduce((s, v) => s + v, 0)
+      : 0;
+    const saleTotal = headSales
+      ? Object.values(headSales).reduce((s, v) => s + v, 0)
+      : 0;
+    const pendingOrdersTotal =
+      obTotal > 0 && saleTotal > 0 ? obTotal - saleTotal : null;
 
     res.json({
       rows: members,
@@ -313,10 +364,19 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         targetsAvailable,
         orderBookingNote,
         rosterSource,
+        // Dispatch sale (actual invoiced goods, by STATE HEAD)
         ...(headSales ? { headSales } : {}),
-        saleSource: saleSourceLabel,
+        saleSource: dispatchSaleSource,
+        // Primary order booking (booked orders, FY2026-27 only)
+        ...(orderBookingPrimary ? { orderBookingPrimary } : {}),
+        ...(orderBookingPrimarySource ? { orderBookingPrimarySource } : {}),
+        // Derived: orders booked but not yet dispatched
+        ...(pendingOrdersTotal != null ? { pendingOrdersTotal } : {}),
+        // Secondary order booking (per salesperson, from order-booking workbooks)
         orderBookingSource: ordersAvailable ? `Secondary Order Booking ${fy}` : null,
         orderBookingNameMatches: nameMatches,
+        // Primary attribution diagnostics (null until dist-map is warm)
+        ...(primaryDiagnostics ? { primaryAttributionDiagnostics: primaryDiagnostics } : {}),
         ...(xlsxTargetDiagnostic ? { targetMatchDiagnostic: xlsxTargetDiagnostic } : {}),
       },
     });

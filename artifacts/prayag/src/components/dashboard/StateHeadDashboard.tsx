@@ -52,6 +52,14 @@ type Member = {
   ctcMonthly: number | null;
   costRatioPct: number | null;
   designation: string | null;
+  /** Primary order booking (booked orders) attributed to this member via distributor map */
+  primaryOrderAmount: number | null;
+  /** Primary dispatch sale attributed to this member via distributor map */
+  primarySaleAmount: number | null;
+  /** Count of Distributor-type parties mapped to this member */
+  primaryDistributors: number | null;
+  /** Count of Direct Dealer-type parties mapped to this member */
+  primaryDirectDealers: number | null;
 };
 
 type DashboardMeta = {
@@ -62,12 +70,29 @@ type DashboardMeta = {
   targetsAvailable: boolean;
   orderBookingNote: string | null;
   rosterSource: string;
-  /** Head-level Sale (primary dispatch, Taxable Value). Null when no sheet configured for FY. */
+  /** Head-level dispatched sale (Taxable Value), by STATE HEAD. */
   headSales?: Record<string, number>;
-  /** Source label for the Sale tile (e.g. "State Head Sale 2025-26") */
+  /** Source label for the Sale (Dispatched) tile. */
   saleSource?: string | null;
-  /** Source label for Order Booking tile (e.g. "Secondary Order Booking 2025-26") */
+  /** Head-level primary order booking (booked orders), by STATE HEAD. FY2026-27 only. */
+  orderBookingPrimary?: Record<string, number>;
+  /** Source label for the Order Booking (Primary) tile. */
+  orderBookingPrimarySource?: string | null;
+  /** Company-wide pending orders = orderBookingPrimary total minus headSales total. */
+  pendingOrdersTotal?: number | null;
+  /** Source label for secondary Order Booking tile. */
   orderBookingSource?: string | null;
+  /** Attribution diagnostics — null until the distributor-TM map is warm. */
+  primaryAttributionDiagnostics?: {
+    distMapAvailable: boolean;
+    orderBookingAvailable: boolean;
+    dispatchSaleAvailable: boolean;
+    totalOrderRows: number;
+    attributedOrderRows: number;
+    totalOrderAmount: number;
+    attributedOrderAmount: number;
+    attributionPct: number | null;
+  } | null;
   /** Diagnostic from the dashboard xlsx target-to-roster join. */
   targetMatchDiagnostic?: {
     xlsxRowCount: number;
@@ -426,24 +451,39 @@ export default function StateHeadDashboard() {
   const kpi = useMemo(() => {
     const target = filteredRows.reduce((s, r) => s + (r.targetSecondary ?? 0), 0);
     const booking = filteredRows.reduce((s, r) => s + (r.orderBooking ?? 0), 0);
-    // Sale: use the post-processed summaryByHead totals when head-level data is
-    // available from meta (so stateHeadFilter is respected correctly).
+    // Sale (dispatched): use post-processed summaryByHead totals when head-level
+    // data is available from meta (so stateHeadFilter is respected correctly).
     const sale = data?.meta.headSales
       ? summaryByHead.reduce((s, h) => s + h.sale, 0)
       : filteredRows.reduce((s, r) => s + (r.saleAmount ?? 0), 0);
+
+    // Primary order booking (booked orders) — sum across filtered heads
+    const filteredHeadKeys = new Set(filteredRows.map((r) => r.stateHead));
+    const obMeta = data?.meta.orderBookingPrimary;
+    const primaryOrderBooking = obMeta
+      ? Object.entries(obMeta)
+          .filter(([h]) => filteredHeadKeys.size === 0 || filteredHeadKeys.has(h))
+          .reduce((s, [, v]) => s + v, 0)
+      : null;
+    // Pending orders = order booking (booked) minus sale (dispatched)
+    const pendingOrders =
+      primaryOrderBooking != null && sale > 0 ? primaryOrderBooking - sale : null;
+
     const lowPerf = filteredRows.filter((r) => isLowPerf(r.band, lowPerfThreshold)).length;
     const noTarget = filteredRows.filter((r) => r.band === "noTarget").length;
     return {
       target,
       booking,
       sale,
+      primaryOrderBooking,
+      pendingOrders,
       achPct: target > 0 ? booking / target : null,
       members: filteredRows.length,
       lowPerf,
       noTarget,
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredRows, lowPerfThreshold, summaryByHead, data?.meta.headSales]);
+  }, [filteredRows, lowPerfThreshold, summaryByHead, data?.meta.headSales, data?.meta.orderBookingPrimary]);
 
   // Rows to render for each view (after sort)
   function viewRows(): Member[] {
@@ -587,7 +627,7 @@ export default function StateHeadDashboard() {
           <KpiTile label="Members" value={fmtN(kpi.members)} sub={`${kpi.noTarget} no target`} />
           <KpiTile label={`Target (${period.label})`} value={fmtCr(kpi.target > 0 ? kpi.target : null)} />
           <KpiTile
-            label="Order Booking"
+            label="Order Booking (Secondary)"
             value={data.meta.ordersAvailable ? fmtCr(kpi.booking) : "Pending"}
             sub={data.meta.orderBookingSource ?? undefined}
           />
@@ -597,9 +637,19 @@ export default function StateHeadDashboard() {
           />
           <KpiTile label="Low Performers" value={fmtN(kpi.lowPerf)} sub={`<${lowPerfThreshold}% threshold`} />
           <KpiTile
-            label="Sale"
+            label="Sale (Dispatched)"
             value={fmtCr(kpi.sale > 0 ? kpi.sale : null)}
             sub={data.meta.saleSource ?? undefined}
+          />
+          <KpiTile
+            label="Order Booking (Primary)"
+            value={fmtCr(kpi.primaryOrderBooking)}
+            sub={data.meta.orderBookingPrimarySource ?? undefined}
+          />
+          <KpiTile
+            label="Pending Orders"
+            value={fmtCr(kpi.pendingOrders)}
+            sub={kpi.primaryOrderBooking != null ? "Order Booking minus Dispatched" : undefined}
           />
         </div>
       )}
@@ -683,6 +733,22 @@ export default function StateHeadDashboard() {
       {/* ── Primary view ── */}
       {!loading && data && activeView === "primary" && (
         <div className="overflow-x-auto rounded-lg border">
+          {data.meta.primaryAttributionDiagnostics && (
+            <div className="px-3 py-2 text-xs text-muted-foreground border-b bg-muted/30">
+              {data.meta.primaryAttributionDiagnostics.distMapAvailable
+                ? `Primary attribution: ${
+                    data.meta.primaryAttributionDiagnostics.attributionPct != null
+                      ? `${(data.meta.primaryAttributionDiagnostics.attributionPct * 100).toFixed(0)}% of order value attributed to named members`
+                      : "distributor map loaded"
+                  }`
+                : "Distributor map loading in background — per-member primary columns will populate on next refresh."}
+            </div>
+          )}
+          {!data.meta.primaryAttributionDiagnostics && (
+            <div className="px-3 py-2 text-xs text-muted-foreground border-b bg-muted/30">
+              Distributor map building in background — per-member primary columns will populate on next refresh.
+            </div>
+          )}
           <table className="w-full text-sm">
             <thead className="bg-muted/50">
               <tr>
@@ -690,10 +756,11 @@ export default function StateHeadDashboard() {
                 <SortTh label="State Head" sortKey="stateHead" sort={sort} onSort={toggleSort} />
                 <Th label="State" />
                 <Th label="HQ" />
-                <SortTh label="Distributors" sortKey="distributorCount" sort={sort} onSort={toggleSort} className="text-right" />
-                <SortTh label="Direct Dealers" sortKey="directDealerCount" sort={sort} onSort={toggleSort} className="text-right" />
+                <SortTh label="Distributors" sortKey="primaryDistributors" sort={sort} onSort={toggleSort} className="text-right" />
+                <SortTh label="Direct Dealers" sortKey="primaryDirectDealers" sort={sort} onSort={toggleSort} className="text-right" />
                 <SortTh label="Target (Primary)" sortKey="targetPrimary" sort={sort} onSort={toggleSort} className="text-right" />
-                <SortTh label="Order Booking" sortKey="orderBooking" sort={sort} onSort={toggleSort} className="text-right" />
+                <SortTh label="Order Booking" sortKey="primaryOrderAmount" sort={sort} onSort={toggleSort} className="text-right" />
+                <SortTh label="Sale (Dispatched)" sortKey="primarySaleAmount" sort={sort} onSort={toggleSort} className="text-right" />
                 <Th label="Old/New" />
               </tr>
             </thead>
@@ -704,18 +771,17 @@ export default function StateHeadDashboard() {
                   <Td className="text-muted-foreground">{r.stateHead}</Td>
                   <Td>{r.state}</Td>
                   <Td>{r.hq}</Td>
-                  <Td className="text-right">{fmtN(r.distributorCount)}</Td>
-                  <Td className="text-right">{fmtN(r.directDealerCount)}</Td>
+                  <Td className="text-right">{fmtN(r.primaryDistributors)}</Td>
+                  <Td className="text-right">{fmtN(r.primaryDirectDealers)}</Td>
                   <Td className="text-right">{fmtCr(r.targetPrimary)}</Td>
-                  <Td className="text-right">
-                    {data.meta.ordersAvailable ? fmtCr(r.orderBooking) : "—"}
-                  </Td>
+                  <Td className="text-right">{fmtCr(r.primaryOrderAmount)}</Td>
+                  <Td className="text-right">{fmtCr(r.primarySaleAmount)}</Td>
                   <Td>{r.oldNew}</Td>
                 </tr>
               ))}
               {viewRows().length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                  <td colSpan={10} className="px-3 py-6 text-center text-sm text-muted-foreground">
                     No primary team members found.
                   </td>
                 </tr>
