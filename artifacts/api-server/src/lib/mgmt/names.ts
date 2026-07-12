@@ -42,6 +42,11 @@ const HEAD_ALIASES: Record<string, string> = {
   aqilrizvi: "syedaqilrizvi",
   sandeep: "sandeepdadheech",
   snadeep: "sandeepdadheech",
+  // Register spells "BIJJU"; roster / State Head Dashboard spell "Biju C.O".
+  // Without this alias normHead("BIJJU")="bijju" has no substring overlap with
+  // normHead("Biju C.O")="bijuco", so the head silently gets zero sale.
+  bijju: "bijuco",
+  biju: "bijuco",
 };
 
 // Resolves head-name spellings from any source (register, bridge, folder

@@ -1,5 +1,5 @@
 {
-  "comment": "Reconciliation anchors for the per-member Management Report, sourced from the Secondary Order Booking file using NET Sub Total. Money is in rupees. saleReportTotal and orders are externally validated ground truth (the workbook's own printed grand total 2,310,913,869 and its order count). activeRetailers, activeMembers and perHeadSale are regression locks pinned to the corrected net/whole-file computation so a future change that reverts to gross Order Value, drops dated rows, or drops a head is caught. The activeMembers anchor locks the count of distinct member names booking orders in the file (a file statistic, not the roster-active count). registeredRetailers/registeredMembers are the company's roster/master sizes shown for context (the retailer master is not loaded in-app and the full HR roster is not yet shared, so the app's live registered-member count comes from the fallback roster). Tolerances: moneyPassPct/countPassPct are percent of expected (pass within, warn within 2x, fail beyond); memberCountAbs is an absolute member count; coverageMinPct is the minimum share of the company net total the roster spine must attribute to a member (pass at/above, warn within 10 points below, fail lower).",
+  "comment": "Verification anchors for the Prayag Sales Intelligence dashboard. All money in rupees. Primary source of truth: the client's approved, signed-off files (STATE HEAD DASHBOARD for secondary; State Head Sale registers for primary). If the app cannot hit an anchor, the app is wrong, not the anchor. Tolerances: moneyPassPct/countPassPct are percent of expected (pass within, warn within 2x, fail beyond); memberCountAbs is absolute; coverageMinPct is the minimum share of the company net total the roster spine must attribute to a member.",
   "tolerances": {
     "moneyPassPct": 1,
     "countPassPct": 2,
@@ -8,23 +8,139 @@
   },
   "fy_anchors": {
     "2025-26": {
-      "saleReportTotal": 2310913869,
+      "comment": "Source: approved STATE HEAD DASHBOARD 2025-26. Basis: net order booking (Sub Total).",
+      "saleReportTotal": 2401400000,
       "orders": 52515,
       "registeredRetailers": 15809,
-      "activeRetailers": 9078,
+      "activeRetailers": 8467,
       "registeredMembers": 240,
       "activeMembers": 200,
       "perHeadSale": {
-        "Sandeep Dadheech": 1362100000,
-        "Syed Aqil Rizvi": 439100000,
-        "Lalan Kumar": 116400000,
-        "Biju C.O": 96600000,
-        "Anant Singh": 75700000,
-        "Pawan Sharma": 33500000,
-        "Nasir Hussain Khan": 22200000,
-        "Sunil Patel": 14800000,
-        "Sulinder Pal": 14400000
+        "Sandeep Dadheech": 1573900000,
+        "Syed Aqil Rizvi": 452300000,
+        "Lalan Kumar": 132500000,
+        "Anant Singh": 98600000,
+        "Biju C.O": 55500000
       }
     }
-  }
+  },
+  "primary_anchors": {
+    "comment": "Source: State Head Sale registers, independently recomputed. Basis: Taxable Value (net dispatch). Biju C.O FY26-27 = 58200000 is the canary: if BIJJU in the register does not map to Biju C.O the check shows 0 and head-name normalisation is broken.",
+    "2026-27": {
+      "total": 732200000,
+      "perHead": {
+        "Sandeep Dadheech": 327700000,
+        "Syed Aqil Rizvi": 130400000,
+        "Biju C.O": 58200000,
+        "Suresh Nair": 29100000,
+        "Anant Singh": 25700000,
+        "Babu": 23500000,
+        "Sulinder Pal": 21200000,
+        "Pawan Sharma": 19000000,
+        "Lalan Kumar": 18000000,
+        "Nasir Hussain Khan": 9900000,
+        "Sunil Patel": 8000000,
+        "Anuj": 7300000
+      }
+    },
+    "2025-26": {
+      "total": 3611400000,
+      "perHead": {}
+    },
+    "2024-25": {
+      "total": 3411400000,
+      "perHead": {}
+    },
+    "growth_2526_vs_2425_pct": 5.9
+  },
+  "target_anchors": {
+    "comment": "FY2026-27 targets are Q1 (Apr-Jun monthly values only), not annual. achievement = actual(period) / sum(target_m_Apr + target_m_May + target_m_Jun). targetMonthlyRatio = total_target / monthly_value should equal 3.0 for Q1 targets; if it comes out ~12 the app is reading annual as monthly.",
+    "2026-27": {
+      "q1SecondaryTargetTotal": 978200000,
+      "targetMonthlyRatio": 3.0,
+      "memberAchievements": {
+        "Sujan Ghata": 0.571,
+        "Surojit Mondal": 0.238
+      }
+    },
+    "2025-26": {
+      "companyAchievementPct": 0.633,
+      "companySecondaryTarget": 3650000000
+    }
+  },
+  "source_list": [
+    {
+      "key": "roster",
+      "label": "Team Member Roster (HR file)",
+      "spreadsheetId": "1Nb8gRcdzY-iambAzwExTmeVY_ob6vnQ2",
+      "type": "drive_file",
+      "pendingExpected": false
+    },
+    {
+      "key": "target_master",
+      "label": "Prayag Target Master",
+      "spreadsheetId": "1ZLok3_8AZHdfrUm4T2lJmonAjngQFz4TuNLkHtU3p2I",
+      "type": "spreadsheet",
+      "pendingExpected": false
+    },
+    {
+      "key": "rate_list",
+      "label": "Rate List / Item & Customer Master (FY26-27)",
+      "spreadsheetId": "1njO-srsS29qiE4t45-zr5njbB7R2Zb-oSnv2NL1ONY4",
+      "type": "spreadsheet",
+      "pendingExpected": false
+    },
+    {
+      "key": "group_index",
+      "label": "Product Group Index (INDEX tab)",
+      "spreadsheetId": "1g-4_lDCeXQfUmp-VQ_mEWXQJyLMJXUGmRwGgughYHFY",
+      "type": "spreadsheet",
+      "pendingExpected": false
+    },
+    {
+      "key": "order_book_2627",
+      "label": "Order Book FY2026-27 (monthly tabs + sale data)",
+      "spreadsheetId": "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A",
+      "type": "spreadsheet",
+      "pendingExpected": false
+    },
+    {
+      "key": "state_head_dashboard_2627",
+      "label": "STATE HEAD DASHBOARD FY2026-27 (roster fallback + SFA)",
+      "spreadsheetId": "1E1jEY_yO8LmpqBDpcesS_fu2SBPEQ0eKO5xN29XyTEM",
+      "type": "spreadsheet",
+      "pendingExpected": false
+    },
+    {
+      "key": "state_head_sale_2627",
+      "label": "State Head Sale Register FY2026-27",
+      "spreadsheetId": "1QIpcfgOVCFjcCmgU_DXKn8h7Bfa8rm2q2wB2HneTvKs",
+      "type": "spreadsheet",
+      "pendingExpected": false
+    },
+    {
+      "key": "party_os_payment_2627",
+      "label": "Party O/S & Payment FY2026-27",
+      "spreadsheetId": "1oHFpXqVDPRF3Vi3WV9MdNcxkHNjgytLPxXUQgM6o1ok",
+      "type": "spreadsheet",
+      "pendingExpected": false
+    },
+    {
+      "key": "secondary_order_booking_2526",
+      "label": "Secondary Order Booking Segment Wise (FY2025-26)",
+      "spreadsheetId": "",
+      "type": "folder_scan",
+      "folderId": "1Ww2B1FKjpshRTcOa_F7OUBiBsBzpVCPZ",
+      "pendingExpected": false
+    },
+    {
+      "key": "secondary_order_booking_2627",
+      "label": "Secondary Order Booking Segment Wise (FY2026-27)",
+      "spreadsheetId": "",
+      "type": "folder_scan",
+      "folderId": "1Ww2B1FKjpshRTcOa_F7OUBiBsBzpVCPZ",
+      "pendingExpected": true,
+      "pendingNote": "FY2026-27 secondary order booking file not yet created — expected known gap, not an error."
+    }
+  ]
 }

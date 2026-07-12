@@ -242,8 +242,8 @@ function Td({
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function StateHeadDashboard() {
-  const [fy, setFy] = useState("2026-27");
-  const [period, setPeriod] = useState<Period>(PERIODS[0]);
+  const [fy, setFy] = useState("2025-26");
+  const [period, setPeriod] = useState<Period>(PERIODS[4]);
   const [stateHeadFilter, setStateHeadFilter] = useState("");
   const [search, setSearch] = useState("");
   const [activeView, setActiveView] = useState<View>("data");
