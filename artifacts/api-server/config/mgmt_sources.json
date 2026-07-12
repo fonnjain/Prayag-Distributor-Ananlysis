@@ -39,5 +39,12 @@
   "group_index": {
     "sheetId": "1g-4_lDCeXQfUmp-VQ_mEWXQJyLMJXUGmRwGgughYHFY",
     "tab": "INDEX"
+  },
+  "party_os_payment": {
+    "comment": "PARTY O/S & PAYMENT workbooks. Filter rows where Type='Pymt'; the payment amount is the collection. Each file may cover multiple months; the State Head column (normalised via head_alias) is the join key.",
+    "files_by_year": {
+      "2026-27": "1oHFpXqVDPRF3Vi3WV9MdNcxkHNjgytLPxXUQgM6o1ok",
+      "2025-26": "1por9tFeT4jeRFc16rRW_S4z3Hk00t6zvlr840246zpA"
+    }
   }
 }

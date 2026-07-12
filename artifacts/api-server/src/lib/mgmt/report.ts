@@ -31,6 +31,11 @@ import {
   type TargetField,
 } from "./targets.js";
 import { logger } from "../logger.js";
+import {
+  loadHrSfaDashboard,
+  type HrSfaRecord,
+} from "./hrSfaDashboard.js";
+import { loadMgmtMargins } from "./mgmtMargins.js";
 
 export type ReportFilters = {
   fy: string;
@@ -53,9 +58,6 @@ export function regionMap(): RegionMap {
 const MISSING_SOURCES: Record<string, string> = {
   target:
     "Target Master (primary/secondary/monthly targets and business plans live in scattered per-head plan sheets; needs one consolidated sheet)",
-  sfa: "SFA field app export (visits, visited parties, lead counters, working days)",
-  gps: "SFA field app export (GPS kilometres / distance)",
-  payroll: "Payroll / CTC master (the HR roster has no CTC column)",
   expense: "Finance T.A. bill / expense export per team member per month",
   orders:
     "Secondary Order Booking Segment Wise workbook for the selected year (not found in the Drive folder yet)",
@@ -510,6 +512,7 @@ function summaryCols(
   ordersMissingKey: string | null,
   targetsMissingKey: string | null,
   saleMissingKey: string | null,
+  hrSfa: Map<string, HrSfaRecord>,
 ): ColSpec[] {
   const fy = filters.fy;
   const s = fyShort(fy);
@@ -544,6 +547,16 @@ function summaryCols(
       ? { header, kind, missing: tm, total: false }
       : { header, kind, get, total };
   const { monthFrom, monthTo } = filters;
+  const h = (r: MemberRow): HrSfaRecord | undefined => hrSfa.get(r.m.normKey);
+  const avgOrderPerDay = (r: MemberRow): number | null => {
+    const wd = h(r)?.workingDays;
+    return wd && wd > 0 && r.orders ? Math.round(r.orders.amount / wd) : null;
+  };
+  const avgVisitPerDay = (r: MemberRow): number | null => {
+    const wd = h(r)?.workingDays;
+    const tv = h(r)?.totalVisits;
+    return wd && wd > 0 && tv != null ? Math.round((tv / wd) * 10) / 10 : null;
+  };
   return [
     { header: "State Head", kind: "text", get: (r) => r.m.stateHead, width: 18 },
     { header: "State", kind: "text", get: (r) => r.m.state, width: 14 },
@@ -559,7 +572,7 @@ function summaryCols(
       width: 14,
     },
     sale(`Sale ${p}`, "money", (r) => r.priorSaleAmount),
-    { header: "CTC Monthly", kind: "money", missing: "payroll" },
+    { header: "CTC Monthly", kind: "money", get: (r) => h(r)?.ctcMonthly ?? null },
     t("Target monthly", "money", (r) => {
       const a = tgtAnnual(r, "secondary");
       return a == null ? null : a / 12;
@@ -595,7 +608,7 @@ function summaryCols(
           total: false,
         },
     o("Total Old Retailers", "int", (x) => x.oldRetailers),
-    { header: "Visited Parties", kind: "int", missing: "sfa" },
+    { header: "Visited Parties", kind: "int", get: (r) => h(r)?.visitedParties ?? null },
     o("New Retailers", "int", (x) => x.newRetailers),
     o(
       "Number of New Retailers Orders Received",
@@ -603,7 +616,7 @@ function summaryCols(
       (x) => x.newPartiesWithBusiness,
     ),
     o("Total Retailers", "int", (x) => x.totalRetailers),
-    { header: "Non Visited Retailers", kind: "int", missing: "sfa" },
+    { header: "Non Visited Retailers", kind: "int", get: (r) => h(r)?.nonVisitedRetailers ?? null },
     o("Old Party Business Order Booking", "money", (x) => x.oldPartyAmount),
     o("New Party Order Booking", "money", (x) => x.newPartyAmount),
     o(
@@ -618,31 +631,33 @@ function summaryCols(
     ),
     o("Business Achieved By", "int", (x) => x.partiesWithBusiness),
     o("Business Achieved By Direct Dealer", "int", (x) => x.directParties),
-    { header: "Total Lead Counters", kind: "int", missing: "sfa" },
-    { header: "Total Lead Visits", kind: "int", missing: "sfa" },
-    { header: "Total Non Lead Visits", kind: "int", missing: "sfa" },
+    { header: "Total Lead Counters", kind: "int", get: (r) => h(r)?.totalLeadCounters ?? null },
+    { header: "Total Lead Visits", kind: "int", get: (r) => h(r)?.totalLeadVisits ?? null },
+    { header: "Total Non Lead Visits", kind: "int", get: (r) => h(r)?.totalNonLeadVisits ?? null },
     o("Distributor Counter", "int", (x) => x.distributorCount),
-    { header: "Distributor Visits", kind: "int", missing: "sfa" },
+    { header: "Distributor Visits", kind: "int", get: (r) => h(r)?.distributorVisits ?? null },
     o("Direct Dealer Counter", "int", (x) => x.directDealerCount),
-    { header: "Direct Dealer Visits", kind: "int", missing: "sfa" },
-    { header: "Distributor/Direct Dealer Lead Counter", kind: "int", missing: "sfa" },
-    { header: "Distributor/Direct Dealer Lead Visits", kind: "int", missing: "sfa" },
-    { header: "Active Parties Visits", kind: "int", missing: "sfa" },
-    { header: "Total Visits", kind: "int", missing: "sfa" },
-    { header: "Working Days", kind: "int", missing: "sfa" },
-    { header: "Average Order Per Day", kind: "money", missing: "sfa" },
-    { header: "Average Visit Per Day", kind: "int", missing: "sfa" },
-    { header: "CTC", kind: "money", missing: "payroll" },
+    { header: "Direct Dealer Visits", kind: "int", get: (r) => h(r)?.directDealerVisits ?? null },
+    { header: "Distributor/Direct Dealer Lead Counter", kind: "int", get: (r) => h(r)?.ddLeadCounter ?? null },
+    { header: "Distributor/Direct Dealer Lead Visits", kind: "int", get: (r) => h(r)?.ddLeadVisits ?? null },
+    { header: "Active Parties Visits", kind: "int", get: (r) => h(r)?.activePartiesVisits ?? null },
+    { header: "Total Visits", kind: "int", get: (r) => h(r)?.totalVisits ?? null },
+    { header: "Working Days", kind: "int", get: (r) => h(r)?.workingDays ?? null },
+    om
+      ? { header: "Average Order Per Day", kind: "money", missing: om, total: false }
+      : { header: "Average Order Per Day", kind: "money", get: avgOrderPerDay, total: false },
+    { header: "Average Visit Per Day", kind: "int", get: avgVisitPerDay },
+    { header: "CTC", kind: "money", get: (r) => h(r)?.ctcMonthly ?? null },
     { header: "T.A. Bill ST. Cost", kind: "money", missing: "expense" },
-    { header: "Cost Ratio (%)", kind: "pct", missing: "expense" },
+    { header: "Cost Ratio (%)", kind: "pct", get: (r) => h(r)?.costRatioPct ?? null },
     o("Business Per Retailer", "money", (x) => x.businessPerRetailer, false),
     o("No of Orders", "int", (x) => x.orderCount),
-    { header: "Total Working Hours", kind: "int", missing: "sfa" },
-    { header: "Total GPS KM", kind: "int", missing: "gps" },
-    { header: "Avg Distance (KM)", kind: "int", missing: "gps" },
-    { header: "Business Received Parties Visits", kind: "int", missing: "sfa" },
-    { header: "Visited But No Business Received", kind: "int", missing: "sfa" },
-    { header: "No Visit No Business Received", kind: "int", missing: "sfa" },
+    { header: "Total Working Hours", kind: "int", get: (r) => h(r)?.totalWorkingHours ?? null },
+    { header: "Total GPS KM", kind: "int", get: (r) => h(r)?.totalGpsKm ?? null },
+    { header: "Avg Distance (KM)", kind: "int", get: (r) => h(r)?.avgDistanceKm ?? null },
+    { header: "Business Received Parties Visits", kind: "int", get: (r) => h(r)?.businessReceivedVisits ?? null },
+    { header: "Visited But No Business Received", kind: "int", get: (r) => h(r)?.visitedNoBusinessReceived ?? null },
+    { header: "No Visit No Business Received", kind: "int", get: (r) => h(r)?.noVisitNoBusinessReceived ?? null },
     {
       header: "Left Date",
       kind: "date",
@@ -657,6 +672,7 @@ function dataCols(
   ordersMissingKey: string | null,
   targetsMissingKey: string | null,
   saleMissingKey: string | null,
+  hrSfa: Map<string, HrSfaRecord>,
 ): ColSpec[] {
   const fy = filters.fy;
   const s = fyShort(fy);
@@ -682,6 +698,16 @@ function dataCols(
       ? { header, kind, missing: tmk, total: false }
       : { header, kind, get, total };
   const { monthFrom, monthTo } = filters;
+  const h = (r: MemberRow): HrSfaRecord | undefined => hrSfa.get(r.m.normKey);
+  const avgOrderPerDay = (r: MemberRow): number | null => {
+    const wd = h(r)?.workingDays;
+    return wd && wd > 0 && r.orders ? Math.round(r.orders.amount / wd) : null;
+  };
+  const avgVisitPerDay = (r: MemberRow): number | null => {
+    const wd = h(r)?.workingDays;
+    const tv = h(r)?.totalVisits;
+    return wd && wd > 0 && tv != null ? Math.round((tv / wd) * 10) / 10 : null;
+  };
   const secondaryAchievement = (r: MemberRow): number | null =>
     achievement(r.orders?.amount, tgtRange(r, "secondary", monthFrom, monthTo));
   return [
@@ -696,10 +722,10 @@ function dataCols(
     o("Achievement", "money", (x) => x.amount),
     o("Direct Dealers order", "money", (x) => x.directAmount),
     o("Total Old Retailers", "int", (x) => x.oldRetailers),
-    { header: "Visited in a Month", kind: "int", missing: "sfa" },
+    { header: "Visited in a Month", kind: "int", get: (r) => h(r)?.visitedParties ?? null },
     o("New Retailers", "int", (x) => x.newRetailers),
     o("Total Retailers", "int", (x) => x.totalRetailers),
-    { header: "Non Visited Retailers", kind: "int", missing: "sfa" },
+    { header: "Non Visited Retailers", kind: "int", get: (r) => h(r)?.nonVisitedRetailers ?? null },
     o("Old Party Business Order Booking", "money", (x) => x.oldPartyAmount),
     o("New Party Order Booking", "money", (x) => x.newPartyAmount),
     o(
@@ -714,24 +740,26 @@ function dataCols(
     ),
     o("Business Achieved By", "int", (x) => x.partiesWithBusiness),
     o("Business Achieved By Direct Dealer", "int", (x) => x.directParties),
-    { header: "Total Lead Counters", kind: "int", missing: "sfa" },
-    { header: "Total Lead Visits", kind: "int", missing: "sfa" },
-    { header: "Total Non Lead Visits", kind: "int", missing: "sfa" },
+    { header: "Total Lead Counters", kind: "int", get: (r) => h(r)?.totalLeadCounters ?? null },
+    { header: "Total Lead Visits", kind: "int", get: (r) => h(r)?.totalLeadVisits ?? null },
+    { header: "Total Non Lead Visits", kind: "int", get: (r) => h(r)?.totalNonLeadVisits ?? null },
     o("Distributor Counter", "int", (x) => x.distributorCount),
-    { header: "Distributor Visits", kind: "int", missing: "sfa" },
+    { header: "Distributor Visits", kind: "int", get: (r) => h(r)?.distributorVisits ?? null },
     o("Direct Dealer Counter", "int", (x) => x.directDealerCount),
-    { header: "Direct Dealer Visits", kind: "int", missing: "sfa" },
-    { header: "Distributor/Direct Dealer Lead Counter", kind: "int", missing: "sfa" },
-    { header: "Distributor/Direct Dealer Lead Visits", kind: "int", missing: "sfa" },
-    { header: "Active Parties Visits", kind: "int", missing: "sfa" },
-    { header: "Total Visits", kind: "int", missing: "sfa" },
-    { header: "Working Days", kind: "int", missing: "sfa" },
-    { header: "Average Sales Per Day", kind: "money", missing: "sfa" },
-    { header: "Average Visit Per Day", kind: "int", missing: "sfa" },
-    { header: "CTC Monthly", kind: "money", missing: "payroll" },
-    { header: "CTC", kind: "money", missing: "payroll" },
+    { header: "Direct Dealer Visits", kind: "int", get: (r) => h(r)?.directDealerVisits ?? null },
+    { header: "Distributor/Direct Dealer Lead Counter", kind: "int", get: (r) => h(r)?.ddLeadCounter ?? null },
+    { header: "Distributor/Direct Dealer Lead Visits", kind: "int", get: (r) => h(r)?.ddLeadVisits ?? null },
+    { header: "Active Parties Visits", kind: "int", get: (r) => h(r)?.activePartiesVisits ?? null },
+    { header: "Total Visits", kind: "int", get: (r) => h(r)?.totalVisits ?? null },
+    { header: "Working Days", kind: "int", get: (r) => h(r)?.workingDays ?? null },
+    om
+      ? { header: "Average Sales Per Day", kind: "money", missing: om, total: false }
+      : { header: "Average Sales Per Day", kind: "money", get: avgOrderPerDay, total: false },
+    { header: "Average Visit Per Day", kind: "int", get: avgVisitPerDay },
+    { header: "CTC Monthly", kind: "money", get: (r) => h(r)?.ctcMonthly ?? null },
+    { header: "CTC", kind: "money", get: (r) => h(r)?.ctcMonthly ?? null },
     { header: "T.A. Bill ST. Cost", kind: "money", missing: "expense" },
-    { header: "Cost Ratio (%)", kind: "pct", missing: "expense" },
+    { header: "Cost Ratio (%)", kind: "pct", get: (r) => h(r)?.costRatioPct ?? null },
     o("Business Per Retailer", "money", (x) => x.businessPerRetailer, false),
     t("Target Achievement (%)", "pct", secondaryAchievement, false),
     t(
@@ -746,13 +774,13 @@ function dataCols(
       false,
     ),
     o("No of Orders", "int", (x) => x.orderCount),
-    { header: "Total Working Hours", kind: "int", missing: "sfa" },
-    { header: "Total GPS KM", kind: "int", missing: "gps" },
+    { header: "Total Working Hours", kind: "int", get: (r) => h(r)?.totalWorkingHours ?? null },
+    { header: "Total GPS KM", kind: "int", get: (r) => h(r)?.totalGpsKm ?? null },
     o("New Party Orders", "int", (x) => x.newPartyOrders),
-    { header: "Avg Distance (KM)", kind: "int", missing: "gps" },
-    { header: "Business Received Parties Visits", kind: "int", missing: "sfa" },
-    { header: "Visited But No Business Received", kind: "int", missing: "sfa" },
-    { header: "No Visit No Business Received", kind: "int", missing: "sfa" },
+    { header: "Avg Distance (KM)", kind: "int", get: (r) => h(r)?.avgDistanceKm ?? null },
+    { header: "Business Received Parties Visits", kind: "int", get: (r) => h(r)?.businessReceivedVisits ?? null },
+    { header: "Visited But No Business Received", kind: "int", get: (r) => h(r)?.visitedNoBusinessReceived ?? null },
+    { header: "No Visit No Business Received", kind: "int", get: (r) => h(r)?.noVisitNoBusinessReceived ?? null },
     sm
       ? { header: `Sale Report ${s}`, kind: "money", missing: sm, total: false }
       : {
@@ -921,6 +949,7 @@ export async function buildManagementWorkbook(
   // Sale Report is now sourced from the same secondary order file as Order
   // Booked, so it is blank for exactly the same reason (file not read yet).
   const saleMissingKey = saleAvailable ? null : "orders";
+  const hrSfa = await loadHrSfaDashboard();
   const wb = new ExcelJS.Workbook();
   wb.creator = "Prayag Sales Intelligence";
   wb.created = new Date();
@@ -937,7 +966,7 @@ export async function buildManagementWorkbook(
       { header: "DOJ", kind: "date", get: (r) => dateVal(r.m.dojSerial), width: 11 },
       { header: "Week Off", kind: "text", get: (r) => r.m.weekOff || null, width: 10 },
       { header: "Market Hours", kind: "text", get: (r) => r.m.marketHours || null, width: 11 },
-      { header: `Monthly CTC ${fyShort(priorFy(fy))}`, kind: "money", missing: "payroll" },
+      { header: `Monthly CTC ${fyShort(priorFy(fy))}`, kind: "money", get: (r) => hrSfa.get(r.m.normKey)?.ctcMonthly ?? null },
       targetsMissingKey
         ? { header: `Monthly Target ${s}`, kind: "money", missing: targetsMissingKey }
         : {
@@ -1190,18 +1219,27 @@ export async function buildManagementWorkbook(
       { header: "DOJ", kind: "date", get: (r) => dateVal(r.m.dojSerial), width: 11 },
       { header: "Week Off", kind: "text", get: (r) => r.m.weekOff || null, width: 10 },
       { header: "Market Hours", kind: "text", get: (r) => r.m.marketHours || null, width: 11 },
-      { header: `Monthly CTC ${fyShort(priorFy(fy))}`, kind: "money", missing: "payroll" },
+      { header: `Monthly CTC ${fyShort(priorFy(fy))}`, kind: "money", get: (r) => hrSfa.get(r.m.normKey)?.ctcMonthly ?? null },
       ordersMissingKey
         ? { header: `Distributor ${s}`, kind: "int", missing: ordersMissingKey }
         : { header: `Distributor ${s}`, kind: "int", get: (r) => ord(r, (x) => x.distributorCount), total: true },
       ordersMissingKey
         ? { header: `Direct Dealers ${s}`, kind: "int", missing: ordersMissingKey }
         : { header: `Direct Dealers ${s}`, kind: "int", get: (r) => ord(r, (x) => x.directDealerCount), total: true },
-      { header: "Distributor & Direct Dealer Visit", kind: "int", missing: "sfa" },
+      {
+        header: "Distributor & Direct Dealer Visit",
+        kind: "int",
+        get: (r) => {
+          const sfa = hrSfa.get(r.m.normKey);
+          if (!sfa) return null;
+          if (sfa.distributorVisits == null && sfa.directDealerVisits == null) return null;
+          return (sfa.distributorVisits ?? 0) + (sfa.directDealerVisits ?? 0);
+        },
+      },
       ordersMissingKey
         ? { header: `Retailers ${s}`, kind: "int", missing: ordersMissingKey }
         : { header: `Retailers ${s}`, kind: "int", get: (r) => ord(r, (x) => x.totalRetailers), total: true },
-      { header: "Retailers Visit", kind: "int", missing: "sfa" },
+      { header: "Retailers Visit", kind: "int", get: (r) => hrSfa.get(r.m.normKey)?.visitedParties ?? null },
       ordersMissingKey
         ? { header: `Secondary Order Booked ${s}`, kind: "money", missing: ordersMissingKey }
         : { header: `Secondary Order Booked ${s}`, kind: "money", get: (r) => ord(r, (x) => x.amount), total: true },
@@ -1252,7 +1290,7 @@ export async function buildManagementWorkbook(
   // --- Tab 3: Low Performers (flagged from Target Master achievement)
   {
     const ws = wb.addWorksheet(`Low Performers `);
-    const cols = summaryCols(filters, ordersMissingKey, targetsMissingKey, saleMissingKey);
+    const cols = summaryCols(filters, ordersMissingKey, targetsMissingKey, saleMissingKey, hrSfa);
     ws.mergeCells(1, 2, 1, 6);
     const title = ws.getCell(1, 2);
     title.value = `Below ${filters.lowPerfPct}% Acheivement & Cost Ratio Above 5%`;
@@ -1294,7 +1332,7 @@ export async function buildManagementWorkbook(
   {
     const ws = wb.addWorksheet(`Summary ${s}`);
     ws.views = [{ state: "frozen", xSplit: 3, ySplit: 6 }];
-    const cols = summaryCols(filters, ordersMissingKey, targetsMissingKey, saleMissingKey);
+    const cols = summaryCols(filters, ordersMissingKey, targetsMissingKey, saleMissingKey, hrSfa);
     collectMissing(missing, cols, ws.name);
     const fyStart = fyBoundsSerial(fy).start;
     const newMembers = rows.filter(
@@ -1399,12 +1437,150 @@ export async function buildManagementWorkbook(
   {
     const ws = wb.addWorksheet("Data");
     ws.views = [{ state: "frozen", xSplit: 3, ySplit: 3 }];
-    const cols = dataCols(filters, ordersMissingKey, targetsMissingKey, saleMissingKey);
+    const cols = dataCols(filters, ordersMissingKey, targetsMissingKey, saleMissingKey, hrSfa);
     collectMissing(missing, cols, ws.name);
     writeGrid(ws, cols, rows, 3, null);
   }
 
-  // --- Tab 6: Missing Data
+  // --- Tab 6: GP Margin (from sale_line + cost_master; empty when no Cost Master)
+  {
+    const marginMap = await loadMgmtMargins(fy).catch(() => new Map());
+    const ws = wb.addWorksheet("GP Margin");
+    ws.views = [{ state: "frozen", xSplit: 1, ySplit: 3 }];
+
+    const HDR_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9E1F2" } };
+    const TOT_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFCE4D6" } };
+    const GRP_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF2F2F2" } };
+    const FMT_MON = "[<=9999999]##,##,##0;[>9999999]##,##,##,##0";
+    const FMT_PCT = "0.00%";
+
+    function mhdr(row: number, col: number, text: string, width?: number): void {
+      const c = ws.getCell(row, col);
+      c.value = text;
+      c.fill = HDR_FILL;
+      c.font = { bold: true, size: 9 };
+      c.alignment = { wrapText: true, vertical: "middle", horizontal: "center" };
+      if (width !== undefined) ws.getColumn(col).width = width;
+    }
+
+    // Row 1: title
+    ws.mergeCells(1, 1, 1, 6);
+    const title = ws.getCell(1, 1);
+    title.value = `GP Margin — ${s} (from dispatched-sale registers + Cost Master)`;
+    title.font = { bold: true, size: 12 };
+
+    // Row 2: note
+    ws.mergeCells(2, 1, 2, 6);
+    const note = ws.getCell(2, 1);
+    note.font = { italic: true, size: 9 };
+
+    // Row 3: headers
+    mhdr(3, 1, "State Head / Group", 26);
+    mhdr(3, 2, `Revenue ${s}`, 16);
+    mhdr(3, 3, `Cost-covered Revenue`, 18);
+    mhdr(3, 4, `Coverage %`, 12);
+    mhdr(3, 5, `GP Amount`, 16);
+    mhdr(3, 6, `GP %`, 10);
+
+    if (marginMap.size === 0) {
+      note.value =
+        "No Cost Master loaded — add a Cost Master to enable GP margin calculations.";
+      ws.getCell(4, 1).value = "No data";
+      ws.getCell(4, 1).font = { italic: true, size: 9 };
+    } else {
+      note.value =
+        "Margin = Revenue − Cost (qty × fg_cost). Only codes present in the Cost Master are included; uncovered revenue is shown in Coverage %.";
+
+      let rowNum = 4;
+      // Iterate roster rows (same order as other tabs) to match head ordering.
+      const seenHeads = new Set<string>();
+
+      for (const r of rows) {
+        const headCanon = r.m.normKey;
+        if (seenHeads.has(headCanon)) continue;
+        seenHeads.add(headCanon);
+
+        const m = marginMap.get(headCanon);
+        // Summary row (state head)
+        const c1 = ws.getCell(rowNum, 1);
+        c1.value = r.m.name;
+        c1.font = { bold: true, size: 9 };
+        c1.fill = TOT_FILL;
+
+        const rev = m?.totalRevenue ?? null;
+        const covRev = m?.coveredRevenue ?? null;
+        const gp = m?.gpAmount ?? null;
+        const gpPct = m?.gpPct ?? null;
+        const covPct = rev != null && rev > 0 && covRev != null ? covRev / rev : null;
+
+        const setMon = (col: number, val: number | null): void => {
+          const cell = ws.getCell(rowNum, col);
+          if (val != null) { cell.value = Math.round(val); cell.numFmt = FMT_MON; }
+          cell.font = { bold: true, size: 9 };
+          cell.fill = TOT_FILL;
+        };
+        const setPct = (col: number, val: number | null): void => {
+          const cell = ws.getCell(rowNum, col);
+          if (val != null) { cell.value = val; cell.numFmt = FMT_PCT; }
+          cell.font = { bold: true, size: 9 };
+          cell.fill = TOT_FILL;
+        };
+
+        setMon(2, rev);
+        setMon(3, covRev);
+        setPct(4, covPct);
+        setMon(5, gp);
+        setPct(6, gpPct);
+        rowNum++;
+
+        // Group breakdown rows (indented)
+        if (m) {
+          for (const g of m.byGroup) {
+            ws.getCell(rowNum, 1).value = `  ${g.group}`;
+            ws.getCell(rowNum, 1).font = { size: 9 };
+            ws.getCell(rowNum, 1).fill = GRP_FILL;
+
+            const setGMon = (col: number, val: number): void => {
+              ws.getCell(rowNum, col).value = Math.round(val);
+              ws.getCell(rowNum, col).numFmt = FMT_MON;
+              ws.getCell(rowNum, col).font = { size: 9 };
+              ws.getCell(rowNum, col).fill = GRP_FILL;
+            };
+            const setGPct = (col: number, val: number | null): void => {
+              const cell = ws.getCell(rowNum, col);
+              if (val != null) { cell.value = val; cell.numFmt = FMT_PCT; }
+              cell.font = { size: 9 };
+              cell.fill = GRP_FILL;
+            };
+
+            setGMon(2, g.revenue);
+            setGMon(3, g.coveredRevenue);
+            setGPct(4, g.revenue > 0 ? g.coveredRevenue / g.revenue : null);
+            setGMon(5, g.gpAmount);
+            setGPct(6, g.gpPct);
+            rowNum++;
+          }
+        }
+      }
+
+      // Grand total row
+      const totRev = [...marginMap.values()].reduce((s, m) => s + m.totalRevenue, 0);
+      const totCov = [...marginMap.values()].reduce((s, m) => s + m.coveredRevenue, 0);
+      const totCost = [...marginMap.values()].reduce((s, m) => s + m.totalCost, 0);
+      const totGp = totCov - totCost;
+      ws.getCell(rowNum, 1).value = "Total";
+      ws.getCell(rowNum, 1).font = { bold: true, size: 9 };
+      ws.getCell(rowNum, 1).fill = TOT_FILL;
+      [2, 3, 4, 5, 6].forEach((c) => { ws.getCell(rowNum, c).fill = TOT_FILL; ws.getCell(rowNum, c).font = { bold: true, size: 9 }; });
+      ws.getCell(rowNum, 2).value = Math.round(totRev); ws.getCell(rowNum, 2).numFmt = FMT_MON;
+      ws.getCell(rowNum, 3).value = Math.round(totCov); ws.getCell(rowNum, 3).numFmt = FMT_MON;
+      if (totRev > 0) { ws.getCell(rowNum, 4).value = totCov / totRev; ws.getCell(rowNum, 4).numFmt = FMT_PCT; }
+      ws.getCell(rowNum, 5).value = Math.round(totGp); ws.getCell(rowNum, 5).numFmt = FMT_MON;
+      if (totCov > 0) { ws.getCell(rowNum, 6).value = totGp / totCov; ws.getCell(rowNum, 6).numFmt = FMT_PCT; }
+    }
+  }
+
+  // --- Tab 7: Missing Data
   {
     const ws = wb.addWorksheet("Missing Data");
     ws.getColumn(1).width = 60;

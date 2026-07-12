@@ -160,7 +160,9 @@ export function monthlyReconcileError(
   const overrides = monthly.filter((v): v is number => v != null);
   if (overrides.length === 0) return null;
   if (annual == null) {
-    return `${field}: monthly values need an annual figure to reconcile against`;
+    // FY26-27 shape: quarterly targets entered directly into monthly cells,
+    // no annual figure.  Monthly-only is valid; nothing to cross-check.
+    return null;
   }
   const blanks = 12 - overrides.length;
   const implied =

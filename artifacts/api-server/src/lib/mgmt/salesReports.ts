@@ -30,6 +30,7 @@ import {
 } from "./names.js";
 import { db, saleLines, itemMaster } from "@workspace/db";
 import { eq, inArray } from "drizzle-orm";
+import { loadCollectionForFy } from "./collection.js";
 
 // -------------------------------------------------------------------------
 // Types
@@ -127,7 +128,7 @@ export type SalesRepReport = {
       segmentsUp: DeepRow[];
       segmentsDown: DeepRow[];
     };
-    saleCollection: { sale: number; saleLast: number; collection: null };
+    saleCollection: { sale: number; saleLast: number; collection: number | null };
     byStateByMonth: StateMonthRow[];
     byGroupByState: Record<string, DeepRow[]>;
     partyGroupMatrix: PartyGroupRow[];
@@ -428,13 +429,14 @@ export async function buildSalesReports(
   const startYear = fyStartYear(fy);
 
   // Run all heavy I/O in parallel.
-  const [dive, orderFile, priorOrderFile, roster, registers, bridge] = await Promise.all([
+  const [dive, orderFile, priorOrderFile, roster, registers, bridge, collectionMap] = await Promise.all([
     buildDeepDive(fy, repKey, scope),
     loadOrderFile(fy),
     loadOrderFile(prior),
     loadRoster(),
     loadStateHeadRegisters(),
     loadPartyBridge(),
+    loadCollectionForFy(fy).catch(() => new Map<string, number>()),
   ]);
 
   // Build minimal hierarchy for team rollup.
@@ -652,7 +654,16 @@ export async function buildSalesReports(
     saleCollection: {
       sale: saleTotal,
       saleLast: saleTotalPrior,
-      collection: null as null,
+      collection: (() => {
+        // Collection is tracked at state-head level (one aggregate per head).
+        // For a team-scope report the rep IS the head; for own-scope find the
+        // head above them in the roster.
+        const headKey =
+          effectiveScope === "team"
+            ? repKey
+            : normName(memberByKey.get(repKey)?.stateHead ?? "");
+        return headKey ? (collectionMap.get(headKey) ?? null) : null;
+      })(),
     },
     byStateByMonth,
     byGroupByState,

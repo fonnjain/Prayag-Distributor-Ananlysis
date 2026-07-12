@@ -282,7 +282,7 @@ function writeItemCodeSheet(
 
 function writeSaleCollectionSheet(
   wb: ExcelJS.Workbook,
-  saleCollection: { sale: number; saleLast: number; collection: null },
+  saleCollection: { sale: number; saleLast: number; collection: number | null },
   thisFyLabel: string,
   lastFyLabel: string,
 ): void {
@@ -311,17 +311,23 @@ function writeSaleCollectionSheet(
     ws.getCell(2, 5).numFmt = FMT_PCT1;
   }
 
-  ws.getCell(3, 1).value = "Collection";
-  ws.getCell(3, 2).fill = GREY_FILL;
-  ws.getCell(3, 3).fill = GREY_FILL;
-  ws.getCell(3, 4).fill = GREY_FILL;
-  ws.getCell(3, 5).fill = GREY_FILL;
-  ws.mergeCells(3, 2, 3, 5);
-  const collNote = ws.getCell(3, 2);
-  collNote.value = "Pending data source — collection is not yet ingested into this system";
-  collNote.font = { italic: true, size: 9 };
-  collNote.fill = GREY_FILL;
-  collNote.alignment = { horizontal: "left" };
+  if (saleCollection.collection != null) {
+    ws.getCell(3, 1).value = "Collection (YTD)";
+    ws.getCell(3, 2).value = Math.round(saleCollection.collection);
+    ws.getCell(3, 2).numFmt = FMT_MONEY;
+    ws.getCell(3, 3).value = "";
+    ws.getCell(3, 4).value = "";
+    ws.getCell(3, 5).value = "";
+  } else {
+    ws.getCell(3, 1).value = "Collection";
+    [2, 3, 4, 5].forEach((c) => { ws.getCell(3, c).fill = GREY_FILL; });
+    ws.mergeCells(3, 2, 3, 5);
+    const collNote = ws.getCell(3, 2);
+    collNote.value = "Pending data source — collection is not yet wired for this salesperson";
+    collNote.font = { italic: true, size: 9 };
+    collNote.fill = GREY_FILL;
+    collNote.alignment = { horizontal: "left" };
+  }
 
   ws.getColumn(1).width = 30;
 }

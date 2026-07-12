@@ -51,6 +51,7 @@ type MgmtSources = {
   party_tm_map: { sheetName: string; memberReportFolderId: string };
   target_master: { sheetId: string; name: string; tab: string };
   group_index: { sheetId: string; tab: string };
+  party_os_payment?: { files_by_year: Record<string, string> };
 };
 
 // Statically imported so esbuild bundles it — a cwd-relative read breaks in

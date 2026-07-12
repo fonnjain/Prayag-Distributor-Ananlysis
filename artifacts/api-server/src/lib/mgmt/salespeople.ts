@@ -458,11 +458,19 @@ export async function buildDeepDive(
   const segmentsDown = topMovers(bySegment, false, 5);
 
   // Target + achievement from the Target Master (secondary order booking target).
+  // FY26-27 shape: annual is null; quarterly targets live in monthly cells
+  // (Apr/May/Jun).  Use Σ(non-null monthly values) when any monthly target is
+  // present; fall back to the annual figure only when no monthly values exist.
   const targets = await loadTargetsForFy(fy);
   let target: number | null = null;
   for (const k of keys) {
-    const t = targets.get(k)?.annual.secondary;
-    if (t != null) target = (target ?? 0) + t;
+    const row = targets.get(k);
+    if (!row) continue;
+    const hasMonthly = row.monthly.secondary.some((v) => v != null);
+    const effectiveTgt = hasMonthly
+      ? row.monthly.secondary.reduce<number>((a, v) => a + (v ?? 0), 0)
+      : (row.annual.secondary ?? null);
+    if (effectiveTgt != null) target = (target ?? 0) + effectiveTgt;
   }
   const netOrderBooked = cur.net;
   const orders = cur.orderIds.size;
