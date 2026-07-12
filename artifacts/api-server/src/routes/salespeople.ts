@@ -197,7 +197,6 @@ router.get(
     try {
       const report = await buildSalesReports(fy, repKey, scope);
       const wb = await buildRepReportWorkbook(report, basis);
-      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
       const safeName = report.repName.replace(/[^a-z0-9 ]/gi, "").trim().replace(/\s+/g, "_") || repKey;
       res.setHeader(
         "Content-Type",
@@ -205,7 +204,7 @@ router.get(
       );
       res.setHeader(
         "Content-Disposition",
-        `attachment; filename="SalesReports_${safeName}_${fy}_${basis}_${dateStr}.xlsx"`,
+        `attachment; filename="${safeName}_FY${fy}.xlsx"`,
       );
       await wb.xlsx.write(res);
       res.end();
