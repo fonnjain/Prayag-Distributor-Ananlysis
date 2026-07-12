@@ -6,3 +6,9 @@ id = "9Lj7u3WrNwdj6I_nNnQMV"
 uri = "file://artifacts/prayag/Prayag_Sales_Intelligence_Report.md"
 type = "text"
 title = "Prayag India — Sales Intelligence Executive Report"
+
+[[outputs]]
+id = "VDfjcBPkaKdS2r8Da9XiT"
+uri = "file://Prayag_GoogleSheets_Connection_Status.docx"
+type = "word_document"
+title = "Google Sheets Connection Status — Prayag India"
