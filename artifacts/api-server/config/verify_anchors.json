@@ -1,5 +1,5 @@
 {
-  "comment": "Verification anchors for the Prayag Sales Intelligence dashboard. All money in rupees. Primary source of truth: the client's approved, signed-off files (STATE HEAD DASHBOARD for secondary; State Head Sale registers for primary). If the app cannot hit an anchor, the app is wrong, not the anchor. Tolerances: moneyPassPct/countPassPct are percent of expected (pass within, warn within 2x, fail beyond); memberCountAbs is absolute; coverageMinPct is the minimum share of the company net total the roster spine must attribute to a member.",
+  "comment": "Verification anchors for the Prayag Sales Intelligence dashboard. All money in rupees. Primary source of truth: the client's approved, signed-off files. If the app cannot hit an anchor, the app is wrong, not the anchor. Tolerances: moneyPassPct/countPassPct are percent of expected (pass within, warn within 2x, fail beyond); memberCountAbs is absolute; coverageMinPct is the minimum share of the company net total the roster spine must attribute to a member.",
   "tolerances": {
     "moneyPassPct": 1,
     "countPassPct": 2,
@@ -8,7 +8,7 @@
   },
   "fy_anchors": {
     "2025-26": {
-      "comment": "Source: approved STATE HEAD DASHBOARD 2025-26. Basis: net order booking (Sub Total).",
+      "comment": "Source: approved STATE HEAD DASHBOARD 2025-26. Basis: net secondary order booking (Sub Total).",
       "saleReportTotal": 2401400000,
       "orders": 52515,
       "registeredRetailers": 15809,
@@ -25,7 +25,7 @@
     }
   },
   "primary_anchors": {
-    "comment": "Source: State Head Sale registers, independently recomputed. Basis: Taxable Value (net dispatch). Biju C.O FY26-27 = 58200000 is the canary: if BIJJU in the register does not map to Biju C.O the check shows 0 and head-name normalisation is broken.",
+    "comment": "Source: State Head Sale registers, independently recomputed. Basis: Taxable Value (net dispatch). Biju C.O canary: if BIJJU in the register does not map to Biju C.O via head-name alias, the check shows 0 and normalisation is broken.",
     "2026-27": {
       "total": 732200000,
       "perHead": {
@@ -54,18 +54,26 @@
     "growth_2526_vs_2425_pct": 5.9
   },
   "target_anchors": {
-    "comment": "FY2026-27 targets are Q1 (Apr-Jun monthly values only), not annual. achievement = actual(period) / sum(target_m_Apr + target_m_May + target_m_Jun). targetMonthlyRatio = total_target / monthly_value should equal 3.0 for Q1 targets; if it comes out ~12 the app is reading annual as monthly.",
+    "comment": "FY2026-27 targets are Q1 (Apr-Jun monthly values only), not annual. achievement = actual(period) / sum(target_m_Apr + target_m_May + target_m_Jun). targetMonthlyRatio should be 3.0 for Q1 targets; ratio of ~12 means app is reading annual as monthly.",
+    "totalRows": 348,
+    "2025-26": {
+      "companyAchievementPct": 0.633,
+      "companySecondaryTarget": 3650800000,
+      "membersWithTarget": 194,
+      "membersNoTarget": 46,
+      "spotChecks": {
+        "Sujan Ghata": 60600000
+      }
+    },
     "2026-27": {
       "q1SecondaryTargetTotal": 978200000,
       "targetMonthlyRatio": 3.0,
       "memberAchievements": {
         "Sujan Ghata": 0.571,
         "Surojit Mondal": 0.238
-      }
-    },
-    "2025-26": {
-      "companyAchievementPct": 0.633,
-      "companySecondaryTarget": 3650000000
+      },
+      "membersWithTarget": 154,
+      "membersNoTarget": 29
     }
   },
   "source_list": [
@@ -80,6 +88,13 @@
       "key": "target_master",
       "label": "Prayag Target Master",
       "spreadsheetId": "1ZLok3_8AZHdfrUm4T2lJmonAjngQFz4TuNLkHtU3p2I",
+      "type": "spreadsheet",
+      "pendingExpected": false
+    },
+    {
+      "key": "state_head_sale_2526",
+      "label": "State Head Sale Register FY2025-26 (primary dispatch, Taxable Value)",
+      "spreadsheetId": "1RuXHIXfusOT-VDdDqeuB-Nx-pxyVkmrJsqr21BB-NUA",
       "type": "spreadsheet",
       "pendingExpected": false
     },
