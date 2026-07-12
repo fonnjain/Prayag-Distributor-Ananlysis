@@ -17,11 +17,13 @@ import {
   startBridgeBuild,
   getBridgeBuildState,
 } from "../lib/mgmt/bridge.js";
+import { loadStateHeadSale } from "../lib/mgmt/stateHeadSale.js";
+import { loadOrderBookSaleByHead } from "../lib/mgmt/orderBookSale.js";
 
 const router: IRouter = Router();
 
 const FY_PATTERN = /^\d{4}-\d{2}$/;
-const DEFAULT_FY = "2026-27";
+const DEFAULT_FY = "2025-26";
 
 // The Target Master sheet is provisioned and writable; the status reflects
 // whether any targets have actually been saved for the default FY yet.
@@ -207,6 +209,40 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
     ]);
     const { rows, ordersAvailable, targetsAvailable, rosterSource, orderStatus } = assembled;
 
+    // Load head-level Sale (primary dispatch, Taxable Value) from the appropriate
+    // per-FY sheet. Sale is head-level only — member saleAmount stays null so the
+    // Summary view and KPI tile use meta.headSales, not a member-sum that would
+    // conflate individual TMs who share a head.
+    //
+    // FY2025-26 → State Head Sale 2025-26 sheet
+    // FY2026-27 → Order Book FY2026-27 (no primary-sale sheet yet; Taxable Value)
+    let saleByHead: Map<string, number> | null = null;
+    let saleSourceLabel: string | null = null;
+    try {
+      const primarySaleData = await loadStateHeadSale(fy);
+      if (!primarySaleData.error && primarySaleData.total > 0) {
+        saleByHead = primarySaleData.byHead;
+        saleSourceLabel = primarySaleData.label;
+        req.log.info(
+          { fy, total: primarySaleData.total, heads: primarySaleData.byHead.size },
+          "mgmt: loaded primary sale data",
+        );
+      } else if (fy === "2026-27") {
+        // No primary-sale sheet for FY2026-27; use Order Book Taxable Value.
+        const obs = await loadOrderBookSaleByHead();
+        if (!obs.error && obs.total > 0) {
+          saleByHead = obs.byHead;
+          saleSourceLabel = "Order Book FY2026-27 (Taxable Value)";
+          req.log.info({ fy, total: obs.total }, "mgmt: loaded Order Book sale for FY2026-27");
+        }
+      }
+    } catch (err) {
+      req.log.warn({ err, fy }, "mgmt: sale-by-head load failed; Sale tile will be blank");
+    }
+    const headSales: Record<string, number> | undefined = saleByHead
+      ? Object.fromEntries(saleByHead)
+      : undefined;
+
     const members = rows.map((r) => {
       const tgtSec = tgtPeriod(r.target, "secondary", monthFrom, monthTo);
       const tgtPri = tgtPeriod(r.target, "primary", monthFrom, monthTo);
@@ -230,7 +266,11 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         targetPrimary: tgtPri,
         targetBusinessPlan: tgtBp,
         orderBooking: booking,
-        saleAmount: r.orders?.saleAmount ?? null,
+        // Sale is sourced from a separate primary-dispatch sheet (Taxable Value),
+        // not from the secondary order booking file. It is head-level only, so
+        // saleAmount on individual member rows is null — the frontend reads
+        // meta.headSales for the Summary and KPI tile.
+        saleAmount: null,
         priorOrderBooking: r.priorAmount,
         totalRetailers: r.orders?.totalRetailers ?? null,
         oldRetailers: r.orders?.oldRetailers ?? null,
@@ -263,6 +303,9 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         targetsAvailable,
         orderBookingNote,
         rosterSource,
+        ...(headSales ? { headSales } : {}),
+        saleSource: saleSourceLabel,
+        orderBookingSource: ordersAvailable ? `Secondary Order Booking ${fy}` : null,
       },
     });
   } catch (err) {

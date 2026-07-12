@@ -59,6 +59,12 @@ type DashboardMeta = {
   targetsAvailable: boolean;
   orderBookingNote: string | null;
   rosterSource: string;
+  /** Head-level Sale (primary dispatch, Taxable Value). Null when no sheet configured for FY. */
+  headSales?: Record<string, number>;
+  /** Source label for the Sale tile (e.g. "State Head Sale 2025-26") */
+  saleSource?: string | null;
+  /** Source label for Order Booking tile (e.g. "Secondary Order Booking 2025-26") */
+  orderBookingSource?: string | null;
 };
 
 type DashboardData = { rows: Member[]; meta: DashboardMeta };
@@ -392,14 +398,29 @@ export default function StateHeadDashboard() {
       if (r.band === "noTarget") s.noTarget++;
       else if (isLowPerf(r.band, lowPerfThreshold)) s.lowPerf++;
     }
+    // Override per-head Sale with authoritative head-level data from the primary
+    // dispatch sheet (meta.headSales). Member saleAmount is null when the Sale
+    // source is head-level only, so the member-sum above would be 0 for those heads.
+    const headSales = data?.meta.headSales;
+    if (headSales) {
+      for (const [, s] of map) {
+        const fromMeta = headSales[s.head];
+        if (fromMeta != null) s.sale = fromMeta;
+      }
+    }
     return [...map.values()].sort((a, b) => b.booking - a.booking);
-  }, [filteredRows, lowPerfThreshold]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredRows, lowPerfThreshold, data?.meta.headSales]);
 
   // KPI aggregates over all filtered rows (regardless of active view)
   const kpi = useMemo(() => {
     const target = filteredRows.reduce((s, r) => s + (r.targetSecondary ?? 0), 0);
     const booking = filteredRows.reduce((s, r) => s + (r.orderBooking ?? 0), 0);
-    const sale = filteredRows.reduce((s, r) => s + (r.saleAmount ?? 0), 0);
+    // Sale: use the post-processed summaryByHead totals when head-level data is
+    // available from meta (so stateHeadFilter is respected correctly).
+    const sale = data?.meta.headSales
+      ? summaryByHead.reduce((s, h) => s + h.sale, 0)
+      : filteredRows.reduce((s, r) => s + (r.saleAmount ?? 0), 0);
     const lowPerf = filteredRows.filter((r) => isLowPerf(r.band, lowPerfThreshold)).length;
     const noTarget = filteredRows.filter((r) => r.band === "noTarget").length;
     return {
@@ -411,7 +432,8 @@ export default function StateHeadDashboard() {
       lowPerf,
       noTarget,
     };
-  }, [filteredRows, lowPerfThreshold]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredRows, lowPerfThreshold, summaryByHead, data?.meta.headSales]);
 
   // Rows to render for each view (after sort)
   function viewRows(): Member[] {
@@ -557,13 +579,18 @@ export default function StateHeadDashboard() {
           <KpiTile
             label="Order Booking"
             value={data.meta.ordersAvailable ? fmtCr(kpi.booking) : "Pending"}
+            sub={data.meta.orderBookingSource ?? undefined}
           />
           <KpiTile
             label="Achievement"
             value={data.meta.ordersAvailable ? fmtPct(kpi.achPct) : "Pending"}
           />
           <KpiTile label="Low Performers" value={fmtN(kpi.lowPerf)} sub={`<${lowPerfThreshold}% threshold`} />
-          <KpiTile label="Sale" value={fmtCr(kpi.sale > 0 ? kpi.sale : null)} />
+          <KpiTile
+            label="Sale"
+            value={fmtCr(kpi.sale > 0 ? kpi.sale : null)}
+            sub={data.meta.saleSource ?? undefined}
+          />
         </div>
       )}
 
