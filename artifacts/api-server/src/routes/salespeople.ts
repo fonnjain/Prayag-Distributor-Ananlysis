@@ -13,8 +13,103 @@ import {
   type RepNode,
 } from "../lib/mgmt/salespeople.js";
 import { priorFy } from "../lib/mgmt/names.js";
-import { buildSalesReports } from "../lib/mgmt/salesReports.js";
+import { buildSalesReports, type SalesRepReport } from "../lib/mgmt/salesReports.js";
 import { buildRepReportWorkbook } from "../lib/mgmt/repReports.js";
+
+// ---------------------------------------------------------------------------
+// Dev-only fixture data
+//
+// When NODE_ENV is not "production" the tree endpoint falls back to a one-rep
+// fixture tree if Google Sheets is unreachable (no access token in dev).
+// The special repKey "__fixture" short-circuits the reports and download
+// handlers so they return fixture data without any external dependency.
+// These paths are never reachable in production because the guard is explicit.
+// ---------------------------------------------------------------------------
+
+const IS_PROD = process.env.NODE_ENV === "production";
+const FIXTURE_REP_KEY = "__fixture";
+
+function makeFixtureReport(fy: string): SalesRepReport {
+  const prior = priorFy(fy);
+  return {
+    fy,
+    priorFy: prior,
+    repKey: FIXTURE_REP_KEY,
+    repName: "Fixture Rep (Test Only)",
+    scope: "own",
+    hasTeam: false,
+    available: true,
+    basis: "secondary",
+    monthly: [
+      { month: "Apr", orderAmount: 500_000, orders: 12, saleAmount: 450_000 },
+      { month: "May", orderAmount: 600_000, orders: 15, saleAmount: 550_000 },
+    ],
+    stateOptions: ["MADHYA PRADESH"],
+    secondary: {
+      tiles: {
+        netOrderBooked: 1_800_000,
+        netOrderBookedLast: 1_650_000,
+        growthPct: 9.09,
+        orders: 45,
+        activeRetailers: 30,
+        newRetailers: 5,
+        avgOrderValue: 40_000,
+        businessPerRetailer: 60_000,
+        target: null,
+        achievementPct: null,
+      },
+      byState: [{ label: "MADHYA PRADESH", thisFy: 1_800_000, lastFy: 1_650_000, diff: 150_000, growthPct: 9.09, sharePct: 100 }],
+      partyByState: {
+        "MADHYA PRADESH": [{ id: "fp1", name: "Fixture Party A", amount: 1_800_000, priorAmount: 1_650_000 }],
+      },
+      segmentByState: {
+        "MADHYA PRADESH": [{ label: "HEALTH CARE", thisFy: 1_800_000, lastFy: 1_650_000, diff: 150_000, growthPct: 9.09, sharePct: 100 }],
+      },
+      byGroup: [{ label: "OTC", thisFy: 1_800_000, lastFy: 1_650_000, diff: 150_000, growthPct: 9.09, sharePct: 100 }],
+      bySegment: [{ label: "HEALTH CARE", thisFy: 1_800_000, lastFy: 1_650_000, diff: 150_000, growthPct: 9.09, sharePct: 100 }],
+      parties: {
+        top: [{ label: "Fixture Party A", thisFy: 1_800_000, lastFy: 1_650_000, diff: 150_000, growthPct: 9.09, sharePct: 100 }],
+        newTop: [],
+        churned: [],
+        newCount: 0,
+        churnedCount: 0,
+      },
+      movers: { partiesUp: [], partiesDown: [], segmentsUp: [], segmentsDown: [] },
+      saleCollection: { sale: 1_800_000, saleLast: 1_650_000, collection: null },
+    },
+    primary: {
+      available: false,
+      reason: "Primary data not available for fixture rep.",
+      headTotal: 0,
+      bridgedToAnyTmAmount: 0,
+      totalBridged: 0,
+      bridgeCoverage: 0,
+      bridgedParties: [],
+      unbridgedParties: [],
+      byItemCode: [],
+    },
+    reconciliation: {
+      secondary: { repTotal: 1_800_000, fileTotal: 1_800_000, delta: 0, ok: true, note: "Fixture: cross-foot OK" },
+      primary: { bridgedAmount: 0, unbridgedAmount: 0, headTotal: 0, delta: 0, ok: true, note: "Not available." },
+    },
+  };
+}
+
+const FIXTURE_TREE = {
+  heads: [
+    {
+      key: FIXTURE_REP_KEY,
+      name: "Fixture Rep (Test Only)",
+      state: "MADHYA PRADESH",
+      ownNet: 1_800_000,
+      teamNet: 1_800_000,
+      hasTeam: false,
+      children: [],
+    },
+  ],
+  multiLevel: false,
+  loadDetail: "Google Sheets unavailable in dev — showing fixture data.",
+};
 
 const router: IRouter = Router();
 
@@ -44,6 +139,11 @@ router.get("/salespeople/tree", async (req: Request, res: Response): Promise<voi
     res.json(await buildSalesTree(fy));
   } catch (err) {
     req.log.error({ err, fy }, "salespeople tree failed");
+    if (!IS_PROD) {
+      req.log.warn("Sheets unavailable in dev — returning fixture tree for e2e testing");
+      res.json(FIXTURE_TREE);
+      return;
+    }
     res.status(500).json({
       error:
         "Could not build the sales people tree. Google Sheets may be rate-limiting reads; try again in a minute.",
@@ -164,6 +264,10 @@ router.get(
       res.status(400).json({ error: "fy must look like 2025-26" });
       return;
     }
+    if (!IS_PROD && repKey === FIXTURE_REP_KEY) {
+      res.json(makeFixtureReport(fy));
+      return;
+    }
     try {
       res.json(
         await buildSalesReports(fy, repKey, scope, {
@@ -195,7 +299,9 @@ router.get(
       return;
     }
     try {
-      const report = await buildSalesReports(fy, repKey, scope);
+      const report = !IS_PROD && repKey === FIXTURE_REP_KEY
+        ? makeFixtureReport(fy)
+        : await buildSalesReports(fy, repKey, scope);
       const wb = await buildRepReportWorkbook(report, basis);
       const safeName = report.repName.replace(/[^a-z0-9 ]/gi, "").trim().replace(/\s+/g, "_") || repKey;
       res.setHeader(
