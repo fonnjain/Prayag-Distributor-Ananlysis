@@ -9,6 +9,7 @@ import mgmtRouter from "./mgmt";
 import targetsRouter from "./targets";
 import salespeopleRouter from "./salespeople";
 import sapRouter from "./sap";
+import auditRouter from "./audit";
 
 const router: IRouter = Router();
 
@@ -22,5 +23,6 @@ router.use(mgmtRouter);
 router.use(targetsRouter);
 router.use(salespeopleRouter);
 router.use(sapRouter);
+router.use(auditRouter);
 
 export default router;

@@ -1,0 +1,107 @@
+{
+  "comment": "Audit-only anchors for extra check groups (1.1 truncation, Group 6 report logic, Group 7 cross-foots). Money in rupees. Tolerance is tight for spot-checks (0.1%). If a check fails, fix the data flow, not the anchor.",
+  "truncation": {
+    "suspicious_row_counts": [100, 500, 1000, 5000, 10000, 50000, 100000],
+    "sources": {
+      "2025-26": {
+        "expectedMinRows": 20000,
+        "description": "Secondary OB FY25-26 is ~8 MB; a round-number read is evidence of the truncation bug that produced ₹46.34 Cr (19% of ₹240 Cr)"
+      },
+      "2026-27": {
+        "pendingExpected": true,
+        "description": "FY2026-27 secondary OB file does not yet exist — expected known gap"
+      }
+    }
+  },
+  "report_logic": {
+    "comment": "Spot-checks for the Sunil Patel FY2026-27 salesperson report. Like-months window: CY = FY26-27 Q1 (Apr-Jun 2026); LY = same calendar months one year prior (Apr-Jun 2025, i.e. FY25-26 months 1-3). If Report 1 or 3 come out 4-5x high, the app is comparing against the full prior year rather than the like-months window.",
+    "subject_head": "Sunil Patel",
+    "cy_fy": "2026-27",
+    "ly_fy": "2025-26",
+    "cy_months": ["Apr-26", "May-26", "Jun-26"],
+    "ly_months": ["Apr-25", "May-25", "Jun-25"],
+    "tolerance_pct": 0.1,
+    "checks": [
+      {
+        "id": "6.1",
+        "label": "Report 1 — State CY total (Sunil Patel, FY26-27 Q1)",
+        "expected": 7978394.92,
+        "unit": "money",
+        "filters": { "period": "cy" },
+        "note": "CY = Apr-May-Jun 2026. If 4-5x high: LY/CY window is not applied and full prior year is used."
+      },
+      {
+        "id": "6.2a",
+        "label": "Report 3 — PTMT LY (Apr-Jun 2025)",
+        "expected": 4410108.22,
+        "unit": "money",
+        "filters": { "period": "ly", "group": "PTMT" },
+        "note": "LY = Apr-May-Jun 2025 (FY25-26 months 1-3). Same calendar window as CY."
+      },
+      {
+        "id": "6.2b",
+        "label": "Report 3 — PTMT CY (Apr-Jun 2026)",
+        "expected": 4552383.34,
+        "unit": "money",
+        "filters": { "period": "cy", "group": "PTMT" },
+        "note": "CY = Apr-May-Jun 2026."
+      },
+      {
+        "id": "6.3",
+        "label": "Report 3 — CISTERN LY (Apr-Jun 2025)",
+        "expected": 134414.17,
+        "unit": "money",
+        "filters": { "period": "ly", "group": "CISTERN" },
+        "note": "LY = Apr-May-Jun 2025."
+      },
+      {
+        "id": "6.4",
+        "label": "Report 3B — Perfect Sanitary (Surat) CY",
+        "expected": 996625,
+        "unit": "money",
+        "filters": { "period": "cy", "customerIlike": "perfect%sanitary" },
+        "note": "Customer ILIKE '%perfect%sanitary%'. CY = Apr-May-Jun 2026."
+      },
+      {
+        "id": "6.5a",
+        "label": "Report 3C — Gujarat AGRI LY",
+        "expected": 118230.26,
+        "unit": "money",
+        "filters": { "period": "ly", "group": "AGRI", "state": "Gujarat" },
+        "note": "LY = Apr-May-Jun 2025. state_canon = Gujarat, group_canon = AGRI."
+      },
+      {
+        "id": "6.5b",
+        "label": "Report 3C — Gujarat AGRI CY",
+        "expected": 411501.80,
+        "unit": "money",
+        "filters": { "period": "cy", "group": "AGRI", "state": "Gujarat" },
+        "note": "CY = Apr-May-Jun 2026."
+      },
+      {
+        "id": "6.6a",
+        "label": "Report 4 — Universal Pipe/PTMT QTY LY",
+        "expected": 5006,
+        "unit": "count",
+        "filters": { "period": "ly", "group": "PTMT", "customerIlike": "universal", "useQty": true },
+        "note": "QTY sum. Customer ILIKE '%universal%'. LY = Apr-May-Jun 2025. Report 4 uses QUANTITY, not value."
+      },
+      {
+        "id": "6.6b",
+        "label": "Report 4 — Universal Pipe/PTMT QTY CY",
+        "expected": 7107,
+        "unit": "count",
+        "filters": { "period": "cy", "group": "PTMT", "customerIlike": "universal", "useQty": true },
+        "note": "QTY sum. CY = Apr-May-Jun 2026."
+      }
+    ]
+  },
+  "crossfoot": {
+    "2025-26": {
+      "expectedMembers": 240,
+      "memberTolerance": 4,
+      "expectedRegisteredRetailers": 15809,
+      "retailerTolerancePct": 2
+    }
+  }
+}

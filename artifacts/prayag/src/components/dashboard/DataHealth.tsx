@@ -1,9 +1,10 @@
 // Data Health — comprehensive multi-anchor-set verification dashboard.
-// Calls GET /api/mgmt/verify?fy=<fy> and renders all check groups
-// with pass / warn / fail / pending / skip status chips.
-import { useState, useEffect, useCallback } from "react";
-import { RefreshCw, CheckCircle, AlertTriangle, XCircle, Clock, Minus } from "lucide-react";
+// Calls GET /api/audit?fy=<fy> (which wraps runFullVerify + extra groups) and renders
+// all check groups with pass / warn / fail / pending / skip status chips.
+import { useState, useEffect, useCallback, useRef } from "react";
+import { RefreshCw, CheckCircle, AlertTriangle, XCircle, Clock, Minus, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useDashboard } from "@/data/dashboard-context";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -152,7 +153,7 @@ function CheckRow({ c }: { c: HealthCheck }) {
   );
 }
 
-// ── Group card ────────────────────────────────────────────────────────────────
+// ── Group card ─────────────────────────────────────────────────────────────────
 
 function GroupCard({ group }: { group: CheckGroup }) {
   const [open, setOpen] = useState(true);
@@ -222,10 +223,12 @@ export default function DataHealth() {
   const [error, setError] = useState<string | null>(null);
   const [lastRun, setLastRun] = useState<string | null>(null);
 
-  const runVerify = useCallback(() => {
+  const { syncedAt } = useDashboard();
+
+  const runAudit = useCallback(() => {
     setLoading(true);
     setError(null);
-    fetch(`/api/mgmt/verify?fy=${encodeURIComponent(fy)}`)
+    fetch(`/api/audit?fy=${encodeURIComponent(fy)}`)
       .then((r) => {
         if (!r.ok) {
           return r.json().then((d: { error?: string }) => {
@@ -244,7 +247,17 @@ export default function DataHealth() {
       .finally(() => setLoading(false));
   }, [fy]);
 
-  useEffect(() => { runVerify(); }, [runVerify]);
+  // Run on mount and when FY changes.
+  useEffect(() => { runAudit(); }, [runAudit]);
+
+  // Auto-rerun after a dashboard refresh (syncedAt advances).
+  const prevSyncedAt = useRef<string | null>(null);
+  useEffect(() => {
+    if (syncedAt && syncedAt !== prevSyncedAt.current) {
+      prevSyncedAt.current = syncedAt;
+      runAudit();
+    }
+  }, [syncedAt, runAudit]);
 
   const overallColor =
     report?.overall === "fail"
@@ -271,7 +284,7 @@ export default function DataHealth() {
         </div>
 
         <button
-          onClick={runVerify}
+          onClick={runAudit}
           disabled={loading}
           className="flex items-center gap-2 h-8 px-3 rounded-md border border-border/60 text-sm font-medium hover:bg-muted transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
         >
@@ -279,18 +292,33 @@ export default function DataHealth() {
           {loading ? "Running" : "Run Checks"}
         </button>
 
+        <a
+          href={`/api/audit/download?fy=${encodeURIComponent(fy)}`}
+          download
+          className={cn(
+            "flex items-center gap-2 h-8 px-3 rounded-md border border-border/60 text-sm font-medium hover:bg-muted transition-colors",
+            !report && "pointer-events-none opacity-40",
+          )}
+          aria-disabled={!report}
+          tabIndex={report ? 0 : -1}
+        >
+          <Download className="w-3.5 h-3.5" />
+          Download Audit (Excel)
+        </a>
+
         {lastRun && !loading && (
           <span className="text-xs text-muted-foreground self-end pb-1.5">
             Last run {lastRun}
+            {syncedAt && " (auto-synced after refresh)"}
           </span>
         )}
       </div>
 
-      {/* Fail banner */}
+      {/* Fail banner — prominent red stripe at top */}
       {report?.overall === "fail" && (
         <div className="flex items-center gap-2 px-4 py-3 rounded-md bg-red-600 text-white text-sm font-medium">
           <XCircle className="w-4 h-4 shrink-0" />
-          One or more verification checks failed. Review the groups below.
+          One or more verification checks failed. Review the groups below and download the audit workbook for details.
         </div>
       )}
 
@@ -301,6 +329,9 @@ export default function DataHealth() {
           {report.overall === "warn" && "Warning — minor discrepancies detected"}
           {report.overall === "pass" && "Pass — all checks within tolerance"}
           <span className="text-xs font-normal opacity-70 ml-2">({report.fy})</span>
+          <span className="text-xs font-normal opacity-50 ml-2">
+            {report.groups.length} groups · {report.groups.flatMap((g) => g.checks).length} checks
+          </span>
         </div>
       )}
 
