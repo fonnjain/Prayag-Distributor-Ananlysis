@@ -313,13 +313,14 @@ router.get(
         : await buildSalesReports(fy, repKey, scope);
       const wb = await buildRepReportWorkbook(report, basis);
       const safeName = report.repName.replace(/[^a-z0-9 ]/gi, "").trim().replace(/\s+/g, "_") || repKey;
+      const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
       res.setHeader(
         "Content-Type",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       );
       res.setHeader(
         "Content-Disposition",
-        `attachment; filename="${safeName}_FY${fy}.xlsx"`,
+        `attachment; filename="SalesReports_${safeName}_${fy}_${basis}_${today}.xlsx"`,
       );
       await wb.xlsx.write(res);
       res.end();

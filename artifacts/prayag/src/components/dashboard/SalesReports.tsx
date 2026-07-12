@@ -319,14 +319,19 @@ function PartyByStateTable({
   state,
   thisFyLabel,
   priorFyLabel,
+  partyFilter = "",
 }: {
   partyByState: Record<string, RepPartyRow[]>;
   state: string;
   thisFyLabel: string;
   priorFyLabel: string;
+  partyFilter?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const rows = partyByState[state] ?? [];
+  const allRows = partyByState[state] ?? [];
+  const rows = partyFilter
+    ? allRows.filter((r) => r.name.toLowerCase().includes(partyFilter.toLowerCase()))
+    : allRows;
   const limit = 25;
   const displayRows = expanded ? rows : rows.slice(0, limit);
 
@@ -979,6 +984,7 @@ export function SalesReports({
 }) {
   const [basis, setBasis] = useState<"secondary" | "primary">("secondary");
   const [selectedState, setSelectedState] = useState<string>("");
+  const [partyFilter, setPartyFilter] = useState<string>("");
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
@@ -1136,21 +1142,43 @@ export function SalesReports({
         priorFy={report.priorFy}
       />
 
-      {/* 3A/3B/3C: State cross-dimensional tables */}
+      {/* 3A/3B/3C: State + Party cross-dimensional tables */}
       {stateOptions.length > 0 && (
         <div className="space-y-3">
           <StateSelector
             stateOptions={stateOptions}
             selected={activeState}
-            onChange={setSelectedState}
+            onChange={(s) => {
+              setSelectedState(s);
+              setPartyFilter("");
+            }}
           />
           {activeState && (
             <>
+              <div className="flex items-center gap-2 px-1">
+                <label className="text-xs text-muted-foreground shrink-0">Party filter:</label>
+                <input
+                  type="text"
+                  value={partyFilter}
+                  onChange={(e) => setPartyFilter(e.target.value)}
+                  placeholder={`Search parties in ${activeState}…`}
+                  className="flex-1 text-xs rounded border border-border/50 bg-background px-2 py-1 placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+                {partyFilter && (
+                  <button
+                    onClick={() => setPartyFilter("")}
+                    className="text-xs text-muted-foreground hover:text-foreground shrink-0"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
               <PartyByStateTable
                 partyByState={sec.partyByState}
                 state={activeState}
                 thisFyLabel={report.fy}
                 priorFyLabel={report.priorFy}
+                partyFilter={partyFilter}
               />
               <ReportTable
                 title={`By Segment — ${activeState}`}

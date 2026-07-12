@@ -642,13 +642,15 @@ export async function buildSalesReports(
     partyGroupMatrix,
   };
 
-  // Reconciliation — secondary: rep rollup vs file total.
+  // Reconciliation — secondary: rep rollup cross-foots against the state-level breakdown
+  // derived from the same order file. Comparing to orderFile.totalSaleAmount would compare
+  // one rep against the whole company file, which is meaningless.
   const repSecTotal = orderFile
     ? teamKeys.reduce((sum, k) => sum + (orderFile.perTm.get(k)?.saleAmount ?? 0), 0)
     : 0;
-  const fileSecTotal = orderFile?.totalSaleAmount ?? null;
-  const secDelta = fileSecTotal != null ? Math.abs(repSecTotal - fileSecTotal) : 0;
-  const secOk = fileSecTotal == null || secDelta <= 1;
+  const byStateTotal = secondary.byState.reduce((a, r) => a + r.thisFy, 0);
+  const secDelta = orderFile ? Math.abs(repSecTotal - byStateTotal) : 0;
+  const secOk = !orderFile || secDelta <= 1;
 
   // Primary: registers + bridge.
   let primary: PrimaryReport;
@@ -709,12 +711,15 @@ export async function buildSalesReports(
       const entry = bridge.entries.get(nk);
       if (entry) {
         bridgedToAnyTmAmount += amount;
-        if (tmKeySet.has(entry.memberKey)) {
-          totalBridged += amount;
-          bridgedParties.push({ party: partyNames.get(nk) ?? nk, amount });
-          bridgedNormKeys.add(nk);
-        }
+      }
+      if (entry && tmKeySet.has(entry.memberKey)) {
+        // Bridged to this rep's team — show in rep's primary view.
+        totalBridged += amount;
+        bridgedParties.push({ party: partyNames.get(nk) ?? nk, amount });
+        bridgedNormKeys.add(nk);
       } else {
+        // Either unmapped or bridged to a different TM — goes into unbridged so
+        // headTotal = totalBridged + Σ(unbridgedParties) always holds (±₹0).
         unbridgedParties.push({ party: partyNames.get(nk) ?? nk, amount });
       }
     }
@@ -763,14 +768,14 @@ export async function buildSalesReports(
     reconciliation: {
       secondary: {
         repTotal: Math.round(repSecTotal),
-        fileTotal: fileSecTotal != null ? Math.round(fileSecTotal) : null,
+        fileTotal: null,
         delta: Math.round(secDelta),
         ok: secOk,
         note: secOk
-          ? fileSecTotal == null
+          ? !orderFile
             ? "Order file not loaded — cannot cross-foot."
-            : "Secondary rep total matches file grand total within ₹1."
-          : `Secondary rep total (${Math.round(repSecTotal).toLocaleString("en-IN")}) differs from file total (${Math.round(fileSecTotal!).toLocaleString("en-IN")}) by ₹${Math.round(secDelta).toLocaleString("en-IN")}.`,
+            : "Rep total cross-foots with state-level breakdown within ₹1."
+          : `Rep total (${Math.round(repSecTotal).toLocaleString("en-IN")}) differs from state-level sum (${Math.round(byStateTotal).toLocaleString("en-IN")}) by ₹${Math.round(secDelta).toLocaleString("en-IN")}.`,
       },
       primary: {
         bridgedAmount: Math.round(primary.totalBridged),
