@@ -13,3 +13,4 @@
 - [Dashboard xlsx upload pattern](prayag-dashboard-xlsx-upload.md) — FY-specific quarterly vs annual rules; header auto-detected (not hardcoded); xlsx fills target-map gaps; departed TMs get stateHead from xlsx.
 - [Customer Performance page](customer-performance.md) — units-first analytics on sale_line; Laspeyres at customer/category/company levels; scheme engine configurable; route /customers.
 - [STATE HD Dashboard column detection](state-dashboard-column-detection.md) — FY-suffix stripping + Excel date serial detection required; block offsets +0/+2/+5=plan/OB/sales; plan ₹364.97 Cr verified.
+- [Drizzle GROUP BY bare-column trap](drizzle-groupby-bare-column.md) — Postgres rejects bare column refs in SELECT when GROUP BY uses a wrapped expression; use max(col) or repeat the exact expression.

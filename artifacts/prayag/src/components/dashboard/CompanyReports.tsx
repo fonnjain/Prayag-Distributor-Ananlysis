@@ -22,6 +22,7 @@ type ReportRow = {
 
 type QtyRow = {
   group: string;
+  groupRaw: string;
   customer: string;
   state: string;
   qtyThisFy: number;
@@ -207,21 +208,13 @@ function Report4({ rows, fy, priorFy, likeMonths }: { rows: QtyRow[]; fy: string
     [rows, activeGroup],
   );
 
-  // Determine predominant unit for this group
-  const predominantUnit = useMemo(() => {
-    const unitCounts: Record<string, number> = {};
-    for (const r of groupRows) {
-      if (r.unit) unitCounts[r.unit] = (unitCounts[r.unit] ?? 0) + 1;
-    }
-    const top = Object.entries(unitCounts).sort((a, b) => b[1] - a[1])[0];
-    return top ? top[0] : "pcs";
-  }, [groupRows]);
+  // Detect if this group has mixed units (e.g. Plumbing mixes WATER TANK Ltr with pipe pcs).
+  const hasMixedCategories = useMemo(
+    () => new Set(groupRows.map((r) => r.unit || "pcs")).size > 1,
+    [groupRows],
+  );
 
-  const isLitreGroup =
-    predominantUnit === "L" || predominantUnit.toUpperCase() === "LTR" ||
-    predominantUnit.toUpperCase() === "LITRE" || predominantUnit.toUpperCase() === "LTR";
-
-  const unitLabel = isLitreGroup ? "Litres" : predominantUnit || "Pcs";
+  const fmtRowUnit = (unit: string) => (unit === "Ltr" ? "Ltr" : unit || "pcs");
 
   const [expanded, setExpanded] = useState(false);
   const LIMIT = 40;
@@ -266,7 +259,10 @@ function Report4({ rows, fy, priorFy, likeMonths }: { rows: QtyRow[]; fy: string
       {activeGroup && (
         <>
           <p className="text-xs text-muted-foreground">
-            Group: <strong>{activeGroup}</strong> — unit: <strong>{unitLabel}</strong>
+            Group: <strong>{activeGroup}</strong>
+            {hasMixedCategories
+              ? <span className="text-amber-600"> — mixed units (litres + pieces — see each row)</span>
+              : null}
             {range && ` — ${range} comparison`}
           </p>
           <div className="rounded-lg border border-border overflow-auto">
@@ -274,9 +270,10 @@ function Report4({ rows, fy, priorFy, likeMonths }: { rows: QtyRow[]; fy: string
               <thead>
                 <tr className="bg-muted/30 border-b border-border">
                   <th className="text-left py-2 px-3 font-medium text-muted-foreground">Customer</th>
+                  {hasMixedCategories && <th className="text-left py-2 px-3 font-medium text-muted-foreground">Category</th>}
                   <th className="text-left py-2 px-3 font-medium text-muted-foreground">State</th>
-                  <th className="text-right py-2 px-3 font-medium text-muted-foreground">Qty {fy} ({unitLabel})</th>
-                  <th className="text-right py-2 px-3 font-medium text-muted-foreground">Qty {priorFy} ({unitLabel})</th>
+                  <th className="text-right py-2 px-3 font-medium text-muted-foreground">Qty {fy}</th>
+                  <th className="text-right py-2 px-3 font-medium text-muted-foreground">Qty {priorFy}</th>
                   <th className="text-right py-2 px-3 font-medium text-muted-foreground">Amount {fy}</th>
                   <th className="text-right py-2 px-3 font-medium text-muted-foreground">Amount {priorFy}</th>
                 </tr>
@@ -285,9 +282,10 @@ function Report4({ rows, fy, priorFy, likeMonths }: { rows: QtyRow[]; fy: string
                 {display.map((r, i) => (
                   <tr key={i} className="border-b border-border/30 hover:bg-muted/20">
                     <td className="py-1.5 px-3 max-w-[160px] truncate">{r.customer || "—"}</td>
+                    {hasMixedCategories && <td className="py-1.5 px-3 text-[11px] text-muted-foreground">{r.groupRaw || "—"}</td>}
                     <td className="py-1.5 px-3 max-w-[120px] truncate text-muted-foreground">{r.state || "—"}</td>
-                    <td className="py-1.5 px-3 text-right font-mono tabular-nums">{r.qtyThisFy > 0 ? r.qtyThisFy.toLocaleString("en-IN") : "—"}</td>
-                    <td className="py-1.5 px-3 text-right font-mono tabular-nums text-muted-foreground">{r.qtyLastFy > 0 ? r.qtyLastFy.toLocaleString("en-IN") : "—"}</td>
+                    <td className="py-1.5 px-3 text-right font-mono tabular-nums">{r.qtyThisFy > 0 ? `${r.qtyThisFy.toLocaleString("en-IN")} ${fmtRowUnit(r.unit)}` : "—"}</td>
+                    <td className="py-1.5 px-3 text-right font-mono tabular-nums text-muted-foreground">{r.qtyLastFy > 0 ? `${r.qtyLastFy.toLocaleString("en-IN")} ${fmtRowUnit(r.unit)}` : "—"}</td>
                     <td className="py-1.5 px-3 text-right font-mono tabular-nums">{r.amountThisFy > 0 ? fmtCr(r.amountThisFy) : "—"}</td>
                     <td className="py-1.5 px-3 text-right font-mono tabular-nums text-muted-foreground">{r.amountLastFy > 0 ? fmtCr(r.amountLastFy) : "—"}</td>
                   </tr>
@@ -295,7 +293,7 @@ function Report4({ rows, fy, priorFy, likeMonths }: { rows: QtyRow[]; fy: string
               </tbody>
               <tfoot>
                 <tr className="bg-muted/30 border-t border-border font-semibold">
-                  <td className="py-1.5 px-3" colSpan={2}>Total amount</td>
+                  <td className="py-1.5 px-3" colSpan={hasMixedCategories ? 3 : 2}>Total amount</td>
                   <td className="py-1.5 px-3 text-right text-muted-foreground text-[10px] italic" colSpan={2}>
                     qty total suppressed (Rule 2)
                   </td>

@@ -46,7 +46,7 @@ function parseEntityType(val: unknown): EntityType {
 
 // ── Available months for a FY ──────────────────────────────────────────────────
 
-router.get("/api/customers/months", async (req, res) => {
+router.get("/customers/months", async (req, res) => {
   const fy = req.query.fy as string;
   if (!fy) {
     res.status(400).json({ error: "fy is required" });
@@ -71,7 +71,7 @@ router.get("/api/customers/months", async (req, res) => {
 
 // ── Customer rankings with YoY ─────────────────────────────────────────────────
 
-router.get("/api/customers/performance", async (req, res) => {
+router.get("/customers/performance", async (req, res) => {
   const fyCy = (req.query.fyCy as string) || "2026-27";
   const fyLy = (req.query.fyLy as string) || "2025-26";
   const monthsCyParam = parseMonthList(req.query.monthsCy);
@@ -98,7 +98,7 @@ router.get("/api/customers/performance", async (req, res) => {
 
 // ── Customer detail — categories then products ─────────────────────────────────
 
-router.get("/api/customers/detail", async (req, res) => {
+router.get("/customers/detail", async (req, res) => {
   const customer = req.query.customer as string;
   if (!customer) {
     res.status(400).json({ error: "customer is required" });
@@ -131,7 +131,7 @@ router.get("/api/customers/detail", async (req, res) => {
 
 // ── Multi-year history for a customer ─────────────────────────────────────────
 
-router.get("/api/customers/history", async (req, res) => {
+router.get("/customers/history", async (req, res) => {
   const customer = req.query.customer as string;
   if (!customer) {
     res.status(400).json({ error: "customer is required" });
@@ -156,7 +156,7 @@ router.get("/api/customers/history", async (req, res) => {
 
 // ── Churn ──────────────────────────────────────────────────────────────────────
 
-router.get("/api/customers/churn", async (req, res) => {
+router.get("/customers/churn", async (req, res) => {
   const fyCy = (req.query.fyCy as string) || "2026-27";
   const fyLy = (req.query.fyLy as string) || "2025-26";
   const monthsCyParam = parseMonthList(req.query.monthsCy);
@@ -180,7 +180,7 @@ router.get("/api/customers/churn", async (req, res) => {
 
 // ── Revenue-up, volume-down flag list ──────────────────────────────────────────
 
-router.get("/api/customers/shrinkers", async (req, res) => {
+router.get("/customers/shrinkers", async (req, res) => {
   const fyCy = (req.query.fyCy as string) || "2026-27";
   const fyLy = (req.query.fyLy as string) || "2025-26";
   const monthsCyParam = parseMonthList(req.query.monthsCy);
@@ -213,7 +213,7 @@ router.get("/api/customers/shrinkers", async (req, res) => {
 
 // ── Laspeyres price multipliers ────────────────────────────────────────────────
 
-router.get("/api/customers/multiplier", async (req, res) => {
+router.get("/customers/multiplier", async (req, res) => {
   const fyLy = (req.query.fyLy as string) || "2025-26";
   const fyCy = (req.query.fyCy as string) || "2026-27";
 
@@ -228,7 +228,7 @@ router.get("/api/customers/multiplier", async (req, res) => {
 
 // ── Schemes CRUD ───────────────────────────────────────────────────────────────
 
-router.get("/api/customers/schemes", async (req, res) => {
+router.get("/customers/schemes", async (req, res) => {
   try {
     const schemes = await listSchemes();
     res.json({ schemes });
@@ -238,7 +238,7 @@ router.get("/api/customers/schemes", async (req, res) => {
   }
 });
 
-router.post("/api/customers/schemes", async (req, res) => {
+router.post("/customers/schemes", async (req, res) => {
   const { slabs, ...schemeInput } = req.body as { slabs?: unknown[]; [k: string]: unknown };
   try {
     const scheme = await createScheme(
@@ -252,7 +252,7 @@ router.post("/api/customers/schemes", async (req, res) => {
   }
 });
 
-router.get("/api/customers/schemes/:id", async (req, res) => {
+router.get("/customers/schemes/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   try {
@@ -265,7 +265,7 @@ router.get("/api/customers/schemes/:id", async (req, res) => {
   }
 });
 
-router.put("/api/customers/schemes/:id", async (req, res) => {
+router.put("/customers/schemes/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   const { slabs, ...input } = req.body as { slabs?: unknown[]; [k: string]: unknown };
@@ -283,7 +283,7 @@ router.put("/api/customers/schemes/:id", async (req, res) => {
   }
 });
 
-router.delete("/api/customers/schemes/:id", async (req, res) => {
+router.delete("/customers/schemes/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   try {
@@ -298,7 +298,7 @@ router.delete("/api/customers/schemes/:id", async (req, res) => {
 
 // ── Scheme tracking + push list ────────────────────────────────────────────────
 
-router.get("/api/customers/schemes/:id/tracking", async (req, res) => {
+router.get("/customers/schemes/:id/tracking", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   try {
@@ -310,7 +310,7 @@ router.get("/api/customers/schemes/:id/tracking", async (req, res) => {
   }
 });
 
-router.get("/api/customers/schemes/:id/push-list", async (req, res) => {
+router.get("/customers/schemes/:id/push-list", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   try {

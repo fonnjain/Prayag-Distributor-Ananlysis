@@ -119,6 +119,7 @@ export type ReportRow = {
 
 export type QtyRow = {
   group: string;
+  groupRaw: string;
   customer: string;
   state: string;
   qtyThisFy: number;
@@ -320,12 +321,12 @@ export async function buildCompanyReports(
   })).sort((a, b) => b.thisFyLike - a.thisFyLike);
 
   // ── Report 4 — quantity (Rule 2: never sum across groups) ──────────────────
-  type QtyKey = string; // "group||customer||state"
+  type QtyKey = string; // "group||groupRaw||customer||state"
   const qtyMap = new Map<QtyKey, QtyRow>();
   for (const r of curQty) {
-    const k = `${r.group}||${r.customer}||${r.state}`;
+    const k = `${r.group}||${r.groupRaw}||${r.customer}||${r.state}`;
     const ex = qtyMap.get(k) ?? {
-      group: r.group, customer: r.customer, state: r.state,
+      group: r.group, groupRaw: r.groupRaw, customer: r.customer, state: r.state,
       qtyThisFy: 0, qtyLastFy: 0, amountThisFy: 0, amountLastFy: 0, unit: r.unit,
     };
     ex.qtyThisFy += r.qty;
@@ -334,9 +335,9 @@ export async function buildCompanyReports(
     qtyMap.set(k, ex);
   }
   for (const r of priorQty) {
-    const k = `${r.group}||${r.customer}||${r.state}`;
+    const k = `${r.group}||${r.groupRaw}||${r.customer}||${r.state}`;
     const ex = qtyMap.get(k) ?? {
-      group: r.group, customer: r.customer, state: r.state,
+      group: r.group, groupRaw: r.groupRaw, customer: r.customer, state: r.state,
       qtyThisFy: 0, qtyLastFy: 0, amountThisFy: 0, amountLastFy: 0, unit: r.unit,
     };
     ex.qtyLastFy += r.qty;
@@ -476,22 +477,24 @@ async function queryByPartyGroup(fyStr: string, months: string[]) {
   }).from(saleLines).where(whereClause(fyStr, months)).groupBy(sql`1, 2, 3`);
 }
 
-// Report 4: qty per group+customer+state with unit from item_master.
+// Report 4: qty per group+customer+state, broken out by group_raw so WATER TANK
+// litres are never merged with pipe pieces in the same row.
 // RULE 2: results are grouped BY group — caller must never sum qty across groups.
 async function queryQty(fyStr: string, months: string[]) {
   if (months.length === 0) return [];
   const rows = await db.select({
     group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
+    groupRaw: sql<string>`coalesce(${saleLines.groupRaw}, '')`,
     customer: sql<string>`coalesce(${saleLines.customer}, '')`,
     state: sql<string>`coalesce(${saleLines.stateCanon}, 'Unmapped')`,
     qty: sql<number>`coalesce(sum(${saleLines.qty}::numeric), 0)::float8`,
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
-    unit: sql<string>`coalesce(max(${itemMaster.unit}), '')`,
+    unit: sql<string>`case when max(${saleLines.groupRaw}) = 'WATER TANK' then 'Ltr' else coalesce(max(${itemMaster.unit}), '') end`,
   })
     .from(saleLines)
     .leftJoin(itemMaster, eq(saleLines.code, itemMaster.code))
     .where(whereClause(fyStr, months))
-    .groupBy(sql`1, 2, 3`);
+    .groupBy(sql`1, 2, 3, 4`);
   return rows;
 }
 
