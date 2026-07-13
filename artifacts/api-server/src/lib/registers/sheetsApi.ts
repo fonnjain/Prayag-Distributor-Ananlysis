@@ -40,7 +40,9 @@ export async function getGoogleAccessToken(): Promise<string> {
       "No Replit identity token available to fetch the Google connection",
     );
   }
-  const url = `https://${hostname}/api/v2/connection?include_secrets=true&connector_names=google-drive`;
+  // connector_names filter param is not recognised by this connectors version —
+  // fetch all connections and pick the google-drive one by connector_name field.
+  const url = `https://${hostname}/api/v2/connection?include_secrets=true`;
   const res = await fetch(url, {
     headers: { Accept: "application/json", "X-Replit-Token": xReplitToken },
   });
@@ -49,6 +51,7 @@ export async function getGoogleAccessToken(): Promise<string> {
   }
   const data = (await res.json()) as {
     items?: Array<{
+      connector_name?: string;
       settings?: {
         access_token?: string;
         expires_at?: string;
@@ -56,7 +59,10 @@ export async function getGoogleAccessToken(): Promise<string> {
       };
     }>;
   };
-  const settings = data.items?.[0]?.settings;
+  const item = (data.items ?? []).find(
+    (c) => c.connector_name === "google-drive",
+  );
+  const settings = item?.settings;
   const accessToken =
     settings?.access_token ?? settings?.oauth?.credentials?.access_token;
   if (!accessToken) {
