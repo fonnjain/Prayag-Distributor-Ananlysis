@@ -19,6 +19,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { normName } from "./names.js";
 import { logger } from "../logger.js";
+import { objectStorageClient } from "../objectStorage.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -88,6 +89,58 @@ export function dashboardXlsxPath(fy: string): string {
 }
 export function dashboardJsonPath(fy: string): string {
   return join(uploadDir(), `dashboard-state-head-${fy}.json`);
+}
+
+// ── Object Storage (GCS) persistence ─────────────────────────────────────────
+// The local uploads/ dir is cwd-relative and may not survive production
+// restarts. We also write/read the parsed JSON from GCS so it persists
+// across deployments. Errors are logged but never thrown — local disk
+// remains the fast path; GCS is only the durable fallback.
+
+function parseGcsPath(path: string): { bucketName: string; objectName: string } {
+  const p = path.startsWith("/") ? path : `/${path}`;
+  const parts = p.split("/");
+  return { bucketName: parts[1], objectName: parts.slice(2).join("/") };
+}
+
+function gcsJsonObjectPath(fy: string): string | null {
+  const dir = process.env.PRIVATE_OBJECT_DIR;
+  if (!dir) return null;
+  return `${dir.replace(/\/$/, "")}/dashboard-json/dashboard-state-head-${fy}.json`;
+}
+
+async function saveToGcs(fy: string, data: DashboardXlsxData): Promise<void> {
+  const gcsPath = gcsJsonObjectPath(fy);
+  if (!gcsPath) return;
+  try {
+    const { bucketName, objectName } = parseGcsPath(gcsPath);
+    const file = objectStorageClient.bucket(bucketName).file(objectName);
+    await file.save(Buffer.from(JSON.stringify(data), "utf8"), {
+      contentType: "application/json",
+      resumable: false,
+    });
+    logger.info({ fy }, "dashboardXlsx: JSON persisted to object storage");
+  } catch (err) {
+    logger.warn({ err, fy }, "dashboardXlsx: could not save JSON to object storage");
+  }
+}
+
+async function loadFromGcs(fy: string): Promise<DashboardXlsxData | null> {
+  const gcsPath = gcsJsonObjectPath(fy);
+  if (!gcsPath) return null;
+  try {
+    const { bucketName, objectName } = parseGcsPath(gcsPath);
+    const file = objectStorageClient.bucket(bucketName).file(objectName);
+    const [exists] = await file.exists();
+    if (!exists) return null;
+    const [content] = await file.download();
+    const data = JSON.parse(content.toString("utf8")) as DashboardXlsxData;
+    logger.info({ fy }, "dashboardXlsx: JSON restored from object storage");
+    return data;
+  } catch (err) {
+    logger.warn({ err, fy }, "dashboardXlsx: could not load JSON from object storage");
+    return null;
+  }
 }
 
 // ── Cell helpers ──────────────────────────────────────────────────────────────
@@ -298,6 +351,9 @@ export async function storeDashboardXlsxData(data: DashboardXlsxData): Promise<v
   const dir = uploadDir();
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   await writeFile(dashboardJsonPath(data.status.fy), JSON.stringify(data), "utf8");
+  // Also persist to Object Storage so data survives deployment restarts.
+  // Non-blocking — does not delay the upload response.
+  void saveToGcs(data.status.fy, data);
 }
 
 // In-process cache (cleared on upload).
@@ -316,18 +372,33 @@ export async function loadDashboardXlsxData(fy: string): Promise<DashboardXlsxDa
   const cached = _cache.get(fy);
   if (cached) return cached;
 
+  // Fast path: local disk (written on upload, warm across in-process restarts).
   const p = dashboardJsonPath(fy);
-  if (!existsSync(p)) return null;
-
-  try {
-    const raw = await readFile(p, "utf8");
-    const data = JSON.parse(raw) as DashboardXlsxData;
-    _cache.set(fy, data);
-    return data;
-  } catch (err) {
-    logger.warn({ err, fy, path: p }, "dashboardXlsx: failed to read stored JSON");
-    return null;
+  if (existsSync(p)) {
+    try {
+      const raw = await readFile(p, "utf8");
+      const data = JSON.parse(raw) as DashboardXlsxData;
+      _cache.set(fy, data);
+      return data;
+    } catch (err) {
+      logger.warn({ err, fy, path: p }, "dashboardXlsx: failed to read local JSON, trying object storage");
+    }
   }
+
+  // Durable fallback: Object Storage (survives deployment restarts).
+  const gcsData = await loadFromGcs(fy);
+  if (gcsData) {
+    _cache.set(fy, gcsData);
+    // Write back to local disk so subsequent calls hit the fast path.
+    try {
+      const dir = uploadDir();
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      await writeFile(p, JSON.stringify(gcsData), "utf8");
+    } catch { /* non-fatal */ }
+    return gcsData;
+  }
+
+  return null;
 }
 
 /**

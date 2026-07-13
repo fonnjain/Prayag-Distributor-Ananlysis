@@ -5,6 +5,8 @@ import {
   syncDashboard,
   startScheduledSync,
 } from "./lib/dashboard/sync";
+import { assembleRows } from "./lib/mgmt/report.js";
+import { loadStateHeadSale } from "./lib/mgmt/stateHeadSale.js";
 
 const rawPort = process.env["PORT"];
 
@@ -38,6 +40,13 @@ app.listen(port, (err) => {
       logger.error({ err: syncErr }, "initial dashboard sync failed");
     }
   })();
+
+  // Pre-warm mgmt data caches so the first Sales page load is fast.
+  // Fills the orders + stateHeadSale sub-caches in the background.
+  void Promise.all([
+    assembleRows({ fy: "2026-27", states: [], regions: [], monthFrom: 1, monthTo: 12, lowPerfPct: 50 }),
+    loadStateHeadSale("2026-27"),
+  ]).catch((err) => logger.warn({ err }, "mgmt warm-up failed"));
 
   // Keep the served snapshot fresh with a periodic background sync
   // (interval configurable via DASHBOARD_SYNC_INTERVAL_MINUTES, 0 disables).

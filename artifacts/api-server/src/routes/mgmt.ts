@@ -43,6 +43,28 @@ const router: IRouter = Router();
 const FY_PATTERN = /^\d{4}-\d{2}$/;
 const DEFAULT_FY = "2025-26";
 
+// ── Response cache for GET /mgmt/data ────────────────────────────────────────
+// Assembling rows requires large Sheets reads (up to 380 k rows per FY).
+// This cache serves repeat loads instantly; it is invalidated when a new
+// dashboard xlsx is uploaded so target data is always fresh.
+type MgmtDataPayload = { rows: unknown[]; meta: Record<string, unknown> };
+const _mgmtDataCache = new Map<string, { payload: MgmtDataPayload; expiresAt: number }>();
+const MGMT_DATA_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+function mgmtDataCacheKey(fy: string, from: number, to: number): string {
+  return `${fy}|${from}|${to}`;
+}
+
+export function invalidateMgmtDataCache(fy?: string): void {
+  if (fy) {
+    for (const key of _mgmtDataCache.keys()) {
+      if (key.startsWith(`${fy}|`)) _mgmtDataCache.delete(key);
+    }
+  } else {
+    _mgmtDataCache.clear();
+  }
+}
+
 // The Target Master sheet is provisioned and writable; the status reflects
 // whether any targets have actually been saved for the default FY yet.
 async function targetsSource(req: Request): Promise<{
@@ -220,6 +242,16 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
   const filters: ReportFilters = {
     fy, states: [], regions: [], monthFrom, monthTo, lowPerfPct: 50,
   };
+
+  // Return the cached payload immediately if it is still fresh.
+  const cacheKey = mgmtDataCacheKey(fy, monthFrom, monthTo);
+  const cachedEntry = _mgmtDataCache.get(cacheKey);
+  if (cachedEntry && Date.now() < cachedEntry.expiresAt) {
+    req.log.debug({ fy, cacheKey }, "mgmt data: cache hit");
+    res.json(cachedEntry.payload);
+    return;
+  }
+
   try {
     const [assembled, hrSfa] = await Promise.all([
       assembleRows(filters),
@@ -354,7 +386,7 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
     const pendingOrdersTotal =
       obTotal > 0 && saleTotal > 0 ? obTotal - saleTotal : null;
 
-    res.json({
+    const responsePayload: MgmtDataPayload = {
       rows: members,
       meta: {
         fy,
@@ -379,7 +411,9 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         ...(primaryDiagnostics ? { primaryAttributionDiagnostics: primaryDiagnostics } : {}),
         ...(xlsxTargetDiagnostic ? { targetMatchDiagnostic: xlsxTargetDiagnostic } : {}),
       },
-    });
+    };
+    _mgmtDataCache.set(cacheKey, { payload: responsePayload, expiresAt: Date.now() + MGMT_DATA_TTL_MS });
+    res.json(responsePayload);
   } catch (err) {
     req.log.error({ err, fy }, "mgmt data failed");
     res.status(500).json({
@@ -589,6 +623,7 @@ router.post(
       const data = await parseDashboardXlsx(dest, fy, fileName);
       await storeDashboardXlsxData(data);
       invalidateDashboardXlsxCache(fy);
+      invalidateMgmtDataCache(fy);
 
       req.log.info(
         {
