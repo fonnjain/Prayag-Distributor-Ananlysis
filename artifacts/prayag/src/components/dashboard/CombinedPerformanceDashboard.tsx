@@ -1,15 +1,22 @@
 // Combined Performance — Primary vs Secondary.
 //
 // CORRECT business model:
-//   Prayag sells ONCE to Distributors (PRIMARY = ₹361 Cr FY25-26).
-//   Salesperson takes orders from retailers/dealers (SECONDARY), which feeds
-//   distributor reorders — secondary ⊂ primary, never additive.
-//   Adding ₹361 Cr + ₹240 Cr is double-counting — the same goods, two ledgers.
+//   Prayag sells ONCE to Distributors (PRIMARY). The same transaction —
+//   salesperson takes orders from retailers/dealers, distributor then buys from
+//   Prayag — is the SECONDARY booking. Secondary ⊂ Primary: it is the
+//   salesperson-attributed portion of primary, never a separate flow.
+//   Adding the two figures is double-counting.
+//
+// Two cadences:
+//   PRIMARY — invoiced daily by Prayag from the register chain.
+//   SECONDARY — recorded once a month at month-end by each salesperson.
+//   This is why like-months comparison (same closed months in both FYs) matters:
+//   secondary only has complete data for closed months.
 //
 // What this page shows:
-//   1. PRIMARY STAGE — Order Booking (committed), Sale (dispatched), Pending.
-//   2. SECONDARY STAGE — Plan (target), Order Booked, Sales Received.
-//   3. COVERAGE — secondary sales / primary sale.
+//   1. PRIMARY — Order Booking (committed), Sale (dispatched), Pending.
+//   2. SECONDARY — Plan (target), Order Booked, Sales Received.
+//   3. COVERAGE — secondary sales / primary sale (like-months basis).
 //      Shows what share of primary was salesperson-supported.
 //   4. COVERAGE GAP — primary sale minus secondary sales.
 //      Business that arrived without direct salesperson touch.
@@ -20,7 +27,7 @@
 //
 // Anomaly rule: per-person per-month, if sales > orders × 1.5 — impossible,
 //   flag but show the recorded value; exclude from rankings.
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, Fragment } from "react";
 import {
   AlertTriangle,
   Info,
@@ -188,6 +195,10 @@ export default function CombinedPerformanceDashboard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedHeads, setExpandedHeads] = useState<Set<string>>(new Set());
+  const [likeMonthsData, setLikeMonthsData] = useState<{
+    likeMonths: string[];
+    monthlyPrimary: Array<{ label: string; amount: number }>;
+  } | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -200,6 +211,20 @@ export default function CombinedPerformanceDashboard() {
       })
       .then((d) => { setData(d); setLoading(false); })
       .catch((err: Error) => { setError(err.message); setLoading(false); });
+  }, [fy]);
+
+  // Fetch like-months primary from the company-reports endpoint so coverage
+  // comparison uses the same closed-month window as secondary data.
+  useEffect(() => {
+    setLikeMonthsData(null);
+    fetch(`/api/company-reports?fy=${encodeURIComponent(fy)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { likeMonths?: string[]; monthlyPrimary?: Array<{ label: string; amount: number }> } | null) => {
+        if (d?.likeMonths && d?.monthlyPrimary) {
+          setLikeMonthsData({ likeMonths: d.likeMonths, monthlyPrimary: d.monthlyPrimary });
+        }
+      })
+      .catch(() => setLikeMonthsData(null));
   }, [fy]);
 
   const hasStateDashboard = useMemo(() => {
@@ -294,6 +319,35 @@ export default function CombinedPerformanceDashboard() {
       ? headSalesTotal - secTotal.salesReceived
       : null;
 
+  // Like-months coverage: compare secondary total (closed months only) against
+  // the same calendar months of primary from the invoice register.
+  // Secondary is already closed-months-only; we pull matching primary months.
+  const likeMonthsPrimaryTotal = useMemo(() => {
+    if (!likeMonthsData || likeMonthsData.likeMonths.length === 0) return null;
+    const monthSet = new Set(likeMonthsData.likeMonths);
+    return likeMonthsData.monthlyPrimary
+      .filter((m) => monthSet.has(m.label))
+      .reduce((s, m) => s + m.amount, 0);
+  }, [likeMonthsData]);
+
+  const likeMonthsLabel = useMemo(() => {
+    if (!likeMonthsData || likeMonthsData.likeMonths.length === 0) return null;
+    const ms = likeMonthsData.likeMonths;
+    const first = ms[0].slice(0, 3);
+    const last = ms[ms.length - 1].slice(0, 3);
+    return first === last ? first : `${first}–${last}`;
+  }, [likeMonthsData]);
+
+  const likeMonthsCoveragePct = useMemo(() => {
+    if (!secTotal || !likeMonthsPrimaryTotal || likeMonthsPrimaryTotal === 0) return null;
+    return secTotal.salesReceived / likeMonthsPrimaryTotal;
+  }, [secTotal, likeMonthsPrimaryTotal]);
+
+  const likeMonthsCoverageGap = useMemo(() => {
+    if (!secTotal || !likeMonthsPrimaryTotal || likeMonthsPrimaryTotal === 0) return null;
+    return likeMonthsPrimaryTotal - secTotal.salesReceived;
+  }, [secTotal, likeMonthsPrimaryTotal]);
+
   const anomalies = data?.meta.anomalies ?? [];
 
   const toggleHead = (head: string) =>
@@ -329,7 +383,17 @@ export default function CombinedPerformanceDashboard() {
       <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-500/5 p-3 text-xs">
         <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-blue-600 dark:text-blue-400" />
         <span className="text-blue-800 dark:text-blue-300">
-          <strong>Why these are never added:</strong> Salesperson takes an order from a retailer (secondary), which feeds the distributor's reorder from Prayag (primary). The same goods appear in both ledgers. Secondary ⊂ Primary — coverage shows how much primary was salesperson-supported.
+          <strong>Why these are never added:</strong> Secondary sales are already counted within primary. Prayag bills the distributor (primary). The salesperson books that order from retailers (secondary). Same goods, same transaction — secondary is the salesperson-attributed portion of primary, never a separate flow. Coverage = secondary / primary tells you what share the team directly drove.
+        </span>
+      </div>
+
+      {/* Cadence callout */}
+      <div className="flex items-start gap-2 rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+        <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+        <span>
+          <strong>Two cadences:</strong> Primary is invoiced <em>daily</em> by Prayag and updated live from the register chain.
+          Secondary is recorded <em>once a month</em> (end-of-month) by each salesperson. Like-months coverage below
+          compares secondary (closed months only) against the same calendar months of primary.
         </span>
       </div>
 
@@ -385,11 +449,23 @@ export default function CombinedPerformanceDashboard() {
               />
               <KpiTile
                 label="Salesperson Coverage"
-                sub="secondary / primary sale"
+                sub="secondary / primary (full year)"
                 value={fmtPct(coveragePct)}
                 note={
                   coverageGap != null
                     ? `Gap: ${fmtCr(coverageGap)} without TM touch`
+                    : undefined
+                }
+              />
+              <KpiTile
+                label={likeMonthsLabel ? `Coverage — ${likeMonthsLabel} (like months)` : "Coverage — like months"}
+                sub="secondary (closed months) / primary (same months)"
+                value={likeMonthsCoveragePct != null ? fmtPct(likeMonthsCoveragePct) : "—"}
+                note={
+                  likeMonthsCoverageGap != null
+                    ? `Gap: ${fmtCr(likeMonthsCoverageGap)} — fair apples-to-apples`
+                    : likeMonthsData === null
+                    ? "Loading primary data..."
                     : undefined
                 }
               />
@@ -453,9 +529,8 @@ export default function CombinedPerformanceDashboard() {
                 </thead>
                 <tbody>
                   {headGroups.map((group) => (
-                    <>
+                    <Fragment key={group.head}>
                       <tr
-                        key={group.head}
                         className="cursor-pointer border-b border-border bg-muted/20 hover:bg-muted/40 transition-colors"
                         onClick={() => toggleHead(group.head)}
                       >
@@ -524,22 +599,26 @@ export default function CombinedPerformanceDashboard() {
                             </td>
                           </tr>
                         ))}
-                    </>
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
 
-          {/* FY2026-27 verification anchors */}
+          {/* Live company totals */}
           {fy === "2026-27" && secTotal != null && (
             <div className="rounded-md bg-muted/30 border border-border p-3 space-y-1">
-              <p className="text-xs font-medium text-muted-foreground">Verification anchors — FY 2026-27 (closed months only)</p>
+              <p className="text-xs font-medium text-muted-foreground">
+                Live totals — FY 2026-27
+              </p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-muted-foreground">
-                <span>Q1 Achievement: ~69.4%</span>
-                <span>Apr: ~55.5%</span>
-                <span>May: ~71.4%</span>
-                <span>Jun: ~79.6%</span>
+                <span>Secondary: {fmtCr(secTotal.salesReceived)}</span>
+                <span>Secondary OB: {fmtCr(secTotal.orderBooked)}</span>
+                <span>Primary (full year): {fmtCr(headSalesTotal || null)}</span>
+                {likeMonthsPrimaryTotal != null && (
+                  <span>Primary ({likeMonthsLabel}): {fmtCr(likeMonthsPrimaryTotal)}</span>
+                )}
               </div>
             </div>
           )}
