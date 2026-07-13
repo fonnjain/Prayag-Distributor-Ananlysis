@@ -20,6 +20,8 @@ const queryClient = new QueryClient({
 function Router() {
   return (
     <Switch>
+      {/* Sales section — /sales and /sales/:section both render SalesPage */}
+      <Route path="/sales/:section" component={SalesPage} />
       <Route path="/sales" component={SalesPage} />
       <Route path="/" component={Dashboard} />
       <Route path="/:area">

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useTheme } from "next-themes";
-import { Sun, Moon, Printer, Menu, X, BarChart3, Map, LayoutGrid, Package, TrendingUp, LineChart, Database, Bot, FileSpreadsheet, Target, Users, UploadCloud, LayoutDashboard, ShieldCheck } from "lucide-react";
+import { Sun, Moon, Printer, Menu, X, BarChart3, Map, LayoutGrid, Package, TrendingUp, LineChart, Database, Bot, FileSpreadsheet, Target, Users, UploadCloud, ShieldCheck } from "lucide-react";
 import Overview from "@/components/dashboard/Overview";
 import Regional from "@/components/dashboard/Regional";
 import Resources from "@/components/dashboard/Resources";
@@ -13,7 +13,6 @@ import Analyst from "@/components/dashboard/Analyst";
 import MgmtReports from "@/components/dashboard/MgmtReports";
 import Targets from "@/components/dashboard/Targets";
 import SalesImport from "@/components/dashboard/SalesImport";
-import StateHeadDashboard from "@/components/dashboard/StateHeadDashboard";
 import DataHealth from "@/components/dashboard/DataHealth";
 import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
@@ -31,7 +30,6 @@ const AREAS = [
   { id: "targets", label: "Targets", icon: Target, component: Targets },
   { id: "sales-import", label: "Sales Import", icon: UploadCloud, component: SalesImport },
   { id: "sources", label: "Data Sources", icon: Database, component: DataSources },
-  { id: "state-head", label: "State Head", icon: LayoutDashboard, component: StateHeadDashboard },
   { id: "data-health", label: "Data Health", icon: ShieldCheck, component: DataHealth },
 ];
 
@@ -44,6 +42,7 @@ export default function Dashboard() {
     AREAS.find((a) => location === `/${a.id}`)?.id ?? AREAS[0].id;
   const setActiveArea = (id: string) =>
     setLocation(id === AREAS[0].id ? "/" : `/${id}`);
+  const isSalesActive = location.startsWith("/sales");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const isDark = theme === "dark";
 
@@ -93,9 +92,14 @@ export default function Dashboard() {
         <nav className="flex-1 px-4 py-6 md:py-2 space-y-1 overflow-y-auto">
           <button
             onClick={() => { setLocation("/sales"); setMobileMenuOpen(false); }}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground"
+            className={cn(
+              "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+              isSalesActive
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            )}
           >
-            <Users className="w-4 h-4 opacity-70" />
+            <Users className={cn("w-4 h-4", isSalesActive ? "opacity-100" : "opacity-70")} />
             Sales
           </button>
           <div className="pt-1 pb-1 border-b border-border/30" />
