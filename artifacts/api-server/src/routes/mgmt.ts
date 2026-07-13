@@ -432,6 +432,9 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
             salesReceived: secDash.totalSalesReceived,
             ytdAchievement: secDash.ytdAchievement,
             totalDealers: secDash.totalDealers,
+            // Sheet's own TOTAL row — for reconciliation display in Data Health.
+            // Null when the TOTAL row was not found in the sheet.
+            sheetTotals: secDash.sheetTotals ?? null,
           },
           anomalies: secDash.anomalies,
           secondaryCoveragePct: saleTotal > 0 && secDash.totalSalesReceived > 0

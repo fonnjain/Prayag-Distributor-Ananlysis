@@ -25,15 +25,29 @@ const BOOKING_SHEETS: Record<string, string> = {
 };
 
 const SALE_SHEETS: Record<string, string> = {
-  "2026-27": "1QIpcfgOVCFjcCmgU_DXKn8h7Bfa8rm2q2wB2HneTvKs",
+  // FY2026-27: "SALE SHEET 26-27" — monthly tabs Apr/May/Jun/July.
+  // Columns: A=serial B=invoice C=date D=bill-from E=customer F=city G=dest
+  //          H=code I=colour J=qty K=MRP L=rate M=TAXABLE VALUE N=group
+  //          O=station P=state Q=STATE HEAD R=month
+  "2026-27": "19LQGpkbZiecGaXdBvl48rPZT2LUz3sKekeKX5fHu7Ps",
   "2025-26": "1RuXHIXfusOT-VDdDqeuB-Nx-pxyVkmrJsqr21BB-NUA",
+};
+
+// Positional fallback column indices for the FY2026-27 sale sheet when
+// header detection fails (0-based: M=12, Q=16).
+const SALE_POSITIONAL: Record<string, { taxIdx: number; headIdx: number }> = {
+  "19LQGpkbZiecGaXdBvl48rPZT2LUz3sKekeKX5fHu7Ps": { taxIdx: 12, headIdx: 16 },
 };
 
 const NON_TERRITORY_RE = /^(other|project|govt|gem|jjm|nonterrit)/i;
 const SKIP_TAB_RE =
   /^(instruction|change.?log|legend|notes?|readme|cover|summary|index|template)/i;
+// Match abbreviated OR full month names, with or without year suffix.
+// Handles: "Apr", "April", "May", "Jun", "June", "Jul", "July", "Aug", "August",
+//          "Sep", "September", "Oct", "October", "Nov", "November",
+//          "Dec", "December", "Jan", "January", "Feb", "February", "Mar", "March"
 const MONTHLY_RE =
-  /^(Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Jan|Feb|Mar)[-\s\d]/i;
+  /^(Apr(il)?|May|Jun(e)?|Jul(y)?|Aug(ust)?|Sep(tember)?|Oct(ober)?|Nov(ember)?|Dec(ember)?|Jan(uary)?|Feb(ruary)?|Mar(ch)?)\b/i;
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
@@ -104,16 +118,22 @@ async function readAndAggregate(
 ): Promise<SheetAgg> {
   const tabs = await listSheetTabs(sheetId);
 
-  // Order booking sheet uses monthly tabs; sale sheets use all non-skip tabs.
-  let dataTabs = forBooking
-    ? tabs.filter(
-        (t) =>
-          MONTHLY_RE.test(t.title.trim()) || /^data$/i.test(t.title.trim()),
-      )
-    : tabs.filter((t) => !SKIP_TAB_RE.test(t.title.trim()));
-  // Fallback: if no monthly tabs, use all non-skip tabs.
+  // Both booking and sale sheets use monthly tabs (Apr/April, May, Jun/June, Jul/July, …).
+  // Fallback to all non-skip tabs when no monthly tabs are found (e.g. legacy sheets
+  // where all data sits on a single tab).
+  let dataTabs = tabs.filter(
+    (t) => MONTHLY_RE.test(t.title.trim()) || /^data$/i.test(t.title.trim()),
+  );
   if (dataTabs.length === 0)
     dataTabs = tabs.filter((t) => !SKIP_TAB_RE.test(t.title.trim()));
+
+  logger.info(
+    { sheetId, forBooking, allTabs: tabs.map((t) => t.title), dataTabs: dataTabs.map((t) => t.title) },
+    "primarySheets: tabs selected",
+  );
+
+  // Positional fallback column indices (used when header-scan finds nothing).
+  const positional = SALE_POSITIONAL[sheetId];
 
   const byNormHead = new Map<string, number>();
   const byDistributor = new Map<
@@ -128,6 +148,7 @@ async function readAndAggregate(
       headIdx = -1,
       custIdx = -1;
     let headerFound = false;
+    let tabRows = 0;
 
     await readTabRowsChunked(sheetId, tab.title, (rows, startRow) => {
       for (let ri = 0; ri < rows.length; ri++) {
@@ -135,22 +156,36 @@ async function readAndAggregate(
         const globalRow = startRow + ri;
 
         if (!headerFound) {
-          if (globalRow > 30) continue;
-          const tI = findCol(row, /taxable\s*value/i);
-          const hI = findCol(row, /state\s*head/i);
-          if (tI >= 0 && hI >= 0) {
-            taxIdx = tI;
-            headIdx = hI;
-            if (forBooking) {
-              custIdx = findCol(
-                row,
-                /^(customer|party\s*name|firm\s*name|dealer\s*name|distributor\s*name)$/i,
+          if (globalRow > 30) {
+            // Header not found in first 30 rows — try positional fallback once.
+            if (positional) {
+              taxIdx = positional.taxIdx;
+              headIdx = positional.headIdx;
+              headerFound = true;
+              logger.warn(
+                { sheetId, tab: tab.title },
+                "primarySheets: header not detected, using positional fallback",
               );
-              if (custIdx < 0) custIdx = findCol(row, /customer|party/i);
             }
-            headerFound = true;
+            if (!headerFound) continue;
+          } else {
+            // Accept "Taxable Value" or "Taxable Amount" (case-insensitive).
+            const tI = findCol(row, /taxable\s*(value|amount)/i);
+            const hI = findCol(row, /state\s*head/i);
+            if (tI >= 0 && hI >= 0) {
+              taxIdx = tI;
+              headIdx = hI;
+              if (forBooking) {
+                custIdx = findCol(
+                  row,
+                  /^(customer|party\s*name|firm\s*name|dealer\s*name|distributor\s*name)$/i,
+                );
+                if (custIdx < 0) custIdx = findCol(row, /customer|party/i);
+              }
+              headerFound = true;
+            }
+            continue;
           }
-          continue;
         }
 
         const head = strVal(row[headIdx]);
@@ -161,12 +196,14 @@ async function readAndAggregate(
         if (NON_TERRITORY_RE.test(hNorm)) {
           nonTerritoryTotal += amt;
           total += amt;
+          tabRows++;
           continue;
         }
         if (!hNorm) continue;
 
         byNormHead.set(hNorm, (byNormHead.get(hNorm) ?? 0) + amt);
         total += amt;
+        tabRows++;
 
         // Distributor-level granularity for the booking sheet.
         if (forBooking && custIdx >= 0) {
@@ -187,6 +224,18 @@ async function readAndAggregate(
         }
       }
     });
+
+    logger.info(
+      { sheetId, tab: tab.title, tabRows, tabTotal: Math.round(total) },
+      "primarySheets: tab processed",
+    );
+  }
+
+  if (total === 0) {
+    logger.warn(
+      { sheetId, forBooking, dataTabs: dataTabs.map((t) => t.title) },
+      "primarySheets: all tabs yielded 0 rows — check sheet structure and column headers",
+    );
   }
 
   return { byNormHead, byDistributor, nonTerritoryTotal, total };

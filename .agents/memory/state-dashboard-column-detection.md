@@ -35,12 +35,28 @@ base+4: Achievement % (Sales/Plan — sheet formula is CORRECT here, unlike the 
 base+5: Sales Received Amount (₹)
 base+6: Sales Received Count
 
-## Verification anchors (FY2026-27, secondary members only, Q1 closed)
-- Annual Business Plan = ₹364.97 Cr (spec said ₹364.98 Cr — exact match ✓)
-- Q1 YTD Sales = ₹48.37 Cr, YTD Achievement = 63.1%
-- Per-member spot-check: Ravinder Puri April plan ₹18L, sales ₹16.74L → 93.0% ✓
-- Earlier drafts cited ₹57.88 Cr / 69.4% — those figures included primary-role members;
-  secondary-only (8 primary-role excluded) gives ₹48.37 Cr.
+## Verification anchors (FY2026-27, ALL secondary members including primary-role)
+- Annual Business Plan = ₹364.97 Cr ✓
+- Total Order Booked = ₹57.80 Cr, Total Sales = ₹57.88 Cr ✓
+- Q1 YTD Achievement = 63.1% (secondary-only, closed months, non-left) ✓
+- Detected column positions: colsBusinessPlan=11, colsOrderBooked=12, colsSales=14,
+  colsMonthStart=15, monthStarts=[15,22,29,36,43,50,57,64,71,78,85,92]
+
+## No TOTAL row in this sheet
+The sheet ends with regular member rows — there is no "GRAND TOTAL" or "TOTAL"
+summary row. `sheetTotals` in `SecDashboard` will always be null for FY26-27.
+The reconciliation warn logs in stateDashboard.ts are in place for if/when a total
+row is added; they will not fire until then.
+
+## notYetRecorded rule
+`notYetRecorded = !closed` (calendar only). The sheet writes explicit zeros for
+future months (plan pre-filled), so `orderedAmount == null && salesAmount == null`
+is NOT a reliable signal. Open months always show "—", never 0%.
+
+## Sheet is actively edited in real-time
+Fresh Sheets loads during editing can return incomplete/partial data. The 15-min
+TTL cache in stateDashboard.ts protects against this. Do not compare fresh-load
+numbers to expected anchors during an active editing session.
 
 **Why:** The anchor row structure was discovered by adding a temporary debug log that
 printed anchorRow[0..30] and the first 3 data rows; without the raw dump it's impossible

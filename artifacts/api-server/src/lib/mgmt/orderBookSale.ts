@@ -66,11 +66,19 @@ export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
   try {
     const tabs = await listSheetTabs(ORDER_BOOK_FY2627);
 
-    // Include monthly tabs (Apr-26, May-26 …) and any flat "Data" tab.
-    const MONTHLY_RE = /^(Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Jan|Feb|Mar)[-\s\d]/i;
+    // Include monthly tabs: abbreviated ("Apr", "Jul") or full ("April", "July"),
+    // with or without a year suffix ("Apr-26", "Apr 2026", "April").
+    // The sheet names some tabs with the full month name and no suffix.
+    const MONTHLY_RE =
+      /^(Apr(il)?|May|Jun(e)?|Jul(y)?|Aug(ust)?|Sep(tember)?|Oct(ober)?|Nov(ember)?|Dec(ember)?|Jan(uary)?|Feb(ruary)?|Mar(ch)?)\b/i;
     const DATA_RE = /^data$/i;
     const relevantTabs = tabs.filter(
       (t) => MONTHLY_RE.test(t.title.trim()) || DATA_RE.test(t.title.trim()),
+    );
+
+    logger.info(
+      { allTabs: tabs.map((t) => t.title), relevantTabs: relevantTabs.map((t) => t.title) },
+      "orderBookSale: tabs selected",
     );
 
     if (relevantTabs.length === 0) {
@@ -93,10 +101,9 @@ export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
           rowNum = globalRow;
 
           if (!headerFound) {
-            // Header expected in first few rows. Stop looking after row 5.
-            if (globalRow > 5) continue;
-            const tIdx = findCol(row, /taxable\s*value/i);
-            const hIdx = findCol(row, /^state\s*head$/i);
+            if (globalRow > 30) continue;
+            const tIdx = findCol(row, /taxable\s*(value|amount)/i);
+            const hIdx = findCol(row, /state\s*head/i);
             if (tIdx >= 0 && hIdx >= 0) {
               taxColIdx = tIdx;
               headColIdx = hIdx;

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useTheme } from "next-themes";
-import { Sun, Moon, Printer, Menu, X, BarChart3, Map, LayoutGrid, Package, TrendingUp, LineChart, Database, Bot, FileSpreadsheet, Target, Users, UploadCloud, ShieldCheck, Store } from "lucide-react";
+import { Sun, Moon, Printer, Menu, X, BarChart3, Map, LayoutGrid, Package, TrendingUp, LineChart, Database, Bot, FileSpreadsheet, Target, Users, ShieldCheck, Store } from "lucide-react";
 import Overview from "@/components/dashboard/Overview";
 import Regional from "@/components/dashboard/Regional";
 import Resources from "@/components/dashboard/Resources";
@@ -12,7 +12,6 @@ import Growth from "@/components/dashboard/Growth";
 import Analyst from "@/components/dashboard/Analyst";
 import MgmtReports from "@/components/dashboard/MgmtReports";
 import Targets from "@/components/dashboard/Targets";
-import SalesImport from "@/components/dashboard/SalesImport";
 import DataHealth from "@/components/dashboard/DataHealth";
 import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
@@ -28,7 +27,6 @@ const AREAS = [
   { id: "analyst", label: "AI Analyst", icon: Bot, component: Analyst },
   { id: "reports", label: "Reports", icon: FileSpreadsheet, component: MgmtReports },
   { id: "targets", label: "Targets", icon: Target, component: Targets },
-  { id: "sales-import", label: "Sales Import", icon: UploadCloud, component: SalesImport },
   { id: "sources", label: "Data Sources", icon: Database, component: DataSources },
   { id: "data-health", label: "Data Health", icon: ShieldCheck, component: DataHealth },
 ];

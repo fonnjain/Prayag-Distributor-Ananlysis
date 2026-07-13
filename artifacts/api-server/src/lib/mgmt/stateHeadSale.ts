@@ -25,13 +25,13 @@ const SALE_SHEETS: Record<string, { id: string; label: string }> = {
     id: "1RuXHIXfusOT-VDdDqeuB-Nx-pxyVkmrJsqr21BB-NUA",
     label: "State Head Sale 2025-26",
   },
-  // FY2026-27 primary dispatch/invoice register (SAP-sourced, "2 years combined").
-  // Order Sheet 26-27 (1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A) holds BOOKED
-  // ORDERS, not dispatched invoices — it is handled separately as the primary order
-  // booking source (loadOrderBookSaleByHead) and returned in meta.orderBookingPrimary.
+  // FY2026-27 primary sale: "SALE SHEET 26-27" (monthly tabs Apr/May/Jun/July).
+  // Columns: A=serial B=invoice C=date D=bill-from E=customer F=city G=dest
+  //          H=code I=colour J=qty K=MRP L=rate M=TAXABLE VALUE N=group
+  //          O=station P=state Q=STATE HEAD R=month
   "2026-27": {
-    id: "1QIpcfgOVCFjcCmgU_DXKn8h7Bfa8rm2q2wB2HneTvKs",
-    label: "State Head Sale 2026-27",
+    id: "19LQGpkbZiecGaXdBvl48rPZT2LUz3sKekeKX5fHu7Ps",
+    label: "Sale Sheet 26-27",
   },
 };
 

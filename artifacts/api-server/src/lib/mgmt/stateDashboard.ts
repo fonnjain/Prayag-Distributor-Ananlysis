@@ -111,14 +111,18 @@ export type SecMember = {
   monthlyTarget: number | null;
   totalDealers: number | null;
   businessPlan: number | null; // Annual target
-  // YTD aggregates (closed months only, excluding flagged anomaly months)
+  // YTD aggregates (closed months only, anomaly months excluded) — per-member display
   ytdOrderBooked: number | null;
   ytdSalesReceived: number | null;
   ytdPlan: number | null;
   // RECOMPUTED: ytdSalesReceived / ytdPlan
   ytdAchievement: number | null;
+  // ALL-months totals (every month, open or closed, including anomalous) — used for
+  // company/state-head headline totals so they tie exactly to the sheet's own TOTAL row.
+  allMonthsOrderBooked: number;
+  allMonthsSalesReceived: number;
   months: SecMonthData[];      // 12 elements, index 0=Apr..11=Mar
-  isPrimaryRole: boolean;      // In "Primary Team Members" tab → exclude from secondary
+  isPrimaryRole: boolean;      // In "Primary Team Members" tab (currently advisory only)
   isLeft: boolean;             // In "LEFT TEAM MEMBERS" section (count in totals, never low-perf)
 };
 
@@ -128,12 +132,16 @@ export type SecDashboard = {
   tabName: string;
   members: SecMember[];
   primaryRoleKeys: Set<string>;
-  // Company totals (secondary members only, closed months, excl anomalies)
+  // Company totals — ALL members, ALL months (open+closed, anomalous included).
+  // These must tie exactly to the sheet's own TOTAL row.
   totalPlan: number;
   totalOrderBooked: number;
   totalSalesReceived: number;
   totalDealers: number;
   ytdAchievement: number | null;
+  // Raw values read from the sheet's own TOTAL row (for reconciliation).
+  // Null when the TOTAL row could not be located.
+  sheetTotals: { orderBooked: number | null; salesReceived: number | null } | null;
   anomalies: Array<{
     name: string;
     stateHead: string;
@@ -491,6 +499,10 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
     let ytdSales = 0;
     let ytdHasData = false;
     let hasAnomalyMonth = false;
+    // All-months accumulators: every month regardless of closed/anomaly status.
+    // Used for company-level headline totals that must tie to the sheet's TOTAL row.
+    let allMonthsOrdered = 0;
+    let allMonthsSales = 0;
 
     for (let m = 0; m < 12; m++) {
       const base = monthStarts[m];
@@ -503,12 +515,12 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
       const salesCount = cellNum(row[base + 6]);
 
       const closed = isMonthClosed(m, fy);
-      // A month is "not yet recorded" if it hasn't closed and has no data.
-      const notYetRecorded =
-        !closed &&
-        planAmount == null &&
-        orderedAmount == null &&
-        salesAmount == null;
+      // A month is "not yet recorded" when it has not yet ended on the calendar.
+      // Secondary data is entered at month-end, so ANY open month — even one where
+      // the sheet has written an explicit zero — must show "in progress", never 0%.
+      // The sheet pre-fills plan and sometimes writes zeros for future months; both
+      // are meaningless until the month closes.  Use the calendar only.
+      const notYetRecorded = !closed;
 
       // Anomaly: sales > 1.5× orders AND orders > 0 (physically impossible).
       const isAnomaly =
@@ -531,12 +543,16 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
         });
       }
 
-      // YTD: closed months only, excluding anomalous months from the accumulator.
+      // YTD (per-member display): closed months only, anomaly months excluded.
       if (closed && !isAnomaly) {
         if (planAmount != null) { ytdPlan += planAmount; ytdHasData = true; }
         if (orderedAmount != null) ytdOrdered += orderedAmount;
         if (salesAmount != null) ytdSales += salesAmount;
       }
+
+      // All-months: include every month unconditionally.
+      if (orderedAmount != null) allMonthsOrdered += orderedAmount;
+      if (salesAmount != null) allMonthsSales += salesAmount;
 
       // Per-month achievement = sales / plan (RECOMPUTED).
       let achievement: number | null = null;
@@ -574,13 +590,75 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
       ytdSalesReceived: ytdHasData ? ytdSales : null,
       ytdPlan: ytdHasData ? ytdPlan : null,
       ytdAchievement,
+      allMonthsOrderBooked: allMonthsOrdered,
+      allMonthsSalesReceived: allMonthsSales,
       months,
       isPrimaryRole,
       isLeft,
     });
   }
 
-  // ── Company-level totals (secondary members, excl primary-role + left for achievement) ─
+  // ── TOTAL row detection (reconciliation) ─────────────────────────────────────
+  // Scan backwards from the end of the sheet to find the grand-total row.
+  // The TOTAL row is identified by the string "TOTAL" appearing in ANY cell in
+  // the first 20 columns (the sheet may place the label in a column other than
+  // the canonical stateHead or teamMember columns).  We read its annual
+  // orderBooked and sales columns — the sheet's own computed grand totals —
+  // and compare them against our member-level reconstruction.
+  let sheetTotalOB: number | null = null;
+  let sheetTotalSales: number | null = null;
+
+  // Log detected column positions once per cache fill (useful for diagnosing
+  // structural changes in the sheet without triggering a full data dump).
+  logger.info(
+    {
+      fy,
+      anchorIdx,
+      dataStart,
+      colsBusinessPlan: cols.businessPlan,
+      colsOrderBooked: cols.orderBooked,
+      colsSales: cols.sales,
+      colsMonthStart: cols.monthStart,
+    },
+    "stateDashboard: detected columns",
+  );
+
+  for (let i = allRows.length - 1; i >= dataStart; i--) {
+    const row = allRows[i] ?? [];
+    // Check the first 20 columns for any cell containing "TOTAL".
+    const isTotalRow = row
+      .slice(0, 20)
+      .some((c) => typeof c === "string" && c.toUpperCase().includes("TOTAL"));
+    if (isTotalRow) {
+      if (cols.orderBooked >= 0) {
+        const v = cellNum(row[cols.orderBooked]);
+        if (v != null && v > 0) sheetTotalOB = v;
+      }
+      if (cols.sales >= 0) {
+        const v = cellNum(row[cols.sales]);
+        if (v != null && v > 0) sheetTotalSales = v;
+      }
+      // Log what we found even if the numeric cells were null/empty.
+      logger.info(
+        {
+          fy,
+          rowIdx: i,
+          isTotalRow: true,
+          rawCells: row.slice(0, 20).map((c) => (c == null || c === "" ? null : String(c).slice(0, 14))),
+          readOB: sheetTotalOB,
+          readSales: sheetTotalSales,
+        },
+        "stateDashboard: TOTAL row candidate",
+      );
+      if (sheetTotalOB != null || sheetTotalSales != null) break;
+    }
+  }
+
+  // ── Company-level totals ─────────────────────────────────────────────────────
+  // RULE: include EVERY member and EVERY month — no isPrimaryRole exclusion, no
+  // anomaly exclusion, no closed-only filter.  These totals must tie exactly to
+  // the sheet's own TOTAL row.  Achievement is recomputed from the sums (never
+  // copied from the sheet's achievement column).
   let totalPlan = 0;
   let totalOrderBooked = 0;
   let totalSalesReceived = 0;
@@ -589,11 +667,12 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
   let ytdSalesSum = 0;
 
   for (const m of members) {
-    if (m.isPrimaryRole) continue;
     if (m.totalDealers != null) totalDealers += m.totalDealers;
     if (m.businessPlan != null) totalPlan += m.businessPlan;
-    if (m.ytdOrderBooked != null) totalOrderBooked += m.ytdOrderBooked;
-    if (m.ytdSalesReceived != null) totalSalesReceived += m.ytdSalesReceived;
+    // allMonths* covers every month (open+closed, anomalous included).
+    totalOrderBooked += m.allMonthsOrderBooked;
+    totalSalesReceived += m.allMonthsSalesReceived;
+    // YTD achievement denominator: closed months, non-left members only.
     if (!m.isLeft) {
       if (m.ytdPlan != null) ytdPlanSum += m.ytdPlan;
       if (m.ytdSalesReceived != null) ytdSalesSum += m.ytdSalesReceived;
@@ -601,6 +680,31 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
   }
 
   const ytdAchievement = ytdPlanSum > 0 ? ytdSalesSum / ytdPlanSum : null;
+
+  // Reconciliation: warn when our member-level reconstruction diverges from
+  // the sheet's TOTAL row.  A gap > ₹1 000 is a sign that rows are being missed.
+  if (sheetTotalOB != null && Math.abs(sheetTotalOB - totalOrderBooked) > 1000) {
+    logger.warn(
+      {
+        fy,
+        sheetOB: Math.round(sheetTotalOB),
+        computedOB: Math.round(totalOrderBooked),
+        gapOB: Math.round(sheetTotalOB - totalOrderBooked),
+      },
+      "stateDashboard: computed OB does not tie to sheet TOTAL row",
+    );
+  }
+  if (sheetTotalSales != null && Math.abs(sheetTotalSales - totalSalesReceived) > 1000) {
+    logger.warn(
+      {
+        fy,
+        sheetSales: Math.round(sheetTotalSales),
+        computedSales: Math.round(totalSalesReceived),
+        gapSales: Math.round(sheetTotalSales - totalSalesReceived),
+      },
+      "stateDashboard: computed Sales does not tie to sheet TOTAL row",
+    );
+  }
 
   logger.info(
     {
@@ -610,11 +714,19 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
       primaryRole: [...primaryRoleKeys].length,
       anomalies: anomalies.length,
       totalPlan: Math.round(totalPlan),
+      totalOrderBooked: Math.round(totalOrderBooked),
       totalSalesReceived: Math.round(totalSalesReceived),
+      sheetTotalOB: sheetTotalOB != null ? Math.round(sheetTotalOB) : null,
+      sheetTotalSales: sheetTotalSales != null ? Math.round(sheetTotalSales) : null,
       ytdAchievementPct: ytdAchievement != null ? `${(ytdAchievement * 100).toFixed(1)}%` : null,
     },
     "stateDashboard: loaded",
   );
+
+  const sheetTotals =
+    sheetTotalOB != null || sheetTotalSales != null
+      ? { orderBooked: sheetTotalOB, salesReceived: sheetTotalSales }
+      : null;
 
   const result: SecDashboard = {
     fy,
@@ -627,6 +739,7 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
     totalSalesReceived,
     totalDealers,
     ytdAchievement,
+    sheetTotals,
     anomalies,
     rowsRead: allRows.length,
     loadedAt: Date.now(),
