@@ -42,7 +42,7 @@ export async function getGoogleAccessToken(): Promise<string> {
   }
   const url = `https://${hostname}/api/v2/connection?include_secrets=true&connector_names=google-drive`;
   const res = await fetch(url, {
-    headers: { Accept: "application/json", X_REPLIT_TOKEN: xReplitToken },
+    headers: { Accept: "application/json", "X-Replit-Token": xReplitToken },
   });
   if (!res.ok) {
     throw new Error(`Failed to fetch google-drive connection (${res.status})`);
