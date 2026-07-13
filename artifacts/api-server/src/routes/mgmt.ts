@@ -27,23 +27,11 @@ import {
   loadPrimaryAttribution,
   type PrimaryAttributionDiagnostics,
 } from "../lib/mgmt/primaryAttribution.js";
-import {
-  parseDashboardXlsx,
-  storeDashboardXlsxData,
-  loadDashboardXlsxData,
-  invalidateDashboardXlsxCache,
-  dashboardXlsxPath,
-} from "../lib/mgmt/dashboardXlsx.js";
 import { loadPrimarySheetData } from "../lib/mgmt/primarySheets.js";
 import {
-  parseSecondaryFile,
-  confirmSecondaryUpload,
-  getSecondaryUploadStatus,
-  deleteSecondaryUpload,
-} from "../lib/mgmt/secondaryUpload.js";
-import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage.js";
-import { createWriteStream, existsSync, mkdirSync } from "node:fs";
-import { resolve, join, dirname } from "node:path";
+  loadStateDashboard,
+  type SecMember,
+} from "../lib/mgmt/stateDashboard.js";
 
 const router: IRouter = Router();
 
@@ -260,11 +248,17 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
   }
 
   try {
-    const [assembled, hrSfa] = await Promise.all([
+    const [assembled, hrSfa, secDash] = await Promise.all([
       assembleRows(filters),
       loadHrSfaDashboard().catch((): Map<string, HrSfaRecord> => new Map()),
+      loadStateDashboard(fy).catch((): null => null),
     ]);
     const { rows, ordersAvailable, targetsAvailable, rosterSource, orderStatus, nameMatches, xlsxTargetDiagnostic } = assembled;
+    // Build a normKey → SecMember lookup for the member-row merge below.
+    const secByKey = new Map<string, SecMember>();
+    if (secDash) {
+      for (const sm of secDash.members) secByKey.set(sm.normKey, sm);
+    }
 
     // ── Primary sale (dispatched invoices, Taxable Value by STATE HEAD) ──────────
     // State Head Sale sheets per FY — after the FY2026-27 sheet-ID fix these now
@@ -334,8 +328,12 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
       const tgtPri = tgtPeriod(r.target, "primary", monthFrom, monthTo);
       const tgtBp = tgtPeriod(r.target, "businessPlan", monthFrom, monthTo);
       const booking = r.orders?.amount ?? null;
+      const sec = secByKey.get(r.m.normKey);
+      // Achievement = Sales Received / Plan (STATE HEAD DASHBOARD — authoritative).
+      // Falls back to Order Booked / Target Master for years without state dashboard.
       const achPct =
-        booking != null && tgtSec != null && tgtSec > 0 ? booking / tgtSec : null;
+        sec?.ytdAchievement ??
+        (booking != null && tgtSec != null && tgtSec > 0 ? booking / tgtSec : null);
       const sfa = hrSfa.get(r.m.normKey);
       const primStats = primaryAttrib?.perMember.get(r.m.normKey);
       return {
@@ -352,10 +350,10 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         targetSecondary: tgtSec,
         targetPrimary: tgtPri,
         targetBusinessPlan: tgtBp,
-        orderBooking: booking,
-        // saleAmount on individual rows is null — the frontend reads meta.headSales
-        // for the Summary view and KPI tile (head-level only, no per-member split).
-        saleAmount: null,
+        // Secondary order booking: STATE HEAD DASHBOARD (authoritative) > old order file
+        orderBooking: sec?.ytdOrderBooked ?? booking,
+        // Secondary sales received: populated from STATE HEAD DASHBOARD
+        saleAmount: sec?.ytdSalesReceived ?? null,
         priorOrderBooking: r.priorAmount,
         totalRetailers: r.orders?.totalRetailers ?? null,
         oldRetailers: r.orders?.oldRetailers ?? null,
@@ -364,10 +362,10 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         directDealerCount: r.orders?.directDealerCount ?? null,
         orderCount: r.orders?.orderCount ?? null,
         achievementPct: achPct,
-        band: achBand(achPct, tgtSec != null),
+        band: achBand(achPct, sec?.ytdPlan != null || tgtSec != null),
         visitedParties: sfa?.visitedParties ?? null,
         workingDays: sfa?.workingDays ?? null,
-        ctcMonthly: sfa?.ctcMonthly ?? null,
+        ctcMonthly: sec?.salary ?? sfa?.ctcMonthly ?? null,
         costRatioPct: sfa?.costRatioPct ?? null,
         designation: sfa?.designation ?? null,
         // Primary attribution (from distributor-TM map + primary sheets)
@@ -375,13 +373,27 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         primarySaleAmount: primStats?.saleAmount ?? null,
         primaryDistributors: distMap?.distributorCountByMember.get(r.m.normKey) ?? null,
         primaryDirectDealers: distMap?.directDealerCountByMember.get(r.m.normKey) ?? null,
+        // STATE HEAD DASHBOARD secondary fields (authoritative for FY26-27, FY25-26)
+        secondaryPlan: sec?.ytdPlan ?? null,
+        secondaryOrderBooked: sec?.ytdOrderBooked ?? null,
+        secondarySalesReceived: sec?.ytdSalesReceived ?? null,
+        secondaryAchievement: sec?.ytdAchievement ?? null,
+        secondaryBusinessPlan: sec?.businessPlan ?? null,
+        salary: sec?.salary ?? null,
+        totalDealers: sec?.totalDealers ?? null,
+        monthlyPlan: sec?.months.map((m) => m.planAmount) ?? null,
+        monthlyOrderBooked: sec?.months.map((m) => m.orderedAmount) ?? null,
+        monthlySalesReceived: sec?.months.map((m) => m.salesAmount) ?? null,
+        monthlyAchievement: sec?.months.map((m) => m.achievement) ?? null,
+        monthlyNotYetRecorded: sec?.months.map((m) => m.notYetRecorded) ?? null,
+        isPrimaryRole: sec?.isPrimaryRole ?? false,
+        isLeft: sec?.isLeft ?? false,
+        hasSecondaryAnomaly: sec?.months.some((m) => m.isAnomaly) ?? false,
       };
     });
 
-    const orderBookingNote = !ordersAvailable
-      ? (orderStatus?.detail ??
-          `FY${fy} Secondary Order Booking file not yet created. Order Booking and Achievement are pending until the file exists in Drive.`)
-      : null;
+    // Secondary data now comes from STATE HEAD DASHBOARD — no upload required.
+    const orderBookingNote: string | null = null;
 
     // Pending orders = primary order booking minus dispatched sale (company-wide)
     const obTotal = orderBookingPrimary
@@ -411,8 +423,24 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         ...(orderBookingPrimarySource ? { orderBookingPrimarySource } : {}),
         // Derived: orders booked but not yet dispatched
         ...(pendingOrdersTotal != null ? { pendingOrdersTotal } : {}),
-        // Secondary order booking (per salesperson, from order-booking workbooks)
-        orderBookingSource: ordersAvailable ? `Secondary Order Booking ${fy}` : null,
+        // Secondary data: STATE HEAD DASHBOARD (authoritative for FY26-27 + FY25-26)
+        secondarySource: secDash ? "state_head_dashboard" : null,
+        ...(secDash ? {
+          secondaryTotal: {
+            plan: secDash.totalPlan,
+            orderBooked: secDash.totalOrderBooked,
+            salesReceived: secDash.totalSalesReceived,
+            ytdAchievement: secDash.ytdAchievement,
+            totalDealers: secDash.totalDealers,
+          },
+          anomalies: secDash.anomalies,
+          secondaryCoveragePct: saleTotal > 0 && secDash.totalSalesReceived > 0
+            ? secDash.totalSalesReceived / saleTotal
+            : null,
+        } : { secondaryTotal: null, anomalies: [], secondaryCoveragePct: null }),
+        orderBookingSource: secDash
+          ? `STATE HEAD DASHBOARD — Secondary Order Booking ${fy}`
+          : (ordersAvailable ? `Secondary Order Booking ${fy}` : null),
         orderBookingNameMatches: nameMatches,
         // Primary attribution diagnostics (null until dist-map is warm)
         ...(primaryDiagnostics ? { primaryAttributionDiagnostics: primaryDiagnostics } : {}),
@@ -668,251 +696,5 @@ router.get("/mgmt/bridge/status", async (req: Request, res: Response): Promise<v
   }
 });
 
-// ── Dashboard xlsx upload ──────────────────────────────────────────────────────
-
-// Step 1: Get a short-lived presigned PUT URL for the browser to upload directly.
-router.get(
-  "/mgmt/dashboard-xlsx/upload-url",
-  async (req: Request, res: Response): Promise<void> => {
-    try {
-      const service = new ObjectStorageService();
-      const uploadUrl = await service.getObjectEntityUploadURL();
-      res.json({ uploadUrl });
-    } catch (err) {
-      req.log.error({ err }, "dashboard-xlsx upload-url failed");
-      res.status(500).json({ error: "Could not create an upload URL." });
-    }
-  },
-);
-
-// Step 2: Register an uploaded file — download from object storage, parse, persist.
-router.post(
-  "/mgmt/dashboard-xlsx/register",
-  async (req: Request, res: Response): Promise<void> => {
-    const body = (req.body ?? {}) as {
-      fy?: unknown;
-      uploadUrl?: unknown;
-      fileName?: unknown;
-    };
-    const fy = typeof body.fy === "string" ? body.fy.trim() : "";
-    const uploadUrl = typeof body.uploadUrl === "string" ? body.uploadUrl.trim() : "";
-    const fileName =
-      typeof body.fileName === "string" && body.fileName.trim()
-        ? body.fileName.trim()
-        : `dashboard-state-head-${fy}.xlsx`;
-
-    if (!FY_PATTERN.test(fy) || !uploadUrl) {
-      res.status(400).json({ error: "fy and uploadUrl are required." });
-      return;
-    }
-
-    try {
-      const service = new ObjectStorageService();
-      const objectPath = service.normalizeObjectEntityPath(uploadUrl);
-      const file = await service.getObjectEntityFile(objectPath);
-
-      // Write the xlsx to the local uploads directory so the fallback order-file
-      // loader and the dashboard parser can read it without re-fetching.
-      const dest = dashboardXlsxPath(fy);
-      const destDir = dirname(dest);
-      if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true });
-
-      await new Promise<void>((ok, fail) => {
-        const ws = createWriteStream(dest);
-        const nodeStream = file.createReadStream();
-        (nodeStream as NodeJS.ReadableStream).pipe(ws);
-        ws.on("finish", ok);
-        ws.on("error", fail);
-        (nodeStream as NodeJS.ReadableStream).on("error", fail);
-      });
-
-      const data = await parseDashboardXlsx(dest, fy, fileName);
-      await storeDashboardXlsxData(data);
-      invalidateDashboardXlsxCache(fy);
-      invalidateMgmtDataCache(fy);
-
-      req.log.info(
-        {
-          fy,
-          fileName,
-          totalRecords: data.status.totalRecords,
-          headerRow: data.status.headerRow,
-          targetPeriod: data.status.targetPeriod,
-        },
-        "dashboard-xlsx registered",
-      );
-
-      res.json({ status: data.status });
-    } catch (err) {
-      if (err instanceof ObjectNotFoundError) {
-        res.status(404).json({ error: "Uploaded file not found in object storage." });
-        return;
-      }
-      req.log.error({ err, fy }, "dashboard-xlsx register failed");
-      res
-        .status(500)
-        .json({
-          error:
-            err instanceof Error
-              ? err.message
-              : "Could not parse the uploaded file.",
-        });
-    }
-  },
-);
-
-// Step 3: Get status / parsed summary for a FY.
-router.get(
-  "/mgmt/dashboard-xlsx/:fy",
-  async (req: Request, res: Response): Promise<void> => {
-    const fy = String(req.params.fy ?? "").trim();
-    if (!FY_PATTERN.test(fy)) {
-      res.status(400).json({ error: "Invalid fiscal year." });
-      return;
-    }
-    try {
-      const data = await loadDashboardXlsxData(fy);
-      if (!data) {
-        res.status(404).json({ error: `No dashboard xlsx uploaded for ${fy}.` });
-        return;
-      }
-      res.json({ status: data.status });
-    } catch (err) {
-      req.log.error({ err, fy }, "dashboard-xlsx status failed");
-      res.status(500).json({ error: "Could not load dashboard xlsx status." });
-    }
-  },
-);
-
-// ── Secondary Order Booking upload ────────────────────────────────────────────
-//
-// Two-step flow: upload → parse (validate, no commit) → confirm (commit).
-// Reuses the same presigned-URL mechanism as dashboard-xlsx.
-
-// Step 1: Presigned PUT URL for direct browser upload.
-router.get(
-  "/mgmt/secondary-upload/upload-url",
-  async (req: Request, res: Response): Promise<void> => {
-    try {
-      const service = new ObjectStorageService();
-      const uploadUrl = await service.getObjectEntityUploadURL();
-      res.json({ uploadUrl });
-    } catch (err) {
-      req.log.error({ err }, "secondary-upload upload-url failed");
-      res.status(500).json({ error: "Could not create an upload URL." });
-    }
-  },
-);
-
-// Step 2a: Parse and validate (no commit). Returns validation result + preview.
-router.post(
-  "/mgmt/secondary-upload/parse",
-  async (req: Request, res: Response): Promise<void> => {
-    const body = (req.body ?? {}) as { uploadUrl?: unknown; fy?: unknown };
-    const rawUrl = typeof body.uploadUrl === "string" ? body.uploadUrl.trim() : "";
-    const fy = typeof body.fy === "string" ? body.fy.trim() : "";
-
-    if (!FY_PATTERN.test(fy) || !rawUrl) {
-      res.status(400).json({ error: "fy and uploadUrl are required." });
-      return;
-    }
-
-    const service = new ObjectStorageService();
-    const objectPath = service.normalizeObjectEntityPath(rawUrl);
-
-    try {
-      const result = await parseSecondaryFile(objectPath, fy);
-      res.json(result);
-    } catch (err) {
-      req.log.error({ err, fy }, "secondary-upload parse failed");
-      res.status(500).json({
-        error: err instanceof Error ? err.message : "Parse failed.",
-      });
-    }
-  },
-);
-
-// Step 2b: Confirm — commit the upload to local disk + GCS.
-router.post(
-  "/mgmt/secondary-upload/confirm",
-  async (req: Request, res: Response): Promise<void> => {
-    const body = (req.body ?? {}) as {
-      uploadUrl?: unknown;
-      fy?: unknown;
-      fileName?: unknown;
-    };
-    const rawUrl = typeof body.uploadUrl === "string" ? body.uploadUrl.trim() : "";
-    const fy = typeof body.fy === "string" ? body.fy.trim() : "";
-    const fileName =
-      typeof body.fileName === "string" && body.fileName.trim()
-        ? body.fileName.trim()
-        : `secondary-order-booking-${fy}.xlsx`;
-
-    if (!FY_PATTERN.test(fy) || !rawUrl) {
-      res.status(400).json({ error: "fy and uploadUrl are required." });
-      return;
-    }
-
-    const service = new ObjectStorageService();
-    const objectPath = service.normalizeObjectEntityPath(rawUrl);
-
-    try {
-      const status = await confirmSecondaryUpload(objectPath, fy, fileName);
-      req.log.info(
-        { fy, fileName, rows: status.rowsRead },
-        "secondary-upload confirmed",
-      );
-      res.json({ status });
-    } catch (err) {
-      req.log.error({ err, fy }, "secondary-upload confirm failed");
-      res.status(500).json({
-        error: err instanceof Error ? err.message : "Could not commit the upload.",
-      });
-    }
-  },
-);
-
-// Step 3: Get status of committed upload for a FY.
-router.get(
-  "/mgmt/secondary-upload/status/:fy",
-  async (req: Request, res: Response): Promise<void> => {
-    const fy = String(req.params.fy ?? "").trim();
-    if (!FY_PATTERN.test(fy)) {
-      res.status(400).json({ error: "Invalid fiscal year." });
-      return;
-    }
-    try {
-      const status = await getSecondaryUploadStatus(fy);
-      if (!status) {
-        res.status(404).json({ error: `No secondary upload found for ${fy}.` });
-        return;
-      }
-      res.json({ status });
-    } catch (err) {
-      req.log.error({ err, fy }, "secondary-upload status failed");
-      res.status(500).json({ error: "Could not load upload status." });
-    }
-  },
-);
-
-// Delete a committed upload for a FY.
-router.delete(
-  "/mgmt/secondary-upload/:fy",
-  async (req: Request, res: Response): Promise<void> => {
-    const fy = String(req.params.fy ?? "").trim();
-    if (!FY_PATTERN.test(fy)) {
-      res.status(400).json({ error: "Invalid fiscal year." });
-      return;
-    }
-    try {
-      await deleteSecondaryUpload(fy);
-      req.log.info({ fy }, "secondary-upload deleted");
-      res.json({ ok: true });
-    } catch (err) {
-      req.log.error({ err, fy }, "secondary-upload delete failed");
-      res.status(500).json({ error: "Could not delete upload." });
-    }
-  },
-);
 
 export default router;

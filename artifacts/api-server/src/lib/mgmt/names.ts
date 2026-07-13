@@ -47,6 +47,13 @@ const HEAD_ALIASES: Record<string, string> = {
   // normHead("Biju C.O")="bijuco", so the head silently gets zero sale.
   bijju: "bijuco",
   biju: "bijuco",
+  // STATE HEAD DASHBOARD name variants confirmed in secondary booking data.
+  sulindarpal: "sulinderpal",   // "Sulindar Pal" → "Sulinder Pal"
+  pawankumar: "pawansharma",    // "Pawan Kumar Sharma" → "Pawan Sharma"
+  pawankumarsharma: "pawansharma",
+  lalan: "lalankumar",          // "LALAN" → "Lalan Kumar"
+  nasirhusain: "nasirhussainkhan", // "NASIR HUSAIN" → "Nasir Hussain Khan"
+  nasirhussain: "nasirhussainkhan",
 };
 
 // Resolves head-name spellings from any source (register, bridge, folder

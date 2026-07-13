@@ -1,38 +1,31 @@
-// Combined Performance dashboard.
+// Combined Performance — Primary vs Secondary.
 //
-// RULE ZERO: Primary and Secondary are NEVER summed. They are different
-// stages of the same channel:
-//   Prayag → [PRIMARY] → Distributor → [SECONDARY] → Retailer
-// Adding ₹361 Cr + ₹240 Cr is double-counting — it equals nothing real.
+// CORRECT business model:
+//   Prayag sells ONCE to Distributors (PRIMARY = ₹361 Cr FY25-26).
+//   Salesperson takes orders from retailers/dealers (SECONDARY), which feeds
+//   distributor reorders — secondary ⊂ primary, never additive.
+//   Adding ₹361 Cr + ₹240 Cr is double-counting — the same goods, two ledgers.
 //
-// This page shows both stages side by side, derives:
-//   Sell-through = Secondary ÷ Primary Sale
-//   Channel Stock = cumulative Primary Sale − cumulative Secondary
-//   Pending       = Primary Booking − Primary Sale
+// What this page shows:
+//   1. PRIMARY STAGE — Order Booking (committed), Sale (dispatched), Pending.
+//   2. SECONDARY STAGE — Plan (target), Order Booked, Sales Received.
+//   3. COVERAGE — secondary sales / primary sale.
+//      Shows what share of primary was salesperson-supported.
+//   4. COVERAGE GAP — primary sale minus secondary sales.
+//      Business that arrived without direct salesperson touch.
 //
-// Signal matrix (per rep):
-//   Primary ↑, Secondary flat/↓ → CHANNEL STUFFING (red — warn even though revenue looks good)
-//   Primary flat/↓, Secondary ↑ → DESTOCKING       (green — reorder due)
-//   Both ↓                       → REAL DEMAND PROBLEM (red)
-//   Both ↑                       → HEALTHY GROWTH      (green)
+// Achievement = Sales Received / Plan (STATE HEAD DASHBOARD — recomputed,
+//   never copied from the sheet). Closed months only for YTD.
+//   Mid-month data not yet recorded = shown as "—", never 0%.
 //
-// Attribution: Primary carried via distributor bridge; where the bridge cannot map
-// a distributor → "Unassigned" (excluded from per-rep sell-through ratio).
-// Secondary carried directly via Team Member Name.
-//
-// Data availability:
-//   FY2025-26: PRIMARY (₹361.14 Cr) + SECONDARY (₹240.14 Cr) → full page.
-//   FY2026-27: PRIMARY live (₹96 Cr booked / ₹73 Cr dispatched); SECONDARY
-//              not yet uploaded → sell-through and channel stock show "Awaiting data".
+// Anomaly rule: per-person per-month, if sales > orders × 1.5 — impossible,
+//   flag but show the recorded value; exclude from rankings.
 import { useState, useEffect, useMemo } from "react";
 import {
   AlertTriangle,
   Info,
   ChevronDown,
   ChevronUp,
-  TrendingUp,
-  TrendingDown,
-  Minus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -49,92 +42,57 @@ type Member = {
   saleAmount: number | null;
   totalRetailers: number | null;
   achievementPct: number | null;
-  targetPrimary: number | null;
   targetSecondary: number | null;
+  // STATE HEAD DASHBOARD fields (authoritative secondary source)
+  secondaryPlan: number | null;
+  secondaryOrderBooked: number | null;
+  secondarySalesReceived: number | null;
+  secondaryAchievement: number | null;
+  secondaryBusinessPlan: number | null;
+  salary: number | null;
+  totalDealers: number | null;
+  monthlyPlan: (number | null)[] | null;
+  monthlyOrderBooked: (number | null)[] | null;
+  monthlySalesReceived: (number | null)[] | null;
+  monthlyAchievement: (number | null)[] | null;
+  monthlyNotYetRecorded: boolean[] | null;
+  isPrimaryRole: boolean;
+  isLeft: boolean;
+  hasSecondaryAnomaly: boolean;
+};
+
+type SecondaryTotal = {
+  plan: number;
+  orderBooked: number;
+  salesReceived: number;
+  ytdAchievement: number | null;
+  totalDealers: number;
+};
+
+type AnomalyRecord = {
+  name: string;
+  stateHead: string;
+  monthIdx: number;
+  monthLabel: string;
+  salesAmount: number;
+  orderedAmount: number;
+  ratio: number;
+};
+
+type DashboardMeta = {
+  headSales?: Record<string, number>;
+  orderBookingPrimary?: Record<string, number>;
+  pendingOrdersTotal?: number | null;
+  secondarySource?: string | null;
+  secondaryTotal?: SecondaryTotal | null;
+  secondaryCoveragePct?: number | null;
+  anomalies?: AnomalyRecord[];
+  fy?: string;
 };
 
 type DashboardData = {
   rows: Member[];
-  meta: {
-    orderLoadStatus?: { fy: string; status: string; detail: string } | null;
-  };
-};
-
-// ── Signal matrix ─────────────────────────────────────────────────────────────
-
-type Signal =
-  | "healthy"         // both ↑
-  | "channel-stuffing" // primary ↑, secondary flat/↓ — WARN even if revenue good
-  | "destocking"      // primary flat/↓, secondary ↑ — opportunity
-  | "demand-problem"  // both ↓
-  | "awaiting-data"   // secondary not uploaded
-  | "unattributed";   // no primary bridge coverage
-
-function classifySignal(
-  primarySale: number,
-  secondary: number,
-  hasSecondary: boolean,
-): Signal {
-  if (!hasSecondary) return "awaiting-data";
-  if (primarySale <= 0) return "unattributed";
-  const sellThrough = secondary / primarySale;
-  // Classify based on sell-through ratio position.
-  // Trend-based signals require multi-period data (not available in single FY load).
-  // Interim heuristic: sell-through < 50% with meaningful channel stock → stuffing risk.
-  const channelStock = primarySale - secondary;
-  if (sellThrough > 0.9) return "destocking"; // stock clearing, reorder due
-  if (sellThrough < 0.45 && channelStock > 5_000_000) return "channel-stuffing";
-  if (sellThrough < 0.3) return "demand-problem";
-  return "healthy";
-}
-
-const SIGNAL_META: Record<
-  Signal,
-  { label: string; short: string; color: string; bg: string; description: string }
-> = {
-  healthy: {
-    label: "Healthy",
-    short: "OK",
-    color: "text-green-700 dark:text-green-400",
-    bg: "bg-green-500/10",
-    description: "Good sell-through. Channel stock within normal range.",
-  },
-  "channel-stuffing": {
-    label: "Channel Stuffing Risk",
-    short: "STUFF",
-    color: "text-red-700 dark:text-red-400",
-    bg: "bg-red-500/10",
-    description:
-      "Low sell-through with large channel stock. Rep looks strong on primary but distributors are not selling on. A correction is coming.",
-  },
-  destocking: {
-    label: "Destocking",
-    short: "DEST",
-    color: "text-green-700 dark:text-green-400",
-    bg: "bg-green-500/10",
-    description: "High sell-through — channel is clearing. A reorder is due soon.",
-  },
-  "demand-problem": {
-    label: "Demand Problem",
-    short: "PROB",
-    color: "text-red-700 dark:text-red-400",
-    bg: "bg-red-500/10",
-    description: "Both primary and secondary are low. This is a real demand issue, not a stock artefact.",
-  },
-  "awaiting-data": {
-    label: "Awaiting secondary data",
-    short: "N/A",
-    color: "text-muted-foreground",
-    bg: "bg-muted/50",
-    description: "Secondary Order Booking not yet uploaded for this FY. Upload in Settings.",
-  },
-  unattributed: {
-    label: "No primary attribution",
-    short: "—",
-    color: "text-muted-foreground",
-    bg: "bg-muted/50",
-    description: "Distributor bridge cannot map this member's primary data.",
-  },
+  meta: DashboardMeta;
 };
 
 // ── Formatters ────────────────────────────────────────────────────────────────
@@ -144,33 +102,49 @@ function fmtCr(n: number | null | undefined): string {
   return `\u20b9${(n / 1e7).toFixed(2)} Cr`;
 }
 
-function fmtPct(n: number | null): string {
+function fmtPct(n: number | null | undefined, decimals = 1): string {
   if (n == null || !Number.isFinite(n)) return "—";
-  return `${n.toFixed(1)}%`;
+  return `${(n * 100).toFixed(decimals)}%`;
 }
 
-function fmtNum(n: number | null): string {
+function fmtNum(n: number | null | undefined): string {
   if (n == null) return "—";
   return n.toLocaleString("en-IN");
 }
 
-// ── Signal chip ───────────────────────────────────────────────────────────────
+function achColor(pct: number | null | undefined): string {
+  if (pct == null) return "text-muted-foreground";
+  if (pct >= 1.0) return "text-green-700 dark:text-green-400";
+  if (pct >= 0.7) return "text-amber-700 dark:text-amber-400";
+  return "text-red-700 dark:text-red-400";
+}
 
-function SignalChip({ signal }: { signal: Signal }) {
-  const meta = SIGNAL_META[signal];
+// ── KPI tile ──────────────────────────────────────────────────────────────────
+
+function KpiTile({
+  label,
+  sub,
+  value,
+  note,
+  warn,
+}: {
+  label: string;
+  sub?: string;
+  value: string;
+  note?: string;
+  warn?: boolean;
+}) {
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
-        meta.bg,
-        meta.color,
+    <div className="flex-1 min-w-[140px] rounded-lg border border-border bg-card p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      {sub && <p className="text-[10px] text-muted-foreground/70 mb-1">{sub}</p>}
+      <p className="text-xl font-semibold font-mono mt-0.5">{value}</p>
+      {note && (
+        <p className={cn("text-[10px] mt-0.5", warn ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
+          {note}
+        </p>
       )}
-      title={meta.description}
-    >
-      {signal === "channel-stuffing" && <AlertTriangle className="h-2.5 w-2.5" />}
-      {signal === "demand-problem" && <AlertTriangle className="h-2.5 w-2.5" />}
-      {meta.short}
-    </span>
+    </div>
   );
 }
 
@@ -180,64 +154,40 @@ type RepRow = {
   name: string;
   stateHead: string;
   primarySale: number;
-  secondary: number;
-  sellThrough: number | null;
-  channelStock: number | null;
-  pending: number;
-  retailers: number;
-  signal: Signal;
+  secPlan: number | null;
+  secOrdered: number | null;
+  secSales: number | null;
+  secAchievement: number | null;
+  dealers: number | null;
+  coveragePct: number | null;
+  coverageGap: number | null;
+  isPrimaryRole: boolean;
+  isLeft: boolean;
+  hasAnomaly: boolean;
 };
 
 type HeadGroup = {
   head: string;
   primarySale: number;
-  secondary: number;
-  sellThrough: number | null;
-  channelStock: number | null;
-  pending: number;
+  secPlan: number;
+  secOrdered: number;
+  secSales: number;
+  secAchievement: number | null;
+  coveragePct: number | null;
+  coverageGap: number | null;
   members: RepRow[];
 };
 
-// ── Funnel tile ───────────────────────────────────────────────────────────────
-
-function FunnelStep({
-  label,
-  sub,
-  value,
-  pct,
-  warn,
-}: {
-  label: string;
-  sub: string;
-  value: string;
-  pct?: string;
-  warn?: boolean;
-}) {
-  return (
-    <div className="flex-1 min-w-0 rounded-lg border border-border bg-card p-3 text-center">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-xs text-muted-foreground/70 mb-1">{sub}</p>
-      <p className="text-xl font-semibold font-mono">{value}</p>
-      {pct && (
-        <p className={cn("text-xs mt-1", warn ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
-          {pct}
-        </p>
-      )}
-    </div>
-  );
-}
-
 // ── Main component ─────────────────────────────────────────────────────────────
 
-const FYS = ["2025-26", "2026-27", "2024-25"] as const;
+const FYS = ["2026-27", "2025-26", "2024-25"] as const;
 
 export default function CombinedPerformanceDashboard() {
-  const [fy, setFy] = useState("2025-26");
+  const [fy, setFy] = useState("2026-27");
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedHeads, setExpandedHeads] = useState<Set<string>>(new Set());
-  const [showMatrix, setShowMatrix] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -252,40 +202,46 @@ export default function CombinedPerformanceDashboard() {
       .catch((err: Error) => { setError(err.message); setLoading(false); });
   }, [fy]);
 
-  // Determine if secondary data exists for this FY
-  const hasSecondary = useMemo(() => {
-    if (!data) return false;
-    return data.rows.some((m) => (m.orderBooking ?? 0) > 0 || (m.saleAmount ?? 0) > 0);
+  const hasStateDashboard = useMemo(() => {
+    return !!data?.meta.secondarySource;
   }, [data]);
 
-  // Build per-rep rows
+  // Build per-rep rows — secondary members only (exclude primary-role TMs)
   const repRows = useMemo((): RepRow[] => {
     if (!data) return [];
     return data.rows
-      .filter((m) => (m.primarySaleAmount ?? 0) > 0 || (m.saleAmount ?? 0) > 0)
-      .map((m) => {
+      .filter((m) => !m.isPrimaryRole)
+      .map((m): RepRow => {
         const primarySale = m.primarySaleAmount ?? 0;
-        const primaryBooking = m.primaryOrderAmount ?? 0;
-        const secondary = m.saleAmount ?? 0;
-        const pending = Math.max(0, primaryBooking - primarySale);
-        const sellThrough =
-          hasSecondary && primarySale > 0 ? (secondary / primarySale) * 100 : null;
-        const channelStock = hasSecondary ? primarySale - secondary : null;
-        const signal = classifySignal(primarySale, secondary, hasSecondary);
+        // Prefer STATE HEAD DASHBOARD values; fall back to old fields
+        const secPlan = m.secondaryPlan ?? m.targetSecondary;
+        const secOrdered = m.secondaryOrderBooked ?? m.orderBooking;
+        const secSales = m.secondarySalesReceived ?? m.saleAmount;
+        const secAchievement = m.secondaryAchievement ?? m.achievementPct;
+        const dealers = m.totalDealers ?? m.totalRetailers;
+        // Coverage: secondary sales as a fraction of primary sale
+        const coveragePct =
+          secSales != null && primarySale > 0 ? secSales / primarySale : null;
+        const coverageGap =
+          secSales != null && primarySale > 0 ? primarySale - secSales : null;
         return {
           name: m.name,
           stateHead: m.stateHead || "Unassigned",
           primarySale,
-          secondary,
-          sellThrough,
-          channelStock,
-          pending,
-          retailers: m.totalRetailers ?? 0,
-          signal,
+          secPlan,
+          secOrdered,
+          secSales,
+          secAchievement,
+          dealers,
+          coveragePct,
+          coverageGap,
+          isPrimaryRole: m.isPrimaryRole,
+          isLeft: m.isLeft,
+          hasAnomaly: m.hasSecondaryAnomaly,
         };
       })
       .sort((a, b) => b.primarySale - a.primarySale);
-  }, [data, hasSecondary]);
+  }, [data]);
 
   // Group by state head
   const headGroups = useMemo((): HeadGroup[] => {
@@ -294,39 +250,51 @@ export default function CombinedPerformanceDashboard() {
       const existing = map.get(r.stateHead);
       if (existing) {
         existing.primarySale += r.primarySale;
-        existing.secondary += r.secondary;
-        existing.pending += r.pending;
+        existing.secPlan += r.secPlan ?? 0;
+        existing.secOrdered += r.secOrdered ?? 0;
+        existing.secSales += r.secSales ?? 0;
         existing.members.push(r);
       } else {
         map.set(r.stateHead, {
           head: r.stateHead,
           primarySale: r.primarySale,
-          secondary: r.secondary,
-          sellThrough: null,
-          channelStock: null,
-          pending: r.pending,
+          secPlan: r.secPlan ?? 0,
+          secOrdered: r.secOrdered ?? 0,
+          secSales: r.secSales ?? 0,
+          secAchievement: null,
+          coveragePct: null,
+          coverageGap: null,
           members: [r],
         });
       }
     }
-    // Compute group-level sell-through
     for (const g of map.values()) {
-      if (hasSecondary && g.primarySale > 0) {
-        g.sellThrough = (g.secondary / g.primarySale) * 100;
-        g.channelStock = g.primarySale - g.secondary;
-      }
+      g.secAchievement = g.secPlan > 0 ? g.secSales / g.secPlan : null;
+      g.coveragePct = g.primarySale > 0 ? g.secSales / g.primarySale : null;
+      g.coverageGap = g.primarySale > 0 ? g.primarySale - g.secSales : null;
     }
     return Array.from(map.values()).sort((a, b) => b.primarySale - a.primarySale);
-  }, [repRows, hasSecondary]);
+  }, [repRows]);
 
-  // Company totals
-  const totals = useMemo(() => {
-    const primarySale = repRows.reduce((s, r) => s + r.primarySale, 0);
-    const secondary = repRows.reduce((s, r) => s + r.secondary, 0);
-    const pending = repRows.reduce((s, r) => s + r.pending, 0);
-    const primaryBooking = data?.rows.reduce((s, m) => s + (m.primaryOrderAmount ?? 0), 0) ?? 0;
-    return { primaryBooking, primarySale, secondary, pending };
-  }, [repRows, data]);
+  // Company totals (from STATE HEAD DASHBOARD secondary total when available)
+  const secTotal = data?.meta.secondaryTotal;
+  const headSalesTotal = useMemo(() => {
+    const hs = data?.meta.headSales;
+    if (!hs) return 0;
+    return Object.values(hs).reduce((s, v) => s + v, 0);
+  }, [data]);
+  const primaryBookingTotal = useMemo(() => {
+    const ob = data?.meta.orderBookingPrimary;
+    if (!ob) return 0;
+    return Object.values(ob).reduce((s, v) => s + v, 0);
+  }, [data]);
+  const coveragePct = data?.meta.secondaryCoveragePct ?? null;
+  const coverageGap =
+    headSalesTotal > 0 && secTotal
+      ? headSalesTotal - secTotal.salesReceived
+      : null;
+
+  const anomalies = data?.meta.anomalies ?? [];
 
   const toggleHead = (head: string) =>
     setExpandedHeads((prev) => {
@@ -336,24 +304,14 @@ export default function CombinedPerformanceDashboard() {
       return next;
     });
 
-  // Signal counts
-  const signalCounts = useMemo(() => {
-    const counts: Record<Signal, number> = {
-      healthy: 0, "channel-stuffing": 0, destocking: 0, "demand-problem": 0,
-      "awaiting-data": 0, unattributed: 0,
-    };
-    for (const r of repRows) counts[r.signal]++;
-    return counts;
-  }, [repRows]);
-
   return (
     <div className="space-y-5 p-4">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Combined Performance</h2>
+          <h2 className="text-lg font-semibold">Salesperson Coverage</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Primary (Prayag to Distributor) and Secondary (Distributor to Retailer) — shown side by side, never summed
+            Primary (Prayag to Distributor) and Secondary (salesperson order booking) — shown side by side, never summed
           </p>
         </div>
         <select
@@ -367,29 +325,28 @@ export default function CombinedPerformanceDashboard() {
         </select>
       </div>
 
-      {/* Rule Zero banner */}
+      {/* Model explanation */}
       <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-500/5 p-3 text-xs">
         <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-blue-600 dark:text-blue-400" />
         <span className="text-blue-800 dark:text-blue-300">
-          <strong>Rule Zero:</strong> Primary (₹361 Cr FY25-26) + Secondary (₹240 Cr) ≠ ₹601 Cr. They are the same goods at two stages of the same channel. Adding is double-counting. No tile on this page sums them.
+          <strong>Why these are never added:</strong> Salesperson takes an order from a retailer (secondary), which feeds the distributor's reorder from Prayag (primary). The same goods appear in both ledgers. Secondary ⊂ Primary — coverage shows how much primary was salesperson-supported.
         </span>
       </div>
 
-      {/* Secondary data banner */}
-      {!loading && data && !hasSecondary && (
+      {/* No STATE HEAD DASHBOARD data for this FY */}
+      {!loading && data && !hasStateDashboard && (
         <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-500/5 p-3 text-xs text-amber-800 dark:text-amber-300">
           <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
           <span>
-            Secondary Order Booking not uploaded for FY {fy}.
-            Sell-through ratio and channel stock cannot be computed — showing "awaiting data".
-            Upload the file in Settings to activate the full combined view.
+            Secondary data (STATE HEAD DASHBOARD) is not available for FY {fy}.
+            Achievement, coverage, and salesperson metrics are blank for this year.
           </span>
         </div>
       )}
 
       {loading && (
         <div className="py-12 text-center text-sm text-muted-foreground">
-          Loading combined performance data…
+          Loading combined performance data...
         </div>
       )}
       {error && (
@@ -398,85 +355,73 @@ export default function CombinedPerformanceDashboard() {
 
       {!loading && data && (
         <>
-          {/* Company funnel */}
+          {/* Company KPI tiles */}
           <div>
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-              Company Funnel — FY {fy}
+              Company — FY {fy}
             </p>
             <div className="flex flex-wrap gap-3">
-              <FunnelStep
-                label="Order Booking"
+              <KpiTile
+                label="Primary — Order Booking"
                 sub="booked by distributors"
-                value={fmtCr(totals.primaryBooking)}
+                value={fmtCr(primaryBookingTotal || null)}
               />
-              <div className="self-center text-muted-foreground text-lg">→</div>
-              <FunnelStep
-                label="Primary Sale"
-                sub="dispatched by Prayag"
-                value={fmtCr(totals.primarySale)}
-                pct={totals.primaryBooking > 0
-                  ? `${((totals.primarySale / totals.primaryBooking) * 100).toFixed(1)}% dispatched`
-                  : undefined}
+              <KpiTile
+                label="Primary — Sale Dispatched"
+                sub="invoiced by Prayag"
+                value={fmtCr(headSalesTotal || null)}
+                note={
+                  primaryBookingTotal > 0 && data.meta.pendingOrdersTotal != null
+                    ? `${fmtCr(data.meta.pendingOrdersTotal)} pending`
+                    : undefined
+                }
+                warn={(data.meta.pendingOrdersTotal ?? 0) / (primaryBookingTotal || 1) > 0.25}
               />
-              <div className="self-center text-muted-foreground text-lg">→</div>
-              <FunnelStep
-                label="Pending"
-                sub="booked, not dispatched — OPS signal"
-                value={fmtCr(totals.pending)}
-                pct={totals.primaryBooking > 0
-                  ? `${((totals.pending / totals.primaryBooking) * 100).toFixed(1)}% of booking`
-                  : undefined}
-                warn={totals.primaryBooking > 0 && totals.pending / totals.primaryBooking > 0.25}
+              <KpiTile
+                label="Secondary — Sales Received"
+                sub="salesperson-supported"
+                value={secTotal ? fmtCr(secTotal.salesReceived) : "—"}
+                note={secTotal ? `Plan: ${fmtCr(secTotal.plan)}` : "No data for this FY"}
               />
-              <div className="self-center text-muted-foreground text-lg">→</div>
-              <FunnelStep
-                label="Secondary"
-                sub={hasSecondary ? "sold on by distributors" : "awaiting data"}
-                value={hasSecondary ? fmtCr(totals.secondary) : "Awaiting data"}
-                pct={hasSecondary && totals.primarySale > 0
-                  ? `${((totals.secondary / totals.primarySale) * 100).toFixed(1)}% sell-through`
-                  : undefined}
+              <KpiTile
+                label="Salesperson Coverage"
+                sub="secondary / primary sale"
+                value={fmtPct(coveragePct)}
+                note={
+                  coverageGap != null
+                    ? `Gap: ${fmtCr(coverageGap)} without TM touch`
+                    : undefined
+                }
+              />
+              <KpiTile
+                label="Secondary YTD Achievement"
+                sub="sales received / plan (closed months)"
+                value={secTotal?.ytdAchievement != null ? fmtPct(secTotal.ytdAchievement) : "—"}
+                note={
+                  secTotal
+                    ? `${fmtNum(secTotal.totalDealers)} total dealers`
+                    : undefined
+                }
               />
             </div>
           </div>
 
-          {/* Signal matrix summary */}
-          {hasSecondary && (
-            <div>
-              <button
-                className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2"
-                onClick={() => setShowMatrix((v) => !v)}
-              >
-                Signal Matrix — Rep Classification
-                {showMatrix ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-              </button>
-              {showMatrix && (
-                <div className="rounded-lg border border-border p-4 space-y-3">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {(["healthy", "channel-stuffing", "destocking", "demand-problem"] as Signal[]).map((s) => {
-                      const meta = SIGNAL_META[s];
-                      return (
-                        <div key={s} className={cn("rounded-md p-3", meta.bg)}>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className={cn("text-xs font-medium", meta.color)}>
-                              {meta.label}
-                            </span>
-                            <span className={cn("text-lg font-bold", meta.color)}>
-                              {signalCounts[s]}
-                            </span>
-                          </div>
-                          <p className="text-xs text-muted-foreground leading-relaxed">
-                            {meta.description}
-                          </p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Classification based on sell-through ratio and channel stock position. Trend-based signals (primary ↑ vs secondary ↓) require multi-period comparison — coming once multi-FY data is available.
+          {/* Anomaly warnings */}
+          {anomalies.length > 0 && (
+            <div className="rounded-md border border-amber-200 bg-amber-500/5 p-3 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+                  Data anomalies detected ({anomalies.length}) — sales exceed orders by more than 1.5x (physically impossible). Values shown as-is; excluded from rankings.
+                </p>
+              </div>
+              <div className="space-y-0.5">
+                {anomalies.map((a, i) => (
+                  <p key={i} className="text-[10px] text-amber-700 dark:text-amber-400 pl-5">
+                    {a.name} ({a.stateHead}) — {a.monthLabel}: sales {fmtCr(a.salesAmount)} vs orders {fmtCr(a.orderedAmount)} ({a.ratio.toFixed(1)}x)
                   </p>
-                </div>
-              )}
+                ))}
+              </div>
             </div>
           )}
 
@@ -493,19 +438,17 @@ export default function CombinedPerformanceDashboard() {
                       Primary Sale
                     </th>
                     <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">
-                      Secondary
+                      Sec Plan
                     </th>
                     <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">
-                      Sell-through
+                      Sec Sales
                     </th>
                     <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">
-                      Channel Stock
+                      Achievement
                     </th>
-                    {hasSecondary && (
-                      <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">
-                        Signal
-                      </th>
-                    )}
+                    <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">
+                      Coverage
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -530,58 +473,55 @@ export default function CombinedPerformanceDashboard() {
                           {fmtCr(group.primarySale)}
                         </td>
                         <td className="py-2 px-3 text-right font-mono text-xs text-muted-foreground">
-                          {hasSecondary ? fmtCr(group.secondary) : "Awaiting data"}
+                          {group.secPlan > 0 ? fmtCr(group.secPlan) : "—"}
                         </td>
                         <td className="py-2 px-3 text-right font-mono text-xs">
-                          {group.sellThrough != null ? (
-                            <span className={cn(
-                              group.sellThrough < 45 ? "text-red-700 dark:text-red-400" :
-                              group.sellThrough > 90 ? "text-green-700 dark:text-green-400" :
-                              "text-foreground"
-                            )}>
-                              {fmtPct(group.sellThrough)}
-                            </span>
-                          ) : "—"}
+                          {group.secSales > 0 ? fmtCr(group.secSales) : "—"}
+                        </td>
+                        <td className={cn("py-2 px-3 text-right font-mono text-xs", achColor(group.secAchievement))}>
+                          {fmtPct(group.secAchievement)}
                         </td>
                         <td className="py-2 px-3 text-right font-mono text-xs text-muted-foreground">
-                          {group.channelStock != null ? fmtCr(group.channelStock) : "—"}
+                          {group.coveragePct != null
+                            ? `${(group.coveragePct * 100).toFixed(1)}%`
+                            : "—"}
                         </td>
-                        {hasSecondary && <td className="py-2 px-3 text-center" />}
                       </tr>
                       {expandedHeads.has(group.head) &&
                         group.members.map((m) => (
                           <tr
                             key={m.name}
-                            className="border-b border-border/50 hover:bg-muted/20 transition-colors"
+                            className={cn(
+                              "border-b border-border/50 hover:bg-muted/20 transition-colors",
+                              m.isLeft && "opacity-70",
+                            )}
                           >
                             <td className="py-1.5 px-3 pl-10 text-sm">
-                              {m.name}
-                            </td>
-                            <td className="py-1.5 px-3 text-right font-mono text-xs">
-                              {fmtCr(m.primarySale)}
-                            </td>
-                            <td className="py-1.5 px-3 text-right font-mono text-xs text-muted-foreground">
-                              {hasSecondary ? fmtCr(m.secondary) : "—"}
-                            </td>
-                            <td className="py-1.5 px-3 text-right font-mono text-xs">
-                              {m.sellThrough != null ? (
-                                <span className={cn(
-                                  m.sellThrough < 45 ? "text-red-700 dark:text-red-400" :
-                                  m.sellThrough > 90 ? "text-green-700 dark:text-green-400" :
-                                  "text-foreground"
-                                )}>
-                                  {fmtPct(m.sellThrough)}
-                                </span>
-                              ) : "—"}
+                              <span>{m.name}</span>
+                              {m.isLeft && (
+                                <span className="ml-1.5 text-[10px] text-muted-foreground">(left)</span>
+                              )}
+                              {m.hasAnomaly && (
+                                <AlertTriangle className="inline ml-1.5 h-3 w-3 text-amber-500" aria-label="Data anomaly — sales exceed orders" />
+                              )}
                             </td>
                             <td className="py-1.5 px-3 text-right font-mono text-xs text-muted-foreground">
-                              {m.channelStock != null ? fmtCr(m.channelStock) : "—"}
+                              {m.primarySale > 0 ? fmtCr(m.primarySale) : "—"}
                             </td>
-                            {hasSecondary && (
-                              <td className="py-1.5 px-3 text-center">
-                                <SignalChip signal={m.signal} />
-                              </td>
-                            )}
+                            <td className="py-1.5 px-3 text-right font-mono text-xs text-muted-foreground">
+                              {m.secPlan != null ? fmtCr(m.secPlan) : "—"}
+                            </td>
+                            <td className="py-1.5 px-3 text-right font-mono text-xs">
+                              {m.secSales != null ? fmtCr(m.secSales) : "—"}
+                            </td>
+                            <td className={cn("py-1.5 px-3 text-right font-mono text-xs", achColor(m.secAchievement))}>
+                              {fmtPct(m.secAchievement)}
+                            </td>
+                            <td className="py-1.5 px-3 text-right font-mono text-xs text-muted-foreground">
+                              {m.coveragePct != null
+                                ? `${(m.coveragePct * 100).toFixed(1)}%`
+                                : "—"}
+                            </td>
                           </tr>
                         ))}
                     </>
@@ -591,14 +531,25 @@ export default function CombinedPerformanceDashboard() {
             </div>
           )}
 
-          {/* Verification anchors for FY2025-26 */}
-          {fy === "2025-26" && hasSecondary && (
+          {/* FY2026-27 verification anchors */}
+          {fy === "2026-27" && secTotal != null && (
+            <div className="rounded-md bg-muted/30 border border-border p-3 space-y-1">
+              <p className="text-xs font-medium text-muted-foreground">Verification anchors — FY 2026-27 (closed months only)</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-muted-foreground">
+                <span>Q1 Achievement: ~69.4%</span>
+                <span>Apr: ~55.5%</span>
+                <span>May: ~71.4%</span>
+                <span>Jun: ~79.6%</span>
+              </div>
+            </div>
+          )}
+          {fy === "2025-26" && (
             <div className="rounded-md bg-muted/30 border border-border p-3 space-y-1">
               <p className="text-xs font-medium text-muted-foreground">Verification anchors — FY 2025-26</p>
               <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
-                <span>Primary: ₹361.14 Cr</span>
-                <span>Secondary: ₹240.14 Cr</span>
-                <span>Sell-through: ~66%</span>
+                <span>Primary Sale: ~₹361.14 Cr</span>
+                <span>Secondary Plan: ~₹364.98 Cr</span>
+                <span>Secondary Sales: ~₹240.14 Cr</span>
               </div>
             </div>
           )}

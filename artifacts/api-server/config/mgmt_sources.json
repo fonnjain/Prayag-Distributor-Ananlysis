@@ -40,6 +40,13 @@
     "sheetId": "1g-4_lDCeXQfUmp-VQ_mEWXQJyLMJXUGmRwGgughYHFY",
     "tab": "INDEX"
   },
+  "state_head_dashboard": {
+    "comment": "STATE HEAD DASHBOARD workbooks — AUTHORITATIVE source for secondary order booking (Plan / Order Booked / Sales Received per person per month). Achievement = Sales Received / Plan (recomputed). Cadence: month closed when today > last calendar day of that month.",
+    "files_by_year": {
+      "2026-27": "1E1jEY_yO8LmpqBDpcesS_fu2SBPEQ0eKO5xN29XyTEM",
+      "2025-26": "1PTkkEa_ENkSqsGnpqoXy9kt0Fe1hCtlmU6kVFBNaonY"
+    }
+  },
   "party_os_payment": {
     "comment": "PARTY O/S & PAYMENT workbooks. Filter rows where Type='Pymt'; the payment amount is the collection. Each file may cover multiple months; the State Head column (normalised via head_alias) is the join key.",
     "files_by_year": {

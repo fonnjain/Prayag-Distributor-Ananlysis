@@ -12,3 +12,4 @@
 - [Prayag historical roster gap](prayag-historical-roster-gap.md) — for FY<current, departed TMs in order file are recovered via target-master stateHead supplement in assembleRows; 40 zero-booking members require a historical roster file.
 - [Dashboard xlsx upload pattern](prayag-dashboard-xlsx-upload.md) — FY-specific quarterly vs annual rules; header auto-detected (not hardcoded); xlsx fills target-map gaps; departed TMs get stateHead from xlsx.
 - [Customer Performance page](customer-performance.md) — units-first analytics on sale_line; Laspeyres at customer/category/company levels; scheme engine configurable; route /customers.
+- [STATE HD Dashboard column detection](state-dashboard-column-detection.md) — FY-suffix stripping + Excel date serial detection required; block offsets +0/+2/+5=plan/OB/sales; plan ₹364.97 Cr verified.
