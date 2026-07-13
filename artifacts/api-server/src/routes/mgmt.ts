@@ -34,6 +34,12 @@ import {
   invalidateDashboardXlsxCache,
   dashboardXlsxPath,
 } from "../lib/mgmt/dashboardXlsx.js";
+import {
+  parseSecondaryFile,
+  confirmSecondaryUpload,
+  getSecondaryUploadStatus,
+  deleteSecondaryUpload,
+} from "../lib/mgmt/secondaryUpload.js";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage.js";
 import { createWriteStream, existsSync, mkdirSync } from "node:fs";
 import { resolve, join, dirname } from "node:path";
@@ -674,6 +680,137 @@ router.get(
     } catch (err) {
       req.log.error({ err, fy }, "dashboard-xlsx status failed");
       res.status(500).json({ error: "Could not load dashboard xlsx status." });
+    }
+  },
+);
+
+// ── Secondary Order Booking upload ────────────────────────────────────────────
+//
+// Two-step flow: upload → parse (validate, no commit) → confirm (commit).
+// Reuses the same presigned-URL mechanism as dashboard-xlsx.
+
+// Step 1: Presigned PUT URL for direct browser upload.
+router.get(
+  "/mgmt/secondary-upload/upload-url",
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const service = new ObjectStorageService();
+      const uploadUrl = await service.getObjectEntityUploadURL();
+      res.json({ uploadUrl });
+    } catch (err) {
+      req.log.error({ err }, "secondary-upload upload-url failed");
+      res.status(500).json({ error: "Could not create an upload URL." });
+    }
+  },
+);
+
+// Step 2a: Parse and validate (no commit). Returns validation result + preview.
+router.post(
+  "/mgmt/secondary-upload/parse",
+  async (req: Request, res: Response): Promise<void> => {
+    const body = (req.body ?? {}) as { uploadUrl?: unknown; fy?: unknown };
+    const rawUrl = typeof body.uploadUrl === "string" ? body.uploadUrl.trim() : "";
+    const fy = typeof body.fy === "string" ? body.fy.trim() : "";
+
+    if (!FY_PATTERN.test(fy) || !rawUrl) {
+      res.status(400).json({ error: "fy and uploadUrl are required." });
+      return;
+    }
+
+    const service = new ObjectStorageService();
+    const objectPath = service.normalizeObjectEntityPath(rawUrl);
+
+    try {
+      const result = await parseSecondaryFile(objectPath, fy);
+      res.json(result);
+    } catch (err) {
+      req.log.error({ err, fy }, "secondary-upload parse failed");
+      res.status(500).json({
+        error: err instanceof Error ? err.message : "Parse failed.",
+      });
+    }
+  },
+);
+
+// Step 2b: Confirm — commit the upload to local disk + GCS.
+router.post(
+  "/mgmt/secondary-upload/confirm",
+  async (req: Request, res: Response): Promise<void> => {
+    const body = (req.body ?? {}) as {
+      uploadUrl?: unknown;
+      fy?: unknown;
+      fileName?: unknown;
+    };
+    const rawUrl = typeof body.uploadUrl === "string" ? body.uploadUrl.trim() : "";
+    const fy = typeof body.fy === "string" ? body.fy.trim() : "";
+    const fileName =
+      typeof body.fileName === "string" && body.fileName.trim()
+        ? body.fileName.trim()
+        : `secondary-order-booking-${fy}.xlsx`;
+
+    if (!FY_PATTERN.test(fy) || !rawUrl) {
+      res.status(400).json({ error: "fy and uploadUrl are required." });
+      return;
+    }
+
+    const service = new ObjectStorageService();
+    const objectPath = service.normalizeObjectEntityPath(rawUrl);
+
+    try {
+      const status = await confirmSecondaryUpload(objectPath, fy, fileName);
+      req.log.info(
+        { fy, fileName, rows: status.rowsRead },
+        "secondary-upload confirmed",
+      );
+      res.json({ status });
+    } catch (err) {
+      req.log.error({ err, fy }, "secondary-upload confirm failed");
+      res.status(500).json({
+        error: err instanceof Error ? err.message : "Could not commit the upload.",
+      });
+    }
+  },
+);
+
+// Step 3: Get status of committed upload for a FY.
+router.get(
+  "/mgmt/secondary-upload/status/:fy",
+  async (req: Request, res: Response): Promise<void> => {
+    const fy = String(req.params.fy ?? "").trim();
+    if (!FY_PATTERN.test(fy)) {
+      res.status(400).json({ error: "Invalid fiscal year." });
+      return;
+    }
+    try {
+      const status = await getSecondaryUploadStatus(fy);
+      if (!status) {
+        res.status(404).json({ error: `No secondary upload found for ${fy}.` });
+        return;
+      }
+      res.json({ status });
+    } catch (err) {
+      req.log.error({ err, fy }, "secondary-upload status failed");
+      res.status(500).json({ error: "Could not load upload status." });
+    }
+  },
+);
+
+// Delete a committed upload for a FY.
+router.delete(
+  "/mgmt/secondary-upload/:fy",
+  async (req: Request, res: Response): Promise<void> => {
+    const fy = String(req.params.fy ?? "").trim();
+    if (!FY_PATTERN.test(fy)) {
+      res.status(400).json({ error: "Invalid fiscal year." });
+      return;
+    }
+    try {
+      await deleteSecondaryUpload(fy);
+      req.log.info({ fy }, "secondary-upload deleted");
+      res.json({ ok: true });
+    } catch (err) {
+      req.log.error({ err, fy }, "secondary-upload delete failed");
+      res.status(500).json({ error: "Could not delete upload." });
     }
   },
 );

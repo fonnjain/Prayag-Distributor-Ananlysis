@@ -2,6 +2,9 @@ import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 const DashboardUploadPanel = lazy(
   () => import("./DashboardUploadPanel"),
 );
+const SecondaryUploadPanel = lazy(
+  () => import("./SecondaryUploadPanel"),
+);
 import {
   Download,
   ChevronUp,
@@ -872,10 +875,13 @@ export default function StateHeadDashboard() {
             <div className="py-8 text-center text-sm text-muted-foreground">Loading...</div>
           }
         >
-          <DashboardUploadPanel
-            targetDiagnostic={data?.meta?.targetMatchDiagnostic ?? null}
-            selectedFy={fy}
-          />
+          <div className="space-y-6">
+            <DashboardUploadPanel
+              targetDiagnostic={data?.meta?.targetMatchDiagnostic ?? null}
+              selectedFy={fy}
+            />
+            <SecondaryUploadPanel />
+          </div>
         </Suspense>
       )}
 

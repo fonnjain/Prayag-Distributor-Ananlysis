@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import { useLocation } from "wouter";
 import { useTheme } from "next-themes";
 import {
@@ -9,10 +9,19 @@ import {
   ChevronLeft,
   LayoutDashboard,
   Users,
+  BarChart2,
+  GitMerge,
 } from "lucide-react";
 import StateHeadDashboard from "@/components/dashboard/StateHeadDashboard";
 import SalesPeople from "@/components/dashboard/SalesPeople";
 import { cn } from "@/lib/utils";
+
+const PrimaryPerformanceDashboard = lazy(
+  () => import("@/components/dashboard/PrimaryPerformanceDashboard"),
+);
+const CombinedPerformanceDashboard = lazy(
+  () => import("@/components/dashboard/CombinedPerformanceDashboard"),
+);
 
 // ── Section registry ──────────────────────────────────────────────────────────
 // Add new Sales sub-sections here. The first entry is the default.
@@ -23,12 +32,28 @@ const SECTIONS = [
     label: "State Head",
     icon: LayoutDashboard,
     component: StateHeadDashboard,
+    lazy: false,
   },
   {
     id: "sales-people",
     label: "Sales People",
     icon: Users,
     component: SalesPeople,
+    lazy: false,
+  },
+  {
+    id: "primary-performance",
+    label: "Primary Performance",
+    icon: BarChart2,
+    component: PrimaryPerformanceDashboard,
+    lazy: true,
+  },
+  {
+    id: "combined",
+    label: "Combined",
+    icon: GitMerge,
+    component: CombinedPerformanceDashboard,
+    lazy: true,
   },
 ] as const;
 
