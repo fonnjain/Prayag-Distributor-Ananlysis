@@ -8,8 +8,10 @@ import {
   X,
   ChevronLeft,
   LayoutDashboard,
+  Users,
 } from "lucide-react";
 import StateHeadDashboard from "@/components/dashboard/StateHeadDashboard";
+import SalesPeople from "@/components/dashboard/SalesPeople";
 import { cn } from "@/lib/utils";
 
 // ── Section registry ──────────────────────────────────────────────────────────
@@ -22,7 +24,12 @@ const SECTIONS = [
     icon: LayoutDashboard,
     component: StateHeadDashboard,
   },
-  // More sections will be added here as the Sales page grows
+  {
+    id: "sales-people",
+    label: "Sales People",
+    icon: Users,
+    component: SalesPeople,
+  },
 ] as const;
 
 type SectionId = (typeof SECTIONS)[number]["id"];
