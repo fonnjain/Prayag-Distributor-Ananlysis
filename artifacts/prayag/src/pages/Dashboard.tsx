@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useTheme } from "next-themes";
-import { Sun, Moon, Printer, Menu, X, BarChart3, Map, LayoutGrid, Package, TrendingUp, LineChart, Database, Bot, FileSpreadsheet, Target, Users, UploadCloud, ShieldCheck } from "lucide-react";
+import { Sun, Moon, Printer, Menu, X, BarChart3, Map, LayoutGrid, Package, TrendingUp, LineChart, Database, Bot, FileSpreadsheet, Target, Users, UploadCloud, ShieldCheck, Store } from "lucide-react";
 import Overview from "@/components/dashboard/Overview";
 import Regional from "@/components/dashboard/Regional";
 import Resources from "@/components/dashboard/Resources";
@@ -43,6 +43,7 @@ export default function Dashboard() {
   const setActiveArea = (id: string) =>
     setLocation(id === AREAS[0].id ? "/" : `/${id}`);
   const isSalesActive = location.startsWith("/sales");
+  const isCustomersActive = location.startsWith("/customers");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const isDark = theme === "dark";
 
@@ -101,6 +102,18 @@ export default function Dashboard() {
           >
             <Users className={cn("w-4 h-4", isSalesActive ? "opacity-100" : "opacity-70")} />
             Sales
+          </button>
+          <button
+            onClick={() => { setLocation("/customers"); setMobileMenuOpen(false); }}
+            className={cn(
+              "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+              isCustomersActive
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            )}
+          >
+            <Store className={cn("w-4 h-4", isCustomersActive ? "opacity-100" : "opacity-70")} />
+            Customers
           </button>
           <div className="pt-1 pb-1 border-b border-border/30" />
           {AREAS.map((area) => {

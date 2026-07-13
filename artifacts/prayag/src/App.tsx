@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "next-themes";
 import Dashboard, { AREA_IDS } from "@/pages/Dashboard";
 import SalesPage from "@/pages/SalesPage";
+import CustomersPage from "@/pages/CustomersPage";
 import NotFound from "@/pages/not-found";
 import { DashboardProvider } from "@/data/dashboard-context";
 
@@ -23,6 +24,9 @@ function Router() {
       {/* Sales section — /sales and /sales/:section both render SalesPage */}
       <Route path="/sales/:section" component={SalesPage} />
       <Route path="/sales" component={SalesPage} />
+      {/* Customer Performance — /customers and /customers/:section */}
+      <Route path="/customers/:section" component={CustomersPage} />
+      <Route path="/customers" component={CustomersPage} />
       <Route path="/" component={Dashboard} />
       <Route path="/:area">
         {(params) =>
