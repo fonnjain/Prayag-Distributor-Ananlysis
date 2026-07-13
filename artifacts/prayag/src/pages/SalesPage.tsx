@@ -11,6 +11,7 @@ import {
   Users,
   BarChart2,
   GitMerge,
+  ShoppingBag,
 } from "lucide-react";
 import StateHeadDashboard from "@/components/dashboard/StateHeadDashboard";
 import SalesPeople from "@/components/dashboard/SalesPeople";
@@ -18,6 +19,9 @@ import { cn } from "@/lib/utils";
 
 const PrimaryPerformanceDashboard = lazy(
   () => import("@/components/dashboard/PrimaryPerformanceDashboard"),
+);
+const SecondaryPerformanceDashboard = lazy(
+  () => import("@/components/dashboard/SecondaryPerformanceDashboard"),
 );
 const CombinedPerformanceDashboard = lazy(
   () => import("@/components/dashboard/CombinedPerformanceDashboard"),
@@ -46,6 +50,13 @@ const SECTIONS = [
     label: "Primary Performance",
     icon: BarChart2,
     component: PrimaryPerformanceDashboard,
+    lazy: true,
+  },
+  {
+    id: "secondary-performance",
+    label: "Secondary Performance",
+    icon: ShoppingBag,
+    component: SecondaryPerformanceDashboard,
     lazy: true,
   },
   {

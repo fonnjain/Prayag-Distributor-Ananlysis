@@ -34,6 +34,7 @@ import {
   invalidateDashboardXlsxCache,
   dashboardXlsxPath,
 } from "../lib/mgmt/dashboardXlsx.js";
+import { loadPrimarySheetData } from "../lib/mgmt/primarySheets.js";
 import {
   parseSecondaryFile,
   confirmSecondaryUpload,
@@ -426,6 +427,105 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
       error:
         "Could not load dashboard data. Google Sheets may be unavailable; try again in a minute.",
     });
+  }
+});
+
+// GET /api/mgmt/primary — focused primary (Prayag→Dist) performance data.
+// Returns company, state-head, and distributor tiers directly from the sheets
+// (no bridge needed). The per-member tier is overlaid when the bridge is ready.
+router.get("/mgmt/primary", async (req: Request, res: Response): Promise<void> => {
+  const fy =
+    typeof req.query.fy === "string" && req.query.fy.trim()
+      ? req.query.fy.trim()
+      : "2026-27";
+  if (!FY_PATTERN.test(fy)) {
+    res.status(400).json({ error: "fy must look like 2026-27" });
+    return;
+  }
+
+  try {
+    // Load head/distributor aggregations from sheets — no bridge needed.
+    const sheetData = await loadPrimarySheetData(fy);
+
+    // Per-member tier: requires the distributor-TM map.
+    const distMap = getDistributorTmMapIfReady();
+    let bridgeStatus: "ready" | "building" | "unavailable" = "unavailable";
+    type MemberEntry = {
+      normKey: string;
+      name: string;
+      stateHead: string;
+      booking: number;
+      sale: number;
+      distributors: number;
+    };
+    let byMember: MemberEntry[] | null = null;
+
+    if (distMap && !distMap.error && distMap.byPartyKey.size > 0) {
+      bridgeStatus = "ready";
+      try {
+        const [primaryAttrib, roster] = await Promise.all([
+          loadPrimaryAttribution(fy, distMap),
+          loadRoster().catch(() => null),
+        ]);
+        const memberByNormKey = new Map(
+          (roster?.members ?? []).map((m) => [m.normKey, m]),
+        );
+        byMember = [];
+        for (const [normKey, stats] of primaryAttrib.perMember) {
+          if (stats.orderAmount === 0 && stats.saleAmount === 0) continue;
+          const member = memberByNormKey.get(normKey);
+          byMember.push({
+            normKey,
+            name: member?.name ?? normKey,
+            stateHead: member?.stateHead ?? "",
+            booking: stats.orderAmount,
+            sale: stats.saleAmount,
+            distributors: distMap.distributorCountByMember.get(normKey) ?? 0,
+          });
+        }
+        // Unassigned bucket — amounts not mapped to any TM but under a head
+        for (const [headKey, ua] of primaryAttrib.unassignedByHead) {
+          if (ua.orderAmount === 0 && ua.saleAmount === 0) continue;
+          byMember.push({
+            normKey: `__unassigned__${headKey}`,
+            name: "Unassigned",
+            stateHead: headKey,
+            booking: ua.orderAmount,
+            sale: ua.saleAmount,
+            distributors: ua.customerCount,
+          });
+        }
+        byMember.sort((a, b) => b.booking - a.booking);
+        req.log.info(
+          { fy, members: byMember.length },
+          "mgmt primary: per-member tier ready",
+        );
+      } catch (err) {
+        req.log.warn({ err, fy }, "mgmt primary: per-member attribution failed");
+      }
+    } else if (!distMap) {
+      bridgeStatus = "building";
+      loadDistributorTmMap().catch((err) =>
+        req.log.warn({ err }, "mgmt primary: dist-map background build failed"),
+      );
+    }
+
+    res.json({
+      fy,
+      companyBooking: sheetData.companyBooking,
+      companySale: sheetData.companySale,
+      companyPending: sheetData.companyPending,
+      byHead: sheetData.byHead,
+      byDistributor: sheetData.byDistributor,
+      byMember,
+      bridgeStatus,
+      sources: sheetData.sources,
+      bookingAvailable: sheetData.bookingAvailable,
+      saleAvailable: sheetData.saleAvailable,
+    });
+  } catch (err) {
+    req.log.error({ err, fy }, "mgmt primary failed");
+    res.status(500).json({ error: "Could not load primary performance data." });
   }
 });
 

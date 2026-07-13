@@ -1,59 +1,67 @@
-// Primary Performance vs History dashboard.
+// Primary Performance dashboard — Prayag to Distributor / Direct Dealer.
 //
-// Shows primary sales (Prayag → Distributor) with:
-//   - Company totals: Order Booking | Sale/Dispatch | Pending
-//   - Per state head breakdown
-//   - Per team member via distributor bridge
-//   - Pending orders panel (OPS signal, not a rep-performance signal)
+// Three tiers, each degrading independently:
+//   1. Company totals  — always from sheets; never blocked.
+//   2. By State Head   — always from sheets (STATE HEAD column); never blocked.
+//   3. By Team Member  — ONLY this tier needs the distributor bridge.
+//      If bridge not ready: show gated message + "Build bridge" action.
+// Plus:
+//   4. By Distributor  — Customer column in the order sheet; never blocked.
 //
-// RULE: This dashboard shows PRIMARY only. Never merge with secondary data.
-// Attribution: order sheet carries Distributor + STATE HEAD → bridge maps to TM.
-// Where the bridge cannot map a distributor → "Unassigned" under the State Head.
+// Source: GET /api/mgmt/primary
+// RULE: Never show ₹0.00 for data that exists. Unavailable shows a reason.
 import { useState, useEffect, useMemo } from "react";
 import {
   ChevronUp,
   ChevronDown,
   AlertTriangle,
   Info,
-  TrendingUp,
-  TrendingDown,
-  Minus,
+  RefreshCw,
+  Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Member = {
+type HeadRow = {
+  head: string;
+  booking: number;
+  sale: number;
+  pending: number;
+};
+
+type DistributorRow = {
   name: string;
   stateHead: string;
-  state: string;
-  primaryOrderAmount: number | null;
-  primarySaleAmount: number | null;
-  primaryDistributors: number | null;
-  orderBooking: number | null;
-  saleAmount: number | null;
-  achievementPct: number | null;
-  targetPrimary: number | null;
-  band: string;
+  booking: number;
 };
 
-type DashboardData = {
-  rows: Member[];
-  meta: {
-    orderLoadStatus?: { fy: string; status: string; detail: string } | null;
-    primaryAttribution?: {
-      totalBookingCr: number;
-      totalSaleCr: number;
-      attributedBookingCr: number;
-      attributedSaleCr: number;
-      attributionPct: number;
-    } | null;
-  };
+type MemberRow = {
+  normKey: string;
+  name: string;
+  stateHead: string;
+  booking: number;
+  sale: number;
+  distributors: number;
 };
 
-type SortKey = "name" | "booking" | "sale" | "pending" | "distributors";
-type SortDir = "asc" | "desc";
-type View = "booking" | "sale" | "pending";
+type ApiResponse = {
+  fy: string;
+  companyBooking: number;
+  companySale: number;
+  companyPending: number;
+  byHead: HeadRow[];
+  byDistributor: DistributorRow[];
+  byMember: MemberRow[] | null;
+  bridgeStatus: "ready" | "building" | "unavailable";
+  sources: { booking: string | null; sale: string | null };
+  bookingAvailable: boolean;
+  saleAvailable: boolean;
+};
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const FYS = ["2026-27", "2025-26"] as const;
 
 const PERIODS = [
   { label: "Full year", from: 1, to: 12 },
@@ -63,31 +71,25 @@ const PERIODS = [
   { label: "Q4 (Jan-Mar)", from: 10, to: 12 },
 ] as const;
 
-const FYS = ["2026-27", "2025-26", "2024-25"] as const;
+type View = "head" | "distributor" | "member";
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
-function fmtCr(n: number | null): string {
-  if (n == null) return "—";
+function fmtCr(n: number | null | undefined): string {
+  if (n == null || n === 0) return "—";
   return `\u20b9${(n / 1e7).toFixed(2)} Cr`;
 }
 
-function fmtPct(n: number | null): string {
-  if (n == null) return "—";
-  return `${n.toFixed(1)}%`;
-}
-
-function fmtNum(n: number | null): string {
-  if (n == null) return "—";
+function fmtNum(n: number): string {
   return n.toLocaleString("en-IN");
 }
 
-// ── Signal chip ───────────────────────────────────────────────────────────────
+// ── Pending chip ──────────────────────────────────────────────────────────────
 
 function PendingChip({ pending, booking }: { pending: number; booking: number }) {
   if (booking <= 0) return null;
   const pct = (pending / booking) * 100;
-  if (pct < 15) return null;
+  if (pct < 10) return null;
   return (
     <span
       className={cn(
@@ -103,120 +105,30 @@ function PendingChip({ pending, booking }: { pending: number; booking: number })
   );
 }
 
-// ── State head group row ───────────────────────────────────────────────────────
-
-type HeadGroup = {
-  head: string;
-  booking: number;
-  sale: number;
-  pending: number;
-  distributors: number;
-  members: Member[];
-};
-
-function HeadRow({
-  group,
-  expanded,
-  onToggle,
-  view,
-}: {
-  group: HeadGroup;
-  expanded: boolean;
-  onToggle: () => void;
-  view: View;
-}) {
-  const primaryVal =
-    view === "booking" ? group.booking : view === "sale" ? group.sale : group.pending;
-
-  return (
-    <tr
-      className="cursor-pointer hover:bg-muted/40 transition-colors border-b border-border bg-muted/20"
-      onClick={onToggle}
-    >
-      <td className="py-2 px-3">
-        <div className="flex items-center gap-2">
-          {expanded ? (
-            <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
-          ) : (
-            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-          )}
-          <span className="font-medium text-sm">{group.head}</span>
-        </div>
-      </td>
-      <td className="py-2 px-3 text-right font-mono text-sm font-semibold">
-        {fmtCr(primaryVal)}
-        {view === "booking" && (
-          <PendingChip pending={group.pending} booking={group.booking} />
-        )}
-      </td>
-      <td className="py-2 px-3 text-right text-xs text-muted-foreground font-mono">
-        {view !== "sale" && fmtCr(group.sale)}
-      </td>
-      <td className="py-2 px-3 text-right text-xs text-muted-foreground font-mono">
-        {group.distributors > 0 ? fmtNum(group.distributors) : "—"}
-      </td>
-    </tr>
-  );
-}
-
-function MemberRow({ member, view }: { member: Member; view: View }) {
-  const booking = member.primaryOrderAmount ?? 0;
-  const sale = member.primarySaleAmount ?? 0;
-  const pending = Math.max(0, booking - sale);
-  const primaryVal = view === "booking" ? booking : view === "sale" ? sale : pending;
-
-  if (booking === 0 && sale === 0) return null;
-
-  return (
-    <tr className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-      <td className="py-1.5 px-3 pl-10">
-        <span className="text-sm">{member.name}</span>
-      </td>
-      <td className="py-1.5 px-3 text-right font-mono text-xs">
-        {fmtCr(primaryVal || null)}
-      </td>
-      <td className="py-1.5 px-3 text-right text-xs text-muted-foreground font-mono">
-        {view !== "sale" && sale > 0 ? fmtCr(sale) : ""}
-      </td>
-      <td className="py-1.5 px-3 text-right text-xs text-muted-foreground font-mono">
-        {member.primaryDistributors != null && member.primaryDistributors > 0
-          ? fmtNum(member.primaryDistributors)
-          : "—"}
-      </td>
-    </tr>
-  );
-}
-
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function PrimaryPerformanceDashboard() {
-  const [fy, setFy] = useState("2026-27");
+  const [fy, setFy] = useState<string>("2026-27");
   const [period, setPeriod] = useState<(typeof PERIODS)[number]>(PERIODS[0]);
-  const [view, setView] = useState<View>("booking");
-  const [data, setData] = useState<DashboardData | null>(null);
+  const [view, setView] = useState<View>("head");
+  const [data, setData] = useState<ApiResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedHeads, setExpandedHeads] = useState<Set<string>>(new Set());
-  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({
-    key: "booking",
-    dir: "desc",
-  });
+  const [bridgeBuilding, setBridgeBuilding] = useState(false);
+  const [bridgeBuildMsg, setBridgeBuildMsg] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
     setError(null);
-    const params = new URLSearchParams({
-      fy,
-      monthFrom: String(period.from),
-      monthTo: String(period.to),
-    });
-    fetch(`/api/mgmt/data?${params}`)
+    const params = new URLSearchParams({ fy });
+    fetch(`/api/mgmt/primary?${params}`)
       .then((r) => {
         if (!r.ok)
           return r.json().then((e: { error?: string }) => {
             throw new Error(e.error ?? r.statusText);
           });
-        return r.json() as Promise<DashboardData>;
+        return r.json() as Promise<ApiResponse>;
       })
       .then((d) => {
         setData(d);
@@ -228,45 +140,6 @@ export default function PrimaryPerformanceDashboard() {
       });
   }, [fy, period]);
 
-  // Aggregate into state head groups
-  const groups = useMemo((): HeadGroup[] => {
-    if (!data) return [];
-    const map = new Map<string, HeadGroup>();
-    for (const m of data.rows) {
-      const booking = m.primaryOrderAmount ?? 0;
-      const sale = m.primarySaleAmount ?? 0;
-      if (booking === 0 && sale === 0) continue;
-      const head = m.stateHead || "Unassigned";
-      const existing = map.get(head);
-      if (existing) {
-        existing.booking += booking;
-        existing.sale += sale;
-        existing.pending = Math.max(0, existing.booking - existing.sale);
-        existing.distributors += m.primaryDistributors ?? 0;
-        existing.members.push(m);
-      } else {
-        map.set(head, {
-          head,
-          booking,
-          sale,
-          pending: Math.max(0, booking - sale),
-          distributors: m.primaryDistributors ?? 0,
-          members: [m],
-        });
-      }
-    }
-    const arr = Array.from(map.values());
-    arr.sort((a, b) => b.booking - a.booking);
-    return arr;
-  }, [data]);
-
-  // Company totals
-  const totals = useMemo(() => {
-    const booking = groups.reduce((s, g) => s + g.booking, 0);
-    const sale = groups.reduce((s, g) => s + g.sale, 0);
-    return { booking, sale, pending: Math.max(0, booking - sale) };
-  }, [groups]);
-
   const toggleHead = (head: string) => {
     setExpandedHeads((prev) => {
       const next = new Set(prev);
@@ -276,22 +149,48 @@ export default function PrimaryPerformanceDashboard() {
     });
   };
 
-  const cycleSort = (key: SortKey) => {
-    setSort((prev) =>
-      prev.key === key
-        ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
-        : { key, dir: "desc" },
-    );
-  };
+  // Group distributor rows by state head for the distributor view
+  const distributorsByHead = useMemo(() => {
+    if (!data) return new Map<string, DistributorRow[]>();
+    const map = new Map<string, DistributorRow[]>();
+    for (const d of data.byDistributor) {
+      const list = map.get(d.stateHead) ?? [];
+      list.push(d);
+      map.set(d.stateHead, list);
+    }
+    return map;
+  }, [data]);
 
-  const SortIcon = ({ k }: { k: SortKey }) => {
-    if (sort.key !== k) return <ChevronsUpDown className="h-3 w-3 opacity-30" />;
-    return sort.dir === "asc" ? (
-      <ChevronUp className="h-3 w-3" />
-    ) : (
-      <ChevronDown className="h-3 w-3" />
-    );
-  };
+  // Group member rows by state head
+  const membersByHead = useMemo(() => {
+    if (!data?.byMember) return new Map<string, MemberRow[]>();
+    const map = new Map<string, MemberRow[]>();
+    for (const m of data.byMember) {
+      const list = map.get(m.stateHead) ?? [];
+      list.push(m);
+      map.set(m.stateHead, list);
+    }
+    return map;
+  }, [data]);
+
+  async function handleBuildBridge() {
+    setBridgeBuilding(true);
+    setBridgeBuildMsg(null);
+    try {
+      const r = await fetch("/api/mgmt/bridge/build", { method: "POST" });
+      const body = (await r.json()) as { message?: string; error?: string };
+      setBridgeBuildMsg(
+        body.message ?? body.error ?? "Bridge build started. Reload in 2-3 minutes.",
+      );
+    } catch {
+      setBridgeBuildMsg("Failed to start bridge build. Check the server logs.");
+    } finally {
+      setBridgeBuilding(false);
+    }
+  }
+
+  const nothingAvailable =
+    !loading && data && !data.bookingAvailable && !data.saleAvailable;
 
   return (
     <div className="space-y-5 p-4">
@@ -318,9 +217,7 @@ export default function PrimaryPerformanceDashboard() {
           <select
             value={`${period.from}-${period.to}`}
             onChange={(e) => {
-              const p = PERIODS.find(
-                (p) => `${p.from}-${p.to}` === e.target.value,
-              );
+              const p = PERIODS.find((p) => `${p.from}-${p.to}` === e.target.value);
               if (p) setPeriod(p);
             }}
             className="text-xs border border-border rounded-md px-2 py-1.5 bg-background"
@@ -334,95 +231,6 @@ export default function PrimaryPerformanceDashboard() {
         </div>
       </div>
 
-      {/* View toggle */}
-      <div className="flex items-center gap-1 rounded-lg border border-border p-0.5 w-fit">
-        {(["booking", "sale", "pending"] as View[]).map((v) => (
-          <button
-            key={v}
-            onClick={() => setView(v)}
-            className={cn(
-              "px-3 py-1 text-xs rounded-md font-medium transition-colors",
-              view === v
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {v === "booking"
-              ? "Order Booking"
-              : v === "sale"
-              ? "Sale / Dispatch"
-              : "Pending Orders"}
-          </button>
-        ))}
-      </div>
-
-      {/* Company totals */}
-      {!loading && data && (
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            {
-              label: "Order Booking (booked)",
-              value: totals.booking,
-              active: view === "booking",
-            },
-            {
-              label: "Sale / Dispatch",
-              value: totals.sale,
-              active: view === "sale",
-            },
-            {
-              label: "Pending (booked − dispatched)",
-              value: totals.pending,
-              active: view === "pending",
-              warn: totals.booking > 0 && totals.pending / totals.booking > 0.25,
-            },
-          ].map((tile) => (
-            <div
-              key={tile.label}
-              className={cn(
-                "rounded-lg border p-3 cursor-pointer transition-colors",
-                tile.active
-                  ? "border-primary bg-primary/5"
-                  : "border-border bg-card",
-              )}
-              onClick={() =>
-                setView(
-                  tile.label.includes("Booking")
-                    ? "booking"
-                    : tile.label.includes("Sale")
-                    ? "sale"
-                    : "pending",
-                )
-              }
-            >
-              <p className="text-xs text-muted-foreground">{tile.label}</p>
-              <p className="text-xl font-semibold font-mono mt-1">
-                {fmtCr(tile.value)}
-              </p>
-              {tile.warn && (
-                <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
-                  <AlertTriangle className="h-3 w-3" />
-                  Ops / fulfilment signal — not a rep issue
-                </p>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Attribution note */}
-      {!loading && data?.meta?.primaryAttribution && (
-        <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/30 rounded-md p-3">
-          <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-          <span>
-            Primary attribution via distributor bridge:{" "}
-            {data.meta.primaryAttribution.attributionPct.toFixed(1)}% of booking attributed to a
-            team member. Distributors the bridge cannot map appear under "Unassigned" and are
-            excluded from per-rep ratios.
-          </span>
-        </div>
-      )}
-
       {/* Load states */}
       {loading && (
         <div className="py-12 text-center text-sm text-muted-foreground">
@@ -433,120 +241,363 @@ export default function PrimaryPerformanceDashboard() {
         <div className="py-6 text-center text-sm text-destructive">{error}</div>
       )}
 
-      {/* Table */}
-      {!loading && data && groups.length > 0 && (
+      {/* Tier 1 — Company totals (always rendered when data exists) */}
+      {!loading && data && (
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            {
+              label: "Order Booking (booked)",
+              value: data.companyBooking,
+              source: data.sources.booking,
+              available: data.bookingAvailable,
+            },
+            {
+              label: "Sale / Dispatch",
+              value: data.companySale,
+              source: data.sources.sale,
+              available: data.saleAvailable,
+            },
+            {
+              label: "Pending (booked \u2212 dispatched)",
+              value: data.companyPending,
+              source: null,
+              available: data.bookingAvailable && data.saleAvailable,
+              warn: data.companyBooking > 0 && data.companyPending / data.companyBooking > 0.25,
+            },
+          ].map((tile) => (
+            <div
+              key={tile.label}
+              className="rounded-lg border border-border bg-card p-3"
+            >
+              <p className="text-xs text-muted-foreground">{tile.label}</p>
+              {tile.available ? (
+                <p className="text-xl font-semibold font-mono mt-1">
+                  {fmtCr(tile.value)}
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground mt-1 italic">
+                  unavailable
+                </p>
+              )}
+              {tile.source && (
+                <p className="text-[10px] text-muted-foreground mt-1 truncate">
+                  {tile.source}
+                </p>
+              )}
+              {tile.warn && (
+                <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
+                  <AlertTriangle className="h-3 w-3" />
+                  Ops / fulfilment signal
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Nothing available at all */}
+      {nothingAvailable && (
+        <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/30 rounded-md p-3">
+          <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <span>
+            No primary sheets are configured for FY {fy}. Order booking and
+            dispatch sale data are unavailable for this fiscal year.
+          </span>
+        </div>
+      )}
+
+      {/* View toggle (only when some data exists) */}
+      {!loading && data && (data.bookingAvailable || data.saleAvailable) && (
+        <div className="flex items-center gap-1 rounded-lg border border-border p-0.5 w-fit flex-wrap">
+          {(
+            [
+              { key: "head" as View, label: "By State Head" },
+              ...(data.byDistributor.length > 0
+                ? [{ key: "distributor" as View, label: "By Distributor" }]
+                : []),
+              { key: "member" as View, label: "By Team Member" },
+            ] as { key: View; label: string }[]
+          ).map((v) => (
+            <button
+              key={v.key}
+              onClick={() => setView(v.key)}
+              className={cn(
+                "px-3 py-1 text-xs rounded-md font-medium transition-colors",
+                view === v.key
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Tier 2 — By State Head (always rendered, no bridge needed) */}
+      {!loading && data && view === "head" && data.byHead.length > 0 && (
         <div className="rounded-lg border border-border overflow-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/30">
                 <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">
-                  State Head / Team Member
-                </th>
-                <th
-                  className="py-2 px-3 text-right text-xs font-medium text-muted-foreground cursor-pointer select-none"
-                  onClick={() => cycleSort("booking")}
-                >
-                  <span className="inline-flex items-center gap-1">
-                    {view === "booking"
-                      ? "Order Booking"
-                      : view === "sale"
-                      ? "Sale"
-                      : "Pending"}
-                    <SortIcon k="booking" />
-                  </span>
+                  State Head
                 </th>
                 <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">
-                  {view === "booking" ? "Dispatched" : ""}
+                  Order Booking
                 </th>
-                <th
-                  className="py-2 px-3 text-right text-xs font-medium text-muted-foreground cursor-pointer select-none"
-                  onClick={() => cycleSort("distributors")}
-                >
-                  <span className="inline-flex items-center gap-1">
-                    Distributors
-                    <SortIcon k="distributors" />
-                  </span>
+                <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">
+                  Dispatched
+                </th>
+                <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">
+                  Pending
                 </th>
               </tr>
             </thead>
             <tbody>
-              {groups.map((group) => (
-                <>
-                  <HeadRow
-                    key={group.head}
-                    group={group}
-                    expanded={expandedHeads.has(group.head)}
-                    onToggle={() => toggleHead(group.head)}
-                    view={view}
-                  />
-                  {expandedHeads.has(group.head) &&
-                    group.members
-                      .sort((a, b) =>
-                        (b.primaryOrderAmount ?? 0) - (a.primaryOrderAmount ?? 0),
-                      )
-                      .map((m) => (
-                        <MemberRow key={m.name} member={m} view={view} />
-                      ))}
-                </>
+              {data.byHead.map((row) => (
+                <tr
+                  key={row.head}
+                  className="border-b border-border/50 hover:bg-muted/20 transition-colors"
+                >
+                  <td className="py-2 px-3 font-medium text-sm">{row.head}</td>
+                  <td className="py-2 px-3 text-right font-mono text-sm">
+                    {row.booking > 0 ? fmtCr(row.booking) : "—"}
+                    {row.booking > 0 && (
+                      <PendingChip pending={row.pending} booking={row.booking} />
+                    )}
+                  </td>
+                  <td className="py-2 px-3 text-right font-mono text-xs text-muted-foreground">
+                    {row.sale > 0 ? fmtCr(row.sale) : "—"}
+                  </td>
+                  <td className="py-2 px-3 text-right font-mono text-xs text-muted-foreground">
+                    {row.pending > 0 ? fmtCr(row.pending) : "—"}
+                  </td>
+                </tr>
               ))}
+              {/* Totals */}
+              <tr className="border-t-2 border-border bg-muted/30 font-semibold">
+                <td className="py-2 px-3 text-sm">Total</td>
+                <td className="py-2 px-3 text-right font-mono text-sm">
+                  {fmtCr(data.companyBooking)}
+                </td>
+                <td className="py-2 px-3 text-right font-mono text-xs text-muted-foreground">
+                  {fmtCr(data.companySale)}
+                </td>
+                <td className="py-2 px-3 text-right font-mono text-xs text-muted-foreground">
+                  {data.companyPending > 0 ? fmtCr(data.companyPending) : "—"}
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
       )}
 
-      {/* Pending orders alert */}
-      {!loading && data && totals.pending > 0 && view === "pending" && (
+      {/* Tier 4 — By Distributor (always available from Customer column in order sheet) */}
+      {!loading && data && view === "distributor" && data.byDistributor.length > 0 && (
+        <div className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            {data.byDistributor.length} distributors from the order sheet.
+            Grouped by State Head. No bridge required.
+          </p>
+          {/* Group by state head */}
+          {Array.from(
+            data.byDistributor.reduce((map, d) => {
+              const list = map.get(d.stateHead) ?? [];
+              list.push(d);
+              map.set(d.stateHead, list);
+              return map;
+            }, new Map<string, DistributorRow[]>()),
+          )
+            .sort(([, a], [, b]) =>
+              b.reduce((s, x) => s + x.booking, 0) -
+              a.reduce((s, x) => s + x.booking, 0),
+            )
+            .map(([head, dists]) => (
+              <div key={head} className="rounded-lg border border-border overflow-auto">
+                <div
+                  className="flex items-center justify-between px-3 py-2 bg-muted/20 cursor-pointer"
+                  onClick={() => toggleHead(head)}
+                >
+                  <span className="font-medium text-sm">{head}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-muted-foreground font-mono">
+                      {fmtCr(dists.reduce((s, d) => s + d.booking, 0))} ·{" "}
+                      {dists.length} distributors
+                    </span>
+                    {expandedHeads.has(head) ? (
+                      <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                  </div>
+                </div>
+                {expandedHeads.has(head) && (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/10">
+                        <th className="py-1.5 px-3 text-left text-xs font-medium text-muted-foreground">
+                          Distributor / Dealer
+                        </th>
+                        <th className="py-1.5 px-3 text-right text-xs font-medium text-muted-foreground">
+                          Order Booking
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dists
+                        .sort((a, b) => b.booking - a.booking)
+                        .map((d) => (
+                          <tr
+                            key={d.name}
+                            className="border-b border-border/40 hover:bg-muted/10"
+                          >
+                            <td className="py-1.5 px-3 text-sm">{d.name}</td>
+                            <td className="py-1.5 px-3 text-right font-mono text-xs">
+                              {fmtCr(d.booking)}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            ))}
+        </div>
+      )}
+
+      {view === "distributor" && !loading && data && data.byDistributor.length === 0 && (
+        <div className="py-8 text-center text-sm text-muted-foreground">
+          No distributor data available. The order sheet for FY {fy} may not
+          have a Customer column or could not be read.
+        </div>
+      )}
+
+      {/* Tier 3 — By Team Member (gated on bridge) */}
+      {!loading && data && view === "member" && (
+        <>
+          {data.bridgeStatus === "ready" && data.byMember && data.byMember.length > 0 ? (
+            <div className="rounded-lg border border-border overflow-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30">
+                    <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">
+                      Team Member
+                    </th>
+                    <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">
+                      State Head
+                    </th>
+                    <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">
+                      Order Booking
+                    </th>
+                    <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">
+                      Dispatched
+                    </th>
+                    <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">
+                      Distributors
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.byMember
+                    .filter((m) => m.booking > 0 || m.sale > 0)
+                    .map((m) => (
+                      <tr
+                        key={m.normKey}
+                        className="border-b border-border/50 hover:bg-muted/20 transition-colors"
+                      >
+                        <td className="py-1.5 px-3 text-sm">{m.name}</td>
+                        <td className="py-1.5 px-3 text-right text-xs text-muted-foreground">
+                          {m.stateHead}
+                        </td>
+                        <td className="py-1.5 px-3 text-right font-mono text-xs">
+                          {m.booking > 0 ? fmtCr(m.booking) : "—"}
+                        </td>
+                        <td className="py-1.5 px-3 text-right font-mono text-xs text-muted-foreground">
+                          {m.sale > 0 ? fmtCr(m.sale) : "—"}
+                        </td>
+                        <td className="py-1.5 px-3 text-right text-xs text-muted-foreground">
+                          {m.distributors > 0 ? fmtNum(m.distributors) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-border bg-muted/10 p-6 space-y-4">
+              <div className="flex items-start gap-3">
+                <Lock className="h-5 w-5 text-muted-foreground mt-0.5 shrink-0" />
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">
+                    Per-salesperson split requires the distributor bridge
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {data.bridgeStatus === "building"
+                      ? "The distributor bridge is currently being built. Company totals and state-head breakdown (above) are fully available now. Come back in a minute for per-member attribution."
+                      : "The distributor-to-team-member bridge maps each Customer in the order sheet to their salesperson. State Head and Distributor views above work without it."}
+                  </p>
+                </div>
+              </div>
+              {data.bridgeStatus !== "building" && (
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={handleBuildBridge}
+                    disabled={bridgeBuilding}
+                    className={cn(
+                      "flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium border transition-colors",
+                      bridgeBuilding
+                        ? "border-border text-muted-foreground cursor-not-allowed"
+                        : "border-primary text-primary hover:bg-primary/5",
+                    )}
+                  >
+                    <RefreshCw
+                      className={cn(
+                        "h-3 w-3",
+                        bridgeBuilding && "animate-spin",
+                      )}
+                    />
+                    {bridgeBuilding ? "Building…" : "Build bridge"}
+                  </button>
+                  {bridgeBuildMsg && (
+                    <p className="text-xs text-muted-foreground">
+                      {bridgeBuildMsg}
+                    </p>
+                  )}
+                </div>
+              )}
+              {/* Company and head tier still visible below the gated section */}
+              <div className="pt-2 border-t border-border/50">
+                <p className="text-xs text-muted-foreground">
+                  Company total and State Head breakdown are fully available
+                  above — switch to "By State Head" to see them.
+                </p>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Pending orders operational note */}
+      {!loading && data && data.companyPending > 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-500/5 p-4 space-y-2">
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
             <span className="text-sm font-medium">
-              Pending Orders — Fulfilment Alert, Not a Sales Signal
+              Pending Orders — Fulfilment Signal, Not a Sales Signal
             </span>
           </div>
           <p className="text-xs text-muted-foreground">
-            {fmtCr(totals.pending)} of booked orders have not been dispatched. This is a
-            stock / credit-hold / logistics issue. Do not penalise the salesperson for this — it
-            is routed here as a separate fulfilment signal.
+            {fmtCr(data.companyPending)} of booked orders have not been
+            dispatched. This is a stock / credit-hold / logistics issue — do not
+            penalise the salesperson for it.
           </p>
           <p className="text-xs text-muted-foreground">
-            Reconciliation: Booking {fmtCr(totals.booking)} − Dispatched {fmtCr(totals.sale)} ={" "}
-            Pending {fmtCr(totals.pending)}
-          </p>
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!loading && data && groups.length === 0 && (
-        <div className="py-12 text-center space-y-2">
-          <p className="text-sm text-muted-foreground">
-            No primary attribution data available for FY {fy}.
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Primary attribution requires the distributor bridge to be built.
-            Check the bridge status in the State Head dashboard.
+            Reconciliation: Booking {fmtCr(data.companyBooking)} &minus; Dispatched{" "}
+            {fmtCr(data.companySale)} = Pending {fmtCr(data.companyPending)}
           </p>
         </div>
       )}
     </div>
-  );
-}
-
-// ── Missing import ─────────────────────────────────────────────────────────────
-// ChevronsUpDown is not in the main lucide import above — add it.
-function ChevronsUpDown({ className }: { className?: string }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="m7 15 5 5 5-5" />
-      <path d="m7 9 5-5 5 5" />
-    </svg>
   );
 }
