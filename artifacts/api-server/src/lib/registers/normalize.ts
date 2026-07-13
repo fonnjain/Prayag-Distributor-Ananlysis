@@ -43,7 +43,7 @@ export function isHeaderRow(values: CellValue[]): boolean {
   return (
     (set.has("CODE") || set.has("ITEMCODE")) &&
     (set.has("QTY") || set.has("QUANTITY")) &&
-    set.has("AMOUNT")
+    (set.has("AMOUNT") || set.has("TAXABLEVALUE"))
   );
 }
 
@@ -67,16 +67,16 @@ export function mapRegisterColumns(
     headerRowNumber,
     invoiceNo: find("INVOICENO"),
     date: find("DATE"),
-    customer: find("CUSTOMER"),
+    customer: find("CUSTOMER", "CUSTOMERNAME"),
     code: find("CODE", "ITEMCODE"),
     month: find("MONTH", "M0NTH"),
     qty: find("QTY", "QUANTITY"),
     rate: find("SALERATE", "RATE"),
-    amount: find("AMOUNT"),
+    amount: find("AMOUNT", "TAXABLEVALUE"),
     group: find("GROUP"),
     station: find("STATION"),
     state: find("STATE"),
-    head: find("STATEHEADA"),
+    head: find("STATEHEADA", "STATEHEAD"),
     type: find("TYPE", "MASTERGROUP"),
     fy,
   };
@@ -335,11 +335,15 @@ const at = (values: CellValue[], idx: number): CellValue =>
 export function parseRegisterRow(
   values: CellValue[],
   cols: RegisterColumns,
+  fyOverride?: string,
 ): RowParseResult {
   const hasAny = values.some((v) => v != null && String(v).trim() !== "");
   if (!hasAny) return { kind: "empty" };
 
-  const fy = normalizeFy(at(values, cols.fy));
+  // Order-register sheets have no FY column; fyOverride supplies the FY from
+  // the sheet configuration. The column-derived value takes precedence when
+  // present (for dual-FY workbooks where cross-year dedup matters).
+  const fy = normalizeFy(at(values, cols.fy)) ?? fyOverride ?? null;
   if (!fy) {
     // Rows without an FY value in these workbooks are formatting residue —
     // verified to carry no amounts. Treat as empty, but re-check to be safe.

@@ -1,8 +1,8 @@
 {
-  "comment": "Live Google Sheets spreadsheet IDs for the invoice-line sale registers, by the fiscal year the workbook is named for. Each workbook also contains the prior FY block; verification filters rows to the requested FY.",
+  "comment": "Live Google Sheets spreadsheet IDs for the invoice-line order registers by fiscal year. Columns: Date, Customer.Name, GROUP, item code, Quantity, Rate, Taxable Value, Month, STATION, STATE, STATE HEAD. Each workbook covers one FY only; FY is implied by the file, not a column.",
   "registers": {
-    "2024-25": "1iL1su3xwe40eG0QJHVwat97rhlMmADzeKQVfMw6ZrE0",
-    "2025-26": "1RuXHIXfusOT-VDdDqeuB-Nx-pxyVkmrJsqr21BB-NUA",
-    "2026-27": "1QIpcfgOVCFjcCmgU_DXKn8h7Bfa8rm2q2wB2HneTvKs"
+    "2024-25": "1cT6lWRPJ3oSeYhab-cqeVjJidGitFQsr0DOq-vNn6cI",
+    "2025-26": "1Xzq-gmB6K7iuMcE6gb-O7OpvGgSDU33DzEVyK60LK6E",
+    "2026-27": "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A"
   }
 }

@@ -8,6 +8,10 @@ import {
 import { assembleRows } from "./lib/mgmt/report.js";
 import { loadStateHeadSale } from "./lib/mgmt/stateHeadSale.js";
 import { restoreSecondaryUploadsFromGcs } from "./lib/mgmt/secondaryUpload.js";
+import {
+  ensureRegisterSynced,
+  REGISTER_SHEET_IDS,
+} from "./lib/customers/registerSync.js";
 
 const rawPort = process.env["PORT"];
 
@@ -57,4 +61,11 @@ app.listen(port, (err) => {
   // Keep the served snapshot fresh with a periodic background sync
   // (interval configurable via DASHBOARD_SYNC_INTERVAL_MINUTES, 0 disables).
   startScheduledSync();
+
+  // Auto-populate sale_line for all configured FYs so Customer Performance
+  // never shows "No register data" on first load. Each sync is a no-op when
+  // the table already has rows for that FY.
+  for (const fy of Object.keys(REGISTER_SHEET_IDS)) {
+    ensureRegisterSynced(fy);
+  }
 });

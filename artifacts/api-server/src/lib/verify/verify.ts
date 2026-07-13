@@ -121,8 +121,8 @@ export async function readLiveRegister(fy: string): Promise<SheetsReadResult> {
   const byHead = new Map<string, number>();
   let amount = 0;
 
-  await readRegisterFromSheets(spreadsheetId, (values, columns) => {
-    const result = parseRegisterRow(values, columns);
+  await readRegisterFromSheets(spreadsheetId, fy, (values, columns) => {
+    const result = parseRegisterRow(values, columns, fy);
     if (result.kind !== "row") return;
     // The occurrence counter must see every row (both FY blocks) in source
     // order to reproduce the backfill's uids exactly.

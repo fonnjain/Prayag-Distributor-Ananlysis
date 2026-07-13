@@ -84,6 +84,8 @@ export default function CustomersPage() {
 
   // Available months from DB
   const [availableMonths, setAvailableMonths] = useState<string[]>([]);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   // Derived months
   const [monthsCy, setMonthsCy] = useState<string[]>([]);
@@ -94,12 +96,38 @@ export default function CustomersPage() {
   const [rankLoading, setRankLoading] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
 
-  // Load available months on FY change
+  // Load available months on FY change, then poll while a sync is in progress.
   useEffect(() => {
-    fetch(`${BASE}/api/customers/months?fy=${fyCy}`)
-      .then((r) => r.json())
-      .then((d) => setAvailableMonths(d.months ?? []))
-      .catch(() => {});
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const load = () => {
+      fetch(`${BASE}/api/customers/months?fy=${fyCy}`)
+        .then((r) => r.json())
+        .then((d: { months?: string[]; syncing?: boolean; syncError?: string }) => {
+          if (cancelled) return;
+          setAvailableMonths(d.months ?? []);
+          setSyncing(d.syncing ?? false);
+          setSyncError(d.syncError ?? null);
+          // Keep polling while the server is still loading from Sheets.
+          if (d.syncing) {
+            timer = setTimeout(load, 15_000);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setSyncing(false);
+        });
+    };
+
+    setSyncing(false);
+    setSyncError(null);
+    setAvailableMonths([]);
+    load();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [fyCy]);
 
   // Derive month lists from preset + available months
@@ -277,9 +305,14 @@ export default function CustomersPage() {
 
         {/* Content */}
         <main className="flex-1 overflow-y-auto p-4">
-          {monthsCy.length === 0 && availableMonths.length === 0 && (
-            <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
-              No register data found for {fyCy}. Backfill via Data Health first.
+          {monthsCy.length === 0 && availableMonths.length === 0 && syncing && (
+            <div className="mb-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200">
+              Loading register data from Sheets for {fyCy} — this takes a minute or two on first load. The page will refresh automatically.
+            </div>
+          )}
+          {monthsCy.length === 0 && availableMonths.length === 0 && !syncing && syncError && (
+            <div className="mb-3 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+              Register sync failed for {fyCy}: {syncError}
             </div>
           )}
 

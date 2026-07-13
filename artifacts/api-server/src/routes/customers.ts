@@ -15,6 +15,10 @@ import {
   toLyMonths,
   type EntityType,
 } from "../lib/customers/analytics.js";
+import {
+  ensureRegisterSynced,
+  getRegisterSyncState,
+} from "../lib/customers/registerSync.js";
 import { computeAllMultipliers } from "../lib/customers/laspeyres.js";
 import {
   listSchemes,
@@ -50,7 +54,15 @@ router.get("/api/customers/months", async (req, res) => {
   }
   try {
     const months = await getAvailableMonths(fy);
-    res.json({ fy, months });
+    if (months.length === 0) {
+      // Trigger a background sync if one is not already in progress.
+      ensureRegisterSynced(fy);
+    }
+    const sync = getRegisterSyncState(fy);
+    const syncing = months.length === 0 && sync.phase === "syncing";
+    const syncError =
+      months.length === 0 && sync.phase === "error" ? sync.error : undefined;
+    res.json({ fy, months, syncing, syncError });
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to fetch months" });
