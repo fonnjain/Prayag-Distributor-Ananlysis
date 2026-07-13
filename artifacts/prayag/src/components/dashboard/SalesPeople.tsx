@@ -30,7 +30,7 @@ import {
   BarChart2,
 } from "lucide-react";
 
-const FY_OPTIONS = ["2025-26", "2024-25", "2026-27"];
+const FY_OPTIONS = ["2026-27", "2025-26", "2024-25"];
 
 function formatCr(rupees: number): string {
   return `${(rupees / 1e7).toLocaleString("en-IN", {
@@ -255,7 +255,7 @@ function HeadCheckChip({ status }: { status: SalesVerifyHead["status"] }) {
 }
 
 export default function SalesPeople() {
-  const [fy, setFy] = useState("2025-26");
+  const [fy, setFy] = useState("2026-27");
   const [headKey, setHeadKey] = useState<string>("");
   const [selected, setSelected] = useState<RepNode | null>(null);
   const [scope, setScope] = useState<"own" | "team">("team");

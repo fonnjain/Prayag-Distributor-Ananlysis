@@ -83,6 +83,10 @@ type DashboardMeta = {
   orderBookingPrimarySource?: string | null;
   /** Company-wide pending orders = orderBookingPrimary total minus headSales total. */
   pendingOrdersTotal?: number | null;
+  /** Raw sheet grand total for the OB (Primary) card — includes Non-territory rows. */
+  primaryBookingRawTotal?: number;
+  /** Raw sheet grand total for Sale (Dispatched) — includes Non-territory rows. */
+  saleRawTotal?: number;
   /** Source label for secondary Order Booking tile. */
   orderBookingSource?: string | null;
   /** Attribution diagnostics — null until the distributor-TM map is warm. */
@@ -641,17 +645,17 @@ export default function StateHeadDashboard() {
           <KpiTile label="Low Performers" value={fmtN(kpi.lowPerf)} sub={`<${lowPerfThreshold}% threshold`} />
           <KpiTile
             label="Sale (Dispatched)"
-            value={fmtCr(kpi.sale > 0 ? kpi.sale : null)}
+            value={fmtCr(data.meta.saleRawTotal ?? (kpi.sale > 0 ? kpi.sale : null))}
             sub={data.meta.saleSource ?? undefined}
           />
           <KpiTile
             label="Order Booking (Primary)"
-            value={fmtCr(kpi.primaryOrderBooking)}
+            value={fmtCr(data.meta.primaryBookingRawTotal ?? kpi.primaryOrderBooking)}
             sub={data.meta.orderBookingPrimarySource ?? undefined}
           />
           <KpiTile
             label="Pending Orders"
-            value={fmtCr(kpi.pendingOrders)}
+            value={fmtCr(data.meta.pendingOrdersTotal ?? kpi.pendingOrders)}
             sub={kpi.primaryOrderBooking != null ? "Order Booking minus Dispatched" : undefined}
           />
         </div>

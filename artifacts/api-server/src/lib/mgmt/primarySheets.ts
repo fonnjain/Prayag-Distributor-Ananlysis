@@ -121,8 +121,13 @@ async function readAndAggregate(
   // Both booking and sale sheets use monthly tabs (Apr/April, May, Jun/June, Jul/July, …).
   // Fallback to all non-skip tabs when no monthly tabs are found (e.g. legacy sheets
   // where all data sits on a single tab).
+  // Also read "WT" (booking) and "WT-LTR" (sale) tabs — water-tank orders and
+  // dispatches are tracked in dedicated tabs separate from the monthly tabs.
   let dataTabs = tabs.filter(
-    (t) => MONTHLY_RE.test(t.title.trim()) || /^data$/i.test(t.title.trim()),
+    (t) =>
+      MONTHLY_RE.test(t.title.trim()) ||
+      /^data$/i.test(t.title.trim()) ||
+      /^wt(-ltr)?$/i.test(t.title.trim()),
   );
   if (dataTabs.length === 0)
     dataTabs = tabs.filter((t) => !SKIP_TAB_RE.test(t.title.trim()));

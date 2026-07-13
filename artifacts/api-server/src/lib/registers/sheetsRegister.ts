@@ -17,8 +17,10 @@ import {
 } from "./normalize.js";
 import { listSheetTabs, readTabRowsChunked, type SheetCellValue } from "./sheetsApi.js";
 
-// Monthly tab name pattern: "Apr-26", "May-26", "Jan-27", etc.
-const MONTHLY_TAB_RE = /^[A-Za-z]{3}-\d{2}$/;
+// Monthly tab name pattern: "Apr-26" / "May-26" (with FY suffix) or plain
+// "Apr" / "May" (without suffix, as used in the FY26-27 register workbook).
+const MONTHLY_TAB_RE =
+  /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(-\d{2})?$/i;
 
 // Fallback tab name for single-sheet layouts.
 export const REGISTER_TAB = "Sheet1";

@@ -72,8 +72,14 @@ export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
     const MONTHLY_RE =
       /^(Apr(il)?|May|Jun(e)?|Jul(y)?|Aug(ust)?|Sep(tember)?|Oct(ober)?|Nov(ember)?|Dec(ember)?|Jan(uary)?|Feb(ruary)?|Mar(ch)?)\b/i;
     const DATA_RE = /^data$/i;
+    // Also include the "WT" tab — the booking sheet carries water-tank orders in a
+    // dedicated WT tab that is NOT duplicated in the monthly tabs.
+    const WT_TAB_RE = /^wt$/i;
     const relevantTabs = tabs.filter(
-      (t) => MONTHLY_RE.test(t.title.trim()) || DATA_RE.test(t.title.trim()),
+      (t) =>
+        MONTHLY_RE.test(t.title.trim()) ||
+        DATA_RE.test(t.title.trim()) ||
+        WT_TAB_RE.test(t.title.trim()),
     );
 
     logger.info(

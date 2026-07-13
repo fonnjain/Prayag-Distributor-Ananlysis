@@ -26,6 +26,21 @@ router.get("/verify", async (req: Request, res: Response): Promise<void> => {
     const report = await buildVerifyReport(fy);
     res.json(report);
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // FY26-27 uses the SAP primary-sales pipeline; its Sheets register tabs do
+    // not carry standard invoice-register headers. Surface a clear note rather
+    // than a generic 502 so the UI can render a helpful message.
+    if (msg.includes("No header row detected")) {
+      req.log.warn({ fy }, "verify: register tabs have non-standard headers — SAP FY?");
+      res.json({
+        fy,
+        notApplicable: true,
+        message:
+          `FY ${fy} uses the SAP primary-sales pipeline. ` +
+          "Register reconciliation is not available for this fiscal year.",
+      });
+      return;
+    }
     req.log.error({ err, fy }, "verification report failed");
     res.status(502).json({ error: "Could not build the verification report." });
   }

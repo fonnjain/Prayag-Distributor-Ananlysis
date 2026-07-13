@@ -423,6 +423,11 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         ...(orderBookingPrimarySource ? { orderBookingPrimarySource } : {}),
         // Derived: orders booked but not yet dispatched
         ...(pendingOrdersTotal != null ? { pendingOrdersTotal } : {}),
+        // Raw sheet totals for OB (Primary) and Sale (Dispatched) tiles —
+        // includes Non-territory + unresolved-head buckets that the per-head
+        // breakdown filters out. Frontend uses these for the company-level tiles.
+        ...(obTotal > 0 ? { primaryBookingRawTotal: obTotal } : {}),
+        ...(saleTotal > 0 ? { saleRawTotal: saleTotal } : {}),
         // Secondary data: STATE HEAD DASHBOARD (authoritative for FY26-27 + FY25-26)
         secondarySource: secDash ? "state_head_dashboard" : null,
         ...(secDash ? {
