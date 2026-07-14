@@ -45,6 +45,23 @@ type MemberRow = {
   distributors: number;
 };
 
+type OrderTabInventoryRow = {
+  tabName: string;
+  role: "monthly" | "lookup" | "combined" | "per-head" | "unknown";
+  includedInSum: boolean;
+  excludedReason: string | null;
+  rowCount: number;
+  dateMin: string | null;
+  dateMax: string | null;
+  taxableValue: number;
+  ltrRows: number;
+  ltrQty: number;
+  pieceRows: number;
+  pieceQty: number;
+  retailValue: number;
+  govtValue: number;
+};
+
 type ApiResponse = {
   fy: string;
   companyBooking: number;
@@ -57,6 +74,7 @@ type ApiResponse = {
   sources: { booking: string | null; sale: string | null };
   bookingAvailable: boolean;
   saleAvailable: boolean;
+  tabInventory: OrderTabInventoryRow[] | null;
 };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -148,6 +166,7 @@ export default function PrimaryPerformanceDashboard() {
   const [expandedHeads, setExpandedHeads] = useState<Set<string>>(new Set());
   const [bridgeBuilding, setBridgeBuilding] = useState(false);
   const [bridgeBuildMsg, setBridgeBuildMsg] = useState<string | null>(null);
+  const [showInventory, setShowInventory] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -621,6 +640,177 @@ export default function PrimaryPerformanceDashboard() {
             </div>
           )}
         </>
+      )}
+
+      {/* Order Sheet tab inventory */}
+      {!loading && data?.tabInventory && data.tabInventory.length > 0 && (
+        <div className="rounded-lg border border-border bg-card">
+          <button
+            onClick={() => setShowInventory((v) => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium hover:bg-muted/40 transition-colors rounded-lg"
+          >
+            <span>Order Sheet — Tab Breakdown</span>
+            <span className="flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
+              {data.tabInventory.filter((r) => r.includedInSum).length} of{" "}
+              {data.tabInventory.length} tabs included in total
+              {showInventory ? (
+                <ChevronUp className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronDown className="h-3.5 w-3.5" />
+              )}
+            </span>
+          </button>
+
+          {showInventory && (
+            <div className="px-4 pb-4 space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Every tab in the Order Sheet is listed below. Only monthly tabs (Apr, May, Jun,
+                Jul, ...) are summed. Lookup tables (WT, INDEX) and combined summaries are
+                excluded. The Litre Rule applies: litres (water tanks, Unit.Name = Ltr.) and
+                pieces are tracked separately and must never be added together. The channel
+                column (last column) identifies Retail vs Govt rows — schemes apply to Retail
+                only.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left py-1.5 pr-3 font-medium text-muted-foreground">Tab</th>
+                      <th className="text-left py-1.5 pr-3 font-medium text-muted-foreground">Role</th>
+                      <th className="text-right py-1.5 pr-3 font-medium text-muted-foreground">Rows</th>
+                      <th className="text-left py-1.5 pr-3 font-medium text-muted-foreground">Dates</th>
+                      <th className="text-right py-1.5 pr-3 font-medium text-muted-foreground">Value</th>
+                      <th className="text-right py-1.5 pr-3 font-medium text-muted-foreground">Pieces</th>
+                      <th className="text-right py-1.5 pr-3 font-medium text-muted-foreground">Litres</th>
+                      <th className="text-right py-1.5 pr-3 font-medium text-muted-foreground">Retail</th>
+                      <th className="text-right py-1.5 font-medium text-muted-foreground">Govt</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.tabInventory.map((row) => (
+                      <tr
+                        key={row.tabName}
+                        className={cn(
+                          "border-b border-border/50 last:border-0",
+                          row.includedInSum
+                            ? "bg-transparent"
+                            : "text-muted-foreground/70",
+                        )}
+                      >
+                        <td className="py-1.5 pr-3 font-mono">
+                          {row.tabName}
+                          {row.includedInSum && (
+                            <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 align-middle" />
+                          )}
+                        </td>
+                        <td className="py-1.5 pr-3">
+                          <span
+                            className={cn(
+                              "rounded px-1.5 py-0.5 text-[10px] font-medium",
+                              row.role === "monthly"
+                                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                : row.role === "lookup"
+                                  ? "bg-slate-500/10 text-slate-600 dark:text-slate-400"
+                                  : row.role === "combined"
+                                    ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                                    : "bg-muted text-muted-foreground",
+                            )}
+                          >
+                            {row.role}
+                          </span>
+                          {row.excludedReason && (
+                            <span
+                              className="ml-1.5 text-[10px] text-muted-foreground/60"
+                              title={row.excludedReason}
+                            >
+                              (excluded)
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">
+                          {row.rowCount > 0 ? row.rowCount.toLocaleString("en-IN") : "—"}
+                        </td>
+                        <td className="py-1.5 pr-3 font-mono text-[10px]">
+                          {row.dateMin && row.dateMax
+                            ? row.dateMin === row.dateMax
+                              ? row.dateMin
+                              : `${row.dateMin} – ${row.dateMax}`
+                            : "—"}
+                        </td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">
+                          {row.taxableValue > 0 ? fmtCr(row.taxableValue) : "—"}
+                        </td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">
+                          {row.pieceRows > 0
+                            ? `${row.pieceQty.toLocaleString("en-IN")} pcs`
+                            : "—"}
+                        </td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">
+                          {row.ltrRows > 0
+                            ? `${row.ltrQty.toLocaleString("en-IN")} L`
+                            : "—"}
+                        </td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">
+                          {row.retailValue > 0 ? fmtCr(row.retailValue) : "—"}
+                        </td>
+                        <td className="py-1.5 text-right tabular-nums">
+                          {row.govtValue > 0 ? fmtCr(row.govtValue) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-border font-medium">
+                      <td className="py-1.5 pr-3" colSpan={4}>
+                        Included total ({data.tabInventory.filter((r) => r.includedInSum).length} monthly tabs)
+                      </td>
+                      <td className="py-1.5 pr-3 text-right tabular-nums">
+                        {fmtCr(
+                          data.tabInventory
+                            .filter((r) => r.includedInSum)
+                            .reduce((s, r) => s + r.taxableValue, 0),
+                        )}
+                      </td>
+                      <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground text-[10px]">
+                        {data.tabInventory
+                          .filter((r) => r.includedInSum)
+                          .reduce((s, r) => s + r.pieceQty, 0)
+                          .toLocaleString("en-IN")}{" "}
+                        pcs
+                      </td>
+                      <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground text-[10px]">
+                        {data.tabInventory
+                          .filter((r) => r.includedInSum)
+                          .reduce((s, r) => s + r.ltrQty, 0)
+                          .toLocaleString("en-IN")}{" "}
+                        L
+                      </td>
+                      <td className="py-1.5 pr-3 text-right tabular-nums">
+                        {fmtCr(
+                          data.tabInventory
+                            .filter((r) => r.includedInSum)
+                            .reduce((s, r) => s + r.retailValue, 0),
+                        )}
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums">
+                        {fmtCr(
+                          data.tabInventory
+                            .filter((r) => r.includedInSum)
+                            .reduce((s, r) => s + r.govtValue, 0),
+                        )}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Green dot = included in company total. Litres (L) and pieces (pcs) are never
+                added together. Govt value is excluded from scheme calculations. Retail +
+                Govt = included total.
+              </p>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Pending orders operational note */}

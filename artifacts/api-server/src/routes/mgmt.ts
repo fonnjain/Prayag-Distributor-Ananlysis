@@ -575,6 +575,7 @@ router.get("/mgmt/primary", async (req: Request, res: Response): Promise<void> =
       sources: sheetData.sources,
       bookingAvailable: sheetData.bookingAvailable,
       saleAvailable: sheetData.saleAvailable,
+      tabInventory: sheetData.tabInventory ?? null,
     });
   } catch (err) {
     req.log.error({ err, fy }, "mgmt primary failed");

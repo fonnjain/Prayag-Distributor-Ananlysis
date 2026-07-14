@@ -66,22 +66,21 @@ export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
   try {
     const tabs = await listSheetTabs(ORDER_BOOK_FY2627);
 
-    // Include monthly tabs (abbreviated or full name, optional year suffix),
-    // the "WT" water-tank tab, and a "data" tab when present.
-    // Per-state-head tabs (e.g. "ANUJ SHARMA") and a "Combined" pivot/summary
-    // tab are explicitly excluded — they duplicate the monthly data in a
-    // different layout and lead to double-counting.
+    // Include monthly tabs (abbreviated or full name, optional year suffix) and
+    // a "data" tab when present.
+    // Explicitly excluded:
+    //   WT / WT-LTR — the tank-size LOOKUP TABLE (digits→litre capacity), NOT order data.
+    //     The user verified: "It is a reference table, exactly like the INDEX tab."
+    //   Combined / Last Month Order — duplicate pivot summaries of monthly data.
+    //   Per-state-head tabs (e.g. "ANUJ SHARMA") — duplicate monthly data in head view.
+    // None of these should be summed.
     const MONTHLY_RE =
       /^(Apr(il)?|May|Jun(e)?|Jul(y)?|Aug(ust)?|Sep(tember)?|Oct(ober)?|Nov(ember)?|Dec(ember)?|Jan(uary)?|Feb(ruary)?|Mar(ch)?)\b/i;
     const DATA_RE = /^data$/i;
-    // Also include the "WT" tab — the booking sheet carries water-tank orders in a
-    // dedicated WT tab that is NOT duplicated in the monthly tabs.
-    const WT_TAB_RE = /^wt$/i;
     const relevantTabs = tabs.filter(
       (t) =>
         MONTHLY_RE.test(t.title.trim()) ||
-        DATA_RE.test(t.title.trim()) ||
-        WT_TAB_RE.test(t.title.trim()),
+        DATA_RE.test(t.title.trim()),
     );
 
     logger.info(
