@@ -1,12 +1,15 @@
-// Extra audit check groups: Group 1.1 (truncation), Group 6 (report logic), Group 7 (cross-foots).
+// Extra audit check groups: Group 1.1 (truncation), Group 6 (report logic), Group 7 (cross-foots),
+// Group 8 (pending cross-check), Group 9 (SAP data freshness).
 // These extend the core verifyFull groups with data-depth and computation-correctness checks.
 import type { CheckGroup, HealthCheck, CheckStatus } from "../mgmt/verifyFull.js";
 import { loadOrderFile } from "../mgmt/orders.js";
-import { db, saleLines } from "@workspace/db";
+import { db, pool, saleLines } from "@workspace/db";
 import { eq, and, sql, ilike } from "drizzle-orm";
 import { logger } from "../logger.js";
 import rawAuditAnchors from "../../../config/audit_anchors.json";
+import rawRegisterSheets from "../../../config/register_sheets.json";
 import { loadFactoryPending } from "../mgmt/factoryPending.js";
+import { listSheetTabs, readTabRowsChunked } from "../registers/sheetsApi.js";
 
 // ── Anchor types ───────────────────────────────────────────────────────────────
 
@@ -463,14 +466,161 @@ async function runPendingCrossCheckGroup(): Promise<CheckGroup> {
   }
 }
 
+// ── Group 9 — SAP data freshness ───────────────────────────────────────────────
+//
+// For the current open FY (2026-27), the SALE SHEET is derived from a raw SAP
+// export. Recently dispatched invoices appear in the derived sheet before the
+// SAP batch job processes them, creating a short lag. This group compares the
+// row count of the open month's tab in the SAP source sheet against the count
+// of matching rows in sale_line, and surfaces any discrepancy as a warning.
+//
+// The SAP source sheet ID is read from register_sheets.json → sap_source.
+// The check only runs for FY2026-27; for other FYs it is skipped.
+
+async function runSapLagGroup(): Promise<CheckGroup> {
+  const OPEN_FY = "2026-27";
+  const registerSheets = rawRegisterSheets as unknown as {
+    registers: Record<string, string>;
+    sap_source: Record<string, string>;
+  };
+  const sapId = registerSheets.sap_source?.[OPEN_FY];
+
+  if (!sapId) {
+    return {
+      id: "sap_lag",
+      label: "Group 9 — SAP Data Freshness",
+      available: false,
+      pendingNote: `No SAP source sheet configured for FY${OPEN_FY} in register_sheets.json.`,
+      checks: [],
+    };
+  }
+
+  try {
+    // Get DB row counts per month for the open FY from sale_line.
+    const dbRes = await pool.query<{ month_label: string; cnt: string }>(
+      `SELECT month_label, COUNT(*) AS cnt FROM sale_line WHERE fy = $1 GROUP BY month_label`,
+      [OPEN_FY],
+    );
+    const dbByMonth = new Map<string, number>(
+      dbRes.rows.map((r) => [r.month_label, parseInt(r.cnt, 10)]),
+    );
+
+    // Find the latest month (the open/partial one — lexicographic sort works
+    // for the "Mon-YY" label format used throughout the system).
+    const sortedMonths = [...dbByMonth.keys()].sort();
+    const latestMonth = sortedMonths[sortedMonths.length - 1];
+
+    if (!latestMonth) {
+      return {
+        id: "sap_lag",
+        label: `Group 9 — SAP Data Freshness (FY${OPEN_FY})`,
+        available: true,
+        checks: [
+          {
+            key: "sap_lag_no_data",
+            label: "9.1 — SAP vs derived register: latest open month",
+            unit: "count",
+            expected: null,
+            actual: null,
+            deltaPct: null,
+            status: "skip",
+            note: `No FY${OPEN_FY} rows in sale_line yet — register sync may still be running.`,
+          },
+        ],
+      };
+    }
+
+    const dbCount = dbByMonth.get(latestMonth) ?? 0;
+
+    // Match the SAP source tab whose title starts with the 3-char month prefix
+    // (e.g. "Jul-26" → "Jul" matches a tab titled "July" or "Jul 2026").
+    const monthPrefix = latestMonth.slice(0, 3);
+    const tabs = await listSheetTabs(sapId);
+    const matchingTab = tabs.find((t) =>
+      t.title.toLowerCase().startsWith(monthPrefix.toLowerCase()),
+    );
+
+    const checks: HealthCheck[] = [];
+
+    if (!matchingTab) {
+      checks.push({
+        key: "sap_lag_open_month",
+        label: `9.1 — SAP vs derived register: ${latestMonth}`,
+        unit: "count",
+        expected: null,
+        actual: dbCount,
+        deltaPct: null,
+        status: "skip",
+        note: `No "${monthPrefix}" tab found in SAP source sheet — tabs present: ${tabs.map((t) => t.title).join(", ") || "(none)"}.`,
+      });
+    } else {
+      // Count actual data rows (first chunk row is the header — subtract 1).
+      let sapRowsTotal = 0;
+      await readTabRowsChunked(sapId, matchingTab.title, (chunk) => {
+        sapRowsTotal += chunk.length;
+      });
+      const sapDataRows = Math.max(0, sapRowsTotal - 1);
+
+      const delta = dbCount - sapDataRows;
+      const deltaPct =
+        sapDataRows > 0
+          ? Math.round((delta / sapDataRows) * 1000) / 10
+          : null;
+
+      let status: CheckStatus;
+      let note: string;
+
+      if (delta === 0) {
+        status = "pass";
+        note = `SAP source tab "${matchingTab.title}" and derived register both have ${dbCount} rows for ${latestMonth}. No lag detected.`;
+      } else if (delta > 0) {
+        status = "warn";
+        note = `Derived register has ${dbCount} rows for ${latestMonth}; SAP source tab "${matchingTab.title}" has ${sapDataRows} (+${delta} in derived, not yet in SAP). These are recently dispatched invoices awaiting the next SAP batch run.`;
+      } else {
+        status = "warn";
+        note = `SAP source tab "${matchingTab.title}" has ${sapDataRows} rows; derived register has ${dbCount} (${Math.abs(delta)} more in SAP). The derived sheet may be missing rows — check whether the SALE SHEET 26-27 was recently regenerated from SAP.`;
+      }
+
+      checks.push({
+        key: "sap_lag_open_month",
+        label: `9.1 — SAP vs derived register: ${latestMonth} (open month)`,
+        unit: "count",
+        expected: sapDataRows,
+        actual: dbCount,
+        deltaPct,
+        status,
+        note,
+      });
+    }
+
+    return {
+      id: "sap_lag",
+      label: `Group 9 — SAP Data Freshness (${latestMonth}, FY${OPEN_FY})`,
+      available: true,
+      checks,
+    };
+  } catch (err) {
+    logger.warn({ err }, "audit: SAP lag group threw");
+    return {
+      id: "sap_lag",
+      label: `Group 9 — SAP Data Freshness (FY${OPEN_FY})`,
+      available: false,
+      pendingNote: "SAP freshness check failed — check server logs.",
+      checks: [],
+    };
+  }
+}
+
 // ── Entry point ────────────────────────────────────────────────────────────────
 
 export async function runExtraGroups(fy: string): Promise<CheckGroup[]> {
-  const [truncation, reportLogic, crossFoot, pendingCrossCheck] = await Promise.all([
-    runTruncationGroup(),
-    runReportLogicGroup(fy),
-    runCrossFootGroup(fy),
-    runPendingCrossCheckGroup(),
-  ]);
-  return [truncation, reportLogic, crossFoot, pendingCrossCheck];
+  const [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag] =
+    await Promise.all([
+      runTruncationGroup(),
+      runReportLogicGroup(fy),
+      runCrossFootGroup(fy),
+      runPendingCrossCheckGroup(),
+      runSapLagGroup(),
+    ]);
+  return [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag];
 }

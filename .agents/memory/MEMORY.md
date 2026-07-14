@@ -8,10 +8,10 @@
 - [SAP primary-sales pipeline](sap-primary-sales.md) — FY26-27 monthly SAP xlsx uploads; month derived from invoice date; verified-gated cutover; cross-foot by construction; rate list never supplies cost/MRP.
 - [api-zod types re-export conflict](prayag-api-zod-types.md) — never re-export ./generated/types from api-zod/src/index.ts; causes TS2308 when Zod schema constants and TypeScript types share names.
 - [Prayag primary attribution pipeline](prayag-primary-attribution.md) — dist-TM map is non-blocking (background build); both sheet IDs live in primaryAttribution.ts + stateHeadSale.ts must stay in sync.
-- [Audit engine architecture](audit-engine.md) — GET /api/audit + /api/audit/download; 10 groups (runFullVerify + extraGroups: truncation, report-logic, cross-foots, pending-crosscheck); 8-tab xlsx via exceljs.
+- [Audit engine architecture](audit-engine.md) — GET /api/audit + /api/audit/download; 10 groups (runFullVerify + extraGroups: truncation, report-logic, cross-foots, pending-crosscheck, SAP-lag); 8-tab xlsx via exceljs.
 - [Prayag historical roster gap](prayag-historical-roster-gap.md) — for FY<current, departed TMs in order file are recovered via target-master stateHead supplement in assembleRows; 40 zero-booking members require a historical roster file.
 - [Dashboard xlsx upload pattern](prayag-dashboard-xlsx-upload.md) — FY-specific quarterly vs annual rules; header auto-detected (not hardcoded); xlsx fills target-map gaps; departed TMs get stateHead from xlsx.
 - [Customer Performance page](customer-performance.md) — units-first analytics on sale_line; Laspeyres at customer/category/company levels; scheme engine configurable; route /customers.
 - [STATE HD Dashboard column detection](state-dashboard-column-detection.md) — FY-suffix stripping + Excel date serial detection required; block offsets +0/+2/+5=plan/OB/sales; plan ₹364.97 Cr verified.
 - [Drizzle GROUP BY bare-column trap](drizzle-groupby-bare-column.md) — Postgres rejects bare column refs in SELECT when GROUP BY uses a wrapped expression; use max(col) or repeat the exact expression.
-- [FY2026-27 register_sheets.json wrong sheet](prayag-register-sheets-config.md) — register_sheets.json "2026-27" ID is the ORDER BOOKING sheet, not SAP dispatch; never run Sheets backfill for FY2026-27 until corrected.
+- [FY2026-27 register config](prayag-register-sheets-config.md) — 2026-27 register is SALE SHEET 26-27 (19LQGpkb…); sap_source["2026-27"] is the raw SAP export (19Oj6P2c…) for the Data Health lag check only; open FY auto-syncs every 6h.

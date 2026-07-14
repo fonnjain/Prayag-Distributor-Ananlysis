@@ -1,9 +1,9 @@
 {
-  "comment": "Verified row counts per source file and FY (spec section A). Used as ingestion assertions.",
+  "comment": "Verified row counts per source file and FY (spec section A). Used as ingestion assertions. FY2026-27 is an open year — the count is a current snapshot, not a fixed total. The 2026-27 register (SALE SHEET 26-27) covers FY2026-27 only; it does not contain prior-year rows.",
   "registers": {
     "2024-25": { "FY-2023-24": 137619, "FY-2024-25": 141201 },
     "2025-26": { "FY-2024-25": 141201, "FY-2025-26": 145657 },
-    "2026-27": { "FY-2025-26": 145657, "FY-2026-27": 30658 }
+    "2026-27": { "FY-2026-27": 31317 }
   },
-  "total_distinct_sale_lines": 424477
+  "total_distinct_sale_lines": 425136
 }

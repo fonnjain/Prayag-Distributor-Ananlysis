@@ -1,8 +1,12 @@
 {
-  "comment": "Live Google Sheets spreadsheet IDs for the invoice-line order registers by fiscal year. Columns: Date, Customer.Name, GROUP, item code, Quantity, Rate, Taxable Value, Month, STATION, STATE, STATE HEAD. Each workbook covers one FY only; FY is implied by the file, not a column.",
+  "comment": "Live Google Sheets spreadsheet IDs for the SALE/DISPATCH registers by fiscal year. These are goods-dispatched (primary sale) registers — NOT order-booking sheets. SALE and ORDER BOOKING are separate measures from separate spreadsheets and must never be confused. Columns: Serial, InvoiceNo, Date, BillFrom, Customer.Name, City, Destination, ItemCode, Color, Quantity, MRP, SaleRate, TaxableValue, GROUP, STATION, STATE, STATE HEAD, MONTH.",
   "registers": {
     "2024-25": "1cT6lWRPJ3oSeYhab-cqeVjJidGitFQsr0DOq-vNn6cI",
     "2025-26": "1Xzq-gmB6K7iuMcE6gb-O7OpvGgSDU33DzEVyK60LK6E",
-    "2026-27": "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A"
+    "2026-27": "19LQGpkbZiecGaXdBvl48rPZT2LUz3sKekeKX5fHu7Ps"
+  },
+  "sap_source": {
+    "comment": "Raw SAP export (56-col) from which the 2026-27 register above is derived. Used for data-freshness cross-check in Data Health only — never read for analytics.",
+    "2026-27": "19Oj6P2cSZmXNGfDro9K_ubfrfPp_03K14vOTrq_gdyI"
   }
 }

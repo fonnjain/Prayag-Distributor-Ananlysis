@@ -10,6 +10,7 @@ import { loadStateHeadSale } from "./lib/mgmt/stateHeadSale.js";
 import { restoreSecondaryUploadsFromGcs } from "./lib/mgmt/secondaryUpload.js";
 import {
   ensureRegisterSynced,
+  startScheduledRegisterSync,
   REGISTER_SHEET_IDS,
 } from "./lib/customers/registerSync.js";
 
@@ -62,10 +63,11 @@ app.listen(port, (err) => {
   // (interval configurable via DASHBOARD_SYNC_INTERVAL_MINUTES, 0 disables).
   startScheduledSync();
 
-  // Auto-populate sale_line for all configured FYs so Customer Performance
-  // never shows "No register data" on first load. Each sync is a no-op when
-  // the table already has rows for that FY.
+  // Auto-populate sale_line for all configured FYs on startup, then keep the
+  // current open FY fresh on a 6-hour schedule. No manual trigger needed.
+  // Completed FYs are no-ops after the first successful sync.
   for (const fy of Object.keys(REGISTER_SHEET_IDS)) {
     ensureRegisterSynced(fy);
   }
+  startScheduledRegisterSync();
 });
