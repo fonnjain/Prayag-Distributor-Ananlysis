@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useTheme } from "next-themes";
-import { Sun, Moon, Printer, Menu, X, BarChart3, Map, LayoutGrid, Package, TrendingUp, LineChart, Database, Bot, FileSpreadsheet, Target, Users, ShieldCheck, Store, BarChart2 } from "lucide-react";
+import { Sun, Moon, Printer, Menu, X, BarChart3, Map, LayoutGrid, Package, TrendingUp, LineChart, Database, Bot, FileSpreadsheet, Target, Users, ShieldCheck, Store, BarChart2, ClipboardList } from "lucide-react";
 import Overview from "@/components/dashboard/Overview";
 import Regional from "@/components/dashboard/Regional";
 import Resources from "@/components/dashboard/Resources";
@@ -14,6 +14,7 @@ import MgmtReports from "@/components/dashboard/MgmtReports";
 import CompanyReports from "@/components/dashboard/CompanyReports";
 import Targets from "@/components/dashboard/Targets";
 import DataHealth from "@/components/dashboard/DataHealth";
+import PendingOrders from "@/components/dashboard/PendingOrders";
 import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
 import { useDashboard } from "@/data/dashboard-context";
@@ -29,6 +30,7 @@ const AREAS = [
   { id: "reports", label: "Reports", icon: FileSpreadsheet, component: MgmtReports },
   { id: "company-reports", label: "Company Reports", icon: BarChart2, component: CompanyReports },
   { id: "targets", label: "Targets", icon: Target, component: Targets },
+  { id: "pending", label: "Pending Orders", icon: ClipboardList, component: PendingOrders },
   { id: "sources", label: "Data Sources", icon: Database, component: DataSources },
   { id: "data-health", label: "Data Health", icon: ShieldCheck, component: DataHealth },
 ];

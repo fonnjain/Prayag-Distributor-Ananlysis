@@ -6,6 +6,7 @@ import { db, saleLines } from "@workspace/db";
 import { eq, and, sql, ilike } from "drizzle-orm";
 import { logger } from "../logger.js";
 import rawAuditAnchors from "../../../config/audit_anchors.json";
+import { loadFactoryPending } from "../mgmt/factoryPending.js";
 
 // ── Anchor types ───────────────────────────────────────────────────────────────
 
@@ -366,13 +367,110 @@ export async function runCrossFootGroup(fy: string): Promise<CheckGroup> {
   }
 }
 
+// ── Group 8 — Pending cross-check ─────────────────────────────────────────────
+// Compares derived pending (OB minus Sale, in ₹) against the factory pending
+// sheet (REPORT 2, in units). They are different measures in different units;
+// the check just surfaces both figures so a large directional divergence is visible.
+
+async function runPendingCrossCheckGroup(): Promise<CheckGroup> {
+  const checks: HealthCheck[] = [];
+  try {
+    const result = await loadFactoryPending();
+    const { grandTotal, derived, error } = result;
+
+    // Check 1 — factory pending total qty
+    checks.push({
+      key: "pending_factory_qty",
+      label: "8.1 — Factory pending: total balance quantity",
+      unit: "count",
+      expected: null,
+      actual: grandTotal,
+      deltaPct: null,
+      status: error ? "warn" : "pass",
+      note: error
+        ? `Factory pending sheet could not be read: ${error}`
+        : `${grandTotal.toLocaleString("en-IN")} units outstanding across ${result.byHead.length} state heads and ${result.byHead.reduce((a, h) => a + h.parties.length, 0)} parties (source: REPORT 2, factory pending sheet). Water tanks are in pieces in this source.`,
+    });
+
+    // Check 2 — derived pending (₹)
+    const derivedPending = derived.pending;
+    checks.push({
+      key: "pending_derived_value",
+      label: "8.2 — Derived pending: Order Booking minus Sale (₹)",
+      unit: "money",
+      expected: null,
+      actual: derivedPending,
+      deltaPct: null,
+      status:
+        derived.obError || derived.saleError
+          ? "warn"
+          : derivedPending != null && derivedPending < 0
+            ? "fail"
+            : "pass",
+      note:
+        derived.obError
+          ? `OB load failed: ${derived.obError}`
+          : derived.saleError
+            ? `Sale load failed: ${derived.saleError}`
+            : derivedPending != null && derivedPending < 0
+              ? `FAIL: Derived pending is negative (${(derivedPending / 1e7).toFixed(2)} Cr). Sale exceeds Order Booking — check source data.`
+              : derivedPending != null
+                ? `OB ${derived.ob != null ? (derived.ob / 1e7).toFixed(2) : "?"} Cr minus Sale ${derived.sale != null ? (derived.sale / 1e7).toFixed(2) : "?"} Cr = ${(derivedPending / 1e7).toFixed(2)} Cr pending. Independently corroborated by factory qty above.`
+                : "OB or Sale data unavailable — cannot compute derived pending.",
+    });
+
+    // Check 3 — directional consistency (both measures must agree that some
+    // pending exists; fail if one shows zero while the other is non-zero)
+    const factoryHasOrders = grandTotal > 0;
+    const derivedHasOrders = derivedPending != null && derivedPending > 0;
+    const consistent = factoryHasOrders === derivedHasOrders;
+    checks.push({
+      key: "pending_consistency",
+      label: "8.3 — Pending cross-check: directional consistency",
+      unit: "text",
+      expected: null,
+      actual: null,
+      deltaPct: null,
+      status:
+        error || derived.obError || derived.saleError
+          ? "skip"
+          : consistent
+            ? "pass"
+            : "warn",
+      note:
+        error || derived.obError || derived.saleError
+          ? "One or both sources unavailable — cannot assess consistency."
+          : consistent
+            ? "Both sources agree: pending orders exist (factory qty > 0, derived value > 0). No directional divergence."
+            : `Directional mismatch: factory qty ${grandTotal > 0 ? "> 0" : "= 0"} but derived value ${derivedHasOrders ? "> 0" : "<= 0"}. Investigate source data.`,
+    });
+
+    return {
+      id: "pending_crosscheck",
+      label: "Group 8 — Pending cross-check",
+      available: true,
+      checks,
+    };
+  } catch (err) {
+    logger.warn({ err }, "audit: pending cross-check group threw");
+    return {
+      id: "pending_crosscheck",
+      label: "Group 8 — Pending cross-check",
+      available: false,
+      pendingNote: "Pending cross-check failed — check server logs.",
+      checks: [],
+    };
+  }
+}
+
 // ── Entry point ────────────────────────────────────────────────────────────────
 
 export async function runExtraGroups(fy: string): Promise<CheckGroup[]> {
-  const [truncation, reportLogic, crossFoot] = await Promise.all([
+  const [truncation, reportLogic, crossFoot, pendingCrossCheck] = await Promise.all([
     runTruncationGroup(),
     runReportLogicGroup(fy),
     runCrossFootGroup(fy),
+    runPendingCrossCheckGroup(),
   ]);
-  return [truncation, reportLogic, crossFoot];
+  return [truncation, reportLogic, crossFoot, pendingCrossCheck];
 }

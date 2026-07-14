@@ -19,6 +19,7 @@ import {
 } from "../lib/mgmt/bridge.js";
 import { loadStateHeadSale } from "../lib/mgmt/stateHeadSale.js";
 import { loadOrderBookSaleByHead } from "../lib/mgmt/orderBookSale.js";
+import { loadFactoryPending } from "../lib/mgmt/factoryPending.js";
 import {
   getDistributorTmMapIfReady,
   loadDistributorTmMap,
@@ -683,6 +684,19 @@ router.post(
     });
   },
 );
+
+// GET /api/mgmt/pending-orders
+// Returns factory pending order book (REPORT 2 from the pending sheet) by state
+// head and party, in quantity only, plus the derived pending (OB minus Sale).
+router.get("/mgmt/pending-orders", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await loadFactoryPending();
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "pending-orders: loadFactoryPending threw");
+    res.status(500).json({ error: "Could not load factory pending data." });
+  }
+});
 
 router.get("/mgmt/bridge/status", async (req: Request, res: Response): Promise<void> => {
   try {
