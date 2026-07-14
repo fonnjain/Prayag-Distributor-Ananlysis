@@ -16,6 +16,7 @@ import {
   toLyMonths,
   calcPctElapsed,
   SEASONAL_TOTAL,
+  getDistributorRisk,
   type EntityType,
 } from "../lib/customers/analytics.js";
 import {
@@ -346,6 +347,38 @@ router.get("/customers/schemes/:id/push-list", async (req, res) => {
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to compute push list" });
+  }
+});
+
+// ── Distributor scheme-risk ────────────────────────────────────────────────────
+
+router.get("/customers/distributor-risk", async (req, res) => {
+  const fyCy = typeof req.query.fyCy === "string" ? req.query.fyCy : "2026-27";
+  const fyLy = typeof req.query.fyLy === "string" ? req.query.fyLy : "2025-26";
+  ensureRegisterSynced(fyCy);
+  ensureRegisterSynced(fyLy);
+  const monthsCy = parseMonthList(req.query.monthsCy);
+  const monthsLy = parseMonthList(req.query.monthsLy);
+
+  if (!monthsCy.length || !monthsLy.length) {
+    res.json({ rows: [], summary: { total: 0, onTrack: 0, atRisk: 0, zeroBuyers: 0, atRiskRevenue: 0, zeroBuyerRevenue: 0 } });
+    return;
+  }
+
+  try {
+    const rows = await getDistributorRisk({ fyCy, fyLy, monthsCy, monthsLy });
+    const summary = {
+      total: rows.length,
+      onTrack: rows.filter((r) => r.status === "on_track").length,
+      atRisk: rows.filter((r) => r.status === "at_risk").length,
+      zeroBuyers: rows.filter((r) => r.status === "zero").length,
+      atRiskRevenue: rows.filter((r) => r.status !== "on_track").reduce((s, r) => s + r.lyVal, 0),
+      zeroBuyerRevenue: rows.filter((r) => r.status === "zero").reduce((s, r) => s + r.lyVal, 0),
+    };
+    res.json({ rows, summary });
+  } catch (err) {
+    req.log.error(err);
+    res.status(500).json({ error: "Failed to compute distributor risk" });
   }
 });
 

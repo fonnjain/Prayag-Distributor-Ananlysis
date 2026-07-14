@@ -39,7 +39,7 @@ const SECTIONS = [
     lazy: false,
   },
   {
-    id: "sales-people",
+    id: "salespeople",
     label: "Sales People",
     icon: Users,
     component: SalesPeople,

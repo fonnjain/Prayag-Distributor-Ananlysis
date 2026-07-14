@@ -361,7 +361,7 @@ export default function CustomersPage() {
             </div>
           )}
 
-          {activeSection === "rankings" && seasonalProjection && seasonalProjection.pctElapsed > 0 && seasonalProjection.pctElapsed < 95 && (
+          {activeSection === "rankings" && seasonalProjection && seasonalProjection.pctElapsed > 0 && seasonalProjection.pctElapsed < 95 && completeMonths.length < 12 && (
             <div className="mb-3 rounded-md border border-blue-200/60 bg-blue-50/50 px-3 py-2 text-xs text-blue-800 dark:border-blue-800/40 dark:bg-blue-950/30 dark:text-blue-300">
               <span className="font-medium">Seasonal context:</span>{" "}
               {monthsCy.length === 1 ? monthsCy[0] : `${monthsCy[0]}–${monthsCy[monthsCy.length - 1]}`}{" "}

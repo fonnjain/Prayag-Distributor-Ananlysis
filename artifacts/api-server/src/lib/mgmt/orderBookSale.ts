@@ -66,9 +66,11 @@ export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
   try {
     const tabs = await listSheetTabs(ORDER_BOOK_FY2627);
 
-    // Include monthly tabs: abbreviated ("Apr", "Jul") or full ("April", "July"),
-    // with or without a year suffix ("Apr-26", "Apr 2026", "April").
-    // The sheet names some tabs with the full month name and no suffix.
+    // Include monthly tabs (abbreviated or full name, optional year suffix),
+    // the "WT" water-tank tab, and a "data" tab when present.
+    // Per-state-head tabs (e.g. "ANUJ SHARMA") and a "Combined" pivot/summary
+    // tab are explicitly excluded — they duplicate the monthly data in a
+    // different layout and lead to double-counting.
     const MONTHLY_RE =
       /^(Apr(il)?|May|Jun(e)?|Jul(y)?|Aug(ust)?|Sep(tember)?|Oct(ober)?|Nov(ember)?|Dec(ember)?|Jan(uary)?|Feb(ruary)?|Mar(ch)?)\b/i;
     const DATA_RE = /^data$/i;

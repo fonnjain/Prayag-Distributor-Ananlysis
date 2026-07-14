@@ -875,3 +875,77 @@ export async function getCustomerHistory(params: {
     return { fy: r.fy, qty, val, price: realizedPrice(val, qty) };
   });
 }
+
+// ── Distributor scheme-risk ────────────────────────────────────────────────────
+
+export type DistributorRiskRow = {
+  customer: string;
+  cyVal: number;
+  lyVal: number;
+  growthPct: number | null;
+  isZeroBuyer: boolean;
+  status: "on_track" | "at_risk" | "zero";
+};
+
+/**
+ * Like-months YoY comparison for every customer who bought in the LY period.
+ * Sorted by revenue at risk (lyVal − cyVal) descending — zero-buyers first.
+ * No type_raw filter: the primary register has no reliable customer-type flag.
+ */
+export async function getDistributorRisk(params: {
+  fyCy: string;
+  fyLy: string;
+  monthsCy: string[];
+  monthsLy: string[];
+}): Promise<DistributorRiskRow[]> {
+  const { fyCy, fyLy, monthsCy, monthsLy } = params;
+  if (!monthsCy.length || !monthsLy.length) return [];
+
+  const res = await pool.query<{
+    customer: string;
+    cy_val: unknown;
+    ly_val: unknown;
+    growth_pct: unknown;
+    is_zero_buyer: unknown;
+  }>(
+    `
+    WITH cy AS (
+      SELECT customer, SUM(amount::numeric) AS cy_val
+      FROM sale_line
+      WHERE fy = $1 AND month_label = ANY($2::text[]) AND customer IS NOT NULL
+      GROUP BY customer
+    ),
+    ly AS (
+      SELECT customer, SUM(amount::numeric) AS ly_val
+      FROM sale_line
+      WHERE fy = $3 AND month_label = ANY($4::text[]) AND customer IS NOT NULL
+      GROUP BY customer
+    )
+    SELECT
+      ly.customer,
+      COALESCE(cy.cy_val, 0)                                    AS cy_val,
+      ly.ly_val,
+      CASE WHEN ly.ly_val > 0
+        THEN ROUND((COALESCE(cy.cy_val, 0) - ly.ly_val) / ly.ly_val * 100, 1)
+        ELSE NULL END                                            AS growth_pct,
+      (COALESCE(cy.cy_val, 0) = 0)                              AS is_zero_buyer
+    FROM ly
+    LEFT JOIN cy USING (customer)
+    ORDER BY (ly.ly_val - COALESCE(cy.cy_val, 0)) DESC
+    `,
+    [fyCy, monthsCy, fyLy, monthsLy],
+  );
+
+  return res.rows.map((r) => {
+    const cyVal = safeN(r.cy_val);
+    const lyVal = safeN(r.ly_val);
+    const isZeroBuyer = Boolean(r.is_zero_buyer);
+    const growthPct = r.growth_pct != null ? Number(r.growth_pct) : null;
+    const status: DistributorRiskRow["status"] = isZeroBuyer
+      ? "zero"
+      : cyVal < lyVal
+      ? "at_risk"
+      : "on_track";
+    return { customer: r.customer, cyVal, lyVal, growthPct, isZeroBuyer, status };
+  });
+}
