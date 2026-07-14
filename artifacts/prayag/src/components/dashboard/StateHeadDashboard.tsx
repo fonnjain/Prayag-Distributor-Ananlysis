@@ -154,6 +154,18 @@ const PERIODS: Period[] = [
   { label: "Q3 (Oct-Dec)", from: 7, to: 9 },
   { label: "Q4 (Jan-Mar)", from: 10, to: 12 },
   { label: "Full Year", from: 1, to: 12 },
+  { label: "Apr", from: 1, to: 1 },
+  { label: "May", from: 2, to: 2 },
+  { label: "Jun", from: 3, to: 3 },
+  { label: "Jul", from: 4, to: 4 },
+  { label: "Aug", from: 5, to: 5 },
+  { label: "Sep", from: 6, to: 6 },
+  { label: "Oct", from: 7, to: 7 },
+  { label: "Nov", from: 8, to: 8 },
+  { label: "Dec", from: 9, to: 9 },
+  { label: "Jan", from: 10, to: 10 },
+  { label: "Feb", from: 11, to: 11 },
+  { label: "Mar", from: 12, to: 12 },
 ];
 
 const FISCAL_MONTH_NAMES = [
