@@ -41,7 +41,7 @@ export type RegisterColumns = {
 export function isHeaderRow(values: CellValue[]): boolean {
   const set = new Set(values.map(normHeader));
   return (
-    (set.has("CODE") || set.has("ITEMCODE")) &&
+    (set.has("CODE") || set.has("ITEMCODE") || set.has("OLDERPCODE")) &&
     (set.has("QTY") || set.has("QUANTITY")) &&
     (set.has("AMOUNT") || set.has("TAXABLEVALUE"))
   );
@@ -65,10 +65,10 @@ export function mapRegisterColumns(
   }
   return {
     headerRowNumber,
-    invoiceNo: find("INVOICENO"),
+    invoiceNo: find("INVOICENO", "DOCUMENTNO"),
     date: find("DATE"),
     customer: find("CUSTOMER", "CUSTOMERNAME"),
-    code: find("CODE", "ITEMCODE"),
+    code: find("CODE", "ITEMCODE", "OLDERPCODE"),
     month: find("MONTH", "M0NTH"),
     qty: find("QTY", "QUANTITY"),
     rate: find("SALERATE", "RATE"),

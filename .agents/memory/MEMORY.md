@@ -14,3 +14,4 @@
 - [Customer Performance page](customer-performance.md) — units-first analytics on sale_line; Laspeyres at customer/category/company levels; scheme engine configurable; route /customers.
 - [STATE HD Dashboard column detection](state-dashboard-column-detection.md) — FY-suffix stripping + Excel date serial detection required; block offsets +0/+2/+5=plan/OB/sales; plan ₹364.97 Cr verified.
 - [Drizzle GROUP BY bare-column trap](drizzle-groupby-bare-column.md) — Postgres rejects bare column refs in SELECT when GROUP BY uses a wrapped expression; use max(col) or repeat the exact expression.
+- [FY2026-27 register_sheets.json wrong sheet](prayag-register-sheets-config.md) — register_sheets.json "2026-27" ID is the ORDER BOOKING sheet, not SAP dispatch; never run Sheets backfill for FY2026-27 until corrected.
