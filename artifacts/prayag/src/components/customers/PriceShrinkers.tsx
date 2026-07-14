@@ -87,6 +87,12 @@ export default function PriceShrinkers({
             The apparent "growth" is entirely price — the real business with that customer
             is contracting. Realized price = Value / Qty; never from the rate list.
           </p>
+          {monthsCy.length > 0 && (
+            <p className="text-xs mt-1 font-medium">
+              Comparing {monthsCy[0]} – {monthsCy[monthsCy.length - 1]} vs the same months in {fyLy}.
+              Complete months only — partial months are excluded.
+            </p>
+          )}
         </div>
       </div>
 

@@ -142,6 +142,12 @@ export default function CustomerChurn({
         {tab === "churned"
           ? `Customers who ordered in the same period of ${fyLy} but have no orders yet in ${fyCy}.`
           : `Customers who ordered in ${fyCy} but had no orders in the corresponding ${fyLy} period.`}
+        {monthsCy.length > 0 && (
+          <span className="ml-1">
+            Comparing {monthsCy[0]}–{monthsCy[monthsCy.length - 1]} vs same months in {fyLy}.
+            Complete months only.
+          </span>
+        )}
       </p>
       {loading ? (
         <div className="flex items-center justify-center h-24 text-muted-foreground text-sm">

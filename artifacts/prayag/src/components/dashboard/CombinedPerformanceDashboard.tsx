@@ -35,6 +35,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useCompleteMonths } from "@/hooks/useCompleteMonths";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -195,10 +196,17 @@ export default function CombinedPerformanceDashboard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedHeads, setExpandedHeads] = useState<Set<string>>(new Set());
-  const [likeMonthsData, setLikeMonthsData] = useState<{
-    likeMonths: string[];
-    monthlyPrimary: Array<{ label: string; amount: number }>;
-  } | null>(null);
+  // Canonical complete-months enforcement: completeMonths = closed months only,
+  // lastSyncedAt = ISO timestamp of last register sync (null until first sync).
+  // This is the single source of truth for month-filtering across all KPI tiles.
+  const { completeMonths, lastSyncedAt } = useCompleteMonths(fy);
+
+  // Per-month primary amounts from the company-reports endpoint (needed to
+  // compute the like-months primary total). The month filter itself comes from
+  // completeMonths above — explicit label intersection, not an implicit total.
+  const [monthlyPrimary, setMonthlyPrimary] = useState<
+    Array<{ label: string; amount: number }>
+  >([]);
 
   useEffect(() => {
     setLoading(true);
@@ -213,18 +221,17 @@ export default function CombinedPerformanceDashboard() {
       .catch((err: Error) => { setError(err.message); setLoading(false); });
   }, [fy]);
 
-  // Fetch like-months primary from the company-reports endpoint so coverage
-  // comparison uses the same closed-month window as secondary data.
+  // Fetch monthly primary amounts from the company-reports endpoint.
+  // Only the per-month array is used here; the month filter comes from
+  // useCompleteMonths (above) so the intersection is always explicit.
   useEffect(() => {
-    setLikeMonthsData(null);
+    setMonthlyPrimary([]);
     fetch(`/api/company-reports?fy=${encodeURIComponent(fy)}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: { likeMonths?: string[]; monthlyPrimary?: Array<{ label: string; amount: number }> } | null) => {
-        if (d?.likeMonths && d?.monthlyPrimary) {
-          setLikeMonthsData({ likeMonths: d.likeMonths, monthlyPrimary: d.monthlyPrimary });
-        }
+      .then((d: { monthlyPrimary?: Array<{ label: string; amount: number }> } | null) => {
+        if (d?.monthlyPrimary) setMonthlyPrimary(d.monthlyPrimary);
       })
-      .catch(() => setLikeMonthsData(null));
+      .catch(() => setMonthlyPrimary([]));
   }, [fy]);
 
   const hasStateDashboard = useMemo(() => {
@@ -313,24 +320,25 @@ export default function CombinedPerformanceDashboard() {
     if (!ob) return 0;
     return Object.values(ob).reduce((s, v) => s + v, 0);
   }, [data]);
-  // Like-months coverage: compare secondary total (closed months only) against
-  // the same calendar months of primary from the invoice register.
-  // Secondary is already closed-months-only; we pull matching primary months.
+  // Like-months primary total: sum only the months in completeMonths (from the
+  // canonical hook) against the per-month primary array from company-reports.
+  // This explicit label intersection guarantees primary and secondary cover the
+  // exact same calendar months — secondary data is entered at month-end so its
+  // total naturally matches the same closed-month set.
   const likeMonthsPrimaryTotal = useMemo(() => {
-    if (!likeMonthsData || likeMonthsData.likeMonths.length === 0) return null;
-    const monthSet = new Set(likeMonthsData.likeMonths);
-    return likeMonthsData.monthlyPrimary
+    if (!completeMonths.length || !monthlyPrimary.length) return null;
+    const monthSet = new Set(completeMonths);
+    return monthlyPrimary
       .filter((m) => monthSet.has(m.label))
       .reduce((s, m) => s + m.amount, 0);
-  }, [likeMonthsData]);
+  }, [completeMonths, monthlyPrimary]);
 
   const likeMonthsLabel = useMemo(() => {
-    if (!likeMonthsData || likeMonthsData.likeMonths.length === 0) return null;
-    const ms = likeMonthsData.likeMonths;
-    const first = ms[0].slice(0, 3);
-    const last = ms[ms.length - 1].slice(0, 3);
+    if (!completeMonths.length) return null;
+    const first = completeMonths[0].slice(0, 3);
+    const last = completeMonths[completeMonths.length - 1].slice(0, 3);
     return first === last ? first : `${first}–${last}`;
-  }, [likeMonthsData]);
+  }, [completeMonths]);
 
   const likeMonthsCoveragePct = useMemo(() => {
     if (!secTotal || !likeMonthsPrimaryTotal || likeMonthsPrimaryTotal === 0) return null;
@@ -426,7 +434,9 @@ export default function CombinedPerformanceDashboard() {
               />
               <KpiTile
                 label="Primary — Sale Dispatched"
-                sub="invoiced by Prayag"
+                sub={lastSyncedAt
+                  ? `invoiced by Prayag · synced ${new Date(lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                  : "invoiced by Prayag"}
                 value={fmtCr(headSalesTotal || null)}
                 note={
                   primaryBookingTotal > 0 && data.meta.pendingOrdersTotal != null
@@ -450,7 +460,7 @@ export default function CombinedPerformanceDashboard() {
                 note={
                   likeMonthsCoverageGap != null
                     ? `Gap: ${fmtCr(likeMonthsCoverageGap)} — apples-to-apples`
-                    : likeMonthsData === null
+                    : !completeMonths.length || !monthlyPrimary.length
                     ? "Loading primary data..."
                     : undefined
                 }
