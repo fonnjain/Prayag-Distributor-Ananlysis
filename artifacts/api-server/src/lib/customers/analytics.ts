@@ -96,6 +96,7 @@ export type EntityType = "all" | "distributor" | "direct_dealer" | "retailer";
 export type CustomerRow = {
   customer: string;
   entityType: "distributor" | "direct_dealer" | "retailer" | "unknown";
+  state: string | null;         // dominant state from state_canon (MAX per customer)
   qtyCy: number;
   valCy: number;
   qtyLy: number;
@@ -187,6 +188,7 @@ function realizedPrice(val: number, qty: number): number | null {
 function buildCustomerRow(r: {
   customer: string;
   type_raw: string | null;
+  state_canon: string | null;
   qty_cy: unknown;
   val_cy: unknown;
   qty_ly: unknown;
@@ -209,6 +211,7 @@ function buildCustomerRow(r: {
   return {
     customer: r.customer,
     entityType: classifyEntityType(r.type_raw),
+    state: r.state_canon ?? null,
     qtyCy,
     valCy,
     qtyLy,
@@ -231,8 +234,9 @@ export async function listCustomers(params: {
   monthsCy: string[];
   monthsLy: string[];
   entityType?: EntityType;
+  states?: string[];
 }): Promise<CustomerRow[]> {
-  const { fyCy, fyLy, monthsCy, monthsLy, entityType = "all" } = params;
+  const { fyCy, fyLy, monthsCy, monthsLy, entityType = "all", states = [] } = params;
 
   const typeFilter =
     entityType === "distributor"
@@ -245,6 +249,7 @@ export async function listCustomers(params: {
     SELECT
       customer,
       MAX(type_raw) AS type_raw,
+      MAX(state_canon) AS state_canon,
       COALESCE(SUM(qty::numeric) FILTER (WHERE fy = $1 AND month_label = ANY($3::text[])), 0) AS qty_cy,
       COALESCE(SUM(amount::numeric) FILTER (WHERE fy = $1 AND month_label = ANY($3::text[])), 0) AS val_cy,
       COALESCE(SUM(qty::numeric) FILTER (WHERE fy = $2 AND month_label = ANY($4::text[])), 0) AS qty_ly,
@@ -256,6 +261,7 @@ export async function listCustomers(params: {
         OR (fy = $2 AND month_label = ANY($4::text[]))
       )
       ${typeFilter}
+      AND ($5::text[] = '{}' OR sl.state_canon = ANY($5::text[]))
     GROUP BY customer
     HAVING
       COALESCE(SUM(qty::numeric) FILTER (WHERE fy = $1 AND month_label = ANY($3::text[])), 0) > 0
@@ -266,11 +272,12 @@ export async function listCustomers(params: {
   const res = await pool.query<{
     customer: string;
     type_raw: string | null;
+    state_canon: string | null;
     qty_cy: unknown;
     val_cy: unknown;
     qty_ly: unknown;
     val_ly: unknown;
-  }>(query, [fyCy, fyLy, monthsCy, monthsLy]);
+  }>(query, [fyCy, fyLy, monthsCy, monthsLy, states]);
 
   return res.rows.map(buildCustomerRow);
 }

@@ -21,6 +21,7 @@ import { fmtQty, fmtVal, fmtPct, fmtPrice, fmtPp, pctColor } from "./formatters"
 export type CustomerRow = {
   customer: string;
   entityType: "distributor" | "direct_dealer" | "retailer" | "unknown";
+  state: string | null;
   qtyCy: number;
   valCy: number;
   qtyLy: number;
@@ -165,6 +166,7 @@ export default function CustomerRanking({
             <TableRow>
               <SortTh col="customer" label="Customer" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="left" />
               <TableHead>Type</TableHead>
+              <SortTh col="state" label="State" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="left" />
               {/* UNITS FIRST */}
               <SortTh col="qtyCy" label={`Qty ${fyCy}`} sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
               <SortTh col="qtyLy" label={`Qty ${fyLy}`} sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
@@ -203,6 +205,9 @@ export default function CustomerRanking({
                   <Badge variant="outline" className="text-xs font-normal">
                     {ENTITY_LABELS[row.entityType] ?? row.entityType}
                   </Badge>
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground max-w-[120px] truncate">
+                  {row.state ?? "—"}
                 </TableCell>
                 {/* QTY — primary signal */}
                 <TableCell className="text-right font-mono">

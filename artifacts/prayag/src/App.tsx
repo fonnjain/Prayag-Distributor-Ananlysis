@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "next-themes";
+import AppShell from "@/components/AppShell";
 import Dashboard, { AREA_IDS } from "@/pages/Dashboard";
 import SalesPage from "@/pages/SalesPage";
 import CustomersPage from "@/pages/CustomersPage";
@@ -20,21 +21,24 @@ const queryClient = new QueryClient({
 
 function Router() {
   return (
-    <Switch>
-      {/* Sales section — /sales and /sales/:section both render SalesPage */}
-      <Route path="/sales/:section" component={SalesPage} />
-      <Route path="/sales" component={SalesPage} />
-      {/* Customer Performance — /customers and /customers/:section */}
-      <Route path="/customers/:section" component={CustomersPage} />
-      <Route path="/customers" component={CustomersPage} />
-      <Route path="/" component={Dashboard} />
-      <Route path="/:area">
-        {(params) =>
-          AREA_IDS.includes(params.area) ? <Dashboard /> : <NotFound />
-        }
-      </Route>
-      <Route component={NotFound} />
-    </Switch>
+    <AppShell>
+      <Switch>
+        {/* Sales section */}
+        <Route path="/sales/:section" component={SalesPage} />
+        <Route path="/sales" component={SalesPage} />
+        {/* Customer Performance */}
+        <Route path="/customers/:section" component={CustomersPage} />
+        <Route path="/customers" component={CustomersPage} />
+        {/* Dashboard areas */}
+        <Route path="/" component={Dashboard} />
+        <Route path="/:area">
+          {(params) =>
+            AREA_IDS.includes(params.area) ? <Dashboard /> : <NotFound />
+          }
+        </Route>
+        <Route component={NotFound} />
+      </Switch>
+    </AppShell>
   );
 }
 

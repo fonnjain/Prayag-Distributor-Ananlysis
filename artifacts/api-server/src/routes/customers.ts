@@ -103,7 +103,9 @@ router.get("/customers/performance", async (req, res) => {
     monthsLy = parseMonthList(req.query.monthsLy) || toLyMonths(monthsCy);
     if (!monthsLy.length) monthsLy = toLyMonths(monthsCy);
 
-    const rows = await listCustomers({ fyCy, fyLy, monthsCy, monthsLy, entityType });
+    const statesParam = req.query.states as string | undefined;
+    const states = statesParam ? statesParam.split(",").map((s) => s.trim()).filter(Boolean) : [];
+    const rows = await listCustomers({ fyCy, fyLy, monthsCy, monthsLy, entityType, states });
     const elapsed = calcPctElapsed(monthsCy);
     const projectFactor = elapsed > 0 ? SEASONAL_TOTAL / elapsed : null;
     res.json({
