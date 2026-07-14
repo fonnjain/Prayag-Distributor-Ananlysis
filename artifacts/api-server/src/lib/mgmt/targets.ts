@@ -150,8 +150,11 @@ export async function loadTargetsForFy(fy: string): Promise<Map<string, TargetRo
 
 // --- Validation -----------------------------------------------------------
 
-// Monthly overrides (plus annual/12 auto-split for blank cells) must sum back
-// to the annual figure within a small tolerance.
+// Monthly overrides (plus seasonally-weighted auto-split for blank cells) must
+// sum back to the annual figure within a small tolerance.
+// Blank months contribute their SEASONAL share of the annual (not a flat ÷12),
+// matching exactly what tgtMonthly() and tgtPeriod() compute at query time.
+import { splitAnnualToMonth } from "../seasonal.js";
 export function monthlyReconcileError(
   field: TargetField,
   annual: number | null,
@@ -164,9 +167,10 @@ export function monthlyReconcileError(
     // no annual figure.  Monthly-only is valid; nothing to cross-check.
     return null;
   }
-  const blanks = 12 - overrides.length;
-  const implied =
-    overrides.reduce((a, b) => a + b, 0) + blanks * (annual / 12);
+  // Sum overrides + seasonal share for each blank month (idx = fiscal month, Apr=0).
+  const implied = monthly.reduce<number>((sum, v, idx) => {
+    return sum + (v != null ? v : (splitAnnualToMonth(annual, idx) ?? 0));
+  }, 0);
   const tolerance = Math.max(12, Math.abs(annual) * 0.001);
   if (Math.abs(implied - annual) > tolerance) {
     return `${field}: monthly values total ${Math.round(implied).toLocaleString("en-IN")} but the annual target is ${Math.round(annual).toLocaleString("en-IN")}`;

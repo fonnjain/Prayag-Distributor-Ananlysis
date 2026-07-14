@@ -1,0 +1,12 @@
+{
+  "_note": "Seasonal monthly shares of annual retail target. Retail/territorial basis only — institutional/tender (Non-territory) business is tender-driven and lumpy and must NOT be seasonalised. Derived from FY2025-26 actuals. SINGLE-YEAR CALIBRATION — not yet validated against a second year. Update annually after each FY completes. Values in the 'monthly' array run Apr=0 … Mar=11 and must sum to 1.0 (code normalises for rounding). Quarterly array: Q1 (Apr-Jun)=0, Q2 (Jul-Sep)=1, Q3 (Oct-Dec)=2, Q4 (Jan-Mar)=3.",
+  "versions": [
+    {
+      "fy": "2025-26",
+      "derivedFrom": "FY2025-26 retail actuals (institutional/Non-territory excluded). Single-year — not yet validated against a second year. Rebuild after FY2026-27 completes.",
+      "monthly": [0.042, 0.080, 0.087, 0.072, 0.069, 0.064, 0.064, 0.082, 0.095, 0.101, 0.109, 0.136],
+      "quarterly": [0.209, 0.205, 0.241, 0.346]
+    }
+  ],
+  "default": "2025-26"
+}

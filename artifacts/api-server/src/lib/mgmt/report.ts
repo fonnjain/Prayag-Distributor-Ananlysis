@@ -102,13 +102,18 @@ export type MemberRow = {
   target: TargetRow | null;
 };
 
-// Effective monthly target: explicit override, else an equal twelfth of the
-// annual figure. Null when neither exists — blank must never read as zero.
+// Effective monthly target: explicit override, else a SEASONALLY-WEIGHTED share
+// of the annual figure.  A flat ÷12 would produce badly wrong targets — see
+// seasonal.ts for the calibration and Rule 2 rationale.
+// Null when neither an override nor an annual exists (blank ≠ zero).
+// NOTE: secondary plans from the STATE HEAD DASHBOARD are real monthly figures
+// and must never reach this function — they are sourced separately via sec.months.
+import { splitAnnualToMonth } from "../seasonal.js";
 function tgtMonthly(t: TargetRow, f: TargetField, monthIdx: number): number | null {
   const override = t.monthly[f][monthIdx];
   if (override != null) return override;
   const annual = t.annual[f];
-  return annual == null ? null : annual / 12;
+  return splitAnnualToMonth(annual, monthIdx);
 }
 
 function tgtRange(

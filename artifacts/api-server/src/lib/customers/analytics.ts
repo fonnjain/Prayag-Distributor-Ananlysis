@@ -672,17 +672,25 @@ export async function getPriceShrinkers(params: {
 }
 
 // ── Seasonal weights + full-year projection ───────────────────────────────────
+//
+// Weights are sourced from the shared seasonal.ts config (retail/territorial
+// basis, FY2025-26 calibration).  Using the same curve here as for target
+// splitting ensures projections and targets are mutually consistent (Rule 5).
 
-/** Monthly share of annual sales (spec-provided, Apr–Mar). Sums to ~100. */
-export const SEASONAL_WEIGHTS: Record<string, number> = {
-  Apr: 4.2, May: 8.2, Jun: 8.3, Jul: 7.3, Aug: 7.0, Sep: 7.4,
-  Oct: 7.1, Nov: 8.5, Dec: 10.1, Jan: 10.1, Feb: 9.6, Mar: 12.3,
-};
+import { SEASONAL_WEIGHTS_NAMED, SEASONAL_TOTAL_NAMED } from "../seasonal.js";
 
-/** Sum of all weights (≈ 100.1 — use this so the projection is self-consistent). */
-export const SEASONAL_TOTAL = Object.values(SEASONAL_WEIGHTS).reduce(
-  (s, v) => s + v, 0,
-);
+/**
+ * Monthly share of annual sales, Apr–Mar, percentage scale (e.g. 4.2 for Apr).
+ * Sourced from config/seasonal_weights.json via seasonal.ts — retail basis only.
+ * @deprecated Use SEASONAL_WEIGHTS_NAMED from seasonal.ts directly.
+ */
+export const SEASONAL_WEIGHTS: Record<string, number> = SEASONAL_WEIGHTS_NAMED;
+
+/**
+ * Sum of all weights (100.0 after normalisation).
+ * @deprecated Use SEASONAL_TOTAL_NAMED from seasonal.ts directly.
+ */
+export const SEASONAL_TOTAL: number = SEASONAL_TOTAL_NAMED;
 
 /**
  * Fraction of the annual total represented by completedMonthNames.
@@ -691,7 +699,7 @@ export const SEASONAL_TOTAL = Object.values(SEASONAL_WEIGHTS).reduce(
 export function calcPctElapsed(completedMonthNames: string[]): number {
   return completedMonthNames.reduce((sum, m) => {
     const name = m.slice(0, 3);
-    return sum + (SEASONAL_WEIGHTS[name] ?? 0);
+    return sum + (SEASONAL_WEIGHTS_NAMED[name] ?? 0);
   }, 0);
 }
 
@@ -705,7 +713,7 @@ export function projectFullYear(
 ): number | null {
   const elapsed = calcPctElapsed(completedMonthNames);
   if (elapsed <= 0) return null;
-  return (ytdAmount / elapsed) * SEASONAL_TOTAL;
+  return (ytdAmount / elapsed) * SEASONAL_TOTAL_NAMED;
 }
 
 // ── At-risk scoring ───────────────────────────────────────────────────────────

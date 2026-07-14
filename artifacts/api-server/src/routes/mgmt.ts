@@ -33,6 +33,7 @@ import {
   loadStateDashboard,
   type SecMember,
 } from "../lib/mgmt/stateDashboard.js";
+import { splitAnnualToMonth, getSeasonalCalibration } from "../lib/seasonal.js";
 
 const router: IRouter = Router();
 
@@ -175,7 +176,8 @@ router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> =
       name,
       states: sts,
     }));
-    res.json({ fys, defaultFy: DEFAULT_FY, regions, states, sources });
+    const seasonalCalibration = getSeasonalCalibration();
+    res.json({ fys, defaultFy: DEFAULT_FY, regions, states, sources, seasonalCalibration });
   } catch (err) {
     req.log.error({ err }, "mgmt options failed");
     res.status(500).json({ error: "Could not load report options." });
@@ -183,6 +185,12 @@ router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> =
 });
 
 // Inline helpers used only by GET /mgmt/data.
+// tgtPeriod: sums monthly targets for [mFrom, mTo] (fiscal month, 1-based).
+// When no monthly override exists, each blank month gets its SEASONAL share
+// of the annual target rather than a flat ÷12.  This matches tgtMonthly() in
+// report.ts and monthlyReconcileError() in targets.ts exactly.
+// Secondary plans from the STATE HEAD DASHBOARD bypass this entirely — they
+// are real hand-entered monthly figures sourced separately via sec.months.
 function tgtPeriod(
   target: TargetRow | null,
   field: "secondary" | "primary" | "businessPlan",
@@ -194,7 +202,8 @@ function tgtPeriod(
   for (let i = mFrom - 1; i <= mTo - 1; i++) {
     const ov = target.monthly[field][i];
     const ann = target.annual[field];
-    const v = ov != null ? ov : ann != null ? ann / 12 : null;
+    // i is the fiscal month index (Apr=0 … Mar=11) — exactly what splitAnnualToMonth expects.
+    const v = ov != null ? ov : splitAnnualToMonth(ann, i);
     if (v != null) { sum += v; any = true; }
   }
   return any ? sum : null;
@@ -351,6 +360,10 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         targetSecondary: tgtSec,
         targetPrimary: tgtPri,
         targetBusinessPlan: tgtBp,
+        // Annual figures for the UI to compute period-share labels ("₹X = ₹Y × Z%").
+        // These are the raw annual targets before seasonal splitting; null when unset.
+        targetPrimaryAnnual: r.target?.annual.primary ?? null,
+        targetBusinessPlanAnnual: r.target?.annual.businessPlan ?? null,
         // Secondary order booking: STATE HEAD DASHBOARD (authoritative) > old order file
         orderBooking: sec?.ytdOrderBooked ?? booking,
         // Secondary sales received: populated from STATE HEAD DASHBOARD
@@ -454,6 +467,9 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         // Primary attribution diagnostics (null until dist-map is warm)
         ...(primaryDiagnostics ? { primaryAttributionDiagnostics: primaryDiagnostics } : {}),
         ...(xlsxTargetDiagnostic ? { targetMatchDiagnostic: xlsxTargetDiagnostic } : {}),
+        // Seasonal calibration metadata so the frontend can show the basis and
+        // single-year calibration caveat on any derived target column.
+        seasonalCalibration: getSeasonalCalibration(),
       },
     };
     _mgmtDataCache.set(cacheKey, { payload: responsePayload, expiresAt: Date.now() + MGMT_DATA_TTL_MS });

@@ -66,6 +66,10 @@ type Member = {
   primaryDistributors: number | null;
   /** Count of Direct Dealer-type parties mapped to this member */
   primaryDirectDealers: number | null;
+  /** Annual primary target (pre-split) so the UI can label "₹X = annual ₹Y × Z% seasonal share". */
+  targetPrimaryAnnual: number | null;
+  /** Annual business-plan target (pre-split). */
+  targetBusinessPlanAnnual: number | null;
 };
 
 type DashboardMeta = {
@@ -119,6 +123,18 @@ type DashboardMeta = {
     xlsxRowCount: number;
     matchedCount: number;
     unmatchedRows: Array<{ name: string; target: number | null }>;
+  } | null;
+  /**
+   * Seasonal calibration metadata.  Includes the monthly shares (Apr=0..Mar=11) used to
+   * split annual primary/business-plan targets.  Null when the server is pre-patch.
+   * SINGLE-YEAR CALIBRATION: derived from FY2025-26 actuals only.
+   */
+  seasonalCalibration?: {
+    fy: string;
+    derivedFrom: string;
+    monthly: number[];
+    quarterly: number[];
+    monthNames: string[];
   } | null;
 };
 
@@ -269,21 +285,25 @@ function SortTh({
   sort,
   onSort,
   className = "",
+  title,
 }: {
   label: string;
   sortKey: string;
   sort: SortState;
   onSort: (key: string) => void;
   className?: string;
+  title?: string;
 }) {
   const active = sort.key === sortKey;
   return (
     <th
       className={`px-3 py-2 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer select-none whitespace-nowrap ${className}`}
       onClick={() => onSort(sortKey)}
+      title={title}
     >
       <span className="inline-flex items-center gap-1">
         {label}
+        {title && <Info className="h-3 w-3 opacity-60 shrink-0" />}
         {active ? (
           sort.dir === "asc" ? (
             <ChevronUp className="h-3 w-3" />
@@ -309,12 +329,14 @@ function Th({ label, className = "" }: { label: string; className?: string }) {
 function Td({
   children,
   className = "",
+  title,
 }: {
   children: React.ReactNode;
   className?: string;
+  title?: string;
 }) {
   return (
-    <td className={`px-3 py-2 text-sm whitespace-nowrap ${className}`}>
+    <td className={`px-3 py-2 text-sm whitespace-nowrap ${className}`} title={title}>
       {children}
     </td>
   );
@@ -543,6 +565,26 @@ export default function StateHeadDashboard() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filteredRows, lowPerfThreshold, summaryByHead, data?.meta.headSales, data?.meta.orderBookingPrimary, data?.meta.secondarySource]);
+
+  /**
+   * Seasonal calibration context for the selected period.
+   * Used to label primary-target cells with their derivation basis (Rule 3).
+   */
+  const seasonalInfo = useMemo(() => {
+    const cal = data?.meta.seasonalCalibration;
+    if (!cal) return null;
+    const from0 = (data?.meta.monthFrom ?? 1) - 1; // 0-based fiscal index
+    const to0   = (data?.meta.monthTo   ?? 12) - 1;
+    const months = to0 - from0 + 1;
+    const share  = cal.monthly.slice(from0, to0 + 1).reduce((s, v) => s + v, 0);
+    const flatShare = (months / 12) * 100;
+    const periodLabel = cal.monthNames.slice(from0, to0 + 1).join("-");
+    return { cal, share, flatShare, months, periodLabel };
+  }, [
+    data?.meta.seasonalCalibration,
+    data?.meta.monthFrom,
+    data?.meta.monthTo,
+  ]);
 
   // Rows to render for each view (after sort)
   function viewRows(): Member[] {
@@ -838,7 +880,18 @@ export default function StateHeadDashboard() {
                 <Th label="HQ" />
                 <SortTh label="Distributors" sortKey="primaryDistributors" sort={sort} onSort={toggleSort} className="text-right" />
                 <SortTh label="Direct Dealers" sortKey="primaryDirectDealers" sort={sort} onSort={toggleSort} className="text-right" />
-                <SortTh label="Target (Primary)" sortKey="targetPrimary" sort={sort} onSort={toggleSort} className="text-right" />
+                <SortTh
+                  label="Target (Primary)"
+                  sortKey="targetPrimary"
+                  sort={sort}
+                  onSort={toggleSort}
+                  className="text-right"
+                  title={
+                    seasonalInfo
+                      ? `Split seasonally from annual — not ÷12. ${seasonalInfo.periodLabel} (${seasonalInfo.months} months) carries ${seasonalInfo.share.toFixed(1)}% of annual vs ${seasonalInfo.flatShare.toFixed(1)}% flat. Calibrated from FY${seasonalInfo.cal.fy} actuals (single year).`
+                      : undefined
+                  }
+                />
                 <SortTh label="Order Booking" sortKey="primaryOrderAmount" sort={sort} onSort={toggleSort} className="text-right" />
                 <SortTh label="Sale (Dispatched)" sortKey="primarySaleAmount" sort={sort} onSort={toggleSort} className="text-right" />
                 <Th label="Old/New" />
@@ -853,7 +906,16 @@ export default function StateHeadDashboard() {
                   <Td>{r.hq}</Td>
                   <Td className="text-right">{fmtN(r.primaryDistributors)}</Td>
                   <Td className="text-right">{fmtN(r.primaryDirectDealers)}</Td>
-                  <Td className="text-right">{fmtCr(r.targetPrimary)}</Td>
+                  <Td
+                    className="text-right"
+                    title={
+                      r.targetPrimaryAnnual != null && r.targetPrimary != null && seasonalInfo
+                        ? `${seasonalInfo.periodLabel} target ₹${(r.targetPrimary / 1e7).toFixed(2)} Cr = annual ₹${(r.targetPrimaryAnnual / 1e7).toFixed(2)} Cr × ${seasonalInfo.share.toFixed(1)}% seasonal share (flat ÷12 × ${seasonalInfo.months} = ₹${(r.targetPrimaryAnnual / 12 * seasonalInfo.months / 1e7).toFixed(2)} Cr; FY${seasonalInfo.cal.fy} calibration)`
+                        : undefined
+                    }
+                  >
+                    {fmtCr(r.targetPrimary)}
+                  </Td>
                   <Td className="text-right">{fmtCr(r.primaryOrderAmount)}</Td>
                   <Td className="text-right">{fmtCr(r.primarySaleAmount)}</Td>
                   <Td>{r.oldNew}</Td>
@@ -958,6 +1020,56 @@ export default function StateHeadDashboard() {
           />
         </Suspense>
       )}
+
+      {/* Seasonal calibration note — visible in Settings when data is loaded */}
+      {activeView === "settings" && data?.meta.seasonalCalibration && (() => {
+        const cal = data.meta.seasonalCalibration!;
+        const monthNames = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
+        return (
+          <div className="mt-6 border rounded-lg p-4 bg-muted/40 text-sm space-y-3">
+            <div className="flex items-center gap-2 font-semibold">
+              <Info className="h-4 w-4 text-muted-foreground shrink-0" />
+              Seasonal Calibration — Primary Target Splitting
+            </div>
+            <p className="text-muted-foreground leading-relaxed">
+              Annual primary targets are split using a seasonal curve instead of a flat ÷12.
+              Weights are derived from <strong>FY{cal.fy} actuals</strong> ({cal.derivedFrom}).
+              This is a <strong>single-year calibration</strong> — update{" "}
+              <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">config/seasonal_weights.json</code>{" "}
+              each April once multi-year data is available.
+              Secondary monthly plans from the STATE HEAD DASHBOARD are real hand-entered figures and are never overwritten.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="text-xs w-full border-collapse">
+                <thead>
+                  <tr className="text-muted-foreground">
+                    <th className="text-left pb-1 pr-4 font-medium">Month</th>
+                    {monthNames.map((m) => (
+                      <th key={m} className="text-right pb-1 px-2 font-medium">{m}</th>
+                    ))}
+                    <th className="text-right pb-1 px-2 font-medium">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="pr-4 text-muted-foreground">Share (%)</td>
+                    {cal.monthly.map((v, i) => (
+                      <td key={i} className="text-right px-2 tabular-nums">{v.toFixed(1)}</td>
+                    ))}
+                    <td className="text-right px-2 tabular-nums font-medium">
+                      {cal.monthly.reduce((s, v) => s + v, 0).toFixed(1)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Q1 {cal.quarterly[0]?.toFixed(1)}% | Q2 {cal.quarterly[1]?.toFixed(1)}% | Q3 {cal.quarterly[2]?.toFixed(1)}% | Q4 {cal.quarterly[3]?.toFixed(1)}%
+              {" — "}flat ÷12 would give 8.33% per month / 25% per quarter.
+            </p>
+          </div>
+        );
+      })()}
 
       {/* Row count footer */}
       {!loading && data && activeView !== "summary" && activeView !== "settings" && (
