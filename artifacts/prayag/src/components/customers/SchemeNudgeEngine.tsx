@@ -534,7 +534,14 @@ export default function SchemeNudgeEngine() {
       {tab === "annual" && (
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground">
-            Annual slab projection based on complete months only. "At risk" = projected FY total below prior year.
+            Annual slab projection based on complete months only, using seasonal weights.
+            Projected FY = YTD &divide; elapsed% &times; 100.
+            "At risk" means the projected full-year total is below prior year — not a settled verdict,
+            a projection
+            {annualData && annualData.rows.length > 0
+              ? ` based on ${annualData.completeMonths.length} month${annualData.completeMonths.length !== 1 ? "s" : ""} (${annualData.rows[0]?.seasonalityPctElapsed?.toFixed(1) ?? "?"}% of annual total).`
+              : "."}
+            {" "}The scheme clause "must not be less than last year" cannot be adjudicated until year-end.
           </p>
           {!annualData ? (
             <div className="text-xs text-muted-foreground py-6 text-center">Loading annual tracker...</div>

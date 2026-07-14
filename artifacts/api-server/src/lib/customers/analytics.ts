@@ -664,6 +664,171 @@ export async function getPriceShrinkers(params: {
   });
 }
 
+// ── Seasonal weights + full-year projection ───────────────────────────────────
+
+/** Monthly share of annual sales (spec-provided, Apr–Mar). Sums to ~100. */
+export const SEASONAL_WEIGHTS: Record<string, number> = {
+  Apr: 4.2, May: 8.2, Jun: 8.3, Jul: 7.3, Aug: 7.0, Sep: 7.4,
+  Oct: 7.1, Nov: 8.5, Dec: 10.1, Jan: 10.1, Feb: 9.6, Mar: 12.3,
+};
+
+/** Sum of all weights (≈ 100.1 — use this so the projection is self-consistent). */
+export const SEASONAL_TOTAL = Object.values(SEASONAL_WEIGHTS).reduce(
+  (s, v) => s + v, 0,
+);
+
+/**
+ * Fraction of the annual total represented by completedMonthNames.
+ * Accepts either "Apr" (3-char) or "Apr-26" (month label) format.
+ */
+export function calcPctElapsed(completedMonthNames: string[]): number {
+  return completedMonthNames.reduce((sum, m) => {
+    const name = m.slice(0, 3);
+    return sum + (SEASONAL_WEIGHTS[name] ?? 0);
+  }, 0);
+}
+
+/**
+ * Annualise a YTD amount using the seasonal weight table.
+ * Returns null when no months are provided or elapsed weight is zero.
+ */
+export function projectFullYear(
+  ytdAmount: number,
+  completedMonthNames: string[],
+): number | null {
+  const elapsed = calcPctElapsed(completedMonthNames);
+  if (elapsed <= 0) return null;
+  return (ytdAmount / elapsed) * SEASONAL_TOTAL;
+}
+
+// ── At-risk scoring ───────────────────────────────────────────────────────────
+//
+// Replaces the binary "churned" flag.
+// Each customer is scored against their own historical median inter-order gap.
+// gap_ratio = days_since_last / median_gap
+//   < 1.2× → active (not shown)
+//   1.2–2×  → mild risk
+//   > 2×    → high risk
+//
+// Historical FYs have no invoice_date; we proxy with month start (1st of month).
+// Customers with < 2 recorded gaps are skipped (insufficient history).
+// Accounts last active more than 730 days ago are excluded (lost/dead).
+
+export type AtRiskRow = {
+  customer: string;
+  entityType: "distributor" | "direct_dealer" | "retailer" | "unknown";
+  medianGap: number;      // days — their normal inter-order cycle
+  daysSinceLast: number;  // days since last invoice (or month proxy)
+  lastOrderDate: string | null;
+  gapRatio: number;       // daysSinceLast / medianGap
+  riskLevel: "high" | "mild";
+};
+
+export async function getAtRisk(params: {
+  entityType?: EntityType;
+}): Promise<AtRiskRow[]> {
+  const { entityType = "all" } = params;
+
+  const typeFilter =
+    entityType === "distributor"
+      ? `AND (sl2.type_raw IS NULL OR sl2.type_raw NOT ILIKE '%direct%')`
+      : entityType === "direct_dealer"
+      ? `AND sl2.type_raw ILIKE '%direct%'`
+      : "";
+
+  const res = await pool.query<{
+    customer: string;
+    type_raw: string | null;
+    median_gap: string;
+    last_order_date: string | null;
+    days_since_last: string;
+    gap_ratio: string;
+  }>(
+    `
+    WITH order_dates AS (
+      SELECT DISTINCT
+        sl.customer,
+        COALESCE(
+          sl.invoice_date::date,
+          make_date(
+            2000 + CAST(SUBSTRING(sl.month_label, 5, 2) AS INTEGER),
+            CASE SUBSTRING(sl.month_label, 1, 3)
+              WHEN 'Apr' THEN 4  WHEN 'May' THEN 5  WHEN 'Jun' THEN 6
+              WHEN 'Jul' THEN 7  WHEN 'Aug' THEN 8  WHEN 'Sep' THEN 9
+              WHEN 'Oct' THEN 10 WHEN 'Nov' THEN 11 WHEN 'Dec' THEN 12
+              WHEN 'Jan' THEN 1  WHEN 'Feb' THEN 2  WHEN 'Mar' THEN 3
+              ELSE NULL
+            END,
+            1
+          )
+        ) AS order_date
+      FROM sale_line sl
+      WHERE sl.customer IS NOT NULL AND sl.month_label IS NOT NULL
+    ),
+    valid_od AS (
+      SELECT customer, order_date FROM order_dates WHERE order_date IS NOT NULL
+    ),
+    gap_series AS (
+      SELECT
+        customer,
+        order_date - LAG(order_date) OVER (PARTITION BY customer ORDER BY order_date) AS gap_days
+      FROM valid_od
+    ),
+    customer_gaps AS (
+      SELECT
+        customer,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gap_days)::integer AS median_gap
+      FROM gap_series
+      WHERE gap_days IS NOT NULL AND gap_days > 0
+      GROUP BY customer
+      HAVING COUNT(*) >= 2
+    ),
+    last_orders AS (
+      SELECT customer, MAX(order_date) AS last_order_date
+      FROM valid_od
+      GROUP BY customer
+    )
+    SELECT
+      cg.customer,
+      MAX(sl2.type_raw) AS type_raw,
+      cg.median_gap,
+      lo.last_order_date::text AS last_order_date,
+      (CURRENT_DATE - lo.last_order_date)::integer AS days_since_last,
+      ROUND(
+        (CURRENT_DATE - lo.last_order_date)::numeric / NULLIF(cg.median_gap, 0),
+        2
+      ) AS gap_ratio
+    FROM customer_gaps cg
+    JOIN last_orders lo ON lo.customer = cg.customer
+    JOIN sale_line sl2 ON sl2.customer = cg.customer
+    WHERE
+      (CURRENT_DATE - lo.last_order_date)::numeric >= cg.median_gap * 1.2
+      AND lo.last_order_date >= CURRENT_DATE - INTERVAL '730 days'
+      ${typeFilter}
+    GROUP BY cg.customer, cg.median_gap, lo.last_order_date
+    ORDER BY
+      (CURRENT_DATE - lo.last_order_date)::numeric / NULLIF(cg.median_gap, 0) DESC
+    LIMIT 500
+    `,
+    [],
+  );
+
+  return res.rows.map((r) => {
+    const medianGap = parseInt(r.median_gap, 10);
+    const daysSinceLast = parseInt(r.days_since_last, 10);
+    const gapRatio = parseFloat(r.gap_ratio);
+    return {
+      customer: r.customer,
+      entityType: classifyEntityType(r.type_raw),
+      medianGap,
+      daysSinceLast,
+      lastOrderDate: r.last_order_date,
+      gapRatio,
+      riskLevel: (gapRatio >= 2 ? "high" : "mild") as "high" | "mild",
+    };
+  });
+}
+
 // ── Multi-year history for a single customer ───────────────────────────────────
 
 export type HistoryYear = {

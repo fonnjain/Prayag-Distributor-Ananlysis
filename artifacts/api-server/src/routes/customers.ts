@@ -7,13 +7,15 @@ import {
   listCustomers,
   getCustomerCategories,
   getCustomerProducts,
-  getChurned,
+  getAtRisk,
   getNewCustomers,
   getPriceShrinkers,
   getCustomerHistory,
   getAvailableMonths,
   getCompleteMonths,
   toLyMonths,
+  calcPctElapsed,
+  SEASONAL_TOTAL,
   type EntityType,
 } from "../lib/customers/analytics.js";
 import {
@@ -101,7 +103,16 @@ router.get("/customers/performance", async (req, res) => {
     if (!monthsLy.length) monthsLy = toLyMonths(monthsCy);
 
     const rows = await listCustomers({ fyCy, fyLy, monthsCy, monthsLy, entityType });
-    res.json({ fyCy, fyLy, monthsCy, monthsLy, entityType, data: rows });
+    const elapsed = calcPctElapsed(monthsCy);
+    const projectFactor = elapsed > 0 ? SEASONAL_TOTAL / elapsed : null;
+    res.json({
+      fyCy, fyLy, monthsCy, monthsLy, entityType, data: rows,
+      seasonalProjection: {
+        completedMonths: monthsCy,
+        pctElapsed: Math.round(elapsed * 10) / 10,
+        projectFactor: projectFactor != null ? Math.round(projectFactor * 100) / 100 : null,
+      },
+    });
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to fetch customer performance" });
@@ -166,7 +177,11 @@ router.get("/customers/history", async (req, res) => {
   }
 });
 
-// ── Churn ──────────────────────────────────────────────────────────────────────
+// ── At-risk scoring + new customers ────────────────────────────────────────────
+//
+// "Churned" (binary) is replaced by at-risk scoring: customers are scored
+// against their own historical median inter-order gap. Seasonal buyers whose
+// normal gap is longer than the current period are not flagged.
 
 router.get("/customers/churn", async (req, res) => {
   const fyCy = (req.query.fyCy as string) || "2026-27";
@@ -179,14 +194,14 @@ router.get("/customers/churn", async (req, res) => {
     if (!monthsCy.length) monthsCy = await getAvailableMonths(fyCy);
     const monthsLy = parseMonthList(req.query.monthsLy) || toLyMonths(monthsCy);
 
-    const [churned, newCustomers] = await Promise.all([
-      getChurned({ fyCy, fyLy, monthsCy, monthsLy, entityType }),
+    const [atRisk, newCustomers] = await Promise.all([
+      getAtRisk({ entityType }),
       getNewCustomers({ fyCy, fyLy, monthsCy, monthsLy, entityType }),
     ]);
-    res.json({ fyCy, fyLy, monthsCy, monthsLy, churned, newCustomers });
+    res.json({ fyCy, fyLy, monthsCy, monthsLy, atRisk, newCustomers });
   } catch (err) {
     req.log.error(err);
-    res.status(500).json({ error: "Failed to fetch churn data" });
+    res.status(500).json({ error: "Failed to fetch at-risk data" });
   }
 });
 

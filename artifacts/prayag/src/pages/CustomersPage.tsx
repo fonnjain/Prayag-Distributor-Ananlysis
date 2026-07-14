@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import CustomerRanking, { type CustomerRow } from "@/components/customers/CustomerRanking";
 import CustomerDetail from "@/components/customers/CustomerDetail";
-import CustomerChurn from "@/components/customers/CustomerChurn";
+import CustomerAtRisk from "@/components/customers/CustomerChurn";
 import PriceShrinkers from "@/components/customers/PriceShrinkers";
 
 const SchemeDashboard = lazy(
@@ -36,7 +36,7 @@ const SchemeNudgeEngine = lazy(
 const SECTIONS = [
   { id: "rankings", label: "Rankings", icon: BarChart2 },
   { id: "shrinkers", label: "Price Shrinkers", icon: AlertTriangle },
-  { id: "churn", label: "Churn & New", icon: UserMinus },
+  { id: "churn", label: "At Risk & New", icon: UserMinus },
   { id: "schemes", label: "Schemes", icon: Settings },
 ] as const;
 
@@ -100,6 +100,12 @@ export default function CustomersPage() {
   const [rankData, setRankData] = useState<CustomerRow[]>([]);
   const [rankLoading, setRankLoading] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
+
+  // Seasonal projection for the current period
+  const [seasonalProjection, setSeasonalProjection] = useState<{
+    pctElapsed: number;
+    projectFactor: number | null;
+  } | null>(null);
 
   // Load available months on FY change, then poll while a sync is in progress.
   useEffect(() => {
@@ -177,7 +183,15 @@ export default function CustomersPage() {
     });
     fetch(`${BASE}/api/customers/performance?${params}`)
       .then((r) => r.json())
-      .then((d) => setRankData(d.data ?? []))
+      .then((d) => {
+        setRankData(d.data ?? []);
+        if (d.seasonalProjection) {
+          setSeasonalProjection({
+            pctElapsed: d.seasonalProjection.pctElapsed ?? 0,
+            projectFactor: d.seasonalProjection.projectFactor ?? null,
+          });
+        }
+      })
       .catch(() => {})
       .finally(() => setRankLoading(false));
   }, [fyCy, fyLy, monthsCy.join(","), monthsLy.join(","), entityType]);
@@ -347,6 +361,21 @@ export default function CustomersPage() {
             </div>
           )}
 
+          {activeSection === "rankings" && seasonalProjection && seasonalProjection.pctElapsed > 0 && seasonalProjection.pctElapsed < 95 && (
+            <div className="mb-3 rounded-md border border-blue-200/60 bg-blue-50/50 px-3 py-2 text-xs text-blue-800 dark:border-blue-800/40 dark:bg-blue-950/30 dark:text-blue-300">
+              <span className="font-medium">Seasonal context:</span>{" "}
+              {monthsCy.length === 1 ? monthsCy[0] : `${monthsCy[0]}–${monthsCy[monthsCy.length - 1]}`}{" "}
+              represents {seasonalProjection.pctElapsed.toFixed(1)}% of the annual total (seasonal weights).
+              {seasonalProjection.projectFactor != null && (
+                <span>
+                  {" "}A distributor running at last year&apos;s Q1 pace could finish the year at a different level once the heavier back-half months arrive.
+                  Full-year projection = period total &times; {seasonalProjection.projectFactor.toFixed(1)}.
+                  Comparisons above are like-period (same months vs prior year) and are not annual verdicts.
+                </span>
+              )}
+            </div>
+          )}
+
           {activeSection === "rankings" && (
             <div className={cn("flex gap-4", selectedCustomer ? "flex-row" : "flex-col")}>
               <div className={selectedCustomer ? "flex-1 min-w-0" : "w-full"}>
@@ -387,7 +416,7 @@ export default function CustomersPage() {
           )}
 
           {activeSection === "churn" && (
-            <CustomerChurn
+            <CustomerAtRisk
               fyCy={fyCy}
               fyLy={fyLy}
               monthsCy={monthsCy}
