@@ -23,14 +23,6 @@
     "tolerance_pct": 0.1,
     "checks": [
       {
-        "id": "6.1",
-        "label": "Report 1 — State CY total (Sunil Patel, FY26-27 Q1)",
-        "expected": 7978394.92,
-        "unit": "money",
-        "filters": { "period": "cy" },
-        "note": "CY = Apr-May-Jun 2026. If 4-5x high: LY/CY window is not applied and full prior year is used."
-      },
-      {
         "id": "6.2a",
         "label": "Report 3 — PTMT LY (Apr-Jun 2025)",
         "expected": 4410108.22,

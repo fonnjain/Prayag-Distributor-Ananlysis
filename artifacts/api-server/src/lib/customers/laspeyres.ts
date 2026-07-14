@@ -9,8 +9,7 @@
 // shift. Laspeyres holds the LY quantity basket fixed and reprices it at CY
 // realized prices, removing mix.
 //
-// Verified: company FY25-26→26-27 Laspeyres = 1.1072, naive = 1.1563.
-// Difference = 4.9pp of the apparent "price rise" was mix, not price.
+// Laspeyres removes mix shift; naive value÷qty inflates the apparent price rise.
 //
 // Resolution order (per customer, per scheme):
 //   1. Customer multiplier (≥ MIN_SHARED_ITEMS and ≥ MIN_LY_VALUE_COVERED)
@@ -123,7 +122,7 @@ async function computeRaw(
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/** Company-level Laspeyres multiplier (FY25-26 → FY26-27 expected ≈ 1.1072). */
+/** Company-level Laspeyres multiplier — computed live from sale_line, not cached. */
 export async function computeCompanyMultiplier(
   fyLy: string,
   fyCy: string,

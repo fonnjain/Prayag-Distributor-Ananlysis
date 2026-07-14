@@ -622,16 +622,6 @@ export default function CombinedPerformanceDashboard() {
               </div>
             </div>
           )}
-          {fy === "2025-26" && (
-            <div className="rounded-md bg-muted/30 border border-border p-3 space-y-1">
-              <p className="text-xs font-medium text-muted-foreground">Verification anchors — FY 2025-26</p>
-              <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
-                <span>Primary Sale: ~₹361.14 Cr</span>
-                <span>Secondary Plan: ~₹364.98 Cr</span>
-                <span>Secondary Sales: ~₹240.14 Cr</span>
-              </div>
-            </div>
-          )}
         </>
       )}
     </div>
