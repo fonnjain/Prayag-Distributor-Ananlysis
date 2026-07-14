@@ -313,12 +313,6 @@ export default function CombinedPerformanceDashboard() {
     if (!ob) return 0;
     return Object.values(ob).reduce((s, v) => s + v, 0);
   }, [data]);
-  const coveragePct = data?.meta.secondaryCoveragePct ?? null;
-  const coverageGap =
-    headSalesTotal > 0 && secTotal
-      ? headSalesTotal - secTotal.salesReceived
-      : null;
-
   // Like-months coverage: compare secondary total (closed months only) against
   // the same calendar months of primary from the invoice register.
   // Secondary is already closed-months-only; we pull matching primary months.
@@ -448,22 +442,14 @@ export default function CombinedPerformanceDashboard() {
                 note={secTotal ? `Plan: ${fmtCr(secTotal.plan)}` : "No data for this FY"}
               />
               <KpiTile
-                label="Salesperson Coverage"
-                sub="secondary / primary (full year)"
-                value={fmtPct(coveragePct)}
-                note={
-                  coverageGap != null
-                    ? `Gap: ${fmtCr(coverageGap)} without TM touch`
-                    : undefined
-                }
-              />
-              <KpiTile
-                label={likeMonthsLabel ? `Coverage — ${likeMonthsLabel} (like months)` : "Coverage — like months"}
-                sub="secondary (closed months) / primary (same months)"
+                label={likeMonthsLabel ? `Salesperson Coverage — ${likeMonthsLabel}` : "Salesperson Coverage"}
+                sub={likeMonthsLabel
+                  ? `secondary closed months / primary same months (${likeMonthsLabel})`
+                  : "secondary (closed months) / primary (same months)"}
                 value={likeMonthsCoveragePct != null ? fmtPct(likeMonthsCoveragePct) : "—"}
                 note={
                   likeMonthsCoverageGap != null
-                    ? `Gap: ${fmtCr(likeMonthsCoverageGap)} — fair apples-to-apples`
+                    ? `Gap: ${fmtCr(likeMonthsCoverageGap)} — apples-to-apples`
                     : likeMonthsData === null
                     ? "Loading primary data..."
                     : undefined

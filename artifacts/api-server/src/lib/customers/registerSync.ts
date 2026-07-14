@@ -68,6 +68,13 @@ export function getRegisterSyncState(fy: string): {
   return { phase: s?.phase ?? "idle", rows: s?.rows ?? 0, error: s?.error };
 }
 
+/** ISO-8601 timestamp of the most recent successful register sync for this FY, or null. */
+export function getLastSyncedAt(fy: string): string | null {
+  const ms = lastSyncedAtMs.get(fy);
+  if (ms == null) return null;
+  return new Date(ms).toISOString();
+}
+
 // Returns true if today is within the fiscal year (i.e., March 31 of the end
 // year is still in the future). Completed FYs never gain new rows.
 export function isFyOpen(fy: string): boolean {

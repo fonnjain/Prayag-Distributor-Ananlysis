@@ -12,12 +12,14 @@ import {
   getPriceShrinkers,
   getCustomerHistory,
   getAvailableMonths,
+  getCompleteMonths,
   toLyMonths,
   type EntityType,
 } from "../lib/customers/analytics.js";
 import {
   ensureRegisterSynced,
   getRegisterSyncState,
+  getLastSyncedAt,
 } from "../lib/customers/registerSync.js";
 import { computeAllMultipliers } from "../lib/customers/laspeyres.js";
 import {
@@ -53,7 +55,10 @@ router.get("/customers/months", async (req, res) => {
     return;
   }
   try {
-    const months = await getAvailableMonths(fy);
+    const [months, completeMonths] = await Promise.all([
+      getAvailableMonths(fy),
+      getCompleteMonths(fy),
+    ]);
     if (months.length === 0) {
       // Trigger a background sync if one is not already in progress.
       ensureRegisterSynced(fy);
@@ -62,7 +67,14 @@ router.get("/customers/months", async (req, res) => {
     const syncing = months.length === 0 && sync.phase === "syncing";
     const syncError =
       months.length === 0 && sync.phase === "error" ? sync.error : undefined;
-    res.json({ fy, months, syncing, syncError });
+    res.json({
+      fy,
+      months,
+      completeMonths,
+      syncing,
+      syncError,
+      lastSyncedAt: getLastSyncedAt(fy),
+    });
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to fetch months" });

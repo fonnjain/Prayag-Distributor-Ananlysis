@@ -8,6 +8,7 @@
 // Month label format: "Apr-26", "Jan-27". Year suffix is the calendar year (Apr-26 = Apr 2026).
 // LY conversion: "Apr-26" → "Apr-25" (same month name, year suffix −1).
 import { pool } from "@workspace/db";
+import { isMonthComplete } from "../analytics/analytics.js";
 
 // ── Month helpers ─────────────────────────────────────────────────────────────
 
@@ -44,6 +45,31 @@ export async function getAvailableMonths(fy: string): Promise<string[]> {
     [fy],
   );
   const labels = res.rows.map((r) => r.month_label);
+  labels.sort((a, b) => {
+    const pa = parseMonthLabel(a);
+    const pb = parseMonthLabel(b);
+    if (!pa || !pb) return 0;
+    return pa.fyIndex - pb.fyIndex;
+  });
+  return labels;
+}
+
+/**
+ * Complete month labels for a FY — months whose last calendar day has passed
+ * (or whose max invoice date reaches the last day of the month). Partial /
+ * in-progress months are excluded. Returns labels in fiscal order.
+ */
+export async function getCompleteMonths(fy: string): Promise<string[]> {
+  const res = await pool.query<{ month_label: string; max_date: string | null }>(
+    `SELECT month_label, max(invoice_date)::text AS max_date
+     FROM sale_line
+     WHERE fy = $1 AND month_label IS NOT NULL
+     GROUP BY month_label`,
+    [fy],
+  );
+  const labels = res.rows
+    .filter((r) => isMonthComplete(r.month_label, r.max_date))
+    .map((r) => r.month_label);
   labels.sort((a, b) => {
     const pa = parseMonthLabel(a);
     const pb = parseMonthLabel(b);

@@ -84,6 +84,8 @@ export default function CustomersPage() {
 
   // Available months from DB
   const [availableMonths, setAvailableMonths] = useState<string[]>([]);
+  const [completeMonths, setCompleteMonths] = useState<string[]>([]);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
 
@@ -104,9 +106,17 @@ export default function CustomersPage() {
     const load = () => {
       fetch(`${BASE}/api/customers/months?fy=${fyCy}`)
         .then((r) => r.json())
-        .then((d: { months?: string[]; syncing?: boolean; syncError?: string }) => {
+        .then((d: {
+          months?: string[];
+          completeMonths?: string[];
+          lastSyncedAt?: string | null;
+          syncing?: boolean;
+          syncError?: string;
+        }) => {
           if (cancelled) return;
           setAvailableMonths(d.months ?? []);
+          setCompleteMonths(d.completeMonths ?? []);
+          setLastSyncedAt(d.lastSyncedAt ?? null);
           setSyncing(d.syncing ?? false);
           setSyncError(d.syncError ?? null);
           // Keep polling while the server is still loading from Sheets.
@@ -122,6 +132,8 @@ export default function CustomersPage() {
     setSyncing(false);
     setSyncError(null);
     setAvailableMonths([]);
+    setCompleteMonths([]);
+    setLastSyncedAt(null);
     load();
 
     return () => {
@@ -130,19 +142,24 @@ export default function CustomersPage() {
     };
   }, [fyCy]);
 
-  // Derive month lists from preset + available months
+  // Partial months: months present in the DB but not yet complete (in-progress).
+  const partialMonths = availableMonths.filter((m) => !completeMonths.includes(m));
+
+  // Derive month lists from preset + available months.
+  // "full" uses completeMonths only — partial/in-progress months are never
+  // included in cross-year comparisons.
   useEffect(() => {
     let cy: string[];
     if (periodPreset === "full") {
-      cy = availableMonths;
+      cy = completeMonths;
     } else {
       const preset = fyMonths(fyCy, periodPreset);
-      cy = preset.filter((m) => availableMonths.includes(m));
+      cy = preset.filter((m) => completeMonths.includes(m));
     }
     const ly = cy.map(toLyMonth);
     setMonthsCy(cy);
     setMonthsLy(ly);
-  }, [fyCy, periodPreset, availableMonths]);
+  }, [fyCy, periodPreset, completeMonths]);
 
   // Load rankings when filters change
   useEffect(() => {
@@ -290,6 +307,12 @@ export default function CustomersPage() {
               {periodLabel}
             </span>
 
+            {lastSyncedAt && (
+              <span className="text-xs text-muted-foreground hidden md:block">
+                synced {new Date(lastSyncedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            )}
+
             <button
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
               className="ml-1 rounded-md p-1.5 hover:bg-muted"
@@ -313,6 +336,11 @@ export default function CustomersPage() {
           {monthsCy.length === 0 && availableMonths.length === 0 && !syncing && syncError && (
             <div className="mb-3 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
               Register sync failed for {fyCy}: {syncError}
+            </div>
+          )}
+          {partialMonths.length > 0 && (
+            <div className="mb-3 rounded-md border border-amber-400/40 bg-amber-500/5 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+              {partialMonths.join(", ")} {partialMonths.length === 1 ? "is" : "are"} in progress and excluded from all comparisons. Data through the last complete month ({completeMonths[completeMonths.length - 1] ?? "none"}) is used.
             </div>
           )}
 
