@@ -110,8 +110,15 @@ export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
 
           if (!headerFound) {
             if (globalRow > 30) continue;
-            const tIdx = findCol(row, /taxable\s*(value|amount)/i);
-            const hIdx = findCol(row, /state\s*head/i);
+            // Primary match: "Taxable Value" / "Taxable Amount" + "State Head".
+            let tIdx = findCol(row, /taxable\s*(value|amount)/i);
+            let hIdx = findCol(row, /state\s*head/i);
+            // Broader fallback for tabs with different column names (e.g. WT tab):
+            // try any "Booking Amount", "Net Amount", or bare "Amount" column.
+            if (tIdx < 0) tIdx = findCol(row, /booking\s*am(ou)?nt|net\s*am(ou)?nt|^amount$|total\s*am(ou)?nt/i);
+            // Fallback head: any column titled exactly "Head" or "State" when combined
+            // with a numeric amount column.
+            if (hIdx < 0 && tIdx >= 0) hIdx = findCol(row, /^head$|^state$/i);
             if (tIdx >= 0 && hIdx >= 0) {
               taxColIdx = tIdx;
               headColIdx = hIdx;

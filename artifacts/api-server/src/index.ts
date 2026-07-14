@@ -7,7 +7,6 @@ import {
 } from "./lib/dashboard/sync";
 import { assembleRows } from "./lib/mgmt/report.js";
 import { loadStateHeadSale } from "./lib/mgmt/stateHeadSale.js";
-import { restoreSecondaryUploadsFromGcs } from "./lib/mgmt/secondaryUpload.js";
 import {
   ensureRegisterSynced,
   startScheduledRegisterSync,
@@ -46,11 +45,6 @@ app.listen(port, (err) => {
       logger.error({ err: syncErr }, "initial dashboard sync failed");
     }
   })();
-
-  // Restore any GCS-persisted secondary order booking uploads to local disk.
-  void restoreSecondaryUploadsFromGcs().catch((err) =>
-    logger.warn({ err }, "secondary upload GCS restore failed"),
-  );
 
   // Pre-warm mgmt data caches so the first Sales page load is fast.
   // Fills the orders + stateHeadSale sub-caches in the background.

@@ -2,9 +2,6 @@ import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 const DashboardUploadPanel = lazy(
   () => import("./DashboardUploadPanel"),
 );
-const SecondaryUploadPanel = lazy(
-  () => import("./SecondaryUploadPanel"),
-);
 import {
   Download,
   ChevronUp,
@@ -50,6 +47,12 @@ type Member = {
   orderCount: number | null;
   achievementPct: number | null;
   band: string;
+  /** Plan from STATE HEAD DASHBOARD (ytdPlan for the selected period). Canonical secondary target. */
+  secondaryPlan: number | null;
+  /** True when this member is listed in the Primary Team Members tab (no secondary target expected). */
+  isPrimaryRole: boolean;
+  /** True when this member is in the LEFT TEAM MEMBERS section (count in totals, never low-perf). */
+  isLeft: boolean;
   visitedParties: number | null;
   workingDays: number | null;
   ctcMonthly: number | null;
@@ -89,6 +92,17 @@ type DashboardMeta = {
   saleRawTotal?: number;
   /** Source label for secondary Order Booking tile. */
   orderBookingSource?: string | null;
+  /** "state_head_dashboard" when secondary data comes from the authoritative STATE HEAD DASHBOARD sheet. */
+  secondarySource?: string | null;
+  /** Company-level totals from the STATE HEAD DASHBOARD (all months, all members, anomaly months included). */
+  secondaryTotal?: {
+    plan: number;
+    orderBooked: number;
+    salesReceived: number;
+    ytdAchievement: number | null;
+    totalDealers: number;
+    sheetTotals: { orderBooked: number | null; salesReceived: number | null } | null;
+  } | null;
   /** Attribution diagnostics — null until the distributor-TM map is warm. */
   primaryAttributionDiagnostics?: {
     distMapAvailable: boolean;
@@ -452,7 +466,7 @@ export default function StateHeadDashboard() {
         map.set(head, s);
       }
       s.count++;
-      s.target += r.targetSecondary ?? 0;
+      s.target += r.secondaryPlan ?? r.targetSecondary ?? 0;
       s.booking += r.orderBooking ?? 0;
       s.sale += r.saleAmount ?? 0;
       s.retailers += r.totalRetailers ?? 0;
@@ -475,8 +489,11 @@ export default function StateHeadDashboard() {
 
   // KPI aggregates over all filtered rows (regardless of active view)
   const kpi = useMemo(() => {
-    const target = filteredRows.reduce((s, r) => s + (r.targetSecondary ?? 0), 0);
+    // Target: prefer STATE HEAD DASHBOARD Plan column over Target Master (canonical source).
+    const target = filteredRows.reduce((s, r) => s + (r.secondaryPlan ?? r.targetSecondary ?? 0), 0);
     const booking = filteredRows.reduce((s, r) => s + (r.orderBooking ?? 0), 0);
+    // Secondary sales received (saleAmount = sec.ytdSalesReceived from STATE HEAD DASHBOARD).
+    const secSalesReceived = filteredRows.reduce((s, r) => s + (r.saleAmount ?? 0), 0);
     // Sale (dispatched): use post-processed summaryByHead totals when head-level
     // data is available from meta (so stateHeadFilter is respected correctly).
     const sale = data?.meta.headSales
@@ -495,21 +512,37 @@ export default function StateHeadDashboard() {
     const pendingOrders =
       primaryOrderBooking != null && sale > 0 ? primaryOrderBooking - sale : null;
 
-    const lowPerf = filteredRows.filter((r) => isLowPerf(r.band, lowPerfThreshold)).length;
-    const noTarget = filteredRows.filter((r) => r.band === "noTarget").length;
+    // Low performers: exclude primary-role and left members (no secondary target expected).
+    const lowPerf = filteredRows.filter((r) => isLowPerf(r.band, lowPerfThreshold) && !r.isPrimaryRole && !r.isLeft).length;
+    // No-target count: exclude primary-role (no secondary target expected) and left members.
+    const noTarget = filteredRows.filter((r) => r.band === "noTarget" && !r.isPrimaryRole && !r.isLeft).length;
+    // Achievement = secondary sales received / plan (STATE HEAD DASHBOARD, recomputed).
+    // Falls back to order booked / target when state dashboard is unavailable.
+    const hasStateDash = data?.meta.secondarySource === "state_head_dashboard";
+    // Use the sheet-level sales total (all months, no anomaly exclusion) for the headline
+    // achievement tile.  Per-member ytdSalesReceived excludes anomaly months, which causes
+    // the row-sum to undershoot the sheet figure by several crore.  meta.secondaryTotal is
+    // the authoritative number that matches what managers see in the sheet directly.
+    const secSalesForAch =
+      hasStateDash && (data?.meta.secondaryTotal?.salesReceived ?? 0) > 0
+        ? data!.meta.secondaryTotal!.salesReceived
+        : secSalesReceived;
+    const achPct = target > 0
+      ? (hasStateDash && secSalesForAch > 0 ? secSalesForAch / target : booking / target)
+      : null;
     return {
       target,
       booking,
       sale,
       primaryOrderBooking,
       pendingOrders,
-      achPct: target > 0 ? booking / target : null,
+      achPct,
       members: filteredRows.length,
       lowPerf,
       noTarget,
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredRows, lowPerfThreshold, summaryByHead, data?.meta.headSales, data?.meta.orderBookingPrimary]);
+  }, [filteredRows, lowPerfThreshold, summaryByHead, data?.meta.headSales, data?.meta.orderBookingPrimary, data?.meta.secondarySource]);
 
   // Rows to render for each view (after sort)
   function viewRows(): Member[] {
@@ -525,6 +558,13 @@ export default function StateHeadDashboard() {
   }
 
   // ── Render ──────────────────────────────────────────────────────────────────
+
+  // True when secondary data is available from the STATE HEAD DASHBOARD (authoritative)
+  // or from an uploaded order file (legacy FY2025-26 and earlier).
+  // Replaces the old ordersAvailable gate which only covered uploaded files.
+  const hasSecondaryData =
+    data?.meta.secondarySource === "state_head_dashboard" ||
+    (data?.meta.ordersAvailable ?? false);
 
   const openInPeriod = openFiscalMonthsInPeriod(fy, period.from, period.to);
 
@@ -668,12 +708,12 @@ export default function StateHeadDashboard() {
           <KpiTile label={`Target (${period.label})`} value={fmtCr(kpi.target > 0 ? kpi.target : null)} />
           <KpiTile
             label="Order Booking (Secondary)"
-            value={data.meta.ordersAvailable ? fmtCr(kpi.booking) : "Pending"}
+            value={hasSecondaryData ? fmtCr(kpi.booking) : "—"}
             sub={data.meta.orderBookingSource ?? undefined}
           />
           <KpiTile
             label="Achievement"
-            value={data.meta.ordersAvailable ? fmtPct(kpi.achPct) : "Pending"}
+            value={hasSecondaryData ? fmtPct(kpi.achPct) : "—"}
           />
           <KpiTile label="Low Performers" value={fmtN(kpi.lowPerf)} sub={`<${lowPerfThreshold}% threshold`} />
           <KpiTile
@@ -746,10 +786,10 @@ export default function StateHeadDashboard() {
                     <Td className="text-right">{fmtN(s.count)}</Td>
                     <Td className="text-right">{fmtCr(s.target || null)}</Td>
                     <Td className="text-right">
-                      {data.meta.ordersAvailable ? fmtCr(s.booking || null) : "—"}
+                      {hasSecondaryData ? fmtCr(s.booking || null) : "—"}
                     </Td>
                     <Td className="text-right">
-                      {data.meta.ordersAvailable ? fmtPct(pct) : "—"}
+                      {hasSecondaryData ? fmtPct(pct) : "—"}
                     </Td>
                     <Td className="text-right">{fmtCr(s.sale || null)}</Td>
                     <Td className="text-right">{fmtN(s.retailers || null)}</Td>
@@ -872,14 +912,14 @@ export default function StateHeadDashboard() {
                   <Td>{r.oldNew}</Td>
                   <Td className="text-right">{fmtCr(r.targetSecondary)}</Td>
                   <Td className="text-right">
-                    {data.meta.ordersAvailable ? fmtCr(r.orderBooking) : "—"}
+                    {hasSecondaryData ? fmtCr(r.orderBooking) : "—"}
                   </Td>
                   <Td className="text-right">{fmtCr(r.priorOrderBooking)}</Td>
                   <Td className="text-right">
-                    {data.meta.ordersAvailable ? fmtPct(r.achievementPct) : "—"}
+                    {hasSecondaryData ? fmtPct(r.achievementPct) : "—"}
                   </Td>
                   <Td>
-                    <BandChip band={data.meta.ordersAvailable ? r.band : "noTarget"} />
+                    <BandChip band={r.band} />
                   </Td>
                   <Td className="text-right">{fmtCr(r.saleAmount)}</Td>
                   <Td className="text-right">{fmtN(r.totalRetailers)}</Td>
@@ -912,13 +952,10 @@ export default function StateHeadDashboard() {
             <div className="py-8 text-center text-sm text-muted-foreground">Loading...</div>
           }
         >
-          <div className="space-y-6">
-            <DashboardUploadPanel
-              targetDiagnostic={data?.meta?.targetMatchDiagnostic ?? null}
-              selectedFy={fy}
-            />
-            <SecondaryUploadPanel />
-          </div>
+          <DashboardUploadPanel
+            targetDiagnostic={data?.meta?.targetMatchDiagnostic ?? null}
+            selectedFy={fy}
+          />
         </Suspense>
       )}
 
