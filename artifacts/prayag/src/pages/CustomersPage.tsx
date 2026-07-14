@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import PeriodPicker, { defaultPeriodValue, type PeriodValue } from "@/components/ui/PeriodPicker";
 import CustomerRanking, { type CustomerRow } from "@/components/customers/CustomerRanking";
 import CustomerDetail from "@/components/customers/CustomerDetail";
 import CustomerAtRisk from "@/components/customers/CustomerChurn";
@@ -42,28 +43,6 @@ const SECTIONS = [
 
 type SectionId = (typeof SECTIONS)[number]["id"];
 
-// ── Period helpers ─────────────────────────────────────────────────────────────
-
-const MONTH_ORDER = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"] as const;
-
-type PeriodPreset = "full" | "Q1" | "Q2" | "Q3" | "Q4" | "H1" | "H2";
-
-function fyMonths(fy: string, preset: PeriodPreset): string[] {
-  const year = parseInt(fy.split("-")[0], 10);
-  const nextYY = String(year + 1).slice(-2);
-  const thisYY = String(year).slice(-2);
-  const map: Record<string, string[]> = {
-    Q1: [`Apr-${thisYY}`, `May-${thisYY}`, `Jun-${thisYY}`],
-    Q2: [`Jul-${thisYY}`, `Aug-${thisYY}`, `Sep-${thisYY}`],
-    Q3: [`Oct-${thisYY}`, `Nov-${thisYY}`, `Dec-${thisYY}`],
-    Q4: [`Jan-${nextYY}`, `Feb-${nextYY}`, `Mar-${nextYY}`],
-    H1: [`Apr-${thisYY}`, `May-${thisYY}`, `Jun-${thisYY}`, `Jul-${thisYY}`, `Aug-${thisYY}`, `Sep-${thisYY}`],
-    H2: [`Oct-${thisYY}`, `Nov-${thisYY}`, `Dec-${thisYY}`, `Jan-${nextYY}`, `Feb-${nextYY}`, `Mar-${nextYY}`],
-    full: [], // use availableMonths
-  };
-  return map[preset] ?? [];
-}
-
 /** Convert CY month label to the corresponding LY label (same month, year −1). */
 function toLyMonth(m: string): string {
   return `${m.slice(0, 4)}${parseInt(m.slice(4), 10) - 1}`;
@@ -82,7 +61,7 @@ export default function CustomersPage() {
   // Filter state
   const [fyCy, setFyCy] = useState("2026-27");
   const [fyLy, setFyLy] = useState("2025-26");
-  const [periodPreset, setPeriodPreset] = useState<PeriodPreset>("Q1");
+  const [periodValue, setPeriodValue] = useState<PeriodValue>(defaultPeriodValue());
   const [entityType, setEntityType] = useState("all");
 
   // Available months from DB
@@ -154,21 +133,52 @@ export default function CustomersPage() {
   // Partial months: months present in the DB but not yet complete (in-progress).
   const partialMonths = availableMonths.filter((m) => !completeMonths.includes(m));
 
-  // Derive month lists from preset + available months.
-  // "full" uses completeMonths only — partial/in-progress months are never
-  // included in cross-year comparisons.
+  // When the FY changes, reset the period picker to Q1 preset so stale
+  // custom/monthly selections from the previous FY don't carry over.
+  // Also re-derive monthsCy/monthsLy when completeMonths or periodValue change
+  // (handles the initial load when completeMonths first arrives from the API).
   useEffect(() => {
+    setPeriodValue(defaultPeriodValue());
+    setMonthsCy([]);
+    setMonthsLy([]);
+  }, [fyCy]);
+
+  useEffect(() => {
+    if (!completeMonths.length) return;
+    // Re-resolve the current picker value against the newly loaded months.
+    // Import the resolve logic inline (mirrors PeriodPicker internals).
     let cy: string[];
-    if (periodPreset === "full") {
-      cy = completeMonths;
+    if (periodValue.mode === "preset") {
+      if (periodValue.preset === "full") {
+        cy = completeMonths;
+      } else {
+        const year = parseInt(fyCy.split("-")[0], 10);
+        const yy = String(year).slice(-2);
+        const nyy = String(year + 1).slice(-2);
+        const slices: Record<string, [number, number]> = {
+          Q1: [0, 3], Q2: [3, 6], Q3: [6, 9], Q4: [9, 12],
+          H1: [0, 6], H2: [6, 12],
+        };
+        const allFy = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"].map(
+          (m) => (["Jan","Feb","Mar"].includes(m) ? `${m}-${nyy}` : `${m}-${yy}`)
+        );
+        const [s, e] = slices[periodValue.preset] ?? [0, 3];
+        cy = allFy.slice(s, e).filter((m) => completeMonths.includes(m));
+      }
+    } else if (periodValue.mode === "monthly") {
+      cy = periodValue.singleMonth ? [periodValue.singleMonth] : (completeMonths.length ? [completeMonths[completeMonths.length - 1]] : []);
     } else {
-      const preset = fyMonths(fyCy, periodPreset);
-      cy = preset.filter((m) => completeMonths.includes(m));
+      // custom
+      const from = periodValue.fromMonth || availableMonths[0] || "";
+      const to   = periodValue.toMonth   || availableMonths[availableMonths.length - 1] || "";
+      const fi = availableMonths.indexOf(from);
+      const ti = availableMonths.indexOf(to);
+      cy = fi !== -1 && ti !== -1 && fi <= ti ? availableMonths.slice(fi, ti + 1) : [];
     }
-    const ly = cy.map(toLyMonth);
     setMonthsCy(cy);
-    setMonthsLy(ly);
-  }, [fyCy, periodPreset, completeMonths]);
+    setMonthsLy(cy.map(toLyMonth));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [completeMonths, periodValue.mode, periodValue.preset, periodValue.singleMonth, periodValue.fromMonth, periodValue.toMonth, fyCy]);
 
   // Load rankings when filters change
   useEffect(() => {
@@ -306,19 +316,13 @@ export default function CustomersPage() {
             </select>
 
             {/* Period */}
-            <select
-              value={periodPreset}
-              onChange={(e) => setPeriodPreset(e.target.value as PeriodPreset)}
-              className="rounded border bg-background px-2 py-1 text-xs"
-            >
-              <option value="full">Full year</option>
-              <option value="Q1">Q1 (Apr-Jun)</option>
-              <option value="Q2">Q2 (Jul-Sep)</option>
-              <option value="Q3">Q3 (Oct-Dec)</option>
-              <option value="Q4">Q4 (Jan-Mar)</option>
-              <option value="H1">H1 (Apr-Sep)</option>
-              <option value="H2">H2 (Oct-Mar)</option>
-            </select>
+            <PeriodPicker
+              availableMonths={availableMonths}
+              completeMonths={completeMonths}
+              fy={fyCy}
+              value={periodValue}
+              onChange={(next) => setPeriodValue(next)}
+            />
 
             <span className="text-xs text-muted-foreground hidden sm:block">
               {periodLabel}
