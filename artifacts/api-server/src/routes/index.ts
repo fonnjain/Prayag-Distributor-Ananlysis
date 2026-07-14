@@ -12,6 +12,7 @@ import sapRouter from "./sap";
 import auditRouter from "./audit";
 import customersRouter from "./customers";
 import companyReportsRouter from "./companyReports";
+import schemesRouter from "./schemes";
 
 const router: IRouter = Router();
 
@@ -28,5 +29,6 @@ router.use(sapRouter);
 router.use(auditRouter);
 router.use(customersRouter);
 router.use(companyReportsRouter);
+router.use(schemesRouter);
 
 export default router;

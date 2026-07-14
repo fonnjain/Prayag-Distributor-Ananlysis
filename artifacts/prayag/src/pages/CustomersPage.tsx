@@ -27,6 +27,9 @@ import PriceShrinkers from "@/components/customers/PriceShrinkers";
 const SchemeDashboard = lazy(
   () => import("@/components/customers/SchemeDashboard"),
 );
+const SchemeNudgeEngine = lazy(
+  () => import("@/components/customers/SchemeNudgeEngine"),
+);
 
 // ── Section registry ──────────────────────────────────────────────────────────
 
@@ -401,7 +404,7 @@ export default function CustomersPage() {
                 </div>
               }
             >
-              <SchemeDashboard />
+              <SchemeNudgeEngine />
             </Suspense>
           )}
         </main>

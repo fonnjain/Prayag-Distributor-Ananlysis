@@ -12,6 +12,7 @@
 - [Prayag historical roster gap](prayag-historical-roster-gap.md) — for FY<current, departed TMs in order file are recovered via target-master stateHead supplement in assembleRows; 40 zero-booking members require a historical roster file.
 - [Dashboard xlsx upload pattern](prayag-dashboard-xlsx-upload.md) — FY-specific quarterly vs annual rules; header auto-detected (not hardcoded); xlsx fills target-map gaps; departed TMs get stateHead from xlsx.
 - [Customer Performance page](customer-performance.md) — units-first analytics on sale_line; Laspeyres at customer/category/company levels; scheme engine configurable; route /customers.
+- [Prayag Scheme Nudge Engine](prayag-scheme-nudge-engine.md) — ROI nudge engine: use group_raw (not group_canon) in SQL; dues check graceful fallback; Q1 control verified exact.
 - [STATE HD Dashboard column detection](state-dashboard-column-detection.md) — FY-suffix stripping + Excel date serial detection required; block offsets +0/+2/+5=plan/OB/sales; plan ₹364.97 Cr verified.
 - [Drizzle GROUP BY bare-column trap](drizzle-groupby-bare-column.md) — Postgres rejects bare column refs in SELECT when GROUP BY uses a wrapped expression; use max(col) or repeat the exact expression.
 - [FY2026-27 register config](prayag-register-sheets-config.md) — 2026-27 register is SALE SHEET 26-27 (19LQGpkb…); sap_source["2026-27"] is the raw SAP export (19Oj6P2c…) for the Data Health lag check only; open FY auto-syncs every 6h.

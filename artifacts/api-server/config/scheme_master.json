@@ -1,0 +1,221 @@
+{
+  "schemes": [
+    {
+      "id": "Q_PLUMB",
+      "name": "QUARTERLY - Plumbing, SWR, Agri Pipe & Fittings, Water Tanks",
+      "basis": "cumulative_quarter",
+      "slabs": [
+        { "threshold": 100000,  "rate": 0.020,  "rewardType": "pct" },
+        { "threshold": 200000,  "rate": 0.025,  "rewardType": "pct" },
+        { "threshold": 400000,  "rate": 0.030,  "rewardType": "pct" },
+        { "threshold": 600000,  "rate": 0.035,  "rewardType": "pct" },
+        { "threshold": 800000,  "rate": 0.040,  "rewardType": "pct" }
+      ]
+    },
+    {
+      "id": "Q_PTMT",
+      "name": "QUARTERLY - PTMT, Cistern, Seat Covers",
+      "basis": "cumulative_quarter",
+      "slabs": [
+        { "threshold":   25000, "rate": 0.025,  "rewardType": "pct" },
+        { "threshold":   75000, "rate": 0.030,  "rewardType": "pct" },
+        { "threshold":  150000, "rate": 0.035,  "rewardType": "pct" },
+        { "threshold":  250000, "rate": 0.040,  "rewardType": "pct" },
+        { "threshold":  400000, "rate": 0.045,  "rewardType": "pct" },
+        { "threshold":  600000, "rate": 0.050,  "rewardType": "pct" },
+        { "threshold": 1000000, "rate": 0.055,  "rewardType": "pct" },
+        { "threshold": 1500000, "rate": 0.065,  "rewardType": "pct" }
+      ]
+    },
+    {
+      "id": "Q_CP",
+      "name": "QUARTERLY - CP, Sink, Sanitaryware",
+      "basis": "cumulative_quarter",
+      "slabs": [
+        { "threshold":  30000, "rate": 0.025,  "rewardType": "pct" },
+        { "threshold":  60000, "rate": 0.030,  "rewardType": "pct" },
+        { "threshold": 100000, "rate": 0.035,  "rewardType": "pct" },
+        { "threshold": 200000, "rate": 0.0425, "rewardType": "pct" },
+        { "threshold": 400000, "rate": 0.050,  "rewardType": "pct" },
+        { "threshold": 600000, "rate": 0.060,  "rewardType": "pct" }
+      ]
+    },
+    {
+      "id": "Q_OTHER",
+      "name": "QUARTERLY - All except Plumbing/Tank/Garden Pipe",
+      "basis": "cumulative_quarter",
+      "slabs": [
+        { "threshold":   99000, "rate": 0.020,  "rewardType": "pct" },
+        { "threshold":  150000, "rate": 0.0275, "rewardType": "pct" },
+        { "threshold":  250000, "rate": 0.0325, "rewardType": "pct" },
+        { "threshold":  400000, "rate": 0.0375, "rewardType": "pct" },
+        { "threshold":  600000, "rate": 0.0425, "rewardType": "pct" },
+        { "threshold":  800000, "rate": null, "reward": "TRIP: Goa (1 person)",     "rewardType": "trip" },
+        { "threshold": 1100000, "rate": null, "reward": "TRIP: Thailand (1 person)","rewardType": "trip" },
+        { "threshold": 1500000, "rate": null, "reward": "TRIP: Vietnam (1 person)", "rewardType": "trip" }
+      ]
+    },
+    {
+      "id": "Q_CP89",
+      "name": "QUARTERLY - CP and Sink 8000/9000 series",
+      "basis": "cumulative_quarter",
+      "slabs": [
+        { "threshold":  50000, "rate": 0.03, "rewardType": "pct" },
+        { "threshold": 100000, "rate": 0.04, "rewardType": "pct" },
+        { "threshold": 200000, "rate": 0.05, "rewardType": "pct" },
+        { "threshold": 500000, "rate": 0.06, "rewardType": "pct" }
+      ]
+    },
+    {
+      "id": "Q_PTMT_KLKA",
+      "name": "QUARTERLY - PTMT (Kerala & Karnataka only)",
+      "basis": "cumulative_quarter",
+      "stateRestriction": ["KERALA", "KARNATAKA"],
+      "slabs": [
+        { "threshold":  40000, "rate": 0.025, "rewardType": "pct" },
+        { "threshold":  75000, "rate": 0.030, "rewardType": "pct" },
+        { "threshold": 150000, "rate": 0.040, "rewardType": "pct" },
+        { "threshold": 300000, "rate": 0.045, "rewardType": "pct" },
+        { "threshold": 600000, "rate": 0.050, "rewardType": "pct" },
+        { "threshold": 800000, "rate": 0.060, "rewardType": "pct" }
+      ]
+    },
+    {
+      "id": "A_DIST",
+      "name": "ANNUAL - Distributor",
+      "basis": "cumulative_year",
+      "slabs": [
+        { "threshold": 3600000, "rate": 0.010, "rewardType": "pct" },
+        { "threshold": 5000000, "rate": 0.015, "rewardType": "pct" },
+        { "threshold": 6500000, "rate": 0.020, "rewardType": "pct" },
+        { "threshold": 9000000, "rate": 0.025, "rewardType": "pct" }
+      ]
+    },
+    {
+      "id": "A_GEN",
+      "name": "ANNUAL - General 2026-27 (cash or trip)",
+      "basis": "cumulative_year",
+      "slabs": [
+        { "threshold":   600000, "rate": 0.0100, "rewardType": "pct" },
+        { "threshold":  1000000, "rate": 0.0125, "rewardType": "pct" },
+        { "threshold":  2500000, "rate": 0.0150, "reward": "1.5% or Trip",              "rewardType": "pct_or_trip" },
+        { "threshold":  5000000, "rate": 0.0165, "reward": "1.65% or Trip: Vietnam",    "rewardType": "pct_or_trip" },
+        { "threshold":  7500000, "rate": 0.0180, "reward": "1.8% or Trip: Mauritius",   "rewardType": "pct_or_trip" },
+        { "threshold": 10000000, "rate": 0.0200, "reward": "2% or Trip: Dubai/Singapore","rewardType": "pct_or_trip" }
+      ]
+    },
+    {
+      "id": "A_DD_JK",
+      "name": "ANNUAL - Direct Dealer (J&K)",
+      "basis": "cumulative_year",
+      "stateRestriction": ["JAMMU", "J&K"],
+      "slabs": [
+        { "threshold": 1000000, "rate": 0.030, "rewardType": "pct" },
+        { "threshold": 1500000, "rate": 0.035, "rewardType": "pct" },
+        { "threshold": 2000000, "rate": 0.040, "rewardType": "pct" },
+        { "threshold": 3000000, "rate": 0.045, "rewardType": "pct" }
+      ]
+    },
+    {
+      "id": "SB_CIST",
+      "name": "SINGLE BILL - Cistern & Seat Covers",
+      "basis": "single_invoice_qty",
+      "unit": "PCS",
+      "slabs": [
+        { "threshold":  100, "rate": 0.10, "rewardType": "pct" },
+        { "threshold":  300, "rate": 0.12, "rewardType": "pct" },
+        { "threshold":  400, "rate": 0.12, "rewardType": "pct" },
+        { "threshold":  600, "rate": 0.14, "rewardType": "pct" },
+        { "threshold":  800, "rate": 0.14, "rewardType": "pct" }
+      ]
+    },
+    {
+      "id": "SB_THT",
+      "name": "SINGLE BILL - T Handle Tap (Cat.No 120 WS)",
+      "basis": "single_invoice_qty",
+      "unit": "PCS",
+      "catNos": ["120WS", "120 WS"],
+      "slabs": [
+        { "threshold":  2700, "rate": 0.020, "rewardType": "pct" },
+        { "threshold":  3600, "rate": 0.025, "rewardType": "pct" },
+        { "threshold":  4500, "rate": 0.030, "rewardType": "pct" },
+        { "threshold":  7200, "rate": 0.035, "rewardType": "pct" },
+        { "threshold": 10080, "rate": 0.040, "rewardType": "pct" }
+      ]
+    },
+    {
+      "id": "SB_TEF",
+      "name": "SINGLE BILL - Teflon Tape",
+      "basis": "single_invoice_qty",
+      "unit": "CARTON",
+      "slabs": [
+        { "threshold":  6, "rate": 0.04, "rewardType": "pct" },
+        { "threshold": 10, "rate": 0.06, "rewardType": "pct" },
+        { "threshold": 20, "rate": 0.08, "rewardType": "pct" }
+      ]
+    },
+    {
+      "id": "SB_DIV",
+      "name": "SINGLE BILL - Single Lever Concealed Divertor",
+      "basis": "single_invoice_qty",
+      "unit": "PCS",
+      "slabs": [
+        { "threshold": 10, "rate": 0.05, "rewardType": "pct" }
+      ]
+    }
+  ],
+  "basketMap": {
+    "CPVC":              "Q_PLUMB",
+    "CPVC PIPE":         "Q_PLUMB",
+    "UPVC":              "Q_PLUMB",
+    "UPVC PIPE":         "Q_PLUMB",
+    "OPVC":              "Q_PLUMB",
+    "SWR":               "Q_PLUMB",
+    "PPR":               "Q_PLUMB",
+    "HDPE PIPE":         "Q_PLUMB",
+    "CORRUGATED PIPE":   "Q_PLUMB",
+    "Corrugated Pipe":   "Q_PLUMB",
+    "AGRI":              "Q_PLUMB",
+    "GARDEN PIPE":       "Q_PLUMB",
+    "WATER TANK":        "Q_PLUMB",
+    "WT LID":            "Q_PLUMB",
+    "COLUMN":            "Q_PLUMB",
+    "CONNECTION":        "Q_PLUMB",
+    "CONECTION":         "Q_PLUMB",
+    "PTMT":              "Q_PTMT",
+    "CISTERN":           "Q_PTMT",
+    "SEAT COVER":        "Q_PTMT",
+    "WASTE PIPE":        "Q_PTMT",
+    "CABINET":           "Q_PTMT",
+    "FLOOR TRAP":        "Q_PTMT",
+    "QUAA":              "Q_PTMT",
+    "C P":               "Q_CP",
+    "CP":                "Q_CP",
+    "CP ACCESSORIES":    "Q_CP",
+    "CP ALLIED":         "Q_CP",
+    "SINK":              "Q_CP",
+    "SANITARYWARE":      "Q_CP",
+    "PLATE RACK":        "Q_CP",
+    "GLASS":             "Q_CP",
+    "TEFELON TAPE":      "SB_TEF",
+    "TEFLON TAPE":       "SB_TEF",
+    "HARDWARE":          "Q_OTHER"
+  },
+  "conditions": {
+    "excludeNonTerritory": true,
+    "excludePatterns": ["GOVT", "GOVERNMENT", "GEM", "JJM", "PROJECT"],
+    "deadlineDayOfMonth": 25,
+    "defaultRoiThreshold": 0.05
+  },
+  "seasonality": {
+    "Apr": 4.2, "May": 8.2, "Jun": 8.3,
+    "Jul": 7.3, "Aug": 7.0, "Sep": 7.4,
+    "Oct": 7.1, "Nov": 8.5, "Dec": 10.1,
+    "Jan": 10.1, "Feb": 9.6, "Mar": 12.3
+  },
+  "trips": [
+    { "label": "Goa",       "requirement": "Q_OTHER ≥ ₹8 L in quarter",  "threshold": 800000  },
+    { "label": "Thailand",  "requirement": "Q_OTHER ≥ ₹11 L in quarter", "threshold": 1100000 },
+    { "label": "Vietnam",   "requirement": "Q_OTHER ≥ ₹15 L in quarter", "threshold": 1500000 }
+  ]
+}
