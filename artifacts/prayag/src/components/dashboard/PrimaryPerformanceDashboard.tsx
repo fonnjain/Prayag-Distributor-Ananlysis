@@ -63,6 +63,25 @@ type ApiResponse = {
 
 const FYS = ["2026-27", "2025-26"] as const;
 
+const FISCAL_MONTH_NAMES = [
+  "Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar",
+] as const;
+
+function openFiscalMonthsInPeriod(fy: string, fromFm: number, toFm: number): string[] {
+  const fyStart = parseInt(fy.slice(0, 4), 10);
+  if (isNaN(fyStart)) return [];
+  const now = Date.now();
+  const open: string[] = [];
+  for (let fm = fromFm; fm <= toFm; fm++) {
+    const calM = (2 + fm) % 12;
+    const yr = fm <= 9 ? fyStart : fyStart + 1;
+    const startMs = Date.UTC(yr, calM, 1);
+    const endMs = Date.UTC(yr, calM + 1, 0, 23, 59, 59, 999);
+    if (now >= startMs && now <= endMs) open.push(FISCAL_MONTH_NAMES[fm - 1]);
+  }
+  return open;
+}
+
 const PERIODS = [
   { label: "Full year", from: 1, to: 12 },
   { label: "Q1 (Apr-Jun)", from: 1, to: 3 },
@@ -192,6 +211,8 @@ export default function PrimaryPerformanceDashboard() {
   const nothingAvailable =
     !loading && data && !data.bookingAvailable && !data.saleAvailable;
 
+  const openInPeriod = openFiscalMonthsInPeriod(fy, 1, 12);
+
   return (
     <div className="space-y-5 p-4">
       {/* Header */}
@@ -230,6 +251,18 @@ export default function PrimaryPerformanceDashboard() {
           </select>
         </div>
       </div>
+
+      {openInPeriod.length > 0 && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2.5 text-sm text-amber-800 dark:text-amber-300">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-amber-500" />
+          <span>
+            {openInPeriod.join(", ")} {openInPeriod.length === 1 ? "is" : "are"} still in
+            progress — figures include partial current-month data. Prior-year figures for the same
+            month{openInPeriod.length > 1 ? "s" : ""} are complete. Any year-on-year comparison
+            covering this period is provisional until the month closes.
+          </span>
+        </div>
+      )}
 
       {/* Load states */}
       {loading && (

@@ -126,6 +126,25 @@ const PERIODS: Period[] = [
   { label: "Full Year", from: 1, to: 12 },
 ];
 
+const FISCAL_MONTH_NAMES = [
+  "Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar",
+] as const;
+
+function openFiscalMonthsInPeriod(fy: string, fromFm: number, toFm: number): string[] {
+  const fyStart = parseInt(fy.slice(0, 4), 10);
+  if (isNaN(fyStart)) return [];
+  const now = Date.now();
+  const open: string[] = [];
+  for (let fm = fromFm; fm <= toFm; fm++) {
+    const calM = (2 + fm) % 12;
+    const yr = fm <= 9 ? fyStart : fyStart + 1;
+    const startMs = Date.UTC(yr, calM, 1);
+    const endMs = Date.UTC(yr, calM + 1, 0, 23, 59, 59, 999);
+    if (now >= startMs && now <= endMs) open.push(FISCAL_MONTH_NAMES[fm - 1]);
+  }
+  return open;
+}
+
 const BAND_LABEL: Record<string, string> = {
   below25: "<25%",
   below50: "25-50%",
@@ -507,6 +526,8 @@ export default function StateHeadDashboard() {
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
+  const openInPeriod = openFiscalMonthsInPeriod(fy, period.from, period.to);
+
   return (
     <div className="flex flex-col gap-4 p-4 pb-8">
       {/* Filter bar */}
@@ -609,6 +630,18 @@ export default function StateHeadDashboard() {
       </div>
 
       {/* Status / notes */}
+      {openInPeriod.length > 0 && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/20 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            {openInPeriod.join(", ")} {openInPeriod.length === 1 ? "is" : "are"} still in
+            progress — this period includes partial current-month data. Prior-year figures for
+            the same month{openInPeriod.length > 1 ? "s" : ""} are complete. Year-on-year
+            comparisons covering {openInPeriod.length === 1 ? "this month" : "these months"} are
+            provisional until the month closes. For like-for-like comparison use Q1 (Apr–Jun).
+          </span>
+        </div>
+      )}
       {data?.meta.orderBookingNote && (
         <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/20 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
           <Info className="h-4 w-4 mt-0.5 shrink-0" />
