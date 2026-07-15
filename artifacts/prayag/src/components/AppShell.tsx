@@ -18,7 +18,7 @@ import {
   ClipboardList, Database, ShieldCheck,
   LayoutDashboard, Users, ShoppingBag, GitMerge,
   AlertTriangle, UserMinus, Settings, Store, BookOpen,
-  ChevronDown, ChevronRight, Menu, X, Sun, Moon,
+  ChevronDown, ChevronRight, Menu, X, Sun, Moon, Braces,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -83,6 +83,14 @@ const NAV: NavGroup[] = [
       { id: "master",    label: "Customer Data",    path: "/customers/master",    icon: BookOpen },
     ],
   },
+  {
+    id: "developer",
+    label: "Developer",
+    icon: Braces,
+    items: [
+      { id: "api-portal", label: "API Portal", path: "/dev/api", icon: Braces },
+    ],
+  },
 ];
 
 // Determine which group & item is active from the current URL.
@@ -96,6 +104,11 @@ function activeIds(location: string): { groupId: string; itemId: string } {
     const slug = location.replace(/^\/customers\/?/, "").split("?")[0];
     const item = NAV[2].items.find((i) => i.id === slug) ?? NAV[2].items[0];
     return { groupId: "customers", itemId: item.id };
+  }
+  if (location.startsWith("/dev")) {
+    const slug = location.replace(/^\/dev\/?/, "").split("?")[0] || "api-portal";
+    const item = NAV[3].items.find((i) => i.id === slug) ?? NAV[3].items[0];
+    return { groupId: "developer", itemId: item.id };
   }
   // Dashboard
   const slug = location === "/" ? "overview" : location.replace(/^\//, "").split("?")[0];
@@ -117,6 +130,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     dashboard: activeGroupId === "dashboard",
     sales:     activeGroupId === "sales",
     customers: activeGroupId === "customers",
+    developer: activeGroupId === "developer",
   });
 
   function toggleGroup(id: string) {

@@ -7,6 +7,7 @@ import AppShell from "@/components/AppShell";
 import Dashboard, { AREA_IDS } from "@/pages/Dashboard";
 import SalesPage from "@/pages/SalesPage";
 import CustomersPage from "@/pages/CustomersPage";
+import DevPortalPage from "@/pages/DevPortalPage";
 import NotFound from "@/pages/not-found";
 import { DashboardProvider } from "@/data/dashboard-context";
 
@@ -29,6 +30,9 @@ function Router() {
         {/* Customer Performance */}
         <Route path="/customers/:section" component={CustomersPage} />
         <Route path="/customers" component={CustomersPage} />
+        {/* Developer Portal */}
+        <Route path="/dev/api" component={DevPortalPage} />
+        <Route path="/dev" component={DevPortalPage} />
         {/* Dashboard areas */}
         <Route path="/" component={Dashboard} />
         <Route path="/:area">
