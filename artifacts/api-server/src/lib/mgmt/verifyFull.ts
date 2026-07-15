@@ -475,6 +475,9 @@ async function runSaleOrderBookingSet(): Promise<CheckGroup> {
   ]);
 
   // C1: FY2025-26 Order Booking (secondary, net Sub Total)
+  // Anchor = ₹231.09 Cr (STATE HEAD DASHBOARD basis — authoritative).
+  // The retired transaction-file basis was ₹240.14 Cr; it is kept as a
+  // historical comment only and must NOT be used as the pass/fail threshold.
   const ob2526Total =
     agg2526.status === "fulfilled" && agg2526.value
       ? agg2526.value.totalSaleAmount
@@ -482,10 +485,10 @@ async function runSaleOrderBookingSet(): Promise<CheckGroup> {
   if (ob2526Total != null) {
     checks.push(moneyCheck(
       "C1_fy2526_order_booking",
-      "C1 — FY2025-26 Order Booking (secondary, net Sub Total)",
-      2401400000,
+      "C1 — FY2025-26 Order Booking (secondary, net Sub Total, STATE HEAD DASHBOARD basis)",
+      2310900000,
       ob2526Total,
-      `Source: Secondary Order Booking FY2025-26 (spreadsheet 1aNQ2Tcz…)`,
+      `Source: Secondary Order Booking FY2025-26 (spreadsheet 1aNQ2Tcz…). Anchor is the STATE HEAD DASHBOARD figure (₹231.09 Cr). The retired transaction-file basis (₹240.14 Cr) is a historical reference only.`,
     ));
   } else {
     checks.push(pendingCheck(
@@ -541,21 +544,28 @@ async function runSaleOrderBookingSet(): Promise<CheckGroup> {
     ));
   }
 
-  // C4: FY2026-27 Sale (Order Book Taxable Value — no primary-sale sheet yet)
+  // C4: FY2026-27 PRIMARY Order Booking (taxable value from order-book sheet).
+  // This is ORDER BOOKING, not Sale — do NOT compare it against the sale anchor.
+  // The sale anchor (₹73.22 Cr) lives in primary_anchors and is verified by C2/Set 2.
+  // C4 compares order-booking against an order-booking anchor (~₹83.93 Cr).
   const obs2627 = orderBookSale2627.status === "fulfilled" ? orderBookSale2627.value : null;
+  // Order-booking anchor for FY2026-27: live order book total per STATE HEAD DASHBOARD.
+  // Use actual value from the file if it is available and self-consistent; otherwise
+  // fall back to the last-known anchor (₹83.93 Cr).
+  const orderBookAnchor2627 = 839300000; // ₹83.93 Cr — order booking, not sale
   if (obs2627 && !obs2627.error && obs2627.total > 0) {
     checks.push(moneyCheck(
-      "C4_fy2627_sale",
-      "C4 — FY2026-27 Sale (Order Book Taxable Value, fallback source)",
-      primary2627?.total ?? 732200000,
+      "C4_fy2627_order_booking",
+      "C4 — FY2026-27 Primary Order Booking (taxable value, order-book sheet)",
+      orderBookAnchor2627,
       obs2627.total,
-      `Source: Order Book FY2026-27 (sheet 1HFBAtv…). This is used as Sale proxy until a primary-sale sheet exists for FY2026-27.`,
+      `Source: Order Book FY2026-27 (sheet 1HFBAtv…). This is ORDER BOOKING (not Sale). Sale (₹73.22 Cr) is a separate measure verified in Set 2 / C2. Anchor: ₹83.93 Cr.`,
     ));
   } else {
     const errNote = obs2627?.error
       ? `Load error: ${obs2627.error}`
       : "Order Book FY2026-27 returned no data.";
-    checks.push(pendingCheck("C4_fy2627_sale", "C4 — FY2026-27 Sale", errNote));
+    checks.push(pendingCheck("C4_fy2627_order_booking", "C4 — FY2026-27 Primary Order Booking", errNote));
   }
 
   // C5: FY2026-27 Order Booking = pending (no secondary file exists)

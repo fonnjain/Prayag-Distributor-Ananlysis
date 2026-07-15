@@ -32,12 +32,40 @@ export const EXPECTED_FY_COUNTS: Record<string, number> = (() => {
 
 export const EXPECTED_TOTAL_LINES = expectedCounts.total_distinct_sale_lines;
 
+// Deduplicate a batch on natural key (fy, invoiceNo, code, qty, amount, invoiceDate)
+// before insert so that two ingest runs loading overlapping source rows cannot
+// produce distinct line_uid values for the same logical invoice line.
+// Within a group of natural-key duplicates, we keep the row with the earliest
+// line_uid (alphabetical), which is deterministic and consistent across runs.
+function dedupeByNaturalKey(lines: InsertSaleLine[]): InsertSaleLine[] {
+  const seen = new Map<string, InsertSaleLine>();
+  for (const line of lines) {
+    const nk = [
+      line.fy ?? "",
+      line.invoiceNo ?? "",
+      line.code ?? "",
+      String(line.qty ?? ""),
+      String(line.amount ?? ""),
+      line.invoiceDate instanceof Date
+        ? line.invoiceDate.toISOString().slice(0, 10)
+        : String(line.invoiceDate ?? ""),
+    ].join("|");
+    const existing = seen.get(nk);
+    if (!existing || (line.lineUid ?? "") < (existing.lineUid ?? "")) {
+      seen.set(nk, line);
+    }
+  }
+  return [...seen.values()];
+}
+
 export async function insertSaleLineBatches(
   lines: InsertSaleLine[],
 ): Promise<{ inserted: number }> {
+  // Dedupe within the incoming set before hitting the DB.
+  const deduped = dedupeByNaturalKey(lines);
   let inserted = 0;
-  for (let i = 0; i < lines.length; i += BATCH_SIZE) {
-    const batch = lines.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < deduped.length; i += BATCH_SIZE) {
+    const batch = deduped.slice(i, i + BATCH_SIZE);
     const rows = await db
       .insert(saleLines)
       .values(batch)
