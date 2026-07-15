@@ -77,7 +77,7 @@ function TargetEditor() {
     const next = new Map<string, string[]>();
     for (const m of members) {
       const annual = m.saved?.annual.secondary ?? 0;
-      const monthly = m.saved?.monthly.secondary ?? [];
+      const monthly = coerceMonthly(m.saved?.monthly.secondary ?? []);
       const displayVals = annual > 0 || monthly.length > 0
         ? toDisplayValues(annual, monthly, cadence)
         : Array<number>(CADENCE_LENGTHS[cadence]).fill(0);
@@ -106,7 +106,7 @@ function TargetEditor() {
   // Compute dirty count.
   const dirtyCount = members.filter((m) => {
     const annual = m.saved?.annual.secondary ?? 0;
-    const monthly = m.saved?.monthly.secondary ?? [];
+    const monthly = coerceMonthly(m.saved?.monthly.secondary ?? []);
     const savedDisplay = annual > 0 || monthly.length > 0
       ? toDisplayValues(annual, monthly, cadence)
       : Array<number>(colCount).fill(0);
@@ -120,7 +120,7 @@ function TargetEditor() {
     const rows = members
       .map((m) => {
         const annual = m.saved?.annual.secondary ?? 0;
-        const monthly = m.saved?.monthly.secondary ?? [];
+        const monthly = coerceMonthly(m.saved?.monthly.secondary ?? []);
         const savedDisplay = annual > 0 || monthly.length > 0
           ? toDisplayValues(annual, monthly, cadence)
           : Array<number>(colCount).fill(0);
@@ -132,7 +132,7 @@ function TargetEditor() {
         const newAnnual = parsedVals.reduce((s, v) => s + v, 0);
 
         // For monthly cadence, save the 12 monthly values; otherwise keep existing monthly.
-        const newMonthly = cadence === "monthly" ? parsedVals : (m.saved?.monthly.secondary ?? []);
+        const newMonthly = cadence === "monthly" ? parsedVals : monthly;
 
         return {
           teamMember: m.name,
@@ -245,7 +245,7 @@ function TargetEditor() {
               <tbody className="divide-y">
                 {members.map((m, idx) => {
                   const annual = m.saved?.annual.secondary ?? 0;
-                  const monthlyArr = m.saved?.monthly.secondary ?? [];
+                  const monthlyArr = coerceMonthly(m.saved?.monthly.secondary ?? []);
                   const savedDisplay = annual > 0 || monthlyArr.length > 0
                     ? toDisplayValues(annual, monthlyArr, cadence)
                     : Array<number>(colCount).fill(0);
