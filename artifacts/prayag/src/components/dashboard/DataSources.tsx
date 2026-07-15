@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useDashboard } from "@/data/dashboard-context";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { FileText, Database, FolderGit2, CheckCircle2, Clock, Save, Loader2, AlertTriangle } from "lucide-react";
@@ -12,47 +12,106 @@ import PrimaryTargetsEntry from "./PrimaryTargetsEntry";
 
 const FYS = ["2026-27", "2025-26"];
 
-function fmtCr(n: number | null | undefined): string {
+type Cadence = "annual" | "half_yearly" | "quarterly" | "monthly";
+
+const CADENCE_LABELS: Record<Cadence, string[]> = {
+  annual: ["Annual (₹ Cr)"],
+  half_yearly: ["H1 Apr-Sep", "H2 Oct-Mar"],
+  quarterly: ["Q1 Apr-Jun", "Q2 Jul-Sep", "Q3 Oct-Dec", "Q4 Jan-Mar"],
+  monthly: ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"],
+};
+
+const CADENCE_LENGTHS: Record<Cadence, number> = {
+  annual: 1,
+  half_yearly: 2,
+  quarterly: 4,
+  monthly: 12,
+};
+
+function fmtCrPrior(n: number | null | undefined): string {
   if (n == null) return "—";
   return `\u20b9${(n / 1e7).toFixed(2)} Cr`;
 }
 
-function toNum(s: string): number | null {
-  if (s.trim() === "") return null;
-  const n = Number(s.replace(/[,\s]/g, ""));
-  return Number.isFinite(n) ? n : null;
+function fmtCr(n: number): string {
+  if (!n || n === 0) return "";
+  return (n / 1e7).toFixed(2);
+}
+
+function parseCr(s: string): number {
+  const n = parseFloat(s.replace(/[,\s]/g, ""));
+  return Number.isFinite(n) ? Math.round(n * 1e7) : 0;
+}
+
+function toDisplayValues(annualRupees: number, monthlyArr: number[], cadence: Cadence): number[] {
+  const n = CADENCE_LENGTHS[cadence];
+  if (cadence === "monthly" && monthlyArr.length === 12) return [...monthlyArr];
+  const perPeriod = annualRupees / n;
+  if (cadence === "annual") return [annualRupees];
+  if (cadence === "half_yearly") return [perPeriod, perPeriod];
+  if (cadence === "quarterly") return [perPeriod, perPeriod, perPeriod, perPeriod];
+  return Array(12).fill(perPeriod);
+}
+
+function emptyEdits(cadence: Cadence): string[] {
+  return Array<string>(CADENCE_LENGTHS[cadence]).fill("");
+}
+
+function coerceMonthly(arr: (number | null)[]): number[] {
+  return arr.map((v) => v ?? 0);
 }
 
 function TargetEditor() {
   const [fy, setFy] = useState(FYS[0]);
+  const [cadence, setCadence] = useState<Cadence>("annual");
   const targets = useGetTargets({ fy });
   const save = useSaveTargets();
-  const [edits, setEdits] = useState<Map<string, string>>(new Map());
+  const [edits, setEdits] = useState<Map<string, string[]>>(new Map());
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   const members: TargetsMember[] = targets.data?.members ?? [];
 
-  const getValue = useCallback(
-    (m: TargetsMember) => {
-      if (edits.has(m.name)) return edits.get(m.name)!;
-      const v = m.saved?.annual.secondary;
-      return v == null ? "" : String(v);
-    },
-    [edits],
-  );
-
-  const setValue = (name: string, v: string) => {
+  // Re-initialise edits from saved values whenever data or cadence changes.
+  useEffect(() => {
+    const next = new Map<string, string[]>();
+    for (const m of members) {
+      const annual = m.saved?.annual.secondary ?? 0;
+      const monthly = m.saved?.monthly.secondary ?? [];
+      const displayVals = annual > 0 || monthly.length > 0
+        ? toDisplayValues(annual, monthly, cadence)
+        : Array<number>(CADENCE_LENGTHS[cadence]).fill(0);
+      next.set(m.name, displayVals.map((v) => (v > 0 ? fmtCr(v) : "")));
+    }
+    setEdits(next);
     setSaveSuccess(false);
-    setEdits((prev) => new Map(prev).set(name, v));
-  };
+    setSaveError(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targets.data, cadence]);
 
-  const dirtyCount = [...edits.entries()].filter(([name, val]) => {
-    const member = members.find((m) => m.name === name);
-    if (!member) return false;
-    const savedVal = member.saved?.annual.secondary;
-    const editedNum = toNum(val);
-    return editedNum !== (savedVal ?? null);
+  const handleChange = useCallback((name: string, idx: number, val: string) => {
+    setEdits((prev) => {
+      const next = new Map(prev);
+      const row = [...(next.get(name) ?? emptyEdits(cadence))];
+      row[idx] = val;
+      next.set(name, row);
+      return next;
+    });
+    setSaveSuccess(false);
+  }, [cadence]);
+
+  const colLabels = CADENCE_LABELS[cadence];
+  const colCount = CADENCE_LENGTHS[cadence];
+
+  // Compute dirty count.
+  const dirtyCount = members.filter((m) => {
+    const annual = m.saved?.annual.secondary ?? 0;
+    const monthly = m.saved?.monthly.secondary ?? [];
+    const savedDisplay = annual > 0 || monthly.length > 0
+      ? toDisplayValues(annual, monthly, cadence)
+      : Array<number>(colCount).fill(0);
+    const vals = edits.get(m.name) ?? emptyEdits(cadence);
+    return vals.some((v, i) => parseCr(v) !== (savedDisplay[i] ?? 0));
   }).length;
 
   const handleSave = async () => {
@@ -60,21 +119,32 @@ function TargetEditor() {
     setSaveSuccess(false);
     const rows = members
       .map((m) => {
-        const raw = getValue(m);
-        const secondary = toNum(raw);
-        const saved = m.saved?.annual.secondary ?? null;
-        if (secondary === saved) return null;
+        const annual = m.saved?.annual.secondary ?? 0;
+        const monthly = m.saved?.monthly.secondary ?? [];
+        const savedDisplay = annual > 0 || monthly.length > 0
+          ? toDisplayValues(annual, monthly, cadence)
+          : Array<number>(colCount).fill(0);
+        const vals = edits.get(m.name) ?? emptyEdits(cadence);
+        const isDirty = vals.some((v, i) => parseCr(v) !== (savedDisplay[i] ?? 0));
+        if (!isDirty) return null;
+
+        const parsedVals = vals.map((v) => parseCr(v));
+        const newAnnual = parsedVals.reduce((s, v) => s + v, 0);
+
+        // For monthly cadence, save the 12 monthly values; otherwise keep existing monthly.
+        const newMonthly = cadence === "monthly" ? parsedVals : (m.saved?.monthly.secondary ?? []);
+
         return {
           teamMember: m.name,
           annual: {
             primary: m.saved?.annual.primary ?? null,
-            secondary,
+            secondary: newAnnual > 0 ? newAnnual : null,
             directDealer: m.saved?.annual.directDealer ?? null,
             businessPlan: m.saved?.annual.businessPlan ?? null,
           },
           monthly: {
             primary: m.saved?.monthly.primary ?? [],
-            secondary: m.saved?.monthly.secondary ?? [],
+            secondary: newMonthly,
             directDealer: m.saved?.monthly.directDealer ?? [],
             businessPlan: m.saved?.monthly.businessPlan ?? [],
           },
@@ -85,7 +155,6 @@ function TargetEditor() {
     if (rows.length === 0) return;
     try {
       await save.mutateAsync({ data: { fy, rows } });
-      setEdits(new Map());
       setSaveSuccess(true);
       await targets.refetch();
     } catch (err) {
@@ -103,15 +172,25 @@ function TargetEditor() {
               Annual secondary order booking targets per team member. Stored in the database and applied across all management reports.
             </CardDescription>
           </div>
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-3 shrink-0 flex-wrap">
             <select
               value={fy}
-              onChange={(e) => { setFy(e.target.value); setEdits(new Map()); setSaveSuccess(false); }}
+              onChange={(e) => { setFy(e.target.value); setSaveSuccess(false); }}
               className="h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             >
               {FYS.map((f) => (
                 <option key={f} value={f}>FY {f}</option>
               ))}
+            </select>
+            <select
+              value={cadence}
+              onChange={(e) => setCadence(e.target.value as Cadence)}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="annual">Annual</option>
+              <option value="half_yearly">Half-Yearly</option>
+              <option value="quarterly">Quarterly</option>
+              <option value="monthly">Monthly</option>
             </select>
             {dirtyCount > 0 && (
               <button
@@ -156,47 +235,58 @@ function TargetEditor() {
                   <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">State Head</th>
                   <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">State</th>
                   <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Prior Year</th>
-                  <th className="px-4 py-2.5 text-right font-medium text-muted-foreground">Secondary Target (Annual, ₹)</th>
+                  {colLabels.map((lbl) => (
+                    <th key={lbl} className="px-2 py-2.5 text-right font-medium text-muted-foreground whitespace-nowrap">
+                      {lbl}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {members.map((m, idx) => {
-                  const val = getValue(m);
-                  const savedVal = m.saved?.annual.secondary ?? null;
-                  const editedNum = toNum(val);
-                  const isDirty = editedNum !== savedVal;
+                  const annual = m.saved?.annual.secondary ?? 0;
+                  const monthlyArr = m.saved?.monthly.secondary ?? [];
+                  const savedDisplay = annual > 0 || monthlyArr.length > 0
+                    ? toDisplayValues(annual, monthlyArr, cadence)
+                    : Array<number>(colCount).fill(0);
+                  const vals = edits.get(m.name) ?? emptyEdits(cadence);
+                  const isDirty = vals.some((v, i) => parseCr(v) !== (savedDisplay[i] ?? 0));
+                  const hasSaved = annual > 0;
                   return (
-                    <tr key={m.name} className="hover:bg-muted/30 transition-colors">
+                    <tr key={m.name} className={`hover:bg-muted/30 transition-colors ${isDirty ? "bg-primary/5" : ""}`}>
                       <td className="px-4 py-2 text-muted-foreground tabular-nums text-sm">{idx + 1}</td>
-                      <td className="px-4 py-2 font-medium">{m.name}</td>
+                      <td className="px-4 py-2 font-medium whitespace-nowrap">
+                        {m.name}
+                        {hasSaved && !isDirty && (
+                          <span className="ml-2 text-xs text-muted-foreground tabular-nums">
+                            ₹{(annual / 1e7).toFixed(2)} Cr
+                          </span>
+                        )}
+                        {isDirty && <span className="ml-2 text-xs text-primary">edited</span>}
+                      </td>
                       <td className="px-4 py-2 text-muted-foreground">{m.stateHead}</td>
                       <td className="px-4 py-2 text-muted-foreground">{m.state}</td>
-                      <td className="px-4 py-2 text-muted-foreground tabular-nums">{fmtCr(m.priorYearActual)}</td>
-                      <td className="px-4 py-2">
-                        <div className="flex items-center justify-end gap-2">
-                          {isDirty && savedVal != null && (
-                            <span className="text-xs text-muted-foreground tabular-nums line-through">
-                              {fmtCr(savedVal)}
-                            </span>
-                          )}
+                      <td className="px-4 py-2 text-muted-foreground tabular-nums">{fmtCrPrior(m.priorYearActual)}</td>
+                      {vals.map((v, i) => (
+                        <td key={i} className="px-2 py-1.5">
                           <input
                             type="text"
-                            inputMode="numeric"
-                            value={val}
-                            onChange={(e) => setValue(m.name, e.target.value)}
-                            placeholder="e.g. 6000000"
-                            className={`w-36 text-right rounded border px-2 py-1 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-ring bg-background ${
+                            inputMode="decimal"
+                            value={v}
+                            onChange={(e) => handleChange(m.name, i, e.target.value)}
+                            placeholder={savedDisplay[i] ? fmtCr(savedDisplay[i]) : "0.00"}
+                            className={`w-24 text-right rounded border px-2 py-1 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-ring bg-background ${
                               isDirty ? "border-primary" : "border-input"
                             }`}
                           />
-                        </div>
-                      </td>
+                        </td>
+                      ))}
                     </tr>
                   );
                 })}
                 {members.length === 0 && !targets.isLoading && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    <td colSpan={5 + colCount} className="px-4 py-8 text-center text-sm text-muted-foreground">
                       No team members found for FY {fy}.
                     </td>
                   </tr>
@@ -206,7 +296,7 @@ function TargetEditor() {
           </div>
         )}
         <p className="px-4 mt-3 text-xs text-muted-foreground">
-          Enter annual target in rupees (e.g. 6000000 for ₹60 Lakh). Blank clears the saved target.
+          Enter targets in crores (e.g. 0.60 for ₹60 Lakh). Values entered in monthly cadence are stored per-month; other cadences split the annual total equally across months.
         </p>
       </CardContent>
     </Card>
