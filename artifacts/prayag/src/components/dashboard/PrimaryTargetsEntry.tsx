@@ -64,6 +64,7 @@ function emptyEdits(cadence: Cadence): string[] {
 }
 
 interface RowProps {
+  serialNo: number;
   name: string;
   role: Role;
   cadence: Cadence;
@@ -72,7 +73,7 @@ interface RowProps {
   onChange: (name: string, idx: number, val: string) => void;
 }
 
-function TargetRow({ name, role: _role, cadence, savedMonthly, vals, onChange }: RowProps) {
+function TargetRow({ serialNo, name, role: _role, cadence, savedMonthly, vals, onChange }: RowProps) {
   const savedDisplay = savedMonthly ? toDisplayValues(savedMonthly, cadence) : [];
   const isDirty = vals.some((v, i) => {
     const saved = savedDisplay[i] ?? 0;
@@ -82,6 +83,7 @@ function TargetRow({ name, role: _role, cadence, savedMonthly, vals, onChange }:
 
   return (
     <tr className={`hover:bg-muted/30 transition-colors ${isDirty ? "bg-primary/5" : ""}`}>
+      <td className="px-3 py-2 text-muted-foreground tabular-nums text-sm w-10">{serialNo}</td>
       <td className="px-3 py-2 font-medium text-sm whitespace-nowrap">
         {name}
         {hasSaved && !isDirty && (
@@ -134,6 +136,7 @@ function GroupTable({ title, names, role, cadence, savedMap, edits, onChange }: 
         <table className="w-full text-sm">
           <thead className="bg-muted/40">
             <tr>
+              <th className="px-3 py-2 text-left font-medium text-muted-foreground w-10">S.No.</th>
               <th className="px-3 py-2 text-left font-medium text-muted-foreground">Name</th>
               {colLabels.map((lbl) => (
                 <th key={lbl} className="px-2 py-2 text-right font-medium text-muted-foreground whitespace-nowrap">
@@ -143,9 +146,10 @@ function GroupTable({ title, names, role, cadence, savedMap, edits, onChange }: 
             </tr>
           </thead>
           <tbody className="divide-y">
-            {names.map((name) => (
+            {names.map((name, idx) => (
               <TargetRow
                 key={name}
+                serialNo={idx + 1}
                 name={name}
                 role={role}
                 cadence={cadence}

@@ -153,6 +153,7 @@ function TargetEditor() {
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
                 <tr>
+                  <th className="px-4 py-2.5 text-left font-medium text-muted-foreground w-10">S.No.</th>
                   <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Name</th>
                   <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">State Head</th>
                   <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">State</th>
@@ -161,13 +162,14 @@ function TargetEditor() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {members.map((m) => {
+                {members.map((m, idx) => {
                   const val = getValue(m);
                   const savedVal = m.saved?.annual.secondary ?? null;
                   const editedNum = toNum(val);
                   const isDirty = editedNum !== savedVal;
                   return (
                     <tr key={m.name} className="hover:bg-muted/30 transition-colors">
+                      <td className="px-4 py-2 text-muted-foreground tabular-nums text-sm">{idx + 1}</td>
                       <td className="px-4 py-2 font-medium">{m.name}</td>
                       <td className="px-4 py-2 text-muted-foreground">{m.stateHead}</td>
                       <td className="px-4 py-2 text-muted-foreground">{m.state}</td>
@@ -196,7 +198,7 @@ function TargetEditor() {
                 })}
                 {members.length === 0 && !targets.isLoading && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    <td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">
                       No team members found for FY {fy}.
                     </td>
                   </tr>
