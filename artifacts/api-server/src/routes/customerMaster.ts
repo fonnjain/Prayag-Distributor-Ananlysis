@@ -225,59 +225,128 @@ router.post(
 
 // ── IMPORT COMMIT — must be before /:id ──────────────────────────────────────
 
-router.post("/customer-master/import/commit", async (req: Request, res: Response): Promise<void> => {
-  const body = req.body as { rows: Record<string, Partial<CustomerMaster>>; editedBy?: string; batchId?: string };
-  if (!body?.rows || typeof body.rows !== "object") { res.status(400).json({ error: "rows is required." }); return; }
+// "Guessed (MH dominant)" and any other "Guessed*" variants normalise to "Guessed"
+// so inline-edit validation (which only allows "Confirmed" / "Guessed") continues to work.
+const normaliseConfidence = (v: string | undefined | null): "Confirmed" | "Guessed" =>
+  v && v.startsWith("Confirmed") ? "Confirmed" : "Guessed";
 
-  const editedBy = typeof body.editedBy === "string" && body.editedBy.trim() ? body.editedBy.trim() : "import";
-  const batchId = body.batchId ?? randomUUID();
-  const now = new Date();
+const CHUNK = 200; // safe well under Postgres 65535-parameter limit
+function chunks<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
 
-  try {
-    const ids = Object.keys(body.rows);
-    const existing = ids.length === 0 ? [] : await db.select().from(customerMaster)
-      .where(inArray(customerMaster.id, ids));
-    const existingMap = new Map(existing.map((r) => [r.id, r]));
+router.post(
+  "/customer-master/import/commit",
+  express.json({ limit: "20mb" }),
+  async (req: Request, res: Response): Promise<void> => {
+    const body = req.body as { rows: Record<string, Partial<CustomerMaster>>; editedBy?: string; batchId?: string };
+    if (!body?.rows || typeof body.rows !== "object") {
+      res.status(400).json({ error: "rows is required." }); return;
+    }
 
-    let inserted = 0;
-    let updated = 0;
+    const editedBy = typeof body.editedBy === "string" && body.editedBy.trim() ? body.editedBy.trim() : "import";
+    const batchId = body.batchId ?? randomUUID();
+    const now = new Date();
 
+    // ── Upfront validation (before touching the DB) ──────────────────────────
     for (const [id, row] of Object.entries(body.rows)) {
-      const old = existingMap.get(id);
-      if (!old) {
-        await db.insert(customerMaster).values({
-          id, company: row.company ?? "", type: row.type ?? "", status: row.status ?? "Active",
-          contact: row.contact ?? null, mobile: row.mobile ?? null, state: row.state ?? null,
-          district: row.district ?? null, city: row.city ?? null, stateHead: row.stateHead ?? null,
-          headConfidence: row.headConfidence ?? "Guessed",
-          supplyingDistributor: row.supplyingDistributor ?? null, notes: row.notes ?? null, editedBy,
-        });
-        await logChange(id, "_created", null, "imported", editedBy, "import", batchId);
-        inserted++;
-      } else {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const patch: Record<string, any> = { updatedAt: now, editedBy };
-        let changed = false;
-        for (const f of UPDATABLE_FIELDS) {
-          const ov = String(old[f] ?? "");
-          const nv = String((row as Record<string, unknown>)[f] ?? "");
-          if (ov !== nv) {
-            patch[f] = (row as Record<string, unknown>)[f];
-            await logChange(id, f, ov, nv, editedBy, "import", batchId);
-            changed = true;
-          }
-        }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        if (changed) { await db.update(customerMaster).set(patch).where(eq(customerMaster.id, id)); updated++; }
+      const t = row.type ?? "";
+      const s = row.status ?? "Active";
+      if (t && !VALID_TYPES.has(t)) {
+        res.status(422).json({
+          error: `Row ${id}: invalid type "${t}". Allowed values: Distributor, Direct Dealer, Retailer.`,
+        }); return;
+      }
+      if (s && !VALID_STATUSES.has(s)) {
+        res.status(422).json({
+          error: `Row ${id}: invalid status "${s}". Allowed values: Active, Inactive, Closed, Converted.`,
+        }); return;
       }
     }
 
-    res.json({ batchId, inserted, updated });
-  } catch (err) {
-    req.log.error({ err }, "customer-master import commit failed");
-    res.status(500).json({ error: "Import failed." });
-  }
-});
+    try {
+      const ids = Object.keys(body.rows);
+      const existing = ids.length === 0 ? [] : await db.select().from(customerMaster)
+        .where(inArray(customerMaster.id, ids));
+      const existingMap = new Map(existing.map((r) => [r.id, r]));
+
+      // Separate inserts from updates upfront
+      const toInsert: Array<typeof customerMaster.$inferInsert> = [];
+      const toUpdate: Array<{ id: string; patch: Record<string, unknown>; logEntries: Array<typeof customerMasterLog.$inferInsert> }> = [];
+
+      for (const [id, row] of Object.entries(body.rows)) {
+        const old = existingMap.get(id);
+        const hc = normaliseConfidence(row.headConfidence);
+        if (!old) {
+          toInsert.push({
+            id, company: row.company ?? "", type: row.type ?? "", status: row.status ?? "Active",
+            contact: row.contact ?? null, mobile: row.mobile ?? null, state: row.state ?? null,
+            district: row.district ?? null, city: row.city ?? null, stateHead: row.stateHead ?? null,
+            headConfidence: hc,
+            supplyingDistributor: row.supplyingDistributor ?? null, notes: row.notes ?? null, editedBy,
+          });
+        } else {
+          const normalised = { ...row, headConfidence: hc } as Record<string, unknown>;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const patch: Record<string, any> = { updatedAt: now, editedBy };
+          const logEntries: Array<typeof customerMasterLog.$inferInsert> = [];
+          for (const f of UPDATABLE_FIELDS) {
+            const ov = String(old[f] ?? "");
+            const nv = String(normalised[f] ?? "");
+            if (ov !== nv) {
+              patch[f] = normalised[f];
+              logEntries.push({ customerId: id, field: f, oldValue: ov, newValue: nv, changedBy: editedBy, reason: "import", importBatch: batchId });
+            }
+          }
+          if (logEntries.length > 0) toUpdate.push({ id, patch, logEntries });
+        }
+      }
+
+      // ── All-or-nothing transaction ────────────────────────────────────────
+      await db.transaction(async (tx) => {
+        // Bulk-insert new rows in chunks
+        for (const chunk of chunks(toInsert, CHUNK)) {
+          await tx.insert(customerMaster).values(chunk);
+        }
+        // Bulk-insert creation log entries
+        const createLogs: Array<typeof customerMasterLog.$inferInsert> = toInsert.map((r) => ({
+          customerId: r.id, field: "_created", oldValue: null, newValue: "imported",
+          changedBy: editedBy, reason: "import", importBatch: batchId,
+        }));
+        for (const chunk of chunks(createLogs, CHUNK)) {
+          await tx.insert(customerMasterLog).values(chunk);
+        }
+        // Apply updates and their logs
+        for (const { id, patch, logEntries } of toUpdate) {
+          await tx.update(customerMaster).set(patch).where(eq(customerMaster.id, id));
+          for (const chunk of chunks(logEntries, CHUNK)) {
+            await tx.insert(customerMasterLog).values(chunk);
+          }
+        }
+      });
+
+      const inserted = toInsert.length;
+      const updated = toUpdate.length;
+      const unchanged = ids.length - inserted - updated;
+
+      // Per-type counts across everything committed
+      const typeCounts: Record<string, number> = {};
+      for (const row of Object.values(body.rows)) {
+        const t = row.type ?? "Unknown";
+        typeCounts[t] = (typeCounts[t] ?? 0) + 1;
+      }
+
+      req.log.info({ batchId, inserted, updated, unchanged, typeCounts }, "customer-master import committed");
+      res.json({ batchId, inserted, updated, unchanged, typeCounts });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      req.log.error({ err, batchId }, "customer-master import commit failed");
+      res.status(500).json({ error: `Import failed: ${msg}` });
+    }
+  },
+);
 
 // ── MISMATCH COUNT (for nav badges) — must be before /:id ────────────────────
 
