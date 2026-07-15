@@ -34,6 +34,11 @@ import {
   type SecMember,
 } from "../lib/mgmt/stateDashboard.js";
 import { splitAnnualToMonth, getSeasonalCalibration } from "../lib/seasonal.js";
+import {
+  buildPrimaryTargetMap,
+  periodTarget as dbPeriodTarget,
+} from "../lib/mgmt/primaryTargets.js";
+import { normName } from "../lib/mgmt/names.js";
 
 const router: IRouter = Router();
 
@@ -258,10 +263,12 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
   }
 
   try {
-    const [assembled, hrSfa, secDash] = await Promise.all([
+    const [assembled, hrSfa, secDash, dbTargetMap] = await Promise.all([
       assembleRows(filters),
       loadHrSfaDashboard().catch((): Map<string, HrSfaRecord> => new Map()),
       loadStateDashboard(fy).catch((): null => null),
+      // DB primary targets override/supplement Target Master when available.
+      buildPrimaryTargetMap(fy).catch((): Map<string, number[]> => new Map()),
     ]);
     const { rows, ordersAvailable, targetsAvailable, rosterSource, orderStatus, nameMatches, xlsxTargetDiagnostic } = assembled;
     // Build a normKey → SecMember lookup for the member-row merge below.
@@ -335,8 +342,15 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
 
     const members = rows.map((r) => {
       const tgtSec = tgtPeriod(r.target, "secondary", monthFrom, monthTo);
-      const tgtPri = tgtPeriod(r.target, "primary", monthFrom, monthTo);
       const tgtBp = tgtPeriod(r.target, "businessPlan", monthFrom, monthTo);
+      // DB-stored primary target overrides the Target Master when present.
+      const dbMonthly12 = dbTargetMap.get(r.m.normKey);
+      const tgtPri = dbMonthly12 != null
+        ? dbPeriodTarget(dbMonthly12, monthFrom, monthTo)
+        : tgtPeriod(r.target, "primary", monthFrom, monthTo);
+      const dbAnnualPrimary = dbMonthly12 != null
+        ? dbMonthly12.reduce((s, v) => s + v, 0)
+        : null;
       const booking = r.orders?.amount ?? null;
       const sec = secByKey.get(r.m.normKey);
       // Achievement = Sales Received / Plan (STATE HEAD DASHBOARD — authoritative).
@@ -362,7 +376,7 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         targetBusinessPlan: tgtBp,
         // Annual figures for the UI to compute period-share labels ("₹X = ₹Y × Z%").
         // These are the raw annual targets before seasonal splitting; null when unset.
-        targetPrimaryAnnual: r.target?.annual.primary ?? null,
+        targetPrimaryAnnual: dbAnnualPrimary ?? r.target?.annual.primary ?? null,
         targetBusinessPlanAnnual: r.target?.annual.businessPlan ?? null,
         // Secondary order booking: STATE HEAD DASHBOARD (authoritative) > old order file
         orderBooking: sec?.ytdOrderBooked ?? booking,
@@ -563,6 +577,17 @@ router.get("/mgmt/primary", async (req: Request, res: Response): Promise<void> =
       );
     }
 
+    // Build head-level primary target map from DB for use in the response.
+    const dbHeadTargetMap = await buildPrimaryTargetMap(fy).catch((): Map<string, number[]> => new Map());
+    const headPrimaryTargets: Record<string, number | null> = {};
+    for (const row of sheetData.byHead) {
+      const nk = normName(row.head);
+      const monthly12 = nk ? dbHeadTargetMap.get(nk) : undefined;
+      headPrimaryTargets[row.head] = monthly12 != null
+        ? monthly12.reduce((s, v) => s + v, 0)
+        : null;
+    }
+
     res.json({
       fy,
       companyBooking: sheetData.companyBooking,
@@ -572,6 +597,7 @@ router.get("/mgmt/primary", async (req: Request, res: Response): Promise<void> =
       byDistributor: sheetData.byDistributor,
       byMember,
       bridgeStatus,
+      headPrimaryTargets,
       sources: sheetData.sources,
       bookingAvailable: sheetData.bookingAvailable,
       saleAvailable: sheetData.saleAvailable,

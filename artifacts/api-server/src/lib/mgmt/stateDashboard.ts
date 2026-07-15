@@ -132,6 +132,7 @@ export type SecDashboard = {
   tabName: string;
   members: SecMember[];
   primaryRoleKeys: Set<string>;
+  primaryRoleNames: string[];   // raw display names from the PRIMARY TEAM MEMBERS tab
   // Company totals — ALL members, ALL months (open+closed, anomalous included).
   // These must tie exactly to the sheet's own TOTAL row.
   totalPlan: number;
@@ -382,23 +383,43 @@ function detectMonthBlocks(
 
 // ── Primary-role member list ──────────────────────────────────────────────────
 
-async function loadPrimaryRoleKeys(sheetId: string): Promise<Set<string>> {
+async function loadPrimaryRoleKeys(
+  sheetId: string,
+): Promise<{ keys: Set<string>; names: string[] }> {
   const keys = new Set<string>();
+  const names: string[] = [];
   const tab = await findTab(sheetId, PRIMARY_MEMBERS_TAB_PREFIX);
-  if (!tab) return keys;
+  if (!tab) return { keys, names };
   try {
     const rows = await readAllTabRows(sheetId, tab);
     for (const row of rows) {
       const name = cellStr(row?.[1] ?? row?.[0]);
-      if (name && !name.toUpperCase().startsWith("S.") && !name.toUpperCase().includes("MEMBER")) {
-        const k = normName(name);
-        if (k) keys.add(k);
+      if (!name) continue;
+      const trimmed = name.trim();
+      // Skip row numbers, blank cells, and obvious header rows.
+      if (!trimmed || trimmed.length < 3) continue;
+      if (/^\d+$/.test(trimmed)) continue;  // pure number → row index
+      const upper = trimmed.toUpperCase();
+      if (
+        upper.startsWith("S.") ||      // S.No. column headers
+        upper.startsWith("SR.") ||
+        upper.includes("MEMBER") ||
+        upper.includes("REPORTING") ||
+        upper.includes("STATE HEAD") ||
+        upper.includes("TEAM HEAD") ||
+        upper.includes("S.NO") ||
+        upper.includes("SR.NO")
+      ) continue;
+      const k = normName(trimmed);
+      if (k && !keys.has(k)) {          // deduplicate by normKey
+        keys.add(k);
+        names.push(trimmed);
       }
     }
   } catch (err) {
     logger.warn({ err, sheetId, tab }, "stateDashboard: primary role tab read failed");
   }
-  return keys;
+  return { keys, names };
 }
 
 // ── Main loader ───────────────────────────────────────────────────────────────
@@ -417,15 +438,17 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
     return null;
   }
 
-  // Load primary-role keys and the secondary data concurrently.
-  const [primaryRoleKeys, allRows] = await Promise.all([
-    loadPrimaryRoleKeys(sheetId).catch((): Set<string> => new Set()),
+  // Load primary-role keys/names and the secondary data concurrently.
+  const [primaryRoleResult, allRows] = await Promise.all([
+    loadPrimaryRoleKeys(sheetId).catch((): { keys: Set<string>; names: string[] } => ({ keys: new Set(), names: [] })),
     (async () => {
       const rows: SheetCellValue[][] = [];
       await readTabRowsChunked(sheetId, tabName, (batch) => rows.push(...batch));
       return rows;
     })(),
   ]);
+
+  const { keys: primaryRoleKeys, names: primaryRoleNames } = primaryRoleResult;
 
   logger.info({ fy, tab: tabName, rows: allRows.length }, "stateDashboard: raw rows read");
 
@@ -734,6 +757,7 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
     tabName,
     members,
     primaryRoleKeys,
+    primaryRoleNames,
     totalPlan,
     totalOrderBooked,
     totalSalesReceived,

@@ -473,6 +473,73 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /primary-targets:
+    get:
+      operationId: getPrimaryTargets
+      tags: [mgmt]
+      summary: Load DB-persisted primary target entries for a fiscal year
+      description: >
+        Returns the roster (state heads + primary team members) for the FY and
+        any primary target entries saved in the database. Each entry includes a
+        precomputed monthlyExpanded array (12 values, Apr-Mar) derived from the
+        cadence and seasonal weights.
+      parameters:
+        - name: fy
+          in: query
+          schema: { type: string }
+          description: Fiscal year like 2026-27. Defaults to 2026-27.
+      responses:
+        "200":
+          description: Roster with saved primary target entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrimaryTargetsResponse"
+        "400":
+          description: Invalid fiscal year
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Load failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: savePrimaryTargets
+      tags: [mgmt]
+      summary: Save primary target entries to the database
+      description: >
+        Upserts primary target rows, keyed by fiscal year and name. Seasonal
+        splitting is applied server-side when targets are read back via
+        GET /primary-targets or in the management report route.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SavePrimaryTargetsRequest"
+      responses:
+        "200":
+          description: Save result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavePrimaryTargetsResult"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Save failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /salespeople/tree:
     get:
       operationId: getSalesPeopleTree
@@ -1686,6 +1753,78 @@ components:
         - syncedAt
         - sourceStatus
 
+    PrimaryTargetEntry:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Display name of the state head or team member.
+        role:
+          type: string
+          enum: [state_head, team_member]
+        cadence:
+          type: string
+          enum: [annual, half_yearly, quarterly, monthly]
+        values:
+          type: array
+          items: { type: number }
+          description: >
+            1, 2, 4, or 12 rupee values depending on cadence.
+        monthlyExpanded:
+          type: array
+          items: { type: number }
+          description: >
+            Precomputed 12-element array (Apr-Mar) derived from cadence +
+            seasonal weights.
+      required: [name, role, cadence, values, monthlyExpanded]
+    PrimaryTargetsResponse:
+      type: object
+      properties:
+        fy:
+          type: string
+        stateHeads:
+          type: array
+          items: { type: string }
+          description: Display names of the 13 state heads for this FY.
+        teamMembers:
+          type: array
+          items: { type: string }
+          description: Display names of the 17 primary team members for this FY.
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrimaryTargetEntry"
+      required: [fy, stateHeads, teamMembers, entries]
+    SavePrimaryTargetsRequest:
+      type: object
+      properties:
+        fy:
+          type: string
+          description: Fiscal year like 2026-27.
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              role:
+                type: string
+                enum: [state_head, team_member]
+              cadence:
+                type: string
+                enum: [annual, half_yearly, quarterly, monthly]
+              values:
+                type: array
+                items: { type: number }
+            required: [name, role, cadence, values]
+      required: [fy, rows]
+    SavePrimaryTargetsResult:
+      type: object
+      properties:
+        saved:
+          type: integer
+          description: Number of rows upserted.
+      required: [saved]
     ErrorResponse:
       type: object
       properties:

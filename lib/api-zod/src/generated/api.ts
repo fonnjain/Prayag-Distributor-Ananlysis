@@ -467,6 +467,47 @@ export const GetTargetSplitPreviewResponse = zod.object({
 
 
 /**
+ * Returns the roster (state heads + primary team members) for the FY and any primary target entries saved in the database. Each entry includes a precomputed monthlyExpanded array (12 values, Apr-Mar) derived from the cadence and seasonal weights.
+ * @summary Load DB-persisted primary target entries for a fiscal year
+ */
+export const GetPrimaryTargetsQueryParams = zod.object({
+  "fy": zod.coerce.string().optional().describe('Fiscal year like 2026-27. Defaults to 2026-27.')
+})
+
+export const GetPrimaryTargetsResponse = zod.object({
+  "fy": zod.string(),
+  "stateHeads": zod.array(zod.string()).describe('Display names of the 13 state heads for this FY.'),
+  "teamMembers": zod.array(zod.string()).describe('Display names of the 17 primary team members for this FY.'),
+  "entries": zod.array(zod.object({
+  "name": zod.string().describe('Display name of the state head or team member.'),
+  "role": zod.enum(['state_head', 'team_member']),
+  "cadence": zod.enum(['annual', 'half_yearly', 'quarterly', 'monthly']),
+  "values": zod.array(zod.number()).describe('1, 2, 4, or 12 rupee values depending on cadence.\n'),
+  "monthlyExpanded": zod.array(zod.number()).describe('Precomputed 12-element array (Apr-Mar) derived from cadence + seasonal weights.\n')
+}))
+})
+
+
+/**
+ * Upserts primary target rows, keyed by fiscal year and name. Seasonal splitting is applied server-side when targets are read back via GET /primary-targets or in the management report route.
+ * @summary Save primary target entries to the database
+ */
+export const SavePrimaryTargetsBody = zod.object({
+  "fy": zod.string().describe('Fiscal year like 2026-27.'),
+  "rows": zod.array(zod.object({
+  "name": zod.string(),
+  "role": zod.enum(['state_head', 'team_member']),
+  "cadence": zod.enum(['annual', 'half_yearly', 'quarterly', 'monthly']),
+  "values": zod.array(zod.number())
+}))
+})
+
+export const SavePrimaryTargetsResponse = zod.object({
+  "saved": zod.number().describe('Number of rows upserted.')
+})
+
+
+/**
  * Returns the roster-derived reporting tree (State Heads as roots, sales people nested underneath by Reporting Manager) with each node's own and rolled-up team NET secondary order booking for the fiscal year.
  * @summary Reporting tree of State Heads and their sales people
  */

@@ -564,6 +564,80 @@ export interface DashboardResponse {
   refreshError?: string;
 }
 
+export type PrimaryTargetEntryRole = typeof PrimaryTargetEntryRole[keyof typeof PrimaryTargetEntryRole];
+
+
+export const PrimaryTargetEntryRole = {
+  state_head: 'state_head',
+  team_member: 'team_member',
+} as const;
+
+export type PrimaryTargetEntryCadence = typeof PrimaryTargetEntryCadence[keyof typeof PrimaryTargetEntryCadence];
+
+
+export const PrimaryTargetEntryCadence = {
+  annual: 'annual',
+  half_yearly: 'half_yearly',
+  quarterly: 'quarterly',
+  monthly: 'monthly',
+} as const;
+
+export interface PrimaryTargetEntry {
+  /** Display name of the state head or team member. */
+  name: string;
+  role: PrimaryTargetEntryRole;
+  cadence: PrimaryTargetEntryCadence;
+  /** 1, 2, 4, or 12 rupee values depending on cadence. */
+  values: number[];
+  /** Precomputed 12-element array (Apr-Mar) derived from cadence + seasonal weights. */
+  monthlyExpanded: number[];
+}
+
+export interface PrimaryTargetsResponse {
+  fy: string;
+  /** Display names of the 13 state heads for this FY. */
+  stateHeads: string[];
+  /** Display names of the 17 primary team members for this FY. */
+  teamMembers: string[];
+  entries: PrimaryTargetEntry[];
+}
+
+export type SavePrimaryTargetsRequestRowsItemRole = typeof SavePrimaryTargetsRequestRowsItemRole[keyof typeof SavePrimaryTargetsRequestRowsItemRole];
+
+
+export const SavePrimaryTargetsRequestRowsItemRole = {
+  state_head: 'state_head',
+  team_member: 'team_member',
+} as const;
+
+export type SavePrimaryTargetsRequestRowsItemCadence = typeof SavePrimaryTargetsRequestRowsItemCadence[keyof typeof SavePrimaryTargetsRequestRowsItemCadence];
+
+
+export const SavePrimaryTargetsRequestRowsItemCadence = {
+  annual: 'annual',
+  half_yearly: 'half_yearly',
+  quarterly: 'quarterly',
+  monthly: 'monthly',
+} as const;
+
+export type SavePrimaryTargetsRequestRowsItem = {
+  name: string;
+  role: SavePrimaryTargetsRequestRowsItemRole;
+  cadence: SavePrimaryTargetsRequestRowsItemCadence;
+  values: number[];
+};
+
+export interface SavePrimaryTargetsRequest {
+  /** Fiscal year like 2026-27. */
+  fy: string;
+  rows: SavePrimaryTargetsRequestRowsItem[];
+}
+
+export interface SavePrimaryTargetsResult {
+  /** Number of rows upserted. */
+  saved: number;
+}
+
 export interface ErrorResponse {
   /** Human-readable error message. */
   error: string;
@@ -1093,6 +1167,13 @@ primary?: number;
 secondary?: number;
 directDealer?: number;
 businessPlan?: number;
+};
+
+export type GetPrimaryTargetsParams = {
+/**
+ * Fiscal year like 2026-27. Defaults to 2026-27.
+ */
+fy?: string;
 };
 
 export type GetSalesPeopleTreeParams = {

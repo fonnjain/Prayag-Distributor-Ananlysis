@@ -8,6 +8,7 @@ import {
   type TargetsMember,
 } from "@workspace/api-client-react";
 import DataHealth from "./DataHealth";
+import PrimaryTargetsEntry from "./PrimaryTargetsEntry";
 
 const DashboardUploadPanel = lazy(() => import("./DashboardUploadPanel"));
 
@@ -235,6 +236,9 @@ export default function DataSources() {
           </Suspense>
         </CardContent>
       </Card>
+
+      {/* Editable primary targets */}
+      <PrimaryTargetsEntry />
 
       {/* Editable secondary targets */}
       <TargetEditor />

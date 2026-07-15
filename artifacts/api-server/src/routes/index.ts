@@ -13,6 +13,7 @@ import auditRouter from "./audit";
 import customersRouter from "./customers";
 import companyReportsRouter from "./companyReports";
 import schemesRouter from "./schemes";
+import primaryTargetsRouter from "./primaryTargets";
 
 const router: IRouter = Router();
 
@@ -30,5 +31,6 @@ router.use(auditRouter);
 router.use(customersRouter);
 router.use(companyReportsRouter);
 router.use(schemesRouter);
+router.use(primaryTargetsRouter);
 
 export default router;

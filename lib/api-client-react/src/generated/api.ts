@@ -32,6 +32,7 @@ import type {
   DriveFileList,
   ErrorResponse,
   GetAnalyticsParams,
+  GetPrimaryTargetsParams,
   GetSalesPeopleTreeParams,
   GetSalesPersonDeepDiveParams,
   GetSalesPersonReportsDownloadParams,
@@ -46,6 +47,7 @@ import type {
   MgmtOptions,
   MgmtReportRequest,
   MgmtVerifyResult,
+  PrimaryTargetsResponse,
   SalesRepReport,
   SalesTree,
   SalesVerify,
@@ -57,6 +59,8 @@ import type {
   SapStatus,
   SapUploadUrl,
   SapVerifyReport,
+  SavePrimaryTargetsRequest,
+  SavePrimaryTargetsResult,
   SaveTargetsRequest,
   SaveTargetsResult,
   SplitPreviewResponse,
@@ -1193,6 +1197,162 @@ export function useGetTargetSplitPreview<TData = Awaited<ReturnType<typeof getTa
 
 
 
+
+export const getGetPrimaryTargetsUrl = (params?: GetPrimaryTargetsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/primary-targets?${stringifiedParams}` : `/api/primary-targets`
+}
+
+/**
+ * Returns the roster (state heads + primary team members) for the FY and any primary target entries saved in the database. Each entry includes a precomputed monthlyExpanded array (12 values, Apr-Mar) derived from the cadence and seasonal weights.
+ * @summary Load DB-persisted primary target entries for a fiscal year
+ */
+export const getPrimaryTargets = async (params?: GetPrimaryTargetsParams, options?: RequestInit): Promise<PrimaryTargetsResponse> => {
+
+  return customFetch<PrimaryTargetsResponse>(getGetPrimaryTargetsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPrimaryTargetsQueryKey = (params?: GetPrimaryTargetsParams,) => {
+    return [
+    `/api/primary-targets`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetPrimaryTargetsQueryOptions = <TData = Awaited<ReturnType<typeof getPrimaryTargets>>, TError = ErrorType<ErrorResponse>>(params?: GetPrimaryTargetsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPrimaryTargets>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPrimaryTargetsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPrimaryTargets>>> = ({ signal }) => getPrimaryTargets(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPrimaryTargets>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPrimaryTargetsQueryResult = NonNullable<Awaited<ReturnType<typeof getPrimaryTargets>>>
+export type GetPrimaryTargetsQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Load DB-persisted primary target entries for a fiscal year
+ */
+
+export function useGetPrimaryTargets<TData = Awaited<ReturnType<typeof getPrimaryTargets>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetPrimaryTargetsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPrimaryTargets>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPrimaryTargetsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSavePrimaryTargetsUrl = () => {
+
+
+
+
+  return `/api/primary-targets`
+}
+
+/**
+ * Upserts primary target rows, keyed by fiscal year and name. Seasonal splitting is applied server-side when targets are read back via GET /primary-targets or in the management report route.
+ * @summary Save primary target entries to the database
+ */
+export const savePrimaryTargets = async (savePrimaryTargetsRequest: SavePrimaryTargetsRequest, options?: RequestInit): Promise<SavePrimaryTargetsResult> => {
+
+  return customFetch<SavePrimaryTargetsResult>(getSavePrimaryTargetsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(savePrimaryTargetsRequest)
+  }
+);}
+
+
+
+
+export const getSavePrimaryTargetsMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof savePrimaryTargets>>, TError,{data: BodyType<SavePrimaryTargetsRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof savePrimaryTargets>>, TError,{data: BodyType<SavePrimaryTargetsRequest>}, TContext> => {
+
+const mutationKey = ['savePrimaryTargets'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof savePrimaryTargets>>, {data: BodyType<SavePrimaryTargetsRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  savePrimaryTargets(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SavePrimaryTargetsMutationResult = NonNullable<Awaited<ReturnType<typeof savePrimaryTargets>>>
+    export type SavePrimaryTargetsMutationBody = BodyType<SavePrimaryTargetsRequest>
+    export type SavePrimaryTargetsMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Save primary target entries to the database
+ */
+export const useSavePrimaryTargets = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof savePrimaryTargets>>, TError,{data: BodyType<SavePrimaryTargetsRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof savePrimaryTargets>>,
+        TError,
+        {data: BodyType<SavePrimaryTargetsRequest>},
+        TContext
+      > => {
+      return useMutation(getSavePrimaryTargetsMutationOptions(options));
+    }
 
 export const getGetSalesPeopleTreeUrl = (params?: GetSalesPeopleTreeParams,) => {
   const normalizedParams = new URLSearchParams();
