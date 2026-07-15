@@ -2,6 +2,11 @@ import { useState, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronRight, Play, Loader2, Copy, Check } from "lucide-react";
 
+// Base URL that external apps use — same origin, /api prefix
+const BASE_URL = typeof window !== "undefined"
+  ? `${window.location.origin}/api`
+  : "https://your-app.replit.app/api";
+
 // ── Static API catalogue extracted from openapi.yaml ─────────────────────────
 
 type Method = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
@@ -1014,6 +1019,178 @@ function TryItPanel({ op }: { op: Operation }) {
   );
 }
 
+// ── CodeExamples ──────────────────────────────────────────────────────────────
+
+type CodeLang = "curl" | "js" | "python";
+
+function samplePath(path: string): string {
+  // Replace path params with readable placeholders
+  return path.replace(/\{(\w+)\}/g, (_, k) => {
+    if (k === "id") return "CM-00001";
+    if (k === "key") return "sandeep-ji";
+    if (k === "fy") return "2026-27";
+    if (k === "mid") return "42";
+    return `<${k}>`;
+  });
+}
+
+function sampleQuery(params: ParamDef[]): string {
+  const qps = params.filter((p) => p.in === "query" && p.required);
+  if (!qps.length) return "";
+  const pairs = qps.map((p) => {
+    const val = p.schema.enum ? p.schema.enum[0] : (p.schema.type === "number" || p.schema.type === "integer" ? "10000000" : "2026-27");
+    return `${encodeURIComponent(p.name)}=${encodeURIComponent(val)}`;
+  });
+  return "?" + pairs.join("&");
+}
+
+function buildCurl(op: Operation): string {
+  const url = `${BASE_URL}${samplePath(op.path)}${sampleQuery(op.parameters)}`;
+  const lines: string[] = [`curl -X ${op.method} \\`, `  "${url}"`];
+  if (op.requestBody) {
+    lines.push(`  -H "Content-Type: ${op.requestBody.contentType}" \\`);
+    if (op.requestBody.contentType === "application/json") {
+      const body = op.requestBody.placeholder.replace(/\n/g, " ").replace(/\s+/g, " ");
+      lines.push(`  -d '${body}'`);
+    } else {
+      lines.push(`  --data-binary @file.xlsx`);
+    }
+  }
+  return lines.join(" \\\n");
+}
+
+function buildJs(op: Operation): string {
+  const path = samplePath(op.path);
+  const qs = sampleQuery(op.parameters);
+  const url = `\`\${BASE_URL}${path}${qs}\``;
+  const hasBody = !!op.requestBody && op.method !== "GET" && op.method !== "DELETE";
+
+  const lines: string[] = [
+    `const BASE_URL = "${BASE_URL}";`,
+    ``,
+    `const res = await fetch(${url}, {`,
+    `  method: "${op.method}",`,
+  ];
+  if (hasBody) {
+    lines.push(`  headers: { "Content-Type": "${op.requestBody!.contentType}" },`);
+    if (op.requestBody!.contentType === "application/json") {
+      const body = op.requestBody!.placeholder.trim();
+      lines.push(`  body: JSON.stringify(${body}),`);
+    } else {
+      lines.push(`  body: xlsxFileBlob,  // File or Blob`);
+    }
+  }
+  lines.push(`});`);
+  lines.push(``);
+  lines.push(`const data = await res.json();`);
+  lines.push(`console.log(data);`);
+  return lines.join("\n");
+}
+
+function buildPython(op: Operation): string {
+  const path = samplePath(op.path);
+  const qps = op.parameters.filter((p) => p.in === "query" && p.required);
+  const hasBody = !!op.requestBody && op.method !== "GET" && op.method !== "DELETE";
+
+  const lines: string[] = [
+    `import requests`,
+    ``,
+    `BASE_URL = "${BASE_URL}"`,
+    ``,
+  ];
+
+  if (qps.length) {
+    lines.push(`params = {`);
+    for (const p of qps) {
+      const val = p.schema.enum ? `"${p.schema.enum[0]}"` : `"2026-27"`;
+      lines.push(`    "${p.name}": ${val},`);
+    }
+    lines.push(`}`);
+    lines.push(``);
+  }
+
+  const paramsArg = qps.length ? ", params=params" : "";
+
+  if (hasBody && op.requestBody!.contentType === "application/json") {
+    lines.push(`payload = ${op.requestBody!.placeholder.trim()}`);
+    lines.push(``);
+    lines.push(`res = requests.${op.method.toLowerCase()}(`);
+    lines.push(`    f"{BASE_URL}${path}"${paramsArg},`);
+    lines.push(`    json=payload,`);
+    lines.push(`)`);
+  } else if (hasBody) {
+    lines.push(`with open("file.xlsx", "rb") as f:`);
+    lines.push(`    res = requests.${op.method.toLowerCase()}(`);
+    lines.push(`        f"{BASE_URL}${path}"${paramsArg},`);
+    lines.push(`        data=f,`);
+    lines.push(`        headers={"Content-Type": "${op.requestBody!.contentType}"},`);
+    lines.push(`    )`);
+  } else {
+    lines.push(`res = requests.${op.method.toLowerCase()}(`);
+    lines.push(`    f"{BASE_URL}${path}"${paramsArg},`);
+    lines.push(`)`);
+  }
+
+  lines.push(``);
+  lines.push(`print(res.status_code, res.json())`);
+  return lines.join("\n");
+}
+
+const LANG_LABELS: Record<CodeLang, string> = { curl: "curl", js: "JavaScript", python: "Python" };
+
+function CodeExamples({ op }: { op: Operation }) {
+  const [lang, setLang] = useState<CodeLang>("curl");
+  const [copied, setCopied] = useState(false);
+
+  const snippet =
+    lang === "curl" ? buildCurl(op) :
+    lang === "js"   ? buildJs(op) :
+                      buildPython(op);
+
+  function copy() {
+    navigator.clipboard.writeText(snippet).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Code examples</p>
+        <button
+          type="button"
+          onClick={copy}
+          className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+        >
+          {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <div className="flex gap-px rounded-t border border-b-0 border-border bg-muted/60 px-2 pt-1.5">
+        {(["curl", "js", "python"] as CodeLang[]).map((l) => (
+          <button
+            key={l}
+            type="button"
+            onClick={() => setLang(l)}
+            className={cn(
+              "px-2.5 py-1 text-[11px] font-mono rounded-t transition-colors",
+              lang === l
+                ? "bg-background text-foreground font-semibold border border-b-0 border-border -mb-px"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {LANG_LABELS[l]}
+          </button>
+        ))}
+      </div>
+      <pre className="overflow-x-auto rounded-b rounded-tr border border-border bg-muted/50 p-3 text-xs font-mono leading-relaxed whitespace-pre">
+        {snippet}
+      </pre>
+    </div>
+  );
+}
+
 // ── EndpointRow ───────────────────────────────────────────────────────────────
 
 function EndpointRow({ op }: { op: Operation }) {
@@ -1122,6 +1299,8 @@ function EndpointRow({ op }: { op: Operation }) {
               ))}
             </div>
           </div>
+
+          <CodeExamples op={op} />
 
           <div>
             <button
