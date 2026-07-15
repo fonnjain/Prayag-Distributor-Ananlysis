@@ -14,6 +14,7 @@ import customersRouter from "./customers";
 import companyReportsRouter from "./companyReports";
 import schemesRouter from "./schemes";
 import primaryTargetsRouter from "./primaryTargets";
+import customerMasterRouter from "./customerMaster";
 
 const router: IRouter = Router();
 
@@ -32,5 +33,6 @@ router.use(customersRouter);
 router.use(companyReportsRouter);
 router.use(schemesRouter);
 router.use(primaryTargetsRouter);
+router.use(customerMasterRouter);
 
 export default router;

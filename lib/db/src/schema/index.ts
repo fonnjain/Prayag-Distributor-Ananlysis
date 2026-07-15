@@ -22,3 +22,4 @@ export * from "./salesRegister";
 export * from "./sapSales";
 export * from "./customerPerf";
 export * from "./primaryTargets";
+export * from "./customerMaster";

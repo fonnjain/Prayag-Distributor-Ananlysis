@@ -1294,3 +1294,282 @@ export const DeleteSapUploadResponse = zod.object({
 })
 
 
+/**
+ * @summary List customer master records with optional filters
+ */
+export const ListCustomerMasterQueryParams = zod.object({
+  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']).optional(),
+  "stateHead": zod.coerce.string().optional(),
+  "state": zod.coerce.string().optional(),
+  "status": zod.enum(['Active', 'Inactive', 'Closed', 'Converted']).optional(),
+  "confidence": zod.enum(['Confirmed', 'Guessed']).optional(),
+  "q": zod.coerce.string().optional(),
+  "limit": zod.coerce.number().optional(),
+  "offset": zod.coerce.number().optional()
+})
+
+export const ListCustomerMasterResponse = zod.object({
+  "total": zod.number(),
+  "limit": zod.number(),
+  "offset": zod.number(),
+  "rows": zod.array(zod.object({
+  "id": zod.string(),
+  "company": zod.string(),
+  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']),
+  "status": zod.enum(['Active', 'Inactive', 'Closed', 'Converted']),
+  "contact": zod.string().nullish(),
+  "mobile": zod.string().nullish(),
+  "state": zod.string().nullish(),
+  "district": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "stateHead": zod.string().nullish(),
+  "headConfidence": zod.enum(['Confirmed', 'Guessed']),
+  "supplyingDistributor": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "editedBy": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}))
+})
+
+
+/**
+ * @summary Export customer master as xlsx
+ */
+export const ExportCustomerMasterQueryParams = zod.object({
+  "type": zod.coerce.string().optional(),
+  "stateHead": zod.coerce.string().optional(),
+  "state": zod.coerce.string().optional(),
+  "status": zod.coerce.string().optional(),
+  "confidence": zod.coerce.string().optional()
+})
+
+export const ExportCustomerMasterResponse = zod.unknown()
+
+
+/**
+ * @summary Parse an xlsx file and return a diff preview (does not write to DB)
+ */
+export const PreviewCustomerMasterImportResponse = zod.object({
+  "batchId": zod.string(),
+  "totalRows": zod.number(),
+  "updates": zod.number(),
+  "inserts": zod.number(),
+  "unchanged": zod.number(),
+  "updateDetails": zod.array(zod.object({
+  "id": zod.string(),
+  "company": zod.string(),
+  "changes": zod.record(zod.string(), zod.object({
+  "old": zod.string(),
+  "new": zod.string()
+}))
+})),
+  "insertSample": zod.array(zod.object({
+  "id": zod.string(),
+  "company": zod.string(),
+  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']),
+  "status": zod.enum(['Active', 'Inactive', 'Closed', 'Converted']),
+  "contact": zod.string().nullish(),
+  "mobile": zod.string().nullish(),
+  "state": zod.string().nullish(),
+  "district": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "stateHead": zod.string().nullish(),
+  "headConfidence": zod.enum(['Confirmed', 'Guessed']),
+  "supplyingDistributor": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "editedBy": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})),
+  "rows": zod.record(zod.string(), zod.object({
+  "id": zod.string(),
+  "company": zod.string(),
+  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']),
+  "status": zod.enum(['Active', 'Inactive', 'Closed', 'Converted']),
+  "contact": zod.string().nullish(),
+  "mobile": zod.string().nullish(),
+  "state": zod.string().nullish(),
+  "district": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "stateHead": zod.string().nullish(),
+  "headConfidence": zod.enum(['Confirmed', 'Guessed']),
+  "supplyingDistributor": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "editedBy": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})).optional()
+})
+
+
+/**
+ * @summary Commit a previewed import to the database
+ */
+export const CommitCustomerMasterImportBody = zod.object({
+  "batchId": zod.string().optional(),
+  "editedBy": zod.string().optional(),
+  "rows": zod.record(zod.string(), zod.object({
+  "id": zod.string(),
+  "company": zod.string(),
+  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']),
+  "status": zod.enum(['Active', 'Inactive', 'Closed', 'Converted']),
+  "contact": zod.string().nullish(),
+  "mobile": zod.string().nullish(),
+  "state": zod.string().nullish(),
+  "district": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "stateHead": zod.string().nullish(),
+  "headConfidence": zod.enum(['Confirmed', 'Guessed']),
+  "supplyingDistributor": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "editedBy": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}))
+})
+
+export const CommitCustomerMasterImportResponse = zod.object({
+  "batchId": zod.string(),
+  "inserted": zod.number(),
+  "updated": zod.number()
+})
+
+
+/**
+ * @summary Number of unresolved head-attribution mismatches
+ */
+export const GetCustomerMismatchCountResponse = zod.object({
+  "pendingCount": zod.number()
+})
+
+
+/**
+ * @summary List head-attribution mismatch queue
+ */
+export const ListCustomerMismatchesQueryParams = zod.object({
+  "pending": zod.coerce.boolean().optional()
+})
+
+export const ListCustomerMismatchesResponse = zod.object({
+  "rows": zod.array(zod.object({
+  "id": zod.number(),
+  "customerId": zod.string().nullish(),
+  "customerName": zod.string(),
+  "masterHead": zod.string().nullish(),
+  "sheetHead": zod.string(),
+  "fy": zod.string(),
+  "detectedAt": zod.string(),
+  "resolvedAt": zod.string().nullish(),
+  "resolvedBy": zod.string().nullish(),
+  "resolution": zod.string().nullish(),
+  "reason": zod.string().nullish()
+})),
+  "pendingCount": zod.number()
+})
+
+
+/**
+ * @summary Approve or dismiss a head-attribution mismatch
+ */
+export const ResolveCustomerMismatchParams = zod.object({
+  "mid": zod.coerce.number()
+})
+
+export const ResolveCustomerMismatchBody = zod.object({
+  "resolution": zod.enum(['approved', 'dismissed']),
+  "resolvedBy": zod.string().optional(),
+  "reason": zod.string().optional()
+})
+
+export const ResolveCustomerMismatchResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Get a single customer master record with change history
+ */
+export const GetCustomerMasterRecordParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const GetCustomerMasterRecordResponse = zod.object({
+  "row": zod.object({
+  "id": zod.string(),
+  "company": zod.string(),
+  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']),
+  "status": zod.enum(['Active', 'Inactive', 'Closed', 'Converted']),
+  "contact": zod.string().nullish(),
+  "mobile": zod.string().nullish(),
+  "state": zod.string().nullish(),
+  "district": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "stateHead": zod.string().nullish(),
+  "headConfidence": zod.enum(['Confirmed', 'Guessed']),
+  "supplyingDistributor": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "editedBy": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}),
+  "log": zod.array(zod.object({
+  "id": zod.number(),
+  "customerId": zod.string(),
+  "changedAt": zod.string(),
+  "changedBy": zod.string().nullish(),
+  "field": zod.string(),
+  "oldValue": zod.string().nullish(),
+  "newValue": zod.string().nullish(),
+  "reason": zod.string().nullish(),
+  "importBatch": zod.string().nullish()
+}))
+})
+
+
+/**
+ * @summary Update a customer master record (inline edit)
+ */
+export const UpdateCustomerMasterRecordParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const UpdateCustomerMasterRecordBody = zod.object({
+  "company": zod.string().optional(),
+  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']).optional(),
+  "status": zod.enum(['Active', 'Inactive', 'Closed', 'Converted']).optional(),
+  "contact": zod.string().nullish(),
+  "mobile": zod.string().nullish(),
+  "state": zod.string().nullish(),
+  "district": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "stateHead": zod.string().nullish(),
+  "headConfidence": zod.enum(['Confirmed', 'Guessed']).optional(),
+  "supplyingDistributor": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "editedBy": zod.string().optional(),
+  "reason": zod.string().optional()
+})
+
+export const UpdateCustomerMasterRecordResponse = zod.object({
+  "row": zod.object({
+  "id": zod.string(),
+  "company": zod.string(),
+  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']),
+  "status": zod.enum(['Active', 'Inactive', 'Closed', 'Converted']),
+  "contact": zod.string().nullish(),
+  "mobile": zod.string().nullish(),
+  "state": zod.string().nullish(),
+  "district": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "stateHead": zod.string().nullish(),
+  "headConfidence": zod.enum(['Confirmed', 'Guessed']),
+  "supplyingDistributor": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "editedBy": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+})
+
+

@@ -22,6 +22,8 @@ tags:
     description: Management report generation
   - name: sap
     description: SAP primary-sales upload, reconciliation, and cutover
+  - name: customer-master
+    description: Customer master — editable attribution table with change history and mismatch review queue
 paths:
   /drive/files:
     get:
@@ -1060,6 +1062,237 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /customer-master:
+    get:
+      tags: [customer-master]
+      operationId: listCustomerMaster
+      summary: List customer master records with optional filters
+      parameters:
+        - { name: type, in: query, schema: { type: string, enum: [Distributor, "Direct Dealer", Retailer] } }
+        - { name: stateHead, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [Active, Inactive, Closed, Converted] } }
+        - { name: confidence, in: query, schema: { type: string, enum: [Confirmed, Guessed] } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer } }
+        - { name: offset, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: Paginated list of customer master records
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomerMasterListResponse" }
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /customer-master/export:
+    get:
+      tags: [customer-master]
+      operationId: exportCustomerMaster
+      summary: Export customer master as xlsx
+      parameters:
+        - { name: type, in: query, schema: { type: string } }
+        - { name: stateHead, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: confidence, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: xlsx file download
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /customer-master/import/preview:
+    post:
+      tags: [customer-master]
+      operationId: previewCustomerMasterImport
+      summary: Parse an xlsx file and return a diff preview (does not write to DB)
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "200":
+          description: Import diff preview
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomerMasterImportPreview" }
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422":
+          description: Unprocessable file
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /customer-master/import/commit:
+    post:
+      tags: [customer-master]
+      operationId: commitCustomerMasterImport
+      summary: Commit a previewed import to the database
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomerMasterImportCommit" }
+      responses:
+        "200":
+          description: Import result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomerMasterImportResult" }
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /customer-master/mismatch/count:
+    get:
+      tags: [customer-master]
+      operationId: getCustomerMismatchCount
+      summary: Number of unresolved head-attribution mismatches
+      responses:
+        "200":
+          description: Count of pending mismatches
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomerMismatchCountResponse" }
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /customer-master/mismatch:
+    get:
+      tags: [customer-master]
+      operationId: listCustomerMismatches
+      summary: List head-attribution mismatch queue
+      parameters:
+        - { name: pending, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: Mismatch queue rows
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomerMismatchListResponse" }
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /customer-master/mismatch/{mid}/resolve:
+    post:
+      tags: [customer-master]
+      operationId: resolveCustomerMismatch
+      summary: Approve or dismiss a head-attribution mismatch
+      parameters:
+        - { name: mid, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomerMismatchResolveRequest" }
+      responses:
+        "200":
+          description: Resolution result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OkResponse" }
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: Already resolved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /customer-master/{id}:
+    get:
+      tags: [customer-master]
+      operationId: getCustomerMasterRecord
+      summary: Get a single customer master record with change history
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Record and change log
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomerMasterRecordResponse" }
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+    put:
+      tags: [customer-master]
+      operationId: updateCustomerMasterRecord
+      summary: Update a customer master record (inline edit)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomerMasterUpdateRequest" }
+      responses:
+        "200":
+          description: Updated record
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomerMasterSingleResponse" }
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
 components:
   schemas:
     SapUploadUrl:
@@ -2702,3 +2935,164 @@ components:
         - targetPeriod
         - headerRow
         - unmatchedSample
+    OkResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+    CustomerMasterRow:
+      type: object
+      required: [id, company, type, status, headConfidence, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        company: { type: string }
+        type: { type: string, enum: [Distributor, "Direct Dealer", Retailer] }
+        status: { type: string, enum: [Active, Inactive, Closed, Converted] }
+        contact: { type: string, nullable: true }
+        mobile: { type: string, nullable: true }
+        state: { type: string, nullable: true }
+        district: { type: string, nullable: true }
+        city: { type: string, nullable: true }
+        stateHead: { type: string, nullable: true }
+        headConfidence: { type: string, enum: [Confirmed, Guessed] }
+        supplyingDistributor: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        editedBy: { type: string, nullable: true }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+    CustomerMasterLogEntry:
+      type: object
+      required: [id, customerId, changedAt, field]
+      properties:
+        id: { type: integer }
+        customerId: { type: string }
+        changedAt: { type: string }
+        changedBy: { type: string, nullable: true }
+        field: { type: string }
+        oldValue: { type: string, nullable: true }
+        newValue: { type: string, nullable: true }
+        reason: { type: string, nullable: true }
+        importBatch: { type: string, nullable: true }
+    CustomerMasterListResponse:
+      type: object
+      required: [total, limit, offset, rows]
+      properties:
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        rows:
+          type: array
+          items: { $ref: "#/components/schemas/CustomerMasterRow" }
+    CustomerMasterRecordResponse:
+      type: object
+      required: [row, log]
+      properties:
+        row: { $ref: "#/components/schemas/CustomerMasterRow" }
+        log:
+          type: array
+          items: { $ref: "#/components/schemas/CustomerMasterLogEntry" }
+    CustomerMasterSingleResponse:
+      type: object
+      required: [row]
+      properties:
+        row: { $ref: "#/components/schemas/CustomerMasterRow" }
+    CustomerMasterUpdateRequest:
+      type: object
+      properties:
+        company: { type: string }
+        type: { type: string, enum: [Distributor, "Direct Dealer", Retailer] }
+        status: { type: string, enum: [Active, Inactive, Closed, Converted] }
+        contact: { type: string, nullable: true }
+        mobile: { type: string, nullable: true }
+        state: { type: string, nullable: true }
+        district: { type: string, nullable: true }
+        city: { type: string, nullable: true }
+        stateHead: { type: string, nullable: true }
+        headConfidence: { type: string, enum: [Confirmed, Guessed] }
+        supplyingDistributor: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        editedBy: { type: string }
+        reason: { type: string }
+    CustomerMasterImportChangeDetail:
+      type: object
+      required: [id, company, changes]
+      properties:
+        id: { type: string }
+        company: { type: string }
+        changes:
+          type: object
+          additionalProperties:
+            type: object
+            required: [old, new]
+            properties:
+              old: { type: string }
+              new: { type: string }
+    CustomerMasterImportPreview:
+      type: object
+      required: [batchId, totalRows, updates, inserts, unchanged, updateDetails, insertSample]
+      properties:
+        batchId: { type: string }
+        totalRows: { type: integer }
+        updates: { type: integer }
+        inserts: { type: integer }
+        unchanged: { type: integer }
+        updateDetails:
+          type: array
+          items: { $ref: "#/components/schemas/CustomerMasterImportChangeDetail" }
+        insertSample:
+          type: array
+          items: { $ref: "#/components/schemas/CustomerMasterRow" }
+        rows:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/CustomerMasterRow" }
+    CustomerMasterImportCommit:
+      type: object
+      required: [rows]
+      properties:
+        batchId: { type: string }
+        editedBy: { type: string }
+        rows:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/CustomerMasterRow" }
+    CustomerMasterImportResult:
+      type: object
+      required: [batchId, inserted, updated]
+      properties:
+        batchId: { type: string }
+        inserted: { type: integer }
+        updated: { type: integer }
+    CustomerMismatchRow:
+      type: object
+      required: [id, customerName, sheetHead, fy, detectedAt]
+      properties:
+        id: { type: integer }
+        customerId: { type: string, nullable: true }
+        customerName: { type: string }
+        masterHead: { type: string, nullable: true }
+        sheetHead: { type: string }
+        fy: { type: string }
+        detectedAt: { type: string }
+        resolvedAt: { type: string, nullable: true }
+        resolvedBy: { type: string, nullable: true }
+        resolution: { type: string, nullable: true }
+        reason: { type: string, nullable: true }
+    CustomerMismatchListResponse:
+      type: object
+      required: [rows, pendingCount]
+      properties:
+        rows:
+          type: array
+          items: { $ref: "#/components/schemas/CustomerMismatchRow" }
+        pendingCount: { type: integer }
+    CustomerMismatchCountResponse:
+      type: object
+      required: [pendingCount]
+      properties:
+        pendingCount: { type: integer }
+    CustomerMismatchResolveRequest:
+      type: object
+      required: [resolution]
+      properties:
+        resolution: { type: string, enum: [approved, dismissed] }
+        resolvedBy: { type: string }
+        reason: { type: string }

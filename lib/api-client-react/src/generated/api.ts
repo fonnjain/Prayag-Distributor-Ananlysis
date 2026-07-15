@@ -23,6 +23,16 @@ import type {
   AnalyticsReport,
   AnalyzeRequest,
   AnalyzeResponse,
+  CustomerMasterImportCommit,
+  CustomerMasterImportPreview,
+  CustomerMasterImportResult,
+  CustomerMasterListResponse,
+  CustomerMasterRecordResponse,
+  CustomerMasterSingleResponse,
+  CustomerMasterUpdateRequest,
+  CustomerMismatchCountResponse,
+  CustomerMismatchListResponse,
+  CustomerMismatchResolveRequest,
   DashboardResponse,
   DashboardXlsxRegisterRequest,
   DashboardXlsxStatusResponse,
@@ -31,6 +41,7 @@ import type {
   DeleteSapUploadParams,
   DriveFileList,
   ErrorResponse,
+  ExportCustomerMasterParams,
   GetAnalyticsParams,
   GetPrimaryTargetsParams,
   GetSalesPeopleTreeParams,
@@ -43,10 +54,13 @@ import type {
   GetTargetsParams,
   GetVerifyReportParams,
   HealthStatus,
+  ListCustomerMasterParams,
+  ListCustomerMismatchesParams,
   ListDriveFilesParams,
   MgmtOptions,
   MgmtReportRequest,
   MgmtVerifyResult,
+  OkResponse,
   PrimaryTargetsResponse,
   SalesRepReport,
   SalesTree,
@@ -2474,5 +2488,693 @@ export const useDeleteSapUpload = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getDeleteSapUploadMutationOptions(options));
+    }
+
+export const getListCustomerMasterUrl = (params?: ListCustomerMasterParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/customer-master?${stringifiedParams}` : `/api/customer-master`
+}
+
+/**
+ * @summary List customer master records with optional filters
+ */
+export const listCustomerMaster = async (params?: ListCustomerMasterParams, options?: RequestInit): Promise<CustomerMasterListResponse> => {
+
+  return customFetch<CustomerMasterListResponse>(getListCustomerMasterUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCustomerMasterQueryKey = (params?: ListCustomerMasterParams,) => {
+    return [
+    `/api/customer-master`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListCustomerMasterQueryOptions = <TData = Awaited<ReturnType<typeof listCustomerMaster>>, TError = ErrorType<ErrorResponse>>(params?: ListCustomerMasterParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCustomerMaster>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCustomerMasterQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCustomerMaster>>> = ({ signal }) => listCustomerMaster(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCustomerMaster>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCustomerMasterQueryResult = NonNullable<Awaited<ReturnType<typeof listCustomerMaster>>>
+export type ListCustomerMasterQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary List customer master records with optional filters
+ */
+
+export function useListCustomerMaster<TData = Awaited<ReturnType<typeof listCustomerMaster>>, TError = ErrorType<ErrorResponse>>(
+ params?: ListCustomerMasterParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCustomerMaster>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCustomerMasterQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getExportCustomerMasterUrl = (params?: ExportCustomerMasterParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/customer-master/export?${stringifiedParams}` : `/api/customer-master/export`
+}
+
+/**
+ * @summary Export customer master as xlsx
+ */
+export const exportCustomerMaster = async (params?: ExportCustomerMasterParams, options?: RequestInit): Promise<Blob> => {
+
+  return customFetch<Blob>(getExportCustomerMasterUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getExportCustomerMasterQueryKey = (params?: ExportCustomerMasterParams,) => {
+    return [
+    `/api/customer-master/export`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getExportCustomerMasterQueryOptions = <TData = Awaited<ReturnType<typeof exportCustomerMaster>>, TError = ErrorType<ErrorResponse>>(params?: ExportCustomerMasterParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof exportCustomerMaster>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getExportCustomerMasterQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportCustomerMaster>>> = ({ signal }) => exportCustomerMaster(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportCustomerMaster>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ExportCustomerMasterQueryResult = NonNullable<Awaited<ReturnType<typeof exportCustomerMaster>>>
+export type ExportCustomerMasterQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Export customer master as xlsx
+ */
+
+export function useExportCustomerMaster<TData = Awaited<ReturnType<typeof exportCustomerMaster>>, TError = ErrorType<ErrorResponse>>(
+ params?: ExportCustomerMasterParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof exportCustomerMaster>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getExportCustomerMasterQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getPreviewCustomerMasterImportUrl = () => {
+
+
+
+
+  return `/api/customer-master/import/preview`
+}
+
+/**
+ * @summary Parse an xlsx file and return a diff preview (does not write to DB)
+ */
+export const previewCustomerMasterImport = async (previewCustomerMasterImportBody: Blob, options?: RequestInit): Promise<CustomerMasterImportPreview> => {
+
+  return customFetch<CustomerMasterImportPreview>(getPreviewCustomerMasterImportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream', ...options?.headers },
+    body: previewCustomerMasterImportBody
+  }
+);}
+
+
+
+
+export const getPreviewCustomerMasterImportMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewCustomerMasterImport>>, TError,{data: BodyType<Blob>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof previewCustomerMasterImport>>, TError,{data: BodyType<Blob>}, TContext> => {
+
+const mutationKey = ['previewCustomerMasterImport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof previewCustomerMasterImport>>, {data: BodyType<Blob>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  previewCustomerMasterImport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PreviewCustomerMasterImportMutationResult = NonNullable<Awaited<ReturnType<typeof previewCustomerMasterImport>>>
+    export type PreviewCustomerMasterImportMutationBody = BodyType<Blob>
+    export type PreviewCustomerMasterImportMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Parse an xlsx file and return a diff preview (does not write to DB)
+ */
+export const usePreviewCustomerMasterImport = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewCustomerMasterImport>>, TError,{data: BodyType<Blob>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof previewCustomerMasterImport>>,
+        TError,
+        {data: BodyType<Blob>},
+        TContext
+      > => {
+      return useMutation(getPreviewCustomerMasterImportMutationOptions(options));
+    }
+
+export const getCommitCustomerMasterImportUrl = () => {
+
+
+
+
+  return `/api/customer-master/import/commit`
+}
+
+/**
+ * @summary Commit a previewed import to the database
+ */
+export const commitCustomerMasterImport = async (customerMasterImportCommit: CustomerMasterImportCommit, options?: RequestInit): Promise<CustomerMasterImportResult> => {
+
+  return customFetch<CustomerMasterImportResult>(getCommitCustomerMasterImportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(customerMasterImportCommit)
+  }
+);}
+
+
+
+
+export const getCommitCustomerMasterImportMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitCustomerMasterImport>>, TError,{data: BodyType<CustomerMasterImportCommit>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof commitCustomerMasterImport>>, TError,{data: BodyType<CustomerMasterImportCommit>}, TContext> => {
+
+const mutationKey = ['commitCustomerMasterImport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof commitCustomerMasterImport>>, {data: BodyType<CustomerMasterImportCommit>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  commitCustomerMasterImport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CommitCustomerMasterImportMutationResult = NonNullable<Awaited<ReturnType<typeof commitCustomerMasterImport>>>
+    export type CommitCustomerMasterImportMutationBody = BodyType<CustomerMasterImportCommit>
+    export type CommitCustomerMasterImportMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Commit a previewed import to the database
+ */
+export const useCommitCustomerMasterImport = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitCustomerMasterImport>>, TError,{data: BodyType<CustomerMasterImportCommit>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof commitCustomerMasterImport>>,
+        TError,
+        {data: BodyType<CustomerMasterImportCommit>},
+        TContext
+      > => {
+      return useMutation(getCommitCustomerMasterImportMutationOptions(options));
+    }
+
+export const getGetCustomerMismatchCountUrl = () => {
+
+
+
+
+  return `/api/customer-master/mismatch/count`
+}
+
+/**
+ * @summary Number of unresolved head-attribution mismatches
+ */
+export const getCustomerMismatchCount = async ( options?: RequestInit): Promise<CustomerMismatchCountResponse> => {
+
+  return customFetch<CustomerMismatchCountResponse>(getGetCustomerMismatchCountUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCustomerMismatchCountQueryKey = () => {
+    return [
+    `/api/customer-master/mismatch/count`
+    ] as const;
+    }
+
+
+export const getGetCustomerMismatchCountQueryOptions = <TData = Awaited<ReturnType<typeof getCustomerMismatchCount>>, TError = ErrorType<ErrorResponse>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCustomerMismatchCount>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCustomerMismatchCountQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCustomerMismatchCount>>> = ({ signal }) => getCustomerMismatchCount({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCustomerMismatchCount>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCustomerMismatchCountQueryResult = NonNullable<Awaited<ReturnType<typeof getCustomerMismatchCount>>>
+export type GetCustomerMismatchCountQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Number of unresolved head-attribution mismatches
+ */
+
+export function useGetCustomerMismatchCount<TData = Awaited<ReturnType<typeof getCustomerMismatchCount>>, TError = ErrorType<ErrorResponse>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCustomerMismatchCount>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCustomerMismatchCountQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListCustomerMismatchesUrl = (params?: ListCustomerMismatchesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/customer-master/mismatch?${stringifiedParams}` : `/api/customer-master/mismatch`
+}
+
+/**
+ * @summary List head-attribution mismatch queue
+ */
+export const listCustomerMismatches = async (params?: ListCustomerMismatchesParams, options?: RequestInit): Promise<CustomerMismatchListResponse> => {
+
+  return customFetch<CustomerMismatchListResponse>(getListCustomerMismatchesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCustomerMismatchesQueryKey = (params?: ListCustomerMismatchesParams,) => {
+    return [
+    `/api/customer-master/mismatch`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListCustomerMismatchesQueryOptions = <TData = Awaited<ReturnType<typeof listCustomerMismatches>>, TError = ErrorType<ErrorResponse>>(params?: ListCustomerMismatchesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCustomerMismatches>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCustomerMismatchesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCustomerMismatches>>> = ({ signal }) => listCustomerMismatches(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCustomerMismatches>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCustomerMismatchesQueryResult = NonNullable<Awaited<ReturnType<typeof listCustomerMismatches>>>
+export type ListCustomerMismatchesQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary List head-attribution mismatch queue
+ */
+
+export function useListCustomerMismatches<TData = Awaited<ReturnType<typeof listCustomerMismatches>>, TError = ErrorType<ErrorResponse>>(
+ params?: ListCustomerMismatchesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCustomerMismatches>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCustomerMismatchesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getResolveCustomerMismatchUrl = (mid: number,) => {
+
+
+
+
+  return `/api/customer-master/mismatch/${mid}/resolve`
+}
+
+/**
+ * @summary Approve or dismiss a head-attribution mismatch
+ */
+export const resolveCustomerMismatch = async (mid: number,
+    customerMismatchResolveRequest: CustomerMismatchResolveRequest, options?: RequestInit): Promise<OkResponse> => {
+
+  return customFetch<OkResponse>(getResolveCustomerMismatchUrl(mid),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(customerMismatchResolveRequest)
+  }
+);}
+
+
+
+
+export const getResolveCustomerMismatchMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveCustomerMismatch>>, TError,{mid: number;data: BodyType<CustomerMismatchResolveRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resolveCustomerMismatch>>, TError,{mid: number;data: BodyType<CustomerMismatchResolveRequest>}, TContext> => {
+
+const mutationKey = ['resolveCustomerMismatch'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resolveCustomerMismatch>>, {mid: number;data: BodyType<CustomerMismatchResolveRequest>}> = (props) => {
+          const {mid,data} = props ?? {};
+
+          return  resolveCustomerMismatch(mid,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResolveCustomerMismatchMutationResult = NonNullable<Awaited<ReturnType<typeof resolveCustomerMismatch>>>
+    export type ResolveCustomerMismatchMutationBody = BodyType<CustomerMismatchResolveRequest>
+    export type ResolveCustomerMismatchMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Approve or dismiss a head-attribution mismatch
+ */
+export const useResolveCustomerMismatch = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveCustomerMismatch>>, TError,{mid: number;data: BodyType<CustomerMismatchResolveRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof resolveCustomerMismatch>>,
+        TError,
+        {mid: number;data: BodyType<CustomerMismatchResolveRequest>},
+        TContext
+      > => {
+      return useMutation(getResolveCustomerMismatchMutationOptions(options));
+    }
+
+export const getGetCustomerMasterRecordUrl = (id: string,) => {
+
+
+
+
+  return `/api/customer-master/${id}`
+}
+
+/**
+ * @summary Get a single customer master record with change history
+ */
+export const getCustomerMasterRecord = async (id: string, options?: RequestInit): Promise<CustomerMasterRecordResponse> => {
+
+  return customFetch<CustomerMasterRecordResponse>(getGetCustomerMasterRecordUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCustomerMasterRecordQueryKey = (id: string,) => {
+    return [
+    `/api/customer-master/${id}`
+    ] as const;
+    }
+
+
+export const getGetCustomerMasterRecordQueryOptions = <TData = Awaited<ReturnType<typeof getCustomerMasterRecord>>, TError = ErrorType<ErrorResponse>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCustomerMasterRecord>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCustomerMasterRecordQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCustomerMasterRecord>>> = ({ signal }) => getCustomerMasterRecord(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCustomerMasterRecord>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCustomerMasterRecordQueryResult = NonNullable<Awaited<ReturnType<typeof getCustomerMasterRecord>>>
+export type GetCustomerMasterRecordQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get a single customer master record with change history
+ */
+
+export function useGetCustomerMasterRecord<TData = Awaited<ReturnType<typeof getCustomerMasterRecord>>, TError = ErrorType<ErrorResponse>>(
+ id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCustomerMasterRecord>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCustomerMasterRecordQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateCustomerMasterRecordUrl = (id: string,) => {
+
+
+
+
+  return `/api/customer-master/${id}`
+}
+
+/**
+ * @summary Update a customer master record (inline edit)
+ */
+export const updateCustomerMasterRecord = async (id: string,
+    customerMasterUpdateRequest: CustomerMasterUpdateRequest, options?: RequestInit): Promise<CustomerMasterSingleResponse> => {
+
+  return customFetch<CustomerMasterSingleResponse>(getUpdateCustomerMasterRecordUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(customerMasterUpdateRequest)
+  }
+);}
+
+
+
+
+export const getUpdateCustomerMasterRecordMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCustomerMasterRecord>>, TError,{id: string;data: BodyType<CustomerMasterUpdateRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateCustomerMasterRecord>>, TError,{id: string;data: BodyType<CustomerMasterUpdateRequest>}, TContext> => {
+
+const mutationKey = ['updateCustomerMasterRecord'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateCustomerMasterRecord>>, {id: string;data: BodyType<CustomerMasterUpdateRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateCustomerMasterRecord(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateCustomerMasterRecordMutationResult = NonNullable<Awaited<ReturnType<typeof updateCustomerMasterRecord>>>
+    export type UpdateCustomerMasterRecordMutationBody = BodyType<CustomerMasterUpdateRequest>
+    export type UpdateCustomerMasterRecordMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Update a customer master record (inline edit)
+ */
+export const useUpdateCustomerMasterRecord = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCustomerMasterRecord>>, TError,{id: string;data: BodyType<CustomerMasterUpdateRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateCustomerMasterRecord>>,
+        TError,
+        {id: string;data: BodyType<CustomerMasterUpdateRequest>},
+        TContext
+      > => {
+      return useMutation(getUpdateCustomerMasterRecordMutationOptions(options));
     }
 

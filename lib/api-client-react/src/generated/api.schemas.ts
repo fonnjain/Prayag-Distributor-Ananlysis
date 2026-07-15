@@ -1123,6 +1123,203 @@ export interface DashboardXlsxStatusResponse {
   status: DashboardXlsxStatus;
 }
 
+export interface OkResponse {
+  ok: boolean;
+}
+
+export type CustomerMasterRowType = typeof CustomerMasterRowType[keyof typeof CustomerMasterRowType];
+
+
+export const CustomerMasterRowType = {
+  Distributor: 'Distributor',
+  Direct_Dealer: 'Direct Dealer',
+  Retailer: 'Retailer',
+} as const;
+
+export type CustomerMasterRowStatus = typeof CustomerMasterRowStatus[keyof typeof CustomerMasterRowStatus];
+
+
+export const CustomerMasterRowStatus = {
+  Active: 'Active',
+  Inactive: 'Inactive',
+  Closed: 'Closed',
+  Converted: 'Converted',
+} as const;
+
+export type CustomerMasterRowHeadConfidence = typeof CustomerMasterRowHeadConfidence[keyof typeof CustomerMasterRowHeadConfidence];
+
+
+export const CustomerMasterRowHeadConfidence = {
+  Confirmed: 'Confirmed',
+  Guessed: 'Guessed',
+} as const;
+
+export interface CustomerMasterRow {
+  id: string;
+  company: string;
+  type: CustomerMasterRowType;
+  status: CustomerMasterRowStatus;
+  contact?: string | null;
+  mobile?: string | null;
+  state?: string | null;
+  district?: string | null;
+  city?: string | null;
+  stateHead?: string | null;
+  headConfidence: CustomerMasterRowHeadConfidence;
+  supplyingDistributor?: string | null;
+  notes?: string | null;
+  editedBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomerMasterLogEntry {
+  id: number;
+  customerId: string;
+  changedAt: string;
+  changedBy?: string | null;
+  field: string;
+  oldValue?: string | null;
+  newValue?: string | null;
+  reason?: string | null;
+  importBatch?: string | null;
+}
+
+export interface CustomerMasterListResponse {
+  total: number;
+  limit: number;
+  offset: number;
+  rows: CustomerMasterRow[];
+}
+
+export interface CustomerMasterRecordResponse {
+  row: CustomerMasterRow;
+  log: CustomerMasterLogEntry[];
+}
+
+export interface CustomerMasterSingleResponse {
+  row: CustomerMasterRow;
+}
+
+export type CustomerMasterUpdateRequestType = typeof CustomerMasterUpdateRequestType[keyof typeof CustomerMasterUpdateRequestType];
+
+
+export const CustomerMasterUpdateRequestType = {
+  Distributor: 'Distributor',
+  Direct_Dealer: 'Direct Dealer',
+  Retailer: 'Retailer',
+} as const;
+
+export type CustomerMasterUpdateRequestStatus = typeof CustomerMasterUpdateRequestStatus[keyof typeof CustomerMasterUpdateRequestStatus];
+
+
+export const CustomerMasterUpdateRequestStatus = {
+  Active: 'Active',
+  Inactive: 'Inactive',
+  Closed: 'Closed',
+  Converted: 'Converted',
+} as const;
+
+export type CustomerMasterUpdateRequestHeadConfidence = typeof CustomerMasterUpdateRequestHeadConfidence[keyof typeof CustomerMasterUpdateRequestHeadConfidence];
+
+
+export const CustomerMasterUpdateRequestHeadConfidence = {
+  Confirmed: 'Confirmed',
+  Guessed: 'Guessed',
+} as const;
+
+export interface CustomerMasterUpdateRequest {
+  company?: string;
+  type?: CustomerMasterUpdateRequestType;
+  status?: CustomerMasterUpdateRequestStatus;
+  contact?: string | null;
+  mobile?: string | null;
+  state?: string | null;
+  district?: string | null;
+  city?: string | null;
+  stateHead?: string | null;
+  headConfidence?: CustomerMasterUpdateRequestHeadConfidence;
+  supplyingDistributor?: string | null;
+  notes?: string | null;
+  editedBy?: string;
+  reason?: string;
+}
+
+export type CustomerMasterImportChangeDetailChanges = {[key: string]: {
+  old: string;
+  new: string;
+}};
+
+export interface CustomerMasterImportChangeDetail {
+  id: string;
+  company: string;
+  changes: CustomerMasterImportChangeDetailChanges;
+}
+
+export type CustomerMasterImportPreviewRows = {[key: string]: CustomerMasterRow};
+
+export interface CustomerMasterImportPreview {
+  batchId: string;
+  totalRows: number;
+  updates: number;
+  inserts: number;
+  unchanged: number;
+  updateDetails: CustomerMasterImportChangeDetail[];
+  insertSample: CustomerMasterRow[];
+  rows?: CustomerMasterImportPreviewRows;
+}
+
+export type CustomerMasterImportCommitRows = {[key: string]: CustomerMasterRow};
+
+export interface CustomerMasterImportCommit {
+  batchId?: string;
+  editedBy?: string;
+  rows: CustomerMasterImportCommitRows;
+}
+
+export interface CustomerMasterImportResult {
+  batchId: string;
+  inserted: number;
+  updated: number;
+}
+
+export interface CustomerMismatchRow {
+  id: number;
+  customerId?: string | null;
+  customerName: string;
+  masterHead?: string | null;
+  sheetHead: string;
+  fy: string;
+  detectedAt: string;
+  resolvedAt?: string | null;
+  resolvedBy?: string | null;
+  resolution?: string | null;
+  reason?: string | null;
+}
+
+export interface CustomerMismatchListResponse {
+  rows: CustomerMismatchRow[];
+  pendingCount: number;
+}
+
+export interface CustomerMismatchCountResponse {
+  pendingCount: number;
+}
+
+export type CustomerMismatchResolveRequestResolution = typeof CustomerMismatchResolveRequestResolution[keyof typeof CustomerMismatchResolveRequestResolution];
+
+
+export const CustomerMismatchResolveRequestResolution = {
+  approved: 'approved',
+  dismissed: 'dismissed',
+} as const;
+
+export interface CustomerMismatchResolveRequest {
+  resolution: CustomerMismatchResolveRequestResolution;
+  resolvedBy?: string;
+  reason?: string;
+}
+
 export type ListDriveFilesParams = {
 /**
  * Optional search text matched against file names.
@@ -1320,5 +1517,55 @@ export type DeleteSapUploadParams = {
  */
 fy: string;
 month: string;
+};
+
+export type ListCustomerMasterParams = {
+type?: ListCustomerMasterType;
+stateHead?: string;
+state?: string;
+status?: ListCustomerMasterStatus;
+confidence?: ListCustomerMasterConfidence;
+q?: string;
+limit?: number;
+offset?: number;
+};
+
+export type ListCustomerMasterType = typeof ListCustomerMasterType[keyof typeof ListCustomerMasterType];
+
+
+export const ListCustomerMasterType = {
+  Distributor: 'Distributor',
+  Direct_Dealer: 'Direct Dealer',
+  Retailer: 'Retailer',
+} as const;
+
+export type ListCustomerMasterStatus = typeof ListCustomerMasterStatus[keyof typeof ListCustomerMasterStatus];
+
+
+export const ListCustomerMasterStatus = {
+  Active: 'Active',
+  Inactive: 'Inactive',
+  Closed: 'Closed',
+  Converted: 'Converted',
+} as const;
+
+export type ListCustomerMasterConfidence = typeof ListCustomerMasterConfidence[keyof typeof ListCustomerMasterConfidence];
+
+
+export const ListCustomerMasterConfidence = {
+  Confirmed: 'Confirmed',
+  Guessed: 'Guessed',
+} as const;
+
+export type ExportCustomerMasterParams = {
+type?: string;
+stateHead?: string;
+state?: string;
+status?: string;
+confidence?: string;
+};
+
+export type ListCustomerMismatchesParams = {
+pending?: boolean;
 };
 

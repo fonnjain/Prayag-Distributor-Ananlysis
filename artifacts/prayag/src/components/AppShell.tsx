@@ -17,7 +17,7 @@ import {
   Bot, FileSpreadsheet, BarChart2 as BarChartIcon, Target,
   ClipboardList, Database, ShieldCheck,
   LayoutDashboard, Users, ShoppingBag, GitMerge,
-  AlertTriangle, UserMinus, Settings, Store,
+  AlertTriangle, UserMinus, Settings, Store, BookOpen,
   ChevronDown, ChevronRight, Menu, X, Sun, Moon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -80,6 +80,7 @@ const NAV: NavGroup[] = [
       { id: "shrinkers", label: "Price Shrinkers",  path: "/customers/shrinkers", icon: AlertTriangle },
       { id: "churn",     label: "At Risk & New",    path: "/customers/churn",     icon: UserMinus },
       { id: "schemes",   label: "Schemes",          path: "/customers/schemes",   icon: Settings },
+      { id: "master",    label: "Customer Data",    path: "/customers/master",    icon: BookOpen },
     ],
   },
 ];

@@ -14,6 +14,7 @@ import CustomerRanking, { type CustomerRow } from "@/components/customers/Custom
 import CustomerDetail from "@/components/customers/CustomerDetail";
 import CustomerAtRisk from "@/components/customers/CustomerChurn";
 import PriceShrinkers from "@/components/customers/PriceShrinkers";
+import CustomerMasterPage from "@/components/customers/CustomerMasterPage";
 import { cn } from "@/lib/utils";
 
 const SchemeNudgeEngine = lazy(
@@ -27,6 +28,7 @@ const SECTIONS = [
   { id: "shrinkers", label: "Price Shrinkers" },
   { id: "churn",     label: "At Risk & New" },
   { id: "schemes",   label: "Schemes" },
+  { id: "master",    label: "Customer Data" },
 ] as const;
 
 type SectionId = (typeof SECTIONS)[number]["id"];
@@ -35,6 +37,7 @@ function sectionFromLocation(loc: string): SectionId {
   if (loc.includes("/shrinkers")) return "shrinkers";
   if (loc.includes("/churn"))     return "churn";
   if (loc.includes("/schemes"))   return "schemes";
+  if (loc.includes("/master"))    return "master";
   return "rankings";
 }
 
@@ -53,9 +56,14 @@ export default function CustomersPage() {
   // Section is URL-driven — AppShell handles the section nav.
   const activeSection = sectionFromLocation(location);
 
+  // CustomerMasterPage owns its own full-height layout — render it standalone.
+  if (activeSection === "master") {
+    return <CustomerMasterPage />;
+  }
+
   function navigate2(section: SectionId) {
     navigate(section === "rankings" ? "/customers" : `/customers/${section}`);
-    setSelectedCustomer(null);
+    if (section !== "master") setSelectedCustomer(null);
   }
 
   // Filter state
