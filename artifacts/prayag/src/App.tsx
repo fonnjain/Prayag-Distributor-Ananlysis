@@ -8,6 +8,7 @@ import Dashboard, { AREA_IDS } from "@/pages/Dashboard";
 import SalesPage from "@/pages/SalesPage";
 import CustomersPage from "@/pages/CustomersPage";
 import DevPortalPage from "@/pages/DevPortalPage";
+import DevApiKeysPage from "@/pages/DevApiKeysPage";
 import NotFound from "@/pages/not-found";
 import { DashboardProvider } from "@/data/dashboard-context";
 
@@ -32,6 +33,7 @@ function Router() {
         <Route path="/customers" component={CustomersPage} />
         {/* Developer Portal */}
         <Route path="/dev/api" component={DevPortalPage} />
+        <Route path="/dev/keys" component={DevApiKeysPage} />
         <Route path="/dev" component={DevPortalPage} />
         {/* Dashboard areas */}
         <Route path="/" component={Dashboard} />

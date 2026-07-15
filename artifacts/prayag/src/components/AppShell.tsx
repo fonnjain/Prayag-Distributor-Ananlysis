@@ -18,7 +18,7 @@ import {
   ClipboardList, Database, ShieldCheck,
   LayoutDashboard, Users, ShoppingBag, GitMerge,
   AlertTriangle, UserMinus, Settings, Store, BookOpen,
-  ChevronDown, ChevronRight, Menu, X, Sun, Moon, Braces,
+  ChevronDown, ChevronRight, Menu, X, Sun, Moon, Braces, Key,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -88,7 +88,8 @@ const NAV: NavGroup[] = [
     label: "Developer",
     icon: Braces,
     items: [
-      { id: "api-portal", label: "API Portal", path: "/dev/api", icon: Braces },
+      { id: "api-portal", label: "API Portal",  path: "/dev/api",  icon: Braces },
+      { id: "api-keys",   label: "API Keys",    path: "/dev/keys", icon: Key },
     ],
   },
 ];

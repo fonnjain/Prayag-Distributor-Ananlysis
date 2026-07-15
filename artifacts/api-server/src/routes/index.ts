@@ -15,6 +15,7 @@ import companyReportsRouter from "./companyReports";
 import schemesRouter from "./schemes";
 import primaryTargetsRouter from "./primaryTargets";
 import customerMasterRouter from "./customerMaster";
+import apiKeysRouter from "./apiKeys";
 
 const router: IRouter = Router();
 
@@ -34,5 +35,6 @@ router.use(companyReportsRouter);
 router.use(schemesRouter);
 router.use(primaryTargetsRouter);
 router.use(customerMasterRouter);
+router.use(apiKeysRouter);
 
 export default router;
