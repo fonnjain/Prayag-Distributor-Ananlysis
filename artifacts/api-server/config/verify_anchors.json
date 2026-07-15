@@ -16,7 +16,14 @@
   "primary_anchors": {
     "comment": "Source: State Head Sale registers, independently recomputed. Basis: Taxable Value (net dispatch). CANARY — Biju C.O: if BIJJU/BIJU CO in the register does not map to 'Biju C.O' via the head-name alias map, the per-head check shows Rs 0 and normalisation is broken. The 'perHeadOrderBooking' figures are ORDER BOOKING (from the order-book file), NOT dispatch. The dispatch total is the 'total' field.",
     "2026-27": {
-      "total": 732200000,
+      "total": null,
+      "closedMonths": [
+        "Apr-26",
+        "May-26",
+        "Jun-26"
+      ],
+      "closedMonthsTotal": 725424443,
+      "closedMonthsNote": "Closed months Apr-Jun 2026 (months 1-3 of FY2026-27). July is still open and excluded. Anchor reconciled against live SALE SHEET 26-27 (19LQGpkb...) on 2026-07-15: DB=31788 rows / Rs 76.06 Cr total; sheet=32280 rows / Rs 76.64 Cr (492 natural-key duplicates in sheet, correctly excluded by dedupeByNaturalKey). Closed-months total: Rs 72.54 Cr across 30060 rows. Update closedMonths + closedMonthsTotal in verify_anchors.json when July closes.",
       "perHeadOrderBooking": {
         "Sandeep Dadheech": 327700000,
         "Syed Aqil Rizvi": 130400000,

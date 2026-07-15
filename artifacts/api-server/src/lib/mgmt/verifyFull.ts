@@ -11,7 +11,7 @@
 //   Set 6 — Source health (probes each configured spreadsheet)
 import verifyAnchorsJson from "../../../config/verify_anchors.json";
 import { db, saleLines } from "@workspace/db";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { runVerify, hasVerifyAnchors } from "./verify.js";
 import { loadTargetsForFy, type TargetRow } from "./targets.js";
 import { loadOrderFile } from "./orders.js";
@@ -62,7 +62,16 @@ type Tolerances = {
 };
 
 type PrimaryFyAnchor = {
-  total: number;
+  // Full-year running total. Omit (or set null) for open FYs — use
+  // closedMonths / closedMonthsTotal instead so the check stays stable as the
+  // current month fills.
+  total?: number | null;
+  // If set, the primary_total check covers only these month_label values (the
+  // closed months). This prevents the anchor from drifting as July/later months
+  // fill. Required for any FY where the current month is still open.
+  closedMonths?: string[];
+  closedMonthsTotal?: number;
+  closedMonthsNote?: string;
   perHead: Record<string, number>;
 };
 
@@ -825,9 +834,31 @@ async function runPrimarySet(fy: string): Promise<CheckGroup> {
       };
     }
 
-    const checks: HealthCheck[] = [
-      moneyCheck(`primary_total_${fy}`, `Total Dispatch (${fy})`, fyAnchor.total, totalActual),
-    ];
+    const checks: HealthCheck[] = [];
+
+    if (fyAnchor.closedMonths?.length && fyAnchor.closedMonthsTotal != null) {
+      // Closed-months check: restricts to stable, closed months so the anchor
+      // does not drift as the current open month fills. Use this for any FY
+      // where the current month has not yet closed.
+      const closedRows = await db
+        .select({ total: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8` })
+        .from(saleLines)
+        .where(and(eq(saleLines.fy, fy), inArray(saleLines.monthLabel, fyAnchor.closedMonths)));
+      const closedActual = Math.round(closedRows[0]?.total ?? 0);
+      checks.push(moneyCheck(
+        `primary_total_${fy}`,
+        `Closed-Months Dispatch (${fy}, ${fyAnchor.closedMonths.join("/")})`,
+        fyAnchor.closedMonthsTotal,
+        closedActual,
+        fyAnchor.closedMonthsNote ??
+          `Closed months only: ${fyAnchor.closedMonths.join(", ")}. ` +
+          `Open months excluded so the anchor stays stable. ` +
+          `Update closedMonths in verify_anchors.json each time a new month closes.`,
+      ));
+    } else if (fyAnchor.total != null) {
+      // Full-year check: only use when the FY is complete and all months are closed.
+      checks.push(moneyCheck(`primary_total_${fy}`, `Total Dispatch (${fy})`, fyAnchor.total, totalActual));
+    }
 
     if (Object.keys(fyAnchor.perHead ?? {}).length > 0) {
       const headRows = await db
