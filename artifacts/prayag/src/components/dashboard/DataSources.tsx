@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useDashboard } from "@/data/dashboard-context";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { FileText, Database, FolderGit2, CheckCircle2, Clock, Save, Loader2, AlertTriangle } from "lucide-react";
@@ -9,8 +9,6 @@ import {
 } from "@workspace/api-client-react";
 import DataHealth from "./DataHealth";
 import PrimaryTargetsEntry from "./PrimaryTargetsEntry";
-
-const DashboardUploadPanel = lazy(() => import("./DashboardUploadPanel"));
 
 const FYS = ["2026-27", "2025-26"];
 
@@ -102,7 +100,7 @@ function TargetEditor() {
           <div>
             <CardTitle className="text-xl">Secondary Targets</CardTitle>
             <CardDescription className="mt-1">
-              Annual secondary order booking targets per team member. Edits write to the Prayag Target Master and override the xlsx import values.
+              Annual secondary order booking targets per team member. Stored in the database and applied across all management reports.
             </CardDescription>
           </div>
           <div className="flex items-center gap-3 shrink-0">
@@ -209,7 +207,6 @@ function TargetEditor() {
         )}
         <p className="px-4 mt-3 text-xs text-muted-foreground">
           Enter annual target in rupees (e.g. 6000000 for ₹60 Lakh). Blank clears the saved target.
-          The Prayag Target Master overrides the xlsx import when both are present.
         </p>
       </CardContent>
     </Card>
@@ -223,21 +220,6 @@ export default function DataSources() {
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-4xl mx-auto">
       <DataHealth />
-
-      {/* Dashboard xlsx import — moved from State Head > Settings */}
-      <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
-        <CardHeader className="px-6 pt-6 pb-4">
-          <CardTitle className="text-xl">Dashboard Import</CardTitle>
-          <CardDescription>
-            Upload the STATE HEAD DASHBOARD xlsx file for each fiscal year. Populates targets, CTC, designation, and stateHead assignments.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="px-6 pb-6">
-          <Suspense fallback={<div className="py-8 text-center text-sm text-muted-foreground">Loading...</div>}>
-            <DashboardUploadPanel />
-          </Suspense>
-        </CardContent>
-      </Card>
 
       {/* Editable primary targets */}
       <PrimaryTargetsEntry />

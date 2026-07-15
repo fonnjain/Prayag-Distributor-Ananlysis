@@ -593,6 +593,22 @@ export interface PrimaryTargetEntry {
   monthlyExpanded: number[];
 }
 
+/**
+ * Seasonal monthly split curve used to expand annual primary targets into per-month targets. Retail/territorial basis only — institutional/tender business is not seasonalised.
+ */
+export interface SeasonalCalibration {
+  /** The FY this calibration was derived from (e.g. "2025-26"). */
+  fy: string;
+  /** Human-readable description of the calibration source. */
+  derivedFrom: string;
+  /** Normalised monthly shares (fractions, sum=1). Apr=index 0 … Mar=index 11. */
+  monthly: number[];
+  /** Normalised quarterly shares (fractions, sum=1). Q1=index 0 … Q4=index 3. */
+  quarterly: number[];
+  /** Month display names Apr…Mar. */
+  monthNames: string[];
+}
+
 export interface PrimaryTargetsResponse {
   fy: string;
   /** Display names of the 13 state heads for this FY. */
@@ -600,6 +616,7 @@ export interface PrimaryTargetsResponse {
   /** Display names of the 17 primary team members for this FY. */
   teamMembers: string[];
   entries: PrimaryTargetEntry[];
+  seasonalCalibration?: SeasonalCalibration;
 }
 
 export type SavePrimaryTargetsRequestRowsItemRole = typeof SavePrimaryTargetsRequestRowsItemRole[keyof typeof SavePrimaryTargetsRequestRowsItemRole];

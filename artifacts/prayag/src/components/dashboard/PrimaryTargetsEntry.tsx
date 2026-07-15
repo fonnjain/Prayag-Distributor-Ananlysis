@@ -319,6 +319,36 @@ export default function PrimaryTargetsEntry() {
             <AlertTriangle className="h-4 w-4" /> {saveError}
           </p>
         )}
+        {data.data?.seasonalCalibration && (
+          <div className="mt-4 rounded-md border border-border/60 bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+            <p className="font-medium text-foreground/80 mb-2">
+              Seasonal Calibration — Primary Target Splitting
+            </p>
+            <div className="grid grid-cols-6 gap-x-3 gap-y-1 mb-2">
+              {data.data.seasonalCalibration.monthNames.map((m, i) => (
+                <div key={m} className="flex flex-col items-center">
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">{m}</span>
+                  <span className="font-mono text-foreground/70">
+                    {((data.data!.seasonalCalibration!.monthly[i] ?? 0) * 100).toFixed(1)}%
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-4 flex-wrap border-t border-border/40 pt-2">
+              {(["Q1", "Q2", "Q3", "Q4"] as const).map((q, i) => (
+                <span key={q}>
+                  <span className="text-muted-foreground/70">{q}</span>{" "}
+                  <span className="font-mono text-foreground/70">
+                    {((data.data!.seasonalCalibration!.quarterly[i] ?? 0) * 100).toFixed(1)}%
+                  </span>
+                </span>
+              ))}
+              <span className="ml-auto text-muted-foreground/60 italic">
+                Calibrated from FY{data.data.seasonalCalibration.fy} retail actuals. Institutional/tender targets are not seasonalised.
+              </span>
+            </div>
+          </div>
+        )}
       </CardHeader>
       <CardContent className="px-0 pb-6">
         {data.isLoading ? (

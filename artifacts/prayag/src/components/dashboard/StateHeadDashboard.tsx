@@ -896,7 +896,7 @@ export default function StateHeadDashboard() {
                   className="text-right"
                   title={
                     seasonalInfo
-                      ? `Split seasonally from annual — not ÷12. ${seasonalInfo.periodLabel} (${seasonalInfo.months} months) carries ${seasonalInfo.share.toFixed(1)}% of annual vs ${seasonalInfo.flatShare.toFixed(1)}% flat. Calibrated from FY${seasonalInfo.cal.fy} actuals (single year).`
+                      ? `Split seasonally from annual — not ÷12. ${seasonalInfo.periodLabel} (${seasonalInfo.months} months) carries ${(seasonalInfo.share * 100).toFixed(1)}% of annual vs ${seasonalInfo.flatShare.toFixed(1)}% flat. Calibrated from FY${seasonalInfo.cal.fy} actuals (single year).`
                       : undefined
                   }
                 />
@@ -918,7 +918,7 @@ export default function StateHeadDashboard() {
                     className="text-right"
                     title={
                       r.targetPrimaryAnnual != null && r.targetPrimary != null && seasonalInfo
-                        ? `${seasonalInfo.periodLabel} target ₹${(r.targetPrimary / 1e7).toFixed(2)} Cr = annual ₹${(r.targetPrimaryAnnual / 1e7).toFixed(2)} Cr × ${seasonalInfo.share.toFixed(1)}% seasonal share (flat ÷12 × ${seasonalInfo.months} = ₹${(r.targetPrimaryAnnual / 12 * seasonalInfo.months / 1e7).toFixed(2)} Cr; FY${seasonalInfo.cal.fy} calibration)`
+                        ? `${seasonalInfo.periodLabel} target ₹${(r.targetPrimary / 1e7).toFixed(2)} Cr = annual ₹${(r.targetPrimaryAnnual / 1e7).toFixed(2)} Cr × ${(seasonalInfo.share * 100).toFixed(1)}% seasonal share (flat ÷12 × ${seasonalInfo.months} = ₹${(r.targetPrimaryAnnual / 12 * seasonalInfo.months / 1e7).toFixed(2)} Cr; FY${seasonalInfo.cal.fy} calibration)`
                         : undefined
                     }
                   >

@@ -34,7 +34,7 @@ import {
   buildHeadResolver,
 } from "./names.js";
 
-type FyAnchor = { perHeadSale: Record<string, number>; saleReportTotal: number };
+type FyAnchor = { perHeadSale?: Record<string, number>; saleReportTotal?: number };
 type VerifyAnchors = { fy_anchors: Record<string, FyAnchor> };
 const anchors = verifyAnchorsJson as VerifyAnchors;
 
@@ -602,7 +602,7 @@ export async function runSalesVerify(fy: string): Promise<SalesVerify> {
       0,
     );
     let anchorVal: number | null = null;
-    if (anchor) {
+    if (anchor?.perHeadSale) {
       for (const [an, av] of Object.entries(anchor.perHeadSale)) {
         if ((resolveHead(an) ?? an) === n.name) {
           anchorVal = av;

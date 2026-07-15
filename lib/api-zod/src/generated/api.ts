@@ -484,7 +484,14 @@ export const GetPrimaryTargetsResponse = zod.object({
   "cadence": zod.enum(['annual', 'half_yearly', 'quarterly', 'monthly']),
   "values": zod.array(zod.number()).describe('1, 2, 4, or 12 rupee values depending on cadence.\n'),
   "monthlyExpanded": zod.array(zod.number()).describe('Precomputed 12-element array (Apr-Mar) derived from cadence + seasonal weights.\n')
-}))
+})),
+  "seasonalCalibration": zod.object({
+  "fy": zod.string().describe('The FY this calibration was derived from (e.g. \"2025-26\").'),
+  "derivedFrom": zod.string().describe('Human-readable description of the calibration source.'),
+  "monthly": zod.array(zod.number()).describe('Normalised monthly shares (fractions, sum=1). Apr=index 0 … Mar=index 11.'),
+  "quarterly": zod.array(zod.number()).describe('Normalised quarterly shares (fractions, sum=1). Q1=index 0 … Q4=index 3.'),
+  "monthNames": zod.array(zod.string()).describe('Month display names Apr…Mar.')
+}).optional().describe('Seasonal monthly split curve used to expand annual primary targets into per-month targets. Retail\/territorial basis only — institutional\/tender business is not seasonalised.')
 })
 
 

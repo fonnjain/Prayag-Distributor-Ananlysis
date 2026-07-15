@@ -129,6 +129,7 @@ export * from './saveTargetRow';
 export * from './saveTargetRowLevel';
 export * from './saveTargetsRequest';
 export * from './saveTargetsResult';
+export * from './seasonalCalibration';
 export * from './splitPreviewMember';
 export * from './splitPreviewResponse';
 export * from './targetFieldMonthly';

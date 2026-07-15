@@ -1794,7 +1794,32 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PrimaryTargetEntry"
+        seasonalCalibration:
+          $ref: "#/components/schemas/SeasonalCalibration"
       required: [fy, stateHeads, teamMembers, entries]
+    SeasonalCalibration:
+      type: object
+      description: Seasonal monthly split curve used to expand annual primary targets into per-month targets. Retail/territorial basis only — institutional/tender business is not seasonalised.
+      properties:
+        fy:
+          type: string
+          description: The FY this calibration was derived from (e.g. "2025-26").
+        derivedFrom:
+          type: string
+          description: Human-readable description of the calibration source.
+        monthly:
+          type: array
+          items: { type: number }
+          description: Normalised monthly shares (fractions, sum=1). Apr=index 0 … Mar=index 11.
+        quarterly:
+          type: array
+          items: { type: number }
+          description: Normalised quarterly shares (fractions, sum=1). Q1=index 0 … Q4=index 3.
+        monthNames:
+          type: array
+          items: { type: string }
+          description: Month display names Apr…Mar.
+      required: [fy, derivedFrom, monthly, quarterly, monthNames]
     SavePrimaryTargetsRequest:
       type: object
       properties:

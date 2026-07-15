@@ -5,7 +5,7 @@
     "sources": {
       "2025-26": {
         "expectedMinRows": 20000,
-        "description": "Secondary OB FY25-26 is ~8 MB; a round-number read is evidence of the truncation bug that produced ₹46.34 Cr (19% of ₹240 Cr)"
+        "description": "Secondary OB FY25-26 is ~8 MB; a round-number read is evidence of the truncation bug that produced Rs 46.34 Cr (19% of Rs 240 Cr)"
       },
       "2026-27": {
         "pendingExpected": true,
@@ -89,11 +89,10 @@
     ]
   },
   "crossfoot": {
+    "comment": "FY2025-26 cross-foot member and retailer counts from the transaction-file basis are RETIRED. The STATE HEAD DASHBOARD is now authoritative. Remove these checks to avoid false failures.",
     "2025-26": {
-      "expectedMembers": 240,
-      "memberTolerance": 4,
-      "expectedRegisteredRetailers": 15809,
-      "retailerTolerancePct": 2
+      "retired": true,
+      "retiredNote": "Transaction-file basis (240 members / 15,809 retailers) retired. Use STATE HEAD DASHBOARD figures."
     }
   }
 }

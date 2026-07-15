@@ -96,7 +96,7 @@ type Anchors = {
   tolerances: Tolerances;
   fy_anchors: Record<string, unknown>;
   primary_anchors: Record<string, unknown>;
-  target_anchors: TargetAnchors;
+  target_anchors?: TargetAnchors & { retired?: boolean };
   source_list: SourceEntry[];
 };
 
@@ -178,6 +178,19 @@ function tgtPeriodSec(target: TargetRow, mFrom: number, mTo: number): number | n
 // ── Group A + B: Targets and Achievement ──────────────────────────────────────
 
 async function runTargetsAndAchievementSet(fy: string): Promise<CheckGroup> {
+  // Target Master is retired — secondary targets and CTC now come live from the
+  // STATE HEAD DASHBOARD Google Sheet. All Group A and B checks are disabled.
+  if (anchors.target_anchors?.retired) {
+    return {
+      id: "targets_achievement",
+      label: "Groups A + B — Target Load and Achievement (retired)",
+      available: false,
+      pendingNote:
+        "Target Master sheet retired. Secondary targets and achievement data now come live from the STATE HEAD DASHBOARD Google Sheet.",
+      checks: [],
+    };
+  }
+
   const checks: HealthCheck[] = [];
 
   try {
@@ -188,10 +201,10 @@ async function runTargetsAndAchievementSet(fy: string): Promise<CheckGroup> {
       loadRoster().catch(() => ({ members: [] as { normKey: string }[] })),
     ]);
 
-    const targetAnchor2526 = anchors.target_anchors["2025-26"] as TargetFyAnchor | undefined;
-    const targetAnchor2627 = anchors.target_anchors["2026-27"] as TargetFyAnchor | undefined;
-    const totalRowsAnchor = typeof anchors.target_anchors.totalRows === "number"
-      ? anchors.target_anchors.totalRows : 348;
+    const ta = anchors.target_anchors;
+    const targetAnchor2526 = ta?.["2025-26"] as TargetFyAnchor | undefined;
+    const targetAnchor2627 = ta?.["2026-27"] as TargetFyAnchor | undefined;
+    const totalRowsAnchor = ta && typeof ta.totalRows === "number" ? ta.totalRows : 348;
 
     // ── Group A: Target load ──────────────────────────────────────────────────
 
@@ -579,6 +592,18 @@ async function runSaleOrderBookingSet(): Promise<CheckGroup> {
 // ── Group E: Name matching ─────────────────────────────────────────────────────
 
 async function runNameMatchSet(fy: string): Promise<CheckGroup> {
+  // Target Master is retired — name-matching checks no longer applicable.
+  if (anchors.target_anchors?.retired) {
+    return {
+      id: "name_match",
+      label: `Group E — Name Matching (${fy}) (retired)`,
+      available: false,
+      pendingNote:
+        "Target Master retired — name matching checks no longer applicable.",
+      checks: [],
+    };
+  }
+
   const checks: HealthCheck[] = [];
 
   try {
@@ -661,7 +686,7 @@ async function runNameMatchSet(fy: string): Promise<CheckGroup> {
       const knownDuplicateCandidates = ["K.V.THAMIZHSELVAN", "PRATHEESH CC"];
       const foundExtras: string[] = [];
       // If map size > expected members-with-target, extra entries exist.
-      const expectedMapSize = (anchors.target_anchors["2026-27"] as TargetFyAnchor | undefined)?.membersWithTarget ?? 154;
+      const expectedMapSize = (anchors.target_anchors?.["2026-27"] as TargetFyAnchor | undefined)?.membersWithTarget ?? 154;
       if (targetMap.size > expectedMapSize + 2) {
         foundExtras.push(`Map size ${targetMap.size} exceeds expected ${expectedMapSize}`);
       }

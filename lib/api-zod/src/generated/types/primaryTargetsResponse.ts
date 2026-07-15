@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { PrimaryTargetEntry } from './primaryTargetEntry';
+import type { SeasonalCalibration } from './seasonalCalibration';
 
 export interface PrimaryTargetsResponse {
   fy: string;
@@ -14,4 +15,5 @@ export interface PrimaryTargetsResponse {
   /** Display names of the 17 primary team members for this FY. */
   teamMembers: string[];
   entries: PrimaryTargetEntry[];
+  seasonalCalibration?: SeasonalCalibration;
 }

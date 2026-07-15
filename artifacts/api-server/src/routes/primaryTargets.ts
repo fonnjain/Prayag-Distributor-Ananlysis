@@ -7,6 +7,7 @@ import {
   type PrimaryTargetRow,
   type Cadence,
 } from "../lib/mgmt/primaryTargets.js";
+import { getSeasonalCalibration } from "../lib/seasonal.js";
 import { invalidateMgmtDataCache } from "./mgmt.js";
 
 const router = Router();
@@ -51,6 +52,7 @@ router.get("/primary-targets", async (req: Request, res: Response): Promise<void
       stateHeads: roster.stateHeads,
       teamMembers: roster.teamMembers,
       entries: entriesWithMonthly,
+      seasonalCalibration: getSeasonalCalibration(),
     });
   } catch (err) {
     req.log.error({ err, fy }, "primary-targets GET failed");

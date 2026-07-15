@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import type { InsertSaleLine } from "@workspace/db";
 import groupMapConfig from "../../../config/group_map.json";
 import normalizeConfig from "../../../config/normalize.json";
+import headAliasConfigRaw from "../../../config/head_alias.json";
 
 export type CellValue = string | number | boolean | Date | null | undefined;
 
@@ -219,6 +220,14 @@ for (const [canon, raws] of Object.entries(
   for (const raw of raws) groupLookup.set(raw.toUpperCase(), canon);
 }
 
+// Build alias map from raw uppercase key → canonical display name.
+// Covers spelling variants (BIJJU→Biju C.O, SNADEEP JI→Sandeep Dadheech, etc.).
+const headAliasLookup = new Map<string, string>(
+  Object.entries(headAliasConfigRaw as Record<string, string>).map(
+    ([raw, canon]) => [raw.toUpperCase().trim(), canon],
+  ),
+);
+
 const territoryHeads = new Set(
   (normalizeConfig.territory_heads as string[]).map((h) => h.toUpperCase()),
 );
@@ -271,8 +280,9 @@ export function canonHead(
   if (raw == null) return { headCanon: null, isTerritory: null };
   const key = raw.toUpperCase().trim();
   if (territoryHeads.has(key)) {
-    // Title-case the canonical head for display consistency.
-    return { headCanon: titleCase(key), isTerritory: true };
+    // Resolve through alias map first so variants like BIJJU → "Biju C.O" and
+    // SNADEEP JI → "Sandeep Dadheech" always produce the canonical display name.
+    return { headCanon: headAliasLookup.get(key) ?? titleCase(key), isTerritory: true };
   }
   if (institutionalHeads.has(key)) {
     return { headCanon: NON_TERRITORY_BUCKET, isTerritory: false };

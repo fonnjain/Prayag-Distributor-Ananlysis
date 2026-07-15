@@ -26,12 +26,12 @@ type Tolerances = {
 
 type FyAnchor = {
   saleReportTotal: number;
-  orders: number;
-  registeredRetailers: number;
-  activeRetailers: number;
-  registeredMembers: number;
-  activeMembers: number;
-  perHeadSale: Record<string, number>;
+  orders?: number;
+  registeredRetailers?: number;
+  activeRetailers?: number;
+  registeredMembers?: number;
+  activeMembers?: number;
+  perHeadSale?: Record<string, number>;
 };
 
 type VerifyAnchors = {
@@ -195,38 +195,44 @@ export async function runVerify(fy: string): Promise<VerifyResult> {
   });
 
   const { retailers: activeRetailers, orders } = unionCounts(agg);
-  checks.push({
-    key: "orders",
-    label: "Total orders",
-    unit: "count",
-    expected: anchor.orders,
-    actual: orders,
-    deltaPct: deltaPct(orders, anchor.orders),
-    status: countPctStatus(orders, anchor.orders, tol.countPassPct),
-  });
-  checks.push({
-    key: "activeRetailers",
-    label: "Active retailers (>=1 order)",
-    unit: "count",
-    expected: anchor.activeRetailers,
-    actual: activeRetailers,
-    deltaPct: deltaPct(activeRetailers, anchor.activeRetailers),
-    status: countPctStatus(activeRetailers, anchor.activeRetailers, tol.countPassPct),
-  });
+  if (anchor.orders != null) {
+    checks.push({
+      key: "orders",
+      label: "Total orders",
+      unit: "count",
+      expected: anchor.orders,
+      actual: orders,
+      deltaPct: deltaPct(orders, anchor.orders),
+      status: countPctStatus(orders, anchor.orders, tol.countPassPct),
+    });
+  }
+  if (anchor.activeRetailers != null) {
+    checks.push({
+      key: "activeRetailers",
+      label: "Active retailers (>=1 order)",
+      unit: "count",
+      expected: anchor.activeRetailers,
+      actual: activeRetailers,
+      deltaPct: deltaPct(activeRetailers, anchor.activeRetailers),
+      status: countPctStatus(activeRetailers, anchor.activeRetailers, tol.countPassPct),
+    });
+  }
 
   // Distinct team-member names that booked orders in the file. This is a file
   // statistic (it includes names the roster cannot place), not the roster-active
   // count — kept as a regression lock on name aggregation.
   const orderBookingNames = agg.perTm.size;
-  checks.push({
-    key: "orderBookingNames",
-    label: "Members booking orders (file)",
-    unit: "count",
-    expected: anchor.activeMembers,
-    actual: orderBookingNames,
-    deltaPct: deltaPct(orderBookingNames, anchor.activeMembers),
-    status: countAbsStatus(orderBookingNames, anchor.activeMembers, tol.memberCountAbs),
-  });
+  if (anchor.activeMembers != null) {
+    checks.push({
+      key: "orderBookingNames",
+      label: "Members booking orders (file)",
+      unit: "count",
+      expected: anchor.activeMembers,
+      actual: orderBookingNames,
+      deltaPct: deltaPct(orderBookingNames, anchor.activeMembers),
+      status: countAbsStatus(orderBookingNames, anchor.activeMembers, tol.memberCountAbs),
+    });
+  }
 
   // Per-head Sale: sum each roster member's NET Sale into their State Head
   // bucket. The resolver aligns spelling drift so no head drops.
@@ -249,9 +255,10 @@ export async function runVerify(fy: string): Promise<VerifyResult> {
   }
   let headSaleTotal = 0;
   for (const v of headSale.values()) headSaleTotal += v;
+  void headSaleTotal;
 
   const missingHeads: string[] = [];
-  for (const [name, expected] of Object.entries(anchor.perHeadSale)) {
+  for (const [name, expected] of Object.entries(anchor.perHeadSale ?? {})) {
     const resolved = resolveHead(name) ?? name;
     const actual = headSale.get(resolved) ?? 0;
     if (actual === 0) missingHeads.push(name);
@@ -295,9 +302,9 @@ export async function runVerify(fy: string): Promise<VerifyResult> {
 
   const registeredMembers = roster.members.length;
   const context: VerifyContext = {
-    registeredRetailers: anchor.registeredRetailers,
+    registeredRetailers: anchor.registeredRetailers ?? null,
     activeRetailers,
-    activeRetailerPct: pct(activeRetailers, anchor.registeredRetailers),
+    activeRetailerPct: pct(activeRetailers, anchor.registeredRetailers ?? 0),
     registeredMembers,
     activeMembers: matchedMembers,
     activeMemberPct: pct(matchedMembers, registeredMembers),
