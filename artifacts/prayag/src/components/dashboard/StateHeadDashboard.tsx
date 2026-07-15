@@ -1,7 +1,4 @@
-import { useState, useEffect, useMemo, lazy, Suspense } from "react";
-const DashboardUploadPanel = lazy(
-  () => import("./DashboardUploadPanel"),
-);
+import { useState, useEffect, useMemo } from "react";
 import {
   Download,
   ChevronUp,
@@ -140,7 +137,7 @@ type DashboardMeta = {
 
 type DashboardData = { rows: Member[]; meta: DashboardMeta };
 
-type View = "data" | "lowPerf" | "summary" | "secondary" | "primary" | "settings";
+type View = "data" | "lowPerf" | "summary" | "secondary" | "primary";
 
 type SortState = { key: string; dir: "asc" | "desc" };
 
@@ -213,7 +210,6 @@ const VIEWS: { id: View; label: string }[] = [
   { id: "summary", label: "Summary by Head" },
   { id: "secondary", label: "Secondary" },
   { id: "primary", label: "Primary" },
-  { id: "settings", label: "Settings" },
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1019,72 +1015,8 @@ export default function StateHeadDashboard() {
         </div>
       )}
 
-      {/* Settings view */}
-      {activeView === "settings" && (
-        <Suspense
-          fallback={
-            <div className="py-8 text-center text-sm text-muted-foreground">Loading...</div>
-          }
-        >
-          <DashboardUploadPanel
-            targetDiagnostic={data?.meta?.targetMatchDiagnostic ?? null}
-            selectedFy={fy}
-          />
-        </Suspense>
-      )}
-
-      {/* Seasonal calibration note — visible in Settings when data is loaded */}
-      {activeView === "settings" && data?.meta.seasonalCalibration && (() => {
-        const cal = data.meta.seasonalCalibration!;
-        const monthNames = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
-        return (
-          <div className="mt-6 border rounded-lg p-4 bg-muted/40 text-sm space-y-3">
-            <div className="flex items-center gap-2 font-semibold">
-              <Info className="h-4 w-4 text-muted-foreground shrink-0" />
-              Seasonal Calibration — Primary Target Splitting
-            </div>
-            <p className="text-muted-foreground leading-relaxed">
-              Annual primary targets are split using a seasonal curve instead of a flat ÷12.
-              Weights are derived from <strong>FY{cal.fy} actuals</strong> ({cal.derivedFrom}).
-              This is a <strong>single-year calibration</strong> — update{" "}
-              <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">config/seasonal_weights.json</code>{" "}
-              each April once multi-year data is available.
-              Secondary monthly plans from the STATE HEAD DASHBOARD are real hand-entered figures and are never overwritten.
-            </p>
-            <div className="overflow-x-auto">
-              <table className="text-xs w-full border-collapse">
-                <thead>
-                  <tr className="text-muted-foreground">
-                    <th className="text-left pb-1 pr-4 font-medium">Month</th>
-                    {monthNames.map((m) => (
-                      <th key={m} className="text-right pb-1 px-2 font-medium">{m}</th>
-                    ))}
-                    <th className="text-right pb-1 px-2 font-medium">Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td className="pr-4 text-muted-foreground">Share (%)</td>
-                    {cal.monthly.map((v, i) => (
-                      <td key={i} className="text-right px-2 tabular-nums">{v.toFixed(1)}</td>
-                    ))}
-                    <td className="text-right px-2 tabular-nums font-medium">
-                      {cal.monthly.reduce((s, v) => s + v, 0).toFixed(1)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Q1 {cal.quarterly[0]?.toFixed(1)}% | Q2 {cal.quarterly[1]?.toFixed(1)}% | Q3 {cal.quarterly[2]?.toFixed(1)}% | Q4 {cal.quarterly[3]?.toFixed(1)}%
-              {" — "}flat ÷12 would give 8.33% per month / 25% per quarter.
-            </p>
-          </div>
-        );
-      })()}
-
       {/* Row count footer */}
-      {!loading && data && activeView !== "summary" && activeView !== "settings" && (
+      {!loading && data && activeView !== "summary" && (
         <p className="text-xs text-muted-foreground text-right">
           {viewRows().length} of {filteredRows.length} members
         </p>
