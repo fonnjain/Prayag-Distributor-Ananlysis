@@ -16,11 +16,16 @@ import { z } from "zod/v4";
 // Invoice-line sales register. One row per invoice line, deduplicated across
 // overlapping source files via line_uid (sha1 of the identifying tuple plus an
 // occurrence counter that preserves legitimate duplicate lines).
+// serial_no is column A of the source sheet ("Serial no"); it is unique per
+// physical dispatch line, including colour/variant lines that share the same
+// (invoice_no, code, qty, amount). Null for historical FYs whose sheets lack
+// the column.
 export const saleLines = pgTable(
   "sale_line",
   {
     lineUid: text("line_uid").primaryKey(),
     fy: text("fy").notNull(), // '2026-27'
+    serialNo: integer("serial_no"), // source sheet column A; null for older FYs
     invoiceNo: text("invoice_no"),
     invoiceDate: date("invoice_date"),
     monthLabel: text("month_label"), // 'Apr-26'

@@ -8,8 +8,8 @@
   },
   "fy_anchors": {
     "2025-26": {
-      "comment": "Source: STATE HEAD DASHBOARD FY2025-26 (live Google Sheet, now authoritative). Secondary order booking basis (Sub Total). Transaction-file basis (retired): total Rs 240.14 Cr — kept as historical reference only; do not fail the audit for matching the dashboard.",
-      "saleReportTotal": 2401400000,
+      "comment": "Source: STATE HEAD DASHBOARD FY2025-26 (live Google Sheet, authoritative). Secondary order booking basis (Sub Total) = Rs 231.09 Cr. Retired transaction-file basis was Rs 240.14 Cr — that figure is superseded and must not be used as the anchor.",
+      "saleReportTotal": 2310900000,
       "orders": 52515
     }
   },
@@ -22,8 +22,8 @@
         "May-26",
         "Jun-26"
       ],
-      "closedMonthsTotal": 725424443,
-      "closedMonthsNote": "Closed months Apr-Jun 2026 (months 1-3 of FY2026-27). July is still open and excluded. Anchor reconciled against live SALE SHEET 26-27 (19LQGpkb...) on 2026-07-15: DB=31788 rows / Rs 76.06 Cr total; sheet=32280 rows / Rs 76.64 Cr (492 natural-key duplicates in sheet, correctly excluded by dedupeByNaturalKey). Closed-months total: Rs 72.54 Cr across 30060 rows. Update closedMonths + closedMonthsTotal in verify_anchors.json when July closes.",
+      "closedMonthsTotal": 730867205,
+      "closedMonthsNote": "Closed months Apr-Jun 2026 (months 1-3 of FY2026-27). July is still open and excluded. Anchor reconciled against live SALE SHEET 26-27 (19LQGpkb...) on 2026-07-15: DB=32280 rows / Rs 76.64 Cr (exact sheet match). Serial-no dedup key (fy, month_label, serial_no) preserves colour variants. Apr=5542 rows Rs 13.11 Cr; May=11956 rows Rs 28.40 Cr; Jun=13020 rows Rs 31.57 Cr; total Rs 73.09 Cr. Update closedMonths + closedMonthsTotal in verify_anchors.json when July closes.",
       "perHeadOrderBooking": {
         "Sandeep Dadheech": 327700000,
         "Syed Aqil Rizvi": 130400000,

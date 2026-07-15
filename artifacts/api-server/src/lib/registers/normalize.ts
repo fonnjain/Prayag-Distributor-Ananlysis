@@ -23,6 +23,7 @@ export function normHeader(v: CellValue): string {
 
 export type RegisterColumns = {
   headerRowNumber: number;
+  serialNo: number; // column A "Serial no"; -1 when absent
   invoiceNo: number;
   date: number;
   customer: number;
@@ -66,6 +67,7 @@ export function mapRegisterColumns(
   }
   return {
     headerRowNumber,
+    serialNo: find("SERIALNO", "SRNO", "SR", "SNO"),
     invoiceNo: find("INVOICENO", "DOCUMENTNO"),
     date: find("DATE"),
     customer: find("CUSTOMER", "CUSTOMERNAME"),
@@ -319,6 +321,7 @@ function titleCase(s: string): string {
 
 export type ParsedRegisterRow = {
   fy: string;
+  serialNo: number | null; // source sheet column A; null when column absent
   invoiceNo: string | null;
   invoiceDate: string | null;
   monthLabel: string | null;
@@ -377,6 +380,7 @@ export function parseRegisterRow(
     kind: "row",
     row: {
       fy,
+      serialNo: toNumber(at(values, cols.serialNo)),
       invoiceNo: toText(at(values, cols.invoiceNo)),
       invoiceDate: toIsoDate(at(values, cols.date)),
       monthLabel: toMonthLabel(at(values, cols.month), fy),
@@ -412,6 +416,12 @@ export class OccurrenceCounter {
 // 424,477-line acceptance requires those blocks to collapse). Legitimate
 // duplicate lines are preserved by the occurrence counter, which depends only
 // on the tuple itself, not on row order among identical tuples.
+//
+// When serial_no is present it is included in the key. Two colour variants of
+// the same item on the same invoice share (code, qty, amount) but have distinct
+// serial numbers, so including serial_no gives them distinct keys without
+// needing the occurrence counter. For historical FYs without serial_no the key
+// falls back to the original tuple and the occurrence counter disambiguates.
 export function lineUidKey(row: ParsedRegisterRow): string {
   return [
     row.fy,
@@ -419,6 +429,7 @@ export function lineUidKey(row: ParsedRegisterRow): string {
     row.qty ?? "",
     row.amount,
     row.monthLabel ?? "",
+    row.serialNo ?? "",
   ].join("|");
 }
 
@@ -437,6 +448,7 @@ export function toSaleLine(
   return {
     lineUid: computeLineUid(key, occurrence.next(key)),
     fy: row.fy,
+    serialNo: row.serialNo,
     invoiceNo: row.invoiceNo,
     invoiceDate: row.invoiceDate,
     monthLabel: row.monthLabel,
