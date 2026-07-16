@@ -8,6 +8,7 @@ import {
   type TargetsMember,
 } from "@workspace/api-client-react";
 import DataHealth from "./DataHealth";
+import PrimaryStateTargetsEditor from "./PrimaryStateTargetsEditor";
 import PrimaryTargetsEntry from "./PrimaryTargetsEntry";
 
 const FYS = ["2026-27", "2025-26", "2024-25"];
@@ -311,7 +312,10 @@ export default function DataSources() {
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-4xl mx-auto">
       <DataHealth />
 
-      {/* Editable primary targets */}
+      {/* State Head monthly targets — single editable source for primary targets */}
+      <PrimaryStateTargetsEditor />
+
+      {/* Editable primary targets (team members + annual rough totals) */}
       <PrimaryTargetsEntry />
 
       {/* Editable secondary targets */}

@@ -179,7 +179,7 @@ export async function ensureAndSeedStateTargets(): Promise<void> {
         ),
       );
 
-    if (count === EXPECTED_ROWS) {
+    if (count >= EXPECTED_ROWS) {
       logger.info(
         { fy: FY, rows: count },
         "stateTargetSeed: already up-to-date, skipping",
@@ -187,18 +187,24 @@ export async function ensureAndSeedStateTargets(): Promise<void> {
       return;
     }
 
-    // Clean-replace: delete existing Apr-Jul targets, then re-insert.
-    await db
-      .delete(primaryStateTargets)
-      .where(
-        and(
-          eq(primaryStateTargets.fy, FY),
-          inArray(primaryStateTargets.monthLabel, [...MONTHS]),
-        ),
-      );
-
+    // Safe upsert: insert missing rows; update only rows where source != 'user'
+    // so user-edited overrides are never clobbered by the seed.
     const rows = buildRows();
-    await db.insert(primaryStateTargets).values(rows);
+    const placeholders = rows
+      .map((_, i) => `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`)
+      .join(", ");
+    const flat = rows.flatMap((r) => [r.fy, r.stateHead, r.state, r.monthLabel, r.targetLakh, r.source]);
+
+    await pool.query(
+      `INSERT INTO primary_state_targets
+         (fy, state_head, state, month_label, target_lakh, source)
+       VALUES ${placeholders}
+       ON CONFLICT (fy, state_head, state, month_label) DO UPDATE
+         SET target_lakh = EXCLUDED.target_lakh,
+             source      = EXCLUDED.source
+         WHERE primary_state_targets.source != 'user'`,
+      flat,
+    );
 
     logger.info(
       { fy: FY, inserted: rows.length, previousCount: count },
