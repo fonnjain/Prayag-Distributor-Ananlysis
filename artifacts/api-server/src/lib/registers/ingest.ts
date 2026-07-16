@@ -70,7 +70,7 @@ export async function insertSaleLineBatches(
     const rows = await db
       .insert(saleLines)
       .values(batch)
-      .onConflictDoNothing({ target: saleLines.lineUid })
+      .onConflictDoNothing()
       .returning({ lineUid: saleLines.lineUid });
     inserted += rows.length;
   }
