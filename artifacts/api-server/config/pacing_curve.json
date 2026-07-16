@@ -1,0 +1,34 @@
+{
+  "_comment": "Company-wide order-booking pacing curve derived from FY2025-26 actuals. sourceYear = reference period. companyCurve = expected cumulative % of the month's orders booked by each day-of-month (31-day scale), with 1-std-dev confidence band. headTypicalPace = each head's own historical pace at key checkpoints (day 15/20/25/28), for context-only fairness reference — does NOT change the status scoring.",
+  "sourceYear": "2025-26",
+  "companyCurve": [
+    { "day": 1,  "cumPct": 0,   "bandLow": 0,   "bandHigh": 0   },
+    { "day": 5,  "cumPct": 2,   "bandLow": 0,   "bandHigh": 8   },
+    { "day": 10, "cumPct": 7,   "bandLow": 0,   "bandHigh": 16  },
+    { "day": 15, "cumPct": 17,  "bandLow": 6,   "bandHigh": 28  },
+    { "day": 18, "cumPct": 22,  "bandLow": 11,  "bandHigh": 33  },
+    { "day": 20, "cumPct": 27,  "bandLow": 17,  "bandHigh": 38  },
+    { "day": 22, "cumPct": 31,  "bandLow": 22,  "bandHigh": 41  },
+    { "day": 24, "cumPct": 38,  "bandLow": 30,  "bandHigh": 46  },
+    { "day": 25, "cumPct": 41,  "bandLow": 33,  "bandHigh": 49  },
+    { "day": 26, "cumPct": 44,  "bandLow": 35,  "bandHigh": 52  },
+    { "day": 27, "cumPct": 48,  "bandLow": 40,  "bandHigh": 57  },
+    { "day": 28, "cumPct": 57,  "bandLow": 42,  "bandHigh": 73  },
+    { "day": 29, "cumPct": 65,  "bandLow": 51,  "bandHigh": 79  },
+    { "day": 30, "cumPct": 81,  "bandLow": 64,  "bandHigh": 99  },
+    { "day": 31, "cumPct": 100, "bandLow": 100, "bandHigh": 100 }
+  ],
+  "headTypicalPace": {
+    "nasirhussainkhan": { "d15": 4,  "d20": 7,  "d25": 14, "d28": 31 },
+    "anantsingh":       { "d15": 7,  "d20": 13, "d25": 20, "d28": 33 },
+    "pawansharma":      { "d15": 11, "d20": 17, "d25": 23, "d28": 36 },
+    "lalankumar":       { "d15": 10, "d20": 18, "d25": 27, "d28": 42 },
+    "bijuco":           { "d15": 9,  "d20": 22, "d25": 33, "d28": 48 },
+    "sulinderpal":      { "d15": 14, "d20": 19, "d25": 33, "d28": 50 },
+    "sandeepdadheech":  { "d15": 10, "d20": 21, "d25": 36, "d28": 53 },
+    "sureshnair":       { "d15": 12, "d20": 22, "d25": 37, "d28": 58 },
+    "syedaqilrizvi":    { "d15": 12, "d20": 23, "d25": 38, "d28": 57 },
+    "sunilpatel":       { "d15": 16, "d20": 32, "d25": 47, "d28": 64 },
+    "babu":             { "d15": 17, "d20": 34, "d25": 55, "d28": 69 }
+  }
+}

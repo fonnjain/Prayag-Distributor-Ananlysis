@@ -120,7 +120,7 @@ const PERIODS = [
   { label: "Mar", from: 12, to: 12 },
 ] as const;
 
-type View = "head" | "distributor" | "member" | "stateTargets";
+type View = "head" | "distributor" | "member" | "stateTargets" | "velocity";
 
 // ── State-achievement types (GET /api/primary-targets/state-achievement) ──────
 
@@ -158,6 +158,55 @@ type StateAchievementResponse = {
   actualsError: string | null;
 };
 
+// ── Velocity types (GET /api/primary-performance/velocity) ────────────────────
+
+type VelocityStatus = "too_early" | "on_pace" | "ahead" | "behind";
+type VelocityMomentum = "building" | "stalling" | "steady" | "early";
+
+type VelocityHeadRow = {
+  stateHead: string;
+  headKey: string;
+  targetLakh: number;
+  targetDerived: boolean;
+  actualLakh: number;
+  actualPct: number;
+  expectedPct: number;
+  bandLow: number;
+  bandHigh: number;
+  typicalPctToday: number;
+  typicalPctRef: { d15: number; d20: number; d25: number; d28: number } | null;
+  status: VelocityStatus;
+  momentum: VelocityMomentum;
+  projectedClosePct: number | null;
+  sparkline: number[];
+  isNewTerritory: boolean;
+  hasDateData: boolean;
+};
+
+type VelocityResponse = {
+  fy: string;
+  month: string | null;
+  monthFull: string;
+  dayOfMonth: number;
+  daysInMonth: number;
+  effectiveDay: number;
+  expectedPct: number;
+  bandLow: number;
+  bandHigh: number;
+  isEarlyMonth: boolean;
+  targetDerived: boolean;
+  company: {
+    targetLakh: number;
+    actualLakh: number;
+    actualPct: number;
+    expectedPct: number;
+    status: VelocityStatus;
+  } | null;
+  heads: VelocityHeadRow[];
+  dataError: string | null;
+  asOf: string;
+};
+
 // ── Formatters ────────────────────────────────────────────────────────────────
 
 function fmtCr(n: number | null | undefined): string {
@@ -190,6 +239,94 @@ function PendingChip({ pending, booking }: { pending: number; booking: number })
   );
 }
 
+// ── Velocity helper components ────────────────────────────────────────────────
+
+const STATUS_LABEL: Record<VelocityStatus, string> = {
+  too_early: "Too early",
+  on_pace:   "On pace",
+  ahead:     "Ahead",
+  behind:    "Behind",
+};
+
+const STATUS_CLASS: Record<VelocityStatus, string> = {
+  too_early: "bg-muted text-muted-foreground",
+  on_pace:   "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  ahead:     "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+  behind:    "bg-red-500/10 text-red-700 dark:text-red-400",
+};
+
+function VelocityStatusChip({ status }: { status: VelocityStatus }) {
+  return (
+    <span
+      className={cn(
+        "rounded px-1.5 py-0.5 text-[10px] font-semibold",
+        STATUS_CLASS[status],
+      )}
+    >
+      {STATUS_LABEL[status]}
+    </span>
+  );
+}
+
+const MOMENTUM_LABEL: Record<VelocityMomentum, string> = {
+  building: "Building",
+  stalling: "Stalling",
+  steady:   "Steady",
+  early:    "",
+};
+
+function VelocityMomentumChip({ momentum }: { momentum: VelocityMomentum }) {
+  if (momentum === "early" || momentum === "steady") return null;
+  return (
+    <span
+      className={cn(
+        "rounded px-1.5 py-0.5 text-[10px] font-medium",
+        momentum === "building"
+          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+          : "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+      )}
+    >
+      {MOMENTUM_LABEL[momentum]}
+    </span>
+  );
+}
+
+function VelocitySparkline({
+  data,
+  daysInMonth,
+  dayOfMonth,
+}: {
+  data: number[];
+  daysInMonth: number;
+  dayOfMonth: number;
+}) {
+  const W = 120;
+  const H = 28;
+  const max = Math.max(...data.slice(0, dayOfMonth), 0.001);
+  const barSlot = W / daysInMonth;
+  const barW = Math.max(barSlot - 1, 1);
+  return (
+    <svg width={W} height={H} className="shrink-0 overflow-visible">
+      {data.slice(0, dayOfMonth).map((v, i) => {
+        if (v <= 0) return null;
+        const bh = Math.max((v / max) * H, 1);
+        const x = i * barSlot;
+        return (
+          <rect
+            key={i}
+            x={x}
+            y={H - bh}
+            width={barW}
+            height={bh}
+            rx="0.5"
+            className="fill-primary/50"
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function PrimaryPerformanceDashboard() {
@@ -206,6 +343,9 @@ export default function PrimaryPerformanceDashboard() {
   const [stateData, setStateData] = useState<StateAchievementResponse | null>(null);
   const [stateLoading, setStateLoading] = useState(false);
   const [stateError, setStateError] = useState<string | null>(null);
+  const [velocityData, setVelocityData] = useState<VelocityResponse | null>(null);
+  const [velocityLoading, setVelocityLoading] = useState(false);
+  const [velocityError, setVelocityError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -244,6 +384,23 @@ export default function PrimaryPerformanceDashboard() {
       })
       .then((d) => { setStateData(d); setStateLoading(false); })
       .catch((err: Error) => { setStateError(err.message); setStateLoading(false); });
+  }, [fy, view]);
+
+  // Lazy-fetch velocity only when that view is active; always uses current FY
+  useEffect(() => {
+    if (view !== "velocity") return;
+    setVelocityLoading(true);
+    setVelocityError(null);
+    fetch(`/api/primary-performance/velocity?fy=${encodeURIComponent(fy)}`)
+      .then((r) => {
+        if (!r.ok)
+          return r.json().then((e: { error?: string }) => {
+            throw new Error(e.error ?? r.statusText);
+          });
+        return r.json() as Promise<VelocityResponse>;
+      })
+      .then((d) => { setVelocityData(d); setVelocityLoading(false); })
+      .catch((err: Error) => { setVelocityError(err.message); setVelocityLoading(false); });
   }, [fy, view]);
 
   const toggleHead = (head: string) => {
@@ -437,6 +594,7 @@ export default function PrimaryPerformanceDashboard() {
                 : []),
               { key: "member" as View, label: "By Team Member" },
               { key: "stateTargets" as View, label: "State Targets" },
+              { key: "velocity" as View, label: "Velocity" },
             ] as { key: View; label: string }[]
           ).map((v) => (
             <button
@@ -1008,6 +1166,193 @@ export default function PrimaryPerformanceDashboard() {
               </p>
             </>
           )}
+        </div>
+      )}
+
+      {/* ── Velocity view ────────────────────────────────────────────────── */}
+      {view === "velocity" && velocityLoading && (
+        <div className="py-12 text-center text-sm text-muted-foreground">
+          Loading velocity data…
+        </div>
+      )}
+      {view === "velocity" && velocityError && (
+        <div className="py-6 text-center text-sm text-destructive">{velocityError}</div>
+      )}
+      {view === "velocity" && !velocityLoading && velocityData && (
+        <div className="space-y-4">
+          {/* Header strip */}
+          <div className="rounded-lg border border-border bg-card px-4 py-3 space-y-1">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="text-sm font-semibold">
+                {velocityData.monthFull} — day {velocityData.dayOfMonth} of {velocityData.daysInMonth}
+              </span>
+              {velocityData.isEarlyMonth ? (
+                <span className="text-xs text-muted-foreground italic">
+                  Too early in the month to score pace (before day 15)
+                </span>
+              ) : (
+                <span className="text-xs text-muted-foreground">
+                  Expected pace today:{" "}
+                  <span className="font-medium text-foreground">
+                    {velocityData.expectedPct}%
+                  </span>
+                  <span className="text-muted-foreground/70">
+                    {" "}(band {velocityData.bandLow}%–{velocityData.bandHigh}%)
+                  </span>
+                </span>
+              )}
+            </div>
+            {velocityData.targetDerived && (
+              <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                Targets for this month are seasonal estimates (derived), not the management plan.
+              </p>
+            )}
+            {velocityData.dataError && (
+              <p className="text-[11px] text-destructive">
+                Data warning: {velocityData.dataError}
+              </p>
+            )}
+          </div>
+
+          {/* Company summary */}
+          {velocityData.company && (
+            <div className="rounded-lg border border-border bg-muted/20 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Company
+                </span>
+                <span className="text-sm font-mono font-medium">
+                  {velocityData.company.actualLakh.toFixed(0)} L actual
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  / {velocityData.company.targetLakh.toFixed(0)} L target
+                </span>
+                <span className="text-sm font-semibold">
+                  {velocityData.company.actualPct}%
+                </span>
+                {!velocityData.isEarlyMonth && (
+                  <span className="text-xs text-muted-foreground">
+                    vs expected {velocityData.company.expectedPct}%
+                  </span>
+                )}
+                {!velocityData.isEarlyMonth && (
+                  <VelocityStatusChip status={velocityData.company.status} />
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Per-head cards */}
+          {velocityData.heads.length === 0 ? (
+            <p className="text-sm text-muted-foreground px-1">
+              No head-level targets found for {velocityData.month ?? "this month"}.
+              Load targets via the State Targets view first.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {velocityData.heads.map((head) => (
+                <div
+                  key={head.headKey}
+                  className="rounded-lg border border-border bg-card px-3 py-2.5 space-y-2"
+                >
+                  {/* Row 1: name + status */}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium">{head.stateHead}</span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {head.isNewTerritory && (
+                        <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                          new territory
+                        </span>
+                      )}
+                      {!velocityData.isEarlyMonth && (
+                        <VelocityStatusChip status={head.status} />
+                      )}
+                      {head.momentum !== "early" && head.momentum !== "steady" && (
+                        <VelocityMomentumChip momentum={head.momentum} />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Row 2: actual vs expected */}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="text-xs text-muted-foreground">
+                      Actual
+                    </span>
+                    <span className="text-sm font-mono font-semibold">
+                      {head.actualPct}%
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      ({head.actualLakh.toFixed(1)} L / {head.targetLakh.toFixed(0)} L)
+                    </span>
+                    {!velocityData.isEarlyMonth && (
+                      <>
+                        <span className="text-muted-foreground/40 text-xs">vs</span>
+                        <span className="text-xs text-muted-foreground">
+                          expected {head.expectedPct}%
+                          <span className="text-muted-foreground/60">
+                            {" "}({head.bandLow}%–{head.bandHigh}%)
+                          </span>
+                        </span>
+                        {head.typicalPctToday >= 0 && (
+                          <span className="text-xs text-muted-foreground/70">
+                            · own pace {head.typicalPctToday}%
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  {/* Row 3: projected + sparkline */}
+                  <div className="flex items-end justify-between gap-3">
+                    <div className="space-y-0.5">
+                      {head.projectedClosePct != null && !velocityData.isEarlyMonth && (
+                        <p className="text-xs text-muted-foreground">
+                          Projected close:{" "}
+                          <span
+                            className={cn(
+                              "font-medium",
+                              head.projectedClosePct >= 100
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : head.projectedClosePct >= 80
+                                  ? "text-amber-600 dark:text-amber-400"
+                                  : "text-destructive",
+                            )}
+                          >
+                            {head.projectedClosePct}%
+                          </span>
+                        </p>
+                      )}
+                      {head.typicalPctRef && (
+                        <p className="text-[10px] text-muted-foreground/60">
+                          Historical pace: d15={head.typicalPctRef.d15}%
+                          · d20={head.typicalPctRef.d20}%
+                          · d25={head.typicalPctRef.d25}%
+                          · d28={head.typicalPctRef.d28}%
+                        </p>
+                      )}
+                    </div>
+                    {head.hasDateData && head.sparkline.some((v) => v > 0) && (
+                      <VelocitySparkline
+                        data={head.sparkline}
+                        daysInMonth={velocityData.daysInMonth}
+                        dayOfMonth={velocityData.dayOfMonth}
+                      />
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Legend */}
+          <p className="text-[10px] text-muted-foreground/60 px-1">
+            Pace curve derived from FY2025-26 actuals. Status scored after day 15 only.
+            {velocityData.heads[0]?.hasDateData
+              ? " Sparklines show daily bookings for the month."
+              : " No date column detected in order sheet — sparklines unavailable."}
+            {" "}Projected close = actual% &divide; expected% &times; 100.
+            Own-pace reference is each head&rsquo;s typical pattern from FY2025-26.
+          </p>
         </div>
       )}
 

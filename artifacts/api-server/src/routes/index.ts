@@ -15,6 +15,7 @@ import companyReportsRouter from "./companyReports";
 import schemesRouter from "./schemes";
 import primaryTargetsRouter from "./primaryTargets";
 import primaryStateAchievementRouter from "./primaryStateAchievement";
+import primaryVelocityRouter from "./primaryVelocity";
 import customerMasterRouter from "./customerMaster";
 import apiKeysRouter from "./apiKeys";
 
@@ -36,6 +37,7 @@ router.use(companyReportsRouter);
 router.use(schemesRouter);
 router.use(primaryTargetsRouter);
 router.use(primaryStateAchievementRouter);
+router.use(primaryVelocityRouter);
 router.use(customerMasterRouter);
 router.use(apiKeysRouter);
 
