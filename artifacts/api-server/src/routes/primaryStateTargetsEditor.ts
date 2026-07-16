@@ -13,6 +13,7 @@ import { Router, type Request, type Response } from "express";
 import { db, primaryStateTargets } from "@workspace/db";
 import { pool } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
+import { getSeasonalCalibration } from "../lib/seasonal.js";
 
 const router = Router();
 const FY_PATTERN = /^\d{4}-\d{2}$/;
@@ -91,7 +92,7 @@ router.get(
         months.map((m) => [m, Math.round((companyMap.get(m) ?? 0) * 100) / 100]),
       );
 
-      res.json({ fy, months, companyTotals, heads });
+      res.json({ fy, months, companyTotals, heads, seasonalCalibration: getSeasonalCalibration() });
     } catch (err) {
       req.log.error({ err, fy }, "primary-state-targets/by-head GET failed");
       res.status(500).json({ error: "Could not load state head targets." });

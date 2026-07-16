@@ -35,7 +35,7 @@ import {
 } from "../lib/mgmt/stateDashboard.js";
 import { splitAnnualToMonth, getSeasonalCalibration } from "../lib/seasonal.js";
 import {
-  buildPrimaryTargetMap,
+  buildPrimaryTargetMapFromStateTargets,
   periodTarget as dbPeriodTarget,
 } from "../lib/mgmt/primaryTargets.js";
 import { normName } from "../lib/mgmt/names.js";
@@ -267,8 +267,8 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
       assembleRows(filters),
       loadHrSfaDashboard().catch((): Map<string, HrSfaRecord> => new Map()),
       loadStateDashboard(fy).catch((): null => null),
-      // DB primary targets override/supplement Target Master when available.
-      buildPrimaryTargetMap(fy).catch((): Map<string, number[]> => new Map()),
+      // State Head Targets (primary_state_targets) override/supplement Target Master.
+      buildPrimaryTargetMapFromStateTargets(fy).catch((): Map<string, number[]> => new Map()),
     ]);
     const { rows, ordersAvailable, targetsAvailable, rosterSource, orderStatus, nameMatches, xlsxTargetDiagnostic } = assembled;
     // Build a normKey → SecMember lookup for the member-row merge below.
@@ -577,8 +577,8 @@ router.get("/mgmt/primary", async (req: Request, res: Response): Promise<void> =
       );
     }
 
-    // Build head-level primary target map from DB for use in the response.
-    const dbHeadTargetMap = await buildPrimaryTargetMap(fy).catch((): Map<string, number[]> => new Map());
+    // Build head-level primary target map from state targets for use in the response.
+    const dbHeadTargetMap = await buildPrimaryTargetMapFromStateTargets(fy).catch((): Map<string, number[]> => new Map());
     const headPrimaryTargets: Record<string, number | null> = {};
     for (const row of sheetData.byHead) {
       const nk = normName(row.head);

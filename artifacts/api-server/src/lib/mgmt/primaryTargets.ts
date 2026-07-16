@@ -13,7 +13,7 @@
 //   4.2  8.0  8.7  7.2  6.9  6.4  6.4  8.2  9.5 10.1 10.9 13.6
 // Sum = 100.1 — normalized internally so they sum to exactly 1.
 import { eq } from "drizzle-orm";
-import { db, primaryTargetEntries } from "@workspace/db";
+import { db, primaryTargetEntries, primaryStateTargets } from "@workspace/db";
 import { normName } from "./names.js";
 import { loadStateDashboard } from "./stateDashboard.js";
 import { loadRoster } from "./roster.js";
@@ -159,6 +159,50 @@ export async function buildPrimaryTargetMap(
     if (key) map.set(key, expandToMonthly(e.cadence, e.values));
   }
   return map;
+}
+
+// ── State-target-backed primary target map ────────────────────────────────────
+//
+// Reads monthly targets from primary_state_targets (the unified editable source)
+// rather than primary_target_entries.  Use this in mgmt routes so edits made in
+// the Data Sources "State Head Targets" editor propagate everywhere.
+//
+// Returns normName(stateHead) → 12-element array of monthly values in RUPEES
+// (target_lakh × 1e5).  Month ordering: Apr=0 … Mar=11 (fiscal).
+
+function fyMonthLabels(fy: string): string[] {
+  const start = Number(fy.slice(2, 4));
+  const end   = Number(fy.slice(5, 7));
+  return [
+    `Apr-${start}`, `May-${start}`, `Jun-${start}`, `Jul-${start}`,
+    `Aug-${start}`, `Sep-${start}`, `Oct-${start}`, `Nov-${start}`,
+    `Dec-${start}`, `Jan-${end}`,   `Feb-${end}`,   `Mar-${end}`,
+  ];
+}
+
+export async function buildPrimaryTargetMapFromStateTargets(
+  fy: string,
+): Promise<Map<string, number[]>> {
+  const rows = await db.select().from(primaryStateTargets).where(eq(primaryStateTargets.fy, fy));
+
+  const monthLabels = fyMonthLabels(fy);
+  // stateHead → monthLabel → sumLakh
+  const headMap = new Map<string, Map<string, number>>();
+  for (const row of rows) {
+    if (!headMap.has(row.stateHead)) headMap.set(row.stateHead, new Map());
+    const m = headMap.get(row.stateHead)!;
+    m.set(row.monthLabel, (m.get(row.monthLabel) ?? 0) + row.targetLakh);
+  }
+
+  const result = new Map<string, number[]>();
+  for (const [head, monthMap] of headMap) {
+    const key = normName(head);
+    if (!key) continue;
+    // Convert Lakh → rupees (× 1e5) for each of the 12 fiscal months in order.
+    const monthly12 = monthLabels.map((lbl) => (monthMap.get(lbl) ?? 0) * 1e5);
+    result.set(key, monthly12);
+  }
+  return result;
 }
 
 // ── Roster ────────────────────────────────────────────────────────────────────
