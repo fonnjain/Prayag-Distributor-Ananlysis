@@ -214,10 +214,10 @@ function GroupCard({ group }: { group: CheckGroup }) {
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
-const FYS = ["2025-26", "2026-27", "2024-25"];
+const FYS = ["2026-27", "2025-26", "2024-25"];
 
 export default function DataHealth() {
-  const [fy, setFy] = useState("2025-26");
+  const [fy, setFy] = useState("2026-27");
   const [report, setReport] = useState<FullVerifyReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

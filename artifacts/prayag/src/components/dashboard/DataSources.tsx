@@ -10,7 +10,7 @@ import {
 import DataHealth from "./DataHealth";
 import PrimaryTargetsEntry from "./PrimaryTargetsEntry";
 
-const FYS = ["2026-27", "2025-26"];
+const FYS = ["2026-27", "2025-26", "2024-25"];
 
 type Cadence = "annual" | "half_yearly" | "quarterly" | "monthly";
 
