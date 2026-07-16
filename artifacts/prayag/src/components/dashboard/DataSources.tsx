@@ -64,7 +64,7 @@ function coerceMonthly(arr: (number | null)[]): number[] {
 
 function TargetEditor() {
   const [fy, setFy] = useState(FYS[0]);
-  const [cadence, setCadence] = useState<Cadence>("annual");
+  const [cadence, setCadence] = useState<Cadence>("monthly");
   const targets = useGetTargets({ fy });
   const save = useSaveTargets();
   const [edits, setEdits] = useState<Map<string, string[]>>(new Map());

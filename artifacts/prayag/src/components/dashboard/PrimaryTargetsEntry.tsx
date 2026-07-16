@@ -167,7 +167,7 @@ function GroupTable({ title, names, role, cadence, savedMap, edits, onChange }: 
 
 export default function PrimaryTargetsEntry() {
   const [fy, setFy] = useState("2026-27");
-  const [cadence, setCadence] = useState<Cadence>("annual");
+  const [cadence, setCadence] = useState<Cadence>("monthly");
   const [edits, setEdits] = useState<Map<string, string[]>>(new Map());
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
