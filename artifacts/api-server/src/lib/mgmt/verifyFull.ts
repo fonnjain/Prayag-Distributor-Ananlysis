@@ -808,18 +808,40 @@ async function runPrimarySet(fy: string): Promise<CheckGroup> {
   const fyAnchor = (anchors.primary_anchors as PrimaryAnchors)[fy] as PrimaryFyAnchor | undefined;
 
   try {
-    const totalRows = await db
-      .select({ total: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8` })
+    // Always query live count + total first — this guard surfaces any doubling
+    // immediately in the audit output, so a 2x row count stands out next to
+    // the expected anchor even before the anchor check itself runs.
+    const liveStatsRows = await db
+      .select({
+        rowCount: sql<number>`count(*)::int`,
+        total: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8`,
+      })
       .from(saleLines)
       .where(eq(saleLines.fy, fy));
-    const totalActual = Math.round(totalRows[0]?.total ?? 0);
+    const liveRowCount = liveStatsRows[0]?.rowCount ?? 0;
+    const totalActual = Math.round(liveStatsRows[0]?.total ?? 0);
+
+    logger.info({ fy, liveRowCount, totalActual }, "audit: primary set live sale_line snapshot");
+
+    const liveGuard: HealthCheck = {
+      key: `primary_live_count_${fy}`,
+      label: `Live row count in sale_line (${fy})`,
+      unit: "count",
+      expected: null,
+      actual: liveRowCount,
+      deltaPct: null,
+      status: liveRowCount === 0 ? "warn" : "pass",
+      note: liveRowCount === 0
+        ? "No rows in sale_line for this FY — run the backfill."
+        : `${liveRowCount.toLocaleString("en-IN")} rows / ₹${(totalActual / 1e7).toFixed(2)} Cr total. Queried live from sale_line at audit run time — a doubled row count would appear here.`,
+    };
 
     if (!fyAnchor) {
       return {
         id: "primary",
         label: "Primary Sale Register (DB dispatch)",
         available: true,
-        checks: [{
+        checks: [liveGuard, {
           key: `primary_total_${fy}`,
           label: `Total Dispatch (${fy}) — ${totalActual === 0 ? "no rows" : (totalActual / 1e7).toFixed(2) + " Cr"}`,
           unit: "money",
@@ -834,7 +856,7 @@ async function runPrimarySet(fy: string): Promise<CheckGroup> {
       };
     }
 
-    const checks: HealthCheck[] = [];
+    const checks: HealthCheck[] = [liveGuard];
 
     if (fyAnchor.closedMonths?.length && fyAnchor.closedMonthsTotal != null) {
       // Closed-months check: restricts to stable, closed months so the anchor
