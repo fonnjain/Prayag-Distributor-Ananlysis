@@ -1044,6 +1044,8 @@ export interface TargetsMember {
   /** Prior fiscal year order-booking actual in rupees. */
   priorYearActual: number;
   saved: SavedTarget | null;
+  /** 12-element array (Apr=0…Mar=11) of monthly secondary plan amounts in rupees sourced from the STATE HEAD DASHBOARD sheet. Null when the dashboard is unavailable for this FY. Individual elements may be null for months with no plan entered. */
+  secMonthlyPlan: (number | null)[] | null;
 }
 
 export interface TargetsResponse {

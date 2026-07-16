@@ -170,6 +170,15 @@ export function invalidateStateDashboardCache(fy?: string): void {
   }
 }
 
+// Returns the cached dashboard synchronously if it is warm; otherwise null.
+// Use this in endpoints that should NOT block waiting for a Sheets fetch —
+// they get the pre-fill for free once the cache is warm (warmed by the first
+// dashboard load) and degrade gracefully on a cold cache.
+export function getCachedStateDashboard(fy: string): SecDashboard | null {
+  const hit = _cache.get(fy);
+  return hit && Date.now() - hit.loadedAt < TTL_MS ? hit : null;
+}
+
 // Never throws. Returns null when the sheet is unreachable or the FY is
 // not configured. Callers degrade gracefully when null is returned.
 export async function loadStateDashboard(fy: string): Promise<SecDashboard | null> {

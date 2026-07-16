@@ -16,6 +16,7 @@ import {
   validateRow,
   upsertTargets,
 } from "../lib/mgmt/targets.js";
+import { getCachedStateDashboard, loadStateDashboard } from "../lib/mgmt/stateDashboard.js";
 
 const router: IRouter = Router();
 
@@ -75,6 +76,24 @@ router.get("/targets", async (req: Request, res: Response): Promise<void> => {
       loadTargetsForFy(fy),
       priorYearActuals(fy),
     ]);
+
+    // Use the in-process cache synchronously — no Sheets fetch here so the
+    // endpoint stays fast.  If the cache is cold, kick off a background warm
+    // (deduped by loadStateDashboard's own _inFlight map) so the next request
+    // will have the pre-fill data.
+    const secDash = getCachedStateDashboard(fy);
+    if (!secDash) {
+      void loadStateDashboard(fy).catch(() => {});
+    }
+
+    // Build normKey → 12-element planAmount array from STATE HEAD DASHBOARD.
+    const secPlanByKey = new Map<string, (number | null)[]>();
+    if (secDash) {
+      for (const m of secDash.members) {
+        secPlanByKey.set(m.normKey, m.months.map((mo) => mo.planAmount));
+      }
+    }
+
     const scoped = stateHead
       ? members.filter((m) => normName(m.stateHead) === normName(stateHead))
       : members;
@@ -95,6 +114,7 @@ router.get("/targets", async (req: Request, res: Response): Promise<void> => {
               updatedAt: s.updatedAt,
             }
           : null,
+        secMonthlyPlan: secPlanByKey.get(m.normKey) ?? null,
       };
     });
     res.json({ fy, stateHeads, members: rows });

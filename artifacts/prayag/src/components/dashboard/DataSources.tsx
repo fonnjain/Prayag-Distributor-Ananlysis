@@ -45,7 +45,8 @@ function parseCr(s: string): number {
 
 function toDisplayValues(annualRupees: number, monthlyArr: number[], cadence: Cadence): number[] {
   const n = CADENCE_LENGTHS[cadence];
-  if (cadence === "monthly" && monthlyArr.length === 12) return [...monthlyArr];
+  // Only use monthly overrides when at least one is non-zero; otherwise distribute.
+  if (cadence === "monthly" && monthlyArr.some((v) => v > 0)) return [...monthlyArr];
   const perPeriod = annualRupees / n;
   if (cadence === "annual") return [annualRupees];
   if (cadence === "half_yearly") return [perPeriod, perPeriod];
@@ -72,15 +73,29 @@ function TargetEditor() {
 
   const members: TargetsMember[] = targets.data?.members ?? [];
 
+  // Compute the canonical display values for a member+cadence, taking into
+  // account: (1) Target Master monthly overrides, (2) STATE HD plan pre-fill,
+  // (3) annual distribution, in that priority order.
+  function savedDisplayVals(m: TargetsMember, cad: Cadence): number[] {
+    const annual = m.saved?.annual.secondary ?? 0;
+    const monthly = coerceMonthly(m.saved?.monthly.secondary ?? []);
+    // 1. Target Master monthly overrides exist → use them.
+    if (monthly.some((v) => v > 0)) return toDisplayValues(annual, monthly, cad);
+    // 2. State HD plan available for monthly cadence → use it as pre-fill.
+    if (cad === "monthly" && m.secMonthlyPlan) {
+      const planVals = m.secMonthlyPlan.map((v) => v ?? 0);
+      if (planVals.some((v) => v > 0)) return planVals;
+    }
+    // 3. Annual target → distribute (or return 0 if no annual).
+    if (annual > 0) return toDisplayValues(annual, [], cad);
+    return Array<number>(CADENCE_LENGTHS[cad]).fill(0);
+  }
+
   // Re-initialise edits from saved values whenever data or cadence changes.
   useEffect(() => {
     const next = new Map<string, string[]>();
     for (const m of members) {
-      const annual = m.saved?.annual.secondary ?? 0;
-      const monthly = coerceMonthly(m.saved?.monthly.secondary ?? []);
-      const displayVals = annual > 0 || monthly.length > 0
-        ? toDisplayValues(annual, monthly, cadence)
-        : Array<number>(CADENCE_LENGTHS[cadence]).fill(0);
+      const displayVals = savedDisplayVals(m, cadence);
       next.set(m.name, displayVals.map((v) => (v > 0 ? fmtCr(v) : "")));
     }
     setEdits(next);
@@ -105,11 +120,7 @@ function TargetEditor() {
 
   // Compute dirty count.
   const dirtyCount = members.filter((m) => {
-    const annual = m.saved?.annual.secondary ?? 0;
-    const monthly = coerceMonthly(m.saved?.monthly.secondary ?? []);
-    const savedDisplay = annual > 0 || monthly.length > 0
-      ? toDisplayValues(annual, monthly, cadence)
-      : Array<number>(colCount).fill(0);
+    const savedDisplay = savedDisplayVals(m, cadence);
     const vals = edits.get(m.name) ?? emptyEdits(cadence);
     return vals.some((v, i) => parseCr(v) !== (savedDisplay[i] ?? 0));
   }).length;
@@ -119,15 +130,12 @@ function TargetEditor() {
     setSaveSuccess(false);
     const rows = members
       .map((m) => {
-        const annual = m.saved?.annual.secondary ?? 0;
-        const monthly = coerceMonthly(m.saved?.monthly.secondary ?? []);
-        const savedDisplay = annual > 0 || monthly.length > 0
-          ? toDisplayValues(annual, monthly, cadence)
-          : Array<number>(colCount).fill(0);
+        const savedDisplay = savedDisplayVals(m, cadence);
         const vals = edits.get(m.name) ?? emptyEdits(cadence);
         const isDirty = vals.some((v, i) => parseCr(v) !== (savedDisplay[i] ?? 0));
         if (!isDirty) return null;
 
+        const monthly = coerceMonthly(m.saved?.monthly.secondary ?? []);
         const parsedVals = vals.map((v) => parseCr(v));
         const newAnnual = parsedVals.reduce((s, v) => s + v, 0);
 
@@ -169,7 +177,7 @@ function TargetEditor() {
           <div>
             <CardTitle className="text-xl">Secondary Targets</CardTitle>
             <CardDescription className="mt-1">
-              Annual secondary order booking targets per team member. Stored in the database and applied across all management reports.
+              Secondary order booking targets per team member. Monthly cadence pre-fills from the State Head Dashboard plan figures (Apr-Jul actuals available). Save to lock in monthly values; other cadences distribute the annual total equally.
             </CardDescription>
           </div>
           <div className="flex items-center gap-3 shrink-0 flex-wrap">

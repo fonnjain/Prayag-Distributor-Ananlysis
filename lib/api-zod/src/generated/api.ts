@@ -397,7 +397,8 @@ export const GetTargetsResponse = zod.object({
 }).describe('Twelve fiscal-month values (April..March) per field. Null cells fall back to an equal twelfth of the annual figure.\n'),
   "updatedBy": zod.string(),
   "updatedAt": zod.string()
-}).nullable()
+}).nullable(),
+  "secMonthlyPlan": zod.array(zod.number().nullable()).nullable().describe('12-element array (Apr=0…Mar=11) of monthly secondary plan amounts in rupees sourced from the STATE HEAD DASHBOARD sheet. Null when the dashboard is unavailable for this FY. Individual elements may be null for months with no plan entered.\n')
 }))
 })
 
