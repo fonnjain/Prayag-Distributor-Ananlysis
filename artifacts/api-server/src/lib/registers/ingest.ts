@@ -2,7 +2,7 @@
 // Sheets sync). Idempotency comes from ON CONFLICT (line_uid) DO NOTHING —
 // the existing row always wins, so a Sheets row is never overwritten by a
 // backfill row.
-import { inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   db,
   saleLines,
@@ -64,6 +64,22 @@ export async function insertSaleLineBatches(
 ): Promise<{ inserted: number }> {
   // Dedupe within the incoming set before hitting the DB.
   const deduped = dedupeBySerialNo(lines);
+
+  // Self-healing cleanup: if ALL incoming rows for an FY have serial_no set,
+  // the source data is in the serial-aware format (column A present).
+  // Any existing NULL-serial rows for that FY are artifacts of an older sync
+  // run (before serial_no capture) and would cause apparent doubling because
+  // the partial unique index only covers (serial_no IS NOT NULL). Delete them
+  // before inserting so the new serial rows become the sole copy.
+  const fySet = new Set(deduped.map((r) => r.fy).filter((f): f is string => f != null));
+  for (const fy of fySet) {
+    const fyRows = deduped.filter((r) => r.fy === fy);
+    const allHaveSerial = fyRows.every((r) => r.serialNo != null);
+    if (allHaveSerial && fyRows.length > 0) {
+      await db.delete(saleLines).where(and(eq(saleLines.fy, fy), isNull(saleLines.serialNo)));
+    }
+  }
+
   let inserted = 0;
   for (let i = 0; i < deduped.length; i += BATCH_SIZE) {
     const batch = deduped.slice(i, i + BATCH_SIZE);
