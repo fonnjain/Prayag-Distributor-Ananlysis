@@ -22,5 +22,6 @@ export * from "./salesRegister";
 export * from "./sapSales";
 export * from "./customerPerf";
 export * from "./primaryTargets";
+export * from "./primaryStateTargets";
 export * from "./customerMaster";
 export * from "./apiKeys";

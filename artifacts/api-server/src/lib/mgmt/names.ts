@@ -56,6 +56,14 @@ const HEAD_ALIASES: Record<string, string> = {
   nasirhussain: "nasirhussainkhan",
 };
 
+// Stable lookup key for any head-name spelling: normHead + alias lookup.
+// Use this — not bare normHead — whenever building or querying a map keyed
+// by head name so that "SANDEEP JI" and "Sandeep Dadheech" share a key.
+export function resolveHeadKey(raw: unknown): string {
+  const n = normHead(raw);
+  return HEAD_ALIASES[n] ?? n;
+}
+
 // Resolves head-name spellings from any source (register, bridge, folder
 // names) to the canonical display used by the provided reference set
 // (normally the roster's State Head column). Matching order: exact normHead,

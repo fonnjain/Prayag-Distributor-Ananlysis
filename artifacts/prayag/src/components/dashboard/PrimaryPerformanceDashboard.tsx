@@ -120,7 +120,43 @@ const PERIODS = [
   { label: "Mar", from: 12, to: 12 },
 ] as const;
 
-type View = "head" | "distributor" | "member";
+type View = "head" | "distributor" | "member" | "stateTargets";
+
+// ── State-achievement types (GET /api/primary-targets/state-achievement) ──────
+
+type StateMonthCell = {
+  month: string;
+  targetLakh: number;
+  actualLakh: number;
+  source: string;
+};
+
+type StateAchievementStateRow = {
+  state: string;
+  isNewTerritory: boolean;
+  registerStates: string[];
+  monthly: StateMonthCell[];
+  totalTargetLakh: number;
+  totalActualLakh: number;
+  achievementPct: number | null;
+};
+
+type StateAchievementHead = {
+  stateHead: string;
+  states: StateAchievementStateRow[];
+  totalTargetLakh: number;
+  totalActualLakh: number;
+  achievementPct: number | null;
+};
+
+type StateAchievementResponse = {
+  fy: string;
+  months: string[];
+  rows: StateAchievementHead[];
+  companyTotals: { month: string; targetLakh: number; actualLakh: number; achievementPct: number | null }[];
+  actualsAvailable: boolean;
+  actualsError: string | null;
+};
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
@@ -167,6 +203,9 @@ export default function PrimaryPerformanceDashboard() {
   const [bridgeBuilding, setBridgeBuilding] = useState(false);
   const [bridgeBuildMsg, setBridgeBuildMsg] = useState<string | null>(null);
   const [showInventory, setShowInventory] = useState(false);
+  const [stateData, setStateData] = useState<StateAchievementResponse | null>(null);
+  const [stateLoading, setStateLoading] = useState(false);
+  const [stateError, setStateError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -189,6 +228,23 @@ export default function PrimaryPerformanceDashboard() {
         setLoading(false);
       });
   }, [fy, period]);
+
+  // Lazy-fetch state targets only when that view is active
+  useEffect(() => {
+    if (view !== "stateTargets") return;
+    setStateLoading(true);
+    setStateError(null);
+    fetch(`/api/primary-targets/state-achievement?fy=${encodeURIComponent(fy)}`)
+      .then((r) => {
+        if (!r.ok)
+          return r.json().then((e: { error?: string }) => {
+            throw new Error(e.error ?? r.statusText);
+          });
+        return r.json() as Promise<StateAchievementResponse>;
+      })
+      .then((d) => { setStateData(d); setStateLoading(false); })
+      .catch((err: Error) => { setStateError(err.message); setStateLoading(false); });
+  }, [fy, view]);
 
   const toggleHead = (head: string) => {
     setExpandedHeads((prev) => {
@@ -380,6 +436,7 @@ export default function PrimaryPerformanceDashboard() {
                 ? [{ key: "distributor" as View, label: "By Distributor" }]
                 : []),
               { key: "member" as View, label: "By Team Member" },
+              { key: "stateTargets" as View, label: "State Targets" },
             ] as { key: View; label: string }[]
           ).map((v) => (
             <button
@@ -640,6 +697,318 @@ export default function PrimaryPerformanceDashboard() {
             </div>
           )}
         </>
+      )}
+
+      {/* State Targets view — target vs order-booking actual, per state per head */}
+      {!loading && view === "stateTargets" && (
+        <div className="space-y-3">
+          {stateLoading && (
+            <div className="py-10 text-center text-sm text-muted-foreground">
+              Loading state targets…
+            </div>
+          )}
+          {stateError && (
+            <div className="py-6 text-center text-sm text-destructive">{stateError}</div>
+          )}
+          {!stateLoading && stateData && (
+            <>
+              {/* Month totals strip */}
+              {stateData.companyTotals.length > 0 && (
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {stateData.companyTotals.map((ct) => (
+                    <div
+                      key={ct.month}
+                      className="flex-shrink-0 rounded-lg border border-border bg-card p-2.5 min-w-[110px]"
+                    >
+                      <p className="text-[10px] text-muted-foreground font-medium">{ct.month}</p>
+                      <p className="text-xs font-mono mt-0.5">
+                        {ct.targetLakh.toFixed(0)} L
+                        {stateData.actualsAvailable && (
+                          <span className="text-muted-foreground"> / {ct.actualLakh.toFixed(0)}</span>
+                        )}
+                      </p>
+                      {stateData.actualsAvailable && ct.achievementPct != null && (
+                        <p
+                          className={cn(
+                            "text-[11px] font-semibold mt-0.5",
+                            ct.achievementPct >= 100
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : ct.achievementPct >= 75
+                                ? "text-amber-600 dark:text-amber-400"
+                                : "text-destructive",
+                          )}
+                        >
+                          {ct.achievementPct.toFixed(1)}%
+                        </p>
+                      )}
+                      <p className="text-[9px] text-muted-foreground/60 mt-0.5">Tgt / Act (Lakh)</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Actuals unavailable notice */}
+              {!stateData.actualsAvailable && (
+                <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+                  <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-500" />
+                  <span>
+                    Order-booking actuals could not be loaded from the live sheet — targets are
+                    shown but achievement cannot be computed.
+                    {stateData.actualsError ? ` (${stateData.actualsError})` : ""}
+                  </span>
+                </div>
+              )}
+
+              {stateData.rows.length === 0 && (
+                <div className="py-8 text-center text-sm text-muted-foreground">
+                  No state targets found for FY {fy}. State targets are loaded for FY2026-27 only.
+                </div>
+              )}
+
+              {/* Per-head collapsible blocks */}
+              {stateData.rows.map((head) => (
+                <div key={head.stateHead} className="rounded-lg border border-border overflow-hidden">
+                  {/* Head header */}
+                  <div
+                    className="flex items-center justify-between px-3 py-2.5 bg-muted/20 cursor-pointer hover:bg-muted/30 transition-colors"
+                    onClick={() => toggleHead(head.stateHead)}
+                  >
+                    <span className="font-medium text-sm">{head.stateHead}</span>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <span className="text-xs font-mono text-muted-foreground">
+                          {head.totalTargetLakh.toFixed(0)} Lakh target
+                        </span>
+                        {stateData.actualsAvailable && head.achievementPct != null && (
+                          <span
+                            className={cn(
+                              "ml-2 text-xs font-semibold",
+                              head.achievementPct >= 100
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : head.achievementPct >= 75
+                                  ? "text-amber-600 dark:text-amber-400"
+                                  : "text-destructive",
+                            )}
+                          >
+                            {head.achievementPct.toFixed(1)}%
+                          </span>
+                        )}
+                      </div>
+                      {expandedHeads.has(head.stateHead) ? (
+                        <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
+                      ) : (
+                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Expanded: state table */}
+                  {expandedHeads.has(head.stateHead) && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-border bg-muted/10">
+                            <th className="py-1.5 px-3 text-left font-medium text-muted-foreground">
+                              State
+                            </th>
+                            {stateData.months.map((m) => (
+                              <th
+                                key={m}
+                                colSpan={stateData.actualsAvailable ? 2 : 1}
+                                className="py-1.5 px-2 text-center font-medium text-muted-foreground border-l border-border/50"
+                              >
+                                {m}
+                              </th>
+                            ))}
+                            <th
+                              colSpan={stateData.actualsAvailable ? 3 : 1}
+                              className="py-1.5 px-2 text-center font-medium text-muted-foreground border-l border-border/50"
+                            >
+                              Total
+                            </th>
+                          </tr>
+                          <tr className="border-b border-border bg-muted/5">
+                            <th className="py-1 px-3 text-left text-[10px] text-muted-foreground/70" />
+                            {stateData.months.map((m) => (
+                              <th key={m} colSpan={stateData.actualsAvailable ? 2 : 1} className="border-l border-border/50">
+                                {stateData.actualsAvailable ? (
+                                  <div className="grid grid-cols-2 text-[10px] text-muted-foreground/70">
+                                    <span className="px-2 py-0.5 text-right">Tgt</span>
+                                    <span className="px-2 py-0.5 text-right">Act</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-muted-foreground/70 px-2">Tgt</span>
+                                )}
+                              </th>
+                            ))}
+                            <th className="border-l border-border/50">
+                              {stateData.actualsAvailable ? (
+                                <div className="grid grid-cols-3 text-[10px] text-muted-foreground/70">
+                                  <span className="px-2 py-0.5 text-right">Tgt</span>
+                                  <span className="px-2 py-0.5 text-right">Act</span>
+                                  <span className="px-2 py-0.5 text-right">Ach%</span>
+                                </div>
+                              ) : (
+                                <span className="text-[10px] text-muted-foreground/70 px-2">Tgt</span>
+                              )}
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {head.states.map((st) => (
+                            <tr
+                              key={st.state}
+                              className="border-b border-border/40 hover:bg-muted/10 last:border-0"
+                            >
+                              <td className="py-1.5 px-3 font-medium">
+                                {st.state}
+                                {st.isNewTerritory && (
+                                  <span className="ml-1.5 rounded px-1 py-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[9px] font-semibold">
+                                    new
+                                  </span>
+                                )}
+                              </td>
+                              {stateData.months.map((m) => {
+                                const cell = st.monthly.find((mm) => mm.month === m);
+                                return (
+                                  <td
+                                    key={m}
+                                    colSpan={stateData.actualsAvailable ? 2 : 1}
+                                    className="border-l border-border/50 p-0"
+                                  >
+                                    {cell ? (
+                                      stateData.actualsAvailable ? (
+                                        <div className="grid grid-cols-2">
+                                          <span className="px-2 py-1.5 text-right tabular-nums">
+                                            {cell.targetLakh.toFixed(0)}
+                                          </span>
+                                          <span className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
+                                            {cell.actualLakh.toFixed(0)}
+                                          </span>
+                                        </div>
+                                      ) : (
+                                        <span className="px-2 py-1.5 text-right tabular-nums block">
+                                          {cell.targetLakh.toFixed(0)}
+                                        </span>
+                                      )
+                                    ) : (
+                                      <span className="px-2 py-1.5 text-muted-foreground/40 block text-right">—</span>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                              {/* Total + achievement */}
+                              <td className="border-l border-border/50 p-0">
+                                {stateData.actualsAvailable ? (
+                                  <div className="grid grid-cols-3">
+                                    <span className="px-2 py-1.5 text-right tabular-nums font-medium">
+                                      {st.totalTargetLakh.toFixed(0)}
+                                    </span>
+                                    <span className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
+                                      {st.totalActualLakh.toFixed(0)}
+                                    </span>
+                                    <span
+                                      className={cn(
+                                        "px-2 py-1.5 text-right font-semibold",
+                                        st.isNewTerritory
+                                          ? "text-blue-500"
+                                          : st.achievementPct == null
+                                            ? "text-muted-foreground"
+                                            : st.achievementPct >= 100
+                                              ? "text-emerald-600 dark:text-emerald-400"
+                                              : st.achievementPct >= 75
+                                                ? "text-amber-600 dark:text-amber-400"
+                                                : "text-destructive",
+                                      )}
+                                    >
+                                      {st.isNewTerritory
+                                        ? "new"
+                                        : st.achievementPct != null
+                                          ? `${st.achievementPct.toFixed(1)}%`
+                                          : "—"}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="px-2 py-1.5 text-right tabular-nums font-medium block">
+                                    {st.totalTargetLakh.toFixed(0)}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        {/* Head subtotal */}
+                        <tfoot>
+                          <tr className="border-t-2 border-border bg-muted/20 font-semibold">
+                            <td className="py-1.5 px-3">Subtotal</td>
+                            {stateData.months.map((m) => {
+                              const tgt = head.states.reduce((s, st) => {
+                                const c = st.monthly.find((mm) => mm.month === m);
+                                return s + (c?.targetLakh ?? 0);
+                              }, 0);
+                              const act = head.states.reduce((s, st) => {
+                                const c = st.monthly.find((mm) => mm.month === m);
+                                return s + (c?.actualLakh ?? 0);
+                              }, 0);
+                              return (
+                                <td
+                                  key={m}
+                                  colSpan={stateData.actualsAvailable ? 2 : 1}
+                                  className="border-l border-border/50 p-0"
+                                >
+                                  {stateData.actualsAvailable ? (
+                                    <div className="grid grid-cols-2">
+                                      <span className="px-2 py-1.5 text-right tabular-nums">{tgt.toFixed(0)}</span>
+                                      <span className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{act.toFixed(0)}</span>
+                                    </div>
+                                  ) : (
+                                    <span className="px-2 py-1.5 text-right tabular-nums block">{tgt.toFixed(0)}</span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                            <td className="border-l border-border/50 p-0">
+                              {stateData.actualsAvailable ? (
+                                <div className="grid grid-cols-3">
+                                  <span className="px-2 py-1.5 text-right tabular-nums">{head.totalTargetLakh.toFixed(0)}</span>
+                                  <span className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{head.totalActualLakh.toFixed(0)}</span>
+                                  <span
+                                    className={cn(
+                                      "px-2 py-1.5 text-right font-semibold",
+                                      head.achievementPct == null
+                                        ? "text-muted-foreground"
+                                        : head.achievementPct >= 100
+                                          ? "text-emerald-600 dark:text-emerald-400"
+                                          : head.achievementPct >= 75
+                                            ? "text-amber-600 dark:text-amber-400"
+                                            : "text-destructive",
+                                    )}
+                                  >
+                                    {head.achievementPct != null ? `${head.achievementPct.toFixed(1)}%` : "—"}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="px-2 py-1.5 text-right tabular-nums block">{head.totalTargetLakh.toFixed(0)}</span>
+                              )}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {/* Source legend */}
+              <p className="text-[10px] text-muted-foreground/60 px-1">
+                Targets in Lakh rupees. Apr–May = seasonal estimate (derived); Jun–Jul = management plan (given).
+                {stateData.actualsAvailable
+                  ? " Actuals from Order Book FY2627 live sheet."
+                  : ""}
+              </p>
+            </>
+          )}
+        </div>
       )}
 
       {/* Order Sheet tab inventory */}

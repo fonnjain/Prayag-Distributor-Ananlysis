@@ -12,6 +12,7 @@ import {
   startScheduledRegisterSync,
   REGISTER_SHEET_IDS,
 } from "./lib/customers/registerSync.js";
+import { ensureAndSeedStateTargets } from "./lib/mgmt/stateTargetSeed.js";
 
 const rawPort = process.env["PORT"];
 
@@ -45,6 +46,11 @@ app.listen(port, (err) => {
       logger.error({ err: syncErr }, "initial dashboard sync failed");
     }
   })();
+
+  // Create primary_state_targets table if needed, then seed Apr-Jul targets.
+  void ensureAndSeedStateTargets().catch((err) =>
+    logger.warn({ err }, "state-target seed failed"),
+  );
 
   // Pre-warm mgmt data caches so the first Sales page load is fast.
   // Fills the orders + stateHeadSale sub-caches in the background.
