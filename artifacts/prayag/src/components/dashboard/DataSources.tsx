@@ -43,14 +43,28 @@ function parseCr(s: string): number {
   return Number.isFinite(n) ? Math.round(n * 1e7) : 0;
 }
 
+function sumArr(arr: number[]): number { return arr.reduce((s, v) => s + v, 0); }
+
 function toDisplayValues(annualRupees: number, monthlyArr: number[], cadence: Cadence): number[] {
+  // When monthly values are present, roll them up for coarser cadences
+  // so Annual/Quarterly/Half-yearly always reflect the true monthly sum.
+  if (monthlyArr.some((v) => v > 0)) {
+    if (cadence === "monthly")     return [...monthlyArr];
+    if (cadence === "annual")      return [sumArr(monthlyArr)];
+    if (cadence === "half_yearly") return [sumArr(monthlyArr.slice(0, 6)), sumArr(monthlyArr.slice(6, 12))];
+    if (cadence === "quarterly")   return [
+      sumArr(monthlyArr.slice(0, 3)),
+      sumArr(monthlyArr.slice(3, 6)),
+      sumArr(monthlyArr.slice(6, 9)),
+      sumArr(monthlyArr.slice(9, 12)),
+    ];
+  }
+  // No monthly data — distribute the annual figure equally.
   const n = CADENCE_LENGTHS[cadence];
-  // Only use monthly overrides when at least one is non-zero; otherwise distribute.
-  if (cadence === "monthly" && monthlyArr.some((v) => v > 0)) return [...monthlyArr];
   const perPeriod = annualRupees / n;
-  if (cadence === "annual") return [annualRupees];
+  if (cadence === "annual")      return [annualRupees];
   if (cadence === "half_yearly") return [perPeriod, perPeriod];
-  if (cadence === "quarterly") return [perPeriod, perPeriod, perPeriod, perPeriod];
+  if (cadence === "quarterly")   return [perPeriod, perPeriod, perPeriod, perPeriod];
   return Array(12).fill(perPeriod);
 }
 
@@ -81,10 +95,10 @@ function TargetEditor() {
     const monthly = coerceMonthly(m.saved?.monthly.secondary ?? []);
     // 1. Target Master monthly overrides exist → use them.
     if (monthly.some((v) => v > 0)) return toDisplayValues(annual, monthly, cad);
-    // 2. State HD plan available for monthly cadence → use it as pre-fill.
-    if (cad === "monthly" && m.secMonthlyPlan) {
+    // 2. State HD plan available → roll up to the requested cadence as pre-fill.
+    if (m.secMonthlyPlan) {
       const planVals = m.secMonthlyPlan.map((v) => v ?? 0);
-      if (planVals.some((v) => v > 0)) return planVals;
+      if (planVals.some((v) => v > 0)) return toDisplayValues(0, planVals, cad);
     }
     // 3. Annual target → distribute (or return 0 if no annual).
     if (annual > 0) return toDisplayValues(annual, [], cad);
