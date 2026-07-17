@@ -12,3 +12,15 @@ id = "VDfjcBPkaKdS2r8Da9XiT"
 uri = "file://Prayag_GoogleSheets_Connection_Status.docx"
 type = "word_document"
 title = "Google Sheets Connection Status — Prayag India"
+
+[[outputs]]
+id = "mWAsWkXZ2B9rTG5tuHxBZ"
+uri = "file://Prayag_Architecture.xlsx"
+type = "table"
+title = "Prayag Architecture — Excel (8 sheets)"
+
+[[outputs]]
+id = "rct7CQB8ClaZ3f9R9MasR"
+uri = "file://Prayag_Architecture.docx"
+type = "word_document"
+title = "Prayag Architecture — Word Document"
