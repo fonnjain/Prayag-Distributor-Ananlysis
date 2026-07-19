@@ -70,15 +70,32 @@ export function toMonthLabel(v: CellValue, fy: string): string | null {
     monthIdx = v.getUTCMonth();
   } else {
     const s = String(v).trim().toUpperCase();
-    const m = s.match(/^([A-Z]{3,9})[\s\-./]*(\d{2,4})?$/);
-    if (m) {
-      const word = m[1];
+    // "Apr-25", "April 2025", "APR 2025", etc.
+    const mName = s.match(/^([A-Z]{3,9})[\s\-./]*(\d{2,4})?$/);
+    if (mName) {
+      const word = mName[1];
       monthIdx = word.length === 3
         ? MONTH_INDEX.get(word)
         : FULL_MONTHS_MAP[word];
+    } else {
+      // Numeric date strings. Indian sheets use DD-MM-YYYY or DD/MM/YYYY.
+      // YYYY-MM-DD (ISO) is also handled for completeness.
+      // Ambiguity rule: if the first component > 12 it must be a day → DD-MM-YYYY.
+      // If ≤ 12, assume DD-MM-YYYY (Indian convention).
+      const dmy = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})$/);
+      if (dmy) {
+        // dmy[1]=DD dmy[2]=MM dmy[3]=YYYY
+        monthIdx = parseInt(dmy[2], 10) - 1;
+      } else {
+        // YYYY-MM-DD
+        const ymd = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+        if (ymd) {
+          monthIdx = parseInt(ymd[2], 10) - 1;
+        }
+      }
     }
   }
-  if (monthIdx == null) return null;
+  if (monthIdx == null || monthIdx < 0 || monthIdx > 11) return null;
   return formatMonthLabel(fyYearForMonth(fy, monthIdx), monthIdx);
 }
 
