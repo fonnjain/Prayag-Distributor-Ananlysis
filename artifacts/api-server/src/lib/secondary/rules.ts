@@ -43,11 +43,14 @@ export function ytdSum(
   fy: string,
   nowMs = Date.now(),
 ): number {
+  // Filter on month status only. Anomalous months (received > ordered × 1.5)
+  // are included — the received amount is real money collected regardless of the
+  // delivery-lag anomaly. The anomaly flag suppresses only rankings and per-member
+  // achievement display, never the gross total.
   return months
     .filter(
       (m) =>
         isMonthClosed(m.monthIdx, fy, nowMs) &&
-        !m.isAnomaly &&
         !m.notYetRecorded,
     )
     .reduce((sum, m) => sum + (m.receivedAmount ?? 0), 0);
@@ -68,9 +71,11 @@ export function ytdPlan(
 // ── Rule 3: anomaly_flag ──────────────────────────────────────────────────────
 //
 // A month is anomalous when salesAmount > orderedAmount × 1.5 AND
-// orderedAmount > 0. This is physically impossible (you cannot receive more
-// than 1.5× what was booked) and must be a data-entry error.
-// Anomalous months: show raw value, exclude from rankings and YTD achievement.
+// orderedAmount > 0. Secondary delivery lag can produce genuine cases (retailer
+// pays for prior-month pipeline in the current month); extreme ratios (>10×)
+// may be data-entry errors but cannot be distinguished automatically.
+// Anomalous months: show raw value, exclude from rankings only.
+// They are INCLUDED in YTD gross totals — see ytdSum above.
 export function isAnomalous(
   salesAmount: number | null,
   orderedAmount: number | null,

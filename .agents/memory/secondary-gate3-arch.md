@@ -66,6 +66,12 @@ Secondary sales received can exceed orders booked in a month due to delivery lag
 secondary anomalies are expected and must not block ingest. The is_anomaly flag
 marks these rows; R3 verifies the flag is consistent with the rule definition.
 
+**ytdSum does NOT filter on isAnomaly (removed 2026-07-19).**
+Anomalous months are INCLUDED in the YTD gross total — the received amount is
+real money collected. Excluding them understated secondary YTD by 9–24% per FY
+(FY2025-26: ₹20.4 Cr, 9.2%; FY2023-24: ₹33.9 Cr, 24.3%).
+The anomaly flag only suppresses rankings and per-member achievement display.
+
 **notYetRecorded rows must store null amounts (not zero).**
 The source sheet pre-fills explicit zeros for future months. cellNum returns 0
 for those cells. dashboardToHeadMonthRows nulls out plan/ordered/received/
