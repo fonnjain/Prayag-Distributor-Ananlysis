@@ -274,7 +274,16 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
     // Build a normKey → SecMember lookup for the member-row merge below.
     const secByKey = new Map<string, SecMember>();
     if (secDash) {
-      for (const sm of secDash.members) secByKey.set(sm.normKey, sm);
+      for (const sm of secDash.members) {
+        // Roster members use normName-based keys.  joinKey = normName(sm.name)
+        // so the lookup at r.m.normKey (roster key) resolves correctly even when
+        // the secondary sheet spells a name with a parenthetical disambiguator
+        // (e.g. "Ravi (Faridabad)") that the roster omits.
+        // First-entry wins: if two secondary members share the same joinKey the
+        // first one is preserved (the second is tracked separately in the DB via
+        // normKey but the roster can only reference one person per normName key).
+        if (!secByKey.has(sm.joinKey)) secByKey.set(sm.joinKey, sm);
+      }
     }
 
     // ── Primary sale (dispatched invoices, Taxable Value by STATE HEAD) ──────────

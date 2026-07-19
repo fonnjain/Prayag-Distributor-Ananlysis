@@ -86,11 +86,14 @@ router.get("/targets", async (req: Request, res: Response): Promise<void> => {
       void loadStateDashboard(fy).catch(() => {});
     }
 
-    // Build normKey → 12-element planAmount array from STATE HEAD DASHBOARD.
+    // Build joinKey → 12-element planAmount array from STATE HEAD DASHBOARD.
+    // joinKey = normName(sm.name) so it aligns with the roster's normKey-based lookup below.
     const secPlanByKey = new Map<string, (number | null)[]>();
     if (secDash) {
       for (const m of secDash.members) {
-        secPlanByKey.set(m.normKey, m.months.map((mo) => mo.planAmount));
+        if (!secPlanByKey.has(m.joinKey)) {
+          secPlanByKey.set(m.joinKey, m.months.map((mo) => mo.planAmount));
+        }
       }
     }
 

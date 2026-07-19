@@ -75,6 +75,10 @@ Prayag India — Sales Intelligence: a mobile-first dashboard over live Google S
 
 - No emojis anywhere (UI, code, or copy).
 
+## Standing constraints
+
+- **Google Drive access is strictly read-only.** No writes, deletes, moves, or renames are permitted under any circumstances. The Drive/Sheets integration is used only to read spreadsheet data.
+
 ## Gotchas
 
 - New API routes require restarting the `artifacts/api-server` workflow to take effect.

@@ -43,6 +43,15 @@ import {
 } from "../registers/sheetsApi.js";
 import { normName, fyStartYear } from "./names.js";
 
+// Secondary-specific member key: lowercase alphanumeric, parenthetical content
+// KEPT (not stripped).  This preserves location/status disambiguators so that
+// "Ravi" and "Ravi (Faridabad)", or "Mahaveer Jain" and "Mahaveer Jain (Off
+// Roll)", produce DISTINCT head_canon values and never overwrite each other on
+// upsert.  normName() still used for isPrimaryRole matching (roster join).
+function normSecKey(raw: string): string {
+  return raw.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
 // ── Sheet config ─────────────────────────────────────────────────────────────
 
 const SHEET_IDS: Record<string, string> = {
@@ -111,7 +120,12 @@ export type SecMonthData = {
 export type SecMember = {
   stateHead: string;
   name: string;
+  // normKey: normSecKey of the raw name — unique per person in the DB (head_canon).
+  // Keeps parenthetical disambiguators so "Ravi" and "Ravi (Faridabad)" remain distinct.
   normKey: string;
+  // joinKey: normName of the raw name — strips parentheticals, used to join
+  // against the roster (which uses normName throughout).
+  joinKey: string;
   hq: string;
   contactNumber: string;
   salary: number | null;       // Monthly CTC
@@ -519,13 +533,15 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
     const rawName = cellStr(row[cols.teamMember]);
     if (!rawName || rawName === currentStateHead) continue; // sub-total / blank row
 
-    const normKey = normName(rawName);
+    // normSecKey: keeps parenthetical disambiguators → distinct head_canon per person.
+    // normName: strips parentheticals → used only for the roster-join isPrimaryRole check.
+    const normKey = normSecKey(rawName);
     if (!normKey) continue;
 
     // LEFT TEAM MEMBERS section: track but never flag as low-performer.
     const isLeft = currentStateHead.toUpperCase().includes("LEFT");
 
-    const isPrimaryRole = primaryRoleKeys.has(normKey);
+    const isPrimaryRole = primaryRoleKeys.has(normName(rawName));
 
     const salary = cellNum(row[cols.ctc]);
     const totalDealers = cellNum(row[cols.totalDealers]);
@@ -624,6 +640,7 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
       stateHead: currentStateHead,
       name: rawName,
       normKey,
+      joinKey: normName(rawName),
       hq,
       contactNumber,
       salary,
@@ -718,12 +735,17 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
     // allMonths* covers every month (open+closed, anomalous included).
     totalOrderBooked += m.allMonthsOrderBooked;
     totalSalesReceived += m.allMonthsSalesReceived;
-    // YTD achievement: all non-left members' closed-month sales in the numerator;
-    // only planned members' plan in the denominator.
-    // ytdSalesReceived is null only for truly inactive members (no plan, no sales)
-    // — those contribute 0 to ytdSalesSum, which is correct.
+    // YTD achievement denominator: ALL members' plan (including those who left
+    // during the year) so achievement is measured against the plan as originally
+    // set at the start of the FY.  Left-section members often have blank monthly
+    // plan cells in the sheet (ytdPlan=null); fall back to businessPlan so they
+    // still contribute their target to the denominator.
+    // Numerator: non-left members' closed-month sales only.
+    // ytdSalesReceived is null only for truly inactive members (no plan, no
+    // sales) — those contribute 0 to ytdSalesSum, which is correct.
+    const planForDenom = m.ytdPlan ?? m.businessPlan;
+    if (planForDenom != null) ytdPlanSum += planForDenom;
     if (!m.isLeft) {
-      if (m.ytdPlan != null) ytdPlanSum += m.ytdPlan;
       ytdSalesSum += m.ytdSalesReceived ?? 0;
     }
   }
