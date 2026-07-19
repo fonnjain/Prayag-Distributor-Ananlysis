@@ -118,7 +118,9 @@ export type SecMember = {
   monthlyTarget: number | null;
   totalDealers: number | null;
   businessPlan: number | null; // Annual target
-  // YTD aggregates (closed months only, anomaly months excluded) — per-member display
+  // YTD aggregates (closed months only) — per-member display.
+  // ytdSalesReceived: null only when the member has no plan AND no sales (truly inactive).
+  // Real sales are always included regardless of whether a plan exists.
   ytdOrderBooked: number | null;
   ytdSalesReceived: number | null;
   ytdPlan: number | null;
@@ -629,7 +631,9 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
       totalDealers,
       businessPlan,
       ytdOrderBooked: ytdHasData ? ytdOrdered : null,
-      ytdSalesReceived: ytdHasData ? ytdSales : null,
+      // Expose sales whenever there are real sales (even if no plan), or 0 when
+      // there is a plan but no sales yet.  Null = truly inactive (no plan, no sales).
+      ytdSalesReceived: ytdSales > 0 ? ytdSales : (ytdHasData ? 0 : null),
       ytdPlan: ytdHasData ? ytdPlan : null,
       ytdAchievement,
       allMonthsOrderBooked: allMonthsOrdered,
@@ -714,10 +718,13 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
     // allMonths* covers every month (open+closed, anomalous included).
     totalOrderBooked += m.allMonthsOrderBooked;
     totalSalesReceived += m.allMonthsSalesReceived;
-    // YTD achievement denominator: closed months, non-left members only.
+    // YTD achievement: all non-left members' closed-month sales in the numerator;
+    // only planned members' plan in the denominator.
+    // ytdSalesReceived is null only for truly inactive members (no plan, no sales)
+    // — those contribute 0 to ytdSalesSum, which is correct.
     if (!m.isLeft) {
       if (m.ytdPlan != null) ytdPlanSum += m.ytdPlan;
-      if (m.ytdSalesReceived != null) ytdSalesSum += m.ytdSalesReceived;
+      ytdSalesSum += m.ytdSalesReceived ?? 0;
     }
   }
 
