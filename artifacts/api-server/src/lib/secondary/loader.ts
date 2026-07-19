@@ -282,15 +282,14 @@ export async function loadSecRegisterFromXlsx(
   }
 
   const result = parseRows(allRows, fy, "xlsx_backfill", mapVersion, grain);
-  const { lines: rawXlsxLines, rowsRead, dataRows, subTotalRowsExcluded, blankRowsSkipped, controlGross: xlsxControlGross, controlNet: xlsxControlNet, fyCounts, unmapped, errors } = result;
-  // Filter out rows with no salesperson (head_raw null) — these are unattributable
-  // source rows that must not enter the DB.  Counted separately so the validator
-  // can report them and the row-accounting identity still holds.
-  const nullHeadSkipped = rawXlsxLines.filter((l) => !l.headRaw).length;
-  const lines = rawXlsxLines.filter((l) => !!l.headRaw);
+  const { lines, rowsRead, dataRows, subTotalRowsExcluded, blankRowsSkipped, controlGross: xlsxControlGross, controlNet: xlsxControlNet, fyCounts, unmapped, errors } = result;
+  // Count rows with no salesperson (head_raw null) — these are unattributable
+  // source rows.  They are loaded into the DB as-is (null head_canon) so the
+  // gross total is never understated.  The validator reports them as informational.
+  const nullHeadUnattributed = lines.filter((l) => !l.headRaw).length;
 
   const crossFoot = crossFootByHead(lines);
-  const assertions = runSecRegisterValidators(lines, unmapped, fyCounts, fy, nullHeadSkipped);
+  const assertions = runSecRegisterValidators(lines, unmapped, fyCounts, fy, nullHeadUnattributed);
   const computedGross = lines.reduce((s, l) => s + Number(l.grossAmount), 0);
   const computedNet = lines.reduce((s, l) => s + Number(l.netAmount ?? 0), 0);
   assertions.push(assertSecControlCellMatches(computedGross, xlsxControlGross, computedNet, xlsxControlNet));
@@ -314,7 +313,7 @@ export async function loadSecRegisterFromXlsx(
       fy,
       rowsRead,
       rowsInserted,
-      rowsSkipped: blankRowsSkipped + subTotalRowsExcluded + nullHeadSkipped,
+      rowsSkipped: blankRowsSkipped + subTotalRowsExcluded,
       unmapped,
       assertions,
       status,
@@ -323,7 +322,7 @@ export async function loadSecRegisterFromXlsx(
   );
 
   logger.info(
-    { fy, grain, rowsRead, dataRows, subTotalRowsExcluded, blankRowsSkipped, nullHeadSkipped, lines: lines.length, dryRun, status },
+    { fy, grain, rowsRead, dataRows, subTotalRowsExcluded, blankRowsSkipped, nullHeadUnattributed, lines: lines.length, dryRun, status },
     "sec: xlsx register loaded",
   );
 
@@ -335,7 +334,7 @@ export async function loadSecRegisterFromXlsx(
     dataRows,
     subTotalRowsExcluded,
     blankRowsSkipped,
-    nullHeadSkipped,
+    nullHeadUnattributed,
     rowsToInsert: lines.length,
     existingInDb,
     crossFoot,
@@ -489,7 +488,7 @@ export async function loadSecRegisterFromSheets(
             detail: "no matching tab found",
           },
         ],
-        nullHeadSkipped: 0,
+        nullHeadUnattributed: 0,
         unmapped: emptySecUnmapped(),
         anomalies: [],
         errors: ["no matching tab found"],
@@ -656,14 +655,12 @@ export async function loadSecRegisterFromSheets(
     errors = result.errors;
   }
 
-  // Filter out rows with no salesperson (head_raw null) — unattributable source
-  // rows excluded from the DB payload.  Applied after both tab branches so it
-  // covers first-tab and all-tab strategies equally.
-  const nullHeadSkipped = lines.filter((l) => !l.headRaw).length;
-  if (nullHeadSkipped > 0) lines = lines.filter((l) => !!l.headRaw);
+  // Count rows with no salesperson (head_raw null) — loaded as-is so the gross
+  // total is never understated.  The validator reports them as informational.
+  const nullHeadUnattributed = lines.filter((l) => !l.headRaw).length;
 
   const crossFoot = crossFootByHead(lines);
-  const assertions = runSecRegisterValidators(lines, unmapped, fyCounts, fy, nullHeadSkipped);
+  const assertions = runSecRegisterValidators(lines, unmapped, fyCounts, fy, nullHeadUnattributed);
   const computedGross = lines.reduce((s, l) => s + Number(l.grossAmount), 0);
   const computedNet = lines.reduce((s, l) => s + Number(l.netAmount ?? 0), 0);
   assertions.push(assertSecControlCellMatches(computedGross, controlGross, computedNet, controlNet));
@@ -687,7 +684,7 @@ export async function loadSecRegisterFromSheets(
       fy,
       rowsRead,
       rowsInserted,
-      rowsSkipped: blankRowsSkipped + subTotalRowsExcluded + nullHeadSkipped,
+      rowsSkipped: blankRowsSkipped + subTotalRowsExcluded,
       unmapped,
       assertions,
       status,
@@ -703,7 +700,7 @@ export async function loadSecRegisterFromSheets(
     dataRows,
     subTotalRowsExcluded,
     blankRowsSkipped,
-    nullHeadSkipped,
+    nullHeadUnattributed,
     rowsToInsert: lines.length,
     existingInDb,
     crossFoot,

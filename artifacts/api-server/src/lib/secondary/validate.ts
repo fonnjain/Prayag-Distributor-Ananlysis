@@ -127,18 +127,19 @@ export function assertSecNoNegativeAmounts(
 
 // ── Validator 9: no_null_salesperson ─────────────────────────────────────────
 //
-// Rows where head_raw is null cannot be attributed to any team member; they
-// are filtered out of the insert set in the loader and counted here.  This
-// is informational (PASS with note) — the rows are reported but do not block
-// Gate 1 because they have already been excluded from the DB payload.  A
-// count > 0 signals a source-sheet data-quality issue (TM column was blank).
-export function assertSecNoNullSalesperson(nullHeadSkipped: number): SecIngestAssertion {
+// Rows where head_raw is null are real orders missing only a TM name in the
+// source sheet.  They are loaded into the DB as-is (null head_canon) so the
+// gross total is never understated.  The validator reports them as
+// informational (PASS with note) — a count > 0 flags a source data-quality
+// issue but does not block Gate 1 or the commit.  These rows are excluded
+// from TM-level analytics but included in gross/net aggregates.
+export function assertSecNoNullSalesperson(nullHeadUnattributed: number): SecIngestAssertion {
   return {
     name: "no_null_salesperson",
     passed: true,
-    detail: nullHeadSkipped === 0
+    detail: nullHeadUnattributed === 0
       ? "all rows have a salesperson (head_raw non-null)"
-      : `${nullHeadSkipped} row(s) with null head_raw skipped (unattributable; excluded from DB)`,
+      : `${nullHeadUnattributed} row(s) loaded with null head_raw (unattributable; included in gross total, excluded from TM analytics)`,
   };
 }
 
@@ -345,7 +346,7 @@ export function runSecRegisterValidators(
   unmapped: SecUnmappedReport,
   fyCounts: Record<string, number>,
   fy: string,
-  nullHeadSkipped: number,
+  nullHeadUnattributed: number,
 ): SecIngestAssertion[] {
   const monthsFound = new Set(
     lines.map((l) => {
@@ -359,7 +360,7 @@ export function runSecRegisterValidators(
     ...assertSecRowCounts(fyCounts),
     assertSecUnmappedHeadsEmpty(unmapped),
     assertSecUnmappedStatesEmpty(unmapped),
-    assertSecNoNullSalesperson(nullHeadSkipped),
+    assertSecNoNullSalesperson(nullHeadUnattributed),
     assertSecNoNegativeAmounts(lines),
     assertSecSumByHeadConsistent(lines),
     assertSecAllMonthsPresent(fy, monthsFound),

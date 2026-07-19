@@ -109,7 +109,7 @@ function printSummary(summary: SecDryRunSummary, prefix = ""): void {
     `  data=${summary.dataRows}` +
     `  subtotal_excluded=${summary.subTotalRowsExcluded}` +
     `  blank_skipped=${summary.blankRowsSkipped}` +
-    (summary.nullHeadSkipped > 0 ? `  null_head_skipped=${summary.nullHeadSkipped}` : ""),
+    (summary.nullHeadUnattributed > 0 ? `  null_head_unattributed=${summary.nullHeadUnattributed}` : ""),
   );
   console.log(
     `  rows_to_insert=${summary.rowsToInsert}  already_in_db=${summary.existingInDb}`,
