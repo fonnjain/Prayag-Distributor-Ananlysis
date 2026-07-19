@@ -80,8 +80,11 @@ export function isAnomalous(
   salesAmount: number | null,
   orderedAmount: number | null,
 ): boolean {
+  // Threshold: 3× ordered. The 1.5–3× band is genuine secondary delivery lag
+  // (retailer paying for prior-month pipeline) and must not suppress rankings.
+  // Rows above 3× are extreme enough that human review is warranted.
   if (salesAmount == null || orderedAmount == null || orderedAmount <= 0) return false;
-  return salesAmount > orderedAmount * 1.5;
+  return salesAmount > orderedAmount * 3.0;
 }
 
 export function collectAnomalies(rows: SecHeadMonthRow[]): AnomalySummary[] {

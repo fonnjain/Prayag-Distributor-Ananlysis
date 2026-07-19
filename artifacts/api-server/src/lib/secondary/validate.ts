@@ -213,8 +213,8 @@ export function assertSecNoAnomalousAchievement(
         : "∞";
     return `${a.headCanon}/${a.monthLabel} ratio=${ratio}`;
   });
-  // Anomalous months are stored with is_anomaly=true and excluded from YTD
-  // achievement and rankings by the calculation rules (R3 in gate3.ts).
+  // Anomalous months (received > ordered × 3) are stored with is_anomaly=true.
+  // They are INCLUDED in YTD gross totals; the flag suppresses rankings only.
   // They do NOT block ingest — secondary sales received can exceed orders in a
   // month due to delivery lag from prior months, unlike primary where it would
   // be a hard parsing error.  Report as informational (passed=true).
@@ -224,7 +224,7 @@ export function assertSecNoAnomalousAchievement(
     detail:
       anomalies.length === 0
         ? "none"
-        : `${anomalies.length} anomalous month(s) flagged (salesReceived > ordered×1.5, stored with is_anomaly=true, excluded from YTD): ${samples.join("; ")}`,
+        : `${anomalies.length} anomalous month(s) flagged (salesReceived > ordered×3, stored with is_anomaly=true, included in YTD gross): ${samples.join("; ")}`,
   };
 }
 

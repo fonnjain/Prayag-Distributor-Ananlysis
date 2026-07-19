@@ -561,13 +561,14 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
       // are meaningless until the month closes.  Use the calendar only.
       const notYetRecorded = !closed;
 
-      // Anomaly: sales > 1.5× orders AND orders > 0 (physically impossible).
+      // Anomaly: sales > 3× orders AND orders > 0.
+      // The 1.5–3× band is genuine secondary delivery lag; above 3× warrants review.
       const isAnomaly =
         !isLeft &&
         salesAmount != null &&
         orderedAmount != null &&
         orderedAmount > 0 &&
-        salesAmount > orderedAmount * 1.5;
+        salesAmount > orderedAmount * 3.0;
 
       if (isAnomaly) {
         hasAnomalyMonth = true;
@@ -582,8 +583,10 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
         });
       }
 
-      // YTD (per-member display): closed months only, anomaly months excluded.
-      if (closed && !isAnomaly) {
+      // YTD (per-member display): closed months only. Anomalous months are
+      // INCLUDED — received amount is real money; anomaly flag suppresses
+      // rankings only, not gross totals.
+      if (closed) {
         if (planAmount != null) { ytdPlan += planAmount; ytdHasData = true; }
         if (orderedAmount != null) ytdOrdered += orderedAmount;
         if (salesAmount != null) ytdSales += salesAmount;
