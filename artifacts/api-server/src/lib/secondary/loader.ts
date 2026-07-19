@@ -9,13 +9,15 @@ import { logger } from "../logger.js";
 import { listSheetTabs, readTabRowsChunked, type SheetCellValue } from "../registers/sheetsApi.js";
 import {
   detectSecHeader,
+  isSubTotalRow,
   parseSecRegisterRow,
   toSecRegLine,
   SecOccurrenceCounter,
 } from "./normalize.js";
 import { emptySecUnmapped } from "./types.js";
-import type { CellValue, SecDryRunSummary } from "./types.js";
+import type { CellValue, SecGrain, SecDryRunSummary } from "./types.js";
 import { runSecRegisterValidators } from "./validate.js";
+import { crossFootByHead } from "./rules.js";
 import {
   insertSecRegLineBatches,
   countExistingSecLineUids,
@@ -44,58 +46,123 @@ function plainCell(v: unknown): CellValue {
   return v as CellValue;
 }
 
-// ── Column-map version lookup ─────────────────────────────────────────────────
+// ── FY config helpers ─────────────────────────────────────────────────────────
+
+type RegisterEntry = {
+  sheet_id: string | null;
+  column_map_key?: string;
+  grain?: string;
+};
+
+function getRegisterEntry(fy: string): RegisterEntry | null {
+  const registers = (
+    sheetsConfig as { registers: Record<string, RegisterEntry | null> }
+  ).registers;
+  return registers[fy] ?? null;
+}
 
 function getColMapVersion(fy: string): string {
-  const registers = (
-    sheetsConfig as {
-      registers: Record<string, { column_map_key?: string } | null>;
-    }
-  ).registers;
-  const entry = registers[fy];
-  if (!entry) return "v1";
-  return (entry as { column_map_key?: string }).column_map_key ?? "v1";
+  const entry = getRegisterEntry(fy);
+  return entry?.column_map_key ?? "v1";
+}
+
+// Read the data grain for the given FY from secondary_sheets.json.
+// Falls back to the version's grain_default (v1 -> "line").
+function getFyGrain(fy: string): SecGrain {
+  const entry = getRegisterEntry(fy);
+  const grainRaw = entry?.grain;
+  if (grainRaw === "subtotal") return "subtotal";
+  // Fall back to version grain_default
+  const mapVersion = entry?.column_map_key ?? "v1";
+  const versionDefault = (
+    colMapsConfig.versions as Record<string, Record<string, unknown>>
+  )[mapVersion]?.grain_default;
+  if (versionDefault === "subtotal") return "subtotal";
+  return "line";
 }
 
 // ── Core parse pipeline (shared between xlsx and Sheets sources) ──────────────
+
+type ParseResult = {
+  lines: InsertSecRegLine[];
+  grain: SecGrain;
+  rowsRead: number;
+  dataRows: number;
+  subTotalRowsExcluded: number;
+  blankRowsSkipped: number;
+  fyCounts: Record<string, number>;
+  unmapped: ReturnType<typeof emptySecUnmapped>;
+  errors: string[];
+};
 
 function parseRows(
   rawRows: CellValue[][],
   fy: string,
   source: "sheets" | "xlsx_backfill",
   mapVersion: string,
-): {
-  lines: InsertSecRegLine[];
-  rowsRead: number;
-  fyCounts: Record<string, number>;
-  unmapped: ReturnType<typeof emptySecUnmapped>;
-  errors: string[];
-} {
+  grain: SecGrain,
+): ParseResult {
   const unmapped = emptySecUnmapped();
   const counter = new SecOccurrenceCounter();
   const lines: InsertSecRegLine[] = [];
   const fyCounts: Record<string, number> = {};
   const errors: string[] = [];
   let rowsRead = 0;
+  let subTotalRowsExcluded = 0;
+  let blankRowsSkipped = 0;
 
-  const cols = detectSecHeader(rawRows, mapVersion);
+  const cols = detectSecHeader(rawRows, mapVersion, grain);
   if (!cols) {
     errors.push(`No secondary register header found in first 20 rows for FY ${fy}`);
-    return { lines, rowsRead, fyCounts, unmapped, errors };
+    return { lines, grain, rowsRead, dataRows: 0, subTotalRowsExcluded, blankRowsSkipped, fyCounts, unmapped, errors };
   }
 
   // Rows after the header row
   const dataRows = rawRows.slice(cols.headerRowNumber);
   for (const cells of dataRows) {
     rowsRead++;
+
+    // Sub-total detection: exclude summary/aggregation rows before parsing.
+    // This is critical for FY2023-24 (subtotal grain) where intermediate
+    // sub-total marker rows would double-count amounts if parsed as data.
+    if (isSubTotalRow(cells)) {
+      subTotalRowsExcluded++;
+      continue;
+    }
+
     const parsed = parseSecRegisterRow(cells, cols, fy);
-    if (!parsed) continue;
+    if (!parsed) {
+      blankRowsSkipped++;
+      continue;
+    }
+
     const line = toSecRegLine(parsed, counter, unmapped, source);
     lines.push(line);
     fyCounts[line.fy] = (fyCounts[line.fy] ?? 0) + 1;
   }
 
-  return { lines, rowsRead, fyCounts, unmapped, errors };
+  // Row accounting identity:
+  //   rowsRead === lines.length + subTotalRowsExcluded + blankRowsSkipped
+  // If this fails, there is a parser bug. Log it as an error (non-fatal) so
+  // Gate 1 can surface it.
+  const accounted = lines.length + subTotalRowsExcluded + blankRowsSkipped;
+  if (accounted !== rowsRead) {
+    errors.push(
+      `Row accounting mismatch for FY ${fy}: read=${rowsRead} but data=${lines.length} + subtotal=${subTotalRowsExcluded} + blank=${blankRowsSkipped} = ${accounted}`,
+    );
+  }
+
+  return {
+    lines,
+    grain,
+    rowsRead,
+    dataRows: lines.length,
+    subTotalRowsExcluded,
+    blankRowsSkipped,
+    fyCounts,
+    unmapped,
+    errors,
+  };
 }
 
 // ── xlsx backfill ─────────────────────────────────────────────────────────────
@@ -105,8 +172,9 @@ export async function loadSecRegisterFromXlsx(
   fy: string,
   dryRun = false,
 ): Promise<SecDryRunSummary> {
-  logger.info({ filePath, fy, dryRun }, "sec: streaming xlsx register");
+  const grain = getFyGrain(fy);
   const mapVersion = getColMapVersion(fy);
+  logger.info({ filePath, fy, dryRun, grain }, "sec: streaming xlsx register");
 
   // Collect all rows first (secondary registers are significantly smaller than
   // primary ones — typically <20k rows — so full in-memory load is fine).
@@ -127,13 +195,10 @@ export async function loadSecRegisterFromXlsx(
     break; // first worksheet only
   }
 
-  const { lines, rowsRead, fyCounts, unmapped, errors } = parseRows(
-    allRows,
-    fy,
-    "xlsx_backfill",
-    mapVersion,
-  );
+  const result = parseRows(allRows, fy, "xlsx_backfill", mapVersion, grain);
+  const { lines, rowsRead, dataRows, subTotalRowsExcluded, blankRowsSkipped, fyCounts, unmapped, errors } = result;
 
+  const crossFoot = crossFootByHead(lines);
   const assertions = runSecRegisterValidators(lines, unmapped, fyCounts, fy);
   const anyFailed = assertions.some((a) => !a.passed);
   const status = dryRun ? "dry_run" : anyFailed ? "fail" : "ok";
@@ -143,8 +208,8 @@ export async function loadSecRegisterFromXlsx(
 
   if (!dryRun && !anyFailed) {
     existingInDb = await countExistingSecLineUids(lines.map((l) => l.lineUid));
-    const result = await insertSecRegLineBatches(lines, false);
-    rowsInserted = result.inserted;
+    const ins = await insertSecRegLineBatches(lines, false);
+    rowsInserted = ins.inserted;
   } else if (dryRun) {
     existingInDb = await countExistingSecLineUids(lines.map((l) => l.lineUid));
   }
@@ -155,7 +220,7 @@ export async function loadSecRegisterFromXlsx(
       fy,
       rowsRead,
       rowsInserted,
-      rowsSkipped: lines.length - rowsInserted,
+      rowsSkipped: blankRowsSkipped + subTotalRowsExcluded,
       unmapped,
       assertions,
       status,
@@ -164,16 +229,21 @@ export async function loadSecRegisterFromXlsx(
   );
 
   logger.info(
-    { fy, rowsRead, lines: lines.length, dryRun, status },
+    { fy, grain, rowsRead, dataRows, subTotalRowsExcluded, blankRowsSkipped, lines: lines.length, dryRun, status },
     "sec: xlsx register loaded",
   );
 
   return {
     fy,
     source: "register_xlsx",
+    grain,
     rowsRead,
+    dataRows,
+    subTotalRowsExcluded,
+    blankRowsSkipped,
     rowsToInsert: lines.length,
     existingInDb,
+    crossFoot,
     assertions,
     unmapped,
     anomalies: [],
@@ -187,25 +257,22 @@ export async function loadSecRegisterFromSheets(
   fy: string,
   dryRun = false,
 ): Promise<SecDryRunSummary> {
-  const registers = (
-    sheetsConfig as {
-      registers: Record<
-        string,
-        { sheet_id: string | null; column_map_key?: string } | null
-      >;
-    }
-  ).registers;
-
-  const entry = registers[fy];
+  const entry = getRegisterEntry(fy);
   const sheetId = entry?.sheet_id ?? null;
+  const grain = getFyGrain(fy);
 
   if (!sheetId) {
     return {
       fy,
       source: "register_sheets",
+      grain,
       rowsRead: 0,
+      dataRows: 0,
+      subTotalRowsExcluded: 0,
+      blankRowsSkipped: 0,
       rowsToInsert: 0,
       existingInDb: 0,
+      crossFoot: null,
       assertions: [
         {
           name: "sheet_configured",
@@ -219,8 +286,8 @@ export async function loadSecRegisterFromSheets(
     };
   }
 
-  logger.info({ fy, sheetId, dryRun }, "sec: loading register from Sheets");
-  const mapVersion = (entry as { column_map_key?: string }).column_map_key ?? "v1";
+  logger.info({ fy, sheetId, dryRun, grain }, "sec: loading register from Sheets");
+  const mapVersion = entry?.column_map_key ?? "v1";
 
   // Discover tabs (secondary registers may have all data on one tab)
   let tabName: string | null = null;
@@ -237,9 +304,14 @@ export async function loadSecRegisterFromSheets(
     return {
       fy,
       source: "register_sheets",
+      grain,
       rowsRead: 0,
+      dataRows: 0,
+      subTotalRowsExcluded: 0,
+      blankRowsSkipped: 0,
       rowsToInsert: 0,
       existingInDb: 0,
+      crossFoot: null,
       assertions: [
         {
           name: "sheet_reachable",
@@ -257,9 +329,14 @@ export async function loadSecRegisterFromSheets(
     return {
       fy,
       source: "register_sheets",
+      grain,
       rowsRead: 0,
+      dataRows: 0,
+      subTotalRowsExcluded: 0,
+      blankRowsSkipped: 0,
       rowsToInsert: 0,
       existingInDb: 0,
+      crossFoot: null,
       assertions: [
         {
           name: "sheet_reachable",
@@ -281,13 +358,10 @@ export async function loadSecRegisterFromSheets(
     }
   });
 
-  const { lines, rowsRead, fyCounts, unmapped, errors } = parseRows(
-    allRows,
-    fy,
-    "sheets",
-    mapVersion,
-  );
+  const result = parseRows(allRows, fy, "sheets", mapVersion, grain);
+  const { lines, rowsRead, dataRows, subTotalRowsExcluded, blankRowsSkipped, fyCounts, unmapped, errors } = result;
 
+  const crossFoot = crossFootByHead(lines);
   const assertions = runSecRegisterValidators(lines, unmapped, fyCounts, fy);
   const anyFailed = assertions.some((a) => !a.passed);
   const status = dryRun ? "dry_run" : anyFailed ? "fail" : "ok";
@@ -297,8 +371,8 @@ export async function loadSecRegisterFromSheets(
 
   if (!dryRun && !anyFailed) {
     existingInDb = await countExistingSecLineUids(lines.map((l) => l.lineUid));
-    const result = await insertSecRegLineBatches(lines, false);
-    rowsInserted = result.inserted;
+    const ins = await insertSecRegLineBatches(lines, false);
+    rowsInserted = ins.inserted;
   } else if (dryRun) {
     existingInDb = await countExistingSecLineUids(lines.map((l) => l.lineUid));
   }
@@ -309,7 +383,7 @@ export async function loadSecRegisterFromSheets(
       fy,
       rowsRead,
       rowsInserted,
-      rowsSkipped: lines.length - rowsInserted,
+      rowsSkipped: blankRowsSkipped + subTotalRowsExcluded,
       unmapped,
       assertions,
       status,
@@ -320,9 +394,14 @@ export async function loadSecRegisterFromSheets(
   return {
     fy,
     source: "register_sheets",
+    grain,
     rowsRead,
+    dataRows,
+    subTotalRowsExcluded,
+    blankRowsSkipped,
     rowsToInsert: lines.length,
     existingInDb,
+    crossFoot,
     assertions,
     unmapped,
     anomalies: [],

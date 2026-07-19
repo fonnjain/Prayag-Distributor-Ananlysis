@@ -1,9 +1,9 @@
-// State Head Dashboard → secondary_head_month persistence.
+// State Head Dashboard -> secondary_head_month persistence.
 // Wraps the existing stateDashboard.ts loader and converts its SecDashboard
 // result into SecHeadMonthRow objects ready for DB upsert.
 //
 // This is the ONLY path that should write secondary_head_month rows for
-// FY2025-26 and FY2026-27. Earlier FYs (FY2021-22 → FY2024-25) are loaded
+// FY2025-26 and FY2026-27. Earlier FYs (FY2021-22 -> FY2024-25) are loaded
 // from xlsx registers via loader.ts.
 import { logger } from "../logger.js";
 import { loadStateDashboard } from "../mgmt/stateDashboard.js";
@@ -23,7 +23,7 @@ const MONTH_LABELS_SHORT = [
 // Convert a stateDashboard.ts SecDashboard into SecHeadMonthRow objects,
 // applying calculation rules:
 //   1. achievement_recomputed  (received / plan, never ordered / plan)
-//   3. anomaly_flag            (salesAmount > orderedAmount × 1.5)
+//   3. anomaly_flag            (salesAmount > orderedAmount x 1.5)
 //   2. ytd_closed_months_only  (notYetRecorded flag for open months)
 function dashboardToHeadMonthRows(
   fy: string,
@@ -103,9 +103,14 @@ export async function loadAndPersistStateDashboard(
     return {
       fy,
       source: "state_head_dashboard",
+      grain: "line",
       rowsRead: 0,
+      dataRows: 0,
+      subTotalRowsExcluded: 0,
+      blankRowsSkipped: 0,
       rowsToInsert: 0,
       existingInDb: 0,
+      crossFoot: null,
       assertions: [
         {
           name: "sheet_configured",
@@ -126,9 +131,14 @@ export async function loadAndPersistStateDashboard(
     return {
       fy,
       source: "state_head_dashboard",
+      grain: "line",
       rowsRead: 0,
+      dataRows: 0,
+      subTotalRowsExcluded: 0,
+      blankRowsSkipped: 0,
       rowsToInsert: 0,
       existingInDb: 0,
+      crossFoot: null,
       assertions: [
         {
           name: "sheet_reachable",
@@ -210,9 +220,14 @@ export async function loadAndPersistStateDashboard(
   return {
     fy,
     source: "state_head_dashboard",
+    grain: "line",
     rowsRead: dashboard.rowsRead,
+    dataRows: headMonthRows.length,
+    subTotalRowsExcluded: 0,
+    blankRowsSkipped: dashboard.rowsRead - headMonthRows.length,
     rowsToInsert: headMonthRows.length,
     existingInDb: 0,
+    crossFoot: null, // pre-aggregated source; no raw lines to cross-foot
     assertions,
     unmapped: { unmapped_heads: {}, unmapped_states: {}, unmapped_brands: {} },
     anomalies,

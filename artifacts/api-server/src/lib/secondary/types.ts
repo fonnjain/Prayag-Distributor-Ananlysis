@@ -1,8 +1,18 @@
 // Shared types for the secondary-data layer.
-// Secondary = distributor → retailer (order booking + sales received).
-// PRIMARY = Prayag → distributor.  The two must NEVER be summed together.
+// Secondary = distributor -> retailer (order booking + sales received).
+// PRIMARY = Prayag -> distributor.  The two must NEVER be summed together.
 
 export type CellValue = string | number | boolean | Date | null | undefined;
+
+// ── Grain ─────────────────────────────────────────────────────────────────────
+//
+// "line"     — register rows are individual customer-level invoice lines
+//              (FY2021-22, FY2022-23, FY2024-25).
+// "subtotal" — register rows are head/month/brand sub-total aggregates, not
+//              individual customer lines (FY2023-24). The loader detects and
+//              excludes any intermediate sub-total marker rows before parsing.
+//              uid key: fy|monthLabel|headRaw|stateRaw|(null customer)|brandRaw|amount|occurrence.
+export type SecGrain = "line" | "subtotal";
 
 // ── Column map ────────────────────────────────────────────────────────────────
 
@@ -10,6 +20,7 @@ export type CellValue = string | number | boolean | Date | null | undefined;
 // -1 means the column was not found in this file.
 export type SecColMap = {
   headerRowNumber: number;
+  grain: SecGrain;   // data grain for this FY — passed through from config
   head: number;
   state: number;
   customer: number;
@@ -23,7 +34,7 @@ export type SecColMap = {
 // ── Unmapped report ───────────────────────────────────────────────────────────
 
 export type SecUnmappedReport = {
-  unmapped_heads: Record<string, number>;   // raw head → occurrence count
+  unmapped_heads: Record<string, number>;   // raw head -> occurrence count
   unmapped_states: Record<string, number>;
   unmapped_brands: Record<string, number>;  // brands that had no alias mapping
 };
@@ -52,14 +63,33 @@ export type SecIngestAssertion = {
   detail: string;
 };
 
+// ── Cross-foot result ─────────────────────────────────────────────────────────
+//
+// Moved here (from rules.ts) so Gate1FyReport can reference it without
+// creating a circular import chain (rules.ts already imports from types.ts).
+export type CrossFootResult = {
+  passed: boolean;
+  grandTotal: number;
+  byHeadSum: number;
+  deltaRupees: number;
+  headCount: number;
+};
+
 // ── Dry-run summary ───────────────────────────────────────────────────────────
 
 export type SecDryRunSummary = {
   fy: string;
   source: "register_xlsx" | "register_sheets" | "state_head_dashboard";
+  grain: SecGrain;
+  // Row accounting — these four fields must satisfy:
+  //   dataRows + subTotalRowsExcluded + blankRowsSkipped == rowsRead
   rowsRead: number;
-  rowsToInsert: number;
-  existingInDb: number;           // count already present (would be skipped)
+  dataRows: number;              // rows that parsed as valid data lines
+  subTotalRowsExcluded: number;  // rows detected as sub-total markers and skipped
+  blankRowsSkipped: number;      // rows with no amount / header repeats / blanks
+  rowsToInsert: number;          // dataRows after dedup against DB
+  existingInDb: number;          // count already present (would be skipped on insert)
+  crossFoot: CrossFootResult | null;  // null for state_head_dashboard source
   assertions: SecIngestAssertion[];
   unmapped: SecUnmappedReport;
   anomalies: AnomalySummary[];
@@ -82,7 +112,7 @@ export type SecParsedRow = {
   monthLabel: string;
   headRaw: string | null;
   stateRaw: string | null;
-  customer: string | null;
+  customer: string | null;       // null for sub-total grain FYs
   brandRaw: string | null;
   amount: number;
   qty: number | null;
@@ -105,4 +135,73 @@ export type SecHeadMonthRow = {
   isAnomaly: boolean;
   notYetRecorded: boolean;
   sourceSheetId: string | null;
+};
+
+// ── Gate 1 dry-run report ─────────────────────────────────────────────────────
+//
+// The Gate 1 report is the formal pre-commit validation gate. It must be
+// produced in dry-run mode (no data committed) and all fyGate values must be
+// "PASS" before any FY is eligible for --commit.
+//
+// Row accounting identity (must hold for every Gate1FyReport):
+//   dataRows + subTotalRowsExcluded + blankRowsSkipped === rowsRead
+
+export type Gate1FyReport = {
+  fy: string;
+  source: SecDryRunSummary["source"];
+  grain: SecGrain;
+
+  // Row accounting
+  rowsRead: number;
+  dataRows: number;
+  subTotalRowsExcluded: number;
+  blankRowsSkipped: number;
+  rowsToInsert: number;
+  existingInDb: number;
+  // rowAccountingPassed: dataRows + subTotalRowsExcluded + blankRowsSkipped === rowsRead
+  rowAccountingPassed: boolean;
+
+  // All seven validators
+  assertions: SecIngestAssertion[];
+  allAssertionsPassed: boolean;
+
+  // Grand-total cross-foot (null for state_head_dashboard source, which is
+  // pre-aggregated and has no raw lines to cross-foot against)
+  crossFoot: CrossFootResult | null;
+
+  // Unmapped heads/states (empty for state_head_dashboard source)
+  unmapped: SecUnmappedReport;
+
+  // Anomalous months (only populated for state_head_dashboard source)
+  anomalies: AnomalySummary[];
+
+  // Parse / loader errors (non-validator)
+  errors: string[];
+
+  // Per-FY gate decision
+  fyGate: "PASS" | "FAIL";
+  fyFailReasons: string[];
+};
+
+export type Gate1DryRunReport = {
+  // ISO-8601 timestamp — when the dry run was executed
+  generatedAt: string;
+  // Always "dry_run" — Gate 1 must never commit data
+  mode: "dry_run";
+
+  // Aggregates across all FYs
+  totalRowsRead: number;
+  totalDataRows: number;
+  totalSubTotalRowsExcluded: number;
+  totalBlankRowsSkipped: number;
+  totalRowsToInsert: number;
+  totalExistingInDb: number;
+
+  // Per-FY breakdown
+  fyReports: Gate1FyReport[];
+
+  // Overall gate decision
+  gate: "PASS" | "FAIL";
+  // Human-readable reasons for FAIL (one entry per failing FY/check)
+  failReasons: string[];
 };

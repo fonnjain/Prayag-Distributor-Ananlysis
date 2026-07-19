@@ -2,7 +2,8 @@
   "comment": "Per-version column header patterns for secondary sale registers. Each entry lists the header tokens (normalised: uppercase, non-alphanumeric stripped) to search for when mapping columns. Multiple tokens per field are tried in order; the first match wins. Version 'v1' is the baseline format observed for FY2021-22 through FY2025-26. If a later FY introduces new column names, add a new version key and reference it in secondary_sheets.json.",
   "versions": {
     "v1": {
-      "comment": "Baseline secondary register column layout. Header auto-detected by scanning first 20 rows for a row containing the 'amount' token.",
+      "comment": "Baseline secondary register column layout. Header auto-detected by scanning first 20 rows for a row containing at least one header_anchor_token. grain_default describes the expected row-level data grain for this version; FY entries in secondary_sheets.json may override via a 'grain' field.",
+      "grain_default": "line",
       "head": ["STATEHEAD", "STATE HEAD", "HEAD", "SALESHEAD"],
       "state": ["STATE"],
       "customer": ["CUSTOMER", "CUSTOMERNAME", "PARTY", "RETAILER"],
@@ -12,6 +13,14 @@
       "amount": ["AMOUNT", "SECONDARYAMOUNT", "NETAMOUNT", "VALUE"],
       "qty": ["QTY", "QUANTITY"],
       "header_anchor_tokens": ["AMOUNT", "SECONDARYAMOUNT", "NETAMOUNT"],
+      "sub_total_skip_tokens": [
+        "SUBTOTAL",
+        "SUBTOTL",
+        "SUBTOT",
+        "GRANDTOTAL",
+        "GRANDTOTL"
+      ],
+      "comment_sub_total_skip": "Normalised (uppercase, non-alphanumeric stripped) tokens that, when found in any of the first five cells of a row, mark the row as a sub-total/summary row to be excluded from data parsing. Only the first five cells are scanned to avoid false positives on amount columns. Applied to all FYs; particularly important for FY2023-24 which stores data at sub-total grain.",
       "comment_header_detection": "Header row must contain at least one of header_anchor_tokens after normalisation. Scan the first 20 rows."
     }
   }

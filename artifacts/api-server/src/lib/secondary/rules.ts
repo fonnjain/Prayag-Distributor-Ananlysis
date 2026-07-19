@@ -3,7 +3,7 @@
 // Apply these after normalization and before (or instead of) persistence.
 
 import type { InsertSecRegLine } from "@workspace/db";
-import type { SecHeadMonthRow, AnomalySummary } from "./types.js";
+import type { SecHeadMonthRow, AnomalySummary, CrossFootResult } from "./types.js";
 
 // ── Rule 1: achievement_recomputed ────────────────────────────────────────────
 //
@@ -27,8 +27,8 @@ export function computeAchievement(
 // monthIdx: 0=Apr .. 11=Mar
 export function fyMonthLastDayMs(monthIdx: number, fy: string): number {
   const startYear = Number(fy.slice(0, 4));
-  // Apr(0)..Dec(8) → calendar month 3..11 of startYear
-  // Jan(9)..Mar(11) → calendar month 0..2 of startYear+1
+  // Apr(0)..Dec(8) -> calendar month 3..11 of startYear
+  // Jan(9)..Mar(11) -> calendar month 0..2 of startYear+1
   const calMonth = (monthIdx + 3) % 12;
   const calYear = monthIdx <= 8 ? startYear : startYear + 1;
   return Date.UTC(calYear, calMonth + 1, 0); // last day of that calendar month (UTC)
@@ -117,14 +117,7 @@ export function splitByTerritory(lines: InsertSecRegLine[]): TerritorySplit {
 //
 // sum(amount) by head must equal the grand total within ±1 rupee.
 // Gaps indicate rows dropped during normalization (unmapped head with no canon).
-export type CrossFootResult = {
-  passed: boolean;
-  grandTotal: number;
-  byHeadSum: number;
-  deltaRupees: number;
-  headCount: number;
-};
-
+// CrossFootResult is defined in types.ts to avoid a circular import.
 export function crossFootByHead(lines: InsertSecRegLine[]): CrossFootResult {
   let grand = 0;
   const byHead = new Map<string, number>();
@@ -179,7 +172,7 @@ export function yoySum(
 // ── Rule 7: no_double_count_guard ─────────────────────────────────────────────
 //
 // Secondary and primary are separate supply-chain layers.
-// Secondary ⊂ Primary: the same goods appear in both registers.
+// Secondary subset Primary: the same goods appear in both registers.
 // They must NEVER be summed into a combined total.
 // This rule is a labelling guard, not an arithmetic check — it attaches a
 // source tag to every line so callers can verify they are not mixing layers.

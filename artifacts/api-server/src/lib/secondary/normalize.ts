@@ -7,7 +7,7 @@ import type { InsertSecRegLine } from "@workspace/db";
 import normalizeConfig from "../../../config/normalize.json";
 import headAliasConfigRaw from "../../../config/head_alias.json";
 import colMapsConfig from "../../../config/secondary_column_maps.json";
-import type { CellValue, SecColMap, SecParsedRow, SecUnmappedReport } from "./types.js";
+import type { CellValue, SecColMap, SecGrain, SecParsedRow, SecUnmappedReport } from "./types.js";
 import { bumpSecUnmapped } from "./types.js";
 
 // ── Shared helpers (mirror primary normalize) ─────────────────────────────────
@@ -57,7 +57,7 @@ export function formatMonthLabel(year: number, monthIdx: number): string {
 
 function fyYearForMonth(fy: string, monthIdx: number): number {
   const startYear = Number(fy.slice(0, 4));
-  // Apr(3)..Dec(11) → first FY year; Jan(0)..Mar(2) → second FY year
+  // Apr(3)..Dec(11) -> first FY year; Jan(0)..Mar(2) -> second FY year
   return monthIdx >= 3 ? startYear : startYear + 1;
 }
 
@@ -86,7 +86,7 @@ export function toMonthLabel(v: CellValue, fy: string): string | null {
 
 const headAliasConfig = headAliasConfigRaw as Record<string, string>;
 
-// Build a name→canon map from head_alias.json (raw → canonical) and
+// Build a name->canon map from head_alias.json (raw -> canonical) and
 // normalize.json territory_heads (canonical list).
 const HEAD_ALIAS: Map<string, string> = new Map();
 for (const [raw, canon] of Object.entries(headAliasConfig)) {
@@ -98,6 +98,33 @@ const STATE_MAP: Map<string, string> = new Map(
     (normalizeConfig as { state_map: Record<string, string> }).state_map,
   ).map(([k, v]) => [k.toUpperCase().trim(), v]),
 );
+
+// ── Sub-total row detection ────────────────────────────────────────────────────
+//
+// Rows whose first five cells contain a known sub-total marker token are
+// summary/aggregation rows that must NOT be parsed as data lines — doing so
+// would double-count amounts. Particularly important for FY2023-24 (subtotal
+// grain), but applied to all FYs for safety.
+//
+// Tokens come from secondary_column_maps.json v1.sub_total_skip_tokens.
+// They are already in normalised form (uppercase, non-alphanumeric stripped).
+
+const SUB_TOTAL_SKIP_TOKENS = new Set<string>(
+  (colMapsConfig.versions.v1 as { sub_total_skip_tokens: string[] })
+    .sub_total_skip_tokens,
+);
+
+// Returns true when the row is a sub-total / grand-total summary row.
+// Only the first five cells are scanned to avoid false positives on
+// numeric amount or qty columns.
+export function isSubTotalRow(cells: CellValue[]): boolean {
+  const limit = Math.min(5, cells.length);
+  for (let i = 0; i < limit; i++) {
+    const n = normHeader(cells[i]);
+    if (n && SUB_TOTAL_SKIP_TOKENS.has(n)) return true;
+  }
+  return false;
+}
 
 // ── Column detection ──────────────────────────────────────────────────────────
 
@@ -115,10 +142,13 @@ function isSecHeaderRow(values: CellValue[]): boolean {
 
 // Map a header row to column indices using the v1 column map config.
 // Returns null when required columns (amount) cannot be found.
+// grain is passed through from the FY config and stored on the SecColMap so
+// downstream callers (loader, Gate 1 report) know the data grain for this FY.
 export function mapSecColumns(
   values: CellValue[],
   headerRowNumber: number,
   mapVersion = "v1",
+  grain: SecGrain = "line",
 ): SecColMap | null {
   const version = (colMapsConfig.versions as Record<string, Record<string, unknown>>)[mapVersion];
   if (!version) return null;
@@ -138,6 +168,7 @@ export function mapSecColumns(
 
   return {
     headerRowNumber,
+    grain,
     head: find(version.head),
     state: find(version.state),
     customer: find(version.customer),
@@ -150,14 +181,16 @@ export function mapSecColumns(
 }
 
 // Scan the first maxRows rows for a header row.
+// grain is threaded through so the returned SecColMap carries the FY's grain.
 export function detectSecHeader(
   rows: CellValue[][],
   mapVersion = "v1",
+  grain: SecGrain = "line",
   maxRows = 20,
 ): SecColMap | null {
   for (let i = 0; i < Math.min(maxRows, rows.length); i++) {
     if (isSecHeaderRow(rows[i])) {
-      return mapSecColumns(rows[i], i + 1, mapVersion); // row number is 1-indexed
+      return mapSecColumns(rows[i], i + 1, mapVersion, grain); // row number is 1-indexed
     }
   }
   return null;
@@ -242,6 +275,7 @@ export function isTerritory(headCanon: string | null, stateRaw: string | null): 
 
 // Parse one raw register row into a SecParsedRow.
 // Returns null for rows that have no amount (header repeats, blank rows, etc.).
+// Sub-total rows are detected upstream (isSubTotalRow) before this is called.
 export function parseSecRegisterRow(
   cells: CellValue[],
   cols: SecColMap,
@@ -254,12 +288,18 @@ export function parseSecRegisterRow(
   const monthLabel = toMonthLabel(rawMonth, fy);
   if (!monthLabel) return null;
 
+  // For subtotal-grain FYs, customer is expected to be null; the uid still
+  // differentiates rows by head/month/brand/amount/occurrence.
+  const customer = (cols.grain === "subtotal" || cols.customer < 0)
+    ? null
+    : toText(cells[cols.customer]);
+
   return {
     fy,
     monthLabel,
     headRaw: cols.head >= 0 ? toText(cells[cols.head]) : null,
     stateRaw: cols.state >= 0 ? toText(cells[cols.state]) : null,
-    customer: cols.customer >= 0 ? toText(cells[cols.customer]) : null,
+    customer,
     brandRaw: cols.brand >= 0 ? toText(cells[cols.brand]) : null,
     amount,
     qty: cols.qty >= 0 ? toNumber(cells[cols.qty]) : null,
