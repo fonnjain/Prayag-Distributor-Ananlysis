@@ -28,7 +28,7 @@
       "column_map_key": "v1",
       "grain": "line",
       "tab": "Data Sheet",
-      "comment": "Secondary order booking register FY2025-26. Tab: 'Data Sheet'. grain=line: individual retailer transaction lines. Also has a state_head_dashboard for the same FY — both sources are loaded independently and serve different purposes (register=line-level, dashboard=pre-aggregated head-month)."
+      "comment": "Secondary order booking register FY2025-26. Tab: 'Data Sheet'. grain=line: individual retailer transaction lines. Also has a state_head_dashboard for the same FY \u2014 both sources are loaded independently and serve different purposes (register=line-level, dashboard=pre-aggregated head-month)."
     },
     "2024-25": {
       "sheet_id": "1sejEhXCaPXwYZ99mP0tPGo_pA623FQaBN2JBcreIy2g",
@@ -42,7 +42,7 @@
       "column_map_key": "v1",
       "grain": "line",
       "tab_strategy": "all",
-      "comment": "FY2023-24 secondary register. tab_strategy=all: reads all tabs and concatenates rows — this workbook may have data split across multiple month-specific tabs (April-only data seen on 'Data Sheet'; other months may live in separate tabs). Subsequent tabs' header rows are auto-skipped by parseRows (amount cell is a string, fails toNumber → blankRowsSkipped)."
+      "comment": "FY2023-24 secondary register. tab_strategy=all: reads all tabs and concatenates rows \u2014 this workbook may have data split across multiple month-specific tabs (April-only data seen on 'Data Sheet'; other months may live in separate tabs). Subsequent tabs' header rows are auto-skipped by parseRows (amount cell is a string, fails toNumber \u2192 blankRowsSkipped)."
     },
     "2022-23": {
       "sheet_id": "1wj96uhny-eBC2umGa8bP9M1j1T9YEt-DsThduzoC-2c",
