@@ -229,6 +229,60 @@ function isMonthClosedInner(monthIdx: number, fy: string, nowMs: number): boolea
   return nowMs > lastDayMs;
 }
 
+// ── Validator 8: control_cell_matches ────────────────────────────────────────
+//
+// Compares our computed sums against amounts captured from the sheet's own
+// grand-total / sub-total row (detected via isSubTotalRow in the loader).
+// When no control row was found (subtotal_excluded=0 for that tab), the check
+// passes with a "no control row detected" note — cross_foot still provides
+// internal consistency.  When a control row IS found, a delta > 1 rupee fails.
+//
+// computedGross  = sum(line.grossAmount) across all parsed lines
+// controlGross   = gross amount read from the sheet's grand-total row (or null)
+// computedNet    = sum(line.netAmount) ignoring NULLs (= sum of Sub Total cells)
+// controlNet     = net amount read from the sheet's grand-total row (or null)
+export function assertSecControlCellMatches(
+  computedGross: number,
+  controlGross: number | null,
+  computedNet: number,
+  controlNet: number | null,
+): SecIngestAssertion {
+  if (controlGross == null && controlNet == null) {
+    return {
+      name: "control_cell_matches",
+      passed: true,
+      detail: "no grand-total row detected in sheet; cross_foot serves as internal consistency check",
+    };
+  }
+  const problems: string[] = [];
+  if (controlGross != null) {
+    const delta = Math.abs(computedGross - controlGross);
+    if (delta > 1) {
+      problems.push(
+        `gross: computed=${Math.round(computedGross).toLocaleString("en-IN")} sheet=${Math.round(controlGross).toLocaleString("en-IN")} delta=${Math.round(delta)}`,
+      );
+    }
+  }
+  if (controlNet != null) {
+    const delta = Math.abs(computedNet - controlNet);
+    if (delta > 1) {
+      problems.push(
+        `net: computed=${Math.round(computedNet).toLocaleString("en-IN")} sheet=${Math.round(controlNet).toLocaleString("en-IN")} delta=${Math.round(delta)}`,
+      );
+    }
+  }
+  const grossLabel = controlGross != null ? `gross=${Math.round(controlGross).toLocaleString("en-IN")}` : "";
+  const netLabel = controlNet != null ? `net=${Math.round(controlNet).toLocaleString("en-IN")}` : "";
+  const labels = [grossLabel, netLabel].filter(Boolean).join(", ");
+  return {
+    name: "control_cell_matches",
+    passed: problems.length === 0,
+    detail: problems.length === 0
+      ? `matches sheet grand-total row (${labels})`
+      : `sheet grand-total mismatch: ${problems.join("; ")}`,
+  };
+}
+
 // ── Run all register validators ───────────────────────────────────────────────
 
 export function runSecRegisterValidators(

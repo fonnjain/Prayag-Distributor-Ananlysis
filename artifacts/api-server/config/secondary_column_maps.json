@@ -2,7 +2,7 @@
   "comment": "Per-version column header patterns for secondary sale registers. Each entry lists the header tokens (normalised: uppercase, non-alphanumeric stripped) to search for when mapping columns. Multiple tokens per field are tried in order; the first match wins. Version 'v1' is the baseline format observed for FY2021-22 through FY2025-26.",
   "versions": {
     "v1": {
-      "comment": "Baseline secondary register column layout. All FYs (2021-22 through 2025-26) share this layout: Sr.No | Date | Retailer/Retailers | ID | Segment | Cat.No | Qty | MRP | Order Value | Distributor | Discount | Sub Total | Order Total | Team Member. Team Member is at column [13] or [14] depending on the FY tab format. The head dimension maps to Team Member, NOT Distributor. Net amount is read directly from the Sub Total column; the discount-carry fallback in loader.ts handles continuation rows where Sub Total is blank.",
+      "comment": "Baseline secondary register column layout. All FYs (2021-22 through 2025-26) share this layout: Sr.No | Date | Retailer/Retailers | ID | Segment | Cat.No | Qty | MRP | Order Value | Distributor | Discount | Sub Total | Order Total | Team Member. Team Member is at column [13] or [14] depending on the FY tab format. The head dimension maps to Team Member, NOT Distributor. net_amount is read directly from the Sub Total column (order-group total, first row of each order only); continuation rows have null net_amount. SUM(net_amount) ignoring NULLs equals the correct grand net. discountPct is still carried across continuation rows for informational purposes.",
       "grain_default": "line",
       "head": ["TEAMMEMBERNAME", "TEAMMEMBER", "STATEHEAD", "HEAD", "SALESHEAD"],
       "state": ["STATE"],
@@ -20,7 +20,8 @@
         "SUBTOTL",
         "SUBTOT",
         "GRANDTOTAL",
-        "GRANDTOTL"
+        "GRANDTOTL",
+        "TOTAL"
       ],
       "comment_sub_total_skip": "Tokens that, when found in any of the first five cells of a data row, mark it as a sub-total/summary row to be excluded. Only the first five cells are scanned to avoid false positives on amount columns.",
       "comment_header_detection": "Header row must contain at least one of header_anchor_tokens after normalisation. Scan the first 20 rows. FY2024-25 has a totals row at row 0 and the real header at row 1 — the 20-row scan covers both."

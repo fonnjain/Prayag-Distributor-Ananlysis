@@ -23,7 +23,7 @@ import {
 } from "./normalize.js";
 import { emptySecUnmapped } from "./types.js";
 import type { CellValue, SecGrain, SecDryRunSummary } from "./types.js";
-import { runSecRegisterValidators } from "./validate.js";
+import { runSecRegisterValidators, assertSecControlCellMatches } from "./validate.js";
 import { crossFootByHead } from "./rules.js";
 import {
   insertSecRegLineBatches,
@@ -101,6 +101,12 @@ type ParseResult = {
   dataRows: number;
   subTotalRowsExcluded: number;
   blankRowsSkipped: number;
+  // Amounts captured from the sheet's own grand-total row (if detected).
+  // null means no sub-total/grand-total row was found — cross_foot is used
+  // instead.  When non-null, these are the external control totals to verify
+  // our computed sums against.
+  controlGross: number | null;
+  controlNet: number | null;
   fyCounts: Record<string, number>;
   unmapped: ReturnType<typeof emptySecUnmapped>;
   errors: string[];
@@ -111,11 +117,17 @@ type ParseResult = {
 // 20 rows; subsequent tab-header rows are blank-skipped because their amount
 // cell ("Order Value") is a string that toNumber() cannot parse.
 //
-// Discount carry: in FY2021-22 through FY2023-24 the Discount % column is
-// populated only on the FIRST row of each order group; continuation rows
-// have a blank cell. lastDiscountPct carries the most recent non-blank
-// discount forward so every row gets a net_amount. FY2024-25 and FY2025-26
-// always have a non-blank Discount column, so carry has no effect there.
+// Net amount semantics: Sub Total is the ORDER-GROUP total — it appears once
+// on the first row of each order group and equals sum(Order Value for that
+// group) × (1 − discount%). Continuation rows have a blank Sub Total cell and
+// therefore null netAmount in the database.  For aggregate reporting,
+// SUM(net_amount) ignoring NULLs equals the correct grand net (Sub Total sum).
+// Do NOT fill netAmount for continuation rows via discount-carry — that would
+// double-count the first row's share.
+//
+// Discount carry: discountPct IS still carried across continuation rows so
+// every parsed row has a non-null discountPct for informational/analysis
+// purposes. Only the net_amount discount-carry fallback is omitted.
 function parseRows(
   rawRows: CellValue[][],
   fy: string,
@@ -131,11 +143,14 @@ function parseRows(
   let rowsRead = 0;
   let subTotalRowsExcluded = 0;
   let blankRowsSkipped = 0;
+  // Control totals from the sheet's own grand-total row (if any).
+  let controlGross: number | null = null;
+  let controlNet: number | null = null;
 
   const cols = detectSecHeader(rawRows, mapVersion, grain);
   if (!cols) {
     errors.push(`No secondary register header found in first 20 rows for FY ${fy}`);
-    return { lines, grain, rowsRead, dataRows: 0, subTotalRowsExcluded, blankRowsSkipped, fyCounts, unmapped, errors };
+    return { lines, grain, rowsRead, dataRows: 0, subTotalRowsExcluded, blankRowsSkipped, controlGross, controlNet, fyCounts, unmapped, errors };
   }
 
   // Rows after the header row
@@ -148,7 +163,17 @@ function parseRows(
     rowsRead++;
 
     // Sub-total detection: exclude summary/aggregation rows before parsing.
+    // When a grand-total row is detected, capture its gross and net amounts as
+    // external control totals to verify our computed sums against.
     if (isSubTotalRow(cells)) {
+      if (cols.grossAmount >= 0) {
+        const cg = Number(cells[cols.grossAmount] ?? NaN);
+        if (Number.isFinite(cg)) controlGross = (controlGross ?? 0) + cg;
+      }
+      if (cols.netAmount >= 0) {
+        const cn = Number(cells[cols.netAmount] ?? NaN);
+        if (Number.isFinite(cn)) controlNet = (controlNet ?? 0) + cn;
+      }
       subTotalRowsExcluded++;
       continue;
     }
@@ -165,17 +190,16 @@ function parseRows(
     // lastDiscountPct is updated only from raw (non-carried) reads so a missing
     // discount at the start of a new order doesn't inherit a stale value across
     // unrelated order groups.
+    //
+    // discountPct IS carried for informational purposes (every row gets the rate
+    // that applied to its order group).
+    //
+    // netAmount is NOT filled from discount-carry: Sub Total is the order-group
+    // total (first row only); continuation rows store null netAmount.  Reporting
+    // uses SUM(net_amount) ignoring NULLs = sum of Sub Total column values.
     const rawDiscountPct = parsed.discountPct;
     const effectiveDiscount = rawDiscountPct ?? lastDiscountPct;
     parsed.discountPct = effectiveDiscount;
-    // Prefer the Sub Total cell read directly from the sheet (accurate, avoids
-    // rounding). Fall back to computing from discount % for continuation rows
-    // where Sub Total is blank.
-    if (parsed.netAmount == null && effectiveDiscount != null) {
-      parsed.netAmount = Math.round(
-        parsed.grossAmount * (1 - effectiveDiscount / 100) * 100,
-      ) / 100;
-    }
     if (rawDiscountPct != null) lastDiscountPct = rawDiscountPct;
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -200,6 +224,8 @@ function parseRows(
     dataRows: lines.length,
     subTotalRowsExcluded,
     blankRowsSkipped,
+    controlGross,
+    controlNet,
     fyCounts,
     unmapped,
     errors,
@@ -237,10 +263,13 @@ export async function loadSecRegisterFromXlsx(
   }
 
   const result = parseRows(allRows, fy, "xlsx_backfill", mapVersion, grain);
-  const { lines, rowsRead, dataRows, subTotalRowsExcluded, blankRowsSkipped, fyCounts, unmapped, errors } = result;
+  const { lines, rowsRead, dataRows, subTotalRowsExcluded, blankRowsSkipped, controlGross: xlsxControlGross, controlNet: xlsxControlNet, fyCounts, unmapped, errors } = result;
 
   const crossFoot = crossFootByHead(lines);
   const assertions = runSecRegisterValidators(lines, unmapped, fyCounts, fy);
+  const computedGross = lines.reduce((s, l) => s + Number(l.grossAmount), 0);
+  const computedNet = lines.reduce((s, l) => s + Number(l.netAmount ?? 0), 0);
+  assertions.push(assertSecControlCellMatches(computedGross, xlsxControlGross, computedNet, xlsxControlNet));
   const anyFailed = assertions.some((a) => !a.passed);
   const status = dryRun ? "dry_run" : anyFailed ? "fail" : "ok";
 
@@ -458,6 +487,8 @@ export async function loadSecRegisterFromSheets(
   let dataRows: number;
   let subTotalRowsExcluded: number;
   let blankRowsSkipped: number;
+  let controlGross: number | null = null;
+  let controlNet: number | null = null;
   let fyCounts: Record<string, number>;
   let unmapped: ReturnType<typeof emptySecUnmapped>;
   let errors: string[];
@@ -465,6 +496,8 @@ export async function loadSecRegisterFromSheets(
   if (tabStrategy === "all") {
     const allLines: InsertSecRegLine[] = [];
     let totalRowsRead = 0, totalSubTotalExcluded = 0, totalBlankSkipped = 0;
+    let totalControlGross: number | null = null;
+    let totalControlNet: number | null = null;
     const totalErrors: string[] = [];
 
     for (const tabName of tabsToRead) {
@@ -485,7 +518,7 @@ export async function loadSecRegisterFromSheets(
           rowsFetched: tabRows.length,
           sample: tabRows
             .slice(0, 3)
-            .map((r) => r.slice(0, 12).map((c) => (c == null ? "" : String(c))).join(" | ")),
+            .map((r) => r.slice(0, 20).map((c) => (c == null ? "" : String(c))).join(" | ")),
         },
         "sec: tab rows fetched",
       );
@@ -504,6 +537,8 @@ export async function loadSecRegisterFromSheets(
       totalRowsRead += tabResult.rowsRead;
       totalSubTotalExcluded += tabResult.subTotalRowsExcluded;
       totalBlankSkipped += tabResult.blankRowsSkipped;
+      if (tabResult.controlGross != null) totalControlGross = (totalControlGross ?? 0) + tabResult.controlGross;
+      if (tabResult.controlNet != null) totalControlNet = (totalControlNet ?? 0) + tabResult.controlNet;
     }
 
     // Dedup by line_uid: copy tabs produce identical line_uids → keep first.
@@ -552,6 +587,8 @@ export async function loadSecRegisterFromSheets(
     dataRows = allLines.length;
     subTotalRowsExcluded = totalSubTotalExcluded;
     blankRowsSkipped = totalBlankSkipped;
+    controlGross = totalControlGross;
+    controlNet = totalControlNet;
     fyCounts = mergedFyCounts;
     unmapped = mergedUnmapped;
     errors = totalErrors;
@@ -569,7 +606,7 @@ export async function loadSecRegisterFromSheets(
         rowsFetched: allRows.length,
         sample: allRows
           .slice(0, 3)
-          .map((r) => r.slice(0, 12).map((c) => (c == null ? "" : String(c))).join(" | ")),
+          .map((r) => r.slice(0, 20).map((c) => (c == null ? "" : String(c))).join(" | ")),
       },
       "sec: tab rows fetched",
     );
@@ -580,6 +617,8 @@ export async function loadSecRegisterFromSheets(
     dataRows = result.dataRows;
     subTotalRowsExcluded = result.subTotalRowsExcluded;
     blankRowsSkipped = result.blankRowsSkipped;
+    controlGross = result.controlGross;
+    controlNet = result.controlNet;
     fyCounts = result.fyCounts;
     unmapped = result.unmapped;
     errors = result.errors;
@@ -587,6 +626,9 @@ export async function loadSecRegisterFromSheets(
 
   const crossFoot = crossFootByHead(lines);
   const assertions = runSecRegisterValidators(lines, unmapped, fyCounts, fy);
+  const computedGross = lines.reduce((s, l) => s + Number(l.grossAmount), 0);
+  const computedNet = lines.reduce((s, l) => s + Number(l.netAmount ?? 0), 0);
+  assertions.push(assertSecControlCellMatches(computedGross, controlGross, computedNet, controlNet));
   const anyFailed = assertions.some((a) => !a.passed);
   const status = dryRun ? "dry_run" : anyFailed ? "fail" : "ok";
 
