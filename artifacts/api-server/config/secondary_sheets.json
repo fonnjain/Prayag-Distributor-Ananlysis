@@ -1,16 +1,35 @@
 {
-  "comment": "Secondary data source spreadsheet IDs, keyed by fiscal year. Two source types are distinguished: 'state_head_dashboard' (aggregated plan/ordered/received per person per month, used for FY2025-26 and FY2026-27) and 'register' (line-level secondary order rows, FY2021-22 through FY2024-25). IDs sourced from mgmt_sources.json secondary_order_booking.files_by_year. IMPORTANT: these are SECONDARY (distributor->retailer) figures and must never be summed with primary sale_line data.",
+  "comment": "Secondary data source spreadsheet IDs, keyed by fiscal year. Two source types: 'state_head_dashboard' (aggregated plan/ordered/received per person per month) and 'register' (line-level secondary order rows). IDs sourced from mgmt_sources.json secondary_order_booking.files_by_year and state_head_dashboard.files_by_year. IMPORTANT: these are SECONDARY (distributor->retailer) figures and must never be summed with primary sale_line data.",
   "state_head_dashboards": {
     "2026-27": {
       "sheet_id": "1E1jEY_yO8LmpqBDpcesS_fu2SBPEQ0eKO5xN29XyTEM",
-      "tab_prefix": "SECONDARY ORDER BOOKING REPORT"
+      "tab_prefix": "SECONDARY ORDER BOOKING REPORT",
+      "comment": "STATE HEAD DASHBOARD(2026-27). Tab: 'SECONDARY ORDER BOOKING REPORT 2026-27'. Per individual team member (not per geographic state). Unique key: (fy, head_canon, month_label)."
     },
     "2025-26": {
       "sheet_id": "1PTkkEa_ENkSqsGnpqoXy9kt0Fe1hCtlmU6kVFBNaonY",
-      "tab_prefix": "ORDER BOOKING REPORT"
+      "tab_prefix": "ORDER BOOKING REPORT",
+      "comment": "STATE HEAD DASHBOARD(2025-26). Tab: 'ORDER BOOKING REPORT 2025-26'. Per individual team member."
+    },
+    "2024-25": {
+      "sheet_id": "1MwNMVzWE3QBVOyJjKr3eFX-Sq1Ng0Q1sghWJbgbE_8g",
+      "tab_prefix": "ORDER BOOKING REPORT",
+      "comment": "STATE HEAD DASHBOARD(2024-25). Tab: 'ORDER BOOKING REPORT 2024-25'. Per individual team member."
+    },
+    "2023-24": {
+      "sheet_id": "1ESjgk5FthsvYc_Bk9zuJVnJ1XtwKQxv0XG2onuspnhg",
+      "tab_prefix": "ORDER BOOKING REPORT",
+      "comment": "STATE HEAD DASHBOARD(2023-24). Tab: 'ORDER BOOKING REPORT 2023-24'. Per individual team member."
     }
   },
   "registers": {
+    "2025-26": {
+      "sheet_id": "1aNQ2TczEMHcSeB26yKoKayiq1CWc4dXdTQORrgxdl80",
+      "column_map_key": "v1",
+      "grain": "line",
+      "tab": "Data Sheet",
+      "comment": "Secondary order booking register FY2025-26. Tab: 'Data Sheet'. grain=line: individual retailer transaction lines. Also has a state_head_dashboard for the same FY — both sources are loaded independently and serve different purposes (register=line-level, dashboard=pre-aggregated head-month)."
+    },
     "2024-25": {
       "sheet_id": "1sejEhXCaPXwYZ99mP0tPGo_pA623FQaBN2JBcreIy2g",
       "column_map_key": "v1",

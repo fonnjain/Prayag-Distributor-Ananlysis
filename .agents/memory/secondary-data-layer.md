@@ -4,17 +4,31 @@ description: Table names, column map, sheet IDs, and Gate 1 dry-run results for 
 ---
 
 ## Tables (created, migration applied)
-- `secondary_register_line` — individual retailer-level order booking transaction rows (FY2021-22 through FY2024-25, source=register_sheets)
-- `secondary_head_month` — pre-aggregated head/month pivot from State Head Dashboard (FY2025-26 / FY2026-27, source=state_head_dashboard)
+- `secondary_register_line` — individual retailer-level order booking transaction rows (FY2021-22 through FY2025-26, source=register_sheets)
+- `secondary_head_month` — per-individual-member monthly aggregates (FY2023-24 through FY2026-27, source=state_head_dashboard). Key: (fy, head_canon, month_label). head_canon is the person's normKey, NOT a geographic state. stateHead is the senior head they roll up to.
 - `secondary_ingest_run` — audit log for every dry-run and real ingest
 
-## Sheet IDs (from mgmt_sources.json secondary_order_booking.files_by_year)
+## Sheet IDs
+Registers (secondary_order_booking.files_by_year):
 - FY2021-22: `1RtRByRmNQorYOEeHsZuOy1GIkB7dVu7MNv9P_pg97Bs`
 - FY2022-23: `1wj96uhny-eBC2umGa8bP9M1j1T9YEt-DsThduzoC-2c`
 - FY2023-24: `1c5ZmmcKUbp9hvW0aS_HQjkjL-FJyyZ2P8Orbc0uaPbY`
 - FY2024-25: `1sejEhXCaPXwYZ99mP0tPGo_pA623FQaBN2JBcreIy2g`
-- FY2025-26 dashboard: `1PTkkEa_ENkSqsGnpqoXy9kt0Fe1hCtlmU6kVFBNaonY`
-- FY2026-27 dashboard: `1E1jEY_yO8LmpqBDpcesS_fu2SBPEQ0eKO5xN29XyTEM`
+- FY2025-26: `1aNQ2TczEMHcSeB26yKoKayiq1CWc4dXdTQORrgxdl80` (added)
+
+State head dashboards (state_head_dashboard.files_by_year):
+- FY2023-24: `1ESjgk5FthsvYc_Bk9zuJVnJ1XtwKQxv0XG2onuspnhg` — tab prefix "ORDER BOOKING REPORT"
+- FY2024-25: `1MwNMVzWE3QBVOyJjKr3eFX-Sq1Ng0Q1sghWJbgbE_8g` — tab prefix "ORDER BOOKING REPORT"
+- FY2025-26: `1PTkkEa_ENkSqsGnpqoXy9kt0Fe1hCtlmU6kVFBNaonY` — tab prefix "ORDER BOOKING REPORT"
+- FY2026-27: `1E1jEY_yO8LmpqBDpcesS_fu2SBPEQ0eKO5xN29XyTEM` — tab prefix "SECONDARY ORDER BOOKING REPORT"
+
+IMPORTANT: Dashboard IDs must be consistent in THREE places: secondary_sheets.json,
+mgmt_sources.json state_head_dashboard.files_by_year, AND stateDashboard.ts SHEET_IDS.
+All three were updated together. If you add a new FY, update all three.
+
+Also note: a historical multi-year workbook exists (`1F69Qv2qaO_ah1domYyhe_Y7qGPZk7Uyfw0oAMovt7bU`
+"STATE HEAD DASHBOARD" no year suffix) containing tabs for FY2020-21 through FY2022-23.
+Not currently wired — can be added later if needed.
 
 ## Column map (v1) — actual register header
 ```

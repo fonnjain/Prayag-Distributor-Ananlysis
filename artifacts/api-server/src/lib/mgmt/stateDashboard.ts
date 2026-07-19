@@ -48,12 +48,19 @@ import { normName, fyStartYear } from "./names.js";
 const SHEET_IDS: Record<string, string> = {
   "2026-27": "1E1jEY_yO8LmpqBDpcesS_fu2SBPEQ0eKO5xN29XyTEM",
   "2025-26": "1PTkkEa_ENkSqsGnpqoXy9kt0Fe1hCtlmU6kVFBNaonY",
+  "2024-25": "1MwNMVzWE3QBVOyJjKr3eFX-Sq1Ng0Q1sghWJbgbE_8g",
+  "2023-24": "1ESjgk5FthsvYc_Bk9zuJVnJ1XtwKQxv0XG2onuspnhg",
 };
 
 // Tab names differ slightly between years; match by prefix (case-insensitive).
+// FY2026-27 uses a different prefix ("SECONDARY ORDER BOOKING REPORT") from all
+// earlier years ("ORDER BOOKING REPORT"). Each workbook contains only one matching
+// tab so the prefix is unambiguous within its workbook.
 const TAB_PREFIXES: Record<string, string> = {
   "2026-27": "SECONDARY ORDER BOOKING REPORT",
   "2025-26": "ORDER BOOKING REPORT",
+  "2024-25": "ORDER BOOKING REPORT",
+  "2023-24": "ORDER BOOKING REPORT",
 };
 
 // Additional tabs (FY26-27 only). Gracefully absent for other years.

@@ -26,8 +26,8 @@ import { buildGate1Report } from "./lib/secondary/gate1.js";
 import type { SecDryRunSummary, SecIngestAssertion, Gate1DryRunReport } from "./lib/secondary/types.js";
 
 // All FYs this pipeline covers.
-const ALL_REGISTER_FYS = ["2021-22", "2022-23", "2023-24", "2024-25"];
-const ALL_DASHBOARD_FYS = ["2025-26", "2026-27"];
+const ALL_REGISTER_FYS = ["2021-22", "2022-23", "2023-24", "2024-25", "2025-26"];
+const ALL_DASHBOARD_FYS = ["2023-24", "2024-25", "2025-26", "2026-27"];
 
 // ── Argument parsing ─────────────────────────────────────────────────────────
 

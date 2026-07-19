@@ -50,9 +50,12 @@ export const secondaryRegisterLines = pgTable(
 
 // ── Table 2: secondary_head_month ─────────────────────────────────────────────
 //
-// Aggregated monthly secondary metrics per State Head, sourced from the
-// "STATE HEAD DASHBOARD" / "ORDER BOOKING REPORT" spreadsheets.
-// One row per (fy, head_canon, month_label). Upserted on reload.
+// Aggregated monthly secondary metrics per individual team member, sourced from
+// the "STATE HEAD DASHBOARD" / "ORDER BOOKING REPORT" spreadsheets.
+// "State Head" here means each individual territory manager (person), NOT a
+// geographic state. One row per (fy, head_canon, month_label). Upserted on
+// reload. headCanon is the individual's normKey (e.g. "vikashgour").
+// stateHead is the senior head they report to (an additional grouping field).
 //
 // Achievement is RECOMPUTED here as received / plan (never ordered / plan).
 // The sheet's own achievement column uses ordered / plan and is WRONG.
