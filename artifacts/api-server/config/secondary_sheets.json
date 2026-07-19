@@ -28,35 +28,47 @@
       "column_map_key": "v1",
       "grain": "line",
       "tab": "Data Sheet",
-      "comment": "Secondary order booking register FY2025-26. Tab: 'Data Sheet'. grain=line: individual retailer transaction lines. Also has a state_head_dashboard for the same FY \u2014 both sources are loaded independently and serve different purposes (register=line-level, dashboard=pre-aggregated head-month)."
-    },
+      "comment": "Secondary order booking register FY2025-26. Tab: 'Data Sheet'. grain=line: individual retailer transaction lines. Also has a state_head_dashboard for the same FY — both sources are loaded independently and serve different purposes (register=line-level, dashboard=pre-aggregated head-month)."
+    }
+  },
+  "frozen_registers": {
+    "comment": "Fully committed and Gate 2-verified FYs. Sheet IDs preserved for audit reference only. Loader will not find these under 'registers' — backfill for these FYs is blocked at config level. Do not re-ingest without a deliberate restore procedure.",
     "2024-25": {
       "sheet_id": "1sejEhXCaPXwYZ99mP0tPGo_pA623FQaBN2JBcreIy2g",
       "column_map_key": "v1",
       "grain": "line",
       "tab": "Data Sheet",
-      "comment": "Secondary order booking register FY2024-25. Tab: 'Data Sheet'. grain=line: individual customer-level rows."
+      "frozen_at": "2026-07-19",
+      "db_rows": 335256,
+      "db_gross_rupees": 4144778641
     },
     "2023-24": {
       "sheet_id": "1c5ZmmcKUbp9hvW0aS_HQjkjL-FJyyZ2P8Orbc0uaPbY",
       "column_map_key": "v1",
       "grain": "line",
       "tab_strategy": "all",
-      "comment": "FY2023-24 secondary register. tab_strategy=all: reads all tabs and concatenates rows \u2014 this workbook may have data split across multiple month-specific tabs (April-only data seen on 'Data Sheet'; other months may live in separate tabs). Subsequent tabs' header rows are auto-skipped by parseRows (amount cell is a string, fails toNumber \u2192 blankRowsSkipped)."
+      "frozen_at": "2026-07-19",
+      "db_rows": 261540,
+      "db_gross_rupees": 3133265376
     },
     "2022-23": {
       "sheet_id": "1wj96uhny-eBC2umGa8bP9M1j1T9YEt-DsThduzoC-2c",
       "column_map_key": "v1",
       "grain": "line",
       "tab": "Data Sheet",
-      "comment": "Secondary order booking register FY2022-23. Tab: 'Data Sheet'."
+      "frozen_at": "2026-07-19",
+      "db_rows": 220821,
+      "db_gross_rupees": 2889220762,
+      "note": "54 rows have null head_canon (Apr-22 + May-22, gross=391291); loaded as-is, included in gross totals"
     },
     "2021-22": {
       "sheet_id": "1RtRByRmNQorYOEeHsZuOy1GIkB7dVu7MNv9P_pg97Bs",
       "column_map_key": "v1",
       "grain": "line",
       "tab": "Data Sheet",
-      "comment": "Secondary order booking register FY2021-22. Tab: 'Data Sheet'."
+      "frozen_at": "2026-07-19",
+      "db_rows": 159482,
+      "db_gross_rupees": 2108798907
     }
   }
 }
