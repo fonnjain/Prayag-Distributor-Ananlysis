@@ -168,8 +168,10 @@ function parseRows(
     const rawDiscountPct = parsed.discountPct;
     const effectiveDiscount = rawDiscountPct ?? lastDiscountPct;
     parsed.discountPct = effectiveDiscount;
-    if (effectiveDiscount != null) {
-      // Round to 2dp to avoid floating-point accumulation noise.
+    // Prefer the Sub Total cell read directly from the sheet (accurate, avoids
+    // rounding). Fall back to computing from discount % for continuation rows
+    // where Sub Total is blank.
+    if (parsed.netAmount == null && effectiveDiscount != null) {
       parsed.netAmount = Math.round(
         parsed.grossAmount * (1 - effectiveDiscount / 100) * 100,
       ) / 100;

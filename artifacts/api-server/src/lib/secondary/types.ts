@@ -21,13 +21,14 @@ export type SecGrain = "line" | "subtotal";
 export type SecColMap = {
   headerRowNumber: number;
   grain: SecGrain;   // data grain for this FY — passed through from config
-  head: number;
+  head: number;      // Team Member column (-1 when not found)
   state: number;
   customer: number;
   brand: number;
   month: number;
   fy: number;
   grossAmount: number;  // Order Value column (before discount)
+  netAmount: number;    // Sub Total column (-1 when not found; computed from discount as fallback)
   discount: number;     // Discount % column (may be blank on continuation rows)
   qty: number;
 };

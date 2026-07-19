@@ -1,16 +1,17 @@
 {
-  "comment": "Per-version column header patterns for secondary sale registers. Each entry lists the header tokens (normalised: uppercase, non-alphanumeric stripped) to search for when mapping columns. Multiple tokens per field are tried in order; the first match wins. Version 'v1' is the baseline format observed for FY2021-22 through FY2025-26. If a later FY introduces new column names, add a new version key and reference it in secondary_sheets.json.",
+  "comment": "Per-version column header patterns for secondary sale registers. Each entry lists the header tokens (normalised: uppercase, non-alphanumeric stripped) to search for when mapping columns. Multiple tokens per field are tried in order; the first match wins. Version 'v1' is the baseline format observed for FY2021-22 through FY2025-26.",
   "versions": {
     "v1": {
-      "comment": "Baseline secondary register column layout covering secondary order-booking registers. Header auto-detected by scanning first 20 rows for a row containing at least one header_anchor_token. Amount column is 'Sub Total' in FY2021-22 through FY2023-24 and 'Order Value' in FY2024-25. Head dimension comes from 'Distributor' (no State Head column exists in register files). Month derived from 'Date' column (Excel serial or formatted date string).",
+      "comment": "Baseline secondary register column layout. All FYs (2021-22 through 2025-26) share this layout: Sr.No | Date | Retailer/Retailers | ID | Segment | Cat.No | Qty | MRP | Order Value | Distributor | Discount | Sub Total | Order Total | Team Member. Team Member is at column [13] or [14] depending on the FY tab format. The head dimension maps to Team Member, NOT Distributor. Net amount is read directly from the Sub Total column; the discount-carry fallback in loader.ts handles continuation rows where Sub Total is blank.",
       "grain_default": "line",
-      "head": ["STATEHEAD", "HEAD", "SALESHEAD", "DISTRIBUTOR"],
+      "head": ["TEAMMEMBERNAME", "TEAMMEMBER", "STATEHEAD", "HEAD", "SALESHEAD"],
       "state": ["STATE"],
       "customer": ["CUSTOMER", "CUSTOMERNAME", "PARTY", "RETAILERS", "RETAILER"],
       "brand": ["BRAND", "GROUP", "PRODUCTGROUP", "CATEGORY", "SEGMENT"],
       "month": ["MONTH", "M0NTH", "DATE"],
       "fy": ["FYYEAR", "FY"],
       "gross_amount": ["ORDERVALUE", "AMOUNT", "NETAMOUNT", "SECONDARYAMOUNT", "VALUE"],
+      "net_amount": ["SUBTOTAL", "SUBTOTL"],
       "discount": ["DISCOUNT"],
       "qty": ["QTY", "QUANTITY"],
       "header_anchor_tokens": ["AMOUNT", "SECONDARYAMOUNT", "NETAMOUNT", "SUBTOTAL", "ORDERVALUE"],
@@ -21,7 +22,7 @@
         "GRANDTOTAL",
         "GRANDTOTL"
       ],
-      "comment_sub_total_skip": "Tokens that, when found in any of the first five cells of a data row, mark it as a sub-total/summary row to be excluded. Only the first five cells are scanned to avoid false positives on amount columns. Note: 'SUBTOTAL' also appears as the column header name in FY2021-22 through FY2023-24, but isSubTotalRow() is only applied to data rows (after the header), whose first five cells are always: serial number, date, retailer name, retailer ID, segment — so no false positives.",
+      "comment_sub_total_skip": "Tokens that, when found in any of the first five cells of a data row, mark it as a sub-total/summary row to be excluded. Only the first five cells are scanned to avoid false positives on amount columns.",
       "comment_header_detection": "Header row must contain at least one of header_anchor_tokens after normalisation. Scan the first 20 rows. FY2024-25 has a totals row at row 0 and the real header at row 1 — the 20-row scan covers both."
     }
   }

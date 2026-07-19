@@ -208,6 +208,7 @@ export function mapSecColumns(
     month: find(version.month),
     fy: find(version.fy),
     grossAmount,
+    netAmount: find(version.net_amount),  // Sub Total column; -1 when absent
     discount: find(version.discount),
     qty: find(version.qty),
   };
@@ -337,6 +338,14 @@ export function parseSecRegisterRow(
   const rawDiscount = cols.discount >= 0 ? cells[cols.discount] : null;
   const discountPct = parseDiscountPct(rawDiscount);
 
+  // Read net amount directly from the Sub Total column when available.
+  // Continuation rows (same order, subsequent SKUs) typically have a blank Sub
+  // Total — toNumber returns null for those, and the loader's discount-carry
+  // fills in a computed value as fallback.
+  const netAmountFromSheet = cols.netAmount >= 0
+    ? toNumber(cells[cols.netAmount])
+    : null;
+
   return {
     fy,
     monthLabel,
@@ -345,8 +354,8 @@ export function parseSecRegisterRow(
     customer,
     brandRaw: cols.brand >= 0 ? toText(cells[cols.brand]) : null,
     grossAmount,
-    netAmount: null,    // filled in by loader.parseRows after discount carry
-    discountPct,        // null when blank (continuation rows); loader carries
+    netAmount: netAmountFromSheet,  // null on continuation rows; loader fills via discount carry
+    discountPct,                    // null when blank (continuation rows); loader carries
     qty: cols.qty >= 0 ? toNumber(cells[cols.qty]) : null,
   };
 }
