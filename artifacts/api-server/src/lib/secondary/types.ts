@@ -89,6 +89,7 @@ export type SecDryRunSummary = {
   dataRows: number;              // rows that parsed as valid data lines
   subTotalRowsExcluded: number;  // rows detected as sub-total markers and skipped
   blankRowsSkipped: number;      // rows with no amount / header repeats / blanks
+  nullHeadSkipped: number;       // rows with null head_raw (unattributable; excluded before insert)
   rowsToInsert: number;          // dataRows after dedup against DB
   existingInDb: number;          // count already present (would be skipped on insert)
   crossFoot: CrossFootResult | null;  // null for state_head_dashboard source

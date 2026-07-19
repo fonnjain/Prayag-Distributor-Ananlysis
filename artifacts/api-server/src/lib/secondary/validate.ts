@@ -125,6 +125,23 @@ export function assertSecNoNegativeAmounts(
   };
 }
 
+// ── Validator 9: no_null_salesperson ─────────────────────────────────────────
+//
+// Rows where head_raw is null cannot be attributed to any team member; they
+// are filtered out of the insert set in the loader and counted here.  This
+// is informational (PASS with note) — the rows are reported but do not block
+// Gate 1 because they have already been excluded from the DB payload.  A
+// count > 0 signals a source-sheet data-quality issue (TM column was blank).
+export function assertSecNoNullSalesperson(nullHeadSkipped: number): SecIngestAssertion {
+  return {
+    name: "no_null_salesperson",
+    passed: true,
+    detail: nullHeadSkipped === 0
+      ? "all rows have a salesperson (head_raw non-null)"
+      : `${nullHeadSkipped} row(s) with null head_raw skipped (unattributable; excluded from DB)`,
+  };
+}
+
 // ── Validator 5: sum_by_head_consistent ───────────────────────────────────────
 //
 // sum(grossAmount) broken down by headCanon must equal the grand total within
@@ -328,6 +345,7 @@ export function runSecRegisterValidators(
   unmapped: SecUnmappedReport,
   fyCounts: Record<string, number>,
   fy: string,
+  nullHeadSkipped: number,
 ): SecIngestAssertion[] {
   const monthsFound = new Set(
     lines.map((l) => {
@@ -341,6 +359,7 @@ export function runSecRegisterValidators(
     ...assertSecRowCounts(fyCounts),
     assertSecUnmappedHeadsEmpty(unmapped),
     assertSecUnmappedStatesEmpty(unmapped),
+    assertSecNoNullSalesperson(nullHeadSkipped),
     assertSecNoNegativeAmounts(lines),
     assertSecSumByHeadConsistent(lines),
     assertSecAllMonthsPresent(fy, monthsFound),
