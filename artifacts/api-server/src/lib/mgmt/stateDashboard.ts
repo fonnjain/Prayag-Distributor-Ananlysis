@@ -185,6 +185,22 @@ const TTL_MS = 15 * 60_000;
 const _cache = new Map<string, SecDashboard>();
 const _inFlight = new Map<string, Promise<SecDashboard | null>>();
 
+// Returns the fiscal year that contains today, e.g. "2026-27" in July 2026.
+// Apr(3)..Mar(2) straddles two calendar years; the FY starts in April.
+function currentFy(): string {
+  const now = new Date();
+  const yr = now.getUTCFullYear();
+  const mo = now.getUTCMonth(); // 0=Jan
+  const fyStart = mo >= 3 ? yr : yr - 1;
+  return `${fyStart}-${String(fyStart + 1).slice(-2)}`;
+}
+
+// A FY is closed once its end date (31 Mar of fyStart+1) has passed, which is
+// equivalent to its start year being less than the current FY's start year.
+function isClosedFy(fy: string): boolean {
+  return fyStartYear(fy) < fyStartYear(currentFy());
+}
+
 export function invalidateStateDashboardCache(fy?: string): void {
   if (fy) {
     _cache.delete(fy);
@@ -199,14 +215,21 @@ export function invalidateStateDashboardCache(fy?: string): void {
 // dashboard load) and degrade gracefully on a cold cache.
 export function getCachedStateDashboard(fy: string): SecDashboard | null {
   const hit = _cache.get(fy);
-  return hit && Date.now() - hit.loadedAt < TTL_MS ? hit : null;
+  if (!hit) return null;
+  // Closed FYs are held for the process lifetime — they never expire.
+  if (isClosedFy(fy)) return hit;
+  return Date.now() - hit.loadedAt < TTL_MS ? hit : null;
 }
 
 // Never throws. Returns null when the sheet is unreachable or the FY is
 // not configured. Callers degrade gracefully when null is returned.
 export async function loadStateDashboard(fy: string): Promise<SecDashboard | null> {
   const hit = _cache.get(fy);
-  if (hit && Date.now() - hit.loadedAt < TTL_MS) return hit;
+  // Closed FYs: once loaded, the cache entry is permanent for the process
+  // lifetime.  Re-reading a closed-year sheet on every 15-min TTL expiry
+  // causes unnecessary Sheets traffic and produces a fluctuating figure if
+  // the sheet is later edited.  Active FY uses the normal 15-min TTL.
+  if (hit && (isClosedFy(fy) || Date.now() - hit.loadedAt < TTL_MS)) return hit;
   const pending = _inFlight.get(fy);
   if (pending) return pending;
   const p = loadStateDashboardUncached(fy).finally(() => _inFlight.delete(fy));
@@ -735,19 +758,16 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
     // allMonths* covers every month (open+closed, anomalous included).
     totalOrderBooked += m.allMonthsOrderBooked;
     totalSalesReceived += m.allMonthsSalesReceived;
-    // YTD achievement denominator: ALL members' plan (including those who left
-    // during the year) so achievement is measured against the plan as originally
-    // set at the start of the FY.  Left-section members often have blank monthly
-    // plan cells in the sheet (ytdPlan=null); fall back to businessPlan so they
-    // still contribute their target to the denominator.
-    // Numerator: non-left members' closed-month sales only.
+    // YTD achievement: numerator and denominator are symmetric — both sides
+    // cover ALL members (active + left).  Left-section members' actual sales
+    // while active count in the numerator; their plan (businessPlan fallback
+    // when ytdPlan is blank) counts in the denominator.  This gives the true
+    // company-wide achievement rate against the full plan as set at FY start.
     // ytdSalesReceived is null only for truly inactive members (no plan, no
-    // sales) — those contribute 0 to ytdSalesSum, which is correct.
+    // sales at all) — those contribute 0 to both sides, which is correct.
     const planForDenom = m.ytdPlan ?? m.businessPlan;
     if (planForDenom != null) ytdPlanSum += planForDenom;
-    if (!m.isLeft) {
-      ytdSalesSum += m.ytdSalesReceived ?? 0;
-    }
+    ytdSalesSum += m.ytdSalesReceived ?? 0;
   }
 
   const ytdAchievement = ytdPlanSum > 0 ? ytdSalesSum / ytdPlanSum : null;
