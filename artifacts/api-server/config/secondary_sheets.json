@@ -22,17 +22,18 @@
       "comment": "STATE HEAD DASHBOARD(2023-24). Tab: 'ORDER BOOKING REPORT 2023-24'. Per individual team member."
     }
   },
-  "registers": {
+  "registers": {},
+  "frozen_registers": {
+    "comment": "All five FYs fully committed and Gate 2-verified. Sheet IDs preserved for audit reference only. Loader type-casts sheetsConfig as { registers: Record<string,RegisterEntry|null> } so frozen_registers is invisible to it. Re-ingest requires moving the entry back to registers and rebuilding.",
     "2025-26": {
       "sheet_id": "1aNQ2TczEMHcSeB26yKoKayiq1CWc4dXdTQORrgxdl80",
       "column_map_key": "v1",
       "grain": "line",
       "tab": "Data Sheet",
-      "comment": "Secondary order booking register FY2025-26. Tab: 'Data Sheet'. grain=line: individual retailer transaction lines. Also has a state_head_dashboard for the same FY — both sources are loaded independently and serve different purposes (register=line-level, dashboard=pre-aggregated head-month)."
-    }
-  },
-  "frozen_registers": {
-    "comment": "Fully committed and Gate 2-verified FYs. Sheet IDs preserved for audit reference only. Loader will not find these under 'registers' — backfill for these FYs is blocked at config level. Do not re-ingest without a deliberate restore procedure.",
+      "frozen_at": "2026-07-19",
+      "db_rows": 379439,
+      "db_gross_rupees": 4586147122
+    },
     "2024-25": {
       "sheet_id": "1sejEhXCaPXwYZ99mP0tPGo_pA623FQaBN2JBcreIy2g",
       "column_map_key": "v1",
