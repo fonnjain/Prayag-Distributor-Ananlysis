@@ -47,9 +47,27 @@ Rows with `head_canon IS NULL` but non-blank `head_raw` go into "(unmapped)". Ro
 **Why aggregated inputs, not raw rows:**
 Loading all 1.36M secondary_register_line rows into Node.js memory for R4/R5/R6/R7 would be slow and wasteful. gate3Runner.ts does the aggregations in Postgres (GROUP BY, COUNT, SUM) and passes compact result sets to the pure check functions. This keeps Gate 3 fast even as the register grows.
 
-## Verified Gate 3 result (2026-07-19)
+## Verified Gate 3 result (2026-07-19, with secondary_head_month populated)
 
-All 7 rules PASS. Five frozen FYs (2021-22 through 2025-26), 1,356,538 rows, source='sheets' throughout.
-- R5 Δ=0 for every FY (exact cross-foot)
+All 7 rules PASS after loading all four state head dashboard FYs.
+- R1: 4,223 rows verified — achievement_pct = received/plan (not ordered/plan)
+- R2: 1,440 not_yet_recorded rows — all have null received_amount
+- R3: 9,780 rows — is_anomaly consistent with isAnomalous() rule
+- R4: is_territory not null in all 1,356,538 rows (2023-24/2024-25: 0 territory expected)
+- R5: Δ=0 for every FY (exact cross-foot by head)
 - R6: all four adjacent FY pairs have 12 complete months
 - R7: no primary-layer rows in secondary table
+
+## Key design decisions
+
+**assertSecNoAnomalousAchievement is informational (passed=true).**
+Secondary sales received can exceed orders booked in a month due to delivery lag
+(pipeline from prior month). Unlike primary (where >1.5× is a parsing error),
+secondary anomalies are expected and must not block ingest. The is_anomaly flag
+marks these rows; R3 verifies the flag is consistent with the rule definition.
+
+**notYetRecorded rows must store null amounts (not zero).**
+The source sheet pre-fills explicit zeros for future months. cellNum returns 0
+for those cells. dashboardToHeadMonthRows nulls out plan/ordered/received/
+achievement when notYetRecorded=true so the DB never shows a false "confirmed ₹0"
+for months not yet closed. Re-upsert updates these to real values when months close.

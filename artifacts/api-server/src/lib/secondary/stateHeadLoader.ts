@@ -64,6 +64,12 @@ function dashboardToHeadMonthRows(
       const calYear = monthIdx <= 8 ? startYear : startYear + 1;
       const monthLabel = `${MONTH_LABELS_SHORT[monthIdx]}-${String(calYear % 100).padStart(2, "0")}`;
 
+      // When a month is not yet recorded (calendar still open), the sheet
+      // may pre-fill explicit zeros in plan/ordered/sales cells.  Storing
+      // those zeros as 0 implies confirmed figures, which is misleading.
+      // Gate 3 R2 requires received_amount = null for open months so YTD
+      // exclusion is unambiguous.  Plan and ordered are also zeroed out for
+      // the same reason — they are re-upserted once the month closes.
       rows.push({
         fy,
         headRaw: member.name,
@@ -71,11 +77,11 @@ function dashboardToHeadMonthRows(
         stateHead: member.stateHead || null,
         monthLabel,
         monthIdx,
-        planAmount: m.planAmount,
-        orderedAmount: m.orderedAmount,
-        receivedAmount: m.salesAmount,
-        achievementPct,
-        isAnomaly: anomaly,
+        planAmount: notYetRecorded ? null : m.planAmount,
+        orderedAmount: notYetRecorded ? null : m.orderedAmount,
+        receivedAmount: notYetRecorded ? null : m.salesAmount,
+        achievementPct: notYetRecorded ? null : achievementPct,
+        isAnomaly: notYetRecorded ? false : anomaly,
         notYetRecorded,
         sourceSheetId: sheetId,
       });
