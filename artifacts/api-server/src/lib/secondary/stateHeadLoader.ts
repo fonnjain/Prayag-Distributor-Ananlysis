@@ -122,6 +122,7 @@ export async function loadAndPersistStateDashboard(
       anomalies: [],
       errors: [`FY ${fy} is not configured in secondary_sheets.json`],
       netTotal: 0,
+      nullHeadUnattributed: 0,
     };
   }
 
@@ -151,6 +152,7 @@ export async function loadAndPersistStateDashboard(
       anomalies: [],
       errors: [`state head dashboard for FY ${fy} returned null`],
       netTotal: 0,
+      nullHeadUnattributed: 0,
     };
   }
 
@@ -239,5 +241,6 @@ export async function loadAndPersistStateDashboard(
     anomalies,
     errors: [],
     netTotal: 0, // state_head_dashboard has no per-line netAmount
+    nullHeadUnattributed: 0,
   };
 }

@@ -280,6 +280,7 @@ async function main(): Promise<void> {
           anomalies: [],
           errors: [msg],
           netTotal: 0,
+          nullHeadUnattributed: 0,
         });
       }
     }
@@ -314,6 +315,7 @@ async function main(): Promise<void> {
           anomalies: [],
           errors: [msg],
           netTotal: 0,
+          nullHeadUnattributed: 0,
         });
       }
     }

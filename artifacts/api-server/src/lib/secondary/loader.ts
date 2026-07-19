@@ -380,6 +380,7 @@ export async function loadSecRegisterFromSheets(
       anomalies: [],
       errors: [`FY ${fy} secondary register sheet_id is null — update secondary_sheets.json`],
       netTotal: 0,
+      nullHeadUnattributed: 0,
     };
   }
 
@@ -419,6 +420,7 @@ export async function loadSecRegisterFromSheets(
       anomalies: [],
       errors: [msg],
       netTotal: 0,
+      nullHeadUnattributed: 0,
     };
   }
 
@@ -445,6 +447,7 @@ export async function loadSecRegisterFromSheets(
       anomalies: [],
       errors: ["sheet has no tabs"],
       netTotal: 0,
+      nullHeadUnattributed: 0,
     };
   }
 

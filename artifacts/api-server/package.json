@@ -10,6 +10,7 @@
     "test": "vitest run",
     "backfill": "node ./build.mjs && node --enable-source-maps ./dist/backfill.mjs",
     "secondary-backfill": "node ./build.mjs && node --enable-source-maps ./dist/secondary-backfill.mjs",
+    "secondary-gate3": "node ./build.mjs && node --enable-source-maps ./dist/secondary-gate3.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

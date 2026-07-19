@@ -22,4 +22,5 @@
 - [Secondary data layer](secondary-data-layer.md) — tables, sheet IDs, v1 column map corrections (SUBTOTAL/ORDERVALUE/DISTRIBUTOR/SEGMENT/DATE), Gate 1 dry-run row counts, structural validator failures expected.
 - [Secondary register date formats](secondary-register-date-formats.md) — FY2024-25 and FY2025-26 store dates as text "DD-MM-YYYY"; toMonthLabel must handle this branch. Older FYs use Excel serials.
 - [Secondary register pipeline fixes](secondary-register-pipeline.md) — gross/net/discount schema; FY2023-24 all-tabs strategy; sum_by_head_consistent fixed; unmapped_heads structural limitation explained.
-- [Secondary register negative credit notes](secondary-negative-credit-notes.md) — 4 negative Sub-Total lines found in 3 FYs; must resolve before commit.
+- [Secondary register negative credit notes](secondary-negative-credit-notes.md) — 4 credit notes (net_amount < 0, gross stays positive); loaded as-is per Validator 4; 2022-23 outlier gross=1700/net=-66167.
+- [Secondary Gate 3 architecture](secondary-gate3-arch.md) — gate3.ts pure check fns (aggregated inputs), gate3Runner.ts SQL aggregations, CLI secondary-gate3; R1-R3 need secondary_head_month populated first.
