@@ -87,12 +87,12 @@ export function assertSecUnmappedStatesEmpty(
 // investigation. A negative line in an automated ingest almost certainly
 // represents a mis-read cell or a format the parser does not handle.
 export function assertSecNoNegativeAmounts(
-  lines: Pick<InsertSecRegLine, "amount" | "headCanon" | "monthLabel">[],
+  lines: Pick<InsertSecRegLine, "grossAmount" | "headCanon" | "monthLabel">[],
 ): SecIngestAssertion {
-  const negatives = lines.filter((l) => Number(l.amount) < 0);
+  const negatives = lines.filter((l) => Number(l.grossAmount) < 0);
   const samples = negatives
     .slice(0, 3)
-    .map((l) => `${l.headCanon ?? "?"}/${l.monthLabel}: ${l.amount}`);
+    .map((l) => `${l.headCanon ?? "?"}/${l.monthLabel}: ${l.grossAmount}`);
   return {
     name: "no_negative_amounts",
     passed: negatives.length === 0,
@@ -105,36 +105,39 @@ export function assertSecNoNegativeAmounts(
 
 // ── Validator 5: sum_by_head_consistent ───────────────────────────────────────
 //
-// sum(amount) broken down by headCanon must equal the grand total within ±1
-// rupee. Discrepancies indicate dropped rows (unmapped heads with no canon)
-// or NaN amounts that slipped through.
+// sum(grossAmount) broken down by headCanon must equal the grand total within
+// ±1 rupee. Rows that have a headRaw but no headCanon are routed to an
+// "(unmapped)" bucket — this keeps the cross-foot closed regardless of TM
+// mapping coverage. The unmapped_heads_empty validator (validator 2) separately
+// reports which raw head names are missing from head_alias.json.
+//
+// Failure conditions:
+//   • non-finite amount values (data corruption)
+//   • delta > 1 rupee between grand total and by-head total (impossible if
+//     every row goes into exactly one bucket, so this only fires on NaN rows)
 export function assertSecSumByHeadConsistent(
-  lines: Pick<InsertSecRegLine, "amount" | "headCanon" | "headRaw">[],
+  lines: Pick<InsertSecRegLine, "grossAmount" | "headCanon" | "headRaw">[],
 ): SecIngestAssertion {
   let grand = 0;
   let badAmounts = 0;
   const byHead = new Map<string, number>();
-  let droppedHead = 0;
 
   for (const line of lines) {
-    const amt = Number(line.amount);
+    const amt = Number(line.grossAmount);
     if (!Number.isFinite(amt)) { badAmounts++; continue; }
     grand += amt;
-    if (line.headCanon) {
-      byHead.set(line.headCanon, (byHead.get(line.headCanon) ?? 0) + amt);
-    } else if (line.headRaw?.trim()) {
-      droppedHead++;
-    } else {
-      byHead.set("(blank)", (byHead.get("(blank)") ?? 0) + amt);
-    }
+    // Route every row into exactly one bucket so cross-foot always closes.
+    // Unmapped heads go into "(unmapped)" — the unmapped_heads_empty validator
+    // reports the specific raw names that need to be added to head_alias.json.
+    const key = line.headCanon ?? (line.headRaw?.trim() ? "(unmapped)" : "(blank)");
+    byHead.set(key, (byHead.get(key) ?? 0) + amt);
   }
 
   const headSum = [...byHead.values()].reduce((a, b) => a + b, 0);
   const delta = Math.abs(headSum - grand);
-  const passed = badAmounts === 0 && droppedHead === 0 && delta <= 1;
+  const passed = badAmounts === 0 && delta <= 1;
   const problems: string[] = [];
   if (badAmounts > 0) problems.push(`${badAmounts} non-numeric amounts`);
-  if (droppedHead > 0) problems.push(`${droppedHead} rows lost head_canon despite raw value`);
   if (delta > 1) problems.push(`by_head sum off by ${Math.round(delta)} rupees`);
 
   return {

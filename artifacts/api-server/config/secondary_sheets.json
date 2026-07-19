@@ -41,8 +41,8 @@
       "sheet_id": "1c5ZmmcKUbp9hvW0aS_HQjkjL-FJyyZ2P8Orbc0uaPbY",
       "column_map_key": "v1",
       "grain": "line",
-      "tab": "Data Sheet",
-      "comment": "FY2023-24 secondary register. Tab: 'Data Sheet'. grain=line: individual retailer transaction lines (confirmed from actual sheet — rows have RET# IDs and Cat.No, not pre-aggregated subtotals)."
+      "tab_strategy": "all",
+      "comment": "FY2023-24 secondary register. tab_strategy=all: reads all tabs and concatenates rows — this workbook may have data split across multiple month-specific tabs (April-only data seen on 'Data Sheet'; other months may live in separate tabs). Subsequent tabs' header rows are auto-skipped by parseRows (amount cell is a string, fails toNumber → blankRowsSkipped)."
     },
     "2022-23": {
       "sheet_id": "1wj96uhny-eBC2umGa8bP9M1j1T9YEt-DsThduzoC-2c",

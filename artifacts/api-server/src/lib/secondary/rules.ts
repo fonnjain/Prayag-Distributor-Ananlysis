@@ -122,7 +122,7 @@ export function crossFootByHead(lines: InsertSecRegLine[]): CrossFootResult {
   let grand = 0;
   const byHead = new Map<string, number>();
   for (const line of lines) {
-    const amt = Number(line.amount);
+    const amt = Number(line.grossAmount);
     grand += amt;
     const key = line.headCanon ?? "(blank)";
     byHead.set(key, (byHead.get(key) ?? 0) + amt);

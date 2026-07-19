@@ -27,7 +27,8 @@ export type SecColMap = {
   brand: number;
   month: number;
   fy: number;
-  amount: number;
+  grossAmount: number;  // Order Value column (before discount)
+  discount: number;     // Discount % column (may be blank on continuation rows)
   qty: number;
 };
 
@@ -114,7 +115,9 @@ export type SecParsedRow = {
   stateRaw: string | null;
   customer: string | null;       // null for sub-total grain FYs
   brandRaw: string | null;
-  amount: number;
+  grossAmount: number;           // Order Value before discount
+  netAmount: number | null;      // grossAmount × (1 - discountPct/100); filled by loader after carry
+  discountPct: number | null;    // as parsed from cell (null when blank); loader carries across order rows
   qty: number | null;
 };
 

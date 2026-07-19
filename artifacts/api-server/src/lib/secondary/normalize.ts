@@ -32,6 +32,22 @@ export function toText(v: CellValue): string | null {
   return s === "" ? null : s;
 }
 
+// Parse a discount percentage from a cell value.
+// Handles:
+//   number: 33.9 → 33.9
+//   string "33.90 (%)": extract leading numeric part → 33.9
+//   string "48": 48
+//   blank / null: null
+export function parseDiscountPct(v: CellValue): number | null {
+  if (v == null || v === "") return null;
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (v instanceof Date) return null;
+  const m = String(v).match(/^(\d+(?:\.\d+)?)/);
+  if (!m) return null;
+  const n = parseFloat(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
 const MONTH_NAMES_3 = [
   "Jan","Feb","Mar","Apr","May","Jun",
   "Jul","Aug","Sep","Oct","Nov","Dec",
@@ -120,8 +136,7 @@ const STATE_MAP: Map<string, string> = new Map(
 //
 // Rows whose first five cells contain a known sub-total marker token are
 // summary/aggregation rows that must NOT be parsed as data lines — doing so
-// would double-count amounts. Particularly important for FY2023-24 (subtotal
-// grain), but applied to all FYs for safety.
+// would double-count amounts. Applied to all FYs for safety.
 //
 // Tokens come from secondary_column_maps.json v1.sub_total_skip_tokens.
 // They are already in normalised form (uppercase, non-alphanumeric stripped).
@@ -158,7 +173,7 @@ function isSecHeaderRow(values: CellValue[]): boolean {
 }
 
 // Map a header row to column indices using the v1 column map config.
-// Returns null when required columns (amount) cannot be found.
+// Returns null when the mandatory gross_amount column cannot be found.
 // grain is passed through from the FY config and stored on the SecColMap so
 // downstream callers (loader, Gate 1 report) know the data grain for this FY.
 export function mapSecColumns(
@@ -180,8 +195,8 @@ export function mapSecColumns(
     return -1;
   };
 
-  const amount = find(version.amount);
-  if (amount < 0) return null; // amount is the mandatory anchor
+  const grossAmount = find(version.gross_amount);
+  if (grossAmount < 0) return null; // gross_amount is the mandatory anchor
 
   return {
     headerRowNumber,
@@ -192,7 +207,8 @@ export function mapSecColumns(
     brand: find(version.brand),
     month: find(version.month),
     fy: find(version.fy),
-    amount,
+    grossAmount,
+    discount: find(version.discount),
     qty: find(version.qty),
   };
 }
@@ -236,11 +252,11 @@ export function computeSecLineUid(
   stateRaw: string | null,
   customer: string | null,
   brandRaw: string | null,
-  amount: number,
+  grossAmount: number,
   occurrence: number,
 ): string {
   const payload = [fy, monthLabel, headRaw ?? "", stateRaw ?? "",
-    customer ?? "", brandRaw ?? "", String(amount), String(occurrence)].join("|");
+    customer ?? "", brandRaw ?? "", String(grossAmount), String(occurrence)].join("|");
   return createHash("sha1").update(payload).digest("hex");
 }
 
@@ -291,25 +307,35 @@ export function isTerritory(headCanon: string | null, stateRaw: string | null): 
 // ── Row parsing ───────────────────────────────────────────────────────────────
 
 // Parse one raw register row into a SecParsedRow.
-// Returns null for rows that have no amount (header repeats, blank rows, etc.).
+// Returns null for rows that have no gross_amount (header repeats, blank rows, etc.).
 // Sub-total rows are detected upstream (isSubTotalRow) before this is called.
+//
+// discountPct in the returned row is the raw cell value (null when the cell is
+// blank — typically continuation rows in FY2021-22 through FY2023-24).
+// The caller (parseRows in loader.ts) carries the last non-null discountPct
+// across order rows and backfills parsed.discountPct + parsed.netAmount.
 export function parseSecRegisterRow(
   cells: CellValue[],
   cols: SecColMap,
   fy: string,
 ): SecParsedRow | null {
-  const amount = toNumber(cols.amount >= 0 ? cells[cols.amount] : null);
-  if (amount == null || !Number.isFinite(amount)) return null;
+  const grossAmount = toNumber(cols.grossAmount >= 0 ? cells[cols.grossAmount] : null);
+  if (grossAmount == null || !Number.isFinite(grossAmount)) return null;
 
   const rawMonth = cols.month >= 0 ? cells[cols.month] : null;
   const monthLabel = toMonthLabel(rawMonth, fy);
   if (!monthLabel) return null;
 
   // For subtotal-grain FYs, customer is expected to be null; the uid still
-  // differentiates rows by head/month/brand/amount/occurrence.
+  // differentiates rows by head/month/brand/grossAmount/occurrence.
   const customer = (cols.grain === "subtotal" || cols.customer < 0)
     ? null
     : toText(cells[cols.customer]);
+
+  // Discount: present on order-header rows; blank on continuation rows.
+  // The loader carries the last non-null value across rows in the same order.
+  const rawDiscount = cols.discount >= 0 ? cells[cols.discount] : null;
+  const discountPct = parseDiscountPct(rawDiscount);
 
   return {
     fy,
@@ -318,13 +344,17 @@ export function parseSecRegisterRow(
     stateRaw: cols.state >= 0 ? toText(cells[cols.state]) : null,
     customer,
     brandRaw: cols.brand >= 0 ? toText(cells[cols.brand]) : null,
-    amount,
+    grossAmount,
+    netAmount: null,    // filled in by loader.parseRows after discount carry
+    discountPct,        // null when blank (continuation rows); loader carries
     qty: cols.qty >= 0 ? toNumber(cells[cols.qty]) : null,
   };
 }
 
 // Convert a SecParsedRow to an InsertSecRegLine, updating occurrence counter
 // and unmapped report in place.
+// The row's netAmount and discountPct must already be resolved by the loader
+// before this is called.
 export function toSecRegLine(
   row: SecParsedRow,
   counter: SecOccurrenceCounter,
@@ -342,7 +372,7 @@ export function toSecRegLine(
     row.fy, row.monthLabel,
     row.headRaw ?? "", row.stateRaw ?? "",
     row.customer ?? "", row.brandRaw ?? "",
-    String(row.amount),
+    String(row.grossAmount),
   ].join("|");
   const occ = counter.next(naturalKey);
 
@@ -351,7 +381,7 @@ export function toSecRegLine(
       row.fy, row.monthLabel,
       row.headRaw, row.stateRaw,
       row.customer, row.brandRaw,
-      row.amount, occ,
+      row.grossAmount, occ,
     ),
     fy: row.fy,
     monthLabel: row.monthLabel,
@@ -362,7 +392,9 @@ export function toSecRegLine(
     customer: row.customer,
     brandRaw: row.brandRaw,
     brandCanon,
-    amount: String(row.amount),
+    grossAmount: String(row.grossAmount),
+    netAmount: row.netAmount != null ? String(row.netAmount) : null,
+    discountPct: row.discountPct != null ? String(row.discountPct) : null,
     qty: row.qty != null ? String(row.qty) : null,
     isTerritory: isTerritory(headCanon, row.stateRaw),
     source,

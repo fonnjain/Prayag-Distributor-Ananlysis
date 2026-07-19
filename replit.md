@@ -43,6 +43,13 @@ A mobile-first dashboard over live Google Sheets sales data: sales trends, growt
 - DB schema (source of truth): `lib/db/src/schema/dashboardSnapshot.ts` (table `dashboard_snapshots`) and `lib/db/src/schema/salesRegister.ts` (`sale_line`, `item_master`, `cost_master`, `ingest_run`)
 - API contract (source of truth): `lib/api-spec/openapi.yaml` — regenerate hooks/schemas with `pnpm --filter @workspace/api-spec run codegen`
 
+## Secondary data reporting rule
+
+- **Dashboard is the sole source of headline order booking and sales figures** for all secondary (distributor→retailer) reporting. The State Head Dashboard (aggregated plan/ordered/received per head per month) drives all KPIs shown to users.
+- **Register is drill-down only.** The line-level `secondary_register_line` table is for customer/SKU/month analysis — it must never be surfaced as a top-line number.
+- **Register-to-dashboard reconciliation runs monthly**, not annually. Run a dry-run Gate 1 after each month closes to verify gross totals are consistent with dashboard figures.
+- **Gross vs net.** Each register row stores `gross_amount` (Order Value before trade discount) and `net_amount` (after discount). The sum of `net_amount` across a month/head should match the dashboard's `ordered_amount` for that period. Use `gross_amount` for market-size analysis; use `net_amount` (or dashboard) for achievement reporting.
+
 ## Architecture decisions
 
 - Dashboard data is stored as immutable snapshots (jsonb `data` + `manifest`) in `dashboard_snapshots`; each sync appends a row and the latest is served. This gives free history and a graceful fallback.

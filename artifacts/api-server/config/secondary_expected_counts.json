@@ -1,8 +1,9 @@
 {
-  "comment": "Expected row counts for secondary register lines per fiscal year, used by the row_count_fy validator. Set to null for FYs where the actual count has not yet been established (loader will emit a warning but not fail). Update these counts once the real registers have been ingested and verified. State Head Dashboard FYs (2025-26, 2026-27) are not counted here — those are validated by the all_months_present and anomaly validators instead.",
+  "comment": "Expected row counts (post-dedup unique lines) for secondary register lines per fiscal year, used by the row_count_fy validator. Set to null for FYs where the actual count has not yet been established. Update after first verified ingest. FY2023-24 count is post-dedup (Data Sheet + Data-Sheet tabs; June tab is a copy removed by in-memory dedup). FY2024-25 and FY2025-26 use a single Data Sheet tab (no dedup needed). State Head Dashboard FYs are not counted here — those are validated by the all_months_present and anomaly validators instead.",
   "registers": {
-    "2024-25": null,
-    "2023-24": null,
+    "2025-26": 379439,
+    "2024-25": 335256,
+    "2023-24": 261537,
     "2022-23": null,
     "2021-22": null
   }

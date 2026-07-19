@@ -10,7 +10,8 @@
       "brand": ["BRAND", "GROUP", "PRODUCTGROUP", "CATEGORY", "SEGMENT"],
       "month": ["MONTH", "M0NTH", "DATE"],
       "fy": ["FYYEAR", "FY"],
-      "amount": ["AMOUNT", "SECONDARYAMOUNT", "NETAMOUNT", "VALUE", "SUBTOTAL", "ORDERVALUE"],
+      "gross_amount": ["ORDERVALUE", "AMOUNT", "NETAMOUNT", "SECONDARYAMOUNT", "VALUE"],
+      "discount": ["DISCOUNT"],
       "qty": ["QTY", "QUANTITY"],
       "header_anchor_tokens": ["AMOUNT", "SECONDARYAMOUNT", "NETAMOUNT", "SUBTOTAL", "ORDERVALUE"],
       "sub_total_skip_tokens": [

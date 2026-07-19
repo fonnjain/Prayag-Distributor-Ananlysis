@@ -19,9 +19,14 @@ import { z } from "zod/v4";
 // Source: per-FY secondary register spreadsheets (FY2021-22 → FY2025-26).
 // Distinct from primary sale_line — the two must NEVER be summed together.
 //
-// line_uid: sha1 of (fy|month_label|head_raw|state_raw|customer|brand_raw|amount|occurrence).
+// line_uid: sha1 of (fy|month_label|head_raw|state_raw|customer|brand_raw|gross_amount|occurrence).
 // Occurrence counter counts across all rows for the same natural key in
 // source order, preserving legitimate duplicate order lines.
+//
+// gross_amount: Order Value as written (before distributor discount).
+// net_amount:   gross_amount × (1 - discount_pct/100). Null when no discount info.
+// discount_pct: distributor trade discount %, carried from order-header row to
+//               continuation rows for FY2021-22 through FY2023-24.
 export const secondaryRegisterLines = pgTable(
   "secondary_register_line",
   {
@@ -35,7 +40,9 @@ export const secondaryRegisterLines = pgTable(
     customer: text("customer"),
     brandRaw: text("brand_raw"),                  // product brand/group as written in source
     brandCanon: text("brand_canon"),              // canonical brand after alias mapping
-    amount: numeric("amount").notNull(),
+    grossAmount: numeric("gross_amount").notNull(), // Order Value before discount
+    netAmount: numeric("net_amount"),               // after discount; null if discount unknown
+    discountPct: numeric("discount_pct"),           // distributor trade discount %
     qty: numeric("qty"),
     isTerritory: boolean("is_territory"),
     source: text("source").notNull(),             // 'sheets' | 'xlsx_backfill'

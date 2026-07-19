@@ -21,3 +21,4 @@
 - [Customer Master schema and routes](customer-master-schema.md) — patch as `Record<string,any>`; `String(req.params.id)` required for drizzle eq(); generated key is `getGetCustomerMismatchCountQueryKey`; `as any` for useListCustomerMaster query option.
 - [Secondary data layer](secondary-data-layer.md) — tables, sheet IDs, v1 column map corrections (SUBTOTAL/ORDERVALUE/DISTRIBUTOR/SEGMENT/DATE), Gate 1 dry-run row counts, structural validator failures expected.
 - [Secondary register date formats](secondary-register-date-formats.md) — FY2024-25 and FY2025-26 store dates as text "DD-MM-YYYY"; toMonthLabel must handle this branch. Older FYs use Excel serials.
+- [Secondary register pipeline fixes](secondary-register-pipeline.md) — gross/net/discount schema; FY2023-24 all-tabs strategy; sum_by_head_consistent fixed; unmapped_heads structural limitation explained.
