@@ -217,14 +217,18 @@ export async function loadAndPersistStateDashboard(
     "sec: state head dashboard loaded",
   );
 
+  // For state_head_dashboard the meaningful unit is head-month rows (1 sheet
+  // member row expands to up to 12 month rows). rowsRead reflects expanded
+  // rows so the row-accounting identity (data + subtotal + blank = read) holds.
+  // The raw sheet row count is already logged by stateDashboard.ts.
   return {
     fy,
     source: "state_head_dashboard",
     grain: "line",
-    rowsRead: dashboard.rowsRead,
+    rowsRead: headMonthRows.length,
     dataRows: headMonthRows.length,
     subTotalRowsExcluded: 0,
-    blankRowsSkipped: dashboard.rowsRead - headMonthRows.length,
+    blankRowsSkipped: 0,
     rowsToInsert: headMonthRows.length,
     existingInDb: 0,
     crossFoot: null, // pre-aggregated source; no raw lines to cross-foot

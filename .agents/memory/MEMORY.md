@@ -19,3 +19,4 @@
 - [Drizzle GROUP BY bare-column trap](drizzle-groupby-bare-column.md) — Postgres rejects bare column refs in SELECT when GROUP BY uses a wrapped expression; use max(col) or repeat the exact expression.
 - [FY2026-27 register config](prayag-register-sheets-config.md) — 2026-27 register is SALE SHEET 26-27 (19LQGpkb…); sap_source["2026-27"] is the raw SAP export (19Oj6P2c…) for the Data Health lag check only; open FY auto-syncs every 6h.
 - [Customer Master schema and routes](customer-master-schema.md) — patch as `Record<string,any>`; `String(req.params.id)` required for drizzle eq(); generated key is `getGetCustomerMismatchCountQueryKey`; `as any` for useListCustomerMaster query option.
+- [Secondary data layer](secondary-data-layer.md) — tables, sheet IDs, v1 column map corrections (SUBTOTAL/ORDERVALUE/DISTRIBUTOR/SEGMENT/DATE), Gate 1 dry-run row counts, structural validator failures expected.

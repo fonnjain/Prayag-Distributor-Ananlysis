@@ -358,6 +358,18 @@ export async function loadSecRegisterFromSheets(
     }
   });
 
+  logger.info(
+    {
+      fy,
+      tabName,
+      totalRowsFetched: allRows.length,
+      first5Rows: allRows.slice(0, 5).map((r) =>
+        r.slice(0, 12).map((c) => (c == null ? "" : String(c))).join(" | "),
+      ),
+    },
+    "sec: register raw rows sample (pre-parse)",
+  );
+
   const result = parseRows(allRows, fy, "sheets", mapVersion, grain);
   const { lines, rowsRead, dataRows, subTotalRowsExcluded, blankRowsSkipped, fyCounts, unmapped, errors } = result;
 
