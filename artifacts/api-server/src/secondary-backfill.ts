@@ -93,6 +93,15 @@ function printSummary(summary: SecDryRunSummary, prefix = ""): void {
     `\n${p}FY ${summary.fy}  source=${summary.source}  grain=${summary.grain}` +
     (summary.tabStrategy != null ? `  tab_strategy=${summary.tabStrategy}` : ""),
   );
+  if (summary.tabsAvailable != null && summary.tabRead != null) {
+    const readInfo = summary.tabRead === "all"
+      ? `all ${summary.tabsAvailable.length} tab(s)`
+      : `"${summary.tabRead}"`;
+    console.log(
+      `  workbook_tabs=[${summary.tabsAvailable.join(", ")}]` +
+      `  tab_read=${readInfo}`,
+    );
+  }
 
   // Row accounting
   console.log(

@@ -89,30 +89,39 @@ export function assertSecUnmappedStatesEmpty(
 export function assertSecNoNegativeAmounts(
   lines: Pick<InsertSecRegLine, "grossAmount" | "netAmount" | "headCanon" | "monthLabel">[],
 ): SecIngestAssertion {
-  // Check gross (Order Value) — always non-null; a negative here is almost
-  // certainly a mis-read cell or an accounting-notation negative "(1 234.00)".
+  // Negative gross (Order Value) is a hard error — almost certainly a mis-read
+  // cell or accounting-notation negative "(1 234.00)" that the parser did not
+  // handle.  These must be fixed in source before commit.
   const negGross = lines.filter((l) => Number(l.grossAmount) < 0);
-  // Check net (Sub Total) — null on continuation rows (expected); a negative
-  // non-null value means a credit-note Sub Total slipped through parsing.
+
+  // Negative net (Sub Total) are genuine credit notes: the distributor received
+  // a credit against a prior order, so the Sub Total cell is negative while
+  // Order Value is still positive.  Decision: load with sign (store as-is in
+  // net_amount) and treat as informational — they do not block Gate 1.
   const negNet = lines.filter((l) => l.netAmount != null && Number(l.netAmount) < 0);
 
-  const problems: string[] = [];
-  if (negGross.length > 0) {
-    const s = negGross
-      .slice(0, 3)
-      .map((l) => `${l.headCanon ?? "?"}/${l.monthLabel}: gross=${l.grossAmount}`);
-    problems.push(`${negGross.length} negative gross: ${s.join("; ")}`);
-  }
-  if (negNet.length > 0) {
-    const s = negNet
-      .slice(0, 3)
-      .map((l) => `${l.headCanon ?? "?"}/${l.monthLabel}: net=${l.netAmount}`);
-    problems.push(`${negNet.length} negative Sub-Total: ${s.join("; ")}`);
+  const parts: string[] = [];
+  if (negGross.length === 0 && negNet.length === 0) {
+    parts.push("none (gross and net)");
+  } else {
+    if (negGross.length > 0) {
+      const s = negGross
+        .slice(0, 3)
+        .map((l) => `${l.headCanon ?? "?"}/${l.monthLabel}: gross=${l.grossAmount}`);
+      parts.push(`${negGross.length} negative gross (ERROR): ${s.join("; ")}`);
+    }
+    if (negNet.length > 0) {
+      const s = negNet
+        .slice(0, 3)
+        .map((l) => `${l.headCanon ?? "?"}/${l.monthLabel}: net=${l.netAmount}`);
+      parts.push(`${negNet.length} credit note(s) loaded with sign: ${s.join("; ")}`);
+    }
   }
   return {
     name: "no_negative_amounts",
-    passed: problems.length === 0,
-    detail: problems.length === 0 ? "none (gross and net)" : problems.join("; "),
+    // Only negative gross blocks Gate 1; negative net is informational.
+    passed: negGross.length === 0,
+    detail: parts.join("; "),
   };
 }
 
@@ -284,14 +293,30 @@ export function assertSecControlCellMatches(
       );
     }
   }
-  const grossLabel = controlGross != null ? `gross=${Math.round(controlGross).toLocaleString("en-IN")}` : "";
-  const netLabel = controlNet != null ? `net=${Math.round(controlNet).toLocaleString("en-IN")}` : "";
-  const labels = [grossLabel, netLabel].filter(Boolean).join(", ");
+  // Build per-column delta lines for the PASS detail so the exact-rupee
+  // comparison is visible even on success.
+  const matchLines: string[] = [];
+  if (controlGross != null) {
+    const delta = Math.abs(computedGross - controlGross);
+    matchLines.push(
+      `gross: computed=${Math.round(computedGross).toLocaleString("en-IN")}` +
+      ` sheet=${Math.round(controlGross).toLocaleString("en-IN")}` +
+      ` delta=\u20b9${Math.round(delta)}`,
+    );
+  }
+  if (controlNet != null) {
+    const delta = Math.abs(computedNet - controlNet);
+    matchLines.push(
+      `net: computed=${Math.round(computedNet).toLocaleString("en-IN")}` +
+      ` sheet=${Math.round(controlNet).toLocaleString("en-IN")}` +
+      ` delta=\u20b9${Math.round(delta)}`,
+    );
+  }
   return {
     name: "control_cell_matches",
     passed: problems.length === 0,
     detail: problems.length === 0
-      ? `matches sheet grand-total row (${labels})`
+      ? `matches sheet grand-total row — ${matchLines.join("; ")}`
       : `sheet grand-total mismatch: ${problems.join("; ")}`,
   };
 }

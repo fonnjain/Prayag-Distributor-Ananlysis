@@ -102,6 +102,11 @@ export type SecDryRunSummary = {
   // Register loaders only: "first" = single named tab, "all" = all tabs read
   // and deduplicated (FY2023-24 only).  Absent for state_head_dashboard source.
   tabStrategy?: "first" | "all";
+  // All tab titles found in the workbook (register loaders only).
+  tabsAvailable?: string[];
+  // The tab(s) actually read: single name for tabStrategy="first", "all" for
+  // tabStrategy="all".  Absent for state_head_dashboard source.
+  tabRead?: string;
 };
 
 export type AnomalySummary = {

@@ -699,5 +699,7 @@ export async function loadSecRegisterFromSheets(
     errors,
     netTotal: computedNet,
     tabStrategy,
+    tabsAvailable: tabs.map((t) => t.title),
+    tabRead: tabStrategy === "all" ? "all" : (tabsToRead[0] ?? ""),
   };
 }
