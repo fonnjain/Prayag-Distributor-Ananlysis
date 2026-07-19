@@ -96,6 +96,12 @@ export type SecDryRunSummary = {
   unmapped: SecUnmappedReport;
   anomalies: AnomalySummary[];
   errors: string[];
+  // SUM(net_amount ignoring NULLs) across all data lines; equals the Sub Total
+  // column sum.  0 for state_head_dashboard source (no per-line netAmount).
+  netTotal: number;
+  // Register loaders only: "first" = single named tab, "all" = all tabs read
+  // and deduplicated (FY2023-24 only).  Absent for state_head_dashboard source.
+  tabStrategy?: "first" | "all";
 };
 
 export type AnomalySummary = {

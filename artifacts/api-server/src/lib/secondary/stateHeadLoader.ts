@@ -121,6 +121,7 @@ export async function loadAndPersistStateDashboard(
       unmapped: { unmapped_heads: {}, unmapped_states: {}, unmapped_brands: {} },
       anomalies: [],
       errors: [`FY ${fy} is not configured in secondary_sheets.json`],
+      netTotal: 0,
     };
   }
 
@@ -149,6 +150,7 @@ export async function loadAndPersistStateDashboard(
       unmapped: { unmapped_heads: {}, unmapped_states: {}, unmapped_brands: {} },
       anomalies: [],
       errors: [`state head dashboard for FY ${fy} returned null`],
+      netTotal: 0,
     };
   }
 
@@ -236,5 +238,6 @@ export async function loadAndPersistStateDashboard(
     unmapped: { unmapped_heads: {}, unmapped_states: {}, unmapped_brands: {} },
     anomalies,
     errors: [],
+    netTotal: 0, // state_head_dashboard has no per-line netAmount
   };
 }

@@ -153,6 +153,25 @@ function parseRows(
     return { lines, grain, rowsRead, dataRows: 0, subTotalRowsExcluded, blankRowsSkipped, controlGross, controlNet, fyCounts, unmapped, errors };
   }
 
+  // Scan pre-header rows (indices 0 .. headerRowNumber-2) for control totals.
+  // Some workbooks place a sheet-level grand-total aggregation row above the
+  // column-header row.  FY2024-25: Order Value + Sub Total present;
+  // FY2025-26: Sub Total column only (Order Value cell is blank).
+  // These rows are excluded from data processing by the slice below, so the
+  // amounts must be captured here before the slice.
+  for (let i = 0; i < cols.headerRowNumber - 1; i++) {
+    const preRow = rawRows[i];
+    if (!preRow) continue;
+    if (cols.grossAmount >= 0) {
+      const cg = Number(preRow[cols.grossAmount] ?? NaN);
+      if (Number.isFinite(cg) && cg > 0) controlGross = (controlGross ?? 0) + cg;
+    }
+    if (cols.netAmount >= 0) {
+      const cn = Number(preRow[cols.netAmount] ?? NaN);
+      if (Number.isFinite(cn) && cn > 0) controlNet = (controlNet ?? 0) + cn;
+    }
+  }
+
   // Rows after the header row
   const dataRows = rawRows.slice(cols.headerRowNumber);
 
@@ -318,6 +337,8 @@ export async function loadSecRegisterFromXlsx(
     unmapped,
     anomalies: [],
     errors,
+    netTotal: computedNet,
+    tabStrategy: "first" as const,
   };
 }
 
@@ -353,6 +374,7 @@ export async function loadSecRegisterFromSheets(
       unmapped: emptySecUnmapped(),
       anomalies: [],
       errors: [`FY ${fy} secondary register sheet_id is null — update secondary_sheets.json`],
+      netTotal: 0,
     };
   }
 
@@ -391,6 +413,7 @@ export async function loadSecRegisterFromSheets(
       unmapped: emptySecUnmapped(),
       anomalies: [],
       errors: [msg],
+      netTotal: 0,
     };
   }
 
@@ -416,6 +439,7 @@ export async function loadSecRegisterFromSheets(
       unmapped: emptySecUnmapped(),
       anomalies: [],
       errors: ["sheet has no tabs"],
+      netTotal: 0,
     };
   }
 
@@ -462,6 +486,7 @@ export async function loadSecRegisterFromSheets(
         unmapped: emptySecUnmapped(),
         anomalies: [],
         errors: ["no matching tab found"],
+        netTotal: 0,
       };
     }
     tabsToRead = [match];
@@ -672,5 +697,7 @@ export async function loadSecRegisterFromSheets(
     unmapped,
     anomalies: [],
     errors,
+    netTotal: computedNet,
+    tabStrategy,
   };
 }

@@ -90,7 +90,8 @@ function passLabel(passed: boolean): string {
 function printSummary(summary: SecDryRunSummary, prefix = ""): void {
   const p = prefix ? `${prefix} ` : "";
   console.log(
-    `\n${p}FY ${summary.fy}  source=${summary.source}  grain=${summary.grain}`,
+    `\n${p}FY ${summary.fy}  source=${summary.source}  grain=${summary.grain}` +
+    (summary.tabStrategy != null ? `  tab_strategy=${summary.tabStrategy}` : ""),
   );
 
   // Row accounting
@@ -120,6 +121,18 @@ function printSummary(summary: SecDryRunSummary, prefix = ""): void {
     const cf = summary.crossFoot;
     console.log(
       `  [${passLabel(cf.passed)}] cross_foot: grand=${cf.grandTotal.toLocaleString("en-IN")}  by_head=${cf.byHeadSum.toLocaleString("en-IN")}  delta=${cf.deltaRupees} rupees  heads=${cf.headCount}`,
+    );
+  }
+
+  // Net total — SUM(net_amount ignoring NULLs) = Sub Total column sum.
+  // Shows what portion of gross order value survived discount.
+  if (summary.netTotal > 0) {
+    const grossBase = summary.crossFoot?.grandTotal ?? 0;
+    console.log(
+      `  net_total=${summary.netTotal.toLocaleString("en-IN")}` +
+      (grossBase > 0
+        ? `  (${((summary.netTotal / grossBase) * 100).toFixed(1)}% of gross)`
+        : ""),
     );
   }
 
@@ -256,6 +269,7 @@ async function main(): Promise<void> {
           unmapped: { unmapped_heads: {}, unmapped_states: {}, unmapped_brands: {} },
           anomalies: [],
           errors: [msg],
+          netTotal: 0,
         });
       }
     }
@@ -289,6 +303,7 @@ async function main(): Promise<void> {
           unmapped: { unmapped_heads: {}, unmapped_states: {}, unmapped_brands: {} },
           anomalies: [],
           errors: [msg],
+          netTotal: 0,
         });
       }
     }
@@ -306,6 +321,17 @@ async function main(): Promise<void> {
   if (isGate1) {
     const gate1 = buildGate1Report(summaries);
     printGate1Summary(gate1);
+    // 5-year net total across all register FYs (net_amount = Sub Total column sum)
+    const g1NetTotal = summaries.reduce((s, r) => s + r.netTotal, 0);
+    const g1GrossTotal = summaries.reduce((s, r) => s + (r.crossFoot?.grandTotal ?? 0), 0);
+    if (g1NetTotal > 0) {
+      console.log(
+        `\n  5yr net_total=${g1NetTotal.toLocaleString("en-IN")}` +
+        (g1GrossTotal > 0
+          ? `  (${((g1NetTotal / g1GrossTotal) * 100).toFixed(1)}% of 5yr gross ${g1GrossTotal.toLocaleString("en-IN")})`
+          : ""),
+      );
+    }
     try {
       writeFileSync(args.gate1ReportPath!, JSON.stringify(gate1, null, 2), "utf8");
       console.log(`\nGate 1 report written to: ${args.gate1ReportPath}`);

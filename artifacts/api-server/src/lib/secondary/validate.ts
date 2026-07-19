@@ -87,19 +87,32 @@ export function assertSecUnmappedStatesEmpty(
 // investigation. A negative line in an automated ingest almost certainly
 // represents a mis-read cell or a format the parser does not handle.
 export function assertSecNoNegativeAmounts(
-  lines: Pick<InsertSecRegLine, "grossAmount" | "headCanon" | "monthLabel">[],
+  lines: Pick<InsertSecRegLine, "grossAmount" | "netAmount" | "headCanon" | "monthLabel">[],
 ): SecIngestAssertion {
-  const negatives = lines.filter((l) => Number(l.grossAmount) < 0);
-  const samples = negatives
-    .slice(0, 3)
-    .map((l) => `${l.headCanon ?? "?"}/${l.monthLabel}: ${l.grossAmount}`);
+  // Check gross (Order Value) — always non-null; a negative here is almost
+  // certainly a mis-read cell or an accounting-notation negative "(1 234.00)".
+  const negGross = lines.filter((l) => Number(l.grossAmount) < 0);
+  // Check net (Sub Total) — null on continuation rows (expected); a negative
+  // non-null value means a credit-note Sub Total slipped through parsing.
+  const negNet = lines.filter((l) => l.netAmount != null && Number(l.netAmount) < 0);
+
+  const problems: string[] = [];
+  if (negGross.length > 0) {
+    const s = negGross
+      .slice(0, 3)
+      .map((l) => `${l.headCanon ?? "?"}/${l.monthLabel}: gross=${l.grossAmount}`);
+    problems.push(`${negGross.length} negative gross: ${s.join("; ")}`);
+  }
+  if (negNet.length > 0) {
+    const s = negNet
+      .slice(0, 3)
+      .map((l) => `${l.headCanon ?? "?"}/${l.monthLabel}: net=${l.netAmount}`);
+    problems.push(`${negNet.length} negative Sub-Total: ${s.join("; ")}`);
+  }
   return {
     name: "no_negative_amounts",
-    passed: negatives.length === 0,
-    detail:
-      negatives.length === 0
-        ? "none"
-        : `${negatives.length} negative amounts, e.g. ${samples.join("; ")}`,
+    passed: problems.length === 0,
+    detail: problems.length === 0 ? "none (gross and net)" : problems.join("; "),
   };
 }
 
