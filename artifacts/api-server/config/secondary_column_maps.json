@@ -1,0 +1,18 @@
+{
+  "comment": "Per-version column header patterns for secondary sale registers. Each entry lists the header tokens (normalised: uppercase, non-alphanumeric stripped) to search for when mapping columns. Multiple tokens per field are tried in order; the first match wins. Version 'v1' is the baseline format observed for FY2021-22 through FY2025-26. If a later FY introduces new column names, add a new version key and reference it in secondary_sheets.json.",
+  "versions": {
+    "v1": {
+      "comment": "Baseline secondary register column layout. Header auto-detected by scanning first 20 rows for a row containing the 'amount' token.",
+      "head": ["STATEHEAD", "STATE HEAD", "HEAD", "SALESHEAD"],
+      "state": ["STATE"],
+      "customer": ["CUSTOMER", "CUSTOMERNAME", "PARTY", "RETAILER"],
+      "brand": ["BRAND", "GROUP", "PRODUCTGROUP", "CATEGORY"],
+      "month": ["MONTH", "M0NTH"],
+      "fy": ["FYYEAR", "FY"],
+      "amount": ["AMOUNT", "SECONDARYAMOUNT", "NETAMOUNT", "VALUE"],
+      "qty": ["QTY", "QUANTITY"],
+      "header_anchor_tokens": ["AMOUNT", "SECONDARYAMOUNT", "NETAMOUNT"],
+      "comment_header_detection": "Header row must contain at least one of header_anchor_tokens after normalisation. Scan the first 20 rows."
+    }
+  }
+}

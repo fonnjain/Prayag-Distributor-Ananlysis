@@ -9,6 +9,7 @@
     "start": "node --enable-source-maps ./dist/index.mjs",
     "test": "vitest run",
     "backfill": "node ./build.mjs && node --enable-source-maps ./dist/backfill.mjs",
+    "secondary-backfill": "node ./build.mjs && node --enable-source-maps ./dist/secondary-backfill.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

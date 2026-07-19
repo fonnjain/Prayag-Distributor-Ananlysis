@@ -18,6 +18,7 @@ async function buildAll() {
     entryPoints: [
       path.resolve(artifactDir, "src/index.ts"),
       path.resolve(artifactDir, "src/backfill.ts"),
+      path.resolve(artifactDir, "src/secondary-backfill.ts"),
     ],
     platform: "node",
     bundle: true,
