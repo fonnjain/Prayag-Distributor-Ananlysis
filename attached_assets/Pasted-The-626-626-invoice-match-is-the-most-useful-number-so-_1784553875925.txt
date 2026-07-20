@@ -1,0 +1,47 @@
+The 626 = 626 invoice match is the most useful number so far. It rules out
+whole-invoice deletion. Now settle the line-level question.
+
+THE DECISIVE TEST - INVOICE TOTALS
+
+Line splitting can change how an invoice is broken into rows. It cannot change
+the invoice's total value. So:
+
+For each of the 626 Jul-26 invoices, compare SUM(amount) in the DB against
+SUM(Taxable Value) in the sheet. Bucket them:
+
+  exact match          - line splitting differs, no data missing
+  DB higher            - duplicates, or rows removed from the sheet
+  sheet higher         - the DB is missing rows
+
+Report the count and total value in each bucket, plus the ten largest
+discrepancies in each direction with invoice number, DB total, sheet total and
+difference.
+
+If most invoices match exactly and a handful differ wildly, the problem is
+localised. If nearly every invoice shows the DB roughly double, it is
+systematic duplication and nothing was deleted at all.
+
+Then pick ONE invoice where the DB has materially more rows than the sheet and
+print BOTH sets side by side, every column. Looking at twenty rows will show
+in seconds what the aggregates cannot.
+
+THE OTHER FINDING - COLOUR IS NOT STORED
+
+You confirmed color does not exist in sale_line. But SALE SHEET 26-27 HAS a
+Color column at position 9 - I read the header directly:
+
+  Serial no, Invoice No, Date, Bill From, Customer.Name, City, Destination,
+  Item Code, Color, Quantity, Mrp, Sale Rate, Taxable Value, GROUP, STATION,
+  STATE, STATE HEAD, MONTH
+
+So colour is read and discarded at load.
+
+That is exactly why serial_no became the dedup key. The documented case:
+invoice 12600285, item 188, qty 88, Rs.25,867 - serial 1802 WHITE, serial 1803
+IVORY, two genuinely different products identical on every other field.
+
+Consequences:
+  a) The DB cannot distinguish colour variants at all.
+  b) Your duplicate analysis is understated - two colour variants collapse into
+     one distinct combination, so 5,575 is a floor, not the true count.
+  c) The key had to use serial_no
