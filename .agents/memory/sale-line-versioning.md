@@ -28,6 +28,14 @@ Exception: `hasRows()` in registerSync.ts intentionally queries all rows to chec
 - `versionedSyncLines(lines, confirmedAt)` — for OPEN FY (live Sheets sync). Loads current rows, builds identity map, compares incoming: touch / supersede+insert / new insert. Called from `doSync` in registerSync.ts.
 - `insertSaleLineBatches(lines)` — for HISTORICAL FYs (xlsx backfill only). Uses ON CONFLICT DO NOTHING. NOT used for open FY sync.
 
+## Tombstone pass (orphan rows — deleted from sheet)
+
+versionedSyncLines now runs a tombstone pass after the main loop. For each month in the batch, any current DB row whose identity is NOT in the incoming sheet batch gets superseded. The 10% blast-radius guard prevents accidental mass-supersession.
+
+All five guards (scope, zero-row abort, blast-radius halt, dry-run, logging) live in `tombstoneOrphans()` in ingest.ts. The blast-radius guard ALWAYS reports candidates (for dry-run review) but only BLOCKS application.
+
+One-off endpoint: `POST /api/registers/:fy/tombstone-orphans?month=X&dryRun=true` — reads the live sheet, finds orphans, returns count/amount/20 samples. Pass `blastRadiusLimitPct=30&dryRun=false` to apply after review and approval.
+
 ## One-time remediation endpoints
 - `POST /api/registers/:fy/backfill-color?dryRun=true` — stamps color column from live sheet using (invoice_no, serial_no) as match key. Run first.
 - `POST /api/registers/:fy/reconcile-versions?dryRun=true` — marks duplicate current rows as superseded. Winner = latest ingested_at within each identity group. Run after backfill-color.

@@ -1,0 +1,90 @@
+Three things done right here, and one dangerous gap in the proposed fix.
+
+DONE RIGHT
+
+Q1 moved to Rs.73.04 Cr and you said so plainly instead of tuning anything to
+preserve Rs.73.09 Cr. That is the correct behaviour and it is the answer to
+step 4b: the 458 Q1 "duplicates" were colour variants correctly kept distinct,
+not inflation. Only 54 rows were genuine rate corrections, worth Rs.4.6 lakh.
+
+Step 4d arithmetic: 1,580 supersede pairs, old Rs.2,62,23,221.47 against new
+Rs.2,62,23,206.93, net delta minus Rs.14.54. Moved by the difference, not the
+full value. Correct.
+
+And you diagnosed the tombstone gap yourself rather than reporting July as
+fixed. That is the right instinct.
+
+THE TOMBSTONE PASS IS THE RIGHT FIX - WITH GUARDS IT MUST NOT SHIP WITHOUT
+
+Your proposal: after processing incoming rows, any current DB row whose
+identity was not seen in the batch gets superseded.
+
+Correct in principle. But consider what happens on a bad read.
+
+This system has ALREADY produced silent zero-row reads. The FY2025-26 primary
+register returned 0 rows and reported success - that was the FY-prefix filter
+bug, and it blocked two separate investigations before anyone noticed. Now
+imagine that read followed by a tombstone pass: nothing was seen, so EVERY row
+gets superseded, and the month reads zero. Silently, with no error.
+
+A partial read does the same thing proportionally. A timeout halfway through a
+tab supersedes everything after the cut.
+
+REQUIRED GUARDS - all of them, not a subset:
+
+  1. SCOPE. Tombstone only within the exact fy and month whose tab was read.
+     Never across months, never across years. If the sync read the July tab,
+     only July rows are candidates.
+
+  2. PRECONDITION. Do not run the pass at all unless the read completed
+     successfully AND returned a plausible row count. A zero-row read must
+     abort the pass and raise an error, never tombstone.
+
+  3. BLAST-RADIUS GUARD. If the pass would supersede more than 10 percent of
+     current rows in scope, HALT and report instead of proceeding. Require
+     explicit approval to exceed it.
+
+  4. DRY RUN FIRST, always. Report what WOULD be superseded - count, value, and
+     twenty sample rows - before anything is marked.
+
+  5. LOG EVERY TOMBSTONE with the sync run id and the reason. A row leaving the
+     current set must be traceable to a specific read.
+
+THE JULY CLEANUP EXCEEDS THAT GUARD - HANDLE IT SEPARATELY
+
+1,114 orphans out of 4,243 current July rows is 26 percent, well past the 10
+percent limit. That is correct: it is a one-off backlog, not a normal sync.
+
+So run it as an explicit one-off with review, not through the standing pass:
+dry run, report the 1,114 with values and a sample, and wait for approval. The
+10 percent guard then applies to every sync afterwards.
+
+Expected result: July current becomes 3,129 rows at Rs.6,28,33,045 across 626
+invoices, matching the sheet exactly.
+
+FOUR SMALLER ITEMS
+
+  a) Update the Q1 anchor to Rs.73.04 Cr in verify_anchors.json and anywhere
+     else Rs.73.09 Cr is recorded, with a note that 54 rate corrections in May
+     and June account for the change. A stale anchor will now fail against
+     correct data, and that trains people to ignore anchors.
+
+  b) Run the EMPIRICAL idempotency test. Your structural check - zero duplicate
+     identity groups - is good evidence but it is not the same thing. Sync
+     twice with no sheet change, report inserts and supersessions on the second
+     run. Both must be zero.
+
+  c) The 2,221 current rows with no colour use COALESCE(color,'') in the
+     identity. Two colour variants both missing colour would collide and one
+     would be wrongly superseded. You report zero duplicate identity groups
+     today, so it has not happened - but check whether any of those 2,221 share
+     invoice, code and qty with each other. If they do, the collision is
+     waiting.
+
+  d) Fetch the live sheet totals for Apr, May and Jun so the per-month table is
+     complete. Right now only July can be compared against its source.
+
+ORDER: guards first, then the July dry run, then approval, then the cleanup.
+
+Constraints unchanged: nothing deleted - superseded only. Drive read-only.
+Secondary untouched.

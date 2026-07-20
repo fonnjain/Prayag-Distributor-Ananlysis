@@ -4,6 +4,14 @@ import {
   backfillColor,
   reconcileVersions,
 } from "../lib/registers/reconcileVersions.js";
+import { tombstoneOrphans, identityKey } from "../lib/registers/ingest.js";
+import { readRegisterFromSheets } from "../lib/registers/sheetsRegister.js";
+import {
+  OccurrenceCounter,
+  emptyUnmapped,
+  parseRegisterRow,
+  toSaleLine,
+} from "../lib/registers/normalize.js";
 import { REGISTER_SHEET_IDS } from "../lib/customers/registerSync.js";
 
 const router = Router();
@@ -60,6 +68,90 @@ router.post("/registers/:fy/reconcile-versions", async (req, res) => {
     res.json(result);
   } catch (err: unknown) {
     req.log.error({ err, fy, dryRun }, "reconcile-versions failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
+ * POST /registers/:fy/tombstone-orphans?month=Jul-26&dryRun=true
+ *
+ * One-off cleanup for orphan rows (DB rows no longer present in the live sheet).
+ * Reads the live sheet for the given FY, identifies current DB rows whose
+ * identity is absent from the sheet's latest state, and marks them superseded.
+ *
+ * ALL FIVE GUARDS APPLY:
+ *   1. Scoped to (fy, month) only
+ *   2. Aborts if sheet returns 0 rows for that month
+ *   3. Halts if candidates > blastRadiusLimitPct (default 10%) of current rows
+ *   4. dryRun=true (default) never writes — always returns full report
+ *   5. Every tombstone logged with syncRunId
+ *
+ * For the July 2026-27 one-off backlog (26%): pass blastRadiusLimitPct=30 with
+ * dryRun=false only after reviewing the dry-run output and obtaining approval.
+ */
+router.post("/registers/:fy/tombstone-orphans", async (req, res) => {
+  const { fy } = req.params;
+  const month = typeof req.query.month === "string" ? req.query.month : "Jul-26";
+  const dryRun = req.query.dryRun !== "false";
+  const blastRadiusLimitPct = req.query.blastRadiusLimitPct != null
+    ? Number(req.query.blastRadiusLimitPct)
+    : undefined;
+
+  const spreadsheetId = REGISTER_SHEET_IDS[fy];
+  if (!spreadsheetId) {
+    res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
+    return;
+  }
+
+  try {
+    const occurrence = new OccurrenceCounter();
+    const unmapped = emptyUnmapped();
+    const allLines: ReturnType<typeof toSaleLine>[] = [];
+
+    const { rowsScanned, tabsRead } = await readRegisterFromSheets(
+      spreadsheetId,
+      fy,
+      (values, columns) => {
+        const result = parseRegisterRow(values, columns, fy);
+        if (result.kind !== "row") return;
+        allLines.push(toSaleLine(result.row, occurrence, unmapped, "sheets"));
+      },
+    );
+
+    const monthLines = allLines.filter((l) => l.monthLabel === month);
+
+    const seenIdentities = new Set(
+      monthLines.map((l) =>
+        identityKey(
+          l.invoiceNo ?? null,
+          l.code,
+          l.color ?? null,
+          l.qty ?? null,
+          l.monthLabel ?? null,
+        ),
+      ),
+    );
+
+    const syncRunId = `manual-tombstone-${new Date().toISOString()}`;
+
+    const result = await tombstoneOrphans({
+      fy,
+      month,
+      seenIdentities,
+      incomingRowCount: monthLines.length,
+      syncRunId,
+      dryRun,
+      blastRadiusLimitPct,
+    });
+
+    res.json({
+      ...result,
+      sheetRowsScanned: rowsScanned,
+      tabsRead,
+      monthLinesFromSheet: monthLines.length,
+    });
+  } catch (err: unknown) {
+    req.log.error({ err, fy, month, dryRun }, "tombstone-orphans failed");
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });

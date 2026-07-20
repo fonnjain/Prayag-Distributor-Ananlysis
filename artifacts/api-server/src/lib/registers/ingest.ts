@@ -12,6 +12,7 @@ import {
   type InsertIngestRun,
 } from "@workspace/db";
 import { allowDelete } from "../deleteGuard.js";
+import { logger } from "../logger.js";
 import expectedCounts from "../../../config/expected_counts.json";
 import type { UnmappedReport } from "./normalize.js";
 
@@ -32,6 +33,20 @@ export const EXPECTED_FY_COUNTS: Record<string, number> = (() => {
 })();
 
 export const EXPECTED_TOTAL_LINES = expectedCounts.total_distinct_sale_lines;
+
+// ── Shared identity key ────────────────────────────────────────────────────────
+// Stable across rate edits: invoice_no | code | color | qty | month_label.
+// Rate and amount are MUTABLE — intentionally excluded.
+// Used by both versionedSyncLines and tombstoneOrphans so the key is consistent.
+export function identityKey(
+  invoiceNo: string | null,
+  code: string,
+  color: string | null,
+  qty: string | null,
+  monthLabel: string | null,
+): string {
+  return `${invoiceNo ?? ""}|${code}|${color ?? ""}|${qty ?? ""}|${monthLabel ?? ""}`;
+}
 
 // Deduplicate a batch before insert.
 // When a row has serial_no set: key = (fy, month_label, serial_no). Serial
@@ -306,7 +321,170 @@ export type VersionedSyncResult = {
   touched: number;
   superseded: number;
   inserted: number;
+  tombstoned: number;
 };
+
+export type TombstoneResult = {
+  fy: string;
+  month: string;
+  currentInScope: number;
+  currentAmountInScope: number;
+  candidateCount: number;
+  candidateAmount: number;
+  blastRadiusPct: number;
+  limitPct: number;
+  /** true when the pass was skipped due to a guard (zero-row or blast-radius) */
+  halted: boolean;
+  haltReason?: string;
+  dryRun: boolean;
+  applied: number;
+  /** Up to 20 sample orphan rows, always populated regardless of dryRun / halted */
+  sampleRows: Array<{
+    lineUid: string;
+    invoiceNo: string | null;
+    code: string;
+    color: string | null;
+    qty: string | null;
+    amount: string;
+    ingestedAt: string | null;
+  }>;
+};
+
+/**
+ * Tombstone (supersede) current rows that are no longer in the live sheet.
+ *
+ * GUARDS — all five must pass before any row is marked:
+ *  1. SCOPE   — only rows for the exact (fy, month) tab that was just read
+ *  2. PRECOND — abort if incomingRowCount === 0 (bad / empty tab read)
+ *  3. BLAST   — halt if candidates exceed blastRadiusLimitPct of current rows in scope
+ *  4. DRY-RUN — never writes when dryRun = true; always returns full report
+ *  5. LOG     — every tombstone is logged with syncRunId for traceability
+ */
+export async function tombstoneOrphans(opts: {
+  fy: string;
+  month: string;
+  seenIdentities: Set<string>;
+  incomingRowCount: number;
+  syncRunId: string;
+  dryRun: boolean;
+  blastRadiusLimitPct?: number;
+}): Promise<TombstoneResult> {
+  const {
+    fy,
+    month,
+    seenIdentities,
+    incomingRowCount,
+    syncRunId,
+    dryRun,
+    blastRadiusLimitPct = 10,
+  } = opts;
+
+  // Guard 2: zero incoming rows = bad read; abort without touching the DB
+  if (incomingRowCount === 0) {
+    logger.warn({ fy, month, syncRunId }, "tombstone: zero incoming rows — aborting to prevent silent wipe");
+    return {
+      fy, month,
+      currentInScope: 0, currentAmountInScope: 0,
+      candidateCount: 0, candidateAmount: 0,
+      blastRadiusPct: 0, limitPct: blastRadiusLimitPct,
+      halted: true,
+      haltReason: "incomingRowCount is zero — aborting to prevent silent wipe",
+      dryRun, applied: 0, sampleRows: [],
+    };
+  }
+
+  // Guard 1: scope — query only the exact (fy, month) that was read
+  const currentRows = await db
+    .select({
+      lineUid: saleLines.lineUid,
+      invoiceNo: saleLines.invoiceNo,
+      code: saleLines.code,
+      color: saleLines.color,
+      qty: saleLines.qty,
+      monthLabel: saleLines.monthLabel,
+      amount: saleLines.amount,
+      ingestedAt: saleLines.ingestedAt,
+    })
+    .from(saleLines)
+    .where(
+      and(
+        eq(saleLines.fy, fy),
+        eq(saleLines.monthLabel, month),
+        eq(saleLines.versionStatus, "current"),
+      ),
+    );
+
+  const currentInScope = currentRows.length;
+  const currentAmountInScope = currentRows.reduce((s, r) => s + Number(r.amount), 0);
+
+  const orphans = currentRows.filter((r) => {
+    const key = identityKey(r.invoiceNo, r.code, r.color, r.qty, r.monthLabel);
+    return !seenIdentities.has(key);
+  });
+
+  const candidateCount = orphans.length;
+  const candidateAmount = orphans.reduce((s, r) => s + Number(r.amount), 0);
+  const blastRadiusPct = currentInScope > 0 ? (candidateCount / currentInScope) * 100 : 0;
+
+  const sampleRows = orphans.slice(0, 20).map((r) => ({
+    lineUid: r.lineUid,
+    invoiceNo: r.invoiceNo,
+    code: r.code,
+    color: r.color,
+    qty: r.qty != null ? String(r.qty) : null,
+    amount: String(r.amount),
+    ingestedAt: r.ingestedAt instanceof Date ? r.ingestedAt.toISOString() : (r.ingestedAt ?? null),
+  }));
+
+  // Guard 3: blast-radius — always report candidates, only block application
+  if (blastRadiusPct > blastRadiusLimitPct) {
+    logger.warn(
+      { fy, month, candidateCount, currentInScope, blastRadiusPct, limitPct: blastRadiusLimitPct, syncRunId },
+      "tombstone: blast-radius limit exceeded — halted",
+    );
+    return {
+      fy, month, currentInScope, currentAmountInScope,
+      candidateCount, candidateAmount,
+      blastRadiusPct, limitPct: blastRadiusLimitPct,
+      halted: true,
+      haltReason: `blast-radius ${blastRadiusPct.toFixed(1)}% exceeds limit ${blastRadiusLimitPct}%`,
+      dryRun, applied: 0, sampleRows,
+    };
+  }
+
+  // Guard 4: dry run — return full report without writing anything
+  if (dryRun || candidateCount === 0) {
+    return {
+      fy, month, currentInScope, currentAmountInScope,
+      candidateCount, candidateAmount,
+      blastRadiusPct, limitPct: blastRadiusLimitPct,
+      halted: false, dryRun, applied: 0, sampleRows,
+    };
+  }
+
+  // Guard 5: apply and log each tombstone with syncRunId
+  const now = new Date();
+  const tombstoneUids = orphans.map((r) => r.lineUid);
+  for (let i = 0; i < tombstoneUids.length; i += BATCH_SIZE) {
+    const batch = tombstoneUids.slice(i, i + BATCH_SIZE);
+    await db
+      .update(saleLines)
+      .set({ versionStatus: "superseded", supersededAt: now, supersededBy: `tombstone|${syncRunId}` })
+      .where(and(inArray(saleLines.lineUid, batch), eq(saleLines.versionStatus, "current")));
+  }
+
+  logger.warn(
+    { fy, month, applied: tombstoneUids.length, blastRadiusPct, syncRunId },
+    "tombstone: orphan rows superseded",
+  );
+
+  return {
+    fy, month, currentInScope, currentAmountInScope,
+    candidateCount, candidateAmount,
+    blastRadiusPct, limitPct: blastRadiusLimitPct,
+    halted: false, dryRun: false, applied: tombstoneUids.length, sampleRows,
+  };
+}
 
 /**
  * Idempotent versioned sync for the open FY.
@@ -324,7 +502,7 @@ export async function versionedSyncLines(
   lines: InsertSaleLine[],
   confirmedAt: Date,
 ): Promise<VersionedSyncResult> {
-  if (lines.length === 0) return { touched: 0, superseded: 0, inserted: 0 };
+  if (lines.length === 0) return { touched: 0, superseded: 0, inserted: 0, tombstoned: 0 };
 
   const deduped = dedupeBySerialNo(lines);
 
@@ -360,14 +538,6 @@ export async function versionedSyncLines(
       .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")));
     allCurrent.push(...(rows as DbRow[]));
   }
-
-  const identityKey = (
-    invoiceNo: string | null,
-    code: string,
-    color: string | null,
-    qty: string | null,
-    monthLabel: string | null,
-  ) => `${invoiceNo ?? ""}|${code}|${color ?? ""}|${qty ?? ""}|${monthLabel ?? ""}`;
 
   const currentMap = new Map<string, DbRow>();
   for (const row of allCurrent) {
@@ -443,7 +613,36 @@ export async function versionedSyncLines(
     await markSheetConfirmed(confirmedUids, confirmedAt);
   }
 
-  return { touched: toTouch.length, superseded: toSupersede.length, inserted };
+  // Tombstone pass: supersede any current DB row whose identity was not seen
+  // in this sync batch (deleted/corrected out of the sheet).
+  // Guard 3 (10% blast-radius) automatically skips large one-off backlogs —
+  // those must be handled via POST /registers/:fy/tombstone-orphans.
+  let tombstoned = 0;
+  const syncRunId = confirmedAt.toISOString();
+  const fyForTombstone = fys[0] ?? "";
+  const monthsInBatch = [
+    ...new Set(deduped.map((l) => l.monthLabel).filter((m): m is string => m != null)),
+  ];
+  for (const month of monthsInBatch) {
+    const monthLines = deduped.filter((l) => l.monthLabel === month);
+    const seenForMonth = new Set(
+      monthLines.map((l) =>
+        identityKey(l.invoiceNo ?? null, l.code, l.color ?? null, l.qty ?? null, l.monthLabel ?? null),
+      ),
+    );
+    const tr = await tombstoneOrphans({
+      fy: fyForTombstone,
+      month,
+      seenIdentities: seenForMonth,
+      incomingRowCount: monthLines.length,
+      syncRunId,
+      dryRun: false,
+      blastRadiusLimitPct: 10,
+    });
+    if (!tr.halted) tombstoned += tr.applied;
+  }
+
+  return { touched: toTouch.length, superseded: toSupersede.length, inserted, tombstoned };
 }
 
 export async function upsertItemMaster(
