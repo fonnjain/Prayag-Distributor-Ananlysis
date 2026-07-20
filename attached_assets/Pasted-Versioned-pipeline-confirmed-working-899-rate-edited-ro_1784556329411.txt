@@ -1,0 +1,70 @@
+Versioned pipeline confirmed working - 899 rate-edited rows superseded on a
+live sync is the mechanism proving itself on real data. And 1,935 supersessions
+against the 1,050 duplicates found earlier is EXPECTED, not a discrepancy: the
+new identity excludes amount, so it collapses rate-edited versions the old count
+treated as distinct. That part is right.
+
+BUT THE TOTAL DOES NOT LAND WHERE IT SHOULD
+
+  Q1 anchor                       Rs.73.09 Cr
+  July per the live sheet         Rs. 6.28 Cr   (3,129 rows, 626 invoices)
+  expected current                Rs.79.37 Cr
+  you reported                    Rs.81.65 Cr
+  gap                             Rs. 2.28 Cr   (2.9%)
+
+If Q1 held at 73.09, that implies July current is Rs.8.56 Cr against a sheet
+that says Rs.6.28 Cr.
+
+Same story on rows:
+
+  current rows reported           34,739
+  Q1 (30,518) + July sheet (3,129) = 33,647
+  excess                           1,092
+
+So roughly 1,092 rows worth Rs.2.28 Cr are still counted as current when they
+should not be - or Q1 has moved and the total is composed differently.
+
+REPORT, PER MONTH
+
+  current row count, current total
+  the live sheet's row count and total for the same month
+  superseded count
+  the delta between DB current and sheet
+
+For July specifically: current rows must equal 3,129 and current total must
+equal Rs.6,28,33,045 across 626 invoices. That is the sheet, and the sheet is
+the correct answer for an open year. Anything above it is still accumulation.
+
+THE Q1 QUESTION - ANSWER IT DIRECTLY
+
+Step 4b asked this and it has not been answered. Q1 carried 458 duplicate rows
+AND matched its Rs.73.09 Cr anchor exactly, twice. Those two facts sit badly
+together.
+
+Give me Apr, May and Jun current totals separately. Then say plainly whether Q1
+still sums to Rs.73.09 Cr.
+
+If it MOVED, report the new figure. Do not adjust anything to preserve the
+anchor. A number that matches only because something was tuned to make it match
+is worse than one that visibly moved and was explained.
+
+If it did NOT move, then those 458 rows were never inflating it - which means
+they are colour variants correctly kept distinct by the new key, not superseded
+edits. Say which.
+
+STILL UNREPORTED FROM THE SPEC
+
+  Step 1 - is colour stored and backfilled? How many rows have a colour, how
+  many could not be matched? The stable identity depends on it, and without it
+  white and ivory merge.
+
+  Step 4c - idempotency. Re-run the sync twice with no sheet change. Zero
+  inserts, zero supersessions on the second run. This has not been demonstrated
+  since the change.
+
+  Step 4d - the 899 supersessions are a real-world version of this, but confirm
+  the arithmetic: did the current total move by the DIFFERENCE in those rows'
+  values, or by their full value? Only the first is correct.
+
+Report the per-month table first. Change nothing until the July gap is
+explained.
