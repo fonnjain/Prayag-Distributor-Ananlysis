@@ -65,12 +65,13 @@ const HEAD_COL_OVERRIDE: Record<string, number> = {
 // Applied after header-scan chanIdx detection; takes precedence over the last-non-empty
 // fallback in all three call sites (readAndAggregate, readOrderTabInventory, ingest).
 const CHANNEL_COL_OVERRIDE: Record<string, { chanIdx: number; explicit: boolean }> = {
-  // FY2023-24 booking sheet: col 20 is SEGMENT (customer market category), NOT a
-  // channel flag.  chanIdx: -1 explicitly blocks channel detection for this sheet so
-  // SEGMENT values are never misread as 'Govt'/'Retail' channel.
-  // Effect: ntBooking = 0 (no HEAD column + no channel), is_territory = null,
-  //         govtValue = 0 in inventory (all rows → retailValue).
-  "1jtSUGE6iT8WuUKi56F4LYqjJgZF42oR1mk51imG8yq8": { chanIdx: -1, explicit: false },
+  // FY2023-24 booking sheet: col 20 is SEGMENT (Retail / Govt / JJM / Project / Gem).
+  // SEGMENT is NOT labeled in the monthly-tab header rows; data rows extend to col 20
+  // while the header ends at col 19 ("Month").  chanIdx=20 is forced here so the
+  // last-non-empty-header fallback (which would land on "Month" at col 19) is bypassed.
+  // explicit=true: non-institutional SEGMENT → isTerritory=true.
+  // NON_TERRITORY_RE is used (not /^govt$/i) so JJM/Project/GEM/Govt all match.
+  "1jtSUGE6iT8WuUKi56F4LYqjJgZF42oR1mk51imG8yq8": { chanIdx: 20, explicit: true },
 };
 
 const NON_TERRITORY_RE = /^(other|project|govt|gem|jjm|nonterrit)/i;
@@ -419,18 +420,17 @@ async function readAndAggregate(
         if (amt <= 0) continue;
 
         // When headIdx=-1 (no STATE HEAD column in this sheet), fall back to the
-        // channel column for institutional/territory split.  Booking sheets that carry
-        // an explicit 'Govt'/'Retail' per-row flag but no per-row STATE HEAD (e.g.
-        // FY2023-24) use this path to populate nonTerritoryTotal correctly.
+        // channel column for institutional/territory split.  FY2023-24 monthly tabs
+        // have no STATE HEAD data in rows; SEGMENT (col 20) is the only per-row flag.
+        // All rows — including blank-SEGMENT rows — count in total/tabRows.
+        // NON_TERRITORY_RE captures Govt / JJM / Project / GEM / Other.
         if (!head) {
           if (chanIdx >= 0) {
             const chan = strVal(row[chanIdx]);
-            if (chan) {
-              if (/^govt$/i.test(chan)) nonTerritoryTotal += amt;
-              total += amt;
-              tabRows++;
-            }
+            if (NON_TERRITORY_RE.test(chan)) nonTerritoryTotal += amt;
           }
+          total += amt;
+          tabRows++;
           continue;
         }
 
@@ -755,10 +755,11 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
             inv.pieceQty += qty;
           }
 
-          // Scheme eligibility: "Retail" rows → scheme-eligible.
-          // "Govt" rows → schemes do not apply. Blank → treated as retail.
+          // Scheme eligibility: institutional rows → schemes do not apply.
+          // NON_TERRITORY_RE (Govt/JJM/Project/GEM/Other) → govtValue (institutional).
+          // All others including blank → retailValue.
           const chan = chanIdx >= 0 ? strVal(row[chanIdx]) : "";
-          if (/^govt$/i.test(chan)) inv.govtValue += amt;
+          if (NON_TERRITORY_RE.test(chan)) inv.govtValue += amt;
           else inv.retailValue += amt;
         }
       });
@@ -1252,10 +1253,11 @@ export async function ingestOrderBookingFy(
           // isTerritory
           // Priority: explicit channel column > HEAD-column NON_TERRITORY_RE > null.
           //
-          // When chanIsExplicit=true (header name matched channel/type/etc.):
-          //   "Govt" → institutional (false).
-          //   Anything else → territory (true).  Matches readOrderTabInventory's
-          //   govtValue logic: govtValue += amt if /^govt$/i; else retailValue.
+          // When chanIsExplicit=true (header name matched channel/type/etc. OR
+          // CHANNEL_COL_OVERRIDE explicit=true):
+          //   NON_TERRITORY_RE match (Govt/JJM/Project/GEM/Other) → institutional (false).
+          //   Non-empty, non-institutional AND cv is non-blank → territory (true).
+          //   Blank cv → null (unknown; cv guard prevents blank→territory promotion).
           //
           // When chanIsExplicit=false (fallback = last non-empty column):
           //   Can't trust the cell value as a channel flag → use HEAD column.
@@ -1263,12 +1265,13 @@ export async function ingestOrderBookingFy(
           let isTerritory: boolean | null = null;
           if (chanIdx >= 0) {
             const cv = strVal(row[chanIdx]);
-            if (/^govt/i.test(cv)) {
-              chanRaw = "Govt";
+            if (NON_TERRITORY_RE.test(cv)) {
+              chanRaw = cv;
               isTerritory = false;
-            } else if (chanIsExplicit) {
-              // Explicit channel column, non-Govt → treat as territory (Retail).
-              chanRaw = "Retail";
+            } else if (cv && chanIsExplicit) {
+              // Explicit channel column, non-empty, non-institutional → territory.
+              // cv guard: blank channel cell stays null rather than silently becoming territory.
+              chanRaw = cv;
               isTerritory = true;
             } else if (headIdx >= 0 && headRaw) {
               // Fallback channel (last-col heuristic) — use HEAD column instead.

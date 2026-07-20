@@ -1,0 +1,74 @@
+Accepting is_territory = null rather than a wrong classification was the right
+call. Blocking SEGMENT was correct.
+
+But "no HEAD column" is not right, and FY2023-24 should not stay null.
+
+YOUR OWN LOG FOUND THE HEAD COLUMN
+
+Earlier this session you reported, for FY2023-24:
+
+    "valueAlias": "Amount", "valueIdx": 17, "headIdx": 23
+
+headIdx 23. That is STATE HEAD, and it was detected.
+
+I read the same header directly from Drive. Zero-indexed:
+
+    17 Amount        22 STATE
+    18 ITEM CODE     23 STATE HEAD
+    19 Month         24 STATE HEAD B
+    20 SEGMENT       25 STATE HEAD A
+    21 Station
+
+So the column exists at 23, your detector found it at 23, and its values are
+head names - SANDEEP JI, SURESH NAIR, LALAN.
+
+One possible explanation: you relaxed the gate from (tI >= 0 && hI >= 0) to
+(tI >= 0), making State Head optional. If the MONTHLY tabs have a different
+layout from "combined", the head column may now be silently skipped where
+before it would have failed loudly.
+
+FIRST: print the header row of ONE monthly tab, verbatim and unnormalised -
+say Apr - alongside the "combined" header. If they differ, that is the answer
+and the map needs to be per-tab, not per-workbook.
+
+THEN: THE DISTINCT HEAD VALUES
+
+This is what I asked for last time and have not had. From the FY2023-24
+monthly tabs, report the distinct values of the STATE HEAD column with row
+count and total Amount for each.
+
+The institutional heads on the sale side are GEM, GOVT, JJM, OTHER and PROJECT.
+If those exact strings appear, NON_TERRITORY_RE will match and the split works
+immediately. If they are named differently in that vintage, the list will show
+what to extend the pattern with - deliberately, rather than defaulting to zero.
+
+WHY THIS YEAR MATTERS MOST
+
+FY2023-24 is the year institutional was LARGEST - Rs.95.76 Cr of dispatch,
+27.4% of the total, against 8.6% today. It is the earliest point in the trend
+and the one that shows the decline most clearly.
+
+Leaving it null means the institutional-versus-territory story cannot be told
+for the year where it is most visible, and no territory ratio can be computed
+for it at all.
+
+THE TARGET NUMBER
+
+Two independent routes both point to roughly the same figure:
+
+  territory ratio band from the other three years:  1.07 to 1.10
+  Rs.377.39 Cr booking - (253.26 x 1.09)         =  Rs.101.34 Cr institutional
+  institutional dispatch that year                =  Rs. 95.76 Cr
+
+So expect FY2023-24 institutional booking near Rs.95-101 Cr. If the head-value
+split lands in that range, it is right. If it lands near Rs.10 Cr again, the
+column is still wrong.
+
+TO CONFIRM WHEN DONE
+
+Re-report all four territory ratios. Three already sit at 1.076, 1.104 and
+1.071. FY2023-24 should join that band without needing a different method.
+That convergence is the test.
+
+Constraints unchanged: Drive read-only, no DELETE from register tables,
+secondary untouched.
