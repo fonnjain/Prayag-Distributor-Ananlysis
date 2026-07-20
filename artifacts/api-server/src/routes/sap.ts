@@ -10,6 +10,8 @@ import { fyMonthLabels } from "../lib/sap/util.js";
 import {
   reconcileSapVsSaleSheet,
   formatReconcileAsCsv,
+  reconcileDbVsSaleSheet,
+  formatDbGapAsCsv,
 } from "../lib/sap/reconcileSheets.js";
 
 const router: IRouter = Router();
@@ -229,6 +231,72 @@ router.get(
     } catch (err) {
       req.log.error({ err, fy, month }, "sap reconcile failed");
       res.status(500).json({ error: "Reconciliation failed — check server logs." });
+    }
+  },
+);
+
+// ── DB gap: rows in the database absent from the live sale sheet ──────────────
+// GET /api/sap/db-gap?fy=2026-27&month=Jul-26
+//   Returns a JSON report: db/saleSheet row counts, amounts, matched count,
+//   db-only (deleted) rows with by-customer breakdown and full detail.
+// GET /api/sap/db-gap?fy=2026-27&month=Jul-26&format=csv
+//   Returns the same report as a downloadable CSV (lineUid on every row for
+//   unambiguous recovery).
+router.get(
+  "/sap/db-gap",
+  async (req: Request, res: Response): Promise<void> => {
+    const fyRaw = req.query["fy"];
+    const monthRaw = req.query["month"];
+    const formatRaw = req.query["format"];
+
+    const fy =
+      typeof fyRaw === "string" && fyRaw.trim() !== "" ? fyRaw.trim() : "2026-27";
+    const month =
+      typeof monthRaw === "string" && monthRaw.trim() !== ""
+        ? monthRaw.trim()
+        : "Jul-26";
+    const asCsv = typeof formatRaw === "string" && formatRaw.trim() === "csv";
+
+    if (!FY_PATTERN.test(fy)) {
+      res.status(400).json({ error: "fy must look like 2026-27" });
+      return;
+    }
+    if (!/^[A-Za-z]{3}-\d{2}$/.test(month)) {
+      res.status(400).json({ error: "month must look like Jul-26" });
+      return;
+    }
+
+    try {
+      req.log.info({ fy, month, asCsv }, "sap db-gap: starting");
+      const result = await reconcileDbVsSaleSheet(fy, month);
+      req.log.info(
+        {
+          fy,
+          month,
+          dbRows: result.db.totalRows,
+          saleRows: result.saleSheet.totalRows,
+          dbOnly: result.dbOnly.rows,
+          errors: result.errors.length,
+        },
+        "sap db-gap: complete",
+      );
+
+      if (asCsv) {
+        const csv = formatDbGapAsCsv(result);
+        const filename = `sap-db-gap-${fy}-${month}.csv`;
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${filename}"`,
+        );
+        res.send(csv);
+        return;
+      }
+
+      res.json(result);
+    } catch (err) {
+      req.log.error({ err, fy, month }, "sap db-gap failed");
+      res.status(500).json({ error: "DB gap analysis failed — check server logs." });
     }
   },
 );

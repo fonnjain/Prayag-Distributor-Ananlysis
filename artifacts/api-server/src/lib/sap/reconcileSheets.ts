@@ -32,6 +32,8 @@ import {
 } from "../registers/sheetsApi.js";
 import rawRegisterSheets from "../../../config/register_sheets.json";
 import { logger } from "../logger.js";
+import { db, saleLines } from "@workspace/db";
+import { eq, and } from "drizzle-orm";
 
 type RegisterConfig = {
   registers: Record<string, string>;
@@ -629,6 +631,261 @@ export async function reconcileSapVsSaleSheet(
   };
 }
 
+// ── DB gap analysis ───────────────────────────────────────────────────────────
+// Compares the DB's historical snapshot (all rows ever ingested for a month)
+// against the CURRENT live sale sheet, surfacing rows that were present when
+// the sheet was last ingested but have since been deleted from it.
+//
+// Fingerprint: normInvoice(invoiceNo) | normCode(code) | round(qty×1000) | round(amount)
+// This 4-field key is more precise than the SAP↔sheet key because the DB was
+// ingested directly from the sale sheet, so all four fields are in identical
+// format on both sides.
+
+export type DbGapRow = {
+  lineUid: string;
+  invoiceNo: string | null;
+  invoiceDate: string | null;
+  customer: string | null;
+  code: string;
+  qty: number;
+  amount: number;
+  head: string | null;
+  state: string | null;
+  group: string | null;
+  source: string;
+};
+
+export type DbGapResult = {
+  fy: string;
+  month: string;
+  generatedAt: string;
+  saleSheet: {
+    sheetId: string;
+    tab: string | null;
+    totalRows: number;
+    totalAmount: number;
+  };
+  db: {
+    totalRows: number;
+    totalAmount: number;
+  };
+  matched: {
+    rows: number;
+    amount: number;
+  };
+  /** Rows in the DB that have no matching row in the current live sheet. */
+  dbOnly: {
+    rows: number;
+    amount: number;
+    byCustomer: Array<{ customer: string; rows: number; amount: number }>;
+    detail: DbGapRow[];
+  };
+  errors: string[];
+  conclusion: string;
+};
+
+// Fingerprint for DB↔sheet matching. All four fields are in the same format
+// on both sides since the DB was ingested from the same sheet.
+function makeDbFingerprint(
+  invoiceNo: string | null | undefined,
+  code: string | null | undefined,
+  qty: number,
+  amount: number,
+): string {
+  return [
+    normInvoice(invoiceNo),
+    (code ?? "").replace(/\s+/g, "").toUpperCase(),
+    Math.round(qty * 1000),
+    Math.round(amount),
+  ].join("|");
+}
+
+/**
+ * Reads the live sale sheet for one month and the DB's stored rows for the
+ * same month, then returns rows that exist in the DB but are absent from
+ * the current sheet — i.e. rows that were deleted after the last ingest.
+ */
+export async function reconcileDbVsSaleSheet(
+  fy: string,
+  monthLabel: string,
+): Promise<DbGapResult> {
+  const errors: string[] = [];
+  const saleId = _cfg.registers?.[fy] ?? "";
+
+  if (!saleId) {
+    errors.push(`No registers sheet configured for FY${fy} in register_sheets.json`);
+  }
+
+  const [abbrRaw] = monthLabel.split("-");
+  const abbr = abbrRaw?.slice(0, 3) ?? "";
+  let saleTabTitle: string | null = null;
+  let saleRows: SaleSheetRow[] = [];
+
+  const [sheetResult, dbQueryResult] = await Promise.allSettled([
+    (async () => {
+      if (!saleId) return;
+      const tabs = await listSheetTabs(saleId);
+      saleTabTitle = findMonthTab(tabs, abbr);
+      if (!saleTabTitle) {
+        errors.push(
+          `No "${abbr}" tab found in sale sheet ${saleId} — tabs: ${tabs.map((t) => t.title).join(", ") || "(none)"}`,
+        );
+        return;
+      }
+      saleRows = await readSaleSheetTab(saleId, saleTabTitle);
+    })(),
+    db
+      .select({
+        lineUid: saleLines.lineUid,
+        invoiceNo: saleLines.invoiceNo,
+        invoiceDate: saleLines.invoiceDate,
+        customer: saleLines.customer,
+        code: saleLines.code,
+        qty: saleLines.qty,
+        amount: saleLines.amount,
+        headRaw: saleLines.headRaw,
+        stateRaw: saleLines.stateRaw,
+        groupRaw: saleLines.groupRaw,
+        source: saleLines.source,
+      })
+      .from(saleLines)
+      .where(and(eq(saleLines.fy, fy), eq(saleLines.monthLabel, monthLabel))),
+  ]);
+
+  if (sheetResult.status === "rejected") {
+    errors.push(`Sale sheet read threw: ${String(sheetResult.reason)}`);
+  }
+  if (dbQueryResult.status === "rejected") {
+    errors.push(`DB query threw: ${String(dbQueryResult.reason)}`);
+    return {
+      fy,
+      month: monthLabel,
+      generatedAt: new Date().toISOString(),
+      saleSheet: { sheetId: saleId, tab: saleTabTitle, totalRows: 0, totalAmount: 0 },
+      db: { totalRows: 0, totalAmount: 0 },
+      matched: { rows: 0, amount: 0 },
+      dbOnly: { rows: 0, amount: 0, byCustomer: [], detail: [] },
+      errors,
+      conclusion: "DB query failed.",
+    };
+  }
+
+  const dbRows = dbQueryResult.value as Array<{
+    lineUid: string;
+    invoiceNo: string | null;
+    invoiceDate: string | null;
+    customer: string | null;
+    code: string;
+    qty: string | null;
+    amount: string;
+    headRaw: string | null;
+    stateRaw: string | null;
+    groupRaw: string | null;
+    source: string;
+  }>;
+
+  // Build a count-bag from the live sheet rows (bag handles genuine duplicates).
+  const sheetBag = new Map<string, number>();
+  let saleTotal = 0;
+  for (const r of saleRows) {
+    const fp = makeDbFingerprint(r.invoiceNo, r.code, r.qty, r.amount);
+    sheetBag.set(fp, (sheetBag.get(fp) ?? 0) + 1);
+    saleTotal += r.amount;
+  }
+
+  // Compare each DB row against the sheet bag.
+  const dbOnlyRows: DbGapRow[] = [];
+  let dbTotal = 0;
+  let dbOnlyAmount = 0;
+  let matchedRows = 0;
+  let matchedAmount = 0;
+
+  for (const row of dbRows) {
+    const qty = Number(row.qty ?? 0);
+    const amount = Number(row.amount);
+    dbTotal += amount;
+    const fp = makeDbFingerprint(row.invoiceNo, row.code, qty, amount);
+    const cnt = sheetBag.get(fp) ?? 0;
+    if (cnt > 0) {
+      sheetBag.set(fp, cnt - 1);
+      matchedRows++;
+      matchedAmount += amount;
+    } else {
+      dbOnlyRows.push({
+        lineUid: row.lineUid,
+        invoiceNo: row.invoiceNo,
+        invoiceDate: row.invoiceDate,
+        customer: row.customer,
+        code: row.code,
+        qty,
+        amount,
+        head: row.headRaw,
+        state: row.stateRaw,
+        group: row.groupRaw,
+        source: row.source,
+      });
+      dbOnlyAmount += amount;
+    }
+  }
+
+  // Aggregate db-only by customer (top by amount).
+  const byCustMap = new Map<string, { rows: number; amount: number }>();
+  for (const r of dbOnlyRows) {
+    const key = r.customer ?? "(unknown)";
+    const s = byCustMap.get(key) ?? { rows: 0, amount: 0 };
+    byCustMap.set(key, { rows: s.rows + 1, amount: s.amount + r.amount });
+  }
+  const byCustomer = Array.from(byCustMap.entries())
+    .map(([customer, s]) => ({ customer, rows: s.rows, amount: Math.round(s.amount) }))
+    .sort((a, b) => b.amount - a.amount);
+
+  const pct =
+    dbRows.length > 0 ? Math.round((dbOnlyRows.length / dbRows.length) * 100) : 0;
+  const conclusion =
+    dbOnlyRows.length === 0
+      ? `All ${dbRows.length} DB rows are present in the live sale sheet — no deletions detected.`
+      : `${dbOnlyRows.length} of ${dbRows.length} DB rows (${pct}%, ₹${Math.round(dbOnlyAmount).toLocaleString()}) are absent from the live sale sheet. These were ingested when the sheet contained more data and can be recovered from the database.`;
+
+  logger.info(
+    {
+      fy,
+      monthLabel,
+      dbRows: dbRows.length,
+      saleRows: saleRows.length,
+      dbOnly: dbOnlyRows.length,
+    },
+    "db-gap: analysis complete",
+  );
+
+  return {
+    fy,
+    month: monthLabel,
+    generatedAt: new Date().toISOString(),
+    saleSheet: {
+      sheetId: saleId,
+      tab: saleTabTitle,
+      totalRows: saleRows.length,
+      totalAmount: Math.round(saleTotal),
+    },
+    db: {
+      totalRows: dbRows.length,
+      totalAmount: Math.round(dbTotal),
+    },
+    matched: {
+      rows: matchedRows,
+      amount: Math.round(matchedAmount),
+    },
+    dbOnly: {
+      rows: dbOnlyRows.length,
+      amount: Math.round(dbOnlyAmount),
+      byCustomer,
+      detail: dbOnlyRows,
+    },
+    errors,
+    conclusion,
+  };
+}
+
 // ── CSV formatter ─────────────────────────────────────────────────────────────
 
 function csvEscape(v: string | number | null | undefined): string {
@@ -637,6 +894,54 @@ function csvEscape(v: string | number | null | undefined): string {
     return `"${s.replace(/"/g, '""')}"`;
   }
   return s;
+}
+
+/**
+ * Formats the dbOnly detail rows as a CSV for download.
+ * Every deleted row is exported with its lineUid so recovery is unambiguous.
+ */
+export function formatDbGapAsCsv(result: DbGapResult): string {
+  const lines: string[] = [];
+  lines.push(`DB vs Sale Sheet Gap Report — ${result.month} (FY${result.fy})`);
+  lines.push(`Generated,${result.generatedAt}`);
+  lines.push(`Sale sheet tab,${result.saleSheet.tab ?? "not found"}`);
+  lines.push(`Sale sheet rows,${result.saleSheet.totalRows}`);
+  lines.push(`Sale sheet amount,${result.saleSheet.totalAmount}`);
+  lines.push(`DB rows,${result.db.totalRows}`);
+  lines.push(`DB amount,${result.db.totalAmount}`);
+  lines.push(`Matched rows,${result.matched.rows}`);
+  lines.push(`DB-only (deleted),${result.dbOnly.rows}`);
+  lines.push(`DB-only amount,${result.dbOnly.amount}`);
+  lines.push(`Conclusion,${csvEscape(result.conclusion)}`);
+  if (result.errors.length > 0) {
+    lines.push(`Errors,${csvEscape(result.errors.join("; "))}`);
+  }
+  lines.push("");
+  lines.push("=== Rows in DB but absent from live sale sheet (deleted — recoverable from DB) ===");
+  lines.push(
+    [
+      "Line UID", "Invoice No", "Invoice Date", "Customer",
+      "Item Code", "Qty", "Amount (Rs)", "State Head", "State", "Group", "Source",
+    ].join(","),
+  );
+  for (const r of result.dbOnly.detail) {
+    lines.push(
+      [
+        csvEscape(r.lineUid),
+        csvEscape(r.invoiceNo),
+        csvEscape(r.invoiceDate),
+        csvEscape(r.customer),
+        csvEscape(r.code),
+        r.qty,
+        r.amount,
+        csvEscape(r.head),
+        csvEscape(r.state),
+        csvEscape(r.group),
+        csvEscape(r.source),
+      ].join(","),
+    );
+  }
+  return lines.join("\n");
 }
 
 /**
