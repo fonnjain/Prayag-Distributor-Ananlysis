@@ -55,15 +55,22 @@ const HEAD_COL_OVERRIDE: Record<string, number> = {
   // split ('Govt'/'Retail') is at unlabeled col 20 — handled by CHANNEL_COL_OVERRIDE.
 };
 
-// Some booking sheets have a channel column ('Govt'/'Retail') in data rows that has
-// NO header label — the column simply doesn't appear in the header row at all.
-// Applied after header-scan chanIdx detection: fires only when chanIdx === -1.
-// explicit=true means non-'Govt' rows are treated as territory (isTerritory=true)
-// rather than falling back to the HEAD column.
+// Per-sheet channel column override.  Two uses:
+//   chanIdx >= 0: positional override for sheets whose channel column has no header label.
+//     explicit=true  → non-'Govt' treated as territory (isTerritory=true).
+//     explicit=false → only 'Govt' is classified; others fall back to HEAD column.
+//   chanIdx = -1:  explicit BLOCK — disables channel detection for this sheet entirely.
+//     Used when the last-non-empty-header fallback would land on a non-channel column
+//     (e.g. SEGMENT) and produce misleading govtValue / ntBooking / isTerritory values.
+// Applied after header-scan chanIdx detection; takes precedence over the last-non-empty
+// fallback in all three call sites (readAndAggregate, readOrderTabInventory, ingest).
 const CHANNEL_COL_OVERRIDE: Record<string, { chanIdx: number; explicit: boolean }> = {
-  // FY2023-24 booking sheet: channel at 0-based col 20, unlabeled in header.
-  // Values confirmed by live probe Jul-2026: 'Govt' or 'Retail' on every data row.
-  "1jtSUGE6iT8WuUKi56F4LYqjJgZF42oR1mk51imG8yq8": { chanIdx: 20, explicit: true },
+  // FY2023-24 booking sheet: col 20 is SEGMENT (customer market category), NOT a
+  // channel flag.  chanIdx: -1 explicitly blocks channel detection for this sheet so
+  // SEGMENT values are never misread as 'Govt'/'Retail' channel.
+  // Effect: ntBooking = 0 (no HEAD column + no channel), is_territory = null,
+  //         govtValue = 0 in inventory (all rows → retailValue).
+  "1jtSUGE6iT8WuUKi56F4LYqjJgZF42oR1mk51imG8yq8": { chanIdx: -1, explicit: false },
 };
 
 const NON_TERRITORY_RE = /^(other|project|govt|gem|jjm|nonterrit)/i;

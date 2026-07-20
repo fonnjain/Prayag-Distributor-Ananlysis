@@ -20,19 +20,14 @@ The header IS present at row 1 (Sheets rows are 1-based; readTabRowsChunked star
 at start=1, so globalRow starts at 1 — the old `globalRow === 0` positional fallback
 was dead code).  After the alias fix the header is found normally.
 
-**Key finding (live probe Jul-2026)**: the header row has 20 columns (0–19); data rows
-extend to col 20.  Col 20 in data rows carries 'Govt' or 'Retail' — but col 20 has
-**no label in the header row**.  As a result, `findCol(regex)` never finds it; and the
-old "last non-empty in header" fallback lands on col 19 ('Month') — the wrong column.
+**Key finding (live probe Jul-2026)**: the header row has 20 labeled columns (0–19);
+data rows extend to col 20.  Col 20 in data rows = SEGMENT (customer market category:
+'Govt', 'Retail', possibly others) — **NOT a channel flag**.  SEGMENT is NOT used for
+ntBooking or is_territory.  CHANNEL_COL_OVERRIDE sets chanIdx=-1 to block detection.
+
 STATE HEAD columns 23–25 appear in the HEADER ROW only; they are EMPTY in ALL data rows.
-
-Channel detection fix: `CHANNEL_COL_OVERRIDE` in primarySheets.ts maps this sheet ID
-to `chanIdx=20, explicit=true`.  Applied in all three functions: readAndAggregate,
-readOrderTabInventory, ingestOrderBookingFy.
-
-readAndAggregate also gained a `chanIdx` variable + channel-fallback data path: when
-`headIdx=-1`, rows with `chan='Govt'` contribute to `nonTerritoryTotal` and `total`.
-This makes ntBooking correct for FY2023-24 without a HEAD column.
+headIdx=-1 in readAndAggregate → ntBooking = 0 for FY2023-24 (honest: no HEAD, no channel).
+is_territory = null for all FY2023-24 rows in primary_order_line.
 
 Verified column positions (0-indexed, from header row):
 | idx | header       | notes |
@@ -48,9 +43,7 @@ Verified column positions (0-indexed, from header row):
 | 12  | Unit         | "Nos" / "Ltr." — **plain "Unit"**, NOT "Unit.Name" |
 | 17  | Amount       | net booking value (the detected value column) |
 | 19  | Month        | text "Apr-2023" / "Mar-2024" — last labeled header col |
-| 20  | *(unlabeled)*| **channel flag in data rows only**: 'Govt' or 'Retail' |
-
-Note: cols 23–25 (STATE HEAD variants) appear in header only; data rows are empty there.
+| 20  | SEGMENT      | customer market category — NOT a channel; BLOCKED by override |
 
 Unit regex fix: `unitIdx = findCol(row, /^(unit(\.name| name)?|uom|measure)$/i)`
 Date parsing: `parseOrderDate` handles DD-MMM-YY via explicit regex branch.
@@ -101,28 +94,27 @@ Per-FY ntBooking source (confirmed Jul-2026):
   FY2026-27  HEAD column → NON_TERRITORY_RE
   FY2024-25  HEAD column → NON_TERRITORY_RE (captures GEM/JJM/PROJECT heads)
   FY2025-26  headIdx=-1; channel col (last-non-empty header fallback)
-  FY2023-24  headIdx=-1; channel col 20 via CHANNEL_COL_OVERRIDE
+  FY2023-24  headIdx=-1; SEGMENT at col 20 BLOCKED via CHANNEL_COL_OVERRIDE (chanIdx=-1) → ntBooking=0
 
-Verified anchors (July 2026, after CHANNEL_COL_OVERRIDE fix):
-  FY2026-27: booking ₹87.01 Cr, ntBooking ₹6.57 Cr, govtAudit ₹0 (no chan col)
+Verified anchors (July 2026, CHANNEL_COL_OVERRIDE block for FY2023-24):
+  FY2026-27: booking ₹87.01 Cr, ntBooking ₹6.57 Cr, govtAudit ₹0
   FY2025-26: booking ₹342.03 Cr, ntBooking ₹12.56 Cr (channel), govtAudit ₹12.56 Cr
   FY2024-25: booking ₹333.81 Cr, ntBooking ₹41.34 Cr (HEAD), govtAudit ₹16.76 Cr
-  FY2023-24: booking ₹377.39 Cr, ntBooking ₹10.72 Cr, govtAudit ₹10.72 Cr ✓
+  FY2023-24: booking ₹377.39 Cr, ntBooking ₹0 (no HEAD + col 20=SEGMENT blocked), govtAudit ₹0
 
 Cold-cache warm-up: startup fires readOrderTabInventory+readBookingAggregated for all 4 FYs
 sequentially in the background. Both have 30-min TTL module-level caches. First call ~2 min.
 
 ## isTerritory detection rules for primary_order_line ingest
-chanIsExplicit=true (explicit header OR CHANNEL_COL_OVERRIDE with explicit=true):
+chanIsExplicit=true (explicit header match OR CHANNEL_COL_OVERRIDE with explicit=true):
   cell matches /^govt/i → isTerritory=false; else → isTerritory=true.
 chanIsExplicit=false (last-non-empty fallback, no override):
   Can't trust cell value as channel flag → use HEAD column vs NON_TERRITORY_RE.
   HEAD empty and no override → isTerritory=null.
+CHANNEL_COL_OVERRIDE chanIdx=-1: blocks channel detection entirely → isTerritory=null.
 
-FY2023-24: CHANNEL_COL_OVERRIDE col 20, explicit=true → all rows attributed:
-  4,641 institutional (isTerritory=false) = ₹10.72 Cr; 134,309 territory; 0 null ✓
-FY2024-25: NON_TERRITORY_RE on HEAD → 14,554 institutional rows (₹41.62 Cr);
-  HEAD approach captures GEM/JJM/PROJECT heads beyond strict "Govt" only.
+FY2023-24: chanIdx=-1 (SEGMENT blocked) + headIdx=-1 → all rows isTerritory=null.
+FY2024-25: NON_TERRITORY_RE on HEAD → 14,554 institutional rows (₹41.62 Cr).
 FY2025-26: 4,274 institutional rows = ₹12.56 Cr; 143,732 territory; 0 null ✓
 FY2026-27: 2,627 institutional rows = ₹6.57 Cr; 33,645 territory; 0 null ✓
 
@@ -133,11 +125,10 @@ FY2026-27: 2,627 institutional rows = ₹6.57 Cr; 33,645 territory; 0 null ✓
 lineUid key: sha1(fy|sourceTab|customer|code|qty|taxableValue|occurrence); occurrence per-tab.
 monthLabel: from invoice_date column first, then from tab title + FY year offsets.
 
-Verified DB row counts and totals (all 4 FYs, CHANNEL_COL_OVERRIDE fix applied Jul-2026):
-  FY2023-24: 138,950 rows ₹377.39 Cr — 134,309 territory / 4,641 institutional (₹10.72 Cr) / 0 null ✓
+Verified DB row counts and totals (all 4 FYs, Jul-2026):
+  FY2023-24: 138,950 rows ₹377.39 Cr — all is_territory=null (no HEAD col; SEGMENT blocked)
   FY2024-25: 145,781 rows ₹333.81 Cr — 131,227 territory / 14,554 institutional / 0 null ✓
   FY2025-26: 148,006 rows ₹342.03 Cr — 143,732 territory / 4,274 institutional (₹12.56 Cr) / 0 null ✓
   FY2026-27:  36,272 rows  ₹87.01 Cr —  33,645 territory / 2,627 institutional (₹6.57 Cr) / 0 null ✓
   Total: 469,009 rows. Per-head unique rows (e.g. ANUJ SHARMA) not yet inserted.
   Ingest idempotency verified: re-running any FY returns inserted=0.
-  FY2023-24 re-ingested after fix: 138,950 rowsEmitted / 138,950 inserted / 0 errors.

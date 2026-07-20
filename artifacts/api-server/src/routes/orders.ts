@@ -302,13 +302,13 @@ router.get(
         //   FY2026-27  HEAD column present → HEAD method
         //   FY2024-25  HEAD column present → HEAD method (captures GEM/JJM/PROJECT)
         //   FY2025-26  headIdx=-1; channel fallback via last-non-empty header col
-        //   FY2023-24  headIdx=-1; channel at unlabeled col 20 ('Govt'/'Retail')
-        //              via CHANNEL_COL_OVERRIDE in primarySheets.ts
+        //   FY2023-24  headIdx=-1, no channel col (col 20 = SEGMENT not channel);
+        //              CHANNEL_COL_OVERRIDE blocks detection → ntBooking = 0
         //
-        // govtValue (Channel column "Govt" rows from readOrderTabInventory) is kept as
-        // an audit cross-check.  For FY2023-24 ntBooking === govtValue (same source).
-        // For FY2024-25 the HEAD method picks up GEM/JJM/PROJECT not flagged as 'Govt'
-        // so ntBooking > govtValue — the difference is non-Govt institutional booking.
+        // govtValue (Channel "Govt" rows from readOrderTabInventory) is an audit field.
+        // For FY2023-24 govtValue = 0 (channel detection blocked; col 20 is SEGMENT).
+        // For FY2024-25 ntBooking > govtValue: HEAD captures GEM/JJM/PROJECT heads
+        // that are institutional but not flagged "Govt" in the channel column.
         const govtValue        = included.reduce((s, t) => s + t.govtValue, 0);
         const ntBooking        = bookingAgg.ntBooking;
         const territoryBooking = companyBooking - ntBooking;
