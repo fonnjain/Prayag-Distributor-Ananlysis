@@ -87,16 +87,36 @@ analysis until clarified.  For territory/institutional split on FY2025-26, use a
 route (sale_line) not SALE_SHEETS.
 
 ## Booking vs Sale split (GET /api/orders/booking-vs-sale)
-Route compares loadPrimarySheetData booking vs sale by FY, splitting by Non-territory bucket.
-FY2026-27 (4 months booking, 3 months sale — not comparable):
-  booking ₹86.96 Cr, sale ₹77.68 Cr, ntSale ₹6.24 Cr, ntBooking ₹6.55 Cr.
-  Note: ₹6.55 Cr of booking triggers NON_TERRITORY_RE — contradicts "100% Retail" Phase 0.
-FY2025-26: booking = 0 in BOOKING_SHEETS (only in ORDER_BOOKING_SHEET_IDS).
-  SALE_SHEETS["2025-26"] total unreliable (see discrepancy above).
+Route uses readOrderTabInventory (companyBooking) + readBookingAggregated (ntBooking via HEAD col)
+with govtValue fallback rule: `ntBooking = govtValue > 0 ? govtValue : bookingAgg.ntBooking`.
+Verified anchors (July 2026):
+  FY2026-27: booking ₹87.4 Cr, ntBooking ₹6.57 Cr, territory ₹80.83 Cr
+  FY2025-26: booking ₹342.03 Cr, ntBooking ₹12.56 Cr, territory ₹329.47 Cr
+  FY2024-25: booking ₹333.81 Cr, ntBooking ₹16.76 Cr (govtValue), territory ₹317.06 Cr
+  FY2023-24: booking ₹377.39 Cr, ntBooking ₹0
 
-## Insert pipeline status (July 2026)
-`primary_order_line` schema at `lib/db/src/schema/orderLines.ts`.
-`GET /api/orders/dry-run` reads all four FY workbooks (corrected total).
-`GET /api/orders/selftest` — path A vs path B agreement test.
-`GET /api/orders/booking-vs-sale` — territory/institutional split vs booking.
-Insert pipeline (DB write) not yet built — dry-run only.
+Cold-cache warm-up: startup fires readOrderTabInventory+readBookingAggregated for all 4 FYs
+sequentially in the background. Both have 30-min TTL module-level caches. First call ~2 min.
+
+## isTerritory detection rules for primary_order_line ingest
+chanIsExplicit=true (header matched /^(channel|chan|type|sale.?type|category)$/i):
+  cell matches /^govt/i → Govt (isTerritory=false); else → Retail (isTerritory=true).
+chanIsExplicit=false (fallback to last non-empty column):
+  Can't trust cell value as channel flag → use HEAD column vs NON_TERRITORY_RE.
+FY2023-24: no explicit channel header AND head values don't match NON_TERRITORY_RE → isTerritory=null.
+FY2024-25: NON_TERRITORY_RE on HEAD captures GEM/JJM/PROJECT heads → 14,554 institutional rows
+  (₹41.62 Cr) vs govtValue ₹16.76 Cr (strict "Govt" only). HEAD-column approach is more complete.
+
+## Insert pipeline status (July 2026) — COMPLETE
+`primary_order_line` schema at `lib/db/src/schema/orderLines.ts` — migrated.
+`ingestOrderBookingFy(fy, opts)` in primarySheets.ts — monthly tabs only; ON CONFLICT DO NOTHING.
+`POST /api/orders/ingest?fy=<fy>&dry_run=true|false` — trigger route.
+lineUid key: sha1(fy|sourceTab|customer|code|qty|taxableValue|occurrence); occurrence per-tab.
+monthLabel: from invoice_date column first, then from tab title + FY year offsets.
+
+Verified DB row counts and totals (all 4 FYs inserted July 2026):
+  FY2023-24: 138,950 rows ₹377.39 Cr — all isTerritory=null (no segmentation in sheet)
+  FY2024-25: 145,781 rows ₹333.81 Cr — 131,227 territory / 14,554 institutional
+  FY2025-26: 148,006 rows ₹342.03 Cr — 143,732 territory / 4,274 institutional (inst=₹12.56 Cr ✓)
+  FY2026-27:  36,272 rows  ₹87.01 Cr —  33,645 territory / 2,627 institutional (inst=₹6.57 Cr ✓)
+  Total: 469,009 rows. Per-head unique rows (e.g. ANUJ SHARMA) not yet inserted.

@@ -4,9 +4,11 @@ import { eq, sql } from "drizzle-orm";
 import { ORDER_BOOKING_SHEET_IDS } from "../lib/mgmt/primaryAttribution.js";
 import {
   readOrderTabInventory,
+  readBookingAggregated,
   loadPrimarySheetData,
   invalidatePrimarySheetCache,
   readSaleSheetFyFiltered,
+  ingestOrderBookingFy,
   SALE_SHEETS,
 } from "../lib/mgmt/primarySheets.js";
 
@@ -267,9 +269,18 @@ router.get(
 
     const results = await Promise.allSettled(
       fys.map(async (fy) => {
-        // ── Booking: Order Booking sheet (same correction as dry-run) ─────────
-        const bookingSheetId = ORDER_BOOKING_SHEET_IDS[fy];
-        const inventory = await readOrderTabInventory(bookingSheetId);
+        // ── Booking: parallel readOrderTabInventory + readBookingAggregated ───
+        // readOrderTabInventory gives the accurate companyBooking (monthly tabs +
+        // perHeadUnique correction).  readBookingAggregated uses readAndAggregate
+        // with isBooking=true (HEAD-column NON_TERRITORY_RE) to get ntBooking —
+        // reliable across all 4 FY layouts, unlike govtValue which needs a
+        // "Channel" column absent from FY2026-27 and FY2023-24 sheets.
+        // Both calls read the same sheet so the dedup/inflight cache fires once.
+        const bookingSheetId = ORDER_BOOKING_SHEET_IDS[fy]!;
+        const [inventory, bookingAgg] = await Promise.all([
+          readOrderTabInventory(bookingSheetId),
+          readBookingAggregated(bookingSheetId),
+        ]);
         const included = inventory.filter((t) => t.includedInSum);
         const excluded = inventory.filter((t) => !t.includedInSum);
         const monthlyTotal = included.reduce((s, t) => s + t.taxableValue, 0);
@@ -282,6 +293,17 @@ router.get(
           )
           .reduce((s, t) => s + (t.contentVerification?.uniqueAmount ?? 0), 0);
         const companyBooking = monthlyTotal + perHeadUniqueAmount;
+        // ntBooking source selection:
+        //  • govtValue (readOrderTabInventory) = row-level "govt/institutional"
+        //    flag via a Channel/Type column — accurate when the column exists
+        //    (FY2025-26, FY2024-25 sheets).
+        //  • bookingAgg.ntBooking (readBookingAggregated) = HEAD-column
+        //    NON_TERRITORY_RE match — accurate for FY2026-27 which has no
+        //    Channel column but the HEAD column carries the segment.
+        //  Rule: prefer govtValue when > 0; fall back to HEAD-column otherwise.
+        const govtValue        = included.reduce((s, t) => s + t.govtValue, 0);
+        const ntBooking        = govtValue > 0 ? govtValue : bookingAgg.ntBooking;
+        const territoryBooking = companyBooking - ntBooking;
 
         // ── Sale: sale_line (primary register in DB), split by is_territory ───
         const [saleRow] = await db
@@ -310,8 +332,12 @@ router.get(
         return {
           fy,
           booking: {
-            total: Math.round(companyBooking),
-            crore: crore(companyBooking),
+            total:               Math.round(companyBooking),
+            crore:               crore(companyBooking),
+            ntBooking:           Math.round(ntBooking),
+            ntBookingCrore:      crore(ntBooking),
+            territoryBooking:    Math.round(territoryBooking),
+            territoryBookingCrore: crore(territoryBooking),
           },
           sale: {
             total:              Math.round(totalSale),
@@ -325,8 +351,13 @@ router.get(
             institutionalCrore: crore(institutionalSale),
           },
           ratios: {
-            bookingVsTotalSale:     ratio(companyBooking, totalSale),
-            bookingVsTerritorySale: ratio(companyBooking, territorySale),
+            // Apples-to-apples: territory booking vs territory dispatch
+            territoryVsTerritorySale:         ratio(territoryBooking, territorySale),
+            // Institutional booking vs institutional dispatch
+            institutionalVsInstitutionalSale: ratio(ntBooking, institutionalSale),
+            // Legacy (kept for reference — apples-to-oranges as booking includes institutional)
+            bookingVsTotalSale:               ratio(companyBooking, totalSale),
+            bookingVsTerritorySale:           ratio(companyBooking, territorySale),
           },
           note: unclassifiedRows > 0
             ? `${unclassifiedRows} rows (${crore(unclassifiedSale)} Cr) have is_territory=NULL`
@@ -464,6 +495,37 @@ router.get(
       unconfigured,
       note: `FY YEAR filter: "FY-${fy}". Each workbook holds two FYs; this isolates the target FY only.`,
     });
+  },
+);
+
+// ── POST /api/orders/ingest ────────────────────────────────────────────────
+//
+// Reads monthly tabs from BOOKING_SHEETS[fy] and upserts rows into
+// primary_order_line (ON CONFLICT (line_uid) DO NOTHING — fully idempotent).
+//
+// Query params:
+//   fy       — required; e.g. "2026-27"
+//   dry_run  — optional; "true" reads and counts rows but does not insert
+//
+// Returns IngestOrderBookingResult.
+router.post(
+  "/orders/ingest",
+  async (req: Request, res: Response): Promise<void> => {
+    const fy = typeof req.query["fy"] === "string" ? req.query["fy"].trim() : "";
+    if (!fy) {
+      res.status(400).json({ error: "fy query param is required (e.g. ?fy=2026-27)" });
+      return;
+    }
+    const dryRun = req.query["dry_run"] === "true";
+    req.log.info({ fy, dryRun }, "orders ingest: starting");
+
+    const result = await ingestOrderBookingFy(fy, { dryRun });
+
+    req.log.info(
+      { fy, dryRun, rowsEmitted: result.rowsEmitted, inserted: result.inserted, errors: result.errors.length },
+      "orders ingest: complete",
+    );
+    res.json(result);
   },
 );
 

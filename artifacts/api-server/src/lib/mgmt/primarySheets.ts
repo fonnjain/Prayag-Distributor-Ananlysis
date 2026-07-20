@@ -11,6 +11,7 @@
 // The byHead breakdown is always available from the STATE HEAD column.
 // The byDistributor breakdown is always available from the Customer column.
 // Both degrade to empty (with a reason) when sheets are unreachable.
+import { createHash } from "node:crypto";
 import {
   listSheetTabs,
   readTabRowsChunked,
@@ -19,9 +20,13 @@ import {
 import { normHead, buildHeadResolver } from "./names.js";
 import { loadRoster } from "./roster.js";
 import { logger } from "../logger.js";
+import { db, primaryOrderLines, type InsertPrimaryOrderLine } from "@workspace/db";
 
 export const BOOKING_SHEETS: Record<string, string> = {
   "2026-27": "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A",
+  "2025-26": "1Xzq-gmB6K7iuMcE6gb-O7OpvGgSDU33DzEVyK60LK6E",
+  "2024-25": "1cT6lWRPJ3oSeYhab-cqeVjJidGitFQsr0DOq-vNn6cI",
+  "2023-24": "1jtSUGE6iT8WuUKi56F4LYqjJgZF42oR1mk51imG8yq8",
 };
 
 export const SALE_SHEETS: Record<string, string> = {
@@ -153,6 +158,8 @@ export type OrderTabInventoryRow = {
 export type PrimarySheetData = {
   fy: string;
   companyBooking: number;
+  /** Non-territory (institutional) booking from the booking sheet (NON_TERRITORY_RE matched on HEAD column). */
+  ntBooking: number;
   companySale: number;
   companyPending: number;
   byHead: PrimaryHeadRow[];
@@ -452,6 +459,30 @@ export async function readSaleSheetFyFiltered(
 ): Promise<{ total: number; fyYearValues: string[]; ntHeads: string[] }> {
   const agg = await readAndAggregate(sheetId, false, { fyFilter });
   return { total: agg.total, fyYearValues: agg.fyYearValues, ntHeads: agg.ntHeads };
+}
+
+const _bookingAggCache = new Map<
+  string,
+  { ts: number; result: { companyTotal: number; ntBooking: number } }
+>();
+
+/**
+ * Lightweight booking-only aggregate: reads a single booking sheet via
+ * readAndAggregate (isBooking=true, HEAD-column NON_TERRITORY_RE detection)
+ * and returns companyTotal and ntBooking.  Does NOT read any sale sheet.
+ * Results are cached for TTL_MS (30 min) — keyed by sheetId.
+ * Used by the booking-vs-sale route so it can run in parallel with
+ * readOrderTabInventory without triggering slow sale-sheet reads.
+ */
+export async function readBookingAggregated(
+  sheetId: string,
+): Promise<{ companyTotal: number; ntBooking: number }> {
+  const cached = _bookingAggCache.get(sheetId);
+  if (cached && Date.now() - cached.ts < TTL_MS) return cached.result;
+  const agg = await readAndAggregate(sheetId, true);
+  const result = { companyTotal: agg.total, ntBooking: agg.nonTerritoryTotal };
+  _bookingAggCache.set(sheetId, { ts: Date.now(), result });
+  return result;
 }
 
 // ── Tab inventory ─────────────────────────────────────────────────────────────
@@ -943,6 +974,7 @@ export async function loadPrimarySheetData(fy: string): Promise<PrimarySheetData
   const data: PrimarySheetData = {
     fy,
     companyBooking: bookingAgg.total,
+    ntBooking: bookingAgg.nonTerritoryTotal,
     companySale: saleAgg.total,
     companyPending: Math.max(0, bookingAgg.total - saleAgg.total),
     byHead,
@@ -958,4 +990,272 @@ export async function loadPrimarySheetData(fy: string): Promise<PrimarySheetData
 
   _cache.set(fy, { ts: Date.now(), data });
   return data;
+}
+
+// ── Order Booking Ingest ──────────────────────────────────────────────────────
+
+export type IngestOrderBookingResult = {
+  fy: string;
+  dryRun: boolean;
+  tabsRead: string[];
+  rowsEmitted: number;
+  inserted: number;
+  errors: string[];
+};
+
+const _MONTH_ABBR = [
+  "Jan","Feb","Mar","Apr","May","Jun",
+  "Jul","Aug","Sep","Oct","Nov","Dec",
+];
+
+/** "YYYY-MM-DD" → "Mon-YY" (e.g. "2026-04-15" → "Apr-26"). */
+function _isoToMonthLabel(isoDate: string): string | null {
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(isoDate);
+  if (!m) return null;
+  const yy  = Number(m[1]) % 100;
+  const mon = Number(m[2]) - 1;
+  if (mon < 0 || mon > 11) return null;
+  return `${_MONTH_ABBR[mon]}-${String(yy).padStart(2, "0")}`;
+}
+
+/**
+ * Derive month label from a tab title + FY string.
+ * "Apr" in FY "2026-27" → "Apr-26";  "Jan" in FY "2026-27" → "Jan-27".
+ * Apr–Dec use the first calendar year; Jan–Mar use the second.
+ */
+function _tabToMonthLabel(tabTitle: string, fy: string): string | null {
+  const fyM = /^(\d{4})-(\d{2})$/.exec(fy);
+  if (!fyM) return null;
+  const yr1 = Number(fyM[1]) % 100; // e.g. 26
+  const yr2 = Number(fyM[2]);        // e.g. 27
+  const norm = tabTitle.trim().toLowerCase();
+  for (let i = 0; i < _MONTH_ABBR.length; i++) {
+    if (norm.startsWith(_MONTH_ABBR[i].toLowerCase())) {
+      const yy = i >= 3 ? yr1 : yr2; // Apr(3)…Dec(11) → yr1; Jan(0)…Mar(2) → yr2
+      return `${_MONTH_ABBR[i]}-${String(yy).padStart(2, "0")}`;
+    }
+  }
+  return null;
+}
+
+function _orderLineUid(
+  fy: string,
+  sourceTab: string,
+  customer: string,
+  code: string,
+  qty: string,
+  tv: string,
+  occurrence: number,
+): string {
+  const key = [fy, sourceTab, customer, code, qty, tv].join("|");
+  return createHash("sha1").update(`${key}|${occurrence}`).digest("hex");
+}
+
+const _INGEST_BATCH = 500;
+
+/**
+ * Read all monthly tabs from BOOKING_SHEETS[fy] and upsert rows into
+ * primary_order_line (ON CONFLICT (line_uid) DO NOTHING — fully idempotent).
+ *
+ * Only monthly tabs are inserted in this initial pipeline.  Per-head tabs
+ * with unique rows (e.g. ANUJ SHARMA) are skipped and counted in errors[].
+ *
+ * isTerritory logic:
+ *  1. Explicit channel column present AND cell value matches /^(retail|govt)$/i
+ *     → isTerritory = (channel !== "Govt").
+ *  2. No explicit channel column → HEAD column vs NON_TERRITORY_RE.
+ *  3. Neither available → null.
+ */
+export async function ingestOrderBookingFy(
+  fy: string,
+  opts: { dryRun?: boolean } = {},
+): Promise<IngestOrderBookingResult> {
+  const { dryRun = false } = opts;
+  const sheetId = BOOKING_SHEETS[fy];
+  if (!sheetId) {
+    return {
+      fy, dryRun,
+      tabsRead: [],
+      rowsEmitted: 0,
+      inserted: 0,
+      errors: [`No BOOKING_SHEETS entry for FY ${fy}`],
+    };
+  }
+
+  const errors: string[] = [];
+  const tabsRead: string[] = [];
+  let totalEmitted = 0;
+  let totalInserted = 0;
+
+  const tabs = await listSheetTabs(sheetId);
+
+  for (const tab of tabs) {
+    const cls = classifyOrderTab(tab.title.trim());
+    if (cls.role !== "monthly") continue;
+
+    const occCounts = new Map<string, number>();
+    const nextOcc = (key: string): number => {
+      const n = occCounts.get(key) ?? 0;
+      occCounts.set(key, n + 1);
+      return n;
+    };
+
+    let dateIdx = -1, taxIdx = -1, unitIdx = -1, qtyIdx = -1;
+    let chanIdx = -1, chanIsExplicit = false;
+    let headIdx = -1, custIdx = -1, codeIdx = -1;
+    let headerFound = false;
+    const tabRows: InsertPrimaryOrderLine[] = [];
+
+    try {
+      await readTabRowsChunked(sheetId, tab.title, (chunkRows, startRow) => {
+        for (let ri = 0; ri < chunkRows.length; ri++) {
+          const row = chunkRows[ri];
+          const globalRow = startRow + ri;
+
+          if (!headerFound) {
+            if (globalRow > 30) continue;
+            const tI = findCol(row, /taxable\s*(value|amount)|^amount$/i);
+            if (tI < 0) continue;
+
+            taxIdx  = tI;
+            headIdx = findCol(row, /state\s*head|^head$|^tm\s*(name)?$|^rsm$|^sm$|sales\s*head|^zone$/i);
+            dateIdx = findCol(row, /^(date|order.?date|invoice.?date)$/i);
+            unitIdx = findCol(row, /^(unit(\.name| name)?|uom|measure)$/i);
+            qtyIdx  = findCol(row, /^(qty|quantity|qnty|pieces?)$/i);
+            custIdx = findCol(row, /^(customer|party[\s_]*name?|firm\s*name|dealer\s*name|distributor\s*name)$/i);
+            if (custIdx < 0) custIdx = findCol(row, /customer|party/i);
+            codeIdx = findCol(row, /^(item[\s_]*code|code|product[\s_]*code|sku|material[\s_]*code)$/i);
+
+            const eChan = findCol(row, /^(channel|chan|type|sale.?type|category)$/i);
+            chanIsExplicit = eChan >= 0;
+            if (eChan >= 0) {
+              chanIdx = eChan;
+            } else {
+              chanIdx = -1;
+              for (let ci = row.length - 1; ci >= 0; ci--) {
+                if (strVal(row[ci])) { chanIdx = ci; break; }
+              }
+            }
+            headerFound = true;
+            continue;
+          }
+
+          const tv = numVal(row[taxIdx]);
+          if (tv <= 0) continue;
+
+          // Date & month label
+          const dateStr   = dateIdx >= 0 ? parseOrderDate(row[dateIdx]) : null;
+          const monthLabel = dateStr
+            ? _isoToMonthLabel(dateStr)
+            : _tabToMonthLabel(tab.title.trim(), fy);
+
+          // Fields
+          const customer = custIdx >= 0 ? strVal(row[custIdx]) : "";
+          const code     = codeIdx >= 0 ? strVal(row[codeIdx]) : "";
+          const rawQtyN  = qtyIdx  >= 0 ? numVal(row[qtyIdx]) : 0;
+          const unit     = unitIdx >= 0 ? strVal(row[unitIdx]) : "";
+          const qtyUnit  = /^ltr\.?$/i.test(unit) ? "Ltr" : "Pcs";
+          const headRaw  = headIdx >= 0 ? strVal(row[headIdx]) || null : null;
+          const headCanon = headRaw ? normHead(headRaw) || null : null;
+
+          // isTerritory
+          // Priority: explicit channel column > HEAD-column NON_TERRITORY_RE > null.
+          //
+          // When chanIsExplicit=true (header name matched channel/type/etc.):
+          //   "Govt" → institutional (false).
+          //   Anything else → territory (true).  Matches readOrderTabInventory's
+          //   govtValue logic: govtValue += amt if /^govt$/i; else retailValue.
+          //
+          // When chanIsExplicit=false (fallback = last non-empty column):
+          //   Can't trust the cell value as a channel flag → use HEAD column.
+          let chanRaw: string | null = null;
+          let isTerritory: boolean | null = null;
+          if (chanIdx >= 0) {
+            const cv = strVal(row[chanIdx]);
+            if (/^govt/i.test(cv)) {
+              chanRaw = "Govt";
+              isTerritory = false;
+            } else if (chanIsExplicit) {
+              // Explicit channel column, non-Govt → treat as territory (Retail).
+              chanRaw = "Retail";
+              isTerritory = true;
+            } else if (headIdx >= 0 && headRaw) {
+              // Fallback channel (last-col heuristic) — use HEAD column instead.
+              const hNorm = normHead(headRaw);
+              if (hNorm) isTerritory = !NON_TERRITORY_RE.test(hNorm);
+            }
+          }
+          // HEAD-column fallback when no channel detection fired at all.
+          if (isTerritory === null && headIdx >= 0 && headRaw) {
+            const hNorm = normHead(headRaw);
+            if (hNorm) isTerritory = !NON_TERRITORY_RE.test(hNorm);
+          }
+
+          const tvStr  = String(tv);
+          const qtyStr = rawQtyN ? String(rawQtyN) : "";
+          const occKey = [customer, code, qtyStr, tvStr].join("|");
+          const uid    = _orderLineUid(
+            fy, tab.title.trim(), customer, code, qtyStr, tvStr, nextOcc(occKey),
+          );
+
+          tabRows.push({
+            lineUid:      uid,
+            fy,
+            invoiceDate:  dateStr,
+            monthLabel,
+            customer:     customer || null,
+            code:         code || null,
+            qty:          rawQtyN ? String(rawQtyN) : null,
+            qtyUnit,
+            taxableValue: String(tv),
+            headRaw,
+            headCanon,
+            isTerritory,
+            channel:      chanRaw,
+            sourceTab:    tab.title.trim(),
+            sheetId,
+          });
+        }
+      });
+
+      if (tabRows.length > 0) {
+        tabsRead.push(tab.title.trim());
+        totalEmitted += tabRows.length;
+
+        if (!dryRun) {
+          for (let i = 0; i < tabRows.length; i += _INGEST_BATCH) {
+            const slice = tabRows.slice(i, i + _INGEST_BATCH);
+            const res = await db
+              .insert(primaryOrderLines)
+              .values(slice)
+              .onConflictDoNothing()
+              .returning({ uid: primaryOrderLines.lineUid });
+            totalInserted += res.length;
+          }
+        }
+
+        logger.info(
+          { fy, tab: tab.title.trim(), rows: tabRows.length, dryRun },
+          "ingestOrderBookingFy: tab done",
+        );
+      }
+    } catch (err) {
+      const msg = `Tab "${tab.title}": ${String(err)}`;
+      errors.push(msg);
+      logger.warn({ err, fy, tab: tab.title }, "ingestOrderBookingFy: tab error");
+    }
+  }
+
+  logger.info(
+    { fy, tabsRead, totalEmitted, totalInserted, dryRun, errors: errors.length },
+    "ingestOrderBookingFy: complete",
+  );
+  return {
+    fy,
+    dryRun,
+    tabsRead,
+    rowsEmitted: totalEmitted,
+    inserted: dryRun ? 0 : totalInserted,
+    errors,
+  };
 }

@@ -1,6 +1,6 @@
 // Orchestrates building and persisting dashboard snapshots.
-import { desc } from "drizzle-orm";
-import { db, dashboardSnapshots, type DashboardSnapshot } from "@workspace/db";
+import { desc, eq, sql } from "drizzle-orm";
+import { db, dashboardSnapshots, saleLines, type DashboardSnapshot } from "@workspace/db";
 import { logger } from "../logger.js";
 import { fetchWorkbook } from "../sheets.js";
 import {
@@ -44,6 +44,17 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
   const orders = buildFromOrders(orderWb);
   const resources = buildResources(rosterWb, headDashWb);
 
+  // FY2024-25 primary dispatch total — sourced from the invoice-line register
+  // (sale_line WHERE fy = '2024-25') rather than the item-wise SALE tab in the
+  // dashboard workbook.  Two independent sources (sale_line and the State Head
+  // Sale 2025-26 sheet filtered on FY-2024-25) both return Rs.341.14 Cr; the
+  // SALE tab returns Rs.341.73 Cr (+Rs.0.59 Cr) and is the odd one out.
+  const [fy2425DbRow] = await db
+    .select({ total: sql<string>`sum(amount)` })
+    .from(saleLines)
+    .where(eq(saleLines.fy, "2024-25"));
+  const fy2425SalesInr = Number(fy2425DbRow?.total ?? fy2425.grand_total);
+
   const data = {
     fy2425,
     orders_fy2627: orders.orders_fy2627,
@@ -60,7 +71,7 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
       channel_partners: resources.channel_partners,
       retailers: resources.retailers,
       retailer_sales_inr: resources.retailer_sales_inr,
-      fy2425_sales_inr: fy2425.grand_total,
+      fy2425_sales_inr: fy2425SalesInr,
       orders_fy2627_ytd_cr: orders.orders_ytd_cr,
     },
   };

@@ -14,6 +14,11 @@ import {
 } from "./lib/customers/registerSync.js";
 import { ensureAndSeedStateTargets } from "./lib/mgmt/stateTargetSeed.js";
 import { loadStateDashboard } from "./lib/mgmt/stateDashboard.js";
+import {
+  readOrderTabInventory,
+  readBookingAggregated,
+  BOOKING_SHEETS,
+} from "./lib/mgmt/primarySheets.js";
 
 const rawPort = process.env["PORT"];
 
@@ -60,6 +65,21 @@ app.listen(port, (err) => {
     loadStateHeadSale("2026-27"),
     loadStateDashboard("2026-27"),
   ]).catch((err) => logger.warn({ err }, "mgmt warm-up failed"));
+
+  // Pre-warm order-booking sheet caches (readOrderTabInventory + readBookingAggregated)
+  // for all four FYs so the booking-vs-sale route responds instantly after startup.
+  // These reads are slow on a cold server (~2 min total); warming them in the background
+  // prevents HTTP timeouts on the first user request.
+  void (async () => {
+    for (const [fy, sheetId] of Object.entries(BOOKING_SHEETS)) {
+      try {
+        await Promise.all([readOrderTabInventory(sheetId), readBookingAggregated(sheetId)]);
+        logger.info({ fy }, "booking sheet warm-up done");
+      } catch (err) {
+        logger.warn({ err, fy }, "booking sheet warm-up failed");
+      }
+    }
+  })();
 
   // Keep the served snapshot fresh with a periodic background sync
   // (interval configurable via DASHBOARD_SYNC_INTERVAL_MINUTES, 0 disables).

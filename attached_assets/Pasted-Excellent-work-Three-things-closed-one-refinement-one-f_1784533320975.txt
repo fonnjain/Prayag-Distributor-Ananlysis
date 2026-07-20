@@ -1,0 +1,91 @@
+Excellent work. Three things closed, one refinement, one flag.
+
+CLOSED - THE Rs.0.59 Cr MYSTERY
+
+That was the first discrepancy I raised in this entire project, on the Overview
+tiles, and it has been open ever since. You have explained it: transform.ts
+reads the item-wise SALE tab in the dashboard workbook, which is a different
+source from the register.
+
+But that leaves a live question. THREE sources now exist for FY2024-25 primary
+sale:
+
+  register (sale_line)                Rs.341.14 Cr
+  State Head Sale 2025-26, FY-filtered Rs.341.14 Cr
+  Overview tile via transform.ts       Rs.341.73 Cr
+
+The first two agree exactly, from independent paths. The tile - the most
+visible number in the application - reads a third source that disagrees.
+
+Report: what is the item-wise SALE tab, which workbook holds it, and why does
+it total Rs.0.59 Cr more? If the register and the State Head Sale sheet agree,
+the tile is likely the outlier and should be switched to the register.
+
+Also: 141,201 rows in the DB against 141,198 in the sheet. Three rows. Tiny,
+but the values match exactly, so find what those three are.
+
+MY HYPOTHESIS WAS WRONG - AND YOU TESTED IT CORRECTLY
+
+Booking/territory came out at 1.15 to 1.49, not 1.0. You reported the
+disconfirmation plainly instead of massaging it. That is the right behaviour.
+
+But the comparison was apples-to-oranges and that is my fault. You found
+ntBooking = Rs.6.55 Cr for FY2026-27, so BOOKING ITSELF CONTAINS institutional.
+I asked you to compare total booking against territory-only dispatch, which
+guarantees a ratio above 1.
+
+The correct test is territory against territory:
+
+  FY2026-27  territoryBooking 86.96 - 6.55 = 80.41
+             territorySale                    75.13
+             ratio                            1.070
+
+That is close to 1. The hypothesis may hold after all; it was tested with the
+wrong numerator.
+
+ACTION: compute ntBooking for FY2025-26, FY2024-25 and FY2023-24 the same way
+you did for FY2026-27, then report per year:
+
+  territoryBooking / territorySale
+  institutionalBooking / institutionalSale
+
+If territory-to-territory lands near 1.0 across all four years, the structure
+is confirmed and pending should be computed on territory alone. If institutional
+booking is far below institutional sale, that channel is dispatched without
+being booked, which is worth knowing separately.
+
+THE FINDING THAT MATTERS MOST COMMERCIALLY
+
+Institutional dispatch as a share of total:
+
+  FY2023-24   95.76 of 349.02   27.4%
+  FY2024-25   69.72 of 341.14   20.4%
+  FY2025-26   61.06 of 359.52   17.0%
+  FY2026-27    7.05 of  82.18    8.6%  (YTD, incomplete)
+
+Territory over the same period: 253.26, 271.43, 298.47 - growing steadily.
+
+So the business has been replacing institutional revenue with territory
+revenue, and total sale has stayed roughly flat as a result. That is the same
+pattern the secondary side showed, and it is a genuine management finding
+rather than a data artefact. Surface it on the analytics side once the
+territory ratios above are confirmed.
+
+ACCEPTED, NO ACTION
+
+  ntBooking heads GEM / GOVT / JJM / OTHER / PROJECT at Rs.6.55 Cr. Phase 0's
+  "100% retail" was wrong and is now corrected.
+  SEGMENT INDEX classified as lookup rather than silenced.
+  FY YEAR filter working, fyYearValues confirming the two-FY structure.
+  FY2023-24 litre gap: your verification against WT- codes in sale_line was the
+  right check. Value unaffected, volume unreliable for Apr-Jan. Flag it in the
+  data notes so nobody builds a litres-booked metric on those months.
+
+NEXT
+
+Once the territory ratios are in, proceed to the insert pipeline for
+primary_order_line. All four years now read cleanly:
+Rs.86.96 / 342.03 / 333.81 / 377.39 Cr. Dry run and report before committing.
+
+Constraints unchanged: Drive read-only, no DELETE from register tables,
+secondary untouched.
