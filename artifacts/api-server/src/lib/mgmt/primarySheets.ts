@@ -338,6 +338,13 @@ async function readAndAggregate(
       fyYearIdx = -1;
     let headerFound = false;
     let tabRows = 0;
+    // V4 col-20 sanity: true when the channel column came from an explicit
+    // CHANNEL_COL_OVERRIDE (not a header-scan or positional fallback).
+    let chanOverrideExplicit = false;
+    // Unexpected SEGMENT values seen for this tab when chanOverrideExplicit is set.
+    const unknownChanValues = new Set<string>();
+    // Valid values for explicitly-overridden channel columns (FY2023-24 col 20).
+    const EXPECTED_CHAN_RE = /^(retail|jjm|govt|project|gem)$/i;
 
     await readTabRowsChunked(sheetId, tab.title, (rows, startRow) => {
       for (let ri = 0; ri < rows.length; ri++) {
@@ -390,6 +397,7 @@ async function readAndAggregate(
                 const co = CHANNEL_COL_OVERRIDE[sheetId];
                 if (co !== undefined) {
                   chanIdx = co.chanIdx;
+                  chanOverrideExplicit = co.explicit;
                 } else {
                   for (let ci = row.length - 1; ci >= 0; ci--) {
                     if (strVal(row[ci])) { chanIdx = ci; break; }
@@ -428,6 +436,13 @@ async function readAndAggregate(
           if (chanIdx >= 0) {
             const chan = strVal(row[chanIdx]);
             if (NON_TERRITORY_RE.test(chan)) nonTerritoryTotal += amt;
+            // Col-20 sanity: when the channel index came from an explicit override
+            // (FY2023-24), every non-blank value must be one of the known SEGMENT
+            // labels.  Unexpected values indicate a sheet layout change that may
+            // silently mis-classify institutional sales as territory.
+            if (chanOverrideExplicit && chan && !EXPECTED_CHAN_RE.test(chan)) {
+              unknownChanValues.add(chan);
+            }
           }
           total += amt;
           tabRows++;
@@ -467,6 +482,22 @@ async function readAndAggregate(
         }
       }
     });
+
+    // Col-20 sanity: after processing all rows, log any unexpected SEGMENT
+    // values encountered when the explicit channel override was active.
+    // Unexpected values indicate the sheet layout changed and may cause silent
+    // mis-classification of institutional sales as territory.
+    if (unknownChanValues.size > 0) {
+      logger.error(
+        {
+          sheetId,
+          tab: tab.title,
+          unexpectedSegmentValues: [...unknownChanValues].sort(),
+          expectedValues: ["Retail", "JJM", "Govt", "Project", "Gem", "(blank)"],
+        },
+        "primarySheets: unexpected SEGMENT values at explicit chanIdx — review sheet layout",
+      );
+    }
 
     logger.info(
       { sheetId, tab: tab.title, tabRows, tabTotal: Math.round(total) },

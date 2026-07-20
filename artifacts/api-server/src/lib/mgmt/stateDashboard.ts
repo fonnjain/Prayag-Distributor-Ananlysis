@@ -97,8 +97,8 @@ function monthLastDay(monthIdx: number, fy: string): Date {
   return new Date(Date.UTC(calYear, calMonth + 1, 0));
 }
 
-export function isMonthClosed(monthIdx: number, fy: string): boolean {
-  return Date.now() > monthLastDay(monthIdx, fy).getTime();
+export function isMonthClosed(monthIdx: number, fy: string, nowMs = Date.now()): boolean {
+  return nowMs > monthLastDay(monthIdx, fy).getTime();
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -165,6 +165,10 @@ export type SecDashboard = {
   totalSalesReceived: number;
   totalDealers: number;
   ytdAchievement: number | null;
+  // Month indices (0=Apr..11=Mar) where the V4 arrears guard fired:
+  // calendar-closed months where secondary data was not yet entered by state heads.
+  // Absent in snapshots saved before the guard was introduced.
+  arrearsMonths?: number[];
   // Raw values read from the sheet's own TOTAL row (for reconciliation).
   // Null when the TOTAL row could not be located.
   sheetTotals: { orderBooked: number | null; salesReceived: number | null } | null;
@@ -268,7 +272,15 @@ export function getCachedStateDashboard(fy: string): SecDashboard | null {
 //  2. DB snapshot    (closed FYs only — avoids re-reading Sheets after restart)
 //  3. Live Sheets    (always for the current FY; fallback for closed FYs that
 //                     have no DB snapshot yet, i.e. first warm-up)
-export async function loadStateDashboard(fy: string): Promise<SecDashboard | null> {
+// When nowMs is provided the cache is bypassed completely (testing / simulation
+// only — do not pass nowMs in production code paths).
+export async function loadStateDashboard(fy: string, nowMs?: number): Promise<SecDashboard | null> {
+  if (nowMs !== undefined) {
+    // Simulated date: skip cache and fly directly to the uncached loader so the
+    // arrears guard runs with the injected clock. skipPersist=true ensures the
+    // simulation result never contaminates the live in-process cache or DB.
+    return loadStateDashboardUncached(fy, nowMs, true);
+  }
   const hit = _cache.get(fy);
   if (hit && (isClosedFy(fy) || Date.now() - hit.loadedAt < TTL_MS)) return hit;
   const pending = _inFlight.get(fy);
@@ -531,7 +543,7 @@ async function loadPrimaryRoleKeys(
 
 // ── Main loader ───────────────────────────────────────────────────────────────
 
-async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | null> {
+async function loadStateDashboardUncached(fy: string, nowMs = Date.now(), skipPersist = false): Promise<SecDashboard | null> {
   const sheetId = SHEET_IDS[fy];
   if (!sheetId) {
     logger.warn({ fy }, "stateDashboard: no sheet configured for this FY");
@@ -646,12 +658,14 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
       const salesAmount = cellNum(row[base + 5]);
       const salesCount = cellNum(row[base + 6]);
 
-      const closed = isMonthClosed(m, fy);
+      const closed = isMonthClosed(m, fy, nowMs);
       // A month is "not yet recorded" when it has not yet ended on the calendar.
       // Secondary data is entered at month-end, so ANY open month — even one where
       // the sheet has written an explicit zero — must show "in progress", never 0%.
       // The sheet pre-fills plan and sometimes writes zeros for future months; both
       // are meaningless until the month closes.  Use the calendar only.
+      // NOTE: the V4 arrears guard below may override notYetRecorded=false for
+      // calendar-closed months where state heads have not yet entered data.
       const notYetRecorded = !closed;
 
       // Anomaly: sales > 3× orders AND orders > 0.
@@ -734,6 +748,89 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
       isPrimaryRole,
       isLeft,
     });
+  }
+
+  // ── V4 Arrears Guard ─────────────────────────────────────────────────────────
+  // Detect closed months where state heads have not yet entered secondary data.
+  //
+  // Pattern: the calendar says a month is closed (nowMs > last day) but salesAmount
+  // is zero/null across almost all members who have a non-zero plan.  This happens
+  // when state heads record data in arrears — typically 1–3 days after month-end.
+  //
+  // Without this guard, those zero sales get banked into YTD the moment the clock
+  // flips past the last day of the month, collapsing achievement incorrectly until
+  // the state heads enter their figures.
+  //
+  // On trigger:
+  //   • notYetRecorded is set to true for the arrears month across every member.
+  //   • Per-month achievement is suppressed (null).
+  //   • Per-member YTD aggregates are recomputed, excluding the arrears month.
+  //   • The company-level ytdPlanSum / ytdSalesSum (computed in the loop below)
+  //     read m.ytdPlan / m.ytdSalesReceived, so they auto-correct.
+  //
+  // Threshold: < 15% of plan-holding non-LEFT members have non-zero salesAmount.
+  // Floor: require at least 3 plan-holding members to avoid firing on sparse data.
+  const ARREARS_MIN_PLAN_MEMBERS = 3;
+  const ARREARS_THRESHOLD = 0.15;
+
+  const arrearsMonths = new Set<number>();
+  for (let am = 0; am < 12; am++) {
+    if (!isMonthClosed(am, fy, nowMs)) continue;
+
+    const planHolders = members.filter(
+      (mb) => !mb.isLeft && (mb.months[am]?.planAmount ?? 0) > 0,
+    );
+    if (planHolders.length < ARREARS_MIN_PLAN_MEMBERS) continue;
+
+    const withSales = planHolders.filter(
+      (mb) => (mb.months[am]?.salesAmount ?? 0) > 0,
+    );
+    const recordedFraction = withSales.length / planHolders.length;
+
+    if (recordedFraction < ARREARS_THRESHOLD) {
+      arrearsMonths.add(am);
+      logger.warn(
+        {
+          fy,
+          monthIdx: am,
+          monthName: MONTH_NAMES[am],
+          planHolders: planHolders.length,
+          withSales: withSales.length,
+          recordedFraction: recordedFraction.toFixed(3),
+        },
+        "stateDashboard: V4 arrears guard — closed month not yet recorded by state heads",
+      );
+    }
+  }
+
+  if (arrearsMonths.size > 0) {
+    for (const mb of members) {
+      // Re-flag arrears months as notYetRecorded and suppress per-month achievement.
+      for (const am of arrearsMonths) {
+        const md = mb.months[am];
+        if (md) {
+          md.notYetRecorded = true;
+          md.achievement = null;
+        }
+      }
+      // Recompute per-member YTD aggregates, excluding arrears months.
+      let ytdPlan2 = 0;
+      let ytdOrdered2 = 0;
+      let ytdSales2 = 0;
+      let ytdHasData2 = false;
+      for (let am2 = 0; am2 < 12; am2++) {
+        const md2 = mb.months[am2];
+        if (!md2 || md2.notYetRecorded) continue;
+        if (!isMonthClosed(am2, fy, nowMs)) continue;
+        if (md2.planAmount != null) { ytdPlan2 += md2.planAmount; ytdHasData2 = true; }
+        if (md2.orderedAmount != null) ytdOrdered2 += md2.orderedAmount;
+        if (md2.salesAmount != null) ytdSales2 += md2.salesAmount;
+      }
+      mb.ytdOrderBooked = ytdHasData2 ? ytdOrdered2 : null;
+      mb.ytdSalesReceived = ytdSales2 > 0 ? ytdSales2 : (ytdHasData2 ? 0 : null);
+      mb.ytdPlan = ytdHasData2 ? ytdPlan2 : null;
+      mb.ytdAchievement = ytdHasData2 && ytdPlan2 > 0 ? ytdSales2 / ytdPlan2 : null;
+    }
   }
 
   // ── TOTAL row detection (reconciliation) ─────────────────────────────────────
@@ -883,15 +980,18 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
     totalSalesReceived,
     totalDealers,
     ytdAchievement,
+    arrearsMonths: arrearsMonths.size > 0 ? [...arrearsMonths].sort((a, b) => a - b) : undefined,
     sheetTotals,
     anomalies,
     rowsRead: allRows.length,
     loadedAt: Date.now(),
   };
 
-  _cache.set(fy, result);
-  // Persist to DB so cold-restart loads for closed FYs never need Sheets.
-  // Fire-and-forget: a DB write failure must never block the response.
-  saveStateDashboardSnapshot(result).catch(() => {/* already logged */});
+  if (!skipPersist) {
+    _cache.set(fy, result);
+    // Persist to DB so cold-restart loads for closed FYs never need Sheets.
+    // Fire-and-forget: a DB write failure must never block the response.
+    saveStateDashboardSnapshot(result).catch(() => {/* already logged */});
+  }
   return result;
 }

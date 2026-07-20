@@ -75,7 +75,14 @@ type SecondaryTotal = {
   salesReceived: number;
   ytdAchievement: number | null;
   totalDealers: number;
+  // Month indices (0=Apr..11=Mar) where the V4 arrears guard fired:
+  // calendar-closed but not yet entered by state heads.
+  arrearsMonths?: number[];
 };
+
+const SEC_MONTH_LABELS = [
+  "Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar",
+] as const;
 
 type AnomalyRecord = {
   name: string;
@@ -477,6 +484,22 @@ export default function CombinedPerformanceDashboard() {
               />
             </div>
           </div>
+
+          {/* Arrears guard notice: closed months not yet entered by state heads */}
+          {(data.meta.secondaryTotal?.arrearsMonths?.length ?? 0) > 0 && (
+            <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-500/5 p-3 text-xs">
+              <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-blue-600 dark:text-blue-400" />
+              <span className="text-blue-800 dark:text-blue-300">
+                <strong>
+                  {(data.meta.secondaryTotal!.arrearsMonths!).map(
+                    (m) => SEC_MONTH_LABELS[m],
+                  ).join(", ")} secondary data not yet recorded.
+                </strong>{" "}
+                The month has ended but state heads have not yet entered figures.
+                YTD achievement excludes {data.meta.secondaryTotal!.arrearsMonths!.length === 1 ? "this month" : "these months"} — figures will update automatically once data is entered.
+              </span>
+            </div>
+          )}
 
           {/* Anomaly warnings */}
           {anomalies.length > 0 && (

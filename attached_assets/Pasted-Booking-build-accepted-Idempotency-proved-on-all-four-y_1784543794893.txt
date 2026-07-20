@@ -1,0 +1,89 @@
+Booking build accepted. Idempotency proved on all four years, zero inserted.
+Ratios cluster at 1.059-1.130 with one predicate throughout, and govtValue
+demoted to an audit field. That is the right shape.
+
+ONE THING TO RECORD, NOT FIX
+
+FY2023-24 uses column 20 in the monthly tabs, and that column is absent from
+the header row - it exists only in data rows. Nothing detects it; it works
+because CHANNEL_COL_OVERRIDE hardcodes it.
+
+That is fine, but it is fragile in a specific way: if anyone inserts or removes
+a column in those monthly tabs, index 20 silently points at the wrong field and
+the whole year misclassifies with no error. It already happened once this
+session when 20 was read as SEGMENT.
+
+Add a sanity check on read: the values at index 20 must be drawn from
+{Retail, JJM, Govt, Project, Gem, blank}. If something else appears, fail
+loudly rather than classifying against it. Cheap insurance on a hardcoded index.
+
+Also record in the data notes that FY2023-24's combined tab holds 16,533 rows
+at Rs.40.6 Cr and is neither a duplicate nor a union of the monthly tabs.
+
+NOW - TWO THINGS WITH A DEADLINE, BOTH SECONDARY
+
+Today is 20 July. On 1 August, July closes. Neither of these has been tested
+and both fire automatically that day.
+
+A. THE ARREARS GUARD - highest priority
+
+Every FY2026-27 member currently shows ZERO for July in the secondary
+dashboard, while primary already carries July booking. That sheet is updated
+in arrears.
+
+On 1 August the rules treat July as a CLOSED month with genuinely zero sales.
+Every salesperson reads 0%, YTD achievement collapses, and State Heads see it.
+
+The V4 guard is supposed to catch this - a closed month that is zero across
+most members WHO HAVE A PLAN is "not yet recorded", held and flagged, not
+banked. It was specified and never tested.
+
+Test it by simulating the date, not by waiting:
+  a) Set effective date to 1 August 2026 with July cells still zero. Report
+     what the app shows for July achievement, YTD achievement, and per member.
+  b) Confirm the guard fires and July is held, not banked as zero.
+  c) If it does not fire, fix it. This is the single highest-value item left.
+  d) Confirm YTD correctly becomes Apr-Jul once July has real data, with the
+     plan denominator growing to match.
+
+B. JULY PRIMARY DISPATCH - still unresolved
+
+2,350 rows at Rs.4.50 Cr sit in sale_line but not in the live sheet. The
+db-gap export exists; the question of whether they should be restored is with
+the sheet owner and unanswered.
+
+On 1 August whichever figure is in place gets locked into Q2, into half-year,
+and into every year-on-year built on them.
+
+Until it is answered, mark FY2026-27 July primary figures as PROVISIONAL
+wherever they appear, so nobody quotes a number still in dispute.
+
+THEN - WHAT NOBODY HAS DONE
+
+Every check in this project, primary and secondary, has been at database or API
+level. Gate 3 proved achievement_pct equals received/plan across 4,223 rows. It
+never confirmed that a State Head opening their page sees a number they would
+recognise as correct.
+
+Those are different things. A correct value can sit under a wrong label, for a
+wrong period.
+
+Load the app as a user and report what is DISPLAYED, with labels:
+  - FY2026-27 company Q1 achievement. Should be roughly 66-74%. If 15.86%
+    appears anywhere as "achievement" that is a fail - it is annual progress,
+    three months of sales against a twelve-month plan.
+  - July. Must read "in progress" or "not yet recorded". Never 0%.
+  - Aug through Mar. Blank or "not yet recorded". Never 0.
+  - One State Head's page - Anant Singh. Do member figures look sane, and does
+    the page total match the sum of his members?
+  - A member with no plan. Must read UNDEFINED or "no target", never 0%.
+  - Primary Overview tiles. FY2024-25 and FY2025-26 unchanged.
+
+Report rendered labels and values, not query results.
+
+ORDER: A first, it has a deadline and is untested. Then B. Then the UI check.
+The FY2023-24 sanity check can follow.
+
+Constraints unchanged: Drive read-only, no DELETE from register tables,
+secondary data untouched - testing the arrears guard is a read and a simulated
+date, not a change to any stored row.

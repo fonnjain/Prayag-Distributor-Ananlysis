@@ -253,9 +253,20 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
     fy, states: [], regions: [], monthFrom, monthTo, lowPerfPct: 50,
   };
 
+  // _simulatedNow: ISO date string injected for testing the V4 arrears guard.
+  // When present the mgmt-data cache is bypassed and the state dashboard is
+  // loaded with the injected clock (does NOT write back to the in-process cache).
+  const simulatedNowMs: number | undefined = (() => {
+    const raw = req.query._simulatedNow;
+    if (typeof raw !== "string" || !raw) return undefined;
+    const t = new Date(raw).getTime();
+    return Number.isFinite(t) ? t : undefined;
+  })();
+
   // Return the cached payload immediately if it is still fresh.
+  // Bypass the cache when a simulated date is in play.
   const cacheKey = mgmtDataCacheKey(fy, monthFrom, monthTo);
-  const cachedEntry = _mgmtDataCache.get(cacheKey);
+  const cachedEntry = simulatedNowMs === undefined ? _mgmtDataCache.get(cacheKey) : undefined;
   if (cachedEntry && Date.now() < cachedEntry.expiresAt) {
     req.log.debug({ fy, cacheKey }, "mgmt data: cache hit");
     res.json(cachedEntry.payload);
@@ -266,7 +277,7 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
     const [assembled, hrSfa, secDash, dbTargetMap] = await Promise.all([
       assembleRows(filters),
       loadHrSfaDashboard().catch((): Map<string, HrSfaRecord> => new Map()),
-      loadStateDashboard(fy).catch((): null => null),
+      loadStateDashboard(fy, simulatedNowMs).catch((): null => null),
       // State Head Targets (primary_state_targets) override/supplement Target Master.
       buildPrimaryTargetMapFromStateTargets(fy).catch((): Map<string, number[]> => new Map()),
     ]);
@@ -474,6 +485,8 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
             salesReceived: secDash.totalSalesReceived,
             ytdAchievement: secDash.ytdAchievement,
             totalDealers: secDash.totalDealers,
+            // Month indices (0=Apr) where V4 arrears guard fired — closed but not recorded.
+            arrearsMonths: secDash.arrearsMonths ?? [],
             // Sheet's own TOTAL row — for reconciliation display in Data Health.
             // Null when the TOTAL row was not found in the sheet.
             sheetTotals: secDash.sheetTotals ?? null,
@@ -495,7 +508,11 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         seasonalCalibration: getSeasonalCalibration(),
       },
     };
-    _mgmtDataCache.set(cacheKey, { payload: responsePayload, expiresAt: Date.now() + MGMT_DATA_TTL_MS });
+    // Do not write back to cache when a simulated date is in play — the payload
+    // is date-dependent and must not pollute the live-clock cache.
+    if (simulatedNowMs === undefined) {
+      _mgmtDataCache.set(cacheKey, { payload: responsePayload, expiresAt: Date.now() + MGMT_DATA_TTL_MS });
+    }
     res.json(responsePayload);
   } catch (err) {
     req.log.error({ err, fy }, "mgmt data failed");
