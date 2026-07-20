@@ -20,7 +20,21 @@ The header IS present at row 1 (Sheets rows are 1-based; readTabRowsChunked star
 at start=1, so globalRow starts at 1 — the old `globalRow === 0` positional fallback
 was dead code).  After the alias fix the header is found normally.
 
-Verified column positions (0-indexed):
+**Key finding (live probe Jul-2026)**: the header row has 20 columns (0–19); data rows
+extend to col 20.  Col 20 in data rows carries 'Govt' or 'Retail' — but col 20 has
+**no label in the header row**.  As a result, `findCol(regex)` never finds it; and the
+old "last non-empty in header" fallback lands on col 19 ('Month') — the wrong column.
+STATE HEAD columns 23–25 appear in the HEADER ROW only; they are EMPTY in ALL data rows.
+
+Channel detection fix: `CHANNEL_COL_OVERRIDE` in primarySheets.ts maps this sheet ID
+to `chanIdx=20, explicit=true`.  Applied in all three functions: readAndAggregate,
+readOrderTabInventory, ingestOrderBookingFy.
+
+readAndAggregate also gained a `chanIdx` variable + channel-fallback data path: when
+`headIdx=-1`, rows with `chan='Govt'` contribute to `nonTerritoryTotal` and `total`.
+This makes ntBooking correct for FY2023-24 without a HEAD column.
+
+Verified column positions (0-indexed, from header row):
 | idx | header       | notes |
 |-----|--------------|-------|
 | 0   | SrNo         | — |
@@ -32,19 +46,11 @@ Verified column positions (0-indexed):
 | 10  | Qty          | piece qty |
 | 11  | Free Qty     | captured separately, never folded into Qty |
 | 12  | Unit         | "Nos" / "Ltr." — **plain "Unit"**, NOT "Unit.Name" |
-| 13  | MRP          | — |
-| 14  | Base Price   | — |
-| 15  | Discount(%)  | — |
-| 16  | Sale Price   | — |
 | 17  | Amount       | net booking value (the detected value column) |
-| 18  | ITEM CODE    | alternate code col |
-| 19  | Month        | text "Mar-2024" (not "Mar-24") |
-| 20  | SEGMENT      | — |
-| 21  | Station      | — |
-| 22  | STATE        | — |
-| 23  | STATE HEAD   | use this one |
-| 24  | STATE HEAD B | concatenated "GROUP+HEAD+STATE" — DO NOT parse |
-| 25  | STATE HEAD A | alternate head col |
+| 19  | Month        | text "Apr-2023" / "Mar-2024" — last labeled header col |
+| 20  | *(unlabeled)*| **channel flag in data rows only**: 'Govt' or 'Retail' |
+
+Note: cols 23–25 (STATE HEAD variants) appear in header only; data rows are empty there.
 
 Unit regex fix: `unitIdx = findCol(row, /^(unit(\.name| name)?|uom|measure)$/i)`
 Date parsing: `parseOrderDate` handles DD-MMM-YY via explicit regex branch.
@@ -87,25 +93,38 @@ analysis until clarified.  For territory/institutional split on FY2025-26, use a
 route (sale_line) not SALE_SHEETS.
 
 ## Booking vs Sale split (GET /api/orders/booking-vs-sale)
-Route uses readOrderTabInventory (companyBooking) + readBookingAggregated (ntBooking via HEAD col)
-with govtValue fallback rule: `ntBooking = govtValue > 0 ? govtValue : bookingAgg.ntBooking`.
-Verified anchors (July 2026):
-  FY2026-27: booking ₹87.4 Cr, ntBooking ₹6.57 Cr, territory ₹80.83 Cr
-  FY2025-26: booking ₹342.03 Cr, ntBooking ₹12.56 Cr, territory ₹329.47 Cr
-  FY2024-25: booking ₹333.81 Cr, ntBooking ₹16.76 Cr (govtValue), territory ₹317.06 Cr
-  FY2023-24: booking ₹377.39 Cr, ntBooking ₹0
+Route uses readOrderTabInventory (companyBooking) + readBookingAggregated (ntBooking).
+ntBooking comes from readAndAggregate: HEAD method when headIdx>=0; channel-column
+'Govt' rows when headIdx=-1.  govtValue is stored as an audit field, NEVER drives ntBooking.
+
+Per-FY ntBooking source (confirmed Jul-2026):
+  FY2026-27  HEAD column → NON_TERRITORY_RE
+  FY2024-25  HEAD column → NON_TERRITORY_RE (captures GEM/JJM/PROJECT heads)
+  FY2025-26  headIdx=-1; channel col (last-non-empty header fallback)
+  FY2023-24  headIdx=-1; channel col 20 via CHANNEL_COL_OVERRIDE
+
+Verified anchors (July 2026, after CHANNEL_COL_OVERRIDE fix):
+  FY2026-27: booking ₹87.01 Cr, ntBooking ₹6.57 Cr, govtAudit ₹0 (no chan col)
+  FY2025-26: booking ₹342.03 Cr, ntBooking ₹12.56 Cr (channel), govtAudit ₹12.56 Cr
+  FY2024-25: booking ₹333.81 Cr, ntBooking ₹41.34 Cr (HEAD), govtAudit ₹16.76 Cr
+  FY2023-24: booking ₹377.39 Cr, ntBooking ₹10.72 Cr, govtAudit ₹10.72 Cr ✓
 
 Cold-cache warm-up: startup fires readOrderTabInventory+readBookingAggregated for all 4 FYs
 sequentially in the background. Both have 30-min TTL module-level caches. First call ~2 min.
 
 ## isTerritory detection rules for primary_order_line ingest
-chanIsExplicit=true (header matched /^(channel|chan|type|sale.?type|category)$/i):
-  cell matches /^govt/i → Govt (isTerritory=false); else → Retail (isTerritory=true).
-chanIsExplicit=false (fallback to last non-empty column):
+chanIsExplicit=true (explicit header OR CHANNEL_COL_OVERRIDE with explicit=true):
+  cell matches /^govt/i → isTerritory=false; else → isTerritory=true.
+chanIsExplicit=false (last-non-empty fallback, no override):
   Can't trust cell value as channel flag → use HEAD column vs NON_TERRITORY_RE.
-FY2023-24: no explicit channel header AND head values don't match NON_TERRITORY_RE → isTerritory=null.
-FY2024-25: NON_TERRITORY_RE on HEAD captures GEM/JJM/PROJECT heads → 14,554 institutional rows
-  (₹41.62 Cr) vs govtValue ₹16.76 Cr (strict "Govt" only). HEAD-column approach is more complete.
+  HEAD empty and no override → isTerritory=null.
+
+FY2023-24: CHANNEL_COL_OVERRIDE col 20, explicit=true → all rows attributed:
+  4,641 institutional (isTerritory=false) = ₹10.72 Cr; 134,309 territory; 0 null ✓
+FY2024-25: NON_TERRITORY_RE on HEAD → 14,554 institutional rows (₹41.62 Cr);
+  HEAD approach captures GEM/JJM/PROJECT heads beyond strict "Govt" only.
+FY2025-26: 4,274 institutional rows = ₹12.56 Cr; 143,732 territory; 0 null ✓
+FY2026-27: 2,627 institutional rows = ₹6.57 Cr; 33,645 territory; 0 null ✓
 
 ## Insert pipeline status (July 2026) — COMPLETE
 `primary_order_line` schema at `lib/db/src/schema/orderLines.ts` — migrated.
@@ -114,9 +133,11 @@ FY2024-25: NON_TERRITORY_RE on HEAD captures GEM/JJM/PROJECT heads → 14,554 in
 lineUid key: sha1(fy|sourceTab|customer|code|qty|taxableValue|occurrence); occurrence per-tab.
 monthLabel: from invoice_date column first, then from tab title + FY year offsets.
 
-Verified DB row counts and totals (all 4 FYs inserted July 2026):
-  FY2023-24: 138,950 rows ₹377.39 Cr — all isTerritory=null (no segmentation in sheet)
-  FY2024-25: 145,781 rows ₹333.81 Cr — 131,227 territory / 14,554 institutional
-  FY2025-26: 148,006 rows ₹342.03 Cr — 143,732 territory / 4,274 institutional (inst=₹12.56 Cr ✓)
-  FY2026-27:  36,272 rows  ₹87.01 Cr —  33,645 territory / 2,627 institutional (inst=₹6.57 Cr ✓)
+Verified DB row counts and totals (all 4 FYs, CHANNEL_COL_OVERRIDE fix applied Jul-2026):
+  FY2023-24: 138,950 rows ₹377.39 Cr — 134,309 territory / 4,641 institutional (₹10.72 Cr) / 0 null ✓
+  FY2024-25: 145,781 rows ₹333.81 Cr — 131,227 territory / 14,554 institutional / 0 null ✓
+  FY2025-26: 148,006 rows ₹342.03 Cr — 143,732 territory / 4,274 institutional (₹12.56 Cr) / 0 null ✓
+  FY2026-27:  36,272 rows  ₹87.01 Cr —  33,645 territory / 2,627 institutional (₹6.57 Cr) / 0 null ✓
   Total: 469,009 rows. Per-head unique rows (e.g. ANUJ SHARMA) not yet inserted.
+  Ingest idempotency verified: re-running any FY returns inserted=0.
+  FY2023-24 re-ingested after fix: 138,950 rowsEmitted / 138,950 inserted / 0 errors.

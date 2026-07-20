@@ -293,16 +293,24 @@ router.get(
           )
           .reduce((s, t) => s + (t.contentVerification?.uniqueAmount ?? 0), 0);
         const companyBooking = monthlyTotal + perHeadUniqueAmount;
-        // ntBooking source selection:
-        //  • govtValue (readOrderTabInventory) = row-level "govt/institutional"
-        //    flag via a Channel/Type column — accurate when the column exists
-        //    (FY2025-26, FY2024-25 sheets).
-        //  • bookingAgg.ntBooking (readBookingAggregated) = HEAD-column
-        //    NON_TERRITORY_RE match — accurate for FY2026-27 which has no
-        //    Channel column but the HEAD column carries the segment.
-        //  Rule: prefer govtValue when > 0; fall back to HEAD-column otherwise.
+        // ntBooking — readBookingAggregated / readAndAggregate, which use this logic:
+        //   • When headIdx >= 0: HEAD-column NON_TERRITORY_RE ("Other"/"Govt"/"GEM" etc.)
+        //   • When headIdx = -1 (no STATE HEAD column): channel-column fallback — rows
+        //     where the channel cell is 'Govt' contribute to nonTerritoryTotal.
+        //
+        // Per-FY layout (confirmed by live probe Jul-2026):
+        //   FY2026-27  HEAD column present → HEAD method
+        //   FY2024-25  HEAD column present → HEAD method (captures GEM/JJM/PROJECT)
+        //   FY2025-26  headIdx=-1; channel fallback via last-non-empty header col
+        //   FY2023-24  headIdx=-1; channel at unlabeled col 20 ('Govt'/'Retail')
+        //              via CHANNEL_COL_OVERRIDE in primarySheets.ts
+        //
+        // govtValue (Channel column "Govt" rows from readOrderTabInventory) is kept as
+        // an audit cross-check.  For FY2023-24 ntBooking === govtValue (same source).
+        // For FY2024-25 the HEAD method picks up GEM/JJM/PROJECT not flagged as 'Govt'
+        // so ntBooking > govtValue — the difference is non-Govt institutional booking.
         const govtValue        = included.reduce((s, t) => s + t.govtValue, 0);
-        const ntBooking        = govtValue > 0 ? govtValue : bookingAgg.ntBooking;
+        const ntBooking        = bookingAgg.ntBooking;
         const territoryBooking = companyBooking - ntBooking;
 
         // ── Sale: sale_line (primary register in DB), split by is_territory ───
@@ -332,12 +340,15 @@ router.get(
         return {
           fy,
           booking: {
-            total:               Math.round(companyBooking),
-            crore:               crore(companyBooking),
-            ntBooking:           Math.round(ntBooking),
-            ntBookingCrore:      crore(ntBooking),
-            territoryBooking:    Math.round(territoryBooking),
+            total:                 Math.round(companyBooking),
+            crore:                 crore(companyBooking),
+            ntBooking:             Math.round(ntBooking),
+            ntBookingCrore:        crore(ntBooking),
+            territoryBooking:      Math.round(territoryBooking),
             territoryBookingCrore: crore(territoryBooking),
+            // Audit: "Govt" rows detected via Channel column (never drives ntBooking).
+            govtValueBooking:      Math.round(govtValue),
+            govtValueBookingCrore: crore(govtValue),
           },
           sale: {
             total:              Math.round(totalSale),

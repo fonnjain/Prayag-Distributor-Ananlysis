@@ -1,0 +1,101 @@
+469,009 rows across four years, arithmetic checks out. But one decision in
+there breaks year-on-year, and the numbers themselves tell us which way to go.
+
+DIFFERENT YEARS ARE USING DIFFERENT METHODS
+
+Your selection rule is:  govtValue > 0 ? govtValue : bookingAgg.ntBooking
+
+So FY2024-25 reports institutional via the channel column (Rs.16.76 Cr) while
+FY2026-27 reports it via the HEAD column (Rs.6.57 Cr). Two different rulers.
+
+"Different methods, both valid" is not acceptable for a series. If FY2024-25 is
+measured one way and FY2025-26 another, the year-on-year change measures the
+METHOD change, not the business:
+
+  institutional booking, channel method for 24-25   16.76 -> 12.56   -25%
+  institutional booking, HEAD method for 24-25      41.62 -> 12.56   -70%
+
+Same two years, same data, and two completely different stories. This is the
+same error we hit on the secondary side, where old years summed net and new
+years summed gross.
+
+THE DATA SAYS USE THE HEAD-COLUMN METHOD EVERYWHERE
+
+Test territory booking against territory dispatch, which is the comparison my
+earlier prompt got wrong.
+
+Using the HEAD-column method consistently:
+
+  FY2024-25   (333.81 - 41.62) / 271.43  =  1.076
+  FY2025-26   (342.03 - 12.56) / 298.47  =  1.104
+  FY2026-27   ( 87.01 -  6.57) /  75.13  =  1.071
+
+Spread of 0.033. Stable, and the 7-10 percent excess is exactly what a working
+backlog looks like.
+
+Using the mixed rule your code currently applies:
+
+  FY2024-25   (333.81 - 16.76) / 271.43  =  1.168
+  FY2025-26                                 1.104
+  FY2026-27                                 1.071
+
+Spread of 0.097, three times wider, and FY2024-25 is the outlier.
+
+So the hypothesis I proposed IS confirmed - booking tracks territory dispatch
+at a stable ratio - but only when one method is used throughout. The mixed rule
+hides it.
+
+ACTION: use the HEAD column against NON_TERRITORY_RE for every year. Keep
+govtValue stored as a second column for audit, never as the reported figure.
+Report both per year so the difference stays visible.
+
+FY2023-24 HAS NO SPLIT AND IT SHOULD
+
+You set isTerritory = null for FY2023-24, described as "no segmentation". But
+that workbook DOES have a STATE HEAD column - I read it directly, at position
+24, carrying values like SANDEEP JI, SURESH NAIR and LALAN.
+
+So the HEAD-column method should work there too. Apply it and report the
+territory/institutional split. That year matters most for the trend, because
+it is the earliest point and institutional was largest.
+
+If NON_TERRITORY_RE genuinely matches nothing in FY2023-24, report the distinct
+STATE HEAD values so we can see whether institutional heads are named
+differently in that vintage. Do not leave it null by default.
+
+WHAT THIS MAKES VISIBLE
+
+Institutional dispatch as a share of total:
+
+  FY2023-24   95.76 of 349.02   27.4%
+  FY2024-25   69.72 of 341.14   20.4%
+  FY2025-26   61.06 of 359.52   17.0%
+  FY2026-27    7.05 of  82.18    8.6%  YTD
+
+Territory dispatch over the same period: 253.26, 271.43, 298.47 - growing
+steadily. Total sale looks flat because territory growth has been absorbing an
+institutional decline of roughly Rs.35 Cr.
+
+And booking institutional runs far below sale institutional in the closed years
+- Rs.41.62 Cr booked against Rs.69.72 Cr dispatched in FY2024-25, Rs.12.56 Cr
+against Rs.61.06 Cr in FY2025-26. Institutional business is being dispatched
+substantially without passing through the order book. That is worth confirming
+with whoever handles GEM, GOVT, JJM and PROJECT orders - it may be a genuine
+process difference rather than a data gap.
+
+ONE PROCESS NOTE
+
+My last prompt said dry run and report before committing. The data committed
+before that review. The outcome looks correct and the table is additive, so no
+harm done - but the review step exists because four of the problems in this
+project were caught at exactly that point.
+
+ACCEPTED
+
+  All four years now read: 377.39 / 333.81 / 342.03 / 87.01 Cr.
+  469,009 rows, sums check out.
+  lineUid with per-tab occurrence counter, ON CONFLICT DO NOTHING - idempotent.
+  Prove it: re-run the ingest and report zero rows inserted.
+
+Constraints unchanged: Drive read-only, no DELETE from register tables,
+secondary untouched.

@@ -38,10 +38,32 @@ export const SALE_SHEETS: Record<string, string> = {
   "2025-26": "1RuXHIXfusOT-VDdDqeuB-Nx-pxyVkmrJsqr21BB-NUA",
 };
 
-// Positional fallback column indices for the FY2026-27 sale sheet when
-// header detection fails (0-based: M=12, Q=16).
+// Positional fallback column indices for sheets where header detection fails
+// entirely (0-based column indices).  Applied only when globalRow > 30 and
+// no header row was found at all.
 const SALE_POSITIONAL: Record<string, { taxIdx: number; headIdx: number }> = {
   "19LQGpkbZiecGaXdBvl48rPZT2LUz3sKekeKX5fHu7Ps": { taxIdx: 12, headIdx: 16 },
+};
+
+// Per-sheet override for the STATE HEAD column when the header IS found
+// (taxIdx set correctly) but the HEAD cell label doesn't match the standard
+// regex.  Applied after headIdx detection: fires only when headIdx === -1,
+// so it never overrides a successfully-detected column.
+const HEAD_COL_OVERRIDE: Record<string, number> = {
+  // No active entries.  FY2023-24 booking sheet was probed live (Jul-2026): col 24
+  // exists in the header row but is empty in ALL data rows.  The per-row channel
+  // split ('Govt'/'Retail') is at unlabeled col 20 — handled by CHANNEL_COL_OVERRIDE.
+};
+
+// Some booking sheets have a channel column ('Govt'/'Retail') in data rows that has
+// NO header label — the column simply doesn't appear in the header row at all.
+// Applied after header-scan chanIdx detection: fires only when chanIdx === -1.
+// explicit=true means non-'Govt' rows are treated as territory (isTerritory=true)
+// rather than falling back to the HEAD column.
+const CHANNEL_COL_OVERRIDE: Record<string, { chanIdx: number; explicit: boolean }> = {
+  // FY2023-24 booking sheet: channel at 0-based col 20, unlabeled in header.
+  // Values confirmed by live probe Jul-2026: 'Govt' or 'Retail' on every data row.
+  "1jtSUGE6iT8WuUKi56F4LYqjJgZF42oR1mk51imG8yq8": { chanIdx: 20, explicit: true },
 };
 
 const NON_TERRITORY_RE = /^(other|project|govt|gem|jjm|nonterrit)/i;
@@ -303,6 +325,7 @@ async function readAndAggregate(
   for (const tab of dataTabs) {
     let taxIdx = -1,
       headIdx = -1,
+      chanIdx = -1,
       custIdx = -1,
       fyYearIdx = -1;
     let headerFound = false;
@@ -334,6 +357,12 @@ async function readAndAggregate(
             if (tI >= 0) {
               taxIdx = tI;
               headIdx = findCol(row, /state\s*head|^head$|^tm\s*(name)?$|^rsm$|^sm$|sales\s*head|^zone$/i);
+              // Override: some sheets have the STATE HEAD column but use an
+              // unconventional label.  Apply positional override only when the
+              // regex found nothing.
+              if (headIdx < 0 && HEAD_COL_OVERRIDE[sheetId] !== undefined) {
+                headIdx = HEAD_COL_OVERRIDE[sheetId]!;
+              }
               // FY YEAR column (e.g. "FY YEAR", "FY-YEAR") exists in State Head Sale
               // workbooks which hold two fiscal years in one file.
               fyYearIdx = findCol(row, /^fy[\s_-]?year$/i);
@@ -344,9 +373,24 @@ async function readAndAggregate(
                 );
                 if (custIdx < 0) custIdx = findCol(row, /customer|party/i);
               }
+              // Channel column: explicit header first; positional override for sheets
+              // where the column exists in data rows but has no header label; finally
+              // fall back to the last non-empty cell in the header row (same heuristic
+              // used by readOrderTabInventory so govtValue and ntBooking stay consistent).
+              chanIdx = findCol(row, /^(channel|chan|type|sale.?type|category)$/i);
+              if (chanIdx < 0) {
+                const co = CHANNEL_COL_OVERRIDE[sheetId];
+                if (co !== undefined) {
+                  chanIdx = co.chanIdx;
+                } else {
+                  for (let ci = row.length - 1; ci >= 0; ci--) {
+                    if (strVal(row[ci])) { chanIdx = ci; break; }
+                  }
+                }
+              }
               headerFound = true;
               logger.info(
-                { sheetId, tab: tab.title, valueAlias: strVal(row[tI]), valueIdx: tI, headIdx, fyYearIdx },
+                { sheetId, tab: tab.title, valueAlias: strVal(row[tI]), valueIdx: tI, headIdx, chanIdx, fyYearIdx },
                 "primarySheets: aggregate header detected",
               );
             }
@@ -363,9 +407,25 @@ async function readAndAggregate(
           if (opts?.fyFilter && fyYearVal !== `FY-${opts.fyFilter}`) continue;
         }
 
-        const head = strVal(row[headIdx]);
+        const head = headIdx >= 0 ? strVal(row[headIdx]) : "";
         const amt = numVal(row[taxIdx]);
-        if (!head || amt <= 0) continue;
+        if (amt <= 0) continue;
+
+        // When headIdx=-1 (no STATE HEAD column in this sheet), fall back to the
+        // channel column for institutional/territory split.  Booking sheets that carry
+        // an explicit 'Govt'/'Retail' per-row flag but no per-row STATE HEAD (e.g.
+        // FY2023-24) use this path to populate nonTerritoryTotal correctly.
+        if (!head) {
+          if (chanIdx >= 0) {
+            const chan = strVal(row[chanIdx]);
+            if (chan) {
+              if (/^govt$/i.test(chan)) nonTerritoryTotal += amt;
+              total += amt;
+              tabRows++;
+            }
+          }
+          continue;
+        }
 
         const hNorm = normHead(head);
         if (NON_TERRITORY_RE.test(hNorm)) {
@@ -608,9 +668,13 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
             }
             const tI = findCol(row, /taxable\s*(value|amount)|^amount$/i);
             if (tI >= 0) {
-              // Header row found.  State Head column is optional (FY2023-24 omits it).
+              // Header row found.  State Head column is optional.
               taxIdx  = tI;
               headIdx = findCol(row, /state\s*head|^head$|^tm\s*(name)?$|^rsm$|^sm$|sales\s*head|^zone$/i);
+              // Override: apply positional fallback only when the regex found nothing.
+              if (headIdx < 0 && HEAD_COL_OVERRIDE[sheetId] !== undefined) {
+                headIdx = HEAD_COL_OVERRIDE[sheetId]!;
+              }
               dateIdx = findCol(row, /^(date|order.?date|invoice.?date)$/i);
               unitIdx = findCol(row, /^(unit(\.name| name)?|uom|measure)$/i);
               qtyIdx  = findCol(row, /^(qty|quantity|qnty|pieces?)$/i);
@@ -620,12 +684,20 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
               // Channel flag: look for explicit header; fallback to last non-empty cell.
               chanIdx = findCol(row, /^(channel|chan|type|sale.?type|category)$/i);
               if (chanIdx < 0) {
-                for (let ci = row.length - 1; ci >= 0; ci--) {
-                  if (strVal(row[ci])) { chanIdx = ci; break; }
+                // Positional override before last-non-empty fallback — the fallback
+                // picks the last header cell ('Month', 'FY', etc.) which is not a
+                // channel flag.  CHANNEL_COL_OVERRIDE maps the actual data column.
+                const co = CHANNEL_COL_OVERRIDE[sheetId];
+                if (co !== undefined) {
+                  chanIdx = co.chanIdx;
+                } else {
+                  for (let ci = row.length - 1; ci >= 0; ci--) {
+                    if (strVal(row[ci])) { chanIdx = ci; break; }
+                  }
                 }
               }
               logger.info(
-                { sheetId, tab: tab.title, valueAlias: strVal(row[tI]), valueIdx: tI, headIdx, dateIdx, unitIdx },
+                { sheetId, tab: tab.title, valueAlias: strVal(row[tI]), valueIdx: tI, headIdx, chanIdx, dateIdx, unitIdx },
                 "primarySheets: inventory header detected",
               );
               headerFound = true;
@@ -1119,6 +1191,10 @@ export async function ingestOrderBookingFy(
 
             taxIdx  = tI;
             headIdx = findCol(row, /state\s*head|^head$|^tm\s*(name)?$|^rsm$|^sm$|sales\s*head|^zone$/i);
+            // Override: apply positional fallback only when the regex found nothing.
+            if (headIdx < 0 && HEAD_COL_OVERRIDE[sheetId] !== undefined) {
+              headIdx = HEAD_COL_OVERRIDE[sheetId]!;
+            }
             dateIdx = findCol(row, /^(date|order.?date|invoice.?date)$/i);
             unitIdx = findCol(row, /^(unit(\.name| name)?|uom|measure)$/i);
             qtyIdx  = findCol(row, /^(qty|quantity|qnty|pieces?)$/i);
@@ -1131,9 +1207,17 @@ export async function ingestOrderBookingFy(
             if (eChan >= 0) {
               chanIdx = eChan;
             } else {
-              chanIdx = -1;
-              for (let ci = row.length - 1; ci >= 0; ci--) {
-                if (strVal(row[ci])) { chanIdx = ci; break; }
+              // Positional override before last-non-empty fallback — the header fallback
+              // would land on a non-channel label ('Month', 'FY', etc.).
+              const co = CHANNEL_COL_OVERRIDE[sheetId];
+              if (co !== undefined) {
+                chanIdx = co.chanIdx;
+                chanIsExplicit = co.explicit;
+              } else {
+                chanIdx = -1;
+                for (let ci = row.length - 1; ci >= 0; ci--) {
+                  if (strVal(row[ci])) { chanIdx = ci; break; }
+                }
               }
             }
             headerFound = true;
