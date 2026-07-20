@@ -249,11 +249,14 @@ type SheetAgg = {
   byDistributor: Map<string, { displayName: string; stateHeadNorm: string; amount: number }>;
   nonTerritoryTotal: number;
   total: number;
+  fyYearValues: string[];
+  ntHeads: string[];
 };
 
 async function readAndAggregate(
   sheetId: string,
   forBooking: boolean,
+  opts?: { fyFilter?: string },
 ): Promise<SheetAgg> {
   const tabs = await listSheetTabs(sheetId);
 
@@ -284,11 +287,17 @@ async function readAndAggregate(
   >();
   let nonTerritoryTotal = 0;
   let total = 0;
+  // Distinct FY YEAR values encountered across all tabs (before filter is applied).
+  // State Head Sale workbooks carry BOTH the prior FY and the current FY in one file.
+  const fyYearValues = new Set<string>();
+  // Distinct raw head strings that triggered NON_TERRITORY_RE.
+  const ntHeads = new Set<string>();
 
   for (const tab of dataTabs) {
     let taxIdx = -1,
       headIdx = -1,
-      custIdx = -1;
+      custIdx = -1,
+      fyYearIdx = -1;
     let headerFound = false;
     let tabRows = 0;
 
@@ -318,6 +327,9 @@ async function readAndAggregate(
             if (tI >= 0) {
               taxIdx = tI;
               headIdx = findCol(row, /state\s*head|^head$|^tm\s*(name)?$|^rsm$|^sm$|sales\s*head|^zone$/i);
+              // FY YEAR column (e.g. "FY YEAR", "FY-YEAR") exists in State Head Sale
+              // workbooks which hold two fiscal years in one file.
+              fyYearIdx = findCol(row, /^fy[\s_-]?year$/i);
               if (forBooking) {
                 custIdx = findCol(
                   row,
@@ -327,12 +339,21 @@ async function readAndAggregate(
               }
               headerFound = true;
               logger.info(
-                { sheetId, tab: tab.title, valueAlias: strVal(row[tI]), valueIdx: tI, headIdx },
+                { sheetId, tab: tab.title, valueAlias: strVal(row[tI]), valueIdx: tI, headIdx, fyYearIdx },
                 "primarySheets: aggregate header detected",
               );
             }
             continue;
           }
+        }
+
+        // FY YEAR filter — State Head Sale workbooks hold two fiscal years.
+        // Collect distinct values verbatim (before filter) so the log shows what is in the sheet.
+        // Format in the sheet: "FY-2025-26".  opts.fyFilter is "2025-26" (no prefix).
+        if (fyYearIdx >= 0) {
+          const fyYearVal = strVal(row[fyYearIdx]);
+          if (fyYearVal) fyYearValues.add(fyYearVal);
+          if (opts?.fyFilter && fyYearVal !== `FY-${opts.fyFilter}`) continue;
         }
 
         const head = strVal(row[headIdx]);
@@ -341,6 +362,7 @@ async function readAndAggregate(
 
         const hNorm = normHead(head);
         if (NON_TERRITORY_RE.test(hNorm)) {
+          ntHeads.add(head);
           nonTerritoryTotal += amt;
           total += amt;
           tabRows++;
@@ -378,6 +400,30 @@ async function readAndAggregate(
     );
   }
 
+  if (fyYearValues.size > 0) {
+    logger.info(
+      {
+        sheetId,
+        fyYearValues: Array.from(fyYearValues).sort(),
+        fyFilter: opts?.fyFilter ?? null,
+        filtered: !!opts?.fyFilter,
+      },
+      "primarySheets: FY YEAR values found (filter applied per-row above)",
+    );
+  }
+
+  if (ntHeads.size > 0) {
+    logger.info(
+      {
+        sheetId,
+        forBooking,
+        ntHeads: Array.from(ntHeads).sort(),
+        ntTotal: Math.round(nonTerritoryTotal),
+      },
+      "primarySheets: non-territory heads",
+    );
+  }
+
   if (total === 0) {
     logger.warn(
       { sheetId, forBooking, dataTabs: dataTabs.map((t) => t.title) },
@@ -385,7 +431,27 @@ async function readAndAggregate(
     );
   }
 
-  return { byNormHead, byDistributor, nonTerritoryTotal, total };
+  return {
+    byNormHead,
+    byDistributor,
+    nonTerritoryTotal,
+    total,
+    fyYearValues: Array.from(fyYearValues).sort(),
+    ntHeads: Array.from(ntHeads).sort(),
+  };
+}
+
+/**
+ * Read a "State Head Sale" workbook that holds two fiscal years and return only
+ * the rows matching `fyFilter` (e.g. "2024-25" → rows where FY YEAR = "FY-2024-25").
+ * Logs distinct FY YEAR values found before filtering so caller can verify.
+ */
+export async function readSaleSheetFyFiltered(
+  sheetId: string,
+  fyFilter: string,
+): Promise<{ total: number; fyYearValues: string[]; ntHeads: string[] }> {
+  const agg = await readAndAggregate(sheetId, false, { fyFilter });
+  return { total: agg.total, fyYearValues: agg.fyYearValues, ntHeads: agg.ntHeads };
 }
 
 // ── Tab inventory ─────────────────────────────────────────────────────────────
@@ -412,6 +478,11 @@ function classifyOrderTab(
       excludedReason: "Summary/combined tab — duplicates individual monthly tabs; excluded to prevent double-counting.",
     };
   if (MONTHLY_RE.test(t)) return { role: "monthly", includedInSum: true, excludedReason: null };
+  // Tabs whose title ends with "INDEX" (e.g. "SEGMENT INDEX") are lookup tables.
+  // NOT added to SKIP_TAB_RE — kept visible in inventory so a mislabelled data
+  // tab cannot silently disappear.
+  if (/\bINDEX$/i.test(t))
+    return { role: "lookup", includedInSum: false, excludedReason: "Lookup/index tab — not order data." };
   // Per-head tabs look like "ANUJ SHARMA", "BIJU C.O" — mixed-/all-caps with a space.
   if (PER_HEAD_TAB_RE.test(t) && t.includes(" "))
     return {
@@ -744,12 +815,16 @@ export async function loadPrimarySheetData(fy: string): Promise<PrimarySheetData
     byDistributor: new Map(),
     nonTerritoryTotal: 0,
     total: 0,
+    fyYearValues: [],
+    ntHeads: [],
   };
   let saleAgg: SheetAgg = {
     byNormHead: new Map(),
     byDistributor: new Map(),
     nonTerritoryTotal: 0,
     total: 0,
+    fyYearValues: [],
+    ntHeads: [],
   };
   let bookingAvailable = false;
   let saleAvailable = false;
@@ -806,7 +881,9 @@ export async function loadPrimarySheetData(fy: string): Promise<PrimarySheetData
 
   if (saleSheetId) {
     try {
-      saleAgg = await readAndAggregate(saleSheetId, false);
+      // Pass fyFilter so multi-year "State Head Sale" workbooks are scoped
+      // to the requested FY only.  Format: "FY-2025-26" in the sheet.
+      saleAgg = await readAndAggregate(saleSheetId, false, { fyFilter: fy });
       saleAvailable = saleAgg.total > 0;
       logger.info(
         { fy, total: saleAgg.total, heads: saleAgg.byNormHead.size },
