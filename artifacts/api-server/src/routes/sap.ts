@@ -7,6 +7,10 @@ import { createMonthAccumulator } from "../lib/sap/derive.js";
 import { upsertUpload, getUploadsForFy, deleteUpload } from "../lib/sap/store.js";
 import { buildSapVerifyReport, clearVerifiedCache } from "../lib/sap/verify.js";
 import { fyMonthLabels } from "../lib/sap/util.js";
+import {
+  reconcileSapVsSaleSheet,
+  formatReconcileAsCsv,
+} from "../lib/sap/reconcileSheets.js";
 
 const router: IRouter = Router();
 
@@ -159,6 +163,72 @@ router.get(
     } catch (err) {
       req.log.error({ err, fy }, "sap status failed");
       res.status(500).json({ error: "Could not load import status." });
+    }
+  },
+);
+
+// ── Read-only reconciliation: SAP source sheet vs derived sale sheet ──────────
+// GET /api/sap/reconcile?fy=2026-27&month=Jul-26
+//   Returns a JSON report: matched/sapOnly/saleOnly row counts, amounts,
+//   by-customer breakdown, and full detail rows for the gap.
+// GET /api/sap/reconcile?fy=2026-27&month=Jul-26&format=csv
+//   Returns the same report as a downloadable CSV file (detail rows included).
+router.get(
+  "/sap/reconcile",
+  async (req: Request, res: Response): Promise<void> => {
+    const fyRaw = req.query["fy"];
+    const monthRaw = req.query["month"];
+    const formatRaw = req.query["format"];
+
+    const fy =
+      typeof fyRaw === "string" && fyRaw.trim() !== "" ? fyRaw.trim() : "2026-27";
+    const month =
+      typeof monthRaw === "string" && monthRaw.trim() !== ""
+        ? monthRaw.trim()
+        : "Jul-26";
+    const asCsv = typeof formatRaw === "string" && formatRaw.trim() === "csv";
+
+    if (!FY_PATTERN.test(fy)) {
+      res.status(400).json({ error: "fy must look like 2026-27" });
+      return;
+    }
+    if (!/^[A-Za-z]{3}-\d{2}$/.test(month)) {
+      res.status(400).json({ error: "month must look like Jul-26" });
+      return;
+    }
+
+    try {
+      req.log.info({ fy, month, asCsv }, "sap reconcile: starting");
+      const result = await reconcileSapVsSaleSheet(fy, month);
+      req.log.info(
+        {
+          fy,
+          month,
+          sapRows: result.sapSource.totalRows,
+          saleRows: result.saleSheet.totalRows,
+          sapOnly: result.sapOnly.rows,
+          saleOnly: result.saleOnly.rows,
+          errors: result.errors.length,
+        },
+        "sap reconcile: complete",
+      );
+
+      if (asCsv) {
+        const csv = formatReconcileAsCsv(result);
+        const filename = `sap-reconcile-${fy}-${month}.csv`;
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${filename}"`,
+        );
+        res.send(csv);
+        return;
+      }
+
+      res.json(result);
+    } catch (err) {
+      req.log.error({ err, fy, month }, "sap reconcile failed");
+      res.status(500).json({ error: "Reconciliation failed — check server logs." });
     }
   },
 );
