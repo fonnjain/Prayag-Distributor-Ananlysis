@@ -1,0 +1,82 @@
+TEST ONLY. Do not fix anything, do not delete anything, do not restore
+anything, do not modify any table. Run the queries below and report the
+numbers. That is the entire task.
+
+HYPOTHESIS TO TEST
+
+Nothing was deleted from the July tab. The Serial no column was renumbered -
+by a sort, a filter, an insert, or a manual renumber - and because line_uid
+includes serial_no, every row became a NEW line_uid and the sync re-ingested
+the same invoices as fresh rows.
+
+Why I suspect this rather than deletion:
+
+  normal sync days   Jul 15: 371   Jul 16: 211   Jul 17: 204   Jul 19: 182
+  spike days         Jul 18: 1,385   Jul 20: 3,803
+
+3,803 in one morning is twenty times the normal rate. Both spikes fall on days
+SALE SHEET 26-27 was edited - 18 July 12:19 and 20 July 05:06.
+
+A DELETION cannot produce an insert spike. Removing rows makes the sync insert
+FEWER rows, not 3,803 more. Something made the sheet's rows look new.
+
+And 3,129 rows in the sheet against 6,156 in the DB is close to two copies of
+the same data under different serial numbers.
+
+QUERY 1 - THE DECISIVE ONE
+
+  SELECT COUNT(*) AS raw_rows,
+         COUNT(DISTINCT (invoice_no, item_code, color, taxable_value))
+           AS distinct_lines
+  FROM sale_line
+  WHERE fy = '2026-27' AND month_label = 'Jul-26';
+
+  distinct near 3,129 while raw is 6,156  -> duplicates under reassigned
+                                             serials. Nothing was deleted.
+  distinct also near 6,156                -> genuinely different lines. The
+                                             deletion story holds.
+
+QUERY 2 - SHOW ME A DUPLICATE SET
+
+Pick any invoice+item+colour+value combination appearing more than once and
+print every row for it in full, including serial_no, line_uid, ingested_at and
+ingest run id.
+
+If the same invoice line appears twice with DIFFERENT serial numbers and
+DIFFERENT ingest timestamps, the mechanism is proven.
+
+QUERY 3 - HOW MANY DISTINCT SERIALS PER LINE
+
+  For Jul-26, group by (invoice_no, item_code, color, taxable_value) and report
+  how many distinct serial_no values each group carries.
+  Then report the distribution: how many groups have 1 serial, 2 serials,
+  3 or more.
+
+  Mostly 2 means the tab was renumbered once. A mix of 2 and 3 means twice -
+  consistent with edits on both 18 and 20 July.
+
+QUERY 4 - DID THE SERIAL RANGE SHIFT
+
+  Report min(serial_no) and max(serial_no) for Jul-26 by ingest run id.
+  If later runs cover a different serial range for the same invoices, the
+  renumbering is visible directly.
+
+QUERY 5 - THE SAME TEST ON THE CLOSED MONTHS
+
+  Run query 1 for Apr-26, May-26 and Jun-26.
+  Those months are settled and their anchors hold - Q1 at Rs.73.09 Cr exactly.
+  Raw and distinct should be equal or near equal there.
+  If Q1 is clean and only July is doubled, that isolates the problem to the
+  tab that was edited.
+
+WHAT NOT TO DO
+
+Do not deduplicate. Do not delete the extra rows. Do not restore anything from
+the db-gap export. Do not change line_uid. Do not touch the sync schedule.
+
+If the hypothesis is confirmed, several things follow that need deciding first -
+including whether the db-gap export is valid at all, and whether July's true
+figure is nearer Rs.4.5 Cr than Rs.11.47 Cr. Those are decisions, not fixes,
+and they come after the numbers.
+
+Report the five results and stop.
