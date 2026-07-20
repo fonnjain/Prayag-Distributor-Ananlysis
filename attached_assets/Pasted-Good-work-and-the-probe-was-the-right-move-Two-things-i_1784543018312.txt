@@ -1,0 +1,77 @@
+Good work, and the probe was the right move. Two things it settled:
+
+Column 20 IS a channel column in the MONTHLY tabs - Retail / JJM / Govt /
+Project / Gem - even though it is absent from the header row. Both of us were
+reasoning from the combined tab, where index 20 is SEGMENT. Different layouts
+in the same workbook. That is exactly why printing the header was worth doing.
+
+And the combined tab holds 16,533 rows at Rs.40.6 Cr, not a union of the
+monthly tabs. Worth recording - it is neither a duplicate nor complete.
+
+THE RESULT LANDS WHERE THE ARITHMETIC SAID IT WOULD
+
+  institutional   9,004 rows   Rs. 91.18 Cr
+  territory     129,656 rows   Rs.285.98 Cr
+  unclassified      290 rows   Rs.  0.23 Cr
+  total         138,950 rows   Rs.377.39 Cr
+
+I predicted Rs.95-101 Cr from two independent routes. You got Rs.91.18 Cr from
+the data. Close enough to confirm the classification, and it moved the year from
+Rs.10.72 Cr to Rs.91.18 Cr - roughly nine times.
+
+ONE CORRECTION TO YOUR CONCLUSION
+
+You wrote that the remaining ~Rs.10 Cr gap is "attributable to institutional
+customers whose SEGMENT cell is blank". The blank-channel rows total
+Rs.0.23 Cr, not Rs.10 Cr. They cannot account for it.
+
+The residual is simply that my Rs.95-101 Cr was an estimate derived from a
+ratio band, not a measurement. Rs.91.18 Cr is the measured figure and it is
+the better number. No gap needs explaining.
+
+Keeping those 290 rows null rather than defaulting them to territory was the
+right call - and moving total += amt outside the channel guard so they still
+count in the company total was the correct pairing. Unclassified is not the
+same as zero.
+
+FOUR SMALL THINGS TO CLOSE
+
+1. Re-report all four territory ratios now, in one table:
+   territoryBooking / territorySale per FY, using the HEAD-or-channel method
+   consistently. Three were 1.076, 1.104 and 1.071; FY2023-24 now computes to
+   1.129. Confirm the set and whether they hold together.
+
+2. Confirm one method now runs across all four years. Earlier the rule was
+   govtValue > 0 ? govtValue : bookingAgg.ntBooking, which had FY2024-25 on the
+   channel column and FY2026-27 on HEAD. You have since changed /^govt$/i to
+   NON_TERRITORY_RE globally. State plainly which method each year now uses.
+   If any year still differs, the series is not comparable.
+
+3. Re-report FY2024-25 institutional. It was Rs.41.62 Cr by the HEAD method and
+   Rs.16.76 Cr by govtValue. With NON_TERRITORY_RE applied globally, what is it
+   now, and by which column?
+
+4. Prove idempotency. Re-run the ingest for all four years and report COUNT(*)
+   before and after. Expect zero inserted, zero removed. 469,009 rows are now
+   committed and this has not been demonstrated since.
+
+WHAT THIS OPENS UP
+
+With FY2023-24 classified, the institutional trend is visible across four years
+for the first time:
+
+  dispatch     95.76 -> 69.72 -> 61.06 -> 7.05 YTD
+  booking      91.18 -> ? -> 12.56 -> 6.57
+
+Institutional dispatch has fallen from 27.4% of total to 8.6%, while territory
+dispatch grew 253 -> 271 -> 298. Total sale looks flat because territory growth
+has been absorbing the institutional decline.
+
+Worth noting for whoever owns that channel: FY2023-24 booking and dispatch were
+close (91 against 96), but FY2025-26 shows Rs.12.56 Cr booked against
+Rs.61.06 Cr dispatched. Either the channel stopped passing through the order
+book, or something changed in how those orders are recorded. That is a process
+question, not a data one.
+
+Constraints unchanged: Drive read-only, no DELETE from register tables,
+secondary untouched.

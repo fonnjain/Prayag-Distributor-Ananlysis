@@ -101,13 +101,20 @@ Per-FY ntBooking source (confirmed Jul-2026):
   FY2025-26  headIdx=-1; channel col (last-non-empty header fallback)
   FY2023-24  headIdx=-1; SEGMENT col 20 via CHANNEL_COL_OVERRIDE (chanIdx=20, explicit=true, NON_TERRITORY_RE)
 
-Verified anchors (July 2026, NON_TERRITORY_RE fix applied):
-  FY2026-27: booking ₹87.01 Cr, ntBooking ₹6.57 Cr (HEAD)
-  FY2025-26: booking ₹342.03 Cr, ntBooking ₹12.56 Cr (channel fallback)
-  FY2024-25: booking ₹333.81 Cr, ntBooking ₹41.62 Cr (HEAD, NON_TERRITORY_RE)
-  FY2023-24: booking ₹377.39 Cr, ntBooking ~₹91 Cr (SEGMENT NON_TERRITORY_RE)
-  Territory ratio FY2023-24 ≈ 1.129 (slightly above 1.07–1.10 band; ~₹10 Cr institutional
-  rows have blank SEGMENT and cannot be recovered from monthly tabs alone)
+Verified anchors (July 2026, NON_TERRITORY_RE fix applied — live route figures):
+  FY2026-27: booking ₹87.40 Cr, ntBooking ₹6.57 Cr (HEAD)
+  FY2025-26: booking ₹342.03 Cr, ntBooking ₹26.01 Cr (channel fallback, NON_TERRITORY_RE)
+  FY2024-25: booking ₹333.81 Cr, ntBooking ₹41.34 Cr (HEAD, NON_TERRITORY_RE); govtValue audit=38.78 Cr
+  FY2023-24: booking ₹377.39 Cr, ntBooking ₹91.18 Cr (SEGMENT col 20, NON_TERRITORY_RE)
+
+Territory ratios (territoryBooking / territorySale — all from live route, Jul-2026):
+  FY2023-24: 286.21 / 253.26 = 1.130  (SEGMENT-blank floor; ~₹10 Cr inst rows unclassifiable)
+  FY2024-25: 292.48 / 271.43 = 1.078
+  FY2025-26: 316.02 / 298.47 = 1.059
+  FY2026-27:  80.83 /  76.15 = 1.061
+
+govtValue is an audit field only — never drives ntBooking in the route (confirmed line 313 orders.ts).
+Ingest idempotency verified all 4 FYs: inserted=0 for each re-run; 469,009 rows stable.
 
 Cold-cache warm-up: startup fires readOrderTabInventory+readBookingAggregated for all 4 FYs
 sequentially in the background. Both have 30-min TTL module-level caches. First call ~2 min.
