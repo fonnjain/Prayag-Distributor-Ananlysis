@@ -1,0 +1,79 @@
+FY2023-24 BLOCKER SOLVED - I read the workbook directly.
+
+The header in Order Sheet 23-24 (1jtSUGE6iT8WuUKi56F4LYqjJgZF42oR1mk51imG8yq8):
+
+  SrNo, Date, Vch/BillNo, Customer, Item Group, Item Code, Item Name, COLOR,
+  Size, Description, Qty, Free Qty, Unit, MRP, Base Price, Discount(%),
+  Sale Price, Amount, ITEM CODE, Month, SEGMENT, Station, STATE, STATE HEAD,
+  STATE HEAD B, STATE HEAD A
+
+There is NO "Taxable Value" column. The value column is "Amount" (position 18).
+"STATE HEAD" is present at 24. So your detector finds one of its two required
+headers and fails.
+
+FIX: make header detection accept a SET of aliases for the value column -
+"Taxable Value", "Amount", "Taxable Amount". Detect by content, and report
+which alias matched per tab so we can see what each workbook actually uses.
+
+Other differences in this workbook, all verified from the file:
+  - Date format is 01-Mar-24. Month format is "Mar-2024", not "Mar-24".
+  - There are THREE head columns: STATE HEAD, STATE HEAD B, STATE HEAD A.
+    STATE HEAD B holds a concatenated key like "CISTERNSANDEEP JIJHARKHAND"
+    (group + head + state). Use STATE HEAD. Do not parse the concatenated one.
+  - There is a "Free Qty" column. Free goods are real - capture the column,
+    do not silently fold it into Qty.
+  - There is a "Unit" column carrying "Nos". See the litre note below.
+  - The "SHEET" tab holds 7 entity names (BHIWADI CASH, KAHRANI CASH, DELHI
+    CASH, three PRAYAG PLYMER entities, SAMPLE). Lookup or exclusion list,
+    not order data.
+  - The "combined" tab DOES contain data - its first rows are March 2024. You
+    reported it unreadable. Re-check with the alias fix, then content-verify
+    it against the monthly tabs before excluding it.
+
+THE LITRE RULE - now resolved.
+
+The documented rule was right, I was looking in the wrong file. The Order Sheet
+family HAS a Unit column (called "Unit", not "Unit.Name") carrying "Nos" for
+pieces and presumably "Ltr." for tanks. SALE SHEET 26-27 has no such column
+because the conversion already happened upstream.
+
+So: for ORDER BOOKING use the Unit column. For SALE, tanks arrive already in
+litres via the WT-LTR lookup. Report the distinct values of Unit in each Order
+Sheet year, and confirm nothing sums litres against pieces.
+
+THE SELF-TEST IS NOT PASSING.
+
+FY2026-27 dry run Rs.86.56 Cr against the live path Rs.86.82 Cr, a gap of
+Rs.0.26 Cr. You called this within the 1% materiality threshold. That threshold
+was for PAST years against documented anchors. This is the SAME FILE read by
+two code paths in the same app - it should agree EXACTLY, to the rupee.
+
+Likely cause: SALE SHEET and the Order Book were both edited on 20 July at
+05:06, so the two figures may have been computed either side of an edit. Run
+both paths back to back, in one request, and report the two numbers and the
+delta. If it is still not zero, the paths differ and no other year can be
+trusted.
+
+BOOKING VERSUS SALE - a pattern worth testing.
+
+  FY2025-26  booking 342.03 / sale 361.14 = 0.947
+  FY2024-25  booking 333.81 / sale 341.73 = 0.977
+
+Both below 1, consistently. Booking should roughly equal dispatch over a full
+year unless backlog swings hard.
+
+Hypothesis: institutional and project business is DISPATCHED but never BOOKED
+in the Order Book. Your Phase 0 report found the FY2026-27 order book is 100%
+Retail with no Govt rows, while sale carries an institutional population -
+Rs.5.42 Cr in Q1 FY2026-27, and an institutional YoY of -54.1%.
+
+Test it: for FY2025-26 and FY2024-25, split sale into territory and
+institutional, then compare booking against TERRITORY sale only. If that ratio
+lands near 1.0, the gap is explained and pending should be computed on
+territory alone. Report both ratios.
+
+ORDER: the alias fix first, it unblocks FY2023-24. Then the self-test. Then
+the booking/sale split.
+
+Constraints unchanged: Drive read-only, no DELETE from register tables,
+secondary untouched, dry run and report before any commit.

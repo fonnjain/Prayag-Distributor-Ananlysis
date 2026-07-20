@@ -29,3 +29,4 @@
 - [stateDashboard closed-FY freeze + FY2025-26 register gap](statedashboard-freeze.md) — closed FYs cache permanently (no TTL); ytdSalesSum must be symmetric (no !isLeft guard); FY2025-26 1,290-row gap requires original xlsx (Sheets register returns 0 rows).
 - [SecMember dual-key design](sec-member-dual-key.md) — normKey=normSecKey (DB head_canon, keeps parentheticals); joinKey=normName (roster join, strips parentheticals); never mix them in secByKey/secPlanByKey Maps.
 - [Tab content verification + sheet_confirmed_at](prayag-tab-content-verification.md) — two-pass readOrderTabInventory; ghost-row marker on sale_line; GET /api/mgmt/tab-diagnostic.
+- [Primary Order Book reader quirks](primary-order-book-reader.md) — FY2023-24: no header row (positional fallback col 17=Amount), no State Head col; dry-run anchors for all four FYs.

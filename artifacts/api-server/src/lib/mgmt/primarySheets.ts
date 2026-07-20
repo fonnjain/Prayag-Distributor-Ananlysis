@@ -311,9 +311,9 @@ async function readAndAggregate(
             }
             if (!headerFound) continue;
           } else {
-            // Accept "Taxable Value" or "Taxable Amount" (case-insensitive).
-            const tI = findCol(row, /taxable\s*(value|amount)/i);
-            const hI = findCol(row, /state\s*head/i);
+            // Accept "Taxable Value", "Taxable Amount", or bare "Amount" (FY2023-24).
+            const tI = findCol(row, /taxable\s*(value|amount)|^amount$/i);
+            const hI = findCol(row, /state\s*head|^head$|^tm\s*(name)?$|^rsm$|^sm$|sales\s*head|^zone$/i);
             if (tI >= 0 && hI >= 0) {
               taxIdx = tI;
               headIdx = hI;
@@ -476,6 +476,8 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
     if (inv.role === "monthly" || inv.role === "unknown") {
       let dateIdx = -1, taxIdx = -1, unitIdx = -1, qtyIdx = -1, chanIdx = -1, headIdx = -1, custIdx = -1, codeIdx = -1;
       let headerFound = false;
+      let bestCandidateRow: SheetCellValue[] = [];
+      let bestCandidateNonEmpty = 0;
 
       await readTabRowsChunked(sheetId, tab.title, (chunkRows, startRow) => {
         for (let ri = 0; ri < chunkRows.length; ri++) {
@@ -484,11 +486,17 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
 
           if (!headerFound) {
             if (globalRow > 30) continue;
-            const tI = findCol(row, /taxable\s*(value|amount)/i);
-            const hI = findCol(row, /state\s*head/i);
-            if (tI >= 0 && hI >= 0) {
+            // Track the row with the most non-empty string cells as a diagnostic aid.
+            const nonEmpty = row.filter((c) => strVal(c).trim().length > 0).length;
+            if (nonEmpty > bestCandidateNonEmpty) {
+              bestCandidateNonEmpty = nonEmpty;
+              bestCandidateRow = row;
+            }
+            const tI = findCol(row, /taxable\s*(value|amount)|^amount$/i);
+            if (tI >= 0) {
+              // Header row found.  State Head column is optional (FY2023-24 omits it).
               taxIdx  = tI;
-              headIdx = hI;
+              headIdx = findCol(row, /state\s*head|^head$|^tm\s*(name)?$|^rsm$|^sm$|sales\s*head|^zone$/i);
               dateIdx = findCol(row, /^(date|order.?date|invoice.?date)$/i);
               unitIdx = findCol(row, /^(unit\.?name|unit\s+name|uom|measure)$/i);
               qtyIdx  = findCol(row, /^(qty|quantity|qnty|pieces?)$/i);
@@ -503,8 +511,30 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
                 }
               }
               headerFound = true;
+              continue; // skip the header row itself
             }
-            continue;
+            // Positional fallback: no header row — data starts at row 0.
+            // FY2023-24 signature: col 1 = Excel date serial (40 000–60 000), col 17 = Amount.
+            if (globalRow === 0) {
+              const dateSerial = numVal(row[1]);
+              const amtCandidate = numVal(row[17]);
+              if (dateSerial >= 40000 && dateSerial <= 60000 && amtCandidate > 0) {
+                taxIdx  = 17;
+                dateIdx = 1;
+                custIdx = 3;
+                codeIdx = 5;
+                qtyIdx  = 10;
+                unitIdx = 12;
+                chanIdx = 20;
+                headIdx = -1; // no State Head column in FY2023-24 workbook
+                headerFound = true;
+                // Fall through — this row is data, not a header.
+              } else {
+                continue;
+              }
+            } else {
+              continue;
+            }
           }
 
           const amt = numVal(row[taxIdx]);
@@ -558,7 +588,14 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
       });
 
       if (!headerFound && inv.role === "monthly") {
-        logger.warn({ sheetId, tab: tab.title }, "primarySheets inventory: header not found in monthly tab");
+        logger.warn(
+          {
+            sheetId,
+            tab: tab.title,
+            bestCandidateHeaders: bestCandidateRow.map(strVal).filter(Boolean),
+          },
+          "primarySheets inventory: header not found in monthly tab",
+        );
       }
     } else if (inv.role === "per-head" || inv.role === "combined") {
       // Defer content verification until after all monthly tabs are read.
@@ -585,7 +622,7 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
           const globalRow = startRow + ri;
           if (!tabHeaderFound) {
             if (globalRow > 30) continue;
-            const tI = findCol(row, /taxable\s*(value|amount)/i);
+            const tI = findCol(row, /taxable\s*(value|amount)|^amount$/i);
             if (tI >= 0) {
               tabTaxIdx  = tI;
               tabDateIdx = findCol(row, /^(date|order.?date|invoice.?date)$/i);
