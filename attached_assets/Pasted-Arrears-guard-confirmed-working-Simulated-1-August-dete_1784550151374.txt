@@ -1,0 +1,71 @@
+Arrears guard confirmed working. Simulated 1 August detects July, live stays
+clean, cache isolated across both. That was the highest-value untested item and
+it is now closed.
+
+BUT LOOK AT THE NUMBER IT RETURNED
+
+You reported YTD = 74.4% in the simulated Aug-1 state, Q1 only.
+
+Q1 achievement on the correct basis was around 73.78%. So 74.4% is the RIGHT
+number - three closed months of sales against three closed months of plan, with
+July correctly excluded.
+
+That is the guard doing exactly what it should. Confirm two things follow from
+it:
+
+  a) When July has real data, YTD becomes Apr-Jul and the PLAN denominator
+     grows to match. Simulate that too: 1 August with July populated. YTD must
+     move to a four-month numerator over a four-month denominator, not a
+     four-month numerator over a three-month one.
+
+  b) 15.86% must not appear anywhere as FY2026-27 achievement. That figure is
+     annual progress - three months of sales against a twelve-month plan. With
+     YTD at 74.4%, anything near 15% on screen labelled "achievement" is the
+     wrong metric under the wrong name.
+
+WHAT THE ARREARS BANNER SHOULD SAY
+
+Confirm the wording. It needs to distinguish two states that look identical in
+the data and mean opposite things:
+
+  "not yet recorded"  - the sheet has not been updated. Neutral. No inference.
+  "zero sales"        - genuinely no business that month.
+
+If the banner or any tooltip implies the second when it means the first, a
+State Head will read a data-entry lag as a performance collapse. That is the
+entire reason this guard exists.
+
+Report the exact rendered text.
+
+NEXT - THE UI CHECK, WHICH STILL HAS NOT HAPPENED
+
+Every verification in this project has been at database or API level. The guard
+test above was the first thing that looked at rendered output, and only for one
+banner.
+
+Load the app as a user and report what is DISPLAYED, with labels, not query
+results:
+
+  - FY2026-27 company Q1 achievement. Expect roughly 74%.
+  - July. Must read "in progress" or "not yet recorded". Never 0%.
+  - Aug through Mar. Blank or "not yet recorded". Never 0.
+  - Anant Singh's State Head page. Do member figures look sane, and does the
+    page total equal the sum of his members?
+  - A member with no plan. Must read UNDEFINED or "no target", never 0%.
+  - Primary Overview tiles. FY2024-25 and FY2025-26 unchanged.
+  - Anywhere July primary appears, it must be marked PROVISIONAL - 2,350 rows
+    at Rs.4.50 Cr are still in dispute and the question is with the sheet owner.
+
+STILL OPEN, NO DEADLINE
+
+  - FY2023-24 column-20 sanity check: values must come from
+    {Retail, JJM, Govt, Project, Gem, blank} or fail loudly. It is a hardcoded
+    index with no header, and it was misread once already this session.
+  - Record that FY2023-24's combined tab holds 16,533 rows at Rs.40.6 Cr and is
+    neither a duplicate nor a union of the monthly tabs.
+  - The secondary dashboard freeze is still a cache, not a freeze. FY2025-26 is
+    the comparison year for every FY2026-27 year-on-year figure, so it should
+    stop moving on restart.
+
+Constraints unchanged: Drive read-only, no DELETE from register tables,
+secondary data untouched.

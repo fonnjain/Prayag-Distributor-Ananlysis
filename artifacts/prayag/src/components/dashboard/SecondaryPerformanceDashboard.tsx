@@ -14,7 +14,7 @@
 //   - Primary-role members have no secondary target — exclude from achievement.
 //   - Left members count in totals but never appear in the low-performer list.
 //   - Never add secondary and primary together.
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, Fragment } from "react";
 import { AlertTriangle, ChevronUp, ChevronDown, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -412,9 +412,8 @@ export default function SecondaryPerformanceDashboard() {
             </thead>
             <tbody>
               {groups.map((group) => (
-                <>
+                <Fragment key={group.head}>
                   <HeadRow
-                    key={group.head}
                     group={group}
                     expanded={expandedHeads.has(group.head)}
                     onToggle={() => toggleHead(group.head)}
@@ -424,7 +423,7 @@ export default function SecondaryPerformanceDashboard() {
                       .filter((m) => !m.isPrimaryRole)
                       .sort((a, b) => (b.secondarySalesReceived ?? 0) - (a.secondarySalesReceived ?? 0))
                       .map((m) => <MemberRowEl key={m.name} member={m} />)}
-                </>
+                </Fragment>
               ))}
               {/* Company total row */}
               <tr className="border-t-2 border-border bg-muted/30 font-semibold">

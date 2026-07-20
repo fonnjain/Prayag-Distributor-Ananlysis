@@ -40,3 +40,11 @@ The Sheets backfill path for FY2025-26 is permanently broken unless the spreadsh
 ## secondary_dashboard_snapshot DB table
 
 DB snapshots verified working: FY2026-27 snaps (~52 KB) saved after each `loadStateDashboardUncached` call. Future cold-start loads for closed FYs read from `secondary_dashboard_snapshot` (latest row by `saved_at`) instead of re-hitting the STATE HEAD DASHBOARD Sheets file.
+
+FY2025-26 secondary snapshot confirmed in DB as of Jul 20 2026: 216 members, plan ₹379.75 Cr, salesReceived ₹240.14 Cr, ytdAchievement 68.1%. This FY is now frozen — restarts use DB, never Sheets.
+
+## Simulation isolation (skipPersist=true)
+
+`loadStateDashboardUncached(fy, nowMs, skipPersist=false)` has a third param. When called via `loadStateDashboard(fy, nowMs)` with an explicit `nowMs` (simulation/testing path), `skipPersist=true` is passed so the simulated result never writes to `_cache` or `secondary_dashboard_snapshots`. Without this, a `?_simulatedNow=2026-08-01` request would overwrite the live cache with an arrears-guarded result and poison all subsequent browser views until the TTL expired.
+
+**How to apply:** Always pass `skipPersist=true` from any caller that supplies a non-default `nowMs`. Production code paths (no `nowMs`) use the default `skipPersist=false`.
