@@ -1,9 +1,7 @@
-// Target Master read/write + pro-rata split logic.
+// Target Master read + pro-rata split logic.
 //
-// This is the ONLY module in the app that writes to Google Sheets, and it
-// writes to exactly one spreadsheet: config mgmt_sources.target_master. The
-// sheet id is registered with the sheetsApi write allowlist here; every other
-// sheet stays read-only by construction.
+// Google Sheets access is strictly read-only. This module reads the Target
+// Master sheet but no longer writes to it. The upsert route has been removed.
 //
 // Sheet schema (tab "targets", one row per fy x team_member):
 //   fy | team_member | state_head | level |
@@ -13,9 +11,6 @@
 //   updated_by | updated_at
 import {
   readAllTabRows,
-  registerWritableSheet,
-  updateValuesBatch,
-  appendValues,
   type SheetCellValue,
 } from "../registers/sheetsApi.js";
 import { normName, priorFy } from "./names.js";
@@ -72,12 +67,6 @@ function cellStr(v: SheetCellValue | undefined): string {
   return v == null ? "" : String(v).trim();
 }
 
-function targetSheet(): { sheetId: string; tab: string } {
-  const cfg = mgmtSources().target_master;
-  registerWritableSheet(cfg.sheetId);
-  return { sheetId: cfg.sheetId, tab: cfg.tab };
-}
-
 function rowKey(fy: string, teamMember: string): string {
   return `${fy}|${normName(teamMember)}`;
 }
@@ -126,10 +115,8 @@ function serializeRow(row: TargetRow): SheetCellValue[] {
   return out;
 }
 
-// Reads the whole targets tab. Small sheet (hundreds of rows), no cache: the
-// tab is the write target and staleness after a save would be confusing.
 async function loadStoredRows(): Promise<StoredRow[]> {
-  const { sheetId, tab } = targetSheet();
+  const { sheetId, tab } = mgmtSources().target_master;
   const rows = await readAllTabRows(sheetId, tab);
   const out: StoredRow[] = [];
   for (let i = 1; i < rows.length; i++) {
@@ -201,52 +188,6 @@ export function validateRow(
     if (rec) errors.push(`${row.teamMember}: ${rec}`);
   }
   return errors;
-}
-
-// --- Upsert ----------------------------------------------------------------
-
-// Serializes saves within this process so two concurrent requests cannot both
-// miss an existing row and append duplicates. The row map is re-read inside
-// the lock, immediately before writing, and if duplicate rows for the same
-// (fy, team member) key already exist in the sheet, every duplicate is
-// overwritten with the same values so no stale copy survives.
-let upsertLock: Promise<unknown> = Promise.resolve();
-
-export async function upsertTargets(rows: TargetRow[]): Promise<{ updated: number; appended: number }> {
-  const run = upsertLock.then(() => doUpsertTargets(rows));
-  upsertLock = run.catch(() => undefined);
-  return run;
-}
-
-async function doUpsertTargets(rows: TargetRow[]): Promise<{ updated: number; appended: number }> {
-  const { sheetId, tab } = targetSheet();
-  const stored = await loadStoredRows();
-  const byKey = new Map<string, StoredRow[]>();
-  for (const s of stored) {
-    const key = rowKey(s.fy, s.teamMember);
-    const list = byKey.get(key);
-    if (list) list.push(s);
-    else byKey.set(key, [s]);
-  }
-
-  const updates: Array<{ range: string; values: SheetCellValue[][] }> = [];
-  const appendRows: SheetCellValue[][] = [];
-  let updated = 0;
-  for (const row of rows) {
-    const existing = byKey.get(rowKey(row.fy, row.teamMember)) ?? [];
-    const values = [serializeRow(row)];
-    if (existing.length > 0) {
-      for (const e of existing) {
-        updates.push({ range: `'${tab}'!A${e.sheetRow}:${LAST_COL}${e.sheetRow}`, values });
-      }
-      updated += 1;
-    } else {
-      appendRows.push(values[0]);
-    }
-  }
-  await updateValuesBatch(sheetId, updates);
-  await appendValues(sheetId, tab, appendRows);
-  return { updated, appended: appendRows.length };
 }
 
 // --- Pro-rata split ---------------------------------------------------------

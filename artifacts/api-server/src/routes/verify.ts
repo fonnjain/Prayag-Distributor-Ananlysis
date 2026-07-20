@@ -28,9 +28,6 @@ router.get("/verify", async (req: Request, res: Response): Promise<void> => {
     res.json(report);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    // FY26-27 uses the SAP primary-sales pipeline; its Sheets register tabs do
-    // not carry standard invoice-register headers. Surface a clear note rather
-    // than a generic 502 so the UI can render a helpful message.
     if (msg.includes("No header row detected")) {
       req.log.warn({ fy }, "verify: register tabs have non-standard headers — SAP FY?");
       res.json({
@@ -68,19 +65,52 @@ router.post(
   },
 );
 
+/**
+ * POST /verify/prune-ghost-rows
+ *
+ * Two-step confirmation protocol — deletion requires both steps:
+ *
+ * Step 1 — dry run (default): POST { "fy": "2026-27" }
+ *   Returns { dryRun: true, toPrune: N, pruned: 0 } without touching any data.
+ *
+ * Step 2 — confirm: POST { "fy": "2026-27", "confirm": true, "expectedCount": N }
+ *   expectedCount must equal the toPrune value from step 1.
+ *   Deletes only when the count still matches (prevents stale confirmations).
+ *   Returns { dryRun: false, toPrune: N, pruned: N }.
+ *
+ * The underlying DB trigger (sale_line_delete_guard) enforces that the
+ * deletion goes through allowDelete() — it cannot be bypassed even with a
+ * direct SQL DELETE.
+ */
 router.post(
   "/verify/prune-ghost-rows",
   async (req: Request, res: Response): Promise<void> => {
-    const fy = resolveFy((req.body as Record<string, unknown> | undefined)?.["fy"]);
+    const body = (req.body as Record<string, unknown> | undefined) ?? {};
+    const fy = resolveFy(body["fy"]);
     if (!fy) {
       res.status(400).json({
         error: `Unknown fiscal year. Known: ${Object.keys(REGISTER_SHEET_IDS).join(", ")}`,
       });
       return;
     }
+
+    const confirm = body["confirm"] === true;
+    const expectedCount =
+      typeof body["expectedCount"] === "number" ? body["expectedCount"] : undefined;
+
     try {
-      const result = await pruneGhostRows(fy);
-      req.log.info({ fy, ...result }, "verify prune-ghost-rows completed");
+      const result = await pruneGhostRows(fy, {
+        dryRun: !confirm,
+        expectedCount,
+      });
+
+      if (result.guarded && !result.dryRun) {
+        req.log.warn({ fy, ...result }, "prune-ghost-rows: guarded — not deleted");
+        res.status(409).json({ fy, ...result });
+        return;
+      }
+
+      req.log.info({ fy, ...result }, "prune-ghost-rows completed");
       res.json({ fy, ...result });
     } catch (err) {
       req.log.error({ err, fy }, "prune-ghost-rows failed");

@@ -11,6 +11,7 @@ import {
   type InsertSaleLine,
   type InsertIngestRun,
 } from "@workspace/db";
+import { allowDelete } from "../deleteGuard.js";
 import expectedCounts from "../../../config/expected_counts.json";
 import type { UnmappedReport } from "./normalize.js";
 
@@ -76,7 +77,9 @@ export async function insertSaleLineBatches(
     const fyRows = deduped.filter((r) => r.fy === fy);
     const allHaveSerial = fyRows.every((r) => r.serialNo != null);
     if (allHaveSerial && fyRows.length > 0) {
-      await db.delete(saleLines).where(and(eq(saleLines.fy, fy), isNull(saleLines.serialNo)));
+      await allowDelete(async (tx) => {
+        await tx.delete(saleLines).where(and(eq(saleLines.fy, fy), isNull(saleLines.serialNo)));
+      });
     }
   }
 

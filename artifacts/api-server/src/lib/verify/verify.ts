@@ -3,6 +3,7 @@
 // sources and lists any live rows missing from the DB.
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, saleLines, type InsertSaleLine } from "@workspace/db";
+import { allowDelete } from "../deleteGuard.js";
 import registerSheets from "../../../config/register_sheets.json";
 import { logger } from "../logger.js";
 import {
@@ -359,28 +360,41 @@ export async function backfillMissingFromSheets(
   return { rowsRead: live.lines.length, inserted };
 }
 
-/**
- * Delete ghost rows from sale_line for a given FY.
- *
- * Ghost rows are rows with source='sheets' that have never been confirmed by
- * a live-sheet read (sheet_confirmed_at IS NULL).  They arise when rows are
- * inserted during a sync but are later deleted from the sheet (e.g. the July
- * 2026 mid-month backfill rows removed after close).
- *
- * Safety guard: we only prune when at least one row in the FY already has a
- * non-null sheet_confirmed_at, proving the scheduled sync has run at least
- * once since the column was added.  Without that, all rows would have null
- * (pre-migration state) and the prune would incorrectly delete everything.
- *
- * xlsx_backfill rows (source != 'sheets') are never touched regardless.
- */
-export async function pruneGhostRows(fy: string): Promise<{
+export type PruneGhostRowsResult = {
   guarded: boolean;
   reason?: string;
   confirmedCount: number;
+  toPrune: number;
   pruned: number;
-}> {
-  // Count confirmed rows — COUNT(col) only counts non-null values in SQL.
+  dryRun: boolean;
+};
+
+/**
+ * Inspect (and optionally delete) ghost rows from sale_line for a given FY.
+ *
+ * Ghost rows: source='sheets', sheet_confirmed_at IS NULL — rows inserted
+ * during a sync that were later deleted from the live sheet.
+ * xlsx_backfill rows (source != 'sheets') are never touched.
+ *
+ * By default this is a DRY RUN: it counts the ghost rows and returns without
+ * deleting anything.  Pass dryRun=false only when the caller has already
+ * presented the count to an operator and received explicit confirmation.
+ *
+ * The DB-level trigger (sale_line_delete_guard) enforces that all actual
+ * deletions go through allowDelete(), which sets the required session
+ * variable inside a transaction.
+ *
+ * Safety guard: refuses to delete when no confirmed rows exist for the FY
+ * (pre-migration state where all rows have null sheet_confirmed_at — pruning
+ * would incorrectly delete everything).
+ */
+export async function pruneGhostRows(
+  fy: string,
+  opts: { dryRun: boolean; expectedCount?: number } = { dryRun: true },
+): Promise<PruneGhostRowsResult> {
+  const { dryRun, expectedCount } = opts;
+
+  // COUNT(col) counts only non-null values.
   const [{ confirmed }] = await db
     .select({ confirmed: sql<number>`count(${saleLines.sheetConfirmedAt})::int` })
     .from(saleLines)
@@ -393,13 +407,14 @@ export async function pruneGhostRows(fy: string): Promise<{
       guarded: true,
       reason:
         `No confirmed rows for FY ${fy}. ` +
-        `Run a live sync (POST /verify/backfill or wait for the 6-hour scheduled sync) before pruning.`,
+        `Run POST /verify/backfill (or wait for the 6-hour scheduled sync) first.`,
       confirmedCount: 0,
+      toPrune: 0,
       pruned: 0,
+      dryRun,
     };
   }
 
-  // Count ghost rows: source='sheets', never confirmed.
   const [{ ghost }] = await db
     .select({ ghost: sql<number>`count(*)::int` })
     .from(saleLines)
@@ -407,12 +422,34 @@ export async function pruneGhostRows(fy: string): Promise<{
 
   const toPrune = ghost ?? 0;
 
-  if (toPrune > 0) {
-    await db
-      .delete(saleLines)
-      .where(and(eq(saleLines.fy, fy), eq(saleLines.source, "sheets"), isNull(saleLines.sheetConfirmedAt)));
-    logger.info({ fy, confirmedCount, pruned: toPrune }, "pruneGhostRows: ghost rows deleted");
+  if (dryRun) {
+    return { guarded: false, confirmedCount, toPrune, pruned: 0, dryRun: true };
   }
 
-  return { guarded: false, confirmedCount, pruned: toPrune };
+  // expectedCount must be supplied and must match to prevent stale confirmations.
+  if (expectedCount == null || expectedCount !== toPrune) {
+    return {
+      guarded: true,
+      reason:
+        `expectedCount mismatch: caller supplied ${expectedCount ?? "(none)"}, ` +
+        `actual ghost row count is ${toPrune}. Re-run without confirm to get the current count.`,
+      confirmedCount,
+      toPrune,
+      pruned: 0,
+      dryRun: false,
+    };
+  }
+
+  let pruned = 0;
+  if (toPrune > 0) {
+    await allowDelete(async (tx) => {
+      await tx
+        .delete(saleLines)
+        .where(and(eq(saleLines.fy, fy), eq(saleLines.source, "sheets"), isNull(saleLines.sheetConfirmedAt)));
+    });
+    pruned = toPrune;
+    logger.info({ fy, confirmedCount, pruned }, "pruneGhostRows: ghost rows deleted");
+  }
+
+  return { guarded: false, confirmedCount, toPrune, pruned, dryRun: false };
 }

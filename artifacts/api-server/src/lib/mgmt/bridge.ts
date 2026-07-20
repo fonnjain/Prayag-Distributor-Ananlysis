@@ -1,15 +1,14 @@
 // Party -> Team Member bridge for the Sale side of the management report.
 //
 // The State-Head registers are tagged to State Head + Customer(party), not to
-// a team member, so per-member Sale columns need a bridge. Priority order
-// (per spec):
+// a team member, so per-member Sale columns need a bridge. Priority order:
 //   1. A consolidated "Party TM Map" sheet. Searched in Drive on every
-//      (cached) load so it wires itself up automatically.
-//   2. Auto-built from the "STATE HEAD (Team Member Report)" folder tree:
-//      every per-member file that carries a "Distributor Visit Report" /
+//      (cached) load so it wires itself up automatically (read-only).
+//   2. Auto-built in memory from the "STATE HEAD (Team Member Report)" folder
+//      tree: every per-member file that carries a "Distributor Visit Report" /
 //      "Retailer Report" tab contributes party rows (DIST#/RET# ids). The
-//      result is cached back to a created "Party TM Map" sheet, so the
-//      ~700-file walk runs once in the background, never per report.
+//      result is held in memory only — it is NOT written back to Sheets
+//      because Google Sheets access is strictly read-only.
 //   3. While the build runs (or if it fails), Sale fills at State-Head grain
 //      only, per-member Sale stays blank, and the Missing Data tab says
 //      exactly why. Never guess an allocation.
@@ -24,11 +23,6 @@ import {
   readAllTabRows,
   listSheetTabs,
   getGoogleAccessToken,
-  createSpreadsheet,
-  clearValues,
-  updateValuesBatch,
-  appendValues,
-  registerWritableSheet,
   type SheetCellValue,
 } from "../registers/sheetsApi.js";
 import { normName, normParty } from "./names.js";
@@ -371,21 +365,8 @@ function parseMemberTab(
 
 const DIST_TAB_PREFIX = "distributorvisitreport";
 const RET_TAB_PREFIX = "retailerreport";
-const SHEET_HEADER = [
-  "Party Type",
-  "Party ID",
-  "Party Name",
-  "Team Member",
-  "State Head",
-  "Channel Type",
-  "Assigned Distributor",
-  "Source File",
-];
-
 // Sort so that first-wins indexing keeps: authoritative distributor rows from
 // the most recently modified file, then via-retailer rows, then retailers.
-// The sheet is written in this order too, so a cold reload reproduces the
-// exact same precedence.
 function sortForPrecedence(rows: Array<BridgeEntry & { mtime?: string }>): void {
   rows.sort((a, b) => {
     if (a.partyType !== b.partyType) return a.partyType === "DISTRIBUTOR" ? -1 : 1;
@@ -452,44 +433,6 @@ async function runWithConcurrency<T>(
       }
     }),
   );
-}
-
-async function writeBridgeSheet(rows: BridgeEntry[]): Promise<string> {
-  const sheetName = mgmtSources().party_tm_map.sheetName;
-  const existing = await findBridgeSheet();
-  let fileId: string;
-  let tabTitle: string;
-  if (existing) {
-    fileId = existing.id;
-    registerWritableSheet(fileId);
-    const tabs = await listSheetTabs(fileId);
-    tabTitle = tabs[0]?.title ?? "Sheet1";
-    await clearValues(fileId, `'${tabTitle.replace(/'/g, "''")}'!A:Z`);
-  } else {
-    fileId = await createSpreadsheet(sheetName);
-    registerWritableSheet(fileId);
-    tabTitle = "Sheet1";
-  }
-  await updateValuesBatch(fileId, [
-    {
-      range: `'${tabTitle.replace(/'/g, "''")}'!A1`,
-      values: [SHEET_HEADER],
-    },
-  ]);
-  const values: SheetCellValue[][] = rows.map((r) => [
-    r.partyType,
-    r.partyId,
-    r.partyName,
-    r.memberName,
-    r.stateHead,
-    r.channelType,
-    r.assignedDistributor,
-    r.sourceFile,
-  ]);
-  for (let i = 0; i < values.length; i += 5000) {
-    await appendValues(fileId, tabTitle, values.slice(i, i + 5000));
-  }
-  return fileId;
 }
 
 async function buildBridgeFromFolder(): Promise<void> {
@@ -560,24 +503,15 @@ async function buildBridgeFromFolder(): Promise<void> {
   }
   const { entries, byId, conflicts } = buildIndexes(rows);
   const members = new Set(rows.map((r) => r.memberKey)).size;
-  buildState.phase = "writing Party TM Map sheet";
-  let fileId: string | undefined;
-  let writeNote = "";
-  try {
-    fileId = await writeBridgeSheet(rows);
-  } catch (err) {
-    writeNote = ` (writing the cache sheet failed: ${err instanceof Error ? err.message : String(err)}; the bridge is held in memory until the next restart)`;
-    logger.error({ err }, "party-tm bridge cache sheet write failed");
-  }
   const summary =
     `Auto-built from the member report folder: ${rows.length} party rows ` +
     `(${entries.size} distributor parties, ${members} team members, ` +
-    `${conflicts.length} conflicts) from ${buildState.filesWithTabs} of ${files.length} files.`;
+    `${conflicts.length} conflicts) from ${buildState.filesWithTabs} of ${files.length} files. ` +
+    `Held in memory only (Sheets access is read-only; no cache sheet is written).`;
   buildState.summary = summary;
   cache = {
     status: "ok",
-    detail: summary + writeNote,
-    fileId,
+    detail: summary,
     entries,
     byId,
     rows,
@@ -592,7 +526,6 @@ async function buildBridgeFromFolder(): Promise<void> {
       distributorParties: entries.size,
       members,
       conflicts: conflicts.length,
-      fileId,
     },
     "party-tm bridge auto-build complete",
   );

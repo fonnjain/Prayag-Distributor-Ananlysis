@@ -67,8 +67,8 @@ export function invalidateMgmtDataCache(fy?: string): void {
   }
 }
 
-// The Target Master sheet is provisioned and writable; the status reflects
-// whether any targets have actually been saved for the default FY yet.
+// Checks whether any targets have been saved in the Target Master sheet for
+// the default FY. The sheet is read-only like all other Sheets sources.
 async function targetsSource(req: Request): Promise<{
   key: string;
   name: string;
