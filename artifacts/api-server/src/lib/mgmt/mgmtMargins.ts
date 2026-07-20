@@ -7,7 +7,7 @@
 // Purchase Price must never be used as cost).
 
 import { db, saleLines, costMaster } from "@workspace/db";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 export type HeadGroupMargin = {
   group: string;
@@ -59,7 +59,7 @@ export async function loadMgmtMargins(
     })
     .from(saleLines)
     .leftJoin(costMaster, eq(saleLines.code, costMaster.code))
-    .where(eq(saleLines.fy, fy))
+    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")))
     .groupBy(saleLines.headCanon, saleLines.groupCanon);
 
   const byHead = new Map<string, HeadMarginSummary>();

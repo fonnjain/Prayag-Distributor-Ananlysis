@@ -187,7 +187,7 @@ export async function computeNudgeList(
       sl.group_raw   AS group_raw,
       sl.head_canon  AS state_head,
       SUM(sl.amount::numeric) AS total_amount
-    FROM sale_line sl
+    FROM sale_line_current sl
     WHERE sl.fy = $1
       AND sl.month_label IN (${monthPlaceholders})
       AND sl.group_raw IN (${groupPlaceholders})

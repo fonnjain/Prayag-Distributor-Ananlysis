@@ -28,6 +28,7 @@ export type RegisterColumns = {
   date: number;
   customer: number;
   code: number;
+  color: number; // e.g. "WHITE", "IVORY"; -1 when absent
   month: number;
   qty: number;
   rate: number;
@@ -72,6 +73,7 @@ export function mapRegisterColumns(
     date: find("DATE"),
     customer: find("CUSTOMER", "CUSTOMERNAME"),
     code: find("CODE", "ITEMCODE", "OLDERPCODE"),
+    color: find("COLOR", "COLOUR"),
     month: find("MONTH", "M0NTH"),
     qty: find("QTY", "QUANTITY"),
     rate: find("SALERATE", "RATE"),
@@ -327,6 +329,7 @@ export type ParsedRegisterRow = {
   monthLabel: string | null;
   customer: string | null;
   code: string;
+  color: string | null; // e.g. "WHITE", "IVORY"; null when column absent
   qty: number | null;
   saleRate: number | null;
   amount: number;
@@ -386,6 +389,7 @@ export function parseRegisterRow(
       monthLabel: toMonthLabel(at(values, cols.month), fy),
       customer: toText(at(values, cols.customer)),
       code,
+      color: toText(at(values, cols.color)),
       qty: toNumber(at(values, cols.qty)),
       saleRate: toNumber(at(values, cols.rate)),
       amount,
@@ -454,6 +458,7 @@ export function toSaleLine(
     monthLabel: row.monthLabel,
     customer: row.customer,
     code: row.code,
+    color: row.color,
     qty: row.qty == null ? null : String(row.qty),
     saleRate: row.saleRate == null ? null : String(row.saleRate),
     amount: String(row.amount),
@@ -467,5 +472,6 @@ export function toSaleLine(
     isTerritory,
     typeRaw: row.typeRaw,
     source,
+    versionStatus: "current",
   };
 }

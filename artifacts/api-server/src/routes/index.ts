@@ -21,6 +21,7 @@ import customerMasterRouter from "./customerMaster";
 import apiKeysRouter from "./apiKeys";
 import tabDiagnosticRouter from "./tabDiagnostic";
 import ordersRouter from "./orders";
+import registersRouter from "./registers";
 
 const router: IRouter = Router();
 
@@ -46,5 +47,6 @@ router.use(customerMasterRouter);
 router.use(apiKeysRouter);
 router.use(tabDiagnosticRouter);
 router.use(ordersRouter);
+router.use(registersRouter);
 
 export default router;

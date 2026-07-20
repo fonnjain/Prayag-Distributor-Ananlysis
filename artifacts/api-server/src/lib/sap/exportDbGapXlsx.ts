@@ -274,7 +274,7 @@ export async function exportDbGapAsXlsx(fy: string, monthLabel: string): Promise
       source: saleLines.source,
     })
     .from(saleLines)
-    .where(and(eq(saleLines.fy, fy), eq(saleLines.monthLabel, monthLabel)));
+    .where(and(eq(saleLines.fy, fy), eq(saleLines.monthLabel, monthLabel), eq(saleLines.versionStatus, "current")));
 
   // Separate gap rows; keep total count per invoice for partial detection.
   const gapRows = allMonthRows.filter((r) => gapLineUids.has(r.lineUid));

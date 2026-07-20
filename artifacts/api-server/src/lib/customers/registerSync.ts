@@ -23,7 +23,7 @@ import {
   parseRegisterRow,
   toSaleLine,
 } from "../registers/normalize.js";
-import { insertSaleLineBatches, markSheetConfirmed } from "../registers/ingest.js";
+import { versionedSyncLines } from "../registers/ingest.js";
 
 export const REGISTER_SHEET_IDS: Record<string, string> =
   registerSheets.registers;
@@ -113,11 +113,7 @@ async function doSync(fy: string, spreadsheetId: string): Promise<void> {
     );
 
     const syncedAt = new Date();
-    const { inserted } = await insertSaleLineBatches(lines);
-
-    // Mark every row currently in the sheet as confirmed.  Ghost rows (in the
-    // DB but absent from this read) keep their prior sheet_confirmed_at.
-    await markSheetConfirmed(lines.map((l) => l.lineUid), syncedAt);
+    const { touched, superseded, inserted } = await versionedSyncLines(lines, syncedAt);
 
     lastSyncedAtMs.set(fy, Date.now());
     s.rows = lines.length;
@@ -129,6 +125,8 @@ async function doSync(fy: string, spreadsheetId: string): Promise<void> {
         tabsRead,
         rowsScanned,
         linesBuilt: lines.length,
+        touched,
+        superseded,
         inserted,
         unmappedGroups: Object.keys(unmapped.unmapped_groups).length,
         unmappedHeads: Object.keys(unmapped.unmapped_heads).length,

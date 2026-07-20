@@ -1,0 +1,126 @@
+Fix the duplicate accumulation in sale_line. Read this whole thing before
+starting - it has an order, and step 1 must land before step 2 is useful.
+
+THE PROBLEM, RESTATED
+
+line_uid hashes the amount. ON CONFLICT DO NOTHING only ever inserts. So when
+someone edits a rate in the sheet - as happened on 18 and 20 July, rounding
+490.92 to 491 - the row hashes differently, gets inserted as new, and the old
+version stays forever. The DB reports the sum of every version.
+
+This is not a July problem. Every month carries it: Apr 75, May 169, Jun 214,
+Jul 592. It is structural and it will keep growing.
+
+The sheet is already correct. Nothing needs recovering. The DB holds too much,
+not too little.
+
+STEP 1 - STORE COLOUR
+
+SALE SHEET 26-27 has a Color column at position 9, zero-indexed 8. It is read
+and discarded at mapping. Add it to sale_line and populate it on every load.
+
+This must come first. Without colour, white and ivory are indistinguishable -
+the documented case is invoice 12600285, item 188, qty 88, Rs.25,867 as serial
+1802 WHITE and 1803 IVORY, two real products. That is the whole reason
+serial_no was pressed into the key, and serial_no is generated in the sheet and
+changes whenever anyone sorts it. Storing colour is what lets the key become
+stable.
+
+Backfill colour for existing rows where it can be matched from the sheet.
+Report how many rows get a colour and how many cannot.
+
+STEP 2 - VERSIONED UPSERT
+
+Split identity from mutable attributes.
+
+  IDENTITY - stable, survives edits:
+      fy, invoice_no, item_code, color, qty
+      This is the new line_uid.
+
+  MUTABLE - can change when someone edits the sheet:
+      rate, amount, serial_no, and any derived field
+
+  STATE - new columns:
+      version_status   'current' or 'superseded'
+      superseded_at    timestamp, null while current
+      superseded_by    the id of the row that replaced it
+
+On sync, for each sheet row:
+  - no matching identity          -> insert as current
+  - identity matches, values same -> touch sheet_confirmed_at, nothing else
+  - identity matches, values differ -> mark the existing row superseded with a
+    timestamp, insert the new values as current
+
+NOTHING IS EVER DELETED. The rate-rounding episode becomes visible history
+instead of silent inflation.
+
+EVERY reported figure filters to version_status = 'current'. Audit views may
+show superseded rows; no total may include them.
+
+STEP 3 - RECONCILE WHAT IS ALREADY THERE
+
+One-off pass over existing rows. Group by the new identity. Within each group,
+the row with the latest ingested_at becomes current; the rest are marked
+superseded with superseded_at set to the timestamp of the row that replaced
+them.
+
+Do not delete anything. Report per month: rows examined, marked superseded,
+remaining current, and the total value before and after.
+
+The July total should land near the sheet's Rs.6,28,33,045 across 626 invoices.
+Apr, May and Jun should barely move - their duplicate counts are 75, 169 and
+214.
+
+STEP 4 - PROVE IT
+
+  a) Per month for FY2026-27: current-row count and total, against the live
+     sheet's row count and total. They should now agree.
+  b) Q1 must still be Rs.73.09 Cr. IMPORTANT: Q1 currently carries 458
+     duplicate rows AND matches its anchor exactly. Those two facts are hard to
+     hold together. Either the anchor was computed from equally inflated data,
+     or those 458 are something other than superseded edits. Report what Q1
+     becomes after the pass and whether the anchor still holds. If Q1 MOVES,
+     say so plainly - do not adjust anything to preserve it.
+  c) Idempotency: re-run the sync twice with no sheet change. Zero inserts,
+     zero supersessions on the second run.
+  d) Edit simulation: take one row, change its rate, re-sync. Confirm exactly
+     one supersession and one insert, and that the current total moves by the
+     difference, not by the whole row.
+
+STEP 5 - THE STANDING CHECK
+
+SAP is a separate system carrying the same invoices and the same money, which
+makes it a genuine external auditor rather than an internal cross-foot.
+
+Add a reconciliation comparing SUM(amount) of current rows per invoice against
+SAP's Taxable Amount per Document Number, for the SAP Combined tab
+(19Oj6P2cSZmXNGfDro9K_ubfrfPp_03K14vOTrq_gdyI).
+
+Caveat: the Drive copy of SAP is a periodic export and lags - last modified
+18 July against the sheet's 20 July. Rows newer than the last export will
+legitimately have no SAP counterpart. Report those separately by date rather
+than as failures.
+
+Also flag any invoice where sheet and SAP disagree on value. The rate rounding
+means the sheet may now differ from what SAP actually billed. Rs.490.92
+becoming Rs.491 is one paisa, but across 626 invoices it accumulates, and it is
+worth knowing whether that rounding was a tidy-up or a correction.
+
+STEP 6 - SAY SO ON SCREEN
+
+Until step 3 completes, FY2026-27 figures are inflated - July by roughly 2x,
+Apr to Jun by 1 to 2 percent. Put a provisional marker on FY2026-27 totals so
+nobody quotes a number this week that is about to change.
+
+CONSTRAINTS
+
+  Do not delete rows. Supersede them. Four times in this project a number was
+  tidied by removing data.
+  Drive read-only. This is fixed entirely on the database side.
+  Secondary is frozen and untouched. It uses the same insert-only pattern, so
+  once this is proven on primary we will assess whether secondary needs it -
+  but change nothing there now.
+  Dry run and report before each of steps 2, 3 and 5.
+
+Report step 1 first. Steps 2 and 3 are the substance; do not start them until
+colour is stored and backfilled.

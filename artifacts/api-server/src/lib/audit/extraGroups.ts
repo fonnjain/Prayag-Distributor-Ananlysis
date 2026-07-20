@@ -158,6 +158,7 @@ export async function runReportLogicGroup(fy: string): Promise<CheckGroup> {
       const baseWhere = and(
         eq(saleLines.headCanon, subject_head),
         eq(saleLines.fy, checkFy),
+        eq(saleLines.versionStatus, "current"),
         monthFilter,
         anchor.filters.group ? eq(saleLines.groupCanon, anchor.filters.group) : undefined,
         anchor.filters.state ? eq(saleLines.stateCanon, anchor.filters.state) : undefined,
@@ -498,7 +499,7 @@ async function runSapLagGroup(): Promise<CheckGroup> {
   try {
     // Get DB row counts per month for the open FY from sale_line.
     const dbRes = await pool.query<{ month_label: string; cnt: string }>(
-      `SELECT month_label, COUNT(*) AS cnt FROM sale_line WHERE fy = $1 GROUP BY month_label`,
+      `SELECT month_label, COUNT(*) AS cnt FROM sale_line_current WHERE fy = $1 GROUP BY month_label`,
       [OPEN_FY],
     );
     const dbByMonth = new Map<string, number>(

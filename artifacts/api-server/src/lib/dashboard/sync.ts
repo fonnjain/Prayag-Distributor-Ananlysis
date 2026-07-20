@@ -1,5 +1,5 @@
 // Orchestrates building and persisting dashboard snapshots.
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db, dashboardSnapshots, saleLines, type DashboardSnapshot } from "@workspace/db";
 import { logger } from "../logger.js";
 import { fetchWorkbook } from "../sheets.js";
@@ -52,7 +52,7 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
   const [fy2425DbRow] = await db
     .select({ total: sql<string>`sum(amount)` })
     .from(saleLines)
-    .where(eq(saleLines.fy, "2024-25"));
+    .where(and(eq(saleLines.fy, "2024-25"), eq(saleLines.versionStatus, "current")));
   const fy2425SalesInr = Number(fy2425DbRow?.total ?? fy2425.grand_total);
 
   const data = {

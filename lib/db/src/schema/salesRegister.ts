@@ -14,8 +14,22 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
 // Invoice-line sales register. One row per invoice line, deduplicated across
-// overlapping source files via line_uid (sha1 of the identifying tuple plus an
-// occurrence counter that preserves legitimate duplicate lines).
+// overlapping source files via line_uid.
+//
+// VERSION MODEL (added Jul 2026):
+//   version_status = 'current'    — the authoritative version of this line
+//   version_status = 'superseded' — an older version (stale rate, etc.)
+//   superseded_at  — when this row was superseded (= ingested_at of its replacement)
+//   superseded_by  — line_uid of the row that replaced this one
+//
+// EVERY reported figure must filter to version_status = 'current'.
+// The sale_line_current view applies this filter automatically for raw SQL.
+//
+// IDENTITY KEY (stable across rate edits):
+//   (fy, invoice_no, code, color, qty, month_label)
+//   When a sync finds an identity-matched row with changed (amount, rate, serial_no),
+//   it marks the old row superseded and inserts the new values as current.
+//
 // serial_no is column A of the source sheet ("Serial no"); it is unique per
 // physical dispatch line, including colour/variant lines that share the same
 // (invoice_no, code, qty, amount). Null for historical FYs whose sheets lack
@@ -31,6 +45,7 @@ export const saleLines = pgTable(
     monthLabel: text("month_label"), // 'Apr-26'
     customer: text("customer"),
     code: text("code").notNull(),
+    color: text("color"), // e.g. "WHITE", "IVORY"; null for FYs whose sheets lack the column
     qty: numeric("qty"),
     saleRate: numeric("sale_rate"),
     amount: numeric("amount").notNull(),
@@ -51,11 +66,17 @@ export const saleLines = pgTable(
     // After the first post-migration backfill: null → sheet removed the row
     // (disputed); non-null → sheet still carries it (confirmed).
     sheetConfirmedAt: timestamp("sheet_confirmed_at", { withTimezone: true }),
+    // Version tracking — see VERSION MODEL above.
+    versionStatus: text("version_status").notNull().default("current"), // 'current' | 'superseded'
+    supersededAt: timestamp("superseded_at", { withTimezone: true }),
+    supersededBy: text("superseded_by"), // line_uid of the replacement row
   },
   (t) => [
     index("sale_line_fy_month_idx").on(t.fy, t.monthLabel),
     index("sale_line_fy_head_idx").on(t.fy, t.headCanon),
     index("sale_line_fy_group_idx").on(t.fy, t.groupCanon),
+    index("sale_line_version_idx").on(t.versionStatus),
+    index("sale_line_identity_idx").on(t.fy, t.invoiceNo, t.code, t.qty, t.monthLabel),
   ],
 );
 

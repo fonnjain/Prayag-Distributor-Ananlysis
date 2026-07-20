@@ -224,6 +224,17 @@ export default function DataHealth() {
   const [lastRun, setLastRun] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
 
+  type VersionStats = {
+    fy: string;
+    totalRows: number;
+    currentRows: number;
+    supersededRows: number;
+    currentAmount: number;
+    supersededAmount: number;
+    reconciled: boolean;
+  };
+  const [versionStats, setVersionStats] = useState<VersionStats | null>(null);
+
   const { syncedAt } = useDashboard();
 
   const runAudit = useCallback(() => {
@@ -250,6 +261,15 @@ export default function DataHealth() {
 
   // Run on mount and when FY changes.
   useEffect(() => { runAudit(); }, [runAudit]);
+
+  // Fetch version-stats (deduplication health) whenever FY changes.
+  useEffect(() => {
+    setVersionStats(null);
+    fetch(`/api/registers/${encodeURIComponent(fy)}/version-stats`)
+      .then((r) => r.ok ? r.json() as Promise<VersionStats> : null)
+      .then((d) => d && setVersionStats(d))
+      .catch(() => {});
+  }, [fy]);
 
   const downloadAudit = useCallback(() => {
     setDownloading(true);
@@ -382,6 +402,30 @@ export default function DataHealth() {
           {report.groups.map((g) => (
             <GroupCard key={g.id} group={g} />
           ))}
+        </div>
+      )}
+
+      {/* Register deduplication status */}
+      {versionStats && versionStats.totalRows > 0 && (
+        <div className={cn(
+          "flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 rounded-md border text-sm",
+          versionStats.reconciled
+            ? "border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-300"
+            : "border-amber-300 bg-amber-50 dark:bg-amber-950/20 text-amber-800 dark:text-amber-300"
+        )}>
+          <span className="font-medium">Register deduplication ({versionStats.fy}):</span>
+          {versionStats.reconciled ? (
+            <span>
+              Reconciled — {versionStats.currentRows.toLocaleString("en-IN")} current rows,{" "}
+              {versionStats.supersededRows.toLocaleString("en-IN")} superseded
+            </span>
+          ) : (
+            <span>
+              Not yet reconciled — {versionStats.totalRows.toLocaleString("en-IN")} total rows.
+              Run <code className="font-mono text-xs">POST /api/registers/{versionStats.fy}/backfill-color</code> then{" "}
+              <code className="font-mono text-xs">reconcile-versions</code>.
+            </span>
+          )}
         </div>
       )}
 

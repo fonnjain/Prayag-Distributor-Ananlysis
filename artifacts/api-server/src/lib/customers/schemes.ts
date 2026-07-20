@@ -167,7 +167,7 @@ async function fetchEntityAchievements(
       customer,
       ${metric} AS achievement,
       0 AS val_ly
-    FROM sale_line
+    FROM sale_line_current
     WHERE customer IS NOT NULL
       AND invoice_date IS NOT NULL
       AND invoice_date::date >= $1::date

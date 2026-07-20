@@ -49,7 +49,7 @@ export async function computeLikeMonths(fy: string): Promise<LikeMonthsResult> {
       maxDate: sql<string | null>`max(${saleLines.invoiceDate})::text`,
     })
     .from(saleLines)
-    .where(eq(saleLines.fy, fy))
+    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")))
     .groupBy(saleLines.monthLabel);
 
   const order = fyMonthLabels(fy);
@@ -431,8 +431,8 @@ export async function buildCompanyReports(
 // ── Private query functions ───────────────────────────────────────────────────
 
 function whereClause(fyStr: string, months: string[]) {
-  if (months.length === 0) return eq(saleLines.fy, fyStr);
-  return and(eq(saleLines.fy, fyStr), inArray(saleLines.monthLabel, months));
+  if (months.length === 0) return and(eq(saleLines.fy, fyStr), eq(saleLines.versionStatus, "current"));
+  return and(eq(saleLines.fy, fyStr), inArray(saleLines.monthLabel, months), eq(saleLines.versionStatus, "current"));
 }
 
 async function queryByState(fyStr: string, months: string[]) {
@@ -455,7 +455,7 @@ async function queryByGroupFull(fyStr: string) {
   return db.select({
     group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
-  }).from(saleLines).where(eq(saleLines.fy, fyStr)).groupBy(sql`1`);
+  }).from(saleLines).where(and(eq(saleLines.fy, fyStr), eq(saleLines.versionStatus, "current"))).groupBy(sql`1`);
 }
 
 async function queryByStateGroup(fyStr: string, months: string[]) {

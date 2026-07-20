@@ -29,7 +29,7 @@ import {
   priorFy as calcPriorFy,
 } from "./names.js";
 import { db, saleLines, itemMaster } from "@workspace/db";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { loadCollectionForFy } from "./collection.js";
 
 // -------------------------------------------------------------------------
@@ -366,7 +366,7 @@ async function buildItemCodeRows(
     const lines = await db
       .select({ code: saleLines.code, customer: saleLines.customer, amount: saleLines.amount })
       .from(saleLines)
-      .where(eq(saleLines.fy, fy));
+      .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")));
 
     const byCode = new Map<string, number>();
     for (const row of lines) {

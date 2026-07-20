@@ -817,7 +817,7 @@ async function runPrimarySet(fy: string): Promise<CheckGroup> {
         total: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8`,
       })
       .from(saleLines)
-      .where(eq(saleLines.fy, fy));
+      .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")));
     const liveRowCount = liveStatsRows[0]?.rowCount ?? 0;
     const totalActual = Math.round(liveStatsRows[0]?.total ?? 0);
 
@@ -865,7 +865,7 @@ async function runPrimarySet(fy: string): Promise<CheckGroup> {
       const closedRows = await db
         .select({ total: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8` })
         .from(saleLines)
-        .where(and(eq(saleLines.fy, fy), inArray(saleLines.monthLabel, fyAnchor.closedMonths)));
+        .where(and(eq(saleLines.fy, fy), inArray(saleLines.monthLabel, fyAnchor.closedMonths), eq(saleLines.versionStatus, "current")));
       const closedActual = Math.round(closedRows[0]?.total ?? 0);
       checks.push(moneyCheck(
         `primary_total_${fy}`,
@@ -889,7 +889,7 @@ async function runPrimarySet(fy: string): Promise<CheckGroup> {
           total: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8`,
         })
         .from(saleLines)
-        .where(eq(saleLines.fy, fy))
+        .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")))
         .groupBy(sql`1`);
 
       const byDisplay = new Map<string, number>();

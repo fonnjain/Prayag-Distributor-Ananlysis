@@ -92,7 +92,7 @@ async function monthlyStats(fy: string): Promise<MonthStat[]> {
       maxDate: sql<string | null>`max(${saleLines.invoiceDate})::text`,
     })
     .from(saleLines)
-    .where(eq(saleLines.fy, fy))
+    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")))
     .groupBy(sql`1`);
 
   const stats: MonthStat[] = [];
@@ -147,7 +147,7 @@ async function headStats(fy: string): Promise<HeadStat[]> {
       amount: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8`,
     })
     .from(saleLines)
-    .where(eq(saleLines.fy, fy))
+    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")))
     .groupBy(sql`1`);
   const total = rows.reduce((s, r) => s + r.amount, 0);
   return rows
@@ -173,7 +173,7 @@ async function customerRevenue(
       amount: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8`,
     })
     .from(saleLines)
-    .where(and(eq(saleLines.fy, fy), inArray(saleLines.monthLabel, monthLabels)))
+    .where(and(eq(saleLines.fy, fy), inArray(saleLines.monthLabel, monthLabels), eq(saleLines.versionStatus, "current")))
     .groupBy(sql`1`);
   const map: CustomerPeriod = new Map();
   for (const row of rows) {
@@ -215,7 +215,7 @@ async function margins(fy: string): Promise<Margins> {
     })
     .from(saleLines)
     .leftJoin(costMaster, eq(saleLines.code, costMaster.code))
-    .where(eq(saleLines.fy, fy));
+    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")));
 
   const total = coverage?.total ?? 0;
   const covered = coverage?.covered ?? 0;
@@ -238,7 +238,7 @@ async function margins(fy: string): Promise<Margins> {
     })
     .from(saleLines)
     .innerJoin(costMaster, eq(saleLines.code, costMaster.code))
-    .where(eq(saleLines.fy, fy))
+    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")))
     .groupBy(sql`1`);
 
   return {
@@ -269,7 +269,7 @@ async function saleLinePeriodCounts(
       customers: sql<number>`count(distinct ${saleLines.customer})::int`,
     })
     .from(saleLines)
-    .where(and(eq(saleLines.fy, fy), inArray(saleLines.monthLabel, monthLabels)));
+    .where(and(eq(saleLines.fy, fy), inArray(saleLines.monthLabel, monthLabels), eq(saleLines.versionStatus, "current")));
   return { invoices: row?.invoices ?? 0, customers: row?.customers ?? 0 };
 }
 

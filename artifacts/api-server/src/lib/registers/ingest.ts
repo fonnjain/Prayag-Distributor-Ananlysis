@@ -302,6 +302,150 @@ export async function recordIngestRun(run: InsertIngestRun): Promise<void> {
   await db.insert(ingestRuns).values(run);
 }
 
+export type VersionedSyncResult = {
+  touched: number;
+  superseded: number;
+  inserted: number;
+};
+
+/**
+ * Idempotent versioned sync for the open FY.
+ *
+ * Groups incoming sheet rows by identity key (invoice_no, code, color, qty,
+ * month_label). Compares each identity against the current row in the DB:
+ *   - No existing row → insert as current
+ *   - Existing row, same (amount, saleRate, serialNo) → touch sheet_confirmed_at
+ *   - Existing row, different values → mark old as superseded, insert new current
+ *
+ * Call ONLY for the open FY where invoice_no is always populated.
+ * For historical FYs (xlsx backfill) continue using insertSaleLineBatches.
+ */
+export async function versionedSyncLines(
+  lines: InsertSaleLine[],
+  confirmedAt: Date,
+): Promise<VersionedSyncResult> {
+  if (lines.length === 0) return { touched: 0, superseded: 0, inserted: 0 };
+
+  const deduped = dedupeBySerialNo(lines);
+
+  const fys = [...new Set(deduped.map((l) => l.fy).filter((f): f is string => f != null))];
+
+  type DbRow = {
+    lineUid: string;
+    invoiceNo: string | null;
+    code: string;
+    color: string | null;
+    qty: string | null;
+    monthLabel: string | null;
+    amount: string;
+    saleRate: string | null;
+    serialNo: number | null;
+  };
+
+  const allCurrent: DbRow[] = [];
+  for (const fy of fys) {
+    const rows = await db
+      .select({
+        lineUid: saleLines.lineUid,
+        invoiceNo: saleLines.invoiceNo,
+        code: saleLines.code,
+        color: saleLines.color,
+        qty: saleLines.qty,
+        monthLabel: saleLines.monthLabel,
+        amount: saleLines.amount,
+        saleRate: saleLines.saleRate,
+        serialNo: saleLines.serialNo,
+      })
+      .from(saleLines)
+      .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")));
+    allCurrent.push(...(rows as DbRow[]));
+  }
+
+  const identityKey = (
+    invoiceNo: string | null,
+    code: string,
+    color: string | null,
+    qty: string | null,
+    monthLabel: string | null,
+  ) => `${invoiceNo ?? ""}|${code}|${color ?? ""}|${qty ?? ""}|${monthLabel ?? ""}`;
+
+  const currentMap = new Map<string, DbRow>();
+  for (const row of allCurrent) {
+    const key = identityKey(row.invoiceNo, row.code, row.color, row.qty, row.monthLabel);
+    currentMap.set(key, row);
+  }
+
+  const toTouch: string[] = [];
+  const toSupersede: Array<{ lineUid: string; supersededBy: string; supersededAt: Date }> = [];
+  const toInsert: InsertSaleLine[] = [];
+
+  for (const line of deduped) {
+    const key = identityKey(
+      line.invoiceNo ?? null,
+      line.code,
+      line.color ?? null,
+      line.qty ?? null,
+      line.monthLabel ?? null,
+    );
+    const existing = currentMap.get(key);
+
+    if (!existing) {
+      toInsert.push(line);
+      continue;
+    }
+
+    const amtMatch = Math.abs(Number(line.amount) - Number(existing.amount)) < 0.01;
+    const rateMatch =
+      line.saleRate == null && existing.saleRate == null
+        ? true
+        : line.saleRate != null && existing.saleRate != null
+          ? Math.abs(Number(line.saleRate) - Number(existing.saleRate)) < 0.01
+          : false;
+    const serialMatch = (line.serialNo ?? null) === (existing.serialNo ?? null);
+
+    if (amtMatch && rateMatch && serialMatch) {
+      toTouch.push(existing.lineUid);
+    } else {
+      toSupersede.push({
+        lineUid: existing.lineUid,
+        supersededBy: line.lineUid,
+        supersededAt: confirmedAt,
+      });
+      toInsert.push(line);
+    }
+  }
+
+  for (let i = 0; i < toSupersede.length; i += BATCH_SIZE) {
+    const batch = toSupersede.slice(i, i + BATCH_SIZE);
+    await db.transaction(async (tx) => {
+      for (const { lineUid, supersededBy, supersededAt } of batch) {
+        await tx
+          .update(saleLines)
+          .set({ versionStatus: "superseded", supersededAt, supersededBy })
+          .where(eq(saleLines.lineUid, lineUid));
+      }
+    });
+  }
+
+  let inserted = 0;
+  for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
+    const batch = toInsert.slice(i, i + BATCH_SIZE);
+    const rows = await db
+      .insert(saleLines)
+      .values(batch)
+      .onConflictDoNothing()
+      .returning({ lineUid: saleLines.lineUid });
+    inserted += rows.length;
+  }
+
+  const confirmedUids = [...toTouch, ...toInsert.map((l) => l.lineUid)];
+  if (confirmedUids.length > 0) {
+    await markSheetConfirmed(confirmedUids, confirmedAt);
+  }
+
+  return { touched: toTouch.length, superseded: toSupersede.length, inserted };
+}
+
 export async function upsertItemMaster(
   items: Array<{
     code: string;

@@ -59,8 +59,8 @@ export async function dbAggregates(
   source?: string,
 ): Promise<SourceAggregates> {
   const where = source
-    ? and(eq(saleLines.fy, fy), eq(saleLines.source, source))
-    : eq(saleLines.fy, fy);
+    ? and(eq(saleLines.fy, fy), eq(saleLines.source, source), eq(saleLines.versionStatus, "current"))
+    : and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current"));
 
   const [totals] = await db
     .select({

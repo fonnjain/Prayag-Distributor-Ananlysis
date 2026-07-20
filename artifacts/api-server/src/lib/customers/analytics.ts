@@ -41,7 +41,7 @@ export function parseMonthLabel(
 /** All distinct month labels present in the DB for a given FY, in fiscal order. */
 export async function getAvailableMonths(fy: string): Promise<string[]> {
   const res = await pool.query<{ month_label: string }>(
-    `SELECT DISTINCT month_label FROM sale_line WHERE fy = $1 AND month_label IS NOT NULL`,
+    `SELECT DISTINCT month_label FROM sale_line_current WHERE fy = $1 AND month_label IS NOT NULL`,
     [fy],
   );
   const labels = res.rows.map((r) => r.month_label);
@@ -62,7 +62,7 @@ export async function getAvailableMonths(fy: string): Promise<string[]> {
 export async function getCompleteMonths(fy: string): Promise<string[]> {
   const res = await pool.query<{ month_label: string; max_date: string | null }>(
     `SELECT month_label, max(invoice_date)::text AS max_date
-     FROM sale_line
+     FROM sale_line_current
      WHERE fy = $1 AND month_label IS NOT NULL
      GROUP BY month_label`,
     [fy],
@@ -254,7 +254,7 @@ export async function listCustomers(params: {
       COALESCE(SUM(amount::numeric) FILTER (WHERE fy = $1 AND month_label = ANY($3::text[])), 0) AS val_cy,
       COALESCE(SUM(qty::numeric) FILTER (WHERE fy = $2 AND month_label = ANY($4::text[])), 0) AS qty_ly,
       COALESCE(SUM(amount::numeric) FILTER (WHERE fy = $2 AND month_label = ANY($4::text[])), 0) AS val_ly
-    FROM sale_line sl
+    FROM sale_line_current sl
     WHERE customer IS NOT NULL
       AND (
         (fy = $1 AND month_label = ANY($3::text[]))
@@ -307,7 +307,7 @@ export async function getCustomerCategories(params: {
       COALESCE(SUM(amount::numeric) FILTER (WHERE fy = $1 AND month_label = ANY($3::text[])), 0) AS val_cy,
       COALESCE(SUM(qty::numeric) FILTER (WHERE fy = $2 AND month_label = ANY($4::text[])), 0) AS qty_ly,
       COALESCE(SUM(amount::numeric) FILTER (WHERE fy = $2 AND month_label = ANY($4::text[])), 0) AS val_ly
-    FROM sale_line
+    FROM sale_line_current
     WHERE customer = $5
       AND (
         (fy = $1 AND month_label = ANY($3::text[]))
@@ -387,7 +387,7 @@ export async function getCustomerProducts(params: {
       COALESCE(SUM(sl.amount::numeric) FILTER (WHERE sl.fy = $1 AND sl.month_label = ANY($3::text[])), 0) AS val_cy,
       COALESCE(SUM(sl.qty::numeric) FILTER (WHERE sl.fy = $2 AND sl.month_label = ANY($4::text[])), 0) AS qty_ly,
       COALESCE(SUM(sl.amount::numeric) FILTER (WHERE sl.fy = $2 AND sl.month_label = ANY($4::text[])), 0) AS val_ly
-    FROM sale_line sl
+    FROM sale_line_current sl
     LEFT JOIN item_master im ON im.code = sl.code
     WHERE sl.customer = $5
       AND (
@@ -466,7 +466,7 @@ export async function getChurned(params: {
     `
     WITH cy_customers AS (
       SELECT DISTINCT customer
-      FROM sale_line
+      FROM sale_line_current
       WHERE fy = $1 AND month_label = ANY($3::text[]) AND customer IS NOT NULL
     ),
     ly_data AS (
@@ -477,7 +477,7 @@ export async function getChurned(params: {
         SUM(qty::numeric) AS qty_ly,
         SUM(amount::numeric) AS val_ly,
         COUNT(DISTINCT month_label) AS months_ordered
-      FROM sale_line
+      FROM sale_line_current
       WHERE fy = $2 AND month_label = ANY($4::text[]) AND customer IS NOT NULL
         ${typeFilter}
       GROUP BY customer
@@ -530,7 +530,7 @@ export async function getNewCustomers(params: {
     `
     WITH ly_customers AS (
       SELECT DISTINCT customer
-      FROM sale_line
+      FROM sale_line_current
       WHERE fy = $2 AND month_label = ANY($4::text[]) AND customer IS NOT NULL
     ),
     cy_data AS (
@@ -541,7 +541,7 @@ export async function getNewCustomers(params: {
         SUM(qty::numeric) AS qty_ly,
         SUM(amount::numeric) AS val_ly,
         COUNT(DISTINCT month_label) AS months_ordered
-      FROM sale_line
+      FROM sale_line_current
       WHERE fy = $1 AND month_label = ANY($3::text[]) AND customer IS NOT NULL
         ${typeFilter}
       GROUP BY customer
@@ -621,7 +621,7 @@ export async function getPriceShrinkers(params: {
       COALESCE(SUM(amount::numeric) FILTER (WHERE fy = $1 AND month_label = ANY($3::text[])), 0) AS val_cy,
       COALESCE(SUM(qty::numeric) FILTER (WHERE fy = $2 AND month_label = ANY($4::text[])), 0) AS qty_ly,
       COALESCE(SUM(amount::numeric) FILTER (WHERE fy = $2 AND month_label = ANY($4::text[])), 0) AS val_ly
-    FROM sale_line sl ${joinClause}
+    FROM sale_line_current sl ${joinClause}
     WHERE customer IS NOT NULL
       AND (
         (fy = $1 AND month_label = ANY($3::text[]))
@@ -777,7 +777,7 @@ export async function getAtRisk(params: {
             1
           )
         ) AS order_date
-      FROM sale_line sl
+      FROM sale_line_current sl
       WHERE sl.customer IS NOT NULL AND sl.month_label IS NOT NULL
     ),
     valid_od AS (
@@ -876,7 +876,7 @@ export async function getCustomerHistory(params: {
     SELECT fy,
       SUM(qty::numeric) AS qty,
       SUM(amount::numeric) AS val
-    FROM sale_line
+    FROM sale_line_current
     WHERE customer = $1 AND fy = ANY($2::text[]) ${monthCond}
     GROUP BY fy
     ORDER BY fy
@@ -926,13 +926,13 @@ export async function getDistributorRisk(params: {
     `
     WITH cy AS (
       SELECT customer, SUM(amount::numeric) AS cy_val
-      FROM sale_line
+      FROM sale_line_current
       WHERE fy = $1 AND month_label = ANY($2::text[]) AND customer IS NOT NULL
       GROUP BY customer
     ),
     ly AS (
       SELECT customer, SUM(amount::numeric) AS ly_val
-      FROM sale_line
+      FROM sale_line_current
       WHERE fy = $3 AND month_label = ANY($4::text[]) AND customer IS NOT NULL
       GROUP BY customer
     )

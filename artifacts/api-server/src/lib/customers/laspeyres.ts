@@ -74,7 +74,7 @@ async function computeRaw(
         code,
         fy,
         SUM(amount::numeric) / NULLIF(SUM(qty::numeric), 0) AS avg_price
-      FROM sale_line
+      FROM sale_line_current
       WHERE fy IN ($1, $2)
         AND qty IS NOT NULL AND qty::numeric > 0
         AND amount IS NOT NULL AND amount::numeric > 0
@@ -83,7 +83,7 @@ async function computeRaw(
     ),
     ly_basket AS (
       SELECT code, SUM(qty::numeric) AS qty_ly
-      FROM sale_line
+      FROM sale_line_current
       WHERE fy = $1
         AND qty IS NOT NULL AND qty::numeric > 0
         ${extraWhereParts ? `AND (${extraWhereParts})` : ""}
@@ -162,7 +162,7 @@ export async function computeCategoryMultipliers(
         sl.fy,
         COALESCE(sl.group_canon, sl.group_raw, 'Uncategorized') AS category,
         SUM(sl.amount::numeric) / NULLIF(SUM(sl.qty::numeric), 0) AS avg_price
-      FROM sale_line sl
+      FROM sale_line_current sl
       WHERE sl.fy IN ($1, $2)
         AND sl.qty IS NOT NULL AND sl.qty::numeric > 0
         AND sl.amount IS NOT NULL AND sl.amount::numeric > 0
@@ -173,7 +173,7 @@ export async function computeCategoryMultipliers(
         sl.code,
         COALESCE(sl.group_canon, sl.group_raw, 'Uncategorized') AS category,
         SUM(sl.qty::numeric) AS qty_ly
-      FROM sale_line sl
+      FROM sale_line_current sl
       WHERE sl.fy = $1 AND sl.qty IS NOT NULL AND sl.qty::numeric > 0
       GROUP BY sl.code, COALESCE(sl.group_canon, sl.group_raw, 'Uncategorized')
     ),
