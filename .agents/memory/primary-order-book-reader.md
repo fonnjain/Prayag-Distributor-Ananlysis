@@ -1,6 +1,6 @@
 ---
 name: Primary Order Book reader quirks
-description: Column detection rules and per-FY layout differences in readOrderTabInventory (primarySheets.ts)
+description: Column detection rules, per-FY layout differences, and dry-run anchors for readOrderTabInventory (primarySheets.ts)
 ---
 
 ## Value column aliases
@@ -10,46 +10,93 @@ The header-detection regex accepts three variants (all three call sites in prima
 - `Amount` (anchored `^amount$`) — FY2023-24
 
 ## State Head column — optional
-FY2023-24 has no State Head column.  The condition is `tI >= 0` only (not `&& hI >= 0`).
-When `headIdx = -1`, head-level aggregation is silently skipped; row counts and totals are still correct.
-Head-column alias regex (main reader + inventory reader):
-`/state\s*head|^head$|^tm\s*(name)?$|^rsm$|^sm$|sales\s*head|^zone$/i`
+Detection gate is `tI >= 0` only (not `&& hI >= 0`) in both `readAndAggregate` and
+`readOrderTabInventory`.  When `headIdx = -1`, head-level aggregation is skipped;
+row counts and totals are still correct.
+Head-column alias regex: `/state\s*head|^head$|^tm\s*(name)?$|^rsm$|^sm$|sales\s*head|^zone$/i`
 
-## FY2023-24 positional fallback (no header row)
-11 of 12 monthly tabs have **no header row** — data starts at row 0.
-Activation signature (checked on globalRow === 0 only):
-- col 1 = Excel date serial in range 40 000–60 000
-- col 17 = positive numeric amount
+## FY2023-24 layout (Order Sheet 23-24, 1jtSUGE6…)
+The header IS present at row 1 (Sheets rows are 1-based; readTabRowsChunked starts
+at start=1, so globalRow starts at 1 — the old `globalRow === 0` positional fallback
+was dead code).  After the alias fix the header is found normally.
 
-Fixed column positions:
-| idx | col | contents |
-|-----|-----|----------|
-| 0   | SrNo | — |
-| 1   | Date | Excel serial |
-| 2   | Vch/BillNo | invoice no |
-| 3   | Customer | customer name |
-| 4   | Item Group | — |
-| 5   | Item Code | product code |
-| 6   | Item Name | — |
-| 7   | COLOR | — |
-| 10  | Qty | — |
-| 12  | Unit | Nos (no Ltr rows in FY2023-24) |
-| 17  | Amount | net booking value |
-| 19  | Month | text e.g. "Apr-2023" |
-| 20  | Channel | "Retail" / "Govt" |
+Verified column positions (0-indexed):
+| idx | header       | notes |
+|-----|--------------|-------|
+| 0   | SrNo         | — |
+| 1   | Date         | **text "DD-MMM-YY"** e.g. "01-Mar-24", NOT Excel serial |
+| 2   | Vch/BillNo   | invoice no |
+| 3   | Customer     | customer name |
+| 4   | Item Group   | — |
+| 5   | Item Code    | product code |
+| 10  | Qty          | piece qty |
+| 11  | Free Qty     | captured separately, never folded into Qty |
+| 12  | Unit         | "Nos" / "Ltr." — **plain "Unit"**, NOT "Unit.Name" |
+| 13  | MRP          | — |
+| 14  | Base Price   | — |
+| 15  | Discount(%)  | — |
+| 16  | Sale Price   | — |
+| 17  | Amount       | net booking value (the detected value column) |
+| 18  | ITEM CODE    | alternate code col |
+| 19  | Month        | text "Mar-2024" (not "Mar-24") |
+| 20  | SEGMENT      | — |
+| 21  | Station      | — |
+| 22  | STATE        | — |
+| 23  | STATE HEAD   | use this one |
+| 24  | STATE HEAD B | concatenated "GROUP+HEAD+STATE" — DO NOT parse |
+| 25  | STATE HEAD A | alternate head col |
 
-## Dry-run anchors (GET /api/orders/dry-run)
-| FY | Full-year booking | Q1 (Apr–Jun) | Q1 sale anchor | Q1 ratio |
-|----|-------------------|--------------|----------------|----------|
-| 2026-27 | ₹86.56 Cr (Apr–Jul) | — | ₹86.82 Cr (self-test) | 0.997 ✓ |
-| 2025-26 | ₹342.03 Cr | — | ₹74.2 Cr (sale) | n/a (full yr) |
-| 2024-25 | ₹333.81 Cr | ₹79.13 Cr | ₹68.6 Cr (sale) | 1.154 |
-| 2023-24 | ₹377.39 Cr | ₹105.38 Cr | ₹87.4 Cr (sale) | 1.21 |
+Unit regex fix: `unitIdx = findCol(row, /^(unit(\.name| name)?|uom|measure)$/i)`
+Date parsing: `parseOrderDate` handles DD-MMM-YY via explicit regex branch.
 
-**Why:** Booking > sale ratios are normal (orders placed > invoices raised in same period).
-FY2023-24 ratio 1.21 is above the 1.0–1.15 expected band but was accepted by user.
+Litre rule in FY2023-24 order sheet:
+- Feb: 537 Ltr rows, 26.87 lakh litres; Apr-Jan: 0 Ltr rows (all Nos)
+- Mar: 558 Ltr rows, 23.73 lakh litres
+- Total FY2023-24: 1,095 Ltr rows, 50.59 lakh litres; 137,855 piece rows
+
+Tab structure anomaly:
+- "SHEET" tab: lookup/exclusion list (7 entity names like BHIWADI CASH, DELHI CASH,
+  PRAYAG PLYMER entities, SAMPLE). Added to SKIP_TAB_RE.
+- "SEGMENT INDEX" tab: classified as per-head (two title-case words), cv=unreadable
+  (no tax header). Zero contribution to total — harmless but could add to SKIP_TAB_RE.
+- "combined" + "LAST MONTH ORDER": confirmed-subset (correctly excluded, not double-counted).
+
+## Per-head unique-row correction (dry-run vs live path)
+`loadPrimarySheetData` adds `cv.uniqueAmount` from per-head tabs with `status === "has-unique-rows"`.
+The dry-run route MUST apply the same correction to match.
+Known instance: **ANUJ SHARMA** tab — 162 unique rows, ₹39.39 lakh (FY2026-27 booking).
+Without this correction, dry-run total was ₹86.56 Cr vs live ₹86.82 Cr.
+
+## Self-test route (GET /api/orders/selftest)
+Clears cache, runs both paths back-to-back, reports delta.
+FY2026-27 self-test result (July 2026): PASS, delta = 0, both paths = ₹86.96 Cr.
+
+## Dry-run anchors (GET /api/orders/dry-run, corrected totals)
+| FY | Full-year booking | Notes |
+|----|-------------------|-------|
+| 2026-27 | ₹86.96 Cr (Apr–Jul) | ANUJ SHARMA correction included; self-test PASS |
+| 2025-26 | ₹342.03 Cr | No BOOKING_SHEETS entry; from ORDER_BOOKING_SHEET_IDS only |
+| 2024-25 | ₹333.81 Cr | — |
+| 2023-24 | ₹377.39 Cr | Q1 ratio 1.21 — accepted by user |
+
+## SALE_SHEETS["2025-26"] discrepancy
+Sheet ID 1RuXHIXfusOT… ("State Head Sale 2025-26") returns ₹702.28 Cr via readAndAggregate,
+vs primary register total ₹361.14 Cr.  Ratio ≈ 1.94 — likely double-counting or wrong
+sheet type (secondary vs primary).  Do not use this entry for booking-vs-sale ratio
+analysis until clarified.  For territory/institutional split on FY2025-26, use analytics
+route (sale_line) not SALE_SHEETS.
+
+## Booking vs Sale split (GET /api/orders/booking-vs-sale)
+Route compares loadPrimarySheetData booking vs sale by FY, splitting by Non-territory bucket.
+FY2026-27 (4 months booking, 3 months sale — not comparable):
+  booking ₹86.96 Cr, sale ₹77.68 Cr, ntSale ₹6.24 Cr, ntBooking ₹6.55 Cr.
+  Note: ₹6.55 Cr of booking triggers NON_TERRITORY_RE — contradicts "100% Retail" Phase 0.
+FY2025-26: booking = 0 in BOOKING_SHEETS (only in ORDER_BOOKING_SHEET_IDS).
+  SALE_SHEETS["2025-26"] total unreliable (see discrepancy above).
 
 ## Insert pipeline status (July 2026)
-`primary_order_line` table exists (schema at `lib/db/src/schema/orderLines.ts`).
-`GET /api/orders/dry-run` reads all four FY workbooks and reports tab inventory.
-Insert pipeline (write rows to DB) not yet built — dry-run only.
+`primary_order_line` schema at `lib/db/src/schema/orderLines.ts`.
+`GET /api/orders/dry-run` reads all four FY workbooks (corrected total).
+`GET /api/orders/selftest` — path A vs path B agreement test.
+`GET /api/orders/booking-vs-sale` — territory/institutional split vs booking.
+Insert pipeline (DB write) not yet built — dry-run only.

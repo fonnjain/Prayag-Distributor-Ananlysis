@@ -46,7 +46,7 @@ const NON_TERRITORY_RE = /^(other|project|govt|gem|jjm|nonterrit)/i;
 //   litre capacity: 05→500 L, 07→750 L, 10→1000 L, 20→2000 L).
 //   The user confirmed: "It is the tank-size lookup table, not order data."
 const SKIP_TAB_RE =
-  /^(instruction|change.?log|legend|notes?|readme|cover|summary|index|template|wt|wt-ltr)$/i;
+  /^(instruction|change.?log|legend|notes?|readme|cover|summary|index|template|wt|wt-ltr|sheet)$/i;
 const COMBINED_TAB_RE = /^(combined|last.?month.?order|all.?orders?|pivot)$/i;
 const PER_HEAD_TAB_RE = /^[A-Z][A-Za-z .'-]+(?:\s[A-Z][A-Za-z .'-]+)+$/; // title-case or all-caps name
 // Match abbreviated OR full month names, with or without year suffix.
@@ -312,11 +312,12 @@ async function readAndAggregate(
             if (!headerFound) continue;
           } else {
             // Accept "Taxable Value", "Taxable Amount", or bare "Amount" (FY2023-24).
+            // State Head column is optional — sheets that lack it yield headIdx = -1
+            // and those rows are skipped in aggregation (no attribution possible).
             const tI = findCol(row, /taxable\s*(value|amount)|^amount$/i);
-            const hI = findCol(row, /state\s*head|^head$|^tm\s*(name)?$|^rsm$|^sm$|sales\s*head|^zone$/i);
-            if (tI >= 0 && hI >= 0) {
+            if (tI >= 0) {
               taxIdx = tI;
-              headIdx = hI;
+              headIdx = findCol(row, /state\s*head|^head$|^tm\s*(name)?$|^rsm$|^sm$|sales\s*head|^zone$/i);
               if (forBooking) {
                 custIdx = findCol(
                   row,
@@ -325,6 +326,10 @@ async function readAndAggregate(
                 if (custIdx < 0) custIdx = findCol(row, /customer|party/i);
               }
               headerFound = true;
+              logger.info(
+                { sheetId, tab: tab.title, valueAlias: strVal(row[tI]), valueIdx: tI, headIdx },
+                "primarySheets: aggregate header detected",
+              );
             }
             continue;
           }
@@ -426,6 +431,13 @@ function parseOrderDate(v: SheetCellValue | undefined): string | null {
   }
   const s = String(v).trim();
   if (!s) return null;
+  // DD-MMM-YY (e.g. "01-Mar-24") — used in FY2023-24 order sheets.
+  const ddMmmYy = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2})$/);
+  if (ddMmmYy) {
+    const year = 2000 + parseInt(ddMmmYy[3], 10);
+    const parsed = new Date(`${ddMmmYy[1]} ${ddMmmYy[2]} ${year}`);
+    return isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+  }
   const parsed = new Date(s);
   return isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
 }
@@ -498,7 +510,7 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
               taxIdx  = tI;
               headIdx = findCol(row, /state\s*head|^head$|^tm\s*(name)?$|^rsm$|^sm$|sales\s*head|^zone$/i);
               dateIdx = findCol(row, /^(date|order.?date|invoice.?date)$/i);
-              unitIdx = findCol(row, /^(unit\.?name|unit\s+name|uom|measure)$/i);
+              unitIdx = findCol(row, /^(unit(\.name| name)?|uom|measure)$/i);
               qtyIdx  = findCol(row, /^(qty|quantity|qnty|pieces?)$/i);
               custIdx = findCol(row, /^(customer|party[\s_]*name?|firm\s*name|dealer\s*name|distributor\s*name)$/i);
               if (custIdx < 0) custIdx = findCol(row, /customer|party/i);
@@ -510,31 +522,14 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
                   if (strVal(row[ci])) { chanIdx = ci; break; }
                 }
               }
+              logger.info(
+                { sheetId, tab: tab.title, valueAlias: strVal(row[tI]), valueIdx: tI, headIdx, dateIdx, unitIdx },
+                "primarySheets: inventory header detected",
+              );
               headerFound = true;
               continue; // skip the header row itself
             }
-            // Positional fallback: no header row — data starts at row 0.
-            // FY2023-24 signature: col 1 = Excel date serial (40 000–60 000), col 17 = Amount.
-            if (globalRow === 0) {
-              const dateSerial = numVal(row[1]);
-              const amtCandidate = numVal(row[17]);
-              if (dateSerial >= 40000 && dateSerial <= 60000 && amtCandidate > 0) {
-                taxIdx  = 17;
-                dateIdx = 1;
-                custIdx = 3;
-                codeIdx = 5;
-                qtyIdx  = 10;
-                unitIdx = 12;
-                chanIdx = 20;
-                headIdx = -1; // no State Head column in FY2023-24 workbook
-                headerFound = true;
-                // Fall through — this row is data, not a header.
-              } else {
-                continue;
-              }
-            } else {
-              continue;
-            }
+            continue; // not a header row — skip until header is found
           }
 
           const amt = numVal(row[taxIdx]);
