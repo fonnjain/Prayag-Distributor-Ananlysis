@@ -1,0 +1,65 @@
+Export the disputed July rows to Excel for review before the 1 August close.
+
+WHAT
+
+The 2,350 sale_line rows for Jul-26 that are absent from the live SALE SHEET.
+The db-gap route already identifies them. Produce a downloadable .xlsx.
+
+COLUMNS - two groups, in this order
+
+First, exactly the SALE SHEET 26-27 column order so rows can be pasted straight
+back if they are confirmed:
+
+  Serial no, Invoice No, Date, Bill From, Customer.Name, City, Destination,
+  Item Code, Color, Quantity, Mrp, Sale Rate, Taxable Value, GROUP, STATION,
+  STATE, STATE HEAD, MONTH
+
+Tank quantities must already be in LITRES, matching the sheet's own convention.
+
+Then these review columns after them:
+
+  lineUid            for unambiguous identification
+  ingestedAt         when the row entered the DB
+  ingestRunId        which run inserted it
+  branchFromInvoice  derived from the invoice prefix:
+                     1=Bhiwadi, 2, 3, 4=Delhi, 5=Gujarat, 6, 7=Andal
+  inSapSource        yes/no - does this invoice appear in the SAP workbook
+                     (19Oj6P2c, Combined tab)?
+
+THAT LAST COLUMN IS THE IMPORTANT ONE
+
+SAP is the billing master - its column names are raw SAP Business One fields
+(Posting Date, Document Number, Dscription, PriceBefDi). If a disputed row's
+invoice appears in SAP, it was genuinely billed and should not have been
+removed from the sale sheet.
+
+That turns a judgement call into a lookup for most rows.
+
+SORT AND SUMMARISE
+
+Sort by Customer.Name, then Invoice No, then Serial no, so a reviewer sees
+complete invoices together rather than scattered lines.
+
+Add a second sheet, "Summary", with:
+  - by customer: row count, invoice count, total value
+  - by invoice: date, customer, line count, value, inSapSource
+  - by branch: row count and value
+  - by STATE HEAD: row count and value
+  - a single total line
+
+Most invoices will be wholly in or wholly out. The summary makes that visible
+in one screen instead of 2,350.
+
+FLAG ANY PARTIAL INVOICES
+
+If any invoice has SOME lines present in the live sheet and some missing, list
+those separately and prominently. A whole invoice removed suggests a deliberate
+decision. Half an invoice removed suggests an accident, and is the strongest
+evidence that this was not intentional.
+
+CONSTRAINTS
+
+Read-only. Export only. Do not write to Drive, do not modify sale_line, do not
+restore anything. This produces a file for a human to review and decide on.
+
+Return the download path when ready.

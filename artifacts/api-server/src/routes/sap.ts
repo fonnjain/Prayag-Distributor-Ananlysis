@@ -13,6 +13,7 @@ import {
   reconcileDbVsSaleSheet,
   formatDbGapAsCsv,
 } from "../lib/sap/reconcileSheets.js";
+import { exportDbGapAsXlsx } from "../lib/sap/exportDbGapXlsx.js";
 
 const router: IRouter = Router();
 
@@ -297,6 +298,53 @@ router.get(
     } catch (err) {
       req.log.error({ err, fy, month }, "sap db-gap failed");
       res.status(500).json({ error: "DB gap analysis failed — check server logs." });
+    }
+  },
+);
+
+// GET /api/sap/db-gap-xlsx?fy=2026-27&month=Jul-26
+//   Downloads a two-sheet xlsx workbook containing:
+//   - Sheet 1 "Disputed Rows": every DB row absent from the live SALE SHEET,
+//     with columns matching the sheet's own column order (paste-ready) plus
+//     review metadata (lineUid, ingestedAt, ingestRunId, branch, inSapSource).
+//   - Sheet 2 "Summary": by-customer, by-invoice, by-branch, by-state-head
+//     aggregations, and a prominent partial-invoice section.
+//   This route reads the live SALE SHEET and the SAP Combined tab — expect
+//   10-90 seconds on a cold server depending on sheet size.
+router.get(
+  "/sap/db-gap-xlsx",
+  async (req: Request, res: Response): Promise<void> => {
+    const fyRaw = req.query["fy"];
+    const monthRaw = req.query["month"];
+
+    const fy =
+      typeof fyRaw === "string" && fyRaw.trim() !== "" ? fyRaw.trim() : "2026-27";
+    const month =
+      typeof monthRaw === "string" && monthRaw.trim() !== ""
+        ? monthRaw.trim()
+        : "Jul-26";
+
+    if (!FY_PATTERN.test(fy)) {
+      res.status(400).json({ error: "fy must look like 2026-27" });
+      return;
+    }
+    if (!/^[A-Za-z]{3}-\d{2}$/.test(month)) {
+      res.status(400).json({ error: "month must look like Jul-26" });
+      return;
+    }
+
+    try {
+      req.log.info({ fy, month }, "sap db-gap-xlsx: starting");
+      const buf = await exportDbGapAsXlsx(fy, month);
+      const filename = `disputed-${fy}-${month}.xlsx`;
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Length", buf.length);
+      res.send(buf);
+      req.log.info({ fy, month, bytes: buf.length }, "sap db-gap-xlsx: sent");
+    } catch (err) {
+      req.log.error({ err, fy, month }, "sap db-gap-xlsx failed");
+      res.status(500).json({ error: "xlsx export failed — check server logs." });
     }
   },
 );

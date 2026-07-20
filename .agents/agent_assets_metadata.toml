@@ -24,3 +24,9 @@ id = "rct7CQB8ClaZ3f9R9MasR"
 uri = "file://Prayag_Architecture.docx"
 type = "word_document"
 title = "Prayag Architecture — Word Document"
+
+[[outputs]]
+id = "j-2LKJ5vvDdd3gFuJabA7"
+uri = "file://exports/disputed-2026-27-Jul-26.xlsx"
+type = "table"
+title = "Disputed Jul-26 Rows — Review Export"
