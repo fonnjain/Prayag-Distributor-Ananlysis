@@ -1,7 +1,7 @@
 // Three-way reconciliation for a fiscal year: xlsx-as-ingested vs live
 // Sheets (read now) vs the DB. Proves the sale_line foundation matches the
 // sources and lists any live rows missing from the DB.
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, saleLines, type InsertSaleLine } from "@workspace/db";
 import registerSheets from "../../../config/register_sheets.json";
 import { logger } from "../logger.js";
@@ -357,4 +357,62 @@ export async function backfillMissingFromSheets(
     status: "ok",
   });
   return { rowsRead: live.lines.length, inserted };
+}
+
+/**
+ * Delete ghost rows from sale_line for a given FY.
+ *
+ * Ghost rows are rows with source='sheets' that have never been confirmed by
+ * a live-sheet read (sheet_confirmed_at IS NULL).  They arise when rows are
+ * inserted during a sync but are later deleted from the sheet (e.g. the July
+ * 2026 mid-month backfill rows removed after close).
+ *
+ * Safety guard: we only prune when at least one row in the FY already has a
+ * non-null sheet_confirmed_at, proving the scheduled sync has run at least
+ * once since the column was added.  Without that, all rows would have null
+ * (pre-migration state) and the prune would incorrectly delete everything.
+ *
+ * xlsx_backfill rows (source != 'sheets') are never touched regardless.
+ */
+export async function pruneGhostRows(fy: string): Promise<{
+  guarded: boolean;
+  reason?: string;
+  confirmedCount: number;
+  pruned: number;
+}> {
+  // Count confirmed rows — COUNT(col) only counts non-null values in SQL.
+  const [{ confirmed }] = await db
+    .select({ confirmed: sql<number>`count(${saleLines.sheetConfirmedAt})::int` })
+    .from(saleLines)
+    .where(eq(saleLines.fy, fy));
+
+  const confirmedCount = confirmed ?? 0;
+
+  if (confirmedCount === 0) {
+    return {
+      guarded: true,
+      reason:
+        `No confirmed rows for FY ${fy}. ` +
+        `Run a live sync (POST /verify/backfill or wait for the 6-hour scheduled sync) before pruning.`,
+      confirmedCount: 0,
+      pruned: 0,
+    };
+  }
+
+  // Count ghost rows: source='sheets', never confirmed.
+  const [{ ghost }] = await db
+    .select({ ghost: sql<number>`count(*)::int` })
+    .from(saleLines)
+    .where(and(eq(saleLines.fy, fy), eq(saleLines.source, "sheets"), isNull(saleLines.sheetConfirmedAt)));
+
+  const toPrune = ghost ?? 0;
+
+  if (toPrune > 0) {
+    await db
+      .delete(saleLines)
+      .where(and(eq(saleLines.fy, fy), eq(saleLines.source, "sheets"), isNull(saleLines.sheetConfirmedAt)));
+    logger.info({ fy, confirmedCount, pruned: toPrune }, "pruneGhostRows: ghost rows deleted");
+  }
+
+  return { guarded: false, confirmedCount, pruned: toPrune };
 }

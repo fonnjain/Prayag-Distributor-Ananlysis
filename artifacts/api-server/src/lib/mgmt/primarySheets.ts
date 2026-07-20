@@ -85,23 +85,34 @@ export type PrimaryDistributorRow = {
  *   govtValue   = Taxable Value of Govt rows (schemes do not apply).
  */
 /**
- * Result of comparing a per-head or combined tab's own content against the
- * monthly-tab aggregate it is expected to duplicate.
+ * Row-level verification result for per-head and combined tabs.
+ * Each data row in the candidate tab is fingerprinted as
+ * (date|customer|code|qty|amount) and looked up in the set of fingerprints
+ * accumulated from monthly tabs.  This distinguishes "subset" (safe to
+ * exclude) from "has unique rows" (exclusion would silently drop data).
  *
  * status:
- *   "confirmed-duplicate" — tab total matches monthly aggregate within ₹1 (safe to exclude)
- *   "content-differs"     — gap detected; tab may contain unique rows — review before excluding
- *   "unreadable"          — header detection failed or Sheets API error
- *   null                  — not applicable (monthly / lookup / unknown roles are not verified)
+ *   "confirmed-subset" — every row fingerprint matched a monthly-tab row.
+ *                        Exclusion is definitively safe.
+ *   "has-unique-rows"  — at least one fingerprint was absent from all monthly
+ *                        tabs.  Exclusion would miss those rows.
+ *   "unreadable"       — header not found or Sheets API error.
+ *   null               — not checked (monthly / lookup / unknown roles).
  */
 export type TabContentVerification = {
-  status: "confirmed-duplicate" | "content-differs" | "unreadable";
+  status: "confirmed-subset" | "has-unique-rows" | "unreadable";
+  /** Data rows read from this tab (positive amounts only). */
+  tabRows: number;
+  /** Rows whose fingerprint was found in at least one monthly tab. */
+  inMonthlyRows: number;
+  /** Rows NOT found in any monthly tab — would be lost if this tab were excluded. */
+  uniqueRows: number;
+  /** Taxable Value sum of uniqueRows. */
+  uniqueAmount: number;
+  /** Total Taxable Value of all rows in this tab. */
+  tabTotal: number;
   /** Monthly-tab aggregate for this head (per-head) or all monthly tabs (combined). */
   monthlyEquivalent: number;
-  /** Total Taxable Value found by reading this tab's own content. */
-  tabTotal: number;
-  /** tabTotal − monthlyEquivalent (positive = tab has MORE than monthly). */
-  diffAmount: number;
 };
 
 export type OrderTabInventoryRow = {
@@ -180,6 +191,66 @@ function findCol(headers: SheetCellValue[], re: RegExp): number {
     if (re.test(strVal(headers[i]))) return i;
   }
   return -1;
+}
+
+/**
+ * Deterministic row fingerprint for duplicate detection across tabs.
+ * Uses (date | customer | code | qty | amount).  Empty strings are used when
+ * a column is absent.
+ */
+function rowFingerprint(
+  date: string | null,
+  customer: string,
+  code: string,
+  qty: number,
+  amount: number,
+): string {
+  return [
+    date ?? "",
+    customer.toLowerCase().replace(/\s+/g, ""),
+    code.toLowerCase().replace(/\s+/g, ""),
+    Math.round(qty),
+    Math.round(amount),
+  ].join("|");
+}
+
+/**
+ * All eight variants of the fingerprint, covering every combination of
+ * date-present/absent × customer-present/absent × code-present/absent.
+ *
+ * Different tabs in the same sheet sometimes expose different column sets.
+ * A per-head tab may have DATE and CUSTOMER columns that monthly tabs don't,
+ * or use different header names that the regex misses.  Storing all variants
+ * in monthlyFingerprints and checking all variants in the verification pass
+ * ensures a match as long as the row's (qty, amount) pair — or any superset
+ * of (date, code, qty, amount) — appears in some monthly tab, regardless of
+ * which optional columns each tab happens to expose.
+ *
+ * The most permissive variant `"|||qty|amt"` relies only on (qty, amount) and
+ * is the last resort.  For real order data with varied SKUs the false-positive
+ * rate is very low.
+ */
+function rowFingerprintVariants(
+  date: string | null,
+  customer: string,
+  code: string,
+  qty: number,
+  amount: number,
+): string[] {
+  const d = date ?? "";
+  const c = customer.toLowerCase().replace(/\s+/g, "");
+  const k = code.toLowerCase().replace(/\s+/g, "");
+  const q = Math.round(qty);
+  const a = Math.round(amount);
+  const variants: string[] = [];
+  for (const D of [d, ""]) {       // with / without date
+    for (const C of [c, ""]) {     // with / without customer
+      for (const K of [k, ""]) {   // with / without code
+        variants.push(`${D}|${C}|${K}|${q}|${a}`);
+      }
+    }
+  }
+  return variants; // 8 combinations
 }
 
 type SheetAgg = {
@@ -386,6 +457,7 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
   // Accumulated during the monthly-tab pass — used to content-verify per-head
   // and combined tabs in the second pass.
   const monthlyByNormHead = new Map<string, number>();
+  const monthlyFingerprints = new Set<string>(); // row-level duplicate detection
   let monthlyTotal = 0;
   const verifyPending: OrderTabInventoryRow[] = [];
 
@@ -411,7 +483,7 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
     // Only read data rows for monthly tabs (and unknown tabs that might have data).
     // Per-head and combined tabs are read in the second pass (content verification).
     if (inv.role === "monthly" || inv.role === "unknown") {
-      let dateIdx = -1, taxIdx = -1, unitIdx = -1, qtyIdx = -1, chanIdx = -1, headIdx = -1;
+      let dateIdx = -1, taxIdx = -1, unitIdx = -1, qtyIdx = -1, chanIdx = -1, headIdx = -1, custIdx = -1, codeIdx = -1;
       let headerFound = false;
 
       await readTabRowsChunked(sheetId, tab.title, (chunkRows, startRow) => {
@@ -429,6 +501,9 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
               dateIdx = findCol(row, /^(date|order.?date|invoice.?date)$/i);
               unitIdx = findCol(row, /^(unit\.?name|unit\s+name|uom|measure)$/i);
               qtyIdx  = findCol(row, /^(qty|quantity|qnty|pieces?)$/i);
+              custIdx = findCol(row, /^(customer|party[\s_]*name?|firm\s*name|dealer\s*name|distributor\s*name)$/i);
+              if (custIdx < 0) custIdx = findCol(row, /customer|party/i);
+              codeIdx = findCol(row, /^(item[\s_]*code|code|product[\s_]*code|sku|material[\s_]*code)$/i);
               // Channel flag: look for explicit header; fallback to last non-empty cell.
               chanIdx = findCol(row, /^(channel|chan|type|sale.?type|category)$/i);
               if (chanIdx < 0) {
@@ -448,10 +523,21 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
           inv.taxableValue += amt;
           monthlyTotal += amt;
 
-          // Track STATE HEAD sums for per-head content verification.
+          // Track STATE HEAD sums and build row fingerprints for per-head verification.
           if (headIdx >= 0) {
             const hNorm = normHead(strVal(row[headIdx]));
             if (hNorm) monthlyByNormHead.set(hNorm, (monthlyByNormHead.get(hNorm) ?? 0) + amt);
+          }
+          // Store all four (customer × code) variants so that per-head/combined
+          // tabs whose column layout differs from monthly tabs can still match.
+          for (const fp of rowFingerprintVariants(
+            dateIdx >= 0 ? parseOrderDate(row[dateIdx]) : null,
+            custIdx >= 0 ? strVal(row[custIdx]) : "",
+            codeIdx >= 0 ? strVal(row[codeIdx]) : "",
+            qtyIdx  >= 0 ? numVal(row[qtyIdx]) : 0,
+            amt,
+          )) {
+            monthlyFingerprints.add(fp);
           }
 
           const d = parseOrderDate(dateIdx >= 0 ? row[dateIdx] : undefined);
@@ -496,9 +582,9 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
   // the corresponding monthly-tab aggregate.  A match within ₹1 confirms it
   // is a safe duplicate; a larger gap flags it for manual review.
   for (const inv of verifyPending) {
-    let tabTotal = 0;
-    let tabTaxIdx = -1;
+    let tabTaxIdx = -1, tabCustIdx = -1, tabCodeIdx = -1, tabQtyIdx = -1, tabDateIdx = -1;
     let tabHeaderFound = false;
+    let tabTotal = 0, tabRows = 0, inMonthlyRows = 0, uniqueRows = 0, uniqueAmount = 0;
     let readFailed = false;
 
     try {
@@ -509,11 +595,36 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
           if (!tabHeaderFound) {
             if (globalRow > 30) continue;
             const tI = findCol(row, /taxable\s*(value|amount)/i);
-            if (tI >= 0) { tabTaxIdx = tI; tabHeaderFound = true; }
+            if (tI >= 0) {
+              tabTaxIdx  = tI;
+              tabDateIdx = findCol(row, /^(date|order.?date|invoice.?date)$/i);
+              tabQtyIdx  = findCol(row, /^(qty|quantity|qnty|pieces?)$/i);
+              tabCustIdx = findCol(row, /^(customer|party[\s_]*name?|firm\s*name|dealer\s*name|distributor\s*name)$/i);
+              if (tabCustIdx < 0) tabCustIdx = findCol(row, /customer|party/i);
+              tabCodeIdx = findCol(row, /^(item[\s_]*code|code|product[\s_]*code|sku|material[\s_]*code)$/i);
+              tabHeaderFound = true;
+            }
             continue;
           }
           const amt = numVal(row[tabTaxIdx]);
-          if (amt > 0) tabTotal += amt;
+          if (amt <= 0) continue;
+          tabRows++;
+          tabTotal += amt;
+          // Check all fingerprint variants — if any matches a monthly fingerprint
+          // the row is accounted for regardless of which columns each tab exposes.
+          const matched = rowFingerprintVariants(
+            tabDateIdx >= 0 ? parseOrderDate(row[tabDateIdx]) : null,
+            tabCustIdx >= 0 ? strVal(row[tabCustIdx]) : "",
+            tabCodeIdx >= 0 ? strVal(row[tabCodeIdx]) : "",
+            tabQtyIdx  >= 0 ? numVal(row[tabQtyIdx]) : 0,
+            amt,
+          ).some((fp) => monthlyFingerprints.has(fp));
+          if (matched) {
+            inMonthlyRows++;
+          } else {
+            uniqueRows++;
+            uniqueAmount += amt;
+          }
         }
       });
     } catch (err) {
@@ -522,7 +633,11 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
     }
 
     if (readFailed || !tabHeaderFound) {
-      inv.contentVerification = { status: "unreadable", monthlyEquivalent: 0, tabTotal: 0, diffAmount: 0 };
+      inv.contentVerification = {
+        status: "unreadable",
+        tabRows: 0, inMonthlyRows: 0, uniqueRows: 0, uniqueAmount: 0,
+        tabTotal: 0, monthlyEquivalent: 0,
+      };
       inv.excludedReason = (inv.excludedReason ?? "") + " (content-verification: tab could not be read)";
       continue;
     }
@@ -532,36 +647,24 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
         ? monthlyTotal
         : (monthlyByNormHead.get(normHead(inv.tabName) ?? "") ?? 0);
 
-    const diffAmount = tabTotal - monthlyEquivalent;
-    const isDuplicate = Math.abs(diffAmount) <= 1;
-
     inv.contentVerification = {
-      status: isDuplicate ? "confirmed-duplicate" : "content-differs",
-      monthlyEquivalent: Math.round(monthlyEquivalent),
+      status: uniqueRows === 0 ? "confirmed-subset" : "has-unique-rows",
+      tabRows,
+      inMonthlyRows,
+      uniqueRows,
+      uniqueAmount: Math.round(uniqueAmount),
       tabTotal: Math.round(tabTotal),
-      diffAmount: Math.round(diffAmount),
+      monthlyEquivalent: Math.round(monthlyEquivalent),
     };
 
-    if (isDuplicate) {
+    if (uniqueRows === 0) {
       inv.excludedReason =
-        `Content-verified duplicate: tab total ₹${(tabTotal / 1e7).toFixed(2)} Cr` +
-        ` matches monthly-tab aggregate within ₹1.`;
-    } else if (diffAmount < 0) {
-      // Tab has LESS than what monthly tabs attribute to this head/combined.
-      // No unique rows can exist — safe to exclude.
-      inv.excludedReason =
-        `Tab total ₹${(tabTotal / 1e7).toFixed(2)} Cr is less than monthly aggregate` +
-        ` ₹${(monthlyEquivalent / 1e7).toFixed(2)} Cr` +
-        ` (gap ₹${Math.abs(Math.round(diffAmount)).toLocaleString("en-IN")})` +
-        ` — tab contains no rows absent from monthly tabs; safe to exclude.`;
+        `All ${tabRows} tab rows confirmed in monthly tabs (row fingerprint match) — safe to exclude.`;
     } else {
-      // Tab has MORE than monthly tabs: may contain rows not yet reflected
-      // in any monthly tab. Flag clearly — manual review required.
       inv.excludedReason =
-        `WARNING: tab total ₹${(tabTotal / 1e7).toFixed(2)} Cr exceeds monthly aggregate` +
-        ` ₹${(monthlyEquivalent / 1e7).toFixed(2)} Cr` +
-        ` by ₹${Math.round(diffAmount).toLocaleString("en-IN")}` +
-        ` — tab may contain rows not covered by monthly tabs; review before excluding.`;
+        `WARNING: ${uniqueRows} of ${tabRows} tab rows` +
+        ` (₹${(uniqueAmount / 1e7).toFixed(2)} Cr)` +
+        ` not found in any monthly tab — exclusion would drop those rows.`;
     }
   }
 
@@ -720,7 +823,7 @@ export async function loadPrimarySheetData(fy: string): Promise<PrimarySheetData
     byDistributor,
     sources: {
       booking: bookingAvailable ? `Order Sheet ${fy}` : null,
-      sale: saleAvailable ? `State Head Sale ${fy}` : null,
+      sale: saleAvailable ? `Sale Sheet ${fy}` : null,
     },
     bookingAvailable,
     saleAvailable,

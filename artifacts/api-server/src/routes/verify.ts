@@ -3,6 +3,7 @@ import {
   REGISTER_SHEET_IDS,
   buildVerifyReport,
   backfillMissingFromSheets,
+  pruneGhostRows,
 } from "../lib/verify/verify.js";
 
 const router: IRouter = Router();
@@ -63,6 +64,27 @@ router.post(
     } catch (err) {
       req.log.error({ err, fy }, "verify backfill failed");
       res.status(502).json({ error: "Backfill from Sheets failed." });
+    }
+  },
+);
+
+router.post(
+  "/verify/prune-ghost-rows",
+  async (req: Request, res: Response): Promise<void> => {
+    const fy = resolveFy((req.body as Record<string, unknown> | undefined)?.["fy"]);
+    if (!fy) {
+      res.status(400).json({
+        error: `Unknown fiscal year. Known: ${Object.keys(REGISTER_SHEET_IDS).join(", ")}`,
+      });
+      return;
+    }
+    try {
+      const result = await pruneGhostRows(fy);
+      req.log.info({ fy, ...result }, "verify prune-ghost-rows completed");
+      res.json({ fy, ...result });
+    } catch (err) {
+      req.log.error({ err, fy }, "prune-ghost-rows failed");
+      res.status(502).json({ error: "Ghost row pruning failed." });
     }
   },
 );

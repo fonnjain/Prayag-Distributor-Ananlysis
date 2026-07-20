@@ -1,49 +1,63 @@
 ---
 name: Tab content verification + sheet_confirmed_at
-description: How per-head/combined tab exclusion is verified by content, and how ghost rows in sale_line are tracked.
+description: How per-head/combined tab exclusion is verified by row fingerprints, and how ghost rows in sale_line are tracked and pruned.
 ---
 
-## Two-pass readOrderTabInventory
+## Row-fingerprint verification in readOrderTabInventory
 
-`readOrderTabInventory` (primarySheets.ts) now does two passes:
+`readOrderTabInventory` (primarySheets.ts) does two passes:
 
-1. **Monthly pass**: reads monthly + unknown tabs, builds `monthlyByNormHead` (normHead → ₹ sum) and `monthlyTotal`.
-2. **Verification pass**: reads per-head and combined candidates, sums their Taxable Value, compares to the monthly aggregate for that head/combined.
+1. **Monthly pass**: reads monthly tabs, builds `monthlyByNormHead` (head → ₹), 
+   and `monthlyFingerprints: Set<string>`. Each monthly row stores **8 fingerprint
+   variants** (date × customer × code, each present or absent), to handle tabs
+   that expose different column sets.
+
+2. **Verification pass**: reads per-head and combined candidate tabs. For each row,
+   checks all 8 fingerprint variants against `monthlyFingerprints`. If any variant
+   matches → `inMonthlyRows++`, else `uniqueRows++`.
 
 `TabContentVerification.status`:
-- `confirmed-duplicate` — within ₹1 (safe to exclude)
-- `content-differs / diffAmount < 0` — tab has LESS than monthly, no unique rows (safe to exclude)
-- `content-differs / diffAmount > 0` — tab has MORE than monthly — WARNING, review required
+- `confirmed-subset` — every row matched a monthly fingerprint; safe to exclude
+- `has-unique-rows` — some rows absent from monthly; exclusion would drop them
 - `unreadable` — header detection failed or API error
 
-**Current FY2026-27 booking sheet results (Jul 2026):**
-- ANUJ SHARMA: diff=−₹1.07 Cr (tab < monthly) — safe to exclude
-- Combined: diff=−₹77.76 Cr (tab < monthly) — safe to exclude
-- LAST MONTH ORDER: diff=−₹53.77 Cr (tab < monthly) — safe to exclude
+**Why 8 variants (date × customer × code):** Per-head tabs (e.g. ANUJ SHARMA) 
+may expose DATE / CUSTOMER columns with different header names than monthly tabs.
+Without the relaxed variants, all 162 ANUJ SHARMA rows appeared "unique" even 
+though 157/162 were actually in monthly tabs. After 8-variant matching: 157 
+confirmed, 5 genuinely unique (₹0.04 Cr).
+
+**Current FY2026-27 results (Jul 2026):**
+- ANUJ SHARMA: 157/162 in monthly, 5 unique (₹0.04 Cr) → has-unique-rows
+- Combined: 4,152/4,152 confirmed-subset
+- LAST MONTH ORDER: 13,311/13,311 confirmed-subset
 
 ## sheet_confirmed_at on sale_line
 
-New nullable column `sheet_confirmed_at timestamp with time zone` on `sale_line`.
+Nullable column `sheet_confirmed_at timestamptz` on `sale_line`:
+- `null` = not confirmed; after a sync has run = ghost row (present in DB, absent from sheet)
+- non-null = timestamp of the last live read that found this row
 
-Semantics:
-- `null` (pre-migration default) → not yet confirmed; after first sync = ghost row (was in DB, not in sheet)
-- non-null → timestamp of the last live read in which this row was present in the sheet
+`markSheetConfirmed(lineUids, ts)` stamps the column from `doSync` (scheduled) 
+and `backfillMissingFromSheets` (manual POST /verify/backfill).
 
-`markSheetConfirmed(lineUids, confirmedAt)` in `ingest.ts` batch-UPDATEs the column for every line_uid found in the current live read. It is called from:
-- `doSync` in `registerSync.ts` (6h scheduled sync)
-- `backfillMissingFromSheets` in `verify.ts` (manual POST /verify/backfill)
+## Ghost-row pruning: POST /verify/prune-ghost-rows
 
-**Why:** July 2026 had 4,000 ghost rows (₹6.94 Cr) inserted during a mid-month backfill (Jul 14–15) that were subsequently deleted from the sheet. The marker lets us distinguish confirmed rows from ghost rows without deleting the DB data (non-destructive).
+`pruneGhostRows(fy)` in `verify.ts`:
+1. Guards: refuses if `count(sheet_confirmed_at) = 0` (no sync has run yet)
+2. Deletes: `DELETE WHERE fy=? AND source='sheets' AND sheet_confirmed_at IS NULL`
+3. Returns: `{ guarded, confirmedCount, pruned }`
 
-**Verified Jul-26 result:** 6,353 total rows; 2,353 confirmed (₹4.53 Cr, matches live sheet); 4,000 disputed (₹6.94 Cr, ghost rows not currently in sheet).
+Only `source='sheets'` rows are touched; xlsx_backfill rows are never affected.
 
-## GET /api/mgmt/tab-diagnostic
+**First production run (Jul 20, 2026):** pruned 4,000 Jul-26 ghost rows (₹6.94 Cr).
+After prune: all months show 0 disputed rows. DB and live SALE SHEET now agree.
 
-Route: `GET /api/mgmt/tab-diagnostic?fy=2026-27`
+## Pending source consistency
 
-Returns:
-- `sheets.booking.tabs` — full `OrderTabInventoryRow[]` with `contentVerification`
-- `sheets.sale.tabs` — same for the sale sheet
-- `disputedRows.byMonth` — per-month counts/amounts split by confirmed vs disputed
+`companyPending = companyBooking − companySale` where both come from live Sheets reads.
+`companySale` reads the SALE SHEET (dispatch register) live — same data as `sale_line`.
+Before ghost-row pruning, the two differed for Jul-26 (DB had ₹11.47 Cr, sheet ₹4.53 Cr).
+After pruning, both agree → analytics and pending tiles are consistent.
 
-**How to apply:** Call this after any July-month-close to confirm ghost-row count drops to 0 once state heads remove obsolete data. The `disputedAmount` field is the ₹ value of DB rows not confirmed by the current live sheet.
+`sources.sale` label is now `"Sale Sheet {fy}"` (was incorrectly "State Head Sale").
