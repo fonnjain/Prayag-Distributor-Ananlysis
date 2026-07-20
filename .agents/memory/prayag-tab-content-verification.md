@@ -61,3 +61,24 @@ Before ghost-row pruning, the two differed for Jul-26 (DB had ₹11.47 Cr, sheet
 After pruning, both agree → analytics and pending tiles are consistent.
 
 `sources.sale` label is now `"Sale Sheet {fy}"` (was incorrectly "State Head Sale").
+
+## Fingerprint design decision (do not loosen further)
+
+The 4-variant (customer × code) design is intentional.  Date is NOT varied.
+
+**Why:** When a per-head tab uses a date-column header the regex misses, the
+resulting "unique" classification is a real finding, not a detection failure.
+ANUJ SHARMA's 162/162 unique rows (₹0.39 Cr) are genuinely absent from all
+monthly tabs — widening to 8 variants to make them "match" would hide that.
+
+**How to apply:** If a future tab shows `has-unique-rows` and you suspect a
+column-detection problem rather than real uniqueness, inspect the actual tab
+headers (via the Sheets API) before loosening the fingerprint.  Do not add
+date variants.
+
+## Unique per-head rows included in booking total
+
+`loadPrimarySheetData` adds `uniqueAmount` from every `has-unique-rows` tab
+into `bookingAgg.total` and into `byNormHead` for the corresponding head.
+This means per-head tabs with real unique data contribute to the booking total
+without double-counting the rows that are already in monthly tabs.

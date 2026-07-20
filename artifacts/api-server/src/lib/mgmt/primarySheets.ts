@@ -215,20 +215,14 @@ function rowFingerprint(
 }
 
 /**
- * All eight variants of the fingerprint, covering every combination of
- * date-present/absent × customer-present/absent × code-present/absent.
+ * Four variants of the fingerprint covering customer-present/absent ×
+ * code-present/absent.  Date is always included as-is (null → empty string).
  *
- * Different tabs in the same sheet sometimes expose different column sets.
- * A per-head tab may have DATE and CUSTOMER columns that monthly tabs don't,
- * or use different header names that the regex misses.  Storing all variants
- * in monthlyFingerprints and checking all variants in the verification pass
- * ensures a match as long as the row's (qty, amount) pair — or any superset
- * of (date, code, qty, amount) — appears in some monthly tab, regardless of
- * which optional columns each tab happens to expose.
- *
- * The most permissive variant `"|||qty|amt"` relies only on (qty, amount) and
- * is the last resort.  For real order data with varied SKUs the false-positive
- * rate is very low.
+ * The four variants exist because different tabs sometimes detect different
+ * optional column sets (customer name, item code) due to header naming
+ * differences.  Date is NOT varied — if a per-head tab uses a date column
+ * header the regex misses, that produces genuinely different fingerprints and
+ * the rows are correctly treated as unique rather than masking the finding.
  */
 function rowFingerprintVariants(
   date: string | null,
@@ -242,15 +236,12 @@ function rowFingerprintVariants(
   const k = code.toLowerCase().replace(/\s+/g, "");
   const q = Math.round(qty);
   const a = Math.round(amount);
-  const variants: string[] = [];
-  for (const D of [d, ""]) {       // with / without date
-    for (const C of [c, ""]) {     // with / without customer
-      for (const K of [k, ""]) {   // with / without code
-        variants.push(`${D}|${C}|${K}|${q}|${a}`);
-      }
-    }
-  }
-  return variants; // 8 combinations
+  return [
+    `${d}|${c}|${k}|${q}|${a}`, // full
+    `${d}||${k}|${q}|${a}`,      // no customer
+    `${d}|${c}||${q}|${a}`,      // no code
+    `${d}|||${q}|${a}`,           // neither
+  ];
 }
 
 type SheetAgg = {
@@ -744,8 +735,34 @@ export async function loadPrimarySheetData(fy: string): Promise<PrimarySheetData
         }),
       ]);
       bookingAgg = agg;
-      bookingAvailable = bookingAgg.total > 0;
       tabInventory = inv;
+
+      // Per-head tabs with genuinely unique rows (not found in any monthly tab)
+      // are excluded from readAndAggregate's sum.  Add their unique amounts here
+      // so the booking total captures data that never made it into monthly tabs.
+      if (tabInventory) {
+        for (const tab of tabInventory) {
+          const cv = tab.contentVerification;
+          if (cv?.status === "has-unique-rows" && cv.uniqueAmount > 0) {
+            bookingAgg.total += cv.uniqueAmount;
+            if (tab.role === "per-head") {
+              const hNorm = normHead(tab.tabName);
+              if (hNorm) {
+                bookingAgg.byNormHead.set(
+                  hNorm,
+                  (bookingAgg.byNormHead.get(hNorm) ?? 0) + cv.uniqueAmount,
+                );
+              }
+            }
+            logger.info(
+              { tab: tab.tabName, uniqueRows: cv.uniqueRows, uniqueAmount: cv.uniqueAmount },
+              "primarySheets: unique rows from per-head tab added to booking total",
+            );
+          }
+        }
+      }
+
+      bookingAvailable = bookingAgg.total > 0;
       logger.info(
         { fy, total: bookingAgg.total, heads: bookingAgg.byNormHead.size },
         "primarySheets: booking loaded",
