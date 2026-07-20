@@ -1,0 +1,121 @@
+Answers to your four questions.
+
+1. THE TWO MISREADINGS
+
+(a) Invoice prefix = BRANCH, not billing system.
+
+You called 12xxx "SAP billing" and 22xxx/32xxx/42xxx "non-SAP invoice
+families". The prefix is the branch. From the SAP file itself:
+
+  52600001 = Gujarat
+  72600001 = Andal
+  42600003 = Delhi
+  12600002 = Bhiwadi 1
+
+So 1=Bhiwadi, 4=Delhi, 5=Gujarat, 7=Andal, and 2/3/6 are three more branches.
+All of them are SAP invoices. There is no second billing system. A SAP tab
+missing those prefixes is incomplete, not evidence of non-SAP data.
+
+(b) You may have read the wrong tab.
+
+You reconciled against a SAP tab called "July". When I opened
+19Oj6P2cSZmXNGfDro9K_ubfrfPp_03K14vOTrq_gdyI directly, the tab I saw was
+"Combined", holding April onward with all branch prefixes present.
+
+ACTION: list every tab in that workbook with row count, column count and date
+range. Then redo the July comparison against whichever tab is the complete one.
+
+
+2. PIPELINE DIRECTION - SAP IS THE MASTER
+
+The evidence is the SAP file's own column names:
+
+  Posting Date, Document Number, Dscription, PriceBefDi
+
+"Dscription" is SAP Business One's own column name, misspelling included.
+"PriceBefDi" is its truncated "Price Before Discount". These are raw ERP field
+names. No operator hand-types a column called Dscription.
+
+So SAP bills, and SALE SHEET 26-27 is derived from it. SALE SHEET adds Serial
+no, City, Destination, STATION, STATE and STATE HEAD; drops Segment,
+Dscription, Total and Branch; and converts tank quantity from pieces to litres.
+
+Why SAP nonetheless shows FEWER July rows: the Drive copy of SAP is a periodic
+export and it lags. SAP last modified 18 July 07:54. SALE SHEET last modified
+20 July 05:06. Two days apart. Your 139 "sale-only" rows sit in a single
+invoice dated 18 July - they are newer than the last SAP export, not
+unauthorised.
+
+Consequence: "saleOnly" means newer than the last export. "dbOnly" means
+removed from the sheet after ingestion, which is the real issue and is what
+db-gap now recovers.
+
+
+3. THE FOUR ORDER SHEET IDS
+
+Verified in Drive on 20 July 2026:
+
+  FY2026-27  1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A   1.5 MB
+  FY2025-26  1Xzq-gmB6K7iuMcE6gb-O7OpvGgSDU33DzEVyK60LK6E   5.2 MB
+  FY2024-25  1cT6lWRPJ3oSeYhab-cqeVjJidGitFQsr0DOq-vNn6cI   6.1 MB
+  FY2023-24  1jtSUGE6iT8WuUKi56F4LYqjJgZF42oR1mk51imG8yq8   7.8 MB
+
+Note: 1Xzq-gmB6 is the file you read while hunting the 1,290 missing SALE rows.
+It is the ORDER BOOKING workbook, which is why that search found nothing usable.
+
+Wire all four into the config, build primary_order_line, dry run and report
+before committing anything.
+
+Classify every tab by CONTENT, never by name. The ANUJ SHARMA tab held 162 rows
+worth Rs.0.39 Cr that were present in no monthly tab. Prior years have twelve
+monthly tabs and will have more per-head and combined tabs, not fewer. Never
+widen a match key until rows match - if they do not match, the first hypothesis
+is that they are different.
+
+Use canonHead() from normalize.json for state_head_canon, not normSecKey.
+Record source_tab on every row.
+
+Self-test: backfill FY2026-27 too. The table's figure must equal the live-sheet
+figure of Rs.86.82 Cr. Same source, two code paths. If they disagree, the
+loader differs from the live path and no other year can be trusted.
+
+Cross-check for prior years, since no documented booking anchors exist: report
+booking divided by sale per year. FY2026-27 Q1 gives 1.06, so expect roughly
+1.0 to 1.15. Sale comparators: FY2023-24 Q1 Rs.87.4 Cr, FY2024-25 Q1
+Rs.68.6 Cr, FY2025-26 Q1 Rs.74.2 Cr.
+
+
+4. THE LITRE RULE - WHAT I ACTUALLY MEANT
+
+Your answer was about the WT and WT-LTR lookup TABS. Excluding those from being
+read is correct and I accept it. That was not the question.
+
+My concern is tank ROWS inside the monthly tabs. Those rows already carry
+litres, not pieces. WT-4LC-10 reads 1000, not 1.
+
+Your own Phase 0 report separated them - April showed 268 Ltr rows against
+6,426 piece rows. So the code IS identifying tank rows somehow.
+
+Question: how? The documented rule is Unit.Name == "Ltr.", and SALE SHEET 26-27
+has no Unit.Name column. Its actual header is:
+
+  Serial no, Invoice No, Date, Bill From, Customer.Name, City, Destination,
+  Item Code, Color, Quantity, Mrp, Sale Rate, Taxable Value, GROUP, STATION,
+  STATE, STATE HEAD, MONTH
+
+So the code must be using something else - GROUP = 'WATER TANK', an item code
+prefix, the WT-LTR lookup, or a trailing column.
+
+Report which one, and confirm no view anywhere sums litres and pieces together.
+In July, litres were 62 percent of raw quantity but only 7 percent of value, so
+a blended unit total is meaningless.
+
+
+ORDER: 4 first, it is small. Then 1. Then 3.
+
+CONSTRAINTS UNCHANGED: Google Drive and Sheets are read-only. No DELETE from
+any register table. Secondary is frozen and untouched - no changes to
+secondary_register_line, secondary_head_month, secondary_ingest_run,
+stateDashboard.ts, stateHeadLoader.ts, secondary_sheets.json, head_alias.json
+or normSecKey. rules.ts, types.ts, validate.ts and loader.ts are shared - if a
+change is needed, stop and report first.

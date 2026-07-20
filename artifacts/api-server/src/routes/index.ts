@@ -20,6 +20,7 @@ import primaryStateTargetsEditorRouter from "./primaryStateTargetsEditor";
 import customerMasterRouter from "./customerMaster";
 import apiKeysRouter from "./apiKeys";
 import tabDiagnosticRouter from "./tabDiagnostic";
+import ordersRouter from "./orders";
 
 const router: IRouter = Router();
 
@@ -44,5 +45,6 @@ router.use(primaryStateTargetsEditorRouter);
 router.use(customerMasterRouter);
 router.use(apiKeysRouter);
 router.use(tabDiagnosticRouter);
+router.use(ordersRouter);
 
 export default router;

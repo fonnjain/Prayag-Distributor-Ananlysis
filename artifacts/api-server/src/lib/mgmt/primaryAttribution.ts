@@ -22,8 +22,11 @@ import type { DistributorTmMap } from "./distributorTmMap.js";
 // ─── Sheet configuration by FY ───────────────────────────────────────────────
 
 /** Sheets that hold primary ORDER BOOKING rows (Customer + Taxable Value) */
-const ORDER_BOOKING_SHEET_IDS: Record<string, string> = {
+export const ORDER_BOOKING_SHEET_IDS: Record<string, string> = {
   "2026-27": "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A", // Order Sheet 26-27
+  "2025-26": "1Xzq-gmB6K7iuMcE6gb-O7OpvGgSDU33DzEVyK60LK6E", // Order Sheet 25-26
+  "2024-25": "1cT6lWRPJ3oSeYhab-cqeVjJidGitFQsr0DOq-vNn6cI", // Order Sheet 24-25
+  "2023-24": "1jtSUGE6iT8WuUKi56F4LYqjJgZF42oR1mk51imG8yq8", // Order Sheet 23-24
 };
 
 /** Sheets that hold primary DISPATCH SALE rows (same columns, invoice-date basis) */

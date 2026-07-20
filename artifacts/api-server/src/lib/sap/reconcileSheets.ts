@@ -207,6 +207,27 @@ function findMonthTab(
   );
 }
 
+/**
+ * Tab selection for the SAP source workbook.
+ *
+ * The SAP source workbook keeps a "Combined" tab that accumulates all months
+ * from April onward with every branch prefix present (1=Bhiwadi, 4=Delhi,
+ * 5=Gujarat, 7=Andal, …). Per-month tabs (e.g. "July") are partial exports
+ * that may omit branch prefixes added after the last export. Always prefer
+ * "Combined" — readSapSourceTab applies monthFilter to narrow it to the
+ * requested month automatically.
+ */
+function findSapTab(
+  tabs: Array<{ title: string }>,
+  monthPrefix: string,
+): { title: string; isCombined: boolean } | null {
+  const combined = tabs.find((t) => /^combined$/i.test(t.title.trim()));
+  if (combined) return { title: combined.title, isCombined: true };
+  const monthly = findMonthTab(tabs, monthPrefix);
+  if (monthly) return { title: monthly, isCombined: false };
+  return null;
+}
+
 // ── SAP source reader ─────────────────────────────────────────────────────────
 // The SAP source sheet is the raw 56-column SAP export in Google Sheets format.
 // Column headers are detected by content (same aliases as the uploaded xlsx parser).
@@ -458,13 +479,17 @@ export async function reconcileSapVsSaleSheet(
     (async () => {
       if (!sapId) return;
       const tabs = await listSheetTabs(sapId);
-      sapTabTitle = findMonthTab(tabs, monthPrefix);
-      if (!sapTabTitle) {
+      const sapTab = findSapTab(tabs, monthPrefix);
+      if (!sapTab) {
         errors.push(
-          `No "${monthPrefix}" tab found in SAP source sheet ${sapId} ` +
+          `No "${monthPrefix}" or "Combined" tab found in SAP source sheet ${sapId} ` +
             `— tabs present: ${tabs.map((t) => t.title).join(", ") || "(none)"}`,
         );
         return;
+      }
+      sapTabTitle = sapTab.title;
+      if (sapTab.isCombined) {
+        logger.info({ sapId, tab: sapTab.title, month: monthLabel }, "sap reconcile: reading Combined tab with date filter");
       }
       sapRows = await readSapSourceTab(sapId, sapTabTitle, monthFilter);
     })(),
