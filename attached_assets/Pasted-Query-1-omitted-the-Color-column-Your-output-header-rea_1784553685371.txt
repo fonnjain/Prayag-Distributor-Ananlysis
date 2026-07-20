@@ -1,0 +1,55 @@
+Query 1 omitted the Color column. Your output header reads
+(invoice_no, code, amount). My spec included colour and it matters.
+
+Colour variants are REAL duplicates on that key. The documented case:
+invoice 12600285, item 188, qty 88, Rs.25,867 - serial 1802 WHITE, serial 1803
+IVORY, both genuine. Without colour, every variant counts as a duplicate.
+
+RE-RUN QUERY 1 WITH COLOUR, for all four months:
+
+  SELECT month_label, COUNT(*) AS raw,
+         COUNT(DISTINCT (invoice_no, item_code, color, taxable_value)) AS distinct
+  FROM sale_line WHERE fy='2026-27' GROUP BY month_label;
+
+Then the same grouped by (invoice_no, item_code, color, qty, taxable_value).
+
+WHY IT STILL WILL NOT EXPLAIN EVERYTHING
+
+  Apr-Jun  30,518 rows, 458 duplicates =  1.5%
+  Jul      6,156 rows, 592 duplicates =  9.6%
+
+Six times the rate. At Q1's rate July should show about 92. Roughly 500 are
+unexplained by colour.
+
+And Q1's anchor of Rs.73.09 Cr matched exactly, twice. If those 458 were
+artifacts the total would be inflated. It is not. So Q1's duplicates are
+legitimate and Q1's rate is the colour-variant baseline.
+
+QUERY 4 ALREADY PROVES RENUMBERING
+
+  Jul 18 ingested serials 2-2,178 when Jul 15-17 covered 1-1,961. Overlapping
+  ranges for the same invoices.
+  Jul 20 inserted 3,803 rows spanning serials 1-3,129 - the entire current
+  sheet range. 3,803 rows cannot occupy 3,129 serial positions unless serials
+  were reassigned.
+
+So BOTH happened: renumbering created some duplicate line_uids, AND rows were
+removed. 5,564 distinct against 3,129 in the sheet leaves 2,435 genuinely
+absent.
+
+TWO MORE QUERIES
+
+  a) Take the invoice 22601001 / code 5106 / amount 4360 pair at serials 2722
+     and 2730. Print BOTH rows in full - every column. If colour differs they
+     are two real products. If every field except serial is identical, that is
+     a renumbering artifact.
+
+  b) For Jul-26, how many distinct invoice numbers are in the DB, and how many
+     in the current sheet? Invoice count is immune to renumbering. If the DB
+     has materially more invoices, whole invoices were removed - which is
+     deletion, not reordering.
+
+That second one is the cleanest test available. Serials move; invoice numbers
+do not.
+
+Report and stop. Change nothing.
