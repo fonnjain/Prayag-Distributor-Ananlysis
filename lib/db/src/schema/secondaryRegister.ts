@@ -117,6 +117,28 @@ export const secondaryIngestRuns = pgTable("secondary_ingest_run", {
   status: text("status"),   // 'ok' | 'fail' | 'dry_run'
 });
 
+// ── Table 4: secondary_dashboard_snapshot ────────────────────────────────────
+//
+// Full serialized SecDashboard per FY, written after every successful Sheets
+// load.  Allows cold-start server restarts to serve closed-FY dashboards from
+// the DB without re-hitting the STATE HEAD DASHBOARD spreadsheet.
+//
+// data: full SecDashboard JSON with primaryRoleKeys stored as string[] (a Set
+//       cannot be serialised to JSON).  The most recent row per FY (by saved_at)
+//       is the authoritative snapshot.
+export const secondaryDashboardSnapshots = pgTable(
+  "secondary_dashboard_snapshot",
+  {
+    id: serial("id").primaryKey(),
+    fy: text("fy").notNull(),
+    data: jsonb("data").notNull(),
+    savedAt: timestamp("saved_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("sec_dash_snap_fy_idx").on(t.fy),
+  ],
+);
+
 // ── Insert schemas and types ─────────────────────────────────────────────────
 
 export const insertSecRegLineSchema = createInsertSchema(secondaryRegisterLines).omit({

@@ -33,6 +33,8 @@
 //   FY2025-26: spreadsheet 1PTkkEa_ENkSqsGnpqoXy9kt0Fe1hCtlmU6kVFBNaonY
 //              tab "ORDER BOOKING REPORT 2025-26" (gid 0)
 
+import { desc, eq } from "drizzle-orm";
+import { db, secondaryDashboardSnapshots } from "@workspace/db";
 import { logger } from "../logger.js";
 import {
   readTabRowsChunked,
@@ -201,6 +203,43 @@ function isClosedFy(fy: string): boolean {
   return fyStartYear(fy) < fyStartYear(currentFy());
 }
 
+// ── DB snapshot serialisation ─────────────────────────────────────────────────
+// SecDashboard.primaryRoleKeys is a Set<string>.  Sets are not JSON-serialisable
+// so the DB snapshot uses a plain string[] in their place.
+
+type SecDashboardJson = Omit<SecDashboard, "primaryRoleKeys"> & {
+  primaryRoleKeys: string[];
+};
+
+// Fire-and-forget: write a snapshot after every successful Sheets load so
+// cold-restart loads for closed FYs can read from DB instead of Sheets.
+async function saveStateDashboardSnapshot(dash: SecDashboard): Promise<void> {
+  try {
+    const data: SecDashboardJson = { ...dash, primaryRoleKeys: [...dash.primaryRoleKeys] };
+    await db.insert(secondaryDashboardSnapshots).values({ fy: dash.fy, data });
+  } catch (err) {
+    logger.warn({ err, fy: dash.fy }, "stateDashboard: DB snapshot save failed");
+  }
+}
+
+// Returns the most recent DB snapshot for a FY, or null when none exists.
+async function loadStateDashboardFromDb(fy: string): Promise<SecDashboard | null> {
+  try {
+    const rows = await db
+      .select()
+      .from(secondaryDashboardSnapshots)
+      .where(eq(secondaryDashboardSnapshots.fy, fy))
+      .orderBy(desc(secondaryDashboardSnapshots.savedAt))
+      .limit(1);
+    if (rows.length === 0) return null;
+    const snap = rows[0].data as SecDashboardJson;
+    return { ...snap, primaryRoleKeys: new Set(snap.primaryRoleKeys) };
+  } catch (err) {
+    logger.warn({ err, fy }, "stateDashboard: DB snapshot load failed, falling back to Sheets");
+    return null;
+  }
+}
+
 export function invalidateStateDashboardCache(fy?: string): void {
   if (fy) {
     _cache.delete(fy);
@@ -223,16 +262,29 @@ export function getCachedStateDashboard(fy: string): SecDashboard | null {
 
 // Never throws. Returns null when the sheet is unreachable or the FY is
 // not configured. Callers degrade gracefully when null is returned.
+//
+// Load priority:
+//  1. In-process cache (permanent for closed FYs, TTL_MS for the current FY)
+//  2. DB snapshot    (closed FYs only — avoids re-reading Sheets after restart)
+//  3. Live Sheets    (always for the current FY; fallback for closed FYs that
+//                     have no DB snapshot yet, i.e. first warm-up)
 export async function loadStateDashboard(fy: string): Promise<SecDashboard | null> {
   const hit = _cache.get(fy);
-  // Closed FYs: once loaded, the cache entry is permanent for the process
-  // lifetime.  Re-reading a closed-year sheet on every 15-min TTL expiry
-  // causes unnecessary Sheets traffic and produces a fluctuating figure if
-  // the sheet is later edited.  Active FY uses the normal 15-min TTL.
   if (hit && (isClosedFy(fy) || Date.now() - hit.loadedAt < TTL_MS)) return hit;
   const pending = _inFlight.get(fy);
   if (pending) return pending;
-  const p = loadStateDashboardUncached(fy).finally(() => _inFlight.delete(fy));
+  const p: Promise<SecDashboard | null> = (async () => {
+    if (isClosedFy(fy)) {
+      // Cold cache for a closed FY: try the DB snapshot before hitting Sheets.
+      // A DB snapshot exists after the first successful Sheets load for that FY.
+      const snap = await loadStateDashboardFromDb(fy);
+      if (snap) {
+        _cache.set(fy, snap);
+        return snap;
+      }
+    }
+    return loadStateDashboardUncached(fy);
+  })().finally(() => _inFlight.delete(fy));
   _inFlight.set(fy, p);
   return p;
 }
@@ -838,5 +890,8 @@ async function loadStateDashboardUncached(fy: string): Promise<SecDashboard | nu
   };
 
   _cache.set(fy, result);
+  // Persist to DB so cold-restart loads for closed FYs never need Sheets.
+  // Fire-and-forget: a DB write failure must never block the response.
+  saveStateDashboardSnapshot(result).catch(() => {/* already logged */});
   return result;
 }

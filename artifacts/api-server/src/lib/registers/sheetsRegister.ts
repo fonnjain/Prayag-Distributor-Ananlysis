@@ -12,10 +12,12 @@
 import {
   isHeaderRow,
   mapRegisterColumns,
+  normHeader,
   type CellValue,
   type RegisterColumns,
 } from "./normalize.js";
 import { listSheetTabs, readTabRowsChunked, type SheetCellValue } from "./sheetsApi.js";
+import { logger } from "../logger.js";
 
 // Monthly tab name pattern. Handles abbreviated and full month names, with or
 // without a two-digit year suffix: "Apr", "April", "Apr-26", "July", "Jul-26".
@@ -74,6 +76,24 @@ export async function readRegisterFromSheets(
           if (isHeaderRow(values)) {
             columns = mapRegisterColumns(values, rowNumber);
             lastColumns = columns;
+            logger.info(
+              {
+                spreadsheetId,
+                tab: tabTitle,
+                headerRow: rowNumber,
+                rawHeaders: values.slice(0, 20).map((v) => normHeader(v)).filter(Boolean),
+                cols: {
+                  code: columns.code,
+                  qty: columns.qty,
+                  amount: columns.amount,
+                  fy: columns.fy,
+                  invoiceNo: columns.invoiceNo,
+                  customer: columns.customer,
+                  head: columns.head,
+                },
+              },
+              "sheetsRegister: header detected",
+            );
             continue;
           }
           if (rowNumber > 20) {

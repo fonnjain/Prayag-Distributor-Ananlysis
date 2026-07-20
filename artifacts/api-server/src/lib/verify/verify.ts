@@ -4,6 +4,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, saleLines, type InsertSaleLine } from "@workspace/db";
 import registerSheets from "../../../config/register_sheets.json";
+import { logger } from "../logger.js";
 import {
   OccurrenceCounter,
   emptyUnmapped,
@@ -99,9 +100,17 @@ export async function dbAggregates(
   };
 }
 
+export type SheetsDebug = {
+  rowsScanned: number;   // data rows seen by readRegisterFromSheets (after header)
+  tabsRead: string[];    // tabs that had a recognised header row
+  skippedNotRow: number; // parseRegisterRow returned kind !== "row"
+  skippedWrongFy: number;// line.fy !== requested fy (FY-column mismatch)
+};
+
 export type SheetsReadResult = {
   aggregates: SourceAggregates;
   lines: InsertSaleLine[];
+  debug: SheetsDebug;
 };
 
 // Reads the live register for a FY and aggregates it in memory using the
@@ -121,13 +130,25 @@ export async function readLiveRegister(fy: string): Promise<SheetsReadResult> {
   const byHead = new Map<string, number>();
   let amount = 0;
 
-  await readRegisterFromSheets(spreadsheetId, fy, (values, columns) => {
+  let skippedNotRow = 0;
+  let skippedWrongFy = 0;
+  const invalidSample: string[] = [];
+
+  const sheetsResult = await readRegisterFromSheets(spreadsheetId, fy, (values, columns) => {
     const result = parseRegisterRow(values, columns, fy);
-    if (result.kind !== "row") return;
+    if (result.kind !== "row") {
+      skippedNotRow++;
+      if (invalidSample.length < 5) {
+        const reason = result.kind === "invalid" ? result.reason : "empty";
+        const snippet = values.slice(0, 12).map((v) => JSON.stringify(v)).join(", ");
+        invalidSample.push(`[${reason}] ${snippet}`);
+      }
+      return;
+    }
     // The occurrence counter must see every row (both FY blocks) in source
     // order to reproduce the backfill's uids exactly.
     const line = toSaleLine(result.row, occurrence, unmapped, "sheets");
-    if (line.fy !== fy) return;
+    if (line.fy !== fy) { skippedWrongFy++; return; }
     lines.push(line);
     amount += result.row.amount;
     if (line.invoiceNo) invoices.add(line.invoiceNo);
@@ -137,6 +158,13 @@ export async function readLiveRegister(fy: string): Promise<SheetsReadResult> {
     const h = line.headCanon ?? "Unmapped";
     byHead.set(h, (byHead.get(h) ?? 0) + result.row.amount);
   });
+
+  if (skippedNotRow > 0 && lines.length === 0) {
+    logger.warn(
+      { fy, skippedNotRow, skippedWrongFy, invalidSample },
+      "readLiveRegister: all rows skipped — see invalidSample for first rows",
+    );
+  }
 
   return {
     aggregates: {
@@ -148,6 +176,12 @@ export async function readLiveRegister(fy: string): Promise<SheetsReadResult> {
       byHead: sortBreakdown(byHead),
     },
     lines,
+    debug: {
+      rowsScanned: sheetsResult.rowsScanned,
+      tabsRead: sheetsResult.tabsRead,
+      skippedNotRow,
+      skippedWrongFy,
+    },
   };
 }
 
@@ -229,6 +263,9 @@ export type VerifyReport = {
   comparisons: Array<{ label: string; deltas: Delta[]; flagged: boolean }>;
   missingFromDb: { count: number; sample: MissingRow[] };
   healthy: boolean;
+  // Diagnostic breakdown for the Sheets read — exposes why rows may be
+  // missing from the DB even when the Sheets register has data.
+  sheetsDebug: SheetsDebug;
 };
 
 export async function buildVerifyReport(fy: string): Promise<VerifyReport> {
@@ -261,6 +298,7 @@ export async function buildVerifyReport(fy: string): Promise<VerifyReport> {
       })),
     },
     healthy: missing.length === 0 && comparisons.every((c) => !c.flagged),
+    sheetsDebug: live.debug,
   };
 }
 
