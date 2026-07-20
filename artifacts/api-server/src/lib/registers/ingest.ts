@@ -275,6 +275,26 @@ export function assertNoNegativeAmounts(
   ];
 }
 
+/**
+ * Stamps `sheet_confirmed_at` on every sale_line whose line_uid was found in
+ * the most recent live-sheet read. Called after every sync (scheduled and
+ * manual backfill). Rows absent from the sheet keep their prior value:
+ *   null (never confirmed)   → disputed after first run
+ *   old timestamp            → previously confirmed, now missing from sheet
+ */
+export async function markSheetConfirmed(
+  lineUids: string[],
+  confirmedAt: Date,
+): Promise<void> {
+  for (let i = 0; i < lineUids.length; i += BATCH_SIZE) {
+    const batch = lineUids.slice(i, i + BATCH_SIZE);
+    await db
+      .update(saleLines)
+      .set({ sheetConfirmedAt: confirmedAt })
+      .where(inArray(saleLines.lineUid, batch));
+  }
+}
+
 export async function recordIngestRun(run: InsertIngestRun): Promise<void> {
   await db.insert(ingestRuns).values(run);
 }

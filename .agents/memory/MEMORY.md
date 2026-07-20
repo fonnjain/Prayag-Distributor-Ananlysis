@@ -28,3 +28,4 @@
 - [stateDashboard ytdSales null-gate pattern](secondary-ytdsales-nullgate.md) — ytdSalesReceived/ytdSalesSum must never be gated on ytdHasData or plan > 0; gross total and achievement ratio are separate: all received / positive-plan only.
 - [stateDashboard closed-FY freeze + FY2025-26 register gap](statedashboard-freeze.md) — closed FYs cache permanently (no TTL); ytdSalesSum must be symmetric (no !isLeft guard); FY2025-26 1,290-row gap requires original xlsx (Sheets register returns 0 rows).
 - [SecMember dual-key design](sec-member-dual-key.md) — normKey=normSecKey (DB head_canon, keeps parentheticals); joinKey=normName (roster join, strips parentheticals); never mix them in secByKey/secPlanByKey Maps.
+- [Tab content verification + sheet_confirmed_at](prayag-tab-content-verification.md) — two-pass readOrderTabInventory; ghost-row marker on sale_line; GET /api/mgmt/tab-diagnostic.

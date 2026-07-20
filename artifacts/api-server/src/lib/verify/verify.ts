@@ -14,6 +14,7 @@ import {
 import { readRegisterFromSheets } from "../registers/sheetsRegister.js";
 import {
   insertSaleLineBatches,
+  markSheetConfirmed,
   assertNoNegativeAmounts,
   assertSumConsistency,
   recordIngestRun,
@@ -338,6 +339,12 @@ export async function backfillMissingFromSheets(
   if (missing.length > 0) {
     inserted = (await insertSaleLineBatches(missing)).inserted;
   }
+
+  // Stamp sheet_confirmed_at on every row currently in the live sheet,
+  // regardless of whether it was newly inserted.  Rows absent from this read
+  // (e.g. July ghost rows) keep their prior sheet_confirmed_at (null or old).
+  await markSheetConfirmed(live.lines.map((l) => l.lineUid), startedAt);
+
   await recordIngestRun({
     startedAt,
     source: "sheets_verify_backfill",

@@ -20,11 +20,11 @@ import { normHead, buildHeadResolver } from "./names.js";
 import { loadRoster } from "./roster.js";
 import { logger } from "../logger.js";
 
-const BOOKING_SHEETS: Record<string, string> = {
+export const BOOKING_SHEETS: Record<string, string> = {
   "2026-27": "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A",
 };
 
-const SALE_SHEETS: Record<string, string> = {
+export const SALE_SHEETS: Record<string, string> = {
   // FY2026-27: "SALE SHEET 26-27" — monthly tabs Apr/May/Jun/July.
   // Columns: A=serial B=invoice C=date D=bill-from E=customer F=city G=dest
   //          H=code I=colour J=qty K=MRP L=rate M=TAXABLE VALUE N=group
@@ -84,6 +84,26 @@ export type PrimaryDistributorRow = {
  *   retailValue = Taxable Value of Retail rows (scheme-eligible).
  *   govtValue   = Taxable Value of Govt rows (schemes do not apply).
  */
+/**
+ * Result of comparing a per-head or combined tab's own content against the
+ * monthly-tab aggregate it is expected to duplicate.
+ *
+ * status:
+ *   "confirmed-duplicate" — tab total matches monthly aggregate within ₹1 (safe to exclude)
+ *   "content-differs"     — gap detected; tab may contain unique rows — review before excluding
+ *   "unreadable"          — header detection failed or Sheets API error
+ *   null                  — not applicable (monthly / lookup / unknown roles are not verified)
+ */
+export type TabContentVerification = {
+  status: "confirmed-duplicate" | "content-differs" | "unreadable";
+  /** Monthly-tab aggregate for this head (per-head) or all monthly tabs (combined). */
+  monthlyEquivalent: number;
+  /** Total Taxable Value found by reading this tab's own content. */
+  tabTotal: number;
+  /** tabTotal − monthlyEquivalent (positive = tab has MORE than monthly). */
+  diffAmount: number;
+};
+
 export type OrderTabInventoryRow = {
   tabName: string;
   /** How this tab is classified. */
@@ -112,6 +132,11 @@ export type OrderTabInventoryRow = {
   retailValue: number;
   /** Taxable Value for Govt channel rows (schemes do not apply). */
   govtValue: number;
+  /**
+   * Content-based verification result for per-head and combined tabs.
+   * null for all other roles.
+   */
+  contentVerification: TabContentVerification | null;
 };
 
 export type PrimarySheetData = {
@@ -358,6 +383,13 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
   const tabs = await listSheetTabs(sheetId);
   const rows: OrderTabInventoryRow[] = [];
 
+  // Accumulated during the monthly-tab pass — used to content-verify per-head
+  // and combined tabs in the second pass.
+  const monthlyByNormHead = new Map<string, number>();
+  let monthlyTotal = 0;
+  const verifyPending: OrderTabInventoryRow[] = [];
+
+  // ── First pass: classify every tab; read monthly and unknown tabs ──────────
   for (const tab of tabs) {
     const cls = classifyOrderTab(tab.title.trim());
     const inv: OrderTabInventoryRow = {
@@ -373,12 +405,13 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
       pieceQty: 0,
       retailValue: 0,
       govtValue: 0,
+      contentVerification: null,
     };
 
     // Only read data rows for monthly tabs (and unknown tabs that might have data).
-    // Lookup/combined/per-head tabs are classified without reading their rows.
+    // Per-head and combined tabs are read in the second pass (content verification).
     if (inv.role === "monthly" || inv.role === "unknown") {
-      let dateIdx = -1, taxIdx = -1, unitIdx = -1, qtyIdx = -1, chanIdx = -1;
+      let dateIdx = -1, taxIdx = -1, unitIdx = -1, qtyIdx = -1, chanIdx = -1, headIdx = -1;
       let headerFound = false;
 
       await readTabRowsChunked(sheetId, tab.title, (chunkRows, startRow) => {
@@ -392,6 +425,7 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
             const hI = findCol(row, /state\s*head/i);
             if (tI >= 0 && hI >= 0) {
               taxIdx  = tI;
+              headIdx = hI;
               dateIdx = findCol(row, /^(date|order.?date|invoice.?date)$/i);
               unitIdx = findCol(row, /^(unit\.?name|unit\s+name|uom|measure)$/i);
               qtyIdx  = findCol(row, /^(qty|quantity|qnty|pieces?)$/i);
@@ -411,14 +445,20 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
           if (amt <= 0) continue; // blank or subtotal rows
 
           inv.rowCount++;
+          inv.taxableValue += amt;
+          monthlyTotal += amt;
+
+          // Track STATE HEAD sums for per-head content verification.
+          if (headIdx >= 0) {
+            const hNorm = normHead(strVal(row[headIdx]));
+            if (hNorm) monthlyByNormHead.set(hNorm, (monthlyByNormHead.get(hNorm) ?? 0) + amt);
+          }
 
           const d = parseOrderDate(dateIdx >= 0 ? row[dateIdx] : undefined);
           if (d) {
             if (!inv.dateMin || d < inv.dateMin) inv.dateMin = d;
             if (!inv.dateMax || d > inv.dateMax) inv.dateMax = d;
           }
-
-          inv.taxableValue += amt;
 
           // Litre Rule: Unit.Name = "Ltr." → water-tank order (litres); else pieces.
           // NEVER add ltrQty and pieceQty together — different units.
@@ -443,9 +483,86 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
       if (!headerFound && inv.role === "monthly") {
         logger.warn({ sheetId, tab: tab.title }, "primarySheets inventory: header not found in monthly tab");
       }
+    } else if (inv.role === "per-head" || inv.role === "combined") {
+      // Defer content verification until after all monthly tabs are read.
+      verifyPending.push(inv);
     }
 
     rows.push(inv);
+  }
+
+  // ── Second pass: content-verify per-head and combined tabs ────────────────
+  // For each candidate tab, read its own Taxable Value total and compare to
+  // the corresponding monthly-tab aggregate.  A match within ₹1 confirms it
+  // is a safe duplicate; a larger gap flags it for manual review.
+  for (const inv of verifyPending) {
+    let tabTotal = 0;
+    let tabTaxIdx = -1;
+    let tabHeaderFound = false;
+    let readFailed = false;
+
+    try {
+      await readTabRowsChunked(sheetId, inv.tabName, (chunkRows, startRow) => {
+        for (let ri = 0; ri < chunkRows.length; ri++) {
+          const row = chunkRows[ri];
+          const globalRow = startRow + ri;
+          if (!tabHeaderFound) {
+            if (globalRow > 30) continue;
+            const tI = findCol(row, /taxable\s*(value|amount)/i);
+            if (tI >= 0) { tabTaxIdx = tI; tabHeaderFound = true; }
+            continue;
+          }
+          const amt = numVal(row[tabTaxIdx]);
+          if (amt > 0) tabTotal += amt;
+        }
+      });
+    } catch (err) {
+      readFailed = true;
+      logger.warn({ sheetId, tab: inv.tabName, err }, "primarySheets: content-verify read failed");
+    }
+
+    if (readFailed || !tabHeaderFound) {
+      inv.contentVerification = { status: "unreadable", monthlyEquivalent: 0, tabTotal: 0, diffAmount: 0 };
+      inv.excludedReason = (inv.excludedReason ?? "") + " (content-verification: tab could not be read)";
+      continue;
+    }
+
+    const monthlyEquivalent =
+      inv.role === "combined"
+        ? monthlyTotal
+        : (monthlyByNormHead.get(normHead(inv.tabName) ?? "") ?? 0);
+
+    const diffAmount = tabTotal - monthlyEquivalent;
+    const isDuplicate = Math.abs(diffAmount) <= 1;
+
+    inv.contentVerification = {
+      status: isDuplicate ? "confirmed-duplicate" : "content-differs",
+      monthlyEquivalent: Math.round(monthlyEquivalent),
+      tabTotal: Math.round(tabTotal),
+      diffAmount: Math.round(diffAmount),
+    };
+
+    if (isDuplicate) {
+      inv.excludedReason =
+        `Content-verified duplicate: tab total ₹${(tabTotal / 1e7).toFixed(2)} Cr` +
+        ` matches monthly-tab aggregate within ₹1.`;
+    } else if (diffAmount < 0) {
+      // Tab has LESS than what monthly tabs attribute to this head/combined.
+      // No unique rows can exist — safe to exclude.
+      inv.excludedReason =
+        `Tab total ₹${(tabTotal / 1e7).toFixed(2)} Cr is less than monthly aggregate` +
+        ` ₹${(monthlyEquivalent / 1e7).toFixed(2)} Cr` +
+        ` (gap ₹${Math.abs(Math.round(diffAmount)).toLocaleString("en-IN")})` +
+        ` — tab contains no rows absent from monthly tabs; safe to exclude.`;
+    } else {
+      // Tab has MORE than monthly tabs: may contain rows not yet reflected
+      // in any monthly tab. Flag clearly — manual review required.
+      inv.excludedReason =
+        `WARNING: tab total ₹${(tabTotal / 1e7).toFixed(2)} Cr exceeds monthly aggregate` +
+        ` ₹${(monthlyEquivalent / 1e7).toFixed(2)} Cr` +
+        ` by ₹${Math.round(diffAmount).toLocaleString("en-IN")}` +
+        ` — tab may contain rows not covered by monthly tabs; review before excluding.`;
+    }
   }
 
   const includedTotal = rows.filter((r) => r.includedInSum).reduce((s, r) => s + r.taxableValue, 0);
@@ -465,6 +582,7 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
         govtValue: Math.round(r.govtValue),
         dateMin: r.dateMin,
         dateMax: r.dateMax,
+        cv: r.contentVerification?.status ?? null,
       })),
     },
     "primarySheets: tab inventory complete",

@@ -19,6 +19,7 @@ import primaryVelocityRouter from "./primaryVelocity";
 import primaryStateTargetsEditorRouter from "./primaryStateTargetsEditor";
 import customerMasterRouter from "./customerMaster";
 import apiKeysRouter from "./apiKeys";
+import tabDiagnosticRouter from "./tabDiagnostic";
 
 const router: IRouter = Router();
 
@@ -42,5 +43,6 @@ router.use(primaryVelocityRouter);
 router.use(primaryStateTargetsEditorRouter);
 router.use(customerMasterRouter);
 router.use(apiKeysRouter);
+router.use(tabDiagnosticRouter);
 
 export default router;

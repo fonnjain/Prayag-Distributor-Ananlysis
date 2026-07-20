@@ -45,6 +45,12 @@ export const saleLines = pgTable(
     typeRaw: text("type_raw"),
     source: text("source").notNull(), // 'sheets' | 'xlsx_backfill'
     ingestedAt: timestamp("ingested_at", { withTimezone: true }).defaultNow(),
+    // Stamped each time a live-sheet read confirms this row is still present in
+    // the source sheet. Null means the row has never been confirmed (either
+    // pre-migration, or absent from every live read since insertion).
+    // After the first post-migration backfill: null → sheet removed the row
+    // (disputed); non-null → sheet still carries it (confirmed).
+    sheetConfirmedAt: timestamp("sheet_confirmed_at", { withTimezone: true }),
   },
   (t) => [
     index("sale_line_fy_month_idx").on(t.fy, t.monthLabel),
