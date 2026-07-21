@@ -1,0 +1,54 @@
+Loader results look right - mismatches 0, clean ratios, assertFail 0, qty in
+pieces. But "fully resolved" needs proving, not asserting, and one number is
+ambiguous. Three checks.
+
+1. "168 INSERTED, 0 TOMBSTONED" - WHICH IS IT?
+
+168 rows inserted with nothing superseded is either fine or the accumulation
+bug returning, and the count alone cannot tell us which:
+  - GOOD: 168 genuinely new sheet lines that were never in the DB.
+  - BAD: 168 new versions of rows that already existed under an old identity
+    key, added ON TOP without the old versions being retired - accumulation.
+
+Settle it:
+  a) Did the total current tank row count go UP by 168, or did 168 replace 168
+     (count roughly flat)?
+  b) For 10 of the 168 inserted rows, does the same (invoice, code, colour, qty)
+     identity already exist as a SEPARATE current row? If yes, that is a
+     duplicate that should have superseded its predecessor - report it. If no,
+     they are genuinely new - fine.
+  The "stale lineUid" explanation is plausible (colour+qty changes shifted keys)
+  but plausible is not verified.
+
+2. IDEMPOTENCY - THE TEST THAT ACTUALLY SETTLES IT
+
+Run the sync AGAIN with no sheet change. Report inserted and superseded. Both
+MUST be 0. This run did 168 - if a second identical run also inserts anything,
+the loader is still not converged and is accumulating. This is the single most
+important check and it has not been shown. "Confirmed by construction" is not
+it - run it.
+
+3. INVOICE TOTALS - CONFIRM THE MONEY DID NOT MOVE
+
+The whole tank saga moved qty around. amount was never supposed to change.
+Verify, for FY2026-27 tanks: does current DB amount per invoice still equal SAP
+amount per invoice? One line that no longer reconciles means qty handling
+disturbed value. Report matched vs any divergence.
+
+4. SCOPE - DID THIS TOUCH THE FROZEN YEARS?
+
+2,248 current tank rows is about the FY2026-27 count. Confirm:
+  a) Is the new loader live ONLY for FY2026-27, or does it run for the closed
+     years too?
+  b) The closed years (23-24, 24-25, 25-26) were hand-fixed and are frozen.
+     Confirm their tank rows STILL hold the hand-fixed pieces/qty_ltr values and
+     were not disturbed by this deployment.
+  c) Confirm the freeze guard held - the startup sync did NOT read or write
+     23-24/24-25/25-26. If it did touch them, that is a freeze breach to
+     investigate, even if the values happen to be unchanged.
+
+Report 1 and 2 first - the insert ambiguity and the idempotency re-run. Those
+decide whether this is actually resolved or still moving.
+
+Constraints: read-only except the idempotency re-run (which by definition should
+write nothing). No deletion. Frozen years untouched.
