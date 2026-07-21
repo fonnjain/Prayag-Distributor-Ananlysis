@@ -1,0 +1,51 @@
+SAP verification accepted - 110/110 Bucket A, zero bugs, zero anomalies, real
+SAP Quantity column read directly. The loader is correct and its amount-anchored
+matching fixed 110 errors the hand-fix's collision-prone (invoice, code) key
+introduced. Good.
+
+LIFT THE PAUSE ON FY2026-27 ONLY
+
+Clear REGISTER_SYNC_PAUSE for 2026-27. Keep FY2025-26 paused - it has no SAP
+anchor and needs its own check first (below).
+
+Then, in order, reporting each:
+  a) Run one sync. Report tankFlags (route1 / route2 / sapGhost / unmapped), and
+     confirm 110 tombstoned + 110 re-inserted + 9 new July rows inserted.
+  b) Re-run the dry run. Confirm qtyMismatches = 0.
+  c) Run a SECOND sync tick with no sheet change. Confirm 0 inserts, 0
+     supersessions - idempotency proven live, not by construction.
+  d) The assertion qty x perTankLitres == qty_ltr - confirm it is active on the
+     live path and fired zero failures on that sync.
+  e) Report 4 for FY2026-27 tanks - confirm litres unchanged from the verified
+     values (the 110 corrections slightly change piece counts but qty_ltr =
+     sheet litres either way, so the litre totals should be stable).
+
+FY2025-26 - THE CHECK BEFORE UN-PAUSING, because it has NO SAP anchor
+
+Every FY2025-26 tank row goes Route 2 - division, internal consistency only, no
+billing source to catch an error. So before lifting its pause, run read-only and
+report:
+
+  a) Every FY2025-26 tank row: does sheetLitres divide by perTankLitres to an
+     exact integer? Report the count that divides cleanly vs any that do not.
+  b) List every non-clean-division row in full - invoice, code, sheet litres,
+     perTankLitres, remainder. These are the only place an error can hide when
+     there is no SAP, so each one is looked at individually, not waved through.
+  c) WT-001 / WT-002 and any unmapped suffix: confirm they go qty_ltr = NULL,
+     not fabricated.
+  d) Cross-check: does FY2025-26 have its OWN SAP file after all? You found
+     SALE SHEET SAP 25-26 (1lbhKoLU...) earlier. If that is usable, FY2025-26
+     could go Route 1 like 26-27 instead of relying on division. Confirm whether
+     it is configured and whether Route 1 is available for 25-26 - that would
+     give it the same SAP anchor and remove the no-anchor risk entirely.
+
+Item (d) may change the FY2025-26 approach completely. You reported that SAP
+file exists and matches the 15-column format. If it is wired in, 25-26 gets the
+same billing-anchored treatment as 26-27 and does not depend on unanchored
+division at all. Check that before defaulting to Route 2.
+
+Report the FY2026-27 sync results (a-e) first, then the FY2025-26 pre-check.
+
+CONSTRAINTS: FY2026-27 pause lifts now; FY2025-26 stays paused until its
+pre-check is reviewed. Drive read-only, SAP read never written, no delete -
+supersede only. Secondary untouched.
