@@ -217,7 +217,7 @@ function findMonthTab(
  * "Combined" — readSapSourceTab applies monthFilter to narrow it to the
  * requested month automatically.
  */
-function findSapTab(
+export function findSapTab(
   tabs: Array<{ title: string }>,
   monthPrefix: string,
 ): { title: string; isCombined: boolean } | null {
@@ -232,7 +232,7 @@ function findSapTab(
 // The SAP source sheet is the raw 56-column SAP export in Google Sheets format.
 // Column headers are detected by content (same aliases as the uploaded xlsx parser).
 
-type SapSourceRow = {
+export type SapSourceRow = {
   invoiceNo: string | null;
   invoiceDate: string | null;
   customer: string | null;
@@ -241,7 +241,7 @@ type SapSourceRow = {
   amount: number;
 };
 
-async function readSapSourceTab(
+export async function readSapSourceTab(
   sheetId: string,
   tabTitle: string,
   monthFilter: { year: number; month: number } | null,

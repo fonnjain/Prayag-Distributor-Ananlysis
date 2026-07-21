@@ -3319,11 +3319,557 @@ router.get("/registers/:fy/sync-dry-run", async (req, res) => {
 });
 
 /**
+ * GET /registers/tank-tier-a-dryrun
+ * Dry run for Tier A of the tank qty fix (FY2025-26 + FY2026-27).
+ * Reads all DB tank rows for both FYs, reads the SAP Combined tab for each FY,
+ * matches by (invoice_no, closest amount ±2 Rs), and reports:
+ *   - matched rows (will be fixed: qty → SAP pieces, qty_ltr → SAP qty × perTankLitres)
+ *   - ghost rows (no SAP match — flagged only, never assigned)
+ *   - true duplicate pairs (same invoice+code+colour, both State1+3 and State2 qtys)
+ * NOTE: FY2025-26 SAP has 145,642 rows — expect 60-90 seconds.
+ */
+router.get("/registers/tank-tier-a-dryrun", async (req, res) => {
+  try {
+    const cfg = rawRegisterSheetsCfg as {
+      sap_source?: Record<string, string>;
+      registers?: Record<string, string>;
+    };
+    const TANK_SIZES = [200, 500, 750, 1000, 1500, 2000, 2500, 3000, 5000];
+    const FYS = ["2025-26", "2026-27"];
+
+    const normH = (s: string) => (s ?? "").replace(/\s+/g, "").toUpperCase();
+    const numV = (v: unknown) => { const n = parseFloat(String(v ?? "")); return isNaN(n) ? 0 : n; };
+    const strV = (v: unknown) => String(v ?? "").trim();
+    const normInv = (s: string) => s.replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+
+    // ── 1. DB rows: all tank rows for FY2025-26 + FY2026-27 ─────────────────
+    const dbResult = await pool.query<{
+      fy: string; line_uid: string; invoice_no: string | null;
+      code: string; color: string | null; month_label: string;
+      db_qty: string; db_amount: string; per_tank_ltr: string;
+    }>(`
+      WITH tank_litres AS (
+        SELECT suffix, ltr FROM (VALUES
+          ('02',200),('03',1500),('05',500),('07',750),('10',1000),
+          ('15',1500),('20',2000),('25',2500),('30',3000),('50',5000)
+        ) AS t(suffix, ltr)
+      )
+      SELECT sl.fy, sl.line_uid, sl.invoice_no, sl.code, sl.color,
+             sl.month_label,
+             sl.qty::text       AS db_qty,
+             sl.amount::text    AS db_amount,
+             tl.ltr::text       AS per_tank_ltr
+      FROM sale_line sl
+      JOIN tank_litres tl ON SUBSTRING(sl.code FROM '[0-9]{2}$') = tl.suffix
+      WHERE sl.version_status = 'current'
+        AND sl.fy = ANY($1::text[])
+        AND sl.code ~ '^(WCT|WT)-'
+        AND sl.qty::numeric = ANY($2::numeric[])
+      ORDER BY sl.fy, sl.invoice_no, sl.code, sl.color
+    `, [FYS, TANK_SIZES]);
+
+    const dbRows = dbResult.rows;
+
+    // ── 2. SAP: read Combined tab for each FY ────────────────────────────────
+    // Map: fy → normInvoice → [{sapQty, sapAmount}]
+    const sapByFy = new Map<string, Map<string, Array<{ sapQty: number; sapAmount: number }>>>();
+    const sapStats: Record<string, { rowsRead: number; invoiceColFound: boolean; tabFound: boolean }> = {};
+
+    for (const fy of FYS) {
+      const sapId = cfg.sap_source?.[fy];
+      const byInv = new Map<string, Array<{ sapQty: number; sapAmount: number }>>();
+      sapByFy.set(fy, byInv);
+      sapStats[fy] = { rowsRead: 0, invoiceColFound: false, tabFound: false };
+      if (!sapId) continue;
+
+      const tabs = await listSheetTabs(sapId);
+      const combined = tabs.find((t) => /^combined$/i.test(t.title.trim()));
+      if (!combined) continue;
+      sapStats[fy].tabFound = true;
+
+      let qtyIdx = -1, amtIdx = -1, invIdx = -1;
+      let headerFound = false;
+
+      await readTabRowsChunked(sapId, combined.title, (chunk, startRow) => {
+        for (let ri = 0; ri < chunk.length; ri++) {
+          const row = chunk[ri];
+          const globalRow = startRow + ri;
+          if (!headerFound) {
+            if (globalRow > 30) continue;
+            const hd = row.map(normH);
+            const qI = ["QTY", "QUANTITY", "BILLQTY", "BILLINGQTY"].reduce(
+              (b, a) => b >= 0 ? b : hd.indexOf(a), -1);
+            const aI = ["TAXABLEVALUE", "TAXABLEAMOUNT", "NETVALUE", "AMOUNT", "ASSESSABLEVALUE"].reduce(
+              (b, a) => b >= 0 ? b : hd.indexOf(a), -1);
+            if (qI >= 0 && aI >= 0) {
+              qtyIdx = qI; amtIdx = aI;
+              invIdx = ["INVOICENO", "INVOICENUMBER", "BILLINGDOCUMENT", "DOCUMENTNO",
+                        "DOCUMENTNUMBER", "BILLNO", "DOCNO"].reduce(
+                (b, a) => b >= 0 ? b : hd.indexOf(a), -1);
+              sapStats[fy].invoiceColFound = invIdx >= 0;
+              headerFound = true;
+            }
+            continue;
+          }
+          const sapAmt = numV(row[amtIdx]);
+          if (sapAmt <= 0) continue;
+          sapStats[fy].rowsRead++;
+          const sapQty = numV(row[qtyIdx]);
+          const invKey = normInv(strV(invIdx >= 0 ? row[invIdx] : ""));
+          if (invKey) {
+            const arr = byInv.get(invKey) ?? [];
+            arr.push({ sapQty, sapAmount: sapAmt });
+            byInv.set(invKey, arr);
+          }
+        }
+      });
+    }
+
+    // ── 3. Match each DB row to its FY's SAP ─────────────────────────────────
+    type MRow = {
+      lineUid: string; fy: string; invoiceNo: string | null;
+      code: string; color: string | null; monthLabel: string;
+      dbQty: number; dbAmount: number; perTankLtr: number;
+      sapQty: number | null; sapAmount: number | null; amtDiff: number | null;
+      isGhost: boolean; isNullInvoice: boolean;
+    };
+
+    const matched: MRow[] = [];
+    const ghosts: MRow[] = [];
+    const nullInvoices: MRow[] = [];
+
+    for (const r of dbRows) {
+      const dbQty = parseFloat(r.db_qty);
+      const dbAmount = parseFloat(r.db_amount);
+      const perTankLtr = parseInt(r.per_tank_ltr, 10);
+      const byInv = sapByFy.get(r.fy)!;
+      const base = {
+        lineUid: r.line_uid, fy: r.fy, invoiceNo: r.invoice_no,
+        code: r.code, color: r.color, monthLabel: r.month_label,
+        dbQty, dbAmount, perTankLtr,
+      };
+      if (!r.invoice_no) {
+        nullInvoices.push({ ...base, sapQty: null, sapAmount: null, amtDiff: null, isGhost: true, isNullInvoice: true });
+        continue;
+      }
+      const invKey = normInv(r.invoice_no);
+      const candidates = byInv.get(invKey) ?? [];
+      if (candidates.length > 0) {
+        const best = candidates.reduce((a, b) =>
+          Math.abs(b.sapAmount - dbAmount) < Math.abs(a.sapAmount - dbAmount) ? b : a);
+        matched.push({ ...base, sapQty: best.sapQty, sapAmount: best.sapAmount,
+          amtDiff: Math.round(Math.abs(best.sapAmount - dbAmount) * 100) / 100,
+          isGhost: false, isNullInvoice: false });
+      } else {
+        ghosts.push({ ...base, sapQty: null, sapAmount: null, amtDiff: null,
+          isGhost: true, isNullInvoice: false });
+      }
+    }
+
+    // ── 4. True duplicate detection ───────────────────────────────────────────
+    // Groups of 2+ matched DB rows with the same (fy, invoice, code, color)
+    const byGroup = new Map<string, MRow[]>();
+    for (const m of matched) {
+      const k = `${m.fy}|${m.invoiceNo}|${m.code}|${m.color}`;
+      const arr = byGroup.get(k) ?? [];
+      arr.push(m);
+      byGroup.set(k, arr);
+    }
+    const trueDupGroups = [...byGroup.entries()]
+      .filter(([, rows]) => rows.length > 1)
+      .map(([key, rows]) => ({
+        key,
+        dbQtys: rows.map((r) => r.dbQty).sort((a, b) => a - b),
+        sapQty: rows[0].sapQty,
+        perTankLtr: rows[0].perTankLtr,
+        // State1_3 row = smallest qty (perTankLtr); State2 row = largest qty (total litres)
+        state1_3_qty: Math.min(...rows.map((r) => r.dbQty)),
+        state2_qty: Math.max(...rows.map((r) => r.dbQty)),
+      }));
+
+    // ── 5. Per-FY breakdown + response ────────────────────────────────────────
+    const byFySummary: Record<string, { dbRows: number; matched: number; ghosts: number; nullInv: number }> = {};
+    for (const fy of FYS) byFySummary[fy] = { dbRows: 0, matched: 0, ghosts: 0, nullInv: 0 };
+    for (const r of dbRows) byFySummary[r.fy].dbRows++;
+    for (const m of matched) byFySummary[m.fy].matched++;
+    for (const g of ghosts) byFySummary[g.fy].ghosts++;
+    for (const n of nullInvoices) byFySummary[n.fy].nullInv++;
+
+    res.json({
+      summary: {
+        totalDbRows: dbRows.length,
+        matched: matched.length,
+        ghosts: ghosts.length,
+        nullInvoice: nullInvoices.length,
+        trueDuplicatePairs: trueDupGroups.length,
+        ghostTotalAmount: Math.round(ghosts.reduce((s, r) => s + r.dbAmount, 0)),
+        matchedAmtDiffMax: matched.length > 0
+          ? Math.max(...matched.map((m) => m.amtDiff ?? 0)) : null,
+      },
+      byFy: byFySummary,
+      sapReadStats: sapStats,
+      sampleMatched: matched.slice(0, 6).map((m) => ({
+        fy: m.fy, invoiceNo: m.invoiceNo, code: m.code, color: m.color,
+        dbQty: m.dbQty, perTankLtr: m.perTankLtr,
+        sapQty: m.sapQty,
+        newQtyLtr: m.sapQty != null ? m.sapQty * m.perTankLtr : null,
+        dbAmount: Math.round(m.dbAmount),
+        sapAmount: m.sapAmount != null ? Math.round(m.sapAmount) : null,
+        amtDiff: m.amtDiff,
+      })),
+      sampleGhosts: ghosts.slice(0, 5).map((g) => ({
+        fy: g.fy, invoiceNo: g.invoiceNo, code: g.code,
+        dbQty: g.dbQty, dbAmount: Math.round(g.dbAmount),
+      })),
+      sampleTrueDups: trueDupGroups.slice(0, 3),
+    });
+  } catch (err: unknown) {
+    req.log.error({ err }, "tank-tier-a-dryrun failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
+ * POST /registers/tank-tier-a-apply?dryRun=true|false
+ *
+ * Applies the Tier A tank qty fix for FY2025-26 + FY2026-27.
+ * Algorithm:
+ *   1. Read all DB tank rows (code ~ ^(WCT|WT)-, qty in tank-size list)
+ *   2. Read SAP Combined tabs for both FYs
+ *   3. Match each DB row to SAP by invoice_no + closest-amount (tolerance ≤ 5 Rs)
+ *   4. Group matches by (fy, invoice, code, color, rounded-sapAmount) to detect
+ *      true duplicate pairs (two DB rows matched to same SAP row):
+ *        - State2 row (larger qty = total litres) → fix: qty=sapQty, qty_ltr=sapQty×perTankLtr
+ *        - State1_3 row (smaller qty = perTankLtr) → tombstone (version_status='superseded')
+ *   5. Single-row matches → fix: qty=sapQty, qty_ltr=sapQty×perTankLtr
+ *   6. Ghosts / bad-matches (amtDiff > 5 Rs) → left unchanged
+ *
+ * dryRun=true (default) → returns the plan without writing.
+ * dryRun=false → runs in a transaction; on error, rolls back automatically.
+ *
+ * PREREQUISITES: REGISTER_SYNC_PAUSE must include "2025-26" and "2026-27".
+ * NOTE: Reads 145,642 rows from FY2025-26 SAP — expect 60-90 seconds.
+ */
+router.post("/registers/tank-tier-a-apply", async (req, res) => {
+  try {
+    const dryRun = req.query.dryRun !== "false";
+    const AMT_TOLERANCE = 5; // Rs — max allowed difference between DB and SAP amount
+    const cfg = rawRegisterSheetsCfg as {
+      sap_source?: Record<string, string>;
+      registers?: Record<string, string>;
+    };
+    const TANK_SIZES = [200, 500, 750, 1000, 1500, 2000, 2500, 3000, 5000];
+    const FYS = ["2025-26", "2026-27"];
+
+    const normH = (s: string) => (s ?? "").replace(/\s+/g, "").toUpperCase();
+    const numV = (v: unknown) => { const n = parseFloat(String(v ?? "")); return isNaN(n) ? 0 : n; };
+    const strV = (v: unknown) => String(v ?? "").trim();
+    const normInv = (s: string) => s.replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+
+    // Guard: sync must be paused for both FYs
+    const pauseEnv = (process.env.REGISTER_SYNC_PAUSE ?? "").split(",").map((s) => s.trim());
+    const missingPause = FYS.filter((fy) => !pauseEnv.includes(fy));
+    if (missingPause.length > 0) {
+      res.status(409).json({
+        error: "REGISTER_SYNC_PAUSE must include all Tier A FYs before apply",
+        missingPause,
+        currentPause: process.env.REGISTER_SYNC_PAUSE,
+      });
+      return;
+    }
+
+    // ── 1. DB rows ────────────────────────────────────────────────────────────
+    const dbResult = await pool.query<{
+      fy: string; line_uid: string; invoice_no: string | null;
+      code: string; color: string | null; month_label: string;
+      db_qty: string; db_amount: string; per_tank_ltr: string;
+    }>(`
+      WITH tank_litres AS (
+        SELECT suffix, ltr FROM (VALUES
+          ('02',200),('03',1500),('05',500),('07',750),('10',1000),
+          ('15',1500),('20',2000),('25',2500),('30',3000),('50',5000)
+        ) AS t(suffix, ltr)
+      )
+      SELECT sl.fy, sl.line_uid, sl.invoice_no, sl.code, sl.color,
+             sl.month_label,
+             sl.qty::text       AS db_qty,
+             sl.amount::text    AS db_amount,
+             tl.ltr::text       AS per_tank_ltr
+      FROM sale_line sl
+      JOIN tank_litres tl ON SUBSTRING(sl.code FROM '[0-9]{2}$') = tl.suffix
+      WHERE sl.version_status = 'current'
+        AND sl.fy = ANY($1::text[])
+        AND sl.code ~ '^(WCT|WT)-'
+        AND sl.qty::numeric = ANY($2::numeric[])
+      ORDER BY sl.fy, sl.invoice_no, sl.code, sl.color
+    `, [FYS, TANK_SIZES]);
+
+    const dbRows = dbResult.rows;
+
+    // ── 2. SAP: read Combined tab for each FY ────────────────────────────────
+    const sapByFy = new Map<string, Map<string, Array<{ sapQty: number; sapAmount: number }>>>();
+    const sapStats: Record<string, { rowsRead: number; invoiceColFound: boolean }> = {};
+
+    for (const fy of FYS) {
+      const sapId = cfg.sap_source?.[fy];
+      const byInv = new Map<string, Array<{ sapQty: number; sapAmount: number }>>();
+      sapByFy.set(fy, byInv);
+      sapStats[fy] = { rowsRead: 0, invoiceColFound: false };
+      if (!sapId) continue;
+
+      const tabs = await listSheetTabs(sapId);
+      const combined = tabs.find((t) => /^combined$/i.test(t.title.trim()));
+      if (!combined) continue;
+
+      let qtyIdx = -1, amtIdx = -1, invIdx = -1;
+      let headerFound = false;
+
+      await readTabRowsChunked(sapId, combined.title, (chunk, startRow) => {
+        for (let ri = 0; ri < chunk.length; ri++) {
+          const row = chunk[ri];
+          const globalRow = startRow + ri;
+          if (!headerFound) {
+            if (globalRow > 30) continue;
+            const hd = row.map(normH);
+            const qI = ["QTY", "QUANTITY", "BILLQTY", "BILLINGQTY"].reduce(
+              (b, a) => b >= 0 ? b : hd.indexOf(a), -1);
+            const aI = ["TAXABLEVALUE", "TAXABLEAMOUNT", "NETVALUE", "AMOUNT", "ASSESSABLEVALUE"].reduce(
+              (b, a) => b >= 0 ? b : hd.indexOf(a), -1);
+            if (qI >= 0 && aI >= 0) {
+              qtyIdx = qI; amtIdx = aI;
+              invIdx = ["INVOICENO", "INVOICENUMBER", "BILLINGDOCUMENT", "DOCUMENTNO",
+                        "DOCUMENTNUMBER", "BILLNO", "DOCNO"].reduce(
+                (b, a) => b >= 0 ? b : hd.indexOf(a), -1);
+              sapStats[fy].invoiceColFound = invIdx >= 0;
+              headerFound = true;
+            }
+            continue;
+          }
+          const sapAmt = numV(row[amtIdx]);
+          if (sapAmt <= 0) continue;
+          sapStats[fy].rowsRead++;
+          const sapQty = numV(row[qtyIdx]);
+          const invKey = normInv(strV(invIdx >= 0 ? row[invIdx] : ""));
+          if (invKey) {
+            const arr = sapByFy.get(fy)!.get(invKey) ?? [];
+            arr.push({ sapQty, sapAmount: sapAmt });
+            sapByFy.get(fy)!.set(invKey, arr);
+          }
+        }
+      });
+    }
+
+    // ── 3. Match each DB row to SAP (strict ≤5 Rs tolerance) ─────────────────
+    type ValidMatch = {
+      lineUid: string; fy: string; invoiceNo: string;
+      code: string; color: string | null; monthLabel: string;
+      dbQty: number; perTankLtr: number;
+      sapQty: number; sapAmount: number; amtDiff: number;
+    };
+
+    const validMatches: ValidMatch[] = [];
+    const excluded: { lineUid: string; fy: string; reason: string; amtDiff?: number }[] = [];
+
+    for (const r of dbRows) {
+      const dbQty = parseFloat(r.db_qty);
+      const dbAmount = parseFloat(r.db_amount);
+      const perTankLtr = parseInt(r.per_tank_ltr, 10);
+      const byInv = sapByFy.get(r.fy)!;
+
+      if (!r.invoice_no) {
+        excluded.push({ lineUid: r.line_uid, fy: r.fy, reason: "null_invoice" });
+        continue;
+      }
+      const invKey = normInv(r.invoice_no);
+      const candidates = byInv.get(invKey) ?? [];
+      if (candidates.length === 0) {
+        excluded.push({ lineUid: r.line_uid, fy: r.fy, reason: "ghost_no_invoice_in_sap" });
+        continue;
+      }
+      const best = candidates.reduce((a, b) =>
+        Math.abs(b.sapAmount - dbAmount) < Math.abs(a.sapAmount - dbAmount) ? b : a);
+      const amtDiff = Math.abs(best.sapAmount - dbAmount);
+      if (amtDiff > AMT_TOLERANCE) {
+        excluded.push({ lineUid: r.line_uid, fy: r.fy, reason: "bad_match_amt_diff_exceeds_tolerance", amtDiff });
+        continue;
+      }
+      validMatches.push({
+        lineUid: r.line_uid, fy: r.fy, invoiceNo: r.invoice_no!,
+        code: r.code, color: r.color, monthLabel: r.month_label,
+        dbQty, perTankLtr,
+        sapQty: best.sapQty, sapAmount: best.sapAmount, amtDiff,
+      });
+    }
+
+    // ── 4. Detect true duplicates: same (fy, invoice, code, color, sapAmount band) ──
+    // Two DB rows matched to the same SAP row → true duplicate
+    // State1_3 row (smaller qty = perTankLtr × 1) → tombstone
+    // State2 row (larger qty = perTankLtr × N) → fix with sapQty
+    const sapAmtBandKey = (m: ValidMatch) =>
+      `${m.fy}|${m.invoiceNo}|${m.code}|${m.color ?? ""}|${Math.round(m.sapAmount / 10)}`;
+
+    const byAmtGroup = new Map<string, ValidMatch[]>();
+    for (const m of validMatches) {
+      const k = sapAmtBandKey(m);
+      const arr = byAmtGroup.get(k) ?? [];
+      arr.push(m);
+      byAmtGroup.set(k, arr);
+    }
+
+    const toFix: { lineUid: string; newQty: number; newQtyLtr: number }[] = [];
+    const toTombstone: string[] = [];
+
+    for (const [, rows] of byAmtGroup) {
+      if (rows.length === 1) {
+        const m = rows[0];
+        toFix.push({ lineUid: m.lineUid, newQty: m.sapQty, newQtyLtr: m.sapQty * m.perTankLtr });
+      } else {
+        // True duplicate pair: fix State2 (largest dbQty), tombstone the rest
+        const state2 = rows.reduce((a, b) => a.dbQty > b.dbQty ? a : b);
+        toFix.push({ lineUid: state2.lineUid, newQty: state2.sapQty, newQtyLtr: state2.sapQty * state2.perTankLtr });
+        for (const dup of rows) {
+          if (dup.lineUid !== state2.lineUid) toTombstone.push(dup.lineUid);
+        }
+      }
+    }
+
+    const plan = {
+      dryRun,
+      totalDbRows: dbRows.length,
+      validMatches: validMatches.length,
+      excluded: excluded.length,
+      toFix: toFix.length,
+      toTombstone: toTombstone.length,
+      excludedBreakdown: Object.fromEntries(
+        Object.entries(
+          excluded.reduce<Record<string, number>>((acc, e) => {
+            acc[e.reason] = (acc[e.reason] ?? 0) + 1;
+            return acc;
+          }, {})
+        )
+      ),
+      sapStats,
+      sampleFix: toFix.slice(0, 5),
+      sampleTombstone: toTombstone.slice(0, 5),
+      sampleExcluded: excluded.slice(0, 5),
+    };
+
+    if (dryRun) {
+      res.json({ ...plan, applied: false });
+      return;
+    }
+
+    // ── 5. Apply in a transaction ─────────────────────────────────────────────
+    const client = await pool.connect();
+    let fixedRows = 0, tombstonedRows = 0;
+    try {
+      await client.query("BEGIN");
+
+      // 5a. Fix valid matches using JSONB parameter
+      if (toFix.length > 0) {
+        const fixJson = JSON.stringify(toFix.map((r) => ({
+          line_uid: r.lineUid,
+          new_qty: r.newQty,
+          new_qty_ltr: r.newQtyLtr,
+        })));
+        const fixResult = await client.query(`
+          UPDATE sale_line sl
+          SET qty     = (elem->>'new_qty')::numeric,
+              qty_ltr = (elem->>'new_qty_ltr')::numeric
+          FROM jsonb_array_elements($1::jsonb) AS elem
+          WHERE sl.line_uid = elem->>'line_uid'
+            AND sl.version_status = 'current'
+        `, [fixJson]);
+        fixedRows = fixResult.rowCount ?? 0;
+      }
+
+      // 5b. Tombstone true-duplicate State1_3 rows
+      if (toTombstone.length > 0) {
+        const tombResult = await client.query(`
+          UPDATE sale_line
+          SET version_status = 'superseded'
+          WHERE line_uid = ANY($1::text[])
+            AND version_status = 'current'
+        `, [toTombstone]);
+        tombstonedRows = tombResult.rowCount ?? 0;
+      }
+
+      await client.query("COMMIT");
+    } catch (txErr) {
+      await client.query("ROLLBACK");
+      throw txErr;
+    } finally {
+      client.release();
+    }
+
+    req.log.info({ fixedRows, tombstonedRows, toFix: toFix.length, toTombstone: toTombstone.length },
+      "tank-tier-a-apply committed");
+
+    res.json({ ...plan, applied: true, fixedRows, tombstonedRows });
+  } catch (err: unknown) {
+    req.log.error({ err }, "tank-tier-a-apply failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
  * GET /registers/sap-coverage-check
  * Searches Drive for SAP-format workbooks for closed FYs (2023-24, 2024-25, 2025-26).
  * Uses the parent folder of the known FY2026-27 SAP file as the starting point,
  * then does a broader name-based search. Read-only diagnostic.
  */
+/**
+ * GET /registers/sap-tab-count/:fy
+ * Reads the Combined tab of the SAP source for the given FY and reports
+ * total data row count + first row headers. Read-only diagnostic.
+ */
+router.get("/registers/sap-tab-count/:fy", async (req, res) => {
+  const { fy } = req.params;
+  const cfg = rawRegisterSheetsCfg as { sap_source?: Record<string, string>; registers?: Record<string, string> };
+  const sapId = cfg.sap_source?.[fy];
+  if (!sapId) {
+    res.status(404).json({ error: `No sap_source configured for FY ${fy}` });
+    return;
+  }
+  try {
+    const token = await getGoogleAccessToken();
+    // List tabs first
+    const tabsResp = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sapId}?fields=sheets.properties.title`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    const tabsData = await tabsResp.json() as { sheets: { properties: { title: string } }[] };
+    const allTabs = (tabsData.sheets ?? []).map((s) => s.properties.title);
+    // Find the Combined tab (startsWith match for truncated titles)
+    const combinedTab = allTabs.find((t) => t.toLowerCase().startsWith("combined"));
+    if (!combinedTab) {
+      res.json({ fy, sapId, allTabs, error: "No Combined tab found" });
+      return;
+    }
+    // Read all rows in chunks to count
+    let totalRows = 0;
+    let headerRow: string[] | null = null;
+    let offset = 1;
+    const chunkSize = 50000;
+    while (true) {
+      const range = `${combinedTab}!A${offset}:P${offset + chunkSize - 1}`;
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${sapId}/values/${encodeURIComponent(range)}`;
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      const d = await r.json() as { values?: string[][] };
+      const rows = d.values ?? [];
+      if (rows.length === 0) break;
+      if (headerRow === null) headerRow = rows[0];
+      totalRows += offset === 1 ? rows.length - 1 : rows.length; // subtract header on first chunk
+      if (rows.length < chunkSize) break;
+      offset += chunkSize;
+    }
+    res.json({ fy, sapId, combinedTab, allTabs, headerRow, totalDataRows: totalRows });
+  } catch (err: unknown) {
+    req.log.error({ err, fy }, "sap-tab-count failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 router.get("/registers/sap-coverage-check", async (req, res) => {
   try {
     const token = await getGoogleAccessToken();

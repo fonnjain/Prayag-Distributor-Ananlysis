@@ -1,0 +1,70 @@
+SAP format confirmed - I read SALE SHEET SAP 25-26 directly. Same 15-column
+Combined layout as the 26-27 file (Posting Date, Document Number, Branch,
+Customer Name, Segment, Old Item Code, Dscription, Color, Quantity, PriceBefDi,
+Price After Discount, Taxable Amount, Total, GROUP, Month). Tier A is one code
+path for both years.
+
+DECISIVE CONFIRMATION: SAP tank rows read Quantity = 1.00 for a
+"WATER TANK ... 5000 LTR". SAP counts tanks in PIECES; the litres are only in
+the description. Pieces is definitively correct.
+
+TWO NOTES BEFORE SCOPING
+
+  - The tier A row count is 4,894 (FY2025-26 3,021 + FY2026-27 1,873), not
+    3,994. Confirm you have 4,894.
+  - SALE SHEET 25-26 also contains an internal "SAP SALE APR" tab with the raw
+    56-column export (UomCode, HSN, full GST columns). Do NOT use that - use the
+    clean 15-column SALE SHEET SAP 25-26 file (1lbhKoLU...). Same schema as
+    26-27. The 56-column tab is a fallback only.
+
+CONFIGURE THE FY2025-26 SAP SOURCE (read-only registration)
+Add 1lbhKoLU...Oge0QPqkBDJ3P4eOs as the SAP source for FY2025-26, read-only,
+same as the 26-27 SAP file. Confirm it reads and report its Combined tab row
+count.
+
+NOW SCOPE THE FIX - THREE TIERS, EXECUTED SAFEST FIRST
+
+Do them in RISK order, not the A/B/C order. Each tier: dry run, report, apply,
+verify, THEN the next. Never one batch.
+
+TIER B FIRST - 5,701 rows, zero risk (FY2023-24 + FY2024-25, State 2)
+  DB already holds total litres. pieces = dbQty / perTankLitres(sizeCode).
+  qty_ltr = dbQty (unchanged). Pure in-DB arithmetic, no external read.
+  DRY RUN: for every row show dbQty, sizeCode, perTankLitres, computed pieces,
+  and confirm dbQty is an exact integer multiple of perTankLitres. Any row where
+  it is NOT exact - flag, do not transform. Report the count that divides
+  cleanly vs any that don't.
+  Why first: if the perTankLitres mapping is wrong anywhere, it surfaces here
+  harmlessly as a non-integer, before any SAP write.
+
+TIER A SECOND - 4,894 rows (FY2025-26 + FY2026-27, all states)
+  Match sale_line to SAP on (invoice_no, amount). qty = SAP Quantity.
+  qty_ltr = SAP Quantity x perTankLitres.
+  Includes the 138 FY2026-27 true-duplicate tombstones - SAP determines the
+  canonical row, the other is superseded.
+  DRY RUN: report matched vs unmatched (ghost) rows. For matched, show DB qty ->
+  SAP qty and confirm DB amount == SAP amount. Ghost rows (no SAP match) are
+  FLAGGED, never assigned. Report ghost count and value.
+
+TIER C LAST - 2,420 rows (FY2023-24 + FY2024-25, State 1+3)
+  DB holds one-tank litres, no SAP for these years. Derive pieces from the
+  SHEET: pieces = sheetTotalLitres / perTankLitres, where the sheet still holds
+  the line.
+  DRY RUN: for each row, is the (invoice, code, colour) line present in the
+  current sheet? If yes, show sheetTotalLitres, perTankLitres, computed pieces.
+  If no (ghost), flag as unfixable - report separately. By now 74% of rows are
+  done, so we can see exactly which resist and why.
+
+THE DERIVED LITRES FIELD
+  ALTER TABLE sale_line ADD COLUMN qty_ltr numeric. Populate it in every tier as
+  above. After the fix:
+    Report 4 (queryQty): CASE WHEN groupRaw='WATER TANK' THEN SUM(qty_ltr) ELSE
+    SUM(qty) END
+    analytics SUM(qty): now correctly pieces for all rows - safe as-is
+    realized price for tanks: store value/qty (per-piece); expose value/qty_ltr
+    (per-litre) in the tank volume view. Piece is truth, litre is the derived
+    lens - same pattern as qty itself.
+
+CONSTRAINTS
+  Drive read-only. SAP is read, never written.
+  No

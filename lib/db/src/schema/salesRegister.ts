@@ -47,6 +47,10 @@ export const saleLines = pgTable(
     code: text("code").notNull(),
     color: text("color"), // e.g. "WHITE", "IVORY"; null for FYs whose sheets lack the column
     qty: numeric("qty"),
+    // Derived litres for tank (WCT/WT) codes. Null for all non-tank rows.
+    // qty = SAP pieces (billing unit); qty_ltr = qty × per-tank-litres (volume).
+    // Reports needing volume (Report 4 Ltr unit) read qty_ltr; all other analytics read qty.
+    qtyLtr: numeric("qty_ltr"),
     saleRate: numeric("sale_rate"),
     amount: numeric("amount").notNull(),
     groupRaw: text("group_raw"),

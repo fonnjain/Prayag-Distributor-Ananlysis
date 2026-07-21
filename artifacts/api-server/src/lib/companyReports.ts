@@ -487,7 +487,7 @@ async function queryQty(fyStr: string, months: string[]) {
     groupRaw: sql<string>`coalesce(${saleLines.groupRaw}, '')`,
     customer: sql<string>`coalesce(${saleLines.customer}, '')`,
     state: sql<string>`coalesce(${saleLines.stateCanon}, 'Unmapped')`,
-    qty: sql<number>`coalesce(sum(${saleLines.qty}::numeric), 0)::float8`,
+    qty: sql<number>`coalesce(case when max(coalesce(${saleLines.groupRaw}, '')) = 'WATER TANK' then sum(${saleLines.qtyLtr}::numeric) else sum(${saleLines.qty}::numeric) end, 0)::float8`,
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
     unit: sql<string>`case when max(${saleLines.groupRaw}) = 'WATER TANK' then 'Ltr' else coalesce(max(${itemMaster.unit}), '') end`,
   })

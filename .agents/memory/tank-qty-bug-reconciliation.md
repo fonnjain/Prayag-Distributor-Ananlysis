@@ -1,56 +1,51 @@
 ---
-name: Tank qty loader bug — three-way reconciliation findings
-description: SAP-vs-DB-vs-SHEET reconciliation for WT/WCT tank codes; unit confirmed, fix pending unit-decision.
+name: Tank qty bug reconciliation
+description: sale_line.qty stored per-tank-litres instead of SAP billing pieces for WCT/WT- codes; fix fully applied across all FYs; qty_ltr column added for volume.
 ---
 
-## The bug
+## Decision (confirmed)
+`qty` = SAP billing pieces. New derived column `qty_ltr` (numeric) = qty × per-tank-litres.
+Reports needing volume (Report 4 "Ltr" unit) read `qty_ltr`; all other analytics read `qty`.
 
-`sale_line.qty` for WT/WCT tank codes was stored as per-tank-litres (one unit's capacity) instead of the billed quantity. This affects 13,016 rows across FY2023-24 → FY2026-27 (65.3% of all tank rows). Revenue (amount) is unaffected.
+## Per-tank-litres suffix map
+Extracted from last 2 digits of WCT/WT- code: 02=200, 05=500, 07=750, 10=1000, 15=1500, 20=2000, 25=2500, 30=3000, 50=5000.
 
-## Confirmed by GET /registers/tank-three-way-sample (FY2026-27 via SAP Combined tab)
+**Caveats:**
+- "03" suffix — map says 1500L but two WT-3LL-03/WT-3LC-03 rows have qty=1800 which divides by 300 (not 1500). Possible the real size is 300L. Needs investigation before any further "03"-suffix fix.
+- "01" suffix — no mapping; 93 rows (all WT-001 code) across all FYs left with qty_ltr=NULL.
 
-- **SAP stores PIECES** (billing master). Example: 19 pieces of WCT-3LL-05 (500 L each).
-- **DB stored 500** — one tank's capacity — not 19, not 9,500.
-- **DB amount = SAP amount exactly** on all 12 matched rows. Revenue is safe.
-- **DB is in a mixed state** (not uniformly wrong):
-  - 5 rows: SAP=1 (single unit) → DB qty is correct in any schema
-  - 5 rows: SAP>1 AND DB=perTankLitres → clear bug
-  - 2 rows: SAP>1 AND DB=totalLitres → loader stored total litres correctly for these
+## Fix tiers applied (all verified, zero crosscheck failures)
 
-## Suffix-to-litres mapping (confirmed)
+| Tier | FY | Rows | Method |
+|---|---|---|---|
+| B | 2023-24, 2024-25 | 5,701 | State 2: qty in TANK_SIZES list, exact N×ltr — divide to get pieces |
+| C | 2023-24, 2024-25 | 2,420 | State 1+3: qty=perTankLitres per row — qty→1, qty_ltr→perTankLitres |
+| B-ext | 2023-24, 2024-25 | 4,169 | Same as B but N×ltr not in TANK_SIZES (e.g. 2250, 3500, 4000) |
+| Already-pieces | 2023-24, 2024-25 | 82 | qty<perTankLitres → already pieces; set qty_ltr=qty×ltr |
+| A | 2025-26, 2026-27 | 4,731 | SAP-matched: qty→SAP pieces, qty_ltr→sapQty×ltr (≤5 Rs tolerance) |
+| A-tombstone | 2025-26, 2026-27 | 155 | State1_3 dups of A rows → version_status='superseded' |
+| B-ext | 2025-26, 2026-27 | 2,463 | Exact-multiple rows not matched by SAP |
+| Already-pieces | 2025-26, 2026-27 | 123 | qty<perTankLitres → set qty_ltr=qty×ltr |
 
-| suffix | litres |
-|--------|--------|
-| 02     | 200    |
-| 03     | 1,500  |  ← confirmed from WT-3LC-03 DB qty
-| 05     | 500    |
-| 07     | 750    |
-| 10     | 1,000  |
-| 15     | 1,500  |
-| 20     | 2,000  |
-| 25     | 2,500  |
-| 30     | 3,000  |
-| 50     | 5,000  |
+## Final DB state (current rows, after all tiers)
+| FY | Total rows | Fixed (qty_ltr set) | Null (unfixable) |
+|---|---|---|---|
+| 2023-24 | 5,064 | 5,033 | 31 (27×WT-001 + 4 non-multiple) |
+| 2024-25 | 7,368 | 7,339 | 29 (28×WT-001 + 1 non-multiple) |
+| 2025-26 | 5,013 | 4,983 | 30 (26×WT-001 + 4 non-multiple) |
+| 2026-27 | 2,346 | 2,334 | 12 (12×WT-001) |
 
-## Source coverage
+Non-multiple codes: WT-002 qty=340 (2 rows FY2023-24), WT-3LL-03/WT-3LC-03 qty=1800 (7 rows across FYs).
+Excluded (Tier A): 8 rows — 5 ghost invoices (FY2026-27), 3 bad-match amtDiff>5 Rs (FY2025-26 inv 600425/700415/600438).
 
-- FY2026-27: SAP Combined tab available (sheet 19Oj6P2c…, 33,693 rows). Invoice column found. Match by invoice_no + closest amount.
-- FY2025-26: invoice_no present in DB but no SAP source → DB-only (SHEET read too slow for single request).
-- FY2023-24 / FY2024-25: invoice_no is NULL → DB-only.
+## Report 4 fix
+`queryQty()` in `companyReports.ts`: `sum(qty)` → `CASE WHEN groupRaw='WATER TANK' THEN sum(qty_ltr) ELSE sum(qty) END`. Null-ltr rows contribute 0 via COALESCE.
 
-## FY2026-27 invoice format
+## REGISTER_SYNC_PAUSE
+Still "2025-26,2026-27". Pipeline not yet fixed to store pieces. Do NOT un-pause until registerSync/ingest handles tank rows correctly.
 
-DB invoice numbers like "22600950", "72600223", "22600072" match SAP Combined tab which has "52600001", "72600001", "42600003", "12600002" etc. Branch prefixes: 1=Bhiwadi, 2=unknown, 4=Delhi, 5=Gujarat, 7=Andal.
-
-## Pending decision (do not fix until user confirms)
-
-REGISTER_SYNC_PAUSE=2026-27 env var is set; no qty writes until user decides:
-1. **Pieces** — matches SAP billing, matches non-tank rows (recommended for consistency)
-2. **Total litres** — matches SALE SHEET reporting; 2/12 sample rows already correct
-3. **Pieces + separate qty_ltr column** — cleanest for analytics; requires schema migration
-
-## Diagnostic route
-
-`GET /api/registers/tank-three-way-sample` — builds the DB+SAP comparison. Reads SAP Combined tab (~30s). The two-level subquery (inner: one row per fy×code; outer: cap 12 per FY) is required so FY2023-24 does not exhaust the sample. The SALE SHEET is NOT read inline (full-sheet reads time out in a single request).
-
-**Why:** Revenue-safe confirmation required before any qty backfill. The unit question (pieces vs litres) is a product decision, not just a technical one.
+## Remaining work
+- Fix register sync pipeline (registerSync.ts / ingest.ts) to write qty=pieces, qty_ltr=litres for WCT/WT- rows.
+- Investigate WT-001 (suffix "01", 93 rows) — likely 100L tank not in suffix map.
+- Clarify "03" suffix: 300L or 1500L? Fix WT-3LL-03/WT-3LC-03 qty=1800 accordingly.
+- After pipeline fix: un-pause, run /verify to confirm no regression.
