@@ -452,6 +452,131 @@ router.post("/registers/:fy/orphan-audit-reverse", async (req, res) => {
   }
 });
 
+// ── Colour backfill diagnostic ────────────────────────────────────────────────
+
+/**
+ * GET /registers/:fy/colour-diagnostic?month=Jul-26
+ *
+ * For the given month, reports WHY colourless current rows remain after
+ * backfillColor:
+ *   - noSerialInDB    : DB serial_no IS NULL → backfillColor skips immediately
+ *   - serialNotInSheet: has serial_no but (invoice, serial) not in live sheet map
+ *   - sheetColourNull : matched in sheet but sheet's colour cell is blank
+ *
+ * Also reports total current rows with colour vs still NULL for the month.
+ * Never writes anything.
+ */
+router.get("/registers/:fy/colour-diagnostic", async (req, res) => {
+  const { fy } = req.params;
+  const month = typeof req.query.month === "string" ? req.query.month : "Jul-26";
+  const spreadsheetId = REGISTER_SHEET_IDS[fy];
+  if (!spreadsheetId) {
+    res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
+    return;
+  }
+
+  try {
+    // 1. Build (invoice_no, serial_no) → color map from live sheet (same as backfillColor)
+    const colorBySerial = new Map<string, string | null>();
+    const occurrence = new OccurrenceCounter();
+    const unmapped = emptyUnmapped();
+
+    await readRegisterFromSheets(spreadsheetId, fy, (values, columns) => {
+      const result = parseRegisterRow(values, columns, fy);
+      if (result.kind !== "row") return;
+      const { row } = result;
+      if (row.invoiceNo != null && row.serialNo != null) {
+        const key = `${row.invoiceNo}|${row.serialNo}`;
+        if (!colorBySerial.has(key)) colorBySerial.set(key, row.color ?? null);
+      }
+    });
+    void occurrence; void unmapped; // suppress unused-var warnings
+
+    // 2. Query colourless current rows for this month
+    const dbResult = await pool.query<{
+      line_uid: string;
+      invoice_no: string | null;
+      serial_no: string | null;
+    }>(
+      `SELECT line_uid, invoice_no, serial_no
+         FROM sale_line
+        WHERE fy = $1 AND month_label = $2
+          AND version_status = 'current'
+          AND (color IS NULL OR color = '')`,
+      [fy, month],
+    );
+
+    let noSerialInDB = 0;
+    let serialNotInSheet = 0;
+    let sheetColourNull = 0; // matched in sheet but sheet colour is blank
+
+    const sampleNoSerial: string[] = [];
+    const sampleNotInSheet: { inv: string; serial: string }[] = [];
+
+    for (const row of dbResult.rows) {
+      if (row.invoice_no == null || row.serial_no == null) {
+        noSerialInDB++;
+        if (sampleNoSerial.length < 5) sampleNoSerial.push(row.invoice_no ?? "(null-invoice)");
+        continue;
+      }
+      const key = `${row.invoice_no}|${row.serial_no}`;
+      if (colorBySerial.has(key)) {
+        // Matched but colour itself is null in sheet
+        sheetColourNull++;
+      } else {
+        serialNotInSheet++;
+        if (sampleNotInSheet.length < 5)
+          sampleNotInSheet.push({ inv: row.invoice_no, serial: row.serial_no });
+      }
+    }
+
+    // 3. Overall Jul-26 colour coverage
+    const coverageResult = await pool.query<{
+      coloured: string;
+      colourless: string;
+    }>(
+      `SELECT
+         COUNT(*) FILTER (WHERE color IS NOT NULL AND color <> '')::text AS coloured,
+         COUNT(*) FILTER (WHERE color IS NULL   OR  color = '')::text  AS colourless
+         FROM sale_line
+        WHERE fy = $1 AND month_label = $2 AND version_status = 'current'`,
+      [fy, month],
+    );
+
+    const coloured = parseInt(coverageResult.rows[0].coloured, 10);
+    const colourless = parseInt(coverageResult.rows[0].colourless, 10);
+    const total = coloured + colourless;
+
+    res.json({
+      fy,
+      month,
+      coverage: {
+        total,
+        coloured,
+        colourless,
+        pct: total > 0 ? +((coloured / total) * 100).toFixed(1) : 0,
+      },
+      unmatchedBreakdown: {
+        noSerialInDB,
+        serialNotInSheet,
+        sheetColourNull,
+        total: noSerialInDB + serialNotInSheet + sheetColourNull,
+        note: [
+          "noSerialInDB: DB serial_no IS NULL — backfillColor skips; fix requires invoice+code+qty fallback",
+          "serialNotInSheet: serial_no exists in DB but not found in sheet — possible sheet edit or tab mismatch",
+          "sheetColourNull: matched in sheet but the colour cell is blank — line has no colour variant",
+        ],
+      },
+      sampleNoSerial,
+      sampleNotInSheet,
+      checkedAt: new Date().toISOString(),
+    });
+  } catch (err: unknown) {
+    req.log.error({ err, fy, month }, "colour-diagnostic failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 // ── Colour-null population report ─────────────────────────────────────────────
 
 /**
