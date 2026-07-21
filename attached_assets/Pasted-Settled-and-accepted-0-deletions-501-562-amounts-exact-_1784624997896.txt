@@ -1,0 +1,59 @@
+Settled and accepted: 0 deletions, 501/562 amounts exact, the bug is qty-only,
+revenue is safe, no tombstone. The guard held for the fifth time. Good.
+
+But do NOT scope the 562-row July update yet. Two things first, and the second
+is larger than July.
+
+1. VERIFY THE 61 - DO NOT ASSUME THEY ARE NOISE
+
+You wrote the 61 amount mismatches are "likely" lookup noise and the "true pair
+likely does match." Likely is not verified, and this whole episode has been a
+lesson in checking the number instead of assuming it. Colour is now stored - use
+it. Re-match those 61 on (invoice, code, COLOUR) precisely. Report:
+  - how many then match on amount (expect most)
+  - any that STILL differ on amount with the exact-colour match - those are real
+    tank value discrepancies, not noise, and they matter
+61 rows. Cheap. Do it before we trust "revenue is safe."
+
+2. THIS IS NOT A JULY BUG - IT IS A LOADER BUG, SO IT IS EVERYWHERE
+
+The root cause is the xlsx backfill storing per-tank litres instead of total
+litres. That same backfill loaded FY2023-24, FY2024-25, FY2025-26 and all of
+FY2026-27 - it is the source='xlsx_backfill' on every row. If it mis-stored tank
+qty in July, it did so in every year it touched.
+
+Before fixing 562 July rows, measure the whole thing. Report, read-only, per FY:
+  - count of tank rows (WT / WCT / WCT prefix, or Unit='Ltr.') whose qty equals
+    exactly one tank's litres for the size in the code
+  - their total, and what share of all tank rows that is
+  - a few samples per year confirming the same DB=per-tank / sheet=total pattern
+
+If the closed years show the same pattern - and they almost certainly will -
+then fixing July alone moves the inconsistency out of sight rather than solving
+it. We fix the loader logic once and apply it to every year, gated per year, the
+same way we are handling the colour backfill.
+
+WHAT IS AND ISN'T AT STAKE - so we scope correctly
+
+Amount is safe, so REVENUE and achievement are unaffected in every year. Good.
+But tank QUANTITY drives:
+  - any litres-dispatched or volume view
+  - the litre-vs-piece split
+  - per-unit realisation on tanks
+Those are wrong wherever this loader ran. Confirm whether any current report or
+tile actually uses tank quantity - if nothing does, this is lower priority and
+can be a clean batch fix later; if the volume split is on a dashboard, it is
+wrong on screen now. Tell me which.
+
+3. THE FIX KEY - state it now so it is right when we build it
+
+The 39 non-integer ratios and the 61 amount mismatches have ONE shared cause:
+the colour-agnostic (invoice, code) lookup grabs the wrong sheet line when an
+invoice carries the same code in multiple colours. So the eventual qty-adoption
+fix MUST match on (invoice, code, colour), now that colour exists. A colour-blind
+update would copy the wrong quantity onto the wrong variant - re-introducing
+error while claiming to fix it. Confirm the fix will use the colour key.
+
+Report items 1 and 2. Do not build the update, do not change qty, pause stays
+on. This decides whether we are fixing 562 rows or a loader bug across four
+years.

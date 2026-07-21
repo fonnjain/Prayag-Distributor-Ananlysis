@@ -2413,6 +2413,308 @@ router.get("/registers/:fy/tank-unit-recheck", async (req, res) => {
   }
 });
 
+// ── Tank 61-verify ────────────────────────────────────────────────────────────
+
+/**
+ * GET /registers/:fy/tank-61-verify?month=Jul-26
+ *
+ * READ-ONLY. Re-examines orphan rows that had a colour-agnostic (wrong-pick)
+ * sheet match in tank-unit-recheck. For each such row, checks whether an
+ * EXACT (invoice, code, colour) match exists in the sheet and, if so, whether
+ * the DB amount equals the exact-match sheet amount.
+ *
+ * Answers: "are the 61 amount mismatches noise (wrong colour pick) or real?"
+ */
+router.get("/registers/:fy/tank-61-verify", async (req, res) => {
+  const { fy } = req.params;
+  const month = typeof req.query.month === "string" ? req.query.month : "Jul-26";
+  const spreadsheetId = REGISTER_SHEET_IDS[fy];
+  if (!spreadsheetId) {
+    res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
+    return;
+  }
+
+  const isTankCode = (code: string): boolean =>
+    /^WCT|^WT-\d|^WT\d/.test(code);
+
+  try {
+    // ── 1. Read sheet — build exact + colour-agnostic lookup ──────────────────
+    const seenByFullKey = new Set<string>();
+    // exact: "invoice|code|colour" → [{qty, amount}]
+    const byExact = new Map<string, Array<{ qty: number; amount: number }>>();
+    // colour-agnostic: "invoice|code" → [{colour, qty, amount}] (largest qty = best)
+    const byInvCode = new Map<
+      string,
+      Array<{ colour: string | null; qty: number; amount: number }>
+    >();
+
+    const occurrence = new OccurrenceCounter();
+    const unmapped = emptyUnmapped();
+
+    await readRegisterFromSheets(spreadsheetId, fy, (values, columns) => {
+      const parsed = parseRegisterRow(values, columns, fy);
+      if (parsed.kind !== "row") return;
+      const { row } = parsed;
+      if (row.monthLabel !== month) return;
+      const sl = toSaleLine(row, occurrence, unmapped, "sheets");
+      seenByFullKey.add(
+        identityKey(sl.invoiceNo ?? null, sl.code, sl.color ?? null, sl.qty ?? null, sl.monthLabel ?? null),
+      );
+      if (sl.invoiceNo == null) return;
+      const sheetQty = Number(sl.qty ?? 0);
+      const sheetAmt = Number(sl.amount ?? 0);
+      const kExact = `${sl.invoiceNo}|${sl.code}|${sl.color ?? ""}`;
+      const aExact = byExact.get(kExact) ?? [];
+      aExact.push({ qty: sheetQty, amount: sheetAmt });
+      byExact.set(kExact, aExact);
+      const kIC = `${sl.invoiceNo}|${sl.code}`;
+      const aIC = byInvCode.get(kIC) ?? [];
+      aIC.push({ colour: sl.color ?? null, qty: sheetQty, amount: sheetAmt });
+      byInvCode.set(kIC, aIC);
+    });
+
+    // ── 2. Load current DB orphans for (fy, month) ────────────────────────────
+    const dbRows = await db
+      .select({
+        invoiceNo: saleLines.invoiceNo,
+        code: saleLines.code,
+        color: saleLines.color,
+        qty: saleLines.qty,
+        monthLabel: saleLines.monthLabel,
+        amount: saleLines.amount,
+      })
+      .from(saleLines)
+      .where(
+        and(
+          eq(saleLines.fy, fy),
+          eq(saleLines.monthLabel, month),
+          eq(saleLines.versionStatus, "current"),
+        ),
+      );
+
+    // ── 3. Re-classify: exact-match vs colour-agnostic-only ──────────────────
+    type VerifyRow = {
+      invoiceNo: string | null; code: string; dbColour: string | null;
+      dbQty: number; dbAmount: number;
+      exactSheetAmt: number | null; exactSheetQty: number | null;
+      exactAmountMatch: boolean | null; // null if no exact match exists
+      agnosticBestAmt: number | null; // what the agnostic pick reported
+      isTank: boolean;
+    };
+
+    const agnosticWithExact: VerifyRow[]   = []; // had agnostic hit + exact exists
+    const agnosticNoExact: VerifyRow[]     = []; // agnostic hit, no exact entry
+    let identityKeyMatches = 0;
+    let exactColourMatches = 0;
+    let agnosticMismatches = 0; // amount differed in tank-unit-recheck
+
+    for (const row of dbRows) {
+      const dbKey = identityKey(
+        row.invoiceNo, row.code, row.color,
+        row.qty != null ? String(row.qty) : null,
+        row.monthLabel,
+      );
+      if (seenByFullKey.has(dbKey)) { identityKeyMatches++; continue; }
+
+      const dbQty = Number(row.qty ?? 0);
+      const dbAmt = Number(row.amount ?? 0);
+      const kExact = `${row.invoiceNo ?? ""}|${row.code}|${row.color ?? ""}`;
+      const kIC    = `${row.invoiceNo ?? ""}|${row.code}`;
+
+      const exactEntries  = byExact.get(kExact);
+      const agnosticEntries = byInvCode.get(kIC);
+
+      if (exactEntries) {
+        // Pass-1 exact match — these were NOT the 61; just count
+        exactColourMatches++;
+        continue;
+      }
+
+      if (!agnosticEntries) {
+        // No sheet match at all — should not happen given tank-unit-recheck found 0
+        continue;
+      }
+
+      // Colour-agnostic match — this is the pool that contained the 61
+      const agnosticBest = agnosticEntries.reduce((a, b) => b.qty > a.qty ? b : a);
+      const agnosticAmtMatch = Math.abs(dbAmt - agnosticBest.amount) < 1;
+      if (!agnosticAmtMatch) agnosticMismatches++;
+
+      // Now: does an exact colour entry ALSO exist (correct pair)?
+      const exactEntry = exactEntries ?? null;
+      // exactEntries is null here (we checked above); try again with correct key
+      // (exactEntries is always null in this branch — look via kIC filtered by colour)
+      const exactForThisColour = agnosticEntries.find(
+        (e) => (e.colour ?? "").toUpperCase() === (row.color ?? "").toUpperCase(),
+      );
+
+      if (exactForThisColour) {
+        const exactAmountMatch = Math.abs(dbAmt - exactForThisColour.amount) < 1;
+        agnosticWithExact.push({
+          invoiceNo: row.invoiceNo, code: row.code, dbColour: row.color,
+          dbQty, dbAmount: dbAmt,
+          exactSheetQty: exactForThisColour.qty, exactSheetAmt: exactForThisColour.amount,
+          exactAmountMatch,
+          agnosticBestAmt: agnosticBest.amount,
+          isTank: isTankCode(row.code),
+        });
+      } else {
+        agnosticNoExact.push({
+          invoiceNo: row.invoiceNo, code: row.code, dbColour: row.color,
+          dbQty, dbAmount: dbAmt,
+          exactSheetQty: null, exactSheetAmt: null, exactAmountMatch: null,
+          agnosticBestAmt: agnosticBest.amount,
+          isTank: isTankCode(row.code),
+        });
+      }
+    }
+
+    const withExactAmtMatch    = agnosticWithExact.filter((r) => r.exactAmountMatch === true);
+    const withExactAmtMismatch = agnosticWithExact.filter((r) => r.exactAmountMatch === false);
+
+    res.json({
+      fy, month,
+      orphanIdentityKeyMatches: identityKeyMatches,
+      orphanExactColourMatches: exactColourMatches,
+      orphanColourAgnosticTotal: agnosticWithExact.length + agnosticNoExact.length,
+      agnosticAmountMismatchesReported: agnosticMismatches,
+      exactColourFoundInAgnosticSet: {
+        total: agnosticWithExact.length,
+        amountMatchesWithExactColour: withExactAmtMatch.length,
+        amountStillMismatchesWithExactColour: withExactAmtMismatch.length,
+        mismatchSample: withExactAmtMismatch.slice(0, 10).map((r) => ({
+          invoiceNo: r.invoiceNo, code: r.code, dbColour: r.dbColour,
+          dbQty: r.dbQty, dbAmount: Math.round(r.dbAmount),
+          exactSheetQty: r.exactSheetQty, exactSheetAmt: Math.round(r.exactSheetAmt ?? 0),
+          agnosticBestAmt: Math.round(r.agnosticBestAmt ?? 0),
+          diff: Math.round(r.dbAmount - (r.exactSheetAmt ?? 0)),
+        })),
+      },
+      noExactColourInSheet: {
+        total: agnosticNoExact.length,
+        tanks: agnosticNoExact.filter((r) => r.isTank).length,
+        nonTanks: agnosticNoExact.filter((r) => !r.isTank).length,
+        sample10: agnosticNoExact.slice(0, 10).map((r) => ({
+          invoiceNo: r.invoiceNo, code: r.code, dbColour: r.dbColour,
+          dbQty: r.dbQty, dbAmount: Math.round(r.dbAmount),
+          agnosticBestAmt: Math.round(r.agnosticBestAmt ?? 0),
+        })),
+      },
+    });
+  } catch (err: unknown) {
+    req.log.error({ err, fy, month }, "tank-61-verify failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ── Cross-year tank scan ───────────────────────────────────────────────────────
+
+/**
+ * GET /registers/tank-scan-all-fy
+ *
+ * READ-ONLY. Pure DB query — no Sheets read. For every FY in sale_line, counts:
+ *   - all tank rows (code ~ WCT/WT prefix)
+ *   - rows where qty equals exactly one tank's per-tank litres
+ *     (200 / 500 / 750 / 1000 / 1500 / 2000 / 2500 / 3000 / 5000)
+ *   - share of all tank rows
+ *   - sample rows per FY confirming DB=per-tank pattern
+ *
+ * Tells us whether the loader bug spans all four years or is July-only.
+ */
+router.get("/registers/tank-scan-all-fy", async (req, res) => {
+  const TANK_SIZES = [200, 500, 750, 1000, 1500, 2000, 2500, 3000, 5000];
+
+  try {
+    // ── Per-FY aggregate ──────────────────────────────────────────────────────
+    const aggResult = await pool.query<{
+      fy: string;
+      all_tank_rows: string;
+      one_unit_rows: string;
+      all_tank_amount: string;
+      one_unit_amount: string;
+    }>(`
+      SELECT
+        fy,
+        COUNT(*)                        FILTER (WHERE code ~ '^WCT|^WT') AS all_tank_rows,
+        COUNT(*)                        FILTER (WHERE code ~ '^WCT|^WT'
+                                                  AND qty::numeric = ANY($1::numeric[]))
+                                                                          AS one_unit_rows,
+        ROUND(SUM(amount::numeric)      FILTER (WHERE code ~ '^WCT|^WT'))  AS all_tank_amount,
+        ROUND(SUM(amount::numeric)      FILTER (WHERE code ~ '^WCT|^WT'
+                                                  AND qty::numeric = ANY($1::numeric[])))
+                                                                          AS one_unit_amount
+      FROM sale_line
+      WHERE version_status = 'current'
+      GROUP BY fy
+      ORDER BY fy
+    `, [TANK_SIZES]);
+
+    // ── Per-FY samples: 3 one-unit rows per FY ───────────────────────────────
+    const sampleResult = await pool.query<{
+      fy: string; invoice_no: string | null; code: string;
+      color: string | null; qty: string; amount: string;
+      month_label: string;
+    }>(`
+      SELECT fy, invoice_no, code, color, qty::text, amount::text, month_label
+      FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY fy ORDER BY month_label, invoice_no) AS rn
+        FROM sale_line
+        WHERE version_status = 'current'
+          AND code ~ '^WCT|^WT'
+          AND qty::numeric = ANY($1::numeric[])
+      ) ranked
+      WHERE rn <= 3
+      ORDER BY fy, rn
+    `, [TANK_SIZES]);
+
+    // Group samples by FY
+    const samplesByFy = new Map<string, typeof sampleResult.rows>();
+    for (const row of sampleResult.rows) {
+      const arr = samplesByFy.get(row.fy) ?? [];
+      arr.push(row);
+      samplesByFy.set(row.fy, arr);
+    }
+
+    const fyRows = aggResult.rows.map((row) => {
+      const allRows   = Number(row.all_tank_rows);
+      const oneUnit   = Number(row.one_unit_rows);
+      const sharePct  = allRows > 0 ? ((oneUnit / allRows) * 100).toFixed(1) : "0.0";
+      return {
+        fy: row.fy,
+        allTankRows:   allRows,
+        oneUnitRows:   oneUnit,
+        sharePct,
+        allTankAmount:  Number(row.all_tank_amount),
+        oneUnitAmount:  Number(row.one_unit_amount),
+        samples: (samplesByFy.get(row.fy) ?? []).map((s) => ({
+          invoiceNo:  s.invoice_no,
+          code:       s.code,
+          color:      s.color,
+          qty:        Number(s.qty),
+          amount:     Math.round(Number(s.amount)),
+          monthLabel: s.month_label,
+        })),
+      };
+    });
+
+    const grandAllTank   = fyRows.reduce((s, r) => s + r.allTankRows, 0);
+    const grandOneUnit   = fyRows.reduce((s, r) => s + r.oneUnitRows, 0);
+    const grandSharePct  = grandAllTank > 0
+      ? ((grandOneUnit / grandAllTank) * 100).toFixed(1)
+      : "0.0";
+
+    res.json({
+      note: "one-unit rows = tank rows whose qty equals exactly one tank's litres (200/500/750/1000/1500/2000/2500/3000/5000)",
+      tankSizesChecked: TANK_SIZES,
+      grand: { allTankRows: grandAllTank, oneUnitRows: grandOneUnit, sharePct: grandSharePct },
+      byFy: fyRows,
+    });
+  } catch (err: unknown) {
+    req.log.error({ err }, "tank-scan-all-fy failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 // ── Sync dry-run ──────────────────────────────────────────────────────────────
 
 /**
