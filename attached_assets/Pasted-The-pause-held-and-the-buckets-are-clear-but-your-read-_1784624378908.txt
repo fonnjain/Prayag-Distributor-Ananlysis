@@ -1,0 +1,78 @@
+The pause held and the buckets are clear - but your read of the B1 ratios is
+wrong, and it changes everything. Do NOT tombstone any of the 562. At most 186
+could be real deletions, and even those are unconfirmed.
+
+THE B1 RATIOS ARE CONSISTENT - YOU DIVIDED THE WRONG WAY
+
+You called 2x, 3x, 10x, 15x, 19x "inconsistent, rules out a single conversion."
+It is not a conversion at all - it is the PIECE COUNT, and it varies per line by
+nature. Watch:
+
+  DB qty = litres of ONE tank (from the WT-LTR size code)
+  Sheet qty = TOTAL litres across all tanks on that line
+  sheet / DB = number of tanks on the line
+
+  WCT-3LL-05  DB 500   sheet 9,500   = 500 x 19 tanks
+  WCT-3LL-10  DB 1,000 sheet 15,000  = 1,000 x 15 tanks
+  WCT-3LL-07  DB 750   sheet 1,500   = 750 x 2 tanks
+  WT-3LL-10   DB 1,000 sheet 10,000  = 1,000 x 10 tanks
+  WT-3LL-20   DB 2,000 sheet 6,000   = 2,000 x 3 tanks
+  WT-3LL-02   DB 200   sheet 600     = 200 x 3 tanks
+
+Every single one is size-litres x an integer piece count. The rule is uniform:
+the DB stored litres-per-tank; the sheet stores total-litres-dispatched. The DB
+is UNDER-representing tank quantity. The sheet is correct - it is the real
+volume dispatched.
+
+So these 286 are the SAME billed lines, present in both. They are a
+unit-representation bug, not deletions. The fix is to re-match on
+(invoice, code, colour) and ADOPT THE SHEET QTY. No tombstone.
+
+B3 IS NOT CLEANLY "DELETED" EITHER - YOUR OWN SAMPLE SHOWS IT
+
+B3 sample row: 72600228, WT-3LL-07, BLUE, qty 2,250. That is 750 x 3 - the exact
+same tank pattern. It landed in B3 instead of B1 only because the lookup missed
+- probably the DB's single-tank qty was used somewhere, or colour/invoice
+differs slightly. So the 90 tanks in B3 are almost certainly more unit
+mismatches, not deletions. Tanks get re-quantified, not individually deleted.
+
+REQUIRED - re-run the classification correctly, read-only
+
+  1. For all 562, match on (invoice, code, colour) ignoring qty. For every match,
+     compute sheet_qty / db_qty and check it is an integer multiple of the tank
+     size implied by the code (02=200 ... 20=2000). Report how many of the 562
+     fit "DB = one tank, sheet = N tanks" cleanly. I expect the great majority,
+     across BOTH the old B1 and old B3 tank rows.
+
+  2. Whatever remains after that - genuinely no (invoice, code, colour) match in
+     the sheet at any qty - is the ONLY real deletion candidate set. Report the
+     count, split tank vs non-tank. It should be small and mostly non-tank.
+
+  3. For that residual only, check TWO things before anyone calls them deleted:
+     (a) invoice-number format mismatch - leading zeros, prefixes - between the
+         xlsx-loaded rows and the sheet. A format mismatch masquerades as a
+         deletion.
+     (b) SAP presence - is the line in the SAP Combined tab? SAP is the billing
+         master. If SAP has it, it was billed and is not a deletion.
+
+THE FIX FOR THE TANK ROWS - do not build yet, just confirm the shape
+
+The DB tank quantity is wrong at the source: it stored per-tank litres instead
+of total litres. That is a LOAD bug in the xlsx backfill, and it means tank
+VALUE may be wrong too - if amount was computed from the wrong qty. Check: for a
+few tank rows, does DB amount match sheet amount? If amounts match but only qty
+differs, the value is safe and only qty needs correcting. If amounts ALSO differ,
+the tank value has been wrong all along and this is bigger than July.
+
+Report that amount comparison for ten tank rows - it tells us whether this is a
+qty-only display bug or a value bug that affects every tank in every year.
+
+WHY THIS IS THE FIFTH TIME
+
+Both options offered earlier - reconcile-then-tombstone, or raised-limit
+tombstone - would have removed these 562. 364 of them are tanks that are fully
+present in the sheet, just quantified differently. Removing them erases real
+dispatched volume. The blast-radius guard halting at 14.8% is the only thing
+that stopped it. That guard has now earned its place twice.
+
+Report items 1, 2 and the amount comparison. Change nothing. Pause stays on.

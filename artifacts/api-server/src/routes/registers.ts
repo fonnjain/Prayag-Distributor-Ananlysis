@@ -2137,6 +2137,282 @@ router.get("/registers/:fy/orphan-bucket-check", async (req, res) => {
   }
 });
 
+// ── Tank unit re-check ────────────────────────────────────────────────────────
+
+/**
+ * GET /registers/:fy/tank-unit-recheck?month=Jul-26
+ *
+ * READ-ONLY. Re-classifies every orphan current DB row for (fy, month) using
+ * a two-pass sheet lookup:
+ *
+ *   Pass 1 — exact (invoice, code, colour) match (same as orphan-bucket-check)
+ *   Pass 2 — colour-agnostic (invoice, code) match
+ *             catches cases where DB and sheet differ only in colour encoding
+ *
+ * For every match (pass 1 or 2), reports:
+ *   - ratio = sheet_qty / db_qty
+ *   - isIntegerMultiple — is ratio a whole number >= 1?
+ *   - dbEqualsOneTank — does db_qty equal the per-tank size implied by the code suffix?
+ *   - amountMatch — does db_amount equal the sheet amount to the nearest rupee?
+ *
+ * The "no-match-at-all" residual (no (invoice, code) match under any colour or
+ * qty) is the only plausible deletion candidate. For that set we also check
+ * whether stripping leading zeros from the invoice number finds a sheet entry.
+ *
+ * No rows are written.
+ */
+router.get("/registers/:fy/tank-unit-recheck", async (req, res) => {
+  const { fy } = req.params;
+  const month = typeof req.query.month === "string" ? req.query.month : "Jul-26";
+  const spreadsheetId = REGISTER_SHEET_IDS[fy];
+  if (!spreadsheetId) {
+    res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
+    return;
+  }
+
+  // WT/WCT tank code suffix → per-tank litres
+  // 07 = 750 L (confirmed from sample data, not 700)
+  const TANK_LITRES_BY_SUFFIX: Record<string, number> = {
+    "02": 200, "05": 500, "07": 750, "10": 1000,
+    "15": 1500, "20": 2000, "25": 2500, "30": 3000, "50": 5000,
+  };
+  const tankLitresFromCode = (code: string): number | null => {
+    const m = code.match(/-(\d{2})$/);
+    if (!m) return null;
+    return TANK_LITRES_BY_SUFFIX[m[1]] ?? null;
+  };
+  const isTankCode = (code: string): boolean =>
+    /^WCT|^WT-\d|^WT\d/.test(code);
+
+  try {
+    // ── 1. Read sheet — build both exact and colour-agnostic lookups ──────────
+    const seenByFullKey = new Set<string>();
+
+    // exact: "invoice|code|colour" → [{qty, amount}]
+    const byExact = new Map<string, Array<{ qty: number; amount: number }>>();
+    // colour-agnostic: "invoice|code" → [{colour, qty, amount}]
+    const byInvCode = new Map<
+      string,
+      Array<{ colour: string | null; qty: number; amount: number }>
+    >();
+
+    let rowsScannedTotal = 0;
+    let rowsInTargetMonth = 0;
+    const occurrence = new OccurrenceCounter();
+    const unmapped = emptyUnmapped();
+
+    await readRegisterFromSheets(spreadsheetId, fy, (values, columns) => {
+      const parsed = parseRegisterRow(values, columns, fy);
+      if (parsed.kind !== "row") return;
+      rowsScannedTotal++;
+      const { row } = parsed;
+      if (row.monthLabel !== month) return;
+
+      const sl = toSaleLine(row, occurrence, unmapped, "sheets");
+      rowsInTargetMonth++;
+
+      seenByFullKey.add(
+        identityKey(
+          sl.invoiceNo ?? null, sl.code, sl.color ?? null,
+          sl.qty ?? null, sl.monthLabel ?? null,
+        ),
+      );
+
+      if (sl.invoiceNo == null) return;
+
+      const sheetQty = Number(sl.qty ?? 0);
+      const sheetAmt = Number(sl.amount ?? 0);
+
+      const kExact = `${sl.invoiceNo}|${sl.code}|${sl.color ?? ""}`;
+      const aExact = byExact.get(kExact) ?? [];
+      aExact.push({ qty: sheetQty, amount: sheetAmt });
+      byExact.set(kExact, aExact);
+
+      const kIC = `${sl.invoiceNo}|${sl.code}`;
+      const aIC = byInvCode.get(kIC) ?? [];
+      aIC.push({ colour: sl.color ?? null, qty: sheetQty, amount: sheetAmt });
+      byInvCode.set(kIC, aIC);
+    });
+
+    // ── 2. Load all current DB rows for (fy, month) ───────────────────────────
+    const dbRows = await db
+      .select({
+        invoiceNo: saleLines.invoiceNo,
+        code: saleLines.code,
+        color: saleLines.color,
+        qty: saleLines.qty,
+        monthLabel: saleLines.monthLabel,
+        amount: saleLines.amount,
+      })
+      .from(saleLines)
+      .where(
+        and(
+          eq(saleLines.fy, fy),
+          eq(saleLines.monthLabel, month),
+          eq(saleLines.versionStatus, "current"),
+        ),
+      );
+
+    // ── 3. Classify every orphan ──────────────────────────────────────────────
+    type MatchedRow = {
+      invoiceNo: string | null; code: string; dbColour: string | null;
+      sheetColour: string | null; colourMatchedExact: boolean;
+      dbQty: number; sheetQty: number; ratio: number;
+      isIntegerMultiple: boolean; intPieceCount: number | null;
+      tankLitres: number | null; dbEqualsOneTank: boolean;
+      dbAmount: number; sheetAmount: number; amountMatch: boolean;
+      isTank: boolean;
+    };
+    type NoMatchRow = {
+      invoiceNo: string | null; code: string; colour: string | null;
+      dbQty: number; dbAmount: number; isTank: boolean;
+      strippedInvoiceFindsSheet: boolean;
+    };
+
+    const matched: MatchedRow[] = [];
+    const noMatch: NoMatchRow[] = [];
+    let identityKeyMatchCount = 0;
+
+    for (const row of dbRows) {
+      // Already in the sheet by full identity key — not an orphan
+      const dbKey = identityKey(
+        row.invoiceNo, row.code, row.color,
+        row.qty != null ? String(row.qty) : null,
+        row.monthLabel,
+      );
+      if (seenByFullKey.has(dbKey)) { identityKeyMatchCount++; continue; }
+
+      // Orphan — try to find in sheet
+      const dbQty = Number(row.qty ?? 0);
+      const dbAmt = Number(row.amount ?? 0);
+      const tank = isTankCode(row.code);
+
+      const kExact = `${row.invoiceNo ?? ""}|${row.code}|${row.color ?? ""}`;
+      const exactEntries = byExact.get(kExact);
+
+      const kIC = `${row.invoiceNo ?? ""}|${row.code}`;
+      const icEntries = byInvCode.get(kIC);
+
+      const sheetEntries = exactEntries ?? icEntries;
+      const colourMatchedExact = exactEntries != null;
+
+      if (sheetEntries && sheetEntries.length > 0) {
+        // Pick the entry with the largest qty (the "whole line" amount if multiple)
+        const best = sheetEntries.reduce((a, b) => b.qty > a.qty ? b : a);
+        const sheetQty = best.qty;
+        const sheetAmt = best.amount;
+        const ratio = dbQty > 0 ? sheetQty / dbQty : 0;
+        const intRatio = Math.round(ratio);
+        const isIntegerMultiple =
+          dbQty > 0 && Math.abs(ratio - intRatio) < 0.005 && intRatio >= 1;
+        const tankLitres = tankLitresFromCode(row.code);
+        const dbEqualsOneTank =
+          tankLitres != null && Math.abs(dbQty - tankLitres) < 0.01;
+        const amountMatch = Math.abs(dbAmt - sheetAmt) < 1;
+
+        matched.push({
+          invoiceNo: row.invoiceNo,
+          code: row.code,
+          dbColour: row.color,
+          sheetColour: colourMatchedExact
+            ? (row.color ?? null)
+            : ((icEntries?.[0]?.colour) ?? null),
+          colourMatchedExact,
+          dbQty, sheetQty,
+          ratio: Math.round(ratio * 1000) / 1000,
+          isIntegerMultiple,
+          intPieceCount: isIntegerMultiple ? intRatio : null,
+          tankLitres,
+          dbEqualsOneTank,
+          dbAmount: dbAmt, sheetAmount: sheetAmt, amountMatch,
+          isTank: tank,
+        });
+      } else {
+        // No match at all — check invoice format
+        const stripped = (row.invoiceNo ?? "").replace(/^0+/, "");
+        const strippedKey = `${stripped}|${row.code}`;
+        const strippedFinds =
+          stripped !== (row.invoiceNo ?? "") && byInvCode.has(strippedKey);
+
+        noMatch.push({
+          invoiceNo: row.invoiceNo, code: row.code, colour: row.color,
+          dbQty, dbAmount: dbAmt, isTank: tank,
+          strippedInvoiceFindsSheet: strippedFinds,
+        });
+      }
+    }
+
+    // ── 4. Summaries ──────────────────────────────────────────────────────────
+    const intMultiples = matched.filter((r) => r.isIntegerMultiple);
+    const oneTankInDB  = matched.filter((r) => r.isIntegerMultiple && r.dbEqualsOneTank);
+    const amtMatch     = matched.filter((r) => r.amountMatch);
+    const amtMismatch  = matched.filter((r) => !r.amountMatch);
+
+    const matchedTanks    = matched.filter((r) => r.isTank);
+    const matchedNonTanks = matched.filter((r) => !r.isTank);
+    const noMatchTanks    = noMatch.filter((r) => r.isTank);
+    const noMatchNonTanks = noMatch.filter((r) => !r.isTank);
+    const noMatchFormatFix = noMatch.filter((r) => r.strippedInvoiceFindsSheet);
+
+    // 10-row sample for tank rows: amount comparison (the critical question)
+    const tankAmountSample = matchedTanks.slice(0, 10).map((r) => ({
+      invoiceNo: r.invoiceNo, code: r.code,
+      dbColour: r.dbColour, sheetColour: r.sheetColour,
+      dbQty: r.dbQty, sheetQty: r.sheetQty,
+      ratio: r.ratio, isIntegerMultiple: r.isIntegerMultiple,
+      tankLitres: r.tankLitres, dbEqualsOneTank: r.dbEqualsOneTank,
+      dbAmount: Math.round(r.dbAmount), sheetAmount: Math.round(r.sheetAmount),
+      amountMatch: r.amountMatch,
+      colourMatchedExact: r.colourMatchedExact,
+    }));
+
+    // 10-row sample of amount mismatches (non-tank too, if any)
+    const amtMismatchSample = amtMismatch.slice(0, 10).map((r) => ({
+      invoiceNo: r.invoiceNo, code: r.code, isTank: r.isTank,
+      dbQty: r.dbQty, sheetQty: r.sheetQty, ratio: r.ratio,
+      dbAmount: Math.round(r.dbAmount), sheetAmount: Math.round(r.sheetAmount),
+      diff: Math.round(r.dbAmount - r.sheetAmount),
+    }));
+
+    res.json({
+      fy,
+      month,
+      rowsScannedTotal,
+      rowsInTargetMonth,
+      dbCurrentRows: dbRows.length,
+      identityKeyMatches: identityKeyMatchCount,
+      orphanTotal: matched.length + noMatch.length,
+      sheetMatched: {
+        total: matched.length,
+        tanks: matchedTanks.length,
+        nonTanks: matchedNonTanks.length,
+        colourExactMatch: matched.filter((r) => r.colourMatchedExact).length,
+        colourAgnosticOnly: matched.filter((r) => !r.colourMatchedExact).length,
+        integerMultipleOfDB: intMultiples.length,
+        dbEqualsExactlyOneTank: oneTankInDB.length,
+        dbAmountEqualsSheetAmount: amtMatch.length,
+        dbAmountDiffersFromSheet: amtMismatch.length,
+        tankAmountSample10: tankAmountSample,
+        amountMismatchSample10: amtMismatchSample,
+      },
+      noSheetMatchAtAll: {
+        total: noMatch.length,
+        tanks: noMatchTanks.length,
+        nonTanks: noMatchNonTanks.length,
+        wouldBeFixedByStrippingLeadingZeros: noMatchFormatFix.length,
+        sample10: noMatch.slice(0, 10).map((r) => ({
+          invoiceNo: r.invoiceNo, code: r.code, colour: r.colour,
+          dbQty: r.dbQty, dbAmount: Math.round(r.dbAmount),
+          isTank: r.isTank, strippedInvoiceFindsSheet: r.strippedInvoiceFindsSheet,
+        })),
+      },
+    });
+  } catch (err: unknown) {
+    req.log.error({ err, fy, month }, "tank-unit-recheck failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 // ── Sync dry-run ──────────────────────────────────────────────────────────────
 
 /**
