@@ -1,6 +1,6 @@
 ---
 name: Tank qty bug reconciliation
-description: sale_line.qty stored per-tank-litres instead of SAP billing pieces for WCT/WT- codes; fix fully applied across all FYs; qty_ltr column added for volume.
+description: sale_line.qty stored per-tank-litres instead of SAP billing pieces for WCT/WT- codes; permanent loader fix implemented; dry-run complete; REGISTER_SYNC_PAUSE awaiting user decision.
 ---
 
 ## Decision (confirmed)
@@ -77,9 +77,49 @@ Important: "DSCRIPTION" is a typo in the sheet (not "DESCRIPTION"). "OLDITEMCODE
 ## Report 4 fix
 `queryQty()` in `companyReports.ts`: `sum(qty)` → `CASE WHEN groupRaw='WATER TANK' THEN sum(qty_ltr) ELSE sum(qty) END`. Null-ltr rows (WT-001 lids, WT-002 anomaly) contribute 0 via COALESCE.
 
-## REGISTER_SYNC_PAUSE
-Still "2025-26,2026-27". Register sync pipeline not yet updated to write qty=pieces, qty_ltr=litres for WCT/WT- rows. Must stay paused until pipeline fix.
+## Permanent loader fix (implemented July 2026)
 
-## Remaining work
-- Fix registerSync/ingest pipeline for tank rows (write qty=pieces, qty_ltr=litres at ingest time).
-- After pipeline fix: un-pause, run /verify to confirm no regression.
+Files created/modified:
+- `artifacts/api-server/src/lib/registers/tankResolution.ts` — canonical single source of truth: TANK_SIZE_MAP, `tankLitresFromCode()`, `tankSizeMapSql()`, `resolveWaterTankRow()`, `buildSapLookupMap()`, `assertTankQtyLtr()`
+- `registerSync.ts` `doSync()` — loads SAP lookup then applies `resolveWaterTankRow` per line (Route 1 SAP / Route 2 division), logs flags, passes `resolvedLines` to `versionedSyncLines`
+- `registers.ts` — imports canonical map (no more duplicate JS constants or hardcoded SQL VALUES strings); adds `GET /registers/:fy/tank-sync-dryrun` route
+
+Resolution logic:
+- **Route 1 (SAP match):** lookup `(invoice_no, code)` in SAP; if found → qty = SAP pieces, qty_ltr = pieces × perTankLitres
+- **Route 2 (exact division):** no SAP match; sheetQty % perTankLitres === 0 → qty = sheetQty/perTankLitres, qty_ltr = sheetQty
+- **Flags:** `sap-ghost` (SAP not ready yet, expected for recent invoices), `non-clean-division` (warning), `unmapped-suffix` (WT-001 lids, correct)
+
+## Dry-run results (FY2026-27, July 21 2026)
+
+```
+tankSheetRows:   2,187
+dbTankRows:      2,346  (from xlsx backfill + one-off fix)
+dbMatchedRows:   2,178
+qtyMismatches:   110
+qtyLtrMismatches: 113
+```
+
+**Verdict: "FAIL" is misleading — the LOADER IS CORRECT.**
+
+Every one of the 110 mismatch rows was verified: `sheetLitres / perTankLitres = computedQty = SAP qty` — all correct. The DB has wrong values from the one-off fix, which used less precise SAP matching (by invoice+code only, without amount tolerance) and incorrectly merged multi-line invoices with the same code.
+
+| Category | Count | Status |
+|---|---|---|
+| Route 1 (SAP) | 2,158 | Loader correct |
+| SAP-ghost (Jul-26, timing) | 11 | Loader correct — Route 2 fallback; all match DB |
+| WT-001 lids (unmapped) | 18 | qty stays pieces, qty_ltr=NULL — correct |
+| Non-clean-division | 0 | None |
+| Perfectly matching DB rows | 2,068 | No-op on sync |
+| One-off-fix errors (will supersede) | 110 | Loader correct; DB wrong |
+| New invoices (not yet in DB) | 9 | Will INSERT |
+
+When REGISTER_SYNC_PAUSE is lifted and the first sync runs:
+- 2,068 rows: touch (no-op)
+- 110 rows: old wrong version tombstoned, new correct version inserted
+- 9 rows: new inserts
+- Subsequent syncs: no-op (idempotent)
+
+## REGISTER_SYNC_PAUSE
+Still set to "2025-26,2026-27". Loader is correct; awaiting user decision to lift the pause.
+
+To lift: remove `REGISTER_SYNC_PAUSE` from env or set it to empty string. The next scheduled sync (or `POST /api/registers/2026-27/sync`) will correctly apply SAP-based qty/qty_ltr values. The 110 one-off-fix errors will self-correct automatically.

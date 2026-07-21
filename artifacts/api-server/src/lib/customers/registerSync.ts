@@ -24,6 +24,12 @@ import {
   toSaleLine,
 } from "../registers/normalize.js";
 import { versionedSyncLines } from "../registers/ingest.js";
+import {
+  resolveWaterTankRow,
+  buildSapLookupMap,
+  assertTankQtyLtr,
+  type SapLookupMap,
+} from "../registers/tankResolution.js";
 
 export const REGISTER_SHEET_IDS: Record<string, string> =
   registerSheets.registers;
@@ -170,12 +176,74 @@ async function doSync(fy: string, spreadsheetId: string): Promise<void> {
       return;
     }
 
+    // ── Tank resolution ────────────────────────────────────────────────────────
+    // WATER TANK rows: sheet qty is total litres, not pieces. Translate to
+    // qty = pieces, qty_ltr = litres before writing. See tankResolution.ts.
+    const regCfg = registerSheets as unknown as { sap_source?: Record<string, string> };
+    const sapId = regCfg.sap_source?.[fy] ?? null;
+    const hasSapSource = sapId != null;
+
+    let sapLookup: SapLookupMap | null = null;
+    if (sapId) {
+      try {
+        sapLookup = await buildSapLookupMap(sapId);
+        logger.info({ fy, sapId, entries: sapLookup.size }, "register sync: SAP lookup loaded");
+      } catch (err) {
+        logger.error({ fy, sapId, err }, "register sync: SAP load failed — falling back to Route 2");
+      }
+    }
+
+    const tankFlags = { route1: 0, route2: 0, sapGhost: 0, nonClean: 0, unmapped: 0, assertFail: 0 };
+    const resolvedLines: typeof lines = lines.map((line) => {
+      const sheetQty = line.qty != null ? Number(line.qty) : null;
+      const resolved = resolveWaterTankRow({
+        code: line.code,
+        groupCanon: line.groupCanon ?? null,
+        sheetQty,
+        invoiceNo: line.invoiceNo ?? null,
+        amount: Number(line.amount),
+        sapLookup,
+        hasSapSource,
+      });
+
+      if (resolved.flag === "non-tank-group") return line;
+      if (resolved.flag === "unmapped-suffix") { tankFlags.unmapped++; return line; }
+
+      if (resolved.flag === "route1-sap")           tankFlags.route1++;
+      else if (resolved.flag === "route2-division")  tankFlags.route2++;
+      else if (resolved.flag === "sap-ghost")        tankFlags.sapGhost++;
+      else if (resolved.flag === "non-clean-division") tankFlags.nonClean++;
+
+      if (resolved.flag === "sap-ghost" || resolved.flag === "non-clean-division") {
+        logger.warn(
+          { fy, code: line.code, invoiceNo: line.invoiceNo, amount: line.amount, flag: resolved.flag },
+          "register sync: tank resolution flag",
+        );
+      }
+
+      const assertion = assertTankQtyLtr(resolved);
+      if (assertion != null) {
+        tankFlags.assertFail++;
+        logger.error(
+          { fy, code: line.code, invoiceNo: line.invoiceNo, assertion },
+          "register sync: tank qty assertion FAILED — row kept with original sheet values",
+        );
+        return line; // fail loudly, never commit bad data silently
+      }
+
+      return { ...line, qty: resolved.qty, qtyLtr: resolved.qtyLtr };
+    });
+
+    if (Object.values(tankFlags).some((v) => v > 0)) {
+      logger.info({ fy, ...tankFlags }, "register sync: tank resolution complete");
+    }
+
     const syncedAt = new Date();
     // ── Step 3 + 4: upsert + tombstone pass (tombstone is inside versionedSyncLines) ──
-    const { touched, superseded, inserted, tombstoned } = await versionedSyncLines(lines, syncedAt);
+    const { touched, superseded, inserted, tombstoned } = await versionedSyncLines(resolvedLines, syncedAt);
 
     lastSyncedAtMs.set(fy, Date.now());
-    s.rows = lines.length;
+    s.rows = resolvedLines.length;
     s.phase = "done";
     logger.info(
       {
@@ -183,7 +251,7 @@ async function doSync(fy: string, spreadsheetId: string): Promise<void> {
         spreadsheetId,
         tabsRead,
         rowsScanned,
-        linesBuilt: lines.length,
+        linesBuilt: resolvedLines.length,
         touched,
         superseded,
         inserted,
@@ -199,7 +267,7 @@ async function doSync(fy: string, spreadsheetId: string): Promise<void> {
     // totalDelta≤1. A halted blast-radius month shows rowDelta>0 with
     // divergencePct>10 and is flagged suspected-read-failure.
     const sheetByMonth = new Map<string, { rows: number; total: number }>();
-    for (const line of lines) {
+    for (const line of resolvedLines) {
       const m = line.monthLabel ?? "(unknown)";
       const e = sheetByMonth.get(m) ?? { rows: 0, total: 0 };
       e.rows++;

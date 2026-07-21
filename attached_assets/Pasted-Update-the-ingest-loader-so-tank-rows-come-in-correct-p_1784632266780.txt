@@ -1,0 +1,122 @@
+Update the ingest loader so tank rows come in correct - pieces in qty, litres
+in qty_ltr - and this cleanup never has to happen again. Read the whole thing
+before starting; it has edge cases that must not be guessed at.
+
+THE PROBLEM THE LOADER STILL HAS
+
+The current loader reads the SALE SHEET and stores its tank quantity as-is into
+qty. The sheet's tank quantity is LITRES, not pieces. So every new tank row
+re-introduces the exact bug we just spent this whole effort fixing. The pause is
+on precisely because of this. The loader must be taught the tiered logic we ran
+by hand.
+
+THE CRUX: THE SALE SHEET HAS NO PIECE COUNT FOR TANKS
+
+The live sheet only holds total litres for tanks. It does not carry pieces. So
+the loader cannot get pieces from the sheet alone - it needs SAP, or it must
+derive pieces by division. Two routes, chosen per row by SAP availability:
+
+ROUTE 1 - SAP AVAILABLE (FY2026-27 now; FY2025-26 once its SAP is configured)
+  Match the row to SAP on (invoice_no, amount, tolerance <= Rs.5).
+  qty = SAP Quantity (pieces).
+  qty_ltr = SAP Quantity x perTankLitres(sizeCode).
+  This is Tier A made permanent.
+
+ROUTE 2 - SAP NOT AVAILABLE (SAP lag, or a year with no SAP export)
+  The loader has only the sheet's total litres.
+  pieces = sheetLitres / perTankLitres(sizeCode), ONLY if it divides to an exact
+  integer.
+  qty = derived pieces, qty_ltr = sheetLitres.
+  This is Tier B/C made permanent.
+
+Choose per row: SAP match found -> Route 1. No SAP match -> Route 2.
+
+THE ONE RULE THAT REMOVES THE AMBIGUITY - state it in code and comment
+
+The bug was born from ambiguity about what the tank qty column meant. Kill that
+permanently:
+
+  For WATER TANK group rows, the sheet quantity is ALWAYS total litres. Pieces
+  are ALWAYS derived (SAP if present, else exact division). qty_ltr is ALWAYS
+  the litre figure. Never treat a tank sheet-qty as a piece count.
+
+No per-row guessing about units. One rule. If a future sheet ever starts storing
+tank qty in pieces, that is a schema change that must FAIL an assertion loudly,
+not be silently absorbed. Add that assertion (see below).
+
+EDGE CASES - handle each explicitly, never crash, never fabricate
+
+  1. NON-TANK rows: unchanged. qty = sheet qty (already pieces), qty_ltr = NULL.
+     Only GROUP = 'WATER TANK' gets the tank treatment.
+
+  2. WT-001 "PLASTIC LIDS HEAVY" and any WT code whose suffix is not in the
+     size map: this is an accessory, not a sized tank. qty = sheet qty (it is
+     already pieces for these), qty_ltr = NULL. The map returning nothing for
+     the suffix IS the signal it is not a sized tank. Do NOT fabricate a litre
+     size. Confirmed from SAP description this session - WT-001 is lids.
+
+  3. NON-CLEAN DIVISION (the WT-002 = 340 case): sheetLitres is not an integer
+     multiple of perTankLitres. Do NOT force it. Store qty_ltr = sheetLitres,
+     leave qty NULL, flag the row for review, log it. Never invent a fractional
+     piece count.
+
+  4. SAP GHOST (Route 1 selected but no SAP match within tolerance): do not
+     silently fall through to division, because a row that SHOULD have SAP but
+     doesn't may be a timing lag or a real mismatch. Flag it, store qty_ltr from
+     the sheet, leave qty provisional, and log. Let it resolve on a later sync
+     when SAP catches up - the same provisional pattern we use elsewhere.
+
+THE SIZE MAP - correct it and centralise it
+
+The map had "03" = 1500, which was WRONG and mis-flagged 388 rows this session.
+Correct value: suffix x 100 = litres.
+  01 -> (not a tank, lids)      02 -> 200    03 -> 300    05 -> 500
+  07 -> 750    10 -> 1000    15 -> 1500    20 -> 2000    30 -> 3000    50 -> 5000
+Define this ONCE, in one place, used by both the loader and any report. Report
+the current definition and every location that has its own copy - divergent
+copies are how "03"=1500 survived.
+
+THE ASSERTION - catch a unit regression at ingest
+
+After loading a tank row, before commit, assert the relationship holds:
+  qty x perTankLitres == qty_ltr   (for sized tanks with a clean piece count)
+If this fails on ingest, something upstream changed - the sheet started giving
+pieces, a code got remapped, a new size appeared. FAIL loudly and log, do not
+commit the bad row. This is the guard that stops the next silent drift.
+
+DRY RUN - prove it on the current sheet before enabling
+
+Run the new loader in dry-run against the live FY2026-27 sheet and report,
+WITHOUT writing:
+  a) How many tank rows would take Route 1 (SAP) vs Route 2 (division).
+  b) For 10 sample tank rows: sheet litres, SAP pieces (if matched),
+     perTankLitres, computed qty, computed qty_ltr - and confirm they match what
+     the one-off fix already stored for those same rows. The loader must
+     REPRODUCE the fix we applied by hand, not diverge from it.
+  c) Any row that would be flagged (ghost, non-clean division, unmapped suffix).
+  d) Confirm non-tank rows are completely untouched.
+
+If the dry run reproduces the hand-fixed values exactly, the loader is correct
+and we enable it. If it diverges on any row, that divergence is a bug in either
+the loader or the hand fix - find which before enabling.
+
+THEN - IDEMPOTENCY AND RE-ENABLE
+
+  - With the loader live, run a sync tick against FY2026-27 and confirm it
+    inserts/supersedes correctly AND that tank qty_ltr stays correct - no
+    re-introduction of the litres-in-qty bug.
+  - Confirm a second tick with no sheet change is a no-op (0 inserts, 0
+    supersessions).
+  - Only after the dry run matches and idempotency holds do we lift
+    REGISTER_SYNC_PAUSE.
+
+CONSTRAINTS
+  Drive read-only, SAP read never written.
+  No DELETE - supersede only.
+  qty / qty_ltr writes only.
+  This changes the loader, which is shared logic - if the change touches
+  anything the secondary pipeline uses, STOP and report before editing.
+  Dry run and report before enabling. Pause stays on until the dry run matches
+  the hand fix and idempotency is proven.
+
+Report the dry run and the size-map audit first.

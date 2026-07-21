@@ -23,6 +23,12 @@ import {
   runScheduledTick,
 } from "../lib/customers/registerSync.js";
 import rawRegisterSheetsCfg from "../../config/register_sheets.json";
+import {
+  tankLitresFromCode,
+  tankSizeMapSql,
+  resolveWaterTankRow,
+  buildSapLookupMap,
+} from "../lib/registers/tankResolution.js";
 
 const router = Router();
 
@@ -2171,20 +2177,6 @@ router.get("/registers/:fy/tank-unit-recheck", async (req, res) => {
     return;
   }
 
-  // WT/WCT tank code suffix → per-tank litres
-  // 03 = 300 L (confirmed from data: 1800/300=6 exact; map had 1500 which was wrong)
-  // 07 = 750 L (confirmed from sample data, not 700)
-  // "01" is absent intentionally: WT-001 = "PLASTIC LIDS HEAVY" (lid accessory, no volume).
-  // WT-001 qty is already in pieces; qty_ltr stays NULL — correct, not a bug.
-  const TANK_LITRES_BY_SUFFIX: Record<string, number> = {
-    "02": 200, "03": 300, "05": 500, "07": 750, "10": 1000,
-    "15": 1500, "20": 2000, "25": 2500, "30": 3000, "50": 5000,
-  };
-  const tankLitresFromCode = (code: string): number | null => {
-    const m = code.match(/-(\d{2})$/);
-    if (!m) return null;
-    return TANK_LITRES_BY_SUFFIX[m[1]] ?? null;
-  };
   const isTankCode = (code: string): boolean =>
     /^WCT|^WT-\d|^WT\d/.test(code);
 
@@ -2742,19 +2734,6 @@ router.get("/registers/tank-scan-all-fy", async (req, res) => {
  */
 router.get("/registers/tank-three-way-sample", async (req, res) => {
   // ── Helpers ──────────────────────────────────────────────────────────────────
-  const TANK_LITRES_BY_SUFFIX: Record<string, number> = {
-    "02": 200, "03": 300,  "05": 500,  "07": 750,  "10": 1000,
-    "15": 1500, "20": 2000, "25": 2500, "30": 3000, "50": 5000,
-  };
-  // "03" = 300 L confirmed from data: 1800/300=6 exact; map previously had 1500 (wrong).
-  // "01" absent: WT-001 = "PLASTIC LIDS HEAVY" (accessory, no volume; qty already pieces).
-
-  function tankLitresFromCode(code: string): number | null {
-    const m = code.match(/-(\d{2})$/);
-    if (!m) return null;
-    return TANK_LITRES_BY_SUFFIX[m[1]] ?? null;
-  }
-
   function normH(v: unknown): string {
     return String(v ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   }
@@ -3353,8 +3332,7 @@ router.get("/registers/tank-tier-a-dryrun", async (req, res) => {
     }>(`
       WITH tank_litres AS (
         SELECT suffix, ltr FROM (VALUES
-          ('02',200),('03',300),('05',500),('07',750),('10',1000),
-          ('15',1500),('20',2000),('25',2500),('30',3000),('50',5000)
+          ${tankSizeMapSql()}
         ) AS t(suffix, ltr)
       )
       SELECT sl.fy, sl.line_uid, sl.invoice_no, sl.code, sl.color,
@@ -3589,8 +3567,7 @@ router.post("/registers/tank-tier-a-apply", async (req, res) => {
     }>(`
       WITH tank_litres AS (
         SELECT suffix, ltr FROM (VALUES
-          ('02',200),('03',300),('05',500),('07',750),('10',1000),
-          ('15',1500),('20',2000),('25',2500),('30',3000),('50',5000)
+          ${tankSizeMapSql()}
         ) AS t(suffix, ltr)
       )
       SELECT sl.fy, sl.line_uid, sl.invoice_no, sl.code, sl.color,
@@ -4038,6 +4015,212 @@ router.get("/registers/sap-check", async (req, res) => {
     });
   } catch (err: unknown) {
     req.log.error({ err }, "sap-check failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
+ * GET /registers/:fy/tank-sync-dryrun
+ *
+ * Runs the new tank-resolution logic against the live register sheet — same
+ * path as doSync — and reports what WOULD be written, WITHOUT touching the DB.
+ *
+ * Purpose: prove the loader produces correct qty/qty_ltr before lifting
+ * REGISTER_SYNC_PAUSE.  Run this, confirm "PASS", then clear the env var.
+ *
+ * Report:
+ *   a) Route 1 (SAP) / Route 2 (division) / flag counts.
+ *   b) Up to 10 Route-1 and 5 Route-2 sample rows with sheet litres, SAP
+ *      pieces, perTankLitres, computed qty/qty_ltr — each compared against the
+ *      current DB value to confirm the one-off fix matches what the new loader
+ *      produces.
+ *   c) Any flagged rows (sap-ghost, non-clean-division) for review.
+ *   d) Non-tank row count — all should have qtyLtr=null from the loader.
+ *   e) Overall verdict: PASS or FAIL with mismatch counts.
+ */
+router.get("/registers/:fy/tank-sync-dryrun", async (req, res) => {
+  const { fy } = req.params;
+  const spreadsheetId = REGISTER_SHEET_IDS[fy];
+  if (!spreadsheetId) {
+    res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
+    return;
+  }
+
+  const cfg = rawRegisterSheetsCfg as { sap_source?: Record<string, string> };
+  const sapId = cfg.sap_source?.[fy] ?? null;
+  const hasSapSource = sapId != null;
+
+  try {
+    // ── 1. Load SAP lookup map ────────────────────────────────────────────────
+    let sapLookup: Awaited<ReturnType<typeof buildSapLookupMap>> | null = null;
+    let sapLoadError: string | null = null;
+    if (sapId) {
+      try {
+        sapLookup = await buildSapLookupMap(sapId);
+      } catch (err) {
+        sapLoadError = err instanceof Error ? err.message : String(err);
+        req.log.warn({ err, sapId }, "tank-sync-dryrun: SAP load failed; will use Route 2 only");
+      }
+    }
+
+    // ── 2. Read sheet rows + apply resolution ─────────────────────────────────
+    const occurrence = new OccurrenceCounter();
+    const unmapped = emptyUnmapped();
+
+    type DryRunRow = {
+      invoiceNo: string | null;
+      code: string;
+      groupCanon: string | null;
+      monthLabel: string | null;
+      amount: string;
+      computedQty: string | null;
+      computedQtyLtr: string | null;
+      flag: string;
+      perTankLitres: number | null;
+      sheetQty: number | null;
+      sapQty: number | null;
+    };
+
+    const tankRows: DryRunRow[] = [];
+    let nonTankCount = 0;
+
+    await readRegisterFromSheets(spreadsheetId, fy, (values, columns) => {
+      const result = parseRegisterRow(values, columns, fy);
+      if (result.kind !== "row") return;
+      const line = toSaleLine(result.row, occurrence, unmapped, "sheets");
+      const sheetQty = line.qty != null ? Number(line.qty) : null;
+      const resolved = resolveWaterTankRow({
+        code: line.code,
+        groupCanon: line.groupCanon ?? null,
+        sheetQty,
+        invoiceNo: line.invoiceNo ?? null,
+        amount: Number(line.amount),
+        sapLookup,
+        hasSapSource,
+      });
+
+      if (resolved.flag === "non-tank-group") {
+        nonTankCount++;
+        return;
+      }
+
+      tankRows.push({
+        invoiceNo: line.invoiceNo ?? null,
+        code: line.code,
+        groupCanon: line.groupCanon ?? null,
+        monthLabel: line.monthLabel ?? null,
+        amount: line.amount,
+        computedQty: resolved.qty,
+        computedQtyLtr: resolved.qtyLtr,
+        flag: resolved.flag,
+        perTankLitres: resolved.perTankLitres,
+        sheetQty: resolved.sheetQty,
+        sapQty: resolved.sapQty,
+      });
+    });
+
+    // ── 3. Flag counts ────────────────────────────────────────────────────────
+    const counts = {
+      route1Sap: 0,
+      route2Division: 0,
+      sapGhost: 0,
+      nonClean: 0,
+      unmappedSuffix: 0,
+    };
+    for (const r of tankRows) {
+      if      (r.flag === "route1-sap")          counts.route1Sap++;
+      else if (r.flag === "route2-division")      counts.route2Division++;
+      else if (r.flag === "sap-ghost")            counts.sapGhost++;
+      else if (r.flag === "non-clean-division")   counts.nonClean++;
+      else if (r.flag === "unmapped-suffix")      counts.unmappedSuffix++;
+    }
+
+    // ── 4. Compare computed values against current DB ─────────────────────────
+    const dbResult = await pool.query<{
+      invoice_no: string | null;
+      code: string;
+      db_qty: string | null;
+      db_qty_ltr: string | null;
+    }>(
+      `SELECT invoice_no, code, qty::text AS db_qty, qty_ltr::text AS db_qty_ltr
+         FROM sale_line
+        WHERE fy = $1 AND group_canon = 'WATER TANK' AND version_status = 'current'`,
+      [fy],
+    );
+
+    // Map by (invoice_no|code) → list of {dbQty, dbQtyLtr}.
+    const dbMap = new Map<string, Array<{ dbQty: string | null; dbQtyLtr: string | null }>>();
+    for (const r of dbResult.rows) {
+      const key = `${r.invoice_no ?? ""}|${r.code}`;
+      const arr = dbMap.get(key) ?? [];
+      arr.push({ dbQty: r.db_qty, dbQtyLtr: r.db_qty_ltr });
+      dbMap.set(key, arr);
+    }
+
+    type AnnotatedRow = DryRunRow & {
+      dbQty: string | null;
+      dbQtyLtr: string | null;
+      qtyMatch: boolean | null;    // null = row not yet in DB (new invoice)
+      qtyLtrMatch: boolean | null;
+    };
+
+    const annotate = (r: DryRunRow): AnnotatedRow => {
+      const key = `${r.invoiceNo ?? ""}|${r.code}`;
+      const entries = dbMap.get(key);
+      if (!entries || entries.length === 0) {
+        return { ...r, dbQty: null, dbQtyLtr: null, qtyMatch: null, qtyLtrMatch: null };
+      }
+      const best = entries.find((e) => e.dbQty === r.computedQty) ?? entries[0];
+      return {
+        ...r,
+        dbQty: best.dbQty,
+        dbQtyLtr: best.dbQtyLtr,
+        qtyMatch: best.dbQty === r.computedQty,
+        qtyLtrMatch: best.dbQtyLtr === r.computedQtyLtr,
+      };
+    };
+
+    // Annotate all tank rows for overall stats.
+    const annotatedAll = tankRows.map(annotate);
+    const inDb = annotatedAll.filter((r) => r.qtyMatch !== null);
+    const qtyMismatches   = inDb.filter((r) => !r.qtyMatch).length;
+    const qtyLtrMismatches = inDb.filter((r) => !r.qtyLtrMatch).length;
+    const allMatch = qtyMismatches === 0 && qtyLtrMismatches === 0;
+
+    // ── 5. Build report ───────────────────────────────────────────────────────
+    const route1Sample  = annotatedAll.filter((r) => r.flag === "route1-sap").slice(0, 10);
+    const route2Sample  = annotatedAll.filter((r) => r.flag === "route2-division").slice(0, 5);
+    const flaggedRows   = annotatedAll.filter(
+      (r) => r.flag === "sap-ghost" || r.flag === "non-clean-division",
+    );
+    const unmappedRows  = annotatedAll.filter((r) => r.flag === "unmapped-suffix").slice(0, 5);
+    const qtyMismatchRows = inDb.filter((r) => !r.qtyMatch || !r.qtyLtrMatch).slice(0, 10);
+
+    res.json({
+      fy,
+      hasSapSource,
+      sapId: sapId ?? null,
+      sapLookupEntries: sapLookup?.size ?? null,
+      sapLoadError,
+      totalSheetRows:  tankRows.length + nonTankCount,
+      tankSheetRows:   tankRows.length,
+      nonTankSheetRows: nonTankCount,
+      counts,
+      dbTankRows:      dbResult.rows.length,
+      dbMatchedRows:   inDb.length,
+      qtyMismatches,
+      qtyLtrMismatches,
+      verdict:         allMatch
+        ? "PASS — loader matches DB for all rows found in DB; safe to lift REGISTER_SYNC_PAUSE"
+        : `FAIL — ${qtyMismatches} qty mismatches, ${qtyLtrMismatches} qty_ltr mismatches`,
+      route1Sample,
+      route2Sample,
+      flaggedRows,
+      unmappedRows,
+      qtyMismatchRows,
+    });
+  } catch (err: unknown) {
+    req.log.error({ err }, "tank-sync-dryrun failed");
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
