@@ -32,3 +32,4 @@
 - [Tab content verification + sheet_confirmed_at](prayag-tab-content-verification.md) — two-pass readOrderTabInventory; ghost-row marker on sale_line; GET /api/mgmt/tab-diagnostic.
 - [Primary Order Book reader quirks](primary-order-book-reader.md) — FY2023-24: no header row (positional fallback col 17=Amount), no State Head col; dry-run anchors for all four FYs.
 - [Tank qty bug reconciliation](tank-qty-bug-reconciliation.md) — qty/lineUid fix + versionedSyncLines currentMap array fix; one-current-row-per-identity invariant verified clean July 21 2026.
+- [Register two-schema gap](register-schema-gap.md) — FY24-25/25-26 registers are 21-col SAP format; ITEMCOLOR + STATEHEADNAME not aliased in normalize.ts; unmapped_heads guardrail silently passes missing-column case.

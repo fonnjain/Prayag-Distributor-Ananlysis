@@ -1,0 +1,52 @@
+The ID collision is confirmed harmless - labelling error, live loader never reads
+those IDs. Good. But the header check you did surfaced a real latent hazard, and
+it is the exact bug we spent this session killing. Do not park it as "future."
+
+THE HAZARD
+
+register_sheets.json's comment describes an 18-column layout:
+  Serial, InvoiceNo, Date, BillFrom, Customer.Name, City, Destination, ItemCode,
+  Color, Quantity, MRP, SaleRate, TaxableValue, GROUP, STATION, STATE, STATE
+  HEAD, MONTH
+
+But the actual 2024-25 and 2025-26 register files you just read are 21 columns
+with DIFFERENT names: Document No. (not InvoiceNo), Location.Name (not BillFrom),
+Item.Color (not Color), and Unit.Name / Quantity / Sale Rate.
+
+Right now this is inert because the live sync only runs FY2026-27. But you raised
+un-pausing FY2025-26 two turns ago. If anyone points the live loader at these
+files for a historical re-sync, it reads a 21-column SAP-format sheet with an
+18-column map, grabs the wrong columns silently - and these files HAVE a
+Unit.Name litre column, so the tank litres-in-qty bug we just eliminated walks
+straight back in. That is this whole session's failure mode, armed and waiting.
+
+WHAT TO DO - two things, config first
+
+1. HEADER DETECTION MUST BE BY CONTENT, NOT POSITION, AND MUST FAIL LOUDLY.
+   Confirm the register loader detects columns by HEADER NAME, not fixed index.
+   If it uses fixed positions, that is the bug - it must match on header text and
+   handle BOTH schemas (the 18-col SALE SHEET layout AND the 21-col
+   Document No./Location.Name/Unit.Name layout).
+   Add an assertion: if the expected value/head/qty columns are not found by
+   name, the loader ABORTS with a clear error - it must never read column N
+   positionally and hope. A schema it does not recognise is a stop, not a guess.
+
+2. FIX THE register_sheets.json COMMENT - it is actively misleading.
+   The comment describes one 18-column layout as if all three registers share it.
+   They do not: 2024-25 and 2025-26 are 21-column SAP-format, 2026-27 is the
+   18-column SALE SHEET layout. Update the comment to state BOTH schemas and
+   which FY uses which, so the next person (or the next re-sync) is not misled
+   into applying the wrong map. This is the same class of error as the FY2023-24
+   "Amount vs Taxable Value" surprise - schema differs by year and the config
+   must say so.
+
+Report, read-only first: does the register loader currently detect columns by
+name or by position? That determines whether item 1 is "confirm it is safe" or
+"there is a real bug to fix." If by position, do NOT change it yet - report and
+we scope the fix.
+
+Then the comment fix (item 2) is a safe one-line-ish edit to register_sheets.json
+- no logic, just accurate documentation of the two schemas.
+
+Constraints: read-only until we know name-vs-position. No logic change without a
+dry run. Frozen data untouched.
