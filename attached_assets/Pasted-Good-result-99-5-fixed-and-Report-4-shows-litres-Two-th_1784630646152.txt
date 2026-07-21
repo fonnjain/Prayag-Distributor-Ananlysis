@@ -1,0 +1,76 @@
+Good result - 99.5% fixed and Report 4 shows litres. Two things to close, and
+one flag on the "non-multiples."
+
+1. THE 1800 ROWS ARE PROBABLY MIS-FLAGGED - RECHECK
+
+You listed WT-3LL-03 -> 1800 and WT-3LC-03 -> 1800 as non-multiples. But suffix
+"03" = 300 litres, and 1800 / 300 = 6 exactly. That IS a clean multiple - 6
+tanks. So either they were flagged in error, or perTankLitres was looked up as
+something other than 300 for those rows.
+
+Recheck: for the flagged 1800 rows, what perTankLitres did the code use? If it
+used 300, they divide cleanly and should be FIXED, not null. If it used
+something else, that is a lookup bug worth finding. Report the actual
+perTankLitres applied.
+
+WT-002 -> 340 is the only genuinely odd one: 340 / 200 = 1.7, not an integer.
+That is likely a source data entry error. Leave it null and flag it - do not
+force it.
+
+2. WT-001 - DO NOT GUESS "01 = 100L". GET IT FROM SAP AND THE DESCRIPTION.
+
+The pattern suggests 01 = 100 litres (02=200, 03=300, so 01=100). Probably
+right - but we do not fabricate a size, we confirm it. Two sources settle it
+without guessing:
+
+  a) For WT-001 rows in FY2025-26 and FY2026-27, SAP gives PIECES directly - no
+     litre size needed for qty. Set qty = SAP pieces for those, same as every
+     other Tier A tank. They should never have been null - they are Tier A rows.
+     Why are 12 FY2026-27 WT-001 rows null when Tier A had SAP? Report whether
+     they failed the SAP match (ghost) or were skipped because the map lacked
+     "01".
+  b) The SAP DESCRIPTION states the size - it read "5000 LTR" for the -50 tanks.
+     Read the description for a WT-001 row. If it says "100 LTR", then 01=100 is
+     confirmed from source, and we add it to the map for the closed-year (Tier
+     B/C) rows that have no SAP. Confirm before adding.
+
+So: WT-001 in FY25-26/26-27 -> pieces from SAP now. WT-001 in FY23-24/24-25 ->
+add 01=100 to the map ONLY after the description confirms it, then fix.
+
+3. VERIFY ONE TANK INVOICE END-TO-END - "looks right" is not verified
+
+qtyThisFy of 4.78M litres looks correct because it is large. That is exactly
+the reasoning that has burned us before. Trace ONE known tank invoice all the
+way:
+
+  pick a FY2026-27 tank line -> SAP pieces (N) -> perTankLitres (L) from the
+  size code -> N x L -> confirm that equals the qty_ltr stored -> confirm it
+  flows into Report 4's litre total for that invoice.
+
+One row, source to screen. If that matches, the mechanism is proven, not
+assumed.
+
+4. CONFIRM THE 138 DUPLICATES WERE SUPERSEDED
+
+Tier A was supposed to tombstone the 138 FY2026-27 true-duplicate rows (SAP
+picks the canonical, the other superseded). The report did not mention them.
+Confirm: how many were superseded, and does FY2026-27 tank qty_ltr now count
+each real line once, not twice?
+
+5. WHAT DOES "CROSSCHECK OK" CHECK? - state it per tier
+
+"5,033 crosscheck OK" - against what? Be specific:
+  - Tier A rows: does computed pieces match SAP pieces? (external anchor - the
+    real check)
+  - Tier B rows: does dbQty / perTankLitres give an exact integer? (internal
+    consistency)
+  - Did DB amount still equal SAP amount after the qty change? (value must not
+    have moved)
+Internal consistency is necessary but not sufficient. Confirm the SAP match ran
+for Tier A - that is the anchor that proves correctness, not just tidiness.
+
+Report 1 and 2 first - the 1800 recheck and the WT-001 SAP/description check.
+Those may drop the 102 unfixed to nearly zero. Then 3, 4, 5.
+
+Constraints: Drive read-only, SAP read never written, no delete (138 superseded
+not deleted), qty/qty_ltr writes only. Pause stays on.

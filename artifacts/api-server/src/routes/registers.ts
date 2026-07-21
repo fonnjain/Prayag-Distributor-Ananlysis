@@ -2172,9 +2172,12 @@ router.get("/registers/:fy/tank-unit-recheck", async (req, res) => {
   }
 
   // WT/WCT tank code suffix → per-tank litres
+  // 03 = 300 L (confirmed from data: 1800/300=6 exact; map had 1500 which was wrong)
   // 07 = 750 L (confirmed from sample data, not 700)
+  // "01" is absent intentionally: WT-001 = "PLASTIC LIDS HEAVY" (lid accessory, no volume).
+  // WT-001 qty is already in pieces; qty_ltr stays NULL — correct, not a bug.
   const TANK_LITRES_BY_SUFFIX: Record<string, number> = {
-    "02": 200, "05": 500, "07": 750, "10": 1000,
+    "02": 200, "03": 300, "05": 500, "07": 750, "10": 1000,
     "15": 1500, "20": 2000, "25": 2500, "30": 3000, "50": 5000,
   };
   const tankLitresFromCode = (code: string): number | null => {
@@ -2740,11 +2743,11 @@ router.get("/registers/tank-scan-all-fy", async (req, res) => {
 router.get("/registers/tank-three-way-sample", async (req, res) => {
   // ── Helpers ──────────────────────────────────────────────────────────────────
   const TANK_LITRES_BY_SUFFIX: Record<string, number> = {
-    "02": 200,  "03": 1500, "05": 500,  "07": 750,  "10": 1000,
+    "02": 200, "03": 300,  "05": 500,  "07": 750,  "10": 1000,
     "15": 1500, "20": 2000, "25": 2500, "30": 3000, "50": 5000,
   };
-  // Note: "03" appears in WT-3LC-03 with DB qty=1500 — tentatively 1500L.
-  // This is one of the quantities the SAP read will clarify.
+  // "03" = 300 L confirmed from data: 1800/300=6 exact; map previously had 1500 (wrong).
+  // "01" absent: WT-001 = "PLASTIC LIDS HEAVY" (accessory, no volume; qty already pieces).
 
   function tankLitresFromCode(code: string): number | null {
     const m = code.match(/-(\d{2})$/);
@@ -3350,7 +3353,7 @@ router.get("/registers/tank-tier-a-dryrun", async (req, res) => {
     }>(`
       WITH tank_litres AS (
         SELECT suffix, ltr FROM (VALUES
-          ('02',200),('03',1500),('05',500),('07',750),('10',1000),
+          ('02',200),('03',300),('05',500),('07',750),('10',1000),
           ('15',1500),('20',2000),('25',2500),('30',3000),('50',5000)
         ) AS t(suffix, ltr)
       )
@@ -3586,7 +3589,7 @@ router.post("/registers/tank-tier-a-apply", async (req, res) => {
     }>(`
       WITH tank_litres AS (
         SELECT suffix, ltr FROM (VALUES
-          ('02',200),('03',1500),('05',500),('07',750),('10',1000),
+          ('02',200),('03',300),('05',500),('07',750),('10',1000),
           ('15',1500),('20',2000),('25',2500),('30',3000),('50',5000)
         ) AS t(suffix, ltr)
       )
@@ -3918,6 +3921,123 @@ router.get("/registers/sap-coverage-check", async (req, res) => {
     });
   } catch (err: unknown) {
     req.log.error({ err }, "sap-coverage-check failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ── SAP check (read-only debug) ───────────────────────────────────────────────
+// GET /api/registers/sap-check?fy=2026-27&code=WT-001[&invoice=22600245]
+// Reads the SAP Combined tab for the given FY, returns rows matching code
+// (and optionally invoice). Shows description, qty, amount for confirmation.
+// Drive is read-only: no writes.
+router.get("/registers/sap-check", async (req, res) => {
+  const fy      = typeof req.query.fy      === "string" ? req.query.fy      : "2026-27";
+  const code    = typeof req.query.code    === "string" ? req.query.code    : "";
+  const invoice = typeof req.query.invoice === "string" ? req.query.invoice : "";
+
+  if (!code) {
+    res.status(400).json({ error: "?code= is required" });
+    return;
+  }
+
+  try {
+    const cfg = rawRegisterSheetsCfg as { sap_source?: Record<string, string> };
+    const sapId = cfg.sap_source?.[fy];
+    if (!sapId) {
+      res.status(404).json({ error: `No sap_source configured for FY ${fy}` });
+      return;
+    }
+
+    const tabs = await listSheetTabs(sapId);
+    const combined = tabs.find((t) => /^combined$/i.test(t.title.trim()));
+    if (!combined) {
+      res.json({ fy, sapId, allTabs: tabs.map((t) => t.title), error: "No Combined tab found" });
+      return;
+    }
+
+    const normH = (s: unknown) => String(s ?? "").replace(/\s+/g, "").toUpperCase();
+    const strV  = (v: unknown) => String(v ?? "").trim();
+    const numV  = (v: unknown) => { const n = parseFloat(String(v ?? "")); return isNaN(n) ? 0 : n; };
+
+    // Detect headers: only QTY+AMOUNT are required (same as Tier A route).
+    // CODE column is optional — SAP tab headers vary and may not match aliases.
+    // We filter by invoice_no and return raw row data so description is visible.
+    let codeIdx = -1, invIdx = -1, qtyIdx = -1, amtIdx = -1, descIdx = -1;
+    let headerFound = false;
+    let rawHeader: string[] = [];
+
+    const matches: {
+      invoiceNo: string; code: string; description: string; qty: number; amount: number;
+    }[] = [];
+
+    // Build the set of invoices we are interested in (from DB).
+    // If invoice param given, use that. Otherwise load from DB for this code+fy.
+    let invoiceSet: Set<string>;
+    if (invoice) {
+      invoiceSet = new Set([invoice]);
+    } else {
+      const dbRows = await pool.query<{ invoice_no: string }>(
+        `SELECT DISTINCT invoice_no FROM sale_line
+         WHERE code = $1 AND fy = $2 AND version_status = 'current'
+           AND invoice_no IS NOT NULL`,
+        [code, fy],
+      );
+      invoiceSet = new Set(dbRows.rows.map((r) => r.invoice_no));
+    }
+
+    if (invoiceSet.size === 0) {
+      res.json({ fy, code, invoiceFilter: invoice || null, message: "No DB invoices found for this code+fy", matches: [] });
+      return;
+    }
+
+    await readTabRowsChunked(sapId, combined.title, (chunk, startRow) => {
+      for (let ri = 0; ri < chunk.length; ri++) {
+        const row = chunk[ri];
+        const globalRow = startRow + ri;
+
+        if (!headerFound) {
+          if (globalRow > 30) continue;
+          const hd = row.map(normH);
+          const qI = ["QTY","QUANTITY","BILLQTY","BILLINGQTY","ORDEREDQTY"]
+            .reduce((b: number, a) => b >= 0 ? b : hd.indexOf(a), -1);
+          const aI = ["TAXABLEVALUE","TAXABLEAMOUNT","TAXABLE","NETVALUE","AMOUNT","ASSESSABLEVALUE"]
+            .reduce((b: number, a) => b >= 0 ? b : hd.indexOf(a), -1);
+          if (qI >= 0 && aI >= 0) {
+            qtyIdx = qI; amtIdx = aI;
+            invIdx = ["INVOICENO","INVOICENUMBER","BILLINGDOCUMENT","DOCUMENTNUMBER","DOCUMENTNO","BILLNO","DOCNO"]
+              .reduce((b: number, a) => b >= 0 ? b : hd.indexOf(a), -1);
+            codeIdx = ["OLDITEMCODE","ITEMCODE","CODE","MATERIAL","MATERIALCODE","PRODUCTCODE","MATERIALNO","MATNO"]
+              .reduce((b: number, a) => b >= 0 ? b : hd.indexOf(a), -1);
+            descIdx = ["DSCRIPTION","MATERIALDESCRIPTION","DESCRIPTION","MATERIALNAME","ITEMDESCRIPTION","MATDESC"]
+              .reduce((b: number, a) => b >= 0 ? b : hd.indexOf(a), -1);
+            rawHeader = hd;
+            headerFound = true;
+          }
+          continue;
+        }
+
+        const inv = invIdx >= 0 ? strV(row[invIdx]) : "";
+        if (!invoiceSet.has(inv)) continue;
+
+        matches.push({
+          invoiceNo:   inv,
+          code:        codeIdx >= 0 ? strV(row[codeIdx]) : "",
+          description: descIdx >= 0 ? strV(row[descIdx]) : "",
+          qty:         numV(row[qtyIdx]),
+          amount:      numV(row[amtIdx]),
+        });
+      }
+    });
+
+    res.json({
+      fy, sapId, tab: combined.title, codeFilter: code, invoiceFilter: invoice || null,
+      headerFound, rawHeader, codeColIdx: codeIdx, invColIdx: invIdx, descColIdx: descIdx,
+      dbInvoicesSearched: invoiceSet.size,
+      matchCount: matches.length,
+      matches: matches.slice(0, 30),
+    });
+  } catch (err: unknown) {
+    req.log.error({ err }, "sap-check failed");
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });

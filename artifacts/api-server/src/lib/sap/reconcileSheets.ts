@@ -237,6 +237,7 @@ export type SapSourceRow = {
   invoiceDate: string | null;
   customer: string | null;
   code: string | null;
+  description: string | null;
   qty: number;
   amount: number;
 };
@@ -251,6 +252,7 @@ export async function readSapSourceTab(
     dateIdx = -1,
     customerIdx = -1,
     codeIdx = -1,
+    descIdx = -1,
     qtyIdx = -1,
     amtIdx = -1;
   let headerFound = false;
@@ -264,7 +266,7 @@ export async function readSapSourceTab(
       if (!headerFound) {
         if (globalRow > 25) continue; // header must appear in first 25 rows
         const hd = row.map(normHeader);
-        const cI = aliasIdx(hd, "ITEMCODE", "CODE", "MATERIAL", "MATERIALCODE", "PRODUCTCODE");
+        const cI = aliasIdx(hd, "OLDITEMCODE", "ITEMCODE", "CODE", "MATERIAL", "MATERIALCODE", "PRODUCTCODE");
         const qI = aliasIdx(hd, "QTY", "QUANTITY", "BILLQTY", "BILLINGQTY", "ORDEREDQTY");
         const aI = aliasIdx(
           hd,
@@ -281,6 +283,7 @@ export async function readSapSourceTab(
           amtIdx = aI;
           invoiceIdx = aliasIdx(
             hd,
+            "DOCUMENTNUMBER",    // SAP Combined tab header
             "INVOICENO",
             "INVOICENUMBER",
             "BILLINGDOCUMENT",
@@ -289,6 +292,8 @@ export async function readSapSourceTab(
             "DOCUMENTNO",
           );
           dateIdx = aliasIdx(hd, "DATE", "INVOICEDATE", "BILLINGDATE", "BILLDATE", "POSTINGDATE");
+          // SAP Combined tab uses "DOCUMENTNUMBER" for invoice and "OLDITEMCODE" for item code.
+          // The description column has a typo in the sheet header: "DSCRIPTION" (not "DESCRIPTION").
           customerIdx = aliasIdx(
             hd,
             "CUSTOMER",
@@ -299,6 +304,17 @@ export async function readSapSourceTab(
             "BILLTOPARTY",
             "NAME1",
             "NAME",
+          );
+          descIdx = aliasIdx(
+            hd,
+            "DSCRIPTION",            // typo in the SAP Combined sheet header
+            "MATERIALDESCRIPTION",
+            "DESCRIPTION",
+            "MATERIALNAME",
+            "ITEMDESCRIPTION",
+            "ITEMNAME",
+            "PRODUCTDESCRIPTION",
+            "MATDESC",
           );
           headerFound = true;
         }
@@ -329,6 +345,7 @@ export async function readSapSourceTab(
         invoiceDate: rawDate,
         customer: customerIdx >= 0 ? strVal(row[customerIdx]) || null : null,
         code,
+        description: descIdx >= 0 ? strVal(row[descIdx]) || null : null,
         qty: qtyIdx >= 0 ? anyNumVal(row[qtyIdx]) : 0,
         amount,
       });
