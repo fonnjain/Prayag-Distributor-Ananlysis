@@ -1,0 +1,45 @@
+The diagnosis is airtight and the read is clean - serialNo=0 and color=8 on
+both tabs, serials populated and correctly parsed. This is not a read bug. The
+1,032 rows were renumbered by the July editing: every invoice still present,
+all under changed serials, zero genuine orphans. That is the reassuring answer -
+no value is missing, only the join key drifted.
+
+And your proposed next step is exactly right. Run the variant count before
+building the fallback - it decides whether the fallback resolves all 1,032 or
+only some.
+
+RUN THE VARIANT COUNT - read-only
+
+For each of the 1,032 unmatched colourless DB rows, count how many distinct
+colour variants the current July sheet holds for that (invoice_no, code, qty)
+tuple:
+
+  BUCKET 1 - exactly one colour variant in the sheet. Safe: the fallback
+             assigns that colour unambiguously.
+  BUCKET 2 - two or more colour variants. Collision: cannot be resolved by
+             (invoice, code, qty) alone. Must stay NULL.
+  BUCKET 3 - zero matches even on (invoice, code, qty). Would mean the line
+             genuinely is not in the sheet under any key - I expect none, since
+             all 1,032 invoices are present, but report it if any appear.
+
+Report the count and value in each bucket, and for Bucket 2 list the tuples with
+their competing colours so we can see how large the ambiguous population really
+is.
+
+WHAT EACH OUTCOME MEANS
+
+  - If Bucket 1 is ~all 1,032: the fallback resolves everything, single-variant
+    only, and we proceed to the sync tick with full colour coverage.
+  - If Bucket 2 is material: those rows need a better key. Note that DB rows
+    also carry the OLD serial and the sheet rows carry sequence - we may be able
+    to match a renumbered row by its POSITION in the invoice (the Nth line of
+    invoice X, ordered by serial, maps to the Nth line in the sheet). Do not
+    build that yet - just report the Bucket 2 size so we know if it is needed.
+
+THE COLLISION RULE STANDS: for any Bucket 2 tuple, the fallback assigns NO
+colour and the row stays NULL and reported. Never guess a colour - a wrong
+colour does not fix the join and silently corrupts the data. Better a reported
+NULL than a wrong RED.
+
+Read-only count. No colour writes, no fallback yet, no sync tick. Report the
+three buckets and stop.

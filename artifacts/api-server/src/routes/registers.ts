@@ -581,6 +581,182 @@ router.get("/registers/:fy/colour-diagnostic", async (req, res) => {
   }
 });
 
+// ── Colour variant count (fallback pre-flight) ────────────────────────────────
+
+/**
+ * GET /registers/:fy/variant-count?month=Jul-26
+ *
+ * Read-only. For each colourless current DB row that backfillColor could not
+ * match (i.e. colour IS NULL, version_status = current), counts how many
+ * distinct colour variants the live sheet holds for the tuple
+ * (invoice_no, code, qty):
+ *
+ *   Bucket 1 – exactly 1 colour in sheet  → safe for (invoice,code,qty) fallback
+ *   Bucket 2 – 2+ colours in sheet        → collision; fallback must not assign
+ *   Bucket 3 – 0 matches on (inv,code,qty)→ genuine orphan (expected 0 here)
+ *
+ * Reports counts, total amount in each bucket, and for Bucket 2: every
+ * ambiguous tuple with its competing colours.
+ * Never writes anything.
+ */
+router.get("/registers/:fy/variant-count", async (req, res) => {
+  const { fy } = req.params;
+  const month = typeof req.query.month === "string" ? req.query.month : "Jul-26";
+  const spreadsheetId = REGISTER_SHEET_IDS[fy];
+  if (!spreadsheetId) {
+    res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
+    return;
+  }
+
+  try {
+    // 1. Build (invoice|code|qty) → Set<color> map from the full live sheet.
+    // qty is stored as a number; normalise to string for the key.
+    const variantMap = new Map<string, Set<string>>();
+
+    await readRegisterFromSheets(spreadsheetId, fy, (values, columns) => {
+      const inv  = columns.invoiceNo >= 0 ? String(values[columns.invoiceNo] ?? "").trim() : null;
+      const code = columns.code      >= 0 ? String(values[columns.code]      ?? "").trim() : null;
+      const qtyRaw = columns.qty >= 0 ? values[columns.qty] : null;
+      const qty = qtyRaw != null && qtyRaw !== "" ? String(Number(qtyRaw)) : null;
+      const colorRaw = columns.color >= 0 ? values[columns.color] : null;
+      const color = colorRaw != null && String(colorRaw).trim() !== ""
+        ? String(colorRaw).trim().toUpperCase()
+        : "__BLANK__";
+
+      if (!inv || !code || qty == null) return;
+
+      const key = `${inv}|${code}|${qty}`;
+      if (!variantMap.has(key)) variantMap.set(key, new Set());
+      variantMap.get(key)!.add(color);
+    });
+
+    // 2. Query DB: colourless current rows for this month.
+    const dbResult = await pool.query<{
+      line_uid: string;
+      invoice_no: string | null;
+      serial_no: number | null;
+      code: string | null;
+      qty: string | null;
+      amount: string | null;
+    }>(
+      `SELECT line_uid, invoice_no, serial_no, code,
+              qty::text, amount::text
+         FROM sale_line
+        WHERE fy = $1 AND month_label = $2
+          AND version_status = 'current'
+          AND (color IS NULL OR color = '')`,
+      [fy, month],
+    );
+
+    // 3. Classify each DB row into a bucket.
+    type B1Row = { invoiceNo: string; code: string; qty: string; colour: string; amount: number };
+    type B2Row = { invoiceNo: string; code: string; qty: string; colours: string[]; amount: number };
+    type B3Row = { invoiceNo: string | null; code: string | null; qty: string | null; amount: number };
+
+    let b1Count = 0, b1Amount = 0;
+    let b2Count = 0, b2Amount = 0;
+    let b3Count = 0, b3Amount = 0;
+
+    const b1Sample: B1Row[] = [];
+    const b2Rows:   B2Row[] = [];   // ALL bucket-2 tuples (for collision report)
+    const b3Sample: B3Row[] = [];
+
+    for (const row of dbResult.rows) {
+      const inv  = row.invoice_no ? String(row.invoice_no) : null;
+      const code = row.code ?? null;
+      const qtyNum = row.qty != null ? Number(row.qty) : null;
+      const qty = qtyNum != null && !isNaN(qtyNum) ? String(qtyNum) : null;
+      const amt = row.amount != null ? Number(row.amount) : 0;
+
+      if (!inv || !code || qty == null) {
+        b3Count++;
+        b3Amount += amt;
+        b3Sample.push({ invoiceNo: inv, code, qty, amount: amt });
+        continue;
+      }
+
+      const key = `${inv}|${code}|${qty}`;
+      const variants = variantMap.get(key);
+
+      if (!variants || variants.size === 0) {
+        b3Count++;
+        b3Amount += amt;
+        if (b3Sample.length < 10)
+          b3Sample.push({ invoiceNo: inv, code, qty: row.qty ?? qty, amount: amt });
+      } else if (variants.size === 1) {
+        b1Count++;
+        b1Amount += amt;
+        const colour = [...variants][0]!;
+        if (b1Sample.length < 5)
+          b1Sample.push({ invoiceNo: inv, code, qty: row.qty ?? qty, colour, amount: amt });
+      } else {
+        b2Count++;
+        b2Amount += amt;
+        // Deduplicate collision tuples: only record distinct (inv, code, qty) once.
+        const already = b2Rows.find(
+          (r) => r.invoiceNo === inv && r.code === code && r.qty === (row.qty ?? qty),
+        );
+        if (!already) {
+          b2Rows.push({
+            invoiceNo: inv,
+            code,
+            qty: row.qty ?? qty,
+            colours: [...variants],
+            amount: amt,
+          });
+        } else {
+          already.amount += amt; // accumulate amount for the same tuple
+        }
+      }
+    }
+
+    const total = b1Count + b2Count + b3Count;
+
+    // Colour-blind total: how many distinct __BLANK__ entries appear in Bucket 2?
+    const b2WithBlank = b2Rows.filter((r) => r.colours.includes("__BLANK__")).length;
+
+    res.json({
+      fy,
+      month,
+      totalColourlessCurrentRows: total,
+      buckets: {
+        b1Safe: {
+          count: b1Count,
+          totalAmount: b1Amount,
+          pct: total > 0 ? +((b1Count / total) * 100).toFixed(1) : 0,
+          note: "Exactly 1 colour variant in sheet — (invoice,code,qty) fallback safe",
+          sample: b1Sample,
+        },
+        b2Collision: {
+          count: b2Count,
+          totalAmount: b2Amount,
+          pct: total > 0 ? +((b2Count / total) * 100).toFixed(1) : 0,
+          note: "2+ colour variants — fallback cannot resolve; rows stay NULL",
+          b2WithBlankColour: b2WithBlank,
+          allTuples: b2Rows, // full list for the report
+        },
+        b3NoMatch: {
+          count: b3Count,
+          totalAmount: b3Amount,
+          pct: total > 0 ? +((b3Count / total) * 100).toFixed(1) : 0,
+          note: "Zero matches on (invoice,code,qty) — genuine orphan",
+          sample: b3Sample,
+        },
+      },
+      interpretation:
+        b2Count === 0 && b3Count === 0
+          ? "ALL rows are Bucket 1 — fallback resolves all 1,032 safely."
+          : b2Count > 0 && b3Count === 0
+            ? `${b1Count} safe, ${b2Count} collision (stay NULL), 0 orphans.`
+            : `${b1Count} safe, ${b2Count} collision, ${b3Count} orphan.`,
+      checkedAt: new Date().toISOString(),
+    });
+  } catch (err: unknown) {
+    req.log.error({ err, fy, month }, "variant-count failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 // ── Invoice serial cross-check ────────────────────────────────────────────────
 
 /**
