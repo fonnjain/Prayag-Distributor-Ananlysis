@@ -7,7 +7,6 @@ import {
   useSaveTargets,
   type TargetsMember,
 } from "@workspace/api-client-react";
-import DataHealth from "./DataHealth";
 import PrimaryStateTargetsEditor from "./PrimaryStateTargetsEditor";
 
 const FYS = ["2026-27", "2025-26", "2024-25"];
@@ -331,8 +330,6 @@ export default function DataSources() {
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-4xl mx-auto">
-      <DataHealth />
-
       {/* State Head monthly targets — single editable source for primary targets */}
       <PrimaryStateTargetsEditor />
 
