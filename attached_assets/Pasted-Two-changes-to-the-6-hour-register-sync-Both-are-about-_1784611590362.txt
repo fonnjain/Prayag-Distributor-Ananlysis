@@ -1,0 +1,107 @@
+Two changes to the 6-hour register sync. Both are about making it behave: stop
+it touching frozen years, and give it the integrity check it currently lacks.
+Read both before starting - they touch the same function.
+
+CONTEXT you already established this session:
+  - The scheduled path startScheduledRegisterSync() calls doSync for every FY
+    with NO isFyOpen guard. The startup path ensureRegisterSynced() has the
+    guard; the scheduled one does not. So closed years get re-read every 6h.
+  - The live sync (doSync / versionedSyncLines) runs NO integrity gate. The
+    four assertions run only in the xlsx backfill CLI and partly in /verify.
+    The path that actually runs in production has nothing checking it.
+
+CHANGE 1 - ENFORCE THE FREEZE ON THE SCHEDULED PATH
+
+Add the isFyOpen guard the scheduled loop is missing:
+
+    for (const [fy, spreadsheetId] of Object.entries(REGISTER_SHEET_IDS)) {
+      if (!isFyOpen(fy)) continue;        // <- add this
+      if (s.inFlight) continue;
+      s.inFlight = doSync(fy, spreadsheetId).catch(...)
+    }
+
+Effect: only the open FY (2026-27 today) is read on the 6-hour cycle. Closed
+years are served from Postgres and never re-read, which is what "frozen" was
+always supposed to mean.
+
+WHY THIS MATTERS - not quota. If a frozen sheet is edited, versionedSyncLines
+currently fires against it: supersedes old rows, inserts edited ones, tombstones
+the rest. A closed year rewrites itself silently from an editable sheet every
+6 hours. FY2024-25's files were edited mid-project, so this is real, not
+hypothetical. The guard makes closed-year drift impossible.
+
+Report after the change:
+  - which FYs the scheduled sync now reads (should be only open ones)
+  - confirm the startup path still behaves (already a no-op for closed years
+    with rows)
+  - a log line proving a closed FY is skipped on the next scheduled cycle
+
+DO NOT delete the frozen sheet IDs from config. They stay for provenance and for
+the rare deliberate re-load. The guard, not removal, is what stops the reads.
+
+CHANGE 2 - GIVE THE LIVE SYNC A REAL GATE
+
+The existing four assertions are a CROSS-FOOT gate - they check the data against
+itself. That class of check passed earlier in this project while 81% of a year
+was missing, and it would MISS the two failures that actually happened on the
+sync path: duplicate accumulation (inflates both sides of a cross-foot equally)
+and name collisions (total unchanged). Do not just wire the old gate in. Add the
+check that catches absence and accumulation: an EXTERNAL anchor against the
+sheet just read.
+
+After versionedSyncLines completes for the open FY, before considering the cycle
+done, compare the DB to the sheet that was just read, per month in that FY:
+
+    current_row_count  vs  sheet_row_count
+    current_total      vs  sheet_total
+
+PASS: they match within a tiny tolerance (rounding only).
+FAIL: they diverge.
+
+This is the check that would have caught July on the first cycle - 4,243 current
+vs 3,129 sheet - instead of a month later.
+
+On FAIL:
+  - do NOT roll back and do NOT delete anything - the sync already ran and
+    superseded nothing improperly; the divergence is information, not corruption
+  - write a health record: fy, month, db count, sheet count, db total, sheet
+    total, delta, timestamp
+  - surface it on Data Health as a live alert, not just a log line
+  - if the divergence exceeds 10% of the month, this likely means a bad or
+    partial read - flag it as suspected-read-failure specifically, because a
+    zero-or-partial read is the one thing that must never be trusted
+
+CRITICAL INTERACTION WITH THE TOMBSTONE GUARD:
+The anchor check runs AFTER the tombstone pass. But the tombstone pass must not
+have run at all if the read was bad. Confirm the ordering:
+  1. read sheet
+  2. abort everything if read returned 0 rows or failed - no upsert, no
+     tombstone, raise error
+  3. versionedSyncLines (upsert + supersede)
+  4. tombstone pass (with its 10% blast-radius guard)
+  5. anchor check against the sheet
+If step 2's zero-row abort is not already in place, add it - it is the single
+most important guard, because a silent zero-row read followed by a tombstone
+would supersede an entire month.
+
+Report after the change:
+  - the anchor check result for FY2026-27, per month, current vs sheet
+  - July specifically must now show current = sheet = 3,129 rows / Rs.6.28 Cr
+    (this also confirms the tombstone cleanup held)
+  - confirm the zero-row abort exists and fires - simulate a 0-row read and show
+    the sync aborts before any upsert or tombstone
+  - confirm the anchor check does NOT run against frozen years (they are no
+    longer synced, so there is nothing to check - but confirm it does not error)
+
+SCOPE AND CONSTRAINTS
+  - Change only the scheduled register sync path and add the anchor check.
+    Do not alter the xlsx backfill gate, /verify, or the frozen data.
+  - Nothing deleted anywhere - superseded only.
+  - Drive read-only.
+  - Secondary registers and dashboards untouched - the freeze guard protects
+    them, it does not modify them.
+  - Dry run / report before committing any structural change to the sync.
+
+ORDER: Change 1 first - it is one line and it immediately stops closed-year
+drift. Then the zero-row abort (step 2 of the ordering above), then the anchor
+check. Report Change 1's skip-log before moving on.

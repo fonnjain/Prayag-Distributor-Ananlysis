@@ -2,11 +2,25 @@
 // Calls GET /api/audit?fy=<fy> (which wraps runFullVerify + extra groups) and renders
 // all check groups with pass / warn / fail / pending / skip status chips.
 import { useState, useEffect, useCallback, useRef } from "react";
-import { RefreshCw, CheckCircle, AlertTriangle, XCircle, Clock, Minus, Download } from "lucide-react";
+import { RefreshCw, CheckCircle, AlertTriangle, XCircle, Clock, Minus, Download, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDashboard } from "@/data/dashboard-context";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+
+type AnchorCheckResult = {
+  fy: string;
+  month: string;
+  dbCurrentRows: number;
+  sheetRows: number;
+  dbCurrentTotal: number;
+  sheetTotal: number;
+  rowDelta: number;
+  totalDelta: number;
+  divergencePct: number;
+  status: "ok" | "diverged" | "suspected-read-failure";
+  checkedAt: string;
+};
 
 type CheckStatus = "pass" | "warn" | "fail" | "skip" | "pending";
 
@@ -234,6 +248,8 @@ export default function DataHealth() {
     reconciled: boolean;
   };
   const [versionStats, setVersionStats] = useState<VersionStats | null>(null);
+  const [anchorHealth, setAnchorHealth] = useState<AnchorCheckResult[]>([]);
+  const [syncingTick, setSyncingTick] = useState(false);
 
   const { syncedAt } = useDashboard();
 
@@ -270,6 +286,30 @@ export default function DataHealth() {
       .then((d) => d && setVersionStats(d))
       .catch(() => {});
   }, [fy]);
+
+  // Fetch anchor health (DB vs sheet per-month comparison). Always the open FY
+  // regardless of the audit FY selector — anchor data only exists for synced FYs.
+  const fetchAnchorHealth = useCallback(() => {
+    fetch("/api/registers/anchor-health")
+      .then((r) => r.ok ? r.json() as Promise<AnchorCheckResult[]> : [])
+      .then((d) => Array.isArray(d) && setAnchorHealth(d))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => { fetchAnchorHealth(); }, [fetchAnchorHealth]);
+
+  const triggerSyncTick = useCallback(() => {
+    setSyncingTick(true);
+    fetch("/api/registers/run-sync-tick", { method: "POST" })
+      .then(() => {
+        // Poll anchor-health after a short delay to pick up the result.
+        setTimeout(fetchAnchorHealth, 5000);
+        setTimeout(fetchAnchorHealth, 20000);
+        setTimeout(fetchAnchorHealth, 60000);
+      })
+      .catch(() => {})
+      .finally(() => setTimeout(() => setSyncingTick(false), 3000));
+  }, [fetchAnchorHealth]);
 
   const downloadAudit = useCallback(() => {
     setDownloading(true);
@@ -404,6 +444,127 @@ export default function DataHealth() {
           ))}
         </div>
       )}
+
+      {/* Live sync anchor health — DB current vs sheet, per month */}
+      {anchorHealth.length > 0 && (() => {
+        const alerts = anchorHealth.filter((r) => r.status !== "ok");
+        const isFail = alerts.some((r) => r.status === "suspected-read-failure");
+        const isWarn = !isFail && alerts.length > 0;
+        const allOk = alerts.length === 0;
+        return (
+          <div className="border border-border/60 rounded-lg overflow-hidden">
+            <div className={cn(
+              "flex items-center justify-between px-4 py-3 gap-3",
+              isFail ? "bg-red-50 dark:bg-red-950/20 border-b border-red-200 dark:border-red-900/40"
+                : isWarn ? "bg-amber-50 dark:bg-amber-950/20 border-b border-amber-200 dark:border-amber-900/40"
+                : "bg-emerald-50 dark:bg-emerald-950/20 border-b border-emerald-200 dark:border-emerald-900/40"
+            )}>
+              <div className="flex items-center gap-2">
+                <Activity className={cn("w-4 h-4 shrink-0",
+                  isFail ? "text-red-500" : isWarn ? "text-amber-500" : "text-emerald-500"
+                )} />
+                <span className="font-medium text-sm">
+                  Live sync anchor — DB vs sheet ({anchorHealth[0]?.fy})
+                </span>
+                {isFail && (
+                  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                    Suspected read failure
+                  </span>
+                )}
+                {isWarn && (
+                  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                    {alerts.length} month{alerts.length > 1 ? "s" : ""} diverged
+                  </span>
+                )}
+                {allOk && (
+                  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                    All months match
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={triggerSyncTick}
+                disabled={syncingTick}
+                title="Run a sync tick now (open FY only) and refresh anchor results"
+                className="flex items-center gap-1.5 h-7 px-2.5 rounded border border-border/60 text-xs font-medium hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw className={cn("w-3 h-3", syncingTick && "animate-spin")} />
+                {syncingTick ? "Syncing" : "Sync now"}
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-sm">
+                <thead>
+                  <tr className="border-b border-border/40 bg-muted/20">
+                    <th className="py-2 pl-4 pr-2 text-left text-xs text-muted-foreground font-medium w-20">Status</th>
+                    <th className="py-2 px-2 text-left text-xs text-muted-foreground font-medium">Month</th>
+                    <th className="py-2 px-2 text-right text-xs text-muted-foreground font-medium">DB rows</th>
+                    <th className="py-2 px-2 text-right text-xs text-muted-foreground font-medium">Sheet rows</th>
+                    <th className="py-2 px-2 text-right text-xs text-muted-foreground font-medium">DB total</th>
+                    <th className="py-2 px-2 text-right text-xs text-muted-foreground font-medium">Sheet total</th>
+                    <th className="py-2 pl-2 pr-4 text-right text-xs text-muted-foreground font-medium">Gap</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {anchorHealth.map((r) => (
+                    <tr key={`${r.fy}|${r.month}`} className={cn(
+                      "border-b border-border/30 last:border-0",
+                      r.status === "suspected-read-failure" && "bg-red-50/60 dark:bg-red-950/20",
+                      r.status === "diverged" && "bg-amber-50/60 dark:bg-amber-950/20",
+                    )}>
+                      <td className="py-2 pl-4 pr-2 align-middle">
+                        {r.status === "ok" ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                            <CheckCircle className="w-3 h-3" /> OK
+                          </span>
+                        ) : r.status === "suspected-read-failure" ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 whitespace-nowrap">
+                            <XCircle className="w-3 h-3" /> Read fail?
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                            <AlertTriangle className="w-3 h-3" /> Diverged
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2 px-2 font-medium align-middle">{r.month}</td>
+                      <td className="py-2 px-2 text-right tabular-nums align-middle">{r.dbCurrentRows.toLocaleString("en-IN")}</td>
+                      <td className="py-2 px-2 text-right tabular-nums align-middle">{r.sheetRows.toLocaleString("en-IN")}</td>
+                      <td className="py-2 px-2 text-right tabular-nums align-middle whitespace-nowrap">
+                        {"\u20b9"}{(r.dbCurrentTotal / 1e7).toFixed(2)} Cr
+                      </td>
+                      <td className="py-2 px-2 text-right tabular-nums align-middle whitespace-nowrap">
+                        {"\u20b9"}{(r.sheetTotal / 1e7).toFixed(2)} Cr
+                      </td>
+                      <td className={cn(
+                        "py-2 pl-2 pr-4 text-right tabular-nums font-medium align-middle whitespace-nowrap",
+                        r.status === "ok" ? "text-emerald-600 dark:text-emerald-400"
+                          : r.status === "suspected-read-failure" ? "text-red-600 dark:text-red-400"
+                          : "text-amber-600 dark:text-amber-400"
+                      )}>
+                        {r.rowDelta === 0 ? "—" : (r.rowDelta > 0 ? "+" : "") + r.rowDelta.toLocaleString("en-IN") + " rows"}
+                        {r.rowDelta !== 0 && (
+                          <span className="text-xs font-normal ml-1 opacity-70">
+                            ({r.divergencePct.toFixed(1)}%)
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-4 py-2 text-xs text-muted-foreground border-t border-border/30 bg-muted/10">
+              DB current = rows with version_status=&apos;current&apos; in sale_line. Sheet = rows parsed from
+              the last sync read. Gap &gt;10% flagged as suspected read failure (also covers blast-radius-halted
+              months). Last checked:{" "}
+              {anchorHealth[0]?.checkedAt
+                ? new Date(anchorHealth[0].checkedAt).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true })
+                : "—"}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Register deduplication status */}
       {versionStats && versionStats.totalRows > 0 && (

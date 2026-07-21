@@ -12,7 +12,11 @@ import {
   parseRegisterRow,
   toSaleLine,
 } from "../lib/registers/normalize.js";
-import { REGISTER_SHEET_IDS } from "../lib/customers/registerSync.js";
+import {
+  REGISTER_SHEET_IDS,
+  getAnchorHealth,
+  runScheduledTick,
+} from "../lib/customers/registerSync.js";
 
 const router = Router();
 
@@ -201,6 +205,30 @@ router.get("/registers/:fy/version-stats", async (req, res) => {
     req.log.error({ err, fy }, "version-stats failed");
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
+});
+
+/**
+ * GET /registers/anchor-health
+ *
+ * Returns the most recent per-month anchor check results for the open FY
+ * (DB current rows/total vs sheet rows/total). Populated after each scheduled
+ * or manual sync tick; empty before the first sync completes.
+ */
+router.get("/registers/anchor-health", (_req, res) => {
+  res.json(getAnchorHealth());
+});
+
+/**
+ * POST /registers/run-sync-tick
+ *
+ * Manually triggers one scheduled-sync tick (same logic as the 6-hour timer).
+ * Skips closed FYs. Useful for confirming the freeze guard and refreshing
+ * anchor-health results without waiting for the next scheduled cycle.
+ */
+router.post("/registers/run-sync-tick", (req, res) => {
+  runScheduledTick();
+  req.log.info("manual sync tick triggered");
+  res.json({ triggered: true, message: "Sync tick started — check anchor-health in ~60s" });
 });
 
 export default router;
