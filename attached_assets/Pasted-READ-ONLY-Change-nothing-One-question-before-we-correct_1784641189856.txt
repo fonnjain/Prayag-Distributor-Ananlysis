@@ -1,0 +1,40 @@
+READ-ONLY. Change nothing. One question before we correct the manifest, because
+it may be a real bug, not just stale text.
+
+THE ID COLLISION - is it an error or intentional?
+
+register_sheets.json uses these as DISPATCH registers (the goods-shipped source
+that feeds sale_line):
+  2024-25: 1cT6lWRPJ3oSeYhab-cqeVjJidGitFQsr0DOq-vNn6cI
+  2025-26: 1Xzq-gmB6K7iuMcE6gb-O7OpvGgSDU33DzEVyK60LK6E
+
+But the manifest lists those SAME TWO IDs under order_and_support_files as ORDER
+SHEETS (order booking). register_sheets.json's own comment says SALE and ORDER
+BOOKING "must never be confused."
+
+This session's 1,290-row dead end WAS exactly that confusion - reading an order
+booking sheet expecting dispatch data. So confirm which is correct:
+
+  1. Open 1cT6lWRPJ3oSeYhab-cqeVjJidGitFQsr0DOq-vNn6cI. Report its tab names and
+     the header row of its main data tab. Is it structured as an ORDER SHEET
+     (monthly tabs Apr..Mar, order lines) or a DISPATCH REGISTER (the 18-column
+     Serial/Invoice/.../STATE HEAD/MONTH layout)?
+  2. Same for 1Xzq-gmB6K7iuMcE6gb-O7OpvGgSDU33DzEVyK60LK6E.
+
+Then tell me:
+  - If they are ORDER SHEETS: register_sheets.json is pointing the DISPATCH
+    loader at order-booking files for 2024-25 and 2025-26. That would be a real
+    bug - the sale_line data for those years would be order data, not dispatch.
+    But those years are frozen/paused, so check whether the loader ever actually
+    reads them (it may not, given the pause).
+  - If they genuinely carry BOTH order and dispatch data on different tabs: then
+    it is fine, and the manifest just needs clearer labelling.
+  - If register_sheets.json has the WRONG id and the real dispatch register for
+    those years is a different file: that is the bug to surface.
+
+This is the one thing in the manifest gap that could be a data problem rather
+than a documentation problem. Everything else (SAP absent, dispatch register
+absent, stale litre-rule text) is just the manifest being out of date, which we
+fix next.
+
+Report the two files' structure. Change nothing.
