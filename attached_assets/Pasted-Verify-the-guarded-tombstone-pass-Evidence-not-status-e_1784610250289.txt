@@ -1,0 +1,76 @@
+Verify the guarded tombstone pass. Evidence, not status - every check returns
+its number.
+
+1. JULY NOW MATCHES THE SHEET
+
+Report FY2026-27 July: current row count, current total, distinct invoices.
+Against the live sheet: 3,129 rows, Rs.6,28,33,045, 626 invoices.
+PASS is exact on all three. The whole point of the pass was to bring current
+July down from 4,243 to the sheet figure.
+
+Report superseded July rows too. Expect roughly 1,114 newly tombstoned. Confirm
+they are marked superseded, NOT deleted - a query for status='superseded' must
+return them in full.
+
+2. THE GUARDS ACTUALLY EXIST AND FIRE
+
+The pass is only safe if these work. Demonstrate each, do not just assert it:
+
+  a) ZERO-ROW ABORT. Simulate a read that returns 0 rows for a month. Confirm
+     the tombstone pass does NOT run and raises an error instead of superseding
+     everything. This is the one that matters most - a silent zero-row read
+     followed by a tombstone would wipe a month.
+
+  b) BLAST-RADIUS HALT. Simulate a read missing more than 10% of a month's
+     current rows. Confirm it halts and reports rather than proceeding.
+
+  c) SCOPE. Confirm the pass only ever tombstones within the exact fy and month
+     read. Superseding July must not touch April.
+
+  d) DRY RUN. Confirm a dry-run mode reports what would be superseded before
+     anything is marked.
+
+  e) LOG. Confirm every tombstone carries the sync run id that caused it.
+
+For each: state whether it is implemented and show the behaviour.
+
+3. Q1 AND CLOSED MONTHS DID NOT GET TOMBSTONED WRONGLY
+
+Report Apr, May, Jun current totals separately.
+  Apr should be unchanged.
+  Q1 should be Rs.73.04 Cr - the corrected figure, not the old Rs.73.09 Cr.
+If the tombstone pass moved a closed month materially, say by how much and why.
+Colour variants in those months must NOT have been tombstoned as orphans.
+
+4. EMPIRICAL IDEMPOTENCY - still owed from before
+
+Sync twice with no sheet change. Report inserts AND supersessions on the second
+run. Both must be zero. A structural check is not the same as running it - run
+it.
+
+5. THE 2,221 COLOURLESS ROWS
+
+Confirm none were wrongly superseded by the tombstone pass. Two colour variants
+both missing colour share an identity under COALESCE(color,''), so a tombstone
+could mark one as an orphan. Check whether any of those 2,221 share invoice,
+code and qty with each other, and whether any were superseded in this pass.
+
+6. THE STATE HEAD VIEW - nobody has looked
+
+Every check so far is database-level. Load the app and report what a State Head
+SEES, with rendered labels:
+
+  - FY2026-27 July primary. Must show the corrected Rs.6.28 Cr, and be marked
+    provisional if that is still the policy.
+  - FY2026-27 company figures - do the totals on screen match current-row
+    totals in the DB, or is a stale cache showing the old inflated number?
+  - Primary Overview tiles FY2024-25 and FY2025-26 - unchanged.
+
+Report rendered values, not query results.
+
+CONSTRAINTS: nothing deleted - superseded only. Drive read-only. Secondary
+untouched.
+
+Report 1 and 2 first. If any guard in 2 is missing, that is more urgent than
+anything else - an unguarded tombstone is more dangerous than the orphans it
+removes.
