@@ -1,0 +1,75 @@
+HALT on the 562 orphans. Both options you offered begin by removing them - A
+reconciles then needs a raised-limit tombstone for the 562, B tombstones them
+directly with an elevated limit. Both ASSUME they are genuine sheet deletions.
+Look at what they actually are before removing anything.
+
+EVERY ORPHAN IN YOUR SAMPLE IS A WATER TANK
+
+  WCT-3LL-05  qty 500      WCT-3LL-10  qty 1000
+  WCT-3LL-07  qty 750      WT-3LL-10   qty 1000
+
+WCT / WT prefix, quantities in round hundreds. Those are tanks, measured in
+LITRES. Tanks are the ONE product where the DB and the sheet use different
+units - the sheet converts pieces to litres via the WT-LTR lookup, and the
+identity key is (invoice, code, colour, QTY). If a tank line sits in the DB at
+one quantity and in the sheet at another, the identity keys do not match even
+though it is the SAME billed line present in both.
+
+That is a far more likely explanation for a 100%-tank orphan set than 562
+genuine deletions. And tombstoning a unit mismatch erases a real line - the
+overshoot again. The blast-radius guard halted at 14.8% precisely to stop an
+unverified removal. Do not override it until these are proven to be real
+deletions.
+
+THE CHECK - READ-ONLY, PER ORPHAN
+
+For each of the 562 orphan rows, look in the current July sheet for the same
+(invoice_no, code, colour) IGNORING qty. Bucket them:
+
+  B1 - same invoice+code+colour EXISTS in sheet at a DIFFERENT qty.
+       UNIT MISMATCH, not an orphan. The line is present. Report the DB qty and
+       the sheet qty side by side - I expect DB in litres, sheet in pieces or a
+       different litre figure. These must NOT be tombstoned; they must be
+       re-matched.
+  B2 - same invoice+code+colour EXISTS in sheet at the SAME qty.
+       Then it is not an orphan at all and something else is wrong with the
+       identity match - report it.
+  B3 - invoice+code+colour genuinely NOT in the sheet under any qty.
+       Only THESE are candidate real deletions.
+
+Report the count and value in each bucket, and for B1 show ten examples with
+both quantities.
+
+WHAT EACH OUTCOME MEANS
+
+  - If B1 is most of the 562: the orphans are a units bug, not deletions. The
+    fix is to normalise tank quantity to one unit on BOTH sides of the identity
+    key - almost certainly convert the sheet's value the same way the DB does,
+    or store both. No tombstone at all. This also explains why it is exactly the
+    tank rows and nothing else.
+  - If B3 is most of them: they may be genuine deletions - but then confirm
+    against SAP before removing, because SAP is the billing master and will show
+    whether those tank lines were really billed.
+
+THE 317 DUPLICATES - probably also tanks, check the same way
+Before reconcileVersions runs, confirm the 317 duplicate-identity pairs are
+TRUE duplicates - identical identity AND the sheet holds only one such line. If
+any are two tank rows that collapsed because of unit handling, or two colour
+variants, reconcile would delete a real line. Report how many of the 317 are
+tanks.
+
+THE 297 INSERTS - these are safe
+New sheet rows not in the DB, no removal involved. But hold them until the
+orphan question is settled, so we converge in one clean step rather than moving
+the total around mid-diagnosis.
+
+AND - PUT A HOLD ON AUTO-SYNC DURING THIS SURGERY
+The startup sync fired again on restart and superseded 1,362 rows before we
+chose to. No harm this time - colour coverage held and all had replacements -
+but the open year auto-syncing on every restart is uncontrolled change during
+delicate work. Add a temporary switch (env flag or similar) that suppresses the
+automatic Jul-26 sync on startup while we are doing this, so nothing moves
+except when we run it deliberately. Report how you have done it.
+
+Report the three buckets first. Nothing removed, nothing reconciled, no
+tombstone, no inserts, until I see them.

@@ -22,3 +22,8 @@ timeoutMs = 20000
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+REGISTER_SYNC_PAUSE = "2026-27"

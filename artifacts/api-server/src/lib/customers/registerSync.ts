@@ -77,6 +77,23 @@ const OPEN_FY_RESYNC_MS = 6 * 60 * 60 * 1000;
 // finds stale data for the open FY.
 const SCHEDULE_INTERVAL_MS = OPEN_FY_RESYNC_MS;
 
+/**
+ * Returns true when the given FY is listed in the REGISTER_SYNC_PAUSE
+ * environment variable (comma-separated, e.g. "2026-27").
+ *
+ * Set this during manual DB surgery to prevent the startup sync and the
+ * scheduled ticker from touching the FY while it is being repaired.
+ * Clear (or remove) the variable when surgery is complete.
+ */
+function isSyncPaused(fy: string): boolean {
+  const raw = process.env.REGISTER_SYNC_PAUSE ?? "";
+  if (!raw.trim()) return false;
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .includes(fy);
+}
+
 function stateFor(fy: string): FyState {
   let s = byFy.get(fy);
   if (!s) {
@@ -255,6 +272,13 @@ export function ensureRegisterSynced(fy: string): void {
   const spreadsheetId = REGISTER_SHEET_IDS[fy];
   if (!spreadsheetId) return;
 
+  if (isSyncPaused(fy)) {
+    logger.warn({ fy }, "register sync: REGISTER_SYNC_PAUSE set — skipping startup sync for this FY");
+    const s = stateFor(fy);
+    s.phase = "done"; // prevent UI from showing "syncing" indefinitely
+    return;
+  }
+
   const s = stateFor(fy);
   if (s.phase === "syncing" || s.inFlight) return;
 
@@ -301,12 +325,12 @@ let scheduledRegisterSyncTimer: NodeJS.Timeout | null = null;
  */
 export function runScheduledTick(): void {
   for (const [fy, spreadsheetId] of Object.entries(REGISTER_SHEET_IDS)) {
-    // CHANGE 1: closed years are frozen — skip on the scheduled path.
-    // The startup path (ensureRegisterSynced) already has its own isFyOpen
-    // guard; this adds the same protection to the periodic scheduler.
-    // Sheet IDs are kept in config for provenance and rare deliberate re-loads.
     if (!isFyOpen(fy)) {
       logger.info({ fy }, "scheduled register sync: closed FY — skipping");
+      continue;
+    }
+    if (isSyncPaused(fy)) {
+      logger.warn({ fy }, "scheduled register sync: REGISTER_SYNC_PAUSE set — skipping this FY");
       continue;
     }
     const s = stateFor(fy);

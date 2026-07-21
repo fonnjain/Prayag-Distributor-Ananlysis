@@ -1892,6 +1892,251 @@ router.post("/registers/:fy/orphan-audit/apply", async (req, res) => {
   }
 });
 
+// ── Orphan bucket check ───────────────────────────────────────────────────────
+
+/**
+ * GET /registers/:fy/orphan-bucket-check?month=Jul-26
+ *
+ * READ-ONLY diagnostic. Identifies the 562 (or N) current DB rows for the
+ * given (fy, month) whose identityKey is absent from the live sheet, then
+ * classifies each one into three buckets by searching for the same
+ * (invoice_no, code, colour) in the sheet IGNORING qty:
+ *
+ *   B1 — (invoice, code, colour) IS in the sheet at a DIFFERENT qty.
+ *        Almost certainly a unit mismatch (e.g. DB stores litres, sheet stores
+ *        pieces, or vice-versa). The line IS present on both sides. Do NOT
+ *        tombstone — re-match instead.
+ *
+ *   B2 — (invoice, code, colour) IS in the sheet at the SAME qty.
+ *        Something else breaks the identity key (month_label encoding?).
+ *        Needs separate investigation.
+ *
+ *   B3 — (invoice, code, colour) NOT present in the sheet under any qty.
+ *        Candidate genuine deletion. Verify against SAP before removing.
+ *
+ * No rows are written.
+ */
+router.get("/registers/:fy/orphan-bucket-check", async (req, res) => {
+  const { fy } = req.params;
+  const month = typeof req.query.month === "string" ? req.query.month : "Jul-26";
+  const spreadsheetId = REGISTER_SHEET_IDS[fy];
+  if (!spreadsheetId) {
+    res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
+    return;
+  }
+
+  try {
+    // ── 1. Read the live sheet — build identity structures ────────────────────
+    //
+    // seenByFullKey   : Set<identityKey string> — same logic as tombstoneOrphans.
+    //                   A DB row is an orphan iff its key is NOT in this set.
+    //
+    // sheetByInvCodeColor : Map<"inv|code|color"> → Array<{qty, amount}>
+    //                       Used to classify orphans into B1/B2/B3.
+    //
+    // Uses toSaleLine so the qty string format exactly matches tombstoneOrphans.
+    const seenByFullKey = new Set<string>();
+    const sheetByInvCodeColor = new Map<string, Array<{ qty: string; amount: number }>>();
+    let rowsScannedTotal = 0;
+    let rowsInTargetMonth = 0;
+
+    const occurrence = new OccurrenceCounter();
+    const unmapped = emptyUnmapped();
+
+    await readRegisterFromSheets(spreadsheetId, fy, (values, columns) => {
+      const parsed = parseRegisterRow(values, columns, fy);
+      if (parsed.kind !== "row") return;
+      rowsScannedTotal++;
+      const { row } = parsed;
+      if (row.monthLabel !== month) return;
+
+      // Build the InsertSaleLine so qty is stringified exactly as toSaleLine does.
+      const sl = toSaleLine(row, occurrence, unmapped, "sheets");
+      rowsInTargetMonth++;
+
+      // Full identity key — mirrors identityKey() in ingest.ts
+      seenByFullKey.add(
+        identityKey(
+          sl.invoiceNo ?? null,
+          sl.code,
+          sl.color ?? null,
+          sl.qty ?? null,
+          sl.monthLabel ?? null,
+        ),
+      );
+
+      // (invoice, code, color) lookup — for B1/B2/B3 classification
+      if (sl.invoiceNo != null && sl.qty != null) {
+        const icKey = `${sl.invoiceNo}|${sl.code}|${sl.color ?? ""}`;
+        const arr = sheetByInvCodeColor.get(icKey) ?? [];
+        arr.push({ qty: sl.qty, amount: Number(sl.amount) });
+        sheetByInvCodeColor.set(icKey, arr);
+      }
+    });
+
+    // ── 2. Load all current DB rows for (fy, month) ──────────────────────────
+    const dbRows = await db
+      .select({
+        lineUid: saleLines.lineUid,
+        invoiceNo: saleLines.invoiceNo,
+        code: saleLines.code,
+        color: saleLines.color,
+        qty: saleLines.qty,
+        monthLabel: saleLines.monthLabel,
+        amount: saleLines.amount,
+      })
+      .from(saleLines)
+      .where(
+        and(
+          eq(saleLines.fy, fy),
+          eq(saleLines.monthLabel, month),
+          eq(saleLines.versionStatus, "current"),
+        ),
+      );
+
+    // ── 3. Classify: matched vs orphan (B1 / B2 / B3) ───────────────────────
+    type B1Row = {
+      invoiceNo: string | null; code: string; color: string | null;
+      dbQty: string | null; sheetQtys: string[]; dbAmount: number; isTank: boolean;
+    };
+    type B2Row = {
+      invoiceNo: string | null; code: string; color: string | null;
+      qty: string | null; dbAmount: number;
+    };
+    type B3Row = {
+      invoiceNo: string | null; code: string; color: string | null;
+      qty: string | null; amount: number; isTank: boolean;
+    };
+
+    const b1Rows: B1Row[] = [];
+    const b2Rows: B2Row[] = [];
+    const b3Rows: B3Row[] = [];
+    let matchedCount = 0;
+    let matchedAmount = 0;
+
+    const isTankCode = (code: string): boolean =>
+      /^WCT|^WT-\d|^WT\d/.test(code);
+
+    for (const row of dbRows) {
+      const dbKey = identityKey(
+        row.invoiceNo,
+        row.code,
+        row.color,
+        row.qty != null ? String(row.qty) : null,
+        row.monthLabel,
+      );
+
+      if (seenByFullKey.has(dbKey)) {
+        matchedCount++;
+        matchedAmount += Number(row.amount);
+        continue;
+      }
+
+      // This row is an orphan — classify by (invoice, code, color) in sheet
+      const icKey = `${row.invoiceNo ?? ""}|${row.code}|${row.color ?? ""}`;
+      const sheetEntries = sheetByInvCodeColor.get(icKey);
+      const dbQtyNum = row.qty != null ? Number(row.qty) : null;
+
+      if (sheetEntries && sheetEntries.length > 0) {
+        // (invoice, code, colour) found in sheet
+        const sameQtyEntry = sheetEntries.find(
+          (e) => Math.abs(Number(e.qty) - (dbQtyNum ?? -1e9)) < 0.01,
+        );
+        if (sameQtyEntry) {
+          // B2: same (inv, code, colour, qty) but different identity key — investigate
+          b2Rows.push({
+            invoiceNo: row.invoiceNo,
+            code: row.code,
+            color: row.color,
+            qty: row.qty != null ? String(row.qty) : null,
+            dbAmount: Number(row.amount),
+          });
+        } else {
+          // B1: same (inv, code, colour) but different qty — unit mismatch
+          b1Rows.push({
+            invoiceNo: row.invoiceNo,
+            code: row.code,
+            color: row.color,
+            dbQty: row.qty != null ? String(row.qty) : null,
+            sheetQtys: sheetEntries.map((e) => e.qty),
+            dbAmount: Number(row.amount),
+            isTank: isTankCode(row.code),
+          });
+        }
+      } else {
+        // B3: not in sheet under any qty
+        b3Rows.push({
+          invoiceNo: row.invoiceNo,
+          code: row.code,
+          color: row.color,
+          qty: row.qty != null ? String(row.qty) : null,
+          amount: Number(row.amount),
+          isTank: isTankCode(row.code),
+        });
+      }
+    }
+
+    // ── 4. Summaries ─────────────────────────────────────────────────────────
+    const b1Amount = b1Rows.reduce((s, r) => s + r.dbAmount, 0);
+    const b2Amount = b2Rows.reduce((s, r) => s + r.dbAmount, 0);
+    const b3Amount = b3Rows.reduce((s, r) => s + r.amount, 0);
+    const b1TankCount = b1Rows.filter((r) => r.isTank).length;
+    const b3TankCount = b3Rows.filter((r) => r.isTank).length;
+
+    res.json({
+      fy,
+      month,
+      rowsScannedTotal,
+      rowsInTargetMonth,
+      dbCurrentRows: dbRows.length,
+      matchedRows: matchedCount,
+      orphanRows: b1Rows.length + b2Rows.length + b3Rows.length,
+      buckets: {
+        B1: {
+          label: "Same (invoice, code, colour) in sheet at DIFFERENT qty — unit mismatch",
+          count: b1Rows.length,
+          amount: Math.round(b1Amount),
+          tankCount: b1TankCount,
+          nonTankCount: b1Rows.length - b1TankCount,
+          sample10: b1Rows.slice(0, 10).map((r) => ({
+            invoiceNo: r.invoiceNo,
+            code: r.code,
+            color: r.color,
+            dbQty: r.dbQty,
+            sheetQtys: r.sheetQtys,
+            dbAmount: Math.round(r.dbAmount),
+            isTank: r.isTank,
+          })),
+        },
+        B2: {
+          label: "Same (invoice, code, colour, qty) in sheet — identity key mismatch bug",
+          count: b2Rows.length,
+          amount: Math.round(b2Amount),
+          sample10: b2Rows.slice(0, 10),
+        },
+        B3: {
+          label: "NOT in sheet under any qty — candidate genuine deletion",
+          count: b3Rows.length,
+          amount: Math.round(b3Amount),
+          tankCount: b3TankCount,
+          nonTankCount: b3Rows.length - b3TankCount,
+          sample10: b3Rows.slice(0, 10).map((r) => ({
+            invoiceNo: r.invoiceNo,
+            code: r.code,
+            color: r.color,
+            qty: r.qty,
+            amount: Math.round(r.amount),
+            isTank: r.isTank,
+          })),
+        },
+      },
+    });
+  } catch (err: unknown) {
+    req.log.error({ err, fy, month }, "orphan-bucket-check failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 // ── Sync dry-run ──────────────────────────────────────────────────────────────
 
 /**
