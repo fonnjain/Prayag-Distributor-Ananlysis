@@ -1,0 +1,54 @@
+Change 1 clean, zero-row abort proven, anchor check live and correctly flagging
+July. The safety infrastructure is sound. One correction on the plan.
+
+WAITING FOR AUGUST 1 DOES NOT HELP - HERE IS WHY
+
+The 48.6% blast-radius halt is correct behaviour, but the conclusion drawn from
+it - "apply the tombstone after July closes" - does not follow.
+
+Those 2,485 orphan candidates are the rate-edit duplicates we already
+diagnosed: old-rate versions of rows that still exist in the sheet under
+corrected rates. They are superseded in fact, not superseded in the database
+yet. July closing on August 1 does nothing to them - they are not live editing
+churn, they are stale versions that will sit there indefinitely until something
+prunes them.
+
+The August-1 rule exists to avoid tombstoning rows that are temporarily absent
+mid-edit. That is not what these are. So the wait buys nothing.
+
+RUN THE JULY CLEANUP NOW, AS A SUPERVISED ONE-OFF - not through the standing
+sync guard (which correctly refuses at 48.6%), but as a reviewed operation.
+
+STEP 1 - DRY RUN. Report before changing anything:
+  a) The 2,485 tombstone candidates: for each, invoice, code, colour, qty, the
+     DB amount, and whether an identity-match row EXISTS in the current sheet
+     with a DIFFERENT amount.
+  b) Split the 2,485 into two groups:
+       GROUP A - identity exists in sheet with a different (corrected) amount.
+                 These are confirmed rate-edit orphans. Safe to supersede.
+       GROUP B - identity does NOT exist in the sheet at all.
+                 These are genuinely gone - either real deletions or something
+                 else. Do NOT auto-supersede these. List them separately.
+  c) Report the count and value of each group. I expect Group A to be the large
+     majority. If Group B is more than a few hundred rows, stop and show me
+     what they are before proceeding.
+
+STEP 2 - APPLY TO GROUP A ONLY. Supersede the confirmed rate-edit orphans -
+those whose identity still exists in the sheet under a corrected value. Mark
+superseded, do not delete. Log each with the sync run id.
+
+STEP 3 - RE-CHECK. After Group A is superseded:
+  - July current row count and total vs the sheet (3,175 rows / Rs.6,41,24,388
+    as of the last read, but re-read fresh - the sheet is still being edited).
+  - They should now match within rounding.
+  - Report Group B separately as remaining-to-investigate, with the running
+    anchor delta it accounts for.
+
+WHY GROUP B MATTERS: the whole reason we are here is that a blanket "supersede
+everything not in the sheet" is dangerous. Group A is provably safe because the
+row still exists, just re-rated. Group B is the population where a bad read or a
+real deletion hides. Separating them is the difference between a clean fix and
+the fourth data-loss incident of this project.
+
+Constraints: supersede only, never delete. Drive read-only. Secondary
+untouched. Dry run and report Step 1 before applying anything.
