@@ -4078,7 +4078,8 @@ router.get("/registers/:fy/tank-sync-dryrun", async (req, res) => {
       flag: string;
       perTankLitres: number | null;
       sheetQty: number | null;
-      sapQty: number | null;
+      sapQty: number | null;    // actual SAP QUANTITY column value (integer from SAP sheet); null for Route 2
+      sapAmt: number | null;    // actual SAP TAXABLEAMOUNT column value for the matched SAP row; proves match identity
     };
 
     const tankRows: DryRunRow[] = [];
@@ -4116,6 +4117,7 @@ router.get("/registers/:fy/tank-sync-dryrun", async (req, res) => {
         perTankLitres: resolved.perTankLitres,
         sheetQty: resolved.sheetQty,
         sapQty: resolved.sapQty,
+        sapAmt: resolved.sapAmt,
       });
     });
 
@@ -4188,13 +4190,49 @@ router.get("/registers/:fy/tank-sync-dryrun", async (req, res) => {
     const allMatch = qtyMismatches === 0 && qtyLtrMismatches === 0;
 
     // ── 5. Build report ───────────────────────────────────────────────────────
+    const full = req.query["full"] === "true";
+
     const route1Sample  = annotatedAll.filter((r) => r.flag === "route1-sap").slice(0, 10);
     const route2Sample  = annotatedAll.filter((r) => r.flag === "route2-division").slice(0, 5);
     const flaggedRows   = annotatedAll.filter(
       (r) => r.flag === "sap-ghost" || r.flag === "non-clean-division",
     );
     const unmappedRows  = annotatedAll.filter((r) => r.flag === "unmapped-suffix").slice(0, 5);
-    const qtyMismatchRows = inDb.filter((r) => !r.qtyMatch || !r.qtyLtrMatch).slice(0, 10);
+
+    // Classify each mismatch row into one of three authoritative buckets.
+    // Bucket A: SAP quantity == loader quantity, DB differs  → loader correct, DB was wrong.
+    // Bucket B: SAP quantity == DB quantity, loader differs  → loader has a bug.
+    // Bucket C: SAP quantity matches neither                  → both wrong; stop and investigate.
+    // Only Route-1 rows have a real sapQty. Any mismatch row WITHOUT sapQty (Route-2/ghost) is bucket C.
+    type BucketedRow = AnnotatedRow & {
+      bucket: "A-sap-eq-loader-db-wrong" | "B-sap-eq-db-loader-bug" | "C-sap-eq-neither" | "no-sap-source";
+    };
+    const rawMismatches = inDb.filter((r) => !r.qtyMatch || !r.qtyLtrMatch);
+    const bucketedMismatches: BucketedRow[] = rawMismatches.map((r) => {
+      const loaderPc  = r.computedQty != null ? Number(r.computedQty) : null;
+      const dbPc      = r.dbQty != null       ? Number(r.dbQty)       : null;
+      const sapPc     = r.sapQty;                                                 // real SAP QUANTITY column value
+      if (sapPc == null) {
+        return { ...r, bucket: "no-sap-source" as const };
+      }
+      if (sapPc === loaderPc && sapPc !== dbPc) {
+        return { ...r, bucket: "A-sap-eq-loader-db-wrong" as const };
+      }
+      if (sapPc === dbPc && sapPc !== loaderPc) {
+        return { ...r, bucket: "B-sap-eq-db-loader-bug" as const };
+      }
+      return { ...r, bucket: "C-sap-eq-neither" as const };
+    });
+
+    const bucketCounts = {
+      "A-sap-eq-loader-db-wrong": bucketedMismatches.filter((r) => r.bucket === "A-sap-eq-loader-db-wrong").length,
+      "B-sap-eq-db-loader-bug":   bucketedMismatches.filter((r) => r.bucket === "B-sap-eq-db-loader-bug").length,
+      "C-sap-eq-neither":         bucketedMismatches.filter((r) => r.bucket === "C-sap-eq-neither").length,
+      "no-sap-source":            bucketedMismatches.filter((r) => r.bucket === "no-sap-source").length,
+    };
+
+    // Default: 20-row preview with bucket summary. Add ?full=true to get all rows.
+    const qtyMismatchRows = full ? bucketedMismatches : bucketedMismatches.slice(0, 20);
 
     res.json({
       fy,
@@ -4210,9 +4248,13 @@ router.get("/registers/:fy/tank-sync-dryrun", async (req, res) => {
       dbMatchedRows:   inDb.length,
       qtyMismatches,
       qtyLtrMismatches,
+      bucketCounts,
       verdict:         allMatch
         ? "PASS — loader matches DB for all rows found in DB; safe to lift REGISTER_SYNC_PAUSE"
         : `FAIL — ${qtyMismatches} qty mismatches, ${qtyLtrMismatches} qty_ltr mismatches`,
+      note: full
+        ? "full=true: all mismatch rows returned. Each row: sapQty=actual SAP QUANTITY column; sapAmt=actual SAP TAXABLEAMOUNT; computedQty=loader output; dbQty=current DB."
+        : "Add ?full=true to get all mismatch rows (default shows first 20 with bucket summary).",
       route1Sample,
       route2Sample,
       flaggedRows,

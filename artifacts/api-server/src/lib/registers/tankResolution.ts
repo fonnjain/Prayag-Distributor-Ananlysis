@@ -75,7 +75,8 @@ export type TankResolveResult = {
   flag: TankResolveFlag;
   perTankLitres: number | null;
   sheetQty: number | null;  // raw qty from sheet (litres for tanks, pieces for accessories)
-  sapQty: number | null;    // SAP QUANTITY if Route 1; null otherwise
+  sapQty: number | null;    // SAP QUANTITY column (actual integer from SAP sheet) if Route 1; null otherwise
+  sapAmt: number | null;    // SAP TAXABLEAMOUNT column for the matched entry; proves which SAP row was selected
 };
 
 // ── SAP lookup map ────────────────────────────────────────────────────────────
@@ -115,6 +116,7 @@ export function resolveWaterTankRow(opts: {
       perTankLitres: null,
       sheetQty,
       sapQty: null,
+      sapAmt: null,
     };
   }
 
@@ -130,6 +132,7 @@ export function resolveWaterTankRow(opts: {
       perTankLitres: null,
       sheetQty,
       sapQty: null,
+      sapAmt: null,
     };
   }
 
@@ -159,6 +162,7 @@ export function resolveWaterTankRow(opts: {
           perTankLitres,
           sheetQty,
           sapQty,
+          sapAmt: best.sapAmt,
         };
       }
     }
@@ -188,6 +192,7 @@ function resolveByDivision(
       perTankLitres,
       sheetQty: null,
       sapQty: null,
+      sapAmt: null,
     };
   }
 
@@ -201,6 +206,7 @@ function resolveByDivision(
       perTankLitres,
       sheetQty: sheetLitres,
       sapQty: null,
+      sapAmt: null,
     };
   }
 
@@ -213,6 +219,7 @@ function resolveByDivision(
     perTankLitres,
     sheetQty: sheetLitres,
     sapQty: null,
+    sapAmt: null,
   };
 }
 

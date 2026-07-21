@@ -1,0 +1,74 @@
+Do not lift the pause. The loader is probably right, but the evidence given is
+circular, and if it is wrong the sync silently replaces correct rows with wrong
+ones at scale. Verify against SAP first, on the 110.
+
+WHY THE PROOF IS CIRCULAR
+
+You concluded "loader correct, DB wrong" from:
+  sheetLitres / perTankLitres = computedQty = SAP qty
+
+But sheetLitres / perTankLitres IS the loader's own formula. Showing that the
+loader agrees with itself proves it divides correctly - it does NOT prove its
+qty equals what SAP billed. The two middle terms are the same source.
+
+Meanwhile the SAME 110 rows were part of the Tier A fix, which you verified
+earlier by matching DB qty to SAP qty to the rupee. So:
+  - hand-fix claimed DB qty == SAP qty   (you verified it then)
+  - loader claims DB qty != SAP qty       (now)
+for identical rows. Both cannot be SAP-correct. One of the two SAP comparisons
+is wrong, and I cannot tell which from what has been shown.
+
+THE ONE CHECK THAT SETTLES IT - SHOW THE ACTUAL SAP QUANTITY
+
+For all 110 disputed rows, pull the real SAP QUANTITY column - not
+sheetLitres/perTankLitres, the actual integer in SAP's Quantity field - and put
+three numbers side by side:
+
+  invoice, code, amount
+  SAP Quantity (the billed piece count, read from the SAP sheet)
+  loader qty
+  current DB qty
+
+Then classify:
+  - SAP == loader, DB differs   -> loader right, DB was wrong. Confirmed.
+  - SAP == DB, loader differs    -> loader has a bug. Do NOT enable it.
+  - SAP == neither               -> both wrong, stop and investigate.
+
+Show all 110, or if that is long, show 20 plus the count in each of the three
+buckets. I expect loader-right, but expect is not verified, and this is the
+row-level truth from the billing master.
+
+THE LIKELY MECHANISM - which supports the loader, but confirm it
+
+62600007 WT-4LL-10 at 3,000L: loader says 3 pieces, DB says 6. If the invoice
+has TWO WT-4LL-10 lines - say one of 3,000L and another the fix conflated - the
+old invoice+code match (no amount) could have summed or mispicked them, exactly
+the multi-variant collision that has bitten us repeatedly. The loader's
+invoice+code+amount key would resolve it correctly. That story fits - so the
+amount column in SAP for these rows is the thing to check: does the disputed
+row's amount match ONE SAP line whose qty equals the loader's number?
+
+WHY THIS MATTERS MORE THAN USUAL
+
+Once the pause is off, the sync tombstones the 110 and re-inserts - with no
+dry-run gate, because the gate was the pause. If the loader is right, that is
+the fix completing itself, good. If the loader is wrong, 110 SAP-correct rows
+are silently replaced with wrong ones and every future sync re-asserts the
+error. The downside is asymmetric and the sync is the hard-to-reverse step.
+Ten minutes of SAP verification against a decision that rewrites verified data
+is cheap.
+
+AFTER SAP CONFIRMS - then, and only then
+
+If SAP confirms loader-right on the 110: lift the pause, run one sync, re-run
+the dry-run, confirm qtyMismatches = 0 and a second tick is a no-op. Then
+FY2025-26 - but note it has NO SAP, so its rows go Route 2 (division) with no
+external anchor at all. Before un-pausing 25-26, confirm its division produces
+clean integers on every tank row and flag any that do not - Route 2 has only
+internal consistency to stand on, so the flagged exceptions are where any error
+will hide.
+
+CONSTRAINTS: read-only SAP verification, no writes, pause STAYS ON until the
+110 are confirmed against SAP row by row. Then lift.
+
+Report the 110-row SAP comparison first.
