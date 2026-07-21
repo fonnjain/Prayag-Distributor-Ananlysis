@@ -1,0 +1,40 @@
+Gate passed - Jul-26 current colourless = 0, all 1,032 resolved via the guarded
+fallback, guard fired zero false collisions. The population that caused the
+overshoot is gone. The sync tick is safe. Proceed - but DRY RUN first, and stop
+before applying.
+
+STEP 3 - SYNC TICK, DRY RUN. Run versionedSyncLines for FY2026-27 in dry-run
+mode and report what it WOULD do before it does anything:
+
+  a) TOMBSTONE: how many rows would be superseded, and their total value. Every
+     one must be a genuine old-rate duplicate - a row whose identity now matches
+     a current-rate sheet row that supersedes it. Confirm NONE are colourless
+     leftovers (there are none) and NONE are lines simply absent from the sheet.
+  b) INSERTS: how many new current-rate rows would be inserted.
+  c) NET: projected Jul-26 current row count and total after the tick.
+  d) The projected total must move TOWARD the sheet, not past it. State the
+     sheet total from a fresh read and the projected DB total side by side.
+
+WHAT I AM CHECKING FOR
+
+The overshoot happened because rows were superseded without a replacement. Now
+that colour coverage is complete, every genuine duplicate has a current-rate
+sheet equivalent to supersede it, and every real line has a matching identity.
+So the dry run should show: supersede the old-rate versions, insert or confirm
+the current-rate versions, and converge to the sheet.
+
+If the dry run shows it would supersede MORE than the residual rate-edit
+duplicates - if it would again take July below the sheet - HALT and report. We
+do not apply a second operation that overshoots.
+
+If the dry run converges cleanly to the sheet total, apply it, then re-run the
+full invoice reconciliation and report:
+  - matched invoice count, target 640 of 640
+  - Jul-26 DB current vs fresh sheet read, within rounding
+  - the 17 previously-cannot-converge invoices: how many now resolve, and list
+    any that remain with their value
+
+Report the dry run first. Do not apply until I see a, b, c, d.
+
+Constraints: dry run before apply, supersede only, no deletion, Drive
+read-only, secondary untouched.

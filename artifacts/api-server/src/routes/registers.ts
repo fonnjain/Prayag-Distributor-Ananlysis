@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { pool } from "@workspace/db";
+import { and, eq } from "drizzle-orm";
+import { pool, db, saleLines, type InsertSaleLine } from "@workspace/db";
 import {
   backfillColor,
   reconcileVersions,
@@ -1887,6 +1888,322 @@ router.post("/registers/:fy/orphan-audit/apply", async (req, res) => {
     });
   } catch (err: unknown) {
     req.log.error({ err, fy, month }, "orphan-audit/apply failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ── Sync dry-run ──────────────────────────────────────────────────────────────
+
+/**
+ * GET /registers/:fy/sync-dry-run
+ *
+ * Mirrors the full doSync → versionedSyncLines → tombstoneOrphans pipeline for
+ * the given FY WITHOUT writing anything to the database.
+ *
+ * Reports per month:
+ *   wouldSupersede  — DB rows whose identity is in the sheet but with changed
+ *                     amount/rate/serial (rate-edit replacements). Each one
+ *                     has a paired new-rate insert queued alongside it.
+ *   wouldInsert     — rows queued for insert (new rows + replacement rows).
+ *   tombstoneCandidates — DB current rows whose identity is NOT in the sheet
+ *                         at all (orphans). Reported via tombstoneOrphans
+ *                         dryRun=true; blast-radius guard is enforced.
+ *   projected       — estimated current row count + amount after the tick.
+ *
+ * Health checks reported at the top level:
+ *   supersedeHealthChecks.colourlessCount — must be 0 before applying.
+ *   supersedeHealthChecks.noneAbsentFromSheet — must be true (by construction
+ *     a supersede always has a paired sheet row; tombstones handle the absent case).
+ */
+router.get("/registers/:fy/sync-dry-run", async (req, res) => {
+  const { fy } = req.params;
+  const spreadsheetId = REGISTER_SHEET_IDS[fy];
+  if (!spreadsheetId) {
+    res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
+    return;
+  }
+
+  try {
+    // ── 1. Read sheet (identical to doSync) ─────────────────────────────────
+    const occurrence = new OccurrenceCounter();
+    const unmapped = emptyUnmapped();
+    const lines: InsertSaleLine[] = [];
+
+    const { rowsScanned, tabsRead } = await readRegisterFromSheets(
+      spreadsheetId,
+      fy,
+      (values, columns) => {
+        const result = parseRegisterRow(values, columns, fy);
+        if (result.kind !== "row") return;
+        lines.push(toSaleLine(result.row, occurrence, unmapped, "sheets"));
+      },
+    );
+
+    if (lines.length === 0) {
+      res.status(400).json({ error: "zero rows from sheet — aborting dry-run" });
+      return;
+    }
+
+    // ── 2. Deduplicate by (fy, monthLabel, serialNo) — mirrors dedupeBySerialNo
+    const deduped: InsertSaleLine[] = [];
+    {
+      const seen = new Map<string, true>();
+      for (const line of lines) {
+        if (line.serialNo != null && line.monthLabel != null) {
+          const k = `${line.fy ?? ""}|${line.monthLabel}|${line.serialNo}`;
+          if (!seen.has(k)) { seen.set(k, true); deduped.push(line); }
+        } else {
+          deduped.push(line);
+        }
+      }
+    }
+
+    // ── 3. Load all current DB rows for this FY ──────────────────────────────
+    type DbRow = {
+      lineUid: string;
+      invoiceNo: string | null;
+      code: string;
+      color: string | null;
+      qty: string | null;
+      monthLabel: string | null;
+      amount: string;
+      saleRate: string | null;
+      serialNo: number | null;
+    };
+
+    const fys = [...new Set(deduped.map((l) => l.fy).filter((f): f is string => f != null))];
+    const allCurrent: DbRow[] = [];
+    for (const fyItem of fys) {
+      const rows = await db
+        .select({
+          lineUid: saleLines.lineUid,
+          invoiceNo: saleLines.invoiceNo,
+          code: saleLines.code,
+          color: saleLines.color,
+          qty: saleLines.qty,
+          monthLabel: saleLines.monthLabel,
+          amount: saleLines.amount,
+          saleRate: saleLines.saleRate,
+          serialNo: saleLines.serialNo,
+        })
+        .from(saleLines)
+        .where(and(eq(saleLines.fy, fyItem), eq(saleLines.versionStatus, "current")));
+      allCurrent.push(...(rows as DbRow[]));
+    }
+
+    const currentMap = new Map<string, DbRow>();
+    for (const row of allCurrent) {
+      currentMap.set(
+        identityKey(row.invoiceNo, row.code, row.color, row.qty, row.monthLabel),
+        row,
+      );
+    }
+
+    // ── 4. Classify each deduped sheet line ──────────────────────────────────
+    const toTouch: string[] = [];
+    type SupersedeEntry = { dbRow: DbRow; newLineUid: string; newAmount: number };
+    const toSupersede: SupersedeEntry[] = [];
+    const toInsert: InsertSaleLine[] = [];
+
+    for (const line of deduped) {
+      const key = identityKey(
+        line.invoiceNo ?? null,
+        line.code,
+        line.color ?? null,
+        line.qty ?? null,
+        line.monthLabel ?? null,
+      );
+      const existing = currentMap.get(key);
+
+      if (!existing) {
+        toInsert.push(line);
+        continue;
+      }
+
+      const amtMatch  = Math.abs(Number(line.amount) - Number(existing.amount)) < 0.01;
+      const rateMatch =
+        line.saleRate == null && existing.saleRate == null
+          ? true
+          : line.saleRate != null && existing.saleRate != null
+            ? Math.abs(Number(line.saleRate) - Number(existing.saleRate)) < 0.01
+            : false;
+      const serialMatch = (line.serialNo ?? null) === (existing.serialNo ?? null);
+
+      if (amtMatch && rateMatch && serialMatch) {
+        toTouch.push(existing.lineUid);
+      } else {
+        toSupersede.push({
+          dbRow: existing,
+          newLineUid: line.lineUid,
+          newAmount: Number(line.amount),
+        });
+        toInsert.push(line);
+      }
+    }
+
+    // ── 5. Tombstone dry-run per month ───────────────────────────────────────
+    const monthsInBatch = [
+      ...new Set(deduped.map((l) => l.monthLabel).filter((m): m is string => m != null)),
+    ];
+    type TombstoneSummary = {
+      candidates: number; amount: number;
+      blastRadiusPct: number; halted: boolean;
+      haltReason?: string;
+      sampleRows: Array<{
+        invoiceNo: string | null; code: string;
+        color: string | null; qty: string | null; amount: string;
+      }>;
+    };
+    const tombstoneByMonth = new Map<string, TombstoneSummary>();
+
+    for (const month of monthsInBatch) {
+      const monthLines = deduped.filter((l) => l.monthLabel === month);
+      const seenForMonth = new Set(
+        monthLines.map((l) =>
+          identityKey(
+            l.invoiceNo ?? null, l.code,
+            l.color ?? null, l.qty ?? null, l.monthLabel ?? null,
+          ),
+        ),
+      );
+      const tr = await tombstoneOrphans({
+        fy: fys[0] ?? fy,
+        month,
+        seenIdentities: seenForMonth,
+        incomingRowCount: monthLines.length,
+        syncRunId: `sync-dry-run|${new Date().toISOString()}`,
+        dryRun: true,
+        blastRadiusLimitPct: 10,
+      });
+      tombstoneByMonth.set(month, {
+        candidates: tr.candidateCount,
+        amount: tr.candidateAmount,
+        blastRadiusPct: tr.blastRadiusPct,
+        halted: tr.halted,
+        haltReason: tr.haltReason,
+        sampleRows: tr.sampleRows.slice(0, 5).map((r) => ({
+          invoiceNo: r.invoiceNo,
+          code: r.code,
+          color: r.color,
+          qty: r.qty,
+          amount: r.amount,
+        })),
+      });
+    }
+
+    // ── 6. Per-month aggregates ──────────────────────────────────────────────
+    // Sheet totals
+    const sheetByMonth = new Map<string, { rows: number; amount: number }>();
+    for (const line of deduped) {
+      const m = line.monthLabel ?? "unknown";
+      const s = sheetByMonth.get(m) ?? { rows: 0, amount: 0 };
+      s.rows++; s.amount += Number(line.amount);
+      sheetByMonth.set(m, s);
+    }
+
+    // DB current totals
+    const dbByMonth = new Map<string, { rows: number; amount: number }>();
+    for (const row of allCurrent) {
+      const m = row.monthLabel ?? "unknown";
+      const s = dbByMonth.get(m) ?? { rows: 0, amount: 0 };
+      s.rows++; s.amount += Number(row.amount);
+      dbByMonth.set(m, s);
+    }
+
+    // Supersede counts per month
+    const supByMonth = new Map<string, { count: number; amount: number; colourlessCount: number }>();
+    for (const { dbRow } of toSupersede) {
+      const m = dbRow.monthLabel ?? "unknown";
+      const s = supByMonth.get(m) ?? { count: 0, amount: 0, colourlessCount: 0 };
+      s.count++; s.amount += Number(dbRow.amount);
+      if (dbRow.color == null) s.colourlessCount++;
+      supByMonth.set(m, s);
+    }
+
+    // Insert counts per month
+    const insByMonth = new Map<string, { count: number; amount: number }>();
+    for (const line of toInsert) {
+      const m = line.monthLabel ?? "unknown";
+      const s = insByMonth.get(m) ?? { count: 0, amount: 0 };
+      s.count++; s.amount += Number(line.amount);
+      insByMonth.set(m, s);
+    }
+
+    // Assemble per-month report
+    const allMonths = [
+      ...new Set([
+        ...Array.from(sheetByMonth.keys()),
+        ...Array.from(dbByMonth.keys()),
+      ]),
+    ].sort();
+
+    const byMonth: Record<string, object> = {};
+    for (const month of allMonths) {
+      const db_   = dbByMonth.get(month)      ?? { rows: 0, amount: 0 };
+      const sup   = supByMonth.get(month)     ?? { count: 0, amount: 0, colourlessCount: 0 };
+      const ins   = insByMonth.get(month)     ?? { count: 0, amount: 0 };
+      const tomb  = tombstoneByMonth.get(month) ?? { candidates: 0, amount: 0, blastRadiusPct: 0, halted: false, sampleRows: [] };
+      const sheet = sheetByMonth.get(month)   ?? { rows: 0, amount: 0 };
+
+      // Supersede+insert pairs are net-zero for row count. Only pure new inserts add rows.
+      const pureNewInserts = ins.count - sup.count;
+      const projRows   = db_.rows + pureNewInserts - tomb.candidates;
+      // Amount: remove superseded old amounts, add all insert amounts, remove tombstoned amounts.
+      const projAmount = db_.amount - sup.amount + ins.amount - tomb.amount;
+
+      byMonth[month] = {
+        dbCurrentRows: db_.rows,
+        dbCurrentAmount: Math.round(db_.amount),
+        sheet: { rows: sheet.rows, amount: Math.round(sheet.amount) },
+        wouldSupersede: { count: sup.count, amount: Math.round(sup.amount), colourlessCount: sup.colourlessCount },
+        wouldInsert:    { count: ins.count, amount: Math.round(ins.amount) },
+        tombstoneCandidates: {
+          count: tomb.candidates, amount: Math.round(tomb.amount),
+          blastRadiusPct: Math.round(tomb.blastRadiusPct * 10) / 10,
+          halted: tomb.halted, haltReason: tomb.haltReason ?? null,
+          sampleRows: tomb.sampleRows,
+        },
+        projected: {
+          rows: projRows,
+          amount: Math.round(projAmount),
+          deltaVsSheet: Math.round(projAmount - sheet.amount),
+        },
+      };
+    }
+
+    // ── 7. Top-level health checks ───────────────────────────────────────────
+    const totalSupColourless = toSupersede.filter(({ dbRow }) => dbRow.color == null).length;
+    const totalTombCandidates = [...tombstoneByMonth.values()].reduce((s, v) => s + v.candidates, 0);
+    const totalTombAmount     = [...tombstoneByMonth.values()].reduce((s, v) => s + v.amount, 0);
+    const anyTombBlastHalted  = [...tombstoneByMonth.values()].some((v) => v.halted);
+
+    res.json({
+      fy,
+      rowsScanned,
+      tabsRead,
+      linesFromSheet: lines.length,
+      deduped: deduped.length,
+      dbCurrentTotal: allCurrent.length,
+      summary: {
+        wouldTouch:    toTouch.length,
+        wouldSupersede: toSupersede.length,
+        wouldInsert:    toInsert.length,
+        tombstoneCandidatesTotal: totalTombCandidates,
+        tombstoneCandidateAmountTotal: Math.round(totalTombAmount),
+        anyTombBlastRadiusHalted: anyTombBlastHalted,
+      },
+      supersedeHealthChecks: {
+        anyColourless: totalSupColourless > 0,
+        colourlessCount: totalSupColourless,
+        // By construction: a supersede in versionedSyncLines means the identity IS in
+        // the sheet (sheet has same invoice/code/colour/qty but different amount/rate/serial).
+        // Rows absent from the sheet are handled by tombstoneOrphans, not here.
+        noneAbsentFromSheet: true,
+      },
+      byMonth,
+    });
+  } catch (err: unknown) {
+    req.log.error({ err, fy }, "sync-dry-run failed");
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
