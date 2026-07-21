@@ -60,22 +60,30 @@ export type BackfillColorResult = {
   fy: string;
   dryRun: boolean;
   rowsScanned: number;
-  rowsMatched: number;        // DB rows that got a color from the sheet
-  rowsUnmatched: number;      // DB rows whose (invoice_no, serial_no) wasn't in sheet
-  rowsAlreadyColored: number; // DB rows that already had a color (skipped)
+  rowsMatched: number;             // matched by (invoice_no, serial_no)
+  rowsMatchedByFallback: number;   // matched by (invoice_no, code, qty) fallback — single variant
+  rowsFallbackCollision: number;   // fallback found 2+ colours — stayed NULL
+  rowsUnmatched: number;           // no match by either method — stayed NULL
+  rowsAlreadyColored: number;      // already had a color (skipped)
   durationMs: number;
 };
 
 // ── Step 1: Backfill colour ───────────────────────────────────────────────────
 
 /**
- * Reads the live SALE SHEET for the given FY, builds a
- * (invoice_no, serial_no) → color map, and batch-updates any DB row for that
- * FY whose color is currently NULL.
+ * Reads the live SALE SHEET for the given FY and batch-updates DB rows whose
+ * color is NULL using a two-pass matching strategy:
  *
- * Matching key: (invoice_no, serial_no) when both are present in the sheet.
- * Rows in the DB that have no serial_no, or whose identity is not in the
- * sheet read, are counted as unmatched and left unchanged.
+ * Primary match  — (invoice_no, serial_no): exact join on the source-sheet
+ *   row number. Works for rows whose serial was not renumbered by editing.
+ *
+ * Fallback match — (invoice_no, code, qty): used when the primary key fails
+ *   (e.g. heavy editing renumbered the serial column).
+ *   GUARD: assigns colour ONLY when the tuple maps to exactly one distinct
+ *   colour variant in the sheet. Two or more variants means the colour is
+ *   ambiguous; those rows are left NULL and logged as collisions.
+ *   This guard must stay in place even when today's data has zero collisions —
+ *   future months and other FYs may have multi-variant tuples.
  *
  * dryRun=true reports counts without writing anything.
  */
@@ -86,8 +94,15 @@ export async function backfillColor(
 ): Promise<BackfillColorResult> {
   const t0 = Date.now();
 
-  // 1. Read the live sheet — build (invoice_no, serial_no) → color map.
-  const colorBySerial = new Map<string, string | null>(); // key: "inv|serial"
+  // 1. One sheet-read pass: build BOTH match maps simultaneously.
+  //
+  //    colorBySerial     : "inv|serial"         → color | null
+  //    colorByInvCodeQty : "inv|code|qty"       → Set<color>
+  //
+  // qty is normalised to a plain number-string so DB and sheet values
+  // compare equal regardless of decimal representation.
+  const colorBySerial     = new Map<string, string | null>();
+  const colorByInvCodeQty = new Map<string, Set<string>>();
   let rowsScanned = 0;
 
   await readRegisterFromSheets(spreadsheetId, fy, (values, columns) => {
@@ -95,60 +110,129 @@ export async function backfillColor(
     if (result.kind !== "row") return;
     const { row } = result;
     rowsScanned++;
+
+    // Primary map: (invoice, serial) → color
     if (row.invoiceNo != null && row.serialNo != null) {
       const key = `${row.invoiceNo}|${row.serialNo}`;
-      // color may be null if the cell is blank — still record the mapping
-      if (!colorBySerial.has(key)) {
-        colorBySerial.set(key, row.color);
-      }
+      if (!colorBySerial.has(key)) colorBySerial.set(key, row.color ?? null);
+    }
+
+    // Fallback map: (invoice, code, qty) → Set<color>
+    // Only build if all three fields are present.
+    if (row.invoiceNo != null && row.code != null && row.qty != null) {
+      const qtyStr = String(row.qty); // already a number from parseRegisterRow
+      const key = `${row.invoiceNo}|${row.code}|${qtyStr}`;
+      const colorToken = row.color != null && row.color !== ""
+        ? row.color       // real colour value ("WHITE", ".", etc.)
+        : "__BLANK__";    // treat blank colour as a distinct sentinel
+      const set = colorByInvCodeQty.get(key) ?? new Set<string>();
+      set.add(colorToken);
+      colorByInvCodeQty.set(key, set);
     }
   });
 
   logger.info(
-    { fy, rowsScanned, mappings: colorBySerial.size, dryRun },
+    {
+      fy,
+      rowsScanned,
+      serialMappings: colorBySerial.size,
+      invCodeQtyMappings: colorByInvCodeQty.size,
+      dryRun,
+    },
     "backfillColor: sheet read complete",
   );
 
-  // 2. Load all DB rows for this FY that still need color.
-  //    Include all version_status values (current and superseded both get color).
+  // 2. Load all DB rows for this FY (current + superseded both get colour).
   const dbRows = await db
     .select({
       lineUid: saleLines.lineUid,
       invoiceNo: saleLines.invoiceNo,
       serialNo: saleLines.serialNo,
+      code: saleLines.code,
+      qty: saleLines.qty,
       color: saleLines.color,
     })
     .from(saleLines)
     .where(eq(saleLines.fy, fy));
 
-  let rowsMatched = 0;
-  let rowsUnmatched = 0;
-  let rowsAlreadyColored = 0;
+  let rowsMatched          = 0;
+  let rowsMatchedByFallback = 0;
+  let rowsFallbackCollision = 0;
+  let rowsUnmatched        = 0;
+  let rowsAlreadyColored   = 0;
 
-  // Partition rows
   type Update = { lineUid: string; color: string | null };
   const updates: Update[] = [];
 
   for (const row of dbRows) {
+    // Already has a colour — skip entirely.
     if (row.color != null) {
       rowsAlreadyColored++;
       continue;
     }
-    if (row.invoiceNo == null || row.serialNo == null) {
-      rowsUnmatched++;
-      continue;
+
+    // ── Primary match: (invoice, serial) ────────────────────────────────────
+    if (row.invoiceNo != null && row.serialNo != null) {
+      const key = `${row.invoiceNo}|${row.serialNo}`;
+      if (colorBySerial.has(key)) {
+        updates.push({ lineUid: row.lineUid, color: colorBySerial.get(key) ?? null });
+        rowsMatched++;
+        continue;
+      }
     }
-    const key = `${row.invoiceNo}|${row.serialNo}`;
-    if (colorBySerial.has(key)) {
-      updates.push({ lineUid: row.lineUid, color: colorBySerial.get(key) ?? null });
-      rowsMatched++;
-    } else {
-      rowsUnmatched++;
+
+    // ── Fallback match: (invoice, code, qty) — single-variant guard ─────────
+    //
+    // Attempt only when primary match fails (no serial, or serial not in map).
+    // qty from Drizzle is a string representation of the numeric column.
+    if (row.invoiceNo != null && row.code != null && row.qty != null) {
+      const qtyStr = String(row.qty);
+      const key = `${row.invoiceNo}|${row.code}|${qtyStr}`;
+      const variants = colorByInvCodeQty.get(key);
+
+      if (variants && variants.size === 1) {
+        // Single variant: unambiguous — assign it.
+        const colorToken = [...variants][0]!;
+        // Convert the __BLANK__ sentinel back to null so we don't persist the
+        // internal sentinel string into the database.
+        const colorToStore = colorToken === "__BLANK__" ? null : colorToken;
+        updates.push({ lineUid: row.lineUid, color: colorToStore });
+        rowsMatchedByFallback++;
+        continue;
+      }
+
+      if (variants && variants.size > 1) {
+        // Multi-variant tuple: COLLISION — cannot determine the correct colour.
+        // Leave NULL and log so the operator can investigate.
+        rowsFallbackCollision++;
+        logger.warn(
+          {
+            fy,
+            invoiceNo: row.invoiceNo,
+            code: row.code,
+            qty: qtyStr,
+            variants: [...variants],
+          },
+          "backfillColor: fallback collision — tuple has multiple colour variants; row left NULL",
+        );
+        continue;
+      }
     }
+
+    // No match by either method.
+    rowsUnmatched++;
   }
 
   logger.info(
-    { fy, rowsMatched, rowsUnmatched, rowsAlreadyColored, dryRun },
+    {
+      fy,
+      rowsMatched,
+      rowsMatchedByFallback,
+      rowsFallbackCollision,
+      rowsUnmatched,
+      rowsAlreadyColored,
+      dryRun,
+    },
     "backfillColor: match summary",
   );
 
@@ -156,8 +240,7 @@ export async function backfillColor(
   if (!dryRun && updates.length > 0) {
     for (let i = 0; i < updates.length; i += BATCH_SIZE) {
       const batch = updates.slice(i, i + BATCH_SIZE);
-      const uids = batch.map((u) => u.lineUid);
-      // Group by color value to minimise round-trips; most cells are the same colour.
+      // Group by color value to minimise round-trips.
       const byColor = new Map<string | null, string[]>();
       for (const u of batch) {
         const arr = byColor.get(u.color) ?? [];
@@ -171,7 +254,10 @@ export async function backfillColor(
           .where(inArray(saleLines.lineUid, lineUids));
       }
     }
-    logger.info({ fy, updated: updates.length }, "backfillColor: DB updated");
+    logger.info(
+      { fy, updated: updates.length, bySerial: rowsMatched, byFallback: rowsMatchedByFallback },
+      "backfillColor: DB updated",
+    );
   }
 
   return {
@@ -179,6 +265,8 @@ export async function backfillColor(
     dryRun,
     rowsScanned,
     rowsMatched,
+    rowsMatchedByFallback,
+    rowsFallbackCollision,
     rowsUnmatched,
     rowsAlreadyColored,
     durationMs: Date.now() - t0,
