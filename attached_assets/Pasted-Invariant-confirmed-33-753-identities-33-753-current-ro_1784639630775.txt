@@ -1,0 +1,46 @@
+Invariant confirmed - 33,753 identities = 33,753 current rows, zero duplicates,
+every month clean. And the 45 the fixed code caught on restart is the good
+sign: the new supersession path found stale versions SQL missed. That suggests
+the fix is live, not just a cleanup. Three checks confirm it holds.
+
+1. PROVE THE FIX IS LIVE - the behavioural test
+
+The count is clean now, but that could be the 389-row cleanup, not the code
+change. Prove the code actually closed the hole:
+
+  Take one tank row, change its rate in the sheet (or simulate it), run the
+  sync. Confirm EXACTLY: 1 superseded (the old rate version) + the identity
+  still has 1 current row (the new rate). Not 2 current. Not 0.
+
+  This is the difference between "we swept the duplicates" and "duplicates can
+  no longer form." Only the behavioural test proves the second. Report the
+  before/after row state for that one identity.
+
+2. IDEMPOTENCY AFTER THE CLEANUP
+
+389 supersessions is a lot of change. Confirm it didn't disturb convergence: run
+the sync again, no sheet change, report inserted and superseded. Both 0. If the
+cleanup left anything mid-state, a re-run reveals it.
+
+3. DID THE MONEY MOVE THE RIGHT AMOUNT - the overshoot check
+
+389 duplicate rows left 'current'. That correctly REDUCES the counted total by
+their value - they were double-counted. But confirm the direction and size, so
+this isn't the July orphan overshoot again:
+
+  FY2026-27 current total: before cleanup vs after, and vs the sheet.
+  - Dropped by roughly the summed duplicate value AND now matches the sheet ->
+    correct.
+  - Dropped by MORE than the duplicate value, or now BELOW the sheet -> a
+    non-duplicate was superseded. That is the overshoot pattern from the July
+    saga - stop and report which rows.
+
+  Also: the 389 were supposedly the OLDER of each duplicate pair. Confirm the
+  KEPT row in each case is the one matching the current sheet value, not an
+  older version that happened to survive.
+
+Report 1 and 3 first - the behavioural test and the money direction. Those
+decide whether the invariant now holds by DESIGN or just by cleanup.
+
+Constraints: the rate-change test writes one row; idempotency re-run writes
+nothing. No deletion. Frozen years untouched.
