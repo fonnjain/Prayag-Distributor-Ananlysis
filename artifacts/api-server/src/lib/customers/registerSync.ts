@@ -22,6 +22,7 @@ import {
   emptyUnmapped,
   parseRegisterRow,
   toSaleLine,
+  computeLineUid,
 } from "../registers/normalize.js";
 import { versionedSyncLines } from "../registers/ingest.js";
 import {
@@ -231,19 +232,42 @@ async function doSync(fy: string, spreadsheetId: string): Promise<void> {
         return line; // fail loudly, never commit bad data silently
       }
 
-      return { ...line, qty: resolved.qty, qtyLtr: resolved.qtyLtr };
+      return {
+        ...line,
+        qty: resolved.qty != null ? String(resolved.qty) : null,
+        qtyLtr: resolved.qtyLtr != null ? String(resolved.qtyLtr) : null,
+      };
     });
 
     if (Object.values(tankFlags).some((v) => v > 0)) {
       logger.info({ fy, ...tankFlags }, "register sync: tank resolution complete");
     }
 
+    // ── Step 2b: recompute lineUid for resolved tank rows ────────────────────
+    // toSaleLine hashed lineUid with the ORIGINAL sheet qty (litres).
+    // After tank resolution qty = pieces, so the hash must be recomputed so
+    // the new lineUid differs from the superseded litres-based row and the
+    // insert does not hit ON CONFLICT DO NOTHING on the old superseded row.
+    const tankUidOcc = new OccurrenceCounter();
+    const linesWithResolvedUids = resolvedLines.map((line) => {
+      if (line.groupCanon !== "WATER TANK") return line;
+      const newKey = [
+        line.fy ?? "",
+        line.code,
+        line.qty ?? "",
+        line.amount,
+        line.monthLabel ?? "",
+        String(line.serialNo ?? ""),
+      ].join("|");
+      return { ...line, lineUid: computeLineUid(newKey, tankUidOcc.next(newKey)) };
+    });
+
     const syncedAt = new Date();
     // ── Step 3 + 4: upsert + tombstone pass (tombstone is inside versionedSyncLines) ──
-    const { touched, superseded, inserted, tombstoned } = await versionedSyncLines(resolvedLines, syncedAt);
+    const { touched, superseded, inserted, tombstoned } = await versionedSyncLines(linesWithResolvedUids, syncedAt);
 
     lastSyncedAtMs.set(fy, Date.now());
-    s.rows = resolvedLines.length;
+    s.rows = linesWithResolvedUids.length;
     s.phase = "done";
     logger.info(
       {
@@ -251,7 +275,7 @@ async function doSync(fy: string, spreadsheetId: string): Promise<void> {
         spreadsheetId,
         tabsRead,
         rowsScanned,
-        linesBuilt: resolvedLines.length,
+        linesBuilt: linesWithResolvedUids.length,
         touched,
         superseded,
         inserted,
@@ -267,7 +291,7 @@ async function doSync(fy: string, spreadsheetId: string): Promise<void> {
     // totalDelta≤1. A halted blast-radius month shows rowDelta>0 with
     // divergencePct>10 and is flagged suspected-read-failure.
     const sheetByMonth = new Map<string, { rows: number; total: number }>();
-    for (const line of resolvedLines) {
+    for (const line of linesWithResolvedUids) {
       const m = line.monthLabel ?? "(unknown)";
       const e = sheetByMonth.get(m) ?? { rows: 0, total: 0 };
       e.rows++;
