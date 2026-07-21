@@ -1,0 +1,73 @@
+Scope confirmed - 13,016 tank rows across four years, one loader bug, and your
+affected-reports list is correct. Revenue safe, quantity wrong, volume views
+affected. Good diagnosis.
+
+But do NOT adopt the sheet qty yet. There is a unit question underneath this,
+and getting it wrong writes a second error onto 13,016 rows across three frozen
+years.
+
+THREE QUANTITIES, NOT TWO
+
+For one tank line there are now three numbers:
+  DB      500     per-tank litres        - the loader bug, wrong
+  Sheet   9,500   total litres           - pieces x 500, COMPUTED in the sheet
+  SAP     19      PIECES                 - the actual billed quantity
+
+The sheet's 9,500 is not a source figure. It is SAP's 19 pieces run through the
+WT-LTR lookup inside the sheet. SAP is the billing master. 19 is what was
+invoiced.
+
+THE QUESTION THAT DECIDES THE FIX
+
+What is sale_line.qty SUPPOSED to hold for a tank - pieces or litres?
+
+Every non-tank row holds PIECES. A tap is qty 1, not "litres of tap". If the
+column is pieces, then the correct tank value is SAP's 19 pieces, and litres is
+a DERIVED view for volume reporting only - adopting the sheet's 9,500 litres
+would make qty mean something different for tanks than for everything else, a
+mixed unit in one column. That mixed unit is exactly what caused the
+litre-vs-piece confusion running through this whole project.
+
+If the column is deliberately litres for tanks, then 9,500 is right and we adopt
+it.
+
+I am not going to guess this. Settle it against SAP before touching a row.
+
+READ-ONLY - RECONCILE A SAMPLE THREE WAYS
+
+Take ~30 tank lines spanning all four FYs and several sizes. For each report,
+side by side:
+  invoice, code, colour
+  DB qty
+  sheet qty
+  SAP quantity (from SALE SHEET SAP 26-27 Combined, and whatever SAP source
+    exists for the closed years - report if none does)
+  the per-tank litres implied by the size code
+  DB amount, sheet amount, SAP amount
+
+Then answer:
+  a) Is SAP qty always pieces, and does sheet qty = SAP pieces x per-tank
+     litres, exactly? If yes, the chain is proven: SAP pieces -> sheet litres,
+     and DB stored per-tank litres by mistake.
+  b) Does DB amount = SAP amount = sheet amount on these lines? If yes, value is
+     confirmed safe from the true source, not just against the sheet.
+  c) Given (a), what SHOULD qty be - SAP pieces or sheet litres? Make the case,
+     do not just pick.
+
+WHY THIS ORDER
+
+Adopting sheet-litres is easy and available today without an SAP read. But if
+qty is meant to be pieces, sheet-litres is wrong too - just wrong in a different
+direction from the loader bug - and we would have written it across three frozen
+years before realising. SAP is the one source that settles which unit is
+correct, because both other numbers derive from it.
+
+A NARROWER SUGGESTION TO CONSIDER
+The cleanest design may be to store BOTH: qty in pieces (SAP truth, consistent
+with every other row) AND a separate litres field for tanks (for volume
+reports). That removes the mixed-unit column entirely and makes the litre-vs-
+piece split explicit instead of inferred. Do not build it - tell me whether the
+schema and the reports could accommodate it, so we scope the real fix once.
+
+Report the three-way sample. Pause stays on. No qty writes, nothing to the
+frozen years, until the unit is settled against SAP.

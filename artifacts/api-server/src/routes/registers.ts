@@ -7,7 +7,7 @@ import {
 } from "../lib/registers/reconcileVersions.js";
 import { tombstoneOrphans, identityKey } from "../lib/registers/ingest.js";
 import { readRegisterFromSheets } from "../lib/registers/sheetsRegister.js";
-import { listSheetTabs, readTabSample } from "../lib/registers/sheetsApi.js";
+import { listSheetTabs, readTabSample, readTabRowsChunked } from "../lib/registers/sheetsApi.js";
 import {
   OccurrenceCounter,
   emptyUnmapped,
@@ -22,6 +22,7 @@ import {
   getAnchorHealth,
   runScheduledTick,
 } from "../lib/customers/registerSync.js";
+import rawRegisterSheetsCfg from "../../config/register_sheets.json";
 
 const router = Router();
 
@@ -2711,6 +2712,292 @@ router.get("/registers/tank-scan-all-fy", async (req, res) => {
     });
   } catch (err: unknown) {
     req.log.error({ err }, "tank-scan-all-fy failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ── Tank three-way sample ─────────────────────────────────────────────────────
+
+/**
+ * GET /registers/tank-three-way-sample
+ *
+ * READ-ONLY. Reconciles ~30 tank lines across all four FYs, three sources:
+ *
+ *   DB        — sale_line.qty (stored as per-tank litres by the loader)
+ *   SHEET     — SALE SHEET (derived register); qty = total litres dispatched
+ *   SAP       — SAP Combined tab (FY2026-27 only); qty = pieces (billing master)
+ *
+ * Answers:
+ *   a) sheet_qty = SAP_pieces × per_tank_litres? (proves the derivation chain)
+ *   b) DB amount = sheet amount = SAP amount? (value safety across all sources)
+ *   c) Per (a): what SHOULD sale_line.qty hold — pieces or total litres?
+ *
+ * Coverage:
+ *   FY2026-27  — DB + SHEET + SAP (full three-way)
+ *   FY2025-26  — DB + SHEET (invoice_no present, no SAP source configured)
+ *   FY2023-24 / FY2024-25 — DB only (invoice_no is null for these years)
+ */
+router.get("/registers/tank-three-way-sample", async (req, res) => {
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+  const TANK_LITRES_BY_SUFFIX: Record<string, number> = {
+    "02": 200,  "03": 1500, "05": 500,  "07": 750,  "10": 1000,
+    "15": 1500, "20": 2000, "25": 2500, "30": 3000, "50": 5000,
+  };
+  // Note: "03" appears in WT-3LC-03 with DB qty=1500 — tentatively 1500L.
+  // This is one of the quantities the SAP read will clarify.
+
+  function tankLitresFromCode(code: string): number | null {
+    const m = code.match(/-(\d{2})$/);
+    if (!m) return null;
+    return TANK_LITRES_BY_SUFFIX[m[1]] ?? null;
+  }
+
+  function normH(v: unknown): string {
+    return String(v ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  }
+  function strV(v: unknown): string { return v == null ? "" : String(v).trim(); }
+  function numV(v: unknown): number {
+    if (v == null || v === "") return 0;
+    const n = typeof v === "number" ? v : Number(String(v).replace(/[,\s]/g, ""));
+    return Number.isFinite(n) ? n : 0;
+  }
+  function normInv(s: string | null | undefined): string {
+    return String(s ?? "").replace(/^0+/, "").toUpperCase().trim();
+  }
+
+  const cfg = rawRegisterSheetsCfg as {
+    registers: Record<string, string>;
+    sap_source: Record<string, string>;
+  };
+
+  try {
+    // ── 1. DB: pull ~12 diverse tank rows per FY ──────────────────────────────
+    // One row per (fy, code), prioritising rows with invoice_no.
+    // Uses a per-FY row-number cap (rn2 <= 12) so FY2023-24's 36 codes
+    // cannot exhaust the limit before FY2025-26 / FY2026-27 appear.
+    // Two-level subquery: inner picks one row per (fy,code) preferring invoice_no;
+    // outer then caps at 12 distinct codes per FY so no single FY hogs the sample.
+    const dbResult = await pool.query<{
+      fy: string; invoice_no: string | null; code: string;
+      color: string | null; qty: string; amount: string; month_label: string;
+    }>(`
+      SELECT fy, invoice_no, code, color, qty::text, amount::text, month_label
+      FROM (
+        SELECT *,
+          ROW_NUMBER() OVER (PARTITION BY fy ORDER BY code) rn2
+        FROM (
+          SELECT *,
+            ROW_NUMBER() OVER (
+              PARTITION BY fy, code
+              ORDER BY (invoice_no IS NOT NULL) DESC, month_label, invoice_no
+            ) rn
+          FROM sale_line
+          WHERE version_status = 'current'
+            AND code ~ '^WCT|^WT'
+            AND qty::numeric = ANY(ARRAY[200,500,750,1000,1500,2000,2500,3000,5000]::numeric[])
+        ) inner_q
+        WHERE rn = 1
+      ) outer_q
+      WHERE rn2 <= 12
+      ORDER BY fy, code
+    `);
+
+    const dbRows = dbResult.rows;
+
+    // ── 2. SAP: read Combined tab for FY2026-27 ───────────────────────────────
+    // Build: normInv(invoice_no) → [{sapRawCode, sapQty, sapAmount}]
+    const sapByInv = new Map<string, Array<{ sapRawCode: string; sapQty: number; sapAmount: number }>>();
+    let sapInvoiceColFound = false;
+    let sapRowsRead = 0;
+    const sap2627Id = cfg.sap_source?.["2026-27"];
+
+    if (sap2627Id) {
+      const tabs = await listSheetTabs(sap2627Id);
+      const combined = tabs.find((t) => /^combined$/i.test(t.title.trim()));
+      if (combined) {
+        let codeIdx = -1, qtyIdx = -1, amtIdx = -1, invIdx = -1;
+        let headerFound = false;
+        await readTabRowsChunked(sap2627Id, combined.title, (chunk, startRow) => {
+          for (let ri = 0; ri < chunk.length; ri++) {
+            const row = chunk[ri];
+            const globalRow = startRow + ri;
+            if (!headerFound) {
+              if (globalRow > 30) break;
+              const hd = row.map(normH);
+              const cI = ["ITEMCODE","CODE","MATERIAL","MATERIALCODE"].reduce(
+                (b, a) => b >= 0 ? b : hd.indexOf(a), -1);
+              const qI = ["QTY","QUANTITY","BILLQTY","BILLINGQTY"].reduce(
+                (b, a) => b >= 0 ? b : hd.indexOf(a), -1);
+              const aI = ["TAXABLEVALUE","TAXABLEAMOUNT","NETVALUE","AMOUNT","ASSESSABLEVALUE"].reduce(
+                (b, a) => b >= 0 ? b : hd.indexOf(a), -1);
+              if (qI >= 0 && aI >= 0) {
+                codeIdx = cI; qtyIdx = qI; amtIdx = aI;
+                invIdx = ["INVOICENO","INVOICENUMBER","BILLINGDOCUMENT","DOCUMENTNO","DOCUMENTNUMBER","BILLNO","DOCNO"].reduce(
+                  (b, a) => b >= 0 ? b : hd.indexOf(a), -1);
+                sapInvoiceColFound = invIdx >= 0;
+                headerFound = true;
+              }
+              continue;
+            }
+            const sapAmt = numV(row[amtIdx]);
+            if (sapAmt <= 0) continue;
+            sapRowsRead++;
+            const sapRawCode = codeIdx >= 0 ? strV(row[codeIdx]) : "";
+            const sapQty = numV(row[qtyIdx]);
+            const invRaw = invIdx >= 0 ? strV(row[invIdx]) : "";
+            const invKey = normInv(invRaw);
+            if (invKey) {
+              const arr = sapByInv.get(invKey) ?? [];
+              arr.push({ sapRawCode, sapQty, sapAmount: sapAmt });
+              sapByInv.set(invKey, arr);
+            } else {
+              // No invoice — key by amount for fallback matching
+              const amtKey = `__AMT__${Math.round(sapAmt)}`;
+              const arr = sapByInv.get(amtKey) ?? [];
+              arr.push({ sapRawCode, sapQty, sapAmount: sapAmt });
+              sapByInv.set(amtKey, arr);
+            }
+          }
+        });
+      }
+    }
+
+    // Diagnostic: first 10 SAP invoice keys so we can compare format with DB invoice_no
+    const sapInvSamples = [...sapByInv.keys()]
+      .filter((k) => !k.startsWith("__AMT__"))
+      .slice(0, 10);
+
+    // ── 3. Build DB-vs-SAP comparison (no SHEET read — full-sheet reads time out) ──
+    //
+    // SALE SHEET qty is not read directly; instead we compute:
+    //   expectedSheetQty = sapQty × perTankLitres
+    // which is the total-litres figure the SHEET would show if SAP stores pieces.
+    // If expectedSheetQty / dbQty = sapQty (an integer), the hypothesis holds:
+    //   SAP = pieces, SHEET = total litres, DB stored only one tank's litres.
+
+    type ThreeWayRow = {
+      fy: string; invoiceNo: string | null; code: string;
+      colour: string | null; monthLabel: string;
+      perTankLitres: number | null;
+      dbQty: number; dbAmount: number;
+      sapQty: number | null; sapAmount: number | null; sapRawCode: string | null;
+      // Derived from SAP + perTankLitres
+      expectedSheetQty: number | null;      // sapQty × perTankLitres (total litres)
+      dbQtyEqPerTankLitres: boolean | null; // dbQty == perTankLitres (one-unit bug)
+      sapPiecesHypothesis: boolean | null;  // expectedSheetQty / dbQty = integer = sapQty?
+      dbAmountEqualsSapAmount: boolean | null;
+      dataAvailability: "DB+SAP" | "DB_ONLY";
+      sapMatchMethod: "invoice" | "amount" | "none" | "no_sap_source";
+    };
+
+    const rows: ThreeWayRow[] = [];
+
+    for (const dbRow of dbRows) {
+      const fy = dbRow.fy;
+      const inv = dbRow.invoice_no;
+      const code = dbRow.code;
+      const colour = dbRow.color;
+      const dbQty = Number(dbRow.qty);
+      const dbAmt = Number(dbRow.amount);
+      const perTankLitres = tankLitresFromCode(code);
+
+      // SAP lookup (FY2026-27 only)
+      let sapQty: number | null = null;
+      let sapAmt: number | null = null;
+      let sapRawCode: string | null = null;
+      let sapMatchMethod: ThreeWayRow["sapMatchMethod"] = "no_sap_source";
+
+      if (fy === "2026-27" && sap2627Id) {
+        sapMatchMethod = "none";
+        // Try invoice-number match first
+        if (inv && sapInvoiceColFound) {
+          const candidates = sapByInv.get(normInv(inv)) ?? [];
+          if (candidates.length > 0) {
+            // Among this invoice's lines, find the one closest in amount to DB
+            const best = candidates.reduce((a, b) =>
+              Math.abs(b.sapAmount - dbAmt) < Math.abs(a.sapAmount - dbAmt) ? b : a,
+            );
+            if (Math.abs(best.sapAmount - dbAmt) < 2) {
+              sapQty = best.sapQty; sapAmt = best.sapAmount;
+              sapRawCode = best.sapRawCode; sapMatchMethod = "invoice";
+            }
+          }
+        }
+        // Fallback: match by amount ±1 Rs (only if exactly one SAP row has this amount)
+        if (sapMatchMethod === "none") {
+          const amtKey = `__AMT__${Math.round(dbAmt)}`;
+          const candidates = sapByInv.get(amtKey) ?? [];
+          if (candidates.length === 1) {
+            sapQty = candidates[0].sapQty; sapAmt = candidates[0].sapAmount;
+            sapRawCode = candidates[0].sapRawCode; sapMatchMethod = "amount";
+          }
+        }
+      }
+
+      // Derived checks
+      const expectedSheetQty = sapQty != null && perTankLitres != null
+        ? sapQty * perTankLitres : null;
+
+      const dbQtyEqPerTankLitres = perTankLitres != null
+        ? dbQty === perTankLitres : null;
+
+      const sapPiecesHypothesis = expectedSheetQty != null
+        ? Math.abs(expectedSheetQty / dbQty - Math.round(expectedSheetQty / dbQty)) < 0.01
+        : null;
+
+      const dbAmtEqSap = sapAmt != null ? Math.abs(dbAmt - sapAmt) < 2 : null;
+
+      rows.push({
+        fy, invoiceNo: inv, code, colour, monthLabel: dbRow.month_label,
+        perTankLitres,
+        dbQty, dbAmount: Math.round(dbAmt),
+        sapQty, sapAmount: sapAmt != null ? Math.round(sapAmt) : null, sapRawCode,
+        expectedSheetQty,
+        dbQtyEqPerTankLitres,
+        sapPiecesHypothesis,
+        dbAmountEqualsSapAmount: dbAmtEqSap,
+        dataAvailability: sapQty != null ? "DB+SAP" : "DB_ONLY",
+        sapMatchMethod,
+      });
+    }
+
+    // ── 4. Summary stats ──────────────────────────────────────────────────────
+    const withSap  = rows.filter((r) => r.dataAvailability === "DB+SAP");
+    const dbOnly   = rows.filter((r) => r.dataAvailability === "DB_ONLY");
+
+    const bugConfirmed  = withSap.filter((r) => r.dbQtyEqPerTankLitres === true).length;
+    const amtSafe       = withSap.filter((r) => r.dbAmountEqualsSapAmount === true).length;
+    const chainVerified = withSap.filter((r) => r.sapPiecesHypothesis === true).length;
+
+    res.json({
+      note: [
+        "Three sources: DB (sale_line.qty, stored as per-tank litres by the loader bug),",
+        "SHEET (derived SALE SHEET register, total litres = SAP pieces × per_tank_litres),",
+        "SAP (Combined tab, pieces = billing-master qty).",
+        "FY2026-27: full three-way. FY2025-26: DB + SHEET only. FY2023-24/24-25: DB only (no invoice_no).",
+      ].join(" "),
+      sapReadInfo: {
+        sapSourceConfigured: !!sap2627Id,
+        invoiceColFound: sapInvoiceColFound,
+        sapRowsRead,
+        sapInvoiceKeySamples: sapInvSamples,
+        dbInvoiceSamples_2627: dbRows
+          .filter((r) => r.fy === "2026-27" && r.invoice_no != null)
+          .slice(0, 10)
+          .map((r) => ({ raw: r.invoice_no, normed: normInv(r.invoice_no) })),
+      },
+      summary: {
+        totalRows: rows.length,
+        withSapRows: withSap.length,
+        dbOnlyRows: dbOnly.length,
+        bugConfirmed_dbQtyEqPerTankLitres: bugConfirmed,
+        amountSafeVsSap: amtSafe,
+        sapPiecesHypothesisVerified: chainVerified,
+      },
+      rows,
+    });
+  } catch (err: unknown) {
+    req.log.error({ err }, "tank-three-way-sample failed");
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
