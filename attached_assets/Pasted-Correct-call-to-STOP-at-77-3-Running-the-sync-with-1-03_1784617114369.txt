@@ -1,0 +1,61 @@
+Correct call to STOP at 77.3%. Running the sync with 1,032 colourless rows
+would have re-created the overshoot. The gate did its job.
+
+But do not build the (invoice, code, qty) fallback yet. Two things first - and
+the second may make the fallback unnecessary.
+
+1. THE FALLBACK IS THE ORIGINAL COLLISION BUG IN REVERSE
+
+You already spotted the danger and I want to make it a hard rule. The
+(invoice, code, qty) fallback cannot resolve a tuple that has MULTIPLE colour
+variants in the sheet - white and ivory, same invoice, code and qty,
+distinguished ONLY by colour. That collision is the exact thing that started
+this entire problem.
+
+If the fallback GUESSES a colour for a multi-variant tuple, it assigns the
+wrong one - the row still won't match its true sheet line, the overshoot
+persists, AND the data is now silently wrong.
+
+So the fallback, IF we use it, is strictly limited: resolve only tuples that
+have exactly ONE colour variant in the sheet. For any tuple with two or more
+variants, leave the row NULL and report it. Never guess. State plainly how many
+of the 1,032 fall into each bucket.
+
+2. FIND OUT WHY JULY HAS NO SERIALS FIRST - IT MAY BE A READ BUG
+
+Apr, May and Jun populate the (invoice, serial) colour map. July contributes
+nothing - that is why all 1,032 unmatched rows are July. Same workbook, same
+loader. So something about the July tab specifically is not yielding serials.
+
+This matters beyond the backfill: if July's serial column is being read from
+the wrong position, that is a READ bug that will affect every future July sync,
+not just this one-time colour fix. Patching around it with a fallback leaves the
+read broken.
+
+Print, read-only:
+  a) The July tab header row, verbatim, and the column index the loader uses
+     for serial_no.
+  b) An Apr tab header row for comparison, same detail.
+  c) Five sample July data rows showing the serial_no cell as read.
+  d) Whether the recent heavy July editing could have blanked or renumbered the
+     serial column.
+
+THE LIKELY CLEANER FIX
+
+The DB rows HAVE serial numbers. The sheet HAS colour. They fail to join only
+because the sheet-side serial is not being parsed for July. If July's serial is
+simply being read from the wrong column, fixing that READ repopulates the map
+and the EXISTING precise serial match resolves all 1,032 - no guessing, no
+collision risk, because serial is unique per line.
+
+Order of preference:
+  1. If it is a July serial-read bug: fix the read, re-run backfillColor,
+     report how many of the 1,032 now resolve. This is colour-variant-safe.
+  2. Only for whatever remains after that: the (invoice, code, qty) fallback,
+     single-variant tuples only, NULL-and-report for multi-variant.
+
+Report the header comparison (item 2) first. If it shows July's serial column
+is misread, that is the fix and we may not need the fallback at all.
+
+Constraints: read-only diagnosis, no colour writes, no supersede, no sync tick.
+Report and stop.

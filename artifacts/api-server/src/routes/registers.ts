@@ -6,9 +6,13 @@ import {
 } from "../lib/registers/reconcileVersions.js";
 import { tombstoneOrphans, identityKey } from "../lib/registers/ingest.js";
 import { readRegisterFromSheets } from "../lib/registers/sheetsRegister.js";
+import { listSheetTabs, readTabSample } from "../lib/registers/sheetsApi.js";
 import {
   OccurrenceCounter,
   emptyUnmapped,
+  isHeaderRow,
+  mapRegisterColumns,
+  normHeader,
   parseRegisterRow,
   toSaleLine,
 } from "../lib/registers/normalize.js";
@@ -573,6 +577,346 @@ router.get("/registers/:fy/colour-diagnostic", async (req, res) => {
     });
   } catch (err: unknown) {
     req.log.error({ err, fy, month }, "colour-diagnostic failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ── Invoice serial cross-check ────────────────────────────────────────────────
+
+/**
+ * GET /registers/:fy/serial-crosscheck?month=Jul-26
+ *
+ * Read-only. Answers: "For the colourless current rows that backfillColor
+ * could not match, are those invoices present in the sheet under DIFFERENT
+ * serial numbers (serial renumbered by editing) or genuinely absent?"
+ *
+ * Process:
+ *   1. Reads the full month tab from the live sheet.
+ *   2. Builds invoice_no → Set<serial_no> from every sheet row.
+ *   3. Queries the DB for colourless current rows for that month.
+ *   4. For each DB row classifies it as:
+ *      - sameSerial    : (invoice, serial) in sheet — shouldn't be unmatched (edge case)
+ *      - diffSerial    : invoice in sheet but with different serial(s) — renumbering
+ *      - notInSheet    : invoice not found in sheet at all — genuine orphan
+ *
+ * Reports aggregated counts + up to 10 sample rows per category.
+ * Never writes anything.
+ */
+router.get("/registers/:fy/serial-crosscheck", async (req, res) => {
+  const { fy } = req.params;
+  const month = typeof req.query.month === "string" ? req.query.month : "Jul-26";
+  const spreadsheetId = REGISTER_SHEET_IDS[fy];
+  if (!spreadsheetId) {
+    res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
+    return;
+  }
+
+  try {
+    // 1. Read the full month tab from the sheet.
+    // The tab may be named "July" (not "Jul-26"), so list tabs first and find it.
+    const allTabs = await listSheetTabs(spreadsheetId);
+
+    // Match the tab: "Jul-26", "Jul", "July", "JULY" all accepted.
+    // month param is like "Jul-26"; strip the "-26" suffix to get the bare name.
+    const bareMonth = month.replace(/-\d{2}$/, "").toLowerCase();
+    const monthTab = allTabs.find(
+      (t) =>
+        t.title.toLowerCase() === month.toLowerCase() ||
+        t.title.toLowerCase() === bareMonth ||
+        // "July" starts with "jul"
+        (t.title.toLowerCase().startsWith("jul") && bareMonth === "jul"),
+    );
+
+    if (!monthTab) {
+      res.status(404).json({
+        error: `No tab matching month "${month}" found.`,
+        allTabs: allTabs.map((t) => t.title),
+      });
+      return;
+    }
+
+    // Map: invoice_no (string) → Set of serial_no values seen in sheet
+    const invoiceSerials = new Map<string, Set<number>>();
+
+    await readRegisterFromSheets(
+      spreadsheetId,
+      fy,
+      (values, columns) => {
+        const inv = columns.invoiceNo >= 0 ? String(values[columns.invoiceNo] ?? "").trim() : null;
+        const ser = columns.serialNo >= 0 ? Number(values[columns.serialNo]) : null;
+        if (!inv || !ser || isNaN(ser)) return;
+        if (!invoiceSerials.has(inv)) invoiceSerials.set(inv, new Set());
+        invoiceSerials.get(inv)!.add(ser);
+      },
+    );
+
+    // 2. Query DB for colourless current rows for this month.
+    const dbResult = await pool.query<{
+      line_uid: string;
+      invoice_no: string | null;
+      serial_no: number | null;
+      code: string | null;
+    }>(
+      `SELECT line_uid, invoice_no, serial_no, code
+         FROM sale_line
+        WHERE fy = $1 AND month_label = $2
+          AND version_status = 'current'
+          AND (color IS NULL OR color = '')`,
+      [fy, month],
+    );
+
+    type SampleRow = { lineUid: string; invoiceNo: string | null; dbSerial: number | null; sheetSerials?: number[] };
+
+    let sameSerial = 0;
+    let diffSerial = 0;
+    let notInSheet = 0;
+    const sampleSame: SampleRow[] = [];
+    const sampleDiff: SampleRow[] = [];
+    const sampleNot: SampleRow[] = [];
+
+    for (const row of dbResult.rows) {
+      const inv = row.invoice_no ? String(row.invoice_no) : null;
+      const ser = row.serial_no;
+
+      if (!inv) { notInSheet++; continue; }
+
+      const sheetSerials = invoiceSerials.get(inv);
+      if (!sheetSerials) {
+        notInSheet++;
+        if (sampleNot.length < 10)
+          sampleNot.push({ lineUid: row.line_uid, invoiceNo: inv, dbSerial: ser });
+        continue;
+      }
+
+      if (ser != null && sheetSerials.has(ser)) {
+        sameSerial++;
+        if (sampleSame.length < 10)
+          sampleSame.push({ lineUid: row.line_uid, invoiceNo: inv, dbSerial: ser, sheetSerials: [...sheetSerials] });
+      } else {
+        diffSerial++;
+        if (sampleDiff.length < 10)
+          sampleDiff.push({ lineUid: row.line_uid, invoiceNo: inv, dbSerial: ser, sheetSerials: [...sheetSerials].slice(0, 10) });
+      }
+    }
+
+    const total = sameSerial + diffSerial + notInSheet;
+
+    res.json({
+      fy,
+      month,
+      monthTabUsed: monthTab.title,
+      sheetInvoiceCount: invoiceSerials.size,
+      dbColourlessCurrentRows: total,
+      categories: {
+        sameSerial: {
+          count: sameSerial,
+          note: "DB (invoice, serial) still present in sheet — backfillColor should have matched these; edge case",
+          sample: sampleSame,
+        },
+        diffSerial: {
+          count: diffSerial,
+          note: "Invoice is in sheet but with DIFFERENT serial_no(s) — serial was renumbered by editing",
+          sample: sampleDiff,
+        },
+        notInSheet: {
+          count: notInSheet,
+          note: "Invoice not found anywhere in the current sheet tab — genuine orphan",
+          sample: sampleNot,
+        },
+      },
+      interpretation:
+        diffSerial > 0 && notInSheet === 0
+          ? "ALL unmatched rows had their serial renumbered. Fix: re-match by (invoice, code, qty) or by new serial lookup."
+          : diffSerial > 0 && notInSheet > 0
+            ? "Mix: some serials renumbered, some invoices genuinely absent. Needs split handling."
+            : notInSheet > 0 && diffSerial === 0
+              ? "ALL unmatched rows are genuinely absent from the sheet — true orphans."
+              : "No colourless current rows found for this month.",
+      checkedAt: new Date().toISOString(),
+    });
+  } catch (err: unknown) {
+    req.log.error({ err, fy, month }, "serial-crosscheck failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ── Sheet header diagnostic ────────────────────────────────────────────────────
+
+/**
+ * GET /registers/:fy/header-diagnostic?tabs=Jul-26,Apr-26
+ *
+ * Read-only. For each requested tab in the FY register sheet:
+ *   - Prints the raw header row verbatim (first 20 columns after normHeader)
+ *   - Reports what mapRegisterColumns resolves for every field, especially
+ *     serialNo (the column index the loader would use; -1 = not found)
+ *   - Shows 5 sample data rows, reporting the value at the serialNo column
+ *     index and the invoiceNo column index
+ *
+ * Also lists all tab titles in the workbook so the caller can verify the
+ * tab name used by the regex matches the actual title.
+ *
+ * Never writes anything. Safe to run at any time.
+ */
+router.get("/registers/:fy/header-diagnostic", async (req, res) => {
+  const { fy } = req.params;
+  const spreadsheetId = REGISTER_SHEET_IDS[fy];
+  if (!spreadsheetId) {
+    res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
+    return;
+  }
+
+  const requestedTabs =
+    typeof req.query.tabs === "string"
+      ? req.query.tabs.split(",").map((s) => s.trim())
+      : ["Jul-26", "Apr-26"];
+
+  try {
+    const allTabs = await listSheetTabs(spreadsheetId);
+
+    const results: Record<
+      string,
+      | {
+          found: true;
+          actualTitle: string;
+          headerFoundAtRow: number | null;
+          rawHeaderVerbatim: string[];
+          normalisedHeader: string[];
+          detectedColumns: {
+            serialNo: number;
+            invoiceNo: number;
+            code: number;
+            color: number;
+            qty: number;
+            amount: number;
+            month: number;
+            fy: number;
+          };
+          serialNoNote: string;
+          sampleRows: Array<{
+            rowNumber: number;
+            invoiceNoCell: string | number | boolean | null | undefined;
+            serialNoCell: string | number | boolean | null | undefined;
+            colorCell: string | number | boolean | null | undefined;
+            codeCell: string | number | boolean | null | undefined;
+          }>;
+        }
+      | { found: false; reason: string }
+    > = {};
+
+    for (const tabName of requestedTabs) {
+      // Fuzzy-match tab title (the regex in sheetsRegister uses startsWith
+      // for 31-char xlsx truncation; here we match case-insensitively too)
+      const actualTab = allTabs.find(
+        (t) =>
+          t.title === tabName ||
+          t.title.toLowerCase() === tabName.toLowerCase(),
+      );
+      if (!actualTab) {
+        results[tabName] = {
+          found: false,
+          reason: `Tab not found in workbook. All tabs: ${allTabs.map((t) => `"${t.title}"`).join(", ")}`,
+        };
+        continue;
+      }
+
+      // Read the first 25 rows × 20 columns of the tab (A1:T25).
+      // readTabSample is a targeted range read — no chunking, no full-tab scan.
+      const firstRows = await readTabSample(spreadsheetId, actualTab.title, "A1:T25");
+
+      // Find header row
+      let headerRowIdx = -1;
+      let columns: ReturnType<typeof mapRegisterColumns> | null = null;
+      for (let i = 0; i < firstRows.length; i++) {
+        if (isHeaderRow(firstRows[i] as Parameters<typeof isHeaderRow>[0])) {
+          headerRowIdx = i;
+          columns = mapRegisterColumns(
+            firstRows[i] as Parameters<typeof mapRegisterColumns>[0],
+            i + 1,
+          );
+          break;
+        }
+      }
+
+      if (!columns || headerRowIdx < 0) {
+        results[tabName] = {
+          found: true,
+          actualTitle: actualTab.title,
+          headerFoundAtRow: null,
+          rawHeaderVerbatim: (firstRows[0] ?? []).slice(0, 20).map(String),
+          normalisedHeader: (firstRows[0] ?? [])
+            .slice(0, 20)
+            .map((v) => normHeader(v as Parameters<typeof normHeader>[0])),
+          detectedColumns: {
+            serialNo: -1,
+            invoiceNo: -1,
+            code: -1,
+            color: -1,
+            qty: -1,
+            amount: -1,
+            month: -1,
+            fy: -1,
+          },
+          serialNoNote: "No header row found in first 25 rows — tab is silently skipped by loader",
+          sampleRows: [],
+        };
+        continue;
+      }
+
+      const rawHeader = firstRows[headerRowIdx].slice(0, 20).map(String);
+      const normalisedHeader = firstRows[headerRowIdx]
+        .slice(0, 20)
+        .map((v) => normHeader(v as Parameters<typeof normHeader>[0]));
+
+      // Sample data rows: first 5 rows after the header
+      const dataRows = firstRows.slice(headerRowIdx + 1).slice(0, 5);
+      const sampleRows = dataRows.map((row, i) => ({
+        rowNumber: headerRowIdx + 2 + i,
+        invoiceNoCell: columns!.invoiceNo >= 0 ? row[columns!.invoiceNo] : "(col not found)",
+        serialNoCell:
+          columns!.serialNo >= 0
+            ? row[columns!.serialNo]
+            : "(col not found — serialNo=-1)",
+        colorCell: columns!.color >= 0 ? row[columns!.color] : "(col not found)",
+        codeCell: columns!.code >= 0 ? row[columns!.code] : "(col not found)",
+      }));
+
+      const serialNoNote =
+        columns.serialNo >= 0
+          ? `Found at column index ${columns.serialNo} (0-based). Header cell: "${rawHeader[columns.serialNo] ?? "(blank)"}". normHeader: "${normalisedHeader[columns.serialNo] ?? ""}".`
+          : `NOT FOUND. Tried normHeaders: "SERIALNO", "SRNO", "SR", "SNO". ` +
+            `Normalised header values present: ${normalisedHeader.filter(Boolean).join(", ")}`;
+
+      results[tabName] = {
+        found: true,
+        actualTitle: actualTab.title,
+        headerFoundAtRow: headerRowIdx + 1,
+        rawHeaderVerbatim: rawHeader,
+        normalisedHeader,
+        detectedColumns: {
+          serialNo: columns.serialNo,
+          invoiceNo: columns.invoiceNo,
+          code: columns.code,
+          color: columns.color,
+          qty: columns.qty,
+          amount: columns.amount,
+          month: columns.month,
+          fy: columns.fy,
+        },
+        serialNoNote,
+        sampleRows,
+      };
+    }
+
+    res.json({
+      fy,
+      spreadsheetId,
+      allTabTitles: allTabs.map((t) => t.title),
+      requestedTabs,
+      results,
+      checkedAt: new Date().toISOString(),
+    });
+  } catch (err: unknown) {
+    req.log.error({ err, fy }, "header-diagnostic failed");
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
