@@ -1,0 +1,83 @@
+Do not proceed to SAP. The July supersede overshot and the explanation needs
+verifying before we trust it.
+
+WHAT HAPPENED
+
+  before    5,113 rows / Rs.9.74 Cr
+  after     2,628 rows / Rs.4.88 Cr
+  sheet     3,175 rows / Rs.6.41 Cr
+
+We were bringing DB DOWN to the sheet. It went BELOW it - DB is now short by
+547 rows and Rs.1.53 Cr. The end state should have been DB current == sheet,
+because every real billed line exists in the sheet. Falling below the sheet
+means value was removed that should not have been.
+
+THE COLOUR MISMATCH IS THE SUSPECT
+
+2,310 of the 2,485 superseded rows had color=NULL in the DB and a colour in the
+sheet. Those are pre-colour-capture rows. Their identity key is
+(invoice, code, '', qty). The colour-bearing sheet row's key is
+(invoice, code, RED, qty). Those are DIFFERENT keys - not an identity match.
+
+So a colourless DB row was superseded as an "orphan" on the assumption its
+colour-bearing replacement exists in current. But if that colourless row was
+the ONLY copy of a real line - and no colour-bearing equivalent has been
+ingested - superseding it removed a real line from the total. That is the most
+likely source of the Rs.1.53 Cr overshoot.
+
+THE "SHEET HAS 547 DUPLICATES" CLAIM IS NOT YET PROVEN
+
+The argument that the next sync inserted 0 does not prove the DB is right. It
+only proves those 547 sheet rows match SOME current DB row on identity. If two
+genuine colour variants in the sheet both map to one colourless DB row, the
+sync inserts 0 AND the DB undercounts by one row's value. Same symptom,
+opposite meaning. "Inserted 0" cannot distinguish them.
+
+THE CHECK THAT SETTLES IT - INVOICE TOTALS
+
+An invoice's total is the sum of its real billed lines. It cannot change from
+colour handling or deduplication. So compare, for every Jul-26 invoice:
+
+    SUM(amount) of DB current rows   vs   SUM(Taxable Value) of sheet rows
+
+Report:
+  a) Count of invoices where they MATCH within rounding.
+  b) Count where DB < sheet, with total shortfall. THIS IS THE OVERSHOOT - real
+     value removed.
+  c) Count where DB > sheet, with total excess. Residual duplication.
+  d) The ten largest divergences in each direction: invoice, DB total, sheet
+     total, delta.
+
+If every invoice matches, the 547 are genuine sheet duplicates and the DB is
+correct - claim proven. If DB < sheet on a material set of invoices, the
+supersede overshot and those rows must be RESTORED.
+
+RESTORING IS POSSIBLE - NOTHING WAS DELETED
+
+The 2,485 rows were marked version_status='superseded', not deleted. syncRunId
+orphan-audit|2026-07-21T05:55:40.864Z. So any that were superseded wrongly can
+be set back to 'current'. That is why we supersede instead of delete.
+
+If the invoice check shows an overshoot:
+  - identify which of the 2,485 superseded rows belong to invoices where DB now
+    falls short
+  - for each, check whether a colour-bearing current row covers the same billed
+    line
+  - if NOT covered, restore that row to current
+  - re-run the invoice check until DB current == sheet per invoice
+
+DO NOT auto-fix yet. Report the invoice-level comparison first. I want to see
+which invoices diverge and by how much before anything is restored.
+
+A NOTE ON THE ANCHOR CHECK
+
+You proposed making the anchor compare unique-identity counts instead of raw
+sheet rows, so this case reads as "sheet duplicates" rather than
+"read-failure". Do NOT make that change yet. Right now the anchor is correctly
+alarming - we do not yet know the DB figure is right, and changing the anchor
+to stop flagging it would be silencing the warning before proving the number.
+If the invoice check confirms the DB is correct, then improve the anchor. Not
+before.
+
+Constraints: report only, restore nothing yet, delete nothing, Drive
+read-only, secondary untouched.

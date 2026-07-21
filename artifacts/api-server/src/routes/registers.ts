@@ -231,6 +231,163 @@ router.post("/registers/run-sync-tick", (req, res) => {
   res.json({ triggered: true, message: "Sync tick started — check anchor-health in ~60s" });
 });
 
+// ── Invoice-level reconciliation ──────────────────────────────────────────────
+// Compares DB current vs live sheet amounts per invoice number for a given month.
+// Used to verify whether a supersede operation overshot (removed real lines) or
+// whether a row delta is explained by genuine sheet duplicates.
+
+/**
+ * GET /registers/:fy/invoice-reconcile?month=Jul-26
+ *
+ * Re-reads the live sheet, then for every invoice in that month compares:
+ *   SUM(amount) of DB current rows  vs  SUM(amount) of sheet rows
+ *
+ * Returns:
+ *   matched  — invoices within ±1 rupee (correct)
+ *   dbShort  — DB < sheet (overshoot: real value removed)
+ *   dbExcess — DB > sheet (residual duplication)
+ *
+ * Never writes anything.
+ */
+router.get("/registers/:fy/invoice-reconcile", async (req, res) => {
+  const { fy } = req.params;
+  const month = typeof req.query.month === "string" ? req.query.month : "Jul-26";
+
+  const spreadsheetId = REGISTER_SHEET_IDS[fy];
+  if (!spreadsheetId) {
+    res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
+    return;
+  }
+
+  try {
+    // 1. Read live sheet
+    const occurrence = new OccurrenceCounter();
+    const unmapped = emptyUnmapped();
+    const allLines: ReturnType<typeof toSaleLine>[] = [];
+
+    await readRegisterFromSheets(spreadsheetId, fy, (values, columns) => {
+      const result = parseRegisterRow(values, columns, fy);
+      if (result.kind !== "row") return;
+      allLines.push(toSaleLine(result.row, occurrence, unmapped, "sheets"));
+    });
+
+    const monthLines = allLines.filter((l) => l.monthLabel === month);
+    if (monthLines.length === 0) {
+      res.status(400).json({ error: `Zero rows for month ${month} in sheet` });
+      return;
+    }
+
+    // 2. Sum by invoice from sheet (all rows, including duplicates)
+    const sheetByInvoice = new Map<string, { rows: number; amount: number }>();
+    for (const l of monthLines) {
+      const key = l.invoiceNo ?? "(no-invoice)";
+      const e = sheetByInvoice.get(key) ?? { rows: 0, amount: 0 };
+      e.rows++;
+      e.amount += Number(l.amount) || 0;
+      sheetByInvoice.set(key, e);
+    }
+
+    // 3. Query DB current amounts by invoice
+    const dbResult = await pool.query<{
+      invoice_no: string | null;
+      rows: string;
+      total: string;
+    }>(
+      `SELECT COALESCE(invoice_no, '(no-invoice)') AS invoice_no,
+              COUNT(*)::text AS rows,
+              COALESCE(SUM(amount::numeric), 0)::text AS total
+         FROM sale_line
+        WHERE fy = $1 AND month_label = $2 AND version_status = 'current'
+        GROUP BY invoice_no`,
+      [fy, month],
+    );
+
+    const dbByInvoice = new Map<string, { rows: number; amount: number }>();
+    for (const r of dbResult.rows) {
+      dbByInvoice.set(r.invoice_no ?? "(no-invoice)", {
+        rows: parseInt(r.rows, 10),
+        amount: parseFloat(r.total),
+      });
+    }
+
+    // 4. Compare every invoice
+    const allInvoices = new Set([...sheetByInvoice.keys(), ...dbByInvoice.keys()]);
+
+    type InvRow = {
+      invoice: string;
+      dbRows: number;
+      sheetRows: number;
+      dbAmount: number;
+      sheetAmount: number;
+      delta: number;
+    };
+
+    const matched: InvRow[] = [];
+    const dbShort: InvRow[] = [];   // DB < sheet — overshoot
+    const dbExcess: InvRow[] = [];  // DB > sheet — residual duplication
+
+    for (const inv of allInvoices) {
+      const sheet = sheetByInvoice.get(inv) ?? { rows: 0, amount: 0 };
+      const db = dbByInvoice.get(inv) ?? { rows: 0, amount: 0 };
+      const delta = Math.round(db.amount - sheet.amount); // positive = DB has more
+
+      const row: InvRow = {
+        invoice: inv,
+        dbRows: db.rows,
+        sheetRows: sheet.rows,
+        dbAmount: Math.round(db.amount),
+        sheetAmount: Math.round(sheet.amount),
+        delta,
+      };
+
+      if (Math.abs(delta) <= 1) {
+        matched.push(row);
+      } else if (delta < 0) {
+        dbShort.push(row); // DB is short — possible overshoot
+      } else {
+        dbExcess.push(row); // DB has extra — residual duplication
+      }
+    }
+
+    dbShort.sort((a, b) => a.delta - b.delta);   // most negative first (largest shortfall)
+    dbExcess.sort((a, b) => b.delta - a.delta);  // most positive first (largest excess)
+
+    const shortfallTotal = dbShort.reduce((s, r) => s + r.delta, 0);
+    const excessTotal = dbExcess.reduce((s, r) => s + r.delta, 0);
+
+    res.json({
+      fy,
+      month,
+      sheetRows: monthLines.length,
+      dbCurrentRows: [...dbByInvoice.values()].reduce((s, r) => s + r.rows, 0),
+      invoiceCount: allInvoices.size,
+      summary: {
+        matched: { count: matched.length },
+        dbShort: {
+          count: dbShort.length,
+          totalShortfall: Math.abs(shortfallTotal),
+          description: "DB < sheet: possible overshoot — real value removed",
+        },
+        dbExcess: {
+          count: dbExcess.length,
+          totalExcess: excessTotal,
+          description: "DB > sheet: residual duplication",
+        },
+      },
+      // Full lists so the caller can see every divergence
+      dbShortAll: dbShort,
+      dbExcessAll: dbExcess,
+      // Capped preview for quick review
+      dbShortTop10: dbShort.slice(0, 10),
+      dbExcessTop10: dbExcess.slice(0, 10),
+      checkedAt: new Date().toISOString(),
+    });
+  } catch (err: unknown) {
+    req.log.error({ err, fy, month }, "invoice-reconcile failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 // ── Orphan audit ───────────────────────────────────────────────────────────────
 // Supervised one-off cleanup for months where the blast-radius guard halted.
 // Splits orphan rows into two groups:
