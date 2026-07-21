@@ -1,0 +1,62 @@
+Option A, full reversal - approved as the approach. It is the right one: undo
+the whole flawed operation, fix the identity split, let the sync converge to
+true current values. The partial plan lands Rs.24 lakh over precisely because it
+re-adds old-rate rows to hit a total - optimising to a number instead of
+restoring correctness.
+
+But Option A step 3 runs a sync tick, and the sync tick runs the tombstone pass
+- the operation that just overshot. So it is GATED. Do the steps in this order
+and STOP at each reporting point.
+
+STEP 1 - FULL REVERSAL. Restore all 2,485 rows from syncRunId
+orphan-audit|2026-07-21T05:55:40.864Z to version_status='current'. Report
+Jul-26 current row count and total after. Expected: back to 5,113 rows /
+Rs.9.74 Cr - the pre-audit state. Confirm we are exactly back where we started.
+
+STEP 2 - COLOUR BACKFILL. Run backfillColor for FY2026-27. Then REPORT COVERAGE
+BEFORE ANYTHING ELSE:
+  - of the 2,485 reversed rows, how many now have a colour
+  - how many are still color IS NULL
+  - the same for ALL current Jul-26 rows, not just the 2,485
+
+This is the pivot. Colour capture reached only 93.6% earlier this session -
+serial_no matching is known to miss rows. Every row it misses stays colourless,
+stays an orphan, and gets swept AGAIN by the next tombstone. If a material
+number are still NULL after the backfill, DO NOT run the sync tick - report and
+stop, because step 3 would re-create the overshoot.
+
+STEP 3 - SYNC TICK, DRY RUN FIRST. Only if step 2 coverage is near-complete.
+Run the sync in DRY-RUN mode and report what the tombstone pass WOULD supersede
+before it does:
+  - how many rows would be superseded, and their value
+  - confirm they are all genuine old-rate duplicates (identity now matches a
+    current-rate sheet row), NOT colourless leftovers
+  - the projected Jul-26 total after
+If the dry run shows it would supersede colourless leftovers again, HALT - the
+colour fix was incomplete. If it shows only genuine rate-edit supersessions,
+apply it.
+
+STEP 4 - VERIFY. Re-run the full invoice reconciliation. Report:
+  - matched invoice count, target 640 of 640
+  - Jul-26 DB current total vs fresh sheet read - must match within rounding
+  - any remaining short or excess invoices, listed
+
+THE 17 CANNOT-CONVERGE - track them through. 14 have no superseded rows because
+those lines were NEVER ingested - they are a missing-ingest case, not a restore
+case. After the sync tick, confirm whether a fresh full read now pulls them from
+the sheet. If they are still missing, they are the genuine "sheet has lines the
+DB never saw" population - list them, do not paper over them. Rs.9.92 lakh.
+
+THE COLOUR BACKFILL FOR CLOSED YEARS - report, do not apply. 423,187 current
+colourless rows sit across FY2023-24/24-25/25-26. They are inert now because the
+scheduled sync skips those years - but a manual orphan-audit on any of them
+would overshoot exactly as July did. Once July is proven clean by this
+procedure, we apply the SAME procedure to each closed year, one at a time, each
+gated. Do NOT touch them in this pass. Just confirm the count and that they are
+currently inert.
+
+Constraints: restore and colour-stamp only, no deletion, no manual row
+insertion - the sync does insertion. Drive read-only. Secondary untouched.
+Report after EACH step. Do not chain steps 1 through 4 without stopping.
+
+Report step 1 first.

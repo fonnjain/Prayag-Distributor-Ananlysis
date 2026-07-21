@@ -388,6 +388,70 @@ router.get("/registers/:fy/invoice-reconcile", async (req, res) => {
   }
 });
 
+// ── Full reversal of an orphan-audit pass ─────────────────────────────────────
+
+/**
+ * POST /registers/:fy/orphan-audit-reverse?month=Jul-26&syncRunId=orphan-audit|...
+ *
+ * Flips ALL rows superseded by the given syncRunId back to version_status='current'.
+ * This is the safe undo of a tombstone/orphan-audit pass when the pass overshot.
+ * No rows are inserted or deleted — status flip only.
+ *
+ * Returns: rows reversed, total amount restored, new DB current totals for the month.
+ */
+router.post("/registers/:fy/orphan-audit-reverse", async (req, res) => {
+  const { fy } = req.params;
+  const month = typeof req.query.month === "string" ? req.query.month : "Jul-26";
+  const syncRunId =
+    typeof req.query.syncRunId === "string"
+      ? req.query.syncRunId
+      : "orphan-audit|2026-07-21T05:55:40.864Z";
+
+  try {
+    // 1. Flip all rows from this syncRunId back to current
+    const flipResult = await pool.query(
+      `UPDATE sale_line
+          SET version_status = 'current',
+              superseded_by   = NULL
+        WHERE fy            = $1
+          AND month_label   = $2
+          AND version_status = 'superseded'
+          AND superseded_by = $3`,
+      [fy, month, syncRunId],
+    );
+
+    // 2. New DB current totals for this month
+    const totals = await pool.query<{ rows: string; total: string }>(
+      `SELECT COUNT(*)::text AS rows,
+              COALESCE(SUM(amount::numeric), 0)::text AS total
+         FROM sale_line
+        WHERE fy = $1 AND month_label = $2 AND version_status = 'current'`,
+      [fy, month],
+    );
+
+    const newRows = parseInt(totals.rows[0].rows, 10);
+    const newTotal = parseFloat(totals.rows[0].total);
+
+    req.log.info(
+      { fy, month, syncRunId, reversed: flipResult.rowCount, newRows, newTotal },
+      "orphan-audit-reverse complete",
+    );
+
+    res.json({
+      fy,
+      month,
+      syncRunId,
+      rowsReversed: flipResult.rowCount,
+      dbCurrentRowsAfter: newRows,
+      dbCurrentTotalAfter: Math.round(newTotal),
+      checkedAt: new Date().toISOString(),
+    });
+  } catch (err: unknown) {
+    req.log.error({ err, fy, month }, "orphan-audit-reverse failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 // ── Colour-null population report ─────────────────────────────────────────────
 
 /**
