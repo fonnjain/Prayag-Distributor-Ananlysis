@@ -539,11 +539,30 @@ export async function versionedSyncLines(
     allCurrent.push(...(rows as DbRow[]));
   }
 
-  const currentMap = new Map<string, DbRow>();
+  // Map holds ALL current DB rows per identity key (not just the last-seen).
+  // A single-entry Map caused a silent bug: when 2+ current rows shared an
+  // identity key (pre-existing duplicates), the first-loaded row was overwritten
+  // and became invisible to both the supersession check and the orphan tombstone,
+  // so it persisted as current indefinitely.
+  const currentMap = new Map<string, DbRow[]>();
   for (const row of allCurrent) {
     const key = identityKey(row.invoiceNo, row.code, row.color, row.qty, row.monthLabel);
-    currentMap.set(key, row);
+    const bucket = currentMap.get(key) ?? [];
+    bucket.push(row);
+    currentMap.set(key, bucket);
   }
+
+  const rowMatches = (line: InsertSaleLine, e: DbRow): boolean => {
+    const amtMatch = Math.abs(Number(line.amount) - Number(e.amount)) < 0.01;
+    const rateMatch =
+      line.saleRate == null && e.saleRate == null
+        ? true
+        : line.saleRate != null && e.saleRate != null
+          ? Math.abs(Number(line.saleRate) - Number(e.saleRate)) < 0.01
+          : false;
+    const serialMatch = (line.serialNo ?? null) === (e.serialNo ?? null);
+    return amtMatch && rateMatch && serialMatch;
+  };
 
   const toTouch: string[] = [];
   const toSupersede: Array<{ lineUid: string; supersededBy: string; supersededAt: Date }> = [];
@@ -557,30 +576,40 @@ export async function versionedSyncLines(
       line.qty ?? null,
       line.monthLabel ?? null,
     );
-    const existing = currentMap.get(key);
+    const existingAll = currentMap.get(key) ?? [];
 
-    if (!existing) {
+    if (existingAll.length === 0) {
       toInsert.push(line);
       continue;
     }
 
-    const amtMatch = Math.abs(Number(line.amount) - Number(existing.amount)) < 0.01;
-    const rateMatch =
-      line.saleRate == null && existing.saleRate == null
-        ? true
-        : line.saleRate != null && existing.saleRate != null
-          ? Math.abs(Number(line.saleRate) - Number(existing.saleRate)) < 0.01
-          : false;
-    const serialMatch = (line.serialNo ?? null) === (existing.serialNo ?? null);
+    // Find the current row that matches the incoming line exactly.
+    const exactMatch = existingAll.find((e) => rowMatches(line, e));
 
-    if (amtMatch && rateMatch && serialMatch) {
-      toTouch.push(existing.lineUid);
+    if (exactMatch) {
+      // Incoming line matches an existing current row → touch it.
+      toTouch.push(exactMatch.lineUid);
+      // Supersede any OTHER current rows for this identity — they are stale
+      // duplicates that accumulated from previous sync runs.
+      for (const e of existingAll) {
+        if (e.lineUid !== exactMatch.lineUid) {
+          toSupersede.push({
+            lineUid: e.lineUid,
+            supersededBy: exactMatch.lineUid,
+            supersededAt: confirmedAt,
+          });
+        }
+      }
     } else {
-      toSupersede.push({
-        lineUid: existing.lineUid,
-        supersededBy: line.lineUid,
-        supersededAt: confirmedAt,
-      });
+      // Incoming line is a new version (amount/rate changed) → supersede ALL
+      // current rows for this identity and insert the new version.
+      for (const e of existingAll) {
+        toSupersede.push({
+          lineUid: e.lineUid,
+          supersededBy: line.lineUid,
+          supersededAt: confirmedAt,
+        });
+      }
       toInsert.push(line);
     }
   }

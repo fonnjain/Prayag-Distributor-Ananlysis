@@ -31,4 +31,4 @@
 - [SecMember dual-key design](sec-member-dual-key.md) — normKey=normSecKey (DB head_canon, keeps parentheticals); joinKey=normName (roster join, strips parentheticals); never mix them in secByKey/secPlanByKey Maps.
 - [Tab content verification + sheet_confirmed_at](prayag-tab-content-verification.md) — two-pass readOrderTabInventory; ghost-row marker on sale_line; GET /api/mgmt/tab-diagnostic.
 - [Primary Order Book reader quirks](primary-order-book-reader.md) — FY2023-24: no header row (positional fallback col 17=Amount), no State Head col; dry-run anchors for all four FYs.
-- [Tank qty bug reconciliation](tank-qty-bug-reconciliation.md) — SAP=pieces, DB stored per-tank-litres; revenue safe (12/12 amt match); mixed DB state; fix awaits unit decision; pause on.
+- [Tank qty bug reconciliation](tank-qty-bug-reconciliation.md) — qty/lineUid fix + versionedSyncLines currentMap array fix; one-current-row-per-identity invariant verified clean July 21 2026.

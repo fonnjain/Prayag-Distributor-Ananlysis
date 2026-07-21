@@ -1,6 +1,6 @@
 ---
 name: Tank qty bug reconciliation
-description: sale_line.qty stored per-tank-litres instead of SAP billing pieces for WCT/WT- codes; permanent loader fix implemented and verified complete July 21 2026. No further action needed.
+description: sale_line.qty stored per-tank-litres instead of SAP billing pieces for WCT/WT- codes; permanent loader fix implemented and verified complete July 21 2026. One-current-row-per-identity invariant also fully closed July 21 2026. No further action needed.
 ---
 
 ## Decision (confirmed)
@@ -41,6 +41,27 @@ WT-001 qty is already in pieces; qty_ltr stays NULL — this is correct, not a b
 - **Route 2 (exact division):** no SAP match; sheetQty % perTankLitres === 0 → qty = sheetQty/perTankLitres, qty_ltr = sheetQty
 - **Flags:** `sap-ghost` (SAP not ready yet), `non-clean-division` (warning), `unmapped-suffix` (WT-001 lids)
 
+## versionedSyncLines currentMap fix (July 21 2026)
+
+`currentMap` was `Map<string, DbRow>` — last-write-wins. When 2+ current rows existed for the
+same identity key (from prior accumulation), only the last-loaded DB row was kept in the map.
+The earlier row was invisible to both the supersession check and the orphan tombstone (its identity
+was in `seenForMonth`), so it persisted as current indefinitely.
+
+**Root symptom:** 344 duplicate identities across FY2026-27 (287 with distinct amounts = ₹46.8 lakh
+double-counted), caused by rate-rounding changes between sync runs accumulating silently.
+
+**Fix in `ingest.ts` `versionedSyncLines()`:**
+- `currentMap: Map<string, DbRow[]>` — collects ALL current DB rows per identity key.
+- For each incoming line: find exact match (amtMatch + rateMatch + serialMatch) across all buckets.
+  - Match found → touch the matched row; supersede all other bucket members (stale duplicates).
+  - No match → supersede all bucket members; insert new version.
+
+**Cleanup applied:** 344 rows superseded via SQL (keep newest `ingested_at`, supersede older);
+45 additional stale rows superseded by the fixed code on first run. Total: 389 stale rows retired.
+
+**Verified clean:** `duplicate_identities = 0` across all 33,753 FY2026-27 identities after fix.
+
 ## Verified final state (FY2026-27, July 21 2026)
 
 | Check | Result |
@@ -49,10 +70,11 @@ WT-001 qty is already in pieces; qty_ltr stays NULL — this is correct, not a b
 | `non_integer_ratio` DB rows | **0** — every tank row exact integer ratio |
 | All 40 codes `min_ratio = max_ratio` | **confirmed** |
 | Startup sync `inserted` | **168** (unblocked by lineUid fix) |
-| Startup sync `tombstoned` | **0** (cleanup already done prior run) |
+| Startup sync `tombstoned` | **0** |
 | `assertFail` | **0** |
 | Current tank rows | 2,248 with pieces in `qty` |
 | Superseded rows (archived litres history) | 822 |
+| Duplicate identities after invariant fix | **0** |
 
 ## REGISTER_SYNC_PAUSE
 Now set to `"2025-26"` only. FY2026-27 syncs live on every 6-hour tick.

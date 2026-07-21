@@ -1,0 +1,79 @@
+Tank fix confirmed done - idempotency inserted 0, 168 traced to vacated slots,
+freeze held, frozen years intact. Closed. Good work.
+
+But the 22600950 double-count you found is not a footnote - it is the ORIGINAL
+accumulation bug, still live. Do not park it.
+
+WHAT IT ACTUALLY IS
+
+  22600950, WCT-3LL-07, serial 371, qty 10:
+    old: rate 3300.51, amount 33008.97, CURRENT
+    new: rate 3301,    amount 33009,    CURRENT
+  Same identity, a rate was rounded, BOTH versions current. A
+  double-count.
+
+This is exactly the rate-rounding bug we started this whole effort with -
+490.92 -> 491 spawning duplicate rows. The identity key is (invoice, code,
+colour, qty, month) with NO amount. So when a rate changes but qty does not,
+versionedSyncLines sees the same identity and - in at least this path - leaves
+both rows current instead of superseding the old one.
+
+The colour fix stopped colourless-orphan duplicates. It did NOT close this. Your
+own idempotency tick proves the mechanism is live: "superseded: 28" on a
+no-change run means 28 rows had amount drift between syncs. 22600950 slipped
+through because its replacement already existed as current, so the old row had
+nothing to trigger its supersession.
+
+FIRST - SIZE IT. This is the question that matters, not the one instance.
+
+How many (invoice, code, colour, qty, month) identities currently have 2+
+CURRENT rows whose amounts differ? Across FY2026-27. Report the count, the total
+double-counted value, and whether it is tanks-only or all products.
+
+  - If it is just 22600950: a one-off, fix the row, move on.
+  - If it is dozens: the supersession path has a real hole and every rate edit
+    on a same-qty line widens it. That is the original bug accumulating quietly.
+
+DO NOT "FIX" IT BY ADDING AMOUNT TO THE IDENTITY KEY
+
+That recreates the original bug in reverse - every rate edit becomes a new
+permanent row. Amount is a MUTABLE ATTRIBUTE, not part of identity. The correct
+behaviour is what versionedSyncLines was supposed to do all along:
+
+  when an incoming sheet row matches an existing current row on identity
+  (invoice, code, colour, qty, month), and the amount differs, supersede the old
+  row and make the incoming one current - one current row per identity, always.
+
+22600950 shows a path where that isn't happening. Find why the old row wasn't
+superseded when the new one arrived:
+  - was the new row inserted in a run BEFORE the old row's supersession logic
+    ran, so they crossed?
+  - does the supersession only fire when the incoming row is NEW (insert path)
+    and skip when a matching current already exists (the 250 "already existed"
+    slots from check 1a)?
+  That second one is the likely culprit - check 1a said 250 replacements
+  "already existed as current from earlier runs." If two replacements for the
+  same identity both got inserted across different runs, both are current and
+  neither supersedes the other.
+
+THEN - RECONCILE THE EXISTING DUPLICATES
+
+For whatever count the sizing finds: these are genuine double-counts in current
+data. Supersede the OLDER row in each pair (older ingested_at), keep the newest -
+it reflects the latest sheet state. Dry run first: report every identity with
+multiple current rows, the amounts, which would be superseded, and the value
+recovered. Do not delete - supersede.
+
+WHY THIS MATTERS DESPITE BEING SMALL
+
+33 rupees is nothing. But it is proof the one-current-row-per-identity invariant
+is not actually holding, and that invariant is the entire foundation of the
+fix we built. A quiet leak in it accumulates the same way the original bug did -
+just slowly enough not to notice until a total is wrong again. Close it now,
+while it is one line and not a month.
+
+Report the sizing count first. That decides whether this is a one-row cleanup or
+a supersession-logic repair.
+
+Constraints: read-only sizing first, dry run before any supersession, no
+deletion, frozen years untouched.
