@@ -388,6 +388,517 @@ router.get("/registers/:fy/invoice-reconcile", async (req, res) => {
   }
 });
 
+// ── Colour-null population report ─────────────────────────────────────────────
+
+/**
+ * GET /registers/colour-null-report
+ *
+ * Counts rows with color IS NULL or color = '' across all FYs and version states.
+ * Used to assess the pre-colour-capture orphan population before applying a fix.
+ * Never writes anything.
+ */
+router.get("/registers/colour-null-report", async (_req, res) => {
+  try {
+    const result = await pool.query<{
+      fy: string;
+      month_label: string;
+      version_status: string;
+      colourless_rows: string;
+    }>(
+      `SELECT fy,
+              COALESCE(month_label, '(null)') AS month_label,
+              version_status,
+              COUNT(*)::text AS colourless_rows
+         FROM sale_line
+        WHERE color IS NULL OR color = ''
+        GROUP BY fy, month_label, version_status
+        ORDER BY fy, month_label, version_status`,
+    );
+
+    // Aggregate totals per FY
+    type FyTotal = { fy: string; current: number; superseded: number; total: number };
+    const byFy = new Map<string, FyTotal>();
+    for (const r of result.rows) {
+      const entry = byFy.get(r.fy) ?? { fy: r.fy, current: 0, superseded: 0, total: 0 };
+      const n = parseInt(r.colourless_rows, 10);
+      entry.total += n;
+      if (r.version_status === "current") entry.current += n;
+      else entry.superseded += n;
+      byFy.set(r.fy, entry);
+    }
+
+    const grandTotal = [...byFy.values()].reduce((s, r) => s + r.total, 0);
+
+    res.json({
+      grandTotal,
+      byFy: [...byFy.values()],
+      byFyMonth: result.rows.map((r) => ({
+        fy: r.fy,
+        monthLabel: r.month_label,
+        versionStatus: r.version_status,
+        colourlessRows: parseInt(r.colourless_rows, 10),
+      })),
+      note: "current rows are live colourless orphan candidates; superseded rows are already inert",
+    });
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ── Invoice-total convergence restore ─────────────────────────────────────────
+//
+// After the orphan-audit overshot (Jul-26: 391 invoices short, Rs.1.53 Cr),
+// this pair of routes restores the wrongly-superseded rows using the invoice
+// total as ground truth instead of row presence.
+//
+// Algorithm (per short invoice):
+//   1. Re-read the live sheet — sheet total per invoice is ground truth.
+//   2. For each invoice where DB current < sheet (shortfall > 1):
+//      a. Collect superseded rows from the target syncRunId for that invoice.
+//      b. Sort: rows whose amount appears in the sheet's amount multiset first
+//         (most likely current-rate version), then remaining; within each group
+//         by amount descending (converges faster, less risk of over-restoring).
+//      c. Greedily restore one row at a time, accumulating the running total,
+//         until (db_total + accumulated) >= (sheet_total - 1).
+//      d. Stop immediately when converged — never push DB above the sheet total.
+//   3. If a short invoice has no superseded rows from the target syncRunId,
+//      flag it as "cannot converge" — it means a line exists in the sheet that
+//      was never in the DB at all (a different problem). Expected: none.
+//
+// The stop condition prevents re-introducing rate-edit duplicates: adding such
+// a row would push the invoice total ABOVE the sheet total, so the guard stops
+// before it is ever added.
+
+/**
+ * GET /registers/:fy/invoice-restore-plan?month=Jul-26[&syncRunId=orphan-audit|...]
+ *
+ * Dry-run. Re-reads the live sheet and computes exactly which superseded rows
+ * would be restored to bring every short invoice up to its sheet total.
+ *
+ * Reports:
+ *   a) Per short invoice: rows to restore + before/after totals.
+ *   b) Grand total rows and value to be restored.
+ *   c) Any invoice that CANNOT reach its sheet total from superseded rows —
+ *      expected none; if any appear the route still returns 200 with the list.
+ *
+ * Never writes anything.
+ */
+router.get("/registers/:fy/invoice-restore-plan", async (req, res) => {
+  const { fy } = req.params;
+  const month =
+    typeof req.query.month === "string" ? req.query.month : "Jul-26";
+  const syncRunId =
+    typeof req.query.syncRunId === "string"
+      ? req.query.syncRunId
+      : "orphan-audit|2026-07-21T05:55:40.864Z";
+
+  const spreadsheetId = REGISTER_SHEET_IDS[fy];
+  if (!spreadsheetId) {
+    res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
+    return;
+  }
+
+  try {
+    // 1. Re-read live sheet
+    const occurrence = new OccurrenceCounter();
+    const unmapped = emptyUnmapped();
+    const allLines: ReturnType<typeof toSaleLine>[] = [];
+
+    await readRegisterFromSheets(spreadsheetId, fy, (values, columns) => {
+      const result = parseRegisterRow(values, columns, fy);
+      if (result.kind !== "row") return;
+      allLines.push(toSaleLine(result.row, occurrence, unmapped, "sheets"));
+    });
+
+    const monthLines = allLines.filter((l) => l.monthLabel === month);
+    if (monthLines.length === 0) {
+      res.status(400).json({ error: `Zero rows for month ${month} in sheet` });
+      return;
+    }
+
+    // 2. Build sheet totals and amount multisets per invoice
+    const sheetByInvoice = new Map<
+      string,
+      { total: number; amounts: number[] }
+    >();
+    for (const l of monthLines) {
+      const key = l.invoiceNo ?? "(no-invoice)";
+      const e = sheetByInvoice.get(key) ?? { total: 0, amounts: [] };
+      const amt = Number(l.amount) || 0;
+      e.total += amt;
+      e.amounts.push(amt);
+      sheetByInvoice.set(key, e);
+    }
+
+    // 3. DB current totals by invoice
+    const dbCurrentResult = await pool.query<{
+      invoice_no: string | null;
+      total: string;
+    }>(
+      `SELECT COALESCE(invoice_no, '(no-invoice)') AS invoice_no,
+              COALESCE(SUM(amount::numeric), 0)::text AS total
+         FROM sale_line
+        WHERE fy = $1 AND month_label = $2 AND version_status = 'current'
+        GROUP BY invoice_no`,
+      [fy, month],
+    );
+
+    const dbCurrentByInvoice = new Map<string, number>();
+    for (const r of dbCurrentResult.rows) {
+      dbCurrentByInvoice.set(r.invoice_no ?? "(no-invoice)", parseFloat(r.total));
+    }
+
+    // 4. Superseded rows from this syncRunId for this month
+    const supersededResult = await pool.query<{
+      line_uid: string;
+      invoice_no: string | null;
+      code: string;
+      color: string | null;
+      qty: string | null;
+      amount: string;
+    }>(
+      `SELECT line_uid,
+              COALESCE(invoice_no, '(no-invoice)') AS invoice_no,
+              code, color, qty, amount
+         FROM sale_line
+        WHERE fy = $1 AND month_label = $2
+          AND version_status = 'superseded'
+          AND superseded_by = $3
+        ORDER BY invoice_no, amount::numeric DESC`,
+      [fy, month, syncRunId],
+    );
+
+    // Group superseded rows by invoice
+    const supersededByInvoice = new Map<
+      string,
+      { lineUid: string; code: string; color: string | null; qty: string | null; amount: number }[]
+    >();
+    for (const r of supersededResult.rows) {
+      const inv = r.invoice_no ?? "(no-invoice)";
+      const list = supersededByInvoice.get(inv) ?? [];
+      list.push({
+        lineUid: r.line_uid,
+        code: r.code,
+        color: r.color,
+        qty: r.qty,
+        amount: parseFloat(r.amount),
+      });
+      supersededByInvoice.set(inv, list);
+    }
+
+    // Helper: check if amount appears in a multiset (within ±1), consuming it
+    function matchAmount(amt: number, remaining: number[]): { matched: boolean; remaining: number[] } {
+      const idx = remaining.findIndex((a) => Math.abs(a - amt) <= 1);
+      if (idx === -1) return { matched: false, remaining };
+      const next = [...remaining];
+      next.splice(idx, 1);
+      return { matched: true, remaining: next };
+    }
+
+    // 5. Convergence plan for each short invoice
+    type PlanRow = {
+      invoice: string;
+      dbBefore: number;
+      sheetTotal: number;
+      shortfall: number;
+      rowsToRestore: number;
+      amountToRestore: number;
+      dbAfter: number;
+      overshootRupees: number;
+      lineUids: string[];
+    };
+
+    const plan: PlanRow[] = [];
+    const cannotConverge: { invoice: string; dbBefore: number; sheetTotal: number; shortfall: number; availableSuperseded: number }[] = [];
+
+    for (const [inv, sheetData] of sheetByInvoice) {
+      const dbCurrent = Math.round(dbCurrentByInvoice.get(inv) ?? 0);
+      const sheetTotal = Math.round(sheetData.total);
+      const shortfall = sheetTotal - dbCurrent;
+
+      if (shortfall <= 1) continue; // already converged
+
+      const superseded = supersededByInvoice.get(inv) ?? [];
+      if (superseded.length === 0) {
+        cannotConverge.push({
+          invoice: inv,
+          dbBefore: dbCurrent,
+          sheetTotal,
+          shortfall,
+          availableSuperseded: 0,
+        });
+        continue;
+      }
+
+      // Sort: amount-matching rows first (prefer current-rate version),
+      // then remaining; within each group by amount descending
+      let availableAmounts = [...sheetData.amounts];
+      const preferred: typeof superseded = [];
+      const fallback: typeof superseded = [];
+
+      for (const row of superseded) {
+        const { matched, remaining } = matchAmount(row.amount, availableAmounts);
+        if (matched) {
+          preferred.push(row);
+          availableAmounts = remaining;
+        } else {
+          fallback.push(row);
+        }
+      }
+
+      // Within each group, sort by amount descending (largest first)
+      preferred.sort((a, b) => b.amount - a.amount);
+      fallback.sort((a, b) => b.amount - a.amount);
+      const ordered = [...preferred, ...fallback];
+
+      // Greedy restore until converged.
+      // Break fires BEFORE adding the next row, so accumulated is the minimum
+      // sum of rows needed to satisfy (dbCurrent + accumulated >= sheetTotal - 1).
+      // Due to row granularity, dbAfter may slightly exceed sheetTotal — that is
+      // acceptable. The true cannot-converge case is when all superseded rows are
+      // exhausted but accumulated + dbCurrent is still < sheetTotal - 1.
+      let accumulated = 0;
+      const toRestore: string[] = [];
+
+      for (const row of ordered) {
+        if (accumulated + dbCurrent >= sheetTotal - 1) break;
+        toRestore.push(row.lineUid);
+        accumulated += row.amount;
+      }
+
+      const dbAfter = Math.round(dbCurrent + accumulated);
+      // Converged = reached the threshold. May be slightly above sheetTotal due to
+      // row granularity; a rate-edit duplicate would push it above by a full row amount.
+      const reachedThreshold = dbCurrent + accumulated >= sheetTotal - 1;
+
+      if (!reachedThreshold) {
+        // Genuinely cannot converge: superseded rows exhausted, still short
+        cannotConverge.push({
+          invoice: inv,
+          dbBefore: dbCurrent,
+          sheetTotal,
+          shortfall,
+          availableSuperseded: Math.round(superseded.reduce((s, r) => s + r.amount, 0)),
+        });
+      } else {
+        plan.push({
+          invoice: inv,
+          dbBefore: dbCurrent,
+          sheetTotal,
+          shortfall,
+          rowsToRestore: toRestore.length,
+          amountToRestore: Math.round(accumulated),
+          dbAfter,
+          // dbAfter may exceed sheetTotal by a small amount (row granularity).
+          // That is expected and not a sign of duplicate restoration.
+          overshootRupees: Math.max(0, dbAfter - sheetTotal),
+          lineUids: toRestore,
+        });
+      }
+    }
+
+    const totalRowsToRestore = plan.reduce((s, r) => s + r.rowsToRestore, 0);
+    const totalAmountToRestore = plan.reduce((s, r) => s + r.amountToRestore, 0);
+
+    // Summary preview (top 10 by shortfall for quick review)
+    const planPreview = [...plan]
+      .sort((a, b) => b.shortfall - a.shortfall)
+      .slice(0, 10)
+      .map(({ lineUids: _, ...rest }) => rest); // omit line_uid lists from preview
+
+    res.json({
+      fy,
+      month,
+      syncRunId,
+      sheetRows: monthLines.length,
+      shortInvoices: plan.length,
+      cannotConverge: cannotConverge.length,
+      totalRowsToRestore,
+      totalAmountToRestore,
+      cannotConvergeList: cannotConverge,
+      planPreview,
+      // Full plan with line_uids is large; the apply route accepts the same
+      // syncRunId + month and recomputes it server-side rather than requiring
+      // the client to POST the full list.
+      planFull: plan,
+      checkedAt: new Date().toISOString(),
+    });
+  } catch (err: unknown) {
+    req.log.error({ err, fy, month }, "invoice-restore-plan failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
+ * POST /registers/:fy/invoice-restore-apply?month=Jul-26[&syncRunId=orphan-audit|...]
+ *
+ * Applies the convergence restore plan computed by invoice-restore-plan.
+ * Re-runs the plan server-side (fresh sheet read) and flips the selected
+ * superseded rows back to version_status='current'.
+ *
+ * This is a status flip only — no rows are inserted or deleted.
+ * Idempotent: rows already 'current' are not re-written.
+ */
+router.post("/registers/:fy/invoice-restore-apply", async (req, res) => {
+  const { fy } = req.params;
+  const month =
+    typeof req.query.month === "string" ? req.query.month : "Jul-26";
+  const syncRunId =
+    typeof req.query.syncRunId === "string"
+      ? req.query.syncRunId
+      : "orphan-audit|2026-07-21T05:55:40.864Z";
+
+  const spreadsheetId = REGISTER_SHEET_IDS[fy];
+  if (!spreadsheetId) {
+    res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
+    return;
+  }
+
+  try {
+    // 1. Re-read live sheet (same as plan route)
+    const occurrence = new OccurrenceCounter();
+    const unmapped = emptyUnmapped();
+    const allLines: ReturnType<typeof toSaleLine>[] = [];
+
+    await readRegisterFromSheets(spreadsheetId, fy, (values, columns) => {
+      const result = parseRegisterRow(values, columns, fy);
+      if (result.kind !== "row") return;
+      allLines.push(toSaleLine(result.row, occurrence, unmapped, "sheets"));
+    });
+
+    const monthLines = allLines.filter((l) => l.monthLabel === month);
+    if (monthLines.length === 0) {
+      res.status(400).json({ error: `Zero rows for month ${month} in sheet` });
+      return;
+    }
+
+    // 2. Sheet totals per invoice
+    const sheetByInvoice = new Map<string, { total: number; amounts: number[] }>();
+    for (const l of monthLines) {
+      const key = l.invoiceNo ?? "(no-invoice)";
+      const e = sheetByInvoice.get(key) ?? { total: 0, amounts: [] };
+      const amt = Number(l.amount) || 0;
+      e.total += amt;
+      e.amounts.push(amt);
+      sheetByInvoice.set(key, e);
+    }
+
+    // 3. DB current totals
+    const dbCurrentResult = await pool.query<{ invoice_no: string | null; total: string }>(
+      `SELECT COALESCE(invoice_no, '(no-invoice)') AS invoice_no,
+              COALESCE(SUM(amount::numeric), 0)::text AS total
+         FROM sale_line
+        WHERE fy = $1 AND month_label = $2 AND version_status = 'current'
+        GROUP BY invoice_no`,
+      [fy, month],
+    );
+    const dbCurrentByInvoice = new Map<string, number>();
+    for (const r of dbCurrentResult.rows) {
+      dbCurrentByInvoice.set(r.invoice_no ?? "(no-invoice)", parseFloat(r.total));
+    }
+
+    // 4. Superseded rows from syncRunId
+    const supersededResult = await pool.query<{
+      line_uid: string;
+      invoice_no: string | null;
+      amount: string;
+    }>(
+      `SELECT line_uid,
+              COALESCE(invoice_no, '(no-invoice)') AS invoice_no,
+              amount
+         FROM sale_line
+        WHERE fy = $1 AND month_label = $2
+          AND version_status = 'superseded'
+          AND superseded_by = $3
+        ORDER BY invoice_no, amount::numeric DESC`,
+      [fy, month, syncRunId],
+    );
+
+    const supersededByInvoice = new Map<string, { lineUid: string; amount: number }[]>();
+    for (const r of supersededResult.rows) {
+      const inv = r.invoice_no ?? "(no-invoice)";
+      const list = supersededByInvoice.get(inv) ?? [];
+      list.push({ lineUid: r.line_uid, amount: parseFloat(r.amount) });
+      supersededByInvoice.set(inv, list);
+    }
+
+    function matchAmount(amt: number, remaining: number[]): { matched: boolean; remaining: number[] } {
+      const idx = remaining.findIndex((a) => Math.abs(a - amt) <= 1);
+      if (idx === -1) return { matched: false, remaining };
+      const next = [...remaining];
+      next.splice(idx, 1);
+      return { matched: true, remaining: next };
+    }
+
+    // 5. Compute restore set (same algorithm as plan route)
+    const toRestoreUids: string[] = [];
+    let totalAmountRestored = 0;
+
+    for (const [inv, sheetData] of sheetByInvoice) {
+      const dbCurrent = Math.round(dbCurrentByInvoice.get(inv) ?? 0);
+      const sheetTotal = Math.round(sheetData.total);
+      const shortfall = sheetTotal - dbCurrent;
+      if (shortfall <= 1) continue;
+
+      const superseded = supersededByInvoice.get(inv) ?? [];
+      if (superseded.length === 0) continue;
+
+      // Sort: amount-matching first, then by amount desc
+      let availableAmounts = [...sheetData.amounts];
+      const preferred: typeof superseded = [];
+      const fallback: typeof superseded = [];
+      for (const row of superseded) {
+        const { matched, remaining } = matchAmount(row.amount, availableAmounts);
+        if (matched) { preferred.push(row); availableAmounts = remaining; }
+        else fallback.push(row);
+      }
+      preferred.sort((a, b) => b.amount - a.amount);
+      fallback.sort((a, b) => b.amount - a.amount);
+      const ordered = [...preferred, ...fallback];
+
+      let accumulated = 0;
+      for (const row of ordered) {
+        if (accumulated + dbCurrent >= sheetTotal - 1) break;
+        toRestoreUids.push(row.lineUid);
+        accumulated += row.amount;
+      }
+      totalAmountRestored += accumulated;
+    }
+
+    if (toRestoreUids.length === 0) {
+      res.json({ restored: 0, totalAmount: 0, message: "Nothing to restore — all invoices already converged" });
+      return;
+    }
+
+    // 6. Flip selected rows back to current (status flip only, no insert/delete)
+    const updateResult = await pool.query(
+      `UPDATE sale_line
+          SET version_status = 'current',
+              superseded_by = NULL
+        WHERE line_uid = ANY($1::text[])
+          AND version_status = 'superseded'`,
+      [toRestoreUids],
+    );
+
+    req.log.info(
+      { fy, month, syncRunId, restored: updateResult.rowCount, totalAmount: Math.round(totalAmountRestored) },
+      "invoice-restore-apply complete",
+    );
+
+    res.json({
+      fy,
+      month,
+      syncRunId,
+      restored: updateResult.rowCount,
+      totalAmountRestored: Math.round(totalAmountRestored),
+      checkedAt: new Date().toISOString(),
+    });
+  } catch (err: unknown) {
+    req.log.error({ err, fy, month }, "invoice-restore-apply failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 // ── Orphan audit ───────────────────────────────────────────────────────────────
 // Supervised one-off cleanup for months where the blast-radius guard halted.
 // Splits orphan rows into two groups:

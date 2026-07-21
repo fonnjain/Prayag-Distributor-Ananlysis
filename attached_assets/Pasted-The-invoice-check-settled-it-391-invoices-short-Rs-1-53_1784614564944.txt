@@ -1,0 +1,84 @@
+The invoice check settled it. 391 invoices short, Rs.1.53 Cr of real value
+removed, 219 invoices erased to zero, and ZERO invoices in excess - which
+disproves the "sheet has 547 duplicates" claim. The DB was not correct; it was
+short by exactly that value. The colour-mismatch hypothesis is confirmed.
+
+Restore the erased value. But the restore rule needs one correction, because as
+written it can leave invoices short.
+
+THE FLAW IN THE PROPOSED RULE
+
+Your rule: restore a superseded row unless a current row already covers the same
+(invoice, code, qty) ignoring colour.
+
+Failure case: invoice X, code C, qty 10 legitimately appears TWICE in the sheet
+as two colour variants - RED and BLUE, two separate billed lines. Suppose one
+colourless DB row was superseded. The colour-agnostic check sees "a current row
+already covers (X, C, 10)" and does NOT restore - leaving invoice X one line
+short. Presence is not enough when a line legitimately repeats.
+
+THE CORRECT RULE - CONVERGE TO THE INVOICE TOTAL
+
+The invoice total is ground truth. Restore to it, not to presence.
+
+For each of the 391 short invoices, restore superseded rows from syncRunId
+orphan-audit|2026-07-21T05:55:40.864Z belonging to that invoice, one at a time,
+until the invoice's DB current total equals its sheet total within rounding.
+Then stop.
+
+  - This cannot leave an invoice short - it converges to the sheet total.
+  - This cannot re-introduce a rate-edit duplicate - adding one would push the
+    DB ABOVE the sheet total, so the stop condition prevents it.
+  - Order the restoration so the CURRENT-rate version is preferred over an
+    old-rate version where both were superseded for the same line. If a row's
+    amount matches the sheet's amount for that line, restore that one first.
+
+For the 219 completely-absent invoices (DB rows = 0), all their lines were
+erased - restore until the invoice total matches, which will bring back
+essentially all of their superseded rows.
+
+For the 172 partially-present invoices, restore only the shortfall.
+
+DRY RUN FIRST
+
+Report before applying:
+  a) Per invoice: how many rows would be restored, and the invoice total before
+     and after (must land on the sheet total).
+  b) Total rows to be restored and total value.
+  c) Any invoice that CANNOT reach its sheet total by restoring superseded rows
+     - that would mean a line exists in the sheet that was never in the DB at
+     all, which is a different problem. List those separately. I expect none,
+     but if any appear, stop and show me.
+
+Expected outcome: DB current for Jul-26 converges to the sheet -
+approximately 3,175 rows / Rs.6,41,24,388 as of the last read, though re-read
+fresh since the sheet is still being edited. The Rs.1.53 Cr comes back.
+
+THEN RE-VERIFY
+
+After the restore, re-run the full invoice reconciliation. Every invoice must
+match within rounding. Report:
+  - matched invoice count (target: 640 of 640)
+  - any remaining short or excess, with the invoice list
+  - DB current total vs sheet total for Jul-26
+
+THE UNDERLYING BUG - fix it so this cannot recur
+
+The root cause is that pre-colour-capture rows have identity (invoice, code, '',
+qty) while their sheet equivalents have (invoice, code, RED, qty), so
+versionedSyncLines cannot match them and leaves them as permanent orphans. That
+is what made 2,310 rows look superseder-able when they were really the only copy
+of their line.
+
+Do NOT leave this as a manual cleanup. Report your proposed fix - two options to
+consider:
+  - a one-time backfill that assigns colours to the pre-colour-capture rows by
+    matching them to their sheet lines, collapsing the two identities into one, OR
+  - a migration that re-keys those rows once and for all
+Report the approach, the affected row count across ALL months (not just July),
+and whether any other month has the same colourless-orphan population waiting to
+cause the same problem. Do not apply it yet - report first.
+
+Constraints: restore is a status flip on already-superseded rows, no deletion,
+no new data. Drive read-only. Secondary untouched. Dry run and report before
+applying the restore OR the colour fix.
