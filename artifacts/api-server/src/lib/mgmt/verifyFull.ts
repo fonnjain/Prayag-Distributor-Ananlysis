@@ -558,18 +558,24 @@ async function runSaleOrderBookingSet(): Promise<CheckGroup> {
   // The sale anchor (₹73.22 Cr) lives in primary_anchors and is verified by C2/Set 2.
   // C4 compares order-booking against an order-booking anchor (~₹83.93 Cr).
   const obs2627 = orderBookSale2627.status === "fulfilled" ? orderBookSale2627.value : null;
-  // Order-booking anchor for FY2026-27: live order book total per STATE HEAD DASHBOARD.
-  // Use actual value from the file if it is available and self-consistent; otherwise
-  // fall back to the last-known anchor (₹83.93 Cr).
-  const orderBookAnchor2627 = 839300000; // ₹83.93 Cr — order booking, not sale
+  // Order-booking anchor for FY2026-27: floor check only.
+  // FY2026-27 is an open FY — order booking grows every month, so a point-in-time
+  // equality check will fail as soon as the book grows past the anchor.  The correct
+  // invariant is: actual >= floor (data is loading and non-trivially large).
+  // Floor = ₹83.93 Cr (first measured value, set Jul-2026).
+  const orderBookFloor2627 = 839300000; // ₹83.93 Cr — floor, not equality anchor
   if (obs2627 && !obs2627.error && obs2627.total > 0) {
-    checks.push(moneyCheck(
-      "C4_fy2627_order_booking",
-      "C4 — FY2026-27 Primary Order Booking (taxable value, order-book sheet)",
-      orderBookAnchor2627,
-      obs2627.total,
-      `Source: Order Book FY2026-27 (sheet 1HFBAtv…). This is ORDER BOOKING (not Sale). Sale (₹73.22 Cr) is a separate measure verified in Set 2 / C2. Anchor: ₹83.93 Cr.`,
-    ));
+    const passes = obs2627.total >= orderBookFloor2627;
+    checks.push({
+      key: "C4_fy2627_order_booking",
+      label: "C4 — FY2026-27 Primary Order Booking (taxable value, order-book sheet)",
+      unit: "money",
+      expected: orderBookFloor2627,
+      actual: obs2627.total,
+      deltaPct: ((obs2627.total - orderBookFloor2627) / orderBookFloor2627) * 100,
+      status: passes ? "pass" : "fail",
+      note: `Source: Order Book FY2026-27 (sheet 1HFBAtv…). Floor check: actual must be >= ₹83.93 Cr (first measured). Open FY — order book grows each month; equality check would false-fail. Current: ₹${(obs2627.total / 1e7).toFixed(2)} Cr.`,
+    });
   } else {
     const errNote = obs2627?.error
       ? `Load error: ${obs2627.error}`

@@ -117,6 +117,7 @@ export async function loadStateHeadSale(fy: string): Promise<StateHeadSaleResult
     for (const tab of dataTabs) {
       let taxColIdx = -1;
       let headColIdx = -1;
+      let fyYearIdx = -1;
       let headerFound = false;
       let tabRows = 0;
 
@@ -128,14 +129,22 @@ export async function loadStateHeadSale(fy: string): Promise<StateHeadSaleResult
           if (!headerFound) {
             // Header can appear in first 30 rows (some sheets have multi-row titles).
             if (globalRow > 30) continue;
-            const tIdx = findCol(row, /taxable\s*value/i);
-            const hIdx = findCol(row, /state\s*head/i);
+            const tIdx = findCol(row, /taxable\s*(value|amount)|^amount$/i);
+            const hIdx = findCol(row, /state\s*head|^head$|^tm\s*(name)?$|^rsm$|^sm$|sales\s*head|^zone$/i);
             if (tIdx >= 0 && hIdx >= 0) {
               taxColIdx = tIdx;
               headColIdx = hIdx;
+              // FY YEAR column — some workbooks hold two FYs in one tab.
+              fyYearIdx = findCol(row, /^fy[\s_-]?year$/i);
               headerFound = true;
             }
             continue;
+          }
+
+          // FY YEAR filter: workbooks that hold two fiscal years use "FY-YYYY-YY".
+          if (fyYearIdx >= 0) {
+            const fyVal = strVal(row[fyYearIdx]);
+            if (fyVal && fyVal !== `FY-${fy}`) continue;
           }
 
           const head = strVal(row[headColIdx]);

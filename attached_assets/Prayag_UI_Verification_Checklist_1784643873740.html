@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prayag - UI Verification Checklist</title>
+<style>
+  :root{
+    --navy:#1F3864; --navy2:#2E5C8A; --line:#D8E0EC; --bg:#F7F9FC;
+    --good:#2E7D32; --goodbg:#E4F1E4; --warn:#B54708; --warnbg:#FBEEE0;
+    --red:#C0202C; --redbg:#FBE7E7; --ink:#1a2230; --mut:#5b6472;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.5;padding:0 0 80px;}
+  header{background:var(--navy);color:#fff;padding:26px 28px 22px;}
+  header h1{margin:0 0 4px;font-size:22px;letter-spacing:.2px;}
+  header p{margin:0;font-size:13.5px;color:#cdd8ea;}
+  .wrap{max-width:940px;margin:0 auto;padding:0 20px;}
+  .bar{position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid var(--line);
+    padding:12px 20px;display:flex;align-items:center;gap:16px;box-shadow:0 1px 4px rgba(0,0,0,.04);}
+  .bar .count{font-weight:700;color:var(--navy);font-size:15px;}
+  .track{flex:1;height:8px;background:#e9eef6;border-radius:6px;overflow:hidden;}
+  .track > i{display:block;height:100%;width:0;background:var(--good);transition:width .25s;}
+  .bar button{border:1px solid var(--line);background:#fff;color:var(--mut);
+    padding:6px 12px;border-radius:7px;font-size:12.5px;cursor:pointer;}
+  .bar button:hover{background:var(--bg);}
+  .intro{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:22px 0;}
+  .intro b{color:var(--navy);}
+  .intro .why{background:var(--warnbg);border-left:3px solid var(--warn);padding:10px 14px;
+    border-radius:6px;margin-top:12px;font-size:13.5px;}
+  section{margin:26px 0 8px;}
+  .sec-h{display:flex;align-items:baseline;gap:10px;margin:0 0 4px;}
+  .sec-h h2{font-size:16px;color:var(--navy);margin:0;}
+  .sec-h .pg{font-size:12px;color:var(--mut);background:#eef3fa;border:1px solid var(--line);
+    padding:2px 9px;border-radius:20px;}
+  .sec-sub{font-size:13px;color:var(--mut);margin:0 0 14px;}
+  .card{background:#fff;border:1px solid var(--line);border-radius:11px;padding:0;margin:12px 0;
+    overflow:hidden;transition:border-color .2s,box-shadow .2s;}
+  .card.ok{border-color:#bcdcbc;box-shadow:0 0 0 1px #bcdcbc inset;}
+  .card.fail{border-color:#e6b6ba;box-shadow:0 0 0 1px #e6b6ba inset;}
+  .card-top{display:flex;gap:14px;padding:15px 17px;cursor:pointer;align-items:flex-start;}
+  .chk{flex:none;width:22px;height:22px;border:2px solid #c3ccda;border-radius:6px;margin-top:1px;
+    display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff;
+    background:#fff;transition:.15s;}
+  .card.ok .chk{background:var(--good);border-color:var(--good);}
+  .card.fail .chk{background:var(--red);border-color:var(--red);}
+  .ct-body{flex:1;min-width:0;}
+  .ct-title{font-weight:650;font-size:14.5px;margin:0 0 3px;}
+  .ct-look{font-size:13.5px;color:var(--mut);margin:0;}
+  .ct-look .exp{color:var(--good);font-weight:600;}
+  .expect{padding:0 17px 15px 53px;font-size:13px;color:var(--ink);}
+  .expect .row{display:flex;gap:8px;padding:3px 0;align-items:flex-start;}
+  .expect .k{flex:none;font-weight:600;color:var(--navy2);min-width:74px;}
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;
+    text-transform:uppercase;letter-spacing:.4px;vertical-align:middle;}
+  .pill.pass{background:var(--goodbg);color:var(--good);}
+  .pill.fail{background:var(--redbg);color:var(--red);}
+  .flags{display:flex;gap:8px;padding:8px 17px 16px 53px;}
+  .flags button{flex:1;border:1px solid var(--line);background:#fff;padding:8px;border-radius:8px;
+    font-size:12.5px;font-weight:600;cursor:pointer;color:var(--mut);}
+  .flags button.y{border-color:#bcdcbc;color:var(--good);}
+  .flags button.y.on{background:var(--goodbg);}
+  .flags button.n{border-color:#e6b6ba;color:var(--red);}
+  .flags button.n.on{background:var(--redbg);}
+  .canary{background:var(--warnbg);border-left:3px solid var(--warn);padding:2px 12px;
+    margin:0 17px 15px 53px;border-radius:6px;font-size:12.5px;color:#6b3d10;}
+  .note{margin:0 17px 16px 53px;}
+  .note textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;
+    font-size:13px;font-family:inherit;resize:vertical;min-height:0;height:34px;color:var(--ink);
+    transition:height .15s;}
+  .note textarea:focus{height:64px;outline:2px solid #cdddf2;}
+  footer.sum{background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px;margin:26px 0;}
+  footer.sum h2{margin:0 0 12px;font-size:16px;color:var(--navy);}
+  .sumline{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed var(--line);font-size:13.5px;}
+  .sumline:last-child{border:none;}
+  .sumline b{color:var(--navy);}
+  .fails-box{margin-top:12px;padding:12px 14px;background:var(--redbg);border-radius:8px;font-size:13px;display:none;}
+  .fails-box.show{display:block;}
+  .fails-box h4{margin:0 0 6px;color:var(--red);font-size:13px;}
+  .fails-box li{margin:3px 0;}
+  .tiny{font-size:11.5px;color:var(--mut);margin-top:6px;}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap" style="padding:0;">
+    <h1>State Head UI Verification</h1>
+    <p>The one check no query can do &mdash; confirm a person sees the right number under the right label. ~30 min, app open.</p>
+  </div>
+</header>
+
+<div class="bar">
+  <div class="wrap" style="display:flex;align-items:center;gap:16px;padding:0;width:100%;">
+    <span class="count" id="count">0 / 12 checked</span>
+    <div class="track"><i id="fill"></i></div>
+    <button onclick="resetAll()">Reset</button>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="intro">
+    Every verification this project has run was at the database level &mdash; achievement equals received &divide; plan, row counts reconcile, totals match anchors. <b>None of it confirmed what a State Head actually sees on screen.</b> A correct value can sit under the wrong label, for the wrong period. That gap is what this closes.
+    <div class="why">Tap each card to see exactly what to look for. Mark <b>Pass</b> or <b>Fail</b>. The failures collect at the bottom so you know precisely what to send back. Nothing here is saved to a server &mdash; it lives in this page only.</div>
+  </div>
+
+  <!-- SECTION 1 -->
+  <section>
+    <div class="sec-h"><h2>1. The achievement label</h2><span class="pg">FY2026-27 &middot; company / overview</span></div>
+    <p class="sec-sub">The single most important thing to get right. Two correct numbers exist; only one belongs on screen.</p>
+  </section>
+
+  <div class="card" data-id="1">
+    <div class="card-top" onclick="tog(1)">
+      <div class="chk">&#10003;</div>
+      <div class="ct-body">
+        <p class="ct-title">Q1 achievement reads roughly <span style="color:var(--good)">74%</span></p>
+        <p class="ct-look">Not 15.86%. Not any mid-teens figure labelled &ldquo;achievement.&rdquo;</p>
+      </div>
+    </div>
+    <div class="expect" style="display:none">
+      <div class="row"><span class="k">Look for</span><span>The headline FY2026-27 achievement / attainment figure on the company or overview view.</span></div>
+      <div class="row"><span class="k"><span class="pill pass">Pass</span></span><span>~74% (three closed months of sales against three months of plan).</span></div>
+      <div class="row"><span class="k"><span class="pill fail">Fail</span></span><span>~15.86% shown <i>as achievement</i>. That is annual progress &mdash; 3 months of sales against a 12-month plan &mdash; a different metric wearing the wrong name.</span></div>
+    </div>
+    <div class="canary" style="display:none"><b>Why it matters:</b> 15.86% and 74% are both arithmetically correct. This is the exact confusion the whole labelling effort was about. If you see 15.86% called achievement anywhere, that is a real fail to send back.</div>
+    <div class="flags" style="display:none">
+      <button class="y" onclick="mark(1,'ok',event)">&#10003; Pass</button>
+      <button class="n" onclick="mark(1,'fail',event)">&#10007; Fail</button>
+    </div>
+    <div class="note" style="display:none"><textarea placeholder="What you actually saw (number + label)..."></textarea></div>
+  </div>
+
+  <div class="card" data-id="2">
+    <div class="card-top" onclick="tog(2)">
+      <div class="chk">&#10003;</div>
+      <div class="ct-body">
+        <p class="ct-title">If annual progress is shown too, it is labelled differently</p>
+        <p class="ct-look">15.86% is fine to display &mdash; but as &ldquo;YTD vs annual plan,&rdquo; never as &ldquo;achievement.&rdquo;</p>
+      </div>
+    </div>
+    <div class="expect" style="display:none">
+      <div class="row"><span class="k">Look for</span><span>Any second percentage near the achievement figure.</span></div>
+      <div class="row"><span class="k"><span class="pill pass">Pass</span></span><span>It carries its own clear label (&ldquo;annual progress,&rdquo; &ldquo;YTD of full-year target&rdquo;) distinct from the ~74% achievement.</span></div>
+      <div class="row"><span class="k"><span class="pill fail">Fail</span></span><span>Two percentages both called &ldquo;achievement,&rdquo; or the annual one unlabelled and ambiguous.</span></div>
+    </div>
+    <div class="flags" style="display:none">
+      <button class="y" onclick="mark(2,'ok',event)">&#10003; Pass</button>
+      <button class="n" onclick="mark(2,'fail',event)">&#10007; Fail</button>
+    </div>
+    <div class="note" style="display:none"><textarea placeholder="Notes..."></textarea></div>
+  </div>
+
+  <!-- SECTION 2 -->
+  <section>
+    <div class="sec-h"><h2>2. July and the future months</h2><span class="pg">FY2026-27 &middot; monthly view</span></div>
+    <p class="sec-sub">An in-progress month and an unstarted month must not read as zero &mdash; zero looks like failure, not &ldquo;no data yet.&rdquo;</p>
+  </section>
+
+  <div class="card" data-id="3">
+    <div class="card-top" onclick="tog(3)">
+      <div class="chk">&#10003;</div>
+      <div class="ct-body">
+        <p class="ct-title">July reads &ldquo;in progress&rdquo; / &ldquo;partial&rdquo; &mdash; not 0%</p>
+        <p class="ct-look">July is open and mid-collection. It must not show a hard 0% or a red miss.</p>
+      </div>
+    </div>
+    <div class="expect" style="display:none">
+      <div class="row"><span class="k">Look for</span><span>The July cell / row in the FY2026-27 monthly breakdown.</span></div>
+      <div class="row"><span class="k"><span class="pill pass">Pass</span></span><span>&ldquo;In progress,&rdquo; &ldquo;partial,&rdquo; a provisional marker, or the live figure clearly flagged as not-yet-final.</span></div>
+      <div class="row"><span class="k"><span class="pill fail">Fail</span></span><span>July shows 0% or reads as a completed month that missed. That misrepresents an ongoing month as a failure.</span></div>
+    </div>
+    <div class="canary" style="display:none"><b>Bonus:</b> if July primary dispatch is marked <i>provisional</i>, that is the disputed-rows flag working. Note whether you see it.</div>
+    <div class="flags" style="display:none">
+      <button class="y" onclick="mark(3,'ok',event)">&#10003; Pass</button>
+      <button class="n" onclick="mark(3,'fail',event)">&#10007; Fail</button>
+    </div>
+    <div class="note" style="display:none"><textarea placeholder="Notes..."></textarea></div>
+  </div>
+
+  <div class="card" data-id="4">
+    <div class="card-top" onclick="tog(4)">
+      <div class="chk">&#10003;</div>
+      <div class="ct-body">
+        <p class="ct-title">Aug through Mar are blank &mdash; not 0%</p>
+        <p class="ct-look">Months that haven&rsquo;t happened should be empty or &ldquo;not yet,&rdquo; never zero.</p>
+      </div>
+    </div>
+    <div class="expect" style="display:none">
+      <div class="row"><span class="k">Look for</span><span>The Aug&ndash;Mar cells in the FY2026-27 monthly view.</span></div>
+      <div class="row"><span class="k"><span class="pill pass">Pass</span></span><span>Blank, dash, or &ldquo;not yet recorded.&rdquo;</span></div>
+      <div class="row"><span class="k"><span class="pill fail">Fail</span></span><span>0% or 0 values, which drag down any average and read as real misses.</span></div>
+    </div>
+    <div class="flags" style="display:none">
+      <button class="y" onclick="mark(4,'ok',event)">&#10003; Pass</button>
+      <button class="n" onclick="mark(4,'fail',event)">&#10007; Fail</button>
+    </div>
+    <div class="note" style="display:none"><textarea placeholder="Notes..."></textarea></div>
+  </div>
+
+  <div class="card" data-id="5">
+    <div class="card-top" onclick="tog(5)">
+      <div class="chk">&#10003;</div>
+      <div class="ct-body">
+        <p class="ct-title">The &ldquo;not yet recorded&rdquo; vs &ldquo;zero sales&rdquo; distinction</p>
+        <p class="ct-look">A month awaiting data must not read the same as a month with genuinely no business.</p>
+      </div>
+    </div>
+    <div class="expect" style="display:none">
+      <div class="row"><span class="k">Look for</span><span>Wording / tooltip on empty or partial months, and on the secondary side where the sheet updates in arrears.</span></div>
+      <div class="row"><span class="k"><span class="pill pass">Pass</span></span><span>&ldquo;Not yet recorded&rdquo; (neutral, awaiting entry) is visibly different from &ldquo;zero sales&rdquo; (real).</span></div>
+      <div class="row"><span class="k"><span class="pill fail">Fail</span></span><span>A data-entry lag looks identical to a performance collapse.</span></div>
+    </div>
+    <div class="canary" style="display:none"><b>This is the arrears guard&rsquo;s whole purpose.</b> On 1 Aug, if July secondary isn&rsquo;t updated, a State Head must not see every salesperson at 0%. Confirm the wording distinguishes the two states.</div>
+    <div class="flags" style="display:none">
+      <button class="y" onclick="mark(5,'ok',event)">&#10003; Pass</button>
+      <button class="n" onclick="mark(5,'fail',event)">&#10007; Fail</button>
+    </div>
+    <div class="note" style="display:none"><textarea placeholder="Notes..."></textarea></div>
+  </div>
+
+  <!-- SECTION 3 -->
+  <section>
+    <div class="sec-h"><h2>3. One State Head, end to end</h2><span class="pg">Anant Singh &middot; state head page</span></div>
+    <p class="sec-sub">Pick one head and sanity-check that the parts add up to the whole.</p>
+  </section>
+
+  <div class="card" data-id="6">
+    <div class="card-top" onclick="tog(6)">
+      <div class="chk">&#10003;</div>
+      <div class="ct-body">
+        <p class="ct-title">Member figures look sane</p>
+        <p class="ct-look">Individual salespeople show believable numbers &mdash; no wild outliers, no unexplained zeros.</p>
+      </div>
+    </div>
+    <div class="expect" style="display:none">
+      <div class="row"><span class="k">Look for</span><span>Open Anant Singh&rsquo;s page; scan the per-member list.</span></div>
+      <div class="row"><span class="k"><span class="pill pass">Pass</span></span><span>Members carry plausible sales/achievement in the same range as each other.</span></div>
+      <div class="row"><span class="k"><span class="pill fail">Fail</span></span><span>A member at ₹0 who shouldn&rsquo;t be, or a figure orders of magnitude off.</span></div>
+    </div>
+    <div class="flags" style="display:none">
+      <button class="y" onclick="mark(6,'ok',event)">&#10003; Pass</button>
+      <button class="n" onclick="mark(6,'fail',event)">&#10007; Fail</button>
+    </div>
+    <div class="note" style="display:none"><textarea placeholder="Notes..."></textarea></div>
+  </div>
+
+  <div class="card" data-id="7">
+    <div class="card-top" onclick="tog(7)">
+      <div class="chk">&#10003;</div>
+      <div class="ct-body">
+        <p class="ct-title">Page total = sum of its members</p>
+        <p class="ct-look">The head&rsquo;s total should equal the members beneath it, added up.</p>
+      </div>
+    </div>
+    <div class="expect" style="display:none">
+      <div class="row"><span class="k">Look for</span><span>The page/header total vs a rough mental sum of the member rows.</span></div>
+      <div class="row"><span class="k"><span class="pill pass">Pass</span></span><span>They reconcile (within rounding).</span></div>
+      <div class="row"><span class="k"><span class="pill fail">Fail</span></span><span>Total noticeably exceeds or falls short of the members &mdash; a rollup or name-matching gap.</span></div>
+    </div>
+    <div class="flags" style="display:none">
+      <button class="y" onclick="mark(7,'ok',event)">&#10003; Pass</button>
+      <button class="n" onclick="mark(7,'fail',event)">&#10007; Fail</button>
+    </div>
+    <div class="note" style="display:none"><textarea placeholder="Notes..."></textarea></div>
+  </div>
+
+  <div class="card" data-id="8">
+    <div class="card-top" onclick="tog(8)">
+      <div class="chk">&#10003;</div>
+      <div class="ct-body">
+        <p class="ct-title">A member with no plan reads &ldquo;no target&rdquo; &mdash; not 0%</p>
+        <p class="ct-look">Someone without a target set should be undefined, not shown as 0% achievement.</p>
+      </div>
+    </div>
+    <div class="expect" style="display:none">
+      <div class="row"><span class="k">Look for</span><span>Any member lacking a plan/target figure.</span></div>
+      <div class="row"><span class="k"><span class="pill pass">Pass</span></span><span>&ldquo;No target,&rdquo; &ldquo;&mdash;,&rdquo; or &ldquo;undefined&rdquo; for their achievement.</span></div>
+      <div class="row"><span class="k"><span class="pill fail">Fail</span></span><span>0% shown, implying total failure when really no goal was set (dividing by an absent plan).</span></div>
+    </div>
+    <div class="flags" style="display:none">
+      <button class="y" onclick="mark(8,'ok',event)">&#10003; Pass</button>
+      <button class="n" onclick="mark(8,'fail',event)">&#10007; Fail</button>
+    </div>
+    <div class="note" style="display:none"><textarea placeholder="Notes..."></textarea></div>
+  </div>
+
+  <!-- SECTION 4 -->
+  <section>
+    <div class="sec-h"><h2>4. The canary &amp; the tiles</h2><span class="pg">overview &middot; per-head</span></div>
+    <p class="sec-sub">Two quick confirmations that the numbers we fought hardest for are still on screen and correct.</p>
+  </section>
+
+  <div class="card" data-id="9">
+    <div class="card-top" onclick="tog(9)">
+      <div class="chk">&#10003;</div>
+      <div class="ct-body">
+        <p class="ct-title">Biju C.O shows ~₹5.82 Cr &mdash; never ₹0</p>
+        <p class="ct-look">The name-normalisation canary. Zero here means ~₹10 Cr silently missing from per-head views.</p>
+      </div>
+    </div>
+    <div class="expect" style="display:none">
+      <div class="row"><span class="k">Look for</span><span>Biju C.O in the per-head / state-head listing (order booking).</span></div>
+      <div class="row"><span class="k"><span class="pill pass">Pass</span></span><span>~₹5.82 Cr.</span></div>
+      <div class="row"><span class="k"><span class="pill fail">Fail</span></span><span>₹0 or missing &mdash; the alias map isn&rsquo;t applied on that path, and the company total reconciles while ~₹10 Cr vanishes from per-head.</span></div>
+    </div>
+    <div class="canary" style="display:none"><b>This is a canary, not a coincidence.</b> Biju C.O reading ₹0 has been a real failure mode before. If it&rsquo;s zero, that&rsquo;s the single highest-value thing to send back.</div>
+    <div class="flags" style="display:none">
+      <button class="y" onclick="mark(9,'ok',event)">&#10003; Pass</button>
+      <button class="n" onclick="mark(9,'fail',event)">&#10007; Fail</button>
+    </div>
+    <div class="note" style="display:none"><textarea placeholder="What Biju C.O actually shows..."></textarea></div>
+  </div>
+
+  <div class="card" data-id="10">
+    <div class="card-top" onclick="tog(10)">
+      <div class="chk">&#10003;</div>
+      <div class="ct-body">
+        <p class="ct-title">Overview tiles unchanged: ~₹341.73 Cr &amp; ~₹361.14 Cr</p>
+        <p class="ct-look">FY2024-25 and FY2025-26 primary sale tiles should read as before &mdash; the tank/dedup work must not have moved revenue.</p>
+      </div>
+    </div>
+    <div class="expect" style="display:none">
+      <div class="row"><span class="k">Look for</span><span>The primary sale tiles for FY2024-25 and FY2025-26 on the overview.</span></div>
+      <div class="row"><span class="k"><span class="pill pass">Pass</span></span><span>~₹341.73 Cr (24-25) and ~₹361.14 Cr (25-26).</span></div>
+      <div class="row"><span class="k"><span class="pill fail">Fail</span></span><span>Either has shifted &mdash; revenue moved when only quantity should have.</span></div>
+    </div>
+    <div class="flags" style="display:none">
+      <button class="y" onclick="mark(10,'ok',event)">&#10003; Pass</button>
+      <button class="n" onclick="mark(10,'fail',event)">&#10007; Fail</button>
+    </div>
+    <div class="note" style="display:none"><textarea placeholder="Tile values seen..."></textarea></div>
+  </div>
+
+  <div class="card" data-id="11">
+    <div class="card-top" onclick="tog(11)">
+      <div class="chk">&#10003;</div>
+      <div class="ct-body">
+        <p class="ct-title">Data Health page loads and shows the anchor table</p>
+        <p class="ct-look">The per-month DB-vs-sheet anchor check should render, with July reconciled.</p>
+      </div>
+    </div>
+    <div class="expect" style="display:none">
+      <div class="row"><span class="k">Look for</span><span>Open the Data Health tab; find the live-sync anchor section.</span></div>
+      <div class="row"><span class="k"><span class="pill pass">Pass</span></span><span>Per-month rows render; FY2026-27 months show small/zero gaps; July DB matches sheet.</span></div>
+      <div class="row"><span class="k"><span class="pill fail">Fail</span></span><span>Page errors, or July still shows a large gap (tank/dedup cleanup didn&rsquo;t hold on screen).</span></div>
+    </div>
+    <div class="flags" style="display:none">
+      <button class="y" onclick="mark(11,'ok',event)">&#10003; Pass</button>
+      <button class="n" onclick="mark(11,'fail',event)">&#10007; Fail</button>
+    </div>
+    <div class="note" style="display:none"><textarea placeholder="Notes..."></textarea></div>
+  </div>
+
+  <div class="card" data-id="12">
+    <div class="card-top" onclick="tog(12)">
+      <div class="chk">&#10003;</div>
+      <div class="ct-body">
+        <p class="ct-title">Report 4 tank rows show litres, labelled &ldquo;Ltr&rdquo;</p>
+        <p class="ct-look">Water tank quantities render as large litre figures with the Ltr unit &mdash; not tiny piece counts.</p>
+      </div>
+    </div>
+    <div class="expect" style="display:none">
+      <div class="row"><span class="k">Look for</span><span>Report 4 (quantity by group), the WATER TANK rows.</span></div>
+      <div class="row"><span class="k"><span class="pill pass">Pass</span></span><span>Litre-scale numbers (thousands+), unit reads &ldquo;Ltr.&rdquo;</span></div>
+      <div class="row"><span class="k"><span class="pill fail">Fail</span></span><span>Tiny piece counts (2, 5, 40) shown as the tank quantity &mdash; the qty_ltr switch didn&rsquo;t reach this view.</span></div>
+    </div>
+    <div class="flags" style="display:none">
+      <button class="y" onclick="mark(12,'ok',event)">&#10003; Pass</button>
+      <button class="n" onclick="mark(12,'fail',event)">&#10007; Fail</button>
+    </div>
+    <div class="note" style="display:none"><textarea placeholder="Notes..."></textarea></div>
+  </div>
+
+  <footer class="sum">
+    <h2>Result</h2>
+    <div class="sumline"><span>Checked</span><b id="s-done">0 / 12</b></div>
+    <div class="sumline"><span>Passed</span><b id="s-pass" style="color:var(--good)">0</b></div>
+    <div class="sumline"><span>Failed</span><b id="s-fail" style="color:var(--red)">0</b></div>
+    <div class="fails-box" id="failsbox">
+      <h4>Send these back to Replit:</h4>
+      <ul id="failslist"></ul>
+    </div>
+    <p class="tiny">This checklist stays in your browser only &mdash; nothing is sent anywhere. Any failure above is a concrete, labelled issue you can hand straight to the agent.</p>
+  </footer>
+
+</div>
+
+<script>
+  var TITLES={};
+  document.querySelectorAll('.card').forEach(function(c){
+    TITLES[c.dataset.id]=c.querySelector('.ct-title').textContent.trim();
+  });
+
+  function tog(id){
+    var c=document.querySelector('.card[data-id="'+id+'"]');
+    var open=c.dataset.open==='1';
+    c.dataset.open=open?'0':'1';
+    ['.expect','.flags','.note','.canary'].forEach(function(sel){
+      var el=c.querySelector(sel); if(el) el.style.display=open?'none':'';
+    });
+  }
+  function mark(id,state,ev){
+    if(ev) ev.stopPropagation();
+    var c=document.querySelector('.card[data-id="'+id+'"]');
+    if(c.classList.contains(state)){ c.classList.remove('ok','fail'); }
+    else { c.classList.remove('ok','fail'); c.classList.add(state); }
+    var yes=c.querySelector('.flags .y'), no=c.querySelector('.flags .n');
+    yes.classList.toggle('on',c.classList.contains('ok'));
+    no.classList.toggle('on',c.classList.contains('fail'));
+    refresh();
+  }
+  function refresh(){
+    var cards=document.querySelectorAll('.card');
+    var done=0,pass=0,fail=0,fails=[];
+    cards.forEach(function(c){
+      if(c.classList.contains('ok')){done++;pass++;}
+      else if(c.classList.contains('fail')){done++;fail++;
+        var n=c.querySelector('textarea').value.trim();
+        fails.push({t:TITLES[c.dataset.id],n:n});
+      }
+    });
+    document.getElementById('count').textContent=done+' / 12 checked';
+    document.getElementById('fill').style.width=(done/12*100)+'%';
+    document.getElementById('s-done').textContent=done+' / 12';
+    document.getElementById('s-pass').textContent=pass;
+    document.getElementById('s-fail').textContent=fail;
+    var box=document.getElementById('failsbox'), list=document.getElementById('failslist');
+    if(fail>0){box.classList.add('show');list.innerHTML=fails.map(function(f){
+      return '<li><b>'+f.t+'</b>'+(f.n?' &mdash; '+f.n.replace(/</g,'&lt;'):'')+'</li>';}).join('');}
+    else{box.classList.remove('show');list.innerHTML='';}
+  }
+  function resetAll(){
+    document.querySelectorAll('.card').forEach(function(c){
+      c.classList.remove('ok','fail');c.dataset.open='0';
+      ['.expect','.flags','.note','.canary'].forEach(function(sel){
+        var el=c.querySelector(sel); if(el) el.style.display='none';});
+      c.querySelectorAll('.flags button').forEach(function(b){b.classList.remove('on');});
+      var t=c.querySelector('textarea'); if(t) t.value='';
+    });
+    refresh();
+  }
+  document.querySelectorAll('textarea').forEach(function(t){t.addEventListener('input',refresh);});
+  refresh();
+</script>
+</body>
+</html>
