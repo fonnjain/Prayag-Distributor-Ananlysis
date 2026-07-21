@@ -7,7 +7,7 @@ import {
 } from "../lib/registers/reconcileVersions.js";
 import { tombstoneOrphans, identityKey } from "../lib/registers/ingest.js";
 import { readRegisterFromSheets } from "../lib/registers/sheetsRegister.js";
-import { listSheetTabs, readTabSample, readTabRowsChunked } from "../lib/registers/sheetsApi.js";
+import { listSheetTabs, readTabSample, readTabRowsChunked, getGoogleAccessToken } from "../lib/registers/sheetsApi.js";
 import {
   OccurrenceCounter,
   emptyUnmapped,
@@ -3314,6 +3314,64 @@ router.get("/registers/:fy/sync-dry-run", async (req, res) => {
     });
   } catch (err: unknown) {
     req.log.error({ err, fy }, "sync-dry-run failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
+ * GET /registers/sap-coverage-check
+ * Searches Drive for SAP-format workbooks for closed FYs (2023-24, 2024-25, 2025-26).
+ * Uses the parent folder of the known FY2026-27 SAP file as the starting point,
+ * then does a broader name-based search. Read-only diagnostic.
+ */
+router.get("/registers/sap-coverage-check", async (req, res) => {
+  try {
+    const token = await getGoogleAccessToken();
+    const knownSapId = "19Oj6P2cSZmXNGfDro9K_ubfrfPp_03K14vOTrq_gdyI";
+
+    // 1. Get parent folders of the known SAP file
+    const metaResp = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${knownSapId}?fields=id,name,parents`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    const meta = await metaResp.json() as { id: string; name: string; parents?: string[] };
+    const parentId = meta.parents?.[0] ?? null;
+
+    // 2. List spreadsheets in the same folder
+    let folderFiles: { id: string; name: string; modifiedTime: string }[] = [];
+    if (parentId) {
+      const folderResp = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
+          `'${parentId}' in parents and mimeType = 'application/vnd.google-apps.spreadsheet'`,
+        )}&fields=files(id,name,modifiedTime)&pageSize=50`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      const folderData = await folderResp.json() as { files: typeof folderFiles };
+      folderFiles = folderData.files ?? [];
+    }
+
+    // 3. Name-based Drive search for SAP-related files
+    const searches = [
+      "name contains 'SAP' and mimeType = 'application/vnd.google-apps.spreadsheet'",
+      "name contains 'SALE SHEET' and mimeType = 'application/vnd.google-apps.spreadsheet'",
+    ];
+    const nameResults: { query: string; files: { id: string; name: string; modifiedTime: string }[] }[] = [];
+    for (const q of searches) {
+      const r = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)&pageSize=30`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      const d = await r.json() as { files: { id: string; name: string; modifiedTime: string }[] };
+      nameResults.push({ query: q, files: d.files ?? [] });
+    }
+
+    res.json({
+      knownSapFile: { id: knownSapId, name: meta.name, parentFolderId: parentId },
+      sameFolder: folderFiles,
+      nameSearch: nameResults,
+    });
+  } catch (err: unknown) {
+    req.log.error({ err }, "sap-coverage-check failed");
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });

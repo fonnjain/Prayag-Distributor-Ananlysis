@@ -1,0 +1,68 @@
+Decision made: qty = SAP PIECES, with a derived litres field for volume
+reports. Reasons: consistency (every non-tank row is pieces), SAP is the billed
+truth and SAP is pieces, and pieces is the only representation you can
+regenerate litres FROM - the current broken "one-tank-litres" can compute
+neither. Option 3.
+
+But two things must be settled before scoping, and one gates whether this is a
+single fix or two.
+
+1. THE DB IS IN THREE STATES - DO NOT FIX THEM AS ONE CLASS
+
+Your own sample proved it:
+  State 1  DB = one tank's litres   (the bug)        needs correcting
+  State 2  DB = total litres         (already whole)  must NOT be re-multiplied
+  State 3  SAP = 1 tank              (both agree)      already correct as pieces? no -
+           500 litres is still not 1 piece
+
+The 13,016 flag lumps all three together. A blanket transform corrupts State 2
+(re-multiplying already-total rows) and mishandles State 3. The fix must
+classify each row's current state FIRST, then apply the right correction to
+each - never one transform across all.
+
+Report, per FY: how many rows are in State 1, State 2, and State 3. That is the
+real shape of the job.
+
+2. DOES AN SAP SOURCE EXIST FOR THE CLOSED YEARS? - this gates everything
+
+To set qty = pieces you need SAP, because the SHEET has no piece count - only
+total litres. You have SAP for FY2026-27 (Combined tab). Confirm, read-only:
+
+  - Is there an SAP dump in Drive for FY2023-24, FY2024-25, FY2025-26? Search
+    for SALE SHEET SAP files for those years. Report the file IDs or confirm
+    none exist.
+
+If SAP exists for the closed years: all four years fix to pieces directly from
+SAP. One clean approach.
+
+If SAP does NOT exist for the closed years: those years can only be fixed by
+INFERENCE, and only partially -
+  - State 2 rows (DB already total litres): pieces = total_litres / per_tank,
+    derivable, safe.
+  - State 1 rows (DB one-tank litres): pieces is NOT recoverable from the DB
+    alone - one-tank litres carries no piece count. These would be stuck at
+    "we know it's wrong but can't set the true pieces" unless the sheet's total
+    litres can supply it: pieces = sheet_total_litres / per_tank. That works IF
+    the sheet still holds that line. So the closed-year fix may lean on the
+    SHEET's total litres (not pieces, but divisible) rather than SAP.
+
+Report which closed years have SAP. That decides whether we scope one fix
+(SAP-driven, all years) or two (SAP for 26-27, sheet-litres-divided for closed
+years).
+
+3. THE 10 UNRESOLVED FROM EARLIER - fold them in
+The 10 rows where no exact-colour match existed are the same multi-variant
+lookup problem. Under a piece-based fix keyed on (invoice, code, colour) with
+colour now populated, check whether they resolve. Report how many remain
+genuinely ambiguous.
+
+4. THE DERIVED LITRES FIELD - confirm the reports can switch
+The volume reports (Report 4, the qty comparisons, per-unit realisation)
+currently read sale_line.qty. Once qty becomes pieces, those must read the new
+derived litres field for tanks. Confirm the schema can take a qty_ltr column and
+that those specific reports can be pointed at it. Do not build - confirm
+feasibility so we scope once.
+
+Report 1 and 2 first. State 2's existence means there is NO single transform,
+and the SAP-for-closed-years answer decides the whole architecture. Pause stays
+on. Nothing written.
