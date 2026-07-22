@@ -320,6 +320,42 @@ export const GetMgmtDeepDiveResponse = zod.object({
   "directDealersCount": zod.number().nullish(),
   "extra": zod.record(zod.string(), zod.unknown()).optional()
 }).nullish(),
+  "retailerDetail": zod.object({
+  "status": zod.enum(['ok', 'not-mapped', 'error', 'loading']).describe('\'ok\' — retailer table loaded successfully. \'not-mapped\' — member has no working sheet mapped yet; Phase 1 KPIs still returned. \'error\' — sheet could not be read.\n'),
+  "error": zod.string().nullish().describe('Human-readable reason when status is not \'ok\'.'),
+  "fileId": zod.string().nullish().describe('Google Sheets file ID of the member\'s working sheet.'),
+  "tabName": zod.string().nullish().describe('Name of the tab that was read.'),
+  "rows": zod.array(zod.object({
+  "name": zod.string(),
+  "district": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "distributor": zod.string().nullish(),
+  "distanceKm": zod.number().nullish(),
+  "businessPlan": zod.number().nullish(),
+  "visitsRequired": zod.number().nullish(),
+  "orderBooking": zod.number(),
+  "sale": zod.number(),
+  "totalVisit": zod.number().nullish(),
+  "achievementPct": zod.number().nullish(),
+  "isActive": zod.boolean()
+})).nullish(),
+  "spread": zod.object({
+  "totalRetailers": zod.number(),
+  "activeRetailers": zod.number().describe('Retailers with OB > 0 or Sale > 0.'),
+  "dormantRetailers": zod.number(),
+  "activePct": zod.number().describe('activeRetailers \/ totalRetailers × 100.'),
+  "totalOrderBooking": zod.number(),
+  "totalSale": zod.number(),
+  "totalVisits": zod.number().nullish(),
+  "top5ObShare": zod.number().nullish().describe('Top-5 retailers\' OB share (%).'),
+  "top10ObShare": zod.number().nullish().describe('Top-10 retailers\' OB share (%).'),
+  "concentrationIndex": zod.number().nullish().describe('HHI: 0–10000; higher = more concentrated.'),
+  "businessPerActiveRetailer": zod.number().nullish(),
+  "businessPerVisit": zod.number().nullish(),
+  "annualBusinessPlan": zod.number().nullish().describe('From the member\'s own FY tab; preferred over col-W sum.')
+}).nullish(),
+  "rowsRead": zod.number().nullish()
+}).nullish().describe('Phase 2: retailer-level detail from the member\'s own working sheet. Null when no member is selected. status=\'not-mapped\' when the member has no sheet ID in the config; status=\'error\' on read failure. Phase 1 KPIs are always returned regardless of this field.\n'),
   "rowsRead": zod.number().describe('Total rows read from the Data tab.'),
   "error": zod.string().nullish()
 })

@@ -21,6 +21,10 @@ import {
   type SheetCellValue,
   type SheetTab,
 } from "../registers/sheetsApi.js";
+import {
+  loadMemberSheet,
+  type MemberSheetData,
+} from "./memberSheet.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -109,6 +113,7 @@ export type DeepDiveDataResult = {
   stateHeads: string[];              // All distinct state heads in the Data tab
   members: MemberRef[];              // All members (or filtered by stateHead)
   kpis: MemberKpis | null;          // null when member not specified or not found
+  retailerDetail: MemberSheetData | null; // Phase 2: retailer-level detail from member's own sheet
   rowsRead: number;
   error: string | null;
 };
@@ -502,6 +507,7 @@ export async function loadDeepDiveData(
       stateHeads: [],
       members: [],
       kpis: null,
+      retailerDetail: null,
       rowsRead: 0,
       error: `Could not load the 'Data' tab for FY ${fy}. The sheet may not be connected or the tab name may differ.`,
     };
@@ -542,11 +548,34 @@ export async function loadDeepDiveData(
     }
   }
 
+  // Phase 2: load retailer-level detail from the member's own working sheet.
+  // We race the Sheets read against a short timeout so Phase 1 KPIs always
+  // respond quickly. On a cache miss, the background read continues; a
+  // re-selection of the same member will serve the cached result instantly.
+  const MEMBER_SHEET_TIMEOUT_MS = 8_000;
+  let retailerDetail: MemberSheetData | null = null;
+  if (selectedMemberKey && kpis) {
+    const loadPromise = loadMemberSheet(selectedMemberKey, kpis.name, fy);
+    const timeoutPromise = new Promise<MemberSheetData>((resolve) =>
+      setTimeout(
+        () =>
+          resolve({
+            status: "loading",
+            error:
+              "Retailer data is loading in the background. Re-select this member in 30–60 seconds to see the retailer detail.",
+          }),
+        MEMBER_SHEET_TIMEOUT_MS,
+      ),
+    );
+    retailerDetail = await Promise.race([loadPromise, timeoutPromise]);
+  }
+
   return {
     fy,
     stateHeads,
     members,
     kpis,
+    retailerDetail,
     rowsRead: entry.rowsRead,
     error: null,
   };

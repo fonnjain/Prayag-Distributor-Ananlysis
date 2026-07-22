@@ -1,46 +1,45 @@
 // Member's own working sheet reader — source B for Sales Deep Dive Phase 2.
 //
 // Each field representative has a personal Google Sheets workbook.
-// This module reads the 'Summary Report 2026-27' tab, parses the retailer-level
+// This module reads the 'Summary Report <FY>' tab, parses the retailer-level
 // order booking, sale, visit count, and business plan for that member, then
 // computes spread/concentration metrics.
 //
-// Column layout (0-indexed, col A = 0):
+// Column layout is HEADER-DETECTED at runtime (not hardcoded), because
+// individual member sheets may have columns in different positions.
+// The canonical column names (fallback indices below) follow the original spec:
 //   C(2)  = Retailer name
 //   D(3)  = District
 //   E(4)  = City
 //   F(5)  = Assigned distributor
 //   G(6)  = Distance km
-//   W(22) = Business Plan (per retailer)
-//   X(23) = Visits Required
+//   W(22) = Business Plan (per retailer)   [may be swapped with X in some sheets]
+//   X(23) = Visits Required               [may be swapped with W in some sheets]
 //   Z(25) = Order Booking (NET, Sub Total)
 //   AA(26)= Sale received
 //   AB(27)= Total Visits (YTD cumulative)
-//   AD(29)= Achievement % — parsed but NEVER used for computation; recomputed.
+//   AD(29)= Achievement % — NEVER used; always recomputed.
 //
-// Tab layout:
-//   Row 5 (1-indexed) = header row → 0-indexed row 4
-//   Row 4 (1-indexed) = TOTAL row  → 0-indexed row 3  (read but not used — we re-sum)
-//   Row 7 (1-indexed) = first retailer data row → 0-indexed row 6
+// Tab selection (in priority order):
+//   1. Tab whose name starts with "SUMMARY REPORT" AND contains the FY year
+//      (e.g. "Summary Report 2026-27", "Summary Report 26-27")
+//   2. Longest tab name starting with "SUMMARY REPORT" (fallback)
 //
 // Annual Business Plan:
 //   Read from the member's '2026-2027' tab (cell that has the FY BP figure).
-//   The Summary Report col-W sum can differ from this figure; always prefer the
-//   '2026-2027' tab value where available.
 //
 // Member→fileId map:
 //   Statically imported from config/member_sheet_map.json.
 //   Key = normSecKey(member name) — lowercase alphanumeric, parentheticals kept.
-//   Add new members to that file; no code change needed.
 //
-// Rules (same as Phase 1):
+// Rules:
 //   NET = Sub Total, never Order Total.
 //   Achievement always recomputed (OB / businessPlan); never read from sheet %.
 //   Google Drive strictly read-only.
 //   Never console.log — use logger.
 //   Config JSON statically imported (esbuild bundles it; no cwd-relative reads).
 
-import memberSheetMapRaw from "../../config/member_sheet_map.json" assert { type: "json" };
+import memberSheetMapRaw from "../../../config/member_sheet_map.json" assert { type: "json" };
 import { logger } from "../logger.js";
 import {
   readAllTabRows,
@@ -50,34 +49,32 @@ import {
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-// Drop the _comment key before use.
 const MEMBER_FILE_MAP: Record<string, string> = Object.fromEntries(
   Object.entries(memberSheetMapRaw as Record<string, string>).filter(
     ([k]) => k !== "_comment",
   ),
 );
 
-// Tab name patterns for the summary report (startsWith match).
 const SUMMARY_TAB_PREFIX = "SUMMARY REPORT";
 
-// ── Column indices (0-indexed) ────────────────────────────────────────────────
-// Fixed by the sheet's design — not header-detected because the header row can
-// contain merged cells that confuse positional lookup.  If the tab is ever
-// restructured, update these constants.
+// ── Default column indices (0-indexed) ────────────────────────────────────────
+// Used as fallback when header detection cannot locate a column.
 
-const COL = {
-  name:         2,   // C — Retailer name
-  district:     3,   // D — District
-  city:         4,   // E — City
-  distributor:  5,   // F — Assigned distributor
-  distanceKm:   6,   // G — Distance km
-  businessPlan: 22,  // W — Business Plan (per retailer, annual)
-  visitsReq:    23,  // X — Visits Required
-  orderBooking: 25,  // Z — Order Booking (NET)
-  sale:         26,  // AA — Sale received
-  totalVisit:   27,  // AB — Total Visits (YTD)
-  achPct:       29,  // AD — Achievement % — NEVER use in computation
+const DEFAULT_COL = {
+  name:         2,   // C
+  district:     3,   // D
+  city:         4,   // E
+  distributor:  5,   // F
+  distanceKm:   6,   // G
+  businessPlan: 22,  // W
+  visitsReq:    23,  // X
+  orderBooking: 25,  // Z
+  sale:         26,  // AA
+  totalVisit:   27,  // AB
+  achPct:       29,  // AD (parsed but never used in computation)
 } as const;
+
+type ColMap = typeof DEFAULT_COL;
 
 // ── Cell helpers ──────────────────────────────────────────────────────────────
 
@@ -105,32 +102,26 @@ export type RetailerRow = {
   distanceKm: number | null;
   businessPlan: number | null;
   visitsRequired: number | null;
-  orderBooking: number;           // 0 when cell is blank
-  sale: number;                   // 0 when cell is blank
+  orderBooking: number;
+  sale: number;
   totalVisit: number | null;
-  // RECOMPUTED — never read from the AD column
   achievementPct: number | null;
-  isActive: boolean;              // OB > 0 OR Sale > 0
+  isActive: boolean;
 };
 
 export type RetailerSpread = {
-  // Counts
   totalRetailers: number;
-  activeRetailers: number;        // OB > 0 OR sale > 0
-  dormantRetailers: number;       // OB == 0 AND sale == 0
-  activePct: number;              // activeRetailers / totalRetailers × 100
-  // Totals (re-summed; never read from the sheet's TOTAL row)
+  activeRetailers: number;
+  dormantRetailers: number;
+  activePct: number;
   totalOrderBooking: number;
   totalSale: number;
-  totalVisits: number | null;     // null when AB column has no data
-  // Spread / concentration
-  top5ObShare: number | null;     // top-5 retailers' OB / total OB × 100
+  totalVisits: number | null;
+  top5ObShare: number | null;
   top10ObShare: number | null;
-  concentrationIndex: number | null; // HHI: sum of (share)^2 × 10000; 0–10000
-  // Per-unit metrics
-  businessPerActiveRetailer: number | null; // totalOB / activeRetailers
-  businessPerVisit: number | null;          // totalOB / totalVisits
-  // Annual Business Plan (from the '2026-2027' tab, preferred over col-W sum)
+  concentrationIndex: number | null;
+  businessPerActiveRetailer: number | null;
+  businessPerVisit: number | null;
   annualBusinessPlan: number | null;
 };
 
@@ -145,7 +136,8 @@ export type MemberSheetResult = {
 export type MemberSheetData =
   | ({ status: "ok" } & MemberSheetResult)
   | { status: "not-mapped"; error: string }
-  | { status: "error"; error: string };
+  | { status: "error"; error: string }
+  | { status: "loading"; error: string };
 
 // ── In-process cache ──────────────────────────────────────────────────────────
 
@@ -159,26 +151,156 @@ export function invalidateMemberSheetCache(normKey?: string): void {
 }
 
 // ── Tab finder ────────────────────────────────────────────────────────────────
+// Prefers the tab whose name contains the FY year hint (most specific).
+// Falls back to the longest tab name starting with the prefix.
 
-async function findTab(
+async function findSummaryTab(
   fileId: string,
-  prefix: string,
+  fy: string,
 ): Promise<string | null> {
+  let tabs: { title: string }[];
   try {
-    const tabs = await listSheetTabs(fileId);
-    const p = prefix.toUpperCase();
-    const hit = tabs.find((t) => t.title.toUpperCase().startsWith(p));
-    return hit?.title ?? null;
+    tabs = await listSheetTabs(fileId);
   } catch (err) {
-    logger.warn({ err, fileId, prefix }, "memberSheet: listSheetTabs failed");
+    logger.warn({ err, fileId }, "memberSheet: listSheetTabs failed");
     return null;
   }
+
+  const p = SUMMARY_TAB_PREFIX;
+  const matches = tabs.filter((t) => t.title.toUpperCase().startsWith(p));
+
+  logger.info(
+    { fileId, fy, allTabs: tabs.map((t) => t.title), summaryMatches: matches.map((t) => t.title) },
+    "memberSheet: tab candidates",
+  );
+
+  if (matches.length === 0) return null;
+
+  // Build FY year variants to prefer the FY-specific tab.
+  // e.g. fy="2026-27" → ["2026-27","2026-2027","26-27","2026"]
+  const fyVariants = [
+    fy,
+    fy.replace("-", "-20"),
+    fy.replace(/^20/, ""),
+    fy.slice(0, 4),
+  ].map((s) => s.toUpperCase());
+
+  const fyMatch = matches.find((t) => {
+    const title = t.title.toUpperCase();
+    return fyVariants.some((v) => title.includes(v));
+  });
+
+  if (fyMatch) {
+    logger.info({ tab: fyMatch.title }, "memberSheet: FY-specific tab selected");
+    return fyMatch.title;
+  }
+
+  // Fall back to the longest matching tab (more specific is better).
+  const fallback = [...matches].sort((a, b) => b.title.length - a.title.length)[0];
+  logger.info(
+    { tab: fallback.title, reason: "no FY match; using longest" },
+    "memberSheet: fallback tab selected",
+  );
+  return fallback.title;
+}
+
+// ── Header detection ──────────────────────────────────────────────────────────
+// Scans the first scanLimit rows for a header row and builds a column map.
+// A header row is identified by having a text-like value in the col-C area
+// that contains RETAILER, PARTY, NAME, or similar.
+
+const COL_SYNONYMS: Record<keyof ColMap, string[]> = {
+  name:         ["RETAILER", "PARTYNAME", "RETAILERNAME", "NAME", "CUSTOMER", "PARTY"],
+  district:     ["DISTRICT", "DISTRICTNAME"],
+  city:         ["CITY", "TOWN"],
+  distributor:  ["DISTRIBUTOR", "DISTRIBUTORNAME", "CHANNEL"],
+  distanceKm:   ["DISTANCEKM", "DISTANCE", "KMS", "KM"],
+  // These two are commonly swapped — detection resolves them dynamically.
+  businessPlan: ["BUSINESSPLAN", "PLAN", "BP", "ANNUALBP", "ANNUALPLAN", "MONTHLYBUSINESSPLAN", "TARGETBUSINESS", "BUSINESSP"],
+  visitsReq:    ["VISITSREQUIRED", "VISITREQ", "REQUIREDVISIT", "VISITREQUIRED", "VISITSREQD", "REQUIREDVISITS", "VISITREQUD"],
+  orderBooking: ["ORDERBOOK", "ORDERBOOKING", "OB", "TOTALOB", "PARTYOB", "OLDPARTYOB", "ORDERB"],
+  sale:         ["SALE", "SALES", "SALEREPORT", "SALERECEIVED", "RECEIVED", "TOTALSALE", "SALESRECEIVED"],
+  totalVisit:   ["TOTALVISIT", "TOTALVISITS", "NOOFVISIT", "NOOFVISITS", "VISITCOUNT", "ACTUALVISIT"],
+  achPct:       ["ACHIEVEMENT", "ACHPCT", "ACH", "ACHIEVEMENTPCT", "PERCACHIEVEMENT"],
+};
+
+// Columns that are identity-like (C-G area); skip for synonym scan to avoid mismatches.
+const IDENTITY_COLS = new Set<keyof ColMap>(["name", "district", "city", "distributor", "distanceKm"]);
+
+function detectColumns(
+  rows: SheetCellValue[][],
+  scanLimit = 15,
+): { colMap: ColMap; headerRowIndex: number } | null {
+  for (let i = 0; i < Math.min(rows.length, scanLimit); i++) {
+    const row = rows[i] ?? [];
+    // Probe col 2-4 (C-E) for header-like text.
+    const probeNorm = normHeader(row[2] ?? row[3] ?? "");
+    const isHeaderRow =
+      probeNorm.length >= 2 &&
+      !/^\d+$/.test(probeNorm) &&
+      (
+        probeNorm.includes("RETAILER") ||
+        probeNorm.includes("PARTY") ||
+        probeNorm.includes("NAME") ||
+        probeNorm === "SL" ||
+        probeNorm === "SR" ||
+        probeNorm === "SNO" ||
+        probeNorm === "SRNO"
+      );
+
+    if (!isHeaderRow) continue;
+
+    const colMap: Record<string, number> = { ...DEFAULT_COL };
+    const assigned = new Set<string>();
+
+    for (let c = 0; c < row.length; c++) {
+      const h = normHeader(row[c]);
+      if (!h) continue;
+      for (const [field, synonyms] of Object.entries(COL_SYNONYMS)) {
+        if (assigned.has(field)) continue;
+        if (synonyms.some((s) => h === s || h.startsWith(s + "S") || h === s + "S")) continue; // skip broad prefix
+        if (synonyms.includes(h)) {
+          colMap[field] = c;
+          assigned.add(field);
+        }
+      }
+    }
+
+    // Second pass: prefix matching for fields not yet assigned (non-identity only).
+    for (let c = 0; c < row.length; c++) {
+      const h = normHeader(row[c]);
+      if (!h) continue;
+      for (const [field, synonyms] of Object.entries(COL_SYNONYMS)) {
+        if (assigned.has(field)) continue;
+        if (IDENTITY_COLS.has(field as keyof ColMap)) continue;
+        if (synonyms.some((s) => h.startsWith(s))) {
+          colMap[field] = c;
+          assigned.add(field);
+        }
+      }
+    }
+
+    logger.info(
+      {
+        headerRowIndex: i,
+        headerRow: row.slice(0, 35).map(String),
+        detectedCols: Object.fromEntries(
+          Object.entries(colMap).map(([k, v]) => [k, `${v}(${String(row[v as number] ?? "?").slice(0, 20)})`])
+        ),
+        assignedFields: [...assigned],
+        fallbackFields: Object.keys(DEFAULT_COL).filter((k) => !assigned.has(k)),
+      },
+      "memberSheet: column detection result",
+    );
+
+    return { colMap: colMap as ColMap, headerRowIndex: i };
+  }
+
+  logger.warn({ scanLimit }, "memberSheet: header row not found; using fixed column positions");
+  return null;
 }
 
 // ── Annual BP reader (from '2026-2027' tab) ───────────────────────────────────
-// Reads the '2026-2027' tab and looks for the largest single numeric value
-// that plausibly represents an annual business plan (1 Cr – 20 Cr range).
-// If the tab or value is absent, falls back to the col-W sum from the summary.
 
 async function readAnnualBp(
   fileId: string,
@@ -193,7 +315,6 @@ async function readAnnualBp(
     );
     if (!hit) return null;
     const rows = await readAllTabRows(fileId, hit.title);
-    // Scan first 20 rows for a value in the annual-BP range (50L – 20 Cr).
     for (let i = 0; i < Math.min(rows.length, 20); i++) {
       for (const cell of rows[i] ?? []) {
         const n = cellNum(cell);
@@ -218,8 +339,7 @@ async function loadMemberSheetUncached(
   const fileId = MEMBER_FILE_MAP[memberKey];
   if (!fileId) return null;
 
-  // Find the summary report tab (startsWith).
-  const tabName = await findTab(fileId, SUMMARY_TAB_PREFIX);
+  const tabName = await findSummaryTab(fileId, fy);
   if (!tabName) {
     logger.warn({ memberKey, fileId, fy }, "memberSheet: summary tab not found");
     return null;
@@ -238,61 +358,77 @@ async function loadMemberSheetUncached(
     "memberSheet: raw rows read",
   );
 
-  // Retailer data starts at row index 6 (row 7, 1-indexed).
-  const DATA_START = 6;
+  // Detect columns — for data-start inference and logging only.
+  // DEFAULT_COL positions are always used for data extraction because the
+  // header has multiple "Order Booking" columns (one per FY) and we must
+  // pick the 2026-27 one at its fixed position (W-AD).
+  const detected = detectColumns(allRows);
+  const COL: ColMap = DEFAULT_COL;
+  // Data starts two rows after the header (header + one blank/separator row).
+  const dataStart = detected ? detected.headerRowIndex + 2 : 6;
 
-  // Scan for the actual data start: skip header, any TOTAL row, and blank rows.
-  // We look for rows where column C (name) is non-empty and not a header token.
+  // Tokens in the name column that mean "skip this row".
   const SKIP_TOKENS = new Set([
-    "RETAILERNAME", "RETAILER", "NAME", "TOTAL", "GRANDTOTAL",
-    "SRLNO", "SL", "SR", "NO",
+    "RETAILERNAME", "RETAILER", "NAME",
+    "SRLNO", "SL", "SR", "NO", "SNO", "SRNO",
   ]);
+  // Tokens in the name column that mean "stop reading — end of section".
+  const STOP_TOKENS = new Set(["TOTAL", "GRANDTOTAL", "SUBTOTAL"]);
 
   const rows: RetailerRow[] = [];
+  let blankRun = 0;
 
-  for (let i = DATA_START; i < allRows.length; i++) {
+  for (let i = dataStart; i < allRows.length; i++) {
     const row = allRows[i] ?? [];
     const rawName = cellStr(row[COL.name]);
-    if (!rawName) continue;
+
+    if (!rawName) {
+      blankRun++;
+      // 3+ consecutive blank name-column cells → section boundary; stop.
+      if (blankRun >= 3) break;
+      continue;
+    }
+    blankRun = 0;
 
     const nameNorm = normHeader(rawName);
-    if (SKIP_TOKENS.has(nameNorm) || nameNorm.startsWith("TOTAL")) continue;
-    // Skip serial numbers (all-digit names).
-    if (/^\d+$/.test(rawName)) continue;
+
+    // End-of-section markers: TOTAL / GRAND TOTAL row → stop.
+    if (STOP_TOKENS.has(nameNorm) || nameNorm.startsWith("GRANDTOTAL") || nameNorm.startsWith("TOTAL")) break;
+    // Header / metadata tokens → skip but keep reading.
+    if (SKIP_TOKENS.has(nameNorm)) continue;
+    // Serial-number-only cells → skip.
+    if (/^\d+$/.test(rawName.trim())) continue;
 
     const ob   = cellNum(row[COL.orderBooking]) ?? 0;
     const sale = cellNum(row[COL.sale]) ?? 0;
     const plan = cellNum(row[COL.businessPlan]);
 
-    // Achievement recomputed — never read from AD.
     const achPct =
       plan !== null && plan > 0 ? (ob / plan) * 100 : null;
 
     rows.push({
-      name:         rawName,
-      district:     cellStr(row[COL.district]) || null,
-      city:         cellStr(row[COL.city]) || null,
-      distributor:  cellStr(row[COL.distributor]) || null,
-      distanceKm:   cellNum(row[COL.distanceKm]),
-      businessPlan: plan,
+      name:           rawName,
+      district:       cellStr(row[COL.district]) || null,
+      city:           cellStr(row[COL.city]) || null,
+      distributor:    cellStr(row[COL.distributor]) || null,
+      distanceKm:     cellNum(row[COL.distanceKm]),
+      businessPlan:   plan,
       visitsRequired: cellNum(row[COL.visitsReq]),
-      orderBooking: ob,
+      orderBooking:   ob,
       sale,
-      totalVisit:   cellNum(row[COL.totalVisit]),
+      totalVisit:     cellNum(row[COL.totalVisit]),
       achievementPct: achPct,
-      isActive:     ob > 0 || sale > 0,
+      isActive:       ob > 0 || sale > 0,
     });
   }
 
   logger.info(
-    { memberKey, tabName, retailers: rows.length },
+    { memberKey, tabName, retailers: rows.length, dataStart },
     "memberSheet: retailers parsed",
   );
 
-  // ── Compute spread metrics ─────────────────────────────────────────────────
   const spread = computeSpread(rows, fileId, fy, memberName);
 
-  // Try to fetch the annual BP from the '2026-2027' tab concurrently.
   const fyTabLabel = fy === "2026-27" ? "2026-2027" : `20${fy.replace("-", "-20")}`;
   const annualBp = await readAnnualBp(fileId, fyTabLabel);
   spread.annualBusinessPlan = annualBp ?? spread.annualBusinessPlan;
@@ -312,29 +448,25 @@ function computeSpread(
   fy: string,
   memberName: string,
 ): RetailerSpread {
-  const active   = rows.filter((r) => r.isActive);
-  const dormant  = rows.filter((r) => !r.isActive);
+  const active  = rows.filter((r) => r.isActive);
+  const dormant = rows.filter((r) => !r.isActive);
 
   const totalOB   = rows.reduce((s, r) => s + r.orderBooking, 0);
   const totalSale = rows.reduce((s, r) => s + r.sale, 0);
 
-  // Total visits — null when every retailer has null AB.
-  const visitRows = rows.filter((r) => r.totalVisit !== null);
+  const visitRows  = rows.filter((r) => r.totalVisit !== null);
   const totalVisits =
     visitRows.length > 0
       ? visitRows.reduce((s, r) => s + (r.totalVisit ?? 0), 0)
       : null;
 
-  // Top-N OB concentration (sort active retailers by OB desc).
-  const sorted = [...active].sort((a, b) => b.orderBooking - a.orderBooking);
-  const top5Ob  = sorted.slice(0, 5).reduce((s, r) => s + r.orderBooking, 0);
-  const top10Ob = sorted.slice(0, 10).reduce((s, r) => s + r.orderBooking, 0);
+  const sorted   = [...active].sort((a, b) => b.orderBooking - a.orderBooking);
+  const top5Ob   = sorted.slice(0, 5).reduce((s, r) => s + r.orderBooking, 0);
+  const top10Ob  = sorted.slice(0, 10).reduce((s, r) => s + r.orderBooking, 0);
 
   const top5Share  = totalOB > 0 ? (top5Ob / totalOB) * 100 : null;
   const top10Share = totalOB > 0 ? (top10Ob / totalOB) * 100 : null;
 
-  // HHI concentration index: sum of squared shares × 10000.
-  // 10000 = monopoly (one retailer takes all OB), ~0 = perfectly dispersed.
   const hhi =
     totalOB > 0
       ? active.reduce((s, r) => {
@@ -348,7 +480,6 @@ function computeSpread(
   const businessPerVisit =
     totalVisits !== null && totalVisits > 0 ? totalOB / totalVisits : null;
 
-  // Annual BP: col-W sum as initial value; may be overridden later from the FY tab.
   const colWSum = rows.reduce((s, r) => s + (r.businessPlan ?? 0), 0);
 
   logger.info(
@@ -365,19 +496,19 @@ function computeSpread(
   );
 
   return {
-    totalRetailers: rows.length,
-    activeRetailers: active.length,
-    dormantRetailers: dormant.length,
-    activePct: rows.length > 0 ? (active.length / rows.length) * 100 : 0,
-    totalOrderBooking: totalOB,
+    totalRetailers:             rows.length,
+    activeRetailers:            active.length,
+    dormantRetailers:           dormant.length,
+    activePct:                  rows.length > 0 ? (active.length / rows.length) * 100 : 0,
+    totalOrderBooking:          totalOB,
     totalSale,
     totalVisits,
-    top5ObShare: top5Share,
-    top10ObShare: top10Share,
-    concentrationIndex: hhi,
-    businessPerActiveRetailer: businessPerActive,
+    top5ObShare:                top5Share,
+    top10ObShare:               top10Share,
+    concentrationIndex:         hhi,
+    businessPerActiveRetailer:  businessPerActive,
     businessPerVisit,
-    annualBusinessPlan: colWSum > 0 ? colWSum : null,
+    annualBusinessPlan:         colWSum > 0 ? colWSum : null,
   };
 }
 
@@ -399,14 +530,12 @@ export async function loadMemberSheet(
     };
   }
 
-  // Cache lookup.
   const cacheKey = `${memberKey}|${fy}`;
   const hit = _cache.get(cacheKey);
   if (hit && Date.now() - hit.loadedAt < TTL_MS) {
     return { status: "ok", ...hit.data };
   }
 
-  // Deduplicate in-flight requests.
   const pending = _inFlight.get(cacheKey);
   if (pending) {
     const result = await pending;

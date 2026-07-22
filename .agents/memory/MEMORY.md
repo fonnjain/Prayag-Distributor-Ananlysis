@@ -34,3 +34,4 @@
 - [Tank qty bug reconciliation](tank-qty-bug-reconciliation.md) — qty/lineUid fix + versionedSyncLines currentMap array fix; one-current-row-per-identity invariant verified clean July 21 2026.
 - [Register two-schema gap](register-schema-gap.md) — FY24-25/25-26 registers are 21-col SAP format; ITEMCOLOR + STATEHEADNAME not aliased in normalize.ts; unmapped_heads guardrail silently passes missing-column case.
 - [Deep Dive Data tab columns](deep-dive-data-tab-columns.md) — State HD Dashboard 'Data' tab column aliases: OB=OLDPARTYBUSINESSORDERBOOKING, Sale=SALEREPORT2627, Visited=VISITEDINAMONTH; plain SALE column is a different (wrong) aggregate.
+- [Member working sheet column detection](member-sheet-column-detection.md) — sheets have one OB/Sale col per FY; use DEFAULT_COL (W-AD), never first-match header detection; prefer FY-specific tab; break on TOTAL row.

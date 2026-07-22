@@ -902,6 +902,70 @@ export interface MgmtDeepDiveKpis {
   extra?: MgmtDeepDiveKpisExtra;
 }
 
+/**
+ * 'ok' — retailer table loaded successfully. 'not-mapped' — member has no working sheet mapped yet; Phase 1 KPIs still returned. 'error' — sheet could not be read.
+ */
+export type MgmtRetailerDetailStatus = typeof MgmtRetailerDetailStatus[keyof typeof MgmtRetailerDetailStatus];
+
+
+export const MgmtRetailerDetailStatus = {
+  ok: 'ok',
+  'not-mapped': 'not-mapped',
+  error: 'error',
+  loading: 'loading',
+} as const;
+
+export interface MgmtRetailerRow {
+  name: string;
+  district?: string | null;
+  city?: string | null;
+  distributor?: string | null;
+  distanceKm?: number | null;
+  businessPlan?: number | null;
+  visitsRequired?: number | null;
+  orderBooking: number;
+  sale: number;
+  totalVisit?: number | null;
+  achievementPct?: number | null;
+  isActive: boolean;
+}
+
+export interface MgmtRetailerSpread {
+  totalRetailers: number;
+  /** Retailers with OB > 0 or Sale > 0. */
+  activeRetailers: number;
+  dormantRetailers: number;
+  /** activeRetailers / totalRetailers × 100. */
+  activePct: number;
+  totalOrderBooking: number;
+  totalSale: number;
+  totalVisits?: number | null;
+  /** Top-5 retailers' OB share (%). */
+  top5ObShare?: number | null;
+  /** Top-10 retailers' OB share (%). */
+  top10ObShare?: number | null;
+  /** HHI: 0–10000; higher = more concentrated. */
+  concentrationIndex?: number | null;
+  businessPerActiveRetailer?: number | null;
+  businessPerVisit?: number | null;
+  /** From the member's own FY tab; preferred over col-W sum. */
+  annualBusinessPlan?: number | null;
+}
+
+export interface MgmtRetailerDetail {
+  /** 'ok' — retailer table loaded successfully. 'not-mapped' — member has no working sheet mapped yet; Phase 1 KPIs still returned. 'error' — sheet could not be read. */
+  status: MgmtRetailerDetailStatus;
+  /** Human-readable reason when status is not 'ok'. */
+  error?: string | null;
+  /** Google Sheets file ID of the member's working sheet. */
+  fileId?: string | null;
+  /** Name of the tab that was read. */
+  tabName?: string | null;
+  rows?: MgmtRetailerRow[] | null;
+  spread?: MgmtRetailerSpread | null;
+  rowsRead?: number | null;
+}
+
 export interface MgmtDeepDive {
   /** Fiscal year, e.g. 2026-27. */
   fy: string;
@@ -910,6 +974,8 @@ export interface MgmtDeepDive {
   /** Members under the selected state head (or all members if no head selected). */
   members: MgmtDeepDiveMemberRef[];
   kpis?: MgmtDeepDiveKpis | null;
+  /** Phase 2: retailer-level detail from the member's own working sheet. Null when no member is selected. status='not-mapped' when the member has no sheet ID in the config; status='error' on read failure. Phase 1 KPIs are always returned regardless of this field. */
+  retailerDetail?: MgmtRetailerDetail | null;
   /** Total rows read from the Data tab. */
   rowsRead: number;
   error?: string | null;

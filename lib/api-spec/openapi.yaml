@@ -2565,6 +2565,14 @@ components:
         kpis:
           nullable: true
           $ref: "#/components/schemas/MgmtDeepDiveKpis"
+        retailerDetail:
+          nullable: true
+          $ref: "#/components/schemas/MgmtRetailerDetail"
+          description: >
+            Phase 2: retailer-level detail from the member's own working sheet.
+            Null when no member is selected. status='not-mapped' when the member
+            has no sheet ID in the config; status='error' on read failure.
+            Phase 1 KPIs are always returned regardless of this field.
         rowsRead:
           type: integer
           description: Total rows read from the Data tab.
@@ -2578,6 +2586,73 @@ components:
         stateHead: { type: string }
         name: { type: string }
         normKey: { type: string }
+    MgmtRetailerDetail:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, not-mapped, error, loading]
+          description: >
+            'ok' — retailer table loaded successfully.
+            'not-mapped' — member has no working sheet mapped yet; Phase 1 KPIs still returned.
+            'error' — sheet could not be read.
+        error:
+          type: string
+          nullable: true
+          description: Human-readable reason when status is not 'ok'.
+        fileId:
+          type: string
+          nullable: true
+          description: Google Sheets file ID of the member's working sheet.
+        tabName:
+          type: string
+          nullable: true
+          description: Name of the tab that was read.
+        rows:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/MgmtRetailerRow"
+        spread:
+          nullable: true
+          $ref: "#/components/schemas/MgmtRetailerSpread"
+        rowsRead:
+          type: integer
+          nullable: true
+    MgmtRetailerRow:
+      type: object
+      required: [name, orderBooking, sale, isActive]
+      properties:
+        name: { type: string }
+        district: { type: string, nullable: true }
+        city: { type: string, nullable: true }
+        distributor: { type: string, nullable: true }
+        distanceKm: { type: number, nullable: true }
+        businessPlan: { type: number, nullable: true }
+        visitsRequired: { type: number, nullable: true }
+        orderBooking: { type: number }
+        sale: { type: number }
+        totalVisit: { type: number, nullable: true }
+        achievementPct: { type: number, nullable: true }
+        isActive: { type: boolean }
+    MgmtRetailerSpread:
+      type: object
+      required: [totalRetailers, activeRetailers, dormantRetailers, activePct, totalOrderBooking, totalSale]
+      properties:
+        totalRetailers: { type: integer }
+        activeRetailers: { type: integer, description: "Retailers with OB > 0 or Sale > 0." }
+        dormantRetailers: { type: integer }
+        activePct: { type: number, description: "activeRetailers / totalRetailers × 100." }
+        totalOrderBooking: { type: number }
+        totalSale: { type: number }
+        totalVisits: { type: number, nullable: true }
+        top5ObShare: { type: number, nullable: true, description: "Top-5 retailers' OB share (%)." }
+        top10ObShare: { type: number, nullable: true, description: "Top-10 retailers' OB share (%)." }
+        concentrationIndex: { type: number, nullable: true, description: "HHI: 0–10000; higher = more concentrated." }
+        businessPerActiveRetailer: { type: number, nullable: true }
+        businessPerVisit: { type: number, nullable: true }
+        annualBusinessPlan: { type: number, nullable: true, description: "From the member's own FY tab; preferred over col-W sum." }
     MgmtDeepDiveKpis:
       type: object
       required: [stateHead, name, normKey]
