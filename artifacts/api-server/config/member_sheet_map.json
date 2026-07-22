@@ -1,0 +1,4 @@
+{
+  "_comment": "Maps normSecKey(member name) → Google Sheets file ID for their own working workbook. Add entries as members' sheets are onboarded. normSecKey = lowercase alphanumeric only, parentheticals kept.",
+  "prasunchatterjee": "1UEZK2L9OACV3t606hu8vkTn-5ekPDyqCYSBS2X6A5Jc"
+}
