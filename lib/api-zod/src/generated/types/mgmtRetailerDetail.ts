@@ -8,6 +8,7 @@
 import type { MgmtRetailerDetailStatus } from './mgmtRetailerDetailStatus';
 import type { MgmtRetailerRow } from './mgmtRetailerRow';
 import type { MgmtRetailerSpread } from './mgmtRetailerSpread';
+import type { MgmtVisitPlan } from './mgmtVisitPlan';
 
 export interface MgmtRetailerDetail {
   /** 'ok' — retailer table loaded successfully. 'not-mapped' — member has no working sheet mapped yet; Phase 1 KPIs still returned. 'error' — sheet could not be read. */
@@ -20,5 +21,7 @@ export interface MgmtRetailerDetail {
   tabName?: string | null;
   rows?: MgmtRetailerRow[] | null;
   spread?: MgmtRetailerSpread | null;
+  /** Phase 3: visit-pattern analysis and forward visit plan (present when status is 'ok'). */
+  visitPlan?: MgmtVisitPlan | null;
   rowsRead?: number | null;
 }

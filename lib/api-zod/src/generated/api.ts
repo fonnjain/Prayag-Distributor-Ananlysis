@@ -354,6 +354,57 @@ export const GetMgmtDeepDiveResponse = zod.object({
   "businessPerVisit": zod.number().nullish(),
   "annualBusinessPlan": zod.number().nullish().describe('From the member\'s own FY tab; preferred over col-W sum.')
 }).nullish(),
+  "visitPlan": zod.object({
+  "pattern": zod.object({
+  "totalVisitsDone": zod.number(),
+  "totalVisitsRequired": zod.number(),
+  "proRatedRequired": zod.number().describe('totalVisitsRequired × (elapsedMonths \/ 12). Pro-rated target for the FY portion elapsed.'),
+  "visitDeficit": zod.number().describe('proRatedRequired − totalVisitsDone. Positive = behind schedule.'),
+  "visitedZeroOrderCount": zod.number(),
+  "visitedZeroOrderRetailers": zod.array(zod.string()).optional().describe('Names of retailers visited at least once but with zero OB and zero sale (capped at 30).'),
+  "distanceBuckets": zod.array(zod.object({
+  "label": zod.string().describe('e.g. \'Near (<=15 km)\''),
+  "minKm": zod.number(),
+  "maxKm": zod.number().nullish(),
+  "count": zod.number(),
+  "visitsDone": zod.number(),
+  "avgVisits": zod.number(),
+  "avgOb": zod.number(),
+  "activeCount": zod.number()
+}))
+}),
+  "capacity": zod.object({
+  "fyStartDate": zod.string().describe('FY start date, e.g. \'2026-04-01\'.'),
+  "asOfDate": zod.string().describe('Date the plan was computed.'),
+  "workingDaysElapsed": zod.number().describe('Mon-Sat working days since FY start.'),
+  "demonstratedVisitsPerDay": zod.number().describe('totalVisitsDone \/ workingDaysElapsed.'),
+  "workingDaysRemaining": zod.number().describe('Mon-Sat working days from tomorrow to FY end.'),
+  "feasibleRemainingVisits": zod.number().describe('demonstratedVisitsPerDay × workingDaysRemaining.'),
+  "remainingRequired": zod.number().describe('totalVisitsRequired − totalVisitsDone.'),
+  "gap": zod.number().describe('feasibleRemainingVisits − remainingRequired. Negative = shortfall.'),
+  "monthlyCapacity": zod.number().describe('Average visit capacity per remaining complete month.')
+}),
+  "monthPlans": zod.array(zod.object({
+  "month": zod.string().describe('e.g. \'Aug 26\''),
+  "workingDays": zod.number(),
+  "capacity": zod.number().describe('demonstratedRate × workingDays, rounded.'),
+  "maintenanceVisits": zod.number().describe('Visits allocated to active retailers to maintain their cadence.'),
+  "developmentVisits": zod.number().describe('Remaining capacity directed at dormant high-potential retailers.'),
+  "targets": zod.array(zod.object({
+  "name": zod.string(),
+  "district": zod.string().nullish(),
+  "distanceKm": zod.number().nullish(),
+  "ob": zod.number(),
+  "businessPlan": zod.number().nullish(),
+  "visitsDone": zod.number(),
+  "priority": zod.enum(['maintain', 'develop', 'reduce']).describe('maintain = active at cadence; develop = dormant high-potential; reduce = visited-zero-order.'),
+  "reason": zod.string()
+})).describe('Top-10 prioritised retailers for this month, batched by district+km.')
+})),
+  "totalFeasible": zod.number().describe('Sum of capacity across all remaining month plans.'),
+  "totalRequired": zod.number().describe('Visits still required to complete the annual plan (= capacity.remainingRequired).'),
+  "gap": zod.number().describe('totalFeasible − totalRequired. Negative = shortfall; surface explicitly.')
+}).nullish().describe('Phase 3: visit-pattern analysis and forward visit plan (present when status is \'ok\').'),
   "rowsRead": zod.number().nullish()
 }).nullish().describe('Phase 2: retailer-level detail from the member\'s own working sheet. Null when no member is selected. status=\'not-mapped\' when the member has no sheet ID in the config; status=\'error\' on read failure. Phase 1 KPIs are always returned regardless of this field.\n'),
   "rowsRead": zod.number().describe('Total rows read from the Data tab.'),

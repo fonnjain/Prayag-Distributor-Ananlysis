@@ -1,4 +1,4 @@
-// Member's own working sheet reader — source B for Sales Deep Dive Phase 2.
+// Member's own working sheet reader — source B for Sales Deep Dive Phase 2 + 3.
 //
 // Each field representative has a personal Google Sheets workbook.
 // This module reads the 'Summary Report <FY>' tab, parses the retailer-level
@@ -41,6 +41,7 @@
 
 import memberSheetMapRaw from "../../../config/member_sheet_map.json" assert { type: "json" };
 import { logger } from "../logger.js";
+import { computeVisitPlan, type VisitPlan } from "./visitPlan.js";
 import {
   readAllTabRows,
   listSheetTabs,
@@ -130,6 +131,7 @@ export type MemberSheetResult = {
   tabName: string;
   rows: RetailerRow[];
   spread: RetailerSpread;
+  visitPlan: VisitPlan;
   rowsRead: number;
 };
 
@@ -433,11 +435,14 @@ async function loadMemberSheetUncached(
   const annualBp = await readAnnualBp(fileId, fyTabLabel);
   spread.annualBusinessPlan = annualBp ?? spread.annualBusinessPlan;
 
+  const visitPlan = computeVisitPlan(rows, fy);
+
   return {
     fileId,
     tabName,
     rows,
     spread,
+    visitPlan,
     rowsRead: allRows.length,
   };
 }

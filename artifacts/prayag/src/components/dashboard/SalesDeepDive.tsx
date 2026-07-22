@@ -85,7 +85,72 @@ interface RetailerDetail {
   tabName?: string | null;
   rows?: RetailerRow[];
   spread?: RetailerSpread;
+  visitPlan?: VisitPlan | null;
   rowsRead?: number | null;
+}
+
+// ── Phase 3 types ──────────────────────────────────────────────────────────────
+
+interface DistanceBucket {
+  label: string;
+  minKm: number;
+  maxKm: number | null;
+  count: number;
+  visitsDone: number;
+  avgVisits: number;
+  avgOb: number;
+  activeCount: number;
+}
+
+interface VisitPattern {
+  totalVisitsDone: number;
+  totalVisitsRequired: number;
+  proRatedRequired: number;
+  visitDeficit: number;
+  visitedZeroOrderCount: number;
+  visitedZeroOrderRetailers: string[];
+  distanceBuckets: DistanceBucket[];
+}
+
+interface VisitCapacity {
+  fyStartDate: string;
+  asOfDate: string;
+  workingDaysElapsed: number;
+  demonstratedVisitsPerDay: number;
+  workingDaysRemaining: number;
+  feasibleRemainingVisits: number;
+  remainingRequired: number;
+  gap: number;
+  monthlyCapacity: number;
+}
+
+interface VisitTarget {
+  name: string;
+  district: string | null;
+  distanceKm: number | null;
+  ob: number;
+  businessPlan: number | null;
+  visitsDone: number;
+  priority: "maintain" | "develop" | "reduce";
+  reason: string;
+}
+
+interface MonthVisitPlan {
+  month: string;
+  workingDays: number;
+  capacity: number;
+  maintenanceVisits: number;
+  developmentVisits: number;
+  targets: VisitTarget[];
+}
+
+interface VisitPlan {
+  pattern: VisitPattern;
+  capacity: VisitCapacity;
+  monthPlans: MonthVisitPlan[];
+  totalFeasible: number;
+  totalRequired: number;
+  gap: number;
 }
 
 interface DeepDiveData {
@@ -400,6 +465,355 @@ function RetailerTable({ rows }: { rows: RetailerRow[] }) {
   );
 }
 
+// ── Phase 3 components ────────────────────────────────────────────────────────
+
+function gapColour(gap: number): string {
+  if (gap >= 0) return "text-green-700 dark:text-green-400";
+  if (gap >= -100) return "text-amber-700 dark:text-amber-400";
+  return "text-red-700 dark:text-red-400";
+}
+
+function VisitBar({
+  done, proRated, required,
+}: { done: number; proRated: number; required: number }) {
+  const donePct    = required > 0 ? Math.min(100, (done / required) * 100) : 0;
+  const proRatePct = required > 0 ? Math.min(100, (proRated / required) * 100) : 0;
+  return (
+    <div className="space-y-1.5">
+      <div className="flex justify-between text-[11px] text-muted-foreground">
+        <span>Visits done: <strong className="text-foreground">{fmtNum(done)}</strong></span>
+        <span>Pro-rated target: <strong className="text-foreground">{fmtNum(proRated)}</strong></span>
+        <span>Annual required: <strong className="text-foreground">{fmtNum(required)}</strong></span>
+      </div>
+      <div className="relative h-3 rounded-full bg-muted overflow-hidden">
+        {/* Pro-rated target marker */}
+        <div
+          className="absolute top-0 h-full w-0.5 bg-amber-400 z-10"
+          style={{ left: `${proRatePct}%` }}
+        />
+        {/* Done bar */}
+        <div
+          className={cn(
+            "h-full rounded-full transition-all",
+            donePct >= proRatePct ? "bg-green-500" : "bg-amber-500",
+          )}
+          style={{ width: `${donePct}%` }}
+        />
+      </div>
+      <div className="text-[10px] text-muted-foreground">
+        Amber marker = pro-rated target for FY portion elapsed
+      </div>
+    </div>
+  );
+}
+
+function VisitPatternPanel({ pattern }: { pattern: VisitPattern }) {
+  const [showZeroList, setShowZeroList] = useState(false);
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground border-b border-border pb-1">
+        Visit Pattern Analysis
+      </h3>
+
+      <VisitBar
+        done={pattern.totalVisitsDone}
+        proRated={pattern.proRatedRequired}
+        required={pattern.totalVisitsRequired}
+      />
+
+      {/* Visit deficit tile */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Tile label="Visits Done (YTD)" value={fmtNum(pattern.totalVisitsDone)} accent />
+        <Tile label="Annual Required" value={fmtNum(pattern.totalVisitsRequired)} />
+        <Tile
+          label="Pro-Rated Target (elapsed)"
+          value={fmtNum(pattern.proRatedRequired)}
+          sub={pattern.visitDeficit > 0
+            ? `${fmtNum(pattern.visitDeficit)} behind schedule`
+            : `${fmtNum(-pattern.visitDeficit)} ahead`}
+        />
+        <div className="rounded-lg border border-border bg-card px-4 py-3 flex flex-col gap-1">
+          <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide leading-tight">
+            Visited — Zero OB
+          </span>
+          <span className={cn(
+            "text-lg font-semibold",
+            pattern.visitedZeroOrderCount > 0 ? "text-amber-600 dark:text-amber-400" : "",
+          )}>
+            {pattern.visitedZeroOrderCount}
+          </span>
+          <span className="text-[11px] text-muted-foreground">
+            Visited {pattern.visitedZeroOrderCount}x · zero order booked
+          </span>
+          {pattern.visitedZeroOrderCount > 0 && (
+            <button
+              className="text-[11px] text-primary underline underline-offset-2 text-left mt-0.5"
+              onClick={() => setShowZeroList((v) => !v)}
+            >
+              {showZeroList ? "Hide list" : "Show list"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {showZeroList && pattern.visitedZeroOrderRetailers.length > 0 && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/10 px-4 py-3">
+          <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 mb-2">
+            Retailers visited but with zero order booked ({pattern.visitedZeroOrderRetailers.length})
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {pattern.visitedZeroOrderRetailers.map((name, i) => (
+              <span
+                key={i}
+                className="rounded px-2 py-0.5 text-[11px] bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300"
+              >
+                {name}
+              </span>
+            ))}
+          </div>
+          <p className="text-[10px] text-amber-700 dark:text-amber-400 mt-2">
+            These retailers received visits but placed no orders. Redirect effort toward high-potential dormant parties.
+          </p>
+        </div>
+      )}
+
+      {/* Distance buckets */}
+      {pattern.distanceBuckets.some((b) => b.count > 0) && (
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-muted/50 text-muted-foreground">
+                <th className="px-3 py-2 text-left font-medium">Distance band</th>
+                <th className="px-3 py-2 text-right font-medium">Retailers</th>
+                <th className="px-3 py-2 text-right font-medium">Active</th>
+                <th className="px-3 py-2 text-right font-medium">Visits done</th>
+                <th className="px-3 py-2 text-right font-medium">Avg visits</th>
+                <th className="px-3 py-2 text-right font-medium">Avg OB</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {pattern.distanceBuckets.map((b) => (
+                <tr key={b.label} className="hover:bg-muted/30">
+                  <td className="px-3 py-1.5 font-medium">{b.label}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{b.count}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums text-green-700 dark:text-green-400">
+                    {b.activeCount}
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(b.visitsDone)}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{b.avgVisits.toFixed(1)}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{fmtRs(b.avgOb)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CapacityPanel({
+  capacity, gap,
+}: { capacity: VisitCapacity; gap: number }) {
+  const isShortfall = gap < 0;
+
+  return (
+    <div className="space-y-3">
+      <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground border-b border-border pb-1">
+        Visit Capacity Model (Mon–Sat working days)
+      </h3>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        <Tile
+          label="Demonstrated visits / day"
+          value={capacity.demonstratedVisitsPerDay.toFixed(2)}
+          sub={`${fmtNum(capacity.workingDaysElapsed)} Mon-Sat days elapsed since ${capacity.fyStartDate}`}
+          accent
+        />
+        <Tile
+          label="Working days remaining"
+          value={fmtNum(capacity.workingDaysRemaining)}
+          sub={`To FY end · ~${fmtNum(capacity.monthlyCapacity)} visits / month`}
+        />
+        <Tile
+          label="Feasible remaining visits"
+          value={fmtNum(capacity.feasibleRemainingVisits)}
+          sub={`At demonstrated rate × remaining days`}
+        />
+        <Tile
+          label="Remaining required"
+          value={fmtNum(capacity.remainingRequired)}
+          sub="Annual total minus visits already done"
+        />
+      </div>
+
+      {/* Gap — always shown explicitly, never hidden */}
+      <div className={cn(
+        "rounded-lg border px-5 py-4 flex flex-col gap-1",
+        isShortfall
+          ? "border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-900/10"
+          : "border-green-200 bg-green-50 dark:border-green-900/40 dark:bg-green-900/10",
+      )}>
+        <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+          {isShortfall ? "Visit shortfall" : "Visit surplus"}
+        </span>
+        <span className={cn("text-2xl font-bold", gapColour(gap))}>
+          {isShortfall ? "" : "+"}{fmtNum(gap)}
+        </span>
+        <p className={cn("text-xs mt-0.5", isShortfall ? "text-red-700 dark:text-red-400" : "text-green-700 dark:text-green-400")}>
+          {isShortfall
+            ? `At the current rate of ${capacity.demonstratedVisitsPerDay.toFixed(2)} visits/day, ${fmtNum(capacity.feasibleRemainingVisits)} visits are feasible in the remaining ${fmtNum(capacity.workingDaysRemaining)} working days — ${fmtNum(-gap)} visits short of the ${fmtNum(capacity.remainingRequired)} still required. Redirect effort from visited-zero-order parties to high-potential dormant retailers.`
+            : `At the current rate the member can complete all required visits with ${fmtNum(gap)} visits to spare.`}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function priorityBadge(p: VisitTarget["priority"]) {
+  if (p === "maintain")
+    return "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300";
+  if (p === "develop")
+    return "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300";
+  return "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300";
+}
+
+function ForwardPlanPanel({
+  monthPlans, totalFeasible, totalRequired, gap,
+}: { monthPlans: MonthVisitPlan[]; totalFeasible: number; totalRequired: number; gap: number }) {
+  const [openMonth, setOpenMonth] = useState<string | null>(null);
+
+  if (monthPlans.length === 0) {
+    return (
+      <div className="rounded-md border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+        No remaining complete months in this FY.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground border-b border-border pb-1">
+        Forward Visit Plan ({monthPlans.length} months)
+      </h3>
+
+      {/* Summary totals */}
+      <div className="grid grid-cols-3 gap-3">
+        <Tile label="Total feasible (plan)" value={fmtNum(totalFeasible)} accent />
+        <Tile label="Total required" value={fmtNum(totalRequired)} />
+        <div className={cn(
+          "rounded-lg border px-4 py-3 flex flex-col gap-1",
+          gap < 0 ? "border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-900/10" : "border-green-200 bg-green-50 dark:border-green-900/40 dark:bg-green-900/10",
+        )}>
+          <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide leading-tight">
+            {gap < 0 ? "Shortfall" : "Surplus"}
+          </span>
+          <span className={cn("text-lg font-semibold", gapColour(gap))}>
+            {gap < 0 ? "" : "+"}{fmtNum(gap)}
+          </span>
+          <span className="text-[11px] text-muted-foreground">
+            Feasible − required
+          </span>
+        </div>
+      </div>
+
+      {/* Month-by-month table */}
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="bg-muted/50 text-muted-foreground">
+              <th className="px-3 py-2 text-left font-medium">Month</th>
+              <th className="px-3 py-2 text-right font-medium">Working days</th>
+              <th className="px-3 py-2 text-right font-medium">Capacity</th>
+              <th className="px-3 py-2 text-right font-medium">Maintenance</th>
+              <th className="px-3 py-2 text-right font-medium">Development</th>
+              <th className="px-3 py-2 text-left font-medium">Top targets</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {monthPlans.map((m) => (
+              <>
+                <tr
+                  key={m.month}
+                  className="hover:bg-muted/30 cursor-pointer"
+                  onClick={() => setOpenMonth(openMonth === m.month ? null : m.month)}
+                >
+                  <td className="px-3 py-1.5 font-medium">{m.month}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                    {m.workingDays}
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums font-medium">
+                    {fmtNum(m.capacity)}
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums text-blue-700 dark:text-blue-400">
+                    {fmtNum(m.maintenanceVisits)}
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums text-green-700 dark:text-green-400">
+                    {fmtNum(m.developmentVisits)}
+                  </td>
+                  <td className="px-3 py-1.5 text-muted-foreground">
+                    {m.targets.slice(0, 2).map((t) => t.name).join(", ")}
+                    {m.targets.length > 2 ? ` +${m.targets.length - 2}` : ""}
+                    <span className="ml-1 text-[10px] text-primary">
+                      {openMonth === m.month ? "(collapse)" : "(expand)"}
+                    </span>
+                  </td>
+                </tr>
+                {openMonth === m.month && m.targets.length > 0 && (
+                  <tr key={`${m.month}-targets`}>
+                    <td colSpan={6} className="px-3 py-2 bg-muted/20">
+                      <div className="space-y-1">
+                        {m.targets.map((t, i) => (
+                          <div key={i} className="flex items-start gap-2 text-[11px]">
+                            <span className={cn("rounded px-1.5 py-0.5 font-medium shrink-0", priorityBadge(t.priority))}>
+                              {t.priority}
+                            </span>
+                            <span className="font-medium">{t.name}</span>
+                            {t.district && (
+                              <span className="text-muted-foreground">{t.district}</span>
+                            )}
+                            {t.distanceKm != null && (
+                              <span className="text-muted-foreground">{t.distanceKm} km</span>
+                            )}
+                            <span className="text-muted-foreground ml-auto">{t.reason}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="bg-muted/50 font-medium">
+              <td className="px-3 py-1.5">Total</td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                {fmtNum(monthPlans.reduce((s, m) => s + m.workingDays, 0))}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(totalFeasible)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-blue-700 dark:text-blue-400">
+                {fmtNum(monthPlans.reduce((s, m) => s + m.maintenanceVisits, 0))}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-green-700 dark:text-green-400">
+                {fmtNum(monthPlans.reduce((s, m) => s + m.developmentVisits, 0))}
+              </td>
+              <td className={cn("px-3 py-1.5 font-bold", gapColour(gap))}>
+                {gap < 0 ? `${fmtNum(-gap)} visits short` : `${fmtNum(gap)} surplus`}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <p className="text-[10px] text-muted-foreground">
+        Maintenance = active retailers at monthly cadence. Development = dormant high-potential sorted by plan / km.
+        Target list batched by district + distance. Click a month to expand its retailer list.
+      </p>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 const AVAILABLE_FYS = ["2026-27", "2025-26", "2024-25", "2023-24"];
@@ -647,8 +1061,26 @@ export default function SalesDeepDive() {
 
           {/* Phase 2: retailer detail from working sheet */}
           {rd && rd.status === "ok" && rd.spread && (
-            <div className="space-y-4 pt-2 border-t border-border">
+            <div className="space-y-6 pt-2 border-t border-border">
               <RetailerSpreadPanel spread={rd.spread} />
+
+              {/* Phase 3: visit pattern + capacity + forward plan */}
+              {rd.visitPlan && (
+                <>
+                  <VisitPatternPanel pattern={rd.visitPlan.pattern} />
+                  <CapacityPanel
+                    capacity={rd.visitPlan.capacity}
+                    gap={rd.visitPlan.gap}
+                  />
+                  <ForwardPlanPanel
+                    monthPlans={rd.visitPlan.monthPlans}
+                    totalFeasible={rd.visitPlan.totalFeasible}
+                    totalRequired={rd.visitPlan.totalRequired}
+                    gap={rd.visitPlan.gap}
+                  />
+                </>
+              )}
+
               {rd.rows && rd.rows.length > 0 && (
                 <RetailerTable rows={rd.rows} />
               )}

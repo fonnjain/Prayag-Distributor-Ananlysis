@@ -952,6 +952,102 @@ export interface MgmtRetailerSpread {
   annualBusinessPlan?: number | null;
 }
 
+export interface MgmtDistanceBucket {
+  /** e.g. 'Near (<=15 km)' */
+  label: string;
+  minKm: number;
+  maxKm?: number | null;
+  count: number;
+  visitsDone: number;
+  avgVisits: number;
+  avgOb: number;
+  activeCount: number;
+}
+
+export interface MgmtVisitPattern {
+  totalVisitsDone: number;
+  totalVisitsRequired: number;
+  /** totalVisitsRequired × (elapsedMonths / 12). Pro-rated target for the FY portion elapsed. */
+  proRatedRequired: number;
+  /** proRatedRequired − totalVisitsDone. Positive = behind schedule. */
+  visitDeficit: number;
+  visitedZeroOrderCount: number;
+  /** Names of retailers visited at least once but with zero OB and zero sale (capped at 30). */
+  visitedZeroOrderRetailers?: string[];
+  distanceBuckets: MgmtDistanceBucket[];
+}
+
+export interface MgmtVisitCapacity {
+  /** FY start date, e.g. '2026-04-01'. */
+  fyStartDate: string;
+  /** Date the plan was computed. */
+  asOfDate: string;
+  /** Mon-Sat working days since FY start. */
+  workingDaysElapsed: number;
+  /** totalVisitsDone / workingDaysElapsed. */
+  demonstratedVisitsPerDay: number;
+  /** Mon-Sat working days from tomorrow to FY end. */
+  workingDaysRemaining: number;
+  /** demonstratedVisitsPerDay × workingDaysRemaining. */
+  feasibleRemainingVisits: number;
+  /** totalVisitsRequired − totalVisitsDone. */
+  remainingRequired: number;
+  /** feasibleRemainingVisits − remainingRequired. Negative = shortfall. */
+  gap: number;
+  /** Average visit capacity per remaining complete month. */
+  monthlyCapacity: number;
+}
+
+/**
+ * maintain = active at cadence; develop = dormant high-potential; reduce = visited-zero-order.
+ */
+export type MgmtVisitTargetPriority = typeof MgmtVisitTargetPriority[keyof typeof MgmtVisitTargetPriority];
+
+
+export const MgmtVisitTargetPriority = {
+  maintain: 'maintain',
+  develop: 'develop',
+  reduce: 'reduce',
+} as const;
+
+export interface MgmtVisitTarget {
+  name: string;
+  district?: string | null;
+  distanceKm?: number | null;
+  ob: number;
+  businessPlan?: number | null;
+  visitsDone: number;
+  /** maintain = active at cadence; develop = dormant high-potential; reduce = visited-zero-order. */
+  priority: MgmtVisitTargetPriority;
+  reason: string;
+}
+
+export interface MgmtMonthVisitPlan {
+  /** e.g. 'Aug 26' */
+  month: string;
+  workingDays: number;
+  /** demonstratedRate × workingDays, rounded. */
+  capacity: number;
+  /** Visits allocated to active retailers to maintain their cadence. */
+  maintenanceVisits: number;
+  /** Remaining capacity directed at dormant high-potential retailers. */
+  developmentVisits: number;
+  /** Top-10 prioritised retailers for this month, batched by district+km. */
+  targets: MgmtVisitTarget[];
+}
+
+export interface MgmtVisitPlan {
+  pattern: MgmtVisitPattern;
+  capacity: MgmtVisitCapacity;
+  monthPlans: MgmtMonthVisitPlan[];
+  /** Sum of capacity across all remaining month plans. */
+  totalFeasible: number;
+  /** Visits still required to complete the annual plan (= capacity.remainingRequired). */
+  totalRequired: number;
+  /** totalFeasible − totalRequired. Negative = shortfall; surface explicitly. */
+  gap: number;
+}
+
 export interface MgmtRetailerDetail {
   /** 'ok' — retailer table loaded successfully. 'not-mapped' — member has no working sheet mapped yet; Phase 1 KPIs still returned. 'error' — sheet could not be read. */
   status: MgmtRetailerDetailStatus;
@@ -963,6 +1059,8 @@ export interface MgmtRetailerDetail {
   tabName?: string | null;
   rows?: MgmtRetailerRow[] | null;
   spread?: MgmtRetailerSpread | null;
+  /** Phase 3: visit-pattern analysis and forward visit plan (present when status is 'ok'). */
+  visitPlan?: MgmtVisitPlan | null;
   rowsRead?: number | null;
 }
 

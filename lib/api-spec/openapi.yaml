@@ -2617,6 +2617,10 @@ components:
         spread:
           nullable: true
           $ref: "#/components/schemas/MgmtRetailerSpread"
+        visitPlan:
+          nullable: true
+          $ref: "#/components/schemas/MgmtVisitPlan"
+          description: "Phase 3: visit-pattern analysis and forward visit plan (present when status is 'ok')."
         rowsRead:
           type: integer
           nullable: true
@@ -2653,6 +2657,108 @@ components:
         businessPerActiveRetailer: { type: number, nullable: true }
         businessPerVisit: { type: number, nullable: true }
         annualBusinessPlan: { type: number, nullable: true, description: "From the member's own FY tab; preferred over col-W sum." }
+    MgmtDistanceBucket:
+      type: object
+      required: [label, minKm, count, visitsDone, avgVisits, avgOb, activeCount]
+      properties:
+        label: { type: string, description: "e.g. 'Near (<=15 km)'" }
+        minKm: { type: number }
+        maxKm: { type: number, nullable: true }
+        count: { type: integer }
+        visitsDone: { type: number }
+        avgVisits: { type: number }
+        avgOb: { type: number }
+        activeCount: { type: integer }
+    MgmtVisitPattern:
+      type: object
+      required: [totalVisitsDone, totalVisitsRequired, proRatedRequired, visitDeficit, visitedZeroOrderCount, distanceBuckets]
+      properties:
+        totalVisitsDone: { type: number }
+        totalVisitsRequired: { type: number }
+        proRatedRequired:
+          type: number
+          description: "totalVisitsRequired × (elapsedMonths / 12). Pro-rated target for the FY portion elapsed."
+        visitDeficit:
+          type: number
+          description: "proRatedRequired − totalVisitsDone. Positive = behind schedule."
+        visitedZeroOrderCount: { type: integer }
+        visitedZeroOrderRetailers:
+          type: array
+          items: { type: string }
+          description: "Names of retailers visited at least once but with zero OB and zero sale (capped at 30)."
+        distanceBuckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/MgmtDistanceBucket"
+    MgmtVisitCapacity:
+      type: object
+      required: [fyStartDate, asOfDate, workingDaysElapsed, demonstratedVisitsPerDay, workingDaysRemaining, feasibleRemainingVisits, remainingRequired, gap, monthlyCapacity]
+      properties:
+        fyStartDate: { type: string, description: "FY start date, e.g. '2026-04-01'." }
+        asOfDate: { type: string, description: "Date the plan was computed." }
+        workingDaysElapsed: { type: integer, description: "Mon-Sat working days since FY start." }
+        demonstratedVisitsPerDay: { type: number, description: "totalVisitsDone / workingDaysElapsed." }
+        workingDaysRemaining: { type: integer, description: "Mon-Sat working days from tomorrow to FY end." }
+        feasibleRemainingVisits: { type: number, description: "demonstratedVisitsPerDay × workingDaysRemaining." }
+        remainingRequired: { type: number, description: "totalVisitsRequired − totalVisitsDone." }
+        gap:
+          type: number
+          description: "feasibleRemainingVisits − remainingRequired. Negative = shortfall."
+        monthlyCapacity: { type: number, description: "Average visit capacity per remaining complete month." }
+    MgmtVisitTarget:
+      type: object
+      required: [name, ob, visitsDone, priority, reason]
+      properties:
+        name: { type: string }
+        district: { type: string, nullable: true }
+        distanceKm: { type: number, nullable: true }
+        ob: { type: number }
+        businessPlan: { type: number, nullable: true }
+        visitsDone: { type: number }
+        priority:
+          type: string
+          enum: [maintain, develop, reduce]
+          description: "maintain = active at cadence; develop = dormant high-potential; reduce = visited-zero-order."
+        reason: { type: string }
+    MgmtMonthVisitPlan:
+      type: object
+      required: [month, workingDays, capacity, maintenanceVisits, developmentVisits, targets]
+      properties:
+        month: { type: string, description: "e.g. 'Aug 26'" }
+        workingDays: { type: integer }
+        capacity: { type: integer, description: "demonstratedRate × workingDays, rounded." }
+        maintenanceVisits:
+          type: integer
+          description: "Visits allocated to active retailers to maintain their cadence."
+        developmentVisits:
+          type: integer
+          description: "Remaining capacity directed at dormant high-potential retailers."
+        targets:
+          type: array
+          items:
+            $ref: "#/components/schemas/MgmtVisitTarget"
+          description: "Top-10 prioritised retailers for this month, batched by district+km."
+    MgmtVisitPlan:
+      type: object
+      required: [pattern, capacity, monthPlans, totalFeasible, totalRequired, gap]
+      properties:
+        pattern:
+          $ref: "#/components/schemas/MgmtVisitPattern"
+        capacity:
+          $ref: "#/components/schemas/MgmtVisitCapacity"
+        monthPlans:
+          type: array
+          items:
+            $ref: "#/components/schemas/MgmtMonthVisitPlan"
+        totalFeasible:
+          type: number
+          description: "Sum of capacity across all remaining month plans."
+        totalRequired:
+          type: number
+          description: "Visits still required to complete the annual plan (= capacity.remainingRequired)."
+        gap:
+          type: number
+          description: "totalFeasible − totalRequired. Negative = shortfall; surface explicitly."
     MgmtDeepDiveKpis:
       type: object
       required: [stateHead, name, normKey]
