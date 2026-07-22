@@ -30,3 +30,15 @@ id = "j-2LKJ5vvDdd3gFuJabA7"
 uri = "file://exports/disputed-2026-27-Jul-26.xlsx"
 type = "table"
 title = "Disputed Jul-26 Rows — Review Export"
+
+[[outputs]]
+id = "OcKBjVD0CEiCM10hp_hL2"
+uri = "file://exports/Prayag_Architecture.xlsx"
+type = "table"
+title = "Prayag Architecture (Excel — 6 sheets)"
+
+[[outputs]]
+id = "gVTvYmc-G_n_Ko17QFD2Y"
+uri = "file://exports/Prayag_Architecture_and_Logic.docx"
+type = "word_document"
+title = "Prayag Architecture and Logic (Word — 10 sections)"
