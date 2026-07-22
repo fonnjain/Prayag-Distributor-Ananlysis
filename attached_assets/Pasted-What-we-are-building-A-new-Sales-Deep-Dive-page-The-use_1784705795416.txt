@@ -1,0 +1,66 @@
+What we are building
+A new 'Sales Deep Dive' page. The user picks a State Head, then a team member under that head, then a fiscal year, and sees that member's full performance profile. FY2024-25 and FY2025-26 are frozen (served from the database once loaded and verified, never re-read from Sheets). FY2026-27 is live and auto-derived.
+Sourcing model (route B = re-derive, with source A as cross-check)
+- Mandatory KPI set (the minimum) = the ~38 fields from the Anant Singh legend tab, columns through AP. Read per member from the STATE HEAD DASHBOARD 'Data' tab (source A) for the live year, and from the frozen DB for closed years.
+- Retailer-level detail (per-retailer OB / Sale / plan / visits / distance) is re-derived (source B) from each member's own working sheet. This powers spread, visit analysis, and the auto visit plan.
+- SKU / segment spread comes from secondary_register_line (already loaded from the segment-wise registers): item-code + segment for closed years; segment-level only for the live year (no FY2026-27 register exists yet, so item-code auto-fills later).
+- Cost (CTC, T.A.) comes from the dashboard 'Data' tab / HR. ROI is revenue-to-cost now; margin-based ROI is added later when a cost master (fg_cost) is populated.
+Non-negotiable rules (apply to every phase)
+- 1. NET = Sub Total, never Order Total.
+- 2. Achievement is always recomputed (received / plan), never read from a sheet's own percent cell; numerator and denominator must cover the same population.
+- 3. The State Head Dashboard is the authority for headline secondary OB and sales; the register is drill-down only.
+- 4. Keep the four measures distinct, and keep direct-dealer separate from retailer/party business on every figure.
+- 5. Match member names with the secondary key (normSecKey) that PRESERVES parentheticals like (Off Roll) and (Rudrapur). Never apply the primary canonHead() to secondary names, and never match a member by row number.
+- 6. Closed years (isClosedFy = true) are frozen: once loaded and verified, serve from the DB and never read Sheets for them again.
+- 7. Corrections supersede (version_status), never DELETE. All inserts ON CONFLICT DO NOTHING. Count occurrence over all rows before filtering.
+- 8. Logging via pino (req.log in handlers, logger elsewhere) - never console.log. Config JSON must be statically imported (no fs.readFileSync(process.cwd())). Read PORT from env. Match tab names with startsWith (titles truncate to 31 chars). Coerce string numeric cells via the sheets.ts helpers.
+- 9. New API route = add the handler, add it to openapi.yaml, run codegen, validate inputs with Zod, then RESTART the API server.
+- 10. Google Drive stays strictly read-only. No writes, deletes, moves, renames.
+- 11. No emojis anywhere.
+- 12. Never trust a self-report of success. Prove each result with a COUNT(*) or a reconciliation to a known number. A total that looks right is often inflated - trace one row source to screen.
+Data sources (verified IDs)
+STATE HEAD DASHBOARD 2026-27: id 1E1jEY_yO8LmpqBDpcesS_fu2SBPEQ0eKO5xN29XyTEM. Tab 'Data' = per-member mandatory KPIs including cost (CTC Monthly, CTC, T.A. Bill ST. Cost, Cost Ratio) and Sale. Header is row 3; each member is one row. Prasun is one row here - match by name, not row.
+Prasun Chatterjee working file (first member to validate): id 1UEZK2L9OACV3t606hu8vkTn-5ekPDyqCYSBS2X6A5Jc. Tab 'Summary Report 2026-27' is retailer-level: header row 5, TOTAL on row 4, retailer rows from row 7; columns C name, D district, E city, F assigned distributor, G distance km, W business plan, X visits required, Z order booking, AA sale, AB total visit, AD percent achievement to date. Tab '2026-27' = monthly Plan/OB/Sale per retailer. Tab 'Apr Visit' = assigned segment + visits.
+Secondary registers (segment-wise, item-code) already loaded into secondary_register_line: FY2025-26 1aNQ2Tcz..., FY2024-25 1sejEhXC... (do NOT use the duplicate 1zTy5o...), FY2023-24 1c5Zmm..., FY2022-23 1wj96u..., FY2021-22 1RtRBy.... Columns: Date, Retailer Id, Retailer, Order ID, Segment, Cat. No. (SKU), Qty, MRP, Order Value, Distributor, Discount, Sub Total (= NET), Order Total (per order, first line only), Team Member Name.
+No FY2026-27 secondary register exists: the live-year SKU view is segment-level only; the item-code panel fills in once that register is created and loaded.
+FY2026-27 plan figure: for Prasun the annual Business Plan is Rs 2,65,00,000 - use the '2026-2027' tab figure, not the Rs 1.8 Cr summary figure.
+Roster provisioning note: the live-year re-derive needs each member's own file id; only Prasun's is wired now. Build the engine to accept a member -> fileId map and degrade gracefully (show the dashboard-sourced KPIs even when a member's own sheet is not yet mapped). Provisioning the remaining ~178 members (share the State Head folders, or an index tab, or Apps Script enumeration from DEEPAKJ@) is a separate data step.
+Phase 1 - page, selectors, and the mandatory KPI set (live year, source A)
+Objective: create the Sales Deep Dive page and a route that returns the ~38 mandatory KPIs for a chosen State Head + member + FY, read from the dashboard 'Data' tab. Live year only. No re-derive, no register, no DB writes yet.
+PROMPT - Phase 1 (copy the box below)
+Prayag app - build the Sales Deep Dive page, Phase 1 of 6. Submit later phases separately.
+
+Goal: a new 'Sales Deep Dive' tab where the user picks a State Head, then a team
+member under that head, then a fiscal year, and sees that member's mandatory KPI
+set for the live year (FY2026-27). This phase only reads the STATE HEAD DASHBOARD
+'Data' tab (source A) and renders the KPIs. No re-derive, no register, no DB writes.
+
+Data source: STATE HEAD DASHBOARD 2026-27, spreadsheet id
+1E1jEY_yO8LmpqBDpcesS_fu2SBPEQ0eKO5xN29XyTEM, tab 'Data'. Header is row 3; each
+member is one data row. Read the ~38 fields from Primary Target through Business Per
+Retailer (this includes CTC Monthly, CTC, T.A. Bill ST. Cost, Cost Ratio). Keep
+Order Booking and Direct Dealers Order as separate fields.
+
+Build:
+- New route GET /mgmt/deep-dive?fy=&stateHead=&member= returning the member's KPI
+  object plus the list of state heads and the members under the selected head.
+- Match the member by the secondary name key (normSecKey) that preserves
+  parentheticals - do not match by row index.
+- New frontend tab 'Sales Deep Dive' with two dependent dropdowns (State Head ->
+  Member) and a fiscal-year selector, rendering the KPI grid. Label each figure and
+  keep direct-dealer separate from retailer/party business.
+- Add the route to openapi.yaml, run codegen, validate inputs with Zod, then RESTART
+  the API server.
+
+Acceptance - State Head 'Anant Singh', member 'Prasun Chatterjee', FY2026-27:
+  Secondary Target Rs 51,00,000; Order Booking Rs 18,34,504; Direct Dealers Order
+  Rs 7,86,605; Sale Rs 26,13,934; CTC Monthly Rs 46,390; Cost Ratio 5.94 percent;
+  Total Old Retailers 61; Visited 54; Non-Visited 8; New Party Order Booking Rs 0.
+  Prove the numbers by logging the parsed row, not by asserting success.
+
+Global rules: NET = Sub Total never Order Total; achievement recomputed never read
+from a percent cell, same population top and bottom; the dashboard is the authority
+for headline OB and sales; keep the four measures distinct; match names with
+normSecKey never canonHead(); Google Drive is read-only; no console.log (use pino
+req.log); config JSON statically imported; PORT from env; match tab names with
+startsWith; coerce string number cells; no emojis.

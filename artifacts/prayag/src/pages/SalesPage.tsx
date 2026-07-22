@@ -4,6 +4,7 @@ import { lazy, Suspense } from "react";
 import { useLocation } from "wouter";
 import StateHeadDashboard from "@/components/dashboard/StateHeadDashboard";
 import SalesPeople from "@/components/dashboard/SalesPeople";
+import SalesDeepDive from "@/components/dashboard/SalesDeepDive";
 
 const PrimaryPerformanceDashboard = lazy(
   () => import("@/components/dashboard/PrimaryPerformanceDashboard"),
@@ -21,6 +22,7 @@ const SECTIONS = [
   { id: "primary-performance",   label: "Primary Performance",   component: PrimaryPerformanceDashboard,   lazy: true },
   { id: "secondary-performance", label: "Secondary Performance", component: SecondaryPerformanceDashboard, lazy: true },
   { id: "combined",              label: "Combined",              component: CombinedPerformanceDashboard,  lazy: true },
+  { id: "deep-dive",             label: "Sales Deep Dive",       component: SalesDeepDive,                 lazy: false },
 ] as const;
 
 type SectionId = (typeof SECTIONS)[number]["id"];

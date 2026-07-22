@@ -866,6 +866,55 @@ export interface MgmtSourceStatus {
   detail: string;
 }
 
+export interface MgmtDeepDiveMemberRef {
+  stateHead: string;
+  name: string;
+  normKey: string;
+}
+
+export type MgmtDeepDiveKpisExtra = { [key: string]: unknown };
+
+export interface MgmtDeepDiveKpis {
+  stateHead: string;
+  name: string;
+  normKey: string;
+  hq?: string | null;
+  designation?: string | null;
+  contact?: string | null;
+  primaryTarget?: number | null;
+  secondaryTarget?: number | null;
+  monthlyTarget?: number | null;
+  orderBooking?: number | null;
+  directDealersOrder?: number | null;
+  sale?: number | null;
+  achievementPct?: number | null;
+  ctcMonthly?: number | null;
+  ctcAnnual?: number | null;
+  taBillStCost?: number | null;
+  costRatio?: number | null;
+  totalOldRetailers?: number | null;
+  visitedRetailers?: number | null;
+  nonVisitedRetailers?: number | null;
+  newPartyOrderBooking?: number | null;
+  businessPerRetailer?: number | null;
+  totalRetailers?: number | null;
+  directDealersCount?: number | null;
+  extra?: MgmtDeepDiveKpisExtra;
+}
+
+export interface MgmtDeepDive {
+  /** Fiscal year, e.g. 2026-27. */
+  fy: string;
+  /** All distinct state heads found in the Data tab. */
+  stateHeads: string[];
+  /** Members under the selected state head (or all members if no head selected). */
+  members: MgmtDeepDiveMemberRef[];
+  kpis?: MgmtDeepDiveKpis | null;
+  /** Total rows read from the Data tab. */
+  rowsRead: number;
+  error?: string | null;
+}
+
 export interface MgmtOptions {
   /** Fiscal years selectable in the report, newest first. */
   fys: string[];
@@ -1353,6 +1402,21 @@ fy?: string;
  * @pattern ^\d{4}-\d{2}$
  */
 compare?: string;
+};
+
+export type GetMgmtDeepDiveParams = {
+/**
+ * Fiscal year like 2026-27. Defaults to 2026-27.
+ */
+fy?: string;
+/**
+ * Raw state head name as it appears in the sheet (used to filter the member dropdown). If omitted, all members are returned.
+ */
+stateHead?: string;
+/**
+ * Member name or normSecKey. Matched with normSecKey (preserves parentheticals like (Off Roll)). If omitted, kpis is null.
+ */
+member?: string;
 };
 
 export type VerifyMgmtReportParams = {

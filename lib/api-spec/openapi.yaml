@@ -237,6 +237,59 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /mgmt/deep-dive:
+    get:
+      operationId: getMgmtDeepDive
+      tags: [mgmt]
+      summary: Sales Deep Dive — mandatory KPI set for one team member
+      description: >
+        Returns the ~38 mandatory KPIs from the STATE HEAD DASHBOARD 'Data' tab
+        (source A) for a chosen state head + member + fiscal year. Also returns
+        the list of all state heads and the members under the selected head for
+        populating the dependent dropdowns. Phase 1 reads the live year from
+        Sheets; closed FYs will be served from DB snapshots in a later phase.
+        Direct Dealers Order is kept separate from retailer/party OB throughout.
+        Achievement is always recomputed (sale / plan) — never read from a sheet
+        percent cell.
+      parameters:
+        - name: fy
+          in: query
+          schema: { type: string }
+          description: Fiscal year like 2026-27. Defaults to 2026-27.
+        - name: stateHead
+          in: query
+          schema: { type: string }
+          description: >
+            Raw state head name as it appears in the sheet (used to filter the
+            member dropdown). If omitted, all members are returned.
+        - name: member
+          in: query
+          schema: { type: string }
+          description: >
+            Member name or normSecKey. Matched with normSecKey (preserves
+            parentheticals like (Off Roll)). If omitted, kpis is null.
+      responses:
+        "200":
+          description: Deep-dive data and selector lists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MgmtDeepDive"
+        "400":
+          description: Invalid parameters
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "502":
+          description: Sheet unreachable or tab not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /mgmt/options:
     get:
       operationId: getMgmtOptions
@@ -2493,6 +2546,69 @@ components:
         - name
         - status
         - detail
+    MgmtDeepDive:
+      type: object
+      required: [fy, stateHeads, members, rowsRead]
+      properties:
+        fy:
+          type: string
+          description: Fiscal year, e.g. 2026-27.
+        stateHeads:
+          type: array
+          items: { type: string }
+          description: All distinct state heads found in the Data tab.
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/MgmtDeepDiveMemberRef"
+          description: Members under the selected state head (or all members if no head selected).
+        kpis:
+          nullable: true
+          $ref: "#/components/schemas/MgmtDeepDiveKpis"
+        rowsRead:
+          type: integer
+          description: Total rows read from the Data tab.
+        error:
+          type: string
+          nullable: true
+    MgmtDeepDiveMemberRef:
+      type: object
+      required: [stateHead, name, normKey]
+      properties:
+        stateHead: { type: string }
+        name: { type: string }
+        normKey: { type: string }
+    MgmtDeepDiveKpis:
+      type: object
+      required: [stateHead, name, normKey]
+      properties:
+        stateHead: { type: string }
+        name: { type: string }
+        normKey: { type: string }
+        hq: { type: string, nullable: true }
+        designation: { type: string, nullable: true }
+        contact: { type: string, nullable: true }
+        primaryTarget: { type: number, nullable: true }
+        secondaryTarget: { type: number, nullable: true }
+        monthlyTarget: { type: number, nullable: true }
+        orderBooking: { type: number, nullable: true }
+        directDealersOrder: { type: number, nullable: true }
+        sale: { type: number, nullable: true }
+        achievementPct: { type: number, nullable: true }
+        ctcMonthly: { type: number, nullable: true }
+        ctcAnnual: { type: number, nullable: true }
+        taBillStCost: { type: number, nullable: true }
+        costRatio: { type: number, nullable: true }
+        totalOldRetailers: { type: number, nullable: true }
+        visitedRetailers: { type: number, nullable: true }
+        nonVisitedRetailers: { type: number, nullable: true }
+        newPartyOrderBooking: { type: number, nullable: true }
+        businessPerRetailer: { type: number, nullable: true }
+        totalRetailers: { type: number, nullable: true }
+        directDealersCount: { type: number, nullable: true }
+        extra:
+          type: object
+          additionalProperties: true
     MgmtOptions:
       type: object
       properties:

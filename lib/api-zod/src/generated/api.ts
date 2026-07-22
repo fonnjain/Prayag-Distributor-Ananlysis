@@ -276,6 +276,56 @@ export const GetAnalyticsResponse = zod.object({
 
 
 /**
+ * Returns the ~38 mandatory KPIs from the STATE HEAD DASHBOARD 'Data' tab (source A) for a chosen state head + member + fiscal year. Also returns the list of all state heads and the members under the selected head for populating the dependent dropdowns. Phase 1 reads the live year from Sheets; closed FYs will be served from DB snapshots in a later phase. Direct Dealers Order is kept separate from retailer/party OB throughout. Achievement is always recomputed (sale / plan) — never read from a sheet percent cell.
+ * @summary Sales Deep Dive — mandatory KPI set for one team member
+ */
+export const GetMgmtDeepDiveQueryParams = zod.object({
+  "fy": zod.coerce.string().optional().describe('Fiscal year like 2026-27. Defaults to 2026-27.'),
+  "stateHead": zod.coerce.string().optional().describe('Raw state head name as it appears in the sheet (used to filter the member dropdown). If omitted, all members are returned.\n'),
+  "member": zod.coerce.string().optional().describe('Member name or normSecKey. Matched with normSecKey (preserves parentheticals like (Off Roll)). If omitted, kpis is null.\n')
+})
+
+export const GetMgmtDeepDiveResponse = zod.object({
+  "fy": zod.string().describe('Fiscal year, e.g. 2026-27.'),
+  "stateHeads": zod.array(zod.string()).describe('All distinct state heads found in the Data tab.'),
+  "members": zod.array(zod.object({
+  "stateHead": zod.string(),
+  "name": zod.string(),
+  "normKey": zod.string()
+})).describe('Members under the selected state head (or all members if no head selected).'),
+  "kpis": zod.object({
+  "stateHead": zod.string(),
+  "name": zod.string(),
+  "normKey": zod.string(),
+  "hq": zod.string().nullish(),
+  "designation": zod.string().nullish(),
+  "contact": zod.string().nullish(),
+  "primaryTarget": zod.number().nullish(),
+  "secondaryTarget": zod.number().nullish(),
+  "monthlyTarget": zod.number().nullish(),
+  "orderBooking": zod.number().nullish(),
+  "directDealersOrder": zod.number().nullish(),
+  "sale": zod.number().nullish(),
+  "achievementPct": zod.number().nullish(),
+  "ctcMonthly": zod.number().nullish(),
+  "ctcAnnual": zod.number().nullish(),
+  "taBillStCost": zod.number().nullish(),
+  "costRatio": zod.number().nullish(),
+  "totalOldRetailers": zod.number().nullish(),
+  "visitedRetailers": zod.number().nullish(),
+  "nonVisitedRetailers": zod.number().nullish(),
+  "newPartyOrderBooking": zod.number().nullish(),
+  "businessPerRetailer": zod.number().nullish(),
+  "totalRetailers": zod.number().nullish(),
+  "directDealersCount": zod.number().nullish(),
+  "extra": zod.record(zod.string(), zod.unknown()).optional()
+}).nullish(),
+  "rowsRead": zod.number().describe('Total rows read from the Data tab.'),
+  "error": zod.string().nullish()
+})
+
+
+/**
  * Returns the available fiscal years, region-to-state map, roster states, and the connection status of each data source used by the STATE HEAD DASHBOARD report.
  * @summary Filter options for management reports
  */

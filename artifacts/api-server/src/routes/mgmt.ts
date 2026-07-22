@@ -33,6 +33,7 @@ import {
   loadStateDashboard,
   type SecMember,
 } from "../lib/mgmt/stateDashboard.js";
+import { loadDeepDiveData, normSecKey } from "../lib/mgmt/deepDiveData.js";
 import { splitAnnualToMonth, getSeasonalCalibration } from "../lib/seasonal.js";
 import {
   buildPrimaryTargetMapFromStateTargets,
@@ -764,6 +765,44 @@ router.get("/mgmt/pending-orders", async (req: Request, res: Response): Promise<
   } catch (err) {
     req.log.error({ err }, "pending-orders: loadFactoryPending threw");
     res.status(500).json({ error: "Could not load factory pending data." });
+  }
+});
+
+// GET /api/mgmt/deep-dive
+// Phase 1: returns the ~38 mandatory KPIs for a chosen state head + member + FY
+// from the 'Data' tab of the STATE HEAD DASHBOARD (source A). No re-derive yet.
+router.get("/mgmt/deep-dive", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const fy =
+      typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
+        ? req.query.fy.trim()
+        : "2026-27";
+
+    const selectedStateHead =
+      typeof req.query.stateHead === "string" ? req.query.stateHead.trim() : undefined;
+
+    const memberRaw =
+      typeof req.query.member === "string" ? req.query.member.trim() : undefined;
+
+    // Accept either the raw name or the normSecKey.
+    const memberKey = memberRaw ? normSecKey(memberRaw) : undefined;
+
+    req.log.info(
+      { fy, selectedStateHead, memberKey },
+      "mgmt/deep-dive: request received",
+    );
+
+    const result = await loadDeepDiveData(fy, selectedStateHead, memberKey);
+
+    if (result.error && !result.stateHeads.length) {
+      res.status(502).json({ error: result.error });
+      return;
+    }
+
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "mgmt/deep-dive: handler threw");
+    res.status(500).json({ error: "Could not load deep-dive data." });
   }
 });
 

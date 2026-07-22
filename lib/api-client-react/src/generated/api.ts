@@ -43,6 +43,7 @@ import type {
   ErrorResponse,
   ExportCustomerMasterParams,
   GetAnalyticsParams,
+  GetMgmtDeepDiveParams,
   GetPrimaryTargetsParams,
   GetSalesPeopleTreeParams,
   GetSalesPersonDeepDiveParams,
@@ -57,6 +58,7 @@ import type {
   ListCustomerMasterParams,
   ListCustomerMismatchesParams,
   ListDriveFilesParams,
+  MgmtDeepDive,
   MgmtOptions,
   MgmtReportRequest,
   MgmtVerifyResult,
@@ -725,6 +727,91 @@ export function useGetAnalytics<TData = Awaited<ReturnType<typeof getAnalytics>>
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAnalyticsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetMgmtDeepDiveUrl = (params?: GetMgmtDeepDiveParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/mgmt/deep-dive?${stringifiedParams}` : `/api/mgmt/deep-dive`
+}
+
+/**
+ * Returns the ~38 mandatory KPIs from the STATE HEAD DASHBOARD 'Data' tab (source A) for a chosen state head + member + fiscal year. Also returns the list of all state heads and the members under the selected head for populating the dependent dropdowns. Phase 1 reads the live year from Sheets; closed FYs will be served from DB snapshots in a later phase. Direct Dealers Order is kept separate from retailer/party OB throughout. Achievement is always recomputed (sale / plan) — never read from a sheet percent cell.
+ * @summary Sales Deep Dive — mandatory KPI set for one team member
+ */
+export const getMgmtDeepDive = async (params?: GetMgmtDeepDiveParams, options?: RequestInit): Promise<MgmtDeepDive> => {
+
+  return customFetch<MgmtDeepDive>(getGetMgmtDeepDiveUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMgmtDeepDiveQueryKey = (params?: GetMgmtDeepDiveParams,) => {
+    return [
+    `/api/mgmt/deep-dive`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetMgmtDeepDiveQueryOptions = <TData = Awaited<ReturnType<typeof getMgmtDeepDive>>, TError = ErrorType<ErrorResponse>>(params?: GetMgmtDeepDiveParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMgmtDeepDive>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMgmtDeepDiveQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMgmtDeepDive>>> = ({ signal }) => getMgmtDeepDive(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMgmtDeepDive>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMgmtDeepDiveQueryResult = NonNullable<Awaited<ReturnType<typeof getMgmtDeepDive>>>
+export type GetMgmtDeepDiveQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Sales Deep Dive — mandatory KPI set for one team member
+ */
+
+export function useGetMgmtDeepDive<TData = Awaited<ReturnType<typeof getMgmtDeepDive>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetMgmtDeepDiveParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMgmtDeepDive>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMgmtDeepDiveQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
