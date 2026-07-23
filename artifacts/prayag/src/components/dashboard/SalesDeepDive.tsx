@@ -1736,6 +1736,172 @@ function PeriodSelectorPanel({ kpis, months }: PeriodSelectorPanelProps) {
   );
 }
 
+// ── Date range filter ─────────────────────────────────────────────────────────
+
+const FY_MONTH_ORDER = [
+  "Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar",
+] as const;
+type FyMonth = (typeof FY_MONTH_ORDER)[number];
+
+type DatePreset = "today" | "7d" | "15d" | "month" | "custom";
+
+interface DateFilter {
+  preset: DatePreset | null;
+  month: FyMonth;
+  fromDate: string;  // YYYY-MM-DD
+  toDate:   string;  // YYYY-MM-DD
+}
+
+const DATE_FILTER_INIT: DateFilter = { preset: null, month: "Apr", fromDate: "", toDate: "" };
+
+/** Calendar start/end for a given FY month label (e.g. "Jul" in FY 2026-27 → July 2026). */
+function fyMonthCalendarRange(month: FyMonth, fyLabel: string): { start: Date; end: Date } {
+  const fyYear   = parseInt(fyLabel.split("-")[0], 10);   // 2026
+  const idx      = FY_MONTH_ORDER.indexOf(month);          // 0 = Apr … 11 = Mar
+  const calYear  = idx < 9 ? fyYear : fyYear + 1;
+  const calMonth = (idx + 3) % 12;                         // Apr→3, May→4 … Dec→11, Jan→0 … Mar→2
+  const start = new Date(calYear, calMonth, 1);
+  const end   = new Date(calYear, calMonth + 1, 0, 23, 59, 59);
+  return { start, end };
+}
+
+interface ActiveDateRange { from: Date; to: Date; label: string }
+
+function computeActiveDateRange(f: DateFilter, fyLabel: string): ActiveDateRange | null {
+  if (!f.preset) return null;
+  const eod = () => { const d = new Date(); d.setHours(23, 59, 59, 999); return d; };
+  const bod = (offset = 0) => {
+    const d = new Date(); d.setDate(d.getDate() - offset); d.setHours(0, 0, 0, 0); return d;
+  };
+  if (f.preset === "today") return { from: bod(0),  to: eod(), label: "Today" };
+  if (f.preset === "7d")    return { from: bod(6),  to: eod(), label: "Last 7 days" };
+  if (f.preset === "15d")   return { from: bod(14), to: eod(), label: "Last 15 days" };
+  if (f.preset === "month") {
+    const { start, end } = fyMonthCalendarRange(f.month, fyLabel);
+    return { from: start, to: end, label: f.month };
+  }
+  if (f.preset === "custom" && f.fromDate && f.toDate) {
+    const from = new Date(f.fromDate + "T00:00:00");
+    const to   = new Date(f.toDate   + "T23:59:59");
+    if (from <= to) return { from, to, label: `${f.fromDate} – ${f.toDate}` };
+  }
+  return null;
+}
+
+function coveredFyMonths(range: ActiveDateRange, fyLabel: string): Set<FyMonth> {
+  const out = new Set<FyMonth>();
+  for (const m of FY_MONTH_ORDER) {
+    const { start, end } = fyMonthCalendarRange(m, fyLabel);
+    if (range.from <= end && range.to >= start) out.add(m);
+  }
+  return out;
+}
+
+function availableFyMonths(fyLabel: string): FyMonth[] {
+  const today = new Date();
+  return FY_MONTH_ORDER.filter((m) => fyMonthCalendarRange(m, fyLabel).start <= today);
+}
+
+function DateFilterBar({
+  fyLabel,
+  value,
+  onChange,
+}: {
+  fyLabel: string;
+  value: DateFilter;
+  onChange: (f: DateFilter) => void;
+}) {
+  const months = availableFyMonths(fyLabel);
+
+  const PRESETS: Array<{ key: DatePreset; label: string }> = [
+    { key: "today", label: "Today" },
+    { key: "7d",    label: "Last 7 days" },
+    { key: "15d",   label: "Last 15 days" },
+  ];
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap">
+        Date
+      </label>
+
+      {PRESETS.map(({ key, label }) => (
+        <button
+          key={key}
+          onClick={() =>
+            onChange({ ...value, preset: value.preset === key ? null : key })
+          }
+          className={cn(
+            "px-2.5 py-1 text-xs rounded-md border transition-colors",
+            value.preset === key
+              ? "border-primary bg-primary text-primary-foreground"
+              : "border-border bg-card hover:bg-muted/50",
+          )}
+        >
+          {label}
+        </button>
+      ))}
+
+      {/* Month dropdown */}
+      <div className="flex flex-col gap-0.5">
+        <select
+          className="h-8 rounded-md border border-border bg-card px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
+          value={value.preset === "month" ? value.month : ""}
+          onChange={(e) => {
+            if (e.target.value)
+              onChange({ ...value, preset: "month", month: e.target.value as FyMonth });
+            else
+              onChange({ ...value, preset: null });
+          }}
+        >
+          <option value="">Month...</option>
+          {months.map((m) => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Custom date range — expand inline when active */}
+      {value.preset === "custom" ? (
+        <div className="flex items-center gap-1.5">
+          <input
+            type="date"
+            value={value.fromDate}
+            onChange={(e) => onChange({ ...value, fromDate: e.target.value })}
+            className="h-8 rounded-md border border-border bg-card px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
+          />
+          <span className="text-xs text-muted-foreground">to</span>
+          <input
+            type="date"
+            value={value.toDate}
+            onChange={(e) => onChange({ ...value, toDate: e.target.value })}
+            className="h-8 rounded-md border border-border bg-card px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
+          />
+        </div>
+      ) : (
+        <button
+          onClick={() =>
+            onChange({ ...value, preset: "custom", fromDate: "", toDate: "" })
+          }
+          className="px-2.5 py-1 text-xs rounded-md border border-border bg-card hover:bg-muted/50 transition-colors"
+        >
+          Custom
+        </button>
+      )}
+
+      {/* Clear */}
+      {value.preset && (
+        <button
+          onClick={() => onChange(DATE_FILTER_INIT)}
+          className="text-xs text-muted-foreground hover:text-foreground underline"
+        >
+          Clear
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 const AVAILABLE_FYS = ["2026-27", "2025-26", "2024-25", "2023-24"];
