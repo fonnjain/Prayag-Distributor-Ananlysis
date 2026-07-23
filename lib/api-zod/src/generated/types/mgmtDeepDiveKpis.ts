@@ -32,5 +32,29 @@ export interface MgmtDeepDiveKpis {
   businessPerRetailer?: number | null;
   totalRetailers?: number | null;
   directDealersCount?: number | null;
+  /** BK: Monthly Direct Dealer Primary Target. */
+  primaryTargetMonthly?: number | null;
+  /** Derived: monthlyTarget − primaryTargetMonthly. */
+  secondaryTargetMonthly?: number | null;
+  /** BM: Total target to date (secondary + primary). */
+  totalTargetToDate?: number | null;
+  /** Derived: round(totalTargetToDate / monthlyTarget). Integer months elapsed from April 1. */
+  elapsedMonths?: number | null;
+  /** orderBooking / secondaryTarget × 100. */
+  achievementSecondary?: number | null;
+  /** directDealersOrder / primaryTarget × 100. */
+  achievementDirectDealer?: number | null;
+  /** (orderBooking + directDealersOrder) / totalTargetToDate × 100. */
+  achievementTotal?: number | null;
+  /** sale / totalTargetToDate × 100. */
+  achievementSale?: number | null;
+  /** Prior year Q1 actual. */
+  lastYearQ1?: number | null;
+  /** Prior year Q2 actual. */
+  lastYearQ2?: number | null;
+  /** Prior year Q3 actual. */
+  lastYearQ3?: number | null;
+  /** Prior year Q4 actual. */
+  lastYearQ4?: number | null;
   extra?: MgmtDeepDiveKpisExtra;
 }

@@ -24,13 +24,28 @@ interface MemberKpis {
   hq: string | null;
   designation: string | null;
   contact: string | null;
-  primaryTarget: number | null;
-  secondaryTarget: number | null;
-  monthlyTarget: number | null;
+  // Targets (all "to date" / monthly — NOT annual)
+  primaryTarget: number | null;           // G: primary YTD target to date
+  secondaryTarget: number | null;         // H: secondary YTD target to date
+  monthlyTarget: number | null;           // BE: total monthly target
+  primaryTargetMonthly: number | null;    // BK: primary monthly target
+  secondaryTargetMonthly: number | null;  // Derived: BE − BK
+  totalTargetToDate: number | null;       // BM: total target to date
+  elapsedMonths: number | null;           // Derived: round(BM / BE)
   orderBooking: number | null;
   directDealersOrder: number | null;
   sale: number | null;
+  // 4 achievement ratios (achievementPct = achievementSale for compat)
   achievementPct: number | null;
+  achievementSecondary: number | null;
+  achievementDirectDealer: number | null;
+  achievementTotal: number | null;
+  achievementSale: number | null;
+  // Prior year quarterly actuals
+  lastYearQ1: number | null;
+  lastYearQ2: number | null;
+  lastYearQ3: number | null;
+  lastYearQ4: number | null;
   ctcMonthly: number | null;
   ctcAnnual: number | null;
   taBillStCost: number | null;
@@ -43,6 +58,14 @@ interface MemberKpis {
   totalRetailers: number | null;
   directDealersCount: number | null;
   extra: Record<string, number | string | null>;
+}
+
+// Per-month actuals from the member's own FY tab.
+interface MonthActual {
+  month: string;              // "Apr" | "May" | ... | "Mar"
+  plan: number | null;
+  orderBooking: number | null;
+  sale: number | null;
 }
 
 interface RetailerRow {
@@ -86,6 +109,7 @@ interface RetailerDetail {
   rows?: RetailerRow[];
   spread?: RetailerSpread;
   visitPlan?: VisitPlan | null;
+  months?: MonthActual[] | null;   // Phase 7: per-month actuals from FY tab
   rowsRead?: number | null;
 }
 
@@ -1440,6 +1464,278 @@ function RoiCostPanel({ roi, memberName }: { roi: RoiCost; memberName: string })
   );
 }
 
+// ── Phase 7: Period Selector Panel ────────────────────────────────────────────
+
+type PeriodId = "ytd" | "full-year" | "q1" | "q2" | "q3" | "q4" | "month";
+
+const PERIOD_LABELS: Record<PeriodId, string> = {
+  "ytd":       "YTD",
+  "full-year": "Full Year",
+  "q1":        "Q1 Apr-Jun",
+  "q2":        "Q2 Jul-Sep",
+  "q3":        "Q3 Oct-Dec",
+  "q4":        "Q4 Jan-Mar",
+  "month":     "Month",
+};
+
+const FY_MONTHS_LIST = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"] as const;
+const QUARTER_MONTHS: Record<string, string[]> = {
+  "q1": ["Apr","May","Jun"],
+  "q2": ["Jul","Aug","Sep"],
+  "q3": ["Oct","Nov","Dec"],
+  "q4": ["Jan","Feb","Mar"],
+};
+
+function computePeriodData(
+  period: PeriodId,
+  selectedMonth: string,
+  kpis: MemberKpis,
+  months: MonthActual[],
+) {
+  const monthlyTotal   = kpis.monthlyTarget;
+  const primaryMonthly = kpis.primaryTargetMonthly;
+  const secMonthly     = kpis.secondaryTargetMonthly;
+  const elapsed        = kpis.elapsedMonths;
+
+  const monthCount =
+    period === "ytd"       ? (elapsed ?? 0)
+    : period === "full-year" ? 12
+    : period === "month"     ? 1
+    : 3; // q1–q4
+
+  // Pro-rata targets
+  const secTarget     = secMonthly    !== null ? secMonthly    * monthCount : null;
+  const primTarget    = primaryMonthly !== null ? primaryMonthly * monthCount : null;
+  const totalTarget   = monthlyTotal   !== null ? monthlyTotal   * monthCount : null;
+
+  // YTD: always use authoritative Data-tab values
+  if (period === "ytd") {
+    return { secOb: kpis.orderBooking, ddOb: kpis.directDealersOrder, sale: kpis.sale,
+             plan: null, secTarget, primTarget, totalTarget, monthCount, fromMonthlyTab: false };
+  }
+
+  // Sub-period: sum from monthly tab rows
+  const targetMonths =
+    period === "full-year" ? [...FY_MONTHS_LIST]
+    : period === "month"    ? [selectedMonth]
+    : QUARTER_MONTHS[period] ?? [];
+
+  const relevant = months.filter((m) => targetMonths.includes(m.month));
+  if (relevant.length === 0) {
+    return { secOb: null, ddOb: null, sale: null, plan: null,
+             secTarget, primTarget, totalTarget, monthCount, fromMonthlyTab: true };
+  }
+  const sum = (fn: (m: MonthActual) => number | null) => {
+    const vals = relevant.map(fn).filter((n): n is number => n !== null);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+  };
+  return {
+    secOb:  sum((m) => m.orderBooking),
+    ddOb:   null, // DD monthly breakdown not in member sheet
+    sale:   sum((m) => m.sale),
+    plan:   sum((m) => m.plan),
+    secTarget, primTarget, totalTarget, monthCount, fromMonthlyTab: true,
+  };
+}
+
+interface PeriodSelectorPanelProps {
+  kpis: MemberKpis;
+  months: MonthActual[];
+}
+
+function PeriodSelectorPanel({ kpis, months }: PeriodSelectorPanelProps) {
+  const [period, setPeriod]               = useState<PeriodId>("ytd");
+  const [selectedMonth, setSelectedMonth] = useState("Apr");
+
+  const d = computePeriodData(period, selectedMonth, kpis, months);
+  const hasMonthlyData = months.length > 0;
+
+  const PERIODS: PeriodId[] = ["ytd", "q1", "q2", "q3", "q4", "month", "full-year"];
+
+  // Achievement
+  const saleAch = d.sale !== null && d.totalTarget !== null && d.totalTarget > 0
+    ? (d.sale / d.totalTarget) * 100 : null;
+  const secAch  = d.secOb !== null && d.secTarget  !== null && d.secTarget  > 0
+    ? (d.secOb / d.secTarget) * 100 : null;
+
+  // YoY comparison from prior-year quarterly fields
+  const priorYearMap: Record<string, number | null | undefined> = {
+    "q1": kpis.lastYearQ1, "q2": kpis.lastYearQ2,
+    "q3": kpis.lastYearQ3, "q4": kpis.lastYearQ4,
+  };
+  const priorYear = priorYearMap[period] ?? null;
+
+  const achColor = (pct: number) =>
+    pct >= 100 ? "text-green-600 dark:text-green-400"
+    : pct >= 60  ? "text-yellow-600 dark:text-yellow-400"
+    : "text-red-600 dark:text-red-400";
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h3 className="text-sm font-semibold">Period Analysis</h3>
+        {!hasMonthlyData && period !== "ytd" && (
+          <span className="text-xs text-amber-600 dark:text-amber-400">
+            Monthly tab not found — targets only shown
+          </span>
+        )}
+      </div>
+
+      {/* Period toggle */}
+      <div className="flex flex-wrap gap-1.5">
+        {PERIODS.map((p) => (
+          <button
+            key={p}
+            onClick={() => setPeriod(p)}
+            className={cn(
+              "px-3 py-1 rounded-md text-xs font-medium border transition-colors",
+              period === p
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-background text-muted-foreground border-border hover:bg-muted",
+            )}
+          >
+            {PERIOD_LABELS[p]}
+          </button>
+        ))}
+      </div>
+
+      {/* Month sub-selector */}
+      {period === "month" && (
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-muted-foreground">Month:</label>
+          <select
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            className="h-8 rounded-md border border-border bg-background px-2 text-sm focus:outline-none"
+          >
+            {FY_MONTHS_LIST.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Summary rows */}
+      <div className="rounded-md border border-border overflow-x-auto">
+        <table className="w-full text-xs">
+          <tbody className="divide-y divide-border">
+            <tr className="bg-muted/40">
+              <td className="px-3 py-2 text-muted-foreground font-medium w-40">
+                {period === "ytd"
+                  ? `Target (${d.monthCount} mo elapsed)`
+                  : `Target (${d.monthCount} mo × rate)`}
+              </td>
+              <td className="px-3 py-2 text-right font-mono">
+                Sec {fmtRs(d.secTarget)}
+              </td>
+              <td className="px-3 py-2 text-right font-mono">
+                Primary {fmtRs(d.primTarget)}
+              </td>
+              <td className="px-3 py-2 text-right font-mono font-semibold">
+                Total {fmtRs(d.totalTarget)}
+              </td>
+            </tr>
+            <tr>
+              <td className="px-3 py-2 text-muted-foreground font-medium">
+                {d.fromMonthlyTab ? "Actual (member FY tab)" : "Actual (Data tab)"}
+              </td>
+              <td className="px-3 py-2 text-right font-mono">
+                {d.secOb !== null ? `Sec OB ${fmtRs(d.secOb)}` : "Sec OB —"}
+              </td>
+              <td className="px-3 py-2 text-right font-mono">
+                {d.ddOb !== null ? `DD ${fmtRs(d.ddOb)}` : period === "ytd" ? "DD —" : "DD n/a"}
+              </td>
+              <td className="px-3 py-2 text-right font-mono">
+                Sale {d.sale !== null ? fmtRs(d.sale) : "—"}
+              </td>
+            </tr>
+            {(saleAch !== null || secAch !== null) && (
+              <tr className="bg-muted/20">
+                <td className="px-3 py-2 text-muted-foreground font-medium">Achievement</td>
+                <td className="px-3 py-2 text-right">
+                  {secAch !== null && (
+                    <span className={cn("font-semibold", achColor(secAch))}>
+                      {fmtPct(secAch)} Sec OB
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-2" />
+                <td className="px-3 py-2 text-right">
+                  {saleAch !== null && (
+                    <span className={cn("font-semibold", achColor(saleAch))}>
+                      {fmtPct(saleAch)} Sale
+                    </span>
+                  )}
+                </td>
+              </tr>
+            )}
+            {d.plan !== null && (
+              <tr>
+                <td className="px-3 py-2 text-muted-foreground">Plan (member tab)</td>
+                <td colSpan={3} className="px-3 py-2 text-right font-mono">{fmtRs(d.plan)}</td>
+              </tr>
+            )}
+            {priorYear !== null && (
+              <tr className="bg-muted/20">
+                <td className="px-3 py-2 text-muted-foreground">Prior Year Actual</td>
+                <td colSpan={2} className="px-3 py-2 text-right font-mono">{fmtRs(priorYear)}</td>
+                <td className="px-3 py-2 text-right">
+                  {d.sale !== null && priorYear > 0 && (
+                    <span className={cn(
+                      "font-semibold",
+                      d.sale >= priorYear ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
+                    )}>
+                      {d.sale >= priorYear ? "+" : ""}
+                      {(((d.sale - priorYear) / priorYear) * 100).toFixed(1)}% YoY
+                    </span>
+                  )}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Full monthly breakdown (collapsible) — only when monthly tab data exists */}
+      {hasMonthlyData && (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
+            Monthly breakdown — member's FY tab ({months.length} months)
+          </summary>
+          <div className="mt-2 rounded-md border border-border overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-muted/40 border-b border-border">
+                  <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Month</th>
+                  <th className="px-3 py-1.5 text-right font-medium text-muted-foreground">Plan</th>
+                  <th className="px-3 py-1.5 text-right font-medium text-muted-foreground">Order Booking</th>
+                  <th className="px-3 py-1.5 text-right font-medium text-muted-foreground">Sale Received</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/50">
+                {months.map((m) => (
+                  <tr key={m.month} className="hover:bg-muted/20">
+                    <td className="px-3 py-1 font-medium">{m.month}</td>
+                    <td className="px-3 py-1 text-right font-mono">
+                      {m.plan !== null ? fmtRs(m.plan) : "—"}
+                    </td>
+                    <td className="px-3 py-1 text-right font-mono">
+                      {m.orderBooking !== null ? fmtRs(m.orderBooking) : "—"}
+                    </td>
+                    <td className="px-3 py-1 text-right font-mono">
+                      {m.sale !== null ? fmtRs(m.sale) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 const AVAILABLE_FYS = ["2026-27", "2025-26", "2024-25", "2023-24"];
@@ -1626,11 +1922,29 @@ export default function SalesDeepDive() {
                   <p className="text-xs text-muted-foreground mt-0.5">{kpis.contact}</p>
                 )}
               </div>
-              {kpis.achievementPct != null && (
-                <div className={cn("rounded-full px-4 py-1.5 text-sm font-semibold", achieveBand(kpis.achievementPct))}>
-                  {fmtPct(kpis.achievementPct)} achievement
-                </div>
-              )}
+              {/* Phase 7: 4 achievement badges replacing the old blended figure */}
+              <div className="flex flex-wrap gap-2">
+                {kpis.achievementSale != null && (
+                  <div className={cn("rounded-full px-3 py-1 text-xs font-semibold", achieveBand(kpis.achievementSale))}>
+                    {fmtPct(kpis.achievementSale)} sale vs total target
+                  </div>
+                )}
+                {kpis.achievementTotal != null && (
+                  <div className={cn("rounded-full px-3 py-1 text-xs font-semibold", achieveBand(kpis.achievementTotal))}>
+                    {fmtPct(kpis.achievementTotal)} total OB vs total target
+                  </div>
+                )}
+                {kpis.achievementSecondary != null && (
+                  <div className={cn("rounded-full px-3 py-1 text-xs font-semibold", achieveBand(kpis.achievementSecondary))}>
+                    {fmtPct(kpis.achievementSecondary)} secondary OB
+                  </div>
+                )}
+                {kpis.achievementDirectDealer != null && (
+                  <div className={cn("rounded-full px-3 py-1 text-xs font-semibold", achieveBand(kpis.achievementDirectDealer))}>
+                    {fmtPct(kpis.achievementDirectDealer)} DD OB
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1638,17 +1952,38 @@ export default function SalesDeepDive() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
 
             <SectionLabel>Targets</SectionLabel>
-            <Tile label="Secondary Target (Annual)" value={fmtRs(kpis.secondaryTarget)} accent />
-            <Tile label="Monthly Target" value={fmtRs(kpis.monthlyTarget)} />
+            <Tile label="Secondary Target (to date)" value={fmtRs(kpis.secondaryTarget)} accent />
+            <Tile label="Monthly Total Target" value={fmtRs(kpis.monthlyTarget)} />
+            {kpis.totalTargetToDate != null && (
+              <Tile label="Total Target (to date)" value={fmtRs(kpis.totalTargetToDate)} accent />
+            )}
+            {kpis.elapsedMonths != null && (
+              <Tile label="Elapsed Months" value={String(kpis.elapsedMonths)} sub="Derived: Total Target / Monthly Target" />
+            )}
             {kpis.primaryTarget != null && (
-              <Tile label="Primary Target (Annual)" value={fmtRs(kpis.primaryTarget)} />
+              <Tile label="Primary Target (to date)" value={fmtRs(kpis.primaryTarget)} />
+            )}
+            {kpis.primaryTargetMonthly != null && (
+              <Tile label="Primary Monthly Target" value={fmtRs(kpis.primaryTargetMonthly)} sub="Direct Dealer" />
+            )}
+            {kpis.secondaryTargetMonthly != null && (
+              <Tile label="Secondary Monthly Target" value={fmtRs(kpis.secondaryTargetMonthly)} sub="Derived: Total − Primary" />
             )}
 
             <SectionLabel>Performance (YTD)</SectionLabel>
             <Tile label="Order Booking (Retailer / Party)" value={fmtRs(kpis.orderBooking)} sub="NET = Sub Total" accent />
             <Tile label="Direct Dealers Order" value={fmtRs(kpis.directDealersOrder)} sub="Kept separate from party OB" />
             <Tile label="Sales Received" value={fmtRs(kpis.sale)} accent />
-            <Tile label="Achievement" value={fmtPct(kpis.achievementPct)} sub="Recomputed: sale / plan" />
+            <Tile label="Sale Achievement" value={fmtPct(kpis.achievementSale)} sub="Sale / Total Target (to date)" />
+            {kpis.achievementTotal != null && (
+              <Tile label="Total OB Achievement" value={fmtPct(kpis.achievementTotal)} sub="(Sec OB + DD) / Total Target" />
+            )}
+            {kpis.achievementSecondary != null && (
+              <Tile label="Secondary OB Achievement" value={fmtPct(kpis.achievementSecondary)} sub="Secondary OB / Secondary Target" />
+            )}
+            {kpis.achievementDirectDealer != null && (
+              <Tile label="DD Achievement" value={fmtPct(kpis.achievementDirectDealer)} sub="DD Order / Primary Target" />
+            )}
 
             <SectionLabel>Cost</SectionLabel>
             <Tile label="Monthly CTC" value={fmtRs(kpis.ctcMonthly)} />
@@ -1669,6 +2004,18 @@ export default function SalesDeepDive() {
             )}
             {kpis.directDealersCount != null && (
               <Tile label="Direct Dealers" value={fmtNum(kpis.directDealersCount)} />
+            )}
+
+            {/* Phase 7: prior-year quarterly actuals */}
+            {(kpis.lastYearQ1 != null || kpis.lastYearQ2 != null ||
+              kpis.lastYearQ3 != null || kpis.lastYearQ4 != null) && (
+              <>
+                <SectionLabel>Prior Year Quarterly Actuals</SectionLabel>
+                {kpis.lastYearQ1 != null && <Tile label="Q1 (Apr-Jun) Last Year" value={fmtRs(kpis.lastYearQ1)} />}
+                {kpis.lastYearQ2 != null && <Tile label="Q2 (Jul-Sep) Last Year" value={fmtRs(kpis.lastYearQ2)} />}
+                {kpis.lastYearQ3 != null && <Tile label="Q3 (Oct-Dec) Last Year" value={fmtRs(kpis.lastYearQ3)} />}
+                {kpis.lastYearQ4 != null && <Tile label="Q4 (Jan-Mar) Last Year" value={fmtRs(kpis.lastYearQ4)} />}
+              </>
             )}
 
             {Object.keys(kpis.extra).length > 0 && (
@@ -1772,6 +2119,16 @@ export default function SalesDeepDive() {
           {kpis && roiCost && roiCost.elapsedCompleteMonths > 0 && fy === "2026-27" && (
             <div className="pt-2 border-t border-border">
               <RunRatePanel kpis={kpis} elapsedMonths={roiCost.elapsedCompleteMonths} />
+            </div>
+          )}
+
+          {/* Phase 7: Period selector — show whenever kpis is loaded */}
+          {kpis && (
+            <div className="pt-2 border-t border-border">
+              <PeriodSelectorPanel
+                kpis={kpis}
+                months={rd?.months ?? []}
+              />
             </div>
           )}
 

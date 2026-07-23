@@ -80,21 +80,40 @@ export type MemberKpis = {
   hq: string | null;
   designation: string | null;
   contact: string | null;
-  // Targets
-  primaryTarget: number | null;    // Annual primary sales target
-  secondaryTarget: number | null;  // Business Plan (annual secondary target)
-  monthlyTarget: number | null;    // Monthly secondary target
+  // Targets — from State Head Dashboard Data tab
+  //   G  = primaryTarget      : primary YTD target to date
+  //   H  = secondaryTarget    : secondary YTD target to date ("Target" column)
+  //   BE = monthlyTarget      : total monthly target (secondary + primary)
+  //   BK = primaryTargetMonthly: primary monthly target (direct dealer)
+  //   BM = totalTargetToDate  : total YTD target to date
+  primaryTarget: number | null;          // G: primary target to date
+  secondaryTarget: number | null;        // H: secondary target to date
+  monthlyTarget: number | null;          // BE: total monthly target
+  // Phase 7 targets
+  primaryTargetMonthly: number | null;   // BK: primary (direct dealer) monthly target
+  secondaryTargetMonthly: number | null; // Derived: monthlyTarget - primaryTargetMonthly
+  totalTargetToDate: number | null;      // BM: total target to date
+  elapsedMonths: number | null;          // Derived: round(totalTargetToDate / monthlyTarget)
   // Performance (YTD from Data tab — NET = Sub Total)
-  orderBooking: number | null;     // Retailer/party secondary OB (NET)
-  directDealersOrder: number | null; // Direct dealer OB — kept separate
-  sale: number | null;             // YTD sales received
-  // Derived — recomputed, never read from a sheet % cell
-  achievementPct: number | null;   // sale / secondaryTarget
+  orderBooking: number | null;           // Retailer/party secondary OB (NET)
+  directDealersOrder: number | null;     // Direct dealer OB — kept separate
+  sale: number | null;                   // YTD sales received
+  // Derived achievement ratios — recomputed, never read from a sheet % cell
+  achievementPct: number | null;         // = achievementSale (kept for backward compat)
+  achievementSecondary: number | null;   // orderBooking / secondaryTarget
+  achievementDirectDealer: number | null; // directDealersOrder / primaryTarget
+  achievementTotal: number | null;       // (OB + DD) / totalTargetToDate
+  achievementSale: number | null;        // sale / totalTargetToDate
+  // Prior year quarterly actuals (BO–BR)
+  lastYearQ1: number | null;
+  lastYearQ2: number | null;
+  lastYearQ3: number | null;
+  lastYearQ4: number | null;
   // Cost
-  ctcMonthly: number | null;       // Monthly CTC salary
-  ctcAnnual: number | null;        // Annual CTC
-  taBillStCost: number | null;     // T.A. Bill + Station cost
-  costRatio: number | null;        // (ctcMonthly + taBill) / sale × 100
+  ctcMonthly: number | null;             // Monthly CTC salary
+  ctcAnnual: number | null;              // Annual CTC
+  taBillStCost: number | null;           // T.A. Bill + Station cost
+  costRatio: number | null;              // (ctcMonthly + taBill) / sale × 100
   // Retailer metrics
   totalOldRetailers: number | null;
   visitedRetailers: number | null;
@@ -152,6 +171,14 @@ type ColMap = {
   businessPerRetailer: number;
   totalRetailers: number;
   directDealersCount: number;
+  // Phase 7: new target / comparison columns
+  primaryTargetMonthly: number;  // BK: Monthly Direct Dealer Primary Target
+  totalTargetToDate: number;     // BM: Total target to date
+  workingDaysAg: number;         // AG: Working days in month
+  lastYearQ1: number;            // BO: Prior year Q1 actual
+  lastYearQ2: number;            // BP: Prior year Q2 actual
+  lastYearQ3: number;            // BQ: Prior year Q3 actual
+  lastYearQ4: number;            // BR: Prior year Q4 actual
   // All header → column index (for extra fields)
   allHeaders: Map<string, number>;
   rawHeaders: string[];
@@ -203,7 +230,10 @@ function detectCols(headerRow: SheetCellValue[]): ColMap | null {
       "BUSINESSPLAN", "SECONDARYTARGET", "ANNUALBUSINESSPLAN",
       "ANNUALTARGET", "ANNUALPLAN", "TARGET",
     ),
-    monthlyTarget:      find("MONTHLYTARGET", "MONTHLYSECONDARY", "MONTHLYPLAN"),
+    monthlyTarget:      find(
+      "MONTHLYTARGET", "TARGETMONTHLY",    // "Monthly Target" OR "Target monthly" (BE header varies)
+      "MONTHLYSECONDARY", "MONTHLYPLAN",
+    ),
     orderBooking:       find(
       // STATE HEAD DASHBOARD 'Data' tab uses "Old Party Business Order Booking"
       // for the retailer/party NET secondary OB (Sub Total, not Order Total).
@@ -252,6 +282,36 @@ function detectCols(headerRow: SheetCellValue[]): ColMap | null {
     totalRetailers:     find("TOTALRETAILERS", "GRANDTOTALRETAILERS"),
     directDealersCount: find(
       "DIRECTDEALERS", "DIRECTDEALERCOUNT", "DEALERCOUNT", "DEALERS",
+    ),
+    // Phase 7: new target / comparison columns
+    primaryTargetMonthly: find(
+      "MONTHLYDIRECTDEALERPRIMARYTARGET", "DIRECTDEALERMONTHLYTARGET",
+      "PRIMARYMONTHLYTARGET", "MONTHLYPRIMARYTARGET", "MONTHLYDIRECTDEALER",
+      "MDDPRIMARYTARGET", "PRIMARYTARGETMONTHLY",
+    ),
+    totalTargetToDate: find(
+      "TOTALTARGET", "TOTALTARGETTODATE", "TOTALTAR",
+      "GRANDTARGET", "COMBINEDTARGET",
+    ),
+    workingDaysAg: find(
+      "WORKINGDAYS", "WORKDAYS", "WORKDAY", "NOOFWORKINGDAYS",
+      "WORKINGDAYSCOUNT",
+    ),
+    lastYearQ1: find(
+      "Q1LASTYEAR", "Q1LY", "Q1PREVYEAR", "LASTYRQ1", "PREVIOUSQ1",
+      "LYQUARTER1", "Q1PREVIOUSYEAR",
+    ),
+    lastYearQ2: find(
+      "Q2LASTYEAR", "Q2LY", "Q2PREVYEAR", "LASTYRQ2", "PREVIOUSQ2",
+      "LYQUARTER2", "Q2PREVIOUSYEAR",
+    ),
+    lastYearQ3: find(
+      "Q3LASTYEAR", "Q3LY", "Q3PREVYEAR", "LASTYRQ3", "PREVIOUSQ3",
+      "LYQUARTER3", "Q3PREVIOUSYEAR",
+    ),
+    lastYearQ4: find(
+      "Q4LASTYEAR", "Q4LY", "Q4PREVYEAR", "LASTYRQ4", "PREVIOUSQ4",
+      "LYQUARTER4", "Q4PREVIOUSYEAR",
     ),
     allHeaders,
     rawHeaders,
@@ -462,6 +522,9 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
     cols.totalOldRetailers, cols.visitedRetailers, cols.nonVisitedRetailers,
     cols.newPartyOrderBooking, cols.businessPerRetailer,
     cols.totalRetailers, cols.directDealersCount,
+    // Phase 7
+    cols.primaryTargetMonthly, cols.totalTargetToDate, cols.workingDaysAg,
+    cols.lastYearQ1, cols.lastYearQ2, cols.lastYearQ3, cols.lastYearQ4,
   ].filter((n) => n >= 0));
 
   for (let i = dataStart; i < allRows.length; i++) {
@@ -501,12 +564,84 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
     const sale = cols.sale >= 0 ? cellNum(row[cols.sale]) : null;
     const secondaryTarget =
       cols.secondaryTarget >= 0 ? cellNum(row[cols.secondaryTarget]) : null;
+    const primaryTarget =
+      cols.primaryTarget >= 0 ? cellNum(row[cols.primaryTarget]) : null;
+    const orderBooking =
+      cols.orderBooking >= 0 ? cellNum(row[cols.orderBooking]) : null;
+    const directDealersOrder =
+      cols.directDealersOrder >= 0 ? cellNum(row[cols.directDealersOrder]) : null;
+    const monthlyTarget =
+      cols.monthlyTarget >= 0 ? cellNum(row[cols.monthlyTarget]) : null;
+    const primaryTargetMonthly =
+      cols.primaryTargetMonthly >= 0 ? cellNum(row[cols.primaryTargetMonthly]) : null;
+    const totalTargetToDate =
+      cols.totalTargetToDate >= 0 ? cellNum(row[cols.totalTargetToDate]) : null;
 
-    // Recompute achievement — never read from a sheet % cell.
-    const achievementPct =
-      sale !== null && secondaryTarget !== null && secondaryTarget > 0
-        ? (sale / secondaryTarget) * 100
+    // Derived secondary monthly target.
+    const secondaryTargetMonthly =
+      monthlyTarget !== null && primaryTargetMonthly !== null
+        ? monthlyTarget - primaryTargetMonthly
         : null;
+
+    // Derived elapsed months: BM / BE — never rely on a sheet column whose header
+    // changes each month (per spec). Round to nearest integer.
+    const elapsedMonths =
+      totalTargetToDate !== null && monthlyTarget !== null && monthlyTarget > 0
+        ? Math.round(totalTargetToDate / monthlyTarget)
+        : null;
+
+    // Self-check identity constraints and log any mismatches (>100 Rs tolerance).
+    if (elapsedMonths !== null && elapsedMonths > 0) {
+      if (totalTargetToDate !== null && monthlyTarget !== null) {
+        const expectBm = monthlyTarget * elapsedMonths;
+        if (Math.abs(totalTargetToDate - expectBm) > 100) {
+          logger.warn(
+            { name: rawName, expectBm, totalTargetToDate, elapsedMonths },
+            "deepDiveData: identity check BE×elapsed≠BM",
+          );
+        }
+      }
+      if (primaryTarget !== null && primaryTargetMonthly !== null) {
+        const expectG = primaryTargetMonthly * elapsedMonths;
+        if (Math.abs(primaryTarget - expectG) > 100) {
+          logger.warn(
+            { name: rawName, expectG, primaryTarget, elapsedMonths },
+            "deepDiveData: identity check BK×elapsed≠G",
+          );
+        }
+      }
+      if (secondaryTarget !== null && secondaryTargetMonthly !== null) {
+        const expectH = secondaryTargetMonthly * elapsedMonths;
+        if (Math.abs(secondaryTarget - expectH) > 100) {
+          logger.warn(
+            { name: rawName, expectH, secondaryTarget, elapsedMonths },
+            "deepDiveData: identity check (BE-BK)×elapsed≠H",
+          );
+        }
+      }
+    }
+
+    // Recompute 4 achievement ratios — never read from a sheet % cell.
+    const achievementSecondary =
+      orderBooking !== null && secondaryTarget !== null && secondaryTarget > 0
+        ? (orderBooking / secondaryTarget) * 100
+        : null;
+    const achievementDirectDealer =
+      directDealersOrder !== null && primaryTarget !== null && primaryTarget > 0
+        ? (directDealersOrder / primaryTarget) * 100
+        : null;
+    const achievementTotal =
+      orderBooking !== null && directDealersOrder !== null &&
+      totalTargetToDate !== null && totalTargetToDate > 0
+        ? ((orderBooking + directDealersOrder) / totalTargetToDate) * 100
+        : null;
+    const achievementSale =
+      sale !== null && totalTargetToDate !== null && totalTargetToDate > 0
+        ? (sale / totalTargetToDate) * 100
+        : null;
+    // Backward-compat: achievementPct = achievementSale (replaces the old
+    // blended sale/secondaryTarget ratio that mislabelled populations).
+    const achievementPct = achievementSale;
 
     members.push({
       stateHead: currentStateHead,
@@ -515,13 +650,25 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
       hq:                  cols.hq >= 0 ? cellStr(row[cols.hq]) || null : null,
       designation:         cols.designation >= 0 ? cellStr(row[cols.designation]) || null : null,
       contact:             cols.contact >= 0 ? cellStr(row[cols.contact]) || null : null,
-      primaryTarget:       cols.primaryTarget >= 0 ? cellNum(row[cols.primaryTarget]) : null,
+      primaryTarget,
       secondaryTarget,
-      monthlyTarget:       cols.monthlyTarget >= 0 ? cellNum(row[cols.monthlyTarget]) : null,
-      orderBooking:        cols.orderBooking >= 0 ? cellNum(row[cols.orderBooking]) : null,
-      directDealersOrder:  cols.directDealersOrder >= 0 ? cellNum(row[cols.directDealersOrder]) : null,
+      monthlyTarget,
+      primaryTargetMonthly,
+      secondaryTargetMonthly,
+      totalTargetToDate,
+      elapsedMonths,
+      orderBooking,
+      directDealersOrder,
       sale,
       achievementPct,
+      achievementSecondary,
+      achievementDirectDealer,
+      achievementTotal,
+      achievementSale,
+      lastYearQ1: cols.lastYearQ1 >= 0 ? cellNum(row[cols.lastYearQ1]) : null,
+      lastYearQ2: cols.lastYearQ2 >= 0 ? cellNum(row[cols.lastYearQ2]) : null,
+      lastYearQ3: cols.lastYearQ3 >= 0 ? cellNum(row[cols.lastYearQ3]) : null,
+      lastYearQ4: cols.lastYearQ4 >= 0 ? cellNum(row[cols.lastYearQ4]) : null,
       ctcMonthly:          cols.ctcMonthly >= 0 ? cellNum(row[cols.ctcMonthly]) : null,
       ctcAnnual:           cols.ctcAnnual >= 0 ? cellNum(row[cols.ctcAnnual]) : null,
       taBillStCost:        cols.taBillStCost >= 0 ? cellNum(row[cols.taBillStCost]) : null,

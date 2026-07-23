@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { MgmtMonthActual } from './mgmtMonthActual';
 import type { MgmtRetailerDetailStatus } from './mgmtRetailerDetailStatus';
 import type { MgmtRetailerRow } from './mgmtRetailerRow';
 import type { MgmtRetailerSpread } from './mgmtRetailerSpread';
@@ -23,5 +24,7 @@ export interface MgmtRetailerDetail {
   spread?: MgmtRetailerSpread | null;
   /** Phase 3: visit-pattern analysis and forward visit plan (present when status is 'ok'). */
   visitPlan?: MgmtVisitPlan | null;
+  /** Phase 7: per-month Plan / Order Booking / Sale Received from the member's FY tab. Empty array when the tab is not found or not parseable. */
+  months?: MgmtMonthActual[] | null;
   rowsRead?: number | null;
 }

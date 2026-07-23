@@ -2701,9 +2701,34 @@ components:
           nullable: true
           $ref: "#/components/schemas/MgmtVisitPlan"
           description: "Phase 3: visit-pattern analysis and forward visit plan (present when status is 'ok')."
+        months:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/MgmtMonthActual"
+          description: "Phase 7: per-month Plan / Order Booking / Sale Received from the member's FY tab. Empty array when the tab is not found or not parseable."
         rowsRead:
           type: integer
           nullable: true
+    MgmtMonthActual:
+      type: object
+      required: [month]
+      properties:
+        month:
+          type: string
+          description: "Month abbreviation: Apr | May | Jun | Jul | Aug | Sep | Oct | Nov | Dec | Jan | Feb | Mar."
+        plan:
+          type: number
+          nullable: true
+          description: "Monthly plan figure from the member's own FY tab."
+        orderBooking:
+          type: number
+          nullable: true
+          description: "Monthly secondary order booking actual."
+        sale:
+          type: number
+          nullable: true
+          description: "Monthly sale received actual."
     MgmtRetailerRow:
       type: object
       required: [name, orderBooking, sale, isActive]
@@ -2883,6 +2908,45 @@ components:
         businessPerRetailer: { type: number, nullable: true }
         totalRetailers: { type: number, nullable: true }
         directDealersCount: { type: number, nullable: true }
+        # Phase 7: target details
+        primaryTargetMonthly:
+          type: number
+          nullable: true
+          description: "BK: Monthly Direct Dealer Primary Target."
+        secondaryTargetMonthly:
+          type: number
+          nullable: true
+          description: "Derived: monthlyTarget − primaryTargetMonthly."
+        totalTargetToDate:
+          type: number
+          nullable: true
+          description: "BM: Total target to date (secondary + primary)."
+        elapsedMonths:
+          type: number
+          nullable: true
+          description: "Derived: round(totalTargetToDate / monthlyTarget). Integer months elapsed from April 1."
+        # Phase 7: 4 achievement ratios (replaces the blended achievementPct)
+        achievementSecondary:
+          type: number
+          nullable: true
+          description: "orderBooking / secondaryTarget × 100."
+        achievementDirectDealer:
+          type: number
+          nullable: true
+          description: "directDealersOrder / primaryTarget × 100."
+        achievementTotal:
+          type: number
+          nullable: true
+          description: "(orderBooking + directDealersOrder) / totalTargetToDate × 100."
+        achievementSale:
+          type: number
+          nullable: true
+          description: "sale / totalTargetToDate × 100."
+        # Phase 7: prior year quarterly actuals (BO–BR)
+        lastYearQ1: { type: number, nullable: true, description: "Prior year Q1 actual." }
+        lastYearQ2: { type: number, nullable: true, description: "Prior year Q2 actual." }
+        lastYearQ3: { type: number, nullable: true, description: "Prior year Q3 actual." }
+        lastYearQ4: { type: number, nullable: true, description: "Prior year Q4 actual." }
         extra:
           type: object
           additionalProperties: true

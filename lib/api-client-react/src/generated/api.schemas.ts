@@ -899,6 +899,30 @@ export interface MgmtDeepDiveKpis {
   businessPerRetailer?: number | null;
   totalRetailers?: number | null;
   directDealersCount?: number | null;
+  /** BK: Monthly Direct Dealer Primary Target. */
+  primaryTargetMonthly?: number | null;
+  /** Derived: monthlyTarget − primaryTargetMonthly. */
+  secondaryTargetMonthly?: number | null;
+  /** BM: Total target to date (secondary + primary). */
+  totalTargetToDate?: number | null;
+  /** Derived: round(totalTargetToDate / monthlyTarget). Integer months elapsed from April 1. */
+  elapsedMonths?: number | null;
+  /** orderBooking / secondaryTarget × 100. */
+  achievementSecondary?: number | null;
+  /** directDealersOrder / primaryTarget × 100. */
+  achievementDirectDealer?: number | null;
+  /** (orderBooking + directDealersOrder) / totalTargetToDate × 100. */
+  achievementTotal?: number | null;
+  /** sale / totalTargetToDate × 100. */
+  achievementSale?: number | null;
+  /** Prior year Q1 actual. */
+  lastYearQ1?: number | null;
+  /** Prior year Q2 actual. */
+  lastYearQ2?: number | null;
+  /** Prior year Q3 actual. */
+  lastYearQ3?: number | null;
+  /** Prior year Q4 actual. */
+  lastYearQ4?: number | null;
   extra?: MgmtDeepDiveKpisExtra;
 }
 
@@ -1067,6 +1091,17 @@ export interface MgmtVisitPlan {
   gap: number;
 }
 
+export interface MgmtMonthActual {
+  /** Month abbreviation: Apr | May | Jun | Jul | Aug | Sep | Oct | Nov | Dec | Jan | Feb | Mar. */
+  month: string;
+  /** Monthly plan figure from the member's own FY tab. */
+  plan?: number | null;
+  /** Monthly secondary order booking actual. */
+  orderBooking?: number | null;
+  /** Monthly sale received actual. */
+  sale?: number | null;
+}
+
 export interface MgmtRetailerDetail {
   /** 'ok' — retailer table loaded successfully. 'not-mapped' — member has no working sheet mapped yet; Phase 1 KPIs still returned. 'error' — sheet could not be read. */
   status: MgmtRetailerDetailStatus;
@@ -1080,6 +1115,8 @@ export interface MgmtRetailerDetail {
   spread?: MgmtRetailerSpread | null;
   /** Phase 3: visit-pattern analysis and forward visit plan (present when status is 'ok'). */
   visitPlan?: MgmtVisitPlan | null;
+  /** Phase 7: per-month Plan / Order Booking / Sale Received from the member's FY tab. Empty array when the tab is not found or not parseable. */
+  months?: MgmtMonthActual[] | null;
   rowsRead?: number | null;
 }
 

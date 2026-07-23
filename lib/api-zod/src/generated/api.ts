@@ -318,6 +318,18 @@ export const GetMgmtDeepDiveResponse = zod.object({
   "businessPerRetailer": zod.number().nullish(),
   "totalRetailers": zod.number().nullish(),
   "directDealersCount": zod.number().nullish(),
+  "primaryTargetMonthly": zod.number().nullish().describe('BK: Monthly Direct Dealer Primary Target.'),
+  "secondaryTargetMonthly": zod.number().nullish().describe('Derived: monthlyTarget − primaryTargetMonthly.'),
+  "totalTargetToDate": zod.number().nullish().describe('BM: Total target to date (secondary + primary).'),
+  "elapsedMonths": zod.number().nullish().describe('Derived: round(totalTargetToDate \/ monthlyTarget). Integer months elapsed from April 1.'),
+  "achievementSecondary": zod.number().nullish().describe('orderBooking \/ secondaryTarget × 100.'),
+  "achievementDirectDealer": zod.number().nullish().describe('directDealersOrder \/ primaryTarget × 100.'),
+  "achievementTotal": zod.number().nullish().describe('(orderBooking + directDealersOrder) \/ totalTargetToDate × 100.'),
+  "achievementSale": zod.number().nullish().describe('sale \/ totalTargetToDate × 100.'),
+  "lastYearQ1": zod.number().nullish().describe('Prior year Q1 actual.'),
+  "lastYearQ2": zod.number().nullish().describe('Prior year Q2 actual.'),
+  "lastYearQ3": zod.number().nullish().describe('Prior year Q3 actual.'),
+  "lastYearQ4": zod.number().nullish().describe('Prior year Q4 actual.'),
   "extra": zod.record(zod.string(), zod.unknown()).optional()
 }).nullish(),
   "retailerDetail": zod.object({
@@ -414,6 +426,12 @@ export const GetMgmtDeepDiveResponse = zod.object({
   "totalRequired": zod.number().describe('Visits still required to complete the annual plan (= capacity.remainingRequired).'),
   "gap": zod.number().describe('Anchor-based gap: capacity.feasibleRemainingVisits − capacity.remainingRequired. Negative = shortfall.')
 }).nullish().describe('Phase 3: visit-pattern analysis and forward visit plan (present when status is \'ok\').'),
+  "months": zod.array(zod.object({
+  "month": zod.string().describe('Month abbreviation: Apr | May | Jun | Jul | Aug | Sep | Oct | Nov | Dec | Jan | Feb | Mar.'),
+  "plan": zod.number().nullish().describe('Monthly plan figure from the member\'s own FY tab.'),
+  "orderBooking": zod.number().nullish().describe('Monthly secondary order booking actual.'),
+  "sale": zod.number().nullish().describe('Monthly sale received actual.')
+})).nullish().describe('Phase 7: per-month Plan \/ Order Booking \/ Sale Received from the member\'s FY tab. Empty array when the tab is not found or not parseable.'),
   "rowsRead": zod.number().nullish()
 }).nullish().describe('Phase 2: retailer-level detail from the member\'s own working sheet. Null when no member is selected. status=\'not-mapped\' when the member has no sheet ID in the config; status=\'error\' on read failure. Phase 1 KPIs are always returned regardless of this field.\n'),
   "roiCost": zod.object({

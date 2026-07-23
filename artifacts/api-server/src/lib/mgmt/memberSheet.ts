@@ -130,12 +130,22 @@ export type RetailerSpread = {
   annualBusinessPlan: number | null;
 };
 
+// Per-month actuals from the member's own FY tab (e.g. '2026-2027').
+// Plan = monthly plan figure; orderBooking / sale = actuals for that month.
+export type MonthActual = {
+  month: string;             // "Apr" | "May" | ... | "Mar"
+  plan: number | null;
+  orderBooking: number | null;
+  sale: number | null;
+};
+
 export type MemberSheetResult = {
   fileId: string;
   tabName: string;
   rows: RetailerRow[];
   spread: RetailerSpread;
   visitPlan: VisitPlan;
+  months: MonthActual[];     // Per-month actuals from the FY tab (may be empty)
   rowsRead: number;
 };
 
@@ -518,32 +528,125 @@ function detectColumns(
   return null;
 }
 
-// ── Annual BP reader (from '2026-2027' tab) ───────────────────────────────────
+// ── FY monthly tab reader (replaces readAnnualBp) ────────────────────────────
+//
+// Reads the member's own FY tab (e.g. '2026-2027') and returns:
+//   - annualBp   : first large number found (5M–200M range)
+//   - months     : per-month Plan / Order Booking / Sale Received rows
+//
+// The tab typically has a header row containing PLAN / ORDER / SALE keywords,
+// followed by month rows (Apr, May, …, Mar).  When header detection fails,
+// a positional scan is used for the numbers after each month-name cell.
 
-async function readAnnualBp(
+const FY_MONTHS_UPPER = ["APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC","JAN","FEB","MAR"] as const;
+const FY_MONTH_LABELS = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"] as const;
+
+async function readFyMonthlyTab(
   fileId: string,
   fyLabel: string,
-): Promise<number | null> {
+  allTabs: { title: string }[],
+): Promise<{ annualBp: number | null; months: MonthActual[] }> {
+  const empty = { annualBp: null, months: [] as MonthActual[] };
   try {
-    const tabs = await listSheetTabs(fileId);
-    const hit = tabs.find(
-      (t) =>
-        t.title.replace(/-/g, "").replace(/\s/g, "") ===
-        fyLabel.replace(/-/g, "").replace(/\s/g, ""),
+    const normalFy = fyLabel.replace(/-/g, "").replace(/\s/g, "");
+    const hit = allTabs.find(
+      (t) => t.title.replace(/-/g, "").replace(/\s/g, "") === normalFy,
     );
-    if (!hit) return null;
+    if (!hit) return empty;
+
     const rows = await readAllTabRows(fileId, hit.title);
+
+    // ── Header detection (first 20 rows) ──────────────────────────────────
+    let headerIdx = -1;
+    let planCol = -1, obCol = -1, saleCol = -1, monthCol = -1;
+
     for (let i = 0; i < Math.min(rows.length, 20); i++) {
-      for (const cell of rows[i] ?? []) {
-        const n = cellNum(cell);
-        if (n !== null && n >= 5_000_000 && n <= 200_000_000) {
-          return n;
+      const row = rows[i] ?? [];
+      const nh = row.map((c) => normHeader(c));
+
+      const hasObLike   = nh.some((h) => h.startsWith("ORDER") || h === "OB");
+      const hasSaleLike = nh.some((h) => h.startsWith("SALE"));
+
+      if (hasObLike || hasSaleLike) {
+        headerIdx = i;
+        for (let c = 0; c < row.length; c++) {
+          const h = nh[c];
+          if (!h) continue;
+          if (monthCol < 0 && (h === "MONTH" || h === "MONTHS")) monthCol = c;
+          if (planCol  < 0 && (h === "PLAN" || h === "TARGET" || h === "BUSINESSPLAN" || h === "MONTHLYPLAN")) planCol = c;
+          if (obCol    < 0 && (h.startsWith("ORDER") || h === "OB")) obCol = c;
+          if (saleCol  < 0 && h.startsWith("SALE")) saleCol = c;
+        }
+        break;
+      }
+    }
+
+    // ── Row scan ──────────────────────────────────────────────────────────
+    const months: MonthActual[] = [];
+    let annualBp: number | null = null;
+    const startIdx = headerIdx >= 0 ? headerIdx + 1 : 0;
+
+    for (let i = startIdx; i < rows.length; i++) {
+      const row = rows[i] ?? [];
+
+      // Detect month name in first 5 columns.
+      let mIdx = -1, mCol = -1;
+      for (let c = 0; c < Math.min(row.length, 5); c++) {
+        const h = normHeader(row[c]).slice(0, 3);
+        const idx = FY_MONTHS_UPPER.indexOf(h as (typeof FY_MONTHS_UPPER)[number]);
+        if (idx >= 0) { mIdx = idx; mCol = c; break; }
+      }
+
+      if (mIdx >= 0) {
+        let plan: number | null = null;
+        let ob: number | null   = null;
+        let sale: number | null = null;
+
+        if (planCol >= 0 && obCol >= 0 && saleCol >= 0) {
+          // Use header-detected positions.
+          plan = cellNum(row[planCol]);
+          ob   = cellNum(row[obCol]);
+          sale = cellNum(row[saleCol]);
+        } else {
+          // Positional: first three numeric values after the month name cell.
+          // Only accept values > 1 000 to filter out counts / percentages.
+          const nums: number[] = [];
+          for (let c = mCol + 1; c < row.length && nums.length < 3; c++) {
+            const n = cellNum(row[c]);
+            if (n !== null && n > 1000) nums.push(n);
+          }
+          if (nums.length >= 1) plan = nums[0];
+          if (nums.length >= 2) ob   = nums[1];
+          if (nums.length >= 3) sale = nums[2];
+        }
+
+        // Skip rows where all detected values are null or implausibly small (< 1 000).
+        // These are most likely false-positive matches (count/percentage cells near a month name).
+        const allNull  = plan === null && ob === null && sale === null;
+        const allSmall = !allNull && [plan, ob, sale].every((n) => n === null || n < 1000);
+        if (allNull || allSmall) continue;
+
+        months.push({ month: FY_MONTH_LABELS[mIdx], plan, orderBooking: ob, sale });
+      } else if (annualBp === null && i < 20) {
+        // Scan non-month rows in the first 20 for a plausible annual BP.
+        for (const cell of row.slice(0, 15)) {
+          const n = cellNum(cell);
+          if (n !== null && n >= 5_000_000 && n <= 200_000_000) {
+            annualBp = n; break;
+          }
         }
       }
     }
-    return null;
-  } catch {
-    return null;
+
+    logger.info(
+      { fileId, fyLabel, headerIdx, monthCount: months.length, planCol, obCol, saleCol },
+      "memberSheet: FY monthly tab parsed",
+    );
+
+    return { annualBp, months };
+  } catch (err) {
+    logger.warn({ err, fileId, fyLabel }, "memberSheet: FY monthly tab read failed");
+    return empty;
   }
 }
 
@@ -647,13 +750,15 @@ async function loadMemberSheetUncached(
 
   const spread = computeSpread(rows, fileId, fy, memberName);
 
-  // Read annualBp and historical capacity in parallel to minimise latency.
+  // Read FY monthly tab and historical capacity in parallel to minimise latency.
+  // readFyMonthlyTab reuses allTabs (already fetched) so it does not make a
+  // second listSheetTabs call.
   const fyTabLabel = fy === "2026-27" ? "2026-2027" : `20${fy.replace("-", "-20")}`;
-  const [annualBp, historicalCapacity] = await Promise.all([
-    readAnnualBp(fileId, fyTabLabel),
+  const [fyMonthData, historicalCapacity] = await Promise.all([
+    readFyMonthlyTab(fileId, fyTabLabel, allTabs),
     loadHistoricalCapacity(fileId, allTabs, fy),
   ]);
-  spread.annualBusinessPlan = annualBp ?? spread.annualBusinessPlan;
+  spread.annualBusinessPlan = fyMonthData.annualBp ?? spread.annualBusinessPlan;
 
   const visitPlan = computeVisitPlan(rows, fy, historicalCapacity);
 
@@ -663,6 +768,7 @@ async function loadMemberSheetUncached(
     rows,
     spread,
     visitPlan,
+    months: fyMonthData.months,
     rowsRead: allRows.length,
   };
 }
