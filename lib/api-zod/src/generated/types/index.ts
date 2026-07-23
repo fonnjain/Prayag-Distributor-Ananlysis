@@ -90,6 +90,7 @@ export * from './mgmtDeepDiveKpis';
 export * from './mgmtDeepDiveKpisExtra';
 export * from './mgmtDeepDiveMemberRef';
 export * from './mgmtDistanceBucket';
+export * from './mgmtHistoricalFyCapacity';
 export * from './mgmtMonthVisitPlan';
 export * from './mgmtOptions';
 export * from './mgmtRegion';

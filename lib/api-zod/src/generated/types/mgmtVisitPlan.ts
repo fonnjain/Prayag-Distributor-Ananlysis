@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { MgmtHistoricalFyCapacity } from './mgmtHistoricalFyCapacity';
 import type { MgmtMonthVisitPlan } from './mgmtMonthVisitPlan';
 import type { MgmtVisitCapacity } from './mgmtVisitCapacity';
 import type { MgmtVisitPattern } from './mgmtVisitPattern';
@@ -12,11 +13,13 @@ import type { MgmtVisitPattern } from './mgmtVisitPattern';
 export interface MgmtVisitPlan {
   pattern: MgmtVisitPattern;
   capacity: MgmtVisitCapacity;
+  /** Closed-year visit totals used to derive the capacity anchor. Sorted by FY descending. */
+  historicalFyCapacity: MgmtHistoricalFyCapacity[];
   monthPlans: MgmtMonthVisitPlan[];
-  /** Sum of capacity across all remaining month plans. */
+  /** Sum of monthly capacity allocations (may differ by 1–2 from feasibleRemainingVisits due to rounding). */
   totalFeasible: number;
   /** Visits still required to complete the annual plan (= capacity.remainingRequired). */
   totalRequired: number;
-  /** totalFeasible − totalRequired. Negative = shortfall; surface explicitly. */
+  /** Anchor-based gap: capacity.feasibleRemainingVisits − capacity.remainingRequired. Negative = shortfall. */
   gap: number;
 }

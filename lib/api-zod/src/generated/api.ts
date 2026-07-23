@@ -375,19 +375,28 @@ export const GetMgmtDeepDiveResponse = zod.object({
 }),
   "capacity": zod.object({
   "fyStartDate": zod.string().describe('FY start date, e.g. \'2026-04-01\'.'),
-  "asOfDate": zod.string().describe('Date the plan was computed.'),
-  "workingDaysElapsed": zod.number().describe('Mon-Sat working days since FY start.'),
-  "demonstratedVisitsPerDay": zod.number().describe('totalVisitsDone \/ workingDaysElapsed.'),
-  "workingDaysRemaining": zod.number().describe('Mon-Sat working days from tomorrow to FY end.'),
-  "feasibleRemainingVisits": zod.number().describe('demonstratedVisitsPerDay × workingDaysRemaining.'),
+  "dataWindowEndDate": zod.string().describe('End of last complete fiscal month — the data cutoff. Never today\'s raw date.'),
+  "dataCutoffWorkingDays": zod.number().describe('Mon-Sat days from FY start to dataWindowEndDate (78 for Q1).'),
+  "demonstratedVisitsPerDay": zod.number().describe('totalVisitsDone \/ dataCutoffWorkingDays. Pace check only — not used for capacity projection.'),
+  "annualCapacityAnchor": zod.number().describe('Most recent closed FY\'s total visits. Used as the annual capacity anchor.'),
+  "anchorFy": zod.string().describe('Which closed FY the anchor is drawn from, e.g. \'2025-26\'.'),
+  "feasibleRemainingVisits": zod.number().describe('annualCapacityAnchor − totalVisitsDone.'),
   "remainingRequired": zod.number().describe('totalVisitsRequired − totalVisitsDone.'),
-  "gap": zod.number().describe('feasibleRemainingVisits − remainingRequired. Negative = shortfall.'),
-  "monthlyCapacity": zod.number().describe('Average visit capacity per remaining complete month.')
+  "gap": zod.number().describe('feasibleRemainingVisits − remainingRequired. Negative = shortfall. Anchor-based; never projected from daily rate.'),
+  "workingDaysRemaining": zod.number().describe('Mon-Sat days from dataWindowEnd+1 to FY end (reference only).'),
+  "monthlyCapacity": zod.number().describe('Approx feasibleRemainingVisits \/ remaining forward plan months.')
 }),
+  "historicalFyCapacity": zod.array(zod.object({
+  "fy": zod.string().describe('Fiscal year, e.g. \'2024-25\'.'),
+  "totalRetailers": zod.number().describe('Retailer rows in that FY\'s summary tab.'),
+  "totalVisitsRequired": zod.number().describe('Sum of visitsRequired across all retailers.'),
+  "totalVisitsDone": zod.number().describe('Sum of totalVisit across all retailers (annual capacity anchor).'),
+  "coveragePct": zod.number().describe('totalVisitsDone \/ totalVisitsRequired × 100.')
+})).describe('Closed-year visit totals used to derive the capacity anchor. Sorted by FY descending.'),
   "monthPlans": zod.array(zod.object({
   "month": zod.string().describe('e.g. \'Aug 26\''),
   "workingDays": zod.number(),
-  "capacity": zod.number().describe('demonstratedRate × workingDays, rounded.'),
+  "capacity": zod.number().describe('Proportional share of feasibleRemainingVisits for this month\'s working days.'),
   "maintenanceVisits": zod.number().describe('Visits allocated to active retailers to maintain their cadence.'),
   "developmentVisits": zod.number().describe('Remaining capacity directed at dormant high-potential retailers.'),
   "targets": zod.array(zod.object({
@@ -401,9 +410,9 @@ export const GetMgmtDeepDiveResponse = zod.object({
   "reason": zod.string()
 })).describe('Top-10 prioritised retailers for this month, batched by district+km.')
 })),
-  "totalFeasible": zod.number().describe('Sum of capacity across all remaining month plans.'),
+  "totalFeasible": zod.number().describe('Sum of monthly capacity allocations (may differ by 1–2 from feasibleRemainingVisits due to rounding).'),
   "totalRequired": zod.number().describe('Visits still required to complete the annual plan (= capacity.remainingRequired).'),
-  "gap": zod.number().describe('totalFeasible − totalRequired. Negative = shortfall; surface explicitly.')
+  "gap": zod.number().describe('Anchor-based gap: capacity.feasibleRemainingVisits − capacity.remainingRequired. Negative = shortfall.')
 }).nullish().describe('Phase 3: visit-pattern analysis and forward visit plan (present when status is \'ok\').'),
   "rowsRead": zod.number().nullish()
 }).nullish().describe('Phase 2: retailer-level detail from the member\'s own working sheet. Null when no member is selected. status=\'not-mapped\' when the member has no sheet ID in the config; status=\'error\' on read failure. Phase 1 KPIs are always returned regardless of this field.\n'),

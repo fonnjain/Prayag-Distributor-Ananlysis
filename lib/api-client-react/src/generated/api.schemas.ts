@@ -980,22 +980,39 @@ export interface MgmtVisitPattern {
 export interface MgmtVisitCapacity {
   /** FY start date, e.g. '2026-04-01'. */
   fyStartDate: string;
-  /** Date the plan was computed. */
-  asOfDate: string;
-  /** Mon-Sat working days since FY start. */
-  workingDaysElapsed: number;
-  /** totalVisitsDone / workingDaysElapsed. */
+  /** End of last complete fiscal month — the data cutoff. Never today's raw date. */
+  dataWindowEndDate: string;
+  /** Mon-Sat days from FY start to dataWindowEndDate (78 for Q1). */
+  dataCutoffWorkingDays: number;
+  /** totalVisitsDone / dataCutoffWorkingDays. Pace check only — not used for capacity projection. */
   demonstratedVisitsPerDay: number;
-  /** Mon-Sat working days from tomorrow to FY end. */
-  workingDaysRemaining: number;
-  /** demonstratedVisitsPerDay × workingDaysRemaining. */
+  /** Most recent closed FY's total visits. Used as the annual capacity anchor. */
+  annualCapacityAnchor: number;
+  /** Which closed FY the anchor is drawn from, e.g. '2025-26'. */
+  anchorFy: string;
+  /** annualCapacityAnchor − totalVisitsDone. */
   feasibleRemainingVisits: number;
   /** totalVisitsRequired − totalVisitsDone. */
   remainingRequired: number;
-  /** feasibleRemainingVisits − remainingRequired. Negative = shortfall. */
+  /** feasibleRemainingVisits − remainingRequired. Negative = shortfall. Anchor-based; never projected from daily rate. */
   gap: number;
-  /** Average visit capacity per remaining complete month. */
+  /** Mon-Sat days from dataWindowEnd+1 to FY end (reference only). */
+  workingDaysRemaining: number;
+  /** Approx feasibleRemainingVisits / remaining forward plan months. */
   monthlyCapacity: number;
+}
+
+export interface MgmtHistoricalFyCapacity {
+  /** Fiscal year, e.g. '2024-25'. */
+  fy: string;
+  /** Retailer rows in that FY's summary tab. */
+  totalRetailers: number;
+  /** Sum of visitsRequired across all retailers. */
+  totalVisitsRequired: number;
+  /** Sum of totalVisit across all retailers (annual capacity anchor). */
+  totalVisitsDone: number;
+  /** totalVisitsDone / totalVisitsRequired × 100. */
+  coveragePct: number;
 }
 
 /**
@@ -1026,7 +1043,7 @@ export interface MgmtMonthVisitPlan {
   /** e.g. 'Aug 26' */
   month: string;
   workingDays: number;
-  /** demonstratedRate × workingDays, rounded. */
+  /** Proportional share of feasibleRemainingVisits for this month's working days. */
   capacity: number;
   /** Visits allocated to active retailers to maintain their cadence. */
   maintenanceVisits: number;
@@ -1039,12 +1056,14 @@ export interface MgmtMonthVisitPlan {
 export interface MgmtVisitPlan {
   pattern: MgmtVisitPattern;
   capacity: MgmtVisitCapacity;
+  /** Closed-year visit totals used to derive the capacity anchor. Sorted by FY descending. */
+  historicalFyCapacity: MgmtHistoricalFyCapacity[];
   monthPlans: MgmtMonthVisitPlan[];
-  /** Sum of capacity across all remaining month plans. */
+  /** Sum of monthly capacity allocations (may differ by 1–2 from feasibleRemainingVisits due to rounding). */
   totalFeasible: number;
   /** Visits still required to complete the annual plan (= capacity.remainingRequired). */
   totalRequired: number;
-  /** totalFeasible − totalRequired. Negative = shortfall; surface explicitly. */
+  /** Anchor-based gap: capacity.feasibleRemainingVisits − capacity.remainingRequired. Negative = shortfall. */
   gap: number;
 }
 

@@ -41,7 +41,11 @@
 
 import memberSheetMapRaw from "../../../config/member_sheet_map.json" assert { type: "json" };
 import { logger } from "../logger.js";
-import { computeVisitPlan, type VisitPlan } from "./visitPlan.js";
+import {
+  computeVisitPlan,
+  type VisitPlan,
+  type HistoricalFyCapacity,
+} from "./visitPlan.js";
 import {
   readAllTabRows,
   listSheetTabs,
@@ -152,31 +156,243 @@ export function invalidateMemberSheetCache(normKey?: string): void {
   else _cache.clear();
 }
 
-// ── Tab finder ────────────────────────────────────────────────────────────────
-// Prefers the tab whose name contains the FY year hint (most specific).
-// Falls back to the longest tab name starting with the prefix.
+// ── Historical FY capacity (Phase 3-C) ────────────────────────────────────────
+// Reads prior-FY "Summary Report <FY>" tabs with full header detection so that
+// the totalVisit and visitsRequired columns are always matched by name, never
+// by hardcoded column letter. Two sheets can carry these columns at different
+// positions across FYs; header detection resolves them independently each time.
 
-async function findSummaryTab(
+// Parse a fiscal year string (e.g. "2024-25", "2025-2026") from a tab title.
+function parseFyFromTabTitle(title: string): string | null {
+  // Long form: "2024-25" or "2024-2025"
+  const m = title.match(/(20\d{2})[- ](20)?(\d{2})/);
+  if (m) return `${m[1]}-${m[3]}`;
+  // Short form: "24-25"
+  const m2 = title.match(/(\d{2})-(\d{2})/);
+  if (m2) return `20${m2[1]}-${m2[2]}`;
+  return null;
+}
+
+// Read one prior-FY summary tab and return visit totals derived via
+// header-detected column positions (not DEFAULT_COL fallback).
+//
+// DETECTION RULES (historical tabs only):
+//   1. Find the header row by probing cols 2-3 for a text identity value.
+//   2. REQ synonyms are checked BEFORE VISIT synonyms in every pass so that
+//      headers like "NO OF VISITS REQD" go to reqCol, not visitCol.
+//   3. Extended REQ synonyms cover "NOOFVISITSREQ*" patterns that the main
+//      detectColumns prefix scan would accidentally assign to totalVisit.
+//   4. If either visitCol or reqCol cannot be resolved, return null (we never
+//      fall back to DEFAULT_COL positions, which are wrong for historical tabs).
+async function readHistoricalFySummary(
   fileId: string,
+  tabTitle: string,
   fy: string,
-): Promise<string | null> {
-  let tabs: { title: string }[];
+): Promise<HistoricalFyCapacity | null> {
+  let allRows: SheetCellValue[][];
   try {
-    tabs = await listSheetTabs(fileId);
+    allRows = await readAllTabRows(fileId, tabTitle);
   } catch (err) {
-    logger.warn({ err, fileId }, "memberSheet: listSheetTabs failed");
+    logger.warn({ err, fileId, tabTitle }, "memberSheet: historical tab read failed");
     return null;
   }
 
-  const p = SUMMARY_TAB_PREFIX;
-  const matches = tabs.filter((t) => t.title.toUpperCase().startsWith(p));
+  // ── Inline column detection ──────────────────────────────────────────────
+  // REQ must be listed before VISIT in every scan pass so columns titled
+  // "NO. OF VISITS REQD" are NOT consumed by the NOOFVISIT VISIT prefix.
+  const VISIT_SYNS: string[] = [
+    "TOTALVISIT","TOTALVISITS","NOOFVISIT","NOOFVISITS",
+    "VISITCOUNT","ACTUALVISIT","ACTUALVISITS",
+  ];
+  const REQ_SYNS: string[] = [
+    "VISITSREQUIRED","VISITREQ","REQUIREDVISIT","VISITREQUIRED",
+    "VISITSREQD","REQUIREDVISITS","VISITREQUD",
+    // Extended: "NO OF VISITS REQD" → "NOOFVISITSREQD", "NO OF VISIT REQ" → "NOOFVISITREQ"
+    "NOOFVISITSREQ","NOOFVISITSREQD","NOOFVISITREQ","NOOFVISITREQD",
+  ];
+  const NAME_EXACT: Set<string> = new Set([
+    "RETAILER","PARTYNAME","RETAILERNAME","NAME","CUSTOMER","PARTY",
+  ]);
+
+  let headerRowIndex = -1;
+  let nameCol: number = DEFAULT_COL.name; // identity col — stable across FYs
+  let visitCol: number | null = null;
+  let reqCol:   number | null = null;
+  let hRow: SheetCellValue[] = [];
+
+  for (let i = 0; i < Math.min(allRows.length, 15); i++) {
+    const row = allRows[i] ?? [];
+    const probe = normHeader(row[2] ?? row[3] ?? "");
+    const isHeader =
+      probe.length >= 2 &&
+      !/^\d+$/.test(probe) &&
+      (probe.includes("RETAILER") || probe.includes("PARTY") ||
+       probe.includes("NAME") || probe === "SL" ||
+       probe === "SR" || probe === "SNO" || probe === "SRNO");
+    if (!isHeader) continue;
+
+    headerRowIndex = i;
+    hRow = row;
+
+    // Pass 1 — exact match; REQ before VISIT to prevent greedy capture.
+    for (let c = 0; c < row.length; c++) {
+      const h = normHeader(row[c]);
+      if (!h) continue;
+      if (NAME_EXACT.has(h) && nameCol === DEFAULT_COL.name) nameCol = c;
+      if (reqCol   === null && REQ_SYNS.includes(h))   reqCol   = c;
+      if (visitCol === null && VISIT_SYNS.includes(h)) visitCol = c;
+    }
+
+    // Pass 2 — prefix match (only for unresolved columns).
+    if (visitCol === null || reqCol === null) {
+      for (let c = 0; c < row.length; c++) {
+        const h = normHeader(row[c]);
+        if (!h) continue;
+        // Check REQ first so "NOOFVISITSREQD" → reqCol, not visitCol.
+        if (reqCol === null && REQ_SYNS.some(s => h.startsWith(s))) {
+          reqCol = c;
+          continue; // prevent same column from also matching VISIT
+        }
+        if (visitCol === null && VISIT_SYNS.some(s => h.startsWith(s))) {
+          visitCol = c;
+        }
+      }
+    }
+    break;
+  }
+
+  // Log the header row so column mapping can be audited in the server log.
+  const headerSample = hRow.slice(0, 32).map((v, i) => `[${i}]${normHeader(v)}`).join(" ");
+
+  if (headerRowIndex < 0) {
+    logger.warn({ tabTitle, fy }, "memberSheet: no header row in historical tab");
+    return null;
+  }
+  if (visitCol === null || reqCol === null) {
+    logger.warn(
+      { tabTitle, fy, visitCol, reqCol, headerSample },
+      "memberSheet: totalVisit or visitsReq column not detected in historical tab — skipping",
+    );
+    return null;
+  }
 
   logger.info(
-    { fileId, fy, allTabs: tabs.map((t) => t.title), summaryMatches: matches.map((t) => t.title) },
+    { tabTitle, fy, visitCol, reqCol, nameCol, headerSample },
+    "memberSheet: historical tab columns resolved",
+  );
+
+  // ── Row scan ──────────────────────────────────────────────────────────────
+  // Use +1 (not +2) so that historical tabs without a sub-header row do not
+  // lose their first data row. SKIP_TOKENS + blank guard filter sub-headers.
+  const dataStart = headerRowIndex + 1;
+  const STOP_TOKENS = new Set(["TOTAL", "GRANDTOTAL", "SUBTOTAL"]);
+  const SKIP_TOKENS = new Set([
+    "RETAILERNAME","RETAILER","NAME",
+    "SRLNO","SL","SR","NO","SNO","SRNO",
+  ]);
+
+  let totalRetailers      = 0;
+  let totalVisitsDone     = 0;
+  let totalVisitsRequired = 0;
+  let blankRun            = 0;
+
+  for (let i = dataStart; i < allRows.length; i++) {
+    const row     = allRows[i] ?? [];
+    const rawName = cellStr(row[nameCol]);
+
+    if (!rawName) {
+      blankRun++;
+      if (blankRun >= 3) break;
+      continue;
+    }
+    blankRun = 0;
+
+    const nameNorm = normHeader(rawName);
+    if (
+      STOP_TOKENS.has(nameNorm) ||
+      nameNorm.startsWith("GRANDTOTAL") ||
+      nameNorm.startsWith("TOTAL")
+    ) break;
+    if (SKIP_TOKENS.has(nameNorm)) continue;
+    if (/^\d+$/.test(rawName.trim())) continue;
+
+    totalRetailers++;
+    totalVisitsDone     += cellNum(row[visitCol]) ?? 0;
+    totalVisitsRequired += cellNum(row[reqCol])   ?? 0;
+  }
+
+  const coveragePct =
+    totalVisitsRequired > 0
+      ? (totalVisitsDone / totalVisitsRequired) * 100
+      : 0;
+
+  logger.info(
+    {
+      tabTitle, fy,
+      totalRetailers, totalVisitsRequired, totalVisitsDone,
+      coveragePct: Math.round(coveragePct * 10) / 10,
+      visitCol, reqCol,
+    },
+    "memberSheet: historical FY capacity",
+  );
+
+  return { fy, totalRetailers, totalVisitsRequired, totalVisitsDone, coveragePct };
+}
+
+// Find and read all prior-FY summary tabs (using a single listSheetTabs call).
+async function loadHistoricalCapacity(
+  fileId: string,
+  tabs: { title: string }[],
+  currentFy: string,
+): Promise<HistoricalFyCapacity[]> {
+  const priorTabs = tabs.filter((t) => {
+    if (!t.title.toUpperCase().startsWith(SUMMARY_TAB_PREFIX)) return false;
+    const fy = parseFyFromTabTitle(t.title);
+    return fy !== null && fy !== currentFy;
+  });
+
+  const results = await Promise.all(
+    priorTabs.map((t) => {
+      const fy = parseFyFromTabTitle(t.title)!;
+      return readHistoricalFySummary(fileId, t.title, fy);
+    }),
+  );
+
+  return results.filter((r): r is HistoricalFyCapacity => r !== null);
+}
+
+// ── Tab finder ────────────────────────────────────────────────────────────────
+// Prefers the tab whose name contains the FY year hint (most specific).
+// Falls back to the longest tab name starting with the prefix.
+// Returns both the selected tab title and the full tab list so the caller
+// can reuse it for historical capacity reads without a second listSheetTabs call.
+
+type TabInventory = {
+  selectedTab: string | null;
+  allTabs: { title: string }[];
+};
+
+async function findSummaryTabWithInventory(
+  fileId: string,
+  fy: string,
+): Promise<TabInventory> {
+  let allTabs: { title: string }[];
+  try {
+    allTabs = await listSheetTabs(fileId);
+  } catch (err) {
+    logger.warn({ err, fileId }, "memberSheet: listSheetTabs failed");
+    return { selectedTab: null, allTabs: [] };
+  }
+
+  const p = SUMMARY_TAB_PREFIX;
+  const matches = allTabs.filter((t) => t.title.toUpperCase().startsWith(p));
+
+  logger.info(
+    { fileId, fy, allTabs: allTabs.map((t) => t.title), summaryMatches: matches.map((t) => t.title) },
     "memberSheet: tab candidates",
   );
 
-  if (matches.length === 0) return null;
+  if (matches.length === 0) return { selectedTab: null, allTabs };
 
   // Build FY year variants to prefer the FY-specific tab.
   // e.g. fy="2026-27" → ["2026-27","2026-2027","26-27","2026"]
@@ -194,16 +410,16 @@ async function findSummaryTab(
 
   if (fyMatch) {
     logger.info({ tab: fyMatch.title }, "memberSheet: FY-specific tab selected");
-    return fyMatch.title;
+    return { selectedTab: fyMatch.title, allTabs };
   }
 
   // Fall back to the longest matching tab (more specific is better).
-  const fallback = [...matches].sort((a, b) => b.title.length - a.title.length)[0];
+  const fallback = [...matches].sort((a, b) => b.title.length - a.title.length)[0]!;
   logger.info(
     { tab: fallback.title, reason: "no FY match; using longest" },
     "memberSheet: fallback tab selected",
   );
-  return fallback.title;
+  return { selectedTab: fallback.title, allTabs };
 }
 
 // ── Header detection ──────────────────────────────────────────────────────────
@@ -341,7 +557,7 @@ async function loadMemberSheetUncached(
   const fileId = MEMBER_FILE_MAP[memberKey];
   if (!fileId) return null;
 
-  const tabName = await findSummaryTab(fileId, fy);
+  const { selectedTab: tabName, allTabs } = await findSummaryTabWithInventory(fileId, fy);
   if (!tabName) {
     logger.warn({ memberKey, fileId, fy }, "memberSheet: summary tab not found");
     return null;
@@ -431,11 +647,15 @@ async function loadMemberSheetUncached(
 
   const spread = computeSpread(rows, fileId, fy, memberName);
 
+  // Read annualBp and historical capacity in parallel to minimise latency.
   const fyTabLabel = fy === "2026-27" ? "2026-2027" : `20${fy.replace("-", "-20")}`;
-  const annualBp = await readAnnualBp(fileId, fyTabLabel);
+  const [annualBp, historicalCapacity] = await Promise.all([
+    readAnnualBp(fileId, fyTabLabel),
+    loadHistoricalCapacity(fileId, allTabs, fy),
+  ]);
   spread.annualBusinessPlan = annualBp ?? spread.annualBusinessPlan;
 
-  const visitPlan = computeVisitPlan(rows, fy);
+  const visitPlan = computeVisitPlan(rows, fy, historicalCapacity);
 
   return {
     fileId,

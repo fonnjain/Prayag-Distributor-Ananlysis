@@ -112,15 +112,25 @@ interface VisitPattern {
   distanceBuckets: DistanceBucket[];
 }
 
+interface HistoricalFyCapacity {
+  fy: string;
+  totalRetailers: number;
+  totalVisitsRequired: number;
+  totalVisitsDone: number;
+  coveragePct: number;
+}
+
 interface VisitCapacity {
   fyStartDate: string;
-  asOfDate: string;
-  workingDaysElapsed: number;
+  dataWindowEndDate: string;
+  dataCutoffWorkingDays: number;
   demonstratedVisitsPerDay: number;
-  workingDaysRemaining: number;
+  annualCapacityAnchor: number;
+  anchorFy: string;
   feasibleRemainingVisits: number;
   remainingRequired: number;
   gap: number;
+  workingDaysRemaining: number;
   monthlyCapacity: number;
 }
 
@@ -147,6 +157,7 @@ interface MonthVisitPlan {
 interface VisitPlan {
   pattern: VisitPattern;
   capacity: VisitCapacity;
+  historicalFyCapacity: HistoricalFyCapacity[];
   monthPlans: MonthVisitPlan[];
   totalFeasible: number;
   totalRequired: number;
@@ -630,32 +641,49 @@ function VisitPatternPanel({ pattern }: { pattern: VisitPattern }) {
 }
 
 function CapacityPanel({
-  capacity, gap,
-}: { capacity: VisitCapacity; gap: number }) {
+  capacity, historicalFyCapacity, gap,
+}: { capacity: VisitCapacity; historicalFyCapacity: HistoricalFyCapacity[]; gap: number }) {
   const isShortfall = gap < 0;
+
+  // Sort historical descending so most recent FY is first.
+  const histSorted = [...historicalFyCapacity].sort((a, b) => b.fy.localeCompare(a.fy));
 
   return (
     <div className="space-y-3">
       <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground border-b border-border pb-1">
-        Visit Capacity Model (Mon–Sat working days)
+        Visit Capacity Model
       </h3>
+
+      {/* Anchor explanation */}
+      <div className="rounded-md border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground leading-relaxed">
+        <span className="font-medium text-foreground">Capacity anchor: </span>
+        FY{capacity.anchorFy} demonstrated{" "}
+        <span className="font-semibold text-foreground">{fmtNum(capacity.annualCapacityAnchor)}</span>{" "}
+        visits over the full year. Using this as the annual budget avoids projecting a quarterly pace
+        that excludes leave, festivals and slower periods.
+        <span className="block mt-1">
+          <span className="font-medium text-foreground">Pace check (Q1): </span>
+          {fmtNum(capacity.dataCutoffWorkingDays)} Mon–Sat days (data window ends {capacity.dataWindowEndDate}) ·{" "}
+          <span className="font-semibold text-foreground">{capacity.demonstratedVisitsPerDay.toFixed(2)} visits/day</span>
+        </span>
+      </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         <Tile
-          label="Demonstrated visits / day"
-          value={capacity.demonstratedVisitsPerDay.toFixed(2)}
-          sub={`${fmtNum(capacity.workingDaysElapsed)} Mon-Sat days elapsed since ${capacity.fyStartDate}`}
+          label={`FY${capacity.anchorFy} annual capacity`}
+          value={fmtNum(capacity.annualCapacityAnchor)}
+          sub="Demonstrated visits — full closed year"
           accent
         />
         <Tile
-          label="Working days remaining"
-          value={fmtNum(capacity.workingDaysRemaining)}
-          sub={`To FY end · ~${fmtNum(capacity.monthlyCapacity)} visits / month`}
+          label="Done this FY"
+          value={fmtNum(capacity.annualCapacityAnchor - capacity.feasibleRemainingVisits)}
+          sub={`Data window ends ${capacity.dataWindowEndDate}`}
         />
         <Tile
-          label="Feasible remaining visits"
+          label="Remaining capacity"
           value={fmtNum(capacity.feasibleRemainingVisits)}
-          sub={`At demonstrated rate × remaining days`}
+          sub={`Anchor minus done · ~${fmtNum(capacity.monthlyCapacity)} / month`}
         />
         <Tile
           label="Remaining required"
@@ -679,10 +707,90 @@ function CapacityPanel({
         </span>
         <p className={cn("text-xs mt-0.5", isShortfall ? "text-red-700 dark:text-red-400" : "text-green-700 dark:text-green-400")}>
           {isShortfall
-            ? `At the current rate of ${capacity.demonstratedVisitsPerDay.toFixed(2)} visits/day, ${fmtNum(capacity.feasibleRemainingVisits)} visits are feasible in the remaining ${fmtNum(capacity.workingDaysRemaining)} working days — ${fmtNum(-gap)} visits short of the ${fmtNum(capacity.remainingRequired)} still required. Redirect effort from visited-zero-order parties to high-potential dormant retailers.`
-            : `At the current rate the member can complete all required visits with ${fmtNum(gap)} visits to spare.`}
+            ? `Remaining capacity (${fmtNum(capacity.feasibleRemainingVisits)}) is ${fmtNum(-gap)} short of the ${fmtNum(capacity.remainingRequired)} visits still required. The gap is structural — he has never met the visit requirement — not this year's lapse.`
+            : `Remaining capacity (${fmtNum(capacity.feasibleRemainingVisits)}) exceeds what is still required by ${fmtNum(gap)} visits.`}
         </p>
       </div>
+
+      {/* 3-year historical panel */}
+      {histSorted.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground border-b border-border pb-1">
+            Three-Year Coverage History
+          </h4>
+          <div className="overflow-x-auto rounded-md border border-border">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  <th className="text-left px-3 py-2 font-medium text-muted-foreground">FY</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">Retailers</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">Required</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">Done</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">Coverage</th>
+                </tr>
+              </thead>
+              <tbody>
+                {histSorted.map((h) => (
+                  <tr key={h.fy} className="border-b border-border last:border-0 hover:bg-muted/10">
+                    <td className="px-3 py-2 font-medium">FY{h.fy}</td>
+                    <td className="px-3 py-2 text-right">{fmtNum(h.totalRetailers)}</td>
+                    <td className="px-3 py-2 text-right">{fmtNum(h.totalVisitsRequired)}</td>
+                    <td className="px-3 py-2 text-right font-medium">{fmtNum(h.totalVisitsDone)}</td>
+                    <td className={cn(
+                      "px-3 py-2 text-right font-semibold",
+                      h.coveragePct >= 80 ? "text-green-700 dark:text-green-400"
+                        : h.coveragePct >= 60 ? "text-amber-700 dark:text-amber-400"
+                        : "text-red-700 dark:text-red-400",
+                    )}>
+                      {h.coveragePct.toFixed(1)}%
+                    </td>
+                  </tr>
+                ))}
+                {/* Current FY projection row */}
+                <tr className="bg-muted/20 border-t-2 border-border">
+                  <td className="px-3 py-2 font-medium text-muted-foreground">
+                    FY{capacity.anchorFy.replace(/\d{2}-/, (m) => {
+                      const y = parseInt(m) + 1;
+                      return `${y}-`;
+                    })} (proj.)
+                  </td>
+                  <td className="px-3 py-2 text-right text-muted-foreground">—</td>
+                  <td className="px-3 py-2 text-right text-muted-foreground">
+                    {fmtNum(capacity.remainingRequired + (capacity.annualCapacityAnchor - capacity.feasibleRemainingVisits))}
+                  </td>
+                  <td className="px-3 py-2 text-right text-muted-foreground">
+                    {fmtNum(capacity.annualCapacityAnchor)} if anchor repeats
+                  </td>
+                  <td className={cn(
+                    "px-3 py-2 text-right font-semibold",
+                    capacity.annualCapacityAnchor > 0 &&
+                    (capacity.remainingRequired + (capacity.annualCapacityAnchor - capacity.feasibleRemainingVisits)) > 0
+                      ? ((capacity.annualCapacityAnchor /
+                          (capacity.remainingRequired + (capacity.annualCapacityAnchor - capacity.feasibleRemainingVisits))) * 100) >= 80
+                          ? "text-green-700 dark:text-green-400"
+                          : ((capacity.annualCapacityAnchor /
+                              (capacity.remainingRequired + (capacity.annualCapacityAnchor - capacity.feasibleRemainingVisits))) * 100) >= 60
+                              ? "text-amber-700 dark:text-amber-400"
+                              : "text-red-700 dark:text-red-400"
+                      : "text-muted-foreground",
+                  )}>
+                    {capacity.annualCapacityAnchor > 0 &&
+                     (capacity.remainingRequired + (capacity.annualCapacityAnchor - capacity.feasibleRemainingVisits)) > 0
+                      ? `~${((capacity.annualCapacityAnchor /
+                          (capacity.remainingRequired + (capacity.annualCapacityAnchor - capacity.feasibleRemainingVisits))) * 100).toFixed(0)}%`
+                      : "—"}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            He has never met the visit requirement. Coverage fell in FY{histSorted[0]?.fy} because the
+            requirement per retailer was raised sharply while his actual effort rose year-on-year.
+            With the requirement now reduced, repeating last year's effort would be his best coverage in three years.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1211,6 +1319,7 @@ export default function SalesDeepDive() {
                   <VisitPatternPanel pattern={rd.visitPlan.pattern} />
                   <CapacityPanel
                     capacity={rd.visitPlan.capacity}
+                    historicalFyCapacity={rd.visitPlan.historicalFyCapacity}
                     gap={rd.visitPlan.gap}
                   />
                   <ForwardPlanPanel

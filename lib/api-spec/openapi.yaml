@@ -2748,21 +2748,32 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MgmtDistanceBucket"
+    MgmtHistoricalFyCapacity:
+      type: object
+      required: [fy, totalRetailers, totalVisitsRequired, totalVisitsDone, coveragePct]
+      properties:
+        fy: { type: string, description: "Fiscal year, e.g. '2024-25'." }
+        totalRetailers: { type: integer, description: "Retailer rows in that FY's summary tab." }
+        totalVisitsRequired: { type: integer, description: "Sum of visitsRequired across all retailers." }
+        totalVisitsDone: { type: integer, description: "Sum of totalVisit across all retailers (annual capacity anchor)." }
+        coveragePct: { type: number, description: "totalVisitsDone / totalVisitsRequired × 100." }
     MgmtVisitCapacity:
       type: object
-      required: [fyStartDate, asOfDate, workingDaysElapsed, demonstratedVisitsPerDay, workingDaysRemaining, feasibleRemainingVisits, remainingRequired, gap, monthlyCapacity]
+      required: [fyStartDate, dataWindowEndDate, dataCutoffWorkingDays, demonstratedVisitsPerDay, annualCapacityAnchor, anchorFy, feasibleRemainingVisits, remainingRequired, gap, workingDaysRemaining, monthlyCapacity]
       properties:
         fyStartDate: { type: string, description: "FY start date, e.g. '2026-04-01'." }
-        asOfDate: { type: string, description: "Date the plan was computed." }
-        workingDaysElapsed: { type: integer, description: "Mon-Sat working days since FY start." }
-        demonstratedVisitsPerDay: { type: number, description: "totalVisitsDone / workingDaysElapsed." }
-        workingDaysRemaining: { type: integer, description: "Mon-Sat working days from tomorrow to FY end." }
-        feasibleRemainingVisits: { type: number, description: "demonstratedVisitsPerDay × workingDaysRemaining." }
-        remainingRequired: { type: number, description: "totalVisitsRequired − totalVisitsDone." }
+        dataWindowEndDate: { type: string, description: "End of last complete fiscal month — the data cutoff. Never today's raw date." }
+        dataCutoffWorkingDays: { type: integer, description: "Mon-Sat days from FY start to dataWindowEndDate (78 for Q1)." }
+        demonstratedVisitsPerDay: { type: number, description: "totalVisitsDone / dataCutoffWorkingDays. Pace check only — not used for capacity projection." }
+        annualCapacityAnchor: { type: integer, description: "Most recent closed FY's total visits. Used as the annual capacity anchor." }
+        anchorFy: { type: string, description: "Which closed FY the anchor is drawn from, e.g. '2025-26'." }
+        feasibleRemainingVisits: { type: integer, description: "annualCapacityAnchor − totalVisitsDone." }
+        remainingRequired: { type: integer, description: "totalVisitsRequired − totalVisitsDone." }
         gap:
-          type: number
-          description: "feasibleRemainingVisits − remainingRequired. Negative = shortfall."
-        monthlyCapacity: { type: number, description: "Average visit capacity per remaining complete month." }
+          type: integer
+          description: "feasibleRemainingVisits − remainingRequired. Negative = shortfall. Anchor-based; never projected from daily rate."
+        workingDaysRemaining: { type: integer, description: "Mon-Sat days from dataWindowEnd+1 to FY end (reference only)." }
+        monthlyCapacity: { type: integer, description: "Approx feasibleRemainingVisits / remaining forward plan months." }
     MgmtVisitTarget:
       type: object
       required: [name, ob, visitsDone, priority, reason]
@@ -2784,7 +2795,7 @@ components:
       properties:
         month: { type: string, description: "e.g. 'Aug 26'" }
         workingDays: { type: integer }
-        capacity: { type: integer, description: "demonstratedRate × workingDays, rounded." }
+        capacity: { type: integer, description: "Proportional share of feasibleRemainingVisits for this month's working days." }
         maintenanceVisits:
           type: integer
           description: "Visits allocated to active retailers to maintain their cadence."
@@ -2798,25 +2809,30 @@ components:
           description: "Top-10 prioritised retailers for this month, batched by district+km."
     MgmtVisitPlan:
       type: object
-      required: [pattern, capacity, monthPlans, totalFeasible, totalRequired, gap]
+      required: [pattern, capacity, historicalFyCapacity, monthPlans, totalFeasible, totalRequired, gap]
       properties:
         pattern:
           $ref: "#/components/schemas/MgmtVisitPattern"
         capacity:
           $ref: "#/components/schemas/MgmtVisitCapacity"
+        historicalFyCapacity:
+          type: array
+          items:
+            $ref: "#/components/schemas/MgmtHistoricalFyCapacity"
+          description: "Closed-year visit totals used to derive the capacity anchor. Sorted by FY descending."
         monthPlans:
           type: array
           items:
             $ref: "#/components/schemas/MgmtMonthVisitPlan"
         totalFeasible:
           type: number
-          description: "Sum of capacity across all remaining month plans."
+          description: "Sum of monthly capacity allocations (may differ by 1–2 from feasibleRemainingVisits due to rounding)."
         totalRequired:
           type: number
           description: "Visits still required to complete the annual plan (= capacity.remainingRequired)."
         gap:
           type: number
-          description: "totalFeasible − totalRequired. Negative = shortfall; surface explicitly."
+          description: "Anchor-based gap: capacity.feasibleRemainingVisits − capacity.remainingRequired. Negative = shortfall."
     MgmtDeepDiveKpis:
       type: object
       required: [stateHead, name, normKey]

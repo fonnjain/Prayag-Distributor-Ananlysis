@@ -9,20 +9,24 @@
 export interface MgmtVisitCapacity {
   /** FY start date, e.g. '2026-04-01'. */
   fyStartDate: string;
-  /** Date the plan was computed. */
-  asOfDate: string;
-  /** Mon-Sat working days since FY start. */
-  workingDaysElapsed: number;
-  /** totalVisitsDone / workingDaysElapsed. */
+  /** End of last complete fiscal month — the data cutoff. Never today's raw date. */
+  dataWindowEndDate: string;
+  /** Mon-Sat days from FY start to dataWindowEndDate (78 for Q1). */
+  dataCutoffWorkingDays: number;
+  /** totalVisitsDone / dataCutoffWorkingDays. Pace check only — not used for capacity projection. */
   demonstratedVisitsPerDay: number;
-  /** Mon-Sat working days from tomorrow to FY end. */
-  workingDaysRemaining: number;
-  /** demonstratedVisitsPerDay × workingDaysRemaining. */
+  /** Most recent closed FY's total visits. Used as the annual capacity anchor. */
+  annualCapacityAnchor: number;
+  /** Which closed FY the anchor is drawn from, e.g. '2025-26'. */
+  anchorFy: string;
+  /** annualCapacityAnchor − totalVisitsDone. */
   feasibleRemainingVisits: number;
   /** totalVisitsRequired − totalVisitsDone. */
   remainingRequired: number;
-  /** feasibleRemainingVisits − remainingRequired. Negative = shortfall. */
+  /** feasibleRemainingVisits − remainingRequired. Negative = shortfall. Anchor-based; never projected from daily rate. */
   gap: number;
-  /** Average visit capacity per remaining complete month. */
+  /** Mon-Sat days from dataWindowEnd+1 to FY end (reference only). */
+  workingDaysRemaining: number;
+  /** Approx feasibleRemainingVisits / remaining forward plan months. */
   monthlyCapacity: number;
 }

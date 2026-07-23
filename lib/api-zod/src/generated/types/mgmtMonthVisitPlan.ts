@@ -11,7 +11,7 @@ export interface MgmtMonthVisitPlan {
   /** e.g. 'Aug 26' */
   month: string;
   workingDays: number;
-  /** demonstratedRate × workingDays, rounded. */
+  /** Proportional share of feasibleRemainingVisits for this month's working days. */
   capacity: number;
   /** Visits allocated to active retailers to maintain their cadence. */
   maintenanceVisits: number;
