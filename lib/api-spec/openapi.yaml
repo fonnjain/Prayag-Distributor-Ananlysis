@@ -2701,6 +2701,13 @@ components:
         skuSpread:
           nullable: true
           $ref: "#/components/schemas/MgmtDistributorSkuSpread"
+        investment:
+          nullable: true
+          $ref: "#/components/schemas/MgmtDistributorInvestment"
+          description: >
+            Phase D4: investment (effective discount, cost to serve, credit, scheme),
+            revenue-to-cost ROI, and A/B/C tier with recommended action. Always present
+            when distributor data loads. Null only if computation fails entirely.
     MgmtDistributorRetailerRow:
       type: object
       required: [name, orderBooking, sale, isActive, confirmedHead, memberName]
@@ -2907,6 +2914,115 @@ components:
           type: number
           nullable: true
           description: Combined NET at peer distributors in recentFy.
+    MgmtDistributorInvestment:
+      type: object
+      required: [creditOutstanding, schemePayouts, tier]
+      description: >
+        Phase D4: investment analysis and A/B/C tiering per distributor.
+        effectiveDiscount is null for the live FY (no secondary register ingested).
+        costToServe is null when visit data or member CTC is unavailable.
+        credit and scheme always show status='no_source' — never estimated or zero.
+      properties:
+        effectiveDiscount:
+          nullable: true
+          $ref: "#/components/schemas/MgmtDistributorEffectiveDiscount"
+        costToServe:
+          nullable: true
+          $ref: "#/components/schemas/MgmtDistributorCostToServe"
+        creditOutstanding:
+          type: object
+          required: [status]
+          properties:
+            status: { type: string, enum: [no_source] }
+        schemePayouts:
+          type: object
+          required: [status]
+          properties:
+            status: { type: string, enum: [no_source] }
+        roi:
+          nullable: true
+          $ref: "#/components/schemas/MgmtDistributorRoi"
+        tier:
+          $ref: "#/components/schemas/MgmtDistributorTier"
+    MgmtDistributorEffectiveDiscount:
+      type: object
+      required: [recentFy, grossTotal, netTotal, discountAmount, weightedDiscountPct, hasAnomalousLines, abovePeerMedian]
+      description: >
+        Weighted average effective discount per distributor from secondary_register_line.
+        weightedDiscountPct = (1 − netTotal / grossTotal) × 100.
+        Lines with discount_pct > 100 are excluded from the weighted average and flagged.
+        Reconciliation sample: gross × (1 − pct/100) should equal net (rounding).
+      properties:
+        recentFy: { type: string }
+        grossTotal: { type: number }
+        netTotal: { type: number }
+        discountAmount: { type: number }
+        weightedDiscountPct: { type: number }
+        hasAnomalousLines: { type: boolean }
+        peerMedianDiscountPct: { type: number, nullable: true }
+        abovePeerMedian: { type: boolean }
+        sampleLineGross: { type: number, nullable: true }
+        sampleLineDiscountPct: { type: number, nullable: true }
+        sampleLineNet: { type: number, nullable: true }
+        sampleLineComputed: { type: number, nullable: true }
+    MgmtDistributorCostToServe:
+      type: object
+      required: [distributorVisits, memberCostPerVisit, visitCostToServe]
+      description: >
+        Visit-based cost to serve this distributor's retailers.
+        memberCostPerVisit uses the SAME formula as Sales Deep Dive Phase 4:
+          (ctcMonthly × elapsed complete months + taBillYtd) / totalVisits.
+        Both figures are shown so Phase 4 and the distributor breakdown can be compared.
+      properties:
+        distributorVisits:
+          type: number
+          description: Sum of retailer visits attributed to this distributor (from D1 member sheets).
+        memberCostPerVisit:
+          type: number
+          description: Member cost per visit — matches Sales Deep Dive Phase 4 output.
+        visitCostToServe:
+          type: number
+          description: distributorVisits × memberCostPerVisit.
+    MgmtDistributorRoi:
+      type: object
+      required: [netRevenue, revenueRecentFy, visitCostToServe, netToCostMultiple, marginRoiAvailable]
+      description: >
+        Revenue-to-cost return on investment using NET (Sub Total) from D3 secondary data.
+        Margin ROI is never computed from MRP or Purchase Price — always false until
+        the Cost Master (fg_cost) table is populated.
+      properties:
+        netRevenue: { type: number }
+        revenueRecentFy: { type: string }
+        visitCostToServe: { type: number }
+        netToCostMultiple: { type: number, description: "netRevenue / visitCostToServe" }
+        marginRoiAvailable: { type: boolean, enum: [false] }
+    MgmtDistributorTier:
+      type: object
+      required: [tier, score, visitCadence, creditPosture, inputs]
+      description: >
+        A / B / C tier derived from a transparent 100-point composite score.
+        A = >= 70, B = 45-69, C < 45. Inputs are shown so the classification
+        can be argued with or overridden by the field team.
+      properties:
+        tier:
+          type: string
+          enum: [A, B, C]
+        score:
+          type: integer
+          description: Composite score 0–100.
+        visitCadence: { type: string }
+        creditPosture: { type: string }
+        inputs:
+          type: array
+          items: { $ref: "#/components/schemas/MgmtDistributorTierInput" }
+    MgmtDistributorTierInput:
+      type: object
+      required: [label, value, score, note]
+      properties:
+        label: { type: string }
+        value: { type: string }
+        score: { type: integer }
+        note: { type: string }
     MgmtRoiCost:
       type: object
       required: [ctcMonthly, taBillYtd, elapsedCompleteMonths, ctcCostYtd, totalCost, marginRoiAvailable]

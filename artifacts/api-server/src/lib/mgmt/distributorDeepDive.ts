@@ -37,11 +37,16 @@ import { db, customerMaster, saleLines, primaryOrderLines } from "@workspace/db"
 import { eq, and, sql, inArray, or, isNull } from "drizzle-orm";
 import { logger } from "../logger.js";
 import { loadDeepDiveData } from "./deepDiveData.js";
-import { loadMemberSheet, type RetailerRow } from "./memberSheet.js";
+import { loadMemberSheet, type RetailerRow, type RetailerSpread } from "./memberSheet.js";
 import {
   loadDistributorSkuSpread,
   type DistributorSkuSpread,
 } from "./distributorSkuSpread.js";
+import {
+  loadDistributorInvestment,
+  type DistributorInvestment,
+} from "./distributorInvestment.js";
+import { computeRoiCost } from "./roiCost.js";
 import verifyAnchorsJson from "../../../config/verify_anchors.json" assert { type: "json" };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -103,6 +108,7 @@ export type DistributorGroup = {
   retailers: DistributorRetailerRow[];
   flows: DistributorFlows | null;       // D2: null until loadDistributorFlows runs
   skuSpread?: DistributorSkuSpread;     // D3: set by loadDistributorSkuSpread
+  investment?: DistributorInvestment;   // D4: set by loadDistributorInvestment
 };
 
 export type SharedRetailerEntry = {
@@ -558,6 +564,8 @@ export async function loadDistributorDeepDive(
   const allRows: RichRow[] = [];
   let membersLoaded = 0;
   let membersNotMapped = 0;
+  // D4: member spreads for cost-per-visit (keyed by display name — matches memberName on rows)
+  const memberSpreads = new Map<string, RetailerSpread>();
 
   for (let i = 0; i < members.length; i++) {
     const m = members[i];
@@ -573,6 +581,7 @@ export async function loadDistributorDeepDive(
       continue;
     }
     membersLoaded++;
+    memberSpreads.set(m.name, sheet.spread);   // capture spread for D4
     for (const row of sheet.rows) {
       allRows.push({ ...row, memberName: m.name });
     }
@@ -586,6 +595,32 @@ export async function loadDistributorDeepDive(
         ? "No working sheets could be loaded for this state head."
         : null,
     };
+  }
+
+  // D4 pre-computation: member cost per visit, using the same formula as Sales
+  // Deep Dive Phase 4: (ctcMonthly × elapsed months + taBillYtd) / totalVisits.
+  // CTC comes from the deepDiveData kpis; totalVisits from the member's spread.
+  // We use the first member with data (typically only one per state head in this period).
+  const memberNameToNormKey = new Map(members.map((m) => [m.name, m.normKey] as const));
+  let d4MemberCostPerVisit: number | null = null;
+  for (const [memberName, spread] of memberSpreads.entries()) {
+    const normKey = memberNameToNormKey.get(memberName);
+    if (!normKey) continue;
+    try {
+      const mDd = await loadDeepDiveData(fy, selectedStateHead, normKey);
+      const kpis = mDd.kpis;
+      if (kpis?.ctcMonthly != null) {
+        const roi = computeRoiCost(kpis.ctcMonthly, kpis.taBillStCost ?? null, fy, spread);
+        if (roi?.costPerVisit != null) {
+          d4MemberCostPerVisit = roi.costPerVisit;
+          logger.info(
+            { memberName, normKey, costPerVisit: roi.costPerVisit.toFixed(0), fy },
+            "distributorDeepDive D4: memberCostPerVisit computed",
+          );
+          break;
+        }
+      }
+    } catch (_) { /* graceful fallback — costToServe will be null */ }
   }
 
   // Step 3: Query customer_master for Confirmed/Guessed attribution confidence.
@@ -784,6 +819,9 @@ export async function loadDistributorDeepDive(
 
   // Step 11 (D3): Attach SKU/segment spread from secondary_register_line.
   await loadDistributorSkuSpread(fy, distGroups);
+
+  // Step 12 (D4): Attach investment, ROI and tier per distributor.
+  await loadDistributorInvestment(fy, distGroups, d4MemberCostPerVisit);
 
   return {
     fy, stateHeads,

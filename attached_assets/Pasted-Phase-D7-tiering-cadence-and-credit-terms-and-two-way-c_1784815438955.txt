@@ -1,0 +1,49 @@
+Phase D7 - tiering, cadence and credit terms, and two-way concentration
+PROMPT - Phase D7
+Prayag app - Distributor Deep Dive, Phase D7. Same global rules. Send after D4;
+this replaces and extends the tiering section of D4.
+
+Goal: turn the analysis into an action, and expose dependency risk in both
+directions.
+
+1. Distributor tiering A / B / C. Classify from NET, growth against the same
+   period last year, retailer breadth (active retailers and districts covered),
+   and effective discount. Show every input behind a tier so the classification
+   can be argued with, and allow a manual override that is recorded with a reason
+   rather than silently applied.
+
+2. Each tier must carry an ACTION, not just a label:
+     visit cadence      - visits per month for the distributor and for its
+                          retailers, feeding the Sales Deep Dive visit plan
+     credit posture     - recommended terms and exposure limit
+     range focus        - which whitespace segments to push first, from D3
+   A tier with no action attached is a report, not a decision.
+
+3. Concentration risk in BOTH directions - these are different risks:
+     PRAYAG'S EXPOSURE   - Prayag's dependence on one distributor within a state
+                           or district. Show each distributor's share of that
+                           territory's business and flag any single distributor
+                           above a set threshold.
+     DISTRIBUTOR'S OWN   - each distributor's dependence on a few retailers.
+                           Show top-5 and top-10 retailer share of that
+                           distributor's NET.
+   Report both on the same panel, clearly separated.
+
+Acceptance:
+  every distributor carries a tier, the inputs behind it, and all three actions
+    (cadence, credit posture, range focus)
+  a manual tier override is stored with its reason and shown as an override
+  Prayag exposure: Jagdamba Traders shows as 86.1 percent of party order booking
+    in Anant Singh's Delhi territory (Rs 15,80,341 of Rs 18,34,503) and is flagged
+    as single-point dependency
+  distributor-side concentration renders top-5 and top-10 retailer share for each
+    distributor
+  the recommended cadence is consistent with the capacity model in Phase 3-C - if
+    the tiers demand more visits than the salesperson can physically do, surface
+    that shortfall rather than silently producing an impossible plan
+What to watch
+- Coverage gap and assignment gap must stay separate. Merged into one 'uncovered' figure they suggest appointing distributors when 29 of 30 cases just need a field filled in.
+- AT RISK must never be rendered as 'lost' or 'churned'. Three months of data cannot support that claim, and a state head acting on it would write off live accounts.
+- The two definitions of 'new' must not be merged. Prasun scores 1 newly onboarded retailer and Rs 0 new-party booking, yet 2 reactivated accounts worth Rs 4,76,320 - averaging them into a single 'new business' number hides both facts.
+- Tier cadence must be reconciled against the visit capacity model. Tiers that demand 1,300 visits from someone who can do 1,000 are how a plan becomes fiction.
+- Direct dealers appear in the top-5 list. Ensure they are not also counted under a distributor's concentration - the same double count that corrupted the '2026-2027' TOTAL row.

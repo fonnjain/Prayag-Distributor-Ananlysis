@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { MgmtDistributorFlows } from './mgmtDistributorFlows';
+import type { MgmtDistributorInvestment } from './mgmtDistributorInvestment';
 import type { MgmtDistributorRetailerRow } from './mgmtDistributorRetailerRow';
 import type { MgmtDistributorSkuSpread } from './mgmtDistributorSkuSpread';
 
@@ -25,4 +26,6 @@ export interface MgmtDistributorGroup {
   retailers: MgmtDistributorRetailerRow[];
   flows?: MgmtDistributorFlows | null;
   skuSpread?: MgmtDistributorSkuSpread | null;
+  /** Phase D4: investment (effective discount, cost to serve, credit, scheme), revenue-to-cost ROI, and A/B/C tier with recommended action. Always present when distributor data loads. Null only if computation fails entirely. */
+  investment?: MgmtDistributorInvestment | null;
 }

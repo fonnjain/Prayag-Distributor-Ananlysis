@@ -1,0 +1,58 @@
+Phase D6 - customer concentration and new versus repeat business
+PROMPT - Phase D6
+Prayag app - Distributor Deep Dive, Phase D6. Same global rules. Depends on D1
+only. Do not change any other phase.
+
+Goal: answer two questions - where is the business actually coming from, and is
+the salesperson generating new business or recycling the same customers.
+
+1. Top customers. For the selected salesperson, distributor or state head, show
+   the top 5 and top 10 customers by order booking with the amount, the percentage
+   of the total, the running cumulative percentage, the visits each received, and
+   the channel each sits in (distributor name, or direct dealer). Flag it when a
+   large share of the top-line runs outside the distributor channel.
+
+2. Classify every customer on last year versus this year. Four states, and keep
+   them distinct:
+     RETAINED    - bought last year AND this year
+     REACTIVATED - nothing last year, bought this year (a revived dormant account)
+     AT RISK     - bought last year, nothing yet this year
+     NEVER       - no business in either year
+   Show for each: retailer count, order booking this year, order booking last
+   year, visits received, and business per visit.
+
+3. Do NOT call the AT RISK group 'lost'. The live year is partial - it runs only
+   to the data cutoff established in Phase 3-C. An account that has not ordered in
+   three months may still order. Label the group with the cutoff date and the
+   months elapsed, and say what it is: not yet converted this year.
+
+4. Keep two different definitions of 'new' apart, because they measure different
+   things and the dashboard already carries the first:
+     NEW RETAILER  - newly onboarded onto the roster (dashboard 'New Retailers',
+                     and 'New Party Order Booking' for its value)
+     REACTIVATED   - an existing retailer that was dormant last year and has
+                     bought this year
+   Report both. A salesperson can score zero on one and well on the other.
+
+5. Effort versus return. Show the share of visits and the share of business for
+   each of the four states side by side, plus business per visit for each. The
+   comparison is the finding: it shows whether visit effort is going where the
+   money is.
+
+Acceptance - Prasun Chatterjee, FY2026-27, from his own sheet:
+  top 5 customers: Lamba traders Rs 5,49,072 (20.9 pc); Taneja traders Rs 3,77,248
+    (14.4 pc); Chattar bhoj & sons Rs 3,10,286 (11.8 pc); S.k.hardware store
+    Rs 2,74,474 (10.5 pc); City hardware Rs 1,66,224 (6.3 pc). Top 5 = 64.0 pc,
+    top 10 = 78.4 pc. Taneja and Chattar bhoj must be flagged as direct dealers.
+  customer states:
+    RETAINED     32 retailers, Rs 21,44,790 (81.8 pc), 215 visits (54.4 pc)
+    REACTIVATED   2 retailers, Rs  4,76,320 (18.2 pc),  15 visits ( 3.8 pc)
+    AT RISK      20 retailers, Rs 0 this year, Rs 18,78,701 last year,
+                                                126 visits (31.9 pc)
+    NEVER        19 retailers, Rs 0, 39 visits (9.9 pc)
+  business per visit: REACTIVATED Rs 31,755 against an overall Rs 6,636 - roughly
+    five times more productive - while AT RISK returns Rs 0 on 31.9 pc of visits
+  new retailers onboarded = 1 and new party order booking = Rs 0 (from the
+    dashboard), reported alongside and NOT merged with the 2 reactivated accounts
+  the AT RISK group is labelled with the 30 June 2026 cutoff and is never called
+    'lost'

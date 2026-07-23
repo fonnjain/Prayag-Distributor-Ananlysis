@@ -1327,6 +1327,112 @@ export interface MgmtDistributorSkuSpread {
   whitespace?: MgmtWhitespaceHint[] | null;
 }
 
+/**
+ * Weighted average effective discount per distributor from secondary_register_line. weightedDiscountPct = (1 − netTotal / grossTotal) × 100. Lines with discount_pct > 100 are excluded from the weighted average and flagged. Reconciliation sample: gross × (1 − pct/100) should equal net (rounding).
+ */
+export interface MgmtDistributorEffectiveDiscount {
+  recentFy: string;
+  grossTotal: number;
+  netTotal: number;
+  discountAmount: number;
+  weightedDiscountPct: number;
+  hasAnomalousLines: boolean;
+  peerMedianDiscountPct?: number | null;
+  abovePeerMedian: boolean;
+  sampleLineGross?: number | null;
+  sampleLineDiscountPct?: number | null;
+  sampleLineNet?: number | null;
+  sampleLineComputed?: number | null;
+}
+
+/**
+ * Visit-based cost to serve this distributor's retailers. memberCostPerVisit uses the SAME formula as Sales Deep Dive Phase 4:
+ *   (ctcMonthly × elapsed complete months + taBillYtd) / totalVisits.
+ * Both figures are shown so Phase 4 and the distributor breakdown can be compared.
+ */
+export interface MgmtDistributorCostToServe {
+  /** Sum of retailer visits attributed to this distributor (from D1 member sheets). */
+  distributorVisits: number;
+  /** Member cost per visit — matches Sales Deep Dive Phase 4 output. */
+  memberCostPerVisit: number;
+  /** distributorVisits × memberCostPerVisit. */
+  visitCostToServe: number;
+}
+
+export type MgmtDistributorInvestmentCreditOutstandingStatus = typeof MgmtDistributorInvestmentCreditOutstandingStatus[keyof typeof MgmtDistributorInvestmentCreditOutstandingStatus];
+
+
+export const MgmtDistributorInvestmentCreditOutstandingStatus = {
+  no_source: 'no_source',
+} as const;
+
+export type MgmtDistributorInvestmentSchemePayoutsStatus = typeof MgmtDistributorInvestmentSchemePayoutsStatus[keyof typeof MgmtDistributorInvestmentSchemePayoutsStatus];
+
+
+export const MgmtDistributorInvestmentSchemePayoutsStatus = {
+  no_source: 'no_source',
+} as const;
+
+/**
+ * Revenue-to-cost return on investment using NET (Sub Total) from D3 secondary data. Margin ROI is never computed from MRP or Purchase Price — always false until the Cost Master (fg_cost) table is populated.
+ */
+export interface MgmtDistributorRoi {
+  netRevenue: number;
+  revenueRecentFy: string;
+  visitCostToServe: number;
+  /** netRevenue / visitCostToServe */
+  netToCostMultiple: number;
+  marginRoiAvailable: false;
+}
+
+export type MgmtDistributorTierTier = typeof MgmtDistributorTierTier[keyof typeof MgmtDistributorTierTier];
+
+
+export const MgmtDistributorTierTier = {
+  A: 'A',
+  B: 'B',
+  C: 'C',
+} as const;
+
+export interface MgmtDistributorTierInput {
+  label: string;
+  value: string;
+  score: number;
+  note: string;
+}
+
+/**
+ * A / B / C tier derived from a transparent 100-point composite score. A = >= 70, B = 45-69, C < 45. Inputs are shown so the classification can be argued with or overridden by the field team.
+ */
+export interface MgmtDistributorTier {
+  tier: MgmtDistributorTierTier;
+  /** Composite score 0–100. */
+  score: number;
+  visitCadence: string;
+  creditPosture: string;
+  inputs: MgmtDistributorTierInput[];
+}
+
+export type MgmtDistributorInvestmentCreditOutstanding = {
+  status: MgmtDistributorInvestmentCreditOutstandingStatus;
+};
+
+export type MgmtDistributorInvestmentSchemePayouts = {
+  status: MgmtDistributorInvestmentSchemePayoutsStatus;
+};
+
+/**
+ * Phase D4: investment analysis and A/B/C tiering per distributor. effectiveDiscount is null for the live FY (no secondary register ingested). costToServe is null when visit data or member CTC is unavailable. credit and scheme always show status='no_source' — never estimated or zero.
+ */
+export interface MgmtDistributorInvestment {
+  effectiveDiscount?: MgmtDistributorEffectiveDiscount | null;
+  costToServe?: MgmtDistributorCostToServe | null;
+  creditOutstanding: MgmtDistributorInvestmentCreditOutstanding;
+  schemePayouts: MgmtDistributorInvestmentSchemePayouts;
+  roi?: MgmtDistributorRoi | null;
+  tier: MgmtDistributorTier;
+}
+
 export interface MgmtDistributorGroup {
   name: string;
   normKey: string;
@@ -1343,6 +1449,8 @@ export interface MgmtDistributorGroup {
   retailers: MgmtDistributorRetailerRow[];
   flows?: MgmtDistributorFlows | null;
   skuSpread?: MgmtDistributorSkuSpread | null;
+  /** Phase D4: investment (effective discount, cost to serve, credit, scheme), revenue-to-cost ROI, and A/B/C tier with recommended action. Always present when distributor data loads. Null only if computation fails entirely. */
+  investment?: MgmtDistributorInvestment | null;
 }
 
 export interface MgmtSharedRetailerEntry {

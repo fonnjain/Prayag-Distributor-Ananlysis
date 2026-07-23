@@ -562,7 +562,53 @@ export const GetMgmtDistributorDeepDiveResponse = zod.object({
   "peerNames": zod.array(zod.string()).nullish().describe('Names of peer distributors (peer_whitespace type only).'),
   "peerNet": zod.number().nullish().describe('Combined NET at peer distributors in recentFy.')
 }).describe('One whitespace suggestion for a distributor. Ranked easiest→hardest: range_depth (already in the broad segment), lost_brand (bought before), peer_whitespace (comparable distributor sells it).\n')).nullish().describe('Ranked whitespace suggestions — range_depth first, lost_brand second, peer_whitespace third.')
-}).nullish().describe('Phase D3: product-line (brand_canon) spread per distributor, sourced from secondary_register_line (closed FYs only). Attribution is via the D1 retailer list — secondary_register_line has no distributor column. \"Segment\" here = brand_canon (product-line name such as \"CPVC DURALIFE\"), which is the finest granularity available in the secondary register. isLiveYear=true when no FY2026-27 secondary register has been ingested. matchedRetailers=0 means the D1 retailer names did not match any secondary_register_line.customer rows — data quality, not an error.\n')
+}).nullish().describe('Phase D3: product-line (brand_canon) spread per distributor, sourced from secondary_register_line (closed FYs only). Attribution is via the D1 retailer list — secondary_register_line has no distributor column. \"Segment\" here = brand_canon (product-line name such as \"CPVC DURALIFE\"), which is the finest granularity available in the secondary register. isLiveYear=true when no FY2026-27 secondary register has been ingested. matchedRetailers=0 means the D1 retailer names did not match any secondary_register_line.customer rows — data quality, not an error.\n'),
+  "investment": zod.object({
+  "effectiveDiscount": zod.object({
+  "recentFy": zod.string(),
+  "grossTotal": zod.number(),
+  "netTotal": zod.number(),
+  "discountAmount": zod.number(),
+  "weightedDiscountPct": zod.number(),
+  "hasAnomalousLines": zod.boolean(),
+  "peerMedianDiscountPct": zod.number().nullish(),
+  "abovePeerMedian": zod.boolean(),
+  "sampleLineGross": zod.number().nullish(),
+  "sampleLineDiscountPct": zod.number().nullish(),
+  "sampleLineNet": zod.number().nullish(),
+  "sampleLineComputed": zod.number().nullish()
+}).nullish().describe('Weighted average effective discount per distributor from secondary_register_line. weightedDiscountPct = (1 − netTotal \/ grossTotal) × 100. Lines with discount_pct > 100 are excluded from the weighted average and flagged. Reconciliation sample: gross × (1 − pct\/100) should equal net (rounding).\n'),
+  "costToServe": zod.object({
+  "distributorVisits": zod.number().describe('Sum of retailer visits attributed to this distributor (from D1 member sheets).'),
+  "memberCostPerVisit": zod.number().describe('Member cost per visit — matches Sales Deep Dive Phase 4 output.'),
+  "visitCostToServe": zod.number().describe('distributorVisits × memberCostPerVisit.')
+}).nullish().describe('Visit-based cost to serve this distributor\'s retailers. memberCostPerVisit uses the SAME formula as Sales Deep Dive Phase 4:\n  (ctcMonthly × elapsed complete months + taBillYtd) \/ totalVisits.\nBoth figures are shown so Phase 4 and the distributor breakdown can be compared.\n'),
+  "creditOutstanding": zod.object({
+  "status": zod.enum(['no_source'])
+}),
+  "schemePayouts": zod.object({
+  "status": zod.enum(['no_source'])
+}),
+  "roi": zod.object({
+  "netRevenue": zod.number(),
+  "revenueRecentFy": zod.string(),
+  "visitCostToServe": zod.number(),
+  "netToCostMultiple": zod.number().describe('netRevenue \/ visitCostToServe'),
+  "marginRoiAvailable": zod.literal(false)
+}).nullish().describe('Revenue-to-cost return on investment using NET (Sub Total) from D3 secondary data. Margin ROI is never computed from MRP or Purchase Price — always false until the Cost Master (fg_cost) table is populated.\n'),
+  "tier": zod.object({
+  "tier": zod.enum(['A', 'B', 'C']),
+  "score": zod.number().describe('Composite score 0–100.'),
+  "visitCadence": zod.string(),
+  "creditPosture": zod.string(),
+  "inputs": zod.array(zod.object({
+  "label": zod.string(),
+  "value": zod.string(),
+  "score": zod.number(),
+  "note": zod.string()
+}))
+}).describe('A \/ B \/ C tier derived from a transparent 100-point composite score. A = >= 70, B = 45-69, C < 45. Inputs are shown so the classification can be argued with or overridden by the field team.\n')
+}).nullish().describe('Phase D4: investment (effective discount, cost to serve, credit, scheme), revenue-to-cost ROI, and A\/B\/C tier with recommended action. Always present when distributor data loads. Null only if computation fails entirely.\n')
 })),
   "sharedRetailers": zod.array(zod.object({
   "name": zod.string(),

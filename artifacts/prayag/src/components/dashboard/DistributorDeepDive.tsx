@@ -100,6 +100,60 @@ type DistributorSkuSpread = {
   whitespace?: WhitespaceHint[];
 };
 
+/** D4: investment, ROI and tier per distributor. */
+type EffectiveDiscount = {
+  recentFy: string;
+  grossTotal: number;
+  netTotal: number;
+  discountAmount: number;
+  weightedDiscountPct: number;
+  hasAnomalousLines: boolean;
+  peerMedianDiscountPct: number | null;
+  abovePeerMedian: boolean;
+  sampleLineGross: number | null;
+  sampleLineDiscountPct: number | null;
+  sampleLineNet: number | null;
+  sampleLineComputed: number | null;
+};
+
+type CostToServe = {
+  distributorVisits: number;
+  memberCostPerVisit: number;
+  visitCostToServe: number;
+};
+
+type DistributorRoiD4 = {
+  netRevenue: number;
+  revenueRecentFy: string;
+  visitCostToServe: number;
+  netToCostMultiple: number;
+  marginRoiAvailable: false;
+};
+
+type TierInput = {
+  label: string;
+  value: string;
+  score: number;
+  note: string;
+};
+
+type DistributorTier = {
+  tier: "A" | "B" | "C";
+  score: number;
+  visitCadence: string;
+  creditPosture: string;
+  inputs: TierInput[];
+};
+
+type DistributorInvestment = {
+  effectiveDiscount: EffectiveDiscount | null;
+  costToServe: CostToServe | null;
+  creditOutstanding: { status: "no_source" };
+  schemePayouts: { status: "no_source" };
+  roi: DistributorRoiD4 | null;
+  tier: DistributorTier;
+};
+
 type DistributorGroup = {
   name: string;
   normKey: string;
@@ -116,6 +170,7 @@ type DistributorGroup = {
   retailers: DistributorRetailerRow[];
   flows: DistributorFlows | null;
   skuSpread?: DistributorSkuSpread;
+  investment?: DistributorInvestment;
 };
 
 type SharedRetailerEntry = {
@@ -689,6 +744,169 @@ function SkuSpreadPanel({
   );
 }
 
+// ── D4: Investment, ROI and tier panel ───────────────────────────────────────
+
+const TIER_COLOR: Record<"A" | "B" | "C", string> = {
+  A: "bg-emerald-100 text-emerald-800 border border-emerald-200",
+  B: "bg-amber-100  text-amber-800  border border-amber-200",
+  C: "bg-red-100    text-red-800    border border-red-200",
+};
+
+function AddSourceBox({ label }: { label: string }) {
+  return (
+    <div className="rounded border border-dashed border-border p-3 text-center">
+      <p className="text-xs text-muted-foreground font-medium">{label}</p>
+      <p className="text-[11px] text-muted-foreground mt-0.5">No source connected</p>
+    </div>
+  );
+}
+
+function InvestmentPanel({ investment }: { investment?: DistributorInvestment }) {
+  if (!investment) return null;
+
+  const { tier, effectiveDiscount: disc, costToServe: cts, roi } = investment;
+
+  const fmtL = (v: number) => "Rs " + (v / 100_000).toFixed(2) + "L";
+  const fmtPct = (v: number) => v.toFixed(1) + " %";
+
+  return (
+    <div className="mt-3 border-t border-border pt-3">
+      {/* Tier header */}
+      <div className="flex items-center gap-2 mb-3">
+        <span className={`text-xs font-bold px-2 py-0.5 rounded ${TIER_COLOR[tier.tier]}`}>
+          Tier {tier.tier}
+        </span>
+        <span className="text-xs text-muted-foreground">
+          Score {tier.score} / 100
+        </span>
+      </div>
+
+      {/* 3 metric tiles */}
+      <div className="grid grid-cols-3 gap-2 mb-3">
+        {/* Effective discount */}
+        <div className="rounded bg-muted/40 p-2">
+          <p className="text-[10px] text-muted-foreground mb-0.5 uppercase tracking-wide">
+            Effective discount
+          </p>
+          {disc ? (
+            <>
+              <p className="text-sm font-semibold tabular-nums">
+                {fmtPct(disc.weightedDiscountPct)}
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                Net {fmtL(disc.netTotal)} / {disc.recentFy}
+              </p>
+              {disc.abovePeerMedian && disc.peerMedianDiscountPct != null && (
+                <p className="text-[10px] text-amber-700 mt-0.5">
+                  Above peer median ({fmtPct(disc.peerMedianDiscountPct)})
+                </p>
+              )}
+              {disc.hasAnomalousLines && (
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  Some anomalous lines excluded
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground mt-1">Live FY — not yet available</p>
+          )}
+        </div>
+
+        {/* Cost to serve */}
+        <div className="rounded bg-muted/40 p-2">
+          <p className="text-[10px] text-muted-foreground mb-0.5 uppercase tracking-wide">
+            Cost to serve
+          </p>
+          {cts ? (
+            <>
+              <p className="text-sm font-semibold tabular-nums">
+                {fmtL(cts.visitCostToServe)}
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                {cts.distributorVisits} visits × Rs{" "}
+                {Math.round(cts.memberCostPerVisit).toLocaleString("en-IN")} / visit
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground mt-1">Visit or CTC data unavailable</p>
+          )}
+        </div>
+
+        {/* Revenue / Cost ROI */}
+        <div className="rounded bg-muted/40 p-2">
+          <p className="text-[10px] text-muted-foreground mb-0.5 uppercase tracking-wide">
+            NET / Cost (ROI)
+          </p>
+          {roi ? (
+            <>
+              <p className="text-sm font-semibold tabular-nums">
+                {roi.netToCostMultiple.toFixed(1)}x
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                {fmtL(roi.netRevenue)} net / {fmtL(roi.visitCostToServe)} cost
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground mt-1">Needs cost and NET data</p>
+          )}
+        </div>
+      </div>
+
+      {/* Credit / Scheme — add-a-source */}
+      <div className="grid grid-cols-2 gap-2 mb-3">
+        <AddSourceBox label="Credit outstanding" />
+        <AddSourceBox label="Scheme payouts" />
+      </div>
+
+      {/* Tier cadence + posture */}
+      <div className="text-[11px] text-muted-foreground space-y-0.5 mb-3">
+        <p><span className="font-medium">Visit cadence:</span> {tier.visitCadence}</p>
+        <p><span className="font-medium">Credit posture:</span> {tier.creditPosture}</p>
+      </div>
+
+      {/* Scoring breakdown (collapsible would be ideal, but keep it simple for now) */}
+      <details className="text-[11px]">
+        <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
+          Score breakdown
+        </summary>
+        <table className="w-full mt-1 border-collapse">
+          <thead>
+            <tr className="text-left text-muted-foreground border-b border-border">
+              <th className="py-1 pr-3 font-medium">Input</th>
+              <th className="py-1 pr-3 font-medium text-right">Value</th>
+              <th className="py-1 pr-3 font-medium text-right">Score</th>
+              <th className="py-1 font-medium">Note</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tier.inputs.map((inp) => (
+              <tr key={inp.label} className="border-b border-border/40">
+                <td className="py-1 pr-3 text-muted-foreground">{inp.label}</td>
+                <td className="py-1 pr-3 text-right tabular-nums">{inp.value}</td>
+                <td className="py-1 pr-3 text-right tabular-nums font-medium">{inp.score}</td>
+                <td className="py-1 text-muted-foreground">{inp.note}</td>
+              </tr>
+            ))}
+            <tr>
+              <td colSpan={2} className="py-1 pr-3 font-semibold text-right">Total</td>
+              <td className="py-1 pr-3 text-right tabular-nums font-bold">{tier.score}</td>
+              <td className="py-1 text-muted-foreground">→ Tier {tier.tier}</td>
+            </tr>
+          </tbody>
+        </table>
+        {disc?.sampleLineGross != null && (
+          <p className="mt-1.5 text-muted-foreground">
+            Discount check: Rs {disc.sampleLineGross.toFixed(0)} gross × (1 −{" "}
+            {disc.sampleLineDiscountPct?.toFixed(1)} %) = Rs{" "}
+            {disc.sampleLineComputed?.toFixed(0)}{" "}
+            (registered: Rs {disc.sampleLineNet?.toFixed(0)})
+          </p>
+        )}
+      </details>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function DistributorDeepDive() {
@@ -938,6 +1156,7 @@ export default function DistributorDeepDive() {
                             <td colSpan={9} className="bg-muted/10 px-4 py-4">
                               <FlowPanel flows={dist.flows} distName={dist.name} />
                               <SkuSpreadPanel spread={dist.skuSpread} distName={dist.name} />
+                              <InvestmentPanel investment={dist.investment} />
                               <div className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
                                 <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                                 Confirmed

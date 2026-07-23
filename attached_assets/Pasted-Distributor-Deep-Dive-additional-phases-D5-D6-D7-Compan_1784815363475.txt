@@ -1,0 +1,59 @@
+Distributor Deep Dive - additional phases D5, D6, D7
+Companion to the D1-D4 document. Send after D1; D5 and D6 do not depend on D2-D4.
+What these add
+D1-D4 cover the page, the two flows, SKU spread and ROI. These three phases add the four items raised after that document was written: territory whitespace, distributor tiering with cadence and credit terms, concentration risk in both directions, direct-dealer channel overlap, and the question of whether a salesperson is generating new business or recycling the same customers.
+Ordering note: D5 (territory whitespace) and D6 (customer concentration and new business) depend only on D1. If you want value fastest, send D1, then D5, then D6, and take D2-D4 afterwards. D7 replaces the tiering section of D4 and should be sent after D4.
+What the data already shows for Prasun - use these as the acceptance anchors
+Whitespace splits in two. 29 of his 30 unassigned retailers sit in districts that ALREADY have a distributor operating - an assignment gap, fixable administratively. Only Central Delhi is a true coverage gap: 4 retailers, no distributor at all, Rs 7,83,284 of proven prior-year demand, served only by direct dealers.
+Channel overlap is real. 8 direct dealers operate inside districts that have a distributor (5 in West Delhi alone). The 3 in Central Delhi are not conflict - they are the only channel there. The page must tell those two cases apart.
+New business is thin but highly productive. 82 percent of his booking comes from customers he already had. 3.8 percent of his visits produced 18.2 percent of his business (Rs 31,755 per visit against a Rs 6,636 average), while 31.9 percent of visits went to accounts that have ordered nothing this year.
+Phase D5 - territory whitespace and channel overlap
+PROMPT - Phase D5
+Prayag app - Distributor Deep Dive, Phase D5. Same global rules. Depends on D1
+only. Do not change any other phase.
+
+Goal: show where Prayag has retailers but no supply route, and where channels
+overlap. This is the highest-value output on the page.
+
+1. Separate the two kinds of gap. They have different fixes and must not be
+   merged into one 'uncovered' number:
+     COVERAGE GAP   - the district has retailers but NO distributor at all.
+                      Fix: appoint a distributor. Strategic, slow.
+     ASSIGNMENT GAP - the district HAS a distributor operating, but retailers in
+                      it carry no Assigned Distributor. Fix: assign them to the
+                      existing distributor. Administrative, immediate.
+   Report each district as: retailers, distributor-served, direct dealers,
+   unassigned, prior-year order booking, current order booking, visits spent, and
+   the distributors operating there.
+
+2. Size the prize, do not just count rows. For every gap show the PRIOR-YEAR order
+   booking of the affected retailers - that is proven demand with no route to
+   market - and the visits already being spent on them. Rank gaps by prior-year
+   value, not by retailer count.
+
+3. Direct-dealer overlap. Flag direct dealers operating inside a district that has
+   a distributor: that is structural channel conflict. Direct dealers in a district
+   with NO distributor are NOT conflict - they are the only channel, and must be
+   labelled differently. Never merge the two cases.
+
+4. Tie it back to dormancy. For each unassigned retailer show visits received and
+   business booked. A retailer with visits and no distributor cannot order; that is
+   a supply-mapping failure, not a sales-effort failure, and the page should say so.
+
+Acceptance - Anant Singh / Prasun Chatterjee territory, FY2026-27:
+  district table renders with these exact figures:
+    West Delhi        40 retailers, 18 covered,  5 direct dealers, 17 unassigned
+    South Delhi       11 retailers,  3 covered,  1 direct dealer,   7 unassigned
+    South West Delhi  14 retailers,  9 covered,  1 direct dealer,   4 unassigned
+    North West Delhi   3 retailers,  1 covered,  1 direct dealer,   1 unassigned
+    Central Delhi      4 retailers,  0 covered,  3 direct dealers,  1 unassigned
+    Faridabad          1 retailer,   0 covered,  1 direct dealer,   0 unassigned
+  ASSIGNMENT GAP = 29 of the 30 unassigned retailers, i.e. they sit in districts
+    that already have a distributor. State this explicitly as administratively
+    fixable.
+  COVERAGE GAP = Central Delhi only: no distributor, Rs 7,83,284 prior-year order
+    booking, 29 visits spent.
+  CHANNEL OVERLAP = 8 direct dealers inside districts that have a distributor
+    (5 West Delhi, 1 South Delhi, 1 South West, 1 North West), shown separately
+    from the 3 Central Delhi direct dealers, which are not conflict.
+Prove each with the computed value, not an assertion of success.
