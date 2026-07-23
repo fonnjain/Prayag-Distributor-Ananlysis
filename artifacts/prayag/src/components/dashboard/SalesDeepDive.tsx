@@ -1541,9 +1541,10 @@ function computePeriodData(
 interface PeriodSelectorPanelProps {
   kpis: MemberKpis;
   months: MonthActual[];
+  dateFilterLabel?: string | null;
 }
 
-function PeriodSelectorPanel({ kpis, months }: PeriodSelectorPanelProps) {
+function PeriodSelectorPanel({ kpis, months, dateFilterLabel }: PeriodSelectorPanelProps) {
   const [period, setPeriod]               = useState<PeriodId>("ytd");
   const [selectedMonth, setSelectedMonth] = useState("Apr");
 
@@ -1573,7 +1574,14 @@ function PeriodSelectorPanel({ kpis, months }: PeriodSelectorPanelProps) {
   return (
     <div className="rounded-lg border border-border bg-card p-4 space-y-3">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h3 className="text-sm font-semibold">Period Analysis</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold">Period Analysis</h3>
+          {dateFilterLabel && (
+            <span className="text-xs px-2 py-0.5 rounded-full border border-primary/40 bg-primary/10 text-primary">
+              {dateFilterLabel}
+            </span>
+          )}
+        </div>
         {!hasMonthlyData && period !== "ytd" && (
           <span className="text-xs text-amber-600 dark:text-amber-400">
             Monthly tab not found — targets only shown
@@ -1910,6 +1918,7 @@ export default function SalesDeepDive() {
   const [fy, setFy] = useState("2026-27");
   const [selectedHead, setSelectedHead] = useState("");
   const [selectedMemberKey, setSelectedMemberKey] = useState("");
+  const [dateFilter, setDateFilter] = useState<DateFilter>(DATE_FILTER_INIT);
 
   const [data, setData] = useState<DeepDiveData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -1966,6 +1975,7 @@ export default function SalesDeepDive() {
     setFy(newFy);
     setSelectedHead("");
     setSelectedMemberKey("");
+    setDateFilter(DATE_FILTER_INIT);
     fetchSelectors(newFy, "");
   }
 
@@ -1988,6 +1998,14 @@ export default function SalesDeepDive() {
   const fromDbSnapshot = data?.fromDbSnapshot ?? false;
   const stateHeads     = data?.stateHeads ?? [];
   const members        = data?.members ?? [];
+
+  const activeDateRange    = computeActiveDateRange(dateFilter, fy);
+  const covered            = activeDateRange ? coveredFyMonths(activeDateRange, fy) : null;
+  const allMonths          = rd?.months ?? [];
+  const dateFilteredMonths = covered
+    ? allMonths.filter((m) => covered.has(m.month as FyMonth))
+    : allMonths;
+  const dateFilterLabel    = activeDateRange?.label ?? null;
 
   return (
     <div className="space-y-6">
@@ -2048,6 +2066,11 @@ export default function SalesDeepDive() {
             Loading...
           </span>
         )}
+      </div>
+
+      {/* Date range filter */}
+      <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border/50">
+        <DateFilterBar fyLabel={fy} value={dateFilter} onChange={setDateFilter} />
       </div>
 
       {/* Error banner */}
@@ -2280,7 +2303,8 @@ export default function SalesDeepDive() {
             <div className="pt-2 border-t border-border">
               <PeriodSelectorPanel
                 kpis={kpis}
-                months={rd?.months ?? []}
+                months={dateFilteredMonths}
+                dateFilterLabel={dateFilterLabel}
               />
             </div>
           )}
