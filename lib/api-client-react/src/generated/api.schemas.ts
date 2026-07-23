@@ -1402,7 +1402,7 @@ export interface MgmtDistributorTierInput {
 }
 
 /**
- * A / B / C tier derived from a transparent 100-point composite score. A = >= 70, B = 45-69, C < 45. Inputs are shown so the classification can be argued with or overridden by the field team.
+ * A / B / C tier derived from a transparent 100-point composite score. A = >= 70, B = 45-69, C < 45. Inputs are shown so the classification can be argued with or overridden by the field team. D7 adds numeric cadences, range-focus actions, and a manual override flag.
  */
 export interface MgmtDistributorTier {
   tier: MgmtDistributorTierTier;
@@ -1411,6 +1411,16 @@ export interface MgmtDistributorTier {
   visitCadence: string;
   creditPosture: string;
   inputs: MgmtDistributorTierInput[];
+  /** Recommended visits per month to the distributor office (A=4, B=2, C=1). */
+  cadenceDistributorPerMonth: number;
+  /** Total retailer visits per month demanded by this tier (activeCount × rate). */
+  cadenceRetailerPerMonth: number;
+  /** Ordered list of whitespace/range actions for this tier. */
+  rangeFocus: string[];
+  /** True when the tier has been manually overridden via the PUT endpoint. */
+  isOverridden: boolean;
+  /** Human-readable justification for the override, set when isOverridden = true. */
+  overrideReason?: string | null;
 }
 
 export type MgmtDistributorInvestmentCreditOutstanding = {
@@ -1433,6 +1443,28 @@ export interface MgmtDistributorInvestment {
   tier: MgmtDistributorTier;
 }
 
+/**
+ * D7: within a single distributor's own retailer list (direct dealers excluded), the top-5 and top-10 OB concentration and the highest single account.
+ */
+export interface MgmtRetailerConcentration {
+  /** Distributor's total order booking. */
+  totalOb: number;
+  /** OB sum of top-5 retailers by OB. */
+  top5Ob: number;
+  /** top5Ob / totalOb × 100. */
+  top5SharePct?: number | null;
+  /** OB sum of top-10 retailers by OB. */
+  top10Ob: number;
+  /** top10Ob / totalOb × 100. */
+  top10SharePct?: number | null;
+  /** Name of the highest-OB retailer. */
+  topRetailerName?: string | null;
+  /** OB of the highest-OB retailer. */
+  topRetailerOb?: number | null;
+  /** topRetailerOb / totalOb × 100. */
+  topRetailerSharePct?: number | null;
+}
+
 export interface MgmtDistributorGroup {
   name: string;
   normKey: string;
@@ -1451,6 +1483,8 @@ export interface MgmtDistributorGroup {
   skuSpread?: MgmtDistributorSkuSpread | null;
   /** Phase D4: investment (effective discount, cost to serve, credit, scheme), revenue-to-cost ROI, and A/B/C tier with recommended action. Always present when distributor data loads. Null only if computation fails entirely. */
   investment?: MgmtDistributorInvestment | null;
+  /** D7: within this distributor's own retailer list (direct dealers excluded), the top-5 and top-10 OB share and the single top account. */
+  retailerConcentration?: MgmtRetailerConcentration | null;
 }
 
 export interface MgmtSharedRetailerEntry {
@@ -1627,6 +1661,36 @@ export interface MgmtCustomerConcentration {
   newPartyOrderBooking?: number | null;
 }
 
+export type MgmtCapacityCheckBreakdownItemTier = typeof MgmtCapacityCheckBreakdownItemTier[keyof typeof MgmtCapacityCheckBreakdownItemTier];
+
+
+export const MgmtCapacityCheckBreakdownItemTier = {
+  A: 'A',
+  B: 'B',
+  C: 'C',
+} as const;
+
+export type MgmtCapacityCheckBreakdownItem = {
+  normKey: string;
+  name: string;
+  tier: MgmtCapacityCheckBreakdownItemTier;
+  demandedRetailerVisitsPerMonth: number;
+};
+
+/**
+ * D7: territory visit-capacity reconciliation. Compares the total retailer visits per month demanded by all distributor tier cadences against the member's actual YTD visit rate. Surfaces a shortfall when demand exceeds available capacity.
+ */
+export interface MgmtCapacityCheck {
+  /** YTD visit total / elapsed months. Null when no visit data is available. */
+  availablePerMonth?: number | null;
+  /** Sum of cadenceRetailerPerMonth across all distributors with a computed tier. */
+  demandedPerMonth: number;
+  /** demandedPerMonth - availablePerMonth when positive, else null. */
+  shortfallPerMonth?: number | null;
+  hasShortfall: boolean;
+  breakdown: MgmtCapacityCheckBreakdownItem[];
+}
+
 export interface MgmtDistributorDeepDive {
   fy: string;
   stateHeads: string[];
@@ -1640,6 +1704,8 @@ export interface MgmtDistributorDeepDive {
   membersNotMapped: number;
   whitespace?: MgmtTerritoryWhitespace | null;
   concentration?: MgmtCustomerConcentration | null;
+  /** D7: territory visit-capacity reconciliation. Shows demanded retailer visits per month (sum of tier cadences) vs available (YTD visits / elapsed months). hasShortfall = true when demand exceeds capacity. */
+  capacityCheck?: MgmtCapacityCheck | null;
   error?: string | null;
 }
 
@@ -2099,6 +2165,45 @@ export interface CustomerMismatchResolveRequest {
   reason?: string;
 }
 
+export type MgmtDistributorTierOverrideTier = typeof MgmtDistributorTierOverrideTier[keyof typeof MgmtDistributorTierOverrideTier];
+
+
+export const MgmtDistributorTierOverrideTier = {
+  A: 'A',
+  B: 'B',
+  C: 'C',
+} as const;
+
+/**
+ * A persisted manual tier override for one distributor in a territory + FY.
+ */
+export interface MgmtDistributorTierOverride {
+  id: number;
+  stateHead: string;
+  fy: string;
+  normKey: string;
+  tier: MgmtDistributorTierOverrideTier;
+  reason: string;
+  overriddenAt: string;
+}
+
+export type MgmtDistributorTierOverrideInputTier = typeof MgmtDistributorTierOverrideInputTier[keyof typeof MgmtDistributorTierOverrideInputTier];
+
+
+export const MgmtDistributorTierOverrideInputTier = {
+  A: 'A',
+  B: 'B',
+  C: 'C',
+} as const;
+
+export interface MgmtDistributorTierOverrideInput {
+  stateHead: string;
+  fy: string;
+  normKey: string;
+  tier: MgmtDistributorTierOverrideInputTier;
+  reason: string;
+}
+
 export type ListDriveFilesParams = {
 /**
  * Optional search text matched against file names.
@@ -2156,6 +2261,27 @@ fy?: string;
  * Raw state head name as it appears in the sheet.
  */
 stateHead?: string;
+};
+
+export type GetMgmtDistributorTierOverrideParams = {
+/**
+ * Fiscal year like 2026-27. Defaults to 2026-27.
+ */
+fy?: string;
+/**
+ * State head display name.
+ */
+stateHead: string;
+};
+
+export type DeleteMgmtDistributorTierOverrideBody = {
+  fy: string;
+  stateHead: string;
+  normKey: string;
+};
+
+export type DeleteMgmtDistributorTierOverride200 = {
+  ok?: boolean;
 };
 
 export type VerifyMgmtReportParams = {

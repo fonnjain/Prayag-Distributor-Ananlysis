@@ -33,7 +33,7 @@
 //  - NET = Sub Total (sale_line.amount) throughout.
 //  - Never console.log — use logger.
 
-import { db, customerMaster, saleLines, primaryOrderLines } from "@workspace/db";
+import { db, customerMaster, saleLines, primaryOrderLines, distributorTierOverrideTable } from "@workspace/db";
 import { eq, and, sql, inArray, or, isNull } from "drizzle-orm";
 import { logger } from "../logger.js";
 import { loadDeepDiveData } from "./deepDiveData.js";
@@ -44,6 +44,7 @@ import {
 } from "./distributorSkuSpread.js";
 import {
   loadDistributorInvestment,
+  buildTierActions,
   type DistributorInvestment,
 } from "./distributorInvestment.js";
 import { computeRoiCost } from "./roiCost.js";
@@ -102,6 +103,18 @@ export type DistributorFlows = {
   growthPct: number | null;       // (current - prior) / prior × 100
 };
 
+/** D7: per-distributor retailer concentration (its own top-5 / top-10, direct dealers excluded). */
+export type RetailerConcentration = {
+  totalOb: number;
+  top5Ob: number;
+  top5SharePct: number | null;
+  top10Ob: number;
+  top10SharePct: number | null;
+  topRetailerName: string | null;
+  topRetailerOb: number | null;
+  topRetailerSharePct: number | null;
+};
+
 export type DistributorGroup = {
   name: string;              // canonical display name (most common raw form)
   normKey: string;           // stable grouping key
@@ -119,6 +132,7 @@ export type DistributorGroup = {
   flows: DistributorFlows | null;       // D2: null until loadDistributorFlows runs
   skuSpread?: DistributorSkuSpread;     // D3: set by loadDistributorSkuSpread
   investment?: DistributorInvestment;   // D4: set by loadDistributorInvestment
+  retailerConcentration?: RetailerConcentration; // D7: set by Step 15
 };
 
 export type SharedRetailerEntry = {
@@ -166,6 +180,20 @@ export type MappingQuality = {
   noneAllDormant: boolean;
 };
 
+/** D7: territory-level visit capacity check. */
+export type CapacityCheck = {
+  availablePerMonth: number | null;   // YTD visits / elapsed months (null = no visit data)
+  demandedPerMonth: number;           // sum of tier retailer cadences across all distributors
+  shortfallPerMonth: number | null;   // demanded - available if positive, else null
+  hasShortfall: boolean;
+  breakdown: Array<{
+    normKey: string;
+    name: string;
+    tier: "A" | "B" | "C";
+    demandedRetailerVisitsPerMonth: number;
+  }>;
+};
+
 export type DistributorDeepDiveResult = {
   fy: string;
   stateHeads: string[];
@@ -179,6 +207,7 @@ export type DistributorDeepDiveResult = {
   membersNotMapped: number;
   whitespace:     TerritoryWhitespace | null;
   concentration:  CustomerConcentration | null;
+  capacityCheck:  CapacityCheck | null;
   error: string | null;
 };
 
@@ -552,7 +581,7 @@ export async function loadDistributorDeepDive(
     fy, stateHeads, distributors: [], sharedRetailers: [],
     directDealer: null, noneAssigned: null, mappingQuality: null,
     partyObTotal: 0, membersLoaded: 0, membersNotMapped: 0,
-    whitespace: null, concentration: null, error: null,
+    whitespace: null, concentration: null, capacityCheck: null, error: null,
   });
 
   if (!selectedStateHead || !members.length) return empty();
@@ -912,6 +941,96 @@ export async function loadDistributorDeepDive(
     );
   }
 
+  // ── Step 15: D7 — retailer concentration, tier overrides, capacity check ───
+
+  // 15a: per-distributor retailer concentration (top-5 / top-10 of own retailers)
+  for (const g of distGroups) {
+    const sorted = [...g.retailers].sort((a, b) => b.orderBooking - a.orderBooking);
+    const top5Ob      = sorted.slice(0, 5).reduce((s, r) => s + r.orderBooking, 0);
+    const top10Ob     = sorted.slice(0, 10).reduce((s, r) => s + r.orderBooking, 0);
+    const totalOb     = g.orderBooking;
+    const topRetailer = sorted[0] ?? null;
+    g.retailerConcentration = {
+      totalOb,
+      top5Ob,
+      top5SharePct:        totalOb > 0 ? (top5Ob / totalOb) * 100 : null,
+      top10Ob,
+      top10SharePct:       totalOb > 0 ? (top10Ob / totalOb) * 100 : null,
+      topRetailerName:     topRetailer?.name ?? null,
+      topRetailerOb:       topRetailer?.orderBooking ?? null,
+      topRetailerSharePct: totalOb > 0 && topRetailer
+        ? (topRetailer.orderBooking / totalOb) * 100
+        : null,
+    };
+  }
+
+  // 15b: load tier overrides from DB and apply them
+  let overrideRows: Array<{ normKey: string; tier: string; reason: string }> = [];
+  try {
+    overrideRows = await db
+      .select({
+        normKey: distributorTierOverrideTable.normKey,
+        tier:    distributorTierOverrideTable.tier,
+        reason:  distributorTierOverrideTable.reason,
+      })
+      .from(distributorTierOverrideTable)
+      .where(
+        and(
+          eq(distributorTierOverrideTable.stateHead, selectedStateHead),
+          eq(distributorTierOverrideTable.fy, fy),
+        ),
+      );
+  } catch (overrideErr) {
+    logger.warn({ overrideErr }, "Step 15: could not load tier overrides — applying none");
+  }
+  const overrideMap = new Map(overrideRows.map((r) => [r.normKey, r]));
+  for (const g of distGroups) {
+    if (!g.investment) continue;
+    const ov = overrideMap.get(g.normKey);
+    if (!ov) continue;
+    const newTier = ov.tier as "A" | "B" | "C";
+    const actions = buildTierActions(newTier, g.activeCount);
+    g.investment = {
+      ...g.investment,
+      tier: {
+        ...g.investment.tier,
+        ...actions,
+        tier:           newTier,
+        isOverridden:   true,
+        overrideReason: ov.reason,
+      },
+    };
+  }
+
+  // 15c: territory-level capacity check
+  const elapsedMonths = concentration?.dataCutoffMonthsElapsed ?? null;
+  const breakdown = distGroups
+    .filter((g) => g.investment != null)
+    .map((g) => ({
+      normKey:                        g.normKey,
+      name:                           g.name,
+      tier:                           g.investment!.tier.tier,
+      demandedRetailerVisitsPerMonth: g.investment!.tier.cadenceRetailerPerMonth,
+    }));
+  const demandedPerMonth = breakdown.reduce((s, b) => s + b.demandedRetailerVisitsPerMonth, 0);
+  let availablePerMonth: number | null = null;
+  if (elapsedMonths && elapsedMonths > 0) {
+    const totalYtdVisits = Array.from(memberSpreads.values()).reduce(
+      (s, sp) => s + (sp.totalVisits ?? 0), 0,
+    );
+    availablePerMonth = totalYtdVisits > 0 ? totalYtdVisits / elapsedMonths : null;
+  }
+  const shortfall = availablePerMonth != null && demandedPerMonth > availablePerMonth
+    ? demandedPerMonth - availablePerMonth
+    : null;
+  const capacityCheck: CapacityCheck = {
+    availablePerMonth,
+    demandedPerMonth,
+    shortfallPerMonth: shortfall,
+    hasShortfall:      shortfall != null,
+    breakdown,
+  };
+
   return {
     fy, stateHeads,
     distributors: distGroups,
@@ -924,6 +1043,7 @@ export async function loadDistributorDeepDive(
     membersNotMapped,
     whitespace,
     concentration,
+    capacityCheck,
     error: null,
   };
 }

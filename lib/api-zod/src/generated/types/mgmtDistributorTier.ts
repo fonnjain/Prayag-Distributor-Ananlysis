@@ -9,7 +9,7 @@ import type { MgmtDistributorTierInput } from './mgmtDistributorTierInput';
 import type { MgmtDistributorTierTier } from './mgmtDistributorTierTier';
 
 /**
- * A / B / C tier derived from a transparent 100-point composite score. A = >= 70, B = 45-69, C < 45. Inputs are shown so the classification can be argued with or overridden by the field team.
+ * A / B / C tier derived from a transparent 100-point composite score. A = >= 70, B = 45-69, C < 45. Inputs are shown so the classification can be argued with or overridden by the field team. D7 adds numeric cadences, range-focus actions, and a manual override flag.
  */
 export interface MgmtDistributorTier {
   tier: MgmtDistributorTierTier;
@@ -18,4 +18,14 @@ export interface MgmtDistributorTier {
   visitCadence: string;
   creditPosture: string;
   inputs: MgmtDistributorTierInput[];
+  /** Recommended visits per month to the distributor office (A=4, B=2, C=1). */
+  cadenceDistributorPerMonth: number;
+  /** Total retailer visits per month demanded by this tier (activeCount × rate). */
+  cadenceRetailerPerMonth: number;
+  /** Ordered list of whitespace/range actions for this tier. */
+  rangeFocus: string[];
+  /** True when the tier has been manually overridden via the PUT endpoint. */
+  isOverridden: boolean;
+  /** Human-readable justification for the override, set when isOverridden = true. */
+  overrideReason?: string | null;
 }

@@ -76,9 +76,17 @@ export type TierInput = {
 export type DistributorTier = {
   tier: "A" | "B" | "C";
   score: number;
+  // D4 actions (strings)
   visitCadence: string;
   creditPosture: string;
   inputs: TierInput[];
+  // D7 extensions
+  cadenceDistributorPerMonth: number;  // visits/month to the distributor office
+  cadenceRetailerPerMonth: number;     // total retailer visits/month demanded by this tier × retailer count
+  rangeFocus: string[];                // which whitespace segments to push first (D7, from D3/D5)
+  // Override (applied in Step 15, null until then)
+  isOverridden: boolean;
+  overrideReason: string | null;
 };
 
 export type DistributorInvestment = {
@@ -209,6 +217,54 @@ const CREDIT_POSTURE: Record<string, string> = {
   B: "Review outstanding before next order cycle",
   C: "Tighten credit; resolve outstanding before restocking",
 };
+
+// D7: numeric cadences (visits/month to distributor HQ)
+const CADENCE_DISTRIBUTOR_PER_MONTH: Record<"A" | "B" | "C", number> = {
+  A: 4,   // weekly
+  B: 2,   // fortnightly
+  C: 1,   // monthly
+};
+
+// D7: retailer visit rate per active retailer per month
+const RETAILER_VISIT_RATE: Record<"A" | "B" | "C", number> = {
+  A: 2.0,  // fortnightly per active retailer
+  B: 1.0,  // monthly per active retailer
+  C: 0.5,  // bi-monthly per active retailer
+};
+
+// D7: which whitespace/range segments to push first (static per tier; enriched in future via D3 + D5)
+const RANGE_FOCUS: Record<"A" | "B" | "C", string[]> = {
+  A: [
+    "Expand: introduce new product lines to top-OB accounts",
+    "Target dormant districts for new retailer activation",
+  ],
+  B: [
+    "Maintain: sustain range depth across existing active accounts",
+    "Push unassigned retailers into distributor network",
+  ],
+  C: [
+    "Consolidate: focus on core SKUs with paying accounts only",
+    "Resolve outstanding credit before any range extension",
+  ],
+};
+
+// D7: helper used by distributorDeepDive when applying manual tier overrides so
+// the textual and numeric cadence fields stay consistent with the new tier.
+export function buildTierActions(
+  tier: "A" | "B" | "C",
+  activeCount: number,
+): Pick<
+  DistributorTier,
+  "visitCadence" | "creditPosture" | "cadenceDistributorPerMonth" | "cadenceRetailerPerMonth" | "rangeFocus"
+> {
+  return {
+    visitCadence:               VISIT_CADENCE[tier]!,
+    creditPosture:              CREDIT_POSTURE[tier]!,
+    cadenceDistributorPerMonth: CADENCE_DISTRIBUTOR_PER_MONTH[tier],
+    cadenceRetailerPerMonth:    Math.round(activeCount * RETAILER_VISIT_RATE[tier] * 10) / 10,
+    rangeFocus:                 RANGE_FOCUS[tier]!,
+  };
+}
 
 // ── Main export ────────────────────────────────────────────────────────────────
 
@@ -399,12 +455,20 @@ export async function loadDistributorInvestment(
     const totalScore    = netInput.score + growthInput.score + activeInput.score + discountInput.score;
     const tier          = tierLabel(totalScore);
 
+    const cadenceRetailerPerMonth =
+      Math.round(g.activeCount * RETAILER_VISIT_RATE[tier] * 10) / 10;
+
     const tierObj: DistributorTier = {
       tier,
       score: totalScore,
       visitCadence:  VISIT_CADENCE[tier]!,
       creditPosture: CREDIT_POSTURE[tier]!,
       inputs: [netInput, growthInput, activeInput, discountInput],
+      cadenceDistributorPerMonth: CADENCE_DISTRIBUTOR_PER_MONTH[tier],
+      cadenceRetailerPerMonth,
+      rangeFocus: RANGE_FOCUS[tier]!,
+      isOverridden:   false,
+      overrideReason: null,
     };
 
     (g as DistributorGroup & { investment: DistributorInvestment }).investment = {

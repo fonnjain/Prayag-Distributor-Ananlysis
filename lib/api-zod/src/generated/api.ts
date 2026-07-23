@@ -606,9 +606,24 @@ export const GetMgmtDistributorDeepDiveResponse = zod.object({
   "value": zod.string(),
   "score": zod.number(),
   "note": zod.string()
-}))
-}).describe('A \/ B \/ C tier derived from a transparent 100-point composite score. A = >= 70, B = 45-69, C < 45. Inputs are shown so the classification can be argued with or overridden by the field team.\n')
-}).nullish().describe('Phase D4: investment (effective discount, cost to serve, credit, scheme), revenue-to-cost ROI, and A\/B\/C tier with recommended action. Always present when distributor data loads. Null only if computation fails entirely.\n')
+})),
+  "cadenceDistributorPerMonth": zod.number().describe('Recommended visits per month to the distributor office (A=4, B=2, C=1).'),
+  "cadenceRetailerPerMonth": zod.number().describe('Total retailer visits per month demanded by this tier (activeCount × rate).'),
+  "rangeFocus": zod.array(zod.string()).describe('Ordered list of whitespace\/range actions for this tier.'),
+  "isOverridden": zod.boolean().describe('True when the tier has been manually overridden via the PUT endpoint.'),
+  "overrideReason": zod.string().nullish().describe('Human-readable justification for the override, set when isOverridden = true.')
+}).describe('A \/ B \/ C tier derived from a transparent 100-point composite score. A = >= 70, B = 45-69, C < 45. Inputs are shown so the classification can be argued with or overridden by the field team. D7 adds numeric cadences, range-focus actions, and a manual override flag.\n')
+}).nullish().describe('Phase D4: investment (effective discount, cost to serve, credit, scheme), revenue-to-cost ROI, and A\/B\/C tier with recommended action. Always present when distributor data loads. Null only if computation fails entirely.\n'),
+  "retailerConcentration": zod.object({
+  "totalOb": zod.number().describe('Distributor\'s total order booking.'),
+  "top5Ob": zod.number().describe('OB sum of top-5 retailers by OB.'),
+  "top5SharePct": zod.number().nullish().describe('top5Ob \/ totalOb × 100.'),
+  "top10Ob": zod.number().describe('OB sum of top-10 retailers by OB.'),
+  "top10SharePct": zod.number().nullish().describe('top10Ob \/ totalOb × 100.'),
+  "topRetailerName": zod.string().nullish().describe('Name of the highest-OB retailer.'),
+  "topRetailerOb": zod.number().nullish().describe('OB of the highest-OB retailer.'),
+  "topRetailerSharePct": zod.number().nullish().describe('topRetailerOb \/ totalOb × 100.')
+}).nullish().describe('D7: within this distributor\'s own retailer list (direct dealers excluded), the top-5 and top-10 OB share and the single top account.\n')
 })),
   "sharedRetailers": zod.array(zod.object({
   "name": zod.string(),
@@ -733,7 +748,75 @@ export const GetMgmtDistributorDeepDiveResponse = zod.object({
   "newRetailersOnboarded": zod.number().nullish(),
   "newPartyOrderBooking": zod.number().nullish()
 }).nullish().describe('Phase D6: customer concentration (top-N) and new-vs-repeat business (retained \/ reactivated \/ at-risk \/ never). Derived purely from D1 retailer rows.\n'),
+  "capacityCheck": zod.object({
+  "availablePerMonth": zod.number().nullish().describe('YTD visit total \/ elapsed months. Null when no visit data is available.'),
+  "demandedPerMonth": zod.number().describe('Sum of cadenceRetailerPerMonth across all distributors with a computed tier.'),
+  "shortfallPerMonth": zod.number().nullish().describe('demandedPerMonth - availablePerMonth when positive, else null.'),
+  "hasShortfall": zod.boolean(),
+  "breakdown": zod.array(zod.object({
+  "normKey": zod.string(),
+  "name": zod.string(),
+  "tier": zod.enum(['A', 'B', 'C']),
+  "demandedRetailerVisitsPerMonth": zod.number()
+}))
+}).nullish().describe('D7: territory visit-capacity reconciliation. Shows demanded retailer visits per month (sum of tier cadences) vs available (YTD visits \/ elapsed months). hasShortfall = true when demand exceeds capacity.\n'),
   "error": zod.string().nullish()
+})
+
+
+/**
+ * @summary D7 — list manual tier overrides for a state head + FY
+ */
+export const GetMgmtDistributorTierOverrideQueryParams = zod.object({
+  "fy": zod.coerce.string().optional().describe('Fiscal year like 2026-27. Defaults to 2026-27.'),
+  "stateHead": zod.coerce.string().describe('State head display name.')
+})
+
+export const GetMgmtDistributorTierOverrideResponseItem = zod.object({
+  "id": zod.number(),
+  "stateHead": zod.string(),
+  "fy": zod.string(),
+  "normKey": zod.string(),
+  "tier": zod.enum(['A', 'B', 'C']),
+  "reason": zod.string(),
+  "overriddenAt": zod.coerce.date()
+}).describe('A persisted manual tier override for one distributor in a territory + FY.')
+export const GetMgmtDistributorTierOverrideResponse = zod.array(GetMgmtDistributorTierOverrideResponseItem)
+
+
+/**
+ * @summary D7 — upsert a manual tier override for one distributor
+ */
+export const PutMgmtDistributorTierOverrideBody = zod.object({
+  "stateHead": zod.string(),
+  "fy": zod.string(),
+  "normKey": zod.string(),
+  "tier": zod.enum(['A', 'B', 'C']),
+  "reason": zod.string()
+})
+
+export const PutMgmtDistributorTierOverrideResponse = zod.object({
+  "id": zod.number(),
+  "stateHead": zod.string(),
+  "fy": zod.string(),
+  "normKey": zod.string(),
+  "tier": zod.enum(['A', 'B', 'C']),
+  "reason": zod.string(),
+  "overriddenAt": zod.coerce.date()
+}).describe('A persisted manual tier override for one distributor in a territory + FY.')
+
+
+/**
+ * @summary D7 — remove a manual tier override
+ */
+export const DeleteMgmtDistributorTierOverrideBody = zod.object({
+  "fy": zod.string(),
+  "stateHead": zod.string(),
+  "normKey": zod.string()
+})
+
+export const DeleteMgmtDistributorTierOverrideResponse = zod.object({
+  "ok": zod.boolean().optional()
 })
 
 

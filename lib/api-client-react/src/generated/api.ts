@@ -38,6 +38,8 @@ import type {
   DashboardXlsxStatusResponse,
   DashboardXlsxUploadUrlResponse,
   DeepDive,
+  DeleteMgmtDistributorTierOverride200,
+  DeleteMgmtDistributorTierOverrideBody,
   DeleteSapUploadParams,
   DriveFileList,
   ErrorResponse,
@@ -45,6 +47,7 @@ import type {
   GetAnalyticsParams,
   GetMgmtDeepDiveParams,
   GetMgmtDistributorDeepDiveParams,
+  GetMgmtDistributorTierOverrideParams,
   GetPrimaryTargetsParams,
   GetSalesPeopleTreeParams,
   GetSalesPersonDeepDiveParams,
@@ -61,6 +64,8 @@ import type {
   ListDriveFilesParams,
   MgmtDeepDive,
   MgmtDistributorDeepDive,
+  MgmtDistributorTierOverride,
+  MgmtDistributorTierOverrideInput,
   MgmtOptions,
   MgmtReportRequest,
   MgmtVerifyResult,
@@ -910,6 +915,230 @@ export function useGetMgmtDistributorDeepDive<TData = Awaited<ReturnType<typeof 
 
 
 
+
+export const getGetMgmtDistributorTierOverrideUrl = (params: GetMgmtDistributorTierOverrideParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/mgmt/distributor-tier-override?${stringifiedParams}` : `/api/mgmt/distributor-tier-override`
+}
+
+/**
+ * @summary D7 — list manual tier overrides for a state head + FY
+ */
+export const getMgmtDistributorTierOverride = async (params: GetMgmtDistributorTierOverrideParams, options?: RequestInit): Promise<MgmtDistributorTierOverride[]> => {
+
+  return customFetch<MgmtDistributorTierOverride[]>(getGetMgmtDistributorTierOverrideUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMgmtDistributorTierOverrideQueryKey = (params?: GetMgmtDistributorTierOverrideParams,) => {
+    return [
+    `/api/mgmt/distributor-tier-override`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetMgmtDistributorTierOverrideQueryOptions = <TData = Awaited<ReturnType<typeof getMgmtDistributorTierOverride>>, TError = ErrorType<void>>(params: GetMgmtDistributorTierOverrideParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMgmtDistributorTierOverride>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMgmtDistributorTierOverrideQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMgmtDistributorTierOverride>>> = ({ signal }) => getMgmtDistributorTierOverride(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMgmtDistributorTierOverride>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMgmtDistributorTierOverrideQueryResult = NonNullable<Awaited<ReturnType<typeof getMgmtDistributorTierOverride>>>
+export type GetMgmtDistributorTierOverrideQueryError = ErrorType<void>
+
+
+/**
+ * @summary D7 — list manual tier overrides for a state head + FY
+ */
+
+export function useGetMgmtDistributorTierOverride<TData = Awaited<ReturnType<typeof getMgmtDistributorTierOverride>>, TError = ErrorType<void>>(
+ params: GetMgmtDistributorTierOverrideParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMgmtDistributorTierOverride>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMgmtDistributorTierOverrideQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getPutMgmtDistributorTierOverrideUrl = () => {
+
+
+
+
+  return `/api/mgmt/distributor-tier-override`
+}
+
+/**
+ * @summary D7 — upsert a manual tier override for one distributor
+ */
+export const putMgmtDistributorTierOverride = async (mgmtDistributorTierOverrideInput: MgmtDistributorTierOverrideInput, options?: RequestInit): Promise<MgmtDistributorTierOverride> => {
+
+  return customFetch<MgmtDistributorTierOverride>(getPutMgmtDistributorTierOverrideUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(mgmtDistributorTierOverrideInput)
+  }
+);}
+
+
+
+
+export const getPutMgmtDistributorTierOverrideMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putMgmtDistributorTierOverride>>, TError,{data: BodyType<MgmtDistributorTierOverrideInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof putMgmtDistributorTierOverride>>, TError,{data: BodyType<MgmtDistributorTierOverrideInput>}, TContext> => {
+
+const mutationKey = ['putMgmtDistributorTierOverride'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putMgmtDistributorTierOverride>>, {data: BodyType<MgmtDistributorTierOverrideInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  putMgmtDistributorTierOverride(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PutMgmtDistributorTierOverrideMutationResult = NonNullable<Awaited<ReturnType<typeof putMgmtDistributorTierOverride>>>
+    export type PutMgmtDistributorTierOverrideMutationBody = BodyType<MgmtDistributorTierOverrideInput>
+    export type PutMgmtDistributorTierOverrideMutationError = ErrorType<void>
+
+    /**
+ * @summary D7 — upsert a manual tier override for one distributor
+ */
+export const usePutMgmtDistributorTierOverride = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putMgmtDistributorTierOverride>>, TError,{data: BodyType<MgmtDistributorTierOverrideInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof putMgmtDistributorTierOverride>>,
+        TError,
+        {data: BodyType<MgmtDistributorTierOverrideInput>},
+        TContext
+      > => {
+      return useMutation(getPutMgmtDistributorTierOverrideMutationOptions(options));
+    }
+
+export const getDeleteMgmtDistributorTierOverrideUrl = () => {
+
+
+
+
+  return `/api/mgmt/distributor-tier-override`
+}
+
+/**
+ * @summary D7 — remove a manual tier override
+ */
+export const deleteMgmtDistributorTierOverride = async (deleteMgmtDistributorTierOverrideBody: DeleteMgmtDistributorTierOverrideBody, options?: RequestInit): Promise<DeleteMgmtDistributorTierOverride200> => {
+
+  return customFetch<DeleteMgmtDistributorTierOverride200>(getDeleteMgmtDistributorTierOverrideUrl(),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(deleteMgmtDistributorTierOverrideBody)
+  }
+);}
+
+
+
+
+export const getDeleteMgmtDistributorTierOverrideMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMgmtDistributorTierOverride>>, TError,{data: BodyType<DeleteMgmtDistributorTierOverrideBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteMgmtDistributorTierOverride>>, TError,{data: BodyType<DeleteMgmtDistributorTierOverrideBody>}, TContext> => {
+
+const mutationKey = ['deleteMgmtDistributorTierOverride'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteMgmtDistributorTierOverride>>, {data: BodyType<DeleteMgmtDistributorTierOverrideBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteMgmtDistributorTierOverride(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteMgmtDistributorTierOverrideMutationResult = NonNullable<Awaited<ReturnType<typeof deleteMgmtDistributorTierOverride>>>
+    export type DeleteMgmtDistributorTierOverrideMutationBody = BodyType<DeleteMgmtDistributorTierOverrideBody>
+    export type DeleteMgmtDistributorTierOverrideMutationError = ErrorType<unknown>
+
+    /**
+ * @summary D7 — remove a manual tier override
+ */
+export const useDeleteMgmtDistributorTierOverride = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMgmtDistributorTierOverride>>, TError,{data: BodyType<DeleteMgmtDistributorTierOverrideBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteMgmtDistributorTierOverride>>,
+        TError,
+        {data: BodyType<DeleteMgmtDistributorTierOverrideBody>},
+        TContext
+      > => {
+      return useMutation(getDeleteMgmtDistributorTierOverrideMutationOptions(options));
+    }
 
 export const getGetMgmtOptionsUrl = () => {
 

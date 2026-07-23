@@ -325,6 +325,73 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /mgmt/distributor-tier-override:
+    get:
+      operationId: getMgmtDistributorTierOverride
+      tags: [mgmt]
+      summary: D7 — list manual tier overrides for a state head + FY
+      parameters:
+        - name: fy
+          in: query
+          schema: { type: string }
+          description: Fiscal year like 2026-27. Defaults to 2026-27.
+        - name: stateHead
+          in: query
+          required: true
+          schema: { type: string }
+          description: State head display name.
+      responses:
+        "200":
+          description: Array of override rows (empty when none exist)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/MgmtDistributorTierOverride" }
+        "400":
+          description: stateHead missing
+    put:
+      operationId: putMgmtDistributorTierOverride
+      tags: [mgmt]
+      summary: D7 — upsert a manual tier override for one distributor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MgmtDistributorTierOverrideInput"
+      responses:
+        "200":
+          description: Saved override row
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MgmtDistributorTierOverride" }
+        "400":
+          description: Validation error
+    delete:
+      operationId: deleteMgmtDistributorTierOverride
+      tags: [mgmt]
+      summary: D7 — remove a manual tier override
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fy, stateHead, normKey]
+              properties:
+                fy: { type: string }
+                stateHead: { type: string }
+                normKey: { type: string }
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
   /mgmt/options:
     get:
       operationId: getMgmtOptions
@@ -2681,6 +2748,13 @@ components:
         concentration:
           nullable: true
           $ref: "#/components/schemas/MgmtCustomerConcentration"
+        capacityCheck:
+          nullable: true
+          $ref: "#/components/schemas/MgmtCapacityCheck"
+          description: >
+            D7: territory visit-capacity reconciliation. Shows demanded retailer
+            visits per month (sum of tier cadences) vs available (YTD visits /
+            elapsed months). hasShortfall = true when demand exceeds capacity.
         error: { type: string, nullable: true }
     MgmtDistributorGroup:
       type: object
@@ -2714,6 +2788,12 @@ components:
             Phase D4: investment (effective discount, cost to serve, credit, scheme),
             revenue-to-cost ROI, and A/B/C tier with recommended action. Always present
             when distributor data loads. Null only if computation fails entirely.
+        retailerConcentration:
+          nullable: true
+          $ref: "#/components/schemas/MgmtRetailerConcentration"
+          description: >
+            D7: within this distributor's own retailer list (direct dealers excluded),
+            the top-5 and top-10 OB share and the single top account.
     MgmtDistributorRetailerRow:
       type: object
       required: [name, orderBooking, sale, isActive, confirmedHead, memberName]
@@ -3172,11 +3252,12 @@ components:
         marginRoiAvailable: { type: boolean, enum: [false] }
     MgmtDistributorTier:
       type: object
-      required: [tier, score, visitCadence, creditPosture, inputs]
+      required: [tier, score, visitCadence, creditPosture, inputs, cadenceDistributorPerMonth, cadenceRetailerPerMonth, rangeFocus, isOverridden]
       description: >
         A / B / C tier derived from a transparent 100-point composite score.
         A = >= 70, B = 45-69, C < 45. Inputs are shown so the classification
-        can be argued with or overridden by the field team.
+        can be argued with or overridden by the field team. D7 adds numeric
+        cadences, range-focus actions, and a manual override flag.
       properties:
         tier:
           type: string
@@ -3189,6 +3270,23 @@ components:
         inputs:
           type: array
           items: { $ref: "#/components/schemas/MgmtDistributorTierInput" }
+        cadenceDistributorPerMonth:
+          type: number
+          description: Recommended visits per month to the distributor office (A=4, B=2, C=1).
+        cadenceRetailerPerMonth:
+          type: number
+          description: Total retailer visits per month demanded by this tier (activeCount × rate).
+        rangeFocus:
+          type: array
+          items: { type: string }
+          description: Ordered list of whitespace/range actions for this tier.
+        isOverridden:
+          type: boolean
+          description: True when the tier has been manually overridden via the PUT endpoint.
+        overrideReason:
+          type: string
+          nullable: true
+          description: Human-readable justification for the override, set when isOverridden = true.
     MgmtDistributorTierInput:
       type: object
       required: [label, value, score, note]
@@ -4231,3 +4329,70 @@ components:
           description: >
             Herfindahl-Hirschman Index over segment NET shares (0–10000).
             Higher = more concentrated. <2500 = diversified, 2500–5000 = moderate, >5000 = concentrated.
+    MgmtRetailerConcentration:
+      type: object
+      required: [totalOb, top5Ob, top10Ob]
+      description: >
+        D7: within a single distributor's own retailer list (direct dealers excluded),
+        the top-5 and top-10 OB concentration and the highest single account.
+      properties:
+        totalOb: { type: number, description: "Distributor's total order booking." }
+        top5Ob: { type: number, description: "OB sum of top-5 retailers by OB." }
+        top5SharePct: { type: number, nullable: true, description: "top5Ob / totalOb × 100." }
+        top10Ob: { type: number, description: "OB sum of top-10 retailers by OB." }
+        top10SharePct: { type: number, nullable: true, description: "top10Ob / totalOb × 100." }
+        topRetailerName: { type: string, nullable: true, description: "Name of the highest-OB retailer." }
+        topRetailerOb: { type: number, nullable: true, description: "OB of the highest-OB retailer." }
+        topRetailerSharePct: { type: number, nullable: true, description: "topRetailerOb / totalOb × 100." }
+    MgmtCapacityCheck:
+      type: object
+      required: [demandedPerMonth, hasShortfall, breakdown]
+      description: >
+        D7: territory visit-capacity reconciliation. Compares the total retailer visits
+        per month demanded by all distributor tier cadences against the member's actual
+        YTD visit rate. Surfaces a shortfall when demand exceeds available capacity.
+      properties:
+        availablePerMonth:
+          type: number
+          nullable: true
+          description: YTD visit total / elapsed months. Null when no visit data is available.
+        demandedPerMonth:
+          type: number
+          description: Sum of cadenceRetailerPerMonth across all distributors with a computed tier.
+        shortfallPerMonth:
+          type: number
+          nullable: true
+          description: demandedPerMonth - availablePerMonth when positive, else null.
+        hasShortfall:
+          type: boolean
+        breakdown:
+          type: array
+          items:
+            type: object
+            required: [normKey, name, tier, demandedRetailerVisitsPerMonth]
+            properties:
+              normKey: { type: string }
+              name: { type: string }
+              tier: { type: string, enum: [A, B, C] }
+              demandedRetailerVisitsPerMonth: { type: number }
+    MgmtDistributorTierOverride:
+      type: object
+      required: [id, stateHead, fy, normKey, tier, reason, overriddenAt]
+      description: A persisted manual tier override for one distributor in a territory + FY.
+      properties:
+        id: { type: integer }
+        stateHead: { type: string }
+        fy: { type: string }
+        normKey: { type: string }
+        tier: { type: string, enum: [A, B, C] }
+        reason: { type: string }
+        overriddenAt: { type: string, format: date-time }
+    MgmtDistributorTierOverrideInput:
+      type: object
+      required: [stateHead, fy, normKey, tier, reason]
+      properties:
+        stateHead: { type: string }
+        fy: { type: string }
+        normKey: { type: string }
+        tier: { type: string, enum: [A, B, C] }
+        reason: { type: string }

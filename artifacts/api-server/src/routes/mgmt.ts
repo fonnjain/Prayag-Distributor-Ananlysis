@@ -40,6 +40,12 @@ import {
   periodTarget as dbPeriodTarget,
 } from "../lib/mgmt/primaryTargets.js";
 import { normName } from "../lib/mgmt/names.js";
+import {
+  db,
+  distributorTierOverrideTable,
+  insertDistributorTierOverrideSchema,
+} from "@workspace/db";
+import { eq, and } from "drizzle-orm";
 
 const router: IRouter = Router();
 
@@ -824,6 +830,81 @@ router.get("/mgmt/distributor-deep-dive", async (req: Request, res: Response): P
   } catch (err) {
     req.log.error({ err }, "mgmt/distributor-deep-dive: handler threw");
     res.status(500).json({ error: "Could not load distributor deep-dive data." });
+  }
+});
+
+// ── D7: distributor tier overrides ───────────────────────────────────────────
+//
+// GET  /api/mgmt/distributor-tier-override?fy=...&stateHead=...
+// PUT  /api/mgmt/distributor-tier-override  (body: { fy, stateHead, normKey, tier, reason })
+// DELETE /api/mgmt/distributor-tier-override  (body: { fy, stateHead, normKey })
+
+router.get("/mgmt/distributor-tier-override", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const fy = typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
+      ? req.query.fy.trim() : "2026-27";
+    const stateHead = typeof req.query.stateHead === "string" ? req.query.stateHead.trim() : "";
+    if (!stateHead) { res.status(400).json({ error: "stateHead is required" }); return; }
+    const rows = await db.select().from(distributorTierOverrideTable).where(
+      and(
+        eq(distributorTierOverrideTable.stateHead, stateHead),
+        eq(distributorTierOverrideTable.fy, fy),
+      ),
+    );
+    res.json(rows);
+  } catch (err) {
+    req.log.error({ err }, "distributor-tier-override GET: failed");
+    res.status(500).json({ error: "Could not load tier overrides." });
+  }
+});
+
+router.put("/mgmt/distributor-tier-override", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const parsed = insertDistributorTierOverrideSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid body", issues: parsed.error.issues });
+      return;
+    }
+    const { stateHead, fy, normKey, tier, reason } = parsed.data;
+    const [row] = await db
+      .insert(distributorTierOverrideTable)
+      .values({ stateHead, fy, normKey, tier, reason })
+      .onConflictDoUpdate({
+        target: [
+          distributorTierOverrideTable.stateHead,
+          distributorTierOverrideTable.fy,
+          distributorTierOverrideTable.normKey,
+        ],
+        set: { tier, reason, overriddenAt: new Date() },
+      })
+      .returning();
+    req.log.info({ stateHead, fy, normKey, tier }, "distributor-tier-override: upserted");
+    res.json(row);
+  } catch (err) {
+    req.log.error({ err }, "distributor-tier-override PUT: failed");
+    res.status(500).json({ error: "Could not save tier override." });
+  }
+});
+
+router.delete("/mgmt/distributor-tier-override", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { fy, stateHead, normKey } = req.body as Record<string, string>;
+    if (!fy || !stateHead || !normKey) {
+      res.status(400).json({ error: "fy, stateHead, and normKey are required" });
+      return;
+    }
+    await db.delete(distributorTierOverrideTable).where(
+      and(
+        eq(distributorTierOverrideTable.stateHead, stateHead),
+        eq(distributorTierOverrideTable.fy, fy),
+        eq(distributorTierOverrideTable.normKey, normKey),
+      ),
+    );
+    req.log.info({ stateHead, fy, normKey }, "distributor-tier-override: deleted");
+    res.json({ ok: true });
+  } catch (err) {
+    req.log.error({ err }, "distributor-tier-override DELETE: failed");
+    res.status(500).json({ error: "Could not delete tier override." });
   }
 });
 

@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { MgmtCapacityCheck } from './mgmtCapacityCheck';
 import type { MgmtCustomerConcentration } from './mgmtCustomerConcentration';
 import type { MgmtDirectDealerSummary } from './mgmtDirectDealerSummary';
 import type { MgmtDistributorGroup } from './mgmtDistributorGroup';
@@ -26,5 +27,7 @@ export interface MgmtDistributorDeepDive {
   membersNotMapped: number;
   whitespace?: MgmtTerritoryWhitespace | null;
   concentration?: MgmtCustomerConcentration | null;
+  /** D7: territory visit-capacity reconciliation. Shows demanded retailer visits per month (sum of tier cadences) vs available (YTD visits / elapsed months). hasShortfall = true when demand exceeds capacity. */
+  capacityCheck?: MgmtCapacityCheck | null;
   error?: string | null;
 }

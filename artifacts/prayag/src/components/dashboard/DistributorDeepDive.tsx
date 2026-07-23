@@ -143,6 +143,38 @@ type DistributorTier = {
   visitCadence: string;
   creditPosture: string;
   inputs: TierInput[];
+  // D7 extensions
+  cadenceDistributorPerMonth: number;
+  cadenceRetailerPerMonth: number;
+  rangeFocus: string[];
+  isOverridden: boolean;
+  overrideReason: string | null;
+};
+
+type RetailerConcentration = {
+  totalOb: number;
+  top5Ob: number;
+  top5SharePct: number | null;
+  top10Ob: number;
+  top10SharePct: number | null;
+  topRetailerName: string | null;
+  topRetailerOb: number | null;
+  topRetailerSharePct: number | null;
+};
+
+type CapacityCheckBreakdown = {
+  normKey: string;
+  name: string;
+  tier: "A" | "B" | "C";
+  demandedRetailerVisitsPerMonth: number;
+};
+
+type CapacityCheck = {
+  availablePerMonth: number | null;
+  demandedPerMonth: number;
+  shortfallPerMonth: number | null;
+  hasShortfall: boolean;
+  breakdown: CapacityCheckBreakdown[];
 };
 
 type DistributorInvestment = {
@@ -171,6 +203,7 @@ type DistributorGroup = {
   flows: DistributorFlows | null;
   skuSpread?: DistributorSkuSpread;
   investment?: DistributorInvestment;
+  retailerConcentration?: RetailerConcentration;
 };
 
 type SharedRetailerEntry = {
@@ -326,6 +359,7 @@ type DistributorDeepDiveResult = {
   membersNotMapped: number;
   whitespace: TerritoryWhitespace | null;
   concentration: CustomerConcentration | null;
+  capacityCheck: CapacityCheck | null;
   error: string | null;
 };
 
@@ -1331,7 +1365,22 @@ function AddSourceBox({ label }: { label: string }) {
   );
 }
 
-function InvestmentPanel({ investment }: { investment?: DistributorInvestment }) {
+function InvestmentPanel({
+  investment,
+  distNormKey,
+  distName,
+  stateHead,
+  fy,
+  onOverrideSaved,
+}: {
+  investment?: DistributorInvestment;
+  distNormKey: string;
+  distName: string;
+  stateHead: string;
+  fy: string;
+  onOverrideSaved?: () => void;
+}) {
+  const [showOverrideForm, setShowOverrideForm] = useState(false);
   if (!investment) return null;
 
   const { tier, effectiveDiscount: disc, costToServe: cts, roi } = investment;
@@ -1342,13 +1391,18 @@ function InvestmentPanel({ investment }: { investment?: DistributorInvestment })
   return (
     <div className="mt-3 border-t border-border pt-3">
       {/* Tier header */}
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
         <span className={`text-xs font-bold px-2 py-0.5 rounded ${TIER_COLOR[tier.tier]}`}>
           Tier {tier.tier}
         </span>
         <span className="text-xs text-muted-foreground">
           Score {tier.score} / 100
         </span>
+        {tier.isOverridden && (
+          <span className="text-xs px-2 py-0.5 rounded bg-violet-100 text-violet-700 font-medium">
+            Overridden
+          </span>
+        )}
       </div>
 
       {/* 3 metric tiles */}
@@ -1429,10 +1483,44 @@ function InvestmentPanel({ investment }: { investment?: DistributorInvestment })
       </div>
 
       {/* Tier cadence + posture */}
-      <div className="text-[11px] text-muted-foreground space-y-0.5 mb-3">
+      <div className="text-[11px] text-muted-foreground space-y-0.5 mb-2">
         <p><span className="font-medium">Visit cadence:</span> {tier.visitCadence}</p>
         <p><span className="font-medium">Credit posture:</span> {tier.creditPosture}</p>
       </div>
+
+      {/* D7: Numeric cadence plan */}
+      <div className="text-[11px] border border-border rounded p-2 mb-2 grid grid-cols-2 gap-x-4">
+        <p>
+          <span className="font-medium">Distributor visits/month:</span>{" "}
+          {tier.cadenceDistributorPerMonth}
+        </p>
+        <p>
+          <span className="font-medium">Retailer visits demanded/month:</span>{" "}
+          {tier.cadenceRetailerPerMonth}
+        </p>
+      </div>
+
+      {/* D7: Range focus */}
+      <div className="mb-3">
+        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1">
+          Range focus
+        </p>
+        <ul className="space-y-0.5">
+          {tier.rangeFocus.map((action, i) => (
+            <li key={i} className="text-[11px] flex gap-1.5 items-start">
+              <span className="text-muted-foreground shrink-0">-</span>
+              <span>{action}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* D7: Override reason (when active) */}
+      {tier.isOverridden && tier.overrideReason && (
+        <p className="text-[11px] text-violet-700 mb-2">
+          <span className="font-medium">Override reason:</span> {tier.overrideReason}
+        </p>
+      )}
 
       {/* Scoring breakdown (collapsible would be ideal, but keep it simple for now) */}
       <details className="text-[11px]">
@@ -1473,6 +1561,278 @@ function InvestmentPanel({ investment }: { investment?: DistributorInvestment })
           </p>
         )}
       </details>
+
+      {/* D7: Override tier button / inline form */}
+      {!showOverrideForm ? (
+        <button
+          onClick={() => setShowOverrideForm(true)}
+          className="mt-3 text-[11px] text-muted-foreground hover:text-foreground underline"
+        >
+          {tier.isOverridden ? "Change or remove override" : "Override tier"}
+        </button>
+      ) : (
+        <TierOverrideForm
+          distNormKey={distNormKey}
+          distName={distName}
+          currentTier={tier.tier}
+          isCurrentlyOverridden={tier.isOverridden}
+          stateHead={stateHead}
+          fy={fy}
+          onSaved={() => { setShowOverrideForm(false); onOverrideSaved?.(); }}
+          onCancel={() => setShowOverrideForm(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── D7: Tier override form ────────────────────────────────────────────────────
+
+function TierOverrideForm({
+  distNormKey,
+  distName,
+  currentTier,
+  isCurrentlyOverridden,
+  stateHead,
+  fy,
+  onSaved,
+  onCancel,
+}: {
+  distNormKey: string;
+  distName: string;
+  currentTier: "A" | "B" | "C";
+  isCurrentlyOverridden: boolean;
+  stateHead: string;
+  fy: string;
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const [tier, setTier] = useState<"A" | "B" | "C">(currentTier);
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave() {
+    if (!reason.trim()) { setError("Reason is required"); return; }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API}/mgmt/distributor-tier-override`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fy, stateHead, normKey: distNormKey, tier, reason: reason.trim() }),
+      });
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRemove() {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API}/mgmt/distributor-tier-override`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fy, stateHead, normKey: distNormKey }),
+      });
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Remove failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="border border-border rounded p-3 mt-3 bg-muted/20">
+      <p className="text-xs font-medium mb-2">Override tier for {distName}</p>
+      <div className="flex gap-2 mb-2">
+        {(["A", "B", "C"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTier(t)}
+            className={`px-3 py-1 rounded text-xs font-bold border transition-colors ${
+              tier === t
+                ? TIER_COLOR[t] + " border-transparent"
+                : "border-border text-muted-foreground hover:border-foreground/40"
+            }`}
+          >
+            Tier {t}
+          </button>
+        ))}
+      </div>
+      <textarea
+        className="w-full text-xs border border-border rounded p-2 bg-background resize-none"
+        rows={2}
+        placeholder="Reason for override (required)"
+        value={reason}
+        onChange={(e) => { setReason(e.target.value); setError(null); }}
+      />
+      {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+      <div className="flex gap-2 mt-2 flex-wrap">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="text-xs px-3 py-1 rounded bg-foreground text-background font-medium disabled:opacity-50"
+        >
+          {saving ? "Saving..." : "Save override"}
+        </button>
+        {isCurrentlyOverridden && (
+          <button
+            onClick={handleRemove}
+            disabled={saving}
+            className="text-xs px-3 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50 disabled:opacity-50"
+          >
+            Remove override
+          </button>
+        )}
+        <button
+          onClick={onCancel}
+          className="text-xs px-3 py-1 rounded border border-border text-muted-foreground"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── D7: Retailer concentration bar (per distributor, own retailers only) ──────
+
+function RetailerConcentrationBar({ rc }: { rc: RetailerConcentration }) {
+  if (rc.totalOb === 0) return null;
+  return (
+    <div className="mt-3 border-t border-border pt-3">
+      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-2">
+        Retailer concentration (within this distributor)
+      </p>
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded bg-muted/40 p-2">
+          <p className="text-[10px] text-muted-foreground mb-0.5">Top account</p>
+          <p className={`text-sm font-semibold tabular-nums ${
+            (rc.topRetailerSharePct ?? 0) > 60 ? "text-amber-600" : ""
+          }`}>
+            {rc.topRetailerSharePct != null ? rc.topRetailerSharePct.toFixed(1) + "%" : "--"}
+          </p>
+          <p className="text-[10px] text-muted-foreground mt-0.5 truncate" title={rc.topRetailerName ?? ""}>
+            {rc.topRetailerName ?? "--"}
+          </p>
+        </div>
+        <div className="rounded bg-muted/40 p-2">
+          <p className="text-[10px] text-muted-foreground mb-0.5">Top-5 share</p>
+          <p className={`text-sm font-semibold tabular-nums ${
+            (rc.top5SharePct ?? 0) > 80 ? "text-amber-600" : ""
+          }`}>
+            {rc.top5SharePct != null ? rc.top5SharePct.toFixed(1) + "%" : "--"}
+          </p>
+        </div>
+        <div className="rounded bg-muted/40 p-2">
+          <p className="text-[10px] text-muted-foreground mb-0.5">Top-10 share</p>
+          <p className="text-sm font-semibold tabular-nums">
+            {rc.top10SharePct != null ? rc.top10SharePct.toFixed(1) + "%" : "--"}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── D7: Capacity check panel (territory level) ────────────────────────────────
+
+function CapacityCheckPanel({ check }: { check: CapacityCheck }) {
+  const [showBreakdown, setShowBreakdown] = useState(false);
+  return (
+    <div className={`rounded-lg border p-4 mb-4 ${
+      check.hasShortfall ? "border-amber-300 bg-amber-50/40" : "border-border"
+    }`}>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-sm font-semibold">Visit Capacity Check</p>
+        {check.hasShortfall ? (
+          <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-medium">
+            Shortfall
+          </span>
+        ) : (
+          <span className="text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">
+            Within capacity
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-3 gap-3 text-center mb-3">
+        <div>
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">
+            Available / month
+          </p>
+          <p className="text-xl font-bold tabular-nums">
+            {check.availablePerMonth != null ? Math.round(check.availablePerMonth) : "--"}
+          </p>
+          <p className="text-[10px] text-muted-foreground">visits (YTD rate)</p>
+        </div>
+        <div>
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">
+            Demanded / month
+          </p>
+          <p className={`text-xl font-bold tabular-nums ${check.hasShortfall ? "text-amber-600" : ""}`}>
+            {Math.round(check.demandedPerMonth)}
+          </p>
+          <p className="text-[10px] text-muted-foreground">visits (tier plan)</p>
+        </div>
+        <div>
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">
+            Shortfall
+          </p>
+          <p className={`text-xl font-bold tabular-nums ${
+            check.hasShortfall ? "text-red-600" : "text-emerald-600"
+          }`}>
+            {check.shortfallPerMonth != null ? Math.round(check.shortfallPerMonth) : "—"}
+          </p>
+          <p className="text-[10px] text-muted-foreground">
+            {check.hasShortfall ? "over capacity" : "on plan"}
+          </p>
+        </div>
+      </div>
+      <button
+        onClick={() => setShowBreakdown((b) => !b)}
+        className="text-[11px] text-muted-foreground hover:text-foreground underline"
+      >
+        {showBreakdown ? "Hide breakdown" : "Show per-distributor breakdown"}
+      </button>
+      {showBreakdown && (
+        <table className="w-full text-xs mt-2 border-collapse">
+          <thead>
+            <tr className="border-b border-border text-left text-muted-foreground">
+              <th className="py-1 pr-3 font-medium">Distributor</th>
+              <th className="py-1 pr-3 font-medium text-center">Tier</th>
+              <th className="py-1 text-right font-medium">Retailer visits / month</th>
+            </tr>
+          </thead>
+          <tbody>
+            {check.breakdown.map((b) => (
+              <tr key={b.normKey} className="border-b border-border/30">
+                <td className="py-1 pr-3">{b.name}</td>
+                <td className="py-1 pr-3 text-center">
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${TIER_COLOR[b.tier]}`}>
+                    {b.tier}
+                  </span>
+                </td>
+                <td className="py-1 text-right tabular-nums">
+                  {b.demandedRetailerVisitsPerMonth.toFixed(1)}
+                </td>
+              </tr>
+            ))}
+            <tr className="font-semibold border-t border-border">
+              <td className="py-1 pr-3">Total</td>
+              <td className="py-1 pr-3"></td>
+              <td className="py-1 text-right tabular-nums">{check.demandedPerMonth.toFixed(1)}</td>
+            </tr>
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
@@ -1664,6 +2024,11 @@ export default function DistributorDeepDive() {
             <CustomerConcentrationPanel c={data.concentration} />
           )}
 
+          {/* ── D7: Visit capacity check ─────────────────────────────── */}
+          {data.capacityCheck && (
+            <CapacityCheckPanel check={data.capacityCheck} />
+          )}
+
           {/* ── Distributor table ───────────────────────────────────── */}
           {data.distributors.length > 0 && (
             <SectionCard title="Distributor Overview">
@@ -1736,7 +2101,17 @@ export default function DistributorDeepDive() {
                             <td colSpan={9} className="bg-muted/10 px-4 py-4">
                               <FlowPanel flows={dist.flows} distName={dist.name} />
                               <SkuSpreadPanel spread={dist.skuSpread} distName={dist.name} />
-                              <InvestmentPanel investment={dist.investment} />
+                              <InvestmentPanel
+                                investment={dist.investment}
+                                distNormKey={dist.normKey}
+                                distName={dist.name}
+                                stateHead={stateHead}
+                                fy={fy}
+                                onOverrideSaved={() => load(fy, stateHead)}
+                              />
+                              {dist.retailerConcentration && (
+                                <RetailerConcentrationBar rc={dist.retailerConcentration} />
+                              )}
                               <div className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
                                 <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                                 Confirmed

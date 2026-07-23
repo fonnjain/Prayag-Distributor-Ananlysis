@@ -9,6 +9,7 @@ import type { MgmtDistributorFlows } from './mgmtDistributorFlows';
 import type { MgmtDistributorInvestment } from './mgmtDistributorInvestment';
 import type { MgmtDistributorRetailerRow } from './mgmtDistributorRetailerRow';
 import type { MgmtDistributorSkuSpread } from './mgmtDistributorSkuSpread';
+import type { MgmtRetailerConcentration } from './mgmtRetailerConcentration';
 
 export interface MgmtDistributorGroup {
   name: string;
@@ -28,4 +29,6 @@ export interface MgmtDistributorGroup {
   skuSpread?: MgmtDistributorSkuSpread | null;
   /** Phase D4: investment (effective discount, cost to serve, credit, scheme), revenue-to-cost ROI, and A/B/C tier with recommended action. Always present when distributor data loads. Null only if computation fails entirely. */
   investment?: MgmtDistributorInvestment | null;
+  /** D7: within this distributor's own retailer list (direct dealers excluded), the top-5 and top-10 OB share and the single top account. */
+  retailerConcentration?: MgmtRetailerConcentration | null;
 }
