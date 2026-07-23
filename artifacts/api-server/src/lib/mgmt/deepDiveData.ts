@@ -25,6 +25,7 @@ import {
   loadMemberSheet,
   type MemberSheetData,
 } from "./memberSheet.js";
+import { computeRoiCost, type RoiCost } from "./roiCost.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -114,6 +115,7 @@ export type DeepDiveDataResult = {
   members: MemberRef[];              // All members (or filtered by stateHead)
   kpis: MemberKpis | null;          // null when member not specified or not found
   retailerDetail: MemberSheetData | null; // Phase 2: retailer-level detail from member's own sheet
+  roiCost: RoiCost | null;          // Phase 4: revenue-to-cost analysis (needs kpis + spread)
   rowsRead: number;
   error: string | null;
 };
@@ -508,6 +510,7 @@ export async function loadDeepDiveData(
       members: [],
       kpis: null,
       retailerDetail: null,
+      roiCost: null,
       rowsRead: 0,
       error: `Could not load the 'Data' tab for FY ${fy}. The sheet may not be connected or the tab name may differ.`,
     };
@@ -570,12 +573,24 @@ export async function loadDeepDiveData(
     retailerDetail = await Promise.race([loadPromise, timeoutPromise]);
   }
 
+  // Phase 4: compute ROI on cost when kpis + retailer spread are both available.
+  const roiCost =
+    kpis && retailerDetail?.status === "ok"
+      ? computeRoiCost(
+          kpis.ctcMonthly,
+          kpis.taBillStCost,
+          fy,
+          retailerDetail.spread,
+        )
+      : null;
+
   return {
     fy,
     stateHeads,
     members,
     kpis,
     retailerDetail,
+    roiCost,
     rowsRead: entry.rowsRead,
     error: null,
   };

@@ -153,12 +153,28 @@ interface VisitPlan {
   gap: number;
 }
 
+interface RoiCost {
+  ctcMonthly: number;
+  taBillYtd: number;
+  elapsedCompleteMonths: number;
+  ctcCostYtd: number;
+  totalCost: number;
+  obToCostMultiple: number | null;
+  saleToCostMultiple: number | null;
+  costPerRetailer: number | null;
+  costPerVisit: number | null;
+  costPerActiveRetailer: number | null;
+  costRatioPct: number | null;
+  marginRoiAvailable: false;
+}
+
 interface DeepDiveData {
   fy: string;
   stateHeads: string[];
   members: MemberRef[];
   kpis: MemberKpis | null;
   retailerDetail: RetailerDetail | null;
+  roiCost: RoiCost | null;
   rowsRead: number;
   error: string | null;
 }
@@ -814,6 +830,130 @@ function ForwardPlanPanel({
   );
 }
 
+// ── Phase 4 components ────────────────────────────────────────────────────────
+
+function multipleColour(m: number): string {
+  if (m >= 20) return "text-green-700 dark:text-green-400";
+  if (m >= 10) return "text-amber-700 dark:text-amber-400";
+  return "text-red-700 dark:text-red-400";
+}
+
+function RoiCostPanel({ roi, memberName }: { roi: RoiCost; memberName: string }) {
+  return (
+    <div className="space-y-4">
+      <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground border-b border-border pb-1">
+        ROI on Cost
+      </h3>
+
+      {/* Cost build-up */}
+      <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 space-y-2">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+          YTD Cost ({roi.elapsedCompleteMonths} complete fiscal months elapsed)
+        </p>
+        <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+          <span>
+            CTC: <strong className="text-foreground">{fmtRs(roi.ctcCostYtd)}</strong>
+            <span className="text-xs text-muted-foreground ml-1">
+              ({fmtRs(roi.ctcMonthly)}/mo × {roi.elapsedCompleteMonths})
+            </span>
+          </span>
+          <span className="text-muted-foreground">+</span>
+          <span>
+            T.A. Bill: <strong className="text-foreground">{fmtRs(roi.taBillYtd)}</strong>
+          </span>
+          <span className="text-muted-foreground">=</span>
+          <span>
+            Total: <strong className="text-foreground text-base">{fmtRs(roi.totalCost)}</strong>
+          </span>
+        </div>
+      </div>
+
+      {/* Revenue-to-cost multiples */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="rounded-lg border border-border bg-card px-4 py-3 flex flex-col gap-1">
+          <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide leading-tight">
+            OB / Cost
+          </span>
+          <span className={cn(
+            "text-2xl font-bold",
+            roi.obToCostMultiple != null ? multipleColour(roi.obToCostMultiple) : "",
+          )}>
+            {roi.obToCostMultiple != null ? `${roi.obToCostMultiple.toFixed(1)}x` : "—"}
+          </span>
+          <span className="text-[11px] text-muted-foreground">Revenue-to-cost (OB)</span>
+        </div>
+        <div className="rounded-lg border border-border bg-card px-4 py-3 flex flex-col gap-1">
+          <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide leading-tight">
+            Sale / Cost
+          </span>
+          <span className={cn(
+            "text-2xl font-bold",
+            roi.saleToCostMultiple != null ? multipleColour(roi.saleToCostMultiple) : "",
+          )}>
+            {roi.saleToCostMultiple != null ? `${roi.saleToCostMultiple.toFixed(1)}x` : "—"}
+          </span>
+          <span className="text-[11px] text-muted-foreground">Revenue-to-cost (Sale)</span>
+        </div>
+        <div className="rounded-lg border border-border bg-card px-4 py-3 flex flex-col gap-1">
+          <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide leading-tight">
+            Cost Ratio
+          </span>
+          <span className={cn(
+            "text-2xl font-bold",
+            roi.costRatioPct != null
+              ? roi.costRatioPct <= 6 ? "text-green-700 dark:text-green-400"
+              : roi.costRatioPct <= 10 ? "text-amber-700 dark:text-amber-400"
+              : "text-red-700 dark:text-red-400"
+              : "",
+          )}>
+            {roi.costRatioPct != null ? `${roi.costRatioPct.toFixed(2)}%` : "—"}
+          </span>
+          <span className="text-[11px] text-muted-foreground">Cost ÷ Order Booking</span>
+        </div>
+        <Tile
+          label="Total YTD Cost"
+          value={fmtRs(roi.totalCost)}
+          sub={`CTC ${fmtRs(roi.ctcCostYtd)} + T.A. ${fmtRs(roi.taBillYtd)}`}
+        />
+      </div>
+
+      {/* Per-unit metrics */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <Tile
+          label="Cost per Retailer"
+          value={fmtRs(roi.costPerRetailer)}
+          sub="Total cost ÷ all retailers"
+        />
+        <Tile
+          label="Cost per Visit"
+          value={fmtRs(roi.costPerVisit)}
+          sub="Total cost ÷ visits done (YTD)"
+        />
+        <Tile
+          label="Cost per Active Retailer"
+          value={fmtRs(roi.costPerActiveRetailer)}
+          sub="Total cost ÷ retailers with orders"
+        />
+      </div>
+
+      {/* Margin ROI placeholder */}
+      <div className="rounded-lg border border-dashed border-border bg-muted/10 px-5 py-4 space-y-1.5">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+          Margin ROI — waiting for Cost Master
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Gross margin and margin-based ROI will appear here once a Cost Master with
+          finished-goods cost (FG cost) is uploaded. MRP and purchase price are never
+          used as cost proxies.
+        </p>
+        <p className="text-[11px] text-muted-foreground italic">
+          Go to Data Health to upload a Cost Master for {memberName}.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 const AVAILABLE_FYS = ["2026-27", "2025-26", "2024-25", "2023-24"];
@@ -892,8 +1032,9 @@ export default function SalesDeepDive() {
     if (memberKey) fetchKpis(fy, selectedHead, memberKey);
   }
 
-  const kpis = data?.kpis ?? null;
-  const rd   = data?.retailerDetail ?? null;
+  const kpis     = data?.kpis ?? null;
+  const rd       = data?.retailerDetail ?? null;
+  const roiCost  = data?.roiCost ?? null;
   const stateHeads = data?.stateHeads ?? [];
   const members    = data?.members ?? [];
 
@@ -1079,6 +1220,11 @@ export default function SalesDeepDive() {
                     gap={rd.visitPlan.gap}
                   />
                 </>
+              )}
+
+              {/* Phase 4: ROI on cost */}
+              {roiCost && (
+                <RoiCostPanel roi={roiCost} memberName={kpis?.name ?? ""} />
               )}
 
               {rd.rows && rd.rows.length > 0 && (

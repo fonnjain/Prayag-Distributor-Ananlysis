@@ -1064,6 +1064,36 @@ export interface MgmtRetailerDetail {
   rowsRead?: number | null;
 }
 
+/**
+ * Phase 4: revenue-to-cost analysis for a field representative. Cost = CTC (monthly × elapsed complete fiscal months) + T.A. Bill (YTD cumulative). Margin ROI requires a Cost Master and is never backed by MRP or purchase price.
+ */
+export interface MgmtRoiCost {
+  /** Monthly CTC salary from the Data tab. */
+  ctcMonthly: number;
+  /** T.A. Bill, YTD cumulative, from the Data tab. */
+  taBillYtd: number;
+  /** Whole fiscal months elapsed from April 1 to today (July 23 → 3). */
+  elapsedCompleteMonths: number;
+  /** ctcMonthly × elapsedCompleteMonths. */
+  ctcCostYtd: number;
+  /** ctcCostYtd + taBillYtd. */
+  totalCost: number;
+  /** Order Booking ÷ totalCost. Higher = more efficient. */
+  obToCostMultiple?: number | null;
+  /** Sale received ÷ totalCost. */
+  saleToCostMultiple?: number | null;
+  /** totalCost ÷ total retailers in the member's sheet. */
+  costPerRetailer?: number | null;
+  /** totalCost ÷ total visits done (YTD). */
+  costPerVisit?: number | null;
+  /** totalCost ÷ active retailers (retailers with OB or Sale > 0). */
+  costPerActiveRetailer?: number | null;
+  /** (totalCost ÷ OB) × 100. Lower = more efficient. */
+  costRatioPct?: number | null;
+  /** Always false until a Cost Master with finished-goods cost is loaded. MRP and purchase price are never used as cost proxies. */
+  marginRoiAvailable: boolean;
+}
+
 export interface MgmtDeepDive {
   /** Fiscal year, e.g. 2026-27. */
   fy: string;
@@ -1074,6 +1104,8 @@ export interface MgmtDeepDive {
   kpis?: MgmtDeepDiveKpis | null;
   /** Phase 2: retailer-level detail from the member's own working sheet. Null when no member is selected. status='not-mapped' when the member has no sheet ID in the config; status='error' on read failure. Phase 1 KPIs are always returned regardless of this field. */
   retailerDetail?: MgmtRetailerDetail | null;
+  /** Phase 4: revenue-to-cost analysis. Null until retailer detail is loaded (requires spread for OB/sale/visits) or if CTC is missing from the Data tab. */
+  roiCost?: MgmtRoiCost | null;
   /** Total rows read from the Data tab. */
   rowsRead: number;
   error?: string | null;

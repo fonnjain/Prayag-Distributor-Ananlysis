@@ -98,6 +98,7 @@ export * from './mgmtRetailerDetail';
 export * from './mgmtRetailerDetailStatus';
 export * from './mgmtRetailerRow';
 export * from './mgmtRetailerSpread';
+export * from './mgmtRoiCost';
 export * from './mgmtSourceStatus';
 export * from './mgmtSourceStatusStatus';
 export * from './mgmtVerifyCheck';

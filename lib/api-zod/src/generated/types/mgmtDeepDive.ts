@@ -8,6 +8,7 @@
 import type { MgmtDeepDiveKpis } from './mgmtDeepDiveKpis';
 import type { MgmtDeepDiveMemberRef } from './mgmtDeepDiveMemberRef';
 import type { MgmtRetailerDetail } from './mgmtRetailerDetail';
+import type { MgmtRoiCost } from './mgmtRoiCost';
 
 export interface MgmtDeepDive {
   /** Fiscal year, e.g. 2026-27. */
@@ -19,6 +20,8 @@ export interface MgmtDeepDive {
   kpis?: MgmtDeepDiveKpis | null;
   /** Phase 2: retailer-level detail from the member's own working sheet. Null when no member is selected. status='not-mapped' when the member has no sheet ID in the config; status='error' on read failure. Phase 1 KPIs are always returned regardless of this field. */
   retailerDetail?: MgmtRetailerDetail | null;
+  /** Phase 4: revenue-to-cost analysis. Null until retailer detail is loaded (requires spread for OB/sale/visits) or if CTC is missing from the Data tab. */
+  roiCost?: MgmtRoiCost | null;
   /** Total rows read from the Data tab. */
   rowsRead: number;
   error?: string | null;

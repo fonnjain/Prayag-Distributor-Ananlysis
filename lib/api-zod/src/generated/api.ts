@@ -407,6 +407,20 @@ export const GetMgmtDeepDiveResponse = zod.object({
 }).nullish().describe('Phase 3: visit-pattern analysis and forward visit plan (present when status is \'ok\').'),
   "rowsRead": zod.number().nullish()
 }).nullish().describe('Phase 2: retailer-level detail from the member\'s own working sheet. Null when no member is selected. status=\'not-mapped\' when the member has no sheet ID in the config; status=\'error\' on read failure. Phase 1 KPIs are always returned regardless of this field.\n'),
+  "roiCost": zod.object({
+  "ctcMonthly": zod.number().describe('Monthly CTC salary from the Data tab.'),
+  "taBillYtd": zod.number().describe('T.A. Bill, YTD cumulative, from the Data tab.'),
+  "elapsedCompleteMonths": zod.number().describe('Whole fiscal months elapsed from April 1 to today (July 23 → 3).'),
+  "ctcCostYtd": zod.number().describe('ctcMonthly × elapsedCompleteMonths.'),
+  "totalCost": zod.number().describe('ctcCostYtd + taBillYtd.'),
+  "obToCostMultiple": zod.number().nullish().describe('Order Booking ÷ totalCost. Higher = more efficient.'),
+  "saleToCostMultiple": zod.number().nullish().describe('Sale received ÷ totalCost.'),
+  "costPerRetailer": zod.number().nullish().describe('totalCost ÷ total retailers in the member\'s sheet.'),
+  "costPerVisit": zod.number().nullish().describe('totalCost ÷ total visits done (YTD).'),
+  "costPerActiveRetailer": zod.number().nullish().describe('totalCost ÷ active retailers (retailers with OB or Sale > 0).'),
+  "costRatioPct": zod.number().nullish().describe('(totalCost ÷ OB) × 100. Lower = more efficient.'),
+  "marginRoiAvailable": zod.boolean().describe('Always false until a Cost Master with finished-goods cost is loaded. MRP and purchase price are never used as cost proxies.\n')
+}).nullish().describe('Phase 4: revenue-to-cost analysis. Null until retailer detail is loaded (requires spread for OB\/sale\/visits) or if CTC is missing from the Data tab.\n'),
   "rowsRead": zod.number().describe('Total rows read from the Data tab.'),
   "error": zod.string().nullish()
 })

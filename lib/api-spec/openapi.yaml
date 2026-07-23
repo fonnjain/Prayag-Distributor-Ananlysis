@@ -2573,6 +2573,12 @@ components:
             Null when no member is selected. status='not-mapped' when the member
             has no sheet ID in the config; status='error' on read failure.
             Phase 1 KPIs are always returned regardless of this field.
+        roiCost:
+          nullable: true
+          $ref: "#/components/schemas/MgmtRoiCost"
+          description: >
+            Phase 4: revenue-to-cost analysis. Null until retailer detail is loaded
+            (requires spread for OB/sale/visits) or if CTC is missing from the Data tab.
         rowsRead:
           type: integer
           description: Total rows read from the Data tab.
@@ -2586,6 +2592,58 @@ components:
         stateHead: { type: string }
         name: { type: string }
         normKey: { type: string }
+    MgmtRoiCost:
+      type: object
+      required: [ctcMonthly, taBillYtd, elapsedCompleteMonths, ctcCostYtd, totalCost, marginRoiAvailable]
+      description: >
+        Phase 4: revenue-to-cost analysis for a field representative.
+        Cost = CTC (monthly × elapsed complete fiscal months) + T.A. Bill (YTD cumulative).
+        Margin ROI requires a Cost Master and is never backed by MRP or purchase price.
+      properties:
+        ctcMonthly:
+          type: number
+          description: Monthly CTC salary from the Data tab.
+        taBillYtd:
+          type: number
+          description: T.A. Bill, YTD cumulative, from the Data tab.
+        elapsedCompleteMonths:
+          type: integer
+          description: Whole fiscal months elapsed from April 1 to today (July 23 → 3).
+        ctcCostYtd:
+          type: number
+          description: ctcMonthly × elapsedCompleteMonths.
+        totalCost:
+          type: number
+          description: ctcCostYtd + taBillYtd.
+        obToCostMultiple:
+          type: number
+          nullable: true
+          description: Order Booking ÷ totalCost. Higher = more efficient.
+        saleToCostMultiple:
+          type: number
+          nullable: true
+          description: Sale received ÷ totalCost.
+        costPerRetailer:
+          type: number
+          nullable: true
+          description: totalCost ÷ total retailers in the member's sheet.
+        costPerVisit:
+          type: number
+          nullable: true
+          description: totalCost ÷ total visits done (YTD).
+        costPerActiveRetailer:
+          type: number
+          nullable: true
+          description: totalCost ÷ active retailers (retailers with OB or Sale > 0).
+        costRatioPct:
+          type: number
+          nullable: true
+          description: (totalCost ÷ OB) × 100. Lower = more efficient.
+        marginRoiAvailable:
+          type: boolean
+          description: >
+            Always false until a Cost Master with finished-goods cost is loaded.
+            MRP and purchase price are never used as cost proxies.
     MgmtRetailerDetail:
       type: object
       required: [status]
