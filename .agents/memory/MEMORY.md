@@ -38,3 +38,4 @@
 - [Member working sheet column detection](member-sheet-column-detection.md) — sheets have one OB/Sale col per FY; use DEFAULT_COL (W-AD), never first-match header detection; prefer FY-specific tab; break on TOTAL row.
 - [Visit plan working-day model](visit-plan-working-days.md) — Mon-Sat (6-day week); 97 days elapsed Apr-Jul22; rate=4.07/day; ~220 in spec was a rough estimate using ~24 days/month; actual gap for Prasun = -429 visits.
 - [Distributor D2 flows architecture](distributor-d2-flows.md) — normDistKey on both sale_line.customer AND member-sheet names; 3 parallel DB queries; hasPrimaryData=false ≠ zero; Prasun=Anant Singh is the only testable state head (Jul 2026).
+- [Distributor D3 SKU spread architecture](distributor-d3-skuspread.md) — secondary_register_line has no distributor/item_code col; retailer attribution via D1 list; LOWER(TRIM) case match required; brand_canon=finest granularity; head_canon stores raw names not normKeys.

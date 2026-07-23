@@ -1259,6 +1259,74 @@ export interface MgmtDistributorFlows {
   growthPct?: number | null;
 }
 
+/**
+ * NET (Sub Total) for a brand_canon or broad segment in a distributor's secondary sales.
+ */
+export interface MgmtDistributorBrandNet {
+  /** brand_canon product-line name or broad segment label. */
+  segment: string;
+  net: number;
+  /** Share of this segment in the distributor's total NET (0–100). */
+  pct: number;
+}
+
+export type MgmtWhitespaceHintType = typeof MgmtWhitespaceHintType[keyof typeof MgmtWhitespaceHintType];
+
+
+export const MgmtWhitespaceHintType = {
+  range_depth: 'range_depth',
+  lost_brand: 'lost_brand',
+  peer_whitespace: 'peer_whitespace',
+} as const;
+
+/**
+ * One whitespace suggestion for a distributor. Ranked easiest→hardest: range_depth (already in the broad segment), lost_brand (bought before), peer_whitespace (comparable distributor sells it).
+ */
+export interface MgmtWhitespaceHint {
+  type: MgmtWhitespaceHintType;
+  /** brand_canon value being suggested. */
+  brand: string;
+  /** Broad segment this brand_canon maps to. */
+  broadSegment: string;
+  /** Human-readable explanation of why this is a suggestion. */
+  evidence: string;
+  /** Names of peer distributors (peer_whitespace type only). */
+  peerNames?: string[] | null;
+  /** Combined NET at peer distributors in recentFy. */
+  peerNet?: number | null;
+}
+
+/**
+ * Phase D3: product-line (brand_canon) spread per distributor, sourced from secondary_register_line (closed FYs only). Attribution is via the D1 retailer list — secondary_register_line has no distributor column. "Segment" here = brand_canon (product-line name such as "CPVC DURALIFE"), which is the finest granularity available in the secondary register. isLiveYear=true when no FY2026-27 secondary register has been ingested. matchedRetailers=0 means the D1 retailer names did not match any secondary_register_line.customer rows — data quality, not an error.
+ */
+export interface MgmtDistributorSkuSpread {
+  /** True for the live FY (no secondary register ingested yet). */
+  isLiveYear: boolean;
+  liveYearNote?: string | null;
+  /** Denominator for broad segment coverage (always 17, from group_map.json). */
+  totalBroadSegments: number;
+  /** Most recent closed FY with any matched data. */
+  recentFy?: string | null;
+  /** Sum of net_amount (Sub Total) in recentFy. */
+  totalNet?: number | null;
+  /** Distinct brand_canon values sold in recentFy. */
+  distinctBrands?: number | null;
+  /** Distinct broad segments (of 17) participated in during recentFy. */
+  broadSegmentsCovered?: number | null;
+  /** Top brand_canons by net_amount in recentFy (descending). */
+  netByBrand?: MgmtDistributorBrandNet[] | null;
+  /** Same data aggregated to broad segment level. */
+  netByBroadSegment?: MgmtDistributorBrandNet[] | null;
+  /** Average distinct brand_canons per retailer (all closed FYs). */
+  crossSellDepth?: number | null;
+  /** HHI over brand_canon NET shares in recentFy (0–10000). */
+  concentrationHhi?: number | null;
+  /** D1 retailers that appeared in secondary_register_line (by LOWER TRIM match). */
+  matchedRetailers?: number | null;
+  /** Ranked whitespace suggestions — range_depth first, lost_brand second, peer_whitespace third. */
+  whitespace?: MgmtWhitespaceHint[] | null;
+}
+
 export interface MgmtDistributorGroup {
   name: string;
   normKey: string;
@@ -1274,6 +1342,7 @@ export interface MgmtDistributorGroup {
   guessedCount: number;
   retailers: MgmtDistributorRetailerRow[];
   flows?: MgmtDistributorFlows | null;
+  skuSpread?: MgmtDistributorSkuSpread | null;
 }
 
 export interface MgmtSharedRetailerEntry {

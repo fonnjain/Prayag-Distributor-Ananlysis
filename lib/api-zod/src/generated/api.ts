@@ -532,7 +532,37 @@ export const GetMgmtDistributorDeepDiveResponse = zod.object({
   "currentPeriodDispatch": zod.number().nullish(),
   "priorPeriodDispatch": zod.number().nullish(),
   "growthPct": zod.number().nullish()
-}).nullish().describe('Phase D2: the two flows a distributor sits between (primary in-flow from Prayag and secondary out-flow to retailers) and the gap between them. NET = Sub Total (sale_line.amount) throughout. hasPrimaryData=false means no sale_line rows matched — never show a zero.\n')
+}).nullish().describe('Phase D2: the two flows a distributor sits between (primary in-flow from Prayag and secondary out-flow to retailers) and the gap between them. NET = Sub Total (sale_line.amount) throughout. hasPrimaryData=false means no sale_line rows matched — never show a zero.\n'),
+  "skuSpread": zod.object({
+  "isLiveYear": zod.boolean().describe('True for the live FY (no secondary register ingested yet).'),
+  "liveYearNote": zod.string().nullish(),
+  "totalBroadSegments": zod.number().describe('Denominator for broad segment coverage (always 17, from group_map.json).'),
+  "recentFy": zod.string().nullish().describe('Most recent closed FY with any matched data.'),
+  "totalNet": zod.number().nullish().describe('Sum of net_amount (Sub Total) in recentFy.'),
+  "distinctBrands": zod.number().nullish().describe('Distinct brand_canon values sold in recentFy.'),
+  "broadSegmentsCovered": zod.number().nullish().describe('Distinct broad segments (of 17) participated in during recentFy.'),
+  "netByBrand": zod.array(zod.object({
+  "segment": zod.string().describe('brand_canon product-line name or broad segment label.'),
+  "net": zod.number(),
+  "pct": zod.number().describe('Share of this segment in the distributor\'s total NET (0–100).')
+}).describe('NET (Sub Total) for a brand_canon or broad segment in a distributor\'s secondary sales.')).nullish().describe('Top brand_canons by net_amount in recentFy (descending).'),
+  "netByBroadSegment": zod.array(zod.object({
+  "segment": zod.string().describe('brand_canon product-line name or broad segment label.'),
+  "net": zod.number(),
+  "pct": zod.number().describe('Share of this segment in the distributor\'s total NET (0–100).')
+}).describe('NET (Sub Total) for a brand_canon or broad segment in a distributor\'s secondary sales.')).nullish().describe('Same data aggregated to broad segment level.'),
+  "crossSellDepth": zod.number().nullish().describe('Average distinct brand_canons per retailer (all closed FYs).'),
+  "concentrationHhi": zod.number().nullish().describe('HHI over brand_canon NET shares in recentFy (0–10000).'),
+  "matchedRetailers": zod.number().nullish().describe('D1 retailers that appeared in secondary_register_line (by LOWER TRIM match).'),
+  "whitespace": zod.array(zod.object({
+  "type": zod.enum(['range_depth', 'lost_brand', 'peer_whitespace']),
+  "brand": zod.string().describe('brand_canon value being suggested.'),
+  "broadSegment": zod.string().describe('Broad segment this brand_canon maps to.'),
+  "evidence": zod.string().describe('Human-readable explanation of why this is a suggestion.'),
+  "peerNames": zod.array(zod.string()).nullish().describe('Names of peer distributors (peer_whitespace type only).'),
+  "peerNet": zod.number().nullish().describe('Combined NET at peer distributors in recentFy.')
+}).describe('One whitespace suggestion for a distributor. Ranked easiest→hardest: range_depth (already in the broad segment), lost_brand (bought before), peer_whitespace (comparable distributor sells it).\n')).nullish().describe('Ranked whitespace suggestions — range_depth first, lost_brand second, peer_whitespace third.')
+}).nullish().describe('Phase D3: product-line (brand_canon) spread per distributor, sourced from secondary_register_line (closed FYs only). Attribution is via the D1 retailer list — secondary_register_line has no distributor column. \"Segment\" here = brand_canon (product-line name such as \"CPVC DURALIFE\"), which is the finest granularity available in the secondary register. isLiveYear=true when no FY2026-27 secondary register has been ingested. matchedRetailers=0 means the D1 retailer names did not match any secondary_register_line.customer rows — data quality, not an error.\n')
 })),
   "sharedRetailers": zod.array(zod.object({
   "name": zod.string(),

@@ -7,6 +7,7 @@
  */
 import type { MgmtDistributorFlows } from './mgmtDistributorFlows';
 import type { MgmtDistributorRetailerRow } from './mgmtDistributorRetailerRow';
+import type { MgmtDistributorSkuSpread } from './mgmtDistributorSkuSpread';
 
 export interface MgmtDistributorGroup {
   name: string;
@@ -23,4 +24,5 @@ export interface MgmtDistributorGroup {
   guessedCount: number;
   retailers: MgmtDistributorRetailerRow[];
   flows?: MgmtDistributorFlows | null;
+  skuSpread?: MgmtDistributorSkuSpread | null;
 }

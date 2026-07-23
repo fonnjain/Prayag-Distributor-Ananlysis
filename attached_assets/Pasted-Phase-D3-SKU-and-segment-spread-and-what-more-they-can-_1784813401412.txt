@@ -1,0 +1,36 @@
+Phase D3 - SKU and segment spread, and what more they can sell
+PROMPT - Phase D3
+Prayag app - Distributor Deep Dive, Phase D3 of 4. Same global rules.
+
+Goal: SKU and segment spread per distributor, and a ranked list of what they
+could sell but do not.
+
+Closed years (FY2021-22 to FY2025-26), from secondary_register_line grouped by its
+Distributor column:
+- distinct item codes (Cat. No.), segment coverage out of the FULL Prayag segment
+  set (state the denominator on screen), NET (Sub Total) by segment, top SKUs by
+  NET, segment concentration, and average distinct segments per retailer as a
+  cross-sell depth measure.
+
+Whitespace - rank by ease of conversion, easiest first, and name the evidence
+behind every suggestion:
+  1. Range depth - item codes the distributor does NOT sell inside segments it
+     ALREADY sells. Easiest, because the shelf and the relationship exist.
+  2. Lost SKUs - item codes bought last year and absent this year.
+  3. Peer whitespace - segments and SKUs that comparable distributors sell and
+     this one does not. Comparable = same state, similar NET band. Name the peer
+     distributors behind each suggestion so it is empirical, not aspirational.
+
+Live year (FY2026-27): no item-code data exists, because there is no FY2026-27
+secondary register. Show the SKU and segment panels as 'populates when a FY2026-27
+register exists' - not as zeros. Do NOT substitute the dealer 'Assigned Segment'
+attribute for actual sales by segment: it records what a dealer is assigned to,
+not what was bought.
+
+Acceptance:
+  for a closed year, a distributor's segment coverage and NET by segment render
+    and foot to that distributor's register NET total, using Sub Total
+  segment coverage shows both numerator and denominator (for example 7 of 15)
+  every whitespace suggestion names its evidence - the segment already sold, the
+    prior-year purchase, or the specific peer distributors
+  the live year shows the unavailable state, never zeros

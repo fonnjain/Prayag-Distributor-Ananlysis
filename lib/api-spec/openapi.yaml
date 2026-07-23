@@ -2698,6 +2698,9 @@ components:
         flows:
           nullable: true
           $ref: "#/components/schemas/MgmtDistributorFlows"
+        skuSpread:
+          nullable: true
+          $ref: "#/components/schemas/MgmtDistributorSkuSpread"
     MgmtDistributorRetailerRow:
       type: object
       required: [name, orderBooking, sale, isActive, confirmedHead, memberName]
@@ -2793,6 +2796,117 @@ components:
         currentPeriodDispatch: { type: number, nullable: true }
         priorPeriodDispatch: { type: number, nullable: true }
         growthPct: { type: number, nullable: true }
+    MgmtDistributorSkuSpread:
+      type: object
+      required: [isLiveYear, totalBroadSegments]
+      description: >
+        Phase D3: product-line (brand_canon) spread per distributor, sourced from
+        secondary_register_line (closed FYs only). Attribution is via the D1
+        retailer list — secondary_register_line has no distributor column.
+        "Segment" here = brand_canon (product-line name such as "CPVC DURALIFE"),
+        which is the finest granularity available in the secondary register.
+        isLiveYear=true when no FY2026-27 secondary register has been ingested.
+        matchedRetailers=0 means the D1 retailer names did not match any
+        secondary_register_line.customer rows — data quality, not an error.
+      properties:
+        isLiveYear:
+          type: boolean
+          description: True for the live FY (no secondary register ingested yet).
+        liveYearNote:
+          type: string
+          nullable: true
+        totalBroadSegments:
+          type: integer
+          description: Denominator for broad segment coverage (always 17, from group_map.json).
+        recentFy:
+          type: string
+          nullable: true
+          description: Most recent closed FY with any matched data.
+        totalNet:
+          type: number
+          nullable: true
+          description: Sum of net_amount (Sub Total) in recentFy.
+        distinctBrands:
+          type: integer
+          nullable: true
+          description: Distinct brand_canon values sold in recentFy.
+        broadSegmentsCovered:
+          type: integer
+          nullable: true
+          description: Distinct broad segments (of 17) participated in during recentFy.
+        netByBrand:
+          type: array
+          nullable: true
+          description: Top brand_canons by net_amount in recentFy (descending).
+          items:
+            $ref: "#/components/schemas/MgmtDistributorBrandNet"
+        netByBroadSegment:
+          type: array
+          nullable: true
+          description: Same data aggregated to broad segment level.
+          items:
+            $ref: "#/components/schemas/MgmtDistributorBrandNet"
+        crossSellDepth:
+          type: number
+          nullable: true
+          description: Average distinct brand_canons per retailer (all closed FYs).
+        concentrationHhi:
+          type: integer
+          nullable: true
+          description: HHI over brand_canon NET shares in recentFy (0–10000).
+        matchedRetailers:
+          type: integer
+          nullable: true
+          description: D1 retailers that appeared in secondary_register_line (by LOWER TRIM match).
+        whitespace:
+          type: array
+          nullable: true
+          description: Ranked whitespace suggestions — range_depth first, lost_brand second, peer_whitespace third.
+          items:
+            $ref: "#/components/schemas/MgmtWhitespaceHint"
+    MgmtDistributorBrandNet:
+      type: object
+      required: [segment, net, pct]
+      description: NET (Sub Total) for a brand_canon or broad segment in a distributor's secondary sales.
+      properties:
+        segment:
+          type: string
+          description: brand_canon product-line name or broad segment label.
+        net:
+          type: number
+        pct:
+          type: number
+          description: Share of this segment in the distributor's total NET (0–100).
+    MgmtWhitespaceHint:
+      type: object
+      required: [type, brand, broadSegment, evidence]
+      description: >
+        One whitespace suggestion for a distributor. Ranked easiest→hardest:
+        range_depth (already in the broad segment), lost_brand (bought before),
+        peer_whitespace (comparable distributor sells it).
+      properties:
+        type:
+          type: string
+          enum: [range_depth, lost_brand, peer_whitespace]
+        brand:
+          type: string
+          description: brand_canon value being suggested.
+        broadSegment:
+          type: string
+          description: Broad segment this brand_canon maps to.
+        evidence:
+          type: string
+          description: Human-readable explanation of why this is a suggestion.
+        peerNames:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: Names of peer distributors (peer_whitespace type only).
+        peerNet:
+          type: number
+          nullable: true
+          description: Combined NET at peer distributors in recentFy.
     MgmtRoiCost:
       type: object
       required: [ctcMonthly, taBillYtd, elapsedCompleteMonths, ctcCostYtd, totalCost, marginRoiAvailable]

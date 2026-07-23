@@ -68,6 +68,38 @@ type DistributorFlows = {
   growthPct: number | null;
 };
 
+/** D3: brand_canon/segment spread per distributor from secondary_register_line. */
+type DistributorBrandNet = {
+  segment: string;
+  net: number;
+  pct: number;
+};
+
+type WhitespaceHint = {
+  type: "range_depth" | "lost_brand" | "peer_whitespace";
+  brand: string;
+  broadSegment: string;
+  evidence: string;
+  peerNames?: string[];
+  peerNet?: number;
+};
+
+type DistributorSkuSpread = {
+  isLiveYear: boolean;
+  liveYearNote?: string;
+  totalBroadSegments: number;
+  recentFy?: string;
+  totalNet?: number;
+  distinctBrands?: number;
+  broadSegmentsCovered?: number;
+  netByBrand?: DistributorBrandNet[];
+  netByBroadSegment?: DistributorBrandNet[];
+  crossSellDepth?: number;
+  concentrationHhi?: number;
+  matchedRetailers?: number;
+  whitespace?: WhitespaceHint[];
+};
+
 type DistributorGroup = {
   name: string;
   normKey: string;
@@ -83,6 +115,7 @@ type DistributorGroup = {
   guessedCount: number;
   retailers: DistributorRetailerRow[];
   flows: DistributorFlows | null;
+  skuSpread?: DistributorSkuSpread;
 };
 
 type SharedRetailerEntry = {
@@ -438,6 +471,224 @@ function FlowPanel({ flows, distName }: { flows: DistributorFlows | null; distNa
   );
 }
 
+// ── D3: SKU / segment spread panel ───────────────────────────────────────────
+
+const HHI_LABEL = (hhi: number) =>
+  hhi < 2500 ? "Diversified" : hhi < 5000 ? "Moderate" : "Concentrated";
+
+const WHITESPACE_TYPE_LABEL: Record<WhitespaceHint["type"], string> = {
+  range_depth: "Range depth",
+  lost_brand: "Lost line",
+  peer_whitespace: "Peer gap",
+};
+
+const WHITESPACE_TYPE_COLOR: Record<WhitespaceHint["type"], string> = {
+  range_depth:
+    "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40 text-emerald-800 dark:text-emerald-300",
+  lost_brand:
+    "bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/40 text-amber-800 dark:text-amber-300",
+  peer_whitespace:
+    "bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800/40 text-blue-800 dark:text-blue-300",
+};
+
+function SkuSpreadPanel({
+  spread,
+  distName,
+}: {
+  spread: DistributorSkuSpread | undefined;
+  distName: string;
+}) {
+  if (!spread) return null;
+
+  // Live FY placeholder
+  if (spread.isLiveYear) {
+    return (
+      <div className="mb-4 border border-border rounded-lg p-4 bg-muted/5">
+        <div className="text-sm font-semibold mb-1">Product Mix</div>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          {spread.liveYearNote ??
+            "Segment data will populate once a FY2026-27 secondary register is ingested."}
+        </p>
+        <p className="text-xs text-muted-foreground mt-1">
+          The secondary register is the source for this panel. The dealer's assigned
+          segment attribute records allocation, not actual purchases, and is never
+          substituted here.
+        </p>
+      </div>
+    );
+  }
+
+  // No retailer matches
+  if ((spread.matchedRetailers ?? 0) === 0) {
+    return (
+      <div className="mb-4 border border-border rounded-lg p-4 bg-muted/5">
+        <div className="text-sm font-semibold mb-1">Product Mix</div>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          No secondary register rows matched {distName}'s retailers for closed FYs
+          (FY2021-22 through FY2025-26). Retailer names from the member working
+          sheet may differ from how the secondary register records them.
+        </p>
+      </div>
+    );
+  }
+
+  const brands = spread.netByBrand ?? [];
+  const broadSegs = spread.netByBroadSegment ?? [];
+  const whitespace = spread.whitespace ?? [];
+  const totalNet = spread.totalNet ?? 0;
+  const maxBrandNet = brands[0]?.net ?? 1;
+
+  return (
+    <div className="mb-4 border border-border rounded-lg overflow-hidden">
+      <div className="bg-muted/40 px-4 py-2.5 border-b border-border flex items-center justify-between">
+        <h4 className="font-semibold text-sm">Product Mix</h4>
+        <span className="text-xs text-muted-foreground">
+          Secondary register — {spread.recentFy} &nbsp;·&nbsp;
+          {spread.matchedRetailers} retailer{spread.matchedRetailers !== 1 ? "s" : ""} matched
+        </span>
+      </div>
+
+      <div className="p-4 space-y-5">
+
+        {/* Coverage tiles */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="rounded-md border border-border px-3 py-2">
+            <div className="text-xs text-muted-foreground">Broad segments</div>
+            <div className="font-bold text-lg tabular-nums">
+              {spread.broadSegmentsCovered ?? 0}
+              <span className="text-sm font-normal text-muted-foreground">
+                {" "}of {spread.totalBroadSegments}
+              </span>
+            </div>
+          </div>
+          <div className="rounded-md border border-border px-3 py-2">
+            <div className="text-xs text-muted-foreground">Product lines</div>
+            <div className="font-bold text-lg tabular-nums">{spread.distinctBrands ?? 0}</div>
+          </div>
+          <div className="rounded-md border border-border px-3 py-2">
+            <div className="text-xs text-muted-foreground">Cross-sell depth</div>
+            <div className="font-bold text-lg tabular-nums">
+              {spread.crossSellDepth?.toFixed(1) ?? "--"}
+              <span className="text-sm font-normal text-muted-foreground"> avg lines/retailer</span>
+            </div>
+          </div>
+          <div className="rounded-md border border-border px-3 py-2">
+            <div className="text-xs text-muted-foreground">Concentration</div>
+            <div className="font-bold text-lg tabular-nums">
+              {spread.concentrationHhi != null ? HHI_LABEL(spread.concentrationHhi) : "--"}
+            </div>
+            {spread.concentrationHhi != null && (
+              <div className="text-xs text-muted-foreground">
+                HHI {spread.concentrationHhi.toLocaleString()}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Broad segment bars */}
+        {broadSegs.length > 0 && (
+          <div>
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+              NET by broad segment — {spread.recentFy}
+            </div>
+            <div className="space-y-1.5">
+              {broadSegs.map((seg) => (
+                <div key={seg.segment} className="flex items-center gap-2">
+                  <div className="w-32 shrink-0 text-xs truncate text-right text-muted-foreground">
+                    {seg.segment}
+                  </div>
+                  <div className="flex-1 bg-muted/40 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="h-2 rounded-full bg-primary/70"
+                      style={{ width: `${Math.min(100, seg.pct)}%` }}
+                    />
+                  </div>
+                  <div className="w-24 shrink-0 text-xs tabular-nums text-right">
+                    {formatINR(seg.net)}
+                    <span className="text-muted-foreground ml-1">{seg.pct.toFixed(1)}%</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Top product lines */}
+        {brands.length > 0 && (
+          <div>
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+              Top product lines (brand_canon) — {spread.recentFy}
+            </div>
+            <div className="space-y-1">
+              {brands.slice(0, 8).map((b) => (
+                <div key={b.segment} className="flex items-center gap-2">
+                  <div className="w-48 shrink-0 text-xs truncate text-muted-foreground">
+                    {b.segment}
+                  </div>
+                  <div className="flex-1 bg-muted/40 rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className="h-1.5 rounded-full bg-primary/50"
+                      style={{ width: `${Math.round((b.net / maxBrandNet) * 100)}%` }}
+                    />
+                  </div>
+                  <div className="w-24 shrink-0 text-xs tabular-nums text-right">
+                    {formatINR(b.net)}
+                  </div>
+                </div>
+              ))}
+              {brands.length > 8 && (
+                <div className="text-xs text-muted-foreground pl-48 pt-0.5">
+                  + {brands.length - 8} more product lines (total {formatINR(totalNet)})
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground mt-2 italic">
+              The secondary register records sales at product-line level (brand_canon), not
+              individual item codes. Brand_canon is the finest granularity available.
+            </p>
+          </div>
+        )}
+
+        {/* Whitespace */}
+        {whitespace.length > 0 && (
+          <div className="pt-1 border-t border-border/60">
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+              Whitespace — ranked easiest to convert first
+            </div>
+            <div className="space-y-1.5">
+              {whitespace.map((h, i) => (
+                <div
+                  key={i}
+                  className={`rounded-md border px-3 py-2 text-xs ${WHITESPACE_TYPE_COLOR[h.type]}`}
+                >
+                  <div className="flex items-start gap-2">
+                    <span className="shrink-0 font-semibold mt-px">
+                      {WHITESPACE_TYPE_LABEL[h.type]}
+                    </span>
+                    <span className="font-medium">{h.brand}</span>
+                    <span className="text-[10px] opacity-70 shrink-0">{h.broadSegment}</span>
+                  </div>
+                  <div className="mt-0.5 opacity-80">{h.evidence}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {whitespace.length === 0 && brands.length > 0 && (
+          <div className="pt-1 border-t border-border/60">
+            <div className="text-xs text-muted-foreground">
+              No whitespace suggestions — this distributor sells all product lines
+              observed across comparable distributors for {spread.recentFy}.
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function DistributorDeepDive() {
@@ -686,6 +937,7 @@ export default function DistributorDeepDive() {
                           <tr key={`${dist.normKey}-detail`}>
                             <td colSpan={9} className="bg-muted/10 px-4 py-4">
                               <FlowPanel flows={dist.flows} distName={dist.name} />
+                              <SkuSpreadPanel spread={dist.skuSpread} distName={dist.name} />
                               <div className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
                                 <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                                 Confirmed

@@ -1,4 +1,4 @@
-// Distributor Deep Dive — Phase D1 + D2
+// Distributor Deep Dive — Phase D1 + D2 + D3
 //
 // Phase D1: Groups retailer rows from member working sheets by Assigned
 //   Distributor field. Four distinct field states:
@@ -38,6 +38,10 @@ import { eq, and, sql, inArray, or, isNull } from "drizzle-orm";
 import { logger } from "../logger.js";
 import { loadDeepDiveData } from "./deepDiveData.js";
 import { loadMemberSheet, type RetailerRow } from "./memberSheet.js";
+import {
+  loadDistributorSkuSpread,
+  type DistributorSkuSpread,
+} from "./distributorSkuSpread.js";
 import verifyAnchorsJson from "../../../config/verify_anchors.json" assert { type: "json" };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -97,7 +101,8 @@ export type DistributorGroup = {
   confirmedCount: number;
   guessedCount: number;
   retailers: DistributorRetailerRow[];
-  flows: DistributorFlows | null;   // D2: null until loadDistributorFlows runs
+  flows: DistributorFlows | null;       // D2: null until loadDistributorFlows runs
+  skuSpread?: DistributorSkuSpread;     // D3: set by loadDistributorSkuSpread
 };
 
 export type SharedRetailerEntry = {
@@ -775,9 +780,10 @@ export async function loadDistributorDeepDive(
   );
 
   // Step 10 (D2): Attach primary flow data to each distributor group.
-  // Run in parallel with the return — the result mutates distGroups in place
-  // before the awaited value is consumed.
   await loadDistributorFlows(fy, selectedStateHead, distGroups);
+
+  // Step 11 (D3): Attach SKU/segment spread from secondary_register_line.
+  await loadDistributorSkuSpread(fy, distGroups);
 
   return {
     fy, stateHeads,
