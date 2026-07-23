@@ -10,6 +10,7 @@ import type { MgmtDeepDiveMemberRef } from './mgmtDeepDiveMemberRef';
 import type { MgmtRetailerDetail } from './mgmtRetailerDetail';
 import type { MgmtRoiCost } from './mgmtRoiCost';
 import type { MgmtSkuSpread } from './mgmtSkuSpread';
+import type { MgmtWinBackItem } from './mgmtWinBackItem';
 
 export interface MgmtDeepDive {
   /** Fiscal year, e.g. 2026-27. */
@@ -25,7 +26,11 @@ export interface MgmtDeepDive {
   roiCost?: MgmtRoiCost | null;
   /** Phase 5: segment and SKU spread from secondary_register_line (closed FYs) or a live-year placeholder when no register is ingested. Null when no member is selected. */
   skuSpread?: MgmtSkuSpread | null;
+  /** Phase 6: dormant retailers — customers present in FY2024-25 or FY2025-26 secondary register for this member but absent from the current working sheet. Null when no member is selected. */
+  winBack?: MgmtWinBackItem[] | null;
   /** Total rows read from the Data tab. */
   rowsRead: number;
+  /** Phase 6: true when the Data-tab member list was served from a DB snapshot (no Sheets read on this request). Absent when false. */
+  fromDbSnapshot?: boolean | null;
   error?: string | null;
 }

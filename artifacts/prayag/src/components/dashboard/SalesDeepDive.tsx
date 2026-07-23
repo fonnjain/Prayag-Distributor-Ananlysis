@@ -200,6 +200,15 @@ interface SkuSpread {
   concentrationHhi?: number | null;
 }
 
+// ── Phase 6 types ──────────────────────────────────────────────────────────────
+
+interface WinBackItem {
+  customer: string;
+  lastActiveFy: string;
+  lastActiveMonth: string;
+  lastNet: number;
+}
+
 interface DeepDiveData {
   fy: string;
   stateHeads: string[];
@@ -208,8 +217,10 @@ interface DeepDiveData {
   retailerDetail: RetailerDetail | null;
   roiCost: RoiCost | null;
   skuSpread: SkuSpread | null;
+  winBack: WinBackItem[] | null;
   rowsRead: number;
   error: string | null;
+  fromDbSnapshot?: boolean | null;
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
@@ -1076,6 +1087,235 @@ function SkuSpreadPanel({ spread }: { spread: SkuSpread }) {
   );
 }
 
+// ── Phase 6 components ────────────────────────────────────────────────────────
+
+function AvsBPanel({
+  kpis,
+  rd,
+}: {
+  kpis: MemberKpis;
+  rd: RetailerDetail | null;
+}) {
+  const partyOb = kpis.orderBooking ?? 0;
+  const directOb = kpis.directDealersOrder ?? 0;
+  const aTotal = partyOb + directOb;
+
+  const sheetTotal =
+    rd?.status === "ok" && rd.spread ? rd.spread.totalOrderBooking : null;
+
+  const variance = sheetTotal != null ? aTotal - sheetTotal : null;
+  const variancePct =
+    sheetTotal != null && aTotal > 0
+      ? ((aTotal - sheetTotal) / aTotal) * 100
+      : null;
+  const withinOne = variancePct != null && Math.abs(variancePct) <= 1;
+
+  return (
+    <div className="space-y-3">
+      <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground border-b border-border pb-1">
+        A-vs-B Reconciliation — Order Booking
+      </h3>
+
+      <div className="grid grid-cols-2 gap-3">
+        {/* Source A */}
+        <div className="rounded-lg border border-border bg-muted/20 px-4 py-3 space-y-1.5">
+          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+            Source A — Dashboard (Data tab)
+          </p>
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">Party OB</span>
+            <span className="font-semibold">{fmtRs(partyOb)}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">Direct Dealer OB</span>
+            <span className="font-semibold">{fmtRs(directOb)}</span>
+          </div>
+          <div className="flex justify-between text-sm border-t border-border pt-1.5">
+            <span className="text-muted-foreground font-medium">Total A</span>
+            <span className="font-bold">{fmtRs(aTotal)}</span>
+          </div>
+        </div>
+
+        {/* Source B */}
+        <div className="rounded-lg border border-border bg-muted/20 px-4 py-3 space-y-1.5">
+          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+            Source B — Working Sheet (re-derived)
+          </p>
+          {rd?.status === "loading" && (
+            <p className="text-xs text-muted-foreground italic">Working sheet loading…</p>
+          )}
+          {rd?.status === "not-mapped" && (
+            <p className="text-xs text-muted-foreground italic">No working sheet mapped.</p>
+          )}
+          {rd?.status === "error" && (
+            <p className="text-xs text-amber-700 dark:text-amber-400 italic">Sheet error — B unavailable.</p>
+          )}
+          {sheetTotal != null && (
+            <>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Sum of retailer rows</span>
+                <span className="font-semibold">{fmtRs(sheetTotal)}</span>
+              </div>
+              <div className="flex justify-between text-sm border-t border-border pt-1.5">
+                <span className="text-muted-foreground font-medium">Total B</span>
+                <span className="font-bold">{fmtRs(sheetTotal)}</span>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {variance != null && (
+        <div className="flex items-center gap-3">
+          <div
+            className={cn(
+              "rounded-full px-3 py-1 text-xs font-semibold",
+              withinOne
+                ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+                : "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300",
+            )}
+          >
+            {withinOne ? "Reconciles within 1%" : "Variance outside 1%"}
+          </div>
+          <span className="text-xs text-muted-foreground">
+            Variance: {fmtRs(Math.abs(variance))}{" "}
+            {variancePct != null && `(${Math.abs(variancePct).toFixed(2)}%)`}
+            {variance > 0 ? " — A exceeds B" : variance < 0 ? " — B exceeds A" : " — exact match"}
+          </span>
+        </div>
+      )}
+
+      <p className="text-[11px] text-muted-foreground">
+        A = Data tab party OB + direct dealer OB · B = sum of individual retailer rows in working sheet.
+      </p>
+    </div>
+  );
+}
+
+function WinBackPanel({ items }: { items: WinBackItem[] }) {
+  const top = items.slice(0, 20);
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground border-b border-border pb-1 flex-1">
+          Win-Back — Dormant Retailers
+        </h3>
+        <span className="ml-3 text-[11px] font-semibold rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 px-2 py-0.5">
+          {items.length} dormant
+        </span>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Customers present in FY2024-25 or FY2025-26 secondary register but not in the current working sheet.
+      </p>
+
+      <div className="rounded-lg border border-border overflow-hidden">
+        <div className="grid grid-cols-[1fr_auto_auto_auto] gap-0 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide bg-muted/30 px-4 py-2">
+          <span>Customer</span>
+          <span className="text-center px-3">Last FY</span>
+          <span className="text-center px-3">Last Month</span>
+          <span className="text-right">Last NET</span>
+        </div>
+        <div className="divide-y divide-border">
+          {top.map((item) => (
+            <div
+              key={`${item.customer}-${item.lastActiveFy}`}
+              className="grid grid-cols-[1fr_auto_auto_auto] gap-0 px-4 py-2.5 text-sm items-center"
+            >
+              <span className="truncate text-foreground font-medium">{item.customer}</span>
+              <span className="text-center px-3 text-muted-foreground text-xs">{item.lastActiveFy}</span>
+              <span className="text-center px-3 text-muted-foreground text-xs">{item.lastActiveMonth}</span>
+              <span className="text-right font-semibold text-foreground">{fmtRs(item.lastNet)}</span>
+            </div>
+          ))}
+        </div>
+        {items.length > 20 && (
+          <div className="px-4 py-2 bg-muted/20 border-t border-border text-xs text-muted-foreground">
+            Showing top 20 of {items.length} dormant customers.
+          </div>
+        )}
+      </div>
+
+      <p className="text-[11px] text-muted-foreground">
+        Source: secondary_register_line · FY2024-25 and FY2025-26 · compared by normalised customer name.
+      </p>
+    </div>
+  );
+}
+
+function RunRatePanel({
+  kpis,
+  elapsedMonths,
+}: {
+  kpis: MemberKpis;
+  elapsedMonths: number;
+}) {
+  if (elapsedMonths <= 0) return null;
+
+  const ytdOb = (kpis.orderBooking ?? 0) + (kpis.directDealersOrder ?? 0);
+  const pace = ytdOb / elapsedMonths; // per-month pace
+  const projected = pace * 12;
+  const plan = kpis.secondaryTarget;
+  const projVsPlanPct = plan && plan > 0 ? (projected / plan) * 100 : null;
+  const barWidth = projVsPlanPct != null ? Math.min(100, projVsPlanPct) : 0;
+  const isOnTrack = projVsPlanPct != null && projVsPlanPct >= 100;
+
+  return (
+    <div className="space-y-3">
+      <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground border-b border-border pb-1">
+        Run-Rate Projection — FY2026-27
+      </h3>
+
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-lg border border-border bg-muted/20 px-3 py-3 text-center">
+          <p className="text-[11px] text-muted-foreground uppercase tracking-wide">YTD OB ({elapsedMonths}M)</p>
+          <p className="text-base font-bold text-foreground mt-0.5">{fmtRs(ytdOb)}</p>
+        </div>
+        <div className="rounded-lg border border-border bg-muted/20 px-3 py-3 text-center">
+          <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Projected Year-End</p>
+          <p className="text-base font-bold text-foreground mt-0.5">{fmtRs(projected)}</p>
+        </div>
+        <div className="rounded-lg border border-border bg-muted/20 px-3 py-3 text-center">
+          <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Annual Plan</p>
+          <p className="text-base font-bold text-foreground mt-0.5">
+            {plan ? fmtRs(plan) : "—"}
+          </p>
+        </div>
+      </div>
+
+      {projVsPlanPct != null && (
+        <div className="space-y-1.5">
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>Projection vs Plan</span>
+            <span
+              className={cn(
+                "font-semibold",
+                isOnTrack
+                  ? "text-green-700 dark:text-green-400"
+                  : "text-amber-700 dark:text-amber-400",
+              )}
+            >
+              {projVsPlanPct.toFixed(1)}%
+            </span>
+          </div>
+          <div className="h-2 bg-muted rounded-full overflow-hidden">
+            <div
+              className={cn(
+                "h-full rounded-full transition-all",
+                isOnTrack ? "bg-green-500" : "bg-amber-500",
+              )}
+              style={{ width: `${barWidth}%` }}
+            />
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Monthly pace {fmtRs(pace)} × 12 months · Plan = annual secondary Business Plan.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Phase 4 components ────────────────────────────────────────────────────────
 
 function multipleColour(m: number): string {
@@ -1278,12 +1518,14 @@ export default function SalesDeepDive() {
     if (memberKey) fetchKpis(fy, selectedHead, memberKey);
   }
 
-  const kpis      = data?.kpis ?? null;
-  const rd        = data?.retailerDetail ?? null;
-  const roiCost   = data?.roiCost ?? null;
-  const skuSpread = data?.skuSpread ?? null;
-  const stateHeads = data?.stateHeads ?? [];
-  const members    = data?.members ?? [];
+  const kpis           = data?.kpis ?? null;
+  const rd             = data?.retailerDetail ?? null;
+  const roiCost        = data?.roiCost ?? null;
+  const skuSpread      = data?.skuSpread ?? null;
+  const winBack        = data?.winBack ?? null;
+  const fromDbSnapshot = data?.fromDbSnapshot ?? false;
+  const stateHeads     = data?.stateHeads ?? [];
+  const members        = data?.members ?? [];
 
   return (
     <div className="space-y-6">
@@ -1512,9 +1754,30 @@ export default function SalesDeepDive() {
             </div>
           )}
 
+          {/* Phase 6A: A-vs-B reconciliation — always show when a member is selected */}
+          {kpis && (
+            <div className="pt-2 border-t border-border">
+              <AvsBPanel kpis={kpis} rd={rd} />
+            </div>
+          )}
+
+          {/* Phase 6B: Win-back dormant retailer list */}
+          {winBack && winBack.length > 0 && (
+            <div className="pt-2 border-t border-border">
+              <WinBackPanel items={winBack} />
+            </div>
+          )}
+
+          {/* Phase 6C: Run-rate projection — only for open FY with elapsed months */}
+          {kpis && roiCost && roiCost.elapsedCompleteMonths > 0 && fy === "2026-27" && (
+            <div className="pt-2 border-t border-border">
+              <RunRatePanel kpis={kpis} elapsedMonths={roiCost.elapsedCompleteMonths} />
+            </div>
+          )}
+
           <p className="text-xs text-muted-foreground pt-1">
             Source A: STATE HEAD DASHBOARD Data tab · FY {fy} ·{" "}
-            {data?.rowsRead ?? 0} rows read · Dashboard is the authority for
+            {data?.rowsRead ?? 0} rows read{fromDbSnapshot ? " · served from DB snapshot" : ""} · Dashboard is the authority for
             headline secondary OB and sales.
           </p>
         </div>

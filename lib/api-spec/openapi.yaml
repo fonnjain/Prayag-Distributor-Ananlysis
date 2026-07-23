@@ -2586,9 +2586,24 @@ components:
             Phase 5: segment and SKU spread from secondary_register_line (closed FYs)
             or a live-year placeholder when no register is ingested. Null when no
             member is selected.
+        winBack:
+          nullable: true
+          type: array
+          items:
+            $ref: "#/components/schemas/MgmtWinBackItem"
+          description: >
+            Phase 6: dormant retailers — customers present in FY2024-25 or FY2025-26
+            secondary register for this member but absent from the current working
+            sheet. Null when no member is selected.
         rowsRead:
           type: integer
           description: Total rows read from the Data tab.
+        fromDbSnapshot:
+          type: boolean
+          nullable: true
+          description: >
+            Phase 6: true when the Data-tab member list was served from a DB
+            snapshot (no Sheets read on this request). Absent when false.
         error:
           type: string
           nullable: true
@@ -3486,6 +3501,25 @@ components:
         resolution: { type: string, enum: [approved, dismissed] }
         resolvedBy: { type: string }
         reason: { type: string }
+    MgmtWinBackItem:
+      type: object
+      required: [customer, lastActiveFy, lastActiveMonth, lastNet]
+      description: >
+        Phase 6: a retailer/customer present in the member's past-FY secondary register
+        (FY2024-25 or FY2025-26) but absent from the current working sheet.
+      properties:
+        customer:
+          type: string
+          description: Customer name as written in the secondary register.
+        lastActiveFy:
+          type: string
+          description: The most recent fiscal year in which this customer appeared.
+        lastActiveMonth:
+          type: string
+          description: The last month label in which this customer appeared (e.g. Mar-26).
+        lastNet:
+          type: number
+          description: Rounded total net_amount for this customer in their last active FY.
     MgmtSegmentNet:
       type: object
       required: [segment, net, pct]

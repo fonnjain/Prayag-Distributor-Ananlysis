@@ -116,6 +116,7 @@ export * from './mgmtVisitPattern';
 export * from './mgmtVisitPlan';
 export * from './mgmtVisitTarget';
 export * from './mgmtVisitTargetPriority';
+export * from './mgmtWinBackItem';
 export * from './okResponse';
 export * from './partyGroupRow';
 export * from './partyGroupRowByGroup';

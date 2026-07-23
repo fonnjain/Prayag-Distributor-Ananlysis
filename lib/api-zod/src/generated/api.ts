@@ -446,7 +446,14 @@ export const GetMgmtDeepDiveResponse = zod.object({
   "crossSellDepth": zod.number().nullish().describe('Average number of distinct segments ordered by each customer.'),
   "concentrationHhi": zod.number().nullish().describe('Herfindahl-Hirschman Index over segment NET shares (0–10000). Higher = more concentrated. <2500 = diversified, 2500–5000 = moderate, >5000 = concentrated.\n')
 }).nullish().describe('Phase 5: segment and SKU spread from secondary_register_line (closed FYs) or a live-year placeholder when no register is ingested. Null when no member is selected.\n'),
+  "winBack": zod.array(zod.object({
+  "customer": zod.string().describe('Customer name as written in the secondary register.'),
+  "lastActiveFy": zod.string().describe('The most recent fiscal year in which this customer appeared.'),
+  "lastActiveMonth": zod.string().describe('The last month label in which this customer appeared (e.g. Mar-26).'),
+  "lastNet": zod.number().describe('Rounded total net_amount for this customer in their last active FY.')
+}).describe('Phase 6: a retailer\/customer present in the member\'s past-FY secondary register (FY2024-25 or FY2025-26) but absent from the current working sheet.\n')).nullish().describe('Phase 6: dormant retailers — customers present in FY2024-25 or FY2025-26 secondary register for this member but absent from the current working sheet. Null when no member is selected.\n'),
   "rowsRead": zod.number().describe('Total rows read from the Data tab.'),
+  "fromDbSnapshot": zod.boolean().nullish().describe('Phase 6: true when the Data-tab member list was served from a DB snapshot (no Sheets read on this request). Absent when false.\n'),
   "error": zod.string().nullish()
 })
 

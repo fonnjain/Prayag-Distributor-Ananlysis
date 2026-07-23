@@ -14,6 +14,8 @@
 //    Phase 1 only covers the live year read from Sheets.
 //  - Never console.log; use logger.
 
+import { db, deepDiveSnapshots } from "@workspace/db";
+import { eq, desc } from "drizzle-orm";
 import { logger } from "../logger.js";
 import {
   readAllTabRows,
@@ -27,6 +29,7 @@ import {
 } from "./memberSheet.js";
 import { computeRoiCost, type RoiCost } from "./roiCost.js";
 import { computeSkuSpread, type SkuSpread } from "./skuSpread.js";
+import { computeWinBack, type WinBackItem } from "./winBack.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -118,8 +121,10 @@ export type DeepDiveDataResult = {
   retailerDetail: MemberSheetData | null; // Phase 2: retailer-level detail from member's own sheet
   roiCost: RoiCost | null;          // Phase 4: revenue-to-cost analysis (needs kpis + spread)
   skuSpread: SkuSpread | null;      // Phase 5: segment/SKU spread from secondary_register_line
+  winBack: WinBackItem[] | null;    // Phase 6: dormant retailers from past-FY register vs current sheet
   rowsRead: number;
   error: string | null;
+  fromDbSnapshot?: boolean;         // Phase 6: true when Data-tab content served from DB (no Sheets read)
 };
 
 // ── Column map ────────────────────────────────────────────────────────────────
@@ -296,6 +301,72 @@ function clearExpired(): void {
 export function invalidateDeepDiveCache(fy?: string): void {
   if (fy) _cache.delete(fy);
   else _cache.clear();
+}
+
+// ── FY helpers (mirrors stateDashboard.ts) ────────────────────────────────────
+
+function fyStartYear(fy: string): number {
+  return parseInt(fy.split("-")[0], 10);
+}
+
+function currentFy(): string {
+  const now = new Date();
+  const yr = now.getUTCFullYear();
+  const mo = now.getUTCMonth(); // 0=Jan
+  const fyStart = mo >= 3 ? yr : yr - 1;
+  return `${fyStart}-${String(fyStart + 1).slice(-2)}`;
+}
+
+function isClosedFy(fy: string): boolean {
+  return fyStartYear(fy) < fyStartYear(currentFy());
+}
+
+// ── DB snapshot: persist and restore the Data-tab parse result ────────────────
+//
+// Closed FYs are served from the DB snapshot on cold start — Sheets is never
+// re-read once a snapshot exists.  Live FY snapshots are also persisted for
+// resilience but are NOT used to bypass Sheets on restart (TTL still applies).
+
+type SnapData = {
+  allMembers: MemberKpis[];
+  rawHeaders: string[];
+  rowsRead: number;
+};
+
+async function saveDeepDiveSnapshot(fy: string, entry: CacheEntry): Promise<void> {
+  try {
+    const data: SnapData = {
+      allMembers: entry.allMembers,
+      rawHeaders: entry.rawHeaders,
+      rowsRead: entry.rowsRead,
+    };
+    await db.insert(deepDiveSnapshots).values({ fy, data });
+    logger.info({ fy }, "deepDiveData: DB snapshot saved");
+  } catch (err) {
+    logger.warn({ err, fy }, "deepDiveData: DB snapshot save failed (non-fatal)");
+  }
+}
+
+async function loadDeepDiveFromDb(fy: string): Promise<CacheEntry | null> {
+  try {
+    const rows = await db
+      .select()
+      .from(deepDiveSnapshots)
+      .where(eq(deepDiveSnapshots.fy, fy))
+      .orderBy(desc(deepDiveSnapshots.savedAt))
+      .limit(1);
+    if (rows.length === 0) return null;
+    const snap = rows[0].data as SnapData;
+    return {
+      allMembers: snap.allMembers,
+      rawHeaders: snap.rawHeaders,
+      rowsRead: snap.rowsRead,
+      loadedAt: Date.now(),
+    };
+  } catch (err) {
+    logger.warn({ err, fy }, "deepDiveData: DB snapshot load failed, falling back to Sheets");
+    return null;
+  }
 }
 
 // ── Core loader ───────────────────────────────────────────────────────────────
@@ -479,6 +550,10 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
   };
 }
 
+// _fromDbSnap tracks whether the most recently loaded CacheEntry for a FY
+// was served from the DB snapshot (true) or from a live Sheets read (false).
+const _fromDbSnap = new Map<string, boolean>();
+
 async function loadAllMembers(fy: string): Promise<CacheEntry | null> {
   clearExpired();
   const hit = _cache.get(fy);
@@ -487,10 +562,28 @@ async function loadAllMembers(fy: string): Promise<CacheEntry | null> {
   const pending = _inFlight.get(fy);
   if (pending) return pending;
 
-  const p = loadAllMembersUncached(fy).then((entry) => {
-    if (entry) _cache.set(fy, entry);
+  const p: Promise<CacheEntry | null> = (async () => {
+    // Phase 6: for closed FYs try the DB snapshot before hitting Sheets.
+    // A snapshot exists after the first successful Sheets load for that FY.
+    if (isClosedFy(fy)) {
+      const snap = await loadDeepDiveFromDb(fy);
+      if (snap) {
+        logger.info({ fy }, "deepDiveData: loaded from DB snapshot — no Sheets read");
+        _fromDbSnap.set(fy, true);
+        _cache.set(fy, snap);
+        return snap;
+      }
+    }
+    // Live Sheets read (first-ever load, or live FY).
+    const entry = await loadAllMembersUncached(fy);
+    if (entry) {
+      _fromDbSnap.set(fy, false);
+      _cache.set(fy, entry);
+      // Phase 6: fire-and-forget DB persist for future cold starts.
+      void saveDeepDiveSnapshot(fy, entry);
+    }
     return entry;
-  }).finally(() => _inFlight.delete(fy));
+  })().finally(() => _inFlight.delete(fy));
 
   _inFlight.set(fy, p);
   return p;
@@ -506,11 +599,11 @@ export async function loadDeepDiveData(
   const entry = await loadAllMembers(fy);
 
   if (!entry) {
-    // Phase 5 is DB-only — compute segment spread even when the Data tab
-    // cannot be loaded (the two are independent data sources).
-    const skuSpread = selectedMemberKey
-      ? await computeSkuSpread(selectedMemberKey, fy)
-      : null;
+    // Phases 5 and 6 are DB-only — compute them even when the Data tab fails.
+    const [skuSpread, winBackResult] = await Promise.all([
+      selectedMemberKey ? computeSkuSpread(selectedMemberKey, fy) : Promise.resolve(null),
+      selectedMemberKey ? computeWinBack(selectedMemberKey, []) : Promise.resolve(null),
+    ]);
     return {
       fy,
       stateHeads: [],
@@ -519,6 +612,7 @@ export async function loadDeepDiveData(
       retailerDetail: null,
       roiCost: null,
       skuSpread,
+      winBack: winBackResult ? winBackResult.items : null,
       rowsRead: 0,
       error: `Could not load the 'Data' tab for FY ${fy}. The sheet may not be connected or the tab name may differ.`,
     };
@@ -592,12 +686,21 @@ export async function loadDeepDiveData(
         )
       : null;
 
-  // Phase 5: SKU and segment spread from secondary_register_line (closed FYs)
-  // or a live-year placeholder (FY2026-27). Runs in parallel — DB-only, no
-  // Sheets read. Null when no member is selected.
-  const skuSpread = selectedMemberKey
-    ? await computeSkuSpread(selectedMemberKey, fy)
-    : null;
+  // Current working-sheet customer names (for win-back comparison).
+  const currentCustomers: string[] =
+    retailerDetail?.status === "ok" && retailerDetail.rows
+      ? retailerDetail.rows.map((r) => r.name)
+      : [];
+
+  // Phases 5 + 6: run in parallel — both DB-only, no additional Sheets reads.
+  const [skuSpread, winBackResult] = selectedMemberKey
+    ? await Promise.all([
+        computeSkuSpread(selectedMemberKey, fy),
+        computeWinBack(selectedMemberKey, currentCustomers),
+      ])
+    : [null, null];
+
+  const fromDbSnapshot = _fromDbSnap.get(fy) ?? false;
 
   return {
     fy,
@@ -607,7 +710,9 @@ export async function loadDeepDiveData(
     retailerDetail,
     roiCost,
     skuSpread,
+    winBack: winBackResult ? winBackResult.items : null,
     rowsRead: entry.rowsRead,
     error: null,
+    fromDbSnapshot,
   };
 }
