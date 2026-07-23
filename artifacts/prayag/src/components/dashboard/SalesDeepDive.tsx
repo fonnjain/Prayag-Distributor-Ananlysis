@@ -2019,20 +2019,7 @@ export default function SalesDeepDive() {
             )}
 
             {Object.keys(kpis.extra).length > 0 && (
-              <>
-                <SectionLabel>Additional Fields</SectionLabel>
-                {Object.entries(kpis.extra).map(([k, v]) => (
-                  <Tile
-                    key={k}
-                    label={k.replace(/([A-Z])/g, " $1").trim()}
-                    value={
-                      typeof v === "number"
-                        ? v > 1000 ? fmtRs(v) : fmtNum(v)
-                        : String(v ?? "—")
-                    }
-                  />
-                ))}
-              </>
+              <ExtraFieldsSections extra={kpis.extra} />
             )}
           </div>
 
@@ -2140,5 +2127,210 @@ export default function SalesDeepDive() {
         </div>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ExtraFieldsSections — renders the raw `extra` dictionary with readable
+// labels, correct value formatting, and logical section grouping.
+// ---------------------------------------------------------------------------
+
+const EXTRA_LABELS: Record<string, string> = {
+  // Profile / identity
+  STATE:                              "State",
+  WORKINGSTATE:                       "Working State",
+  DOJ:                                "Date of Joining",
+  EMPCODE:                            "Employee Code",
+  ACTIVELEFT:                         "Active / Left",
+  OLDNEW:                             "Old / New",
+  SECONDARYPRIMARY:                   "Channel (Secondary / Primary)",
+  TARGETRANGE:                        "Target Range",
+  JUN:                                "Jun (month indicator)",
+
+  // Achievement detail
+  ACHIEVEMENT:                        "Achievement",
+  TARGETACHIEVEMENT:                  "Target Achievement",
+  TARGETACHIEVEMENTSALE:              "Target Achievement (Sale)",
+  DIRECTDEALERPRIMARYTARGETACHIEVEMENT: "DD Primary Target Achievement",
+  COSTRATIOSALE:                      "Cost Ratio (Sale)",
+  BELOW60DEALER:                      "Dealers Below 60% Achievement",
+  BUSINESSACHIEVED50ANDABOVE:         "Parties — 50%+ Achievement",
+  VARITAION:                          "Variation",
+  TARGETCROSSCHECK:                   "Target Cross-check",
+
+  // Business breakdown
+  BUSINESSACHIEVEDBY:                 "Business Achieved By (parties)",
+  BUSINESSACHIVEDBYNOOFOLDPARTIES:    "Business — Old Parties",
+  BUSINESSACHIVEDBYNOOFNEWPARTIES:    "Business — New Parties",
+  BUSINESSACHIEVEDBYDIRECTDEALER:     "Business — Direct Dealer",
+  BUSINESSRECEIVEDPARTIESVISITS:      "Parties Giving Business",
+  NEWRETAILERS:                       "New Retailers",
+  NEWPARTYORDERS:                     "New Party Orders",
+
+  // Counterwise / visit breakdown
+  TOTALLEADCOUNTERS:                  "Lead Counters",
+  TOTALLEADVISITS:                    "Lead Visits",
+  TOTALNONLEADVISITS:                 "Non-Lead Visits",
+  DISTRIBUTORCOUNTER:                 "Distributor Counter",
+  DISTRIBUTORVISITS:                  "Distributor Visits",
+  DIRECTDEALERCOUNTER:                "Direct Dealer Counter",
+  DIRECTDEALERVISITS:                 "Direct Dealer Visits",
+  DISTRIBUTORDIRECTDEALERLEADCOUNTER: "Distributor DD Lead Counter",
+  DISTRIBUTORDIRECTDEALERLEADVISITS:  "Distributor DD Lead Visits",
+  ACTIVEPARTIESVISITS:                "Active Parties Visited",
+  TOTALVISITS:                        "Total Visits",
+  VISITEDBUTNOBUSINESSRECEIVED:       "Visited — No Business",
+  NOVISITNOBUSINESSRECEIVED:          "No Visit, No Business",
+
+  // Activity & effort
+  AVERAGESALESPERDAY:                 "Avg. Sales Per Day",
+  AVERAGEVISITPERDAY:                 "Avg. Visits Per Day",
+  NOOFORDERS:                         "No. of Orders",
+  TOTALWORKINGHOURS:                  "Total Working Hours",
+  TOTALGPSKM:                         "Total GPS km",
+  AVGDISTANCEKM:                      "Avg. Distance (km)",
+  CTC:                                "CTC",
+  CTC2025:                            "CTC (FY 24-25)",
+
+  // Prior period
+  SALE2526:                           "Sales FY 25-26",
+  TOTALORDER2526:                     "Order Booking FY 25-26",
+  Q1:                                 "Q1 (Apr-Jun)",
+  Q2:                                 "Q2 (Jul-Sep)",
+  Q3:                                 "Q3 (Oct-Dec)",
+  Q4:                                 "Q4 (Jan-Mar)",
+
+  // Additional targets / totals
+  MONTHYDIRECTDEALERPRIMARYTARGET:    "Monthly DD Primary Target",
+  DIRECTDEALERPRIMARYTARGET:          "DD Primary Target",
+  SALE:                               "Sale (YTD)",
+  TOTALORDER:                         "Total Order Booking (YTD)",
+};
+
+// Fields that are ratios (value < 2 = raw fraction, value >= 2 = already a percentage)
+const RATIO_KEYS = new Set([
+  "ACHIEVEMENT", "TARGETACHIEVEMENT", "TARGETACHIEVEMENTSALE",
+  "DIRECTDEALERPRIMARYTARGETACHIEVEMENT", "COSTRATIOSALE",
+]);
+
+// Fields that are plain counts (never currency)
+const COUNT_KEYS = new Set([
+  "TOTALVISITS", "TOTALLEADVISITS", "TOTALNONLEADVISITS",
+  "ACTIVEPARTIESVISITS", "VISITEDBUTNOBUSINESSRECEIVED", "NOVISITNOBUSINESSRECEIVED",
+  "BUSINESSRECEIVEDPARTIESVISITS", "DISTRIBUTORVISITS", "DIRECTDEALERVISITS",
+  "DISTRIBUTORDIRECTDEALERLEADVISITS", "TOTALLEADCOUNTERS", "DISTRIBUTORCOUNTER",
+  "DIRECTDEALERCOUNTER", "DISTRIBUTORDIRECTDEALERLEADCOUNTER",
+  "NOOFORDERS", "NEWRETAILERS", "NEWPARTYORDERS", "BELOW60DEALER",
+  "BUSINESSACHIEVEDBY", "BUSINESSACHIVEDBYNOOFOLDPARTIES",
+  "BUSINESSACHIVEDBYNOOFNEWPARTIES", "BUSINESSACHIEVEDBYDIRECTDEALER",
+  "BUSINESSACHIEVED50ANDABOVE",
+]);
+
+// Fields with explicit units appended
+const KM_KEYS  = new Set(["TOTALGPSKM", "AVGDISTANCEKM"]);
+const HRS_KEYS = new Set(["TOTALWORKINGHOURS"]);
+
+function fmtExtra(key: string, v: number | string | null): string {
+  if (v === null || v === undefined) return "—";
+  if (typeof v === "string") return v || "—";
+  if (RATIO_KEYS.has(key)) {
+    // Raw fraction (e.g. 0.485) → percentage; if already > 1 it's a multiplier
+    const pct = Math.abs(v) <= 5 ? v * 100 : v;
+    return fmtPct(pct);
+  }
+  if (COUNT_KEYS.has(key)) return fmtNum(v);
+  if (KM_KEYS.has(key))    return fmtNum(v) + " km";
+  if (HRS_KEYS.has(key))   return fmtNum(v) + " hrs";
+  // Auto: currency for large values, plain number otherwise
+  return v >= 1000 ? fmtRs(v) : fmtNum(v);
+}
+
+// Logical section groupings — rendered in order; unlisted keys go in "Other"
+const EXTRA_SECTION_GROUPS: Array<{ section: string; keys: string[] }> = [
+  {
+    section: "Business Breakdown",
+    keys: [
+      "BUSINESSACHIVEDBYNOOFOLDPARTIES", "BUSINESSACHIVEDBYNOOFNEWPARTIES",
+      "BUSINESSACHIEVEDBYDIRECTDEALER", "BUSINESSACHIEVEDBY",
+      "BUSINESSRECEIVEDPARTIESVISITS",
+      "BUSINESSACHIEVED50ANDABOVE", "NEWRETAILERS", "NEWPARTYORDERS",
+    ],
+  },
+  {
+    section: "Counterwise",
+    keys: [
+      "TOTALLEADCOUNTERS", "TOTALLEADVISITS", "TOTALNONLEADVISITS",
+      "DISTRIBUTORCOUNTER", "DISTRIBUTORVISITS",
+      "DIRECTDEALERCOUNTER", "DIRECTDEALERVISITS",
+      "DISTRIBUTORDIRECTDEALERLEADCOUNTER", "DISTRIBUTORDIRECTDEALERLEADVISITS",
+      "ACTIVEPARTIESVISITS", "TOTALVISITS",
+      "VISITEDBUTNOBUSINESSRECEIVED", "NOVISITNOBUSINESSRECEIVED",
+    ],
+  },
+  {
+    section: "Activity",
+    keys: [
+      "AVERAGESALESPERDAY", "AVERAGEVISITPERDAY", "NOOFORDERS",
+      "TOTALWORKINGHOURS", "TOTALGPSKM", "AVGDISTANCEKM", "CTC", "CTC2025",
+    ],
+  },
+  {
+    section: "Achievement Detail",
+    keys: [
+      "ACHIEVEMENT", "TARGETACHIEVEMENT", "TARGETACHIEVEMENTSALE",
+      "DIRECTDEALERPRIMARYTARGETACHIEVEMENT", "COSTRATIOSALE",
+      "BELOW60DEALER", "VARITAION", "TARGETCROSSCHECK",
+    ],
+  },
+  {
+    section: "Prior Period",
+    keys: ["SALE2526", "TOTALORDER2526", "Q1", "Q2", "Q3", "Q4"],
+  },
+  {
+    section: "Additional Targets",
+    keys: ["MONTHYDIRECTDEALERPRIMARYTARGET", "DIRECTDEALERPRIMARYTARGET", "SALE", "TOTALORDER"],
+  },
+  {
+    section: "Profile",
+    keys: [
+      "STATE", "WORKINGSTATE", "DOJ", "EMPCODE",
+      "ACTIVELEFT", "OLDNEW", "SECONDARYPRIMARY", "TARGETRANGE", "JUN",
+    ],
+  },
+];
+
+function ExtraFieldsSections({ extra }: { extra: Record<string, number | string | null> }) {
+  const listed = new Set<string>();
+
+  const sections = EXTRA_SECTION_GROUPS.map(({ section, keys }) => {
+    const entries = keys.flatMap((k) => {
+      if (!(k in extra)) return [];
+      listed.add(k);
+      return [[k, extra[k]] as [string, number | string | null]];
+    });
+    return { section, entries };
+  }).filter((s) => s.entries.length > 0);
+
+  // Catch anything not in any group
+  const otherEntries = Object.entries(extra).filter(([k]) => !listed.has(k));
+  if (otherEntries.length > 0) {
+    sections.push({ section: "Other", entries: otherEntries as [string, number | string | null][] });
+  }
+
+  return (
+    <>
+      {sections.map(({ section, entries }) => (
+        <>
+          <SectionLabel key={section + "_label"}>{section}</SectionLabel>
+          {entries.map(([k, v]) => (
+            <Tile
+              key={k}
+              label={EXTRA_LABELS[k] ?? k.charAt(0) + k.slice(1).toLowerCase()}
+              value={fmtExtra(k, v)}
+            />
+          ))}
+        </>
+      ))}
+    </>
   );
 }
