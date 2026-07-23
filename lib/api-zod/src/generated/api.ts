@@ -364,7 +364,7 @@ export const GetMgmtDeepDiveResponse = zod.object({
   "concentrationIndex": zod.number().nullish().describe('HHI: 0–10000; higher = more concentrated.'),
   "businessPerActiveRetailer": zod.number().nullish(),
   "businessPerVisit": zod.number().nullish(),
-  "annualBusinessPlan": zod.number().nullish().describe('From the member\'s own FY tab; preferred over col-W sum.')
+  "annualBusinessPlan": zod.number().nullish().describe('Sum of retailer-row plan values from the Summary Report tab (col W). Falls back to the FY-tab scan only when the Summary Report has no plan column. The FY-tab TOTAL row is never used — it may not foot.')
 }).nullish(),
   "visitPlan": zod.object({
   "pattern": zod.object({
@@ -472,6 +472,91 @@ export const GetMgmtDeepDiveResponse = zod.object({
 }).describe('Phase 6: a retailer\/customer present in the member\'s past-FY secondary register (FY2024-25 or FY2025-26) but absent from the current working sheet.\n')).nullish().describe('Phase 6: dormant retailers — customers present in FY2024-25 or FY2025-26 secondary register for this member but absent from the current working sheet. Null when no member is selected.\n'),
   "rowsRead": zod.number().describe('Total rows read from the Data tab.'),
   "fromDbSnapshot": zod.boolean().nullish().describe('Phase 6: true when the Data-tab member list was served from a DB snapshot (no Sheets read on this request). Absent when false.\n'),
+  "error": zod.string().nullish()
+})
+
+
+/**
+ * Reads all member working sheets under a state head and groups retailer rows by their Assigned Distributor field. Surfaces direct dealers (blank field) as a parallel branch, flags no-distributor retailers ('--') as a mapping problem, models comma-separated shared distributors as a relation not a string, and excludes numeric/malformed rows. Never publishes a distributor total without Confirmed/Guessed confidence split. Live year (FY2026-27) only; closed years are served from DB snapshots via the Sales Deep Dive.
+ * @summary Distributor Deep Dive — live-year distributor and retailer performance
+ */
+export const GetMgmtDistributorDeepDiveQueryParams = zod.object({
+  "fy": zod.coerce.string().optional().describe('Fiscal year like 2026-27. Defaults to 2026-27.'),
+  "stateHead": zod.coerce.string().optional().describe('Raw state head name as it appears in the sheet.')
+})
+
+export const GetMgmtDistributorDeepDiveResponse = zod.object({
+  "fy": zod.string(),
+  "stateHeads": zod.array(zod.string()),
+  "distributors": zod.array(zod.object({
+  "name": zod.string(),
+  "normKey": zod.string(),
+  "retailerCount": zod.number(),
+  "activeCount": zod.number(),
+  "dormantCount": zod.number(),
+  "orderBooking": zod.number(),
+  "sale": zod.number(),
+  "visits": zod.number().nullish(),
+  "obSharePct": zod.number().nullish(),
+  "isConcentrationRisk": zod.boolean(),
+  "confirmedCount": zod.number(),
+  "guessedCount": zod.number(),
+  "retailers": zod.array(zod.object({
+  "name": zod.string(),
+  "district": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "orderBooking": zod.number(),
+  "sale": zod.number(),
+  "visits": zod.number().nullish(),
+  "isActive": zod.boolean(),
+  "confirmedHead": zod.boolean(),
+  "memberName": zod.string()
+}))
+})),
+  "sharedRetailers": zod.array(zod.object({
+  "name": zod.string(),
+  "rawDistributor": zod.string(),
+  "distributorParts": zod.array(zod.string()),
+  "orderBooking": zod.number(),
+  "sale": zod.number(),
+  "visits": zod.number().nullish(),
+  "isActive": zod.boolean(),
+  "confirmedHead": zod.boolean(),
+  "memberName": zod.string()
+})),
+  "directDealer": zod.object({
+  "retailerCount": zod.number(),
+  "activeCount": zod.number(),
+  "dormantCount": zod.number(),
+  "orderBooking": zod.number(),
+  "sale": zod.number(),
+  "visits": zod.number().nullish()
+}).nullish(),
+  "noneAssigned": zod.object({
+  "retailerCount": zod.number(),
+  "activeCount": zod.number(),
+  "dormantCount": zod.number(),
+  "orderBooking": zod.number(),
+  "sale": zod.number(),
+  "visits": zod.number().nullish(),
+  "visitSharePct": zod.number().nullish(),
+  "allDormant": zod.boolean()
+}).nullish(),
+  "mappingQuality": zod.object({
+  "totalRetailers": zod.number(),
+  "blankCount": zod.number(),
+  "noneCount": zod.number(),
+  "sharedCount": zod.number(),
+  "malformedCount": zod.number(),
+  "distributorCount": zod.number(),
+  "noneVisits": zod.number().nullish(),
+  "totalVisits": zod.number().nullish(),
+  "noneVisitSharePct": zod.number().nullish(),
+  "noneAllDormant": zod.boolean()
+}).nullish(),
+  "partyObTotal": zod.number(),
+  "membersLoaded": zod.number(),
+  "membersNotMapped": zod.number(),
   "error": zod.string().nullish()
 })
 

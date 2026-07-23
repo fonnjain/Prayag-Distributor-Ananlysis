@@ -290,6 +290,41 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /mgmt/distributor-deep-dive:
+    get:
+      operationId: getMgmtDistributorDeepDive
+      tags: [mgmt]
+      summary: Distributor Deep Dive — live-year distributor and retailer performance
+      description: >
+        Reads all member working sheets under a state head and groups retailer
+        rows by their Assigned Distributor field. Surfaces direct dealers
+        (blank field) as a parallel branch, flags no-distributor retailers ('--')
+        as a mapping problem, models comma-separated shared distributors as a
+        relation not a string, and excludes numeric/malformed rows. Never
+        publishes a distributor total without Confirmed/Guessed confidence split.
+        Live year (FY2026-27) only; closed years are served from DB snapshots via
+        the Sales Deep Dive.
+      parameters:
+        - name: fy
+          in: query
+          schema: { type: string }
+          description: Fiscal year like 2026-27. Defaults to 2026-27.
+        - name: stateHead
+          in: query
+          schema: { type: string }
+          description: Raw state head name as it appears in the sheet.
+      responses:
+        "200":
+          description: Distributor deep-dive data and selector lists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MgmtDistributorDeepDive"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /mgmt/options:
     get:
       operationId: getMgmtOptions
@@ -2614,6 +2649,116 @@ components:
         stateHead: { type: string }
         name: { type: string }
         normKey: { type: string }
+    MgmtDistributorDeepDive:
+      type: object
+      required: [fy, stateHeads, distributors, sharedRetailers, partyObTotal, membersLoaded, membersNotMapped]
+      properties:
+        fy: { type: string }
+        stateHeads:
+          type: array
+          items: { type: string }
+        distributors:
+          type: array
+          items: { $ref: "#/components/schemas/MgmtDistributorGroup" }
+        sharedRetailers:
+          type: array
+          items: { $ref: "#/components/schemas/MgmtSharedRetailerEntry" }
+        directDealer:
+          nullable: true
+          $ref: "#/components/schemas/MgmtDirectDealerSummary"
+        noneAssigned:
+          nullable: true
+          $ref: "#/components/schemas/MgmtNoneAssignedSummary"
+        mappingQuality:
+          nullable: true
+          $ref: "#/components/schemas/MgmtDistributorMappingQuality"
+        partyObTotal: { type: number }
+        membersLoaded: { type: integer }
+        membersNotMapped: { type: integer }
+        error: { type: string, nullable: true }
+    MgmtDistributorGroup:
+      type: object
+      required: [name, normKey, retailerCount, activeCount, dormantCount, orderBooking, sale, confirmedCount, guessedCount, isConcentrationRisk, retailers]
+      properties:
+        name: { type: string }
+        normKey: { type: string }
+        retailerCount: { type: integer }
+        activeCount: { type: integer }
+        dormantCount: { type: integer }
+        orderBooking: { type: number }
+        sale: { type: number }
+        visits: { type: number, nullable: true }
+        obSharePct: { type: number, nullable: true }
+        isConcentrationRisk: { type: boolean }
+        confirmedCount: { type: integer }
+        guessedCount: { type: integer }
+        retailers:
+          type: array
+          items: { $ref: "#/components/schemas/MgmtDistributorRetailerRow" }
+    MgmtDistributorRetailerRow:
+      type: object
+      required: [name, orderBooking, sale, isActive, confirmedHead, memberName]
+      properties:
+        name: { type: string }
+        district: { type: string, nullable: true }
+        city: { type: string, nullable: true }
+        orderBooking: { type: number }
+        sale: { type: number }
+        visits: { type: number, nullable: true }
+        isActive: { type: boolean }
+        confirmedHead: { type: boolean }
+        memberName: { type: string }
+    MgmtSharedRetailerEntry:
+      type: object
+      required: [name, rawDistributor, distributorParts, orderBooking, sale, isActive, confirmedHead, memberName]
+      properties:
+        name: { type: string }
+        rawDistributor: { type: string }
+        distributorParts:
+          type: array
+          items: { type: string }
+        orderBooking: { type: number }
+        sale: { type: number }
+        visits: { type: number, nullable: true }
+        isActive: { type: boolean }
+        confirmedHead: { type: boolean }
+        memberName: { type: string }
+    MgmtDirectDealerSummary:
+      type: object
+      required: [retailerCount, activeCount, dormantCount, orderBooking, sale]
+      properties:
+        retailerCount: { type: integer }
+        activeCount: { type: integer }
+        dormantCount: { type: integer }
+        orderBooking: { type: number }
+        sale: { type: number }
+        visits: { type: number, nullable: true }
+    MgmtNoneAssignedSummary:
+      type: object
+      required: [retailerCount, activeCount, dormantCount, orderBooking, sale, allDormant]
+      properties:
+        retailerCount: { type: integer }
+        activeCount: { type: integer }
+        dormantCount: { type: integer }
+        orderBooking: { type: number }
+        sale: { type: number }
+        visits: { type: number, nullable: true }
+        visitSharePct: { type: number, nullable: true }
+        allDormant: { type: boolean }
+    MgmtDistributorMappingQuality:
+      type: object
+      required: [totalRetailers, blankCount, noneCount, sharedCount, malformedCount, distributorCount, noneAllDormant]
+      properties:
+        totalRetailers: { type: integer }
+        blankCount: { type: integer }
+        noneCount: { type: integer }
+        sharedCount: { type: integer }
+        malformedCount: { type: integer }
+        distributorCount: { type: integer }
+        noneVisits: { type: number, nullable: true }
+        totalVisits: { type: number, nullable: true }
+        noneVisitSharePct: { type: number, nullable: true }
+        noneAllDormant: { type: boolean }
     MgmtRoiCost:
       type: object
       required: [ctcMonthly, taBillYtd, elapsedCompleteMonths, ctcCostYtd, totalCost, marginRoiAvailable]

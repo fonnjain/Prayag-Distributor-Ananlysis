@@ -17,7 +17,7 @@ import {
   Bot, FileSpreadsheet, BarChart2 as BarChartIcon, Target,
   ClipboardList, Database, ShieldCheck,
   LayoutDashboard, Users, ShoppingBag, GitMerge,
-  AlertTriangle, UserMinus, Settings, Store, BookOpen,
+  AlertTriangle, UserMinus, Settings, Store, BookOpen, Network,
   ChevronDown, ChevronRight, Menu, X, Sun, Moon, Braces, Key,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -70,6 +70,7 @@ const NAV: NavGroup[] = [
       { id: "secondary-performance",  label: "Secondary Performance",  path: "/sales/secondary-performance",  icon: ShoppingBag },
       { id: "combined",               label: "Combined",               path: "/sales/combined",               icon: GitMerge },
       { id: "deep-dive",              label: "Sales Deep Dive",        path: "/sales/deep-dive",              icon: BookOpen },
+      { id: "distributor-deep-dive",  label: "Distributor Deep Dive",  path: "/sales/distributor-deep-dive",  icon: Network  },
     ],
   },
   {

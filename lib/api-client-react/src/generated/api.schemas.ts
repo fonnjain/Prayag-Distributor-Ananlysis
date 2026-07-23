@@ -972,7 +972,7 @@ export interface MgmtRetailerSpread {
   concentrationIndex?: number | null;
   businessPerActiveRetailer?: number | null;
   businessPerVisit?: number | null;
-  /** From the member's own FY tab; preferred over col-W sum. */
+  /** Sum of retailer-row plan values from the Summary Report tab (col W). Falls back to the FY-tab scan only when the Summary Report has no plan column. The FY-tab TOTAL row is never used — it may not foot. */
   annualBusinessPlan?: number | null;
 }
 
@@ -1219,6 +1219,93 @@ export interface MgmtDeepDive {
   rowsRead: number;
   /** Phase 6: true when the Data-tab member list was served from a DB snapshot (no Sheets read on this request). Absent when false. */
   fromDbSnapshot?: boolean | null;
+  error?: string | null;
+}
+
+export interface MgmtDistributorRetailerRow {
+  name: string;
+  district?: string | null;
+  city?: string | null;
+  orderBooking: number;
+  sale: number;
+  visits?: number | null;
+  isActive: boolean;
+  confirmedHead: boolean;
+  memberName: string;
+}
+
+export interface MgmtDistributorGroup {
+  name: string;
+  normKey: string;
+  retailerCount: number;
+  activeCount: number;
+  dormantCount: number;
+  orderBooking: number;
+  sale: number;
+  visits?: number | null;
+  obSharePct?: number | null;
+  isConcentrationRisk: boolean;
+  confirmedCount: number;
+  guessedCount: number;
+  retailers: MgmtDistributorRetailerRow[];
+}
+
+export interface MgmtSharedRetailerEntry {
+  name: string;
+  rawDistributor: string;
+  distributorParts: string[];
+  orderBooking: number;
+  sale: number;
+  visits?: number | null;
+  isActive: boolean;
+  confirmedHead: boolean;
+  memberName: string;
+}
+
+export interface MgmtDirectDealerSummary {
+  retailerCount: number;
+  activeCount: number;
+  dormantCount: number;
+  orderBooking: number;
+  sale: number;
+  visits?: number | null;
+}
+
+export interface MgmtNoneAssignedSummary {
+  retailerCount: number;
+  activeCount: number;
+  dormantCount: number;
+  orderBooking: number;
+  sale: number;
+  visits?: number | null;
+  visitSharePct?: number | null;
+  allDormant: boolean;
+}
+
+export interface MgmtDistributorMappingQuality {
+  totalRetailers: number;
+  blankCount: number;
+  noneCount: number;
+  sharedCount: number;
+  malformedCount: number;
+  distributorCount: number;
+  noneVisits?: number | null;
+  totalVisits?: number | null;
+  noneVisitSharePct?: number | null;
+  noneAllDormant: boolean;
+}
+
+export interface MgmtDistributorDeepDive {
+  fy: string;
+  stateHeads: string[];
+  distributors: MgmtDistributorGroup[];
+  sharedRetailers: MgmtSharedRetailerEntry[];
+  directDealer?: MgmtDirectDealerSummary | null;
+  noneAssigned?: MgmtNoneAssignedSummary | null;
+  mappingQuality?: MgmtDistributorMappingQuality | null;
+  partyObTotal: number;
+  membersLoaded: number;
+  membersNotMapped: number;
   error?: string | null;
 }
 
@@ -1724,6 +1811,17 @@ stateHead?: string;
  * Member name or normSecKey. Matched with normSecKey (preserves parentheticals like (Off Roll)). If omitted, kpis is null.
  */
 member?: string;
+};
+
+export type GetMgmtDistributorDeepDiveParams = {
+/**
+ * Fiscal year like 2026-27. Defaults to 2026-27.
+ */
+fy?: string;
+/**
+ * Raw state head name as it appears in the sheet.
+ */
+stateHead?: string;
 };
 
 export type VerifyMgmtReportParams = {

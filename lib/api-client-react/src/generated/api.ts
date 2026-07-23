@@ -44,6 +44,7 @@ import type {
   ExportCustomerMasterParams,
   GetAnalyticsParams,
   GetMgmtDeepDiveParams,
+  GetMgmtDistributorDeepDiveParams,
   GetPrimaryTargetsParams,
   GetSalesPeopleTreeParams,
   GetSalesPersonDeepDiveParams,
@@ -59,6 +60,7 @@ import type {
   ListCustomerMismatchesParams,
   ListDriveFilesParams,
   MgmtDeepDive,
+  MgmtDistributorDeepDive,
   MgmtOptions,
   MgmtReportRequest,
   MgmtVerifyResult,
@@ -812,6 +814,91 @@ export function useGetMgmtDeepDive<TData = Awaited<ReturnType<typeof getMgmtDeep
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetMgmtDeepDiveQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetMgmtDistributorDeepDiveUrl = (params?: GetMgmtDistributorDeepDiveParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/mgmt/distributor-deep-dive?${stringifiedParams}` : `/api/mgmt/distributor-deep-dive`
+}
+
+/**
+ * Reads all member working sheets under a state head and groups retailer rows by their Assigned Distributor field. Surfaces direct dealers (blank field) as a parallel branch, flags no-distributor retailers ('--') as a mapping problem, models comma-separated shared distributors as a relation not a string, and excludes numeric/malformed rows. Never publishes a distributor total without Confirmed/Guessed confidence split. Live year (FY2026-27) only; closed years are served from DB snapshots via the Sales Deep Dive.
+ * @summary Distributor Deep Dive — live-year distributor and retailer performance
+ */
+export const getMgmtDistributorDeepDive = async (params?: GetMgmtDistributorDeepDiveParams, options?: RequestInit): Promise<MgmtDistributorDeepDive> => {
+
+  return customFetch<MgmtDistributorDeepDive>(getGetMgmtDistributorDeepDiveUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMgmtDistributorDeepDiveQueryKey = (params?: GetMgmtDistributorDeepDiveParams,) => {
+    return [
+    `/api/mgmt/distributor-deep-dive`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetMgmtDistributorDeepDiveQueryOptions = <TData = Awaited<ReturnType<typeof getMgmtDistributorDeepDive>>, TError = ErrorType<ErrorResponse>>(params?: GetMgmtDistributorDeepDiveParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMgmtDistributorDeepDive>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMgmtDistributorDeepDiveQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMgmtDistributorDeepDive>>> = ({ signal }) => getMgmtDistributorDeepDive(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMgmtDistributorDeepDive>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMgmtDistributorDeepDiveQueryResult = NonNullable<Awaited<ReturnType<typeof getMgmtDistributorDeepDive>>>
+export type GetMgmtDistributorDeepDiveQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Distributor Deep Dive — live-year distributor and retailer performance
+ */
+
+export function useGetMgmtDistributorDeepDive<TData = Awaited<ReturnType<typeof getMgmtDistributorDeepDive>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetMgmtDistributorDeepDiveParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMgmtDistributorDeepDive>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMgmtDistributorDeepDiveQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

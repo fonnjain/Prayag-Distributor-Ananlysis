@@ -808,6 +808,25 @@ router.get("/mgmt/deep-dive", async (req: Request, res: Response): Promise<void>
   }
 });
 
+// GET /api/mgmt/distributor-deep-dive
+// Phase D1: groups retailer rows from all member working sheets under a state
+// head by their Assigned Distributor field.
+router.get("/mgmt/distributor-deep-dive", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const fy         = typeof req.query.fy         === "string" ? req.query.fy.trim()         : "2026-27";
+    const stateHead  = typeof req.query.stateHead  === "string" ? req.query.stateHead.trim()  : undefined;
+
+    req.log.info({ fy, stateHead }, "mgmt/distributor-deep-dive: request received");
+
+    const { loadDistributorDeepDive } = await import("../lib/mgmt/distributorDeepDive.js");
+    const result = await loadDistributorDeepDive(fy, stateHead);
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "mgmt/distributor-deep-dive: handler threw");
+    res.status(500).json({ error: "Could not load distributor deep-dive data." });
+  }
+});
+
 router.get("/mgmt/bridge/status", async (req: Request, res: Response): Promise<void> => {
   try {
     const bridge = await loadPartyBridge();

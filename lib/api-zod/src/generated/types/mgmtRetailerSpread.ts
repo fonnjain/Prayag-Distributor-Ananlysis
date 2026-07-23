@@ -24,6 +24,6 @@ export interface MgmtRetailerSpread {
   concentrationIndex?: number | null;
   businessPerActiveRetailer?: number | null;
   businessPerVisit?: number | null;
-  /** From the member's own FY tab; preferred over col-W sum. */
+  /** Sum of retailer-row plan values from the Summary Report tab (col W). Falls back to the FY-tab scan only when the Summary Report has no plan column. The FY-tab TOTAL row is never used — it may not foot. */
   annualBusinessPlan?: number | null;
 }
