@@ -25,6 +25,9 @@ import {
   Info,
   CheckCircle2,
   HelpCircle,
+  ArrowRight,
+  TrendingUp,
+  TrendingDown,
 } from "lucide-react";
 import { formatINR } from "@/data/dataset";
 
@@ -42,6 +45,29 @@ type DistributorRetailerRow = {
   memberName: string;
 };
 
+/** D2: per-distributor flow data returned by the API. */
+type DistributorFlows = {
+  hasPrimaryData: boolean;
+  primaryDispatch: number;
+  primaryOb: number | null;
+  pendingValue: number | null;
+  fillRate: number | null;
+  matchedCustomers: string[];
+  secondaryOut: number;
+  secondarySource: string;
+  flowGap: number | null;
+  period: string;
+  lastInvoiceDate: string | null;
+  daysSinceLastOrder: number | null;
+  invoiceCount: number;
+  monthsActive: number;
+  ordersPerMonth: number | null;
+  yoyPeriod: string;
+  currentPeriodDispatch: number | null;
+  priorPeriodDispatch: number | null;
+  growthPct: number | null;
+};
+
 type DistributorGroup = {
   name: string;
   normKey: string;
@@ -56,6 +82,7 @@ type DistributorGroup = {
   confirmedCount: number;
   guessedCount: number;
   retailers: DistributorRetailerRow[];
+  flows: DistributorFlows | null;
 };
 
 type SharedRetailerEntry = {
@@ -221,6 +248,192 @@ function RetailerTable({ retailers, memberName }: {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// ── D2: Flow panel ────────────────────────────────────────────────────────────
+
+function FlowPanel({ flows, distName }: { flows: DistributorFlows | null; distName: string }) {
+  if (!flows) return null;
+
+  if (!flows.hasPrimaryData) {
+    return (
+      <div className="mb-4 border border-border rounded-lg p-4 bg-muted/5">
+        <div className="text-sm font-semibold mb-1.5">Flows and Pending</div>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          No primary dispatch data found for {distName} in the primary sales register for {flows.period}.
+          The distributor may be listed under a different name in the SAP system.
+          {flows.matchedCustomers.length > 0 && (
+            <> Customer name(s) tried: {flows.matchedCustomers.join(", ")}.</>
+          )}
+        </p>
+        {flows.primaryOb !== null && flows.primaryOb > 0 && (
+          <div className="mt-2.5 grid grid-cols-2 gap-3">
+            <div>
+              <div className="text-xs text-muted-foreground">Order Booking (primary)</div>
+              <div className="font-semibold tabular-nums text-sm">{formatINR(flows.primaryOb)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">Secondary Out (member sheets)</div>
+              <div className="font-semibold tabular-nums text-sm">{formatINR(flows.secondaryOut)}</div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const gapPositive = flows.flowGap !== null && flows.flowGap >= 0;
+
+  return (
+    <div className="mb-4 border border-border rounded-lg overflow-hidden">
+      <div className="bg-muted/40 px-4 py-2.5 border-b border-border flex items-center justify-between">
+        <h4 className="font-semibold text-sm">Flows and Pending</h4>
+        <span className="text-xs text-muted-foreground">{flows.period}</span>
+      </div>
+      <div className="p-4 space-y-4">
+
+        {/* Two-column flow comparison */}
+        <div className="grid grid-cols-2 gap-6">
+          <div className="space-y-1">
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Primary In — Prayag to Distributor
+            </div>
+            <div className="text-xl font-bold tabular-nums">{formatINR(flows.primaryDispatch)}</div>
+            <div className="text-xs text-muted-foreground">Primary sales register</div>
+            {flows.matchedCustomers.length > 0 && (
+              <div className="text-xs text-muted-foreground italic">
+                Matched as: {flows.matchedCustomers.join(", ")}
+              </div>
+            )}
+          </div>
+          <div className="space-y-1">
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Secondary Out — Distributor to Retailers
+            </div>
+            <div className="text-xl font-bold tabular-nums">{formatINR(flows.secondaryOut)}</div>
+            <div className="text-xs text-muted-foreground">Member sheets (FY to date)</div>
+          </div>
+        </div>
+
+        {/* Flow gap observation */}
+        {flows.flowGap !== null && (
+          <div className={`rounded-md px-3 py-2.5 text-xs leading-relaxed ${
+            gapPositive
+              ? "bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800/50 text-blue-900 dark:text-blue-200"
+              : "bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800/50 text-orange-900 dark:text-orange-200"
+          }`}>
+            <span className="font-semibold">Flow gap: </span>
+            <span className="tabular-nums font-bold">
+              {flows.flowGap >= 0 ? "+" : ""}{formatINR(flows.flowGap)}
+            </span>
+            <span className="ml-2 opacity-80">
+              {gapPositive
+                ? "Primary in exceeds secondary out — may indicate stock building at the distributor, or business moving outside the attributed retailer channel."
+                : "Secondary out exceeds primary in — may indicate prior-period stock being liquidated, or secondary reported against a different primary FY."}
+            </span>
+          </div>
+        )}
+
+        {/* Pending: OB vs dispatch */}
+        {flows.primaryOb !== null && (
+          <div className="grid grid-cols-3 gap-3 pt-1 border-t border-border/60">
+            <div>
+              <div className="text-xs text-muted-foreground">Order Booking</div>
+              <div className="font-semibold tabular-nums text-sm">{formatINR(flows.primaryOb)}</div>
+              <div className="text-xs text-muted-foreground">primary, non-institutional</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">Dispatched</div>
+              <div className="font-semibold tabular-nums text-sm">{formatINR(flows.primaryDispatch)}</div>
+              <div className="text-xs text-muted-foreground">primary register</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">Pending</div>
+              <div className={`font-semibold tabular-nums text-sm ${
+                (flows.pendingValue ?? 0) > 0
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-muted-foreground"
+              }`}>
+                {flows.pendingValue !== null ? formatINR(flows.pendingValue) : "--"}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {flows.fillRate !== null
+                  ? `${flows.fillRate.toFixed(1)}% fill rate`
+                  : ""}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Recency and frequency */}
+        <div className="flex flex-wrap gap-5 text-sm pt-1 border-t border-border/60">
+          <div>
+            <span className="text-xs text-muted-foreground">Last dispatch: </span>
+            <span className="font-medium">
+              {flows.daysSinceLastOrder !== null
+                ? `${flows.daysSinceLastOrder} day${flows.daysSinceLastOrder !== 1 ? "s" : ""} ago`
+                : (flows.lastInvoiceDate ?? "--")}
+            </span>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Dispatches per month: </span>
+            <span className="font-medium">
+              {flows.ordersPerMonth !== null ? flows.ordersPerMonth.toFixed(1) : "--"}
+            </span>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Invoices (FY): </span>
+            <span className="font-medium">{flows.invoiceCount}</span>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Months active: </span>
+            <span className="font-medium">{flows.monthsActive}</span>
+          </div>
+        </div>
+
+        {/* YoY growth */}
+        {(flows.currentPeriodDispatch !== null || flows.priorPeriodDispatch !== null) && (
+          <div className="pt-1 border-t border-border/60">
+            <div className="text-xs text-muted-foreground mb-2">
+              Year-on-year — {flows.yoyPeriod}
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              <div>
+                <div className="text-xs text-muted-foreground">This period</div>
+                <div className="font-semibold tabular-nums text-sm">
+                  {flows.currentPeriodDispatch !== null
+                    ? formatINR(flows.currentPeriodDispatch)
+                    : "--"}
+                </div>
+              </div>
+              <ArrowRight className="w-4 h-4 text-muted-foreground shrink-0" />
+              <div>
+                <div className="text-xs text-muted-foreground">Prior period</div>
+                <div className="font-semibold tabular-nums text-sm">
+                  {flows.priorPeriodDispatch !== null
+                    ? formatINR(flows.priorPeriodDispatch)
+                    : "no data"}
+                </div>
+              </div>
+              {flows.growthPct !== null && (
+                <div className={`flex items-center gap-1 font-bold text-sm ${
+                  flows.growthPct >= 0
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-red-600 dark:text-red-400"
+                }`}>
+                  {flows.growthPct >= 0
+                    ? <TrendingUp className="w-4 h-4" />
+                    : <TrendingDown className="w-4 h-4" />}
+                  {flows.growthPct >= 0 ? "+" : ""}{flows.growthPct.toFixed(1)}%
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+      </div>
     </div>
   );
 }
@@ -468,10 +681,11 @@ export default function DistributorDeepDive() {
                           </td>
                         </tr>
 
-                        {/* Expanded retailer table */}
+                        {/* Expanded detail: flows (D2) + retailer table (D1) */}
                         {expandedDist === dist.normKey && (
                           <tr key={`${dist.normKey}-detail`}>
-                            <td colSpan={9} className="bg-muted/10 px-4 py-3">
+                            <td colSpan={9} className="bg-muted/10 px-4 py-4">
+                              <FlowPanel flows={dist.flows} distName={dist.name} />
                               <div className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
                                 <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                                 Confirmed

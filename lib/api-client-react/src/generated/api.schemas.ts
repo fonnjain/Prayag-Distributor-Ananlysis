@@ -1234,6 +1234,31 @@ export interface MgmtDistributorRetailerRow {
   memberName: string;
 }
 
+/**
+ * Phase D2: the two flows a distributor sits between (primary in-flow from Prayag and secondary out-flow to retailers) and the gap between them. NET = Sub Total (sale_line.amount) throughout. hasPrimaryData=false means no sale_line rows matched — never show a zero.
+ */
+export interface MgmtDistributorFlows {
+  hasPrimaryData: boolean;
+  primaryDispatch: number;
+  primaryOb?: number | null;
+  pendingValue?: number | null;
+  fillRate?: number | null;
+  matchedCustomers: string[];
+  secondaryOut: number;
+  secondarySource: string;
+  flowGap?: number | null;
+  period: string;
+  lastInvoiceDate?: string | null;
+  daysSinceLastOrder?: number | null;
+  invoiceCount: number;
+  monthsActive: number;
+  ordersPerMonth?: number | null;
+  yoyPeriod: string;
+  currentPeriodDispatch?: number | null;
+  priorPeriodDispatch?: number | null;
+  growthPct?: number | null;
+}
+
 export interface MgmtDistributorGroup {
   name: string;
   normKey: string;
@@ -1248,6 +1273,7 @@ export interface MgmtDistributorGroup {
   confirmedCount: number;
   guessedCount: number;
   retailers: MgmtDistributorRetailerRow[];
+  flows?: MgmtDistributorFlows | null;
 }
 
 export interface MgmtSharedRetailerEntry {

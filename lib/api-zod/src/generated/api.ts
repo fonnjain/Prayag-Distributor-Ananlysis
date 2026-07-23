@@ -511,7 +511,28 @@ export const GetMgmtDistributorDeepDiveResponse = zod.object({
   "isActive": zod.boolean(),
   "confirmedHead": zod.boolean(),
   "memberName": zod.string()
-}))
+})),
+  "flows": zod.object({
+  "hasPrimaryData": zod.boolean(),
+  "primaryDispatch": zod.number(),
+  "primaryOb": zod.number().nullish(),
+  "pendingValue": zod.number().nullish(),
+  "fillRate": zod.number().nullish(),
+  "matchedCustomers": zod.array(zod.string()),
+  "secondaryOut": zod.number(),
+  "secondarySource": zod.string(),
+  "flowGap": zod.number().nullish(),
+  "period": zod.string(),
+  "lastInvoiceDate": zod.string().nullish(),
+  "daysSinceLastOrder": zod.number().nullish(),
+  "invoiceCount": zod.number(),
+  "monthsActive": zod.number(),
+  "ordersPerMonth": zod.number().nullish(),
+  "yoyPeriod": zod.string(),
+  "currentPeriodDispatch": zod.number().nullish(),
+  "priorPeriodDispatch": zod.number().nullish(),
+  "growthPct": zod.number().nullish()
+}).nullish().describe('Phase D2: the two flows a distributor sits between (primary in-flow from Prayag and secondary out-flow to retailers) and the gap between them. NET = Sub Total (sale_line.amount) throughout. hasPrimaryData=false means no sale_line rows matched — never show a zero.\n')
 })),
   "sharedRetailers": zod.array(zod.object({
   "name": zod.string(),

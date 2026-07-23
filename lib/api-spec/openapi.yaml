@@ -2695,6 +2695,9 @@ components:
         retailers:
           type: array
           items: { $ref: "#/components/schemas/MgmtDistributorRetailerRow" }
+        flows:
+          nullable: true
+          $ref: "#/components/schemas/MgmtDistributorFlows"
     MgmtDistributorRetailerRow:
       type: object
       required: [name, orderBooking, sale, isActive, confirmedHead, memberName]
@@ -2759,6 +2762,37 @@ components:
         totalVisits: { type: number, nullable: true }
         noneVisitSharePct: { type: number, nullable: true }
         noneAllDormant: { type: boolean }
+    MgmtDistributorFlows:
+      type: object
+      description: >
+        Phase D2: the two flows a distributor sits between (primary in-flow from Prayag
+        and secondary out-flow to retailers) and the gap between them.
+        NET = Sub Total (sale_line.amount) throughout.
+        hasPrimaryData=false means no sale_line rows matched — never show a zero.
+      required: [hasPrimaryData, primaryDispatch, secondaryOut, secondarySource, period,
+                 invoiceCount, monthsActive, matchedCustomers, yoyPeriod]
+      properties:
+        hasPrimaryData: { type: boolean }
+        primaryDispatch: { type: number }
+        primaryOb: { type: number, nullable: true }
+        pendingValue: { type: number, nullable: true }
+        fillRate: { type: number, nullable: true }
+        matchedCustomers:
+          type: array
+          items: { type: string }
+        secondaryOut: { type: number }
+        secondarySource: { type: string }
+        flowGap: { type: number, nullable: true }
+        period: { type: string }
+        lastInvoiceDate: { type: string, nullable: true }
+        daysSinceLastOrder: { type: integer, nullable: true }
+        invoiceCount: { type: integer }
+        monthsActive: { type: integer }
+        ordersPerMonth: { type: number, nullable: true }
+        yoyPeriod: { type: string }
+        currentPeriodDispatch: { type: number, nullable: true }
+        priorPeriodDispatch: { type: number, nullable: true }
+        growthPct: { type: number, nullable: true }
     MgmtRoiCost:
       type: object
       required: [ctcMonthly, taBillYtd, elapsedCompleteMonths, ctcCostYtd, totalCost, marginRoiAvailable]

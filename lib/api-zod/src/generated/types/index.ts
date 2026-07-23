@@ -93,6 +93,7 @@ export * from './mgmtDeepDiveMemberRef';
 export * from './mgmtDirectDealerSummary';
 export * from './mgmtDistanceBucket';
 export * from './mgmtDistributorDeepDive';
+export * from './mgmtDistributorFlows';
 export * from './mgmtDistributorGroup';
 export * from './mgmtDistributorMappingQuality';
 export * from './mgmtDistributorRetailerRow';

@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { MgmtDistributorFlows } from './mgmtDistributorFlows';
 import type { MgmtDistributorRetailerRow } from './mgmtDistributorRetailerRow';
 
 export interface MgmtDistributorGroup {
@@ -21,4 +22,5 @@ export interface MgmtDistributorGroup {
   confirmedCount: number;
   guessedCount: number;
   retailers: MgmtDistributorRetailerRow[];
+  flows?: MgmtDistributorFlows | null;
 }
