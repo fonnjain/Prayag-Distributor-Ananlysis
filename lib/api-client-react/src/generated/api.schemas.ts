@@ -1572,6 +1572,61 @@ export interface MgmtTerritoryWhitespace {
   channelConflictEntries: MgmtChannelConflictEntry[];
 }
 
+export interface MgmtTopCustomerEntry {
+  rank: number;
+  name: string;
+  orderBooking: number;
+  sharePct: number;
+  cumulativePct: number;
+  visits?: number | null;
+  channel: string;
+  isDirectDealer: boolean;
+}
+
+export type MgmtCustomerStateGroupState = typeof MgmtCustomerStateGroupState[keyof typeof MgmtCustomerStateGroupState];
+
+
+export const MgmtCustomerStateGroupState = {
+  retained: 'retained',
+  reactivated: 'reactivated',
+  at_risk: 'at_risk',
+  never: 'never',
+} as const;
+
+/**
+ * One of four customer lifecycle states (retained/reactivated/at_risk/never).
+ */
+export interface MgmtCustomerStateGroup {
+  state: MgmtCustomerStateGroupState;
+  label: string;
+  count: number;
+  obThisYear: number;
+  obLastYear: number;
+  visits?: number | null;
+  bizPerVisit?: number | null;
+  visitSharePct?: number | null;
+  obSharePct?: number | null;
+}
+
+/**
+ * Phase D6: customer concentration (top-N) and new-vs-repeat business (retained / reactivated / at-risk / never). Derived purely from D1 retailer rows.
+ */
+export interface MgmtCustomerConcentration {
+  totalOb: number;
+  totalVisits?: number | null;
+  overallBizPerVisit?: number | null;
+  top5Ob: number;
+  top5SharePct?: number | null;
+  top10Ob: number;
+  top10SharePct?: number | null;
+  topCustomers: MgmtTopCustomerEntry[];
+  customerStates: MgmtCustomerStateGroup[];
+  dataCutoffLabel: string;
+  dataCutoffMonthsElapsed: number;
+  newRetailersOnboarded?: number | null;
+  newPartyOrderBooking?: number | null;
+}
+
 export interface MgmtDistributorDeepDive {
   fy: string;
   stateHeads: string[];
@@ -1584,6 +1639,7 @@ export interface MgmtDistributorDeepDive {
   membersLoaded: number;
   membersNotMapped: number;
   whitespace?: MgmtTerritoryWhitespace | null;
+  concentration?: MgmtCustomerConcentration | null;
   error?: string | null;
 }
 

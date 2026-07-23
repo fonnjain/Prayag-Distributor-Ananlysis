@@ -699,6 +699,40 @@ export const GetMgmtDistributorDeepDiveResponse = zod.object({
   "isActive": zod.boolean()
 }).describe('A direct dealer operating inside a district that has a named distributor.'))
 }).nullish().describe('Phase D5: territory whitespace and channel overlap. Two gap types are always reported separately: COVERAGE GAP (no distributor in the district) and ASSIGNMENT GAP (has distributor but unassigned retailers). priorYearOb is the sum of the sale field (secondary-received \/ prior-year reference) for direct-dealer and unassigned retailers — the best single-field proxy for proven demand in the gap districts.\n'),
+  "concentration": zod.object({
+  "totalOb": zod.number(),
+  "totalVisits": zod.number().nullish(),
+  "overallBizPerVisit": zod.number().nullish(),
+  "top5Ob": zod.number(),
+  "top5SharePct": zod.number().nullish(),
+  "top10Ob": zod.number(),
+  "top10SharePct": zod.number().nullish(),
+  "topCustomers": zod.array(zod.object({
+  "rank": zod.number(),
+  "name": zod.string(),
+  "orderBooking": zod.number(),
+  "sharePct": zod.number(),
+  "cumulativePct": zod.number(),
+  "visits": zod.number().nullish(),
+  "channel": zod.string(),
+  "isDirectDealer": zod.boolean()
+})),
+  "customerStates": zod.array(zod.object({
+  "state": zod.enum(['retained', 'reactivated', 'at_risk', 'never']),
+  "label": zod.string(),
+  "count": zod.number(),
+  "obThisYear": zod.number(),
+  "obLastYear": zod.number(),
+  "visits": zod.number().nullish(),
+  "bizPerVisit": zod.number().nullish(),
+  "visitSharePct": zod.number().nullish(),
+  "obSharePct": zod.number().nullish()
+}).describe('One of four customer lifecycle states (retained\/reactivated\/at_risk\/never).')),
+  "dataCutoffLabel": zod.string(),
+  "dataCutoffMonthsElapsed": zod.number(),
+  "newRetailersOnboarded": zod.number().nullish(),
+  "newPartyOrderBooking": zod.number().nullish()
+}).nullish().describe('Phase D6: customer concentration (top-N) and new-vs-repeat business (retained \/ reactivated \/ at-risk \/ never). Derived purely from D1 retailer rows.\n'),
   "error": zod.string().nullish()
 })
 

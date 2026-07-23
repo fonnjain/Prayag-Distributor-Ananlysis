@@ -48,6 +48,11 @@ import {
 } from "./distributorInvestment.js";
 import { computeRoiCost } from "./roiCost.js";
 import {
+  computeCustomerConcentration,
+  type CustomerConcentration,
+  type D6RetailerInput,
+} from "./distributorCustomerConcentration.js";
+import {
   computeTerritoryWhitespace,
   type WhitespaceRow,
   type TerritoryWhitespace,
@@ -172,7 +177,8 @@ export type DistributorDeepDiveResult = {
   partyObTotal: number;
   membersLoaded: number;
   membersNotMapped: number;
-  whitespace: TerritoryWhitespace | null;
+  whitespace:     TerritoryWhitespace | null;
+  concentration:  CustomerConcentration | null;
   error: string | null;
 };
 
@@ -545,7 +551,8 @@ export async function loadDistributorDeepDive(
   const empty = (): DistributorDeepDiveResult => ({
     fy, stateHeads, distributors: [], sharedRetailers: [],
     directDealer: null, noneAssigned: null, mappingQuality: null,
-    partyObTotal: 0, membersLoaded: 0, membersNotMapped: 0, whitespace: null, error: null,
+    partyObTotal: 0, membersLoaded: 0, membersNotMapped: 0,
+    whitespace: null, concentration: null, error: null,
   });
 
   if (!selectedStateHead || !members.length) return empty();
@@ -609,12 +616,27 @@ export async function loadDistributorDeepDive(
   // We use the first member with data (typically only one per state head in this period).
   const memberNameToNormKey = new Map(members.map((m) => [m.name, m.normKey] as const));
   let d4MemberCostPerVisit: number | null = null;
+  // D6 dashboard stats (new retailer data) — captured from the first member kpis available.
+  let d6NewPartyOb:     number | null = null;
+  let d6NewRetailers:   number | null = null;
+
   for (const [memberName, spread] of memberSpreads.entries()) {
     const normKey = memberNameToNormKey.get(memberName);
     if (!normKey) continue;
     try {
       const mDd = await loadDeepDiveData(fy, selectedStateHead, normKey);
       const kpis = mDd.kpis;
+
+      // D6: capture new-party stats from the first member that has kpis.
+      if (kpis && d6NewPartyOb === null) {
+        d6NewPartyOb = kpis.newPartyOrderBooking ?? null;
+        const oldR   = kpis.totalOldRetailers ?? null;
+        const totalR = kpis.totalRetailers    ?? null;
+        if (oldR !== null && totalR !== null && totalR >= oldR) {
+          d6NewRetailers = totalR - oldR;
+        }
+      }
+
       if (kpis?.ctcMonthly != null) {
         const roi = computeRoiCost(kpis.ctcMonthly, kpis.taBillStCost ?? null, fy, spread);
         if (roi?.costPerVisit != null) {
@@ -848,6 +870,48 @@ export async function loadDistributorDeepDive(
       )
     : null;
 
+  // Step 14 (D6): Customer concentration and new vs. repeat — pure sync, no I/O.
+  // Build a unified D6RetailerInput[] with channel labels from the three row sets.
+  let concentration: CustomerConcentration | null = null;
+  if (allRows.length > 0) {
+    const d6Rows: D6RetailerInput[] = [];
+    for (const g of distGroups) {
+      for (const r of g.retailers) {
+        d6Rows.push({
+          name:           r.name,
+          orderBooking:   r.orderBooking,
+          sale:           r.sale,
+          visits:         r.visits,
+          channel:        g.name,
+          isDirectDealer: false,
+        });
+      }
+    }
+    for (const r of directDealerRows) {
+      d6Rows.push({
+        name:           r.name,
+        orderBooking:   r.orderBooking,
+        sale:           r.sale,
+        visits:         r.totalVisit,
+        channel:        "Direct Dealer",
+        isDirectDealer: true,
+      });
+    }
+    for (const r of noneRows) {
+      d6Rows.push({
+        name:           r.name,
+        orderBooking:   r.orderBooking,
+        sale:           r.sale,
+        visits:         r.totalVisit,
+        channel:        "Unassigned",
+        isDirectDealer: false,
+      });
+    }
+    concentration = computeCustomerConcentration(
+      d6Rows, fy, d6NewPartyOb, d6NewRetailers,
+    );
+  }
+
   return {
     fy, stateHeads,
     distributors: distGroups,
@@ -859,6 +923,7 @@ export async function loadDistributorDeepDive(
     membersLoaded,
     membersNotMapped,
     whitespace,
+    concentration,
     error: null,
   };
 }

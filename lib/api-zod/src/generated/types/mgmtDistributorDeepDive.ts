@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { MgmtCustomerConcentration } from './mgmtCustomerConcentration';
 import type { MgmtDirectDealerSummary } from './mgmtDirectDealerSummary';
 import type { MgmtDistributorGroup } from './mgmtDistributorGroup';
 import type { MgmtDistributorMappingQuality } from './mgmtDistributorMappingQuality';
@@ -24,5 +25,6 @@ export interface MgmtDistributorDeepDive {
   membersLoaded: number;
   membersNotMapped: number;
   whitespace?: MgmtTerritoryWhitespace | null;
+  concentration?: MgmtCustomerConcentration | null;
   error?: string | null;
 }

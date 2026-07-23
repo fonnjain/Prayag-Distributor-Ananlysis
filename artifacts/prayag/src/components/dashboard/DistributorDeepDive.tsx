@@ -272,6 +272,47 @@ type TerritoryWhitespace = {
   channelConflictEntries: ChannelConflictEntry[];
 };
 
+// ── D6: Customer concentration types ─────────────────────────────────────────
+
+type TopCustomerEntry = {
+  rank: number;
+  name: string;
+  orderBooking: number;
+  sharePct: number;
+  cumulativePct: number;
+  visits: number | null;
+  channel: string;
+  isDirectDealer: boolean;
+};
+
+type CustomerStateGroup = {
+  state: "retained" | "reactivated" | "at_risk" | "never";
+  label: string;
+  count: number;
+  obThisYear: number;
+  obLastYear: number;
+  visits: number | null;
+  bizPerVisit: number | null;
+  visitSharePct: number | null;
+  obSharePct: number | null;
+};
+
+type CustomerConcentration = {
+  totalOb: number;
+  totalVisits: number | null;
+  overallBizPerVisit: number | null;
+  top5Ob: number;
+  top5SharePct: number | null;
+  top10Ob: number;
+  top10SharePct: number | null;
+  topCustomers: TopCustomerEntry[];
+  customerStates: CustomerStateGroup[];
+  dataCutoffLabel: string;
+  dataCutoffMonthsElapsed: number;
+  newRetailersOnboarded: number | null;
+  newPartyOrderBooking: number | null;
+};
+
 type DistributorDeepDiveResult = {
   fy: string;
   stateHeads: string[];
@@ -284,6 +325,7 @@ type DistributorDeepDiveResult = {
   membersLoaded: number;
   membersNotMapped: number;
   whitespace: TerritoryWhitespace | null;
+  concentration: CustomerConcentration | null;
   error: string | null;
 };
 
@@ -1073,6 +1115,205 @@ function WhitespacePanel({ whitespace }: { whitespace: TerritoryWhitespace }) {
   );
 }
 
+// ── D6: Customer concentration panel ─────────────────────────────────────────
+
+const STATE_STYLE: Record<CustomerStateGroup["state"], { border: string; bg: string; label: string }> = {
+  retained:    { border: "border-green-200",  bg: "bg-green-50",  label: "Retained"    },
+  reactivated: { border: "border-blue-200",   bg: "bg-blue-50",   label: "Reactivated" },
+  at_risk:     { border: "border-amber-200",  bg: "bg-amber-50",  label: "At Risk"     },
+  never:       { border: "border-slate-200",  bg: "bg-slate-50",  label: "Never"       },
+};
+
+const STATE_OB_LABEL: Record<CustomerStateGroup["state"], string> = {
+  retained:    "OB this year",
+  reactivated: "OB this year",
+  at_risk:     "OB last year",
+  never:       "--",
+};
+
+function CustomerConcentrationPanel({ c }: { c: CustomerConcentration }) {
+  const [showAllCustomers, setShowAllCustomers] = useState(false);
+  const visibleCustomers = showAllCustomers ? c.topCustomers : c.topCustomers.slice(0, 5);
+
+  const totalVisits = c.totalVisits ?? null;
+
+  return (
+    <SectionCard title="Customer Concentration">
+      <div className="space-y-5">
+
+        {/* ── Cutoff note ───────────────────────────────────────────── */}
+        <div className="text-xs text-muted-foreground">
+          Data through {c.dataCutoffLabel} ({c.dataCutoffMonthsElapsed} month{c.dataCutoffMonthsElapsed !== 1 ? "s" : ""} elapsed).
+          {(c.newRetailersOnboarded != null || c.newPartyOrderBooking != null) && (
+            <span className="ml-2">
+              New retailers this year:{" "}
+              <span className="font-medium text-foreground">
+                {c.newRetailersOnboarded ?? "--"}
+              </span>
+              {c.newPartyOrderBooking != null && c.newPartyOrderBooking > 0 && (
+                <span className="ml-1">
+                  ({formatINR(c.newPartyOrderBooking)} OB)
+                </span>
+              )}
+            </span>
+          )}
+        </div>
+
+        {/* ── Concentration summary bar ─────────────────────────────── */}
+        <div className="grid grid-cols-3 gap-3 text-center">
+          {[
+            { label: "Top 5 share",  pct: c.top5SharePct,  ob: c.top5Ob  },
+            { label: "Top 10 share", pct: c.top10SharePct, ob: c.top10Ob },
+            { label: "Total OB",     pct: null,             ob: c.totalOb },
+          ].map(({ label, pct: p, ob }) => (
+            <div key={label} className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+              <div className="text-xs text-muted-foreground mb-0.5">{label}</div>
+              <div className="font-semibold text-sm tabular-nums">{formatINR(ob)}</div>
+              {p != null && (
+                <div className={`text-xs font-medium mt-0.5 ${p >= 60 ? "text-amber-600" : "text-muted-foreground"}`}>
+                  {p.toFixed(1)}%
+                  {p >= 60 && <AlertTriangle className="inline w-3 h-3 ml-0.5 mb-0.5" />}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* ── Top customers table ───────────────────────────────────── */}
+        {c.topCustomers.length > 0 && (
+          <div>
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+              Top customers by order booking
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-muted-foreground text-xs">
+                    <th className="text-left py-1.5 pr-3 font-medium w-6">#</th>
+                    <th className="text-left py-1.5 pr-3 font-medium">Customer</th>
+                    <th className="text-left py-1.5 pr-3 font-medium hidden sm:table-cell">Channel</th>
+                    <th className="text-right py-1.5 pr-3 font-medium">Order Booking</th>
+                    <th className="text-right py-1.5 pr-3 font-medium">Share</th>
+                    <th className="text-right py-1.5 font-medium">Cumulative</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {visibleCustomers.map((row) => (
+                    <tr key={row.rank} className="text-xs">
+                      <td className="py-1.5 pr-3 text-muted-foreground tabular-nums">{row.rank}</td>
+                      <td className="py-1.5 pr-3 font-medium">
+                        {row.name}
+                        {row.isDirectDealer && (
+                          <span className="ml-1.5 text-[10px] text-amber-600 font-normal">direct</span>
+                        )}
+                      </td>
+                      <td className="py-1.5 pr-3 text-muted-foreground hidden sm:table-cell">{row.channel}</td>
+                      <td className="py-1.5 pr-3 text-right tabular-nums">{formatINR(row.orderBooking)}</td>
+                      <td className="py-1.5 pr-3 text-right tabular-nums">{row.sharePct.toFixed(1)}%</td>
+                      <td className={`py-1.5 text-right tabular-nums font-medium ${row.cumulativePct >= 60 ? "text-amber-600" : "text-muted-foreground"}`}>
+                        {row.cumulativePct.toFixed(1)}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {c.topCustomers.length > 5 && (
+              <button
+                className="mt-2 text-xs text-primary hover:underline flex items-center gap-1"
+                onClick={() => setShowAllCustomers((v) => !v)}
+              >
+                {showAllCustomers ? (
+                  <><ChevronDown className="w-3 h-3 rotate-180" />Show top 5 only</>
+                ) : (
+                  <><ChevronRight className="w-3 h-3" />Show top {c.topCustomers.length}</>
+                )}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* ── Customer lifecycle grid ───────────────────────────────── */}
+        {c.customerStates.length > 0 && (
+          <div>
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+              Repeat vs. new business
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {c.customerStates.map((sg) => {
+                const style = STATE_STYLE[sg.state];
+                const obVal = sg.state === "at_risk" ? sg.obLastYear : sg.obThisYear;
+                const obLabel = STATE_OB_LABEL[sg.state];
+                return (
+                  <div key={sg.state} className={`rounded-lg border ${style.border} ${style.bg} px-3 py-2.5`}>
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-foreground/70 mb-1">
+                      {style.label}
+                    </div>
+                    <div className="text-xl font-bold tabular-nums">{sg.count}</div>
+                    <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
+                      {sg.state !== "never" && obVal > 0 && (
+                        <div>{obLabel}: <span className="font-medium text-foreground">{formatINR(obVal)}</span></div>
+                      )}
+                      {sg.visits != null && sg.visits > 0 && (
+                        <div>
+                          {sg.visits} visit{sg.visits !== 1 ? "s" : ""}
+                          {sg.visitSharePct != null && ` (${sg.visitSharePct.toFixed(0)}%)`}
+                        </div>
+                      )}
+                      {sg.bizPerVisit != null && sg.bizPerVisit > 0 && totalVisits != null && (
+                        <div>{formatINR(sg.bizPerVisit)}/visit</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* ── Effort-vs-return note ─────────────────────────────── */}
+            {(() => {
+              const reactivated = c.customerStates.find((s) => s.state === "reactivated");
+              const retained    = c.customerStates.find((s) => s.state === "retained");
+              if (
+                reactivated?.bizPerVisit != null &&
+                retained?.bizPerVisit != null &&
+                reactivated.bizPerVisit > retained.bizPerVisit
+              ) {
+                return (
+                  <div className="mt-2 flex items-start gap-2 rounded-md bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-800">
+                    <TrendingUp className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                    <span>
+                      Reactivated customers yield{" "}
+                      <span className="font-medium">{formatINR(reactivated.bizPerVisit)}/visit</span>
+                      {" "}vs{" "}
+                      <span className="font-medium">{formatINR(retained.bizPerVisit)}/visit</span>
+                      {" "}for retained — recovery visits are high-return.
+                    </span>
+                  </div>
+                );
+              }
+              const atRisk = c.customerStates.find((s) => s.state === "at_risk");
+              if (atRisk && atRisk.count > 0 && atRisk.obLastYear > 0) {
+                return (
+                  <div className="mt-2 flex items-start gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+                    <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                    <span>
+                      {atRisk.count} customer{atRisk.count !== 1 ? "s" : ""} with{" "}
+                      <span className="font-medium">{formatINR(atRisk.obLastYear)}</span>
+                      {" "}prior-year OB have no booking yet this year (cutoff: {c.dataCutoffLabel}).
+                    </span>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+          </div>
+        )}
+
+      </div>
+    </SectionCard>
+  );
+}
+
 // ── D4: Investment, ROI and tier panel ───────────────────────────────────────
 
 const TIER_COLOR: Record<"A" | "B" | "C", string> = {
@@ -1416,6 +1657,11 @@ export default function DistributorDeepDive() {
           {/* ── D5: Territory whitespace ────────────────────────────── */}
           {data.whitespace && (
             <WhitespacePanel whitespace={data.whitespace} />
+          )}
+
+          {/* ── D6: Customer concentration ───────────────────────────── */}
+          {data.concentration && (
+            <CustomerConcentrationPanel c={data.concentration} />
           )}
 
           {/* ── Distributor table ───────────────────────────────────── */}

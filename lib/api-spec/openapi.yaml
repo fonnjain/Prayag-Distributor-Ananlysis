@@ -2678,6 +2678,9 @@ components:
         whitespace:
           nullable: true
           $ref: "#/components/schemas/MgmtTerritoryWhitespace"
+        concentration:
+          nullable: true
+          $ref: "#/components/schemas/MgmtCustomerConcentration"
         error: { type: string, nullable: true }
     MgmtDistributorGroup:
       type: object
@@ -3056,6 +3059,65 @@ components:
         sale: { type: number }
         visits: { type: integer, nullable: true }
         isActive: { type: boolean }
+    MgmtCustomerConcentration:
+      type: object
+      description: >
+        Phase D6: customer concentration (top-N) and new-vs-repeat business
+        (retained / reactivated / at-risk / never). Derived purely from D1 retailer rows.
+      required:
+        - totalOb
+        - top5Ob
+        - top10Ob
+        - topCustomers
+        - customerStates
+        - dataCutoffLabel
+        - dataCutoffMonthsElapsed
+      properties:
+        totalOb:              { type: number }
+        totalVisits:          { type: integer,  nullable: true }
+        overallBizPerVisit:   { type: number,   nullable: true }
+        top5Ob:               { type: number }
+        top5SharePct:         { type: number,   nullable: true }
+        top10Ob:              { type: number }
+        top10SharePct:        { type: number,   nullable: true }
+        topCustomers:
+          type: array
+          items: { $ref: "#/components/schemas/MgmtTopCustomerEntry" }
+        customerStates:
+          type: array
+          items: { $ref: "#/components/schemas/MgmtCustomerStateGroup" }
+        dataCutoffLabel:         { type: string }
+        dataCutoffMonthsElapsed: { type: integer }
+        newRetailersOnboarded:   { type: integer, nullable: true }
+        newPartyOrderBooking:    { type: number,  nullable: true }
+    MgmtTopCustomerEntry:
+      type: object
+      required: [rank, name, orderBooking, sharePct, cumulativePct, channel, isDirectDealer]
+      properties:
+        rank:           { type: integer }
+        name:           { type: string }
+        orderBooking:   { type: number }
+        sharePct:       { type: number }
+        cumulativePct:  { type: number }
+        visits:         { type: integer, nullable: true }
+        channel:        { type: string }
+        isDirectDealer: { type: boolean }
+    MgmtCustomerStateGroup:
+      type: object
+      description: One of four customer lifecycle states (retained/reactivated/at_risk/never).
+      required: [state, label, count, obThisYear, obLastYear]
+      properties:
+        state:
+          type: string
+          enum: [retained, reactivated, at_risk, never]
+        label:          { type: string }
+        count:          { type: integer }
+        obThisYear:     { type: number }
+        obLastYear:     { type: number }
+        visits:         { type: integer,  nullable: true }
+        bizPerVisit:    { type: number,   nullable: true }
+        visitSharePct:  { type: number,   nullable: true }
+        obSharePct:     { type: number,   nullable: true }
     MgmtDistributorEffectiveDiscount:
       type: object
       required: [recentFy, grossTotal, netTotal, discountAmount, weightedDiscountPct, hasAnomalousLines, abovePeerMedian]
