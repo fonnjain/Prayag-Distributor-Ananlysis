@@ -1,0 +1,76 @@
+Distributor Deep Dive - phased build prompts (D1 to D4)
+Submit each block on its own, in order. Verify its acceptance checks before sending the next.
+What we are building
+A new 'Distributor Deep Dive' page. The user picks a State Head, then a distributor beneath that head, and sees the distributor's performance with its retailers underneath - what it sells, what it could sell, and what Prayag invests in it against what it returns.
+The hierarchy, as the data actually is
+- State Head -> Distributor -> Retailers
+- State Head -> Direct Dealer (PARALLEL branch, not a child of any distributor)
+Direct dealers buy straight from Prayag and carry no distributor. In the member sheets they appear with a blank Assigned Distributor, and that group totals exactly Rs 7,86,605 for Prasun - the same figure the Sales Deep Dive reports as Direct Dealers Order. Placing them under a distributor would invent a supply relationship that does not exist.
+The backbone: a distributor sits between two flows
+This is what makes the page different from the Sales Deep Dive. Primary in-flow is what the distributor buys from Prayag; secondary out-flow is what it sells to retailers. The gap between them is stock building at the distributor, or business moving outside the attributed channel. Neither is currently visible anywhere in the app.
+What is live and what is closed-years only
+Live (FY2026-27): distributor and retailer PERFORMANCE. Two sources - the member sheets ('Summary Report 26-27', column F Assigned Distributor) for retailer-level detail, and the State Head Dashboard tab 'SECONDARY ORDER BOOKING REPORT' for month-by-month Plan / Order Booked / % Achievement / Sales Received, each carrying an Amount and a Count column (the Count is the dealer count, so it gives active-dealer coverage per month).
+Closed years only: item-code (Cat. No.) SKU mix, segment spread, whitespace and effective discount. These come from secondary_register_line, which carries a Distributor column alongside Segment, Cat. No., Qty, MRP, Discount and Sub Total. No FY2026-27 register exists, so the SKU panels show an unavailable state for the live year rather than zeros.
+Mapping quality is itself a finding
+The Assigned Distributor field is dirty, and its condition matters more than it looks. For Prasun: 30 retailers carry '--' (no distributor assigned), every one of them is dormant, and they absorbed 113 visits - 29 percent of his entire visit effort against zero rupees. A retailer with no distributor has no route to order through, so that dormancy is likely a supply-mapping problem, not a sales-effort problem. That single panel is probably worth more than the rest of the page.
+Phase D1 - page, hierarchy, live-year performance, mapping quality
+PROMPT - Phase D1 (copy the box below)
+Prayag app - new page, Distributor Deep Dive, Phase D1 of 4. Same global rules as
+the Sales Deep Dive phases. Submit later phases separately.
+
+Goal: a 'Distributor Deep Dive' page. The user picks a State Head, then a
+distributor under that head, and sees that distributor's performance with its
+retailers beneath it.
+
+Hierarchy, as the data actually is:
+  State Head -> Distributor -> Retailers
+  State Head -> Direct Dealer  (PARALLEL branch, never a child of a distributor)
+Direct dealers buy straight from Prayag and carry no distributor.
+
+Live-year sources (FY2026-27):
+- Member sheets, tab 'Summary Report 26-27': column F 'Assigned Distributor'
+  groups retailers under a distributor. Aggregate order booking, sale, visits and
+  active/dormant counts per distributor.
+- State Head Dashboard, tab 'SECONDARY ORDER BOOKING REPORT': per member, month by
+  month, Plan / Order Booked / % Achievement / Sales Received, each with an Amount
+  and a Count column. Count is the dealer count, so it gives active-dealer
+  coverage per month.
+
+Mapping quality - surface it, never hide it. The Assigned Distributor field is
+dirty and its condition is itself a finding:
+  blank            = direct dealer. Route to the parallel branch.
+  '--'             = no distributor assigned. Flag it; these cannot order.
+  'A, B' (comma)   = retailer served by two distributors. Model as a relation,
+                     not as a string. Do not split the money arbitrarily; show it
+                     against both and mark it shared.
+  numeric (25.2)   = malformed row. Exclude it.
+Show a mapping panel with the count in each state, plus the customer_master
+head_confidence split (Confirmed vs Guessed). Never publish a distributor total
+without showing how much of it rests on a Guessed mapping.
+
+Build:
+- Route GET /mgmt/distributor-deep-dive?fy=&stateHead=&distributor=
+- Frontend tab 'Distributor Deep Dive': State Head -> Distributor dropdowns, a
+  fiscal-year selector, a distributor summary, the retailer table beneath, and the
+  direct-dealer branch shown separately.
+- Concentration, both directions: each distributor's share of the State Head's
+  party business, and each distributor's dependence on its own top retailers.
+- Add the route to openapi.yaml, run codegen, validate with Zod, RESTART the API.
+
+Acceptance - State Head 'Anant Singh'. Grouping Prasun Chatterjee's 73 retailers
+by Assigned Distributor for FY2026-27 must give exactly:
+  Jagdamba Traders           23 retailers, 23 active, Rs 15,80,341, 136 visits
+  (blank = direct dealer)    12 retailers,  3 active, Rs  7,86,606,  78 visits
+  Manoj Enterprises           5 retailers,  5 active, Rs  1,16,481,  33 visits
+  Sumit paint and hardware    2 retailers,  2 active, Rs  1,18,102,  25 visits
+  Manoj + Jagdamba (shared)   1 retailer,   1 active, Rs    19,580,  10 visits
+  '--' none assigned         30 retailers,  0 active, Rs        0, 113 visits
+  Totals: 73 retailers, 34 active, Rs 26,21,109
+  The direct-dealer branch must total exactly Rs 7,86,605 - the same figure the
+    Sales Deep Dive reports as Direct Dealers Order.
+  Jagdamba Traders must show as 86.1 percent of party order booking
+    (15,80,341 of 18,34,503) - flag it as concentration risk.
+  The mapping panel must report 30 retailers with no distributor, all dormant,
+    holding 113 visits, being 29 percent of his visit effort against zero
+    business.
+Prove each with the computed value, not an assertion of success.
