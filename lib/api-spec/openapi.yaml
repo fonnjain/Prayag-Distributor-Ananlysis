@@ -2761,7 +2761,7 @@ components:
         concentrationIndex: { type: number, nullable: true, description: "HHI: 0–10000; higher = more concentrated." }
         businessPerActiveRetailer: { type: number, nullable: true }
         businessPerVisit: { type: number, nullable: true }
-        annualBusinessPlan: { type: number, nullable: true, description: "From the member's own FY tab; preferred over col-W sum." }
+        annualBusinessPlan: { type: number, nullable: true, description: "Sum of retailer-row plan values from the Summary Report tab (col W). Falls back to the FY-tab scan only when the Summary Report has no plan column. The FY-tab TOTAL row is never used — it may not foot." }
     MgmtDistanceBucket:
       type: object
       required: [label, minKm, count, visitsDone, avgVisits, avgOb, activeCount]

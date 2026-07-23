@@ -629,6 +629,10 @@ async function readFyMonthlyTab(
         months.push({ month: FY_MONTH_LABELS[mIdx], plan, orderBooking: ob, sale });
       } else if (annualBp === null && i < 20) {
         // Scan non-month rows in the first 20 for a plausible annual BP.
+        // Skip TOTAL / GRAND TOTAL rows — they may not foot (direct-dealer OB
+        // counted twice, etc.) and would silently overstate the plan.
+        const firstLabel = normHeader(row.find((c) => (cellStr(c) || "").trim() !== "") ?? "");
+        if (firstLabel.startsWith("TOTAL") || firstLabel.startsWith("GRANDTOTAL")) continue;
         for (const cell of row.slice(0, 15)) {
           const n = cellNum(cell);
           if (n !== null && n >= 5_000_000 && n <= 200_000_000) {
@@ -758,7 +762,13 @@ async function loadMemberSheetUncached(
     readFyMonthlyTab(fileId, fyTabLabel, allTabs),
     loadHistoricalCapacity(fileId, allTabs, fy),
   ]);
-  spread.annualBusinessPlan = fyMonthData.annualBp ?? spread.annualBusinessPlan;
+  // Phase 2-C: the col-W sum (retailer rows, Summary Report tab) is authoritative.
+  // Only fall back to the FY-tab scan when the Summary Report had no plan column
+  // (colWSum = 0 → spread.annualBusinessPlan = null).  Never let the FY tab's
+  // TOTAL row — which may not foot — overwrite a good per-row sum.
+  if (spread.annualBusinessPlan === null) {
+    spread.annualBusinessPlan = fyMonthData.annualBp ?? null;
+  }
 
   const visitPlan = computeVisitPlan(rows, fy, historicalCapacity);
 
