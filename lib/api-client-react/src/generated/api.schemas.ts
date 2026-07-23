@@ -1113,6 +1113,41 @@ export interface MgmtRoiCost {
   marginRoiAvailable: boolean;
 }
 
+export interface MgmtSegmentNet {
+  /** Canonical segment/brand name (brand_canon from secondary_register_line). */
+  segment: string;
+  /** NET (Sub Total) for this segment in rupees. */
+  net: number;
+  /** Share of this segment in the member's total NET (0–100). */
+  pct: number;
+}
+
+/**
+ * Phase 5: segment and SKU spread from secondary_register_line. NET = net_amount (Sub Total), never gross_amount. For the live year (FY2026-27) isLiveYear is true and no metrics are present.
+ */
+export interface MgmtSkuSpread {
+  /** True when the selected FY has no secondary register ingested yet (live year). */
+  isLiveYear: boolean;
+  /** Human-readable note explaining that data will appear when a register is ingested. */
+  liveYearNote?: string | null;
+  /** Total secondary_register_line rows for this member in the FY. */
+  totalRows?: number | null;
+  /** Sum of net_amount (Sub Total) across all rows. */
+  totalNet?: number | null;
+  /** Distinct brand_canon values present in the member's rows. */
+  distinctSegments?: number | null;
+  /** Distinct brand_canon values across ALL members for this FY (the full segment universe). */
+  totalKnownSegments?: number | null;
+  /** distinctSegments / totalKnownSegments × 100. */
+  coveragePct?: number | null;
+  /** NET by segment, sorted descending by net. Also serves as the top-SKU list. */
+  netBySegment?: MgmtSegmentNet[] | null;
+  /** Average number of distinct segments ordered by each customer. */
+  crossSellDepth?: number | null;
+  /** Herfindahl-Hirschman Index over segment NET shares (0–10000). Higher = more concentrated. <2500 = diversified, 2500–5000 = moderate, >5000 = concentrated. */
+  concentrationHhi?: number | null;
+}
+
 export interface MgmtDeepDive {
   /** Fiscal year, e.g. 2026-27. */
   fy: string;
@@ -1125,6 +1160,8 @@ export interface MgmtDeepDive {
   retailerDetail?: MgmtRetailerDetail | null;
   /** Phase 4: revenue-to-cost analysis. Null until retailer detail is loaded (requires spread for OB/sale/visits) or if CTC is missing from the Data tab. */
   roiCost?: MgmtRoiCost | null;
+  /** Phase 5: segment and SKU spread from secondary_register_line (closed FYs) or a live-year placeholder when no register is ingested. Null when no member is selected. */
+  skuSpread?: MgmtSkuSpread | null;
   /** Total rows read from the Data tab. */
   rowsRead: number;
   error?: string | null;

@@ -179,6 +179,27 @@ interface RoiCost {
   marginRoiAvailable: false;
 }
 
+// ── Phase 5 types ──────────────────────────────────────────────────────────────
+
+interface SegmentNet {
+  segment: string;
+  net: number;
+  pct: number;
+}
+
+interface SkuSpread {
+  isLiveYear: boolean;
+  liveYearNote?: string | null;
+  totalRows?: number | null;
+  totalNet?: number | null;
+  distinctSegments?: number | null;
+  totalKnownSegments?: number | null;
+  coveragePct?: number | null;
+  netBySegment?: SegmentNet[] | null;
+  crossSellDepth?: number | null;
+  concentrationHhi?: number | null;
+}
+
 interface DeepDiveData {
   fy: string;
   stateHeads: string[];
@@ -186,6 +207,7 @@ interface DeepDiveData {
   kpis: MemberKpis | null;
   retailerDetail: RetailerDetail | null;
   roiCost: RoiCost | null;
+  skuSpread: SkuSpread | null;
   rowsRead: number;
   error: string | null;
 }
@@ -938,6 +960,122 @@ function ForwardPlanPanel({
   );
 }
 
+// ── Phase 5 components ────────────────────────────────────────────────────────
+
+function hhiLabel(hhi: number): { label: string; colour: string } {
+  if (hhi < 2500) return { label: "Diversified", colour: "text-green-700 dark:text-green-400" };
+  if (hhi < 5000) return { label: "Moderate", colour: "text-amber-700 dark:text-amber-400" };
+  return { label: "Concentrated", colour: "text-red-700 dark:text-red-400" };
+}
+
+function SkuSpreadPanel({ spread }: { spread: SkuSpread }) {
+  if (spread.isLiveYear) {
+    return (
+      <div className="space-y-3">
+        <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground border-b border-border pb-1">
+          Segment Spread (Secondary Register)
+        </h3>
+        <div className="rounded-md border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+          {spread.liveYearNote ?? "Segment data will populate once a FY2026-27 secondary register is ingested."}
+        </div>
+      </div>
+    );
+  }
+
+  const segments = spread.netBySegment ?? [];
+  const total = spread.totalNet ?? 0;
+  const distinct = spread.distinctSegments ?? 0;
+  const universe = spread.totalKnownSegments ?? 0;
+  const coveragePct = spread.coveragePct ?? 0;
+  const hhi = spread.concentrationHhi ?? 0;
+  const hhiInfo = hhiLabel(hhi);
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground border-b border-border pb-1">
+        Segment Spread (Secondary Register)
+      </h3>
+
+      {/* Summary tiles */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="rounded-lg border border-border bg-card px-4 py-3 flex flex-col gap-1">
+          <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide leading-tight">
+            Register NET (Sub Total)
+          </span>
+          <span className="text-xl font-bold text-foreground">{fmtRs(total)}</span>
+          <span className="text-[11px] text-muted-foreground">{(spread.totalRows ?? 0).toLocaleString("en-IN")} lines</span>
+        </div>
+
+        <div className="rounded-lg border border-border bg-card px-4 py-3 flex flex-col gap-1">
+          <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide leading-tight">
+            Segment Coverage
+          </span>
+          <span className="text-xl font-bold text-foreground">
+            {distinct} <span className="text-sm font-normal text-muted-foreground">of {universe}</span>
+          </span>
+          <span className="text-[11px] text-muted-foreground">{coveragePct.toFixed(1)}% of all segments</span>
+        </div>
+
+        <div className="rounded-lg border border-border bg-card px-4 py-3 flex flex-col gap-1">
+          <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide leading-tight">
+            Cross-sell Depth
+          </span>
+          <span className="text-xl font-bold text-foreground">
+            {(spread.crossSellDepth ?? 0).toFixed(1)}
+          </span>
+          <span className="text-[11px] text-muted-foreground">avg segments per customer</span>
+        </div>
+
+        <div className="rounded-lg border border-border bg-card px-4 py-3 flex flex-col gap-1">
+          <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide leading-tight">
+            Concentration (HHI)
+          </span>
+          <span className={cn("text-xl font-bold", hhiInfo.colour)}>{hhi.toLocaleString("en-IN")}</span>
+          <span className={cn("text-[11px]", hhiInfo.colour)}>{hhiInfo.label}</span>
+        </div>
+      </div>
+
+      {/* NET by segment */}
+      {segments.length > 0 && (
+        <div className="rounded-lg border border-border overflow-hidden">
+          <div className="px-4 py-2 bg-muted/30 border-b border-border">
+            <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+              NET (Sub Total) by Segment — sorted by value
+            </p>
+          </div>
+          <div className="divide-y divide-border">
+            {segments.map((seg) => (
+              <div key={seg.segment} className="px-4 py-2.5 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{seg.segment}</p>
+                  <div className="mt-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary/60 rounded-full transition-all"
+                      style={{ width: `${Math.min(100, seg.pct)}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-sm font-semibold text-foreground">{fmtRs(seg.net)}</p>
+                  <p className="text-[11px] text-muted-foreground">{seg.pct.toFixed(1)}%</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="px-4 py-2 bg-muted/20 border-t border-border flex justify-between text-xs text-muted-foreground">
+            <span>Total (foots to register NET)</span>
+            <span className="font-semibold text-foreground">{fmtRs(total)}</span>
+          </div>
+        </div>
+      )}
+
+      <p className="text-xs text-muted-foreground">
+        Source: secondary_register_line · NET = net_amount (Sub Total) · segment = brand_canon.
+      </p>
+    </div>
+  );
+}
+
 // ── Phase 4 components ────────────────────────────────────────────────────────
 
 function multipleColour(m: number): string {
@@ -1140,9 +1278,10 @@ export default function SalesDeepDive() {
     if (memberKey) fetchKpis(fy, selectedHead, memberKey);
   }
 
-  const kpis     = data?.kpis ?? null;
-  const rd       = data?.retailerDetail ?? null;
-  const roiCost  = data?.roiCost ?? null;
+  const kpis      = data?.kpis ?? null;
+  const rd        = data?.retailerDetail ?? null;
+  const roiCost   = data?.roiCost ?? null;
+  const skuSpread = data?.skuSpread ?? null;
   const stateHeads = data?.stateHeads ?? [];
   const members    = data?.members ?? [];
 
@@ -1363,6 +1502,13 @@ export default function SalesDeepDive() {
           {rd && rd.status === "error" && (
             <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/10 px-4 py-3 text-xs text-amber-800 dark:text-amber-300">
               Could not load working sheet: {rd.error}
+            </div>
+          )}
+
+          {/* Phase 5: segment and SKU spread from secondary_register_line */}
+          {skuSpread && (
+            <div className="pt-2 border-t border-border">
+              <SkuSpreadPanel spread={skuSpread} />
             </div>
           )}
 

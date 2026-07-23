@@ -430,6 +430,22 @@ export const GetMgmtDeepDiveResponse = zod.object({
   "costRatioPct": zod.number().nullish().describe('(totalCost ÷ OB) × 100. Lower = more efficient.'),
   "marginRoiAvailable": zod.boolean().describe('Always false until a Cost Master with finished-goods cost is loaded. MRP and purchase price are never used as cost proxies.\n')
 }).nullish().describe('Phase 4: revenue-to-cost analysis. Null until retailer detail is loaded (requires spread for OB\/sale\/visits) or if CTC is missing from the Data tab.\n'),
+  "skuSpread": zod.object({
+  "isLiveYear": zod.boolean().describe('True when the selected FY has no secondary register ingested yet (live year).'),
+  "liveYearNote": zod.string().nullish().describe('Human-readable note explaining that data will appear when a register is ingested.'),
+  "totalRows": zod.number().nullish().describe('Total secondary_register_line rows for this member in the FY.'),
+  "totalNet": zod.number().nullish().describe('Sum of net_amount (Sub Total) across all rows.'),
+  "distinctSegments": zod.number().nullish().describe('Distinct brand_canon values present in the member\'s rows.'),
+  "totalKnownSegments": zod.number().nullish().describe('Distinct brand_canon values across ALL members for this FY (the full segment universe).'),
+  "coveragePct": zod.number().nullish().describe('distinctSegments \/ totalKnownSegments × 100.'),
+  "netBySegment": zod.array(zod.object({
+  "segment": zod.string().describe('Canonical segment\/brand name (brand_canon from secondary_register_line).'),
+  "net": zod.number().describe('NET (Sub Total) for this segment in rupees.'),
+  "pct": zod.number().describe('Share of this segment in the member\'s total NET (0–100).')
+})).nullish().describe('NET by segment, sorted descending by net. Also serves as the top-SKU list.'),
+  "crossSellDepth": zod.number().nullish().describe('Average number of distinct segments ordered by each customer.'),
+  "concentrationHhi": zod.number().nullish().describe('Herfindahl-Hirschman Index over segment NET shares (0–10000). Higher = more concentrated. <2500 = diversified, 2500–5000 = moderate, >5000 = concentrated.\n')
+}).nullish().describe('Phase 5: segment and SKU spread from secondary_register_line (closed FYs) or a live-year placeholder when no register is ingested. Null when no member is selected.\n'),
   "rowsRead": zod.number().describe('Total rows read from the Data tab.'),
   "error": zod.string().nullish()
 })

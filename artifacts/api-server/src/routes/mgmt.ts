@@ -795,7 +795,9 @@ router.get("/mgmt/deep-dive", async (req: Request, res: Response): Promise<void>
     const result = await loadDeepDiveData(fy, selectedStateHead, memberKey);
 
     if (result.error && !result.stateHeads.length) {
-      res.status(502).json({ error: result.error });
+      // Phase 5 (skuSpread) is DB-only — include it even when the Sheets
+      // Data tab could not be loaded.
+      res.status(502).json({ error: result.error, skuSpread: result.skuSpread ?? null });
       return;
     }
 

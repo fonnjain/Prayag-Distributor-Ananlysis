@@ -100,6 +100,8 @@ export * from './mgmtRetailerDetailStatus';
 export * from './mgmtRetailerRow';
 export * from './mgmtRetailerSpread';
 export * from './mgmtRoiCost';
+export * from './mgmtSegmentNet';
+export * from './mgmtSkuSpread';
 export * from './mgmtSourceStatus';
 export * from './mgmtSourceStatusStatus';
 export * from './mgmtVerifyCheck';

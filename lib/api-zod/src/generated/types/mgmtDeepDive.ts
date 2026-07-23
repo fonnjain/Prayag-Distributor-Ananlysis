@@ -9,6 +9,7 @@ import type { MgmtDeepDiveKpis } from './mgmtDeepDiveKpis';
 import type { MgmtDeepDiveMemberRef } from './mgmtDeepDiveMemberRef';
 import type { MgmtRetailerDetail } from './mgmtRetailerDetail';
 import type { MgmtRoiCost } from './mgmtRoiCost';
+import type { MgmtSkuSpread } from './mgmtSkuSpread';
 
 export interface MgmtDeepDive {
   /** Fiscal year, e.g. 2026-27. */
@@ -22,6 +23,8 @@ export interface MgmtDeepDive {
   retailerDetail?: MgmtRetailerDetail | null;
   /** Phase 4: revenue-to-cost analysis. Null until retailer detail is loaded (requires spread for OB/sale/visits) or if CTC is missing from the Data tab. */
   roiCost?: MgmtRoiCost | null;
+  /** Phase 5: segment and SKU spread from secondary_register_line (closed FYs) or a live-year placeholder when no register is ingested. Null when no member is selected. */
+  skuSpread?: MgmtSkuSpread | null;
   /** Total rows read from the Data tab. */
   rowsRead: number;
   error?: string | null;

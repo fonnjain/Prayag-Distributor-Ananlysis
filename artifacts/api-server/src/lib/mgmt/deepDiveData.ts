@@ -26,6 +26,7 @@ import {
   type MemberSheetData,
 } from "./memberSheet.js";
 import { computeRoiCost, type RoiCost } from "./roiCost.js";
+import { computeSkuSpread, type SkuSpread } from "./skuSpread.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -116,6 +117,7 @@ export type DeepDiveDataResult = {
   kpis: MemberKpis | null;          // null when member not specified or not found
   retailerDetail: MemberSheetData | null; // Phase 2: retailer-level detail from member's own sheet
   roiCost: RoiCost | null;          // Phase 4: revenue-to-cost analysis (needs kpis + spread)
+  skuSpread: SkuSpread | null;      // Phase 5: segment/SKU spread from secondary_register_line
   rowsRead: number;
   error: string | null;
 };
@@ -504,6 +506,11 @@ export async function loadDeepDiveData(
   const entry = await loadAllMembers(fy);
 
   if (!entry) {
+    // Phase 5 is DB-only — compute segment spread even when the Data tab
+    // cannot be loaded (the two are independent data sources).
+    const skuSpread = selectedMemberKey
+      ? await computeSkuSpread(selectedMemberKey, fy)
+      : null;
     return {
       fy,
       stateHeads: [],
@@ -511,6 +518,7 @@ export async function loadDeepDiveData(
       kpis: null,
       retailerDetail: null,
       roiCost: null,
+      skuSpread,
       rowsRead: 0,
       error: `Could not load the 'Data' tab for FY ${fy}. The sheet may not be connected or the tab name may differ.`,
     };
@@ -584,6 +592,13 @@ export async function loadDeepDiveData(
         )
       : null;
 
+  // Phase 5: SKU and segment spread from secondary_register_line (closed FYs)
+  // or a live-year placeholder (FY2026-27). Runs in parallel — DB-only, no
+  // Sheets read. Null when no member is selected.
+  const skuSpread = selectedMemberKey
+    ? await computeSkuSpread(selectedMemberKey, fy)
+    : null;
+
   return {
     fy,
     stateHeads,
@@ -591,6 +606,7 @@ export async function loadDeepDiveData(
     kpis,
     retailerDetail,
     roiCost,
+    skuSpread,
     rowsRead: entry.rowsRead,
     error: null,
   };
