@@ -654,6 +654,51 @@ export const GetMgmtDistributorDeepDiveResponse = zod.object({
   "partyObTotal": zod.number(),
   "membersLoaded": zod.number(),
   "membersNotMapped": zod.number(),
+  "whitespace": zod.object({
+  "districtStats": zod.array(zod.object({
+  "district": zod.string(),
+  "hasDistributor": zod.boolean(),
+  "distributorNames": zod.array(zod.string()),
+  "coveredCount": zod.number(),
+  "directCount": zod.number(),
+  "noneCount": zod.number(),
+  "totalCount": zod.number(),
+  "coveredOb": zod.number(),
+  "directOb": zod.number(),
+  "noneOb": zod.number(),
+  "priorYearOb": zod.number(),
+  "coveredVisits": zod.number().nullish(),
+  "directVisits": zod.number().nullish(),
+  "noneVisits": zod.number().nullish(),
+  "totalVisits": zod.number().nullish(),
+  "gapType": zod.enum(['coverage', 'assignment', 'both', 'none']).describe('coverage = no distributor in this district at all (strategic fix). assignment = has distributor but some retailers unassigned (admin fix). both = no distributor AND some unassigned (edge case). none = fully covered.\n'),
+  "isChannelConflict": zod.boolean().describe('true when direct dealers AND a named distributor both operate here — structural channel conflict. Direct dealers in a district WITHOUT a distributor are NOT conflict (they are the only channel).\n'),
+  "noneRetailers": zod.array(zod.object({
+  "name": zod.string(),
+  "ob": zod.number(),
+  "sale": zod.number(),
+  "visits": zod.number().nullish(),
+  "isActive": zod.boolean()
+})).describe('Detail of unassigned retailers for dormancy context.')
+})),
+  "totalAssignmentGapRetailers": zod.number(),
+  "totalAssignmentGapDistricts": zod.number(),
+  "totalCoverageGapRetailers": zod.number(),
+  "totalCoverageGapDistricts": zod.number(),
+  "coverageGapPriorYearOb": zod.number(),
+  "coverageGapCurrentOb": zod.number(),
+  "coverageGapVisits": zod.number(),
+  "channelConflictCount": zod.number(),
+  "channelNonConflictCount": zod.number(),
+  "channelConflictEntries": zod.array(zod.object({
+  "name": zod.string(),
+  "district": zod.string(),
+  "ob": zod.number(),
+  "sale": zod.number(),
+  "visits": zod.number().nullish(),
+  "isActive": zod.boolean()
+}).describe('A direct dealer operating inside a district that has a named distributor.'))
+}).nullish().describe('Phase D5: territory whitespace and channel overlap. Two gap types are always reported separately: COVERAGE GAP (no distributor in the district) and ASSIGNMENT GAP (has distributor but unassigned retailers). priorYearOb is the sum of the sale field (secondary-received \/ prior-year reference) for direct-dealer and unassigned retailers — the best single-field proxy for proven demand in the gap districts.\n'),
   "error": zod.string().nullish()
 })
 

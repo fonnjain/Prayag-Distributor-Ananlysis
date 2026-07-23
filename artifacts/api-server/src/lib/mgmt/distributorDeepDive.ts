@@ -47,6 +47,11 @@ import {
   type DistributorInvestment,
 } from "./distributorInvestment.js";
 import { computeRoiCost } from "./roiCost.js";
+import {
+  computeTerritoryWhitespace,
+  type WhitespaceRow,
+  type TerritoryWhitespace,
+} from "./distributorWhitespace.js";
 import verifyAnchorsJson from "../../../config/verify_anchors.json" assert { type: "json" };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -167,6 +172,7 @@ export type DistributorDeepDiveResult = {
   partyObTotal: number;
   membersLoaded: number;
   membersNotMapped: number;
+  whitespace: TerritoryWhitespace | null;
   error: string | null;
 };
 
@@ -539,7 +545,7 @@ export async function loadDistributorDeepDive(
   const empty = (): DistributorDeepDiveResult => ({
     fy, stateHeads, distributors: [], sharedRetailers: [],
     directDealer: null, noneAssigned: null, mappingQuality: null,
-    partyObTotal: 0, membersLoaded: 0, membersNotMapped: 0, error: null,
+    partyObTotal: 0, membersLoaded: 0, membersNotMapped: 0, whitespace: null, error: null,
   });
 
   if (!selectedStateHead || !members.length) return empty();
@@ -823,6 +829,25 @@ export async function loadDistributorDeepDive(
   // Step 12 (D4): Attach investment, ROI and tier per distributor.
   await loadDistributorInvestment(fy, distGroups, d4MemberCostPerVisit);
 
+  // Step 13 (D5): Territory whitespace and channel overlap — pure sync, no I/O.
+  const toWRow = (r: RichRow): WhitespaceRow => ({
+    name:         r.name,
+    district:     r.district,
+    city:         r.city,
+    orderBooking: r.orderBooking,
+    sale:         r.sale,
+    visits:       r.totalVisit,
+    isActive:     r.isActive,
+    memberName:   r.memberName,
+  });
+  const whitespace = allRows.length > 0
+    ? computeTerritoryWhitespace(
+        distGroups,
+        directDealerRows.map(toWRow),
+        noneRows.map(toWRow),
+      )
+    : null;
+
   return {
     fy, stateHeads,
     distributors: distGroups,
@@ -833,6 +858,7 @@ export async function loadDistributorDeepDive(
     partyObTotal,
     membersLoaded,
     membersNotMapped,
+    whitespace,
     error: null,
   };
 }

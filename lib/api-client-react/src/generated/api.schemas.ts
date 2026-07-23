@@ -1498,6 +1498,80 @@ export interface MgmtDistributorMappingQuality {
   noneAllDormant: boolean;
 }
 
+/**
+ * coverage = no distributor in this district at all (strategic fix). assignment = has distributor but some retailers unassigned (admin fix). both = no distributor AND some unassigned (edge case). none = fully covered.
+ */
+export type MgmtDistrictStatGapType = typeof MgmtDistrictStatGapType[keyof typeof MgmtDistrictStatGapType];
+
+
+export const MgmtDistrictStatGapType = {
+  coverage: 'coverage',
+  assignment: 'assignment',
+  both: 'both',
+  none: 'none',
+} as const;
+
+export type MgmtDistrictStatNoneRetailersItem = {
+  name: string;
+  ob: number;
+  sale: number;
+  visits?: number | null;
+  isActive: boolean;
+};
+
+export interface MgmtDistrictStat {
+  district: string;
+  hasDistributor: boolean;
+  distributorNames: string[];
+  coveredCount: number;
+  directCount: number;
+  noneCount: number;
+  totalCount: number;
+  coveredOb: number;
+  directOb: number;
+  noneOb: number;
+  priorYearOb: number;
+  coveredVisits?: number | null;
+  directVisits?: number | null;
+  noneVisits?: number | null;
+  totalVisits?: number | null;
+  /** coverage = no distributor in this district at all (strategic fix). assignment = has distributor but some retailers unassigned (admin fix). both = no distributor AND some unassigned (edge case). none = fully covered. */
+  gapType: MgmtDistrictStatGapType;
+  /** true when direct dealers AND a named distributor both operate here — structural channel conflict. Direct dealers in a district WITHOUT a distributor are NOT conflict (they are the only channel). */
+  isChannelConflict: boolean;
+  /** Detail of unassigned retailers for dormancy context. */
+  noneRetailers: MgmtDistrictStatNoneRetailersItem[];
+}
+
+/**
+ * A direct dealer operating inside a district that has a named distributor.
+ */
+export interface MgmtChannelConflictEntry {
+  name: string;
+  district: string;
+  ob: number;
+  sale: number;
+  visits?: number | null;
+  isActive: boolean;
+}
+
+/**
+ * Phase D5: territory whitespace and channel overlap. Two gap types are always reported separately: COVERAGE GAP (no distributor in the district) and ASSIGNMENT GAP (has distributor but unassigned retailers). priorYearOb is the sum of the sale field (secondary-received / prior-year reference) for direct-dealer and unassigned retailers — the best single-field proxy for proven demand in the gap districts.
+ */
+export interface MgmtTerritoryWhitespace {
+  districtStats: MgmtDistrictStat[];
+  totalAssignmentGapRetailers: number;
+  totalAssignmentGapDistricts: number;
+  totalCoverageGapRetailers: number;
+  totalCoverageGapDistricts: number;
+  coverageGapPriorYearOb: number;
+  coverageGapCurrentOb: number;
+  coverageGapVisits: number;
+  channelConflictCount: number;
+  channelNonConflictCount: number;
+  channelConflictEntries: MgmtChannelConflictEntry[];
+}
+
 export interface MgmtDistributorDeepDive {
   fy: string;
   stateHeads: string[];
@@ -1509,6 +1583,7 @@ export interface MgmtDistributorDeepDive {
   partyObTotal: number;
   membersLoaded: number;
   membersNotMapped: number;
+  whitespace?: MgmtTerritoryWhitespace | null;
   error?: string | null;
 }
 

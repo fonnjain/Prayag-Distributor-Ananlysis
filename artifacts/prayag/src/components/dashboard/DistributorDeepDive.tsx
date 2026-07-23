@@ -14,7 +14,7 @@
 //   - "None-assigned" panel includes visit-effort share observation.
 //   - Flow gap is an observation, not an accusation (cannot distinguish stock
 //     building from channel leakage from this data).
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Fragment } from "react";
 import {
   AlertTriangle,
   ChevronDown,
@@ -218,6 +218,60 @@ type MappingQuality = {
   noneAllDormant: boolean;
 };
 
+// ── D5: Territory whitespace types ───────────────────────────────────────────
+
+type WhitespaceNoneRetailer = {
+  name: string;
+  ob: number;
+  sale: number;
+  visits: number | null;
+  isActive: boolean;
+};
+
+type DistrictStat = {
+  district: string;
+  hasDistributor: boolean;
+  distributorNames: string[];
+  coveredCount: number;
+  directCount: number;
+  noneCount: number;
+  totalCount: number;
+  coveredOb: number;
+  directOb: number;
+  noneOb: number;
+  priorYearOb: number;
+  coveredVisits: number | null;
+  directVisits: number | null;
+  noneVisits: number | null;
+  totalVisits: number | null;
+  gapType: "coverage" | "assignment" | "both" | "none";
+  isChannelConflict: boolean;
+  noneRetailers: WhitespaceNoneRetailer[];
+};
+
+type ChannelConflictEntry = {
+  name: string;
+  district: string;
+  ob: number;
+  sale: number;
+  visits: number | null;
+  isActive: boolean;
+};
+
+type TerritoryWhitespace = {
+  districtStats: DistrictStat[];
+  totalAssignmentGapRetailers: number;
+  totalAssignmentGapDistricts: number;
+  totalCoverageGapRetailers: number;
+  totalCoverageGapDistricts: number;
+  coverageGapPriorYearOb: number;
+  coverageGapCurrentOb: number;
+  coverageGapVisits: number;
+  channelConflictCount: number;
+  channelNonConflictCount: number;
+  channelConflictEntries: ChannelConflictEntry[];
+};
+
 type DistributorDeepDiveResult = {
   fy: string;
   stateHeads: string[];
@@ -229,6 +283,7 @@ type DistributorDeepDiveResult = {
   partyObTotal: number;
   membersLoaded: number;
   membersNotMapped: number;
+  whitespace: TerritoryWhitespace | null;
   error: string | null;
 };
 
@@ -744,6 +799,280 @@ function SkuSpreadPanel({
   );
 }
 
+// ── D5: Territory whitespace panel ───────────────────────────────────────────
+
+const GAP_BADGE: Record<DistrictStat["gapType"], { label: string; cls: string }> = {
+  coverage:   { label: "COVERAGE GAP",   cls: "bg-red-100    text-red-800    border border-red-200"    },
+  assignment: { label: "ASSIGNMENT GAP", cls: "bg-amber-100  text-amber-800  border border-amber-200"  },
+  both:       { label: "COVERAGE GAP",   cls: "bg-red-100    text-red-800    border border-red-200"    },
+  none:       { label: "Covered",         cls: "bg-green-100  text-green-800  border border-green-200"  },
+};
+
+function WhitespacePanel({ whitespace }: { whitespace: TerritoryWhitespace }) {
+  const [showNone, setShowNone] = useState<string | null>(null);
+
+  const hasAnyGap =
+    whitespace.totalAssignmentGapRetailers > 0 || whitespace.totalCoverageGapRetailers > 0;
+
+  return (
+    <SectionCard title="Territory Whitespace">
+      <div className="space-y-5">
+
+        {/* ── Two-gap summary callouts ── */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Assignment gap */}
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-amber-700 mb-1">
+              Assignment Gap
+            </div>
+            <div className="text-2xl font-bold text-amber-900 tabular-nums">
+              {whitespace.totalAssignmentGapRetailers}
+              <span className="text-sm font-normal text-amber-700 ml-1">retailers</span>
+            </div>
+            <div className="text-sm text-amber-800 mt-1">
+              {whitespace.totalAssignmentGapDistricts === 0
+                ? "No assignment gap"
+                : `Across ${whitespace.totalAssignmentGapDistricts} district${whitespace.totalAssignmentGapDistricts > 1 ? "s" : ""} that already have a distributor.`}
+            </div>
+            <div className="text-xs text-amber-600 mt-2 font-medium">
+              Fix: assign to existing distributor — administrative, immediate.
+            </div>
+          </div>
+
+          {/* Coverage gap */}
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-red-700 mb-1">
+              Coverage Gap
+            </div>
+            <div className="text-2xl font-bold text-red-900 tabular-nums">
+              {whitespace.totalCoverageGapRetailers}
+              <span className="text-sm font-normal text-red-700 ml-1">retailers</span>
+            </div>
+            {whitespace.totalCoverageGapDistricts > 0 ? (
+              <div className="text-sm text-red-800 mt-1">
+                {whitespace.totalCoverageGapDistricts} district{whitespace.totalCoverageGapDistricts > 1 ? "s" : ""} with
+                no distributor.{" "}
+                {whitespace.coverageGapPriorYearOb > 0 && (
+                  <span className="font-medium">
+                    {formatINR(whitespace.coverageGapPriorYearOb)} prior-year demand,{" "}
+                    {whitespace.coverageGapVisits} visits already spent.
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className="text-sm text-red-800 mt-1">No coverage gap.</div>
+            )}
+            <div className="text-xs text-red-600 mt-2 font-medium">
+              Fix: appoint a distributor — strategic, takes time.
+            </div>
+          </div>
+        </div>
+
+        {/* ── District table ── */}
+        {whitespace.districtStats.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-xs text-muted-foreground">
+                  <th className="text-left py-2 pr-3 font-medium">District</th>
+                  <th className="text-right py-2 pr-3 font-medium">Total</th>
+                  <th className="text-right py-2 pr-3 font-medium">Covered</th>
+                  <th className="text-right py-2 pr-3 font-medium">Direct</th>
+                  <th className="text-right py-2 pr-3 font-medium">Unassigned</th>
+                  <th className="text-right py-2 pr-3 font-medium">Prior-Yr Demand</th>
+                  <th className="text-right py-2 pr-3 font-medium">Current OB</th>
+                  <th className="text-right py-2 pr-3 font-medium">Visits</th>
+                  <th className="text-left py-2 font-medium">Gap / Distributors</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/50">
+                {whitespace.districtStats.map((d) => {
+                  const badge = GAP_BADGE[d.gapType];
+                  const rowBg =
+                    d.gapType === "coverage" || d.gapType === "both"
+                      ? "bg-red-50/40"
+                      : d.gapType === "assignment"
+                      ? "bg-amber-50/40"
+                      : "";
+                  const currentOb = d.directOb + d.noneOb;
+                  const totalVisitsVal =
+                    (d.coveredVisits ?? 0) + (d.directVisits ?? 0) + (d.noneVisits ?? 0);
+
+                  return (
+                    <Fragment key={d.district}>
+                      <tr className={`${rowBg}`}>
+                        <td className="py-2 pr-3 font-medium">{d.district}</td>
+                        <td className="py-2 pr-3 text-right tabular-nums">{d.totalCount}</td>
+                        <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
+                          {d.coveredCount}
+                        </td>
+                        <td className="py-2 pr-3 text-right tabular-nums">
+                          {d.directCount > 0 ? (
+                            <span className={d.isChannelConflict ? "text-orange-700 font-medium" : ""}>
+                              {d.directCount}
+                              {d.isChannelConflict && (
+                                <AlertTriangle className="w-3 h-3 inline ml-0.5 mb-0.5" />
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">0</span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-3 text-right tabular-nums">
+                          {d.noneCount > 0 ? (
+                            <button
+                              className="text-amber-700 font-medium underline-offset-2 hover:underline"
+                              onClick={() => setShowNone(showNone === d.district ? null : d.district)}
+                            >
+                              {d.noneCount}
+                            </button>
+                          ) : (
+                            <span className="text-muted-foreground">0</span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-3 text-right tabular-nums">
+                          {d.priorYearOb > 0 ? formatINR(d.priorYearOb) : "--"}
+                        </td>
+                        <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
+                          {currentOb > 0 ? formatINR(currentOb) : "--"}
+                        </td>
+                        <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
+                          {totalVisitsVal > 0 ? totalVisitsVal : "--"}
+                        </td>
+                        <td className="py-2">
+                          <div className="flex flex-col gap-1">
+                            <span className={`inline-flex text-xs px-1.5 py-0.5 rounded font-medium w-fit ${badge.cls}`}>
+                              {badge.label}
+                            </span>
+                            {d.distributorNames.length > 0 && (
+                              <span className="text-xs text-muted-foreground">
+                                {d.distributorNames.join(", ")}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+
+                      {/* Expandable unassigned retailer detail */}
+                      {showNone === d.district && d.noneRetailers.length > 0 && (
+                        <tr className="bg-amber-50/60">
+                          <td colSpan={9} className="px-4 py-3">
+                            <div className="text-xs font-semibold text-amber-800 mb-2">
+                              Unassigned retailers in {d.district} — visits spent, no supply route
+                            </div>
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-muted-foreground">
+                                  <th className="text-left pr-3 pb-1 font-medium">Retailer</th>
+                                  <th className="text-right pr-3 pb-1 font-medium">Visits</th>
+                                  <th className="text-right pr-3 pb-1 font-medium">Current OB</th>
+                                  <th className="text-right pb-1 font-medium">Prior-Yr Demand</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-amber-200/50">
+                                {d.noneRetailers.map((r) => (
+                                  <tr key={r.name}>
+                                    <td className="py-1 pr-3">{r.name}</td>
+                                    <td className="py-1 pr-3 text-right tabular-nums">
+                                      {r.visits != null ? r.visits : "--"}
+                                    </td>
+                                    <td className="py-1 pr-3 text-right tabular-nums">
+                                      {r.ob > 0 ? formatINR(r.ob) : (
+                                        <span className="text-muted-foreground">No orders</span>
+                                      )}
+                                    </td>
+                                    <td className="py-1 text-right tabular-nums">
+                                      {r.sale > 0 ? formatINR(r.sale) : "--"}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            <div className="mt-2 text-xs text-amber-700">
+                              A retailer with visits and no distributor cannot place orders through the
+                              standard channel. This is a supply-mapping failure, not a sales-effort failure.
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* ── Channel overlap ── */}
+        {(whitespace.channelConflictCount > 0 || whitespace.channelNonConflictCount > 0) && (
+          <div className="border border-border rounded-lg p-4 space-y-3">
+            <div className="text-sm font-semibold">Channel Overlap</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+              <div className="rounded-md border border-orange-200 bg-orange-50 p-3">
+                <div className="font-semibold text-orange-800 mb-0.5">
+                  {whitespace.channelConflictCount} structural conflict{whitespace.channelConflictCount !== 1 ? "s" : ""}
+                </div>
+                <div className="text-xs text-orange-700">
+                  Direct dealers inside districts that have a distributor.
+                  Channel integrity is at risk — each sale competes with distributor throughput.
+                </div>
+              </div>
+              <div className="rounded-md border border-border bg-muted/30 p-3">
+                <div className="font-semibold mb-0.5">
+                  {whitespace.channelNonConflictCount} non-conflict
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Direct dealers in districts with no distributor.
+                  They are the only supply route — not a conflict.
+                </div>
+              </div>
+            </div>
+
+            {whitespace.channelConflictEntries.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border text-muted-foreground">
+                      <th className="text-left py-1.5 pr-3 font-medium">Direct Dealer</th>
+                      <th className="text-left py-1.5 pr-3 font-medium">District</th>
+                      <th className="text-right py-1.5 pr-3 font-medium">OB</th>
+                      <th className="text-right py-1.5 pr-3 font-medium">Prior-Yr Demand</th>
+                      <th className="text-right py-1.5 font-medium">Visits</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {whitespace.channelConflictEntries.map((e) => (
+                      <tr key={e.name + e.district} className="text-muted-foreground">
+                        <td className="py-1.5 pr-3 font-medium text-foreground">{e.name}</td>
+                        <td className="py-1.5 pr-3">{e.district}</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">
+                          {e.ob > 0 ? formatINR(e.ob) : "--"}
+                        </td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">
+                          {e.sale > 0 ? formatINR(e.sale) : "--"}
+                        </td>
+                        <td className="py-1.5 text-right tabular-nums">
+                          {e.visits != null ? e.visits : "--"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!hasAnyGap && whitespace.channelConflictCount === 0 && (
+          <div className="text-sm text-muted-foreground text-center py-4">
+            All retailers are assigned to a distributor. No territory gaps detected.
+          </div>
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
 // ── D4: Investment, ROI and tier panel ───────────────────────────────────────
 
 const TIER_COLOR: Record<"A" | "B" | "C", string> = {
@@ -1083,6 +1412,11 @@ export default function DistributorDeepDive() {
               </div>
             </div>
           </div>
+
+          {/* ── D5: Territory whitespace ────────────────────────────── */}
+          {data.whitespace && (
+            <WhitespacePanel whitespace={data.whitespace} />
+          )}
 
           {/* ── Distributor table ───────────────────────────────────── */}
           {data.distributors.length > 0 && (

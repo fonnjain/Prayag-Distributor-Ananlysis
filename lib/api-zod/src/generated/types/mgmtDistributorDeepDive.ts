@@ -10,6 +10,7 @@ import type { MgmtDistributorGroup } from './mgmtDistributorGroup';
 import type { MgmtDistributorMappingQuality } from './mgmtDistributorMappingQuality';
 import type { MgmtNoneAssignedSummary } from './mgmtNoneAssignedSummary';
 import type { MgmtSharedRetailerEntry } from './mgmtSharedRetailerEntry';
+import type { MgmtTerritoryWhitespace } from './mgmtTerritoryWhitespace';
 
 export interface MgmtDistributorDeepDive {
   fy: string;
@@ -22,5 +23,6 @@ export interface MgmtDistributorDeepDive {
   partyObTotal: number;
   membersLoaded: number;
   membersNotMapped: number;
+  whitespace?: MgmtTerritoryWhitespace | null;
   error?: string | null;
 }

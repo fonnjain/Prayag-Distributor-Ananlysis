@@ -2675,6 +2675,9 @@ components:
         partyObTotal: { type: number }
         membersLoaded: { type: integer }
         membersNotMapped: { type: integer }
+        whitespace:
+          nullable: true
+          $ref: "#/components/schemas/MgmtTerritoryWhitespace"
         error: { type: string, nullable: true }
     MgmtDistributorGroup:
       type: object
@@ -2944,6 +2947,115 @@ components:
           $ref: "#/components/schemas/MgmtDistributorRoi"
         tier:
           $ref: "#/components/schemas/MgmtDistributorTier"
+    MgmtTerritoryWhitespace:
+      type: object
+      description: >
+        Phase D5: territory whitespace and channel overlap.
+        Two gap types are always reported separately: COVERAGE GAP (no distributor
+        in the district) and ASSIGNMENT GAP (has distributor but unassigned retailers).
+        priorYearOb is the sum of the sale field (secondary-received / prior-year
+        reference) for direct-dealer and unassigned retailers — the best single-field
+        proxy for proven demand in the gap districts.
+      required:
+        - districtStats
+        - totalAssignmentGapRetailers
+        - totalAssignmentGapDistricts
+        - totalCoverageGapRetailers
+        - totalCoverageGapDistricts
+        - coverageGapPriorYearOb
+        - coverageGapCurrentOb
+        - coverageGapVisits
+        - channelConflictCount
+        - channelNonConflictCount
+        - channelConflictEntries
+      properties:
+        districtStats:
+          type: array
+          items: { $ref: "#/components/schemas/MgmtDistrictStat" }
+        totalAssignmentGapRetailers: { type: integer }
+        totalAssignmentGapDistricts: { type: integer }
+        totalCoverageGapRetailers: { type: integer }
+        totalCoverageGapDistricts: { type: integer }
+        coverageGapPriorYearOb: { type: number }
+        coverageGapCurrentOb: { type: number }
+        coverageGapVisits: { type: integer }
+        channelConflictCount: { type: integer }
+        channelNonConflictCount: { type: integer }
+        channelConflictEntries:
+          type: array
+          items: { $ref: "#/components/schemas/MgmtChannelConflictEntry" }
+    MgmtDistrictStat:
+      type: object
+      required:
+        - district
+        - hasDistributor
+        - distributorNames
+        - coveredCount
+        - directCount
+        - noneCount
+        - totalCount
+        - coveredOb
+        - directOb
+        - noneOb
+        - priorYearOb
+        - gapType
+        - isChannelConflict
+        - noneRetailers
+      properties:
+        district: { type: string }
+        hasDistributor: { type: boolean }
+        distributorNames:
+          type: array
+          items: { type: string }
+        coveredCount: { type: integer }
+        directCount: { type: integer }
+        noneCount: { type: integer }
+        totalCount: { type: integer }
+        coveredOb: { type: number }
+        directOb: { type: number }
+        noneOb: { type: number }
+        priorYearOb: { type: number }
+        coveredVisits: { type: integer, nullable: true }
+        directVisits: { type: integer, nullable: true }
+        noneVisits: { type: integer, nullable: true }
+        totalVisits: { type: integer, nullable: true }
+        gapType:
+          type: string
+          enum: [coverage, assignment, both, none]
+          description: >
+            coverage = no distributor in this district at all (strategic fix).
+            assignment = has distributor but some retailers unassigned (admin fix).
+            both = no distributor AND some unassigned (edge case).
+            none = fully covered.
+        isChannelConflict:
+          type: boolean
+          description: >
+            true when direct dealers AND a named distributor both operate here —
+            structural channel conflict. Direct dealers in a district WITHOUT a
+            distributor are NOT conflict (they are the only channel).
+        noneRetailers:
+          type: array
+          description: Detail of unassigned retailers for dormancy context.
+          items:
+            type: object
+            required: [name, ob, sale, isActive]
+            properties:
+              name: { type: string }
+              ob: { type: number }
+              sale: { type: number }
+              visits: { type: integer, nullable: true }
+              isActive: { type: boolean }
+    MgmtChannelConflictEntry:
+      type: object
+      description: A direct dealer operating inside a district that has a named distributor.
+      required: [name, district, ob, sale, isActive]
+      properties:
+        name: { type: string }
+        district: { type: string }
+        ob: { type: number }
+        sale: { type: number }
+        visits: { type: integer, nullable: true }
+        isActive: { type: boolean }
     MgmtDistributorEffectiveDiscount:
       type: object
       required: [recentFy, grossTotal, netTotal, discountAmount, weightedDiscountPct, hasAnomalousLines, abovePeerMedian]
