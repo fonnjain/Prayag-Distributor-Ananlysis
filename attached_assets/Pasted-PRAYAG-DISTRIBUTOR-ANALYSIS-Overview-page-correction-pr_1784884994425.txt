@@ -1,0 +1,61 @@
+PRAYAG DISTRIBUTOR ANALYSIS
+Overview page - correction prompts O1, O2, O3
+Three isolated prompts. O1 is a data-integrity fault and should go first. Send each separately.
+What is wrong, in one page
+Established: FY2024-25 has all twelve months in source and totals Rs 341.73 Cr. The screen showed Rs 126.71 Cr - 37.1 percent of the year.
+The cause: the priority chain prefers the database whenever it returns anything non-null. A partially loaded register therefore outranks a complete sheet.
+const fy2425SalesInr = Number(fy2425DbRow?.total ?? fy2425.grand_total);
+The ?? operator falls back only on null or undefined. It is a null check, not a completeness check. Any non-null sum wins - including a partial one.
+This is a REGRESSION, not a design gap. The code comment states that sale_line and the State Head Sale sheet BOTH returned Rs 341.14 Cr. The register held complete FY2024-25 data at some point and has lost rows since. That is the same class of fault as the register-doubling incident and the stale audit cache.
+Rs 126.71 Cr matches no clean subset of the year. The closest contiguous month run is Nov to Feb at Rs 127.18 Cr, and no product-group combination lands on it either. An arbitrary 37.1 percent points to an interrupted or row-limited backfill rather than a deliberate filter.
+Two further cards fail against their own documented source
+Verified directly against the live STATE HEAD DASHBOARD(2026-27), tab 'SECONDARY ORDER BOOKING REPORT ', using exactly the columns and row range the reference document specifies:
+Card	Documented source	Actual value in that tab	On screen	Error
+Retailers subtitle	Col M, rows 7+	Rs 57,36,76,739 (Rs 57.37 Cr)	Rs 4.92 Cr	11.7x low
+Dealers	Col K, rows 7+	11,338	1,256	9x low
+(cross-check) Sales	Col O, rows 7+	Rs 61,93,75,473 (Rs 61.94 Cr)	not shown	-
+The tab holds 162 member rows from row 7. Both wrong cards read the same tab and the same range, so a single row-termination fault - stopping at a blank cell, a merged header, or a fixed limit - would produce both.
+Prompt O1 - FY2024-25 completeness guard
+PROMPT - O1 (copy the box below)
+Prayag app - Overview page, correction O1. Same global rules as every earlier phase.
+This is a DATA INTEGRITY fault. Do it before O2 and O3.
+
+Problem: the FY24-25 Total Sales card showed Rs 126.71 Cr. The source has all twelve
+months and totals Rs 341.73 Cr. The card is reading a PARTIALLY LOADED sale_line
+table, and the priority chain prefers it because ?? only falls back on null:
+    const fy2425SalesInr = Number(fy2425DbRow?.total ?? fy2425.grand_total);
+That is a null check, not a completeness check. A half-loaded register outranks a
+complete sheet.
+
+STEP 1 - DIAGNOSE FIRST. Report, do not fix yet:
+  a) For sale_line where version_status = 'current', for BOTH fy = '2024-25' and
+     fy = '2025-26': the row COUNT, the SUM of amount, and the list of DISTINCT
+     months present. Show both years side by side.
+  b) State how many of the twelve months FY2024-25 is missing, and which.
+  c) State whether any FY2024-25 rows exist with a version_status other than
+     'current', and how many.
+  Do not delete, reload or repair anything before reporting this.
+
+STEP 2 - ADD THE COMPLETENESS GUARD. Wherever the app prefers a database figure over
+a sheet or seed figure, require completeness, not merely non-null:
+  - Count DISTINCT months present in sale_line for that fiscal year.
+  - For a CLOSED fiscal year, require all twelve months before using the database
+    figure. For an open year, require every month up to the data cutoff.
+  - If the requirement is not met, fall back to the next source AND log a warning at
+    error level naming the fiscal year, the months found, and both candidate figures.
+  - Never silently prefer an incomplete register. Apply this to every card and every
+    endpoint using the same pattern, not just this one.
+
+STEP 3 - Do NOT repair the register in this prompt. Report what is missing; the
+reload is a separate, deliberate operation with its own verification.
+
+Acceptance - prove each with the computed value, never an assertion of success:
+  the diagnosis in step 1 is reported in full for both years
+  after the guard, the FY24-25 card no longer shows Rs 126.71 Cr
+  it shows Rs 341.73 Cr from the SALE tab, or Rs 341.14 Cr if and only if sale_line
+    is proved to hold all twelve months
+  a warning is logged whenever the guard rejects an incomplete database figure
+  the FY25-26 card is unchanged at Rs 361.14 Cr
+  monthly FY24-25 figures still read Apr 12.71, May 26.40, Jun 29.73, Jul 24.49,
+    Aug 24.01, Sep 24.15, Oct 22.81, Nov 33.43, Dec 32.37, Jan 28.92, Feb 32.45,
+    Mar 50.26 - summing to Rs 341.73 Cr

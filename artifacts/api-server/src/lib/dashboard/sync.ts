@@ -49,11 +49,57 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
   // dashboard workbook.  Two independent sources (sale_line and the State Head
   // Sale 2025-26 sheet filtered on FY-2024-25) both return Rs.341.14 Cr; the
   // SALE tab returns Rs.341.73 Cr (+Rs.0.59 Cr) and is the odd one out.
-  const [fy2425DbRow] = await db
-    .select({ total: sql<string>`sum(amount)` })
-    .from(saleLines)
-    .where(and(eq(saleLines.fy, "2024-25"), eq(saleLines.versionStatus, "current")));
-  const fy2425SalesInr = Number(fy2425DbRow?.total ?? fy2425.grand_total);
+  //
+  // COMPLETENESS GUARD: a non-null DB sum is not sufficient — a partial register
+  // will produce a non-null sum that is silently wrong.  For a closed FY, all
+  // twelve months must be present before the DB figure is trusted.  If fewer
+  // are found, we fall back to the SALE tab total and log at error level so the
+  // gap is visible in monitoring.  The ?? operator is intentionally NOT used
+  // here; this is a completeness check, not a null check.
+  const CLOSED_FY_MONTHS_REQUIRED = 12;
+  // Wrapped in try-catch so a DB error (e.g. table not in schema search_path
+  // during integration tests) degrades gracefully to the SALE tab fallback
+  // rather than crashing the entire snapshot build.
+  let fy2425MonthCount = 0;
+  let fy2425DbTotal: string | null = null;
+  try {
+    const [fy2425DbRow] = await db
+      .select({
+        total: sql<string>`sum(amount)`,
+        distinct_months: sql<number>`count(distinct month_label)::int`,
+      })
+      .from(saleLines)
+      .where(and(eq(saleLines.fy, "2024-25"), eq(saleLines.versionStatus, "current")));
+    fy2425MonthCount = fy2425DbRow?.distinct_months ?? 0;
+    fy2425DbTotal = fy2425DbRow?.total ?? null;
+  } catch (err) {
+    logger.error(
+      { err },
+      "sale_line query failed for FY2024-25; falling back to SALE tab total",
+    );
+  }
+
+  const fy2425DbComplete = fy2425MonthCount >= CLOSED_FY_MONTHS_REQUIRED;
+  let fy2425SalesInr: number;
+  if (fy2425DbTotal != null && fy2425DbComplete) {
+    fy2425SalesInr = Number(fy2425DbTotal);
+  } else {
+    if (fy2425DbTotal != null && !fy2425DbComplete) {
+      logger.error(
+        {
+          fy: "2024-25",
+          months_found: fy2425MonthCount,
+          months_required: CLOSED_FY_MONTHS_REQUIRED,
+          db_total_inr: fy2425DbTotal,
+          sheet_total_inr: fy2425.grand_total,
+        },
+        "sale_line completeness guard: FY2024-25 has %d/%d months — incomplete register rejected, falling back to SALE tab total",
+        fy2425MonthCount,
+        CLOSED_FY_MONTHS_REQUIRED,
+      );
+    }
+    fy2425SalesInr = fy2425.grand_total;
+  }
 
   const data = {
     fy2425,

@@ -33,6 +33,7 @@
 - [Primary Order Book reader quirks](primary-order-book-reader.md) — FY2023-24: no header row (positional fallback col 17=Amount), no State Head col; dry-run anchors for all four FYs.
 - [Tank qty bug reconciliation](tank-qty-bug-reconciliation.md) — qty/lineUid fix + versionedSyncLines currentMap array fix; one-current-row-per-identity invariant verified clean July 21 2026.
 - [Register two-schema gap](register-schema-gap.md) — FY24-25/25-26 registers are 21-col SAP format; ITEMCOLOR + STATEHEADNAME not aliased in normalize.ts; unmapped_heads guardrail silently passes missing-column case.
+- [FY24-25 card completeness guard](fy2425-completeness-guard.md) — ?? is a null check not a completeness check; closed-FY DB figure requires count(distinct month_label)=12; try-catch degrades to SALE tab; ₹341.14 Cr is authoritative (DB+SH agree), ₹341.73 Cr is the SALE tab fallback.
 - [Distributor D4 Investment, ROI, Tiering](distributor-d4-investment.md) — sql.join IN-clause required (ANY(jsArray) silently matches nothing); discount null for live FY; credit/scheme always no_source.
 - [Deep Dive Data tab columns](deep-dive-data-tab-columns.md) — State HD Dashboard 'Data' tab column aliases: OB=OLDPARTYBUSINESSORDERBOOKING, Sale=SALEREPORT2627, Visited=VISITEDINAMONTH; plain SALE column is a different (wrong) aggregate.
 - [Deep Dive Phase 6 patterns](deep-dive-phase6-patterns.md) — DB freeze (deep_dive_snapshot singular), A-vs-B pure frontend, win-back via secondary_register_line, route uses member= not memberKey=.
