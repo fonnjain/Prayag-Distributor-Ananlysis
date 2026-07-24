@@ -23,6 +23,7 @@ import tabDiagnosticRouter from "./tabDiagnostic";
 import ordersRouter from "./orders";
 import registersRouter from "./registers";
 import aiPayloadRouter from "./aiPayload";
+import aiReportRouter from "./aiReport";
 
 const router: IRouter = Router();
 
@@ -50,5 +51,6 @@ router.use(tabDiagnosticRouter);
 router.use(ordersRouter);
 router.use(registersRouter);
 router.use(aiPayloadRouter);
+router.use(aiReportRouter);
 
 export default router;

@@ -304,6 +304,47 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /ai/report:
+    post:
+      operationId: generateAiReport
+      tags: [ai]
+      summary: Phase A2 — generate salesperson narrative report via Claude
+      description: >
+        Builds the Phase A1 payload internally, sends it to Claude with a strict
+        system prompt, runs the numeric guard, and returns a structured JSON
+        report. No PDF is generated server-side; the client renders and prints
+        the returned JSON. Claude never does arithmetic — it receives only the
+        pre-computed payload and writes narrative. The numeric guard checks every
+        number in the generated text against the payload; any unmatched number
+        sets guard.status to "requires_review".
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AiReportRequest"
+      responses:
+        "200":
+          description: Report generated (check guard.status for review flag)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiReportResponse"
+        "400":
+          description: Invalid parameters
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404":
+          description: Member not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "502":
+          description: Claude API unavailable or returned malformed JSON
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /mgmt/deep-dive:
     get:
       operationId: getMgmtDeepDive
