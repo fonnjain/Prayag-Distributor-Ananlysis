@@ -664,6 +664,8 @@ async function loadMemberSheetUncached(
   const fileId = MEMBER_FILE_MAP[memberKey];
   if (!fileId) return null;
 
+  logger.info({ memberKey, memberName, fy, fileId }, "memberSheet: resolved fileId for member");
+
   const { selectedTab: tabName, allTabs } = await findSummaryTabWithInventory(fileId, fy);
   if (!tabName) {
     logger.warn({ memberKey, fileId, fy }, "memberSheet: summary tab not found");

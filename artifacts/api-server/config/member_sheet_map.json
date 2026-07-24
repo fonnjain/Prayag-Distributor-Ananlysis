@@ -1,4 +1,10 @@
 {
   "_comment": "Maps normSecKey(member name) → Google Sheets file ID for their own working workbook. Add entries as members' sheets are onboarded. normSecKey = lowercase alphanumeric only, parentheticals kept.",
-  "prasunchatterjee": "1UEZK2L9OACV3t606hu8vkTn-5ekPDyqCYSBS2X6A5Jc"
+  "prasunchatterjee": "1UEZK2L9OACV3t606hu8vkTn-5ekPDyqCYSBS2X6A5Jc",
+  "ravinderpuri":           "1WowgCGTCOMmqanUXVQIbYWHbXi0cuGFxvrPe3CdSDpA",
+  "jagdev":                 "1FQCfm55A8B3_aOo8e1xPQEUbQHYH85diG24OUoTRqnY",
+  "manishgupta":            "1Oujo8vUnwFLr-WkmYYfJwaGjmRsDy-q2Aq0vU4BlykA",
+  "rinku":                  "1LJGS53NCp-odxIXkmSORKxH8_UeQo5bY4expBVdkFdk",
+  "ashutoshkumarrudrapur":  "13EYfcAewqPPQ83PA3ta2L46h2GIwi9k-mw8zx8HuEws",
+  "shivamchauhan":          "132I0fvbfTDk_3h-QeYGrQ-F6z0A921MXbdqyLFsyN5Y"
 }
