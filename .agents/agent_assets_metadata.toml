@@ -54,3 +54,9 @@ id = "Jvu3Du5Od4iEJ2ZFKJ2Gv"
 uri = "file://Prayag_Logic_Terms.docx"
 type = "word_document"
 title = "Prayag Business Logic, Terms & Formulas (Word)"
+
+[[outputs]]
+id = "SekSxPftJDWs1l5OxdB5T"
+uri = "file://prayag_overview_reference.docx"
+type = "word_document"
+title = "Prayag Overview Reference — FY24-25 months & card sources"
