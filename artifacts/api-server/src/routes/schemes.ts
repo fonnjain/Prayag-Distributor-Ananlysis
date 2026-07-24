@@ -36,10 +36,11 @@ router.get("/schemes/nudge", async (req, res) => {
   const fy = String(req.query.fy ?? "2026-27");
   const q = parseQ(req.query.q);
   const roiThreshold = parseFloat(String(req.query.roi ?? "0.05")) || 0.05;
+  const head = String(req.query.head ?? "");
 
   try {
     const dues = await getBlockedCustomers();
-    const result = await computeNudgeList(fy, q, dues.blocked, dues.available, roiThreshold);
+    const result = await computeNudgeList(fy, q, dues.blocked, dues.available, roiThreshold, head);
     res.json({
       ...result,
       duesError: dues.error ?? null,
@@ -56,10 +57,11 @@ router.get("/schemes/nudge", async (req, res) => {
 router.get("/schemes/cockpit", async (req, res) => {
   const fy = String(req.query.fy ?? "2026-27");
   const q = parseQ(req.query.q);
+  const head = String(req.query.head ?? "");
 
   try {
     const dues = await getBlockedCustomers();
-    const nudgeResult = await computeNudgeList(fy, q, dues.blocked, dues.available);
+    const nudgeResult = await computeNudgeList(fy, q, dues.blocked, dues.available, undefined, head);
     const cockpit = buildCockpit(nudgeResult);
     res.json(cockpit);
   } catch (err) {

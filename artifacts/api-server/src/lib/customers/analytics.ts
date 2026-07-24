@@ -235,8 +235,9 @@ export async function listCustomers(params: {
   monthsLy: string[];
   entityType?: EntityType;
   states?: string[];
+  head?: string;
 }): Promise<CustomerRow[]> {
-  const { fyCy, fyLy, monthsCy, monthsLy, entityType = "all", states = [] } = params;
+  const { fyCy, fyLy, monthsCy, monthsLy, entityType = "all", states = [], head = "" } = params;
 
   const typeFilter =
     entityType === "distributor"
@@ -245,6 +246,9 @@ export async function listCustomers(params: {
       ? `AND sl.type_raw ILIKE '%direct%'`
       : "";
 
+  // $5 = states array (empty array = no filter), $6 = head (empty string = no filter).
+  // head_canon in sale_line stores the normalized state head name exactly as entered;
+  // the caller passes the raw query param which must match head_canon verbatim.
   const query = `
     SELECT
       customer,
@@ -262,6 +266,7 @@ export async function listCustomers(params: {
       )
       ${typeFilter}
       AND ($5::text[] = '{}' OR sl.state_canon = ANY($5::text[]))
+      AND ($6::text = '' OR sl.head_canon = $6::text)
     GROUP BY customer
     HAVING
       COALESCE(SUM(qty::numeric) FILTER (WHERE fy = $1 AND month_label = ANY($3::text[])), 0) > 0
@@ -277,7 +282,7 @@ export async function listCustomers(params: {
     val_cy: unknown;
     qty_ly: unknown;
     val_ly: unknown;
-  }>(query, [fyCy, fyLy, monthsCy, monthsLy, states]);
+  }>(query, [fyCy, fyLy, monthsCy, monthsLy, states, head]);
 
   return res.rows.map(buildCustomerRow);
 }

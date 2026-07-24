@@ -105,7 +105,8 @@ router.get("/customers/performance", async (req, res) => {
 
     const statesParam = req.query.states as string | undefined;
     const states = statesParam ? statesParam.split(",").map((s) => s.trim()).filter(Boolean) : [];
-    const rows = await listCustomers({ fyCy, fyLy, monthsCy, monthsLy, entityType, states });
+    const head = (req.query.head as string | undefined) ?? "";
+    const rows = await listCustomers({ fyCy, fyLy, monthsCy, monthsLy, entityType, states, head });
     const elapsed = calcPctElapsed(monthsCy);
     const projectFactor = elapsed > 0 ? SEASONAL_TOTAL / elapsed : null;
     res.json({

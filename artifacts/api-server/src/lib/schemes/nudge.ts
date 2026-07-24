@@ -142,6 +142,7 @@ export async function computeNudgeList(
   blockedCustomers: Set<string>,
   duesDataAvailable: boolean,
   roiThreshold: number = schemeMaster.conditions.defaultRoiThreshold,
+  head: string = "",
 ): Promise<NudgeResult> {
   const months = getQuarterMonths(fy, q);
   const deadline = getQuarterDeadline(fy, q);
@@ -180,6 +181,8 @@ export async function computeNudgeList(
   const groupPlaceholders = quarterlyGroups
     .map((_, i) => `$${months.length + 2 + i}`)
     .join(", ");
+  // head is always the last positional param; empty string = no filter
+  const headParamIdx = months.length + quarterlyGroups.length + 2;
 
   const sql = `
     SELECT
@@ -192,11 +195,12 @@ export async function computeNudgeList(
       AND sl.month_label IN (${monthPlaceholders})
       AND sl.group_raw IN (${groupPlaceholders})
       AND (sl.is_territory IS NULL OR sl.is_territory = true)
+      AND ($${headParamIdx}::text = '' OR sl.head_canon = $${headParamIdx}::text)
     GROUP BY sl.customer, sl.group_raw, sl.head_canon
     ORDER BY SUM(sl.amount::numeric) DESC
   `;
 
-  const params = [fy, ...months, ...quarterlyGroups];
+  const params = [fy, ...months, ...quarterlyGroups, head];
   const { rows } = await pool.query<{
     customer: string;
     group_raw: string;
