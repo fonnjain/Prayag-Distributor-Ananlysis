@@ -1,10 +1,14 @@
 {
-  "_comment": "Maps normSecKey(member name) → Google Sheets file ID for their own working workbook. Add entries as members' sheets are onboarded. normSecKey = lowercase alphanumeric only, parentheticals kept.",
-  "prasunchatterjee": "1UEZK2L9OACV3t606hu8vkTn-5ekPDyqCYSBS2X6A5Jc",
+  "_comment": "Maps normSecKey(member name) → Google Sheets file ID for their own working workbook. normSecKey = lowercase alphanumeric only, parentheticals kept. Shiv Kumar and Ravi Upadhyay remain unmapped — degrade gracefully.",
+  "prasunchatterjee":       "1UEZK2L9OACV3t606hu8vkTn-5ekPDyqCYSBS2X6A5Jc",
   "ravinderpuri":           "1WowgCGTCOMmqanUXVQIbYWHbXi0cuGFxvrPe3CdSDpA",
   "jagdev":                 "1FQCfm55A8B3_aOo8e1xPQEUbQHYH85diG24OUoTRqnY",
   "manishgupta":            "1Oujo8vUnwFLr-WkmYYfJwaGjmRsDy-q2Aq0vU4BlykA",
   "rinku":                  "1LJGS53NCp-odxIXkmSORKxH8_UeQo5bY4expBVdkFdk",
   "ashutoshkumarrudrapur":  "13EYfcAewqPPQ83PA3ta2L46h2GIwi9k-mw8zx8HuEws",
-  "shivamchauhan":          "132I0fvbfTDk_3h-QeYGrQ-F6z0A921MXbdqyLFsyN5Y"
+  "shivamchauhan":          "132I0fvbfTDk_3h-QeYGrQ-F6z0A921MXbdqyLFsyN5Y",
+  "tarungiri":              "1K_te1jkI-iFfbgNObYuqxjJkg-GYMv3I58ZA0lOYHRg",
+  "ankitkumar":             "1rYn_Flgp7jo7mcfA8eUDen14LV_dF62DRjmNbnJEK7k",
+  "rahulsingh":             "1oZiOB-uOkOH274-vJVj-7KfU6a1wi4EPcAR85Vyas10",
+  "ravifaridabad":          "1jFDZ-XQ8Fuzz37_6c1Wi087O7eNCDVE8KbcMW9lSUac"
 }

@@ -486,7 +486,7 @@ function computePriorYears(
   kpis: MemberKpis,
   visitPlan: VisitPlan | null,
 ): PriorYearEntry[] {
-  const histMap = new Map<string, { visitsDone: number; visitsRequired: number; coveragePct: number }>();
+  const histMap = new Map<string, { visitsDone: number; visitsRequired: number; coveragePct: number | null }>();
   if (visitPlan) {
     for (const h of visitPlan.historicalFyCapacity) {
       histMap.set(h.fy, {

@@ -331,16 +331,16 @@ async function readHistoricalFySummary(
     totalVisitsRequired += cellNum(row[reqCol])   ?? 0;
   }
 
-  const coveragePct =
+  const coveragePct: number | null =
     totalVisitsRequired > 0
       ? (totalVisitsDone / totalVisitsRequired) * 100
-      : 0;
+      : null;
 
   logger.info(
     {
       tabTitle, fy,
       totalRetailers, totalVisitsRequired, totalVisitsDone,
-      coveragePct: Math.round(coveragePct * 10) / 10,
+      coveragePct: coveragePct != null ? Math.round(coveragePct * 10) / 10 : null,
       visitCol, reqCol,
     },
     "memberSheet: historical FY capacity",

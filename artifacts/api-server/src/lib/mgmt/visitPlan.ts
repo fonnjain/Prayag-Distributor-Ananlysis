@@ -45,7 +45,7 @@ export type HistoricalFyCapacity = {
   totalRetailers: number;
   totalVisitsRequired: number;
   totalVisitsDone: number;
-  coveragePct: number;   // totalVisitsDone / totalVisitsRequired × 100
+  coveragePct: number | null;   // null when totalVisitsRequired === 0 (no requirement recorded)
 };
 
 export type DistanceBucket = {
