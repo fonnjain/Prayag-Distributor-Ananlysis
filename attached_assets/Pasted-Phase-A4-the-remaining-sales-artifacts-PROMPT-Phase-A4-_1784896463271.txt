@@ -1,0 +1,49 @@
+Phase A4 - the remaining sales artifacts
+PROMPT - Phase A4
+Prayag app - AI Analytics, Phase A4 of 7. Same global rules. Same payload, same
+numeric guard, same no-arithmetic constraint for every artifact below.
+
+1. STATE HEAD REPORT (PDF). Team-level narrative: aggregate position, ranked member
+   performance, spread of achievement across the team, which members carry the
+   business, and which data-quality flags affect the aggregate. Where members carry
+   NO_MEMBER_SHEET, say so in the report - an aggregate built on partial detail must
+   declare it.
+
+2. PRESENTATION (PPTX) at both levels. Charts are rendered NATIVELY by the app from
+   payload figures - Claude supplies titles, ordering and commentary only, never chart
+   data. Keep decks short: position, coverage, effort versus return, risks, actions.
+
+3. SUGGESTIONS AND ACTIONS (PDF). Ranked, specific and tied to a figure. Each
+   suggestion states the metric that motivates it and the expected effect. Rank by
+   ease of execution first, since the easiest actions are what actually get done -
+   for a salesperson that ordering is typically: assign the unassigned retailers,
+   redirect effort away from non-converting accounts, then range expansion.
+
+4. TRAVEL AND VISIT PLAN (PDF). Built from the existing visit-plan logic - do NOT
+   have Claude invent a schedule. The app computes the month-by-month plan, the
+   capacity and the shortfall; Claude writes the covering explanation only.
+   State plainly on the document that batching is by district and distance from base,
+   NOT route optimisation - the sheets carry district, city and distance, but no
+   coordinates. Do not imply precision that the data cannot support.
+
+5. PERFORMANCE REVIEW (PDF) - MANAGEMENT ONLY. Additional constraints, all mandatory:
+     - Mark every page 'Management only - not for distribution to the individual'.
+     - Mark the document 'Draft - requires human sign-off' and require an explicit
+       action before it can be exported or shared.
+     - Every data-quality flag that bears on the assessment MUST appear in the
+       assessment itself. A member whose dormant retailers cannot order, whose sale
+       column may be unmaintained, or who has 11 working days in the period must not
+       be characterised as underperforming without that context stated alongside.
+     - Distinguish clearly between what the person controls and what they do not.
+     - No comparison to named colleagues; rank within the team is permissible, naming
+       another individual's figures in someone's review is not.
+
+Acceptance:
+  every artifact passes the numeric guard with zero unmatched numbers
+  the State Head report names the 6 members with NO_MEMBER_SHEET
+  PPTX charts are native and their values match the payload exactly
+  the travel plan states its batching basis and does not claim route optimisation
+  a performance review generated for a member carrying ZERO_SALE_WITH_OB or
+    PARTIAL_TENURE states that caveat in the assessment text - verify on Rahul Singh,
+    whose 11 working days and zero sale would otherwise read as failure
+  performance reviews cannot be exported without the sign-off action
