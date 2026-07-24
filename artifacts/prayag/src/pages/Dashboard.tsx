@@ -11,6 +11,7 @@ import OrderMomentum from "@/components/dashboard/OrderMomentum";
 import DataSources from "@/components/dashboard/DataSources";
 import Growth from "@/components/dashboard/Growth";
 import Analyst from "@/components/dashboard/Analyst";
+import AiReports from "@/components/dashboard/AiReports";
 import MgmtReports from "@/components/dashboard/MgmtReports";
 import CompanyReports from "@/components/dashboard/CompanyReports";
 import Targets from "@/components/dashboard/Targets";
@@ -27,6 +28,7 @@ const AREAS = [
   { id: "momentum",        label: "Momentum",        component: OrderMomentum },
   { id: "growth",          label: "Growth",          component: Growth },
   { id: "analyst",         label: "AI Analyst",      component: Analyst },
+  { id: "ai-reports",     label: "AI Reports",      component: AiReports },
   { id: "reports",         label: "Reports",         component: MgmtReports },
   { id: "company-reports", label: "Company Reports", component: CompanyReports },
   { id: "targets",         label: "Targets",         component: Targets },
