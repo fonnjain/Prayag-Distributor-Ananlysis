@@ -25,6 +25,7 @@ import registersRouter from "./registers";
 import aiPayloadRouter from "./aiPayload";
 import aiReportRouter from "./aiReport";
 import aiArtifactsRouter from "./aiArtifacts";
+import aiDistributorArtifactsRouter from "./aiDistributorArtifacts";
 
 const router: IRouter = Router();
 
@@ -54,5 +55,6 @@ router.use(registersRouter);
 router.use(aiPayloadRouter);
 router.use(aiReportRouter);
 router.use(aiArtifactsRouter);
+router.use(aiDistributorArtifactsRouter);
 
 export default router;
