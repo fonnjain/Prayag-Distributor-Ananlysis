@@ -51,6 +51,7 @@ const NAV: NavGroup[] = [
       { id: "momentum",        label: "Momentum",        path: "/momentum",        icon: TrendingUp },
       { id: "growth",          label: "Growth",          path: "/growth",          icon: LineChart },
       { id: "analyst",         label: "AI Analyst",      path: "/analyst",         icon: Bot },
+      { id: "ai-reports",     label: "AI Reports",      path: "/ai-reports",      icon: FileSpreadsheet },
       { id: "reports",         label: "Reports",         path: "/reports",         icon: FileSpreadsheet },
       { id: "company-reports", label: "Company Reports", path: "/company-reports", icon: BarChartIcon },
       { id: "targets",         label: "Targets",         path: "/targets",         icon: Target },
