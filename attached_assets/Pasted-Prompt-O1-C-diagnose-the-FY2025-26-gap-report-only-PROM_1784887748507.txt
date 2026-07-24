@@ -1,0 +1,40 @@
+Prompt O1-C - diagnose the FY2025-26 gap (report only)
+PROMPT - O1-C
+Prayag app - correction O1-C, diagnosis only. Same global rules. Send after O1-B and
+before O2. THIS PROMPT CHANGES NO CODE AND NO DATA. Report only.
+
+The O1 diagnosis reports sale_line FY2025-26 at Rs 359.52 Cr across 144,365 rows with
+version_status = 'current'. The FY25-26 card shows Rs 361.14 Cr. That is Rs 1.62 Cr
+apart - 0.45 percent - and both are supposed to read the same table.
+
+Report the following. Do not fix anything; a fix follows once the cause is known.
+
+1. The EXACT query behind the FY25-26 card, from GET /api/analytics?fy=2025-26.
+   Print the SQL as executed. State plainly whether it filters
+   version_status = 'current'.
+
+2. For sale_line, fiscal year 2025-26, a breakdown by version_status: the row count
+   and sum of amount for EACH distinct value of version_status. State whether the
+   non-current rows sum to Rs 1,61,86,830, which is the observed gap.
+
+3. The same breakdown for fiscal year 2024-25, for comparison.
+
+4. EVERY consumer of sale_line in the codebase - route, service, job or report - with,
+   for each: does it filter version_status, and does it filter fy. Present it as a
+   table. This is the important one: if the analytics endpoint is missing the filter,
+   others may be too, and a superseded correction row counted twice is invisible in
+   the output.
+
+5. The Rs 0.59 Cr FY2024-25 difference. O1 asserted that 'the tab includes rows the
+   register does not' without evidence. Identify those rows: how many, from which
+   months, and which product groups or plants. If they cannot be identified, say so
+   rather than restating the assertion - the register cannot be called complete on
+   rows while Rs 0.59 Cr is unaccounted for.
+
+Acceptance:
+  every item above is reported with actual values
+  the Rs 1.62 Cr gap is either explained by the version_status breakdown, or reported
+    explicitly as unexplained - do not narrow the gap by adjusting a query until it
+    matches
+  the consumer table lists every sale_line reader with its filters
+  no code and no data were changed by this prompt
