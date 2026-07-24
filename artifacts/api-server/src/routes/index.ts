@@ -27,6 +27,7 @@ import aiReportRouter from "./aiReport";
 import aiArtifactsRouter from "./aiArtifacts";
 import aiDistributorArtifactsRouter from "./aiDistributorArtifacts";
 import aiBatchRouter from "./aiBatch";
+import aiChatRouter from "./aiChat";
 
 const router: IRouter = Router();
 
@@ -58,5 +59,6 @@ router.use(aiReportRouter);
 router.use(aiArtifactsRouter);
 router.use(aiDistributorArtifactsRouter);
 router.use(aiBatchRouter);
+router.use(aiChatRouter);
 
 export default router;
