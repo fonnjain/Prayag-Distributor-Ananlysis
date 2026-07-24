@@ -136,6 +136,7 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
       distributors: resources.distributors,
       dealers: resources.dealers,
       channel_partners: resources.channel_partners,
+      secondary_retail_reach: resources.secondary_retail_reach,
       retailers: resources.retailers,
       retailer_sales_inr: resources.retailer_sales_inr,
       fy2425_sales_inr: fy2425SalesInr,

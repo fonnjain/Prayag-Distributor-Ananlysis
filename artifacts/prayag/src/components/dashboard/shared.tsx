@@ -5,26 +5,35 @@ export function KPICard({
   title, 
   value, 
   subtitle,
-  icon
+  icon,
+  detail,
 }: { 
   title: string; 
   value: ReactNode; 
   subtitle?: string;
   icon?: ReactNode;
+  detail?: string[];
 }) {
   return (
     <Card className="overflow-hidden border-border/50 bg-card/50 backdrop-blur-sm shadow-sm transition-all hover:shadow-md">
       <CardContent className="p-5">
         <div className="flex items-start justify-between">
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-muted-foreground mb-1">{title}</p>
             <p className="text-3xl font-bold font-display text-foreground tracking-tight">{value}</p>
-            {subtitle && (
-              <p className="text-xs text-muted-foreground mt-2">{subtitle}</p>
+            {(subtitle || detail) && (
+              <div className="mt-2 space-y-0.5">
+                {subtitle && (
+                  <p className="text-xs text-muted-foreground">{subtitle}</p>
+                )}
+                {detail?.map((line, i) => (
+                  <p key={i} className="text-xs text-muted-foreground leading-tight">{line}</p>
+                ))}
+              </div>
             )}
           </div>
           {icon && (
-            <div className="p-2 rounded-lg bg-primary/10 text-primary">
+            <div className="p-2 rounded-lg bg-primary/10 text-primary shrink-0 ml-2">
               {icon}
             </div>
           )}
@@ -35,45 +44,29 @@ export function KPICard({
 }
 
 export function CustomTooltip({ active, payload, label }: any) {
-  if (!active || !payload || payload.length === 0) return null;
-  return (
-    <div
-      style={{
-        backgroundColor: "hsl(var(--card))",
-        borderRadius: "8px",
-        padding: "12px",
-        border: "1px solid hsl(var(--border))",
-        color: "hsl(var(--foreground))",
-        fontSize: "13px",
-        boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
-      }}
-    >
-      <div style={{ marginBottom: "8px", fontWeight: 600, borderBottom: "1px solid hsl(var(--border))", paddingBottom: "4px" }}>
-        {label}
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-popover border border-border rounded-lg shadow-lg p-3 text-sm">
+        <p className="font-medium text-foreground mb-1">{label}</p>
+        {payload.map((entry: any, index: number) => (
+          <p key={index} style={{ color: entry.color }} className="text-xs">
+            {entry.name}: {typeof entry.value === "number" ? entry.value.toLocaleString() : entry.value}
+          </p>
+        ))}
       </div>
-      {payload.map((entry: any, index: number) => (
-        <div key={index} style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
-          {entry.color && entry.color !== "#ffffff" && (
-            <span style={{ display: "inline-block", width: "10px", height: "10px", borderRadius: "50%", backgroundColor: entry.color, flexShrink: 0 }} />
-          )}
-          <span style={{ color: "hsl(var(--muted-foreground))" }}>{entry.name}</span>
-          <span style={{ marginLeft: "12px", fontWeight: 600, color: "hsl(var(--foreground))" }}>
-            {typeof entry.value === "number" ? entry.value.toLocaleString() : entry.value}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
+    );
+  }
+  return null;
 }
 
 export function CustomLegend({ payload }: any) {
-  if (!payload || payload.length === 0) return null;
+  if (!payload) return null;
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "8px 16px", fontSize: "12px", marginTop: "12px" }}>
+    <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 mt-2">
       {payload.map((entry: any, index: number) => (
-        <div key={index} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-          <span style={{ display: "inline-block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: entry.color, flexShrink: 0 }} />
-          <span style={{ color: "hsl(var(--muted-foreground))" }}>{entry.value}</span>
+        <div key={index} className="flex items-center gap-1.5">
+          <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: entry.color }} />
+          <span className="text-xs text-muted-foreground">{entry.value}</span>
         </div>
       ))}
     </div>

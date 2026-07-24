@@ -44,35 +44,78 @@ export default function Overview() {
     value: g.annual
   })).sort((a, b) => b.value - a.value);
 
+  // Secondary retail reach: registered retailers not covered by any secondary
+  // team member — minimum figure, true gap is higher because 11,338 is not deduplicated.
+  const registeredRetailers = data.totals.retailers;
+  const secondaryReach = data.totals.secondary_retail_reach ?? 0;
+  const coverageGapPct =
+    registeredRetailers > 0
+      ? Math.round(((registeredRetailers - secondaryReach) / registeredRetailers) * 100)
+      : 0;
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <KPICard 
           title="FY24-25 Total Sales" 
           value={formatCompact(data.totals.fy2425_sales_inr)} 
           icon={<IndianRupee className="w-5 h-5" />}
+          detail={[
+            "Primary sale & dispatch",
+            "Source: sale_line register",
+            "All channels, incl. project & institutional",
+          ]}
         />
         <KPICard
           title="FY25-26 Total Sales"
           value={fy2526Total != null ? formatCompact(fy2526Total) : "—"}
           icon={<IndianRupee className="w-5 h-5" />}
+          detail={[
+            "Primary sale & dispatch",
+            "Source: analytics endpoint",
+            "All channels, incl. project & institutional",
+          ]}
         />
         <KPICard 
           title="Orders YTD (FY26-27)" 
           value={`₹${data.totals.orders_fy2627_ytd_cr} Cr`} 
           icon={<TrendingUp className="w-5 h-5" />}
+          detail={[
+            "Primary order booking",
+            "Source: Order Book, monthly tabs",
+            "All channels",
+          ]}
         />
         <KPICard 
           title="Retailers" 
           value={data.totals.retailers.toLocaleString()} 
           icon={<Store className="w-5 h-5" />}
-          subtitle={`Sales: ${formatCompact(data.totals.retailer_sales_inr)}`}
+          subtitle={`Secondary OB: ${formatCompact(data.totals.retailer_sales_inr)}`}
+          detail={[
+            "Registered retailer count",
+            "Source: Retailer-Distributor Data",
+            "Master roster · Excl. project & institutional",
+          ]}
         />
         <KPICard 
           title="Channel Partners" 
           value={data.totals.channel_partners.toLocaleString()} 
           icon={<Users className="w-5 h-5" />}
-          subtitle={`${data.totals.distributors} Dist. / ${data.totals.dealers} Dealers`}
+          detail={[
+            "Distributors only",
+            "Source: Retailer-Distributor Data",
+            "Direct commercial partners",
+          ]}
+        />
+        <KPICard
+          title="Secondary Retail Reach"
+          value={(data.totals.secondary_retail_reach ?? 0).toLocaleString()}
+          icon={<Store className="w-5 h-5" />}
+          detail={[
+            "Per-member col K sum, not deduplicated",
+            "Source: Secondary report",
+            `At least ${coverageGapPct}% of registered retailers uncovered`,
+          ]}
         />
       </div>
 

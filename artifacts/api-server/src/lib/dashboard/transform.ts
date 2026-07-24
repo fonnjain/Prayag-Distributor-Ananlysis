@@ -450,6 +450,7 @@ export interface ResourcesResult {
   distributors: number;
   dealers: number;
   channel_partners: number;
+  secondary_retail_reach: number;
   retailers: number;
   retailer_sales_inr: number;
 }
@@ -608,7 +609,8 @@ export function buildResources(
     state_heads: heads_resources.length,
     distributors: distributorsTotal,
     dealers: dealersTotal,
-    channel_partners: distributorsTotal + dealersTotal,
+    channel_partners: distributorsTotal,
+    secondary_retail_reach: dealersTotal,
     retailers: retailersTotal,
     retailer_sales_inr: Math.round(secondaryOrderValue),
   };
