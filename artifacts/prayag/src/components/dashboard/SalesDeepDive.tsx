@@ -268,6 +268,15 @@ function fmtPct(v: number | null | undefined): string {
   return `${v.toFixed(1)}%`;
 }
 
+// Whole-rupee formatter for per-unit cost metrics (no decimal places).
+function fmtRsWhole(v: number | null | undefined): string {
+  if (v == null) return "—";
+  const r = Math.round(v);
+  if (Math.abs(r) >= 1_00_00_000) return `Rs ${(r / 1_00_00_000).toFixed(0)} Cr`;
+  if (Math.abs(r) >= 1_00_000) return `Rs ${(r / 1_00_000).toFixed(0)} L`;
+  return `Rs ${r.toLocaleString("en-IN")}`;
+}
+
 // ── Band colour for achievement / active% ─────────────────────────────────────
 
 function achieveBand(pct: number | null): string {
@@ -392,14 +401,21 @@ function RetailerSpreadPanel({ spread }: { spread: RetailerSpread }) {
 
         <div className="rounded-lg border border-border bg-card px-4 py-3 flex flex-col gap-1">
           <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide leading-tight">
-            Concentration Index
+            Effective Retailers
           </span>
           <span className="text-lg font-semibold">
-            {spread.concentrationIndex != null
-              ? Math.round(spread.concentrationIndex).toLocaleString("en-IN")
+            {spread.concentrationIndex != null && spread.concentrationIndex > 0
+              ? (10000 / spread.concentrationIndex).toFixed(1)
               : "—"}
           </span>
-          <span className="text-[11px] text-muted-foreground">HHI · 10000 = monopoly</span>
+          <span className="text-[11px] text-muted-foreground">
+            10,000 ÷ HHI — equivalent equal-size retailers
+          </span>
+          {spread.concentrationIndex != null && (
+            <span className="text-[10px] text-muted-foreground">
+              Raw HHI: {Math.round(spread.concentrationIndex).toLocaleString("en-IN")}
+            </span>
+          )}
           {spread.concentrationIndex != null && (
             <ConcentrationBar hhi={spread.concentrationIndex} />
           )}
@@ -1406,7 +1422,7 @@ function RoiCostPanel({ roi, memberName }: { roi: RoiCost; memberName: string })
         </div>
         <div className="rounded-lg border border-border bg-card px-4 py-3 flex flex-col gap-1">
           <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide leading-tight">
-            Cost Ratio
+            Cost Ratio (cost / OB)
           </span>
           <span className={cn(
             "text-2xl font-bold",
@@ -1418,7 +1434,7 @@ function RoiCostPanel({ roi, memberName }: { roi: RoiCost; memberName: string })
           )}>
             {roi.costRatioPct != null ? `${roi.costRatioPct.toFixed(2)}%` : "—"}
           </span>
-          <span className="text-[11px] text-muted-foreground">Cost ÷ Order Booking</span>
+          <span className="text-[11px] text-muted-foreground">Total cost ÷ order booking (YTD)</span>
         </div>
         <Tile
           label="Total YTD Cost"
@@ -1431,17 +1447,17 @@ function RoiCostPanel({ roi, memberName }: { roi: RoiCost; memberName: string })
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <Tile
           label="Cost per Retailer"
-          value={fmtRs(roi.costPerRetailer)}
+          value={fmtRsWhole(roi.costPerRetailer)}
           sub="Total cost ÷ all retailers"
         />
         <Tile
           label="Cost per Visit"
-          value={fmtRs(roi.costPerVisit)}
+          value={fmtRsWhole(roi.costPerVisit)}
           sub="Total cost ÷ visits done (YTD)"
         />
         <Tile
           label="Cost per Active Retailer"
-          value={fmtRs(roi.costPerActiveRetailer)}
+          value={fmtRsWhole(roi.costPerActiveRetailer)}
           sub="Total cost ÷ retailers with orders"
         />
       </div>
@@ -2178,7 +2194,7 @@ export default function SalesDeepDive() {
             <Tile label="Monthly CTC" value={fmtRs(kpis.ctcMonthly)} />
             {kpis.ctcAnnual != null && <Tile label="Annual CTC" value={fmtRs(kpis.ctcAnnual)} />}
             <Tile label="T.A. Bill / Station Cost" value={fmtRs(kpis.taBillStCost)} />
-            <Tile label="Cost Ratio" value={fmtPct(kpis.costRatio)} sub="(CTC + T.A.) / Sale" />
+            <Tile label="Cost Ratio (cost / sale)" value={fmtPct(kpis.costRatio)} sub="(CTC + T.A.) / sale received" />
 
             <SectionLabel>Retailer Coverage (Dashboard)</SectionLabel>
             <Tile label="Total Old Retailers" value={fmtNum(kpis.totalOldRetailers)} />
@@ -2208,7 +2224,14 @@ export default function SalesDeepDive() {
             )}
 
             {Object.keys(kpis.extra).length > 0 && (
-              <ExtraFieldsSections extra={kpis.extra} />
+              <ExtraFieldsSections
+                extra={{
+                  ...kpis.extra,
+                  // Inject current-year YTD values so they appear beside the prior-year actuals.
+                  ...(kpis.sale != null ? { SALENOWYTD: kpis.sale } : {}),
+                  ...(kpis.orderBooking != null ? { TOTALORDERNOWYTD: kpis.orderBooking } : {}),
+                }}
+              />
             )}
           </div>
 
@@ -2338,14 +2361,13 @@ const EXTRA_LABELS: Record<string, string> = {
   JUN:                                "Jun (month indicator)",
 
   // Achievement detail
-  ACHIEVEMENT:                        "Achievement",
+  ACHIEVEMENT:                        "Secondary Order Booking (achieved amount)",
   TARGETACHIEVEMENT:                  "Target Achievement",
   TARGETACHIEVEMENTSALE:              "Target Achievement (Sale)",
   DIRECTDEALERPRIMARYTARGETACHIEVEMENT: "DD Primary Target Achievement",
   COSTRATIOSALE:                      "Cost Ratio (Sale)",
   BELOW60DEALER:                      "Dealers Below 60% Achievement",
   BUSINESSACHIEVED50ANDABOVE:         "Parties — 50%+ Achievement",
-  VARITAION:                          "Variation",
   TARGETCROSSCHECK:                   "Target Cross-check",
 
   // Business breakdown
@@ -2393,15 +2415,24 @@ const EXTRA_LABELS: Record<string, string> = {
   // Additional targets / totals
   MONTHYDIRECTDEALERPRIMARYTARGET:    "Monthly DD Primary Target",
   DIRECTDEALERPRIMARYTARGET:          "DD Primary Target",
-  SALE:                               "Sale (YTD)",
-  TOTALORDER:                         "Total Order Booking (YTD)",
+  SALE:                               "Sale FY2025-26 (full year)",
+  TOTALORDER:                         "Order Booking FY2025-26 (full year)",
+  SALENOWYTD:                         "Sale YTD (current FY)",
+  TOTALORDERNOWYTD:                   "Order Booking YTD (current FY)",
 };
 
-// Fields that are ratios (value < 2 = raw fraction, value >= 2 = already a percentage)
+// Fields that are ratios (value < 2 = raw fraction, value >= 2 = already a percentage).
+// ACHIEVEMENT (col I) is a rupee amount — NOT a ratio — intentionally excluded.
 const RATIO_KEYS = new Set([
-  "ACHIEVEMENT", "TARGETACHIEVEMENT", "TARGETACHIEVEMENTSALE",
+  "TARGETACHIEVEMENT", "TARGETACHIEVEMENTSALE",
   "DIRECTDEALERPRIMARYTARGETACHIEVEMENT", "COSTRATIOSALE",
 ]);
+
+// Fields where a numeric 0 means the source cell was blank — show "not available".
+const NULLABLE_ZERO_KEYS = new Set(["BELOW60DEALER"]);
+
+// Fields that are suppressed entirely: sourced but undefined or unverifiable.
+const SUPPRESS_KEYS = new Set(["VARITAION"]);
 
 // Fields that are plain counts (never currency)
 const COUNT_KEYS = new Set([
@@ -2422,7 +2453,11 @@ const HRS_KEYS = new Set(["TOTALWORKINGHOURS"]);
 
 function fmtExtra(key: string, v: number | string | null): string {
   if (v === null || v === undefined) return "—";
-  if (typeof v === "string") return v || "—";
+  // Blank or whitespace-only string — source cell was effectively empty.
+  if (typeof v === "string") return v.trim() ? v : "not available";
+  // Numeric zero for fields where blank-in-sheet evaluates to 0 — show "not available"
+  // rather than "0" which reads as "nobody is underperforming" vs "we did not measure it".
+  if (v === 0 && NULLABLE_ZERO_KEYS.has(key)) return "not available";
   if (RATIO_KEYS.has(key)) {
     // Raw fraction (e.g. 0.485) → percentage; if already > 1 it's a multiplier
     const pct = Math.abs(v) <= 5 ? v * 100 : v;
@@ -2469,16 +2504,22 @@ const EXTRA_SECTION_GROUPS: Array<{ section: string; keys: string[] }> = [
     keys: [
       "ACHIEVEMENT", "TARGETACHIEVEMENT", "TARGETACHIEVEMENTSALE",
       "DIRECTDEALERPRIMARYTARGETACHIEVEMENT", "COSTRATIOSALE",
-      "BELOW60DEALER", "VARITAION", "TARGETCROSSCHECK",
+      "BELOW60DEALER", "TARGETCROSSCHECK",
     ],
   },
   {
-    section: "Prior Period",
-    keys: ["SALE2526", "TOTALORDER2526", "Q1", "Q2", "Q3", "Q4"],
+    // Current-year YTD first, then prior-year full-year, then quarterly.
+    section: "Prior Period vs Current Year",
+    keys: [
+      "SALENOWYTD", "TOTALORDERNOWYTD",
+      "SALE", "TOTALORDER",
+      "SALE2526", "TOTALORDER2526",
+      "Q1", "Q2", "Q3", "Q4",
+    ],
   },
   {
     section: "Additional Targets",
-    keys: ["MONTHYDIRECTDEALERPRIMARYTARGET", "DIRECTDEALERPRIMARYTARGET", "SALE", "TOTALORDER"],
+    keys: ["MONTHYDIRECTDEALERPRIMARYTARGET", "DIRECTDEALERPRIMARYTARGET"],
   },
   {
     section: "Profile",
@@ -2495,14 +2536,15 @@ function ExtraFieldsSections({ extra }: { extra: Record<string, number | string 
   const sections = EXTRA_SECTION_GROUPS.map(({ section, keys }) => {
     const entries = keys.flatMap((k) => {
       if (!(k in extra)) return [];
+      if (SUPPRESS_KEYS.has(k)) return [];
       listed.add(k);
       return [[k, extra[k]] as [string, number | string | null]];
     });
     return { section, entries };
   }).filter((s) => s.entries.length > 0);
 
-  // Catch anything not in any group
-  const otherEntries = Object.entries(extra).filter(([k]) => !listed.has(k));
+  // Catch anything not in any group (suppressed keys are silently dropped)
+  const otherEntries = Object.entries(extra).filter(([k]) => !listed.has(k) && !SUPPRESS_KEYS.has(k));
   if (otherEntries.length > 0) {
     sections.push({ section: "Other", entries: otherEntries as [string, number | string | null][] });
   }
