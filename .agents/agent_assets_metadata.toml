@@ -42,3 +42,15 @@ id = "gVTvYmc-G_n_Ko17QFD2Y"
 uri = "file://exports/Prayag_Architecture_and_Logic.docx"
 type = "word_document"
 title = "Prayag Architecture and Logic (Word — 10 sections)"
+
+[[outputs]]
+id = "2OWlhYPleRBJ9NTmy3Zs0"
+uri = "file://Prayag_Architecture_DB.xlsx"
+type = "table"
+title = "Prayag Architecture & DB Schema (Excel)"
+
+[[outputs]]
+id = "Jvu3Du5Od4iEJ2ZFKJ2Gv"
+uri = "file://Prayag_Logic_Terms.docx"
+type = "word_document"
+title = "Prayag Business Logic, Terms & Formulas (Word)"
