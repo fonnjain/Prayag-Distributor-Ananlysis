@@ -6,6 +6,11 @@
     "memberCountAbs": 5,
     "coverageMinPct": 92
   },
+  "register_row_anchors": {
+    "comment": "Verified row counts for closed fiscal years from sale_line WHERE version_status='current'. A snapshot built from the DB is considered stale if the current row count falls below minRowCount. FY2024-25 verified 2026-07-24 (141,201 rows, Rs 341.14 Cr, 12/12 months). FY2025-26 verified 2026-07-24 (144,365 rows, Rs 359.52 Cr, 12/12 months).",
+    "2024-25": { "minRowCount": 141201 },
+    "2025-26": { "minRowCount": 144365 }
+  },
   "fy_anchors": {
     "2025-26": {
       "comment": "Source: STATE HEAD DASHBOARD FY2025-26 (live Google Sheet, authoritative). Secondary order booking basis (Sub Total) = Rs 231.09 Cr. Retired transaction-file basis was Rs 240.14 Cr — that figure is superseded and must not be used as the anchor.",

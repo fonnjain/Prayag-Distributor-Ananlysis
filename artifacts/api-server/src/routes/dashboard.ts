@@ -1,6 +1,11 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import type { DashboardSnapshot } from "@workspace/db";
-import { ensureSeeded, getLatestSnapshot, syncDashboard } from "../lib/dashboard/sync.js";
+import {
+  checkSnapshotStaleness,
+  ensureSeeded,
+  getLatestSnapshot,
+  syncDashboard,
+} from "../lib/dashboard/sync.js";
 
 const router: IRouter = Router();
 
@@ -17,6 +22,21 @@ function toResponse(snapshot: DashboardSnapshot, refreshError?: string) {
 router.get("/dashboard", async (req: Request, res: Response): Promise<void> => {
   try {
     const snapshot = await ensureSeeded();
+    const stale = await checkSnapshotStaleness(snapshot);
+    if (stale) {
+      // The stored snapshot was built from the DB but the register has since
+      // dropped below its row-count anchor — rebuild now rather than serve a
+      // figure we know is wrong.  If the rebuild itself fails, fall back to
+      // the existing snapshot so the dashboard never goes blank.
+      try {
+        const fresh = await syncDashboard();
+        res.json(toResponse(fresh));
+      } catch (rebuildErr) {
+        req.log.error({ err: rebuildErr }, "stale-snapshot rebuild failed; serving existing snapshot");
+        res.json(toResponse(snapshot));
+      }
+      return;
+    }
     res.json(toResponse(snapshot));
   } catch (err) {
     req.log.error({ err }, "failed to load dashboard snapshot");

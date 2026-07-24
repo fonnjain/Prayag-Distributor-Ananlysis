@@ -10,6 +10,12 @@ import {
   isMonthlyTabTitle,
 } from "./transform.js";
 import { seed } from "./seed.js";
+import {
+  checkRegisterGuard,
+  isSnapshotStale,
+  type RegisterGuardResult,
+} from "./registerGuard.js";
+import verifyAnchorsJson from "../../../config/verify_anchors.json" assert { type: "json" };
 
 // Live source workbooks (see manifest.primary_sources).
 const ITEMWISE_SALES_FY2425 = "1HgWelwHy73Ybc-1fBQMXhKxo2ctJToxgZLDWwJPmqz8";
@@ -51,51 +57,66 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
   // SALE tab returns Rs.341.73 Cr (+Rs.0.59 Cr) and is the odd one out.
   //
   // COMPLETENESS GUARD: a non-null DB sum is not sufficient — a partial register
-  // will produce a non-null sum that is silently wrong.  For a closed FY, all
-  // twelve months must be present before the DB figure is trusted.  If fewer
-  // are found, we fall back to the SALE tab total and log at error level so the
-  // gap is visible in monitoring.  The ?? operator is intentionally NOT used
-  // here; this is a completeness check, not a null check.
-  const CLOSED_FY_MONTHS_REQUIRED = 12;
+  // will produce a non-null sum that is silently wrong even with all 12 months
+  // present (rows missing across months, not whole months absent).  Three
+  // independent checks are required before the DB figure is trusted:
+  //   1. Month count — all 12 months present.
+  //   2. Magnitude — deviation from SALE tab control <= 2%.
+  //   3. Row count — at least the verified minimum rows from verify_anchors.json.
+  // Any failure falls back to the SALE tab total and logs at error level.
+  // The ?? operator is intentionally NOT used here; this is a completeness
+  // check, not a null check.
+  //
   // Wrapped in try-catch so a DB error (e.g. table not in schema search_path
   // during integration tests) degrades gracefully to the SALE tab fallback
   // rather than crashing the entire snapshot build.
-  let fy2425MonthCount = 0;
-  let fy2425DbTotal: string | null = null;
+  const fy2425MinRowCount =
+    (verifyAnchorsJson as unknown as { register_row_anchors?: { "2024-25"?: { minRowCount?: number } } })
+      .register_row_anchors?.["2024-25"]?.minRowCount ?? 0;
+
+  let fy2425GuardResult: RegisterGuardResult | null = null;
   try {
     const [fy2425DbRow] = await db
       .select({
-        total: sql<string>`sum(amount)`,
+        total: sql<string>`coalesce(sum(amount), 0)`,
         distinct_months: sql<number>`count(distinct month_label)::int`,
+        row_count: sql<number>`count(*)::int`,
       })
       .from(saleLines)
       .where(and(eq(saleLines.fy, "2024-25"), eq(saleLines.versionStatus, "current")));
-    fy2425MonthCount = fy2425DbRow?.distinct_months ?? 0;
-    fy2425DbTotal = fy2425DbRow?.total ?? null;
+    fy2425GuardResult = checkRegisterGuard({
+      fy: "2024-25",
+      dbTotalInr: Number(fy2425DbRow?.total ?? 0),
+      rowCount: fy2425DbRow?.row_count ?? 0,
+      monthCount: fy2425DbRow?.distinct_months ?? 0,
+      sheetTotalInr: fy2425.grand_total,
+      minRowCount: fy2425MinRowCount,
+    });
   } catch (err) {
     logger.error(
-      { err },
-      "sale_line query failed for FY2024-25; falling back to SALE tab total",
+      { err, db_total_inr: null, sheet_total_inr: fy2425.grand_total },
+      "sale_line query failed for FY2024-25 — DB total unavailable, falling back to SALE tab total %d",
+      fy2425.grand_total,
     );
   }
 
-  const fy2425DbComplete = fy2425MonthCount >= CLOSED_FY_MONTHS_REQUIRED;
   let fy2425SalesInr: number;
-  if (fy2425DbTotal != null && fy2425DbComplete) {
-    fy2425SalesInr = Number(fy2425DbTotal);
+  if (fy2425GuardResult?.passed === true) {
+    fy2425SalesInr = fy2425GuardResult.dbTotalInr;
   } else {
-    if (fy2425DbTotal != null && !fy2425DbComplete) {
+    if (fy2425GuardResult != null && !fy2425GuardResult.passed) {
       logger.error(
         {
           fy: "2024-25",
-          months_found: fy2425MonthCount,
-          months_required: CLOSED_FY_MONTHS_REQUIRED,
-          db_total_inr: fy2425DbTotal,
-          sheet_total_inr: fy2425.grand_total,
+          rejection_reason: fy2425GuardResult.rejectionReason,
+          month_count: fy2425GuardResult.monthCount,
+          row_count: fy2425GuardResult.rowCount,
+          db_total_inr: fy2425GuardResult.dbTotalInr,
+          sheet_total_inr: fy2425GuardResult.sheetTotalInr,
+          deviation_pct: fy2425GuardResult.deviationPct.toFixed(1),
         },
-        "sale_line completeness guard: FY2024-25 has %d/%d months — incomplete register rejected, falling back to SALE tab total",
-        fy2425MonthCount,
-        CLOSED_FY_MONTHS_REQUIRED,
+        "register completeness guard rejected FY2024-25 DB figure — %s; falling back to SALE tab total",
+        fy2425GuardResult.rejectionReason,
       );
     }
     fy2425SalesInr = fy2425.grand_total;
@@ -136,6 +157,11 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
         id: STATE_HEAD_DASHBOARD_FY2627,
       },
     },
+    // Guard result stored so the serve path can re-validate without a rebuild.
+    // source="db" means the guard passed; source="sheet" means a fallback was used.
+    register_guard: {
+      fy2425: fy2425GuardResult ?? { source: "sheet", passed: false, rejectionReason: "DB query error — fallback used" },
+    },
     generated: new Date().toISOString(),
     data_mode: "live",
   };
@@ -150,6 +176,57 @@ export async function getLatestSnapshot(): Promise<DashboardSnapshot | null> {
     .orderBy(desc(dashboardSnapshots.id))
     .limit(1);
   return rows[0] ?? null;
+}
+
+// Checks whether a previously-built snapshot is stale by re-querying the
+// current FY2024-25 row count and comparing it against the verified minimum
+// in verify_anchors.json.  Returns true only when the snapshot was built using
+// the DB figure (source="db") AND the current row count has since dropped
+// below the anchor — the exact signature of the original partial-load fault.
+// A DB error during the count query is treated as "not stale" so the serve
+// path never blocks on an inaccessible table.
+export async function checkSnapshotStaleness(
+  snapshot: DashboardSnapshot,
+): Promise<boolean> {
+  const storedGuard = (
+    snapshot.manifest as unknown as {
+      register_guard?: { fy2425?: RegisterGuardResult };
+    }
+  ).register_guard?.fy2425;
+
+  if (!storedGuard || storedGuard.source !== "db") return false;
+
+  const minRowCount =
+    (verifyAnchorsJson as unknown as { register_row_anchors?: { "2024-25"?: { minRowCount?: number } } })
+      .register_row_anchors?.["2024-25"]?.minRowCount;
+  if (!minRowCount) return false;
+
+  let currentRowCount: number;
+  try {
+    const [row] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(saleLines)
+      .where(and(eq(saleLines.fy, "2024-25"), eq(saleLines.versionStatus, "current")));
+    currentRowCount = row?.n ?? 0;
+  } catch {
+    return false;
+  }
+
+  const stale = isSnapshotStale(storedGuard, currentRowCount, minRowCount);
+  if (stale) {
+    logger.error(
+      {
+        current_row_count: currentRowCount,
+        min_row_count: minRowCount,
+        stored_row_count: storedGuard.rowCount,
+        fy: "2024-25",
+      },
+      "stale snapshot detected: FY2024-25 row count %d is below anchor %d — triggering rebuild",
+      currentRowCount,
+      minRowCount,
+    );
+  }
+  return stale;
 }
 
 let syncInFlight: Promise<DashboardSnapshot> | null = null;

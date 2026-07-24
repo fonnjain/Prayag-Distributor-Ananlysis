@@ -1,0 +1,70 @@
+Send before O2 - prompts O1-B and O1-C
+O1 was done well. Two gaps remain that must close before moving on. Send O1-B first, then O1-C.
+Why these two, before O2
+1. The guard as built would not have caught the bug it was written for
+O1 added a guard that requires 12 distinct months in sale_line before trusting the database figure. But the bad snapshot was Rs 126.71 Cr, and that value matches no contiguous run of months - the closest, November to February, is Rs 127.18 Cr. A shortfall of 62.9 percent that lands on no month boundary means rows were missing ACROSS all twelve months, not whole months absent.
+At the moment the bad snapshot was computed, count(distinct month_label) would have returned 12. The guard would have PASSED and Rs 126.71 Cr would still have reached the card. A month-presence check cannot detect a register that is thin everywhere.
+The guard needs a magnitude anchor - the same audit-anchor principle already used elsewhere in this project. The numbers make the tolerance easy to set:
+Figure	Value	Deviation from the SALE tab control
+SALE tab control total	Rs 341.73 Cr	-
+Register, complete (today)	Rs 341.14 Cr	0.17 percent
+Bad snapshot	Rs 126.71 Cr	62.9 percent
+A 2 percent tolerance accommodates the known Rs 0.59 Cr difference comfortably and rejects the bad figure instantly.
+2. FY2025-26 disagrees with itself by Rs 1.62 Cr
+The O1 diagnosis reports sale_line FY2025-26 at Rs 359.52 Cr across 144,365 current rows. The card shows Rs 361.14 Cr. That is Rs 1.62 Cr apart - 0.45 percent - and both are supposed to read the same table.
+The reply set this aside as 'unaffected, reads the analytics endpoint, not this code path'. That is true of the code path but not of the number. The most likely cause is that the analytics endpoint does not filter version_status = 'current', and is therefore summing superseded correction rows alongside current ones. That is exactly what the supersede-never-delete rule produces when a consumer forgets the filter, and it inflates - which matches the direction of the gap.
+3. Two smaller things
+- The guard runs at snapshot BUILD time. A bad snapshot already cached is untouched by it. The stale audit cache that replayed doubled numbers earlier in this project was the same shape: the computation was fixed, the cache was not.
+- 'The tab includes rows the register does not' is asserted, not evidenced. If true, the register is missing Rs 0.59 Cr of rows - which sits awkwardly beside 'the register is currently complete'. Complete on months is not complete on rows.
+Prompt O1-B - harden the guard
+PROMPT - O1-B (copy the box below)
+Prayag app - correction O1-B, completing O1. Same global rules as every earlier
+phase. Send before O2.
+
+The completeness guard added in O1 checks count(distinct month_label) = 12. That
+check would NOT have caught the fault it was written for. The bad snapshot was
+Rs 126.71 Cr, which matches no contiguous run of months - the nearest, Nov to Feb, is
+Rs 127.18 Cr. A 62.9 percent shortfall landing on no month boundary means rows were
+missing across ALL twelve months. count(distinct month_label) would have returned 12,
+the guard would have passed, and the wrong figure would still have reached the card.
+
+1. ADD A MAGNITUDE ANCHOR to the guard, alongside the month check.
+   Compare the database sum against the SALE tab control total for the same fiscal
+   year. If the deviation exceeds 2 percent, REJECT the database figure, fall back,
+   and log at error level naming: the fiscal year, both candidate figures, the
+   deviation as a percentage, the month count, and the row count.
+   Calibration - do not change these without saying why:
+     SALE tab control     Rs 341.73 Cr
+     register (complete)  Rs 341.14 Cr   deviation 0.17 percent  -> must PASS
+     bad snapshot         Rs 126.71 Cr   deviation 62.9 percent  -> must FAIL
+
+2. ADD A ROW-COUNT ANCHOR for closed fiscal years. Record the verified row count in
+   the existing anchors file (verify_anchors.json) and compare on every snapshot
+   build. FY2024-25 = 141,201 rows; FY2025-26 = 144,365 rows. A material drop in row
+   count with the month count still at 12 is precisely the signature of the fault
+   that occurred, and nothing currently detects it.
+
+3. INVALIDATE STALE SNAPSHOTS. The guard runs at build time, so a bad snapshot that
+   is already cached is unaffected by it. Store, inside each snapshot, the guard
+   result and the anchor values it passed. When a snapshot is SERVED, re-check those
+   stored anchors against the current expected values; if they do not match, rebuild
+   rather than serve. This project has already had a stale cache replay wrong numbers
+   after the computation behind it was corrected.
+
+4. CONFIRM THE DEGRADATION IS LOUD. The try-catch added in O1 falls back to the SALE
+   tab on any database error. Verify it logs at ERROR level, naming the exception and
+   both candidate figures. A silent fallback would swap Rs 341.14 Cr for Rs 341.73 Cr
+   with no signal that anything happened.
+
+Acceptance - prove each with the computed value, never an assertion of success:
+  the guard is unit-tested with a SYNTHETIC database sum - do NOT delete, modify or
+    reload any real rows to create a test condition
+  a synthetic sum of Rs 126.71 Cr is REJECTED with an error log naming both figures
+    and the 62.9 percent deviation
+  a synthetic sum of Rs 341.14 Cr with 12 months and 141,201 rows is ACCEPTED
+  a synthetic sum with 12 months but a row count of 52,000 is REJECTED by the
+    row-count anchor
+  a forced database exception falls back to the SALE tab AND logs at error level
+  serving a snapshot whose stored anchors no longer match triggers a rebuild
+  the live FY24-25 card still reads Rs 341.14 Cr and FY25-26 is unchanged
+  the full test suite still passes
