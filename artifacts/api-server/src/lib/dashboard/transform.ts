@@ -505,12 +505,22 @@ export function buildResources(
 
   // --- Secondary order booking report: dealers + secondary order value per head.
   // Rows 1-6 are banner/header rows; member rows start at 7.
+  //
+  // Col B (State Head) is a MERGED CELL spanning all member rows per group in
+  // the Google Sheet.  The Sheets API returns the value only in the top cell of
+  // each merge and null for every subsequent row in the group.  Without carrying
+  // the last non-empty head forward the reader accepted only the first row per
+  // state head (17 rows, 1,256 dealers, Rs 4.92 Cr) instead of all 162 member
+  // rows (11,338 dealers, Rs 57.37 Cr).
   const dealersByHead = new Map<string, number>();
   let dealersTotal = 0;
   let secondaryOrderValue = 0;
+  let lastSecondaryHead = "";
   secondarySheet.eachRow((row, r) => {
     if (r < 7) return;
-    const head = canonicalHead(cellString(row.getCell(2)));
+    const rawHead = canonicalHead(cellString(row.getCell(2)));
+    if (rawHead) lastSecondaryHead = rawHead;
+    const head = lastSecondaryHead;
     const member = cellString(row.getCell(3));
     if (!head || !member || /total/i.test(member)) return;
     const dealers = cellNumber(row.getCell(11));
