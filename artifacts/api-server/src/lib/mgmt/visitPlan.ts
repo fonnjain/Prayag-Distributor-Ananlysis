@@ -103,6 +103,7 @@ export type MonthVisitPlan = {
   maintenanceVisits: number;
   developmentVisits: number;
   targets: VisitTarget[];
+  poolExhausted: boolean;     // true when no develop-pool retailers remain for this month
 };
 
 export type VisitPlan = {
@@ -113,6 +114,7 @@ export type VisitPlan = {
   totalFeasible: number;   // sum of month capacities (may differ by 1–2 from feasibleRemaining due to rounding)
   totalRequired: number;   // = capacity.remainingRequired
   gap: number;             // = capacity.gap (anchor-based, not recomputed from totalFeasible)
+  unassignedExcluded: number; // retailers with no distributor — excluded from forward scheduling
 };
 
 // ── Calendar helpers ───────────────────────────────────────────────────────────
@@ -251,6 +253,7 @@ function computeCapacity(
   fy: string,
   historicalCapacity: HistoricalFyCapacity[],
   asOf: Date,
+  workingDaysActual?: number, // AG col from dashboard — member's own working days
 ): VisitCapacity {
   const start = fyStart(fy);
   const end   = fyEnd(fy);
@@ -264,7 +267,12 @@ function computeCapacity(
 
   const dataCutoffWorkingDays = Math.max(1, countWorkingDays(start, dataCutoff));
   const totalVisitsDone       = rows.reduce((s, r) => s + (r.totalVisit ?? 0), 0);
-  const demonstratedRate      = totalVisitsDone / dataCutoffWorkingDays;
+  // A4-B: use member's own dashboard working days when available (AG col).
+  // Fall back to calendar working days so memberSheet.ts callers stay unchanged.
+  const effectiveWorkingDays  = workingDaysActual && workingDaysActual > 0
+    ? workingDaysActual
+    : dataCutoffWorkingDays;
+  const demonstratedRate      = totalVisitsDone / effectiveWorkingDays;
 
   // Annual capacity anchor: most recent closed FY's actual total visits.
   // Sorted descending so [0] = most recent.
@@ -335,14 +343,18 @@ function computeForwardPlan(
 ): MonthVisitPlan[] {
   const end = fyEnd(fy);
 
-  const active      = rows.filter((r) => r.isActive);
-  const visitedNoOb = rows.filter(
-    (r) => !r.isActive && (r.totalVisit ?? 0) > 0,
-  );
-  const untouched   = rows.filter(
-    (r) => !r.isActive && (r.totalVisit ?? 0) === 0,
-  );
+  // A4-B: retailers with no distributor cannot place orders — exclude from all
+  // forward scheduling. Active retailers are maintained regardless (their
+  // existing orders prove a supply path; null distributor column is a data gap).
+  const schedulableDormant = rows.filter((r) => !r.isActive && !!r.distributor);
 
+  const active      = rows.filter((r) => r.isActive);
+  const visitedNoOb = schedulableDormant.filter((r) => (r.totalVisit ?? 0) > 0);
+  const untouched   = schedulableDormant.filter((r) => (r.totalVisit ?? 0) === 0);
+
+  // A4-B: developPool must DECREMENT — splice removes each batch from the pool
+  // so later months draw the next tranche and never repeat names. When the pool
+  // is empty, poolExhausted = true is signalled rather than looping.
   const developPool = [...untouched].sort(
     (a, b) => priorityScore(b) - priorityScore(a),
   );
@@ -410,9 +422,11 @@ function computeForwardPlan(
     }
 
     const devSlots = Math.max(0, 10 - targets.length);
-    const devCount = Math.min(developPool.length, devSlots);
-    for (let i = 0; i < devCount; i++) {
-      const r = developPool[i]!;
+    // A4-B: splice removes the drawn batch so each month draws the NEXT tranche.
+    // poolExhausted = true when we want development slots but the pool is empty.
+    const poolExhausted = devSlots > 0 && developPool.length === 0;
+    const devBatch = developPool.splice(0, Math.min(developPool.length, devSlots));
+    for (const r of devBatch) {
       targets.push({
         name:         r.name,
         district:     r.district,
@@ -453,6 +467,7 @@ function computeForwardPlan(
       maintenanceVisits: maintain,
       developmentVisits: devBudget,
       targets,
+      poolExhausted,
     });
   }
 
@@ -466,13 +481,17 @@ export function computeVisitPlan(
   fy: string,
   historicalCapacity: HistoricalFyCapacity[],
   asOf?: Date,
+  workingDaysActual?: number, // A4-B: member's own dashboard working days (AG col)
 ): VisitPlan {
   const now     = asOf ?? new Date();
   const start   = fyStart(fy);
   const elapsed = elapsedFractionalMonths(start, now);
 
+  // A4-B: count retailers excluded from forward scheduling (no distributor).
+  const unassignedExcluded = rows.filter((r) => !r.distributor).length;
+
   const pattern    = computePattern(rows, elapsed);
-  const capacity   = computeCapacity(rows, fy, historicalCapacity, now);
+  const capacity   = computeCapacity(rows, fy, historicalCapacity, now, workingDaysActual);
   const monthPlans = computeForwardPlan(rows, capacity, fy, now);
 
   const totalFeasible = monthPlans.reduce((s, m) => s + m.capacity, 0);
@@ -507,5 +526,6 @@ export function computeVisitPlan(
     totalFeasible,
     totalRequired,
     gap,
+    unassignedExcluded,
   };
 }

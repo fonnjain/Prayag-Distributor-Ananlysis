@@ -125,9 +125,18 @@ type VisitTarget = {
   ob: number; priority: "maintain" | "develop" | "reduce"; reason: string;
 };
 
+type DeckMemberSlide = {
+  memberName: string;
+  achievementBadge: "teal" | "amber";
+  bullets: string[];
+  commentary: string;
+  unmapped: boolean;
+};
+
 type MonthPlan = {
   month: string; workingDays: number; capacity: number;
   maintenanceVisits: number; developmentVisits: number; targets: VisitTarget[];
+  poolExhausted?: boolean;
 };
 
 type SlideSpec = {
@@ -151,7 +160,7 @@ type GenerationResult =
   | { type: "suggestions"; fy: string; member: string; dataCutoff: string; intro: string; suggestions: SuggestionItem[]; guard: GuardResult }
   | { type: "travel-plan"; fy: string; member: string; dataCutoff: string; sections: Record<string, Section>; guard: GuardResult; monthPlans: MonthPlan[]; visitCapacity: { gap: number; feasibleRemainingVisits: number; remainingRequired: number } | null }
   | { type: "performance-review"; fy: string; member: string; dataCutoff: string; sections: Record<string, Section>; guard: GuardResult; dataQualityFlags: string[] }
-  | { type: "presentation"; fy: string; member: string | null; stateHead: string | null; dataCutoff: string; deckTitle: string; deckSubtitle: string; slides: SlideSpec[]; guard: GuardResult; payload: AiPayloadSubset; memberRanking: MemberRankingEntry[] | null }
+  | { type: "presentation"; fy: string; member: string | null; stateHead: string | null; dataCutoff: string; deckTitle: string; deckSubtitle: string; slides: SlideSpec[]; teamSlides: SlideSpec[] | null; memberSlides: DeckMemberSlide[] | null; closingSlides: SlideSpec[] | null; guard: GuardResult; payload: AiPayloadSubset; memberRanking: MemberRankingEntry[] | null }
   // ── Distributor ──
   | { type: "distributor-statehead-report"; fy: string; stateHead: string; dataCutoff: string; sections: Record<string, Section>; guard: GuardResult; payload: DistributorPayloadSubset }
   | { type: "distributor-report"; fy: string; stateHead: string; distributor: string; dataCutoff: string; sections: Record<string, Section>; guard: GuardResult; payload: DistributorPayloadSubset }
@@ -526,6 +535,40 @@ function SlidePreview({ slide, payload, distPayload, memberRanking }: {
   );
 }
 
+function DeckMemberSlideCard({ slide }: { slide: DeckMemberSlide }) {
+  return (
+    <div className={cn(
+      "border rounded-lg p-4 bg-card space-y-2 min-h-[160px]",
+      slide.achievementBadge === "teal" ? "border-teal-200" : "border-amber-200",
+    )}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="font-semibold text-sm">{slide.memberName}</div>
+        <Badge className={cn(
+          "text-xs flex-shrink-0 text-white",
+          slide.achievementBadge === "teal" ? "bg-teal-600 hover:bg-teal-600" : "bg-amber-500 hover:bg-amber-500",
+        )}>
+          {slide.achievementBadge === "teal" ? "On Track" : "Needs Attention"}
+        </Badge>
+      </div>
+      {slide.bullets.length > 0 && (
+        <ul className="space-y-1">
+          {slide.bullets.map((b, i) => (
+            <li key={i} className="text-xs text-foreground flex gap-1.5 items-start">
+              <span className="text-primary mt-0.5">-</span>{b}
+            </li>
+          ))}
+        </ul>
+      )}
+      {slide.commentary && (
+        <p className={cn(
+          "text-xs italic border-t border-border/40 pt-2",
+          slide.unmapped ? "text-amber-700" : "text-muted-foreground",
+        )}>{slide.commentary}</p>
+      )}
+    </div>
+  );
+}
+
 function MonthPlanCard({ mp }: { mp: MonthPlan }) {
   const [open, setOpen] = useState(false);
   return (
@@ -534,8 +577,13 @@ function MonthPlanCard({ mp }: { mp: MonthPlan }) {
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between px-4 py-3 bg-muted/30 text-sm font-medium text-left hover:bg-muted/50 transition-colors"
       >
-        <span>{mp.month} — {mp.workingDays} working days · {mp.capacity} visits ({mp.maintenanceVisits} maintenance, {mp.developmentVisits} development)</span>
-        {open ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="truncate">{mp.month} — {mp.workingDays} working days · {mp.capacity} visits ({mp.maintenanceVisits} maintenance, {mp.developmentVisits} development)</span>
+          {mp.poolExhausted && (
+            <Badge variant="outline" className="text-xs text-amber-700 border-amber-300 flex-shrink-0">pool exhausted</Badge>
+          )}
+        </div>
+        {open ? <ChevronDown className="w-4 h-4 flex-shrink-0" /> : <ChevronRight className="w-4 h-4 flex-shrink-0" />}
       </button>
       {open && mp.targets.length > 0 && (
         <div className="overflow-x-auto">
@@ -1464,7 +1512,7 @@ export default function AiReports() {
             </>
           )}
 
-          {/* ── Member Presentation ── */}
+          {/* ── Presentation (member-level 8-12 slides OR state-head 27-slide A4A) ── */}
           {result.type === "presentation" && (
             <>
               <div className="flex items-center justify-between flex-wrap gap-3">
@@ -1476,11 +1524,49 @@ export default function AiReports() {
                   <Presentation className="w-3.5 h-3.5 mr-1.5" />Download PPTX
                 </Button>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {result.slides.map((slide, i) => (
-                  <SlidePreview key={i} slide={slide} payload={result.payload} memberRanking={result.memberRanking} />
-                ))}
-              </div>
+
+              {/* A4-A 27-slide state-head deck */}
+              {result.teamSlides && result.teamSlides.length > 0 ? (
+                <div className="space-y-4">
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Team Slides (1–11)</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {result.teamSlides.map((slide, i) => (
+                        <SlidePreview key={i} slide={slide} payload={result.payload} memberRanking={result.memberRanking} />
+                      ))}
+                    </div>
+                  </div>
+
+                  {result.memberSlides && result.memberSlides.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Member Slides ({result.memberSlides.length} members)</p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {result.memberSlides.map((slide, i) => (
+                          <DeckMemberSlideCard key={i} slide={slide} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {result.closingSlides && result.closingSlides.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Closing Slides (25–27)</p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {result.closingSlides.map((slide, i) => (
+                          <SlidePreview key={i} slide={slide} payload={result.payload} memberRanking={null} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Original member-level deck */
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {result.slides.map((slide, i) => (
+                    <SlidePreview key={i} slide={slide} payload={result.payload} memberRanking={result.memberRanking} />
+                  ))}
+                </div>
+              )}
             </>
           )}
 

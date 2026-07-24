@@ -28,6 +28,7 @@ import {
 } from "../lib/mgmt/aiPayload.js";
 import { runNumericGuard, type GuardResult } from "../lib/mgmt/numericGuard.js";
 import type { VisitPlan } from "../lib/mgmt/visitPlan.js";
+import { getMemberFileId } from "../lib/mgmt/memberSheet.js";
 
 const router: IRouter = Router();
 
@@ -255,16 +256,18 @@ const TRAVEL_PLAN_PROMPT = `You are writing the covering narrative for a Prayag 
 
 The app has already computed the month-by-month visit plan. You write the covering explanation ONLY. Do NOT invent a schedule; the plan is provided.
 
-Your SOLE data sources are the verified payload and the monthPlanSummary provided. An automated numeric guard will flag every number not matched to these sources.
+Your SOLE data sources are the verified payload, the planContext, and the monthPlanSummary provided. An automated numeric guard will flag every number not matched to these sources.
 
 ${CORE_NUMERIC_RULES}
 
 TRAVEL PLAN ADDITIONAL RULES:
 14. State EXPLICITLY in the batchingBasis section: "Visit batching in this plan is by district and distance from base, not route optimisation. The data includes district, city, and distance from base, but no coordinates. Precision beyond this cannot be implied."
 15. Do NOT list individual retailer names — they are not in the payload and must not be referenced.
-16. monthPlanSummary shows each remaining month with workingDays, capacity (visits allocated), maintenanceVisits, developmentVisits, targetCount (number of retailers on the list). Write a brief narrative for each month based on these figures. Do not reference individual retailers.
+16. monthPlanSummary shows each remaining month with workingDays, capacity (visits allocated), maintenanceVisits, developmentVisits, targetCount (number of retailers on the list), and poolExhausted (true when all new retailer prospects have been drawn). Write a brief narrative for each month. When poolExhausted is true, state that no new development targets remain for that month — maintenance visits continue.
 17. The shortfall (capacity.gap) may be negative (more required than feasible). State it plainly.
 18. Do NOT invent visit routes, sequences, or day-by-day schedules. The plan is month-level only.
+19. Demonstrated visit rate: planContext.workingDaysActual is the member's own working days from the State Head Dashboard (AG column). Use this — not a calendar count — when describing the member's demonstrated visit pace.
+20. If planContext.unassignedExcluded > 0, state explicitly in the coveringExplanation: how many retailers have been excluded from the forward plan because no distributor is assigned. Visiting them cannot generate orders until a distributor is allocated.
 
 RESPONSE FORMAT — return ONLY valid JSON, no fences:
 {
@@ -306,9 +309,16 @@ router.post("/ai/travel-plan", async (req: Request, res: Response): Promise<void
       maintenanceVisits: mp.maintenanceVisits,
       developmentVisits: mp.developmentVisits,
       targetCount: mp.targets.length,
+      poolExhausted: mp.poolExhausted,
     }));
 
-    const userMsg = `Verified payload (JSON):\n${JSON.stringify(payload, null, 2)}\n\nMonth-by-month visit plan summary (app-computed — cite these figures freely):\n${JSON.stringify(monthSummary, null, 2)}`;
+    // A4-B: expose unassigned exclusion count + member's own working days to Claude.
+    const planContext = {
+      unassignedExcluded: visitPlan?.unassignedExcluded ?? 0,
+      workingDaysActual: data.kpis.workingDaysActual ?? null,
+    };
+
+    const userMsg = `Verified payload (JSON):\n${JSON.stringify(payload, null, 2)}\n\nPlan context (unassigned exclusion + member working days — cite freely):\n${JSON.stringify(planContext, null, 2)}\n\nMonth-by-month visit plan summary (app-computed — cite these figures freely):\n${JSON.stringify(monthSummary, null, 2)}`;
 
     const message = await anthropic.messages.create({
       model: MODEL, max_tokens: MAX_TOKENS,
@@ -333,6 +343,7 @@ router.post("/ai/travel-plan", async (req: Request, res: Response): Promise<void
       guard,
       monthPlans,
       visitCapacity: visitPlan?.capacity ?? null,
+      unassignedExcluded: visitPlan?.unassignedExcluded ?? 0,
     });
   } catch (err) {
     req.log.error({ err, fy, member: memberRaw }, "ai/travel-plan: error");
@@ -415,6 +426,66 @@ router.post("/ai/performance-review", async (req: Request, res: Response): Promi
 
 // ── 5. Presentation ────────────────────────────────────────────────────────────
 
+// ── A4-A: 27-slide State Head team deck ────────────────────────────────────────
+
+const PRESENTATION_PROMPT_A4A = `You are generating a 27-slide State Head team deck for Prayag India sales leadership. This is a comprehensive team-level review, not a short summary.
+
+Your SOLE data source is the verified state-head aggregate payload and the memberSummary array provided. An automated numeric guard will flag every number not matched to these sources.
+
+${CORE_NUMERIC_RULES}
+
+DECK-SPECIFIC RULES:
+13. NEVER include chart data in bullets or commentary. Charts are rendered natively by the application. You supply chartDataRef labels only — never data values.
+14. chartDataRef must be ONE of: "performance", "achievement", "coverage", "teamRanking", "none".
+15. chartType must be ONE of: "bar", "pie", "line", "none".
+16. deckTitle must contain the state head name and FY. No numeric figures.
+17. deckSubtitle must state the data cutoff period. No numeric figures.
+18. memberSlides must be in EXACTLY the same order as memberSummary (already sorted by totalOB descending). Do not reorder.
+19. achievementBadge: "teal" when achievementPct >= 60, "amber" when achievementPct < 60 or null.
+20. For unmapped members (hasMappedSheet=false): set unmapped=true. First bullet must be exactly: "Retailer, visit, and distributor detail is ABSENT — not zero. No working sheet is mapped for this member."
+21. For each member: write 3–5 bullets citing only fields from memberSummary (secondaryOB, directDealerOB, totalOB, sale, achievementPct, retailers, visitsCompleted, workingDays, totalTargetToDate). Do not invent figures.
+22. Do NOT name individual retailers, customers, or distributors. Only member names from memberSummary.
+23. teamSlides: EXACTLY 11 items (slides 1–11). memberSlides: one per memberSummary entry. closingSlides: EXACTLY 3 items (slides 25–27).
+24. Concentration: compute share of team total OB held by top 2–3 members using payload.performance.totalOB as the team denominator and memberSummary[].totalOB. This is the only derived figure permitted — it is a sum-fraction, not a subtraction.
+
+TEAM SLIDE STRUCTURE (exactly 11):
+Slide  1 — Title slide. No bullets. subtitle = state head name + FY + data period. chartType: "none".
+Slide  2 — At a Glance: 4–6 KPI bullets from aggregate payload (totalOB, sale, achievement, members). chartType: "bar", chartDataRef: "performance".
+Slide  3 — Team vs Target: achievement ratios. chartType: "bar", chartDataRef: "achievement".
+Slide  4 — Member Rankings: commentary on tiers; 1 sentence per tier cluster. chartType: "bar", chartDataRef: "teamRanking".
+Slide  5 — Member Overview table: 1 bullet per member — name, totalOB, achievementPct. chartType: "none".
+Slide  6 — Visit Coverage: team retailer universe, visited vs unvisited. chartType: "bar", chartDataRef: "coverage".
+Slide  7 — Effort vs Return: identify which members have high workingDays relative to their OB, which are efficient. chartType: "none".
+Slide  8 — Concentration Risk: top-2 members share of team OB (use rule 24 calculation). chartType: "none".
+Slide  9 — Data Availability: count hasMappedSheet=true vs false; list members without sheets. chartType: "none".
+Slide 10 — Best Performer spotlight: cite top member's OB, sale, achievementPct, workingDays. chartType: "none".
+Slide 11 — Priority Actions: 3–5 management action bullets. No invented figures. chartType: "none".
+
+MEMBER SLIDE STRUCTURE (one per member, ordered as per memberSummary):
+{ memberName, achievementBadge ("teal"|"amber"), bullets (3–5), commentary (1–2 sentences), unmapped (bool) }
+
+CLOSING SLIDE STRUCTURE (exactly 3):
+Slide 25 — Data Quality: full breakdown of mapped vs unmapped members; list names without sheets. chartType: "none".
+Slide 26 — Benchmark and Best Practices: what the top performer's pattern suggests for peers. chartType: "none".
+Slide 27 — Next Steps: 3–5 placeholder action items for state head to fill in. chartType: "none".
+
+RESPONSE FORMAT — return ONLY valid JSON, no fences:
+{
+  "deckTitle": "...",
+  "deckSubtitle": "...",
+  "teamSlides": [
+    { "slideNumber": 1, "title": "...", "subtitle": "...", "bullets": [], "commentary": "...", "chartType": "none", "chartDataRef": "none" }
+  ],
+  "memberSlides": [
+    { "memberName": "...", "achievementBadge": "teal", "bullets": ["..."], "commentary": "...", "unmapped": false }
+  ],
+  "closingSlides": [
+    { "slideNumber": 25, "title": "...", "subtitle": "", "bullets": [], "commentary": "...", "chartType": "none", "chartDataRef": "none" }
+  ]
+}`;
+
+// ── A4 (original): member-level or short state-head deck ───────────────────────
+
 const PRESENTATION_PROMPT = `You are generating a structured slide deck plan for a Prayag India sales presentation.
 
 Your SOLE data source is the verified payload (and memberRanking if provided). An automated numeric guard will flag every number not matched to these sources.
@@ -457,60 +528,117 @@ router.post("/ai/presentation", async (req: Request, res: Response): Promise<voi
 
   try {
     let payload: AiPayload;
-    let memberName: string | null = null;
-    let memberRanking: Array<{ name: string; totalOB: number; target: number | null; achievementPct: number | null }> | null = null;
 
     if (memberRaw) {
+      // ── A4 member-level deck (8–12 slides) ──────────────────────────────────
       const memberKey = normSecKey(memberRaw);
       const data = await loadDeepDiveData(fy, stateHead, memberKey);
       if (!data.kpis) { res.status(404).json({ error: `Member '${memberRaw}' not found.` }); return; }
-      memberName = data.kpis.name;
+      const memberName = data.kpis.name;
       payload = buildMemberPayload(fy, stateHead ?? data.kpis.stateHead ?? null, period, data.kpis, data.retailerDetail, data.roiCost, data.skuSpread);
-    } else {
-      const { members, error: loadErr } = await resolveStateHeadMembers(fy, stateHead!);
-      if (loadErr) { res.status(404).json({ error: loadErr }); return; }
-      payload = buildStateHeadPayload(fy, stateHead!, period, members);
-      memberRanking = members
-        .map((m) => ({
-          name: m.name,
-          totalOB: (m.orderBooking ?? 0) + (m.directDealersOrder ?? 0),
-          target: m.totalTargetToDate ?? null,
-          achievementPct:
-            m.totalTargetToDate && m.totalTargetToDate > 0
-              ? Math.round(((m.orderBooking ?? 0) + (m.directDealersOrder ?? 0)) / m.totalTargetToDate * 1000) / 10
-              : null,
-        }))
-        .sort((a, b) => b.totalOB - a.totalOB);
+
+      const userMsg = `Verified payload (JSON):\n${JSON.stringify(payload, null, 2)}`;
+      const message = await anthropic.messages.create({
+        model: MODEL, max_tokens: MAX_TOKENS,
+        system: PRESENTATION_PROMPT,
+        messages: [{ role: "user", content: userMsg }],
+      });
+      const rawJson = message.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
+      const deck = JSON.parse(stripFences(rawJson)) as { deckTitle: string; deckSubtitle: string; slides: unknown[] };
+      if (!Array.isArray(deck.slides)) throw new Error("slides array missing");
+      const guard = guardCustom(deck, payload, null);
+      req.log.info({ member: memberName, slideCount: deck.slides.length, guardStatus: guard.status }, "ai/presentation member: done");
+      res.json({
+        fy,
+        stateHead: stateHead ?? payload.identity.stateHead,
+        member: memberName,
+        dataCutoff: payload.identity.dataCutoff,
+        generatedAt: payload.identity.generatedAt,
+        deckTitle: deck.deckTitle,
+        deckSubtitle: deck.deckSubtitle,
+        slides: deck.slides,
+        teamSlides: null,
+        memberSlides: null,
+        closingSlides: null,
+        guard,
+        payload,
+        memberRanking: null,
+      });
+      return;
     }
 
-    const userMsg = memberRanking
-      ? `Verified state-head aggregate payload (JSON):\n${JSON.stringify(payload, null, 2)}\n\nMember ranking (app-computed, cite freely):\n${JSON.stringify(memberRanking, null, 2)}`
-      : `Verified payload (JSON):\n${JSON.stringify(payload, null, 2)}`;
+    // ── A4-A state-head 27-slide deck ─────────────────────────────────────────
+    const { members, error: loadErr } = await resolveStateHeadMembers(fy, stateHead!);
+    if (loadErr) { res.status(404).json({ error: loadErr }); return; }
+    payload = buildStateHeadPayload(fy, stateHead!, period, members);
 
-    const message = await anthropic.messages.create({
+    // Extended per-member summary for A4A (all from KPIs — no extra Sheets reads)
+    const memberSummary = members
+      .map((m) => {
+        const totalOB = (m.orderBooking ?? 0) + (m.directDealersOrder ?? 0);
+        const achievementPct =
+          m.totalTargetToDate && m.totalTargetToDate > 0
+            ? Math.round(totalOB / m.totalTargetToDate * 1000) / 10
+            : null;
+        return {
+          name: m.name,
+          hq: m.hq,
+          hasMappedSheet: !!getMemberFileId(m.normKey),
+          secondaryOB: m.orderBooking ?? 0,
+          directDealerOB: m.directDealersOrder ?? 0,
+          totalOB,
+          sale: m.sale ?? 0,
+          totalTargetToDate: m.totalTargetToDate ?? null,
+          achievementPct,
+          retailers: m.totalOldRetailers ?? null,
+          visitsCompleted: m.visitedRetailers ?? null,
+          workingDays: m.workingDaysActual ?? null,
+        };
+      })
+      .sort((a, b) => b.totalOB - a.totalOB);
+
+    const a4aUserMsg =
+      `Verified state-head aggregate payload (JSON):\n${JSON.stringify(payload, null, 2)}\n\n` +
+      `Member summary — sorted by totalOB descending, verified, cite freely (JSON):\n${JSON.stringify(memberSummary, null, 2)}`;
+
+    const a4aMessage = await anthropic.messages.create({
       model: MODEL, max_tokens: MAX_TOKENS,
-      system: PRESENTATION_PROMPT,
-      messages: [{ role: "user", content: userMsg }],
+      system: PRESENTATION_PROMPT_A4A,
+      messages: [{ role: "user", content: a4aUserMsg }],
     });
+    const a4aRawJson = a4aMessage.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
+    const a4aDeck = JSON.parse(stripFences(a4aRawJson)) as {
+      deckTitle: string; deckSubtitle: string;
+      teamSlides: unknown[]; memberSlides: unknown[]; closingSlides: unknown[];
+    };
+    if (!Array.isArray(a4aDeck.teamSlides))   throw new Error("teamSlides array missing");
+    if (!Array.isArray(a4aDeck.memberSlides)) throw new Error("memberSlides array missing");
+    if (!Array.isArray(a4aDeck.closingSlides)) throw new Error("closingSlides array missing");
 
-    const rawJson = message.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
-    const deck = JSON.parse(stripFences(rawJson)) as { deckTitle: string; deckSubtitle: string; slides: unknown[] };
-    if (!Array.isArray(deck.slides)) throw new Error("slides array missing");
-
-    const guard = guardCustom(deck, payload, memberRanking);
-
-    req.log.info({ stateHead, member: memberName, slideCount: deck.slides.length, guardStatus: guard.status }, "ai/presentation: done");
+    const guard = guardCustom(a4aDeck, payload, null);
+    req.log.info({
+      stateHead,
+      teamSlides: a4aDeck.teamSlides.length,
+      memberSlides: a4aDeck.memberSlides.length,
+      closingSlides: a4aDeck.closingSlides.length,
+      guardStatus: guard.status,
+    }, "ai/presentation A4A: done");
 
     res.json({
       fy,
       stateHead: stateHead ?? payload.identity.stateHead,
-      member: memberName,
+      member: null,
       dataCutoff: payload.identity.dataCutoff,
       generatedAt: payload.identity.generatedAt,
-      ...deck,
+      deckTitle: a4aDeck.deckTitle,
+      deckSubtitle: a4aDeck.deckSubtitle,
+      slides: [],
+      teamSlides: a4aDeck.teamSlides,
+      memberSlides: a4aDeck.memberSlides,
+      closingSlides: a4aDeck.closingSlides,
       guard,
       payload,
-      memberRanking,
+      memberRanking: null,
     });
   } catch (err) {
     req.log.error({ err, fy, stateHead, member: memberRaw }, "ai/presentation: error");
