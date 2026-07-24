@@ -26,6 +26,7 @@ import aiPayloadRouter from "./aiPayload";
 import aiReportRouter from "./aiReport";
 import aiArtifactsRouter from "./aiArtifacts";
 import aiDistributorArtifactsRouter from "./aiDistributorArtifacts";
+import aiBatchRouter from "./aiBatch";
 
 const router: IRouter = Router();
 
@@ -56,5 +57,6 @@ router.use(aiPayloadRouter);
 router.use(aiReportRouter);
 router.use(aiArtifactsRouter);
 router.use(aiDistributorArtifactsRouter);
+router.use(aiBatchRouter);
 
 export default router;
