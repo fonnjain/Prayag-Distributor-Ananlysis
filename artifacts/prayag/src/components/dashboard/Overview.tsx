@@ -28,16 +28,28 @@ export default function Overview() {
   const fy2526Total = fy2526Query.data
     ? fy2526Query.data.months.reduce((sum, m) => sum + m.amount, 0)
     : null;
+
+  // FY26-27 monthly order booking — complete months only, from analytics endpoint.
+  const fy2627Query = useGetAnalytics(
+    { fy: "2026-27" },
+    {
+      query: {
+        queryKey: getGetAnalyticsQueryKey({ fy: "2026-27" }),
+        staleTime: 5 * 60 * 1000,
+        refetchOnWindowFocus: false,
+      },
+    },
+  );
+  const fy2627Monthly = fy2627Query.data?.months.map((m) => ({
+    month: m.monthLabel,
+    sales: m.amount,
+  })) ?? [];
+
   const { theme } = useTheme();
   const isDark = theme === "dark";
-  
+
   const gridColor = isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)";
   const tickColor = isDark ? "#98999C" : "#71717a";
-
-  const monthlySales = data.fy2425.months.map((month, i) => ({
-    month,
-    sales: data.fy2425.grand_monthly[i]
-  }));
 
   const pieData = data.fy2425.groups.map(g => ({
     name: g.group,
@@ -122,10 +134,10 @@ export default function Overview() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2">
           <CardHeader className="px-5 pt-5 pb-2 flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base font-semibold">FY24-25 Monthly Sales</CardTitle>
+            <CardTitle className="text-base font-semibold">FY26-27 Order Booking</CardTitle>
             <CSVLink 
-              data={monthlySales} 
-              filename="monthly-sales.csv" 
+              data={fy2627Monthly} 
+              filename="fy2627-order-booking.csv" 
               className="print:hidden flex items-center justify-center w-[28px] h-[28px] rounded-md transition-colors hover:bg-muted text-muted-foreground"
               aria-label="Export chart data"
             >
@@ -134,7 +146,7 @@ export default function Overview() {
           </CardHeader>
           <CardContent className="px-2 sm:px-5 pb-5 pt-2">
             <ResponsiveContainer width="100%" height={320} debounce={0}>
-              <AreaChart data={monthlySales} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+              <AreaChart data={fy2627Monthly} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor={CHART_COLORS.blue} stopOpacity={0.3}/>
@@ -159,7 +171,7 @@ export default function Overview() {
 
         <Card>
           <CardHeader className="px-5 pt-5 pb-2 flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base font-semibold">Product Mix</CardTitle>
+            <CardTitle className="text-base font-semibold">FY24-25 Product Mix</CardTitle>
             <CSVLink 
               data={pieData} 
               filename="product-mix.csv" 

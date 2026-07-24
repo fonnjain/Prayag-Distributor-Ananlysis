@@ -63,7 +63,7 @@ export default function Dashboard() {
             )}>
               {isLive ? "Live from Google Sheets" : "Baseline dataset"}
             </span>
-            <span className="text-xs text-muted-foreground hidden sm:inline">
+            <span className="text-xs text-muted-foreground">
               Last synced {time} on {date}
             </span>
             {refreshError && (
@@ -77,7 +77,7 @@ export default function Dashboard() {
           className="flex items-center gap-2 px-3 py-2 rounded-md border border-border/50 text-sm font-medium hover:bg-muted transition-colors disabled:opacity-60 disabled:cursor-not-allowed shrink-0"
         >
           <RefreshCw className={cn("w-4 h-4", isRefreshing && "animate-spin")} />
-          <span className="hidden sm:inline">{isRefreshing ? "Refreshing" : "Refresh data"}</span>
+          <span>{isRefreshing ? "Refreshing" : "Refresh data"}</span>
         </button>
       </header>
 
