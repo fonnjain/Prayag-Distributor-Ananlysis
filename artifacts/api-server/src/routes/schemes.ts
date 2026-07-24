@@ -16,7 +16,6 @@ import {
   computeNudgeList,
   buildCockpit,
   computeAnnualTracker,
-  getCurrentQuarter,
   getQuarterMonths,
 } from "../lib/schemes/nudge.js";
 import { getBlockedCustomers } from "../lib/schemes/dues.js";
@@ -25,16 +24,46 @@ import { getCompleteMonths } from "../lib/customers/analytics.js";
 
 const router = Router();
 
-function parseQ(raw: unknown): "Q1" | "Q2" | "Q3" | "Q4" {
+// Returns the last quarter for which ALL three months appear in completeMonths.
+// Data-driven: stable across day boundaries, never uses wall-clock date.
+function lastCompleteQuarter(
+  fy: string,
+  completeMonths: string[]
+): "Q1" | "Q2" | "Q3" | "Q4" {
+  const [yr] = fy.split("-").map(Number);
+  const s = String(yr).slice(-2);
+  const e = String(yr + 1).slice(-2);
+  const quarters: ["Q1" | "Q2" | "Q3" | "Q4", string[]][] = [
+    ["Q1", [`Apr-${s}`, `May-${s}`, `Jun-${s}`]],
+    ["Q2", [`Jul-${s}`, `Aug-${s}`, `Sep-${s}`]],
+    ["Q3", [`Oct-${s}`, `Nov-${s}`, `Dec-${s}`]],
+    ["Q4", [`Jan-${e}`, `Feb-${e}`, `Mar-${e}`]],
+  ];
+  const set = new Set(completeMonths);
+  let last: "Q1" | "Q2" | "Q3" | "Q4" = "Q1";
+  for (const [q, months] of quarters) {
+    if (months.every((m) => set.has(m))) last = q;
+  }
+  return last;
+}
+
+// Resolves the quarter parameter. When q is explicit, uses it directly.
+// When absent, derives from the last fully-complete quarter in the data —
+// never from the wall clock.
+async function resolveQ(
+  raw: unknown,
+  fy: string
+): Promise<"Q1" | "Q2" | "Q3" | "Q4"> {
   if (raw === "Q1" || raw === "Q2" || raw === "Q3" || raw === "Q4") return raw;
-  return getCurrentQuarter("2026-27");
+  const complete = await getCompleteMonths(fy);
+  return lastCompleteQuarter(fy, complete);
 }
 
 // ── Nudge list ────────────────────────────────────────────────────────────────
 
 router.get("/schemes/nudge", async (req, res) => {
   const fy = String(req.query.fy ?? "2026-27");
-  const q = parseQ(req.query.q);
+  const q = await resolveQ(req.query.q, fy);
   const roiThreshold = parseFloat(String(req.query.roi ?? "0.05")) || 0.05;
   const head = String(req.query.head ?? "");
 
@@ -56,7 +85,7 @@ router.get("/schemes/nudge", async (req, res) => {
 
 router.get("/schemes/cockpit", async (req, res) => {
   const fy = String(req.query.fy ?? "2026-27");
-  const q = parseQ(req.query.q);
+  const q = await resolveQ(req.query.q, fy);
   const head = String(req.query.head ?? "");
 
   try {
