@@ -7,7 +7,7 @@
 // The disputed-rows table is only meaningful after the first post-migration
 // backfill run: before that first run, all rows show sheet_confirmed_at=null.
 import { Router, type Request, type Response } from "express";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db, saleLines } from "@workspace/db";
 import {
   BOOKING_SHEETS,
@@ -63,7 +63,7 @@ router.get(
             disputedAmount: sql<number>`coalesce(sum(case when ${saleLines.sheetConfirmedAt} is null then ${saleLines.amount}::numeric else 0 end), 0)::float8`,
           })
           .from(saleLines)
-          .where(eq(saleLines.fy, fy))
+          .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")))
           .groupBy(saleLines.monthLabel)
           .orderBy(saleLines.monthLabel),
       ]);

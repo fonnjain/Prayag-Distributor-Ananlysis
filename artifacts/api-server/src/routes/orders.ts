@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, saleLines } from "@workspace/db";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { ORDER_BOOKING_SHEET_IDS } from "../lib/mgmt/primaryAttribution.js";
 import {
   readOrderTabInventory,
@@ -324,7 +324,7 @@ router.get(
             unclassifiedRows:   sql<number>`count(*) filter (where is_territory is null)::int`,
           })
           .from(saleLines)
-          .where(eq(saleLines.fy, fy));
+          .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")));
 
         const totalSale         = Number(saleRow?.totalSale         ?? 0);
         const territorySale     = Number(saleRow?.territorySale     ?? 0);
@@ -424,7 +424,7 @@ router.get(
         rowCount: sql<number>`count(*)::int`,
       })
       .from(saleLines)
-      .where(eq(saleLines.fy, fy));
+      .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")));
 
     const dbTotal    = Number(dbRow?.total    ?? 0);
     const dbRowCount = dbRow?.rowCount ?? 0;

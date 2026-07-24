@@ -433,6 +433,7 @@ export async function computeAnnualTracker(
       SELECT customer, head_canon AS state_head, SUM(amount::numeric) AS total
       FROM sale_line
       WHERE fy = $1
+        AND version_status = 'current'
         AND month_label IN (${monthPlaceholders})
         AND (is_territory IS NULL OR is_territory = true)
       GROUP BY customer, head_canon
@@ -441,6 +442,7 @@ export async function computeAnnualTracker(
       SELECT customer, SUM(amount::numeric) AS total
       FROM sale_line
       WHERE fy = $${completeMonths.length + 2}
+        AND version_status = 'current'
         AND month_label IN (${priorPlaceholders})
         AND (is_territory IS NULL OR is_territory = true)
       GROUP BY customer

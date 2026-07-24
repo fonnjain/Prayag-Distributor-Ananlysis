@@ -791,7 +791,7 @@ export async function reconcileDbVsSaleSheet(
         source: saleLines.source,
       })
       .from(saleLines)
-      .where(and(eq(saleLines.fy, fy), eq(saleLines.monthLabel, monthLabel))),
+      .where(and(eq(saleLines.fy, fy), eq(saleLines.monthLabel, monthLabel), eq(saleLines.versionStatus, "current"))),
   ]);
 
   if (sheetResult.status === "rejected") {

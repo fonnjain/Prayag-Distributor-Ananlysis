@@ -544,7 +544,7 @@ async function queryMonthlyTotal(fyStr: string) {
   return db.select({
     label: sql<string>`coalesce(${saleLines.monthLabel}, '')`,
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
-  }).from(saleLines).where(eq(saleLines.fy, fyStr)).groupBy(sql`1`);
+  }).from(saleLines).where(and(eq(saleLines.fy, fyStr), eq(saleLines.versionStatus, "current"))).groupBy(sql`1`);
 }
 
 async function queryMonthlyByHead(fyStr: string) {
@@ -552,5 +552,5 @@ async function queryMonthlyByHead(fyStr: string) {
     label: sql<string>`coalesce(${saleLines.monthLabel}, '')`,
     head: sql<string>`coalesce(${saleLines.headCanon}, 'Unmapped')`,
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
-  }).from(saleLines).where(eq(saleLines.fy, fyStr)).groupBy(sql`1, 2`);
+  }).from(saleLines).where(and(eq(saleLines.fy, fyStr), eq(saleLines.versionStatus, "current"))).groupBy(sql`1, 2`);
 }
