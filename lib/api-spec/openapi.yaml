@@ -237,6 +237,73 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /ai/payload:
+    get:
+      operationId: getAiPayload
+      tags: [ai]
+      summary: Phase A1 — verified metrics payload (no AI call)
+      description: >
+        Returns the pre-computed, fully reconciled metrics payload for a member or
+        state head. Every figure is computed by the app from already-loaded Deep
+        Dive data. This endpoint makes NO Anthropic API call. Later phases receive
+        this payload and generate narrative; they never do arithmetic on raw sheet
+        rows. The payload covers: identity, targets, performance, achievement,
+        coverage, customer states, top customers, concentration, visit analytics,
+        visit capacity projection, cost and ROI, product-segment spread (closed
+        FYs), prior-year comparisons, and data quality flags.
+      parameters:
+        - name: fy
+          in: query
+          schema: { type: string }
+          description: Fiscal year like 2026-27. Defaults to 2026-27.
+        - name: stateHead
+          in: query
+          schema: { type: string }
+          description: >
+            Raw state head name as it appears in the sheet. If omitted, the
+            payload aggregates across all state heads.
+        - name: member
+          in: query
+          schema: { type: string }
+          description: >
+            Member name or normSecKey. If omitted, a state-head aggregate
+            payload is returned (no retailer-level detail).
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [ytd, year, quarter, q1, q2, q3, q4, month]
+          description: >
+            Reporting period. Defaults to 'ytd'. All actuals from the State Head
+            Dashboard are YTD by construction; this field is recorded in identity
+            for downstream labelling only.
+      responses:
+        "200":
+          description: Verified metrics payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiPayload"
+        "400":
+          description: Invalid parameters
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404":
+          description: Member or state head not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "502":
+          description: Sheet unreachable or tab not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /mgmt/deep-dive:
     get:
       operationId: getMgmtDeepDive
@@ -4395,4 +4462,112 @@ components:
         fy: { type: string }
         normKey: { type: string }
         tier: { type: string, enum: [A, B, C] }
+    AiPayload:
+      type: object
+      description: >
+        Phase A1 verified metrics payload. Every figure is computed by the app
+        from already-loaded Deep Dive data. No Anthropic API call is made when
+        building this payload. Later phases receive this object and generate
+        narrative; they never perform arithmetic on raw sheet rows.
+      required:
+        - identity
+        - targets
+        - performance
+        - achievement
+        - coverage
+        - priorYears
+        - dataQuality
+        - provenance
+      properties:
+        identity:
+          type: object
+          additionalProperties: true
+          description: "Who + when + period context."
+          properties:
+            fy:            { type: string }
+            stateHead:     { type: string, nullable: true }
+            member:        { type: string, nullable: true }
+            hq:            { type: string, nullable: true }
+            period:        { type: string }
+            dataCutoff:    { type: string, description: "ISO date of last complete fiscal month end." }
+            elapsedMonths: { type: integer }
+            workingDays:   { type: number, nullable: true }
+            isClosedFy:    { type: boolean }
+            generatedAt:   { type: string, format: date-time }
+        targets:
+          type: object
+          additionalProperties: true
+          description: "Monthly and to-date targets from the Data tab."
+        performance:
+          type: object
+          additionalProperties: true
+          description: "Secondary OB, Direct Dealer OB, total OB, sales received."
+        achievement:
+          type: object
+          additionalProperties: true
+          description: "Achievement ratios (always recomputed, never from sheet %)."
+        coverage:
+          type: object
+          additionalProperties: true
+          description: "Retailer count breakdown."
+        customerStates:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: "retained / reactivated / atRisk / never groups."
+        topCustomers:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: "Top 5 and top 10 by order booking."
+        concentration:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: "top5SharePct, top10SharePct, HHI, effectiveRetailers."
+        visits:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: "Visit done/required/coveragePct + distance bands."
+        capacity:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: "Annual visit capacity model with projection band."
+        cost:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: "CTC, TA bill, total cost, cost ratios and per-visit/retailer."
+        productSpread:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: "Segment/SKU coverage from secondary_register_line (closed FYs)."
+        priorYears:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+          description: "Per-FY visit and OB history."
+        dataQuality:
+          type: array
+          items:
+            type: object
+            required: [code, message, severity, fields]
+            properties:
+              code:     { type: string }
+              message:  { type: string }
+              severity: { type: string, enum: [info, warning, error] }
+              fields:   { type: array, items: { type: string } }
+        provenance:
+          type: object
+          additionalProperties: { type: string }
+          description: "Per-section data-source description."
+        teamSummary:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: "Present only for state-head aggregate payloads."
         reason: { type: string }

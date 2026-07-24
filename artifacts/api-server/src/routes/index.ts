@@ -22,6 +22,7 @@ import apiKeysRouter from "./apiKeys";
 import tabDiagnosticRouter from "./tabDiagnostic";
 import ordersRouter from "./orders";
 import registersRouter from "./registers";
+import aiPayloadRouter from "./aiPayload";
 
 const router: IRouter = Router();
 
@@ -48,5 +49,6 @@ router.use(apiKeysRouter);
 router.use(tabDiagnosticRouter);
 router.use(ordersRouter);
 router.use(registersRouter);
+router.use(aiPayloadRouter);
 
 export default router;

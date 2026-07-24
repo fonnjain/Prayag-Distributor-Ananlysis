@@ -6,6 +6,24 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './aiPayload';
+export * from './aiPayloadAchievement';
+export * from './aiPayloadCapacity';
+export * from './aiPayloadConcentration';
+export * from './aiPayloadCost';
+export * from './aiPayloadCoverage';
+export * from './aiPayloadCustomerStates';
+export * from './aiPayloadDataQualityItem';
+export * from './aiPayloadDataQualityItemSeverity';
+export * from './aiPayloadIdentity';
+export * from './aiPayloadPerformance';
+export * from './aiPayloadPriorYearsItem';
+export * from './aiPayloadProductSpread';
+export * from './aiPayloadProvenance';
+export * from './aiPayloadTargets';
+export * from './aiPayloadTeamSummary';
+export * from './aiPayloadTopCustomers';
+export * from './aiPayloadVisits';
 export * from './analyticsHeadStat';
 export * from './analyticsMarginGroup';
 export * from './analyticsMargins';
@@ -62,6 +80,8 @@ export * from './driveFile';
 export * from './driveFileList';
 export * from './errorResponse';
 export * from './exportCustomerMasterParams';
+export * from './getAiPayloadParams';
+export * from './getAiPayloadPeriod';
 export * from './getAnalyticsParams';
 export * from './getMgmtDeepDiveParams';
 export * from './getMgmtDistributorDeepDiveParams';

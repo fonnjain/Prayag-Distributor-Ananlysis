@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AiPayload,
   AnalyticsReport,
   AnalyzeRequest,
   AnalyzeResponse,
@@ -44,6 +45,7 @@ import type {
   DriveFileList,
   ErrorResponse,
   ExportCustomerMasterParams,
+  GetAiPayloadParams,
   GetAnalyticsParams,
   GetMgmtDeepDiveParams,
   GetMgmtDistributorDeepDiveParams,
@@ -734,6 +736,91 @@ export function useGetAnalytics<TData = Awaited<ReturnType<typeof getAnalytics>>
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAnalyticsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAiPayloadUrl = (params?: GetAiPayloadParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/ai/payload?${stringifiedParams}` : `/api/ai/payload`
+}
+
+/**
+ * Returns the pre-computed, fully reconciled metrics payload for a member or state head. Every figure is computed by the app from already-loaded Deep Dive data. This endpoint makes NO Anthropic API call. Later phases receive this payload and generate narrative; they never do arithmetic on raw sheet rows. The payload covers: identity, targets, performance, achievement, coverage, customer states, top customers, concentration, visit analytics, visit capacity projection, cost and ROI, product-segment spread (closed FYs), prior-year comparisons, and data quality flags.
+ * @summary Phase A1 — verified metrics payload (no AI call)
+ */
+export const getAiPayload = async (params?: GetAiPayloadParams, options?: RequestInit): Promise<AiPayload> => {
+
+  return customFetch<AiPayload>(getGetAiPayloadUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAiPayloadQueryKey = (params?: GetAiPayloadParams,) => {
+    return [
+    `/api/ai/payload`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAiPayloadQueryOptions = <TData = Awaited<ReturnType<typeof getAiPayload>>, TError = ErrorType<ErrorResponse>>(params?: GetAiPayloadParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAiPayload>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAiPayloadQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAiPayload>>> = ({ signal }) => getAiPayload(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAiPayload>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAiPayloadQueryResult = NonNullable<Awaited<ReturnType<typeof getAiPayload>>>
+export type GetAiPayloadQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Phase A1 — verified metrics payload (no AI call)
+ */
+
+export function useGetAiPayload<TData = Awaited<ReturnType<typeof getAiPayload>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetAiPayloadParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAiPayload>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAiPayloadQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

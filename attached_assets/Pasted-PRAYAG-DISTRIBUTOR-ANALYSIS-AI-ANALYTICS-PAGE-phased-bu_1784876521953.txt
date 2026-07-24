@@ -1,0 +1,108 @@
+PRAYAG DISTRIBUTOR ANALYSIS
+AI ANALYTICS PAGE - phased build prompts (A1 to A7)
+Reports, decks, suggestions, travel plans, performance reviews and Q&A - for both Sales and Distributor, generated on demand.
+The architecture principle - read before anything else
+THE APP COMPUTES EVERY NUMBER. CLAUDE NEVER DOES ARITHMETIC THAT REACHES A REPORT. Claude receives a pre-computed, already-reconciled metrics payload and writes narrative, patterns and recommendations on top of it. It must not be handed raw retailer rows and asked to work out achievement, concentration or totals.
+This is not a stylistic preference. Every figure on the Deep Dive pages is the product of reconciliation work - the party plus direct-dealer identity, the audit anchors, the six errors caught by tracing values back to source. Handing raw rows to a language model and asking for totals throws all of that away and substitutes arithmetic that is fluent, plausible and occasionally wrong. Fluent and wrong is the worst possible failure mode for a document that carries a manager's name.
+The split: app = numbers. Claude = judgement.
+File generation: Claude cannot emit files. It returns structured content - JSON with headings and prose - and the APP renders the PDF and the PPTX using the existing document tooling.
+Model configuration: read the model name from an environment variable alongside ANTHROPIC_API_KEY. Do not hardcode it. The app already has an AI Analyst wired to that key with /analyze and /salesperson/analyze routes - extend that wiring rather than starting fresh.
+What gets built
+Artifact	Sales	Distributor	Level
+Detailed report	PDF	PDF	State Head and individual
+Presentation	PPTX	PPTX	State Head and individual
+Suggestions and actions	PDF	PDF	State Head and individual
+Travel and visit plan	PDF	PDF	Individual
+Performance review	PDF	PDF	Individual - MANAGEMENT ONLY
+Ask Claude	interactive	interactive	Whatever is selected
+Filters match the Sales Deep Dive exactly: fiscal year, State Head, member, and period (year / quarter / month / year-to-date). A Generate button produces everything for the current selection. When more than five documents are produced, do not render them individually - offer a single ZIP download.
+Phase order and why
+A1 has no AI in it at all. That is deliberate: the payload must be provably correct before a single word is generated on top of it. A2 then proves one report end to end on Prasun Chatterjee, where every figure can be checked by hand against known values. Only then does the work fan out.
+Phase	Scope
+A1	The metrics payload contract. No AI. An endpoint that returns verified figures plus data-quality flags.
+A2	One report end to end - salesperson detailed report PDF - with the numeric guard.
+A3	Caching on a payload hash, provenance stamping, and stored payloads.
+A4	The remaining sales artifacts - head report, PPTX, suggestions, travel plan, performance review.
+A5	The distributor equivalents.
+A6	Batch generation, queueing and ZIP.
+A7	Ask Claude - scoped question answering.
+Phase A1 - the metrics payload contract (no AI)
+PROMPT - Phase A1
+Prayag app - new AI Analytics page, Phase A1 of 7. Same global rules as every earlier
+phase. THIS PHASE CONTAINS NO AI CALL. Do not call the Anthropic API anywhere in it.
+
+Goal: build the metrics payload - the single verified data structure that every report
+will later be generated from. Everything downstream depends on this being right, so it
+is built and proved on its own first.
+
+Route: GET /api/ai/payload?fy=&stateHead=&member=&period=
+Returns a JSON object with these sections. Every figure must be computed by the app
+using the EXISTING Deep Dive logic - do not write new calculations, reuse what is
+already verified:
+
+  identity      fy, stateHead, member, hq, period, dataCutoff, elapsedMonths,
+                workingDays, isClosedFy, generatedAt
+  targets       monthlyTotal, monthlyPrimary, monthlySecondary, beBasis
+                ('TOTAL' | 'SECONDARY' | 'FALLBACK'), toDateSecondary, toDatePrimary,
+                toDateTotal, annualSecondary, annualPrimary, annualTotal, businessPlan
+  performance   secondaryOB, directDealerOB, totalOB, salesReceived
+  achievement   totalOBPct, secondaryOBPct, directDealerPct, salePct, annualProgressPct
+  coverage      retailersTotal, active, dormant, visited, nonVisited, newRetailers
+  customerStates retained, reactivated, atRisk, never - each with count, obThisYear,
+                obLastYear, visits, businessPerVisit
+  topCustomers  top5 and top10 - each entry name, ob, sharePct, visits, channel
+                ('distributor:<name>' | 'directDealer')
+  concentration top5SharePct, top10SharePct, hhi, effectiveRetailers
+  visits        done, required, coveragePct, visitedNoOrder, distanceBands[]
+  capacity      demonstratedRatePerDay, rateWindow, rateWorkingDays,
+                demonstratedAnnualCapacity[], remainingRequired, feasibleRemaining,
+                shortfall, projectionBand[{scenario, annual, remaining, gap}]
+  cost          ctcMonthly, ctcToDate, taBill, totalCost, costRatioOB, costRatioSale,
+                revenueToCostOB, revenueToCostSale, costPerRetailer, costPerVisit,
+                costPerActiveRetailer, marginRoiAvailable (boolean)
+  productSpread segmentsSold, segmentsTotal, skuCount, netBySegment[], available
+                (boolean - false for the live year, no FY2026-27 register exists)
+  priorYears    per closed year: ob, sale, visitsDone, visitsRequired, coveragePct
+  dataQuality   an ARRAY OF FLAGS - see below. This is not optional.
+  provenance    for each section, the source it came from ('dashboard Data tab',
+                'member sheet Summary Report 26-27', 'secondary_register_line',
+                'frozen database')
+
+DATA QUALITY FLAGS. Each flag carries a code, a human-readable message, a severity
+and the fields it affects. At minimum implement:
+  UNASSIGNED_RETAILERS   retailers with no distributor - they cannot order, so their
+                         dormancy is a supply-mapping issue not an effort issue
+  ZERO_SALE_WITH_OB      order booking present but sales received exactly zero - the
+                         sale column may simply be unmaintained for this member
+  PARTIAL_TENURE         working days well below the team norm - targets and
+                         achievement are pro-rated and not comparable at face value
+  NO_MEMBER_SHEET        no working sheet mapped - retailer, visit and distributor
+                         detail unavailable; dashboard KPIs only
+  BE_BASIS_ANOMALY       column BE not on the total basis for this member
+  NO_LIVE_REGISTER       no FY2026-27 secondary register, so no item-code SKU data
+  GUESSED_MAPPING        share of retailer-to-distributor mappings that are Guessed
+  CUTOFF_LAG            data cutoff is materially older than today
+
+Add the route to openapi.yaml, run codegen, validate with Zod, RESTART the API.
+
+Acceptance - Prasun Chatterjee, FY2026-27, period = year to date. Prove each by
+returning the payload and showing the values, not by asserting success:
+  identity: dataCutoff 2026-06-30, elapsedMonths 3, workingDays 72
+  targets: monthly 18,00,000 / 1,00,000 / 17,00,000; toDate 51,00,000 / 3,00,000 /
+    54,00,000; beBasis 'TOTAL'; businessPlan 1,80,00,000
+  performance: secondaryOB 18,34,504, directDealerOB 7,86,605, totalOB 26,21,109,
+    salesReceived 26,13,934
+  achievement: 48.5 / 36.0 / 262.2 / 48.4 / annualProgress 14.5
+  coverage: 73 total, 34 active, 39 dormant
+  customerStates: retained 32, reactivated 2, atRisk 20, never 19
+  concentration: top5 64.0, top10 78.4, hhi 1006, effectiveRetailers 9.9
+  visits: done 395, required 1704, visitedNoOrder 28
+  cost: ctcToDate 1,39,170 + taBill 16,484 = totalCost 1,55,654; costRatioOB 5.94;
+    costPerVisit 394; marginRoiAvailable false
+  priorYears: FY2024-25 1043/1534, FY2025-26 1423/2343
+  productSpread.available = false for FY2026-27
+  dataQuality contains UNASSIGNED_RETAILERS (30 retailers) and NO_LIVE_REGISTER
+  Also return the payload for State Head 'Anant Singh' with no member selected, and
+    confirm team totals: secondaryOB 2,41,84,663, directDealerOB 14,49,394,
+    salesReceived 2,58,84,872, visits 5,281, retailers 863, 13 members, of which 6
+    carry NO_MEMBER_SHEET

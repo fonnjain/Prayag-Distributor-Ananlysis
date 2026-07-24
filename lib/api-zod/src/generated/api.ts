@@ -276,6 +276,54 @@ export const GetAnalyticsResponse = zod.object({
 
 
 /**
+ * Returns the pre-computed, fully reconciled metrics payload for a member or state head. Every figure is computed by the app from already-loaded Deep Dive data. This endpoint makes NO Anthropic API call. Later phases receive this payload and generate narrative; they never do arithmetic on raw sheet rows. The payload covers: identity, targets, performance, achievement, coverage, customer states, top customers, concentration, visit analytics, visit capacity projection, cost and ROI, product-segment spread (closed FYs), prior-year comparisons, and data quality flags.
+ * @summary Phase A1 — verified metrics payload (no AI call)
+ */
+export const GetAiPayloadQueryParams = zod.object({
+  "fy": zod.coerce.string().optional().describe('Fiscal year like 2026-27. Defaults to 2026-27.'),
+  "stateHead": zod.coerce.string().optional().describe('Raw state head name as it appears in the sheet. If omitted, the payload aggregates across all state heads.\n'),
+  "member": zod.coerce.string().optional().describe('Member name or normSecKey. If omitted, a state-head aggregate payload is returned (no retailer-level detail).\n'),
+  "period": zod.enum(['ytd', 'year', 'quarter', 'q1', 'q2', 'q3', 'q4', 'month']).optional().describe('Reporting period. Defaults to \'ytd\'. All actuals from the State Head Dashboard are YTD by construction; this field is recorded in identity for downstream labelling only.\n')
+})
+
+export const GetAiPayloadResponse = zod.object({
+  "identity": zod.object({
+  "fy": zod.string().optional(),
+  "stateHead": zod.string().nullish(),
+  "member": zod.string().nullish(),
+  "hq": zod.string().nullish(),
+  "period": zod.string().optional(),
+  "dataCutoff": zod.string().optional().describe('ISO date of last complete fiscal month end.'),
+  "elapsedMonths": zod.number().optional(),
+  "workingDays": zod.number().nullish(),
+  "isClosedFy": zod.boolean().optional(),
+  "generatedAt": zod.coerce.date().optional()
+}).describe('Who + when + period context.'),
+  "targets": zod.record(zod.string(), zod.unknown()).describe('Monthly and to-date targets from the Data tab.'),
+  "performance": zod.record(zod.string(), zod.unknown()).describe('Secondary OB, Direct Dealer OB, total OB, sales received.'),
+  "achievement": zod.record(zod.string(), zod.unknown()).describe('Achievement ratios (always recomputed, never from sheet %).'),
+  "coverage": zod.record(zod.string(), zod.unknown()).describe('Retailer count breakdown.'),
+  "customerStates": zod.record(zod.string(), zod.unknown()).nullish().describe('retained \/ reactivated \/ atRisk \/ never groups.'),
+  "topCustomers": zod.record(zod.string(), zod.unknown()).nullish().describe('Top 5 and top 10 by order booking.'),
+  "concentration": zod.record(zod.string(), zod.unknown()).nullish().describe('top5SharePct, top10SharePct, HHI, effectiveRetailers.'),
+  "visits": zod.record(zod.string(), zod.unknown()).nullish().describe('Visit done\/required\/coveragePct + distance bands.'),
+  "capacity": zod.record(zod.string(), zod.unknown()).nullish().describe('Annual visit capacity model with projection band.'),
+  "cost": zod.record(zod.string(), zod.unknown()).nullish().describe('CTC, TA bill, total cost, cost ratios and per-visit\/retailer.'),
+  "productSpread": zod.record(zod.string(), zod.unknown()).nullish().describe('Segment\/SKU coverage from secondary_register_line (closed FYs).'),
+  "priorYears": zod.array(zod.record(zod.string(), zod.unknown())).describe('Per-FY visit and OB history.'),
+  "dataQuality": zod.array(zod.object({
+  "code": zod.string(),
+  "message": zod.string(),
+  "severity": zod.enum(['info', 'warning', 'error']),
+  "fields": zod.array(zod.string())
+})),
+  "provenance": zod.record(zod.string(), zod.string()).describe('Per-section data-source description.'),
+  "teamSummary": zod.record(zod.string(), zod.unknown()).nullish().describe('Present only for state-head aggregate payloads.'),
+  "reason": zod.string().optional()
+}).describe('Phase A1 verified metrics payload. Every figure is computed by the app from already-loaded Deep Dive data. No Anthropic API call is made when building this payload. Later phases receive this object and generate narrative; they never perform arithmetic on raw sheet rows.\n')
+
+
+/**
  * Returns the ~38 mandatory KPIs from the STATE HEAD DASHBOARD 'Data' tab (source A) for a chosen state head + member + fiscal year. Also returns the list of all state heads and the members under the selected head for populating the dependent dropdowns. Phase 1 reads the live year from Sheets; closed FYs will be served from DB snapshots in a later phase. Direct Dealers Order is kept separate from retailer/party OB throughout. Achievement is always recomputed (sale / plan) — never read from a sheet percent cell.
  * @summary Sales Deep Dive — mandatory KPI set for one team member
  */
@@ -791,8 +839,7 @@ export const PutMgmtDistributorTierOverrideBody = zod.object({
   "stateHead": zod.string(),
   "fy": zod.string(),
   "normKey": zod.string(),
-  "tier": zod.enum(['A', 'B', 'C']),
-  "reason": zod.string()
+  "tier": zod.enum(['A', 'B', 'C'])
 })
 
 export const PutMgmtDistributorTierOverrideResponse = zod.object({

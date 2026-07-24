@@ -12,5 +12,4 @@ export interface MgmtDistributorTierOverrideInput {
   fy: string;
   normKey: string;
   tier: MgmtDistributorTierOverrideInputTier;
-  reason: string;
 }

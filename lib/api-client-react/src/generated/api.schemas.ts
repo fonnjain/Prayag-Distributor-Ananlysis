@@ -2201,7 +2201,145 @@ export interface MgmtDistributorTierOverrideInput {
   fy: string;
   normKey: string;
   tier: MgmtDistributorTierOverrideInputTier;
-  reason: string;
+}
+
+/**
+ * Who + when + period context.
+ */
+export type AiPayloadIdentity = {
+  fy?: string;
+  stateHead?: string | null;
+  member?: string | null;
+  hq?: string | null;
+  period?: string;
+  /** ISO date of last complete fiscal month end. */
+  dataCutoff?: string;
+  elapsedMonths?: number;
+  workingDays?: number | null;
+  isClosedFy?: boolean;
+  generatedAt?: string;
+  [key: string]: unknown;
+ };
+
+/**
+ * Monthly and to-date targets from the Data tab.
+ */
+export type AiPayloadTargets = { [key: string]: unknown };
+
+/**
+ * Secondary OB, Direct Dealer OB, total OB, sales received.
+ */
+export type AiPayloadPerformance = { [key: string]: unknown };
+
+/**
+ * Achievement ratios (always recomputed, never from sheet %).
+ */
+export type AiPayloadAchievement = { [key: string]: unknown };
+
+/**
+ * Retailer count breakdown.
+ */
+export type AiPayloadCoverage = { [key: string]: unknown };
+
+/**
+ * retained / reactivated / atRisk / never groups.
+ */
+export type AiPayloadCustomerStates = { [key: string]: unknown } | null;
+
+/**
+ * Top 5 and top 10 by order booking.
+ */
+export type AiPayloadTopCustomers = { [key: string]: unknown } | null;
+
+/**
+ * top5SharePct, top10SharePct, HHI, effectiveRetailers.
+ */
+export type AiPayloadConcentration = { [key: string]: unknown } | null;
+
+/**
+ * Visit done/required/coveragePct + distance bands.
+ */
+export type AiPayloadVisits = { [key: string]: unknown } | null;
+
+/**
+ * Annual visit capacity model with projection band.
+ */
+export type AiPayloadCapacity = { [key: string]: unknown } | null;
+
+/**
+ * CTC, TA bill, total cost, cost ratios and per-visit/retailer.
+ */
+export type AiPayloadCost = { [key: string]: unknown } | null;
+
+/**
+ * Segment/SKU coverage from secondary_register_line (closed FYs).
+ */
+export type AiPayloadProductSpread = { [key: string]: unknown } | null;
+
+export type AiPayloadPriorYearsItem = { [key: string]: unknown };
+
+export type AiPayloadDataQualityItemSeverity = typeof AiPayloadDataQualityItemSeverity[keyof typeof AiPayloadDataQualityItemSeverity];
+
+
+export const AiPayloadDataQualityItemSeverity = {
+  info: 'info',
+  warning: 'warning',
+  error: 'error',
+} as const;
+
+export type AiPayloadDataQualityItem = {
+  code: string;
+  message: string;
+  severity: AiPayloadDataQualityItemSeverity;
+  fields: string[];
+};
+
+/**
+ * Per-section data-source description.
+ */
+export type AiPayloadProvenance = {[key: string]: string};
+
+/**
+ * Present only for state-head aggregate payloads.
+ */
+export type AiPayloadTeamSummary = { [key: string]: unknown } | null;
+
+/**
+ * Phase A1 verified metrics payload. Every figure is computed by the app from already-loaded Deep Dive data. No Anthropic API call is made when building this payload. Later phases receive this object and generate narrative; they never perform arithmetic on raw sheet rows.
+ */
+export interface AiPayload {
+  /** Who + when + period context. */
+  identity: AiPayloadIdentity;
+  /** Monthly and to-date targets from the Data tab. */
+  targets: AiPayloadTargets;
+  /** Secondary OB, Direct Dealer OB, total OB, sales received. */
+  performance: AiPayloadPerformance;
+  /** Achievement ratios (always recomputed, never from sheet %). */
+  achievement: AiPayloadAchievement;
+  /** Retailer count breakdown. */
+  coverage: AiPayloadCoverage;
+  /** retained / reactivated / atRisk / never groups. */
+  customerStates?: AiPayloadCustomerStates;
+  /** Top 5 and top 10 by order booking. */
+  topCustomers?: AiPayloadTopCustomers;
+  /** top5SharePct, top10SharePct, HHI, effectiveRetailers. */
+  concentration?: AiPayloadConcentration;
+  /** Visit done/required/coveragePct + distance bands. */
+  visits?: AiPayloadVisits;
+  /** Annual visit capacity model with projection band. */
+  capacity?: AiPayloadCapacity;
+  /** CTC, TA bill, total cost, cost ratios and per-visit/retailer. */
+  cost?: AiPayloadCost;
+  /** Segment/SKU coverage from secondary_register_line (closed FYs). */
+  productSpread?: AiPayloadProductSpread;
+  /** Per-FY visit and OB history. */
+  priorYears: AiPayloadPriorYearsItem[];
+  dataQuality: AiPayloadDataQualityItem[];
+  /** Per-section data-source description. */
+  provenance: AiPayloadProvenance;
+  /** Present only for state-head aggregate payloads. */
+  teamSummary?: AiPayloadTeamSummary;
+  reason?: string;
 }
 
 export type ListDriveFilesParams = {
@@ -2236,6 +2374,39 @@ fy?: string;
  */
 compare?: string;
 };
+
+export type GetAiPayloadParams = {
+/**
+ * Fiscal year like 2026-27. Defaults to 2026-27.
+ */
+fy?: string;
+/**
+ * Raw state head name as it appears in the sheet. If omitted, the payload aggregates across all state heads.
+ */
+stateHead?: string;
+/**
+ * Member name or normSecKey. If omitted, a state-head aggregate payload is returned (no retailer-level detail).
+ */
+member?: string;
+/**
+ * Reporting period. Defaults to 'ytd'. All actuals from the State Head Dashboard are YTD by construction; this field is recorded in identity for downstream labelling only.
+ */
+period?: GetAiPayloadPeriod;
+};
+
+export type GetAiPayloadPeriod = typeof GetAiPayloadPeriod[keyof typeof GetAiPayloadPeriod];
+
+
+export const GetAiPayloadPeriod = {
+  ytd: 'ytd',
+  year: 'year',
+  quarter: 'quarter',
+  q1: 'q1',
+  q2: 'q2',
+  q3: 'q3',
+  q4: 'q4',
+  month: 'month',
+} as const;
 
 export type GetMgmtDeepDiveParams = {
 /**

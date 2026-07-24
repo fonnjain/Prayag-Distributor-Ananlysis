@@ -114,6 +114,7 @@ export type MemberKpis = {
   ctcAnnual: number | null;              // Annual CTC
   taBillStCost: number | null;           // T.A. Bill + Station cost
   costRatio: number | null;              // (ctcMonthly + taBill) / sale × 100
+  workingDaysActual: number | null;      // AG: Actual working days this period (member-specific)
   // Retailer metrics
   totalOldRetailers: number | null;
   visitedRetailers: number | null;
@@ -673,6 +674,7 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
       ctcAnnual:           cols.ctcAnnual >= 0 ? cellNum(row[cols.ctcAnnual]) : null,
       taBillStCost:        cols.taBillStCost >= 0 ? cellNum(row[cols.taBillStCost]) : null,
       costRatio:           cols.costRatio >= 0 ? cellNum(row[cols.costRatio]) : null,
+      workingDaysActual:   cols.workingDaysAg >= 0 ? cellNum(row[cols.workingDaysAg]) : null,
       totalOldRetailers:   cols.totalOldRetailers >= 0 ? cellNum(row[cols.totalOldRetailers]) : null,
       visitedRetailers:    cols.visitedRetailers >= 0 ? cellNum(row[cols.visitedRetailers]) : null,
       nonVisitedRetailers: cols.nonVisitedRetailers >= 0 ? cellNum(row[cols.nonVisitedRetailers]) : null,
