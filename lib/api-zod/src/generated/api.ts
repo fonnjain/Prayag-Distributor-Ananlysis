@@ -324,6 +324,66 @@ export const GetAiPayloadResponse = zod.object({
 
 
 /**
+ * Builds the Phase A1 payload internally, sends it to Claude with a strict system prompt, runs the numeric guard, and returns a structured JSON report. No PDF is generated server-side; the client renders and prints the returned JSON. Claude never does arithmetic — it receives only the pre-computed payload and writes narrative. The numeric guard checks every number in the generated text against the payload; any unmatched number sets guard.status to "requires_review".
+ * @summary Phase A2 — generate salesperson narrative report via Claude
+ */
+export const generateAiReportBodyPeriodDefault = `ytd`;
+export const generateAiReportBodyCorruptDefault = false;
+
+export const GenerateAiReportBody = zod.object({
+  "fy": zod.string().optional(),
+  "stateHead": zod.string().optional(),
+  "member": zod.string().describe('Member name or normSecKey.'),
+  "period": zod.string().default(generateAiReportBodyPeriodDefault),
+  "corrupt": zod.boolean().default(generateAiReportBodyCorruptDefault).describe('Guard self-test mode. Injects a wrong monetary figure into the generated text before running the guard. Response includes corruptTestMode:true.\n')
+})
+
+export const GenerateAiReportResponse = zod.object({
+  "fy": zod.string(),
+  "member": zod.string(),
+  "stateHead": zod.string().nullish(),
+  "dataCutoff": zod.string(),
+  "generatedAt": zod.coerce.date(),
+  "sections": zod.object({
+  "executiveSummary": zod.object({
+  "title": zod.string(),
+  "body": zod.string()
+}),
+  "performanceAgainstTarget": zod.object({
+  "title": zod.string(),
+  "body": zod.string()
+}),
+  "coverageAndCustomerBase": zod.object({
+  "title": zod.string(),
+  "body": zod.string()
+}),
+  "visitEffectiveness": zod.object({
+  "title": zod.string(),
+  "body": zod.string()
+}),
+  "costAndReturn": zod.object({
+  "title": zod.string(),
+  "body": zod.string()
+}),
+  "risksAndDataCaveats": zod.object({
+  "title": zod.string(),
+  "body": zod.string()
+})
+}),
+  "guard": zod.object({
+  "status": zod.enum(['ok', 'requires_review']),
+  "checked": zod.number(),
+  "unmatched": zod.array(zod.object({
+  "extracted": zod.string(),
+  "value": zod.number(),
+  "sentence": zod.string()
+}))
+}),
+  "corruptTestMode": zod.boolean().nullish()
+})
+
+
+/**
  * Returns the ~38 mandatory KPIs from the STATE HEAD DASHBOARD 'Data' tab (source A) for a chosen state head + member + fiscal year. Also returns the list of all state heads and the members under the selected head for populating the dependent dropdowns. Phase 1 reads the live year from Sheets; closed FYs will be served from DB snapshots in a later phase. Direct Dealers Order is kept separate from retailer/party OB throughout. Achievement is always recomputed (sale / plan) — never read from a sheet percent cell.
  * @summary Sales Deep Dive — mandatory KPI set for one team member
  */

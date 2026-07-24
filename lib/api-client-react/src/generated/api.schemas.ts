@@ -2342,6 +2342,61 @@ export interface AiPayload {
   reason?: string;
 }
 
+export interface ReportSection {
+  title: string;
+  body: string;
+}
+
+export interface AiReportRequest {
+  fy?: string;
+  stateHead?: string;
+  /** Member name or normSecKey. */
+  member: string;
+  period?: string;
+  /** Guard self-test mode. Injects a wrong monetary figure into the generated text before running the guard. Response includes corruptTestMode:true. */
+  corrupt?: boolean;
+}
+
+export type AiReportResponseSections = {
+  executiveSummary: ReportSection;
+  performanceAgainstTarget: ReportSection;
+  coverageAndCustomerBase: ReportSection;
+  visitEffectiveness: ReportSection;
+  costAndReturn: ReportSection;
+  risksAndDataCaveats: ReportSection;
+};
+
+export type AiReportResponseGuardStatus = typeof AiReportResponseGuardStatus[keyof typeof AiReportResponseGuardStatus];
+
+
+export const AiReportResponseGuardStatus = {
+  ok: 'ok',
+  requires_review: 'requires_review',
+} as const;
+
+export type AiReportResponseGuardUnmatchedItem = {
+  extracted: string;
+  value: number;
+  sentence: string;
+};
+
+export type AiReportResponseGuard = {
+  status: AiReportResponseGuardStatus;
+  checked: number;
+  unmatched: AiReportResponseGuardUnmatchedItem[];
+};
+
+export interface AiReportResponse {
+  fy: string;
+  member: string;
+  stateHead?: string | null;
+  dataCutoff: string;
+  generatedAt: string;
+  sections: AiReportResponseSections;
+  guard: AiReportResponseGuard;
+  corruptTestMode?: boolean | null;
+}
+
 export type ListDriveFilesParams = {
 /**
  * Optional search text matched against file names.

@@ -4612,3 +4612,69 @@ components:
           additionalProperties: true
           description: "Present only for state-head aggregate payloads."
         reason: { type: string }
+    ReportSection:
+      type: object
+      required: [title, body]
+      properties:
+        title: { type: string }
+        body:  { type: string }
+    AiReportRequest:
+      type: object
+      required: [member]
+      properties:
+        fy:        { type: string, example: "2026-27" }
+        stateHead: { type: string }
+        member:    { type: string, description: "Member name or normSecKey." }
+        period:    { type: string, default: "ytd" }
+        corrupt:
+          type: boolean
+          default: false
+          description: >
+            Guard self-test mode. Injects a wrong monetary figure into the
+            generated text before running the guard. Response includes
+            corruptTestMode:true.
+    AiReportResponse:
+      type: object
+      required: [fy, member, dataCutoff, generatedAt, sections, guard]
+      properties:
+        fy:           { type: string }
+        member:       { type: string }
+        stateHead:    { type: string, nullable: true }
+        dataCutoff:   { type: string }
+        generatedAt:  { type: string, format: date-time }
+        sections:
+          type: object
+          required:
+            - executiveSummary
+            - performanceAgainstTarget
+            - coverageAndCustomerBase
+            - visitEffectiveness
+            - costAndReturn
+            - risksAndDataCaveats
+          properties:
+            executiveSummary:         { $ref: "#/components/schemas/ReportSection" }
+            performanceAgainstTarget: { $ref: "#/components/schemas/ReportSection" }
+            coverageAndCustomerBase:  { $ref: "#/components/schemas/ReportSection" }
+            visitEffectiveness:       { $ref: "#/components/schemas/ReportSection" }
+            costAndReturn:            { $ref: "#/components/schemas/ReportSection" }
+            risksAndDataCaveats:      { $ref: "#/components/schemas/ReportSection" }
+        guard:
+          type: object
+          required: [status, checked, unmatched]
+          properties:
+            status:
+              type: string
+              enum: [ok, requires_review]
+            checked: { type: integer }
+            unmatched:
+              type: array
+              items:
+                type: object
+                required: [extracted, value, sentence]
+                properties:
+                  extracted: { type: string }
+                  value:     { type: number }
+                  sentence:  { type: string }
+        corruptTestMode:
+          type: boolean
+          nullable: true

@@ -16,7 +16,6 @@
 //   max_tokens: 8192
 
 import { Router, type IRouter, type Request, type Response } from "express";
-import { z } from "zod/v4";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { loadDeepDiveData, normSecKey } from "../lib/mgmt/deepDiveData.js";
 import {
@@ -29,15 +28,28 @@ const router: IRouter = Router();
 
 const FY_PATTERN = /^\d{4}-\d{2}$/;
 
-// ── Request schema ────────────────────────────────────────────────────────────
+// ── Request parsing ───────────────────────────────────────────────────────────
 
-const AiReportRequestSchema = z.object({
-  fy:        z.string().default("2026-27"),
-  stateHead: z.string().trim().optional(),
-  member:    z.string().trim(),
-  period:    z.string().optional().default("ytd"),
-  corrupt:   z.boolean().optional().default(false), // guard test: inject a wrong number
-});
+type AiReportRequest = {
+  fy:        string;
+  stateHead: string | undefined;
+  member:    string;
+  period:    string;
+  corrupt:   boolean;
+};
+
+function parseRequest(body: unknown): AiReportRequest | { error: string } {
+  if (!body || typeof body !== "object") return { error: "Request body required." };
+  const b = body as Record<string, unknown>;
+  if (typeof b.member !== "string" || !b.member.trim()) return { error: "member is required." };
+  return {
+    fy:        typeof b.fy === "string" && b.fy.trim() ? b.fy.trim() : "2026-27",
+    stateHead: typeof b.stateHead === "string" && b.stateHead.trim() ? b.stateHead.trim() : undefined,
+    member:    b.member.trim(),
+    period:    typeof b.period === "string" && b.period.trim() ? b.period.trim() : "ytd",
+    corrupt:   b.corrupt === true,
+  };
+}
 
 // ── Report section type ───────────────────────────────────────────────────────
 
@@ -59,16 +71,19 @@ An automated numeric guard will run after you respond and flag every number that
 matched to a payload field. Write only numbers that appear in the payload.
 
 ABSOLUTE RULES:
-1. Use ONLY numbers present in the payload. Never compute, estimate, derive a new ratio, or round a figure into a value not present in the payload.
+1. Use ONLY numbers present in the payload. Never compute, estimate, subtract, add, or derive any figure that does not appear explicitly as a numeric value in the payload JSON. If you feel you must compute something (e.g. dormant = total − active), stop — write that the breakdown is not available instead.
 2. Every quantitative claim must name its payload field in brackets immediately after the value — e.g. "Rs 26.21 lakh [performance.totalOB]". The guard uses these citations to verify provenance.
 3. Where a dataQuality flag is relevant to a claim, state the caveat in the SAME SENTENCE as the figure, not in a footnote or a later section.
 4. Write in English. No emojis. This is a management report; it refers to the salesperson in the third person (not "you").
-5. If a section lacks data (field is null, section is null, or a dataQuality code signals absence), state that the data is unavailable and why. Never fill a gap with a plausible estimate.
+5. If a field is null, absent, or a dataQuality code signals absence, state that the data is unavailable and why. NEVER substitute a plausible estimate or a number derived from other fields. Null means null.
 6. For order booking: always present performance.secondaryOB and performance.directDealerOB separately before stating performance.totalOB. Never report only the blended total.
 7. Present all four achievement ratios separately: achievement.totalOBPct, achievement.secondaryOBPct, achievement.directDealerPct, achievement.salePct. Never blend them into one figure.
 8. For the SKU/product section: if productSpread is null or productSpread.available is false, write exactly this sentence in the costAndReturn or risksAndDataCaveats section: "Item-code level data is not available for this financial year as this analysis requires a completed financial year; SKU-level breakdown will be available after year-end."
 9. For dormant retailers: if the UNASSIGNED_RETAILERS flag appears in dataQuality, include its message in the SAME SENTENCE as any mention of the dormant count or total retailer count.
 10. Do NOT invent prior-year OB or prior-year sale figures. priorYears entries have null ob and null sale for current open FY — if those fields are null, state visit history only.
+11. Distance band thresholds and labels (e.g. "Mid (15-40 km)") appear verbatim in visits.distanceBands[].label. Copy them exactly. Do not invent alternative km ranges or bins.
+12. Numeric range boundaries in labels (the "15", "40" in "Mid (15-40 km)") are payload values embedded in strings. You may quote them as part of citing the label. Do not introduce any other numeric thresholds.
+13. Do NOT use "per Rs 100" or "for every Rs 100" normalization phrases. Express cost ratios as percentages or as a direct value from the payload. Do not introduce 100 as a normalization denominator — it is not a payload value and the guard will flag it.
 
 RESPONSE FORMAT:
 Return ONLY valid JSON with no markdown code fences, no preamble, no trailing commentary:
@@ -89,25 +104,36 @@ function buildUserMessage(payload: AiPayload): string {
 
 // ── Parse Claude's JSON response ──────────────────────────────────────────────
 
-const SectionSchema = z.object({
-  title: z.string(),
-  body:  z.string(),
-});
-
-const SectionsSchema = z.object({
-  executiveSummary:         SectionSchema,
-  performanceAgainstTarget: SectionSchema,
-  coverageAndCustomerBase:  SectionSchema,
-  visitEffectiveness:       SectionSchema,
-  costAndReturn:            SectionSchema,
-  risksAndDataCaveats:      SectionSchema,
-});
+function isSection(v: unknown): v is { title: string; body: string } {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    typeof (v as Record<string, unknown>).title === "string" &&
+    typeof (v as Record<string, unknown>).body === "string"
+  );
+}
 
 function parseSections(raw: string): ReportSections {
   // Strip markdown fences if Claude wrapped anyway
   const stripped = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
-  const parsed = JSON.parse(stripped) as unknown;
-  return SectionsSchema.parse(parsed);
+  const parsed = JSON.parse(stripped) as Record<string, unknown>;
+
+  const keys: (keyof ReportSections)[] = [
+    "executiveSummary",
+    "performanceAgainstTarget",
+    "coverageAndCustomerBase",
+    "visitEffectiveness",
+    "costAndReturn",
+    "risksAndDataCaveats",
+  ];
+
+  for (const key of keys) {
+    if (!isSection(parsed[key])) {
+      throw new Error(`Missing or malformed section: ${key}`);
+    }
+  }
+
+  return parsed as unknown as ReportSections;
 }
 
 // ── Corrupt-test injection ────────────────────────────────────────────────────
@@ -129,13 +155,13 @@ function injectCorruption(sections: ReportSections): ReportSections {
 // ── Route ─────────────────────────────────────────────────────────────────────
 
 router.post("/ai/report", async (req: Request, res: Response): Promise<void> => {
-  const parsed = AiReportRequestSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: "Invalid request", details: parsed.error.issues });
+  const parseResult = parseRequest(req.body);
+  if ("error" in parseResult) {
+    res.status(400).json({ error: parseResult.error });
     return;
   }
 
-  const { fy, stateHead, member: memberRaw, period, corrupt } = parsed.data;
+  const { fy, stateHead, member: memberRaw, period, corrupt } = parseResult;
 
   if (!FY_PATTERN.test(fy)) {
     res.status(400).json({ error: "fy must look like 2026-27" });

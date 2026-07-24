@@ -5,6 +5,7 @@
 // Achievement always recomputed (sale / plan); never read from a sheet % cell.
 import { useState, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
+import { SalesPersonReport } from "./SalesPersonReport";
 
 const BASE = import.meta.env.BASE_URL ?? "/";
 const API = `${BASE}api`.replace(/\/\//g, "/");
@@ -2152,6 +2153,21 @@ export default function SalesDeepDive() {
               </div>
             </div>
           </div>
+
+          {/* Phase A2: AI narrative report */}
+          {selectedMemberKey && (
+            <div className="rounded-lg border border-border bg-card px-5 py-4 space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                AI Report
+              </p>
+              <SalesPersonReport
+                fy={fy}
+                stateHead={selectedHead}
+                memberKey={selectedMemberKey}
+                memberName={kpis.name}
+              />
+            </div>
+          )}
 
           {/* KPI tiles */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">

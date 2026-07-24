@@ -21,6 +21,8 @@ import type {
 
 import type {
   AiPayload,
+  AiReportRequest,
+  AiReportResponse,
   AnalyticsReport,
   AnalyzeRequest,
   AnalyzeResponse,
@@ -832,6 +834,77 @@ export function useGetAiPayload<TData = Awaited<ReturnType<typeof getAiPayload>>
 
 
 
+
+export const getGenerateAiReportUrl = () => {
+
+
+
+
+  return `/api/ai/report`
+}
+
+/**
+ * Builds the Phase A1 payload internally, sends it to Claude with a strict system prompt, runs the numeric guard, and returns a structured JSON report. No PDF is generated server-side; the client renders and prints the returned JSON. Claude never does arithmetic — it receives only the pre-computed payload and writes narrative. The numeric guard checks every number in the generated text against the payload; any unmatched number sets guard.status to "requires_review".
+ * @summary Phase A2 — generate salesperson narrative report via Claude
+ */
+export const generateAiReport = async (aiReportRequest: AiReportRequest, options?: RequestInit): Promise<AiReportResponse> => {
+
+  return customFetch<AiReportResponse>(getGenerateAiReportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(aiReportRequest)
+  }
+);}
+
+
+
+
+export const getGenerateAiReportMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateAiReport>>, TError,{data: BodyType<AiReportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof generateAiReport>>, TError,{data: BodyType<AiReportRequest>}, TContext> => {
+
+const mutationKey = ['generateAiReport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof generateAiReport>>, {data: BodyType<AiReportRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  generateAiReport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GenerateAiReportMutationResult = NonNullable<Awaited<ReturnType<typeof generateAiReport>>>
+    export type GenerateAiReportMutationBody = BodyType<AiReportRequest>
+    export type GenerateAiReportMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Phase A2 — generate salesperson narrative report via Claude
+ */
+export const useGenerateAiReport = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateAiReport>>, TError,{data: BodyType<AiReportRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof generateAiReport>>,
+        TError,
+        {data: BodyType<AiReportRequest>},
+        TContext
+      > => {
+      return useMutation(getGenerateAiReportMutationOptions(options));
+    }
 
 export const getGetMgmtDeepDiveUrl = (params?: GetMgmtDeepDiveParams,) => {
   const normalizedParams = new URLSearchParams();

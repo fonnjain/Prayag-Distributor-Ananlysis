@@ -39,12 +39,28 @@ export type GuardResult = {
 // ── Build the allowed-value set from a payload ────────────────────────────────
 // Walk every numeric leaf in the payload JSON.  For each value n we add:
 //   • n itself (raw INR or count)
-//   • n / 100_000  (lakh variant — used when Claude writes "18.35 lakh")
-//   • n / 10_000_000  (crore variant — used when Claude writes "1.8 crore")
+//   • |n| (absolute — Claude may write "gap of -510" as a positive figure)
+//   • n / 100_000  (lakh variant — "18.35 lakh")
+//   • n / 10_000_000  (crore variant — "1.8 crore")
+//
+// String values are also scanned for embedded numerics so that labels like
+// "Mid (15-40 km)" in distanceBands contribute 15 and 40 to the allowlist.
+
+const EMBEDDED_NUM_RE = /\d+(?:\.\d+)?/g;
 
 function collectLeaves(obj: unknown, out: number[]): void {
   if (typeof obj === "number" && isFinite(obj)) {
     out.push(obj);
+    return;
+  }
+  if (typeof obj === "string") {
+    // Extract any numeric tokens embedded in string labels (e.g. band thresholds)
+    let m: RegExpExecArray | null;
+    EMBEDDED_NUM_RE.lastIndex = 0;
+    while ((m = EMBEDDED_NUM_RE.exec(obj)) !== null) {
+      const n = parseFloat(m[0]);
+      if (isFinite(n) && n !== 0) out.push(n);
+    }
     return;
   }
   if (Array.isArray(obj)) {
@@ -65,20 +81,29 @@ function buildAllowed(payload: AiPayload): number[] {
   const allowed: number[] = [];
   for (const n of raw) {
     allowed.push(n);
-    if (Math.abs(n) >= 50_000) allowed.push(n / 100_000);      // lakh
-    if (Math.abs(n) >= 1_000_000) allowed.push(n / 10_000_000); // crore
+    allowed.push(Math.abs(n));                                     // absolute value
+    if (Math.abs(n) >= 50_000) allowed.push(n / 100_000);         // lakh
+    if (Math.abs(n) >= 1_000_000) allowed.push(n / 10_000_000);   // crore
   }
   return allowed;
 }
 
 // ── Text pre-processing ───────────────────────────────────────────────────────
-// Neutralise fiscal-year tokens so "FY2026-27" doesn't inject 2026, 27 etc.
+// Neutralise tokens that would inject spurious numbers:
+//   • Full ISO dates first (2026-06-30 → YYYY-MM-DD) before partial masks consume them
+//   • Fiscal-year references (FY2026-27, 2026-27 bare)
+//   • Standalone calendar years (2026 etc.)
+//   • Bracket field-path references ([top10[9]], [capacity.remaining]) — Claude
+//     uses these to cite source fields; their embedded integers are not data values.
 
 function preprocess(text: string): string {
   return text
-    .replace(/\bFY\s*\d{4}-\d{2}\b/gi, "FYXX-XX")  // "FY2026-27"
-    .replace(/\b\d{4}-\d{2}\b/g, "YYXX")            // "2026-27" bare
-    .replace(/\b20\d{2}\b/g, "YYYY");               // standalone years 2000-2099
+    .replace(/\b\d{4}-\d{2}-\d{2}\b/g, "YYYY-MM-DD")  // full ISO dates first
+    .replace(/\bFY\s*\d{4}-\d{2}\b/gi, "FYXX-XX")      // "FY2026-27"
+    .replace(/\b\d{4}-\d{2}\b/g, "YYXX")               // "2026-27" bare
+    .replace(/\b20\d{2}\b/g, "YYYY")                    // standalone years 2000-2099
+    .replace(/\[[^\]]*\d[^\]]*\]/g, "[REF]")             // bracket field refs [top10[9]], etc.
+    .replace(/(?:^|\n)(\d{1,2})\.\s/gm, "\n[N]. ");    // numbered list ordinals "9. Customer…"
 }
 
 // ── Number extraction ─────────────────────────────────────────────────────────
@@ -98,8 +123,10 @@ type ParsedToken = {
 };
 
 // One globally-defined pattern, reset before each use.
+// Uses \d+ (not \d{1,3}) as the leading group so that 4-digit numbers like
+// 1005.72 are matched whole rather than split into "100" + "5.72".
 const NUM_RE =
-  /(?:Rs\.?\s*|₹\s*)?(\d{1,3}(?:,\d{2,3})*(?:\.\d+)?|\d+(?:\.\d+)?)(?:\s*(lakh|lakhs?|crores?|Cr|L)\b)?(\s*%)?/gi;
+  /(?:Rs\.?\s*|₹\s*)?(\d+(?:,\d{2,3})*(?:\.\d+)?)(?:\s*(lakh|lakhs?|crores?|Cr|L)\b)?(\s*%)?/gi;
 
 function extractTokens(text: string): ParsedToken[] {
   NUM_RE.lastIndex = 0;
