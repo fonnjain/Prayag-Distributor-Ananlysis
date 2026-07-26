@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Bot, Send, User, Sparkles, Loader2, AlertCircle, FileDown } from "lucide-react";
+import { Bot, Send, User, Sparkles, Loader2, AlertCircle, FileDown, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Message = {
@@ -66,6 +66,7 @@ export default function Analyst() {
     }
   ]);
   const [input, setInput] = useState("");
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
 
   const analyzeSales = useAnalyzeSales();
 
@@ -174,26 +175,38 @@ export default function Analyst() {
               </Button>
             </form>
 
-            <div className="space-y-3 max-h-[34vh] md:max-h-[220px] overflow-y-auto pr-1">
-              {SUGGESTION_GROUPS.map((group) => (
-                <div key={group.label}>
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
-                    {group.label}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {group.questions.map((question, i) => (
-                      <button
-                        key={i}
-                        onClick={() => handleSend(question)}
-                        disabled={analyzeSales.isPending}
-                        className="text-left text-xs px-3 py-1.5 rounded-full bg-background border border-border text-foreground/80 hover:bg-muted hover:text-foreground hover:border-primary/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {question}
-                      </button>
-                    ))}
-                  </div>
+            <div>
+              <button
+                onClick={() => setSuggestionsOpen((o) => !o)}
+                className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {suggestionsOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                {suggestionsOpen ? "Hide suggested questions" : "Show suggested questions"}
+              </button>
+
+              {suggestionsOpen && (
+                <div className="mt-3 space-y-3 max-h-[34vh] md:max-h-[220px] overflow-y-auto pr-1">
+                  {SUGGESTION_GROUPS.map((group) => (
+                    <div key={group.label}>
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+                        {group.label}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {group.questions.map((question, i) => (
+                          <button
+                            key={i}
+                            onClick={() => handleSend(question)}
+                            disabled={analyzeSales.isPending}
+                            className="text-left text-xs px-3 py-1.5 rounded-full bg-background border border-border text-foreground/80 hover:bg-muted hover:text-foreground hover:border-primary/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {question}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           </div>
 
