@@ -7,7 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Bot, Send, User, Sparkles, Loader2, AlertCircle, FileDown, ChevronDown, ChevronUp, Mic, MicOff, Calendar } from "lucide-react";
+import { Bot, Send, User, Sparkles, Loader2, AlertCircle, FileDown, ChevronDown, ChevronUp, Mic, MicOff, Calendar, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 
@@ -119,6 +119,9 @@ export default function Analyst() {
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [graphIndex, setGraphIndex] = useState<GraphIndex | null>(null);
   const [cutoffLabel, setCutoffLabel] = useState<string | null>(null);
+  // Indices of assistant messages whose answer is currently expanded.
+  // The most-recent answer is always auto-expanded; older ones collapse when a new one arrives.
+  const [expandedAnswers, setExpandedAnswers] = useState<Set<number>>(new Set());
   const greetingSet = useRef(false);
 
   const analyzeSales = useAnalyzeSales();
@@ -131,19 +134,16 @@ export default function Analyst() {
       .then((r) => r.json())
       .then((data: GraphIndex) => {
         setGraphIndex(data);
-
-        // Data cutoff label — derived from FY 2026-27 being a live year
-        // Months with data are Apr–Jun 2026; July register in progress.
         setCutoffLabel("Data through Jun 2026 (Jul in progress)");
 
-        // Set the greeting from the index — only once.
         if (!greetingSet.current) {
           greetingSet.current = true;
           setMessages([{ role: "assistant", content: buildGreeting(data) }]);
+          // Greeting (index 0) starts expanded.
+          setExpandedAnswers(new Set([0]));
         }
       })
       .catch(() => {
-        // Fallback greeting if graph index unavailable.
         if (!greetingSet.current) {
           greetingSet.current = true;
           setMessages([{
@@ -153,6 +153,7 @@ export default function Analyst() {
               "the metrics graph — company, State Head, salesperson, distributor, month. " +
               "Every figure I cite comes from a verified node. What would you like to know?",
           }]);
+          setExpandedAnswers(new Set([0]));
         }
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -161,6 +162,15 @@ export default function Analyst() {
     setInput((prev) => (prev ? `${prev} ${text}` : text));
   }, []);
   const voice = useVoiceInput(appendTranscript);
+
+  const toggleAnswer = (idx: number) => {
+    setExpandedAnswers((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
 
   const handleSend = (text: string) => {
     if (!text.trim()) return;
@@ -172,14 +182,19 @@ export default function Analyst() {
       { data: { question: text } },
       {
         onSuccess: (response) => {
-          setMessages((prev) => [...prev, { role: "assistant", content: response.answer }]);
+          setMessages((prev) => {
+            const next = [...prev, { role: "assistant" as const, content: response.answer }];
+            // Auto-expand the new answer; collapse all others except the greeting.
+            setExpandedAnswers(new Set([next.length - 1]));
+            return next;
+          });
         },
         onError: (error) => {
           const msg = (error as { message?: string })?.message ?? String(error);
           setMessages((prev) => [
             ...prev,
             {
-              role: "system",
+              role: "system" as const,
               content: `The analyst could not respond: ${msg}. Please try again.`,
             },
           ]);
@@ -331,63 +346,81 @@ export default function Analyst() {
             </div>
           </div>
 
-          <ScrollArea className="flex-1 p-4 md:p-6">
-            <div className="space-y-6">
-              {/* Show a loading shimmer while the greeting is loading */}
+          <ScrollArea className="flex-1 p-3 md:p-5">
+            <div className="space-y-1">
+              {/* Loading shimmer while greeting fetches */}
               {messages.length === 0 && (
-                <div className="flex gap-3 max-w-[85%]">
-                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-secondary text-secondary-foreground flex items-center justify-center">
-                    <Sparkles className="w-4 h-4" />
-                  </div>
-                  <div className="px-4 py-3 rounded-2xl bg-muted rounded-tl-sm border border-border/50">
-                    <div className="h-3 w-48 bg-muted-foreground/20 rounded animate-pulse" />
-                  </div>
+                <div className="flex gap-2 items-center px-3 py-3 rounded-lg bg-muted/40 border border-border/40">
+                  <Sparkles className="w-4 h-4 shrink-0 text-muted-foreground" />
+                  <div className="h-3 w-48 bg-muted-foreground/20 rounded animate-pulse" />
                 </div>
               )}
 
-              {messages.map((msg, i) => (
-                <div
-                  key={i}
-                  className={cn(
-                    "flex gap-3 max-w-[85%]",
-                    msg.role === "user" ? "ml-auto flex-row-reverse" : "",
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center",
-                      msg.role === "user"
-                        ? "bg-primary text-primary-foreground"
-                        : msg.role === "assistant"
-                          ? "bg-secondary text-secondary-foreground"
-                          : "bg-destructive/10 text-destructive",
-                    )}
-                  >
-                    {msg.role === "user" ? (
-                      <User className="w-4 h-4" />
-                    ) : msg.role === "assistant" ? (
-                      <Sparkles className="w-4 h-4" />
-                    ) : (
-                      <AlertCircle className="w-4 h-4" />
-                    )}
-                  </div>
-                  <div
-                    className={cn(
-                      "px-4 py-3 rounded-2xl text-sm leading-relaxed",
-                      msg.role === "user"
-                        ? "bg-primary text-primary-foreground rounded-tr-sm"
-                        : msg.role === "assistant"
-                          ? "bg-muted text-foreground rounded-tl-sm border border-border/50"
-                          : "bg-destructive/10 text-destructive rounded-tl-sm border border-destructive/20",
-                    )}
-                  >
-                    {msg.role === "user" || msg.role === "system" ? (
-                      <p>{msg.content}</p>
-                    ) : (
-                      <div>
+              {messages.map((msg, i) => {
+                if (msg.role === "user") {
+                  // User question — always visible, shown as a compact row
+                  return (
+                    <div key={i} className="flex items-start gap-2 justify-end pl-8">
+                      <p className="text-sm px-4 py-2.5 rounded-2xl rounded-tr-sm bg-primary text-primary-foreground leading-snug">
+                        {msg.content}
+                      </p>
+                      <div className="shrink-0 w-7 h-7 mt-0.5 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
+                        <User className="w-3.5 h-3.5" />
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (msg.role === "system") {
+                  return (
+                    <div key={i} className="flex gap-2 items-center px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>{msg.content}</span>
+                    </div>
+                  );
+                }
+
+                // Assistant answer — collapsible
+                const isExpanded = expandedAnswers.has(i);
+                // Find the preceding user question for the collapsed label
+                const prevQuestion = messages
+                  .slice(0, i)
+                  .reverse()
+                  .find((m) => m.role === "user")?.content ?? null;
+
+                return (
+                  <div key={i} className="rounded-xl border border-border/50 bg-muted/40 overflow-hidden">
+                    {/* Collapse toggle header */}
+                    <button
+                      onClick={() => toggleAnswer(i)}
+                      className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-muted/60 transition-colors group"
+                    >
+                      <div className="shrink-0 w-6 h-6 rounded-full bg-secondary text-secondary-foreground flex items-center justify-center">
+                        <Sparkles className="w-3 h-3" />
+                      </div>
+                      {prevQuestion ? (
+                        <span className="flex-1 text-xs font-medium text-foreground/80 truncate">
+                          {prevQuestion}
+                        </span>
+                      ) : (
+                        <span className="flex-1 text-xs font-medium text-muted-foreground italic">
+                          Introduction
+                        </span>
+                      )}
+                      <ChevronRight
+                        className={cn(
+                          "w-4 h-4 shrink-0 text-muted-foreground transition-transform duration-200",
+                          isExpanded && "rotate-90",
+                        )}
+                      />
+                    </button>
+
+                    {/* Collapsible answer body */}
+                    {isExpanded && (
+                      <div className="px-4 pb-4 pt-1 border-t border-border/30">
                         <div
                           id={`analyst-answer-${i}`}
-                          className="prose prose-sm dark:prose-invert prose-p:leading-relaxed prose-pre:my-0 max-w-none"
+                          className="prose prose-sm dark:prose-invert prose-p:leading-relaxed prose-pre:my-0 max-w-none text-foreground"
                         >
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
                             {msg.content}
@@ -405,17 +438,18 @@ export default function Analyst() {
                       </div>
                     )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
 
+              {/* Pending answer skeleton */}
               {analyzeSales.isPending && (
-                <div className="flex gap-3 max-w-[85%]">
-                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-secondary text-secondary-foreground flex items-center justify-center">
-                    <Sparkles className="w-4 h-4" />
-                  </div>
-                  <div className="px-4 py-4 rounded-2xl bg-muted rounded-tl-sm border border-border/50 flex items-center gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-                    <span className="text-sm text-muted-foreground">Traversing the graph...</span>
+                <div className="rounded-xl border border-border/50 bg-muted/40 overflow-hidden">
+                  <div className="flex items-center gap-2 px-3 py-2.5">
+                    <div className="shrink-0 w-6 h-6 rounded-full bg-secondary text-secondary-foreground flex items-center justify-center">
+                      <Sparkles className="w-3 h-3" />
+                    </div>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">Traversing the graph...</span>
                   </div>
                 </div>
               )}
