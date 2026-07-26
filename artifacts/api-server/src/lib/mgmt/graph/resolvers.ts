@@ -235,11 +235,15 @@ async function resolveSalesperson(memberName: string, fy: string): Promise<Graph
   const perf = payload.performance;
   const tgt  = payload.targets;
 
+  // Expose all three booking streams so the AI never needs to add them up.
+  // The acceptance figure "Rs 26,21,109 booking" is totalOB (secondary + direct dealer).
   const measures: MeasureValue[] = [
-    mv("secondary_ob",   "Secondary Order Booking",   perf.secondaryOB   ?? null),
-    mv("secondary_sale", "Secondary Sales Received",  perf.salesReceived ?? null),
-    mv("target", "Monthly Target (secondary)", tgt.monthlySecondary ?? null),
-    mv("business_plan",  "Annual Business Plan",      tgt.annualSecondary ?? null),
+    mv("secondary_ob",   "Total Order Booking (secondary + direct dealer)", perf.totalOB        ?? null),
+    mv("secondary_sale", "Secondary Sales Received",                        perf.salesReceived  ?? null),
+    mv("secondary_ob",   "Secondary-only OB (retailer/party)",              perf.secondaryOB    ?? null),
+    mv("primary_ob",     "Direct Dealer OB",                                perf.directDealerOB ?? null),
+    mv("target",         "Monthly Target (secondary)",                      tgt.monthlySecondary ?? null),
+    mv("business_plan",  "Annual Business Plan",                            tgt.annualSecondary ?? null),
   ];
 
   const flags: string[] = payload.dataQuality.map(

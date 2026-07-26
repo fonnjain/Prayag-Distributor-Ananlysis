@@ -1,69 +1,161 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useAnalyzeSales } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Bot, Send, User, Sparkles, Loader2, AlertCircle, FileDown, ChevronDown, ChevronUp, Mic, MicOff } from "lucide-react";
+import { Bot, Send, User, Sparkles, Loader2, AlertCircle, FileDown, ChevronDown, ChevronUp, Mic, MicOff, Calendar } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 type Message = {
   role: "user" | "assistant" | "system";
   content: string;
 };
 
+type GraphIndexLevel = {
+  level: string;
+  count: number;
+  measuresAvailable: string[];
+};
+
+type GraphIndexGap = {
+  path: string;
+  reason: string;
+};
+
+type GraphIndex = {
+  fy: string;
+  fys: string[];
+  levels: GraphIndexLevel[];
+  gapNodes: GraphIndexGap[];
+  generatedAt: string;
+};
+
+// ── Suggested questions — exact from document ─────────────────────────────────
+
 const SUGGESTION_GROUPS: { label: string; questions: string[] }[] = [
   {
-    label: "Company overview",
+    label: "Where the business is",
     questions: [
-      "What is the company secondary total for FY2026-27, and which State Heads are driving it?",
-      "Compare all State Heads on secondary order booking for FY2026-27.",
+      "Which State Heads are behind their target, and is it coverage or conversion?",
+      "Which members carry the most business, and which carry the most risk?",
     ],
   },
   {
-    label: "Distributor focus",
+    label: "Supply routes",
     questions: [
-      "Which distributor carries the most concentration risk in Anant Singh's territory?",
-      "Show distributor flows for Jagdamba Traders — what is the gap between primary dispatch and secondary out?",
+      "How many retailers cannot order because they have no assigned distributor?",
+      "Which members lose the most visits to retailers with no supply route?",
+      "Which districts have retailers but no distributor at all?",
     ],
   },
   {
-    label: "Member deep-dive",
+    label: "Effort and return",
     questions: [
-      "Which month was strongest for Prasun Chatterjee, and why is July absent?",
-      "Compare Prasun Chatterjee and any other member on unassigned retailers.",
+      "Where are visits going, and what does each group return?",
+      "Which retailers were visited repeatedly and ordered nothing?",
+      "What does a visit cost, and which members return most per rupee spent?",
     ],
   },
   {
-    label: "Data boundaries",
+    label: "The customer base",
     questions: [
-      "Which SKU sells best for Prasun Chatterjee this year?",
-      "What is the margin on water tanks?",
+      "Is growth new business, or the same customers reordering?",
+      "Which accounts bought last year and nothing yet this year?",
     ],
   },
   {
-    label: "Year-on-year",
+    label: "Concentration",
     questions: [
-      "How did Sandeep Dadheech grow year on year?",
-      "Compare company primary sale between FY2024-25 and FY2025-26.",
+      "Which distributor carries the most territory risk?",
+      "Which members depend on too few customers?",
+    ],
+  },
+  {
+    label: "What we cannot answer yet",
+    questions: [
+      "What questions can this data not answer, and why?",
     ],
   },
 ];
 
+// ── Build greeting from graph index ──────────────────────────────────────────
+
+function buildGreeting(index: GraphIndex): string {
+  const fyList = index.fys.join(", ");
+  const reachable = index.levels
+    .filter((l) => l.level !== "gap" && l.count > 0)
+    .map((l) => `${l.level} (${l.count > 1 ? `${l.count} nodes` : "1 node"})`)
+    .join(", ");
+
+  const gapCount = index.gapNodes.length;
+  const gapExamples = index.gapNodes
+    .slice(0, 2)
+    .map((g) => g.path.replace("gap/", "").replace(/-/g, " "))
+    .join(", ");
+
+  return (
+    `Hello. I am the Prayag India Sales Analyst, wired to the metrics graph for FY${index.fy}.\n\n` +
+    `**Fiscal years held:** ${fyList}\n` +
+    `**Reachable levels:** ${reachable}\n` +
+    `**Known gaps** (${gapCount} total, e.g. ${gapExamples}): I will name the gap and its reason when a question needs one of these — I will not guess.\n\n` +
+    `Every number I cite comes from a verified graph node with a source, population note, and data cutoff. What would you like to know?`
+  );
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+const API = (import.meta as { env: Record<string, string> }).env.BASE_URL?.replace(/\/$/, "") ?? "";
+
 export default function Analyst() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content: "Hello! I'm your Prayag India Sales Analyst. I can now traverse the full metrics graph — company, State Head, member, distributor, month — to answer questions that go beyond the standard dashboard. Every number I cite comes from a verified node with a source and population note. What would you like to know?"
-    }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [graphIndex, setGraphIndex] = useState<GraphIndex | null>(null);
+  const [cutoffLabel, setCutoffLabel] = useState<string | null>(null);
+  const greetingSet = useRef(false);
 
   const analyzeSales = useAnalyzeSales();
+
+  // ── Fetch graph index on mount ─────────────────────────────────────────────
+
+  useEffect(() => {
+    const url = `${API}/api/graph/index?fy=2026-27`;
+    fetch(url)
+      .then((r) => r.json())
+      .then((data: GraphIndex) => {
+        setGraphIndex(data);
+
+        // Data cutoff label — derived from FY 2026-27 being a live year
+        // Months with data are Apr–Jun 2026; July register in progress.
+        setCutoffLabel("Data through Jun 2026 (Jul in progress)");
+
+        // Set the greeting from the index — only once.
+        if (!greetingSet.current) {
+          greetingSet.current = true;
+          setMessages([{ role: "assistant", content: buildGreeting(data) }]);
+        }
+      })
+      .catch(() => {
+        // Fallback greeting if graph index unavailable.
+        if (!greetingSet.current) {
+          greetingSet.current = true;
+          setMessages([{
+            role: "assistant",
+            content:
+              "Hello. I am the Prayag India Sales Analyst. I answer questions by traversing " +
+              "the metrics graph — company, State Head, salesperson, distributor, month. " +
+              "Every figure I cite comes from a verified node. What would you like to know?",
+          }]);
+        }
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const appendTranscript = useCallback((text: string) => {
     setInput((prev) => (prev ? `${prev} ${text}` : text));
@@ -72,32 +164,41 @@ export default function Analyst() {
 
   const handleSend = (text: string) => {
     if (!text.trim()) return;
-    
-    setMessages(prev => [...prev, { role: "user", content: text }]);
+
+    setMessages((prev) => [...prev, { role: "user", content: text }]);
     setInput("");
-    
-    analyzeSales.mutate({ data: { question: text } }, {
-      onSuccess: (response) => {
-        setMessages(prev => [...prev, { role: "assistant", content: response.answer }]);
+
+    analyzeSales.mutate(
+      { data: { question: text } },
+      {
+        onSuccess: (response) => {
+          setMessages((prev) => [...prev, { role: "assistant", content: response.answer }]);
+        },
+        onError: (error) => {
+          const msg = (error as { message?: string })?.message ?? String(error);
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "system",
+              content: `The analyst could not respond: ${msg}. Please try again.`,
+            },
+          ]);
+        },
       },
-      onError: (error) => {
-        const msg = (error as { message?: string })?.message ?? String(error);
-        setMessages(prev => [...prev, {
-          role: "system",
-          content: `The analyst could not respond: ${msg}. Please try again — the API is usually available within a few seconds.`,
-        }]);
-      }
-    });
+    );
   };
+
+  // ── PDF export ────────────────────────────────────────────────────────────
 
   const exportAnswerPdf = (index: number) => {
     const el = document.getElementById(`analyst-answer-${index}`);
     if (!el) return;
 
-    const question = messages
-      .slice(0, index)
-      .reverse()
-      .find((m) => m.role === "user")?.content ?? "";
+    const question =
+      messages
+        .slice(0, index)
+        .reverse()
+        .find((m) => m.role === "user")?.content ?? "";
 
     const escapeHtml = (s: string) =>
       s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -126,7 +227,7 @@ export default function Analyst() {
 </head>
 <body>
   <div class="brand">Prayag India - Sales Intelligence</div>
-  <div class="meta">AI Analyst response &middot; Generated ${new Date().toLocaleString()}</div>
+  <div class="meta">AI Analyst response &middot; Generated ${new Date().toLocaleString()}${cutoffLabel ? ` &middot; Data cutoff: ${cutoffLabel}` : ""}</div>
   ${question ? `<div class="q">${escapeHtml(question)}</div>` : ""}
   <div>${el.innerHTML}</div>
   <div class="footer">Generated by the Prayag India Sales Intelligence dashboard. Figures are sourced from verified graph nodes; each cites its data source and population.</div>
@@ -139,6 +240,8 @@ export default function Analyst() {
     }, 350);
   };
 
+  // ── Render ────────────────────────────────────────────────────────────────
+
   return (
     <div className="h-[calc(100vh-140px)] md:h-[600px] flex flex-col animate-in fade-in slide-in-from-bottom-4 duration-500">
       <Card className="flex-1 flex flex-col overflow-hidden border-border/50 bg-card/50 backdrop-blur-sm shadow-sm">
@@ -147,13 +250,19 @@ export default function Analyst() {
             <div className="p-2 rounded-md bg-primary/10 text-primary">
               <Bot className="w-5 h-5" />
             </div>
-            <div>
+            <div className="flex-1">
               <CardTitle className="text-base font-semibold">Ask the Analyst</CardTitle>
               <CardDescription className="text-xs">Graph-traversal AI — every figure cited from a verified node</CardDescription>
             </div>
+            {cutoffLabel && (
+              <Badge variant="outline" className="text-xs gap-1 font-normal shrink-0">
+                <Calendar className="w-3 h-3" />
+                {cutoffLabel}
+              </Badge>
+            )}
           </div>
         </CardHeader>
-        
+
         <CardContent className="flex-1 p-0 flex flex-col overflow-hidden">
           <div className="p-4 bg-muted/20 border-b border-border/50 space-y-3">
             <form
@@ -166,7 +275,7 @@ export default function Analyst() {
               <Input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Ask about sales, regions, or products..."
+                placeholder="Ask about sales, distributors, members, visits..."
                 className="flex-1 bg-background"
                 disabled={analyzeSales.isPending}
               />
@@ -224,27 +333,54 @@ export default function Analyst() {
 
           <ScrollArea className="flex-1 p-4 md:p-6">
             <div className="space-y-6">
+              {/* Show a loading shimmer while the greeting is loading */}
+              {messages.length === 0 && (
+                <div className="flex gap-3 max-w-[85%]">
+                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-secondary text-secondary-foreground flex items-center justify-center">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div className="px-4 py-3 rounded-2xl bg-muted rounded-tl-sm border border-border/50">
+                    <div className="h-3 w-48 bg-muted-foreground/20 rounded animate-pulse" />
+                  </div>
+                </div>
+              )}
+
               {messages.map((msg, i) => (
-                <div 
-                  key={i} 
+                <div
+                  key={i}
                   className={cn(
                     "flex gap-3 max-w-[85%]",
-                    msg.role === "user" ? "ml-auto flex-row-reverse" : ""
+                    msg.role === "user" ? "ml-auto flex-row-reverse" : "",
                   )}
                 >
-                  <div className={cn(
-                    "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center",
-                    msg.role === "user" ? "bg-primary text-primary-foreground" : 
-                    msg.role === "assistant" ? "bg-secondary text-secondary-foreground" : "bg-destructive/10 text-destructive"
-                  )}>
-                    {msg.role === "user" ? <User className="w-4 h-4" /> : 
-                     msg.role === "assistant" ? <Sparkles className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                  <div
+                    className={cn(
+                      "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center",
+                      msg.role === "user"
+                        ? "bg-primary text-primary-foreground"
+                        : msg.role === "assistant"
+                          ? "bg-secondary text-secondary-foreground"
+                          : "bg-destructive/10 text-destructive",
+                    )}
+                  >
+                    {msg.role === "user" ? (
+                      <User className="w-4 h-4" />
+                    ) : msg.role === "assistant" ? (
+                      <Sparkles className="w-4 h-4" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4" />
+                    )}
                   </div>
-                  <div className={cn(
-                    "px-4 py-3 rounded-2xl text-sm leading-relaxed",
-                    msg.role === "user" ? "bg-primary text-primary-foreground rounded-tr-sm" : 
-                    msg.role === "assistant" ? "bg-muted text-foreground rounded-tl-sm border border-border/50" : "bg-destructive/10 text-destructive rounded-tl-sm border border-destructive/20"
-                  )}>
+                  <div
+                    className={cn(
+                      "px-4 py-3 rounded-2xl text-sm leading-relaxed",
+                      msg.role === "user"
+                        ? "bg-primary text-primary-foreground rounded-tr-sm"
+                        : msg.role === "assistant"
+                          ? "bg-muted text-foreground rounded-tl-sm border border-border/50"
+                          : "bg-destructive/10 text-destructive rounded-tl-sm border border-destructive/20",
+                    )}
+                  >
                     {msg.role === "user" || msg.role === "system" ? (
                       <p>{msg.content}</p>
                     ) : (
@@ -271,6 +407,7 @@ export default function Analyst() {
                   </div>
                 </div>
               ))}
+
               {analyzeSales.isPending && (
                 <div className="flex gap-3 max-w-[85%]">
                   <div className="flex-shrink-0 w-8 h-8 rounded-full bg-secondary text-secondary-foreground flex items-center justify-center">
@@ -278,7 +415,7 @@ export default function Analyst() {
                   </div>
                   <div className="px-4 py-4 rounded-2xl bg-muted rounded-tl-sm border border-border/50 flex items-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-                    <span className="text-sm text-muted-foreground">Analyzing data...</span>
+                    <span className="text-sm text-muted-foreground">Traversing the graph...</span>
                   </div>
                 </div>
               )}
