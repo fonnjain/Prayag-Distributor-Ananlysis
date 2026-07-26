@@ -57,6 +57,7 @@ const NAV: NavGroup[] = [
       { id: "targets",         label: "Targets",         path: "/targets",         icon: Target },
       { id: "pending",         label: "Pending Orders",  path: "/pending",         icon: ClipboardList },
       { id: "sources",         label: "Data Sources",    path: "/sources",         icon: Database },
+      { id: "warnings",        label: "Warning System",  path: "/warnings",        icon: AlertTriangle },
       { id: "data-health",     label: "Data Health",     path: "/data-health",     icon: ShieldCheck },
     ],
   },

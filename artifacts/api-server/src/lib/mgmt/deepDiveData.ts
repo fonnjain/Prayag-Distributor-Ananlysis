@@ -744,7 +744,9 @@ export async function loadDeepDiveData(
   fy: string,
   selectedStateHead?: string,
   selectedMemberKey?: string,
+  opts: { skipExtras?: boolean } = {},
 ): Promise<DeepDiveDataResult> {
+  const { skipExtras = false } = opts;
   const entry = await loadAllMembers(fy);
 
   if (!entry) {
@@ -842,7 +844,8 @@ export async function loadDeepDiveData(
       : [];
 
   // Phases 5 + 6: run in parallel — both DB-only, no additional Sheets reads.
-  const [skuSpread, winBackResult] = selectedMemberKey
+  // Skip when the caller does not need them (e.g. warnings engine).
+  const [skuSpread, winBackResult] = selectedMemberKey && !skipExtras
     ? await Promise.all([
         computeSkuSpread(selectedMemberKey, fy),
         computeWinBack(selectedMemberKey, currentCustomers),
