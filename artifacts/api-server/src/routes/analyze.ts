@@ -1,7 +1,29 @@
+/**
+ * POST /api/analyze  — Phase A8-B: graph-traversal AI Analyst.
+ *
+ * Replaces the fixed-payload approach with a two-step traversal:
+ *   1. The graph INDEX (shape / gaps / available measures) is sent in every prompt.
+ *   2. Claude calls the `resolve_nodes` tool to fetch specific nodes on demand,
+ *      several rounds if needed.
+ *   3. The final answer cites node paths and lists the traversal.
+ *
+ * GUARDRAILS (none may be relaxed):
+ *   - Use ONLY values present in returned nodes. Never calculate a new figure.
+ *   - Selecting, comparing, ranking, explaining across nodes is allowed. Arithmetic is not.
+ *   - Cite the node path behind every number given.
+ *   - Never compare two nodes whose MEASURE or POPULATION differ without saying so.
+ *   - If answering needs a gap node, say what is missing using the gap reason.
+ *   - Volunteer any flag on a node used in the answer.
+ *   - CROSS_FY_KEY_SPLIT nodes must not be presented as a year-on-year comparison.
+ */
+
 import { Router, type IRouter, type Request, type Response } from "express";
 import { AnalyzeSalesBody, AnalyzeSalesResponse } from "@workspace/api-zod";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
-import { ensureSeeded } from "../lib/dashboard/sync.js";
+import { buildGraphIndex, graphIndexToPromptText } from "../lib/mgmt/graph/graphIndex.js";
+import { resolvePath, resolveWildcard } from "../lib/mgmt/graph/resolvers.js";
+import { MAX_NODES_PER_RESOLVE } from "../lib/mgmt/graph/types.js";
+import type { GraphNode } from "../lib/mgmt/graph/types.js";
 
 const router: IRouter = Router();
 
@@ -12,30 +34,146 @@ function stripEmojis(text: string): string {
   return text.replace(EMOJI_PATTERN, "").replace(/[ \t]+\n/g, "\n").trim();
 }
 
-function buildSystemPrompt(datasetJson: string): string {
-  return `You are the "Prayag India Sales Analyst", an expert data analyst for Prayag India, an Indian manufacturer of retail and resource products.
+// Maximum traversal rounds before we force a final answer.
+const MAX_ROUNDS = 5;
 
-You answer questions strictly using the JSON dataset provided below. Do not invent numbers that are not derivable from the data. If a question cannot be answered from the data, say so plainly and suggest what related insight IS available.
+// ── System prompt ─────────────────────────────────────────────────────────────
 
-Dataset structure notes:
-- fy2425: FY2024-25 sales. grand_total is total annual sales in INR. months + grand_monthly = monthly sales. products[] = per-product annual sales. groups[] = product-group rollups.
-- orders_fy2627: FY2026-27 order pipeline. monthly[] = order value per month. groups[] = per-group order values.
-- by_state[]: sales broken down by Indian state.
-- heads_retail[] / heads_resources[]: sales attributed to sales heads (people) for retail and resources divisions.
-- coverage[] + coverage_totals: geographic/market coverage metrics by state.
-- top_retailers[]: the top 40 retail customers by value.
-- totals: headline totals.
+function buildSystemPrompt(indexText: string): string {
+  return `You are the "Prayag India Sales Analyst", an expert data analyst for Prayag India.
 
-Formatting rules:
-- All monetary values are in Indian Rupees. Format large numbers using the Indian convention: crore (Cr = 10,000,000) and lakh (lakh = 100,000). Example: 3417311917 -> "₹341.73 Cr".
-- Respond in clear, well-structured GitHub-flavored Markdown. Use headings, bullet lists, and Markdown tables where helpful.
-- Be concise and executive in tone. Lead with the answer, then support it with specific numbers.
-- When ranking or comparing, cite the actual figures from the data.
-- STRICT: Never use emojis, pictographs, medal/rank symbols, or any decorative Unicode characters (e.g. no medal symbols, check marks, arrows-as-decoration, stars). Use plain numbers like "1", "2", "3" for ranking. Text and standard punctuation only. This rule is absolute.
+You answer questions by TRAVERSING the metrics graph described below.
+The graph holds every reconciled figure in the application — primary sale, secondary OB, secondary sales received, targets, retailer counts, distributor flows, concentration, visit data, cost ratios.
 
-Dataset (JSON):
-${datasetJson}`;
+GUARDRAILS — these are absolute and none may be relaxed:
+1. USE ONLY values present in nodes returned by the resolve_nodes tool. NEVER calculate a new figure, derive a ratio not present in a node, estimate, or interpolate.
+2. Selecting, comparing, ranking, and explaining across returned nodes is allowed and is the point. Arithmetic on node values is not.
+3. Cite the NODE PATH behind every number given (e.g. "salesperson/Prasun Chatterjee/2026-27").
+4. Never compare two nodes whose MEASURE or POPULATION differ without explicitly stating the difference. Primary and secondary bases will never reconcile — say that rather than reporting a discrepancy.
+5. If answering needs a node that does not exist, say what is missing using the gap node's own reason. Do not answer anyway.
+6. Volunteer any flag on a node used in the answer (e.g. CROSS_FY_KEY_SPLIT, MONTH_ABSENT, FLOW_GAP).
+7. If a node is flagged CROSS_FY_KEY_SPLIT, do not present its year-on-year comparison as fact.
+8. Never use emojis, pictographs, or decorative Unicode. Text and standard punctuation only.
+9. Format all INR values using Indian convention: crore (Cr = 10,000,000) and lakh (lakh = 100,000).
+10. Respond in clear, well-structured Markdown. Lead with the answer, then support with specific numbers.
+
+HOW TO USE THE GRAPH:
+- Call resolve_nodes with a list of paths to fetch those nodes.
+- Wildcards: "head/*/2026-27" returns all heads (hard cap: ${MAX_NODES_PER_RESOLVE} nodes per call).
+- Make as many resolve_nodes calls as needed, but be targeted — fetch only what you need to answer the question.
+- After fetching, include a "## Traversal" section listing all node paths consulted.
+
+${indexText}`;
 }
+
+// ── Tool definition ───────────────────────────────────────────────────────────
+
+const RESOLVE_NODES_TOOL = {
+  name: "resolve_nodes",
+  description:
+    "Fetch one or more graph nodes by path. " +
+    "Returns reconciled figures with population, source, cutoff, and flags. " +
+    "Use paths like: company/2026-27, head/Anant Singh/2026-27, " +
+    "salesperson/Prasun Chatterjee/2026-27, salesperson/Prasun Chatterjee/2026-27/month/Jun, " +
+    "distributor/Jagdamba Traders/2026-27, gap/live-year-sku, head/*/2026-27 (wildcard). " +
+    `Hard cap: ${MAX_NODES_PER_RESOLVE} nodes per call. If truncated, refine your paths.`,
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      paths: {
+        type: "array",
+        items: { type: "string" },
+        description: "List of node paths to resolve.",
+      },
+      fy: {
+        type: "string",
+        description: "Default fiscal year when a path omits it (e.g. '2026-27').",
+      },
+    },
+    required: ["paths"],
+  },
+};
+
+// ── Node resolver for tool calls ──────────────────────────────────────────────
+
+async function runResolveTool(
+  paths: string[],
+  defaultFy: string,
+): Promise<{ nodes: GraphNode[]; errors: { path: string; error: string }[]; truncated: boolean }> {
+  const nodes: GraphNode[] = [];
+  const errors: { path: string; error: string }[] = [];
+  let truncated = false;
+
+  for (const rawPath of paths) {
+    if (nodes.length >= MAX_NODES_PER_RESOLVE) { truncated = true; break; }
+
+    if (rawPath.includes("/*")) {
+      const { nodes: wNodes, errors: wErrors } = await resolveWildcard(rawPath, defaultFy);
+      for (const n of wNodes) {
+        if (nodes.length >= MAX_NODES_PER_RESOLVE) { truncated = true; break; }
+        nodes.push(n);
+      }
+      errors.push(...wErrors);
+    } else {
+      const { node, error } = await resolvePath(rawPath, defaultFy);
+      if (node)  nodes.push(node);
+      if (error) errors.push({ path: rawPath, error });
+    }
+  }
+
+  return { nodes, errors, truncated };
+}
+
+// ── Numeric guard ─────────────────────────────────────────────────────────────
+
+function runNumericGuard(
+  answer: string,
+  nodes: GraphNode[],
+): { status: "clean" | "unmatched"; unmatched: string[] } {
+  const crPatterns = answer.matchAll(/[\d,]+\.?\d*\s*(?:Cr|Lakh|lakh|cr)\b/g);
+  const unmatched: string[] = [];
+
+  for (const match of crPatterns) {
+    const raw = match[0].replace(/[,\s]/g, "");
+    const numStr = raw.replace(/(?:Cr|Lakh|lakh|cr)/i, "");
+    const num = parseFloat(numStr);
+    if (!isFinite(num)) continue;
+
+    const inRupees = raw.toLowerCase().includes("cr") ? num * 1e7 : num * 1e5;
+    // Allow 2% tolerance.
+    const found = nodes.some((n) =>
+      n.measures.some(
+        (m) =>
+          m.value != null &&
+          m.unit === "INR" &&
+          Math.abs(m.value - inRupees) / Math.max(Math.abs(inRupees), 1) < 0.02,
+      ),
+    );
+    if (!found) unmatched.push(match[0]);
+  }
+
+  return unmatched.length === 0
+    ? { status: "clean", unmatched: [] }
+    : { status: "unmatched", unmatched };
+}
+
+// ── Helpers for content block handling (avoids SDK type complexity) ───────────
+
+type AnyBlock = { type: string; [key: string]: unknown };
+
+function blocksText(content: AnyBlock[]): string {
+  return content
+    .filter((b) => b.type === "text")
+    .map((b) => (b["text"] as string) ?? "")
+    .join("\n")
+    .trim();
+}
+
+function toolUseBlocks(content: AnyBlock[]): AnyBlock[] {
+  return content.filter((b) => b.type === "tool_use");
+}
+
+// ── Route ─────────────────────────────────────────────────────────────────────
 
 router.post("/analyze", async (req: Request, res: Response): Promise<void> => {
   const parsed = AnalyzeSalesBody.safeParse(req.body);
@@ -44,26 +182,115 @@ router.post("/analyze", async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
+  const question = parsed.data.question;
+  const defaultFy = ((parsed.data as Record<string, unknown>)["fy"] as string | undefined) ?? "2026-27";
+
   try {
-    const snapshot = await ensureSeeded();
-    const systemPrompt = buildSystemPrompt(JSON.stringify(snapshot.data));
+    // Build graph index (uses cached data — fast).
+    const index     = await buildGraphIndex(defaultFy);
+    const indexText = graphIndexToPromptText(index);
+    const systemPrompt = buildSystemPrompt(indexText);
 
-    const message = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 8192,
-      system: systemPrompt,
-      messages: [{ role: "user", content: parsed.data.question }],
-    });
+    // Use `any[]` for messages to avoid fighting the SDK's own union types.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const messages: any[] = [{ role: "user", content: question }];
+    const allNodes: GraphNode[] = [];
+    let finalAnswer = "";
+    let round = 0;
 
-    const rawAnswer = message.content
-      .map((block) => (block.type === "text" ? block.text : ""))
-      .join("\n")
-      .trim();
+    // Multi-round traversal loop.
+    while (round < MAX_ROUNDS) {
+      round++;
 
-    const answer = stripEmojis(rawAnswer);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const response = await (anthropic.messages.create as any)({
+        model: "claude-sonnet-4-6",
+        max_tokens: 8192,
+        system: systemPrompt,
+        tools: [RESOLVE_NODES_TOOL],
+        messages,
+      });
+
+      const content: AnyBlock[] = Array.isArray(response.content) ? response.content : [];
+      const toolCalls = toolUseBlocks(content);
+
+      if (response.stop_reason === "end_turn" || toolCalls.length === 0) {
+        finalAnswer = blocksText(content);
+        break;
+      }
+
+      // Append assistant turn (full content block array).
+      messages.push({ role: "assistant", content });
+
+      // Resolve all tool calls in this round.
+      const toolResults: unknown[] = [];
+
+      for (const toolCall of toolCalls) {
+        if (toolCall["name"] !== "resolve_nodes") {
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: toolCall["id"],
+            content: JSON.stringify({ error: `Unknown tool: ${String(toolCall["name"])}` }),
+          });
+          continue;
+        }
+
+        const toolInput = (toolCall["input"] as Record<string, unknown>) ?? {};
+        const paths  = (toolInput["paths"] as string[]) ?? [];
+        const callFy = (toolInput["fy"] as string | undefined) ?? defaultFy;
+        const result = await runResolveTool(paths, callFy);
+
+        allNodes.push(...result.nodes);
+
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: toolCall["id"],
+          content: JSON.stringify({
+            nodes: result.nodes,
+            errors: result.errors,
+            truncated: result.truncated,
+            truncationReason: result.truncated
+              ? `Capped at ${MAX_NODES_PER_RESOLVE} nodes. Refine your paths.`
+              : undefined,
+          }),
+        });
+      }
+
+      messages.push({ role: "user", content: toolResults });
+    }
+
+    // If we hit MAX_ROUNDS with no final answer, force one.
+    if (!finalAnswer) {
+      messages.push({
+        role: "user",
+        content:
+          "You have reached the maximum number of traversal rounds. " +
+          "Please give your final answer now using only the nodes already fetched.",
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const finalResp = await (anthropic.messages.create as any)({
+        model: "claude-sonnet-4-6",
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages,
+      });
+
+      const finalContent: AnyBlock[] = Array.isArray(finalResp.content) ? finalResp.content : [];
+      finalAnswer = blocksText(finalContent);
+    }
+
+    // Numeric guard.
+    const guard = runNumericGuard(finalAnswer, allNodes);
+    const guardNote =
+      guard.status === "unmatched" && guard.unmatched.length > 0
+        ? `\n\n> **Numeric guard**: ${guard.unmatched.length} figure(s) could not be verified against a graph node: ${guard.unmatched.join(", ")}. Treat with caution.`
+        : "";
+
+    const cleanAnswer = stripEmojis(finalAnswer + guardNote);
 
     const data = AnalyzeSalesResponse.parse({
-      answer: answer || "I could not generate an answer for that question.",
+      answer: cleanAnswer || "I could not generate an answer for that question.",
     });
     res.json(data);
   } catch (err) {
