@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useAnalyzeSales } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,8 +6,9 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Bot, Send, User, Sparkles, Loader2, AlertCircle, FileDown, ChevronDown, ChevronUp } from "lucide-react";
+import { Bot, Send, User, Sparkles, Loader2, AlertCircle, FileDown, ChevronDown, ChevronUp, Mic, MicOff } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useVoiceInput } from "@/hooks/useVoiceInput";
 
 type Message = {
   role: "user" | "assistant" | "system";
@@ -69,6 +70,11 @@ export default function Analyst() {
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
 
   const analyzeSales = useAnalyzeSales();
+
+  const appendTranscript = useCallback((text: string) => {
+    setInput((prev) => (prev ? `${prev} ${text}` : text));
+  }, []);
+  const voice = useVoiceInput(appendTranscript);
 
   const handleSend = (text: string) => {
     if (!text.trim()) return;
@@ -169,6 +175,17 @@ export default function Analyst() {
                 className="flex-1 bg-background"
                 disabled={analyzeSales.isPending}
               />
+              {voice.state !== "unsupported" && (
+                <Button
+                  type="button"
+                  size="icon"
+                  variant={voice.state === "listening" ? "destructive" : "outline"}
+                  onClick={voice.start}
+                  title={voice.state === "listening" ? "Stop listening" : "Speak your question"}
+                >
+                  {voice.state === "listening" ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                </Button>
+              )}
               <Button type="submit" size="icon" disabled={analyzeSales.isPending || !input.trim()}>
                 <Send className="w-4 h-4" />
                 <span className="sr-only">Send</span>

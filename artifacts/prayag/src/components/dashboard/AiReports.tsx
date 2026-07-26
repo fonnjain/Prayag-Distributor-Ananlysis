@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
@@ -8,8 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, FileDown, Presentation, CheckSquare, Square, ChevronDown, ChevronRight, Download, Loader2 } from "lucide-react";
+import { AlertTriangle, FileDown, Presentation, CheckSquare, Square, ChevronDown, ChevronRight, Download, Loader2, Mic, MicOff } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useVoiceInput } from "@/hooks/useVoiceInput";
 
 // ── Payload type subsets (only fields needed for chart rendering) ──────────────
 
@@ -917,6 +918,29 @@ export default function AiReports() {
 
   const isBatchableType = (BATCHABLE_MEMBER_TYPES as readonly string[]).includes(reportType);
 
+  // ── Salespeople tree (for dropdowns) ────────────────────────────────────────
+  type RepNode = { name: string; children: RepNode[] };
+  const [treeHeads, setTreeHeads]       = useState<RepNode[]>([]);
+
+  useEffect(() => {
+    fetch(`/api/salespeople/tree?fy=${encodeURIComponent(fy)}`)
+      .then((r) => r.ok ? r.json() as Promise<{ heads: RepNode[] }> : Promise.reject())
+      .then((d) => setTreeHeads(d.heads ?? []))
+      .catch(() => setTreeHeads([]));
+  }, [fy]);
+
+  const stateHeadOptions = useMemo(() => treeHeads.map((h) => h.name), [treeHeads]);
+  const memberOptions    = useMemo(() => {
+    const head = treeHeads.find((h) => h.name === stateHead);
+    return head ? head.children.map((c) => c.name) : [];
+  }, [treeHeads, stateHead]);
+
+  // ── Voice input ───────────────────────────────────────────────────────────
+  const appendChatTranscript = useCallback((text: string) => {
+    setChatInput((prev) => (prev ? `${prev} ${text}` : text));
+  }, []);
+  const chatVoice = useVoiceInput(appendChatTranscript);
+
   // ── Chat state ───────────────────────────────────────────────────────────────
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput]       = useState("");
@@ -1150,18 +1174,55 @@ export default function AiReports() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {/* Financial Year */}
             <div className="space-y-1.5">
               <Label htmlFor="ai-fy" className="text-xs">Financial Year</Label>
-              <Input id="ai-fy" value={fy} onChange={(e) => setFy(e.target.value)} placeholder="2026-27" className="h-8 text-sm" />
+              <select
+                id="ai-fy"
+                value={fy}
+                onChange={(e) => { setFy(e.target.value); setStateHead(""); setMember(""); setDistributorName(""); }}
+                className="w-full h-8 px-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                {["2026-27", "2025-26", "2024-25", "2023-24"].map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
             </div>
+
+            {/* State Head */}
             <div className="space-y-1.5">
-              <Label htmlFor="ai-sh" className="text-xs">State Head (exact name)</Label>
-              <Input id="ai-sh" value={stateHead} onChange={(e) => setStateHead(e.target.value)} placeholder="e.g. Anant Singh" className="h-8 text-sm" />
+              <Label htmlFor="ai-sh" className="text-xs">State Head</Label>
+              <select
+                id="ai-sh"
+                value={stateHead}
+                onChange={(e) => { setStateHead(e.target.value); setMember(""); }}
+                className="w-full h-8 px-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                <option value="">— select —</option>
+                {stateHeadOptions.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
             </div>
+
+            {/* Member */}
             <div className="space-y-1.5">
               <Label htmlFor="ai-mb" className="text-xs">Member (member reports)</Label>
-              <Input id="ai-mb" value={member} onChange={(e) => setMember(e.target.value)} placeholder="e.g. Rahul Singh" className="h-8 text-sm" />
+              <select
+                id="ai-mb"
+                value={member}
+                onChange={(e) => setMember(e.target.value)}
+                disabled={!stateHead || memberOptions.length === 0}
+                className="w-full h-8 px-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <option value="">— select —</option>
+                {memberOptions.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
             </div>
+
+            {/* Distributor — free text (no roster API available) */}
             <div className="space-y-1.5">
               <Label htmlFor="ai-dist" className="text-xs">Distributor (distributor reports)</Label>
               <Input id="ai-dist" value={distributorName} onChange={(e) => setDistributorName(e.target.value)} placeholder="e.g. Jagdamba Traders" className="h-8 text-sm" />
@@ -1820,10 +1881,22 @@ export default function AiReports() {
                     void sendChat();
                   }
                 }}
-                placeholder={`Ask about ${member.trim() || stateHead.trim()}…`}
+                placeholder={`Ask about ${member.trim() || stateHead.trim() || "the selected report"}…`}
                 className="flex-1 h-9 px-3 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
                 disabled={isChatting}
               />
+              {chatVoice.state !== "unsupported" && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={chatVoice.state === "listening" ? "destructive" : "outline"}
+                  onClick={chatVoice.start}
+                  title={chatVoice.state === "listening" ? "Stop listening" : "Speak your question"}
+                  className="px-2.5"
+                >
+                  {chatVoice.state === "listening" ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                </Button>
+              )}
               <Button
                 onClick={() => void sendChat()}
                 disabled={!chatInput.trim() || isChatting}
