@@ -87,9 +87,10 @@ export default function Analyst() {
         setMessages(prev => [...prev, { role: "assistant", content: response.answer }]);
       },
       onError: (error) => {
-        setMessages(prev => [...prev, { 
-          role: "system", 
-          content: "Sorry, I encountered an error while analyzing the data. Please try again." 
+        const msg = (error as { message?: string })?.message ?? String(error);
+        setMessages(prev => [...prev, {
+          role: "system",
+          content: `The analyst could not respond: ${msg}. Please try again — the API is usually available within a few seconds.`,
         }]);
       }
     });
