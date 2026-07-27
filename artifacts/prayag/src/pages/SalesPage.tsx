@@ -2,6 +2,7 @@
 // Sidebar is provided by AppShell; this renders the active Sales section.
 import { lazy, Suspense } from "react";
 import { useLocation } from "wouter";
+import GlobalFilterBar from "@/components/GlobalFilterBar";
 import StateHeadDashboard from "@/components/dashboard/StateHeadDashboard";
 import SalesPeople from "@/components/dashboard/SalesPeople";
 import SalesDeepDive from "@/components/dashboard/SalesDeepDive";
@@ -45,10 +46,11 @@ export default function SalesPage() {
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto w-full">
-      <header className="mb-6">
-        <h2 className="font-display text-2xl md:text-3xl font-bold tracking-tight">
+      <header className="mb-5">
+        <h2 className="font-display text-2xl md:text-3xl font-bold tracking-tight mb-3">
           {activeSection.label}
         </h2>
+        <GlobalFilterBar />
       </header>
       {activeSection.lazy ? (
         <Suspense

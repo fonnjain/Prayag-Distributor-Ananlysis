@@ -11,6 +11,7 @@ import DevPortalPage from "@/pages/DevPortalPage";
 import DevApiKeysPage from "@/pages/DevApiKeysPage";
 import NotFound from "@/pages/not-found";
 import { DashboardProvider } from "@/data/dashboard-context";
+import { GlobalFilterProvider } from "@/data/global-filter-context";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -54,9 +55,11 @@ function App() {
       <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
         <TooltipProvider>
           <DashboardProvider>
-            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-              <Router />
-            </WouterRouter>
+            <GlobalFilterProvider>
+              <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+                <Router />
+              </WouterRouter>
+            </GlobalFilterProvider>
           </DashboardProvider>
           <Toaster />
         </TooltipProvider>

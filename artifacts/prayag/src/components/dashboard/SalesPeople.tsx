@@ -4,14 +4,11 @@
 // Achievement = Sales Received ÷ Plan.  Never OB ÷ Plan.
 // Current open month shows "In Progress" — never a bare 0%.
 // Primary-role members are hidden by default (toggle to reveal).
+// FY + month selection driven by the global filter context (GlobalFilterBar).
 import { useState, useEffect, useMemo } from "react";
+import { useGlobalFilter, type FiscalMonthIdx, FISCAL_MONTH_NAMES } from "@/data/global-filter-context";
 
-const FISCAL_MONTHS = [
-  "Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar",
-] as const;
-type FiscalMonthIdx = 0|1|2|3|4|5|6|7|8|9|10|11;
-
-const FY_OPTIONS = ["2026-27","2025-26","2024-25"];
+const FISCAL_MONTHS = FISCAL_MONTH_NAMES;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -86,8 +83,14 @@ function achClass(pct: number | null): string {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function SalesPeople() {
-  const [fy, setFy] = useState("2026-27");
-  const [monthIdx, setMonthIdx] = useState<FiscalMonthIdx>(2); // Jun default
+  // FY + month driven by global filter (GlobalFilterBar handles the UI).
+  const {
+    fy,
+    effectiveMonthIdx: monthIdx,
+    setMonthIdx,
+    setPeriodMode,
+  } = useGlobalFilter();
+
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,24 +99,11 @@ export default function SalesPeople() {
   const [sortKey, setSortKey] = useState<"name"|"stateHead"|"plan"|"ob"|"sales"|"ach">("ach");
   const [sortDir, setSortDir] = useState<"asc"|"desc">("asc");
 
-  // Auto-select the most recent complete month on FY change.
-  useEffect(() => {
-    const fyStart = parseInt(fy.split("-")[0], 10);
-    const { calMonth: nowM, calYear: nowY } = nowCalMonthYear();
-    // Find last complete fiscal month: the one just before the current open month.
-    let best: FiscalMonthIdx = 2; // fallback: Jun
-    for (let i = 0 as FiscalMonthIdx; i < 12; i++) {
-      const fi = i as FiscalMonthIdx;
-      if (!isFutureMonth(fi, fy) && !isCurrentCalMonth(fi, fy)) best = fi;
-    }
-    // If current FY hasn't started yet, default to 0 (Apr)
-    const fyCalStart = { calMonth: 3, calYear: fyStart };
-    if (nowY < fyCalStart.calYear || (nowY === fyCalStart.calYear && nowM < fyCalStart.calMonth)) {
-      best = 0;
-    }
-    setMonthIdx(best);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fy]);
+  // When a month tab is clicked, update the global filter.
+  function selectMonthTab(fi: FiscalMonthIdx) {
+    setMonthIdx(fi);
+    setPeriodMode("month");
+  }
 
   // Fetch member data for the full FY.
   useEffect(() => {
@@ -227,16 +217,6 @@ export default function SalesPeople() {
     <div className="space-y-4">
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-muted-foreground">FY</label>
-          <select
-            value={fy}
-            onChange={(e) => setFy(e.target.value)}
-            className="rounded border bg-background px-2 py-1 text-sm"
-          >
-            {FY_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
-          </select>
-        </div>
         <input
           type="text"
           value={search}
@@ -268,7 +248,7 @@ export default function SalesPeople() {
           return (
             <button
               key={m}
-              onClick={() => setMonthIdx(fi2)}
+              onClick={() => selectMonthTab(fi2)}
               className={[
                 "shrink-0 rounded px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap",
                 active

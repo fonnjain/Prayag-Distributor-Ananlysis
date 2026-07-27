@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { useGlobalFilter } from "@/data/global-filter-context";
 import {
   Download,
   ChevronUp,
@@ -353,36 +354,42 @@ function Td({
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function StateHeadDashboard() {
-  const [fy, setFy] = useState("2026-27");
-  const [period, setPeriod] = useState<Period>(PERIODS[0]);
+  // FY + period driven by the global filter context (GlobalFilterBar handles UI).
+  const { fy, effectivePeriod, setAvailableFys } = useGlobalFilter();
+  // Map global effectivePeriod to the local Period shape used by this component.
+  const period: Period = useMemo(
+    () => ({
+      label: effectivePeriod.label,
+      from: effectivePeriod.from,
+      to: effectivePeriod.to,
+    }),
+    [effectivePeriod],
+  );
+
   const [stateHeadFilter, setStateHeadFilter] = useState("");
   const [search, setSearch] = useState("");
   const [activeView, setActiveView] = useState<View>("data");
   const [lowPerfThreshold, setLowPerfThreshold] = useState(50);
   const [sort, setSort] = useState<SortState>({ key: "achievementPct", dir: "asc" });
 
-  const [fys, setFys] = useState<string[]>(["2026-27", "2025-26", "2024-25"]);
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
 
-  // Load FY options once
+  // Load FY options once — also populate the global filter's available FYs.
   useEffect(() => {
     fetch("/api/mgmt/options")
       .then((r) => r.json())
       .then((d: { fys?: string[] }) => {
-        if (Array.isArray(d.fys) && d.fys.length > 0) setFys(d.fys);
+        if (Array.isArray(d.fys) && d.fys.length > 0) {
+          setAvailableFys(d.fys);
+        }
       })
       .catch(() => {});
-  }, []);
+  }, [setAvailableFys]);
 
-  // Reset period to default when FY changes
-  useEffect(() => {
-    setPeriod(fy === "2026-27" ? PERIODS[0] : PERIODS[4]);
-  }, [fy]);
-
-  // Fetch dashboard data when FY or period changes
+  // Fetch dashboard data when FY or period changes.
   useEffect(() => {
     setLoading(true);
     setError(null);
@@ -620,46 +627,8 @@ export default function StateHeadDashboard() {
 
   return (
     <div className="flex flex-col gap-4 p-4 pb-8">
-      {/* Filter bar */}
+      {/* Filter bar — FY & period driven by GlobalFilterBar in page header */}
       <div className="flex flex-wrap gap-2 items-end">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-muted-foreground font-medium">FY</label>
-          <Select value={fy} onValueChange={setFy}>
-            <SelectTrigger className="h-8 w-28 text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {fys.map((f) => (
-                <SelectItem key={f} value={f}>
-                  {f}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-muted-foreground font-medium">Period</label>
-          <Select
-            value={`${period.from}-${period.to}`}
-            onValueChange={(v) => {
-              const p = PERIODS.find((x) => `${x.from}-${x.to}` === v);
-              if (p) setPeriod(p);
-            }}
-          >
-            <SelectTrigger className="h-8 w-36 text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PERIODS.map((p) => (
-                <SelectItem key={`${p.from}-${p.to}`} value={`${p.from}-${p.to}`}>
-                  {p.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
         <div className="flex flex-col gap-1">
           <label className="text-xs text-muted-foreground font-medium">State Head</label>
           <Select value={stateHeadFilter || "__all__"} onValueChange={(v) => setStateHeadFilter(v === "__all__" ? "" : v)}>
