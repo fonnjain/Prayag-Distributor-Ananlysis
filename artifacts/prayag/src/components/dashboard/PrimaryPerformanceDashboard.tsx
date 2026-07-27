@@ -11,6 +11,7 @@
 // Source: GET /api/mgmt/primary
 // RULE: Never show ₹0.00 for data that exists. Unavailable shows a reason.
 import { useState, useEffect, useMemo } from "react";
+import { useGlobalFilter } from "@/data/global-filter-context";
 import {
   ChevronUp,
   ChevronDown,
@@ -330,8 +331,7 @@ function VelocitySparkline({
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function PrimaryPerformanceDashboard() {
-  const [fy, setFy] = useState<string>("2026-27");
-  const [period, setPeriod] = useState<(typeof PERIODS)[number]>(PERIODS[0]);
+  const { fy, effectivePeriodFrom, effectivePeriodTo } = useGlobalFilter();
   const [view, setView] = useState<View>("head");
   const [data, setData] = useState<ApiResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -367,7 +367,7 @@ export default function PrimaryPerformanceDashboard() {
         setError(err.message);
         setLoading(false);
       });
-  }, [fy, period]);
+  }, [fy]);
 
   // Lazy-fetch state targets only when that view is active
   useEffect(() => {
@@ -455,7 +455,7 @@ export default function PrimaryPerformanceDashboard() {
   const nothingAvailable =
     !loading && data && !data.bookingAvailable && !data.saleAvailable;
 
-  const openInPeriod = openFiscalMonthsInPeriod(fy, 1, 12);
+  const openInPeriod = openFiscalMonthsInPeriod(fy, effectivePeriodFrom, effectivePeriodTo);
 
   return (
     <div className="space-y-5 p-4">
@@ -467,33 +467,7 @@ export default function PrimaryPerformanceDashboard() {
             Prayag to Distributor / Direct Dealer — order booking, dispatch, and pending
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <select
-            value={fy}
-            onChange={(e) => setFy(e.target.value)}
-            className="text-xs border border-border rounded-md px-2 py-1.5 bg-background"
-          >
-            {FYS.map((f) => (
-              <option key={f} value={f}>
-                FY {f}
-              </option>
-            ))}
-          </select>
-          <select
-            value={`${period.from}-${period.to}`}
-            onChange={(e) => {
-              const p = PERIODS.find((p) => `${p.from}-${p.to}` === e.target.value);
-              if (p) setPeriod(p);
-            }}
-            className="text-xs border border-border rounded-md px-2 py-1.5 bg-background"
-          >
-            {PERIODS.map((p) => (
-              <option key={`${p.from}-${p.to}`} value={`${p.from}-${p.to}`}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        <span className="text-xs text-muted-foreground">FY {fy}</span>
       </div>
 
       {openInPeriod.length > 0 && (

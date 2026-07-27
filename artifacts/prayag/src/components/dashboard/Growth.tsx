@@ -19,6 +19,7 @@ import {
 } from "recharts";
 import { TrendingUp, TrendingDown, Users, Loader2, RefreshCw, AlertTriangle } from "lucide-react";
 import { useTheme } from "next-themes";
+import { useGlobalFilter } from "@/data/global-filter-context";
 
 const FY_OPTIONS = ["2026-27", "2025-26"];
 
@@ -56,7 +57,7 @@ function YoyCard({ title, split, subtitle }: { title: string; split: AnalyticsYo
 }
 
 export default function Growth() {
-  const [fy, setFy] = useState(FY_OPTIONS[0]);
+  const { fy } = useGlobalFilter();
   const { theme } = useTheme();
   const isDark = theme === "dark";
   const gridColor = isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)";
@@ -120,18 +121,7 @@ export default function Growth() {
             invoices, {report.customersInPeriod.toLocaleString("en-IN")} customers in the period.
           </p>
         </div>
-        <select
-          value={fy}
-          onChange={(e) => setFy(e.target.value)}
-          className="h-9 rounded-md border border-border/60 bg-background px-2 text-sm"
-          aria-label="Fiscal year"
-        >
-          {FY_OPTIONS.map((option) => (
-            <option key={option} value={option}>
-              FY {option}
-            </option>
-          ))}
-        </select>
+        <span className="text-xs text-muted-foreground">FY {fy}</span>
       </div>
 
       {partialMonths.length > 0 && (

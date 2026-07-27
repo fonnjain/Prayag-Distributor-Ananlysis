@@ -16,6 +16,7 @@
 //   - Never add secondary and primary together.
 import { useState, useEffect, useMemo, Fragment } from "react";
 import { AlertTriangle, ChevronUp, ChevronDown, Info } from "lucide-react";
+import { useGlobalFilter } from "@/data/global-filter-context";
 import { cn } from "@/lib/utils";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -199,23 +200,23 @@ function MemberRowEl({ member }: { member: MemberRow }) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function SecondaryPerformanceDashboard() {
-  const [fy, setFy] = useState<string>("2026-27");
-  const [period, setPeriod] = useState<(typeof PERIODS)[number]>(PERIODS[1]);
+  const { fy, effectivePeriodFrom, effectivePeriodTo } = useGlobalFilter();
   const [data, setData] = useState<ApiData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedHeads, setExpandedHeads] = useState<Set<string>>(new Set());
 
   useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
     setData(null);
     const params = new URLSearchParams({
       fy,
-      monthFrom: String(period.from),
-      monthTo: String(period.to),
+      monthFrom: String(effectivePeriodFrom),
+      monthTo: String(effectivePeriodTo),
     });
-    fetch(`/api/mgmt/data?${params}`)
+    fetch(`/api/mgmt/data?${params}`, { signal: controller.signal })
       .then((r) => {
         if (!r.ok)
           return r.json().then((e: { error?: string }) => {
@@ -228,10 +229,12 @@ export default function SecondaryPerformanceDashboard() {
         setLoading(false);
       })
       .catch((err: Error) => {
+        if (err.name === "AbortError") return;
         setError(err.message);
         setLoading(false);
       });
-  }, [fy, period]);
+    return () => controller.abort();
+  }, [fy, effectivePeriodFrom, effectivePeriodTo]);
 
   // Whether secondary data comes from the authoritative STATE HEAD DASHBOARD.
   const isStateDash = data?.meta.secondarySource === "state_head_dashboard";
@@ -307,35 +310,7 @@ export default function SecondaryPerformanceDashboard() {
             {data?.meta.orderBookingSource ?? "STATE HEAD DASHBOARD — Secondary Order Booking"}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <select
-            value={fy}
-            onChange={(e) => setFy(e.target.value)}
-            className="text-xs border border-border rounded-md px-2 py-1.5 bg-background"
-          >
-            {FYS.map((f) => (
-              <option key={f} value={f}>
-                FY {f}
-              </option>
-            ))}
-          </select>
-          <select
-            value={`${period.from}-${period.to}`}
-            onChange={(e) => {
-              const p = PERIODS.find(
-                (p) => `${p.from}-${p.to}` === e.target.value,
-              );
-              if (p) setPeriod(p);
-            }}
-            className="text-xs border border-border rounded-md px-2 py-1.5 bg-background"
-          >
-            {PERIODS.map((p) => (
-              <option key={`${p.from}-${p.to}`} value={`${p.from}-${p.to}`}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        <span className="text-xs text-muted-foreground">FY {fy}</span>
       </div>
 
       {/* Load states */}

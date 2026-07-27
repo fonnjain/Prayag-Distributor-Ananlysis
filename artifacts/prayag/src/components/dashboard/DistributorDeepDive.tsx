@@ -15,6 +15,7 @@
 //   - Flow gap is an observation, not an accusation (cannot distinguish stock
 //     building from channel leakage from this data).
 import { useState, useEffect, useCallback, Fragment } from "react";
+import { useGlobalFilter } from "@/data/global-filter-context";
 import {
   AlertTriangle,
   ChevronDown,
@@ -1840,7 +1841,7 @@ function CapacityCheckPanel({ check }: { check: CapacityCheck }) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function DistributorDeepDive() {
-  const [fy, setFy]               = useState("2026-27");
+  const { fy }                    = useGlobalFilter();
   const [stateHead, setStateHead] = useState("");
   const [data, setData]           = useState<DistributorDeepDiveResult | null>(null);
   const [loading, setLoading]     = useState(false);
@@ -1868,17 +1869,12 @@ export default function DistributorDeepDive() {
     }
   }, []);
 
-  // Initial load to get state head list.
+  // Reload whenever global FY changes.
   useEffect(() => {
-    load(fy, stateHead);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  function handleFyChange(next: string) {
-    setFy(next);
     setData(null);
     setExpandedDist(null);
-    load(next, stateHead);
-  }
+    load(fy, stateHead);
+  }, [fy]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleStateHeadChange(next: string) {
     setStateHead(next);
@@ -1898,19 +1894,6 @@ export default function DistributorDeepDive() {
     <div className="space-y-6">
       {/* ── Filter bar ─────────────────────────────────────────────── */}
       <div className="flex flex-wrap gap-3 items-center">
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-muted-foreground">FY</label>
-          <select
-            value={fy}
-            onChange={(e) => handleFyChange(e.target.value)}
-            className="border border-border rounded-md px-2.5 py-1.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-          >
-            {FY_OPTIONS.map((f) => (
-              <option key={f} value={f}>{f}</option>
-            ))}
-          </select>
-        </div>
-
         <div className="flex items-center gap-2">
           <label className="text-sm text-muted-foreground">State Head</label>
           <select

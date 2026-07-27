@@ -28,6 +28,7 @@
 // Anomaly rule: per-person per-month, if sales > orders × 1.5 — impossible,
 //   flag but show the recorded value; exclude from rankings.
 import { useState, useEffect, useMemo, Fragment } from "react";
+import { useGlobalFilter } from "@/data/global-filter-context";
 import {
   AlertTriangle,
   Info,
@@ -198,7 +199,7 @@ type HeadGroup = {
 const FYS = ["2026-27", "2025-26", "2024-25"] as const;
 
 export default function CombinedPerformanceDashboard() {
-  const [fy, setFy] = useState("2026-27");
+  const { fy } = useGlobalFilter();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -377,15 +378,7 @@ export default function CombinedPerformanceDashboard() {
             Primary (Prayag to Distributor) and Secondary (salesperson order booking) — shown side by side, never summed
           </p>
         </div>
-        <select
-          value={fy}
-          onChange={(e) => setFy(e.target.value)}
-          className="text-xs border border-border rounded-md px-2 py-1.5 bg-background"
-        >
-          {FYS.map((f) => (
-            <option key={f} value={f}>FY {f}</option>
-          ))}
-        </select>
+        <span className="text-xs text-muted-foreground">FY {fy}</span>
       </div>
 
       {/* Model explanation */}

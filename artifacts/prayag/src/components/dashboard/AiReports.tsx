@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, FileDown, Presentation, CheckSquare, Square, ChevronDown, ChevronRight, Download, Loader2, Mic, MicOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
+import { useGlobalFilter } from "@/data/global-filter-context";
 
 // ── Payload type subsets (only fields needed for chart rendering) ──────────────
 
@@ -898,7 +899,7 @@ const DISTRIBUTOR_REPORT_TYPES: { id: DistributorArtifactType; label: string; re
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function AiReports() {
-  const [fy, setFy]                     = useState("2026-27");
+  const { fy }                          = useGlobalFilter();
   const [stateHead, setStateHead]       = useState("");
   const [member, setMember]             = useState("");
   const [distributorName, setDistributorName] = useState("");
@@ -1174,19 +1175,12 @@ export default function AiReports() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {/* Financial Year */}
+            {/* Financial Year — set via the global filter bar */}
             <div className="space-y-1.5">
-              <Label htmlFor="ai-fy" className="text-xs">Financial Year</Label>
-              <select
-                id="ai-fy"
-                value={fy}
-                onChange={(e) => { setFy(e.target.value); setStateHead(""); setMember(""); setDistributorName(""); }}
-                className="w-full h-8 px-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                {["2026-27", "2025-26", "2024-25", "2023-24"].map((y) => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
-              </select>
+              <Label className="text-xs">Financial Year</Label>
+              <div className="h-8 px-2 text-sm rounded-md border border-input bg-muted/40 flex items-center text-muted-foreground">
+                FY {fy}
+              </div>
             </div>
 
             {/* State Head */}

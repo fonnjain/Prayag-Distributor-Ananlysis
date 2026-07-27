@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { SalesPersonReport } from "./SalesPersonReport";
+import { useGlobalFilter } from "@/data/global-filter-context";
 
 const BASE = import.meta.env.BASE_URL ?? "/";
 const API = `${BASE}api`.replace(/\/\//g, "/");
@@ -1932,7 +1933,7 @@ function DateFilterBar({
 const AVAILABLE_FYS = ["2026-27", "2025-26", "2024-25", "2023-24"];
 
 export default function SalesDeepDive() {
-  const [fy, setFy] = useState("2026-27");
+  const { fy } = useGlobalFilter();
   const [selectedHead, setSelectedHead] = useState("");
   const [selectedMemberKey, setSelectedMemberKey] = useState("");
   const [dateFilter, setDateFilter] = useState<DateFilter>(DATE_FILTER_INIT);
@@ -1984,17 +1985,13 @@ export default function SalesDeepDive() {
     [],
   );
 
+  // Reload selectors whenever the global FY changes (or on first mount).
   useEffect(() => {
-    fetchSelectors(fy, "");
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  function handleFyChange(newFy: string) {
-    setFy(newFy);
     setSelectedHead("");
     setSelectedMemberKey("");
     setDateFilter(DATE_FILTER_INIT);
-    fetchSelectors(newFy, "");
-  }
+    fetchSelectors(fy, "");
+  }, [fy, fetchSelectors]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleHeadChange(newHead: string) {
     setSelectedHead(newHead);
@@ -2029,21 +2026,6 @@ export default function SalesDeepDive() {
 
       {/* Selectors */}
       <div className="flex flex-wrap gap-3 items-end">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Fiscal Year
-          </label>
-          <select
-            className="h-9 rounded-md border border-border bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-            value={fy}
-            onChange={(e) => handleFyChange(e.target.value)}
-          >
-            {AVAILABLE_FYS.map((f) => (
-              <option key={f} value={f}>FY {f}</option>
-            ))}
-          </select>
-        </div>
-
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
             State Head
