@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from "react";
-import { useGlobalFilter } from "@/data/global-filter-context";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -398,7 +397,7 @@ const DEFAULT_FY = "2026-27";
 const DEFAULT_HEAD = "Anant Singh";
 
 export default function WarningSystem() {
-  const { fy } = useGlobalFilter();
+  const fy = DEFAULT_FY; // Warnings are always for the current FY only
   const [stateHead, setStateHead] = useState(DEFAULT_HEAD);
   const [data, setData] = useState<WarningsResponse | null>(null);
   const [loading, setLoading] = useState(false);
