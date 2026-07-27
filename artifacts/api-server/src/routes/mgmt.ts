@@ -338,19 +338,44 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
       buildPrimaryTargetMapFromStateTargets(fy).catch((): Map<string, number[]> => new Map()),
     ]);
     const { rows, ordersAvailable, targetsAvailable, rosterSource, orderStatus, nameMatches, xlsxTargetDiagnostic } = assembled;
-    // Build a normKey → SecMember lookup for the member-row merge below.
-    const secByKey = new Map<string, SecMember>();
+    // Build a joinKey → SecMember[] multi-map.
+    // When a joinKey is unique the lookup is O(1).  When two SHD members share
+    // the same joinKey (same normName), co-existence in the same SOBR tab for
+    // the same period proves they are distinct people — disambiguate using the
+    // state head rather than falling back to an arbitrary first-entry-wins rule.
+    const secByKeyMulti = new Map<string, SecMember[]>();
     if (secDash) {
       for (const sm of secDash.members) {
-        // Roster members use normName-based keys.  joinKey = normName(sm.name)
-        // so the lookup at r.m.normKey (roster key) resolves correctly even when
-        // the secondary sheet spells a name with a parenthetical disambiguator
-        // (e.g. "Ravi (Faridabad)") that the roster omits.
-        // First-entry wins: if two secondary members share the same joinKey the
-        // first one is preserved (the second is tracked separately in the DB via
-        // normKey but the roster can only reference one person per normName key).
-        if (!secByKey.has(sm.joinKey)) secByKey.set(sm.joinKey, sm);
+        const bucket = secByKeyMulti.get(sm.joinKey);
+        if (bucket) {
+          bucket.push(sm);
+        } else {
+          secByKeyMulti.set(sm.joinKey, [sm]);
+        }
       }
+    }
+
+    // Normalise a state head name for comparison: lowercase alpha only.
+    const normSh = (s: string): string => s.toLowerCase().replace(/[^a-z]/g, "");
+
+    // State-head-aware SHD member lookup.
+    // • Unique key  → return the only candidate.
+    // • Collision   → prefer the candidate whose stateHead matches the roster
+    //                 row's stateHead; fall back to the first candidate when no
+    //                 match is found (preserves previous behaviour for unknown cases).
+    const secLookup = (normKey: string, rosterStateHead: string): SecMember | undefined => {
+      const candidates = secByKeyMulti.get(normKey);
+      if (!candidates) return undefined;
+      if (candidates.length === 1) return candidates[0];
+      const rsh = normSh(rosterStateHead);
+      return candidates.find((c) => normSh(c.stateHead) === rsh) ?? candidates[0];
+    };
+
+    // Flat first-entry map — kept for the meta aggregate loop which iterates
+    // secDash.members directly and does not use the per-row join path.
+    const secByKey = new Map<string, SecMember>();
+    for (const [key, bucket] of secByKeyMulti) {
+      secByKey.set(key, bucket[0]);
     }
 
     // ── Primary sale (dispatched invoices, Taxable Value by STATE HEAD) ──────────
@@ -428,7 +453,7 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         ? dbMonthly12.reduce((s, v) => s + v, 0)
         : null;
       const booking = r.orders?.amount ?? null;
-      const sec = secByKey.get(r.m.normKey);
+      const sec = secLookup(r.m.normKey, r.m.stateHead);
       // PS1 period resolver: compute period-specific figures from sec.months rather
       // than using the pre-baked ytd* aggregates which always reflect full closed-YTD.
       const sp = sec ? secPeriod(sec, monthFrom, monthTo) : null;
