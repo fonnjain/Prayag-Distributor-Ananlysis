@@ -348,11 +348,41 @@ router.post("/org/seed", async (req, res) => {
     const created: string[] = [];
     const skipped: string[] = [];
 
+    // Load existing aliases once so we can do an idempotent alias upsert for
+    // both new and already-existing heads.
+    const existingAliasRows = await db
+      .select({ headId: orgHeadAliases.headId, alias: orgHeadAliases.alias })
+      .from(orgHeadAliases);
+    const existingAliasKeys = new Set(
+      existingAliasRows.map((r) => `${r.headId}|${r.alias.toLowerCase()}`),
+    );
+
+    let aliasesAdded = 0;
+
     for (const s of SEED_HEADS) {
       if (existingIds.has(s.id)) {
         skipped.push(s.displayName);
+        // Still check for missing aliases on existing heads.
+        for (const a of s.aliases ?? []) {
+          const key = `${s.id}|${a.alias.toLowerCase()}`;
+          if (!existingAliasKeys.has(key)) {
+            await db.insert(orgHeadAliases).values({
+              headId: s.id,
+              alias: a.alias,
+              fySeen: a.fySeen,
+            });
+            await appendAudit(s.id, "alias_added", {
+              alias: a.alias,
+              fySeen: a.fySeen,
+              source: "seed-backfill",
+            });
+            existingAliasKeys.add(key);
+            aliasesAdded++;
+          }
+        }
         continue;
       }
+
       await db.insert(orgStateHeads).values({
         id: s.id,
         displayName: s.displayName,
@@ -368,6 +398,7 @@ router.post("/org/seed", async (req, res) => {
         await db.insert(orgHeadAliases).values(
           s.aliases.map((a) => ({ headId: s.id, alias: a.alias, fySeen: a.fySeen })),
         );
+        aliasesAdded += s.aliases.length;
       }
 
       await appendAudit(s.id, "seeded", {
@@ -402,7 +433,7 @@ router.post("/org/seed", async (req, res) => {
       flagsCreated++;
     }
 
-    res.json({ created, skipped, flagsCreated });
+    res.json({ created, skipped, flagsCreated, aliasesAdded });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

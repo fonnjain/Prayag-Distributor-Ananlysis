@@ -2,6 +2,24 @@
 // All names, aliases, member counts, and flags are CONFIRMED BY THE BUSINESS.
 // Source: STATE HEAD DASHBOARD 2026-27 (1E1jEY_yO8LmpqBDpcesS_fu2SBPEQ0eKO5xN29XyTEM),
 // tab 'Data', header row 3.
+//
+// ── IDENTITY RULE (from Prayag_Identity_Rule_and_Sandeep_REVISED.docx) ──────
+// Two records are the SAME person only if ALL of these hold:
+//   1. Names match after normalisation, OR confirmed business alias
+//   2. Same State Head, OR documented transfer with effective date
+//   3. Same state, OR documented territory move with effective date
+//   4. Compatible headquarter
+//
+// ANY ONE of the following DISPROVES a match — no override:
+//   • Co-existence: they appear as separate rows in the same tab for the same
+//     period (nobody is their own colleague — this alone settled Ashutosh Kumar)
+//   • Different State Head in the same fiscal year
+//   • Different state in the same fiscal year
+//   • Different headquarter in the same fiscal year
+//
+// Similarity may only SUGGEST a match and always requires human confirmation.
+// Geography DISPROVES outright. Never auto-merge on name similarity.
+// ────────────────────────────────────────────────────────────────────────────
 
 export type SeedHead = {
   id: string;
@@ -36,7 +54,9 @@ export const SEED_HEADS: SeedHead[] = [
     displayName: "Syed Aqil Rizvi",
     status: "active",
     memberCount: 32,
-    aliases: [],
+    // 'AQIL RIZVI' is used in the Secondary Order Booking Report tab (tab-specific,
+    // not FY-specific). Confirmed same person; short form only appears in that tab.
+    aliases: [{ alias: "AQIL RIZVI", fySeen: null }],
   },
   {
     id: "lalan-kumar",
@@ -57,7 +77,13 @@ export const SEED_HEADS: SeedHead[] = [
     displayName: "Biju C.O",
     status: "active",
     memberCount: 12,
-    aliases: [{ alias: "BIJU C.O", fySeen: null }],
+    // Secondary Order Booking Report carries BOTH 'BIJU C.O' (16 rows) and
+    // 'Biju CO' (1 row) in the same tab. Co-existence test does not fire because
+    // they share the same State Head row — safe to alias. Both confirmed.
+    aliases: [
+      { alias: "BIJU C.O", fySeen: null },
+      { alias: "Biju CO", fySeen: null },
+    ],
   },
   {
     id: "pawan-sharma",
