@@ -29,3 +29,4 @@ export * from "./secondaryRegister";
 export * from "./orderLines";
 export * from "./deepDiveSnapshot";
 export * from "./distributorTierOverride";
+export * from "./orgStateHeads";

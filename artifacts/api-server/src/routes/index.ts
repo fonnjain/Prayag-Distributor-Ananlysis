@@ -30,6 +30,7 @@ import aiBatchRouter from "./aiBatch";
 import aiChatRouter from "./aiChat";
 import graphRouter from "./graph";
 import warningsRouter from "./warnings";
+import orgRouter from "./org";
 
 const router: IRouter = Router();
 
@@ -64,5 +65,6 @@ router.use(aiBatchRouter);
 router.use(aiChatRouter);
 router.use(graphRouter);
 router.use(warningsRouter);
+router.use(orgRouter);
 
 export default router;
