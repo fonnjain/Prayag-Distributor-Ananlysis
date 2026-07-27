@@ -221,6 +221,39 @@ function tgtPeriod(
   return any ? sum : null;
 }
 
+// secPeriod: slices sec.months[mFrom-1..mTo-1] to produce period-specific
+// figures from the STATE HEAD DASHBOARD, respecting notYetRecorded (open /
+// arrears months are excluded so achievement is never distorted by partial data).
+//
+// This is the PS1 period resolver — every sec.ytd* reference in the member
+// assembly now calls this instead, so Q1/Q2/Q3/Q4/Full/individual-month filters
+// all return accurate OB/Sales/Plan/Achievement for the requested period.
+//
+// Return semantics mirror ytdSalesReceived / ytdPlan:
+//   null plan   → no recorded data in the period (truly no plan/actuals)
+//   0 sales     → plan exists but nothing booked/received yet
+function secPeriod(
+  sec: SecMember,
+  mFrom: number, // 1-based fiscal month (1 = Apr)
+  mTo: number,   // 1-based fiscal month (12 = Mar)
+): { plan: number | null; ob: number | null; sales: number | null; achievement: number | null } {
+  let plan = 0, ob = 0, sales = 0, hasData = false;
+  for (let i = mFrom - 1; i <= mTo - 1; i++) {
+    const md = sec.months[i];
+    if (!md || md.notYetRecorded) continue; // open or V4-arrears month — skip
+    if (md.planAmount != null) { plan += md.planAmount; hasData = true; }
+    if (md.orderedAmount != null) ob += md.orderedAmount;
+    if (md.salesAmount != null) sales += md.salesAmount;
+  }
+  if (!hasData) return { plan: null, ob: null, sales: null, achievement: null };
+  return {
+    plan,
+    ob,
+    sales: sales > 0 ? sales : 0,
+    achievement: plan > 0 ? sales / plan : null,
+  };
+}
+
 function serialDate(n: number | null): string | null {
   if (n == null || n <= 0) return null;
   return new Date((n - 25569) * 86400000).toLocaleDateString("en-IN", {
@@ -380,10 +413,13 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         : null;
       const booking = r.orders?.amount ?? null;
       const sec = secByKey.get(r.m.normKey);
+      // PS1 period resolver: compute period-specific figures from sec.months rather
+      // than using the pre-baked ytd* aggregates which always reflect full closed-YTD.
+      const sp = sec ? secPeriod(sec, monthFrom, monthTo) : null;
       // Achievement = Sales Received / Plan (STATE HEAD DASHBOARD — authoritative).
       // Falls back to Order Booked / Target Master for years without state dashboard.
       const achPct =
-        sec?.ytdAchievement ??
+        sp?.achievement ??
         (booking != null && tgtSec != null && tgtSec > 0 ? booking / tgtSec : null);
       const sfa = hrSfa.get(r.m.normKey);
       const primStats = primaryAttrib?.perMember.get(r.m.normKey);
@@ -405,10 +441,10 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         // These are the raw annual targets before seasonal splitting; null when unset.
         targetPrimaryAnnual: dbAnnualPrimary ?? r.target?.annual.primary ?? null,
         targetBusinessPlanAnnual: r.target?.annual.businessPlan ?? null,
-        // Secondary order booking: STATE HEAD DASHBOARD (authoritative) > old order file
-        orderBooking: sec?.ytdOrderBooked ?? booking,
-        // Secondary sales received: populated from STATE HEAD DASHBOARD
-        saleAmount: sec?.ytdSalesReceived ?? null,
+        // Secondary order booking: STATE HEAD DASHBOARD period figure (authoritative) > old order file
+        orderBooking: sp?.ob ?? booking,
+        // Secondary sales received: period-specific from STATE HEAD DASHBOARD
+        saleAmount: sp?.sales ?? null,
         priorOrderBooking: r.priorAmount,
         totalRetailers: r.orders?.totalRetailers ?? null,
         oldRetailers: r.orders?.oldRetailers ?? null,
@@ -417,7 +453,7 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         directDealerCount: r.orders?.directDealerCount ?? null,
         orderCount: r.orders?.orderCount ?? null,
         achievementPct: achPct,
-        band: achBand(achPct, sec?.ytdPlan != null || tgtSec != null),
+        band: achBand(achPct, sp?.plan != null || tgtSec != null),
         visitedParties: sfa?.visitedParties ?? null,
         workingDays: sfa?.workingDays ?? null,
         ctcMonthly: sec?.salary ?? sfa?.ctcMonthly ?? null,
@@ -428,11 +464,11 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         primarySaleAmount: primStats?.saleAmount ?? null,
         primaryDistributors: distMap?.distributorCountByMember.get(r.m.normKey) ?? null,
         primaryDirectDealers: distMap?.directDealerCountByMember.get(r.m.normKey) ?? null,
-        // STATE HEAD DASHBOARD secondary fields (authoritative for FY26-27, FY25-26)
-        secondaryPlan: sec?.ytdPlan ?? null,
-        secondaryOrderBooked: sec?.ytdOrderBooked ?? null,
-        secondarySalesReceived: sec?.ytdSalesReceived ?? null,
-        secondaryAchievement: sec?.ytdAchievement ?? null,
+        // STATE HEAD DASHBOARD secondary fields — period-specific via PS1 resolver.
+        secondaryPlan: sp?.plan ?? null,
+        secondaryOrderBooked: sp?.ob ?? null,
+        secondarySalesReceived: sp?.sales ?? null,
+        secondaryAchievement: sp?.achievement ?? null,
         secondaryBusinessPlan: sec?.businessPlan ?? null,
         salary: sec?.salary ?? null,
         totalDealers: sec?.totalDealers ?? null,
@@ -461,6 +497,28 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
     const pendingOrdersTotal =
       obTotal > 0 && saleTotal > 0 ? obTotal - saleTotal : null;
 
+    // PS1: period-specific company-level secondary totals for the meta block.
+    // Sums secPeriod() across all members so the headline KPI tiles reflect
+    // exactly the same [monthFrom, monthTo] window as the per-member rows.
+    let _ptPlan = 0, _ptOB = 0, _ptSales = 0, _ptHasData = false;
+    if (secDash) {
+      for (const sm of secDash.members) {
+        const smp = secPeriod(sm, monthFrom, monthTo);
+        if (smp.plan != null) { _ptPlan += smp.plan; _ptHasData = true; }
+        _ptOB    += smp.ob    ?? 0;
+        _ptSales += smp.sales ?? 0;
+      }
+    }
+    const periodSecTotal = secDash ? {
+      plan: _ptHasData ? _ptPlan : secDash.totalPlan,
+      orderBooked: _ptOB,
+      salesReceived: _ptSales,
+      ytdAchievement: _ptHasData && _ptPlan > 0 ? _ptSales / _ptPlan : null,
+      totalDealers: secDash.totalDealers,
+      arrearsMonths: secDash.arrearsMonths ?? [],
+      sheetTotals: secDash.sheetTotals ?? null,
+    } : null;
+
     const responsePayload: MgmtDataPayload = {
       rows: members,
       meta: {
@@ -487,18 +545,7 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         // Secondary data: STATE HEAD DASHBOARD (authoritative for FY26-27 + FY25-26)
         secondarySource: secDash ? "state_head_dashboard" : null,
         ...(secDash ? {
-          secondaryTotal: {
-            plan: secDash.totalPlan,
-            orderBooked: secDash.totalOrderBooked,
-            salesReceived: secDash.totalSalesReceived,
-            ytdAchievement: secDash.ytdAchievement,
-            totalDealers: secDash.totalDealers,
-            // Month indices (0=Apr) where V4 arrears guard fired — closed but not recorded.
-            arrearsMonths: secDash.arrearsMonths ?? [],
-            // Sheet's own TOTAL row — for reconciliation display in Data Health.
-            // Null when the TOTAL row was not found in the sheet.
-            sheetTotals: secDash.sheetTotals ?? null,
-          },
+          secondaryTotal: periodSecTotal,
           anomalies: secDash.anomalies,
           secondaryCoveragePct: saleTotal > 0 && secDash.totalSalesReceived > 0
             ? secDash.totalSalesReceived / saleTotal
