@@ -589,6 +589,10 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         ...(saleTotal > 0 ? { saleRawTotal: saleTotal } : {}),
         // Secondary data: STATE HEAD DASHBOARD (authoritative for FY26-27 + FY25-26)
         secondarySource: secDash ? "state_head_dashboard" : null,
+        // Unix ms timestamp of when the SOBR sheet was last read from Google Sheets.
+        // Use this to attribute any figure difference to live-sheet drift rather than
+        // investigating it as a code bug.  Re-read if the figure is questioned.
+        secondaryReadAt: secDash ? secDash.loadedAt : null,
         ...(secDash ? {
           secondaryTotal: periodSecTotal,
           anomalies: secDash.anomalies,

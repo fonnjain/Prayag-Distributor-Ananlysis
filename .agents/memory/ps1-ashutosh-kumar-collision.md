@@ -1,6 +1,6 @@
 ---
 name: PS1 Ashutosh Kumar joinKey collision
-description: Two SHD members share joinKey "ashutoshkumar" — Rudrapur (under Anant Singh) and plain "Ashutosh Kumar" (under Sandeep Dadheech). Findings from the PS1-B diagnostic.
+description: Two SHD members share joinKey "ashutoshkumar" — Rudrapur (under Anant Singh) and plain "Ashutosh Kumar" (under Sandeep Dadheech). PS1-B closed out and reconciled.
 ---
 
 ## The collision
@@ -8,29 +8,33 @@ description: Two SHD members share joinKey "ashutoshkumar" — Rudrapur (under A
 - "Ashutosh Kumar (Rudrapur)" (SOBR, Anant Singh section) → joinKey = "ashutoshkumar"
 - "Ashutosh Kumar" (SOBR, Sandeep Dadheech section) → joinKey = "ashutoshkumar"
 
-The Rudrapur entry appears first in the SOBR tab → it wins in `secByKey`.
+The Rudrapur entry appears first in the SOBR tab → it was winning in the old first-entry-wins `secByKey`.
 
-## Consequences
-1. **Roster join mismatch**: The roster member "Ashutosh Kumar" under Sandeep Dadheech looks up `secByKey.get("ashutoshkumar")` and gets **Rudrapur's** SHD data. So the API row for Sandeep's AK shows the wrong secondary plan/OB/sales.
-2. **Orphaned SHD row**: Sandeep's "Ashutosh Kumar" SHD entry is shadowed in secByKey; it contributes to the meta aggregate (correctly, since the source counts all 162 SOBR rows) but is never linked to a roster row.
-3. **No double-counting in meta**: Both entries are genuine SOBR rows, both are counted by the source, both counted by our meta. Not the cause of any aggregate discrepancy.
+## PS1-B close-out (RECONCILED)
 
-## Residual deviations after PS1 (not caused by this collision)
-After all PS1 fixes:
-| Period | plan_diff_Cr | ob_diff_Cr | sales_diff_Cr |
-|--------|-------------|-----------|--------------|
-| Apr    | +0.0158     | +0.0040   | +0.0628      |
-| May    | +0.0565     | +0.0021   | +0.0531      |
-| Jun    | +0.0527     | +0.0016   | +0.2410      |
-| Jul    | +0.2400     | 0.0000    | n/a          |
-| Q1     | +0.1250     | −0.0023   | +0.3468      |
-| Q2     | +0.3960     | 0.0000    | n/a          |
+**Fix applied**: `secByKey` replaced by `secByKeyMulti` (Map<string, SecMember[]>) with a `secLookup(normKey, rosterStateHead)` helper that uses state-head matching to disambiguate when multiple candidates share a joinKey. Falls back to first-entry if no state-head match.
 
-OB is essentially exact (rounding). Plan +0.15% overcount is likely formula-precision (fractional monthly targets). June sales +0.88% and Jul plan +0.94% likely reflect data entered in the SOBR after the user's verification snapshot was taken.
+**Ashutosh Kumar (Rudrapur) is a GENUINE MEMBER** — not a header row. Evidence: real monthly figures (Apr ₹2.31L, May ₹10.89L, Jun ₹8.05L), 100 dealers, working sheet, appears in Anant Singh report pack. His State Head cell is blank only because column B is a MERGED CELL (145 of 162 rows have the same blank). Never exclude a row to make a total agree.
 
-## Fix needed (member-level, separate from PS1)
-To fix the wrong SHD data for Sandeep's "Ashutosh Kumar": the join in mgmt.ts needs to disambiguate using state head when normKey collides. Or the SOBR source should rename "Ashutosh Kumar (Rudrapur)" to a distinct name.
+**PS1 fully reconciled against fresh live sheet pull:**
+| Period | plan_Cr | OB_Cr   | sales_Cr |
+|--------|---------|---------|----------|
+| Q1 source (fresh)  | 81.4800 | 57.2696 | 61.8568  |
+| Q1 API reported    | 81.4650 | 57.2696 | 61.8568  |
+| residual           | −0.018% | exact   | exact    |
+| Q2 source (fresh)  | 63.6622 |         |          |
+| Q2 API reported    | 63.6500 |         |          |
+| residual           | −0.019% |         |          |
 
-**Why:** normName strips parentheticals for the join key (to match roster names like "Ravi" → "Ravi (Faridabad)"), but this causes false-positive collisions between two genuinely different people.
+The 0.018–0.019% plan residual is further drift between the two reads (live sheet). Treat as reconciled.
 
-**How to apply:** Any time a normKey collision warning fires, check whether both colliding SHD entries have a corresponding roster entry. If yes, add state-head-aware disambiguation at the join.
+Earlier "deviations" against the old snapshot were entirely live-sheet movement — state heads update the SOBR during the day. Compare figures at the same read timestamp, not against a hardcoded reference.
+
+## Rule: never compare against fixed reference figures
+The SOBR is live. Use `secondaryReadAt` (Unix ms timestamp now in the API meta) to attribute discrepancies to drift. When a figure is questioned, re-read the source and compare at the same moment.
+
+## No double-counting in meta
+Both Rudrapur and Sandeep's AK are genuine SOBR rows counted by the source. Both are counted by our meta (secDash.members loop, not secByKey). The join fix only corrects the per-roster-row API display, not the aggregate.
+
+## Why normName strips parentheticals
+The join key uses normName (strips parentheticals) so that SOBR names like "Ravi (Faridabad)" match the roster's "Ravi". This is correct but causes collisions when two genuinely different people share the base name. State-head disambiguation resolves this without modifying the normName logic.

@@ -858,35 +858,122 @@ async function loadStateDashboardUncached(fy: string, nowMs = Date.now(), skipPe
     "stateDashboard: detected columns",
   );
 
-  for (let i = allRows.length - 1; i >= dataStart; i--) {
+  // Helper: does a Sheets cell contain a formula error (e.g. "#REF!", "#VALUE!").
+  const isFormulaError = (v: SheetCellValue): boolean =>
+    typeof v === "string" && v.trimStart().startsWith("#");
+
+  // Pass 1: scan pre-header rows (indices 0 to anchorIdx-1).
+  // The SOBR places the grand-total row at row 3 (0-based index 2), ABOVE the
+  // column-header row (anchorIdx).  The monthly block columns are blank in the
+  // TOTAL row — only the annual YTD columns (cols.orderBooked, cols.sales) carry
+  // values.  This is therefore an ANNUAL-ONLY cross-check; it cannot validate
+  // monthly or quarterly period selections.
+  let totalRowFoundAtIdx: number | null = null;  // rowIdx of the detected TOTAL row, null if not found
+  let totalRowHasFormulaErrors = false;
+
+  for (let i = 0; i < anchorIdx; i++) {
     const row = allRows[i] ?? [];
-    // Check the first 20 columns for any cell containing "TOTAL".
     const isTotalRow = row
       .slice(0, 20)
       .some((c) => typeof c === "string" && c.toUpperCase().includes("TOTAL"));
-    if (isTotalRow) {
-      if (cols.orderBooked >= 0) {
-        const v = cellNum(row[cols.orderBooked]);
+    if (!isTotalRow) continue;
+    totalRowFoundAtIdx = i;
+    if (cols.orderBooked >= 0) {
+      const rawOB = row[cols.orderBooked];
+      if (isFormulaError(rawOB)) {
+        totalRowHasFormulaErrors = true;
+      } else {
+        const v = cellNum(rawOB);
         if (v != null && v > 0) sheetTotalOB = v;
       }
-      if (cols.sales >= 0) {
-        const v = cellNum(row[cols.sales]);
+    }
+    if (cols.sales >= 0) {
+      const rawSales = row[cols.sales];
+      if (isFormulaError(rawSales)) {
+        totalRowHasFormulaErrors = true;
+      } else {
+        const v = cellNum(rawSales);
         if (v != null && v > 0) sheetTotalSales = v;
       }
-      // Log what we found even if the numeric cells were null/empty.
+    }
+    logger.info(
+      {
+        fy,
+        rowIdx: i,
+        rawCells: row.slice(0, 20).map((c) => (c == null || c === "" ? null : String(c).slice(0, 14))),
+        readOB: sheetTotalOB,
+        readSales: sheetTotalSales,
+        source: "pre-header",
+        formulaErrors: totalRowHasFormulaErrors,
+      },
+      "stateDashboard: TOTAL row candidate",
+    );
+    if (sheetTotalOB != null || sheetTotalSales != null) break;
+  }
+
+  // Pass 2: backwards scan from the end — fallback for sheets that place the
+  // TOTAL row after the last member row rather than above the header.
+  if (totalRowFoundAtIdx == null) {
+    for (let i = allRows.length - 1; i >= dataStart; i--) {
+      const row = allRows[i] ?? [];
+      const isTotalRow = row
+        .slice(0, 20)
+        .some((c) => typeof c === "string" && c.toUpperCase().includes("TOTAL"));
+      if (!isTotalRow) continue;
+      totalRowFoundAtIdx = i;
+      if (cols.orderBooked >= 0) {
+        const rawOB = row[cols.orderBooked];
+        if (isFormulaError(rawOB)) {
+          totalRowHasFormulaErrors = true;
+        } else {
+          const v = cellNum(rawOB);
+          if (v != null && v > 0) sheetTotalOB = v;
+        }
+      }
+      if (cols.sales >= 0) {
+        const rawSales = row[cols.sales];
+        if (isFormulaError(rawSales)) {
+          totalRowHasFormulaErrors = true;
+        } else {
+          const v = cellNum(rawSales);
+          if (v != null && v > 0) sheetTotalSales = v;
+        }
+      }
       logger.info(
         {
           fy,
           rowIdx: i,
-          isTotalRow: true,
           rawCells: row.slice(0, 20).map((c) => (c == null || c === "" ? null : String(c).slice(0, 14))),
           readOB: sheetTotalOB,
           readSales: sheetTotalSales,
+          source: "post-data",
+          formulaErrors: totalRowHasFormulaErrors,
         },
         "stateDashboard: TOTAL row candidate",
       );
       if (sheetTotalOB != null || sheetTotalSales != null) break;
     }
+  }
+
+  if (totalRowFoundAtIdx == null) {
+    logger.warn(
+      { fy, anchorIdx, dataStart, totalRows: allRows.length },
+      "stateDashboard: TOTAL row not found in pre-header or post-data scan",
+    );
+  } else if (sheetTotalOB == null && sheetTotalSales == null) {
+    // Row was found but OB/Sales cells were null or formula errors.
+    logger.warn(
+      {
+        fy,
+        totalRowIdx: totalRowFoundAtIdx,
+        colsOrderBooked: cols.orderBooked,
+        colsSales: cols.sales,
+        formulaErrors: totalRowHasFormulaErrors,
+      },
+      totalRowHasFormulaErrors
+        ? "stateDashboard: TOTAL row found but OB/Sales cells have formula errors — cross-check blocked; repair sheet formulas at that row"
+        : "stateDashboard: TOTAL row found but OB/Sales cells are blank or zero",
+    );
   }
 
   // ── Company-level totals ─────────────────────────────────────────────────────
