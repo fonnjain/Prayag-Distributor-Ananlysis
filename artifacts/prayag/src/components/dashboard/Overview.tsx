@@ -4,6 +4,8 @@ import {
   useGetAnalytics,
   getGetAnalyticsQueryKey,
 } from "@workspace/api-client-react";
+
+type GroupStat = { group: string; amount: number; sharePct: number };
 import { KPICard, CustomTooltip, CustomLegend } from "./shared";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
@@ -51,10 +53,12 @@ export default function Overview() {
   const gridColor = isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)";
   const tickColor = isDark ? "#98999C" : "#71717a";
 
-  const pieData = data.fy2425.groups.map(g => ({
+  // FY26-27 product-group mix from sale_line.group_canon via analytics endpoint.
+  const fy2627Groups: GroupStat[] = fy2627Query.data?.groups ?? [];
+  const pieData: { name: string; value: number }[] = fy2627Groups.map((g) => ({
     name: g.group,
-    value: g.annual
-  })).sort((a, b) => b.value - a.value);
+    value: g.amount,
+  }));
 
   // Secondary retail reach: registered retailers not covered by any secondary
   // team member — minimum figure, true gap is higher because 11,338 is not deduplicated.
@@ -171,7 +175,7 @@ export default function Overview() {
 
         <Card>
           <CardHeader className="px-5 pt-5 pb-2 flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base font-semibold">FY24-25 Product Mix</CardTitle>
+            <CardTitle className="text-base font-semibold">FY26-27 Product Mix</CardTitle>
             <CSVLink 
               data={pieData} 
               filename="product-mix.csv" 

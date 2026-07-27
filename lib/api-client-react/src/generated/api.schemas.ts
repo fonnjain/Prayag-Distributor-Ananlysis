@@ -818,6 +818,12 @@ export const AnalyticsReportSource = {
   register: 'register',
 } as const;
 
+export interface AnalyticsGroupStat {
+  group: string;
+  amount: number;
+  sharePct: number;
+}
+
 export interface AnalyticsReport {
   fy: string;
   compareFy: string;
@@ -832,6 +838,8 @@ export interface AnalyticsReport {
   compareByHead: AnalyticsHeadStat[];
   retention: AnalyticsRetention;
   margins: AnalyticsMargins;
+  /** Product-group breakdown by revenue for the requested FY. Always from sale_line.group_canon. */
+  groups: AnalyticsGroupStat[];
   /** Which data source produced this report. */
   source: AnalyticsReportSource;
 }

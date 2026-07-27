@@ -139,6 +139,34 @@ export type HeadStat = {
   isTerritory: boolean;
 };
 
+export type GroupStat = {
+  group: string;
+  amount: number;
+  sharePct: number;
+};
+
+// Product-group breakdown by revenue. Always sourced from sale_line.groupCanon
+// regardless of whether SAP is the primary source — group classification lives
+// in the register and is present in both FY26-27 SAP-verified and non-verified paths.
+async function groupStats(fy: string): Promise<GroupStat[]> {
+  const rows = await db
+    .select({
+      group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
+      amount: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8`,
+    })
+    .from(saleLines)
+    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")))
+    .groupBy(sql`1`);
+  const total = rows.reduce((s, r) => s + r.amount, 0);
+  return rows
+    .map((r) => ({
+      group: r.group,
+      amount: Math.round(r.amount),
+      sharePct: total === 0 ? 0 : Math.round((r.amount / total) * 1000) / 10,
+    }))
+    .sort((a, b) => b.amount - a.amount);
+}
+
 async function headStats(fy: string): Promise<HeadStat[]> {
   const rows = await db
     .select({
@@ -431,6 +459,7 @@ export type AnalyticsReport = {
   compareByHead: HeadStat[];
   retention: Retention;
   margins: Margins;
+  groups: GroupStat[];
 };
 
 export function priorFy(fy: string): string {
@@ -453,13 +482,14 @@ export async function buildAnalytics(
     : saleLineSource(fy);
   const compareSource = saleLineSource(compareFy);
 
-  const [months, compareMonths, byHead, compareByHead, marginData] =
+  const [months, compareMonths, byHead, compareByHead, marginData, groups] =
     await Promise.all([
       currentSource.monthlyStats(),
       compareSource.monthlyStats(),
       currentSource.headStats(),
       compareSource.headStats(),
       currentSource.margins(),
+      groupStats(fy),
     ]);
 
   // Comparable months: complete in the current FY AND complete in the prior
@@ -545,5 +575,6 @@ export async function buildAnalytics(
       lostPriorRevenue: Math.round(lostPriorRevenue),
     },
     margins: marginData,
+    groups,
   };
 }
