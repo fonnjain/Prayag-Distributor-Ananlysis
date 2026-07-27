@@ -369,6 +369,7 @@ export default function StateHeadDashboard() {
   );
 
   const [stateHeadFilter, setStateHeadFilter] = useState("");
+  const [employeeFilter, setEmployeeFilter] = useState("");
   const [search, setSearch] = useState("");
   const [activeView, setActiveView] = useState<View>("data");
   const [lowPerfThreshold, setLowPerfThreshold] = useState(50);
@@ -392,15 +393,17 @@ export default function StateHeadDashboard() {
   }, [setAvailableFys]);
 
   // Fetch dashboard data when FY or period changes.
+  // Uses an AbortController so that rapid filter changes cancel in-flight requests.
   useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
     const params = new URLSearchParams({
       fy,
-      monthFrom: String(period.from),
-      monthTo: String(period.to),
+      monthFrom: String(effectivePeriodFrom),
+      monthTo: String(effectivePeriodTo),
     });
-    fetch(`/api/mgmt/data?${params}`)
+    fetch(`/api/mgmt/data?${params}`, { signal: controller.signal })
       .then((r) => {
         if (!r.ok) return r.json().then((e: { error?: string }) => { throw new Error(e.error ?? r.statusText); });
         return r.json();
@@ -412,10 +415,12 @@ export default function StateHeadDashboard() {
         setSearch("");
       })
       .catch((e: Error) => {
+        if (e.name === "AbortError") return; // stale request — ignore
         setError(e.message);
         setLoading(false);
       });
-  // Use primitive dep values so React's Object.is comparison is reliable.
+    return () => controller.abort();
+  // Primitive deps — stable comparison via Object.is.
   }, [fy, effectivePeriodFrom, effectivePeriodTo]);
 
   function toggleSort(key: string) {
@@ -459,6 +464,11 @@ export default function StateHeadDashboard() {
     }
   }
 
+  // Clear employee selection whenever the state head changes.
+  useEffect(() => {
+    setEmployeeFilter("");
+  }, [stateHeadFilter]);
+
   // Derived data
   const allHeads = useMemo(
     () =>
@@ -468,16 +478,26 @@ export default function StateHeadDashboard() {
     [data],
   );
 
+  /** Members belonging to the currently selected state head — drives the Employee dropdown. */
+  const membersForHead = useMemo(() => {
+    if (!data || !stateHeadFilter) return [];
+    return data.rows
+      .filter((r) => r.stateHead === stateHeadFilter)
+      .map((r) => ({ normKey: r.normKey, name: r.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [data, stateHeadFilter]);
+
   const filteredRows = useMemo(() => {
     if (!data) return [];
     const q = search.trim().toLowerCase();
     return data.rows.filter((r) => {
       if (stateHeadFilter && r.stateHead !== stateHeadFilter) return false;
+      if (employeeFilter && r.normKey !== employeeFilter) return false;
       if (q && !r.name.toLowerCase().includes(q) && !r.stateHead.toLowerCase().includes(q))
         return false;
       return true;
     });
-  }, [data, stateHeadFilter, search]);
+  }, [data, stateHeadFilter, employeeFilter, search]);
 
   const lowPerfRows = useMemo(
     () => filteredRows.filter((r) => isLowPerf(r.band, lowPerfThreshold)),
@@ -648,6 +668,29 @@ export default function StateHeadDashboard() {
             </SelectContent>
           </Select>
         </div>
+
+        {/* Employee dropdown — only visible when a specific head is selected */}
+        {stateHeadFilter && membersForHead.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-muted-foreground font-medium">Employee</label>
+            <Select
+              value={employeeFilter || "__all__"}
+              onValueChange={(v) => setEmployeeFilter(v === "__all__" ? "" : v)}
+            >
+              <SelectTrigger className="h-8 w-52 text-sm">
+                <SelectValue placeholder="All employees" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All employees</SelectItem>
+                {membersForHead.map((m) => (
+                  <SelectItem key={m.normKey} value={m.normKey}>
+                    {m.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
         {(activeView === "lowPerf") && (
           <div className="flex flex-col gap-1">
