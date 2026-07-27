@@ -442,7 +442,8 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         monthlyAchievement: sec?.months.map((m) => m.achievement) ?? null,
         monthlyNotYetRecorded: sec?.months.map((m) => m.notYetRecorded) ?? null,
         isPrimaryRole: sec?.isPrimaryRole ?? false,
-        isLeft: sec?.isLeft ?? false,
+        // isLeft: stateDashboard section detection is primary; roster BA column is the fallback.
+        isLeft: (sec?.isLeft ?? false) || r.m.activeLeft?.toUpperCase().trim() === "LEFT",
         hasSecondaryAnomaly: sec?.months.some((m) => m.isAnomaly) ?? false,
       };
     });

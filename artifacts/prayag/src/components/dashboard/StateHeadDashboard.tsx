@@ -982,15 +982,17 @@ export default function StateHeadDashboard() {
               {viewRows().map((r) => (
                 <tr
                   key={r.normKey}
-                  className={`hover:bg-muted/30 transition-colors ${
-                    r.activeLeft !== "Active" ? "opacity-60" : ""
-                  }`}
+                  className={`hover:bg-muted/30 transition-colors ${r.isLeft ? "opacity-60" : ""}`}
                 >
                   <Td className="font-medium">
-                    {r.name}
-                    {r.activeLeft !== "Active" && (
-                      <span className="ml-1 text-[10px] text-muted-foreground font-normal">(left)</span>
-                    )}
+                    <span className="flex items-center gap-1.5 flex-wrap">
+                      {r.name}
+                      {r.isLeft && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700 border border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800">
+                          Left
+                        </span>
+                      )}
+                    </span>
                   </Td>
                   <Td className="text-muted-foreground">{r.stateHead}</Td>
                   <Td>{r.state}</Td>

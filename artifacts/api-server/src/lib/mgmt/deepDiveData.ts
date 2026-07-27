@@ -93,7 +93,9 @@ export type MemberKpis = {
   primaryTargetMonthly: number | null;   // BK: primary (direct dealer) monthly target
   secondaryTargetMonthly: number | null; // Derived: monthlyTarget - primaryTargetMonthly
   totalTargetToDate: number | null;      // BM: total target to date
-  elapsedMonths: number | null;          // Derived: round(totalTargetToDate / monthlyTarget)
+  elapsedMonths: number | null;          // BD when available (authoritative), else derived from BM÷BE
+  elapsedMonthsFromSheet: number | null; // BD: read directly from the sheet; null when column absent
+  isLeft: boolean;                       // BA "Active/ Left" column: true when member has left the team
   // Performance (YTD from Data tab — NET = Sub Total)
   orderBooking: number | null;           // Retailer/party secondary OB (NET)
   directDealersOrder: number | null;     // Direct dealer OB — kept separate
@@ -180,6 +182,9 @@ type ColMap = {
   lastYearQ2: number;            // BP: Prior year Q2 actual
   lastYearQ3: number;            // BQ: Prior year Q3 actual
   lastYearQ4: number;            // BR: Prior year Q4 actual
+  // BA/BD: member status and authoritative elapsed months
+  activeLeftBd: number;          // BA: "Active/ Left" status column
+  elapsedMonthsBd: number;       // BD (= BA+3): elapsed months — headed with a month name but holds a pro-rata NUMBER
   // All header → column index (for extra fields)
   allHeaders: Map<string, number>;
   rawHeaders: string[];
@@ -220,7 +225,7 @@ function detectCols(headerRow: SheetCellValue[]): ColMap | null {
   const allHeaders = new Map<string, number>();
   for (const [k, v] of Object.entries(idx)) allHeaders.set(k, v);
 
-  return {
+  const colMap: ColMap = {
     stateHead,
     teamMember,
     hq:                 find("HQ", "HEADQUARTER", "HEADQUARTERS", "STATION"),
@@ -317,6 +322,15 @@ function detectCols(headerRow: SheetCellValue[]): ColMap | null {
     allHeaders,
     rawHeaders,
   };
+
+  // BA: "Active/ Left" — detectable by header.
+  // BD: headed with a month name ("Jun") but holds a pro-rata NUMBER (3.00 full tenure,
+  // fractional for partial tenure). Locate positionally as BA+3 because the header is
+  // ambiguous. Must be computed before the return so it is included in the literal.
+  const detectedActiveLeft = find("ACTIVELEFT", "ACTIVEORLEFT", "LEFTACTIVE", "ACTIVE/LEFT", "ACTIVESTATUS");
+  colMap.activeLeftBd = detectedActiveLeft;
+  colMap.elapsedMonthsBd = detectedActiveLeft >= 0 ? detectedActiveLeft + 3 : -1;
+  return colMap;
 }
 
 // ── Tab finder ────────────────────────────────────────────────────────────────
@@ -526,6 +540,8 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
     // Phase 7
     cols.primaryTargetMonthly, cols.totalTargetToDate, cols.workingDaysAg,
     cols.lastYearQ1, cols.lastYearQ2, cols.lastYearQ3, cols.lastYearQ4,
+    // BA/BD
+    cols.activeLeftBd, cols.elapsedMonthsBd,
   ].filter((n) => n >= 0));
 
   for (let i = dataStart; i < allRows.length; i++) {
@@ -584,38 +600,52 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
         ? monthlyTarget - primaryTargetMonthly
         : null;
 
-    // Derived elapsed months: BM / BE — never rely on a sheet column whose header
-    // changes each month (per spec). Round to nearest integer.
-    const elapsedMonths =
+    // BA: member status — "Active" or "LEFT".
+    const isLeft = cols.activeLeftBd >= 0
+      ? cellStr(row[cols.activeLeftBd]).toUpperCase().includes("LEFT")
+      : false;
+
+    // BD: elapsed months written in the sheet (headed with a month name but holds a
+    // pro-rata NUMBER: 3.00 for full tenure, fractional for partial tenure e.g. 0.47).
+    // This is the authoritative value — the targets are already built on it.
+    const elapsedMonthsFromSheet =
+      cols.elapsedMonthsBd >= 0 ? cellNum(row[cols.elapsedMonthsBd]) : null;
+
+    // Derived elapsed months: BM / BE — kept for self-check and as fallback when BD absent.
+    const elapsedMonthsDerived =
       totalTargetToDate !== null && monthlyTarget !== null && monthlyTarget > 0
         ? Math.round(totalTargetToDate / monthlyTarget)
         : null;
 
-    // Self-check identity constraints and log any mismatches (>100 Rs tolerance).
-    if (elapsedMonths !== null && elapsedMonths > 0) {
+    // Authoritative elapsed months: BD (sheet) first, then derived.
+    const elapsedMonths = elapsedMonthsFromSheet ?? elapsedMonthsDerived;
+
+    // Self-check identity constraints using the derived (integer) value so the
+    // check remains valid regardless of what BD holds (BD may be fractional).
+    if (elapsedMonthsDerived !== null && elapsedMonthsDerived > 0) {
       if (totalTargetToDate !== null && monthlyTarget !== null) {
-        const expectBm = monthlyTarget * elapsedMonths;
+        const expectBm = monthlyTarget * elapsedMonthsDerived;
         if (Math.abs(totalTargetToDate - expectBm) > 100) {
           logger.warn(
-            { name: rawName, expectBm, totalTargetToDate, elapsedMonths },
+            { name: rawName, expectBm, totalTargetToDate, elapsedMonthsDerived },
             "deepDiveData: identity check BE×elapsed≠BM",
           );
         }
       }
       if (primaryTarget !== null && primaryTargetMonthly !== null) {
-        const expectG = primaryTargetMonthly * elapsedMonths;
+        const expectG = primaryTargetMonthly * elapsedMonthsDerived;
         if (Math.abs(primaryTarget - expectG) > 100) {
           logger.warn(
-            { name: rawName, expectG, primaryTarget, elapsedMonths },
+            { name: rawName, expectG, primaryTarget, elapsedMonthsDerived },
             "deepDiveData: identity check BK×elapsed≠G",
           );
         }
       }
       if (secondaryTarget !== null && secondaryTargetMonthly !== null) {
-        const expectH = secondaryTargetMonthly * elapsedMonths;
+        const expectH = secondaryTargetMonthly * elapsedMonthsDerived;
         if (Math.abs(secondaryTarget - expectH) > 100) {
           logger.warn(
-            { name: rawName, expectH, secondaryTarget, elapsedMonths },
+            { name: rawName, expectH, secondaryTarget, elapsedMonthsDerived },
             "deepDiveData: identity check (BE-BK)×elapsed≠H",
           );
         }
@@ -658,6 +688,8 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
       secondaryTargetMonthly,
       totalTargetToDate,
       elapsedMonths,
+      elapsedMonthsFromSheet,
+      isLeft,
       orderBooking,
       directDealersOrder,
       sale,

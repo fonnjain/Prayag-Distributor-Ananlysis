@@ -296,6 +296,10 @@ router.post("/ai/travel-plan", async (req: Request, res: Response): Promise<void
   try {
     const data = await loadDeepDiveData(fy, stateHead, memberKey);
     if (!data.kpis) { res.status(404).json({ error: `Member '${memberRaw}' not found.` }); return; }
+    if (data.kpis.isLeft) {
+      res.status(400).json({ error: `${data.kpis.name} is marked LEFT — visit plans cannot be generated for members who have left the team.` });
+      return;
+    }
 
     const payload = buildMemberPayload(fy, stateHead ?? data.kpis.stateHead ?? null, period, data.kpis, data.retailerDetail, data.roiCost, data.skuSpread);
 

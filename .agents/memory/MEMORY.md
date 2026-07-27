@@ -47,3 +47,4 @@
 - [Phase A4 visit plan + deck architecture](phase-a4-deck-visitplan.md) — pool splice fix, unassigned exclusion, poolExhausted, 27-slide A4A format, memberSummary from MemberKpis.
 - [Phase A8 metrics graph architecture](a8-graph-architecture.md) — graph routes + graph-traversal Analyst; field name corrections; acceptance anchors verified; A8-C not yet built.
 - [Warning System W1 architecture](warning-system-w1.md) — GET /api/warnings route; cold-start ~9s (Sheets loads), warm cache ~21ms; skipExtras=true skips winBack+skuSpread.
+- [detectCols return-then-mutate trap](detectcols-return-trap.md) — esbuild never reports TS errors; dead code after `return {...}` silently runs (it doesn't). Use `const colMap = {...}` then mutate then `return colMap`.

@@ -96,6 +96,8 @@ export default function SalesPeople() {
   const [error, setError] = useState<string | null>(null);
   const [showPrimary, setShowPrimary] = useState(false);
   const [search, setSearch] = useState("");
+  const [selectedHead, setSelectedHead] = useState<string>("All");
+  const [selectedMember, setSelectedMember] = useState<string>("All");
   const [sortKey, setSortKey] = useState<"name"|"stateHead"|"plan"|"ob"|"sales"|"ach">("ach");
   const [sortDir, setSortDir] = useState<"asc"|"desc">("asc");
 
@@ -124,14 +126,34 @@ export default function SalesPeople() {
   const currentMonth = isCurrentCalMonth(monthIdx, fy);
   const futureMonth = isFutureMonth(monthIdx, fy);
 
+  // Sorted list of all distinct state heads for the dropdown.
+  const stateHeads = useMemo(
+    () => ["All", ...Array.from(new Set(members.map((m) => m.stateHead).filter(Boolean))).sort()],
+    [members],
+  );
+
+  // Members available in the member dropdown — filtered to the selected state head.
+  const memberOptions = useMemo(() => {
+    const base = selectedHead === "All" ? members : members.filter((m) => m.stateHead === selectedHead);
+    const sorted = [...base].sort((a, b) => a.name.localeCompare(b.name));
+    return ["All", ...sorted.map((m) => m.name)];
+  }, [members, selectedHead]);
+
+  // Reset member selection whenever state head changes.
+  useEffect(() => {
+    setSelectedMember("All");
+  }, [selectedHead]);
+
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return members.filter((m) => {
       if (!showPrimary && m.isPrimaryRole) return false;
+      if (selectedHead !== "All" && m.stateHead !== selectedHead) return false;
+      if (selectedMember !== "All" && m.name !== selectedMember) return false;
       if (q && !m.name.toLowerCase().includes(q) && !m.stateHead.toLowerCase().includes(q) && !m.state.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [members, showPrimary, search]);
+  }, [members, showPrimary, search, selectedHead, selectedMember]);
 
   const sortedRows = useMemo(() => {
     return [...filteredRows].sort((a, b) => {
@@ -216,15 +238,39 @@ export default function SalesPeople() {
   return (
     <div className="space-y-4">
       {/* Controls */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {/* State Head dropdown */}
+        <select
+          value={selectedHead}
+          onChange={(e) => setSelectedHead(e.target.value)}
+          className="rounded border bg-background px-2 py-1 text-sm min-w-[140px] max-w-[200px] cursor-pointer"
+        >
+          {stateHeads.map((h) => (
+            <option key={h} value={h}>{h === "All" ? "All State Heads" : h}</option>
+          ))}
+        </select>
+
+        {/* Sales Person dropdown — cascades from State Head */}
+        <select
+          value={selectedMember}
+          onChange={(e) => setSelectedMember(e.target.value)}
+          className="rounded border bg-background px-2 py-1 text-sm min-w-[140px] max-w-[200px] cursor-pointer"
+        >
+          {memberOptions.map((n) => (
+            <option key={n} value={n}>{n === "All" ? "All Members" : n}</option>
+          ))}
+        </select>
+
+        {/* Free-text search */}
         <input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search name / head / state..."
-          className="rounded border bg-background px-2 py-1 text-sm flex-1 min-w-[160px] max-w-[280px]"
+          placeholder="Search name / state..."
+          className="rounded border bg-background px-2 py-1 text-sm flex-1 min-w-[140px] max-w-[220px]"
         />
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none whitespace-nowrap">
           <input
             type="checkbox"
             checked={showPrimary}
@@ -233,7 +279,7 @@ export default function SalesPeople() {
           />
           Show primary-role members
         </label>
-        <span className="text-xs text-muted-foreground ml-auto">
+        <span className="text-xs text-muted-foreground ml-auto whitespace-nowrap">
           {sortedRows.length} members
         </span>
       </div>
@@ -315,7 +361,9 @@ export default function SalesPeople() {
                   ].join(" ")}>
                     <td className="px-3 py-2">
                       <span className="font-medium">{r.name}</span>
-                      {r.isLeft && <span className="ml-1.5 text-[10px] text-muted-foreground">(left)</span>}
+                      {r.isLeft && (
+                        <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700 border border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800">Left</span>
+                      )}
                       {r.isPrimaryRole && <span className="ml-1.5 text-[10px] text-muted-foreground">(primary)</span>}
                       <span className="block text-xs text-muted-foreground md:hidden">{r.stateHead}</span>
                     </td>

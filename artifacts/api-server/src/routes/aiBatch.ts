@@ -282,20 +282,26 @@ router.post("/ai/batch", async (req: Request, res: Response): Promise<void> => {
       data: memberDataList[i],
     }));
 
-    // Step 3: announce the full member list so the frontend can render queued rows immediately
+    // Step 3: exclude LEFT members from batch generation.
+    // They must stay in historical figures but must never receive a forward report.
+    const activeMembers = members.filter((m) => !m.data.kpis?.isLeft);
+    const leftMembersExcluded = members.length - activeMembers.length;
+
+    // Announce only active members so the frontend renders only those as queued rows.
     send({
       type: "batch_start",
       fy,
       stateHead,
       reportType: batchType,
-      total: members.length,
-      memberNames: members.map((m) => m.name),
+      total: activeMembers.length,
+      memberNames: activeMembers.map((m) => m.name),
+      ...(leftMembersExcluded > 0 ? { leftMembersExcluded } : {}),
     });
 
     let cached = 0, generated = 0, failed = 0;
 
-    // Step 4: process members one at a time (sequential — one Claude call at a time)
-    for (const m of members) {
+    // Step 4: process active members one at a time (sequential — one Claude call at a time)
+    for (const m of activeMembers) {
       send({ type: "member_start", member: m.name });
 
       try {
