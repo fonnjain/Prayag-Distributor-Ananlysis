@@ -238,35 +238,6 @@ export default function SalesPeople() {
         </span>
       </div>
 
-      {/* Month tabs */}
-      <div className="flex overflow-x-auto gap-1 pb-1">
-        {(FISCAL_MONTHS as unknown as string[]).map((m, fi) => {
-          const fi2 = fi as FiscalMonthIdx;
-          const open = isCurrentCalMonth(fi2, fy);
-          const future = isFutureMonth(fi2, fy);
-          const active = fi2 === monthIdx;
-          return (
-            <button
-              key={m}
-              onClick={() => selectMonthTab(fi2)}
-              className={[
-                "shrink-0 rounded px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap",
-                active
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : future
-                  ? "text-muted-foreground/50 hover:bg-muted"
-                  : open
-                  ? "border border-amber-400 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/20"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
-              ].join(" ")}
-            >
-              {m}
-              {open && !active && <span className="ml-1 text-[10px] opacity-70">open</span>}
-            </button>
-          );
-        })}
-      </div>
-
       {/* In-progress banner */}
       {currentMonth && (
         <div className="rounded border border-amber-300 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">

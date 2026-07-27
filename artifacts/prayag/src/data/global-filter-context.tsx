@@ -4,7 +4,15 @@ import { createContext, useContext, useState, useEffect, useMemo, type ReactNode
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type PeriodMode = "ytd" | "month" | "last7" | "today";
+export type PeriodMode =
+  | "ytd"
+  | "month"
+  | "q1" | "q2" | "q3" | "q4"
+  | "full"
+  | "last7"
+  | "today"
+  | "custom";
+
 /** 0 = Apr, 1 = May, … 11 = Mar */
 export type FiscalMonthIdx = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
 
@@ -13,91 +21,109 @@ export const FISCAL_MONTH_NAMES = [
   "Oct", "Nov", "Dec", "Jan", "Feb", "Mar",
 ] as const;
 
+/** Quarter ranges in 0-based fiscal indices [fromIdx, toIdx] */
+export const QUARTER_RANGES: Record<"q1"|"q2"|"q3"|"q4", [FiscalMonthIdx, FiscalMonthIdx]> = {
+  q1: [0, 2],
+  q2: [3, 5],
+  q3: [6, 8],
+  q4: [9, 11],
+};
+
 const DEFAULT_FY = "2026-27";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Calendar month → fiscal index (0=Apr … 11=Mar) for a given FY start year. */
+/** Calendar month → fiscal index (0=Apr … 11=Mar). */
 function calMonthToFiscalIdx(calMonth: number /* 0=Jan */): FiscalMonthIdx {
   return ((calMonth - 3 + 12) % 12) as FiscalMonthIdx;
 }
 
-/** Return the fiscal index of the currently in-progress calendar month. */
-export function currentFiscalMonthIdx(fy: string): FiscalMonthIdx {
-  const now = new Date();
-  return calMonthToFiscalIdx(now.getMonth());
+/** Fiscal index of the currently in-progress calendar month. */
+export function currentFiscalMonthIdx(_fy: string): FiscalMonthIdx {
+  return calMonthToFiscalIdx(new Date().getMonth());
 }
 
-/** Return the fiscal index of the last *completed* calendar month for the given FY.
- *  For the first month of the FY before it starts, returns 0. */
+/** Fiscal index of the last *completed* calendar month for the given FY. */
 export function lastCompleteFiscalMonthIdx(fy: string): FiscalMonthIdx {
   const now = new Date();
   const fyStart = parseInt(fy.split("-")[0], 10);
   if (isNaN(fyStart)) return 2;
 
-  // Previous calendar month
   const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const prevCalYear = prevDate.getFullYear();
-  const prevCalMonth = prevDate.getMonth(); // 0=Jan
+  const prevCalMonth = prevDate.getMonth();
 
-  // Is prev month within this FY?
-  const fyStartCalYear = fyStart;
-  const fyEndCalYear = fyStart + 1;
   const inFy =
-    (prevCalYear === fyStartCalYear && prevCalMonth >= 3) ||
-    (prevCalYear === fyEndCalYear && prevCalMonth <= 2);
+    (prevCalYear === fyStart && prevCalMonth >= 3) ||
+    (prevCalYear === fyStart + 1 && prevCalMonth <= 2);
 
   if (!inFy) return 0;
   return calMonthToFiscalIdx(prevCalMonth);
 }
 
-/** True if the given fiscal index is still in the future for the given FY. */
+/** True if the fiscal index is still in the future for the given FY. */
 export function isFutureFiscalMonth(idx: FiscalMonthIdx, fy: string): boolean {
-  const now = new Date();
-  const fyStart = parseInt(fy.split("-")[0], 10);
-  if (isNaN(fyStart)) return false;
-  // Calendar month+year for this fiscal index
-  const calMonth = (idx + 3) % 12; // 0=Jan
-  const calYear = idx <= 8 ? fyStart : fyStart + 1;
-  const startMs = Date.UTC(calYear, calMonth, 1);
-  return Date.now() < startMs;
-}
-
-/** True if the given fiscal index is the current in-progress month. */
-export function isOpenFiscalMonth(idx: FiscalMonthIdx, fy: string): boolean {
-  const now = new Date();
   const fyStart = parseInt(fy.split("-")[0], 10);
   if (isNaN(fyStart)) return false;
   const calMonth = (idx + 3) % 12;
   const calYear = idx <= 8 ? fyStart : fyStart + 1;
+  return Date.now() < Date.UTC(calYear, calMonth, 1);
+}
+
+/** True if the fiscal index is the current in-progress month. */
+export function isOpenFiscalMonth(idx: FiscalMonthIdx, fy: string): boolean {
+  const fyStart = parseInt(fy.split("-")[0], 10);
+  if (isNaN(fyStart)) return false;
+  const calMonth = (idx + 3) % 12;
+  const calYear = idx <= 8 ? fyStart : fyStart + 1;
+  const now = new Date();
   return now.getFullYear() === calYear && now.getMonth() === calMonth;
 }
 
+/** Last complete month clamped to a [fromIdx, toIdx] range (0-based). */
+function clampToRange(fromIdx: number, toIdx: number, lastComplete: FiscalMonthIdx): FiscalMonthIdx {
+  if (lastComplete < fromIdx) return fromIdx as FiscalMonthIdx;
+  if (lastComplete > toIdx) return toIdx as FiscalMonthIdx;
+  return lastComplete;
+}
+
 // ── Context ───────────────────────────────────────────────────────────────────
+
+export interface EffectivePeriod {
+  /** 1-based fiscal month (from). */
+  from: number;
+  /** 1-based fiscal month (to). */
+  to: number;
+  label: string;
+}
 
 export interface GlobalFilterContextValue {
   fy: string;
   setFy: (fy: string) => void;
   periodMode: PeriodMode;
   setPeriodMode: (mode: PeriodMode) => void;
-  /** Active fiscal month index (0=Apr…11=Mar). Used when periodMode === "month". */
+  /** Active single fiscal month index (0=Apr…11=Mar). Used by "month" mode. */
   monthIdx: FiscalMonthIdx;
   setMonthIdx: (idx: FiscalMonthIdx) => void;
-  /** All known FYs — populated by whichever component first fetches /api/mgmt/options. */
+  /** Custom range — start index. Used by "custom" mode. */
+  rangeFrom: FiscalMonthIdx;
+  setRangeFrom: (idx: FiscalMonthIdx) => void;
+  /** Custom range — end index. Used by "custom" mode. */
+  rangeTo: FiscalMonthIdx;
+  setRangeTo: (idx: FiscalMonthIdx) => void;
+  /** All known FYs — populated when any component fetches /api/mgmt/options. */
   availableFys: string[];
   setAvailableFys: (fys: string[]) => void;
   /** Derived: last complete fiscal month index for current FY. */
   lastCompleteIdx: FiscalMonthIdx;
   /** Derived: current in-progress fiscal month index. */
   currentIdx: FiscalMonthIdx;
-  /** Derived: the resolved monthIdx to display/query.
-   *  - "month"  → monthIdx
-   *  - "ytd"    → lastCompleteIdx (for single-month views that need one month to highlight)
-   *  - "last7"  → currentIdx (in-progress month)
-   *  - "today"  → currentIdx */
+  /** Derived: single month to highlight / show in single-month views (e.g. SalesPeople). */
   effectiveMonthIdx: FiscalMonthIdx;
-  /** Derived: 1-based period range {from, to} suitable for StateHeadDashboard API calls. */
-  effectivePeriod: { from: number; to: number; label: string };
+  /** Derived: API period {from, to} as 1-based fiscal month numbers. Primitive values — safe as useEffect deps. */
+  effectivePeriodFrom: number;
+  effectivePeriodTo: number;
+  effectivePeriodLabel: string;
 }
 
 const GlobalFilterContext = createContext<GlobalFilterContextValue | null>(null);
@@ -106,9 +132,11 @@ export function GlobalFilterProvider({ children }: { children: ReactNode }) {
   const [fy, setFy] = useState(DEFAULT_FY);
   const [periodMode, setPeriodMode] = useState<PeriodMode>("ytd");
   const [monthIdx, setMonthIdx] = useState<FiscalMonthIdx>(() => lastCompleteFiscalMonthIdx(DEFAULT_FY));
+  const [rangeFrom, setRangeFrom] = useState<FiscalMonthIdx>(0);
+  const [rangeTo, setRangeTo] = useState<FiscalMonthIdx>(2);
   const [availableFys, setAvailableFys] = useState<string[]>([DEFAULT_FY, "2025-26", "2024-25", "2023-24"]);
 
-  // When FY changes, reset monthIdx to last complete month of the new FY.
+  // Reset monthIdx to last complete month when FY changes.
   useEffect(() => {
     setMonthIdx(lastCompleteFiscalMonthIdx(fy));
   }, [fy]);
@@ -116,40 +144,83 @@ export function GlobalFilterProvider({ children }: { children: ReactNode }) {
   const lastCompleteIdx = useMemo(() => lastCompleteFiscalMonthIdx(fy), [fy]);
   const currentIdx = useMemo(() => currentFiscalMonthIdx(fy), [fy]);
 
-  const effectiveMonthIdx = useMemo<FiscalMonthIdx>(() => {
-    if (periodMode === "month") return monthIdx;
-    if (periodMode === "ytd") return lastCompleteIdx;
-    // last7 / today → current in-progress month
-    return currentIdx;
-  }, [periodMode, monthIdx, lastCompleteIdx, currentIdx]);
+  // All period derivations as primitive values — no object allocation in deps.
+  const { effectiveMonthIdx, effectivePeriodFrom, effectivePeriodTo, effectivePeriodLabel } =
+    useMemo(() => {
+      let from: number;
+      let to: number;
+      let label: string;
+      let singleIdx: FiscalMonthIdx;
 
-  const effectivePeriod = useMemo(() => {
-    if (periodMode === "month") {
-      const from = monthIdx + 1;
-      return { from, to: from, label: FISCAL_MONTH_NAMES[monthIdx] };
-    }
-    if (periodMode === "ytd") {
-      const to = lastCompleteIdx + 1;
-      return { from: 1, to, label: `YTD (Apr–${FISCAL_MONTH_NAMES[lastCompleteIdx]})` };
-    }
-    // last7 / today → current month
-    const from = currentIdx + 1;
-    return {
-      from,
-      to: from,
-      label: periodMode === "today" ? "Today" : "Last 7 Days",
-    };
-  }, [periodMode, monthIdx, lastCompleteIdx, currentIdx]);
+      switch (periodMode) {
+        case "month":
+          from = monthIdx + 1;
+          to = from;
+          label = FISCAL_MONTH_NAMES[monthIdx];
+          singleIdx = monthIdx;
+          break;
+        case "q1":
+        case "q2":
+        case "q3":
+        case "q4": {
+          const [f0, t0] = QUARTER_RANGES[periodMode];
+          from = f0 + 1;
+          to = t0 + 1;
+          label = `${periodMode.toUpperCase()} (${FISCAL_MONTH_NAMES[f0]}–${FISCAL_MONTH_NAMES[t0]})`;
+          singleIdx = clampToRange(f0, t0, lastCompleteIdx);
+          break;
+        }
+        case "full":
+          from = 1;
+          to = 12;
+          label = "Full Year";
+          singleIdx = lastCompleteIdx;
+          break;
+        case "custom":
+          from = rangeFrom + 1;
+          to = Math.max(from, rangeTo + 1);
+          label = from === to
+            ? FISCAL_MONTH_NAMES[rangeFrom]
+            : `${FISCAL_MONTH_NAMES[rangeFrom]}–${FISCAL_MONTH_NAMES[Math.max(rangeFrom, rangeTo)]}`;
+          singleIdx = clampToRange(rangeFrom, Math.max(rangeFrom, rangeTo), lastCompleteIdx);
+          break;
+        case "last7":
+        case "today":
+          from = currentIdx + 1;
+          to = from;
+          label = periodMode === "today" ? "Today" : "Last 7 Days";
+          singleIdx = currentIdx;
+          break;
+        case "ytd":
+        default:
+          from = 1;
+          to = lastCompleteIdx + 1;
+          label = `YTD (Apr–${FISCAL_MONTH_NAMES[lastCompleteIdx]})`;
+          singleIdx = lastCompleteIdx;
+          break;
+      }
+
+      return {
+        effectiveMonthIdx: singleIdx,
+        effectivePeriodFrom: from,
+        effectivePeriodTo: to,
+        effectivePeriodLabel: label,
+      };
+    }, [periodMode, monthIdx, rangeFrom, rangeTo, lastCompleteIdx, currentIdx]);
 
   const value: GlobalFilterContextValue = {
     fy, setFy,
     periodMode, setPeriodMode,
     monthIdx, setMonthIdx,
+    rangeFrom, setRangeFrom,
+    rangeTo, setRangeTo,
     availableFys, setAvailableFys,
     lastCompleteIdx,
     currentIdx,
     effectiveMonthIdx,
-    effectivePeriod,
+    effectivePeriodFrom,
+    effectivePeriodTo,
+    effectivePeriodLabel,
   };
 
   return (

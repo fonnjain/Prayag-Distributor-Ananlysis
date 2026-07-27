@@ -355,15 +355,17 @@ function Td({
 
 export default function StateHeadDashboard() {
   // FY + period driven by the global filter context (GlobalFilterBar handles UI).
-  const { fy, effectivePeriod, setAvailableFys } = useGlobalFilter();
-  // Map global effectivePeriod to the local Period shape used by this component.
+  const {
+    fy,
+    effectivePeriodFrom,
+    effectivePeriodTo,
+    effectivePeriodLabel,
+    setAvailableFys,
+  } = useGlobalFilter();
+  // Stable Period object — only changes when the primitive values change.
   const period: Period = useMemo(
-    () => ({
-      label: effectivePeriod.label,
-      from: effectivePeriod.from,
-      to: effectivePeriod.to,
-    }),
-    [effectivePeriod],
+    () => ({ label: effectivePeriodLabel, from: effectivePeriodFrom, to: effectivePeriodTo }),
+    [effectivePeriodFrom, effectivePeriodTo, effectivePeriodLabel],
   );
 
   const [stateHeadFilter, setStateHeadFilter] = useState("");
@@ -413,7 +415,8 @@ export default function StateHeadDashboard() {
         setError(e.message);
         setLoading(false);
       });
-  }, [fy, period]);
+  // Use primitive dep values so React's Object.is comparison is reliable.
+  }, [fy, effectivePeriodFrom, effectivePeriodTo]);
 
   function toggleSort(key: string) {
     setSort((s) =>
