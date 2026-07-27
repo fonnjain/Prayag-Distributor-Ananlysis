@@ -222,35 +222,51 @@ function tgtPeriod(
 }
 
 // secPeriod: slices sec.months[mFrom-1..mTo-1] to produce period-specific
-// figures from the STATE HEAD DASHBOARD, respecting notYetRecorded (open /
-// arrears months are excluded so achievement is never distorted by partial data).
+// figures from the STATE HEAD DASHBOARD.
 //
 // This is the PS1 period resolver — every sec.ytd* reference in the member
 // assembly now calls this instead, so Q1/Q2/Q3/Q4/Full/individual-month filters
 // all return accurate OB/Sales/Plan/Achievement for the requested period.
 //
-// Return semantics mirror ytdSalesReceived / ytdPlan:
-//   null plan   → no recorded data in the period (truly no plan/actuals)
-//   0 sales     → plan exists but nothing booked/received yet
+// Key rule: PLAN is always read regardless of notYetRecorded.
+//   Plans are set at year-start and are real for both past AND future months
+//   (e.g. Q2 Jul–Sep plans are populated and meaningful even though the months
+//   haven't closed yet).  notYetRecorded only gates ACTUALS (OB, sales).
+//
+// ACTUALS (orderedAmount, salesAmount) are only accumulated for months where
+//   notYetRecorded = false (calendar-closed months not caught by the V4 arrears
+//   guard).  Open or arrears months contribute 0 to OB/Sales.
+//
+// Return semantics:
+//   plan null        → no planAmount data in the period at all (member has no target)
+//   ob/sales 0       → plan exists but the period has no closed actuals yet (future quarter)
+//   achievement null → plan is null OR no closed actuals (cannot compute)
 function secPeriod(
   sec: SecMember,
   mFrom: number, // 1-based fiscal month (1 = Apr)
   mTo: number,   // 1-based fiscal month (12 = Mar)
 ): { plan: number | null; ob: number | null; sales: number | null; achievement: number | null } {
-  let plan = 0, ob = 0, sales = 0, hasData = false;
+  let plan = 0, ob = 0, sales = 0;
+  let hasPlan = false, hasClosedMonth = false;
   for (let i = mFrom - 1; i <= mTo - 1; i++) {
     const md = sec.months[i];
-    if (!md || md.notYetRecorded) continue; // open or V4-arrears month — skip
-    if (md.planAmount != null) { plan += md.planAmount; hasData = true; }
-    if (md.orderedAmount != null) ob += md.orderedAmount;
-    if (md.salesAmount != null) sales += md.salesAmount;
+    if (!md) continue;
+    // PLAN: always read — real for past AND future months.
+    if (md.planAmount != null) { plan += md.planAmount; hasPlan = true; }
+    // ACTUALS: only from closed/recorded months (notYetRecorded = false).
+    if (!md.notYetRecorded) {
+      hasClosedMonth = true;
+      if (md.orderedAmount != null) ob += md.orderedAmount;
+      if (md.salesAmount != null)   sales += md.salesAmount;
+    }
   }
-  if (!hasData) return { plan: null, ob: null, sales: null, achievement: null };
+  if (!hasPlan && !hasClosedMonth) return { plan: null, ob: null, sales: null, achievement: null };
   return {
-    plan,
-    ob,
-    sales: sales > 0 ? sales : 0,
-    achievement: plan > 0 ? sales / plan : null,
+    plan: hasPlan ? plan : null,
+    // 0 when there is a plan but the period has no recorded actuals yet (future Q).
+    ob:    hasClosedMonth ? ob    : 0,
+    sales: hasClosedMonth ? (sales > 0 ? sales : 0) : 0,
+    achievement: hasPlan && plan > 0 && hasClosedMonth ? sales / plan : null,
   };
 }
 
@@ -465,7 +481,11 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         primaryDistributors: distMap?.distributorCountByMember.get(r.m.normKey) ?? null,
         primaryDirectDealers: distMap?.directDealerCountByMember.get(r.m.normKey) ?? null,
         // STATE HEAD DASHBOARD secondary fields — period-specific via PS1 resolver.
-        secondaryPlan: sp?.plan ?? null,
+        // secondaryPlan: for SHD members (sec != null) we never fall back to the
+        // Target Master — a member with no period plan in the SHD genuinely has a
+        // zero target for that period.  Null is reserved for non-SHD members so the
+        // frontend knows to substitute targetSecondary for them.
+        secondaryPlan: sec ? (sp.plan ?? 0) : null,
         secondaryOrderBooked: sp?.ob ?? null,
         secondarySalesReceived: sp?.sales ?? null,
         secondaryAchievement: sp?.achievement ?? null,
