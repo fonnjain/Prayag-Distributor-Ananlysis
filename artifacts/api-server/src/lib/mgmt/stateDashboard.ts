@@ -43,16 +43,10 @@ import {
   type SheetCellValue,
   type SheetTab,
 } from "../registers/sheetsApi.js";
-import { normName, fyStartYear } from "./names.js";
+import { normName, normSecKey, fyStartYear } from "./names.js";
 
-// Secondary-specific member key: lowercase alphanumeric, parenthetical content
-// KEPT (not stripped).  This preserves location/status disambiguators so that
-// "Ravi" and "Ravi (Faridabad)", or "Mahaveer Jain" and "Mahaveer Jain (Off
-// Roll)", produce DISTINCT head_canon values and never overwrite each other on
-// upsert.  normName() still used for isPrimaryRole matching (roster join).
-function normSecKey(raw: string): string {
-  return raw.toLowerCase().replace(/[^a-z0-9]+/g, "");
-}
+// normSecKey (from names.ts): lowercase alphanumeric, parentheticals KEPT.
+// Distinct from normName (which strips parentheticals, used for roster joins).
 
 // ── Sheet config ─────────────────────────────────────────────────────────────
 

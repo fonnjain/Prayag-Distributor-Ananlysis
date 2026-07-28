@@ -227,6 +227,12 @@ export type AiPayload = {
     directDealerOB: number | null;
     totalOB: number | null;
     salesReceived: number | null;
+    /** Sheet column / data source for every figure in this object. */
+    sources: {
+      secondaryOB: string;
+      directDealerOB: string;
+      salesReceived: string;
+    };
   };
   achievement: {
     totalOBPct: number | null;
@@ -243,6 +249,15 @@ export type AiPayload = {
     visited: number | null;
     nonVisited: number | null;
     newRetailers: number | null;
+    /** Sheet column / data source for every count in this object. */
+    sources: {
+      retailersTotal: string;
+      active: string | null;
+      dormant: string | null;
+      removed: string | null;
+      visited: string;
+      visits: string | null;
+    };
   };
   formerRetailers: {
     count: number;
@@ -912,9 +927,40 @@ export function buildMemberPayload(
       annualTotal,
       businessPlan,
     },
-    performance: { secondaryOB, directDealerOB, totalOB, salesReceived },
+    performance: {
+      secondaryOB,
+      directDealerOB,
+      totalOB,
+      salesReceived,
+      // Source labels for every count — the AI must cite these, not invent sources.
+      sources: {
+        secondaryOB:    "data_tab_subtotal_col",
+        directDealerOB: "data_tab_directdealer_col",
+        salesReceived:  "data_tab_salereport2627",  // SALEREPORT2627 column; may be overridden by stateDashboard ytdSalesReceived
+      },
+    },
     achievement: { totalOBPct, secondaryOBPct, directDealerPct, salePct, annualProgressPct },
-    coverage: { retailersTotal, active, dormant, removed, visited, nonVisited, newRetailers },
+    coverage: {
+      retailersTotal,
+      active,
+      dormant,
+      removed,
+      visited,
+      nonVisited,
+      newRetailers,
+      // Source labels: tells the AI (and any human reading the payload) exactly
+      // which sheet and column each count comes from.
+      sources: {
+        retailersTotal: spread?.totalRetailers != null
+          ? "member_working_file_summary_tab"
+          : "data_tab_col_n",
+        active:   spread?.activeRetailers   != null ? "member_working_file_summary_tab" : null,
+        dormant:  spread?.dormantRetailers  != null ? "member_working_file_summary_tab" : null,
+        removed:  spread?.removedRetailers  != null ? "member_working_file_removed_section" : null,
+        visited:  "data_tab_visitedinamonth",   // kpis.visitedRetailers — unique retailers visited per VISITEDINAMONTH col
+        visits:   pattern != null ? "member_working_file_summary_tab" : null,
+      },
+    },
     formerRetailers: removedRows.length > 0
       ? (() => {
           // Group by last active year (NOT year of removal — the sheet has no
@@ -1044,7 +1090,17 @@ export function buildStateHeadPayload(
       annualTotal:     monthlyTotal     != null ? monthlyTotal     * 12 : null,
       businessPlan: null,
     },
-    performance: { secondaryOB, directDealerOB, totalOB, salesReceived },
+    performance: {
+      secondaryOB,
+      directDealerOB,
+      totalOB,
+      salesReceived,
+      sources: {
+        secondaryOB:    "data_tab_subtotal_col_sum_team",
+        directDealerOB: "data_tab_directdealer_col_sum_team",
+        salesReceived:  "data_tab_salereport2627_sum_team",
+      },
+    },
     achievement: { totalOBPct, secondaryOBPct, directDealerPct, salePct, annualProgressPct: null },
     coverage: {
       retailersTotal,
@@ -1054,6 +1110,14 @@ export function buildStateHeadPayload(
       visited,
       nonVisited,
       newRetailers: null,
+      sources: {
+        retailersTotal: "data_tab_col_n_sum_team",
+        active:   null,
+        dormant:  null,
+        removed:  null,
+        visited:  "data_tab_visitedinamonth_sum_team",
+        visits:   null,
+      },
     },
     customerStates: null,
     topCustomers: null,

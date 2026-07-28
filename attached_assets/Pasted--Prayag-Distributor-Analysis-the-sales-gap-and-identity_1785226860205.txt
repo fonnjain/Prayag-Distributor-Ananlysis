@@ -1,0 +1,151 @@
+# Prayag Distributor Analysis — the sales gap, and identity resolution as a global service
+
+*Two items. The first is a misdiagnosis that would waste someone's time. The second is the architectural fix that stops this class of problem recurring.*
+
+---
+
+## 1. The ₹16.5 lakh is Tarun Giri, not Rahul Singh
+
+The diagnosis names Rahul Singh's `SALEREPORT2627` cell as null and recommends opening the sheet to repair a broken formula. **That cell is fine. Rahul Singh's sale genuinely is zero**, and the dashboard agrees — his null-to-zero is correct behaviour, not a bug.
+
+Checked member by member against dashboard column AY:
+
+| Member | Produced | Dashboard AY | Difference |
+|---|---|---|---|
+| Ravinder Puri | ₹56,20,061 | ₹56,20,061 | 0 |
+| Manish Gupta | ₹28,40,220 | ₹28,40,220 | 0 |
+| Prasun Chatterjee | ₹26,13,934 | ₹26,13,934 | 0 |
+| Rinku | ₹28,91,303 | ₹28,91,303 | 0 |
+| Ankit Kumar | ₹25,92,884 | ₹25,92,884 | 0 |
+| **Tarun Giri** | **₹16,47,589** | **₹32,95,178** | **−₹16,47,589** |
+| Ashutosh Kumar (Rudrapur) | ₹23,29,983 | ₹23,29,983 | 0 |
+| Shivam Chauhan | ₹19,36,657 | ₹19,36,657 | 0 |
+| Rahul Singh | 0 | **0** | 0 |
+| Ravi (Faridabad) | 0 | 0 | 0 |
+
+**Nine of ten are exact. Tarun Giri is exactly half.**
+
+₹16,47,589 × 2 = ₹32,95,178. The whole gap is one member's value halved, and the gap figure appearing in the table as Tarun Giri's value is what made it look like Rahul Singh's missing number.
+
+There is only **one** Tarun Giri row in the Data tab (row 156, ₹32,95,178), so this is not two rows being averaged.
+
+**Find why one member's sale is halved.** Exactly 0.5000 is a specific signature — a division, a merged cell read across two rows, or a mean where a sum belongs. Report the parsed cell value and the code path that produced it.
+
+Do not send anyone to repair Rahul Singh's spreadsheet.
+
+---
+
+## 2. Identity resolution must be one global service
+
+Ashutosh Kumar (Rudrapur) under Anant Singh and Ashutosh Kumar under Sandeep Dadheech are still mishandled on **Sales People** and **State Head**. Fixing the member join alone was not enough, and the agent's own report shows a third symptom: a `?member=Ashutosh+Kumar` call reading a different person's row and returning ₹59,79,073.
+
+That is three separate discoveries of one defect. It will keep happening as long as each code path normalises names itself.
+
+### The requirement
+
+**No hardcoded list of known collisions.** The registry must detect them structurally, so a collision created next month is handled without anyone editing code.
+
+### 2a. Build one identity registry at data load
+
+Every person gets a **stable ID** derived from their full identity, not their name alone:
+
+```
+identity = name + State Head + state + headquarter
+```
+
+The registry is built once when the dashboard loads and holds, for every person:
+
+- the stable ID
+- the display name exactly as the sheet spells it
+- the normalised name
+- State Head, state, headquarter
+- active or left status
+- the source row
+
+### 2b. Detect collisions at build time, not query time
+
+When two people share a normalised name, register **both as distinct**, and record the collision in the registry with the field that separates them.
+
+**Ashutosh Kumar** is separated by State Head. **K Suresh Kumar** and **J.SURESH KUMAR** are separated by headquarter within the same head and state. The registry should note which discriminator applies.
+
+Co-existence is the proof: two rows in the same tab for the same period are two people, always.
+
+### 2c. One resolve function, used everywhere
+
+```
+resolve(nameOrId, context?) -> Person | Ambiguous | NotFound
+```
+
+Every code path calls this. **No file normalises a name itself.** After first resolution, pass the **stable ID**, never the name.
+
+### 2d. Ambiguity must fail loudly
+
+This is the rule that would have prevented all three symptoms.
+
+If a name resolves to more than one person and no disambiguating context is supplied, **return Ambiguous and error**. Do not take the first match. `secByKey` first-entry-wins is exactly how Sandeep's Ashutosh Kumar ended up showing Rudrapur's figures.
+
+An API call with `?member=Ashutosh+Kumar` and no head should return an error naming both candidates — not one of them silently.
+
+### 2e. Apply everywhere and report the audit
+
+Every place a person is looked up by name must use the registry. At minimum: Sales People, State Head, Sales Deep Dive, Distributor Deep Dive, Warning System, the AI payload, all report routes, and the batch generator.
+
+**Report every location that currently normalises a name or matches on one**, and confirm each now calls the registry instead.
+
+### 2f. Surface collisions at startup
+
+On boot, log every detected collision with both people's full identities. A new collision should appear in the log the first time the data contains it — not be discovered later through a wrong figure.
+
+---
+
+## 3. Related — the payload should say which source a count came from
+
+The agent's own three-source analysis of retailer counts is correct and worth acting on:
+
+| Source | Prasun |
+|---|---|
+| Data tab column N — the State Head's declared universe | 62 |
+| Member working file — physical rows entered | 73 |
+| Secondary register — distinct purchasing customers | separate |
+
+Neither is wrong; they measure different things. But the payload currently uses whichever it finds first and says nothing.
+
+**Every count in the payload should name its source.** The same applies to visits, where three sources already exist: `totalVisitsYtd` (column AF), `visits.done` (working sheet), and `visitedRetailers` (unique per month).
+
+---
+
+## 4. The numeric guard gap they identified
+
+Their finding stands and should be fixed: the A4A deck calls `guardCustom(a4aDeck, payload, null)` with no `extra`, so member-level figures from `memberSummary` cannot be validated. The state-head report already passes `{ memberRanking, departedMembers }`.
+
+**Pass `memberSummary` as `extra` in the deck call**, matching the pattern already used. Then regenerate the deck and report the guard status and any unmatched tokens.
+
+---
+
+## Acceptance
+
+- [ ] The halved value is traced to a code path and reported — not attributed to Rahul Singh
+- [ ] Team sales received reads **₹2,41,20,220**
+- [ ] A registry exists, built at load, holding stable IDs for all 183 people
+- [ ] Collisions are detected structurally with no hardcoded list
+- [ ] `?member=Ashutosh+Kumar` with no head returns **Ambiguous** naming both candidates
+- [ ] `?member=Ashutosh+Kumar+(Rudrapur)` returns ₹23,29,983 under Anant Singh
+- [ ] Sandeep Dadheech's Ashutosh Kumar returns his own figures on Sales People and State Head
+- [ ] Every name-matching location is listed and confirmed to use the registry
+- [ ] Startup logs every detected collision
+- [ ] Payload counts name their source
+- [ ] The deck guard receives `memberSummary` and its status is reported
+
+---
+
+## What to watch
+
+**No hardcoded collision list.** If the fix names Ashutosh Kumar in code, it has not been fixed — it has been patched, and the next collision will be found the same way this one was.
+
+**Ambiguous must error, not guess.** Every symptom so far came from a lookup quietly choosing one of two candidates.
+
+**Exactly half is a precise clue.** Do not accept "sheet drift" or a null cell as the explanation — 0.5000 is arithmetic, not data.
+
+---
+
+*Prayag Distributor Analysis · verified against the live dashboard · data cutoff 30 June 2026*

@@ -13,7 +13,7 @@
 //   Never console.log — use req.log / logger.
 
 import { Router, type IRouter, type Request, type Response } from "express";
-import { loadDeepDiveData, normSecKey } from "../lib/mgmt/deepDiveData.js";
+import { loadDeepDiveData, normSecKey, loadRegistry } from "../lib/mgmt/deepDiveData.js";
 import {
   buildMemberPayload,
   buildStateHeadPayload,
@@ -59,13 +59,31 @@ router.get("/ai/payload", async (req: Request, res: Response): Promise<void> => 
     typeof req.query.member === "string" && req.query.member.trim()
       ? req.query.member.trim()
       : undefined;
-  const memberKey = memberRaw ? normSecKey(memberRaw) : undefined;
 
   const period = normalisePeriod(req.query.period);
 
   req.log.info({ fy, stateHead, member: memberRaw, period }, "ai/payload: request");
 
   try {
+    // Registry-based member resolution — Ambiguous returns 400 before any heavy load.
+    let memberKey: string | undefined;
+    if (memberRaw) {
+      const registry = await loadRegistry(fy);
+      const resolved = registry?.resolve(memberRaw, stateHead ? { stateHead } : undefined);
+      if (resolved?.kind === "ambiguous") {
+        res.status(400).json({
+          error: resolved.message,
+          candidates: resolved.candidates.map((p) => ({
+            displayName: p.displayName,
+            stateHead: p.stateHead,
+            hq: p.hq ?? null,
+          })),
+        });
+        return;
+      }
+      memberKey = resolved?.kind === "found" ? resolved.person.nsk : normSecKey(memberRaw);
+    }
+
     const data = await loadDeepDiveData(fy, stateHead, memberKey);
 
     if (data.error && !data.kpis) {

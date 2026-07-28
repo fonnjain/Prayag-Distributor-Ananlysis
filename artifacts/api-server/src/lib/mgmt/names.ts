@@ -5,6 +5,13 @@
 // Matching happens on a normalized key: lowercase alphanumerics only, with
 // parenthetical suffixes removed.
 
+// Secondary key: lowercase alphanumerics, keeps parentheticals so
+// "Ravi" ≠ "Ravi (Faridabad)". Used by deepDiveData, stateDashboard,
+// identityRegistry, and all routes that resolve a member by name.
+export function normSecKey(raw: string): string {
+  return raw.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
 export function normName(raw: unknown): string {
   if (raw == null) return "";
   return String(raw)

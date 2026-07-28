@@ -33,7 +33,7 @@ import {
   loadStateDashboard,
   type SecMember,
 } from "../lib/mgmt/stateDashboard.js";
-import { loadDeepDiveData, normSecKey } from "../lib/mgmt/deepDiveData.js";
+import { loadDeepDiveData, normSecKey, loadRegistry } from "../lib/mgmt/deepDiveData.js";
 import { splitAnnualToMonth, getSeasonalCalibration } from "../lib/seasonal.js";
 import {
   buildPrimaryTargetMapFromStateTargets,
@@ -887,13 +887,32 @@ router.get("/mgmt/deep-dive", async (req: Request, res: Response): Promise<void>
     const memberRaw =
       typeof req.query.member === "string" ? req.query.member.trim() : undefined;
 
-    // Accept either the raw name or the normSecKey.
-    const memberKey = memberRaw ? normSecKey(memberRaw) : undefined;
-
     req.log.info(
-      { fy, selectedStateHead, memberKey },
+      { fy, selectedStateHead, member: memberRaw },
       "mgmt/deep-dive: request received",
     );
+
+    // Registry-based member resolution — Ambiguous returns 400 before any data load.
+    let memberKey: string | undefined;
+    if (memberRaw) {
+      const registry = await loadRegistry(fy);
+      const resolved = registry?.resolve(
+        memberRaw,
+        selectedStateHead ? { stateHead: selectedStateHead } : undefined,
+      );
+      if (resolved?.kind === "ambiguous") {
+        res.status(400).json({
+          error: resolved.message,
+          candidates: resolved.candidates.map((p) => ({
+            displayName: p.displayName,
+            stateHead: p.stateHead,
+            hq: p.hq ?? null,
+          })),
+        });
+        return;
+      }
+      memberKey = resolved?.kind === "found" ? resolved.person.nsk : normSecKey(memberRaw);
+    }
 
     const result = await loadDeepDiveData(fy, selectedStateHead, memberKey);
 

@@ -30,6 +30,8 @@ import {
 import { computeRoiCost, type RoiCost } from "./roiCost.js";
 import { computeSkuSpread, type SkuSpread } from "./skuSpread.js";
 import { computeWinBack, type WinBackItem } from "./winBack.js";
+import { IdentityRegistry } from "./identityRegistry.js";
+import { getCachedStateDashboard } from "./stateDashboard.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -46,11 +48,10 @@ const DATA_TAB_NAME = "Data";
 
 // ── Name normalization ────────────────────────────────────────────────────────
 
-// Secondary key: preserves parentheticals so "Ravi" and "Ravi (Faridabad)"
-// remain distinct. Must match the normSecKey used in stateDashboard.ts.
-export function normSecKey(raw: string): string {
-  return raw.toLowerCase().replace(/[^a-z0-9]+/g, "");
-}
+// Import from names.ts (single authoritative definition) and re-export so
+// all callers keep their existing `import { normSecKey } from "...deepDiveData.js"`.
+import { normSecKey } from "./names.js";
+export { normSecKey };
 
 // ── Cell helpers ──────────────────────────────────────────────────────────────
 
@@ -744,6 +745,26 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
 // was served from the DB snapshot (true) or from a live Sheets read (false).
 const _fromDbSnap = new Map<string, boolean>();
 
+// _registry: one IdentityRegistry per FY, built lazily when allMembers is first
+// populated. Detects name collisions at load time and enables ambiguous-input
+// rejection in all member-lookup routes.
+const _registry = new Map<string, IdentityRegistry>();
+
+/** Synchronous access — returns null if this FY has not been loaded yet. */
+export function getRegistry(fy: string): IdentityRegistry | null {
+  return _registry.get(fy) ?? null;
+}
+
+/**
+ * Async access — triggers a data load if the FY is not yet cached, then
+ * returns the registry.  Adds no Sheets-read overhead once the FY is warm
+ * (both loadAllMembers and this call hit the in-process Map).
+ */
+export async function loadRegistry(fy: string): Promise<IdentityRegistry | null> {
+  await loadAllMembers(fy);
+  return _registry.get(fy) ?? null;
+}
+
 async function loadAllMembers(fy: string): Promise<CacheEntry | null> {
   clearExpired();
   const hit = _cache.get(fy);
@@ -761,6 +782,7 @@ async function loadAllMembers(fy: string): Promise<CacheEntry | null> {
         logger.info({ fy }, "deepDiveData: loaded from DB snapshot — no Sheets read");
         _fromDbSnap.set(fy, true);
         _cache.set(fy, snap);
+        _registry.set(fy, new IdentityRegistry(snap.allMembers, fy));
         return snap;
       }
     }
@@ -769,6 +791,7 @@ async function loadAllMembers(fy: string): Promise<CacheEntry | null> {
     if (entry) {
       _fromDbSnap.set(fy, false);
       _cache.set(fy, entry);
+      _registry.set(fy, new IdentityRegistry(entry.allMembers, fy));
       // Phase 6: fire-and-forget DB persist for future cold starts.
       void saveDeepDiveSnapshot(fy, entry);
     }
@@ -837,6 +860,47 @@ export async function loadDeepDiveData(
       kpis = entry.allMembers.find((m) => m.normKey === selectedMemberKey) ?? null;
     }
     if (kpis) {
+      // Override kpis.sale from stateDashboard ytdSalesReceived when the two sources differ.
+      //
+      // Root cause: the SALEREPORT2627 column in the Data tab is a formula that
+      // can reference only the member's own working sheet (on-roll retailers)
+      // rather than the full secondary register total. The stateDashboard reads
+      // the monthly block entries entered by the state head — a complete
+      // accounting of the secondary register.
+      //
+      // Example: Tarun Giri's SALEREPORT2627 formula reads 16,47,589 (member
+      // sheet sub-total for his 54 on-roll retailers). The secondary register and
+      // stateDashboard ytdSalesReceived = 32,95,178 (all buyers including those
+      // not on his roll). The formula is reading half the actual figure.
+      // The fix is NOT to send anyone to repair Rahul Singh's cell (Rahul's
+      // null is correct — his member sheet totalSale = 0). It is THIS override.
+      const sd = getCachedStateDashboard(fy);
+      if (sd) {
+        const sdRow = sd.members.find((m) => m.normKey === kpis!.normKey);
+        // Prefer allMonthsSalesReceived: includes the current (open) month when the
+        // state head has already entered figures, so it matches the dashboard total
+        // column AY that includes all months to date, not just closed months.
+        // Fall back to ytdSalesReceived if allMonthsSalesReceived is zero or absent.
+        const sdSale = sdRow
+          ? (sdRow.allMonthsSalesReceived > 0
+              ? sdRow.allMonthsSalesReceived
+              : (sdRow.ytdSalesReceived ?? null))
+          : null;
+        if (sdSale != null && sdSale !== kpis.sale) {
+          logger.info(
+            {
+              fy,
+              member: kpis.name,
+              dataSale: kpis.sale,
+              sdSale,
+              sdAllMonths: sdRow?.allMonthsSalesReceived,
+              sdYtd: sdRow?.ytdSalesReceived,
+            },
+            "deepDiveData: kpis.sale overridden from stateDashboard (SALEREPORT2627 undercount)",
+          );
+          kpis = { ...kpis, sale: sdSale };
+        }
+      }
       // Log the parsed row for proof (per rule 12: never trust a self-report of success).
       logger.info(
         { fy, member: kpis.name, stateHead: kpis.stateHead, kpis },

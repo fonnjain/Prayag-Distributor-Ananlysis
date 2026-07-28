@@ -17,7 +17,7 @@
 
 import { Router, type IRouter, type Request, type Response } from "express";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
-import { loadDeepDiveData, normSecKey } from "../lib/mgmt/deepDiveData.js";
+import { loadDeepDiveData, normSecKey, loadRegistry } from "../lib/mgmt/deepDiveData.js";
 import {
   buildMemberPayload,
   isPeriodMismatch,
@@ -171,12 +171,25 @@ router.post("/ai/report", async (req: Request, res: Response): Promise<void> => 
     return;
   }
 
-  const memberKey = normSecKey(memberRaw);
-
   req.log.info({ fy, stateHead, member: memberRaw, corrupt }, "ai/report: request received");
 
   try {
     // ── 1. Build the A1 payload ───────────────────────────────────────────────
+    // Registry-based member resolution — Ambiguous returns 400 before any AI call.
+    const registry = await loadRegistry(fy);
+    const resolved = registry?.resolve(memberRaw, stateHead ? { stateHead } : undefined);
+    if (resolved?.kind === "ambiguous") {
+      res.status(400).json({
+        error: resolved.message,
+        candidates: resolved.candidates.map((p) => ({
+          displayName: p.displayName,
+          stateHead: p.stateHead,
+          hq: p.hq ?? null,
+        })),
+      });
+      return;
+    }
+    const memberKey = resolved?.kind === "found" ? resolved.person.nsk : normSecKey(memberRaw);
     const data = await loadDeepDiveData(fy, stateHead, memberKey);
 
     if (data.error && !data.kpis) {

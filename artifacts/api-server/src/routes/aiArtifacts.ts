@@ -19,7 +19,7 @@
 
 import { Router, type IRouter, type Request, type Response } from "express";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
-import { loadDeepDiveData, normSecKey } from "../lib/mgmt/deepDiveData.js";
+import { loadDeepDiveData, normSecKey, loadRegistry } from "../lib/mgmt/deepDiveData.js";
 import type { MemberKpis } from "../lib/mgmt/deepDiveData.js";
 import {
   buildMemberPayload,
@@ -269,10 +269,16 @@ router.post("/ai/suggestions", async (req: Request, res: Response): Promise<void
   if (!FY_PATTERN.test(fy)) { res.status(400).json({ error: "fy must look like 2026-27" }); return; }
   if (!memberRaw) { res.status(400).json({ error: "member is required for suggestions." }); return; }
 
-  const memberKey = normSecKey(memberRaw);
   req.log.info({ fy, stateHead, member: memberRaw }, "ai/suggestions: request");
 
   try {
+    const registry = await loadRegistry(fy);
+    const sugResolved = registry?.resolve(memberRaw, stateHead ? { stateHead } : undefined);
+    if (sugResolved?.kind === "ambiguous") {
+      res.status(400).json({ error: sugResolved.message, candidates: sugResolved.candidates.map((p) => ({ displayName: p.displayName, stateHead: p.stateHead, hq: p.hq ?? null })) });
+      return;
+    }
+    const memberKey = sugResolved?.kind === "found" ? sugResolved.person.nsk : normSecKey(memberRaw);
     const data = await loadDeepDiveData(fy, stateHead, memberKey);
     if (!data.kpis) { res.status(404).json({ error: `Member '${memberRaw}' not found.` }); return; }
 
@@ -352,10 +358,16 @@ router.post("/ai/travel-plan", async (req: Request, res: Response): Promise<void
   if (!FY_PATTERN.test(fy)) { res.status(400).json({ error: "fy must look like 2026-27" }); return; }
   if (!memberRaw) { res.status(400).json({ error: "member is required for travel plan." }); return; }
 
-  const memberKey = normSecKey(memberRaw);
   req.log.info({ fy, stateHead, member: memberRaw }, "ai/travel-plan: request");
 
   try {
+    const registry = await loadRegistry(fy);
+    const tpResolved = registry?.resolve(memberRaw, stateHead ? { stateHead } : undefined);
+    if (tpResolved?.kind === "ambiguous") {
+      res.status(400).json({ error: tpResolved.message, candidates: tpResolved.candidates.map((p) => ({ displayName: p.displayName, stateHead: p.stateHead, hq: p.hq ?? null })) });
+      return;
+    }
+    const memberKey = tpResolved?.kind === "found" ? tpResolved.person.nsk : normSecKey(memberRaw);
     const data = await loadDeepDiveData(fy, stateHead, memberKey);
     if (!data.kpis) { res.status(404).json({ error: `Member '${memberRaw}' not found.` }); return; }
     if (data.kpis.isLeft) {
@@ -459,10 +471,16 @@ router.post("/ai/performance-review", async (req: Request, res: Response): Promi
   if (!FY_PATTERN.test(fy)) { res.status(400).json({ error: "fy must look like 2026-27" }); return; }
   if (!memberRaw) { res.status(400).json({ error: "member is required for performance review." }); return; }
 
-  const memberKey = normSecKey(memberRaw);
   req.log.info({ fy, stateHead, member: memberRaw }, "ai/performance-review: request");
 
   try {
+    const registry = await loadRegistry(fy);
+    const prResolved = registry?.resolve(memberRaw, stateHead ? { stateHead } : undefined);
+    if (prResolved?.kind === "ambiguous") {
+      res.status(400).json({ error: prResolved.message, candidates: prResolved.candidates.map((p) => ({ displayName: p.displayName, stateHead: p.stateHead, hq: p.hq ?? null })) });
+      return;
+    }
+    const memberKey = prResolved?.kind === "found" ? prResolved.person.nsk : normSecKey(memberRaw);
     const data = await loadDeepDiveData(fy, stateHead, memberKey);
     if (!data.kpis) { res.status(404).json({ error: `Member '${memberRaw}' not found.` }); return; }
 
@@ -609,7 +627,13 @@ router.post("/ai/presentation", async (req: Request, res: Response): Promise<voi
 
     if (memberRaw) {
       // ── A4 member-level deck (8–12 slides) ──────────────────────────────────
-      const memberKey = normSecKey(memberRaw);
+      const registry = await loadRegistry(fy);
+      const presResolved = registry?.resolve(memberRaw, stateHead ? { stateHead } : undefined);
+      if (presResolved?.kind === "ambiguous") {
+        res.status(400).json({ error: presResolved.message, candidates: presResolved.candidates.map((p) => ({ displayName: p.displayName, stateHead: p.stateHead, hq: p.hq ?? null })) });
+        return;
+      }
+      const memberKey = presResolved?.kind === "found" ? presResolved.person.nsk : normSecKey(memberRaw);
       const data = await loadDeepDiveData(fy, stateHead, memberKey);
       if (!data.kpis) { res.status(404).json({ error: `Member '${memberRaw}' not found.` }); return; }
       const memberName = data.kpis.name;
@@ -724,7 +748,9 @@ router.post("/ai/presentation", async (req: Request, res: Response): Promise<voi
     if (!Array.isArray(a4aDeck.memberSlides)) throw new Error("memberSlides array missing");
     if (!Array.isArray(a4aDeck.closingSlides)) throw new Error("closingSlides array missing");
 
-    const guard = guardCustom(a4aDeck, payload, null);
+    // Pass memberSummary as extra so individual member figures (OB, sale,
+    // achievementPct per member) are within the allowed numeric set.
+    const guard = guardCustom(a4aDeck, payload, memberSummary);
     const periodGuard: PeriodGuardResult = runPeriodGuard(
       { content: { title: "Presentation", body: JSON.stringify(a4aDeck) } },
       payload.identity.periodToFiscalMonth,
