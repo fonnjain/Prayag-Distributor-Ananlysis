@@ -45,21 +45,16 @@ export default function Dashboard() {
   const ActiveComponent = AREAS.find((a) => a.id === activeArea)?.component ?? Overview;
   const areaLabel = AREAS.find((a) => a.id === activeArea)?.label ?? "Overview";
 
-  // Warning System is always current-FY — the global filter bar doesn't apply there.
-  const hideFilterBar = activeArea === "warnings";
-
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto w-full">
       <header className="mb-5">
         <h2 className="font-display text-2xl md:text-3xl font-bold tracking-tight mb-3">
           {areaLabel}
         </h2>
-        {!hideFilterBar && <GlobalFilterBar />}
-        {hideFilterBar && (
-          <p className="text-sm text-muted-foreground">
-            Always showing current fiscal year · FY 2026-27
-          </p>
-        )}
+        {/* GlobalFilterBar reads periodCapability from context and renders accordingly.
+            FULL pages show all controls; FY_ONLY pages show FY selector + reason;
+            NONE pages show only the sync row + a brief note. */}
+        <GlobalFilterBar />
       </header>
 
       <ActiveComponent />

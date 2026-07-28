@@ -1,6 +1,8 @@
 // Global date filter context — shared FY + period selection across all pages.
 // Components subscribe with useGlobalFilter(); the filter bar is in GlobalFilterBar.tsx.
 import { createContext, useContext, useState, useEffect, useMemo, type ReactNode } from "react";
+import { useLocation } from "wouter";
+import { getCapabilityForPath, type PeriodCapability } from "./period-capability";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -124,6 +126,15 @@ export interface GlobalFilterContextValue {
   effectivePeriodFrom: number;
   effectivePeriodTo: number;
   effectivePeriodLabel: string;
+  /**
+   * Period capability of the currently active page, derived from the route.
+   * FULL    — honours month / quarter / YTD / custom
+   * FY_ONLY — honours the FY selector only; sub-year period has no effect
+   * NONE    — not period-scoped at all
+   * Used by GlobalFilterBar to disable/hide controls and by export code to
+   * label generated documents with the period they actually cover.
+   */
+  periodCapability: PeriodCapability;
 }
 
 const GlobalFilterContext = createContext<GlobalFilterContextValue | null>(null);
@@ -135,6 +146,11 @@ export function GlobalFilterProvider({ children }: { children: ReactNode }) {
   const [rangeFrom, setRangeFrom] = useState<FiscalMonthIdx>(0);
   const [rangeTo, setRangeTo] = useState<FiscalMonthIdx>(2);
   const [availableFys, setAvailableFys] = useState<string[]>([DEFAULT_FY, "2025-26", "2024-25", "2023-24"]);
+
+  // Derive the current page's period capability from the wouter location.
+  // This requires GlobalFilterProvider to be inside WouterRouter (see App.tsx).
+  const [location] = useLocation();
+  const periodCapability = useMemo(() => getCapabilityForPath(location), [location]);
 
   // Reset monthIdx to last complete month when FY changes.
   useEffect(() => {
@@ -221,6 +237,7 @@ export function GlobalFilterProvider({ children }: { children: ReactNode }) {
     effectivePeriodFrom,
     effectivePeriodTo,
     effectivePeriodLabel,
+    periodCapability,
   };
 
   return (

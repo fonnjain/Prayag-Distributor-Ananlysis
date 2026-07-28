@@ -55,11 +55,13 @@ function App() {
       <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
         <TooltipProvider>
           <DashboardProvider>
-            <GlobalFilterProvider>
-              <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+            {/* GlobalFilterProvider is inside WouterRouter so it can call
+                useLocation() to derive the current page's period capability. */}
+            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+              <GlobalFilterProvider>
                 <Router />
-              </WouterRouter>
-            </GlobalFilterProvider>
+              </GlobalFilterProvider>
+            </WouterRouter>
           </DashboardProvider>
           <Toaster />
         </TooltipProvider>

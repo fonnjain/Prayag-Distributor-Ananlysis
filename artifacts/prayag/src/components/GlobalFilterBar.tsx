@@ -1,7 +1,9 @@
 // GlobalFilterBar — sticky filter strip shown at the top of every page.
-// Provides: FY · YTD · Q1–Q4 · Full Year · month pills · Last 7d · Today · Custom range
-// Shows: sync timestamp · Refresh button
-import { Clock, RefreshCw, ChevronDown, Settings2 } from "lucide-react";
+// Behaviour depends on the current page's PeriodCapability (from context):
+//   FULL    — full controls: FY · YTD · Q1–Q4 · Full Year · months · Custom
+//   FY_ONLY — FY selector only; period pills hidden + reason shown
+//   NONE    — period controls hidden; reason shown
+import { Clock, RefreshCw, ChevronDown, Settings2, AlertCircle } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import {
@@ -13,6 +15,7 @@ import {
   type FiscalMonthIdx,
   type PeriodMode,
 } from "@/data/global-filter-context";
+import { FY_ONLY_REASON, NONE_REASON } from "@/data/period-capability";
 import { useDashboard } from "@/data/dashboard-context";
 import {
   Select,
@@ -189,6 +192,58 @@ function CustomRangePicker() {
   );
 }
 
+// ── Sync row (shared across all capability modes) ─────────────────────────────
+
+function SyncRow() {
+  const { syncedAt, sourceStatus, isRefreshing, refresh, refreshError } = useDashboard();
+  const isLive = sourceStatus === "live";
+
+  return (
+    <div className="flex items-center gap-3 flex-wrap">
+      <span
+        className={cn(
+          "text-xs font-medium px-2 py-0.5 rounded inline-flex items-center gap-1",
+          isLive
+            ? "bg-primary/10 text-primary"
+            : "bg-muted text-muted-foreground",
+        )}
+      >
+        <span className={cn("w-1.5 h-1.5 rounded-full", isLive ? "bg-primary" : "bg-muted-foreground")} />
+        {isLive ? "Live" : "Baseline"}
+      </span>
+
+      <span className="text-xs text-muted-foreground flex items-center gap-1">
+        <Clock className="w-3 h-3" />
+        Last synced: {fmtSyncedAt(syncedAt)}
+      </span>
+
+      {refreshError && (
+        <span className="text-xs text-destructive">{String(refreshError)}</span>
+      )}
+
+      <button
+        onClick={refresh}
+        disabled={isRefreshing}
+        className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-medium hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <RefreshCw className={cn("w-3 h-3", isRefreshing && "animate-spin")} />
+        {isRefreshing ? "Refreshing…" : "Refresh"}
+      </button>
+    </div>
+  );
+}
+
+// ── Capability note ────────────────────────────────────────────────────────────
+
+function CapabilityNote({ reason }: { reason: string }) {
+  return (
+    <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+      <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-px opacity-60" />
+      {reason}
+    </p>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 interface GlobalFilterBarProps {
@@ -203,10 +258,10 @@ export default function GlobalFilterBar({ hideSyncRow, className }: GlobalFilter
     monthIdx, setMonthIdx,
     availableFys,
     currentIdx,
+    periodCapability,
   } = useGlobalFilter();
 
-  const { syncedAt, sourceStatus, isRefreshing, refresh, refreshError } = useDashboard();
-  const isLive = sourceStatus === "live";
+  const isMonthActive = (idx: FiscalMonthIdx) => periodMode === "month" && monthIdx === idx;
 
   function selectMonth(idx: FiscalMonthIdx) {
     setMonthIdx(idx);
@@ -220,25 +275,55 @@ export default function GlobalFilterBar({ hideSyncRow, className }: GlobalFilter
     { id: "q4", label: "Q4" },
   ];
 
-  const isMonthActive = (idx: FiscalMonthIdx) => periodMode === "month" && monthIdx === idx;
+  // FY selector — shared between FULL and FY_ONLY modes.
+  const FySelector = (
+    <Select value={fy} onValueChange={setFy}>
+      <SelectTrigger className="h-7 w-[108px] text-xs font-semibold border-border">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {availableFys.map((f) => (
+          <SelectItem key={f} value={f} className="text-xs">
+            {f}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
 
+  // ── NONE ──────────────────────────────────────────────────────────────────
+  // Not period-scoped at all. Show only the sync row and a brief note.
+  if (periodCapability === "NONE") {
+    return (
+      <div className={cn("flex flex-col gap-1.5", className)}>
+        <CapabilityNote reason={NONE_REASON} />
+        {!hideSyncRow && <SyncRow />}
+      </div>
+    );
+  }
+
+  // ── FY_ONLY ───────────────────────────────────────────────────────────────
+  // Honours the FY selector only. Period pills are hidden; reason is shown.
+  if (periodCapability === "FY_ONLY") {
+    return (
+      <div className={cn("flex flex-col gap-1.5", className)}>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {FySelector}
+          <CapabilityNote reason={FY_ONLY_REASON} />
+        </div>
+        {!hideSyncRow && <SyncRow />}
+      </div>
+    );
+  }
+
+  // ── FULL ──────────────────────────────────────────────────────────────────
+  // Full controls: FY · YTD · Q1–Q4 · Full Year · months · Last 7d · Today · Custom
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
       {/* Row 1: FY + presets + month pills + special modes */}
       <div className="flex flex-wrap items-center gap-1.5">
         {/* FY selector */}
-        <Select value={fy} onValueChange={setFy}>
-          <SelectTrigger className="h-7 w-[108px] text-xs font-semibold border-border">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {availableFys.map((f) => (
-              <SelectItem key={f} value={f} className="text-xs">
-                {f}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {FySelector}
 
         <span className="text-border/60 select-none text-sm">|</span>
 
@@ -311,39 +396,7 @@ export default function GlobalFilterBar({ hideSyncRow, className }: GlobalFilter
       </div>
 
       {/* Row 2: Sync status + refresh */}
-      {!hideSyncRow && (
-        <div className="flex items-center gap-3 flex-wrap">
-          <span
-            className={cn(
-              "text-xs font-medium px-2 py-0.5 rounded inline-flex items-center gap-1",
-              isLive
-                ? "bg-primary/10 text-primary"
-                : "bg-muted text-muted-foreground",
-            )}
-          >
-            <span className={cn("w-1.5 h-1.5 rounded-full", isLive ? "bg-primary" : "bg-muted-foreground")} />
-            {isLive ? "Live" : "Baseline"}
-          </span>
-
-          <span className="text-xs text-muted-foreground flex items-center gap-1">
-            <Clock className="w-3 h-3" />
-            Last synced: {fmtSyncedAt(syncedAt)}
-          </span>
-
-          {refreshError && (
-            <span className="text-xs text-destructive">{String(refreshError)}</span>
-          )}
-
-          <button
-            onClick={refresh}
-            disabled={isRefreshing}
-            className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-medium hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <RefreshCw className={cn("w-3 h-3", isRefreshing && "animate-spin")} />
-            {isRefreshing ? "Refreshing…" : "Refresh"}
-          </button>
-        </div>
-      )}
+      {!hideSyncRow && <SyncRow />}
     </div>
   );
 }

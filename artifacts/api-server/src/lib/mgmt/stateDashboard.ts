@@ -985,11 +985,13 @@ async function loadStateDashboardUncached(fy: string, nowMs = Date.now(), skipPe
   let totalOrderBooked = 0;
   let totalSalesReceived = 0;
   let totalDealers = 0;
+  let totalMonthlyTarget = 0;
   let ytdPlanSum = 0;
   let ytdSalesSum = 0;
 
   for (const m of members) {
     if (m.totalDealers != null) totalDealers += m.totalDealers;
+    if (m.monthlyTarget != null) totalMonthlyTarget += m.monthlyTarget;
     if (m.businessPlan != null) totalPlan += m.businessPlan;
     // allMonths* covers every month (open+closed, anomalous included).
     totalOrderBooked += m.allMonthsOrderBooked;
@@ -1031,6 +1033,51 @@ async function loadStateDashboardUncached(fy: string, nowMs = Date.now(), skipPe
       },
       "stateDashboard: computed Sales does not tie to sheet TOTAL row",
     );
+  }
+
+  // ── I/J cross-check ────────────────────────────────────────────────────────
+  // Excel columns I (cols.monthlyTarget) and J (cols.totalDealers) are the ONLY
+  // cells in the TOTAL row that carry valid (non-#REF!) numeric values.  We use
+  // them as a structural integrity check: if our sum of member values for those
+  // same columns matches the sheet's TOTAL row, we have read all member rows.
+  // This check fires even when the OB/Sales cross-check is blocked by formula errors.
+  if (totalRowFoundAtIdx !== null) {
+    const totalRowRaw = allRows[totalRowFoundAtIdx] ?? [];
+    const sheetColI = cellNum(totalRowRaw[cols.monthlyTarget]);   // Excel column I
+    const sheetColJ = cellNum(totalRowRaw[cols.totalDealers]);    // Excel column J
+
+    if (sheetColI !== null || sheetColJ !== null) {
+      const gapI = sheetColI !== null ? Math.abs(sheetColI - totalMonthlyTarget) : null;
+      const gapJ = sheetColJ !== null ? Math.abs(sheetColJ - totalDealers) : null;
+      const matchI = gapI !== null ? gapI <= 1 : null;
+      const matchJ = gapJ !== null ? gapJ <= 1 : null;
+      const allMatch = (matchI === null || matchI) && (matchJ === null || matchJ);
+
+      if (!allMatch) {
+        logger.warn(
+          {
+            fy,
+            sheetColI: sheetColI ?? null,
+            computedColI: Math.round(totalMonthlyTarget),
+            gapI: gapI !== null ? Math.round(gapI) : null,
+            sheetColJ: sheetColJ ?? null,
+            computedColJ: Math.round(totalDealers),
+            gapJ: gapJ !== null ? Math.round(gapJ) : null,
+          },
+          "stateDashboard: I/J cross-check mismatch — member rows may have been skipped",
+        );
+      } else {
+        logger.info(
+          {
+            fy,
+            colI: sheetColI ?? totalMonthlyTarget,
+            colJ: sheetColJ ?? totalDealers,
+            members: members.length,
+          },
+          "stateDashboard: I/J cross-check passed — all member rows accounted for",
+        );
+      }
+    }
   }
 
   logger.info(
