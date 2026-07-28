@@ -25,6 +25,7 @@ import {
   getLastSyncedAt,
 } from "../lib/customers/registerSync.js";
 import { computeAllMultipliers } from "../lib/customers/laspeyres.js";
+import { getSplit } from "../lib/headSplits.js";
 import {
   listSchemes,
   getScheme,
@@ -109,8 +110,18 @@ router.get("/customers/performance", async (req, res) => {
     const rows = await listCustomers({ fyCy, fyLy, monthsCy, monthsLy, entityType, states, head });
     const elapsed = calcPctElapsed(monthsCy);
     const projectFactor = elapsed > 0 ? SEASONAL_TOTAL / elapsed : null;
+
+    // Detect cross-FY head_canon key split.  When the head parameter names a
+    // territory manager whose head_canon changed between fyLy and fyCy, the LY
+    // filter in listCustomers returns zero rows — a false 100%-loss signal.
+    // The caller should suppress the LY panel rather than display zeros.
+    const headYoySplit = head ? getSplit(head, fyCy, fyLy) : null;
+
     res.json({
       fyCy, fyLy, monthsCy, monthsLy, entityType, data: rows,
+      headYoySplit: headYoySplit
+        ? { priorCanon: headYoySplit.priorCanon, splitFromFy: headYoySplit.splitFromFy }
+        : null,
       seasonalProjection: {
         completedMonths: monthsCy,
         pctElapsed: Math.round(elapsed * 10) / 10,

@@ -88,6 +88,8 @@ export default function CustomersPage() {
   const [rankData, setRankData] = useState<CustomerRow[]>([]);
   const [rankLoading, setRankLoading] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
+  // Set when the active head filter has a cross-FY key split; LY columns are suppressed.
+  const [headYoySplit, setHeadYoySplit] = useState<{ priorCanon: string; splitFromFy: string } | null>(null);
 
   // Seasonal projection for the current period
   const [seasonalProjection, setSeasonalProjection] = useState<{
@@ -196,6 +198,7 @@ export default function CustomersPage() {
       .then((r) => r.json())
       .then((d) => {
         setRankData(d.data ?? []);
+        setHeadYoySplit(d.headYoySplit ?? null);
         if (d.seasonalProjection) {
           setSeasonalProjection({
             pctElapsed: d.seasonalProjection.pctElapsed ?? 0,
@@ -336,6 +339,7 @@ export default function CustomersPage() {
                 selectedCustomer={selectedCustomer}
                 fyCy={fyCy}
                 fyLy={fyLy}
+                headYoySplit={headYoySplit}
               />
             </div>
             {selectedCustomer && (

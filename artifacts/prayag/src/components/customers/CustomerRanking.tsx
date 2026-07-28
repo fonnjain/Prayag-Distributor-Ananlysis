@@ -95,6 +95,7 @@ export default function CustomerRanking({
   selectedCustomer,
   fyCy,
   fyLy,
+  headYoySplit,
 }: {
   data: CustomerRow[];
   loading: boolean;
@@ -102,6 +103,8 @@ export default function CustomerRanking({
   selectedCustomer: string | null;
   fyCy: string;
   fyLy: string;
+  /** When set, the active head filter has a cross-FY key split — LY columns are suppressed. */
+  headYoySplit?: { priorCanon: string; splitFromFy: string } | null;
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("qtyCy");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -148,9 +151,24 @@ export default function CustomerRanking({
   }
 
   const shrinkerCount = data.filter((r) => r.revenueUpVolumeDown).length;
+  // When a cross-FY key split is active, prior-year LY columns are meaningless
+  // (they would show zero because the old head_canon is different).  Suppress
+  // them entirely rather than mislead with a false 100%-loss signal.
+  const showLy = !headYoySplit;
 
   return (
     <div>
+      {headYoySplit && (
+        <div className="mb-3 flex items-center gap-2 rounded-md border border-blue-300 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-700 dark:bg-blue-950 dark:text-blue-200">
+          <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+          <span>
+            Prior-year comparison suppressed.{" "}
+            This head was recorded as <strong>{headYoySplit.priorCanon}</strong> in {fyLy} — a different{" "}
+            <code className="font-mono text-xs">head_canon</code> key. LY columns are hidden until the alias is confirmed
+            and applied.
+          </span>
+        </div>
+      )}
       {shrinkerCount > 0 && (
         <div className="mb-3 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
           <AlertTriangle className="h-4 w-4 flex-shrink-0" />
@@ -169,17 +187,17 @@ export default function CustomerRanking({
               <SortTh col="state" label="State" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="left" />
               {/* UNITS FIRST */}
               <SortTh col="qtyCy" label={`Qty ${fyCy}`} sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-              <SortTh col="qtyLy" label={`Qty ${fyLy}`} sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-              <SortTh col="qtyGrowthPct" label="Qty %" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+              {showLy && <SortTh col="qtyLy" label={`Qty ${fyLy}`} sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />}
+              {showLy && <SortTh col="qtyGrowthPct" label="Qty %" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />}
               {/* VALUE */}
               <SortTh col="valCy" label={`Value ${fyCy}`} sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-              <SortTh col="valLy" label={`Value ${fyLy}`} sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-              <SortTh col="valGrowthPct" label="Value %" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+              {showLy && <SortTh col="valLy" label={`Value ${fyLy}`} sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />}
+              {showLy && <SortTh col="valGrowthPct" label="Value %" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />}
               {/* PRICE */}
               <SortTh col="priceCy" label={`Price ${fyCy}`} sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-              <SortTh col="priceLy" label={`Price ${fyLy}`} sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-              <SortTh col="priceChangePct" label="Price %" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-              <SortTh col="priceEffectPp" label="Price effect" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+              {showLy && <SortTh col="priceLy" label={`Price ${fyLy}`} sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />}
+              {showLy && <SortTh col="priceChangePct" label="Price %" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />}
+              {showLy && <SortTh col="priceEffectPp" label="Price effect" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />}
               <TableHead />
             </TableRow>
           </TableHeader>
@@ -213,36 +231,50 @@ export default function CustomerRanking({
                 <TableCell className="text-right font-mono">
                   {fmtQty(row.qtyCy)}
                 </TableCell>
-                <TableCell className="text-right font-mono text-muted-foreground">
-                  {fmtQty(row.qtyLy)}
-                </TableCell>
-                <TableCell className={`text-right font-mono ${pctColor(row.qtyGrowthPct)}`}>
-                  {fmtPct(row.qtyGrowthPct)}
-                </TableCell>
+                {showLy && (
+                  <TableCell className="text-right font-mono text-muted-foreground">
+                    {fmtQty(row.qtyLy)}
+                  </TableCell>
+                )}
+                {showLy && (
+                  <TableCell className={`text-right font-mono ${pctColor(row.qtyGrowthPct)}`}>
+                    {fmtPct(row.qtyGrowthPct)}
+                  </TableCell>
+                )}
                 {/* VALUE */}
                 <TableCell className="text-right font-mono">
                   {fmtVal(row.valCy)}
                 </TableCell>
-                <TableCell className="text-right font-mono text-muted-foreground">
-                  {fmtVal(row.valLy)}
-                </TableCell>
-                <TableCell className={`text-right font-mono ${pctColor(row.valGrowthPct)}`}>
-                  {fmtPct(row.valGrowthPct)}
-                </TableCell>
+                {showLy && (
+                  <TableCell className="text-right font-mono text-muted-foreground">
+                    {fmtVal(row.valLy)}
+                  </TableCell>
+                )}
+                {showLy && (
+                  <TableCell className={`text-right font-mono ${pctColor(row.valGrowthPct)}`}>
+                    {fmtPct(row.valGrowthPct)}
+                  </TableCell>
+                )}
                 {/* PRICE */}
                 <TableCell className="text-right font-mono">
                   {fmtPrice(row.priceCy)}
                 </TableCell>
-                <TableCell className="text-right font-mono text-muted-foreground">
-                  {fmtPrice(row.priceLy)}
-                </TableCell>
-                <TableCell className={`text-right font-mono ${pctColor(row.priceChangePct)}`}>
-                  {fmtPct(row.priceChangePct)}
-                </TableCell>
+                {showLy && (
+                  <TableCell className="text-right font-mono text-muted-foreground">
+                    {fmtPrice(row.priceLy)}
+                  </TableCell>
+                )}
+                {showLy && (
+                  <TableCell className={`text-right font-mono ${pctColor(row.priceChangePct)}`}>
+                    {fmtPct(row.priceChangePct)}
+                  </TableCell>
+                )}
                 {/* PRICE EFFECT — how much of value growth was price, not volume */}
-                <TableCell className={`text-right font-mono ${pctColor(row.priceEffectPp, true)}`}>
-                  {fmtPp(row.priceEffectPp)}
-                </TableCell>
+                {showLy && (
+                  <TableCell className={`text-right font-mono ${pctColor(row.priceEffectPp, true)}`}>
+                    {fmtPp(row.priceEffectPp)}
+                  </TableCell>
+                )}
                 <TableCell>
                   {row.revenueUpVolumeDown && (
                     <Badge className="text-xs bg-red-100 text-red-700 border border-red-300 dark:bg-red-950 dark:text-red-300">

@@ -6,10 +6,18 @@ import type { RetailerRow } from "../memberSheet.js";
 import type { WarningCard, WarningSeverity, WarningTrend } from "./types.js";
 
 // ── Known cross-FY key splits ─────────────────────────────────────────────────
-// Keys that differ between consecutive fiscal years; YoY comparisons for these
-// are unreliable.
+// head_canon values that differ between consecutive FYs; YoY comparisons for
+// these heads return zero for the prior year instead of real data.
+// All six pairs were confirmed as never co-existing in the same FY (DB diff).
+// Source of truth: src/lib/headSplits.ts — this map is a local copy for the
+// warnings engine (avoids an async import).
 const CROSS_FY_KEY_SPLITS: Record<string, string> = {
-  "sandeep dadheech": "Sandeep Ji (FY2025-26 key) — keys differ between FYs",
+  "sandeep dadheech":   "Sandeep Ji (FY2025-26 canon) — head key changed in FY2026-27",
+  "syed aqil rizvi":    "Rizvi Ji (FY2025-26 canon) — head key changed in FY2026-27",
+  "pawan sharma":       "Pawan Kumar (FY2025-26 canon) — head key changed in FY2026-27",
+  "biju c.o":           "Bijju (FY2025-26 canon) — head key changed in FY2026-27",
+  "lalan kumar":        "Lalan (FY2025-26 canon) — head key changed in FY2026-27",
+  "nasir hussain khan": "Nasir Husain (FY2025-26 canon) — head key changed in FY2026-27",
 };
 
 function normKey(name: string): string {

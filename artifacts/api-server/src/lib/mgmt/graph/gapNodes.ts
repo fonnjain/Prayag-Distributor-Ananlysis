@@ -60,13 +60,15 @@ export const GAP_NODE_REGISTRY: GapNodeMeta[] = [
 ];
 
 // Known cross-FY key splits that produce CROSS_FY_KEY_SPLIT flags.
+// All six pairs confirmed as never co-existing in the same FY (DB diff, Jul 2026).
+// Source of truth: src/lib/headSplits.ts — keep in sync when adding new pairs.
 export const KNOWN_KEY_SPLITS = [
-  {
-    level: "head" as const,
-    name: "Sandeep Dadheech",
-    missingIn: "2025-26",
-    alias: "Sandeep Ji",
-  },
+  { level: "head" as const, name: "Sandeep Dadheech",  missingIn: "2025-26", alias: "Sandeep Ji"         },
+  { level: "head" as const, name: "Syed Aqil Rizvi",   missingIn: "2025-26", alias: "Rizvi Ji"           },
+  { level: "head" as const, name: "Pawan Sharma",       missingIn: "2025-26", alias: "Pawan Kumar"        },
+  { level: "head" as const, name: "Biju C.O",           missingIn: "2025-26", alias: "Bijju"              },
+  { level: "head" as const, name: "Lalan Kumar",        missingIn: "2025-26", alias: "Lalan"              },
+  { level: "head" as const, name: "Nasir Hussain Khan", missingIn: "2025-26", alias: "Nasir Husain"       },
 ];
 
 // Build a gap GraphNode from its registry entry.
