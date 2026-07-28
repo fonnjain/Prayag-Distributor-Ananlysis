@@ -646,7 +646,13 @@ export function buildMemberPayload(
   const annualTotal      = monthlyTotal     != null ? monthlyTotal     * 12 : null;
 
   // ── performance ────────────────────────────────────────────────────────────
-  const secondaryOB   = kpis.orderBooking;
+  // secondaryOB = old-party OB + new-party OB (both are secondary/retailer bookings).
+  // directDealerOB = primary direct-dealer bookings.  totalOB = all three.
+  // The dashboard ACHIEVEMENT column = secondaryOB + directDealerOB (= totalOB here).
+  const secondaryOB =
+    kpis.orderBooking != null || kpis.newPartyOrderBooking != null
+      ? (kpis.orderBooking ?? 0) + (kpis.newPartyOrderBooking ?? 0)
+      : null;
   const directDealerOB = kpis.directDealersOrder;
   const totalOB =
     secondaryOB != null || directDealerOB != null
@@ -920,7 +926,10 @@ export function buildStateHeadPayload(
   );
 
   // Sum performance across all members.
-  const secondaryOB    = members.reduce((s, m) => s + (m.orderBooking ?? 0), 0);
+  // secondaryOB = old-party + new-party OB (both are retailer/secondary bookings).
+  const secondaryOB    = members.reduce(
+    (s, m) => s + (m.orderBooking ?? 0) + (m.newPartyOrderBooking ?? 0), 0,
+  );
   const directDealerOB = members.reduce((s, m) => s + (m.directDealersOrder ?? 0), 0);
   const totalOB        = secondaryOB + directDealerOB;
   const salesReceived  = members.reduce((s, m) => s + (m.sale ?? 0), 0);
@@ -935,8 +944,16 @@ export function buildStateHeadPayload(
     ? monthlyTotal - monthlyPrimary : null;
 
   // Coverage from Data tab.
-  const retailersTotal = members.reduce((s, m) => s + (m.totalOldRetailers ?? 0), 0) || null;
-  const visited        = members.reduce((s, m) => s + (m.visitedRetailers ?? 0), 0) || null;
+  // retailersTotal: uses totalRetailers (dashboard total, old + new party) — matches dashboard 748.
+  //   Do NOT use totalOldRetailers here; that column gives only old-party retailers (679).
+  const retailersTotal = members.reduce((s, m) => s + (m.totalRetailers ?? 0), 0) || null;
+  // visited: uses totalVisitsYtd (dashboard col AF, all visit types: retailer + distributor + DD + leads)
+  //   = 4,522 for Anant Singh active-10.  Distinct from:
+  //   - visitedRetailers (VISITEDINAMONTH, unique retailers visited that month) = 665
+  //   - working-sheet visits.done (retailer-only YTD visits from Summary Report) = 2,819
+  const visited        = members.reduce(
+    (s, m) => s + (m.totalVisitsYtd ?? m.visitedRetailers ?? 0), 0,
+  ) || null;
   const nonVisited     = members.reduce((s, m) => s + (m.nonVisitedRetailers ?? 0), 0) || null;
 
   // Achievement.

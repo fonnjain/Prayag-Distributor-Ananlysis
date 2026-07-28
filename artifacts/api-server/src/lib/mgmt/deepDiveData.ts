@@ -125,6 +125,10 @@ export type MemberKpis = {
   businessPerRetailer: number | null;
   totalRetailers: number | null;
   directDealersCount: number | null;
+  // AF: Total all-type YTD visits (retailer + distributor + DD + leads) — dashboard col AF.
+  // Distinct from visitedRetailers (unique retailers visited in a month) and from
+  // the working-sheet retailer-visits-only figure (sheet.visits.done).
+  totalVisitsYtd: number | null;
   // Extra fields read from header (catch-all for any additional columns)
   extra: Record<string, number | string | null>;
 };
@@ -174,6 +178,7 @@ type ColMap = {
   businessPerRetailer: number;
   totalRetailers: number;
   directDealersCount: number;
+  totalVisitsYtd: number;        // AF: Total all-type YTD visits (retailer + distributor + DD + leads)
   // Phase 7: new target / comparison columns
   primaryTargetMonthly: number;  // BK: Monthly Direct Dealer Primary Target
   totalTargetToDate: number;     // BM: Total target to date
@@ -286,6 +291,9 @@ function detectCols(headerRow: SheetCellValue[]): ColMap | null {
       "RETAILERAVG", "AVGBUSINESS",
     ),
     totalRetailers:     find("TOTALRETAILERS", "GRANDTOTALRETAILERS"),
+    // AF: Total visits YTD across all visit types (retailer + distributor + DD + leads).
+    // Lives in the State Head Dashboard Data tab as "Total Visits".
+    totalVisitsYtd:     find("TOTALVISITS", "YTDVISITS", "TOTALVISITSYTD"),
     directDealersCount: find(
       "DIRECTDEALERS", "DIRECTDEALERCOUNT", "DEALERCOUNT", "DEALERS",
     ),
@@ -714,6 +722,7 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
       businessPerRetailer:  cols.businessPerRetailer >= 0 ? cellNum(row[cols.businessPerRetailer]) : null,
       totalRetailers:       cols.totalRetailers >= 0 ? cellNum(row[cols.totalRetailers]) : null,
       directDealersCount:   cols.directDealersCount >= 0 ? cellNum(row[cols.directDealersCount]) : null,
+      totalVisitsYtd:       cols.totalVisitsYtd >= 0 ? cellNum(row[cols.totalVisitsYtd]) : null,
       extra,
     });
   }

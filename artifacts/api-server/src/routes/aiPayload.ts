@@ -111,18 +111,25 @@ router.get("/ai/payload", async (req: Request, res: Response): Promise<void> => 
         (k): k is NonNullable<typeof k> => k !== null,
       );
 
+      // Exclude LEFT members from the aggregate — they inflate OB, targets, and
+      // retailer/visit counts with their partial-tenure figures.
+      const activeKpis = validKpis.filter((k) => !k.isLeft);
+      const payloadKpis = activeKpis.length > 0 ? activeKpis : validKpis;
+      const leftCount   = validKpis.length - payloadKpis.length;
+
       const payload = buildStateHeadPayload(
         fy,
-        head ?? (validKpis[0]?.stateHead ?? "Unknown"),
+        head ?? (payloadKpis[0]?.stateHead ?? "Unknown"),
         period,
-        validKpis,
+        payloadKpis,
       );
 
       req.log.info(
         {
           fy,
           stateHead: head,
-          memberCount: validKpis.length,
+          memberCount: payloadKpis.length,
+          departedExcluded: leftCount,
           secondaryOB: payload.performance.secondaryOB,
           directDealerOB: payload.performance.directDealerOB,
           salesReceived: payload.performance.salesReceived,
