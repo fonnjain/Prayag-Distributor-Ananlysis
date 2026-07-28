@@ -1,0 +1,149 @@
+# Prayag Distributor Analysis — post-merge check and pack regeneration
+
+*Two parts. Part A verifies that the five head merges did not break anything. Part B closes PA3 by producing the pack that was verified but never generated.*
+
+---
+
+## Why now
+
+Five `head_canon` UPDATEs have just rewritten **19,480 invoice rows** across four fiscal years. Every year-on-year figure in the application that groups by head has changed as a result — correctly, but changed. Nothing has been checked since.
+
+Separately, **PA3 verified the Anant Singh payload but never produced a pack.** The zip in circulation still contains a full member report and a forward visit plan for Jagdev, who is marked LEFT. That is the oldest known-wrong artifact outstanding.
+
+---
+
+## Part A — verify the merges
+
+### A1. Confirm the merged canons hold
+
+Report for each, across all four fiscal years:
+
+| head_canon | invoices | customers | ₹ Cr |
+|---|---|---|---|
+| Sandeep Dadheech | 10,017 | 128 | 498.99 |
+| Syed Aqil Rizvi | 6,518 | 126 | 160.50 |
+| Biju C.O | 906 | 25 | 50.80 |
+| Lalan Kumar | 1,523 | 64 | 34.37 |
+| Nasir Hussain Khan | 516 | 46 | 9.93 |
+
+Confirm the five old canons — `Sandeep Ji`, `Rizvi Ji`, `Bijju`, `Lalan`, `Nasir Husain` — now return **zero rows**. A residual row under an old name would sit outside every per-head view.
+
+### A2. Confirm nothing was lost company-wide
+
+The merges moved rows between canons; they must not have changed any total.
+
+- Total `sale_line` rows per fiscal year, before and after
+- Total amount per fiscal year, before and after
+- **FY2024-25 must still read ₹341.14 Cr and FY2025-26 ₹359.52 Cr**
+
+If either moved, the UPDATE touched more than `head_canon`.
+
+### A3. Confirm the year-on-year panels now populate
+
+For each of the five merged heads, report FY2025-26 and FY2026-27 side by side and confirm the prior year is **no longer zero**. Sandeep Dadheech should show roughly ₹163 Cr against ₹41 Cr, not ₹0.
+
+Confirm the `CROSS_FY_KEY_SPLIT` flag has **cleared** for those five and **remains active** for Pawan Sharma.
+
+### A4. Pawan stays paused — but correct the stated reason
+
+The recorded justification is a 6× customer contraction, 152 → 21. That compares **three fiscal years cumulative against one quarter**. Like-for-like, FY2025-26 to FY2026-27 Q1:
+
+| Head | Customers retained | Status |
+|---|---|---|
+| Syed Aqil Rizvi | 82% | merged |
+| Sandeep Dadheech | 78% | merged |
+| Lalan Kumar | 76% | merged |
+| Nasir Hussain Khan | 56% | merged |
+| **Pawan Sharma** | **47%** | **paused** |
+| Biju C.O | **45%** | merged |
+
+Bijju retained less and was merged. **Pawan is not a numerical outlier.**
+
+Keep the pause, but record the real reason: **the surname**. Five pairs are honorific-to-full-name, a spelling variant, or an added surname. `Kumar` to `Sharma` is none of those, and only the business can settle it.
+
+Also note in the record: Pawan Sharma has 11 members of whom **3 are marked LEFT** — the highest departure rate of any head — which would explain a customer drop with no identity question involved.
+
+---
+
+## Part B — regenerate the Anant Singh pack
+
+Generate the full pack for **Anant Singh, FY2026-27, year to date**: State Head report, member reports, suggestions, visit plans, performance reviews and the deck.
+
+### B1. Expect these figures to differ from the previous pack
+
+They differ because bugs were fixed, not because data moved. State this in the pack's own README or cover so nobody reads it as performance change.
+
+| Change | Effect |
+|---|---|
+| Three LEFT members excluded | 13 members → **10** |
+| New-party order booking now included | **+₹25.77 L**, 11.7% of secondary that was being dropped |
+| Removed retailers separated from active | 224 across the team no longer inflating retailer counts |
+| Period stamping added | Every document carries period, cutoff and generation time |
+
+Head-split merges do **not** affect Anant Singh — he was never split.
+
+### B2. Acceptance figures
+
+**Team, active-10 basis:**
+
+- Order booking **₹2.35 Cr** (₹23,549,308)
+- Sales received **₹2.41 Cr**
+- Target to date **₹4.03 Cr**
+- Achievement **58.4%**
+- Visits **4,522** (dashboard column AF)
+- Retailers **748** (dashboard column N)
+
+**Prasun Chatterjee, all seven controls to the rupee:**
+
+- 73 retailers, 34 active
+- Order booking ₹26,21,109
+- Sales received ₹26,13,934
+- 395 visits against 1,704 required
+- Top-5 share 64.0%
+- Effective retailers 9.9
+- Cost ratio 5.94%
+
+**Removed retailers, now reported separately:**
+
+Ravinder Puri 64 · Prasun Chatterjee 47 · Manish Gupta 39 · Shivam Chauhan 58 · Ravi (Faridabad) 11 · Rinku 5 · the other four zero. **Total 224.**
+
+### B3. Mandatory content checks
+
+- **No visit plan** for Jagdev, Shiv Kumar or Ravi Upadhyay
+- The three are **named as departed** in the State Head report, with their historical business preserved
+- The report **states in words** that achievement rising from 51.7% to 58.4% is organisational, not commercial
+- Every document carries its period, data cutoff and generation time
+- Filenames and the batch folder carry the actual period covered
+- No false mismatch banner with year-to-date selected
+- Removed retailers appear as **former retailers**, labelled by **last active year** — not "year of removal", since the sheet holds no removal date
+
+---
+
+## Acceptance
+
+Report each with the produced value, never an assertion of success.
+
+- [ ] Five merged canons match the A1 table; the five old canons return zero rows
+- [ ] FY totals unchanged: FY2024-25 ₹341.14 Cr, FY2025-26 ₹359.52 Cr
+- [ ] Year-on-year populates for all five merged heads; the flag clears for them and holds for Pawan
+- [ ] The Pawan pause reason is corrected in the record
+- [ ] The pack contains 10 member reports and no visit plan for the three departed
+- [ ] Team figures match B2
+- [ ] Prasun reproduces all seven controls
+- [ ] Removed counts match B3, labelled by last active year
+- [ ] The State Head report explains the achievement move as organisational
+- [ ] Every document carries period, cutoff and generation time
+
+---
+
+## What to watch
+
+**A2 is the check that matters most.** The merges rewrote 19,480 rows. If a fiscal-year total has moved even slightly, the UPDATE touched something beyond `head_canon`, and that would be far more serious than the problem it was fixing.
+
+**Do not let the Pawan pause quietly become permanent.** It needs a business answer, not more analysis — the numbers have already been examined and do not settle it.
+
+**The regenerated pack should be compared against the old one field by field**, and every difference should trace to one of the four changes in B1. A difference that traces to none of them is a regression.
+
+---
+
+*Prayag Distributor Analysis · data cutoff 30 June 2026 · figures verified against source*

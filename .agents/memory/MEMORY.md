@@ -49,6 +49,7 @@
 - [Phase A4 visit plan + deck architecture](phase-a4-deck-visitplan.md) — pool splice fix, unassigned exclusion, poolExhausted, 27-slide A4A format, memberSummary from MemberKpis.
 - [PS1 Ashutosh Kumar joinKey collision](ps1-ashutosh-kumar-collision.md) — RECONCILED; secByKeyMulti + secLookup fix applied; Rudrapur is genuine member; secondaryReadAt timestamp in API meta; TOTAL row #REF! formula errors block cross-check.
 - [Phase A8 metrics graph architecture](a8-graph-architecture.md) — graph routes + graph-traversal Analyst; field name corrections; acceptance anchors verified; A8-C not yet built.
+- [Presentation route streaming requirement](presentation-streaming.md) — A4A 27-slide deck needs max_tokens=32000; Anthropic SDK requires streaming for >10-min requests; use messages.stream() not messages.create().
 - [Warning System W1 architecture](warning-system-w1.md) — GET /api/warnings route; cold-start ~9s (Sheets loads), warm cache ~21ms; skipExtras=true skips winBack+skuSpread.
 - [detectCols return-then-mutate trap](detectcols-return-trap.md) — esbuild never reports TS errors; dead code after `return {...}` silently runs (it doesn't). Use `const colMap = {...}` then mutate then `return colMap`.
 - [PA1 period capability system](pa1-period-capability.md) — FULL/FY_ONLY/NONE declared in period-capability.ts; GlobalFilterProvider is inside WouterRouter; I/J cross-check added to stateDashboard.

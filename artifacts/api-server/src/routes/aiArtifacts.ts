@@ -708,12 +708,14 @@ router.post("/ai/presentation", async (req: Request, res: Response): Promise<voi
       `Member summary — active members only, sorted by totalOB descending, verified, cite freely (JSON):\n${JSON.stringify(memberSummary, null, 2)}` +
       a4aDepartedContext;
 
-    const a4aMessage = await anthropic.messages.create({
-      model: MODEL, max_tokens: MAX_TOKENS,
+    // Use streaming: 32000 max_tokens exceeds the SDK non-streaming 10-min threshold
+    const a4aStream = await anthropic.messages.stream({
+      model: MODEL, max_tokens: 32000,
       system: PRESENTATION_PROMPT_A4A,
       messages: [{ role: "user", content: a4aUserMsg }],
     });
-    const a4aRawJson = a4aMessage.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
+    const a4aFinal = await a4aStream.finalMessage();
+    const a4aRawJson = a4aFinal.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
     const a4aDeck = JSON.parse(stripFences(a4aRawJson)) as {
       deckTitle: string; deckSubtitle: string;
       teamSlides: unknown[]; memberSlides: unknown[]; closingSlides: unknown[];

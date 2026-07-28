@@ -34,10 +34,13 @@ export type HeadSplit = {
  *   Nasir Husain    → Nasir Hussain Khan (   516 inv / ₹9.93 Cr)
  */
 export const CROSS_FY_SPLITS: Record<string, HeadSplit> = {
-  // Pending business confirmation: roster shows "Pawan Kumar Sharma" which may
-  // explain "Pawan Kumar" (FY2023-24 – FY2025-26) and "Pawan Sharma" (FY2026-27)
-  // as partial forms of the same person, but customer count halves (152 → 21)
-  // where other heads drop far less.  Do not apply UPDATE until confirmed.
+  // Pending business confirmation. The surname change (Kumar → Sharma) is unlike
+  // the five applied pairs (honorific→full name, spelling variant, added initial).
+  // Like-for-like FY2025-26 → FY2026-27 Q1 retention is ~33%, which is similar
+  // to Biju C.O (45%) — which WAS merged. So retention alone is not the reason
+  // to hold. The real reason: we cannot confirm without the business whether
+  // "Pawan Kumar Sharma" (roster) is one person with a two-part surname, or a
+  // replacement. Do not apply UPDATE until that is confirmed.
   // head_alias.json already aligned: "PAWAN KUMAR." now → "Pawan Sharma".
   "Pawan Sharma": { currentCanon: "Pawan Sharma", priorCanon: "Pawan Kumar", splitFromFy: "2026-27" },
 };

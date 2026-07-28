@@ -45,6 +45,12 @@ All verified: never co-exist in the same FY → safe alias candidates.
 
 Verified: invoice counts before + after match exactly for all five. Customers (distinct) are slightly lower than the sum due to shared customers across FYs.
 
+## Pawan Kumar / Pawan Sharma — hold reason (corrected Jul 28 2026)
+
+Like-for-like FY2025-26 → FY2026-27 Q1 retention is ~33%, which is **similar to Biju C.O (45%) — which was merged**. Retention is therefore not the reason to hold. The earlier "152 → 21 customer drop" figure was incorrect: it compared three-year cumulative against one quarter.
+
+**Real hold reason:** the surname change (Kumar → Sharma) does not match any of the five applied patterns (honorific→full name, spelling variant, added initial). The roster entry "Pawan Kumar Sharma" may mean one person with a two-part surname, or it may be a replacement. Business must confirm before the UPDATE is applied.
+
 ## head_alias.json fix (Jul 28 2026)
 
 `"PAWAN KUMAR."` → was `"Pawan Kumar"`, now `"Pawan Sharma"` — trailing-period variant now consistent with `"PAWAN KUMAR"`. Only affects future ingestion; historical rows stay as `"Pawan Kumar"` until the UPDATE is confirmed.
