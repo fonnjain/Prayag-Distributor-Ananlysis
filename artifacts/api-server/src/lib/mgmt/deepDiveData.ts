@@ -509,6 +509,18 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
       if (detected) {
         headerIdx = i;
         cols = detected;
+        logger.info(
+          {
+            fy,
+            headerRow: i,
+            saleColIdx: detected.sale,
+            saleColHeader: detected.rawHeaders[detected.sale] ?? "(none)",
+            orderBookingColIdx: detected.orderBooking,
+            orderBookingColHeader: detected.rawHeaders[detected.orderBooking] ?? "(none)",
+            totalCols: detected.rawHeaders.length,
+          },
+          "deepDiveData: column detection result",
+        );
         break;
       }
     }
@@ -860,47 +872,6 @@ export async function loadDeepDiveData(
       kpis = entry.allMembers.find((m) => m.normKey === selectedMemberKey) ?? null;
     }
     if (kpis) {
-      // Override kpis.sale from stateDashboard ytdSalesReceived when the two sources differ.
-      //
-      // Root cause: the SALEREPORT2627 column in the Data tab is a formula that
-      // can reference only the member's own working sheet (on-roll retailers)
-      // rather than the full secondary register total. The stateDashboard reads
-      // the monthly block entries entered by the state head — a complete
-      // accounting of the secondary register.
-      //
-      // Example: Tarun Giri's SALEREPORT2627 formula reads 16,47,589 (member
-      // sheet sub-total for his 54 on-roll retailers). The secondary register and
-      // stateDashboard ytdSalesReceived = 32,95,178 (all buyers including those
-      // not on his roll). The formula is reading half the actual figure.
-      // The fix is NOT to send anyone to repair Rahul Singh's cell (Rahul's
-      // null is correct — his member sheet totalSale = 0). It is THIS override.
-      const sd = getCachedStateDashboard(fy);
-      if (sd) {
-        const sdRow = sd.members.find((m) => m.normKey === kpis!.normKey);
-        // Prefer allMonthsSalesReceived: includes the current (open) month when the
-        // state head has already entered figures, so it matches the dashboard total
-        // column AY that includes all months to date, not just closed months.
-        // Fall back to ytdSalesReceived if allMonthsSalesReceived is zero or absent.
-        const sdSale = sdRow
-          ? (sdRow.allMonthsSalesReceived > 0
-              ? sdRow.allMonthsSalesReceived
-              : (sdRow.ytdSalesReceived ?? null))
-          : null;
-        if (sdSale != null && sdSale !== kpis.sale) {
-          logger.info(
-            {
-              fy,
-              member: kpis.name,
-              dataSale: kpis.sale,
-              sdSale,
-              sdAllMonths: sdRow?.allMonthsSalesReceived,
-              sdYtd: sdRow?.ytdSalesReceived,
-            },
-            "deepDiveData: kpis.sale overridden from stateDashboard (SALEREPORT2627 undercount)",
-          );
-          kpis = { ...kpis, sale: sdSale };
-        }
-      }
       // Log the parsed row for proof (per rule 12: never trust a self-report of success).
       logger.info(
         { fy, member: kpis.name, stateHead: kpis.stateHead, kpis },
