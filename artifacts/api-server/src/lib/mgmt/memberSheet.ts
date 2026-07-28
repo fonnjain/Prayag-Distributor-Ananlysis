@@ -62,6 +62,16 @@ const MEMBER_FILE_MAP: Record<string, string> = Object.fromEntries(
 
 const SUMMARY_TAB_PREFIX = "SUMMARY REPORT";
 
+// Normalized column-B (or column-C) tokens that mark a section header row
+// separating the active-retailer list from a "Removed Parties" section.
+// Either column is checked so the detection works regardless of which cell
+// the member used.
+const SECTION_HEADER_TOKENS = new Set([
+  "REMOVEDPARTIES", "REMOVEDRETAILERS", "REMOVEDACCOUNTS",
+  "DELETEDPARTIES", "INACTIVEPARTIES", "FORMERPARTIES",
+  "REMOVEDRETAILER", "REMOVEDCUSTOMER", "REMOVEDCUSTOMERS",
+]);
+
 // ── Default column indices (0-indexed) ────────────────────────────────────────
 // Used as fallback when header detection cannot locate a column.
 
@@ -118,6 +128,10 @@ export type RetailerSpread = {
   totalRetailers: number;
   activeRetailers: number;
   dormantRetailers: number;
+  // Retailers found in the "Removed Parties" section of the Summary Report tab.
+  // These are excluded from all active/dormant counts and spread metrics but
+  // carry real prior-year business and belong in win-back analysis.
+  removedRetailers: number;
   activePct: number;
   totalOrderBooking: number;
   totalSale: number;
@@ -143,7 +157,8 @@ export type MemberSheetResult = {
   fileId: string;
   tabName: string;           // actual tab title selected (e.g. "Summary Report 26-27")
   canonicalName: string;     // the exact name we looked for (e.g. "Summary Report 26-27")
-  rows: RetailerRow[];
+  rows: RetailerRow[];       // active section only (serial-numbered rows above the section break)
+  removedRows: RetailerRow[]; // "Removed Parties" section — prior-year win-back candidates
   spread: RetailerSpread;
   visitPlan: VisitPlan;
   months: MonthActual[];     // Per-month actuals from the FY tab (may be empty)
@@ -702,42 +717,16 @@ async function loadMemberSheetUncached(
     "RETAILERNAME", "RETAILER", "NAME",
     "SRLNO", "SL", "SR", "NO", "SNO", "SRNO",
   ]);
-  // Tokens in the name column that mean "stop reading — end of section".
+  // Tokens in the name column that mean "stop reading entirely".
   const STOP_TOKENS = new Set(["TOTAL", "GRANDTOTAL", "SUBTOTAL"]);
 
-  const rows: RetailerRow[] = [];
-  let blankRun = 0;
-
-  for (let i = dataStart; i < allRows.length; i++) {
-    const row = allRows[i] ?? [];
-    const rawName = cellStr(row[COL.name]);
-
-    if (!rawName) {
-      blankRun++;
-      // 3+ consecutive blank name-column cells → section boundary; stop.
-      if (blankRun >= 3) break;
-      continue;
-    }
-    blankRun = 0;
-
-    const nameNorm = normHeader(rawName);
-
-    // End-of-section markers: TOTAL / GRAND TOTAL row → stop.
-    if (STOP_TOKENS.has(nameNorm) || nameNorm.startsWith("GRANDTOTAL") || nameNorm.startsWith("TOTAL")) break;
-    // Header / metadata tokens → skip but keep reading.
-    if (SKIP_TOKENS.has(nameNorm)) continue;
-    // Serial-number-only cells → skip.
-    if (/^\d+$/.test(rawName.trim())) continue;
-
+  // Helper: build a RetailerRow from a raw sheet row.
+  function buildRow(row: SheetCellValue[]): RetailerRow {
     const ob   = cellNum(row[COL.orderBooking]) ?? 0;
     const sale = cellNum(row[COL.sale]) ?? 0;
     const plan = cellNum(row[COL.businessPlan]);
-
-    const achPct =
-      plan !== null && plan > 0 ? (ob / plan) * 100 : null;
-
-    rows.push({
-      name:           rawName,
+    return {
+      name:           cellStr(row[COL.name]),
       district:       cellStr(row[COL.district]) || null,
       city:           cellStr(row[COL.city]) || null,
       distributor:    cellStr(row[COL.distributor]) || null,
@@ -747,17 +736,70 @@ async function loadMemberSheetUncached(
       orderBooking:   ob,
       sale,
       totalVisit:     cellNum(row[COL.totalVisit]),
-      achievementPct: achPct,
+      achievementPct: plan !== null && plan > 0 ? (ob / plan) * 100 : null,
       isActive:       ob > 0 || sale > 0,
-    });
+    };
+  }
+
+  const rows: RetailerRow[] = [];         // active section (serial-numbered rows)
+  const removedRows: RetailerRow[] = [];  // "Removed Parties" section
+  let parsePhase: "active" | "removed" = "active";
+
+  for (let i = dataStart; i < allRows.length; i++) {
+    const row = allRows[i] ?? [];
+
+    // ── Section-header detection ─────────────────────────────────────────────
+    // Col B (index 1) carries the header text; col C (name col) may be blank.
+    // Also check col C in case the member put it there instead.
+    const colBNorm = normHeader(row[1]);
+    const colCNorm = normHeader(row[COL.name]);
+    if (SECTION_HEADER_TOKENS.has(colBNorm) || SECTION_HEADER_TOKENS.has(colCNorm)) {
+      parsePhase = "removed";
+      continue; // skip the header row itself
+    }
+
+    const rawName = cellStr(row[COL.name]);
+
+    if (parsePhase === "active") {
+      if (!rawName) continue; // blank name — skip (single blanks are OK between active rows)
+
+      const nameNorm = normHeader(rawName);
+      // Hard stop: TOTAL row ends parsing entirely.
+      if (STOP_TOKENS.has(nameNorm) || nameNorm.startsWith("GRANDTOTAL") || nameNorm.startsWith("TOTAL")) break;
+      // Skip header / metadata tokens.
+      if (SKIP_TOKENS.has(nameNorm)) continue;
+      // Serial-number-only value in the name column → skip.
+      if (/^\d+$/.test(rawName.trim())) continue;
+
+      // Rule 1 — name present but no integer serial in col A → section boundary.
+      // Active retailers are numbered (1, 2, 3…); removed retailers have no serial.
+      const colAStr = cellStr(row[0]).trim();
+      if (!/^\d+$/.test(colAStr)) {
+        // Treat this row as the first removed retailer and switch phase.
+        parsePhase = "removed";
+        removedRows.push(buildRow(row));
+        continue;
+      }
+
+      rows.push(buildRow(row));
+
+    } else {
+      // removed phase
+      if (!rawName) continue;
+      const nameNorm = normHeader(rawName);
+      if (STOP_TOKENS.has(nameNorm) || nameNorm.startsWith("TOTAL") || nameNorm.startsWith("GRANDTOTAL")) break;
+      if (SKIP_TOKENS.has(nameNorm)) continue;
+      if (/^\d+$/.test(rawName.trim())) continue;
+      removedRows.push(buildRow(row));
+    }
   }
 
   logger.info(
-    { memberKey, tabName, retailers: rows.length, dataStart },
+    { memberKey, tabName, retailers: rows.length, removedRetailers: removedRows.length, dataStart },
     "memberSheet: retailers parsed",
   );
 
-  const spread = computeSpread(rows, fileId, fy, memberName);
+  const spread = computeSpread(rows, removedRows.length, fileId, fy, memberName);
 
   // Read FY monthly tab and historical capacity in parallel to minimise latency.
   // readFyMonthlyTab reuses allTabs (already fetched) so it does not make a
@@ -782,6 +824,7 @@ async function loadMemberSheetUncached(
     tabName,
     canonicalName,
     rows,
+    removedRows,
     spread,
     visitPlan,
     months: fyMonthData.months,
@@ -791,6 +834,7 @@ async function loadMemberSheetUncached(
 
 function computeSpread(
   rows: RetailerRow[],
+  removedCount: number,
   fileId: string,
   fy: string,
   memberName: string,
@@ -835,6 +879,7 @@ function computeSpread(
       retailers: rows.length,
       active: active.length,
       dormant: dormant.length,
+      removedRetailers: removedCount,
       totalOB, totalSale, totalVisits,
       top5Share, top10Share, hhi,
       businessPerActive, businessPerVisit,
@@ -846,6 +891,7 @@ function computeSpread(
     totalRetailers:             rows.length,
     activeRetailers:            active.length,
     dormantRetailers:           dormant.length,
+    removedRetailers:           removedCount,
     activePct:                  rows.length > 0 ? (active.length / rows.length) * 100 : 0,
     totalOrderBooking:          totalOB,
     totalSale,

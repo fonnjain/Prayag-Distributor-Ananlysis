@@ -202,6 +202,8 @@ export type AiPayload = {
     workingDays: number | null;
     isClosedFy: boolean;
     generatedAt: string;
+    summaryTabName: string | null;
+    summaryTabCanonical: string | null;
     periodCoveredLabel: string;
     periodCoveredShort: string;
     periodFromFiscalMonth: number;
@@ -237,10 +239,15 @@ export type AiPayload = {
     retailersTotal: number | null;
     active: number | null;
     dormant: number | null;
+    removed: number | null;   // "Removed Parties" section row count (win-back candidates)
     visited: number | null;
     nonVisited: number | null;
     newRetailers: number | null;
   };
+  formerRetailers: {
+    count: number;
+    names: string[];
+  } | null;
   customerStates: CustomerStates | null;
   topCustomers: {
     top5: TopCustomerEntry[];
@@ -631,6 +638,8 @@ export function buildMemberPayload(
 
   const rows: RetailerRow[] =
     retailerDetail?.status === "ok" ? retailerDetail.rows : [];
+  const removedRows: RetailerRow[] =
+    retailerDetail?.status === "ok" ? retailerDetail.removedRows : [];
   const spread: RetailerSpread | null =
     retailerDetail?.status === "ok" ? retailerDetail.spread : null;
   const visitPlan: VisitPlan | null =
@@ -700,6 +709,9 @@ export function buildMemberPayload(
   const retailersTotal = spread?.totalRetailers ?? kpis.totalRetailers;
   const active         = spread?.activeRetailers ?? null;
   const dormant        = spread?.dormantRetailers ?? null;
+  // removed: rows from the "Removed Parties" section — excluded from active/dormant
+  // counts; captured for win-back. Only available when sheet is loaded.
+  const removed        = spread?.removedRetailers ?? null;
   const visited        = kpis.visitedRetailers;
   const nonVisited     = kpis.nonVisitedRetailers;
   const newRetailers   =
@@ -891,7 +903,16 @@ export function buildMemberPayload(
     },
     performance: { secondaryOB, directDealerOB, totalOB, salesReceived },
     achievement: { totalOBPct, secondaryOBPct, directDealerPct, salePct, annualProgressPct },
-    coverage: { retailersTotal, active, dormant, visited, nonVisited, newRetailers },
+    coverage: { retailersTotal, active, dormant, removed, visited, nonVisited, newRetailers },
+    formerRetailers: removedRows.length > 0
+      ? {
+          count: removedRows.length,
+          // Names for win-back targeting. Prior-year OB is not in RetailerRow
+          // (fixed col positions read current-FY cols only); cross-reference
+          // secondary_register_line for historical volumes.
+          names: removedRows.map((r) => r.name),
+        }
+      : null,
     customerStates,
     topCustomers,
     concentration,
@@ -986,6 +1007,8 @@ export function buildStateHeadPayload(
       workingDays: calWorkingDays,
       isClosedFy: isClosedFy(fy),
       generatedAt: now.toISOString(),
+      summaryTabName: null,     // aggregate — no single member sheet
+      summaryTabCanonical: null,
       ...periodCoverage,
     },
     targets: {
@@ -1007,6 +1030,7 @@ export function buildStateHeadPayload(
       retailersTotal,
       active: null,
       dormant: null,
+      removed: null,
       visited,
       nonVisited,
       newRetailers: null,
@@ -1025,6 +1049,7 @@ export function buildStateHeadPayload(
     cost: null,
     productSpread: { segmentsSold: 0, segmentsTotal: 0, skuCount: 0, netBySegment: [], available: false },
     priorYears: [],
+    formerRetailers: null, // state-head aggregate — per-member removed sections not summed here
     dataQuality,
     provenance: {
       identity:    "computed (FY calendar)",
