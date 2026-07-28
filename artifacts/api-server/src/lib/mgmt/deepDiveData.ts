@@ -19,6 +19,7 @@ import { eq, desc } from "drizzle-orm";
 import { logger } from "../logger.js";
 import {
   readAllTabRows,
+  readTabRowsViaExport,
   listSheetTabs,
   type SheetCellValue,
   type SheetTab,
@@ -61,7 +62,15 @@ function cellStr(v: SheetCellValue): string {
 
 function cellNum(v: SheetCellValue): number | null {
   if (v == null || v === "") return null;
-  const n = typeof v === "number" ? v : Number(String(v).replace(/[,%\s₹]/g, ""));
+  // When rows come from the CSV export path, numeric values arrive as strings.
+  if (typeof v === "number") return v;
+  const s = String(v).trim();
+  // Percentage cells (e.g. "67.76%") — divide by 100 to restore the decimal.
+  if (s.endsWith("%")) {
+    const n = Number(s.slice(0, -1).replace(/[,\s₹]/g, ""));
+    return Number.isFinite(n) ? n / 100 : null;
+  }
+  const n = Number(s.replace(/[,\s₹]/g, ""));
   return Number.isFinite(n) ? n : null;
 }
 
@@ -476,6 +485,53 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
     return null;
   }
 
+  // ── Fresh sale values from the SOBR tab ──────────────────────────────────
+  // Data tab column AY is populated by:
+  //   =ArrayFormula(iferror(VLOOKUP($C$4:$C, 'SECONDARY ORDER BOOKING REPORT...'!C:O, 13, 0)))
+  //
+  // ArrayFormula SPILL CELLS use a server-side computed cache.  When the state
+  // head updates a member's ytdSalesReceived in the SOBR tab, the ArrayFormula
+  // spill cells in the Data tab go stale — both values.get AND the Drive CSV
+  // export return the cached (old) value.  Only opening the file in a browser
+  // triggers a full recompute.
+  //
+  // Fix: read SOBR!C:O directly (col C = member name, col O = ytdSalesReceived).
+  // These cells are either plain numbers or within-tab SUM formulas — always
+  // fresh via the Sheets API.  We reproduce the VLOOKUP ourselves so kpis.sale
+  // always reflects the current SOBR state regardless of the spill cache.
+  //
+  // SOBR col indices (0-based from col A):  C = 2, O = 14
+  const sobrSaleMap = new Map<string, number>();
+  try {
+    const SOBR_PREFIX = "SECONDARY ORDER BOOKING REPORT";
+    const allTabs = await listSheetTabs(sheetId);
+    const sobrTabName = allTabs.find((t) =>
+      t.title.trim().toUpperCase().startsWith(SOBR_PREFIX),
+    )?.title ?? null;
+    if (sobrTabName) {
+      const sobrRows = await readAllTabRows(sheetId, sobrTabName);
+      for (const sobrRow of sobrRows) {
+        const name = String(sobrRow[2] ?? "").trim();         // col C = member name
+        const saleVal = typeof sobrRow[14] === "number"
+          ? sobrRow[14]
+          : (sobrRow[14] != null && sobrRow[14] !== ""
+              ? Number(String(sobrRow[14]).replace(/[,\s₹]/g, ""))
+              : NaN);
+        if (name && Number.isFinite(saleVal)) {
+          sobrSaleMap.set(name.toLowerCase(), saleVal);
+        }
+      }
+      logger.info(
+        { fy, sobrTabName, entries: sobrSaleMap.size },
+        "deepDiveData: SOBR sale map built",
+      );
+    } else {
+      logger.warn({ fy, sheetId }, "deepDiveData: SOBR tab not found — sale values from Data tab only");
+    }
+  } catch (err) {
+    logger.warn({ err, fy }, "deepDiveData: SOBR sale read failed — sale values from Data tab only");
+  }
+
   // Log first 5 rows (up to 12 columns each) to diagnose tab structure.
   const diagRows = allRows.slice(0, 5).map((r) =>
     (r ?? []).slice(0, 20).map((c) => cellStr(c)).filter(Boolean).join(" | "),
@@ -546,6 +602,34 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
   // The spec says "Header is row 3; each member is one row." — so data starts at row 4.
   const dataStart = headerIdx + 1;
 
+  // ── Row-length distribution diagnostic ─────────────────────────────────────
+  // The Sheets API trims trailing empty cells per row. If data rows are shorter
+  // than the header row, positional indices may land on the wrong column.
+  {
+    const lenMap = new Map<number, number>();
+    for (let i = dataStart; i < allRows.length; i++) {
+      const len = (allRows[i] ?? []).length;
+      lenMap.set(len, (lenMap.get(len) ?? 0) + 1);
+    }
+    logger.info(
+      {
+        fy,
+        headerCols: cols.rawHeaders.length,
+        saleColIdx: cols.sale,
+        dataRowCount: allRows.length - dataStart,
+        rowLengthDistribution: Object.fromEntries(
+          [...lenMap.entries()].sort(([a], [b]) => a - b),
+        ),
+        // How many rows are too short to reach the sale column?
+        rowsShorterThanSaleCol: [...lenMap.entries()]
+          .filter(([len]) => len <= cols.sale)
+          .reduce((s, [, cnt]) => s + cnt, 0),
+      },
+      "deepDiveData: row-length distribution",
+    );
+  }
+  // ────────────────────────────────────────────────────────────────────────────
+
   const members: MemberKpis[] = [];
   let currentStateHead = "";
 
@@ -575,6 +659,28 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
     const rawName = cellStr(row[cols.teamMember]);
     if (!rawName) continue;
 
+    // ── Per-row probe: Tarun Giri ────────────────────────────────────────────
+    if (rawName.includes("Tarun Giri")) {
+      const probe48to52 = Array.from({ length: 5 }, (_, k) => ({
+        idx: 48 + k,
+        raw: row[48 + k] ?? "(missing)",
+      }));
+      logger.info(
+        {
+          fy,
+          sheetRowIdx: i,         // 0-based index in allRows (sheet row = i+1)
+          rawName,
+          rowLength: row.length,
+          saleColIdx: cols.sale,
+          saleColInRange: row.length > cols.sale,
+          rawSaleCell: row[cols.sale] ?? "(missing)",
+          probe48to52,
+        },
+        "deepDiveData: DIAG Tarun Giri raw row",
+      );
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     // Skip section headers / total rows.
     const upper = rawName.toUpperCase();
     if (
@@ -599,7 +705,16 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
       extra[hdr] = n !== null ? n : cellStr(v) || null;
     }
 
-    const sale = cols.sale >= 0 ? cellNum(row[cols.sale]) : null;
+    // Prefer the fresh SOBR value (avoids stale ArrayFormula spill cache).
+    const dataSale = cols.sale >= 0 ? cellNum(row[cols.sale]) : null;
+    const sobrSale = sobrSaleMap.get(rawName.trim().toLowerCase()) ?? null;
+    const sale = sobrSale ?? dataSale;
+    if (sobrSale !== null && dataSale !== null && sobrSale !== dataSale) {
+      logger.debug(
+        { name: rawName, sobrSale, dataSale },
+        "deepDiveData: sale patched from SOBR (Data tab spill was stale)",
+      );
+    }
     const secondaryTarget =
       cols.secondaryTarget >= 0 ? cellNum(row[cols.secondaryTarget]) : null;
     const primaryTarget =

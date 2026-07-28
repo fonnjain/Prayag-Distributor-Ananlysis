@@ -183,3 +183,140 @@ export async function readAllTabRows(
   return all;
 }
 
+// ── CSV export reader ─────────────────────────────────────────────────────────
+//
+// Reads a single tab via the Drive CSV export endpoint instead of the Sheets
+// values.get API.  The critical difference: Drive export forces a full
+// recalculation of every formula in the tab before returning, including
+// cross-file IMPORTRANGE references.  The values.get endpoint with
+// UNFORMATTED_VALUE returns a server-side cache for IMPORTRANGE cells that can
+// lag days behind the actual formula result.
+//
+// Use this path for tabs whose cells contain IMPORTRANGE or other cross-file
+// formulas where freshness matters.  For pure-data tabs (registers, SOBR) the
+// chunked path is preferred because it handles arbitrarily large sheets.
+//
+// CSV format notes:
+//   - Google Sheets exports numbers without thousands separators in CSV.
+//   - Percentage cells export as "67.76%" (the displayed string).
+//   - Date cells export as a locale-formatted string (e.g. "01/04/2026").
+//   - Empty trailing cells per row are omitted (same as values.get).
+//   - The caller's cellNum must handle "%" strings (divide by 100).
+
+async function getTabGid(spreadsheetId: string, title: string): Promise<number> {
+  const data = (await sheetsGet(
+    `/${spreadsheetId}?fields=sheets.properties(title,sheetId)`,
+  )) as {
+    sheets?: Array<{ properties?: { title?: string; sheetId?: number } }>;
+  };
+  const sheet = (data.sheets ?? []).find((s) => s.properties?.title === title);
+  if (sheet?.properties?.sheetId == null) {
+    throw new Error(
+      `Tab "${title}" not found in spreadsheet ${spreadsheetId}`,
+    );
+  }
+  return sheet.properties.sheetId;
+}
+
+function parseCsvToRows(text: string): SheetCellValue[][] {
+  const rows: SheetCellValue[][] = [];
+  const len = text.length;
+  let i = 0;
+
+  while (i <= len) {
+    // End of input.
+    if (i === len) break;
+
+    const row: SheetCellValue[] = [];
+    let firstField = true;
+
+    // Parse one row — stop at unquoted \n.
+    rowLoop: while (i < len) {
+      if (!firstField) {
+        // Expect comma separator between fields.
+        if (text[i] === ",") {
+          i++;
+        } else if (text[i] === "\r" || text[i] === "\n") {
+          break rowLoop; // end of row
+        }
+      }
+      firstField = false;
+
+      if (i >= len || text[i] === "\r" || text[i] === "\n") {
+        // Trailing comma → one more empty field, then end of row.
+        row.push(null);
+        break rowLoop;
+      }
+
+      if (text[i] === '"') {
+        // RFC 4180 quoted field.
+        i++; // skip opening quote
+        let field = "";
+        while (i < len) {
+          if (text[i] === '"') {
+            if (i + 1 < len && text[i + 1] === '"') {
+              field += '"';
+              i += 2;
+            } else {
+              i++; // skip closing quote
+              break;
+            }
+          } else {
+            field += text[i];
+            i++;
+          }
+        }
+        row.push(field === "" ? null : field);
+      } else {
+        // Unquoted field — read until comma or end-of-row.
+        let start = i;
+        while (i < len && text[i] !== "," && text[i] !== "\r" && text[i] !== "\n") {
+          i++;
+        }
+        const field = text.slice(start, i);
+        row.push(field === "" ? null : field);
+      }
+    }
+
+    // Consume CRLF or LF line ending.
+    if (i < len && text[i] === "\r") i++;
+    if (i < len && text[i] === "\n") i++;
+
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+export async function readTabRowsViaExport(
+  spreadsheetId: string,
+  title: string,
+): Promise<SheetCellValue[][]> {
+  const gid = await getTabGid(spreadsheetId, title);
+  const token = await getGoogleAccessToken();
+  const url =
+    `https://docs.google.com/spreadsheets/d/${spreadsheetId}` +
+    `/export?format=csv&gid=${gid}`;
+
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      redirect: "follow",
+    });
+    if (res.ok) {
+      const text = await res.text();
+      return parseCsvToRows(text);
+    }
+    const body = await res.text().catch(() => "");
+    lastError = new Error(
+      `CSV export failed (${res.status}): ${body.slice(0, 300)}`,
+    );
+    if (!RETRYABLE_STATUS.has(res.status) || attempt === MAX_ATTEMPTS) {
+      throw lastError;
+    }
+    await sleep(attempt * 15_000);
+  }
+  throw lastError ?? new Error("CSV export failed");
+}
+
