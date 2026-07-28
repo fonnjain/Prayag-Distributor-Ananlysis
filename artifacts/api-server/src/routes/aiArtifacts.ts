@@ -26,7 +26,7 @@ import {
   buildStateHeadPayload,
   type AiPayload,
 } from "../lib/mgmt/aiPayload.js";
-import { runNumericGuard, type GuardResult } from "../lib/mgmt/numericGuard.js";
+import { runNumericGuard, runPeriodGuard, type GuardResult, type PeriodGuardResult } from "../lib/mgmt/numericGuard.js";
 import type { VisitPlan } from "../lib/mgmt/visitPlan.js";
 import { getMemberFileId } from "../lib/mgmt/memberSheet.js";
 
@@ -51,7 +51,9 @@ ABSOLUTE RULES (all artifacts):
 9. Do NOT use "per Rs 100" normalisation phrases. Express ratios as percentages or direct values.
 10. 4-digit calendar years (2020-2030) in "FY2026-27" style text are excluded from the guard.
 11. Distance band labels (e.g. "Mid (15-40 km)") appear verbatim in visits.distanceBands[].label. Copy them exactly.
-12. Do NOT invent prior-year OB or sale figures. priorYears.ob and priorYears.sale may be null for open FYs.`;
+12. Do NOT invent prior-year OB or sale figures. priorYears.ob and priorYears.sale may be null for open FYs.
+
+PERIOD COVERAGE RULE: The figures cover identity.periodCoveredLabel (year to date from April). Do not attribute any payload figure to a single specific month — "in April the team booked Rs X" implies a per-month figure from cumulative data and will be flagged by the period guard. You may reference the coverage window months in context, but never assign a payload number exclusively to one sub-month.`;
 
 async function resolveStateHeadMembers(fy: string, stateHead: string): Promise<{
   members: MemberKpis[];
@@ -171,10 +173,20 @@ router.post("/ai/statehead-report", async (req: Request, res: Response): Promise
     const sections = JSON.parse(stripFences(rawJson)) as Record<string, { title: string; body: string }>;
 
     const guard = guardCustom(sections, payload, memberRanking);
+    const periodGuard: PeriodGuardResult = runPeriodGuard(sections, payload.identity.periodToFiscalMonth);
 
     req.log.info({ stateHead, guardStatus: guard.status, unmatched: guard.unmatched.length }, "ai/statehead-report: done");
 
-    res.json({ fy, stateHead, dataCutoff: payload.identity.dataCutoff, generatedAt: payload.identity.generatedAt, sections, guard, memberRanking });
+    res.json({
+      fy, stateHead,
+      dataCutoff: payload.identity.dataCutoff,
+      generatedAt: payload.identity.generatedAt,
+      periodCoveredLabel: payload.identity.periodCoveredLabel,
+      periodCoveredShort: payload.identity.periodCoveredShort,
+      selectedPeriod: period,
+      periodMismatch: period !== "ytd",
+      sections, guard, periodGuard, memberRanking,
+    });
   } catch (err) {
     req.log.error({ err, fy, stateHead }, "ai/statehead-report: error");
     res.status(502).json({ error: "Report generation failed. Please retry." });
@@ -240,10 +252,23 @@ router.post("/ai/suggestions", async (req: Request, res: Response): Promise<void
     if (!Array.isArray(result.suggestions)) throw new Error("suggestions array missing");
 
     const guard = guardCustom(result, payload);
+    const periodGuard: PeriodGuardResult = runPeriodGuard(
+      { content: { title: "Suggestions", body: JSON.stringify(result) } },
+      payload.identity.periodToFiscalMonth,
+    );
 
     req.log.info({ member: data.kpis.name, count: result.suggestions.length, guardStatus: guard.status }, "ai/suggestions: done");
 
-    res.json({ fy, member: data.kpis.name, stateHead: data.kpis.stateHead, dataCutoff: payload.identity.dataCutoff, generatedAt: payload.identity.generatedAt, ...result, guard });
+    res.json({
+      fy, member: data.kpis.name, stateHead: data.kpis.stateHead,
+      dataCutoff: payload.identity.dataCutoff,
+      generatedAt: payload.identity.generatedAt,
+      periodCoveredLabel: payload.identity.periodCoveredLabel,
+      periodCoveredShort: payload.identity.periodCoveredShort,
+      selectedPeriod: period,
+      periodMismatch: period !== "ytd",
+      ...result, guard, periodGuard,
+    });
   } catch (err) {
     req.log.error({ err, fy, member: memberRaw }, "ai/suggestions: error");
     res.status(502).json({ error: "Suggestions generation failed. Please retry." });
@@ -334,6 +359,7 @@ router.post("/ai/travel-plan", async (req: Request, res: Response): Promise<void
     const sections = JSON.parse(stripFences(rawJson)) as Record<string, { title: string; body: string }>;
 
     const guard = guardCustom(sections, payload, monthSummary);
+    const periodGuard: PeriodGuardResult = runPeriodGuard(sections, payload.identity.periodToFiscalMonth);
 
     req.log.info({ member: data.kpis.name, monthCount: monthPlans.length, guardStatus: guard.status }, "ai/travel-plan: done");
 
@@ -343,8 +369,13 @@ router.post("/ai/travel-plan", async (req: Request, res: Response): Promise<void
       stateHead: data.kpis.stateHead,
       dataCutoff: payload.identity.dataCutoff,
       generatedAt: payload.identity.generatedAt,
+      periodCoveredLabel: payload.identity.periodCoveredLabel,
+      periodCoveredShort: payload.identity.periodCoveredShort,
+      selectedPeriod: period,
+      periodMismatch: period !== "ytd",
       sections,
       guard,
+      periodGuard,
       monthPlans,
       visitCapacity: visitPlan?.capacity ?? null,
       unassignedExcluded: visitPlan?.unassignedExcluded ?? 0,
@@ -409,6 +440,7 @@ router.post("/ai/performance-review", async (req: Request, res: Response): Promi
     const rawJson = message.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
     const sections = JSON.parse(stripFences(rawJson)) as Record<string, { title: string; body: string }>;
     const guard = runNumericGuard(sections, payload);
+    const periodGuard: PeriodGuardResult = runPeriodGuard(sections, payload.identity.periodToFiscalMonth);
 
     req.log.info({ member: data.kpis.name, guardStatus: guard.status, flags: payload.dataQuality.map((f) => f.code) }, "ai/performance-review: done");
 
@@ -418,8 +450,13 @@ router.post("/ai/performance-review", async (req: Request, res: Response): Promi
       stateHead: data.kpis.stateHead,
       dataCutoff: payload.identity.dataCutoff,
       generatedAt: payload.identity.generatedAt,
+      periodCoveredLabel: payload.identity.periodCoveredLabel,
+      periodCoveredShort: payload.identity.periodCoveredShort,
+      selectedPeriod: period,
+      periodMismatch: period !== "ytd",
       sections,
       guard,
+      periodGuard,
       dataQualityFlags: payload.dataQuality.map((f) => f.code),
     });
   } catch (err) {
@@ -551,6 +588,10 @@ router.post("/ai/presentation", async (req: Request, res: Response): Promise<voi
       const deck = JSON.parse(stripFences(rawJson)) as { deckTitle: string; deckSubtitle: string; slides: unknown[] };
       if (!Array.isArray(deck.slides)) throw new Error("slides array missing");
       const guard = guardCustom(deck, payload, null);
+      const periodGuard: PeriodGuardResult = runPeriodGuard(
+        { content: { title: "Presentation", body: JSON.stringify(deck) } },
+        payload.identity.periodToFiscalMonth,
+      );
       req.log.info({ member: memberName, slideCount: deck.slides.length, guardStatus: guard.status }, "ai/presentation member: done");
       res.json({
         fy,
@@ -558,6 +599,10 @@ router.post("/ai/presentation", async (req: Request, res: Response): Promise<voi
         member: memberName,
         dataCutoff: payload.identity.dataCutoff,
         generatedAt: payload.identity.generatedAt,
+        periodCoveredLabel: payload.identity.periodCoveredLabel,
+        periodCoveredShort: payload.identity.periodCoveredShort,
+        selectedPeriod: period,
+        periodMismatch: period !== "ytd",
         deckTitle: deck.deckTitle,
         deckSubtitle: deck.deckSubtitle,
         slides: deck.slides,
@@ -565,6 +610,7 @@ router.post("/ai/presentation", async (req: Request, res: Response): Promise<voi
         memberSlides: null,
         closingSlides: null,
         guard,
+        periodGuard,
         payload,
         memberRanking: null,
       });
@@ -620,6 +666,10 @@ router.post("/ai/presentation", async (req: Request, res: Response): Promise<voi
     if (!Array.isArray(a4aDeck.closingSlides)) throw new Error("closingSlides array missing");
 
     const guard = guardCustom(a4aDeck, payload, null);
+    const periodGuard: PeriodGuardResult = runPeriodGuard(
+      { content: { title: "Presentation", body: JSON.stringify(a4aDeck) } },
+      payload.identity.periodToFiscalMonth,
+    );
     req.log.info({
       stateHead,
       teamSlides: a4aDeck.teamSlides.length,
@@ -634,6 +684,10 @@ router.post("/ai/presentation", async (req: Request, res: Response): Promise<voi
       member: null,
       dataCutoff: payload.identity.dataCutoff,
       generatedAt: payload.identity.generatedAt,
+      periodCoveredLabel: payload.identity.periodCoveredLabel,
+      periodCoveredShort: payload.identity.periodCoveredShort,
+      selectedPeriod: period,
+      periodMismatch: period !== "ytd",
       deckTitle: a4aDeck.deckTitle,
       deckSubtitle: a4aDeck.deckSubtitle,
       slides: [],
@@ -641,6 +695,7 @@ router.post("/ai/presentation", async (req: Request, res: Response): Promise<voi
       memberSlides: a4aDeck.memberSlides,
       closingSlides: a4aDeck.closingSlides,
       guard,
+      periodGuard,
       payload,
       memberRanking: null,
     });

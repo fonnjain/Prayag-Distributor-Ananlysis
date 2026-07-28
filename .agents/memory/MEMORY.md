@@ -50,3 +50,4 @@
 - [Warning System W1 architecture](warning-system-w1.md) — GET /api/warnings route; cold-start ~9s (Sheets loads), warm cache ~21ms; skipExtras=true skips winBack+skuSpread.
 - [detectCols return-then-mutate trap](detectcols-return-trap.md) — esbuild never reports TS errors; dead code after `return {...}` silently runs (it doesn't). Use `const colMap = {...}` then mutate then `return colMap`.
 - [PA1 period capability system](pa1-period-capability.md) — FULL/FY_ONLY/NONE declared in period-capability.ts; GlobalFilterProvider is inside WouterRouter; I/J cross-check added to stateDashboard.
+- [PA2 period labelling](pa2-period-labelling.md) — computePeriodCovered in aiPayload.ts; runPeriodGuard in numericGuard.ts; all 6 AI routes return 5 period fields; PeriodMismatchBanner + PdfPeriodInfo + updated filenames in AiReports.tsx.

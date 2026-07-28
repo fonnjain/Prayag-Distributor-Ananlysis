@@ -219,3 +219,101 @@ export function runNumericGuard(
     checked,
   };
 }
+
+// ── Period guard ──────────────────────────────────────────────────────────────
+// When the payload covers more than one fiscal month (i.e. it is a multi-month
+// YTD report), a sentence that attributes a specific figure to a single named
+// month — e.g. "in April the team booked Rs 2.56 Cr" — is misleading because
+// the payload only carries YTD cumulative values, not per-month breakdowns.
+// This guard flags such sentences so a reviewer can verify them before the
+// document leaves the system.
+//
+// Patterns flagged:
+//   "in April", "during April", "for April" followed within 120 chars by a number
+//   "[Month] saw" followed within 120 chars by a number
+//   "Q1 ...", "Q2 ...", "Q3 ...", "Q4 ..." followed within 80 chars by a number,
+//   when toFiscalMonth > 3 (i.e. more than one quarter is covered)
+
+export type FlaggedPeriodSentence = {
+  sentence: string;
+  termMentioned: string;
+  reason: string;
+};
+
+export type PeriodGuardResult = {
+  status: "ok" | "requires_review";
+  flagged: FlaggedPeriodSentence[];
+};
+
+const MONTH_LIST =
+  "January|February|March|April|May|June|July|August|September|October|November|December";
+
+function periodGetSentence(text: string, pos: number): string {
+  let start = pos;
+  while (start > 0 && text[start - 1] !== "." && text[start - 1] !== "\n") start--;
+  let end = pos;
+  while (end < text.length && text[end] !== "." && text[end] !== "\n") end++;
+  const s = text.slice(start, end + 1).trim();
+  return s.length > 200 ? s.slice(0, 200) + "…" : s;
+}
+
+export function runPeriodGuard(
+  sections: Record<string, { title: string; body: string }>,
+  toFiscalMonth: number,
+): PeriodGuardResult {
+  // Only relevant for multi-month periods (2+ fiscal months covered).
+  if (toFiscalMonth <= 1) return { status: "ok", flagged: [] };
+
+  const rawText = Object.values(sections)
+    .map((s) => `${s.title}. ${s.body}`)
+    .join("\n\n");
+
+  const flagged: FlaggedPeriodSentence[] = [];
+  const seenSentences = new Set<string>();
+
+  function checkRe(re: RegExp, buildReason: (match: string) => string): void {
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(rawText)) !== null) {
+      const term = m[1] ?? m[0];
+      const sentence = periodGetSentence(rawText, m.index);
+      const key = sentence.slice(0, 100);
+      if (!seenSentences.has(key)) {
+        seenSentences.add(key);
+        flagged.push({ sentence, termMentioned: term, reason: buildReason(term) });
+      }
+    }
+  }
+
+  // "in/during/for [Month]" within 120 chars of a numeric token
+  const inMonthRe = new RegExp(
+    `\\b(?:in|during|for)\\s+(${MONTH_LIST})\\b[^.]{0,120}(?:\\d|Rs\\.?|₹)`,
+    "gi",
+  );
+  checkRe(inMonthRe, (t) =>
+    `"in ${t}" in a YTD report may imply a single-month figure; payload covers April to cutoff month cumulatively.`,
+  );
+
+  // "[Month] saw" within 120 chars of a numeric token
+  const sawRe = new RegExp(
+    `\\b(${MONTH_LIST})\\s+saw\\b[^.]{0,120}(?:\\d|Rs\\.?|₹)`,
+    "gi",
+  );
+  checkRe(sawRe, (t) =>
+    `"${t} saw" in a YTD report may imply a single-month figure; payload is cumulative.`,
+  );
+
+  // "Q1/Q2/Q3/Q4" within 80 chars of a number — only flag if the period spans
+  // more than one quarter (toFiscalMonth > 3).
+  if (toFiscalMonth > 3) {
+    const qRe = /\b(Q[1-4])\b[^.]{0,80}(?:\d|Rs\.?|₹)/gi;
+    checkRe(qRe, (t) =>
+      `"${t}" in a multi-quarter YTD report may imply a single-quarter figure; payload covers April to cutoff month cumulatively.`,
+    );
+  }
+
+  return {
+    status: flagged.length === 0 ? "ok" : "requires_review",
+    flagged,
+  };
+}

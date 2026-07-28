@@ -80,6 +80,30 @@ type GuardResult = {
   checked: number;
 };
 
+type PeriodGuardResult = {
+  status: "ok" | "requires_review";
+  flagged: { sentence: string; termMentioned: string; reason: string }[];
+};
+
+// Period metadata returned by every AI report API response
+type PeriodMeta = {
+  periodCoveredLabel?: string;   // "year to date, April to June 2026"
+  periodCoveredShort?: string;   // "YTD-Apr-Jun-2026"
+  selectedPeriod?: string;       // what the user had selected ("ytd", "q1", etc.)
+  periodMismatch?: boolean;      // selectedPeriod !== "ytd"
+  periodGuard?: PeriodGuardResult;
+};
+
+// Helper to extract PeriodMeta from a result object
+function periodMetaOf(r: PeriodMeta): { coveredLabel: string; coveredShort: string; mismatch: boolean; selectedPeriod: string } {
+  return {
+    coveredLabel: r.periodCoveredLabel ?? "year to date",
+    coveredShort: r.periodCoveredShort ?? "YTD",
+    mismatch: r.periodMismatch ?? false,
+    selectedPeriod: r.selectedPeriod ?? "ytd",
+  };
+}
+
 type Section = { title: string; body: string };
 
 // ── Batch types ───────────────────────────────────────────────────────────────
@@ -97,6 +121,10 @@ type BatchDoc = {
   dataCutoff: string;
   source: "api" | "cache";
   result: Record<string, unknown>;
+  periodCoveredLabel?: string;
+  periodCoveredShort?: string;
+  periodMismatch?: boolean;
+  selectedPeriod?: string;
 };
 
 type BatchSummary = { total: number; cached: number; generated: number; failed: number };
@@ -158,11 +186,11 @@ type ArtifactType = MemberArtifactType | DistributorArtifactType;
 
 type GenerationResult =
   // ── Member / team ──
-  | { type: "statehead-report"; fy: string; stateHead: string; dataCutoff: string; sections: Record<string, Section>; guard: GuardResult; memberRanking: (MemberRankingEntry & { sale: number })[] }
-  | { type: "suggestions"; fy: string; member: string; dataCutoff: string; intro: string; suggestions: SuggestionItem[]; guard: GuardResult }
-  | { type: "travel-plan"; fy: string; member: string; dataCutoff: string; sections: Record<string, Section>; guard: GuardResult; monthPlans: MonthPlan[]; visitCapacity: { gap: number; feasibleRemainingVisits: number; remainingRequired: number } | null }
-  | { type: "performance-review"; fy: string; member: string; dataCutoff: string; sections: Record<string, Section>; guard: GuardResult; dataQualityFlags: string[] }
-  | { type: "presentation"; fy: string; member: string | null; stateHead: string | null; dataCutoff: string; deckTitle: string; deckSubtitle: string; slides: SlideSpec[]; teamSlides: SlideSpec[] | null; memberSlides: DeckMemberSlide[] | null; closingSlides: SlideSpec[] | null; guard: GuardResult; payload: AiPayloadSubset; memberRanking: MemberRankingEntry[] | null }
+  | ({ type: "statehead-report"; fy: string; stateHead: string; dataCutoff: string; generatedAt?: string; sections: Record<string, Section>; guard: GuardResult; memberRanking: (MemberRankingEntry & { sale: number })[] } & PeriodMeta)
+  | ({ type: "suggestions"; fy: string; member: string; dataCutoff: string; generatedAt?: string; intro: string; suggestions: SuggestionItem[]; guard: GuardResult } & PeriodMeta)
+  | ({ type: "travel-plan"; fy: string; member: string; dataCutoff: string; generatedAt?: string; sections: Record<string, Section>; guard: GuardResult; monthPlans: MonthPlan[]; visitCapacity: { gap: number; feasibleRemainingVisits: number; remainingRequired: number } | null } & PeriodMeta)
+  | ({ type: "performance-review"; fy: string; member: string; dataCutoff: string; generatedAt?: string; sections: Record<string, Section>; guard: GuardResult; dataQualityFlags: string[] } & PeriodMeta)
+  | ({ type: "presentation"; fy: string; member: string | null; stateHead: string | null; dataCutoff: string; generatedAt?: string; deckTitle: string; deckSubtitle: string; slides: SlideSpec[]; teamSlides: SlideSpec[] | null; memberSlides: DeckMemberSlide[] | null; closingSlides: SlideSpec[] | null; guard: GuardResult; payload: AiPayloadSubset; memberRanking: MemberRankingEntry[] | null } & PeriodMeta)
   // ── Distributor ──
   | { type: "distributor-statehead-report"; fy: string; stateHead: string; dataCutoff: string; sections: Record<string, Section>; guard: GuardResult; payload: DistributorPayloadSubset }
   | { type: "distributor-report"; fy: string; stateHead: string; distributor: string; dataCutoff: string; sections: Record<string, Section>; guard: GuardResult; payload: DistributorPayloadSubset }
@@ -288,42 +316,70 @@ function openPrintWindow(html: string, title: string): void {
 const PDF_BASE_STYLE = `
   body { font-family: 'Inter', system-ui, sans-serif; color: #0f172a; margin: 40px; line-height: 1.6; }
   .brand { color: #1d4ed8; font-weight: 700; font-size: 18px; margin-bottom: 2px; }
-  .meta { color: #64748b; font-size: 11px; margin-bottom: 20px; }
+  .meta { color: #64748b; font-size: 11px; margin-bottom: 4px; }
+  .period-cover { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 4px; padding: 8px 12px; font-size: 12px; color: #1e40af; margin-bottom: 4px; }
+  .period-mismatch { background: #fef9c3; border: 1px solid #fde047; border-radius: 4px; padding: 8px 12px; font-size: 12px; color: #713f12; margin-bottom: 4px; }
+  .period-sep { margin-bottom: 16px; }
   h2 { font-size: 15px; font-weight: 600; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin-top: 20px; color: #1e293b; }
   p { margin: 6px 0; font-size: 13px; }
   .footer { margin-top: 32px; padding-top: 10px; border-top: 1px solid #e2e8f0; color: #94a3b8; font-size: 10px; }
-  @media print { body { margin: 20px; } }
+  @media print { body { margin: 20px; } .footer { position: running(footer); } }
 `;
 
-function exportSectionsPdf(title: string, meta: string, sections: Record<string, Section>, extra?: string): void {
+type PdfPeriodInfo = {
+  coveredLabel: string;   // "year to date, April to June 2026"
+  dataCutoff: string;
+  fy: string;
+  mismatch: boolean;
+  selectedPeriod?: string;
+};
+
+function makePeriodCoverHtml(pi: PdfPeriodInfo): string {
+  const mismatchNote = pi.mismatch && pi.selectedPeriod && pi.selectedPeriod !== "ytd"
+    ? `<div class="period-mismatch"><strong>${pi.selectedPeriod.toUpperCase()} was selected.</strong> This report covers ${pi.coveredLabel} because AI reports always use year-to-date data from the start of the financial year.</div>`
+    : "";
+  return `${mismatchNote}<div class="period-cover">Coverage: ${pi.coveredLabel} &nbsp;·&nbsp; Data to ${pi.dataCutoff} &nbsp;·&nbsp; FY${pi.fy}</div><div class="period-sep"></div>`;
+}
+
+function makePeriodFooterText(pi: PdfPeriodInfo): string {
+  return `FY${pi.fy} · ${pi.coveredLabel} · Data to ${pi.dataCutoff} · Generated ${new Date().toLocaleString()}`;
+}
+
+function exportSectionsPdf(title: string, meta: string, sections: Record<string, Section>, extra?: string, period?: PdfPeriodInfo): void {
   const sectionHtml = Object.values(sections).map((s) => `
     <h2>${s.title}</h2>
     <p>${s.body.replace(/\n/g, "<br/>")}</p>
   `).join("");
+  const periodCover = period ? makePeriodCoverHtml(period) : "";
+  const footer = period ? makePeriodFooterText(period) : `Generated ${new Date().toLocaleString()}`;
   openPrintWindow(`<!doctype html><html><head><meta charset="utf-8"/><title>${title}</title><style>${PDF_BASE_STYLE}</style></head><body>
     <div class="brand">Prayag India - Sales Intelligence</div>
-    <div class="meta">${title} &middot; ${meta} &middot; Generated ${new Date().toLocaleString()}</div>
+    <div class="meta">${title} &middot; ${meta}</div>
+    ${periodCover}
     ${sectionHtml}${extra ?? ""}
-    <div class="footer">Generated by Prayag India Sales Intelligence. Figures are grounded in the verified payload.</div>
+    <div class="footer">${footer} · Figures are grounded in the verified payload.</div>
   </body></html>`, title);
 }
 
-function exportPerformanceReviewPdf(member: string, sections: Record<string, Section>): void {
+function exportPerformanceReviewPdf(member: string, sections: Record<string, Section>, period?: PdfPeriodInfo): void {
   const sectionHtml = Object.values(sections).map((s) => `<h2>${s.title}</h2><p>${s.body.replace(/\n/g, "<br/>")}</p>`).join("");
   const style = `${PDF_BASE_STYLE}
     .watermark { background: #DC2626; color: white; text-align: center; padding: 6px; font-size: 11px; font-weight: 700; border-radius: 4px; margin-bottom: 16px; }
     @media print { .watermark { position: fixed; top: 0; left: 0; right: 0; border-radius: 0; margin-bottom: 0; z-index: 9999; } body { padding-top: 36px; } }
   `;
+  const periodCover = period ? makePeriodCoverHtml(period) : "";
+  const footer = period ? makePeriodFooterText(period) : `Generated ${new Date().toLocaleString()}`;
   openPrintWindow(`<!doctype html><html><head><meta charset="utf-8"/><title>Performance Review — ${member}</title><style>${style}</style></head><body>
     <div class="watermark">MANAGEMENT ONLY — NOT FOR DISTRIBUTION TO THE INDIVIDUAL | DRAFT — REQUIRES HUMAN SIGN-OFF</div>
     <div class="brand">Prayag India - Sales Intelligence</div>
-    <div class="meta">Performance Review: ${member} &middot; Generated ${new Date().toLocaleString()}</div>
+    <div class="meta">Performance Review: ${member}</div>
+    ${periodCover}
     ${sectionHtml}
-    <div class="footer">MANAGEMENT ONLY. This document must not be shared with the individual named above. Draft status — human sign-off required before use or distribution.</div>
+    <div class="footer">MANAGEMENT ONLY — Draft, requires sign-off. ${footer}</div>
   </body></html>`, "Performance Review");
 }
 
-function exportSuggestionsPdf(member: string, intro: string, suggestions: SuggestionItem[], extraHtml?: string): void {
+function exportSuggestionsPdf(member: string, intro: string, suggestions: SuggestionItem[], extraHtml?: string, period?: PdfPeriodInfo): void {
   const items = suggestions.map((s) => `
     <div style="margin: 14px 0; padding: 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
       <div style="font-weight:600;font-size:14px;margin-bottom:4px;">${s.rank}. ${s.title}
@@ -334,16 +390,19 @@ function exportSuggestionsPdf(member: string, intro: string, suggestions: Sugges
       <p style="font-size:12px;margin-top:6px;"><strong>Action:</strong> ${s.action}</p>
     </div>
   `).join("");
+  const periodCover = period ? makePeriodCoverHtml(period) : "";
+  const footer = period ? makePeriodFooterText(period) : `Generated ${new Date().toLocaleString()}`;
   openPrintWindow(`<!doctype html><html><head><meta charset="utf-8"/><title>Suggestions — ${member}</title><style>${PDF_BASE_STYLE}</style></head><body>
     <div class="brand">Prayag India - Sales Intelligence</div>
-    <div class="meta">Suggestions and Actions: ${member} &middot; Generated ${new Date().toLocaleString()}</div>
+    <div class="meta">Suggestions and Actions: ${member}</div>
+    ${periodCover}
     <h2>Introduction</h2><p>${intro}</p>
     <h2>Ranked Suggestions</h2>${items}${extraHtml ?? ""}
-    <div class="footer">Generated by Prayag India Sales Intelligence. Figures are grounded in the verified payload.</div>
+    <div class="footer">${footer} · Figures are grounded in the verified payload.</div>
   </body></html>`, "Suggestions");
 }
 
-function exportTravelPlanPdf(member: string, sections: Record<string, Section>, monthPlans: MonthPlan[]): void {
+function exportTravelPlanPdf(member: string, sections: Record<string, Section>, monthPlans: MonthPlan[], period?: PdfPeriodInfo): void {
   const monthHtml = monthPlans.map((mp) => `
     <h3 style="font-size:13px;margin-top:14px;color:#1e293b;">${mp.month} — ${mp.workingDays} working days, ${mp.capacity} visits allocated (${mp.maintenanceVisits} maintenance, ${mp.developmentVisits} development)</h3>
     <table style="border-collapse:collapse;width:100%;margin:6px 0;font-size:11px;">
@@ -351,7 +410,7 @@ function exportTravelPlanPdf(member: string, sections: Record<string, Section>, 
       ${mp.targets.map((t) => `<tr><td style="padding:3px 8px;border:1px solid #e2e8f0;">${t.name}</td><td style="padding:3px 8px;border:1px solid #e2e8f0;">${t.district ?? "—"}</td><td style="padding:3px 8px;border:1px solid #e2e8f0;">${t.distanceKm ?? "—"}</td><td style="padding:3px 8px;border:1px solid #e2e8f0;">${t.priority}</td><td style="padding:3px 8px;border:1px solid #e2e8f0;">${t.reason}</td></tr>`).join("")}
     </table>
   `).join("");
-  exportSectionsPdf(`Travel and Visit Plan — ${member}`, member, sections, `<h2>Month-by-Month Visit Plan (App-Computed)</h2>${monthHtml}`);
+  exportSectionsPdf(`Travel and Visit Plan — ${member}`, member, sections, `<h2>Month-by-Month Visit Plan (App-Computed)</h2>${monthHtml}`, period);
 }
 
 // ── PPTX exports ──────────────────────────────────────────────────────────────
@@ -448,7 +507,7 @@ async function exportDistributorPptx(result: Extract<GenerationResult, { type: "
   await prs.writeFile({ fileName: `${result.deckTitle}.pptx` } as any);
 }
 
-// ── Guard banner ──────────────────────────────────────────────────────────────
+// ── Guard banners ─────────────────────────────────────────────────────────────
 
 function GuardBanner({ guard }: { guard: GuardResult }) {
   if (guard.status === "ok") return null;
@@ -456,6 +515,45 @@ function GuardBanner({ guard }: { guard: GuardResult }) {
     <div className="flex gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800 mb-4">
       <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
       <span>{guard.unmatched.length} figure(s) in this report could not be matched to the verified payload. Review before distributing.</span>
+    </div>
+  );
+}
+
+function PeriodMismatchBanner({ result }: { result: PeriodMeta & { dataCutoff: string } }) {
+  const { periodCoveredLabel, selectedPeriod, periodMismatch, periodGuard } = result;
+  const showMismatch = periodMismatch && selectedPeriod && selectedPeriod !== "ytd";
+  const showPeriodGuard = periodGuard && periodGuard.status === "requires_review";
+  if (!showMismatch && !showPeriodGuard) return null;
+  return (
+    <div className="space-y-2 mb-4">
+      {showMismatch && (
+        <div className="flex gap-2 p-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-800">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <span>
+            <strong>{selectedPeriod.toUpperCase()}</strong> was selected. This report covers{" "}
+            <strong>{periodCoveredLabel ?? "year to date"}</strong> because AI reports always use
+            year-to-date data from the start of the financial year.
+          </span>
+        </div>
+      )}
+      {showPeriodGuard && (
+        <div className="flex gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <div className="space-y-1 min-w-0">
+            <p className="font-medium">
+              {periodGuard.flagged.length} period attribution{periodGuard.flagged.length !== 1 ? "s" : ""} flagged — a sentence attributes a figure to a single month while data is year-to-date. Review before distributing.
+            </p>
+            {periodGuard.flagged.slice(0, 3).map((f, i) => (
+              <p key={i} className="text-xs text-amber-700 truncate" title={f.sentence}>
+                "{f.termMentioned}": {f.sentence.slice(0, 120)}{f.sentence.length > 120 ? "…" : ""}
+              </p>
+            ))}
+            {periodGuard.flagged.length > 3 && (
+              <p className="text-xs text-amber-600">+{periodGuard.flagged.length - 3} more</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -730,6 +828,12 @@ function generateBatchDocHtml(doc: BatchDoc, fy: string): string {
   const { member, reportType, dataCutoff, result } = doc;
   const generatedAt = new Date().toLocaleString();
   const title = `${member} — ${reportType === "travel-plan" ? "Travel and Visit Plan" : reportType === "performance-review" ? "Performance Review" : "Suggestions and Actions"}`;
+  const coveredLabel = doc.periodCoveredLabel ?? "year to date";
+  const mismatch = doc.periodMismatch ?? false;
+  const selPeriod = doc.selectedPeriod;
+  const periodCoverHtml = mismatch && selPeriod && selPeriod !== "ytd"
+    ? `<div class="period-mismatch"><strong>${selPeriod.toUpperCase()} was selected.</strong> This report covers ${coveredLabel} because AI reports always use year-to-date data.</div><div class="period-cover">Coverage: ${coveredLabel} &nbsp;·&nbsp; Data to ${dataCutoff} &nbsp;·&nbsp; FY${fy}</div><div class="period-sep"></div>`
+    : `<div class="period-cover">Coverage: ${coveredLabel} &nbsp;·&nbsp; Data to ${dataCutoff} &nbsp;·&nbsp; FY${fy}</div><div class="period-sep"></div>`;
 
   let bodyHtml = "";
 
@@ -764,9 +868,10 @@ function generateBatchDocHtml(doc: BatchDoc, fy: string): string {
 </head>
 <body>
   <div class="brand">Prayag India - Sales Intelligence</div>
-  <div class="meta">${title} &middot; FY${fy} &middot; Data to ${dataCutoff} &middot; Generated ${generatedAt}</div>
+  <div class="meta">${title}</div>
+  ${periodCoverHtml}
   ${bodyHtml}
-  <div class="footer">Generated by Prayag India Sales Intelligence. Figures are grounded in the verified payload.</div>
+  <div class="footer">FY${fy} · ${coveredLabel} · Data to ${dataCutoff} · Generated ${generatedAt} · Figures are grounded in the verified payload.</div>
 </body>
 </html>`;
 }
@@ -780,13 +885,16 @@ async function downloadBatchZip(
   const { default: JSZip } = await import("jszip");
   const zip = new JSZip();
   const sanitize = (s: string) => s.replace(/[/\\:*?"<>|]/g, "_");
-  const folderName = `${sanitize(stateHead)}_${fy}_${reportType}`;
+  // Use the period short from the first document (all docs in a batch share the same cutoff/period)
+  const periodShort = docs[0]?.periodCoveredShort ?? "YTD";
+  const folderName = `${sanitize(stateHead)}_FY${fy}_${reportType}_${periodShort}`;
   const root = zip.folder(folderName)!;
 
   for (const doc of docs) {
     const html = generateBatchDocHtml(doc, fy);
     const safeMember = sanitize(doc.member);
-    root.folder(safeMember)!.file(`${safeMember}_${reportType}_${fy}.html`, html);
+    const docPeriodShort = doc.periodCoveredShort ?? periodShort;
+    root.folder(safeMember)!.file(`${safeMember}_${reportType}_FY${fy}_${docPeriodShort}.html`, html);
   }
 
   const blob = await zip.generateAsync({ type: "blob" });
@@ -899,7 +1007,7 @@ const DISTRIBUTOR_REPORT_TYPES: { id: DistributorArtifactType; label: string; re
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function AiReports() {
-  const { fy }                          = useGlobalFilter();
+  const { fy, periodMode }              = useGlobalFilter();
   const [stateHead, setStateHead]       = useState("");
   const [member, setMember]             = useState("");
   const [distributorName, setDistributorName] = useState("");
@@ -987,7 +1095,7 @@ export default function AiReports() {
     setResult(null);
     setSignedOff(false);
 
-    const body: Record<string, string> = { fy };
+    const body: Record<string, string> = { fy, period: periodMode };
     if (stateHead.trim()) body.stateHead = stateHead.trim();
     if (member.trim()) body.member = member.trim();
     if (distributorName.trim()) body.distributor = distributorName.trim();
@@ -1074,7 +1182,7 @@ export default function AiReports() {
       const response = await fetch("/api/ai/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fy, stateHead: stateHead.trim(), reportType }),
+        body: JSON.stringify({ fy, stateHead: stateHead.trim(), reportType, period: periodMode }),
       });
 
       if (!response.ok || !response.body) {
@@ -1119,6 +1227,10 @@ export default function AiReports() {
                   dataCutoff: event.dataCutoff,
                   source: event.source,
                   result: event.result,
+                  periodCoveredLabel: event.result.periodCoveredLabel as string | undefined,
+                  periodCoveredShort: event.result.periodCoveredShort as string | undefined,
+                  periodMismatch: event.result.periodMismatch as boolean | undefined,
+                  selectedPeriod: event.result.selectedPeriod as string | undefined,
                 };
                 collectedDocs.push(doc);
                 setBatchDocs((prev) => [...prev, doc]);
@@ -1421,6 +1533,7 @@ export default function AiReports() {
       {result && (
         <div className="space-y-4">
           <GuardBanner guard={result.guard} />
+          {"dataCutoff" in result && <PeriodMismatchBanner result={result as PeriodMeta & { dataCutoff: string }} />}
 
           {/* ── State Head Report ── */}
           {result.type === "statehead-report" && (
@@ -1430,7 +1543,10 @@ export default function AiReports() {
                   <p className="text-sm font-semibold">{result.stateHead} — State Head Report</p>
                   <p className="text-xs text-muted-foreground">Data to {result.dataCutoff}</p>
                 </div>
-                <Button size="sm" variant="outline" onClick={() => exportSectionsPdf(`State Head Report — ${result.stateHead}`, result.dataCutoff, result.sections)}>
+                <Button size="sm" variant="outline" onClick={() => {
+                  const pm = periodMetaOf(result);
+                  exportSectionsPdf(`State Head Report — ${result.stateHead}`, result.dataCutoff, result.sections, undefined, { coveredLabel: pm.coveredLabel, dataCutoff: result.dataCutoff, fy: result.fy, mismatch: pm.mismatch, selectedPeriod: pm.selectedPeriod });
+                }}>
                   <FileDown className="w-3.5 h-3.5 mr-1.5" />Export PDF
                 </Button>
               </div>
@@ -1474,7 +1590,10 @@ export default function AiReports() {
                   <p className="text-sm font-semibold">{result.member} — Suggestions and Actions</p>
                   <p className="text-xs text-muted-foreground">Data to {result.dataCutoff}</p>
                 </div>
-                <Button size="sm" variant="outline" onClick={() => exportSuggestionsPdf(result.member, result.intro, result.suggestions)}>
+                <Button size="sm" variant="outline" onClick={() => {
+                  const pm = periodMetaOf(result);
+                  exportSuggestionsPdf(result.member, result.intro, result.suggestions, undefined, { coveredLabel: pm.coveredLabel, dataCutoff: result.dataCutoff, fy: result.fy, mismatch: pm.mismatch, selectedPeriod: pm.selectedPeriod });
+                }}>
                   <FileDown className="w-3.5 h-3.5 mr-1.5" />Export PDF
                 </Button>
               </div>
@@ -1509,7 +1628,10 @@ export default function AiReports() {
                   <p className="text-sm font-semibold">{result.member} — Travel and Visit Plan</p>
                   <p className="text-xs text-muted-foreground">Data to {result.dataCutoff}</p>
                 </div>
-                <Button size="sm" variant="outline" onClick={() => exportTravelPlanPdf(result.member, result.sections, result.monthPlans)}>
+                <Button size="sm" variant="outline" onClick={() => {
+                  const pm = periodMetaOf(result);
+                  exportTravelPlanPdf(result.member, result.sections, result.monthPlans, { coveredLabel: pm.coveredLabel, dataCutoff: result.dataCutoff, fy: result.fy, mismatch: pm.mismatch, selectedPeriod: pm.selectedPeriod });
+                }}>
                   <FileDown className="w-3.5 h-3.5 mr-1.5" />Export PDF
                 </Button>
               </div>
@@ -1559,7 +1681,10 @@ export default function AiReports() {
                   I confirm this review is for internal management use only and will not be shared with the individual named above.
                 </button>
                 {signedOff && (
-                  <Button size="sm" variant="outline" onClick={() => exportPerformanceReviewPdf(result.member, result.sections)}>
+                  <Button size="sm" variant="outline" onClick={() => {
+                    const pm = periodMetaOf(result);
+                    exportPerformanceReviewPdf(result.member, result.sections, { coveredLabel: pm.coveredLabel, dataCutoff: result.dataCutoff, fy: result.fy, mismatch: pm.mismatch, selectedPeriod: pm.selectedPeriod });
+                  }}>
                     <FileDown className="w-3.5 h-3.5 mr-1.5" />Export PDF (Management Only)
                   </Button>
                 )}

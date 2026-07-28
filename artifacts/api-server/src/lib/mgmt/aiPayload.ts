@@ -127,6 +127,45 @@ export type ProjectionScenario = {
   gap: number;
 };
 
+// ── Period coverage computation ───────────────────────────────────────────────
+// All AI reports use year-to-date data from the start of the FY (April).
+// Derives a human-readable coverage label and a filename-safe short form from
+// the data cutoff date.
+
+export type PeriodCoverage = {
+  periodCoveredLabel: string;   // "year to date, April to June 2026"
+  periodCoveredShort: string;   // "YTD-Apr-Jun-2026"
+  periodFromFiscalMonth: number; // always 1 (April = fiscal month 1)
+  periodToFiscalMonth: number;   // e.g. 3 for June
+};
+
+const CAL_MONTH_NAMES = [
+  "January","February","March","April","May","June",
+  "July","August","September","October","November","December",
+];
+const FISCAL_MONTH_SHORT = [
+  "Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar",
+];
+
+export function computePeriodCovered(cutoffDate: Date): PeriodCoverage {
+  const cutoffCalMonth = cutoffDate.getMonth(); // 0=Jan..11=Dec
+  const cutoffYear = cutoffDate.getFullYear();
+
+  // Fiscal month index (0-based): 0=April, 1=May, ..., 11=March
+  const toFiscalIdx = (cutoffCalMonth - 3 + 12) % 12;
+  const toFiscalMonth = toFiscalIdx + 1; // 1-based
+
+  const toMonthName  = CAL_MONTH_NAMES[cutoffCalMonth];
+  const toMonthShort = FISCAL_MONTH_SHORT[toFiscalIdx];
+
+  return {
+    periodCoveredLabel: `year to date, April to ${toMonthName} ${cutoffYear}`,
+    periodCoveredShort: `YTD-Apr-${toMonthShort}-${cutoffYear}`,
+    periodFromFiscalMonth: 1,
+    periodToFiscalMonth: toFiscalMonth,
+  };
+}
+
 export type AiPayload = {
   identity: {
     fy: string;
@@ -139,6 +178,10 @@ export type AiPayload = {
     workingDays: number | null;
     isClosedFy: boolean;
     generatedAt: string;
+    periodCoveredLabel: string;
+    periodCoveredShort: string;
+    periodFromFiscalMonth: number;
+    periodToFiscalMonth: number;
   };
   targets: {
     monthlyTotal: number | null;
@@ -783,6 +826,8 @@ export function buildMemberPayload(
     dataQuality:    "app-computed from all available sources",
   };
 
+  const periodCoverage = computePeriodCovered(cutoffDate);
+
   return {
     identity: {
       fy,
@@ -795,6 +840,7 @@ export function buildMemberPayload(
       workingDays: actualWorkingDays ?? workingDays,
       isClosedFy: isClosedFy(fy),
       generatedAt: now.toISOString(),
+      ...periodCoverage,
     },
     targets: {
       monthlyTotal,
@@ -881,6 +927,8 @@ export function buildStateHeadPayload(
   const membersWithSheet = members.filter((m) => getMemberFileId(m.normKey)).length;
   const membersWithoutSheet = members.length - membersWithSheet;
 
+  const periodCoverage = computePeriodCovered(cutoffDate);
+
   return {
     identity: {
       fy,
@@ -893,6 +941,7 @@ export function buildStateHeadPayload(
       workingDays: calWorkingDays,
       isClosedFy: isClosedFy(fy),
       generatedAt: now.toISOString(),
+      ...periodCoverage,
     },
     targets: {
       monthlyTotal,

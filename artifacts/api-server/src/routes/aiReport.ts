@@ -22,7 +22,7 @@ import {
   buildMemberPayload,
   type AiPayload,
 } from "../lib/mgmt/aiPayload.js";
-import { runNumericGuard, type GuardResult } from "../lib/mgmt/numericGuard.js";
+import { runNumericGuard, runPeriodGuard, type GuardResult, type PeriodGuardResult } from "../lib/mgmt/numericGuard.js";
 
 const router: IRouter = Router();
 
@@ -84,6 +84,8 @@ ABSOLUTE RULES:
 11. Distance band thresholds and labels (e.g. "Mid (15-40 km)") appear verbatim in visits.distanceBands[].label. Copy them exactly. Do not invent alternative km ranges or bins.
 12. Numeric range boundaries in labels (the "15", "40" in "Mid (15-40 km)") are payload values embedded in strings. You may quote them as part of citing the label. Do not introduce any other numeric thresholds.
 13. Do NOT use "per Rs 100" or "for every Rs 100" normalization phrases. Express cost ratios as percentages or as a direct value from the payload. Do not introduce 100 as a normalization denominator — it is not a payload value and the guard will flag it.
+
+PERIOD COVERAGE RULE: The figures in this payload cover identity.periodCoveredLabel (year to date from April). The payload does NOT contain per-month breakdowns. Do not write sentences that attribute a figure to a single specific month, such as "in April, the team booked Rs X" or "April saw Rs X booking" — those claims imply a monthly figure from cumulative data and will be flagged by the period guard. You may name the months of the coverage window in context (e.g. "in the April–June period"), but never attribute a payload figure exclusively to one sub-month of the YTD window.
 
 RESPONSE FORMAT:
 Return ONLY valid JSON with no markdown code fences, no preamble, no trailing commentary:
@@ -260,6 +262,19 @@ router.post("/ai/report", async (req: Request, res: Response): Promise<void> => 
       );
     }
 
+    // ── 5b. Period guard ──────────────────────────────────────────────────────
+    const periodGuard: PeriodGuardResult = runPeriodGuard(
+      sections as unknown as Record<string, { title: string; body: string }>,
+      payload.identity.periodToFiscalMonth,
+    );
+
+    if (periodGuard.flagged.length > 0) {
+      req.log.warn(
+        { flagged: periodGuard.flagged.length },
+        "ai/report: PERIOD GUARD FLAGGED — single-month attribution in YTD report",
+      );
+    }
+
     // ── 6. Response ───────────────────────────────────────────────────────────
     res.json({
       fy,
@@ -267,8 +282,13 @@ router.post("/ai/report", async (req: Request, res: Response): Promise<void> => 
       stateHead: data.kpis.stateHead ?? stateHead ?? null,
       dataCutoff: payload.identity.dataCutoff,
       generatedAt: payload.identity.generatedAt,
+      periodCoveredLabel: payload.identity.periodCoveredLabel,
+      periodCoveredShort: payload.identity.periodCoveredShort,
+      selectedPeriod: period,
+      periodMismatch: period !== "ytd",
       sections,
       guard,
+      periodGuard,
       ...(corrupt ? { corruptTestMode: true } : {}),
     });
   } catch (err) {
