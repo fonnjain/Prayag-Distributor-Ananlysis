@@ -136,8 +136,8 @@ function detectYearColumns(headerRow: SheetCellValue[]): YearCol[] {
 
 /**
  * Walk year columns from newest to oldest (skipping currentFy) and return the
- * first year that has non-zero OB or Sale.  This is the "year of removal" —
- * the last FY in which the retailer was active.
+ * first year that has non-zero OB or Sale.  This is the last FY in which the
+ * retailer was active — NOT the year of removal (the sheet has no removal date).
  */
 function findLastActiveYear(
   row: SheetCellValue[],
@@ -205,8 +205,9 @@ export type RetailerRow = {
   achievementPct: number | null;
   isActive: boolean;
   // Populated only for rows in MemberSheetResult.removedRows.
-  // lastActiveYear = last FY with non-zero OB or Sale (year of removal).
-  // lastYearSale / lastYearOb = business in that final year (win-back value).
+  // lastActiveYear = last FY with non-zero OB or Sale in the working sheet.
+  // This is NOT the year of removal — the sheet carries no removal date.
+  // lastYearSale / lastYearOb = the business value in that last active FY.
   lastActiveYear: string | null;
   lastYearOb: number | null;
   lastYearSale: number | null;
@@ -892,7 +893,8 @@ async function loadMemberSheetUncached(
       if (SKIP_TOKENS.has(nameNorm)) continue;
       if (/^\d+$/.test(rawName.trim())) continue;
       // Find the last FY where this retailer had non-zero OB or Sale.
-      // That year is the year of removal; its business is the win-back value.
+      // This is the last active year, not the year of removal (no removal date
+      // exists in the sheet).  Its business is the win-back value.
       const lastActive = findLastActiveYear(row, yearCols, fy);
       removedRows.push(buildRow(row, lastActive));
     }

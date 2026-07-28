@@ -246,12 +246,16 @@ export type AiPayload = {
   };
   formerRetailers: {
     count: number;
-    // Retailers grouped by the last FY they were active (year of removal).
+    // Retailers grouped by their LAST ACTIVE year (the last FY in which they
+    // had non-zero OB or Sale in the working sheet).
+    // NOTE: this is NOT the year of removal. The sheet has no removal date.
+    // A retailer last active in 2022-23 may have been removed at any point
+    // after that. Clusters most likely reflect a cleanup pass, not a loss event.
     // Sorted chronologically oldest → newest.
-    byYear: Array<{
-      year: string;       // e.g. "2022-23"
+    byLastActiveYear: Array<{
+      lastActiveYear: string;  // e.g. "2022-23"
       count: number;
-      totalSale: number;  // sum of lastYearSale for retailers lost in this year
+      totalSale: number;       // sum of lastYearSale for retailers in this bucket
       retailers: string[];
     }>;
   } | null;
@@ -913,19 +917,20 @@ export function buildMemberPayload(
     coverage: { retailersTotal, active, dormant, removed, visited, nonVisited, newRetailers },
     formerRetailers: removedRows.length > 0
       ? (() => {
-          // Group by year of removal (lastActiveYear).
-          const byYearMap = new Map<string, { totalSale: number; retailers: string[] }>();
+          // Group by last active year (NOT year of removal — the sheet has no
+          // removal date; clusters reflect cleanup passes, not loss events).
+          const bucketMap = new Map<string, { totalSale: number; retailers: string[] }>();
           for (const r of removedRows) {
-            const year = r.lastActiveYear ?? "unknown";
-            const entry = byYearMap.get(year) ?? { totalSale: 0, retailers: [] };
+            const key = r.lastActiveYear ?? "unknown";
+            const entry = bucketMap.get(key) ?? { totalSale: 0, retailers: [] };
             entry.totalSale += r.lastYearSale ?? 0;
             entry.retailers.push(r.name);
-            byYearMap.set(year, entry);
+            bucketMap.set(key, entry);
           }
-          const byYear = [...byYearMap.entries()]
-            .map(([year, e]) => ({ year, count: e.retailers.length, totalSale: e.totalSale, retailers: e.retailers }))
-            .sort((a, b) => a.year.localeCompare(b.year));
-          return { count: removedRows.length, byYear };
+          const byLastActiveYear = [...bucketMap.entries()]
+            .map(([lastActiveYear, e]) => ({ lastActiveYear, count: e.retailers.length, totalSale: e.totalSale, retailers: e.retailers }))
+            .sort((a, b) => a.lastActiveYear.localeCompare(b.lastActiveYear));
+          return { count: removedRows.length, byLastActiveYear };
         })()
       : null,
     customerStates,
