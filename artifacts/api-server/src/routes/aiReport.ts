@@ -20,6 +20,7 @@ import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { loadDeepDiveData, normSecKey } from "../lib/mgmt/deepDiveData.js";
 import {
   buildMemberPayload,
+  isPeriodMismatch,
   type AiPayload,
 } from "../lib/mgmt/aiPayload.js";
 import { runNumericGuard, runPeriodGuard, type GuardResult, type PeriodGuardResult } from "../lib/mgmt/numericGuard.js";
@@ -285,7 +286,7 @@ router.post("/ai/report", async (req: Request, res: Response): Promise<void> => 
       periodCoveredLabel: payload.identity.periodCoveredLabel,
       periodCoveredShort: payload.identity.periodCoveredShort,
       selectedPeriod: period,
-      periodMismatch: period !== "ytd",
+      periodMismatch: isPeriodMismatch(period, payload.identity.periodToFiscalMonth),
       sections,
       guard,
       periodGuard,

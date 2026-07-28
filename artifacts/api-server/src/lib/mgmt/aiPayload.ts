@@ -147,6 +147,30 @@ const FISCAL_MONTH_SHORT = [
   "Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar",
 ];
 
+/**
+ * Returns true only when the selected period resolves to a DIFFERENT month range
+ * than the actual coverage window [1, coveredTo].
+ *
+ * - "ytd"          → [1, coveredTo]        — always the same, never a mismatch
+ * - "q1"           → [1, 3]
+ * - "q2"           → [4, 6]
+ * - "q3"           → [7, 9]
+ * - "q4"           → [10, 12]
+ * - anything else  → treat as no mismatch (conservative)
+ *
+ * Example: cutoff = 30 June → coveredTo = 3. Selecting "q1" → [1,3] == [1,3]. No mismatch.
+ *          Selecting "q2" → [4,6] ≠ [1,3]. Mismatch.
+ */
+export function isPeriodMismatch(selectedPeriod: string, coveredTo: number): boolean {
+  const QUARTER: Record<string, [number, number]> = {
+    q1: [1, 3], q2: [4, 6], q3: [7, 9], q4: [10, 12],
+  };
+  if (selectedPeriod === "ytd") return false;
+  const range = QUARTER[selectedPeriod];
+  if (!range) return false; // unknown, conservative
+  return range[0] !== 1 || range[1] !== coveredTo;
+}
+
 export function computePeriodCovered(cutoffDate: Date): PeriodCoverage {
   const cutoffCalMonth = cutoffDate.getMonth(); // 0=Jan..11=Dec
   const cutoffYear = cutoffDate.getFullYear();

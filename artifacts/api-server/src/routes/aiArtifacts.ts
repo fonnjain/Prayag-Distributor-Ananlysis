@@ -24,6 +24,7 @@ import type { MemberKpis } from "../lib/mgmt/deepDiveData.js";
 import {
   buildMemberPayload,
   buildStateHeadPayload,
+  isPeriodMismatch,
   type AiPayload,
 } from "../lib/mgmt/aiPayload.js";
 import { runNumericGuard, runPeriodGuard, type GuardResult, type PeriodGuardResult } from "../lib/mgmt/numericGuard.js";
@@ -120,10 +121,14 @@ Your SOLE data source is the verified aggregate payload and the memberRanking ar
 ${CORE_NUMERIC_RULES}
 
 STATE HEAD REPORT ADDITIONAL RULES:
-14. The memberRanking array lists every team member with their name, totalOB, target, achievementPct, and sale. You may cite any of these figures — they are verified. Write each member's own figures alongside their name.
+14. The memberRanking array lists every ACTIVE team member with their name, totalOB, target, achievementPct, and sale. You may cite any of these figures — they are verified. Write each member's own figures alongside their name.
 15. Do NOT write one member's figures as a direct comparison to another named member in the same sentence. You may use positional language ("the highest-ranked member accounts for X% of team OB") or ordinal rank ("third of Y members").
 16. The dataQuality array lists members in the NO_MEMBER_SHEET message by name. Name every such member in the dataQualityAndRisks section. State explicitly that the aggregate is built on partial detail where membersWithoutSheet > 0.
-17. memberPerformance body: rank members from highest to lowest totalOB. Cite each member's totalOB and achievementPct alongside their name. Do not omit any member.
+17. memberPerformance body: rank members from highest to lowest totalOB. Cite each member's totalOB and achievementPct alongside their name. Do not omit any active member.
+18. DEPARTED MEMBERS: The user message may include a "Departed members" section listing members whose status is LEFT. If that section is present you MUST:
+    a. Open the teamPosition section by naming every departed member explicitly and stating their historical OB, sale, retailers, and visits for the period.
+    b. State clearly that the current achievement percentage EXCLUDES the targets of the departed members. This is an organisational change — not commercial improvement. A reader comparing this period's achievement against a prior period when those members were active MUST NOT interpret the difference as performance gain.
+    c. Do NOT include departed members in the memberPerformance ranking. They belong only in the teamPosition narrative.
 
 RESPONSE FORMAT — return ONLY valid JSON, no fences:
 {
@@ -142,13 +147,18 @@ router.post("/ai/statehead-report", async (req: Request, res: Response): Promise
   req.log.info({ fy, stateHead }, "ai/statehead-report: request");
 
   try {
-    const { members, error: loadErr } = await resolveStateHeadMembers(fy, stateHead);
+    const { members: allMembers, error: loadErr } = await resolveStateHeadMembers(fy, stateHead);
     if (loadErr) { res.status(404).json({ error: loadErr }); return; }
-    if (members.length === 0) { res.status(404).json({ error: "No member data found for this state head." }); return; }
+    if (allMembers.length === 0) { res.status(404).json({ error: "No member data found for this state head." }); return; }
 
-    const payload = buildStateHeadPayload(fy, stateHead, period, members);
+    // Aggregate figures are computed on ACTIVE members only.
+    const activeMembers = allMembers.filter((m) => !m.isLeft);
+    const leftMembers   = allMembers.filter((m) => m.isLeft);
+    const payloadMembers = activeMembers.length > 0 ? activeMembers : allMembers;
 
-    const memberRanking = members
+    const payload = buildStateHeadPayload(fy, stateHead, period, payloadMembers);
+
+    const memberRanking = payloadMembers
       .map((m) => ({
         name: m.name,
         totalOB: (m.orderBooking ?? 0) + (m.directDealersOrder ?? 0),
@@ -161,7 +171,25 @@ router.post("/ai/statehead-report", async (req: Request, res: Response): Promise
       }))
       .sort((a, b) => b.totalOB - a.totalOB);
 
-    const userMsg = `Verified state-head aggregate payload (JSON):\n${JSON.stringify(payload, null, 2)}\n\nMember ranking by total OB (app-computed, verified — cite freely):\n${JSON.stringify(memberRanking, null, 2)}`;
+    // Departed members context — passed to Claude so it can name them explicitly.
+    const departedContext = leftMembers.length > 0
+      ? `\n\nDeparted members (status: LEFT — historical business for this period, excluded from all aggregate figures and the ranking above):\n${JSON.stringify(
+          leftMembers.map((m) => ({
+            name: m.name,
+            historicalOB: Math.round((m.orderBooking ?? 0) + (m.directDealersOrder ?? 0)),
+            historicalSale: Math.round(m.sale ?? 0),
+            retailers: m.totalOldRetailers ?? 0,
+            visits: m.visitedRetailers ?? 0,
+            target: Math.round(m.totalTargetToDate ?? 0),
+          })),
+          null, 2,
+        )}`
+      : "";
+
+    const userMsg =
+      `Verified state-head aggregate payload (JSON) — active members only:\n${JSON.stringify(payload, null, 2)}\n\n` +
+      `Member ranking by total OB (active members only, app-computed, verified — cite freely):\n${JSON.stringify(memberRanking, null, 2)}` +
+      departedContext;
 
     const message = await anthropic.messages.create({
       model: MODEL, max_tokens: MAX_TOKENS,
@@ -172,10 +200,18 @@ router.post("/ai/statehead-report", async (req: Request, res: Response): Promise
     const rawJson = message.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
     const sections = JSON.parse(stripFences(rawJson)) as Record<string, { title: string; body: string }>;
 
-    const guard = guardCustom(sections, payload, memberRanking);
+    // Guard extra includes departed member figures so they can be cited freely.
+    const departedForGuard = leftMembers.map((m) => ({
+      historicalOB: Math.round((m.orderBooking ?? 0) + (m.directDealersOrder ?? 0)),
+      historicalSale: Math.round(m.sale ?? 0),
+      retailers: m.totalOldRetailers ?? 0,
+      visits: m.visitedRetailers ?? 0,
+      target: Math.round(m.totalTargetToDate ?? 0),
+    }));
+    const guard = guardCustom(sections, payload, { memberRanking, departedMembers: departedForGuard });
     const periodGuard: PeriodGuardResult = runPeriodGuard(sections, payload.identity.periodToFiscalMonth);
 
-    req.log.info({ stateHead, guardStatus: guard.status, unmatched: guard.unmatched.length }, "ai/statehead-report: done");
+    req.log.info({ stateHead, active: activeMembers.length, departed: leftMembers.length, guardStatus: guard.status, unmatched: guard.unmatched.length }, "ai/statehead-report: done");
 
     res.json({
       fy, stateHead,
@@ -184,8 +220,9 @@ router.post("/ai/statehead-report", async (req: Request, res: Response): Promise
       periodCoveredLabel: payload.identity.periodCoveredLabel,
       periodCoveredShort: payload.identity.periodCoveredShort,
       selectedPeriod: period,
-      periodMismatch: period !== "ytd",
+      periodMismatch: isPeriodMismatch(period, payload.identity.periodToFiscalMonth),
       sections, guard, periodGuard, memberRanking,
+      departedMembersExcluded: leftMembers.length,
     });
   } catch (err) {
     req.log.error({ err, fy, stateHead }, "ai/statehead-report: error");
@@ -266,7 +303,7 @@ router.post("/ai/suggestions", async (req: Request, res: Response): Promise<void
       periodCoveredLabel: payload.identity.periodCoveredLabel,
       periodCoveredShort: payload.identity.periodCoveredShort,
       selectedPeriod: period,
-      periodMismatch: period !== "ytd",
+      periodMismatch: isPeriodMismatch(period, payload.identity.periodToFiscalMonth),
       ...result, guard, periodGuard,
     });
   } catch (err) {
@@ -372,7 +409,7 @@ router.post("/ai/travel-plan", async (req: Request, res: Response): Promise<void
       periodCoveredLabel: payload.identity.periodCoveredLabel,
       periodCoveredShort: payload.identity.periodCoveredShort,
       selectedPeriod: period,
-      periodMismatch: period !== "ytd",
+      periodMismatch: isPeriodMismatch(period, payload.identity.periodToFiscalMonth),
       sections,
       guard,
       periodGuard,
@@ -453,7 +490,7 @@ router.post("/ai/performance-review", async (req: Request, res: Response): Promi
       periodCoveredLabel: payload.identity.periodCoveredLabel,
       periodCoveredShort: payload.identity.periodCoveredShort,
       selectedPeriod: period,
-      periodMismatch: period !== "ytd",
+      periodMismatch: isPeriodMismatch(period, payload.identity.periodToFiscalMonth),
       sections,
       guard,
       periodGuard,
@@ -602,7 +639,7 @@ router.post("/ai/presentation", async (req: Request, res: Response): Promise<voi
         periodCoveredLabel: payload.identity.periodCoveredLabel,
         periodCoveredShort: payload.identity.periodCoveredShort,
         selectedPeriod: period,
-        periodMismatch: period !== "ytd",
+        periodMismatch: isPeriodMismatch(period, payload.identity.periodToFiscalMonth),
         deckTitle: deck.deckTitle,
         deckSubtitle: deck.deckSubtitle,
         slides: deck.slides,
@@ -618,12 +655,18 @@ router.post("/ai/presentation", async (req: Request, res: Response): Promise<voi
     }
 
     // ── A4-A state-head 27-slide deck ─────────────────────────────────────────
-    const { members, error: loadErr } = await resolveStateHeadMembers(fy, stateHead!);
+    const { members: allA4aMembers, error: loadErr } = await resolveStateHeadMembers(fy, stateHead!);
     if (loadErr) { res.status(404).json({ error: loadErr }); return; }
-    payload = buildStateHeadPayload(fy, stateHead!, period, members);
 
-    // Extended per-member summary for A4A (all from KPIs — no extra Sheets reads)
-    const memberSummary = members
+    // Aggregate figures use active members only; departed shown as context in the deck.
+    const a4aActive  = allA4aMembers.filter((m) => !m.isLeft);
+    const a4aLeft    = allA4aMembers.filter((m) => m.isLeft);
+    const a4aPayloadMembers = a4aActive.length > 0 ? a4aActive : allA4aMembers;
+
+    payload = buildStateHeadPayload(fy, stateHead!, period, a4aPayloadMembers);
+
+    // Extended per-member summary for A4A (active members only — no extra Sheets reads)
+    const memberSummary = a4aPayloadMembers
       .map((m) => {
         const totalOB = (m.orderBooking ?? 0) + (m.directDealersOrder ?? 0);
         const achievementPct =
@@ -647,9 +690,23 @@ router.post("/ai/presentation", async (req: Request, res: Response): Promise<voi
       })
       .sort((a, b) => b.totalOB - a.totalOB);
 
+    const a4aDepartedContext = a4aLeft.length > 0
+      ? `\n\nDeparted members (status: LEFT — historical business only, excluded from all aggregate figures):\n${JSON.stringify(
+          a4aLeft.map((m) => ({
+            name: m.name,
+            historicalOB: Math.round((m.orderBooking ?? 0) + (m.directDealersOrder ?? 0)),
+            historicalSale: Math.round(m.sale ?? 0),
+            retailers: m.totalOldRetailers ?? 0,
+            visits: m.visitedRetailers ?? 0,
+          })),
+          null, 2,
+        )}`
+      : "";
+
     const a4aUserMsg =
-      `Verified state-head aggregate payload (JSON):\n${JSON.stringify(payload, null, 2)}\n\n` +
-      `Member summary — sorted by totalOB descending, verified, cite freely (JSON):\n${JSON.stringify(memberSummary, null, 2)}`;
+      `Verified state-head aggregate payload (JSON) — active members only:\n${JSON.stringify(payload, null, 2)}\n\n` +
+      `Member summary — active members only, sorted by totalOB descending, verified, cite freely (JSON):\n${JSON.stringify(memberSummary, null, 2)}` +
+      a4aDepartedContext;
 
     const a4aMessage = await anthropic.messages.create({
       model: MODEL, max_tokens: MAX_TOKENS,
@@ -687,7 +744,7 @@ router.post("/ai/presentation", async (req: Request, res: Response): Promise<voi
       periodCoveredLabel: payload.identity.periodCoveredLabel,
       periodCoveredShort: payload.identity.periodCoveredShort,
       selectedPeriod: period,
-      periodMismatch: period !== "ytd",
+      periodMismatch: isPeriodMismatch(period, payload.identity.periodToFiscalMonth),
       deckTitle: a4aDeck.deckTitle,
       deckSubtitle: a4aDeck.deckSubtitle,
       slides: [],
