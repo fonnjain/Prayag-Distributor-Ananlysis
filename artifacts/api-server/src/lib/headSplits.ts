@@ -22,16 +22,24 @@ export type HeadSplit = {
 };
 
 /**
- * All confirmed alias pairs (never co-exist in the same FY).
+ * Remaining unresolved alias pairs (never co-exist in the same FY, but not yet
+ * applied via DB UPDATE — business confirmation still required).
  * Keyed by currentCanon so lookups are O(1).
+ *
+ * Applied and removed (DB UPDATE confirmed clean, Jul 2026):
+ *   Sandeep Ji      → Sandeep Dadheech   (10,017 inv / ₹498.99 Cr)
+ *   Rizvi Ji        → Syed Aqil Rizvi    ( 6,518 inv / ₹160.50 Cr)
+ *   Bijju           → Biju C.O           (   906 inv / ₹50.80 Cr)
+ *   Lalan           → Lalan Kumar        ( 1,523 inv / ₹34.37 Cr)
+ *   Nasir Husain    → Nasir Hussain Khan (   516 inv / ₹9.93 Cr)
  */
 export const CROSS_FY_SPLITS: Record<string, HeadSplit> = {
-  "Sandeep Dadheech":  { currentCanon: "Sandeep Dadheech",  priorCanon: "Sandeep Ji",         splitFromFy: "2026-27" },
-  "Syed Aqil Rizvi":   { currentCanon: "Syed Aqil Rizvi",   priorCanon: "Rizvi Ji",            splitFromFy: "2026-27" },
-  "Pawan Sharma":      { currentCanon: "Pawan Sharma",       priorCanon: "Pawan Kumar",         splitFromFy: "2026-27" },
-  "Biju C.O":          { currentCanon: "Biju C.O",           priorCanon: "Bijju",               splitFromFy: "2026-27" },
-  "Lalan Kumar":       { currentCanon: "Lalan Kumar",        priorCanon: "Lalan",               splitFromFy: "2026-27" },
-  "Nasir Hussain Khan":{ currentCanon: "Nasir Hussain Khan", priorCanon: "Nasir Husain",        splitFromFy: "2026-27" },
+  // Pending business confirmation: roster shows "Pawan Kumar Sharma" which may
+  // explain "Pawan Kumar" (FY2023-24 – FY2025-26) and "Pawan Sharma" (FY2026-27)
+  // as partial forms of the same person, but customer count halves (152 → 21)
+  // where other heads drop far less.  Do not apply UPDATE until confirmed.
+  // head_alias.json already aligned: "PAWAN KUMAR." now → "Pawan Sharma".
+  "Pawan Sharma": { currentCanon: "Pawan Sharma", priorCanon: "Pawan Kumar", splitFromFy: "2026-27" },
 };
 
 /**

@@ -33,6 +33,22 @@ All verified: never co-exist in the same FY → safe alias candidates.
 | Lalan (25-26) | 37 | 11.48 |
 | Nasir Husain (25-26) | 32 | 3.37 |
 
+## Applied UPDATEs (Jul 28 2026) — confirmed clean
+
+| Pair | Invoices merged | ₹ Cr merged |
+|---|---|---|
+| Sandeep Ji → Sandeep Dadheech | 10,017 | 498.99 |
+| Rizvi Ji → Syed Aqil Rizvi | 6,518 | 160.50 |
+| Bijju → Biju C.O | 906 | 50.80 |
+| Lalan → Lalan Kumar | 1,523 | 34.37 |
+| Nasir Husain → Nasir Hussain Khan | 516 | 9.93 |
+
+Verified: invoice counts before + after match exactly for all five. Customers (distinct) are slightly lower than the sum due to shared customers across FYs.
+
+## head_alias.json fix (Jul 28 2026)
+
+`"PAWAN KUMAR."` → was `"Pawan Kumar"`, now `"Pawan Sharma"` — trailing-period variant now consistent with `"PAWAN KUMAR"`. Only affects future ingestion; historical rows stay as `"Pawan Kumar"` until the UPDATE is confirmed.
+
 ## Suppression implementation (active)
 
 - `src/lib/headSplits.ts` — canonical config + `getSplit(headCanon, fyCy, fyLy)` 

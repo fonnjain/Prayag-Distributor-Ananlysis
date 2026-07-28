@@ -8,16 +8,15 @@ import type { WarningCard, WarningSeverity, WarningTrend } from "./types.js";
 // ── Known cross-FY key splits ─────────────────────────────────────────────────
 // head_canon values that differ between consecutive FYs; YoY comparisons for
 // these heads return zero for the prior year instead of real data.
-// All six pairs were confirmed as never co-existing in the same FY (DB diff).
 // Source of truth: src/lib/headSplits.ts — this map is a local copy for the
 // warnings engine (avoids an async import).
+//
+// Five pairs have been resolved via DB UPDATE (Jul 2026):
+//   Sandeep Ji→Dadheech, Rizvi Ji→Syed Aqil Rizvi, Bijju→Biju C.O,
+//   Lalan→Lalan Kumar, Nasir Husain→Nasir Hussain Khan.
+// Remaining: Pawan Kumar / Pawan Sharma — awaiting business confirmation.
 const CROSS_FY_KEY_SPLITS: Record<string, string> = {
-  "sandeep dadheech":   "Sandeep Ji (FY2025-26 canon) — head key changed in FY2026-27",
-  "syed aqil rizvi":    "Rizvi Ji (FY2025-26 canon) — head key changed in FY2026-27",
-  "pawan sharma":       "Pawan Kumar (FY2025-26 canon) — head key changed in FY2026-27",
-  "biju c.o":           "Bijju (FY2025-26 canon) — head key changed in FY2026-27",
-  "lalan kumar":        "Lalan (FY2025-26 canon) — head key changed in FY2026-27",
-  "nasir hussain khan": "Nasir Husain (FY2025-26 canon) — head key changed in FY2026-27",
+  "pawan sharma": "Pawan Kumar (FY2025-26 canon) — business confirmation pending",
 };
 
 function normKey(name: string): string {
