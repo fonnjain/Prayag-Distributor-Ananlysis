@@ -1,0 +1,141 @@
+# Prayag Distributor Analysis — verification outstanding
+
+*The pack was produced but not verified, Part A was not reported, and the output formats do not match the specification. Three things to close.*
+
+---
+
+## 1. Part A was not reported — do this first
+
+Five `head_canon` UPDATEs rewrote **19,480 invoice rows** across four fiscal years. Nothing has confirmed the effect. This is the highest-risk open item in the project right now.
+
+### 1a. Fiscal-year totals must be unchanged — report this before anything else
+
+The merges moved rows **between** canons. They must not have changed any total.
+
+- Total `sale_line` rows per fiscal year
+- Total amount per fiscal year
+- **FY2024-25 must read ₹341.14 Cr**
+- **FY2025-26 must read ₹359.52 Cr**
+
+If either has moved, the UPDATE touched something beyond `head_canon`. Stop and report rather than correcting it.
+
+### 1b. Merged canons
+
+Report across all four fiscal years:
+
+| head_canon | invoices | customers | ₹ Cr |
+|---|---|---|---|
+| Sandeep Dadheech | 10,017 | 128 | 498.99 |
+| Syed Aqil Rizvi | 6,518 | 126 | 160.50 |
+| Biju C.O | 906 | 25 | 50.80 |
+| Lalan Kumar | 1,523 | 64 | 34.37 |
+| Nasir Hussain Khan | 516 | 46 | 9.93 |
+
+### 1c. Old canons must be empty
+
+Confirm `Sandeep Ji`, `Rizvi Ji`, `Bijju`, `Lalan` and `Nasir Husain` each return **zero rows**. A residual row under an old name sits outside every per-head view and would be invisible.
+
+### 1d. Year-on-year now populates
+
+For each of the five merged heads, report FY2025-26 beside FY2026-27 and confirm the prior year is no longer zero. Sandeep Dadheech should show roughly **₹163 Cr against ₹41 Cr**.
+
+Confirm `CROSS_FY_KEY_SPLIT` has **cleared** for those five and **remains active** for Pawan Sharma.
+
+---
+
+## 2. Part B acceptance was not reported
+
+The pack exists. Nothing confirms it is correct. Report the produced values, not that generation succeeded.
+
+### 2a. Team figures, active-10 basis
+
+- Order booking **₹2.35 Cr** (₹23,549,308)
+- Sales received **₹2.41 Cr**
+- Target to date **₹4.03 Cr**
+- Achievement **58.4%**
+- Visits **4,522** (dashboard column AF)
+- Retailers **748** (dashboard column N)
+
+### 2b. Prasun Chatterjee — all seven controls, to the rupee
+
+- 73 retailers, 34 active
+- Order booking ₹26,21,109
+- Sales received ₹26,13,934
+- 395 visits against 1,704 required
+- Top-5 share 64.0%
+- Effective retailers 9.9
+- Cost ratio 5.94%
+
+### 2c. Removed retailers, reported separately
+
+Ravinder Puri 64 · Prasun Chatterjee 47 · Manish Gupta 39 · Shivam Chauhan 58 · Ravi (Faridabad) 11 · Rinku 5 · other four zero. **Total 224.** Labelled by **last active year**, not year of removal.
+
+### 2d. Content checks
+
+- Every document carries period, data cutoff and generation time
+- Filenames and the batch folder carry the actual period covered
+- No false mismatch banner with year-to-date selected
+
+---
+
+## 3. Output formats do not match the specification
+
+The pack is entirely **HTML**. The requirement was **PDF for reports and PPTX for the deck**.
+
+`AiReports.tsx` already contains `exportSectionsPdf`, `exportPerformanceReviewPdf`, `exportSuggestionsPdf` and `exportTravelPlanPdf`. So an individual download produces PDF while the batch zip produces HTML — **the same content in two formats depending on how it was requested.**
+
+Report:
+
+- Whether the batch path can call the same export functions the individual path uses
+- What prevents it today, if anything
+- Whether the deck can be produced as **PPTX** rather than HTML
+
+An HTML deck cannot be opened in PowerPoint or edited before a review meeting, which is most of the reason a deck is wanted at all.
+
+**Do not rebuild the pack until this is answered.** If the batch path can reuse the existing exporters, that is a small change and the pack should be regenerated once, in the right formats.
+
+---
+
+## 4. Check what the deck response actually contains
+
+`max_tokens: 32000` for a 27-slide deck is a large budget for what the specification permits the model to produce.
+
+Phase A4-A was explicit: **charts render natively by the application from payload figures. The model supplies titles, ordering and commentary only — never chart data.**
+
+Report:
+
+- The approximate token count of a real deck response
+- Whether it contains any numeric series, chart data arrays, or table values
+- Whether chart values are rendered from the payload or from the model's output
+
+If the model is emitting chart data, the numeric guard cannot protect it and the architecture principle that has held throughout this project has quietly eroded. That matters more than the token cost.
+
+---
+
+## Acceptance
+
+Report each with the produced value.
+
+- [ ] FY2024-25 ₹341.14 Cr and FY2025-26 ₹359.52 Cr, unchanged
+- [ ] Five merged canons match the 1b table
+- [ ] Five old canons return zero rows
+- [ ] Year-on-year populates for all five; flag cleared for them, held for Pawan
+- [ ] Team figures match 2a
+- [ ] Prasun reproduces all seven controls in 2b
+- [ ] Removed counts match 2c, labelled by last active year
+- [ ] Format question in 3 answered before any rebuild
+- [ ] Deck response contents reported per 4
+
+---
+
+## What to watch
+
+**1a before everything else.** A moved fiscal-year total would mean the merge damaged something, and every figure produced since would be suspect.
+
+**"Complete" is not "verified".** The pack was reported as delivered without a single acceptance figure. The prompt asked for produced values throughout, and that is the difference between a pack that is right and a pack that exists.
+
+**Do not regenerate before the format question is answered.** Regenerating in HTML a second time wastes the run.
+
+---
+
+*Prayag Distributor Analysis · data cutoff 30 June 2026*
