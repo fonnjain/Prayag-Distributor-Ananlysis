@@ -246,7 +246,14 @@ export type AiPayload = {
   };
   formerRetailers: {
     count: number;
-    names: string[];
+    // Retailers grouped by the last FY they were active (year of removal).
+    // Sorted chronologically oldest → newest.
+    byYear: Array<{
+      year: string;       // e.g. "2022-23"
+      count: number;
+      totalSale: number;  // sum of lastYearSale for retailers lost in this year
+      retailers: string[];
+    }>;
   } | null;
   customerStates: CustomerStates | null;
   topCustomers: {
@@ -905,13 +912,21 @@ export function buildMemberPayload(
     achievement: { totalOBPct, secondaryOBPct, directDealerPct, salePct, annualProgressPct },
     coverage: { retailersTotal, active, dormant, removed, visited, nonVisited, newRetailers },
     formerRetailers: removedRows.length > 0
-      ? {
-          count: removedRows.length,
-          // Names for win-back targeting. Prior-year OB is not in RetailerRow
-          // (fixed col positions read current-FY cols only); cross-reference
-          // secondary_register_line for historical volumes.
-          names: removedRows.map((r) => r.name),
-        }
+      ? (() => {
+          // Group by year of removal (lastActiveYear).
+          const byYearMap = new Map<string, { totalSale: number; retailers: string[] }>();
+          for (const r of removedRows) {
+            const year = r.lastActiveYear ?? "unknown";
+            const entry = byYearMap.get(year) ?? { totalSale: 0, retailers: [] };
+            entry.totalSale += r.lastYearSale ?? 0;
+            entry.retailers.push(r.name);
+            byYearMap.set(year, entry);
+          }
+          const byYear = [...byYearMap.entries()]
+            .map(([year, e]) => ({ year, count: e.retailers.length, totalSale: e.totalSale, retailers: e.retailers }))
+            .sort((a, b) => a.year.localeCompare(b.year));
+          return { count: removedRows.length, byYear };
+        })()
       : null,
     customerStates,
     topCustomers,

@@ -72,6 +72,88 @@ const SECTION_HEADER_TOKENS = new Set([
   "REMOVEDRETAILER", "REMOVEDCUSTOMER", "REMOVEDCUSTOMERS",
 ]);
 
+// ── Historical year-column helpers ────────────────────────────────────────────
+// Each member sheet has pairs of columns (Order Booking <FY>, Sale <FY>) for
+// historical years.  Column positions vary per sheet.  We detect them from the
+// header row so we can find the LAST POPULATED YEAR for removed retailers,
+// which gives both the win-back value and the year of removal.
+
+type YearCol = {
+  fy: string;      // normalised "2022-23"
+  obCol: number;   // 0-indexed column; -1 if not found
+  saleCol: number; // 0-indexed column; -1 if not found
+};
+
+/**
+ * Normalise a year label extracted from a column header to "YYYY-YY" format.
+ * Handles both short ("21-22") and long ("2021-22") forms.
+ */
+function normFyFromLabel(raw: string): string | null {
+  const m = raw.match(/(\d{2,4})-(\d{2})\s*$/);
+  if (!m) return null;
+  const y1Raw = m[1];
+  const y2    = m[2];
+  const y1    = y1Raw.length === 2 ? `20${y1Raw}` : y1Raw;
+  return `${y1}-${y2}`;
+}
+
+/**
+ * Scan a header row and return a chronologically sorted list of
+ * { fy, obCol, saleCol } for every "Order Booking <FY>" / "Sale <FY>" pair.
+ * When a FY appears more than once (repeated appendix columns), the first
+ * occurrence wins — those are in the main data area.
+ */
+function detectYearColumns(headerRow: SheetCellValue[]): YearCol[] {
+  const map = new Map<string, { obCol: number; saleCol: number }>();
+
+  for (let col = 0; col < headerRow.length; col++) {
+    const raw    = String(headerRow[col] ?? "").trim();
+    const upper  = raw.toUpperCase();
+    const fyLabel = normFyFromLabel(raw);
+    if (!fyLabel) continue;
+
+    // Exclude non-year metric columns that accidentally match the date pattern.
+    const isOb =
+      (upper.includes("ORDER") || upper.includes("BOOKING")) &&
+      !upper.includes("PERVISIT") && !upper.includes("PER VISIT");
+    const isSale =
+      upper.includes("SALE") &&
+      !upper.includes("PERSALE") && !upper.includes("PERRETAILER") &&
+      !upper.includes("PER VISIT") && !upper.includes("AVERAGE");
+
+    if (!isOb && !isSale) continue;
+
+    const entry = map.get(fyLabel) ?? { obCol: -1, saleCol: -1 };
+    if (isOb  && entry.obCol   === -1) entry.obCol   = col;
+    if (isSale && entry.saleCol === -1) entry.saleCol = col;
+    map.set(fyLabel, entry);
+  }
+
+  return [...map.entries()]
+    .map(([fy, c]) => ({ fy, ...c }))
+    .sort((a, b) => a.fy.localeCompare(b.fy));
+}
+
+/**
+ * Walk year columns from newest to oldest (skipping currentFy) and return the
+ * first year that has non-zero OB or Sale.  This is the "year of removal" —
+ * the last FY in which the retailer was active.
+ */
+function findLastActiveYear(
+  row: SheetCellValue[],
+  yearCols: YearCol[],
+  currentFy: string,
+): { fy: string; ob: number; sale: number } | null {
+  for (let i = yearCols.length - 1; i >= 0; i--) {
+    const yc = yearCols[i];
+    if (yc.fy === currentFy) continue;
+    const ob   = yc.obCol   >= 0 ? (cellNum(row[yc.obCol])   ?? 0) : 0;
+    const sale = yc.saleCol >= 0 ? (cellNum(row[yc.saleCol]) ?? 0) : 0;
+    if (ob > 0 || sale > 0) return { fy: yc.fy, ob, sale };
+  }
+  return null;
+}
+
 // ── Default column indices (0-indexed) ────────────────────────────────────────
 // Used as fallback when header detection cannot locate a column.
 
@@ -122,6 +204,12 @@ export type RetailerRow = {
   totalVisit: number | null;
   achievementPct: number | null;
   isActive: boolean;
+  // Populated only for rows in MemberSheetResult.removedRows.
+  // lastActiveYear = last FY with non-zero OB or Sale (year of removal).
+  // lastYearSale / lastYearOb = business in that final year (win-back value).
+  lastActiveYear: string | null;
+  lastYearOb: number | null;
+  lastYearSale: number | null;
 };
 
 export type RetailerSpread = {
@@ -704,13 +792,19 @@ async function loadMemberSheetUncached(
   );
 
   // Detect columns — for data-start inference and logging only.
-  // DEFAULT_COL positions are always used for data extraction because the
-  // header has multiple "Order Booking" columns (one per FY) and we must
-  // pick the 2026-27 one at its fixed position (W-AD).
+  // DEFAULT_COL positions are always used for active-section data extraction
+  // because the header has multiple "Order Booking" columns (one per FY) and
+  // we must pick the 2026-27 one at its fixed position (W-AD).
   const detected = detectColumns(allRows);
   const COL: ColMap = DEFAULT_COL;
   // Data starts two rows after the header (header + one blank/separator row).
   const dataStart = detected ? detected.headerRowIndex + 2 : 6;
+
+  // Build a year→column map from the header row.  Used only when parsing the
+  // removed section to find each retailer's last active year (year of removal).
+  const yearCols: YearCol[] = detected
+    ? detectYearColumns(allRows[detected.headerRowIndex] ?? [])
+    : [];
 
   // Tokens in the name column that mean "skip this row".
   const SKIP_TOKENS = new Set([
@@ -721,7 +815,11 @@ async function loadMemberSheetUncached(
   const STOP_TOKENS = new Set(["TOTAL", "GRANDTOTAL", "SUBTOTAL"]);
 
   // Helper: build a RetailerRow from a raw sheet row.
-  function buildRow(row: SheetCellValue[]): RetailerRow {
+  // lastActive is only supplied for removed-section rows.
+  function buildRow(
+    row: SheetCellValue[],
+    lastActive?: { fy: string; ob: number; sale: number } | null,
+  ): RetailerRow {
     const ob   = cellNum(row[COL.orderBooking]) ?? 0;
     const sale = cellNum(row[COL.sale]) ?? 0;
     const plan = cellNum(row[COL.businessPlan]);
@@ -738,6 +836,9 @@ async function loadMemberSheetUncached(
       totalVisit:     cellNum(row[COL.totalVisit]),
       achievementPct: plan !== null && plan > 0 ? (ob / plan) * 100 : null,
       isActive:       ob > 0 || sale > 0,
+      lastActiveYear: lastActive?.fy ?? null,
+      lastYearOb:     lastActive?.ob ?? null,
+      lastYearSale:   lastActive?.sale ?? null,
     };
   }
 
@@ -790,7 +891,10 @@ async function loadMemberSheetUncached(
       if (STOP_TOKENS.has(nameNorm) || nameNorm.startsWith("TOTAL") || nameNorm.startsWith("GRANDTOTAL")) break;
       if (SKIP_TOKENS.has(nameNorm)) continue;
       if (/^\d+$/.test(rawName.trim())) continue;
-      removedRows.push(buildRow(row));
+      // Find the last FY where this retailer had non-zero OB or Sale.
+      // That year is the year of removal; its business is the win-back value.
+      const lastActive = findLastActiveYear(row, yearCols, fy);
+      removedRows.push(buildRow(row, lastActive));
     }
   }
 
