@@ -870,6 +870,10 @@ export function buildMemberPayload(
       workingDays: actualWorkingDays ?? workingDays,
       isClosedFy: isClosedFy(fy),
       generatedAt: now.toISOString(),
+      // Which Summary Report tab was actually read — null if the sheet had no
+      // exact "Summary Report <short-FY>" tab.  Used to verify tab resolution.
+      summaryTabName: retailerDetail?.status === "ok" ? retailerDetail.tabName : null,
+      summaryTabCanonical: retailerDetail?.status === "ok" ? retailerDetail.canonicalName : null,
       ...periodCoverage,
     },
     targets: {

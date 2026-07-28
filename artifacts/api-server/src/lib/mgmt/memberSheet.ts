@@ -141,7 +141,8 @@ export type MonthActual = {
 
 export type MemberSheetResult = {
   fileId: string;
-  tabName: string;
+  tabName: string;           // actual tab title selected (e.g. "Summary Report 26-27")
+  canonicalName: string;     // the exact name we looked for (e.g. "Summary Report 26-27")
   rows: RetailerRow[];
   spread: RetailerSpread;
   visitPlan: VisitPlan;
@@ -372,13 +373,19 @@ async function loadHistoricalCapacity(
 }
 
 // ── Tab finder ────────────────────────────────────────────────────────────────
-// Prefers the tab whose name contains the FY year hint (most specific).
-// Falls back to the longest tab name starting with the prefix.
-// Returns both the selected tab title and the full tab list so the caller
+// Requires an exact tab named "Summary Report <short-FY>" (case-insensitive).
+// e.g. fy="2026-27" → canonical = "Summary Report 26-27"
+//
+// No fuzzy fallback: if that exact tab is absent the function returns null and
+// logs at WARN level so the problem is visible rather than silently reading the
+// wrong tab (e.g. "Summary Report 2026-2027" or just "Summary Report").
+//
+// Returns both the selected tab title and the full tab inventory so the caller
 // can reuse it for historical capacity reads without a second listSheetTabs call.
 
 type TabInventory = {
   selectedTab: string | null;
+  canonicalName: string;          // the name we looked for, e.g. "Summary Report 26-27"
   allTabs: { title: string }[];
 };
 
@@ -386,50 +393,46 @@ async function findSummaryTabWithInventory(
   fileId: string,
   fy: string,
 ): Promise<TabInventory> {
+  // Canonical name: "Summary Report 26-27" for fy="2026-27"
+  const shortFy      = fy.replace(/^20/, "");           // "2026-27" → "26-27"
+  const canonicalName = `${SUMMARY_TAB_PREFIX} ${shortFy}`;  // "Summary Report 26-27"
+  const canonicalUC  = canonicalName.toUpperCase();
+
   let allTabs: { title: string }[];
   try {
     allTabs = await listSheetTabs(fileId);
   } catch (err) {
     logger.warn({ err, fileId }, "memberSheet: listSheetTabs failed");
-    return { selectedTab: null, allTabs: [] };
+    return { selectedTab: null, canonicalName, allTabs: [] };
   }
 
-  const p = SUMMARY_TAB_PREFIX;
-  const matches = allTabs.filter((t) => t.title.toUpperCase().startsWith(p));
-
   logger.info(
-    { fileId, fy, allTabs: allTabs.map((t) => t.title), summaryMatches: matches.map((t) => t.title) },
+    {
+      fileId,
+      fy,
+      canonicalName,
+      allTabs: allTabs.map((t) => t.title),
+    },
     "memberSheet: tab candidates",
   );
 
-  if (matches.length === 0) return { selectedTab: null, allTabs };
+  const exactMatch = allTabs.find((t) => t.title.toUpperCase() === canonicalUC);
 
-  // Build FY year variants to prefer the FY-specific tab.
-  // e.g. fy="2026-27" → ["2026-27","2026-2027","26-27","2026"]
-  const fyVariants = [
-    fy,
-    fy.replace("-", "-20"),
-    fy.replace(/^20/, ""),
-    fy.slice(0, 4),
-  ].map((s) => s.toUpperCase());
-
-  const fyMatch = matches.find((t) => {
-    const title = t.title.toUpperCase();
-    return fyVariants.some((v) => title.includes(v));
-  });
-
-  if (fyMatch) {
-    logger.info({ tab: fyMatch.title }, "memberSheet: FY-specific tab selected");
-    return { selectedTab: fyMatch.title, allTabs };
+  if (exactMatch) {
+    logger.info({ tab: exactMatch.title, canonicalName }, "memberSheet: exact tab match");
+    return { selectedTab: exactMatch.title, canonicalName, allTabs };
   }
 
-  // Fall back to the longest matching tab (more specific is better).
-  const fallback = [...matches].sort((a, b) => b.title.length - a.title.length)[0]!;
-  logger.info(
-    { tab: fallback.title, reason: "no FY match; using longest" },
-    "memberSheet: fallback tab selected",
+  // Hard failure — do not fall through to a similarly-named tab.
+  const summaryTabs = allTabs
+    .filter((t) => t.title.toUpperCase().startsWith(SUMMARY_TAB_PREFIX))
+    .map((t) => t.title);
+
+  logger.warn(
+    { fileId, fy, canonicalName, summaryTabsFound: summaryTabs, allTabCount: allTabs.length },
+    "memberSheet: SUMMARY TAB NOT FOUND — expected exact tab absent; refusing fallback",
   );
-  return { selectedTab: fallback.title, allTabs };
+  return { selectedTab: null, canonicalName, allTabs };
 }
 
 // ── Header detection ──────────────────────────────────────────────────────────
@@ -666,9 +669,9 @@ async function loadMemberSheetUncached(
 
   logger.info({ memberKey, memberName, fy, fileId }, "memberSheet: resolved fileId for member");
 
-  const { selectedTab: tabName, allTabs } = await findSummaryTabWithInventory(fileId, fy);
+  const { selectedTab: tabName, canonicalName, allTabs } = await findSummaryTabWithInventory(fileId, fy);
   if (!tabName) {
-    logger.warn({ memberKey, fileId, fy }, "memberSheet: summary tab not found");
+    // findSummaryTabWithInventory already logged the WARN with full tab inventory.
     return null;
   }
 
@@ -777,6 +780,7 @@ async function loadMemberSheetUncached(
   return {
     fileId,
     tabName,
+    canonicalName,
     rows,
     spread,
     visitPlan,
