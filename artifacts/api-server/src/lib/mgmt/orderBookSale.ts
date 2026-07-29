@@ -1,5 +1,8 @@
-// Reads primary order booking data (Taxable Value) from the Order Book FY2627
-// sheet, aggregated by State Head.
+// Reads primary order booking data (Taxable Value) from the Order Book sheets,
+// aggregated by State Head.
+//
+// Supports FY2024-25, FY2025-26, and FY2026-27.  Each FY has its own Google
+// Sheet; the mapping is in ORDER_BOOK_SHEETS below.
 //
 // The sheet has monthly tabs (Apr-26, May-26, …). Each tab has a header row
 // containing STATE HEAD and Taxable Value columns. STATE HEAD values are
@@ -19,8 +22,16 @@ import { normHead, buildHeadResolver } from "./names.js";
 import { loadRoster } from "./roster.js";
 import { logger } from "../logger.js";
 
-// Same sheet as ORDER_BOOK_FY2627 in dashboard/sync.ts.
-const ORDER_BOOK_FY2627 = "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A";
+/**
+ * FY → Order Book sheet ID for FYs that have per-tab monthly booking data
+ * with a STATE HEAD column.  FY2023-24 is intentionally absent — that sheet
+ * has no STATE HEAD data in monthly-tab rows (only a SEGMENT/channel column).
+ */
+export const ORDER_BOOK_SHEETS: Record<string, string> = {
+  "2026-27": "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A",
+  "2025-26": "1Xzq-gmB6K7iuMcE6gb-O7OpvGgSDU33DzEVyK60LK6E",
+  "2024-25": "1cT6lWRPJ3oSeYhab-cqeVjJidGitFQsr0DOq-vNn6cI",
+};
 
 const NON_TERRITORY_RE = /^(other|project|govt|gem|jjm|nonterrit)/i;
 
@@ -37,8 +48,8 @@ export type OrderBookSale = {
   error: string | null;
 };
 
-// 30-minute in-process TTL cache — the sheet refreshes daily at most.
-let _cache: { ts: number; result: OrderBookSale } | null = null;
+// 30-minute in-process TTL cache — keyed by FY.
+const _caches = new Map<string, { ts: number; result: OrderBookSale }>();
 const TTL_MS = 30 * 60 * 1000;
 
 function numVal(v: SheetCellValue | undefined): number {
@@ -58,8 +69,26 @@ function findCol(headers: SheetCellValue[], re: RegExp): number {
   return -1;
 }
 
-export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
-  if (_cache && Date.now() - _cache.ts < TTL_MS) return _cache.result;
+/**
+ * Load order booking data for the given fiscal year, aggregated by State Head.
+ *
+ * `fy` defaults to "2026-27" so existing callers that omit it continue to work.
+ * Returns an error result when no sheet is registered for the requested FY.
+ */
+export async function loadOrderBookSaleByHead(fy: string = "2026-27"): Promise<OrderBookSale> {
+  const cached = _caches.get(fy);
+  if (cached && Date.now() - cached.ts < TTL_MS) return cached.result;
+
+  const sheetId = ORDER_BOOK_SHEETS[fy];
+  if (!sheetId) {
+    return {
+      byHead: new Map(),
+      byHeadByMonth: new Map(),
+      total: 0,
+      rowsRead: 0,
+      error: `No order book sheet registered for FY ${fy}`,
+    };
+  }
 
   // Per-tab accumulators: tab title → { normKey → amount, nonTerritory, unattributed }
   type TabAccum = {
@@ -78,7 +107,7 @@ export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
   let rowsRead = 0;
 
   try {
-    const tabs = await listSheetTabs(ORDER_BOOK_FY2627);
+    const tabs = await listSheetTabs(sheetId);
 
     // Include monthly tabs (abbreviated or full name, optional year suffix) and
     // a "data" tab when present.
@@ -117,7 +146,7 @@ export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
 
       const tabAccum: TabAccum = { byNormKey: new Map(), nonTerritory: 0, unattributed: 0 };
 
-      await readTabRowsChunked(ORDER_BOOK_FY2627, tab.title, (rows, startRow) => {
+      await readTabRowsChunked(sheetId, tab.title, (rows, startRow) => {
         for (let ri = 0; ri < rows.length; ri++) {
           const row = rows[ri];
           const globalRow = startRow + ri;
@@ -229,19 +258,20 @@ export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
     }
 
     const result: OrderBookSale = { byHead, byHeadByMonth, total, rowsRead, error: null };
-    _cache = { ts: Date.now(), result };
+    _caches.set(fy, { ts: Date.now(), result });
     logger.info(
-      { total, rowsRead, heads: byHead.size, tabs: byHeadByMonth.size },
-      "orderBookSale: loaded Order Book FY2627 sale data",
+      { fy, total, rowsRead, heads: byHead.size, tabs: byHeadByMonth.size },
+      "orderBookSale: loaded Order Book sale data",
     );
     return result;
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    logger.warn({ err }, "orderBookSale: failed to load");
+    logger.warn({ err, fy }, "orderBookSale: failed to load");
     return { byHead: new Map(), byHeadByMonth: new Map(), total: 0, rowsRead: 0, error };
   }
 }
 
-export function invalidateOrderBookSaleCache(): void {
-  _cache = null;
+export function invalidateOrderBookSaleCache(fy?: string): void {
+  if (fy) _caches.delete(fy);
+  else _caches.clear();
 }

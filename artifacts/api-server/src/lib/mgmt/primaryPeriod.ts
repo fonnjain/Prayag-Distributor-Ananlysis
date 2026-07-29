@@ -3,14 +3,14 @@
 // Single source of truth for Order Sheet booking and dispatch-sale figures
 // across State Head dashboard, Primary Performance, and any future consumer.
 //
-// BOOKING (FY2026-27)
-//   Reads the Order Sheet via loadOrderBookSaleByHead(), which caches a
+// BOOKING (FY2024-25, FY2025-26, FY2026-27)
+//   Reads the Order Sheet via loadOrderBookSaleByHead(fy), which caches a
 //   per-tab byHeadByMonth map, then filters to exactly the requested months
 //   via 3-char month-prefix matching ("Apr-26", "April", "Apr" → "Apr").
 //   Falls back to the FY-total byHead if the requested month tabs are not
 //   yet present in the sheet.
 //
-// BOOKING (historical FYs)
+// BOOKING (older FYs — no registered per-tab sheet)
 //   loadPrimarySheetData() returns an FY-level aggregate only.
 //   periodFiltered=false is set so callers can surface a warning.
 //
@@ -24,7 +24,7 @@
 //   const labels = fiscalMonthsToLabels(fy, monthFrom, monthTo);
 //   const { booking, sale } = await loadPrimaryPeriodData(fy, labels);
 
-import { loadOrderBookSaleByHead } from "./orderBookSale.js";
+import { loadOrderBookSaleByHead, ORDER_BOOK_SHEETS } from "./orderBookSale.js";
 import { loadDispatchSaleFromDb } from "./saleFromDb.js";
 import { loadStateHeadSale } from "./stateHeadSale.js";
 import { loadPrimarySheetData } from "./primarySheets.js";
@@ -107,10 +107,10 @@ async function _loadBookingPeriod(
   fy: string,
   monthLabels: string[],
 ): Promise<PrimaryPeriodSide> {
-  // ── FY2026-27: Order Sheet with per-tab byHeadByMonth ────────────────────
-  if (fy === "2026-27") {
+  // ── FYs with a registered per-tab Order Sheet (2024-25, 2025-26, 2026-27) ─
+  if (ORDER_BOOK_SHEETS[fy]) {
     try {
-      const ob = await loadOrderBookSaleByHead();
+      const ob = await loadOrderBookSaleByHead(fy);
       if (ob.error || ob.total === 0) {
         logger.warn(
           { fy, error: ob.error },
@@ -156,7 +156,7 @@ async function _loadBookingPeriod(
           total,
           byHead: periodByHead,
           periodFiltered: true,
-          source: `Order Sheet 26-27 (orders committed ${pLabel})`,
+          source: `Order Sheet ${fy} (orders committed ${pLabel})`,
         };
       }
 
@@ -173,7 +173,7 @@ async function _loadBookingPeriod(
         total: ob.total,
         byHead: ob.byHead,
         periodFiltered: false,
-        source: "Order Sheet 26-27 (FY total — period tabs not yet available)",
+        source: `Order Sheet ${fy} (FY total — period tabs not yet available)`,
       };
     } catch (err) {
       logger.warn({ err, fy }, "primaryPeriod: booking load failed");
@@ -186,7 +186,7 @@ async function _loadBookingPeriod(
     }
   }
 
-  // ── Historical FYs: FY-level aggregate from primarySheets.ts ────────────
+  // ── Older FYs without a per-tab Order Sheet: FY-level aggregate ─────────
   try {
     const sd = await loadPrimarySheetData(fy);
     const byHead = new Map<string, number>(
