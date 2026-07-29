@@ -233,38 +233,52 @@ function tgtPeriod(
 //   (e.g. Q2 Jul–Sep plans are populated and meaningful even though the months
 //   haven't closed yet).  notYetRecorded only gates ACTUALS (OB, sales).
 //
-// ACTUALS (orderedAmount, salesAmount) are only accumulated for months where
-//   notYetRecorded = false (calendar-closed months not caught by the V4 arrears
-//   guard).  Open or arrears months contribute 0 to OB/Sales.
+// ACTUALS split:
+//   OB (orderedAmount)  — accumulated for all closed months, including sales-lag
+//     months (notYetRecorded=true because sales=0 but ob>0).  The distributor
+//     placed the order; it is a real figure even if receipt hasn't been entered.
+//   SALES (salesAmount) — only from months where notYetRecorded=false.
+//     A zero-sales closed month with positive OB is a data-entry lag, not a
+//     genuine zero; stateDashboard.ts sets notYetRecorded=true for that case.
+//   ACHIEVEMENT — computed only from hasClosedMonth (fully recorded months).
+//     If every closed month in the period is in the sales-lag state,
+//     achievement returns null, not 0.
 //
 // Return semantics:
 //   plan null        → no planAmount data in the period at all (member has no target)
-//   ob/sales 0       → plan exists but the period has no closed actuals yet (future quarter)
-//   achievement null → plan is null OR no closed actuals (cannot compute)
+//   ob/sales 0       → plan exists but the period has no recorded actuals yet (future Q)
+//   achievement null → plan is null OR no fully-recorded closed actuals yet
 function secPeriod(
   sec: SecMember,
   mFrom: number, // 1-based fiscal month (1 = Apr)
   mTo: number,   // 1-based fiscal month (12 = Mar)
 ): { plan: number | null; ob: number | null; sales: number | null; achievement: number | null } {
   let plan = 0, ob = 0, sales = 0;
-  let hasPlan = false, hasClosedMonth = false;
+  let hasPlan = false, hasClosedMonth = false, hasObData = false;
   for (let i = mFrom - 1; i <= mTo - 1; i++) {
     const md = sec.months[i];
     if (!md) continue;
     // PLAN: always read — real for past AND future months.
     if (md.planAmount != null) { plan += md.planAmount; hasPlan = true; }
-    // ACTUALS: only from closed/recorded months (notYetRecorded = false).
     if (!md.notYetRecorded) {
+      // Fully recorded closed month: accumulate both OB and sales.
       hasClosedMonth = true;
+      hasObData = true;
       if (md.orderedAmount != null) ob += md.orderedAmount;
       if (md.salesAmount != null)   sales += md.salesAmount;
+    } else if (md.orderedAmount != null && md.orderedAmount > 0) {
+      // Sales-lag month: notYetRecorded=true because sales=0 but ob>0.
+      // OB was entered by the state head — include it; do not advance hasClosedMonth
+      // (so it does not contribute a zero to the sales/achievement computation).
+      hasObData = true;
+      ob += md.orderedAmount;
     }
   }
-  if (!hasPlan && !hasClosedMonth) return { plan: null, ob: null, sales: null, achievement: null };
+  if (!hasPlan && !hasClosedMonth && !hasObData) return { plan: null, ob: null, sales: null, achievement: null };
   return {
     plan: hasPlan ? plan : null,
-    // 0 when there is a plan but the period has no recorded actuals yet (future Q).
-    ob:    hasClosedMonth ? ob    : 0,
+    // 0 when there is a plan but the period has no OB at all yet (future Q).
+    ob:    hasObData ? ob    : 0,
     sales: hasClosedMonth ? (sales > 0 ? sales : 0) : 0,
     achievement: hasPlan && plan > 0 && hasClosedMonth ? sales / plan : null,
   };

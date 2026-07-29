@@ -653,14 +653,20 @@ async function loadStateDashboardUncached(fy: string, nowMs = Date.now(), skipPe
       const salesCount = cellNum(row[base + 6]);
 
       const closed = isMonthClosed(m, fy, nowMs);
-      // A month is "not yet recorded" when it has not yet ended on the calendar.
-      // Secondary data is entered at month-end, so ANY open month — even one where
-      // the sheet has written an explicit zero — must show "in progress", never 0%.
-      // The sheet pre-fills plan and sometimes writes zeros for future months; both
-      // are meaningless until the month closes.  Use the calendar only.
-      // NOTE: the V4 arrears guard below may override notYetRecorded=false for
-      // calendar-closed months where state heads have not yet entered data.
-      const notYetRecorded = !closed;
+      // A month is "not yet recorded" when:
+      //   (a) it has not yet ended on the calendar — standard open-month case, OR
+      //   (b) it IS calendar-closed but salesAmount is zero while orderedAmount is
+      //       positive.  This signals a data-entry lag: the distributor placed orders
+      //       (OB recorded) but the state head has not yet entered the sales-received
+      //       figure.  Showing 0% achievement in that state is wrong; null is correct.
+      //
+      // NOTE: the V4 arrears guard below may additionally override notYetRecorded=false
+      // for calendar-closed months where state heads have not yet entered any data at all.
+      const salesLag = closed &&
+        salesAmount === 0 &&
+        orderedAmount != null &&
+        orderedAmount > 0;
+      const notYetRecorded = !closed || salesLag;
 
       // Anomaly: sales > 3× orders AND orders > 0.
       // The 1.5–3× band is genuine secondary delivery lag; above 3× warrants review.
@@ -687,10 +693,13 @@ async function loadStateDashboardUncached(fy: string, nowMs = Date.now(), skipPe
       // YTD (per-member display): closed months only. Anomalous months are
       // INCLUDED — received amount is real money; anomaly flag suppresses
       // rankings only, not gross totals.
+      // Sales-lag months (notYetRecorded due to salesLag) still contribute their
+      // OB to ytdOrdered, but their salesAmount (0) is NOT added to ytdSales —
+      // a zero that hasn't been entered is not the same as zero sales received.
       if (closed) {
         if (planAmount != null) { ytdPlan += planAmount; ytdHasData = true; }
         if (orderedAmount != null) ytdOrdered += orderedAmount;
-        if (salesAmount != null) ytdSales += salesAmount;
+        if (salesAmount != null && !notYetRecorded) ytdSales += salesAmount;
       }
 
       // All-months: include every month unconditionally.
