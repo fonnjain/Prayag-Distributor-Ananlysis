@@ -149,11 +149,53 @@ export type MemberRef = {
   normKey: string;
 };
 
+// ── Team-summary types (SD1: Sandeep Dadheech onboarding) ────────────────────
+// Computed whenever a state head is selected.  Headline includes all active
+// members (zero-target contribute OB but no target denominator).  Like-for-like
+// is restricted to active members who have a positive target.
+
+export type StateBreakdownRow = {
+  state: string;
+  memberCount: number;
+  membersWithTarget: number;
+  targetTotal: number;
+  obTotal: number;
+  saleTotal: number;
+  visitTotal: number;
+  /** obTotal / targetTotal (all active members in state; null when targetTotal = 0) */
+  headlinePct: number | null;
+  /** obTotal(members-with-target) / targetTotal(members-with-target) */
+  likeForLikePct: number | null;
+  zeroTargetCount: number;
+  zeroTargetOb: number;
+};
+
+export type TeamSummary = {
+  totalMembers: number;
+  activeMembers: number;
+  leftMembers: number;
+  zeroTargetActiveCount: number;
+  zeroTargetActiveOb: number;
+  zeroTargetActiveNames: string[];
+  totalTarget: number;
+  totalOB: number;
+  totalSale: number;
+  totalVisits: number;
+  totalRetailers: number;
+  directDealerOB: number;
+  /** totalOB(all-active) / totalTarget — includes zero-target members' OB */
+  headlineAchievementPct: number | null;
+  /** totalOB(with-target) / totalTarget(with-target) — excludes zero-target members entirely */
+  likeForLikeAchievementPct: number | null;
+  byState: StateBreakdownRow[];
+};
+
 export type DeepDiveDataResult = {
   fy: string;
   stateHeads: string[];              // All distinct state heads in the Data tab
   members: MemberRef[];              // All members (or filtered by stateHead)
   kpis: MemberKpis | null;          // null when member not specified or not found
+  teamSummary: TeamSummary | null;   // Aggregate over all members under the selected state head
   retailerDetail: MemberSheetData | null; // Phase 2: retailer-level detail from member's own sheet
   roiCost: RoiCost | null;          // Phase 4: revenue-to-cost analysis (needs kpis + spread)
   skuSpread: SkuSpread | null;      // Phase 5: segment/SKU spread from secondary_register_line
@@ -337,6 +379,9 @@ function detectCols(headerRow: SheetCellValue[]): ColMap | null {
       "Q4LASTYEAR", "Q4LY", "Q4PREVYEAR", "LASTYRQ4", "PREVIOUSQ4",
       "LYQUARTER4", "Q4PREVIOUSYEAR",
     ),
+    // Initialized to -1; overridden below after the BA ("Active/ Left") header is located.
+    activeLeftBd:    -1,
+    elapsedMonthsBd: -1,
     allHeaders,
     rawHeaders,
   };
@@ -602,34 +647,6 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
   // The spec says "Header is row 3; each member is one row." — so data starts at row 4.
   const dataStart = headerIdx + 1;
 
-  // ── Row-length distribution diagnostic ─────────────────────────────────────
-  // The Sheets API trims trailing empty cells per row. If data rows are shorter
-  // than the header row, positional indices may land on the wrong column.
-  {
-    const lenMap = new Map<number, number>();
-    for (let i = dataStart; i < allRows.length; i++) {
-      const len = (allRows[i] ?? []).length;
-      lenMap.set(len, (lenMap.get(len) ?? 0) + 1);
-    }
-    logger.info(
-      {
-        fy,
-        headerCols: cols.rawHeaders.length,
-        saleColIdx: cols.sale,
-        dataRowCount: allRows.length - dataStart,
-        rowLengthDistribution: Object.fromEntries(
-          [...lenMap.entries()].sort(([a], [b]) => a - b),
-        ),
-        // How many rows are too short to reach the sale column?
-        rowsShorterThanSaleCol: [...lenMap.entries()]
-          .filter(([len]) => len <= cols.sale)
-          .reduce((s, [, cnt]) => s + cnt, 0),
-      },
-      "deepDiveData: row-length distribution",
-    );
-  }
-  // ────────────────────────────────────────────────────────────────────────────
-
   const members: MemberKpis[] = [];
   let currentStateHead = "";
 
@@ -658,28 +675,6 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
 
     const rawName = cellStr(row[cols.teamMember]);
     if (!rawName) continue;
-
-    // ── Per-row probe: Tarun Giri ────────────────────────────────────────────
-    if (rawName.includes("Tarun Giri")) {
-      const probe48to52 = Array.from({ length: 5 }, (_, k) => ({
-        idx: 48 + k,
-        raw: row[48 + k] ?? "(missing)",
-      }));
-      logger.info(
-        {
-          fy,
-          sheetRowIdx: i,         // 0-based index in allRows (sheet row = i+1)
-          rawName,
-          rowLength: row.length,
-          saleColIdx: cols.sale,
-          saleColInRange: row.length > cols.sale,
-          rawSaleCell: row[cols.sale] ?? "(missing)",
-          probe48to52,
-        },
-        "deepDiveData: DIAG Tarun Giri raw row",
-      );
-    }
-    // ────────────────────────────────────────────────────────────────────────
 
     // Skip section headers / total rows.
     const upper = rawName.toUpperCase();
@@ -929,6 +924,113 @@ async function loadAllMembers(fy: string): Promise<CacheEntry | null> {
   return p;
 }
 
+// ── Team summary helpers ───────────────────────────────────────────────────────
+
+/** Derive the display state name from the member's extra fields or HQ. */
+function extractStateName(m: MemberKpis): string {
+  // Prefer the properly-cased STATE column (e.g. "West Bengal") from the Data tab.
+  // Fall back to WORKINGSTATE (often all-caps "WEST BENGAL") then HQ city.
+  const raw =
+    (m.extra["STATE"] as string | null) ??
+    (m.extra["WORKINGSTATE"] as string | null);
+  if (!raw) return m.hq ?? "Unknown";
+  // Title-case if value is all-uppercase (e.g. "WEST BENGAL" → "West Bengal").
+  if (raw === raw.toUpperCase() && /[A-Z]/.test(raw)) {
+    return raw
+      .split(/\s+/)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(" ");
+  }
+  return raw;
+}
+
+function buildTeamSummary(filtered: MemberKpis[]): TeamSummary {
+  const active = filtered.filter((m) => !m.isLeft);
+  const left   = filtered.filter((m) => m.isLeft);
+
+  const sumN = (arr: MemberKpis[], fn: (m: MemberKpis) => number | null): number =>
+    arr.reduce((s, m) => s + (fn(m) ?? 0), 0);
+
+  const isZeroTarget = (m: MemberKpis): boolean => (m.totalTargetToDate ?? 0) <= 0;
+
+  // "Total OB" for team display = old-party OB + new-party OB (both from the Data tab).
+  // This matches the State Head Dashboard "Sub Total" concept.
+  // Direct-dealer OB is kept separate (different target type, reported in its own tile).
+  const memberOB = (m: MemberKpis): number =>
+    (m.orderBooking ?? 0) + (m.newPartyOrderBooking ?? 0);
+
+  const zeroTargetActive = active.filter(isZeroTarget);
+  const withTargetActive = active.filter((m) => !isZeroTarget(m));
+
+  const totalTarget    = sumN(active, (m) => m.totalTargetToDate);
+  const totalOB        = sumN(active, memberOB);
+  const directDealerOB = sumN(active, (m) => m.directDealersOrder);
+  const totalSale      = sumN(active, (m) => m.sale);
+  const totalVisits    = sumN(active, (m) => m.totalVisitsYtd);
+  const totalRetailers = sumN(active, (m) => m.totalRetailers);
+
+  const headlineAchievementPct =
+    totalTarget > 0 ? (totalOB / totalTarget) * 100 : null;
+
+  const likeForLikeOB     = sumN(withTargetActive, memberOB);
+  const likeForLikeTarget = sumN(withTargetActive, (m) => m.totalTargetToDate);
+  const likeForLikeAchievementPct =
+    likeForLikeTarget > 0 ? (likeForLikeOB / likeForLikeTarget) * 100 : null;
+
+  // Per-state aggregation (active members only).
+  const stateMap = new Map<string, MemberKpis[]>();
+  for (const m of active) {
+    const state = extractStateName(m);
+    const bucket = stateMap.get(state);
+    if (bucket) bucket.push(m);
+    else stateMap.set(state, [m]);
+  }
+
+  const byState: StateBreakdownRow[] = [];
+  for (const [state, mems] of stateMap) {
+    const withTarget  = mems.filter((m) => !isZeroTarget(m));
+    const stateTarget = sumN(mems, (m) => m.totalTargetToDate);
+    const stateOB     = sumN(mems, memberOB);
+    const zeroMems    = mems.filter(isZeroTarget);
+    const likeOB      = sumN(withTarget, memberOB);
+    const likeTarget  = sumN(withTarget, (m) => m.totalTargetToDate);
+
+    byState.push({
+      state,
+      memberCount:       mems.length,
+      membersWithTarget: withTarget.length,
+      targetTotal:       stateTarget,
+      obTotal:           stateOB,
+      saleTotal:         sumN(mems, (m) => m.sale),
+      visitTotal:        sumN(mems, (m) => m.totalVisitsYtd),
+      headlinePct:       stateTarget > 0 ? (stateOB / stateTarget) * 100 : null,
+      likeForLikePct:    likeTarget  > 0 ? (likeOB  / likeTarget)  * 100 : null,
+      zeroTargetCount:   zeroMems.length,
+      zeroTargetOb:      sumN(zeroMems, memberOB),
+    });
+  }
+  // Descending by OB so the largest states appear first.
+  byState.sort((a, b) => b.obTotal - a.obTotal);
+
+  return {
+    totalMembers:             filtered.length,
+    activeMembers:            active.length,
+    leftMembers:              left.length,
+    zeroTargetActiveCount:    zeroTargetActive.length,
+    zeroTargetActiveOb:       sumN(zeroTargetActive, memberOB),
+    zeroTargetActiveNames:    zeroTargetActive.map((m) => m.name),
+    totalTarget,
+    totalOB,
+    totalSale,
+    totalVisits,
+    totalRetailers,
+    directDealerOB,
+    headlineAchievementPct,
+    likeForLikeAchievementPct,
+    byState,
+  };
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function loadDeepDiveData(
@@ -951,6 +1053,7 @@ export async function loadDeepDiveData(
       stateHeads: [],
       members: [],
       kpis: null,
+      teamSummary: null,
       retailerDetail: null,
       roiCost: null,
       skuSpread,
@@ -977,6 +1080,13 @@ export async function loadDeepDiveData(
     name: m.name,
     normKey: m.normKey,
   }));
+
+  // Team summary — computed whenever a state head is chosen (regardless of
+  // whether a specific member is also selected).
+  const teamSummary: TeamSummary | null =
+    selectedStateHead && filtered.length > 0
+      ? buildTeamSummary(filtered)
+      : null;
 
   // Find the selected member by normSecKey.
   let kpis: MemberKpis | null = null;
@@ -1050,6 +1160,7 @@ export async function loadDeepDiveData(
     stateHeads,
     members,
     kpis,
+    teamSummary,
     retailerDetail,
     roiCost,
     skuSpread,

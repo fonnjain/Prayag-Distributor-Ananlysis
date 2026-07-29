@@ -235,11 +235,46 @@ interface WinBackItem {
   lastNet: number;
 }
 
+// ── Team-summary types (mirrors API TeamSummary / StateBreakdownRow) ──────────
+
+interface StateBreakdownRow {
+  state: string;
+  memberCount: number;
+  membersWithTarget: number;
+  targetTotal: number;
+  obTotal: number;
+  saleTotal: number;
+  visitTotal: number;
+  headlinePct: number | null;
+  likeForLikePct: number | null;
+  zeroTargetCount: number;
+  zeroTargetOb: number;
+}
+
+interface TeamSummary {
+  totalMembers: number;
+  activeMembers: number;
+  leftMembers: number;
+  zeroTargetActiveCount: number;
+  zeroTargetActiveOb: number;
+  zeroTargetActiveNames: string[];
+  totalTarget: number;
+  totalOB: number;
+  totalSale: number;
+  totalVisits: number;
+  totalRetailers: number;
+  directDealerOB: number;
+  headlineAchievementPct: number | null;
+  likeForLikeAchievementPct: number | null;
+  byState: StateBreakdownRow[];
+}
+
 interface DeepDiveData {
   fy: string;
   stateHeads: string[];
   members: MemberRef[];
   kpis: MemberKpis | null;
+  teamSummary: TeamSummary | null;
   retailerDetail: RetailerDetail | null;
   roiCost: RoiCost | null;
   skuSpread: SkuSpread | null;
@@ -349,6 +384,149 @@ function ConcentrationBar({ hhi }: { hhi: number }) {
       <span className="text-[10px] text-muted-foreground tabular-nums">
         HHI {Math.round(hhi)}
       </span>
+    </div>
+  );
+}
+
+// ── Achievement text colour (for table cells, not pill badges) ────────────────
+
+function achieveBandText(pct: number | null): string {
+  if (pct == null) return "text-muted-foreground";
+  if (pct >= 100) return "text-green-700 dark:text-green-400 font-semibold";
+  if (pct >= 70)  return "text-blue-700  dark:text-blue-400";
+  if (pct >= 50)  return "text-amber-700 dark:text-amber-400";
+  return                  "text-red-700   dark:text-red-400";
+}
+
+// ── Team summary panel (SD1: shown when a state head is chosen, no member) ────
+
+function TeamSummaryPanel({ summary }: { summary: TeamSummary }) {
+  return (
+    <div className="space-y-4">
+
+      {/* Identity + achievement header */}
+      <div className="rounded-lg border border-border bg-card px-5 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-base font-semibold">Team Summary</p>
+            <p className="text-sm text-muted-foreground">
+              {summary.activeMembers} active member{summary.activeMembers !== 1 ? "s" : ""}
+              {summary.leftMembers > 0 && ` · ${summary.leftMembers} LEFT`}
+              {summary.zeroTargetActiveCount > 0 && ` · ${summary.zeroTargetActiveCount} with no target`}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {summary.headlineAchievementPct != null && (
+              <div className={cn("rounded-full px-3 py-1 text-xs font-semibold", achieveBand(summary.headlineAchievementPct))}>
+                {fmtPct(summary.headlineAchievementPct)} headline OB
+              </div>
+            )}
+            {summary.likeForLikeAchievementPct != null && (
+              <div className={cn("rounded-full px-3 py-1 text-xs font-semibold", achieveBand(summary.likeForLikeAchievementPct))}>
+                {fmtPct(summary.likeForLikeAchievementPct)} like-for-like
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Zero-target notice */}
+      {summary.zeroTargetActiveCount > 0 && (
+        <div className="rounded-md border border-amber-500/30 bg-amber-50/60 px-4 py-3 text-sm dark:bg-amber-900/10">
+          <p className="font-medium text-amber-800 dark:text-amber-300">
+            {summary.zeroTargetActiveCount} active member
+            {summary.zeroTargetActiveCount !== 1 ? "s have" : " has"} no target recorded
+            — carrying {fmtRs(summary.zeroTargetActiveOb)} of order booking.
+          </p>
+          <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+            Headline includes their OB but contributes no target denominator.
+            Like-for-like excludes them entirely.
+          </p>
+          {summary.zeroTargetActiveNames.length > 0 && (
+            <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
+              {summary.zeroTargetActiveNames.join(" · ")}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* KPI tiles */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        <SectionLabel>Team Totals</SectionLabel>
+        <Tile label="Total Target (to date)" value={fmtRs(summary.totalTarget)} accent />
+        <Tile label="Order Booking" value={fmtRs(summary.totalOB)} />
+        <Tile label="Sales Received" value={fmtRs(summary.totalSale)} />
+        <Tile label="Total Visits" value={fmtNum(summary.totalVisits)} />
+        <Tile label="Total Retailers" value={fmtNum(summary.totalRetailers)} />
+        {summary.directDealerOB > 0 && (
+          <Tile label="Direct Dealer OB" value={fmtRs(summary.directDealerOB)} />
+        )}
+      </div>
+
+      {/* State breakdown */}
+      {summary.byState.length > 0 && (
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <div className="px-4 py-3 border-b border-border">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              By State
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
+                  <th className="px-3 py-2 text-left">State</th>
+                  <th className="px-3 py-2 text-right">Members</th>
+                  <th className="px-3 py-2 text-right">Target</th>
+                  <th className="px-3 py-2 text-right">OB</th>
+                  <th className="px-3 py-2 text-right">Sales</th>
+                  <th className="px-3 py-2 text-right">Headline</th>
+                  <th className="px-3 py-2 text-right">Like-for-like</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.byState.map((row) => (
+                  <tr key={row.state} className="border-b border-border/50 hover:bg-muted/20">
+                    <td className="px-3 py-2 font-medium">{row.state}</td>
+                    <td className="px-3 py-2 text-right text-muted-foreground">{row.memberCount}</td>
+                    <td className="px-3 py-2 text-right">{row.targetTotal > 0 ? fmtRs(row.targetTotal) : <span className="text-muted-foreground text-xs">no target</span>}</td>
+                    <td className="px-3 py-2 text-right">{fmtRs(row.obTotal)}</td>
+                    <td className="px-3 py-2 text-right">{fmtRs(row.saleTotal)}</td>
+                    <td className="px-3 py-2 text-right">
+                      {row.headlinePct != null ? (
+                        <span className={achieveBandText(row.headlinePct)}>
+                          {fmtPct(row.headlinePct)}
+                          {row.zeroTargetCount > 0 && (
+                            <span className="ml-1 text-amber-600 dark:text-amber-400" title={`${row.zeroTargetCount} member(s) with no target inflate this figure`}>⚠</span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">no target</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {row.likeForLikePct != null ? (
+                        <span className={achieveBandText(row.likeForLikePct)}>
+                          {fmtPct(row.likeForLikePct)}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">—</span>
+                      )}
+                      {row.zeroTargetCount > 0 && (
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {row.zeroTargetCount} w/o target
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
@@ -2005,6 +2183,7 @@ export default function SalesDeepDive() {
   }
 
   const kpis           = data?.kpis ?? null;
+  const teamSummary    = data?.teamSummary ?? null;
   const rd             = data?.retailerDetail ?? null;
   const roiCost        = data?.roiCost ?? null;
   const skuSpread      = data?.skuSpread ?? null;
@@ -2079,13 +2258,18 @@ export default function SalesDeepDive() {
         </div>
       )}
 
-      {/* Prompt when nothing selected */}
-      {!kpis && !loading && !error && (
+      {/* State head selected, no member → team summary panel */}
+      {!kpis && !loading && !error && selectedHead && teamSummary && (
+        <TeamSummaryPanel summary={teamSummary} />
+      )}
+
+      {/* Prompt when nothing useful to show yet */}
+      {!kpis && !loading && !error && !(selectedHead && teamSummary) && (
         <div className="rounded-md border border-border bg-muted/30 px-4 py-8 text-center text-sm text-muted-foreground">
           {!stateHeads.length
             ? "Could not load the Data tab. Check that the sheet is connected."
             : !selectedHead
-            ? "Select a State Head and a Team Member to see their performance profile."
+            ? "Select a State Head to see team summary, or choose a Team Member for individual analysis."
             : !selectedMemberKey
             ? "Select a Team Member to see their performance profile."
             : "Member data not found. The name may not appear in the Data tab yet."}

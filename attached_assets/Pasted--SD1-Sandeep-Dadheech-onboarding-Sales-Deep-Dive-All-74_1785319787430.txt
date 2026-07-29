@@ -1,0 +1,206 @@
+# SD1 — Sandeep Dadheech onboarding, Sales Deep Dive
+
+*All 74 member file IDs resolved. Figures re-verified against the live dashboard on 28 July 2026.*
+
+---
+
+## Scale, against the reference implementation
+
+| | Anant Singh | Sandeep Dadheech |
+|---|---|---|
+| Members | 13 (10 active) | **74 (71 active)** |
+| States | 4 | **8** |
+| Retailers | 748 | **6,248** |
+| Visits | 4,522 | **19,872** |
+| Order booking | ₹2.35 Cr | **₹35.48 Cr** |
+| Target to date | ₹4.03 Cr | **₹56.98 Cr** |
+
+**Fifteen times the order booking and eight times the retailers.** If anything hits a size or timeout limit, West Bengal alone — 30 members, 2,805 retailers — is where it will happen.
+
+---
+
+## The prompt
+
+```
+Prayag app - Sales Deep Dive. Onboard State Head 'Sandeep Dadheech'. Same global
+rules as every earlier phase. Do not change any other State Head and do not change
+any earlier acceptance number.
+
+1. MEMBER FILE IDs - all 74 are resolved. Use these directly; no search needed.
+
+     Aditya Dasgupta               1zXPh69S6ryZEZcVhfjtAeevcaJY_x59C3APN5fjBE5Q
+     Ajay Morthad                  15AqdQm5YkAFRfu2r5LTF0YinlxQl1irlVpAkdhrGbJ0
+     Anirban Biswas                16St08vBtqG6cQ29Lh2yNSR8b82ABOrtscauHawL3SnA
+     ARUPANANDA MANDAL             1BjyFlLZTYgD3mFAjCX0s67AY3qvKXaoe2hT6732MbyM
+     Ashok Das                     1tBU2WORCGkePMRxXIZloeHDIhaKFEnE8iBZsKyW5bHc
+     Ashutosh Kumar                1XawI1eeAYzxXaEtROeQ7asG4RKU9dbiD2rtpUdvB76A
+     ATANU PAUL                    1O8_IB27WHzeYapUtQjxSkdl_JCT9lSSz357rD743jfU
+     AVINASH KUMAR                 1lrzJ0bcPvcbipm39nmARSoKIg0_81LFUcUZBMTIXHW8
+     Biswajit Roy                  1caQXh8WGfK5sXydbQ1cFTMP2RiGHVTedJ7iCzX2Bmes
+     Dasari Adiseshu               1ocgsSn3L-88dzzTXvjPnm-mRwf9KNXUnPd--lUdR6oc
+     Debasish Adhikary             1Cvkmf9XW8YyoV2xL1JRa6rQ8PUxQVh1SUrLGjS3xCGY
+     DIBYENDU SAHA                 1-GtR9KEvpi7RiFYMnuZo8zNQdsMbzFvWslRaxdBQRPM
+     Dikart Kumar Borah            1UteHRCCON4AO5JM7duOBoq72OM5x2CQQr2sJKgCMmOA
+     Dipak Sharma                  1shTvs8XCxTEi4uArYvktfhVF3aaBcX8qXa6gu0Yrdy8
+     Gaurav Kumar                  14k9zl8QJZNDdLexy-mL85RC3KURzq9Zn4glvtZCxREk
+     Gonesh Dey                    15jee2k6DSN8nNrsGXt9fSygQKECjnTqi8q5bSr2fopI
+     Hrusikesh Satapathy           1kXi-Po5tHh3RtsiZDCgyu75R5xrra0yqvmCs6fPdJr0
+     Indrajit Ghosh                1RdylvZXl-yDfgXcLVoejtlCF0vSUFCYL9P78takYbNI
+     J.Kamal Kishore               1h3OkZUk2XSA0l8e-AWxaJmXe7Z1U0attMzXCN4SdOQ8
+     JAHIR ABBAS HALDER            1h1TRZt74g3toSCg6X1zf04TRrPzTIJTRRHm-VtgXmkM
+     Jithender Reddy Katukuri      1Hir2BSz1KtNe_zzhtoBurd4NvYToFy3OAbQvUmeocvQ   # sheet titled: JITHENDER REDDY
+     Kailash Ch. Ghadei            1zKPpIRi__6SVbgTzjvO6O1sQo3DfJF5zbe0T4GU19c0
+     Kumar Avinish                 1mi1sDldXWcjlwchNl1AQUNhqAUBYBIp7wc37TNeFjug
+     Lingaraj Moharana             18ae2uzQJOtuCf9wsXVRUJahP0nrzJqy8-QAB-gP6ztc
+     Litan Saha                    1Cr2_pSX3-yhuS1Sayvgl6YpnuKxXHVGMTe6yyY45KCA
+     Manas Ranjan Das              1H5ov6exB2KA-MsYBzkS8Gakd86NhbRUa-tEOe1wSAcY
+     Monmon Paul                   1FWoCAr1C7ZSb0vw1vvaBhsS73XL8YWHN3CvvtZ3LLKE
+     NARAYAN BAISHYA               1Kbg-PEBsKwSxEO5N_-jXktJpPSl1uQP-6wpQXKr9BiM
+     Nikhil Kumar                  1jb97tsNPP32qu8ow9340R_Kgg7aVZi6E-LN-1JUDVf8
+     Paripally Sridhar             1yaKL6dBHXsNDJ0_lXkg8L3rNlCkvrgR8wnoDpNHB5YU
+     Pawan Kumar Pareek (Off-Roll) 1WWW2zIyk5tLuZBmJ_SGRdLG9zfVVRBi6dj0APb4CYec
+     Prabhakar Pratap Singh        1lrpW3ERBae84SZH5rLCIIaLpTHa8gnQDG_xpkiONU-Q
+     Pradeep Kumar                 1e9SaWVffUYtulZA0Qz11l6mchzaBCaXi023gDuCgG_A
+     Pramod Kumar                  1S4W1SsvjFN8z0hdXAYztswIPFnmI5owY4xgKT81w7ZE
+     Prashantha M                  1kzHgjYG2fRl24KkUwgwuGb5jqIcNjrLI4bAa5_Ur8Do
+     Pravat Kumar Dash             1wjoxTKxLPmzHS19GT_DZ96swQR-_WwppkY-Fa7qtBBY
+     Priyabrata Biswas             1FGGDrtOqFXFnIAqpV4VK1I_FD986CaP6bQUHv8xEIys
+     Rajesh Chakraborty            1nf1mZOdFw_I9WqkBXQwXHTbrrZ3qxgTnaC1u33tib50
+     Rakesh Kumar Sinha            1Qy4AhkrCwmDPPa9arKWOGV5jQtQ6fPEBUDl2sx_mLIg
+     Ram Shankar Mishra            1KK2Gk0v7qSg-tdyBI73crsdg5bq163NRRkpYHeQi_Y0
+     Roni Gupta                    1j7Nu-wU4q-UwGzcF5m-7_LFLSWRWonleD-DZtJT2GfY
+     RUDRAPRAKASH JANA             1fpEWqgaINLyqNjSB3fo6ETWVUzJpnCYOX4eKClQfQmE
+     Rupak Kumar                   1icXZrszWsrD0XhtVJspeoGUH0iHsSqgl-bNhXYgD_NE
+     S.Tirumala Rao                1KtLc5obE_6VKCzPev5r5J9lFw6lt8gHztkItNMpjPvA
+     Santanu Kalita                1SRwam8SNlw4sXl322moV7twW0wJxVm4N5PRJuC10VAA
+     Sarbjit Singh Chawla          19sd98Ma-lKiTrPsBhkwCFf0ACdf0Xphg3rWCORyhIMY
+     Sasikant Prasad               1AEqUI2za5g6wYjXj1or87EmS_1Xr5zeTeh75HX6TIRs
+     Shaik Jani basha              1UwZVGRca4V7QbfCEKzKsInQfTfLYV5gkrTzD89b_gVg
+     Shuvadip Ghosh                1s5jMeCFSNsddGLPhXVD2iHrblkJkWFU40qIKlTc8-ng
+     SHYAM KUMAR MISHRA            1WBmn03mnxrtox5uWO2YKJB7PYVfHYAUNt150alXp7eg
+     Soumen Ghosh                  1yYGXSwJ72j8viKCOe86p6wi8lNM7qrWmfCBaFBiUKLo
+     Sourav Samanta                1nZS-t-cNO00Enmafk2x3CmLJnbno5WaD_EEIUOjJ93Q
+     SRAVAN KUMAR SHARMA           1f-Q3GKpCdBCdJNXC0PAWbenumI9Kvif8dR3uM-wiA14
+     Subhajit Koley                156SGblhGPrELnH1FKNY41p5c_9ctePyjdgoNlJkLR94
+     Sudhanshu Kumar               1ePExRxwP6pYHNPcZoek1UEmUSlzyoQB26S6P0bkl_7w
+     Sudip Guha Roy                1gBSOlfPBM0xWQ6uvhSlxXPJioEdKdIHOyJPiizY4W2o
+     Sudip Sarkar                  1VqJ41KU2NHf3hBrQkQD7pFGKum8ws6X0cK6C5YetsgY
+     Sudipta Thom                  1XBfiSuCmqOXHpS2F64iSZHyqzwuIwsQyxjk4aAoupus
+     Sujan Ghata                   1xiD-ftAMw5fqqFj6Gxi4X1d9CquBqV8fA6bcw0GeCQ8
+     Sujeet Singh                  1EI3mfkw4tnCjQO2zng_o2RwNxu-iRNoEbMdHoBZ0tvg
+     Sujit Das                     1z4Dlg9-vhzqicqIM3aOVAq9C7BiGYht1wlKwymUb1rs   [LEFT]
+     Suman Mondal                  1j5_2sIBZP_RUoPnKOu_65lvVzVUeZs1BujRIxLnqEss   [LEFT]
+     SUMANTA SINGHA                1QP5E3bv2nQocHwhakijcUbpjfZXkhSHOEthvwHNKxmI
+     Sunil Kumar Pani              12NAF1MMl-z3SV6fkAOrVJEa7ZNuEoTL4waKw4vXLNes
+     Surojit Mondal                1yLhrKcjt1xaec0PTD-O5wT7tbQk_0C0O53JVUJ107no
+     Susanta Behera                1lIjq4lqI_I2NTr_QMX-fDGS4warbHWtB6HUAekXAeY0
+     Sushanta Barman               1fC3fyg60xd2eSSYcWdzoxTfCeKLcRbmaUzBDRvPxPB0
+     Susovan Singha                18m5o7TTSu_7OYCCZkDgwq90DUL-KY0ZOGTL75E5bkIs
+     Suven Sengupta                1rAogo87KmLoM9x6aHBi4Bu9Yxi5qzdkfU9lA5e8X9NY
+     Taninki Ramesh Babu           1mt75vIKJmjJpjC3XhdItkTMn04Duusc2QWxpLJYvWbs
+     Tankeswor Barman              1e8jkTtwi2aXiYRx1t-DdbLhvJgj08Uq9ZOXPl2yK5AY   [LEFT]
+     Vijay Kumar                   1C-PaiedLj2XOlFsshkO221ipgOAZuZ9nzOrc7VRBlHo
+     Vikash Kumar Singh            1939lMQ_ymDDtVRAKKKpTg6-ciOV1sghbvYqRFhFaZi8
+     VIVEK SHANKAR                 1h0AtWsk8NkAI3_51JZNnz_sEcXfnMBKLurlRcutnfrM
+
+   Three members are marked LEFT in column BA and must be excluded from
+   current-period performance, from low-performer counts and from any forward visit
+   plan, while their historical business is preserved.
+
+   NEVER read a file whose title begins 'Copy'. A 'Copy Of Sheets' subfolder exists
+   inside the main folder, and the southern folder holds Copy files mixed in beside
+   the live ones.
+
+2. THE SHEETS SIT IN FOUR DIFFERENT FOLDERS - by territory, not by State Head:
+     1visjMEIO-kgXI568pS4ZzUeqpCw3ZfZJ   64 members, east and north
+     1xyIo7H57GNW4Qu48i3fPpDeLBK-ysraf    8 members, Andhra Pradesh and Telangana
+     1uumx1WoEWVQ_V3vCKRyL8CJYgKRNS-cj    1 member, Karnataka
+     Drive root                           1 member, Prabhakar Pratap Singh
+   Do not assume one folder per head. The southern folder also holds roughly 17
+   sheets belonging to people who are NOT on this team - folder contents do not
+   equal team membership.
+
+3. IDENTITY - two traps in this team specifically.
+   ASHUTOSH KUMAR under Sandeep Dadheech (Jharkhand, Dhanbad) is a DIFFERENT PERSON
+   from Ashutosh Kumar (Rudrapur) under Anant Singh. They co-exist in the same tab,
+   which proves it. Resolve by State Head, never by name alone.
+   JITHENDER REDDY KATUKURI has a sheet titled only 'JITHENDER REDDY' - the surname
+   is absent. Exact-title matching fails for him; the mapping above is correct.
+
+4. GUARD ZERO TARGETS. Ten of the 71 active members have a to-date target of ZERO
+   while carrying real activity - Rs 2.01 Cr of order booking between them. Pravat
+   Kumar Dash is among the largest producers on the team with no target at all.
+     - never divide by zero; show 'no target recorded', not 0 per cent
+     - report TWO figures at state and team level: the headline, and a like-for-like
+       computed only over members who have a target. Label both.
+   Team headline is 62.3 per cent; like-for-like is 58.7 per cent.
+   ODISHA READS 107.0 PER CENT because one member contributes order booking and no
+   target. A state above target for that reason must never be shown as
+   over-performance without the like-for-like figure beside it.
+
+5. PARSE THE 'Removed Parties' SECTION OUT of every member sheet. Each Summary
+   Report tab holds active retailers first, each numbered in column A, then a
+   section header and a block of removed retailers with names but NO serial number.
+   Stop on either condition - a section header in column B, or a name with no
+   integer serial in column A. A blank-run stop will not fire.
+   Capture the removed rows separately and label them by LAST ACTIVE YEAR. The sheet
+   holds no removal date.
+
+6. Establish elapsed months PER MEMBER from column BD, and working days from column
+   AG. Do not derive either.
+
+7. Header text uses the FULL year form - 'Order Booking 2026-27', not '26-27'.
+   The short form returns zeros silently. Column I equals P + Q, so it already
+   includes new-party business; never read P alone.
+
+Acceptance - prove each with the computed value, never an assertion of success:
+  74 members listed, 71 active, 3 LEFT (Sujit Das, Tankeswor Barman, Suman Mondal)
+  all 74 sheets load; report any that fail with the reason
+  team totals, ACTIVE 71: target Rs 56.98 Cr, order booking Rs 35.48 Cr, sales
+    received Rs 40.65 Cr, cost Rs 110.62 L, visits 19,872, retailers 6,248
+  direct-dealer order booking is Rs 1,40,628 and comes from ONE member only
+  headline achievement 62.3 per cent AND like-for-like 58.7 per cent, both labelled
+  Odisha shows 107.0 per cent with its like-for-like figure and the reason
+  the 10 zero-target members are flagged and none causes a division error
+  Ashutosh Kumar resolves to the Sandeep Dadheech record, not Anant Singh's
+  every mapped member reconciles: own-sheet order booking equals dashboard secondary
+    plus direct dealer, exactly - report the comparison per member
+  removed retailers are counted separately per member and excluded from active and
+    dormant counts
+  no file whose title begins 'Copy' is read anywhere
+  Anant Singh is unchanged: order booking Rs 2,35,49,308, sales Rs 2,34,67,609,
+    target Rs 4,02,96,667, 58.4 per cent, 10 active members
+```
+
+---
+
+## By state — expect wide variation
+
+| State | Members | Target | Order booking | Achievement |
+|---|---|---|---|---|
+| West Bengal | 30 | ₹30.87 Cr | ₹17.14 Cr | 55.5% |
+| Bihar | 9 | ₹7.78 Cr | ₹4.64 Cr | 59.7% |
+| Odisha | 8 | ₹4.52 Cr | ₹4.84 Cr | **107.0%** ⚠ |
+| Jharkhand | 8 | ₹7.07 Cr | ₹4.32 Cr | 61.0% |
+| North East | 7 | ₹3.35 Cr | ₹2.26 Cr | 67.5% |
+| Andhra Pradesh | 5 | ₹1.95 Cr | ₹1.18 Cr | 60.6% |
+| Telangana | 3 | ₹1.44 Cr | ₹1.09 Cr | 76.0% |
+| Karnataka | 1 | ₹0 | ₹0 | no target |
+
+**West Bengal is more than half the target and 30 of 71 members.** Karnataka is one member with no target and no booking — and Karnataka is also claimed by Prashant Onam Naik, so it is the shared-state case.
+
+---
+
+## What to watch
+
+**The zero-target members are the largest arithmetic risk.** Ten of them, carrying ₹2.01 Cr. A division error breaks the page; treating them as 0 per cent makes real producers look like total failures.
+
+**Odisha at 107 per cent will be quoted as a success story within a week** if the like-for-like figure is not beside it.
+
+**Expect the reconciliation to fail for some members.** Anant Singh's eleven all reconciled exactly, but that was eleven. Seventy-four sheets across four folders, several created in 2020, will not all be clean. Report failures rather than tolerancing them.
+
+**Do not carry Anant Singh's ratios across.** His territory has an unusually high direct-dealer share and a concentrated distributor base. Sandeep has one member with direct-dealer business out of 74. Carry the method, not the numbers.
+
+---
+
+*Prayag Distributor Analysis · file IDs resolved 28 July 2026 · figures verified against the live dashboard*
