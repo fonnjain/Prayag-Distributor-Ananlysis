@@ -9,7 +9,7 @@ import type { GraphNode, MeasureValue } from "./types.js";
 import { MAX_NODES_PER_RESOLVE } from "./types.js";
 import { GAP_NODE_REGISTRY, KNOWN_KEY_SPLITS, findGapNode } from "./gapNodes.js";
 import { loadStateDashboard } from "../stateDashboard.js";
-import { loadStateHeadSale } from "../stateHeadSale.js";
+import { loadPrimaryPeriodData, fiscalMonthsToLabels } from "../primaryPeriod.js";
 import { loadDeepDiveData, normSecKey } from "../deepDiveData.js";
 import { buildMemberPayload, buildStateHeadPayload } from "../aiPayload.js";
 import { loadDistributorDeepDive, normDistKey } from "../distributorDeepDive.js";
@@ -42,19 +42,25 @@ const MONTH_LABELS = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan
 // ── Company node ───────────────────────────────────────────────────────────────
 
 async function resolveCompany(fy: string): Promise<GraphNode> {
-  const [secDash, saleResult] = await Promise.all([
+  const fullYear = fiscalMonthsToLabels(fy, 1, 12);
+  const [secDash, primary] = await Promise.all([
     loadStateDashboard(fy),
-    loadStateHeadSale(fy),
+    loadPrimaryPeriodData(fy, fullYear),
   ]);
 
   const measures: MeasureValue[] = [];
 
-  // Primary sale from State Head Sale sheet.
-  if (saleResult.error) {
-    measures.push(mv("primary_sale", "Primary Sale / Dispatch", null));
-  } else {
-    measures.push(mv("primary_sale", "Primary Sale / Dispatch", saleResult.total));
-  }
+  // Primary booking and sale via shared period-aware service (full-year).
+  measures.push(mv(
+    "primary_ob",
+    "Primary Order Booking",
+    primary.booking.total > 0 ? primary.booking.total : null,
+  ));
+  measures.push(mv(
+    "primary_sale",
+    "Primary Sale / Dispatch",
+    primary.sale.total > 0 ? primary.sale.total : null,
+  ));
 
   // Secondary OB and sale from State Head Dashboard.
   if (secDash) {
@@ -67,7 +73,9 @@ async function resolveCompany(fy: string): Promise<GraphNode> {
   }
 
   const flags: string[] = [];
-  if (saleResult.error) flags.push(`PRIMARY_SALE_ERROR: ${saleResult.error}`);
+  if (primary.sale.total === 0) flags.push("PRIMARY_SALE_UNAVAILABLE");
+  if (!primary.sale.periodFiltered) flags.push(`PRIMARY_SALE_FY_TOTAL: ${primary.sale.source}`);
+  if (!primary.booking.periodFiltered) flags.push(`PRIMARY_BOOKING_FY_TOTAL: ${primary.booking.source}`);
   if (!secDash) flags.push("SECONDARY_DASHBOARD_UNAVAILABLE");
 
   // Known residual: 164 non-territory customers who sit outside any named head.
@@ -96,9 +104,13 @@ async function resolveCompany(fy: string): Promise<GraphNode> {
     population:
       "Primary: all dispatches including project, institutional, and govt business. " +
       "Secondary: distributor→retailer order booking and sales; excludes project business.",
-    source: `Primary sale from loadStateHeadSale (State Head Sale sheet FY${fy}). ` +
-      `Secondary from loadStateDashboard (STATE HEAD DASHBOARD ${fy}).`,
-    cutoff: secDash?.anomalies?.length ? "See anomalies" : `FY${fy} YTD`,
+    source:
+      `Primary booking: ${primary.booking.source}` +
+      (primary.booking.periodFiltered ? "" : " [FY total — period filter not applied]") +
+      `. Primary sale: ${primary.sale.source}` +
+      (primary.sale.periodFiltered ? "" : " [FY total — period filter not applied]") +
+      `. Secondary from loadStateDashboard (STATE HEAD DASHBOARD ${fy}).`,
+    cutoff: primary.sale.periodFiltered ? `FY${fy} full year` : `FY${fy} total (Sheets)`,
     flags,
     parent: null,
     children: heads.map((h) => `head/${h}/${fy}`),
@@ -111,9 +123,10 @@ async function resolveCompany(fy: string): Promise<GraphNode> {
 // ── Head node ─────────────────────────────────────────────────────────────────
 
 async function resolveHead(headName: string, fy: string): Promise<GraphNode> {
-  const [secDash, saleResult, roster] = await Promise.all([
+  const fullYear = fiscalMonthsToLabels(fy, 1, 12);
+  const [secDash, primary, roster] = await Promise.all([
     loadStateDashboard(fy),
-    loadStateHeadSale(fy),
+    loadPrimaryPeriodData(fy, fullYear),
     loadRoster().catch(() => null),
   ]);
 
@@ -133,23 +146,23 @@ async function resolveHead(headName: string, fy: string): Promise<GraphNode> {
     }
   }
 
-  // Primary: from StateHeadSale.byHead — key is the head name as stored in sheet.
-  const primarySale = saleResult.error
-    ? null
-    : (saleResult.byHead.get(headName) ?? null);
+  // Primary booking and sale via shared period-aware service (full-year).
+  const primaryBooking = primary.booking.byHead.get(headName) ?? null;
+  const primarySale    = primary.sale.byHead.get(headName) ?? null;
 
   const measures: MeasureValue[] = [
-    mv("primary_sale", "Primary Sale / Dispatch", primarySale),
+    mv("primary_ob",      "Primary Order Booking",    primaryBooking),
+    mv("primary_sale",    "Primary Sale / Dispatch",  primarySale),
     mv("secondary_ob",   "Secondary Order Booking",   secDash ? secOB   : null),
     mv("secondary_sale", "Secondary Sales Received",  secDash ? secSale : null),
     mv("target", "Secondary Business Plan", secDash ? secPlan : null),
   ];
 
   const flags: string[] = [];
-  if (saleResult.error)       flags.push(`PRIMARY_SALE_ERROR: ${saleResult.error}`);
-  if (!secDash)               flags.push("SECONDARY_DASHBOARD_UNAVAILABLE");
-  if (primarySale == null && !saleResult.error)
-    flags.push("HEAD_NOT_IN_PRIMARY_SALE_SHEET: name may differ between sheets");
+  if (!secDash)            flags.push("SECONDARY_DASHBOARD_UNAVAILABLE");
+  if (primarySale == null) flags.push("HEAD_NOT_IN_PRIMARY_SALE_DATA: name may differ between sources");
+  if (!primary.sale.periodFiltered)    flags.push(`PRIMARY_SALE_FY_TOTAL: ${primary.sale.source}`);
+  if (!primary.booking.periodFiltered) flags.push(`PRIMARY_BOOKING_FY_TOTAL: ${primary.booking.source}`);
 
   // Check cross-FY key splits.
   for (const split of KNOWN_KEY_SPLITS) {
@@ -187,7 +200,7 @@ async function resolveHead(headName: string, fy: string): Promise<GraphNode> {
     population:
       "Primary: dispatches attributed to this State Head including project/institutional. " +
       "Secondary: order booking/sales from the members listed under this head in STATE HEAD DASHBOARD.",
-    source: `Primary from loadStateHeadSale.byHead. Secondary aggregated from loadStateDashboard.members filtered by stateHead="${headName}".`,
+    source: `Primary booking: ${primary.booking.source}${primary.booking.periodFiltered ? "" : " [FY total]"}. Primary sale: ${primary.sale.source}${primary.sale.periodFiltered ? "" : " [FY total — period filter not applied]"}. Secondary aggregated from loadStateDashboard.members filtered by stateHead="${headName}".`,
     cutoff: `FY${fy} YTD`,
     flags,
     parent: `company/${fy}`,
