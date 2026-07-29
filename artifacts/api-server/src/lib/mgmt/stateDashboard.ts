@@ -632,7 +632,8 @@ async function loadStateDashboardUncached(fy: string, nowMs = Date.now(), skipPe
     const contactNumber = cellStr(row[cols.contactNumber]);
 
     const months: SecMonthData[] = [];
-    let ytdPlan = 0;
+    let ytdPlan = 0;               // full closed-month plan — for display only
+    let ytdPlanForAchievement = 0; // plan only from fully-recorded months — achievement denominator
     let ytdOrdered = 0;
     let ytdSales = 0;
     let ytdHasData = false;
@@ -698,6 +699,10 @@ async function loadStateDashboardUncached(fy: string, nowMs = Date.now(), skipPe
       // a zero that hasn't been entered is not the same as zero sales received.
       if (closed) {
         if (planAmount != null) { ytdPlan += planAmount; ytdHasData = true; }
+        // Achievement denominator: only fully-recorded months.
+        // Sales-lag months have a real plan but no recorded sales yet;
+        // including them in the denominator would understate achievement.
+        if (planAmount != null && !notYetRecorded) ytdPlanForAchievement += planAmount;
         if (orderedAmount != null) ytdOrdered += orderedAmount;
         if (salesAmount != null && !notYetRecorded) ytdSales += salesAmount;
       }
@@ -726,7 +731,7 @@ async function loadStateDashboardUncached(fy: string, nowMs = Date.now(), skipPe
     }
 
     const ytdAchievement =
-      ytdHasData && ytdPlan > 0 ? ytdSales / ytdPlan : null;
+      ytdHasData && ytdPlanForAchievement > 0 ? ytdSales / ytdPlanForAchievement : null;
 
     members.push({
       stateHead: currentStateHead,

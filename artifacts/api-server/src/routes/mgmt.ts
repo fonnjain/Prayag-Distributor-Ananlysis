@@ -253,23 +253,28 @@ function secPeriod(
   mFrom: number, // 1-based fiscal month (1 = Apr)
   mTo: number,   // 1-based fiscal month (12 = Mar)
 ): { plan: number | null; ob: number | null; sales: number | null; achievement: number | null } {
-  let plan = 0, ob = 0, sales = 0;
+  let plan = 0, planForAchievement = 0, ob = 0, sales = 0;
   let hasPlan = false, hasClosedMonth = false, hasObData = false;
   for (let i = mFrom - 1; i <= mTo - 1; i++) {
     const md = sec.months[i];
     if (!md) continue;
-    // PLAN: always read — real for past AND future months.
+    // PLAN for display: always read — real for past AND future months.
+    // PLAN for achievement denominator: only fully-recorded months.
+    //   A sales-lag month (notYetRecorded=true) has a real plan figure, but since
+    //   its sales are not yet in, including it in the denominator would understate
+    //   achievement.  E.g. Apr=lag, May+Jun=recorded → denominator = May+Jun plan only.
     if (md.planAmount != null) { plan += md.planAmount; hasPlan = true; }
     if (!md.notYetRecorded) {
-      // Fully recorded closed month: accumulate both OB and sales.
+      // Fully recorded closed month: accumulate OB, sales, and plan-for-achievement.
       hasClosedMonth = true;
       hasObData = true;
-      if (md.orderedAmount != null) ob += md.orderedAmount;
-      if (md.salesAmount != null)   sales += md.salesAmount;
+      if (md.planAmount    != null) planForAchievement += md.planAmount;
+      if (md.orderedAmount != null) ob    += md.orderedAmount;
+      if (md.salesAmount   != null) sales += md.salesAmount;
     } else if (md.orderedAmount != null && md.orderedAmount > 0) {
       // Sales-lag month: notYetRecorded=true because sales=0 but ob>0.
       // OB was entered by the state head — include it; do not advance hasClosedMonth
-      // (so it does not contribute a zero to the sales/achievement computation).
+      // (so it contributes neither a zero to sales nor its plan to the denominator).
       hasObData = true;
       ob += md.orderedAmount;
     }
@@ -278,9 +283,10 @@ function secPeriod(
   return {
     plan: hasPlan ? plan : null,
     // 0 when there is a plan but the period has no OB at all yet (future Q).
-    ob:    hasObData ? ob    : 0,
+    ob:    hasObData      ? ob    : 0,
     sales: hasClosedMonth ? (sales > 0 ? sales : 0) : 0,
-    achievement: hasPlan && plan > 0 && hasClosedMonth ? sales / plan : null,
+    // Denominator = sum of plan for fully-recorded months only.
+    achievement: hasClosedMonth && planForAchievement > 0 ? sales / planForAchievement : null,
   };
 }
 
