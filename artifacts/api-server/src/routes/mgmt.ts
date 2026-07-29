@@ -252,9 +252,18 @@ function secPeriod(
   sec: SecMember,
   mFrom: number, // 1-based fiscal month (1 = Apr)
   mTo: number,   // 1-based fiscal month (12 = Mar)
-): { plan: number | null; ob: number | null; sales: number | null; achievement: number | null } {
+): {
+  plan: number | null; ob: number | null; sales: number | null;
+  achievement: number | null;
+  // recordedMonths: fully-recorded closed months in the period.
+  // lagMonths:      sales-lag months (closed, OB entered, sales not yet received).
+  // When lagMonths > 0 the achievement denominator ≠ the displayed plan —
+  // callers expose a "N of M months recorded" marker in the UI.
+  recordedMonths: number; lagMonths: number;
+} {
   let plan = 0, planForAchievement = 0, ob = 0, sales = 0;
   let hasPlan = false, hasClosedMonth = false, hasObData = false;
+  let recordedMonths = 0, lagMonths = 0;
   for (let i = mFrom - 1; i <= mTo - 1; i++) {
     const md = sec.months[i];
     if (!md) continue;
@@ -268,6 +277,7 @@ function secPeriod(
       // Fully recorded closed month: accumulate OB, sales, and plan-for-achievement.
       hasClosedMonth = true;
       hasObData = true;
+      recordedMonths++;
       if (md.planAmount    != null) planForAchievement += md.planAmount;
       if (md.orderedAmount != null) ob    += md.orderedAmount;
       if (md.salesAmount   != null) sales += md.salesAmount;
@@ -275,11 +285,14 @@ function secPeriod(
       // Sales-lag month: notYetRecorded=true because sales=0 but ob>0.
       // OB was entered by the state head — include it; do not advance hasClosedMonth
       // (so it contributes neither a zero to sales nor its plan to the denominator).
+      lagMonths++;
       hasObData = true;
       ob += md.orderedAmount;
     }
   }
-  if (!hasPlan && !hasClosedMonth && !hasObData) return { plan: null, ob: null, sales: null, achievement: null };
+  if (!hasPlan && !hasClosedMonth && !hasObData) {
+    return { plan: null, ob: null, sales: null, achievement: null, recordedMonths: 0, lagMonths: 0 };
+  }
   return {
     plan: hasPlan ? plan : null,
     // 0 when there is a plan but the period has no OB at all yet (future Q).
@@ -287,6 +300,8 @@ function secPeriod(
     sales: hasClosedMonth ? (sales > 0 ? sales : 0) : 0,
     // Denominator = sum of plan for fully-recorded months only.
     achievement: hasClosedMonth && planForAchievement > 0 ? sales / planForAchievement : null,
+    recordedMonths,
+    lagMonths,
   };
 }
 
@@ -534,6 +549,13 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         secondaryOrderBooked: sp?.ob ?? null,
         secondarySalesReceived: sp?.sales ?? null,
         secondaryAchievement: sp?.achievement ?? null,
+        // Present when at least one closed month in the period has OB entered but
+        // sales not yet received (notYetRecorded=true, ob>0).  In that state the
+        // achievement denominator is smaller than the displayed plan, so the UI
+        // shows "N of M months recorded" next to the achievement figure.
+        secondaryAchievementBasis: (sp && sp.lagMonths > 0)
+          ? { recorded: sp.recordedMonths, lag: sp.lagMonths }
+          : null,
         secondaryBusinessPlan: sec?.businessPlan ?? null,
         salary: sec?.salary ?? null,
         totalDealers: sec?.totalDealers ?? null,

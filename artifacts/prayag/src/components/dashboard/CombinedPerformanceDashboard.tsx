@@ -57,6 +57,8 @@ type Member = {
   secondaryOrderBooked: number | null;
   secondarySalesReceived: number | null;
   secondaryAchievement: number | null;
+  // Present when lagMonths > 0 — achievement denominator ≠ displayed plan.
+  secondaryAchievementBasis: { recorded: number; lag: number } | null;
   secondaryBusinessPlan: number | null;
   salary: number | null;
   totalDealers: number | null;
@@ -174,6 +176,8 @@ type RepRow = {
   secOrdered: number | null;
   secSales: number | null;
   secAchievement: number | null;
+  // Non-null when the achievement denominator < displayed plan (sales-lag months).
+  achievementBasis: { recorded: number; lag: number } | null;
   dealers: number | null;
   coveragePct: number | null;
   coverageGap: number | null;
@@ -272,6 +276,7 @@ export default function CombinedPerformanceDashboard() {
           secOrdered,
           secSales,
           secAchievement,
+          achievementBasis: m.secondaryAchievementBasis ?? null,
           dealers,
           coveragePct,
           coverageGap,
@@ -603,6 +608,11 @@ export default function CombinedPerformanceDashboard() {
                             </td>
                             <td className={cn("py-1.5 px-3 text-right font-mono text-xs", achColor(m.secAchievement))}>
                               {fmtPct(m.secAchievement)}
+                              {m.achievementBasis && (
+                                <div className="text-[10px] font-normal text-muted-foreground leading-tight mt-0.5 tabular-nums">
+                                  {m.achievementBasis.recorded}/{m.achievementBasis.recorded + m.achievementBasis.lag} mo. recorded
+                                </div>
+                              )}
                             </td>
                             <td className="py-1.5 px-3 text-right font-mono text-xs text-muted-foreground">
                               {m.coveragePct != null
