@@ -223,9 +223,14 @@ type DirectDealerSummary = {
   retailerCount: number;
   activeCount: number;
   dormantCount: number;
+  /** Secondary OB from working-sheet blank-distributor rows (typically 0 for direct-dealer channels). */
   orderBooking: number;
   sale: number;
   visits: number | null;
+  /** Authoritative OB from Data-tab directDealersOrder column. */
+  dashboardOb: number | null;
+  /** Member whose Data-tab directDealersOrder > 0. */
+  dashboardMember: string | null;
 };
 
 type NoneAssignedSummary = {
@@ -250,6 +255,56 @@ type MappingQuality = {
   totalVisits: number | null;
   noneVisitSharePct: number | null;
   noneAllDormant: boolean;
+};
+
+// ── SD2: per-state and per-member analysis ────────────────────────────────────
+
+type StateDistributorRow = {
+  state: string;
+  memberCount: number;
+  retailerCount: number;
+  visitCount: number | null;
+  namedCount: number;
+  noneCount: number;
+  blankCount: number;
+  sharedCount: number;
+  malformedCount: number;
+  namedActiveCount: number;
+  namedActivePct: number | null;
+  noneActiveCount: number;
+  noneActivePct: number | null;
+  noneVisits: number | null;
+  noneVisitSharePct: number | null;
+  topDistributorNormKey: string | null;
+  topDistributorName: string | null;
+  topDistributorObPct: number | null;
+};
+
+type MemberDistributorRow = {
+  name: string;
+  normKey: string;
+  state: string;
+  isLeft: boolean;
+  totalRetailers: number;
+  removedCount: number;
+  namedCount: number;
+  noneCount: number;
+  blankCount: number;
+  sharedCount: number;
+  noneSharePct: number | null;
+  namedActivePct: number | null;
+  noneActivePct: number | null;
+  noneVisits: number | null;
+  noneVisitSharePct: number | null;
+  achievementTotal: number | null;
+};
+
+type NamingCandidate = {
+  a: string;
+  b: string;
+  normA: string;
+  normB: string;
+  similarity: number;
 };
 
 // ── D5: Territory whitespace types ───────────────────────────────────────────
@@ -361,6 +416,14 @@ type DistributorDeepDiveResult = {
   whitespace: TerritoryWhitespace | null;
   concentration: CustomerConcentration | null;
   capacityCheck: CapacityCheck | null;
+  /** SD2: per-state classification and activity breakdown. */
+  byState?: StateDistributorRow[];
+  /** SD2: per-member unassigned analysis (all members). */
+  perMember?: MemberDistributorRow[];
+  /** SD2: Pearson r between noneSharePct and achievementTotal (active members). */
+  unassignedCorrelation?: number | null;
+  /** SD2: candidate near-duplicate distributor name pairs (Jaccard trigram > 0.6). */
+  namingCandidates?: NamingCandidate[];
   error: string | null;
 };
 
@@ -1838,6 +1901,82 @@ function CapacityCheckPanel({ check }: { check: CapacityCheck }) {
   );
 }
 
+// ── SD2: Per-member unassigned analysis section ───────────────────────────────
+
+function PerMemberAnalysisSection({ perMember }: { perMember: MemberDistributorRow[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const active = perMember.filter((m) => m.totalRetailers > 0).sort((a, b) => b.noneCount - a.noneCount);
+  const left   = perMember.filter((m) => m.isLeft && m.totalRetailers > 0);
+
+  return (
+    <SectionCard title={`Per-Member Unassigned Analysis (${active.length} members with data${left.length > 0 ? `, ${left.length} departed` : ""})`}>
+      <p className="text-xs text-muted-foreground mb-3 flex items-start gap-2">
+        <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+        Shows every member whose working sheet was loaded. None% = share of retailers with '--' (unassigned).
+        None Active = active rate among unassigned retailers. Removed = rows in the 'Removed Parties' section.
+      </p>
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="mb-3 text-xs font-medium text-primary underline-offset-2 hover:underline flex items-center gap-1"
+      >
+        {expanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+        {expanded ? "Collapse" : "Expand member table"}
+      </button>
+      {expanded && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border text-muted-foreground text-xs">
+                <th className="text-left py-2 pr-3 font-medium">Member</th>
+                <th className="text-left py-2 pr-3 font-medium">State</th>
+                <th className="text-right py-2 pr-3 font-medium">Retail</th>
+                <th className="text-right py-2 pr-3 font-medium">None%</th>
+                <th className="text-right py-2 pr-3 font-medium">None Active</th>
+                <th className="text-right py-2 pr-3 font-medium">Named Active</th>
+                <th className="text-right py-2 pr-3 font-medium">Achievement</th>
+                <th className="text-right py-2 font-medium">Removed</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/50">
+              {active.map((m) => (
+                <tr key={m.normKey} className={`hover:bg-muted/30 ${m.isLeft ? "opacity-60" : ""}`}>
+                  <td className="py-1.5 pr-3 font-medium text-xs">
+                    {m.name}
+                    {m.isLeft && <span className="ml-1 text-muted-foreground">(left)</span>}
+                  </td>
+                  <td className="py-1.5 pr-3 text-xs text-muted-foreground">{m.state}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums text-xs">{m.totalRetailers}</td>
+                  <td className={`py-1.5 pr-3 text-right tabular-nums text-xs font-medium ${
+                    m.noneSharePct != null && m.noneSharePct > 60 ? "text-amber-600" : "text-muted-foreground"
+                  }`}>
+                    {pct(m.noneSharePct)}
+                  </td>
+                  <td className={`py-1.5 pr-3 text-right tabular-nums text-xs ${
+                    m.noneActivePct != null && m.noneActivePct > 20 ? "text-amber-600" : "text-muted-foreground"
+                  }`}>
+                    {pct(m.noneActivePct)}
+                  </td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums text-xs text-emerald-700">
+                    {pct(m.namedActivePct)}
+                  </td>
+                  <td className={`py-1.5 pr-3 text-right tabular-nums text-xs ${
+                    m.achievementTotal != null && m.achievementTotal < 50 ? "text-destructive font-medium" : ""
+                  }`}>
+                    {m.achievementTotal != null ? pct(m.achievementTotal) : "--"}
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums text-xs text-muted-foreground">
+                    {m.removedCount > 0 ? m.removedCount : "--"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function DistributorDeepDive() {
@@ -2189,11 +2328,21 @@ export default function DistributorDeepDive() {
                   These retailers buy directly from Prayag — they are NOT served
                   via any distributor. Shown as a parallel channel.
                 </p>
+                {/* Dashboard OB (authoritative — from Data tab directDealersOrder) */}
+                {data.directDealer.dashboardOb != null && data.directDealer.dashboardOb > 0 && (
+                  <div className="mb-3 px-3 py-2 rounded-md bg-emerald-50 border border-emerald-100 text-xs">
+                    <span className="text-muted-foreground">Order Booking (Data tab)  </span>
+                    <span className="font-semibold tabular-nums text-emerald-800">{formatINR(data.directDealer.dashboardOb)}</span>
+                    {data.directDealer.dashboardMember && (
+                      <span className="text-muted-foreground ml-1">— {data.directDealer.dashboardMember}</span>
+                    )}
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-3">
                   {[
                     { label: "Retailers", value: String(data.directDealer.retailerCount) },
                     { label: "Active",    value: String(data.directDealer.activeCount)   },
-                    { label: "OB",        value: formatINR(data.directDealer.orderBooking) },
+                    { label: "OB (sheet rows)", value: data.directDealer.orderBooking > 0 ? formatINR(data.directDealer.orderBooking) : "Rs 0" },
                     { label: "Sale",      value: data.directDealer.sale > 0 ? formatINR(data.directDealer.sale) : "--" },
                     { label: "Visits",    value: visits(data.directDealer.visits) },
                   ].map(({ label, value }) => (
@@ -2292,6 +2441,120 @@ export default function DistributorDeepDive() {
                 </div>
               )}
             </SectionCard>
+          )}
+
+          {/* ── SD2: By-State Breakdown ─────────────────────────────── */}
+          {data.byState && data.byState.length > 0 && (
+            <SectionCard title="Retailer Distribution by State">
+              {data.unassignedCorrelation != null && (
+                <div className={`mb-3 px-3 py-2 rounded-md border text-xs flex items-start gap-2 ${
+                  data.unassignedCorrelation < -0.6
+                    ? "bg-amber-50 border-amber-200 text-amber-900"
+                    : data.unassignedCorrelation < -0.3
+                    ? "bg-yellow-50 border-yellow-200 text-yellow-900"
+                    : "bg-muted/40 border-border text-muted-foreground"
+                }`}>
+                  <TrendingDown className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>
+                    Unassigned share vs achievement correlation:{" "}
+                    <span className="font-semibold tabular-nums">r = {data.unassignedCorrelation.toFixed(2)}</span>
+                    {data.unassignedCorrelation < -0.5
+                      ? " — strong negative signal: members with more unassigned retailers tend to achieve significantly less."
+                      : data.unassignedCorrelation < -0.3
+                      ? " — moderate negative signal: members with more unassigned retailers tend to achieve somewhat less."
+                      : " — weak signal; unassigned share does not strongly predict achievement in this territory."}
+                    {" "}(Pearson r, active members with retailer data)
+                  </span>
+                </div>
+              )}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-muted-foreground text-xs">
+                      <th className="text-left py-2 pr-4 font-medium">State</th>
+                      <th className="text-right py-2 pr-3 font-medium">Members</th>
+                      <th className="text-right py-2 pr-3 font-medium">Retailers</th>
+                      <th className="text-right py-2 pr-3 font-medium">None</th>
+                      <th className="text-right py-2 pr-3 font-medium">None Active</th>
+                      <th className="text-right py-2 pr-3 font-medium">Named Active</th>
+                      <th className="text-left py-2 font-medium">Largest Distributor</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {data.byState.map((s) => {
+                      const noneShare = s.retailerCount > 0 ? (s.noneCount / s.retailerCount) * 100 : 0;
+                      return (
+                        <tr key={s.state} className="hover:bg-muted/30">
+                          <td className="py-1.5 pr-4 font-medium">{s.state}</td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground">{s.memberCount}</td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums font-medium">{s.retailerCount.toLocaleString("en-IN")}</td>
+                          <td className={`py-1.5 pr-3 text-right tabular-nums ${noneShare > 50 ? "text-amber-600 font-semibold" : "text-muted-foreground"}`}>
+                            {s.noneCount.toLocaleString("en-IN")}
+                            <span className="text-xs ml-1">({noneShare.toFixed(0)}%)</span>
+                          </td>
+                          <td className={`py-1.5 pr-3 text-right tabular-nums ${
+                            s.noneActivePct != null && s.noneActivePct > 15 ? "text-amber-600" : "text-muted-foreground"
+                          }`}>
+                            {pct(s.noneActivePct)}
+                          </td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums text-emerald-700">
+                            {pct(s.namedActivePct)}
+                          </td>
+                          <td className="py-1.5 text-xs text-muted-foreground">
+                            {s.topDistributorName
+                              ? <>{s.topDistributorName}<span className="ml-1 text-foreground font-medium">{pct(s.topDistributorObPct)}</span></>
+                              : <span className="opacity-40">—</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                None Active = active rate among unassigned (--) retailers. Named Active = active rate among distributor-assigned retailers.
+                Largest distributor share is of named-retailer OB in that state.
+              </p>
+            </SectionCard>
+          )}
+
+          {/* ── SD2: Near-duplicate distributor name candidates ──────── */}
+          {data.namingCandidates && data.namingCandidates.length > 0 && (
+            <SectionCard title={`Possible Duplicate Distributor Names (${data.namingCandidates.length})`}>
+              <p className="text-xs text-muted-foreground mb-3 flex items-start gap-2">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-500" />
+                These distributor name pairs have high spelling similarity (Jaccard trigram &gt; 0.6).
+                They may be the same entity entered differently across member sheets.
+                Review before treating them as separate distributors. Never auto-merged.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-muted-foreground text-xs">
+                      <th className="text-left py-2 pr-4 font-medium">Name A</th>
+                      <th className="text-left py-2 pr-4 font-medium">Name B</th>
+                      <th className="text-right py-2 font-medium">Similarity</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {data.namingCandidates.map((c, i) => (
+                      <tr key={i} className="hover:bg-muted/30">
+                        <td className="py-1.5 pr-4 font-medium">{c.a}</td>
+                        <td className="py-1.5 pr-4 font-medium">{c.b}</td>
+                        <td className={`py-1.5 text-right tabular-nums font-semibold ${c.similarity > 0.8 ? "text-destructive" : "text-amber-600"}`}>
+                          {(c.similarity * 100).toFixed(0)}%
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </SectionCard>
+          )}
+
+          {/* ── SD2: Per-member unassigned analysis ─────────────────── */}
+          {data.perMember && data.perMember.filter(m => m.totalRetailers > 0).length > 0 && (
+            <PerMemberAnalysisSection perMember={data.perMember} />
           )}
 
           {/* ── Empty state when no sheets returned data ──────────── */}

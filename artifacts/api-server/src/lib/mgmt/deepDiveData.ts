@@ -147,6 +147,14 @@ export type MemberRef = {
   stateHead: string;
   name: string;
   normKey: string;
+  /** State derived from extra.STATE (preferred) or extra.WORKINGSTATE.  Used by
+   *  distributorDeepDive.ts for per-state aggregation. */
+  state: string;
+  /** Pre-computed from Data tab — passed to distributorDeepDive for correlation. */
+  achievementTotal: number | null;
+  isLeft: boolean;
+  /** Data-tab directDealersOrder — for DD OB reconciliation in distributorDeepDive. */
+  directDealerOb: number;
 };
 
 // ── Team-summary types (SD1: Sandeep Dadheech onboarding) ────────────────────
@@ -1120,6 +1128,10 @@ export async function loadDeepDiveData(
     stateHead: m.stateHead,
     name: m.name,
     normKey: m.normKey,
+    state: extractStateName(m),
+    achievementTotal: m.achievementTotal ?? null,
+    isLeft: m.isLeft,
+    directDealerOb: m.directDealersOrder ?? 0,
   }));
 
   // Team summary — computed whenever a state head is chosen (regardless of

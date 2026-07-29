@@ -151,9 +151,71 @@ export type DirectDealerSummary = {
   retailerCount: number;
   activeCount: number;
   dormantCount: number;
+  /** Secondary OB from blank-distributor retailer rows in working sheets (often 0 — DD
+   *  business is a primary channel and is not re-reported in secondary row OB). */
   orderBooking: number;
   sale: number;
   visits: number | null;
+  /** Authoritative DD OB from Data-tab directDealersOrder column. */
+  dashboardOb: number | null;
+  /** Member whose directDealersOrder > 0 in the Data tab. */
+  dashboardMember: string | null;
+};
+
+/** SD2: per-state classification and activity summary. */
+export type StateDistributorRow = {
+  state: string;
+  memberCount: number;
+  retailerCount: number;
+  visitCount: number | null;
+  namedCount: number;
+  noneCount: number;
+  blankCount: number;
+  sharedCount: number;
+  malformedCount: number;
+  namedActiveCount: number;
+  namedActivePct: number | null;
+  noneActiveCount: number;
+  noneActivePct: number | null;
+  noneVisits: number | null;
+  noneVisitSharePct: number | null;
+  /** Top distributor (by secondary OB) in this state. */
+  topDistributorNormKey: string | null;
+  topDistributorName: string | null;
+  /** topDistributor OB as % of all named-OB in this state. */
+  topDistributorObPct: number | null;
+};
+
+/** SD2: per-member unassigned analysis for cross-member correlation. */
+export type MemberDistributorRow = {
+  name: string;
+  normKey: string;
+  state: string;
+  isLeft: boolean;
+  totalRetailers: number;
+  removedCount: number;
+  namedCount: number;
+  noneCount: number;
+  blankCount: number;
+  sharedCount: number;
+  noneSharePct: number | null;
+  namedActivePct: number | null;
+  noneActivePct: number | null;
+  noneVisits: number | null;
+  noneVisitSharePct: number | null;
+  /** From Data tab — paired with noneSharePct for correlation. */
+  achievementTotal: number | null;
+};
+
+/** SD2: near-duplicate distributor name pair detected via Jaccard trigram similarity. */
+export type NamingCandidate = {
+  /** Canonical name of distributor A (most-common raw spelling). */
+  a: string;
+  /** Canonical name of distributor B. */
+  b: string;
+  normA: string;
+  normB: string;
+  similarity: number;   // 0–1 Jaccard trigram
 };
 
 export type NoneAssignedSummary = {
@@ -208,6 +270,16 @@ export type DistributorDeepDiveResult = {
   whitespace:     TerritoryWhitespace | null;
   concentration:  CustomerConcentration | null;
   capacityCheck:  CapacityCheck | null;
+  /** SD2: per-state classification and activity breakdown. */
+  byState: StateDistributorRow[];
+  /** SD2: per-member unassigned analysis (includes LEFT members for completeness). */
+  perMember: MemberDistributorRow[];
+  /** SD2: Pearson r between noneSharePct and achievementTotal across active members.
+   *  Null when fewer than 3 active members have both values. */
+  unassignedCorrelation: number | null;
+  /** SD2: candidate near-duplicate distributor name pairs (Jaccard trigram sim > 0.6).
+   *  Never auto-merged — listed for human confirmation only. */
+  namingCandidates: NamingCandidate[];
   error: string | null;
 };
 
@@ -566,6 +638,58 @@ async function loadDistributorFlows(
   );
 }
 
+// ── SD2 helper functions ───────────────────────────────────────────────────────
+
+/** Pearson correlation coefficient.  Returns null when n < 3 or denominator = 0. */
+function pearsonR(xs: number[], ys: number[]): number | null {
+  const n = xs.length;
+  if (n < 3) return null;
+  const mx = xs.reduce((s, v) => s + v, 0) / n;
+  const my = ys.reduce((s, v) => s + v, 0) / n;
+  let num = 0, dx2 = 0, dy2 = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - mx, dy = ys[i] - my;
+    num += dx * dy; dx2 += dx * dx; dy2 += dy * dy;
+  }
+  const denom = Math.sqrt(dx2 * dy2);
+  return denom === 0 ? null : +(num / denom).toFixed(4);
+}
+
+function trigramsOf(s: string): Set<string> {
+  const norm = s.toUpperCase().replace(/[^A-Z0-9]/g, "").padEnd(3, "\0");
+  const out = new Set<string>();
+  for (let i = 0; i <= norm.length - 3; i++) out.add(norm.slice(i, i + 3));
+  return out;
+}
+
+/** Jaccard similarity on character trigrams of two normDistKey strings. */
+function jaccardTrigram(a: string, b: string): number {
+  const sa = trigramsOf(a), sb = trigramsOf(b);
+  let inter = 0;
+  for (const t of sa) if (sb.has(t)) inter++;
+  const union = sa.size + sb.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
+
+/**
+ * Return up to 30 near-duplicate distributor name pairs (Jaccard trigram > 0.6).
+ * Never auto-merges — the list is for human review only.
+ */
+function computeNamingCandidates(groups: DistributorGroup[]): NamingCandidate[] {
+  const cands: NamingCandidate[] = [];
+  for (let i = 0; i < groups.length; i++) {
+    for (let j = i + 1; j < groups.length; j++) {
+      const g1 = groups[i], g2 = groups[j];
+      if (g1.normKey === g2.normKey) continue;
+      const sim = jaccardTrigram(g1.normKey, g2.normKey);
+      if (sim > 0.6 && sim < 1) {
+        cands.push({ a: g1.name, b: g2.name, normA: g1.normKey, normB: g2.normKey, similarity: +sim.toFixed(3) });
+      }
+    }
+  }
+  return cands.sort((a, b) => b.similarity - a.similarity).slice(0, 30);
+}
+
 // ── D1 main function ───────────────────────────────────────────────────────────
 
 export async function loadDistributorDeepDive(
@@ -581,13 +705,16 @@ export async function loadDistributorDeepDive(
     fy, stateHeads, distributors: [], sharedRetailers: [],
     directDealer: null, noneAssigned: null, mappingQuality: null,
     partyObTotal: 0, membersLoaded: 0, membersNotMapped: 0,
-    whitespace: null, concentration: null, capacityCheck: null, error: null,
+    whitespace: null, concentration: null, capacityCheck: null,
+    byState: [], perMember: [], unassignedCorrelation: null, namingCandidates: [],
+    error: null,
   });
 
   if (!selectedStateHead || !members.length) return empty();
 
   // Step 2: Load all member working sheets in parallel.
-  const TIMEOUT_MS = 20_000;
+  // 60 s timeout: large teams (74 members) exhaust the 20 s budget on cold loads.
+  const TIMEOUT_MS = 60_000;
   const sheetResults = await Promise.allSettled(
     members.map((m) =>
       Promise.race([
@@ -602,7 +729,17 @@ export async function loadDistributorDeepDive(
     ),
   );
 
-  type RichRow = RetailerRow & { memberName: string };
+  type RichRow = RetailerRow & { memberName: string; memberState: string };
+  // SD2: per-member accumulator — populated during classification (Step 4).
+  type PerMemberAcc = {
+    named: RichRow[]; none: RichRow[]; blank: RichRow[];
+    shared: RichRow[]; malformed: RichRow[];
+  };
+  const perMemberAcc        = new Map<string, PerMemberAcc>();
+  const memberRemovedCounts = new Map<string, number>();
+  const memberStateMap      = new Map<string, string>(
+    members.map((m) => [m.name, m.state ?? "Unknown"] as const),
+  );
   const allRows: RichRow[] = [];
   let membersLoaded = 0;
   let membersNotMapped = 0;
@@ -624,8 +761,9 @@ export async function loadDistributorDeepDive(
     }
     membersLoaded++;
     memberSpreads.set(m.name, sheet.spread);   // capture spread for D4
+    memberRemovedCounts.set(m.name, (sheet as any).removedRows?.length ?? 0);
     for (const row of sheet.rows) {
-      allRows.push({ ...row, memberName: m.name });
+      allRows.push({ ...row, memberName: m.name, memberState: memberStateMap.get(m.name) ?? "Unknown" });
     }
   }
 
@@ -712,15 +850,19 @@ export async function loadDistributorDeepDive(
   for (const row of allRows) {
     if (row.totalVisit !== null) { totalVisitSum += row.totalVisit; hasAnyVisit = true; }
     const cls = classifyDist(row.distributor);
+    // SD2: per-member accumulator for unassigned analysis.
+    let pma = perMemberAcc.get(row.memberName);
+    if (!pma) { pma = { named:[], none:[], blank:[], shared:[], malformed:[] }; perMemberAcc.set(row.memberName, pma); }
     switch (cls.type) {
-      case "blank":       directDealerRows.push(row); break;
-      case "none":        noneRows.push(row);         break;
-      case "malformed":   malformedRows.push(row);    break;
-      case "shared":      sharedRows.push(row);       break;
+      case "blank":       directDealerRows.push(row); pma.blank.push(row);     break;
+      case "none":        noneRows.push(row);         pma.none.push(row);      break;
+      case "malformed":   malformedRows.push(row);    pma.malformed.push(row); break;
+      case "shared":      sharedRows.push(row);       pma.shared.push(row);    break;
       case "distributor": {
         const existing = distMap.get(cls.normKey);
         if (existing) { existing.rawNames.push(cls.raw); existing.rows.push(row); }
         else          { distMap.set(cls.normKey, { rawNames: [cls.raw], rows: [row] }); }
+        pma.named.push(row);
         break;
       }
     }
@@ -802,18 +944,28 @@ export async function loadDistributorDeepDive(
   distGroups.sort((a, b) => b.orderBooking - a.orderBooking);
 
   // Step 7: Direct dealer summary.
-  const ddActive  = directDealerRows.filter((r) => r.isActive);
-  const ddVArr    = directDealerRows.map((r) => r.totalVisit).filter((v): v is number => v !== null);
-  const directDealer: DirectDealerSummary | null = directDealerRows.length > 0
-    ? {
-        retailerCount: directDealerRows.length,
-        activeCount:   ddActive.length,
-        dormantCount:  directDealerRows.length - ddActive.length,
-        orderBooking:  directDealerRows.reduce((s, r) => s + r.orderBooking, 0),
-        sale:          directDealerRows.reduce((s, r) => s + r.sale, 0),
-        visits:        ddVArr.length > 0 ? ddVArr.reduce((s, v) => s + v, 0) : null,
-      }
-    : null;
+  // dashboardOb comes from the Data-tab directDealersOrder column (primary channel — the
+  // secondary-channel row OB on blank-distributor rows is typically 0 for DD business).
+  const ddActive      = directDealerRows.filter((r) => r.isActive);
+  const ddVArr        = directDealerRows.map((r) => r.totalVisit).filter((v): v is number => v !== null);
+  const ddTabMembers  = members
+    .filter((m) => (m.directDealerOb ?? 0) > 0)
+    .sort((a, b) => (b.directDealerOb ?? 0) - (a.directDealerOb ?? 0));
+  const dashboardDdOb     = ddTabMembers[0]?.directDealerOb ?? null;
+  const dashboardDdMember = ddTabMembers[0]?.name ?? null;
+  const directDealer: DirectDealerSummary | null =
+    directDealerRows.length > 0 || dashboardDdOb !== null
+      ? {
+          retailerCount:   directDealerRows.length,
+          activeCount:     ddActive.length,
+          dormantCount:    directDealerRows.length - ddActive.length,
+          orderBooking:    directDealerRows.reduce((s, r) => s + r.orderBooking, 0),
+          sale:            directDealerRows.reduce((s, r) => s + r.sale, 0),
+          visits:          ddVArr.length > 0 ? ddVArr.reduce((s, v) => s + v, 0) : null,
+          dashboardOb:     dashboardDdOb,
+          dashboardMember: dashboardDdMember,
+        }
+      : null;
 
   // Step 8: None-assigned summary.
   const noneActive = noneRows.filter((r) => r.isActive);
@@ -864,12 +1016,143 @@ export async function loadDistributorDeepDive(
       distributors:   distGroups.length,
       partyObTotal,
       directDealerOb: directDealer?.orderBooking ?? null,
+      dashboardDdOb:  directDealer?.dashboardOb ?? null,
       noneCount:      noneRows.length,
       sharedCount:    sharedRows.length,
       malformedCount: malformedRows.length,
     },
     "distributorDeepDive D1: aggregation complete",
   );
+
+  // ── SD2: per-member, per-state, correlation, naming candidates ────────────────
+
+  // Step 9b: Per-member unassigned analysis.
+  const perMember: MemberDistributorRow[] = members.map((m) => {
+    const acc = perMemberAcc.get(m.name) ?? { named:[], none:[], blank:[], shared:[], malformed:[] };
+    const total = acc.named.length + acc.none.length + acc.blank.length + acc.shared.length + acc.malformed.length;
+    const namedActive = acc.named.filter((r) => r.isActive).length;
+    const noneActive  = acc.none.filter((r) => r.isActive).length;
+    const noneVisArr  = acc.none.map((r) => r.totalVisit).filter((v): v is number => v !== null);
+    const allVisArr   = [...acc.named, ...acc.none, ...acc.blank, ...acc.shared]
+      .map((r) => r.totalVisit).filter((v): v is number => v !== null);
+    const noneVis  = noneVisArr.length > 0 ? noneVisArr.reduce((s, v) => s + v, 0) : null;
+    const totalVis = allVisArr.length  > 0 ? allVisArr.reduce((s, v)  => s + v, 0) : 0;
+    return {
+      name:             m.name,
+      normKey:          m.normKey,
+      state:            m.state ?? "Unknown",
+      isLeft:           m.isLeft,
+      totalRetailers:   total,
+      removedCount:     memberRemovedCounts.get(m.name) ?? 0,
+      namedCount:       acc.named.length,
+      noneCount:        acc.none.length,
+      blankCount:       acc.blank.length,
+      sharedCount:      acc.shared.length,
+      noneSharePct:     total > 0 ? (acc.none.length / total) * 100 : null,
+      namedActivePct:   acc.named.length > 0 ? (namedActive / acc.named.length) * 100 : null,
+      noneActivePct:    acc.none.length  > 0 ? (noneActive  / acc.none.length)  * 100 : null,
+      noneVisits:       noneVis,
+      noneVisitSharePct: totalVis > 0 && noneVis !== null ? (noneVis / totalVis) * 100 : null,
+      achievementTotal: m.achievementTotal ?? null,
+    };
+  });
+
+  // Step 9c: Per-state breakdown.
+  type StateAcc = {
+    memberNames: Set<string>;
+    named: RichRow[]; none: RichRow[]; blank: RichRow[];
+    shared: RichRow[]; malformed: RichRow[];
+  };
+  const stateAccMap = new Map<string, StateAcc>();
+  for (const row of allRows) {
+    const st = row.memberState;
+    let s = stateAccMap.get(st);
+    if (!s) {
+      s = { memberNames: new Set(), named:[], none:[], blank:[], shared:[], malformed:[] };
+      stateAccMap.set(st, s);
+    }
+    s.memberNames.add(row.memberName);
+    const clsType = classifyDist(row.distributor).type;
+    if      (clsType === "distributor") s.named.push(row);
+    else if (clsType === "none")        s.none.push(row);
+    else if (clsType === "blank")       s.blank.push(row);
+    else if (clsType === "shared")      s.shared.push(row);
+    else                                s.malformed.push(row);
+  }
+  // Top distributor per state by secondary OB on named retailer rows.
+  const distStateOb = new Map<string, Map<string, number>>();  // state → normKey → OB
+  for (const [normKey, { rows }] of distMap) {
+    for (const row of rows) {
+      const st = row.memberState;
+      let inner = distStateOb.get(st);
+      if (!inner) { inner = new Map(); distStateOb.set(st, inner); }
+      inner.set(normKey, (inner.get(normKey) ?? 0) + row.orderBooking);
+    }
+  }
+  const distCanonName = new Map<string, string>(distGroups.map((g) => [g.normKey, g.name]));
+
+  const byState: StateDistributorRow[] = Array.from(stateAccMap.entries())
+    .sort((a, b) => {
+      const ca = a[1].named.length + a[1].none.length + a[1].blank.length + a[1].shared.length + a[1].malformed.length;
+      const cb = b[1].named.length + b[1].none.length + b[1].blank.length + b[1].shared.length + b[1].malformed.length;
+      return cb - ca;
+    })
+    .map(([state, s]) => {
+      const retailerCount = s.named.length + s.none.length + s.blank.length + s.shared.length + s.malformed.length;
+      const namedActive   = s.named.filter((r) => r.isActive).length;
+      const noneActive    = s.none.filter((r) => r.isActive).length;
+      const noneVisArr    = s.none.map((r) => r.totalVisit).filter((v): v is number => v !== null);
+      const allVisArr     = [...s.named, ...s.none, ...s.blank, ...s.shared]
+        .map((r) => r.totalVisit).filter((v): v is number => v !== null);
+      const noneVis  = noneVisArr.length > 0 ? noneVisArr.reduce((a, v) => a + v, 0) : null;
+      const totalVis = allVisArr.length  > 0 ? allVisArr.reduce((a, v)  => a + v, 0) : null;
+      const stateOb = distStateOb.get(state);
+      let topNormKey: string | null = null, topOb = 0, totalNamedOb = 0;
+      if (stateOb) {
+        for (const [nk, ob] of stateOb) {
+          totalNamedOb += ob;
+          if (ob > topOb) { topOb = ob; topNormKey = nk; }
+        }
+      }
+      return {
+        state,
+        memberCount:      s.memberNames.size,
+        retailerCount,
+        visitCount:       totalVis,
+        namedCount:       s.named.length,
+        noneCount:        s.none.length,
+        blankCount:       s.blank.length,
+        sharedCount:      s.shared.length,
+        malformedCount:   s.malformed.length,
+        namedActiveCount: namedActive,
+        namedActivePct:   s.named.length > 0 ? (namedActive / s.named.length) * 100 : null,
+        noneActiveCount:  noneActive,
+        noneActivePct:    s.none.length  > 0 ? (noneActive  / s.none.length)  * 100 : null,
+        noneVisits:       noneVis,
+        noneVisitSharePct:
+          totalVis !== null && totalVis > 0 && noneVis !== null ? (noneVis / totalVis) * 100 : null,
+        topDistributorNormKey: topNormKey,
+        topDistributorName:    topNormKey ? (distCanonName.get(topNormKey) ?? topNormKey) : null,
+        topDistributorObPct:   topNormKey && totalNamedOb > 0 ? (topOb / totalNamedOb) * 100 : null,
+      };
+    });
+
+  // Step 9d: Pearson r — unassigned share vs achievement (SD2).
+  const corrPts = perMember.filter(
+    (m) => !m.isLeft && m.noneSharePct !== null && m.achievementTotal !== null && m.totalRetailers > 0,
+  );
+  const unassignedCorrelation = pearsonR(
+    corrPts.map((m) => m.noneSharePct!),
+    corrPts.map((m) => m.achievementTotal!),
+  );
+  logger.info(
+    { n: corrPts.length, r: unassignedCorrelation?.toFixed(3) ?? "n/a", stateHead: selectedStateHead },
+    "distributorDeepDive SD2: unassigned-vs-achievement correlation",
+  );
+
+  // Step 9e: Near-duplicate distributor name candidates (SD2).
+  const namingCandidates = computeNamingCandidates(distGroups);
+  logger.info({ count: namingCandidates.length }, "distributorDeepDive SD2: naming candidates");
 
   // Step 10 (D2): Attach primary flow data to each distributor group.
   await loadDistributorFlows(fy, selectedStateHead, distGroups);
@@ -1041,6 +1324,10 @@ export async function loadDistributorDeepDive(
     partyObTotal,
     membersLoaded,
     membersNotMapped,
+    byState,
+    perMember,
+    unassignedCorrelation,
+    namingCandidates,
     whitespace,
     concentration,
     capacityCheck,

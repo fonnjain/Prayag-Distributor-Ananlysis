@@ -56,3 +56,4 @@
 - [detectCols return-then-mutate trap](detectcols-return-trap.md) — esbuild never reports TS errors; dead code after `return {...}` silently runs (it doesn't). Use `const colMap = {...}` then mutate then `return colMap`.
 - [PA1 period capability system](pa1-period-capability.md) — FULL/FY_ONLY/NONE declared in period-capability.ts; GlobalFilterProvider is inside WouterRouter; I/J cross-check added to stateDashboard.
 - [PA2 period labelling](pa2-period-labelling.md) — computePeriodCovered in aiPayload.ts; runPeriodGuard in numericGuard.ts; all 6 AI routes return 5 period fields; PeriodMismatchBanner + PdfPeriodInfo + updated filenames in AiReports.tsx.
+- [SD2 Distributor Deep Dive](sd2-distributor-deep-dive.md) — byState/perMember/correlation/namingCandidates + dashboardOb; TIMEOUT_MS=60s; perMemberAcc in Step 4; MemberRef extended; verified Sandeep Dadheech r=−0.333.

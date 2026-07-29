@@ -1,0 +1,144 @@
+# SD2 — Sandeep Dadheech, Distributor Deep Dive
+
+*Builds on the retailer rows SD1 resolved. The real test of whether the unassigned finding is a company-level truth or a territory quirk.*
+
+---
+
+## First, close one thing from the achievement fix
+
+Fifteen active members were RED and no longer are, because their badges were missing new-party order booking. Two are in the delivered Anant Singh pack.
+
+> Re-run the Warning System for all heads and report the low-performer count before and after. The A1 threshold is under 50 per cent, and 15 active members cross it as a result of the achievement fix — including Shivam Chauhan (41.4 to 55.0) and Ashutosh Kumar Rudrapur (43.1 to 50.6) under Anant Singh. Confirm no member is still shown red on a pre-fix figure.
+
+Small, and it closes a downstream effect on how people are being judged.
+
+---
+
+## Why this build matters more than the last
+
+Anant Singh's territory produced the strongest relationship found in this project:
+
+- Retailers **with** an assigned distributor: **96.0% active**
+- Retailers **without** one: **5.0% active**
+- A retailer with a distributor is **19 times more likely** to be ordering
+- Unassigned share correlated with achievement at **−0.90**
+
+That was **854 retailers, one territory, ten members.** Sandeep has **6,248 retailers, eight states, 71 members** — seven times the base and a completely different geography.
+
+**If it holds here, it is a company-level finding. If it does not, that is equally worth knowing.** Carry the method, never Anant Singh's ratios.
+
+---
+
+## The prompt
+
+```
+Prayag app - Distributor Deep Dive. Onboard State Head 'Sandeep Dadheech'. Same
+global rules as every earlier phase. Send after SD1 is verified.
+
+1. Build from the SAME retailer rows SD1 resolved, grouped by Assigned Distributor
+   rather than by salesperson. If the two pages disagree on a total, the grouping is
+   wrong, not the data.
+
+2. CLASSIFY EVERY RETAILER into the five states of the Assigned Distributor field:
+     a named distributor
+     BLANK           - direct dealer, a PARALLEL branch under the State Head
+     '--'            - no distributor assigned
+     'A, B'          - shared between two, model as a relation to both
+     a number        - malformed row, exclude
+   RECONCILE BEFORE AGGREGATING. The blank group must equal the dashboard's Direct
+   Dealers Order. For this whole team that is Rs 1,40,628, carried by ONE member -
+   Sasikant Prasad in Odisha. A large blank group means the classification is wrong,
+   not that the team has undiscovered direct-dealer business.
+
+3. APPLY THE IDENTITY RULE TO DISTRIBUTOR NAMES. They are free text and were never
+   validated, so near-duplicates are certain across 6,248 retailers. Two distributor
+   records are the same only if the name matches AND the state agrees AND they do not
+   appear as separate rows for the same period. Never auto-merge on similarity -
+   report candidates for human confirmation.
+   A wrongly merged distributor produces a concentration figure that is simply false,
+   and the numeric guard cannot catch it.
+
+4. TEST THE UNASSIGNED FINDING. Report per member and per state:
+     retailers with an assigned distributor, and what share are active
+     retailers with no distributor, and what share are active
+     visits spent on unassigned retailers, and what they returned
+     the correlation between a member's unassigned share and their achievement
+   Compare against Anant Singh: 96.0 per cent versus 5.0 per cent active, and -0.90.
+   State plainly whether it holds, weakens or fails. Do not assume it repeats.
+   Carry BOTH readings as before: a retailer with no distributor may be unable to
+   order, OR '--' may be written when a retailer goes dormant. The data cannot
+   distinguish them.
+
+5. TERRITORY WHITESPACE, split and never merged, reported PER STATE:
+     COVERAGE GAP   - a district with retailers and NO distributor at all
+     ASSIGNMENT GAP - retailers unassigned where a distributor already operates
+   Size both by prior-year order booking. Eight states and 6,248 retailers make this
+   the largest whitespace analysis attempted; report per state rather than as one
+   number.
+
+6. CONCENTRATION BOTH WAYS, per state:
+     Prayag's dependence on any single distributor within that state
+     each distributor's dependence on its own top retailers
+   Use effective number of retailers (10,000 divided by HHI) rather than a raw HHI
+   gauge.
+
+7. PARSE OUT the 'Removed Parties' section as in SD1, and exclude it from active and
+   dormant counts. Report removed counts per member.
+
+8. FLAG WHAT IS UNAVAILABLE rather than showing zeros:
+     no FY2026-27 secondary register, so item-code SKU, segment NET and effective
+       discount are closed-years only
+     customer_master is empty, so the Confirmed-versus-Guessed mapping split has no
+       source
+     the direct-dealer entity filter is inoperative because type_raw holds product
+       groups - direct dealers must come from the member sheets
+
+Acceptance - prove each with the computed value, never an assertion of success:
+  the five field states are counted per member and per state
+  the blank group reconciles to Rs 1,40,628 and traces to Sasikant Prasad only
+  distributor totals sum to party order booking for the territory
+  retailer counts by state match: West Bengal 2,707, Bihar 821, Jharkhand 724,
+    Odisha 591, North East 476, Telangana 459, Andhra Pradesh 433, Karnataka 37,
+    total 6,248
+  visits by state match, total 19,872
+  the unassigned share is reported per member and per state, with the correlation
+    against achievement stated and compared to Anant Singh's -0.90
+  coverage gap and assignment gap are reported separately per state, each sized by
+    prior-year booking
+  the largest distributor in each of the eight states is named with its share
+  no two distributors are auto-merged; candidates are listed for confirmation
+  unavailable analyses show their reason, never zeros
+  Anant Singh's distributor figures are unchanged
+```
+
+---
+
+## The baseline this must reproduce
+
+| State | Members | Retailers | Visits |
+|---|---|---|---|
+| West Bengal | 30 | 2,707 | 8,476 |
+| Bihar | 9 | 821 | 2,406 |
+| Jharkhand | 8 | 724 | 2,463 |
+| Odisha | 8 | 591 | 2,024 |
+| North East | 7 | 476 | 1,717 |
+| Telangana | 3 | 459 | 1,281 |
+| Andhra Pradesh | 5 | 433 | 1,166 |
+| Karnataka | 1 | 37 | 339 |
+| **Total** | **71** | **6,248** | **19,872** |
+
+---
+
+## What to watch
+
+**Direct dealers are almost absent here.** One member of 71, ₹1,40,628. Anant Singh had three of ten and ₹14.49 L. If the blank-distributor group comes back large, the classification is wrong — do not accept it as newly discovered business.
+
+**Distributor name collisions are more likely than member ones.** Members are typed once into a roster; distributor names are typed by every salesperson independently, into 6,248 rows. Expect near-duplicates and do not let them be merged silently.
+
+**West Bengal is 30 members and 2,707 retailers** — larger than Anant Singh's entire territory three times over. If anything times out, it is there.
+
+**Do not let the correlation be assumed.** The value of running this on a second territory is precisely that it might not hold. A result of −0.30 would be as useful as −0.90, and reporting a weak correlation honestly is the point of the exercise.
+
+---
+
+*Prayag Distributor Analysis · baseline verified against the live dashboard 29 July 2026*
