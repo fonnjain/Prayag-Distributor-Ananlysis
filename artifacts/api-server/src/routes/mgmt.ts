@@ -17,9 +17,10 @@ import {
   startBridgeBuild,
   getBridgeBuildState,
 } from "../lib/mgmt/bridge.js";
-import { loadStateHeadSale } from "../lib/mgmt/stateHeadSale.js";
-import { loadOrderBookSaleByHead } from "../lib/mgmt/orderBookSale.js";
-import { loadDispatchSaleFromDb } from "../lib/mgmt/saleFromDb.js";
+import {
+  loadPrimaryPeriodData,
+  fiscalMonthsToLabels,
+} from "../lib/mgmt/primaryPeriod.js";
 import { loadFactoryPending } from "../lib/mgmt/factoryPending.js";
 import {
   getDistributorTmMapIfReady,
@@ -50,22 +51,7 @@ import { eq, and } from "drizzle-orm";
 
 const router: IRouter = Router();
 
-// Short month abbreviations for fiscal month → month_label conversion (idx 0=Apr … 11=Mar).
-const SHORT_MONTH = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"] as const;
-
-/**
- * Returns the list of month_label strings (e.g. ["Apr-26","May-26","Jun-26"])
- * for fiscal months monthFrom..monthTo (1-based, 1=Apr) within the given FY.
- */
-function fiscalMonthsToLabels(fy: string, monthFrom: number, monthTo: number): string[] {
-  const fyStart = parseInt(fy.split("-")[0], 10);
-  const labels: string[] = [];
-  for (let idx = monthFrom - 1; idx <= monthTo - 1; idx++) {
-    const calYear = idx <= 8 ? fyStart : fyStart + 1;
-    labels.push(`${SHORT_MONTH[idx]}-${String(calYear).slice(2)}`);
-  }
-  return labels;
-}
+// fiscalMonthsToLabels is imported from primaryPeriod.ts (single source of truth).
 
 const FY_PATTERN = /^\d{4}-\d{2}$/;
 const DEFAULT_FY = "2025-26";
@@ -431,78 +417,39 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
       secByKey.set(key, bucket[0]);
     }
 
-    // ── Primary sale (dispatched invoices) via sale_line (period-filtered) ──────
-    // Preferred path: query sale_line DB for exactly the selected period months.
-    // Falls back to the Sheets loader (FY total, no period filter) when the DB
-    // returns no data for this FY (e.g. historical FYs not yet backfilled).
+    // ── Primary sale (dispatch) + Order Booking — shared period-aware service ──
+    // Single call handles FY/period/DB/Sheets routing internally; no branches here.
     const monthLabels = fiscalMonthsToLabels(fy, monthFrom, monthTo);
     let dispatchSaleByHead: Map<string, number> | null = null;
     let dispatchSaleSource: string | null = null;
     let salePeriodFiltered = false;
-    try {
-      const dbSale = await loadDispatchSaleFromDb(fy, monthLabels);
-      if (!dbSale.error && dbSale.total > 0) {
-        dispatchSaleByHead = dbSale.byHead;
-        dispatchSaleSource = dbSale.source;
-        salePeriodFiltered = true; // sale_line always returns exact-period data
-        req.log.info({ fy, months: monthLabels.length, total: dbSale.total, heads: dbSale.byHead.size }, "mgmt: dispatch sale loaded from sale_line");
-      } else {
-        // Fall back to Sheets loader (FY total — period filter not applicable).
-        const sd = await loadStateHeadSale(fy);
-        if (!sd.error && sd.total > 0) {
-          dispatchSaleByHead = sd.byHead;
-          dispatchSaleSource = sd.label;
-          salePeriodFiltered = false;
-          req.log.info({ fy, total: sd.total, heads: sd.byHead.size }, "mgmt: dispatch sale loaded from Sheets (fallback)");
-        }
-      }
-    } catch (err) {
-      req.log.warn({ err, fy }, "mgmt: dispatch sale load failed");
-    }
-
-    // ── Primary order booking (booked orders — FY2026-27 Order Sheet only) ────
-    // Period-filtered via byHeadByMonth: only tabs matching the selected months
-    // are summed.  Falls back to the FY-total byHead if no matching tabs found.
     let orderBookingPrimaryByHead: Map<string, number> | null = null;
     let orderBookingPrimarySource: string | null = null;
     let primaryBookingPeriodFiltered = false;
-    if (fy === "2026-27") {
-      try {
-        const ob = await loadOrderBookSaleByHead();
-        if (!ob.error && ob.total > 0) {
-          // Filter byHeadByMonth to the requested months.
-          // Tab titles may be "Apr", "Apr-26", "April", "Apr 2026" — compare
-          // on the 3-char month prefix so all variants resolve correctly.
-          const requestedPrefixes = new Set(
-            monthLabels.map((ml) => ml.slice(0, 3).toLowerCase()),
-          );
-          const periodByHead = new Map<string, number>();
-          for (const [tabTitle, headMap] of ob.byHeadByMonth) {
-            if (requestedPrefixes.has(tabTitle.trim().slice(0, 3).toLowerCase())) {
-              for (const [head, amt] of headMap) {
-                periodByHead.set(head, (periodByHead.get(head) ?? 0) + amt);
-              }
-            }
-          }
-          if (periodByHead.size > 0) {
-            orderBookingPrimaryByHead = periodByHead;
-            const pLabel = monthLabels.length === 1
-              ? monthLabels[0]
-              : `${monthLabels[0]}–${monthLabels[monthLabels.length - 1]}`;
-            orderBookingPrimarySource = `Order Sheet 26-27 (orders committed ${pLabel})`;
-            primaryBookingPeriodFiltered = true;
-            req.log.info({ months: monthLabels.length, heads: periodByHead.size }, "mgmt: primary order booking loaded (period-filtered)");
-          } else {
-            // Requested months not yet available as tabs — use FY total.
-            orderBookingPrimaryByHead = ob.byHead;
-            orderBookingPrimarySource = "Order Sheet 26-27 (Primary Order Booking — FY total)";
-            primaryBookingPeriodFiltered = false;
-            req.log.info({ total: ob.total }, "mgmt: primary order booking loaded (FY total, no period tabs)");
-          }
-        }
-      } catch (err) {
-        req.log.warn({ err }, "mgmt: primary order booking load failed");
+    try {
+      const primary = await loadPrimaryPeriodData(fy, monthLabels);
+      if (primary.sale.total > 0) {
+        dispatchSaleByHead = primary.sale.byHead;
+        dispatchSaleSource = primary.sale.source;
+        salePeriodFiltered = primary.sale.periodFiltered;
       }
+      if (primary.booking.total > 0) {
+        orderBookingPrimaryByHead = primary.booking.byHead;
+        orderBookingPrimarySource = primary.booking.source;
+        primaryBookingPeriodFiltered = primary.booking.periodFiltered;
+      }
+      req.log.info(
+        {
+          fy,
+          saleTotal: primary.sale.total,
+          bookingTotal: primary.booking.total,
+          saleFiltered: primary.sale.periodFiltered,
+          bookingFiltered: primary.booking.periodFiltered,
+        },
+        "mgmt: primary period data loaded",
+      );
+    } catch (err) {
+      req.log.warn({ err, fy }, "mgmt: primary period data load failed");
     }
 
     // ── Distributor-to-TM map + per-member primary attribution ─────────────────
@@ -734,8 +681,14 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
 });
 
 // GET /api/mgmt/primary — focused primary (Prayag→Dist) performance data.
-// Returns company, state-head, and distributor tiers directly from the sheets
-// (no bridge needed). The per-member tier is overlaid when the bridge is ready.
+//
+// Accepts: fy, monthFrom (1=Apr … 12=Mar), monthTo.
+// byHead, companyBooking, companySale, companyPending — period-filtered.
+// byDistributor, tabInventory — always FY total (no per-row date in the distributor column).
+//
+// bookingPeriodFiltered / salePeriodFiltered:
+//   true  = figure corresponds to the selected period.
+//   false = FY total (period tabs not yet available or historical FY).
 router.get("/mgmt/primary", async (req: Request, res: Response): Promise<void> => {
   const fy =
     typeof req.query.fy === "string" && req.query.fy.trim()
@@ -745,10 +698,21 @@ router.get("/mgmt/primary", async (req: Request, res: Response): Promise<void> =
     res.status(400).json({ error: "fy must look like 2026-27" });
     return;
   }
+  const intQ = (k: string, lo: number, hi: number, dflt: number): number => {
+    const v = Number(req.query[k]);
+    return Number.isFinite(v) && v >= lo && v <= hi ? Math.round(v) : dflt;
+  };
+  const monthFrom = intQ("monthFrom", 1, 12, 1);
+  const monthTo = intQ("monthTo", monthFrom, 12, 12);
+  const monthLabels = fiscalMonthsToLabels(fy, monthFrom, monthTo);
 
   try {
-    // Load head/distributor aggregations from sheets — no bridge needed.
-    const sheetData = await loadPrimarySheetData(fy);
+    // Period data (byHead, company totals) + sheet data (distributor/inventory) in parallel.
+    // Sheet data is always FY-level; period data is filtered to the requested window.
+    const [primaryPeriod, sheetData] = await Promise.all([
+      loadPrimaryPeriodData(fy, monthLabels),
+      loadPrimarySheetData(fy),
+    ]);
 
     // Per-member tier: requires the distributor-TM map.
     const distMap = getDistributorTmMapIfReady();
@@ -813,10 +777,28 @@ router.get("/mgmt/primary", async (req: Request, res: Response): Promise<void> =
       );
     }
 
+    // ── byHead — period-filtered, merged from booking + sale sides ────────────
+    // Same shape as before (PrimaryHeadRow[]) but now reflects the selected period.
+    const allHeadNames = new Set([
+      ...primaryPeriod.booking.byHead.keys(),
+      ...primaryPeriod.sale.byHead.keys(),
+    ]);
+    const byHead = Array.from(allHeadNames)
+      .map((head) => {
+        const booking = primaryPeriod.booking.byHead.get(head) ?? 0;
+        const sale = primaryPeriod.sale.byHead.get(head) ?? 0;
+        return { head, booking, sale, pending: Math.max(0, booking - sale) };
+      })
+      .sort((a, b) => b.booking - a.booking);
+
+    const companyBooking = primaryPeriod.booking.total;
+    const companySale = primaryPeriod.sale.total;
+    const companyPending = Math.max(0, companyBooking - companySale);
+
     // Build head-level primary target map from state targets for use in the response.
     const dbHeadTargetMap = await buildPrimaryTargetMapFromStateTargets(fy).catch((): Map<string, number[]> => new Map());
     const headPrimaryTargets: Record<string, number | null> = {};
-    for (const row of sheetData.byHead) {
+    for (const row of byHead) {
       const nk = normName(row.head);
       const monthly12 = nk ? dbHeadTargetMap.get(nk) : undefined;
       headPrimaryTargets[row.head] = monthly12 != null
@@ -826,17 +808,24 @@ router.get("/mgmt/primary", async (req: Request, res: Response): Promise<void> =
 
     res.json({
       fy,
-      companyBooking: sheetData.companyBooking,
-      companySale: sheetData.companySale,
-      companyPending: sheetData.companyPending,
-      byHead: sheetData.byHead,
+      monthFrom,
+      monthTo,
+      companyBooking,
+      companySale,
+      companyPending,
+      byHead,
       byDistributor: sheetData.byDistributor,
       byMember,
       bridgeStatus,
       headPrimaryTargets,
-      sources: sheetData.sources,
-      bookingAvailable: sheetData.bookingAvailable,
-      saleAvailable: sheetData.saleAvailable,
+      sources: {
+        booking: primaryPeriod.booking.source,
+        sale: primaryPeriod.sale.source,
+      },
+      bookingAvailable: companyBooking > 0,
+      saleAvailable: companySale > 0,
+      bookingPeriodFiltered: primaryPeriod.booking.periodFiltered,
+      salePeriodFiltered: primaryPeriod.sale.periodFiltered,
       tabInventory: sheetData.tabInventory ?? null,
     });
   } catch (err) {

@@ -61,13 +61,19 @@ function findCol(headers: SheetCellValue[], re: RegExp): number {
 export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
   if (_cache && Date.now() - _cache.ts < TTL_MS) return _cache.result;
 
-  // Per-tab accumulators: tab title → { normKey → amount, nonTerritory }
-  type TabAccum = { byNormKey: Map<string, number>; nonTerritory: number };
+  // Per-tab accumulators: tab title → { normKey → amount, nonTerritory, unattributed }
+  type TabAccum = {
+    byNormKey: Map<string, number>;
+    nonTerritory: number;
+    /** Rows where the STATE HEAD cell is blank — real amounts, unattributable. */
+    unattributed: number;
+  };
   const tabAccums = new Map<string, TabAccum>();
 
   // Global aggregates (sum across all tabs — kept for byHead backward compat).
   const byNormKeyAll = new Map<string, number>();
   let nonTerritoryAll = 0;
+  let unattributedAll = 0;
   let total = 0;
   let rowsRead = 0;
 
@@ -109,7 +115,7 @@ export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
       let headerFound = false;
       let rowNum = 0;
 
-      const tabAccum: TabAccum = { byNormKey: new Map(), nonTerritory: 0 };
+      const tabAccum: TabAccum = { byNormKey: new Map(), nonTerritory: 0, unattributed: 0 };
 
       await readTabRowsChunked(ORDER_BOOK_FY2627, tab.title, (rows, startRow) => {
         for (let ri = 0; ri < rows.length; ri++) {
@@ -138,7 +144,17 @@ export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
 
           const head = strVal(row[headColIdx]);
           const amt = numVal(row[taxColIdx]);
-          if (!head || amt <= 0) continue;
+          if (amt <= 0) continue;
+
+          if (!head) {
+            // No STATE HEAD value — real booking amount but cannot be attributed to a head.
+            // Count in the company total and in a per-tab "Unattributed" bucket.
+            tabAccum.unattributed += amt;
+            unattributedAll += amt;
+            total += amt;
+            rowsRead++;
+            continue;
+          }
 
           if (NON_TERRITORY_RE.test(normHead(head))) {
             tabAccum.nonTerritory += amt;
@@ -190,10 +206,14 @@ export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
     if (nonTerritoryAll > 0) {
       byHead.set("Non-territory", (byHead.get("Non-territory") ?? 0) + nonTerritoryAll);
     }
+    // Blank-STATE-HEAD rows — real amounts that cannot be attributed to any head.
+    if (unattributedAll > 0) {
+      byHead.set("Unattributed", (byHead.get("Unattributed") ?? 0) + unattributedAll);
+    }
 
     // Per-tab → byHeadByMonth
     const byHeadByMonth = new Map<string, Map<string, number>>();
-    for (const [tabTitle, { byNormKey: tabNK, nonTerritory: tabNT }] of tabAccums) {
+    for (const [tabTitle, { byNormKey: tabNK, nonTerritory: tabNT, unattributed: tabUA }] of tabAccums) {
       const tabHead = new Map<string, number>();
       for (const [key, amt] of tabNK) {
         const display = resolve(key) ?? key;
@@ -201,6 +221,9 @@ export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
       }
       if (tabNT > 0) {
         tabHead.set("Non-territory", (tabHead.get("Non-territory") ?? 0) + tabNT);
+      }
+      if (tabUA > 0) {
+        tabHead.set("Unattributed", (tabHead.get("Unattributed") ?? 0) + tabUA);
       }
       byHeadByMonth.set(tabTitle, tabHead);
     }

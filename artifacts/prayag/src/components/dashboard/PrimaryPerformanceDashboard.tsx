@@ -65,6 +65,8 @@ type OrderTabInventoryRow = {
 
 type ApiResponse = {
   fy: string;
+  monthFrom: number;
+  monthTo: number;
   companyBooking: number;
   companySale: number;
   companyPending: number;
@@ -75,6 +77,9 @@ type ApiResponse = {
   sources: { booking: string | null; sale: string | null };
   bookingAvailable: boolean;
   saleAvailable: boolean;
+  /** true = figure corresponds to the selected period; false = FY total. */
+  bookingPeriodFiltered: boolean;
+  salePeriodFiltered: boolean;
   tabInventory: OrderTabInventoryRow[] | null;
 };
 
@@ -350,7 +355,11 @@ export default function PrimaryPerformanceDashboard() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    const params = new URLSearchParams({ fy });
+    const params = new URLSearchParams({
+      fy,
+      monthFrom: String(effectivePeriodFrom),
+      monthTo: String(effectivePeriodTo),
+    });
     fetch(`/api/mgmt/primary?${params}`)
       .then((r) => {
         if (!r.ok)
@@ -367,7 +376,7 @@ export default function PrimaryPerformanceDashboard() {
         setError(err.message);
         setLoading(false);
       });
-  }, [fy]);
+  }, [fy, effectivePeriodFrom, effectivePeriodTo]);
 
   // Lazy-fetch state targets only when that view is active
   useEffect(() => {
@@ -493,58 +502,72 @@ export default function PrimaryPerformanceDashboard() {
       )}
 
       {/* Tier 1 — Company totals (always rendered when data exists) */}
-      {!loading && data && (
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            {
-              label: "Order Booking (booked)",
-              value: data.companyBooking,
-              source: data.sources.booking,
-              available: data.bookingAvailable,
-            },
-            {
-              label: "Sale / Dispatch",
-              value: data.companySale,
-              source: data.sources.sale,
-              available: data.saleAvailable,
-            },
-            {
-              label: "Pending (booked \u2212 dispatched)",
-              value: data.companyPending,
-              source: null,
-              available: data.bookingAvailable && data.saleAvailable,
-              warn: data.companyBooking > 0 && data.companyPending / data.companyBooking > 0.25,
-            },
-          ].map((tile) => (
-            <div
-              key={tile.label}
-              className="rounded-lg border border-border bg-card p-3"
-            >
-              <p className="text-xs text-muted-foreground">{tile.label}</p>
-              {tile.available ? (
-                <p className="text-xl font-semibold font-mono mt-1">
-                  {fmtCr(tile.value)}
-                </p>
-              ) : (
-                <p className="text-sm text-muted-foreground mt-1 italic">
-                  unavailable
-                </p>
-              )}
-              {tile.source && (
-                <p className="text-[10px] text-muted-foreground mt-1 truncate">
-                  {tile.source}
-                </p>
-              )}
-              {tile.warn && (
-                <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
-                  <AlertTriangle className="h-3 w-3" />
-                  Ops / fulfilment signal
-                </p>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      {!loading && data && (() => {
+        const isSubYear = data.monthFrom !== 1 || data.monthTo !== 12;
+        const bookingUnfiltered = isSubYear && !data.bookingPeriodFiltered;
+        const saleUnfiltered = isSubYear && !data.salePeriodFiltered;
+        return (
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              {
+                label: "Order Booking (booked)",
+                value: data.companyBooking,
+                source: data.sources.booking,
+                available: data.bookingAvailable,
+                unfiltered: bookingUnfiltered,
+              },
+              {
+                label: "Sale / Dispatch",
+                value: data.companySale,
+                source: data.sources.sale,
+                available: data.saleAvailable,
+                unfiltered: saleUnfiltered,
+              },
+              {
+                label: "Pending (booked \u2212 dispatched)",
+                value: data.companyPending,
+                source: null,
+                available: data.bookingAvailable && data.saleAvailable,
+                warn: data.companyBooking > 0 && data.companyPending / data.companyBooking > 0.25,
+                unfiltered: bookingUnfiltered || saleUnfiltered,
+              },
+            ].map((tile) => (
+              <div
+                key={tile.label}
+                className="rounded-lg border border-border bg-card p-3"
+              >
+                <p className="text-xs text-muted-foreground">{tile.label}</p>
+                {tile.available ? (
+                  <p className="text-xl font-semibold font-mono mt-1">
+                    {fmtCr(tile.value)}
+                  </p>
+                ) : (
+                  <p className="text-sm text-muted-foreground mt-1 italic">
+                    unavailable
+                  </p>
+                )}
+                {tile.source && (
+                  <p className="text-[10px] text-muted-foreground mt-1 truncate">
+                    {tile.source}
+                  </p>
+                )}
+                {tile.unfiltered && (
+                  <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
+                    <AlertTriangle className="h-2.5 w-2.5" />
+                    FY total — period filter not applied
+                  </p>
+                )}
+                {"warn" in tile && tile.warn && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3" />
+                    Ops / fulfilment signal
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* Nothing available at all */}
       {nothingAvailable && (
@@ -588,8 +611,27 @@ export default function PrimaryPerformanceDashboard() {
       )}
 
       {/* Tier 2 — By State Head (always rendered, no bridge needed) */}
-      {!loading && data && view === "head" && data.byHead.length > 0 && (
+      {!loading && data && view === "head" && data.byHead.length > 0 && (() => {
+        const isSubYear = data.monthFrom !== 1 || data.monthTo !== 12;
+        const bookingUnfiltered = isSubYear && !data.bookingPeriodFiltered;
+        const saleUnfiltered = isSubYear && !data.salePeriodFiltered;
+        return (
         <div className="rounded-lg border border-border overflow-auto">
+          {(bookingUnfiltered || saleUnfiltered) && (
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-amber-500/20 bg-amber-500/5 text-[11px] text-amber-700 dark:text-amber-300">
+              <AlertTriangle className="h-3 w-3 shrink-0" />
+              <span>
+                {[bookingUnfiltered && "Order Booking", saleUnfiltered && "Sale"]
+                  .filter(Boolean)
+                  .join(" and ")}{" "}
+                shows FY total — period filter not applied for{" "}
+                {[bookingUnfiltered && "booking", saleUnfiltered && "sale"]
+                  .filter(Boolean)
+                  .join(" and ")}
+                . By State Head rows reflect the same unfiltered figures.
+              </span>
+            </div>
+          )}
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/30">
@@ -644,7 +686,8 @@ export default function PrimaryPerformanceDashboard() {
             </tbody>
           </table>
         </div>
-      )}
+        );
+      })()}
 
       {/* Tier 4 — By Distributor (always available from Customer column in order sheet) */}
       {!loading && data && view === "distributor" && data.byDistributor.length > 0 && (
