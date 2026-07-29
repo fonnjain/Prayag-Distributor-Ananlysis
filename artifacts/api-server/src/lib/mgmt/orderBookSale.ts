@@ -1,13 +1,15 @@
-// Reads primary-sale data (Taxable Value) from the Order Book FY2627 sheet,
-// aggregated by State Head. Used as the Sale source for FY2026-27 when the
-// secondary order booking file has not yet been created.
+// Reads primary order booking data (Taxable Value) from the Order Book FY2627
+// sheet, aggregated by State Head.
 //
-// The Order Book FY2627 sheet has monthly tabs (Apr-26, May-26, ...). Each tab
-// has a header row containing STATE HEAD and Taxable Value columns. STATE HEAD
-// values are normalised via normHead + buildHeadResolver so spelling drift
-// (BIJJU -> Biju C.O, RIZVI JI -> Syed Aqil Rizvi, etc.) never drops a head.
-// Non-territory buckets (OTHER, PROJECT, GOVT, GEM, JJM) are excluded from
-// per-head attribution and tracked separately as non_territory.
+// The sheet has monthly tabs (Apr-26, May-26, …). Each tab has a header row
+// containing STATE HEAD and Taxable Value columns. STATE HEAD values are
+// normalised via normHead + buildHeadResolver so spelling drift never drops a
+// head. Non-territory buckets (OTHER, PROJECT, GOVT, GEM, JJM) are tracked
+// separately.
+//
+// byHead       — all months aggregated (backward-compatible).
+// byHeadByMonth — per-tab map (tab title → display head → Σ amount).
+//                 Use this in the route to produce period-filtered totals.
 import {
   listSheetTabs,
   readTabRowsChunked,
@@ -23,11 +25,13 @@ const ORDER_BOOK_FY2627 = "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A";
 const NON_TERRITORY_RE = /^(other|project|govt|gem|jjm|nonterrit)/i;
 
 export type OrderBookSale = {
-  /** Display head name -> Σ Taxable Value (rupees) */
+  /** Display head name → Σ Taxable Value (rupees), all months aggregated. */
   byHead: Map<string, number>;
-  /** Company-wide total Taxable Value across all heads */
+  /** Tab title (e.g. "Apr-26") → display head → Σ Taxable Value. */
+  byHeadByMonth: Map<string, Map<string, number>>;
+  /** Company-wide total Taxable Value across all heads. */
   total: number;
-  /** Total data rows read (excludes header rows) */
+  /** Total data rows read (excludes header rows). */
   rowsRead: number;
   /** Non-null when the load failed entirely. */
   error: string | null;
@@ -57,9 +61,13 @@ function findCol(headers: SheetCellValue[], re: RegExp): number {
 export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
   if (_cache && Date.now() - _cache.ts < TTL_MS) return _cache.result;
 
-  // Accumulate by normHead key first; resolve to display names after reading.
-  const byNormKey = new Map<string, number>();
-  let nonTerritoryTotal = 0;
+  // Per-tab accumulators: tab title → { normKey → amount, nonTerritory }
+  type TabAccum = { byNormKey: Map<string, number>; nonTerritory: number };
+  const tabAccums = new Map<string, TabAccum>();
+
+  // Global aggregates (sum across all tabs — kept for byHead backward compat).
+  const byNormKeyAll = new Map<string, number>();
+  let nonTerritoryAll = 0;
   let total = 0;
   let rowsRead = 0;
 
@@ -101,6 +109,8 @@ export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
       let headerFound = false;
       let rowNum = 0;
 
+      const tabAccum: TabAccum = { byNormKey: new Map(), nonTerritory: 0 };
+
       await readTabRowsChunked(ORDER_BOOK_FY2627, tab.title, (rows, startRow) => {
         for (let ri = 0; ri < rows.length; ri++) {
           const row = rows[ri];
@@ -131,7 +141,8 @@ export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
           if (!head || amt <= 0) continue;
 
           if (NON_TERRITORY_RE.test(normHead(head))) {
-            nonTerritoryTotal += amt;
+            tabAccum.nonTerritory += amt;
+            nonTerritoryAll += amt;
             total += amt;
             rowsRead++;
             continue;
@@ -140,7 +151,8 @@ export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
           const key = normHead(head);
           if (!key) continue;
 
-          byNormKey.set(key, (byNormKey.get(key) ?? 0) + amt);
+          tabAccum.byNormKey.set(key, (tabAccum.byNormKey.get(key) ?? 0) + amt);
+          byNormKeyAll.set(key, (byNormKeyAll.get(key) ?? 0) + amt);
           total += amt;
           rowsRead++;
         }
@@ -152,41 +164,58 @@ export async function loadOrderBookSaleByHead(): Promise<OrderBookSale> {
           "orderBookSale: Taxable Value / STATE HEAD columns not found in tab",
         );
       }
+
+      tabAccums.set(tab.title, tabAccum);
     }
 
-    // Resolve normHead keys to canonical display names using the live roster.
-    const byHead = new Map<string, number>();
+    // ── Resolve normHead keys → canonical display names ────────────────────────
+    // Build the resolver once and apply it to both the aggregate and per-tab maps.
+    let resolve: (key: string) => string | null = (k) => k;
     try {
       const roster = await loadRoster();
       const canonicalHeads = new Set(
         roster.members.map((m) => m.stateHead).filter((h) => h.trim() !== ""),
       );
-      const resolve = buildHeadResolver(canonicalHeads);
-      for (const [key, amt] of byNormKey) {
-        const display = resolve(key) ?? key;
-        byHead.set(display, (byHead.get(display) ?? 0) + amt);
-      }
+      resolve = buildHeadResolver(canonicalHeads);
     } catch {
       // Roster unavailable — use normHead keys as-is.
-      for (const [key, amt] of byNormKey) {
-        byHead.set(key, amt);
-      }
-    }
-    if (nonTerritoryTotal > 0) {
-      byHead.set("Non-territory", (byHead.get("Non-territory") ?? 0) + nonTerritoryTotal);
     }
 
-    const result: OrderBookSale = { byHead, total, rowsRead, error: null };
+    // Aggregate (all months) → byHead
+    const byHead = new Map<string, number>();
+    for (const [key, amt] of byNormKeyAll) {
+      const display = resolve(key) ?? key;
+      byHead.set(display, (byHead.get(display) ?? 0) + amt);
+    }
+    if (nonTerritoryAll > 0) {
+      byHead.set("Non-territory", (byHead.get("Non-territory") ?? 0) + nonTerritoryAll);
+    }
+
+    // Per-tab → byHeadByMonth
+    const byHeadByMonth = new Map<string, Map<string, number>>();
+    for (const [tabTitle, { byNormKey: tabNK, nonTerritory: tabNT }] of tabAccums) {
+      const tabHead = new Map<string, number>();
+      for (const [key, amt] of tabNK) {
+        const display = resolve(key) ?? key;
+        tabHead.set(display, (tabHead.get(display) ?? 0) + amt);
+      }
+      if (tabNT > 0) {
+        tabHead.set("Non-territory", (tabHead.get("Non-territory") ?? 0) + tabNT);
+      }
+      byHeadByMonth.set(tabTitle, tabHead);
+    }
+
+    const result: OrderBookSale = { byHead, byHeadByMonth, total, rowsRead, error: null };
     _cache = { ts: Date.now(), result };
     logger.info(
-      { total, rowsRead, heads: byHead.size },
+      { total, rowsRead, heads: byHead.size, tabs: byHeadByMonth.size },
       "orderBookSale: loaded Order Book FY2627 sale data",
     );
     return result;
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     logger.warn({ err }, "orderBookSale: failed to load");
-    return { byHead: new Map(), total: 0, rowsRead: 0, error };
+    return { byHead: new Map(), byHeadByMonth: new Map(), total: 0, rowsRead: 0, error };
   }
 }
 

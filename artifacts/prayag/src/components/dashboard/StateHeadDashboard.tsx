@@ -88,6 +88,16 @@ type DashboardMeta = {
   orderBookingPrimarySource?: string | null;
   /** Company-wide pending orders = orderBookingPrimary total minus headSales total. */
   pendingOrdersTotal?: number | null;
+  /**
+   * True when Sale (Dispatched) is queried from sale_line for exactly the
+   * selected period (not always a FY total).  Undefined on older API versions.
+   */
+  salePeriodFiltered?: boolean;
+  /**
+   * True when Order Booking (Primary) is filtered to the selected period via
+   * per-tab reads (not a FY total).  Undefined on older API versions.
+   */
+  primaryBookingPeriodFiltered?: boolean;
   /** Raw sheet grand total for the OB (Primary) card — includes Non-territory rows. */
   primaryBookingRawTotal?: number;
   /** Raw sheet grand total for Sale (Dispatched) — includes Non-territory rows. */
@@ -777,20 +787,47 @@ export default function StateHeadDashboard() {
             sub={data.meta.orderBookingSource ?? undefined}
           />
           <KpiTile
+            label="Sales Received"
+            value={
+              hasSecondaryData && (data.meta.secondaryTotal?.salesReceived ?? 0) > 0
+                ? fmtCr(data.meta.secondaryTotal!.salesReceived)
+                : "—"
+            }
+            sub="Secondary, state head dashboard"
+          />
+          <KpiTile
             label="Achievement"
             value={hasSecondaryData ? fmtPct(kpi.achPct) : "—"}
+            sub="Sales Received ÷ Plan"
           />
           <KpiTile label="Low Performers" value={fmtN(kpi.lowPerf)} sub={`<${lowPerfThreshold}% threshold`} />
-          <KpiTile
-            label="Sale (Dispatched)"
-            value={fmtCr(data.meta.saleRawTotal ?? (kpi.sale > 0 ? kpi.sale : null))}
-            sub={data.meta.saleSource ?? undefined}
-          />
-          <KpiTile
-            label="Order Booking (Primary)"
-            value={fmtCr(data.meta.primaryBookingRawTotal ?? kpi.primaryOrderBooking)}
-            sub={data.meta.orderBookingPrimarySource ?? undefined}
-          />
+          {(() => {
+            const isSubYear = period.from !== 1 || period.to !== 12;
+            const saleFilt = data.meta.salePeriodFiltered;
+            const saleSub =
+              saleFilt === false && isSubYear
+                ? "FY total — period filter not applied"
+                : (data.meta.saleSource ?? undefined);
+            const obFilt = data.meta.primaryBookingPeriodFiltered;
+            const obSub =
+              obFilt === false && isSubYear
+                ? "FY total — period filter not applied"
+                : (data.meta.orderBookingPrimarySource ?? undefined);
+            return (
+              <>
+                <KpiTile
+                  label="Sale (Dispatched)"
+                  value={fmtCr(data.meta.saleRawTotal ?? (kpi.sale > 0 ? kpi.sale : null))}
+                  sub={saleSub}
+                />
+                <KpiTile
+                  label="Order Booking (Primary)"
+                  value={fmtCr(data.meta.primaryBookingRawTotal ?? kpi.primaryOrderBooking)}
+                  sub={obSub}
+                />
+              </>
+            );
+          })()}
           <KpiTile
             label="Pending Orders"
             value={fmtCr(data.meta.pendingOrdersTotal ?? kpi.pendingOrders)}
