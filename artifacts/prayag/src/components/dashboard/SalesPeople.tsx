@@ -2,8 +2,10 @@
 //
 // Data source: GET /api/mgmt/data (STATE HEAD DASHBOARD).
 // Achievement = Sales Received ÷ Plan.  Never OB ÷ Plan.
+//   Column header is "Sales/Plan%" to name the denominator explicitly.
 // Current open month shows "In Progress" — never a bare 0%.
-// Primary-role members are hidden by default (toggle to reveal).
+// Closed month with sales=0 but ob>0 shows "—" — sales not yet received/recorded.
+// Primary-role members (19) have no SOBR row → monthly cells show "—" (FY data only).
 // FY + month selection driven by the global filter context (GlobalFilterBar).
 import { useState, useEffect, useMemo } from "react";
 import { useGlobalFilter, type FiscalMonthIdx, FISCAL_MONTH_NAMES } from "@/data/global-filter-context";
@@ -39,9 +41,17 @@ function fmt(n: number | null | undefined): string {
   return `₹${Math.round(n).toLocaleString("en-IN")}`;
 }
 
-function achPct(sales: number | null, plan: number | null): number | null {
+/**
+ * Computes Sales Received ÷ Plan.
+ * Returns null (shown as "—") when:
+ *   • plan is null / zero
+ *   • sales is null
+ *   • sales === 0 AND ob > 0  ← sales not yet received/recorded; suppress the 0%
+ */
+function achPct(sales: number | null, plan: number | null, ob?: number | null): number | null {
   if (plan == null || plan <= 0) return null;
   if (sales == null) return null;
+  if (sales === 0 && ob != null && ob > 0) return null;
   return (sales / plan) * 100;
 }
 
@@ -171,8 +181,8 @@ export default function SalesPeople() {
         av = a.monthlySalesReceived?.[monthIdx] ?? null;
         bv = b.monthlySalesReceived?.[monthIdx] ?? null;
       } else if (sortKey === "ach") {
-        av = achPct(a.monthlySalesReceived?.[monthIdx] ?? null, a.monthlyPlan?.[monthIdx] ?? null);
-        bv = achPct(b.monthlySalesReceived?.[monthIdx] ?? null, b.monthlyPlan?.[monthIdx] ?? null);
+        av = achPct(a.monthlySalesReceived?.[monthIdx] ?? null, a.monthlyPlan?.[monthIdx] ?? null, a.monthlyOrderBooked?.[monthIdx] ?? null);
+        bv = achPct(b.monthlySalesReceived?.[monthIdx] ?? null, b.monthlyPlan?.[monthIdx] ?? null, b.monthlyOrderBooked?.[monthIdx] ?? null);
       }
       if (av === null && bv === null) return 0;
       if (av === null) return 1;
@@ -335,7 +345,7 @@ export default function SalesPeople() {
                   Sales <SortArrow k="sales" />
                 </th>
                 <th className="text-right px-3 py-2 font-medium cursor-pointer whitespace-nowrap" onClick={() => toggleSort("ach")}>
-                  Ach% <SortArrow k="ach" />
+                  Sales/Plan% <SortArrow k="ach" />
                 </th>
               </tr>
             </thead>
@@ -352,7 +362,7 @@ export default function SalesPeople() {
                 const ob = r.monthlyOrderBooked?.[monthIdx] ?? null;
                 const sales = r.monthlySalesReceived?.[monthIdx] ?? null;
                 const notRecorded = r.monthlyNotYetRecorded?.[monthIdx] ?? false;
-                const ach = achPct(sales, plan);
+                const ach = achPct(sales, plan, ob);
 
                 return (
                   <tr key={r.normKey} className={[

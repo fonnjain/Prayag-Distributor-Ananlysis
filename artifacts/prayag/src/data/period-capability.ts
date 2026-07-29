@@ -47,7 +47,7 @@ const PAGE_CAPABILITIES: Record<string, PeriodCapability> = {
   "analyst":                 "FY_ONLY",   // AI Analyst
   "ai-reports":              "FY_ONLY",   // AI Reports  ← PA2 priority 1
   "company-reports":         "FY_ONLY",
-  "salespeople":             "FY_ONLY",   // Sales People  ← PA2 priority 4
+  "salespeople":             "FULL",      // Sales People — SOBR gives per-month Plan/OB/Sales for 162 secondary members; 19 primary-role members show "—" for monthly cells (no SOBR row)
   "deep-dive":               "FY_ONLY",   // Sales Deep Dive  ← PA2 priority 3
   "distributor-deep-dive":   "FY_ONLY",   // Distributor Deep Dive  ← PA2 priority 5
 
