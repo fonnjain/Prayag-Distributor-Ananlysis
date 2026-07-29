@@ -16,7 +16,7 @@ import {
   LayoutGrid, Map, BarChart3, Package, TrendingUp, LineChart,
   Bot, FileSpreadsheet, BarChart2 as BarChartIcon, Target,
   ClipboardList, Database, ShieldCheck,
-  LayoutDashboard, Users, ShoppingBag, GitMerge,
+  LayoutDashboard, Users, ShoppingBag,
   AlertTriangle, UserMinus, Settings, Store, BookOpen, Network,
   ChevronDown, ChevronRight, Menu, X, Sun, Moon, Braces, Key,
 } from "lucide-react";
@@ -70,7 +70,6 @@ const NAV: NavGroup[] = [
       { id: "salespeople",            label: "Sales People",           path: "/sales/salespeople",            icon: Users },
       { id: "primary-performance",    label: "Primary Performance",    path: "/sales/primary-performance",    icon: BarChartIcon },
       { id: "secondary-performance",  label: "Secondary Performance",  path: "/sales/secondary-performance",  icon: ShoppingBag },
-      { id: "combined",               label: "Combined",               path: "/sales/combined",               icon: GitMerge },
       { id: "deep-dive",              label: "Sales Deep Dive",        path: "/sales/deep-dive",              icon: BookOpen },
       { id: "distributor-deep-dive",  label: "Distributor Deep Dive",  path: "/sales/distributor-deep-dive",  icon: Network  },
     ],

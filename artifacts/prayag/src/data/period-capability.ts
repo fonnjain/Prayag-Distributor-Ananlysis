@@ -30,8 +30,6 @@ const PAGE_CAPABILITIES: Record<string, PeriodCapability> = {
   "state-head":              "FULL",
   "primary-performance":     "FULL",
   "secondary-performance":   "FULL",
-  "combined":                "FULL",
-
   // ── FY_ONLY — honours the FY selector; sub-year period has no effect ──────
   // Source is YTD-only or the page has not yet been wired for monthly slicing.
   // Move to FULL after fixing, one page at a time (PA2 priority order).

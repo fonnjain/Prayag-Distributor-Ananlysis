@@ -13,10 +13,6 @@ const PrimaryPerformanceDashboard = lazy(
 const SecondaryPerformanceDashboard = lazy(
   () => import("@/components/dashboard/SecondaryPerformanceDashboard"),
 );
-const CombinedPerformanceDashboard = lazy(
-  () => import("@/components/dashboard/CombinedPerformanceDashboard"),
-);
-
 const DistributorDeepDive = lazy(
   () => import("@/components/dashboard/DistributorDeepDive"),
 );
@@ -26,7 +22,6 @@ const SECTIONS = [
   { id: "salespeople",             label: "Sales People",            component: SalesPeople,                   lazy: false },
   { id: "primary-performance",     label: "Primary Performance",     component: PrimaryPerformanceDashboard,   lazy: true },
   { id: "secondary-performance",   label: "Secondary Performance",   component: SecondaryPerformanceDashboard, lazy: true },
-  { id: "combined",                label: "Combined",                component: CombinedPerformanceDashboard,  lazy: true },
   { id: "deep-dive",               label: "Sales Deep Dive",         component: SalesDeepDive,                 lazy: false },
   { id: "distributor-deep-dive",   label: "Distributor Deep Dive",   component: DistributorDeepDive,           lazy: true },
 ] as const;
