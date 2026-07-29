@@ -720,6 +720,8 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
       cols.primaryTarget >= 0 ? cellNum(row[cols.primaryTarget]) : null;
     const orderBooking =
       cols.orderBooking >= 0 ? cellNum(row[cols.orderBooking]) : null;
+    const newPartyOrderBooking =
+      cols.newPartyOrderBooking >= 0 ? cellNum(row[cols.newPartyOrderBooking]) : null;
     const directDealersOrder =
       cols.directDealersOrder >= 0 ? cellNum(row[cols.directDealersOrder]) : null;
     const monthlyTarget =
@@ -796,10 +798,14 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
       directDealersOrder !== null && primaryTarget !== null && primaryTarget > 0
         ? (directDealersOrder / primaryTarget) * 100
         : null;
+    // achievementTotal = (old-party OB + new-party OB + DD OB) / total target.
+    // Consistent with aiPayload.ts totalOBPct and the dashboard TARGETACHIEVEMENT column.
+    // (Earlier formula used old-party + DD but omitted new-party, understating for members
+    // who carry new-party bookings.)
     const achievementTotal =
-      orderBooking !== null && directDealersOrder !== null &&
+      (orderBooking !== null || newPartyOrderBooking !== null || directDealersOrder !== null) &&
       totalTargetToDate !== null && totalTargetToDate > 0
-        ? ((orderBooking + directDealersOrder) / totalTargetToDate) * 100
+        ? ((orderBooking ?? 0) + (newPartyOrderBooking ?? 0) + (directDealersOrder ?? 0)) / totalTargetToDate * 100
         : null;
     const achievementSale =
       sale !== null && totalTargetToDate !== null && totalTargetToDate > 0
@@ -845,7 +851,7 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
       totalOldRetailers:   cols.totalOldRetailers >= 0 ? cellNum(row[cols.totalOldRetailers]) : null,
       visitedRetailers:    cols.visitedRetailers >= 0 ? cellNum(row[cols.visitedRetailers]) : null,
       nonVisitedRetailers: cols.nonVisitedRetailers >= 0 ? cellNum(row[cols.nonVisitedRetailers]) : null,
-      newPartyOrderBooking: cols.newPartyOrderBooking >= 0 ? cellNum(row[cols.newPartyOrderBooking]) : null,
+      newPartyOrderBooking,
       businessPerRetailer:  cols.businessPerRetailer >= 0 ? cellNum(row[cols.businessPerRetailer]) : null,
       totalRetailers:       cols.totalRetailers >= 0 ? cellNum(row[cols.totalRetailers]) : null,
       directDealersCount:   cols.directDealersCount >= 0 ? cellNum(row[cols.directDealersCount]) : null,
