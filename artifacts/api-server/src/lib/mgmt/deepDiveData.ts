@@ -178,10 +178,12 @@ export type TeamSummary = {
   zeroTargetActiveOb: number;
   zeroTargetActiveNames: string[];
   totalTarget: number;
+  /** old-party OB + new-party OB + direct-dealer OB — matches Data-tab "Sub Total" concept */
   totalOB: number;
   totalSale: number;
   totalVisits: number;
   totalRetailers: number;
+  /** subset of totalOB from the direct-dealer channel — shown as a breakdown tile */
   directDealerOB: number;
   /** totalOB(all-active) / totalTarget — includes zero-target members' OB */
   headlineAchievementPct: number | null;
@@ -201,6 +203,8 @@ export type DeepDiveDataResult = {
   skuSpread: SkuSpread | null;      // Phase 5: segment/SKU spread from secondary_register_line
   winBack: WinBackItem[] | null;    // Phase 6: dormant retailers from past-FY register vs current sheet
   rowsRead: number;
+  /** Unix ms timestamp when the Data tab was last read from Google Sheets (or loaded from DB snapshot). */
+  dataReadAt: number;
   error: string | null;
   fromDbSnapshot?: boolean;         // Phase 6: true when Data-tab content served from DB (no Sheets read)
 };
@@ -953,11 +957,11 @@ function buildTeamSummary(filtered: MemberKpis[]): TeamSummary {
 
   const isZeroTarget = (m: MemberKpis): boolean => (m.totalTargetToDate ?? 0) <= 0;
 
-  // "Total OB" for team display = old-party OB + new-party OB (both from the Data tab).
-  // This matches the State Head Dashboard "Sub Total" concept.
-  // Direct-dealer OB is kept separate (different target type, reported in its own tile).
+  // "Total OB" for team display = old-party OB + new-party OB + direct-dealer OB.
+  // This matches the per-member achievementTotal formula and the Data-tab "Sub Total".
+  // directDealerOB is also reported as a breakdown field (subset of totalOB).
   const memberOB = (m: MemberKpis): number =>
-    (m.orderBooking ?? 0) + (m.newPartyOrderBooking ?? 0);
+    (m.orderBooking ?? 0) + (m.newPartyOrderBooking ?? 0) + (m.directDealersOrder ?? 0);
 
   const zeroTargetActive = active.filter(isZeroTarget);
   const withTargetActive = active.filter((m) => !isZeroTarget(m));
@@ -1059,6 +1063,7 @@ export async function loadDeepDiveData(
       skuSpread,
       winBack: winBackResult ? winBackResult.items : null,
       rowsRead: 0,
+      dataReadAt: 0,
       error: `Could not load the 'Data' tab for FY ${fy}. The sheet may not be connected or the tab name may differ.`,
     };
   }
@@ -1166,6 +1171,7 @@ export async function loadDeepDiveData(
     skuSpread,
     winBack: winBackResult ? winBackResult.items : null,
     rowsRead: entry.rowsRead,
+    dataReadAt: entry.loadedAt,
     error: null,
     fromDbSnapshot,
   };

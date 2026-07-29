@@ -280,6 +280,8 @@ interface DeepDiveData {
   skuSpread: SkuSpread | null;
   winBack: WinBackItem[] | null;
   rowsRead: number;
+  /** Unix ms timestamp when the Data tab was last read from Google Sheets (or DB snapshot). */
+  dataReadAt?: number | null;
   error: string | null;
   fromDbSnapshot?: boolean | null;
 }
@@ -400,7 +402,16 @@ function achieveBandText(pct: number | null): string {
 
 // ── Team summary panel (SD1: shown when a state head is chosen, no member) ────
 
-function TeamSummaryPanel({ summary }: { summary: TeamSummary }) {
+function fmtReadAt(ts: number | null | undefined): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  return d.toLocaleString("en-IN", {
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  });
+}
+
+function TeamSummaryPanel({ summary, dataReadAt }: { summary: TeamSummary; dataReadAt: number | null }) {
   return (
     <div className="space-y-4">
 
@@ -414,6 +425,11 @@ function TeamSummaryPanel({ summary }: { summary: TeamSummary }) {
               {summary.leftMembers > 0 && ` · ${summary.leftMembers} LEFT`}
               {summary.zeroTargetActiveCount > 0 && ` · ${summary.zeroTargetActiveCount} with no target`}
             </p>
+            {dataReadAt ? (
+              <p className="text-xs text-muted-foreground/70 mt-0.5">
+                Data read: {fmtReadAt(dataReadAt)}
+              </p>
+            ) : null}
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -2189,6 +2205,7 @@ export default function SalesDeepDive() {
   const skuSpread      = data?.skuSpread ?? null;
   const winBack        = data?.winBack ?? null;
   const fromDbSnapshot = data?.fromDbSnapshot ?? false;
+  const dataReadAt     = data?.dataReadAt ?? null;
   const stateHeads     = data?.stateHeads ?? [];
   const members        = data?.members ?? [];
 
@@ -2260,7 +2277,7 @@ export default function SalesDeepDive() {
 
       {/* State head selected, no member → team summary panel */}
       {!kpis && !loading && !error && selectedHead && teamSummary && (
-        <TeamSummaryPanel summary={teamSummary} />
+        <TeamSummaryPanel summary={teamSummary} dataReadAt={dataReadAt} />
       )}
 
       {/* Prompt when nothing useful to show yet */}
@@ -2293,6 +2310,11 @@ export default function SalesDeepDive() {
                 {kpis.contact && (
                   <p className="text-xs text-muted-foreground mt-0.5">{kpis.contact}</p>
                 )}
+                {dataReadAt ? (
+                  <p className="text-xs text-muted-foreground/70 mt-0.5">
+                    Data read: {fmtReadAt(dataReadAt)}
+                  </p>
+                ) : null}
               </div>
               {/* Phase 7: 4 achievement badges replacing the old blended figure */}
               <div className="flex flex-wrap gap-2">
