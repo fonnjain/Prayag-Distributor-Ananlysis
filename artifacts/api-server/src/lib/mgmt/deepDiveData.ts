@@ -807,6 +807,36 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
       totalTargetToDate !== null && totalTargetToDate > 0
         ? ((orderBooking ?? 0) + (newPartyOrderBooking ?? 0) + (directDealersOrder ?? 0)) / totalTargetToDate * 100
         : null;
+
+    // ── Assertion: recomputed achievement must match dashboard column AO ─────────
+    // TARGETACHIEVEMENT is stored as a 0–1 ratio in the Data tab (normHeader strips
+    // spaces → "TARGETACHIEVEMENT").  Tolerance 0.05 pp covers float serialisation.
+    // A mismatch means either the formula is wrong or a new OB channel was added to
+    // the dashboard without being reflected here.
+    {
+      const dashboardRatio = typeof extra["TARGETACHIEVEMENT"] === "number"
+        ? (extra["TARGETACHIEVEMENT"] as number) : null;
+      if (achievementTotal !== null && dashboardRatio !== null) {
+        const dashboardPct = dashboardRatio * 100;
+        if (Math.abs(achievementTotal - dashboardPct) > 0.05) {
+          logger.warn(
+            {
+              name: rawName,
+              stateHead: currentStateHead,
+              computed: +achievementTotal.toFixed(4),
+              dashboard: +dashboardPct.toFixed(4),
+              deltaPp: +(achievementTotal - dashboardPct).toFixed(4),
+              orderBooking,
+              newPartyOrderBooking,
+              directDealersOrder,
+              totalTargetToDate,
+            },
+            "deepDiveData: achievementTotal mismatch vs dashboard TARGETACHIEVEMENT (AO)",
+          );
+        }
+      }
+    }
+
     const achievementSale =
       sale !== null && totalTargetToDate !== null && totalTargetToDate > 0
         ? (sale / totalTargetToDate) * 100
