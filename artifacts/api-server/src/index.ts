@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { runMigrations } from "@workspace/db";
 import {
   ensureSeeded,
   syncDashboard,
@@ -34,7 +35,15 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-app.listen(port, (err) => {
+// Apply any pending DB schema migrations before accepting requests.
+// If a migration fails the process exits so the broken state is surfaced immediately.
+runMigrations()
+  .catch((err) => {
+    logger.error({ err }, "DB migration failed — refusing to start");
+    process.exit(1);
+  })
+  .then(() => {
+    app.listen(port, (err) => {
   if (err) {
     logger.error({ err }, "Error listening on port");
     process.exit(1);
@@ -92,4 +101,5 @@ app.listen(port, (err) => {
     ensureRegisterSynced(fy);
   }
   startScheduledRegisterSync();
-});
+    });
+  });

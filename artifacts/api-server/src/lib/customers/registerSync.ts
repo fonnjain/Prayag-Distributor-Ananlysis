@@ -1,4 +1,4 @@
-// Auto-populates sale_line from the live sale/dispatch register Sheets.
+// Auto-populates sale_line_all from the live sale/dispatch register Sheets.
 //
 // Sync model:
 //   • On startup, ensureRegisterSynced(fy) is called for every configured FY.
@@ -142,7 +142,7 @@ export function isFyOpen(fy: string): boolean {
 
 async function hasRows(fy: string): Promise<boolean> {
   const res = await pool.query<{ n: string }>(
-    `SELECT count(*)::text AS n FROM sale_line WHERE fy = $1 LIMIT 1`,
+    `SELECT count(*)::text AS n FROM sale_line_all WHERE fy = $1 LIMIT 1`,
     [fy],
   );
   return parseInt(res.rows[0]?.n ?? "0", 10) > 0;
@@ -333,7 +333,7 @@ async function doSync(fy: string, spreadsheetId: string): Promise<void> {
       `SELECT month_label,
               COUNT(*)::text AS rows,
               COALESCE(SUM(amount::numeric), 0)::text AS total
-         FROM sale_line
+         FROM sale_line_all
         WHERE fy = $1 AND version_status = 'current'
         GROUP BY month_label`,
       [fy],
@@ -387,7 +387,7 @@ async function doSync(fy: string, spreadsheetId: string): Promise<void> {
   }
 }
 
-// Ensures sale_line is being populated for this FY.
+// Ensures sale_line_all is being populated for this FY.
 //   - Completed FYs: syncs once on first call; subsequent calls are no-ops.
 //   - Open (current) FY: syncs on first call and re-syncs after OPEN_FY_RESYNC_MS.
 export function ensureRegisterSynced(fy: string): void {

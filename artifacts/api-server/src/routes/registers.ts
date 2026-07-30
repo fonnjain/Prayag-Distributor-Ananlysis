@@ -36,7 +36,7 @@ const router = Router();
  * POST /registers/:fy/backfill-color?dryRun=true
  *
  * Reads the live SALE SHEET for the given FY and stamps colour on any
- * sale_line rows whose color column is NULL.
+ * sale_line_all rows whose color column is NULL.
  *
  * Run this ONCE after deploying the colour-capture code, before reconciling.
  * dryRun=true reports counts without writing anything.
@@ -186,7 +186,7 @@ router.get("/registers/:fy/version-stats", async (req, res) => {
          COALESCE(version_status, 'current') AS status,
          COUNT(*)::text AS cnt,
          COALESCE(SUM(amount::numeric), 0)::text AS total_amount
-       FROM sale_line
+       FROM sale_line_all
        WHERE fy = $1
        GROUP BY COALESCE(version_status, 'current')`,
       [fy],
@@ -308,7 +308,7 @@ router.get("/registers/:fy/invoice-reconcile", async (req, res) => {
       `SELECT COALESCE(invoice_no, '(no-invoice)') AS invoice_no,
               COUNT(*)::text AS rows,
               COALESCE(SUM(amount::numeric), 0)::text AS total
-         FROM sale_line
+         FROM sale_line_all
         WHERE fy = $1 AND month_label = $2 AND version_status = 'current'
         GROUP BY invoice_no`,
       [fy, month],
@@ -422,7 +422,7 @@ router.post("/registers/:fy/orphan-audit-reverse", async (req, res) => {
   try {
     // 1. Flip all rows from this syncRunId back to current
     const flipResult = await pool.query(
-      `UPDATE sale_line
+      `UPDATE sale_line_all
           SET version_status = 'current',
               superseded_by   = NULL
         WHERE fy            = $1
@@ -436,7 +436,7 @@ router.post("/registers/:fy/orphan-audit-reverse", async (req, res) => {
     const totals = await pool.query<{ rows: string; total: string }>(
       `SELECT COUNT(*)::text AS rows,
               COALESCE(SUM(amount::numeric), 0)::text AS total
-         FROM sale_line
+         FROM sale_line_all
         WHERE fy = $1 AND month_label = $2 AND version_status = 'current'`,
       [fy, month],
     );
@@ -511,7 +511,7 @@ router.get("/registers/:fy/colour-diagnostic", async (req, res) => {
       serial_no: string | null;
     }>(
       `SELECT line_uid, invoice_no, serial_no
-         FROM sale_line
+         FROM sale_line_all
         WHERE fy = $1 AND month_label = $2
           AND version_status = 'current'
           AND (color IS NULL OR color = '')`,
@@ -550,7 +550,7 @@ router.get("/registers/:fy/colour-diagnostic", async (req, res) => {
       `SELECT
          COUNT(*) FILTER (WHERE color IS NOT NULL AND color <> '')::text AS coloured,
          COUNT(*) FILTER (WHERE color IS NULL   OR  color = '')::text  AS colourless
-         FROM sale_line
+         FROM sale_line_all
         WHERE fy = $1 AND month_label = $2 AND version_status = 'current'`,
       [fy, month],
     );
@@ -649,7 +649,7 @@ router.get("/registers/:fy/variant-count", async (req, res) => {
     }>(
       `SELECT line_uid, invoice_no, serial_no, code,
               qty::text, amount::text
-         FROM sale_line
+         FROM sale_line_all
         WHERE fy = $1 AND month_label = $2
           AND version_status = 'current'
           AND (color IS NULL OR color = '')`,
@@ -842,7 +842,7 @@ router.get("/registers/:fy/serial-crosscheck", async (req, res) => {
       code: string | null;
     }>(
       `SELECT line_uid, invoice_no, serial_no, code
-         FROM sale_line
+         FROM sale_line_all
         WHERE fy = $1 AND month_label = $2
           AND version_status = 'current'
           AND (color IS NULL OR color = '')`,
@@ -1126,7 +1126,7 @@ router.get("/registers/colour-null-report", async (_req, res) => {
               COALESCE(month_label, '(null)') AS month_label,
               version_status,
               COUNT(*)::text AS colourless_rows
-         FROM sale_line
+         FROM sale_line_all
         WHERE color IS NULL OR color = ''
         GROUP BY fy, month_label, version_status
         ORDER BY fy, month_label, version_status`,
@@ -1254,7 +1254,7 @@ router.get("/registers/:fy/invoice-restore-plan", async (req, res) => {
     }>(
       `SELECT COALESCE(invoice_no, '(no-invoice)') AS invoice_no,
               COALESCE(SUM(amount::numeric), 0)::text AS total
-         FROM sale_line
+         FROM sale_line_all
         WHERE fy = $1 AND month_label = $2 AND version_status = 'current'
         GROUP BY invoice_no`,
       [fy, month],
@@ -1277,7 +1277,7 @@ router.get("/registers/:fy/invoice-restore-plan", async (req, res) => {
       `SELECT line_uid,
               COALESCE(invoice_no, '(no-invoice)') AS invoice_no,
               code, color, qty, amount
-         FROM sale_line
+         FROM sale_line_all
         WHERE fy = $1 AND month_label = $2
           AND version_status = 'superseded'
           AND superseded_by = $3
@@ -1504,7 +1504,7 @@ router.post("/registers/:fy/invoice-restore-apply", async (req, res) => {
     const dbCurrentResult = await pool.query<{ invoice_no: string | null; total: string }>(
       `SELECT COALESCE(invoice_no, '(no-invoice)') AS invoice_no,
               COALESCE(SUM(amount::numeric), 0)::text AS total
-         FROM sale_line
+         FROM sale_line_all
         WHERE fy = $1 AND month_label = $2 AND version_status = 'current'
         GROUP BY invoice_no`,
       [fy, month],
@@ -1523,7 +1523,7 @@ router.post("/registers/:fy/invoice-restore-apply", async (req, res) => {
       `SELECT line_uid,
               COALESCE(invoice_no, '(no-invoice)') AS invoice_no,
               amount
-         FROM sale_line
+         FROM sale_line_all
         WHERE fy = $1 AND month_label = $2
           AND version_status = 'superseded'
           AND superseded_by = $3
@@ -1589,7 +1589,7 @@ router.post("/registers/:fy/invoice-restore-apply", async (req, res) => {
 
     // 6. Flip selected rows back to current (status flip only, no insert/delete)
     const updateResult = await pool.query(
-      `UPDATE sale_line
+      `UPDATE sale_line_all
           SET version_status = 'current',
               superseded_by = NULL
         WHERE line_uid = ANY($1::text[])
@@ -1732,7 +1732,7 @@ async function doOrphanAudit(
   }>(
     `SELECT line_uid, invoice_no, code, color, qty, amount, sale_rate,
             to_char(ingested_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS ingested_at
-       FROM sale_line
+       FROM sale_line_all
       WHERE fy = $1 AND month_label = $2 AND version_status = 'current'
       ORDER BY ingested_at`,
     [fy, month],
@@ -1874,7 +1874,7 @@ router.post("/registers/:fy/orphan-audit/apply", async (req, res) => {
     // Supersede Group A only. WHERE version_status='current' is a safety guard
     // against double-supersede if a concurrent sync ran between audit and apply.
     const updateResult = await pool.query<never>(
-      `UPDATE sale_line
+      `UPDATE sale_line_all
           SET version_status = 'superseded',
               superseded_at  = NOW(),
               superseded_by  = $1
@@ -2608,7 +2608,7 @@ router.get("/registers/:fy/tank-61-verify", async (req, res) => {
 /**
  * GET /registers/tank-scan-all-fy
  *
- * READ-ONLY. Pure DB query — no Sheets read. For every FY in sale_line, counts:
+ * READ-ONLY. Pure DB query — no Sheets read. For every FY in sale_line_all, counts:
  *   - all tank rows (code ~ WCT/WT prefix)
  *   - rows where qty equals exactly one tank's per-tank litres
  *     (200 / 500 / 750 / 1000 / 1500 / 2000 / 2500 / 3000 / 5000)
@@ -2639,7 +2639,7 @@ router.get("/registers/tank-scan-all-fy", async (req, res) => {
         ROUND(SUM(amount::numeric)      FILTER (WHERE code ~ '^WCT|^WT'
                                                   AND qty::numeric = ANY($1::numeric[])))
                                                                           AS one_unit_amount
-      FROM sale_line
+      FROM sale_line_all
       WHERE version_status = 'current'
       GROUP BY fy
       ORDER BY fy
@@ -2654,7 +2654,7 @@ router.get("/registers/tank-scan-all-fy", async (req, res) => {
       SELECT fy, invoice_no, code, color, qty::text, amount::text, month_label
       FROM (
         SELECT *, ROW_NUMBER() OVER (PARTITION BY fy ORDER BY month_label, invoice_no) AS rn
-        FROM sale_line
+        FROM sale_line_all
         WHERE version_status = 'current'
           AND code ~ '^WCT|^WT'
           AND qty::numeric = ANY($1::numeric[])
@@ -2718,14 +2718,14 @@ router.get("/registers/tank-scan-all-fy", async (req, res) => {
  *
  * READ-ONLY. Reconciles ~30 tank lines across all four FYs, three sources:
  *
- *   DB        — sale_line.qty (stored as per-tank litres by the loader)
+ *   DB        — sale_line_all.qty (stored as per-tank litres by the loader)
  *   SHEET     — SALE SHEET (derived register); qty = total litres dispatched
  *   SAP       — SAP Combined tab (FY2026-27 only); qty = pieces (billing master)
  *
  * Answers:
  *   a) sheet_qty = SAP_pieces × per_tank_litres? (proves the derivation chain)
  *   b) DB amount = sheet amount = SAP amount? (value safety across all sources)
- *   c) Per (a): what SHOULD sale_line.qty hold — pieces or total litres?
+ *   c) Per (a): what SHOULD sale_line_all.qty hold — pieces or total litres?
  *
  * Coverage:
  *   FY2026-27  — DB + SHEET + SAP (full three-way)
@@ -2773,7 +2773,7 @@ router.get("/registers/tank-three-way-sample", async (req, res) => {
               PARTITION BY fy, code
               ORDER BY (invoice_no IS NOT NULL) DESC, month_label, invoice_no
             ) rn
-          FROM sale_line
+          FROM sale_line_all
           WHERE version_status = 'current'
             AND code ~ '^WCT|^WT'
             AND qty::numeric = ANY(ARRAY[200,500,750,1000,1500,2000,2500,3000,5000]::numeric[])
@@ -2953,7 +2953,7 @@ router.get("/registers/tank-three-way-sample", async (req, res) => {
 
     res.json({
       note: [
-        "Three sources: DB (sale_line.qty, stored as per-tank litres by the loader bug),",
+        "Three sources: DB (sale_line_all.qty, stored as per-tank litres by the loader bug),",
         "SHEET (derived SALE SHEET register, total litres = SAP pieces × per_tank_litres),",
         "SAP (Combined tab, pieces = billing-master qty).",
         "FY2026-27: full three-way. FY2025-26: DB + SHEET only. FY2023-24/24-25: DB only (no invoice_no).",
@@ -3340,7 +3340,7 @@ router.get("/registers/tank-tier-a-dryrun", async (req, res) => {
              sl.qty::text       AS db_qty,
              sl.amount::text    AS db_amount,
              tl.ltr::text       AS per_tank_ltr
-      FROM sale_line sl
+      FROM sale_line_all sl
       JOIN tank_litres tl ON SUBSTRING(sl.code FROM '[0-9]{2}$') = tl.suffix
       WHERE sl.version_status = 'current'
         AND sl.fy = ANY($1::text[])
@@ -3575,7 +3575,7 @@ router.post("/registers/tank-tier-a-apply", async (req, res) => {
              sl.qty::text       AS db_qty,
              sl.amount::text    AS db_amount,
              tl.ltr::text       AS per_tank_ltr
-      FROM sale_line sl
+      FROM sale_line_all sl
       JOIN tank_litres tl ON SUBSTRING(sl.code FROM '[0-9]{2}$') = tl.suffix
       WHERE sl.version_status = 'current'
         AND sl.fy = ANY($1::text[])
@@ -3753,7 +3753,7 @@ router.post("/registers/tank-tier-a-apply", async (req, res) => {
           new_qty_ltr: r.newQtyLtr,
         })));
         const fixResult = await client.query(`
-          UPDATE sale_line sl
+          UPDATE sale_line_all sl
           SET qty     = (elem->>'new_qty')::numeric,
               qty_ltr = (elem->>'new_qty_ltr')::numeric
           FROM jsonb_array_elements($1::jsonb) AS elem
@@ -3766,7 +3766,7 @@ router.post("/registers/tank-tier-a-apply", async (req, res) => {
       // 5b. Tombstone true-duplicate State1_3 rows
       if (toTombstone.length > 0) {
         const tombResult = await client.query(`
-          UPDATE sale_line
+          UPDATE sale_line_all
           SET version_status = 'superseded'
           WHERE line_uid = ANY($1::text[])
             AND version_status = 'current'
@@ -3954,7 +3954,7 @@ router.get("/registers/sap-check", async (req, res) => {
       invoiceSet = new Set([invoice]);
     } else {
       const dbRows = await pool.query<{ invoice_no: string }>(
-        `SELECT DISTINCT invoice_no FROM sale_line
+        `SELECT DISTINCT invoice_no FROM sale_line_all
          WHERE code = $1 AND fy = $2 AND version_status = 'current'
            AND invoice_no IS NOT NULL`,
         [code, fy],
@@ -4145,7 +4145,7 @@ router.get("/registers/:fy/tank-sync-dryrun", async (req, res) => {
       db_qty_ltr: string | null;
     }>(
       `SELECT invoice_no, code, qty::text AS db_qty, qty_ltr::text AS db_qty_ltr
-         FROM sale_line
+         FROM sale_line_all
         WHERE fy = $1 AND group_canon = 'WATER TANK' AND version_status = 'current'`,
       [fy],
     );

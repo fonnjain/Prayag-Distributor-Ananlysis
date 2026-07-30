@@ -35,7 +35,7 @@ import { z } from "zod/v4";
 // (invoice_no, code, qty, amount). Null for historical FYs whose sheets lack
 // the column.
 export const saleLines = pgTable(
-  "sale_line",
+  "sale_line_all",
   {
     lineUid: text("line_uid").primaryKey(),
     fy: text("fy").notNull(), // '2026-27'

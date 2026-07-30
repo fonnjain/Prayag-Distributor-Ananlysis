@@ -251,7 +251,7 @@ router.get(
 // ── Booking vs Sale split: territory vs institutional ───────────────────────
 //
 // Compares order-book booking (ORDER_BOOKING_SHEET_IDS, all four FYs) against
-// primary dispatch from sale_line (DB), split by the is_territory flag:
+// primary dispatch from sale_line_all (DB), split by the is_territory flag:
 //
 //   is_territory = TRUE  → territory (Retail channel)
 //   is_territory = FALSE → institutional (Govt / Project / JJM / GEM)
@@ -313,7 +313,7 @@ router.get(
         const ntBooking        = bookingAgg.ntBooking;
         const territoryBooking = companyBooking - ntBooking;
 
-        // ── Sale: sale_line (primary register in DB), split by is_territory ───
+        // ── Sale: sale_line_all (primary register in DB), split by is_territory ───
         const [saleRow] = await db
           .select({
             totalSale:          sql<string>`sum(amount)`,
@@ -396,10 +396,10 @@ router.get(
 // Each "State Head Sale" workbook holds TWO fiscal years (prior + named FY).
 // This route reads the target FY from every workbook that contains it by
 // filtering on the FY YEAR column ("FY-2024-25" format), then compares the
-// filtered total against sale_line (DB).
+// filtered total against sale_line_all (DB).
 //
 // Three-way comparison for FY2024-25:
-//   1. sale_line (DB) — primary register, fully ingested
+//   1. sale_line_all (DB) — primary register, fully ingested
 //   2. State Head Sale 2025-26 filtered on "FY-2024-25"  (configured below)
 //   3. State Head Sale 2024-25 filtered on "FY-2024-25"  (sheet ID pending)
 //
@@ -417,7 +417,7 @@ router.get(
 
     const crore = (n: number) => Math.round((n / 1e7) * 100) / 100;
 
-    // ── DB: sale_line total for the target FY ─────────────────────────────────
+    // ── DB: sale_line_all total for the target FY ─────────────────────────────────
     const [dbRow] = await db
       .select({
         total:    sql<string>`sum(amount)`,
@@ -500,7 +500,7 @@ router.get(
         total:    Math.round(dbTotal),
         crore:    crore(dbTotal),
         rowCount: dbRowCount,
-        source:   `sale_line WHERE fy = '${fy}'`,
+        source:   `sale_line_all WHERE fy = '${fy}'`,
       },
       sheets,
       unconfigured,

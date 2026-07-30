@@ -1,4 +1,4 @@
-// Customer Performance analytics — query sale_line directly.
+// Customer Performance analytics — query sale_line_all directly.
 //
 // RULE ZERO: Every function leads with QUANTITY (pcs). Value is alongside, never instead.
 // Realized price = amount / qty — NEVER the rate list's MRP (unreliable, often 0).
@@ -251,7 +251,7 @@ export async function listCustomers(params: {
       : "";
 
   // $5 = states array (empty array = no filter), $6 = head (empty string = no filter).
-  // head_canon in sale_line stores the normalized state head name exactly as entered;
+  // head_canon in sale_line_all stores the normalized state head name exactly as entered;
   // the caller passes the raw query param which must match head_canon verbatim.
   const query = `
     SELECT
@@ -824,7 +824,7 @@ export async function getAtRisk(params: {
       ) AS gap_ratio
     FROM customer_gaps cg
     JOIN last_orders lo ON lo.customer = cg.customer
-    JOIN sale_line sl2 ON sl2.customer = cg.customer
+    JOIN sale_line_all sl2 ON sl2.customer = cg.customer
     WHERE
       (CURRENT_DATE - lo.last_order_date)::numeric >= cg.median_gap * 1.2
       AND lo.last_order_date >= CURRENT_DATE - INTERVAL '730 days'

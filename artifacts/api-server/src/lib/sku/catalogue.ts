@@ -96,7 +96,7 @@ export type CatalogueCompletenessRow = {
   segment: string;
   /** Distinct codes in item_master for this segment (the breadth denominator). */
   codesAvailable: number;
-  /** Distinct codes ever transacted in sale_line across all loaded FYs. */
+  /** Distinct codes ever transacted in sale_line_all across all loaded FYs. */
   codesEverSold: number;
   /** codesEverSold - codesAvailable. Negative = item_master is incomplete. */
   shortfall: number;
@@ -108,7 +108,7 @@ export type CatalogueCompletenessRow = {
 
 export type CatalogueCompleteness = {
   rows: CatalogueCompletenessRow[];
-  /** Segments that appear in sale_line but have no entry in item_group_map.json. */
+  /** Segments that appear in sale_line_all but have no entry in item_group_map.json. */
   unmappedSegments: string[];
   passing: number;
   failing: number;
@@ -169,7 +169,7 @@ export function clearCatalogueCache(): void {
 // ── Ever-sold denominator ─────────────────────────────────────────────────────
 //
 // This is the breadth denominator for SKU facts.
-// codesEverSold[segment] = COUNT(DISTINCT code) in sale_line across ALL loaded
+// codesEverSold[segment] = COUNT(DISTINCT code) in sale_line_all across ALL loaded
 // fiscal years.  It is always >= codesBought for any period sub-query, so
 // breadthPct is always in [0, 100].  Never derived from item_master.
 
@@ -204,7 +204,7 @@ export async function getEverSoldPerSegment(): Promise<Map<string, number>> {
     SELECT
       COALESCE(group_canon, group_raw, 'Unmapped') AS segment,
       COUNT(DISTINCT code)::text                   AS cnt
-    FROM sale_line
+    FROM sale_line_all
     WHERE version_status = 'current'
       AND code IS NOT NULL AND code <> ''
     GROUP BY 1
@@ -234,7 +234,7 @@ export async function getEverSoldPerSegmentTerritory(): Promise<Map<string, numb
     SELECT
       COALESCE(group_canon, group_raw, 'Unmapped') AS segment,
       COUNT(DISTINCT code)::text                   AS cnt
-    FROM sale_line
+    FROM sale_line_all
     WHERE version_status = 'current'
       AND code IS NOT NULL AND code <> ''
       AND (head_canon IS NULL OR head_canon != ${PROJECT_HEAD_CANON})
@@ -264,7 +264,7 @@ export async function getEverSoldPerSegmentProject(): Promise<Map<string, number
     SELECT
       COALESCE(group_canon, group_raw, 'Unmapped') AS segment,
       COUNT(DISTINCT code)::text                   AS cnt
-    FROM sale_line
+    FROM sale_line_all
     WHERE version_status = 'current'
       AND code IS NOT NULL AND code <> ''
       AND head_canon = ${PROJECT_HEAD_CANON}
@@ -281,7 +281,7 @@ export async function getEverSoldPerSegmentProject(): Promise<Map<string, number
   return map;
 }
 
-/** Invalidate all ever-sold and catalogue caches (call after bulk sale_line or item_master updates). */
+/** Invalidate all ever-sold and catalogue caches (call after bulk sale_line_all or item_master updates). */
 export function clearSkuCaches(): void {
   _cache = null;
   _cacheBuiltAt = 0;
@@ -296,7 +296,7 @@ export function clearSkuCaches(): void {
 // ── Never-sold catalogue reference ───────────────────────────────────────────
 //
 // Codes that exist in item_master (mrp > 0) but have never appeared in any
-// sale_line row.  These are genuine catalogue items with no transaction history.
+// sale_line_all row.  These are genuine catalogue items with no transaction history.
 // Returned as a secondary reference — NOT used as a breadth denominator.
 
 export type NeverSoldSegmentSummary = {
@@ -316,7 +316,7 @@ export async function getNeverSoldCatalogueItems(): Promise<{
     SELECT im.item_group, COUNT(DISTINCT im.code)::text AS cnt
     FROM item_master im
     LEFT JOIN (
-      SELECT DISTINCT code FROM sale_line WHERE version_status = 'current'
+      SELECT DISTINCT code FROM sale_line_all WHERE version_status = 'current'
     ) sold ON sold.code = im.code
     WHERE im.mrp IS NOT NULL AND im.mrp > 0
       AND sold.code IS NULL
@@ -361,7 +361,7 @@ export async function getNeverSoldCatalogueItems(): Promise<{
  * segment across all loaded fiscal years.
  *
  * Failure taxonomy:
- *   not_in_item_group_map — segment appears in sale_line but has no entry in
+ *   not_in_item_group_map — segment appears in sale_line_all but has no entry in
  *                           item_group_map.json, so codesAvailable = 0 always.
  *   not_in_item_master    — segment is declared in item_group_map.json but its
  *                           constituent item_groups produce 0 rows in item_master
@@ -376,7 +376,7 @@ export async function getCatalogueCompleteness(): Promise<CatalogueCompleteness>
       SELECT
         COALESCE(group_canon, group_raw, 'Unmapped') AS segment,
         COUNT(DISTINCT code)::text                    AS distinct_codes
-      FROM sale_line
+      FROM sale_line_all
       WHERE version_status = 'current'
         AND code IS NOT NULL AND code <> ''
       GROUP BY 1
@@ -389,7 +389,7 @@ export async function getCatalogueCompleteness(): Promise<CatalogueCompleteness>
     everSold.set(row.segment, parseInt(row.distinct_codes, 10));
   }
 
-  // Union of all segment names seen in either catalogue or sale_line
+  // Union of all segment names seen in either catalogue or sale_line_all
   const allSegments = new Set([
     ...Object.keys(cat.bySegment),
     ...everSold.keys(),
@@ -471,7 +471,7 @@ export async function getFySegmentDistribution(
       COUNT(DISTINCT code)::text                         AS distinct_codes,
       COUNT(*)::text                                     AS line_count,
       COALESCE(SUM(amount), 0)::text                     AS total_net
-    FROM sale_line
+    FROM sale_line_all
     WHERE version_status = 'current'
       AND fy = ${fy}
     GROUP BY 1, 2

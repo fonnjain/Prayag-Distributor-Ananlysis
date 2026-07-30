@@ -294,7 +294,7 @@ export async function reconcileVersions(
   const beforeRows = await pool.query<{ month_label: string; total: string }>(
     `SELECT COALESCE(month_label,'') AS month_label,
             SUM(amount::numeric)::text AS total
-     FROM sale_line
+     FROM sale_line_all
      WHERE fy = $1 AND version_status = 'current'
      GROUP BY month_label`,
     [fy],
@@ -404,7 +404,7 @@ export async function reconcileVersions(
   const afterRows = await pool.query<{ month_label: string; total: string }>(
     `SELECT COALESCE(month_label,'') AS month_label,
             SUM(amount::numeric)::text AS total
-     FROM sale_line
+     FROM sale_line_all
      WHERE fy = $1 AND version_status = 'current'
      GROUP BY month_label`,
     [fy],

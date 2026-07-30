@@ -51,8 +51,8 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
   const resources = buildResources(rosterWb, headDashWb);
 
   // FY2024-25 primary dispatch total — sourced from the invoice-line register
-  // (sale_line WHERE fy = '2024-25') rather than the item-wise SALE tab in the
-  // dashboard workbook.  Two independent sources (sale_line and the State Head
+  // (sale_line_all WHERE fy = '2024-25') rather than the item-wise SALE tab in the
+  // dashboard workbook.  Two independent sources (sale_line_all and the State Head
   // Sale 2025-26 sheet filtered on FY-2024-25) both return Rs.341.14 Cr; the
   // SALE tab returns Rs.341.73 Cr (+Rs.0.59 Cr) and is the odd one out.
   //
@@ -95,7 +95,7 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
   } catch (err) {
     logger.error(
       { err, db_total_inr: null, sheet_total_inr: fy2425.grand_total },
-      "sale_line query failed for FY2024-25 — DB total unavailable, falling back to SALE tab total %d",
+      "sale_line_all query failed for FY2024-25 — DB total unavailable, falling back to SALE tab total %d",
       fy2425.grand_total,
     );
   }

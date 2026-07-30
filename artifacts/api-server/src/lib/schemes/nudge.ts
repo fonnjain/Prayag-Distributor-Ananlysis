@@ -13,7 +13,7 @@
 // A nudge engine that cries wolf gets ignored and the whole feature is dead.
 //
 // CONDITIONS (all applied before any nudge is shown):
-//   1. Slab base = SALE (dispatched), not order booking — we query sale_line.
+//   1. Slab base = SALE (dispatched), not order booking — we query sale_line_all.
 //   2. Exclude is_territory = false (non-territory, Govt, Project etc).
 //   3. Exclude customers matching GOVT/GEM/JJM/PROJECT patterns in name.
 //   4. BLOCKED = distributor with overdue bills (from dues fetcher).
@@ -435,7 +435,7 @@ export async function computeAnnualTracker(
   const sql = `
     WITH cy AS (
       SELECT customer, head_canon AS state_head, SUM(amount::numeric) AS total
-      FROM sale_line
+      FROM sale_line_all
       WHERE fy = $1
         AND version_status = 'current'
         AND month_label IN (${monthPlaceholders})
@@ -444,7 +444,7 @@ export async function computeAnnualTracker(
     ),
     ly AS (
       SELECT customer, SUM(amount::numeric) AS total
-      FROM sale_line
+      FROM sale_line_all
       WHERE fy = $${completeMonths.length + 2}
         AND version_status = 'current'
         AND month_label IN (${priorPlaceholders})
