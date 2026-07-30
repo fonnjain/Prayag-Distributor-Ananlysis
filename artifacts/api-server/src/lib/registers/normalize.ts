@@ -235,6 +235,46 @@ const headAliasLookup = new Map<string, string>(
 const territoryHeads = new Set(
   (normalizeConfig.territory_heads as string[]).map((h) => h.toUpperCase()),
 );
+
+// ── Startup integrity check ────────────────────────────────────────────────────
+//
+// canonHead() is a two-gate function: it resolves aliases ONLY for keys that
+// first pass the territoryHeads gate.  Any head_alias.json key that maps to a
+// known state-head canonical name but is absent from territory_heads will be
+// silently discarded as unmapped — the alias entry has no effect.
+//
+// This assertion fails loudly at module load time (i.e. server startup) rather
+// than silently routing rows to unmapped_heads.  The two files must stay in sync;
+// this is the enforcement mechanism.
+(function assertAliasKeysGated() {
+  // Pass 1: collect all canonical state-head names — the values that territory
+  // keys resolve to through headAliasLookup.
+  const stateHeadCanons = new Set<string>();
+  for (const raw of normalizeConfig.territory_heads as string[]) {
+    const key = raw.toUpperCase().trim();
+    const canon = headAliasLookup.get(key);
+    if (canon) stateHeadCanons.add(canon);
+  }
+
+  // Pass 2: find alias keys that map to a state-head canon but are not gated.
+  const ungated: string[] = [];
+  for (const [key, canon] of headAliasLookup) {
+    if (stateHeadCanons.has(canon) && !territoryHeads.has(key)) {
+      ungated.push(`"${key}" → "${canon}"`);
+    }
+  }
+
+  if (ungated.length > 0) {
+    throw new Error(
+      `normalize.ts: startup integrity check failed.\n` +
+      `The following head_alias.json keys map to a state-head canonical name but are\n` +
+      `absent from normalize.json territory_heads.  canonHead() would silently discard\n` +
+      `them — add each key to territory_heads to fix:\n` +
+      ungated.map((s) => `  ${s}`).join("\n"),
+    );
+  }
+})();
+
 const institutionalHeads = new Set(
   (normalizeConfig.institutional as string[]).map((h) => h.toUpperCase()),
 );
