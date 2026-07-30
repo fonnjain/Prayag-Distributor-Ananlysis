@@ -37,6 +37,7 @@ import {
   getCatalogueCompleteness,
   getFySegmentDistribution,
   getNeverSoldCatalogueItems,
+  getItemMasterGapForFy,
 } from "../lib/sku/catalogue.js";
 import { fiscalMonthsToLabels } from "../lib/mgmt/primaryPeriod.js";
 
@@ -166,11 +167,12 @@ router.get("/sku/catalogue", async (req: Request, res: Response): Promise<void> 
         ? req.query.fy.trim()
         : null;
 
-    const [cat, completeness, neverSold, fyDist] = await Promise.all([
+    const [cat, completeness, neverSold, fyDist, itemMasterGap] = await Promise.all([
       getCatalogueCounts(),
       getCatalogueCompleteness(),
       getNeverSoldCatalogueItems(),
       fyParam ? getFySegmentDistribution(fyParam) : Promise.resolve(null),
+      getItemMasterGapForFy(fyParam ?? undefined),
     ]);
 
     const unmappedLines = (fyDist ?? []).filter(
@@ -228,7 +230,26 @@ router.get("/sku/catalogue", async (req: Request, res: Response): Promise<void> 
           }
         : null,
 
-      note: "item_master reference via item_group_map.json. Breadth denominator = codesEverSold in sale_line.",
+      // ── item_master gap disclosure ─────────────────────────────────────
+      // Codes that transacted in the target FY but are invisible to the
+      // mrp > 0 catalogue gate — either unpriced (mrp null/0) or absent
+      // from item_master entirely.  Reported here so the caller can surface
+      // the gap rather than silently omit ₹40+ Cr of live sales.
+      //
+      // fy defaults to the latest FY in sale_line_all when ?fy= is omitted.
+      // Segment is taken from sale_line_all (group_canon / group_raw) —
+      // NOT from item_master, which is precisely what is incomplete here.
+      // Per-segment code counts may not sum to the top-level distinct total
+      // if a code appears under two group_canon values across invoices.
+      itemMasterGap: {
+        fy: itemMasterGap.fy,
+        unpriced: itemMasterGap.unpriced,
+        notInMaster: itemMasterGap.notInMaster,
+        total: itemMasterGap.total,
+        bySegment: itemMasterGap.bySegment,
+      },
+
+      note: "item_master reference via item_group_map.json. Breadth denominator = codesEverSold in sale_line. itemMasterGap lists live codes excluded by the mrp > 0 gate.",
     });
   } catch (err) {
     req.log.error({ err }, "catalogue endpoint failed");

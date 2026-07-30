@@ -293,6 +293,186 @@ export function clearSkuCaches(): void {
   _everSoldProjectCacheBuiltAt = 0;
 }
 
+// ── item_master gap disclosure ────────────────────────────────────────────────
+//
+// Codes that transacted in a given FY but whose item_master record either
+// (a) has mrp null / 0 (unpriced — silently excluded by the mrp > 0 gate), or
+// (b) has no row at all (completely absent from item_master).
+//
+// These codes carry live revenue but are invisible in every catalogue-gated
+// view.  This function surfaces them explicitly so the API caller can report
+// the gap rather than silently omit it.
+//
+// Segment is taken from sale_line_all (group_canon / group_raw) — NOT from
+// item_master, because item_master is precisely what is incomplete here.
+
+export type ItemMasterGapSegment = {
+  segment: string;
+  /** Codes in sale_line_all for this segment that are in item_master but have mrp null/0. */
+  unpricedCodes: number;
+  /** Codes in sale_line_all for this segment that have no item_master row. */
+  notInMasterCodes: number;
+  totalCodes: number;
+  totalLines: number;
+  /** Sum of sale_line_all.amount for gap codes in this segment (Rs). */
+  totalValueRs: number;
+};
+
+export type ItemMasterGap = {
+  fy: string;
+  /**
+   * Codes with an item_master row but mrp null or 0.
+   * The mrp > 0 gate silently excludes these from every catalogue view.
+   */
+  unpriced: { distinctCodes: number; lines: number; valueRs: number };
+  /** Codes that have no item_master row at all. */
+  notInMaster: { distinctCodes: number; lines: number; valueRs: number };
+  /** Combined total (unpriced + notInMaster). */
+  total: { distinctCodes: number; lines: number; valueRs: number };
+  /** Breakdown by segment from sale_line_all (group_canon / group_raw), sorted by value desc. */
+  bySegment: ItemMasterGapSegment[];
+};
+
+export async function getItemMasterGapForFy(fy?: string): Promise<ItemMasterGap> {
+  // Resolve FY: use provided value or derive the latest FY present in sale_line_all.
+  let resolvedFy: string;
+  if (fy) {
+    resolvedFy = fy;
+  } else {
+    const fyRow = await db.execute<{ max_fy: string | null }>(sql`
+      SELECT MAX(fy) AS max_fy FROM sale_line_all WHERE version_status = 'current'
+    `);
+    resolvedFy = fyRow.rows[0]?.max_fy ?? "2026-27";
+  }
+
+  // Two queries in parallel:
+  //   (1) True distinct-code totals by gap_kind — for accurate headline figures.
+  //   (2) Per-segment breakdown — for attribution.
+  //       Note: a code that appears under two group_canon values in different
+  //       invoices will be counted in both segments, so per-segment code counts
+  //       do not sum to the top-level distinct total.  The top-level total from
+  //       query (1) is the authoritative figure.
+
+  const [totalsRes, segRes] = await Promise.all([
+    db.execute<{
+      gap_kind: string;
+      distinct_codes: string;
+      line_rows: string;
+      total_value: string;
+    }>(sql`
+      SELECT
+        CASE WHEN im.code IS NULL THEN 'not_in_master' ELSE 'unpriced' END AS gap_kind,
+        COUNT(DISTINCT sl.code)::text                                       AS distinct_codes,
+        COUNT(*)::text                                                      AS line_rows,
+        COALESCE(SUM(sl.amount), 0)::text                                  AS total_value
+      FROM sale_line_all sl
+      LEFT JOIN item_master im ON im.code = sl.code
+      WHERE sl.version_status = 'current'
+        AND sl.fy = ${resolvedFy}
+        AND (im.code IS NULL OR im.mrp IS NULL OR im.mrp = 0)
+      GROUP BY 1
+    `),
+    db.execute<{
+      segment: string;
+      gap_kind: string;
+      distinct_codes: string;
+      line_rows: string;
+      total_value: string;
+    }>(sql`
+      SELECT
+        COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') AS segment,
+        CASE WHEN im.code IS NULL THEN 'not_in_master' ELSE 'unpriced' END AS gap_kind,
+        COUNT(DISTINCT sl.code)::text                                       AS distinct_codes,
+        COUNT(*)::text                                                      AS line_rows,
+        COALESCE(SUM(sl.amount), 0)::text                                  AS total_value
+      FROM sale_line_all sl
+      LEFT JOIN item_master im ON im.code = sl.code
+      WHERE sl.version_status = 'current'
+        AND sl.fy = ${resolvedFy}
+        AND (im.code IS NULL OR im.mrp IS NULL OR im.mrp = 0)
+      GROUP BY 1, 2
+      ORDER BY SUM(sl.amount) DESC, 1, 2
+    `),
+  ]);
+
+  // Build headline totals
+  let unpricedCodes = 0, unpricedLines = 0, unpricedValue = 0;
+  let notInMasterCodes = 0, notInMasterLines = 0, notInMasterValue = 0;
+  for (const r of totalsRes.rows) {
+    const codes = parseInt(r.distinct_codes, 10);
+    const lines = parseInt(r.line_rows, 10);
+    const value = parseFloat(r.total_value);
+    if (r.gap_kind === "not_in_master") {
+      notInMasterCodes = codes;
+      notInMasterLines = lines;
+      notInMasterValue = value;
+    } else {
+      unpricedCodes = codes;
+      unpricedLines = lines;
+      unpricedValue = value;
+    }
+  }
+
+  // Build per-segment map (merge both gap_kinds per segment)
+  type SegAcc = {
+    unpricedCodes: number;
+    notInMasterCodes: number;
+    totalLines: number;
+    totalValueRs: number;
+  };
+  const segMap = new Map<string, SegAcc>();
+  for (const r of segRes.rows) {
+    const codes = parseInt(r.distinct_codes, 10);
+    const lines = parseInt(r.line_rows, 10);
+    const value = parseFloat(r.total_value);
+    const acc = segMap.get(r.segment) ?? {
+      unpricedCodes: 0,
+      notInMasterCodes: 0,
+      totalLines: 0,
+      totalValueRs: 0,
+    };
+    acc.totalLines += lines;
+    acc.totalValueRs += value;
+    if (r.gap_kind === "not_in_master") {
+      acc.notInMasterCodes += codes;
+    } else {
+      acc.unpricedCodes += codes;
+    }
+    segMap.set(r.segment, acc);
+  }
+
+  const bySegment: ItemMasterGapSegment[] = Array.from(segMap.entries())
+    .map(([segment, acc]) => ({
+      segment,
+      unpricedCodes: acc.unpricedCodes,
+      notInMasterCodes: acc.notInMasterCodes,
+      totalCodes: acc.unpricedCodes + acc.notInMasterCodes,
+      totalLines: acc.totalLines,
+      totalValueRs: acc.totalValueRs,
+    }))
+    .sort((a, b) => b.totalValueRs - a.totalValueRs);
+
+  return {
+    fy: resolvedFy,
+    unpriced: {
+      distinctCodes: unpricedCodes,
+      lines: unpricedLines,
+      valueRs: unpricedValue,
+    },
+    notInMaster: {
+      distinctCodes: notInMasterCodes,
+      lines: notInMasterLines,
+      valueRs: notInMasterValue,
+    },
+    total: {
+      distinctCodes: unpricedCodes + notInMasterCodes,
+      lines: unpricedLines + notInMasterLines,
+      valueRs: unpricedValue + notInMasterValue,
+    },
+    bySegment,
+  };
+}
+
 // ── Never-sold catalogue reference ───────────────────────────────────────────
 //
 // Codes that exist in item_master (mrp > 0) but have never appeared in any
