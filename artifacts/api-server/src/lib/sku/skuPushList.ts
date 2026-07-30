@@ -116,9 +116,16 @@ function buildLevelFilter(level: SkuLevel) {
 // ── Distributor list (for the selector) ───────────────────────────────────────
 
 /**
- * Returns distinct distributors that appear in either COHORT_FY or `activeFy`,
- * enriched with their cohort quintile.  New distributors (not in cohort FY)
- * get quintile=null; the push list will suppress them gracefully.
+ * Returns distinct distributors **active in `activeFy`** (≥1 purchase in the
+ * selected year), enriched with their COHORT_FY quintile for peer grouping.
+ *
+ * Inclusion criterion = active in activeFy only.  COHORT_FY is used purely for
+ * quintile enrichment; a distributor absent from cohort FY (newly onboarded)
+ * gets quintile=null and will be suppressed by the push-list engine.
+ *
+ * This intentionally excludes dormant distributors (bought in FY25-26 but zero
+ * in the selected FY): their push list would have an empty target-bought set and
+ * would return every peer code as a "gap", producing a meaningless result.
  */
 export async function getDistributorList(
   activeFy: string,
@@ -126,25 +133,7 @@ export async function getDistributorList(
 ): Promise<DistributorListItem[]> {
   const levelFilter = buildLevelFilter(level);
 
-  // Cohort FY nets
-  const cohortRows = await db.execute<{
-    customer: string;
-    head_canon: string | null;
-    fy_net: string;
-  }>(sql`
-    SELECT
-      sl.customer,
-      sl.head_canon,
-      SUM(sl.amount::numeric)::text AS fy_net
-    FROM sale_line_current sl
-    WHERE sl.fy = ${COHORT_FY}
-      AND sl.customer IS NOT NULL AND sl.customer <> ''
-      AND sl.code IS NOT NULL
-      ${levelFilter}
-    GROUP BY sl.customer, sl.head_canon
-  `);
-
-  // Active FY (so the user can select newly-onboarded distributors too)
+  // ── 1. Active distributors: bought ≥1 order in the selected FY ──────────────
   const activeRows = await db.execute<{
     customer: string;
     head_canon: string | null;
@@ -157,73 +146,81 @@ export async function getDistributorList(
       ${levelFilter}
   `);
 
-  // Build cohort map
-  const cohortMap = new Map<string, DistRow>();
-  for (const r of cohortRows.rows) {
-    cohortMap.set(r.customer, {
-      customer: r.customer,
-      headCanon: r.head_canon,
-      cohortNet: parseFloat(r.fy_net) || 0,
-    });
+  if (activeRows.rows.length === 0) return [];
+
+  const activeCustomers = activeRows.rows.map((r) => r.customer);
+
+  // Build a quick lookup for headCanon from the active query
+  const activeHeadCanon = new Map<string, string | null>();
+  for (const r of activeRows.rows) {
+    activeHeadCanon.set(r.customer, r.head_canon);
   }
 
-  // Compute quintiles (state-based with national fallback)
-  // Group by state
-  const byState = new Map<string, DistRow[]>();
-  for (const d of cohortMap.values()) {
-    const key = d.headCanon ?? "__unknown__";
+  // ── 2. Cohort FY nets — only for active distributors (enrichment only) ───────
+  const cohortRows = await db.execute<{
+    customer: string;
+    fy_net: string;
+  }>(sql`
+    SELECT
+      sl.customer,
+      SUM(sl.amount::numeric)::text AS fy_net
+    FROM sale_line_current sl
+    WHERE sl.fy = ${COHORT_FY}
+      AND sl.customer = ANY(ARRAY[${sql.join(activeCustomers.map((c) => sql`${c}`), sql`, `)}])
+      AND sl.code IS NOT NULL
+      ${levelFilter}
+    GROUP BY sl.customer
+  `);
+
+  const cohortNetMap = new Map<string, number>();
+  for (const r of cohortRows.rows) {
+    cohortNetMap.set(r.customer, parseFloat(r.fy_net) || 0);
+  }
+
+  // ── 3. Compute quintiles over the cohort-FY nets of active distributors ──────
+  // Group by state using headCanon from the active query
+  const byState = new Map<string, { customer: string; net: number }[]>();
+  for (const customer of activeCustomers) {
+    const hc = activeHeadCanon.get(customer) ?? null;
+    const key = hc ?? "__unknown__";
+    const net = cohortNetMap.get(customer) ?? 0;
     const arr = byState.get(key) ?? [];
-    arr.push(d);
+    arr.push({ customer, net });
     byState.set(key, arr);
   }
 
-  // National fallback pool (all cohort distributors)
-  const allNets = [...cohortMap.values()].map((d) => d.cohortNet);
+  // National pool = all active distributors that also appear in cohort FY
+  const allCohortNets = activeCustomers
+    .filter((c) => cohortNetMap.has(c))
+    .map((c) => cohortNetMap.get(c)!);
 
   type QuintileInfo = { quintile: number; cohortBasis: "state" | "national" };
   const quintileMap = new Map<string, QuintileInfo>();
 
-  for (const [state, members] of byState) {
-    const stateNets = members.map((m) => m.cohortNet);
-    const useNational = members.length < MIN_STATE_DISTRIBUTORS;
-    for (const m of members) {
+  for (const [, members] of byState) {
+    const cohortMembers = members.filter((m) => cohortNetMap.has(m.customer));
+    const useNational = cohortMembers.length < MIN_STATE_DISTRIBUTORS;
+    const pool = useNational ? allCohortNets : cohortMembers.map((m) => m.net);
+    for (const m of cohortMembers) {
       quintileMap.set(m.customer, {
-        quintile: quintileOf(m.cohortNet, useNational ? allNets : stateNets),
+        quintile: quintileOf(m.net, pool),
         cohortBasis: useNational ? "national" : "state",
       });
     }
   }
 
-  // Merge active + cohort
-  const seen = new Set<string>();
-  const result: DistributorListItem[] = [];
-
-  // Cohort distributors first (have quintile data)
-  for (const d of cohortMap.values()) {
-    if (seen.has(d.customer)) continue;
-    seen.add(d.customer);
-    const q = quintileMap.get(d.customer) ?? null;
-    result.push({
-      customer: d.customer,
-      headCanon: d.headCanon,
-      cohortFyNet: d.cohortNet,
+  // ── 4. Assemble result ───────────────────────────────────────────────────────
+  const result: DistributorListItem[] = activeCustomers.map((customer) => {
+    const hc = activeHeadCanon.get(customer) ?? null;
+    const q = quintileMap.get(customer) ?? null;
+    return {
+      customer,
+      headCanon: hc,
+      cohortFyNet: cohortNetMap.get(customer) ?? 0,
       quintile: q?.quintile ?? null,
       cohortBasis: q?.cohortBasis ?? null,
-    });
-  }
-
-  // New distributors (active FY only)
-  for (const r of activeRows.rows) {
-    if (seen.has(r.customer)) continue;
-    seen.add(r.customer);
-    result.push({
-      customer: r.customer,
-      headCanon: r.head_canon,
-      cohortFyNet: 0,
-      quintile: null,
-      cohortBasis: null,
-    });
-  }
+    };
+  });
 
   // Sort by state, then cohortNet descending
   result.sort((a, b) => {
