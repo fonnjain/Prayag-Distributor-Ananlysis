@@ -1,0 +1,145 @@
+# Next prompts — three, in order
+
+*A verification pass, a design decision, and remaining sync hygiene. Figures verified against SALE SHEET 26-27 on 30 July.*
+
+---
+
+## A — verification pass, after the next scheduled tick
+
+```
+Prayag app - verification only, no new work. Report each value; do not fix
+anything unless a check fails.
+
+1. JULY CLEANUP. The baseline is stored at 8,025 for Jul-26, so the tombstone
+   pass should now run.
+     July current rows   11,675 -> 8,025    (3,650 tombstoned)
+     July dispatch       ~Rs 25.23 Cr -> Rs 17.34 Cr
+   If the tombstone did not run, report the halt reason.
+
+2. ROW COUNTS PER MONTH against the sheet:
+     Apr  5,542    May  11,812    Jun  12,868    Jul  8,025
+   May and Jun should remain 3 and 6 short - the known lineUidKey rows.
+   Anything else has a new cause.
+
+3. DISPATCH VALUES against the sheet:
+     Apr  Rs 13.11 Cr    May  Rs 28.28 Cr    Jun  Rs 31.43 Cr
+     Jul  Rs 17.34 Cr    Q1   Rs 72.81 Cr    Apr-Jul  Rs 90.16 Cr
+
+4. DOES PRODUCTION HAVE FY2025-26? The FY25-26 Overview card was reading zero
+   because months came back empty. The empty-array guard now renders a dash
+   instead - but that hides the question rather than answering it.
+   Report the row count and total for FY2025-26 in the PRODUCTION database, not
+   dev. It should be 144,365 rows and Rs 359.52 Cr.
+   If production is missing that year, say so plainly - it would break every
+   year-on-year figure, the Laspeyres price index, and the SKU ever-sold
+   denominators, none of which would show an error.
+
+5. CONVERGENCE still holds - run the sync twice against an unchanged source and
+   confirm superseded, inserted and tombstoned are all zero on the second pass.
+```
+
+---
+
+## B — the YTD decision, now with figures
+
+Two problems in one: YTD is applied across sources that have different data, and it is offered on years where it has no meaning.
+
+```
+Prayag app - resolve YTD properly. Same global rules. Two separate faults.
+
+FAULT 1 - YTD IS OFFERED ON CLOSED FISCAL YEARS, WHERE IT MEANS NOTHING.
+"Year to date" only has meaning for the CURRENT fiscal year. FY2023-24,
+FY2024-25 and FY2025-26 are complete - for them, year to date IS the full year.
+
+CHECK FIRST, AND REPORT: what does the app currently return for FY2024-25 with
+YTD selected? If the resolver computes "April to the current calendar month" and
+applies that range to whichever FY is chosen, a closed year is being shown as a
+QUARTER of itself with nothing to indicate why. FY2024-25 would read roughly
+Rs 85 Cr instead of Rs 341.14 Cr.
+
+FIX: for any fiscal year that is not the current one, either hide the YTD option
+or make it resolve to Full Year and label it as such. Never let a closed year
+return a partial range.
+
+  FY2023-24 + YTD  ->  Rs 349.02 Cr   (= Full Year)
+  FY2024-25 + YTD  ->  Rs 341.14 Cr   (= Full Year)
+  FY2025-26 + YTD  ->  Rs 359.52 Cr   (= Full Year)
+  FY2026-27 + YTD  ->  Apr to latest data
+
+The same applies to any quarter beyond a closed year's data and to the
+"Last 7 days" and "Today" shortcuts, which are meaningless on a closed year.
+
+FAULT 2 - YTD ON THE CURRENT YEAR IS TRUNCATED TO THE SECONDARY CUTOFF.
+It resolves to Apr-Jun everywhere, because June is the last complete SECONDARY
+month. That range is then applied to the PRIMARY cards, which do have July. The
+two pages now disagree:
+
+   Overview     Orders YTD              Rs 102.25 Cr   (Apr-Jul)
+   State Head   Order Booking (Primary) Rs  77.76 Cr   (Apr-Jun)
+   difference   Rs 24.49 Cr - exactly July's Rs 24.50 Cr
+
+Adding July to the secondary side is NOT the fix. July carries a Rs 26.57 Cr plan
+and no recorded actuals, so including it would drop achievement from 76.2 per
+cent to 57.6 per cent - a 19-point fall caused by a month with no data.
+
+So YTD must resolve PER SOURCE for the current year:
+
+   PRIMARY cards    Apr-Jul   sale_line and the Order Sheet both hold July
+     Sale (Dispatched)       Rs 90.16 Cr
+     Order Booking (Primary) Rs 102.26 Cr
+     Pending                 Rs 12.10 Cr
+   SECONDARY cards  Apr-Jun   last month with recorded actuals
+     Target Rs 82.65 Cr, Sales Received Rs 62.95 Cr, Achievement 76.2 per cent
+
+Label each card with the range it actually covers. Every card already names its
+source, so two ranges can sit on one page honestly. What cannot happen is the
+primary cards being silently truncated to the secondary cutoff, or the two pages
+disagreeing on the same measure.
+
+Acceptance:
+  report what FY2024-25 + YTD returns TODAY, before any change
+  after the fix, a closed FY with YTD returns its Full Year total
+  FY2024-25 Rs 341.14 Cr, FY2025-26 Rs 359.52 Cr, FY2023-24 Rs 349.02 Cr
+  State Head primary cards read Rs 90.16 Cr and Rs 102.26 Cr on current-year YTD
+  Overview and State Head agree on Orders YTD
+  secondary cards stay at Apr-Jun and say so
+  every card shows the range it covers
+```
+
+---
+
+## C — remaining sync hygiene
+
+```
+Prayag app - two items left from the register work.
+
+1. THE BASELINE CAN ONLY RISE. lastGoodRowCountByMonth advances where
+   incoming >= prev, so it never comes down. When July closes and a cancellation
+   legitimately removes a row, incoming drops below lastGood and that month
+   halts permanently with no way back.
+   Add a deliberate way to lower a baseline - an admin action that records who
+   lowered it and why - and surface any month currently in a halted state as a
+   visible flag rather than a log line. This project has already had one case
+   where a log line was the only signal and nobody saw it for weeks.
+
+2. lineUidKey OMITS invoiceNo AND color. Two rows with different invoice numbers
+   or colours can share a line_uid, which silently drops the second one. That is
+   the remaining 3 May + 6 June rows.
+   Adding those fields changes every existing line_uid, so it requires a full
+   FY2026-27 re-ingestion. Plan it as its own task with a verification pass
+   afterwards - row counts per month against the sheet, and Q1 dispatch at
+   Rs 72.81 Cr.
+   Do not attempt it alongside anything else.
+```
+
+---
+
+## Not for Replit
+
+**`item_master`** — 2,054 codes selling in FY2026-27 with no MRP or no master row, carrying **₹41.30 Cr**, roughly 46% of the year. Most have no `item_name` and no `item_group`. That is a business data request, and the ask is simply to populate the master.
+
+**The 574 deleted lines (₹51.61 lakh)** — hold until the lineUidKey re-ingestion is done. June moved from 154 to 430 between two measurements, so the figure is not yet stable enough to escalate.
+
+---
+
+*Figures verified against SALE SHEET 26-27 (19LQGpkb…) on 30 July 2026*
