@@ -1,19 +1,21 @@
-// SKU Deep Dive — Phase K2 + K4.
+// SKU Deep Dive — Phase K2 + K3 + K4.
 //
-// Three sections driven by internal state (not URL sub-routes):
+// Four sections driven by internal state (not URL sub-routes):
 //   Overview  — all canonical segments sorted by net; click → drill.
 //   Drill     — code-level breakdown for one segment.
+//   Focus     — ranked push list: top gap codes per segment (K3).
 //   Trends    — breadth % time-series and FY-over-FY comparisons.
 //
-// Filters: FY | Level (distributor/direct_dealer/retailer) | Period preset
+// Filters: FY | Level (distributor/direct_dealer/retailer/project) | Period preset
 // Scope defaults to company-wide. scopeId is omitted.
 //
-// Breadth denominator: codesEverSold (cross-FY distinct codes in sale_line).
+// Breadth denominator: codesEverSold (territory-channel-filtered, no project inflation).
 // Always ∈ [0,100] — never exceeds 100%.
 import { useState, useEffect, useCallback } from "react";
 import SkuOverview, { type SegmentRow } from "@/components/sku/SkuOverview";
 import SkuDrill, { type CodeRow } from "@/components/sku/SkuDrill";
 import SkuTrends, { type TrendData } from "@/components/sku/SkuTrends";
+import SkuFocus, { type FocusData } from "@/components/sku/SkuFocus";
 import { cn } from "@/lib/utils";
 import { ChevronLeft } from "lucide-react";
 
@@ -58,7 +60,7 @@ type FactsResponse = {
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
-type Section = "overview" | "drill" | "trends";
+type Section = "overview" | "drill" | "focus" | "trends";
 type Level = "distributor" | "direct_dealer" | "retailer" | "project";
 
 export default function SkuPage() {
@@ -80,6 +82,11 @@ export default function SkuPage() {
   const [drillData, setDrillData] = useState<FactsResponse | null>(null);
   const [drillLoading, setDrillLoading] = useState(false);
   const [drillError, setDrillError] = useState<string | null>(null);
+
+  // Fetch state — focus (K3 recommendations)
+  const [focusData, setFocusData] = useState<FocusData | null>(null);
+  const [focusLoading, setFocusLoading] = useState(false);
+  const [focusError, setFocusError] = useState<string | null>(null);
 
   // Fetch state — trends
   const [trendData, setTrendData] = useState<TrendData | null>(null);
@@ -136,6 +143,29 @@ export default function SkuPage() {
       .finally(() => setDrillLoading(false));
   }, [section, drillSegment, fy, level, period.monthFrom, period.monthTo]);
 
+  // ── Fetch focus (K3 recommendations) ─────────────────────────────────────────
+
+  useEffect(() => {
+    if (section !== "focus") return;
+    setFocusLoading(true);
+    setFocusError(null);
+    const params = new URLSearchParams({
+      fy,
+      level,
+      scope: "company",
+      monthFrom: String(period.monthFrom),
+      monthTo: String(period.monthTo),
+    });
+    fetch(`${BASE}/api/sku/recommendations?${params}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json() as Promise<FocusData>;
+      })
+      .then(setFocusData)
+      .catch((e: Error) => setFocusError(e.message))
+      .finally(() => setFocusLoading(false));
+  }, [section, fy, level, period.monthFrom, period.monthTo]);
+
   // ── Fetch trend (all FYs) ─────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -166,6 +196,12 @@ export default function SkuPage() {
     setSection("overview");
   }
 
+  function handleFocusDrill(seg: string) {
+    setDrillSegment(seg);
+    setDrillData(null);
+    setSection("drill");
+  }
+
   // ── Derived ───────────────────────────────────────────────────────────────────
 
   const activeCap = overviewData?.capability?.[level];
@@ -187,6 +223,7 @@ export default function SkuPage() {
     distributor: "Distributor",
     direct_dealer: "Direct Dealer",
     retailer: "Retailer",
+    project: "Project / Govt",
   };
 
   return (
@@ -246,6 +283,20 @@ export default function SkuPage() {
             </button>
           )}
 
+          {/* Focus (K3) — always visible */}
+          <button
+            type="button"
+            onClick={() => setSection("focus")}
+            className={cn(
+              "px-2.5 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap",
+              section === "focus"
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+          >
+            Focus
+          </button>
+
           {/* Trends — always visible */}
           <button
             type="button"
@@ -270,6 +321,7 @@ export default function SkuPage() {
               setLevel(e.target.value as Level);
               setOverviewData(null);
               setDrillData(null);
+              setFocusData(null);
               setTrendData(null);
             }}
             className="rounded border bg-background px-2 py-1 text-xs"
@@ -289,6 +341,7 @@ export default function SkuPage() {
                   setFy(e.target.value);
                   setOverviewData(null);
                   setDrillData(null);
+                  setFocusData(null);
                 }}
                 className="rounded border bg-background px-2 py-1 text-xs"
               >
@@ -303,6 +356,7 @@ export default function SkuPage() {
                   setPeriodId(e.target.value as PeriodPresetId);
                   setOverviewData(null);
                   setDrillData(null);
+                  setFocusData(null);
                 }}
                 className="rounded border bg-background px-2 py-1 text-xs"
               >
@@ -371,6 +425,16 @@ export default function SkuPage() {
             truncated={drillTruncated}
             onBack={handleBack}
             segmentFact={drillSegmentFact}
+          />
+        )}
+
+        {section === "focus" && (
+          <SkuFocus
+            data={focusData}
+            loading={focusLoading}
+            error={focusError}
+            onDrill={handleFocusDrill}
+            periodLabel={periodLabel}
           />
         )}
 

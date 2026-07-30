@@ -30,6 +30,7 @@ import type { Request, Response } from "express";
 import { Router } from "express";
 import { loadSkuFacts, getSkuCapability, getSkuTrend } from "../lib/sku/skuFacts.js";
 import type { SkuLevel, SkuScope } from "../lib/sku/skuFacts.js";
+import { getSkuRecommendations } from "../lib/sku/skuRecommendations.js";
 import {
   getCatalogueCounts,
   getCatalogueCompleteness,
@@ -284,6 +285,67 @@ router.get("/sku/trend", async (req: Request, res: Response): Promise<void> => {
   } catch (err) {
     req.log.error({ err, level }, "sku trend failed");
     res.status(500).json({ error: "Could not load SKU trend data." });
+  }
+});
+
+// ── GET /api/sku/recommendations ─────────────────────────────────────────────
+//
+// Returns a ranked push list: segments with gap codes, each with top-N gap
+// codes by prior same-period net.  Same params as /api/sku/facts except no
+// `segment` filter (always company-wide segments).
+//
+// Query params:
+//   fy        (required)  e.g. 2026-27
+//   level     (required)  distributor | direct_dealer | retailer | project
+//   scope     (optional)  company (default) | head | customer
+//   scopeId   (required when scope != company)
+//   monthFrom (optional)  1–12, default 1
+//   monthTo   (optional)  monthFrom–12, default 12
+
+router.get("/sku/recommendations", async (req: Request, res: Response): Promise<void> => {
+  const fy =
+    typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
+      ? req.query.fy.trim()
+      : "2026-27";
+
+  const level = typeof req.query.level === "string" ? req.query.level.trim() : "distributor";
+  if (!VALID_LEVELS.has(level)) {
+    res.status(400).json({ error: `level must be one of: ${[...VALID_LEVELS].join(", ")}` });
+    return;
+  }
+
+  const scope = typeof req.query.scope === "string" ? req.query.scope.trim() : "company";
+  if (!VALID_SCOPES.has(scope)) {
+    res.status(400).json({ error: `scope must be one of: ${[...VALID_SCOPES].join(", ")}` });
+    return;
+  }
+
+  const scopeId =
+    scope !== "company" && typeof req.query.scopeId === "string" && req.query.scopeId.trim()
+      ? req.query.scopeId.trim()
+      : undefined;
+
+  if (scope !== "company" && !scopeId) {
+    res.status(400).json({ error: "scopeId is required when scope is 'head' or 'customer'" });
+    return;
+  }
+
+  const monthFrom = intParam(req, "monthFrom", 1, 12, 1);
+  const monthTo   = intParam(req, "monthTo", monthFrom, 12, 12);
+  const monthLabels = fiscalMonthsToLabels(fy, monthFrom, monthTo);
+
+  try {
+    const result = await getSkuRecommendations({
+      fy,
+      monthLabels,
+      level: level as SkuLevel,
+      scope: scope as SkuScope,
+      scopeId,
+    });
+    res.json({ fy, monthFrom, monthTo, level, scope, scopeId: scopeId ?? null, ...result });
+  } catch (err) {
+    req.log.error({ err, fy, level }, "sku recommendations failed");
+    res.status(500).json({ error: "Could not load SKU recommendations." });
   }
 });
 
