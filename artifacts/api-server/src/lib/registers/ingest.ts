@@ -404,11 +404,14 @@ export async function tombstoneOrphans(opts: {
   dryRun: boolean;
   blastRadiusLimitPct?: number;
   /** Last known-good row count from a previous successful read of this month.
-   *  When supplied, Guard 2.5 compares against this instead of the current DB
-   *  count — so tombstone is only halted by a genuinely truncated read, not by
-   *  the DB having drifted above the sheet count. Falls back to currentInScope
-   *  when not provided (e.g. manual POST calls). */
-  lastGoodRowCount?: number;
+   *  Three-way semantics:
+   *    number   — baseline known; compare incoming against it.
+   *    null     — called from the sync pipeline but no baseline recorded yet;
+   *               treat as unknown and halt (a missed cycle costs nothing,
+   *               tombstoning against an unvalidated read costs the month).
+   *    undefined — manual / ad-hoc call (e.g. POST tombstone-orphans);
+   *               fall back to current DB row count (original Guard 2.5). */
+  lastGoodRowCount?: number | null;
 }): Promise<TombstoneResult> {
   const {
     fy,
@@ -459,14 +462,30 @@ export async function tombstoneOrphans(opts: {
   const currentInScope = currentRows.length;
   const currentAmountInScope = currentRows.reduce((s, r) => s + Number(r.amount), 0);
 
-  // Guard 2.5: short-read — the incoming row count must be >= the last
-  // known-good read for this month. A complete read should surface at least as
-  // many rows as the previous successful read; fewer means the Sheets API
-  // returned a truncated page. Tombstoning against a truncated read would
-  // permanently delete rows that are still in the sheet.
-  // Falls back to current DB row count when no baseline is recorded (first run).
-  // NOTE: comparing against current DB rows instead fires whenever the DB has
-  // drifted above the sheet count, which is exactly when tombstone needs to run.
+  // Guard 2.5: short-read detection.
+  //
+  // lastGoodRowCount semantics (see opts type for full detail):
+  //   null     → sync pipeline, no baseline yet → halt as unknown
+  //   number   → sync pipeline, baseline known → compare incoming against it
+  //   undefined → manual/ad-hoc call → fall back to current DB count
+  //
+  // The DB-count fallback (undefined) is intentionally only for manual calls.
+  // Comparing against DB rows from the sync pipeline fires whenever the DB has
+  // drifted above the sheet, which is exactly when tombstone needs to run.
+  if (opts.lastGoodRowCount === null) {
+    logger.warn(
+      { fy, month, incomingRowCount, currentInScope, syncRunId },
+      "tombstone: no baseline established for this month — halting until a validated read is recorded",
+    );
+    return {
+      fy, month, currentInScope, currentAmountInScope,
+      candidateCount: 0, candidateAmount: 0,
+      blastRadiusPct: 0, limitPct: blastRadiusLimitPct,
+      halted: true,
+      haltReason: "no baseline established — halting tombstone until a validated read is recorded",
+      dryRun, applied: 0, sampleRows: [],
+    };
+  }
   const shortReadThreshold = opts.lastGoodRowCount ?? currentInScope;
   if (incomingRowCount < shortReadThreshold) {
     logger.warn(
@@ -715,8 +734,12 @@ export async function versionedSyncLines(
   }
   const safeToReviveMonths = new Set<string>();
   for (const [fyMonth, incoming] of incomingCountByFyMonth) {
-    const lastGood = lastGoodRowCountByMonth?.get(fyMonth) ?? 0;
-    if (incoming >= lastGood) {
+    const lastGood = lastGoodRowCountByMonth?.get(fyMonth);
+    // No baseline (undefined) → treat as unknown → not safe to revive.
+    // A missed revive cycle costs nothing; reviving against a truncated read
+    // inflates the DB silently. Only proceed when the baseline is known and
+    // this read meets or exceeds it.
+    if (lastGood !== undefined && incoming >= lastGood) {
       safeToReviveMonths.add(fyMonth.slice(fyMonth.indexOf("|") + 1));
     }
   }
@@ -801,7 +824,9 @@ export async function versionedSyncLines(
       syncRunId,
       dryRun: false,
       blastRadiusLimitPct: 10,
-      lastGoodRowCount: lastGoodRowCountByMonth?.get(`${fyForTombstone}|${month}`),
+      // Pass null (not undefined) when no baseline → Guard 2.5 halts as unknown.
+      // undefined is reserved for manual/ad-hoc calls that bypass the baseline.
+      lastGoodRowCount: lastGoodRowCountByMonth?.get(`${fyForTombstone}|${month}`) ?? null,
     });
     if (!tr.halted) tombstoned += tr.applied;
   }

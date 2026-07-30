@@ -26,6 +26,12 @@ interface Migration {
 
 const MIGRATIONS: Migration[] = [
   {
+    id: "002_ingest_run_rows_per_month",
+    sql: `
+      ALTER TABLE ingest_run ADD COLUMN IF NOT EXISTS rows_per_month jsonb;
+    `,
+  },
+  {
     id: "001_sale_line_rename",
     sql: `
       -- Rename raw table so naive queries no longer reach superseded rows.

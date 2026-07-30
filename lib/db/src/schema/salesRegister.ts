@@ -116,6 +116,11 @@ export const ingestRuns = pgTable("ingest_run", {
   unmapped: jsonb("unmapped"),
   assertions: jsonb("assertions"),
   status: text("status"),
+  /** Per-month post-dedup row counts from the sheet read that produced this run.
+   *  Shape: { "Apr-26": 5542, "May-26": 11809, ... }.
+   *  Loaded on boot to populate the last-good-read baseline for Guard 2.5 and
+   *  the revive guard, so tombstone/revive decisions survive process restarts. */
+  rowsPerMonth: jsonb("rows_per_month"),
 });
 
 export const insertSaleLineSchema = createInsertSchema(saleLines).omit({

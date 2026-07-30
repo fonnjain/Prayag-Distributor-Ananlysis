@@ -81,12 +81,53 @@ const byFy = new Map<string, FyState>();
 const lastSyncedAtMs = new Map<string, number>();
 
 // Last known-good sheet row count per FY+month (key: "fy|monthLabel").
-// Updated at the end of every successful sync for months whose incoming count
-// matched or exceeded the previous baseline (i.e. not a truncated read).
-// Used by versionedSyncLines to distinguish a genuinely short read (incoming <
-// last-good) from the DB having drifted above the sheet count (where tombstone
-// and revive need to run unblocked).
+// Loaded from ingest_run (rows_per_month column) on first use, then kept
+// current in memory. Used by versionedSyncLines to distinguish a genuinely
+// short read (incoming < last-good) from the DB having drifted above the sheet
+// count (where tombstone and revive need to run unblocked).
 const lastGoodRowCountByMonth = new Map<string, number>();
+
+// Loaded lazily on the first doSync call so the DB is ready before we try to
+// read from it. A null promise means "not yet started".
+let baselineLoadPromise: Promise<void> | null = null;
+
+/**
+ * Populates lastGoodRowCountByMonth from the most recent successful
+ * register_sheets_sync run per FY that recorded rows_per_month. Called once
+ * per process lifetime before the first versionedSyncLines invocation.
+ */
+async function loadBaselineFromDb(): Promise<void> {
+  try {
+    // For each FY take the latest run that has rows_per_month populated.
+    const { rows } = await pool.query<{
+      fy: string;
+      rows_per_month: Record<string, number> | null;
+    }>(`
+      SELECT DISTINCT ON (fy) fy, rows_per_month
+      FROM ingest_run
+      WHERE source = 'register_sheets_sync'
+        AND status IN ('ok', 'warn')
+        AND rows_per_month IS NOT NULL
+      ORDER BY fy, started_at DESC NULLS LAST
+    `);
+    let loaded = 0;
+    for (const row of rows) {
+      if (!row.rows_per_month || !row.fy) continue;
+      for (const [month, count] of Object.entries(row.rows_per_month)) {
+        if (typeof count === "number" && count > 0) {
+          lastGoodRowCountByMonth.set(`${row.fy}|${month}`, count);
+          loaded++;
+        }
+      }
+    }
+    logger.info({ loaded }, "register baseline: loaded from DB");
+  } catch (err) {
+    // Non-fatal: the baseline simply stays empty.  All guards will halt on this
+    // boot cycle (unknown baseline), establishing the baseline after one clean
+    // sync, then operate normally from there.
+    logger.warn({ err }, "register baseline: failed to load from DB — guards will halt this cycle");
+  }
+}
 
 // Re-sync TTL for the current open FY: 6 hours.
 // A completed FY is never re-synced (no new invoices possible).
@@ -157,6 +198,11 @@ async function hasRows(fy: string): Promise<boolean> {
 }
 
 async function doSync(fy: string, spreadsheetId: string): Promise<void> {
+  // Ensure the persisted baseline is loaded exactly once per process, before
+  // any guard decisions are made. This is the only place we await it.
+  if (!baselineLoadPromise) baselineLoadPromise = loadBaselineFromDb();
+  await baselineLoadPromise;
+
   const s = stateFor(fy);
   s.phase = "syncing";
   const startedAt = new Date();
@@ -319,6 +365,15 @@ async function doSync(fy: string, spreadsheetId: string): Promise<void> {
       Object.keys(unmapped.unmapped_states).length > 0
         ? "warn"
         : "ok";
+    // Convert "fy|month" keys to just month keys for storage (the run is already
+    // tagged with fy). This record is loaded on boot to seed lastGoodRowCountByMonth
+    // so guards survive process restarts.
+    const rowsPerMonth: Record<string, number> = {};
+    for (const [k, count] of incomingCountByFyMonth) {
+      const month = k.slice(k.indexOf("|") + 1);
+      if (month) rowsPerMonth[month] = count;
+    }
+
     await recordIngestRun({
       startedAt,
       source: "register_sheets_sync",
@@ -329,6 +384,7 @@ async function doSync(fy: string, spreadsheetId: string): Promise<void> {
       unmapped,
       assertions: assertUnmappedEmpty(unmapped),
       status: unmappedStatus,
+      rowsPerMonth,
     }).catch((err: unknown) =>
       logger.warn({ fy, err }, "register sync: failed to record ingest run (non-fatal)"),
     );
