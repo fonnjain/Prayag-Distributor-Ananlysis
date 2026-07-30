@@ -1,0 +1,120 @@
+# Post-fix verification — one prompt
+
+*Both fixes verified at 0 candidates. Six things to close, in order. The first is time-sensitive.*
+
+---
+
+## 1. Before the next scheduled sync runs — the serial key migration
+
+`identityKey()` now appends `|sn:N`. Every row already in the database was written under the **old five-field key**.
+
+If `versionedSyncLines` builds its `currentMap` from DB rows that do not carry `serialNo`, then on the next sync **every incoming key will differ from every stored key**, every row will look new, and the sync will tombstone and reinsert the entire fiscal year in one pass.
+
+You caught exactly this for `tombstoneOrphans` — the SELECT was missing `serialNo` and you noted it would have been "100% blast radius". Confirm the same hole does not exist in the hot sync path.
+
+```
+Confirm sale_line_all stores serialNo, and that it is populated for existing
+FY2026-27 rows rather than null. Report the count of current FY2026-27 rows with
+serialNo null.
+
+If any are null, the new key cannot match them and the next sync will supersede
+and reinsert everything. Backfill serialNo before the next scheduled run, or gate
+the new key behind a check that the stored value exists.
+```
+
+---
+
+## 2. The decisive test — does the sync converge?
+
+Dry-run showing 0 candidates proves the manual endpoint is fixed. It does not prove the scheduled sync converges.
+
+```
+Run the scheduled sync twice with no source change between runs. Report rows
+superseded and rows inserted on each pass.
+
+A static source must produce ZERO changes on the second pass. If the second run
+still finds work, it is a loop and the mechanism is still unidentified.
+
+The source is genuinely static for this test: SALE SHEET 26-27 was pulled twice
+today hours apart and April, May and June were byte-identical - 5,542 / 11,812 /
+12,868 rows, no cell different. Only July moves.
+```
+
+---
+
+## 3. Does the 63-row gap close?
+
+```
+After the next sync, report row counts per month from sale_line against the
+sheet: May 11,812 and Jun 12,868. Before these fixes the DB held 11,778 and
+12,839 - short by 34 and 29.
+
+If the gap closes, the fixes resolved it. If it persists at exactly 63, it is a
+separate cause and the qty and serial fixes were necessary but not sufficient.
+```
+
+---
+
+## 4. Which file does the sync actually read?
+
+Never answered, and it determines which figure the app can ever match.
+
+```
+Report whether the sync reads SALE SHEET 26-27 (19LQGpkb...) or Sale 26-27
+(1rW9fvrd...). As of this afternoon they were six hours apart - SALE SHEET last
+modified 18:00 IST, Sale 26-27 11:46 IST.
+
+Also note that Sale 26-27 changed size between two metadata reads while its
+modifiedTime did not update. If the sync uses modifiedTime to decide whether to
+re-read, that signal is unreliable on these files.
+```
+
+---
+
+## 5. FY25-26 Total Sales still shows Rs 0 on the Overview
+
+This was closed as a loading state. It is not one.
+
+```
+The card renders "Rs 0" with the rupee symbol, not a dash. The app uses a dash
+for null elsewhere - the July State Head card shows Sales Received as a dash. So
+the card received a zero, not a null.
+
+It also persisted across two page loads seven minutes apart, at 05:45 pm and
+05:52 pm, both captured. A first-render loading state does not survive that.
+
+Testing /api/analytics in isolation returns Rs 359.52 Cr correctly - that is not
+in dispute. What has not been tested is what the CARD receives. Log the actual
+request the Overview makes for FY2025-26, its parameters, the response body, and
+the field the card reads. If the response carries Rs 359.52 Cr and the card still
+renders zero, the fault is in the mapping.
+```
+
+---
+
+## 6. Re-derive the deleted lines, then escalate
+
+```
+The 145 May + 154 June "gone" lines (Rs 53.8 lakh) were counted under the old
+identity key. Re-derive that count now the key includes serial number and qty is
+converted consistently.
+
+Report the new figure. Only escalate to the business once it is stable - a list
+of "deleted invoices" that shrinks after a key change would not survive scrutiny.
+```
+
+---
+
+## And one design decision still open
+
+YTD resolves to Apr-Jun everywhere, because that is the last complete secondary month. But the primary sources have July:
+
+- Sale (Dispatched) YTD should be **Rs 88.95 Cr**, not Rs 72.77 Cr
+- Order Booking (Primary) YTD should be **Rs 102.26 Cr**, not Rs 77.76 Cr
+- Overview already shows Orders YTD as **Rs 102.25 Cr** - so the two pages currently disagree by exactly July's Rs 24.50 Cr
+
+Adding July to the secondary side would drop achievement from 76.2% to 57.6%, because July carries a Rs 26.57 Cr plan and no actuals. So YTD has to resolve **per source**: primary Apr-Jul, secondary Apr-Jun, each labelled. Not one global range.
+
+---
+
+*Verified against SALE SHEET 26-27 on 30 July 2026*

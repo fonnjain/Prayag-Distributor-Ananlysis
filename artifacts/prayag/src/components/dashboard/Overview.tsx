@@ -27,9 +27,13 @@ export default function Overview() {
       },
     },
   );
-  const fy2526Total = fy2526Query.data
-    ? fy2526Query.data.months.reduce((sum, m) => sum + m.amount, 0)
-    : null;
+  // Guard: treat an empty months array the same as no data — both render "—".
+  // Without this, an empty months array (e.g. production DB without FY25-26 loaded)
+  // causes reduce() to return 0, and 0 != null passes the ternary → shows "₹0".
+  const fy2526Total =
+    fy2526Query.data && fy2526Query.data.months.length > 0
+      ? fy2526Query.data.months.reduce((sum, m) => sum + m.amount, 0)
+      : null;
 
   // FY26-27 monthly order booking — complete months only, from analytics endpoint.
   const fy2627Query = useGetAnalytics(
