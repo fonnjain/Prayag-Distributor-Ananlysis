@@ -7,6 +7,7 @@ import AppShell from "@/components/AppShell";
 import Dashboard, { AREA_IDS } from "@/pages/Dashboard";
 import SalesPage from "@/pages/SalesPage";
 import CustomersPage from "@/pages/CustomersPage";
+import SkuPage from "@/pages/SkuPage";
 import DevPortalPage from "@/pages/DevPortalPage";
 import DevApiKeysPage from "@/pages/DevApiKeysPage";
 import NotFound from "@/pages/not-found";
@@ -29,6 +30,8 @@ function Router() {
         {/* Sales section */}
         <Route path="/sales/:section" component={SalesPage} />
         <Route path="/sales" component={SalesPage} />
+        {/* SKU Deep Dive */}
+        <Route path="/sku" component={SkuPage} />
         {/* Customer Performance */}
         <Route path="/customers/:section" component={CustomersPage} />
         <Route path="/customers" component={CustomersPage} />

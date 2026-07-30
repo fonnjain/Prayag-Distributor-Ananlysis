@@ -18,7 +18,7 @@ import {
   ClipboardList, Database, ShieldCheck,
   LayoutDashboard, Users, ShoppingBag,
   AlertTriangle, UserMinus, Settings, Store, BookOpen, Network,
-  ChevronDown, ChevronRight, Menu, X, Sun, Moon, Braces, Key,
+  ChevronDown, ChevronRight, Menu, X, Sun, Moon, Braces, Key, Layers,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -72,6 +72,7 @@ const NAV: NavGroup[] = [
       { id: "secondary-performance",  label: "Secondary Performance",  path: "/sales/secondary-performance",  icon: ShoppingBag },
       { id: "deep-dive",              label: "Sales Deep Dive",        path: "/sales/deep-dive",              icon: BookOpen },
       { id: "distributor-deep-dive",  label: "Distributor Deep Dive",  path: "/sales/distributor-deep-dive",  icon: Network  },
+      { id: "sku-deep-dive",          label: "SKU Deep Dive",          path: "/sku",                          icon: Layers   },
     ],
   },
   {
@@ -103,6 +104,9 @@ function activeIds(location: string): { groupId: string; itemId: string } {
     const slug = location.replace(/^\/sales\/?/, "").split("?")[0];
     const item = NAV[1].items.find((i) => i.id === slug) ?? NAV[1].items[0];
     return { groupId: "sales", itemId: item.id };
+  }
+  if (location === "/sku" || location.startsWith("/sku/")) {
+    return { groupId: "sales", itemId: "sku-deep-dive" };
   }
   if (location.startsWith("/customers")) {
     const slug = location.replace(/^\/customers\/?/, "").split("?")[0];
