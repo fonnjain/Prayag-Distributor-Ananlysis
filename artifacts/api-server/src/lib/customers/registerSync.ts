@@ -24,7 +24,11 @@ import {
   toSaleLine,
   computeLineUid,
 } from "../registers/normalize.js";
-import { versionedSyncLines } from "../registers/ingest.js";
+import {
+  versionedSyncLines,
+  recordIngestRun,
+  assertUnmappedEmpty,
+} from "../registers/ingest.js";
 import {
   resolveWaterTankRow,
   buildSapLookupMap,
@@ -147,6 +151,7 @@ async function hasRows(fy: string): Promise<boolean> {
 async function doSync(fy: string, spreadsheetId: string): Promise<void> {
   const s = stateFor(fy);
   s.phase = "syncing";
+  const startedAt = new Date();
   logger.info({ fy, spreadsheetId }, "register sync: starting");
   try {
     const occurrence = new OccurrenceCounter();
@@ -284,6 +289,31 @@ async function doSync(fy: string, spreadsheetId: string): Promise<void> {
         unmappedHeads: Object.keys(unmapped.unmapped_heads).length,
       },
       "register sync: complete",
+    );
+
+    // ── Persist ingest run (unmapped detail + assertions) ───────────────────
+    // This is the early-warning record for unmapped heads/groups/states.
+    // assertUnmappedEmpty will mark unmapped_heads_empty as failed and include
+    // the full raw→count map in `detail`, so any new unmapped head is visible
+    // in the ingest_run table without needing to grep logs.
+    const unmappedStatus =
+      Object.keys(unmapped.unmapped_heads).length > 0 ||
+      Object.keys(unmapped.unmapped_groups).length > 0 ||
+      Object.keys(unmapped.unmapped_states).length > 0
+        ? "warn"
+        : "ok";
+    await recordIngestRun({
+      startedAt,
+      source: "register_sheets_sync",
+      fy,
+      rowsRead: rowsScanned,
+      rowsInserted: inserted,
+      rowsSkipped: rowsScanned - linesWithResolvedUids.length,
+      unmapped,
+      assertions: assertUnmappedEmpty(unmapped),
+      status: unmappedStatus,
+    }).catch((err: unknown) =>
+      logger.warn({ fy, err }, "register sync: failed to record ingest run (non-fatal)"),
     );
 
     // ── Step 5: anchor check — DB current vs sheet, per month ───────────────
