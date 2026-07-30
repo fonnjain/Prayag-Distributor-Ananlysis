@@ -370,13 +370,37 @@ export default function StateHeadDashboard() {
     effectivePeriodFrom,
     effectivePeriodTo,
     effectivePeriodLabel,
+    periodMode,
+    currentIdx,
     setAvailableFys,
   } = useGlobalFilter();
-  // Stable Period object — only changes when the primitive values change.
+  // Stable Period object for secondary data — only changes when the primitive values change.
+  // Secondary uses effectivePeriodTo (last COMPLETE month) because the State Head Dashboard
+  // records actuals at month-end; secPeriod() on the server enforces this gate.
   const period: Period = useMemo(
     () => ({ label: effectivePeriodLabel, from: effectivePeriodFrom, to: effectivePeriodTo }),
     [effectivePeriodFrom, effectivePeriodTo, effectivePeriodLabel],
   );
+
+  // Primary data (sale_line, Order Sheet) accumulates continuously through the
+  // month.  When YTD is selected, extend to the current in-progress month so
+  // live figures are not silently truncated to the secondary cadence cutoff.
+  // Server-side secPeriod() still caps secondary actuals at the last complete
+  // month regardless of what monthTo we send.
+  const primaryMonthTo =
+    periodMode === "ytd" ? currentIdx + 1 : effectivePeriodTo;
+
+  // Short range labels used in KPI tile sub-lines.
+  const primaryPeriodLabel: string = (() => {
+    const f = FISCAL_MONTH_NAMES[effectivePeriodFrom - 1];
+    const t = FISCAL_MONTH_NAMES[primaryMonthTo - 1];
+    return f === t ? f : `${f}–${t}`;
+  })();
+  const secPeriodLabel: string = (() => {
+    const f = FISCAL_MONTH_NAMES[effectivePeriodFrom - 1];
+    const t = FISCAL_MONTH_NAMES[effectivePeriodTo - 1];
+    return f === t ? f : `${f}–${t}`;
+  })();
 
   const [stateHeadFilter, setStateHeadFilter] = useState("");
   const [employeeFilter, setEmployeeFilter] = useState("");
@@ -411,7 +435,7 @@ export default function StateHeadDashboard() {
     const params = new URLSearchParams({
       fy,
       monthFrom: String(effectivePeriodFrom),
-      monthTo: String(effectivePeriodTo),
+      monthTo: String(primaryMonthTo),
     });
     fetch(`/api/mgmt/data?${params}`, { signal: controller.signal })
       .then((r) => {
@@ -431,7 +455,7 @@ export default function StateHeadDashboard() {
       });
     return () => controller.abort();
   // Primitive deps — stable comparison via Object.is.
-  }, [fy, effectivePeriodFrom, effectivePeriodTo]);
+  }, [fy, effectivePeriodFrom, primaryMonthTo]);
 
   function toggleSort(key: string) {
     setSort((s) =>
@@ -448,7 +472,7 @@ export default function StateHeadDashboard() {
         body: JSON.stringify({
           fy,
           monthFrom: period.from,
-          monthTo: period.to,
+          monthTo: primaryMonthTo,
           lowPerfPct: lowPerfThreshold,
           states: stateHeadFilter ? [stateHeadFilter] : [],
           regions: [],
@@ -656,7 +680,9 @@ export default function StateHeadDashboard() {
     data?.meta.secondarySource === "state_head_dashboard" ||
     (data?.meta.ordersAvailable ?? false);
 
-  const openInPeriod = openFiscalMonthsInPeriod(fy, period.from, period.to);
+  // openInPeriod uses the primary period (which includes the current open month
+  // in YTD mode) so the banner fires whenever primary figures are provisional.
+  const openInPeriod = openFiscalMonthsInPeriod(fy, period.from, primaryMonthTo);
 
   return (
     <div className="flex flex-col gap-4 p-4 pb-8">
@@ -784,7 +810,7 @@ export default function StateHeadDashboard() {
           <KpiTile
             label="Order Booking (Secondary)"
             value={hasSecondaryData ? fmtCr(kpi.booking) : "—"}
-            sub={data.meta.orderBookingSource ?? undefined}
+            sub={`${secPeriodLabel}${data.meta.orderBookingSource ? ` · ${data.meta.orderBookingSource}` : ""}`}
           />
           <KpiTile
             label="Sales Received"
@@ -793,16 +819,18 @@ export default function StateHeadDashboard() {
                 ? fmtCr(data.meta.secondaryTotal!.salesReceived)
                 : "—"
             }
-            sub="Secondary, state head dashboard"
+            sub={`${secPeriodLabel} · Secondary, state head dashboard`}
           />
           <KpiTile
             label="Achievement"
             value={hasSecondaryData ? fmtPct(kpi.achPct) : "—"}
-            sub="Sales Received ÷ Plan"
+            sub={`${secPeriodLabel} · Sales Received ÷ Plan`}
           />
           <KpiTile label="Low Performers" value={fmtN(kpi.lowPerf)} sub={`<${lowPerfThreshold}% threshold`} />
           {(() => {
-            const isSubYear = period.from !== 1 || period.to !== 12;
+            // isSubYear uses primaryMonthTo — that's the actual period sent to the
+            // server for primary data (may differ from effectivePeriodTo in YTD mode).
+            const isSubYear = period.from !== 1 || primaryMonthTo !== 12;
             const saleFilt = data.meta.salePeriodFiltered;
             const saleSub =
               saleFilt === false && isSubYear
@@ -818,12 +846,12 @@ export default function StateHeadDashboard() {
                 <KpiTile
                   label="Sale (Dispatched)"
                   value={fmtCr(data.meta.saleRawTotal ?? (kpi.sale > 0 ? kpi.sale : null))}
-                  sub={saleSub}
+                  sub={`${primaryPeriodLabel}${saleSub ? ` · ${saleSub}` : ""}`}
                 />
                 <KpiTile
                   label="Order Booking (Primary)"
                   value={fmtCr(data.meta.primaryBookingRawTotal ?? kpi.primaryOrderBooking)}
-                  sub={obSub}
+                  sub={`${primaryPeriodLabel}${obSub ? ` · ${obSub}` : ""}`}
                 />
               </>
             );
@@ -831,7 +859,7 @@ export default function StateHeadDashboard() {
           <KpiTile
             label="Pending Orders"
             value={fmtCr(data.meta.pendingOrdersTotal ?? kpi.pendingOrders)}
-            sub={kpi.primaryOrderBooking != null ? "Order Booking minus Dispatched" : undefined}
+            sub={`${primaryPeriodLabel}${kpi.primaryOrderBooking != null ? " · Order Booking minus Dispatched" : ""}`}
           />
         </div>
       )}
