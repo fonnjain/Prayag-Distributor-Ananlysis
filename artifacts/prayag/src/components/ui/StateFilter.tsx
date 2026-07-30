@@ -13,55 +13,39 @@ import { useState, useRef, useEffect } from "react";
 import { ChevronDown, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// Maps ERP split-territory names → canonical geographic state shown in the UI.
+// Keep in sync with STATE_CANON_NORMALISE in artifacts/api-server/src/lib/stateCanon.ts.
+// The server expands canonical selections back to all DB variants before querying.
+const STATE_CANON_NORMALISE: Record<string, string> = {
+  "DELHI A":       "DELHI",
+  "DELHI NCR":     "DELHI",
+  "UP ( A )":      "UTTAR PRADESH",
+  "UP (AS)":       "UTTAR PRADESH",
+  "UP (S)":        "UTTAR PRADESH",
+  "HP":            "HIMACHAL PRADESH",
+  "KARNATAKA (B)": "KARNATAKA",
+};
+
+/** Normalise a raw state_canon value to the canonical name shown in the UI. */
+function toCanonical(s: string) { return STATE_CANON_NORMALISE[s] ?? s; }
+
 export const REGION_GROUPS: { region: string; states: string[] }[] = [
   {
     region: "North",
-    states: [
-      "UTTAR PRADESH",
-      "UP ( A )",
-      "UP (AS)",
-      "HARYANA",
-      "PUNJAB",
-      "RAJASTHAN",
-      "HIMACHAL PRADESH",
-      "UTTARAKHAND",
-      "DELHI A",
-      "DELHI NCR",
-      "CHANDIGARH",
-      "KASHMIR",
-      "JAMMU",
-    ],
+    // Canonical geographic states only — no split-territory duplicates.
+    states: ["UTTAR PRADESH", "HARYANA", "PUNJAB", "RAJASTHAN", "HIMACHAL PRADESH", "UTTARAKHAND", "DELHI", "CHANDIGARH", "KASHMIR", "JAMMU"],
   },
   {
     region: "East",
-    states: [
-      "WEST BENGAL",
-      "BIHAR",
-      "JHARKHAND",
-      "ODISHA",
-      "ASSAM",
-    ],
+    states: ["WEST BENGAL", "BIHAR", "JHARKHAND", "ODISHA", "ASSAM"],
   },
   {
     region: "South",
-    states: [
-      "KERALA",
-      "TAMIL NADU",
-      "AP",
-      "TELANGANA",
-      "KARNATAKA",
-      "KARNATAKA (B)",
-      "GOA",
-    ],
+    states: ["KERALA", "TAMIL NADU", "AP", "TELANGANA", "KARNATAKA", "GOA"],
   },
   {
     region: "West",
-    states: [
-      "MAHARASHTRA",
-      "GUJARAT",
-      "MADHYA PRADESH",
-      "CHHATTISGARH",
-    ],
+    states: ["MAHARASHTRA", "GUJARAT", "MADHYA PRADESH", "CHHATTISGARH"],
   },
 ];
 
@@ -86,25 +70,29 @@ export default function StateFilter({ selected, onChange, className }: Props) {
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  const isAll = selected.length === 0;
+  // Normalise any legacy raw split-variant values to canonical names.
+  // This is a safety net for URL state that predates the canonical-names convention.
+  const normSelected = selected.length === 0
+    ? []
+    : [...new Set(selected.map(toCanonical))];
+
+  const isAll = normSelected.length === 0;
 
   function toggle(state: string) {
-    if (selected.includes(state)) {
-      onChange(selected.filter((s) => s !== state));
+    if (normSelected.includes(state)) {
+      onChange(normSelected.filter((s) => s !== state));
     } else {
-      onChange([...selected, state]);
+      onChange([...normSelected, state]);
     }
   }
 
-  function toggleRegion(states: string[]) {
-    const allIn = states.every((s) => selected.includes(s));
+  function toggleRegion(regionStates: string[]) {
+    const allIn = regionStates.every((s) => normSelected.includes(s));
     if (allIn) {
-      // Deselect all in region
-      onChange(selected.filter((s) => !states.includes(s)));
+      onChange(normSelected.filter((s) => !regionStates.includes(s)));
     } else {
-      // Select all in region (add missing)
-      const next = [...selected];
-      for (const s of states) {
+      const next = [...normSelected];
+      for (const s of regionStates) {
         if (!next.includes(s)) next.push(s);
       }
       onChange(next);
@@ -118,16 +106,15 @@ export default function StateFilter({ selected, onChange, className }: Props) {
   // Label for the trigger button
   let label = "All States";
   if (!isAll) {
-    // Check if an entire region is selected
     const matchingRegion = REGION_GROUPS.find(
-      (g) => g.states.every((s) => selected.includes(s)) && g.states.length === selected.length,
+      (g) => g.states.every((s) => normSelected.includes(s)) && g.states.length === normSelected.length,
     );
     if (matchingRegion) {
       label = matchingRegion.region;
-    } else if (selected.length === 1) {
-      label = selected[0];
+    } else if (normSelected.length === 1) {
+      label = normSelected[0];
     } else {
-      label = `${selected.length} states`;
+      label = `${normSelected.length} states`;
     }
   }
 
@@ -200,7 +187,7 @@ export default function StateFilter({ selected, onChange, className }: Props) {
                   {/* Individual states */}
                   <div className="ml-4 mt-0.5 space-y-0.5">
                     {states.map((state) => {
-                      const checked = selected.includes(state);
+                      const checked = normSelected.includes(state);
                       return (
                         <button
                           key={state}
@@ -231,7 +218,7 @@ export default function StateFilter({ selected, onChange, className }: Props) {
           {/* Footer */}
           {!isAll && (
             <div className="border-t px-3 py-1.5 flex items-center justify-between">
-              <span className="text-[10px] text-muted-foreground">{selected.length} selected</span>
+              <span className="text-[10px] text-muted-foreground">{normSelected.length} selected</span>
               <button
                 type="button"
                 onClick={clearAll}

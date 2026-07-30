@@ -29,6 +29,8 @@ import type { SkuLevel } from "./skuFacts.js";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
+import { normaliseStateCanon, stateVariants, STATE_CANON_NORMALISE } from "../stateCanon.js";
+
 const COHORT_FY = "2025-26";
 const MIN_STATE_DISTRIBUTORS = 8;
 const MIN_PEERS_PER_CODE = 3;
@@ -56,40 +58,6 @@ const TOP_CODES_PER_SEGMENT = 10;
  *
  * Maharashtra 2 does NOT exist in this dataset (single undivided state, 28 dists).
  */
-const STATE_CANON_NORMALISE: Record<string, string> = {
-  "DELHI A":        "DELHI",
-  "DELHI NCR":      "DELHI",
-  "UP ( A )":       "UTTAR PRADESH",
-  "UP (AS)":        "UTTAR PRADESH",
-  "UP (S)":         "UTTAR PRADESH",
-  "HP":             "HIMACHAL PRADESH",
-  "KARNATAKA (B)":  "KARNATAKA",
-};
-
-/** Return the canonical geographic state name for a raw state_canon value. */
-function normaliseStateCanon(raw: string | null): string | null {
-  if (raw == null) return null;
-  return STATE_CANON_NORMALISE[raw] ?? raw;
-}
-
-/**
- * Return all raw state_canon DB values that belong to the same geographic state
- * as `raw`. Always includes `raw` itself (even if it is already canonical).
- * Used to build ANY(ARRAY[...]) filters that span split variants.
- */
-function stateVariants(raw: string | null): string[] {
-  if (raw == null) return [];
-  const canonical = STATE_CANON_NORMALISE[raw] ?? raw;
-  // Collect every key that maps to this canonical, plus the canonical itself
-  const variants = new Set<string>();
-  variants.add(raw);          // always include the input value
-  variants.add(canonical);    // include the canonical (may equal raw)
-  for (const [k, v] of Object.entries(STATE_CANON_NORMALISE)) {
-    if (v === canonical) variants.add(k);
-  }
-  return [...variants];
-}
-
 // ── Tier classification ────────────────────────────────────────────────────────
 
 /**

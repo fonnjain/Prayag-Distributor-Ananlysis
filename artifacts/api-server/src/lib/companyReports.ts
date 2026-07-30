@@ -430,6 +430,22 @@ export async function buildCompanyReports(
 
 // ── Private query functions ───────────────────────────────────────────────────
 
+/**
+ * SQL expression that normalises management territory splits to canonical geographic
+ * state names.  Use this everywhere instead of bare coalesce(stateCanon, 'Unmapped')
+ * so that DELHI A + DELHI NCR aggregate together, UP variants merge into UTTAR PRADESH,
+ * HP maps to HIMACHAL PRADESH, and KARNATAKA (B) maps to KARNATAKA.
+ */
+function normStateExpr() {
+  return sql<string>`CASE
+    WHEN ${saleLines.stateCanon} IN ('DELHI A', 'DELHI NCR')              THEN 'DELHI'
+    WHEN ${saleLines.stateCanon} IN ('UP ( A )', 'UP (AS)', 'UP (S)')      THEN 'UTTAR PRADESH'
+    WHEN ${saleLines.stateCanon} = 'HP'                                    THEN 'HIMACHAL PRADESH'
+    WHEN ${saleLines.stateCanon} = 'KARNATAKA (B)'                         THEN 'KARNATAKA'
+    ELSE COALESCE(${saleLines.stateCanon}, 'Unmapped')
+  END`;
+}
+
 function whereClause(fyStr: string, months: string[]) {
   if (months.length === 0) return and(eq(saleLines.fy, fyStr), eq(saleLines.versionStatus, "current"));
   return and(eq(saleLines.fy, fyStr), inArray(saleLines.monthLabel, months), eq(saleLines.versionStatus, "current"));
@@ -438,7 +454,7 @@ function whereClause(fyStr: string, months: string[]) {
 async function queryByState(fyStr: string, months: string[]) {
   if (months.length === 0) return [];
   return db.select({
-    state: sql<string>`coalesce(${saleLines.stateCanon}, 'Unmapped')`,
+    state: normStateExpr(),
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
   }).from(saleLines).where(whereClause(fyStr, months)).groupBy(sql`1`);
 }
@@ -461,7 +477,7 @@ async function queryByGroupFull(fyStr: string) {
 async function queryByStateGroup(fyStr: string, months: string[]) {
   if (months.length === 0) return [];
   return db.select({
-    state: sql<string>`coalesce(${saleLines.stateCanon}, 'Unmapped')`,
+    state: normStateExpr(),
     group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
   }).from(saleLines).where(whereClause(fyStr, months)).groupBy(sql`1, 2`);
@@ -471,7 +487,7 @@ async function queryByPartyGroup(fyStr: string, months: string[]) {
   if (months.length === 0) return [];
   return db.select({
     customer: sql<string>`coalesce(${saleLines.customer}, '')`,
-    state: sql<string>`coalesce(${saleLines.stateCanon}, 'Unmapped')`,
+    state: normStateExpr(),
     group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
   }).from(saleLines).where(whereClause(fyStr, months)).groupBy(sql`1, 2, 3`);
@@ -486,7 +502,7 @@ async function queryQty(fyStr: string, months: string[]) {
     group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
     groupRaw: sql<string>`coalesce(${saleLines.groupRaw}, '')`,
     customer: sql<string>`coalesce(${saleLines.customer}, '')`,
-    state: sql<string>`coalesce(${saleLines.stateCanon}, 'Unmapped')`,
+    state: normStateExpr(),
     qty: sql<number>`coalesce(case when max(coalesce(${saleLines.groupRaw}, '')) = 'WATER TANK' then sum(${saleLines.qtyLtr}::numeric) else sum(${saleLines.qty}::numeric) end, 0)::float8`,
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
     unit: sql<string>`case when max(${saleLines.groupRaw}) = 'WATER TANK' then 'Ltr' else coalesce(max(${itemMaster.unit}), '') end`,
@@ -502,7 +518,7 @@ async function queryByCustomer(fyStr: string, months: string[]) {
   if (months.length === 0) return [];
   return db.select({
     customer: sql<string>`coalesce(${saleLines.customer}, '')`,
-    state: sql<string>`coalesce(${saleLines.stateCanon}, 'Unmapped')`,
+    state: normStateExpr(),
     head: sql<string>`coalesce(${saleLines.headCanon}, 'Unmapped')`,
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
   }).from(saleLines).where(whereClause(fyStr, months)).groupBy(sql`1, 2, 3`);
@@ -521,7 +537,7 @@ async function queryAsOf(fyStr: string, asOfDate: string) {
 
   return db.select({
     group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
-    state: sql<string>`coalesce(${saleLines.stateCanon}, 'Unmapped')`,
+    state: normStateExpr(),
     customer: sql<string>`coalesce(${saleLines.customer}, '')`,
     customerKey: sql<string>`coalesce(${saleLines.customer}, '')`,
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,

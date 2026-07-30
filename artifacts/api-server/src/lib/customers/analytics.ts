@@ -9,6 +9,7 @@
 // LY conversion: "Apr-26" → "Apr-25" (same month name, year suffix −1).
 import { pool } from "@workspace/db";
 import { isMonthComplete } from "../analytics/analytics.js";
+import { stateVariantsFromArray } from "../stateCanon.js";
 
 // ── Month helpers ─────────────────────────────────────────────────────────────
 
@@ -237,7 +238,10 @@ export async function listCustomers(params: {
   states?: string[];
   head?: string;
 }): Promise<CustomerRow[]> {
-  const { fyCy, fyLy, monthsCy, monthsLy, entityType = "all", states = [], head = "" } = params;
+  const { fyCy, fyLy, monthsCy, monthsLy, entityType = "all", states: rawStates = [], head = "" } = params;
+  // Expand canonical/raw state names to all DB split-variants so DELHI A and DELHI NCR
+  // are both matched when the caller passes "DELHI".
+  const states = stateVariantsFromArray(rawStates);
 
   const typeFilter =
     entityType === "distributor"

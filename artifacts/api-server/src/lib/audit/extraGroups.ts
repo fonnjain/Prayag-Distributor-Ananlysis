@@ -4,7 +4,8 @@
 import type { CheckGroup, HealthCheck, CheckStatus } from "../mgmt/verifyFull.js";
 import { loadOrderFile } from "../mgmt/orders.js";
 import { db, pool, saleLines } from "@workspace/db";
-import { eq, and, sql, ilike } from "drizzle-orm";
+import { eq, and, sql, ilike, inArray } from "drizzle-orm";
+import { stateVariants } from "../stateCanon.js";
 import { logger } from "../logger.js";
 import rawAuditAnchors from "../../../config/audit_anchors.json";
 import rawRegisterSheets from "../../../config/register_sheets.json";
@@ -161,7 +162,7 @@ export async function runReportLogicGroup(fy: string): Promise<CheckGroup> {
         eq(saleLines.versionStatus, "current"),
         monthFilter,
         anchor.filters.group ? eq(saleLines.groupCanon, anchor.filters.group) : undefined,
-        anchor.filters.state ? eq(saleLines.stateCanon, anchor.filters.state) : undefined,
+        anchor.filters.state ? inArray(saleLines.stateCanon, stateVariants(anchor.filters.state)) : undefined,
         anchor.filters.customerIlike
           ? ilike(saleLines.customer, `%${anchor.filters.customerIlike}%`)
           : undefined,

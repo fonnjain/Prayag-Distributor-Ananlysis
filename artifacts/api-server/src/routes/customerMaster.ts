@@ -30,6 +30,7 @@ import {
 } from "drizzle-orm";
 import ExcelJS from "exceljs";
 import { randomUUID } from "crypto";
+import { stateVariants } from "../lib/stateCanon.js";
 
 const router = Router();
 
@@ -88,7 +89,7 @@ router.get("/customer-master", async (req: Request, res: Response): Promise<void
     const conds = [];
     if (type && VALID_TYPES.has(type)) conds.push(eq(customerMaster.type, type));
     if (stateHead) conds.push(eq(customerMaster.stateHead, stateHead));
-    if (state) conds.push(eq(customerMaster.state, state));
+    if (state) { const sv = stateVariants(state); conds.push(sv.length === 1 ? eq(customerMaster.state, state) : inArray(customerMaster.state, sv)); }
     if (status && VALID_STATUSES.has(status)) conds.push(eq(customerMaster.status, status));
     if (confidence && VALID_CONFIDENCE.has(confidence)) conds.push(eq(customerMaster.headConfidence, confidence));
     if (q) {
@@ -115,7 +116,7 @@ router.get("/customer-master/export", async (req: Request, res: Response): Promi
     const conds = [];
     if (type && VALID_TYPES.has(type)) conds.push(eq(customerMaster.type, type));
     if (stateHead) conds.push(eq(customerMaster.stateHead, stateHead));
-    if (state) conds.push(eq(customerMaster.state, state));
+    if (state) { const sv = stateVariants(state); conds.push(sv.length === 1 ? eq(customerMaster.state, state) : inArray(customerMaster.state, sv)); }
     if (status) conds.push(eq(customerMaster.status, status));
     if (confidence) conds.push(eq(customerMaster.headConfidence, confidence));
     const rows = await db.select().from(customerMaster)
