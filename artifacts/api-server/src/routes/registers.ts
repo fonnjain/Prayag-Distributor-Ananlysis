@@ -1731,6 +1731,7 @@ async function doOrphanAudit(
         l.color ?? null,
         l.qty ?? null,
         l.monthLabel ?? null,
+        l.serialNo ?? null,
       ),
     ),
   );
@@ -1763,8 +1764,9 @@ async function doOrphanAudit(
     amount: string;
     sale_rate: string | null;
     ingested_at: string | null;
+    serial_no: number | null;
   }>(
-    `SELECT line_uid, invoice_no, code, color, qty, amount, sale_rate,
+    `SELECT line_uid, invoice_no, code, color, qty, amount, sale_rate, serial_no,
             to_char(ingested_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS ingested_at
        FROM sale_line_all
       WHERE fy = $1 AND month_label = $2 AND version_status = 'current'
@@ -1779,7 +1781,7 @@ async function doOrphanAudit(
   const groupBRows: OrphanRow[] = [];
 
   for (const r of dbResult.rows) {
-    const key = identityKey(r.invoice_no, r.code, r.color, r.qty, month);
+    const key = identityKey(r.invoice_no, r.code, r.color, r.qty, month, r.serial_no);
     if (seenIdentities.has(key)) continue; // confirmed — not an orphan
 
     const row: OrphanRow = {
@@ -2003,6 +2005,7 @@ router.get("/registers/:fy/orphan-bucket-check", async (req, res) => {
           sl.color ?? null,
           sl.qty ?? null,
           sl.monthLabel ?? null,
+          sl.serialNo ?? null,
         ),
       );
 
@@ -2025,6 +2028,7 @@ router.get("/registers/:fy/orphan-bucket-check", async (req, res) => {
         qty: saleLines.qty,
         monthLabel: saleLines.monthLabel,
         amount: saleLines.amount,
+        serialNo: saleLines.serialNo,
       })
       .from(saleLines)
       .where(
@@ -2065,6 +2069,7 @@ router.get("/registers/:fy/orphan-bucket-check", async (req, res) => {
         row.color,
         row.qty != null ? String(row.qty) : null,
         row.monthLabel,
+        row.serialNo ?? null,
       );
 
       if (seenByFullKey.has(dbKey)) {
@@ -2245,6 +2250,7 @@ router.get("/registers/:fy/tank-unit-recheck", async (req, res) => {
         identityKey(
           sl.invoiceNo ?? null, sl.code, sl.color ?? null,
           sl.qty ?? null, sl.monthLabel ?? null,
+          sl.serialNo ?? null,
         ),
       );
 
@@ -2273,6 +2279,7 @@ router.get("/registers/:fy/tank-unit-recheck", async (req, res) => {
         qty: saleLines.qty,
         monthLabel: saleLines.monthLabel,
         amount: saleLines.amount,
+        serialNo: saleLines.serialNo,
       })
       .from(saleLines)
       .where(
@@ -2309,6 +2316,7 @@ router.get("/registers/:fy/tank-unit-recheck", async (req, res) => {
         row.invoiceNo, row.code, row.color,
         row.qty != null ? String(row.qty) : null,
         row.monthLabel,
+        row.serialNo ?? null,
       );
       if (seenByFullKey.has(dbKey)) { identityKeyMatchCount++; continue; }
 
@@ -2488,7 +2496,7 @@ router.get("/registers/:fy/tank-61-verify", async (req, res) => {
       if (row.monthLabel !== month) return;
       const sl = toSaleLine(row, occurrence, unmapped, "sheets");
       seenByFullKey.add(
-        identityKey(sl.invoiceNo ?? null, sl.code, sl.color ?? null, sl.qty ?? null, sl.monthLabel ?? null),
+        identityKey(sl.invoiceNo ?? null, sl.code, sl.color ?? null, sl.qty ?? null, sl.monthLabel ?? null, sl.serialNo ?? null),
       );
       if (sl.invoiceNo == null) return;
       const sheetQty = Number(sl.qty ?? 0);
@@ -2512,6 +2520,7 @@ router.get("/registers/:fy/tank-61-verify", async (req, res) => {
         qty: saleLines.qty,
         monthLabel: saleLines.monthLabel,
         amount: saleLines.amount,
+        serialNo: saleLines.serialNo,
       })
       .from(saleLines)
       .where(
@@ -2543,6 +2552,7 @@ router.get("/registers/:fy/tank-61-verify", async (req, res) => {
         row.invoiceNo, row.code, row.color,
         row.qty != null ? String(row.qty) : null,
         row.monthLabel,
+        row.serialNo ?? null,
       );
       if (seenByFullKey.has(dbKey)) { identityKeyMatches++; continue; }
 
@@ -3120,7 +3130,7 @@ router.get("/registers/:fy/sync-dry-run", async (req, res) => {
     const currentMap = new Map<string, DbRow>();
     for (const row of allCurrent) {
       currentMap.set(
-        identityKey(row.invoiceNo, row.code, row.color, row.qty, row.monthLabel),
+        identityKey(row.invoiceNo, row.code, row.color, row.qty, row.monthLabel, row.serialNo),
         row,
       );
     }
@@ -3138,6 +3148,7 @@ router.get("/registers/:fy/sync-dry-run", async (req, res) => {
         line.color ?? null,
         line.qty ?? null,
         line.monthLabel ?? null,
+        line.serialNo ?? null,
       );
       const existing = currentMap.get(key);
 
@@ -3189,6 +3200,7 @@ router.get("/registers/:fy/sync-dry-run", async (req, res) => {
           identityKey(
             l.invoiceNo ?? null, l.code,
             l.color ?? null, l.qty ?? null, l.monthLabel ?? null,
+            l.serialNo ?? null,
           ),
         ),
       );
