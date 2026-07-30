@@ -78,6 +78,16 @@ export type SkuSegmentFact = {
    * snapshot for most segments).  0 for segments not in item_group_map.json.
    */
   codesInCatalogue: number;
+  /**
+   * Bottom-up historical net of codes NOT bought in the query period.
+   * Computed as: SUM(amount) from sale_line_current where code is not in the
+   * bought-codes set for this query, applying the same level/scope filters,
+   * across all loaded fiscal years.
+   *
+   * This is a factual figure (realised value), not a projection.  The
+   * assumption is labelled on the API response and the UI column.
+   */
+  unboughtValue: number;
 };
 
 export type SkuFactsResult = {
@@ -215,7 +225,42 @@ export async function getPrimarySkuFacts(
     ORDER BY COALESCE(sl.group_canon, sl.group_raw, 'Unmapped'), sl.code, sl.month_label
   `);
 
-  return buildFactsFromRows(rows.rows, fy);
+  const facts = await buildFactsFromRows(rows.rows, fy);
+  if (!facts) return facts;
+
+  // Enrich each segment with the bottom-up historical net of codes that were
+  // NOT ordered in the query period (same level + scope filters, all FYs).
+  // This is a factual sum — no extrapolation — so it can be labelled clearly.
+  const boughtCodes = [...new Set(rows.rows.map((r) => r.code))];
+  if (boughtCodes.length === 0) return facts;
+
+  const unboughtRows = await db.execute<{
+    segment: string;
+    unbought_value: string;
+  }>(sql`
+    SELECT
+      COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') AS segment,
+      SUM(sl.amount::numeric)::text AS unbought_value
+    FROM sale_line_current sl
+    WHERE sl.version_status = 'current'
+      ${levelFilter}
+      ${scopeFilter}
+      ${segmentFilter}
+      AND sl.code != ALL(ARRAY[${sql.join(boughtCodes.map((c) => sql`${c}`), sql`, `)}])
+    GROUP BY 1
+  `);
+
+  const unboughtBySegment = new Map<string, number>(
+    unboughtRows.rows.map((r) => [r.segment, parseFloat(r.unbought_value) || 0]),
+  );
+
+  return {
+    ...facts,
+    bySegment: facts.bySegment.map((seg) => ({
+      ...seg,
+      unboughtValue: unboughtBySegment.get(seg.segment) ?? 0,
+    })),
+  };
 }
 
 // ── Secondary facts (retailer from secondary_sku_line) ────────────────────────
@@ -269,7 +314,40 @@ export async function getSecondarySkuFacts(
     ORDER BY COALESCE(sku.segment_canon, 'Unmapped'), sku.item_code, sku.month_label
   `);
 
-  return buildFactsFromRows(rows.rows, fy);
+  const facts = await buildFactsFromRows(rows.rows, fy);
+  if (!facts) return facts;
+
+  // Same bottom-up unbought enrichment as primary: historical net of codes
+  // absent from the query period, same scope filter, all loaded FYs.
+  const boughtCodes = [...new Set(rows.rows.map((r) => r.code))];
+  if (boughtCodes.length === 0) return facts;
+
+  const unboughtRows = await db.execute<{
+    segment: string;
+    unbought_value: string;
+  }>(sql`
+    SELECT
+      COALESCE(sku.segment_canon, 'Unmapped') AS segment,
+      SUM(sku.net_amount::numeric)::text AS unbought_value
+    FROM secondary_sku_line sku
+    WHERE 1=1
+      ${scopeFilter}
+      ${segmentFilter}
+      AND sku.item_code != ALL(ARRAY[${sql.join(boughtCodes.map((c) => sql`${c}`), sql`, `)}])
+    GROUP BY 1
+  `);
+
+  const unboughtBySegment = new Map<string, number>(
+    unboughtRows.rows.map((r) => [r.segment, parseFloat(r.unbought_value) || 0]),
+  );
+
+  return {
+    ...facts,
+    bySegment: facts.bySegment.map((seg) => ({
+      ...seg,
+      unboughtValue: unboughtBySegment.get(seg.segment) ?? 0,
+    })),
+  };
 }
 
 // ── Shared aggregation ────────────────────────────────────────────────────────
@@ -359,6 +437,9 @@ async function buildFactsFromRows(
         codesEverSold: codesEverSoldForSeg,
         breadthPct: codesEverSoldForSeg > 0 ? (codesBought / codesEverSoldForSeg) * 100 : 0,
         codesInCatalogue: catalogue.bySegment[segment] ?? 0,
+        // Populated by the caller (getPrimarySkuFacts / getSecondarySkuFacts) via
+        // a second query.  Initialised to 0 here so the shape is always complete.
+        unboughtValue: 0,
       };
     });
 

@@ -4,14 +4,13 @@
 // Clicking a row fires onDrill(segment).
 //
 // Columns:
-//   Segment | Net ₹Cr | Net% bar | Qty (pcs) | Codes Bought | Unbought | Opportunity ₹ | Breadth%
+//   Segment | Net ₹Cr | Net% bar | Qty (pcs) | Codes Bought | Unbought | Gap codes' net | Breadth%
 //
-// Opportunity = unbought codes × (net ÷ codesBought)
-//   = the rupee value you would expect to add if the average unbought code
-//     performed at the segment's current mean net-per-code rate.
-//   This is a rupee-denominated ranking signal: it puts CP's 1,707 gap codes
-//   on the same scale as Garden Pipe's 207, so segments with both a large
-//   gap and high per-code value rank above segments that are merely wide.
+// "Gap codes' net" = unboughtValue from the API:
+//   SUM(sale_line.amount) for codes NOT bought in the query period,
+//   applying the same level/scope filters, across all loaded fiscal years.
+//   This is a factual bottom-up sum — no extrapolation or mean assumption.
+//   Assumption labelled on column: "historical net of gap codes, all loaded FYs".
 //
 // Breadth% bar is shown without colour — the percentage is structural
 // (small segments hit 100% trivially) so colouring it is misleading.
@@ -30,9 +29,11 @@ export type SegmentRow = {
   codesEverSold: number;
   breadthPct: number;
   codesInCatalogue: number;
+  /** Bottom-up historical net of codes not bought this period (all loaded FYs). */
+  unboughtValue: number;
 };
 
-type SortKey = "segment" | "net" | "qty" | "breadthPct" | "codesBought" | "unbought" | "opportunity";
+type SortKey = "segment" | "net" | "qty" | "breadthPct" | "codesBought" | "unbought" | "gapNet";
 
 interface Props {
   rows: SegmentRow[];
@@ -42,18 +43,11 @@ interface Props {
   summary?: { totalCodes: number; totalQty: number; totalNet: number; segmentsBought: number } | null;
 }
 
-/** Opportunity = unbought codes × mean net per bought code. */
-function opportunity(row: SegmentRow): number {
-  if (row.codesBought === 0) return 0;
-  const meanNetPerCode = row.net / row.codesBought;
-  return (row.codesEverSold - row.codesBought) * meanNetPerCode;
-}
-
 function fmtCr(n: number): string {
   return `₹${(n / 1e7).toFixed(2)} Cr`;
 }
 
-function fmtOpportunity(n: number): string {
+function fmtGapNet(n: number): string {
   if (n === 0) return "—";
   const cr = n / 1e7;
   if (cr >= 1) return `₹${cr.toFixed(1)} Cr`;
@@ -61,7 +55,7 @@ function fmtOpportunity(n: number): string {
 }
 
 export default function SkuOverview({ rows, loading, onDrill, unmapped, summary }: Props) {
-  const [sortKey, setSortKey] = useState<SortKey>("opportunity");
+  const [sortKey, setSortKey] = useState<SortKey>("gapNet");
   const [sortAsc, setSortAsc] = useState(false);
 
   function toggleSort(key: SortKey) {
@@ -72,7 +66,6 @@ export default function SkuOverview({ rows, loading, onDrill, unmapped, summary 
   const enriched = rows.map((r) => ({
     ...r,
     unbought: r.codesEverSold - r.codesBought,
-    opportunity: opportunity(r),
   }));
 
   const sorted = [...enriched].sort((a, b) => {
@@ -83,12 +76,12 @@ export default function SkuOverview({ rows, loading, onDrill, unmapped, summary 
     else if (sortKey === "breadthPct") diff = a.breadthPct - b.breadthPct;
     else if (sortKey === "codesBought")diff = a.codesBought - b.codesBought;
     else if (sortKey === "unbought")   diff = a.unbought - b.unbought;
-    else if (sortKey === "opportunity")diff = a.opportunity - b.opportunity;
+    else if (sortKey === "gapNet")     diff = a.unboughtValue - b.unboughtValue;
     return sortAsc ? diff : -diff;
   });
 
   const maxNet = rows.length ? Math.max(...rows.map((r) => r.net)) : 1;
-  const maxOpportunity = enriched.length ? Math.max(...enriched.map((r) => r.opportunity)) : 1;
+  const maxGapNet = enriched.length ? Math.max(...enriched.map((r) => r.unboughtValue)) : 1;
 
   function SortHead({
     label,
@@ -172,7 +165,7 @@ export default function SkuOverview({ rows, loading, onDrill, unmapped, summary 
               <SortHead label="Qty (pcs)" k="qty" align="right" className="hidden md:table-cell" />
               <SortHead label="Bought" k="codesBought" align="right" />
               <SortHead label="Unbought" k="unbought" align="right" />
-              <SortHead label="Opportunity" k="opportunity" align="right" />
+              <SortHead label="Gap codes' net" k="gapNet" align="right" />
               <SortHead label="Breadth %" k="breadthPct" align="right" className="hidden lg:table-cell" />
             </TableRow>
           </TableHeader>
@@ -225,18 +218,17 @@ export default function SkuOverview({ rows, loading, onDrill, unmapped, summary 
                     : <span className="text-muted-foreground">0</span>}
                 </TableCell>
 
-                {/* Opportunity ₹ — the primary ranking signal */}
+                {/* Gap codes' net — bottom-up historical sum, no extrapolation */}
                 <TableCell className="text-right text-sm tabular-nums whitespace-nowrap">
                   <div className="flex items-center justify-end gap-2">
-                    {/* Inline bar */}
                     <div className="w-16 h-1.5 rounded bg-muted overflow-hidden hidden sm:block">
                       <div
                         className="h-full bg-primary rounded"
-                        style={{ width: `${maxOpportunity > 0 ? (row.opportunity / maxOpportunity) * 100 : 0}%` }}
+                        style={{ width: `${maxGapNet > 0 ? (row.unboughtValue / maxGapNet) * 100 : 0}%` }}
                       />
                     </div>
-                    <span className={cn("font-medium", row.opportunity > 0 ? "text-foreground" : "text-muted-foreground")}>
-                      {fmtOpportunity(row.opportunity)}
+                    <span className={cn("font-medium", row.unboughtValue > 0 ? "text-foreground" : "text-muted-foreground")}>
+                      {fmtGapNet(row.unboughtValue)}
                     </span>
                   </div>
                 </TableCell>
@@ -261,7 +253,7 @@ export default function SkuOverview({ rows, loading, onDrill, unmapped, summary 
         </Table>
       </div>
       <p className="text-xs text-muted-foreground">
-        <span className="font-medium">Opportunity</span> = unbought codes × mean net per bought code (₹ uplift if gap codes perform at segment average).
+        <span className="font-medium">Gap codes' net</span> = historical sales of codes not ordered this period, across all loaded fiscal years (same level — no forecast, no extrapolation).
         Click a row to drill into individual codes.
       </p>
     </div>
