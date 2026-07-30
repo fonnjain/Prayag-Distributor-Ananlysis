@@ -353,12 +353,15 @@ export type TombstoneResult = {
 /**
  * Tombstone (supersede) current rows that are no longer in the live sheet.
  *
- * GUARDS — all five must pass before any row is marked:
- *  1. SCOPE   — only rows for the exact (fy, month) tab that was just read
- *  2. PRECOND — abort if incomingRowCount === 0 (bad / empty tab read)
- *  3. BLAST   — halt if candidates exceed blastRadiusLimitPct of current rows in scope
- *  4. DRY-RUN — never writes when dryRun = true; always returns full report
- *  5. LOG     — every tombstone is logged with syncRunId for traceability
+ * GUARDS — all six must pass before any row is marked:
+ *  1. SCOPE      — only rows for the exact (fy, month) tab that was just read
+ *  2. PRECOND    — abort if incomingRowCount === 0 (bad / empty tab read)
+ *  2.5 SHORT-READ — abort if incomingRowCount < current DB rows for this month;
+ *                   a complete read must return at least as many rows as already
+ *                   exist, so fewer means the read is truncated
+ *  3. BLAST      — halt if candidates exceed blastRadiusLimitPct of current rows
+ *  4. DRY-RUN    — never writes when dryRun = true; always returns full report
+ *  5. LOG        — every tombstone is logged with syncRunId for traceability
  */
 export async function tombstoneOrphans(opts: {
   fy: string;
@@ -416,6 +419,26 @@ export async function tombstoneOrphans(opts: {
 
   const currentInScope = currentRows.length;
   const currentAmountInScope = currentRows.reduce((s, r) => s + Number(r.amount), 0);
+
+  // Guard 2.5: short-read — the incoming row count must be >= the number of
+  // current rows we already have for this (fy, month). Any complete read of a
+  // month should surface at least as many lines as are already stored; fewer
+  // means the Sheets API returned a truncated page. Tombstoning against a
+  // truncated read would permanently delete rows that are still in the sheet.
+  if (incomingRowCount < currentInScope) {
+    logger.warn(
+      { fy, month, incomingRowCount, currentInScope, syncRunId },
+      "tombstone: incoming row count less than current DB rows — read appears short, aborting tombstone pass for this month",
+    );
+    return {
+      fy, month, currentInScope, currentAmountInScope,
+      candidateCount: 0, candidateAmount: 0,
+      blastRadiusPct: 0, limitPct: blastRadiusLimitPct,
+      halted: true,
+      haltReason: `incoming ${incomingRowCount} rows < current DB ${currentInScope} rows — read appears short`,
+      dryRun, applied: 0, sampleRows: [],
+    };
+  }
 
   const orphans = currentRows.filter((r) => {
     const key = identityKey(r.invoiceNo, r.code, r.color, r.qty, r.monthLabel);
