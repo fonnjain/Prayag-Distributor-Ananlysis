@@ -1,8 +1,11 @@
-// SKU Deep Dive — Focus section (K3 Recommendations Engine).
+// SKU Deep Dive — Review section (K3 company-wide gap review).
 //
-// Ranked push list: for each segment with gap codes, shows the top codes
-// that were NOT ordered this period but had the highest realised net in
-// the same fiscal months across all prior loaded FYs.
+// Company-wide review list: for each segment, the codes that NO distributor
+// in the territory ordered this period, ranked by their historical net in
+// the same fiscal months.  This answers "what has the whole territory
+// stopped buying?" — not what one specific distributor should push.
+//
+// For per-distributor peer-cohort recommendations, see the Push tab.
 //
 // Rule-based — no AI, no forecast. Priority = gapNet descending.
 import { cn } from "@/lib/utils";

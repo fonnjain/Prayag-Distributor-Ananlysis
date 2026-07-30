@@ -1,9 +1,10 @@
-// SKU Deep Dive — Phase K2 + K3 + K4.
+// SKU Deep Dive — Phase K2 + K3 + K3b + K4.
 //
-// Four sections driven by internal state (not URL sub-routes):
+// Five sections driven by internal state (not URL sub-routes):
 //   Overview  — all canonical segments sorted by net; click → drill.
 //   Drill     — code-level breakdown for one segment.
-//   Focus     — ranked push list: top gap codes per segment (K3).
+//   Review    — company-wide gap codes (no distributor is buying these).
+//   Push      — per-distributor peer-cohort push list (K3b).
 //   Trends    — breadth % time-series and FY-over-FY comparisons.
 //
 // Filters: FY | Level (distributor/direct_dealer/retailer/project) | Period preset
@@ -16,6 +17,7 @@ import SkuOverview, { type SegmentRow } from "@/components/sku/SkuOverview";
 import SkuDrill, { type CodeRow } from "@/components/sku/SkuDrill";
 import SkuTrends, { type TrendData } from "@/components/sku/SkuTrends";
 import SkuFocus, { type FocusData } from "@/components/sku/SkuFocus";
+import SkuPushList, { type DistributorListItem, type PushListResult } from "@/components/sku/SkuPushList";
 import { cn } from "@/lib/utils";
 import { ChevronLeft } from "lucide-react";
 
@@ -60,7 +62,7 @@ type FactsResponse = {
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
-type Section = "overview" | "drill" | "focus" | "trends";
+type Section = "overview" | "drill" | "focus" | "push" | "trends";
 type Level = "distributor" | "direct_dealer" | "retailer" | "project";
 
 export default function SkuPage() {
@@ -83,10 +85,20 @@ export default function SkuPage() {
   const [drillLoading, setDrillLoading] = useState(false);
   const [drillError, setDrillError] = useState<string | null>(null);
 
-  // Fetch state — focus (K3 recommendations)
+  // Fetch state — focus / review (K3 company-wide gap review)
   const [focusData, setFocusData] = useState<FocusData | null>(null);
   const [focusLoading, setFocusLoading] = useState(false);
   const [focusError, setFocusError] = useState<string | null>(null);
+
+  // Distributor list — pre-fetched for the Push selector
+  const [distributorList, setDistributorList] = useState<DistributorListItem[]>([]);
+  const [distributorListLoading, setDistributorListLoading] = useState(false);
+
+  // Push state — per-distributor peer push list (K3b)
+  const [selectedDistributor, setSelectedDistributor] = useState<string | null>(null);
+  const [pushData, setPushData] = useState<PushListResult | null>(null);
+  const [pushLoading, setPushLoading] = useState(false);
+  const [pushError, setPushError] = useState<string | null>(null);
 
   // Fetch state — trends
   const [trendData, setTrendData] = useState<TrendData | null>(null);
@@ -166,6 +178,45 @@ export default function SkuPage() {
       .finally(() => setFocusLoading(false));
   }, [section, fy, level, period.monthFrom, period.monthTo]);
 
+  // ── Fetch distributor list (eager — pre-load when level or FY changes) ────────
+
+  useEffect(() => {
+    if (level === "retailer" || level === "project") return; // push only for distributor/direct
+    setDistributorListLoading(true);
+    const params = new URLSearchParams({ fy, level });
+    fetch(`${BASE}/api/sku/distributors?${params}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json() as Promise<{ distributors: DistributorListItem[] }>;
+      })
+      .then((d) => setDistributorList(d.distributors))
+      .catch(() => setDistributorList([]))
+      .finally(() => setDistributorListLoading(false));
+  }, [fy, level]);
+
+  // ── Fetch push list (fires when section = push AND a distributor is selected) ─
+
+  useEffect(() => {
+    if (section !== "push" || !selectedDistributor) return;
+    setPushLoading(true);
+    setPushError(null);
+    const params = new URLSearchParams({
+      fy,
+      level,
+      monthFrom: String(period.monthFrom),
+      monthTo: String(period.monthTo),
+      distributorKey: selectedDistributor,
+    });
+    fetch(`${BASE}/api/sku/push-list?${params}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json() as Promise<PushListResult>;
+      })
+      .then(setPushData)
+      .catch((e: Error) => setPushError(e.message))
+      .finally(() => setPushLoading(false));
+  }, [section, fy, level, period.monthFrom, period.monthTo, selectedDistributor]);
+
   // ── Fetch trend (all FYs) ─────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -200,6 +251,12 @@ export default function SkuPage() {
     setDrillSegment(seg);
     setDrillData(null);
     setSection("drill");
+  }
+
+  function handleSelectDistributor(customer: string | null) {
+    setSelectedDistributor(customer);
+    setPushData(null);
+    setPushError(null);
   }
 
   // ── Derived ───────────────────────────────────────────────────────────────────
@@ -283,7 +340,7 @@ export default function SkuPage() {
             </button>
           )}
 
-          {/* Focus (K3) — always visible */}
+          {/* Review (K3 company-wide gap list) — always visible */}
           <button
             type="button"
             onClick={() => setSection("focus")}
@@ -294,8 +351,24 @@ export default function SkuPage() {
                 : "text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
           >
-            Focus
+            Review
           </button>
+
+          {/* Push (K3b per-distributor) — visible for distributor/direct_dealer only */}
+          {level !== "retailer" && level !== "project" && (
+            <button
+              type="button"
+              onClick={() => setSection("push")}
+              className={cn(
+                "px-2.5 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap",
+                section === "push"
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            >
+              Push
+            </button>
+          )}
 
           {/* Trends — always visible */}
           <button
@@ -323,6 +396,8 @@ export default function SkuPage() {
               setDrillData(null);
               setFocusData(null);
               setTrendData(null);
+              setPushData(null);
+              setSelectedDistributor(null);
             }}
             className="rounded border bg-background px-2 py-1 text-xs"
           >
@@ -342,6 +417,7 @@ export default function SkuPage() {
                   setOverviewData(null);
                   setDrillData(null);
                   setFocusData(null);
+                  setPushData(null);
                 }}
                 className="rounded border bg-background px-2 py-1 text-xs"
               >
@@ -357,6 +433,7 @@ export default function SkuPage() {
                   setOverviewData(null);
                   setDrillData(null);
                   setFocusData(null);
+                  setPushData(null);
                 }}
                 className="rounded border bg-background px-2 py-1 text-xs"
               >
@@ -435,6 +512,20 @@ export default function SkuPage() {
             error={focusError}
             onDrill={handleFocusDrill}
             periodLabel={periodLabel}
+          />
+        )}
+
+        {section === "push" && (
+          <SkuPushList
+            distributorList={distributorList}
+            distributorListLoading={distributorListLoading}
+            selectedDistributor={selectedDistributor}
+            onSelect={handleSelectDistributor}
+            pushData={pushData}
+            pushLoading={pushLoading}
+            pushError={pushError}
+            periodLabel={periodLabel}
+            onDrill={handleFocusDrill}
           />
         )}
 

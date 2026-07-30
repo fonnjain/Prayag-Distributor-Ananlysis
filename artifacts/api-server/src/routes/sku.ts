@@ -31,6 +31,7 @@ import { Router } from "express";
 import { loadSkuFacts, getSkuCapability, getSkuTrend } from "../lib/sku/skuFacts.js";
 import type { SkuLevel, SkuScope } from "../lib/sku/skuFacts.js";
 import { getSkuRecommendations } from "../lib/sku/skuRecommendations.js";
+import { getDistributorList, getSkuPushList } from "../lib/sku/skuPushList.js";
 import {
   getCatalogueCounts,
   getCatalogueCompleteness,
@@ -346,6 +347,82 @@ router.get("/sku/recommendations", async (req: Request, res: Response): Promise<
   } catch (err) {
     req.log.error({ err, fy, level }, "sku recommendations failed");
     res.status(500).json({ error: "Could not load SKU recommendations." });
+  }
+});
+
+// ── GET /api/sku/distributors ─────────────────────────────────────────────────
+//
+// Returns all non-project distributors for the given level + active FY,
+// enriched with their FY2025-26 cohort quintile.  Used to populate the Push
+// tab selector.
+//
+// Query params:
+//   fy     (required)  active FY for discovering newly-onboarded distributors
+//   level  (optional)  distributor (default) | direct_dealer
+
+router.get("/sku/distributors", async (req: Request, res: Response): Promise<void> => {
+  const fy =
+    typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
+      ? req.query.fy.trim()
+      : "2026-27";
+  const level = typeof req.query.level === "string" ? req.query.level.trim() : "distributor";
+  if (!VALID_LEVELS.has(level)) {
+    res.status(400).json({ error: `level must be one of: ${[...VALID_LEVELS].join(", ")}` });
+    return;
+  }
+  try {
+    const list = await getDistributorList(fy, level as SkuLevel);
+    res.json({ fy, level, count: list.length, distributors: list });
+  } catch (err) {
+    req.log.error({ err, fy, level }, "sku distributors failed");
+    res.status(500).json({ error: "Could not load distributor list." });
+  }
+});
+
+// ── GET /api/sku/push-list ────────────────────────────────────────────────────
+//
+// Per-distributor peer-cohort push list.  Returns gap codes that ≥ 3 peers
+// are buying in the query period but the target distributor is not.
+//
+// Query params:
+//   fy              (required)  e.g. 2026-27
+//   level           (optional)  distributor (default)
+//   monthFrom       (optional)  1–12, default 1
+//   monthTo         (optional)  monthFrom–12, default 12
+//   distributorKey  (required)  exact customer name from sale_line_current
+
+router.get("/sku/push-list", async (req: Request, res: Response): Promise<void> => {
+  const fy =
+    typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
+      ? req.query.fy.trim()
+      : "2026-27";
+  const level = typeof req.query.level === "string" ? req.query.level.trim() : "distributor";
+  if (!VALID_LEVELS.has(level)) {
+    res.status(400).json({ error: `level must be one of: ${[...VALID_LEVELS].join(", ")}` });
+    return;
+  }
+  const distributorKey =
+    typeof req.query.distributorKey === "string" && req.query.distributorKey.trim()
+      ? req.query.distributorKey.trim()
+      : null;
+  if (!distributorKey) {
+    res.status(400).json({ error: "distributorKey is required" });
+    return;
+  }
+  const monthFrom = intParam(req, "monthFrom", 1, 12, 1);
+  const monthTo   = intParam(req, "monthTo", monthFrom, 12, 12);
+  const monthLabels = fiscalMonthsToLabels(fy, monthFrom, monthTo);
+  try {
+    const result = await getSkuPushList({
+      fy,
+      monthLabels,
+      level: level as SkuLevel,
+      distributorKey,
+    });
+    res.json({ fy, monthFrom, monthTo, level, ...result });
+  } catch (err) {
+    req.log.error({ err, fy, level, distributorKey }, "sku push-list failed");
+    res.status(500).json({ error: "Could not load SKU push list." });
   }
 });
 
