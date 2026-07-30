@@ -269,7 +269,7 @@ async function doSync(fy: string, spreadsheetId: string): Promise<void> {
 
     const syncedAt = new Date();
     // ── Step 3 + 4: upsert + tombstone pass (tombstone is inside versionedSyncLines) ──
-    const { touched, superseded, inserted, tombstoned } = await versionedSyncLines(linesWithResolvedUids, syncedAt);
+    const { touched, superseded, inserted, revived, tombstoned } = await versionedSyncLines(linesWithResolvedUids, syncedAt);
 
     lastSyncedAtMs.set(fy, Date.now());
     s.rows = linesWithResolvedUids.length;
@@ -284,6 +284,7 @@ async function doSync(fy: string, spreadsheetId: string): Promise<void> {
         touched,
         superseded,
         inserted,
+        revived,
         tombstoned,
         unmappedGroups: Object.keys(unmapped.unmapped_groups).length,
         unmappedHeads: Object.keys(unmapped.unmapped_heads).length,

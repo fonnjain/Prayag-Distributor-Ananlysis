@@ -57,23 +57,40 @@ export function identityKey(
 }
 
 // Deduplicate a batch before insert.
-// When a row has serial_no set: key = (fy, month_label, serial_no). Serial
-// numbers restart at 1 for each monthly tab, so month_label is required to
-// scope uniqueness correctly. Two lines with the same (fy, month_label,
-// serial_no) are the same physical dispatch line (true double-read); we keep
-// the first occurrence.
+// When a row has serial_no set: key = (fy, month_label, serial_no,
+// invoice_no, code, color, qty). Combining the serial number with the full
+// 5-field natural key ensures that two rows sharing a serial number but
+// carrying different invoice/code/colour/qty are both kept (they are distinct
+// dispatch lines whose serial happened to collide or be reassigned by the
+// sheet author). Only a row that is identical on ALL six dimensions is treated
+// as a true double-read and suppressed.
+//
+// PRIOR BEHAVIOUR (fy|monthLabel|serialNo only) was too broad: it collapsed
+// rows that differed by colour or code when they shared a serial, silently
+// dropping 16 May and 12 June rows in FY2026-27.
+//
 // When serial_no is absent (historical FYs without column A): no in-memory
 // dedup — trust the occurrence-counter in line_uid to distinguish legitimate
 // variant lines. The DB ON CONFLICT (line_uid) DO NOTHING handles residual
 // hash collisions.
 function dedupeBySerialNo(lines: InsertSaleLine[]): InsertSaleLine[] {
-  const seen = new Map<string, InsertSaleLine>();
+  const seen = new Set<string>();
   const out: InsertSaleLine[] = [];
   for (const line of lines) {
     if (line.serialNo != null && line.monthLabel != null) {
-      const key = `${line.fy ?? ""}|${line.monthLabel}|${line.serialNo}`;
+      // Six-field key: serial narrows to a physical row; the natural-key fields
+      // distinguish genuinely different rows that share a serial.
+      const key = [
+        line.fy ?? "",
+        line.monthLabel,
+        line.serialNo,
+        line.invoiceNo ?? "",
+        line.code,
+        line.color ?? "",
+        line.qty ?? "",
+      ].join("|");
       if (!seen.has(key)) {
-        seen.set(key, line);
+        seen.add(key);
         out.push(line);
       }
     } else {
@@ -329,6 +346,10 @@ export type VersionedSyncResult = {
   touched: number;
   superseded: number;
   inserted: number;
+  /** Rows that existed as superseded in the DB but were present again in the
+   *  sheet — revived back to version_status='current' rather than silently
+   *  dropped by INSERT ON CONFLICT DO NOTHING. */
+  revived: number;
   tombstoned: number;
 };
 
@@ -534,7 +555,7 @@ export async function versionedSyncLines(
   lines: InsertSaleLine[],
   confirmedAt: Date,
 ): Promise<VersionedSyncResult> {
-  if (lines.length === 0) return { touched: 0, superseded: 0, inserted: 0, tombstoned: 0 };
+  if (lines.length === 0) return { touched: 0, superseded: 0, inserted: 0, revived: 0, tombstoned: 0 };
 
   const deduped = dedupeBySerialNo(lines);
 
@@ -659,18 +680,86 @@ export async function versionedSyncLines(
     });
   }
 
-  let inserted = 0;
-  for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
-    const batch = toInsert.slice(i, i + BATCH_SIZE);
-    const rows = await db
-      .insert(saleLines)
-      .values(batch)
-      .onConflictDoNothing()
-      .returning({ lineUid: saleLines.lineUid });
-    inserted += rows.length;
+  // ── Insert / revive pass ──────────────────────────────────────────────────
+  // A row in toInsert whose line_uid already exists as 'superseded' cannot be
+  // re-inserted (ON CONFLICT DO NOTHING silently skips it). Instead, detect
+  // those superseded rows up-front and UPDATE them back to 'current'. Only
+  // rows with a genuinely new line_uid go to INSERT.
+  //
+  // Revive guard (symmetric with Guard 2.5 in tombstoneOrphans):
+  // A month where incomingRows < currentDbRows is a suspected short read.
+  // In that scenario the tombstone pass is also halted (Guard 2.5), so we must
+  // NOT revive rows for that month either — doing so would silently inflate the
+  // current-row count for months whose sheet read was incomplete.
+  const currentCountByMonth = new Map<string, number>();
+  for (const row of allCurrent) {
+    if (row.monthLabel == null) continue;
+    currentCountByMonth.set(row.monthLabel, (currentCountByMonth.get(row.monthLabel) ?? 0) + 1);
+  }
+  const incomingCountByMonth = new Map<string, number>();
+  for (const line of deduped) {
+    if (line.monthLabel == null) continue;
+    incomingCountByMonth.set(line.monthLabel, (incomingCountByMonth.get(line.monthLabel) ?? 0) + 1);
+  }
+  // A month is "safe to revive" when the incoming count is at least as large
+  // as the current DB count (no evidence of a short read).
+  const safeToReviveMonths = new Set<string>();
+  for (const [month, incoming] of incomingCountByMonth) {
+    const current = currentCountByMonth.get(month) ?? 0;
+    if (incoming >= current) safeToReviveMonths.add(month);
   }
 
-  const confirmedUids = [...toTouch, ...toInsert.map((l) => l.lineUid)];
+  let inserted = 0;
+  let revived = 0;
+  const revivedUids: string[] = [];
+  for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
+    const batch = toInsert.slice(i, i + BATCH_SIZE);
+    const batchUids = batch.map((l) => l.lineUid);
+
+    // Pre-flight: which line_uids already exist in any version?
+    const existing = await db
+      .select({ lineUid: saleLines.lineUid, versionStatus: saleLines.versionStatus })
+      .from(saleLines)
+      .where(inArray(saleLines.lineUid, batchUids));
+
+    const existingUidSet = new Set(existing.map((r) => r.lineUid));
+    const supersededUids = existing
+      .filter((r) => r.versionStatus === "superseded")
+      .map((r) => r.lineUid);
+    const trulyNew = batch.filter((l) => !existingUidSet.has(l.lineUid));
+
+    // Revive: update superseded rows back to current — only for safe months.
+    // Build a line_uid → monthLabel map from the batch so we can filter by month.
+    const uidToMonth = new Map(batch.map((l) => [l.lineUid, l.monthLabel ?? ""]));
+    const safeSupersededUids = supersededUids.filter((uid) =>
+      safeToReviveMonths.has(uidToMonth.get(uid) ?? ""),
+    );
+    if (safeSupersededUids.length > 0) {
+      for (let j = 0; j < safeSupersededUids.length; j += BATCH_SIZE) {
+        const uidBatch = safeSupersededUids.slice(j, j + BATCH_SIZE);
+        await db
+          .update(saleLines)
+          .set({ versionStatus: "current", supersededAt: null, supersededBy: null })
+          .where(
+            and(inArray(saleLines.lineUid, uidBatch), eq(saleLines.versionStatus, "superseded")),
+          );
+      }
+      revived += safeSupersededUids.length;
+      revivedUids.push(...safeSupersededUids);
+    }
+
+    // Insert genuinely new rows.
+    if (trulyNew.length > 0) {
+      const rows = await db
+        .insert(saleLines)
+        .values(trulyNew)
+        .onConflictDoNothing()
+        .returning({ lineUid: saleLines.lineUid });
+      inserted += rows.length;
+    }
+  }
+
+  const confirmedUids = [...toTouch, ...revivedUids, ...toInsert.map((l) => l.lineUid)];
   if (confirmedUids.length > 0) {
     await markSheetConfirmed(confirmedUids, confirmedAt);
   }
@@ -704,7 +793,7 @@ export async function versionedSyncLines(
     if (!tr.halted) tombstoned += tr.applied;
   }
 
-  return { touched: toTouch.length, superseded: toSupersede.length, inserted, tombstoned };
+  return { touched: toTouch.length, superseded: toSupersede.length, inserted, revived, tombstoned };
 }
 
 export async function upsertItemMaster(
