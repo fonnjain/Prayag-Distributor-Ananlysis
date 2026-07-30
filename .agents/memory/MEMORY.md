@@ -19,6 +19,7 @@
 - [STATE HD Dashboard column detection](state-dashboard-column-detection.md) — FY-suffix stripping + Excel date serial detection required; block offsets +0/+2/+5=plan/OB/sales; plan ₹364.97 Cr verified.
 - [Drizzle GROUP BY bare-column trap](drizzle-groupby-bare-column.md) — Postgres rejects bare column refs in SELECT when GROUP BY uses a wrapped expression; use max(col) or repeat the exact expression.
 - [SKU Deep Dive K3 — Review + Push](sku-k3-focus.md) — Review=company-wide gap list; Push=per-distributor peer cohort (COHORT_FY=2025-26, ≥3 peers, segment-active denominator, national fallback < 8 dist/state).
+- [state_canon normalisation](state-canon-normalisation.md) — STATE_CANON_NORMALISE map + stateVariants() in skuPushList.ts; vocabulary gap: dashboard=Delhi, sale_line=DELHI A; customers/analytics.ts state filter needs same expansion.
 - [SKU project channel separation](sku-project-channel.md) — PROJECT_HEAD_CANON excluded from territory gap/breadth; three ever-sold maps in catalogue.ts; level="project" is first-class.
 - [SKU Deep Dive K1 data layer](sku-k1-data-layer.md) — secondary_sku_line table; two separate group maps (item_group_map.json vs group_map.json); sale_line_current view must be created manually; Drizzle array params need sql.join+ARRAY[].
 - [sale_line_current view](sale-line-current-view.md) — must be created manually via psql (not in Drizzle schema push); CREATE OR REPLACE VIEW sale_line_current AS SELECT * FROM sale_line WHERE version_status='current'.
