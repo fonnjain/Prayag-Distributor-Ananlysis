@@ -41,6 +41,22 @@ Segments sorted by `segmentPeerCount × totalGapCodes` descending — prioritise
 - 13 segments with qualifying gap codes
 - CP: 55 codes, 27 active peers; CPVC: 69 codes, 17 peers; PTMT: 40 codes, 28 peers
 
+## Four-tier code ranking (Block 1)
+Each gap code is classified before assembly; within each segment codes sort T1→T4 then peerCount DESC, capped at 10 (TOP_CODES_PER_SEGMENT).
+
+| Tier | Label | Signal | Condition |
+|---|---|---|---|
+| 1 | Range | Fill sub-family range | code's `item_group` ∈ distributor's bought item_groups this period. Fires only when item_master covers the code (~49% coverage). |
+| 2 | Lapsed | Reactivate dropped line | code in COHORT_FY purchase history but not current period |
+| 3 | Active | Cross-sell within segment | distributor has any purchase in this `group_canon` this period |
+| 4 | New | New category entry | none of the above |
+
+`rankCode()` pure function in skuPushList.ts. `PushCode.tier` (1|2|3|4) + `PushCode.tierLabel` on every code. Frontend `TierBadge` uses emerald/amber/blue/slate colour scheme.
+
+WAHID Q1 FY26-27 result: T1=72 (67%), T2=25 (23%), T3=4, T4=7 across 14 segments, 108 top codes (down from 234 raw).
+
+item_master coverage note: only 1,716 of 3,509 codes in FY2026-27 have item_group. Tier 1 is sparse but correct; uncovered codes fall to T3/T4 based on segment activity.
+
 ## Key files
 - `artifacts/api-server/src/lib/sku/skuPushList.ts`
 - `artifacts/api-server/src/routes/sku.ts` (distributors + push-list routes)

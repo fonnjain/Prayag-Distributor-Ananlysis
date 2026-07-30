@@ -32,7 +32,7 @@ import type { SkuLevel } from "./skuFacts.js";
 const COHORT_FY = "2025-26";
 const MIN_STATE_DISTRIBUTORS = 8;
 const MIN_PEERS_PER_CODE = 3;
-const TOP_CODES_PER_SEGMENT = 8;
+const TOP_CODES_PER_SEGMENT = 10;
 
 /**
  * Explicit normalisation map for sale_line state_canon variants that represent
@@ -90,6 +90,32 @@ function stateVariants(raw: string | null): string[] {
   return [...variants];
 }
 
+// ── Tier classification ────────────────────────────────────────────────────────
+
+/**
+ * Classify a gap code into one of four recommendation tiers (lower = higher priority).
+ *
+ *  1 Range  — code's ERP item_group is already in the distributor's current-period
+ *             purchase set (fill the range within a sub-family).
+ *             Only fires when item_master covers both the gap code and ≥1 bought code.
+ *  2 Lapsed — distributor bought this exact code in COHORT_FY but not this period.
+ *  3 Active — distributor has any purchase in this segment this period.
+ *  4 New    — distributor has no purchase in this segment this period.
+ */
+function rankCode(
+  itemGroup: string | null,
+  segment: string,
+  code: string,
+  targetItemGroups: Set<string>,
+  targetLostCodes: Set<string>,
+  targetActiveSegments: Set<string>,
+): { tier: 1 | 2 | 3 | 4; tierLabel: "Range" | "Lapsed" | "Active" | "New" } {
+  if (itemGroup && targetItemGroups.has(itemGroup)) return { tier: 1, tierLabel: "Range" };
+  if (targetLostCodes.has(code))                    return { tier: 2, tierLabel: "Lapsed" };
+  if (targetActiveSegments.has(segment))             return { tier: 3, tierLabel: "Active" };
+  return { tier: 4, tierLabel: "New" };
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 export type DistributorListItem = {
@@ -110,6 +136,15 @@ export type PushCode = {
   /** Total net of those peers for this code in the query period. */
   peerNet: number;
   lastFy: string;
+  /**
+   * Four-tier recommendation priority:
+   *   1 Range   — code's item_group matches an item_group the distributor already buys
+   *   2 Lapsed  — distributor bought this code in COHORT_FY but not this period
+   *   3 Active  — distributor is active in this segment this period
+   *   4 New     — distributor has no purchases in this segment this period
+   */
+  tier: 1 | 2 | 3 | 4;
+  tierLabel: "Range" | "Lapsed" | "Active" | "New";
 };
 
 export type SegmentPushCard = {
@@ -473,8 +508,10 @@ export async function getSkuPushList(
 
     // ── Segment queries (identical SQL to the main path, different pool) ────────
 
-    const fbTargetBoughtRows = await db.execute<{ code: string }>(sql`
-      SELECT DISTINCT sl.code
+    const fbTargetBoughtRows = await db.execute<{ code: string; segment: string }>(sql`
+      SELECT DISTINCT
+        sl.code,
+        COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') AS segment
       FROM sale_line_current sl
       WHERE sl.fy = ${fy}
         AND sl.month_label = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
@@ -482,9 +519,35 @@ export async function getSkuPushList(
         AND sl.code IS NOT NULL AND sl.code <> ''
         ${levelFilter}
     `);
-    const fbTargetBought = new Set(fbTargetBoughtRows.rows.map((r) => r.code));
+    const fbTargetBought         = new Set(fbTargetBoughtRows.rows.map((r) => r.code));
+    const fbTargetActiveSegments = new Set(fbTargetBoughtRows.rows.map((r) => r.segment));
     const fbFiscalMonths = [...new Set(monthLabels.map((m) => m.split("-")[0]))];
     const fbNotBoughtArr = fbTargetBought.size > 0 ? [...fbTargetBought] : ["__none__"];
+
+    // Tier-classification data for fallback distributor
+    const [fbItemGroupRows, fbPriorCodeRows] = await Promise.all([
+      db.execute<{ item_group: string }>(sql`
+        SELECT DISTINCT im.item_group
+        FROM sale_line_current sl
+        JOIN item_master im ON im.code = sl.code
+        WHERE sl.fy = ${fy}
+          AND sl.month_label = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
+          AND sl.customer = ${distributorKey}
+          AND sl.code IS NOT NULL AND im.item_group IS NOT NULL
+          ${levelFilter}
+      `),
+      db.execute<{ code: string }>(sql`
+        SELECT DISTINCT sl.code
+        FROM sale_line_current sl
+        WHERE sl.fy = ${COHORT_FY}
+          AND sl.customer = ${distributorKey}
+          AND sl.code IS NOT NULL AND sl.code <> ''
+          ${levelFilter}
+      `),
+    ]);
+    const fbTargetItemGroups = new Set(fbItemGroupRows.rows.map((r) => r.item_group));
+    const fbPriorCodes       = new Set(fbPriorCodeRows.rows.map((r) => r.code));
+    const fbTargetLostCodes  = new Set([...fbPriorCodes].filter((c) => !fbTargetBought.has(c)));
 
     const fbSegPeerRows = await db.execute<{
       segment: string;
@@ -510,6 +573,7 @@ export async function getSkuPushList(
       segment: string;
       code: string;
       item_name: string | null;
+      item_group: string | null;
       peer_count: string;
       peer_net: string;
       last_fy: string;
@@ -518,6 +582,7 @@ export async function getSkuPushList(
         COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') AS segment,
         sl.code,
         MAX(im.item_name)                                   AS item_name,
+        MAX(im.item_group)                                  AS item_group,
         COUNT(DISTINCT sl.customer)::text                   AS peer_count,
         SUM(sl.amount::numeric)::text                       AS peer_net,
         MAX(sl.fy)                                          AS last_fy
@@ -536,37 +601,43 @@ export async function getSkuPushList(
                SUM(sl.amount::numeric) DESC
     `);
 
-    type SegAccFb = { totalGapCodes: number; topCodes: PushCode[] };
+    type SegAccFb = { totalGapCodes: number; codes: PushCode[] };
     const fbSegMap = new Map<string, SegAccFb>();
     for (const r of fbCodeRows.rows) {
       const seg = r.segment;
-      const spCount = fbSegPeerCount.get(seg) ?? 0;
-      if (spCount < MIN_PEERS_PER_CODE) continue;
-      const existing = fbSegMap.get(seg);
+      if ((fbSegPeerCount.get(seg) ?? 0) < MIN_PEERS_PER_CODE) continue;
+      const { tier, tierLabel } = rankCode(
+        r.item_group ?? null, seg, r.code,
+        fbTargetItemGroups, fbTargetLostCodes, fbTargetActiveSegments,
+      );
       const code: PushCode = {
         code: r.code,
         itemName: r.item_name,
         peerCount: parseInt(r.peer_count, 10) || 0,
         peerNet: parseFloat(r.peer_net) || 0,
         lastFy: r.last_fy,
+        tier,
+        tierLabel,
       };
+      const existing = fbSegMap.get(seg);
       if (existing) {
         existing.totalGapCodes++;
-        if (existing.topCodes.length < TOP_CODES_PER_SEGMENT) existing.topCodes.push(code);
+        existing.codes.push(code);
       } else {
-        fbSegMap.set(seg, { totalGapCodes: 1, topCodes: [code] });
+        fbSegMap.set(seg, { totalGapCodes: 1, codes: [code] });
       }
     }
 
     const fbSegments: SegmentPushCard[] = [];
     for (const [segment, acc] of fbSegMap) {
+      acc.codes.sort((a, b) => a.tier - b.tier || b.peerCount - a.peerCount);
       fbSegments.push({
         rank: 0,
         segment,
         totalGapCodes: acc.totalGapCodes,
         segmentPeerCount: fbSegPeerCount.get(segment) ?? 0,
         cohortBasis: fallbackTier === "national" ? "national" : "state",
-        topCodes: acc.topCodes,
+        topCodes: acc.codes.slice(0, TOP_CODES_PER_SEGMENT),
       });
     }
     fbSegments.sort(
@@ -625,10 +696,12 @@ export async function getSkuPushList(
     };
   }
 
-  // ── 2. Target's bought codes in query period ───────────────────────────────
+  // ── 2. Target's bought codes + active segments in query period ────────────
 
-  const targetBoughtRows = await db.execute<{ code: string }>(sql`
-    SELECT DISTINCT sl.code
+  const targetBoughtRows = await db.execute<{ code: string; segment: string }>(sql`
+    SELECT DISTINCT
+      sl.code,
+      COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') AS segment
     FROM sale_line_current sl
     WHERE sl.fy = ${fy}
       AND sl.month_label = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
@@ -636,7 +709,37 @@ export async function getSkuPushList(
       AND sl.code IS NOT NULL AND sl.code <> ''
       ${levelFilter}
   `);
-  const targetBought = new Set(targetBoughtRows.rows.map((r) => r.code));
+  const targetBought         = new Set(targetBoughtRows.rows.map((r) => r.code));
+  const targetActiveSegments = new Set(targetBoughtRows.rows.map((r) => r.segment));
+
+  // ── 2b. Tier-classification data (run in parallel) ─────────────────────────
+  //   • item_groups the target already buys → Tier 1 (Range) signal
+  //   • codes bought in COHORT_FY → Tier 2 (Lapsed) signal
+
+  const [targetItemGroupRows, targetPriorCodeRows] = await Promise.all([
+    db.execute<{ item_group: string }>(sql`
+      SELECT DISTINCT im.item_group
+      FROM sale_line_current sl
+      JOIN item_master im ON im.code = sl.code
+      WHERE sl.fy = ${fy}
+        AND sl.month_label = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
+        AND sl.customer = ${distributorKey}
+        AND sl.code IS NOT NULL AND im.item_group IS NOT NULL
+        ${levelFilter}
+    `),
+    db.execute<{ code: string }>(sql`
+      SELECT DISTINCT sl.code
+      FROM sale_line_current sl
+      WHERE sl.fy = ${COHORT_FY}
+        AND sl.customer = ${distributorKey}
+        AND sl.code IS NOT NULL AND sl.code <> ''
+        ${levelFilter}
+    `),
+  ]);
+  const targetItemGroups = new Set(targetItemGroupRows.rows.map((r) => r.item_group));
+  const targetPriorCodes = new Set(targetPriorCodeRows.rows.map((r) => r.code));
+  // Lapsed = bought in COHORT_FY but NOT in current query period
+  const targetLostCodes  = new Set([...targetPriorCodes].filter((c) => !targetBought.has(c)));
 
   // ── 3. Fiscal-month prefix for same-period signal ─────────────────────────
 
@@ -676,6 +779,7 @@ export async function getSkuPushList(
     segment: string;
     code: string;
     item_name: string | null;
+    item_group: string | null;
     peer_count: string;
     peer_net: string;
     last_fy: string;
@@ -684,6 +788,7 @@ export async function getSkuPushList(
       COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') AS segment,
       sl.code,
       MAX(im.item_name)                                   AS item_name,
+      MAX(im.item_group)                                  AS item_group,
       COUNT(DISTINCT sl.customer)::text                   AS peer_count,
       SUM(sl.amount::numeric)::text                       AS peer_net,
       MAX(sl.fy)                                          AS last_fy
@@ -700,49 +805,50 @@ export async function getSkuPushList(
     ORDER BY COALESCE(sl.group_canon, sl.group_raw, 'Unmapped'), COUNT(DISTINCT sl.customer) DESC, SUM(sl.amount::numeric) DESC
   `);
 
-  // ── 5. Assemble segment cards ─────────────────────────────────────────────
+  // ── 5. Assemble segment cards with four-tier ranking ─────────────────────
+  // Collect ALL qualifying codes per segment first, then sort + cap.
 
-  type SegAcc = {
-    totalGapCodes: number;
-    topCodes: PushCode[];
-  };
+  type SegAcc = { totalGapCodes: number; codes: PushCode[] };
   const segMap = new Map<string, SegAcc>();
 
   for (const r of peerCodeRows.rows) {
     const seg = r.segment;
-    const spCount = segPeerCount.get(seg) ?? 0;
-    // Segment-active peer count must also meet the threshold
-    if (spCount < MIN_PEERS_PER_CODE) continue;
+    if ((segPeerCount.get(seg) ?? 0) < MIN_PEERS_PER_CODE) continue;
 
-    const existing = segMap.get(seg);
+    const { tier, tierLabel } = rankCode(
+      r.item_group ?? null, seg, r.code,
+      targetItemGroups, targetLostCodes, targetActiveSegments,
+    );
     const code: PushCode = {
       code: r.code,
       itemName: r.item_name,
       peerCount: parseInt(r.peer_count, 10) || 0,
       peerNet: parseFloat(r.peer_net) || 0,
       lastFy: r.last_fy,
+      tier,
+      tierLabel,
     };
+    const existing = segMap.get(seg);
     if (existing) {
       existing.totalGapCodes++;
-      if (existing.topCodes.length < TOP_CODES_PER_SEGMENT) {
-        existing.topCodes.push(code);
-      }
+      existing.codes.push(code);
     } else {
-      segMap.set(seg, { totalGapCodes: 1, topCodes: [code] });
+      segMap.set(seg, { totalGapCodes: 1, codes: [code] });
     }
   }
 
-  // Build sorted segment cards (sort by totalGapCodes * segmentPeerCount desc)
+  // Sort each segment: tier ASC (1 beats 4), then peerCount DESC; cap to TOP_CODES_PER_SEGMENT.
   const segments: SegmentPushCard[] = [];
   for (const [segment, acc] of segMap) {
     const spCount = segPeerCount.get(segment) ?? 0;
+    acc.codes.sort((a, b) => a.tier - b.tier || b.peerCount - a.peerCount);
     segments.push({
       rank: 0,
       segment,
       totalGapCodes: acc.totalGapCodes,
       segmentPeerCount: spCount,
       cohortBasis,
-      topCodes: acc.topCodes,
+      topCodes: acc.codes.slice(0, TOP_CODES_PER_SEGMENT),
     });
   }
 

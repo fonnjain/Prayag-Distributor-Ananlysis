@@ -31,6 +31,8 @@ export type PushCode = {
   peerCount: number;
   peerNet: number;
   lastFy: string;
+  tier: 1 | 2 | 3 | 4;
+  tierLabel: "Range" | "Lapsed" | "Active" | "New";
 };
 
 export type SegmentPushCard = {
@@ -61,6 +63,24 @@ export type PushListResult = {
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+const TIER_STYLES: Record<1 | 2 | 3 | 4, string> = {
+  1: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20",
+  2: "bg-amber-500/10  text-amber-700  dark:text-amber-400  border-amber-500/20",
+  3: "bg-blue-500/10   text-blue-700   dark:text-blue-400   border-blue-500/20",
+  4: "bg-muted/60      text-muted-foreground                border-border",
+};
+
+function TierBadge({ tier, label }: { tier: 1 | 2 | 3 | 4; label: string }) {
+  return (
+    <span className={cn(
+      "inline-flex items-center px-1.5 py-0 rounded border text-[10px] font-medium leading-4 tabular-nums select-none",
+      TIER_STYLES[tier],
+    )}>
+      {label}
+    </span>
+  );
+}
 
 function fmtNet(n: number): string {
   const cr = n / 1e7;
@@ -477,12 +497,15 @@ function PushSegmentCard({
           </TableHeader>
           <TableBody>
             {seg.topCodes.map((code, idx) => (
-              <TableRow key={code.code} className={cn(idx === 0 && "font-medium")}>
+              <TableRow key={code.code}>
                 <TableCell className="py-1.5 pl-4 text-xs text-muted-foreground tabular-nums w-8">
                   {idx + 1}
                 </TableCell>
-                <TableCell className="py-1.5 font-mono text-xs whitespace-nowrap">
-                  {code.code}
+                <TableCell className="py-1.5 whitespace-nowrap">
+                  <div className="flex items-center gap-1.5">
+                    <TierBadge tier={code.tier} label={code.tierLabel} />
+                    <span className="font-mono text-xs">{code.code}</span>
+                  </div>
                 </TableCell>
                 <TableCell className="py-1.5 text-xs hidden sm:table-cell max-w-[200px] truncate">
                   {code.itemName ?? (
