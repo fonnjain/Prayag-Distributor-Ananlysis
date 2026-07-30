@@ -351,6 +351,9 @@ export type VersionedSyncResult = {
    *  dropped by INSERT ON CONFLICT DO NOTHING. */
   revived: number;
   tombstoned: number;
+  /** Post-dedup incoming row count per "fy|monthLabel" key.
+   *  Returned so the caller can update its last-good-read baseline. */
+  incomingCountByFyMonth: ReadonlyMap<string, number>;
 };
 
 export type TombstoneResult = {
@@ -400,6 +403,12 @@ export async function tombstoneOrphans(opts: {
   syncRunId: string;
   dryRun: boolean;
   blastRadiusLimitPct?: number;
+  /** Last known-good row count from a previous successful read of this month.
+   *  When supplied, Guard 2.5 compares against this instead of the current DB
+   *  count — so tombstone is only halted by a genuinely truncated read, not by
+   *  the DB having drifted above the sheet count. Falls back to currentInScope
+   *  when not provided (e.g. manual POST calls). */
+  lastGoodRowCount?: number;
 }): Promise<TombstoneResult> {
   const {
     fy,
@@ -450,22 +459,26 @@ export async function tombstoneOrphans(opts: {
   const currentInScope = currentRows.length;
   const currentAmountInScope = currentRows.reduce((s, r) => s + Number(r.amount), 0);
 
-  // Guard 2.5: short-read — the incoming row count must be >= the number of
-  // current rows we already have for this (fy, month). Any complete read of a
-  // month should surface at least as many lines as are already stored; fewer
-  // means the Sheets API returned a truncated page. Tombstoning against a
-  // truncated read would permanently delete rows that are still in the sheet.
-  if (incomingRowCount < currentInScope) {
+  // Guard 2.5: short-read — the incoming row count must be >= the last
+  // known-good read for this month. A complete read should surface at least as
+  // many rows as the previous successful read; fewer means the Sheets API
+  // returned a truncated page. Tombstoning against a truncated read would
+  // permanently delete rows that are still in the sheet.
+  // Falls back to current DB row count when no baseline is recorded (first run).
+  // NOTE: comparing against current DB rows instead fires whenever the DB has
+  // drifted above the sheet count, which is exactly when tombstone needs to run.
+  const shortReadThreshold = opts.lastGoodRowCount ?? currentInScope;
+  if (incomingRowCount < shortReadThreshold) {
     logger.warn(
-      { fy, month, incomingRowCount, currentInScope, syncRunId },
-      "tombstone: incoming row count less than current DB rows — read appears short, aborting tombstone pass for this month",
+      { fy, month, incomingRowCount, shortReadThreshold, lastGoodRowCount: opts.lastGoodRowCount, currentInScope, syncRunId },
+      "tombstone: incoming row count less than last known-good read — read appears short, aborting tombstone pass for this month",
     );
     return {
       fy, month, currentInScope, currentAmountInScope,
       candidateCount: 0, candidateAmount: 0,
       blastRadiusPct: 0, limitPct: blastRadiusLimitPct,
       halted: true,
-      haltReason: `incoming ${incomingRowCount} rows < current DB ${currentInScope} rows — read appears short`,
+      haltReason: `incoming ${incomingRowCount} rows < last-good ${shortReadThreshold} rows — read appears short`,
       dryRun, applied: 0, sampleRows: [],
     };
   }
@@ -554,8 +567,10 @@ export async function tombstoneOrphans(opts: {
 export async function versionedSyncLines(
   lines: InsertSaleLine[],
   confirmedAt: Date,
+  lastGoodRowCountByMonth?: ReadonlyMap<string, number>,
 ): Promise<VersionedSyncResult> {
-  if (lines.length === 0) return { touched: 0, superseded: 0, inserted: 0, revived: 0, tombstoned: 0 };
+  const emptyMap: ReadonlyMap<string, number> = new Map();
+  if (lines.length === 0) return { touched: 0, superseded: 0, inserted: 0, revived: 0, tombstoned: 0, incomingCountByFyMonth: emptyMap };
 
   const deduped = dedupeBySerialNo(lines);
 
@@ -686,27 +701,24 @@ export async function versionedSyncLines(
   // those superseded rows up-front and UPDATE them back to 'current'. Only
   // rows with a genuinely new line_uid go to INSERT.
   //
-  // Revive guard (symmetric with Guard 2.5 in tombstoneOrphans):
-  // A month where incomingRows < currentDbRows is a suspected short read.
-  // In that scenario the tombstone pass is also halted (Guard 2.5), so we must
-  // NOT revive rows for that month either — doing so would silently inflate the
-  // current-row count for months whose sheet read was incomplete.
-  const currentCountByMonth = new Map<string, number>();
-  for (const row of allCurrent) {
-    if (row.monthLabel == null) continue;
-    currentCountByMonth.set(row.monthLabel, (currentCountByMonth.get(row.monthLabel) ?? 0) + 1);
-  }
-  const incomingCountByMonth = new Map<string, number>();
+  // Revive guard: a read is suspect when it returns fewer rows than the PREVIOUS
+  // successful read of the same month — not fewer than the current DB row count.
+  // The DB count fires whenever the DB has drifted above the sheet (i.e. exactly
+  // when tombstone needs to run and revive may legitimately be needed). The
+  // last-good-read baseline is owned by the caller and passed in via
+  // lastGoodRowCountByMonth. On first run (no baseline) every month is safe.
+  const incomingCountByFyMonth = new Map<string, number>();
   for (const line of deduped) {
-    if (line.monthLabel == null) continue;
-    incomingCountByMonth.set(line.monthLabel, (incomingCountByMonth.get(line.monthLabel) ?? 0) + 1);
+    if (line.fy == null || line.monthLabel == null) continue;
+    const k = `${line.fy}|${line.monthLabel}`;
+    incomingCountByFyMonth.set(k, (incomingCountByFyMonth.get(k) ?? 0) + 1);
   }
-  // A month is "safe to revive" when the incoming count is at least as large
-  // as the current DB count (no evidence of a short read).
   const safeToReviveMonths = new Set<string>();
-  for (const [month, incoming] of incomingCountByMonth) {
-    const current = currentCountByMonth.get(month) ?? 0;
-    if (incoming >= current) safeToReviveMonths.add(month);
+  for (const [fyMonth, incoming] of incomingCountByFyMonth) {
+    const lastGood = lastGoodRowCountByMonth?.get(fyMonth) ?? 0;
+    if (incoming >= lastGood) {
+      safeToReviveMonths.add(fyMonth.slice(fyMonth.indexOf("|") + 1));
+    }
   }
 
   let inserted = 0;
@@ -789,11 +801,12 @@ export async function versionedSyncLines(
       syncRunId,
       dryRun: false,
       blastRadiusLimitPct: 10,
+      lastGoodRowCount: lastGoodRowCountByMonth?.get(`${fyForTombstone}|${month}`),
     });
     if (!tr.halted) tombstoned += tr.applied;
   }
 
-  return { touched: toTouch.length, superseded: toSupersede.length, inserted, revived, tombstoned };
+  return { touched: toTouch.length, superseded: toSupersede.length, inserted, revived, tombstoned, incomingCountByFyMonth };
 }
 
 export async function upsertItemMaster(

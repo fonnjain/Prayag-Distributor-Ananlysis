@@ -80,6 +80,14 @@ const byFy = new Map<string, FyState>();
 // Track last successful full sync time per FY (resets on process restart).
 const lastSyncedAtMs = new Map<string, number>();
 
+// Last known-good sheet row count per FY+month (key: "fy|monthLabel").
+// Updated at the end of every successful sync for months whose incoming count
+// matched or exceeded the previous baseline (i.e. not a truncated read).
+// Used by versionedSyncLines to distinguish a genuinely short read (incoming <
+// last-good) from the DB having drifted above the sheet count (where tombstone
+// and revive need to run unblocked).
+const lastGoodRowCountByMonth = new Map<string, number>();
+
 // Re-sync TTL for the current open FY: 6 hours.
 // A completed FY is never re-synced (no new invoices possible).
 const OPEN_FY_RESYNC_MS = 6 * 60 * 60 * 1000;
@@ -269,7 +277,15 @@ async function doSync(fy: string, spreadsheetId: string): Promise<void> {
 
     const syncedAt = new Date();
     // ── Step 3 + 4: upsert + tombstone pass (tombstone is inside versionedSyncLines) ──
-    const { touched, superseded, inserted, revived, tombstoned } = await versionedSyncLines(linesWithResolvedUids, syncedAt);
+    const { touched, superseded, inserted, revived, tombstoned, incomingCountByFyMonth } =
+      await versionedSyncLines(linesWithResolvedUids, syncedAt, lastGoodRowCountByMonth);
+
+    // Update last-good-read baseline for every month whose incoming count
+    // was at least as large as the previous baseline (i.e. not a truncated read).
+    for (const [k, incoming] of incomingCountByFyMonth) {
+      const prev = lastGoodRowCountByMonth.get(k) ?? 0;
+      if (incoming >= prev) lastGoodRowCountByMonth.set(k, incoming);
+    }
 
     lastSyncedAtMs.set(fy, Date.now());
     s.rows = linesWithResolvedUids.length;

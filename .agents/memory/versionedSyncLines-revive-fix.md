@@ -1,6 +1,6 @@
 ---
 name: versionedSyncLines revive fix
-description: INSERT blocked by superseded line_uid — once a row is tombstoned its line_uid stays in the table, silently blocking re-insertion. Fixed with pre-flight revive pass. Also: dedupeBySerialNo now uses 7-field key; lineUidKey structural gap causes 9 persistent gap rows.
+description: INSERT blocked by superseded line_uid — once a row is tombstoned its line_uid stays in the table, silently blocking re-insertion. Fixed with pre-flight revive pass. Also: dedupeBySerialNo now uses 7-field key; lastGoodRowCountByMonth replaces DB-count comparison in both the revive guard and Guard 2.5; lineUidKey structural gap causes 9 persistent gap rows.
 ---
 
 ## The problem
@@ -20,21 +20,29 @@ Before the INSERT batch, a pre-flight SELECT checks which `line_uid`s already ex
 
 New `VersionedSyncResult` field: `revived: number`.
 
-## Revive guard (symmetric with Guard 2.5)
-If a month's incoming row count < its current DB count, that month is excluded from the revive pass
-(same logic as the tombstone Guard 2.5 "suspected-read-failure" halt).
-Implemented via `safeToReviveMonths` set built from `currentCountByMonth` vs `incomingCountByMonth`.
+## Revive guard + Guard 2.5 — last-good-read baseline (deployed)
+Both the revive guard and tombstone Guard 2.5 compare against the LAST KNOWN-GOOD read for
+that month, not the current DB row count.
 
-**Why this matters:** Without the guard, the July revive tick incorrectly revived 1,345 rows from
-previous tombstone cycles before the guard was in place. July went 10,331→11,676 current rows.
-The guard now blocks July (incoming 8,025 < current 11,675). Manual cleanup of July still needed
-(run tombstone-orphans with raised blast-radius once the July sheet read stabilises).
+- DB count comparison fires whenever the DB drifts above the sheet (e.g. accumulated revivals),
+  which is exactly when tombstone needs to run — wrong signal.
+- Last-good-read comparison fires only when the sheet actually returned fewer rows than last time —
+  correct signal for a truncated read.
+
+**Implementation:**
+- `lastGoodRowCountByMonth: Map<string, number>` (key: `fy|monthLabel`) owned by `registerSync.ts`.
+- Updated after each successful sync for months where incoming >= previous baseline.
+- Passed to `versionedSyncLines` as 3rd param; threaded through to `tombstoneOrphans` as `lastGoodRowCount`.
+- `versionedSyncLines` returns `incomingCountByFyMonth` (post-dedup) so the caller updates cleanly.
+- First run: `lastGood = 0` for each month → revive always safe; Guard 2.5 falls back to `currentInScope`.
+
+**July cleanup:** After the first new-code sync, baseline for Jul-26 = 8,025.
+Next tick: incoming (8,025) >= lastGood (8,025) → tombstone proceeds → removes 3,651 excess rows
+automatically. A genuine short read (incoming < 8,025) still halts.
 
 ## dedupeBySerialNo key change (deployed alongside)
 Old key: `fy|monthLabel|serialNo` — collapsed rows with same serial but different natural key.
 New key: `fy|monthLabel|serialNo|invoiceNo|code|color|qty` — only collapses true 7-field duplicates.
-**Effect on gap:** zero — the 16+12 natural-key duplicates the user measured share the same serial AND
-natural key (true 7-field duplicates), so the fix had no visible impact on insertion count.
 
 ## Remaining 9 gap rows (3 May-26 + 6 Jun-26) — structural issue
 These rows have a `line_uid` that is already held by a DIFFERENT CURRENT row (different `invoiceNo`
@@ -46,9 +54,9 @@ The anchor check counts it in `sheetRows` but it never reaches `current`.
 This is a breaking migration (all existing line_uids would change) — do it as a separate task with
 a full re-ingestion of FY2026-27 data.
 
-## Results after fixes
+## Results after all fixes
 | Month | Gap before | Gap after (stable) |
 |-------|------------|-------------------|
 | May-26 | 34 | 3 |
 | Jun-26 | 29 | 6 |
-| Jul-26 | +2,306 excess (guard halted) | +3,650 excess (needs cleanup) |
+| Jul-26 | +2,306 excess (guard halted) | will self-correct on next tick |
