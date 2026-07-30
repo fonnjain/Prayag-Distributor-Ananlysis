@@ -3,8 +3,18 @@
 // Shows all 17 canonical segments in a sortable table.
 // Clicking a row fires onDrill(segment).
 //
-// Columns: Segment | Net ₹Cr | Net% bar | Qty (pcs) | Codes Bought | Breadth%
-// Breadth% = codesBought / codesEverSold (cross-FY denominator, always ∈ [0,100]).
+// Columns:
+//   Segment | Net ₹Cr | Net% bar | Qty (pcs) | Codes Bought | Unbought | Opportunity ₹ | Breadth%
+//
+// Opportunity = unbought codes × (net ÷ codesBought)
+//   = the rupee value you would expect to add if the average unbought code
+//     performed at the segment's current mean net-per-code rate.
+//   This is a rupee-denominated ranking signal: it puts CP's 1,707 gap codes
+//   on the same scale as Garden Pipe's 207, so segments with both a large
+//   gap and high per-code value rank above segments that are merely wide.
+//
+// Breadth% bar is shown without colour — the percentage is structural
+// (small segments hit 100% trivially) so colouring it is misleading.
 import { useState } from "react";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -22,7 +32,7 @@ export type SegmentRow = {
   codesInCatalogue: number;
 };
 
-type SortKey = "segment" | "net" | "qty" | "breadthPct" | "codesBought";
+type SortKey = "segment" | "net" | "qty" | "breadthPct" | "codesBought" | "unbought" | "opportunity";
 
 interface Props {
   rows: SegmentRow[];
@@ -32,26 +42,26 @@ interface Props {
   summary?: { totalCodes: number; totalQty: number; totalNet: number; segmentsBought: number } | null;
 }
 
-function breadthColor(pct: number): string {
-  if (pct >= 70) return "bg-emerald-500";
-  if (pct >= 50) return "bg-amber-400";
-  if (pct >= 30) return "bg-orange-400";
-  return "bg-red-400";
-}
-
-function breadthLabel(pct: number): string {
-  if (pct >= 70) return "text-emerald-700 dark:text-emerald-400";
-  if (pct >= 50) return "text-amber-700 dark:text-amber-400";
-  if (pct >= 30) return "text-orange-600 dark:text-orange-400";
-  return "text-red-600 dark:text-red-400";
+/** Opportunity = unbought codes × mean net per bought code. */
+function opportunity(row: SegmentRow): number {
+  if (row.codesBought === 0) return 0;
+  const meanNetPerCode = row.net / row.codesBought;
+  return (row.codesEverSold - row.codesBought) * meanNetPerCode;
 }
 
 function fmtCr(n: number): string {
   return `₹${(n / 1e7).toFixed(2)} Cr`;
 }
 
+function fmtOpportunity(n: number): string {
+  if (n === 0) return "—";
+  const cr = n / 1e7;
+  if (cr >= 1) return `₹${cr.toFixed(1)} Cr`;
+  return `₹${(n / 1e5).toFixed(1)} L`;
+}
+
 export default function SkuOverview({ rows, loading, onDrill, unmapped, summary }: Props) {
-  const [sortKey, setSortKey] = useState<SortKey>("net");
+  const [sortKey, setSortKey] = useState<SortKey>("opportunity");
   const [sortAsc, setSortAsc] = useState(false);
 
   function toggleSort(key: SortKey) {
@@ -59,26 +69,45 @@ export default function SkuOverview({ rows, loading, onDrill, unmapped, summary 
     else { setSortKey(key); setSortAsc(key === "segment"); }
   }
 
-  const sorted = [...rows].sort((a, b) => {
+  const enriched = rows.map((r) => ({
+    ...r,
+    unbought: r.codesEverSold - r.codesBought,
+    opportunity: opportunity(r),
+  }));
+
+  const sorted = [...enriched].sort((a, b) => {
     let diff = 0;
-    if (sortKey === "segment") diff = a.segment.localeCompare(b.segment);
-    else if (sortKey === "net") diff = a.net - b.net;
-    else if (sortKey === "qty") diff = a.qty - b.qty;
+    if (sortKey === "segment")     diff = a.segment.localeCompare(b.segment);
+    else if (sortKey === "net")        diff = a.net - b.net;
+    else if (sortKey === "qty")        diff = a.qty - b.qty;
     else if (sortKey === "breadthPct") diff = a.breadthPct - b.breadthPct;
-    else if (sortKey === "codesBought") diff = a.codesBought - b.codesBought;
+    else if (sortKey === "codesBought")diff = a.codesBought - b.codesBought;
+    else if (sortKey === "unbought")   diff = a.unbought - b.unbought;
+    else if (sortKey === "opportunity")diff = a.opportunity - b.opportunity;
     return sortAsc ? diff : -diff;
   });
 
   const maxNet = rows.length ? Math.max(...rows.map((r) => r.net)) : 1;
+  const maxOpportunity = enriched.length ? Math.max(...enriched.map((r) => r.opportunity)) : 1;
 
-  function SortHead({ label, k }: { label: string; k: SortKey }) {
+  function SortHead({
+    label,
+    k,
+    align = "left",
+    className,
+  }: {
+    label: string;
+    k: SortKey;
+    align?: "left" | "right";
+    className?: string;
+  }) {
     const active = sortKey === k;
     return (
       <TableHead
-        className="cursor-pointer select-none whitespace-nowrap"
+        className={cn("cursor-pointer select-none whitespace-nowrap", align === "right" && "text-right", className)}
         onClick={() => toggleSort(k)}
       >
-        <span className={cn("flex items-center gap-0.5", active && "text-primary font-semibold")}>
+        <span className={cn("inline-flex items-center gap-0.5", active && "text-primary font-semibold")}>
           {label}
           {active && <span className="text-[10px]">{sortAsc ? "↑" : "↓"}</span>}
         </span>
@@ -115,7 +144,7 @@ export default function SkuOverview({ rows, loading, onDrill, unmapped, summary 
           </span>
           <span>
             <span className="font-medium">{summary.totalCodes.toLocaleString()}</span>
-            <span className="text-muted-foreground ml-1">codes</span>
+            <span className="text-muted-foreground ml-1">codes bought</span>
           </span>
           <span>
             <span className="font-medium">{summary.segmentsBought}</span>
@@ -138,12 +167,13 @@ export default function SkuOverview({ rows, loading, onDrill, unmapped, summary 
           <TableHeader>
             <TableRow>
               <SortHead label="Segment" k="segment" />
-              <SortHead label="Net" k="net" />
+              <SortHead label="Net" k="net" align="right" />
               <TableHead className="w-28 hidden sm:table-cell">Net %</TableHead>
-              <SortHead label="Qty (pcs)" k="qty" />
-              <SortHead label="Codes" k="codesBought" />
-              <SortHead label="Breadth %" k="breadthPct" />
-              <TableHead className="w-32 hidden md:table-cell">vs Catalogue</TableHead>
+              <SortHead label="Qty (pcs)" k="qty" align="right" className="hidden md:table-cell" />
+              <SortHead label="Bought" k="codesBought" align="right" />
+              <SortHead label="Unbought" k="unbought" align="right" />
+              <SortHead label="Opportunity" k="opportunity" align="right" />
+              <SortHead label="Breadth %" k="breadthPct" align="right" className="hidden lg:table-cell" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -168,7 +198,7 @@ export default function SkuOverview({ rows, loading, onDrill, unmapped, summary 
                   <div className="flex items-center gap-1.5">
                     <div className="flex-1 h-1.5 rounded bg-muted overflow-hidden">
                       <div
-                        className="h-full bg-primary/60 rounded"
+                        className="h-full bg-primary/50 rounded"
                         style={{ width: `${maxNet > 0 ? (row.net / maxNet) * 100 : 0}%` }}
                       />
                     </div>
@@ -179,7 +209,7 @@ export default function SkuOverview({ rows, loading, onDrill, unmapped, summary 
                 </TableCell>
 
                 {/* Qty */}
-                <TableCell className="text-right text-sm tabular-nums whitespace-nowrap">
+                <TableCell className="text-right text-sm tabular-nums whitespace-nowrap hidden md:table-cell">
                   {row.qty.toLocaleString()}
                 </TableCell>
 
@@ -188,26 +218,42 @@ export default function SkuOverview({ rows, loading, onDrill, unmapped, summary 
                   {row.codesBought}
                 </TableCell>
 
-                {/* Breadth % bar */}
-                <TableCell>
-                  <div className="flex items-center gap-1.5 min-w-[100px]">
-                    <div className="flex-1 h-1.5 rounded bg-muted overflow-hidden">
+                {/* Unbought codes */}
+                <TableCell className="text-right text-sm tabular-nums font-medium">
+                  {row.unbought > 0
+                    ? <span className="text-foreground">{row.unbought}</span>
+                    : <span className="text-muted-foreground">0</span>}
+                </TableCell>
+
+                {/* Opportunity ₹ — the primary ranking signal */}
+                <TableCell className="text-right text-sm tabular-nums whitespace-nowrap">
+                  <div className="flex items-center justify-end gap-2">
+                    {/* Inline bar */}
+                    <div className="w-16 h-1.5 rounded bg-muted overflow-hidden hidden sm:block">
                       <div
-                        className={cn("h-full rounded", breadthColor(row.breadthPct))}
-                        style={{ width: `${row.breadthPct}%` }}
+                        className="h-full bg-primary rounded"
+                        style={{ width: `${maxOpportunity > 0 ? (row.opportunity / maxOpportunity) * 100 : 0}%` }}
                       />
                     </div>
-                    <span className={cn("text-xs tabular-nums font-medium w-10 text-right", breadthLabel(row.breadthPct))}>
-                      {row.breadthPct.toFixed(1)}%
+                    <span className={cn("font-medium", row.opportunity > 0 ? "text-foreground" : "text-muted-foreground")}>
+                      {fmtOpportunity(row.opportunity)}
                     </span>
                   </div>
                 </TableCell>
 
-                {/* vs Catalogue */}
-                <TableCell className="hidden md:table-cell text-xs text-muted-foreground whitespace-nowrap">
-                  {row.codesInCatalogue > 0
-                    ? `${row.codesBought} / ${row.codesInCatalogue} cat`
-                    : <span className="italic">no catalogue</span>}
+                {/* Breadth % — neutral bar, no health colouring */}
+                <TableCell className="hidden lg:table-cell">
+                  <div className="flex items-center gap-1.5 min-w-[100px]">
+                    <div className="flex-1 h-1.5 rounded bg-muted overflow-hidden">
+                      <div
+                        className="h-full bg-muted-foreground/40 rounded"
+                        style={{ width: `${row.breadthPct}%` }}
+                      />
+                    </div>
+                    <span className="text-xs tabular-nums text-muted-foreground w-10 text-right">
+                      {row.breadthPct.toFixed(1)}%
+                    </span>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
@@ -215,8 +261,8 @@ export default function SkuOverview({ rows, loading, onDrill, unmapped, summary 
         </Table>
       </div>
       <p className="text-xs text-muted-foreground">
+        <span className="font-medium">Opportunity</span> = unbought codes × mean net per bought code (₹ uplift if gap codes perform at segment average).
         Click a row to drill into individual codes.
-        Breadth % = codes bought this period ÷ codes ever sold (all loaded FYs).
       </p>
     </div>
   );
