@@ -41,7 +41,7 @@ import { fiscalMonthsToLabels } from "../lib/mgmt/primaryPeriod.js";
 const router = Router();
 
 const FY_PATTERN = /^\d{4}-\d{2}$/;
-const VALID_LEVELS = new Set(["distributor", "direct_dealer", "retailer"]);
+const VALID_LEVELS = new Set(["distributor", "direct_dealer", "retailer", "project"]);
 const VALID_SCOPES = new Set(["company", "head", "customer"]);
 
 function intParam(
@@ -97,7 +97,7 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await loadSkuFacts({
       fy,
-      level: level as "distributor" | "direct_dealer" | "retailer",
+      level: level as SkuLevel,
       scope: scope as "company" | "head" | "customer",
       scopeId,
       monthLabels,

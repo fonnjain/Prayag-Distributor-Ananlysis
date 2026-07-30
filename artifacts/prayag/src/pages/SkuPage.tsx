@@ -59,7 +59,7 @@ type FactsResponse = {
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 type Section = "overview" | "drill" | "trends";
-type Level = "distributor" | "direct_dealer" | "retailer";
+type Level = "distributor" | "direct_dealer" | "retailer" | "project";
 
 export default function SkuPage() {
   // Filters
@@ -276,6 +276,7 @@ export default function SkuPage() {
           >
             <option value="distributor">Distributor</option>
             <option value="direct_dealer">Direct Dealer</option>
+            <option value="project">Project / Govt</option>
             <option value="retailer">Retailer</option>
           </select>
 

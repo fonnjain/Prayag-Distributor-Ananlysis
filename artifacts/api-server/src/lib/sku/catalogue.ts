@@ -173,8 +173,27 @@ export function clearCatalogueCache(): void {
 // fiscal years.  It is always >= codesBought for any period sub-query, so
 // breadthPct is always in [0, 100].  Never derived from item_master.
 
+// ── Canonical value for the project/govt head_canon ──────────────────────────
+
+export const PROJECT_HEAD_CANON = "Non-territory / Project / Govt";
+
+// ── Three ever-sold maps (global / territory-only / project-only) ─────────────
+//
+// "Global"    — all channels combined; used by the retailer (secondary) path
+//               and by catalogue completeness checks.
+// "Territory" — excludes PROJECT_HEAD_CANON rows; used when level is
+//               distributor or direct_dealer so project-only codes don't
+//               inflate the territory breadth denominator.
+// "Project"   — only PROJECT_HEAD_CANON rows; used when level = "project".
+
 let _everSoldCache: Map<string, number> | null = null;
 let _everSoldCacheBuiltAt = 0;
+
+let _everSoldTerritoryCache: Map<string, number> | null = null;
+let _everSoldTerritoryCacheBuiltAt = 0;
+
+let _everSoldProjectCache: Map<string, number> | null = null;
+let _everSoldProjectCacheBuiltAt = 0;
 
 export async function getEverSoldPerSegment(): Promise<Map<string, number>> {
   if (_everSoldCache && Date.now() - _everSoldCacheBuiltAt < CACHE_TTL_MS) {
@@ -201,12 +220,77 @@ export async function getEverSoldPerSegment(): Promise<Map<string, number>> {
   return map;
 }
 
-/** Invalidate both caches together (call after item_master or sale_line bulk updates). */
+/**
+ * Ever-sold denominator for territory channels (distributor / direct_dealer).
+ * Excludes codes that were ONLY ever sold to Project / Govt entities, so
+ * project-only SKUs don't appear as territory breadth gaps.
+ */
+export async function getEverSoldPerSegmentTerritory(): Promise<Map<string, number>> {
+  if (_everSoldTerritoryCache && Date.now() - _everSoldTerritoryCacheBuiltAt < CACHE_TTL_MS) {
+    return _everSoldTerritoryCache;
+  }
+
+  const rows = await db.execute<{ segment: string; cnt: string }>(sql`
+    SELECT
+      COALESCE(group_canon, group_raw, 'Unmapped') AS segment,
+      COUNT(DISTINCT code)::text                   AS cnt
+    FROM sale_line
+    WHERE version_status = 'current'
+      AND code IS NOT NULL AND code <> ''
+      AND (head_canon IS NULL OR head_canon != ${PROJECT_HEAD_CANON})
+    GROUP BY 1
+  `);
+
+  const map = new Map<string, number>();
+  for (const r of rows.rows) {
+    map.set(r.segment, parseInt(r.cnt, 10));
+  }
+
+  _everSoldTerritoryCache = map;
+  _everSoldTerritoryCacheBuiltAt = Date.now();
+  return map;
+}
+
+/**
+ * Ever-sold denominator for the project channel.
+ * Counts only codes transacted by Project / Govt entities.
+ */
+export async function getEverSoldPerSegmentProject(): Promise<Map<string, number>> {
+  if (_everSoldProjectCache && Date.now() - _everSoldProjectCacheBuiltAt < CACHE_TTL_MS) {
+    return _everSoldProjectCache;
+  }
+
+  const rows = await db.execute<{ segment: string; cnt: string }>(sql`
+    SELECT
+      COALESCE(group_canon, group_raw, 'Unmapped') AS segment,
+      COUNT(DISTINCT code)::text                   AS cnt
+    FROM sale_line
+    WHERE version_status = 'current'
+      AND code IS NOT NULL AND code <> ''
+      AND head_canon = ${PROJECT_HEAD_CANON}
+    GROUP BY 1
+  `);
+
+  const map = new Map<string, number>();
+  for (const r of rows.rows) {
+    map.set(r.segment, parseInt(r.cnt, 10));
+  }
+
+  _everSoldProjectCache = map;
+  _everSoldProjectCacheBuiltAt = Date.now();
+  return map;
+}
+
+/** Invalidate all ever-sold and catalogue caches (call after bulk sale_line or item_master updates). */
 export function clearSkuCaches(): void {
   _cache = null;
   _cacheBuiltAt = 0;
   _everSoldCache = null;
   _everSoldCacheBuiltAt = 0;
+  _everSoldTerritoryCache = null;
+  _everSoldTerritoryCacheBuiltAt = 0;
+  _everSoldProjectCache = null;
+  _everSoldProjectCacheBuiltAt = 0;
 }
 
 // ── Never-sold catalogue reference ───────────────────────────────────────────

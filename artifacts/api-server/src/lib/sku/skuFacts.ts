@@ -22,12 +22,19 @@
 
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { getCatalogueCounts, getEverSoldPerSegment, canonGroupFromMap } from "./catalogue.js";
+import {
+  getCatalogueCounts,
+  getEverSoldPerSegment,
+  getEverSoldPerSegmentTerritory,
+  getEverSoldPerSegmentProject,
+  PROJECT_HEAD_CANON,
+  canonGroupFromMap,
+} from "./catalogue.js";
 import { logger } from "../logger.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type SkuLevel = "distributor" | "direct_dealer" | "retailer";
+export type SkuLevel = "distributor" | "direct_dealer" | "retailer" | "project";
 export type SkuScope = "company" | "head" | "customer";
 
 export type SkuCapabilityEntry = {
@@ -41,6 +48,7 @@ export type SkuCapability = {
   distributor: SkuCapabilityEntry;
   direct_dealer: SkuCapabilityEntry;
   retailer: SkuCapabilityEntry;
+  project: SkuCapabilityEntry;
 };
 
 export type SkuCodeFact = {
@@ -151,6 +159,15 @@ export async function getSkuCapability(fy: string): Promise<SkuCapability> {
   `).catch(() => null);
   const secCount = secRows ? parseInt(secRows.rows[0]?.cnt ?? "0", 10) : 0;
 
+  // Project / Govt channel
+  const projRows = await db.execute<{ cnt: string }>(sql`
+    SELECT COUNT(*)::text AS cnt
+    FROM sale_line_current
+    WHERE fy = ${fy} AND version_status = 'current'
+      AND head_canon = ${PROJECT_HEAD_CANON}
+  `).catch(() => null);
+  const projCount = projRows ? parseInt(projRows.rows[0]?.cnt ?? "0", 10) : 0;
+
   return {
     distributor: distCount > 0
       ? { available: true, rowCount: distCount }
@@ -164,6 +181,9 @@ export async function getSkuCapability(fy: string): Promise<SkuCapability> {
           available: false,
           reason: `no FY${fy} secondary register is loaded`,
         },
+    project: projCount > 0
+      ? { available: true, rowCount: projCount }
+      : { available: false, reason: `no project/govt data in sale_line for FY${fy}` },
   };
 }
 
@@ -172,7 +192,7 @@ export async function getSkuCapability(fy: string): Promise<SkuCapability> {
 type PrimaryFactParams = {
   fy: string;
   monthLabels: string[];
-  level: "distributor" | "direct_dealer";
+  level: "distributor" | "direct_dealer" | "project";
   scope: SkuScope;
   scopeId?: string;
   segment?: string; // optional segment filter
@@ -183,9 +203,21 @@ export async function getPrimarySkuFacts(
 ): Promise<SkuFactsResult["facts"]> {
   const { fy, monthLabels, level, scope, scopeId, segment } = params;
 
-  const levelFilter = level === "direct_dealer"
-    ? sql`AND sl.type_raw ILIKE '%direct%'`
-    : sql`AND (sl.type_raw IS NULL OR sl.type_raw NOT ILIKE '%direct%')`;
+  // Level filter — three cases:
+  //   project      → only Non-territory / Project / Govt head_canon
+  //   direct_dealer → type_raw ILIKE '%direct%', excluding project head
+  //   distributor   → type_raw null-or-not-direct, excluding project head
+  //
+  // Project entities (HDPE PIPE type, project head_canon) are completely
+  // excluded from territory channels so their historical volumes don't
+  // inflate territory gap figures.
+  const projectHeadFilter = sql`AND (sl.head_canon IS NULL OR sl.head_canon != ${PROJECT_HEAD_CANON})`;
+  const levelFilter =
+    level === "project"
+      ? sql`AND sl.head_canon = ${PROJECT_HEAD_CANON}`
+      : level === "direct_dealer"
+        ? sql`AND sl.type_raw ILIKE '%direct%' ${projectHeadFilter}`
+        : sql`AND (sl.type_raw IS NULL OR sl.type_raw NOT ILIKE '%direct%') ${projectHeadFilter}`;
 
   const scopeFilter =
     scope === "customer" && scopeId
@@ -225,7 +257,14 @@ export async function getPrimarySkuFacts(
     ORDER BY COALESCE(sl.group_canon, sl.group_raw, 'Unmapped'), sl.code, sl.month_label
   `);
 
-  const facts = await buildFactsFromRows(rows.rows, fy);
+  // Fetch the level-appropriate ever-sold denominator so territory breadth
+  // figures are not inflated by project-only codes, and vice versa.
+  const everSoldMap =
+    level === "project"
+      ? await getEverSoldPerSegmentProject()
+      : await getEverSoldPerSegmentTerritory();
+
+  const facts = await buildFactsFromRows(rows.rows, fy, everSoldMap);
   if (!facts) return facts;
 
   // Enrich each segment with the bottom-up historical net of codes that were
@@ -375,16 +414,20 @@ type RawRow = {
 async function buildFactsFromRows(
   rows: RawRow[],
   _fy: string,
+  everSoldOverride?: Map<string, number>,
 ): Promise<SkuFactsResult["facts"]> {
   if (rows.length === 0) return null;
 
   // Fetch both denominators in parallel:
-  //   everSold   — primary breadth denominator (cross-FY distinct codes in sale_line)
+  //   everSold   — primary breadth denominator; caller may override to a
+  //                level-filtered map (territory-only or project-only) so
+  //                codes exclusive to one channel don't distort another.
   //   catalogue  — secondary reference (item_master codes with mrp > 0)
-  const [everSold, catalogue] = await Promise.all([
-    getEverSoldPerSegment(),
+  const [everSoldDefault, catalogue] = await Promise.all([
+    everSoldOverride ? Promise.resolve(null) : getEverSoldPerSegment(),
     getCatalogueCounts(),
   ]);
+  const everSold = everSoldOverride ?? everSoldDefault!;
 
   // Aggregate per-code (across months)
   type CodeAcc = {
@@ -603,10 +646,13 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
     }));
     fyTotalsRaw = fyRes.rows;
   } else {
+    const trendProjectHead = sql`AND (sl.head_canon IS NULL OR sl.head_canon != ${PROJECT_HEAD_CANON})`;
     const levelFilter =
-      level === "direct_dealer"
-        ? sql`AND sl.type_raw ILIKE '%direct%'`
-        : sql`AND (sl.type_raw IS NULL OR sl.type_raw NOT ILIKE '%direct%')`;
+      level === "project"
+        ? sql`AND sl.head_canon = ${PROJECT_HEAD_CANON}`
+        : level === "direct_dealer"
+          ? sql`AND sl.type_raw ILIKE '%direct%' ${trendProjectHead}`
+          : sql`AND (sl.type_raw IS NULL OR sl.type_raw NOT ILIKE '%direct%') ${trendProjectHead}`;
     const scopeFilter =
       scope === "customer" && scopeId ? sql`AND sl.customer = ${scopeId}`
       : scope === "head" && scopeId    ? sql`AND sl.head_canon = ${scopeId}`
