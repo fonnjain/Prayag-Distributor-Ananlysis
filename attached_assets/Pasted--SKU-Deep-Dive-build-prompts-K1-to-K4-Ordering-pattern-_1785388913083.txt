@@ -1,0 +1,282 @@
+# SKU Deep Dive — build prompts K1 to K4
+
+*Ordering-pattern analysis by segment and item code, at distributor, direct-dealer and retailer level. Schemes are deliberately out of scope for now.*
+
+---
+
+## The constraint that shapes the whole build
+
+Availability splits by **channel**, not by preference:
+
+| Level | Buys from | Source | FY2026-27 | Closed years |
+|---|---|---|---|---|
+| **Distributor** | Prayag | `sale_line` (primary) | ✅ available | ✅ |
+| **Direct dealer** | Prayag | `sale_line` (primary) | ✅ available | ✅ |
+| **Retailer** | a distributor | secondary register | ❌ register not yet loaded | ✅ FY2021-22 to FY2025-26 |
+
+**Build all three levels fully.** The retailer level runs on closed years today and must light up for FY2026-27 the moment that register is loaded — with no code change. The live-year state is *"register not yet loaded"*, never *"feature unavailable"*.
+
+### Segment must come from the code, not from `type_raw`
+
+`sale_line.type_raw` holds product-group names for FY2023-24 through FY2025-26 and is **null for every FY2026-27 row**. Segment for the live year must be derived through the item-code to `PRODUCT_GROUP` mapping — the same mapping the Laspeyres index and the FY24-25 SALE-tab loader already use.
+
+### The catalogue denominator
+
+| Segment | Codes | Share | Price index | Break-even growth |
+|---|---|---|---|---|
+| CP (chrome-plated) | **903** | 35.6% | 1.113 | +11.3% |
+| PTMT / faucets | **829** | 32.7% | 1.047 | +4.7% |
+| CPVC | 217 | 8.6% | 1.007 | +0.7% |
+| Sanitaryware | 206 | 8.1% | 1.089 | +8.9% |
+| AGRI | 169 | 6.7% | 1.052 | +5.2% |
+| Connection / waste | 95 | 3.7% | 1.073 | +7.3% |
+| Garden pipe | 63 | 2.5% | 1.073 | +7.3% |
+| Water tank | 33 | 1.3% | 1.181 | +18.1% |
+| Cistern | 21 | 0.8% | 1.125 | +12.5% |
+| **Total mapped** | **2,536** | | | |
+
+3,186 codes are shared between FY2025-26 and FY2026-27, so roughly 650 sit outside these nine groups — those need a bucket, not silent exclusion.
+
+**CP and PTMT are 68% of the catalogue.** A distributor buying 60 CP codes has 6.6% of that segment; one buying 19 cistern codes has 90.5%. **Breadth without its denominator is meaningless** and must never be shown as a bare count.
+
+---
+
+## K1 — the SKU data layer (no UI, no AI)
+
+```
+Prayag app - new SKU Deep Dive, Phase K1 of 4. Same global rules as every earlier
+phase. NO UI AND NO AI CALL in this phase. Build the data layer and prove it first.
+
+1. BUILD ONE SKU FACT SERVICE serving both channels:
+     PRIMARY  - sale_line, filtered version_status = 'current', grouped by
+                customer, item code, month. Covers distributors AND direct dealers.
+     SECONDARY - the secondary register tables, grouped by retailer, item code,
+                distributor, month. Closed years only for now.
+   Reuse existing verified computation wherever it exists. Do not write a second
+   definition of NET - it is Sub Total, never Order Total.
+
+2. SEGMENT COMES FROM THE ITEM CODE, not from type_raw. type_raw is populated for
+   FY2023-24 to FY2025-26 and NULL for every FY2026-27 row, so a type_raw-based
+   segment would silently return nothing for the live year. Use the code to
+   PRODUCT_GROUP mapping already used by the Laspeyres index and the SALE-tab loader.
+   Codes that map to no group go into an explicit 'unmapped' bucket and are COUNTED,
+   never dropped. Report how many codes and how much value fall there.
+
+3. THE CATALOGUE DENOMINATOR is required on every breadth figure. Codes per segment:
+     CP 903 | PTMT 829 | CPVC 217 | Sanitaryware 206 | AGRI 169
+     Connection/waste 95 | Garden pipe 63 | Water tank 33 | Cistern 21
+   Total mapped 2,536. Derive these from the mapping rather than hardcoding them, and
+   report the derived counts so they can be checked against the figures above.
+   Never show a breadth count without its denominator.
+
+4. CAPABILITY DECLARATION per level and fiscal year, in the same shape as the page
+   period capability:
+     distributor / direct dealer  - available for every FY with sale_line data
+     retailer                     - available only for fiscal years with a loaded
+                                    secondary register
+   A level with no data for the selected year returns NOT AVAILABLE with the reason -
+   'no FY2026-27 secondary register is loaded' - never zeros and never an empty list.
+   When that register is loaded the retailer level must begin working with NO code
+   change. Build the capability now; the data arrives later.
+
+5. ROUTE: GET /api/sku/facts?fy=&level=&scope=&scopeId=&period=
+   Returns, for the requested scope: codes bought, segments bought, quantity and NET
+   per code and per segment, month distribution, and the capability state.
+
+Acceptance - prove each by returning the values, never by asserting success:
+  derived segment code counts match the table above, and the unmapped bucket is
+    reported with its code count and value
+  primary SKU facts return for FY2026-27 - confirm against the 3,186 codes shared
+    between FY2025-26 and FY2026-27
+  primary row counts reconcile to sale_line: FY2024-25 141,201, FY2025-26 144,365,
+    FY2026-27 38,857 year to date, all version_status = 'current'
+  secondary SKU facts return for FY2025-26 and FY2024-25
+  retailer level for FY2026-27 returns NOT AVAILABLE with the register reason
+  NET is Sub Total everywhere - state which column each source uses
+  no segment figure is derived from type_raw
+```
+
+---
+
+## K2 — the page: spread, breadth, depth, concentration
+
+```
+Prayag app - SKU Deep Dive, Phase K2 of 4. Same global rules. Depends on K1.
+
+1. NEW PAGE 'SKU Deep Dive' with the same global filters as the Deep Dives, plus a
+   LEVEL selector: Distributor | Direct Dealer | Retailer.
+
+2. SEGMENT VIEW - which segments are being ordered, for the selected scope:
+     NET and quantity per segment, and each segment's share
+     codes bought against codes available IN THAT SEGMENT - always both numbers
+     segments not bought at all, named
+   Sort by NET, but show the code-coverage percentage beside it. A segment worth 40
+   per cent of NET on 5 per cent of its codes is the single most useful line on this
+   page.
+
+3. SKU VIEW within a segment - code, description, quantity, NET, share of segment,
+   number of customers buying it, and month distribution.
+
+4. RANGE DEPTH - for each segment the customer ALREADY buys, list the codes they do
+   not. Rank this ABOVE new-segment entry: the shelf space and the relationship
+   already exist, so it is the easiest conversion available.
+
+5. SKU CONCENTRATION per customer - top-5 and top-10 code share, and effective
+   number of codes (10,000 divided by the HHI of code shares). A distributor whose
+   volume sits in 5 codes is fragile, and that fragility becomes Prayag's one step
+   later.
+
+6. REAL VERSUS NOMINAL. Where a period comparison is shown, give both. The price
+   index differs sharply by segment - water tank 1.181 means +18.1 per cent nominal
+   growth is standing still, while CPVC at 1.007 needs +0.7 per cent. Use the
+   EXISTING Laspeyres function; do not compute a second index.
+
+Acceptance:
+  segment view returns for a named distributor on FY2026-27, with codes bought AND
+    codes available shown for every segment
+  a segment worth a large NET share on a small code share is visibly identifiable
+  range depth lists unbought codes only within segments already bought
+  effective number of codes is reported per customer
+  retailer level on FY2026-27 shows the register reason, not an empty page
+  any growth figure shows real beside nominal with the segment index named
+```
+
+---
+
+## K3 — recommendations: peer whitespace, and two opposite lists
+
+```
+Prayag app - SKU Deep Dive, Phase K3 of 4. Same global rules. Depends on K2.
+
+1. PEER WHITESPACE - codes that comparable customers buy and this one does not.
+   THE COHORT DEFINITION IS THE WHOLE VALUE HERE. Comparable means:
+     same state
+     similar NET band
+     similar segment mix
+   Recommending water tanks to a Kerala distributor because Bihar distributors buy
+   them is noise. NAME THE PEERS behind every recommendation - 'four distributors of
+   your size in your state buy this code and you do not' is arguable in a way a
+   target never is. Report the cohort size; suppress the recommendation when the
+   cohort is too small to mean anything and say so.
+
+2. SLOW-MOVING SPLITS INTO TWO OPPOSITE LISTS. This is the most important
+   distinction in this phase and they must never share a list:
+     PUSH LIST            - slow for this customer, STRONG among peers. Demand is
+                            proven elsewhere; this customer has not been offered it.
+     REVIEW LIST          - slow EVERYWHERE, across all customers and states. Either
+                            the market does not want it or it is being replaced.
+   A code on the review list is a catalogue decision, not a sales target. Pushing it
+   burns effort on stock nobody asked for. Label the two lists by what they are for,
+   never as one 'slow-moving' list.
+
+3. DEAD CODES COMPANY-WIDE - codes with zero orders from anybody in the period.
+   Report separately again. This belongs to whoever owns the catalogue, not to a
+   salesperson, and must not appear in any push list.
+
+4. TIE RECOMMENDATIONS TO THE PEOPLE WHO ACT ON THEM. Every recommendation carries
+   the State Head and, where the level is retailer, the salesperson - so a push list
+   can be handed to the person who can act on it. Aggregate per State Head and per
+   salesperson as well as per customer.
+
+5. RANK BY EASE OF EXECUTION, not size of prize, as with the existing suggestions
+   work. The order that reflects reality:
+     range depth inside a segment already bought
+     lost codes - bought last year, absent this year, proven demand
+     peer whitespace in a segment already bought
+     peer whitespace in a new segment
+   State the expected effect and the evidence for each.
+
+Acceptance:
+  peer cohort is defined by state, NET band and segment mix, and its size is reported
+  every recommendation names its peers
+  the push list and the review list are separate and labelled by purpose
+  a code slow everywhere appears ONLY on the review list, never on a push list
+  dead codes are reported separately and appear in no push list
+  recommendations aggregate per State Head and per salesperson
+  a cohort too small to support a recommendation says so rather than recommending
+```
+
+---
+
+## K4 — the additional trackers
+
+```
+Prayag app - SKU Deep Dive, Phase K4 of 4. Same global rules. Depends on K3.
+
+1. LOST CODES - bought last year, absent this year. Ranked by prior-year NET. The
+   warmest list available: proven demand, known customer, existing relationship.
+
+2. FIRST-ORDER CODES - codes appearing for a customer for the first time. Early
+   trend detection, and the fastest signal that a push actually worked.
+
+3. EFFECTIVE DISCOUNT BY CODE - the registers carry MRP and Discount beside Sub
+   Total, so this needs NO new data for closed years. Compute
+   (gross - Sub Total) / gross per code and per segment. Verify on a sampled order
+   that gross minus discount equals Sub Total before publishing.
+   The VARIANCE across customers on the same code is the finding: one distributor
+   taking a deeper discount than another on the same item is an immediate commercial
+   conversation.
+
+4. SEASONALITY PER SEGMENT - month distribution across the closed years. Four years
+   is enough to establish it. Pushing water tanks in the wrong quarter wastes the
+   visit, and a push list that ignores seasonality will be judged on results it could
+   not have produced.
+
+5. BREADTH TREND - codes and segments per customer over time. Widening or narrowing
+   matters more than the level, and a narrowing distributor is a leading indicator
+   that annual totals will not show for months.
+
+6. FLAG WHAT IS STILL BLOCKED rather than approximating it:
+     margin per code - no finished-goods cost master exists, so profit ROI cannot be
+       computed. Never substitute MRP or purchase price for cost.
+     live-year retailer SKU - no FY2026-27 secondary register loaded
+     live-year discount - same reason
+   Every one of these must state its reason on screen.
+
+Acceptance:
+  lost codes ranked by prior-year NET, per customer
+  first-order codes identified for a named customer
+  effective discount per code computed for FY2025-26, and verified against a sampled
+    order where gross minus discount equals Sub Total
+  discount VARIANCE across customers on the same code is reported
+  seasonality by segment shown across at least three closed years
+  breadth trend shows direction, not just level
+  margin shows its blocked reason, never an estimate
+```
+
+---
+
+## Sources
+
+```
+secondary registers, folder 1Ww2B1FKjpshRTcOa_F7OUBiBsBzpVCPZ
+  FY2025-26  1aNQ2TczEMHcSeB26yKoKayiq1CWc4dXdTQORrgxdl80
+  FY2024-25  1sejEhXCaPXwYZ99mP0tPGo_pA623FQaBN2JBcreIy2g   <- use this one
+  FY2024-25  1zTy5o-wU437P36uuMj-jU_Fy9jKJRdVN-qabT-153ds   <- DUPLICATE, do not use
+  FY2023-24  1c5ZmmcKUbp9hvW0aS_HQjkjL-FJyyZ2P8Orbc0uaPbY   <- 14-column schema,
+                                                               DIFFERENT layout
+```
+
+Register columns (FY2024-25 and FY2025-26): Date, Retailer Id, Retailer, Order ID, **Segment**, **Cat. No.**, Qty, MRP, Order Value, Distributor, Discount, **Sub Total**, Order Total, Team Member Name.
+
+**FY2023-24 uses a different 14-column schema** with reversed retailer positions and no Order ID. A loader built for the 15-column layout would read Order Total instead of Sub Total and materially overstate the year. Verify the column count and header row before touching any new year.
+
+These files exceed the Drive connector's export limit, so closed-year SKU data must be served from the database, not read ad hoc.
+
+---
+
+## What to watch
+
+**Breadth without a denominator is the most likely mistake.** "Sells 3 segments" and "sells 40 of 903 CP codes" are different statements, and only the second is actionable. CP and PTMT are 68% of the catalogue, so segment-count metrics will mislead by design.
+
+**The push and review lists must not merge.** A single "slow-moving" list would send salespeople after codes the market has rejected. The peer comparison is what separates them, and it is the reason to build peer analysis before any push list is published.
+
+**Peer cohorts need naming, not just computing.** A recommendation a distributor can challenge — "which four?" — is a recommendation that gets acted on. One that cannot be challenged gets ignored.
+
+**Segment must never come from `type_raw`.** It is null for every FY2026-27 row, so a type_raw-based segment silently returns nothing for the live year and the page would look empty rather than broken.
+
+**Retailer level must be built, not deferred.** It works on closed years now and lights up when the FY2026-27 register arrives. Gate the data, not the feature.
+
+---
+
+*Prayag Distributor Analysis · schemes deliberately out of scope · segment catalogue verified 29 July 2026*

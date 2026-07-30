@@ -31,6 +31,7 @@ import aiChatRouter from "./aiChat";
 import graphRouter from "./graph";
 import warningsRouter from "./warnings";
 import orgRouter from "./org";
+import skuRouter from "./sku";
 
 const router: IRouter = Router();
 
@@ -66,5 +67,6 @@ router.use(aiChatRouter);
 router.use(graphRouter);
 router.use(warningsRouter);
 router.use(orgRouter);
+router.use(skuRouter);
 
 export default router;

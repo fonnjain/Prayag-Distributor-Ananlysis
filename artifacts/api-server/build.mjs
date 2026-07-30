@@ -20,6 +20,7 @@ async function buildAll() {
       path.resolve(artifactDir, "src/backfill.ts"),
       path.resolve(artifactDir, "src/secondary-backfill.ts"),
       path.resolve(artifactDir, "src/secondary-gate3.ts"),
+      path.resolve(artifactDir, "src/secondary-sku-backfill.ts"),
     ],
     platform: "node",
     bundle: true,

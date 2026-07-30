@@ -1,0 +1,40 @@
+{
+  "_comment": "Maps item_master.item_group (ERP product category) to the canonical segment group used in the SKU Deep Dive. Keep in sync with group_map.json (which maps secondary register Segment values). Only count items with mrp > 0 as 'active catalogue' items. Blanks and 'NA' are unmapped.",
+  "CP (Chrome-Plated)": [
+    "CP FAUCET", "CP SHOWER", "CP ACCESSORIES", "CP ALLIED",
+    "CP Finished Goods", "CP PROJECT A/C", "CP TRADING", "Cp Spare"
+  ],
+  "PTMT / Faucets": [
+    "PTMT Finish Goods", "PTMT TRADING"
+  ],
+  "CPVC": [
+    "CPVC Finished Goods", "CPVC PIPE FG", "CPVC Trading Goods"
+  ],
+  "Sanitaryware": [
+    "SANITARYWARE", "SANITARYWARE TRADING"
+  ],
+  "AGRI": [
+    "AGRI FG", "AGRI PIPE FG", "AGRI TRADING"
+  ],
+  "Sink": [
+    "SINK FG", "SINK Plate Rack", "SINK TRADING", "QUARDZ SINK FG", "GLASS FG"
+  ],
+  "Connection / Waste": [
+    "SINK FLOOR TRAP", "QUAA FG", "QUAA TRADING"
+  ],
+  "Hardware": [
+    "HARDWARE FG", "HARDWARE TRADING", "B/D"
+  ],
+  "SWR": [
+    "SWR FG", "SWR PIPE FG", "SWR TRADING GOODS"
+  ],
+  "UPVC": [
+    "UPVC Finished Goods", "UPVC PIPE FG", "UPVC Trading Goods"
+  ],
+  "WATER TANK": [
+    "WATER TANK"
+  ],
+  "CISTERN": [
+    "CISTERN Finished Goods"
+  ]
+}
