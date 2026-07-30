@@ -29,7 +29,11 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
 import { loadSkuFacts, getSkuCapability } from "../lib/sku/skuFacts.js";
-import { getCatalogueCounts } from "../lib/sku/catalogue.js";
+import {
+  getCatalogueCounts,
+  getCatalogueCompleteness,
+  getFySegmentDistribution,
+} from "../lib/sku/catalogue.js";
 import { fiscalMonthsToLabels } from "../lib/mgmt/primaryPeriod.js";
 
 const router = Router();
@@ -152,18 +156,70 @@ router.get("/sku/capability", async (req: Request, res: Response): Promise<void>
 });
 
 // ── GET /api/sku/catalogue ────────────────────────────────────────────────────
+//
+// Query params:
+//   fy  (optional) — if provided, also returns segment distribution for that FY
+//                    so callers can inspect unmapped/raw_only rows for a specific year.
 
-router.get("/sku/catalogue", async (_req: Request, res: Response): Promise<void> => {
+router.get("/sku/catalogue", async (req: Request, res: Response): Promise<void> => {
   try {
-    const cat = await getCatalogueCounts();
+    const fyParam =
+      typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
+        ? req.query.fy.trim()
+        : null;
+
+    const [cat, completeness, fyDist] = await Promise.all([
+      getCatalogueCounts(),
+      getCatalogueCompleteness(),
+      fyParam ? getFySegmentDistribution(fyParam) : Promise.resolve(null),
+    ]);
+
+    const unmappedLines = (fyDist ?? []).filter(
+      (r) => r.segment === "Unmapped" || r.mappingStatus !== "mapped_via_canon",
+    );
+    const unmappedLineCount  = unmappedLines.reduce((s, r) => s + r.lineCount, 0);
+    const unmappedCodeCount  = unmappedLines.reduce((s, r) => s + r.distinctCodes, 0);
+    const unmappedValue      = unmappedLines.reduce((s, r) => s + r.totalNet, 0);
+
     res.json({
+      // ── Catalogue denominator ────────────────────────────────────────────
       bySegment: cat.bySegment,
       mappedCodes: cat.mappedCodes,
       unmappedCodes: cat.unmappedCount,
       totalCodes: cat.totalCodes,
-      note: "Derived from item_master.item_group via group_map.json. Never hardcoded.",
+
+      // ── Per-segment completeness assertion ──────────────────────────────
+      // Assert: codesAvailable >= distinct codes ever sold in that segment
+      // across all loaded fiscal years.  Shortfall = codesEverSold - codesAvailable.
+      // Negative shortfall means item_master is incomplete for that segment.
+      completeness: {
+        passing: completeness.passing,
+        failing: completeness.failing,
+        totalShortfall: completeness.totalShortfall,
+        unmappedSegments: completeness.unmappedSegments,
+        rows: completeness.rows,
+      },
+
+      // ── Per-FY segment distribution (only when ?fy= is provided) ────────
+      fyDistribution: fyDist
+        ? {
+            fy: fyParam,
+            rows: fyDist,
+            unmappedSummary: {
+              lineCount:  unmappedLineCount,
+              codeCount:  unmappedCodeCount,
+              totalNet:   unmappedValue,
+              pct: fyDist.reduce((s, r) => s + r.totalNet, 0) > 0
+                ? (unmappedValue / fyDist.reduce((s, r) => s + r.totalNet, 0)) * 100
+                : 0,
+            },
+          }
+        : null,
+
+      note: "Derived from item_master.item_group via item_group_map.json. Never hardcoded.",
     });
   } catch (err) {
+    req.log.error({ err }, "catalogue endpoint failed");
     res.status(500).json({ error: "Could not compute catalogue counts." });
   }
 });
