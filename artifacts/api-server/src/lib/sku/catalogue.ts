@@ -166,6 +166,110 @@ export function clearCatalogueCache(): void {
   _cacheBuiltAt = 0;
 }
 
+// ── Ever-sold denominator ─────────────────────────────────────────────────────
+//
+// This is the breadth denominator for SKU facts.
+// codesEverSold[segment] = COUNT(DISTINCT code) in sale_line across ALL loaded
+// fiscal years.  It is always >= codesBought for any period sub-query, so
+// breadthPct is always in [0, 100].  Never derived from item_master.
+
+let _everSoldCache: Map<string, number> | null = null;
+let _everSoldCacheBuiltAt = 0;
+
+export async function getEverSoldPerSegment(): Promise<Map<string, number>> {
+  if (_everSoldCache && Date.now() - _everSoldCacheBuiltAt < CACHE_TTL_MS) {
+    return _everSoldCache;
+  }
+
+  const rows = await db.execute<{ segment: string; cnt: string }>(sql`
+    SELECT
+      COALESCE(group_canon, group_raw, 'Unmapped') AS segment,
+      COUNT(DISTINCT code)::text                   AS cnt
+    FROM sale_line
+    WHERE version_status = 'current'
+      AND code IS NOT NULL AND code <> ''
+    GROUP BY 1
+  `);
+
+  const map = new Map<string, number>();
+  for (const r of rows.rows) {
+    map.set(r.segment, parseInt(r.cnt, 10));
+  }
+
+  _everSoldCache = map;
+  _everSoldCacheBuiltAt = Date.now();
+  return map;
+}
+
+/** Invalidate both caches together (call after item_master or sale_line bulk updates). */
+export function clearSkuCaches(): void {
+  _cache = null;
+  _cacheBuiltAt = 0;
+  _everSoldCache = null;
+  _everSoldCacheBuiltAt = 0;
+}
+
+// ── Never-sold catalogue reference ───────────────────────────────────────────
+//
+// Codes that exist in item_master (mrp > 0) but have never appeared in any
+// sale_line row.  These are genuine catalogue items with no transaction history.
+// Returned as a secondary reference — NOT used as a breadth denominator.
+
+export type NeverSoldSegmentSummary = {
+  segment: string;
+  /** item_group values in this segment that have never-sold codes. */
+  itemGroups: string[];
+  /** Total never-sold codes in this segment. */
+  count: number;
+};
+
+export async function getNeverSoldCatalogueItems(): Promise<{
+  bySegment: NeverSoldSegmentSummary[];
+  unmapped: { itemGroup: string; count: number }[];
+  total: number;
+}> {
+  const rows = await db.execute<{ item_group: string | null; cnt: string }>(sql`
+    SELECT im.item_group, COUNT(DISTINCT im.code)::text AS cnt
+    FROM item_master im
+    LEFT JOIN (
+      SELECT DISTINCT code FROM sale_line WHERE version_status = 'current'
+    ) sold ON sold.code = im.code
+    WHERE im.mrp IS NOT NULL AND im.mrp > 0
+      AND sold.code IS NULL
+    GROUP BY 1
+    ORDER BY 2::int DESC
+  `);
+
+  type SegAcc = { itemGroups: string[]; count: number };
+  const segMap = new Map<string, SegAcc>();
+  const unmapped: { itemGroup: string; count: number }[] = [];
+  let total = 0;
+
+  for (const r of rows.rows) {
+    const count = parseInt(r.cnt, 10);
+    total += count;
+    const canon = canonItemGroup(r.item_group);
+    const rawGroup = r.item_group ?? "(null)";
+    if (canon) {
+      const acc = segMap.get(canon);
+      if (acc) {
+        acc.itemGroups.push(rawGroup);
+        acc.count += count;
+      } else {
+        segMap.set(canon, { itemGroups: [rawGroup], count });
+      }
+    } else {
+      unmapped.push({ itemGroup: rawGroup, count });
+    }
+  }
+
+  const bySegment: NeverSoldSegmentSummary[] = Array.from(segMap.entries())
+    .map(([segment, acc]) => ({ segment, itemGroups: acc.itemGroups, count: acc.count }))
+    .sort((a, b) => b.count - a.count);
+
+  return { bySegment, unmapped, total };
+}
+
 // ── Catalogue completeness assertion ─────────────────────────────────────────
 
 /**

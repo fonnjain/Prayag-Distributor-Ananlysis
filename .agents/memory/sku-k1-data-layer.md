@@ -27,6 +27,15 @@ Passing a JS array to `ANY(${array}::text[])` in a Drizzle tagged template gener
 - `type_raw ILIKE '%direct%'` → direct dealer
 - NEVER use `type_raw` as a segment source; segment always from `COALESCE(group_canon, group_raw, 'Unmapped')`.
 
+## Breadth denominator
+`codesEverSold` = `COUNT(DISTINCT code)` in `sale_line WHERE version_status='current'` across ALL loaded FYs for that segment. Always ≥ `codesBought` for any period sub-query, so `breadthPct` ∈ [0, 100]. `item_master` is carried as `codesInCatalogue` for reference only. `catalogueIncomplete` flag was removed (structurally impossible with this denominator). Cache TTL 1h. `getEverSoldPerSegment()` in catalogue.ts.
+
+## Never-sold catalogue items
+`getNeverSoldCatalogueItems()` in catalogue.ts: LEFT JOIN item_master vs DISTINCT sale_line codes. 1,238 codes with mrp>0 have zero transactions across all loaded FYs. Returned as `neverSold.bySegment` from `/api/sku/catalogue`. Largest: CP (562), Hardware (213), Sanitaryware (127), SWR (121).
+
+## Overview product mix
+The Overview renders ALL 17 `group_canon` values from `/api/analytics` — there is no 7-group rollup layer. analytics.ts uses `COALESCE(group_canon, 'Unmapped')` (no group_raw fallback); SKU facts uses `COALESCE(group_canon, group_raw, 'Unmapped')`. NET is identical across all FYs (zero group_raw-only rows confirmed). 17 segments = 17 Overview groups = 1:1 mapping.
+
 ## Routes
 - `GET /api/sku/facts?fy&level&scope&scopeId&monthFrom&monthTo&segment`
 - `GET /api/sku/capability?fy`

@@ -13,13 +13,16 @@
  * NET = amount (sale_line) or net_amount (secondary_sku_line) = Sub Total.
  * Order Total is never used.
  *
- * Breadth figures always carry their denominator (codes_available per segment
- * from item_master via group_map.json). Bare counts are never returned.
+ * Breadth figures carry their denominator: codesEverSold per segment = distinct
+ * codes transacted across ALL loaded FYs in that segment.  This is always ≥
+ * codesBought for any period sub-query, so breadthPct is always in [0, 100].
+ * item_master is carried as a secondary reference (codesInCatalogue) only.
+ * Bare counts are never returned.
  */
 
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { getCatalogueCounts, canonGroupFromMap } from "./catalogue.js";
+import { getCatalogueCounts, getEverSoldPerSegment, canonGroupFromMap } from "./catalogue.js";
 import { logger } from "../logger.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -59,16 +62,22 @@ export type SkuSegmentFact = {
   /** Share of total net for the requested scope (0–1). */
   netShare: number;
   codesBought: number;
-  /** From item_master via item_group_map.json — always present. */
-  codesAvailable: number;
   /**
-   * codesBought / codesAvailable × 100.
-   * May exceed 100 when item_master is incomplete (codesBought > codesAvailable).
-   * Check catalogueIncomplete flag; K2 UI should show a warning in that case.
+   * Distinct codes ever transacted in this segment across ALL loaded fiscal years.
+   * This is the breadth denominator.  Always >= codesBought, so breadthPct is
+   * always in [0, 100] — no segment can divide by zero.
+   */
+  codesEverSold: number;
+  /**
+   * codesBought / codesEverSold × 100.  Always in [0, 100].
    */
   breadthPct: number;
-  /** True when codesBought > codesAvailable — item_master is undercounting this segment. */
-  catalogueIncomplete: boolean;
+  /**
+   * Codes in item_master (mrp > 0) for this segment — secondary reference only.
+   * May be less than codesEverSold (item_master is an incomplete catalogue
+   * snapshot for most segments).  0 for segments not in item_group_map.json.
+   */
+  codesInCatalogue: number;
 };
 
 export type SkuFactsResult = {
@@ -280,7 +289,13 @@ async function buildFactsFromRows(
 ): Promise<SkuFactsResult["facts"]> {
   if (rows.length === 0) return null;
 
-  const catalogue = await getCatalogueCounts();
+  // Fetch both denominators in parallel:
+  //   everSold   — primary breadth denominator (cross-FY distinct codes in sale_line)
+  //   catalogue  — secondary reference (item_master codes with mrp > 0)
+  const [everSold, catalogue] = await Promise.all([
+    getEverSoldPerSegment(),
+    getCatalogueCounts(),
+  ]);
 
   // Aggregate per-code (across months)
   type CodeAcc = {
@@ -331,7 +346,9 @@ async function buildFactsFromRows(
   const bySegment: SkuSegmentFact[] = Array.from(segMap.entries())
     .sort(([, a], [, b]) => b.net - a.net)
     .map(([segment, acc]) => {
-      const codesAvailable = catalogue.bySegment[segment] ?? 0;
+      // codesEverSold is the denominator: always >= codesBought for the requested
+      // period (since codesEverSold spans all FYs/months), so breadthPct ∈ [0,100].
+      const codesEverSoldForSeg = everSold.get(segment) ?? acc.codes.size;
       const codesBought = acc.codes.size;
       return {
         segment,
@@ -339,9 +356,9 @@ async function buildFactsFromRows(
         net: acc.net,
         netShare: totalNet > 0 ? acc.net / totalNet : 0,
         codesBought,
-        codesAvailable,
-        breadthPct: codesAvailable > 0 ? (codesBought / codesAvailable) * 100 : 0,
-        catalogueIncomplete: codesBought > codesAvailable,
+        codesEverSold: codesEverSoldForSeg,
+        breadthPct: codesEverSoldForSeg > 0 ? (codesBought / codesEverSoldForSeg) * 100 : 0,
+        codesInCatalogue: catalogue.bySegment[segment] ?? 0,
       };
     });
 
@@ -401,10 +418,7 @@ export async function loadSkuFacts(
 ): Promise<SkuFactsResult> {
   const { fy, level, scope, scopeId, monthLabels, segment } = params;
 
-  const [capability, catalogue] = await Promise.all([
-    getSkuCapability(fy),
-    getCatalogueCounts(),
-  ]);
+  const capability = await getSkuCapability(fy);
 
   const cap = capability[level];
   if (!cap.available) {

@@ -33,6 +33,7 @@ import {
   getCatalogueCounts,
   getCatalogueCompleteness,
   getFySegmentDistribution,
+  getNeverSoldCatalogueItems,
 } from "../lib/sku/catalogue.js";
 import { fiscalMonthsToLabels } from "../lib/mgmt/primaryPeriod.js";
 
@@ -102,8 +103,6 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
       segment,
     });
 
-    const catalogue = await getCatalogueCounts();
-
     res.json({
       fy,
       monthFrom,
@@ -121,13 +120,9 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
         level === "retailer"
           ? "secondary_sku_line.segment_canon derived from Segment column via group_map.json"
           : "COALESCE(sale_line.group_canon, sale_line.group_raw, 'Unmapped') — never type_raw",
+      // breadthDenominator: codesEverSold per segment (cross-FY distinct codes in
+      // sale_line). Each SkuSegmentFact carries its own codesEverSold + codesInCatalogue.
       capability: result.capability,
-      catalogue: {
-        bySegment: catalogue.bySegment,
-        mappedCodes: catalogue.mappedCodes,
-        unmappedCodes: catalogue.unmappedCount,
-        totalCodes: catalogue.totalCodes,
-      },
       facts: result.facts,
     });
   } catch (err) {
@@ -168,9 +163,10 @@ router.get("/sku/catalogue", async (req: Request, res: Response): Promise<void> 
         ? req.query.fy.trim()
         : null;
 
-    const [cat, completeness, fyDist] = await Promise.all([
+    const [cat, completeness, neverSold, fyDist] = await Promise.all([
       getCatalogueCounts(),
       getCatalogueCompleteness(),
+      getNeverSoldCatalogueItems(),
       fyParam ? getFySegmentDistribution(fyParam) : Promise.resolve(null),
     ]);
 
@@ -182,16 +178,29 @@ router.get("/sku/catalogue", async (req: Request, res: Response): Promise<void> 
     const unmappedValue      = unmappedLines.reduce((s, r) => s + r.totalNet, 0);
 
     res.json({
-      // ── Catalogue denominator ────────────────────────────────────────────
-      bySegment: cat.bySegment,
-      mappedCodes: cat.mappedCodes,
-      unmappedCodes: cat.unmappedCount,
-      totalCodes: cat.totalCodes,
+      // ── item_master reference counts ─────────────────────────────────────
+      // NOT used as breadth denominator (item_master is an incomplete snapshot).
+      // Use completeness.rows[seg].codesEverSold for the breadth denominator.
+      itemMaster: {
+        bySegment: cat.bySegment,
+        mappedCodes: cat.mappedCodes,
+        unmappedCodes: cat.unmappedCount,
+        totalCodes: cat.totalCodes,
+      },
 
-      // ── Per-segment completeness assertion ──────────────────────────────
-      // Assert: codesAvailable >= distinct codes ever sold in that segment
-      // across all loaded fiscal years.  Shortfall = codesEverSold - codesAvailable.
-      // Negative shortfall means item_master is incomplete for that segment.
+      // ── Codes in item_master that have never been sold ───────────────────
+      // These are genuine catalogue items with no transaction history.
+      // bySegment lists canonical segment → { count, itemGroups }.
+      // unmapped = item_groups not covered by item_group_map.json.
+      neverSold: {
+        total: neverSold.total,
+        bySegment: neverSold.bySegment,
+        unmapped: neverSold.unmapped,
+      },
+
+      // ── Completeness assertion ───────────────────────────────────────────
+      // codesAvailable (item_master) vs codesEverSold (sale_line, all FYs).
+      // Shortfall = codesEverSold − codesAvailable.  Only SWR passes today.
       completeness: {
         passing: completeness.passing,
         failing: completeness.failing,
@@ -216,7 +225,7 @@ router.get("/sku/catalogue", async (req: Request, res: Response): Promise<void> 
           }
         : null,
 
-      note: "Derived from item_master.item_group via item_group_map.json. Never hardcoded.",
+      note: "item_master reference via item_group_map.json. Breadth denominator = codesEverSold in sale_line.",
     });
   } catch (err) {
     req.log.error({ err }, "catalogue endpoint failed");
