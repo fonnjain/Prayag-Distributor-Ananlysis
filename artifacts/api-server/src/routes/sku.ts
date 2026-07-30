@@ -28,7 +28,8 @@
 
 import type { Request, Response } from "express";
 import { Router } from "express";
-import { loadSkuFacts, getSkuCapability } from "../lib/sku/skuFacts.js";
+import { loadSkuFacts, getSkuCapability, getSkuTrend } from "../lib/sku/skuFacts.js";
+import type { SkuLevel, SkuScope } from "../lib/sku/skuFacts.js";
 import {
   getCatalogueCounts,
   getCatalogueCompleteness,
@@ -230,6 +231,59 @@ router.get("/sku/catalogue", async (req: Request, res: Response): Promise<void> 
   } catch (err) {
     req.log.error({ err }, "catalogue endpoint failed");
     res.status(500).json({ error: "Could not compute catalogue counts." });
+  }
+});
+
+// ── GET /api/sku/trend ────────────────────────────────────────────────────────
+//
+// Returns per-FY-month and per-FY breadth aggregates across all loaded fiscal
+// years.  No FY or period filter — the whole time series is always returned.
+//
+// Query params:
+//   level    (required)  distributor | direct_dealer | retailer
+//   scope    (optional)  company (default) | head | customer
+//   scopeId  (required when scope != company)
+//   segment  (optional)  filter to a single canonical segment
+
+router.get("/sku/trend", async (req: Request, res: Response): Promise<void> => {
+  const level = typeof req.query.level === "string" ? req.query.level.trim() : "distributor";
+  if (!VALID_LEVELS.has(level)) {
+    res.status(400).json({ error: `level must be one of: ${[...VALID_LEVELS].join(", ")}` });
+    return;
+  }
+
+  const scope = typeof req.query.scope === "string" ? req.query.scope.trim() : "company";
+  if (!VALID_SCOPES.has(scope)) {
+    res.status(400).json({ error: `scope must be one of: ${[...VALID_SCOPES].join(", ")}` });
+    return;
+  }
+
+  const scopeId =
+    scope !== "company" && typeof req.query.scopeId === "string" && req.query.scopeId.trim()
+      ? req.query.scopeId.trim()
+      : undefined;
+
+  if (scope !== "company" && !scopeId) {
+    res.status(400).json({ error: "scopeId is required when scope is 'head' or 'customer'" });
+    return;
+  }
+
+  const segment =
+    typeof req.query.segment === "string" && req.query.segment.trim()
+      ? req.query.segment.trim()
+      : undefined;
+
+  try {
+    const result = await getSkuTrend({
+      level: level as SkuLevel,
+      scope: scope as SkuScope,
+      scopeId,
+      segment,
+    });
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err, level }, "sku trend failed");
+    res.status(500).json({ error: "Could not load SKU trend data." });
   }
 });
 

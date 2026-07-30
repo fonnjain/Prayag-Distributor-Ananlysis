@@ -494,6 +494,212 @@ async function buildFactsFromRows(
   };
 }
 
+// ── SKU Trend (K4) ────────────────────────────────────────────────────────────
+//
+// Aggregate breadth metrics across all loaded FYs at two granularities:
+//   monthly  — one row per (fy, month_label, segment): codesBought + net
+//   fyTotals — one row per (fy, segment): distinct codes bought in full FY + net
+//
+// The denominator for breadthPct is always everSold[segment] (cross-FY global),
+// so it is stable and independent of the requested FY range.
+
+const FM_IDX: Record<string, number> = {
+  Apr: 1, May: 2, Jun: 3, Jul: 4, Aug: 5, Sep: 6,
+  Oct: 7, Nov: 8, Dec: 9, Jan: 10, Feb: 11, Mar: 12,
+};
+
+function monthLabelToFiscalIdx(ml: string): number {
+  return FM_IDX[ml.slice(0, 3)] ?? 0;
+}
+
+export type SkuTrendMonthRow = {
+  fy: string;
+  fyMonth: string;
+  monthIdx: number;
+  segment: string;
+  codesBought: number;
+  net: number;
+};
+
+export type SkuTrendFyRow = {
+  fy: string;
+  segment: string;
+  codesBought: number;
+  net: number;
+};
+
+export type SkuTrendResult = {
+  level: string;
+  fys: string[];
+  fyMonths: string[];
+  everSold: Record<string, number>;
+  monthly: SkuTrendMonthRow[];
+  fyTotals: SkuTrendFyRow[];
+  fyNetTotals: Record<string, number>;
+};
+
+export type SkuTrendParams = {
+  level: SkuLevel;
+  scope: SkuScope;
+  scopeId?: string;
+  segment?: string;
+};
+
+export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResult> {
+  const { level, scope, scopeId, segment } = params;
+
+  type RawTrendRow = {
+    fy: string; month_label: string; segment: string;
+    codes_bought: string; net: string;
+  };
+  type RawFyRow = {
+    fy: string; segment: string; codes_bought: string; net: string;
+  };
+
+  let monthly: SkuTrendMonthRow[];
+  let fyTotalsRaw: RawFyRow[];
+
+  if (level === "retailer") {
+    const scopeFilter =
+      scope === "customer" && scopeId ? sql`AND sku.retailer = ${scopeId}`
+      : scope === "head" && scopeId    ? sql`AND sku.head_canon = ${scopeId}`
+      : sql``;
+    const segFilter = segment
+      ? sql`AND COALESCE(sku.segment_canon, 'Unmapped') = ${segment}`
+      : sql``;
+
+    const [mRes, fyRes] = await Promise.all([
+      db.execute<RawTrendRow>(sql`
+        SELECT
+          sku.fy,
+          sku.month_label,
+          COALESCE(sku.segment_canon, 'Unmapped') AS segment,
+          COUNT(DISTINCT sku.item_code)::text      AS codes_bought,
+          SUM(sku.net_amount::numeric)::text       AS net
+        FROM secondary_sku_line sku
+        WHERE sku.item_code IS NOT NULL AND sku.item_code <> ''
+          ${scopeFilter} ${segFilter}
+        GROUP BY sku.fy, sku.month_label, COALESCE(sku.segment_canon, 'Unmapped')
+        ORDER BY sku.fy, sku.month_label
+      `),
+      db.execute<RawFyRow>(sql`
+        SELECT
+          sku.fy,
+          COALESCE(sku.segment_canon, 'Unmapped') AS segment,
+          COUNT(DISTINCT sku.item_code)::text      AS codes_bought,
+          SUM(sku.net_amount::numeric)::text       AS net
+        FROM secondary_sku_line sku
+        WHERE sku.item_code IS NOT NULL AND sku.item_code <> ''
+          ${scopeFilter} ${segFilter}
+        GROUP BY sku.fy, COALESCE(sku.segment_canon, 'Unmapped')
+        ORDER BY sku.fy
+      `),
+    ]);
+
+    monthly = mRes.rows.map((r) => ({
+      fy: r.fy, fyMonth: r.month_label, monthIdx: monthLabelToFiscalIdx(r.month_label),
+      segment: r.segment, codesBought: parseInt(r.codes_bought, 10) || 0,
+      net: parseFloat(r.net) || 0,
+    }));
+    fyTotalsRaw = fyRes.rows;
+  } else {
+    const levelFilter =
+      level === "direct_dealer"
+        ? sql`AND sl.type_raw ILIKE '%direct%'`
+        : sql`AND (sl.type_raw IS NULL OR sl.type_raw NOT ILIKE '%direct%')`;
+    const scopeFilter =
+      scope === "customer" && scopeId ? sql`AND sl.customer = ${scopeId}`
+      : scope === "head" && scopeId    ? sql`AND sl.head_canon = ${scopeId}`
+      : sql``;
+    const segFilter = segment
+      ? sql`AND COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') = ${segment}`
+      : sql``;
+
+    const [mRes, fyRes] = await Promise.all([
+      db.execute<RawTrendRow>(sql`
+        SELECT
+          sl.fy,
+          sl.month_label,
+          COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') AS segment,
+          COUNT(DISTINCT sl.code)::text                       AS codes_bought,
+          SUM(sl.amount::numeric)::text                       AS net
+        FROM sale_line_current sl
+        WHERE sl.version_status = 'current'
+          AND sl.code IS NOT NULL AND sl.code <> ''
+          ${levelFilter} ${scopeFilter} ${segFilter}
+        GROUP BY sl.fy, sl.month_label,
+                 COALESCE(sl.group_canon, sl.group_raw, 'Unmapped')
+        ORDER BY sl.fy, sl.month_label
+      `),
+      db.execute<RawFyRow>(sql`
+        SELECT
+          sl.fy,
+          COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') AS segment,
+          COUNT(DISTINCT sl.code)::text                       AS codes_bought,
+          SUM(sl.amount::numeric)::text                       AS net
+        FROM sale_line_current sl
+        WHERE sl.version_status = 'current'
+          AND sl.code IS NOT NULL AND sl.code <> ''
+          ${levelFilter} ${scopeFilter} ${segFilter}
+        GROUP BY sl.fy, COALESCE(sl.group_canon, sl.group_raw, 'Unmapped')
+        ORDER BY sl.fy
+      `),
+    ]);
+
+    monthly = mRes.rows.map((r) => ({
+      fy: r.fy, fyMonth: r.month_label, monthIdx: monthLabelToFiscalIdx(r.month_label),
+      segment: r.segment, codesBought: parseInt(r.codes_bought, 10) || 0,
+      net: parseFloat(r.net) || 0,
+    }));
+    fyTotalsRaw = fyRes.rows;
+  }
+
+  // Sort monthly chronologically: by FY start year, then fiscal month index.
+  monthly.sort((a, b) => {
+    const fyA = parseInt(a.fy.split("-")[0], 10);
+    const fyB = parseInt(b.fy.split("-")[0], 10);
+    if (fyA !== fyB) return fyA - fyB;
+    return a.monthIdx - b.monthIdx;
+  });
+
+  // Ordered unique FY list
+  const fySet = new Set<string>();
+  for (const r of monthly) fySet.add(r.fy);
+  const fys = [...fySet].sort((a, b) =>
+    parseInt(a.split("-")[0], 10) - parseInt(b.split("-")[0], 10),
+  );
+
+  // Ordered unique fyMonths (already in chronological order after sort above)
+  const seenFyMonths = new Set<string>();
+  const fyMonths: string[] = [];
+  for (const r of monthly) {
+    if (!seenFyMonths.has(r.fyMonth)) {
+      seenFyMonths.add(r.fyMonth);
+      fyMonths.push(r.fyMonth);
+    }
+  }
+
+  // fyTotals
+  const fyTotals: SkuTrendFyRow[] = fyTotalsRaw.map((r) => ({
+    fy: r.fy, segment: r.segment,
+    codesBought: parseInt(r.codes_bought, 10) || 0,
+    net: parseFloat(r.net) || 0,
+  }));
+
+  // fyNetTotals: total net per FY across all segments
+  const fyNetTotals: Record<string, number> = {};
+  for (const r of fyTotals) {
+    fyNetTotals[r.fy] = (fyNetTotals[r.fy] ?? 0) + r.net;
+  }
+
+  // everSold denominator
+  const everSoldMap = await getEverSoldPerSegment();
+  const everSold: Record<string, number> = {};
+  for (const [seg, cnt] of everSoldMap) everSold[seg] = cnt;
+
+  return { level, fys, fyMonths, everSold, monthly, fyTotals, fyNetTotals };
+}
+
 // ── Main entry point ──────────────────────────────────────────────────────────
 
 export type SkuFactsParams = {

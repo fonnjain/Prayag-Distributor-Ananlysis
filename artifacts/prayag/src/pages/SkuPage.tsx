@@ -1,8 +1,9 @@
-// SKU Deep Dive — Phase K2.
+// SKU Deep Dive — Phase K2 + K4.
 //
-// Two sections driven by internal state (not URL sub-routes):
-//   Overview  — all 17 canonical segments sorted by net; click → drill.
+// Three sections driven by internal state (not URL sub-routes):
+//   Overview  — all canonical segments sorted by net; click → drill.
 //   Drill     — code-level breakdown for one segment.
+//   Trends    — breadth % time-series and FY-over-FY comparisons.
 //
 // Filters: FY | Level (distributor/direct_dealer/retailer) | Period preset
 // Scope defaults to company-wide. scopeId is omitted.
@@ -12,6 +13,7 @@
 import { useState, useEffect, useCallback } from "react";
 import SkuOverview, { type SegmentRow } from "@/components/sku/SkuOverview";
 import SkuDrill, { type CodeRow } from "@/components/sku/SkuDrill";
+import SkuTrends, { type TrendData } from "@/components/sku/SkuTrends";
 import { cn } from "@/lib/utils";
 import { ChevronLeft } from "lucide-react";
 
@@ -56,7 +58,7 @@ type FactsResponse = {
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
-type Section = "overview" | "drill";
+type Section = "overview" | "drill" | "trends";
 type Level = "distributor" | "direct_dealer" | "retailer";
 
 export default function SkuPage() {
@@ -69,14 +71,20 @@ export default function SkuPage() {
   const [section, setSection] = useState<Section>("overview");
   const [drillSegment, setDrillSegment] = useState<string | null>(null);
 
-  // Fetch state
+  // Fetch state — overview
   const [overviewData, setOverviewData] = useState<FactsResponse | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(false);
   const [overviewError, setOverviewError] = useState<string | null>(null);
 
+  // Fetch state — drill
   const [drillData, setDrillData] = useState<FactsResponse | null>(null);
   const [drillLoading, setDrillLoading] = useState(false);
   const [drillError, setDrillError] = useState<string | null>(null);
+
+  // Fetch state — trends
+  const [trendData, setTrendData] = useState<TrendData | null>(null);
+  const [trendLoading, setTrendLoading] = useState(false);
+  const [trendError, setTrendError] = useState<string | null>(null);
 
   const period = PERIOD_PRESETS.find((p) => p.id === periodId) ?? PERIOD_PRESETS[0];
 
@@ -127,6 +135,24 @@ export default function SkuPage() {
       .catch((e: Error) => setDrillError(e.message))
       .finally(() => setDrillLoading(false));
   }, [section, drillSegment, fy, level, period.monthFrom, period.monthTo]);
+
+  // ── Fetch trend (all FYs) ─────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (section !== "trends") return;
+    setTrendLoading(true);
+    setTrendError(null);
+    setTrendData(null);
+    const params = new URLSearchParams({ level, scope: "company" });
+    fetch(`${BASE}/api/sku/trend?${params}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json() as Promise<TrendData>;
+      })
+      .then(setTrendData)
+      .catch((e: Error) => setTrendError(e.message))
+      .finally(() => setTrendLoading(false));
+  }, [section, level]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
@@ -190,24 +216,49 @@ export default function SkuPage() {
 
         {/* Section tabs */}
         <div className="hidden sm:flex items-center gap-1 ml-1">
-          {(["overview", "drill"] as Section[]).map((s) => {
-            if (s === "drill" && !drillSegment) return null;
-            return (
-              <button
-                key={s}
-                type="button"
-                onClick={() => s === "overview" ? handleBack() : undefined}
-                className={cn(
-                  "px-2.5 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap",
-                  section === s
-                    ? "bg-primary/10 text-primary"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                )}
-              >
-                {s === "overview" ? "Overview" : drillSegment}
-              </button>
-            );
-          })}
+          {/* Overview — always visible */}
+          <button
+            type="button"
+            onClick={handleBack}
+            className={cn(
+              "px-2.5 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap",
+              section === "overview"
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+          >
+            Overview
+          </button>
+
+          {/* Drill — only when a segment is selected */}
+          {drillSegment && (
+            <button
+              type="button"
+              onClick={() => setSection("drill")}
+              className={cn(
+                "px-2.5 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap",
+                section === "drill"
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            >
+              {drillSegment}
+            </button>
+          )}
+
+          {/* Trends — always visible */}
+          <button
+            type="button"
+            onClick={() => setSection("trends")}
+            className={cn(
+              "px-2.5 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap",
+              section === "trends"
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+          >
+            Trends
+          </button>
         </div>
 
         {/* Filters */}
@@ -219,6 +270,7 @@ export default function SkuPage() {
               setLevel(e.target.value as Level);
               setOverviewData(null);
               setDrillData(null);
+              setTrendData(null);
             }}
             className="rounded border bg-background px-2 py-1 text-xs"
           >
@@ -227,46 +279,55 @@ export default function SkuPage() {
             <option value="retailer">Retailer</option>
           </select>
 
-          {/* FY */}
-          <select
-            value={fy}
-            onChange={(e) => {
-              setFy(e.target.value);
-              setOverviewData(null);
-              setDrillData(null);
-            }}
-            className="rounded border bg-background px-2 py-1 text-xs"
-          >
-            {FYS.map((f) => (
-              <option key={f} value={f}>FY {f}</option>
-            ))}
-          </select>
+          {/* FY + Period — hidden on Trends (spans all FYs) */}
+          {section !== "trends" && (
+            <>
+              <select
+                value={fy}
+                onChange={(e) => {
+                  setFy(e.target.value);
+                  setOverviewData(null);
+                  setDrillData(null);
+                }}
+                className="rounded border bg-background px-2 py-1 text-xs"
+              >
+                {FYS.map((f) => (
+                  <option key={f} value={f}>FY {f}</option>
+                ))}
+              </select>
 
-          {/* Period */}
-          <select
-            value={periodId}
-            onChange={(e) => {
-              setPeriodId(e.target.value as PeriodPresetId);
-              setOverviewData(null);
-              setDrillData(null);
-            }}
-            className="rounded border bg-background px-2 py-1 text-xs"
-          >
-            {PERIOD_PRESETS.map((p) => (
-              <option key={p.id} value={p.id}>{p.label}</option>
-            ))}
-          </select>
+              <select
+                value={periodId}
+                onChange={(e) => {
+                  setPeriodId(e.target.value as PeriodPresetId);
+                  setOverviewData(null);
+                  setDrillData(null);
+                }}
+                className="rounded border bg-background px-2 py-1 text-xs"
+              >
+                {PERIOD_PRESETS.map((p) => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
+                ))}
+              </select>
 
-          <span className="text-xs text-muted-foreground hidden lg:block">
-            {levelLabel[level]} · {periodLabel}
-          </span>
+              <span className="text-xs text-muted-foreground hidden lg:block">
+                {levelLabel[level]} · {periodLabel}
+              </span>
+            </>
+          )}
+
+          {section === "trends" && (
+            <span className="text-xs text-muted-foreground hidden lg:block">
+              {levelLabel[level]} · All FYs
+            </span>
+          )}
         </div>
       </header>
 
       {/* ── Content ─────────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto p-4">
-        {/* Not available notice */}
-        {notAvailable && (
+        {/* Not available notice (overview/drill only) */}
+        {notAvailable && section !== "trends" && (
           <div className="mb-4 rounded-md border border-amber-400/40 bg-amber-500/5 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
             <span className="font-medium">{levelLabel[level]}</span>{" "}
             data is not available for FY {fy}.
@@ -283,6 +344,11 @@ export default function SkuPage() {
         {drillError && section === "drill" && (
           <div className="mb-4 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
             Failed to load code data: {drillError}
+          </div>
+        )}
+        {trendError && section === "trends" && (
+          <div className="mb-4 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+            Failed to load trend data: {trendError}
           </div>
         )}
 
@@ -305,6 +371,19 @@ export default function SkuPage() {
             onBack={handleBack}
             segmentFact={drillSegmentFact}
           />
+        )}
+
+        {section === "trends" && (
+          trendLoading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-8 rounded bg-muted animate-pulse" />
+              ))}
+              <div className="h-64 rounded bg-muted animate-pulse" />
+            </div>
+          ) : trendData ? (
+            <SkuTrends data={trendData} />
+          ) : null
         )}
       </div>
     </div>
