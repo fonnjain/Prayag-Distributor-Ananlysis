@@ -50,6 +50,8 @@ export type PushListResult = {
   cohortBasis: "state" | "national";
   suppressed: boolean;
   suppressReason?: string;
+  /** True when no FY2025-26 cohort data: recommendations use the state-typical pool. */
+  isFallback: boolean;
   segments: SegmentPushCard[];
   fiscalMonths: string[];
 };
@@ -240,6 +242,25 @@ export default function SkuPushList({
         <>
           <CohortBanner data={pushData} />
 
+          {/* Weak-evidence callout for state-typical fallback */}
+          {!pushData.suppressed && pushData.isFallback && (
+            <div className="rounded-md border border-amber-400/40 bg-amber-500/5 px-4 py-3 flex gap-3">
+              <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 flex-shrink-0" />
+              <div className="text-sm">
+                <p className="font-medium text-amber-800 dark:text-amber-300">
+                  State-typical recommendation — weaker evidence
+                </p>
+                <p className="text-amber-700 dark:text-amber-400 mt-0.5">
+                  No FY2025-26 purchase history found for this distributor, so peer-cohort
+                  matching is not possible. These codes are stocked by at least 3 distributors
+                  in {pushData.cohortBasis === "national" ? "the national pool" : (pushData.stateName ?? "this state")}{" "}
+                  that this distributor has not ordered — a useful starting point, but not a
+                  like-for-like comparison.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Suppressed */}
           {pushData.suppressed ? (
             <div className="rounded-md border border-amber-400/40 bg-amber-500/5 px-4 py-3 flex gap-3">
@@ -255,7 +276,7 @@ export default function SkuPushList({
             </div>
           ) : pushData.segments.length === 0 ? (
             <p className="text-sm text-muted-foreground py-8 text-center">
-              No gap codes meet the minimum peer threshold for this distributor and period.
+              No gap codes meet the minimum threshold for this distributor and period.
             </p>
           ) : (
             <>
@@ -265,14 +286,28 @@ export default function SkuPushList({
                   seg={seg}
                   stateName={pushData.stateName}
                   cohortSize={pushData.cohortSize}
+                  isFallback={pushData.isFallback}
                   onDrill={onDrill}
                 />
               ))}
               <p className="text-xs text-muted-foreground pt-1">
-                Showing codes bought by ≥ 3 segment-active peers in the same period that this
-                distributor did not order.{" "}
-                <span className="font-medium">Peer net</span> = sum of those peers' net for this
-                code in the period. Cohort basis: FY2025-26.
+                {pushData.isFallback ? (
+                  <>
+                    Showing codes stocked by ≥ 3 distributors in the same{" "}
+                    {pushData.cohortBasis === "national" ? "national pool" : "state"} in this
+                    period that this distributor did not order.{" "}
+                    <span className="font-medium">Pool net</span> = sum of those distributors'
+                    net for this code in the period. Based on state-typical stocking patterns,
+                    not a size-matched peer cohort.
+                  </>
+                ) : (
+                  <>
+                    Showing codes bought by ≥ 3 segment-active peers in the same period that
+                    this distributor did not order.{" "}
+                    <span className="font-medium">Peer net</span> = sum of those peers' net for
+                    this code in the period. Cohort basis: FY2025-26.
+                  </>
+                )}
               </p>
             </>
           )}
@@ -286,6 +321,29 @@ export default function SkuPushList({
 
 function CohortBanner({ data }: { data: PushListResult }) {
   if (data.suppressed) return null;
+
+  if (data.isFallback) {
+    const basisLabel =
+      data.cohortBasis === "national"
+        ? `national pool (state too small)`
+        : `${data.stateName ?? "state"} pool`;
+    return (
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border bg-muted/40 px-3 py-2 text-xs">
+        <Users className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+        <span>
+          <span className="font-medium">{data.cohortSize}</span> distributors in{" "}
+          {basisLabel} · state-typical · no FY25-26 cohort
+        </span>
+        {data.segments.length > 0 && (
+          <span className="text-muted-foreground">
+            {data.segments.reduce((s, seg) => s + seg.totalGapCodes, 0)} gap codes
+            across {data.segments.length} segment{data.segments.length === 1 ? "" : "s"}
+          </span>
+        )}
+      </div>
+    );
+  }
+
   const basis =
     data.cohortBasis === "national"
       ? `national cohort — state has too few distributors`
@@ -313,15 +371,21 @@ function PushSegmentCard({
   seg,
   stateName,
   cohortSize,
+  isFallback,
   onDrill,
 }: {
   seg: SegmentPushCard;
   stateName: string | null;
   cohortSize: number;
+  isFallback: boolean;
   onDrill: (segment: string) => void;
 }) {
   const stateLabel =
     seg.cohortBasis === "national" ? "nationally" : (stateName ?? "in this state");
+
+  // Label differs: peer-cohort uses "peers", state-typical uses "distributors"
+  const countLabel = isFallback ? "distributors" : "peers";
+  const netLabel = isFallback ? "Pool net" : "Peer net";
 
   return (
     <div className="rounded-lg border bg-card">
@@ -340,7 +404,7 @@ function PushSegmentCard({
                 {seg.totalGapCodes} gap code{seg.totalGapCodes === 1 ? "" : "s"}
               </span>
               <span>
-                {seg.segmentPeerCount} of {cohortSize} peers active in this segment
+                {seg.segmentPeerCount} of {cohortSize} {countLabel} active in this segment
               </span>
             </div>
           </div>
@@ -364,8 +428,10 @@ function PushSegmentCard({
               <TableHead className="py-1.5 pl-4 w-8">#</TableHead>
               <TableHead className="py-1.5">Code</TableHead>
               <TableHead className="py-1.5 hidden sm:table-cell">Item Name</TableHead>
-              <TableHead className="py-1.5 text-right">Peers buying</TableHead>
-              <TableHead className="py-1.5 text-right">Peer net</TableHead>
+              <TableHead className="py-1.5 text-right">
+                {isFallback ? "Stocking" : "Peers buying"}
+              </TableHead>
+              <TableHead className="py-1.5 text-right">{netLabel}</TableHead>
               <TableHead className="py-1.5 text-right hidden md:table-cell">Last FY</TableHead>
             </TableRow>
           </TableHeader>

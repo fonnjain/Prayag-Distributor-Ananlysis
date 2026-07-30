@@ -75,6 +75,12 @@ export type PushListResult = {
   cohortBasis: "state" | "national";
   suppressed: boolean;
   suppressReason?: string;
+  /**
+   * True when the target has no COHORT_FY purchase history and the result
+   * was computed using state-typical (all-state-pool, no quintile) logic.
+   * Evidence is weaker than a peer-cohort result.
+   */
+  isFallback: boolean;
   segments: SegmentPushCard[];
   fiscalMonths: string[];
 };
@@ -276,16 +282,184 @@ export async function getSkuPushList(
   // Find target
   const target = allDist.find((d) => d.customer === distributorKey);
   if (!target) {
+    // ── State-typical fallback (no COHORT_FY data) ─────────────────────────────
+    // The distributor is new this FY and has no FY2025-26 purchase history, so
+    // we cannot place them in a size quintile.  Instead, use the whole active-FY
+    // state pool as the reference — codes that the median state distributor stocks
+    // which the target does not.  Evidence is weaker; isFallback=true flags this.
+
+    // Discover target's state from the active FY
+    const targetStateRow = await db.execute<{ head_canon: string | null }>(sql`
+      SELECT sl.head_canon
+      FROM sale_line_current sl
+      WHERE sl.fy = ${fy}
+        AND sl.customer = ${distributorKey}
+        AND sl.code IS NOT NULL
+        ${levelFilter}
+      LIMIT 1
+    `);
+    const fallbackState = targetStateRow.rows[0]?.head_canon ?? null;
+
+    // Pool: all active distributors in the same state (active FY), excluding target
+    const statePoolRows = await db.execute<{ customer: string }>(sql`
+      SELECT DISTINCT sl.customer
+      FROM sale_line_current sl
+      WHERE sl.fy = ${fy}
+        AND sl.customer IS NOT NULL AND sl.customer <> ''
+        AND sl.customer <> ${distributorKey}
+        AND sl.code IS NOT NULL
+        ${fallbackState != null ? sql`AND sl.head_canon = ${fallbackState}` : sql``}
+        ${levelFilter}
+    `);
+
+    let fallbackPoolCustomers = statePoolRows.rows.map((r) => r.customer);
+    let fallbackBasis: "state" | "national" = "state";
+
+    if (fallbackPoolCustomers.length < MIN_STATE_DISTRIBUTORS) {
+      // Widen to national pool
+      const nationalRows = await db.execute<{ customer: string }>(sql`
+        SELECT DISTINCT sl.customer
+        FROM sale_line_current sl
+        WHERE sl.fy = ${fy}
+          AND sl.customer IS NOT NULL AND sl.customer <> ''
+          AND sl.customer <> ${distributorKey}
+          AND sl.code IS NOT NULL
+          ${levelFilter}
+      `);
+      fallbackPoolCustomers = nationalRows.rows.map((r) => r.customer);
+      fallbackBasis = "national";
+    }
+
+    if (fallbackPoolCustomers.length < MIN_PEERS_PER_CODE) {
+      return {
+        distributorKey,
+        stateName: fallbackState,
+        quintile: null,
+        cohortSize: fallbackPoolCustomers.length,
+        cohortBasis: fallbackBasis,
+        suppressed: true,
+        suppressReason: `Only ${fallbackPoolCustomers.length} other active distributor${fallbackPoolCustomers.length === 1 ? "" : "s"} found in ${fallbackBasis === "national" ? "the national pool" : (fallbackState ?? "this state")}. No recommendations can be made on thin evidence.`,
+        isFallback: true,
+        segments: [],
+        fiscalMonths: [],
+      };
+    }
+
+    // Target's bought codes in query period
+    const fbTargetBoughtRows = await db.execute<{ code: string }>(sql`
+      SELECT DISTINCT sl.code
+      FROM sale_line_current sl
+      WHERE sl.fy = ${fy}
+        AND sl.month_label = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
+        AND sl.customer = ${distributorKey}
+        AND sl.code IS NOT NULL AND sl.code <> ''
+        ${levelFilter}
+    `);
+    const fbTargetBought = new Set(fbTargetBoughtRows.rows.map((r) => r.code));
+    const fbFiscalMonths = [...new Set(monthLabels.map((m) => m.split("-")[0]))];
+    const fbNotBoughtArr = fbTargetBought.size > 0 ? [...fbTargetBought] : ["__none__"];
+
+    // Segment-active pool counts
+    const fbSegPeerRows = await db.execute<{
+      segment: string;
+      seg_peer_count: string;
+    }>(sql`
+      SELECT
+        COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') AS segment,
+        COUNT(DISTINCT sl.customer)::text AS seg_peer_count
+      FROM sale_line_current sl
+      WHERE sl.fy = ${fy}
+        AND sl.month_label = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
+        AND sl.customer = ANY(ARRAY[${sql.join(fallbackPoolCustomers.map((c) => sql`${c}`), sql`, `)}])
+        AND sl.code IS NOT NULL AND sl.code <> ''
+        ${levelFilter}
+      GROUP BY COALESCE(sl.group_canon, sl.group_raw, 'Unmapped')
+    `);
+    const fbSegPeerCount = new Map<string, number>();
+    for (const r of fbSegPeerRows.rows) {
+      fbSegPeerCount.set(r.segment, parseInt(r.seg_peer_count, 10) || 0);
+    }
+
+    // Per-(segment, code): pool members stocking it, threshold MIN_PEERS_PER_CODE
+    const fbCodeRows = await db.execute<{
+      segment: string;
+      code: string;
+      item_name: string | null;
+      peer_count: string;
+      peer_net: string;
+      last_fy: string;
+    }>(sql`
+      SELECT
+        COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') AS segment,
+        sl.code,
+        MAX(im.item_name)                                   AS item_name,
+        COUNT(DISTINCT sl.customer)::text                   AS peer_count,
+        SUM(sl.amount::numeric)::text                       AS peer_net,
+        MAX(sl.fy)                                          AS last_fy
+      FROM sale_line_current sl
+      LEFT JOIN item_master im ON im.code = sl.code
+      WHERE sl.fy = ${fy}
+        AND sl.month_label = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
+        AND sl.customer = ANY(ARRAY[${sql.join(fallbackPoolCustomers.map((c) => sql`${c}`), sql`, `)}])
+        AND sl.code IS NOT NULL AND sl.code <> ''
+        AND sl.code != ALL(ARRAY[${sql.join(fbNotBoughtArr.map((c) => sql`${c}`), sql`, `)}])
+        ${levelFilter}
+      GROUP BY COALESCE(sl.group_canon, sl.group_raw, 'Unmapped'), sl.code
+      HAVING COUNT(DISTINCT sl.customer) >= ${MIN_PEERS_PER_CODE}
+      ORDER BY COALESCE(sl.group_canon, sl.group_raw, 'Unmapped'),
+               COUNT(DISTINCT sl.customer) DESC,
+               SUM(sl.amount::numeric) DESC
+    `);
+
+    // Assemble segment cards
+    type SegAccFb = { totalGapCodes: number; topCodes: PushCode[] };
+    const fbSegMap = new Map<string, SegAccFb>();
+    for (const r of fbCodeRows.rows) {
+      const seg = r.segment;
+      const spCount = fbSegPeerCount.get(seg) ?? 0;
+      if (spCount < MIN_PEERS_PER_CODE) continue;
+      const existing = fbSegMap.get(seg);
+      const code: PushCode = {
+        code: r.code,
+        itemName: r.item_name,
+        peerCount: parseInt(r.peer_count, 10) || 0,
+        peerNet: parseFloat(r.peer_net) || 0,
+        lastFy: r.last_fy,
+      };
+      if (existing) {
+        existing.totalGapCodes++;
+        if (existing.topCodes.length < TOP_CODES_PER_SEGMENT) existing.topCodes.push(code);
+      } else {
+        fbSegMap.set(seg, { totalGapCodes: 1, topCodes: [code] });
+      }
+    }
+
+    const fbSegments: SegmentPushCard[] = [];
+    for (const [segment, acc] of fbSegMap) {
+      fbSegments.push({
+        rank: 0,
+        segment,
+        totalGapCodes: acc.totalGapCodes,
+        segmentPeerCount: fbSegPeerCount.get(segment) ?? 0,
+        cohortBasis: fallbackBasis,
+        topCodes: acc.topCodes,
+      });
+    }
+    fbSegments.sort(
+      (a, b) => b.segmentPeerCount * b.totalGapCodes - a.segmentPeerCount * a.totalGapCodes,
+    );
+    fbSegments.forEach((s, i) => { s.rank = i + 1; });
+
     return {
       distributorKey,
-      stateName: null,
+      stateName: fallbackState,
       quintile: null,
-      cohortSize: 0,
-      cohortBasis: "state",
-      suppressed: true,
-      suppressReason: `${distributorKey} does not appear in FY ${COHORT_FY} and cannot be placed in a peer cohort. A full year of data is required to define size.`,
-      segments: [],
-      fiscalMonths: [],
+      cohortSize: fallbackPoolCustomers.length,
+      cohortBasis: fallbackBasis,
+      suppressed: false,
+      isFallback: true,
+      segments: fbSegments,
+      fiscalMonths: fbFiscalMonths,
     };
   }
 
@@ -319,6 +493,7 @@ export async function getSkuPushList(
       cohortBasis,
       suppressed: true,
       suppressReason: `Only ${peers.length} peer${peers.length === 1 ? "" : "s"} found in the ${cohortBasis} cohort (need at least ${MIN_PEERS_PER_CODE}). No recommendations can be made on thin evidence.`,
+      isFallback: false,
       segments: [],
       fiscalMonths: [],
     };
@@ -462,6 +637,7 @@ export async function getSkuPushList(
     cohortSize: peers.length,
     cohortBasis,
     suppressed: false,
+    isFallback: false,
     segments,
     fiscalMonths,
   };
