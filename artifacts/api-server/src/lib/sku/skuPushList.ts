@@ -34,6 +34,62 @@ const MIN_STATE_DISTRIBUTORS = 8;
 const MIN_PEERS_PER_CODE = 3;
 const TOP_CODES_PER_SEGMENT = 8;
 
+/**
+ * Explicit normalisation map for sale_line state_canon variants that represent
+ * the same geographic state but differ due to sales-management territory splits.
+ *
+ * Rules:
+ *  - Values are the canonical display name used in the UI.
+ *  - Keys are the raw state_canon values exactly as they appear in the DB.
+ *  - If a raw value is not listed here it normalises to itself (identity).
+ *  - "Non-territory / Project / Govt" and pseudo-states (GEM, JJM, HITESH) are
+ *    intentionally omitted — they are not geographic states.
+ *
+ * Dashboard column B (SOBR) uses different names (e.g. "Delhi") from sale_line
+ * (e.g. "DELHI A"). Neither is wrong; this map concerns only sale_line values.
+ *
+ * Confirmed splits as of FY2026-27:
+ *   Delhi   — DELHI A (7) + DELHI NCR (3) → 10 combined (crosses tier-1 threshold)
+ *   UP      — UTTAR PRADESH (58) + UP ( A ) (9) + UP (AS) (7) + UP (S) (0)
+ *   HP      — HIMACHAL PRADESH (12) + HP (0 this FY, legacy FY23-24 only)
+ *   Karnataka — KARNATAKA + KARNATAKA (B) (split appeared in FY26-27; 4 combined)
+ *
+ * Maharashtra 2 does NOT exist in this dataset (single undivided state, 28 dists).
+ */
+const STATE_CANON_NORMALISE: Record<string, string> = {
+  "DELHI A":        "DELHI",
+  "DELHI NCR":      "DELHI",
+  "UP ( A )":       "UTTAR PRADESH",
+  "UP (AS)":        "UTTAR PRADESH",
+  "UP (S)":         "UTTAR PRADESH",
+  "HP":             "HIMACHAL PRADESH",
+  "KARNATAKA (B)":  "KARNATAKA",
+};
+
+/** Return the canonical geographic state name for a raw state_canon value. */
+function normaliseStateCanon(raw: string | null): string | null {
+  if (raw == null) return null;
+  return STATE_CANON_NORMALISE[raw] ?? raw;
+}
+
+/**
+ * Return all raw state_canon DB values that belong to the same geographic state
+ * as `raw`. Always includes `raw` itself (even if it is already canonical).
+ * Used to build ANY(ARRAY[...]) filters that span split variants.
+ */
+function stateVariants(raw: string | null): string[] {
+  if (raw == null) return [];
+  const canonical = STATE_CANON_NORMALISE[raw] ?? raw;
+  // Collect every key that maps to this canonical, plus the canonical itself
+  const variants = new Set<string>();
+  variants.add(raw);          // always include the input value
+  variants.add(canonical);    // include the canonical (may equal raw)
+  for (const [k, v] of Object.entries(STATE_CANON_NORMALISE)) {
+    if (v === canonical) variants.add(k);
+  }
+  return [...variants];
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 export type DistributorListItem = {
@@ -318,11 +374,15 @@ export async function getSkuPushList(
     const fbHeadCanon  = targetInfoRows.rows[0]?.head_canon  ?? null;
     const fbActiveNet  = parseFloat(targetInfoRows.rows[0]?.active_net ?? "0") || 0;
 
+    // Normalise: collapse split territory variants (DELHI A + DELHI NCR → DELHI, etc.)
+    const fbStateNorm    = normaliseStateCanon(fbStateCanon);   // canonical display name
+    const fbStateVars    = stateVariants(fbStateCanon);         // all DB variants for SQL
+
     let poolCustomers: string[] = [];
     let fallbackTier: "state" | "territory" | "national" = "state";
-    let fallbackScopeName = fbStateCanon ?? "this state";
+    let fallbackScopeName = fbStateNorm ?? "this state";
 
-    // ── Tier 1: same geographic state ──────────────────────────────────────────
+    // ── Tier 1: same geographic state (all split variants collapsed) ───────────
     if (fbStateCanon != null) {
       const tier1Rows = await db.execute<{ customer: string }>(sql`
         SELECT DISTINCT sl.customer
@@ -330,7 +390,7 @@ export async function getSkuPushList(
         WHERE sl.fy = ${fy}
           AND sl.customer IS NOT NULL AND sl.customer <> ''
           AND sl.customer <> ${distributorKey}
-          AND sl.state_canon = ${fbStateCanon}
+          AND sl.state_canon = ANY(ARRAY[${sql.join(fbStateVars.map((v) => sql`${v}`), sql`, `)}])
           AND sl.code IS NOT NULL
           ${levelFilter}
       `);
