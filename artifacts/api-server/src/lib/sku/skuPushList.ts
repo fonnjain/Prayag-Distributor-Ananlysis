@@ -77,10 +77,19 @@ export type PushListResult = {
   suppressReason?: string;
   /**
    * True when the target has no COHORT_FY purchase history and the result
-   * was computed using state-typical (all-state-pool, no quintile) logic.
+   * was computed using state-typical (tiered pool, no quintile) logic.
    * Evidence is weaker than a peer-cohort result.
    */
   isFallback: boolean;
+  /**
+   * When isFallback=true: which tier resolved the pool.
+   *   "state"     — same geographic state (state_canon), ≥ MIN_STATE_DISTRIBUTORS
+   *   "territory" — same State Head territory (head_canon), ≥ MIN_PEERS_PER_CODE
+   *   "national"  — national pool filtered to active-FY size quintile ±1
+   */
+  fallbackTier?: "state" | "territory" | "national";
+  /** When isFallback=true: human-readable pool scope for display. */
+  fallbackScopeName?: string;
   segments: SegmentPushCard[];
   fiscalMonths: string[];
 };
@@ -282,70 +291,128 @@ export async function getSkuPushList(
   // Find target
   const target = allDist.find((d) => d.customer === distributorKey);
   if (!target) {
-    // ── State-typical fallback (no COHORT_FY data) ─────────────────────────────
-    // The distributor is new this FY and has no FY2025-26 purchase history, so
-    // we cannot place them in a size quintile.  Instead, use the whole active-FY
-    // state pool as the reference — codes that the median state distributor stocks
-    // which the target does not.  Evidence is weaker; isFallback=true flags this.
+    // ── Three-tier state-typical fallback (no COHORT_FY data) ──────────────────
+    // Tier 1: Same geographic state (state_canon)     — if ≥ MIN_STATE_DISTRIBUTORS
+    // Tier 2: Same State Head territory (head_canon)  — if ≥ MIN_PEERS_PER_CODE
+    // Tier 3: National within active-FY size quintile — if ≥ MIN_PEERS_PER_CODE
+    // Evidence is weaker than peer-cohort; isFallback=true flags this throughout.
 
-    // Discover target's state from the active FY
-    const targetStateRow = await db.execute<{ head_canon: string | null }>(sql`
-      SELECT sl.head_canon
+    // ── Discover target's geographic info from the active FY ───────────────────
+    // Take the dominant row by net (handles rare cross-state sales cleanly).
+    const targetInfoRows = await db.execute<{
+      state_canon: string | null;
+      head_canon: string | null;
+      active_net: string;
+    }>(sql`
+      SELECT sl.state_canon, sl.head_canon, SUM(sl.amount::numeric)::text AS active_net
       FROM sale_line_current sl
       WHERE sl.fy = ${fy}
         AND sl.customer = ${distributorKey}
         AND sl.code IS NOT NULL
         ${levelFilter}
+      GROUP BY sl.state_canon, sl.head_canon
+      ORDER BY SUM(sl.amount::numeric) DESC
       LIMIT 1
     `);
-    const fallbackState = targetStateRow.rows[0]?.head_canon ?? null;
+    const fbStateCanon = targetInfoRows.rows[0]?.state_canon ?? null;
+    const fbHeadCanon  = targetInfoRows.rows[0]?.head_canon  ?? null;
+    const fbActiveNet  = parseFloat(targetInfoRows.rows[0]?.active_net ?? "0") || 0;
 
-    // Pool: all active distributors in the same state (active FY), excluding target
-    const statePoolRows = await db.execute<{ customer: string }>(sql`
-      SELECT DISTINCT sl.customer
-      FROM sale_line_current sl
-      WHERE sl.fy = ${fy}
-        AND sl.customer IS NOT NULL AND sl.customer <> ''
-        AND sl.customer <> ${distributorKey}
-        AND sl.code IS NOT NULL
-        ${fallbackState != null ? sql`AND sl.head_canon = ${fallbackState}` : sql``}
-        ${levelFilter}
-    `);
+    let poolCustomers: string[] = [];
+    let fallbackTier: "state" | "territory" | "national" = "state";
+    let fallbackScopeName = fbStateCanon ?? "this state";
 
-    let fallbackPoolCustomers = statePoolRows.rows.map((r) => r.customer);
-    let fallbackBasis: "state" | "national" = "state";
-
-    if (fallbackPoolCustomers.length < MIN_STATE_DISTRIBUTORS) {
-      // Widen to national pool
-      const nationalRows = await db.execute<{ customer: string }>(sql`
+    // ── Tier 1: same geographic state ──────────────────────────────────────────
+    if (fbStateCanon != null) {
+      const tier1Rows = await db.execute<{ customer: string }>(sql`
         SELECT DISTINCT sl.customer
+        FROM sale_line_current sl
+        WHERE sl.fy = ${fy}
+          AND sl.customer IS NOT NULL AND sl.customer <> ''
+          AND sl.customer <> ${distributorKey}
+          AND sl.state_canon = ${fbStateCanon}
+          AND sl.code IS NOT NULL
+          ${levelFilter}
+      `);
+      poolCustomers = tier1Rows.rows.map((r) => r.customer);
+    }
+
+    // ── Tier 2: same State Head territory ──────────────────────────────────────
+    if (poolCustomers.length < MIN_STATE_DISTRIBUTORS) {
+      fallbackTier = "territory";
+      fallbackScopeName = fbHeadCanon
+        ? `${fbHeadCanon}'s territory`
+        : "this territory";
+
+      if (fbHeadCanon != null) {
+        const tier2Rows = await db.execute<{ customer: string }>(sql`
+          SELECT DISTINCT sl.customer
+          FROM sale_line_current sl
+          WHERE sl.fy = ${fy}
+            AND sl.customer IS NOT NULL AND sl.customer <> ''
+            AND sl.customer <> ${distributorKey}
+            AND sl.head_canon = ${fbHeadCanon}
+            AND sl.code IS NOT NULL
+            ${levelFilter}
+        `);
+        poolCustomers = tier2Rows.rows.map((r) => r.customer);
+      }
+    }
+
+    // ── Tier 3: national within active-FY size band ────────────────────────────
+    if (poolCustomers.length < MIN_PEERS_PER_CODE) {
+      fallbackTier = "national";
+
+      const nationalRows = await db.execute<{ customer: string; net: string }>(sql`
+        SELECT sl.customer, SUM(sl.amount::numeric)::text AS net
         FROM sale_line_current sl
         WHERE sl.fy = ${fy}
           AND sl.customer IS NOT NULL AND sl.customer <> ''
           AND sl.customer <> ${distributorKey}
           AND sl.code IS NOT NULL
           ${levelFilter}
+        GROUP BY sl.customer
       `);
-      fallbackPoolCustomers = nationalRows.rows.map((r) => r.customer);
-      fallbackBasis = "national";
+
+      const nationalWithNets = nationalRows.rows.map((r) => ({
+        customer: r.customer,
+        net: parseFloat(r.net) || 0,
+      }));
+      const allNationalNets = nationalWithNets.map((r) => r.net);
+      const targetQn = quintileOf(fbActiveNet, allNationalNets);
+      const qLowN = Math.max(1, targetQn - 1);
+      const qHighN = Math.min(5, targetQn + 1);
+
+      poolCustomers = nationalWithNets
+        .filter((r) => {
+          const q = quintileOf(r.net, allNationalNets);
+          return q >= qLowN && q <= qHighN;
+        })
+        .map((r) => r.customer);
+
+      fallbackScopeName = `national · size band Q${targetQn}`;
     }
 
-    if (fallbackPoolCustomers.length < MIN_PEERS_PER_CODE) {
+    // ── Suppress if pool still too thin after all three tiers ──────────────────
+    if (poolCustomers.length < MIN_PEERS_PER_CODE) {
       return {
         distributorKey,
-        stateName: fallbackState,
+        stateName: fbHeadCanon,
         quintile: null,
-        cohortSize: fallbackPoolCustomers.length,
-        cohortBasis: fallbackBasis,
+        cohortSize: poolCustomers.length,
+        cohortBasis: "national",
         suppressed: true,
-        suppressReason: `Only ${fallbackPoolCustomers.length} other active distributor${fallbackPoolCustomers.length === 1 ? "" : "s"} found in ${fallbackBasis === "national" ? "the national pool" : (fallbackState ?? "this state")}. No recommendations can be made on thin evidence.`,
+        suppressReason: `Pool is too thin even after widening to national size band (${poolCustomers.length} distributor${poolCustomers.length === 1 ? "" : "s"}). No recommendations can be made.`,
         isFallback: true,
+        fallbackTier,
+        fallbackScopeName,
         segments: [],
         fiscalMonths: [],
       };
     }
 
-    // Target's bought codes in query period
+    // ── Segment queries (identical SQL to the main path, different pool) ────────
+
     const fbTargetBoughtRows = await db.execute<{ code: string }>(sql`
       SELECT DISTINCT sl.code
       FROM sale_line_current sl
@@ -359,7 +426,6 @@ export async function getSkuPushList(
     const fbFiscalMonths = [...new Set(monthLabels.map((m) => m.split("-")[0]))];
     const fbNotBoughtArr = fbTargetBought.size > 0 ? [...fbTargetBought] : ["__none__"];
 
-    // Segment-active pool counts
     const fbSegPeerRows = await db.execute<{
       segment: string;
       seg_peer_count: string;
@@ -370,7 +436,7 @@ export async function getSkuPushList(
       FROM sale_line_current sl
       WHERE sl.fy = ${fy}
         AND sl.month_label = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
-        AND sl.customer = ANY(ARRAY[${sql.join(fallbackPoolCustomers.map((c) => sql`${c}`), sql`, `)}])
+        AND sl.customer = ANY(ARRAY[${sql.join(poolCustomers.map((c) => sql`${c}`), sql`, `)}])
         AND sl.code IS NOT NULL AND sl.code <> ''
         ${levelFilter}
       GROUP BY COALESCE(sl.group_canon, sl.group_raw, 'Unmapped')
@@ -380,7 +446,6 @@ export async function getSkuPushList(
       fbSegPeerCount.set(r.segment, parseInt(r.seg_peer_count, 10) || 0);
     }
 
-    // Per-(segment, code): pool members stocking it, threshold MIN_PEERS_PER_CODE
     const fbCodeRows = await db.execute<{
       segment: string;
       code: string;
@@ -400,7 +465,7 @@ export async function getSkuPushList(
       LEFT JOIN item_master im ON im.code = sl.code
       WHERE sl.fy = ${fy}
         AND sl.month_label = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
-        AND sl.customer = ANY(ARRAY[${sql.join(fallbackPoolCustomers.map((c) => sql`${c}`), sql`, `)}])
+        AND sl.customer = ANY(ARRAY[${sql.join(poolCustomers.map((c) => sql`${c}`), sql`, `)}])
         AND sl.code IS NOT NULL AND sl.code <> ''
         AND sl.code != ALL(ARRAY[${sql.join(fbNotBoughtArr.map((c) => sql`${c}`), sql`, `)}])
         ${levelFilter}
@@ -411,7 +476,6 @@ export async function getSkuPushList(
                SUM(sl.amount::numeric) DESC
     `);
 
-    // Assemble segment cards
     type SegAccFb = { totalGapCodes: number; topCodes: PushCode[] };
     const fbSegMap = new Map<string, SegAccFb>();
     for (const r of fbCodeRows.rows) {
@@ -441,7 +505,7 @@ export async function getSkuPushList(
         segment,
         totalGapCodes: acc.totalGapCodes,
         segmentPeerCount: fbSegPeerCount.get(segment) ?? 0,
-        cohortBasis: fallbackBasis,
+        cohortBasis: fallbackTier === "national" ? "national" : "state",
         topCodes: acc.topCodes,
       });
     }
@@ -452,12 +516,14 @@ export async function getSkuPushList(
 
     return {
       distributorKey,
-      stateName: fallbackState,
+      stateName: fbHeadCanon,
       quintile: null,
-      cohortSize: fallbackPoolCustomers.length,
-      cohortBasis: fallbackBasis,
+      cohortSize: poolCustomers.length,
+      cohortBasis: fallbackTier === "national" ? "national" : "state",
       suppressed: false,
       isFallback: true,
+      fallbackTier,
+      fallbackScopeName,
       segments: fbSegments,
       fiscalMonths: fbFiscalMonths,
     };

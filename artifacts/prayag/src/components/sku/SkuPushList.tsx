@@ -50,8 +50,12 @@ export type PushListResult = {
   cohortBasis: "state" | "national";
   suppressed: boolean;
   suppressReason?: string;
-  /** True when no FY2025-26 cohort data: recommendations use the state-typical pool. */
+  /** True when no FY2025-26 cohort data: recommendations use the tiered state-typical pool. */
   isFallback: boolean;
+  /** Which tier resolved the pool when isFallback=true. */
+  fallbackTier?: "state" | "territory" | "national";
+  /** Human-readable pool scope for display when isFallback=true. */
+  fallbackScopeName?: string;
   segments: SegmentPushCard[];
   fiscalMonths: string[];
 };
@@ -248,14 +252,33 @@ export default function SkuPushList({
               <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 flex-shrink-0" />
               <div className="text-sm">
                 <p className="font-medium text-amber-800 dark:text-amber-300">
-                  State-typical recommendation — weaker evidence
+                  {pushData.fallbackTier === "state" && "Geographic-state pool · weaker evidence than peer cohort"}
+                  {pushData.fallbackTier === "territory" && "Territory pool · state too small, widened to territory"}
+                  {pushData.fallbackTier === "national" && "National size-band pool · territory too small, widened nationally"}
+                  {!pushData.fallbackTier && "State-typical recommendation · weaker evidence"}
                 </p>
                 <p className="text-amber-700 dark:text-amber-400 mt-0.5">
-                  No FY2025-26 purchase history found for this distributor, so peer-cohort
-                  matching is not possible. These codes are stocked by at least 3 distributors
-                  in {pushData.cohortBasis === "national" ? "the national pool" : (pushData.stateName ?? "this state")}{" "}
-                  that this distributor has not ordered — a useful starting point, but not a
-                  like-for-like comparison.
+                  {pushData.fallbackTier === "state" && (
+                    <>No FY2025-26 history for size-matched peer selection. Codes shown are stocked
+                    by ≥ 3 distributors in <strong>{pushData.fallbackScopeName}</strong> that this
+                    distributor has not ordered. Useful signal, but not a like-for-like size comparison.</>
+                  )}
+                  {pushData.fallbackTier === "territory" && (
+                    <>The geographic state had too few active distributors for a state-level pool,
+                    so the reference was widened to the full{" "}
+                    <strong>{pushData.fallbackScopeName}</strong> ({pushData.cohortSize} distributors).
+                    Codes shown are stocked by ≥ 3 in that territory.</>
+                  )}
+                  {pushData.fallbackTier === "national" && (
+                    <>Neither state nor territory had enough distributors, so the pool was widened to
+                    national distributors in the same YTD size band (<strong>{pushData.fallbackScopeName}</strong>,{" "}
+                    {pushData.cohortSize} distributors). Evidence is thinner — treat as a broad catalogue prompt.</>
+                  )}
+                  {!pushData.fallbackTier && (
+                    <>No FY2025-26 history found. Codes are stocked by ≥ 3 nearby distributors
+                    that this distributor has not ordered — a useful starting point but not a
+                    like-for-like comparison.</>
+                  )}
                 </p>
               </div>
             </div>
@@ -287,6 +310,8 @@ export default function SkuPushList({
                   stateName={pushData.stateName}
                   cohortSize={pushData.cohortSize}
                   isFallback={pushData.isFallback}
+                  fallbackTier={pushData.fallbackTier}
+                  fallbackScopeName={pushData.fallbackScopeName}
                   onDrill={onDrill}
                 />
               ))}
@@ -323,16 +348,19 @@ function CohortBanner({ data }: { data: PushListResult }) {
   if (data.suppressed) return null;
 
   if (data.isFallback) {
-    const basisLabel =
-      data.cohortBasis === "national"
-        ? `national pool (state too small)`
-        : `${data.stateName ?? "state"} pool`;
+    const tierLabel = {
+      state:     "geographic state",
+      territory: "territory",
+      national:  "national · size band",
+    }[data.fallbackTier ?? "state"] ?? "state-typical";
+
     return (
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border bg-muted/40 px-3 py-2 text-xs">
         <Users className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
         <span>
-          <span className="font-medium">{data.cohortSize}</span> distributors in{" "}
-          {basisLabel} · state-typical · no FY25-26 cohort
+          <span className="font-medium">{data.cohortSize}</span> distributors ·{" "}
+          {tierLabel} · <span className="font-medium">{data.fallbackScopeName}</span>
+          {" "}· no FY25-26 cohort
         </span>
         {data.segments.length > 0 && (
           <span className="text-muted-foreground">
@@ -372,16 +400,28 @@ function PushSegmentCard({
   stateName,
   cohortSize,
   isFallback,
+  fallbackTier,
+  fallbackScopeName,
   onDrill,
 }: {
   seg: SegmentPushCard;
   stateName: string | null;
   cohortSize: number;
   isFallback: boolean;
+  fallbackTier?: "state" | "territory" | "national";
+  fallbackScopeName?: string;
   onDrill: (segment: string) => void;
 }) {
-  const stateLabel =
-    seg.cohortBasis === "national" ? "nationally" : (stateName ?? "in this state");
+  // Row annotation: "X of Y [label]"
+  //   Peer-cohort  → "in [state]" or "nationally"
+  //   Fallback T1  → "in [WEST BENGAL]"
+  //   Fallback T2  → "in [Head]'s territory"
+  //   Fallback T3  → "nationally (size band Qn)"
+  const stateLabel = isFallback
+    ? (fallbackTier === "national"
+        ? (fallbackScopeName ?? "nationally")
+        : `in ${fallbackScopeName ?? "this area"}`)
+    : (seg.cohortBasis === "national" ? "nationally" : `in ${stateName ?? "this state"}`);
 
   // Label differs: peer-cohort uses "peers", state-typical uses "distributors"
   const countLabel = isFallback ? "distributors" : "peers";
