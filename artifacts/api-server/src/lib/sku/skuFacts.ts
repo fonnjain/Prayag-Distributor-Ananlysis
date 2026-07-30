@@ -229,10 +229,16 @@ export async function getPrimarySkuFacts(
   if (!facts) return facts;
 
   // Enrich each segment with the bottom-up historical net of codes that were
-  // NOT ordered in the query period (same level + scope filters, all FYs).
-  // This is a factual sum — no extrapolation — so it can be labelled clearly.
+  // NOT ordered in the query period, restricted to the SAME fiscal months
+  // across all loaded FYs (e.g. Apr/May/Jun for a Q1 query).
+  // This keeps the time-window comparable: Q1 gap codes vs Q1 prior-year sales.
+  // No extrapolation — purely factual realised figures.
   const boughtCodes = [...new Set(rows.rows.map((r) => r.code))];
   if (boughtCodes.length === 0) return facts;
+
+  // Extract fiscal-month prefixes ("Apr", "May", "Jun") from the label list.
+  const fiscalMonths = [...new Set(monthLabels.map((m) => m.split("-")[0]))];
+  const fiscalMonthFilter = sql`AND split_part(sl.month_label, '-', 1) = ANY(ARRAY[${sql.join(fiscalMonths.map((m) => sql`${m}`), sql`, `)}])`;
 
   const unboughtRows = await db.execute<{
     segment: string;
@@ -246,6 +252,7 @@ export async function getPrimarySkuFacts(
       ${levelFilter}
       ${scopeFilter}
       ${segmentFilter}
+      ${fiscalMonthFilter}
       AND sl.code != ALL(ARRAY[${sql.join(boughtCodes.map((c) => sql`${c}`), sql`, `)}])
     GROUP BY 1
   `);
@@ -317,10 +324,13 @@ export async function getSecondarySkuFacts(
   const facts = await buildFactsFromRows(rows.rows, fy);
   if (!facts) return facts;
 
-  // Same bottom-up unbought enrichment as primary: historical net of codes
-  // absent from the query period, same scope filter, all loaded FYs.
+  // Same bottom-up unbought enrichment as primary: same fiscal months only,
+  // across all loaded FYs, so the period window is like-for-like.
   const boughtCodes = [...new Set(rows.rows.map((r) => r.code))];
   if (boughtCodes.length === 0) return facts;
+
+  const fiscalMonths = [...new Set(monthLabels.map((m) => m.split("-")[0]))];
+  const fiscalMonthFilter = sql`AND split_part(sku.month_label, '-', 1) = ANY(ARRAY[${sql.join(fiscalMonths.map((m) => sql`${m}`), sql`, `)}])`;
 
   const unboughtRows = await db.execute<{
     segment: string;
@@ -333,6 +343,7 @@ export async function getSecondarySkuFacts(
     WHERE 1=1
       ${scopeFilter}
       ${segmentFilter}
+      ${fiscalMonthFilter}
       AND sku.item_code != ALL(ARRAY[${sql.join(boughtCodes.map((c) => sql`${c}`), sql`, `)}])
     GROUP BY 1
   `);

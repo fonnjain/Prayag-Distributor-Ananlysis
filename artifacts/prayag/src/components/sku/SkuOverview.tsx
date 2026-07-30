@@ -8,9 +8,9 @@
 //
 // "Gap codes' net" = unboughtValue from the API:
 //   SUM(sale_line.amount) for codes NOT bought in the query period,
-//   applying the same level/scope filters, across all loaded fiscal years.
-//   This is a factual bottom-up sum — no extrapolation or mean assumption.
-//   Assumption labelled on column: "historical net of gap codes, all loaded FYs".
+//   filtered to the SAME fiscal months (e.g. Apr/May/Jun for Q1) across all
+//   loaded FYs — so a Q1 selection compares against Q1 of prior years, not
+//   against twelve months of history.  No extrapolation.
 //
 // Breadth% bar is shown without colour — the percentage is structural
 // (small segments hit 100% trivially) so colouring it is misleading.
@@ -253,7 +253,7 @@ export default function SkuOverview({ rows, loading, onDrill, unmapped, summary 
         </Table>
       </div>
       <p className="text-xs text-muted-foreground">
-        <span className="font-medium">Gap codes' net</span> = historical sales of codes not ordered this period, across all loaded fiscal years (same level — no forecast, no extrapolation).
+        <span className="font-medium">Gap codes' net</span> = realised sales of codes absent from this period's orders, in the same fiscal months across all loaded FYs (e.g. Apr–Jun only for a Q1 selection). No extrapolation.
         Click a row to drill into individual codes.
       </p>
     </div>
