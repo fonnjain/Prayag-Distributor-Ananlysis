@@ -336,7 +336,7 @@ function VelocitySparkline({
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function PrimaryPerformanceDashboard() {
-  const { fy, effectivePeriodFrom, effectivePeriodTo } = useGlobalFilter();
+  const { fy, effectivePeriodFrom, effectivePrimaryPeriodTo } = useGlobalFilter();
   const [view, setView] = useState<View>("head");
   const [data, setData] = useState<ApiResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -358,7 +358,7 @@ export default function PrimaryPerformanceDashboard() {
     const params = new URLSearchParams({
       fy,
       monthFrom: String(effectivePeriodFrom),
-      monthTo: String(effectivePeriodTo),
+      monthTo: String(effectivePrimaryPeriodTo),
     });
     fetch(`/api/mgmt/primary?${params}`)
       .then((r) => {
@@ -376,7 +376,7 @@ export default function PrimaryPerformanceDashboard() {
         setError(err.message);
         setLoading(false);
       });
-  }, [fy, effectivePeriodFrom, effectivePeriodTo]);
+  }, [fy, effectivePeriodFrom, effectivePrimaryPeriodTo]);
 
   // Lazy-fetch state targets only when that view is active
   useEffect(() => {
@@ -464,7 +464,7 @@ export default function PrimaryPerformanceDashboard() {
   const nothingAvailable =
     !loading && data && !data.bookingAvailable && !data.saleAvailable;
 
-  const openInPeriod = openFiscalMonthsInPeriod(fy, effectivePeriodFrom, effectivePeriodTo);
+  const openInPeriod = openFiscalMonthsInPeriod(fy, effectivePeriodFrom, effectivePrimaryPeriodTo);
 
   return (
     <div className="space-y-5 p-4">

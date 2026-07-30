@@ -82,6 +82,18 @@ export function isOpenFiscalMonth(idx: FiscalMonthIdx, fy: string): boolean {
   return now.getFullYear() === calYear && now.getMonth() === calMonth;
 }
 
+/**
+ * True when the entire FY has ended (today is on or after 1 Apr of the next year).
+ * Used to guard YTD / Last-7d / Today from resolving to partial ranges on historical FYs.
+ */
+export function isFyClosed(fy: string): boolean {
+  const fyStart = parseInt(fy.split("-")[0], 10);
+  if (isNaN(fyStart)) return false;
+  // FY Apr-xxxx to Mar-yyyy ends on Mar 31 of fyStart+1.
+  // It is fully closed when today >= Apr 1 of fyStart+1.
+  return Date.now() >= Date.UTC(fyStart + 1, 3, 1); // month 3 = April (0-based)
+}
+
 /** Last complete month clamped to a [fromIdx, toIdx] range (0-based). */
 function clampToRange(fromIdx: number, toIdx: number, lastComplete: FiscalMonthIdx): FiscalMonthIdx {
   if (lastComplete < fromIdx) return fromIdx as FiscalMonthIdx;
@@ -127,6 +139,20 @@ export interface GlobalFilterContextValue {
   effectivePeriodTo: number;
   effectivePeriodLabel: string;
   /**
+   * Primary-source period upper bound (1-based fiscal month).
+   * Same as effectivePeriodTo EXCEPT on YTD for an open FY, where it extends
+   * to the current in-progress month so that live sale_line / Order Sheet data
+   * is not silently truncated to the secondary cadence cutoff.
+   * On closed FYs in YTD mode both values equal 12 (Full Year).
+   */
+  effectivePrimaryPeriodTo: number;
+  /**
+   * True when the selected FY has fully ended (today ≥ 1 Apr of the following year).
+   * Components use this to guard against YTD / Last-7d / Today returning partial
+   * ranges on historical FYs.
+   */
+  isFyClosedValue: boolean;
+  /**
    * Period capability of the currently active page, derived from the route.
    * FULL    — honours month / quarter / YTD / custom
    * FY_ONLY — honours the FY selector only; sub-year period has no effect
@@ -159,12 +185,14 @@ export function GlobalFilterProvider({ children }: { children: ReactNode }) {
 
   const lastCompleteIdx = useMemo(() => lastCompleteFiscalMonthIdx(fy), [fy]);
   const currentIdx = useMemo(() => currentFiscalMonthIdx(fy), [fy]);
+  const isFyClosedValue = useMemo(() => isFyClosed(fy), [fy]);
 
   // All period derivations as primitive values — no object allocation in deps.
-  const { effectiveMonthIdx, effectivePeriodFrom, effectivePeriodTo, effectivePeriodLabel } =
+  const { effectiveMonthIdx, effectivePeriodFrom, effectivePeriodTo, effectivePeriodLabel, effectivePrimaryPeriodTo } =
     useMemo(() => {
       let from: number;
       let to: number;
+      let primaryTo: number;
       let label: string;
       let singleIdx: FiscalMonthIdx;
 
@@ -172,6 +200,7 @@ export function GlobalFilterProvider({ children }: { children: ReactNode }) {
         case "month":
           from = monthIdx + 1;
           to = from;
+          primaryTo = to;
           label = FISCAL_MONTH_NAMES[monthIdx];
           singleIdx = monthIdx;
           break;
@@ -182,6 +211,7 @@ export function GlobalFilterProvider({ children }: { children: ReactNode }) {
           const [f0, t0] = QUARTER_RANGES[periodMode];
           from = f0 + 1;
           to = t0 + 1;
+          primaryTo = to;
           label = `${periodMode.toUpperCase()} (${FISCAL_MONTH_NAMES[f0]}–${FISCAL_MONTH_NAMES[t0]})`;
           singleIdx = clampToRange(f0, t0, lastCompleteIdx);
           break;
@@ -189,12 +219,14 @@ export function GlobalFilterProvider({ children }: { children: ReactNode }) {
         case "full":
           from = 1;
           to = 12;
+          primaryTo = 12;
           label = "Full Year";
           singleIdx = lastCompleteIdx;
           break;
         case "custom":
           from = rangeFrom + 1;
           to = Math.max(from, rangeTo + 1);
+          primaryTo = to;
           label = from === to
             ? FISCAL_MONTH_NAMES[rangeFrom]
             : `${FISCAL_MONTH_NAMES[rangeFrom]}–${FISCAL_MONTH_NAMES[Math.max(rangeFrom, rangeTo)]}`;
@@ -202,17 +234,38 @@ export function GlobalFilterProvider({ children }: { children: ReactNode }) {
           break;
         case "last7":
         case "today":
-          from = currentIdx + 1;
-          to = from;
-          label = periodMode === "today" ? "Today" : "Last 7 Days";
-          singleIdx = currentIdx;
+          // On a closed FY these calendar-day modes are meaningless; resolve to Full Year.
+          if (isFyClosedValue) {
+            from = 1;
+            to = 12;
+            primaryTo = 12;
+            label = "Full Year";
+            singleIdx = 11 as FiscalMonthIdx;
+          } else {
+            from = currentIdx + 1;
+            to = from;
+            primaryTo = to;
+            label = periodMode === "today" ? "Today" : "Last 7 Days";
+            singleIdx = currentIdx;
+          }
           break;
         case "ytd":
         default:
-          from = 1;
-          to = lastCompleteIdx + 1;
-          label = `YTD (Apr–${FISCAL_MONTH_NAMES[lastCompleteIdx]})`;
-          singleIdx = lastCompleteIdx;
+          if (isFyClosedValue) {
+            // Closed FY — YTD IS the full year; avoid partial ranges on historical FYs.
+            from = 1;
+            to = 12;
+            primaryTo = 12;
+            label = "Full Year";
+            singleIdx = 11 as FiscalMonthIdx;
+          } else {
+            // Open FY — secondary: up to last complete month; primary: up to current month.
+            from = 1;
+            to = lastCompleteIdx + 1;
+            primaryTo = currentIdx + 1;
+            label = `YTD (Apr–${FISCAL_MONTH_NAMES[lastCompleteIdx]})`;
+            singleIdx = lastCompleteIdx;
+          }
           break;
       }
 
@@ -221,8 +274,9 @@ export function GlobalFilterProvider({ children }: { children: ReactNode }) {
         effectivePeriodFrom: from,
         effectivePeriodTo: to,
         effectivePeriodLabel: label,
+        effectivePrimaryPeriodTo: primaryTo,
       };
-    }, [periodMode, monthIdx, rangeFrom, rangeTo, lastCompleteIdx, currentIdx]);
+    }, [periodMode, monthIdx, rangeFrom, rangeTo, lastCompleteIdx, currentIdx, isFyClosedValue]);
 
   const value: GlobalFilterContextValue = {
     fy, setFy,
@@ -237,6 +291,8 @@ export function GlobalFilterProvider({ children }: { children: ReactNode }) {
     effectivePeriodFrom,
     effectivePeriodTo,
     effectivePeriodLabel,
+    effectivePrimaryPeriodTo,
+    isFyClosedValue,
     periodCapability,
   };
 

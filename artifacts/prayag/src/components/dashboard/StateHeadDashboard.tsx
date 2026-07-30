@@ -370,8 +370,7 @@ export default function StateHeadDashboard() {
     effectivePeriodFrom,
     effectivePeriodTo,
     effectivePeriodLabel,
-    periodMode,
-    currentIdx,
+    effectivePrimaryPeriodTo,
     setAvailableFys,
   } = useGlobalFilter();
   // Stable Period object for secondary data — only changes when the primitive values change.
@@ -383,12 +382,11 @@ export default function StateHeadDashboard() {
   );
 
   // Primary data (sale_line, Order Sheet) accumulates continuously through the
-  // month.  When YTD is selected, extend to the current in-progress month so
-  // live figures are not silently truncated to the secondary cadence cutoff.
-  // Server-side secPeriod() still caps secondary actuals at the last complete
-  // month regardless of what monthTo we send.
-  const primaryMonthTo =
-    periodMode === "ytd" ? currentIdx + 1 : effectivePeriodTo;
+  // current month.  effectivePrimaryPeriodTo already accounts for:
+  //   • open FY YTD  → currentIdx + 1 (includes the live in-progress month)
+  //   • closed FY YTD → 12 (full year — no partial range on historical FYs)
+  //   • all other modes → same as effectivePeriodTo
+  const primaryMonthTo = effectivePrimaryPeriodTo;
 
   // Short range labels used in KPI tile sub-lines.
   const primaryPeriodLabel: string = (() => {

@@ -1,25 +1,27 @@
 ---
-name: PA1 period capability system
-description: Architecture of the period-capability indicator that prevents FY_ONLY pages from silently accepting month/quarter selections.
+name: PA1 period capability + YTD split
+description: isFyClosed guard for closed-FY YTD + primary vs secondary period upper bound
 ---
 
-# PA1 Period Capability System
+## Rule
+`effectivePeriodTo` (secondary) ≠ `effectivePrimaryPeriodTo` (primary) on open-FY YTD.
 
-## The rule
-All pages declare their capability in `artifacts/prayag/src/data/period-capability.ts`. Undeclared pages default to NONE. When promoting a page from FY_ONLY → FULL, edit that file only.
+- **Open FY YTD** → secondary `to = lastCompleteIdx + 1`; primary `to = currentIdx + 1`
+- **Closed FY YTD** → both `to = 12` (full year; `isFyClosed()` returns true when today ≥ 1 Apr of fyStart+1)
+- **All other modes** → `effectivePrimaryPeriodTo === effectivePeriodTo`
 
-## Capability levels
-- `FULL` — state-head, primary-performance, secondary-performance, combined
-- `FY_ONLY` — overview, regional, resources, products, momentum, growth, pending, sources, reports, analyst, ai-reports, company-reports, salespeople, deep-dive, distributor-deep-dive
-- `NONE` — warnings, targets, data-health
+**Why:** sale_line and Order Sheet accumulate continuously through the current month. Secondary records actuals at month-end only. Using one shared `effectivePeriodTo` (last complete month) silently truncates live primary data. Closed FYs must not use calendar-day helpers (`isFyClosed`) or the YTD/last7/today modes return partial ranges on historical data.
 
-## Architecture
-- `period-capability.ts` — single source of truth; exports `PeriodCapability` type, `PAGE_CAPABILITIES` map, `getCapabilityForPath(pathname)`
-- `global-filter-context.tsx` — calls `useLocation()` to derive `periodCapability`; exposes it on the context value. **Requires GlobalFilterProvider to be inside WouterRouter** (App.tsx changed to move it inward).
-- `GlobalFilterBar.tsx` — reads `periodCapability` from context; renders three distinct modes (NONE: note only, FY_ONLY: FY selector + reason note, FULL: all controls)
-- Dashboard.tsx — removed manual `hideFilterBar` logic; always renders `<GlobalFilterBar />`
+## How to apply
+- `isFyClosed(fy)` + `effectivePrimaryPeriodTo` are exported from `global-filter-context.tsx`
+- Components reading primary data (sale_line, Order Sheet): use `effectivePrimaryPeriodTo`
+- Components reading secondary data: use `effectivePeriodTo`
+- `GlobalFilterBar`: hide "Last 7 days" and "Today" pills when `isFyClosed(fy)` is true
 
-## I/J cross-check (stateDashboard.ts)
-Excel columns I (cols.monthlyTarget) and J (cols.totalDealers) are the only non-#REF! cells in the SOBR TOTAL row. Added cross-check after the OB/Sales reconciliation block: sums membermonthlyTarget and totalDealers across all 162 members and compares to TOTAL row values. Passes on FY 2026-27 (colI = 349,220,283 verified). The OB/Sales cross-check is still blocked by #REF! errors at cols 12 and 14 — sheet repair required (Task #32).
-
-**Why:** Provides structural integrity confirmation (all member rows read) even when the OB/Sales formula errors block the primary cross-check.
+## Which components consume which
+| Component | Period upper bound |
+|---|---|
+| `StateHeadDashboard` (primary section) | `effectivePrimaryPeriodTo` (via `primaryMonthTo = effectivePrimaryPeriodTo`) |
+| `PrimaryPerformanceDashboard` | `effectivePrimaryPeriodTo` |
+| `StateHeadDashboard` (secondary section) | `effectivePeriodTo` |
+| `SecondaryPerformanceDashboard` | `effectivePeriodTo` |

@@ -102,8 +102,14 @@ router.post("/registers/:fy/reconcile-versions", async (req, res) => {
  *   4. dryRun=true (default) never writes — always returns full report
  *   5. Every tombstone logged with syncRunId
  *
- * For the July 2026-27 one-off backlog (26%): pass blastRadiusLimitPct=30 with
- * dryRun=false only after reviewing the dry-run output and obtaining approval.
+ * Guard 2.5 (short-read) compares incomingRowCount against lastGoodRowCount when
+ * supplied, or against the current DB row count when not. Omitting lastGoodRowCount
+ * on a month where the DB is inflated (e.g. July cleanup) will trigger a false
+ * short-read halt because incoming < currentInScope. Supply the known-good baseline
+ * explicitly: ?lastGoodRowCount=8025
+ *
+ * For the July 2026-27 one-off backlog (~32%): pass blastRadiusLimitPct=35 and
+ * lastGoodRowCount=8025 with dryRun=false only after reviewing the dry-run output.
  */
 router.post("/registers/:fy/tombstone-orphans", async (req, res) => {
   const { fy } = req.params;
@@ -111,6 +117,14 @@ router.post("/registers/:fy/tombstone-orphans", async (req, res) => {
   const dryRun = req.query.dryRun !== "false";
   const blastRadiusLimitPct = req.query.blastRadiusLimitPct != null
     ? Number(req.query.blastRadiusLimitPct)
+    : undefined;
+  // Explicit admin-supplied last-known-good row count for Guard 2.5.
+  // When the DB is inflated above the sheet (e.g. July excess rows), the default
+  // fallback to currentInScope triggers a false short-read halt. Supply the
+  // verified baseline so the guard compares against the right threshold.
+  // Omit to use the default currentInScope fallback.
+  const lastGoodRowCount = req.query.lastGoodRowCount != null
+    ? Number(req.query.lastGoodRowCount)
     : undefined;
 
   const spreadsheetId = REGISTER_SHEET_IDS[fy];
@@ -192,6 +206,7 @@ router.post("/registers/:fy/tombstone-orphans", async (req, res) => {
       syncRunId,
       dryRun,
       blastRadiusLimitPct,
+      lastGoodRowCount,
     });
 
     res.json({

@@ -12,6 +12,7 @@ import {
   QUARTER_RANGES,
   isOpenFiscalMonth,
   isFutureFiscalMonth,
+  isFyClosed,
   type FiscalMonthIdx,
   type PeriodMode,
 } from "@/data/global-filter-context";
@@ -374,22 +375,26 @@ export default function GlobalFilterBar({ hideSyncRow, className }: GlobalFilter
 
         <span className="text-border/60 select-none text-sm hidden sm:inline">|</span>
 
-        {/* Last 7 days / Today */}
+        {/* Last 7 days / Today — hidden on closed FYs (meaningless for historical data) */}
         <div className="flex items-center gap-1">
-          <Pill
-            active={periodMode === "last7"}
-            onClick={() => setPeriodMode("last7")}
-            variant={periodMode === "last7" ? "default" : "special"}
-          >
-            Last 7 days
-          </Pill>
-          <Pill
-            active={periodMode === "today"}
-            onClick={() => setPeriodMode("today")}
-            variant={periodMode === "today" ? "default" : "special"}
-          >
-            Today
-          </Pill>
+          {!isFyClosed(fy) && (
+            <>
+              <Pill
+                active={periodMode === "last7"}
+                onClick={() => setPeriodMode("last7")}
+                variant={periodMode === "last7" ? "default" : "special"}
+              >
+                Last 7 days
+              </Pill>
+              <Pill
+                active={periodMode === "today"}
+                onClick={() => setPeriodMode("today")}
+                variant={periodMode === "today" ? "default" : "special"}
+              >
+                Today
+              </Pill>
+            </>
+          )}
           {/* Custom range */}
           <CustomRangePicker />
         </div>
