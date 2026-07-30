@@ -1,4 +1,5 @@
-- [sale_line versioning pipeline](sale-line-versioning.md) — versionedSyncLines prevents rate-edit duplicates; identity key = invoice_no|code|color|qty|month_label; analytics always filter version_status='current'.
+- [sale_line versioning pipeline](sale-line-versioning.md) — versionedSyncLines prevents rate-edit duplicates; identity key = invoice_no|code|color|qty|month_label[|sn:N]; analytics always filter version_status='current'.
+- [Tombstone identity-key bugs](tombstone-identity-key-bugs.md) — manual tombstone route needs tank resolution (litres→pieces) + serialNo in DB SELECT; both fixed Jul 2026; diagnostic endpoints not yet aligned.
 - [sale_line table rename](sale-line-table-rename.md) — raw table=sale_line_all, safe VIEW=sale_line (current-only), VIEW=sale_line_current (alias); runMigrations.ts wires it on every start.
 - [Prayag live register quirks](prayag-live-registers.md) — historical live Sheets registers have no DATE column (null invoice_date rows); analytics uses a calendar fallback; FY23-24 only via xlsx CLI.
 - [Prayag Sheets transform](prayag-sheets-transform.md) — tab/column mapping + control total 3,417,311,917; use MONTHLY not Combined; cell helpers coerce string cells; snapshot/fallback model.

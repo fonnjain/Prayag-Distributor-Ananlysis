@@ -38,14 +38,22 @@ export const EXPECTED_TOTAL_LINES = expectedCounts.total_distinct_sale_lines;
 // Stable across rate edits: invoice_no | code | color | qty | month_label.
 // Rate and amount are MUTABLE — intentionally excluded.
 // Used by both versionedSyncLines and tombstoneOrphans so the key is consistent.
+//
+// serialNo (optional): when present, appended as "|sn:<n>" so that two
+// physically distinct lines sharing the same invoice+code+colour+qty but
+// printed on different rows of the sheet are treated as different identities.
+// For FYs without a serial-number column (serialNo = null/undefined) the key
+// falls back to the five-field form, preserving backward compatibility.
 export function identityKey(
   invoiceNo: string | null,
   code: string,
   color: string | null,
   qty: string | null,
   monthLabel: string | null,
+  serialNo?: number | null,
 ): string {
-  return `${invoiceNo ?? ""}|${code}|${color ?? ""}|${qty ?? ""}|${monthLabel ?? ""}`;
+  const base = `${invoiceNo ?? ""}|${code}|${color ?? ""}|${qty ?? ""}|${monthLabel ?? ""}`;
+  return serialNo != null ? `${base}|sn:${serialNo}` : base;
 }
 
 // Deduplicate a batch before insert.
@@ -404,6 +412,7 @@ export async function tombstoneOrphans(opts: {
       code: saleLines.code,
       color: saleLines.color,
       qty: saleLines.qty,
+      serialNo: saleLines.serialNo,
       monthLabel: saleLines.monthLabel,
       amount: saleLines.amount,
       ingestedAt: saleLines.ingestedAt,
@@ -441,7 +450,7 @@ export async function tombstoneOrphans(opts: {
   }
 
   const orphans = currentRows.filter((r) => {
-    const key = identityKey(r.invoiceNo, r.code, r.color, r.qty, r.monthLabel);
+    const key = identityKey(r.invoiceNo, r.code, r.color, r.qty, r.monthLabel, r.serialNo);
     return !seenIdentities.has(key);
   });
 
@@ -569,7 +578,7 @@ export async function versionedSyncLines(
   // so it persisted as current indefinitely.
   const currentMap = new Map<string, DbRow[]>();
   for (const row of allCurrent) {
-    const key = identityKey(row.invoiceNo, row.code, row.color, row.qty, row.monthLabel);
+    const key = identityKey(row.invoiceNo, row.code, row.color, row.qty, row.monthLabel, row.serialNo);
     const bucket = currentMap.get(key) ?? [];
     bucket.push(row);
     currentMap.set(key, bucket);
@@ -598,6 +607,7 @@ export async function versionedSyncLines(
       line.color ?? null,
       line.qty ?? null,
       line.monthLabel ?? null,
+      line.serialNo ?? null,
     );
     const existingAll = currentMap.get(key) ?? [];
 
@@ -679,7 +689,7 @@ export async function versionedSyncLines(
     const monthLines = deduped.filter((l) => l.monthLabel === month);
     const seenForMonth = new Set(
       monthLines.map((l) =>
-        identityKey(l.invoiceNo ?? null, l.code, l.color ?? null, l.qty ?? null, l.monthLabel ?? null),
+        identityKey(l.invoiceNo ?? null, l.code, l.color ?? null, l.qty ?? null, l.monthLabel ?? null, l.serialNo ?? null),
       ),
     );
     const tr = await tombstoneOrphans({

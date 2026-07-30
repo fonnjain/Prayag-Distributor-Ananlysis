@@ -134,7 +134,40 @@ router.post("/registers/:fy/tombstone-orphans", async (req, res) => {
       },
     );
 
-    const monthLines = allLines.filter((l) => l.monthLabel === month);
+    // Apply the same tank resolution as the scheduled sync (registerSync.ts).
+    // Without this step every water tank line mismatches: the DB stores pieces
+    // (e.g. qty="5") while toSaleLine carries the raw sheet litres (e.g.
+    // qty="5000"), so every tank row would be a false tombstone candidate.
+    const cfg = rawRegisterSheetsCfg as { sap_source?: Record<string, string> };
+    const sapId = cfg.sap_source?.[fy];
+    let sapLookup: Awaited<ReturnType<typeof buildSapLookupMap>> | null = null;
+    const hasSapSource = !!sapId;
+    if (sapId) {
+      try {
+        sapLookup = await buildSapLookupMap(sapId);
+      } catch {
+        // Fall back to Route 2 (division) — correct for clean-integer tanks
+      }
+    }
+    const resolvedLines = allLines.map((line) => {
+      const sheetQty = line.qty != null ? Number(line.qty) : null;
+      const resolved = resolveWaterTankRow({
+        code: line.code,
+        groupCanon: line.groupCanon ?? null,
+        sheetQty,
+        invoiceNo: line.invoiceNo ?? null,
+        amount: Number(line.amount),
+        sapLookup,
+        hasSapSource,
+      });
+      // Pass through non-tank rows and unmapped suffixes unchanged.
+      if (resolved.flag === "non-tank-group" || resolved.flag === "unmapped-suffix") return line;
+      // non-clean-division means we cannot safely convert — keep raw.
+      if (resolved.qty == null) return line;
+      return { ...line, qty: String(resolved.qty) };
+    });
+
+    const monthLines = resolvedLines.filter((l) => l.monthLabel === month);
 
     const seenIdentities = new Set(
       monthLines.map((l) =>
@@ -144,6 +177,7 @@ router.post("/registers/:fy/tombstone-orphans", async (req, res) => {
           l.color ?? null,
           l.qty ?? null,
           l.monthLabel ?? null,
+          l.serialNo ?? null,
         ),
       ),
     );
