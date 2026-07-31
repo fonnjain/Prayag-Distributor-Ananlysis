@@ -13,6 +13,7 @@ import {
   isHeaderRow,
   mapRegisterColumns,
   normHeader,
+  toMonthLabel,
   type CellValue,
   type RegisterColumns,
 } from "./normalize.js";
@@ -46,7 +47,7 @@ export type RegisterReadResult = {
 export async function readRegisterFromSheets(
   spreadsheetId: string,
   fyOverride: string,
-  onRow: (values: CellValue[], columns: RegisterColumns) => void,
+  onRow: (values: CellValue[], columns: RegisterColumns, tabMonthLabel?: string) => void,
 ): Promise<RegisterReadResult> {
   const tabs = await listSheetTabs(spreadsheetId);
   const monthlyTabs = tabs
@@ -65,6 +66,13 @@ export async function readRegisterFromSheets(
   for (const tabTitle of tabsToRead) {
     let columns: RegisterColumns | null = null;
     let skipTab = false;
+    // Derive a month label from the tab name for sheets that have no MONTH
+    // column (e.g. FY2024-25 whose tabs are named "APR-24", "Aug", etc.).
+    // toMonthLabel handles "APR-24" → "Apr-24" and "Aug" → "Aug-24" when
+    // combined with fyOverride. Passed to onRow so callers can use it as a
+    // fallback when cols.month === -1.
+    const tabMonthLabelDerived: string | undefined =
+      toMonthLabel(tabTitle, fyOverride) ?? undefined;
 
     await readTabRowsChunked(spreadsheetId, tabTitle, (rows, startRow) => {
       if (skipTab) return;
@@ -90,6 +98,7 @@ export async function readRegisterFromSheets(
                   invoiceNo: columns.invoiceNo,
                   customer: columns.customer,
                   head: columns.head,
+                  month: columns.month,
                 },
               },
               "sheetsRegister: header detected",
@@ -103,7 +112,7 @@ export async function readRegisterFromSheets(
           continue;
         }
         totalRowsScanned++;
-        onRow(values, columns);
+        onRow(values, columns, tabMonthLabelDerived);
       }
     });
 

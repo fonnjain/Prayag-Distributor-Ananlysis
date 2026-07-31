@@ -136,8 +136,8 @@ export async function readLiveRegister(fy: string): Promise<SheetsReadResult> {
   let skippedWrongFy = 0;
   const invalidSample: string[] = [];
 
-  const sheetsResult = await readRegisterFromSheets(spreadsheetId, fy, (values, columns) => {
-    const result = parseRegisterRow(values, columns, fy);
+  const sheetsResult = await readRegisterFromSheets(spreadsheetId, fy, (values, columns, tabMonthLabel) => {
+    const result = parseRegisterRow(values, columns, fy, tabMonthLabel);
     if (result.kind !== "row") {
       skippedNotRow++;
       if (invalidSample.length < 5) {

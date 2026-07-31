@@ -215,8 +215,8 @@ async function doSync(fy: string, spreadsheetId: string): Promise<void> {
     const { rowsScanned, tabsRead } = await readRegisterFromSheets(
       spreadsheetId,
       fy,
-      (values, columns) => {
-        const result = parseRegisterRow(values, columns, fy);
+      (values, columns, tabMonthLabel) => {
+        const result = parseRegisterRow(values, columns, fy, tabMonthLabel);
         if (result.kind !== "row") return;
         lines.push(toSaleLine(result.row, occurrence, unmapped, "sheets"));
       },

@@ -73,7 +73,7 @@ export function mapRegisterColumns(
     date: find("DATE"),
     customer: find("CUSTOMER", "CUSTOMERNAME"),
     code: find("CODE", "ITEMCODE", "OLDERPCODE"),
-    color: find("COLOR", "COLOUR"),
+    color: find("COLOR", "COLOUR", "ITEMCOLOR"),
     month: find("MONTH", "M0NTH"),
     qty: find("QTY", "QUANTITY"),
     rate: find("SALERATE", "RATE"),
@@ -81,7 +81,7 @@ export function mapRegisterColumns(
     group: find("GROUP"),
     station: find("STATION"),
     state: find("STATE"),
-    head: find("STATEHEADA", "STATEHEAD"),
+    head: find("STATEHEADA", "STATEHEAD", "STATEHEADNAME"),
     type: find("TYPE", "MASTERGROUP"),
     fy,
   };
@@ -392,6 +392,10 @@ export function parseRegisterRow(
   values: CellValue[],
   cols: RegisterColumns,
   fyOverride?: string,
+  /** Pre-resolved month label derived from the tab name.  Used as a fallback
+   *  when the sheet has no MONTH column (cols.month === -1), e.g. FY2024-25
+   *  which encodes the month only in its tab title ("APR-24", "Aug", …). */
+  tabMonthLabel?: string,
 ): RowParseResult {
   const hasAny = values.some((v) => v != null && String(v).trim() !== "");
   if (!hasAny) return { kind: "empty" };
@@ -426,7 +430,7 @@ export function parseRegisterRow(
       serialNo: toNumber(at(values, cols.serialNo)),
       invoiceNo: toText(at(values, cols.invoiceNo)),
       invoiceDate: toIsoDate(at(values, cols.date)),
-      monthLabel: toMonthLabel(at(values, cols.month), fy),
+      monthLabel: toMonthLabel(at(values, cols.month), fy) ?? tabMonthLabel ?? null,
       customer: toText(at(values, cols.customer)),
       code,
       color: toText(at(values, cols.color)),

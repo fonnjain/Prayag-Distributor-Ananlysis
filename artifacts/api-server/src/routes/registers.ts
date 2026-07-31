@@ -3083,8 +3083,8 @@ router.get("/registers/:fy/sync-dry-run", async (req, res) => {
     const { rowsScanned, tabsRead } = await readRegisterFromSheets(
       spreadsheetId,
       fy,
-      (values, columns) => {
-        const result = parseRegisterRow(values, columns, fy);
+      (values, columns, tabMonthLabel) => {
+        const result = parseRegisterRow(values, columns, fy, tabMonthLabel);
         if (result.kind !== "row") return;
         lines.push(toSaleLine(result.row, occurrence, unmapped, "sheets"));
       },
@@ -3139,7 +3139,7 @@ router.get("/registers/:fy/sync-dry-run", async (req, res) => {
         })
         .from(saleLines)
         .where(and(eq(saleLines.fy, fyItem), eq(saleLines.versionStatus, "current")));
-      allCurrent.push(...(rows as DbRow[]));
+      for (const row of rows as DbRow[]) allCurrent.push(row);
     }
 
     const currentMap = new Map<string, DbRow>();

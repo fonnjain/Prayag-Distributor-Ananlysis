@@ -1,8 +1,8 @@
 {
   "comment": "Live Google Sheets spreadsheet IDs for the SALE/DISPATCH registers by fiscal year. These are goods-dispatched (primary sale) registers — NOT order-booking sheets. SALE and ORDER BOOKING are separate measures from separate spreadsheets and must never be confused. TWO SCHEMAS EXIST — do not assume one layout applies to all years: Schema A (FY2026-27, 18-col SALE SHEET layout): Serial, InvoiceNo, Date, BillFrom, CustomerName, City, Destination, ItemCode, Color, Quantity, MRP, SaleRate, TaxableValue, GROUP, STATION, STATE, STATE HEAD, MONTH. Schema B (FY2024-25 and FY2025-26, 21-col SAP-format layout): SrNo, Date, Document No., Location.Name, Customer.Name, State Name, Item Code, Old ERP Code, Item.Name, Item.Color, Item.Segment, Unit.Name, Quantity, Rate, Sale Rate, Taxable Value, State Head.Name, Month, GROUP, STATION, STATE. The normalize.ts find() alias lists must cover both schemas before any live Sheets read of FY2024-25 or FY2025-26 is attempted; currently 'Item.Color' (ITEMCOLOR) and 'State Head.Name' (STATEHEADNAME) are not aliased and would silently map to -1.",
   "registers": {
-    "2024-25": "1cT6lWRPJ3oSeYhab-cqeVjJidGitFQsr0DOq-vNn6cI",
-    "2025-26": "1Xzq-gmB6K7iuMcE6gb-O7OpvGgSDU33DzEVyK60LK6E",
+    "2024-25": "13fAGbZ6DDUadTGo8_uSLATv6eKBr-H7ZNhAnoV-E2dI",
+    "2025-26": "1chx0hL67Vpz_uQMxFfQe1JBUVrCmdBFxfFaMvcd_-vE",
     "2026-27": "19LQGpkbZiecGaXdBvl48rPZT2LUz3sKekeKX5fHu7Ps"
   },
   "sap_source": {

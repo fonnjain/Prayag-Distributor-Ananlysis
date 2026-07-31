@@ -1,0 +1,51 @@
+Prayag app - correction to the FY2025-26 diagnosis, before step 5.
+
+Steps 1 to 4 are agreed. Run them after the publish completes.
+
+THE FY2025-26 SHEET IS NOT EMPTY AND NOT MISCONFIGURED.
+
+I checked both registers directly:
+
+   Sale 24-25   id 13fAGbZ6DDUadTGo8_uSLATv6eKBr-H7ZNhAnoV-E2dI
+                15,069,932 bytes   modified 13 Jul 2026
+   Sale 25-26   id 1chx0hL67Vpz_uQMxFfQe1JBUVrCmdBFxfFaMvcd_-vE
+                15,557,488 bytes   modified 20 Jul 2026
+
+Same size, same structure, same owner (DEEPAKJ@prayagindia.com), same sharing.
+Both have an intact Combined tab and both return real rows on read:
+
+   24-25:  SLINDT:24-25/05/000001, 5-Apr-2024, JEYAM TRADERS, BABU, SANITARYWARE
+   25-26:  500001, 11-Apr-2025, SB ENTERPRISES, BALASORE, ODISHA, SANDEEP JI
+
+If FY2024-25 "reads cleanly from Sheets", FY2025-26 must too. Any explanation
+that has one working and the other empty is wrong.
+
+PRODUCTION ITSELF SHOWS THE MECHANISM.
+
+   FY2024-25 in production: 24,000 rows, 3 months of 12, Rs 54.09 Cr
+   FY2024-25 in dev:       141,201 rows, 12 months, Rs 341.14 Cr
+
+Production holds 17 per cent of that year. Not zero, not complete - PARTIAL.
+An empty sheet gives you nothing. A sheet that TRUNCATES ON READ gives you a
+partial year, which is exactly what is there.
+
+So both years are the same fault: read truncation on a 15 MB sheet. FY2024-25
+truncated at 3 months, FY2025-26 truncated at 0. This is the same failure mode
+that made IMPORTRANGE unusable in this chain originally, and Sale 26-27 at
+4.6 MB already fails outright with "File too large for export".
+
+THE TEST, BEFORE ANY XLSX HUNT:
+
+Run the backfill for FY2024-25 against a scratch target and report the row count
+it actually retrieves, per month. Do not write to production.
+
+   if it returns 141,201 rows across 12 months
+        -> the read is fine, and the production gap has another cause
+   if it returns a partial year
+        -> the fault is chunking on a 15 MB sheet, and it will affect
+           FY2023-24 and FY2025-26 identically
+
+If it is chunking, fix the chunked read. That single fix restores all three years
+in production from Sheets, with no file to locate and no upload path to build.
+
+Only if the read is proven sound should the xlsx route be considered.

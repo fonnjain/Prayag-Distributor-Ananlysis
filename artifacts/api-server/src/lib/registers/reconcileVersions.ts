@@ -105,8 +105,8 @@ export async function backfillColor(
   const colorByInvCodeQty = new Map<string, Set<string>>();
   let rowsScanned = 0;
 
-  await readRegisterFromSheets(spreadsheetId, fy, (values, columns) => {
-    const result = parseRegisterRow(values, columns, fy);
+  await readRegisterFromSheets(spreadsheetId, fy, (values, columns, tabMonthLabel) => {
+    const result = parseRegisterRow(values, columns, fy, tabMonthLabel);
     if (result.kind !== "row") return;
     const { row } = result;
     rowsScanned++;
