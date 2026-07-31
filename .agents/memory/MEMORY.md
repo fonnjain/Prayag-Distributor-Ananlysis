@@ -66,3 +66,4 @@
 - [PA2 period labelling](pa2-period-labelling.md) — computePeriodCovered in aiPayload.ts; runPeriodGuard in numericGuard.ts; all 6 AI routes return 5 period fields; PeriodMismatchBanner + PdfPeriodInfo + updated filenames in AiReports.tsx.
 - [SD2 Distributor Deep Dive](sd2-distributor-deep-dive.md) — byState/perMember/correlation/namingCandidates + dashboardOb; TIMEOUT_MS=60s; perMemberAcc in Step 4; MemberRef extended; verified Sandeep Dadheech r=−0.333.
 - [Primary period-aware service](primary-period-service.md) — single shared loader for booking+sale; resolved ₹0.42 Cr gap; Q1 anchors ₹77.76/₹72.86/₹4.90 Cr; period-filter flag drives FY-total warning UI.
+- [Tank dedup serial collision](tank-dedup-serial-collision.md) — synthetic serials must be assigned AFTER tank resolution; pre-resolution ltr-based keys cause dedupeBySerialNo collision when different ltr amounts floor to same pieces.

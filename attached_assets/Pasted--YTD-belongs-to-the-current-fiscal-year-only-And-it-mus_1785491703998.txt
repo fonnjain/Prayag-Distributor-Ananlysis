@@ -1,0 +1,77 @@
+# YTD belongs to the current fiscal year only
+
+*And it must move on its own when the fiscal year turns, with no code change.*
+
+---
+
+```
+Prayag app - restrict YTD to the current fiscal year, derived from today's date.
+
+"Year to date" only has meaning for the fiscal year currently in progress. For a
+closed year, year to date IS the full year - so offering it either misleads or
+duplicates Full Year.
+
+1. DERIVE THE CURRENT FY FROM TODAY'S DATE. Do not hardcode it, do not read it
+   from config, do not maintain a list of closed years.
+   Indian fiscal year runs 1 April to 31 March, so:
+      on 31 Jul 2026  -> current FY is 2026-27
+      on 31 Mar 2027  -> current FY is still 2026-27
+      on  1 Apr 2027  -> current FY becomes 2027-28
+
+   This is the whole point of the change. When the year turns, FY2026-27 must
+   lose YTD automatically. Nobody should have to remember to edit anything.
+
+2. YTD IS OFFERED ONLY FOR THE CURRENT FY.
+   For any other fiscal year, hide the YTD control. If a stored URL or saved view
+   still carries ytd for a closed year, resolve it to Full Year and label it
+   "Full Year" so the figure shown matches the label.
+
+   REPORT WHAT IT DOES TODAY BEFORE CHANGING ANYTHING. If YTD currently resolves
+   as "April to the current calendar month" and applies that to whichever FY is
+   selected, then a closed year is being shown as a QUARTER of itself right now,
+   with nothing on screen to say so. FY2024-25 would read roughly Rs 85 Cr
+   instead of Rs 341.14 Cr.
+
+3. THE SAME APPLIES TO "Last 7 days" AND "Today".
+   Both are meaningless on a closed year - they would return nothing, or worse,
+   silently return a range that falls outside the year entirely. Hide them
+   whenever the selected FY is not the current one.
+
+4. QUARTERS BEYOND THE CURRENT ONE, WITHIN THE CURRENT FY.
+   Q3 and Q4 of FY2026-27 have not happened. They carry a plan but no actuals.
+   They must read "no actuals recorded yet" rather than 0 per cent, and must not
+   contribute a low-performer count. Same rule already agreed for July.
+
+5. A FUTURE FY, if selectable at all, shows "no data for this fiscal year"
+   rather than zeros.
+
+Acceptance - report each:
+  what FY2024-25 + YTD returns TODAY, before any change
+  after the change, YTD is not offered for FY2023-24, FY2024-25 or FY2025-26
+  a saved ytd URL for a closed FY resolves to Full Year and is labelled so:
+     FY2024-25   Rs 341.14 Cr
+     FY2025-26   Rs 361.00 Cr
+     FY2023-24   its frozen total
+  FY2026-27 + YTD still resolves to April through the latest data, unchanged
+  "Last 7 days" and "Today" are hidden on any FY that is not current
+  Q3 and Q4 of FY2026-27 read "no actuals recorded yet", not 0 per cent
+
+  THE AUTOMATIC TEST - this is the one that matters:
+  simulate today's date as 1 April 2027 and confirm, with NO code edit:
+     FY2027-28 becomes the current year and offers YTD
+     FY2026-27 no longer offers YTD and resolves it to Full Year
+  If that requires touching a config file or a list, the rule is not derived
+  from the date and the change is not complete.
+```
+
+---
+
+## Why the automatic test is the acceptance criterion
+
+Everything else here is a one-off correction. **The date-derived rule is the part that keeps working.**
+
+A hardcoded list of closed years would pass every check today and quietly break on 1 April 2027 — showing YTD on a year that has ended, on a dashboard nobody would think to re-verify. That is the same shape as several faults already found in this project: correct when written, wrong later, and silent about it.
+
+---
+
+*Figures verified 31 July 2026*

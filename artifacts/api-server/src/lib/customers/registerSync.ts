@@ -302,29 +302,73 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
       logger.info({ fy, ...tankFlags }, "register sync: tank resolution complete");
     }
 
-    // ── Step 2b: recompute lineUid for resolved tank rows ────────────────────
+    // ── Step 2b: recompute lineUid for resolved tank rows (Schema A only) ────
     // toSaleLine hashed lineUid with the ORIGINAL sheet qty (litres).
     // After tank resolution qty = pieces, so the hash must be recomputed so
     // the new lineUid differs from the superseded litres-based row and the
     // insert does not hit ON CONFLICT DO NOTHING on the old superseded row.
+    // Only applies to rows with a real (non-null) serialNo — null-serial rows
+    // (Schema B FYs: 2024-25, 2025-26) have their lineUid recomputed in
+    // step 2c after synthetic serials are assigned post-resolution.
     const tankUidOcc = new OccurrenceCounter();
     const linesWithResolvedUids = resolvedLines.map((line) => {
-      if (line.groupCanon !== "WATER TANK") return line;
+      if (line.groupCanon !== "WATER TANK" || line.serialNo == null) return line;
       const newKey = [
         line.fy ?? "",
         line.code,
         line.qty ?? "",
         line.amount,
         line.monthLabel ?? "",
-        String(line.serialNo ?? ""),
+        String(line.serialNo),
       ].join("|");
       return { ...line, lineUid: computeLineUid(newKey, tankUidOcc.next(newKey)) };
+    });
+
+    // ── Step 2c: assign synthetic serials (post-resolution) ─────────────────
+    // Synthetic serials must be based on the POST-resolution identity key.
+    // Assigning them pre-resolution (based on sheet ltr-qty) causes collisions
+    // in dedupeBySerialNo when two rows with different ltr quantities both
+    // floor-divide to the same pieces count: each gets serialNo=0 from its own
+    // counter key, then shares the same 6-field dedup key after resolution.
+    //
+    // By assigning here — after qty has been resolved to pieces — the counter
+    // key is stable through tank resolution, and every physically distinct row
+    // gets a unique serial in the post-resolution identity space.
+    //
+    // Only applies to rows with serialNo == null (Schema B FYs with no SERIALNO
+    // column). Schema A rows (FY2026-27) have real sheet serials and are
+    // untouched by this step.
+    const postResOccCounter = new OccurrenceCounter();
+    const linesForSync = linesWithResolvedUids.map((line) => {
+      if (line.serialNo != null) return line; // real or Schema-A serial — leave untouched
+      // Post-resolution identity key: uses resolved qty (pieces for tank rows).
+      const postIdKey = [
+        line.invoiceNo ?? "",
+        line.code,
+        line.color ?? "",
+        line.qty ?? "",
+        line.monthLabel ?? "",
+      ].join("|");
+      const syntheticSerial = postResOccCounter.next(postIdKey);
+      // Recompute lineUid to match the lineUidKey formula (fy|invoiceNo|code|color|qty|amount|month|serial)
+      // so it is consistent with the identity key used by versionedSyncLines.
+      const postUidKey = [
+        line.fy ?? "",
+        line.invoiceNo ?? "",
+        line.code,
+        line.color ?? "",
+        line.qty ?? "",
+        line.amount,
+        line.monthLabel ?? "",
+        syntheticSerial,
+      ].join("|");
+      return { ...line, serialNo: syntheticSerial, lineUid: computeLineUid(postUidKey, 0) };
     });
 
     const syncedAt = new Date();
     // ── Step 3 + 4: upsert + tombstone pass (tombstone is inside versionedSyncLines) ──
     const { touched, superseded, inserted, revived, tombstoned, incomingCountByFyMonth } =
-      await versionedSyncLines(linesWithResolvedUids, syncedAt, lastGoodRowCountByMonth);
+      await versionedSyncLines(linesForSync, syncedAt, lastGoodRowCountByMonth);
 
     // Update last-good-read baseline for every month whose incoming count
     // was at least as large as the previous baseline (i.e. not a truncated read).
@@ -334,7 +378,7 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
     }
 
     lastSyncedAtMs.set(fy, Date.now());
-    s.rows = linesWithResolvedUids.length;
+    s.rows = linesForSync.length;
     s.phase = "done";
     logger.info(
       {
@@ -342,7 +386,7 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
         spreadsheetId,
         tabsRead,
         rowsScanned,
-        linesBuilt: linesWithResolvedUids.length,
+        linesBuilt: linesForSync.length,
         touched,
         superseded,
         inserted,
