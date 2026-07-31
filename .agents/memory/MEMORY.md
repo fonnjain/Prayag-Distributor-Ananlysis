@@ -39,7 +39,7 @@
 - [Tab content verification + sheet_confirmed_at](prayag-tab-content-verification.md) — two-pass readOrderTabInventory; ghost-row marker on sale_line; GET /api/mgmt/tab-diagnostic.
 - [Primary Order Book reader quirks](primary-order-book-reader.md) — FY2023-24: no header row (positional fallback col 17=Amount), no State Head col; dry-run anchors for all four FYs.
 - [Tank qty bug reconciliation](tank-qty-bug-reconciliation.md) — qty/lineUid fix + versionedSyncLines currentMap array fix; one-current-row-per-identity invariant verified clean July 21 2026.
-- [versionedSyncLines revive fix](versionedSyncLines-revive-fix.md) — INSERT blocked by superseded line_uid; pre-flight revive pass + per-month guard; May gap 34→3, Jun 29→6; 9 rows remain due to lineUidKey not including invoiceNo/color.
+- [versionedSyncLines revive fix](versionedSyncLines-revive-fix.md) — lineUidKey must include invoiceNo+color; old key caused infinite revive/tombstone cycle; FY≤2025-26 re-ingest needs full clear-and-reload (old UIDs invalid).
 - [Register two-schema gap](register-schema-gap.md) — FY24-25/25-26 registers are 21-col SAP format; ITEMCOLOR + STATEHEADNAME not aliased in normalize.ts; unmapped_heads guardrail silently passes missing-column case.
 - [FY24-25 card completeness guard](fy2425-completeness-guard.md) — ?? is a null check not a completeness check; closed-FY DB figure requires count(distinct month_label)=12; try-catch degrades to SALE tab; ₹341.14 Cr is authoritative (DB+SH agree), ₹341.73 Cr is the SALE tab fallback.
 - [Distributor D4 Investment, ROI, Tiering](distributor-d4-investment.md) — sql.join IN-clause required (ANY(jsArray) silently matches nothing); discount null for live FY; credit/scheme always no_source.

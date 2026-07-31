@@ -454,22 +454,30 @@ export class OccurrenceCounter {
   }
 }
 
-// NOTE: invoice_no is deliberately NOT part of the uid. The same FY block is
-// exported with an invoice column in one workbook and without it in the next
-// year's workbook, so including it would defeat cross-file dedup (the spec's
-// 424,477-line acceptance requires those blocks to collapse). Legitimate
-// duplicate lines are preserved by the occurrence counter, which depends only
-// on the tuple itself, not on row order among identical tuples.
+// lineUidKey — the stable hash input for a register row.
 //
-// When serial_no is present it is included in the key. Two colour variants of
-// the same item on the same invoice share (code, qty, amount) but have distinct
-// serial numbers, so including serial_no gives them distinct keys without
-// needing the occurrence counter. For historical FYs without serial_no the key
-// falls back to the original tuple and the occurrence counter disambiguates.
+// invoice_no and color are intentionally included so that two rows with the
+// same (code, qty, amount, month) but different invoices or colors get
+// distinct line_uids. Without them, the occurrence counter is the only
+// disambiguator, and the counter is order-dependent: if two rows collide in
+// the sheet but arrive in a different order on the next read, their uids swap,
+// causing the tombstone + revive cycle that prevents convergence.
+//
+// Historical note (FY ≤ 2025-26): invoice_no was originally excluded so that
+// the same data block could be deduped across two workbooks, one of which had
+// no invoice column. Those FYs were ingested with the old key and are
+// unchanged in the DB. Any future re-ingest of those FYs will need a full
+// clear-and-reload to avoid line_uid orphans.
+//
+// serialNo, when present, further distinguishes colour variants of the same
+// item on the same invoice. For FYs without a SERIALNO column it is empty and
+// the occurrence counter falls back to order-based disambiguation.
 export function lineUidKey(row: ParsedRegisterRow): string {
   return [
     row.fy,
+    row.invoiceNo ?? "",
     row.code,
+    row.color ?? "",
     row.qty ?? "",
     row.amount,
     row.monthLabel ?? "",

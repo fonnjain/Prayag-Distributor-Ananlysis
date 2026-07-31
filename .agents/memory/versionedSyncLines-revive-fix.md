@@ -1,73 +1,38 @@
 ---
-name: versionedSyncLines revive fix
-description: INSERT blocked by superseded line_uid — once a row is tombstoned its line_uid stays in the table, silently blocking re-insertion. Fixed with pre-flight revive pass. Also covers: dedupeBySerialNo 7-field key; persisted last-good-read baseline (ingest_run.rows_per_month); null/undefined semantics for Guard 2.5; 9 persistent structural gap rows.
+name: versionedSyncLines revive fix + lineUidKey convergence
+description: lineUidKey must include invoiceNo+color; historical key change + re-ingest contract
 ---
 
-## The problem
-`versionedSyncLines` used `INSERT … ON CONFLICT DO NOTHING` on `line_uid`.
-A tombstoned row's `line_uid` stays in `sale_line_all` as `version_status='superseded'`.
-When the sheet brings the row back, `toInsert` puts it through INSERT → conflict → silently skipped.
-No error, 0 rows inserted, gap persists indefinitely.
+## Rule — lineUidKey must include invoiceNo and color
 
-**Why:** `line_uid` is a SHA1 hash of `fy|code|qty|amount|monthLabel|serialNo` — it is a content hash
-that does not include `invoiceNo` or `color`. After tombstone the row's hash still occupies the table.
+`lineUidKey` (normalize.ts) hashes `(fy, invoiceNo, code, color, qty, amount, monthLabel, serialNo)`.
 
-## The fix (deployed)
-Before the INSERT batch, a pre-flight SELECT checks which `line_uid`s already exist.
-- Found as `superseded` → UPDATE back to `current`
-- Found as `current` → silently ignored (another row with same hash is already active — see structural gap)
-- Not found → INSERT as usual
+Without invoiceNo and color, two rows on different invoices with the same SKU/qty/amount collide at occurrence=0. The revive pre-flight resurrects them (lineUid matches), but tombstoneOrphans correctly finds no identity match and re-tombstones. The cycle repeats every sync tick indefinitely.
 
-New `VersionedSyncResult` field: `revived: number`.
+**Why invoiceNo was excluded (historical):** FY2023-24 through 2025-26 were ingested from workbooks where one file had INVOICENO and another did not. Including invoiceNo in the key would have prevented cross-file dedup (the spec required those blocks to collapse). Those FYs were ingested with the old key and remain unchanged in the DB.
 
-## Baseline persistence: ingest_run.rows_per_month (deployed)
-Migration `002_ingest_run_rows_per_month` adds `rows_per_month jsonb` to `ingest_run`.
-After each successful register sync the per-month post-dedup row counts are written there:
-`{"Apr-26": 5542, "Jul-26": 8025, "Jun-26": 12868, "May-26": 11812}`.
+**How to apply:**
+- FY2026-27 onwards: new key is active, sync converges cleanly.
+- Any future re-ingest of FY ≤ 2025-26 MUST be a full clear-and-reload (old line_uids are invalidated by the key change).
+- The DB delete guard (`allowDelete`) must be used: `SET LOCAL app.allow_delete = 'confirmed'` in the same transaction, or call `allowDelete()` from application code.
 
-On boot, `loadBaselineFromDb()` in `registerSync.ts` queries:
-```sql
-SELECT DISTINCT ON (fy) fy, rows_per_month
-FROM ingest_run
-WHERE source = 'register_sheets_sync'
-  AND status IN ('ok', 'warn')
-  AND rows_per_month IS NOT NULL
-ORDER BY fy, started_at DESC NULLS LAST
-```
-Populates `lastGoodRowCountByMonth` (`Map<"fy|month", number>`) before the first sync runs.
-If the DB load fails it is non-fatal: map stays empty → guards halt one cycle → baseline established.
+## Boot / baseline persistence
 
-## Revive guard + Guard 2.5 semantics (deployed)
-Both guards compare against the last known-good read, not the current DB row count.
-DB-count comparison fires whenever the DB drifts above the sheet (e.g. accumulated revivals) —
-that is exactly when tombstone needs to run, so it is the wrong signal.
+After clearing and re-ingesting a FY:
+1. First sync inserts all rows; tombstoneOrphans halts (no baseline yet).
+2. `recordIngestRun` writes `rows_per_month` JSON to `ingest_run` table.
+3. Second sync: baseline loaded → tombstoneOrphans armed → zero churn if sheet unchanged.
+4. `loadBaselineFromDb()` in registerSync.ts runs once on cold start and populates in-memory map.
 
-**Three-way `lastGoodRowCount` on `tombstoneOrphans` opts:**
-- `number`    — baseline known; incoming must be >= this or tombstone halts.
-- `null`      — sync pipeline, no baseline yet; halt as unknown. Zero baseline = unknown = halt.
-                A missed cycle costs nothing; tombstoning an unvalidated read loses the month.
-- `undefined` — manual/ad-hoc POST call; fall back to current DB count (original Guard 2.5).
+## Verified convergence (FY2026-27 after re-ingest with new key)
 
-`null` vs `undefined` distinction matters: `undefined` is reserved for callers that
-intentionally have no baseline context (manual admin routes). The sync pipeline always passes
-`null` when the map has no entry (`?? null`).
+| Month | Rows | Dispatch |
+|---|---|---|
+| Apr-26 | 5,542 | Rs 13.11 Cr |
+| May-26 | 11,812 | Rs 28.28 Cr |
+| Jun-26 | 12,868 | Rs 31.43 Cr |
+| Jul-26 | 9,387 | Rs 21.16 Cr |
+| **Total** | **39,609** | **Rs 93.98 Cr** |
 
-**Revive guard:** `lastGood === undefined` (map has no entry) → not safe to revive. Revive only
-proceeds when baseline is known (`lastGood !== undefined`) AND `incoming >= lastGood`.
-
-## First boot after deploy (verified Jul 30 2026)
-- `loaded: 0` (no prior run had `rows_per_month`).
-- All 4 months: "no baseline established — halting tombstone." `revived: 0, tombstoned: 0`.
-- Run 39 written: `rows_per_month = {"Apr-26":5542,"Jul-26":8025,"Jun-26":12868,"May-26":11812}`.
-- Next boot: baseline loads → July tombstone proceeds (incoming 8,025 >= lastGood 8,025) → clears 3,651 excess rows.
-
-## dedupeBySerialNo key (deployed)
-Old: `fy|monthLabel|serialNo` — collapsed rows with same serial but different natural key.
-New: `fy|monthLabel|serialNo|invoiceNo|code|color|qty` — only collapses true 7-field duplicates.
-
-## Remaining 9 gap rows (3 May-26 + 6 Jun-26) — structural
-`lineUidKey` hashes `fy|code|qty|amount|monthLabel|serialNo` (no `invoiceNo`, no `color`).
-Two rows with different identities can share a `line_uid`. If the "other" row is already `current`,
-pre-flight finds it as `current` → skipped from both revive and insert → silent drop.
-Fix: add `invoiceNo` + `color` to `lineUidKey` in `normalize.ts` + full FY2026-27 re-ingestion.
-Not yet done — breaking migration, separate task.
+Tick 2: `touched: 39,609 · superseded: 0 · inserted: 0 · revived: 0 · tombstoned: 0`
+SAP ghost rows: 0 (was 31 before — collision rows are now uniquely keyed).
