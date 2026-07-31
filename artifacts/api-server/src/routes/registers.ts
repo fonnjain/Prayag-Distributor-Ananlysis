@@ -21,7 +21,10 @@ import {
   REGISTER_SHEET_IDS,
   getAnchorHealth,
   runScheduledTick,
+  ensureRegisterSynced,
+  doSync,
 } from "../lib/customers/registerSync.js";
+import { allowDelete } from "../lib/deleteGuard.js";
 import rawRegisterSheetsCfg from "../../config/register_sheets.json";
 import {
   tankLitresFromCode,
@@ -141,8 +144,8 @@ router.post("/registers/:fy/tombstone-orphans", async (req, res) => {
     const { rowsScanned, tabsRead } = await readRegisterFromSheets(
       spreadsheetId,
       fy,
-      (values, columns) => {
-        const result = parseRegisterRow(values, columns, fy);
+      (values, columns, tabMonthLabel) => {
+        const result = parseRegisterRow(values, columns, fy, tabMonthLabel);
         if (result.kind !== "row") return;
         allLines.push(toSaleLine(result.row, occurrence, unmapped, "sheets"));
       },
@@ -290,6 +293,59 @@ router.post("/registers/run-sync-tick", (req, res) => {
   runScheduledTick();
   req.log.info("manual sync tick triggered");
   res.json({ triggered: true, message: "Sync tick started — check anchor-health in ~60s" });
+});
+
+/**
+ * POST /registers/:fy/force-resync?clearFirst=true
+ *
+ * Admin endpoint for backfilling or correcting a specific FY from its live Sheet.
+ * Bypasses the "closed FY already has rows — skip" guard in ensureRegisterSynced.
+ *
+ * ?clearFirst=true  — DELETE all rows for the FY first (via the delete guard).
+ *                     Required when the DB holds data from a wrong source.
+ *                     Do NOT use for the open FY.
+ *
+ * The actual sync is non-blocking (returns immediately). Poll
+ * GET /registers/:fy/version-stats or GET /registers/anchor-health to
+ * track progress.
+ */
+router.post("/registers/:fy/force-resync", async (req, res) => {
+  const { fy } = req.params;
+  const clearFirst = req.query.clearFirst === "true";
+
+  const spreadsheetId = REGISTER_SHEET_IDS[fy];
+  if (!spreadsheetId) {
+    res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
+    return;
+  }
+
+  try {
+    if (clearFirst) {
+      await allowDelete(async (tx) => {
+        await (tx as typeof db)
+          .delete(saleLines)
+          .where(eq(saleLines.fy, fy));
+      });
+      req.log.info({ fy }, "force-resync: rows cleared");
+    }
+
+    // Call doSync directly — bypasses REGISTER_SYNC_PAUSE and the
+    // "closed FY already has rows" early-exit in ensureRegisterSynced.
+    // This is intentional: force-resync IS the admin repair tool.
+    doSync(fy, spreadsheetId).catch((err: unknown) => {
+      req.log.error({ fy, err }, "force-resync: doSync failed");
+    });
+
+    res.json({
+      triggered: true,
+      fy,
+      clearFirst,
+      message: "Sync started — poll /registers/:fy/version-stats for progress",
+    });
+  } catch (err: unknown) {
+    req.log.error({ fy, err }, "force-resync failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 // ── Invoice-level reconciliation ──────────────────────────────────────────────

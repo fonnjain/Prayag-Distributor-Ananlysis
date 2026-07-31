@@ -197,7 +197,7 @@ async function hasRows(fy: string): Promise<boolean> {
   return parseInt(res.rows[0]?.n ?? "0", 10) > 0;
 }
 
-async function doSync(fy: string, spreadsheetId: string): Promise<void> {
+export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
   // Ensure the persisted baseline is loaded exactly once per process, before
   // any guard decisions are made. This is the only place we await it.
   if (!baselineLoadPromise) baselineLoadPromise = loadBaselineFromDb();

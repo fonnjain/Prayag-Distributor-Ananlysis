@@ -1,0 +1,109 @@
+# To Replit — now
+
+*Two bugs fixed and the read is unblocked. This is the order of work from here.*
+
+---
+
+## 1 — Production FY2026-27, after publish
+
+The live number is wrong right now. Do this first.
+
+```
+Prayag app - after the publish completes, run the agreed steps 1 to 4 for
+FY2026-27 on PRODUCTION.
+
+Production currently reads Rs 106.67 Cr for FY2026-27 with 46,215 rows.
+The sheet holds 39,609 rows and Rs 93.98 Cr. July is the whole of the excess:
+15,993 rows against 9,387.
+
+PRE-FLIGHT BEFORE ANY DELETE. Read SALE SHEET 26-27 from the production runtime
+and report per-month counts without writing:
+   Apr 5,542   May 11,812   Jun 12,868   Jul 9,387   total 39,609
+If any month comes back below that, STOP. A failed read after a delete leaves
+production empty.
+
+Then clear FY2026-27 only, re-ingest, and verify:
+   Apr  5,542 rows  Rs 13.11 Cr
+   May 11,812 rows  Rs 28.28 Cr
+   Jun 12,868 rows  Rs 31.43 Cr
+   Jul  9,387 rows  Rs 21.16 Cr
+   total 39,609     Rs 93.98 Cr
+Second tick must show superseded 0, inserted 0, revived 0, tombstoned 0.
+Report the live URL figure afterwards - Sale (Dispatched) YTD should read
+Rs 93.98 Cr.
+
+Do this at a quiet hour. Between the delete and the re-ingest the dashboard shows
+nothing for the current year.
+```
+
+---
+
+## 2 — The FY2025-26 anchor has moved, and it matters
+
+```
+Prayag app - the FY2025-26 read has closed a question open since the O-series.
+
+   sale_line register              Rs 359.52 Cr   144,365 rows
+   State Head Sale 2025-26 anchor  Rs 361.14 Cr
+   gap                             Rs   1.62 Cr   direction never established
+
+   live register sheet, read now   Rs 361.00 Cr   145,613 rows
+
+That is Rs 0.14 Cr from the anchor and Rs 1.48 Cr above the database, with 1,248
+more rows. So the DATABASE was short, not the sheet over. The xlsx backfill that
+loaded dev was cut before those rows existed.
+
+Rs 359.52 Cr has been used as the FY2025-26 truth throughout - the head-merge
+verification, the Overview card, the SKU ever-sold denominators and both handover
+documents. It is understated.
+
+Report:
+  whether dev's FY2025-26 should be re-ingested from Sheets rather than left on
+    the stale xlsx
+  the new FY2025-26 total after that re-ingest
+  the per-head FY2025-26 breakdown, so the merge verification can be restated -
+    currently Sandeep Dadheech Rs 163.32 Cr, Syed Aqil Rizvi Rs 56.71 Cr,
+    Biju C.O Rs 17.24 Cr, Lalan Kumar Rs 11.48 Cr, Nasir Hussain Khan Rs 3.37 Cr
+  whether FY2023-24 in dev also differs from its sheet. FY2024-25 matches exactly
+    at 141,201 rows, so that one is confirmed good.
+```
+
+---
+
+## 3 — Then the production historical backfill
+
+```
+Prayag app - backfill the three missing years into PRODUCTION, one at a time.
+Report after each; do not chain them.
+
+Production currently holds:
+   FY2023-24   absent
+   FY2024-25   24,000 rows, 3 months of 12, Rs 54.09 Cr
+   FY2025-26   absent
+
+Run the Sheets backfill against production for each year in turn, and after each
+report row count and total per month against the sheet.
+
+   FY2024-25 target   141,201 rows   Rs 341.14 Cr   - dev matches the sheet exactly
+   FY2025-26 target   145,613 rows   Rs 361.00 Cr   - per the read just completed
+   FY2023-24 target   confirm against its own sheet first
+
+FY2024-25 must ADD the missing nine months without disturbing the three already
+present. Confirm that before running it - if the backfill would supersede the
+existing 24,000 rows, say so first.
+
+No xlsx is needed. All three years read from Sheets now that the stack overflow
+and the month-label fallback are fixed.
+```
+
+---
+
+## Also still open
+
+- **Guard the historical years against the `lineUidKey` change** — a normal sync of FY2023-24, FY2024-25 or FY2025-26 will now mismatch every stored row. Record the key version per FY and refuse a normal sync of any year that predates it.
+- **YTD on closed fiscal years** — confirm FY2024-25 + YTD returns the full year, not a partial range
+- **The baseline can only rise** — a month that legitimately shrinks halts permanently
+
+---
+
+*Sheet figures verified 30 July 2026*
