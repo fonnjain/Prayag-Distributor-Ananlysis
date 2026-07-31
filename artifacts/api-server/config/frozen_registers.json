@@ -1,0 +1,8 @@
+{
+  "comment": "Closed FYs that are frozen. The freeze is stronger than REGISTER_SYNC_PAUSE: (1) the scheduler skips frozen FYs entirely, (2) ensureRegisterSynced treats them as permanently done, (3) force-resync rejects them with HTTP 423 unless ?unfreeze=true&reason=<text> is supplied. Row and amount anchors are asserted on every startup; a mismatch means something wrote to an immutable year. amountRupees=0 means the Sheets-sourced total has not yet been confirmed — the amount assertion is skipped until it is filled in.",
+  "frozen": {
+    "2024-25": { "rows": 141201, "amountRupees": 3411433805 },
+    "2025-26": { "rows": 145613, "amountRupees": 3609953809 },
+    "2023-24": { "rows": 137619, "amountRupees": 3490233848 }
+  }
+}

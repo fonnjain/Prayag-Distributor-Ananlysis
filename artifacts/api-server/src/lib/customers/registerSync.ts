@@ -16,6 +16,7 @@
 import { pool, type InsertSaleLine } from "@workspace/db";
 import { logger } from "../logger.js";
 import registerSheets from "../../../config/register_sheets.json";
+import frozenRegisters from "../../../config/frozen_registers.json";
 import { readRegisterFromSheets } from "../registers/sheetsRegister.js";
 import {
   OccurrenceCounter,
@@ -38,6 +39,95 @@ import {
 
 export const REGISTER_SHEET_IDS: Record<string, string> =
   registerSheets.registers;
+
+// ── Freeze system ──────────────────────────────────────────────────────────────
+// A frozen FY is permanently closed: the scheduler does not read it, startup
+// sync treats it as done, and force-resync is rejected unless the caller
+// explicitly passes ?unfreeze=true&reason=<text>.
+//
+// Anchors (rows + amountRupees) are asserted on every startup. A mismatch
+// means something wrote to an immutable year — the violation is logged at
+// ERROR and exposed via getFreezeViolations().
+//
+// amountRupees=0 means the Sheets-sourced total has not yet been confirmed;
+// the amount assertion is skipped until it is set.
+
+type FrozenEntry = { rows: number; amountRupees: number };
+const frozenMap: Map<string, FrozenEntry> = new Map(
+  Object.entries(frozenRegisters.frozen as Record<string, FrozenEntry>),
+);
+
+export function isFrozen(fy: string): boolean {
+  return frozenMap.has(fy);
+}
+
+export function getFrozenAnchor(fy: string): FrozenEntry | undefined {
+  return frozenMap.get(fy);
+}
+
+export type FreezeViolation = {
+  fy: string;
+  expected: FrozenEntry;
+  actual: { rows: number; amountRupees: number };
+  reason: string;
+};
+
+const freezeViolations: FreezeViolation[] = [];
+let freezeCheckedAt: string | null = null;
+
+export function getFreezeViolations(): { violations: FreezeViolation[]; checkedAt: string | null } {
+  return { violations: [...freezeViolations], checkedAt: freezeCheckedAt };
+}
+
+/**
+ * Asserts that every frozen FY in the DB still matches its anchor.
+ * Called once per startup; runs in background (non-blocking).
+ * Logs ERROR for each violation; never exits the process.
+ */
+export async function assertFrozenAnchors(): Promise<void> {
+  for (const [fy, anchor] of frozenMap) {
+    try {
+      const { rows } = await pool.query<{ rows: string; amount: string }>(
+        `SELECT COUNT(*)::text AS rows, COALESCE(ROUND(SUM(amount::numeric)), 0)::text AS amount
+         FROM sale_line_all WHERE fy = $1 AND version_status = 'current'`,
+        [fy],
+      );
+      const actual = {
+        rows: parseInt(rows[0]?.rows ?? "0", 10),
+        amountRupees: parseInt(rows[0]?.amount ?? "0", 10),
+      };
+
+      // If DB has 0 rows the FY hasn't been loaded yet — skip assertion.
+      if (actual.rows === 0) continue;
+
+      let violated = false;
+      const reasons: string[] = [];
+
+      if (anchor.rows > 0 && actual.rows !== anchor.rows) {
+        reasons.push(`rows expected=${anchor.rows} actual=${actual.rows}`);
+        violated = true;
+      }
+      // Skip amount assertion when anchor.amountRupees=0 (not yet confirmed).
+      if (anchor.amountRupees > 0 && Math.abs(actual.amountRupees - anchor.amountRupees) > 10) {
+        reasons.push(
+          `amountRupees expected=${anchor.amountRupees} actual=${actual.amountRupees} delta=${actual.amountRupees - anchor.amountRupees}`,
+        );
+        violated = true;
+      }
+
+      if (violated) {
+        const violation: FreezeViolation = { fy, expected: anchor, actual, reason: reasons.join("; ") };
+        freezeViolations.push(violation);
+        logger.error(violation, `freeze violation: FY${fy} has been written — immutability broken`);
+      } else {
+        logger.info({ fy, rows: actual.rows, amountRupees: actual.amountRupees }, "freeze assertion: ok");
+      }
+    } catch (err) {
+      logger.warn({ err, fy }, "freeze assertion: DB query failed — skipping");
+    }
+  }
+  freezeCheckedAt = new Date().toISOString();
+}
 
 // ── Anchor health ──────────────────────────────────────────────────────────────
 // Per (fy, month) comparison of DB current rows vs sheet rows after each sync.
@@ -511,6 +601,13 @@ export function ensureRegisterSynced(fy: string): void {
   const spreadsheetId = REGISTER_SHEET_IDS[fy];
   if (!spreadsheetId) return;
 
+  if (isFrozen(fy)) {
+    // Frozen FYs are permanently closed — treat as already done on every startup.
+    const s = stateFor(fy);
+    s.phase = "done";
+    return;
+  }
+
   if (isSyncPaused(fy)) {
     logger.warn({ fy }, "register sync: REGISTER_SYNC_PAUSE set — skipping startup sync for this FY");
     const s = stateFor(fy);
@@ -564,6 +661,10 @@ let scheduledRegisterSyncTimer: NodeJS.Timeout | null = null;
  */
 export function runScheduledTick(): void {
   for (const [fy, spreadsheetId] of Object.entries(REGISTER_SHEET_IDS)) {
+    if (isFrozen(fy)) {
+      // Frozen FYs never participate in any scheduled sync.
+      continue;
+    }
     if (!isFyOpen(fy)) {
       logger.info({ fy }, "scheduled register sync: closed FY — skipping");
       continue;

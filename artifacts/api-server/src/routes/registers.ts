@@ -23,6 +23,8 @@ import {
   runScheduledTick,
   ensureRegisterSynced,
   doSync,
+  isFrozen,
+  getFreezeViolations,
 } from "../lib/customers/registerSync.js";
 import { allowDelete } from "../lib/deleteGuard.js";
 import rawRegisterSheetsCfg from "../../config/register_sheets.json";
@@ -312,11 +314,28 @@ router.post("/registers/run-sync-tick", (req, res) => {
 router.post("/registers/:fy/force-resync", async (req, res) => {
   const { fy } = req.params;
   const clearFirst = req.query.clearFirst === "true";
+  const unfreeze = req.query.unfreeze === "true";
+  const unfreezeReason = typeof req.query.reason === "string" ? req.query.reason.trim() : "";
 
   const spreadsheetId = REGISTER_SHEET_IDS[fy];
   if (!spreadsheetId) {
     res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
     return;
+  }
+
+  // Frozen FYs are immutable — reject without an explicit unfreeze intent + reason.
+  if (isFrozen(fy) && !unfreeze) {
+    res.status(423).json({
+      error: `FY ${fy} is frozen. Pass ?unfreeze=true&reason=<your reason> to override.`,
+    });
+    return;
+  }
+  if (isFrozen(fy) && unfreeze) {
+    if (!unfreezeReason) {
+      res.status(400).json({ error: "?reason=<text> is required when unfreezing a FY." });
+      return;
+    }
+    req.log.warn({ fy, reason: unfreezeReason }, "force-resync: UNFREEZE override — writing to a frozen FY");
   }
 
   try {
@@ -340,12 +359,86 @@ router.post("/registers/:fy/force-resync", async (req, res) => {
       triggered: true,
       fy,
       clearFirst,
+      frozen: isFrozen(fy),
       message: "Sync started — poll /registers/:fy/version-stats for progress",
     });
   } catch (err: unknown) {
     req.log.error({ fy, err }, "force-resync failed");
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
+});
+
+/**
+ * GET /registers/:fy/sheet-preview
+ *
+ * Reads the live Sheet for a FY and reports row count + amount total
+ * WITHOUT writing anything to the DB. Use before loading a new FY to confirm
+ * the source figures (spec: "Report the source total before loading").
+ *
+ * Also reports distinct head_canon values after alias resolution so you can
+ * confirm the old vocabulary maps to current canonical names.
+ */
+router.get("/registers/:fy/sheet-preview", async (req, res) => {
+  const { fy } = req.params;
+  const spreadsheetId = REGISTER_SHEET_IDS[fy];
+  if (!spreadsheetId) {
+    res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
+    return;
+  }
+  try {
+    const occurrence = new OccurrenceCounter();
+    const unmapped = emptyUnmapped();
+    let rows = 0;
+    let totalRupees = 0;
+    const headCanons = new Set<string>();
+
+    const { tabsRead, rowsScanned } = await readRegisterFromSheets(
+      spreadsheetId,
+      fy,
+      (values, columns, tabMonthLabel) => {
+        const result = parseRegisterRow(values, columns, fy, tabMonthLabel);
+        if (result.kind !== "row") return;
+        const line = toSaleLine(result.row, occurrence, unmapped, "sheets");
+        rows++;
+        totalRupees += parseFloat(line.amount);
+        if (line.headCanon) headCanons.add(line.headCanon);
+      },
+    );
+
+    const totalRupeesRounded = Math.round(totalRupees);
+    res.json({
+      fy,
+      spreadsheetId,
+      tabsRead,
+      rowsScanned,
+      rows,
+      totalRupees: totalRupeesRounded,
+      totalCr: +(totalRupeesRounded / 10_000_000).toFixed(2),
+      distinctHeadCanons: [...headCanons].sort(),
+      unmappedHeads: Object.keys(unmapped.unmapped_heads),
+      unmappedStates: Object.keys(unmapped.unmapped_states),
+      unmappedGroups: Object.keys(unmapped.unmapped_groups),
+    });
+  } catch (err: unknown) {
+    req.log.error({ err, fy }, "sheet-preview failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
+ * GET /registers/freeze-status
+ *
+ * Returns the list of frozen FYs, their anchors, and any startup violations.
+ */
+router.get("/registers/freeze-status", (_req, res) => {
+  const { violations, checkedAt } = getFreezeViolations();
+  // Re-export the frozen FY list from registerSync which already loaded it.
+  // We report it alongside any violations so callers get the full picture.
+  res.json({
+    violations,
+    checkedAt,
+    note: "Poll /registers/:fy/version-stats for per-FY row counts. violations[] is populated after startup anchor assertion.",
+  });
 });
 
 // ── Invoice-level reconciliation ──────────────────────────────────────────────

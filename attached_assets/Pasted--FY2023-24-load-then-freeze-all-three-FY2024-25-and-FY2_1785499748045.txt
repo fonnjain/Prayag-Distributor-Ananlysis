@@ -1,0 +1,97 @@
+# FY2023-24 load, then freeze all three
+
+*FY2024-25 and FY2025-26 landed exactly. One year left, then lock them.*
+
+---
+
+## Where things stand
+
+| FY | Rows | ₹ Cr | Against source |
+|---|---|---|---|
+| FY2024-25 | 141,201 | 341.14 | **exact** |
+| FY2025-26 | 145,613 | 361.00 | **exact** |
+| FY2023-24 | 137,619 | *unknown* | count only |
+
+FY2025-26 at ₹361.00 Cr also sits **₹0.14 Cr from the State Head Sale anchor of ₹361.14 Cr** — the gap open since the O-series is now closed, and the database was the short side all along.
+
+---
+
+```
+Prayag app - load FY2023-24 with the same straight-copy loader, then freeze all
+three closed years.
+
+STEP 1 - FY2023-24, straight copy.
+
+   source  1R-jNPuy6ofJgIOqykulT0FDkuYVvh_FTAR59H4c5FkI  "Sale  2023-24"
+           tab "Sheet1", 10 columns:
+           Customer, Item Code, MONTH, Quantity, Rate, Amount, GROUP, station,
+           STATE, STATE HEAD A
+
+   No INVOICE NO and no COLOR. With the straight-copy loader that does not
+   matter - there is nothing to match against, so nothing collides. Row index
+   is the only identifier needed.
+
+   REPORT THE SOURCE TOTAL BEFORE LOADING. The row count of 137,619 is known and
+   agrees with the xlsx, but no VALUE has ever been reported for this year from
+   either source. Read the sheet, report rows and total, and only then load.
+
+   A count match is not a value match. FY2025-26 agreed with its xlsx on count
+   too - until the sheet turned out to hold 1,248 more rows and Rs 1.48 Cr more
+   value. Do not assume this year is different.
+
+   Acceptance: rows written equals rows read, exactly. Report both.
+
+STEP 2 - reconcile the state head names.
+
+   FY2023-24 uses the OLD head vocabulary - the sample rows show SANDEEP JI,
+   RIZVI JI, SURESH NAIR, PROJECT, GOVT, OTHER. Five of those were merged during
+   the head_canon work: Sandeep Ji, Rizvi Ji, Bijju, Lalan and Nasir Husain.
+   Confirm the alias mapping applies on load, so FY2023-24 lands under the
+   current canonical names and the four-year per-head view works.
+   Report the distinct head_canon values after loading.
+
+   It also carries state variants - "UP ( R )" appears in the sample. Confirm
+   these normalise through the shared stateCanon module.
+
+STEP 3 - freeze all three years.
+
+   A frozen FY is skipped ENTIRELY by the scheduled sync: no read, no identity
+   match, no tombstone pass, no revive. Writing to it requires an explicit
+   unfreeze with a recorded reason.
+
+   Record the frozen anchor per year:
+      FY2023-24   137,619 rows   total from step 1
+      FY2024-25   141,201 rows   Rs 341.14 Cr
+      FY2025-26   145,613 rows   Rs 361.00 Cr
+
+   Assert those on every startup. If a frozen year's row count or total changes,
+   something wrote to a year that should be immutable - fail loudly with the year
+   named.
+
+   Then remove REGISTER_SYNC_PAUSE entirely. The freeze replaces it and is
+   explicit rather than a workaround.
+
+STEP 4 - replicate on production.
+
+   Production currently holds FY2024-25 at 141,193 and FY2025-26 at 145,547 -
+   both loaded through the old pipeline and both short. Re-load them with the
+   straight-copy loader to reach 141,201 and 145,613, then load FY2023-24, then
+   freeze all three there too.
+
+   Confirm the live Overview afterwards: FY24-25 and FY25-26 cards should read
+   Rs 341.14 Cr and Rs 361.00 Cr.
+
+FY2026-27 stays live on the existing pipeline throughout. Do not touch it.
+```
+
+---
+
+## One thing this will surface
+
+**The FY2025-26 anchor has moved from ₹359.52 Cr to ₹361.00 Cr.** That figure is quoted as exact in the head-merge verification, the Overview card, the SKU ever-sold denominators and both handover documents.
+
+Once the freeze is in, ask for the **per-head FY2025-26 breakdown** so the merge verification can be restated — currently Sandeep Dadheech ₹163.32 Cr, Syed Aqil Rizvi ₹56.71 Cr, Biju C.O ₹17.24 Cr, Lalan Kumar ₹11.48 Cr, Nasir Hussain Khan ₹3.37 Cr, all computed on the old total.
+
+---
+
+*Verified 31 July 2026*

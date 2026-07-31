@@ -11,6 +11,7 @@ import { loadStateHeadSale } from "./lib/mgmt/stateHeadSale.js";
 import {
   ensureRegisterSynced,
   startScheduledRegisterSync,
+  assertFrozenAnchors,
   REGISTER_SHEET_IDS,
 } from "./lib/customers/registerSync.js";
 import { ensureAndSeedStateTargets } from "./lib/mgmt/stateTargetSeed.js";
@@ -101,5 +102,11 @@ runMigrations()
     ensureRegisterSynced(fy);
   }
   startScheduledRegisterSync();
+
+  // Assert frozen-FY anchors in the background. Any mismatch means something
+  // wrote to an immutable year — logged at ERROR and exposed via /registers/freeze-status.
+  void assertFrozenAnchors().catch((err) =>
+    logger.error({ err }, "assertFrozenAnchors: unexpected failure"),
+  );
     });
   });
