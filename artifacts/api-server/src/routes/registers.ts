@@ -38,6 +38,35 @@ import {
 const router = Router();
 
 /**
+ * Shared freeze guard for mutating register routes.
+ * Returns true if the request was REJECTED (response already sent).
+ * Dry-run requests always pass — they never write.
+ * Frozen FYs require ?unfreeze=true&reason=<text> to override, matching force-resync.
+ */
+function rejectIfFrozen(
+  req: { query: Record<string, unknown>; path: string; log: { warn: (obj: object, msg: string) => void } },
+  res: { status: (code: number) => { json: (body: object) => void } },
+  fy: string,
+  opts?: { dryRun?: boolean },
+): boolean {
+  if (!isFrozen(fy) || opts?.dryRun) return false;
+  const unfreeze = req.query.unfreeze === "true";
+  const reason = typeof req.query.reason === "string" ? req.query.reason.trim() : "";
+  if (!unfreeze) {
+    res.status(423).json({
+      error: `FY ${fy} is frozen. Pass ?unfreeze=true&reason=<your reason> to override.`,
+    });
+    return true;
+  }
+  if (!reason) {
+    res.status(400).json({ error: "?reason=<text> is required when unfreezing a FY." });
+    return true;
+  }
+  req.log.warn({ fy, reason, route: req.path }, "UNFREEZE override — writing to a frozen FY");
+  return false;
+}
+
+/**
  * POST /registers/:fy/backfill-color?dryRun=true
  *
  * Reads the live SALE SHEET for the given FY and stamps colour on any
@@ -55,6 +84,7 @@ router.post("/registers/:fy/backfill-color", async (req, res) => {
     res.status(400).json({ error: `No spreadsheet ID configured for FY ${fy}` });
     return;
   }
+  if (rejectIfFrozen(req, res, fy, { dryRun })) return;
 
   try {
     const result = await backfillColor(fy, spreadsheetId, dryRun);
@@ -83,6 +113,8 @@ router.post("/registers/:fy/backfill-color", async (req, res) => {
 router.post("/registers/:fy/reconcile-versions", async (req, res) => {
   const { fy } = req.params;
   const dryRun = req.query.dryRun === "true";
+
+  if (rejectIfFrozen(req, res, fy, { dryRun })) return;
 
   try {
     const result = await reconcileVersions(fy, dryRun);
@@ -137,6 +169,7 @@ router.post("/registers/:fy/tombstone-orphans", async (req, res) => {
     res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
     return;
   }
+  if (rejectIfFrozen(req, res, fy, { dryRun })) return;
 
   try {
     const occurrence = new OccurrenceCounter();
@@ -616,6 +649,8 @@ router.post("/registers/:fy/orphan-audit-reverse", async (req, res) => {
     typeof req.query.syncRunId === "string"
       ? req.query.syncRunId
       : "orphan-audit|2026-07-21T05:55:40.864Z";
+
+  if (rejectIfFrozen(req, res, fy)) return;
 
   try {
     // 1. Flip all rows from this syncRunId back to current
@@ -1668,6 +1703,7 @@ router.post("/registers/:fy/invoice-restore-apply", async (req, res) => {
     res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
     return;
   }
+  if (rejectIfFrozen(req, res, fy)) return;
 
   try {
     // 1. Re-read live sheet (same as plan route)
@@ -2051,6 +2087,7 @@ router.post("/registers/:fy/orphan-audit/apply", async (req, res) => {
     res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
     return;
   }
+  if (rejectIfFrozen(req, res, fy)) return;
 
   try {
     // Always re-read sheet fresh — never apply a cached audit result
@@ -3744,6 +3781,8 @@ router.get("/registers/tank-tier-a-dryrun", async (req, res) => {
 router.post("/registers/tank-tier-a-apply", async (req, res) => {
   try {
     const dryRun = req.query.dryRun !== "false";
+    // FY2025-26 is frozen — this route writes to it when not a dry run.
+    if (rejectIfFrozen(req, res, "2025-26", { dryRun })) return;
     const AMT_TOLERANCE = 5; // Rs — max allowed difference between DB and SAP amount
     const cfg = rawRegisterSheetsCfg as {
       sap_source?: Record<string, string>;

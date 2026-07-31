@@ -57,19 +57,22 @@ import { logger } from "../lib/logger.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Poll until the open-FY sync leaves the 'syncing' phase (max 10 s). */
+/** Poll until the open-FY sync reaches a terminal phase (max 10 s).
+ *  doSync awaits the persisted-baseline load BEFORE setting phase='syncing',
+ *  so the state can still read 'idle' briefly after the tick fires — treat
+ *  both 'idle' and 'syncing' as in-progress. */
 async function waitForSyncPhase(
   fy: string,
-  notPhase: string,
+  _notPhase: string,
   timeoutMs = 10_000,
 ): Promise<{ phase: string; error?: string }> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const state = getRegisterSyncState(fy);
-    if (state.phase !== notPhase) return state;
+    if (state.phase !== "syncing" && state.phase !== "idle") return state;
     await new Promise((r) => setTimeout(r, 20));
   }
-  throw new Error(`Timed out waiting for sync to leave '${notPhase}'`);
+  throw new Error(`Timed out waiting for sync to reach a terminal phase`);
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -79,6 +82,7 @@ describe("doSync zero-row abort guard", () => {
     vi.clearAllMocks();
     vi.mocked(versionedSyncLines).mockResolvedValue({
       touched: 0, superseded: 0, inserted: 0, tombstoned: 0,
+      revived: 0, incomingCountByFyMonth: new Map<string, number>(),
     });
   });
 
