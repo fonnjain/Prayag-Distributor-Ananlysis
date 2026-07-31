@@ -1,0 +1,84 @@
+# Freeze the closed years — load once, never sync again
+
+*This removes several open problems at once rather than solving them one at a time.*
+
+---
+
+## The reasoning
+
+FY2023-24, FY2024-25 and FY2025-26 are **closed**. Their figures will not change. Yet the system currently treats them as live sources to be re-read, re-matched and re-tombstoned on a schedule — and every problem of the past week comes from exactly that.
+
+Load each once, freeze it, and these all disappear together:
+
+| Problem | Why freezing removes it |
+|---|---|
+| FY2023-24 has no INVOICE NO or COLOR, so identity keys collide | identity only matters for re-sync matching; a one-time load needs only row position |
+| Historical years were ingested under the old `lineUidKey` | no future sync means no mismatch |
+| A truncated read could tombstone a closed year | no read, no tombstone |
+| Schema differs per year — 10, 11 and 20 columns | handle it once at load, not on every tick |
+| `REGISTER_SYNC_PAUSE` as a workaround | replaced by a real freeze |
+
+---
+
+```
+Prayag app - freeze the closed fiscal years. Load once, never sync again.
+
+FY2023-24, FY2024-25 and FY2025-26 are closed. Their figures do not change.
+Re-reading them on a 6-hour schedule creates risk and gains nothing.
+
+1. ADD A FROZEN FLAG PER FISCAL YEAR.
+   A frozen FY is skipped entirely by the scheduled sync - no read, no identity
+   match, no tombstone pass, no revive. Writing to it requires an explicit
+   unfreeze with a recorded reason. Record the frozen row count and total per FY
+   as the anchor, and assert against it on every startup: if a frozen year's row
+   count has changed, something wrote to it that should not have.
+
+2. LOAD EACH YEAR ONCE, THEN FREEZE.
+
+   FY2024-25 - already correct in dev at 141,201 rows and Rs 341.14 Cr, matching
+     the sheet exactly. Freeze as-is. Production needs the full year loaded first
+     - it currently holds 24,000 rows across three months.
+
+   FY2025-26 - reload from the sheet BEFORE freezing. The sheet reads 145,613
+     rows and Rs 361.00 Cr; dev holds 144,365 and Rs 359.52 Cr from a stale xlsx.
+     The sheet figure is Rs 0.14 Cr from the State Head Sale anchor of
+     Rs 361.14 Cr, so it is the better source. Freeze at the sheet figure and
+     restate the anchor.
+
+   FY2023-24 - load once from 1R-jNPuy6ofJgIOqykulT0FDkuYVvh_FTAR59H4c5FkI,
+     which you confirmed holds 137,619 invoice-level rows matching the xlsx.
+     It has no INVOICE NO and no COLOR, so use the ROW POSITION in the sheet as
+     the identity tiebreaker for this one load. That is sufficient because there
+     will never be a second load to match against.
+     Do NOT build a schema-aware identity key for the ongoing pipeline - a closed
+     year does not need one.
+
+3. FOR THE ONE-TIME LOADS, verify before and after.
+   Report row count and total per month against the source before writing, and
+   again after. A one-time load that silently drops rows is worse than a sync
+   that does, because nothing will re-run to correct it.
+
+4. AFTER FREEZING, remove REGISTER_SYNC_PAUSE for those years - the freeze flag
+   replaces it and is explicit rather than a workaround.
+
+Acceptance:
+  three fiscal years marked frozen, with row count and total recorded per year
+  the scheduled sync skips them entirely - confirm in the sync log
+  a startup assertion fires if a frozen year's row count changes
+  FY2024-25  141,201 rows  Rs 341.14 Cr
+  FY2025-26  145,613 rows  Rs 361.00 Cr   (restated from Rs 359.52 Cr)
+  FY2023-24  137,619 rows  total to be confirmed against the source
+  writing to a frozen year without an explicit unfreeze is refused
+```
+
+---
+
+## What this also settles
+
+**The `lineUidKey` guard I asked for is no longer needed** for historical years. Once frozen, they are never synced, so the old-key mismatch cannot fire. The guard is only needed for FY2026-27, which has already been re-ingested under the new key.
+
+**And FY2025-26's anchor gets corrected in the same pass.** ₹359.52 Cr has been quoted as exact in the head-merge verification, the Overview, the SKU denominators and both handovers. Freezing at ₹361.00 Cr fixes it permanently rather than leaving a known-stale figure in circulation.
+
+---
+
+*Sheet figures verified 30 July 2026*
