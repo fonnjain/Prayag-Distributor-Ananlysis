@@ -90,6 +90,21 @@ export async function loadDispatchSaleFromDb(
       };
     }
 
+    // Head-attribution guard: FYs loaded from registers WITHOUT a state-head
+    // column (FY2024-25 / FY2025-26 are 11-col sheets) have head_canon NULL on
+    // every row, which lands entirely under "unmapped" here. A per-head answer
+    // where >90% is "unmapped" is useless — return an error so the caller falls
+    // through to the Sheets-based State Head Sale loader, which has real heads.
+    const unmappedAmt = byNormKey.get("unmapped") ?? 0;
+    if (unmappedAmt > 0.9 * total) {
+      return {
+        byHead: new Map(),
+        total: 0,
+        source: "",
+        error: `head_canon not populated for ${fy} (register has no state-head column) — use Sheets fallback`,
+      };
+    }
+
     // Resolve normHead keys → canonical display names (same as roster's stateHead).
     const byHead = new Map<string, number>();
     try {
