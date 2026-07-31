@@ -26,4 +26,4 @@ channel = "stable-25_05"
 [userenv]
 
 [userenv.shared]
-REGISTER_SYNC_PAUSE = "2025-26"
+REGISTER_SYNC_PAUSE = "2023-24,2025-26,2026-27"
