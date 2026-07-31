@@ -1,0 +1,40 @@
+Prayag app - deploy the lineUidKey fix to production and re-ingest FY2026-27.
+Same procedure as dev, with one addition: verify before deleting.
+
+PRODUCTION IS LIVE AND CURRENTLY WRONG. July reads Rs 33.85 Cr against a true
+Rs 21.16 Cr - 15,993 rows against 9,387 in the sheet. FY2026-27 YTD reads
+Rs 106.67 Cr against Rs 93.98 Cr. Apr, May and Jun are already correct and must
+stay that way.
+
+STEP 1 - deploy the lineUidKey change. Confirm the deployed build carries it
+before touching data.
+
+STEP 2 - PRE-FLIGHT, BEFORE ANY DELETE.
+Read SALE SHEET 26-27 from the production runtime and report the row count per
+month WITHOUT writing anything:
+   Apr 5,542   May 11,812   Jun 12,868   Jul 9,387   total 39,609
+If the read returns fewer rows than that, STOP. Do not delete. A failed read
+after a delete would leave production empty, and the sheet is large enough that
+this is a real risk - Sale 26-27 at 4.6 MB already fails outright on export.
+
+STEP 3 - clear and re-ingest FY2026-27 only. Do not touch FY2024-25.
+Use the same SET LOCAL app.allow_delete = 'confirmed' transaction as dev.
+Do this at a quiet hour: between the delete and the re-ingest the dashboard will
+show nothing for the current year.
+
+STEP 4 - verify against the sheet, exactly as dev now matches:
+   Apr  5,542 rows   Rs 13.11 Cr
+   May 11,812 rows   Rs 28.28 Cr
+   Jun 12,868 rows   Rs 31.43 Cr
+   Jul  9,387 rows   Rs 21.16 Cr
+   total 39,609 rows Rs 93.98 Cr
+Then run a second tick and confirm convergence:
+   superseded 0, inserted 0, revived 0, tombstoned 0
+Report the live URL figure afterwards - Sale (Dispatched) YTD should read
+Rs 93.98 Cr, not Rs 106.67 Cr.
+
+STEP 5 - do NOT attempt the historical years in the same pass. Report only:
+how did DEV acquire FY2023-24, FY2024-25 and FY2025-26? Dev holds 137,619 /
+141,201 / 144,365 rows for those years, so a working load path exists. Name it -
+a CLI backfill, a one-time script, a chunked Sheets read - and say whether it can
+run against production. That is the next task, not this one.
