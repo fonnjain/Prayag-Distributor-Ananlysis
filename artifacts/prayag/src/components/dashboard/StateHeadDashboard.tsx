@@ -1,4 +1,5 @@
 import { LoadingState } from "@/components/ui/loading-state";
+import { QuotaWaitBanner, quotaDelayMs, quotaOrThrow } from "./quotaWait";
 import { BAND_LABEL, BAND_BG } from "@/lib/achievementBands";
 import { useState, useEffect, useMemo } from "react";
 import { useGlobalFilter } from "@/data/global-filter-context";
@@ -399,6 +400,10 @@ export default function StateHeadDashboard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  // True while Google Sheets is briefly rate-limiting reads (503 quota);
+  // a retry is scheduled automatically after the server's retryAfter hint.
+  const [quotaWait, setQuotaWait] = useState(false);
+  const [retryTick, setRetryTick] = useState(0);
 
   // Load FY options once — also populate the global filter's available FYs.
   useEffect(() => {
@@ -416,19 +421,31 @@ export default function StateHeadDashboard() {
   // Uses an AbortController so that rapid filter changes cancel in-flight requests.
   useEffect(() => {
     const controller = new AbortController();
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     setLoading(true);
     setError(null);
+    setQuotaWait(false);
     const params = new URLSearchParams({
       fy,
       monthFrom: String(effectivePeriodFrom),
       monthTo: String(primaryMonthTo),
     });
     fetch(`/api/mgmt/data?${params}`, { signal: controller.signal })
-      .then((r) => {
-        if (!r.ok) return r.json().then((e: { error?: string }) => { throw new Error(e.error ?? r.statusText); });
-        return r.json();
+      .then(async (r) => {
+        const q = await quotaOrThrow(r);
+        if (q) {
+          setQuotaWait(true);
+          setLoading(false);
+          retryTimer = setTimeout(
+            () => setRetryTick((t) => t + 1),
+            quotaDelayMs(q.retryAfter),
+          );
+          return null;
+        }
+        return r.json() as Promise<DashboardData>;
       })
-      .then((d: DashboardData) => {
+      .then((d) => {
+        if (d === null) return;
         setData(d);
         setLoading(false);
         setStateHeadFilter("");
@@ -439,9 +456,12 @@ export default function StateHeadDashboard() {
         setError(e.message);
         setLoading(false);
       });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+    };
   // Primitive deps — stable comparison via Object.is.
-  }, [fy, effectivePeriodFrom, primaryMonthTo]);
+  }, [fy, effectivePeriodFrom, primaryMonthTo, retryTick]);
 
   function toggleSort(key: string) {
     setSort((s) =>
@@ -811,6 +831,7 @@ export default function StateHeadDashboard() {
           <span>Roster loaded from bundled fallback — Google Sheets may be unavailable. Data may be outdated.</span>
         </div>
       )}
+      {quotaWait && <QuotaWaitBanner testId="banner-quota-wait-dashboard" />}
       {error && (
         <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-950/20 px-3 py-2 text-sm text-red-700 dark:text-red-300">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
