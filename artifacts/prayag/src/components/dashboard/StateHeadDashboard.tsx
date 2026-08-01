@@ -49,6 +49,8 @@ type Member = {
   band: string;
   /** Plan from STATE HEAD DASHBOARD (ytdPlan for the selected period). Canonical secondary target. */
   secondaryPlan: number | null;
+  /** Achievement denominator — plan for fully-recorded closed months only. Undefined on older API versions. */
+  secondaryPlanRecorded?: number | null;
   /** True when this member is listed in the Primary Team Members tab (no secondary target expected). */
   isPrimaryRole: boolean;
   /** True when this member is in the LEFT TEAM MEMBERS section (count in totals, never low-perf). */
@@ -615,15 +617,28 @@ export default function StateHeadDashboard() {
     // narrows the row set (otherwise fall back to the filtered row computation).
     const isFiltered = Boolean(stateHeadFilter || employeeFilter || search.trim());
     const useServerAch = hasStateDash && st != null && !isFiltered;
+    // Filtered views: use the per-member recorded-months denominator
+    // (secondaryPlanRecorded) so achievement uses the same basis as the
+    // company tile — recorded sales ÷ plan of recorded months only.
+    // Undefined on older API versions → fall back to the full-period plan.
+    const hasPlanRecorded =
+      hasStateDash && filteredRows.some((r) => r.secondaryPlanRecorded !== undefined);
+    const planRecordedSum = hasPlanRecorded
+      ? filteredRows.reduce((s, r) => s + (r.secondaryPlanRecorded ?? 0), 0)
+      : null;
     const achPct = useServerAch
       ? st.ytdAchievement
-      : target > 0
-        ? (hasStateDash && secSalesForAch > 0 ? secSalesForAch / target : booking / target)
-        : null;
+      : isFiltered && planRecordedSum != null
+        // No fully-recorded months in the period → null renders "—".
+        ? (planRecordedSum > 0 ? secSalesReceived / planRecordedSum : null)
+        : target > 0
+          ? (hasStateDash && secSalesForAch > 0 ? secSalesForAch / target : booking / target)
+          : null;
     // True when the achievement denominator excludes months (not yet recorded) —
     // the UI shows a "vs. recorded months' plan" note, matching Secondary Performance.
-    const achClosedMonthsOnly =
-      useServerAch && st.planRecorded != null && st.planRecorded > 0 && st.planRecorded < st.plan - 1;
+    const achClosedMonthsOnly = useServerAch
+      ? st.planRecorded != null && st.planRecorded > 0 && st.planRecorded < st.plan - 1
+      : isFiltered && planRecordedSum != null && planRecordedSum > 0 && planRecordedSum < target - 1;
     return {
       target,
       booking,

@@ -563,6 +563,10 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
         secondaryOrderBooked: sp?.ob ?? null,
         secondarySalesReceived: sp?.sales ?? null,
         secondaryAchievement: sp?.achievement ?? null,
+        // Achievement denominator: plan summed over fully-recorded closed months
+        // only.  Lets filtered frontend views (single head/employee) divide
+        // recorded sales by recorded-month plan — same basis as secondaryTotal.
+        secondaryPlanRecorded: sp ? sp.planRecorded : null,
         // Present when at least one closed month in the period has OB entered but
         // sales not yet received (notYetRecorded=true, ob>0).  In that state the
         // achievement denominator is smaller than the displayed plan, so the UI
