@@ -56,6 +56,10 @@ export type SegmentPushCard = {
   peakQuarterLabel: string | null;
   /** K4: share of annual revenue in the peak quarter (0-1), may be null. */
   peakQuarterShare: number | null;
+  /** Season-aware ranking band: 0 in-season, 1 next-quarter, 2 groundwork. */
+  seasonRank?: number;
+  seasonStatus?: "in_season" | "next_quarter" | "groundwork";
+  seasonNote?: string;
   topCodes: PushCode[];
 };
 
@@ -75,6 +79,12 @@ export type PushListResult = {
   fallbackScopeName?: string;
   segments: SegmentPushCard[];
   fiscalMonths: string[];
+  /** Season-aware ordering context (K4). */
+  seasonContext?: {
+    currentQuarter: number;
+    currentQuarterLabel: string;
+    note: string;
+  };
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -424,6 +434,12 @@ function CohortBanner({ data }: { data: PushListResult }) {
           across {data.segments.length} segment{data.segments.length === 1 ? "" : "s"}
         </span>
       )}
+      {data.seasonContext && (
+        <span className="text-muted-foreground" title={data.seasonContext.note}>
+          Ordered for {data.seasonContext.currentQuarterLabel}: in-season first, Q4 peaks as
+          groundwork
+        </span>
+      )}
     </div>
   );
 }
@@ -486,6 +502,25 @@ function PushSegmentCard({
                   }
                 >
                   Peak {seg.peakQuarterLabel}
+                </span>
+              )}
+              {seg.seasonStatus && (
+                <span
+                  className={cn(
+                    "inline-flex items-center px-1.5 py-0 rounded border text-[10px] font-medium leading-4 select-none",
+                    seg.seasonStatus === "in_season"
+                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20"
+                      : seg.seasonStatus === "next_quarter"
+                        ? "bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20"
+                        : "bg-muted text-muted-foreground border-border",
+                  )}
+                  title={seg.seasonNote}
+                >
+                  {seg.seasonStatus === "in_season"
+                    ? "In season now"
+                    : seg.seasonStatus === "next_quarter"
+                      ? "Season next quarter"
+                      : "Groundwork"}
                 </span>
               )}
             </div>

@@ -461,11 +461,49 @@ router.get("/sku/push-list", async (req: Request, res: Response): Promise<void> 
         for (const c of seg.topCodes ?? []) allCodes.add(c.code);
       }
       const flags = await getDiscountNormFlags(fy, [...allCodes], monthLabels);
+
+      // Season-aware ranking: a salesperson works the list TODAY, so segments
+      // whose season is now (or next quarter) lead; Q-far segments are kept but
+      // labelled as groundwork for their peak. Current fiscal quarter from the
+      // server date (Q1 = Apr–Jun … Q4 = Jan–Mar).
+      const nowMonth = new Date().getMonth() + 1; // 1-12
+      const currentQuarter = Math.floor(((nowMonth + 8) % 12) / 3) + 1;
+      const QUARTER_LABELS = ["Q1 (Apr–Jun)", "Q2 (Jul–Sep)", "Q3 (Oct–Dec)", "Q4 (Jan–Mar)"];
+      // Most of the catalogue peaks Q4, so peak quarter alone is degenerate as
+      // a ranking signal. Instead use the segment's revenue share in the
+      // CURRENT quarter (its 3-closed-year seasonal curve): ≥27% = in season
+      // now (flat baseline is 25%); peak-next-quarter = build now; else the
+      // segment is groundwork for its later peak.
+      const seasonality = await getSeasonality();
+      const curveBySeg = new Map(seasonality.segments.map((s) => [s.segment, s]));
       for (const seg of result.segments ?? []) {
         const peak = peakMap.get(seg.segment);
+        const curve = curveBySeg.get(seg.segment);
+        const curShare = curve ? curve.quarterShare[currentQuarter - 1] : null;
         (seg as Record<string, unknown>).peakQuarter = peak?.peakQuarter ?? null;
         (seg as Record<string, unknown>).peakQuarterLabel = peak?.peakQuarterLabel ?? null;
         (seg as Record<string, unknown>).peakQuarterShare = peak?.quarterShare ?? null;
+        (seg as Record<string, unknown>).currentQuarterShare = curShare;
+        const peakQ = peak?.peakQuarter ?? null;
+        const rank =
+          peakQ == null || curShare == null
+            ? 1
+            : peakQ === currentQuarter || curShare >= 0.27
+              ? 0
+              : peakQ === (currentQuarter % 4) + 1
+                ? 1
+                : 2;
+        (seg as Record<string, unknown>).seasonRank = rank;
+        (seg as Record<string, unknown>).seasonStatus =
+          rank === 0 ? "in_season" : rank === 1 ? "next_quarter" : "groundwork";
+        (seg as Record<string, unknown>).seasonNote =
+          peak == null || curShare == null
+            ? "No seasonality baseline for this segment."
+            : rank === 0
+              ? `In season now — ${(curShare * 100).toFixed(0)}% of this segment's year lands in ${QUARTER_LABELS[currentQuarter - 1]} (peak ${peak.peakQuarterLabel}).`
+              : rank === 1
+                ? `Season builds next quarter (peak ${peak.peakQuarterLabel}) — place listings now.`
+                : `Groundwork — only ${(curShare * 100).toFixed(0)}% of this segment's year lands in ${QUARTER_LABELS[currentQuarter - 1]}; peak is ${peak.peakQuarterLabel}. Placements made now pay off then.`;
         for (const c of seg.topCodes ?? []) {
           const f = flags.get(c.code);
           (c as Record<string, unknown>).discountAboveNorm = f
@@ -477,6 +515,26 @@ router.get("/sku/push-list", async (req: Request, res: Response): Promise<void> 
             : null;
         }
       }
+      // Stable re-rank: in-season first, then next-quarter, then groundwork;
+      // the underlying gap-value order is preserved within each band.
+      if (Array.isArray(result.segments)) {
+        result.segments = result.segments
+          .map((seg, i) => ({ seg, i }))
+          .sort((a, b) => {
+            const ra = ((a.seg as Record<string, unknown>).seasonRank as number) ?? 1;
+            const rb = ((b.seg as Record<string, unknown>).seasonRank as number) ?? 1;
+            if (ra !== rb) return ra - rb;
+            const sa = ((a.seg as Record<string, unknown>).currentQuarterShare as number) ?? 0;
+            const sb = ((b.seg as Record<string, unknown>).currentQuarterShare as number) ?? 0;
+            return sb - sa || a.i - b.i;
+          })
+          .map((x) => x.seg);
+      }
+      (result as Record<string, unknown>).seasonContext = {
+        currentQuarter,
+        currentQuarterLabel: QUARTER_LABELS[currentQuarter - 1],
+        note: "Segments are ordered season-first: in-season, next-quarter, then groundwork for a later peak. Within each band, segments doing more of their year in the current quarter come first.",
+      };
     } catch (err) {
       req.log.warn({ err }, "sku push-list K4 enrichment failed — serving base list");
     }
