@@ -328,6 +328,9 @@ export default function SecondaryPerformanceDashboard() {
       ach,
       closedMonthsOnly,
       noActualsYet,
+      // The achievement denominator itself — shown beside the label so the
+      // displayed ratio is reproducible from visible figures.
+      planRecorded: st?.planRecorded ?? null,
     };
   }, [data?.meta.secondaryTotal, groups]);
 
@@ -399,7 +402,9 @@ export default function SecondaryPerformanceDashboard() {
               valueClass: achColor(totals.ach),
               note: totals.noActualsYet
                 ? "no actuals recorded yet"
-                : totals.closedMonthsOnly ? "vs. recorded months' plan" : undefined,
+                : totals.closedMonthsOnly && totals.planRecorded != null
+                  ? `vs. recorded months' plan ${fmtCr(totals.planRecorded)}`
+                  : totals.closedMonthsOnly ? "vs. recorded months' plan" : undefined,
             },
           ].map((tile: { label: string; value: string; valueClass?: string; note?: string }) => (
             <div key={tile.label} className="rounded-lg border border-border bg-card p-3">

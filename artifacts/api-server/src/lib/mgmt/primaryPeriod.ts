@@ -214,15 +214,33 @@ async function _loadSalePeriod(
   try {
     const dbSale = await loadDispatchSaleFromDb(fy, monthLabels);
     if (!dbSale.error && dbSale.total > 0) {
+      let byHead = dbSale.byHead;
+      let source = dbSale.source;
+      // Totals-only FYs (register has no state-head column): the DB total is
+      // period-exact, but per-head figures must come from the Sheets loader.
+      // Sheets heads are FY totals, so only merge them when the requested
+      // period IS the full FY — otherwise leave byHead empty (honest blank)
+      // rather than pairing a period total with full-year head splits.
+      if (!dbSale.headsAvailable && monthLabels.length >= 12) {
+        try {
+          const sheet = await loadStateHeadSale(fy);
+          if (!sheet.error && sheet.byHead.size > 0) {
+            byHead = sheet.byHead;
+            source = `${dbSale.source} + heads from ${sheet.label ?? "Sale Sheet"}`;
+          }
+        } catch {
+          // heads stay empty — total is still correct
+        }
+      }
       logger.info(
-        { fy, months: monthLabels.length, total: dbSale.total, heads: dbSale.byHead.size },
+        { fy, months: monthLabels.length, total: dbSale.total, heads: byHead.size, headsAvailable: dbSale.headsAvailable },
         "primaryPeriod: dispatch sale from DB (period-filtered)",
       );
       return {
         total: dbSale.total,
-        byHead: dbSale.byHead,
+        byHead,
         periodFiltered: true,
-        source: dbSale.source,
+        source,
       };
     }
     logger.info(

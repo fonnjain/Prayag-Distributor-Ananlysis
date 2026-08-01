@@ -1,0 +1,110 @@
+# August scope, empty-month guards, and the open items
+
+*Checked both registers on 1 August. No new sheet IDs are needed — the August tabs already exist inside the workbooks the app reads.*
+
+---
+
+## The sources — unchanged
+
+```
+SALE SHEET 26-27    19LQGpkbZiecGaXdBvl48rPZT2LUz3sKekeKX5fHu7Ps
+                    tabs: WT-LTR, Apr, May, Jun, July, Aug
+                    Aug tab EXISTS and is structured, 0 rows today
+
+Order Sheet 26-27   1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A
+                    tabs: INDEX, ANUJ SHARMA, Combined, LAST MONTH ORDER,
+                          Apr, May, Jun, July, Aug, WT, --report
+                    Aug tab EXISTS and is structured, 0 rows today
+```
+
+**No new file IDs are required.** Both August tabs sit inside the workbooks already configured. They are simply unpopulated because today is the 1st.
+
+## Current state, verified
+
+| Tab | Sale rows / ₹ Cr | OB rows / ₹ Cr |
+|---|---|---|
+| Apr | 5,542 / 13.11 | 6,694 / 15.73 |
+| May | 11,812 / 28.28 | 11,842 / 29.37 |
+| Jun | 12,868 / 31.43 | 13,311 / 32.65 |
+| **Jul** | **11,848 / 27.36** | 13,812 / 32.56 |
+| **Aug** | **0 / 0.00** | **0 / 0.00** |
+
+July has been stable at 11,848 since the 09:36 resync — the 394 late invoices have settled.
+
+---
+
+```
+Prayag app - August scope and empty-month handling. Same global rules.
+
+1. CONFIRM THE AUGUST TABS ARE IN SCOPE.
+   No new sheet IDs are needed. Both August tabs already exist inside the
+   configured workbooks:
+     SALE SHEET 26-27   19LQGpkbZiecGaXdBvl48rPZT2LUz3sKekeKX5fHu7Ps  tab "Aug"
+     Order Sheet 26-27  1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A  tab "Aug"
+   Both are structured and hold 0 rows today. Confirm the loader discovers the
+   Aug tab by name and does not require it to be added anywhere.
+
+2. THE NIGHTLY REPLACE MUST COVER EVERY UNFROZEN MONTH BY RULE.
+   Today's log showed only "Jul-26 replaced". That was correct by accident -
+   August is empty, so there was nothing to write. It should be correct by rule.
+
+   Between the 1st and the 6th, TWO months are unfrozen and both must be
+   attempted: the prior month still inside its edit window, and the current open
+   month. Deepak confirms the sheet is edited for 3 to 5 days into the following
+   month, which is exactly why July must stay in scope until it freezes.
+
+     1-6 Aug    replace Jul-26 AND Aug-26
+     7 Aug      Jul-26 freezes, then Aug-26 only
+     8-31 Aug   Aug-26 only
+     1-6 Sep    replace Aug-26 AND Sep-26
+     7 Sep      Aug-26 freezes
+
+   Log every month attempted, including no-ops, so the scope is visible rather
+   than inferred from which months happened to change.
+
+3. AN EMPTY MONTH IS NOT A SHORT READ.
+   August will read zero rows every night until invoices are raised. The read
+   guard must not treat that as truncation and abort.
+
+   Specifically:
+     a month with no baseline yet AND an empty read is NORMAL - record a
+       baseline of 0 and continue
+     a month whose baseline is 0 and reads 0 is a no-op - log it, do not abort
+     the guard should fire only when a month with a POSITIVE baseline reads
+       materially fewer rows
+
+   This matters this week: if the guard trips on an empty read, August's first
+   real sync could halt on the day invoices start landing, and nobody would
+   notice until the figure looked wrong.
+
+4. AUGUST'S FIRST REAL DATA IS THE TEST.
+   When the Aug tab receives its first invoices, confirm:
+     the baseline rises from 0 to the new count without the guard firing
+     the month replaces cleanly and rows written equals rows read
+     a second tick on unchanged data produces zero changes
+
+Acceptance:
+  the nightly log lists BOTH Jul-26 and Aug-26 as attempted, with Aug-26 a no-op
+  Apr, May and Jun continue to show frozen-skipped
+  an empty August read does not abort and does not halt the tombstone
+  July freezes automatically on 7 August with its anchor recorded at whatever
+    the sheet holds at that moment
+  after 7 August the log shows only Aug-26 attempted
+```
+
+---
+
+## Four items still open
+
+| Item | Detail |
+|---|---|
+| **Sales Received not period-scoped** | returns ₹63.09 Cr for FY, Q1 and YTD alike. A Q1 selection shows a Q1 plan of ₹82.60 Cr beside an all-months figure. Q1 should read ₹62.86 Cr |
+| **May achievement basis** | shows 72.7% while the two visible numbers (₹20.43 Cr ÷ ₹28.55 Cr) give 71.6%. The label says "vs. recorded months' plan" — show that plan, or the ratio cannot be reproduced |
+| **`primary_order_line` stale** | last ingested 20 July, July at ₹9.25 Cr against a live ₹32.56 Cr. Re-sync it or mark it unusable |
+| **Band conflict** | Red <80 on one page, Red <25 on the other. Unverified in code |
+
+The first two are user-facing; the second two are latent.
+
+---
+
+*Both registers read 1 August 2026*

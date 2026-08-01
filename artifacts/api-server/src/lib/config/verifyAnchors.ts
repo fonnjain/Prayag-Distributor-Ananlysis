@@ -22,12 +22,31 @@
  *   a) startup restore runs before the server accepts requests, and
  *   b) lock-month-anchor writes to disk before returning 200.
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { objectStorageClient } from "../objectStorage.js";
 
 const GCS_ANCHOR_KEY = "config/verify_anchors.json";
+
+/**
+ * Resolve the on-disk path of verify_anchors.json regardless of the process
+ * working directory. In development the server runs with cwd =
+ * artifacts/api-server (file at <cwd>/config/...); in the deployed monorepo
+ * the process starts from the REPO ROOT (`node artifacts/api-server/dist/...`),
+ * where the file lives at <cwd>/artifacts/api-server/config/... . Resolving
+ * only against cwd caused ENOENT + /api/dashboard 500s in production.
+ */
+export function anchorsFilePath(): string {
+  const direct = path.join(process.cwd(), "config", "verify_anchors.json");
+  if (existsSync(direct)) return direct;
+  const monorepo = path.join(process.cwd(), "artifacts", "api-server", "config", "verify_anchors.json");
+  if (existsSync(monorepo)) return monorepo;
+  // Neither exists yet (e.g. first GCS restore writing the file): prefer the
+  // location whose parent config/ directory exists.
+  if (existsSync(path.dirname(monorepo))) return monorepo;
+  return direct;
+}
 
 function getBucket() {
   const bucketId = process.env["DEFAULT_OBJECT_STORAGE_BUCKET_ID"];
@@ -71,8 +90,9 @@ export async function restoreAnchorsFromStorage(
   }
 
   const [content] = await file.download(); // throws on failure → fatal
-  const anchorsPath = path.join(process.cwd(), "config", "verify_anchors.json");
+  const anchorsPath = anchorsFilePath();
   const tmpPath = anchorsPath + ".restore.tmp";
+  mkdirSync(path.dirname(anchorsPath), { recursive: true }); // first restore may pre-date the config dir
   writeFileSync(tmpPath, content); // throws on disk failure → fatal
   const { rename: renameSync } = await import("node:fs/promises");
   await renameSync(tmpPath, anchorsPath); // throws on rename failure → fatal
@@ -88,7 +108,7 @@ export async function restoreAnchorsFromStorage(
  * knows the lock was NOT made durable and must retry.
  */
 export async function pushAnchorsToStorage(): Promise<void> {
-  const anchorsPath = path.join(process.cwd(), "config", "verify_anchors.json");
+  const anchorsPath = anchorsFilePath();
   const content = readFileSync(anchorsPath, "utf8");
   const file = getBucket().file(GCS_ANCHOR_KEY);
   await file.save(content, { contentType: "application/json" });
@@ -148,7 +168,7 @@ export async function atomicWriteWithRollback(opts: {
  *   defaults to `<cwd>/config/verify_anchors.json`.
  */
 export function readVerifyAnchors<T = Record<string, unknown>>(overridePath?: string): T {
-  const filePath = overridePath ?? path.join(process.cwd(), "config", "verify_anchors.json");
+  const filePath = overridePath ?? anchorsFilePath();
   return JSON.parse(readFileSync(filePath, "utf8")) as T;
 }
 

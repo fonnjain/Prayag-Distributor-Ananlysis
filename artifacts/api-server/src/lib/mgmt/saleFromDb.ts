@@ -25,6 +25,12 @@ export type SaleFromDbResult = {
   source: string;
   /** Non-null when the load failed or returned no data. */
   error: string | null;
+  /**
+   * false when the FY's register rows have no state-head attribution
+   * (head_canon NULL on >90% of rows) — total is still period-exact, but
+   * byHead is empty and per-head figures must come from another source.
+   */
+  headsAvailable: boolean;
 };
 
 /**
@@ -36,7 +42,7 @@ export async function loadDispatchSaleFromDb(
   monthLabels: string[],
 ): Promise<SaleFromDbResult> {
   if (monthLabels.length === 0) {
-    return { byHead: new Map(), total: 0, source: "", error: "no months requested" };
+    return { byHead: new Map(), total: 0, source: "", error: "no months requested", headsAvailable: false };
   }
   try {
     const rows = await db
@@ -61,6 +67,7 @@ export async function loadDispatchSaleFromDb(
         total: 0,
         source: "",
         error: `no rows in sale_line for ${fy} / ${monthLabels.join(",")}`,
+        headsAvailable: false,
       };
     }
 
@@ -87,6 +94,7 @@ export async function loadDispatchSaleFromDb(
         total: 0,
         source: "",
         error: `all amounts are zero in sale_line for ${fy} / ${monthLabels.join(",")}`,
+        headsAvailable: false,
       };
     }
 
@@ -97,11 +105,24 @@ export async function loadDispatchSaleFromDb(
     // through to the Sheets-based State Head Sale loader, which has real heads.
     const unmappedAmt = byNormKey.get("unmapped") ?? 0;
     if (unmappedAmt > 0.9 * total) {
+      // Totals-only path: the period-exact company total is still valid even
+      // though per-head attribution is impossible for this FY. Return it with
+      // an empty byHead so callers keep exact period filtering and source
+      // per-head figures elsewhere (or omit them).
+      const plabel =
+        monthLabels.length === 1
+          ? monthLabels[0]
+          : `${monthLabels[0]}–${monthLabels[monthLabels.length - 1]}`;
+      logger.info(
+        { fy, months: monthLabels.length, total },
+        "saleFromDb: totals-only (no head attribution for this FY)",
+      );
       return {
         byHead: new Map(),
-        total: 0,
-        source: "",
-        error: `head_canon not populated for ${fy} (register has no state-head column) — use Sheets fallback`,
+        total,
+        source: `sale_line (${plabel}; company total — no head split)`,
+        error: null,
+        headsAvailable: false,
       };
     }
 
@@ -138,10 +159,10 @@ export async function loadDispatchSaleFromDb(
       "saleFromDb: period-filtered sale loaded",
     );
 
-    return { byHead, total, source, error: null };
+    return { byHead, total, source, error: null, headsAvailable: true };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     logger.warn({ err, fy }, "saleFromDb: DB query failed");
-    return { byHead: new Map(), total: 0, source: "", error };
+    return { byHead: new Map(), total: 0, source: "", error, headsAvailable: false };
   }
 }

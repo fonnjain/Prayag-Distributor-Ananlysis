@@ -74,4 +74,6 @@
 - [Register monthly full-replace](register-monthly-replace.md) — open-FY sync is nightly per-month delete+insert (no identity key); DB short-read baseline; months freeze on the 7th (clock-derived) with anchors.
 - [OB mirror sync](ob-mirror-sync.md) — primary_order_line default ingest is append-only (drifts stale); replace mode + 6h open-FY scheduler + audit check 7.0 keep it aligned with the Order Sheet.
 - [Tank dedup serial collision](tank-dedup-serial-collision.md) — synthetic serials must be assigned AFTER tank resolution; pre-resolution ltr-based keys cause dedupeBySerialNo collision when different ltr amounts floor to same pieces.
+- [Primary sale totals-only path](primary-sale-totals-only.md) — head-less FYs (24-25/25-26) keep period-exact DB totals with empty byHead; pending needs matching period bases, clamp ≥0, else null.
 - [Secondary period achievement basis](secondary-period-achievement-basis.md) — secondaryTotal.ytdAchievement = recorded sales / planRecorded (closed months only); never period sales / full-period plan.
+- [verify_anchors deploy path](anchors-deploy-path.md) — deployed monorepo cwd is the repo root; cwd-relative config paths 500 in production, use anchorsFilePath().

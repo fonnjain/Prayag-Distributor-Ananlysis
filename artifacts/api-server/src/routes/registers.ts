@@ -2,7 +2,7 @@ import { Router } from "express";
 import path from "node:path";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { isAdminToken, isMonthInFy } from "../lib/adminAuth.js";
-import { pushAnchorsToStorage, atomicWriteWithRollback } from "../lib/config/verifyAnchors.js";
+import { pushAnchorsToStorage, atomicWriteWithRollback, anchorsFilePath } from "../lib/config/verifyAnchors.js";
 import { and, eq } from "drizzle-orm";
 import { pool, db, saleLines, type InsertSaleLine } from "@workspace/db";
 import {
@@ -4787,7 +4787,7 @@ router.post("/registers/:fy/lock-month-anchor", async (req, res) => {
   // locking different months simultaneously) cannot both read the same old
   // file, each pass the duplicate check, and then overwrite each other.
   // writeFile is replaced with writeFile-to-temp + rename for atomicity.
-  const anchorsPath = path.join(process.cwd(), "config", "verify_anchors.json");
+  const anchorsPath = anchorsFilePath();
 
   // Enqueue this request and wait for the previous one to finish.
   let releaseMutex!: () => void;

@@ -30,7 +30,7 @@ type HeadRow = {
   head: string;
   booking: number;
   sale: number;
-  pending: number;
+  pending: number | null;
 };
 
 type DistributorRow = {
@@ -554,10 +554,14 @@ export default function PrimaryPerformanceDashboard() {
               },
               {
                 label: "Pending (booked \u2212 dispatched)",
-                value: data.companyPending,
+                value: data.companyPending ?? 0,
                 source: null,
-                available: data.bookingAvailable && data.saleAvailable,
-                warn: data.companyBooking > 0 && data.companyPending / data.companyBooking > 0.25,
+                available:
+                  data.bookingAvailable && data.saleAvailable && data.companyPending != null,
+                warn:
+                  data.companyBooking > 0 &&
+                  data.companyPending != null &&
+                  data.companyPending / data.companyBooking > 0.25,
                 unfiltered: bookingUnfiltered && saleUnfiltered,
                 mixedBasis: bookingUnfiltered !== saleUnfiltered,
               },
@@ -701,7 +705,7 @@ export default function PrimaryPerformanceDashboard() {
                   <td className="py-2 px-3 font-medium text-sm">{row.head}</td>
                   <td className="py-2 px-3 text-right font-mono text-sm">
                     {row.booking > 0 ? fmtCr(row.booking) : "—"}
-                    {row.booking > 0 && (
+                    {row.booking > 0 && row.pending != null && (
                       <PendingChip pending={row.pending} booking={row.booking} />
                     )}
                   </td>
@@ -709,7 +713,7 @@ export default function PrimaryPerformanceDashboard() {
                     {row.sale > 0 ? fmtCr(row.sale) : "—"}
                   </td>
                   <td className="py-2 px-3 text-right font-mono text-xs text-muted-foreground">
-                    {row.pending > 0 ? fmtCr(row.pending) : "—"}
+                    {row.pending != null && row.pending > 0 ? fmtCr(row.pending) : "—"}
                   </td>
                 </tr>
               ))}
@@ -723,7 +727,9 @@ export default function PrimaryPerformanceDashboard() {
                   {fmtCr(data.companySale)}
                 </td>
                 <td className="py-2 px-3 text-right font-mono text-xs text-muted-foreground">
-                  {data.companyPending > 0 ? fmtCr(data.companyPending) : "—"}
+                  {data.companyPending != null && data.companyPending > 0
+                    ? fmtCr(data.companyPending)
+                    : "—"}
                 </td>
               </tr>
             </tbody>
@@ -1568,7 +1574,7 @@ export default function PrimaryPerformanceDashboard() {
       )}
 
       {/* Pending orders operational note */}
-      {!loading && data && data.companyPending > 0 && (
+      {!loading && data && data.companyPending != null && data.companyPending > 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-500/5 p-4 space-y-2">
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />

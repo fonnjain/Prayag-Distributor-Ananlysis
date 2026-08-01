@@ -57,6 +57,32 @@ export function isMonthFrozen(monthLabel: string, now: Date = new Date()): boole
   return freezeAt != null && now.getTime() >= freezeAt.getTime();
 }
 
+const MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+/**
+ * Every month label of the FY whose calendar month has STARTED as of `now`
+ * and which is not yet frozen. This is the rule-based sync scope: between the
+ * 1st and 6th of a month it contains BOTH the prior month (still in its edit
+ * window) and the current month (even if its tab is empty); from the 7th only
+ * the current month. Future months are excluded.
+ * FY format "2026-27" → Apr-26 … Mar-27.
+ */
+export function openMonthLabels(fy: string, now: Date = new Date()): string[] {
+  const m = /^(\d{4})-(\d{2})$/.exec(fy);
+  if (!m) return [];
+  const startYear = parseInt(m[1], 10);
+  const labels: string[] = [];
+  for (let i = 0; i < 12; i++) {
+    const mon = (3 + i) % 12; // Apr=3 … Mar=2
+    const year = startYear + (mon < 3 ? 1 : 0);
+    const monthStart = Date.UTC(year, mon, 1);
+    if (now.getTime() < monthStart) continue; // month not started yet
+    const label = `${MONTH_ABBR[mon]}-${String(year % 100).padStart(2, "0")}`;
+    if (!isMonthFrozen(label, now)) labels.push(label);
+  }
+  return labels;
+}
+
 export interface MonthReplaceResult {
   month: string;
   action: "replaced" | "frozen-skipped" | "frozen-anchored" | "aborted-short-read" | "failed";
@@ -150,11 +176,28 @@ export async function replaceOpenMonths(opts: {
     logger.error({ fy, unlabelledRows }, "monthly replace: rows without month_label EXCLUDED — investigate the sheet read");
   }
 
+  // RULE-BASED SCOPE: attempt every unfrozen, already-started month of the FY
+  // even when the sheet read holds zero rows for it. An empty tab (e.g. "Aug"
+  // on 1 Aug) must still be attempted so that (a) the attempt is visible in
+  // the log rather than inferred, and (b) a baseline of 0 is recorded — the
+  // short-read guard then rises naturally with the first real invoices.
+  for (const label of openMonthLabels(fy, now)) {
+    if (!byMonth.has(label)) byMonth.set(label, []);
+  }
+
   const months: MonthReplaceResult[] = [];
 
   for (const [month, monthLines] of [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     months.push(await processOneMonth(fy, month, monthLines, now, force));
   }
+
+  logger.info(
+    {
+      fy,
+      attempted: months.map((r) => `${r.month}:${r.action}(${r.sheetRows} rows)`),
+    },
+    "monthly replace: month scope attempted (rule-based, no-ops included)",
+  );
 
   return { fy, months, unlabelledRows };
 }
@@ -206,7 +249,17 @@ async function processOneMonth(
       // ── Short-read guard (applies to open months AND the final freeze-
       //    transition replace — a truncated read must never become an anchor).
       const lastGood = st?.lastGoodRows ?? null;
-      if (!force && lastGood != null && sheetRows < Math.floor(lastGood * SHORT_READ_TOLERANCE)) {
+      // Fires when a month with a POSITIVE baseline reads materially fewer
+      // rows. The explicit `sheetRows === 0` branch closes a rounding gap:
+      // for tiny baselines (e.g. 1 row) floor(1 × 0.98) = 0 and an empty read
+      // would otherwise slip past the `<` comparison and delete real data.
+      // A 0 baseline never trips the guard — empty months stay normal no-ops.
+      if (
+        !force &&
+        lastGood != null &&
+        lastGood > 0 &&
+        (sheetRows === 0 || sheetRows < Math.floor(lastGood * SHORT_READ_TOLERANCE))
+      ) {
         logger.error(
           { fy, month, sheetRows, lastGood, frozen },
           "monthly replace: read materially below last good read — ABORTED, month left untouched",
@@ -242,6 +295,10 @@ async function processOneMonth(
         // Fail loudly: rolls back the delete, the insert, and the state write.
         throw new Error(`rows written (${written}) != rows read (${sheetRows}) — rolled back`);
       }
+      // Empty month, empty DB: a normal no-op (e.g. the current month's tab
+      // before its first invoices). Logged with a distinct detail so the
+      // nightly log shows the attempt explicitly.
+      const noOp = sheetRows === 0 && dbRowsBefore === 0;
 
       // ── State upsert in the SAME transaction as the data it describes ────
       // Freeze transition: the month passed its freeze date without an anchor
@@ -262,15 +319,18 @@ async function processOneMonth(
         });
 
       logger.info(
-        { fy, month, dbRowsBefore, rowsWritten: written, amountCr: (sheetAmount / 1e7).toFixed(2), frozen },
+        { fy, month, dbRowsBefore, rowsWritten: written, amountCr: (sheetAmount / 1e7).toFixed(2), frozen, noOp },
         frozen
           ? "monthly replace: final verified replace + freeze anchor recorded"
-          : "monthly replace: month replaced",
+          : noOp
+            ? "monthly replace: empty month no-op (baseline 0 recorded)"
+            : "monthly replace: month replaced",
       );
       return {
         month,
         action: (frozen ? "frozen-anchored" : "replaced") as MonthReplaceResult["action"],
         sheetRows, sheetAmount, dbRowsBefore, rowsWritten: written, lastGoodRows: sheetRows,
+        ...(noOp ? { detail: "no-op (empty month)" } : {}),
       };
     });
   } catch (err) {

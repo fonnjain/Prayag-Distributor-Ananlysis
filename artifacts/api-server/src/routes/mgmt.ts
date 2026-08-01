@@ -433,17 +433,21 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
     let orderBookingPrimaryByHead: Map<string, number> | null = null;
     let orderBookingPrimarySource: string | null = null;
     let primaryBookingPeriodFiltered = false;
+    let primarySaleTotal = 0;
+    let primaryBookingTotal = 0;
     try {
       const primary = await loadPrimaryPeriodData(fy, monthLabels);
       if (primary.sale.total > 0) {
         dispatchSaleByHead = primary.sale.byHead;
         dispatchSaleSource = primary.sale.source;
         salePeriodFiltered = primary.sale.periodFiltered;
+        primarySaleTotal = primary.sale.total;
       }
       if (primary.booking.total > 0) {
         orderBookingPrimaryByHead = primary.booking.byHead;
         orderBookingPrimarySource = primary.booking.source;
         primaryBookingPeriodFiltered = primary.booking.periodFiltered;
+        primaryBookingTotal = primary.booking.total;
       }
       req.log.info(
         {
@@ -592,15 +596,23 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
     // Secondary data now comes from STATE HEAD DASHBOARD — no upload required.
     const orderBookingNote: string | null = null;
 
-    // Pending orders = primary order booking minus dispatched sale (company-wide)
-    const obTotal = orderBookingPrimary
-      ? Object.values(orderBookingPrimary).reduce((s, v) => s + v, 0)
-      : 0;
-    const saleTotal = headSales
-      ? Object.values(headSales).reduce((s, v) => s + v, 0)
-      : 0;
+    // Pending orders = primary order booking minus dispatched sale (company-wide).
+    // Use the period service's own totals (byHead can be empty for FYs without
+    // head attribution, but the company total is still period-exact).
+    const obTotal = primaryBookingTotal;
+    const saleTotal = primarySaleTotal;
+    // Only meaningful when both sides cover the SAME period basis; a full-FY
+    // sale against a period-filtered booking produces nonsense (large
+    // negatives). Never report a negative pending — booking coverage gaps
+    // (e.g. dispatches against prior-FY orders) make it unknowable, not <0.
+    // When the selected period IS the full FY, an FY-total side and a
+    // period-filtered side cover the same months — treat as matching bases.
+    const pendingBasisMatch =
+      primaryBookingPeriodFiltered === salePeriodFiltered || monthLabels.length >= 12;
     const pendingOrdersTotal =
-      obTotal > 0 && saleTotal > 0 ? obTotal - saleTotal : null;
+      obTotal > 0 && saleTotal > 0 && pendingBasisMatch
+        ? Math.max(0, obTotal - saleTotal)
+        : null;
 
     // PS1: period-specific company-level secondary totals for the meta block.
     // Sums secPeriod() across all members so the headline KPI tiles reflect
@@ -803,17 +815,38 @@ router.get("/mgmt/primary", async (req: Request, res: Response): Promise<void> =
       ...primaryPeriod.booking.byHead.keys(),
       ...primaryPeriod.sale.byHead.keys(),
     ]);
+    // Per-head sale attribution can be unavailable (FYs whose register has no
+    // state-head column: sale total is period-exact but byHead is empty). In
+    // that case a per-head pending of booking−0 would be fabricated — send null.
+    const saleHeadsAvailable =
+      primaryPeriod.sale.total <= 0 || primaryPeriod.sale.byHead.size > 0;
+    // Pending is only meaningful when both sides cover the same period basis
+    // (or the selection is the full FY, where an FY-total side matches anyway).
+    const pendingBasisMatch =
+      primaryPeriod.booking.periodFiltered === primaryPeriod.sale.periodFiltered ||
+      monthLabels.length >= 12;
     const byHead = Array.from(allHeadNames)
       .map((head) => {
         const booking = primaryPeriod.booking.byHead.get(head) ?? 0;
         const sale = primaryPeriod.sale.byHead.get(head) ?? 0;
-        return { head, booking, sale, pending: Math.max(0, booking - sale) };
+        return {
+          head,
+          booking,
+          sale,
+          pending:
+            saleHeadsAvailable && pendingBasisMatch
+              ? Math.max(0, booking - sale)
+              : null,
+        };
       })
       .sort((a, b) => b.booking - a.booking);
 
     const companyBooking = primaryPeriod.booking.total;
     const companySale = primaryPeriod.sale.total;
-    const companyPending = Math.max(0, companyBooking - companySale);
+    const companyPending =
+      companyBooking > 0 && companySale > 0 && pendingBasisMatch
+        ? Math.max(0, companyBooking - companySale)
+        : null;
 
     // Build head-level primary target map from state targets for use in the response.
     const dbHeadTargetMap = await buildPrimaryTargetMapFromStateTargets(fy).catch((): Map<string, number[]> => new Map());
