@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { invalidateSnapshots } from "../lib/payloadSnapshot.js";
 import path from "node:path";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { isAdminToken, isMonthInFy } from "../lib/adminAuth.js";
@@ -561,9 +562,19 @@ router.post("/registers/:fy/force-resync", async (req, res) => {
     // Call doSync directly — bypasses REGISTER_SYNC_PAUSE and the
     // "closed FY already has rows" early-exit in ensureRegisterSynced.
     // This is intentional: force-resync IS the admin repair tool.
-    doSync(fy, spreadsheetId).catch((err: unknown) => {
-      req.log.error({ fy, err }, "force-resync: doSync failed");
-    });
+    doSync(fy, spreadsheetId)
+      .then(() => {
+        // Register data changed — drop every payload snapshot derived from it,
+        // so frozen-FY snapshots (served as final, never re-built) rebuild
+        // from the repaired data on the next request.
+        invalidateSnapshots(`mgmt-data|${fy}|`);
+        invalidateSnapshots(`warnings|${fy}|`);
+        invalidateSnapshots(`company-reports|${fy}`);
+        req.log.info({ fy }, "force-resync: payload snapshots invalidated");
+      })
+      .catch((err: unknown) => {
+        req.log.error({ fy, err }, "force-resync: doSync failed");
+      });
 
     res.json({
       triggered: true,

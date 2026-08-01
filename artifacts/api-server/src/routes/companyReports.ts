@@ -9,6 +9,7 @@ import { Router } from "express";
 import { buildCompanyReports } from "../lib/companyReports.js";
 import { respondIfQuotaError } from "../lib/quotaResponse.js";
 import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
+import { isFrozen } from "../lib/customers/registerSync.js";
 
 const router = Router();
 
@@ -47,6 +48,7 @@ router.get("/company-reports", async (req, res) => {
       ttlMs: COMPANY_REPORTS_TTL_MS,
       build: () => buildCompanyReports(rawFy, undefined),
       log: req.log,
+      frozen: isFrozen(rawFy),
     });
     res.json(payload);
   } catch (err) {

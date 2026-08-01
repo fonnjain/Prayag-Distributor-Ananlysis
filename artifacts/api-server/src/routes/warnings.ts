@@ -15,6 +15,7 @@ import {
   SnapshotHttpError,
 } from "../lib/payloadSnapshot.js";
 import { logger } from "../lib/logger.js";
+import { isFrozen } from "../lib/customers/registerSync.js";
 
 const router = Router();
 
@@ -68,6 +69,7 @@ router.get("/warnings", async (req, res) => {
       ttlMs: WARNINGS_TTL_MS,
       build: () => buildWarningsResponse(fy, stateHeadRaw),
       log: req.log,
+      frozen: isFrozen(fy),
     });
     res.json(response);
   } catch (err) {

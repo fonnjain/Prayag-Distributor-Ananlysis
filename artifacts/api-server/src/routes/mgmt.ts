@@ -50,6 +50,7 @@ import {
 } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { serveWithSnapshot, invalidateSnapshots } from "../lib/payloadSnapshot.js";
+import { isFrozen } from "../lib/customers/registerSync.js";
 
 const router: IRouter = Router();
 
@@ -386,6 +387,7 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
       ttlMs: MGMT_DATA_TTL_MS,
       build: () => buildMgmtDataPayload(fy, monthFrom, monthTo, undefined, req.log),
       log: req.log,
+      frozen: isFrozen(fy),
     });
     res.json(payload);
   } catch (err) {
