@@ -279,9 +279,11 @@ export async function loadDistributorInvestment(
 ): Promise<void> {
   if (!distGroups.length) return;
 
-  const isLiveFy = fy === "2026-27";   // brand-level register table not populated for live FY
+  // FY2026-27 is populated via the PSCode_3 brand-level backfill, so the
+  // effective-discount query runs for every FY.
+  const isLiveFy = false;
 
-  // ── Step A: Effective discount (closed FYs only) ───────────────────────────
+  // ── Step A: Effective discount ─────────────────────────────────────────────
   const discountByNormKey = new Map<string, EffectiveDiscount>();
 
   if (!isLiveFy) {

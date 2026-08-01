@@ -113,9 +113,10 @@ function brandToBroad(brand: string): string {
   return "(other)";
 }
 
-// Ordered closed FYs — most recent last so priorFy derivation is trivial.
-const CLOSED_FYS = ["2021-22", "2022-23", "2023-24", "2024-25", "2025-26"];
-const LIVE_FY = "2026-27";
+// Ordered FYs — most recent last so priorFy derivation is trivial.
+// FY2026-27 is included: the PSCode_3 register was backfilled into
+// secondary_register_line at brand level (source='pscode3_brand_rollup').
+const ANALYSIS_FYS = ["2021-22", "2022-23", "2023-24", "2024-25", "2025-26", "2026-27"];
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -179,19 +180,6 @@ export async function loadDistributorSkuSpread(
   fy: string,
   distGroups: DistributorGroup[],
 ): Promise<void> {
-  if (fy === LIVE_FY) {
-    const note =
-      "Segment spread reads the brand-level register table, which is not populated for FY2026-27. (Item-code SKU detail for Apr–Jun 2026 is loaded separately.)";
-    for (const g of distGroups) {
-      (g as DistributorGroup & { skuSpread?: DistributorSkuSpread }).skuSpread = {
-        isLiveYear: true,
-        liveYearNote: note,
-        totalBroadSegments: TOTAL_BROAD_SEGMENTS,
-      };
-    }
-    return;
-  }
-
   if (!distGroups.length) return;
 
   // ── Collect all retailer names ─────────────────────────────────────────────
@@ -228,7 +216,7 @@ export async function loadDistributorSkuSpread(
                 )
           AND   fy IN (
                   ${sql.join(
-                    CLOSED_FYS.map((f) => sql`${f}`),
+                    ANALYSIS_FYS.map((f) => sql`${f}`),
                     sql`, `,
                   )}
                 )
@@ -302,12 +290,12 @@ export async function loadDistributorSkuSpread(
     }
   }
 
-  // ── Determine most recent closed FY (global — most recent with any data) ──
+  // ── Determine most recent FY (global — most recent with any data) ──
   const fysWithData = new Set(rows.map((r) => r.fy));
   const recentFy =
-    [...CLOSED_FYS].reverse().find((f) => fysWithData.has(f)) ?? CLOSED_FYS.at(-1)!;
-  const priorFyIdx = CLOSED_FYS.indexOf(recentFy) - 1;
-  const priorFy = priorFyIdx >= 0 ? CLOSED_FYS[priorFyIdx] : null;
+    [...ANALYSIS_FYS].reverse().find((f) => fysWithData.has(f)) ?? ANALYSIS_FYS.at(-1)!;
+  const priorFyIdx = ANALYSIS_FYS.indexOf(recentFy) - 1;
+  const priorFy = priorFyIdx >= 0 ? ANALYSIS_FYS[priorFyIdx] : null;
 
   // ── Build per-distributor spread objects ──────────────────────────────────
   // We also build a cross-distributor brand map for peer whitespace.

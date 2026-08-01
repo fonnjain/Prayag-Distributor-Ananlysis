@@ -517,14 +517,14 @@ function computeDataQualityFlags(
     });
   }
 
-  // NO_LIVE_REGISTER — FY2026-27 brand-level register table not available.
-  // (The item-code SKU register IS loaded for Apr–Jun 2026; this flag covers
-  // the brand-level secondary_register_line dependency that drives productSpread.)
+  // PARTIAL_LIVE_REGISTER — FY2026-27 brand-level register covers Apr–Jun 2026
+  // only (PSCode_3 backfill into secondary_register_line). Months after June
+  // remain unavailable until a fresh export is loaded.
   if (skuSpread?.isLiveYear || fy === "2026-27") {
     flags.push({
-      code: "NO_LIVE_REGISTER",
+      code: "PARTIAL_LIVE_REGISTER",
       message:
-        "The FY2026-27 brand-level secondary register table is not populated, so product-segment spread is unavailable for this year. (Item-code SKU detail for Apr–Jun 2026 IS loaded and served on the SKU pages.)",
+        "The FY2026-27 secondary register covers Apr–Jun 2026 only (PSCode_3 drop). Product-segment spread and related views reflect those three months; later months are unavailable until a fresh export is loaded.",
       severity: "info",
       fields: ["productSpread"],
     });
@@ -582,9 +582,9 @@ function computeTeamQualityFlags(
 
   if (fy === "2026-27") {
     flags.push({
-      code: "NO_LIVE_REGISTER",
+      code: "PARTIAL_LIVE_REGISTER",
       message:
-        "The FY2026-27 brand-level secondary register table is not populated, so product-segment spread is unavailable for all members. (Item-code SKU detail for Apr–Jun 2026 IS loaded and served on the SKU pages.)",
+        "The FY2026-27 secondary register covers Apr–Jun 2026 only (PSCode_3 brand-level backfill). Product-segment spread reflects those three months; later months are unavailable until a fresh export is loaded.",
       severity: "info",
       fields: ["productSpread"],
     });
@@ -902,7 +902,7 @@ export function buildMemberPayload(
     visits:         visitPlan ? "member sheet — Summary Report tab (totalVisit column)" : "not available",
     capacity:       visitPlan ? "member sheet — historical Summary Report tabs (closed-FY visit anchors)" : "not available",
     cost:           roiCost ? "Data tab (CTC, TA Bill) + member sheet (spread)" : "not available (CTC missing from Data tab)",
-    productSpread:  skuSpread?.isLiveYear !== false ? "not available — FY2026-27 register not ingested" : "secondary_register_line (DB)",
+    productSpread:  skuSpread?.isLiveYear !== false ? "not available" : "secondary_register_line (DB; FY2026-27 = PSCode_3 brand-level backfill, Apr–Jun 2026)",
     priorYears:     hist.length > 0 ? "member sheet — historical Summary Report tabs" : "not available",
     dataQuality:    "app-computed from all available sources",
   };

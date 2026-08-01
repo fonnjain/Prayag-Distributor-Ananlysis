@@ -13,12 +13,12 @@ export const GAP_NODE_REGISTRY: GapNodeMeta[] = [
     path: "gap/live-year-sku",
     reason:
       "The FY2026-27 secondary register (PSCode_3 xlsx drop) covers " +
-      "Apr–Jun 2026 only, at item-code level in secondary_sku_line. Months after June and " +
-      "the brand-level secondary_register_line table remain unavailable for FY2026-27 until " +
-      "a fresh export is loaded.",
+      "Apr–Jun 2026 only. It is loaded at item-code level in secondary_sku_line and " +
+      "mirrored at brand level into secondary_register_line, so segment-spread, win-back " +
+      "and effective-discount views work for Apr–Jun 2026. Months after June remain " +
+      "unavailable until a fresh export is loaded.",
     blocks:
-      "SKU/segment questions for FY2026-27 months after Jun-26; distributor segment-spread " +
-      "(D3) and win-back analyses for FY2026-27, which read the brand-level register table.",
+      "SKU/segment questions for FY2026-27 months after Jun-26.",
   },
   {
     path: "gap/finished-goods-cost",

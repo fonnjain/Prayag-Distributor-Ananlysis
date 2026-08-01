@@ -48,21 +48,13 @@ type BrandRow = {
   brand_canon: string | null;
 };
 
-// Live FY — secondary register not ingested yet.
-const LIVE_FY = "2026-27";
+// FY2026-27 is served from the PSCode_3 brand-level backfill
+// (source='pscode3_brand_rollup' in secondary_register_line), Apr–Jun 2026.
 
 export async function computeSkuSpread(
   normKey: string,
   fy: string,
 ): Promise<SkuSpread> {
-  if (fy === LIVE_FY) {
-    return {
-      isLiveYear: true,
-      liveYearNote:
-        "Segment spread reads the brand-level register table, which is not populated for FY2026-27. (Item-code SKU detail for Apr–Jun 2026 is loaded separately.)",
-    };
-  }
-
   // Run member lines + full segment universe in parallel.
   const [memberResult, universeResult] = await Promise.all([
     db.execute<RawLine>(

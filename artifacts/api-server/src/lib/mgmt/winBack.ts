@@ -1,8 +1,9 @@
 // Phase 6: Dormant / win-back list from secondary_register_line.
 //
-// Returns retailers/customers who had Order Booking or Sale in FY2024-25 or
-// FY2025-26 for the selected member, but are NOT present in the member's
-// current working-sheet customer list (FY2026-27 Phase 2 data).
+// Returns retailers/customers who had Order Booking or Sale in FY2024-25,
+// FY2025-26 or FY2026-27 (PSCode_3 brand-level backfill, Apr–Jun 2026) for the
+// selected member, but are NOT present in the member's current working-sheet
+// customer list (FY2026-27 Phase 2 data).
 //
 // Rules:
 //  - Match head by regexp_replace(head_canon) = normKey (same as Phase 5).
@@ -51,7 +52,7 @@ export async function computeWinBack(
       sum(net_amount)::text AS total_net
     FROM   secondary_register_line
     WHERE  lower(regexp_replace(head_canon, '[^a-zA-Z0-9]', '', 'g')) = ${normKey}
-      AND  fy IN ('2024-25', '2025-26')
+      AND  fy IN ('2024-25', '2025-26', '2026-27')
       AND  customer IS NOT NULL
     GROUP BY customer, fy
     ORDER BY fy DESC, sum(net_amount) DESC NULLS LAST
