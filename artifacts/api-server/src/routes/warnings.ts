@@ -9,7 +9,12 @@ import {
   computeUnassignedStats,
 } from "../lib/mgmt/warnings/engine.js";
 import type { MemberWarnings, WarningsResponse } from "../lib/mgmt/warnings/types.js";
-import { serveWithSnapshot, SnapshotHttpError } from "../lib/payloadSnapshot.js";
+import {
+  serveWithSnapshot,
+  prewarmSnapshot,
+  SnapshotHttpError,
+} from "../lib/payloadSnapshot.js";
+import { logger } from "../lib/logger.js";
 
 const router = Router();
 
@@ -290,6 +295,48 @@ async function buildWarningsResponse(
 
     return response;
   }
+}
+
+// ── Startup pre-warm ─────────────────────────────────────────────────────────
+//
+// Guarantees every state head in the selector has a persisted warnings
+// snapshot shortly after a cold start, so the first-ever request for any
+// state head never blocks ~35-55s on Sheets deep-dive loads.
+//
+// Deliberately low priority: strictly sequential (one state head at a time)
+// and skips any key that already has a persisted snapshot, so it never
+// competes with user-facing Sheets reads for heads that are already covered.
+export async function prewarmWarningsSnapshots(fy: string): Promise<void> {
+  const dashboard = await loadStateDashboard(fy);
+  if (!dashboard) {
+    logger.warn({ fy }, "warnings prewarm: state dashboard not available, skipping");
+    return;
+  }
+  const stateHeads = [
+    ...new Set(dashboard.members.map((m) => m.stateHead).filter(Boolean)),
+  ].sort() as string[];
+
+  logger.info({ fy, count: stateHeads.length }, "warnings prewarm: starting");
+  let built = 0;
+  let skipped = 0;
+  for (const stateHead of stateHeads) {
+    try {
+      const result = await prewarmSnapshot({
+        key: `warnings|${fy}|${stateHead.toLowerCase()}`,
+        ttlMs: WARNINGS_TTL_MS,
+        build: () => buildWarningsResponse(fy, stateHead),
+      });
+      if (result === "built") {
+        built++;
+        logger.info({ fy, stateHead }, "warnings prewarm: snapshot built");
+      } else {
+        skipped++;
+      }
+    } catch (err) {
+      logger.warn({ err, fy, stateHead }, "warnings prewarm: build failed");
+    }
+  }
+  logger.info({ fy, built, skipped }, "warnings prewarm: done");
 }
 
 export default router;

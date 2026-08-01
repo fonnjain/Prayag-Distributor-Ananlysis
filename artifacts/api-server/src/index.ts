@@ -25,6 +25,7 @@ import {
 } from "./lib/mgmt/primarySheets.js";
 import { isFyOpen } from "./lib/customers/registerSync.js";
 import { restoreAnchorsFromStorage } from "./lib/config/verifyAnchors.js";
+import { prewarmWarningsSnapshots } from "./routes/warnings.js";
 
 const rawPort = process.env["PORT"];
 
@@ -83,11 +84,22 @@ runMigrations()
 
   // Pre-warm mgmt data caches so the first Sales/Data Sources page load is fast.
   // Fills the orders, stateHeadSale, and stateDashboard sub-caches in the background.
+  // As soon as the state dashboard is warm, chain the /api/warnings pre-warm so
+  // every state head has a persisted snapshot ASAP after a cold start (sequential,
+  // skip-if-exists — see prewarmWarningsSnapshots). Chaining (rather than a fixed
+  // delay) starts it at the earliest moment its prerequisite data is available
+  // while still yielding to the user-facing warm-ups above.
   void Promise.all([
     assembleRows({ fy: "2026-27", states: [], regions: [], monthFrom: 1, monthTo: 12, lowPerfPct: 50 }),
     loadStateHeadSale("2026-27"),
     loadStateDashboard("2026-27"),
-  ]).catch((err) => logger.warn({ err }, "mgmt warm-up failed"));
+  ])
+    .catch((err) => logger.warn({ err }, "mgmt warm-up failed"))
+    .then(() =>
+      prewarmWarningsSnapshots("2026-27").catch((err) =>
+        logger.warn({ err }, "warnings prewarm failed"),
+      ),
+    );
 
   // Pre-warm order-booking sheet caches (readOrderTabInventory + readBookingAggregated)
   // for all four FYs so the booking-vs-sale route responds instantly after startup.

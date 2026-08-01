@@ -140,6 +140,23 @@ export async function serveWithSnapshot<T extends AnyPayload>(opts: {
   return buildAndCache(key, ttlMs, build);
 }
 
+/**
+ * Pre-warm a snapshot key: if a persisted snapshot already exists, do nothing
+ * (the next request will serve it instantly and refresh in the background).
+ * Only when no snapshot exists at all is the live build run — so a startup
+ * pre-warm loop never re-builds keys that are already covered, and the first
+ * ever request for a key never has to block.
+ */
+export async function prewarmSnapshot<T extends AnyPayload>(opts: {
+  key: string;
+  ttlMs: number;
+  build: () => Promise<T>;
+}): Promise<"exists" | "built"> {
+  const existing = await loadSnapshot(opts.key);
+  if (existing) return "exists";
+  await buildAndCache(opts.key, opts.ttlMs, opts.build);
+  return "built";
+}
 /** Typed error a build function can throw to control the HTTP response. */
 export class SnapshotHttpError extends Error {
   status: number;
