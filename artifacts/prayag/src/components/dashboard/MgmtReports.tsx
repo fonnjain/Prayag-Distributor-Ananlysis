@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   useGetMgmtOptions,
+  getGetMgmtOptionsQueryKey,
   useGenerateMgmtReport,
   useVerifyMgmtReport,
   getVerifyMgmtReportQueryKey,
@@ -9,6 +10,8 @@ import {
 } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { QuotaWaitBanner } from "./quotaWait";
+import { isQuotaWaitError, quotaRetryDelayMs } from "@/data/dashboard-context";
 import {
   FileSpreadsheet,
   Download,
@@ -111,7 +114,19 @@ function CheckRow({ check }: { check: MgmtVerifyCheck }) {
 }
 
 export default function MgmtReports() {
-  const options = useGetMgmtOptions();
+  // Auto-recover from the ~60s Sheets quota window: keep retrying quota 503s
+  // (the banner explains the wait); other errors retry twice.
+  const options = useGetMgmtOptions({
+    query: {
+      queryKey: getGetMgmtOptionsQueryKey(),
+      retry: (failureCount, error) =>
+        isQuotaWaitError(error) ? failureCount < 10 : failureCount < 2,
+      retryDelay: (failureCount, error) =>
+        isQuotaWaitError(error)
+          ? quotaRetryDelayMs(error)
+          : Math.min(30_000, 1000 * 2 ** failureCount),
+    },
+  });
   const report = useGenerateMgmtReport();
   const [fy, setFy] = useState<string | null>(null);
   const [regions, setRegions] = useState<Set<string>>(new Set());
@@ -209,6 +224,17 @@ export default function MgmtReports() {
       setError(msg);
     }
   };
+
+  // While the Sheets quota window is open, react-query keeps retrying in the
+  // background (see the retry config above) — show the friendly amber notice
+  // instead of a spinner or a red error.
+  if (isQuotaWaitError(options.failureReason) || isQuotaWaitError(options.error)) {
+    return (
+      <div className="max-w-4xl mx-auto p-6">
+        <QuotaWaitBanner testId="banner-quota-wait-reports" />
+      </div>
+    );
+  }
 
   if (options.isLoading) {
     return (

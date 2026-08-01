@@ -7,6 +7,7 @@
 import { useState, useEffect } from "react";
 import { ChevronDown, ChevronRight, AlertTriangle, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { QuotaWaitBanner, quotaDelayMs, quotaOrThrow } from "./quotaWait";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -167,21 +168,55 @@ export default function PendingOrders() {
   const [data, setData] = useState<PendingOrdersData | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  // True while Google Sheets is briefly rate-limiting reads (503 quota);
+  // a retry is scheduled automatically after the server's retryAfter hint.
+  const [quotaWait, setQuotaWait] = useState(false);
+  const [retryTick, setRetryTick] = useState(0);
 
   useEffect(() => {
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     setLoading(true);
     setFetchError(null);
+    setQuotaWait(false);
     fetch("/api/mgmt/pending-orders")
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      .then(async (r) => {
+        const q = await quotaOrThrow(r);
+        if (q) {
+          if (!cancelled) {
+            setQuotaWait(true);
+            retryTimer = setTimeout(
+              () => setRetryTick((t) => t + 1),
+              quotaDelayMs(q.retryAfter),
+            );
+          }
+          return null;
+        }
         return r.json() as Promise<PendingOrdersData>;
       })
-      .then((d) => setData(d))
-      .catch((e: unknown) =>
-        setFetchError(e instanceof Error ? e.message : String(e)),
-      )
-      .finally(() => setLoading(false));
-  }, []);
+      .then((d) => {
+        if (!cancelled && d !== null) setData(d);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled)
+          setFetchError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+    };
+  }, [retryTick]);
+
+  if (quotaWait) {
+    return (
+      <div className="p-6">
+        <QuotaWaitBanner testId="banner-quota-wait-pending" />
+      </div>
+    );
+  }
 
   if (loading) {
     return (

@@ -21,6 +21,7 @@ import {
   Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { QuotaWaitBanner, quotaDelayMs, quotaOrThrow } from "./quotaWait";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -351,32 +352,53 @@ export default function PrimaryPerformanceDashboard() {
   const [velocityData, setVelocityData] = useState<VelocityResponse | null>(null);
   const [velocityLoading, setVelocityLoading] = useState(false);
   const [velocityError, setVelocityError] = useState<string | null>(null);
+  // True while Google Sheets is briefly rate-limiting reads (503 quota);
+  // a retry is scheduled automatically after the server's retryAfter hint.
+  const [quotaWait, setQuotaWait] = useState(false);
+  const [retryTick, setRetryTick] = useState(0);
 
   useEffect(() => {
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     setLoading(true);
     setError(null);
+    setQuotaWait(false);
     const params = new URLSearchParams({
       fy,
       monthFrom: String(effectivePeriodFrom),
       monthTo: String(effectivePrimaryPeriodTo),
     });
     fetch(`/api/mgmt/primary?${params}`)
-      .then((r) => {
-        if (!r.ok)
-          return r.json().then((e: { error?: string }) => {
-            throw new Error(e.error ?? r.statusText);
-          });
+      .then(async (r) => {
+        const q = await quotaOrThrow(r);
+        if (q) {
+          if (!cancelled) {
+            setQuotaWait(true);
+            setLoading(false);
+            retryTimer = setTimeout(
+              () => setRetryTick((t) => t + 1),
+              quotaDelayMs(q.retryAfter),
+            );
+          }
+          return null;
+        }
         return r.json() as Promise<ApiResponse>;
       })
       .then((d) => {
+        if (cancelled || d === null) return;
         setData(d);
         setLoading(false);
       })
       .catch((err: Error) => {
+        if (cancelled) return;
         setError(err.message);
         setLoading(false);
       });
-  }, [fy, effectivePeriodFrom, effectivePrimaryPeriodTo]);
+    return () => {
+      cancelled = true;
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+    };
+  }, [fy, effectivePeriodFrom, effectivePrimaryPeriodTo, retryTick]);
 
   // Lazy-fetch state targets only when that view is active
   useEffect(() => {
@@ -497,6 +519,7 @@ export default function PrimaryPerformanceDashboard() {
       )}
 
       {/* Load states */}
+      {quotaWait && <QuotaWaitBanner testId="banner-quota-wait-primary" />}
       {loading && (
         <div className="py-12 text-center text-sm text-muted-foreground">
           Loading primary performance data…

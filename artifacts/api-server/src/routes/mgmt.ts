@@ -196,6 +196,7 @@ router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> =
     const seasonalCalibration = getSeasonalCalibration();
     res.json({ fys, defaultFy: DEFAULT_FY, regions, states, sources, seasonalCalibration });
   } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
     req.log.error({ err }, "mgmt options failed");
     res.status(500).json({ error: "Could not load report options." });
   }
@@ -831,6 +832,7 @@ router.get("/mgmt/primary", async (req: Request, res: Response): Promise<void> =
       tabInventory: sheetData.tabInventory ?? null,
     });
   } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
     req.log.error({ err, fy }, "mgmt primary failed");
     res.status(500).json({ error: "Could not load primary performance data." });
   }
