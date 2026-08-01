@@ -113,6 +113,8 @@ type DashboardMeta = {
     plan: number;
     orderBooked: number;
     salesReceived: number;
+    /** Achievement denominator — plan for fully-recorded closed months only. */
+    planRecorded?: number;
     ytdAchievement: number | null;
     totalDealers: number;
     sheetTotals: { orderBooked: number | null; salesReceived: number | null } | null;
@@ -603,9 +605,25 @@ export default function StateHeadDashboard() {
       hasStateDash && (data?.meta.secondaryTotal?.salesReceived ?? 0) > 0
         ? data!.meta.secondaryTotal!.salesReceived
         : secSalesReceived;
-    const achPct = target > 0
-      ? (hasStateDash && secSalesForAch > 0 ? secSalesForAch / target : booking / target)
-      : null;
+    // Company-level achievement: prefer the server figure (secondaryTotal.ytdAchievement) —
+    // its numerator (recorded sales) and denominator (recorded-month plan) use the SAME
+    // closed-month set.  Dividing period sales by the full period plan understates
+    // achievement whenever the period includes months with no recorded sales yet
+    // (e.g. full-FY view early in the year).  Null (no fully-recorded months) renders "—".
+    const st = data?.meta.secondaryTotal;
+    // The server figure is company-wide — only use it when no member/head filter
+    // narrows the row set (otherwise fall back to the filtered row computation).
+    const isFiltered = Boolean(stateHeadFilter || employeeFilter || search.trim());
+    const useServerAch = hasStateDash && st != null && !isFiltered;
+    const achPct = useServerAch
+      ? st.ytdAchievement
+      : target > 0
+        ? (hasStateDash && secSalesForAch > 0 ? secSalesForAch / target : booking / target)
+        : null;
+    // True when the achievement denominator excludes months (not yet recorded) —
+    // the UI shows a "vs. recorded months' plan" note, matching Secondary Performance.
+    const achClosedMonthsOnly =
+      useServerAch && st.planRecorded != null && st.planRecorded > 0 && st.planRecorded < st.plan - 1;
     return {
       target,
       booking,
@@ -613,12 +631,13 @@ export default function StateHeadDashboard() {
       primaryOrderBooking,
       pendingOrders,
       achPct,
+      achClosedMonthsOnly,
       members: filteredRows.length,
       lowPerf,
       noTarget,
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredRows, lowPerfThreshold, summaryByHead, data?.meta.headSales, data?.meta.orderBookingPrimary, data?.meta.secondarySource]);
+  }, [filteredRows, lowPerfThreshold, summaryByHead, data?.meta.headSales, data?.meta.orderBookingPrimary, data?.meta.secondarySource, data?.meta.secondaryTotal, stateHeadFilter, employeeFilter, search]);
 
   /**
    * Seasonal calibration context for the selected period.
@@ -805,8 +824,8 @@ export default function StateHeadDashboard() {
           />
           <KpiTile
             label="Achievement"
-            value={hasSecondaryData ? fmtPct(kpi.achPct) : "—"}
-            sub={`${secPeriodLabel} · Sales Received ÷ Plan`}
+            value={hasSecondaryData && kpi.achPct != null ? fmtPct(kpi.achPct) : "—"}
+            sub={`${secPeriodLabel} · Sales Received ÷ Plan${kpi.achClosedMonthsOnly ? " · vs. recorded months' plan" : ""}`}
           />
           <KpiTile label="Low Performers" value={fmtN(kpi.lowPerf)} sub={`<${lowPerfThreshold}% threshold`} />
           {(() => {

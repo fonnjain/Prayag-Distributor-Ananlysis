@@ -76,6 +76,8 @@ type SecondaryTotal = {
   plan: number;
   orderBooked: number;
   salesReceived: number;
+  /** Achievement denominator — plan for fully-recorded closed months only. */
+  planRecorded?: number;
   ytdAchievement: number | null;
   totalDealers: number;
   // Month indices (0=Apr..11=Mar) where the V4 arrears guard fired:
@@ -472,11 +474,19 @@ export default function CombinedPerformanceDashboard() {
               />
               <KpiTile
                 label={isFyClosed(fy) ? "Secondary Full-Year Achievement" : "Secondary YTD Achievement"}
-                sub="sales received / plan (closed months)"
+                sub={
+                  // Matches the Secondary Performance tiles: flag when the
+                  // denominator excludes months with no recorded sales yet.
+                  secTotal?.planRecorded != null && secTotal.planRecorded > 0 && secTotal.planRecorded < secTotal.plan - 1
+                    ? "vs. recorded months' plan (recorded months only)"
+                    : "sales received / plan (closed months)"
+                }
                 value={secTotal?.ytdAchievement != null ? fmtPct(secTotal.ytdAchievement) : "—"}
                 note={
                   secTotal
-                    ? `${fmtNum(secTotal.totalDealers)} total dealers`
+                    ? secTotal.planRecorded === 0
+                      ? "no actuals recorded yet"
+                      : `${fmtNum(secTotal.totalDealers)} total dealers`
                     : undefined
                 }
               />
