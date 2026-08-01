@@ -20,6 +20,7 @@ import { AlertTriangle, ChevronUp, ChevronDown, Info } from "lucide-react";
 import { useGlobalFilter } from "@/data/global-filter-context";
 import { cn } from "@/lib/utils";
 import { achBandBg, achBandText } from "@/lib/achievementBands";
+import { SnapshotBanner, useSnapshotRefresh } from "./snapshotRefresh";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -63,6 +64,9 @@ type ApiData = {
     secondarySource?: string | null;
     secondaryTotal?: SecondaryTotal | null;
     orderBookingSource?: string | null;
+    /** Cold-start snapshot freshness — see snapshotRefresh.tsx. */
+    snapshotSavedAt?: number;
+    refreshing?: boolean;
   };
 };
 
@@ -207,6 +211,12 @@ export default function SecondaryPerformanceDashboard() {
   const [retryTick, setRetryTick] = useState(0);
   const [expandedHeads, setExpandedHeads] = useState<Set<string>>(new Set());
 
+  // Cold-start snapshot: while meta.refreshing is true the server is rebuilding
+  // from live sources in the background — poll silently and swap the fresh
+  // figures in without a loading state.
+  const dataUrl = `/api/mgmt/data?fy=${encodeURIComponent(fy)}&monthFrom=${effectivePeriodFrom}&monthTo=${effectivePeriodTo}`;
+  useSnapshotRefresh(data?.meta, dataUrl, (fresh) => setData(fresh as ApiData));
+
   useEffect(() => {
     const controller = new AbortController();
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -345,6 +355,7 @@ export default function SecondaryPerformanceDashboard() {
 
   return (
     <div className="space-y-5 p-4">
+      <SnapshotBanner meta={data?.meta} />
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>

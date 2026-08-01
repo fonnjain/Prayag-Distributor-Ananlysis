@@ -38,6 +38,7 @@ import {
 import { cn } from "@/lib/utils";
 import { achBandText } from "@/lib/achievementBands";
 import { useCompleteMonths } from "@/hooks/useCompleteMonths";
+import { SnapshotBanner, useSnapshotRefresh } from "./snapshotRefresh";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -109,6 +110,9 @@ type DashboardMeta = {
   secondaryCoveragePct?: number | null;
   anomalies?: AnomalyRecord[];
   fy?: string;
+  /** Cold-start snapshot freshness — see snapshotRefresh.tsx. */
+  snapshotSavedAt?: number;
+  refreshing?: boolean;
 };
 
 type DashboardData = {
@@ -209,6 +213,12 @@ export default function CombinedPerformanceDashboard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedHeads, setExpandedHeads] = useState<Set<string>>(new Set());
+
+  // Cold-start snapshot: while meta.refreshing is true the server is rebuilding
+  // from live sources in the background — poll silently and swap the fresh
+  // figures in without a loading state.
+  const dataUrl = `/api/mgmt/data?fy=${encodeURIComponent(fy)}&monthFrom=1&monthTo=12`;
+  useSnapshotRefresh(data?.meta, dataUrl, (fresh) => setData(fresh as DashboardData));
   // Canonical complete-months enforcement: completeMonths = closed months only,
   // lastSyncedAt = ISO timestamp of last register sync (null until first sync).
   // This is the single source of truth for month-filtering across all KPI tiles.
@@ -376,6 +386,7 @@ export default function CombinedPerformanceDashboard() {
 
   return (
     <div className="space-y-5 p-4">
+      <SnapshotBanner meta={data?.meta} />
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>

@@ -1,5 +1,6 @@
 import { LoadingState } from "@/components/ui/loading-state";
 import { QuotaWaitBanner, quotaDelayMs, quotaOrThrow } from "./quotaWait";
+import { SnapshotBanner, useSnapshotRefresh } from "./snapshotRefresh";
 import { BAND_LABEL, BAND_BG } from "@/lib/achievementBands";
 import { useState, useEffect, useMemo } from "react";
 import { useGlobalFilter } from "@/data/global-filter-context";
@@ -151,6 +152,9 @@ type DashboardMeta = {
     quarterly: number[];
     monthNames: string[];
   } | null;
+  /** Cold-start snapshot freshness — see snapshotRefresh.tsx. */
+  snapshotSavedAt?: number;
+  refreshing?: boolean;
 };
 
 type DashboardData = { rows: Member[]; meta: DashboardMeta };
@@ -404,6 +408,12 @@ export default function StateHeadDashboard() {
   // a retry is scheduled automatically after the server's retryAfter hint.
   const [quotaWait, setQuotaWait] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
+
+  // Cold-start snapshot: while meta.refreshing is true the server is rebuilding
+  // from live sources in the background — poll silently and swap the fresh
+  // figures in without a loading state.
+  const dataUrl = `/api/mgmt/data?fy=${encodeURIComponent(fy)}&monthFrom=${effectivePeriodFrom}&monthTo=${primaryMonthTo}`;
+  useSnapshotRefresh(data?.meta, dataUrl, (fresh) => setData(fresh as DashboardData));
 
   // Load FY options once — also populate the global filter's available FYs.
   useEffect(() => {
@@ -722,6 +732,7 @@ export default function StateHeadDashboard() {
 
   return (
     <div className="flex flex-col gap-4 p-4 pb-8">
+      <SnapshotBanner meta={data?.meta} />
       {/* Filter bar — FY & period driven by GlobalFilterBar in page header */}
       <div className="flex flex-wrap gap-2 items-end">
         <div className="flex flex-col gap-1">

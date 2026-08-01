@@ -12,6 +12,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { achBandText } from "@/lib/achievementBands";
 import { useGlobalFilter, type FiscalMonthIdx, FISCAL_MONTH_NAMES } from "@/data/global-filter-context";
+import { SnapshotBanner, useSnapshotRefresh, type SnapshotMeta } from "./snapshotRefresh";
 
 const FISCAL_MONTHS = FISCAL_MONTH_NAMES;
 
@@ -110,6 +111,15 @@ export default function SalesPeople() {
     setPeriodMode("month");
   }
 
+  // Cold-start snapshot freshness — see snapshotRefresh.tsx.
+  const [snapMeta, setSnapMeta] = useState<SnapshotMeta | null>(null);
+  const dataUrl = `/api/mgmt/data?fy=${encodeURIComponent(fy)}&monthFrom=1&monthTo=12`;
+  useSnapshotRefresh(snapMeta, dataUrl, (fresh) => {
+    const d = fresh as { rows: Member[]; meta?: SnapshotMeta };
+    setMembers(d.rows ?? []);
+    setSnapMeta(d.meta ?? null);
+  });
+
   // Fetch member data for the full FY.
   useEffect(() => {
     setLoading(true);
@@ -119,8 +129,9 @@ export default function SalesPeople() {
         if (!r.ok) return r.json().then((e: { error?: string }) => { throw new Error(e.error ?? r.statusText); });
         return r.json();
       })
-      .then((d: { rows: Member[] }) => {
+      .then((d: { rows: Member[]; meta?: SnapshotMeta }) => {
         setMembers(d.rows ?? []);
+        setSnapMeta(d.meta ?? null);
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
@@ -240,6 +251,7 @@ export default function SalesPeople() {
 
   return (
     <div className="space-y-4">
+      <SnapshotBanner meta={snapMeta} />
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-2">
         {/* State Head dropdown */}
