@@ -248,6 +248,19 @@ export default function DataHealth() {
     reconciled: boolean;
   };
   const [versionStats, setVersionStats] = useState<VersionStats | null>(null);
+
+  type LockMonth = {
+    month: string;
+    locked: boolean;
+    frozen: boolean;
+    deadline: string | null;
+    freezesAt: string | null;
+    overdue: boolean;
+  };
+  type LockStatus = { fy: string; closedMonths: string[]; months: LockMonth[] };
+  const [lockStatus, setLockStatus] = useState<LockStatus | null>(null);
+  const [locking, setLocking] = useState<string | null>(null);
+  const [lockMsg, setLockMsg] = useState<string | null>(null);
   const [anchorHealth, setAnchorHealth] = useState<AnchorCheckResult[]>([]);
   const [syncingTick, setSyncingTick] = useState(false);
 
@@ -297,6 +310,41 @@ export default function DataHealth() {
   }, []);
 
   useEffect(() => { fetchAnchorHealth(); }, [fetchAnchorHealth]);
+
+  // Fetch month anchor-lock status whenever FY changes.
+  const fetchLockStatus = useCallback(() => {
+    fetch(`/api/registers/${encodeURIComponent(fy)}/lock-status`)
+      .then((r) => (r.ok ? (r.json() as Promise<LockStatus>) : null))
+      .then((d) => setLockStatus(d))
+      .catch(() => setLockStatus(null));
+  }, [fy]);
+
+  useEffect(() => {
+    setLockStatus(null);
+    setLockMsg(null);
+    fetchLockStatus();
+  }, [fetchLockStatus]);
+
+  const lockAnchorNow = useCallback((month: string) => {
+    const secret = window.prompt(
+      `Lock the ${month} anchor now?\n\nThis writes the current DB total into verify_anchors.json permanently.\nEnter the admin secret to confirm:`,
+    );
+    if (!secret) return;
+    setLocking(month);
+    setLockMsg(null);
+    fetch(`/api/registers/${encodeURIComponent(fy)}/lock-month-anchor?month=${encodeURIComponent(month)}`, {
+      method: "POST",
+      headers: { "X-Admin-Secret": secret },
+    })
+      .then((r) => r.json().then((d: { error?: string; locked?: boolean; dbRows?: number; amountCr?: number }) => ({ ok: r.ok, d })))
+      .then(({ ok, d }) => {
+        if (!ok) throw new Error(d.error ?? "Lock failed");
+        setLockMsg(`${month} locked: ${d.dbRows?.toLocaleString("en-IN")} rows / \u20b9${d.amountCr} Cr`);
+        fetchLockStatus();
+      })
+      .catch((err: Error) => setLockMsg(`Lock failed: ${err.message}`))
+      .finally(() => setLocking(null));
+  }, [fy, fetchLockStatus]);
 
   const triggerSyncTick = useCallback(() => {
     setSyncingTick(true);
@@ -561,6 +609,117 @@ export default function DataHealth() {
               {anchorHealth[0]?.checkedAt
                 ? new Date(anchorHealth[0].checkedAt).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true })
                 : "—"}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Month anchor lock status */}
+      {lockStatus && lockStatus.months.length > 0 && (() => {
+        const pending = lockStatus.months.filter((mo) => !mo.locked);
+        const anyOverdue = pending.some((mo) => mo.overdue);
+        return (
+          <div className="border border-border/60 rounded-lg overflow-hidden">
+            <div className={cn(
+              "flex items-center gap-2 px-4 py-3",
+              anyOverdue ? "bg-red-50 dark:bg-red-950/20 border-b border-red-200 dark:border-red-900/40"
+                : pending.length > 0 ? "bg-amber-50 dark:bg-amber-950/20 border-b border-amber-200 dark:border-amber-900/40"
+                : "bg-emerald-50 dark:bg-emerald-950/20 border-b border-emerald-200 dark:border-emerald-900/40"
+            )}>
+              <Clock className={cn("w-4 h-4 shrink-0",
+                anyOverdue ? "text-red-500" : pending.length > 0 ? "text-amber-500" : "text-emerald-500"
+              )} />
+              <span className="font-medium text-sm">Month anchor locks ({lockStatus.fy})</span>
+              {pending.length > 0 ? (
+                <span className={cn(
+                  "text-xs font-medium px-2 py-0.5 rounded-full",
+                  anyOverdue ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
+                    : "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                )}>
+                  {pending.length} pending lock{pending.length > 1 ? "s" : ""}{anyOverdue ? " — deadline passed" : ""}
+                </span>
+              ) : (
+                <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                  All months locked
+                </span>
+              )}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[560px] text-sm">
+                <thead>
+                  <tr className="border-b border-border/40 bg-muted/20">
+                    <th className="py-2 pl-4 pr-2 text-left text-xs text-muted-foreground font-medium w-28">Status</th>
+                    <th className="py-2 px-2 text-left text-xs text-muted-foreground font-medium">Month</th>
+                    <th className="py-2 px-2 text-left text-xs text-muted-foreground font-medium">Lock deadline</th>
+                    <th className="py-2 px-2 text-left text-xs text-muted-foreground font-medium">Auto-freeze</th>
+                    <th className="py-2 pl-2 pr-4 text-right text-xs text-muted-foreground font-medium">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lockStatus.months.map((mo) => (
+                    <tr key={mo.month} className={cn(
+                      "border-b border-border/30 last:border-0",
+                      !mo.locked && mo.overdue && "bg-red-50/60 dark:bg-red-950/20",
+                      !mo.locked && !mo.overdue && "bg-amber-50/40 dark:bg-amber-950/10",
+                    )}>
+                      <td className="py-2 pl-4 pr-2 align-middle">
+                        {mo.locked ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                            <CheckCircle className="w-3 h-3" /> Locked
+                          </span>
+                        ) : mo.overdue ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 whitespace-nowrap">
+                            <XCircle className="w-3 h-3" /> Overdue
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 whitespace-nowrap">
+                            <Clock className="w-3 h-3" /> Pending lock
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2 px-2 font-medium align-middle">{mo.month}</td>
+                      <td className={cn(
+                        "py-2 px-2 align-middle tabular-nums",
+                        !mo.locked && mo.overdue && "text-red-600 dark:text-red-400 font-medium",
+                      )}>
+                        {mo.deadline ?? "—"}
+                      </td>
+                      <td className="py-2 px-2 align-middle tabular-nums text-muted-foreground">
+                        {mo.freezesAt ?? "—"}{mo.frozen ? " (frozen)" : ""}
+                      </td>
+                      <td className="py-2 pl-2 pr-4 text-right align-middle">
+                        {!mo.locked && (
+                          <button
+                            onClick={() => lockAnchorNow(mo.month)}
+                            disabled={locking != null}
+                            className={cn(
+                              "h-7 px-2.5 rounded border text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+                              mo.overdue
+                                ? "border-red-300 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/30"
+                                : "border-border/60 hover:bg-muted",
+                            )}
+                          >
+                            {locking === mo.month ? "Locking…" : "Lock anchor now"}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {lockMsg && (
+              <div className={cn(
+                "px-4 py-2 text-xs border-t border-border/30",
+                lockMsg.startsWith("Lock failed") ? "text-red-600 dark:text-red-400" : "text-emerald-700 dark:text-emerald-400",
+              )}>
+                {lockMsg}
+              </div>
+            )}
+            <div className="px-4 py-2 text-xs text-muted-foreground border-t border-border/30 bg-muted/10">
+              Data owners must confirm the register sheet and lock each month's anchor by the deadline
+              (the day before the automatic freeze on the 7th of the following month). Locking requires
+              the admin secret and writes the DB total into verify_anchors.json permanently.
             </div>
           </div>
         );

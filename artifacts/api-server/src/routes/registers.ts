@@ -2,7 +2,7 @@ import { Router } from "express";
 import path from "node:path";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { isAdminToken, isMonthInFy } from "../lib/adminAuth.js";
-import { pushAnchorsToStorage, atomicWriteWithRollback, anchorsFilePath } from "../lib/config/verifyAnchors.js";
+import { pushAnchorsToStorage, atomicWriteWithRollback, anchorsFilePath, readVerifyAnchors } from "../lib/config/verifyAnchors.js";
 import { and, eq } from "drizzle-orm";
 import { pool, db, saleLines, type InsertSaleLine } from "@workspace/db";
 import {
@@ -4692,6 +4692,66 @@ router.get("/registers/:fy/tank-sync-dryrun", async (req, res) => {
     });
   } catch (err: unknown) {
     req.log.error({ err }, "tank-sync-dryrun failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
+ * GET /registers/:fy/lock-status
+ *
+ * Month anchor-lock status for the Data Health page. For every month of the
+ * FY whose calendar month has ENDED, reports whether it is locked into
+ * verify_anchors.json (primary_anchors[fy].closedMonths), the lock deadline
+ * (the day before the clock-derived freeze on the 7th of the following
+ * month), and whether the deadline has passed without a lock.
+ */
+router.get("/registers/:fy/lock-status", (req, res) => {
+  const { fy } = req.params;
+  const m = /^(\d{4})-(\d{2})$/.exec(fy);
+  if (!m) {
+    res.status(400).json({ error: `Invalid FY format: ${fy}` });
+    return;
+  }
+  try {
+    const anchors = readVerifyAnchors<{
+      primary_anchors?: Record<string, { closedMonths?: string[] }>;
+    }>();
+    const closedMonths = anchors.primary_anchors?.[fy]?.closedMonths ?? [];
+
+    const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const startYear = parseInt(m[1], 10);
+    const now = new Date();
+    const months: {
+      month: string;
+      locked: boolean;
+      frozen: boolean;
+      deadline: string | null;
+      freezesAt: string | null;
+      overdue: boolean;
+    }[] = [];
+    for (let i = 0; i < 12; i++) {
+      const mon = (3 + i) % 12; // Apr … Mar
+      const year = startYear + (mon < 3 ? 1 : 0);
+      // Only months whose calendar month has fully ended are lockable.
+      const monthEnd = Date.UTC(mon === 11 ? year + 1 : year, (mon + 1) % 12, 1);
+      if (now.getTime() < monthEnd) continue;
+      const label = `${MONTH_ABBR[mon]}-${String(year % 100).padStart(2, "0")}`;
+      const freezesAt = monthFreezeAt(label);
+      // Deadline = the day before the automatic freeze (e.g. Aug 6 for Jul-26).
+      const deadline = freezesAt != null ? new Date(freezesAt.getTime() - 24 * 3600 * 1000) : null;
+      const locked = closedMonths.includes(label);
+      months.push({
+        month: label,
+        locked,
+        frozen: isMonthFrozen(label, now),
+        deadline: deadline?.toISOString().slice(0, 10) ?? null,
+        freezesAt: freezesAt?.toISOString().slice(0, 10) ?? null,
+        overdue: !locked && deadline != null && now.getTime() >= deadline.getTime(),
+      });
+    }
+    res.json({ fy, closedMonths, months });
+  } catch (err: unknown) {
+    req.log.error({ err, fy }, "lock-status failed");
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
