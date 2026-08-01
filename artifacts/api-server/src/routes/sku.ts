@@ -44,7 +44,6 @@ import {
   getPrimaryDiscountByCode,
   getSecondaryDiscountByCode,
   getSeasonality,
-  getPeakQuarterMap,
   getDiscountNormFlags,
   getBreadthTrend,
   getFirstOrderCodes,
@@ -455,7 +454,6 @@ router.get("/sku/push-list", async (req: Request, res: Response): Promise<void> 
 
     // K4 enrichment: segment peak quarter + discount-above-norm flags.
     try {
-      const peakMap = await getPeakQuarterMap();
       const allCodes = new Set<string>();
       for (const seg of result.segments ?? []) {
         for (const c of seg.topCodes ?? []) allCodes.add(c.code);
@@ -474,17 +472,25 @@ router.get("/sku/push-list", async (req: Request, res: Response): Promise<void> 
       // CURRENT quarter (its 3-closed-year seasonal curve): ≥27% = in season
       // now (flat baseline is 25%); peak-next-quarter = build now; else the
       // segment is groundwork for its later peak.
-      const seasonality = await getSeasonality();
+      //
+      // TERRITORY-ONLY curves: the push list is territory-scoped, so its
+      // seasonal banding must not rest on project volume (e.g. HDPE's Q1
+      // dominance is project-driven — territory HDPE does 0.2% of its year in
+      // Q1 and actually peaks Q3).
+      const seasonality = await getSeasonality("territory");
       const curveBySeg = new Map(seasonality.segments.map((s) => [s.segment, s]));
+      const THIN_HISTORY_NET = 3e7; // < ₹3 Cr over 3 closed years — curve is low-confidence
       for (const seg of result.segments ?? []) {
-        const peak = peakMap.get(seg.segment);
         const curve = curveBySeg.get(seg.segment);
         const curShare = curve ? curve.quarterShare[currentQuarter - 1] : null;
-        (seg as Record<string, unknown>).peakQuarter = peak?.peakQuarter ?? null;
-        (seg as Record<string, unknown>).peakQuarterLabel = peak?.peakQuarterLabel ?? null;
-        (seg as Record<string, unknown>).peakQuarterShare = peak?.quarterShare ?? null;
+        const peakQ = curve?.peakQuarter ?? null;
+        const peakLabel = curve?.peakQuarterLabel ?? null;
+        const thin = curve != null && curve.totalNet < THIN_HISTORY_NET;
+        (seg as Record<string, unknown>).peakQuarter = peakQ;
+        (seg as Record<string, unknown>).peakQuarterLabel = peakLabel;
+        (seg as Record<string, unknown>).peakQuarterShare =
+          curve && peakQ ? curve.quarterShare[peakQ - 1] : null;
         (seg as Record<string, unknown>).currentQuarterShare = curShare;
-        const peakQ = peak?.peakQuarter ?? null;
         const rank =
           peakQ == null || curShare == null
             ? 1
@@ -496,14 +502,17 @@ router.get("/sku/push-list", async (req: Request, res: Response): Promise<void> 
         (seg as Record<string, unknown>).seasonRank = rank;
         (seg as Record<string, unknown>).seasonStatus =
           rank === 0 ? "in_season" : rank === 1 ? "next_quarter" : "groundwork";
+        const thinNote = thin
+          ? ` Territory history is thin (₹${(curve!.totalNet / 1e7).toFixed(1)} Cr over 3 yrs) — treat the curve as indicative.`
+          : "";
         (seg as Record<string, unknown>).seasonNote =
-          peak == null || curShare == null
-            ? "No seasonality baseline for this segment."
+          peakQ == null || curShare == null
+            ? "No territory seasonality baseline for this segment."
             : rank === 0
-              ? `In season now — ${(curShare * 100).toFixed(0)}% of this segment's year lands in ${QUARTER_LABELS[currentQuarter - 1]} (peak ${peak.peakQuarterLabel}).`
+              ? `In season now — ${(curShare * 100).toFixed(0)}% of this segment's territory year lands in ${QUARTER_LABELS[currentQuarter - 1]} (peak ${peakLabel}).${thinNote}`
               : rank === 1
-                ? `Season builds next quarter (peak ${peak.peakQuarterLabel}) — place listings now.`
-                : `Groundwork — only ${(curShare * 100).toFixed(0)}% of this segment's year lands in ${QUARTER_LABELS[currentQuarter - 1]}; peak is ${peak.peakQuarterLabel}. Placements made now pay off then.`;
+                ? `Season builds next quarter (peak ${peakLabel}) — place listings now.${thinNote}`
+                : `Groundwork — only ${(curShare * 100).toFixed(0)}% of this segment's territory year lands in ${QUARTER_LABELS[currentQuarter - 1]}; peak is ${peakLabel}. Placements made now pay off then.${thinNote}`;
         for (const c of seg.topCodes ?? []) {
           const f = flags.get(c.code);
           (c as Record<string, unknown>).discountAboveNorm = f
@@ -533,7 +542,8 @@ router.get("/sku/push-list", async (req: Request, res: Response): Promise<void> 
       (result as Record<string, unknown>).seasonContext = {
         currentQuarter,
         currentQuarterLabel: QUARTER_LABELS[currentQuarter - 1],
-        note: "Segments are ordered season-first: in-season, next-quarter, then groundwork for a later peak. Within each band, segments doing more of their year in the current quarter come first.",
+        basis: "territory-only seasonal curves (project volume excluded — matches the push list's scope)",
+        note: "Segments are ordered season-first: in-season, next-quarter, then groundwork for a later peak. Within each band, segments doing more of their territory year in the current quarter come first.",
       };
     } catch (err) {
       req.log.warn({ err }, "sku push-list K4 enrichment failed — serving base list");

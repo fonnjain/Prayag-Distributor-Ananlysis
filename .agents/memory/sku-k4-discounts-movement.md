@@ -13,8 +13,10 @@ description: K4 layer — two discount measures never conflated, customer-bridge
 ## Project exclusion — FY-conditional customer bridge
 FY2024-25/25-26 sale_line rows have NULL head_canon (21-col registers have no head column). Territory filter must be ROW-conditional: head attributed → trust head; head NULL → exclude customers ever project-attributed in FY2023-24/2026-27 (the bridge). Applying the bridge to attributed rows is WRONG (drops genuine territory sales of mixed customers). See territoryFilterSql/projectFilterSql in skuK4.ts.
 
-## Seasonality basis
-All channels including project (territory-only HDPE ₹8.3 Cr is meaningless; 2 of 3 closed FYs can't be split). Pooled 3-yr HDPE Q1 = 37.1% (spec reference ~31.6% — same direction), June largest month, 3/3 years consistent. Most other segments peak Q4 (Jan–Mar).
+## Seasonality — two bases, never mixed
+- Timing tab: all channels (market pattern). Pooled 3-yr HDPE Q1 = 37.1%, June largest, 3/3 consistent. 13 of 14 segments peak Q4 (mild skew, 28–35% vs flat 25%).
+- Push-list season banding: TERRITORY-ONLY curves (`getSeasonality("territory")`, via the customer bridge). Critical: HDPE's Q1 dominance is pure project (₹32.6 Cr project Q1 vs ₹0.02 Cr territory); territory HDPE (₹8.3 Cr/3yr) peaks Q3 47.6%, Q2 43.7%. Never band a territory-scoped list on the all-channel curve.
+- Banding: in_season if peakQ==curQ or current-quarter share ≥27%; next_quarter if peak next Q; else groundwork; sorted band → current-quarter share desc. Thin-history note when territory net < ₹3 Cr/3yr.
 
 ## In-process backfill route
 Shell-launched CLIs (nohup/setsid) get reaped when the ShellExec session ends in this environment — long backfills must run inside the API server process. POST /api/sku/secondary-backfill?confirm=true&reason=… (allowlisted closed FYs only, 423 without confirm, clears K4 cache on finish). Full 3-FY SKU backfill takes ~4 min in-process (976K rows).

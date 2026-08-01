@@ -424,14 +424,18 @@ export type SeasonalityResult = {
   segments: SegmentSeasonality[];
 };
 
-export async function getSeasonality(): Promise<SeasonalityResult> {
-  return cached("seasonality", async () => {
+export async function getSeasonality(
+  channel: "all" | "territory" = "all",
+): Promise<SeasonalityResult> {
+  return cached(`seasonality:${channel}`, async () => {
+    const chanFilter =
+      channel === "territory" ? territoryFilterSql(await getProjectCustomerSet()) : sql`TRUE`;
     const rows = await db.execute(sql`
       SELECT coalesce(group_canon, group_raw, 'Unmapped') AS segment,
              fy, substring(month_label, 1, 3) AS m, sum(amount::float8) AS net
       FROM sale_line_current
       WHERE fy IN (${sql.join(CLOSED_FYS.map((f) => sql`${f}`), sql`, `)})
-        AND month_label IS NOT NULL
+        AND month_label IS NOT NULL AND ${chanFilter}
       GROUP BY 1, 2, 3
     `);
 
@@ -489,9 +493,12 @@ export async function getSeasonality(): Promise<SeasonalityResult> {
 
     return {
       basis:
-        "All channels including project — demand timing is a market pattern, and " +
-        "FY2024-25/FY2025-26 rows carry no head attribution so a per-channel split " +
-        "is not possible for two of the three closed years.",
+        channel === "territory"
+          ? "Territory only — project rows excluded (direct head where attributed; the " +
+            "project-customer bridge for FY2024-25/25-26 rows, which carry no head)."
+          : "All channels including project — demand timing is a market pattern, and " +
+            "FY2024-25/FY2025-26 rows carry no direct head attribution (a per-channel " +
+            "split there relies on the project-customer bridge).",
       fys: CLOSED_FYS,
       segments,
     };
