@@ -18,6 +18,31 @@ import DataHealth from "@/components/dashboard/DataHealth";
 import WarningSystem from "@/components/dashboard/WarningSystem";
 import PendingOrders from "@/components/dashboard/PendingOrders";
 import GlobalFilterBar from "@/components/GlobalFilterBar";
+import { useDashboard } from "@/data/dashboard-context";
+import { RefreshCw } from "lucide-react";
+
+/**
+ * Friendly notice shown while Google briefly rate-limits Sheets reads.
+ * The dashboard query auto-retries; this banner makes the ≤60s cold-start
+ * window feel intentional rather than broken.
+ */
+function QuotaWaitBanner() {
+  const { quotaWait } = useDashboard();
+  if (!quotaWait) return null;
+  return (
+    <div
+      className="mb-4 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 dark:border-amber-700/50 dark:bg-amber-950/30 px-3 py-2 text-sm text-amber-800 dark:text-amber-200"
+      data-testid="banner-quota-wait"
+    >
+      <RefreshCw className="h-4 w-4 mt-0.5 shrink-0 animate-spin" />
+      <span>
+        Your data is loading — Google briefly limits how fast sheets can be
+        read. This resolves itself within a minute; the dashboard will refresh
+        automatically.
+      </span>
+    </div>
+  );
+}
 
 const AREAS = [
   { id: "overview",        label: "Overview",        component: Overview },
@@ -56,6 +81,8 @@ export default function Dashboard() {
             NONE pages show only the sync row + a brief note. */}
         <GlobalFilterBar />
       </header>
+
+      <QuotaWaitBanner />
 
       <ActiveComponent />
     </div>

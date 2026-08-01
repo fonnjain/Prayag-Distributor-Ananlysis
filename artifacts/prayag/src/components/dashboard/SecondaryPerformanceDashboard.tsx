@@ -204,10 +204,15 @@ export default function SecondaryPerformanceDashboard() {
   const [data, setData] = useState<ApiData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // True while Google Sheets is briefly rate-limiting reads (503 quota).
+  // The effect auto-retries after the server's retryAfter hint.
+  const [quotaWait, setQuotaWait] = useState(false);
+  const [retryTick, setRetryTick] = useState(0);
   const [expandedHeads, setExpandedHeads] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const controller = new AbortController();
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     setLoading(true);
     setError(null);
     setData(null);
@@ -219,22 +224,42 @@ export default function SecondaryPerformanceDashboard() {
     fetch(`/api/mgmt/data?${params}`, { signal: controller.signal })
       .then((r) => {
         if (!r.ok)
-          return r.json().then((e: { error?: string }) => {
-            throw new Error(e.error ?? r.statusText);
-          });
+          return r
+            .json()
+            .then((e: { error?: string; quota?: boolean; retryAfter?: number }) => {
+              if (r.status === 503 && e.quota) {
+                // Google Sheets read quota window — show a friendly wait
+                // state and retry automatically once the window resets.
+                setQuotaWait(true);
+                setLoading(false);
+                const delaySec = Math.min(60, Math.max(5, e.retryAfter ?? 30));
+                retryTimer = setTimeout(
+                  () => setRetryTick((t) => t + 1),
+                  delaySec * 1000,
+                );
+                return null;
+              }
+              throw new Error(e.error ?? r.statusText);
+            });
         return r.json() as Promise<ApiData>;
       })
       .then((d) => {
+        if (d === null) return; // quota wait — retry scheduled
+        setQuotaWait(false);
         setData(d);
         setLoading(false);
       })
       .catch((err: Error) => {
         if (err.name === "AbortError") return;
+        setQuotaWait(false);
         setError(err.message);
         setLoading(false);
       });
-    return () => controller.abort();
-  }, [fy, effectivePeriodFrom, effectivePeriodTo]);
+    return () => {
+      controller.abort();
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+    };
+  }, [fy, effectivePeriodFrom, effectivePeriodTo, retryTick]);
 
   // Whether secondary data comes from the authoritative STATE HEAD DASHBOARD.
   const isStateDash = data?.meta.secondarySource === "state_head_dashboard";
@@ -317,6 +342,19 @@ export default function SecondaryPerformanceDashboard() {
       {loading && (
         <div className="py-12 text-center text-sm text-muted-foreground">
           Loading secondary performance data...
+        </div>
+      )}
+      {quotaWait && (
+        <div
+          className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 dark:border-amber-700/50 dark:bg-amber-950/30 px-3 py-2 text-sm text-amber-800 dark:text-amber-200"
+          data-testid="banner-quota-wait-mgmt"
+        >
+          <Info className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            Your data is loading — Google briefly limits how fast sheets can be
+            read. This resolves itself within a minute; this page will retry
+            automatically.
+          </span>
         </div>
       )}
       {error && (

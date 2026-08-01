@@ -120,10 +120,20 @@ function spreadsheetIdFromPath(path: string): string {
 
 export class SheetsQuotaError extends Error {
   readonly status = 429;
-  constructor(message: string) {
+  /** Seconds until the negative-cache window expires and a retry can succeed. */
+  readonly retryAfterSeconds: number;
+  constructor(message: string, retryAfterSeconds = 60) {
     super(message);
     this.name = "SheetsQuotaError";
+    this.retryAfterSeconds = retryAfterSeconds;
   }
+}
+
+export function isSheetsQuotaError(err: unknown): err is SheetsQuotaError {
+  return (
+    err instanceof SheetsQuotaError ||
+    (err instanceof Error && err.name === "SheetsQuotaError")
+  );
 }
 
 function throwIfQuotaBlocked(spreadsheetId: string): void {
@@ -133,9 +143,11 @@ function throwIfQuotaBlocked(spreadsheetId: string): void {
     _quotaBlockedUntil.delete(spreadsheetId);
     return;
   }
+  const remainingSec = Math.max(1, Math.ceil((until - Date.now()) / 1000));
   throw new SheetsQuotaError(
     `Sheets read quota exhausted for spreadsheet ${spreadsheetId} — ` +
-      `blocked for ${Math.ceil((until - Date.now()) / 1000)}s (negative cache)`,
+      `blocked for ${remainingSec}s (negative cache)`,
+    remainingSec,
   );
 }
 

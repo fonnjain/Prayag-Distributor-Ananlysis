@@ -1,6 +1,7 @@
 // Management Reports: filter options + Excel generation.
 import { Router, type IRouter, type Request, type Response } from "express";
 import { loadRoster, mgmtSources } from "../lib/mgmt/roster.js";
+import { respondIfQuotaError } from "../lib/quotaResponse.js";
 import { resolveOrderFileId, getOrderLoadStatus } from "../lib/mgmt/orders.js";
 import {
   buildManagementWorkbook,
@@ -672,6 +673,7 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
     }
     res.json(responsePayload);
   } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
     req.log.error({ err, fy }, "mgmt data failed");
     res.status(500).json({
       error:

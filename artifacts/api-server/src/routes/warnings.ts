@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { loadDeepDiveData } from "../lib/mgmt/deepDiveData.js";
+import { respondIfQuotaError } from "../lib/quotaResponse.js";
 import { loadStateDashboard, type SecMember } from "../lib/mgmt/stateDashboard.js";
 import { buildMemberPayload } from "../lib/mgmt/aiPayload.js";
 import {
@@ -254,6 +255,7 @@ router.get("/warnings", async (req, res) => {
 
     res.json(response);
   } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
     req.log?.error({ err }, "warnings: error");
     res.status(500).json({ error: "Internal server error" });
   }

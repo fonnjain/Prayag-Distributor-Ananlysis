@@ -5,6 +5,7 @@
 - [Prayag Sheets transform](prayag-sheets-transform.md) — tab/column mapping + control total 3,417,311,917; use MONTHLY not Combined; cell helpers coerce string cells; snapshot/fallback model.
 - [Prayag register ingestion](prayag-register-ingestion.md) — line_uid excludes invoice_no; occurrence counted over all rows pre-filter; month year from FY column; Sheets chunked reads + 429 backoff.
 - [sale_line dedupe and occurrence stability](sale-line-dedupe-occurrence.md) — deleting rows cascades occurrence-count drift; always clear+re-sync whole FY; two-guard dedup (dedupeByNaturalKey + unique index); closed-months anchor for open FYs.
+- [Sheets quota surfaced to frontend](sheets-quota-frontend.md) — quota travels as 503 {quota,retryAfter} OR as a flag on a 200 fallback payload; consumers must check both.
 - [Sheets 429 coalescing + negative cache](sheets-429-coalescing.md) — sheetsApi coalesces identical GETs (60s snapshot) and negative-caches 429 per spreadsheet; new loaders get this free via sheetsGet.
 - [Sheets loader concurrency rules](sheets-loader-concurrency.md) — dedupe in-flight Sheets reads next to TTL caches; never keep per-request report state in module-level mutables.
 - [Prayag Target Master conventions](prayag-target-master.md) — single writable-sheet allowlist; split rule = per-capita for no-data members then pro-rata; serialized upserts overwrite all key duplicates.
