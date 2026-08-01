@@ -14,7 +14,8 @@
 //   - "None-assigned" panel includes visit-effort share observation.
 //   - Flow gap is an observation, not an accusation (cannot distinguish stock
 //     building from channel leakage from this data).
-import { useState, useEffect, useCallback, Fragment } from "react";
+import { useState, useEffect, useCallback, useRef, Fragment } from "react";
+import { QuotaWaitBanner, quotaDelayMs, quotaOrThrow } from "./quotaWait";
 import { useGlobalFilter } from "@/data/global-filter-context";
 import {
   AlertTriangle,
@@ -1987,25 +1988,53 @@ export default function DistributorDeepDive() {
   const [loading, setLoading]     = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [expandedDist, setExpandedDist] = useState<string | null>(null);
+  // True while Google Sheets is briefly rate-limiting reads (503 quota);
+  // a retry is scheduled automatically after the server's retryAfter hint.
+  const [quotaWait, setQuotaWait] = useState(false);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Request generation counter: each user-initiated load bumps it, so a stale
+  // quota retry (or late response) from an earlier selection never commits.
+  const reqSeq = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      if (retryTimer.current !== undefined) clearTimeout(retryTimer.current);
+    };
+  }, []);
 
   const load = useCallback(async (fyVal: string, stateHeadVal: string) => {
+    const seq = ++reqSeq.current;
+    // A new load supersedes any pending quota retry.
+    if (retryTimer.current !== undefined) clearTimeout(retryTimer.current);
+    setQuotaWait(false);
     setLoading(true);
     setFetchError(null);
     try {
       const params = new URLSearchParams({ fy: fyVal });
       if (stateHeadVal) params.set("stateHead", stateHeadVal);
       const res = await fetch(`${API}/mgmt/distributor-deep-dive?${params}`);
-      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      if (seq !== reqSeq.current) return; // superseded by a newer load
+      const q = await quotaOrThrow(res);
+      if (q) {
+        setQuotaWait(true);
+        retryTimer.current = setTimeout(
+          () => load(fyVal, stateHeadVal),
+          quotaDelayMs(q.retryAfter),
+        );
+        return;
+      }
       const json: DistributorDeepDiveResult = await res.json();
+      if (seq !== reqSeq.current) return;
       setData(json);
       // Auto-populate state head from first available if the selector is empty.
       if (!stateHeadVal && json.stateHeads.length > 0) {
         setStateHead(json.stateHeads[0]);
       }
     } catch (err) {
+      if (seq !== reqSeq.current) return;
       setFetchError(err instanceof Error ? err.message : "Load failed");
     } finally {
-      setLoading(false);
+      if (seq === reqSeq.current) setLoading(false);
     }
   }, []);
 
@@ -2062,6 +2091,9 @@ export default function DistributorDeepDive() {
           </span>
         )}
       </div>
+
+      {/* ── Quota wait ─────────────────────────────────────────────── */}
+      {quotaWait && <QuotaWaitBanner testId="banner-quota-wait-distributor-deep-dive" />}
 
       {/* ── Error ──────────────────────────────────────────────────── */}
       {fetchError && (

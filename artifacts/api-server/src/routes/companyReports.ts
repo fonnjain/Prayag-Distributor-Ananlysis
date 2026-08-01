@@ -7,6 +7,7 @@
 //   3. Live data from sale_line (populated from live register chain).
 import { Router } from "express";
 import { buildCompanyReports } from "../lib/companyReports.js";
+import { respondIfQuotaError } from "../lib/quotaResponse.js";
 
 const router = Router();
 
@@ -30,6 +31,7 @@ router.get("/company-reports", async (req, res) => {
     const payload = await buildCompanyReports(rawFy, rawAsOf);
     res.json(payload);
   } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
     req.log.error({ err }, "company-reports error");
     res.status(500).json({ error: "Failed to compute company reports" });
   }

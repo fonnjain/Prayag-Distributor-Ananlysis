@@ -963,6 +963,7 @@ router.get("/mgmt/pending-orders", async (req: Request, res: Response): Promise<
     const result = await loadFactoryPending();
     res.json(result);
   } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
     req.log.error({ err }, "pending-orders: loadFactoryPending threw");
     res.status(500).json({ error: "Could not load factory pending data." });
   }
@@ -1022,6 +1023,7 @@ router.get("/mgmt/deep-dive", async (req: Request, res: Response): Promise<void>
 
     res.json(result);
   } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
     req.log.error({ err }, "mgmt/deep-dive: handler threw");
     res.status(500).json({ error: "Could not load deep-dive data." });
   }
@@ -1041,6 +1043,7 @@ router.get("/mgmt/distributor-deep-dive", async (req: Request, res: Response): P
     const result = await loadDistributorDeepDive(fy, stateHead);
     res.json(result);
   } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
     req.log.error({ err }, "mgmt/distributor-deep-dive: handler threw");
     res.status(500).json({ error: "Could not load distributor deep-dive data." });
   }

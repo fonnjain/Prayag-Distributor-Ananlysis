@@ -6,6 +6,7 @@
 //   RULE 2 — LITRE RULE: Report 4 qty is per-group only, never cross-group total.
 //   RULE 3 — LIVE DATA: sale_line populated from live register chain.
 import { useState, useEffect, useMemo } from "react";
+import { QuotaWaitBanner, quotaDelayMs } from "./quotaWait";
 import { AlertTriangle, Info, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -743,18 +744,47 @@ export default function CompanyReports() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeReport, setActiveReport] = useState<ReportId>("1");
+  // True while Google Sheets is briefly rate-limiting reads (503 quota);
+  // the effect auto-retries after the server's retryAfter hint.
+  const [quotaWait, setQuotaWait] = useState(false);
+  const [retryTick, setRetryTick] = useState(0);
 
   useEffect(() => {
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     setLoading(true);
     setError(null);
     fetch(`/api/company-reports?fy=${encodeURIComponent(fy)}`)
       .then((r) => {
-        if (!r.ok) return r.json().then((e: { error?: string }) => { throw new Error(e.error ?? r.statusText); });
+        if (!r.ok)
+          return r
+            .json()
+            .then((e: { error?: string; quota?: boolean; retryAfter?: number }) => {
+              if (r.status === 503 && e.quota) {
+                // Google Sheets read quota window — show a friendly wait
+                // state and retry automatically once the window resets.
+                setQuotaWait(true);
+                setLoading(false);
+                retryTimer = setTimeout(
+                  () => setRetryTick((t) => t + 1),
+                  quotaDelayMs(e.retryAfter),
+                );
+                return null;
+              }
+              throw new Error(e.error ?? r.statusText);
+            });
         return r.json() as Promise<Payload>;
       })
-      .then((d) => { setData(d); setLoading(false); })
-      .catch((err: Error) => { setError(err.message); setLoading(false); });
-  }, [fy]);
+      .then((d) => {
+        if (d === null) return; // quota wait — retry scheduled
+        setQuotaWait(false);
+        setData(d);
+        setLoading(false);
+      })
+      .catch((err: Error) => { setQuotaWait(false); setError(err.message); setLoading(false); });
+    return () => {
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+    };
+  }, [fy, retryTick]);
 
   // Report 2: same data as Report 1 but sorted by growth
   const report2Rows = useMemo((): ReportRow[] => {
@@ -797,6 +827,7 @@ export default function CompanyReports() {
 
       {/* Loading / error */}
       {loading && <div className="py-12 text-center text-sm text-muted-foreground">Loading reports...</div>}
+      {quotaWait && <QuotaWaitBanner testId="banner-quota-wait-company-reports" />}
       {error && <div className="py-6 text-center text-sm text-destructive">{error}</div>}
 
       {!loading && data && (

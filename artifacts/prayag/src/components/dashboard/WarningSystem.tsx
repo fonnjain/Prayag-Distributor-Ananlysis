@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { QuotaWaitBanner, quotaDelayMs, quotaOrThrow } from "./quotaWait";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -402,26 +403,42 @@ export default function WarningSystem() {
   const [data, setData] = useState<WarningsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // True while Google Sheets is briefly rate-limiting reads (503 quota);
+  // a retry is scheduled automatically after the server's retryAfter hint.
+  const [quotaWait, setQuotaWait] = useState(false);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Request generation counter: each user-initiated load bumps it, so a stale
+  // quota retry (or late response) from an earlier selection never commits.
+  const reqSeq = useRef(0);
 
   const load = useCallback(
     async (sh: string) => {
+      const seq = ++reqSeq.current;
+      // A new load supersedes any pending quota retry.
+      if (retryTimer.current !== undefined) clearTimeout(retryTimer.current);
+      setQuotaWait(false);
       setLoading(true);
       setError(null);
       try {
         const res = await fetch(
           `${API}/warnings?fy=${encodeURIComponent(fy)}&stateHead=${encodeURIComponent(sh)}`,
         );
-        if (!res.ok) {
-          const j = await res.json().catch(() => ({}));
-          throw new Error((j as { error?: string }).error ?? `HTTP ${res.status}`);
+        if (seq !== reqSeq.current) return; // superseded by a newer load
+        const q = await quotaOrThrow(res);
+        if (q) {
+          setQuotaWait(true);
+          retryTimer.current = setTimeout(() => load(sh), quotaDelayMs(q.retryAfter));
+          return;
         }
         const json = (await res.json()) as WarningsResponse;
+        if (seq !== reqSeq.current) return;
         setData(json);
         setStateHead(json.stateHead);
       } catch (e) {
+        if (seq !== reqSeq.current) return;
         setError((e as Error).message);
       } finally {
-        setLoading(false);
+        if (seq === reqSeq.current) setLoading(false);
       }
     },
     [fy],
@@ -429,6 +446,9 @@ export default function WarningSystem() {
 
   useEffect(() => {
     load(stateHead);
+    return () => {
+      if (retryTimer.current !== undefined) clearTimeout(retryTimer.current);
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
@@ -467,6 +487,9 @@ export default function WarningSystem() {
           {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Refresh"}
         </Button>
       </div>
+
+      {/* Quota wait */}
+      {quotaWait && <QuotaWaitBanner testId="banner-quota-wait-warnings" />}
 
       {/* Error */}
       {error && (

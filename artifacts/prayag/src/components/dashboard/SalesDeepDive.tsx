@@ -3,7 +3,8 @@
 // Phase 2: member's own working sheet retailer-level detail (source B).
 // Direct Dealer order kept separate from retailer/party OB throughout.
 // Achievement always recomputed (sale / plan); never read from a sheet % cell.
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { QuotaWaitBanner, quotaDelayMs, quotaOrThrow } from "./quotaWait";
 import { cn } from "@/lib/utils";
 import { SalesPersonReport } from "./SalesPersonReport";
 import { useGlobalFilter, isFyClosed } from "@/data/global-filter-context";
@@ -2150,31 +2151,65 @@ export default function SalesDeepDive() {
   const [data, setData] = useState<DeepDiveData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // True while Google Sheets is briefly rate-limiting reads (503 quota);
+  // a retry is scheduled automatically after the server's retryAfter hint.
+  const [quotaWait, setQuotaWait] = useState(false);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Request generation counter: each user-initiated load bumps it, so a stale
+  // quota retry (or late response) from an earlier selection never commits.
+  const reqSeq = useRef(0);
+
+  // Called at the start of every load: supersede any pending quota retry.
+  const beginRequest = useCallback((): number => {
+    if (retryTimer.current !== undefined) clearTimeout(retryTimer.current);
+    setQuotaWait(false);
+    return ++reqSeq.current;
+  }, []);
+
+  const scheduleRetry = useCallback((retryAfter: number, fn: () => void) => {
+    setQuotaWait(true);
+    retryTimer.current = setTimeout(fn, quotaDelayMs(retryAfter));
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (retryTimer.current !== undefined) clearTimeout(retryTimer.current);
+    };
+  }, []);
 
   const fetchSelectors = useCallback(
     async (newFy: string, newHead: string) => {
+      const seq = beginRequest();
       setLoading(true);
       setError(null);
       try {
         const params = new URLSearchParams({ fy: newFy });
         if (newHead) params.set("stateHead", newHead);
         const r = await fetch(`${API}/mgmt/deep-dive?${params}`);
-        if (!r.ok) throw new Error(await r.text());
+        if (seq !== reqSeq.current) return; // superseded by a newer load
+        const q = await quotaOrThrow(r);
+        if (q) {
+          scheduleRetry(q.retryAfter, () => fetchSelectors(newFy, newHead));
+          return;
+        }
         const d: DeepDiveData = await r.json();
+        if (seq !== reqSeq.current) return;
         setData(d);
         setSelectedMemberKey("");
       } catch (e) {
+        if (seq !== reqSeq.current) return;
         setError(e instanceof Error ? e.message : String(e));
       } finally {
-        setLoading(false);
+        if (seq === reqSeq.current) setLoading(false);
       }
     },
-    [],
+    [beginRequest, scheduleRetry],
   );
 
   const fetchKpis = useCallback(
     async (newFy: string, newHead: string, memberKey: string) => {
       if (!memberKey) return;
+      const seq = beginRequest();
       setLoading(true);
       setError(null);
       try {
@@ -2182,16 +2217,23 @@ export default function SalesDeepDive() {
         if (newHead) params.set("stateHead", newHead);
         params.set("member", memberKey);
         const r = await fetch(`${API}/mgmt/deep-dive?${params}`);
-        if (!r.ok) throw new Error(await r.text());
+        if (seq !== reqSeq.current) return; // superseded by a newer load
+        const q = await quotaOrThrow(r);
+        if (q) {
+          scheduleRetry(q.retryAfter, () => fetchKpis(newFy, newHead, memberKey));
+          return;
+        }
         const d: DeepDiveData = await r.json();
+        if (seq !== reqSeq.current) return;
         setData(d);
       } catch (e) {
+        if (seq !== reqSeq.current) return;
         setError(e instanceof Error ? e.message : String(e));
       } finally {
-        setLoading(false);
+        if (seq === reqSeq.current) setLoading(false);
       }
     },
-    [],
+    [beginRequest, scheduleRetry],
   );
 
   // Reload selectors whenever the global FY changes (or on first mount).
@@ -2282,6 +2324,9 @@ export default function SalesDeepDive() {
       <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border/50">
         <DateFilterBar fyLabel={fy} value={dateFilter} onChange={setDateFilter} />
       </div>
+
+      {/* Quota wait banner */}
+      {quotaWait && <QuotaWaitBanner testId="banner-quota-wait-deep-dive" />}
 
       {/* Error banner */}
       {error && (
