@@ -73,9 +73,22 @@ Note: the DB copy `primary_order_line` is stale (last ingested 20 Jul, July only
 
 The reference (Part 11) predicted the app was ₹1.46 Cr high on July and said the DB should hold 11,454 rows. Following the reference's own rule ("re-read the source before treating any difference as a bug"), a **force-resync was run at 09:36** — it re-read the live `SALE SHEET 26-27` July tab and got **11,848 rows / ₹27.36 Cr from the sheet itself** (sync log: `rowsWritten: 11848, amountCr: 27.36`). The DB, API and sheet are now in exact agreement.
 
-**Conclusion: the sheet gained/regained ~394 rows / ₹1.46 Cr between the reference snapshot and 09:36.** Either the cleanup the reference observed was reverted, or new July invoices were entered on 1 Aug. **This needs a decision from the data owners** — if those 394 rows are the ones the cleanup was meant to delete, the deletion needs to be redone *in the sheet*; the app will follow within the nightly sync (July freezes on 7 Aug — resolve before then). Row-count to watch: July = 11,454 (per reference) vs 11,848 (current sheet).
+**Conclusion: the sheet gained/regained ~394 rows / ₹1.46 Cr between the reference snapshot and 09:36.** Either the cleanup the reference observed was reverted, or new July invoices were entered on 1 Aug. DB-side analysis found only 3 near-duplicate rows (₹0.00 net extra) — the 394-row difference is invoice-dated 29–31 Jul and appears to be genuine late entries, not residual cleanup rows.
 
-Pending ₹10.15 vs ₹11.60 and YTD ₹100.17 vs ₹98.71 are the same single fact, exactly as the reference describes ("one fault, three symptoms").
+**Decision (1 Aug 2026): the authoritative source is the live SALE SHEET 26-27.** The app must match whatever the sheet holds at freeze time. Data owners will review the sheet before 7 Aug and remove any rows that should not be there; a force-resync must be run immediately after any sheet edits so the DB reflects the final state before the freeze guard activates.
+
+### July freeze checklist (complete before 7 Aug 2026)
+
+1. **Data owners:** open `SALE SHEET 26-27` → July tab and verify the row count is correct.
+   - If rows need to be removed: delete them in the sheet, then run `POST /api/registers/2026-27/force-resync`.
+   - If the sheet is correct as-is (11,848 rows / ₹27.36 Cr): no action needed — nightly sync will keep the DB aligned until the freeze.
+2. **After any sheet edit:** confirm the API returns the expected figure:
+   ```
+   curl "$API_BASE/api/mgmt/data" | jq '.months["jul-26"]'
+   ```
+3. **On or before 7 Aug:** the month freeze guard will lock July automatically. Verify `frozen_months` in the sync log includes `jul-26`.
+
+Pending ₹10.15 vs ₹11.60 and YTD ₹100.17 vs ₹98.71 are the same single fact — both will resolve once July is finalised in the sheet.
 
 ## 8. Glossary-conformance spot checks (G1–G4)
 
@@ -99,4 +112,4 @@ User-reported gap: headings and tile descriptions did not state the selected per
 
 ## 10. Verdict
 
-Data layer: **all anchors exact** except July FY2026-27, which tracks a moving source (decision needed from data owners before the 7 Aug freeze). Application periods (month / quarter / YTD / full-year) filter correctly on primary sale and OB; secondary Sales Received is the one figure that ignores the period filter (partly by design — needs an explicit label or scoping). UI now states the selected period in headings and tiles on both performance pages.
+Data layer: **all anchors exact** except July FY2026-27, which will be finalised by data owners in the sheet before the 7 Aug freeze (checklist in §7). Application periods (month / quarter / YTD / full-year) filter correctly on primary sale and OB; secondary Sales Received is the one figure that ignores the period filter (partly by design — needs an explicit label or scoping). UI now states the selected period in headings and tiles on both performance pages.
