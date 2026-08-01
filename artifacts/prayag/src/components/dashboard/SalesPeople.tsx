@@ -10,6 +10,7 @@
 // Primary-role members (19) have no SOBR row → monthly cells show "—" (FY data only).
 // FY + month selection driven by the global filter context (GlobalFilterBar).
 import { useState, useEffect, useMemo } from "react";
+import { achBandText } from "@/lib/achievementBands";
 import { useGlobalFilter, type FiscalMonthIdx, FISCAL_MONTH_NAMES } from "@/data/global-filter-context";
 
 const FISCAL_MONTHS = FISCAL_MONTH_NAMES;
@@ -77,11 +78,9 @@ function isFutureMonth(fiscalIdx: number, fy: string): boolean {
   return false;
 }
 
+// Shared band scale — single source of truth in lib/achievementBands.ts.
 function achClass(pct: number | null): string {
-  if (pct == null) return "text-muted-foreground";
-  if (pct >= 100) return "text-green-600 dark:text-green-400 font-semibold";
-  if (pct >= 75) return "text-amber-600 dark:text-amber-400";
-  return "text-red-600 dark:text-red-400";
+  return achBandText(pct);
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────

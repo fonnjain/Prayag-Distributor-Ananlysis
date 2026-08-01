@@ -7,6 +7,7 @@ import { Loader2 } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { QuotaWaitBanner, quotaDelayMs, quotaOrThrow } from "./quotaWait";
 import { cn } from "@/lib/utils";
+import { achBandBg, achBandText } from "@/lib/achievementBands";
 import { SalesPersonReport } from "./SalesPersonReport";
 import { useGlobalFilter, isFyClosed } from "@/data/global-filter-context";
 
@@ -320,13 +321,8 @@ function fmtRsWhole(v: number | null | undefined): string {
 
 // ── Band colour for achievement / active% ─────────────────────────────────────
 
-function achieveBand(pct: number | null): string {
-  if (pct == null) return "bg-muted text-muted-foreground";
-  if (pct >= 100) return "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300";
-  if (pct >= 70)  return "bg-blue-100  text-blue-800  dark:bg-blue-900/40  dark:text-blue-300";
-  if (pct >= 50)  return "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300";
-  return              "bg-red-100   text-red-800   dark:bg-red-900/40   dark:text-red-300";
-}
+// Shared band scale — single source of truth in lib/achievementBands.ts.
+const achieveBand = achBandBg;
 
 function activeBand(pct: number): string {
   if (pct >= 60) return "text-green-700 dark:text-green-400";
@@ -394,13 +390,8 @@ function ConcentrationBar({ hhi }: { hhi: number }) {
 
 // ── Achievement text colour (for table cells, not pill badges) ────────────────
 
-function achieveBandText(pct: number | null): string {
-  if (pct == null) return "text-muted-foreground";
-  if (pct >= 100) return "text-green-700 dark:text-green-400 font-semibold";
-  if (pct >= 70)  return "text-blue-700  dark:text-blue-400";
-  if (pct >= 50)  return "text-amber-700 dark:text-amber-400";
-  return                  "text-red-700   dark:text-red-400";
-}
+// Shared band scale — single source of truth in lib/achievementBands.ts.
+const achieveBandText = achBandText;
 
 // ── Team summary panel (SD1: shown when a state head is chosen, no member) ────
 
@@ -1795,10 +1786,8 @@ function PeriodSelectorPanel({ kpis, months, dateFilterLabel }: PeriodSelectorPa
   };
   const priorYear = priorYearMap[period] ?? null;
 
-  const achColor = (pct: number) =>
-    pct >= 100 ? "text-green-600 dark:text-green-400"
-    : pct >= 60  ? "text-yellow-600 dark:text-yellow-400"
-    : "text-red-600 dark:text-red-400";
+  // Shared band scale — single source of truth in lib/achievementBands.ts.
+  const achColor = (pct: number) => achBandText(pct);
 
   return (
     <div className="rounded-lg border border-border bg-card p-4 space-y-3">

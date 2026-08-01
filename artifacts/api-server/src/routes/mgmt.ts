@@ -318,13 +318,13 @@ function serialDate(n: number | null): string | null {
   });
 }
 
-function achBand(pct: number | null, hasTarget: boolean): string {
+export function achBand(pct: number | null, hasTarget: boolean): string {
   if (!hasTarget || pct == null) return "noTarget";
   if (pct < 0.25) return "below25";
   if (pct < 0.50) return "below50";
   if (pct < 0.70) return "50to70";
   if (pct < 0.90) return "70to90";
-  if (pct < 1.00) return "90to100";
+  if (pct <= 1.00) return "90to100"; // Glossary v2: Emerald is strictly >100
   return "above100";
 }
 

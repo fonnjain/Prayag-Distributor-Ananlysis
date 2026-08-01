@@ -1,4 +1,5 @@
 import { LoadingState } from "@/components/ui/loading-state";
+import { BAND_LABEL, BAND_BG } from "@/lib/achievementBands";
 import { useState, useEffect, useMemo } from "react";
 import { useGlobalFilter } from "@/data/global-filter-context";
 import {
@@ -196,25 +197,7 @@ function openFiscalMonthsInPeriod(fy: string, fromFm: number, toFm: number): str
   return open;
 }
 
-const BAND_LABEL: Record<string, string> = {
-  below25: "<25%",
-  below50: "25-50%",
-  "50to70": "50-70%",
-  "70to90": "70-90%",
-  "90to100": "90-100%",
-  above100: ">100%",
-  noTarget: "No Target",
-};
-
-const BAND_BG: Record<string, string> = {
-  below25: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
-  below50: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
-  "50to70": "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-  "70to90": "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
-  "90to100": "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300",
-  above100: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
-  noTarget: "bg-muted text-muted-foreground",
-};
+// Shared band scale — single source of truth in lib/achievementBands.ts.
 
 const VIEWS: { id: View; label: string }[] = [
   { id: "data", label: "Data" },

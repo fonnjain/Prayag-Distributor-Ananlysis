@@ -19,6 +19,7 @@ import { useState, useEffect, useMemo, Fragment } from "react";
 import { AlertTriangle, ChevronUp, ChevronDown, Info } from "lucide-react";
 import { useGlobalFilter } from "@/data/global-filter-context";
 import { cn } from "@/lib/utils";
+import { achBandBg, achBandText } from "@/lib/achievementBands";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -111,12 +112,9 @@ function fmtNum(n: number | null | undefined): string {
   return n.toLocaleString("en-IN");
 }
 
+// Shared band scale — single source of truth in lib/achievementBands.ts.
 function achColor(pct: number | null): string {
-  if (pct == null) return "text-muted-foreground";
-  const p = pct * 100;
-  if (p >= 100) return "text-emerald-600 dark:text-emerald-400";
-  if (p >= 70) return "text-amber-600 dark:text-amber-400";
-  return "text-red-600 dark:text-red-400";
+  return achBandText(pct == null ? null : pct * 100);
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -124,12 +122,7 @@ function achColor(pct: number | null): string {
 function AchBadge({ pct }: { pct: number | null }) {
   if (pct == null) return null;
   const p = pct * 100;
-  const cls =
-    p >= 100
-      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-      : p >= 70
-        ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
-        : "bg-red-500/15 text-red-700 dark:text-red-400";
+  const cls = achBandBg(p);
   return (
     <span className={cn("ml-1.5 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium", cls)}>
       {p.toFixed(0)}%

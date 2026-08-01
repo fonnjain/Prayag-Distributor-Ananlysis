@@ -21,6 +21,7 @@ import {
   Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { achBandText } from "@/lib/achievementBands";
 import { QuotaWaitBanner, quotaDelayMs, quotaOrThrow } from "./quotaWait";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -948,11 +949,7 @@ export default function PrimaryPerformanceDashboard() {
                         <p
                           className={cn(
                             "text-[11px] font-semibold mt-0.5",
-                            ct.achievementPct >= 100
-                              ? "text-emerald-600 dark:text-emerald-400"
-                              : ct.achievementPct >= 75
-                                ? "text-amber-600 dark:text-amber-400"
-                                : "text-destructive",
+                            achBandText(ct.achievementPct),
                           )}
                         >
                           {ct.achievementPct.toFixed(1)}%
@@ -1000,11 +997,7 @@ export default function PrimaryPerformanceDashboard() {
                           <span
                             className={cn(
                               "ml-2 text-xs font-semibold",
-                              head.achievementPct >= 100
-                                ? "text-emerald-600 dark:text-emerald-400"
-                                : head.achievementPct >= 75
-                                  ? "text-amber-600 dark:text-amber-400"
-                                  : "text-destructive",
+                              achBandText(head.achievementPct),
                             )}
                           >
                             {head.achievementPct.toFixed(1)}%
@@ -1129,13 +1122,7 @@ export default function PrimaryPerformanceDashboard() {
                                         "px-2 py-1.5 text-right font-semibold",
                                         st.isNewTerritory
                                           ? "text-blue-500"
-                                          : st.achievementPct == null
-                                            ? "text-muted-foreground"
-                                            : st.achievementPct >= 100
-                                              ? "text-emerald-600 dark:text-emerald-400"
-                                              : st.achievementPct >= 75
-                                                ? "text-amber-600 dark:text-amber-400"
-                                                : "text-destructive",
+                                          : achBandText(st.achievementPct),
                                       )}
                                     >
                                       {st.isNewTerritory
@@ -1192,13 +1179,7 @@ export default function PrimaryPerformanceDashboard() {
                                   <span
                                     className={cn(
                                       "px-2 py-1.5 text-right font-semibold",
-                                      head.achievementPct == null
-                                        ? "text-muted-foreground"
-                                        : head.achievementPct >= 100
-                                          ? "text-emerald-600 dark:text-emerald-400"
-                                          : head.achievementPct >= 75
-                                            ? "text-amber-600 dark:text-amber-400"
-                                            : "text-destructive",
+                                      achBandText(head.achievementPct),
                                     )}
                                   >
                                     {head.achievementPct != null ? `${head.achievementPct.toFixed(1)}%` : "—"}
