@@ -11,6 +11,8 @@ import { db, primaryStateTargets } from "@workspace/db";
 import { and, eq, inArray } from "drizzle-orm";
 import { resolveHeadKey } from "../lib/mgmt/names.js";
 import { loadOrderBookByState } from "../lib/mgmt/orderBookByState.js";
+import { isSheetsQuotaError } from "../lib/registers/sheetsApi.js";
+import { respondIfQuotaError } from "../lib/quotaResponse.js";
 
 const router = Router();
 
@@ -124,10 +126,14 @@ router.get(
       }
 
       // 2. Load order-booking actuals by (head, state, month) from the live sheet
-      const bookingResult = await loadOrderBookByState().catch((err: unknown) => ({
-        amounts: new Map<string, number>(),
-        error: err instanceof Error ? err.message : String(err),
-      }));
+      const bookingResult = await loadOrderBookByState().catch((err: unknown) => {
+        // Quota errors must reach the outer catch → respondIfQuotaError (503).
+        if (isSheetsQuotaError(err)) throw err;
+        return {
+          amounts: new Map<string, number>(),
+          error: err instanceof Error ? err.message : String(err),
+        };
+      });
       const actualsAvailable = bookingResult.error === null;
 
       // 3. Collect distinct months in fiscal-calendar order (Apr → Mar), not alphabetical.
@@ -265,6 +271,7 @@ router.get(
         actualsError: bookingResult.error,
       });
     } catch (err) {
+      if (respondIfQuotaError(err, res)) return;
       req.log.error({ err, fy }, "primary-targets/state-achievement failed");
       res.status(500).json({ error: "Could not load state achievement data." });
     }

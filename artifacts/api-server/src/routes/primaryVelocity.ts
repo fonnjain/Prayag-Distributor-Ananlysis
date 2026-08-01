@@ -12,6 +12,7 @@ import { db, primaryStateTargets } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { resolveHeadKey } from "../lib/mgmt/names.js";
 import { loadVelocityDailyBooking } from "../lib/mgmt/velocityReader.js";
+import { respondIfQuotaError } from "../lib/quotaResponse.js";
 import pacingConfig from "../../config/pacing_curve.json";
 
 const router = Router();
@@ -367,6 +368,7 @@ router.get(
         asOf: now.toISOString(),
       });
     } catch (err) {
+      if (respondIfQuotaError(err, res)) return;
       const msg = err instanceof Error ? err.message : String(err);
       req.log.error({ err }, "primaryVelocity: unhandled error");
       res.status(500).json({ error: msg });

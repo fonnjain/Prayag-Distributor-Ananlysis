@@ -10,6 +10,7 @@
 import {
   listSheetTabs,
   readTabRowsChunked,
+  isSheetsQuotaError,
   type SheetCellValue,
 } from "../registers/sheetsApi.js";
 import { resolveHeadKey, parseOrderDate, serialToDate } from "./names.js";
@@ -179,6 +180,9 @@ export async function loadVelocityDailyBooking(
     _cache = { ts: now, result };
     return result;
   } catch (err) {
+    // Let the Sheets quota window propagate so routes can respond 503 + quota
+    // flag (respondIfQuotaError) instead of a generic degraded payload.
+    if (isSheetsQuotaError(err)) throw err;
     const error = err instanceof Error ? err.message : String(err);
     logger.warn({ err }, "velocityReader: failed to load");
     return { dailyByHead, totalByHead, hasDateData: false, calMonth, calYear, tabTitle: "", error };

@@ -11,6 +11,7 @@
 import {
   listSheetTabs,
   readTabRowsChunked,
+  isSheetsQuotaError,
   type SheetCellValue,
 } from "../registers/sheetsApi.js";
 import { resolveHeadKey } from "./names.js";
@@ -161,6 +162,9 @@ export async function loadOrderBookByState(): Promise<StateBookingResult> {
     );
     return result;
   } catch (err) {
+    // Let the Sheets quota window propagate so routes can respond 503 + quota
+    // flag (respondIfQuotaError) instead of a generic degraded payload.
+    if (isSheetsQuotaError(err)) throw err;
     const error = err instanceof Error ? err.message : String(err);
     logger.warn({ err }, "orderBookByState: failed to load");
     return { amounts: new Map(), error };

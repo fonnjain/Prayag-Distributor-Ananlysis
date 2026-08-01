@@ -357,6 +357,10 @@ export default function PrimaryPerformanceDashboard() {
   // a retry is scheduled automatically after the server's retryAfter hint.
   const [quotaWait, setQuotaWait] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
+  const [stateQuotaWait, setStateQuotaWait] = useState(false);
+  const [stateRetryTick, setStateRetryTick] = useState(0);
+  const [velocityQuotaWait, setVelocityQuotaWait] = useState(false);
+  const [velocityRetryTick, setVelocityRetryTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -404,36 +408,82 @@ export default function PrimaryPerformanceDashboard() {
   // Lazy-fetch state targets only when that view is active
   useEffect(() => {
     if (view !== "stateTargets") return;
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     setStateLoading(true);
     setStateError(null);
+    setStateQuotaWait(false);
     fetch(`/api/primary-targets/state-achievement?fy=${encodeURIComponent(fy)}`)
-      .then((r) => {
-        if (!r.ok)
-          return r.json().then((e: { error?: string }) => {
-            throw new Error(e.error ?? r.statusText);
-          });
+      .then(async (r) => {
+        const q = await quotaOrThrow(r);
+        if (q) {
+          if (!cancelled) {
+            setStateQuotaWait(true);
+            setStateLoading(false);
+            retryTimer = setTimeout(
+              () => setStateRetryTick((t) => t + 1),
+              quotaDelayMs(q.retryAfter),
+            );
+          }
+          return null;
+        }
         return r.json() as Promise<StateAchievementResponse>;
       })
-      .then((d) => { setStateData(d); setStateLoading(false); })
-      .catch((err: Error) => { setStateError(err.message); setStateLoading(false); });
-  }, [fy, view]);
+      .then((d) => {
+        if (cancelled || d === null) return;
+        setStateData(d);
+        setStateLoading(false);
+      })
+      .catch((err: Error) => {
+        if (cancelled) return;
+        setStateError(err.message);
+        setStateLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+    };
+  }, [fy, view, stateRetryTick]);
 
   // Lazy-fetch velocity only when that view is active; always uses current FY
   useEffect(() => {
     if (view !== "velocity") return;
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     setVelocityLoading(true);
     setVelocityError(null);
+    setVelocityQuotaWait(false);
     fetch(`/api/primary-performance/velocity?fy=${encodeURIComponent(fy)}`)
-      .then((r) => {
-        if (!r.ok)
-          return r.json().then((e: { error?: string }) => {
-            throw new Error(e.error ?? r.statusText);
-          });
+      .then(async (r) => {
+        const q = await quotaOrThrow(r);
+        if (q) {
+          if (!cancelled) {
+            setVelocityQuotaWait(true);
+            setVelocityLoading(false);
+            retryTimer = setTimeout(
+              () => setVelocityRetryTick((t) => t + 1),
+              quotaDelayMs(q.retryAfter),
+            );
+          }
+          return null;
+        }
         return r.json() as Promise<VelocityResponse>;
       })
-      .then((d) => { setVelocityData(d); setVelocityLoading(false); })
-      .catch((err: Error) => { setVelocityError(err.message); setVelocityLoading(false); });
-  }, [fy, view]);
+      .then((d) => {
+        if (cancelled || d === null) return;
+        setVelocityData(d);
+        setVelocityLoading(false);
+      })
+      .catch((err: Error) => {
+        if (cancelled) return;
+        setVelocityError(err.message);
+        setVelocityLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+    };
+  }, [fy, view, velocityRetryTick]);
 
   const toggleHead = (head: string) => {
     setExpandedHeads((prev) => {
@@ -931,6 +981,9 @@ export default function PrimaryPerformanceDashboard() {
               Loading state targets…
             </div>
           )}
+          {stateQuotaWait && (
+            <QuotaWaitBanner testId="banner-quota-wait-state-targets" />
+          )}
           {stateError && (
             <div className="py-6 text-center text-sm text-destructive">{stateError}</div>
           )}
@@ -1220,6 +1273,9 @@ export default function PrimaryPerformanceDashboard() {
         <div className="py-12 text-center text-sm text-muted-foreground">
           Loading velocity data…
         </div>
+      )}
+      {view === "velocity" && velocityQuotaWait && (
+        <QuotaWaitBanner testId="banner-quota-wait-velocity" />
       )}
       {view === "velocity" && velocityError && (
         <div className="py-6 text-center text-sm text-destructive">{velocityError}</div>
