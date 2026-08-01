@@ -1,0 +1,88 @@
+# July inflation — pause now, then fix properly
+
+*Send both parts. The pause is immediate; the design question must be answered before #74 is built.*
+
+---
+
+## Part 1 — Pause production now
+
+```
+Yes - set REGISTER_SYNC_PAUSE=2026-27 in production now.
+
+July on the live site reads Rs 41.26 Cr against Rs 25.90 Cr in the sheet - 59 per
+cent over, roughly 18,000 rows against 11,454. Pending shows MINUS Rs 9.52 Cr,
+which is arithmetically impossible and confirms dispatch is the corrupted side.
+
+The next 6-hourly tick adds a third copy. Pausing costs nothing - the sheet is the
+source of truth and nothing is lost by not reading it for a few hours. Not pausing
+means somebody opens the dashboard this afternoon and sees a figure inflated
+beyond 80 per cent.
+
+Confirm the pause is active and report the next scheduled tick that was skipped.
+```
+
+---
+
+## Part 2 — The proposed key reintroduces the bug it replaces
+
+```
+Prayag app - before building #74, resolve a design contradiction.
+
+Serial number was ADDED to the identity key on 30 July precisely BECAUSE rows
+without it collided. From that session, invoice 72600078 carries two WT-4LC-07
+PINK lines that are identical on invoice, code, colour, qty AND amount - serials
+2506 and 2532. Only the serial separates them.
+
+The proposed key is invoice | code | colour | qty | month + occurrence index,
+dropping serial. That works ONLY if the duplicate rows appear in a stable order.
+If the sheet re-sorts - which is the very fault being fixed - occurrence 1 and
+occurrence 2 swap, and the churn returns under a different name.
+
+The underlying problem is not which field sits in the key. It is that the sheet
+contains genuinely indistinguishable rows and has no stable identifier, so ANY
+positional tiebreaker is hostage to sort order.
+
+ANSWER THESE BEFORE BUILDING:
+
+1. How is the occurrence index derived?
+   If it is assigned by row order as read, it has exactly the same weakness as
+   serial. If it is assigned by sorting the duplicate group deterministically -
+   invoice date, then amount, then a stable hash of the row's own values - then
+   it survives a re-sort. Make that explicit in the design; the distinction is
+   the whole fix.
+
+2. How many rows actually need a tiebreaker?
+   Measured on the sheet: 31 of 11,812 May rows and 25 of 12,868 June rows share
+   all five fields - under 0.3 per cent. If the figure is that small, matching on
+   the five fields alone and accepting ambiguity for those rows may be safer than
+   any positional scheme. Report the count for July.
+
+3. What happens to the 9,910 stale 31-Jul rows under the new key?
+   You propose a normal tombstone pass retires them. Confirm the blast-radius
+   guard will not halt on that volume - it halted at 10 per cent last time, which
+   is what left old and new both counted.
+
+DO NOT clear and re-ingest again. That was done on 30 July and the problem
+returned within 48 hours. Fix the mechanism, then let the tombstone pass work.
+```
+
+---
+
+## Part 3 — For the business, not Replit
+
+**Why does the sheet re-sort at all?**
+
+If someone is sorting `SALE SHEET 26-27` manually, that is a process question with a one-line answer — ask them to stop, or add a stable ID column that never changes.
+
+**A stable identifier at source removes this entire class of problem permanently**, and is far cheaper than defending against re-sorts in code. Worth asking Deepak directly.
+
+---
+
+## Also visible on the same screen
+
+- **Achievement 0.1% with Sales Received showing a dash.** July closed yesterday, so secondary July sales are not entered. Expected — but it should read **"no actuals recorded yet"**, not 0.1%
+- **"169 no target" against a ₹27.45 Cr July target** puts the whole plan on 12 members. Flagged twice without an answer
+
+---
+
+*July sheet figures verified 1 August 2026: 11,454 rows, ₹25.90 Cr*
