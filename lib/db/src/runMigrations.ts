@@ -100,6 +100,20 @@ const MIGRATIONS: Migration[] = [
         ON mgmt_data_snapshot (fy, month_from, month_to);
     `,
   },
+  {
+    id: "005_route_payload_snapshot",
+    sql: `
+      -- Generic cold-start fast path for heavy read-only routes (e.g.
+      -- /api/company-reports, /api/warnings): last successful payload per
+      -- snapshot key. Guarantees the table exists in production where
+      -- drizzle-kit push is not run.
+      CREATE TABLE IF NOT EXISTS route_payload_snapshot (
+        key      TEXT        PRIMARY KEY,
+        payload  JSONB       NOT NULL,
+        saved_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

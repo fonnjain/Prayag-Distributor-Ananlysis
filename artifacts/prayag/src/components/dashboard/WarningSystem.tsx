@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { QuotaWaitBanner, quotaDelayMs, quotaOrThrow } from "./quotaWait";
+import { SnapshotBanner, useSnapshotRefresh } from "./snapshotRefresh";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -77,6 +78,8 @@ interface WarningsResponse {
     membersWithoutSheet: number;
     activeRetailers: number;
   };
+  /** Cold-start snapshot freshness — see snapshotRefresh.tsx. */
+  meta?: { snapshotSavedAt?: number; refreshing?: boolean };
 }
 
 // ── Severity helpers ──────────────────────────────────────────────────────────
@@ -411,6 +414,15 @@ export default function WarningSystem() {
   // quota retry (or late response) from an earlier selection never commits.
   const reqSeq = useRef(0);
 
+  // Cold-start snapshot: while meta.refreshing is true the server is rebuilding
+  // in the background — poll silently and swap the fresh figures in.
+  const dataUrl = data
+    ? `${API}/warnings?fy=${encodeURIComponent(fy)}&stateHead=${encodeURIComponent(data.stateHead)}`
+    : null;
+  useSnapshotRefresh(data?.meta, dataUrl, (fresh) =>
+    setData(fresh as WarningsResponse),
+  );
+
   const load = useCallback(
     async (sh: string) => {
       const seq = ++reqSeq.current;
@@ -487,6 +499,9 @@ export default function WarningSystem() {
           {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Refresh"}
         </Button>
       </div>
+
+      {/* Cold-start snapshot freshness */}
+      <SnapshotBanner meta={data?.meta} />
 
       {/* Quota wait */}
       {quotaWait && <QuotaWaitBanner testId="banner-quota-wait-warnings" />}

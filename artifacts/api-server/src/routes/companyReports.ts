@@ -8,8 +8,13 @@
 import { Router } from "express";
 import { buildCompanyReports } from "../lib/companyReports.js";
 import { respondIfQuotaError } from "../lib/quotaResponse.js";
+import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
 
 const router = Router();
+
+// In-process warm-cache TTL. sale_line only changes on register syncs (every
+// few hours), so 10 minutes keeps repeat loads instant without staleness risk.
+const COMPANY_REPORTS_TTL_MS = 10 * 60 * 1000;
 
 const FY_RE = /^\d{4}-\d{2}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -28,7 +33,21 @@ router.get("/company-reports", async (req, res) => {
   }
 
   try {
-    const payload = await buildCompanyReports(rawFy, rawAsOf);
+    if (rawAsOf !== undefined) {
+      // Explicit as-of date is a diagnostic path — always build live, never
+      // cache or snapshot (the key space would be unbounded).
+      const payload = await buildCompanyReports(rawFy, rawAsOf);
+      res.json(payload);
+      return;
+    }
+    // Cold-start fast path: serve the last persisted payload instantly with
+    // meta.snapshotSavedAt + meta.refreshing, rebuilding in the background.
+    const payload = await serveWithSnapshot({
+      key: `company-reports|${rawFy}`,
+      ttlMs: COMPANY_REPORTS_TTL_MS,
+      build: () => buildCompanyReports(rawFy, undefined),
+      log: req.log,
+    });
     res.json(payload);
   } catch (err) {
     if (respondIfQuotaError(err, res)) return;

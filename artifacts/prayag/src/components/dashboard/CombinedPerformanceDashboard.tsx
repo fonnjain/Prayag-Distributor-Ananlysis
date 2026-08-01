@@ -230,6 +230,18 @@ export default function CombinedPerformanceDashboard() {
   const [monthlyPrimary, setMonthlyPrimary] = useState<
     Array<{ label: string; amount: number }>
   >([]);
+  // Company-reports also serves a cold-start snapshot; refresh monthlyPrimary
+  // silently when its live rebuild finishes.
+  const [crMeta, setCrMeta] = useState<{ refreshing?: boolean } | null>(null);
+  useSnapshotRefresh(
+    crMeta,
+    `/api/company-reports?fy=${encodeURIComponent(fy)}`,
+    (fresh) => {
+      const d = fresh as { monthlyPrimary?: Array<{ label: string; amount: number }> };
+      if (d?.monthlyPrimary) setMonthlyPrimary(d.monthlyPrimary);
+      setCrMeta(null);
+    },
+  );
 
   useEffect(() => {
     setLoading(true);
@@ -249,11 +261,18 @@ export default function CombinedPerformanceDashboard() {
   // useCompleteMonths (above) so the intersection is always explicit.
   useEffect(() => {
     setMonthlyPrimary([]);
+    setCrMeta(null);
     fetch(`/api/company-reports?fy=${encodeURIComponent(fy)}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: { monthlyPrimary?: Array<{ label: string; amount: number }> } | null) => {
-        if (d?.monthlyPrimary) setMonthlyPrimary(d.monthlyPrimary);
-      })
+      .then(
+        (d: {
+          monthlyPrimary?: Array<{ label: string; amount: number }>;
+          meta?: { refreshing?: boolean };
+        } | null) => {
+          if (d?.monthlyPrimary) setMonthlyPrimary(d.monthlyPrimary);
+          setCrMeta(d?.meta ?? null);
+        },
+      )
       .catch(() => setMonthlyPrimary([]));
   }, [fy]);
 

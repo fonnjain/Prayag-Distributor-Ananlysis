@@ -9,8 +9,14 @@ import {
   computeUnassignedStats,
 } from "../lib/mgmt/warnings/engine.js";
 import type { MemberWarnings, WarningsResponse } from "../lib/mgmt/warnings/types.js";
+import { serveWithSnapshot, SnapshotHttpError } from "../lib/payloadSnapshot.js";
 
 const router = Router();
+
+// In-process warm-cache TTL — matches the state dashboard's own 15-min TTL
+// closely enough that a warm hit never serves figures older than one dashboard
+// refresh cycle.
+const WARNINGS_TTL_MS = 10 * 60 * 1000;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -49,11 +55,39 @@ router.get("/warnings", async (req, res) => {
   req.log?.info({ fy, stateHead: stateHeadRaw }, "warnings: request");
 
   try {
+    // Cold-start fast path: serve the last persisted payload instantly with
+    // meta.snapshotSavedAt + meta.refreshing, rebuilding in the background
+    // (the live build blocks ~9s on Sheets loads on a cold cache).
+    const response = await serveWithSnapshot({
+      key: `warnings|${fy}|${stateHeadRaw.toLowerCase()}`,
+      ttlMs: WARNINGS_TTL_MS,
+      build: () => buildWarningsResponse(fy, stateHeadRaw),
+      log: req.log,
+    });
+    res.json(response);
+  } catch (err) {
+    if (err instanceof SnapshotHttpError) {
+      res.status(err.status).json(err.body);
+      return;
+    }
+    if (respondIfQuotaError(err, res)) return;
+    req.log?.error({ err }, "warnings: error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Full live build of the warnings payload. Pure of caches/snapshots — errors
+// are thrown as SnapshotHttpError so the route (and only the blocking path)
+// can map them to HTTP responses; background refreshes just log them.
+async function buildWarningsResponse(
+  fy: string,
+  stateHeadRaw: string,
+): Promise<WarningsResponse> {
+  {
     // 1. Load the state dashboard to get member list + month data.
     const dashboard = await loadStateDashboard(fy);
     if (!dashboard) {
-      res.status(503).json({ error: "State dashboard not available" });
-      return;
+      throw new SnapshotHttpError(503, { error: "State dashboard not available" });
     }
 
     // All state heads for the selector.
@@ -68,8 +102,9 @@ router.get("/warnings", async (req, res) => {
     );
 
     if (memberRefs.length === 0) {
-      res.status(404).json({ error: `No members found for state head: ${stateHeadRaw}` });
-      return;
+      throw new SnapshotHttpError(404, {
+        error: `No members found for state head: ${stateHeadRaw}`,
+      });
     }
 
     // Build a month-data lookup by normKey.
@@ -253,12 +288,8 @@ router.get("/warnings", async (req, res) => {
       },
     };
 
-    res.json(response);
-  } catch (err) {
-    if (respondIfQuotaError(err, res)) return;
-    req.log?.error({ err }, "warnings: error");
-    res.status(500).json({ error: "Internal server error" });
+    return response;
   }
-});
+}
 
 export default router;

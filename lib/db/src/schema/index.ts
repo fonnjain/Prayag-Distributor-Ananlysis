@@ -32,3 +32,4 @@ export * from "./distributorTierOverride";
 export * from "./orgStateHeads";
 export * from "./secondarySkuRegister";
 export * from "./mgmtDataSnapshot";
+export * from "./routePayloadSnapshot";

@@ -7,6 +7,7 @@
 //   RULE 3 — LIVE DATA: sale_line populated from live register chain.
 import { useState, useEffect, useMemo } from "react";
 import { QuotaWaitBanner, quotaDelayMs } from "./quotaWait";
+import { SnapshotBanner, useSnapshotRefresh } from "./snapshotRefresh";
 import { AlertTriangle, Info, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -74,6 +75,9 @@ type Payload = {
     customerCount: number;
     note: string;
   };
+  monthlyPrimary?: Array<{ label: string; amount: number }>;
+  /** Cold-start snapshot freshness — see snapshotRefresh.tsx. */
+  meta?: { snapshotSavedAt?: number; refreshing?: boolean };
 };
 
 // ── Formatters ────────────────────────────────────────────────────────────────
@@ -749,6 +753,11 @@ export default function CompanyReports() {
   const [quotaWait, setQuotaWait] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
 
+  // Cold-start snapshot: while meta.refreshing is true the server is rebuilding
+  // in the background — poll silently and swap the fresh figures in.
+  const dataUrl = `/api/company-reports?fy=${encodeURIComponent(fy)}`;
+  useSnapshotRefresh(data?.meta, dataUrl, (fresh) => setData(fresh as Payload));
+
   useEffect(() => {
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     setLoading(true);
@@ -827,6 +836,7 @@ export default function CompanyReports() {
 
       {/* Loading / error */}
       {loading && <div className="py-12 text-center text-sm text-muted-foreground">Loading reports...</div>}
+      <SnapshotBanner meta={data?.meta} />
       {quotaWait && <QuotaWaitBanner testId="banner-quota-wait-company-reports" />}
       {error && <div className="py-6 text-center text-sm text-destructive">{error}</div>}
 
