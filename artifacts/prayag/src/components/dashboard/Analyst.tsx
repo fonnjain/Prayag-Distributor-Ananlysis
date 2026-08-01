@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useAnalyzeSales } from "@workspace/api-client-react";
+import { useGlobalFilter } from "@/data/global-filter-context";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -123,13 +124,14 @@ export default function Analyst() {
   // The most-recent answer is always auto-expanded; older ones collapse when a new one arrives.
   const [expandedAnswers, setExpandedAnswers] = useState<Set<number>>(new Set());
   const greetingSet = useRef(false);
+  const { fy } = useGlobalFilter();
 
   const analyzeSales = useAnalyzeSales();
 
-  // ── Fetch graph index on mount ─────────────────────────────────────────────
+  // ── Fetch graph index on mount and when the global FY changes ─────────────
 
   useEffect(() => {
-    const url = `${API}/api/graph/index?fy=2026-27`;
+    const url = `${API}/api/graph/index?fy=${encodeURIComponent(fy)}`;
     fetch(url)
       .then((r) => r.json())
       .then((data: GraphIndex) => {
@@ -156,7 +158,7 @@ export default function Analyst() {
           setExpandedAnswers(new Set([0]));
         }
       });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fy]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const appendTranscript = useCallback((text: string) => {
     setInput((prev) => (prev ? `${prev} ${text}` : text));
