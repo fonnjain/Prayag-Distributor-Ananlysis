@@ -108,11 +108,19 @@ export async function serveWithSnapshot<T extends AnyPayload>(opts: {
   build: () => Promise<T>;
   log?: { info: (obj: unknown, msg?: string) => void };
   /**
-   * When true (closed/frozen fiscal years whose source sheets never change),
-   * an existing persisted snapshot is served as final: no background rebuild,
-   * no meta.refreshing flag. Only the first-ever request runs the live build.
+   * When true (closed/frozen fiscal years or fully locked month ranges whose
+   * source data never changes), an existing persisted snapshot is served as
+   * final: no background rebuild, no meta.refreshing flag. Only the
+   * first-ever request runs the live build.
    */
   frozen?: boolean;
+  /**
+   * Unix ms of the moment the underlying data froze. A snapshot saved BEFORE
+   * this instant may predate final corrections made inside the edit window,
+   * so it gets one normal serve-and-refresh cycle; once a snapshot saved
+   * after the freeze exists, it is served as final.
+   */
+  frozenSince?: number;
 }): Promise<T> {
   const { key, ttlMs, build } = opts;
 
@@ -121,7 +129,7 @@ export async function serveWithSnapshot<T extends AnyPayload>(opts: {
 
   const snap = await loadSnapshot(key);
   if (snap) {
-    if (opts.frozen) {
+    if (opts.frozen && (opts.frozenSince === undefined || snap.savedAt.getTime() >= opts.frozenSince)) {
       // Frozen source data: the snapshot is authoritative. Re-warm the
       // in-process cache from it and skip the live re-read entirely.
       _cache.set(key, { payload: snap.payload, expiresAt: Date.now() + ttlMs });

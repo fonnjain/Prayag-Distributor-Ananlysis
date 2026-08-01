@@ -18,3 +18,6 @@ description: How GET /api/mgmt/data avoids the ~20s cold-start Sheets wait via t
 serveWithSnapshot accepts `frozen: boolean` (wired via isFrozen(fy) in mgmt/data, warnings, company-reports). For frozen FYs (23-24/24-25/25-26) an existing snapshot is served as FINAL: no background rebuild, no meta.refreshing, in-process cache re-warmed from the snapshot. Only the first-ever request builds live.
 **Why:** frozen registers never change; re-reading Sheets on every cold start wasted minutes and confused users ("updating…" on frozen years).
 **How to apply:** any new serveWithSnapshot caller with an fy key should pass `frozen: isFrozen(fy)`. If a frozen FY is ever repaired via force-resync (unfreeze), doSync success now invalidates prefixes mgmt-data|fy|, warnings|fy|, company-reports|fy — new snapshot consumers must be added to that invalidation list too.
+
+## Month-level frozen slices (open FY)
+mgmt/data also passes `frozen`+`frozenSince` when EVERY month in the requested range is past its lock date (7th of next month, via monthFreezeAt). A snapshot saved BEFORE frozenSince gets one normal refresh cycle; once a post-freeze snapshot exists it is final. Full-year requests on the open FY include unlocked months so they keep refreshing.

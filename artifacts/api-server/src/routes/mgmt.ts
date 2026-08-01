@@ -51,6 +51,7 @@ import {
 import { eq, and } from "drizzle-orm";
 import { serveWithSnapshot, invalidateSnapshots } from "../lib/payloadSnapshot.js";
 import { isFrozen } from "../lib/customers/registerSync.js";
+import { monthFreezeAt } from "../lib/registers/monthlyReplace.js";
 
 const router: IRouter = Router();
 
@@ -72,6 +73,36 @@ const MGMT_DATA_KEY_PREFIX = "mgmt-data|";
 
 function mgmtDataSnapshotKey(fy: string, from: number, to: number): string {
   return `${MGMT_DATA_KEY_PREFIX}${fy}|${from}|${to}`;
+}
+
+// Fiscal-month index (1=Apr … 12=Mar) → month label like "Apr-26" for a FY.
+function fiscalMonthLabel(fy: string, idx: number): string | null {
+  const m = /^(\d{4})-(\d{2})$/.exec(fy);
+  if (!m || idx < 1 || idx > 12) return null;
+  const startYear = parseInt(m[1], 10);
+  const mon = (3 + (idx - 1)) % 12; // Apr=3 … Mar=2
+  const year = startYear + (mon < 3 ? 1 : 0);
+  const abbr = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][mon];
+  return `${abbr}-${String(year % 100).padStart(2, "0")}`;
+}
+
+/**
+ * True when every month in the requested fiscal range is past its lock date
+ * (7th of the following month). Such a slice of an open FY is as immutable as
+ * a fully closed FY — the registers for those months are frozen and the sync
+ * never rewrites them — so its snapshot can be served as final. Target/xlsx
+ * edits still invalidate these snapshots via invalidateMgmtDataCache.
+ */
+function periodFrozenSince(fy: string, monthFrom: number, monthTo: number): number | null {
+  if (isFrozen(fy)) return 0; // closed FY: any snapshot is post-freeze
+  let latest = 0;
+  for (let i = monthFrom; i <= monthTo; i++) {
+    const label = fiscalMonthLabel(fy, i);
+    const freezeAt = label ? monthFreezeAt(label) : null;
+    if (!freezeAt || Date.now() < freezeAt.getTime()) return null;
+    latest = Math.max(latest, freezeAt.getTime());
+  }
+  return latest;
 }
 
 export function invalidateMgmtDataCache(fy?: string): void {
@@ -387,7 +418,10 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
       ttlMs: MGMT_DATA_TTL_MS,
       build: () => buildMgmtDataPayload(fy, monthFrom, monthTo, undefined, req.log),
       log: req.log,
-      frozen: isFrozen(fy),
+      ...(() => {
+        const since = periodFrozenSince(fy, monthFrom, monthTo);
+        return since === null ? {} : { frozen: true, frozenSince: since };
+      })(),
     });
     res.json(payload);
   } catch (err) {
