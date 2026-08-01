@@ -23,26 +23,47 @@ const DRY = !process.argv.includes("--write");
 // analysis pass). Winner = the name that matches the FY2026-27 SOBR dashboard
 // roster; where both/neither match, the first listed. The losers' files are
 // byte-identical business content under a different salesperson name.
+//
+// CONFIRMED correct by business review (Aug 2026):
+//   - SANDEEP DADHEECH is a State Head (74 members), not a field rep. The file
+//     under that name is a mislabelled export of SANDEEP AMRUT SANWANE's data —
+//     confirmed by row profile (455 rows, 30 retailers, 3 distributors, ₹0.22 Cr;
+//     consistent with a typical rep, not a roll-up). Mislabelling is at the
+//     export-tool level; report to whoever generates these files.
+//   - SASHIKANT PRASAD kept above (correct rep); spelling corrected via NAME_OVERRIDE
+//     to "Sasikant Prasad" to match the SOBR dashboard roster. Override is applied
+//     before any key derivation so re-runs stay consistent.
+//   - SUJIT DAS is on Sandeep Dadheech's team but marked LEFT. Loading his
+//     historical data is correct; he is excluded from current-period performance
+//     and low-performer counts by the isLeft flag in stateDashboard.ts.
+//   - RAVI (FARIDABAD) is confirmed correct; RAVI KANT MAHATO is not on any roster.
 const DUP_DROP = new Set<string>([
   // group → dropped copies
   "SANTOSH KUMAR KV",          // keep SANTANU KALITA
   "Ravindera",                 // keep RAVINDER PURI
   "AJOY BORAH",                // keep AJEET YADAV
-  "SASIKUMAR A",               // keep SASHIKANT PRASAD
+  "SASIKUMAR A",               // keep SASHIKANT PRASAD (normalised → Sasikant Prasad via NAME_OVERRIDE)
   "OP KALRA",                  // keep NITIN PRASAD BAGHEL
   "Ilesh Vyash",               // keep HRUSIKESH SATAPATHY
   "SUMIT PAREEK",              // keep SUMANTA SINGHA
   "Test",                      // keep TEJAS LUNAWAT
   "HARDEEP KHINDA",            // keep GULAB SINGH
   "AMIT HARIDASJI BELONKAR",   // keep AMIT DAMODHAR JADHAV
-  "SANDEEP DADHEECH",          // keep SANDEEP AMRUT SANWANE
+  "SANDEEP DADHEECH",          // keep SANDEEP AMRUT SANWANE (DADHEECH is a State Head, not a rep — mislabelled export)
   "L.SELVAGANAPATHY",          // keep KUNAL SANJAY SAASNE
   "MANOKARAN",                 // keep MANOJ YADAV
   "KANISH KHANNA",             // keep KANHAIYA LAL SALVI (3-copy group)
   "KAPIL THAKUR",              // keep KANHAIYA LAL SALVI (3-copy group)
-  "SUKANTA SEN",               // keep SUJIT DAS
-  "RAVI KANT MAHATO",          // keep RAVI (FARIDABAD)
+  "SUKANTA SEN",               // keep SUJIT DAS (LEFT; loaded for history, excluded from current-period metrics)
+  "RAVI KANT MAHATO",          // keep RAVI (FARIDABAD) — confirmed; RAVI KANT MAHATO not on any roster
 ]);
+
+// Canonical name overrides: applied to the member name derived from the filename
+// before any key derivation (headRaw, headCanon, natKey, lineUid).
+// Use when the export file is named differently from the SOBR dashboard roster.
+const NAME_OVERRIDE: Record<string, string> = {
+  "SASHIKANT PRASAD": "Sasikant Prasad",  // roster spelling (Sandeep Dadheech team, Active)
+};
 
 const num = (v: unknown): number | null => {
   if (v == null || v === "") return null;
@@ -80,7 +101,8 @@ const occurrenceMap = new Map<string, number>();
 let noItemCode = 0, noMonth = 0, skippedNoValue = 0, totalRows = 0;
 
 for (const f of files) {
-  const member = f.replace(/^PSCode_3_New_Report /, "").replace(/\.xlsx$/, "").trim();
+  const rawMember = f.replace(/^PSCode_3_New_Report /, "").replace(/\.xlsx$/, "").trim();
+  const member = NAME_OVERRIDE[rawMember] ?? rawMember;
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(path.join(DIR, f));
   wb.worksheets[0].eachRow((row, rn) => {
