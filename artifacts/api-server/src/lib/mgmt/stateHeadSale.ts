@@ -82,10 +82,24 @@ function findCol(headers: SheetCellValue[], re: RegExp): number {
  * Returns null-byHead result (error set) when no sheet is configured for the FY
  * or when the sheet cannot be reached.
  */
+// Single-flight: concurrent callers share one in-flight load per FY instead of
+// each issuing their own multi-tab Sheets read (cold-start stampede exhausts
+// the per-minute read quota → 429s in production).
+const _inFlight = new Map<string, Promise<StateHeadSaleResult>>();
+
 export async function loadStateHeadSale(fy: string): Promise<StateHeadSaleResult> {
   const cached = _cache.get(fy);
   if (cached && Date.now() - cached.ts < TTL_MS) return cached.result;
 
+  const existing = _inFlight.get(fy);
+  if (existing) return existing;
+
+  const p = _loadStateHeadSaleUncached(fy).finally(() => _inFlight.delete(fy));
+  _inFlight.set(fy, p);
+  return p;
+}
+
+async function _loadStateHeadSaleUncached(fy: string): Promise<StateHeadSaleResult> {
   const sheetCfg = SALE_SHEETS[fy];
   if (!sheetCfg) {
     // No primary-sale sheet configured for this FY — caller falls back to

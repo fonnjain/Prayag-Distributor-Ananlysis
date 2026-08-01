@@ -12,3 +12,5 @@ Two rules for anything that reads Google Sheets on demand (report generators, sy
 **How to apply:** create the tracker inside the build function and pass it to helpers.
 
 **Why:** architect review caught both in the Management Reports feature; fixed and verified with parallel curl requests producing isolated Missing Data tabs.
+
+**Aug 2026 production incident:** autoscale cold start (fresh instance after republish) stampeded Sheets — startup sync + dashboard sync + several /mgmt/data requests each ran full multi-tab reads, exhausting the per-minute quota (429) despite sheetsGet's 4-attempt backoff. Dashboard tiles (Sale/Pending) rendered blank/negative because failures aren't cached, but new instances re-stampede. Single-flight added to stateHeadSale, orderBookSale, loadPrimarySheetData, readBookingAggregated, readOrderTabInventory. Remaining gap: independent loaders still scan the same workbook concurrently (no cross-loader coalescing), and 429 failures have no short negative cache.

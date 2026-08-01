@@ -572,15 +572,25 @@ const _bookingAggCache = new Map<
  * Used by the booking-vs-sale route so it can run in parallel with
  * readOrderTabInventory without triggering slow sale-sheet reads.
  */
+const _bookingAggInFlight = new Map<string, Promise<{ companyTotal: number; ntBooking: number }>>();
+
 export async function readBookingAggregated(
   sheetId: string,
 ): Promise<{ companyTotal: number; ntBooking: number }> {
   const cached = _bookingAggCache.get(sheetId);
   if (cached && Date.now() - cached.ts < TTL_MS) return cached.result;
-  const agg = await readAndAggregate(sheetId, true);
-  const result = { companyTotal: agg.total, ntBooking: agg.nonTerritoryTotal };
-  _bookingAggCache.set(sheetId, { ts: Date.now(), result });
-  return result;
+
+  const existing = _bookingAggInFlight.get(sheetId);
+  if (existing) return existing;
+
+  const p = (async () => {
+    const agg = await readAndAggregate(sheetId, true);
+    const result = { companyTotal: agg.total, ntBooking: agg.nonTerritoryTotal };
+    _bookingAggCache.set(sheetId, { ts: Date.now(), result });
+    return result;
+  })().finally(() => _bookingAggInFlight.delete(sheetId));
+  _bookingAggInFlight.set(sheetId, p);
+  return p;
 }
 
 // ── Tab inventory ─────────────────────────────────────────────────────────────
@@ -650,10 +660,23 @@ function parseOrderDate(v: SheetCellValue | undefined): string | null {
  * pieces from the Unit.Name column), and channel breakdown (Retail vs Govt
  * from the last column — the scheme-eligibility flag).
  */
+const _inventoryInFlight = new Map<string, Promise<OrderTabInventoryRow[]>>();
+
 export async function readOrderTabInventory(sheetId: string): Promise<OrderTabInventoryRow[]> {
   const cached = _inventoryCache.get(sheetId);
   if (cached && Date.now() - cached.ts < TTL_MS) return cached.rows;
 
+  const existing = _inventoryInFlight.get(sheetId);
+  if (existing) return existing;
+
+  const p = _readOrderTabInventoryUncached(sheetId).finally(() =>
+    _inventoryInFlight.delete(sheetId),
+  );
+  _inventoryInFlight.set(sheetId, p);
+  return p;
+}
+
+async function _readOrderTabInventoryUncached(sheetId: string): Promise<OrderTabInventoryRow[]> {
   const tabs = await listSheetTabs(sheetId);
   const rows: OrderTabInventoryRow[] = [];
 
@@ -933,10 +956,24 @@ export async function readOrderTabInventory(sheetId: string): Promise<OrderTabIn
 
 // ── Public loader ─────────────────────────────────────────────────────────────
 
+// Single-flight: concurrent callers share one in-flight load per FY (a
+// cold-start stampede of parallel multi-tab reads exhausts the Sheets
+// per-minute read quota → 429s in production).
+const _inFlight = new Map<string, Promise<PrimarySheetData>>();
+
 export async function loadPrimarySheetData(fy: string): Promise<PrimarySheetData> {
   const cached = _cache.get(fy);
   if (cached && Date.now() - cached.ts < TTL_MS) return cached.data;
 
+  const existing = _inFlight.get(fy);
+  if (existing) return existing;
+
+  const p = _loadPrimarySheetDataUncached(fy).finally(() => _inFlight.delete(fy));
+  _inFlight.set(fy, p);
+  return p;
+}
+
+async function _loadPrimarySheetDataUncached(fy: string): Promise<PrimarySheetData> {
   // Build head resolver from roster (best-effort).
   let resolve: (raw: unknown) => string | null;
   try {

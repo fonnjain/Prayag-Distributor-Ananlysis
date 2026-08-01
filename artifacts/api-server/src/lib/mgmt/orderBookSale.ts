@@ -75,10 +75,24 @@ function findCol(headers: SheetCellValue[], re: RegExp): number {
  * `fy` defaults to "2026-27" so existing callers that omit it continue to work.
  * Returns an error result when no sheet is registered for the requested FY.
  */
+// Single-flight: concurrent callers share one in-flight load per FY (a
+// cold-start stampede of parallel multi-tab reads exhausts the Sheets
+// per-minute read quota → 429s in production).
+const _inFlight = new Map<string, Promise<OrderBookSale>>();
+
 export async function loadOrderBookSaleByHead(fy: string = "2026-27"): Promise<OrderBookSale> {
   const cached = _caches.get(fy);
   if (cached && Date.now() - cached.ts < TTL_MS) return cached.result;
 
+  const existing = _inFlight.get(fy);
+  if (existing) return existing;
+
+  const p = _loadOrderBookSaleUncached(fy).finally(() => _inFlight.delete(fy));
+  _inFlight.set(fy, p);
+  return p;
+}
+
+async function _loadOrderBookSaleUncached(fy: string): Promise<OrderBookSale> {
   const sheetId = ORDER_BOOK_SHEETS[fy];
   if (!sheetId) {
     return {
