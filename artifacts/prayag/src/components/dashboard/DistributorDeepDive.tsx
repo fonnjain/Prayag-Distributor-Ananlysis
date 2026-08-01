@@ -17,6 +17,7 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { QuotaWaitBanner, quotaDelayMs, quotaOrThrow } from "./quotaWait";
 import { useGlobalFilter } from "@/data/global-filter-context";
+import { achBandText } from "@/lib/achievementBands";
 import {
   AlertTriangle,
   ChevronDown,
@@ -1962,7 +1963,7 @@ function PerMemberAnalysisSection({ perMember }: { perMember: MemberDistributorR
                     {pct(m.namedActivePct)}
                   </td>
                   <td className={`py-1.5 pr-3 text-right tabular-nums text-xs ${
-                    m.achievementTotal != null && m.achievementTotal < 50 ? "text-destructive font-medium" : ""
+                    m.achievementTotal != null ? achBandText(m.achievementTotal) : ""
                   }`}>
                     {m.achievementTotal != null ? pct(m.achievementTotal) : "--"}
                   </td>

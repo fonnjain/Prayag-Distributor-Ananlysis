@@ -36,6 +36,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { achBandText } from "@/lib/achievementBands";
 import { useCompleteMonths } from "@/hooks/useCompleteMonths";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -132,11 +133,9 @@ function fmtNum(n: number | null | undefined): string {
   return n.toLocaleString("en-IN");
 }
 
+// Shared band scale — single source of truth in lib/achievementBands.ts.
 function achColor(pct: number | null | undefined): string {
-  if (pct == null) return "text-muted-foreground";
-  if (pct >= 1.0) return "text-green-700 dark:text-green-400";
-  if (pct >= 0.7) return "text-amber-700 dark:text-amber-400";
-  return "text-red-700 dark:text-red-400";
+  return achBandText(pct == null ? null : pct * 100);
 }
 
 // ── KPI tile ──────────────────────────────────────────────────────────────────
