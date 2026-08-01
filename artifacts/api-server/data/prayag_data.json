@@ -1,531 +1,6 @@
 {
   "data": {
     "fy2425": {
-      "months": [
-        "Apr",
-        "May",
-        "Jun",
-        "Jul",
-        "Aug",
-        "Sep",
-        "Oct",
-        "Nov",
-        "Dec",
-        "Jan",
-        "Feb",
-        "Mar"
-      ],
-      "grand_total": 3417311917,
-      "grand_monthly": [
-        127064276,
-        263987683,
-        297280519,
-        244893404,
-        240146868,
-        241524486,
-        228086733,
-        334329902,
-        323713408,
-        289189077,
-        324521028,
-        502574533
-      ],
-      "products": [
-        {
-          "group": "PTMT / Faucets",
-          "product": "PTMT",
-          "monthly": [
-            36842697,
-            65626335,
-            79724796,
-            56110277,
-            67602553,
-            59159975,
-            50105539,
-            113909741,
-            105230893,
-            65670079,
-            81149771,
-            130813916
-          ],
-          "annual": 911946572
-        },
-        {
-          "group": "CP (Chrome-Plated)",
-          "product": "CP",
-          "monthly": [
-            23543970,
-            40135349,
-            46323099,
-            37545714,
-            40563973,
-            51477504,
-            35316630,
-            89853164,
-            77886718,
-            45422022,
-            51147190,
-            107601316
-          ],
-          "annual": 646816649
-        },
-        {
-          "group": "Plumbing (Pipes & Fittings)",
-          "product": "CPVC PIPE",
-          "monthly": [
-            5651931,
-            14831072,
-            8420427,
-            11889066,
-            18055874,
-            10275997,
-            10353651,
-            10947742,
-            11631260,
-            35345323,
-            38825890,
-            36840689
-          ],
-          "annual": 213068922
-        },
-        {
-          "group": "Plumbing (Pipes & Fittings)",
-          "product": "CPVC",
-          "monthly": [
-            6117070,
-            15496135,
-            9666589,
-            14204258,
-            18482892,
-            10005819,
-            10021119,
-            11467264,
-            13211505,
-            33066792,
-            22475295,
-            29714464
-          ],
-          "annual": 193929202
-        },
-        {
-          "group": "Plumbing (Pipes & Fittings)",
-          "product": "SWR",
-          "monthly": [
-            10834553,
-            19902769,
-            13277076,
-            13305459,
-            13129133,
-            4703535,
-            14267271,
-            13969701,
-            15771854,
-            15488122,
-            22710909,
-            27148185
-          ],
-          "annual": 184508567
-        },
-        {
-          "group": "Plumbing (Pipes & Fittings)",
-          "product": "HDPE PIPE",
-          "monthly": [
-            0,
-            10394036,
-            42442809,
-            33345978,
-            6959242,
-            4554640,
-            41690065,
-            267194,
-            0,
-            916889,
-            0,
-            5527656
-          ],
-          "annual": 146098509
-        },
-        {
-          "group": "Plumbing (Pipes & Fittings)",
-          "product": "WATER TANK",
-          "monthly": [
-            5512108,
-            10582941,
-            12153413,
-            12718008,
-            9065753,
-            11021729,
-            11020307,
-            11370839,
-            15599115,
-            10766150,
-            10678220,
-            23273133
-          ],
-          "annual": 143761716
-        },
-        {
-          "group": "CP (Chrome-Plated)",
-          "product": "CP ACCESSORIES",
-          "monthly": [
-            4793190,
-            11228251,
-            9772975,
-            9378282,
-            9846591,
-            11261889,
-            7800924,
-            13206362,
-            12950502,
-            14219880,
-            15272826,
-            21732338
-          ],
-          "annual": 141464010
-        },
-        {
-          "group": "Sink",
-          "product": "SINK",
-          "monthly": [
-            4917073,
-            12817200,
-            9416652,
-            8869897,
-            9624863,
-            10441429,
-            6391331,
-            13001573,
-            11353127,
-            8160108,
-            11436588,
-            15960124
-          ],
-          "annual": 122389965
-        },
-        {
-          "group": "Sanitaryware",
-          "product": "SANITARYWARE",
-          "monthly": [
-            5919661,
-            7697456,
-            13794315,
-            9453904,
-            7112344,
-            10068727,
-            5564658,
-            11292501,
-            10567798,
-            11340343,
-            8072366,
-            18587133
-          ],
-          "annual": 119471206
-        },
-        {
-          "group": "Plumbing (Pipes & Fittings)",
-          "product": "UPVC PIPE",
-          "monthly": [
-            3727425,
-            15099719,
-            10670290,
-            5205006,
-            6830420,
-            9003867,
-            7452625,
-            7559688,
-            9343253,
-            8477036,
-            17688832,
-            17925754
-          ],
-          "annual": 118983915
-        },
-        {
-          "group": "PTMT / Faucets",
-          "product": "CISTERN",
-          "monthly": [
-            4544055,
-            7966786,
-            9010156,
-            6355172,
-            6735272,
-            8179138,
-            6919065,
-            8222733,
-            7118211,
-            6454390,
-            7427036,
-            10829677
-          ],
-          "annual": 89761691
-        },
-        {
-          "group": "Plumbing (Pipes & Fittings)",
-          "product": "UPVC",
-          "monthly": [
-            4154323,
-            9503493,
-            6456936,
-            5861284,
-            6235383,
-            6119786,
-            3789628,
-            6573969,
-            6205234,
-            7205124,
-            7913456,
-            14215727
-          ],
-          "annual": 84234343
-        },
-        {
-          "group": "Connection / Waste",
-          "product": "CONNECTION",
-          "monthly": [
-            2627785,
-            5966488,
-            7499218,
-            5229967,
-            6829405,
-            4943243,
-            4650534,
-            6724471,
-            6171387,
-            6426295,
-            6868519,
-            10058731
-          ],
-          "annual": 73996043
-        },
-        {
-          "group": "Plumbing (Pipes & Fittings)",
-          "product": "AGRI",
-          "monthly": [
-            2229134,
-            4516570,
-            3299701,
-            4999255,
-            3538050,
-            19973789,
-            4175277,
-            3314605,
-            3828160,
-            4554583,
-            5820676,
-            6174214
-          ],
-          "annual": 66424014
-        },
-        {
-          "group": "Plumbing (Pipes & Fittings)",
-          "product": "GARDEEN PIPE",
-          "monthly": [
-            1066245,
-            4476875,
-            6066241,
-            2045737,
-            1712576,
-            1989758,
-            1772226,
-            3659384,
-            5740398,
-            6714972,
-            7390444,
-            10189677
-          ],
-          "annual": 52824533
-        },
-        {
-          "group": "Connection / Waste",
-          "product": "WASTE-PIPE",
-          "monthly": [
-            1350525,
-            2275180,
-            2276011,
-            2620317,
-            2256863,
-            2101681,
-            1658666,
-            2658974,
-            1920377,
-            2165544,
-            2182789,
-            3715921
-          ],
-          "annual": 27182848
-        },
-        {
-          "group": "PTMT / Faucets",
-          "product": "SEAT COVER",
-          "monthly": [
-            1342320,
-            1327082,
-            2385237,
-            1468745,
-            1381740,
-            1412044,
-            1188348,
-            1558403,
-            1541356,
-            1733587,
-            1336967,
-            2202681
-          ],
-          "annual": 18878510
-        },
-        {
-          "group": "Hardware",
-          "product": "HARDWARE",
-          "monthly": [
-            326668,
-            1315030,
-            1956053,
-            616723,
-            1231217,
-            693443,
-            432735,
-            1139124,
-            1317877,
-            1385137,
-            304908,
-            2662472
-          ],
-          "annual": 13381387
-        },
-        {
-          "group": "Sink",
-          "product": "P-RACK",
-          "monthly": [
-            399571,
-            166873,
-            383586,
-            562024,
-            375107,
-            814002,
-            534460,
-            1137828,
-            1855926,
-            883070,
-            2505352,
-            3761532
-          ],
-          "annual": 13379331
-        },
-        {
-          "group": "PTMT / Faucets",
-          "product": "CABINET",
-          "monthly": [
-            324851,
-            805589,
-            967546,
-            1453508,
-            929075,
-            1313360,
-            1132851,
-            955454,
-            1328775,
-            1507022,
-            1255488,
-            1155094
-          ],
-          "annual": 13128613
-        },
-        {
-          "group": "CP (Chrome-Plated)",
-          "product": "TEFLON TAPE",
-          "monthly": [
-            445722,
-            1348362,
-            909041,
-            1039119,
-            762020,
-            737992,
-            752872,
-            388741,
-            1065662,
-            681351,
-            1392334,
-            1453910
-          ],
-          "annual": 10977126
-        },
-        {
-          "group": "Sink",
-          "product": "JALI",
-          "monthly": [
-            165531,
-            419283,
-            393186,
-            490367,
-            744177,
-            776647,
-            657097,
-            586563,
-            613013,
-            539527,
-            658915,
-            916779
-          ],
-          "annual": 6961085
-        },
-        {
-          "group": "CP (Chrome-Plated)",
-          "product": "GEYSER",
-          "monthly": [
-            209582,
-            0,
-            0,
-            0,
-            107427,
-            427118,
-            437299,
-            543997,
-            1339665,
-            56839,
-            0,
-            47843
-          ],
-          "annual": 3169770
-        },
-        {
-          "group": "PTMT / Faucets",
-          "product": "QUAA",
-          "monthly": [
-            18286,
-            88809,
-            0,
-            125337,
-            34918,
-            67374,
-            1555,
-            19887,
-            121342,
-            8892,
-            6257,
-            65567
-          ],
-          "annual": 558224
-        },
-        {
-          "group": "CP (Chrome-Plated)",
-          "product": "GLASS",
-          "monthly": [
-            0,
-            0,
-            15166,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0
-          ],
-          "annual": 15166
-        }
-      ],
       "groups": [
         {
           "group": "Plumbing (Pipes & Fittings)",
@@ -653,1485 +128,2129 @@
             2662472
           ]
         }
-      ]
-    },
-    "orders_fy2627": {
-      "monthly": [
+      ],
+      "months": [
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+        "Jan",
+        "Feb",
+        "Mar"
+      ],
+      "products": [
         {
-          "month": "Apr-26",
-          "lines": 6694,
-          "docs": 630,
-          "customers": 231,
-          "qty": 1840266,
-          "value_cr": 15.73
+          "group": "PTMT / Faucets",
+          "annual": 911946572,
+          "monthly": [
+            36842697,
+            65626335,
+            79724796,
+            56110277,
+            67602553,
+            59159975,
+            50105539,
+            113909741,
+            105230893,
+            65670079,
+            81149771,
+            130813916
+          ],
+          "product": "PTMT"
         },
         {
-          "month": "May-26",
-          "lines": 11842,
-          "docs": 1016,
-          "customers": 278,
-          "qty": 4816124,
-          "value_cr": 29.37
+          "group": "PTMT / Faucets",
+          "annual": 89761691,
+          "monthly": [
+            4544055,
+            7966786,
+            9010156,
+            6355172,
+            6735272,
+            8179138,
+            6919065,
+            8222733,
+            7118211,
+            6454390,
+            7427036,
+            10829677
+          ],
+          "product": "CISTERN"
         },
         {
-          "month": "Jun-26",
-          "lines": 13311,
-          "docs": 1153,
-          "customers": 299,
-          "qty": 5943338,
-          "value_cr": 32.65
+          "group": "PTMT / Faucets",
+          "annual": 13128613,
+          "monthly": [
+            324851,
+            805589,
+            967546,
+            1453508,
+            929075,
+            1313360,
+            1132851,
+            955454,
+            1328775,
+            1507022,
+            1255488,
+            1155094
+          ],
+          "product": "CABINET"
         },
         {
-          "month": "Jul-26 (to 6th)",
-          "lines": 441,
-          "docs": 76,
-          "customers": 56,
-          "qty": 268176,
-          "value_cr": 0.69
+          "group": "PTMT / Faucets",
+          "annual": 18878510,
+          "monthly": [
+            1342320,
+            1327082,
+            2385237,
+            1468745,
+            1381740,
+            1412044,
+            1188348,
+            1558403,
+            1541356,
+            1733587,
+            1336967,
+            2202681
+          ],
+          "product": "SEAT COVER"
+        },
+        {
+          "group": "PTMT / Faucets",
+          "annual": 558224,
+          "monthly": [
+            18286,
+            88809,
+            0,
+            125337,
+            34918,
+            67374,
+            1555,
+            19887,
+            121342,
+            8892,
+            6257,
+            65567
+          ],
+          "product": "QUAA"
+        },
+        {
+          "group": "CP (Chrome-Plated)",
+          "annual": 646816649,
+          "monthly": [
+            23543970,
+            40135349,
+            46323099,
+            37545714,
+            40563973,
+            51477504,
+            35316630,
+            89853164,
+            77886718,
+            45422022,
+            51147190,
+            107601316
+          ],
+          "product": "CP"
+        },
+        {
+          "group": "CP (Chrome-Plated)",
+          "annual": 141464010,
+          "monthly": [
+            4793190,
+            11228251,
+            9772975,
+            9378282,
+            9846591,
+            11261889,
+            7800924,
+            13206362,
+            12950502,
+            14219880,
+            15272826,
+            21732338
+          ],
+          "product": "CP ACCESSORIES"
+        },
+        {
+          "group": "CP (Chrome-Plated)",
+          "annual": 15166,
+          "monthly": [
+            0,
+            0,
+            15166,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "product": "GLASS"
+        },
+        {
+          "group": "CP (Chrome-Plated)",
+          "annual": 10977126,
+          "monthly": [
+            445722,
+            1348362,
+            909041,
+            1039119,
+            762020,
+            737992,
+            752872,
+            388741,
+            1065662,
+            681351,
+            1392334,
+            1453910
+          ],
+          "product": "TEFLON TAPE"
+        },
+        {
+          "group": "CP (Chrome-Plated)",
+          "annual": 3169770,
+          "monthly": [
+            209582,
+            0,
+            0,
+            0,
+            107427,
+            427118,
+            437299,
+            543997,
+            1339665,
+            56839,
+            0,
+            47843
+          ],
+          "product": "GEYSER"
+        },
+        {
+          "group": "Sink",
+          "annual": 122389965,
+          "monthly": [
+            4917073,
+            12817200,
+            9416652,
+            8869897,
+            9624863,
+            10441429,
+            6391331,
+            13001573,
+            11353127,
+            8160108,
+            11436588,
+            15960124
+          ],
+          "product": "SINK"
+        },
+        {
+          "group": "Sink",
+          "annual": 6961085,
+          "monthly": [
+            165531,
+            419283,
+            393186,
+            490367,
+            744177,
+            776647,
+            657097,
+            586563,
+            613013,
+            539527,
+            658915,
+            916779
+          ],
+          "product": "JALI"
+        },
+        {
+          "group": "Sink",
+          "annual": 13379331,
+          "monthly": [
+            399571,
+            166873,
+            383586,
+            562024,
+            375107,
+            814002,
+            534460,
+            1137828,
+            1855926,
+            883070,
+            2505352,
+            3761532
+          ],
+          "product": "P-RACK"
+        },
+        {
+          "group": "Plumbing (Pipes & Fittings)",
+          "annual": 193929202,
+          "monthly": [
+            6117070,
+            15496135,
+            9666589,
+            14204258,
+            18482892,
+            10005819,
+            10021119,
+            11467264,
+            13211505,
+            33066792,
+            22475295,
+            29714464
+          ],
+          "product": "CPVC"
+        },
+        {
+          "group": "Plumbing (Pipes & Fittings)",
+          "annual": 213068922,
+          "monthly": [
+            5651931,
+            14831072,
+            8420427,
+            11889066,
+            18055874,
+            10275997,
+            10353651,
+            10947742,
+            11631260,
+            35345323,
+            38825890,
+            36840689
+          ],
+          "product": "CPVC PIPE"
+        },
+        {
+          "group": "Plumbing (Pipes & Fittings)",
+          "annual": 84234343,
+          "monthly": [
+            4154323,
+            9503493,
+            6456936,
+            5861284,
+            6235383,
+            6119786,
+            3789628,
+            6573969,
+            6205234,
+            7205124,
+            7913456,
+            14215727
+          ],
+          "product": "UPVC"
+        },
+        {
+          "group": "Plumbing (Pipes & Fittings)",
+          "annual": 118983915,
+          "monthly": [
+            3727425,
+            15099719,
+            10670290,
+            5205006,
+            6830420,
+            9003867,
+            7452625,
+            7559688,
+            9343253,
+            8477036,
+            17688832,
+            17925754
+          ],
+          "product": "UPVC PIPE"
+        },
+        {
+          "group": "Plumbing (Pipes & Fittings)",
+          "annual": 184508567,
+          "monthly": [
+            10834553,
+            19902769,
+            13277076,
+            13305459,
+            13129133,
+            4703535,
+            14267271,
+            13969701,
+            15771854,
+            15488122,
+            22710909,
+            27148185
+          ],
+          "product": "SWR"
+        },
+        {
+          "group": "Plumbing (Pipes & Fittings)",
+          "annual": 66424014,
+          "monthly": [
+            2229134,
+            4516570,
+            3299701,
+            4999255,
+            3538050,
+            19973789,
+            4175277,
+            3314605,
+            3828160,
+            4554583,
+            5820676,
+            6174214
+          ],
+          "product": "AGRI"
+        },
+        {
+          "group": "Plumbing (Pipes & Fittings)",
+          "annual": 143761716,
+          "monthly": [
+            5512108,
+            10582941,
+            12153413,
+            12718008,
+            9065753,
+            11021729,
+            11020307,
+            11370839,
+            15599115,
+            10766150,
+            10678220,
+            23273133
+          ],
+          "product": "WATER TANK"
+        },
+        {
+          "group": "Plumbing (Pipes & Fittings)",
+          "annual": 146098509,
+          "monthly": [
+            0,
+            10394036,
+            42442809,
+            33345978,
+            6959242,
+            4554640,
+            41690065,
+            267194,
+            0,
+            916889,
+            0,
+            5527656
+          ],
+          "product": "HDPE PIPE"
+        },
+        {
+          "group": "Plumbing (Pipes & Fittings)",
+          "annual": 52824533,
+          "monthly": [
+            1066245,
+            4476875,
+            6066241,
+            2045737,
+            1712576,
+            1989758,
+            1772226,
+            3659384,
+            5740398,
+            6714972,
+            7390444,
+            10189677
+          ],
+          "product": "GARDEEN PIPE"
+        },
+        {
+          "group": "Hardware",
+          "annual": 13381387,
+          "monthly": [
+            326668,
+            1315030,
+            1956053,
+            616723,
+            1231217,
+            693443,
+            432735,
+            1139124,
+            1317877,
+            1385137,
+            304908,
+            2662472
+          ],
+          "product": "HARDWARE"
+        },
+        {
+          "group": "Connection / Waste",
+          "annual": 73996043,
+          "monthly": [
+            2627785,
+            5966488,
+            7499218,
+            5229967,
+            6829405,
+            4943243,
+            4650534,
+            6724471,
+            6171387,
+            6426295,
+            6868519,
+            10058731
+          ],
+          "product": "CONNECTION"
+        },
+        {
+          "group": "Connection / Waste",
+          "annual": 27182848,
+          "monthly": [
+            1350525,
+            2275180,
+            2276011,
+            2620317,
+            2256863,
+            2101681,
+            1658666,
+            2658974,
+            1920377,
+            2165544,
+            2182789,
+            3715921
+          ],
+          "product": "WASTE-PIPE"
+        },
+        {
+          "group": "Sanitaryware",
+          "annual": 119471206,
+          "monthly": [
+            5919661,
+            7697456,
+            13794315,
+            9453904,
+            7112344,
+            10068727,
+            5564658,
+            11292501,
+            10567798,
+            11340343,
+            8072366,
+            18587133
+          ],
+          "product": "SANITARYWARE"
         }
       ],
-      "groups": [
-        {
-          "group": "PTMT",
-          "qty": 1179896,
-          "value_cr": 17.23,
-          "share": 0.219686344511029
-        },
-        {
-          "group": "C P",
-          "qty": 278409,
-          "value_cr": 16.28,
-          "share": 0.207573632538569
-        },
-        {
-          "group": "CPVC",
-          "qty": 1689905,
-          "value_cr": 8.33,
-          "share": 0.106209358663777
-        },
-        {
-          "group": "SWR",
-          "qty": 506694,
-          "value_cr": 5.35,
-          "share": 0.0682136937396404
-        },
-        {
-          "group": "UPVC",
-          "qty": 1225460,
-          "value_cr": 4.64,
-          "share": 0.0591610353181181
-        },
-        {
-          "group": "SANITARYWARE",
-          "qty": 32456,
-          "value_cr": 4.37,
-          "share": 0.0557184750733138
-        },
-        {
-          "group": "WATER TANK",
-          "qty": 6616500,
-          "value_cr": 3.7,
-          "share": 0.0471758255769476
-        },
-        {
-          "group": "CP ACCESSORIES",
-          "qty": 90587,
-          "value_cr": 3.63,
-          "share": 0.0462833099579243
-        },
-        {
-          "group": "SINK",
-          "qty": 17048,
-          "value_cr": 3.28,
-          "share": 0.0418207318628076
-        },
-        {
-          "group": "GARDEN PIPE",
-          "qty": 36202,
-          "value_cr": 2.44,
-          "share": 0.0311105444345276
-        },
-        {
-          "group": "CISTERN",
-          "qty": 46602,
-          "value_cr": 2.35,
-          "share": 0.0299630243529262
-        },
-        {
-          "group": "AGRI",
-          "qty": 227697,
-          "value_cr": 2.33,
-          "share": 0.0297080198903481
-        },
-        {
-          "group": "CONNECTION",
-          "qty": 240624,
-          "value_cr": 1.33,
-          "share": 0.0169577967614433
-        },
-        {
-          "group": "WASTE PIPE",
-          "qty": 158933,
-          "value_cr": 0.73,
-          "share": 0.00930766288410047
-        },
-        {
-          "group": "SEAT COVER",
-          "qty": 16447,
-          "value_cr": 0.5,
-          "share": 0.00637511156445238
-        },
-        {
-          "group": "HARDWARE",
-          "qty": 45343,
-          "value_cr": 0.43,
-          "share": 0.00548259594542905
-        },
-        {
-          "group": "TEFELON TAPE",
-          "qty": 304840,
-          "value_cr": 0.31,
-          "share": 0.00395256916996047
-        },
-        {
-          "group": "CABINET",
-          "qty": 2822,
-          "value_cr": 0.3,
-          "share": 0.00382506693867143
-        },
-        {
-          "group": "HDPE PIPE",
-          "qty": 104110,
-          "value_cr": 0.27,
-          "share": 0.00344256024480428
-        },
-        {
-          "group": "COLUMN",
-          "qty": 11210,
-          "value_cr": 0.16,
-          "share": 0.00204003570062476
-        },
-        {
-          "group": "PLATE RACK",
-          "qty": 477,
-          "value_cr": 0.15,
-          "share": 0.00191253346933571
-        },
-        {
-          "group": "FLOOR TRAP",
-          "qty": 10043,
-          "value_cr": 0.15,
-          "share": 0.00191253346933571
-        },
-        {
-          "group": "PPR",
-          "qty": 14185,
-          "value_cr": 0.13,
-          "share": 0.00165752900675762
-        },
-        {
-          "group": "Corrugated Pipe",
-          "qty": 10100,
-          "value_cr": 0.02,
-          "share": 0.000255004462578095
-        },
-        {
-          "group": "GEYSER",
-          "qty": 26,
-          "value_cr": 0.01,
-          "share": 0.000127502231289048
-        },
-        {
-          "group": "QUAA",
-          "qty": 1026,
-          "value_cr": 0.01,
-          "share": 0.000127502231289048
-        },
-        {
-          "group": "WT LID",
-          "qty": 262,
-          "value_cr": 0,
-          "share": 0
-        }
+      "grand_total": 3417311917,
+      "grand_monthly": [
+        127064276,
+        263987683,
+        297280519,
+        244893404,
+        240146868,
+        241524486,
+        228086733,
+        334329902,
+        323713408,
+        289189077,
+        324521028,
+        502574533
       ]
+    },
+    "totals": {
+      "dealers": 11590,
+      "retailers": 18117,
+      "state_heads": 12,
+      "distributors": 269,
+      "channel_partners": 269,
+      "fy2425_sales_inr": 3417311917,
+      "retailer_sales_inr": 582958018,
+      "orders_fy2627_ytd_cr": 111.18,
+      "secondary_retail_reach": 11590
     },
     "by_state": [
       {
-        "state": "WEST BENGAL",
-        "head": "Sandeep ji",
-        "retailers": 755,
-        "sales": 104935199.73
+        "head": "SANDEEP JI",
+        "sales": 230556962,
+        "state": "W-BENGAL",
+        "retailers": 33
       },
       {
-        "state": "East U.P",
-        "head": "Rizvi ji",
-        "retailers": 609,
-        "sales": 41677281.54
+        "head": "RIZVI JI",
+        "sales": 100564764,
+        "state": "UP ( R )",
+        "retailers": 62
       },
       {
+        "head": "SANDEEP JI",
+        "sales": 98805964,
         "state": "BIHAR",
-        "head": "Sandeep ji",
-        "retailers": 295,
-        "sales": 30635434.93
+        "retailers": 19
       },
       {
-        "state": "ODISHA",
-        "head": "Sandeep ji",
-        "retailers": 196,
-        "sales": 29976631.75
+        "head": "RIZVI JI",
+        "sales": 76240493,
+        "state": "MP",
+        "retailers": 17
       },
       {
-        "state": "MAHARASHTRA",
-        "head": "Lalan / Rizvi (split)",
-        "retailers": 588,
-        "sales": 24830161.64
-      },
-      {
+        "head": "SANDEEP JI",
+        "sales": 71974663,
         "state": "JHARKHAND",
-        "head": "Sandeep ji",
-        "retailers": 227,
-        "sales": 24540074.25
+        "retailers": 4
       },
       {
-        "state": "MADHYA PRADESH",
-        "head": "Rizvi ji",
-        "retailers": 395,
-        "sales": 23800036.04
+        "head": "SANDEEP JI",
+        "sales": 68248617,
+        "state": "ODISHA",
+        "retailers": 8
       },
       {
+        "head": "BIJJU",
+        "sales": 61561916,
+        "state": "Kerala",
+        "retailers": 7
+      },
+      {
+        "head": "SANDEEP JI",
+        "sales": 38885930,
         "state": "ASSAM",
-        "head": "Sandeep ji",
-        "retailers": 104,
-        "sales": 13618833.99
+        "retailers": 7
       },
       {
-        "state": "West U.P",
-        "head": "Anant Singh",
-        "retailers": 229,
-        "sales": 12133547.41
+        "head": "GOVT",
+        "sales": 38285525,
+        "state": "GOVT",
+        "retailers": 93
       },
       {
-        "state": "KERALA",
-        "head": "Bijju",
-        "retailers": 213,
-        "sales": 11112314.62
+        "head": "LALAN",
+        "sales": 29531471,
+        "state": "MAHARASTRA L",
+        "retailers": 30
       },
       {
-        "state": "TAMIL NADU",
-        "head": "Babu",
-        "retailers": 226,
-        "sales": 7478551.24
+        "head": "SANDEEP JI",
+        "sales": 27608478,
+        "state": "Tamilnadu",
+        "retailers": 1
       },
       {
-        "state": "TELANGANA",
-        "head": "Suresh Nair",
-        "retailers": 139,
-        "sales": 7273232.49
+        "head": "SANDEEP JI",
+        "sales": 22894025,
+        "state": "AP",
+        "retailers": 5
       },
       {
-        "state": "ANDHRA PRADESH",
-        "head": "Suresh Nair",
-        "retailers": 160,
-        "sales": 6943343.47
+        "head": "ANANT SINGH",
+        "sales": 22194017,
+        "state": "UP ( A )",
+        "retailers": 13
       },
       {
-        "state": "RAJASTHAN",
-        "head": "Pawan Kumar",
-        "retailers": 125,
-        "sales": 5175107.95
-      },
-      {
-        "state": "CHATTISGARH",
-        "head": "Rizvi ji",
-        "retailers": 111,
-        "sales": 4476877.47
-      },
-      {
-        "state": "GUJARAT",
-        "head": "Sunil Patel",
-        "retailers": 143,
-        "sales": 3694507.55
-      },
-      {
-        "state": "HARYANA",
-        "head": "Pawan Kumar",
-        "retailers": 42,
-        "sales": 3387074.04
-      },
-      {
-        "state": "JAMMU AND KASHMIR",
-        "head": "Nasir Husain",
-        "retailers": 38,
-        "sales": 3275651.34
-      },
-      {
+        "head": "SULINDER PAL",
+        "sales": 21486455,
         "state": "PUNJAB",
-        "head": "Sulinder Pal",
-        "retailers": 132,
-        "sales": 2781902.12
+        "retailers": 16
       },
       {
-        "state": "UTTARAKHAND",
-        "head": "Anant Singh",
-        "retailers": 108,
-        "sales": 2610719.82
+        "head": "BIJJU",
+        "sales": 18227582,
+        "state": "Karnataka (B)",
+        "retailers": 5
       },
       {
-        "state": "TRIPURA",
-        "head": "Sandeep ji",
-        "retailers": 36,
-        "sales": 2042293.73
+        "head": "PAWAN KUMAR",
+        "sales": 18178581,
+        "state": "Haryana",
+        "retailers": 12
       },
       {
-        "state": "DELHI",
-        "head": "Anant Singh",
-        "retailers": 71,
-        "sales": 1806078.89
+        "head": "ANUJ SHARMA",
+        "sales": 17726465,
+        "state": "UP (AS)",
+        "retailers": 7
       },
       {
-        "state": "KARNATAKA",
-        "head": "Bijju",
-        "retailers": 103,
-        "sales": 1342610.47
+        "head": "SANDEEP JI",
+        "sales": 17524674,
+        "state": "Telangana",
+        "retailers": 3
       },
       {
-        "state": "ARUNACHAL PRADESH",
-        "head": "Sandeep ji",
-        "retailers": 2,
-        "sales": 206506.79
+        "head": "PROJECT",
+        "sales": 14529966,
+        "state": "PROJECT",
+        "retailers": 36
       },
       {
-        "state": "MEGHALAYA",
-        "head": "Sandeep ji",
-        "retailers": 2,
-        "sales": 168480.33
+        "head": "PAWAN KUMAR",
+        "sales": 13880929,
+        "state": "Rajasthan",
+        "retailers": 16
       },
       {
-        "state": "PONDICHERRY",
-        "head": "Babu",
-        "retailers": 2,
-        "sales": 102716.5
+        "head": "SUNIL PATEL",
+        "sales": 12343238,
+        "state": "Gujarat",
+        "retailers": 14
       },
       {
-        "state": "HIMACHAL PRADESH",
-        "head": "Sulinder Pal",
-        "retailers": 3,
-        "sales": 78519.8
+        "head": "RIZVI JI",
+        "sales": 12084258,
+        "state": "MAHARASTRA R",
+        "retailers": 1
       },
       {
-        "state": "NAGALAND",
-        "head": "Sandeep ji",
-        "retailers": 3,
-        "sales": 67650
+        "head": "OTHER",
+        "sales": 11273029,
+        "state": "OTHER",
+        "retailers": 28
       },
       {
-        "state": "Delhi NCR",
-        "head": "Anant Singh",
-        "retailers": 6,
-        "sales": 52937.94
+        "head": "ANANT SINGH",
+        "sales": 10324477,
+        "state": "Uttarakhand",
+        "retailers": 12
       },
       {
-        "state": "GOA",
-        "head": "Lalan",
-        "retailers": 1,
-        "sales": 18749.6
+        "head": "GEM",
+        "sales": 9865057,
+        "state": "GEM",
+        "retailers": 14
       },
       {
-        "state": "MIZORAM",
-        "head": "Sandeep ji",
-        "retailers": 1,
-        "sales": 0
-      }
-    ],
-    "heads_retail": [
-      {
-        "head": "Sandeep ji",
-        "retailers": 1621,
-        "sales": 206191105.5,
-        "share": 0.556907464066732
+        "head": "SULINDER PAL",
+        "sales": 9219459,
+        "state": "Himachal Pradesh",
+        "retailers": 12
       },
       {
-        "head": "Rizvi ji",
-        "retailers": 1196,
-        "sales": 74785261.8,
-        "share": 0.201989656137736
+        "head": "NASIR HUSAIN",
+        "sales": 8982152,
+        "state": "KASHMIR",
+        "retailers": 21
       },
       {
-        "head": "Lalan",
-        "retailers": 508,
-        "sales": 20017844.49,
-        "share": 0.0540667696793939
+        "head": "RIZVI JI",
+        "sales": 7906672,
+        "state": "Chhattisgarh",
+        "retailers": 3
       },
       {
-        "head": "Anant Singh",
-        "retailers": 414,
-        "sales": 16603284.06,
-        "share": 0.0448442855893908
+        "head": "NASIR HUSAIN",
+        "sales": 7190653,
+        "state": "JAMMU",
+        "retailers": 3
       },
       {
-        "head": "Suresh Nair",
-        "retailers": 299,
-        "sales": 14216575.96,
-        "share": 0.0383979573046892
+        "head": "ANANT SINGH",
+        "sales": 4934535,
+        "state": "DELHI A",
+        "retailers": 7
       },
       {
-        "head": "Bijju",
-        "retailers": 316,
-        "sales": 12454925.09,
-        "share": 0.0336398639999193
+        "head": "NARENDRA SHARMA",
+        "sales": 4217960,
+        "state": "Rajasthan (N)",
+        "retailers": 1
       },
       {
-        "head": "Pawan Kumar",
-        "retailers": 167,
-        "sales": 8562181.99,
-        "share": 0.0231258426369354
+        "head": "ANANT SINGH",
+        "sales": 3439134,
+        "state": "DELHI NCR",
+        "retailers": 3
       },
       {
-        "head": "Babu",
-        "retailers": 228,
-        "sales": 7581267.74,
-        "share": 0.0204764632366469
+        "head": "LALAN",
+        "sales": 432647,
+        "state": "Goa",
+        "retailers": 3
       },
       {
-        "head": "Sunil Patel",
-        "retailers": 143,
-        "sales": 3694507.55,
-        "share": 0.00997860128668788
+        "head": "SULINDER PAL",
+        "sales": 405577,
+        "state": "Chandigarh",
+        "retailers": 1
       },
       {
-        "head": "Nasir Husain",
-        "retailers": 38,
-        "sales": 3275651.34,
-        "share": 0.00884730054918006
+        "head": "OTHER",
+        "sales": 159300,
+        "state": "HITESH",
+        "retailers": 1
       },
       {
-        "head": "Sulinder Pal",
-        "retailers": 135,
-        "sales": 2860421.92,
-        "share": 0.00772579551268808
-      }
-    ],
-    "heads_resources": [
-      {
-        "head": "Rizvi ji",
-        "distributors": 75,
-        "dealers": 54,
-        "total": 129,
-        "states": "CHATTISGARH, East U.P, MADHYA PRADESH, MAHARASHTRA"
+        "head": "SANDEEP JI",
+        "sales": 124386,
+        "state": "MAHARASTRA S",
+        "retailers": 1
       },
       {
-        "head": "Sandeep ji",
-        "distributors": 97,
-        "dealers": 16,
-        "total": 113,
-        "states": "ASSAM, BIHAR, JHARKHAND, ODISHA, TRIPURA, WEST BENGAL"
-      },
-      {
-        "head": "Anant Singh",
-        "distributors": 70,
-        "dealers": 36,
-        "total": 106,
-        "states": "DELHI, Delhi NCR, UTTARAKHAND, West U.P"
-      },
-      {
-        "head": "Sunil Patel",
-        "distributors": 23,
-        "dealers": 0,
-        "total": 23,
-        "states": "GUJARAT"
-      },
-      {
-        "head": "Babu",
-        "distributors": 53,
-        "dealers": 13,
-        "total": 66,
-        "states": "PONDICHERRY, TAMIL NADU"
-      },
-      {
-        "head": "Lalan",
-        "distributors": 52,
-        "dealers": 6,
-        "total": 58,
-        "states": "GOA, MAHARASHTRA"
-      },
-      {
-        "head": "Pawan Kumar",
-        "distributors": 101,
-        "dealers": 4,
-        "total": 105,
-        "states": "HARYANA, RAJASTHAN"
-      },
-      {
-        "head": "Suresh Nair",
-        "distributors": 24,
-        "dealers": 8,
-        "total": 32,
-        "states": "ANDHRA PRADESH, TELANGANA"
-      },
-      {
-        "head": "Bijju",
-        "distributors": 68,
-        "dealers": 5,
-        "total": 73,
-        "states": "KARNATAKA, KERALA"
-      },
-      {
-        "head": "Nasir Husain",
-        "distributors": 18,
-        "dealers": 24,
-        "total": 42,
-        "states": "JAMMU AND KASHMIR"
-      },
-      {
-        "head": "Sulinder Pal",
-        "distributors": 23,
-        "dealers": 3,
-        "total": 26,
-        "states": "HIMACHAL PRADESH, PUNJAB"
+        "head": "JJM",
+        "sales": 69275,
+        "state": "JJM",
+        "retailers": 1
       }
     ],
     "coverage": [
       {
-        "state": "East U.P",
-        "districts": 42,
-        "cities": 136
-      },
-      {
-        "state": "MADHYA PRADESH",
-        "districts": 40,
-        "cities": 115
-      },
-      {
-        "state": "MAHARASHTRA",
-        "districts": 30,
-        "cities": 174
-      },
-      {
-        "state": "BIHAR",
-        "districts": 27,
-        "cities": 96
-      },
-      {
-        "state": "ODISHA",
-        "districts": 23,
-        "cities": 82
+        "state": "KERALA",
+        "cities": 219,
+        "districts": 18,
+        "retailers": 2382
       },
       {
         "state": "TAMIL NADU",
-        "districts": 21,
-        "cities": 82
+        "cities": 238,
+        "districts": 32,
+        "retailers": 2126
       },
       {
-        "state": "JHARKHAND",
-        "districts": 21,
-        "cities": 81
+        "state": "MAHARASHTRA",
+        "cities": 212,
+        "districts": 33,
+        "retailers": 1470
+      },
+      {
+        "state": "EAST U.P",
+        "cities": 206,
+        "districts": 51,
+        "retailers": 1419
       },
       {
         "state": "WEST BENGAL",
+        "cities": 265,
         "districts": 18,
-        "cities": 254
-      },
-      {
-        "state": "West U.P",
-        "districts": 16,
-        "cities": 30
-      },
-      {
-        "state": "GUJARAT",
-        "districts": 13,
-        "cities": 41
+        "retailers": 1286
       },
       {
         "state": "ASSAM",
-        "districts": 13,
-        "cities": 41
+        "cities": 92,
+        "districts": 22,
+        "retailers": 955
       },
       {
-        "state": "RAJASTHAN",
-        "districts": 12,
-        "cities": 38
+        "state": "ANDHRA PRADESH",
+        "cities": 306,
+        "districts": 13,
+        "retailers": 884
+      },
+      {
+        "state": "TELANGANA",
+        "cities": 172,
+        "districts": 11,
+        "retailers": 778
+      },
+      {
+        "state": "BIHAR",
+        "cities": 143,
+        "districts": 30,
+        "retailers": 757
+      },
+      {
+        "state": "MADHYA PRADESH",
+        "cities": 124,
+        "districts": 48,
+        "retailers": 739
       },
       {
         "state": "CHATTISGARH",
-        "districts": 12,
-        "cities": 39
-      },
-      {
-        "state": "KARNATAKA",
-        "districts": 11,
-        "cities": 36
-      },
-      {
-        "state": "TELANGANA",
-        "districts": 10,
-        "cities": 81
-      },
-      {
-        "state": "JAMMU AND KASHMIR",
-        "districts": 10,
-        "cities": 15
-      },
-      {
-        "state": "PUNJAB",
-        "districts": 10,
-        "cities": 24
-      },
-      {
-        "state": "ANDHRA PRADESH",
-        "districts": 9,
-        "cities": 83
+        "cities": 96,
+        "districts": 18,
+        "retailers": 671
       },
       {
         "state": "HARYANA",
-        "districts": 7,
-        "cities": 21
+        "cities": 70,
+        "districts": 18,
+        "retailers": 653
       },
       {
-        "state": "UTTARAKHAND",
-        "districts": 7,
-        "cities": 25
+        "state": "GUJARAT",
+        "cities": 95,
+        "districts": 19,
+        "retailers": 637
       },
       {
-        "state": "KERALA",
-        "districts": 6,
-        "cities": 34
-      },
-      {
-        "state": "TRIPURA",
-        "districts": 6,
-        "cities": 12
+        "state": "WEST U.P",
+        "cities": 47,
+        "districts": 15,
+        "retailers": 518
       },
       {
         "state": "DELHI",
-        "districts": 5,
-        "cities": 5
+        "cities": 4,
+        "districts": 9,
+        "retailers": 491
       },
       {
-        "state": "NAGALAND",
-        "districts": 2,
-        "cities": 2
+        "state": "JHARKHAND",
+        "cities": 103,
+        "districts": 23,
+        "retailers": 438
       },
       {
-        "state": "PONDICHERRY",
-        "districts": 1,
-        "cities": 0
+        "state": "KARNATAKA",
+        "cities": 72,
+        "districts": 23,
+        "retailers": 437
       },
       {
-        "state": "Delhi NCR",
-        "districts": 1,
-        "cities": 2
+        "state": "ODISHA",
+        "cities": 121,
+        "districts": 27,
+        "retailers": 370
       },
       {
-        "state": "MIZORAM",
-        "districts": 1,
-        "cities": 1
+        "state": "PUNJAB",
+        "cities": 50,
+        "districts": 13,
+        "retailers": 326
       },
       {
-        "state": "HIMACHAL PRADESH",
-        "districts": 1,
-        "cities": 3
+        "state": "UTTARAKHAND",
+        "cities": 19,
+        "districts": 6,
+        "retailers": 302
       },
       {
-        "state": "ARUNACHAL PRADESH",
-        "districts": 1,
-        "cities": 2
+        "state": "RAJASTHAN",
+        "cities": 56,
+        "districts": 23,
+        "retailers": 225
       },
       {
-        "state": "GOA",
-        "districts": 1,
-        "cities": 1
+        "state": "TRIPURA",
+        "cities": 24,
+        "districts": 7,
+        "retailers": 107
       },
       {
         "state": "MEGHALAYA",
+        "cities": 5,
+        "districts": 5,
+        "retailers": 50
+      },
+      {
+        "state": "ARUNACHAL PRADESH",
+        "cities": 8,
+        "districts": 3,
+        "retailers": 28
+      },
+      {
+        "state": "PONDICHERRY",
+        "cities": 3,
+        "districts": 4,
+        "retailers": 27
+      },
+      {
+        "state": "GOA",
+        "cities": 8,
+        "districts": 2,
+        "retailers": 18
+      },
+      {
+        "state": "NAGALAND",
+        "cities": 2,
         "districts": 1,
-        "cities": 1
+        "retailers": 15
+      },
+      {
+        "state": "MANIPUR",
+        "cities": 2,
+        "districts": 2,
+        "retailers": 5
+      },
+      {
+        "state": "MIZORAM",
+        "cities": 1,
+        "districts": 1,
+        "retailers": 1
+      },
+      {
+        "state": "ANDAMAN & NICOBAR ISLANDS",
+        "cities": 1,
+        "districts": 1,
+        "retailers": 1
+      },
+      {
+        "state": "DAMAN & DIU",
+        "cities": 1,
+        "districts": 1,
+        "retailers": 1
       }
     ],
-    "coverage_totals": {
-      "states": 31,
-      "districts": 378,
-      "cities": 1557,
-      "supplying_distributors_named": 730,
-      "retailers": 5065
+    "heads_retail": [
+      {
+        "head": "SANDEEP JI",
+        "sales": 576623700,
+        "share": 51.9,
+        "retailers": 81
+      },
+      {
+        "head": "RIZVI JI",
+        "sales": 196796186,
+        "share": 17.7,
+        "retailers": 83
+      },
+      {
+        "head": "BIJJU",
+        "sales": 79789499,
+        "share": 7.2,
+        "retailers": 12
+      },
+      {
+        "head": "ANANT SINGH",
+        "sales": 40892163,
+        "share": 3.7,
+        "retailers": 35
+      },
+      {
+        "head": "GOVT",
+        "sales": 38285525,
+        "share": 3.4,
+        "retailers": 93
+      },
+      {
+        "head": "PAWAN KUMAR",
+        "sales": 32059509,
+        "share": 2.9,
+        "retailers": 28
+      },
+      {
+        "head": "SULINDER PAL",
+        "sales": 31111491,
+        "share": 2.8,
+        "retailers": 29
+      },
+      {
+        "head": "LALAN",
+        "sales": 29964118,
+        "share": 2.7,
+        "retailers": 33
+      },
+      {
+        "head": "ANUJ SHARMA",
+        "sales": 17726465,
+        "share": 1.6,
+        "retailers": 7
+      },
+      {
+        "head": "NASIR HUSAIN",
+        "sales": 16172805,
+        "share": 1.5,
+        "retailers": 24
+      },
+      {
+        "head": "PROJECT",
+        "sales": 14529966,
+        "share": 1.3,
+        "retailers": 36
+      },
+      {
+        "head": "SUNIL PATEL",
+        "sales": 12343238,
+        "share": 1.1,
+        "retailers": 14
+      },
+      {
+        "head": "OTHER",
+        "sales": 11432329,
+        "share": 1,
+        "retailers": 29
+      },
+      {
+        "head": "GEM",
+        "sales": 9865057,
+        "share": 0.9,
+        "retailers": 14
+      },
+      {
+        "head": "NARENDRA SHARMA",
+        "sales": 4217960,
+        "share": 0.4,
+        "retailers": 1
+      },
+      {
+        "head": "JJM",
+        "sales": 69275,
+        "share": 0,
+        "retailers": 1
+      }
+    ],
+    "orders_fy2627": {
+      "groups": [
+        {
+          "qty": 1669504,
+          "group": "PTMT",
+          "share": 21.8,
+          "value_cr": 24.2
+        },
+        {
+          "qty": 359746,
+          "group": "C P",
+          "share": 19.3,
+          "value_cr": 21.47
+        },
+        {
+          "qty": 2477265,
+          "group": "CPVC",
+          "share": 11,
+          "value_cr": 12.19
+        },
+        {
+          "qty": 739792,
+          "group": "SWR",
+          "share": 7.3,
+          "value_cr": 8.14
+        },
+        {
+          "qty": 1872311,
+          "group": "UPVC",
+          "share": 6.6,
+          "value_cr": 7.29
+        },
+        {
+          "qty": 45517,
+          "group": "SANITARYWARE",
+          "share": 5.4,
+          "value_cr": 5.97
+        },
+        {
+          "qty": 10469200,
+          "group": "WATER TANK",
+          "share": 5.3,
+          "value_cr": 5.87
+        },
+        {
+          "qty": 124018,
+          "group": "CP ACCESSORIES",
+          "share": 4.4,
+          "value_cr": 4.89
+        },
+        {
+          "qty": 23366,
+          "group": "SINK",
+          "share": 4,
+          "value_cr": 4.48
+        },
+        {
+          "qty": 71308,
+          "group": "CISTERN",
+          "share": 3.3,
+          "value_cr": 3.61
+        },
+        {
+          "qty": 302501,
+          "group": "AGRI",
+          "share": 2.9,
+          "value_cr": 3.23
+        },
+        {
+          "qty": 41898,
+          "group": "GARDEN PIPE",
+          "share": 2.6,
+          "value_cr": 2.86
+        },
+        {
+          "qty": 417144,
+          "group": "CONNECTION",
+          "share": 2,
+          "value_cr": 2.28
+        },
+        {
+          "qty": 229308,
+          "group": "WASTE PIPE",
+          "share": 0.9,
+          "value_cr": 1.04
+        },
+        {
+          "qty": 22675,
+          "group": "SEAT COVER",
+          "share": 0.6,
+          "value_cr": 0.69
+        },
+        {
+          "qty": 55700,
+          "group": "HARDWARE",
+          "share": 0.5,
+          "value_cr": 0.54
+        },
+        {
+          "qty": 4505,
+          "group": "CABINET",
+          "share": 0.4,
+          "value_cr": 0.48
+        },
+        {
+          "qty": 478340,
+          "group": "TEFELON TAPE",
+          "share": 0.4,
+          "value_cr": 0.48
+        },
+        {
+          "qty": 125367,
+          "group": "HDPE PIPE",
+          "share": 0.4,
+          "value_cr": 0.47
+        },
+        {
+          "qty": 25979,
+          "group": "COLUMN",
+          "share": 0.3,
+          "value_cr": 0.35
+        },
+        {
+          "qty": 733,
+          "group": "PLATE RACK",
+          "share": 0.2,
+          "value_cr": 0.23
+        },
+        {
+          "qty": 15509,
+          "group": "FLOOR TRAP",
+          "share": 0.2,
+          "value_cr": 0.22
+        },
+        {
+          "qty": 14185,
+          "group": "PPR",
+          "share": 0.1,
+          "value_cr": 0.13
+        },
+        {
+          "qty": 1570,
+          "group": "WT LID",
+          "share": 0,
+          "value_cr": 0.02
+        },
+        {
+          "qty": 47,
+          "group": "GEYSER",
+          "share": 0,
+          "value_cr": 0.02
+        },
+        {
+          "qty": 10100,
+          "group": "Corrugated Pipe",
+          "share": 0,
+          "value_cr": 0.02
+        },
+        {
+          "qty": 1026,
+          "group": "QUAA",
+          "share": 0,
+          "value_cr": 0.01
+        },
+        {
+          "qty": 100,
+          "group": "LPG PIPE",
+          "share": 0,
+          "value_cr": 0
+        }
+      ],
+      "monthly": [
+        {
+          "qty": 1840266,
+          "docs": 630,
+          "lines": 6694,
+          "month": "Apr-26",
+          "value_cr": 15.73,
+          "customers": 231
+        },
+        {
+          "qty": 4816124,
+          "docs": 1016,
+          "lines": 11842,
+          "month": "May-26",
+          "value_cr": 29.37,
+          "customers": 278
+        },
+        {
+          "qty": 5943338,
+          "docs": 1153,
+          "lines": 13311,
+          "month": "Jun-26",
+          "value_cr": 32.65,
+          "customers": 299
+        },
+        {
+          "qty": 6998986,
+          "docs": 1320,
+          "lines": 14158,
+          "month": "Jul-26",
+          "value_cr": 33.43,
+          "customers": 328
+        }
+      ]
     },
     "top_retailers": [
       {
-        "company": "Srikrishna sanitary & Pipe Fittings",
-        "state": "WEST BENGAL",
-        "city": "Memari - I",
-        "sales": 4109965.69
+        "city": "BHOPAL",
+        "sales": 36546087,
+        "state": "MP",
+        "company": "PROGRESSIVE MARKETING (Bhopal)"
       },
       {
-        "company": "Nirman Sales",
-        "state": "ODISHA",
-        "city": "Remuna",
-        "sales": 3330706.36
-      },
-      {
-        "company": "Shree Mahavir Hardware",
-        "state": "WEST BENGAL",
-        "city": "Kharagpur",
-        "sales": 2218537.24
-      },
-      {
-        "company": "Popular Trade Links",
-        "state": "KERALA",
-        "city": "Karuvankallu",
-        "sales": 2193814.77
-      },
-      {
-        "company": "NEW PURNIMA MACHINERY STORE",
-        "state": "WEST BENGAL",
-        "city": "Dantan",
-        "sales": 1721442.75
-      },
-      {
-        "company": "Sri Ram Enterprises",
-        "state": "ODISHA",
-        "city": "Baleshwar Sadar",
-        "sales": 1533190.25
-      },
-      {
-        "company": "Saif Rubber & Plastic Co",
-        "state": "WEST BENGAL",
-        "city": "Kolkata",
-        "sales": 1484901.57
-      },
-      {
-        "company": "Akash Steel Industries (P) Ltd",
-        "state": "WEST BENGAL",
-        "city": "Kolkata",
-        "sales": 1422838.86
-      },
-      {
-        "company": "Baman Sanitary",
-        "state": "ODISHA",
-        "city": "Anugul",
-        "sales": 1336386.31
-      },
-      {
-        "company": "Rana hardware",
-        "state": "WEST BENGAL",
-        "city": "Chandipur",
-        "sales": 1308892.38
-      },
-      {
-        "company": "Sri maha lakshmi Ganapathi industries",
-        "state": "ANDHRA PRADESH",
-        "city": "Tenali",
-        "sales": 1215987.83
-      },
-      {
-        "company": "Sarada Mechinary",
-        "state": "WEST BENGAL",
-        "city": "Joypur",
-        "sales": 1155908.13
-      },
-      {
-        "company": "Sri Durga Sanitary and paints",
-        "state": "TELANGANA",
-        "city": "Hyd",
-        "sales": 1135896
-      },
-      {
-        "company": "NANDI TRADERS",
-        "state": "WEST BENGAL",
-        "city": "Manteswar",
-        "sales": 1088663.99
-      },
-      {
-        "company": "Maa Askamini  Traders",
-        "state": "BIHAR",
-        "city": "Bikramganj",
-        "sales": 1088556.48
-      },
-      {
-        "company": "GORAI HARDWARE",
-        "state": "WEST BENGAL",
-        "city": "Salanpur",
-        "sales": 1069127.89
-      },
-      {
-        "company": "Aditya Enterprises",
+        "city": "DEOGHAR",
+        "sales": 33520836,
         "state": "JHARKHAND",
-        "city": "Rajmahal",
-        "sales": 1068696.06
+        "company": "CHHINAMASTIKE SANITATION PRIVATE LIMITED"
       },
       {
-        "company": "Sunil Hardware",
+        "city": "Bardhaman",
+        "sales": 32548382,
+        "state": "W-BENGAL",
+        "company": "TAPAN SMRITI HARDWARE"
+      },
+      {
+        "city": "PERINTHALMANNA",
+        "sales": 29640833,
+        "state": "Kerala",
+        "company": "PRAYAG SYNDICATE"
+      },
+      {
+        "city": "CHENNAI",
+        "sales": 27608478,
+        "state": "Tamilnadu",
+        "company": "GRAHAA PRIYA ENTERPRISES"
+      },
+      {
+        "city": "SANTIPUR",
+        "sales": 26558353,
+        "state": "W-BENGAL",
+        "company": "MAJI TRADING"
+      },
+      {
+        "city": "MIDNAPUR",
+        "sales": 26276609,
+        "state": "W-BENGAL",
+        "company": "SUBHAM ENTERPRISE (W.B)"
+      },
+      {
+        "city": "PURNIA",
+        "sales": 25190851,
+        "state": "BIHAR",
+        "company": "ANAND SANITARYWARE"
+      },
+      {
+        "city": "PATNA",
+        "sales": 25063231,
+        "state": "BIHAR",
+        "company": "MITTAL AGENCIES (Patna)"
+      },
+      {
+        "city": "INDORE",
+        "sales": 24538669,
+        "state": "MP",
+        "company": "SEWA BATH SOLUTIONS"
+      },
+      {
+        "city": "KOLKATA",
+        "sales": 24511784,
+        "state": "W-BENGAL",
+        "company": "AVIRASICO INTERNATIONAL (KOLKATTA)"
+      },
+      {
+        "city": "BHUBNESHWAR",
+        "sales": 24495080,
+        "state": "ODISHA",
+        "company": "PRAYAG SALES CORPORATION (BHUBANESHWAR)"
+      },
+      {
+        "city": "BALASORE",
+        "sales": 24268815,
+        "state": "ODISHA",
+        "company": "SB ENTERPRISES"
+      },
+      {
+        "city": "Birbhum",
+        "sales": 24204846,
+        "state": "W-BENGAL",
+        "company": "SAINTHIA PAINTS HOUSE (WB)"
+      },
+      {
+        "city": "GUWAHATI",
+        "sales": 22379159,
         "state": "ASSAM",
-        "city": "Tezpur",
-        "sales": 1056594.88
+        "company": "PRAYAG SALES CORPORATION (NE) (GUWAHATI)"
       },
       {
-        "company": "Vineet Enterprise",
-        "state": "WEST BENGAL",
-        "city": "Kolkata",
-        "sales": 1054060.52
-      },
-      {
-        "company": "Shri Mangalmurti Traders",
-        "state": "MAHARASHTRA",
-        "city": "Valva",
-        "sales": 1052985.18
-      },
-      {
-        "company": "Shiv shakti hardware",
-        "state": "BIHAR",
-        "city": "Katihar",
-        "sales": 1035243.88
-      },
-      {
-        "company": "Saha Electric",
-        "state": "WEST BENGAL",
-        "city": "Katwa",
-        "sales": 1011690.13
-      },
-      {
-        "company": "Debu work shop",
-        "state": "WEST BENGAL",
-        "city": "Daspur-II",
-        "sales": 997856.59
-      },
-      {
-        "company": "Shiv Sakti traders",
-        "state": "East U.P",
-        "city": "Kadipur",
-        "sales": 992558.76
-      },
-      {
-        "company": "TAPAN SMRITI HARDWARE",
-        "state": "WEST BENGAL",
-        "city": "",
-        "sales": 980666
-      },
-      {
-        "company": "Ma kali Enterprise",
-        "state": "WEST BENGAL",
-        "city": "Midnapore",
-        "sales": 973318.32
-      },
-      {
-        "company": "Ajay Iron Store",
-        "state": "East U.P",
-        "city": "Nawabganj",
-        "sales": 956767.54
-      },
-      {
-        "company": "GUDDU HARDWARE",
-        "state": "WEST BENGAL",
-        "city": "Dubrajpur",
-        "sales": 944524
-      },
-      {
-        "company": "Rajsthan marble house",
-        "state": "BIHAR",
-        "city": "Purnea",
-        "sales": 906938.44
-      },
-      {
-        "company": "KHAJABABA CONCRETE AND HARDWORKS",
-        "state": "WEST BENGAL",
-        "city": "Memari - II",
-        "sales": 905653.64
-      },
-      {
-        "company": "Ms Vs Infratech",
-        "state": "JAMMU AND KASHMIR",
-        "city": "Jammu",
-        "sales": 897099.38
-      },
-      {
-        "company": "CHANDIMATA ENTERPRISE",
-        "state": "TRIPURA",
-        "city": "Sadar",
-        "sales": 897072.97
-      },
-      {
-        "company": "Pran Trading",
-        "state": "WEST BENGAL",
-        "city": "Midnapore",
-        "sales": 881664.72
-      },
-      {
-        "company": "SRI SRINIVASA SANITARY STORES",
-        "state": "ANDHRA PRADESH",
-        "city": "Tenali",
-        "sales": 876497.92
-      },
-      {
-        "company": "SANAYA ENTERPRISES",
+        "city": "RANCHI",
+        "sales": 18781139,
         "state": "JHARKHAND",
-        "city": "Garhwa",
-        "sales": 869433.92
+        "company": "NATIONAL CASTING & METALS(RANCHI)"
       },
       {
-        "company": "Rana Enterprise",
-        "state": "WEST BENGAL",
-        "city": "Belda",
-        "sales": 864571.21
+        "city": "VIJAYWADA",
+        "sales": 18459392,
+        "state": "AP",
+        "company": "SRI LAKSHMI LALITHA AGENCIES"
       },
       {
-        "company": "Verma loha bhandaar",
-        "state": "East U.P",
-        "city": "Mohanlalganj",
-        "sales": 860082.33
+        "city": "LUCKNOW",
+        "sales": 17954849,
+        "state": "UP ( R )",
+        "company": "Lalta Prasad Ram Dayal"
       },
       {
-        "company": "N R HARDWARE STORE",
-        "state": "ASSAM",
-        "city": "Kaliabhomora",
-        "sales": 855992.66
+        "city": "PATNA",
+        "sales": 17334896,
+        "state": "BIHAR",
+        "company": "BMW POLYTUBE (UNIT OF BMW VENTURES LTD)"
       },
       {
-        "company": "Chaudhary Sanitary & Tiles",
-        "state": "East U.P",
-        "city": "Faizabad",
-        "sales": 813005.75
+        "city": "BURRABAZAR",
+        "sales": 17039255,
+        "state": "W-BENGAL",
+        "company": "MAHABIR SALES CORPORATION"
       },
       {
-        "company": "Janak enterprise / jalmark sanicare pvt ltd",
-        "state": "GUJARAT",
-        "city": "Ahmedabad City",
-        "sales": 777218
+        "city": "KOLKATA",
+        "sales": 13042698,
+        "state": "W-BENGAL",
+        "company": "AVIRASICO EXIM PRIVATE LIMITED"
+      },
+      {
+        "city": "Bardhaman",
+        "sales": 12706963,
+        "state": "W-BENGAL",
+        "company": "ASHISH BATH GALAXY"
+      },
+      {
+        "city": "BANKUDA",
+        "sales": 12705796,
+        "state": "W-BENGAL",
+        "company": "UNIQUE PIPE & SANITATION (BANKUDA)"
+      },
+      {
+        "city": "WADI",
+        "sales": 12084258,
+        "state": "MAHARASTRA R",
+        "company": "WAHID MARKETING (WADI)"
+      },
+      {
+        "city": "HYDERABAD",
+        "sales": 11964450,
+        "state": "Telangana",
+        "company": "BAJRANG HOME INNOVATIONS"
+      },
+      {
+        "city": "PERINTHALMANNA",
+        "sales": 11760289,
+        "state": "Kerala",
+        "company": "PRAYAG MARKETING (KERALA)"
+      },
+      {
+        "city": "KARNAL",
+        "sales": 11239125,
+        "state": "Haryana",
+        "company": "PRAYAG DISTRIBUTORS (KARNAL)"
+      },
+      {
+        "city": "DHANBAD",
+        "sales": 10919098,
+        "state": "JHARKHAND",
+        "company": "BABA ENTERPRISES (DHANBAD)"
+      },
+      {
+        "city": "GHAZIPUR",
+        "sales": 10588929,
+        "state": "UP ( R )",
+        "company": "MANOJ HARDWARE AND PAINT STORE"
+      },
+      {
+        "city": "Hubballi",
+        "sales": 10283385,
+        "state": "Karnataka (B)",
+        "company": "B R Agencies"
+      },
+      {
+        "city": "OLD DELHI",
+        "sales": 9408748,
+        "state": "OTHER",
+        "company": "KAKKAR TRADERS"
+      },
+      {
+        "city": "JAMSHEDPUR",
+        "sales": 8753590,
+        "state": "JHARKHAND",
+        "company": "BASUKI COMMOTRADE PVT. LTD.( JAMSHEDPUR)"
+      },
+      {
+        "city": "BALASORE",
+        "sales": 8053542,
+        "state": "ODISHA",
+        "company": "SRIRAM PACKAGING"
+      },
+      {
+        "city": "ALLAHABAD",
+        "sales": 7254392,
+        "state": "UP ( R )",
+        "company": "WARSI SALES CORPORATION"
+      },
+      {
+        "city": "GORAKHPUR",
+        "sales": 6909352,
+        "state": "UP ( R )",
+        "company": "GORAKHPUR MARBLE WORKS (GORAKHPUR"
+      },
+      {
+        "city": "MIRAJ",
+        "sales": 6719968,
+        "state": "MAHARASTRA L",
+        "company": "DIVEKAR MARKETING ASSOCIATES(MIRAJ)"
+      },
+      {
+        "city": "PUNE",
+        "sales": 6690820,
+        "state": "MAHARASTRA L",
+        "company": "R.R. PORWAL & SONS"
+      },
+      {
+        "city": "KANPUR",
+        "sales": 6561817,
+        "state": "UP ( R )",
+        "company": "NEW RAVI TRADING CO. (KANPUR)"
+      },
+      {
+        "city": "Hooghly",
+        "sales": 6414548,
+        "state": "W-BENGAL",
+        "company": "PSA BHARAT PIPE AND PUMPS PRIVATE LIMITED"
+      },
+      {
+        "city": "Bulandshahr",
+        "sales": 6370491,
+        "state": "UP (AS)",
+        "company": "V.M.D. PUMPS PRIVATE LIMITED(UP)"
       }
     ],
-    "totals": {
-      "state_heads": 11,
-      "distributors": 604,
-      "dealers": 169,
-      "channel_partners": 773,
-      "retailers": 5065,
-      "retailer_sales_inr": 370243027.44,
-      "fy2425_sales_inr": 3417311917,
-      "orders_fy2627_ytd_cr": 78.44
-    }
+    "coverage_totals": {
+      "cities": 2765,
+      "states": 31,
+      "districts": 497,
+      "retailers": 18117
+    },
+    "heads_resources": [
+      {
+        "head": "DADHEECH JI",
+        "total": 4867,
+        "states": "West Bengal, Odisha, Bihar, Telangana, Andhra Pradesh, North East, Jharkhand, Karnataka",
+        "dealers": 4804,
+        "distributors": 63
+      },
+      {
+        "head": "RIZVI JI",
+        "total": 2601,
+        "states": "East U.P, Madhya Pradesh, Chattisgarh, Maharashtra",
+        "dealers": 2555,
+        "distributors": 46
+      },
+      {
+        "head": "BIJJU",
+        "total": 1267,
+        "states": "Tamil Nadu, Kerala",
+        "dealers": 1198,
+        "distributors": 69
+      },
+      {
+        "head": "LALAN",
+        "total": 1124,
+        "states": "Maharashtra",
+        "dealers": 1114,
+        "distributors": 10
+      },
+      {
+        "head": "ANANT SINGH",
+        "total": 842,
+        "states": "West U.P, Delhi, Uttarakhand, Delhi NCR",
+        "dealers": 820,
+        "distributors": 22
+      },
+      {
+        "head": "PAWAN KUMAR",
+        "total": 557,
+        "states": "Haryana, Rajasthan",
+        "dealers": 537,
+        "distributors": 20
+      },
+      {
+        "head": "SUNIL PATEL",
+        "total": 237,
+        "states": "Gujarat",
+        "dealers": 224,
+        "distributors": 13
+      },
+      {
+        "head": "SULINDER PAL",
+        "total": 202,
+        "states": "Punjab, Himachal Pradesh",
+        "dealers": 199,
+        "distributors": 3
+      },
+      {
+        "head": "NASIR HUSAIN",
+        "total": 139,
+        "states": "Jammu and Kashmir",
+        "dealers": 139,
+        "distributors": 0
+      },
+      {
+        "head": "PRASHANT ONAM NAIK",
+        "total": 23,
+        "states": "Karnataka",
+        "dealers": 0,
+        "distributors": 23
+      },
+      {
+        "head": "SUNIL MOHANTY",
+        "total": 0,
+        "states": "West U.P, Rajasthan",
+        "dealers": 0,
+        "distributors": 0
+      },
+      {
+        "head": "ANUJ SHARMA",
+        "total": 0,
+        "states": "West U.P",
+        "dealers": 0,
+        "distributors": 0
+      }
+    ]
   },
   "manifest": {
-    "generated": "2026-07-07",
-    "drive_account": "DEEPAKJ@prayagindia.com",
-    "counts": {
-      "sales_files": 44,
-      "order_and_support_files": 8,
-      "total": 52
-    },
-    "primary_sources": {
-      "product_itemwise_sales": {
-        "desc": "Item-wise product sales by month. Read the 'SALE' tab.",
-        "files_by_year": {
-          "2026-27": "1OhGlFHTxJ4XQetMurLmi_fvJGmb3fVjhCyIQ_bZxtsU",
-          "2025-26": "13muZf9-tFNkXbR3zetL8ibY5GVK7tQRVHi-tofSHm5U",
-          "2024-25": "1HgWelwHy73Ybc-1fBQMXhKxo2ctJToxgZLDWwJPmqz8",
-          "2024-25_xlsx": "1lKoCMlGU42-psMEgLxzPAHURNMHPP1aP",
-          "2023-24": "1-vgW_n7gqk4EHt0FBSI-aKdpVyJh0DRoV2vytFlHdug",
-          "2022-23": "1Ql_slsNOlIB12ExaBOWu_XmXpm0d-F1Nch6B4mNJQJo"
-        },
-        "tab": "SALE"
-      },
-      "order_book": {
-        "desc": "Order intake; monthly tabs (Apr, May, ...). Each row is an order line.",
-        "files_by_year": {
-          "2026-27": "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A",
-          "2025-26": "1Xzq-gmB6K7iuMcE6gb-O7OpvGgSDU33DzEVyK60LK6E",
-          "2024-25": "1cT6lWRPJ3oSeYhab-cqeVjJidGitFQsr0DOq-vNn6cI",
-          "2023-24": "1jtSUGE6iT8WuUKi56F4LYqjJgZF42oR1mk51imG8yq8"
-        },
-        "tabs": "monthly (Apr..Mar)"
-      },
-      "state_head_sales": {
-        "desc": "Sales rolled up by State Head.",
-        "files_by_year": {
-          "2026-27": "1QIpcfgOVCFjcCmgU_DXKn8h7Bfa8rm2q2wB2HneTvKs",
-          "2025-26": "1RuXHIXfusOT-VDdDqeuB-Nx-pxyVkmrJsqr21BB-NUA",
-          "2024-25": "1iL1su3xwe40eG0QJHVwat97rhlMmADzeKQVfMw6ZrE0"
-        }
-      },
-      "rate_list_master": {
-        "desc": "IMPORTRANGE source for item rates/groups.",
-        "id": "1njO-srsS29qiE4t45-zr5njbB7R2Zb-oSnv2NL1ONY4"
-      },
-      "seven_year_statehead_folder": {
-        "desc": "Folder of 7-year State-Head sale reports.",
-        "id": "1m-JlphYuytCy_3vliWWFNwDBdS8v7Elq"
-      }
-    },
-    "sales_files": [
-      {
-        "n": 1,
-        "name": "Sale & Pur PL Summary 2026-27",
-        "id": "1OhGlFHTxJ4XQetMurLmi_fvJGmb3fVjhCyIQ_bZxtsU",
-        "category": "Consolidated P&L Summary",
-        "fy": "2026-27",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1OhGlFHTxJ4XQetMurLmi_fvJGmb3fVjhCyIQ_bZxtsU/edit"
-      },
-      {
-        "n": 2,
-        "name": "Sale & Pur PL Summary 2025-26",
-        "id": "13muZf9-tFNkXbR3zetL8ibY5GVK7tQRVHi-tofSHm5U",
-        "category": "Consolidated P&L Summary",
-        "fy": "2025-26",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/13muZf9-tFNkXbR3zetL8ibY5GVK7tQRVHi-tofSHm5U/edit"
-      },
-      {
-        "n": 3,
-        "name": "_Sale & Pur PL Summary 2025-26 (copy)",
-        "id": "1wsduIZ0T-zIL2nViVMFN3GQ9ZNzKuvvWqp-hRClmo1M",
-        "category": "Consolidated P&L Summary",
-        "fy": "2025-26",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1wsduIZ0T-zIL2nViVMFN3GQ9ZNzKuvvWqp-hRClmo1M/edit"
-      },
-      {
-        "n": 4,
-        "name": "Sale & Pur PL Summary 2024-25",
-        "id": "1HgWelwHy73Ybc-1fBQMXhKxo2ctJToxgZLDWwJPmqz8",
-        "category": "Consolidated P&L Summary",
-        "fy": "2024-25",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1HgWelwHy73Ybc-1fBQMXhKxo2ctJToxgZLDWwJPmqz8/edit"
-      },
-      {
-        "n": 5,
-        "name": "Sale & Pur PL Summary 2024-25.xlsx",
-        "id": "1lKoCMlGU42-psMEgLxzPAHURNMHPP1aP",
-        "category": "Consolidated P&L Summary",
-        "fy": "2024-25",
-        "type": "Excel (.xlsx)",
-        "url": "https://docs.google.com/spreadsheets/d/1lKoCMlGU42-psMEgLxzPAHURNMHPP1aP/edit"
-      },
-      {
-        "n": 6,
-        "name": "Sale & Pur PL Summary 2023-24",
-        "id": "1-vgW_n7gqk4EHt0FBSI-aKdpVyJh0DRoV2vytFlHdug",
-        "category": "Consolidated P&L Summary",
-        "fy": "2023-24",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1-vgW_n7gqk4EHt0FBSI-aKdpVyJh0DRoV2vytFlHdug/edit"
-      },
-      {
-        "n": 7,
-        "name": "Sale & Pur PL Summary 2022-23",
-        "id": "1Ql_slsNOlIB12ExaBOWu_XmXpm0d-F1Nch6B4mNJQJo",
-        "category": "Consolidated P&L Summary",
-        "fy": "2022-23",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1Ql_slsNOlIB12ExaBOWu_XmXpm0d-F1Nch6B4mNJQJo/edit"
-      },
-      {
-        "n": 8,
-        "name": "Sale Master 2026-27",
-        "id": "1sytliQa_YdoC_ddB6FxqlbXGwlG-qXknmi4g0VNHJ6o",
-        "category": "Sale Master (yearly)",
-        "fy": "2026-27",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1sytliQa_YdoC_ddB6FxqlbXGwlG-qXknmi4g0VNHJ6o/edit"
-      },
-      {
-        "n": 9,
-        "name": "Sale Master 2025-26",
-        "id": "1HjzsyZDqeCYXCG-l7CX10ddxCgi1-C31xUO1YlHFMUU",
-        "category": "Sale Master (yearly)",
-        "fy": "2025-26",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1HjzsyZDqeCYXCG-l7CX10ddxCgi1-C31xUO1YlHFMUU/edit"
-      },
-      {
-        "n": 10,
-        "name": "Sale Master 2023-24",
-        "id": "1zvtL4AAOvT714VDWjAmME5jyb4ruQn1Aay9LO7A3-tw",
-        "category": "Sale Master (yearly)",
-        "fy": "2023-24",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1zvtL4AAOvT714VDWjAmME5jyb4ruQn1Aay9LO7A3-tw/edit"
-      },
-      {
-        "n": 11,
-        "name": "Sale Master 2022-23",
-        "id": "1f8A5BaCEysQNYxPtqfEUjXSbX0umh7hCFOubQdVzTuE",
-        "category": "Sale Master (yearly)",
-        "fy": "2022-23",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1f8A5BaCEysQNYxPtqfEUjXSbX0umh7hCFOubQdVzTuE/edit"
-      },
-      {
-        "n": 12,
-        "name": "Sale Master 2022-23 dated 07/04/2023",
-        "id": "12oqe4z70KYe8LlQT6-CVf73F97PlLToWg-BdI3ZsFYI",
-        "category": "Sale Master (yearly)",
-        "fy": "2022-23",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/12oqe4z70KYe8LlQT6-CVf73F97PlLToWg-BdI3ZsFYI/edit"
-      },
-      {
-        "n": 13,
-        "name": "3 YEAR SALE MASTER",
-        "id": "1JpHX_hiRZ1l2QyyS3X3LbbsyqSLQ0oyIs3n9emnoH3s",
-        "category": "Sale Master (multi-year)",
-        "fy": "3-year",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1JpHX_hiRZ1l2QyyS3X3LbbsyqSLQ0oyIs3n9emnoH3s/edit"
-      },
-      {
-        "n": 14,
-        "name": "State Head Sale 2026-27",
-        "id": "1QIpcfgOVCFjcCmgU_DXKn8h7Bfa8rm2q2wB2HneTvKs",
-        "category": "State-Head Sale",
-        "fy": "2026-27",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1QIpcfgOVCFjcCmgU_DXKn8h7Bfa8rm2q2wB2HneTvKs/edit"
-      },
-      {
-        "n": 15,
-        "name": "State Head Sale 2025-26",
-        "id": "1RuXHIXfusOT-VDdDqeuB-Nx-pxyVkmrJsqr21BB-NUA",
-        "category": "State-Head Sale",
-        "fy": "2025-26",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1RuXHIXfusOT-VDdDqeuB-Nx-pxyVkmrJsqr21BB-NUA/edit"
-      },
-      {
-        "n": 16,
-        "name": "State Head Sale 2024-25",
-        "id": "1iL1su3xwe40eG0QJHVwat97rhlMmADzeKQVfMw6ZrE0",
-        "category": "State-Head Sale",
-        "fy": "2024-25",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1iL1su3xwe40eG0QJHVwat97rhlMmADzeKQVfMw6ZrE0/edit"
-      },
-      {
-        "n": 17,
-        "name": "State Head Sale Summary 2025-26",
-        "id": "1ctm5oiWWJTbYtrTmlg4Y5l9J87b3PIsSbyPH0hbJCg8",
-        "category": "State-Head Sale",
-        "fy": "2025-26",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1ctm5oiWWJTbYtrTmlg4Y5l9J87b3PIsSbyPH0hbJCg8/edit"
-      },
-      {
-        "n": 18,
-        "name": "State Head Wise Sale",
-        "id": "1KgnZ5iCKszgJ_tACijCzDaPlAf1sHwFWgNSYazH6jGY",
-        "category": "State-Head Sale",
-        "fy": "undated",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1KgnZ5iCKszgJ_tACijCzDaPlAf1sHwFWgNSYazH6jGY/edit"
-      },
-      {
-        "n": 19,
-        "name": "Sale PL APR 2026-27",
-        "id": "16W-fxW6srpBsCtP6-xMR8FoLRhb3z9L_3ls5ZIfLmgc",
-        "category": "Monthly Sale P&L",
-        "fy": "2026-27",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/16W-fxW6srpBsCtP6-xMR8FoLRhb3z9L_3ls5ZIfLmgc/edit"
-      },
-      {
-        "n": 20,
-        "name": "Sale PL MAY 2026-27",
-        "id": "1DSA6jOGAPcK3bAjcIf7Z4taz8rapShggT8-TCVpntHY",
-        "category": "Monthly Sale P&L",
-        "fy": "2026-27",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1DSA6jOGAPcK3bAjcIf7Z4taz8rapShggT8-TCVpntHY/edit"
-      },
-      {
-        "n": 21,
-        "name": "Daily Sale mail-2024",
-        "id": "1JbxNmTPLrJyKPjbqspzRkhxaLZDLsNA4OsHGEqF4tuA",
-        "category": "Daily Sale (mailer)",
-        "fy": "rolling",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1JbxNmTPLrJyKPjbqspzRkhxaLZDLsNA4OsHGEqF4tuA/edit"
-      },
-      {
-        "n": 22,
-        "name": "Sale 2023-24",
-        "id": "1R-jNPuy6ofJgIOqykulT0FDkuYVvh_FTAR59H4c5FkI",
-        "category": "Sale Report (yearly)",
-        "fy": "2023-24",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1R-jNPuy6ofJgIOqykulT0FDkuYVvh_FTAR59H4c5FkI/edit"
-      },
-      {
-        "n": 23,
-        "name": "Sale REPORT 2022-23 DATED 16-02-2023",
-        "id": "1Fu52AyIfSuq8fKmdkWUGHNiyJDzjGVsFEndM2FuD9P4",
-        "category": "Sale Report (yearly)",
-        "fy": "2022-23",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1Fu52AyIfSuq8fKmdkWUGHNiyJDzjGVsFEndM2FuD9P4/edit"
-      },
-      {
-        "n": 24,
-        "name": "Sale Comparison -25-26 / 26-27",
-        "id": "16fFG3xkDt3rlGbiHKSIaj38hi7c3K8gHXm8G2dCTcvU",
-        "category": "Sale Comparison",
-        "fy": "25-26/26-27",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/16fFG3xkDt3rlGbiHKSIaj38hi7c3K8gHXm8G2dCTcvU/edit"
-      },
-      {
-        "n": 25,
-        "name": "sale & dispatch data",
-        "id": "1ITliDjJEjSs7QAuKQ4_QQc47o_67evUn0vRvIKj9HLQ",
-        "category": "Sale + Dispatch",
-        "fy": "undated",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1ITliDjJEjSs7QAuKQ4_QQc47o_67evUn0vRvIKj9HLQ/edit"
-      },
-      {
-        "n": 26,
-        "name": "3 YEAR SALE",
-        "id": "1OW8Oh-zd6lgQbTOf4w_r1MqEN8SikJyU0uDwZmJlMfM",
-        "category": "Multi-Year Sale",
-        "fy": "3-year",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1OW8Oh-zd6lgQbTOf4w_r1MqEN8SikJyU0uDwZmJlMfM/edit"
-      },
-      {
-        "n": 27,
-        "name": "4 YEAR SALE",
-        "id": "1PB4fXtqrF4yK5sH-t-UJS15yIrhWEO0cCG5RjrRln9w",
-        "category": "Multi-Year Sale",
-        "fy": "4-year",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1PB4fXtqrF4yK5sH-t-UJS15yIrhWEO0cCG5RjrRln9w/edit"
-      },
-      {
-        "n": 28,
-        "name": "5 YEAR SALE WEIGHT",
-        "id": "1Qi_bQATy_60QGoJmGKkQsn4Ul8dPYzbk-UOC4j7LUrg",
-        "category": "Multi-Year Sale",
-        "fy": "5-year",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1Qi_bQATy_60QGoJmGKkQsn4Ul8dPYzbk-UOC4j7LUrg/edit"
-      },
-      {
-        "n": 29,
-        "name": "6 YEAR SALE",
-        "id": "1ilnmTpbOVUD9_G90ttz41XgVLQrUucMpUzzvxsRS-vc",
-        "category": "Multi-Year Sale",
-        "fy": "6-year",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1ilnmTpbOVUD9_G90ttz41XgVLQrUucMpUzzvxsRS-vc/edit"
-      },
-      {
-        "n": 30,
-        "name": "7 Years Sale Report- State Head (folder)",
-        "id": "1m-JlphYuytCy_3vliWWFNwDBdS8v7Elq",
-        "category": "Multi-Year Sale",
-        "fy": "7-year",
-        "type": "Folder",
-        "url": "https://drive.google.com/drive/folders/1m-JlphYuytCy_3vliWWFNwDBdS8v7Elq"
-      },
-      {
-        "n": 31,
-        "name": "7 Year Sales Report - Sandeep ji",
-        "id": "1KxI0s_HR2SVUX29qQd01gbajJusi5geHTQkuGhCVtQI",
-        "category": "Distributor Sale History",
-        "fy": "7-year",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1KxI0s_HR2SVUX29qQd01gbajJusi5geHTQkuGhCVtQI/edit"
-      },
-      {
-        "n": 32,
-        "name": "7 Year Sales Report - Rizvi ji",
-        "id": "1oEd4jNclJM6DK6butzP55bmes2T8GYZozd3IkjYqWrc",
-        "category": "Distributor Sale History",
-        "fy": "7-year",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1oEd4jNclJM6DK6butzP55bmes2T8GYZozd3IkjYqWrc/edit"
-      },
-      {
-        "n": 33,
-        "name": "4 Year Sales Report - Pawan Kumar",
-        "id": "1lLYyFxz9awRzaf4xdPpa8gqXglUpuooG0sl_cbl9pjw",
-        "category": "Distributor Sale History",
-        "fy": "4-year",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1lLYyFxz9awRzaf4xdPpa8gqXglUpuooG0sl_cbl9pjw/edit"
-      },
-      {
-        "n": 34,
-        "name": "CP SALE GROUP WISE 2023-24",
-        "id": "1IoNfjKPH8s78RoJJuIKMW9yNOg5rocTR8EHnFJbp7cc",
-        "category": "Segment Sale (CP)",
-        "fy": "2023-24",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1IoNfjKPH8s78RoJJuIKMW9yNOg5rocTR8EHnFJbp7cc/edit"
-      },
-      {
-        "n": 35,
-        "name": "Plumbing Item Wise Sale -24-25 / 25-26",
-        "id": "1_nnbFlnokNgm5RT522YB4d074Ehvv2-iP9L5gistsSA",
-        "category": "Segment Sale (Plumbing)",
-        "fy": "24-25/25-26",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1_nnbFlnokNgm5RT522YB4d074Ehvv2-iP9L5gistsSA/edit"
-      },
-      {
-        "n": 36,
-        "name": "PLUMBING ITEM WISE SALE (24-25/25-26)",
-        "id": "1VNEygCgHLxhgwpwQHySKD7k0FZVF5mzEJkjsIi98cK0",
-        "category": "Segment Sale (Plumbing)",
-        "fy": "24-25/25-26",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1VNEygCgHLxhgwpwQHySKD7k0FZVF5mzEJkjsIi98cK0/edit"
-      },
-      {
-        "n": 37,
-        "name": "Plumbing Sale GP Margin APR-26",
-        "id": "1HfOnlp2UUZXCe0Jt9JtLpfVY078Ryp3hF_vU8Sx46BU",
-        "category": "Segment Sale (Plumbing)",
-        "fy": "2026-27",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1HfOnlp2UUZXCe0Jt9JtLpfVY078Ryp3hF_vU8Sx46BU/edit"
-      },
-      {
-        "n": 38,
-        "name": "PLUMBING SALE GP MARGIN Feb 26",
-        "id": "1RQckznLZms_Wfo6tAoHnitAP6WVQKGfmvDRTkq0Mlng",
-        "category": "Segment Sale (Plumbing)",
-        "fy": "2025-26",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1RQckznLZms_Wfo6tAoHnitAP6WVQKGfmvDRTkq0Mlng/edit"
-      },
-      {
-        "n": 39,
-        "name": "Plumbing Sale GP Margin Mar-26",
-        "id": "1khU931IAfqHlMUxqN4ZTp1Es-VjnwQXlodFTvYQ6P6I",
-        "category": "Segment Sale (Plumbing)",
-        "fy": "2025-26",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1khU931IAfqHlMUxqN4ZTp1Es-VjnwQXlodFTvYQ6P6I/edit"
-      },
-      {
-        "n": 40,
-        "name": "PLUMBING SALE GP MARGIN Jan 26",
-        "id": "1i4s4yIAp41iL5fbi9AGBN6BruD7aeVglsIe5qGIIRgU",
-        "category": "Segment Sale (Plumbing)",
-        "fy": "2025-26",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1i4s4yIAp41iL5fbi9AGBN6BruD7aeVglsIe5qGIIRgU/edit"
-      },
-      {
-        "n": 41,
-        "name": "SINK SALE GP MARGIN (Apr to Sep 2024-25)",
-        "id": "1RO6_2UxlFPwCnibq2nwrwSk5VbP4Q4UVop5kerzh2AU",
-        "category": "Segment Sale (Sink)",
-        "fy": "2024-25",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1RO6_2UxlFPwCnibq2nwrwSk5VbP4Q4UVop5kerzh2AU/edit"
-      },
-      {
-        "n": 42,
-        "name": "SINK SALE GP MARGIN (Apr To June 2024-25)",
-        "id": "1pML4iDzLKNuKdOE6lmusFcmvja6MVFhj1mDk-7JR5bY",
-        "category": "Segment Sale (Sink)",
-        "fy": "2024-25",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1pML4iDzLKNuKdOE6lmusFcmvja6MVFhj1mDk-7JR5bY/edit"
-      },
-      {
-        "n": 43,
-        "name": "SINK SALE GP MARGIN (Apr To Aug 2024-25)",
-        "id": "1sWZsoMUKuHCeXtESJPuc5tHHTHMYbjLJDvX2YSu4rCw",
-        "category": "Segment Sale (Sink)",
-        "fy": "2024-25",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1sWZsoMUKuHCeXtESJPuc5tHHTHMYbjLJDvX2YSu4rCw/edit"
-      },
-      {
-        "n": 44,
-        "name": "SINK SALE GP MARGIN (Apr To July 2024-25)",
-        "id": "1lVxX6YnH_Dp3YhlcymSPd38ml692htPvC7_OB90JSEg",
-        "category": "Segment Sale (Sink)",
-        "fy": "2024-25",
-        "type": "Google Sheet",
-        "url": "https://docs.google.com/spreadsheets/d/1lVxX6YnH_Dp3YhlcymSPd38ml692htPvC7_OB90JSEg/edit"
-      }
-    ],
-    "order_and_support_files": [
-      {
-        "name": "Order Sheet 26-27",
-        "id": "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A",
-        "period": "FY2026-27",
-        "category": "Order Sheet",
-        "type": "Google Sheet",
-        "role": "Live order intake; monthly tabs Apr–Jul; INDEX/WT helper tabs",
-        "url": "https://docs.google.com/spreadsheets/d/1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A/edit"
-      },
-      {
-        "name": "Order Sheet 25-26",
-        "id": "1Xzq-gmB6K7iuMcE6gb-O7OpvGgSDU33DzEVyK60LK6E",
-        "period": "FY2025-26",
-        "category": "Order Sheet",
-        "type": "Google Sheet",
-        "role": "Full-year order intake; same structure",
-        "url": "https://docs.google.com/spreadsheets/d/1Xzq-gmB6K7iuMcE6gb-O7OpvGgSDU33DzEVyK60LK6E/edit"
-      },
-      {
-        "name": "Order Sheet 24-25",
-        "id": "1cT6lWRPJ3oSeYhab-cqeVjJidGitFQsr0DOq-vNn6cI",
-        "period": "FY2024-25",
-        "category": "Order Sheet",
-        "type": "Google Sheet",
-        "role": "Full-year order intake; same structure",
-        "url": "https://docs.google.com/spreadsheets/d/1cT6lWRPJ3oSeYhab-cqeVjJidGitFQsr0DOq-vNn6cI/edit"
-      },
-      {
-        "name": "Order Sheet 23-24",
-        "id": "1jtSUGE6iT8WuUKi56F4LYqjJgZF42oR1mk51imG8yq8",
-        "period": "FY2023-24",
-        "category": "Order Sheet",
-        "type": "Google Sheet",
-        "role": "Full-year order intake; same structure",
-        "url": "https://docs.google.com/spreadsheets/d/1jtSUGE6iT8WuUKi56F4LYqjJgZF42oR1mk51imG8yq8/edit"
-      },
-      {
-        "name": "ORDER & COLLECTION PLAN NEW SHEET",
-        "id": "1guL5afGXknbYT19KsrOeJ6O5bjRMpRwRXDndvC2AQzA",
-        "period": "2022 (older)",
-        "category": "Order+Collection plan",
-        "type": "Google Sheet",
-        "role": "Older, lighter order+collection planning (different format)",
-        "url": "https://docs.google.com/spreadsheets/d/1guL5afGXknbYT19KsrOeJ6O5bjRMpRwRXDndvC2AQzA/edit"
-      },
-      {
-        "name": "rate list",
-        "id": "1njO-srsS29qiE4t45-zr5njbB7R2Zb-oSnv2NL1ONY4",
-        "period": "2020 → live",
-        "category": "Reference master (IMPORTRANGE source)",
-        "type": "Google Sheet",
-        "role": "Item rates/reference imported into Order Sheet (Sheet1!B4:F, Sheet2!A2:F) for rate & group lookups",
-        "url": "https://docs.google.com/spreadsheets/d/1njO-srsS29qiE4t45-zr5njbB7R2Zb-oSnv2NL1ONY4/edit"
-      },
-      {
-        "name": "ORDER FORM RATE LIST",
-        "id": "1r6rT6wTr3jcylF-hh47gfogtdyisXL8oG-YQiYfTEF0",
-        "period": "2022 → live",
-        "category": "Related rate-list",
-        "type": "Google Sheet",
-        "role": "Related order-form / rate reference; not confirmed as the IMPORTRANGE source",
-        "url": "https://docs.google.com/spreadsheets/d/1r6rT6wTr3jcylF-hh47gfogtdyisXL8oG-YQiYfTEF0/edit"
-      },
-      {
-        "name": "RATE LIST.XLSX",
-        "id": "1Sb9GyBaFgJAs89bmLeETWLQuoHLCoz5z",
-        "period": "static copy",
-        "category": "Related rate-list (static)",
-        "type": "xlsx",
-        "role": "Static Excel export of the rate list",
-        "url": "https://docs.google.com/spreadsheets/d/1Sb9GyBaFgJAs89bmLeETWLQuoHLCoz5z/edit"
-      }
-    ],
     "notes": [
       "Share every file (or the parent folders) with the Replit service-account email, or the app cannot read them.",
       "Native Google Sheets: read via the Sheets API (spreadsheets.values.get) — no 10MB cap. Use Drive export only for small sheets.",
       "The 5,065-retailer roster used for coverage did not appear in these two catalogs; add its file ID to primary_sources when known.",
       "INDEX and WT are TABS inside each Order Sheet, not separate files."
+    ],
+    "counts": {
+      "total": 52,
+      "sales_files": 44,
+      "order_and_support_files": 8
+    },
+    "data_mode": "seed",
+    "generated": "2026-08-01T12:10:10.985Z",
+    "sales_files": [
+      {
+        "n": 1,
+        "fy": "2026-27",
+        "id": "1OhGlFHTxJ4XQetMurLmi_fvJGmb3fVjhCyIQ_bZxtsU",
+        "url": "https://docs.google.com/spreadsheets/d/1OhGlFHTxJ4XQetMurLmi_fvJGmb3fVjhCyIQ_bZxtsU/edit",
+        "name": "Sale & Pur PL Summary 2026-27",
+        "type": "Google Sheet",
+        "category": "Consolidated P&L Summary"
+      },
+      {
+        "n": 2,
+        "fy": "2025-26",
+        "id": "13muZf9-tFNkXbR3zetL8ibY5GVK7tQRVHi-tofSHm5U",
+        "url": "https://docs.google.com/spreadsheets/d/13muZf9-tFNkXbR3zetL8ibY5GVK7tQRVHi-tofSHm5U/edit",
+        "name": "Sale & Pur PL Summary 2025-26",
+        "type": "Google Sheet",
+        "category": "Consolidated P&L Summary"
+      },
+      {
+        "n": 3,
+        "fy": "2025-26",
+        "id": "1wsduIZ0T-zIL2nViVMFN3GQ9ZNzKuvvWqp-hRClmo1M",
+        "url": "https://docs.google.com/spreadsheets/d/1wsduIZ0T-zIL2nViVMFN3GQ9ZNzKuvvWqp-hRClmo1M/edit",
+        "name": "_Sale & Pur PL Summary 2025-26 (copy)",
+        "type": "Google Sheet",
+        "category": "Consolidated P&L Summary"
+      },
+      {
+        "n": 4,
+        "fy": "2024-25",
+        "id": "1HgWelwHy73Ybc-1fBQMXhKxo2ctJToxgZLDWwJPmqz8",
+        "url": "https://docs.google.com/spreadsheets/d/1HgWelwHy73Ybc-1fBQMXhKxo2ctJToxgZLDWwJPmqz8/edit",
+        "name": "Sale & Pur PL Summary 2024-25",
+        "type": "Google Sheet",
+        "category": "Consolidated P&L Summary"
+      },
+      {
+        "n": 5,
+        "fy": "2024-25",
+        "id": "1lKoCMlGU42-psMEgLxzPAHURNMHPP1aP",
+        "url": "https://docs.google.com/spreadsheets/d/1lKoCMlGU42-psMEgLxzPAHURNMHPP1aP/edit",
+        "name": "Sale & Pur PL Summary 2024-25.xlsx",
+        "type": "Excel (.xlsx)",
+        "category": "Consolidated P&L Summary"
+      },
+      {
+        "n": 6,
+        "fy": "2023-24",
+        "id": "1-vgW_n7gqk4EHt0FBSI-aKdpVyJh0DRoV2vytFlHdug",
+        "url": "https://docs.google.com/spreadsheets/d/1-vgW_n7gqk4EHt0FBSI-aKdpVyJh0DRoV2vytFlHdug/edit",
+        "name": "Sale & Pur PL Summary 2023-24",
+        "type": "Google Sheet",
+        "category": "Consolidated P&L Summary"
+      },
+      {
+        "n": 7,
+        "fy": "2022-23",
+        "id": "1Ql_slsNOlIB12ExaBOWu_XmXpm0d-F1Nch6B4mNJQJo",
+        "url": "https://docs.google.com/spreadsheets/d/1Ql_slsNOlIB12ExaBOWu_XmXpm0d-F1Nch6B4mNJQJo/edit",
+        "name": "Sale & Pur PL Summary 2022-23",
+        "type": "Google Sheet",
+        "category": "Consolidated P&L Summary"
+      },
+      {
+        "n": 8,
+        "fy": "2026-27",
+        "id": "1sytliQa_YdoC_ddB6FxqlbXGwlG-qXknmi4g0VNHJ6o",
+        "url": "https://docs.google.com/spreadsheets/d/1sytliQa_YdoC_ddB6FxqlbXGwlG-qXknmi4g0VNHJ6o/edit",
+        "name": "Sale Master 2026-27",
+        "type": "Google Sheet",
+        "category": "Sale Master (yearly)"
+      },
+      {
+        "n": 9,
+        "fy": "2025-26",
+        "id": "1HjzsyZDqeCYXCG-l7CX10ddxCgi1-C31xUO1YlHFMUU",
+        "url": "https://docs.google.com/spreadsheets/d/1HjzsyZDqeCYXCG-l7CX10ddxCgi1-C31xUO1YlHFMUU/edit",
+        "name": "Sale Master 2025-26",
+        "type": "Google Sheet",
+        "category": "Sale Master (yearly)"
+      },
+      {
+        "n": 10,
+        "fy": "2023-24",
+        "id": "1zvtL4AAOvT714VDWjAmME5jyb4ruQn1Aay9LO7A3-tw",
+        "url": "https://docs.google.com/spreadsheets/d/1zvtL4AAOvT714VDWjAmME5jyb4ruQn1Aay9LO7A3-tw/edit",
+        "name": "Sale Master 2023-24",
+        "type": "Google Sheet",
+        "category": "Sale Master (yearly)"
+      },
+      {
+        "n": 11,
+        "fy": "2022-23",
+        "id": "1f8A5BaCEysQNYxPtqfEUjXSbX0umh7hCFOubQdVzTuE",
+        "url": "https://docs.google.com/spreadsheets/d/1f8A5BaCEysQNYxPtqfEUjXSbX0umh7hCFOubQdVzTuE/edit",
+        "name": "Sale Master 2022-23",
+        "type": "Google Sheet",
+        "category": "Sale Master (yearly)"
+      },
+      {
+        "n": 12,
+        "fy": "2022-23",
+        "id": "12oqe4z70KYe8LlQT6-CVf73F97PlLToWg-BdI3ZsFYI",
+        "url": "https://docs.google.com/spreadsheets/d/12oqe4z70KYe8LlQT6-CVf73F97PlLToWg-BdI3ZsFYI/edit",
+        "name": "Sale Master 2022-23 dated 07/04/2023",
+        "type": "Google Sheet",
+        "category": "Sale Master (yearly)"
+      },
+      {
+        "n": 13,
+        "fy": "3-year",
+        "id": "1JpHX_hiRZ1l2QyyS3X3LbbsyqSLQ0oyIs3n9emnoH3s",
+        "url": "https://docs.google.com/spreadsheets/d/1JpHX_hiRZ1l2QyyS3X3LbbsyqSLQ0oyIs3n9emnoH3s/edit",
+        "name": "3 YEAR SALE MASTER",
+        "type": "Google Sheet",
+        "category": "Sale Master (multi-year)"
+      },
+      {
+        "n": 14,
+        "fy": "2026-27",
+        "id": "1QIpcfgOVCFjcCmgU_DXKn8h7Bfa8rm2q2wB2HneTvKs",
+        "url": "https://docs.google.com/spreadsheets/d/1QIpcfgOVCFjcCmgU_DXKn8h7Bfa8rm2q2wB2HneTvKs/edit",
+        "name": "State Head Sale 2026-27",
+        "type": "Google Sheet",
+        "category": "State-Head Sale"
+      },
+      {
+        "n": 15,
+        "fy": "2025-26",
+        "id": "1RuXHIXfusOT-VDdDqeuB-Nx-pxyVkmrJsqr21BB-NUA",
+        "url": "https://docs.google.com/spreadsheets/d/1RuXHIXfusOT-VDdDqeuB-Nx-pxyVkmrJsqr21BB-NUA/edit",
+        "name": "State Head Sale 2025-26",
+        "type": "Google Sheet",
+        "category": "State-Head Sale"
+      },
+      {
+        "n": 16,
+        "fy": "2024-25",
+        "id": "1iL1su3xwe40eG0QJHVwat97rhlMmADzeKQVfMw6ZrE0",
+        "url": "https://docs.google.com/spreadsheets/d/1iL1su3xwe40eG0QJHVwat97rhlMmADzeKQVfMw6ZrE0/edit",
+        "name": "State Head Sale 2024-25",
+        "type": "Google Sheet",
+        "category": "State-Head Sale"
+      },
+      {
+        "n": 17,
+        "fy": "2025-26",
+        "id": "1ctm5oiWWJTbYtrTmlg4Y5l9J87b3PIsSbyPH0hbJCg8",
+        "url": "https://docs.google.com/spreadsheets/d/1ctm5oiWWJTbYtrTmlg4Y5l9J87b3PIsSbyPH0hbJCg8/edit",
+        "name": "State Head Sale Summary 2025-26",
+        "type": "Google Sheet",
+        "category": "State-Head Sale"
+      },
+      {
+        "n": 18,
+        "fy": "undated",
+        "id": "1KgnZ5iCKszgJ_tACijCzDaPlAf1sHwFWgNSYazH6jGY",
+        "url": "https://docs.google.com/spreadsheets/d/1KgnZ5iCKszgJ_tACijCzDaPlAf1sHwFWgNSYazH6jGY/edit",
+        "name": "State Head Wise Sale",
+        "type": "Google Sheet",
+        "category": "State-Head Sale"
+      },
+      {
+        "n": 19,
+        "fy": "2026-27",
+        "id": "16W-fxW6srpBsCtP6-xMR8FoLRhb3z9L_3ls5ZIfLmgc",
+        "url": "https://docs.google.com/spreadsheets/d/16W-fxW6srpBsCtP6-xMR8FoLRhb3z9L_3ls5ZIfLmgc/edit",
+        "name": "Sale PL APR 2026-27",
+        "type": "Google Sheet",
+        "category": "Monthly Sale P&L"
+      },
+      {
+        "n": 20,
+        "fy": "2026-27",
+        "id": "1DSA6jOGAPcK3bAjcIf7Z4taz8rapShggT8-TCVpntHY",
+        "url": "https://docs.google.com/spreadsheets/d/1DSA6jOGAPcK3bAjcIf7Z4taz8rapShggT8-TCVpntHY/edit",
+        "name": "Sale PL MAY 2026-27",
+        "type": "Google Sheet",
+        "category": "Monthly Sale P&L"
+      },
+      {
+        "n": 21,
+        "fy": "rolling",
+        "id": "1JbxNmTPLrJyKPjbqspzRkhxaLZDLsNA4OsHGEqF4tuA",
+        "url": "https://docs.google.com/spreadsheets/d/1JbxNmTPLrJyKPjbqspzRkhxaLZDLsNA4OsHGEqF4tuA/edit",
+        "name": "Daily Sale mail-2024",
+        "type": "Google Sheet",
+        "category": "Daily Sale (mailer)"
+      },
+      {
+        "n": 22,
+        "fy": "2023-24",
+        "id": "1R-jNPuy6ofJgIOqykulT0FDkuYVvh_FTAR59H4c5FkI",
+        "url": "https://docs.google.com/spreadsheets/d/1R-jNPuy6ofJgIOqykulT0FDkuYVvh_FTAR59H4c5FkI/edit",
+        "name": "Sale 2023-24",
+        "type": "Google Sheet",
+        "category": "Sale Report (yearly)"
+      },
+      {
+        "n": 23,
+        "fy": "2022-23",
+        "id": "1Fu52AyIfSuq8fKmdkWUGHNiyJDzjGVsFEndM2FuD9P4",
+        "url": "https://docs.google.com/spreadsheets/d/1Fu52AyIfSuq8fKmdkWUGHNiyJDzjGVsFEndM2FuD9P4/edit",
+        "name": "Sale REPORT 2022-23 DATED 16-02-2023",
+        "type": "Google Sheet",
+        "category": "Sale Report (yearly)"
+      },
+      {
+        "n": 24,
+        "fy": "25-26/26-27",
+        "id": "16fFG3xkDt3rlGbiHKSIaj38hi7c3K8gHXm8G2dCTcvU",
+        "url": "https://docs.google.com/spreadsheets/d/16fFG3xkDt3rlGbiHKSIaj38hi7c3K8gHXm8G2dCTcvU/edit",
+        "name": "Sale Comparison -25-26 / 26-27",
+        "type": "Google Sheet",
+        "category": "Sale Comparison"
+      },
+      {
+        "n": 25,
+        "fy": "undated",
+        "id": "1ITliDjJEjSs7QAuKQ4_QQc47o_67evUn0vRvIKj9HLQ",
+        "url": "https://docs.google.com/spreadsheets/d/1ITliDjJEjSs7QAuKQ4_QQc47o_67evUn0vRvIKj9HLQ/edit",
+        "name": "sale & dispatch data",
+        "type": "Google Sheet",
+        "category": "Sale + Dispatch"
+      },
+      {
+        "n": 26,
+        "fy": "3-year",
+        "id": "1OW8Oh-zd6lgQbTOf4w_r1MqEN8SikJyU0uDwZmJlMfM",
+        "url": "https://docs.google.com/spreadsheets/d/1OW8Oh-zd6lgQbTOf4w_r1MqEN8SikJyU0uDwZmJlMfM/edit",
+        "name": "3 YEAR SALE",
+        "type": "Google Sheet",
+        "category": "Multi-Year Sale"
+      },
+      {
+        "n": 27,
+        "fy": "4-year",
+        "id": "1PB4fXtqrF4yK5sH-t-UJS15yIrhWEO0cCG5RjrRln9w",
+        "url": "https://docs.google.com/spreadsheets/d/1PB4fXtqrF4yK5sH-t-UJS15yIrhWEO0cCG5RjrRln9w/edit",
+        "name": "4 YEAR SALE",
+        "type": "Google Sheet",
+        "category": "Multi-Year Sale"
+      },
+      {
+        "n": 28,
+        "fy": "5-year",
+        "id": "1Qi_bQATy_60QGoJmGKkQsn4Ul8dPYzbk-UOC4j7LUrg",
+        "url": "https://docs.google.com/spreadsheets/d/1Qi_bQATy_60QGoJmGKkQsn4Ul8dPYzbk-UOC4j7LUrg/edit",
+        "name": "5 YEAR SALE WEIGHT",
+        "type": "Google Sheet",
+        "category": "Multi-Year Sale"
+      },
+      {
+        "n": 29,
+        "fy": "6-year",
+        "id": "1ilnmTpbOVUD9_G90ttz41XgVLQrUucMpUzzvxsRS-vc",
+        "url": "https://docs.google.com/spreadsheets/d/1ilnmTpbOVUD9_G90ttz41XgVLQrUucMpUzzvxsRS-vc/edit",
+        "name": "6 YEAR SALE",
+        "type": "Google Sheet",
+        "category": "Multi-Year Sale"
+      },
+      {
+        "n": 30,
+        "fy": "7-year",
+        "id": "1m-JlphYuytCy_3vliWWFNwDBdS8v7Elq",
+        "url": "https://drive.google.com/drive/folders/1m-JlphYuytCy_3vliWWFNwDBdS8v7Elq",
+        "name": "7 Years Sale Report- State Head (folder)",
+        "type": "Folder",
+        "category": "Multi-Year Sale"
+      },
+      {
+        "n": 31,
+        "fy": "7-year",
+        "id": "1KxI0s_HR2SVUX29qQd01gbajJusi5geHTQkuGhCVtQI",
+        "url": "https://docs.google.com/spreadsheets/d/1KxI0s_HR2SVUX29qQd01gbajJusi5geHTQkuGhCVtQI/edit",
+        "name": "7 Year Sales Report - Sandeep ji",
+        "type": "Google Sheet",
+        "category": "Distributor Sale History"
+      },
+      {
+        "n": 32,
+        "fy": "7-year",
+        "id": "1oEd4jNclJM6DK6butzP55bmes2T8GYZozd3IkjYqWrc",
+        "url": "https://docs.google.com/spreadsheets/d/1oEd4jNclJM6DK6butzP55bmes2T8GYZozd3IkjYqWrc/edit",
+        "name": "7 Year Sales Report - Rizvi ji",
+        "type": "Google Sheet",
+        "category": "Distributor Sale History"
+      },
+      {
+        "n": 33,
+        "fy": "4-year",
+        "id": "1lLYyFxz9awRzaf4xdPpa8gqXglUpuooG0sl_cbl9pjw",
+        "url": "https://docs.google.com/spreadsheets/d/1lLYyFxz9awRzaf4xdPpa8gqXglUpuooG0sl_cbl9pjw/edit",
+        "name": "4 Year Sales Report - Pawan Kumar",
+        "type": "Google Sheet",
+        "category": "Distributor Sale History"
+      },
+      {
+        "n": 34,
+        "fy": "2023-24",
+        "id": "1IoNfjKPH8s78RoJJuIKMW9yNOg5rocTR8EHnFJbp7cc",
+        "url": "https://docs.google.com/spreadsheets/d/1IoNfjKPH8s78RoJJuIKMW9yNOg5rocTR8EHnFJbp7cc/edit",
+        "name": "CP SALE GROUP WISE 2023-24",
+        "type": "Google Sheet",
+        "category": "Segment Sale (CP)"
+      },
+      {
+        "n": 35,
+        "fy": "24-25/25-26",
+        "id": "1_nnbFlnokNgm5RT522YB4d074Ehvv2-iP9L5gistsSA",
+        "url": "https://docs.google.com/spreadsheets/d/1_nnbFlnokNgm5RT522YB4d074Ehvv2-iP9L5gistsSA/edit",
+        "name": "Plumbing Item Wise Sale -24-25 / 25-26",
+        "type": "Google Sheet",
+        "category": "Segment Sale (Plumbing)"
+      },
+      {
+        "n": 36,
+        "fy": "24-25/25-26",
+        "id": "1VNEygCgHLxhgwpwQHySKD7k0FZVF5mzEJkjsIi98cK0",
+        "url": "https://docs.google.com/spreadsheets/d/1VNEygCgHLxhgwpwQHySKD7k0FZVF5mzEJkjsIi98cK0/edit",
+        "name": "PLUMBING ITEM WISE SALE (24-25/25-26)",
+        "type": "Google Sheet",
+        "category": "Segment Sale (Plumbing)"
+      },
+      {
+        "n": 37,
+        "fy": "2026-27",
+        "id": "1HfOnlp2UUZXCe0Jt9JtLpfVY078Ryp3hF_vU8Sx46BU",
+        "url": "https://docs.google.com/spreadsheets/d/1HfOnlp2UUZXCe0Jt9JtLpfVY078Ryp3hF_vU8Sx46BU/edit",
+        "name": "Plumbing Sale GP Margin APR-26",
+        "type": "Google Sheet",
+        "category": "Segment Sale (Plumbing)"
+      },
+      {
+        "n": 38,
+        "fy": "2025-26",
+        "id": "1RQckznLZms_Wfo6tAoHnitAP6WVQKGfmvDRTkq0Mlng",
+        "url": "https://docs.google.com/spreadsheets/d/1RQckznLZms_Wfo6tAoHnitAP6WVQKGfmvDRTkq0Mlng/edit",
+        "name": "PLUMBING SALE GP MARGIN Feb 26",
+        "type": "Google Sheet",
+        "category": "Segment Sale (Plumbing)"
+      },
+      {
+        "n": 39,
+        "fy": "2025-26",
+        "id": "1khU931IAfqHlMUxqN4ZTp1Es-VjnwQXlodFTvYQ6P6I",
+        "url": "https://docs.google.com/spreadsheets/d/1khU931IAfqHlMUxqN4ZTp1Es-VjnwQXlodFTvYQ6P6I/edit",
+        "name": "Plumbing Sale GP Margin Mar-26",
+        "type": "Google Sheet",
+        "category": "Segment Sale (Plumbing)"
+      },
+      {
+        "n": 40,
+        "fy": "2025-26",
+        "id": "1i4s4yIAp41iL5fbi9AGBN6BruD7aeVglsIe5qGIIRgU",
+        "url": "https://docs.google.com/spreadsheets/d/1i4s4yIAp41iL5fbi9AGBN6BruD7aeVglsIe5qGIIRgU/edit",
+        "name": "PLUMBING SALE GP MARGIN Jan 26",
+        "type": "Google Sheet",
+        "category": "Segment Sale (Plumbing)"
+      },
+      {
+        "n": 41,
+        "fy": "2024-25",
+        "id": "1RO6_2UxlFPwCnibq2nwrwSk5VbP4Q4UVop5kerzh2AU",
+        "url": "https://docs.google.com/spreadsheets/d/1RO6_2UxlFPwCnibq2nwrwSk5VbP4Q4UVop5kerzh2AU/edit",
+        "name": "SINK SALE GP MARGIN (Apr to Sep 2024-25)",
+        "type": "Google Sheet",
+        "category": "Segment Sale (Sink)"
+      },
+      {
+        "n": 42,
+        "fy": "2024-25",
+        "id": "1pML4iDzLKNuKdOE6lmusFcmvja6MVFhj1mDk-7JR5bY",
+        "url": "https://docs.google.com/spreadsheets/d/1pML4iDzLKNuKdOE6lmusFcmvja6MVFhj1mDk-7JR5bY/edit",
+        "name": "SINK SALE GP MARGIN (Apr To June 2024-25)",
+        "type": "Google Sheet",
+        "category": "Segment Sale (Sink)"
+      },
+      {
+        "n": 43,
+        "fy": "2024-25",
+        "id": "1sWZsoMUKuHCeXtESJPuc5tHHTHMYbjLJDvX2YSu4rCw",
+        "url": "https://docs.google.com/spreadsheets/d/1sWZsoMUKuHCeXtESJPuc5tHHTHMYbjLJDvX2YSu4rCw/edit",
+        "name": "SINK SALE GP MARGIN (Apr To Aug 2024-25)",
+        "type": "Google Sheet",
+        "category": "Segment Sale (Sink)"
+      },
+      {
+        "n": 44,
+        "fy": "2024-25",
+        "id": "1lVxX6YnH_Dp3YhlcymSPd38ml692htPvC7_OB90JSEg",
+        "url": "https://docs.google.com/spreadsheets/d/1lVxX6YnH_Dp3YhlcymSPd38ml692htPvC7_OB90JSEg/edit",
+        "name": "SINK SALE GP MARGIN (Apr To July 2024-25)",
+        "type": "Google Sheet",
+        "category": "Segment Sale (Sink)"
+      }
+    ],
+    "drive_account": "DEEPAKJ@prayagindia.com",
+    "primary_sources": {
+      "order_book": {
+        "desc": "Order intake; monthly tabs (Apr, May, ...). Each row is an order line.",
+        "tabs": "monthly (Apr..Mar)",
+        "files_by_year": {
+          "2023-24": "1jtSUGE6iT8WuUKi56F4LYqjJgZF42oR1mk51imG8yq8",
+          "2024-25": "1cT6lWRPJ3oSeYhab-cqeVjJidGitFQsr0DOq-vNn6cI",
+          "2025-26": "1Xzq-gmB6K7iuMcE6gb-O7OpvGgSDU33DzEVyK60LK6E",
+          "2026-27": "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A"
+        }
+      },
+      "rate_list_master": {
+        "id": "1njO-srsS29qiE4t45-zr5njbB7R2Zb-oSnv2NL1ONY4",
+        "desc": "IMPORTRANGE source for item rates/groups."
+      },
+      "state_head_sales": {
+        "desc": "Sales rolled up by State Head.",
+        "files_by_year": {
+          "2024-25": "1iL1su3xwe40eG0QJHVwat97rhlMmADzeKQVfMw6ZrE0",
+          "2025-26": "1RuXHIXfusOT-VDdDqeuB-Nx-pxyVkmrJsqr21BB-NUA",
+          "2026-27": "1QIpcfgOVCFjcCmgU_DXKn8h7Bfa8rm2q2wB2HneTvKs"
+        }
+      },
+      "state_head_dashboard": {
+        "id": "1E1jEY_yO8LmpqBDpcesS_fu2SBPEQ0eKO5xN29XyTEM",
+        "desc": "Per-head team dashboard. \"Data\" tab -> states covered per head; \"SECONDARY ORDER BOOKING REPORT\" tab -> dealer network and secondary order value per head."
+      },
+      "product_itemwise_sales": {
+        "tab": "SALE",
+        "desc": "Item-wise product sales by month. Read the 'SALE' tab.",
+        "files_by_year": {
+          "2022-23": "1Ql_slsNOlIB12ExaBOWu_XmXpm0d-F1Nch6B4mNJQJo",
+          "2023-24": "1-vgW_n7gqk4EHt0FBSI-aKdpVyJh0DRoV2vytFlHdug",
+          "2024-25": "1HgWelwHy73Ybc-1fBQMXhKxo2ctJToxgZLDWwJPmqz8",
+          "2025-26": "13muZf9-tFNkXbR3zetL8ibY5GVK7tQRVHi-tofSHm5U",
+          "2026-27": "1OhGlFHTxJ4XQetMurLmi_fvJGmb3fVjhCyIQ_bZxtsU",
+          "2024-25_xlsx": "1lKoCMlGU42-psMEgLxzPAHURNMHPP1aP"
+        }
+      },
+      "retailer_distributor_roster": {
+        "id": "1EbWoXm-LC9L_nsh4JUzMU7v0H6Q3Lq8FEmKgFT9FXHc",
+        "desc": "Registered retailer roster (\"Retailer\" tab -> coverage) and distributor roster (\"Distributor\" tab -> distributor counts)."
+      },
+      "seven_year_statehead_folder": {
+        "id": "1m-JlphYuytCy_3vliWWFNwDBdS8v7Elq",
+        "desc": "Folder of 7-year State-Head sale reports."
+      }
+    },
+    "order_and_support_files": [
+      {
+        "id": "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A",
+        "url": "https://docs.google.com/spreadsheets/d/1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A/edit",
+        "name": "Order Sheet 26-27",
+        "role": "Live order intake; monthly tabs Apr–Jul; INDEX/WT helper tabs",
+        "type": "Google Sheet",
+        "period": "FY2026-27",
+        "category": "Order Sheet"
+      },
+      {
+        "id": "1Xzq-gmB6K7iuMcE6gb-O7OpvGgSDU33DzEVyK60LK6E",
+        "url": "https://docs.google.com/spreadsheets/d/1Xzq-gmB6K7iuMcE6gb-O7OpvGgSDU33DzEVyK60LK6E/edit",
+        "name": "Order Sheet 25-26",
+        "role": "Full-year order intake; same structure",
+        "type": "Google Sheet",
+        "period": "FY2025-26",
+        "category": "Order Sheet"
+      },
+      {
+        "id": "1cT6lWRPJ3oSeYhab-cqeVjJidGitFQsr0DOq-vNn6cI",
+        "url": "https://docs.google.com/spreadsheets/d/1cT6lWRPJ3oSeYhab-cqeVjJidGitFQsr0DOq-vNn6cI/edit",
+        "name": "Order Sheet 24-25",
+        "role": "Full-year order intake; same structure",
+        "type": "Google Sheet",
+        "period": "FY2024-25",
+        "category": "Order Sheet"
+      },
+      {
+        "id": "1jtSUGE6iT8WuUKi56F4LYqjJgZF42oR1mk51imG8yq8",
+        "url": "https://docs.google.com/spreadsheets/d/1jtSUGE6iT8WuUKi56F4LYqjJgZF42oR1mk51imG8yq8/edit",
+        "name": "Order Sheet 23-24",
+        "role": "Full-year order intake; same structure",
+        "type": "Google Sheet",
+        "period": "FY2023-24",
+        "category": "Order Sheet"
+      },
+      {
+        "id": "1guL5afGXknbYT19KsrOeJ6O5bjRMpRwRXDndvC2AQzA",
+        "url": "https://docs.google.com/spreadsheets/d/1guL5afGXknbYT19KsrOeJ6O5bjRMpRwRXDndvC2AQzA/edit",
+        "name": "ORDER & COLLECTION PLAN NEW SHEET",
+        "role": "Older, lighter order+collection planning (different format)",
+        "type": "Google Sheet",
+        "period": "2022 (older)",
+        "category": "Order+Collection plan"
+      },
+      {
+        "id": "1njO-srsS29qiE4t45-zr5njbB7R2Zb-oSnv2NL1ONY4",
+        "url": "https://docs.google.com/spreadsheets/d/1njO-srsS29qiE4t45-zr5njbB7R2Zb-oSnv2NL1ONY4/edit",
+        "name": "rate list",
+        "role": "Item rates/reference imported into Order Sheet (Sheet1!B4:F, Sheet2!A2:F) for rate & group lookups",
+        "type": "Google Sheet",
+        "period": "2020 → live",
+        "category": "Reference master (IMPORTRANGE source)"
+      },
+      {
+        "id": "1r6rT6wTr3jcylF-hh47gfogtdyisXL8oG-YQiYfTEF0",
+        "url": "https://docs.google.com/spreadsheets/d/1r6rT6wTr3jcylF-hh47gfogtdyisXL8oG-YQiYfTEF0/edit",
+        "name": "ORDER FORM RATE LIST",
+        "role": "Related order-form / rate reference; not confirmed as the IMPORTRANGE source",
+        "type": "Google Sheet",
+        "period": "2022 → live",
+        "category": "Related rate-list"
+      },
+      {
+        "id": "1Sb9GyBaFgJAs89bmLeETWLQuoHLCoz5z",
+        "url": "https://docs.google.com/spreadsheets/d/1Sb9GyBaFgJAs89bmLeETWLQuoHLCoz5z/edit",
+        "name": "RATE LIST.XLSX",
+        "role": "Static Excel export of the rate list",
+        "type": "xlsx",
+        "period": "static copy",
+        "category": "Related rate-list (static)"
+      }
     ]
   }
 }
