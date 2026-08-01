@@ -82,6 +82,24 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    id: "004_mgmt_data_snapshot",
+    sql: `
+      -- Cold-start fast path for GET /api/mgmt/data: last successful payload
+      -- per (fy, month_from, month_to). Guarantees the table exists in
+      -- production where drizzle-kit push is not run.
+      CREATE TABLE IF NOT EXISTS mgmt_data_snapshot (
+        id         SERIAL PRIMARY KEY,
+        fy         TEXT        NOT NULL,
+        month_from INTEGER     NOT NULL,
+        month_to   INTEGER     NOT NULL,
+        payload    JSONB       NOT NULL,
+        saved_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS mgmt_data_snap_key_idx
+        ON mgmt_data_snapshot (fy, month_from, month_to);
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {
