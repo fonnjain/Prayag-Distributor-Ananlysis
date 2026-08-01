@@ -259,9 +259,9 @@ export async function loadSecSkuFromSheets(
     logger.info({ fy, tab: tab.title }, "skuLoader: reading tab");
 
     const rawRows: SheetCellValue[][] = [];
-    for await (const chunk of readTabRowsChunked(sheetId, tab.title)) {
+    await readTabRowsChunked(sheetId, tab.title, (chunk) => {
       rawRows.push(...chunk);
-    }
+    });
 
     if (rawRows.length < 2) continue;
 

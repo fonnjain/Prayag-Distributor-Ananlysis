@@ -25,6 +25,13 @@ export type DistributorListItem = {
   cohortBasis: "state" | "national" | null;
 };
 
+/** Discount-vs-own-norm signal for a pushed code (K4). */
+export type DiscountAboveNorm = {
+  currentPct: number;
+  normPct: number;
+  aboveNormPts: number;
+};
+
 export type PushCode = {
   code: string;
   itemName: string | null;
@@ -33,6 +40,8 @@ export type PushCode = {
   lastFy: string;
   tier: 1 | 2 | 3 | 4;
   tierLabel: "Range" | "Lapsed" | "Active" | "New";
+  /** K4: set when this code is pushed at a discount above its own norm. */
+  discountAboveNorm: DiscountAboveNorm | null;
 };
 
 export type SegmentPushCard = {
@@ -41,6 +50,12 @@ export type SegmentPushCard = {
   totalGapCodes: number;
   segmentPeerCount: number;
   cohortBasis: "state" | "national";
+  /** K4: peak quarter (1-4) for this segment, if computable. */
+  peakQuarter: 1 | 2 | 3 | 4 | null;
+  /** K4: e.g. "Q4 (Jan–Mar)". */
+  peakQuarterLabel: string | null;
+  /** K4: share of annual revenue in the peak quarter (0-1), may be null. */
+  peakQuarterShare: number | null;
   topCodes: PushCode[];
 };
 
@@ -458,7 +473,22 @@ function PushSegmentCard({
             {seg.rank}
           </span>
           <div className="min-w-0">
-            <span className="font-semibold text-sm">{seg.segment}</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold text-sm">{seg.segment}</span>
+              {seg.peakQuarter != null && seg.peakQuarterLabel && (
+                <span
+                  className="inline-flex items-center px-1.5 py-0 rounded border text-[10px] font-medium leading-4 select-none
+                             bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/20"
+                  title={
+                    seg.peakQuarterShare != null
+                      ? `share of annual revenue in peak quarter: ${(seg.peakQuarterShare * 100).toFixed(0)}%`
+                      : "peak quarter for this segment"
+                  }
+                >
+                  Peak {seg.peakQuarterLabel}
+                </span>
+              )}
+            </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5 text-xs text-muted-foreground">
               <span className="font-medium text-foreground">
                 {seg.totalGapCodes} gap code{seg.totalGapCodes === 1 ? "" : "s"}
@@ -504,6 +534,15 @@ function PushSegmentCard({
                 <TableCell className="py-1.5 whitespace-nowrap">
                   <div className="flex items-center gap-1.5">
                     <TierBadge tier={code.tier} label={code.tierLabel} />
+                    {code.discountAboveNorm && (
+                      <span
+                        className="inline-flex items-center px-1.5 py-0 rounded border text-[10px] font-medium leading-4 tabular-nums select-none
+                                   bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20"
+                        title={`Pushed at ${code.discountAboveNorm.currentPct}% MRP discount vs its own norm ${code.discountAboveNorm.normPct}% — margin question before volume opportunity`}
+                      >
+                        Disc +{code.discountAboveNorm.aboveNormPts} pts
+                      </span>
+                    )}
                     <span className="font-mono text-xs">{code.code}</span>
                   </div>
                 </TableCell>

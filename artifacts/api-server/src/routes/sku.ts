@@ -40,6 +40,18 @@ import {
   getItemMasterGapForFy,
 } from "../lib/sku/catalogue.js";
 import { fiscalMonthsToLabels } from "../lib/mgmt/primaryPeriod.js";
+import {
+  getPrimaryDiscountByCode,
+  getSecondaryDiscountByCode,
+  getSeasonality,
+  getPeakQuarterMap,
+  getDiscountNormFlags,
+  getBreadthTrend,
+  getFirstOrderCodes,
+  getLostCodes,
+  getBlockedCapabilities,
+  clearK4Cache,
+} from "../lib/sku/skuK4.js";
 
 const router = Router();
 
@@ -440,11 +452,201 @@ router.get("/sku/push-list", async (req: Request, res: Response): Promise<void> 
       level: level as SkuLevel,
       distributorKey,
     });
+
+    // K4 enrichment: segment peak quarter + discount-above-norm flags.
+    try {
+      const peakMap = await getPeakQuarterMap();
+      const allCodes = new Set<string>();
+      for (const seg of result.segments ?? []) {
+        for (const c of seg.topCodes ?? []) allCodes.add(c.code);
+      }
+      const flags = await getDiscountNormFlags(fy, [...allCodes], monthLabels);
+      for (const seg of result.segments ?? []) {
+        const peak = peakMap.get(seg.segment);
+        (seg as Record<string, unknown>).peakQuarter = peak?.peakQuarter ?? null;
+        (seg as Record<string, unknown>).peakQuarterLabel = peak?.peakQuarterLabel ?? null;
+        (seg as Record<string, unknown>).peakQuarterShare = peak?.quarterShare ?? null;
+        for (const c of seg.topCodes ?? []) {
+          const f = flags.get(c.code);
+          (c as Record<string, unknown>).discountAboveNorm = f
+            ? {
+                currentPct: Math.round(f.currentAvgDiscount * 1000) / 10,
+                normPct: Math.round(f.normAvgDiscount * 1000) / 10,
+                aboveNormPts: Math.round(f.aboveNormPts * 10) / 10,
+              }
+            : null;
+        }
+      }
+    } catch (err) {
+      req.log.warn({ err }, "sku push-list K4 enrichment failed — serving base list");
+    }
+
     res.json({ fy, monthFrom, monthTo, level, ...result });
   } catch (err) {
     req.log.error({ err, fy, level, distributorKey }, "sku push-list failed");
     res.status(500).json({ error: "Could not load SKU push list." });
   }
 });
+
+// ── K4: Discounts ─────────────────────────────────────────────────────────────
+// Two SEPARATE measures, never merged: primary (MRP discount, sale_line) and
+// secondary (register Discount column, closed years only).
+
+router.get("/sku/discounts", async (req: Request, res: Response): Promise<void> => {
+  const fy =
+    typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
+      ? req.query.fy.trim()
+      : "2026-27";
+  const channel = req.query.channel === "project" ? "project" : "territory";
+  const monthFrom = intParam(req, "monthFrom", 1, 12, 0);
+  const monthTo = intParam(req, "monthTo", monthFrom || 1, 12, 0);
+  const monthLabels =
+    monthFrom >= 1 && monthTo >= monthFrom ? fiscalMonthsToLabels(fy, monthFrom, monthTo) : null;
+  try {
+    const [primary, secondary, blocked] = await Promise.all([
+      getPrimaryDiscountByCode(fy, channel, monthLabels),
+      getSecondaryDiscountByCode(fy),
+      getBlockedCapabilities(),
+    ]);
+    res.json({ fy, channel, primary, secondary, blocked });
+  } catch (err) {
+    req.log.error({ err, fy }, "sku discounts failed");
+    res.status(500).json({ error: "Could not compute SKU discounts." });
+  }
+});
+
+// ── K4: Seasonality per segment ───────────────────────────────────────────────
+
+router.get("/sku/seasonality", async (req: Request, res: Response): Promise<void> => {
+  try {
+    res.json(await getSeasonality());
+  } catch (err) {
+    req.log.error({ err }, "sku seasonality failed");
+    res.status(500).json({ error: "Could not compute seasonality." });
+  }
+});
+
+// ── K4: Breadth trend (largest narrowers by value) ────────────────────────────
+
+router.get("/sku/breadth-trend", async (req: Request, res: Response): Promise<void> => {
+  const latestFy =
+    typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
+      ? req.query.fy.trim()
+      : "2025-26";
+  const priorFy = prevFy(latestFy);
+  try {
+    res.json(await getBreadthTrend(latestFy, priorFy));
+  } catch (err) {
+    req.log.error({ err, latestFy }, "sku breadth-trend failed");
+    res.status(500).json({ error: "Could not compute breadth trend." });
+  }
+});
+
+// ── K4: First-order codes ─────────────────────────────────────────────────────
+
+router.get("/sku/first-orders", async (req: Request, res: Response): Promise<void> => {
+  const fy =
+    typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
+      ? req.query.fy.trim()
+      : "2026-27";
+  const monthFrom = intParam(req, "monthFrom", 1, 12, 0);
+  const monthTo = intParam(req, "monthTo", monthFrom || 1, 12, 0);
+  const monthLabels =
+    monthFrom >= 1 && monthTo >= monthFrom ? fiscalMonthsToLabels(fy, monthFrom, monthTo) : null;
+  const customer =
+    typeof req.query.customer === "string" && req.query.customer.trim()
+      ? req.query.customer.trim()
+      : null;
+  try {
+    res.json(await getFirstOrderCodes(fy, monthLabels, customer));
+  } catch (err) {
+    req.log.error({ err, fy }, "sku first-orders failed");
+    res.status(500).json({ error: "Could not compute first-order codes." });
+  }
+});
+
+// ── K4: Lost codes ────────────────────────────────────────────────────────────
+
+router.get("/sku/lost-codes", async (req: Request, res: Response): Promise<void> => {
+  const fy =
+    typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
+      ? req.query.fy.trim()
+      : "2026-27";
+  const priorFy = prevFy(fy);
+  try {
+    res.json(await getLostCodes(fy, priorFy));
+  } catch (err) {
+    req.log.error({ err, fy }, "sku lost-codes failed");
+    res.status(500).json({ error: "Could not compute lost codes." });
+  }
+});
+
+// ── K4: secondary SKU backfill trigger (runs in-process; shell-run CLIs get
+// reaped by the environment). Fire-and-forget; poll GET for status.
+
+const _skuBackfill: { running: boolean; log: string[] } = { running: false, log: [] };
+
+const BACKFILL_ALLOWED_FYS = new Set(["2023-24", "2024-25", "2025-26"]);
+
+router.post("/sku/secondary-backfill", async (req: Request, res: Response): Promise<void> => {
+  // Deliberate-action guard, matching the frozen-register convention:
+  // requires ?confirm=true&reason=<text>. FYs are allowlisted to the three
+  // closed years with configured SKU sheets — nothing else is loadable.
+  if (req.query.confirm !== "true" || typeof req.query.reason !== "string" || !req.query.reason.trim()) {
+    res.status(423).json({
+      error: "secondary backfill requires ?confirm=true&reason=<text> (deliberate action guard)",
+    });
+    return;
+  }
+  if (_skuBackfill.running) {
+    res.status(409).json({ error: "backfill already running", log: _skuBackfill.log });
+    return;
+  }
+  const fys = (
+    typeof req.query.fys === "string" && req.query.fys.trim()
+      ? req.query.fys.split(",").map((s) => s.trim())
+      : [...BACKFILL_ALLOWED_FYS]
+  ).filter((f) => BACKFILL_ALLOWED_FYS.has(f));
+  if (fys.length === 0) {
+    res.status(400).json({ error: `fys must be from: ${[...BACKFILL_ALLOWED_FYS].join(", ")}` });
+    return;
+  }
+  req.log.info({ fys, reason: req.query.reason }, "sku secondary backfill triggered");
+  _skuBackfill.running = true;
+  _skuBackfill.log = [`started ${new Date().toISOString()} for ${fys.join(", ")}`];
+  void (async () => {
+    const { loadSecSkuFromSheets, SKU_SHEET_IDS: sheetIds } = await import(
+      "../lib/secondary/skuLoader.js"
+    );
+    for (const fy of fys) {
+      try {
+        const sheetId = sheetIds[fy];
+        if (!sheetId) {
+          _skuBackfill.log.push(`${fy}: no SKU sheet configured — skipped`);
+          continue;
+        }
+        const r = await loadSecSkuFromSheets(fy, sheetId, false);
+        _skuBackfill.log.push(
+          `${fy}: parsed=${r.rowsParsed} inserted=${r.rowsInserted} tabs=${r.tabsWithItemCodes}/${r.tabs}`,
+        );
+      } catch (err) {
+        _skuBackfill.log.push(`${fy}: FAILED — ${String(err)}`);
+      }
+    }
+    _skuBackfill.log.push(`done ${new Date().toISOString()}`);
+    _skuBackfill.running = false;
+    clearK4Cache();
+  })();
+  res.json({ started: true, fys });
+});
+
+router.get("/sku/secondary-backfill", (_req: Request, res: Response): void => {
+  res.json(_skuBackfill);
+});
+
+function prevFy(fy: string): string {
+  const start = parseInt(fy.split("-")[0], 10) - 1;
+  return `${start}-${String(start + 1).slice(2)}`;
+}
 
 export default router;

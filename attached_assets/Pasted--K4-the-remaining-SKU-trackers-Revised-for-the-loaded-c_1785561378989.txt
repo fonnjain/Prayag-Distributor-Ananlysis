@@ -1,0 +1,116 @@
+# K4 — the remaining SKU trackers
+
+*Revised for the loaded closed years. Two of these five change how the push list is used, not just what is on it.*
+
+---
+
+## What is now possible that was not
+
+| FY | Rows | ₹ Cr |
+|---|---|---|
+| FY2023-24 | 137,619 | 349.02 |
+| FY2024-25 | 141,201 | 341.14 |
+| FY2025-26 | 145,613 | 361.00 |
+| FY2026-27 | 39,677 | 94.06 |
+
+**Seasonality needed at least three closed years. It now has three.** Breadth trend needed multiple years per customer — same. When K4 was first drafted, production held none of this.
+
+---
+
+```
+Prayag app - SKU Deep Dive, Phase K4. Same global rules as every earlier phase.
+Depends on K3. The project-exclusion rule applies throughout - territory views
+must never include Non-territory / Project / Govt history.
+
+All four fiscal years are now loaded. FY2023-24, FY2024-25 and FY2025-26 are
+FROZEN - read them freely, never write to them.
+
+1. EFFECTIVE DISCOUNT BY CODE - and be precise about which discount.
+
+   THERE ARE TWO DIFFERENT MEASURES AND THEY MUST NOT BE CONFLATED:
+
+   a) PRIMARY, from sale_line, available for ALL FOUR YEARS including the live
+      one. sale_line carries mrp and sale rate alongside amount, so:
+          discount off MRP = (mrp * qty - amount) / (mrp * qty)
+      This is what the distributor pays against list price.
+
+   b) SECONDARY, from the registers, CLOSED YEARS ONLY. The registers carry an
+      explicit Discount column beside Sub Total. This is the retailer-level
+      discount and is a different number.
+
+   Compute both, label each by which it is, and never show them in one column.
+   Verify (b) on a sampled order: gross minus discount must equal Sub Total.
+
+   THE VARIANCE IS THE FINDING, not the average. Report per code:
+     the spread of effective discount across customers buying that code
+     the widest gaps - one distributor materially below another on the same item
+       is an immediate commercial conversation
+     project versus territory channel, which behave differently
+
+   Cross this with the push list: a code being pushed at a discount well above
+   its own norm is a margin question before it is a volume opportunity.
+
+2. SEASONALITY PER SEGMENT - this changes WHEN the push list should be worked.
+
+   Month distribution per segment across FY2023-24, FY2024-25 and FY2025-26 -
+   three complete years, which is enough to establish a pattern.
+
+   Known example to validate against: HDPE's Q1 was 31.6 per cent of its annual
+   revenue with June the largest month, because pre-monsoon is when civil works
+   peak.
+
+   Surface each segment's peak quarter on the push card. A code whose segment
+   peaks in Q3 should not head a Q1 call list. A push list that ignores
+   seasonality will be judged on results it could not have produced.
+
+3. BREADTH TREND - direction matters more than level.
+
+   Codes and segments per customer across the four years. A distributor
+   narrowing their range is a leading indicator that annual totals will not show
+   for months.
+   Report the largest narrowers BY VALUE, not by code count - losing 5
+   high-value codes matters more than losing 20 marginal ones.
+
+4. FIRST-ORDER CODES - codes appearing for a customer for the first time.
+   The fastest signal that a push actually worked, and the basis for measuring
+   whether this feature changes behaviour at all. Report per customer and per
+   period.
+
+5. LOST CODES - bought in a prior year, absent this year. Ranked by prior-year
+   value. The warmest list available: proven demand, known customer, existing
+   relationship. Now computable across three closed years rather than one.
+
+6. FLAG WHAT REMAINS BLOCKED rather than approximating it:
+     margin per code - no finished-goods cost master exists. Never substitute
+       MRP or purchase price for cost. MRP discount is not margin.
+     live-year retailer SKU and secondary discount - no FY2026-27 secondary
+       register exists
+   Both must state their reason on screen.
+
+Acceptance - prove each with the computed value:
+  primary MRP-discount per code computed for FY2026-27 and at least one closed
+    year, labelled as discount off MRP
+  secondary register discount computed for FY2025-26, verified against a sampled
+    order where gross minus discount equals Sub Total
+  the two discount measures are never shown in the same column
+  discount variance across customers reported per code, widest gaps named
+  seasonality by segment across all three closed years, each segment's peak
+    quarter identified, HDPE Q1 near 31.6 per cent as a sanity check
+  push cards show the segment's peak quarter alongside the recommendation
+  breadth trend identifies the largest narrowers by value
+  first-order codes reported for a named customer
+  lost codes ranked by prior-year value
+  margin and live-year retailer views show their blocked reason, never an estimate
+```
+
+---
+
+## Why items 1 and 2 matter most
+
+**Discount variance is the only margin-adjacent measure available without `fg_cost`.** If a code is being pushed while already discounted well above its norm, that is a commercial question the push list currently cannot see.
+
+**Seasonality determines whether the push list is fair.** HDPE's Q1 was 31.6% of its annual revenue — putting a Q3-peaking code at the top of a Q1 call list sets the field up to fail on timing rather than effort.
+
+---
+
+*Figures verified 31 July 2026*

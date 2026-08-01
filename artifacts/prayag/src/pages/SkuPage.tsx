@@ -18,6 +18,9 @@ import SkuDrill, { type CodeRow } from "@/components/sku/SkuDrill";
 import SkuTrends, { type TrendData } from "@/components/sku/SkuTrends";
 import SkuFocus, { type FocusData } from "@/components/sku/SkuFocus";
 import SkuPushList, { type DistributorListItem, type PushListResult } from "@/components/sku/SkuPushList";
+import SkuDiscounts from "@/components/sku/SkuDiscounts";
+import SkuSeasonality from "@/components/sku/SkuSeasonality";
+import SkuMovement from "@/components/sku/SkuMovement";
 import { cn } from "@/lib/utils";
 import { ChevronLeft } from "lucide-react";
 
@@ -47,6 +50,7 @@ type Capability = {
   distributor: CapabilityEntry;
   direct_dealer: CapabilityEntry;
   retailer: CapabilityEntry;
+  project: CapabilityEntry;
 };
 
 type FactsResponse = {
@@ -62,7 +66,7 @@ type FactsResponse = {
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
-type Section = "overview" | "drill" | "focus" | "push" | "trends";
+type Section = "overview" | "drill" | "focus" | "push" | "trends" | "discounts" | "timing" | "movement";
 type Level = "distributor" | "direct_dealer" | "retailer" | "project";
 
 export default function SkuPage() {
@@ -383,6 +387,48 @@ export default function SkuPage() {
           >
             Trends
           </button>
+
+          {/* Discounts (K4) — reacts to fy */}
+          <button
+            type="button"
+            onClick={() => setSection("discounts")}
+            className={cn(
+              "px-2.5 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap",
+              section === "discounts"
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+          >
+            Discounts
+          </button>
+
+          {/* Timing (K4 seasonality) — fy-independent */}
+          <button
+            type="button"
+            onClick={() => setSection("timing")}
+            className={cn(
+              "px-2.5 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap",
+              section === "timing"
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+          >
+            Timing
+          </button>
+
+          {/* Movement (K4) — reacts to fy */}
+          <button
+            type="button"
+            onClick={() => setSection("movement")}
+            className={cn(
+              "px-2.5 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap",
+              section === "movement"
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+          >
+            Movement
+          </button>
         </div>
 
         {/* Filters */}
@@ -407,8 +453,8 @@ export default function SkuPage() {
             <option value="retailer">Retailer</option>
           </select>
 
-          {/* FY + Period — hidden on Trends (spans all FYs) */}
-          {section !== "trends" && (
+          {/* FY + Period — hidden on Trends / Timing (span all FYs) */}
+          {section !== "trends" && section !== "timing" && (
             <>
               <select
                 value={fy}
@@ -451,6 +497,12 @@ export default function SkuPage() {
           {section === "trends" && (
             <span className="text-xs text-muted-foreground hidden lg:block">
               {levelLabel[level]} · All FYs
+            </span>
+          )}
+
+          {section === "timing" && (
+            <span className="text-xs text-muted-foreground hidden lg:block">
+              Seasonality · All FYs
             </span>
           )}
         </div>
@@ -540,6 +592,22 @@ export default function SkuPage() {
           ) : trendData ? (
             <SkuTrends data={trendData} />
           ) : null
+        )}
+
+        {section === "discounts" && (
+          <SkuDiscounts
+            fy={fy}
+            channel={level === "project" ? "project" : "territory"}
+            monthFrom={period.monthFrom}
+            monthTo={period.monthTo}
+            periodLabel={periodLabel}
+          />
+        )}
+
+        {section === "timing" && <SkuSeasonality />}
+
+        {section === "movement" && (
+          <SkuMovement fy={fy} periodLabel={periodLabel} />
         )}
       </div>
     </div>
