@@ -86,7 +86,72 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function sheetsGet(path: string): Promise<unknown> {
+// ── Request coalescing + 429 negative cache ──────────────────────────────────
+//
+// Cold-start problem: several independent loaders (order-book sale, primary
+// sheet aggregate, tab inventory, state-head sale) scan the SAME workbook at
+// the same time.  Each issues identical `values.get` range requests, so a
+// stampede burns the per-minute Sheets read quota and everything 429s.
+//
+// Two layers, both keyed by the exact request path:
+//   1. In-flight dedupe — concurrent identical GETs share one fetch.
+//   2. Short snapshot cache (SNAPSHOT_TTL_MS) — near-concurrent loaders that
+//      start a few seconds apart still reuse each other's chunk reads.
+//      The TTL is deliberately short: it is a coalescing window, not a data
+//      cache (the loaders have their own 30-min TTL caches on aggregates).
+//
+// Plus a per-spreadsheet negative cache: when a request ultimately fails with
+// 429 (after in-request retries), every request for that spreadsheet fails
+// fast for QUOTA_BLOCK_MS instead of hammering the quota window.  Callers
+// already degrade gracefully (they log and fall back / retry later), so a
+// fast failure means the tiles recover as soon as the quota resets instead of
+// each request burning further quota.
+const SNAPSHOT_TTL_MS = 60_000;
+const QUOTA_BLOCK_MS = 60_000;
+
+const _getCache = new Map<string, { ts: number; data: unknown }>();
+const _getInFlight = new Map<string, Promise<unknown>>();
+const _quotaBlockedUntil = new Map<string, number>();
+
+function spreadsheetIdFromPath(path: string): string {
+  const m = /^\/([^/?]+)/.exec(path);
+  return m ? m[1] : path;
+}
+
+export class SheetsQuotaError extends Error {
+  readonly status = 429;
+  constructor(message: string) {
+    super(message);
+    this.name = "SheetsQuotaError";
+  }
+}
+
+function throwIfQuotaBlocked(spreadsheetId: string): void {
+  const until = _quotaBlockedUntil.get(spreadsheetId);
+  if (until === undefined) return;
+  if (Date.now() >= until) {
+    _quotaBlockedUntil.delete(spreadsheetId);
+    return;
+  }
+  throw new SheetsQuotaError(
+    `Sheets read quota exhausted for spreadsheet ${spreadsheetId} — ` +
+      `blocked for ${Math.ceil((until - Date.now()) / 1000)}s (negative cache)`,
+  );
+}
+
+function markQuotaBlocked(spreadsheetId: string): void {
+  _quotaBlockedUntil.set(spreadsheetId, Date.now() + QUOTA_BLOCK_MS);
+}
+
+function sweepGetCache(): void {
+  const now = Date.now();
+  for (const [key, entry] of _getCache) {
+    if (now - entry.ts >= SNAPSHOT_TTL_MS) _getCache.delete(key);
+  }
+}
+
+async function sheetsGetUncached(path: string): Promise<unknown> {
+  const spreadsheetId = spreadsheetIdFromPath(path);
   let lastError: Error | null = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const token = await getGoogleAccessToken();
@@ -99,12 +164,37 @@ async function sheetsGet(path: string): Promise<unknown> {
       `Sheets API request failed (${res.status}): ${body.slice(0, 300)}`,
     );
     if (!RETRYABLE_STATUS.has(res.status) || attempt === MAX_ATTEMPTS) {
+      if (res.status === 429) {
+        // Quota exhausted even after in-request backoff — negative-cache so
+        // follow-up requests fail fast instead of burning more quota.
+        markQuotaBlocked(spreadsheetId);
+        throw new SheetsQuotaError(lastError.message);
+      }
       throw lastError;
     }
     // 429 is a per-minute read quota; back off long enough for it to reset.
     await sleep(attempt * 15_000);
   }
   throw lastError ?? new Error("Sheets API request failed");
+}
+
+async function sheetsGet(path: string): Promise<unknown> {
+  const cached = _getCache.get(path);
+  if (cached && Date.now() - cached.ts < SNAPSHOT_TTL_MS) return cached.data;
+
+  throwIfQuotaBlocked(spreadsheetIdFromPath(path));
+
+  const existing = _getInFlight.get(path);
+  if (existing) return existing;
+
+  const p = (async () => {
+    const data = await sheetsGetUncached(path);
+    sweepGetCache();
+    _getCache.set(path, { ts: Date.now(), data });
+    return data;
+  })().finally(() => _getInFlight.delete(path));
+  _getInFlight.set(path, p);
+  return p;
 }
 
 // A1 sheet titles with spaces/quotes must be quoted.
@@ -292,6 +382,7 @@ export async function readTabRowsViaExport(
   spreadsheetId: string,
   title: string,
 ): Promise<SheetCellValue[][]> {
+  throwIfQuotaBlocked(spreadsheetId);
   const gid = await getTabGid(spreadsheetId, title);
   const token = await getGoogleAccessToken();
   const url =
@@ -313,6 +404,10 @@ export async function readTabRowsViaExport(
       `CSV export failed (${res.status}): ${body.slice(0, 300)}`,
     );
     if (!RETRYABLE_STATUS.has(res.status) || attempt === MAX_ATTEMPTS) {
+      if (res.status === 429) {
+        markQuotaBlocked(spreadsheetId);
+        throw new SheetsQuotaError(lastError.message);
+      }
       throw lastError;
     }
     await sleep(attempt * 15_000);
