@@ -420,6 +420,13 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
       incomingCountByFyMonth.set(`${fy}|${m.month}`, m.sheetRows);
     }
 
+    // Which months were actually replaced this run. Between the 1st and 6th
+    // this is two months (prior month in its edit grace window + open month);
+    // from the 7th the prior month freezes and the set narrows to one.
+    const replacedMonths = replaceSummary.months
+      .filter((m) => m.action === "replaced" || m.action === "frozen-anchored")
+      .map((m) => `${m.month}(${m.rowsWritten} rows, ₹${((m.sheetAmount ?? 0) / 1e7).toFixed(2)} Cr)`);
+
     lastSyncedAtMs.set(fy, Date.now());
     s.rows = linesForSync.length;
     s.phase = "done";
@@ -430,6 +437,8 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
         tabsRead,
         rowsScanned,
         linesBuilt: linesForSync.length,
+        replacedMonths,
+        replacedCount: replacedMonths.length,
         months: replaceSummary.months.map((m) => `${m.month}:${m.action}(${m.rowsWritten ?? "-"})`),
         rowsWritten: inserted,
         abortedMonths: aborted.map((m) => m.month),
