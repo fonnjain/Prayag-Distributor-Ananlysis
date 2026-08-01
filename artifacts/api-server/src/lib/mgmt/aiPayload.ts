@@ -517,12 +517,14 @@ function computeDataQualityFlags(
     });
   }
 
-  // NO_LIVE_REGISTER — FY2026-27 secondary register not yet available.
+  // NO_LIVE_REGISTER — FY2026-27 brand-level register table not available.
+  // (The item-code SKU register IS loaded for Apr–Jun 2026; this flag covers
+  // the brand-level secondary_register_line dependency that drives productSpread.)
   if (skuSpread?.isLiveYear || fy === "2026-27") {
     flags.push({
       code: "NO_LIVE_REGISTER",
       message:
-        "The FY2026-27 secondary invoice register has not been ingested yet. Product-segment (SKU) spread is unavailable for this year.",
+        "The FY2026-27 brand-level secondary register table is not populated, so product-segment spread is unavailable for this year. (Item-code SKU detail for Apr–Jun 2026 IS loaded and served on the SKU pages.)",
       severity: "info",
       fields: ["productSpread"],
     });
@@ -582,7 +584,7 @@ function computeTeamQualityFlags(
     flags.push({
       code: "NO_LIVE_REGISTER",
       message:
-        "The FY2026-27 secondary invoice register has not been ingested yet. Product-segment spread is unavailable for all members.",
+        "The FY2026-27 brand-level secondary register table is not populated, so product-segment spread is unavailable for all members. (Item-code SKU detail for Apr–Jun 2026 IS loaded and served on the SKU pages.)",
       severity: "info",
       fields: ["productSpread"],
     });

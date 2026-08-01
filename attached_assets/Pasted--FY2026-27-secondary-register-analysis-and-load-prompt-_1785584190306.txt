@@ -1,0 +1,157 @@
+# FY2026-27 secondary register — analysis and load prompt
+
+*181 per-salesperson files, examined 1 August 2026. This is the source that has been blocked since the SKU work began.*
+
+---
+
+## What this unblocks
+
+The FY2026-27 secondary register has been the single missing source. Its absence blocked, by name:
+
+- **Retailer-level SKU** on the SKU Deep Dive — the live-year level that reads *"register not yet loaded"*
+- **Segment NET and effective discount** for the live year
+- **Item-code and day-level analysis** for FY2026-27
+- **Warning System family F** (variety and range), which is closed-years-only today
+
+**All of it is in these files.**
+
+---
+
+## Structure
+
+**One file per salesperson**, 181 files, 34 MB, single `Sheet1` each.
+
+| Row | Content |
+|---|---|
+| 1–2 | two-row header band |
+| 3+ | data |
+| last | **`Total:` row — must be excluded** |
+
+Columns:
+
+```
+A Sr.No.   B Date       C Retailer Id   D Retailer     E Order ID
+F Segment  G Cat. No.   H Qty           I MRP          J Order Value
+K Distributor          L Discount (%)   M Sub Total    N Order Total
+```
+
+**Two arithmetic identities, both verified exactly:**
+
+```
+Sub Total   = Order Value x (1 - Discount/100)     line level
+Order Total = sum of Sub Total for that Order ID   order level, on the last line only
+```
+
+**`Sub Total` is the line-level NET.** `Order Total` is an order footer and must never be summed across lines.
+
+---
+
+## Verified totals — `Total:` rows excluded
+
+| Month | Lines | Orders | Retailers | Codes | Distributors | Gross ₹ Cr | **NET ₹ Cr** | Disc % |
+|---|---|---|---|---|---|---|---|---|
+| Apr-26 | 3,479 | 3,156 | 2,216 | 762 | 159 | 6.44 | **3.33** | 48.3 |
+| May-26 | 4,950 | 4,493 | 2,992 | 926 | 170 | 9.97 | **5.08** | 49.1 |
+| Jun-26 | 6,027 | 5,462 | 3,578 | 984 | 172 | 12.82 | **6.60** | 48.5 |
+| **All files** | **98,046** | | | | | | **64.49** | **48.6** |
+
+**Coverage is Apr–Jun 2026 only.** No July data.
+
+> **Effective discount is 48.6%, consistent across all three months.** That is a company-wide figure available for the live year for the first time — the SKU glossary's discount work has been closed-years-only until now.
+
+## The control reconciles exactly
+
+| | |
+|---|---|
+| Prasun Chatterjee, this register | **₹18,34,504** |
+| Dashboard secondary OB | **₹18.35 L** |
+| Ratio | **1.000** |
+
+His distributor split also matches: Jagdamba Traders ₹15,85,623 across 58 lines, Manoj Enterprises ₹1,30,781, Sumit Paint ₹1,18,102.
+
+**This is the right source, parsed correctly.**
+
+---
+
+## Three cautions before loading
+
+**1 — The `Total:` row.** Every file ends with one, in column A, with the total in column M. Parsed as data it adds a phantom row equal to the whole file — Prasun would read ₹36.69 L instead of ₹18.35 L, exactly double.
+
+**2 — 115 of 181 files disagree with their own `Total:` row** by ₹4 to ₹9. Rounding in the sheet's own footer, not a parse error, but it means the footer cannot be used as a checksum.
+
+**3 — 16 pairs of files share an identical total**, including `RAVINDER PURI` / `Ravindera` at ₹52.25 L and `SASHIKANT PRASAD` / `SASIKUMAR A` at ₹50.14 L. Either genuine duplicates under different spellings, or two people with coincidentally equal totals. **Resolve before loading, or the same business counts twice.**
+
+---
+
+```
+Prayag app - load the FY2026-27 secondary register. Same global rules.
+
+SOURCE: 181 per-salesperson xlsx files, one Sheet1 each, header rows 1-2, data
+from row 3, and a "Total:" row at the end of every file.
+
+COLUMNS:
+   A Sr.No.  B Date  C Retailer Id  D Retailer  E Order ID  F Segment
+   G Cat. No.  H Qty  I MRP  J Order Value  K Distributor  L Discount (%)
+   M Sub Total  N Order Total
+
+1. NET IS SUB TOTAL (column M), line level. Never Order Total.
+   Order Total is an order footer, populated only on the last line of each
+   order. Summing it across lines double-counts.
+   Verified identities, both exact:
+      Sub Total   = Order Value x (1 - Discount/100)
+      Order Total = sum of Sub Total for that Order ID
+
+2. EXCLUDE THE "Total:" ROW at the end of every file - column A contains
+   "Total:" and column M the file total. Parsing it as data doubles the file.
+   Prasun Chatterjee reads Rs 18.35 L correctly and Rs 36.69 L with it included.
+
+3. CARRY FORWARD THE MERGED FIELDS. Order ID (E) and Segment (F) appear only on
+   the first line of each order; subsequent lines are blank. Carry the last
+   non-empty value forward, the same as the merged State Head column.
+
+4. RESOLVE THE 16 DUPLICATE-TOTAL PAIRS BEFORE LOADING. These files share an
+   identical total to the rupee:
+      RAVINDER PURI / Ravindera            Rs 52.25 L
+      AJEET YADAV / AJOY BORAH             Rs 51.03 L
+      SASHIKANT PRASAD / SASIKUMAR A       Rs 50.14 L
+      SANTANU KALITA / SANTOSH KUMAR KV    Rs 106.62 L
+      NITIN PRASAD BAGHEL / OP KALRA       Rs 46.32 L
+      HRUSIKESH SATAPATHY / Ilesh Vyash    Rs 45.48 L
+      ... 10 more
+   Report all 16 with their line counts and first three Order IDs. If the Order
+   IDs match, they are duplicate exports and only one should load. If they
+   differ, they are genuinely different people and both load.
+   Do NOT load until this is resolved - a duplicate doubles that member's
+   business silently.
+
+5. DO NOT OVERWRITE THE DASHBOARD FIGURES. The State Head Dashboard SOBR tab
+   remains authoritative for secondary OB and Sales Received at member level.
+   This register is the ITEM-CODE detail beneath it. Where they differ, report
+   the difference rather than replacing one with the other.
+
+6. AFTER LOADING, CONFIRM:
+      Apr-26  3,479 lines  Rs  3.33 Cr NET
+      May-26  4,950 lines  Rs  5.08 Cr NET
+      Jun-26  6,027 lines  Rs  6.60 Cr NET
+      Prasun Chatterjee    Rs 18,34,504 exactly
+      effective discount   48.6 per cent, all three months
+      coverage is Apr-Jun only - there is no July data in these files
+
+7. THEN LIGHT UP WHAT THIS UNBLOCKS, and report each:
+      SKU Deep Dive retailer level for FY2026-27 - it currently reads
+        "register not yet loaded"
+      live-year segment NET and effective discount
+      Warning System family F (variety and range), closed-years-only today
+      the SKU glossary states these must switch on with NO code change once the
+        register exists - confirm that held
+```
+
+---
+
+## What to check afterwards
+
+**The Q1 register NET is ₹64.49 Cr against the dashboard's ₹57.70 Cr secondary OB** — a ₹6.79 Cr difference. Not necessarily wrong: the register is order-line detail and the dashboard is a member-level summary, and the two may cover different populations. But it should be explained rather than assumed, and it is the same class as the primary-versus-secondary distinction in the glossaries.
+
+---
+
+*181 files examined 1 August 2026. Prasun Chatterjee reconciles to the dashboard at 1.000.*

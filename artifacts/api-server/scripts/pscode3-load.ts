@@ -1,0 +1,162 @@
+// FY2026-27 secondary register load — 181-file PSCode_3 xlsx drop.
+// Rules from the load prompt:
+//   - NET = Sub Total (col M); Order Total (N) never summed
+//   - "Total:" footer rows excluded
+//   - merged Order ID / Segment resolved (ExcelJS returns master values)
+//   - 16 duplicate-export groups: load ONE file per group
+//   - target table: secondary_sku_line (item-code detail), source='pscode3_xlsx'
+import ExcelJS from "exceljs";
+import crypto from "node:crypto";
+import { readdirSync } from "node:fs";
+import path from "node:path";
+import { sql } from "drizzle-orm";
+import { db, secondarySkuLines, type InsertSecSkuLine } from "@workspace/db";
+import { canonGroupFromMap } from "../src/lib/sku/catalogue.js";
+
+const DIR = "/tmp/pscode3/PSCODE 3 NEW REPORT";
+const FY = "2026-27";
+const SOURCE = "pscode3_xlsx";
+// Destructive replace of the whole FY — writes require an explicit --write flag.
+const DRY = !process.argv.includes("--write");
+
+// One winner per duplicate-export group (identical Order IDs verified in the
+// analysis pass). Winner = the name that matches the FY2026-27 SOBR dashboard
+// roster; where both/neither match, the first listed. The losers' files are
+// byte-identical business content under a different salesperson name.
+const DUP_DROP = new Set<string>([
+  // group → dropped copies
+  "SANTOSH KUMAR KV",          // keep SANTANU KALITA
+  "Ravindera",                 // keep RAVINDER PURI
+  "AJOY BORAH",                // keep AJEET YADAV
+  "SASIKUMAR A",               // keep SASHIKANT PRASAD
+  "OP KALRA",                  // keep NITIN PRASAD BAGHEL
+  "Ilesh Vyash",               // keep HRUSIKESH SATAPATHY
+  "SUMIT PAREEK",              // keep SUMANTA SINGHA
+  "Test",                      // keep TEJAS LUNAWAT
+  "HARDEEP KHINDA",            // keep GULAB SINGH
+  "AMIT HARIDASJI BELONKAR",   // keep AMIT DAMODHAR JADHAV
+  "SANDEEP DADHEECH",          // keep SANDEEP AMRUT SANWANE
+  "L.SELVAGANAPATHY",          // keep KUNAL SANJAY SAASNE
+  "MANOKARAN",                 // keep MANOJ YADAV
+  "KANISH KHANNA",             // keep KANHAIYA LAL SALVI (3-copy group)
+  "KAPIL THAKUR",              // keep KANHAIYA LAL SALVI (3-copy group)
+  "SUKANTA SEN",               // keep SUJIT DAS
+  "RAVI KANT MAHATO",          // keep RAVI (FARIDABAD)
+]);
+
+const num = (v: unknown): number | null => {
+  if (v == null || v === "") return null;
+  if (typeof v === "number") return v;
+  const n = parseFloat(String(v).replace(/[,₹\s]/g, ""));
+  return Number.isFinite(n) ? n : null;
+};
+const str = (v: unknown): string => {
+  if (v == null) return "";
+  if (v instanceof Date) return v.toISOString();
+  if (typeof v === "object" && "result" in (v as any)) return String((v as any).result ?? "").trim();
+  return String(v).trim();
+};
+function monthLabel(v: unknown): string | null {
+  let d: Date | null = null;
+  if (v instanceof Date) d = v;
+  else if (typeof v === "number" && v > 20000) d = new Date((v - 25569) * 86400000);
+  else if (typeof v === "string") {
+    const m = /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/.exec(v.trim());
+    if (m) d = new Date(Date.UTC(+m[3], +m[2] - 1, +m[1]));
+  }
+  if (!d || isNaN(d.getTime())) return null;
+  const M = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return `${M[d.getUTCMonth()]}-${String(d.getUTCFullYear() % 100).padStart(2, "0")}`;
+}
+const normKey = (raw: string) => raw.toLowerCase().replace(/\s+/g, " ").trim();
+
+const files = readdirSync(DIR)
+  .filter((f) => f.startsWith("PSCode_3_New_Report ") && f.endsWith(".xlsx"))
+  .filter((f) => !DUP_DROP.has(f.replace(/^PSCode_3_New_Report /, "").replace(/\.xlsx$/, "").trim()));
+console.log(`files after dedupe: ${files.length} (dropped ${DUP_DROP.size} duplicate exports)`);
+
+const rows: InsertSecSkuLine[] = [];
+const occurrenceMap = new Map<string, number>();
+let noItemCode = 0, noMonth = 0, skippedNoValue = 0, totalRows = 0;
+
+for (const f of files) {
+  const member = f.replace(/^PSCode_3_New_Report /, "").replace(/\.xlsx$/, "").trim();
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(path.join(DIR, f));
+  wb.worksheets[0].eachRow((row, rn) => {
+    if (rn <= 2) return;
+    const c = (i: number) => row.getCell(i).value as unknown;
+    if (str(c(1)).toUpperCase().startsWith("TOTAL")) { totalRows++; return; }
+    const gross = num(c(10));
+    const net = num(c(13));
+    const retailer = str(c(4));
+    if (gross == null && net == null) { if (retailer) skippedNoValue++; return; }
+    const itemCode = str(c(7));
+    if (!itemCode) { noItemCode++; return; }
+    const ml = monthLabel(c(2));
+    if (!ml) { noMonth++; return; }
+    const distributor = str(c(11));
+    const segmentRaw = str(c(6)) || null;
+    const grossStr = gross != null ? String(gross) : "";
+    const natKey = `${FY}|${ml}|${member}|${retailer}|${distributor}|${itemCode}|${grossStr}`;
+    const occ = (occurrenceMap.get(natKey) ?? 0) + 1;
+    occurrenceMap.set(natKey, occ);
+    const lineUid = crypto.createHash("sha1")
+      .update([FY, ml, member, retailer, distributor, itemCode, grossStr, occ].join("|"))
+      .digest("hex");
+    rows.push({
+      lineUid,
+      fy: FY,
+      monthLabel: ml,
+      headRaw: member,
+      headCanon: normKey(member),
+      stateRaw: null,
+      stateCanon: null,
+      retailer: retailer || null,
+      retailerId: str(c(3)) || null,
+      distributor: distributor || null,
+      itemCode,
+      segmentRaw,
+      segmentCanon: segmentRaw ? (canonGroupFromMap(segmentRaw) ?? null) : null,
+      qty: num(c(8)) != null ? String(num(c(8))) : null,
+      mrp: num(c(9)) != null ? String(num(c(9))) : null,
+      netAmount: net != null ? String(net) : null,
+      grossAmount: gross != null ? String(gross) : null,
+      discountPct: num(c(12)) != null ? String(num(c(12))) : null,
+      source: SOURCE,
+    } as InsertSecSkuLine);
+  });
+}
+
+const cr = (n: number) => (n / 1e7).toFixed(4);
+const byM = new Map<string, { n: number; net: number; gross: number }>();
+for (const r of rows) {
+  const e = byM.get(r.monthLabel) ?? { n: 0, net: 0, gross: 0 };
+  e.n++; e.net += parseFloat(String(r.netAmount ?? 0)); e.gross += parseFloat(String(r.grossAmount ?? 0));
+  byM.set(r.monthLabel, e);
+}
+console.log(`parsed rows: ${rows.length} | footer rows excluded: ${totalRows} | noItemCode: ${noItemCode} | noMonth: ${noMonth} | skippedNoValue: ${skippedNoValue}`);
+for (const [m, e] of [...byM.entries()].sort())
+  console.log(`  ${m}: lines=${e.n} NET=${cr(e.net)}Cr gross=${cr(e.gross)}Cr disc=${((1 - e.net / e.gross) * 100).toFixed(1)}%`);
+const prasunNet = rows.filter((r) => r.headCanon === "prasun chatterjee").reduce((s, r) => s + parseFloat(String(r.netAmount ?? 0)), 0);
+console.log(`Prasun control: ₹${prasunNet.toFixed(0)} (expect 1834504±2)`);
+const segNull = rows.filter((r) => !r.segmentCanon).length;
+console.log(`segment_canon unmapped: ${segNull} of ${rows.length}`);
+
+if (DRY) { console.log("DRY RUN — no DB writes (pass --write to load)"); process.exit(0); }
+
+// Safety gate before the destructive full-FY replace: the Prasun control and a
+// sane row count must hold, or the run aborts with nothing deleted.
+if (rows.length < 50_000) throw new Error(`abort: only ${rows.length} rows parsed — refusing to replace FY${FY}`);
+if (Math.abs(prasunNet - 1_834_504) > 5) throw new Error(`abort: Prasun control failed (₹${prasunNet.toFixed(0)}) — refusing to replace FY${FY}`);
+
+await db.transaction(async (tx) => {
+  await tx.execute(sql`DELETE FROM secondary_sku_line WHERE fy = ${FY}`);
+  for (let i = 0; i < rows.length; i += 1000) {
+    await tx.insert(secondarySkuLines).values(rows.slice(i, i + 1000));
+  }
+});
+const check = await db.execute(sql`SELECT month_label, count(*)::int AS n, sum(net_amount)::numeric AS net FROM secondary_sku_line WHERE fy = ${FY} GROUP BY 1 ORDER BY 1`);
+console.log("DB after load:");
+for (const r of check.rows as any[]) console.log(`  ${r.month_label}: ${r.n} rows, NET ${cr(parseFloat(r.net))} Cr`);
+process.exit(0);

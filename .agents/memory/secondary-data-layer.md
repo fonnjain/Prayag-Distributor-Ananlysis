@@ -69,3 +69,10 @@ For state_head_dashboard source: 1 sheet row expands to 12 head-month rows. rows
 
 ## "Tarun Giri" note
 No member with key matching "tarun" exists in FY2025-26 or FY2026-27 dashboard data. "girishb" (Girish B) is anomalous in both FYs.
+
+## FY2026-27 register (PSCode_3 xlsx drop, Aug 2026)
+- FY2026-27 secondary register came as ~179 per-salesperson `PSCode_3_New_Report <NAME>.xlsx` files, NOT a Google Sheet; loaded into `secondary_sku_line` only (source='pscode3_xlsx') via `artifacts/api-server/scripts/pscode3-load.ts` (dry-run default, `--write` to load; full-FY delete+insert in one transaction; Prasun + row-count safety gates).
+- Parsing rules: NET = Sub Total (col M) line-level; Order Total (col N) repeats on EVERY line — never sum it. Trailing `Total:` footer row must be excluded. Order ID (E) and Segment (F) are merged cells — ExcelJS resolves merges automatically; merge-unaware parsers (openpyxl) see blanks and produce wrong per-month subsets.
+- 16 duplicate-total file groups were byte-identical duplicate exports (same Order ID sets) — one file loaded per group (~₹5.47 Cr would double otherwise). PSCode_3 salesperson names do NOT join to the SOBR member roster (different vocabulary); head_raw is cosmetic for these analytics.
+- brand-level `secondary_register_line` stays EMPTY for FY2026-27: D3 segment spread, win-back, effective-discount-in-investment remain live-year blocked; item-code features (K4 secondary discount, retailer capability) gate on `secondarySkuFyHasData()` (data presence, not SKU_SHEET_IDS).
+- Coverage Apr–Jun 2026 only; anchors post-dedupe: Apr 21,613/₹13.11 Cr, May 31,266/₹21.01 Cr, Jun 36,300/₹24.90 Cr, total ₹59.02 Cr NET, eff. discount ≈49%; Prasun Chatterjee ₹18,34,506.

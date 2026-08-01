@@ -16,6 +16,7 @@
  */
 
 import crypto from "node:crypto";
+import { sql as sqlRaw } from "drizzle-orm";
 import { db, secondarySkuLines, type InsertSecSkuLine } from "@workspace/db";
 import { listSheetTabs, readTabRowsChunked, type SheetCellValue } from "../registers/sheetsApi.js";
 import { toMonthLabel } from "./normalize.js";
@@ -310,6 +311,7 @@ export async function loadSecSkuFromSheets(
   };
 
   logger.info(result, "skuLoader: complete");
+  if (!dryRun && totalInserted > 0) clearSecondarySkuFyCache();
   return result;
 }
 
@@ -334,3 +336,27 @@ export const SKU_SHEET_IDS: Record<string, string> = {
 };
 
 export const SUPPORTED_SKU_FYS = Object.keys(SKU_SHEET_IDS);
+
+// ── Data-presence check ──────────────────────────────────────────────────────
+// Some FYs are loaded from sources other than Google Sheets (FY2026-27 came in
+// as a one-time PSCode_3 xlsx drop, source='pscode3_xlsx'), so gates must ask
+// the database — not SKU_SHEET_IDS — whether register data exists for an FY.
+const fyDataCache = new Map<string, { has: boolean; at: number }>();
+const FY_DATA_TTL_MS = 10 * 60 * 1000;
+
+/** Drop the presence cache — call after any load/reload of secondary_sku_line. */
+export function clearSecondarySkuFyCache(): void {
+  fyDataCache.clear();
+}
+
+/** True when secondary_sku_line has at least one row for the FY (10-min cache). */
+export async function secondarySkuFyHasData(fy: string): Promise<boolean> {
+  const hit = fyDataCache.get(fy);
+  if (hit && Date.now() - hit.at < FY_DATA_TTL_MS) return hit.has;
+  const res = await db.execute(
+    sqlRaw`SELECT 1 FROM secondary_sku_line WHERE fy = ${fy} LIMIT 1`,
+  );
+  const has = res.rows.length > 0;
+  fyDataCache.set(fy, { has, at: Date.now() });
+  return has;
+}

@@ -31,7 +31,7 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { PROJECT_HEAD_CANON } from "./catalogue.js";
-import { SKU_SHEET_IDS } from "../secondary/skuLoader.js";
+import { SKU_SHEET_IDS, secondarySkuFyHasData } from "../secondary/skuLoader.js";
 import { logger } from "../logger.js";
 
 const CLOSED_FYS = ["2023-24", "2024-25", "2025-26"];
@@ -271,12 +271,14 @@ export async function getSecondaryDiscountByCode(
 ): Promise<SecondaryDiscountResult> {
   const label =
     "Register Discount column (retailer-level, beside Sub Total). A DIFFERENT measure from the primary MRP discount.";
-  if (fy === "2026-27" || !(fy in SKU_SHEET_IDS)) {
+  // Gate on data presence, not on the sheet registry: FY2026-27 was loaded
+  // from the PSCode_3 xlsx drop (no Google Sheet exists for it).
+  if (!(fy in SKU_SHEET_IDS) && !(await secondarySkuFyHasData(fy))) {
     return {
       measureLabel: label,
       fy,
       available: false,
-      reason: `No FY${fy} secondary SKU register exists — retailer-level discount is not computable for the live year.`,
+      reason: `No FY${fy} secondary SKU register exists — retailer-level discount is not computable.`,
       codes: [],
       widestGaps: [],
       verification: { sampled: false, note: "not available" },
@@ -806,7 +808,7 @@ export async function getLostCodes(fy: string, priorFy: string): Promise<LostCod
 
 export type BlockedResult = {
   marginPerCode: { blocked: true; reason: string };
-  liveYearRetailer: { blocked: true; reason: string };
+  liveYearRetailer: { blocked: boolean; reason: string };
 };
 
 export async function getBlockedCapabilities(): Promise<BlockedResult> {
@@ -820,10 +822,21 @@ export async function getBlockedCapabilities(): Promise<BlockedResult> {
           ? "No finished-goods cost master exists (cost_master is empty). MRP and purchase price are list prices, not costs — MRP discount is not margin and is never substituted."
           : `cost_master has ${n} rows but has not been verified as a genuine cost source.`,
     },
-    liveYearRetailer: {
-      blocked: true,
-      reason:
-        "No FY2026-27 secondary register exists — retailer SKU activity and secondary discount are not computable for the live year.",
-    },
+    liveYearRetailer: await (async () => {
+      const has = await secondarySkuFyHasData("2026-27");
+      return has
+        ? {
+            blocked: false,
+            reason:
+              "FY2026-27 secondary register loaded from the PSCode_3 xlsx drop (Apr–Jun 2026). " +
+              "Retailer SKU activity and secondary discount are computable for the covered months; " +
+              "coverage extends only when a fresh export is loaded.",
+          }
+        : {
+            blocked: true,
+            reason:
+              "No FY2026-27 secondary register exists — retailer SKU activity and secondary discount are not computable for the live year.",
+          };
+    })(),
   };
 }

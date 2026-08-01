@@ -59,7 +59,7 @@ export async function computeSkuSpread(
     return {
       isLiveYear: true,
       liveYearNote:
-        "Segment and SKU data will populate once a FY2026-27 secondary register is ingested.",
+        "Segment spread reads the brand-level register table, which is not populated for FY2026-27. (Item-code SKU detail for Apr–Jun 2026 is loaded separately.)",
     };
   }
 

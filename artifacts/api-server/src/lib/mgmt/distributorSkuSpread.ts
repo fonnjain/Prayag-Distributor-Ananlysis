@@ -181,7 +181,7 @@ export async function loadDistributorSkuSpread(
 ): Promise<void> {
   if (fy === LIVE_FY) {
     const note =
-      "Segment data will populate once a FY2026-27 secondary register is ingested.";
+      "Segment spread reads the brand-level register table, which is not populated for FY2026-27. (Item-code SKU detail for Apr–Jun 2026 is loaded separately.)";
     for (const g of distGroups) {
       (g as DistributorGroup & { skuSpread?: DistributorSkuSpread }).skuSpread = {
         isLiveYear: true,

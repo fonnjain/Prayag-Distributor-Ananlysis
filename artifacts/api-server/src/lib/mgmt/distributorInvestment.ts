@@ -90,7 +90,7 @@ export type DistributorTier = {
 };
 
 export type DistributorInvestment = {
-  effectiveDiscount: EffectiveDiscount | null;   // null for live FY (no secondary register)
+  effectiveDiscount: EffectiveDiscount | null;   // null for live FY (brand-level register table not populated)
   costToServe: CostToServe | null;               // null when visits or CTC unavailable
   creditOutstanding: { status: "no_source" };    // no AR source wired — never estimated
   schemePayouts: { status: "no_source" };        // no scheme source wired — never estimated
@@ -279,7 +279,7 @@ export async function loadDistributorInvestment(
 ): Promise<void> {
   if (!distGroups.length) return;
 
-  const isLiveFy = fy === "2026-27";   // no secondary register for live FY
+  const isLiveFy = fy === "2026-27";   // brand-level register table not populated for live FY
 
   // ── Step A: Effective discount (closed FYs only) ───────────────────────────
   const discountByNormKey = new Map<string, EffectiveDiscount>();
