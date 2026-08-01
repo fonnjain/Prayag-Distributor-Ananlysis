@@ -11,6 +11,7 @@ import rawAuditAnchors from "../../../config/audit_anchors.json";
 import rawRegisterSheets from "../../../config/register_sheets.json";
 import { loadFactoryPending } from "../mgmt/factoryPending.js";
 import { listSheetTabs, readTabRowsChunked } from "../registers/sheetsApi.js";
+import { BOOKING_SHEETS, readBookingAggregated } from "../mgmt/primarySheets.js";
 
 // ── Anchor types ───────────────────────────────────────────────────────────────
 
@@ -241,6 +242,58 @@ export async function runCrossFootGroup(fy: string): Promise<CheckGroup> {
   const cfAnchor = auditAnchors.crossfoot[fy];
   const checks: HealthCheck[] = [];
 
+  // 7.0 Primary OB DB mirror (primary_order_line) vs live Order Sheet.
+  // Guards against silent staleness of the mirror — analytics that read the DB
+  // table (deep-dive pending, distributor flows) depend on it matching the sheet.
+  const bookingSheetId = BOOKING_SHEETS[fy];
+  if (bookingSheetId) {
+    try {
+      const [live, dbRes] = await Promise.all([
+        readBookingAggregated(bookingSheetId),
+        pool.query(
+          "SELECT COALESCE(SUM(taxable_value::numeric),0) AS total FROM primary_order_line WHERE fy = $1",
+          [fy],
+        ),
+      ]);
+      const dbTotal = Number(dbRes.rows[0]?.total ?? 0);
+      const liveTotal = live.companyTotal;
+      const deltaPct = liveTotal > 0 ? ((dbTotal - liveTotal) / liveTotal) * 100 : null;
+      const absDeltaPct = deltaPct != null ? Math.abs(deltaPct) : null;
+      checks.push({
+        key: "cf_7_0_ob_mirror_vs_sheet",
+        label: `7.0 — Primary OB DB mirror = live Order Sheet (${fy})`,
+        unit: "money",
+        expected: Math.round(liveTotal),
+        actual: Math.round(dbTotal),
+        deltaPct,
+        status:
+          absDeltaPct == null
+            ? "skip"
+            : absDeltaPct <= 0.1
+              ? "pass"
+              : absDeltaPct <= 1
+                ? "warn"
+                : "fail",
+        note:
+          absDeltaPct != null && absDeltaPct <= 0.1
+            ? `DB mirror ₹${(dbTotal / 1e7).toFixed(2)} Cr matches live Order Sheet ₹${(liveTotal / 1e7).toFixed(2)} Cr.`
+            : `DB mirror ₹${(dbTotal / 1e7).toFixed(2)} Cr vs sheet ₹${(liveTotal / 1e7).toFixed(2)} Cr — run POST /api/orders/ingest?fy=${fy}&replace=true to re-sync.`,
+      });
+    } catch (err) {
+      logger.warn({ err, fy }, "audit: OB mirror cross-check threw");
+      checks.push({
+        key: "cf_7_0_ob_mirror_vs_sheet",
+        label: `7.0 — Primary OB DB mirror = live Order Sheet (${fy})`,
+        unit: "money",
+        expected: null,
+        actual: null,
+        deltaPct: null,
+        status: "warn",
+        note: `Could not compare mirror to sheet: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
   try {
     const agg = await loadOrderFile(fy);
 
@@ -248,12 +301,12 @@ export async function runCrossFootGroup(fy: string): Promise<CheckGroup> {
       return {
         id: "crossfoot",
         label: `Group 7 — Cross-foots (${fy})`,
-        available: false,
+        available: checks.length > 0,
         pendingNote:
           fy === "2026-27"
             ? "FY2026-27 secondary order booking file not yet available (expected known gap)."
             : `Secondary order booking file for ${fy} not loaded — upload it first.`,
-        checks: [],
+        checks,
       };
     }
 

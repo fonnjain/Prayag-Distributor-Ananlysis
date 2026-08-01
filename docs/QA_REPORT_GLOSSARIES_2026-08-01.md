@@ -37,7 +37,7 @@ Period roll-ups (API `/api/mgmt/data`):
 | Jul | 32.56 | ✅ (month filter returns 32.56) |
 | **YTD** | **110.32** | **✅ 110.32 exact** (cross-check #3) |
 
-Note: the DB copy `primary_order_line` is stale (last ingested 20 Jul, July only ₹9.25 Cr) — **the app reads OB live from the Order Sheet, so no user-facing fault**, but the DB mirror should not be used for OB analytics until re-synced.
+Note (resolved 1 Aug): the DB copy `primary_order_line` was stale (last ingested 20 Jul, July only ₹9.25 Cr). It was re-ingested on 1 Aug in replace mode (`POST /api/orders/ingest?fy=2026-27&replace=true`) and now matches the live sheet exactly (July ₹32.56 Cr, YTD ₹110.32 Cr). The mirror is now kept aligned automatically: a scheduled sync (every 6h, open FY only, per-tab delete+re-insert) runs alongside the register sync, and audit check 7.0 (Group 7 cross-foots) compares the mirror to the live Order Sheet on every audit run.
 
 ## 4. Dimensional breakdowns (FY2026-27 sale)
 

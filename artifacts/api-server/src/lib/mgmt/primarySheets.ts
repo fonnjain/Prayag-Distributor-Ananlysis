@@ -20,6 +20,7 @@ import {
 import { normHead, buildHeadResolver } from "./names.js";
 import { loadRoster } from "./roster.js";
 import { logger } from "../logger.js";
+import { and, eq } from "drizzle-orm";
 import { db, primaryOrderLines, type InsertPrimaryOrderLine } from "@workspace/db";
 
 export const BOOKING_SHEETS: Record<string, string> = {
@@ -1202,6 +1203,21 @@ function _orderLineUid(
 const _INGEST_BATCH = 500;
 
 /**
+ * Pure reconciliation helper for replace-mode ingest: given the distinct
+ * source_tab values currently in the DB mirror and the monthly tabs that were
+ * successfully read (and replaced) from the sheet, return the tabs whose mirror
+ * rows are orphaned — i.e. the tab was deleted or renamed in the sheet.
+ * Comparison is on trimmed titles (both sides are stored trimmed).
+ */
+export function computeOrphanTabs(
+  existingTabs: string[],
+  replacedTabs: string[],
+): string[] {
+  const kept = new Set(replacedTabs.map((t) => t.trim()));
+  return existingTabs.map((t) => t.trim()).filter((t) => !kept.has(t));
+}
+
+/**
  * Read all monthly tabs from BOOKING_SHEETS[fy] and upsert rows into
  * primary_order_line (ON CONFLICT (line_uid) DO NOTHING — fully idempotent).
  *
@@ -1216,9 +1232,9 @@ const _INGEST_BATCH = 500;
  */
 export async function ingestOrderBookingFy(
   fy: string,
-  opts: { dryRun?: boolean } = {},
+  opts: { dryRun?: boolean; replace?: boolean } = {},
 ): Promise<IngestOrderBookingResult> {
-  const { dryRun = false } = opts;
+  const { dryRun = false, replace = false } = opts;
   const sheetId = BOOKING_SHEETS[fy];
   if (!sheetId) {
     return {
@@ -1232,6 +1248,7 @@ export async function ingestOrderBookingFy(
 
   const errors: string[] = [];
   const tabsRead: string[] = [];
+  const replacedTabs: string[] = [];
   let totalEmitted = 0;
   let totalInserted = 0;
 
@@ -1380,24 +1397,53 @@ export async function ingestOrderBookingFy(
         }
       });
 
-      if (tabRows.length > 0) {
+      // In replace mode an EMPTY monthly tab still counts: its stale mirror rows
+      // must be deleted. In append mode empty tabs are simply skipped.
+      if (tabRows.length > 0 || replace) {
         tabsRead.push(tab.title.trim());
         totalEmitted += tabRows.length;
+        replacedTabs.push(tab.title.trim());
 
         if (!dryRun) {
-          for (let i = 0; i < tabRows.length; i += _INGEST_BATCH) {
-            const slice = tabRows.slice(i, i + _INGEST_BATCH);
-            const res = await db
-              .insert(primaryOrderLines)
-              .values(slice)
-              .onConflictDoNothing()
-              .returning({ uid: primaryOrderLines.lineUid });
-            totalInserted += res.length;
+          if (replace) {
+            // Full-replace per tab: delete the tab's existing mirror rows and
+            // re-insert fresh from the sheet, atomically. This is the only way
+            // rows deleted/edited in the sheet ever leave the DB mirror
+            // (ON CONFLICT DO NOTHING alone can only add rows, never remove).
+            await db.transaction(async (tx) => {
+              await tx
+                .delete(primaryOrderLines)
+                .where(
+                  and(
+                    eq(primaryOrderLines.fy, fy),
+                    eq(primaryOrderLines.sourceTab, tab.title.trim()),
+                  ),
+                );
+              for (let i = 0; i < tabRows.length; i += _INGEST_BATCH) {
+                const slice = tabRows.slice(i, i + _INGEST_BATCH);
+                const res = await tx
+                  .insert(primaryOrderLines)
+                  .values(slice)
+                  .onConflictDoNothing()
+                  .returning({ uid: primaryOrderLines.lineUid });
+                totalInserted += res.length;
+              }
+            });
+          } else {
+            for (let i = 0; i < tabRows.length; i += _INGEST_BATCH) {
+              const slice = tabRows.slice(i, i + _INGEST_BATCH);
+              const res = await db
+                .insert(primaryOrderLines)
+                .values(slice)
+                .onConflictDoNothing()
+                .returning({ uid: primaryOrderLines.lineUid });
+              totalInserted += res.length;
+            }
           }
         }
 
         logger.info(
-          { fy, tab: tab.title.trim(), rows: tabRows.length, dryRun },
+          { fy, tab: tab.title.trim(), rows: tabRows.length, dryRun, replace },
           "ingestOrderBookingFy: tab done",
         );
       }
@@ -1405,6 +1451,39 @@ export async function ingestOrderBookingFy(
       const msg = `Tab "${tab.title}": ${String(err)}`;
       errors.push(msg);
       logger.warn({ err, fy, tab: tab.title }, "ingestOrderBookingFy: tab error");
+    }
+  }
+
+  // Orphan-tab reconciliation (replace mode only): mirror rows whose source_tab
+  // no longer exists in the sheet (tab deleted or renamed) must be removed, or
+  // they linger forever. Only safe when every monthly tab was read without error
+  // — a transient read failure must never cascade into deleting a month.
+  if (replace && !dryRun) {
+    if (errors.length > 0) {
+      logger.warn(
+        { fy, errors: errors.length },
+        "ingestOrderBookingFy: skipping orphan-tab cleanup — some tabs failed to read",
+      );
+    } else {
+      const existing = await db
+        .selectDistinct({ sourceTab: primaryOrderLines.sourceTab })
+        .from(primaryOrderLines)
+        .where(eq(primaryOrderLines.fy, fy));
+      const orphans = computeOrphanTabs(
+        existing.map((r) => r.sourceTab),
+        replacedTabs,
+      );
+      for (const orphan of orphans) {
+        await db
+          .delete(primaryOrderLines)
+          .where(
+            and(eq(primaryOrderLines.fy, fy), eq(primaryOrderLines.sourceTab, orphan)),
+          );
+        logger.warn(
+          { fy, orphanTab: orphan },
+          "ingestOrderBookingFy: deleted mirror rows for tab no longer in sheet",
+        );
+      }
     }
   }
 

@@ -21,7 +21,9 @@ import {
   readOrderTabInventory,
   readBookingAggregated,
   BOOKING_SHEETS,
+  ingestOrderBookingFy,
 } from "./lib/mgmt/primarySheets.js";
+import { isFyOpen } from "./lib/customers/registerSync.js";
 
 const rawPort = process.env["PORT"];
 
@@ -103,6 +105,35 @@ runMigrations()
     ensureRegisterSynced(fy);
   }
   startScheduledRegisterSync();
+
+  // Keep the primary_order_line OB mirror aligned with the live Order Sheet.
+  // Runs alongside the register sync cadence (every 6h) for the OPEN FY only,
+  // in replace mode so rows removed from the sheet also leave the DB mirror.
+  // Closed FYs are never touched. Overlap-guarded via obSyncInFlight.
+  {
+    let obSyncInFlight = false;
+    const runObMirrorSync = async (): Promise<void> => {
+      if (obSyncInFlight) return;
+      obSyncInFlight = true;
+      try {
+        for (const fy of Object.keys(BOOKING_SHEETS)) {
+          if (!isFyOpen(fy)) continue;
+          const r = await ingestOrderBookingFy(fy, { replace: true });
+          logger.info(
+            { fy, rowsEmitted: r.rowsEmitted, inserted: r.inserted, errors: r.errors },
+            "scheduled OB mirror sync: done",
+          );
+        }
+      } catch (err) {
+        logger.error({ err }, "scheduled OB mirror sync: failed");
+      } finally {
+        obSyncInFlight = false;
+      }
+    };
+    // First run shortly after startup (let sheet warm-up begin first), then every 6h.
+    setTimeout(() => void runObMirrorSync(), 60_000).unref();
+    setInterval(() => void runObMirrorSync(), 6 * 3_600_000).unref();
+  }
 
   // Assert frozen-FY anchors in the background. Any mismatch means something
   // wrote to an immutable year — logged at ERROR and exposed via /registers/freeze-status.

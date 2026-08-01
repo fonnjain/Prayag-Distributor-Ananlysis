@@ -11,6 +11,7 @@ import {
   ingestOrderBookingFy,
   SALE_SHEETS,
 } from "../lib/mgmt/primarySheets.js";
+import { isFrozen } from "../lib/customers/registerSync.js";
 
 const router: IRouter = Router();
 
@@ -528,12 +529,54 @@ router.post(
       return;
     }
     const dryRun = req.query["dry_run"] === "true";
-    req.log.info({ fy, dryRun }, "orders ingest: starting");
+    // replace=true → per-tab delete + re-insert so the mirror also drops rows
+    // that were removed from the sheet (default keeps the old append-only mode).
+    const replace = req.query["replace"] === "true";
 
-    const result = await ingestOrderBookingFy(fy, { dryRun });
+    if (replace && !dryRun) {
+      // Destructive path — requires the admin token (set ORDERS_ADMIN_TOKEN).
+      // The scheduled 6h sync calls ingestOrderBookingFy directly and is not
+      // affected by this guard.
+      const configured = process.env["ORDERS_ADMIN_TOKEN"];
+      const provided = req.header("x-admin-token");
+      if (!configured) {
+        res.status(403).json({
+          error:
+            "replace mode is disabled: set the ORDERS_ADMIN_TOKEN secret and pass it in the x-admin-token header.",
+        });
+        return;
+      }
+      if (provided !== configured) {
+        res.status(403).json({ error: "invalid or missing x-admin-token header." });
+        return;
+      }
+      // Frozen (closed) FYs: replace would rewrite immutable history from
+      // whatever the old sheet holds today. Require an explicit unfreeze+reason,
+      // matching the register force-resync convention.
+      if (isFrozen(fy)) {
+        const unfreeze = req.query["unfreeze"] === "true";
+        const reason =
+          typeof req.query["reason"] === "string" ? req.query["reason"].trim() : "";
+        if (!unfreeze) {
+          res.status(423).json({
+            error: `FY ${fy} is frozen. Pass ?unfreeze=true&reason=<your reason> to override.`,
+          });
+          return;
+        }
+        if (!reason) {
+          res.status(400).json({ error: "?reason=<text> is required when unfreezing a FY." });
+          return;
+        }
+        req.log.warn({ fy, reason }, "orders ingest: UNFREEZE override on frozen FY");
+      }
+    }
+
+    req.log.info({ fy, dryRun, replace }, "orders ingest: starting");
+
+    const result = await ingestOrderBookingFy(fy, { dryRun, replace });
 
     req.log.info(
-      { fy, dryRun, rowsEmitted: result.rowsEmitted, inserted: result.inserted, errors: result.errors.length },
+      { fy, dryRun, replace, rowsEmitted: result.rowsEmitted, inserted: result.inserted, errors: result.errors.length },
       "orders ingest: complete",
     );
     res.json(result);
