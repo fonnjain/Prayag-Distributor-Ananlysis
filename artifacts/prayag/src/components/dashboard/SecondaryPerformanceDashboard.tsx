@@ -201,7 +201,7 @@ function MemberRowEl({ member }: { member: MemberRow }) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function SecondaryPerformanceDashboard() {
-  const { fy, effectivePeriodFrom, effectivePeriodTo } = useGlobalFilter();
+  const { fy, effectivePeriodFrom, effectivePeriodTo, effectivePeriodLabel } = useGlobalFilter();
   const [data, setData] = useState<ApiData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -331,12 +331,17 @@ export default function SecondaryPerformanceDashboard() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Secondary Performance</h2>
+          <h2 className="text-lg font-semibold">
+            Secondary Performance
+            <span className="ml-2 text-sm font-normal text-muted-foreground" data-testid="text-secondary-period">
+              · FY {fy} · {effectivePeriodLabel}
+            </span>
+          </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
             {data?.meta.orderBookingSource ?? "STATE HEAD DASHBOARD — Secondary Order Booking"}
           </p>
         </div>
-        <span className="text-xs text-muted-foreground">FY {fy}</span>
+        <span className="text-xs text-muted-foreground">FY {fy} · {effectivePeriodLabel}</span>
       </div>
 
       {/* Load states */}
@@ -376,6 +381,9 @@ export default function SecondaryPerformanceDashboard() {
           ].map((tile) => (
             <div key={tile.label} className="rounded-lg border border-border bg-card p-3">
               <p className="text-xs text-muted-foreground">{tile.label}</p>
+              <p className="text-[10px] text-muted-foreground/80">
+                FY {fy} · {effectivePeriodLabel}
+              </p>
               <p className={cn("text-xl font-semibold font-mono mt-1", tile.valueClass)}>
                 {tile.value}
               </p>

@@ -336,7 +336,7 @@ function VelocitySparkline({
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function PrimaryPerformanceDashboard() {
-  const { fy, effectivePeriodFrom, effectivePrimaryPeriodTo } = useGlobalFilter();
+  const { fy, effectivePeriodFrom, effectivePrimaryPeriodTo, effectivePeriodLabel } = useGlobalFilter();
   const [view, setView] = useState<View>("head");
   const [data, setData] = useState<ApiResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -471,12 +471,17 @@ export default function PrimaryPerformanceDashboard() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Primary Performance</h2>
+          <h2 className="text-lg font-semibold">
+            Primary Performance
+            <span className="ml-2 text-sm font-normal text-muted-foreground" data-testid="text-primary-period">
+              · FY {fy} · {effectivePeriodLabel}
+            </span>
+          </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
             Prayag to Distributor / Direct Dealer — order booking, dispatch, and pending
           </p>
         </div>
-        <span className="text-xs text-muted-foreground">FY {fy}</span>
+        <span className="text-xs text-muted-foreground">FY {fy} · {effectivePeriodLabel}</span>
       </div>
 
       {openInPeriod.length > 0 && (
@@ -529,7 +534,8 @@ export default function PrimaryPerformanceDashboard() {
                 source: null,
                 available: data.bookingAvailable && data.saleAvailable,
                 warn: data.companyBooking > 0 && data.companyPending / data.companyBooking > 0.25,
-                unfiltered: bookingUnfiltered || saleUnfiltered,
+                unfiltered: bookingUnfiltered && saleUnfiltered,
+                mixedBasis: bookingUnfiltered !== saleUnfiltered,
               },
             ].map((tile) => (
               <div
@@ -537,6 +543,13 @@ export default function PrimaryPerformanceDashboard() {
                 className="rounded-lg border border-border bg-card p-3"
               >
                 <p className="text-xs text-muted-foreground">{tile.label}</p>
+                <p className="text-[10px] text-muted-foreground/80">
+                  {"mixedBasis" in tile && tile.mixedBasis
+                    ? "mixed basis — see warning"
+                    : tile.unfiltered
+                      ? `FY ${fy} full year`
+                      : `FY ${fy} · ${effectivePeriodLabel}`}
+                </p>
                 {tile.available ? (
                   <p className="text-xl font-semibold font-mono mt-1">
                     {fmtCr(tile.value)}
@@ -555,6 +568,12 @@ export default function PrimaryPerformanceDashboard() {
                   <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
                     <AlertTriangle className="h-2.5 w-2.5" />
                     FY total — period filter not applied
+                  </p>
+                )}
+                {"mixedBasis" in tile && tile.mixedBasis && (
+                  <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
+                    <AlertTriangle className="h-2.5 w-2.5" />
+                    Mixed basis — booking and dispatch cover different periods
                   </p>
                 )}
                 {"warn" in tile && tile.warn && (
