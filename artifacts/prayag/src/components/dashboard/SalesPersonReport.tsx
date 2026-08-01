@@ -10,6 +10,7 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { isFyClosed } from "@/data/global-filter-context";
 
 const BASE = import.meta.env.BASE_URL ?? "/";
 const API  = `${BASE}api`.replace(/\/\//g, "/");
@@ -232,7 +233,7 @@ function ReportDocument({ report }: { report: AiReport }) {
         <div className="report-title">Salesperson Performance Report — {member}</div>
         <div className="report-meta">
           {stateHead && <span>State Head: {stateHead}  |  </span>}
-          FY {fy}  |  Period: YTD through {cutoffFmt}
+          FY {fy}  |  Period: {isFyClosed(fy) ? "Full Year" : `YTD through ${cutoffFmt}`}
         </div>
       </div>
 
@@ -262,7 +263,7 @@ export function SalesPersonReport({ fy, stateHead, memberKey, memberName }: Prop
       const res = await fetch(`${API}/ai/report`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ fy, stateHead, member: memberKey, period: "ytd", corrupt }),
+        body:    JSON.stringify({ fy, stateHead, member: memberKey, period: isFyClosed(fy) ? "full" : "ytd", corrupt }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as Record<string, unknown>;

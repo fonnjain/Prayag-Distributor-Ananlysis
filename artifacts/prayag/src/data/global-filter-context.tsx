@@ -183,6 +183,15 @@ export function GlobalFilterProvider({ children }: { children: ReactNode }) {
     setMonthIdx(lastCompleteFiscalMonthIdx(fy));
   }, [fy]);
 
+  // YTD / Last-7d / Today are meaningless on a closed (historical) FY — the
+  // year is over, so "to date" IS the full year. Switch to Full Year so the
+  // UI never shows a YTD pill active on a prior year.
+  useEffect(() => {
+    if (isFyClosed(fy) && (periodMode === "ytd" || periodMode === "last7" || periodMode === "today")) {
+      setPeriodMode("full");
+    }
+  }, [fy, periodMode]);
+
   const lastCompleteIdx = useMemo(() => lastCompleteFiscalMonthIdx(fy), [fy]);
   const currentIdx = useMemo(() => currentFiscalMonthIdx(fy), [fy]);
   const isFyClosedValue = useMemo(() => isFyClosed(fy), [fy]);

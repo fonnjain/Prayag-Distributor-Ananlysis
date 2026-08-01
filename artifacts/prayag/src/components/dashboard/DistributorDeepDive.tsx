@@ -1810,6 +1810,7 @@ function RetailerConcentrationBar({ rc }: { rc: RetailerConcentration }) {
 // ── D7: Capacity check panel (territory level) ────────────────────────────────
 
 function CapacityCheckPanel({ check }: { check: CapacityCheck }) {
+  const { isFyClosedValue } = useGlobalFilter();
   const [showBreakdown, setShowBreakdown] = useState(false);
   return (
     <div className={`rounded-lg border p-4 mb-4 ${
@@ -1835,7 +1836,7 @@ function CapacityCheckPanel({ check }: { check: CapacityCheck }) {
           <p className="text-xl font-bold tabular-nums">
             {check.availablePerMonth != null ? Math.round(check.availablePerMonth) : "--"}
           </p>
-          <p className="text-[10px] text-muted-foreground">visits (YTD rate)</p>
+          <p className="text-[10px] text-muted-foreground">visits ({isFyClosedValue ? "FY" : "YTD"} rate)</p>
         </div>
         <div>
           <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">

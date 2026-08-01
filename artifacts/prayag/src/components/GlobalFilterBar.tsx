@@ -328,10 +328,12 @@ export default function GlobalFilterBar({ hideSyncRow, className }: GlobalFilter
 
         <span className="text-border/60 select-none text-sm">|</span>
 
-        {/* YTD */}
-        <Pill active={periodMode === "ytd"} onClick={() => setPeriodMode("ytd")} variant="special">
-          YTD
-        </Pill>
+        {/* YTD — only meaningful on the open FY; hidden on closed (prior) FYs */}
+        {!isFyClosed(fy) && (
+          <Pill active={periodMode === "ytd"} onClick={() => setPeriodMode("ytd")} variant="special">
+            YTD
+          </Pill>
+        )}
 
         {/* Quarters */}
         {quarters.map(({ id, label }) => (

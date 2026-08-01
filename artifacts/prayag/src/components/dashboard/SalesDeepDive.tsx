@@ -6,7 +6,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { SalesPersonReport } from "./SalesPersonReport";
-import { useGlobalFilter } from "@/data/global-filter-context";
+import { useGlobalFilter, isFyClosed } from "@/data/global-filter-context";
 
 const BASE = import.meta.env.BASE_URL ?? "/";
 const API = `${BASE}api`.replace(/\/\//g, "/");
@@ -550,6 +550,8 @@ function TeamSummaryPanel({ summary, dataReadAt }: { summary: TeamSummary; dataR
 // ── Retailer spread panel (Phase 2) ───────────────────────────────────────────
 
 function RetailerSpreadPanel({ spread }: { spread: RetailerSpread }) {
+  const { isFyClosedValue } = useGlobalFilter();
+  const toDateLabel = isFyClosedValue ? "FY" : "YTD";
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -587,7 +589,7 @@ function RetailerSpreadPanel({ spread }: { spread: RetailerSpread }) {
         />
         {spread.totalVisits != null && (
           <Tile
-            label="Total Visits (YTD)"
+            label={`Total Visits (${toDateLabel})`}
             value={fmtNum(spread.totalVisits)}
           />
         )}
@@ -804,6 +806,8 @@ function VisitBar({
 }
 
 function VisitPatternPanel({ pattern }: { pattern: VisitPattern }) {
+  const { isFyClosedValue } = useGlobalFilter();
+  const toDateLabel = isFyClosedValue ? "FY" : "YTD";
   const [showZeroList, setShowZeroList] = useState(false);
 
   return (
@@ -820,7 +824,7 @@ function VisitPatternPanel({ pattern }: { pattern: VisitPattern }) {
 
       {/* Visit deficit tile */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Tile label="Visits Done (YTD)" value={fmtNum(pattern.totalVisitsDone)} accent />
+        <Tile label={`Visits Done (${toDateLabel})`} value={fmtNum(pattern.totalVisitsDone)} accent />
         <Tile label="Annual Required" value={fmtNum(pattern.totalVisitsRequired)} />
         <Tile
           label="Pro-Rated Target (elapsed)"
@@ -1561,6 +1565,8 @@ function multipleColour(m: number): string {
 }
 
 function RoiCostPanel({ roi, memberName }: { roi: RoiCost; memberName: string }) {
+  const { isFyClosedValue } = useGlobalFilter();
+  const toDateLabel = isFyClosedValue ? "FY" : "YTD";
   return (
     <div className="space-y-4">
       <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground border-b border-border pb-1">
@@ -1570,7 +1576,7 @@ function RoiCostPanel({ roi, memberName }: { roi: RoiCost; memberName: string })
       {/* Cost build-up */}
       <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 space-y-2">
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-          YTD Cost ({roi.elapsedCompleteMonths} complete fiscal months elapsed)
+          {toDateLabel} Cost ({roi.elapsedCompleteMonths} complete fiscal months elapsed)
         </p>
         <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
           <span>
@@ -1630,10 +1636,10 @@ function RoiCostPanel({ roi, memberName }: { roi: RoiCost; memberName: string })
           )}>
             {roi.costRatioPct != null ? `${roi.costRatioPct.toFixed(2)}%` : "—"}
           </span>
-          <span className="text-[11px] text-muted-foreground">Total cost ÷ order booking (YTD)</span>
+          <span className="text-[11px] text-muted-foreground">Total cost ÷ order booking ({toDateLabel})</span>
         </div>
         <Tile
-          label="Total YTD Cost"
+          label={`Total ${toDateLabel} Cost`}
           value={fmtRs(roi.totalCost)}
           sub={`CTC ${fmtRs(roi.ctcCostYtd)} + T.A. ${fmtRs(roi.taBillYtd)}`}
         />
@@ -1649,7 +1655,7 @@ function RoiCostPanel({ roi, memberName }: { roi: RoiCost; memberName: string })
         <Tile
           label="Cost per Visit"
           value={fmtRsWhole(roi.costPerVisit)}
-          sub="Total cost ÷ visits done (YTD)"
+          sub={`Total cost ÷ visits done (${toDateLabel})`}
         />
         <Tile
           label="Cost per Active Retailer"
@@ -1757,13 +1763,22 @@ interface PeriodSelectorPanelProps {
 }
 
 function PeriodSelectorPanel({ kpis, months, dateFilterLabel }: PeriodSelectorPanelProps) {
-  const [period, setPeriod]               = useState<PeriodId>("ytd");
+  const { fy, isFyClosedValue } = useGlobalFilter();
+  // YTD is meaningless on a closed FY — the year is over. Hide the option and
+  // fall back to Full Year whenever a prior year is selected.
+  const [period, setPeriod]               = useState<PeriodId>(isFyClosedValue ? "full-year" : "ytd");
   const [selectedMonth, setSelectedMonth] = useState("Apr");
+  useEffect(() => {
+    if (isFyClosedValue && period === "ytd") setPeriod("full-year");
+  }, [fy, isFyClosedValue, period]);
 
-  const d = computePeriodData(period, selectedMonth, kpis, months);
+  const effectivePeriod: PeriodId = isFyClosedValue && period === "ytd" ? "full-year" : period;
+  const d = computePeriodData(effectivePeriod, selectedMonth, kpis, months);
   const hasMonthlyData = months.length > 0;
 
-  const PERIODS: PeriodId[] = ["ytd", "q1", "q2", "q3", "q4", "month", "full-year"];
+  const PERIODS: PeriodId[] = isFyClosedValue
+    ? ["full-year", "q1", "q2", "q3", "q4", "month"]
+    : ["ytd", "q1", "q2", "q3", "q4", "month", "full-year"];
 
   // Achievement
   const saleAch = d.sale !== null && d.totalTarget !== null && d.totalTarget > 0
@@ -2379,7 +2394,7 @@ export default function SalesDeepDive() {
               <Tile label="Secondary Monthly Target" value={fmtRs(kpis.secondaryTargetMonthly)} sub="Derived: Total − Primary" />
             )}
 
-            <SectionLabel>Performance (YTD)</SectionLabel>
+            <SectionLabel>{isFyClosed(fy) ? "Performance (Full Year)" : "Performance (YTD)"}</SectionLabel>
             <Tile label="Order Booking (Retailer / Party)" value={fmtRs(kpis.orderBooking)} sub="NET = Sub Total" accent />
             <Tile label="Direct Dealers Order" value={fmtRs(kpis.directDealersOrder)} sub="Kept separate from party OB" />
             <Tile label="Sales Received" value={fmtRs(kpis.sale)} accent />
@@ -2431,9 +2446,11 @@ export default function SalesDeepDive() {
               <ExtraFieldsSections
                 extra={{
                   ...kpis.extra,
-                  // Inject current-year YTD values so they appear beside the prior-year actuals.
-                  ...(kpis.sale != null ? { SALENOWYTD: kpis.sale } : {}),
-                  ...(kpis.orderBooking != null ? { TOTALORDERNOWYTD: kpis.orderBooking } : {}),
+                  // Inject current-year YTD values so they appear beside the prior-year
+                  // actuals — only on the open FY (labels say "YTD (current FY)", which
+                  // would be wrong on a closed year where these are full-year figures).
+                  ...(!isFyClosed(fy) && kpis.sale != null ? { SALENOWYTD: kpis.sale } : {}),
+                  ...(!isFyClosed(fy) && kpis.orderBooking != null ? { TOTALORDERNOWYTD: kpis.orderBooking } : {}),
                 }}
               />
             )}

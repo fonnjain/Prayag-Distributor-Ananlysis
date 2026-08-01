@@ -28,7 +28,7 @@
 // Anomaly rule: per-person per-month, if sales > orders × 1.5 — impossible,
 //   flag but show the recorded value; exclude from rankings.
 import { useState, useEffect, useMemo, Fragment } from "react";
-import { useGlobalFilter } from "@/data/global-filter-context";
+import { useGlobalFilter, isFyClosed } from "@/data/global-filter-context";
 import {
   AlertTriangle,
   Info,
@@ -471,7 +471,7 @@ export default function CombinedPerformanceDashboard() {
                 }
               />
               <KpiTile
-                label="Secondary YTD Achievement"
+                label={isFyClosed(fy) ? "Secondary Full-Year Achievement" : "Secondary YTD Achievement"}
                 sub="sales received / plan (closed months)"
                 value={secTotal?.ytdAchievement != null ? fmtPct(secTotal.ytdAchievement) : "—"}
                 note={
@@ -494,7 +494,7 @@ export default function CombinedPerformanceDashboard() {
                   ).join(", ")} secondary data not yet recorded.
                 </strong>{" "}
                 The month has ended but state heads have not yet entered figures.
-                YTD achievement excludes {data.meta.secondaryTotal!.arrearsMonths!.length === 1 ? "this month" : "these months"} — figures will update automatically once data is entered.
+                {isFyClosed(fy) ? "Achievement" : "YTD achievement"} excludes {data.meta.secondaryTotal!.arrearsMonths!.length === 1 ? "this month" : "these months"} — figures will update automatically once data is entered.
               </span>
             </div>
           )}

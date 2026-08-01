@@ -182,6 +182,17 @@ export function computePeriodCovered(cutoffDate: Date): PeriodCoverage {
   const toMonthName  = CAL_MONTH_NAMES[cutoffCalMonth];
   const toMonthShort = FISCAL_MONTH_SHORT[toFiscalIdx];
 
+  // When the cutoff is the fiscal year end (March), the coverage IS the full
+  // year — never label a closed year "year to date".
+  if (toFiscalMonth === 12) {
+    return {
+      periodCoveredLabel: `full fiscal year, April ${cutoffYear - 1} to March ${cutoffYear}`,
+      periodCoveredShort: `FY-Apr-Mar-${cutoffYear}`,
+      periodFromFiscalMonth: 1,
+      periodToFiscalMonth: 12,
+    };
+  }
+
   return {
     periodCoveredLabel: `year to date, April to ${toMonthName} ${cutoffYear}`,
     periodCoveredShort: `YTD-Apr-${toMonthShort}-${cutoffYear}`,
