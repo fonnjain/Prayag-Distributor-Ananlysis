@@ -66,6 +66,22 @@ const MIGRATIONS: Migration[] = [
         SELECT * FROM sale_line_all WHERE version_status = 'current';
     `,
   },
+  {
+    id: "003_register_month_state",
+    sql: `
+      CREATE TABLE IF NOT EXISTS register_month_state (
+        fy                TEXT        NOT NULL,
+        month_label       TEXT        NOT NULL,
+        last_good_rows    INTEGER,
+        last_good_amount  NUMERIC,
+        last_replaced_at  TIMESTAMPTZ,
+        frozen_at         TIMESTAMPTZ,
+        frozen_rows       INTEGER,
+        frozen_amount     NUMERIC,
+        PRIMARY KEY (fy, month_label)
+      );
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

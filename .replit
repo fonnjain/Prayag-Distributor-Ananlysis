@@ -28,4 +28,3 @@ channel = "stable-25_05"
 [userenv.shared]
 
 [userenv.production]
-REGISTER_SYNC_PAUSE = "2026-27"

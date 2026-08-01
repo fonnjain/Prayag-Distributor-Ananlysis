@@ -9,6 +9,7 @@ import {
   integer,
   jsonb,
   index,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -140,3 +141,27 @@ export type InsertCostMaster = z.infer<typeof insertCostMasterSchema>;
 export type CostMaster = typeof costMaster.$inferSelect;
 export type InsertIngestRun = z.infer<typeof insertIngestRunSchema>;
 export type IngestRun = typeof ingestRuns.$inferSelect;
+
+// Per-month sync state for the monthly full-replace pipeline (Aug 2026).
+//
+// One row per (fy, month_label). Two roles:
+//   1. Short-read guard baseline: last_good_rows/last_good_amount are the row
+//      count and amount total of the last SUCCESSFUL full read of the month.
+//      Stored in the DB — never in process memory — so the guard survives
+//      restarts. A read materially below last_good_rows aborts the replace.
+//   2. Freeze anchor: a month freezes permanently on the 7th of the following
+//      month (derived from the clock, never a config list). frozen_at,
+//      frozen_rows and frozen_amount are recorded once at freeze time and
+//      asserted on every startup; a frozen month is never read or written again.
+export const registerMonthState = pgTable("register_month_state", {
+  fy: text("fy").notNull(),
+  monthLabel: text("month_label").notNull(),
+  lastGoodRows: integer("last_good_rows"),
+  lastGoodAmount: numeric("last_good_amount"),
+  lastReplacedAt: timestamp("last_replaced_at", { withTimezone: true }),
+  frozenAt: timestamp("frozen_at", { withTimezone: true }),
+  frozenRows: integer("frozen_rows"),
+  frozenAmount: numeric("frozen_amount"),
+}, (t) => [primaryKey({ columns: [t.fy, t.monthLabel] })]);
+
+export type RegisterMonthState = typeof registerMonthState.$inferSelect;

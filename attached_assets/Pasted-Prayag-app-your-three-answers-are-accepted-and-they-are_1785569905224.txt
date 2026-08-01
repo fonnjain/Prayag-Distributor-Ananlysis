@@ -1,0 +1,75 @@
+Prayag app - your three answers are accepted, and they are what makes the case
+for NOT building #74.
+
+Q1, Q2 and Q3 were answered properly. The two-tier occurrence index is sound in
+principle, the count-based reconciliation genuinely dissolves the sort-order
+problem for identical rows, and the cross-foot is exact:
+   11,454 confirmed + 7,638 stale = 19,092 rows
+   Rs 25.89 + Rs 15.37 = Rs 41.26 Cr
+
+But your own measurements point somewhere else.
+
+ALL 20 AMBIGUOUS GROUPS ARE FULLY IDENTICAL ON EVERY FIELD.
+You state this explicitly - "for July there is nothing for a deterministic sort
+to distinguish". So the two-tier design has no work to do: tier one is empty and
+tier two is count reconciliation.
+
+Count reconciliation of identical rows IS a full replace, applied to 40 rows
+instead of 11,454. If the answer for the ambiguous rows is "keep what the sheet
+holds", that is the right answer for every row.
+
+THE 45 PER CENT BLAST RADIUS IS THE TELL.
+A supervised pass at blastRadiusLimitPct=45 is exactly what was done on 30 July
+at 35 - it cleared 3,749 rows and the corruption returned within 48 hours.
+
+A guard that must be overridden to let the fix through is measuring the wrong
+thing. Under a full replace there is no blast radius at all, because replacing a
+month is not a partial mutation.
+
+BUILD THIS INSTEAD:
+
+1. NIGHTLY FULL REPLACE OF THE OPEN MONTH.
+   Read every row for the current open month, verify the count, then in ONE
+   transaction delete that month and insert the read in full.
+   No identity key. No dedup. No tombstone. No supersede. No revive.
+   If the sheet holds two identical rows, both are written.
+   Acceptance is one line: rows written equals rows read, exactly.
+
+2. THE ONLY GUARD: verify before deleting. If the read returns materially fewer
+   rows than the last successful read of that month, ABORT and leave the data
+   alone. Store that count in the DATABASE, not memory - an in-memory baseline
+   lapses on restart, which has already happened once.
+   The delete and insert in one transaction means a partial write cannot occur.
+
+3. FREEZE A MONTH ON THE 7th OF THE FOLLOWING MONTH - seven days of grace for
+   late entries, then permanent.
+     Apr-26 -> frozen 7 May    May-26 -> frozen 7 Jun
+     Jun-26 -> frozen 7 Jul    Jul-26 -> frozen 7 Aug
+   Derive the date from today, never a config list. A frozen month is skipped
+   entirely - no read, no write. Record its row count and total, and assert them
+   on startup.
+   Under this rule April, May and June should ALREADY be frozen, which would
+   have prevented their churn entirely.
+
+4. JULY NEEDS NO SUPERVISED TOMBSTONE. The first nightly replace corrects it:
+   delete 19,092 rows, insert 11,454, done. No override, no dry-run review, no
+   blast-radius exception.
+
+WHAT SURVIVES FROM #74:
+   the read verification, with its count in the database
+WHAT IS DROPPED:
+   occurrence index, count reconciliation, tombstone override, revive
+   pre-flight, blast-radius tuning
+
+Acceptance:
+  the first replace of Jul-26 writes exactly 11,454 rows and Rs 25.90 Cr
+  a second run on an unchanged sheet gives an identical count - idempotent by
+    construction, so this must hold trivially
+  Apr, May and Jun are frozen with anchors recorded
+  a simulated short read aborts and leaves the month untouched
+  a write to a frozen month is refused
+  simulate the date as 8 September: Aug-26 freezes with no code change
+  then unpause FY2026-27
+
+On the pause: republish now so it takes effect immediately rather than waiting
+for an instance to recycle. The republish is needed to ship this anyway.

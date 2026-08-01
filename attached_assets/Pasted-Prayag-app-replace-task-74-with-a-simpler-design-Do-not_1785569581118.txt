@@ -1,0 +1,70 @@
+Prayag app - replace task #74 with a simpler design. Do not build the occurrence
+index; it inherits the same weakness as serial when the sheet re-sorts.
+
+1. NIGHTLY FULL REPLACE OF THE OPEN MONTH.
+
+   Once a night, for the current open month only:
+
+     read every row for that month from SALE SHEET 26-27
+     verify the read (see the guard below)
+     in ONE transaction: delete that month's rows, insert the read in full
+     record rows read and rows written
+
+   NO identity key. NO dedup. NO tombstone. NO supersede. NO revive.
+   If the sheet holds two identical rows, BOTH are written - the sheet is the
+   truth for a live month, and it is not the loader's job to decide a row is a
+   duplicate.
+
+   ACCEPTANCE, one line: rows written must equal rows read, exactly.
+   Any difference is a bug with nothing to interpret.
+
+2. THE ONLY GUARD NEEDED - verify before deleting.
+
+   Read first, count, and only then delete. If the read returns fewer rows than
+   the last successful read of that month by more than a small tolerance, ABORT
+   and leave the existing data alone. A failed read after a delete would empty
+   the live month.
+
+   Store the last good count per month in the database, not in memory - an
+   in-memory baseline is lost on restart and the guard lapses for one cycle.
+
+   Because this is a full replace inside a transaction, a partial write cannot
+   occur. Either the whole month lands or nothing changes.
+
+3. FREEZE A MONTH ON THE 7th OF THE FOLLOWING MONTH.
+
+   A closed month gets 7 days of grace for late entries and corrections, then
+   freezes permanently:
+
+     Apr-26  closed 30 Apr  ->  frozen 7 May
+     May-26  closed 31 May  ->  frozen 7 Jun
+     Jun-26  closed 30 Jun  ->  frozen 7 Jul
+     Jul-26  closed 31 Jul  ->  frozen 7 Aug
+
+   Derive the freeze date from today's date - never a config list, so it advances
+   on its own.
+
+   A frozen month is skipped entirely: no read, no write, no replace. Record its
+   row count and total as an anchor and assert them on every startup. If a frozen
+   month's figures change, something wrote to it that should not have - fail
+   loudly with the month named.
+
+   Writing to a frozen month requires an explicit unfreeze with a recorded reason.
+
+   NOTE: under this rule April, May and June should ALREADY be frozen. Freezing
+   them would have prevented the May and June churn entirely.
+
+4. THE SAME RULE ALREADY APPLIES TO CLOSED FISCAL YEARS.
+   FY2023-24, FY2024-25 and FY2025-26 are loaded by straight copy and frozen.
+   This extends the identical logic from years to months.
+
+Acceptance - report each:
+  a nightly replace of Jul-26 writes exactly the rows read
+  after it, Jul-26 reads 11,454 rows and Rs 25.90 Cr, matching the sheet
+  Apr, May and Jun are frozen with their anchors recorded
+  a second run on an unchanged sheet produces an identical row count - a full
+    replace is idempotent by construction, so this must hold trivially
+  a simulated short read aborts and leaves the month untouched
+  a simulated write to a frozen month is refused
+  simulate the date as 8 September and confirm Aug-26 freezes automatically with
+    no code change

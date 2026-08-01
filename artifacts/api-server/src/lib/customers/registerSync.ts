@@ -26,10 +26,10 @@ import {
   computeLineUid,
 } from "../registers/normalize.js";
 import {
-  versionedSyncLines,
   recordIngestRun,
   assertUnmappedEmpty,
 } from "../registers/ingest.js";
+import { replaceOpenMonths, assertMonthAnchors } from "../registers/monthlyReplace.js";
 import {
   resolveWaterTankRow,
   buildSapLookupMap,
@@ -170,58 +170,14 @@ const byFy = new Map<string, FyState>();
 // Track last successful full sync time per FY (resets on process restart).
 const lastSyncedAtMs = new Map<string, number>();
 
-// Last known-good sheet row count per FY+month (key: "fy|monthLabel").
-// Loaded from ingest_run (rows_per_month column) on first use, then kept
-// current in memory. Used by versionedSyncLines to distinguish a genuinely
-// short read (incoming < last-good) from the DB having drifted above the sheet
-// count (where tombstone and revive need to run unblocked).
-const lastGoodRowCountByMonth = new Map<string, number>();
+// NOTE (Aug 2026): the per-month short-read baseline now lives in the DATABASE
+// (register_month_state.last_good_rows, maintained by replaceOpenMonths) so it
+// survives process restarts. The old in-memory lastGoodRowCountByMonth map and
+// its ingest_run-based boot loader are gone with the versioned-sync pipeline.
 
-// Loaded lazily on the first doSync call so the DB is ready before we try to
-// read from it. A null promise means "not yet started".
-let baselineLoadPromise: Promise<void> | null = null;
-
-/**
- * Populates lastGoodRowCountByMonth from the most recent successful
- * register_sheets_sync run per FY that recorded rows_per_month. Called once
- * per process lifetime before the first versionedSyncLines invocation.
- */
-async function loadBaselineFromDb(): Promise<void> {
-  try {
-    // For each FY take the latest run that has rows_per_month populated.
-    const { rows } = await pool.query<{
-      fy: string;
-      rows_per_month: Record<string, number> | null;
-    }>(`
-      SELECT DISTINCT ON (fy) fy, rows_per_month
-      FROM ingest_run
-      WHERE source = 'register_sheets_sync'
-        AND status IN ('ok', 'warn')
-        AND rows_per_month IS NOT NULL
-      ORDER BY fy, started_at DESC NULLS LAST
-    `);
-    let loaded = 0;
-    for (const row of rows) {
-      if (!row.rows_per_month || !row.fy) continue;
-      for (const [month, count] of Object.entries(row.rows_per_month)) {
-        if (typeof count === "number" && count > 0) {
-          lastGoodRowCountByMonth.set(`${row.fy}|${month}`, count);
-          loaded++;
-        }
-      }
-    }
-    logger.info({ loaded }, "register baseline: loaded from DB");
-  } catch (err) {
-    // Non-fatal: the baseline simply stays empty.  All guards will halt on this
-    // boot cycle (unknown baseline), establishing the baseline after one clean
-    // sync, then operate normally from there.
-    logger.warn({ err }, "register baseline: failed to load from DB — guards will halt this cycle");
-  }
-}
-
-// Re-sync TTL for the current open FY: 6 hours.
-// A completed FY is never re-synced (no new invoices possible).
-const OPEN_FY_RESYNC_MS = 6 * 60 * 60 * 1000;
+// Re-sync TTL for the current open FY: 24 hours (nightly full replace of the
+// open month). A completed FY is never re-synced (no new invoices possible).
+const OPEN_FY_RESYNC_MS = 24 * 60 * 60 * 1000;
 
 // Scheduled sync interval — same as the resync TTL so a schedule tick always
 // finds stale data for the open FY.
@@ -288,11 +244,6 @@ async function hasRows(fy: string): Promise<boolean> {
 }
 
 export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
-  // Ensure the persisted baseline is loaded exactly once per process, before
-  // any guard decisions are made. This is the only place we await it.
-  if (!baselineLoadPromise) baselineLoadPromise = loadBaselineFromDb();
-  await baselineLoadPromise;
-
   const s = stateFor(fy);
   s.phase = "syncing";
   const startedAt = new Date();
@@ -455,16 +406,18 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
       return { ...line, serialNo: syntheticSerial, lineUid: computeLineUid(postUidKey, 0) };
     });
 
-    const syncedAt = new Date();
-    // ── Step 3 + 4: upsert + tombstone pass (tombstone is inside versionedSyncLines) ──
-    const { touched, superseded, inserted, revived, tombstoned, incomingCountByFyMonth } =
-      await versionedSyncLines(linesForSync, syncedAt, lastGoodRowCountByMonth);
+    // ── Step 3: monthly full replace ─────────────────────────────────────────
+    // No identity key, no dedup, no tombstone, no supersede, no revive.
+    // Frozen months (7th-of-following-month rule) are skipped; each open month
+    // is deleted and re-inserted from the read in ONE transaction, guarded by
+    // the DB-persisted short-read baseline in register_month_state.
+    const replaceSummary = await replaceOpenMonths({ fy, lines: linesForSync });
 
-    // Update last-good-read baseline for every month whose incoming count
-    // was at least as large as the previous baseline (i.e. not a truncated read).
-    for (const [k, incoming] of incomingCountByFyMonth) {
-      const prev = lastGoodRowCountByMonth.get(k) ?? 0;
-      if (incoming >= prev) lastGoodRowCountByMonth.set(k, incoming);
+    const inserted = replaceSummary.months.reduce((n, m) => n + (m.rowsWritten ?? 0), 0);
+    const aborted = replaceSummary.months.filter((m) => m.action === "aborted-short-read" || m.action === "failed");
+    const incomingCountByFyMonth = new Map<string, number>();
+    for (const m of replaceSummary.months) {
+      incomingCountByFyMonth.set(`${fy}|${m.month}`, m.sheetRows);
     }
 
     lastSyncedAtMs.set(fy, Date.now());
@@ -477,11 +430,9 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
         tabsRead,
         rowsScanned,
         linesBuilt: linesForSync.length,
-        touched,
-        superseded,
-        inserted,
-        revived,
-        tombstoned,
+        months: replaceSummary.months.map((m) => `${m.month}:${m.action}(${m.rowsWritten ?? "-"})`),
+        rowsWritten: inserted,
+        abortedMonths: aborted.map((m) => m.month),
         unmappedGroups: Object.keys(unmapped.unmapped_groups).length,
         unmappedHeads: Object.keys(unmapped.unmapped_heads).length,
       },

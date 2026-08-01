@@ -27,6 +27,13 @@ import {
   getFreezeViolations,
 } from "../lib/customers/registerSync.js";
 import { allowDelete } from "../lib/deleteGuard.js";
+import {
+  replaceOpenMonths,
+  isMonthFrozen,
+  monthFreezeAt,
+  getMonthAnchorViolations,
+} from "../lib/registers/monthlyReplace.js";
+import { registerMonthState } from "@workspace/db";
 import rawRegisterSheetsCfg from "../../config/register_sheets.json";
 import {
   tankLitresFromCode,
@@ -64,6 +71,23 @@ function rejectIfFrozen(
   }
   req.log.warn({ fy, reason, route: req.path }, "UNFREEZE override — writing to a frozen FY");
   return false;
+}
+
+/**
+ * Month-level freeze guard (7th-of-following-month rule, clock-derived).
+ * Frozen months are PERMANENT — there is no unfreeze escape hatch.
+ * Dry-run requests always pass — they never write.
+ */
+function rejectIfMonthFrozen(
+  res: { status: (code: number) => { json: (body: object) => void } },
+  month: string,
+  opts?: { dryRun?: boolean },
+): boolean {
+  if (opts?.dryRun || !isMonthFrozen(month)) return false;
+  res.status(423).json({
+    error: `month ${month} froze on ${monthFreezeAt(month)?.toISOString().slice(0, 10)} — writes are permanently refused`,
+  });
+  return true;
 }
 
 /**
@@ -170,6 +194,7 @@ router.post("/registers/:fy/tombstone-orphans", async (req, res) => {
     return;
   }
   if (rejectIfFrozen(req, res, fy, { dryRun })) return;
+  if (rejectIfMonthFrozen(res, month, { dryRun })) return;
 
   try {
     const occurrence = new OccurrenceCounter();
@@ -255,6 +280,127 @@ router.post("/registers/:fy/tombstone-orphans", async (req, res) => {
     });
   } catch (err: unknown) {
     req.log.error({ err, fy, month, dryRun }, "tombstone-orphans failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
+ * POST /registers/:fy/replace-months?force=true&now=2026-09-08
+ *
+ * Manual trigger for the monthly full-replace pipeline (same code path as the
+ * nightly sync). Reads the whole FY sheet, then per month:
+ *   frozen (7th-of-following-month rule) → skipped (anchored on first encounter)
+ *   open → short-read guard, then delete+insert in one transaction.
+ *
+ * force=true accepts a read below the 98% short-read tolerance and resets the
+ * baseline — the explicit human path for genuine large deletions.
+ * now=<ISO date> simulates the clock for freeze-rule testing (non-prod aid).
+ */
+router.post("/registers/:fy/replace-months", async (req, res) => {
+  const { fy } = req.params;
+  const force = req.query.force === "true";
+  const nowOverride = typeof req.query.now === "string" ? new Date(req.query.now) : undefined;
+  if (nowOverride != null && Number.isNaN(nowOverride.getTime())) {
+    res.status(400).json({ error: "invalid ?now= date" });
+    return;
+  }
+  // force resets the short-read baseline; now= manipulates the freeze clock.
+  // Both are admin overrides: require an authenticated API key (Bearer token).
+  if ((force || nowOverride != null) && !req.apiKey) {
+    res.status(401).json({
+      error: "?force and ?now are admin overrides — a valid API key (Authorization: Bearer …) is required",
+    });
+    return;
+  }
+
+  const spreadsheetId = REGISTER_SHEET_IDS[fy];
+  if (!spreadsheetId) {
+    res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
+    return;
+  }
+  if (rejectIfFrozen(req, res, fy)) return;
+
+  try {
+    const occurrence = new OccurrenceCounter();
+    const unmapped = emptyUnmapped();
+    const allLines: ReturnType<typeof toSaleLine>[] = [];
+    const { rowsScanned, tabsRead } = await readRegisterFromSheets(
+      spreadsheetId,
+      fy,
+      (values, columns, tabMonthLabel) => {
+        const result = parseRegisterRow(values, columns, fy, tabMonthLabel);
+        if (result.kind !== "row") return;
+        allLines.push(toSaleLine(result.row, occurrence, unmapped, "sheets"));
+      },
+    );
+    if (allLines.length === 0) {
+      res.status(409).json({ error: "zero rows returned from sheet — aborted to prevent silent wipe" });
+      return;
+    }
+
+    // Same tank resolution as the scheduled sync so tank rows carry pieces.
+    const cfg = rawRegisterSheetsCfg as { sap_source?: Record<string, string> };
+    const sapId = cfg.sap_source?.[fy];
+    let sapLookup: Awaited<ReturnType<typeof buildSapLookupMap>> | null = null;
+    if (sapId) {
+      try { sapLookup = await buildSapLookupMap(sapId); } catch { /* Route 2 fallback */ }
+    }
+    const resolvedLines = allLines.map((line) => {
+      const sheetQty = line.qty != null ? Number(line.qty) : null;
+      const resolved = resolveWaterTankRow({
+        code: line.code,
+        groupCanon: line.groupCanon ?? null,
+        sheetQty,
+        invoiceNo: line.invoiceNo ?? null,
+        amount: Number(line.amount),
+        sapLookup,
+        hasSapSource: !!sapId,
+      });
+      if (resolved.flag === "non-tank-group" || resolved.flag === "unmapped-suffix") return line;
+      if (resolved.qty == null) return line;
+      return {
+        ...line,
+        qty: String(resolved.qty),
+        qtyLtr: resolved.qtyLtr != null ? String(resolved.qtyLtr) : line.qtyLtr,
+      };
+    });
+
+    const summary = await replaceOpenMonths({ fy, lines: resolvedLines, force, now: nowOverride });
+    res.json({ ...summary, rowsScanned, tabsRead });
+  } catch (err: unknown) {
+    req.log.error({ err, fy }, "replace-months failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
+ * GET /registers/:fy/month-state
+ *
+ * Per-month sync state: DB-persisted short-read baseline, freeze status and
+ * anchors, plus any startup anchor violations.
+ */
+router.get("/registers/:fy/month-state", async (req, res) => {
+  const { fy } = req.params;
+  try {
+    const rows = await db.select().from(registerMonthState).where(eq(registerMonthState.fy, fy));
+    res.json({
+      fy,
+      months: rows
+        .sort((a, b) => a.monthLabel.localeCompare(b.monthLabel))
+        .map((r) => ({
+          month: r.monthLabel,
+          lastGoodRows: r.lastGoodRows,
+          lastGoodAmount: r.lastGoodAmount != null ? Number(r.lastGoodAmount) : null,
+          lastReplacedAt: r.lastReplacedAt,
+          frozen: isMonthFrozen(r.monthLabel),
+          freezesAt: monthFreezeAt(r.monthLabel)?.toISOString() ?? null,
+          frozenAt: r.frozenAt,
+          frozenRows: r.frozenRows,
+          frozenAmount: r.frozenAmount != null ? Number(r.frozenAmount) : null,
+        })),
+      anchorViolations: getMonthAnchorViolations(),
+    });
+  } catch (err: unknown) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
@@ -369,6 +515,27 @@ router.post("/registers/:fy/force-resync", async (req, res) => {
       return;
     }
     req.log.warn({ fy, reason: unfreezeReason }, "force-resync: UNFREEZE override — writing to a frozen FY");
+  }
+
+  // clearFirst wipes the entire FY — refuse if any month of this FY is
+  // permanently frozen under the month-level rule (no unfreeze escape hatch).
+  if (clearFirst) {
+    try {
+      const frozenMonths = (
+        await db.select().from(registerMonthState).where(eq(registerMonthState.fy, fy))
+      )
+        .map((r) => r.monthLabel)
+        .filter((m) => isMonthFrozen(m));
+      if (frozenMonths.length > 0) {
+        res.status(423).json({
+          error: `FY ${fy} contains permanently frozen months (${frozenMonths.join(", ")}) — clearFirst is refused. Use POST /registers/${fy}/replace-months instead (it only touches open months).`,
+        });
+        return;
+      }
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      return;
+    }
   }
 
   try {
@@ -651,6 +818,7 @@ router.post("/registers/:fy/orphan-audit-reverse", async (req, res) => {
       : "orphan-audit|2026-07-21T05:55:40.864Z";
 
   if (rejectIfFrozen(req, res, fy)) return;
+  if (rejectIfMonthFrozen(res, month)) return;
 
   try {
     // 1. Flip all rows from this syncRunId back to current
@@ -1704,6 +1872,7 @@ router.post("/registers/:fy/invoice-restore-apply", async (req, res) => {
     return;
   }
   if (rejectIfFrozen(req, res, fy)) return;
+  if (rejectIfMonthFrozen(res, month)) return;
 
   try {
     // 1. Re-read live sheet (same as plan route)
@@ -2088,6 +2257,7 @@ router.post("/registers/:fy/orphan-audit/apply", async (req, res) => {
     return;
   }
   if (rejectIfFrozen(req, res, fy)) return;
+  if (rejectIfMonthFrozen(res, month)) return;
 
   try {
     // Always re-read sheet fresh — never apply a cached audit result

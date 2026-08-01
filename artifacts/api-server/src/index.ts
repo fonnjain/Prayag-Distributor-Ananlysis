@@ -14,6 +14,7 @@ import {
   assertFrozenAnchors,
   REGISTER_SHEET_IDS,
 } from "./lib/customers/registerSync.js";
+import { assertMonthAnchors } from "./lib/registers/monthlyReplace.js";
 import { ensureAndSeedStateTargets } from "./lib/mgmt/stateTargetSeed.js";
 import { loadStateDashboard } from "./lib/mgmt/stateDashboard.js";
 import {
@@ -108,5 +109,13 @@ runMigrations()
   void assertFrozenAnchors().catch((err) =>
     logger.error({ err }, "assertFrozenAnchors: unexpected failure"),
   );
+
+  // Assert frozen-MONTH anchors (7th-of-following-month freeze rule) for every
+  // configured FY. A mismatch means something wrote to a frozen month.
+  for (const fy of Object.keys(REGISTER_SHEET_IDS)) {
+    void assertMonthAnchors(fy).catch((err) =>
+      logger.error({ err, fy }, "assertMonthAnchors: unexpected failure"),
+    );
+  }
     });
   });
