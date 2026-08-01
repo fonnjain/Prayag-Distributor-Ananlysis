@@ -76,4 +76,5 @@
 - [Tank dedup serial collision](tank-dedup-serial-collision.md) — synthetic serials must be assigned AFTER tank resolution; pre-resolution ltr-based keys cause dedupeBySerialNo collision when different ltr amounts floor to same pieces.
 - [Primary sale totals-only path](primary-sale-totals-only.md) — head-less FYs (24-25/25-26) keep period-exact DB totals with empty byHead; pending needs matching period bases, clamp ≥0, else null.
 - [Secondary period achievement basis](secondary-period-achievement-basis.md) — secondaryTotal.ytdAchievement = recorded sales / planRecorded (closed months only); never period sales / full-period plan.
+- [PSCode3 brand mirror chaining](pscode3-brand-mirror.md) — sku loader refreshes pscode3_brand_rollup mirror in same txn; backfill script is repair-only; audit 7.6 flags per-month NET drift.
 - [verify_anchors deploy path](anchors-deploy-path.md) — deployed monorepo cwd is the repo root; cwd-relative config paths 500 in production, use anchorsFilePath().

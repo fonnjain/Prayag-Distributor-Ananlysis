@@ -150,13 +150,33 @@ if (DRY) { console.log("DRY RUN — no DB writes (pass --write to load)"); proce
 if (rows.length < 50_000) throw new Error(`abort: only ${rows.length} rows parsed — refusing to replace FY${FY}`);
 if (Math.abs(prasunNet - 1_834_504) > 5) throw new Error(`abort: Prasun control failed (₹${prasunNet.toFixed(0)}) — refusing to replace FY${FY}`);
 
+// The brand-level mirror (secondary_register_line, source='pscode3_brand_rollup')
+// feeds segment-spread, win-back and effective-discount views. It is refreshed in
+// the SAME transaction as the sku load so the two tables can never disagree.
+const BRAND_SOURCE = "pscode3_brand_rollup";
 await db.transaction(async (tx) => {
   await tx.execute(sql`DELETE FROM secondary_sku_line WHERE fy = ${FY}`);
   for (let i = 0; i < rows.length; i += 1000) {
     await tx.insert(secondarySkuLines).values(rows.slice(i, i + 1000));
   }
+  // Mirror into secondary_register_line (same mapping as pscode3-brand-backfill.ts):
+  // brand = segment_raw, customer = retailer, head_canon = head_raw (register
+  // convention), line_uid namespaced with 'brl-'.
+  await tx.execute(sql`DELETE FROM secondary_register_line WHERE fy = ${FY} AND source = ${BRAND_SOURCE}`);
+  await tx.execute(sql`
+    INSERT INTO secondary_register_line
+      (line_uid, fy, month_label, head_raw, head_canon, customer,
+       brand_raw, brand_canon, qty, source, gross_amount, net_amount, discount_pct)
+    SELECT 'brl-' || line_uid, fy, month_label, head_raw, head_raw, retailer,
+           segment_raw, segment_raw, qty, ${BRAND_SOURCE}, gross_amount, net_amount, discount_pct
+    FROM   secondary_sku_line
+    WHERE  fy = ${FY}
+  `);
 });
 const check = await db.execute(sql`SELECT month_label, count(*)::int AS n, sum(net_amount)::numeric AS net FROM secondary_sku_line WHERE fy = ${FY} GROUP BY 1 ORDER BY 1`);
 console.log("DB after load:");
 for (const r of check.rows as any[]) console.log(`  ${r.month_label}: ${r.n} rows, NET ${cr(parseFloat(r.net))} Cr`);
+const mirror = await db.execute(sql`SELECT month_label, count(*)::int AS n, sum(net_amount)::numeric AS net FROM secondary_register_line WHERE fy = ${FY} AND source = ${BRAND_SOURCE} GROUP BY 1 ORDER BY 1`);
+console.log("DB after load (brand mirror, secondary_register_line):");
+for (const r of mirror.rows as any[]) console.log(`  ${r.month_label}: ${r.n} rows, NET ${cr(parseFloat(r.net))} Cr`);
 process.exit(0);

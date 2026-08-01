@@ -294,6 +294,62 @@ export async function runCrossFootGroup(fy: string): Promise<CheckGroup> {
     }
   }
 
+  // 7.6 PSCode3 sku table vs brand-level mirror (secondary_register_line,
+  // source='pscode3_brand_rollup'). The loader refreshes both in one transaction;
+  // this flags any per-month NET drift if they ever diverge (e.g. partial manual edits).
+  try {
+    const mirrorRes = await pool.query(
+      `SELECT COALESCE(s.month_label, m.month_label) AS month_label,
+              COALESCE(s.net, 0)::numeric AS sku_net,
+              COALESCE(m.net, 0)::numeric AS mirror_net
+       FROM (SELECT month_label, SUM(net_amount::numeric) AS net
+             FROM secondary_sku_line WHERE fy = $1 GROUP BY 1) s
+       FULL OUTER JOIN
+            (SELECT month_label, SUM(net_amount::numeric) AS net
+             FROM secondary_register_line WHERE fy = $1 AND source = 'pscode3_brand_rollup' GROUP BY 1) m
+       ON s.month_label = m.month_label
+       ORDER BY 1`,
+      [fy],
+    );
+    if (mirrorRes.rows.length > 0) {
+      const badMonths: string[] = [];
+      let skuTotal = 0;
+      let mirrorTotal = 0;
+      for (const r of mirrorRes.rows as any[]) {
+        const skuNet = Number(r.sku_net);
+        const mirrorNet = Number(r.mirror_net);
+        skuTotal += skuNet;
+        mirrorTotal += mirrorNet;
+        if (Math.abs(skuNet - mirrorNet) > 1) badMonths.push(String(r.month_label));
+      }
+      checks.push({
+        key: "cf_7_6_sku_vs_brand_mirror",
+        label: `7.6 — PSCode3 sku table = brand-level mirror per month (${fy})`,
+        unit: "money",
+        expected: Math.round(skuTotal),
+        actual: Math.round(mirrorTotal),
+        deltaPct: skuTotal !== 0 ? ((mirrorTotal - skuTotal) / skuTotal) * 100 : null,
+        status: badMonths.length === 0 ? "pass" : "fail",
+        note:
+          badMonths.length === 0
+            ? `All ${mirrorRes.rows.length} month(s) match: sku NET ₹${(skuTotal / 1e7).toFixed(2)} Cr = mirror NET ₹${(mirrorTotal / 1e7).toFixed(2)} Cr.`
+            : `NET mismatch in month(s): ${badMonths.join(", ")} — re-run scripts/pscode3-load.ts --write (refreshes both tables in one transaction) or scripts/pscode3-brand-backfill.ts --write.`,
+      });
+    }
+  } catch (err) {
+    logger.warn({ err, fy }, "audit: sku vs brand mirror cross-check threw");
+    checks.push({
+      key: "cf_7_6_sku_vs_brand_mirror",
+      label: `7.6 — PSCode3 sku table = brand-level mirror per month (${fy})`,
+      unit: "money",
+      expected: null,
+      actual: null,
+      deltaPct: null,
+      status: "warn",
+      note: `Could not compare sku table to brand mirror: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
+
   try {
     const agg = await loadOrderFile(fy);
 

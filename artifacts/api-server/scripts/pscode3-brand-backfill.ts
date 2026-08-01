@@ -1,5 +1,10 @@
 // FY2026-27 brand-level backfill.
 //
+// NOTE: as of Aug 2026 pscode3-load.ts refreshes this mirror automatically in
+// the same transaction as the sku load, so a fresh drop never needs this script.
+// It remains as a standalone repair tool (mapping must stay identical to the
+// mirror step in pscode3-load.ts).
+//
 // The PSCode_3 xlsx drop was loaded at item-code level into secondary_sku_line
 // (source='pscode3_xlsx'). Distributor segment spread (D3), win-back and the
 // effective-discount step of the investment view read the brand-level table
