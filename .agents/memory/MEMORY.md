@@ -68,4 +68,5 @@
 - [Primary period-aware service](primary-period-service.md) — single shared loader for booking+sale; resolved ₹0.42 Cr gap; Q1 anchors ₹77.76/₹72.86/₹4.90 Cr; period-filter flag drives FY-total warning UI.
 - [Frozen registers system](frozen-registers-freeze.md) — closed FYs 23-24/24-25/25-26 anchor-frozen; every mutating register route needs rejectIfFrozen(); HTTP 423 unless unfreeze+reason.
 - [SKU K4 discounts/movement](sku-k4-discounts-movement.md) — register discount_pct is a % (gross×(1−d%)=SubTotal, 100% verified); FY-conditional project bridge; in-process backfill route (shell nohup gets reaped).
+- [Register serial instability](register-serial-instability.md) — sheet serials shift on re-sort; serial-in-identity caused July doubling twice; never key on sheet serial, blast-radius guard masks it.
 - [Tank dedup serial collision](tank-dedup-serial-collision.md) — synthetic serials must be assigned AFTER tank resolution; pre-resolution ltr-based keys cause dedupeBySerialNo collision when different ltr amounts floor to same pieces.
