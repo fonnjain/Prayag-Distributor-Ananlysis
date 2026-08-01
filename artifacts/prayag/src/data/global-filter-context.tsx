@@ -192,6 +192,22 @@ export function GlobalFilterProvider({ children }: { children: ReactNode }) {
     }
   }, [fy, periodMode]);
 
+  // A quarter that has not started yet (open FY) cannot be selected — if the
+  // mode lands there (e.g. FY switched from a closed year with Q4 active),
+  // fall back to YTD.
+  useEffect(() => {
+    if (isFyClosed(fy)) return;
+    if (periodMode === "q1" || periodMode === "q2" || periodMode === "q3" || periodMode === "q4") {
+      const qStart = QUARTER_RANGES[periodMode][0] as FiscalMonthIdx;
+      if (isFutureFiscalMonth(qStart, fy)) setPeriodMode("ytd");
+    }
+    // Same for a future single month (pills are disabled, but the state can
+    // carry over from a closed FY where every month is selectable).
+    if (periodMode === "month" && isFutureFiscalMonth(monthIdx, fy)) {
+      setPeriodMode("ytd");
+    }
+  }, [fy, periodMode, monthIdx]);
+
   const lastCompleteIdx = useMemo(() => lastCompleteFiscalMonthIdx(fy), [fy]);
   const currentIdx = useMemo(() => currentFiscalMonthIdx(fy), [fy]);
   const isFyClosedValue = useMemo(() => isFyClosed(fy), [fy]);

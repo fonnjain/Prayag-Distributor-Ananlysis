@@ -335,16 +335,21 @@ export default function GlobalFilterBar({ hideSyncRow, className }: GlobalFilter
           </Pill>
         )}
 
-        {/* Quarters */}
-        {quarters.map(({ id, label }) => (
-          <Pill
-            key={id}
-            active={periodMode === id}
-            onClick={() => setPeriodMode(id as PeriodMode)}
-          >
-            {label}
-          </Pill>
-        ))}
+        {/* Quarters — a quarter that has not started yet (open FY) is not selectable */}
+        {quarters.map(({ id, label }) => {
+          const qStart = QUARTER_RANGES[id][0] as FiscalMonthIdx;
+          const isFutureQuarter = !isFyClosed(fy) && isFutureFiscalMonth(qStart, fy);
+          return (
+            <Pill
+              key={id}
+              active={periodMode === id}
+              onClick={() => setPeriodMode(id as PeriodMode)}
+              dimmed={isFutureQuarter}
+            >
+              {label}
+            </Pill>
+          );
+        })}
 
         {/* Full Year */}
         <Pill active={periodMode === "full"} onClick={() => setPeriodMode("full")}>
