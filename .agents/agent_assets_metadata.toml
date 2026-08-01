@@ -95,3 +95,10 @@ uri = "file://docs/exports/Architecture-and-Database.xlsx"
 type = "table"
 title = "Architecture & Database"
 description = "Full system architecture, API route inventory, database tables/views with columns, data sources and background jobs — one sheet each."
+
+[[outputs]]
+id = "Jd9KneYFkLdyMCsk48SVt"
+uri = "file://docs/QA_REPORT_2026-08-01.md"
+type = "text"
+title = "Dashboard QA Report — 1 Aug 2026"
+description = "Full QA of dashboard numbers vs database across all FYs and date filters: 70+ exact matches, tile arithmetic and captions verified, audit engine 28/30 pass with 0 genuine failures."
