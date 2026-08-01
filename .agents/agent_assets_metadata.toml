@@ -60,3 +60,38 @@ id = "SekSxPftJDWs1l5OxdB5T"
 uri = "file://prayag_overview_reference.docx"
 type = "word_document"
 title = "Prayag Overview Reference — FY24-25 months & card sources"
+
+[[outputs]]
+id = "P-Kp3RybvlYY94lOUqEMB"
+uri = "file://docs/exports/Sales-Deep-Dive-Glossary-and-Logic.pdf"
+type = "pdf"
+title = "Sales Deep Dive — Glossary & Logic"
+description = "Every metric on the Sales Deep Dive page: definitions, exact formulas, data sources, thresholds and closed-FY behavior."
+
+[[outputs]]
+id = "0EHqCHKUlnAwb2XVpTAv2"
+uri = "file://docs/exports/Distributor-Deep-Dive-Glossary-and-Logic.pdf"
+type = "pdf"
+title = "Distributor Deep Dive — Glossary & Logic"
+description = "Retailer lists, flows, SKU spread, investment/ROI tiering and capacity checks: definitions, formulas and data sources."
+
+[[outputs]]
+id = "tb_tNNMbopDCLz285lhHo"
+uri = "file://docs/exports/SKU-Deep-Dive-Glossary-and-Logic.pdf"
+type = "pdf"
+title = "SKU Deep Dive — Glossary & Logic"
+description = "Catalogue, Review/Push lists, discounts, seasonality, movement trackers: definitions, formulas, cohort and season-banding rules."
+
+[[outputs]]
+id = "gvsjod9vD0olM63HkS6ou"
+uri = "file://docs/exports/State-Head-and-Sales-People-Glossary-and-Logic.pdf"
+type = "pdf"
+title = "State Head & Sales People — Glossary & Logic"
+description = "Plan/OB/sales measures, achievement definitions, coverage, arrears handling, low-performer rules and color bands."
+
+[[outputs]]
+id = "mRDaNbik5HCdMhKsIvgxw"
+uri = "file://docs/exports/Architecture-and-Database.xlsx"
+type = "table"
+title = "Architecture & Database"
+description = "Full system architecture, API route inventory, database tables/views with columns, data sources and background jobs — one sheet each."
