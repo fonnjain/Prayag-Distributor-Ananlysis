@@ -112,4 +112,4 @@ User-reported gap: headings and tile descriptions did not state the selected per
 
 ## 10. Verdict
 
-Data layer: **all anchors exact** except July FY2026-27, which will be finalised by data owners in the sheet before the 7 Aug freeze (checklist in §7). Application periods (month / quarter / YTD / full-year) filter correctly on primary sale and OB; secondary Sales Received is the one figure that ignores the period filter (partly by design — needs an explicit label or scoping). UI now states the selected period in headings and tiles on both performance pages.
+Data layer: **all anchors exact** except July FY2026-27, which will be finalised by data owners in the sheet before the 7 Aug freeze (checklist in §7). Application periods (month / quarter / YTD / full-year) filter correctly on primary sale and OB; secondary Sales Received now follows the selected period (sum of the monthly Sales columns for the range), and the tiles carry a "recorded months only" label with Achievement computed against the recorded months' plan. UI now states the selected period in headings and tiles on both performance pages.

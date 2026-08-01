@@ -46,6 +46,9 @@ type SecondaryTotal = {
   plan: number;
   orderBooked: number;
   salesReceived: number;
+  // Plan for fully-recorded (closed) months only — the achievement denominator.
+  // When < plan the period contains months with no recorded sales yet.
+  planRecorded?: number;
   ytdAchievement: number | null;
   totalDealers: number;
 };
@@ -302,11 +305,29 @@ export default function SecondaryPerformanceDashboard() {
     const st = data?.meta.secondaryTotal;
     const ob = st && st.orderBooked > 0 ? st.orderBooked : groups.reduce((s, g) => s + g.orderBooked, 0);
     const sales = st && st.salesReceived > 0 ? st.salesReceived : groups.reduce((s, g) => s + g.sales, 0);
+    // Achievement: prefer the server figure — numerator (recorded sales) and
+    // denominator (recorded-month plan) use the same closed-month set.
+    // Dividing period sales by the full period plan would understate
+    // achievement whenever the period includes months with no recorded sales
+    // yet (e.g. a full-FY selection early in the year).
+    const ach = st
+      ? st.ytdAchievement
+      : plan > 0 && sales > 0 ? sales / plan : null;
+    // True when the selected period contains months whose sales are not yet
+    // recorded — Sales Received and Achievement then cover closed months only.
+    const closedMonthsOnly =
+      st?.planRecorded != null && st.planRecorded > 0 && st.planRecorded < st.plan - 1;
+    // Explicit no-actuals state: the period has a plan but NO fully-recorded
+    // months (e.g. a future quarter).  Distinct from "data unavailable" — the
+    // tiles say "no actuals recorded yet" instead of a bare dash.
+    const noActualsYet = st != null && st.planRecorded === 0 && plan > 0;
     return {
       plan,
       orderBooked: ob,
       sales,
-      ach: plan > 0 && sales > 0 ? sales / plan : null,
+      ach,
+      closedMonthsOnly,
+      noActualsYet,
     };
   }, [data?.meta.secondaryTotal, groups]);
 
@@ -365,17 +386,27 @@ export default function SecondaryPerformanceDashboard() {
           {[
             { label: "Plan (Target)", value: fmtCr(totals.plan) },
             { label: "Order Booked", value: fmtCr(totals.orderBooked) },
-            { label: "Sales Received", value: fmtCr(totals.sales) },
+            {
+              label: "Sales Received",
+              value: totals.noActualsYet ? "—" : fmtCr(totals.sales),
+              note: totals.noActualsYet
+                ? "no actuals recorded yet"
+                : totals.closedMonthsOnly ? "recorded months only" : undefined,
+            },
             {
               label: "Achievement",
               value: totals.ach != null ? fmtPct(totals.ach) : "—",
               valueClass: achColor(totals.ach),
+              note: totals.noActualsYet
+                ? "no actuals recorded yet"
+                : totals.closedMonthsOnly ? "vs. recorded months' plan" : undefined,
             },
-          ].map((tile) => (
+          ].map((tile: { label: string; value: string; valueClass?: string; note?: string }) => (
             <div key={tile.label} className="rounded-lg border border-border bg-card p-3">
               <p className="text-xs text-muted-foreground">{tile.label}</p>
               <p className="text-[10px] text-muted-foreground/80">
                 FY {fy} · {effectivePeriodLabel}
+                {tile.note ? <span className="text-amber-600 dark:text-amber-400"> · {tile.note}</span> : null}
               </p>
               <p className={cn("text-xl font-semibold font-mono mt-1", tile.valueClass)}>
                 {tile.value}

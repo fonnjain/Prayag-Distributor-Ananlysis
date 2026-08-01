@@ -73,3 +73,4 @@
 - [Register serial instability](register-serial-instability.md) — sheet serials shift on re-sort; serial-in-identity caused July doubling twice; never key on sheet serial, blast-radius guard masks it.
 - [Register monthly full-replace](register-monthly-replace.md) — open-FY sync is nightly per-month delete+insert (no identity key); DB short-read baseline; months freeze on the 7th (clock-derived) with anchors.
 - [Tank dedup serial collision](tank-dedup-serial-collision.md) — synthetic serials must be assigned AFTER tank resolution; pre-resolution ltr-based keys cause dedupeBySerialNo collision when different ltr amounts floor to same pieces.
+- [Secondary period achievement basis](secondary-period-achievement-basis.md) — secondaryTotal.ytdAchievement = recorded sales / planRecorded (closed months only); never period sales / full-period plan.

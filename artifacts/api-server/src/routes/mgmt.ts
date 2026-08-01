@@ -254,12 +254,16 @@ function tgtPeriod(
 //   plan null        → no planAmount data in the period at all (member has no target)
 //   ob/sales 0       → plan exists but the period has no recorded actuals yet (future Q)
 //   achievement null → plan is null OR no fully-recorded closed actuals yet
-function secPeriod(
+export function secPeriod(
   sec: SecMember,
   mFrom: number, // 1-based fiscal month (1 = Apr)
   mTo: number,   // 1-based fiscal month (12 = Mar)
 ): {
   plan: number | null; ob: number | null; sales: number | null;
+  // planRecorded: plan summed over fully-recorded closed months only — the
+  // achievement denominator.  Differs from `plan` when the period contains
+  // future or sales-lag months (e.g. a full-FY selection in August).
+  planRecorded: number;
   achievement: number | null;
   // recordedMonths: fully-recorded closed months in the period.
   // lagMonths:      sales-lag months (closed, OB entered, sales not yet received).
@@ -297,13 +301,14 @@ function secPeriod(
     }
   }
   if (!hasPlan && !hasClosedMonth && !hasObData) {
-    return { plan: null, ob: null, sales: null, achievement: null, recordedMonths: 0, lagMonths: 0 };
+    return { plan: null, ob: null, sales: null, planRecorded: 0, achievement: null, recordedMonths: 0, lagMonths: 0 };
   }
   return {
     plan: hasPlan ? plan : null,
     // 0 when there is a plan but the period has no OB at all yet (future Q).
     ob:    hasObData      ? ob    : 0,
     sales: hasClosedMonth ? (sales > 0 ? sales : 0) : 0,
+    planRecorded: planForAchievement,
     // Denominator = sum of plan for fully-recorded months only.
     achievement: hasClosedMonth && planForAchievement > 0 ? sales / planForAchievement : null,
     recordedMonths,
@@ -596,20 +601,28 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
     // PS1: period-specific company-level secondary totals for the meta block.
     // Sums secPeriod() across all members so the headline KPI tiles reflect
     // exactly the same [monthFrom, monthTo] window as the per-member rows.
-    let _ptPlan = 0, _ptOB = 0, _ptSales = 0, _ptHasData = false;
+    let _ptPlan = 0, _ptOB = 0, _ptSales = 0, _ptPlanRec = 0, _ptHasData = false;
     if (secDash) {
       for (const sm of secDash.members) {
         const smp = secPeriod(sm, monthFrom, monthTo);
         if (smp.plan != null) { _ptPlan += smp.plan; _ptHasData = true; }
         _ptOB    += smp.ob    ?? 0;
         _ptSales += smp.sales ?? 0;
+        _ptPlanRec += smp.planRecorded;
       }
     }
     const periodSecTotal = secDash ? {
       plan: _ptHasData ? _ptPlan : secDash.totalPlan,
       orderBooked: _ptOB,
       salesReceived: _ptSales,
-      ytdAchievement: _ptHasData && _ptPlan > 0 ? _ptSales / _ptPlan : null,
+      // planRecorded: achievement denominator — plan for fully-recorded closed
+      // months only.  When < plan, the period contains months with no recorded
+      // sales yet; the frontend labels the achievement as closed-months-only.
+      planRecorded: _ptPlanRec,
+      // Achievement numerator (recorded sales) and denominator (recorded-month
+      // plan) use the SAME month set — never period sales / full-period plan,
+      // which would understate achievement whenever future months carry a plan.
+      ytdAchievement: _ptHasData && _ptPlanRec > 0 ? _ptSales / _ptPlanRec : null,
       totalDealers: secDash.totalDealers,
       arrearsMonths: secDash.arrearsMonths ?? [],
       sheetTotals: secDash.sheetTotals ?? null,
