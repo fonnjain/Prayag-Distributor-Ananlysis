@@ -114,6 +114,37 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    id: "006_drop_mgmt_data_snapshot",
+    sql: `
+      -- GET /api/mgmt/data now uses the generic route_payload_snapshot layer
+      -- (key mgmt-data|<fy>|<from>|<to>); the bespoke table is obsolete.
+      -- Copy existing snapshots into the shared table first so the first
+      -- request after rollout still gets the instant cold-start path instead
+      -- of blocking on a ~20s live Sheets build. Existing shared keys win
+      -- (they can only be fresher — written by the new code).
+      -- Guarded: on a fresh DB the old table never existed (its Drizzle schema
+      -- is gone), so the copy is skipped entirely.
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE c.relname = 'mgmt_data_snapshot'
+            AND c.relkind = 'r'
+            AND n.nspname = 'public'
+        ) THEN
+          INSERT INTO route_payload_snapshot (key, payload, saved_at)
+            SELECT 'mgmt-data|' || fy || '|' || month_from || '|' || month_to,
+                   payload, saved_at
+            FROM mgmt_data_snapshot
+            ON CONFLICT (key) DO NOTHING;
+        END IF;
+      END;
+      $$;
+      DROP TABLE IF EXISTS mgmt_data_snapshot;
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

@@ -77,5 +77,5 @@
 - [Primary sale totals-only path](primary-sale-totals-only.md) — head-less FYs (24-25/25-26) keep period-exact DB totals with empty byHead; pending needs matching period bases, clamp ≥0, else null.
 - [Secondary period achievement basis](secondary-period-achievement-basis.md) — secondaryTotal.ytdAchievement = recorded sales / planRecorded (closed months only); never period sales / full-period plan.
 - [PSCode3 brand mirror chaining](pscode3-brand-mirror.md) — sku loader refreshes pscode3_brand_rollup mirror in same txn; backfill script is repair-only; audit 7.6 flags per-month NET drift.
-- [mgmt/data cold-start snapshot](mgmt-data-snapshot.md) — /api/mgmt/data serves DB-persisted payload instantly on cold start (refreshing flag) then rebuilds in background; invalidation must delete snapshots too.
+- [mgmt/data cold-start snapshot](mgmt-data-snapshot.md) — /api/mgmt/data uses shared serveWithSnapshot layer (key mgmt-data|fy|from|to); invalidation deletes route_payload_snapshot rows by prefix.
 - [verify_anchors deploy path](anchors-deploy-path.md) — deployed monorepo cwd is the repo root; cwd-relative config paths 500 in production, use anchorsFilePath().

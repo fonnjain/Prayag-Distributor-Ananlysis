@@ -17,7 +17,7 @@
 // artifacts/prayag/src/components/dashboard/snapshotRefresh.tsx poll until
 // meta.refreshing disappears and swap the fresh figures in silently.
 import { db, routePayloadSnapshots } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { logger } from "./logger.js";
 
 type AnyPayload = Record<string, unknown>;
@@ -73,6 +73,25 @@ function buildAndCache<T extends AnyPayload>(
   })().finally(() => _inFlight.delete(key));
   _inFlight.set(key, p);
   return p;
+}
+
+/**
+ * Invalidate every snapshot whose key starts with `prefix`: drops the warm
+ * in-process cache entries synchronously and deletes the persisted
+ * route_payload_snapshot rows fire-and-forget (the next live build re-creates
+ * them). Use a prefix ending in the key separator (e.g. "mgmt-data|2026-27|")
+ * to avoid matching unrelated keys.
+ */
+export function invalidateSnapshots(prefix: string): void {
+  for (const key of _cache.keys()) {
+    if (key.startsWith(prefix)) _cache.delete(key);
+  }
+  void db
+    .delete(routePayloadSnapshots)
+    .where(like(routePayloadSnapshots.key, `${prefix.replace(/[%_\\]/g, "\\$&")}%`))
+    .catch((err: unknown) =>
+      logger.warn({ err, prefix }, "payload snapshot: invalidation failed"),
+    );
 }
 
 /**

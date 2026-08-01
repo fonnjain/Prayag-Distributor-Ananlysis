@@ -47,10 +47,9 @@ import {
   db,
   distributorTierOverrideTable,
   insertDistributorTierOverrideSchema,
-  mgmtDataSnapshots,
 } from "@workspace/db";
-import { eq, and, desc } from "drizzle-orm";
-import { logger } from "../lib/logger.js";
+import { eq, and } from "drizzle-orm";
+import { serveWithSnapshot, invalidateSnapshots } from "../lib/payloadSnapshot.js";
 
 const router: IRouter = Router();
 
@@ -59,88 +58,26 @@ const router: IRouter = Router();
 const FY_PATTERN = /^\d{4}-\d{2}$/;
 const DEFAULT_FY = "2025-26";
 
-// ── Response cache for GET /mgmt/data ────────────────────────────────────────
-// Assembling rows requires large Sheets reads (up to 380 k rows per FY).
-// This cache serves repeat loads instantly; it is invalidated when a new
-// dashboard xlsx is uploaded so target data is always fresh.
+// ── Cold-start fast path for GET /mgmt/data ──────────────────────────────────
+// Assembling rows requires large Sheets reads (up to 380 k rows per FY), so
+// the route is served through the shared snapshot layer (lib/payloadSnapshot):
+// warm in-process cache → instant; cold cache with a persisted snapshot →
+// instant with meta.refreshing while a background rebuild runs; first ever
+// request → blocking live build. Invalidated when a new dashboard xlsx is
+// uploaded so target data is always fresh.
 type MgmtDataPayload = { rows: unknown[]; meta: Record<string, unknown> };
-const _mgmtDataCache = new Map<string, { payload: MgmtDataPayload; expiresAt: number }>();
 const MGMT_DATA_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const MGMT_DATA_KEY_PREFIX = "mgmt-data|";
 
-function mgmtDataCacheKey(fy: string, from: number, to: number): string {
-  return `${fy}|${from}|${to}`;
+function mgmtDataSnapshotKey(fy: string, from: number, to: number): string {
+  return `${MGMT_DATA_KEY_PREFIX}${fy}|${from}|${to}`;
 }
 
 export function invalidateMgmtDataCache(fy?: string): void {
-  if (fy) {
-    for (const key of _mgmtDataCache.keys()) {
-      if (key.startsWith(`${fy}|`)) _mgmtDataCache.delete(key);
-    }
-  } else {
-    _mgmtDataCache.clear();
-  }
-  // Also drop the persisted cold-start snapshots — they hold the same payload
-  // (including target columns), so leaving them would re-serve stale targets
-  // right after a dashboard xlsx upload. Fire-and-forget: the next live build
-  // re-creates them.
-  const del = fy
-    ? db.delete(mgmtDataSnapshots).where(eq(mgmtDataSnapshots.fy, fy))
-    : db.delete(mgmtDataSnapshots);
-  void Promise.resolve(del).catch((err) =>
-    logger.warn({ err, fy }, "mgmt data: snapshot invalidation failed"),
-  );
-}
-
-// ── DB snapshot persistence (cold-start fast path) ───────────────────────────
-// Production is autoscale: instances cold-start often, and a full live build
-// blocks ~20s on the STATE HEAD DASHBOARD Sheets read. The last successful
-// payload per (fy, monthFrom, monthTo) is upserted here after every live
-// build; a cold in-process cache serves it instantly (with freshness metadata)
-// while the real build runs in the background.
-
-async function saveMgmtDataSnapshot(
-  fy: string,
-  monthFrom: number,
-  monthTo: number,
-  payload: MgmtDataPayload,
-): Promise<void> {
-  try {
-    await db
-      .insert(mgmtDataSnapshots)
-      .values({ fy, monthFrom, monthTo, payload })
-      .onConflictDoUpdate({
-        target: [mgmtDataSnapshots.fy, mgmtDataSnapshots.monthFrom, mgmtDataSnapshots.monthTo],
-        set: { payload, savedAt: new Date() },
-      });
-  } catch (err) {
-    logger.warn({ err, fy }, "mgmt data: snapshot save failed");
-  }
-}
-
-async function loadMgmtDataSnapshot(
-  fy: string,
-  monthFrom: number,
-  monthTo: number,
-): Promise<{ payload: MgmtDataPayload; savedAt: Date } | null> {
-  try {
-    const rows = await db
-      .select()
-      .from(mgmtDataSnapshots)
-      .where(
-        and(
-          eq(mgmtDataSnapshots.fy, fy),
-          eq(mgmtDataSnapshots.monthFrom, monthFrom),
-          eq(mgmtDataSnapshots.monthTo, monthTo),
-        ),
-      )
-      .orderBy(desc(mgmtDataSnapshots.savedAt))
-      .limit(1);
-    if (rows.length === 0) return null;
-    return { payload: rows[0].payload as MgmtDataPayload, savedAt: rows[0].savedAt };
-  } catch (err) {
-    logger.warn({ err, fy }, "mgmt data: snapshot load failed, falling back to live build");
-    return null;
-  }
+  // Drops warm cache entries and the persisted route_payload_snapshot rows —
+  // both hold the same payload (including target columns), so leaving either
+  // would re-serve stale targets right after a dashboard xlsx upload.
+  invalidateSnapshots(fy ? `${MGMT_DATA_KEY_PREFIX}${fy}|` : MGMT_DATA_KEY_PREFIX);
 }
 
 // Minimal logger surface shared by req.log (pino-http) and the app logger.
@@ -149,39 +86,6 @@ type MgmtLog = {
   warn: (obj: unknown, msg?: string) => void;
   debug: (obj: unknown, msg?: string) => void;
 };
-
-// In-flight dedupe for live builds: a foreground build and a background
-// refresh (or two concurrent cold requests) share one physical build.
-const _mgmtBuildInFlight = new Map<string, Promise<MgmtDataPayload>>();
-
-// Runs the full live build (Sheets reads), then writes the in-process cache
-// and persists the DB snapshot. Never called with a simulated clock — that
-// path bypasses caches entirely via buildMgmtDataPayload directly.
-function buildAndCacheMgmtData(
-  fy: string,
-  monthFrom: number,
-  monthTo: number,
-  log: MgmtLog,
-): Promise<MgmtDataPayload> {
-  const cacheKey = mgmtDataCacheKey(fy, monthFrom, monthTo);
-  const pending = _mgmtBuildInFlight.get(cacheKey);
-  if (pending) return pending;
-  const p = (async () => {
-    const payload = await buildMgmtDataPayload(fy, monthFrom, monthTo, undefined, log);
-    _mgmtDataCache.set(cacheKey, { payload, expiresAt: Date.now() + MGMT_DATA_TTL_MS });
-    void saveMgmtDataSnapshot(fy, monthFrom, monthTo, payload);
-    return payload;
-  })().finally(() => _mgmtBuildInFlight.delete(cacheKey));
-  _mgmtBuildInFlight.set(cacheKey, p);
-  return p;
-}
-
-// Fire-and-forget background refresh after a snapshot has been served.
-function refreshMgmtDataInBackground(fy: string, monthFrom: number, monthTo: number): void {
-  buildAndCacheMgmtData(fy, monthFrom, monthTo, logger).catch((err) =>
-    logger.warn({ err, fy, monthFrom, monthTo }, "mgmt data: background refresh failed"),
-  );
-}
 
 // Checks whether any targets have been saved in the Target Master sheet for
 // the default FY. The sheet is read-only like all other Sheets sources.
@@ -466,16 +370,6 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
     return Number.isFinite(t) ? t : undefined;
   })();
 
-  // Return the cached payload immediately if it is still fresh.
-  // Bypass the cache when a simulated date is in play.
-  const cacheKey = mgmtDataCacheKey(fy, monthFrom, monthTo);
-  const cachedEntry = simulatedNowMs === undefined ? _mgmtDataCache.get(cacheKey) : undefined;
-  if (cachedEntry && Date.now() < cachedEntry.expiresAt) {
-    req.log.debug({ fy, cacheKey }, "mgmt data: cache hit");
-    res.json(cachedEntry.payload);
-    return;
-  }
-
   try {
     if (simulatedNowMs !== undefined) {
       // Simulated clock: bypass every cache and snapshot; never persist.
@@ -484,31 +378,15 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    // Cold-start fast path: serve the last persisted payload immediately with
-    // freshness metadata, and refresh from Google Sheets in the background.
-    const snap = await loadMgmtDataSnapshot(fy, monthFrom, monthTo);
-    if (snap) {
-      refreshMgmtDataInBackground(fy, monthFrom, monthTo);
-      req.log.info(
-        { fy, cacheKey, snapshotSavedAt: snap.savedAt.toISOString() },
-        "mgmt data: serving DB snapshot, refreshing in background",
-      );
-      res.json({
-        rows: snap.payload.rows,
-        meta: {
-          ...snap.payload.meta,
-          // Unix ms of when this payload was last built from live sources.
-          snapshotSavedAt: snap.savedAt.getTime(),
-          // true = a live rebuild is running; a reload within the TTL window
-          // returns fresh figures from the in-process cache.
-          refreshing: true,
-        },
-      });
-      return;
-    }
-
-    // No snapshot yet (first ever load for this fy/period): build live.
-    const payload = await buildAndCacheMgmtData(fy, monthFrom, monthTo, req.log);
+    // Shared snapshot layer: warm cache → instant; persisted snapshot →
+    // instant with meta.snapshotSavedAt + meta.refreshing while a background
+    // rebuild runs; first ever request → blocking live build.
+    const payload = await serveWithSnapshot<MgmtDataPayload>({
+      key: mgmtDataSnapshotKey(fy, monthFrom, monthTo),
+      ttlMs: MGMT_DATA_TTL_MS,
+      build: () => buildMgmtDataPayload(fy, monthFrom, monthTo, undefined, req.log),
+      log: req.log,
+    });
     res.json(payload);
   } catch (err) {
     if (respondIfQuotaError(err, res)) return;
