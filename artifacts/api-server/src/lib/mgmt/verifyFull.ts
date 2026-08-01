@@ -9,7 +9,7 @@
 //   Set 1 — Secondary order booking (delegates to lib/mgmt/verify.ts, contains Group D)
 //   Set 2 — Primary sale register (queries sale_line DB)
 //   Set 6 — Source health (probes each configured spreadsheet)
-import verifyAnchorsJson from "../../../config/verify_anchors.json";
+import { readVerifyAnchors } from "../config/verifyAnchors.js";
 import { db, saleLines } from "@workspace/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { runVerify, hasVerifyAnchors } from "./verify.js";
@@ -109,9 +109,12 @@ type Anchors = {
   source_list: SourceEntry[];
 };
 
-// Statically imported — cwd-relative reads break in production.
-const anchors = verifyAnchorsJson as unknown as Anchors;
-const tol = anchors.tolerances;
+// Read fresh from disk on each invocation (not bundled, not cached).
+// lock-month-anchor writes a new verify_anchors.json; the next audit run
+// picks it up without a server restart.
+function getAnchors(): Anchors {
+  return readVerifyAnchors<Anchors>();
+}
 
 // ── Check factories ────────────────────────────────────────────────────────────
 
@@ -123,6 +126,7 @@ function dp(actual: number, expected: number): number | null {
 function moneyCheck(
   key: string, label: string, expected: number, actual: number, note?: string,
 ): HealthCheck {
+  const tol = getAnchors().tolerances;
   const deltaPct = dp(actual, expected);
   const abs = deltaPct == null ? 999 : Math.abs(deltaPct);
   const status: CheckStatus = abs <= tol.moneyPassPct ? "pass" : abs <= tol.moneyPassPct * 2 ? "warn" : "fail";
@@ -132,6 +136,7 @@ function moneyCheck(
 function countCheck(
   key: string, label: string, expected: number, actual: number, note?: string,
 ): HealthCheck {
+  const tol = getAnchors().tolerances;
   const deltaPct = dp(actual, expected);
   const abs = deltaPct == null ? 999 : Math.abs(deltaPct);
   const status: CheckStatus = abs <= tol.countPassPct ? "pass" : abs <= tol.countPassPct * 2 ? "warn" : "fail";
@@ -187,6 +192,7 @@ function tgtPeriodSec(target: TargetRow, mFrom: number, mTo: number): number | n
 // ── Group A + B: Targets and Achievement ──────────────────────────────────────
 
 async function runTargetsAndAchievementSet(fy: string): Promise<CheckGroup> {
+  const anchors = getAnchors();
   // Target Master is retired — secondary targets and CTC now come live from the
   // STATE HEAD DASHBOARD Google Sheet. All Group A and B checks are disabled.
   if (anchors.target_anchors?.retired) {
@@ -472,6 +478,7 @@ async function runTargetsAndAchievementSet(fy: string): Promise<CheckGroup> {
 // Always covers both FYs regardless of the fy query param.
 
 async function runSaleOrderBookingSet(): Promise<CheckGroup> {
+  const anchors = getAnchors();
   const checks: HealthCheck[] = [];
   const primary2526 = anchors.primary_anchors["2025-26"] as PrimaryFyAnchor | undefined;
   const primary2627 = anchors.primary_anchors["2026-27"] as PrimaryFyAnchor | undefined;
@@ -617,6 +624,7 @@ async function runSaleOrderBookingSet(): Promise<CheckGroup> {
 // ── Group E: Name matching ─────────────────────────────────────────────────────
 
 async function runNameMatchSet(fy: string): Promise<CheckGroup> {
+  const anchors = getAnchors();
   // Target Master is retired — name-matching checks no longer applicable.
   if (anchors.target_anchors?.retired) {
     return {
@@ -811,6 +819,7 @@ async function runSecondarySet(fy: string): Promise<CheckGroup> {
 type PrimaryAnchors = Record<string, PrimaryFyAnchor | unknown>;
 
 async function runPrimarySet(fy: string): Promise<CheckGroup> {
+  const anchors = getAnchors();
   const fyAnchor = (anchors.primary_anchors as PrimaryAnchors)[fy] as PrimaryFyAnchor | undefined;
 
   try {
@@ -951,6 +960,7 @@ async function probeSheet(spreadsheetId: string): Promise<SourceProbeResult> {
 }
 
 async function runSourceHealthSet(): Promise<CheckGroup> {
+  const anchors = getAnchors();
   const checks: HealthCheck[] = await Promise.all(
     anchors.source_list.map(async (src): Promise<HealthCheck> => {
       const key = `source_${src.key}`;

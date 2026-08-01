@@ -171,9 +171,9 @@ router.get("/org/state-heads/alias-check", async (req, res) => {
       }
     }
 
-    res.json({ matches });
+    return res.json({ matches });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    return res.status(500).json({ error: String(err) });
   }
 });
 
@@ -241,9 +241,9 @@ router.post("/org/state-heads", async (req, res) => {
 
     await appendAudit(id, "created", { displayName: displayName.trim(), status }, changedBy);
 
-    res.status(201).json({ head });
+    return res.status(201).json({ head });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    return res.status(500).json({ error: String(err) });
   }
 });
 
@@ -329,9 +329,9 @@ router.patch("/org/state-heads/:id", async (req, res) => {
         .where(eq(orgHeadFlags.id, resolveFlag));
     }
 
-    res.json({ head, newAlias });
+    return res.json({ head, newAlias });
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    return res.status(500).json({ error: String(err) });
   }
 });
 

@@ -24,6 +24,7 @@ import {
   ingestOrderBookingFy,
 } from "./lib/mgmt/primarySheets.js";
 import { isFyOpen } from "./lib/customers/registerSync.js";
+import { restoreAnchorsFromStorage } from "./lib/config/verifyAnchors.js";
 
 const rawPort = process.env["PORT"];
 
@@ -39,12 +40,21 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-// Apply any pending DB schema migrations before accepting requests.
-// If a migration fails the process exits so the broken state is surfaced immediately.
+// Apply DB schema migrations, restore locked anchors from Object Storage, then
+// start accepting requests.  Both steps are sequential and must complete before
+// app.listen() — the server must not accept requests until:
+//   1. The schema is current, and
+//   2. Any locked audit anchors in GCS have been restored to disk.
+//
+// A single terminal .catch() makes both steps startup-fatal: a transient GCS
+// outage during restore would otherwise silently serve the committed pre-lock
+// config, potentially reverting a locked audit baseline.
 runMigrations()
-  .catch((err) => {
-    logger.error({ err }, "DB migration failed — refusing to start");
-    process.exit(1);
+  .then(async () => {
+    await restoreAnchorsFromStorage({
+      info: (msg) => logger.info(msg),
+      warn: (msg) => logger.warn(msg),
+    });
   })
   .then(() => {
     app.listen(port, (err) => {
@@ -149,4 +159,11 @@ runMigrations()
     );
   }
     });
+  })
+  .catch((err) => {
+    // Terminal handler: migrations failure or GCS anchor restore failure.
+    // Both are startup-fatal — a restore failure means the server would serve
+    // the committed pre-lock config instead of the locked audit baseline.
+    logger.error({ err }, "Startup failed — refusing to start");
+    process.exit(1);
   });

@@ -1,4 +1,8 @@
 import { Router } from "express";
+import path from "node:path";
+import { readFile, rename, writeFile } from "node:fs/promises";
+import { isAdminToken, isMonthInFy } from "../lib/adminAuth.js";
+import { pushAnchorsToStorage, atomicWriteWithRollback } from "../lib/config/verifyAnchors.js";
 import { and, eq } from "drizzle-orm";
 import { pool, db, saleLines, type InsertSaleLine } from "@workspace/db";
 import {
@@ -43,6 +47,12 @@ import {
 } from "../lib/registers/tankResolution.js";
 
 const router = Router();
+
+// Module-level mutex for lock-month-anchor's read–check–write critical section.
+// Serializes concurrent requests so two callers locking different months cannot
+// both read the same stale file and silently overwrite each other's change.
+// Initialized to a pre-resolved promise so the first caller acquires immediately.
+let _anchorFileMutex: Promise<void> = Promise.resolve();
 
 /**
  * Shared freeze guard for mutating register routes.
@@ -4683,6 +4693,185 @@ router.get("/registers/:fy/tank-sync-dryrun", async (req, res) => {
   } catch (err: unknown) {
     req.log.error({ err }, "tank-sync-dryrun failed");
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
+ * POST /registers/:fy/lock-month-anchor?month=Jul-26
+ *
+ * Admin endpoint: reads the current DB total for a given month and writes it
+ * into verify_anchors.json by appending the month to
+ * primary_anchors[fy].closedMonths and updating closedMonthsTotal.
+ *
+ * Run AFTER data owners have confirmed the sheet is final and after any
+ * force-resync, but BEFORE the month-freeze guard activates (i.e. before the
+ * 7th of the following month).
+ *
+ * Auth: X-Admin-Secret: <SESSION_SECRET> (env var, not a DB API key).
+ * This is intentionally separate from the DB-backed API-key system — any user
+ * can create a DB API key via POST /api/keys, so possession of a DB key is not
+ * sufficient to authorise durable config mutations. Only the holder of the
+ * SESSION_SECRET (server operator) can lock an anchor.
+ *
+ * No server restart is required — all audit consumers call readVerifyAnchors()
+ * fresh on every invocation, so the new anchor is visible to the next audit run.
+ *
+ * Safety checks:
+ *   - Refuses if month does not belong to the requested FY
+ *   - Refuses if the month is already in closedMonths (idempotent re-run safe)
+ *   - Refuses if DB returns 0 rows for the month (short-read guard)
+ */
+router.post("/registers/:fy/lock-month-anchor", async (req, res) => {
+  const { fy } = req.params;
+  const month = typeof req.query.month === "string" ? req.query.month.trim() : "";
+
+  // Admin auth: X-Admin-Secret header must match SESSION_SECRET.
+  // We deliberately avoid the Authorization: Bearer header here because the
+  // resolveApiKey middleware intercepts all Bearer tokens and rejects any that
+  // are not in the DB — the SESSION_SECRET is never in the DB, so that path
+  // would always return 401 before the handler runs.
+  const adminSecret = String(req.headers["x-admin-secret"] ?? "").trim();
+  if (!isAdminToken(adminSecret)) {
+    res.status(401).json({
+      error: "Admin authorization required. Pass the SESSION_SECRET as: X-Admin-Secret: <SESSION_SECRET>",
+    });
+    return;
+  }
+
+  if (!month) {
+    res.status(400).json({ error: "?month=<label> is required (e.g. Jul-26)" });
+    return;
+  }
+  // Validate month belongs to the requested FY (e.g. Jul-26 ∈ 2026-27).
+  if (!isMonthInFy(month, fy)) {
+    res.status(400).json({
+      error: `Month "${month}" does not belong to FY ${fy}. ` +
+        `Expected Mon-YY format with the correct year suffix (e.g. Jul-26 for FY 2026-27).`,
+    });
+    return;
+  }
+  // Validate FY: must be one of the configured register sheet IDs.
+  if (!REGISTER_SHEET_IDS[fy]) {
+    res.status(400).json({ error: `No register configured for FY ${fy}` });
+    return;
+  }
+
+  // ── DB query (outside mutex — read-only, safe to run concurrently) ───────────
+  let dbRows: number;
+  let dbAmount: number;
+  try {
+    const dbResult = await pool.query<{ row_count: string; total_amount: string }>(
+      `SELECT COUNT(*)::text AS row_count,
+              COALESCE(SUM(amount::numeric), 0)::text AS total_amount
+       FROM sale_line_all
+       WHERE fy = $1 AND month_label = $2 AND version_status = 'current'`,
+      [fy, month],
+    );
+    dbRows = parseInt(dbResult.rows[0]?.row_count ?? "0", 10);
+    dbAmount = parseFloat(dbResult.rows[0]?.total_amount ?? "0");
+  } catch (err: unknown) {
+    req.log.error({ fy, month, err }, "lock-month-anchor: DB query failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    return;
+  }
+
+  if (dbRows === 0) {
+    res.status(409).json({
+      error: `DB returned 0 rows for ${fy}/${month} — refusing to anchor zero. Run force-resync first if the month has not been loaded.`,
+    });
+    return;
+  }
+
+  // ── Serialized critical section: read → check → write ────────────────────
+  // A module-level promise chain ensures that two concurrent requests (e.g.
+  // locking different months simultaneously) cannot both read the same old
+  // file, each pass the duplicate check, and then overwrite each other.
+  // writeFile is replaced with writeFile-to-temp + rename for atomicity.
+  const anchorsPath = path.join(process.cwd(), "config", "verify_anchors.json");
+
+  // Enqueue this request and wait for the previous one to finish.
+  let releaseMutex!: () => void;
+  const waitForMutex = _anchorFileMutex;
+  _anchorFileMutex = new Promise<void>(resolve => { releaseMutex = resolve; });
+  await waitForMutex;
+
+  try {
+    // Load verify_anchors.json from disk.
+    // Resolved via process.cwd() (= artifacts/api-server/ at runtime) so the
+    // path is correct in both dev and production — unlike import.meta.url,
+    // which resolves to dist/index.mjs after bundling.
+    const raw = await readFile(anchorsPath, "utf8");
+    const anchors = JSON.parse(raw) as Record<string, unknown>;
+
+    const primaryAnchors = anchors["primary_anchors"] as Record<string, unknown>;
+    const fyAnchor = primaryAnchors[fy] as {
+      closedMonths?: string[];
+      closedMonthsTotal?: number;
+      closedMonthsNote?: string;
+      [key: string]: unknown;
+    };
+
+    if (!fyAnchor) {
+      res.status(404).json({ error: `No primary_anchors entry for FY ${fy} in verify_anchors.json` });
+      return;
+    }
+
+    const existing = fyAnchor.closedMonths ?? [];
+    if (existing.includes(month)) {
+      res.status(409).json({
+        error: `${month} is already locked in closedMonths for ${fy}. No change made.`,
+        closedMonths: existing,
+        closedMonthsTotal: fyAnchor.closedMonthsTotal,
+      });
+      return;
+    }
+
+    const prevTotal = fyAnchor.closedMonthsTotal ?? 0;
+    const newTotal = Math.round(prevTotal + dbAmount);
+    const newMonths = [...existing, month];
+    const amountCrFormatted = (dbAmount / 1e7).toFixed(2);
+
+    fyAnchor.closedMonths = newMonths;
+    fyAnchor.closedMonthsTotal = newTotal;
+    fyAnchor.closedMonthsNote =
+      `Closed months ${newMonths.join("/")}. ${month} locked ${new Date().toISOString().slice(0, 10)}: ` +
+      `${dbRows} rows / ₹${amountCrFormatted} Cr. Active immediately — no restart needed.`;
+
+    primaryAnchors[fy] = fyAnchor;
+    anchors["primary_anchors"] = primaryAnchors;
+
+    // ── Write protocol (rollback-safe) ────────────────────────────────────────
+    // atomicWriteWithRollback: writes to disk via temp+rename, then pushes to
+    // GCS. If the GCS push fails it rolls the disk back to `raw` so a retry by
+    // the operator is never blocked by a duplicate-in-closedMonths rejection.
+    const newJson = JSON.stringify(anchors, null, 2) + "\n";
+    await atomicWriteWithRollback({
+      filePath: anchorsPath,
+      newContent: newJson,
+      originalContent: raw,
+      push: pushAnchorsToStorage,
+    });
+
+    req.log.info(
+      { fy, month, dbRows, dbAmount, prevTotal, newTotal },
+      "lock-month-anchor: verify_anchors.json updated and pushed to GCS",
+    );
+
+    res.json({
+      locked: true,
+      fy,
+      month,
+      dbRows,
+      amountCr: parseFloat(amountCrFormatted),
+      closedMonths: newMonths,
+      closedMonthsTotal: newTotal,
+      note: "verify_anchors.json updated on disk and in Object Storage. Active immediately — no server restart needed. Safe to retry if this failed.",
+    });
+  } catch (err: unknown) {
+    req.log.error({ fy, month, err }, "lock-month-anchor failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  } finally {
+    releaseMutex();
   }
 });
 

@@ -17,7 +17,7 @@
 //      tiles and four FY-vs-FY tables (By State, By Party, By Group, By
 //      Segment) plus top-5 movers.
 //   3. A verify/data-health reconciliation against the locked net anchors.
-import verifyAnchorsJson from "../../../config/verify_anchors.json";
+import { readVerifyAnchors } from "../config/verifyAnchors.js";
 import {
   loadOrderFile,
   loadRetailerFirstSeen,
@@ -36,7 +36,9 @@ import {
 
 type FyAnchor = { perHeadSale?: Record<string, number>; saleReportTotal?: number };
 type VerifyAnchors = { fy_anchors: Record<string, FyAnchor> };
-const anchors = verifyAnchorsJson as VerifyAnchors;
+function getAnchors(): VerifyAnchors {
+  return readVerifyAnchors<VerifyAnchors>();
+}
 
 // -------------------------------------------------------------------------
 // Hierarchy (roster-derived reporting tree)
@@ -586,7 +588,7 @@ export async function runSalesVerify(fy: string): Promise<SalesVerify> {
   const h = buildHierarchy(roster);
   const seen = new Set<string>();
   const nodes = h.roots.map((r) => buildNode(h, agg, r, seen));
-  const anchor = anchors.fy_anchors[fy];
+  const anchor = getAnchors().fy_anchors[fy];
 
   const rootNames = nodes.map((n) => n.name);
   const resolveHead = buildHeadResolver(rootNames);

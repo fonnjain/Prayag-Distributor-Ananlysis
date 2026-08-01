@@ -15,7 +15,7 @@ import {
   isSnapshotStale,
   type RegisterGuardResult,
 } from "./registerGuard.js";
-import verifyAnchorsJson from "../../../config/verify_anchors.json" assert { type: "json" };
+import { readVerifyAnchors } from "../config/verifyAnchors.js";
 
 // Live source workbooks (see manifest.primary_sources).
 const ITEMWISE_SALES_FY2425 = "1HgWelwHy73Ybc-1fBQMXhKxo2ctJToxgZLDWwJPmqz8";
@@ -71,7 +71,7 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
   // during integration tests) degrades gracefully to the SALE tab fallback
   // rather than crashing the entire snapshot build.
   const fy2425MinRowCount =
-    (verifyAnchorsJson as unknown as { register_row_anchors?: { "2024-25"?: { minRowCount?: number } } })
+    readVerifyAnchors<{ register_row_anchors?: { "2024-25"?: { minRowCount?: number } } }>()
       .register_row_anchors?.["2024-25"]?.minRowCount ?? 0;
 
   let fy2425GuardResult: RegisterGuardResult | null = null;
@@ -198,7 +198,7 @@ export async function checkSnapshotStaleness(
   if (!storedGuard || storedGuard.source !== "db") return false;
 
   const minRowCount =
-    (verifyAnchorsJson as unknown as { register_row_anchors?: { "2024-25"?: { minRowCount?: number } } })
+    readVerifyAnchors<{ register_row_anchors?: { "2024-25"?: { minRowCount?: number } } }>()
       .register_row_anchors?.["2024-25"]?.minRowCount;
   if (!minRowCount) return false;
 

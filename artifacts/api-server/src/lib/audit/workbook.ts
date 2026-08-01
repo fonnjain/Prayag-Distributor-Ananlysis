@@ -2,7 +2,7 @@
 // Built server-side with exceljs; streamed into a Buffer for the download endpoint.
 import ExcelJS from "exceljs";
 import type { FullVerifyReport, HealthCheck, CheckGroup } from "../mgmt/verifyFull.js";
-import verifyAnchors from "../../../config/verify_anchors.json";
+import { readVerifyAnchors } from "../config/verifyAnchors.js";
 import auditAnchors from "../../../config/audit_anchors.json";
 
 // ── Formatting helpers ─────────────────────────────────────────────────────────
@@ -426,8 +426,7 @@ function buildAnchorsSheet(wb: ExcelJS.Workbook, fy: string): void {
   const ws = wb.addWorksheet("Anchors");
   addHeaderRow(ws, ["FY / Scope", "Anchor Key", "Expected Value", "Unit", "Source"], [18, 48, 22, 12, 48]);
 
-  type VA = typeof verifyAnchors;
-  const va = verifyAnchors as VA;
+  const va = readVerifyAnchors();
 
   // Secondary OB anchors (fy_anchors)
   const fyAnchors = (va as Record<string, unknown>)["fy_anchors"] as Record<string, Record<string, unknown>> | undefined;

@@ -12,7 +12,7 @@
 // money the file counts but the roster cannot place, so the cross-foot proves
 // Σ(member Sale) == Σ(head Sale) and surfaces the unmatched remainder to the
 // company total as data-health context rather than a failure.
-import verifyAnchorsJson from "../../../config/verify_anchors.json";
+import { readVerifyAnchors } from "../config/verifyAnchors.js";
 import { loadOrderFile, type OrderFileAgg } from "./orders.js";
 import { loadRoster } from "./roster.js";
 import { buildHeadResolver } from "./names.js";
@@ -39,9 +39,12 @@ type VerifyAnchors = {
   fy_anchors: Record<string, FyAnchor>;
 };
 
-// Statically imported so esbuild bundles it — a cwd-relative read breaks in
-// production, where the server does not run from the artifact directory.
-const anchors = verifyAnchorsJson as VerifyAnchors;
+// Read fresh from disk on each invocation (not bundled, not cached).
+// lock-month-anchor writes a new verify_anchors.json; the next call here
+// picks it up without a server restart.
+function getAnchors(): VerifyAnchors {
+  return readVerifyAnchors<VerifyAnchors>();
+}
 
 export type CheckStatus = "pass" | "warn" | "fail";
 
@@ -86,11 +89,11 @@ export type VerifyResult = {
 };
 
 export function hasVerifyAnchors(fy: string): boolean {
-  return fy in anchors.fy_anchors;
+  return fy in getAnchors().fy_anchors;
 }
 
 export function verifyFyList(): string[] {
-  return Object.keys(anchors.fy_anchors).sort().reverse();
+  return Object.keys(getAnchors().fy_anchors).sort().reverse();
 }
 
 // Percentage-tolerance verdict: pass within band, warn within twice, else fail.
@@ -153,6 +156,7 @@ function unionCounts(agg: OrderFileAgg): { retailers: number; orders: number } {
 }
 
 export async function runVerify(fy: string): Promise<VerifyResult> {
+  const anchors = getAnchors();
   const anchor = anchors.fy_anchors[fy];
   if (!anchor) {
     return {
@@ -179,7 +183,7 @@ export async function runVerify(fy: string): Promise<VerifyResult> {
       missingHeads: [],
     };
   }
-  const tol = anchors.tolerances;
+  const tol = anchors.tolerances; // anchors read at top of this function
   const checks: VerifyCheck[] = [];
 
   // Company total (NET Sub Total) — the workbook's own grand total. Passing

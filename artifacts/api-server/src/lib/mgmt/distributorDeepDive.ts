@@ -58,7 +58,7 @@ import {
   type WhitespaceRow,
   type TerritoryWhitespace,
 } from "./distributorWhitespace.js";
-import verifyAnchorsJson from "../../../config/verify_anchors.json" assert { type: "json" };
+import { readVerifyAnchors } from "../config/verifyAnchors.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -331,11 +331,9 @@ function classifyDist(raw: string | null): DistClass {
 type AnchorShape = {
   primary_anchors?: Record<string, { closedMonths?: string[] } | string | number>;
 };
-const _anchors = verifyAnchorsJson as AnchorShape;
-
 /** Return the list of closed month labels for a given FY, e.g. ["Apr-26","May-26","Jun-26"]. */
 function closedMonthsForFy(fy: string): string[] {
-  const a = _anchors.primary_anchors?.[fy];
+  const a = readVerifyAnchors<AnchorShape>().primary_anchors?.[fy];
   if (!a || typeof a !== "object") return [];
   return (a as { closedMonths?: string[] }).closedMonths ?? [];
 }
