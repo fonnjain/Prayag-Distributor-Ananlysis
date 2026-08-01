@@ -1,3 +1,4 @@
+import { LoadingState } from "@/components/ui/loading-state";
 import { useState, useEffect, useMemo } from "react";
 import { useGlobalFilter } from "@/data/global-filter-context";
 import {
@@ -882,11 +883,7 @@ export default function StateHeadDashboard() {
       </div>
 
       {/* Loading skeleton */}
-      {loading && (
-        <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
-          Loading...
-        </div>
-      )}
+      {loading && <LoadingState className="py-16" />}
 
       {/* ── Summary by Head view ── */}
       {!loading && data && activeView === "summary" && (

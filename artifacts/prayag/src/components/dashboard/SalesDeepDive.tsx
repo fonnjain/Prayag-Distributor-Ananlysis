@@ -3,6 +3,7 @@
 // Phase 2: member's own working sheet retailer-level detail (source B).
 // Direct Dealer order kept separate from retailer/party OB throughout.
 // Achievement always recomputed (sale / plan); never read from a sheet % cell.
+import { Loader2 } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { QuotaWaitBanner, quotaDelayMs, quotaOrThrow } from "./quotaWait";
 import { cn } from "@/lib/utils";
@@ -2314,8 +2315,9 @@ export default function SalesDeepDive() {
         </div>
 
         {loading && (
-          <span className="text-xs text-muted-foreground self-center pb-1">
-            Loading...
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground self-center pb-1">
+            <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+            Data loading…
           </span>
         )}
       </div>

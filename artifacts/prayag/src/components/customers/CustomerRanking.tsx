@@ -4,6 +4,7 @@
 // Price effect = value growth % − qty growth %, shows how much "growth" was
 // just price, not volume.
 // "Revenue up, volume down" rows are the hidden shrinkers — flagged in red.
+import { LoadingState } from "@/components/ui/loading-state";
 import { useState, useMemo } from "react";
 import {
   Table,
@@ -135,11 +136,7 @@ export default function CustomerRanking({
   }, [data, sortKey, sortDir]);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
-        Loading...
-      </div>
-    );
+    return <LoadingState className="h-48" />;
   }
 
   if (!data.length) {

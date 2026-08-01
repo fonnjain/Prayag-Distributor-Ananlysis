@@ -1,5 +1,6 @@
 // SalesPage — content-only page rendered inside AppShell.
 // Sidebar is provided by AppShell; this renders the active Sales section.
+import { LoadingState } from "@/components/ui/loading-state";
 import { lazy, Suspense } from "react";
 import { useLocation } from "wouter";
 import GlobalFilterBar from "@/components/GlobalFilterBar";
@@ -49,11 +50,7 @@ export default function SalesPage() {
       </header>
       {activeSection.lazy ? (
         <Suspense
-          fallback={
-            <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
-              Loading...
-            </div>
-          }
+          fallback={<LoadingState className="h-48" />}
         >
           <ActiveComponent />
         </Suspense>

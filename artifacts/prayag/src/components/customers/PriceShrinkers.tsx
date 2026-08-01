@@ -2,6 +2,7 @@
 // These are the hidden shrinkers: price rises masking real demand decline.
 // The single most valuable output: every entry here is a customer being
 // over-reported as "growing" when they are actually shrinking in units.
+import { LoadingState } from "@/components/ui/loading-state";
 import { useState, useEffect } from "react";
 import {
   Table,
@@ -110,9 +111,7 @@ export default function PriceShrinkers({
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
-          Loading...
-        </div>
+        <LoadingState className="h-32" />
       ) : !data.length ? (
         <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
           No hidden shrinkers found for this period. Good.

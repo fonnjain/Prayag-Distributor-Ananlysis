@@ -14,6 +14,7 @@
 //   - Primary-role members have no secondary target — exclude from achievement.
 //   - Left members count in totals but never appear in the low-performer list.
 //   - Never add secondary and primary together.
+import { LoadingState } from "@/components/ui/loading-state";
 import { useState, useEffect, useMemo, Fragment } from "react";
 import { AlertTriangle, ChevronUp, ChevronDown, Info } from "lucide-react";
 import { useGlobalFilter } from "@/data/global-filter-context";
@@ -339,11 +340,7 @@ export default function SecondaryPerformanceDashboard() {
       </div>
 
       {/* Load states */}
-      {loading && (
-        <div className="py-12 text-center text-sm text-muted-foreground">
-          Loading secondary performance data...
-        </div>
-      )}
+      {loading && <LoadingState />}
       {quotaWait && (
         <div
           className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 dark:border-amber-700/50 dark:bg-amber-950/30 px-3 py-2 text-sm text-amber-800 dark:text-amber-200"

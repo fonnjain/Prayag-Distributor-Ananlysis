@@ -6,6 +6,7 @@
 //
 // Navigation: this page is content-only — AppShell provides the sidebar and
 // routes to /customers, /customers/shrinkers, /customers/churn, /customers/schemes.
+import { LoadingState } from "@/components/ui/loading-state";
 import { useState, useEffect, lazy, Suspense } from "react";
 import { useLocation } from "wouter";
 import PeriodPicker, { defaultPeriodValue, type PeriodValue } from "@/components/ui/PeriodPicker";
@@ -186,6 +187,9 @@ export default function CustomersPage() {
   useEffect(() => {
     if (!monthsCy.length) return;
     setRankLoading(true);
+    // Clear previous-period figures immediately — never show stale numbers
+    // while the newly selected FY/period is still loading.
+    setRankData([]);
     const params = new URLSearchParams({
       fyCy,
       fyLy,
@@ -379,11 +383,7 @@ export default function CustomersPage() {
 
         {activeSection === "schemes" && (
           <Suspense
-            fallback={
-              <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
-                Loading...
-              </div>
-            }
+            fallback={<LoadingState className="h-32" />}
           >
             <SchemeNudgeEngine />
           </Suspense>
