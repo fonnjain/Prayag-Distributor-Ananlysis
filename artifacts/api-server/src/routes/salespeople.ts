@@ -320,7 +320,7 @@ router.get(
       );
       res.setHeader(
         "Content-Disposition",
-        `attachment; filename="SalesReports_${safeName}_${fy}_${basis}_${today}.xlsx"`,
+        `attachment; filename="SalesReports_${safeName}_${fy}_${scope}_${basis}_${today}.xlsx"`,
       );
       await wb.xlsx.write(res);
       res.end();
