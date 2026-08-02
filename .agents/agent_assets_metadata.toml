@@ -109,3 +109,17 @@ uri = "file://docs/QA_REPORT_GLOSSARIES_2026-08-01.md"
 type = "text"
 title = "QA Report — 1 Aug 2026 (Glossaries v2 + Reference)"
 description = "Full QA: frozen-year anchors, FY2026-27 month/quarter/YTD checks, secondary Q1, July ₹1.46 Cr resolution, glossary conformance, and UI period-label fixes."
+
+[[outputs]]
+id = "09sPJSCS0a2mRwiL--HV1"
+uri = "file://exports/Targets_Page_Documentation.xlsx"
+type = "table"
+title = "Targets Page — Documentation"
+description = "What the Targets page shows, where its data lives, how it works, and which pages consume it."
+
+[[outputs]]
+id = "OOTlT0CreAG8J7p8E_GFL"
+uri = "file://exports/DataSources_Targets_Documentation.xlsx"
+type = "table"
+title = "Data Sources Targets — Documentation"
+description = "State Head Targets and Secondary Targets editors: database, logic (seasonal calibration, Auto Calculate), and downstream connections."
