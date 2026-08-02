@@ -407,6 +407,163 @@ function fmtReadAt(ts: number | null | undefined): string {
   });
 }
 
+// ── Retailer-count drift (typed vs sheet) — maintenance signal per head ──────
+
+type MemberDrift = {
+  name: string;
+  normKey: string;
+  isLeft: boolean;
+  status: "ok" | "loading" | "not-mapped" | "no-typed-count" | "error";
+  typed: number | null;
+  sheet: number | null;
+  drift: number | null;
+  direction: "IN_SYNC" | "SHEET_EXCEEDS_TYPED" | "TYPED_EXCEEDS_SHEET" | null;
+};
+
+type RetailerDriftReport = {
+  fy: string;
+  stateHead: string;
+  tolerance: number;
+  members: MemberDrift[];
+  summary: {
+    comparable: number;
+    pending: number;
+    notMapped: number;
+    inSync: number;
+    sheetExceedsTyped: number;
+    typedExceedsSheet: number;
+    netDrift: number;
+    typedTotal: number;
+    sheetTotal: number;
+  };
+};
+
+function RetailerDriftPanel({ fy, stateHead }: { fy: string; stateHead: string }) {
+  const [report, setReport] = useState<RetailerDriftReport | null>(null);
+  const [driftLoading, setDriftLoading] = useState(false);
+  const [driftError, setDriftError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const load = async () => {
+      setDriftLoading(true);
+      setDriftError(null);
+      try {
+        const params = new URLSearchParams({ fy, stateHead });
+        const r = await fetch(`${API}/mgmt/retailer-drift?${params}`);
+        if (cancelled) return;
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d: RetailerDriftReport = await r.json();
+        if (cancelled) return;
+        setReport(d);
+        // Cold-cache member sheets come back as "loading" — poll until settled.
+        if (d.summary.pending > 0) retryTimer = setTimeout(load, 20000);
+      } catch {
+        if (!cancelled) setDriftError("Could not load the retailer count check.");
+      } finally {
+        if (!cancelled) setDriftLoading(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); };
+  }, [fy, stateHead]);
+
+  if (driftError) return null; // non-essential panel — fail quiet
+  if (!report && driftLoading) {
+    return (
+      <div className="rounded-lg border border-border bg-card px-4 py-3 text-xs text-muted-foreground">
+        Checking retailer counts against member sheets…
+      </div>
+    );
+  }
+  if (!report || report.summary.comparable === 0) return null;
+
+  const s = report.summary;
+  const outOfSync = report.members.filter(
+    (m) => m.status === "ok" && m.direction !== "IN_SYNC",
+  ).sort((a, b) => Math.abs(b.drift ?? 0) - Math.abs(a.drift ?? 0));
+
+  return (
+    <div className="rounded-lg border border-border bg-card overflow-hidden">
+      <div className="px-4 py-3 border-b border-border flex items-baseline justify-between gap-3 flex-wrap">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Retailer Count Maintenance — typed vs member sheets
+        </p>
+        <p className="text-[11px] text-muted-foreground">
+          {s.comparable} member{s.comparable !== 1 ? "s" : ""} checked
+          {s.pending > 0 ? ` · ${s.pending} still loading` : ""}
+          {s.notMapped > 0 ? ` · ${s.notMapped} without a sheet` : ""}
+        </p>
+      </div>
+      <div className="px-4 py-3 space-y-3">
+        <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+          <span>Sheets: <strong>{s.sheetTotal.toLocaleString()}</strong> retailers</span>
+          <span>Typed (Data tab): <strong>{s.typedTotal.toLocaleString()}</strong></span>
+          <span className={s.netDrift === 0 ? "" : s.netDrift < 0 ? "text-amber-700 dark:text-amber-400" : "text-orange-700 dark:text-orange-400"}>
+            Net drift: <strong>{s.netDrift > 0 ? "+" : ""}{s.netDrift}</strong>
+          </span>
+          <span className="text-muted-foreground">{s.inSync} in sync (±{report.tolerance})</span>
+        </div>
+
+        {s.sheetExceedsTyped > 0 && (
+          <p className="text-xs text-amber-700 dark:text-amber-400">
+            {s.sheetExceedsTyped} member{s.sheetExceedsTyped !== 1 ? "s" : ""} — typed count is behind the sheet:
+            the Data tab column is not being kept up to date as retailers are added.
+          </p>
+        )}
+        {s.typedExceedsSheet > 0 && (
+          <p className="text-xs text-orange-700 dark:text-orange-400 font-medium">
+            {s.typedExceedsSheet} member{s.typedExceedsSheet !== 1 ? "s" : ""} — typed count EXCEEDS the sheet:
+            the State Head believes there are retailers the member has not recorded. That is a coverage
+            gap, not a bookkeeping error.
+          </p>
+        )}
+
+        {outOfSync.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
+                  <th className="px-3 py-1.5 text-left">Member</th>
+                  <th className="px-3 py-1.5 text-right">Sheet rows</th>
+                  <th className="px-3 py-1.5 text-right">Typed</th>
+                  <th className="px-3 py-1.5 text-right">Drift</th>
+                  <th className="px-3 py-1.5 text-left">Reading</th>
+                </tr>
+              </thead>
+              <tbody>
+                {outOfSync.map((m) => (
+                  <tr key={m.normKey} className="border-b border-border/50 last:border-0">
+                    <td className="px-3 py-1.5">{m.name}{m.isLeft ? " (left)" : ""}</td>
+                    <td className="px-3 py-1.5 text-right font-medium">{m.sheet}</td>
+                    <td className="px-3 py-1.5 text-right text-muted-foreground">{m.typed}</td>
+                    <td className={`px-3 py-1.5 text-right ${m.direction === "TYPED_EXCEEDS_SHEET" ? "text-orange-700 dark:text-orange-400" : "text-amber-700 dark:text-amber-400"}`}>
+                      {(m.drift ?? 0) > 0 ? "+" : ""}{m.drift}
+                    </td>
+                    <td className="px-3 py-1.5 text-xs">
+                      {m.direction === "TYPED_EXCEEDS_SHEET"
+                        ? "Possible unrecorded retailers"
+                        : "Typed column under-maintained"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <p className="text-[11px] text-muted-foreground">
+          Sheet rows = serial-numbered retailers in the member&rsquo;s working sheet (the fresher source).
+          Typed = the count entered on the Dashboard Data tab. Both are kept; this drift is a
+          maintenance signal for the State Head, not an app calculation.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function TeamSummaryPanel({ summary, dataReadAt }: { summary: TeamSummary; dataReadAt: number | null }) {
   return (
     <div className="space-y-4">
@@ -2351,7 +2508,10 @@ export default function SalesDeepDive() {
 
       {/* State head selected, no member → team summary panel */}
       {!kpis && !loading && !error && selectedHead && teamSummary && (
-        <TeamSummaryPanel summary={teamSummary} dataReadAt={dataReadAt} />
+        <>
+          <TeamSummaryPanel summary={teamSummary} dataReadAt={dataReadAt} />
+          <RetailerDriftPanel fy={fy} stateHead={selectedHead} />
+        </>
       )}
 
       {/* Prompt when nothing useful to show yet */}
@@ -2482,9 +2642,34 @@ export default function SalesDeepDive() {
             {kpis.businessPerRetailer != null && (
               <Tile label="Business per Retailer" value={fmtRs(kpis.businessPerRetailer)} />
             )}
-            {kpis.totalRetailers != null && (
-              <Tile label="Total Retailers" value={fmtNum(kpis.totalRetailers)} sub="Source: Dashboard Data tab (typed by State Head)" />
-            )}
+            {/* Sheet count is primary where a member sheet exists; the typed
+                Data tab value is kept and shown beside it when they diverge
+                by more than the small tolerance (±3). typed > sheet =
+                possible unrecorded retailers (coverage gap). */}
+            {(() => {
+              const typed = kpis.totalRetailers;
+              const sheet = rd?.status === "ok" ? (rd.rows ?? []).length : null;
+              if (sheet != null) {
+                const drift = (typed ?? 0) - sheet;
+                const diverged = typed != null && Math.abs(drift) > 3;
+                return (
+                  <Tile
+                    label="Total Retailers"
+                    value={fmtNum(sheet)}
+                    sub={
+                      !diverged
+                        ? `Source: member sheet rows${typed != null ? ` (Data tab typed: ${typed})` : ""}`
+                        : drift > 0
+                        ? `Data tab typed: ${typed} — typed EXCEEDS sheet by ${drift}: possible unrecorded retailers`
+                        : `Data tab typed: ${typed} — typed column behind the sheet by ${-drift}`
+                    }
+                  />
+                );
+              }
+              return typed != null ? (
+                <Tile label="Total Retailers" value={fmtNum(typed)} sub="Source: Dashboard Data tab (typed by State Head — no member sheet to verify)" />
+              ) : null;
+            })()}
             {kpis.directDealersCount != null && (
               <Tile label="Direct Dealers" value={fmtNum(kpis.directDealersCount)} />
             )}

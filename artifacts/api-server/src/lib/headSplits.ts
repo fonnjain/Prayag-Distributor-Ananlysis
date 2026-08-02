@@ -34,15 +34,12 @@ export type HeadSplit = {
  *   Nasir Husain    → Nasir Hussain Khan (   516 inv / ₹9.93 Cr)
  */
 export const CROSS_FY_SPLITS: Record<string, HeadSplit> = {
-  // Pending business confirmation. The surname change (Kumar → Sharma) is unlike
-  // the five applied pairs (honorific→full name, spelling variant, added initial).
-  // Like-for-like FY2025-26 → FY2026-27 Q1 retention is ~33%, which is similar
-  // to Biju C.O (45%) — which WAS merged. So retention alone is not the reason
-  // to hold. The real reason: we cannot confirm without the business whether
-  // "Pawan Kumar Sharma" (roster) is one person with a two-part surname, or a
-  // replacement. Do not apply UPDATE until that is confirmed.
-  // head_alias.json already aligned: "PAWAN KUMAR." now → "Pawan Sharma".
-  "Pawan Sharma": { currentCanon: "Pawan Sharma", priorCanon: "Pawan Kumar", splitFromFy: "2026-27" },
+  // Pawan Kumar → Pawan Sharma merged Aug 2 2026 after business confirmation:
+  // FY2026-27 geography matches exactly (Haryana + Rajasthan; Karnal, Jaipur,
+  // Bharatpur, Karauli, Churu on both sides) and "PAWAN SHARMA" appears in no
+  // register row — same territory, same year, two spellings. All six pairs
+  // are now resolved; this map is intentionally empty but kept for the next
+  // split that appears.
 };
 
 /**

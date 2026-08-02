@@ -64,11 +64,10 @@ export const GAP_NODE_REGISTRY: GapNodeMeta[] = [
 // Known cross-FY key splits that produce CROSS_FY_KEY_SPLIT flags.
 // Source of truth: src/lib/headSplits.ts — keep in sync when adding/removing pairs.
 //
-// Five pairs resolved via DB UPDATE Jul 2026 (Sandeep, Rizvi, Bijju, Lalan, Nasir).
-// Remaining: Pawan Kumar / Pawan Sharma — awaiting business confirmation.
-export const KNOWN_KEY_SPLITS = [
-  { level: "head" as const, name: "Pawan Sharma", missingIn: "2025-26", alias: "Pawan Kumar" },
-];
+// All six pairs resolved (five via DB UPDATE Jul 2026; Pawan Kumar → Pawan
+// Sharma confirmed by geography and merged Aug 2026). Empty until the next
+// split appears.
+export const KNOWN_KEY_SPLITS: { level: "head"; name: string; missingIn: string; alias: string }[] = [];
 
 // Build a gap GraphNode from its registry entry.
 export function makeGapNode(meta: GapNodeMeta): GraphNode {

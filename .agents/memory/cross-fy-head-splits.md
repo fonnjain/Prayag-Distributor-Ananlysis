@@ -1,6 +1,6 @@
 ---
 name: Cross-FY head_canon key splits
-description: Six head_canon aliases that differ across fiscal years, causing false zero LY in YoY queries. DB diff confirmed Jul 2026.
+description: Six head_canon aliases that differed across fiscal years, causing false zero LY in YoY queries. ALL SIX RESOLVED as of Aug 2 2026.
 ---
 
 ## The problem
@@ -45,11 +45,13 @@ All verified: never co-exist in the same FY → safe alias candidates.
 
 Verified: invoice counts before + after match exactly for all five. Customers (distinct) are slightly lower than the sum due to shared customers across FYs.
 
-## Pawan Kumar / Pawan Sharma — hold reason (corrected Jul 28 2026)
+## Pawan Kumar / Pawan Sharma — RESOLVED (Aug 2 2026)
 
-Like-for-like FY2025-26 → FY2026-27 Q1 retention is ~33%, which is **similar to Biju C.O (45%) — which was merged**. Retention is therefore not the reason to hold. The earlier "152 → 21 customer drop" figure was incorrect: it compared three-year cumulative against one quarter.
+Business confirmed via geography: FY2026-27 dashboard head "Pawan Sharma" covers Haryana + Rajasthan; register "PAWAN KUMAR" covers the same two states with overlapping stations (Karnal, Jaipur, Bharatpur, Karauli, Churu); "PAWAN SHARMA" appears in no register row. Same territory, same year, two spellings.
 
-**Real hold reason:** the surname change (Kumar → Sharma) does not match any of the five applied patterns (honorific→full name, spelling variant, added initial). The roster entry "Pawan Kumar Sharma" may mean one person with a two-part surname, or it may be a replacement. Business must confirm before the UPDATE is applied.
+By the time the merge was approved, no 'Pawan Kumar' rows remained anywhere in sale_line_all (current or tombstoned) — the head_alias.json fix plus subsequent full clear-and-reload of historical FYs had already unified head_canon. The "merge" was therefore config-only: removed Pawan from CROSS_FY_SPLITS (headSplits.ts), CROSS_FY_KEY_SPLITS (warnings/engine.ts), KNOWN_KEY_SPLITS (gapNodes.ts). Verified /api/customers/performance?head=Pawan Sharma: headYoySplit null, LY figures populate.
+
+Lesson: after any full historical re-ingest, re-check whether DB-level alias splits still exist before planning an UPDATE — the alias map may have already fixed them.
 
 ## head_alias.json fix (Jul 28 2026)
 

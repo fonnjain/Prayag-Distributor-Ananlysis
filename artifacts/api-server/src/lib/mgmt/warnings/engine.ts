@@ -11,13 +11,10 @@ import type { WarningCard, WarningSeverity, WarningTrend } from "./types.js";
 // Source of truth: src/lib/headSplits.ts — this map is a local copy for the
 // warnings engine (avoids an async import).
 //
-// Five pairs have been resolved via DB UPDATE (Jul 2026):
-//   Sandeep Ji→Dadheech, Rizvi Ji→Syed Aqil Rizvi, Bijju→Biju C.O,
-//   Lalan→Lalan Kumar, Nasir Husain→Nasir Hussain Khan.
-// Remaining: Pawan Kumar / Pawan Sharma — awaiting business confirmation.
-const CROSS_FY_KEY_SPLITS: Record<string, string> = {
-  "pawan sharma": "Pawan Kumar (FY2025-26 canon) — business confirmation pending",
-};
+// All six pairs are resolved (five via DB UPDATE Jul 2026; Pawan Kumar →
+// Pawan Sharma confirmed by geography and merged Aug 2026). Map kept empty
+// for the next split that appears.
+const CROSS_FY_KEY_SPLITS: Record<string, string> = {};
 
 function normKey(name: string): string {
   return name.toLowerCase().trim();

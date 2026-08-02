@@ -1278,6 +1278,27 @@ router.get("/mgmt/deep-dive", async (req: Request, res: Response): Promise<void>
   }
 });
 
+// GET /api/mgmt/retailer-drift
+// Per-member drift between the Data tab typed retailer count and the member
+// working-sheet row count. Maintenance signal per State Head — sheet is the
+// fresher source; typed>sheet flags possible unrecorded retailers.
+router.get("/mgmt/retailer-drift", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const fy = typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
+      ? req.query.fy.trim() : "2026-27";
+    const stateHead = typeof req.query.stateHead === "string" ? req.query.stateHead.trim() : "";
+    if (!stateHead) { res.status(400).json({ error: "stateHead is required" }); return; }
+
+    const { loadRetailerDrift } = await import("../lib/mgmt/retailerDrift.js");
+    const result = await loadRetailerDrift(fy, stateHead);
+    res.json(result);
+  } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
+    req.log.error({ err }, "mgmt/retailer-drift: handler threw");
+    res.status(500).json({ error: "Could not load retailer drift report." });
+  }
+});
+
 // GET /api/mgmt/distributor-deep-dive
 // Phase D1: groups retailer rows from all member working sheets under a state
 // head by their Assigned Distributor field.
