@@ -86,6 +86,8 @@ export type GraphIndex = {
   crossFyKeySplits: CrossFyKeySplit[];
   // Known residuals at company level.
   companyResiduals: { description: string; customers: number; value?: number }[];
+  // Free-form usage notes surfaced in the prompt.
+  notes: string[];
 };
 
 export type GapNodeMeta = {

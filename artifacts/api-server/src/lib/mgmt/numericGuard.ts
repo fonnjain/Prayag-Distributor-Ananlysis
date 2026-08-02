@@ -84,6 +84,16 @@ function buildAllowed(payload: AiPayload): number[] {
     allowed.push(Math.abs(n));                                     // absolute value
     if (Math.abs(n) >= 50_000) allowed.push(n / 100_000);         // lakh
     if (Math.abs(n) >= 1_000_000) allowed.push(n / 10_000_000);   // crore
+    // 2-decimal display rounding: "Rs 0.14 lakh" for 13,890 is the payload
+    // figure shown at 2 dp in lakh — a legitimate citation, not a new number.
+    // The relative error of 2-dp rounding exceeds the 0.15% tolerance for
+    // small displayed values, so allow the rounded rupee forms explicitly.
+    if (Math.abs(n) >= 1_000) {
+      allowed.push(Math.round((n / 100_000) * 100) / 100 * 100_000);      // lakh @ 2dp
+    }
+    if (Math.abs(n) >= 100_000) {
+      allowed.push(Math.round((n / 10_000_000) * 100) / 100 * 10_000_000); // crore @ 2dp
+    }
   }
   return allowed;
 }

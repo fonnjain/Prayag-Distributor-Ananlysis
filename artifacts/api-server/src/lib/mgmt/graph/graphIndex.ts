@@ -73,9 +73,16 @@ export async function buildGraphIndex(fy: string, period?: string): Promise<Grap
     },
     {
       level: "segment",
-      count: 0, // only available in closed FYs via secondary register
-      measuresAvailable: ["secondary_ob", "secondary_sale"],
-      examplePaths: ["segment/CP/2025-26"],
+      count: 30,
+      measuresAvailable: ["primary_sale", "secondary_sale"],
+      examplePaths: [
+        `segment/CP/${fy}`,
+        `sku/gaps/${fy}`,
+        `sku/gaps/Anant Singh/${fy}`,
+        `sku/push/{distributor}/${fy}`,
+        `sku/discounts/${fy}`,
+        `sku/detail/${fy}`,
+      ],
     },
     {
       level: "gap",
@@ -108,8 +115,14 @@ export async function buildGraphIndex(fy: string, period?: string): Promise<Grap
     "closed FYs. Live-year retailer detail requires a member working sheet read instead.",
   );
   notes.push(
-    "Segment / SKU nodes are only available for closed FYs (FY2025-26 and earlier). " +
-    "See gap/live-year-sku for FY2026-27.",
+    "Segment / SKU nodes are available for closed FYs AND for FY2026-27 Apr–Jun (PARTIAL — " +
+    "the PSCode_3 register covers Apr–Jun 2026; later months are absent, not zero). " +
+    "See gap/live-year-sku.",
+  );
+  notes.push(
+    "ALL loaded fiscal years are resolvable in one question — no filter change is needed. " +
+    "Append /likemonths to company or head paths to restrict any FY's primary figures to the " +
+    "open FY's complete-month window (required for any open-year comparison).",
   );
 
   return {
@@ -121,6 +134,7 @@ export async function buildGraphIndex(fy: string, period?: string): Promise<Grap
     gapNodes: GAP_NODE_REGISTRY,
     crossFyKeySplits: KNOWN_KEY_SPLITS,
     companyResiduals,
+    notes,
   };
 }
 
@@ -150,6 +164,9 @@ export function graphIndexToPromptText(index: GraphIndex): string {
     "",
     "COMPANY RESIDUALS (heads do NOT sum to company):",
     ...index.companyResiduals.map((r) => `  ${r.description}`),
+    "",
+    "USAGE NOTES:",
+    ...index.notes.map((n) => `  - ${n}`),
     "",
     "=== END INDEX ===",
   ];

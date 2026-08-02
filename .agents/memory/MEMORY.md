@@ -84,4 +84,6 @@
 - [SD4 Rizvi distributor deep dive](sd4-rizvi-distributor.md) — cold-cache partial loads need retries; dashboard-vs-sheet retailer counts drift; blank reconciliation is on blankOb>0 (7 members), not blank-row count.
 - [Member targets database home](member-targets-db-home.md) — member_targets DB overlays read-only Target Master sheet; user rows never re-seeded; POST must invalidateMgmtDataCache; add tables via migration runner not drizzle push.
 - [FY24-25/25-26 state backfill](state-head-backfill-2425-2526.md) — Schema B registers have no STATE/HEAD cols; migration 008 backfills per customer; ~₹13 Cr Unmapped residual is structural; audit Group 10 = frozen-anchor reconciliation.
+- [State-head report extras](statehead-report-extras.md) — SKU/multi-year/roster blocks; head_canon holds DISPLAY names; sale_line SKU figures are primary_sale; 16000 max_tokens; cite-able figures must be numeric fields.
+- [Numeric guard 2-dp rounding](numeric-guard-rounding.md) — allowlist includes 2-dp lakh/crore display forms of every payload number; sums still flagged.
 - [Month-complete lock rule](month-complete-lock-rule.md) — complete when max invoice hits month-end OR the lock instant (lastDay+7d) passes; payload-logic changes need versioned snapshot keys.

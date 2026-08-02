@@ -1516,6 +1516,13 @@ export default function AiReports() {
                     <p className="text-xs text-muted-foreground">More than 5 documents — ZIP was auto-downloaded. Use the button above to re-download.</p>
                   )}
                 </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Format note: batch packs download as print-ready HTML documents (open any file and use the
+                  browser&rsquo;s Print &rarr; Save as PDF for a PDF copy). Individual reports export as PDF via
+                  the preview window, and decks export as editable PowerPoint (PPTX). This difference is deliberate:
+                  HTML keeps large batches fast to generate and easy to review, while single documents are
+                  print-finalised.
+                </p>
 
                 {/* Inline compact previews for ≤ 5 members */}
                 {batchDocs.length <= 5 && (

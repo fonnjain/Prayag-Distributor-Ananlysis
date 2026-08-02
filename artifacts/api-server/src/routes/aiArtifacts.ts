@@ -21,6 +21,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { loadDeepDiveData, normSecKey, loadRegistry } from "../lib/mgmt/deepDiveData.js";
 import type { MemberKpis } from "../lib/mgmt/deepDiveData.js";
+import { buildStateHeadExtras } from "../lib/mgmt/aiStateHeadExtras.js";
 import {
   buildMemberPayload,
   buildStateHeadPayload,
@@ -129,6 +130,14 @@ STATE HEAD REPORT ADDITIONAL RULES:
     a. Open the teamPosition section by naming every departed member explicitly and stating their historical OB, sale, retailers, and visits for the period.
     b. State clearly that the current achievement percentage EXCLUDES the targets of the departed members. This is an organisational change — not commercial improvement. A reader comparing this period's achievement against a prior period when those members were active MUST NOT interpret the difference as performance gain.
     c. Do NOT include departed members in the memberPerformance ranking. They belong only in the teamPosition narrative.
+19. ROSTER CHANGES: When a "Roster changes" block is provided, cite BOTH achievement figures (achievementPctActiveOnly and achievementPctIncludingDeparted) side by side and describe the difference in words as an organisational effect — e.g. "the team's achievement reads X% on active members but Y% when departed members' targets are included; the movement is a roster change, not a commercial gain".
+20. SKU CONTENT: When an "SKU gap and push content" block is provided, include in the report:
+    a. The top gap segments by value (these are territory-only figures) with their peak quarter beside each recommendation.
+    b. For each push list: the distributor's name, the top codes with tier labels and peer counts, and NAME the peers from peerNames when explaining the evidence ("N peers including A, B and C are buying this code").
+    c. Where discountAboveOwnNormPts is present on a code, state that the code is currently sold at a discount above its own historical norm — a margin question before a volume opportunity.
+    d. If the sku block is null or a push list is suppressed, say the SKU evidence is not available for this territory rather than omitting silently.
+21. NEVER sum, combine, or otherwise derive totals across the extras blocks (e.g. adding two members' historical OB together). Cite each figure individually as it appears.
+22. MULTI-YEAR VIEW: When a "Multi-year like-months view" block is provided, present the years side by side, ALWAYS naming each fiscal year and stating that every year is restricted to the same like-months window. A null year means attribution is unavailable for that year — not zero business (say so).
 
 RESPONSE FORMAT — return ONLY valid JSON, no fences:
 {
@@ -186,13 +195,29 @@ router.post("/ai/statehead-report", async (req: Request, res: Response): Promise
         )}`
       : "";
 
+    // Part 4 extras: SKU gap/push content, multi-year like-months view,
+    // roster-change achievement (with vs without departed members).
+    const extras = await buildStateHeadExtras(fy, stateHead, allMembers).catch((err) => {
+      req.log.warn({ err, fy, stateHead }, "ai/statehead-report: extras failed — continuing without");
+      return null;
+    });
+
+    const extrasContext = extras
+      ? `\n\nSKU gap and push content (app-computed, verified — cite freely; peers are NAMED in peerNames):\n${JSON.stringify(extras.sku, null, 2)}` +
+        `\n\nMulti-year like-months view (same fiscal window every year — name the years when citing):\n${JSON.stringify(extras.multiYear, null, 2)}` +
+        `\n\nRoster changes (organisational effect — achievement with vs without departed members):\n${JSON.stringify(extras.rosterChanges, null, 2)}`
+      : "";
+
     const userMsg =
       `Verified state-head aggregate payload (JSON) — active members only:\n${JSON.stringify(payload, null, 2)}\n\n` +
       `Member ranking by total OB (active members only, app-computed, verified — cite freely):\n${JSON.stringify(memberRanking, null, 2)}` +
-      departedContext;
+      departedContext +
+      extrasContext;
 
+    // Richer content (SKU push lists, multi-year, roster changes) needs more
+    // output room than the default cap — a truncated response breaks JSON.parse.
     const message = await anthropic.messages.create({
-      model: MODEL, max_tokens: MAX_TOKENS,
+      model: MODEL, max_tokens: 16000,
       system: STATEHEAD_REPORT_PROMPT,
       messages: [{ role: "user", content: userMsg }],
     });
@@ -208,7 +233,7 @@ router.post("/ai/statehead-report", async (req: Request, res: Response): Promise
       visits: m.visitedRetailers ?? 0,
       target: Math.round(m.totalTargetToDate ?? 0),
     }));
-    const guard = guardCustom(sections, payload, { memberRanking, departedMembers: departedForGuard });
+    const guard = guardCustom(sections, payload, { memberRanking, departedMembers: departedForGuard, extras });
     const periodGuard: PeriodGuardResult = runPeriodGuard(sections, payload.identity.periodToFiscalMonth);
 
     req.log.info({ stateHead, active: activeMembers.length, departed: leftMembers.length, guardStatus: guard.status, unmatched: guard.unmatched.length }, "ai/statehead-report: done");
@@ -223,6 +248,7 @@ router.post("/ai/statehead-report", async (req: Request, res: Response): Promise
       periodMismatch: isPeriodMismatch(period, payload.identity.periodToFiscalMonth),
       sections, guard, periodGuard, memberRanking,
       departedMembersExcluded: leftMembers.length,
+      extras,
     });
   } catch (err) {
     req.log.error({ err, fy, stateHead }, "ai/statehead-report: error");

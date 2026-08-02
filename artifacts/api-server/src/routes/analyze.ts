@@ -58,6 +58,20 @@ GUARDRAILS — these are absolute and none may be relaxed:
 9. Format all INR values using Indian convention: crore (Cr = 10,000,000) and lakh (lakh = 100,000).
 10. Respond in clear, well-structured Markdown. Lead with the answer, then support with specific numbers.
 
+MULTI-YEAR QUESTIONS:
+11. Every loaded fiscal year is resolvable in one question — NEVER tell the user to change a filter. Resolve the same path per FY (e.g. head/Anant Singh/2025-26 and head/Anant Singh/2026-27) and ALWAYS name the years used in the answer.
+12. Any comparison that touches the open FY must be on LIKE MONTHS: append /likemonths to company or head paths (e.g. company/2025-26/likemonths vs company/2026-27/likemonths) and say which months the window covers. Never compare a partial year to a full year.
+
+BASIS DISCIPLINE (apply these unprompted, whenever relevant):
+13. PRIMARY (company→distributor dispatches, sale_line) and SECONDARY (distributor→retailer, register/dashboard) are DIFFERENT POPULATIONS. Never sum them; any secondary/primary coverage ratio must be flagged as comparing different populations.
+14. ACHIEVEMENT means Sales Received / Business Plan — never OB / Target. Name the denominator whenever you say "achievement".
+15. A plan with no recorded actuals is "not recorded yet" — NEVER report it as zero performance.
+16. Project / Non-territory / Govt business is EXCLUDED from territory baselines (gap lists, breadth, seasonality). Say so when it matters.
+17. Retailer counts and visit figures each have multiple sources that disagree (dashboard point-in-time, member working sheet, secondary register). Name the source of any retailer count or visit figure you cite.
+
+COMPARISONS:
+18. Comparing two entities (head vs head, member vs peers, month vs same month last year, territory vs company) in one answer is expected — resolve both sides' nodes and present them together, stating basis and period for each.
+
 HOW TO USE THE GRAPH:
 - Call resolve_nodes with a list of paths to fetch those nodes.
 - Wildcards: "head/*/2026-27" returns all heads (hard cap: ${MAX_NODES_PER_RESOLVE} nodes per call).
@@ -74,9 +88,12 @@ const RESOLVE_NODES_TOOL = {
   description:
     "Fetch one or more graph nodes by path. " +
     "Returns reconciled figures with population, source, cutoff, and flags. " +
-    "Use paths like: company/2026-27, head/Anant Singh/2026-27, " +
-    "salesperson/Prasun Chatterjee/2026-27, salesperson/Prasun Chatterjee/2026-27/month/Jun, " +
-    "distributor/Jagdamba Traders/2026-27, gap/live-year-sku, head/*/2026-27 (wildcard). " +
+    "Use paths like: company/2026-27, company/2025-26/likemonths, head/Anant Singh/2026-27, " +
+    "head/Anant Singh/2025-26/likemonths, salesperson/Prasun Chatterjee/2026-27, " +
+    "salesperson/Prasun Chatterjee/2026-27/month/Jun, distributor/Jagdamba Traders/2026-27, " +
+    "sku/gaps/2026-27, sku/gaps/Anant Singh/2026-27, sku/push/{distributor}/2026-27, " +
+    "sku/discounts/2026-27, sku/detail/2026-27, segment/CP/2026-27, " +
+    "gap/live-year-sku, head/*/2026-27 (wildcard). " +
     `Hard cap: ${MAX_NODES_PER_RESOLVE} nodes per call. If truncated, refine your paths.`,
   input_schema: {
     type: "object" as const,
@@ -127,12 +144,37 @@ async function runResolveTool(
 
 // ── Numeric guard ─────────────────────────────────────────────────────────────
 
+// Recursively collect every finite number carried in a node's `detail` blob so
+// figures cited from rich detail (push lists, gap segments, discounts) pass the
+// guard just like measure values do.
+function collectDetailNumbers(value: unknown, out: number[], depth = 0): void {
+  if (depth > 6 || value == null) return;
+  if (typeof value === "number") {
+    if (isFinite(value)) out.push(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const v of value) collectDetailNumbers(v, out, depth + 1);
+    return;
+  }
+  if (typeof value === "object") {
+    for (const v of Object.values(value as Record<string, unknown>)) {
+      collectDetailNumbers(v, out, depth + 1);
+    }
+  }
+}
+
 function runNumericGuard(
   answer: string,
   nodes: GraphNode[],
 ): { status: "clean" | "unmatched"; unmatched: string[] } {
   const crPatterns = answer.matchAll(/[\d,]+\.?\d*\s*(?:Cr|Lakh|lakh|cr)\b/g);
   const unmatched: string[] = [];
+
+  const detailNumbers: number[] = [];
+  for (const n of nodes) {
+    if (n.detail) collectDetailNumbers(n.detail, detailNumbers);
+  }
 
   for (const match of crPatterns) {
     const raw = match[0].replace(/[,\s]/g, "");
@@ -141,15 +183,13 @@ function runNumericGuard(
     if (!isFinite(num)) continue;
 
     const inRupees = raw.toLowerCase().includes("cr") ? num * 1e7 : num * 1e5;
-    // Allow 2% tolerance.
-    const found = nodes.some((n) =>
-      n.measures.some(
-        (m) =>
-          m.value != null &&
-          m.unit === "INR" &&
-          Math.abs(m.value - inRupees) / Math.max(Math.abs(inRupees), 1) < 0.02,
-      ),
-    );
+    const close = (v: number) =>
+      Math.abs(v - inRupees) / Math.max(Math.abs(inRupees), 1) < 0.02;
+    // Allow 2% tolerance; match measure values first, then detail values.
+    const found =
+      nodes.some((n) =>
+        n.measures.some((m) => m.value != null && m.unit === "INR" && close(m.value)),
+      ) || detailNumbers.some(close);
     if (!found) unmatched.push(match[0]);
   }
 

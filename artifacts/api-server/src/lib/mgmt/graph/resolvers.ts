@@ -16,6 +16,14 @@ import { loadDistributorDeepDive, normDistKey } from "../distributorDeepDive.js"
 import { loadRoster } from "../roster.js";
 import memberSheetMapRaw from "../../../../config/member_sheet_map.json" with { type: "json" };
 import { logger } from "../../logger.js";
+import {
+  resolveSkuGaps,
+  resolveSkuPush,
+  resolveSegment,
+  resolveSkuDiscounts,
+  resolveSkuDetail,
+  likeMonthsWindow,
+} from "./skuNodes.js";
 
 const memberSheetMap = memberSheetMapRaw as Record<string, string>;
 
@@ -439,6 +447,56 @@ async function resolveDistributor(distributorName: string, fy: string): Promise<
   };
 }
 
+// ── Like-months nodes (company / head) ────────────────────────────────────────
+//
+// A likemonths node restricts PRIMARY figures for any loaded FY to the window
+// of complete months in the open FY, so open-year comparisons never mix a
+// partial year against a full year.
+
+async function resolveLikeMonths(
+  fy: string,
+  headName?: string,
+): Promise<GraphNode> {
+  const win = await likeMonthsWindow(fy);
+  const primary = await loadPrimaryPeriodData(fy, win.labels);
+
+  const measures: MeasureValue[] = [];
+  if (headName) {
+    const headSale = primary.sale.byHead?.get?.(headName) ?? null;
+    const headBooking = primary.booking.byHead?.get?.(headName) ?? null;
+    measures.push(mv("primary_sale", `Primary Sale — ${headName} (like months)`, headSale));
+    measures.push(mv("primary_ob", `Primary Order Booking — ${headName} (like months)`, headBooking));
+  } else {
+    measures.push(mv("primary_sale", "Primary Sale / Dispatch (like months)", primary.sale.total > 0 ? primary.sale.total : null));
+    measures.push(mv("primary_ob", "Primary Order Booking (like months)", primary.booking.total > 0 ? primary.booking.total : null));
+  }
+
+  const flags = ["LIKE_MONTHS_BASIS"];
+  if (!primary.sale.periodFiltered) flags.push(`PRIMARY_SALE_FY_TOTAL: ${primary.sale.source}`);
+  if (headName && (primary.sale.byHead == null || primary.sale.byHead.size === 0)) {
+    flags.push("HEAD_SPLIT_UNAVAILABLE: this FY's primary source carries no per-head split for this period basis");
+  }
+
+  const basePath = headName ? `head/${headName}/${fy}` : `company/${fy}`;
+  return {
+    path: `${basePath}/likemonths`,
+    level: headName ? "head" : "company",
+    fy,
+    name: headName ? `${headName} (like months)` : "Prayag India (like months)",
+    measures,
+    population:
+      "Primary register (invoice-line level, current rows), restricted to the like-months window. " +
+      "Includes project / institutional / govt business. Secondary figures are NOT on this node.",
+    source: `Primary booking: ${primary.booking.source}. Primary sale: ${primary.sale.source}.`,
+    cutoff: win.desc,
+    flags,
+    parent: basePath,
+    children: [],
+    childrenSumToParent: null,
+    isGap: false,
+  };
+}
+
 // ── Path parser + dispatcher ──────────────────────────────────────────────────
 
 type ResolveResult = { node: GraphNode | null; error: string | null };
@@ -456,18 +514,56 @@ export async function resolvePath(path: string, defaultFy: string): Promise<Reso
   const parts = trimmed.split("/");
 
   try {
-    // company/{fy}
+    // company/{fy}[/likemonths]
     if (parts[0] === "company") {
       const fy = parts[1] ?? defaultFy;
+      if (parts[2] === "likemonths") {
+        return { node: await resolveLikeMonths(fy), error: null };
+      }
       return { node: await resolveCompany(fy), error: null };
     }
 
-    // head/{name}/{fy}
+    // head/{name}/{fy}[/likemonths]
     if (parts[0] === "head") {
+      if (parts[parts.length - 1] === "likemonths") {
+        const fy = parts[parts.length - 2] ?? defaultFy;
+        const headName = parts.slice(1, -2).join("/");
+        if (!headName) return { node: null, error: "head path requires a name: head/{name}/{fy}/likemonths" };
+        return { node: await resolveLikeMonths(fy, headName), error: null };
+      }
       const headName = parts.slice(1, -1).join("/");
       const fy = parts[parts.length - 1] ?? defaultFy;
       if (!headName) return { node: null, error: "head path requires a name: head/{name}/{fy}" };
       return { node: await resolveHead(headName, fy), error: null };
+    }
+
+    // sku/gaps/{fy} | sku/gaps/{head}/{fy} | sku/push/{distributor}/{fy}
+    // sku/discounts/{fy} | sku/detail/{fy}
+    if (parts[0] === "sku") {
+      const sub = parts[1];
+      const fy = parts[parts.length - 1] ?? defaultFy;
+      if (sub === "gaps") {
+        const head = parts.length > 3 ? parts.slice(2, -1).join("/") : undefined;
+        return { node: await resolveSkuGaps(fy, head), error: null };
+      }
+      if (sub === "push") {
+        const dist = parts.slice(2, -1).join("/");
+        if (!dist) return { node: null, error: "push path requires a distributor: sku/push/{distributor}/{fy}" };
+        return { node: await resolveSkuPush(dist, fy), error: null };
+      }
+      if (sub === "discounts") return { node: await resolveSkuDiscounts(fy), error: null };
+      if (sub === "detail")    return { node: await resolveSkuDetail(fy), error: null };
+      return { node: null, error: `Unknown sku path: "${trimmed}". Use sku/gaps/{fy}, sku/gaps/{head}/{fy}, sku/push/{distributor}/{fy}, sku/discounts/{fy}, sku/detail/{fy}` };
+    }
+
+    // segment/{name}/{fy} — seasonality + period net for one segment
+    if (parts[0] === "segment") {
+      const fy = parts[parts.length - 1] ?? defaultFy;
+      const name = parts.slice(1, -1).join("/");
+      if (!name) return { node: null, error: "segment path requires a name: segment/{name}/{fy}" };
+      const node = await resolveSegment(name, fy);
+      if (!node) return { node: null, error: `Segment "${name}" not found in seasonality history or FY${fy} facts.` };
+      return { node, error: null };
     }
 
     // salesperson/{name}/{fy}[/month/{month}]
