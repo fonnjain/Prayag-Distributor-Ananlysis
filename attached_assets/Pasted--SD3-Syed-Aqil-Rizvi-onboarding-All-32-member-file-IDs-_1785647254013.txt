@@ -1,0 +1,151 @@
+# SD3 — Syed Aqil Rizvi onboarding
+
+*All 32 member file IDs resolved. Figures verified against the live dashboard on 1 August 2026.*
+
+---
+
+## Why this head next
+
+| | Anant Singh | Sandeep Dadheech | **Syed Aqil Rizvi** |
+|---|---|---|---|
+| Members | 13 (10 active) | 74 (71 active) | **32 (32 active)** |
+| States | 4 | 8 | **4** |
+| Order booking | ₹2.35 Cr | ₹35.48 Cr | **₹12.42 Cr** |
+| Target | ₹4.03 Cr | ₹56.98 Cr | **₹22.30 Cr** |
+| Achievement | 58.4% | 62.3% | **55.7%** |
+| Retailers | 748 | 6,248 | **2,624** |
+
+**The cleanest team so far.** No leavers, no zero-target members, and the identity `BM − G = H` holds for all 32. That makes it a good test of whether the pipeline works when nothing is anomalous — every prior onboarding had a distortion to work around.
+
+He is also one of the five merged head-canon cases, so his year-on-year data is clean.
+
+---
+
+## The prompt
+
+```
+Prayag app - Sales Deep Dive. Onboard State Head 'Syed Aqil Rizvi'. Same global
+rules as every earlier phase. Do not change any other State Head and do not
+change any earlier acceptance number.
+
+1. MEMBER FILE IDs - all 32 resolved. Use these directly; no search needed.
+
+     Abhishek Kumar Gupta        1sHvSXi0AD3yzVisDp_Q80pgUI4xFY0cLGM19VDtecFY
+     Ajeet Yadav                 1Rxe7z3t_XfrfvmDl_1EhXw1OSPwOK642EiaRHONm2Oc
+     AMAN KHAN                   1I8z6Xfl0SZLMgBnWxBRKoVK18zG4drUtjIQybtuJzxE
+     Ankur Srivastava            1BRUajD0ljy0AGH7V6VApyhC8CYImP4SFkM_02NmsTfQ
+     Arun Sharma                 1jmBFvxVGKQdmVHp9imrnhkW5r-SmJ28k6LqBFIGDm6A
+     Deependra Singh             18LfbnJvue8ABkZqR8NiXNEy_rJ_H-rZcZ-ip9KE1ZmQ
+     Dhiraj Ravindra Patle       1MWp85DrwBNK7tQ1tlVLrCDUimILFTDnvvv6FtNhbiEA
+     Faraz Khan                  160qastmdA75nF7eZOKHiYx2-dg1tDT-CE6L7D1M1stU
+     Hemant kumar srivastava     168rO1noAjXUXPyctkxWsPdyeGBTsdn824sOiP-z2cWY   # sheet titled: HEMANT SRIVASTAVA
+     Himanshu Sable              14pr0LWS4yWvsbcpEvNucTxJa2rYb_R0kLM3icaSL2uY
+     Jitender Birla              1HDGA-F4B-GDBBUlnJZi2PMo2Yy--hq6dG-YFM90rIzw
+     Manish Kumar Kartikey       12lV-Fl7jFZ9xKdVrjo8td38uNtGVZVee4toXD179p0M
+     Manoj Yadav                 1C8zFo8Wr-G2dpe4FzFhr8ObF-1C64JPU2sDH3LNGo_Y
+     Nandkishor Upadhyay         1KQTVmJDcGi8nV3_t1mE9kcnETLPWhuSu5rpSaRf3Hf4
+     Neel Kamal choure           1vvfCDjQh1LBVwkUUB7ZEeku1dM6x_yzeXavvI--pPRg
+     Nitin prasad baghel         1zZrQzeo-pLQodYi6Jw--fNVDOKrSmQL1Jd3GjTKt7z8
+     Om dutt Dwivedi             1VEbI85GIACBzK7Fr53MA8H90fnc5xOBzkIV_G3O2R84
+     Pradeep Kumar Dwivedi       1cOCCtQejZMOc5M-X_uBY6P5Whx2uTl85m-_57_mUQg0
+     Pradeep Rajak               1dUp9H9fQ-eRdYYXUl4RfyqoZHopWcp6rvHiswO-8olc
+     Rajan Srivastava            1qB0wLF6n06Xjuz33RbhM7IXLGi5siQLFWFLO-uO9I_g
+     Rajesh Patel                1ii7mSZuwFsDeSKThBBKb777jYLe6wyBkEiBUpLVItGw
+     Ravi Kumar Verma            1782y0Ibe1yvSMN3u9Xl6eOr76HRhRm0OHFWC8W9DhHQ
+     Rohit Kumar                 171w6KRBV2rba0q9n8Gbz_2pG5V9aYcwOZTrmc_2SUsg
+     Saqib juned                 152AECjMPz2mnH4mgBJ75E4ggGRK2pwMrpTycQwGhS9o
+     Shubham Shukla              1PYshLg1OXx1pJptcckl0-wsx1cq1FqXl7CB7pBkMyXw
+     Siddharth Shanker Singh     1MvzyJLe5oScOl4KjmrXr4bF1shHNP7m3u_KrVvJNGq8   # sheet titled: Siddharth Singh
+     Siddharth Srivastava        1Aj8bWFTL-YpgmLeRYIHRh9VWv_x0tdoFK37SvSkVoMA
+     Sunil Kumar                 1jDBw_zRV45g4GHvTxYAqTVyIfEtjeL3BgdcT4LOTyuo
+     Vikas Kumar (Bareilly)      1xU8paeZ0mv2aDj_IVEGT9OnonuXc8Lhfbz35yExNTVQ
+     Vishal Dheer                1eZTb0NOMQD308IrvgRFKi0-gbtKGrUXc1Qg96NLMbgk
+     Vishal Kumar Gaurav         14M5jXuQsrQnNmVEk4qaGhkFZmAEG0r9kxepMstmBo44
+     Wasim Ahmad                 1pcIpQIFPR-YUVv9ATwQfIVPOInmgM9-9wy6F6PXI-Q8
+
+2. THE SHEETS SIT IN TWO FOLDERS:
+     1-YWIGUuRzQtUAaM3uPpfBRdhS3UPYRIB   29 members - East U.P, Madhya Pradesh,
+                                          Chattisgarh
+     1MaFjbw_pf0LYqnxaG_LVMUT4THGH9Phf    3 members - Maharashtra 2
+                                          (Himanshu Sable, Nandkishor Upadhyay,
+                                           Dhiraj Ravindra Patle)
+   Do not assume one folder per head. Sandeep Dadheech's team spans four.
+
+3. TWO TITLE MISMATCHES - the mapping above is correct, do not re-derive them:
+     Hemant kumar srivastava -> sheet titled "HEMANT SRIVASTAVA" (no "kumar")
+     Siddharth Shanker Singh -> sheet titled "Siddharth Singh"   (no "Shanker")
+   Note the team also has a "Siddharth Srivastava", a different person with his
+   own sheet. Do not conflate them.
+
+4. NEVER READ A FILE WHOSE TITLE BEGINS 'Copy'. The main folder holds Copy of
+   versions for Ankur Srivastava, Rohit Kumar, Abhishek Kumar Gupta, Vikas Kumar
+   (Bareilly), Pradeep Kumar Dwivedi, Shubham Shukla, Pradeep Rajak, Deependra
+   Singh, Sunil Kumar, Rajesh Patel and Manish Kumar Kartikey. The Maharashtra
+   folder holds Copy of Himanshu Sable, Nandkishor Upadhyay and Dhiraj Ravindra
+   Patle. All are transitory feeder sheets.
+
+5. THE FOLDER CONTAINS MANY NON-TEAM SHEETS. Folder contents do not equal team
+   membership - the main folder holds roughly 30 sheets for people not on this
+   team, including one titled "AQIL RIZVI" which is the head's own sheet, not a
+   member's. Match against the 32 names above, not against the folder.
+
+6. HEADER TEXT USES THE FULL YEAR FORM - 'Order Booking 2026-27', not '26-27'.
+   The short form returns zeros silently. Column I equals P + Q, so it already
+   includes new-party business; never read P alone.
+
+7. PARSE OUT the 'Removed Parties' section in every member sheet. Stop on a
+   section header in column B, or a name with no integer serial in column A.
+   A blank-run stop will not fire. Label removed rows by LAST ACTIVE YEAR - the
+   sheet holds no removal date.
+
+8. Establish elapsed months per member from column BD and working days from
+   column AG. This team ranges 33 to 79 working days.
+
+Acceptance - prove each with the computed value, never an assertion of success:
+  32 members listed, all Active, no LEFT members
+  the identity BM - G = H holds for all 32
+  team totals: target Rs 22.30 Cr, order booking Rs 12.42 Cr, sales received
+    Rs 10.98 Cr, visits 10,811, retailers 2,624, cost Rs 55.87 L
+  achievement 55.7 per cent - no like-for-like split needed, every member has a
+    target
+  direct-dealer business is Rs 61,57,806 across 7 of 32 members
+  all 32 sheets load; report any that fail with the reason
+  every mapped member reconciles: own-sheet order booking equals dashboard
+    secondary plus direct dealer, exactly - report the comparison per member
+  no file whose title begins 'Copy' is read anywhere
+  Anant Singh unchanged: Rs 2,35,49,308 booking, Rs 4,02,96,667 target, 58.4%
+  Sandeep Dadheech unchanged: Rs 35.48 Cr booking, Rs 56.98 Cr target, 62.3%
+```
+
+---
+
+## The team, ranked
+
+| # | Member | State | H.Q | OB ₹ | Target ₹ | Ach % |
+|---|---|---|---|---|---|---|
+| 1 | Faraz Khan | Madhya Pradesh | Bhopal | 1,50,86,232 | 1,42,50,000 | **105.9** |
+| 2 | Rajan Srivastava | East U.P | Varanasi | 1,13,72,837 | 1,42,50,003 | 79.8 |
+| 3 | Jitender Birla | Madhya Pradesh | Indore | 69,17,352 | 1,12,50,000 | 61.5 |
+| 4 | Saqib juned | Madhya Pradesh | Indore | 66,10,257 | 83,25,000 | 79.4 |
+| 5 | Hemant kumar srivastava | East U.P | Gorakhpur | 59,84,671 | 1,14,00,000 | 52.5 |
+| … | | | | | | |
+| 31 | Neel Kamal choure | Madhya Pradesh | Jabalpur | 5,39,552 | 63,43,998 | **8.5** |
+| 32 | Manish Kumar Kartikey | Madhya Pradesh | Jabalpur | 63,279 | 20,12,903 | **3.1** |
+
+**Spread: 105.9% down to 3.1%.** Manish Kumar Kartikey has only 33 working days, so his figure is not comparable at face value — the BD elapsed-months guard matters here.
+
+**States:** East U.P 16 · Madhya Pradesh 11 · Maharashtra 2 (3) · Chattisgarh 2
+
+---
+
+## What to watch
+
+**Every member has a target and none has left.** So the zero-target and LEFT guards will not fire on this team — which makes it a clean test, but also means a bug in those paths would go unnoticed here.
+
+**Two members share a surname pattern with a third** — Siddharth Srivastava, Siddharth Shanker Singh, and separately Rajan Srivastava, Ankur Srivastava, Hemant kumar srivastava. The identity rule matters: same head, same state for some, so **headquarter is the discriminator** — Varanasi, Lucknow, Gorakhpur, Kanpur.
+
+**Faraz Khan is over target at 105.9%** on ₹1.51 Cr. Worth confirming that is real rather than a target-basis anomaly, since no other member on any team has exceeded 100%.
+
+---
+
+*File IDs resolved 1 August 2026 · figures from the live State Head Dashboard*

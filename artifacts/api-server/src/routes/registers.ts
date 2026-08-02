@@ -570,6 +570,9 @@ router.post("/registers/:fy/force-resync", async (req, res) => {
         invalidateSnapshots(`mgmt-data|${fy}|`);
         invalidateSnapshots(`warnings|${fy}|`);
         invalidateSnapshots(`company-reports|${fy}`);
+        // Analytics keys are analytics|fy|compareFy — the repaired year can sit
+        // in either position, so clear the whole family (small set).
+        invalidateSnapshots(`analytics|`);
         req.log.info({ fy }, "force-resync: payload snapshots invalidated");
       })
       .catch((err: unknown) => {

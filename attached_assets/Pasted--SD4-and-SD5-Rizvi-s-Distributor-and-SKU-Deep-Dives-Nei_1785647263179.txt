@@ -1,0 +1,175 @@
+# SD4 and SD5 — Rizvi's Distributor and SKU Deep Dives
+
+*Neither needs new data. Send after SD3 lands.*
+
+---
+
+## Why no new sources
+
+| Page | Source | Status |
+|---|---|---|
+| Sales Deep Dive | the 32 member sheets | **SD3 loads these** |
+| Distributor Deep Dive | the **same** retailer rows, regrouped by Assigned Distributor | works once SD3 lands |
+| SKU Deep Dive — distributor level | `sale_line` | already loaded company-wide |
+| SKU Deep Dive — retailer level | FY2026-27 secondary register | already loaded |
+
+**Rizvi's SKU data is already in the system.** These two prompts are about surfacing and analysing it, not loading it.
+
+---
+
+## SD4 — Distributor Deep Dive
+
+```
+Prayag app - Distributor Deep Dive for 'Syed Aqil Rizvi'. Same global rules.
+Send after SD3 is verified. NO new data source - this reads the same retailer
+rows SD3 loaded, grouped by Assigned Distributor instead of by salesperson.
+
+If the two pages disagree on a total, the grouping is wrong, not the data.
+
+1. CLASSIFY EVERY RETAILER into the five states of the Assigned Distributor
+   field: a named distributor; BLANK meaning direct dealer; '--' meaning
+   unassigned; comma-separated meaning shared; numeric meaning malformed.
+
+   RECONCILE BEFORE AGGREGATING. The blank group must equal the dashboard's
+   Direct Dealers Order: Rs 61,57,806 across SEVEN of 32 members -
+     Siddharth Shanker Singh  Rs 23.02 L
+     Rajan Srivastava         Rs 22.49 L
+     Siddharth Srivastava     Rs 12.05 L
+     Vishal Dheer             Rs  1.48 L
+     Om dutt Dwivedi          Rs  1.17 L
+     Pradeep Kumar Dwivedi    Rs  0.79 L
+     Faraz Khan               Rs  0.59 L
+   A larger blank group means the classification is wrong.
+
+   Note this team carries proportionally MORE direct-dealer business than either
+   head done so far - 5.0 per cent of order booking against 0.4 per cent for
+   Sandeep Dadheech. The parallel branch matters here.
+
+2. TEST THE UNASSIGNED FINDING - this is the third territory and the point of
+   running it again.
+     Anant Singh   retailers WITH a distributor 96.0 per cent active,
+                   WITHOUT 5.0 per cent. Member correlation -0.90 (n=10)
+     Sandeep       100 per cent versus 16 per cent. Correlation -0.33 (n=66)
+   Report the same for Rizvi's 2,624 retailers across 32 members, and state
+   plainly whether the retailer-level gap holds and what the member-level
+   correlation is.
+   CARRY THE METHOD, NOT THE RATIOS. A weak correlation reported honestly is
+   worth more than a forced confirmation.
+   Carry both readings as before: a retailer with no distributor may be unable
+   to order, OR '--' may be written when a retailer goes dormant.
+
+3. APPLY THE IDENTITY RULE TO DISTRIBUTOR NAMES. Free text, never validated.
+   Same only if the name matches AND the state agrees AND they do not appear as
+   separate rows for the same period. Never auto-merge on similarity - report
+   candidates. A wrongly merged distributor produces a concentration figure that
+   is simply false and the numeric guard cannot catch it.
+
+4. TERRITORY WHITESPACE, split and never merged, reported PER STATE:
+     COVERAGE GAP   - a district with retailers and NO distributor at all
+     ASSIGNMENT GAP - retailers unassigned where a distributor already operates
+   Size both by prior-year order booking.
+   Baseline: East U.P 16 members / 1,555 retailers · Madhya Pradesh 11 / 721 ·
+   Chattisgarh 2 / 199 · Maharashtra 2 - 3 / 149. Total 2,624.
+
+5. EXCLUDE Non-territory / Project / Govt from every territory figure.
+
+6. CONCENTRATION BOTH WAYS per state, using effective number of retailers
+   (10,000 divided by HHI) rather than a raw HHI gauge.
+
+Acceptance:
+  the five field states are counted per member and per state
+  the blank group reconciles to Rs 61,57,806 across exactly seven members
+  distributor totals sum to party order booking for the territory
+  retailer counts by state match: East U.P 1,555, Madhya Pradesh 721,
+    Chattisgarh 199, Maharashtra 2 - 149, total 2,624
+  the unassigned share is reported per member and per state, with the
+    correlation stated and compared against -0.90 and -0.33
+  coverage gap and assignment gap reported separately per state
+  the largest distributor in each of the four states is named with its share
+  no two distributors are auto-merged; candidates listed for confirmation
+  Anant Singh and Sandeep Dadheech distributor figures unchanged
+```
+
+---
+
+## SD5 — SKU Deep Dive
+
+```
+Prayag app - SKU Deep Dive for 'Syed Aqil Rizvi'. Same global rules.
+NO new data source. Distributor and direct-dealer levels read sale_line;
+retailer level reads the FY2026-27 secondary register. Both are already loaded.
+
+This is about surfacing per-head, and about testing whether the SKU findings
+replicate on a third territory.
+
+1. CONFIRM THE HEAD FILTER REACHES ALL THREE LEVELS.
+   sale_line carries head_canon. The secondary register carries the salesperson
+   name. Confirm Rizvi's 32 members resolve on both, and report how many of the
+   32 appear in the secondary register - the register uses a separate PS-code
+   name vocabulary and not every member may match.
+
+2. SEGMENT AND BREADTH for the territory:
+     NET and quantity per segment, and each segment's share
+     codes bought against codes EVER SOLD - always both numbers
+     segments not bought at all, named
+   Ever Sold is across ALL loaded fiscal years, territory channel only, never
+   the selected FY alone.
+   Rank by opportunity, never by breadth percentage - segments range from 3
+   codes to 2,657 and the percentages are not comparable.
+
+3. GAP VALUE AND THE PUSH LIST, per distributor:
+     same fiscal months across all loaded FYs, never all twelve against a quarter
+     bottom-up from what those codes actually earned - no extrapolation
+     project excluded
+     the four tiers in order: range depth, lapsed, peer gap in an active
+       segment, peer gap in a new segment
+     default the card to the top 10
+   Peer cohorts: same state if it holds 8 or more distributors, else the
+   territory, else national within the size band. Quintile of FY2025-26, never
+   the current year. Minimum 3 segment-active peers. NAME THE PEERS.
+
+4. TEST WHETHER THE SEASONALITY PATTERN HOLDS.
+   Company-wide, 13 of 14 segments peak Q4 on territory-only curves. Report
+   Rizvi's territory curves per segment and state whether they match. His
+   territory is East U.P, Madhya Pradesh, Chattisgarh and Maharashtra - a
+   different climate and construction cycle from Sandeep's east and south, so a
+   divergence is plausible and worth knowing.
+   Band and rank on TERRITORY-only curves, never all-channel. The all-channel
+   view put HDPE top of the list on a Q1 peak that was 100 per cent project.
+
+5. DISCOUNT - two measures, never in the same column:
+     primary MRP discount, all four years
+     secondary register discount, closed years AND now FY2026-27 Apr-Jun
+   Report the variance across customers on the same code - one distributor
+   materially below another is an immediate commercial conversation.
+   Flag any pushed code sitting 5 points or more above its own norm.
+
+6. FLAG WHAT IS BLOCKED rather than approximating: margin per code needs a
+   finished-goods cost master that does not exist. MRP discount is NOT margin.
+
+Acceptance:
+  Rizvi resolves on all three levels; the count of his 32 members appearing in
+    the secondary register is reported
+  segment view returns with codes bought AND codes ever sold for every segment
+  the push list is tiered and capped at 10 per segment by default
+  peer cohorts name their tier and their peers
+  seasonality is reported per segment on territory-only curves, and compared
+    against the company-wide 13-of-14 Q4 pattern
+  both discount measures are reported separately and never combined
+  margin shows its blocked reason, never an estimate
+  Anant Singh and Sandeep Dadheech SKU figures unchanged
+```
+
+---
+
+## What makes this territory a useful test
+
+**Direct-dealer business is 5.0% of order booking** — against 0.4% for Sandeep Dadheech and 6.2% for Anant Singh. So the parallel branch is material here, and the reconciliation to ₹61,57,806 across seven members is a real check rather than a formality.
+
+**The geography is different.** East U.P, Madhya Pradesh, Chattisgarh and Maharashtra — a different climate and construction cycle from Sandeep's east and south. **If the Q4 seasonality pattern holds here too, it is a company-level fact.** If it does not, that is more useful still, because it means the push list must band per territory rather than nationally.
+
+**And the unassigned finding gets its third test.** −0.90 on ten members, −0.33 on sixty-six. Thirty-two sits between them, and a third data point will settle whether the member-level correlation means anything at all.
+
+---
+
+*Figures verified against the live State Head Dashboard, 1 August 2026*

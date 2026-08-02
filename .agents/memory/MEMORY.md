@@ -79,3 +79,4 @@
 - [PSCode3 brand mirror chaining](pscode3-brand-mirror.md) — sku loader refreshes pscode3_brand_rollup mirror in same txn; backfill script is repair-only; audit 7.6 flags per-month NET drift.
 - [mgmt/data cold-start snapshot](mgmt-data-snapshot.md) — shared serveWithSnapshot layer; frozen FYs serve snapshots as final (frozen flag, no re-read); force-resync unfreeze invalidates fy prefixes.
 - [verify_anchors deploy path](anchors-deploy-path.md) — deployed monorepo cwd is the repo root; cwd-relative config paths 500 in production, use anchorsFilePath().
+- [State Head onboarding](state-head-onboarding.md) — config-only: member_sheet_map.json normSecKey→fileId; own-sheet OB = old-party + new-party + direct dealer, exactly.
