@@ -950,7 +950,7 @@ function PrimarySection({ report }: { report: SalesRepReport }) {
         <Card>
           <CardContent className="py-6 text-sm text-muted-foreground">
             No dispatch register data found for this head and FY. Load the relevant
-            register via Data Sources to enable primary view.
+            register via Organization to enable primary view.
           </CardContent>
         </Card>
       ) : (

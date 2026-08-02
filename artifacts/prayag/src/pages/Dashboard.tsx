@@ -58,7 +58,7 @@ const AREAS = [
   { id: "company-reports", label: "Company Reports", component: CompanyReports },
   { id: "targets",         label: "Targets",         component: Targets },
   { id: "pending",         label: "Pending Orders",  component: PendingOrders },
-  { id: "sources",         label: "Data Sources",    component: DataSources },
+  { id: "sources",         label: "Organization",    component: DataSources },
   { id: "data-health",     label: "Data Health",     component: DataHealth },
 ];
 
