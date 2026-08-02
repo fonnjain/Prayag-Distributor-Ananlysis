@@ -87,3 +87,4 @@
 - [State-head report extras](statehead-report-extras.md) — SKU/multi-year/roster blocks; head_canon holds DISPLAY names; sale_line SKU figures are primary_sale; 16000 max_tokens; cite-able figures must be numeric fields.
 - [Numeric guard 2-dp rounding](numeric-guard-rounding.md) — allowlist includes 2-dp lakh/crore display forms of every payload number; sums still flagged.
 - [Month-complete lock rule](month-complete-lock-rule.md) — complete when max invoice hits month-end OR the lock instant (lastDay+7d) passes; payload-logic changes need versioned snapshot keys.
+- [Distributor DD stale fallback](distributor-dd-stale-fallback.md) — member-sheet Sheets failures return 200 with membersFailed>0, not throws; only complete loads may overwrite the snapshot.

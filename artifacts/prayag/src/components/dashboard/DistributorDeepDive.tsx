@@ -436,6 +436,9 @@ type DistributorDeepDiveResult = {
   /** SD2: candidate near-duplicate distributor name pairs (Jaccard trigram > 0.6). */
   namingCandidates?: NamingCandidate[];
   error: string | null;
+  /** True when the server served the last saved snapshot because Google Sheets
+   *  was briefly busy — figures may be slightly out of date. */
+  stale?: boolean;
 };
 
 // ── API ──────────────────────────────────────────────────────────────────────
@@ -2115,6 +2118,17 @@ export default function DistributorDeepDive() {
 
       {/* ── Quota wait ─────────────────────────────────────────────── */}
       {quotaWait && <QuotaWaitBanner testId="banner-quota-wait-distributor-deep-dive" />}
+
+      {/* Stale-snapshot notice: Sheets was briefly busy, showing saved figures */}
+      {data?.stale && !fetchError && (
+        <div
+          className="rounded-md border border-amber-500/30 bg-amber-50/60 px-4 py-3 text-sm text-amber-800 dark:bg-amber-900/10 dark:text-amber-300"
+          data-testid="banner-stale-distributor-deep-dive"
+        >
+          Figures are updating — showing the last saved snapshot while Google
+          Sheets is briefly busy. Refresh in a minute for live figures.
+        </div>
+      )}
 
       {/* ── Error ──────────────────────────────────────────────────── */}
       {fetchError && (

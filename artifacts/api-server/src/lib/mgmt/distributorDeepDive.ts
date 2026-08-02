@@ -33,7 +33,7 @@
 //  - NET = Sub Total (sale_line.amount) throughout.
 //  - Never console.log — use logger.
 
-import { db, customerMaster, saleLines, primaryOrderLines, distributorTierOverrideTable } from "@workspace/db";
+import { db, customerMaster, saleLines, primaryOrderLines, distributorTierOverrideTable, routePayloadSnapshots } from "@workspace/db";
 import { eq, and, sql, inArray, or, isNull } from "drizzle-orm";
 import { logger } from "../logger.js";
 import { loadDeepDiveData } from "./deepDiveData.js";
@@ -283,6 +283,9 @@ export type DistributorDeepDiveResult = {
   partyObTotal: number;
   membersLoaded: number;
   membersNotMapped: number;
+  /** Mapped member working sheets whose Sheets read failed or timed out this
+   *  build. > 0 marks the live payload as incomplete (degraded load). */
+  membersFailed: number;
   whitespace:     TerritoryWhitespace | null;
   concentration:  CustomerConcentration | null;
   capacityCheck:  CapacityCheck | null;
@@ -297,6 +300,9 @@ export type DistributorDeepDiveResult = {
    *  Never auto-merged — listed for human confirmation only. */
   namingCandidates: NamingCandidate[];
   error: string | null;
+  /** True when the live build failed transiently and the last saved snapshot
+   *  was served instead — figures may be slightly out of date. */
+  stale?: boolean;
 };
 
 // ── Distributor field classification ─────────────────────────────────────────
@@ -718,7 +724,7 @@ export async function loadDistributorDeepDive(
   const empty = (): DistributorDeepDiveResult => ({
     fy, stateHeads, distributors: [], sharedRetailers: [],
     directDealer: null, noneAssigned: null, mappingQuality: null,
-    partyObTotal: 0, membersLoaded: 0, membersNotMapped: 0,
+    partyObTotal: 0, membersLoaded: 0, membersNotMapped: 0, membersFailed: 0,
     whitespace: null, concentration: null, capacityCheck: null,
     byState: [], perMember: [], unassignedCorrelation: null, namingCandidates: [],
     error: null,
@@ -757,6 +763,7 @@ export async function loadDistributorDeepDive(
   const allRows: RichRow[] = [];
   let membersLoaded = 0;
   let membersNotMapped = 0;
+  let membersFailed = 0;
   // D4: member spreads for cost-per-visit (keyed by display name — matches memberName on rows)
   const memberSpreads = new Map<string, RetailerSpread>();
 
@@ -765,12 +772,14 @@ export async function loadDistributorDeepDive(
     const res = sheetResults[i];
     if (res.status === "rejected") {
       logger.warn({ member: m.name, err: res.reason }, "distributorDeepDive: sheet load rejected");
+      membersFailed++;
       continue;
     }
     const sheet = res.value;
     if (sheet.status === "not-mapped") { membersNotMapped++; continue; }
     if (sheet.status !== "ok") {
       logger.warn({ member: m.name, status: sheet.status }, "distributorDeepDive: sheet not ok");
+      membersFailed++;
       continue;
     }
     membersLoaded++;
@@ -784,7 +793,7 @@ export async function loadDistributorDeepDive(
   if (!allRows.length) {
     return {
       ...empty(),
-      membersLoaded, membersNotMapped,
+      membersLoaded, membersNotMapped, membersFailed,
       error: membersLoaded === 0
         ? "No working sheets could be loaded for this state head."
         : null,
@@ -1390,6 +1399,7 @@ export async function loadDistributorDeepDive(
     partyObTotal,
     membersLoaded,
     membersNotMapped,
+    membersFailed,
     byState,
     perMember,
     unassignedCorrelation,
@@ -1399,4 +1409,155 @@ export async function loadDistributorDeepDive(
     capacityCheck,
     error: null,
   };
+}
+
+// ── Stale-snapshot fallback (mirrors deepDiveData.ts) ─────────────────────────
+//
+// When the live build fails transiently (Sheets quota / cold start), the last
+// successful payload — persisted in route_payload_snapshot after every good
+// build — is served with a `stale` flag instead of a hard 500.  A short
+// in-memory window (STALE_SERVE_MS) avoids re-reading the DB on every request
+// while Sheets recovers; once it expires the live build is retried.
+
+const STALE_SERVE_MS = 60_000;
+const _staleFallback = new Map<string, { payload: DistributorDeepDiveResult; until: number }>();
+const DIST_DD_SNAP_PREFIX = "dist-deep-dive|";
+
+function distDdSnapKey(fy: string, stateHead: string | undefined): string {
+  return `${DIST_DD_SNAP_PREFIX}${fy}|${(stateHead ?? "").trim().toUpperCase()}`;
+}
+
+async function saveDistDdSnapshot(key: string, payload: DistributorDeepDiveResult): Promise<void> {
+  try {
+    await db
+      .insert(routePayloadSnapshots)
+      .values({ key, payload: payload as unknown as Record<string, unknown> })
+      .onConflictDoUpdate({
+        target: routePayloadSnapshots.key,
+        set: { payload: payload as unknown as Record<string, unknown>, savedAt: new Date() },
+      });
+  } catch (err) {
+    logger.warn({ err, key }, "distributorDeepDive: snapshot save failed (non-fatal)");
+  }
+}
+
+async function loadDistDdSnapshot(key: string): Promise<DistributorDeepDiveResult | null> {
+  try {
+    const rows = await db
+      .select({ payload: routePayloadSnapshots.payload })
+      .from(routePayloadSnapshots)
+      .where(eq(routePayloadSnapshots.key, key))
+      .limit(1);
+    if (rows.length === 0) return null;
+    return rows[0].payload as unknown as DistributorDeepDiveResult;
+  } catch (err) {
+    logger.warn({ err, key }, "distributorDeepDive: snapshot load failed");
+    return null;
+  }
+}
+
+/** A live load is complete when at least one member sheet loaded and no mapped
+ *  sheet failed or timed out — only such payloads may replace the snapshot. */
+export function isCompleteLoad(r: Pick<DistributorDeepDiveResult, "error" | "membersLoaded" | "membersFailed">): boolean {
+  return r.error === null && r.membersLoaded > 0 && r.membersFailed === 0;
+}
+
+/** A live load is degraded when any mapped member sheet failed/timed out, or
+ *  when nothing loaded at all and the payload carries an error. Member-sheet
+ *  Sheets failures never throw (loadMemberSheet catches and Promise.allSettled
+ *  absorbs the rest), so THIS — not an exception — is the primary transient
+ *  failure signal for this route. */
+export function isDegradedLoad(r: Pick<DistributorDeepDiveResult, "error" | "membersLoaded" | "membersFailed">): boolean {
+  return r.membersFailed > 0 || (r.membersLoaded === 0 && r.error !== null);
+}
+
+/** Injectable dependencies so the fallback decision logic is unit-testable. */
+export type ResilientDeps = {
+  build: (fy: string, stateHead?: string) => Promise<DistributorDeepDiveResult>;
+  loadSnap: (key: string) => Promise<DistributorDeepDiveResult | null>;
+  saveSnap: (key: string, payload: DistributorDeepDiveResult) => Promise<void>;
+  now: () => number;
+  sleep: (ms: number) => Promise<void>;
+  staleMap: Map<string, { payload: DistributorDeepDiveResult; until: number }>;
+};
+
+const defaultDeps: ResilientDeps = {
+  build: loadDistributorDeepDive,
+  loadSnap: loadDistDdSnapshot,
+  saveSnap: saveDistDdSnapshot,
+  now: () => Date.now(),
+  sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+  staleMap: _staleFallback,
+};
+
+export async function loadDistributorDeepDiveResilientWith(
+  fy: string,
+  selectedStateHead: string | undefined,
+  deps: ResilientDeps,
+): Promise<DistributorDeepDiveResult> {
+  const key = distDdSnapKey(fy, selectedStateHead);
+
+  const serveSnapshot = async (reason: string): Promise<DistributorDeepDiveResult | null> => {
+    const cached = deps.staleMap.get(key);
+    if (cached && deps.now() < cached.until) return { ...cached.payload, stale: true };
+    const snap = await deps.loadSnap(key);
+    if (!snap) return null;
+    logger.warn(
+      { fy, stateHead: selectedStateHead, reason },
+      "distributorDeepDive: live build unusable — serving stale snapshot",
+    );
+    deps.staleMap.set(key, { payload: snap, until: deps.now() + STALE_SERVE_MS });
+    return { ...snap, stale: true };
+  };
+
+  let result: DistributorDeepDiveResult | null = null;
+  let buildErr: unknown = null;
+  try {
+    result = await deps.build(fy, selectedStateHead);
+  } catch (err) {
+    buildErr = err;
+  }
+
+  if (result) {
+    if (!selectedStateHead) return result; // state-head list only — nothing to snapshot
+    if (isCompleteLoad(result)) {
+      // Only a demonstrably complete load may replace the last known-good
+      // snapshot — a partial Sheets outage must never overwrite it.
+      deps.staleMap.delete(key);
+      void deps.saveSnap(key, result);
+      return result;
+    }
+    if (!isDegradedLoad(result)) return result; // e.g. no sheets mapped yet
+    // Degraded (some/all member sheets failed) → prefer the last saved snapshot.
+    const snap = await serveSnapshot(`degraded: ${result.membersFailed} sheet(s) failed, ${result.membersLoaded} loaded`);
+    // No snapshot yet — serve the partial live payload rather than nothing.
+    return snap ?? result;
+  }
+
+  // The build itself threw (e.g. the Data-tab read failed hard).
+  const snap = await serveSnapshot(buildErr instanceof Error ? buildErr.message : String(buildErr));
+  if (snap) return snap;
+
+  // No snapshot at all (first-ever load) — retry the live build once after a
+  // short pause before surfacing the error to the route handler.
+  logger.warn(
+    { err: buildErr, fy, stateHead: selectedStateHead },
+    "distributorDeepDive: live build failed with no snapshot — retrying once",
+  );
+  await deps.sleep(1_500);
+  return deps.build(fy, selectedStateHead);
+}
+
+/**
+ * Resilient entry point for GET /api/mgmt/distributor-deep-dive.
+ * Complete live build → persist snapshot; transient failure (thrown OR a
+ * degraded 200 payload with failed member sheets) → serve the last saved
+ * snapshot with stale=true; no snapshot at all → one retry after a short
+ * pause, then let the error propagate to the route's hard-error handler.
+ */
+export async function loadDistributorDeepDiveResilient(
+  fy: string,
+  selectedStateHead?: string,
+): Promise<DistributorDeepDiveResult> {
+  return loadDistributorDeepDiveResilientWith(fy, selectedStateHead, defaultDeps);
 }

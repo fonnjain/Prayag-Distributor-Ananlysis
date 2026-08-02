@@ -1309,8 +1309,10 @@ router.get("/mgmt/distributor-deep-dive", async (req: Request, res: Response): P
 
     req.log.info({ fy, stateHead }, "mgmt/distributor-deep-dive: request received");
 
-    const { loadDistributorDeepDive } = await import("../lib/mgmt/distributorDeepDive.js");
-    const result = await loadDistributorDeepDive(fy, stateHead);
+    // Resilient loader: a transient Sheets failure serves the last saved
+    // snapshot with a `stale` flag instead of a hard 500 (see distributorDeepDive.ts).
+    const { loadDistributorDeepDiveResilient } = await import("../lib/mgmt/distributorDeepDive.js");
+    const result = await loadDistributorDeepDiveResilient(fy, stateHead);
     res.json(result);
   } catch (err) {
     if (respondIfQuotaError(err, res)) return;
