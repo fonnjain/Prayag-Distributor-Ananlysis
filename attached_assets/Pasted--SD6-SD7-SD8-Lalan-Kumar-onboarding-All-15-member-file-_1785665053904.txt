@@ -1,0 +1,238 @@
+# SD6 / SD7 / SD8 — Lalan Kumar onboarding
+
+*All 15 member file IDs resolved, all in one folder. Figures verified against the live dashboard, 2 August 2026.*
+
+---
+
+## Why this head
+
+| | Anant Singh | Sandeep | Rizvi | **Lalan Kumar** |
+|---|---|---|---|---|
+| Members | 13 (10 active) | 74 (71) | 32 (32) | **15 (all active)** |
+| States | 4 | 8 | 4 | **1 — Maharashtra** |
+| Order booking | ₹2.35 Cr | ₹35.48 Cr | ₹12.42 Cr | **₹3.22 Cr** |
+| Achievement | 58.4% | 62.3% | 55.7% | **57.9%** |
+| Direct dealer | ₹14.49 L | ₹1.41 L | ₹61.58 L | **₹0 — none** |
+
+Takes coverage from **119 to 134 of 182 members (74%)**.
+
+**The reason that matters:** three of the largest achievement-badge corrections were his members. When new-party order booking was found missing from the badge — **Unmesh Dilip Thakar read 17.5% when he was at 77.1%**, a 60-point error, the worst on the platform. Prasad Pundalik Yedge 28.1 → 69.7, Vaibhav Bapurao Waghe 39.2 → 69.7. Onboarding him verifies that fix against full sheet detail on the team where it did most damage.
+
+**Zero direct-dealer business** — the first team with none at all. Every retailer sits under a named distributor or is unassigned, which makes the Distributor Deep Dive reconciliation unusually clean.
+
+---
+
+# SD6 — Sales Deep Dive
+
+```
+Prayag app - Sales Deep Dive. Onboard State Head 'Lalan Kumar'. Same global rules
+as every earlier phase. Do not change any other State Head and do not change any
+earlier acceptance number.
+
+1. MEMBER FILE IDs - all 15 resolved, all in ONE folder
+   1MaFjbw_pf0LYqnxaG_LVMUT4THGH9Phf (Maharashtra). Use these directly.
+
+     Amey Deodhar                1hdnWim5IyU3odQS7qac9pteQzzcjKICRf0oXedBwc28
+     ANAND BHAGWAN MORE          13D9UbXPP75b58DcBlWgLxY0DVWj6aVq2oz2QDzKUZKg
+     Amit Damodhar Jadhav        1MGgolYlaQvBNEw9oPfJ_rFftpPOa2GbsHdGvFEWLn20
+     Chandrakant Mandave         1sSd36kbbelgYAPey114fqOQ7PNwz4uYjGlTg07byzOs
+     Kunal Sanjay Sasane         1RIKtidqK6hOmuK0xqGl8SKK7KjTCUKiagqmfmuzZkFQ
+     Prasad Pundalik Yedge       1aJSsNfLs2vSa44AxxODE13x_FesRGxlv96d6TPn5VaI
+     Rahul Ramchandra Bhosale    1Q5bLMdU-xURO8V0-x3r5xNyq88vnfkNPCQ3hu_xHIsU
+     Sandeep Amrut Sonawane      1CL9AQCD6lDzVeoB1ZWNbvv3iQAnDc2XWAbufodLvVyE
+     Swapnil Rajput              1SMt1pqYCvGPpiMknRM26ek7JjvdwZJqK-Li4_SyFHEc
+     Syed Sohel Hashmi           1VHlUXvmsF-UUlS75Y_QvlWUXvBPAtAPMWQSoseA9psY
+     Tejas Lunawat               1MRc1o6yRbC1yz2vf27KvD-M1jrmImyc4pmYWn9yMT_Y
+     Tushar Ravindra Kanthale    1WTwJOkEL-7pdLdu4DqeFqbDaTBRyZ2Y7K1Ui-q851JQ
+     Unmesh Dilip Thakar         1VeRiww_FU3hSWDH7KCJh6BgQ0zzOQ2pRPjdbNLvkRm0
+     Vaibhav Bapurao Waghe       1L6Qot-tX0BahjoHFRtp7rqwsomNzqMNnwPIEbNZIte0
+     Vijay Dnyaneshwar           12dKOgyOY9ZTIrAmx7mV_iLSm7hXEwbS1yATBaqnCBtc
+
+2. THE FOLDER IS FULL OF TRAPS. It holds roughly 65 files for 15 members.
+   NEVER read a file whose title begins 'Copy' or 'Copy Of' - there is a Copy of
+   almost every member.
+   NEVER read a file whose title contains LEFT, Left or a leaving date. The
+   folder holds: Ramesh Parshuram Oak LEFT 31.01.2026, Amit Haridasji Belonkar
+   LEFT 25.11.2024, Prashant Sardeshpande Left: 08-Jun-24, Ramdas Sampat Jadhav
+   (LEFT), Manish Sharma (LEFT 16.07.2022), Pravin Ashok Bansode (LEFT
+   28.02.2023), Satish Shete LEFT 07.04.2025, Pradip Laxman Biradar left
+   30-Aug-25, Manoj Daware Left: 22-Feb-25, Vibhor Mathur Left 08.05.2025,
+   Dnyaneshwar More (LEFT 19.05.2022), Girish Bapu Jadhav Left: 08-Jun-24,
+   Ashish Rahangadale (Last working 14.10.2023).
+   FOLDER CONTENTS DO NOT EQUAL TEAM MEMBERSHIP. It also holds three of Syed
+   Aqil Rizvi's members (Himanshu Sable, Nandkishor Upadhyay, Dhiraj Ravindra
+   Patle), people from other teams (Praveen Pandey, Shailesh Sharma, Dipak
+   Shivling Agre, Shubham Khivsara) and a DISTRIBUTOR sheet (Wahid Marketing).
+   Match against the 15 names above, nothing else.
+
+3. NAME NOTE: the dashboard says 'Sandeep Amrut Sonawane'; the FY2026-27
+   secondary register carried a duplicate group under 'SANDEEP AMRUT SANWANE'.
+   Same person, different spelling. Do not create two.
+
+4. THIS TEAM VERIFIES THE ACHIEVEMENT-BADGE FIX. Three members were the worst
+   affected when new-party order booking was omitted:
+     Unmesh Dilip Thakar    17.5% -> 77.1%   (60-point error)
+     Prasad Pundalik Yedge  28.1% -> 69.7%
+     Vaibhav Bapurao Waghe  39.2% -> 69.7%
+   Confirm all three now compute correctly from their own sheets, and that
+   column I equals P + Q for every member.
+
+5. WORKING DAYS RANGE 29 TO 77 - the widest of any team so far. Vaibhav 29,
+   Prasad 38, Unmesh 41 against Amey 77. Read elapsed months from column BD per
+   member; never a team average. Under a 55-day partial-tenure rule, three
+   members would be flagged - confirm the norm is derived from this team rather
+   than hardcoded.
+
+6. HEADER TEXT USES THE FULL YEAR FORM - 'Order Booking 2026-27', not '26-27'.
+   Parse out the 'Removed Parties' section; stop on a section header in column B
+   or a name with no integer serial in column A. Label removed rows by LAST
+   ACTIVE YEAR.
+
+Acceptance - prove each with the computed value:
+  15 members, all Active, no LEFT, every one with a target
+  the identity BM - G = H holds for all 15
+  team totals: order booking Rs 3,22,36,040, target Rs 5,57,00,000, sales
+    received Rs 3,09,70,590, achievement 57.9 per cent, visits 4,230,
+    retailers 1,119, cost Rs 18.32 L
+  DIRECT DEALER ORDER IS ZERO for every member - this team has none
+  Unmesh, Prasad and Vaibhav compute above 69 per cent, not below 40
+  every mapped member reconciles: own-sheet order booking equals dashboard
+    column I, exactly - report the comparison per member
+  no file beginning 'Copy' and no file containing LEFT is read anywhere
+  Anant Singh, Sandeep Dadheech and Syed Aqil Rizvi are unchanged
+```
+
+---
+
+# SD7 — Distributor Deep Dive
+
+**No new data.** Same retailer rows SD6 loads, regrouped by Assigned Distributor.
+
+```
+Prayag app - Distributor Deep Dive for 'Lalan Kumar'. Same global rules. Send
+after SD6 is verified. NO new source.
+
+1. CLASSIFY EVERY RETAILER into the five states of the Assigned Distributor
+   field: named distributor; BLANK meaning direct dealer; '--' meaning
+   unassigned; comma-separated meaning shared; numeric meaning malformed.
+
+   THIS TEAM IS THE CLEANEST RECONCILIATION AVAILABLE. Direct Dealers Order is
+   ZERO for all 15 members, so the BLANK group must be EMPTY. Any blank at all
+   means the classification is wrong - there is no direct-dealer business to
+   discover. Every previous team had some and the check was approximate; here it
+   is exact.
+
+2. TEST THE UNASSIGNED FINDING - fourth territory.
+     Anant Singh  96.0 per cent active with a distributor, 5.0 without.
+                  member correlation -0.90 (n=10)
+     Sandeep      100 versus 16.   correlation -0.33 (n=66)
+     Rizvi        report as computed
+   Report the same for Lalan's 1,119 retailers across 15 members and state
+   plainly whether the retailer-level gap holds and what the correlation is.
+   CARRY THE METHOD, NOT THE RATIOS.
+   Carry both readings: a retailer with no distributor may be unable to order,
+   OR '--' may be written when a retailer goes dormant.
+
+3. APPLY THE IDENTITY RULE TO DISTRIBUTOR NAMES. Free text, never validated.
+   Same only if the name matches AND the state agrees AND they do not appear as
+   separate rows for the same period. Never auto-merge on similarity.
+   Note the folder holds a sheet titled 'Wahid Marketing' - that is a
+   DISTRIBUTOR, not a member. Its presence in a member folder is a filing
+   accident, not a data relationship.
+
+4. TERRITORY WHITESPACE, split and never merged, reported per district since
+   the whole team is one state:
+     COVERAGE GAP   - a district with retailers and NO distributor at all
+     ASSIGNMENT GAP - retailers unassigned where a distributor already operates
+   Size both by prior-year order booking.
+   Twelve headquarters across Maharashtra: Mumbai, Pune, Nashik, Aurangabad,
+   Kolhapur, Sangli, Miraj, Latur, Nanded, Jalgaon, Dhule, Parbhani. Single-state
+   coverage makes district whitespace unusually readable here.
+
+5. EXCLUDE Non-territory / Project / Govt from every territory figure.
+
+6. CONCENTRATION BOTH WAYS per district, using effective number of retailers
+   (10,000 divided by HHI).
+
+Acceptance:
+  the five field states are counted per member and per district
+  THE BLANK GROUP IS EMPTY - direct dealer is zero for this team
+  distributor totals sum to Rs 3,22,36,040, the full order booking
+  retailer count reconciles to 1,119 against the dashboard, and the sheet count
+    is reported beside it where it differs by more than 3
+  the unassigned share is reported per member and per district with the
+    correlation, compared against -0.90 and -0.33
+  coverage gap and assignment gap reported separately per district
+  the largest distributor is named with its share
+  Anant Singh, Sandeep and Rizvi distributor figures unchanged
+```
+
+---
+
+# SD8 — SKU Deep Dive
+
+**No new data.** `sale_line` and the FY2026-27 secondary register are already loaded company-wide.
+
+```
+Prayag app - SKU Deep Dive for 'Lalan Kumar'. Same global rules. NO new source.
+
+1. CONFIRM THE HEAD FILTER REACHES ALL THREE LEVELS, and report how many of the
+   15 members appear in the FY2026-27 secondary register - it uses a separate
+   PS-code name vocabulary and not every member may match. Note 'Sandeep Amrut
+   Sonawane' appears there as 'SANDEEP AMRUT SANWANE'.
+
+2. SEGMENT AND BREADTH for the territory. Codes bought against codes EVER SOLD,
+   across ALL loaded fiscal years, territory channel only. Rank by opportunity,
+   never by breadth percentage.
+
+3. GAP VALUE AND THE PUSH LIST per distributor: same fiscal months across years,
+   bottom-up with no extrapolation, project excluded, four tiers in order, top 10
+   per card. Peer cohorts by quintile of FY2025-26, minimum 3 segment-active
+   peers, NAME THE PEERS.
+
+4. SEASONALITY - THE REAL TEST HERE.
+   Company-wide, 13 of 14 segments peak Q4 (Jan-Mar) on territory-only curves.
+   Maharashtra is a single-state territory with a distinct monsoon and
+   construction cycle - the state is one of the few where the monsoon dominates
+   Jun to Sep outright.
+   Report Lalan's territory curves per segment and state plainly whether they
+   match the company pattern or diverge. If they diverge, the push list must band
+   PER TERRITORY rather than nationally, and that is a design consequence worth
+   knowing before more heads are onboarded.
+   Band and rank on TERRITORY-only curves, never all-channel.
+
+5. DISCOUNT - two measures, never in the same column: primary MRP discount for
+   all four years, secondary register discount for closed years plus FY2026-27
+   Apr-Jun. Report the variance across customers on the same code, and flag any
+   pushed code 5 points or more above its own norm.
+
+6. FLAG WHAT IS BLOCKED: margin per code needs a finished-goods cost master that
+   does not exist. MRP discount is NOT margin.
+
+Acceptance:
+  Lalan resolves on all three levels; the count of his 15 members found in the
+    secondary register is reported
+  segment view returns codes bought AND codes ever sold for every segment
+  the push list is tiered and capped at 10 per segment
+  seasonality is reported per segment on territory-only curves and explicitly
+    compared against the company-wide 13-of-14 Q4 pattern
+  both discount measures reported separately
+  margin shows its blocked reason
+  earlier heads' SKU figures unchanged
+```
+
+---
+
+## What makes this team worth running
+
+**Zero direct-dealer business** gives the first exact reconciliation — the blank group must be empty, not approximately equal to some figure.
+
+**Working days 29 to 77** is the widest spread yet, so the per-member elapsed-months rule and the partial-tenure threshold both get a real test rather than a theoretical one.
+
+**Single-state, twelve headquarters** makes district whitespace readable in a way multi-state territories are not.
+
+**And Maharashtra's monsoon cycle** is the strongest test of whether the Q4 seasonality pattern is national or territorial. If it diverges here, the push list needs per-territory banding — and that is better discovered now than after ten more heads.
+
+---
+
+*File IDs resolved 2 August 2026 · figures from the live State Head Dashboard*

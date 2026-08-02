@@ -1,0 +1,118 @@
+# Warning System — corrections
+
+*The documentation is clear and the suppression tree is well designed. Six items need changing; the first two are substantive.*
+
+---
+
+```
+Prayag app - Warning System corrections. Same global rules. Report each with the
+value it produces, not an assertion of success.
+
+1. SALES-LAG MONTHS FIRE SPURIOUS WARNINGS. This is the most serious item.
+
+   A closed month with order booking and ZERO sales received is notYetRecorded -
+   a data-entry delay, not performance. The achievement calculation already
+   excludes those months from both numerator and denominator.
+
+   Three rules do not know about it:
+     A4  (OB - sales) / OB reads 100 per cent -> fires Red
+     J2  "booking exists but zero sales received" -> Orange, the same fact again
+     TREND  a lag month looks like a collapse, so EVERY other warning on that
+            member is bumped one severity level
+
+   So one late entry produces a Red, an Orange, and a level bump across the whole
+   card - and the member has done nothing wrong.
+
+   FIX: exclude notYetRecorded months from the trend calculation and from A4.
+   Keep J2, but only where the month is genuinely closed AND recorded.
+   Report how many members currently carry a lag month and how many warnings
+   clear once this is applied.
+
+2. COST THRESHOLDS CONFLICT WITH THE GLOSSARY.
+     Warning System I1     Red >10%, Orange >7%, Yellow >4%
+     Sales Deep Dive doc   "flagged above ~15%, sector dependent"
+
+   On Anant Singh's mapped active members, I1 fires Yellow for 4 of 8 and Red or
+   Orange for none: Prasun 6.0, Shivam 5.7, Ashutosh 5.2, Ankit 4.4 per cent.
+
+   Both documents are live and they describe the same measure differently.
+   Decide one set, apply it in both places, and report the firing distribution
+   across all mapped members at the chosen thresholds. If most members sit in a
+   single band, the bands are not discriminating.
+
+3. PACE USES A GLOBAL ELAPSED FRACTION INSTEAD OF PER-MEMBER ELAPSED MONTHS.
+   A2 and C1 divide by "fraction of year elapsed". J3 uses a hardcoded ~65-day
+   norm with a 55-day cutoff.
+
+   The established rule is column BD, per member. Values range 0.47 to 3.00
+   elapsed months, and working days run 11 to 79 across teams. J3 catches
+   members under 55 days, but a member at 56 days is still measured against a
+   fraction of the year he was not present for.
+
+   FIX: use each member's own elapsed months from BD for all pace pro-rating.
+   Derive the partial-tenure norm from the team median rather than hardcoding
+   65 days - Rizvi's team runs 33 to 79, Anant Singh's 11 to 75, so one norm
+   does not fit both.
+
+4. TWO GUARDS ARE NOT DOCUMENTED AND MAY NOT EXIST.
+   a) ZERO-TARGET MEMBERS. A1 divides order booking by the to-date target. Ten
+      of Sandeep Dadheech's 71 active members have a to-date target of ZERO while
+      carrying real business. Confirm A1 does not divide by zero, and that those
+      members show "no target recorded" rather than 0 per cent or a Red.
+   b) LEFT MEMBERS. Departed members are excluded from current-period
+      performance and low-performer counts everywhere else. Confirm the Warning
+      System excludes them too, and that their history is preserved rather than
+      deleted.
+
+5. TWO FAMILIES ARE MISSING. The documentation describes seven families -
+   A, C, D, E, G, I, J. The design had nine.
+     F  variety and range - known never to have been built
+     B  real value / deflator, using the Laspeyres index
+     H  not mentioned anywhere
+   Report what happened to B and H. Family B is now buildable: all four fiscal
+   years are loaded, three are frozen, and the Laspeyres index exists with
+   per-segment multipliers. A warning that a member's nominal growth is below
+   their segment's price inflation is a real signal that nothing else surfaces.
+
+6. THREE SMALLER INCONSISTENCIES:
+   a) HHI is defined here as 1 / HHI and in the glossaries as 10,000 / HHI. Both
+      give the same effective-retailer figure if one uses fractional shares and
+      the other percentages, but as written the two documents contradict each
+      other. State which convention the code uses and make both documents match.
+   b) I2 has only an Orange threshold at Rs 2,000 per visit - no Red, no Yellow.
+      Every other rule has three. Either add the other two or say why it is
+      single-banded.
+   c) G1 fires Yellow below 20 effective retailers. Prasun sits at 9.9, which is
+      Orange. Report the distribution of effective retailers across all mapped
+      members - if most fall under 20, the Yellow band is wallpaper rather than
+      a signal.
+
+Acceptance - report each:
+  the count of members carrying a lag month, and how many warnings clear once
+    notYetRecorded is excluded from trend and A4
+  one cost-ratio threshold set, applied in both the Warning System and the
+    Sales Deep Dive documentation, with the firing distribution
+  pace calculations use column BD per member; the partial-tenure norm is derived
+    from the team, not hardcoded
+  a zero-target member shows "no target recorded", never 0 per cent
+  LEFT members raise no current-period warnings
+  the status of families B and H is stated
+  the HHI convention is consistent across code and both documents
+  the effective-retailer distribution is reported against the G1 bands
+```
+
+---
+
+## What is right and should not change
+
+**The suppression tree.** J1 hiding everything, J3 hiding pace rules, D1 at Red hiding G1/C3/E2 — that is the correct treatment. A root cause should hide its symptoms, and this one is well chosen.
+
+**Trend as a severity modifier rather than its own warning.** Bumping a level on a worsening trend, and lowering one on improvement so a Yellow can disappear, is a better design than a separate trend alert nobody would action.
+
+**The J family framed as "can't judge fairly" rather than performance.** That distinction is what stops an unmeasurable member looking healthier than a measured one.
+
+**J4 is now empty** — all six spelling splits including Pawan are merged, which confirms that work landed.
+
+---
+
+*Thresholds checked against Anant Singh's mapped active members, 2 August 2026*

@@ -66,7 +66,28 @@ function applyTrend(
 
 // ── Month-trend helper ────────────────────────────────────────────────────────
 
-type Month = { monthLabel: string; orderedAmount: number; salesAmount: number };
+type Month = {
+  monthLabel: string;
+  orderedAmount: number;
+  salesAmount: number;
+  // True when the month has not been fully recorded yet — either the calendar
+  // month is still open, or it closed with booking but sales not yet entered
+  // (a data-entry lag, NOT a performance signal). Lag months must never feed
+  // trend detection, A4, or J2 — they look like a collapse when they are not.
+  notYetRecorded?: boolean;
+};
+
+// Months that are fully recorded — the only months trend/A4/J2 may read.
+function recordedMonths(months: Month[]): Month[] {
+  return months.filter((m) => !m.notYetRecorded);
+}
+
+// A "lag month": closed with order booking present but flagged notYetRecorded
+// (sales entry is pending). Future months carry no booking, so orderedAmount>0
+// distinguishes lag from simply-not-arrived months.
+export function countLagMonths(months: Month[]): number {
+  return months.filter((m) => m.notYetRecorded && m.orderedAmount > 0).length;
+}
 
 function detectTrend(values: number[]): WarningTrend | null {
   if (values.length < 2) return null;
@@ -114,10 +135,29 @@ function makeCard(
 function computeA1(
   achievementPct: number | null,
   months: Month[],
+  totalOB: number | null,
 ): WarningCard | null {
+  // Zero/absent to-date target with real business: never 0% or RED —
+  // surface "no target recorded" instead.
+  if (achievementPct === null && (totalOB ?? 0) > 0) {
+    return makeCard({
+      code: "A1",
+      family: "A",
+      title: "To-date target (not recorded)",
+      severity: "NOT_AVAILABLE",
+      baseSeverity: "NOT_AVAILABLE",
+      trend: null,
+      metric: { value: null, label: "Achievement vs pro-rated target", formatted: "No target recorded" },
+      threshold: { direction: "below" },
+      source: "member working sheet (to-date target = 0 or absent)",
+      suggestedAction: "Record a to-date target to enable achievement tracking",
+      notAvailableReason: "This member carries business but has no to-date target recorded — achievement cannot be judged.",
+      suppresses: [],
+    });
+  }
   const base = severityBelow(achievementPct, 50, 70, 85);
   if (!base) return null;
-  const obVals = months.map((m) => m.orderedAmount);
+  const obVals = recordedMonths(months).map((m) => m.orderedAmount);
   const trend = detectTrend(obVals);
   const sev = applyTrend(base, trend);
   return makeCard({
@@ -151,7 +191,7 @@ function computeA2(
   const pct = (projected / businessPlan) * 100;
   const base = severityBelow(pct, 50, 70, 85);
   if (!base) return null;
-  const obVals = months.map((m) => m.orderedAmount);
+  const obVals = recordedMonths(months).map((m) => m.orderedAmount);
   const trend = detectTrend(obVals);
   const sev = applyTrend(base, trend);
   return makeCard({
@@ -176,7 +216,7 @@ function computeA2(
 // A3 — Momentum reversing
 function computeA3(months: Month[]): WarningCard | null {
   if (months.length < 2) return null;
-  const obVals = months.map((m) => m.orderedAmount);
+  const obVals = recordedMonths(months).map((m) => m.orderedAmount);
   const trend = detectTrend(obVals);
   if (trend !== "WORSENING") return null;
   return makeCard({
@@ -202,7 +242,39 @@ function computeA3(months: Month[]): WarningCard | null {
 function computeA4(
   totalOB: number | null,
   salesReceived: number | null,
+  months: Month[],
 ): WarningCard | null {
+  // Lag-month guard: a closed month with booking but sales not yet entered
+  // makes the OB–sale gap read as pure shortfall. When month data exists and
+  // a lag month is present, compute the gap over fully-recorded months only.
+  if (months.length > 0 && countLagMonths(months) > 0) {
+    const rec = recordedMonths(months).filter((m) => m.orderedAmount > 0);
+    if (rec.length === 0) return null; // nothing recorded yet — pure lag, no signal
+    const obRec = rec.reduce((s, m) => s + m.orderedAmount, 0);
+    const saleRec = rec.reduce((s, m) => s + m.salesAmount, 0);
+    if (obRec <= 0) return null;
+    if (saleRec === 0) return null; // J2 territory
+    const gapPctRec = ((obRec - saleRec) / obRec) * 100;
+    const baseRec = severityAbove(gapPctRec, 25, 15, 8);
+    if (!baseRec) return null;
+    return makeCard({
+      code: "A4",
+      family: "A",
+      title: "Booking not converting to sale",
+      severity: baseRec,
+      baseSeverity: baseRec,
+      trend: null,
+      metric: {
+        value: gapPctRec,
+        label: "OB–sale gap as % of booking (recorded months only)",
+        formatted: pctFmt(gapPctRec),
+      },
+      threshold: { red: 25, orange: 15, yellow: 8, direction: "above" },
+      source: "secondary register (recorded months only — lag months excluded)",
+      suggestedAction: "Check dispatch, credit hold, or an unmaintained sale column",
+      suppresses: [],
+    });
+  }
   if (totalOB === null || totalOB === 0 || salesReceived === null) return null;
   if (salesReceived === 0) {
     // J2 handles the zero-sale case; skip here if totalOB is small
@@ -285,7 +357,7 @@ function computeC2(
   if (!visits || visits.done === null || visits.done === 0 || totalOB === null) return null;
   const bpv = totalOB / visits.done;
   // Trend: if OB is falling while visits are stable or rising → productivity falling
-  const obVals = months.map((m) => m.orderedAmount);
+  const obVals = recordedMonths(months).map((m) => m.orderedAmount);
   const trend = detectTrend(obVals);
   if (trend !== "WORSENING") return null;
   return makeCard({
@@ -557,11 +629,11 @@ function computeG1(effectiveRetailers: number | null): WarningCard | null {
     trend: null,
     metric: {
       value: effectiveRetailers,
-      label: "Effective retailers (1/HHI)",
+      label: "Effective retailers (10,000 ÷ HHI)",
       formatted: effectiveRetailers !== null ? effectiveRetailers.toFixed(1) : "—",
     },
     threshold: { red: 5, orange: 10, yellow: 20, direction: "below" },
-    source: "member working sheet (concentration.effectiveRetailers = 1/HHI)",
+    source: "member working sheet (concentration.effectiveRetailers = 10,000 ÷ HHI on percentage shares)",
     suggestedAction:
       "Broadening the active base matters more than growing the top accounts",
     suppresses: [],
@@ -572,12 +644,18 @@ function computeG1(effectiveRetailers: number | null): WarningCard | null {
 function computeI1(cost: AiPayload["cost"], months: Month[]): WarningCard | null {
   if (!cost || cost.costRatioSale === null) return null;
   const r = cost.costRatioSale;
-  const obVals = months.map((m) => m.orderedAmount);
+  // Zero sales received (often a lag month, not performance) → ratio is
+  // Infinity/NaN — no meaningful cost signal, don't fire.
+  if (!Number.isFinite(r)) return null;
+  // Strict "above" semantics — exactly 6/10/15 % does not fire, matching the
+  // Sales Deep Dive tile (green ≤ 6, amber ≤ 15, red > 15).
+  if (r <= 6) return null;
+  const obVals = recordedMonths(months).map((m) => m.orderedAmount);
   const obTrend = detectTrend(obVals);
   // Cost rising faster than business = OB falling while cost exists
   const trend: WarningTrend | null =
     obTrend === "WORSENING" ? "WORSENING" : obTrend === "IMPROVING" ? "IMPROVING" : "STABLE";
-  const base = severityAbove(r, 10, 7, 4);
+  const base: WarningSeverity = r > 15 ? "RED" : r > 10 ? "ORANGE" : "YELLOW";
   if (!base) return null;
   const sev = applyTrend(base, trend);
   return makeCard({
@@ -592,7 +670,7 @@ function computeI1(cost: AiPayload["cost"], months: Month[]): WarningCard | null
       label: "Cost as % of sales received",
       formatted: pctFmt(r),
     },
-    threshold: { red: 10, orange: 7, yellow: 4, direction: "above" },
+    threshold: { red: 15, orange: 10, yellow: 6, direction: "above" },
     source: "member working sheet (totalCost / salesReceived × 100)",
     suggestedAction: "Revenue efficiency only — margin needs a cost master that does not exist",
     suppresses: [],
@@ -603,12 +681,13 @@ function computeI1(cost: AiPayload["cost"], months: Month[]): WarningCard | null
 function computeI2(cost: AiPayload["cost"], months: Month[]): WarningCard | null {
   if (!cost || cost.costPerVisit === null) return null;
   const cpv = cost.costPerVisit;
-  const obVals = months.map((m) => m.orderedAmount);
+  const obVals = recordedMonths(months).map((m) => m.orderedAmount);
   const trend: WarningTrend | null =
     detectTrend(obVals) === "WORSENING" ? "WORSENING" : null;
-  // No absolute threshold given in spec; only fire if cost per visit is very high or trending up
-  if (cpv < 500 && trend !== "WORSENING") return null;
-  const base: WarningSeverity = cpv >= 2000 ? "ORANGE" : "YELLOW";
+  // Three bands like every other rule: Yellow ≥ ₹1,000, Orange ≥ ₹2,000, Red ≥ ₹3,500.
+  if (cpv < 1000 && trend !== "WORSENING") return null;
+  const base: WarningSeverity =
+    cpv >= 3500 ? "RED" : cpv >= 2000 ? "ORANGE" : "YELLOW";
   const sev = trend === "WORSENING" ? applyTrend(base, "WORSENING") : base;
   return makeCard({
     code: "I2",
@@ -622,7 +701,7 @@ function computeI2(cost: AiPayload["cost"], months: Month[]): WarningCard | null
       label: "Cost per visit (₹)",
       formatted: `₹${Math.round(cpv).toLocaleString("en-IN")}`,
     },
-    threshold: { direction: "above" },
+    threshold: { red: 3500, orange: 2000, yellow: 1000, direction: "above" },
     source: "member working sheet (totalCost / visitsActual)",
     suggestedAction: "Read with the visit-productivity warning, not alone",
     suppresses: [],
@@ -791,9 +870,21 @@ export function computeMemberWarnings(opts: {
   kpisWorkingDaysActual: number | null;
   secMemberMonths: Month[] | null;
   elapsedFraction: number;
+  // Per-member elapsed fraction from the sheet's BD column (elapsedMonths/12).
+  // Used for all pace pro-rating (A2, C1) so a member present for 1.5 of 4
+  // elapsed months is not measured against the full team period.
+  memberElapsedFraction?: number | null;
   teamNormWorkingDays: number;
+  // Partial-tenure cutoff in working days — derived from the team median by
+  // the caller (0.85 × median), never hardcoded.
+  partialTenureCutoffDays?: number;
 }): WarningCard[] {
   const { payload, rows, kpisWorkingDaysActual, secMemberMonths, elapsedFraction, teamNormWorkingDays } = opts;
+  const paceElapsedFraction =
+    opts.memberElapsedFraction != null && opts.memberElapsedFraction > 0
+      ? opts.memberElapsedFraction
+      : elapsedFraction;
+  const partialCutoff = opts.partialTenureCutoffDays ?? 55;
   const months = secMemberMonths ?? [];
   const warnings: WarningCard[] = [];
 
@@ -806,13 +897,23 @@ export function computeMemberWarnings(opts: {
 
   const { totalOB, salesReceived } = payload.performance;
   const isPartialTenure =
-    kpisWorkingDaysActual != null && kpisWorkingDaysActual < 55;
+    kpisWorkingDaysActual != null && kpisWorkingDaysActual < partialCutoff;
   if (isPartialTenure) {
     warnings.push(makeJ3(kpisWorkingDaysActual!, teamNormWorkingDays));
   }
 
+  // J2 only where a month is genuinely closed AND recorded with booking but
+  // zero sale. If every booked month is still a lag month (sales entry
+  // pending), zero sales is a data-entry delay — no warning.
   if ((totalOB ?? 0) > 0 && salesReceived === 0) {
-    warnings.push(makeJ2(totalOB!));
+    const bookedMonths = months.filter((m) => m.orderedAmount > 0);
+    // With month data: fire only when a RECORDED booked month shows zero sale
+    // (month-level fact). Without month data: keep the aggregate behaviour.
+    const genuineZero =
+      bookedMonths.length > 0
+        ? bookedMonths.some((m) => !m.notYetRecorded && m.salesAmount === 0)
+        : true;
+    if (genuineZero) warnings.push(makeJ2(totalOB!));
   }
 
   const j5 = computeJ5(payload.identity.dataCutoff);
@@ -841,22 +942,22 @@ export function computeMemberWarnings(opts: {
 
   // ── A warnings ─────────────────────────────────────────────────────────────
   if (!isPartialTenure) {
-    const a1 = computeA1(payload.achievement.totalOBPct, months);
+    const a1 = computeA1(payload.achievement.totalOBPct, months, totalOB);
     if (a1) warnings.push(a1);
 
-    const a2 = computeA2(totalOB, payload.targets.businessPlan, elapsedFraction, months);
+    const a2 = computeA2(totalOB, payload.targets.businessPlan, paceElapsedFraction, months);
     if (a2) warnings.push(a2);
   }
 
   const a3 = computeA3(months);
   if (a3) warnings.push(a3);
 
-  const a4 = computeA4(totalOB, salesReceived);
+  const a4 = computeA4(totalOB, salesReceived, months);
   if (a4) warnings.push(a4);
 
   // ── C warnings ─────────────────────────────────────────────────────────────
   if (!isPartialTenure) {
-    const c1 = computeC1(payload.visits, elapsedFraction);
+    const c1 = computeC1(payload.visits, paceElapsedFraction);
     if (c1) warnings.push(c1);
 
     const c2 = computeC2(payload.visits, totalOB, months);
@@ -864,7 +965,7 @@ export function computeMemberWarnings(opts: {
   } else {
     // Even for partial tenure, show C1 as NOT_AVAILABLE if required is null
     if (payload.visits?.required === null || payload.visits?.required === 0) {
-      const c1Na = computeC1(payload.visits, elapsedFraction);
+      const c1Na = computeC1(payload.visits, paceElapsedFraction);
       if (c1Na?.severity === "NOT_AVAILABLE") warnings.push(c1Na);
     }
   }

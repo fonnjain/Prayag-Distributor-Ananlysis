@@ -47,3 +47,24 @@ Uses Tabs (State Heads | Distributors), Select for state head, and MemberPanel c
 
 **Why:**
 The document's acceptance criteria used example/estimated values. Live data for FY2026-27 as of Jul 2026 differs (e.g. Prasun D1 is 57.5% RED not 41% ORANGE). The engine logic is correct — the numbers simply changed.
+
+
+## Aug 2026 corrections (lag months, per-member pace, thresholds)
+- **Lag months** (closed month, booking present, sales not yet entered → `notYetRecorded`): excluded from trend detection, A4 (recomputed over recorded months when a lag month exists), and J2 (skipped when every booked month is lag). I1 skips non-finite cost ratios (zero sales = lag, not performance).
+- **Pace pro-rating** (A2, C1) uses per-member elapsed months from the sheet BD column (`kpis.elapsedMonths / 12`), falling back to the global FY fraction. J3 partial-tenure cutoff = 0.85 × team median working days (norm = median, never hardcoded 65/55).
+- **A1 zero-target guard**: to-date target 0/absent with real OB → NOT_AVAILABLE "No target recorded" card, never 0% or RED.
+- **LEFT members** are filtered out in the route (`!m.isLeft`); history untouched.
+- **Thresholds**: I1 cost ratio Yellow >6 / Orange >10 / Red >15 (aligned with the Sales Deep Dive tile colours); I2 three bands ₹1,000/₹2,000/₹3,500.
+- **Head-name resolution**: register spelling ("AQIL RIZVI") is resolved to the Data-tab spelling ("Syed Aqil Rizvi") via normalised token-subset match before deep-dive loads — without it a whole team reads as J1.
+- **Known wallpaper**: G1 effective-retailer bands (<5/<10/<20) — all 93 measured members fall under 10; bands need a user decision to recalibrate.
+- Families B (Laspeyres deflator) and H were never built; F never built. Engine covers A,C,D,E,G,I,J only.
+- `MemberWarnings.lagMonths` exposes the per-member lag-month count.
+
+
+## Partial-tenure norm basis (Aug 2026)
+Rule: teams with <5 members in the dashboard roster use the company fallback norm (65 wd), not a team median; basis exposed as teamSummary.normBasis.
+**Why:** a 2-person team of new joiners (8 & 27 working days) makes the "median" meaningless and suppresses every flag. Basis must key on team SIZE, not on how many sheets loaded this pass — cold-load misses otherwise flip a 5-person team to fallback and the snapshot freezes it.
+**How to apply:** warnings snapshot key is versioned (warnings|v3|). Any bump must update the invalidation prefix in the register resync route in lockstep, or refreshed data never invalidates warning snapshots.
+
+## Warnings roster limitation
+Warnings population comes from the secondary state dashboard roster, not the Data tab: heads with no secondary register (e.g. project-state or brand-new heads) and zero-target members missing from the secondary roster get no warnings coverage. 404 "no members" for a real head usually means this, not a naming bug.

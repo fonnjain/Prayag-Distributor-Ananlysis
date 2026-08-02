@@ -1,0 +1,242 @@
+# SD9 / SD10 / SD11 — the remaining eight heads
+
+*48 members across 8 heads. Completes the roster at 182 of 182.*
+
+---
+
+## Scope
+
+| Head | Members | Active | LEFT | OB | Target | Ach | Retailers |
+|---|---|---|---|---|---|---|---|
+| Biju C.O | 12 | 11 | 1 | ₹3.23 Cr | ₹4.27 Cr | **75.7%** | 1,172 |
+| Pawan Sharma | 11 | 8 | 3 | ₹1.08 Cr | ₹2.22 Cr | 48.7% | 562 |
+| Sunil Patel | 5 | 5 | 0 | ₹0.57 Cr | ₹0.96 Cr | 59.6% | 329 |
+| Nasir Hussain Khan | 5 | 5 | 0 | ₹0.86 Cr | ₹1.40 Cr | 61.4% | 116 |
+| Sulinder Pal | 5 | 5 | 0 | ₹0.41 Cr | ₹0.90 Cr | 45.6% | 258 |
+| Prashant Onam Naik | 5 | 4 | 1 | ₹0.19 Cr | ₹0.69 Cr | **27.5%** | 172 |
+| Sunil Mohanty | 3 | 2 | 1 | **₹0** | **₹0** | n/a | **1** |
+| Anuj Sharma | 2 | 2 | 0 | **₹0** | **₹0** | n/a | **5** |
+
+**These teams are where every guard gets exercised.** Zero targets, zero business, single-digit retailers, 8-day tenures — the edge cases the large teams never produced.
+
+---
+
+# SD9 — Sales Deep Dive, all eight heads
+
+```
+Prayag app - Sales Deep Dive. Onboard the eight remaining State Heads. Same
+global rules. Do not change any earlier head's acceptance number.
+
+FOLDERS IDENTIFIED. Enumerate each and match against the roster names below -
+folder contents do NOT equal team membership, and every folder holds Copy files,
+LEFT files, and people from other teams.
+
+   1uumx1WoEWVQ_V3vCKRyL8CJYgKRNS-cj   South - Biju C.O and Prashant Onam Naik.
+                                        Paginated: request the second page.
+                                        Also holds a head sheet 'BIJU C.O' and
+                                        ~30 sheets for people not on either team.
+   Drive root                           Saibulla S. sits outside any folder.
+
+RESOLVED FILE IDs - use directly, no search needed:
+
+   BIJU C.O
+     PRATHEESH CC            1BOdlvcbAzmhN6MUIGmMKbyx8OGarcJ2uhWJX8ES8y70
+     Girish B                1u3amP6zdTUuwKNSkL2afwBWqTLQOc5-H5_uRmoN1Hog
+     Saibulla S.             1qD_dDXHvafaUuFnZ7gAkyxCmJQoO3BtBbnVLwHgMtpU
+     Ameerali Ek (Off Roll)  1ClLrVOrOm2lRZkxwSRYk28lKgD3AqRr0eB6lbpUoAm8
+     Riyas V                 1FDquPHJI6WZGHFmkKa-RqP1eEgjXcIOR6r4SpB9QkSA
+     Shafeeq Parengal        1o73DJbLFLgOXztUGvACDAPJQLjK9m6M0LmAIH6HjOBg
+     SANOJ M.                1BerZ1KBscl6gBUJpIfictQ2C6O0zIhMNM78goFcw5Hc
+     Jijo                    1ubsraNghFvZJ3YRRWKWb8P3SYuDS_RoIg08_j56vs68
+     still to find: K.V.THAMIZHSELVAN, K Suresh Kumar, J.SURESH KUMAR,
+                    M. Raman (LEFT)
+
+   PRASHANT ONAM NAIK - all five resolved
+     Milind Ashok Sadanand     1wsszhlq6_ah5OYzZkVme-nY4menV6_rwzD2vaJvOGhU
+     Harsha K Rao              1YBT8hCgFe9nUhNdo9pGS2oMLXgn4s_p1opviQrazJPE
+     Pratham Kyasti            1lTy8V1Bpac44zVynX8JD5XIdZoX9d2s-m-lQeTElVRc
+     Abhishek Ravindra Padadar 1R5iwNi-ALIg1NogdaLRy5rzN2gxbU6wjp-0fjOK7y2A
+     Amruth Shivappa Banakar   1LF2Q3hf8PmqbCtIh_IYQwMCJfUjNd2x1JaohFk2YsSk  [LEFT]
+
+For the other six heads, search title-first then request direct links for
+anything unresolved. A Drive search returning nothing means NOT SHARED, not
+absent - four of Anant Singh's members were invisible to search and opened
+immediately from a link.
+
+THE IDENTITY TRAP ON THIS BATCH - Biju C.O has TWO Suresh Kumars:
+     K Suresh Kumar    Tamil Nadu, Virudhunagar
+     J.SURESH KUMAR    Tamil Nadu, Thanjavur
+   Same head, same state, different initial and different headquarter.
+   HEADQUARTER IS THE ONLY DISCRIMINATOR. Never merge them. If a name resolves
+   ambiguously, return an error naming both rather than taking the first match.
+   Note also 'Anuj Sharma' is both a State Head AND a member under Sunil Mohanty
+   - two different rows, and the head row must not absorb the member row.
+
+ZERO-TARGET AND ZERO-BUSINESS GUARDS - THIS BATCH IS WHERE THEY FIRE.
+   Members with a to-date target of ZERO while carrying activity:
+     Gourav Trivedi (Pawan Sharma), Bhavesh N Ranpara (Sunil Patel),
+     Vishant Bandhral (Nasir Hussain Khan), Ritesh Thakur / Arvind Kumar /
+     Brinder Singh (Sulinder Pal - three of five), Narendra Kumar Sharma /
+     Anuj Sharma (Sunil Mohanty), Ram Kumar Vashishtha / Himanshu Sharma
+     (Anuj Sharma).
+   Show "no target recorded", never 0 per cent. Report headline AND like-for-like
+   over targeted members only.
+   SULINDER PAL HAS THREE OF FIVE WITH NO TARGET - his headline of 45.6 per cent
+   rests on two members. Report both figures prominently.
+
+   TWO HEADS HAVE ZERO BUSINESS ENTIRELY - Sunil Mohanty and Anuj Sharma both
+   show OB, target and sale of ZERO. Sunil Mohanty has ONE retailer; Anuj Sharma
+   has FIVE. Achievement is undefined, not 0 per cent. These teams must not
+   appear as catastrophic performers - they appear to be new or in transition.
+   Report them as "no target and no recorded business" and exclude them from any
+   ranking or low-performer count.
+
+WORKING DAYS RUN 8 TO 77 ACROSS THIS BATCH. Himanshu Sharma has 8 days, Ram
+Kumar Vashishtha 27, Deo Bhushan Sharma 14. Read elapsed months from column BD
+per member. A partial-tenure norm derived from a team of two is meaningless -
+derive it company-wide for teams under 5 members, and say which basis was used.
+
+STANDARD RULES: never read a file whose title begins 'Copy'; never read a file
+whose title contains LEFT; header text uses the full year form
+'Order Booking 2026-27'; column I equals P + Q; parse out the 'Removed Parties'
+section stopping on a section header or a name with no serial.
+
+Acceptance - prove each with the computed value, per head:
+   Biju C.O            12 members (11 active, M. Raman LEFT)
+                       OB Rs 3,23,33,433 | tgt Rs 4,27,10,278 | ach 75.7%
+                       sale Rs 3,11,10,501 | visits 5,369 | retailers 1,172
+   Pawan Sharma        11 (8 active, 3 LEFT) | OB Rs 1,08,01,973 | ach 48.7%
+                       retailers 562 | one zero-target member
+   Sunil Patel          5 active | OB Rs 56,93,028 | ach 59.6% | retailers 329
+   Nasir Hussain Khan   5 active | OB Rs 85,89,501 | ach 61.4% | retailers 116
+                       DIRECT DEALER Rs 39,73,417 - 46 per cent of his booking,
+                       the highest proportion of any head
+   Sulinder Pal         5 active | OB Rs 41,04,579 | headline 45.6% AND
+                       like-for-like over the two targeted members
+   Prashant Onam Naik   5 (4 active, 1 LEFT) | OB Rs 18,99,324 | ach 27.5%
+                       sale Rs 5,65,260 - sale is a quarter of booking, flag it
+   Sunil Mohanty        3 (2 active, 1 LEFT) | no target, no business, 1 retailer
+   Anuj Sharma          2 active | no target, no business, 5 retailers
+   the two Suresh Kumars remain separate records
+   'Anuj Sharma' the head and 'Anuj Sharma' the member remain separate
+   all four earlier heads unchanged
+```
+
+---
+
+# SD10 — Distributor Deep Dive, all eight
+
+```
+Prayag app - Distributor Deep Dive for the eight heads onboarded in SD9. Same
+global rules. NO new source - the same retailer rows, grouped by Assigned
+Distributor.
+
+1. THE FIVE FIELD STATES, reconciled per head before aggregating.
+   SEVEN OF EIGHT HEADS HAVE ZERO DIRECT-DEALER BUSINESS, so their BLANK group
+   must be EMPTY. The exception is Nasir Hussain Khan at Rs 39,73,417.
+   An empty blank group is an exact check, not an approximate one - use it.
+
+2. NASIR HUSSAIN KHAN IS THE STRUCTURAL OUTLIER AND WORTH ITS OWN READING.
+   Rs 39.73 L of Rs 85.89 L - 46 per cent - is direct dealer, the highest share
+   of any head. He also has 116 retailers across 5 members, the lowest count of
+   any team, and the company-wide coverage table shows him with ZERO
+   distributors against 139 retailers.
+   Report how his 116 retailers classify. If most are direct dealers, his
+   territory runs on a parallel channel rather than a distributor network, and
+   that is a finding about how J&K is served, not a data gap.
+
+3. TEST THE UNASSIGNED FINDING ACROSS ALL EIGHT, and report as one table:
+     Anant Singh   96.0 per cent active with a distributor, 5.0 without,
+                   member correlation -0.90 (n=10)
+     Sandeep       100 versus 16, correlation -0.33 (n=66)
+   With Rizvi and Lalan already reported, this completes the picture across all
+   twelve heads and 182 members. State plainly whether the retailer-level gap
+   holds company-wide and what the correlation is at full scale.
+   CARRY BOTH READINGS as before.
+
+4. PRASHANT ONAM NAIK - the company coverage table shows him with 23
+   distributors and ZERO secondary coverage. His members report 172 retailers.
+   Reconcile the two. Either the distributors serve retailers attributed
+   elsewhere, or the secondary side is unrecorded for his territory.
+
+5. SUNIL MOHANTY HAS ONE RETAILER AND ANUJ SHARMA HAS FIVE. Concentration,
+   whitespace and correlation are all undefined at that scale. Report
+   "insufficient population" rather than computing a figure from one row.
+
+6. WHITESPACE per state, coverage gap and assignment gap never merged. Exclude
+   Non-territory / Project / Govt from every territory figure.
+
+Acceptance:
+   the blank group is EMPTY for all heads except Nasir Hussain Khan
+   Nasir's blank group reconciles to Rs 39,73,417
+   the unassigned table covers all twelve heads with correlations stated
+   Prashant Onam Naik's 23 distributors versus 172 retailers is explained
+   Sunil Mohanty and Anuj Sharma report insufficient population, not zeros
+   earlier heads' distributor figures unchanged
+```
+
+---
+
+# SD11 — SKU Deep Dive, all eight
+
+```
+Prayag app - SKU Deep Dive for the eight heads onboarded in SD9. Same global
+rules. NO new source.
+
+1. CONFIRM THE HEAD FILTER REACHES ALL THREE LEVELS for each head, and report
+   how many members of each appear in the FY2026-27 secondary register.
+   Small teams may match poorly - the register uses a separate PS-code
+   vocabulary. Report the match rate per head rather than assuming.
+
+2. SEGMENT AND BREADTH per head. Codes bought against codes EVER SOLD across all
+   loaded fiscal years, territory channel only. Rank by opportunity, never
+   breadth percentage.
+
+3. SEASONALITY - THIS COMPLETES THE GEOGRAPHIC PICTURE.
+   Company-wide, 13 of 14 segments peak Q4 on territory-only curves. This batch
+   adds Kerala and Tamil Nadu (Biju), Jammu and Kashmir (Nasir), Punjab and
+   Himachal (Sulinder Pal), Gujarat (Sunil Patel), Karnataka (Prashant),
+   Rajasthan and Haryana (Pawan Sharma).
+   J&K and Himachal have a genuinely different construction season - work stops
+   in deep winter, which is Q4. If any territory diverges from the Q4 pattern it
+   is most likely one of those two, and that would mean the push list must band
+   PER TERRITORY rather than nationally.
+   Report each head's territory curve and state plainly whether it matches.
+
+4. GAP VALUE AND THE PUSH LIST per distributor: same fiscal months, bottom-up
+   with no extrapolation, project excluded, four tiers, top 10 per card, peer
+   cohorts by quintile of FY2025-26 with a minimum of 3 segment-active peers.
+   NAME THE PEERS.
+   For heads with very few distributors, the state cohort will be too thin -
+   confirm the tier fallback fires and says which tier it used.
+
+5. DISCOUNT - both measures, never in the same column. Report variance across
+   customers on the same code.
+
+6. FLAG WHAT IS BLOCKED: margin needs a cost master that does not exist.
+
+Acceptance:
+   all eight heads resolve on the distributor level; the secondary-register
+     match rate is reported per head
+   seasonality reported per head on territory-only curves and compared against
+     the company-wide 13-of-14 Q4 pattern, with any divergence named
+   the cohort tier used is stated for every push card
+   heads with insufficient population say so rather than computing
+   earlier heads' SKU figures unchanged
+```
+
+---
+
+## What this batch is really testing
+
+**Every guard fires here.** Eleven zero-target members across five heads, two heads with no business at all, one member with 8 working days, one team with a single retailer. The large teams never produced these — they were all comfortably measurable.
+
+**Sulinder Pal has three of five members with no target.** His 45.6% headline rests on two people. That is the like-for-like rule doing real work rather than being a footnote.
+
+**Nasir Hussain Khan runs 46% direct dealer** — the highest of any head, against a company average near zero. If his territory genuinely runs on a parallel channel rather than a distributor network, that is worth knowing before anyone applies distributor-based recommendations to J&K.
+
+**And J&K plus Himachal are the strongest test of the Q4 seasonality assumption.** Deep winter stops construction there, which is exactly when the rest of the country peaks. If any territory breaks the pattern, it is one of those two — and that would mean the push list needs per-territory banding company-wide.
+
+---
+
+*Roster figures from the live State Head Dashboard, 2 August 2026 · completes 182 of 182 members*

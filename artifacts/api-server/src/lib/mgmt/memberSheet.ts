@@ -532,6 +532,20 @@ async function findSummaryTabWithInventory(
     .filter((t) => t.title.toUpperCase().startsWith(SUMMARY_TAB_PREFIX))
     .map((t) => t.title);
 
+  // Narrow exception: some workbooks (e.g. Tejas Lunawat) title the current
+  // year's retailer table "Retailer Report 26-27" instead of
+  // "Summary Report 26-27". Accept an alternate prefix ONLY with the exact
+  // requested FY suffix — never a similarly-named tab for another year.
+  const altCanonicalUC = `RETAILER REPORT ${shortFy}`.toUpperCase();
+  const altMatch = allTabs.find((t) => t.title.trim().toUpperCase() === altCanonicalUC);
+  if (altMatch) {
+    logger.info(
+      { fileId, fy, tab: altMatch.title },
+      "memberSheet: FY-exact 'Retailer Report' tab accepted (no Summary Report tab for this FY)",
+    );
+    return { selectedTab: altMatch.title, canonicalName, allTabs };
+  }
+
   logger.warn(
     { fileId, fy, canonicalName, summaryTabsFound: summaryTabs, allTabCount: allTabs.length },
     "memberSheet: SUMMARY TAB NOT FOUND — expected exact tab absent; refusing fallback",

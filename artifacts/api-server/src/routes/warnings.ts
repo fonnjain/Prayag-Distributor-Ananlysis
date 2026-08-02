@@ -37,10 +37,22 @@ function fyElapsedFraction(fy: string): number {
   return (now.getTime() - fyStart.getTime()) / (fyEnd.getTime() - fyStart.getTime());
 }
 
-// Working-day norm for the elapsed portion of the FY.
-// Mon-Sat (6-day week). Q1 = 91 days × 6/7 ≈ 78. Use 65 as a conservative
-// field norm (not every member is in field all 6 days).
-const TEAM_NORM_WORKING_DAYS = 65;
+// Fallback working-day norm, used only when a team has no usable working-day
+// data at all. The real norm is derived per team as the median of the members'
+// actual working days (AG column) — teams range widely (11–79 days), so one
+// hardcoded norm does not fit all.
+const FALLBACK_NORM_WORKING_DAYS = 65;
+
+// Partial tenure = working days below 85% of the team median (was a hardcoded
+// 55-day cutoff against a hardcoded 65-day norm — same ratio, now team-derived).
+const PARTIAL_TENURE_RATIO = 0.85;
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const s = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
 
 // ── GET /api/warnings ─────────────────────────────────────────────────────────
 
@@ -65,7 +77,7 @@ router.get("/warnings", async (req, res) => {
     // meta.snapshotSavedAt + meta.refreshing, rebuilding in the background
     // (the live build blocks ~9s on Sheets loads on a cold cache).
     const response = await serveWithSnapshot({
-      key: `warnings|${fy}|${stateHeadRaw.toLowerCase()}`,
+      key: `warnings|v3|${fy}|${stateHeadRaw.toLowerCase()}`,
       ttlMs: WARNINGS_TTL_MS,
       build: () => buildWarningsResponse(fy, stateHeadRaw),
       log: req.log,
@@ -104,8 +116,11 @@ async function buildWarningsResponse(
 
     // Filter members for the requested state head.
     const normalised = stateHeadRaw.toLowerCase();
+    // LEFT members are excluded from current-period warnings everywhere else
+    // (low-perf counts, rankings) — exclude them here too. Their history stays
+    // in the register untouched; they simply raise no current warnings.
     const memberRefs = dashboard.members.filter(
-      (m) => m.stateHead?.toLowerCase() === normalised,
+      (m) => m.stateHead?.toLowerCase() === normalised && !m.isLeft,
     );
 
     if (memberRefs.length === 0) {
@@ -123,13 +138,73 @@ async function buildWarningsResponse(
     const elapsedFraction = fyElapsedFraction(fy);
     const period = `YTD (elapsed ${(elapsedFraction * 100).toFixed(1)}%)`;
 
+    // Resolve the register's head spelling to the Data tab's spelling.
+    // The secondary register writes e.g. "AQIL RIZVI" where the Data tab has
+    // "Syed Aqil Rizvi" — the deep-dive loader matches exactly, so without
+    // this mapping an entire team reads as "no working sheet" (all J1).
+    const normHead = (s: string) => s.toLowerCase().replace(/[^a-z]+/g, " ").trim();
+    const headTokens = (s: string) => new Set(normHead(s).split(" ").filter(Boolean));
+    let deepDiveHead = stateHeadRaw;
+    try {
+      const headIndex = await loadDeepDiveData(fy, undefined, undefined, { skipExtras: true });
+      const candidates = headIndex.stateHeads ?? [];
+      const exact = candidates.find((h) => normHead(h) === normHead(stateHeadRaw));
+      if (exact) {
+        deepDiveHead = exact;
+      } else {
+        // One-directional and ≥2 tokens only: every register token must appear
+        // in the candidate (e.g. "AQIL RIZVI" ⊂ "Syed Aqil Rizvi"). Single-token
+        // names are too ambiguous to auto-resolve.
+        const want = headTokens(stateHeadRaw);
+        if (want.size >= 2) {
+          const subset = candidates.filter((h) => {
+            const have = headTokens(h);
+            return [...want].every((t) => have.has(t));
+          });
+          if (subset.length === 1) {
+            deepDiveHead = subset[0];
+          } else if (subset.length > 1) {
+            logger.warn(
+              { stateHeadRaw, candidates: subset },
+              "warnings: ambiguous state-head resolution — using raw spelling",
+            );
+          }
+        }
+      }
+    } catch {
+      // fall through with the raw name
+    }
+
     // 2. Load deep dive data for each member in parallel.
     const memberResults = await Promise.allSettled(
       memberRefs.map(async (ref) => {
-        const data = await loadDeepDiveData(fy, stateHeadRaw, ref.normKey, { skipExtras: true });
+        const data = await loadDeepDiveData(fy, deepDiveHead, ref.normKey, { skipExtras: true });
         return { ref, data };
       }),
     );
+
+    // Team working-day median → partial-tenure norm + cutoff (never hardcoded).
+    const teamWorkingDays: number[] = [];
+    for (const result of memberResults) {
+      if (result.status !== "fulfilled") continue;
+      const wd = result.value.data.kpis?.workingDaysActual;
+      if (wd != null && wd > 0) teamWorkingDays.push(wd);
+    }
+    const teamMedianWd = median(teamWorkingDays);
+    // Tiny teams (<5 usable samples) get a meaningless "median" — e.g. a
+    // two-person team of new joiners with 8 and 27 working days would set the
+    // norm to ~17 days and never flag anyone. Use the company-wide fallback
+    // norm instead, and expose which basis was used.
+    // Basis depends on team SIZE (memberRefs), not on how many sheets loaded
+    // this pass — otherwise a transient cold-load miss flips a 5-person team
+    // to the company norm and the snapshot freezes that misclassification.
+    const normBasis: "team-median" | "company-fallback" =
+      teamMedianWd != null && memberRefs.length >= 5
+        ? "team-median"
+        : "company-fallback";
+    const teamNormWorkingDays =
+      normBasis === "team-median" ? teamMedianWd! : FALLBACK_NORM_WORKING_DAYS;
+    const partialTenureCutoffDays = Math.round(teamNormWorkingDays * PARTIAL_TENURE_RATIO);
 
     // 3. Compute warnings for each member.
     const members: MemberWarnings[] = [];
@@ -168,14 +243,20 @@ async function buildWarningsResponse(
         "Apr", "May", "Jun", "Jul", "Aug", "Sep",
         "Oct", "Nov", "Dec", "Jan", "Feb", "Mar",
       ];
-      const secMonths: { monthLabel: string; orderedAmount: number; salesAmount: number }[] | null =
-        rawMonths
-          ? rawMonths.map((m, idx) => ({
-              monthLabel: MONTH_NAMES[idx] ?? `M${idx}`,
-              orderedAmount: m.orderedAmount ?? 0,
-              salesAmount: m.salesAmount ?? 0,
-            }))
-          : null;
+      const secMonths:
+        | { monthLabel: string; orderedAmount: number; salesAmount: number; notYetRecorded: boolean }[]
+        | null = rawMonths
+        ? rawMonths.map((m, idx) => ({
+            monthLabel: MONTH_NAMES[idx] ?? `M${idx}`,
+            orderedAmount: m.orderedAmount ?? 0,
+            salesAmount: m.salesAmount ?? 0,
+            notYetRecorded: m.notYetRecorded,
+          }))
+        : null;
+      // Lag months: closed with booking present but sales not yet entered —
+      // data-entry delay, never a performance signal.
+      const lagMonths =
+        secMonths?.filter((m) => m.notYetRecorded && m.orderedAmount > 0).length ?? 0;
 
       // Build the payload (same as aiPayload route).
       let payload;
@@ -232,21 +313,25 @@ async function buildWarningsResponse(
 
       const kpisWorkingDaysActual = data.kpis.workingDaysActual ?? null;
       const isPartialTenure =
-        kpisWorkingDaysActual != null && kpisWorkingDaysActual < 55;
+        kpisWorkingDaysActual != null &&
+        kpisWorkingDaysActual < partialTenureCutoffDays;
+
+      // Per-member elapsed months from the sheet's BD column — pace pro-rating
+      // uses each member's own tenure, not the global FY fraction.
+      const memberElapsedFraction =
+        data.kpis.elapsedMonths != null && data.kpis.elapsedMonths > 0
+          ? data.kpis.elapsedMonths / 12
+          : null;
 
       const allWarnings = computeMemberWarnings({
         payload,
         rows,
         kpisWorkingDaysActual,
-        secMemberMonths: secMonths
-          ? secMonths.map((m) => ({
-              monthLabel: m.monthLabel,
-              orderedAmount: m.orderedAmount,
-              salesAmount: m.salesAmount,
-            }))
-          : null,
+        secMemberMonths: secMonths,
         elapsedFraction,
-        teamNormWorkingDays: TEAM_NORM_WORKING_DAYS,
+        memberElapsedFraction,
+        teamNormWorkingDays,
+        partialTenureCutoffDays,
       });
 
       const { rootWarnings, suppressedWarnings, jFlags } = splitWarnings(allWarnings);
@@ -261,6 +346,7 @@ async function buildWarningsResponse(
         hasMappedSheet,
         isPartialTenure,
         workingDaysActual: kpisWorkingDaysActual,
+        lagMonths,
         retailersTotal: stats.retailersTotal || payload.coverage.retailersTotal,
         unassignedCount: stats.unassignedCount,
         visitsToUnassigned: stats.visitsToUnassigned,
@@ -292,6 +378,9 @@ async function buildWarningsResponse(
         membersWithSheet,
         membersWithoutSheet,
         activeRetailers: teamActive,
+        normWorkingDays: teamNormWorkingDays,
+        normBasis,
+        partialTenureCutoffDays,
       },
     };
 
@@ -324,7 +413,7 @@ export async function prewarmWarningsSnapshots(fy: string): Promise<void> {
   for (const stateHead of stateHeads) {
     try {
       const result = await prewarmSnapshot({
-        key: `warnings|${fy}|${stateHead.toLowerCase()}`,
+        key: `warnings|v3|${fy}|${stateHead.toLowerCase()}`,
         ttlMs: WARNINGS_TTL_MS,
         build: () => buildWarningsResponse(fy, stateHead),
       });

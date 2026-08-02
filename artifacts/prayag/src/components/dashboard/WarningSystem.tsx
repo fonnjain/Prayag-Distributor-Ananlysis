@@ -77,6 +77,11 @@ interface WarningsResponse {
     membersWithSheet: number;
     membersWithoutSheet: number;
     activeRetailers: number;
+    /** Partial-tenure norm actually applied (working days). */
+    normWorkingDays?: number;
+    /** "team-median" for teams of 5+, else "company-fallback". */
+    normBasis?: "team-median" | "company-fallback";
+    partialTenureCutoffDays?: number;
   };
   /** Cold-start snapshot freshness — see snapshotRefresh.tsx. */
   meta?: { snapshotSavedAt?: number; refreshing?: boolean };

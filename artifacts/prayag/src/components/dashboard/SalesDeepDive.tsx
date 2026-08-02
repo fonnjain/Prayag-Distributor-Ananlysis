@@ -1790,9 +1790,10 @@ function RoiCostPanel({ roi, memberName }: { roi: RoiCost; memberName: string })
           </span>
           <span className={cn(
             "text-2xl font-bold",
+            // Same bands as the Warning System I1 rule: ≤6% fine, 6–15% watch, >15% red.
             roi.costRatioPct != null
               ? roi.costRatioPct <= 6 ? "text-green-700 dark:text-green-400"
-              : roi.costRatioPct <= 10 ? "text-amber-700 dark:text-amber-400"
+              : roi.costRatioPct <= 15 ? "text-amber-700 dark:text-amber-400"
               : "text-red-700 dark:text-red-400"
               : "",
           )}>

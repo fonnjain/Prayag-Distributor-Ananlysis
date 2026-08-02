@@ -569,7 +569,8 @@ router.post("/registers/:fy/force-resync", async (req, res) => {
         // so frozen-FY snapshots (served as final, never re-built) rebuild
         // from the repaired data on the next request.
         invalidateSnapshots(`mgmt-data|${fy}|`);
-        invalidateSnapshots(`warnings|${fy}|`);
+        // Note: prefix must match the versioned snapshot key in routes/warnings.ts.
+        invalidateSnapshots(`warnings|v3|${fy}|`);
         invalidateSnapshots(`company-reports|v3|${fy}`);
         // Analytics keys are analytics|fy|compareFy — the repaired year can sit
         // in either position, so clear the whole family (small set).

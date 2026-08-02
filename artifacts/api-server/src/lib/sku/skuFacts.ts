@@ -341,6 +341,13 @@ type SecondaryFactParams = {
 // separate PS-code name vocabulary, so not every member is expected to match —
 // the counts are surfaced so the mismatch is visible, never silent.
 
+import memberNameAliasRaw from "../../../config/member_name_alias.json" with { type: "json" };
+const MEMBER_NAME_ALIAS: Record<string, string> = Object.fromEntries(
+  Object.entries(memberNameAliasRaw as Record<string, string>).filter(
+    ([k]) => !k.startsWith("_"),
+  ),
+);
+
 export type SecondaryHeadResolution = {
   head: string;
   /** Members on the head's roster for the FY. */
@@ -392,7 +399,15 @@ export async function resolveHeadForSecondary(
   for (const m of members) {
     const exact = vocab.get(secRegKey(m.name));
     const bare = exact ?? vocabBare.get(secRegKeyBare(m.name));
-    if (bare) matchedKeys.add(bare);
+    // Known register misspellings (e.g. "Sonawane" written "Sanwane") come
+    // from config — same person, different spelling, never two entries.
+    const aliased =
+      bare ??
+      (() => {
+        const alias = MEMBER_NAME_ALIAS[secRegKey(m.name)];
+        return alias ? vocab.get(secRegKey(alias)) : undefined;
+      })();
+    if (aliased) matchedKeys.add(aliased);
     else unmatchedMembers.push(m.name);
   }
 

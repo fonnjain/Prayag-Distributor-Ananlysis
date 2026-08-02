@@ -41,6 +41,9 @@ export type MemberWarnings = {
   hasMappedSheet: boolean;
   isPartialTenure: boolean;
   workingDaysActual: number | null;
+  // Closed months with booking present but sales not yet entered (data-entry
+  // lag). These months are excluded from trend, A4, and J2.
+  lagMonths?: number;
   retailersTotal: number | null;
   unassignedCount: number | null;
   visitsToUnassigned: number | null;
@@ -64,5 +67,8 @@ export type WarningsResponse = {
     membersWithSheet: number;
     membersWithoutSheet: number;
     activeRetailers: number;
+    normWorkingDays: number;
+    normBasis: "team-median" | "company-fallback";
+    partialTenureCutoffDays: number;
   };
 };
