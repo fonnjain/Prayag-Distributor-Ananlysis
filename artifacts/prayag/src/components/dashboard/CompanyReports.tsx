@@ -6,6 +6,7 @@
 //   RULE 2 — LITRE RULE: Report 4 qty is per-group only, never cross-group total.
 //   RULE 3 — LIVE DATA: sale_line populated from live register chain.
 import { useState, useEffect, useMemo } from "react";
+import { useGlobalFilter } from "@/data/global-filter-context";
 import { QuotaWaitBanner, quotaDelayMs } from "./quotaWait";
 import { SnapshotBanner, useSnapshotRefresh } from "./snapshotRefresh";
 import { AlertTriangle, Info, ChevronDown, ChevronUp } from "lucide-react";
@@ -738,12 +739,13 @@ const TABS: { id: ReportId; label: string; description: string }[] = [
   { id: "7", label: "Report 7", description: "As-of date snapshot" },
 ];
 
-const FYS = ["2026-27", "2025-26", "2024-25"] as const;
-
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function CompanyReports() {
-  const [fy, setFy] = useState<string>("2026-27");
+  // FY comes from the global filter bar (page is FY_ONLY) — a second local
+  // selector previously disagreed with the global one and left stale-year
+  // figures on screen.
+  const { fy } = useGlobalFilter();
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -762,6 +764,8 @@ export default function CompanyReports() {
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     setLoading(true);
     setError(null);
+    // Never leave the previous year's figures on screen while the new year loads.
+    setData(null);
     fetch(`/api/company-reports?fy=${encodeURIComponent(fy)}`)
       .then((r) => {
         if (!r.ok)
@@ -825,13 +829,6 @@ export default function CompanyReports() {
             {data && likeMonthsLabel ? ` Comparing ${likeMonthsLabel} FY ${fy} vs FY ${data.priorFy}.` : ""}
           </p>
         </div>
-        <select
-          value={fy}
-          onChange={(e) => setFy(e.target.value)}
-          className="text-xs border border-border rounded-md px-2 py-1.5 bg-background"
-        >
-          {FYS.map((f) => <option key={f} value={f}>FY {f}</option>)}
-        </select>
       </div>
 
       {/* Loading / error */}

@@ -51,11 +51,20 @@ function lastDayOfMonth(label: string): Date | null {
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+// How long after month-end we keep trusting the max-invoice-date heuristic.
+// Register months lock on the 7th of the following month, so once that grace
+// window has passed the data can no longer change — the month is complete
+// even if no invoice happens to land on its literal last calendar day
+// (e.g. Oct-24's last invoice was Oct-30, which used to drop the whole month
+// from Company Reports' like-months comparison).
+const MONTH_COMPLETE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+
 // A month is complete when its max invoice date reaches the month's last
-// calendar day. Some live register workbooks (historical FYs) have no
-// per-invoice DATE column, so every row's invoice_date is null; for those
-// months fall back to the calendar — the month is complete once it has fully
-// elapsed.
+// calendar day, OR once the month-lock grace window (7 days past month end,
+// matching the register freeze rule) has elapsed. Some live register
+// workbooks (historical FYs) have no per-invoice DATE column, so every row's
+// invoice_date is null; for those months fall back to the calendar — the
+// month is complete once it has fully elapsed.
 export function isMonthComplete(
   monthLabel: string,
   maxInvoiceDate: string | null,
@@ -64,9 +73,14 @@ export function isMonthComplete(
   const lastDay = lastDayOfMonth(monthLabel);
   if (lastDay == null) return false;
   if (maxInvoiceDate != null) {
-    return (
-      new Date(`${maxInvoiceDate}T00:00:00Z`).getTime() >= lastDay.getTime()
-    );
+    if (new Date(`${maxInvoiceDate}T00:00:00Z`).getTime() >= lastDay.getTime()) {
+      return true;
+    }
+    // Data exists but no invoice reached the last calendar day — still
+    // complete once the month locks. The lock instant is 00:00 UTC on the
+    // 7th of the following month = lastDay 00:00 + 7 days (lastDay + 1 day
+    // is the 1st of the next month, + 6 more days reaches the 7th).
+    return now >= lastDay.getTime() + MONTH_COMPLETE_GRACE_MS;
   }
   // Fully elapsed means the whole last day is over, i.e. we are at or past
   // the first moment of the following month.

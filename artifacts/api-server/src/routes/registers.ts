@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { invalidateSnapshots } from "../lib/payloadSnapshot.js";
+import { prewarmMgmtDataSnapshots } from "./mgmt.js";
 import path from "node:path";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { isAdminToken, isMonthInFy } from "../lib/adminAuth.js";
@@ -569,10 +570,13 @@ router.post("/registers/:fy/force-resync", async (req, res) => {
         // from the repaired data on the next request.
         invalidateSnapshots(`mgmt-data|${fy}|`);
         invalidateSnapshots(`warnings|${fy}|`);
-        invalidateSnapshots(`company-reports|${fy}`);
+        invalidateSnapshots(`company-reports|v2|${fy}`);
         // Analytics keys are analytics|fy|compareFy — the repaired year can sit
         // in either position, so clear the whole family (small set).
         invalidateSnapshots(`analytics|`);
+        // Rebuild the repaired year's saved views in the background so the
+        // next visitor gets fresh figures instantly instead of a blocking build.
+        void prewarmMgmtDataSnapshots([fy]).catch(() => {});
         req.log.info({ fy }, "force-resync: payload snapshots invalidated");
       })
       .catch((err: unknown) => {

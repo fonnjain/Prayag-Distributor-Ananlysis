@@ -49,7 +49,8 @@ import {
   insertDistributorTierOverrideSchema,
 } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
-import { serveWithSnapshot, invalidateSnapshots } from "../lib/payloadSnapshot.js";
+import { serveWithSnapshot, invalidateSnapshots, prewarmSnapshot } from "../lib/payloadSnapshot.js";
+import { logger } from "../lib/logger.js";
 import { isFrozen } from "../lib/customers/registerSync.js";
 import { monthFreezeAt } from "../lib/registers/monthlyReplace.js";
 
@@ -73,6 +74,43 @@ const MGMT_DATA_KEY_PREFIX = "mgmt-data|";
 
 function mgmtDataSnapshotKey(fy: string, from: number, to: number): string {
   return `${MGMT_DATA_KEY_PREFIX}${fy}|${from}|${to}`;
+}
+
+// The period views every FY selector exposes: full year + the four quarters.
+// Pre-warmed at startup (and after a register repair) so no user's first visit
+// ever blocks on a multi-minute live build.
+const PREWARM_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [1, 12], [1, 3], [4, 6], [7, 9], [10, 12],
+];
+
+/**
+ * Build any missing mgmt-data snapshots (full year + quarters) for the given
+ * FYs — or every selectable FY when none are given. Sequential and
+ * skip-if-exists (see prewarmSnapshot), so re-runs are cheap and a startup
+ * loop never re-builds covered keys.
+ */
+export async function prewarmMgmtDataSnapshots(fys?: string[]): Promise<void> {
+  const targets =
+    fys ?? Object.keys(mgmtSources().secondary_order_booking.files_by_year).sort().reverse();
+  let built = 0;
+  for (const fy of targets) {
+    for (const [from, to] of PREWARM_RANGES) {
+      try {
+        const result = await prewarmSnapshot({
+          key: mgmtDataSnapshotKey(fy, from, to),
+          ttlMs: MGMT_DATA_TTL_MS,
+          build: () => buildMgmtDataPayload(fy, from, to, undefined, logger),
+        });
+        if (result === "built") {
+          built += 1;
+          logger.info({ fy, from, to }, "mgmt-data prewarm: snapshot built");
+        }
+      } catch (err) {
+        logger.warn({ err, fy, from, to }, "mgmt-data prewarm: build failed");
+      }
+    }
+  }
+  logger.info({ fys: targets.length, built }, "mgmt-data prewarm: done");
 }
 
 // Fiscal-month index (1=Apr … 12=Mar) → month label like "Apr-26" for a FY.

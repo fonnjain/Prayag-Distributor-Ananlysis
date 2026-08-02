@@ -26,6 +26,7 @@ import {
 import { isFyOpen } from "./lib/customers/registerSync.js";
 import { restoreAnchorsFromStorage } from "./lib/config/verifyAnchors.js";
 import { prewarmWarningsSnapshots } from "./routes/warnings.js";
+import { prewarmMgmtDataSnapshots } from "./routes/mgmt.js";
 
 const rawPort = process.env["PORT"];
 
@@ -98,6 +99,15 @@ runMigrations()
     .then(() =>
       prewarmWarningsSnapshots("2026-27").catch((err) =>
         logger.warn({ err }, "warnings prewarm failed"),
+      ),
+    )
+    // Then build any missing mgmt-data snapshots (every FY × full year + four
+    // quarters) so no user's first visit to any year or quarter ever blocks on
+    // a multi-minute live build. Sequential and skip-if-exists — cheap when
+    // everything is already covered.
+    .then(() =>
+      prewarmMgmtDataSnapshots().catch((err) =>
+        logger.warn({ err }, "mgmt-data prewarm failed"),
       ),
     );
 

@@ -44,7 +44,9 @@ router.get("/company-reports", async (req, res) => {
     // Cold-start fast path: serve the last persisted payload instantly with
     // meta.snapshotSavedAt + meta.refreshing, rebuilding in the background.
     const payload = await serveWithSnapshot({
-      key: `company-reports|${rawFy}`,
+      // v2: month-completeness rule fixed (Oct-24-style months no longer
+      // dropped) — versioned key forces frozen-FY snapshots to rebuild once.
+      key: `company-reports|v2|${rawFy}`,
       ttlMs: COMPANY_REPORTS_TTL_MS,
       build: () => buildCompanyReports(rawFy, undefined),
       log: req.log,

@@ -435,6 +435,9 @@ export default function StateHeadDashboard() {
     setLoading(true);
     setError(null);
     setQuotaWait(false);
+    // Never leave the previous selection's figures on screen while the new
+    // period loads — stale numbers for the wrong year are worse than a spinner.
+    setData(null);
     const params = new URLSearchParams({
       fy,
       monthFrom: String(effectivePeriodFrom),
