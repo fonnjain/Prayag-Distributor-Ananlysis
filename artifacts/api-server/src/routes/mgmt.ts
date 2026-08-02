@@ -2,7 +2,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { loadRoster, mgmtSources } from "../lib/mgmt/roster.js";
 import { respondIfQuotaError } from "../lib/quotaResponse.js";
-import { resolveOrderFileId, getOrderLoadStatus } from "../lib/mgmt/orders.js";
+import { resolveOrderFileId, getOrderLoadStatus, loadOrderFile } from "../lib/mgmt/orders.js";
 import {
   buildManagementWorkbook,
   assembleRows,
@@ -10,6 +10,7 @@ import {
   type ReportFilters,
 } from "../lib/mgmt/report.js";
 import { loadTargetsForFy, type TargetRow } from "../lib/mgmt/targets.js";
+import { loadDbTargetsForFy } from "../lib/mgmt/memberTargetsStore.js";
 import { loadHrSfaDashboard, type HrSfaRecord } from "../lib/mgmt/hrSfaDashboard.js";
 import { runVerify, hasVerifyAnchors, verifyFyList } from "../lib/mgmt/verify.js";
 import {
@@ -36,7 +37,7 @@ import {
   loadStateDashboard,
   type SecMember,
 } from "../lib/mgmt/stateDashboard.js";
-import { loadDeepDiveData, normSecKey, loadRegistry } from "../lib/mgmt/deepDiveData.js";
+import { loadDeepDiveData, normSecKey, loadRegistry, getRegistry } from "../lib/mgmt/deepDiveData.js";
 import { splitAnnualToMonth, getSeasonalCalibration } from "../lib/seasonal.js";
 import {
   buildPrimaryTargetMapFromStateTargets,
@@ -166,21 +167,40 @@ async function targetsSource(req: Request): Promise<{
   detail: string;
 }> {
   try {
-    const map = await loadTargetsForFy(DEFAULT_FY);
-    if (map.size > 0) {
+    const [map, dbRows] = await Promise.all([
+      loadTargetsForFy(DEFAULT_FY),
+      loadDbTargetsForFy(DEFAULT_FY).catch(() => new Map<string, TargetRow>()),
+    ]);
+    const dbCount = dbRows.size;
+    // Sheet-only share = merged entries whose key has no DB overlay (DB rows
+    // can override sheet rows for the same member, so map.size - dbCount
+    // would undercount the sheet).
+    const sheetCount = [...map.keys()].filter((k) => !dbRows.has(k)).length;
+    let rosterCount: number | null = null;
+    try {
+      rosterCount = (await loadRoster()).members.length;
+    } catch { /* roster unavailable — omit the denominator */ }
+    const ofRoster = rosterCount ? ` of ${rosterCount} roster members` : "";
+    if (map.size === 0) {
       return {
         key: "targets",
         name: "Targets and business plans",
-        status: "connected",
-        detail: `${map.size} member target${map.size === 1 ? "" : "s"} saved in the Prayag Target Master sheet for ${DEFAULT_FY}. Achievement % columns fill from these.`,
+        status: "partial",
+        detail:
+          "The Prayag Target Master sheet is connected but effectively unmaintained — it holds no usable targets, and none have been saved in the app yet. Set targets in the Targets tab; those save to the app's own database, not the sheet.",
       };
     }
+    const lowCoverage = rosterCount != null && map.size < rosterCount * 0.25;
     return {
       key: "targets",
       name: "Targets and business plans",
-      status: "partial",
+      status: lowCoverage ? "partial" : "connected",
       detail:
-        "The Prayag Target Master sheet is connected but has no saved targets for the current year yet. Set them in the Targets tab.",
+        `Targets exist for ${map.size}${ofRoster} for ${DEFAULT_FY}` +
+        ` (${sheetCount} from the Target Master sheet, ${dbCount} saved in the app).` +
+        (lowCoverage
+          ? " The Target Master sheet is effectively unmaintained — it is not being filled in, not merely awaiting entry. New targets should be set in the Targets tab, which saves to the app database."
+          : " Achievement % columns fill from these."),
     };
   } catch (err) {
     req.log.warn({ err }, "target master status check failed");
@@ -193,6 +213,82 @@ async function targetsSource(req: Request): Promise<{
     };
   }
 }
+
+// GET /mgmt/unmatched-names?fy=YYYY-YY — order-booking names that no roster
+// member matches, each with its net Sale value and an identity-registry
+// verdict. Purpose: before anyone is asked to fix 58 names by hand, show which
+// are spelling variants the registry can already resolve and which are
+// genuinely unknown.
+const _unmatchedCache = new Map<string, { at: number; payload: unknown }>();
+const UNMATCHED_TTL_MS = 10 * 60 * 1000;
+
+router.get("/mgmt/unmatched-names", async (req: Request, res: Response): Promise<void> => {
+  const fy = typeof req.query.fy === "string" && req.query.fy ? req.query.fy : DEFAULT_FY;
+  const hit = _unmatchedCache.get(fy);
+  if (hit && Date.now() - hit.at < UNMATCHED_TTL_MS) {
+    res.json(hit.payload);
+    return;
+  }
+  try {
+    // Registry access is warm-only (getRegistry, sync): triggering a full
+    // deep-dive Sheets load from this diagnostic endpoint on a cold start
+    // could burn quota / time out the Data Sources page. When cold, names
+    // come back as "unchecked" and the next visit (after deep-dive pages
+    // warm the cache) upgrades them.
+    const [agg, roster] = await Promise.all([loadOrderFile(fy), loadRoster()]);
+    const registry = getRegistry(fy);
+    if (!agg) {
+      res.status(404).json({ error: `No order booking file for ${fy}.` });
+      return;
+    }
+    const rosterKeys = new Set(roster.members.map((m) => m.normKey));
+    const names = [...agg.perTm.entries()]
+      .filter(([key]) => !rosterKeys.has(key))
+      .map(([, v]) => {
+        const name = v.displayName;
+        let registryStatus: "resolvable" | "ambiguous" | "unknown" | "unchecked" = "unchecked";
+        let resolvedTo: string | null = null;
+        let candidates: string[] | null = null;
+        if (registry) {
+          const r = registry.resolve(name);
+          if (r.kind === "found") {
+            registryStatus = "resolvable";
+            resolvedTo = `${r.person.displayName} (${r.person.stateHead}${r.person.isLeft ? ", LEFT" : ""})`;
+          } else if (r.kind === "ambiguous") {
+            registryStatus = "ambiguous";
+            candidates = r.candidates.map((p) => `${p.displayName} (${p.stateHead})`);
+          } else {
+            registryStatus = "unknown";
+          }
+        }
+        return {
+          name,
+          amount: Math.round(v.amount),
+          saleAmount: Math.round(v.saleAmount ?? 0),
+          registryStatus,
+          resolvedTo,
+          candidates,
+        };
+      })
+      .sort((a, b) => b.amount - a.amount);
+    const totalAmount = names.reduce((s, n) => s + n.amount, 0);
+    const payload = {
+      fy,
+      count: names.length,
+      totalAmount,
+      registryAvailable: registry != null,
+      names,
+    };
+    // Only cache once the registry is warm — a cold "unchecked" response
+    // should upgrade on the next visit, not stick for 10 minutes.
+    if (registry != null) _unmatchedCache.set(fy, { at: Date.now(), payload });
+    res.json(payload);
+  } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
+    req.log.error({ err, fy }, "unmatched-names failed");
+    res.status(500).json({ error: "Could not compute unmatched order-booking names." });
+  }
+});
 
 router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> => {
   try {
@@ -236,13 +332,14 @@ router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> =
       {
         key: "roster",
         name: "Team member roster",
-        status: roster
-          ? roster.source === "hr_roster" ? "connected" : "partial"
-          : "missing",
+        // Dashboard identity columns are the working source of truth by
+        // design (not a stopgap awaiting the HR file), so they count as
+        // connected, not partial.
+        status: roster ? "connected" : "missing",
         detail: roster
           ? roster.source === "hr_roster"
             ? `${roster.members.length} team members from the HR roster workbook`
-            : `${roster.members.length} team members. The Team Member Details (HR) file is not shared with the connected Google account yet, so the roster comes from the live STATE HEAD DASHBOARD identity columns.`
+            : `${roster.members.length} team members from the live STATE HEAD DASHBOARD identity columns — the working source of truth for the roster. (A separate Team Member Details (HR) file exists but is not shared; the dashboard identity columns are used by design, not as a stopgap.)`
           : "The roster could not be loaded. Connect the Google account to enable state and member filtering.",
       },
       {
@@ -1005,7 +1102,9 @@ router.post("/mgmt/report", async (req: Request, res: Response): Promise<void> =
     regions: strArr(body.regions),
     monthFrom: intIn(body.monthFrom, 1, 12, 1),
     monthTo: intIn(body.monthTo, 1, 12, 12),
-    lowPerfPct: intIn(body.lowPerfPct, 1, 100, 60),
+    // Unified low-performer threshold: 50% everywhere (matches the dashboard
+    // filter and the "below 50%" achievement band boundary).
+    lowPerfPct: intIn(body.lowPerfPct, 1, 100, 50),
   };
   if (filters.monthFrom > filters.monthTo) {
     res.status(400).json({ error: "monthFrom must not be after monthTo" });

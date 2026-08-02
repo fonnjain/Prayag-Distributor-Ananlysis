@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { cn } from "@/lib/utils";
 import { QuotaWaitBanner } from "./quotaWait";
 import { isQuotaWaitError, quotaRetryDelayMs } from "@/data/dashboard-context";
+import { useGlobalFilter } from "@/data/global-filter-context";
 import {
   FileSpreadsheet,
   Download,
@@ -128,16 +129,23 @@ export default function MgmtReports() {
     },
   });
   const report = useGenerateMgmtReport();
+  const { fy: globalFy } = useGlobalFilter();
   const [fy, setFy] = useState<string | null>(null);
   const [regions, setRegions] = useState<Set<string>>(new Set());
   const [states, setStates] = useState<Set<string>>(new Set());
   const [monthFrom, setMonthFrom] = useState(1);
   const [monthTo, setMonthTo] = useState(12);
-  const [lowPerfPct, setLowPerfPct] = useState(60);
+  // Unified low-performer threshold: 50% across all pages (dashboard filter,
+  // workbook generator, and the "below 50%" achievement band boundary).
+  const [lowPerfPct, setLowPerfPct] = useState(50);
   const [error, setError] = useState<string | null>(null);
 
   const data = options.data;
-  const effectiveFy = fy ?? data?.defaultFy ?? "2026-27";
+  // Follow the global FY filter by default; the local selector is an explicit
+  // override (labelled below) so two selectors on screen can't silently disagree.
+  const effectiveFy =
+    fy ?? (data?.fys?.includes(globalFy) ? globalFy : undefined) ?? data?.defaultFy ?? "2026-27";
+  const isOverride = fy !== null && fy !== globalFy;
 
   const verify = useVerifyMgmtReport(
     { fy: effectiveFy },
@@ -270,7 +278,14 @@ export default function MgmtReports() {
         <CardContent className="px-6 pb-6 space-y-6">
           <div className="grid gap-4 sm:grid-cols-3">
             <div>
-              <label className="text-sm font-medium block mb-1.5">Fiscal year</label>
+              <label className="text-sm font-medium block mb-1.5">
+                Fiscal year
+                {isOverride && (
+                  <span className="ml-2 text-[11px] font-normal text-amber-600">
+                    override — global filter is {globalFy}
+                  </span>
+                )}
+              </label>
               <select
                 value={effectiveFy}
                 onChange={(e) => setFy(e.target.value)}

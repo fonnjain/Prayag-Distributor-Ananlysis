@@ -123,3 +123,31 @@ uri = "file://exports/DataSources_Targets_Documentation.xlsx"
 type = "table"
 title = "Data Sources Targets — Documentation"
 description = "State Head Targets and Secondary Targets editors: database, logic (seasonal calibration, Auto Calculate), and downstream connections."
+
+[[outputs]]
+id = "vRXu8lq6_DthNCcZ8OT3f"
+uri = "file://exports/Prayag_Database_Documentation.xlsx"
+type = "table"
+title = "Database Documentation (Excel)"
+description = "All database tables, columns, views, where each table's data comes from, and how the data flows into the app."
+
+[[outputs]]
+id = "ciCk4lg58s2KX6VgVNhRf"
+uri = "file://exports/Reports_and_CompanyReports_Documentation.xlsx"
+type = "table"
+title = "Reports & Company Reports Documentation (Excel)"
+description = "What the Reports and Company Reports pages do, their sources, and how they connect to the rest of the app."
+
+[[outputs]]
+id = "-e-Aw6ScQXCZh9z0EEQgU"
+uri = "file://exports/AI_Analyst_Documentation.docx"
+type = "word_document"
+title = "AI Analyst Documentation (Word)"
+description = "How the AI Analyst works, step by step, with its functionalities, capabilities and limits."
+
+[[outputs]]
+id = "QiNlisGogNZ5hJUiywVCj"
+uri = "file://exports/AI_Reports_Documentation.docx"
+type = "word_document"
+title = "AI Reports Documentation (Word)"
+description = "How AI Reports works, the document types it can generate, and its guarantees and limits."

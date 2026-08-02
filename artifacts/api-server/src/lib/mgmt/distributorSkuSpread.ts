@@ -26,6 +26,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { logger } from "../logger.js";
 import type { DistributorGroup } from "./distributorDeepDive.js";
+import { secondaryCoverageNote } from "./skuSpread.js";
 
 // ─── Broad segment universe (17 categories, from group_map.json keys) ─────────
 
@@ -296,6 +297,8 @@ export async function loadDistributorSkuSpread(
     [...ANALYSIS_FYS].reverse().find((f) => fysWithData.has(f)) ?? ANALYSIS_FYS.at(-1)!;
   const priorFyIdx = ANALYSIS_FYS.indexOf(recentFy) - 1;
   const priorFy = priorFyIdx >= 0 ? ANALYSIS_FYS[priorFyIdx] : null;
+  // Derived from the actual loaded months (cached), never a hard-coded range.
+  const coverageNote = await secondaryCoverageNote(recentFy);
 
   // ── Build per-distributor spread objects ──────────────────────────────────
   // We also build a cross-distributor brand map for peer whitespace.
@@ -400,6 +403,7 @@ export async function loadDistributorSkuSpread(
 
     spreads.set(g.normKey, {
       isLiveYear: false,
+      liveYearNote: coverageNote,
       totalBroadSegments: TOTAL_BROAD_SEGMENTS,
       recentFy,
       totalNet: Math.round(totalNet),

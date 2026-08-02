@@ -51,6 +51,43 @@ type BrandRow = {
 // FY2026-27 is served from the PSCode_3 brand-level backfill
 // (source='pscode3_brand_rollup' in secondary_register_line), Apr–Jun 2026.
 
+// For an open FY the register only covers the months loaded so far. Derive the
+// covered months from the data (cached per FY, 10-min TTL) so the UI can state
+// coverage explicitly ("Apr–Jun only, no July") instead of implying a full year.
+const coverageCache = new Map<string, { note: string | undefined; at: number }>();
+const COVERAGE_TTL_MS = 10 * 60 * 1000;
+
+export async function secondaryCoverageNote(fy: string): Promise<string | undefined> {
+  const hit = coverageCache.get(fy);
+  if (hit && Date.now() - hit.at < COVERAGE_TTL_MS) return hit.note;
+  let note: string | undefined;
+  try {
+    const res = await db.execute<{ month_label: string }>(
+      sql`SELECT DISTINCT month_label FROM secondary_register_line WHERE fy = ${fy}`,
+    );
+    const months = res.rows.map((r) => r.month_label);
+    if (months.length > 0 && months.length < 12) {
+      // Sort fiscal-calendar order (Apr..Mar) by parsing "Mon-YY".
+      const ord = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
+      months.sort((a, b) => ord.indexOf(a.slice(0, 3)) - ord.indexOf(b.slice(0, 3)));
+      const range = `${months[0]}–${months[months.length - 1]} (${months.length} month${months.length === 1 ? "" : "s"})`;
+      // "Not loaded yet" is only true for the open FY. For a closed FY,
+      // partial months are a data gap and must be labelled as one.
+      const now = new Date();
+      const startYr = now.getUTCMonth() >= 3 ? now.getUTCFullYear() : now.getUTCFullYear() - 1;
+      const openFy = `${startYr}-${String(startYr + 1).slice(-2)}`;
+      note =
+        fy === openFy
+          ? `FY${fy} secondary register covers ${range} only; later months are not loaded yet.`
+          : `FY${fy} secondary register covers ${range} only — the remaining months are missing from the loaded register (a data gap, not pending data).`;
+    }
+  } catch (err) {
+    logger.warn({ err, fy }, "skuSpread: coverage note query failed");
+  }
+  coverageCache.set(fy, { note, at: Date.now() });
+  return note;
+}
+
 export async function computeSkuSpread(
   normKey: string,
   fy: string,
@@ -79,10 +116,13 @@ export async function computeSkuSpread(
     (r) => r.brand_canon != null,
   ).length;
 
+  const coverageNote = await secondaryCoverageNote(fy);
+
   if (rows.length === 0) {
     logger.info({ normKey, fy }, "skuSpread: no rows for member in closed FY");
     return {
       isLiveYear: false,
+      liveYearNote: coverageNote,
       totalRows: 0,
       totalNet: 0,
       distinctSegments: 0,
@@ -158,6 +198,7 @@ export async function computeSkuSpread(
 
   return {
     isLiveYear: false,
+    liveYearNote: coverageNote,
     totalRows: rows.length,
     totalNet,
     distinctSegments,

@@ -137,6 +137,39 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    id: "008_backfill_state_head_2425_2526",
+    sql: `
+      -- FY2024-25 and FY2025-26 registers (Schema B, 11 columns) carry no
+      -- STATE / STATE HEAD columns, so every sale_line row for those years was
+      -- ingested with state_canon and head_canon NULL. Company Reports (and any
+      -- state/head-grouped analytics) therefore showed Rs 0.00 for the prior
+      -- year. Backfill both attributes per customer from the years that DO
+      -- carry them: FY2026-27 first (most recent attribution), then FY2023-24.
+      -- Amounts, row counts and identity keys are untouched — the frozen-FY
+      -- row/amount anchors still hold. Rows whose customer never appears in a
+      -- state-bearing year stay NULL (grouped as 'Unmapped' — honest residual).
+      WITH src AS (
+        SELECT lower(trim(customer)) AS cust,
+               max(state_canon) FILTER (WHERE fy = '2026-27') AS st27,
+               max(head_canon)  FILTER (WHERE fy = '2026-27') AS hd27,
+               max(state_canon) FILTER (WHERE fy = '2023-24') AS st24,
+               max(head_canon)  FILTER (WHERE fy = '2023-24') AS hd24
+        FROM sale_line_all
+        WHERE version_status = 'current'
+          AND fy IN ('2026-27', '2023-24')
+          AND (state_canon IS NOT NULL OR head_canon IS NOT NULL)
+        GROUP BY 1
+      )
+      UPDATE sale_line_all t
+      SET state_canon = COALESCE(t.state_canon, src.st27, src.st24),
+          head_canon  = COALESCE(t.head_canon,  src.hd27, src.hd24)
+      FROM src
+      WHERE t.fy IN ('2024-25', '2025-26')
+        AND lower(trim(t.customer)) = src.cust
+        AND (t.state_canon IS NULL OR t.head_canon IS NULL);
+    `,
+  },
+  {
     id: "006_drop_mgmt_data_snapshot",
     sql: `
       -- GET /api/mgmt/data now uses the generic route_payload_snapshot layer

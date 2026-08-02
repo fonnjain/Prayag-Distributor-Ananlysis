@@ -570,7 +570,7 @@ router.post("/registers/:fy/force-resync", async (req, res) => {
         // from the repaired data on the next request.
         invalidateSnapshots(`mgmt-data|${fy}|`);
         invalidateSnapshots(`warnings|${fy}|`);
-        invalidateSnapshots(`company-reports|v2|${fy}`);
+        invalidateSnapshots(`company-reports|v3|${fy}`);
         // Analytics keys are analytics|fy|compareFy — the repaired year can sit
         // in either position, so clear the whole family (small set).
         invalidateSnapshots(`analytics|`);

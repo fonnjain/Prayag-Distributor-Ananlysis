@@ -1246,6 +1246,12 @@ function SkuSpreadPanel({ spread }: { spread: SkuSpread }) {
         Segment Spread (Secondary Register)
       </h3>
 
+      {spread.liveYearNote && (
+        <div className="rounded-md border border-amber-300/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-[11px] text-amber-800 dark:text-amber-300">
+          {spread.liveYearNote}
+        </div>
+      )}
+
       {/* Summary tiles */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="rounded-lg border border-border bg-card px-4 py-3 flex flex-col gap-1">

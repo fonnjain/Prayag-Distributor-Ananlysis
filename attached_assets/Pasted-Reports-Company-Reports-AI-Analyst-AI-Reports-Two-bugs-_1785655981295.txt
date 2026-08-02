@@ -1,0 +1,62 @@
+Reports, Company Reports, AI Analyst, AI Reports
+
+Two bugs first — the reports are built on figures that are currently wrong. Then the capability work.
+
+Part 1 — Fix before building anything
+Bug 1: Company Reports prior-year column reads zero
+
+Report 1, sale by state, Apr–Jul FY2026-27 vs FY2025-26:
+
+State	FY2026-27	FY2025-26	Growth
+WEST BENGAL	₹20.53 Cr	₹0.00 Cr	—
+UTTAR PRADESH	₹12.30 Cr	₹0.00 Cr	—
+BIHAR	₹9.44 Cr	₹0.00 Cr	—
+
+FY2025-26 is frozen at 145,613 rows and ₹361.00 Cr. It is not empty. Apr–Jul of that year is roughly a third of it.
+
+Likely cause: state name vocabulary. This report groups by state. FY2025-26 rows carry state_canon values like UP ( R ), DELHI A, KARNATAKA (B) — territory splits. The current-year column shows UTTAR PRADESH, WEST BENGAL — canonical names. If the join is on raw values, the two years never match and every prior cell is empty.
+
+This is the same stateCanon normalisation issue already fixed in the Customer Performance filter. The shared module exists; this report is not using it.
+
+The like-months banner is correct and worth keeping — "comparing Apr–Jul FY2026-27 against the same Apr–Jul months of FY2025-26. Incomplete current year — never compare to full prior year." That rule is right. Only the join is broken.
+
+Bug 2: Data health passes on a figure that is ₹130 Cr out
+
+Data health reports FY2025-26 Total Sale (net) at ₹231.09 Cr and marks it PASS.
+
+The frozen FY2025-26 anchor is ₹361.00 Cr. The check passes because it compares the app against the same source it computed from, rather than against the register.
+
+A reconciliation that cannot fail is not a reconciliation. Anchor it to the frozen figures.
+
+Prayag app - fix two figures before any report work. Report each with its value.
+
+1. COMPANY REPORTS PRIOR-YEAR COLUMN IS ZERO for every state.
+   FY2025-26 is frozen at 145,613 rows and Rs 361.00 Cr - it is not empty.
+   Report 1 compares Apr-Jul across years and the prior column returns nothing.
+
+   Check whether the state join uses raw state_canon values. FY2025-26 carries
+   territory splits - UP ( R ), DELHI A, KARNATAKA (B) - while the current year
+   shows canonical names. If so, route both sides through the shared stateCanon
+   module, which already exists and is already used by the Customer Performance
+   filter.
+
+   Then report Apr-Jul FY2025-26 sale by state, and confirm the growth column
+   populates. Check Reports 2 to 7 for the same fault - any that group by state,
+   head or customer name may have it.
+
+2. DATA HEALTH PASSES ON A WRONG FIGURE.
+   It reports FY2025-26 Total Sale (net) as Rs 231.09 Cr and marks it PASS. The
+   frozen anchor is Rs 361.00 Cr - a Rs 129.91 Cr difference.
+
+   The check is comparing the app against the same source it computed from, so
+   it cannot fail. Anchor it to the frozen register figures instead:
+      FY2023-24  137,619 rows  Rs 349.02 Cr
+      FY2024-25  141,201 rows  Rs 341.14 Cr
+      FY2025-26  145,613 rows  Rs 361.00 Cr
+   Report what the check returns after re-anchoring. If it now FAILS, that is
+   correct behaviour and the underlying figure needs fixing.
+
+3. WHILE THERE - the Reports page defaults to fiscal year 2025-26 while the
+   global filter reads 2026-27. Two year selectors on one screen showing
+   different years is a misreading waiting to happen. Make the report follow the
+   global filter, or label the local selector as an override.

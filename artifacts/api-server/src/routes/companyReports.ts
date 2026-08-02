@@ -46,7 +46,7 @@ router.get("/company-reports", async (req, res) => {
     const payload = await serveWithSnapshot({
       // v2: month-completeness rule fixed (Oct-24-style months no longer
       // dropped) — versioned key forces frozen-FY snapshots to rebuild once.
-      key: `company-reports|v2|${rawFy}`,
+      key: `company-reports|v3|${rawFy}`,
       ttlMs: COMPANY_REPORTS_TTL_MS,
       build: () => buildCompanyReports(rawFy, undefined),
       log: req.log,

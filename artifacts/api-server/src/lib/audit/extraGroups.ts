@@ -9,6 +9,7 @@ import { stateVariants } from "../stateCanon.js";
 import { logger } from "../logger.js";
 import rawAuditAnchors from "../../../config/audit_anchors.json";
 import rawRegisterSheets from "../../../config/register_sheets.json";
+import rawFrozenRegisters from "../../../config/frozen_registers.json";
 import { loadFactoryPending } from "../mgmt/factoryPending.js";
 import { listSheetTabs, readTabRowsChunked } from "../registers/sheetsApi.js";
 import { BOOKING_SHEETS, readBookingAggregated } from "../mgmt/primarySheets.js";
@@ -724,14 +725,86 @@ async function runSapLagGroup(): Promise<CheckGroup> {
 
 // ── Entry point ────────────────────────────────────────────────────────────────
 
+// ── Group 10 — Frozen register anchors (independent reconciliation) ──────────
+//
+// Compares the sale_line DB (current rows) against the FROZEN register anchors
+// in frozen_registers.json — figures verified once against the client's
+// registers and then locked. Unlike a self-referential total, this check CAN
+// fail: if a sync, migration, or manual write ever changes a closed FY, the
+// row count or amount drifts off its anchor and this group flags it.
+export async function runFrozenAnchorGroup(): Promise<CheckGroup> {
+  const frozen = (rawFrozenRegisters as { frozen: Record<string, { rows: number; amountRupees: number }> }).frozen;
+  const checks: HealthCheck[] = [];
+  try {
+    const { rows } = await pool.query<{ fy: string; n: string; amt: string }>(
+      `SELECT fy, count(*)::text AS n, coalesce(sum(amount),0)::text AS amt
+       FROM sale_line_all WHERE version_status = 'current'
+       GROUP BY fy`,
+    );
+    const byFy = new Map(rows.map((r) => [r.fy, { n: Number(r.n), amt: Number(r.amt) }]));
+    for (const [fy, anchor] of Object.entries(frozen)) {
+      const actual = byFy.get(fy) ?? { n: 0, amt: 0 };
+      const rowsOk = actual.n === anchor.rows;
+      checks.push({
+        key: `frozen_rows_${fy}`,
+        label: `FY${fy} register rows vs frozen anchor`,
+        unit: "count",
+        expected: anchor.rows,
+        actual: actual.n,
+        deltaPct: anchor.rows > 0 ? ((actual.n - anchor.rows) / anchor.rows) * 100 : null,
+        status: rowsOk ? "pass" : "fail",
+        note: rowsOk
+          ? "Current sale_line rows match the frozen register anchor exactly."
+          : "Row count drifted off the frozen anchor — something wrote to a closed year.",
+      });
+      if (anchor.amountRupees > 0) {
+        const dPct = ((actual.amt - anchor.amountRupees) / anchor.amountRupees) * 100;
+        // Frozen years must match to the rupee — allow only sub-rupee float dust.
+        const amtOk = Math.abs(actual.amt - anchor.amountRupees) < 1;
+        checks.push({
+          key: `frozen_amount_${fy}`,
+          label: `FY${fy} Total Sale (net, primary register) vs frozen anchor`,
+          unit: "money",
+          expected: anchor.amountRupees,
+          actual: actual.amt,
+          deltaPct: dPct,
+          status: amtOk ? "pass" : "fail",
+          note: amtOk
+            ? "DB register total matches the frozen anchor. This is the primary sales register total — NOT the Secondary OB file total, which is a different, smaller measure."
+            : `Off by Rs ${(Math.abs(actual.amt - anchor.amountRupees) / 1e7).toFixed(2)} Cr from the frozen anchor — the underlying data needs investigating.`,
+        });
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, "audit: frozen-anchor group failed");
+    checks.push({
+      key: "frozen_anchor_error",
+      label: "Frozen register anchor reconciliation",
+      unit: "text",
+      expected: null,
+      actual: null,
+      deltaPct: null,
+      status: "fail",
+      note: `Could not read sale_line to reconcile against frozen anchors: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
+  return {
+    id: "frozen-anchors",
+    label: "Group 10 — Frozen register anchors (independent reconciliation)",
+    available: true,
+    checks,
+  };
+}
+
 export async function runExtraGroups(fy: string): Promise<CheckGroup[]> {
-  const [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag] =
+  const [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag, frozenAnchors] =
     await Promise.all([
       runTruncationGroup(),
       runReportLogicGroup(fy),
       runCrossFootGroup(fy),
       runPendingCrossCheckGroup(),
       runSapLagGroup(),
+      runFrozenAnchorGroup(),
     ]);
-  return [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag];
+  return [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag, frozenAnchors];
 }

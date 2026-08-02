@@ -6,4 +6,6 @@ description: FY2026-27 sku loader refreshes the brand-level mirror in the same t
 
 **Why:** the two tables were previously loaded by separate manual runs; forgetting the second left segment-spread/win-back/effective-discount views silently stale (found Aug 2026 with the mirror completely empty while sku table had Apr–Jun).
 
+**Update (Aug 2026):** mirror for FY2026-27 was empty again after the Apr–Jun PSCode_3 drop; repaired by running the identical delete+insert SQL directly (89,179 rows, ₹59.02 Cr NET), 7.6 back to green. Live-year segment-spread views now attach a coverage note derived from `DISTINCT month_label` (secondaryCoverageNote in skuSpread) — open FY wording "not loaded yet", closed FY wording "data gap"; never hard-code a month range.
+
 **How to apply:** audit cross-foot check 7.6 (`cf_7_6_sku_vs_brand_mirror` in extraGroups.ts) compares per-month NET between the two tables and fails on >₹1 drift; if it fires, re-run the loader with --write (or the backfill repair script). If the mirror mapping changes, change it in BOTH scripts and keep 7.6 green.

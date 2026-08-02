@@ -818,6 +818,18 @@ export default function CompanyReports() {
     return first === last ? first : `${first}–${last}`;
   }, [data]);
 
+  // Year-on-year headline — stated explicitly rather than left to be inferred
+  // from the tables. Summed from the same r1r2 dataset every report page
+  // reconciles to (all pages read sale_line, invoice-line level; the prior
+  // year is served from the anchor-frozen register).
+  const headline = useMemo(() => {
+    if (!data || data.likeMonths.length === 0 || data.r1r2_byState.length === 0) return null;
+    const thisFy = data.r1r2_byState.reduce((s, r) => s + r.thisFy, 0);
+    const lastFy = data.r1r2_byState.reduce((s, r) => s + r.lastFy, 0);
+    const growthPct = lastFy > 0 ? ((thisFy / lastFy) - 1) * 100 : null;
+    return { thisFy, lastFy, growthPct };
+  }, [data]);
+
   return (
     <div className="space-y-5 p-4">
       {/* Header */}
@@ -839,6 +851,42 @@ export default function CompanyReports() {
 
       {!loading && data && (
         <>
+          {/* Year-on-year headline — the number that gets quoted, stated with
+              its basis. Level label per glossary: primary sale register,
+              invoice-line level (NOT the retailer-level secondary register). */}
+          {headline && (
+            <div className="rounded-lg border border-border bg-card px-4 py-3">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span className="text-sm font-semibold">
+                  {likeMonthsLabel} FY {data.fy}: {fmtCr(headline.thisFy)}
+                </span>
+                <span className="text-sm text-muted-foreground">
+                  vs {fmtCr(headline.lastFy)} in {likeMonthsLabel} FY {data.priorFy}
+                </span>
+                {headline.growthPct != null && (
+                  <span
+                    className={cn(
+                      "text-sm font-semibold tabular-nums",
+                      headline.growthPct >= 0
+                        ? "text-green-600 dark:text-green-400"
+                        : "text-red-600 dark:text-red-400",
+                    )}
+                  >
+                    {headline.growthPct >= 0 ? "up" : "down"}{" "}
+                    {Math.abs(headline.growthPct).toFixed(1)}% on like months
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Basis: primary sale register (Prayag → distributors, invoice-line
+                level). All report pages below reconcile to these totals. FY{" "}
+                {data.priorFy} figure comes from the anchor-frozen register.
+                Retailer-level secondary figures are a different measure and are
+                never mixed into this number.
+              </p>
+            </div>
+          )}
+
           {/* Like-months notice */}
           <LikeMonthsBadge
             months={data.likeMonths}

@@ -1,0 +1,139 @@
+Part 2 — Reports and Company Reports, current data
+Prayag app - bring Reports and Company Reports onto the current data model.
+Same global rules. Send after Part 1.
+
+1. THE FROZEN YEARS ARE NOW LOADED. FY2023-24, FY2024-25 and FY2025-26 hold
+   137,619 / 141,201 / 145,613 rows. Any report that said a prior year was
+   unavailable should now populate. Report which reports change.
+
+2. THE FY2026-27 SECONDARY REGISTER IS NOW LOADED - Apr to Jun, 89,179 rows,
+   item-code level with segment, distributor, discount and retailer. Reports
+   that were closed-years-only for secondary detail can now cover the open year
+   for those three months. State the coverage explicitly: Apr-Jun only, no July.
+
+3. THE DATA SOURCES PANEL IS OUT OF DATE. It currently says:
+     "Targets and business plans - the Prayag Target Master sheet is connected
+      but has no saved targets for the current year yet."
+   The sheet holds targets for 2 of 169 members, last edited 9 July, and is
+   effectively unmaintained. Say that rather than implying targets merely have
+   not been entered yet.
+   Also confirm what "Team Member Details (HR) file is not shared" means today -
+   the roster comes from the dashboard identity columns, which works, so state
+   it as a design choice rather than a gap if that is what it now is.
+
+4. THE 58 UNMATCHED ORDER-BOOKING NAMES carrying Rs 13.51 Cr are the largest
+   single data-quality item on this page - net Sale counted in the company total
+   but attributed to no member or head.
+   List them with their value, and check them against the identity registry
+   before anyone is asked to fix them by hand. Some will be spelling variants
+   the registry can already resolve.
+
+5. LOW PERFORMER THRESHOLD is 60 per cent on this page, 50 per cent elsewhere,
+   and the band documentation uses a third set. Unify on one.
+
+Acceptance:
+  prior-year columns populate in every Company Report that compares years
+  the frozen anchors are what Data health reconciles against
+  the Data Sources panel describes the true state of each source
+  the 58 unmatched names are listed with their value and registry status
+  one low-performer threshold across all pages
+Part 3 — AI Analyst
+
+The graph already holds company, 12 heads, 181 salespeople, 269 distributors, 18,117 retailers, with 6 named gaps. The architecture is sound. What it lacks is reach into the newer data.
+
+Prayag app - extend the AI Analyst. Same global rules. The graph traversal
+design, the numeric guard and the refusal-to-guess behaviour all stay exactly as
+they are - this adds nodes and abilities, it does not change the contract.
+
+1. ADD THE NEW LEVELS TO THE GRAPH. These exist in the data and the analyst
+   cannot reach them:
+     SKU / item code - segment, breadth, gap value, push and review lists
+     secondary register detail for FY2026-27 Apr-Jun - retailer x code x
+       distributor x discount
+     seasonality per segment, territory-only curves
+     effective discount per code, and its variance across customers
+   Each node carries source, population and cutoff as the existing ones do.
+
+2. LET IT ANSWER MULTI-YEAR QUESTIONS. It currently answers about the selected
+   fiscal year only and asks the user to switch. All four years are loaded and
+   three are frozen. It should answer "how has West Bengal moved over three
+   years" without a filter change, stating which years it used.
+   Use LIKE MONTHS for any comparison involving the open year - Apr-Jul against
+   Apr-Jul, never against a full prior year.
+
+3. TEACH IT THE DISTINCTIONS THAT CAUSE MISREADINGS. These are documented in the
+   glossaries and the analyst should apply them unprompted:
+     primary and secondary are different populations - primary includes project
+       and institutional business, secondary does not. Never sum them, and never
+       present secondary over primary as a coverage percentage without saying so
+     achievement is Sales Received over Plan, not Order Booking over Target
+     a period with a plan and no actuals is "not recorded yet", never zero
+     project business must be excluded from any territory baseline
+     three sources exist for retailer counts and three for visits - name the
+       source with the number
+   When a question touches one of these, the answer should say which basis it is
+   on rather than picking one silently.
+
+4. LET IT COMPARE. Head against head, member against peers, month against the
+   same month last year, this territory against the company. Comparison is the
+   most common analytical question and it currently answers one entity at a time.
+
+5. KEEP THE GAP DISCIPLINE. Six known gaps are named today. Add the new ones -
+   live-year retailer SKU is now PARTIAL (Apr-Jun loaded, Jul absent), not
+   blocked. Margin per code remains blocked with no cost master.
+
+Acceptance:
+  a SKU question returns a cited answer rather than a gap
+  a three-year question answers without a filter change and names its years
+  a primary-versus-secondary question states the population difference
+  an achievement question names its denominator
+  a comparison question handles two entities in one answer
+  the numeric guard still flags anything unmatched
+Part 4 — AI Reports
+Prayag app - extend AI Reports. Same global rules. The payload-first design, the
+numeric guard and the period stamping stay as they are.
+
+1. ADD SKU CONTENT TO THE REPORTS. The payload now can carry segment breadth,
+   gap value, the tiered push list with named peers, seasonality and discount
+   variance. A State Head report that says nothing about which products his
+   territory is not selling is missing the most actionable material available.
+   Include, per report:
+     the top gap segments by value, territory-only
+     the push list top 10 with tiers and peer counts
+     the segment's peak quarter beside each recommendation
+     any code being pushed at a discount above its own norm
+
+2. ADD THE THREE-YEAR VIEW. All four years are loaded. Reports currently cover
+   one period. A performance report should show the same period across the
+   loaded years - like months only - so a reader sees direction, not just level.
+
+3. FIX THE BATCH GAP. Batch mode generates for many people, but the report pack
+   produced earlier included a departed member with a forward visit plan. Confirm
+   LEFT members are excluded from batch generation and from travel plans, and
+   that their history is still preserved in the State Head report.
+
+4. STATE THE ORGANISATIONAL CHANGES. When a team's achievement moves because
+   members joined or left rather than because performance changed, the report
+   must say so in words. One team moved from 51.7 to 58.4 per cent purely by
+   excluding three departed members.
+
+5. OUTPUT FORMATS. The batch pack currently produces HTML while individual
+   downloads produce PDF. Same content, two formats depending on how it was
+   requested. Decide one, or produce both deliberately - and if the deck can be
+   PPTX rather than HTML, it should be, because a deck that cannot be opened in
+   PowerPoint cannot be edited before a review meeting.
+
+Acceptance:
+  a State Head report contains SKU gap and push content with named peers
+  a performance report shows like-months across the loaded years
+  no LEFT member receives a forward visit plan in batch mode
+  an achievement move caused by joiners or leavers is described as such
+  batch and individual output are the same format, or the difference is
+    deliberate and documented
+Order
+
+Part 1 first — the reports are currently built on a prior-year column of zeros and a health check that cannot fail. Everything else compounds on those.
+
+Then Part 2, which is mostly wiring the newly loaded data into pages that predate it.
+
+Parts 3 and 4 are the capability work and can run in either order, though the Analyst is cheaper — it adds nodes to an existing traversal, where AI Reports changes generated documents that people will read.

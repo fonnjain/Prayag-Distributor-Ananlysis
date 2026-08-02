@@ -190,7 +190,7 @@ export async function runVerify(fy: string): Promise<VerifyResult> {
   // this proves the report sums net money over the whole file.
   checks.push({
     key: "saleReportTotal",
-    label: "Total Sale (net)",
+    label: "Secondary OB file total (Sub Total, net)",
     unit: "money",
     expected: anchor.saleReportTotal,
     actual: agg.totalSaleAmount,

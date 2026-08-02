@@ -278,7 +278,7 @@ export async function getSecondaryDiscountByCode(
       measureLabel: label,
       fy,
       available: false,
-      reason: `No FY${fy} secondary SKU register exists — retailer-level discount is not computable.`,
+      reason: `No FY${fy} secondary SKU register is loaded — retailer-level discount is not computable until one is ingested.`,
       codes: [],
       widestGaps: [],
       verification: { sampled: false, note: "not available" },
