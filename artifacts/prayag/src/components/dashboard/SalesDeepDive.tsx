@@ -287,6 +287,9 @@ interface DeepDiveData {
   dataReadAt?: number | null;
   error: string | null;
   fromDbSnapshot?: boolean | null;
+  /** True when the server served the last saved snapshot because Google Sheets
+   *  was briefly busy — figures may be slightly out of date. */
+  stale?: boolean | null;
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
@@ -2318,6 +2321,17 @@ export default function SalesDeepDive() {
 
       {/* Quota wait banner */}
       {quotaWait && <QuotaWaitBanner testId="banner-quota-wait-deep-dive" />}
+
+      {/* Stale-snapshot notice: Sheets was briefly busy, showing saved figures */}
+      {data?.stale && !error && (
+        <div
+          className="rounded-md border border-amber-500/30 bg-amber-50/60 px-4 py-3 text-sm text-amber-800 dark:bg-amber-900/10 dark:text-amber-300"
+          data-testid="banner-stale-deep-dive"
+        >
+          Figures are updating — showing the last saved snapshot while Google
+          Sheets is briefly busy. Refresh in a minute for live figures.
+        </div>
+      )}
 
       {/* Error banner */}
       {error && (

@@ -215,6 +215,9 @@ export type DeepDiveDataResult = {
   dataReadAt: number;
   error: string | null;
   fromDbSnapshot?: boolean;         // Phase 6: true when Data-tab content served from DB (no Sheets read)
+  /** True when the live Sheets read failed transiently and the last saved DB
+   *  snapshot was served instead — figures may be slightly out of date. */
+  stale?: boolean;
 };
 
 // ── Column map ────────────────────────────────────────────────────────────────
@@ -915,6 +918,15 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
 // was served from the DB snapshot (true) or from a live Sheets read (false).
 const _fromDbSnap = new Map<string, boolean>();
 
+// Stale-snapshot fallback: when the live Sheets read fails transiently
+// (quota / cold start), the last saved DB snapshot is served with a `stale`
+// flag instead of a hard error.  Held outside `_cache` with a short expiry so
+// the next request after the window retries the live read.
+const STALE_SERVE_MS = 60_000;
+const _staleFallback = new Map<string, { entry: CacheEntry; until: number }>();
+// True when the most recent load for a FY was served from the stale fallback.
+const _servedStale = new Map<string, boolean>();
+
 // _registry: one IdentityRegistry per FY, built lazily when allMembers is first
 // populated. Detects name collisions at load time and enables ambiguous-input
 // rejection in all member-lookup routes.
@@ -960,12 +972,50 @@ async function loadAllMembers(fy: string): Promise<CacheEntry | null> {
     const entry = await loadAllMembersUncached(fy);
     if (entry) {
       _fromDbSnap.set(fy, false);
+      _servedStale.set(fy, false);
+      _staleFallback.delete(fy);
       _cache.set(fy, entry);
       _registry.set(fy, new IdentityRegistry(entry.allMembers, fy));
       // Phase 6: fire-and-forget DB persist for future cold starts.
       void saveDeepDiveSnapshot(fy, entry);
+      return entry;
     }
-    return entry;
+
+    // Live read failed (typically transient: Sheets quota / cold start).
+    // Serve the last saved DB snapshot with a stale flag instead of erroring.
+    // The fallback expires after STALE_SERVE_MS so a later request retries
+    // the live read (in-flight dedupe prevents stampedes meanwhile).
+    const cachedStale = _staleFallback.get(fy);
+    if (cachedStale && Date.now() < cachedStale.until) {
+      _servedStale.set(fy, true);
+      return cachedStale.entry;
+    }
+    const snap = await loadDeepDiveFromDb(fy);
+    if (snap) {
+      logger.warn(
+        { fy },
+        "deepDiveData: live Sheets read failed — serving stale DB snapshot",
+      );
+      _staleFallback.set(fy, { entry: snap, until: Date.now() + STALE_SERVE_MS });
+      _servedStale.set(fy, true);
+      _fromDbSnap.set(fy, true);
+      // Registry from the snapshot so member resolution keeps working.
+      _registry.set(fy, new IdentityRegistry(snap.allMembers, fy));
+      return snap;
+    }
+
+    // No snapshot at all (first-ever load) — retry the live read once after a
+    // short pause before giving up with the hard error.
+    await new Promise((r) => setTimeout(r, 1_500));
+    const retry = await loadAllMembersUncached(fy);
+    if (retry) {
+      _fromDbSnap.set(fy, false);
+      _servedStale.set(fy, false);
+      _cache.set(fy, retry);
+      _registry.set(fy, new IdentityRegistry(retry.allMembers, fy));
+      void saveDeepDiveSnapshot(fy, retry);
+    }
+    return retry;
   })().finally(() => _inFlight.delete(fy));
 
   _inFlight.set(fy, p);
@@ -1207,6 +1257,7 @@ export async function loadDeepDiveData(
     : [null, null];
 
   const fromDbSnapshot = _fromDbSnap.get(fy) ?? false;
+  const stale = _servedStale.get(fy) ?? false;
 
   return {
     fy,
@@ -1222,5 +1273,6 @@ export async function loadDeepDiveData(
     dataReadAt: entry.loadedAt,
     error: null,
     fromDbSnapshot,
+    stale,
   };
 }
