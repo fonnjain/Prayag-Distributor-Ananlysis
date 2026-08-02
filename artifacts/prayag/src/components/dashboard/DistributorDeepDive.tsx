@@ -280,6 +280,14 @@ type StateDistributorRow = {
   topDistributorNormKey: string | null;
   topDistributorName: string | null;
   topDistributorObPct: number | null;
+  effectiveDistributors: number | null;
+  effectiveRetailers: number | null;
+  coverageGapDistricts: number;
+  coverageGapRetailers: number;
+  coverageGapPriorYearOb: number;
+  assignmentGapDistricts: number;
+  assignmentGapRetailers: number;
+  assignmentGapPriorYearOb: number;
 };
 
 type MemberDistributorRow = {
@@ -293,6 +301,7 @@ type MemberDistributorRow = {
   noneCount: number;
   blankCount: number;
   sharedCount: number;
+  blankOb?: number;
   noneSharePct: number | null;
   namedActivePct: number | null;
   noneActivePct: number | null;
@@ -1916,7 +1925,8 @@ function PerMemberAnalysisSection({ perMember }: { perMember: MemberDistributorR
       <p className="text-xs text-muted-foreground mb-3 flex items-start gap-2">
         <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
         Shows every member whose working sheet was loaded. None% = share of retailers with '--' (unassigned).
-        None Active = active rate among unassigned retailers. Removed = rows in the 'Removed Parties' section.
+        None Active = active rate among unassigned retailers. DD OB = order booking on this member's blank-distributor
+        (direct dealer) rows — these sum to the territory's direct-dealer total. Removed = rows in the 'Removed Parties' section.
       </p>
       <button
         onClick={() => setExpanded((v) => !v)}
@@ -1937,6 +1947,7 @@ function PerMemberAnalysisSection({ perMember }: { perMember: MemberDistributorR
                 <th className="text-right py-2 pr-3 font-medium">None Active</th>
                 <th className="text-right py-2 pr-3 font-medium">Named Active</th>
                 <th className="text-right py-2 pr-3 font-medium">Achievement</th>
+                <th className="text-right py-2 pr-3 font-medium">DD OB</th>
                 <th className="text-right py-2 font-medium">Removed</th>
               </tr>
             </thead>
@@ -1966,6 +1977,9 @@ function PerMemberAnalysisSection({ perMember }: { perMember: MemberDistributorR
                     m.achievementTotal != null ? achBandText(m.achievementTotal) : ""
                   }`}>
                     {m.achievementTotal != null ? pct(m.achievementTotal) : "--"}
+                  </td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums text-xs text-muted-foreground">
+                    {m.blankOb != null && m.blankOb > 0 ? formatINR(m.blankOb) : "--"}
                   </td>
                   <td className="py-1.5 text-right tabular-nums text-xs text-muted-foreground">
                     {m.removedCount > 0 ? m.removedCount : "--"}
@@ -2511,6 +2525,10 @@ export default function DistributorDeepDive() {
                       <th className="text-right py-2 pr-3 font-medium">None</th>
                       <th className="text-right py-2 pr-3 font-medium">None Active</th>
                       <th className="text-right py-2 pr-3 font-medium">Named Active</th>
+                      <th className="text-right py-2 pr-3 font-medium">Eff. Distributors</th>
+                      <th className="text-right py-2 pr-3 font-medium">Eff. Retailers</th>
+                      <th className="text-right py-2 pr-3 font-medium">Coverage Gap</th>
+                      <th className="text-right py-2 pr-3 font-medium">Assignment Gap</th>
                       <th className="text-left py-2 font-medium">Largest Distributor</th>
                     </tr>
                   </thead>
@@ -2534,6 +2552,24 @@ export default function DistributorDeepDive() {
                           <td className="py-1.5 pr-3 text-right tabular-nums text-emerald-700">
                             {pct(s.namedActivePct)}
                           </td>
+                          <td className={`py-1.5 pr-3 text-right tabular-nums ${
+                            s.effectiveDistributors != null && s.effectiveDistributors < 2 ? "text-amber-600 font-semibold" : "text-muted-foreground"
+                          }`}>
+                            {s.effectiveDistributors != null ? s.effectiveDistributors.toFixed(1) : "—"}
+                          </td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground">
+                            {s.effectiveRetailers != null ? s.effectiveRetailers.toFixed(0) : "—"}
+                          </td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground text-xs">
+                            {s.coverageGapDistricts > 0
+                              ? <>{s.coverageGapRetailers.toLocaleString("en-IN")} ret / {s.coverageGapDistricts} dist</>
+                              : <span className="opacity-40">—</span>}
+                          </td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground text-xs">
+                            {s.assignmentGapDistricts > 0
+                              ? <>{s.assignmentGapRetailers.toLocaleString("en-IN")} ret / {s.assignmentGapDistricts} dist</>
+                              : <span className="opacity-40">—</span>}
+                          </td>
                           <td className="py-1.5 text-xs text-muted-foreground">
                             {s.topDistributorName
                               ? <>{s.topDistributorName}<span className="ml-1 text-foreground font-medium">{pct(s.topDistributorObPct)}</span></>
@@ -2547,6 +2583,8 @@ export default function DistributorDeepDive() {
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
                 None Active = active rate among unassigned (--) retailers. Named Active = active rate among distributor-assigned retailers.
+                Eff. Distributors / Eff. Retailers = effective count (10,000 ÷ HHI on OB shares) — reads as "equivalent to N equally-sized players".
+                Coverage Gap = retailers in districts with no distributor at all; Assignment Gap = unassigned retailers where a distributor already operates.
                 Largest distributor share is of named-retailer OB in that state.
               </p>
             </SectionCard>

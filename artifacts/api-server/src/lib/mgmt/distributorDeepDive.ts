@@ -184,6 +184,19 @@ export type StateDistributorRow = {
   topDistributorName: string | null;
   /** topDistributor OB as % of all named-OB in this state. */
   topDistributorObPct: number | null;
+  /** SD4: concentration both ways as effective counts (10,000 / HHI on OB shares).
+   *  Never a raw HHI gauge — an effective count of N reads as "equivalent to N
+   *  equally-sized players". Null when the state has no positive OB. */
+  effectiveDistributors: number | null;
+  effectiveRetailers: number | null;
+  /** SD4: whitespace split per state (mirrors the territory-total filters —
+   *  coverage counts gapType "both" districts, assignment counts "assignment"). */
+  coverageGapDistricts: number;
+  coverageGapRetailers: number;
+  coverageGapPriorYearOb: number;
+  assignmentGapDistricts: number;
+  assignmentGapRetailers: number;
+  assignmentGapPriorYearOb: number;
 };
 
 /** SD2: per-member unassigned analysis for cross-member correlation. */
@@ -198,6 +211,9 @@ export type MemberDistributorRow = {
   noneCount: number;
   blankCount: number;
   sharedCount: number;
+  /** SD4: order booking on this member's blank-distributor (direct dealer) rows —
+   *  lets the ₹ direct-dealer total be reconciled member by member. */
+  blankOb: number;
   noneSharePct: number | null;
   namedActivePct: number | null;
   noneActivePct: number | null;
@@ -1045,6 +1061,7 @@ export async function loadDistributorDeepDive(
       namedCount:       acc.named.length,
       noneCount:        acc.none.length,
       blankCount:       acc.blank.length,
+      blankOb:          acc.blank.reduce((s, r) => s + r.orderBooking, 0),
       sharedCount:      acc.shared.length,
       noneSharePct:     total > 0 ? (acc.none.length / total) * 100 : null,
       namedActivePct:   acc.named.length > 0 ? (namedActive / acc.named.length) * 100 : null,
@@ -1112,6 +1129,18 @@ export async function loadDistributorDeepDive(
           if (ob > topOb) { topOb = ob; topNormKey = nk; }
         }
       }
+      // SD4: effective counts (10,000 / HHI, HHI = Σ share%² over positive OB).
+      const effCount = (values: number[]): number | null => {
+        const pos = values.filter((v) => v > 0);
+        const tot = pos.reduce((a, v) => a + v, 0);
+        if (tot <= 0) return null;
+        const hhi = pos.reduce((a, v) => a + ((v / tot) * 100) ** 2, 0);
+        return hhi > 0 ? 10_000 / hhi : null;
+      };
+      const effectiveDistributors = effCount(stateOb ? [...stateOb.values()] : []);
+      const effectiveRetailers = effCount(
+        [...s.named, ...s.none, ...s.blank, ...s.shared, ...s.malformed].map((r) => r.orderBooking),
+      );
       return {
         state,
         memberCount:      s.memberNames.size,
@@ -1132,6 +1161,11 @@ export async function loadDistributorDeepDive(
         topDistributorNormKey: topNormKey,
         topDistributorName:    topNormKey ? (distCanonName.get(topNormKey) ?? topNormKey) : null,
         topDistributorObPct:   topNormKey && totalNamedOb > 0 ? (topOb / totalNamedOb) * 100 : null,
+        effectiveDistributors,
+        effectiveRetailers,
+        // Filled from whitespace districtStats after Step 13.
+        coverageGapDistricts: 0, coverageGapRetailers: 0, coverageGapPriorYearOb: 0,
+        assignmentGapDistricts: 0, assignmentGapRetailers: 0, assignmentGapPriorYearOb: 0,
       };
     });
 
@@ -1179,6 +1213,40 @@ export async function loadDistributorDeepDive(
         noneRows.map(toWRow),
       )
     : null;
+
+  // SD4: split the whitespace gap totals per state.  District → state via
+  // majority vote over the retailer rows that named the district (a district
+  // practically belongs to a single member state).  Mirrors the territory-total
+  // filters exactly: assignment = gapType "assignment", coverage = gapType "both".
+  if (whitespace) {
+    const districtStateVotes = new Map<string, Map<string, number>>();
+    for (const row of allRows) {
+      const d = row.district ?? "Unknown";
+      let votes = districtStateVotes.get(d);
+      if (!votes) { votes = new Map(); districtStateVotes.set(d, votes); }
+      votes.set(row.memberState, (votes.get(row.memberState) ?? 0) + 1);
+    }
+    const districtToState = new Map<string, string>();
+    for (const [d, votes] of districtStateVotes) {
+      let best = "Unknown", bestN = -1;
+      for (const [st, n] of votes) if (n > bestN) { best = st; bestN = n; }
+      districtToState.set(d, best);
+    }
+    const byStateMap = new Map(byState.map((s) => [s.state, s] as const));
+    for (const ds of whitespace.districtStats) {
+      const st = byStateMap.get(districtToState.get(ds.district) ?? "Unknown");
+      if (!st) continue;
+      if (ds.gapType === "assignment") {
+        st.assignmentGapDistricts += 1;
+        st.assignmentGapRetailers += ds.noneCount;
+        st.assignmentGapPriorYearOb += ds.priorYearOb;
+      } else if (ds.gapType === "both") {
+        st.coverageGapDistricts += 1;
+        st.coverageGapRetailers += ds.directCount + ds.noneCount;
+        st.coverageGapPriorYearOb += ds.priorYearOb;
+      }
+    }
+  }
 
   // Step 14 (D6): Customer concentration and new vs. repeat — pure sync, no I/O.
   // Build a unified D6RetailerInput[] with channel labels from the three row sets.
