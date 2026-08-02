@@ -1,10 +1,13 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { buildAnalytics, priorFy } from "../lib/analytics/analytics.js";
+import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
+import { isFrozen } from "../lib/customers/registerSync.js";
 
 const router: IRouter = Router();
 
 const FY_PATTERN = /^\d{4}-\d{2}$/;
 const DEFAULT_FY = "2026-27";
+const ANALYTICS_TTL_MS = 15 * 60 * 1000;
 
 router.get(
   "/analytics",
@@ -26,7 +29,16 @@ router.get(
       return;
     }
     try {
-      const report = await buildAnalytics(fy, compareFy);
+      // Snapshot-first: serve the last persisted payload instantly. Both the
+      // FY and its comparison year must be frozen for the payload to be final
+      // (a live compare year changes as new months are ingested).
+      const report = await serveWithSnapshot({
+        key: `analytics|${fy}|${compareFy}`,
+        ttlMs: ANALYTICS_TTL_MS,
+        build: () => buildAnalytics(fy, compareFy) as Promise<Record<string, unknown>>,
+        log: req.log,
+        frozen: isFrozen(fy) && isFrozen(compareFy),
+      });
       res.json(report);
     } catch (err) {
       req.log.error({ err, fy, compareFy }, "analytics build failed");
