@@ -10,8 +10,14 @@ import { buildGraphIndex } from "../lib/mgmt/graph/graphIndex.js";
 import { resolvePath, resolveWildcard } from "../lib/mgmt/graph/resolvers.js";
 import type { ResolveRequest, ResolveResponse } from "../lib/mgmt/graph/types.js";
 import { MAX_NODES_PER_RESOLVE } from "../lib/mgmt/graph/types.js";
+import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
 
 const router: IRouter = Router();
+
+// Graph index shape is cheap to rebuild but its roster read hits Sheets on a
+// cold start — snapshot-first keeps the Analyst panel instant after restarts.
+// No frozen flag: counts come from live roster/dashboard caches.
+const GRAPH_INDEX_TTL_MS = 15 * 60 * 1000;
 
 // ── GET /api/graph/index ──────────────────────────────────────────────────────
 
@@ -20,7 +26,17 @@ router.get("/graph/index", async (req: Request, res: Response): Promise<void> =>
   const period = req.query.period ? String(req.query.period) : undefined;
 
   try {
-    const index = await buildGraphIndex(fy, period);
+    // Snapshot only validated-FY, periodless requests (the Analyst page-load
+    // variant); free-form period values stay live so the key space is bounded.
+    const index =
+      /^\d{4}-\d{2}$/.test(fy) && period === undefined
+        ? await serveWithSnapshot({
+            key: `graph-index|${fy}`,
+            ttlMs: GRAPH_INDEX_TTL_MS,
+            build: () => buildGraphIndex(fy, period) as Promise<Record<string, unknown>>,
+            log: req.log,
+          })
+        : await buildGraphIndex(fy, period);
     res.json(index);
   } catch (err) {
     req.log.error({ err, fy }, "graph/index failed");

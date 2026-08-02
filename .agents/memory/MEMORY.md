@@ -77,6 +77,7 @@
 - [Primary sale totals-only path](primary-sale-totals-only.md) — head-less FYs (24-25/25-26) keep period-exact DB totals with empty byHead; pending needs matching period bases, clamp ≥0, else null.
 - [Secondary period achievement basis](secondary-period-achievement-basis.md) — secondaryTotal.ytdAchievement = recorded sales / planRecorded (closed months only); never period sales / full-period plan.
 - [PSCode3 brand mirror chaining](pscode3-brand-mirror.md) — sku loader refreshes pscode3_brand_rollup mirror in same txn; backfill script is repair-only; audit 7.6 flags per-month NET drift.
+- [Route snapshot coverage rules](route-snapshot-coverage.md) — snapshot only default page-load variants; never `frozen` for cross-FY/clock-dependent payloads (SKU breadth, churn, audit).
 - [mgmt/data cold-start snapshot](mgmt-data-snapshot.md) — shared serveWithSnapshot layer; frozen FYs serve snapshots as final (frozen flag, no re-read); force-resync unfreeze invalidates fy prefixes.
 - [verify_anchors deploy path](anchors-deploy-path.md) — deployed monorepo cwd is the repo root; cwd-relative config paths 500 in production, use anchorsFilePath().
 - [SKU head scope across levels](sku-head-scope-retailer.md) — retailer level needs head→member resolution (register head_canon = member names); FY24-25/25-26 sale_line rows carry no head/state; head seasonality is FY23-24-only evidence.

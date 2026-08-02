@@ -11,8 +11,15 @@ import {
 } from "../lib/mgmt/verifyFull.js";
 import { runExtraGroups } from "../lib/audit/extraGroups.js";
 import { buildAuditWorkbook } from "../lib/audit/workbook.js";
+import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
 
 const router: IRouter = Router();
+
+// The Data Health page blocks on GET /api/audit, which re-runs every check
+// group (Sheets + DB) on a cold start. Snapshot-first keeps the page instant;
+// never frozen — an audit must keep re-checking live sources in the
+// background, otherwise it would hide new drift.
+const AUDIT_SNAPSHOT_TTL_MS = 15 * 60 * 1000;
 
 const FY_PATTERN = /^\d{4}-\d{2}$/;
 const VALID_FYS = ["2024-25", "2025-26", "2026-27"];
@@ -48,7 +55,12 @@ router.get("/audit", async (req: Request, res: Response): Promise<void> => {
     return;
   }
   try {
-    const report = await runAudit(fy);
+    const report = await serveWithSnapshot({
+      key: `audit|${fy}`,
+      ttlMs: AUDIT_SNAPSHOT_TTL_MS,
+      build: () => runAudit(fy) as unknown as Promise<Record<string, unknown>>,
+      log: req.log,
+    });
     res.json(report);
   } catch (err) {
     req.log.error({ err, fy }, "audit: runAudit threw");

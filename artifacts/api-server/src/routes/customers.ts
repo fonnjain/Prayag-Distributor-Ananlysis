@@ -23,7 +23,9 @@ import {
   ensureRegisterSynced,
   getRegisterSyncState,
   getLastSyncedAt,
+  isFrozen,
 } from "../lib/customers/registerSync.js";
+import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
 import { computeAllMultipliers } from "../lib/customers/laspeyres.js";
 import { getSplit } from "../lib/headSplits.js";
 import {
@@ -38,6 +40,10 @@ import {
 
 const router = Router();
 
+// Snapshot TTL for heavy customer analytics payloads (default page-load
+// variants only — filtered variants stay live to keep the key space bounded).
+const CUSTOMERS_SNAPSHOT_TTL_MS = 15 * 60 * 1000;
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function parseMonthList(val: unknown): string[] {
@@ -48,6 +54,28 @@ function parseMonthList(val: unknown): string[] {
 function parseEntityType(val: unknown): EntityType {
   const valid: EntityType[] = ["all", "distributor", "direct_dealer", "retailer"];
   return valid.includes(val as EntityType) ? (val as EntityType) : "all";
+}
+
+const FY_PATTERN = /^\d{4}-\d{2}$/;
+
+function sameMonths(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.join(",") === b.join(",");
+}
+
+// True when the requested CY/LY month lists are a logical default for the FY
+// pair: either all *complete* CY months (what the UI's "All complete months"
+// preset sends explicitly on first page load) or all *available* CY months
+// (what an omitted parameter falls back to) — each with its LY counterparts.
+// The UI sends months explicitly even on first page load, so "default
+// variant" must be detected by value, not by absence of the parameter.
+function isDefaultMonthSelection(
+  monthsCy: string[],
+  monthsLy: string[],
+  defaults: string[][],
+): boolean {
+  return defaults.some(
+    (d) => d.length > 0 && sameMonths(monthsCy, d) && sameMonths(monthsLy, toLyMonths(d)),
+  );
 }
 
 // ── Available months for a FY ──────────────────────────────────────────────────
@@ -93,20 +121,21 @@ router.get("/customers/performance", async (req, res) => {
   const monthsCyParam = parseMonthList(req.query.monthsCy);
   const entityType = parseEntityType(req.query.entityType);
 
-  let monthsCy = monthsCyParam;
-  let monthsLy: string[];
+  const statesParam = req.query.states as string | undefined;
+  const states = statesParam ? statesParam.split(",").map((s) => s.trim()).filter(Boolean) : [];
+  const head = (req.query.head as string | undefined) ?? "";
+  const monthsLyParam = parseMonthList(req.query.monthsLy);
 
   try {
     // If no months specified, use all available months for the CY
-    if (!monthsCy.length) {
-      monthsCy = await getAvailableMonths(fyCy);
-    }
-    monthsLy = parseMonthList(req.query.monthsLy) || toLyMonths(monthsCy);
-    if (!monthsLy.length) monthsLy = toLyMonths(monthsCy);
+    const [availableCy, completeCy] = await Promise.all([
+      getAvailableMonths(fyCy),
+      getCompleteMonths(fyCy),
+    ]);
+    const monthsCy = monthsCyParam.length ? monthsCyParam : availableCy;
+    const monthsLy = monthsLyParam.length ? monthsLyParam : toLyMonths(monthsCy);
 
-    const statesParam = req.query.states as string | undefined;
-    const states = statesParam ? statesParam.split(",").map((s) => s.trim()).filter(Boolean) : [];
-    const head = (req.query.head as string | undefined) ?? "";
+    const build = async (): Promise<Record<string, unknown>> => {
     const rows = await listCustomers({ fyCy, fyLy, monthsCy, monthsLy, entityType, states, head });
     const elapsed = calcPctElapsed(monthsCy);
     const projectFactor = elapsed > 0 ? SEASONAL_TOTAL / elapsed : null;
@@ -117,7 +146,7 @@ router.get("/customers/performance", async (req, res) => {
     // The caller should suppress the LY panel rather than display zeros.
     const headYoySplit = head ? getSplit(head, fyCy, fyLy) : null;
 
-    res.json({
+    return {
       fyCy, fyLy, monthsCy, monthsLy, entityType, data: rows,
       headYoySplit: headYoySplit
         ? { priorCanon: headYoySplit.priorCanon, splitFromFy: headYoySplit.splitFromFy }
@@ -127,7 +156,29 @@ router.get("/customers/performance", async (req, res) => {
         pctElapsed: Math.round(elapsed * 10) / 10,
         projectFactor: projectFactor != null ? Math.round(projectFactor * 100) / 100 : null,
       },
-    });
+    };
+    };
+
+    // Snapshot-first for the default page-load variant only: valid FY pair,
+    // no state/head filters, and the month lists equal the logical default
+    // (all available CY months + LY counterparts) whether sent explicitly or
+    // omitted. Filtered variants stay live so the key space stays bounded.
+    const isDefaultVariant =
+      FY_PATTERN.test(fyCy) &&
+      FY_PATTERN.test(fyLy) &&
+      states.length === 0 &&
+      !head &&
+      isDefaultMonthSelection(monthsCy, monthsLy, [completeCy, availableCy]);
+    const payload = isDefaultVariant
+      ? await serveWithSnapshot({
+          key: `customers-performance|${fyCy}|${fyLy}|${entityType}`,
+          ttlMs: CUSTOMERS_SNAPSHOT_TTL_MS,
+          build,
+          log: req.log,
+          frozen: isFrozen(fyCy) && isFrozen(fyLy),
+        })
+      : await build();
+    res.json(payload);
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to fetch customer performance" });
@@ -204,16 +255,40 @@ router.get("/customers/churn", async (req, res) => {
   const monthsCyParam = parseMonthList(req.query.monthsCy);
   const entityType = parseEntityType(req.query.entityType);
 
-  try {
-    let monthsCy = monthsCyParam;
-    if (!monthsCy.length) monthsCy = await getAvailableMonths(fyCy);
-    const monthsLy = parseMonthList(req.query.monthsLy) || toLyMonths(monthsCy);
+  const monthsLyParam = parseMonthList(req.query.monthsLy);
 
-    const [atRisk, newCustomers] = await Promise.all([
-      getAtRisk({ entityType }),
-      getNewCustomers({ fyCy, fyLy, monthsCy, monthsLy, entityType }),
+  try {
+    const [availableCy, completeCy] = await Promise.all([
+      getAvailableMonths(fyCy),
+      getCompleteMonths(fyCy),
     ]);
-    res.json({ fyCy, fyLy, monthsCy, monthsLy, atRisk, newCustomers });
+    const monthsCy = monthsCyParam.length ? monthsCyParam : availableCy;
+    const monthsLy = monthsLyParam.length ? monthsLyParam : toLyMonths(monthsCy);
+
+    const build = async (): Promise<Record<string, unknown>> => {
+      const [atRisk, newCustomers] = await Promise.all([
+        getAtRisk({ entityType }),
+        getNewCustomers({ fyCy, fyLy, monthsCy, monthsLy, entityType }),
+      ]);
+      return { fyCy, fyLy, monthsCy, monthsLy, atRisk, newCustomers };
+    };
+
+    const isDefaultVariant =
+      FY_PATTERN.test(fyCy) &&
+      FY_PATTERN.test(fyLy) &&
+      isDefaultMonthSelection(monthsCy, monthsLy, [completeCy, availableCy]);
+    // At-risk scoring depends on "days since last order", so churn snapshots
+    // are never served as final (no frozen flag) — the background refresh
+    // keeps the recency-based figures current.
+    const payload = isDefaultVariant
+      ? await serveWithSnapshot({
+          key: `customers-churn|${fyCy}|${fyLy}|${entityType}`,
+          ttlMs: CUSTOMERS_SNAPSHOT_TTL_MS,
+          build,
+          log: req.log,
+        })
+      : await build();
+    res.json(payload);
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to fetch at-risk data" });
@@ -233,20 +308,42 @@ router.get("/customers/shrinkers", async (req, res) => {
       ? grainRaw
       : "customer";
 
-  try {
-    let monthsCy = monthsCyParam;
-    if (!monthsCy.length) monthsCy = await getAvailableMonths(fyCy);
-    const monthsLy = parseMonthList(req.query.monthsLy) || toLyMonths(monthsCy);
+  const monthsLyParam = parseMonthList(req.query.monthsLy);
 
-    const shrinkers = await getPriceShrinkers({
-      fyCy,
-      fyLy,
-      monthsCy,
-      monthsLy,
-      grain: grain as "customer" | "category" | "product",
-      entityType,
-    });
-    res.json({ fyCy, fyLy, monthsCy, monthsLy, grain, data: shrinkers });
+  try {
+    const [availableCy, completeCy] = await Promise.all([
+      getAvailableMonths(fyCy),
+      getCompleteMonths(fyCy),
+    ]);
+    const monthsCy = monthsCyParam.length ? monthsCyParam : availableCy;
+    const monthsLy = monthsLyParam.length ? monthsLyParam : toLyMonths(monthsCy);
+
+    const build = async (): Promise<Record<string, unknown>> => {
+      const shrinkers = await getPriceShrinkers({
+        fyCy,
+        fyLy,
+        monthsCy,
+        monthsLy,
+        grain: grain as "customer" | "category" | "product",
+        entityType,
+      });
+      return { fyCy, fyLy, monthsCy, monthsLy, grain, data: shrinkers };
+    };
+
+    const isDefaultVariant =
+      FY_PATTERN.test(fyCy) &&
+      FY_PATTERN.test(fyLy) &&
+      isDefaultMonthSelection(monthsCy, monthsLy, [completeCy, availableCy]);
+    const payload = isDefaultVariant
+      ? await serveWithSnapshot({
+          key: `customers-shrinkers|${fyCy}|${fyLy}|${entityType}|${grain}`,
+          ttlMs: CUSTOMERS_SNAPSHOT_TTL_MS,
+          build,
+          log: req.log,
+          frozen: isFrozen(fyCy) && isFrozen(fyLy),
+        })
+      : await build();
+    res.json(payload);
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to fetch price shrinkers" });

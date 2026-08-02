@@ -51,8 +51,16 @@ import {
   getBlockedCapabilities,
   clearK4Cache,
 } from "../lib/sku/skuK4.js";
+import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
 
 const router = Router();
+
+// Snapshot TTL for heavy SKU payloads. Only company-scope, unsegmented
+// variants are snapshotted (the default page-load requests) so the key space
+// stays bounded. No `frozen` flag: breadth denominators (codesEverSold) are
+// cross-FY, so even a closed FY's payload changes as live-FY data arrives —
+// snapshots must keep refreshing in the background.
+const SKU_SNAPSHOT_TTL_MS = 15 * 60 * 1000;
 
 const FY_PATTERN = /^\d{4}-\d{2}$/;
 const VALID_LEVELS = new Set(["distributor", "direct_dealer", "retailer", "project"]);
@@ -108,7 +116,7 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
       ? req.query.segment.trim()
       : undefined;
 
-  try {
+  const build = async (): Promise<Record<string, unknown>> => {
     const result = await loadSkuFacts({
       fy,
       level: level as SkuLevel,
@@ -118,7 +126,7 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
       segment,
     });
 
-    res.json({
+    return {
       fy,
       monthFrom,
       monthTo,
@@ -143,7 +151,22 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
       // vocabulary, so membersMatched may be < membersTotal).
       memberResolution: result.headResolution ?? null,
       facts: result.facts,
-    });
+    };
+  };
+
+  try {
+    // Snapshot-first for company-scope, unsegmented requests (the page-load
+    // variant); scoped/segmented drill-downs stay live.
+    const payload =
+      scope === "company" && !segment
+        ? await serveWithSnapshot({
+            key: `sku-facts|${fy}|${level}|${monthFrom}-${monthTo}`,
+            ttlMs: SKU_SNAPSHOT_TTL_MS,
+            build,
+            log: req.log,
+          })
+        : await build();
+    res.json(payload);
   } catch (err) {
     req.log.error({ err, fy, level }, "sku facts failed");
     res.status(500).json({ error: "Could not load SKU facts." });
@@ -312,12 +335,22 @@ router.get("/sku/trend", async (req: Request, res: Response): Promise<void> => {
       : undefined;
 
   try {
-    const result = await getSkuTrend({
-      level: level as SkuLevel,
-      scope: scope as SkuScope,
-      scopeId,
-      segment,
-    });
+    const build = (): Promise<Record<string, unknown>> =>
+      getSkuTrend({
+        level: level as SkuLevel,
+        scope: scope as SkuScope,
+        scopeId,
+        segment,
+      }) as Promise<Record<string, unknown>>;
+    const result =
+      scope === "company" && !segment
+        ? await serveWithSnapshot({
+            key: `sku-trend|${level}`,
+            ttlMs: SKU_SNAPSHOT_TTL_MS,
+            build,
+            log: req.log,
+          })
+        : await build();
     res.json(result);
   } catch (err) {
     req.log.error({ err, level }, "sku trend failed");
@@ -372,14 +405,26 @@ router.get("/sku/recommendations", async (req: Request, res: Response): Promise<
   const monthLabels = fiscalMonthsToLabels(fy, monthFrom, monthTo);
 
   try {
-    const result = await getSkuRecommendations({
-      fy,
-      monthLabels,
-      level: level as SkuLevel,
-      scope: scope as SkuScope,
-      scopeId,
-    });
-    res.json({ fy, monthFrom, monthTo, level, scope, scopeId: scopeId ?? null, ...result });
+    const build = async (): Promise<Record<string, unknown>> => {
+      const result = await getSkuRecommendations({
+        fy,
+        monthLabels,
+        level: level as SkuLevel,
+        scope: scope as SkuScope,
+        scopeId,
+      });
+      return { fy, monthFrom, monthTo, level, scope, scopeId: scopeId ?? null, ...result };
+    };
+    const payload =
+      scope === "company"
+        ? await serveWithSnapshot({
+            key: `sku-recommendations|${fy}|${level}|${monthFrom}-${monthTo}`,
+            ttlMs: SKU_SNAPSHOT_TTL_MS,
+            build,
+            log: req.log,
+          })
+        : await build();
+    res.json(payload);
   } catch (err) {
     req.log.error({ err, fy, level }, "sku recommendations failed");
     res.status(500).json({ error: "Could not load SKU recommendations." });
@@ -407,8 +452,16 @@ router.get("/sku/distributors", async (req: Request, res: Response): Promise<voi
     return;
   }
   try {
-    const list = await getDistributorList(fy, level as SkuLevel);
-    res.json({ fy, level, count: list.length, distributors: list });
+    const payload = await serveWithSnapshot({
+      key: `sku-distributors|${fy}|${level}`,
+      ttlMs: SKU_SNAPSHOT_TTL_MS,
+      build: async () => {
+        const list = await getDistributorList(fy, level as SkuLevel);
+        return { fy, level, count: list.length, distributors: list };
+      },
+      log: req.log,
+    });
+    res.json(payload);
   } catch (err) {
     req.log.error({ err, fy, level }, "sku distributors failed");
     res.status(500).json({ error: "Could not load distributor list." });

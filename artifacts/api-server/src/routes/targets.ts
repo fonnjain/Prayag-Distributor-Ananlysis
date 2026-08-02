@@ -19,8 +19,12 @@ import {
 import { upsertMemberTargets } from "../lib/mgmt/memberTargetsStore.js";
 import { invalidateMgmtDataCache } from "./mgmt.js";
 import { getCachedStateDashboard, loadStateDashboard } from "../lib/mgmt/stateDashboard.js";
+import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
+import { isFrozen } from "../lib/customers/registerSync.js";
 
 const router: IRouter = Router();
+
+const TARGETS_SNAPSHOT_TTL_MS = 15 * 60 * 1000;
 
 const FY_PATTERN = /^\d{4}-\d{2}$/;
 const DEFAULT_FY = "2026-27";
@@ -44,7 +48,7 @@ router.get("/targets", async (req: Request, res: Response): Promise<void> => {
   }
   const stateHead =
     typeof req.query.stateHead === "string" ? req.query.stateHead.trim() : "";
-  try {
+  const build = async (): Promise<Record<string, unknown>> => {
     const roster = await loadRoster();
     const members = activeMembers(roster.members);
     const stateHeads = [...new Set(members.map((m) => m.stateHead).filter(Boolean))].sort();
@@ -53,9 +57,15 @@ router.get("/targets", async (req: Request, res: Response): Promise<void> => {
       priorYearActuals(fy),
     ]);
 
-    const secDash = getCachedStateDashboard(fy);
+    let secDash = getCachedStateDashboard(fy);
     if (!secDash) {
-      void loadStateDashboard(fy).catch(() => {});
+      if (isFrozen(fy)) {
+        // Frozen FY: the snapshot may be served as final, so it must not be
+        // persisted with missing secondary plans — block on the load once.
+        secDash = await loadStateDashboard(fy).catch(() => null);
+      } else {
+        void loadStateDashboard(fy).catch(() => {});
+      }
     }
 
     const secPlanByKey = new Map<string, (number | null)[]>();
@@ -90,7 +100,23 @@ router.get("/targets", async (req: Request, res: Response): Promise<void> => {
         secMonthlyPlan: secPlanByKey.get(m.normKey) ?? null,
       };
     });
-    res.json({ fy, stateHeads, members: rows });
+    return { fy, stateHeads, members: rows };
+  };
+
+  try {
+    // Snapshot only the unscoped page-load variant (fy is already validated
+    // by parseFy). Free-form stateHead filters stay live so the snapshot key
+    // space stays bounded.
+    const payload = !stateHead
+      ? await serveWithSnapshot({
+          key: `targets|${fy}`,
+          ttlMs: TARGETS_SNAPSHOT_TTL_MS,
+          build,
+          log: req.log,
+          frozen: isFrozen(fy),
+        })
+      : await build();
+    res.json(payload);
   } catch (err) {
     req.log.error({ err, fy }, "targets load failed");
     res.status(500).json({ error: "Could not load targets. Try again in a minute." });
