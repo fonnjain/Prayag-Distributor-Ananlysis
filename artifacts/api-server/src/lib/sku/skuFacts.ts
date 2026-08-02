@@ -100,6 +100,11 @@ export type SkuSegmentFact = {
 
 export type SkuFactsResult = {
   capability: SkuCapability;
+  /**
+   * Present only for level='retailer' + scope='head': how the state head was
+   * expanded to register member names, incl. PS-code vocabulary mismatches.
+   */
+  headResolution?: SecondaryHeadResolution | null;
   /** null when level is not available for the selected FY. */
   facts: {
     bySegment: SkuSegmentFact[];
@@ -317,19 +322,102 @@ type SecondaryFactParams = {
   scope: SkuScope;
   scopeId?: string;
   segment?: string;
+  /**
+   * Pre-resolved member head_canon keys for scope='head'.  The secondary
+   * register's head_canon column holds MEMBER (salesperson) names, not state
+   * heads, so a state-head scope must be expanded to the member list first
+   * (see resolveHeadForSecondary).
+   */
+  headKeys?: string[];
 };
+
+// ── State-head → member resolution for the secondary register ────────────────
+//
+// secondary_sku_line.head_canon stores the register's salesperson name,
+// lowercased with collapsed whitespace (see skuLoader normKey).  A state head
+// like "Syed Aqil Rizvi" never appears there directly.  We resolve the head to
+// their roster members (State Head Dashboard Data tab) and match member names
+// against the distinct head_canon vocabulary for the FY.  The register uses a
+// separate PS-code name vocabulary, so not every member is expected to match —
+// the counts are surfaced so the mismatch is visible, never silent.
+
+export type SecondaryHeadResolution = {
+  head: string;
+  /** Members on the head's roster for the FY. */
+  membersTotal: number;
+  /** Members whose name matched a head_canon present in the register. */
+  membersMatched: number;
+  /** Matched register head_canon keys (used as the filter). */
+  matchedKeys: string[];
+  /** Roster members with no register match (PS-code vocabulary mismatch). */
+  unmatchedMembers: string[];
+};
+
+/** Register-side normalisation: lowercase + collapse whitespace. */
+function secRegKey(raw: string): string {
+  return raw.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/** Strip parenthetical suffixes: "Ravi (Rudrapur)" → "ravi". */
+function secRegKeyBare(raw: string): string {
+  return secRegKey(raw.replace(/\(.*?\)/g, " "));
+}
+
+export async function resolveHeadForSecondary(
+  fy: string,
+  head: string,
+): Promise<SecondaryHeadResolution | null> {
+  // Lazy import: deepDiveData lives in lib/mgmt and pulls the Sheets stack;
+  // only load it when a head-scoped retailer query actually needs the roster.
+  const { loadDeepDiveData } = await import("../mgmt/deepDiveData.js");
+  const dd = await loadDeepDiveData(fy, head, undefined, { skipExtras: true });
+  const members = (dd.members ?? []).filter((m) => m.stateHead === head);
+  if (members.length === 0) return null;
+
+  const vocabRows = await db.execute<{ hc: string }>(sql`
+    SELECT DISTINCT head_canon AS hc
+    FROM secondary_sku_line
+    WHERE fy = ${fy} AND head_canon IS NOT NULL
+  `);
+  const vocab = new Map<string, string>(); // exact key → head_canon
+  const vocabBare = new Map<string, string>(); // parenthetical-stripped key → head_canon
+  for (const r of vocabRows.rows) {
+    vocab.set(secRegKey(r.hc), r.hc);
+    const bare = secRegKeyBare(r.hc);
+    if (!vocabBare.has(bare)) vocabBare.set(bare, r.hc);
+  }
+
+  const matchedKeys = new Set<string>();
+  const unmatchedMembers: string[] = [];
+  for (const m of members) {
+    const exact = vocab.get(secRegKey(m.name));
+    const bare = exact ?? vocabBare.get(secRegKeyBare(m.name));
+    if (bare) matchedKeys.add(bare);
+    else unmatchedMembers.push(m.name);
+  }
+
+  return {
+    head,
+    membersTotal: members.length,
+    membersMatched: members.length - unmatchedMembers.length,
+    matchedKeys: [...matchedKeys],
+    unmatchedMembers,
+  };
+}
 
 export async function getSecondarySkuFacts(
   params: SecondaryFactParams,
 ): Promise<SkuFactsResult["facts"]> {
-  const { fy, monthLabels, scope, scopeId, segment } = params;
+  const { fy, monthLabels, scope, scopeId, segment, headKeys } = params;
 
   const scopeFilter =
     scope === "customer" && scopeId
       ? sql`AND sku.retailer = ${scopeId}`
-      : scope === "head" && scopeId
-        ? sql`AND sku.head_canon = ${scopeId}`
-        : sql``;
+      : scope === "head" && headKeys && headKeys.length > 0
+        ? sql`AND sku.head_canon = ANY(ARRAY[${sql.join(headKeys.map((k) => sql`${k}`), sql`, `)}])`
+        : scope === "head" && scopeId
+          ? sql`AND sku.head_canon = ${scopeId}`
+          : sql``;
 
   const segmentFilter = segment
     ? sql`AND sku.segment_canon = ${segment}`
@@ -771,8 +859,17 @@ export async function loadSkuFacts(
   }
 
   let facts: SkuFactsResult["facts"];
+  let headResolution: SecondaryHeadResolution | null = null;
   if (level === "retailer") {
-    facts = await getSecondarySkuFacts({ fy, monthLabels, scope, scopeId, segment });
+    let headKeys: string[] | undefined;
+    if (scope === "head" && scopeId) {
+      headResolution = await resolveHeadForSecondary(fy, scopeId).catch((err) => {
+        logger.warn({ err, fy, scopeId }, "sku: head→member resolution failed");
+        return null;
+      });
+      if (headResolution) headKeys = headResolution.matchedKeys;
+    }
+    facts = await getSecondarySkuFacts({ fy, monthLabels, scope, scopeId, segment, headKeys });
   } else {
     facts = await getPrimarySkuFacts({ fy, monthLabels, level, scope, scopeId, segment });
   }
@@ -785,5 +882,5 @@ export async function loadSkuFacts(
     );
   }
 
-  return { capability, facts };
+  return { capability, facts, headResolution };
 }

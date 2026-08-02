@@ -149,6 +149,11 @@ export type PushListResult = {
   fallbackTier?: "state" | "territory" | "national";
   /** When isFallback=true: human-readable pool scope for display. */
   fallbackScopeName?: string;
+  /**
+   * Names of the peer distributors backing this list (the cohort/pool the
+   * gap evidence comes from). Sorted alphabetically for display.
+   */
+  peerNames: string[];
   segments: SegmentPushCard[];
   fiscalMonths: string[];
 };
@@ -469,6 +474,7 @@ export async function getSkuPushList(
         isFallback: true,
         fallbackTier,
         fallbackScopeName,
+        peerNames: [...poolCustomers].sort(),
         segments: [],
         fiscalMonths: [],
       };
@@ -623,6 +629,7 @@ export async function getSkuPushList(
       isFallback: true,
       fallbackTier,
       fallbackScopeName,
+      peerNames: [...poolCustomers].sort(),
       segments: fbSegments,
       fiscalMonths: fbFiscalMonths,
     };
@@ -659,6 +666,7 @@ export async function getSkuPushList(
       suppressed: true,
       suppressReason: `Only ${peers.length} peer${peers.length === 1 ? "" : "s"} found in the ${cohortBasis} cohort (need at least ${MIN_PEERS_PER_CODE}). No recommendations can be made on thin evidence.`,
       isFallback: false,
+      peerNames: peers.map((p) => p.customer).sort(),
       segments: [],
       fiscalMonths: [],
     };
@@ -838,6 +846,7 @@ export async function getSkuPushList(
     cohortBasis,
     suppressed: false,
     isFallback: false,
+    peerNames: peers.map((p) => p.customer).sort(),
     segments,
     fiscalMonths,
   };

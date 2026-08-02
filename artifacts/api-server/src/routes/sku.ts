@@ -138,6 +138,10 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
       // breadthDenominator: codesEverSold per segment (cross-FY distinct codes in
       // sale_line). Each SkuSegmentFact carries its own codesEverSold + codesInCatalogue.
       capability: result.capability,
+      // level='retailer' + scope='head' only: how the state head resolved to
+      // register member names (the register uses a separate PS-code name
+      // vocabulary, so membersMatched may be < membersTotal).
+      memberResolution: result.headResolution ?? null,
       facts: result.facts,
     });
   } catch (err) {
@@ -586,8 +590,15 @@ router.get("/sku/discounts", async (req: Request, res: Response): Promise<void> 
 // ── K4: Seasonality per segment ───────────────────────────────────────────────
 
 router.get("/sku/seasonality", async (req: Request, res: Response): Promise<void> => {
+  // Optional: channel=territory (curves excluding project rows) and
+  // head=<state head canon> (territory curves scoped to one head's states).
+  const channel = req.query.channel === "territory" ? "territory" : "all";
+  const head =
+    typeof req.query.head === "string" && req.query.head.trim()
+      ? req.query.head.trim()
+      : undefined;
   try {
-    res.json(await getSeasonality());
+    res.json(await getSeasonality(channel, head));
   } catch (err) {
     req.log.error({ err }, "sku seasonality failed");
     res.status(500).json({ error: "Could not compute seasonality." });

@@ -53,8 +53,18 @@ type Capability = {
   project: CapabilityEntry;
 };
 
+type MemberResolution = {
+  head: string;
+  membersTotal: number;
+  membersMatched: number;
+  matchedKeys: string[];
+  unmatchedMembers: string[];
+};
+
 type FactsResponse = {
   capability: Capability;
+  /** retailer + head scope only: how the state head resolved to register member names. */
+  memberResolution?: MemberResolution | null;
   facts: {
     bySegment: SegmentRow[];
     byCode: CodeRow[];
@@ -74,6 +84,8 @@ export default function SkuPage() {
   const [fy, setFy] = useState("2026-27");
   const [level, setLevel] = useState<Level>("distributor");
   const [periodId, setPeriodId] = useState<PeriodPresetId>("q1");
+  // State-head scope — "" = company-wide. Applies to Overview/Drill facts and Timing.
+  const [scopeHead, setScopeHead] = useState<string>("");
 
   // Section state
   const [section, setSection] = useState<Section>("overview");
@@ -111,6 +123,12 @@ export default function SkuPage() {
 
   const period = PERIOD_PRESETS.find((p) => p.id === periodId) ?? PERIOD_PRESETS[0];
 
+  // State-head options for the scope selector (distinct headCanon from the
+  // distributor list — the same vocabulary sale_line carries).
+  const headOptions = [...new Set(
+    distributorList.map((d) => d.headCanon).filter((h): h is string => !!h),
+  )].sort();
+
   // ── Fetch overview (all segments, no segment filter) ─────────────────────────
 
   const fetchOverview = useCallback(() => {
@@ -119,10 +137,11 @@ export default function SkuPage() {
     const params = new URLSearchParams({
       fy,
       level,
-      scope: "company",
+      scope: scopeHead ? "head" : "company",
       monthFrom: String(period.monthFrom),
       monthTo: String(period.monthTo),
     });
+    if (scopeHead) params.set("scopeId", scopeHead);
     fetch(`${BASE}/api/sku/facts?${params}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -131,7 +150,7 @@ export default function SkuPage() {
       .then(setOverviewData)
       .catch((e: Error) => setOverviewError(e.message))
       .finally(() => setOverviewLoading(false));
-  }, [fy, level, period.monthFrom, period.monthTo]);
+  }, [fy, level, period.monthFrom, period.monthTo, scopeHead]);
 
   useEffect(() => { fetchOverview(); }, [fetchOverview]);
 
@@ -144,11 +163,12 @@ export default function SkuPage() {
     const params = new URLSearchParams({
       fy,
       level,
-      scope: "company",
+      scope: scopeHead ? "head" : "company",
       monthFrom: String(period.monthFrom),
       monthTo: String(period.monthTo),
       segment: drillSegment,
     });
+    if (scopeHead) params.set("scopeId", scopeHead);
     fetch(`${BASE}/api/sku/facts?${params}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -157,7 +177,7 @@ export default function SkuPage() {
       .then(setDrillData)
       .catch((e: Error) => setDrillError(e.message))
       .finally(() => setDrillLoading(false));
-  }, [section, drillSegment, fy, level, period.monthFrom, period.monthTo]);
+  }, [section, drillSegment, fy, level, period.monthFrom, period.monthTo, scopeHead]);
 
   // ── Fetch focus (K3 recommendations) ─────────────────────────────────────────
 
@@ -185,9 +205,11 @@ export default function SkuPage() {
   // ── Fetch distributor list (eager — pre-load when level or FY changes) ────────
 
   useEffect(() => {
-    if (level === "retailer" || level === "project") return; // push only for distributor/direct
+    // Distributor level list also feeds the state-head scope selector, so it is
+    // fetched for every level (retailer/project fall back to distributor heads).
     setDistributorListLoading(true);
-    const params = new URLSearchParams({ fy, level });
+    const listLevel = level === "retailer" || level === "project" ? "distributor" : level;
+    const params = new URLSearchParams({ fy, level: listLevel });
     fetch(`${BASE}/api/sku/distributors?${params}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -453,6 +475,25 @@ export default function SkuPage() {
             <option value="retailer">Retailer</option>
           </select>
 
+          {/* State-head scope — applies to Overview / Drill / Timing */}
+          {level !== "project" && (
+            <select
+              value={scopeHead}
+              onChange={(e) => {
+                setScopeHead(e.target.value);
+                setOverviewData(null);
+                setDrillData(null);
+              }}
+              className="rounded border bg-background px-2 py-1 text-xs"
+              title="Scope figures to one State Head's territory"
+            >
+              <option value="">All heads (company)</option>
+              {headOptions.map((h) => (
+                <option key={h} value={h}>{h}</option>
+              ))}
+            </select>
+          )}
+
           {/* FY + Period — hidden on Trends / Timing (span all FYs) */}
           {section !== "trends" && section !== "timing" && (
             <>
@@ -536,6 +577,22 @@ export default function SkuPage() {
           </div>
         )}
 
+        {/* Retailer + head scope: member resolution (PS-code vocabulary mismatch) */}
+        {section === "overview" && level === "retailer" && scopeHead &&
+          overviewData?.memberResolution && (
+          <div className="mb-4 rounded-md border border-blue-300/50 bg-blue-500/5 px-3 py-2 text-xs text-blue-900 dark:text-blue-200">
+            <span className="font-medium">{overviewData.memberResolution.head}:</span>{" "}
+            {overviewData.memberResolution.membersMatched} of{" "}
+            {overviewData.memberResolution.membersTotal} roster members matched in the
+            secondary register (it uses a separate PS-code name vocabulary).
+            {overviewData.memberResolution.unmatchedMembers.length > 0 && (
+              <span className="ml-1 text-muted-foreground">
+                No register match: {overviewData.memberResolution.unmatchedMembers.join(", ")}.
+              </span>
+            )}
+          </div>
+        )}
+
         {section === "overview" && (
           <SkuOverview
             rows={overviewRows}
@@ -604,7 +661,7 @@ export default function SkuPage() {
           />
         )}
 
-        {section === "timing" && <SkuSeasonality />}
+        {section === "timing" && <SkuSeasonality head={scopeHead || null} />}
 
         {section === "movement" && (
           <SkuMovement fy={fy} periodLabel={periodLabel} />

@@ -77,6 +77,8 @@ export type PushListResult = {
   fallbackTier?: "state" | "territory" | "national";
   /** Human-readable pool scope for display when isFallback=true. */
   fallbackScopeName?: string;
+  /** Names of the peer distributors backing this list (sorted). */
+  peerNames?: string[];
   segments: SegmentPushCard[];
   fiscalMonths: string[];
   /** Season-aware ordering context (K4). */
@@ -389,6 +391,21 @@ export default function SkuPushList({
 
 // ── Cohort banner ──────────────────────────────────────────────────────────────
 
+/** Collapsible list of the peer distributors backing the push list. */
+function PeerNamesDisclosure({ peerNames }: { peerNames?: string[] }) {
+  if (!peerNames || peerNames.length === 0) return null;
+  return (
+    <details className="w-full">
+      <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
+        Name the {peerNames.length} peer{peerNames.length === 1 ? "" : "s"}
+      </summary>
+      <div className="mt-1 max-h-40 overflow-y-auto rounded border bg-background/60 p-2 leading-5">
+        {peerNames.join(" · ")}
+      </div>
+    </details>
+  );
+}
+
 function CohortBanner({ data }: { data: PushListResult }) {
   if (data.suppressed) return null;
 
@@ -413,6 +430,7 @@ function CohortBanner({ data }: { data: PushListResult }) {
             across {data.segments.length} segment{data.segments.length === 1 ? "" : "s"}
           </span>
         )}
+        <PeerNamesDisclosure peerNames={data.peerNames} />
       </div>
     );
   }
@@ -434,6 +452,7 @@ function CohortBanner({ data }: { data: PushListResult }) {
           across {data.segments.length} segment{data.segments.length === 1 ? "" : "s"}
         </span>
       )}
+      <PeerNamesDisclosure peerNames={data.peerNames} />
       {data.seasonContext && (
         <span className="text-muted-foreground" title={data.seasonContext.note}>
           Ordered for {data.seasonContext.currentQuarterLabel}: in-season first, Q4 peaks as

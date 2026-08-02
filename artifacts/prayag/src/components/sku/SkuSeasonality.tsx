@@ -63,7 +63,7 @@ function consistencyColour(n: number): string {
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export default function SkuSeasonality() {
+export default function SkuSeasonality({ head = null }: { head?: string | null }) {
   const [data, setData] = useState<SeasonalityResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +71,15 @@ export default function SkuSeasonality() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    fetch(`${BASE}/api/sku/seasonality`)
+    // Head scope always bands on territory-only curves (the all-channel view
+    // once put HDPE top of a push list on a 100%-project Q1 peak).
+    const params = new URLSearchParams();
+    if (head) {
+      params.set("channel", "territory");
+      params.set("head", head);
+    }
+    const qs = params.toString();
+    fetch(`${BASE}/api/sku/seasonality${qs ? `?${qs}` : ""}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json() as Promise<SeasonalityResult>;
@@ -79,7 +87,7 @@ export default function SkuSeasonality() {
       .then(setData)
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [head]);
 
   if (loading) {
     return (
@@ -117,7 +125,21 @@ export default function SkuSeasonality() {
         <span className="text-muted-foreground">
           Across FY {data.fys.join(", ")}
         </span>
+        {head && (
+          <span className="rounded bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+            {head} · territory-only curves
+          </span>
+        )}
       </div>
+
+      {head && (
+        <p className="rounded-md border border-amber-400/40 bg-amber-500/5 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+          Head-scoped curves use only the closed years where sale_line carries head
+          attribution (FY2023-24) — single-year evidence, weaker than the pooled
+          company-wide pattern. Compare each segment&apos;s peak against the
+          company-wide view before acting on a divergence.
+        </p>
+      )}
 
       {data.segments.map((seg) => (
         <SeasonalityCard key={seg.segment} seg={seg} />

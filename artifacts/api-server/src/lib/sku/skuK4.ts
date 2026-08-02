@@ -428,16 +428,19 @@ export type SeasonalityResult = {
 
 export async function getSeasonality(
   channel: "all" | "territory" = "all",
+  head?: string,
 ): Promise<SeasonalityResult> {
-  return cached(`seasonality:${channel}`, async () => {
+  return cached(`seasonality:${channel}:${head ?? ""}`, async () => {
     const chanFilter =
       channel === "territory" ? territoryFilterSql(await getProjectCustomerSet()) : sql`TRUE`;
+    // Optional state-head scope: sale_line.head_canon carries the state head.
+    const headFilter = head ? sql`AND head_canon = ${head}` : sql``;
     const rows = await db.execute(sql`
       SELECT coalesce(group_canon, group_raw, 'Unmapped') AS segment,
              fy, substring(month_label, 1, 3) AS m, sum(amount::float8) AS net
       FROM sale_line_current
       WHERE fy IN (${sql.join(CLOSED_FYS.map((f) => sql`${f}`), sql`, `)})
-        AND month_label IS NOT NULL AND ${chanFilter}
+        AND month_label IS NOT NULL AND ${chanFilter} ${headFilter}
       GROUP BY 1, 2, 3
     `);
 
@@ -494,8 +497,11 @@ export async function getSeasonality(
       .sort((x, y) => y.totalNet - x.totalNet);
 
     return {
-      basis:
-        channel === "territory"
+      basis: head
+        ? `Scoped to ${head} — territory-only curves. sale_line carries head attribution ` +
+          "only for FY2023-24 among closed years, so these curves are single-year " +
+          "evidence; compare against the pooled company-wide pattern."
+        : channel === "territory"
           ? "Territory only — project rows excluded (direct head where attributed; the " +
             "project-customer bridge for FY2024-25/25-26 rows, which carry no head)."
           : "All channels including project — demand timing is a market pattern, and " +
