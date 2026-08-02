@@ -5,10 +5,13 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { SplitPreviewMemberBasis } from './splitPreviewMemberBasis';
 import type { TargetFieldValues } from './targetFieldValues';
 
 export interface SplitPreviewMember {
   name: string;
   priorYearActual: number;
   allocated: TargetFieldValues;
+  /** How this member's share was derived: pro-rata from prior-year actuals, or an equal per-head share because the member has no prior-year history (e.g. a new joiner). */
+  basis: SplitPreviewMemberBasis;
 }

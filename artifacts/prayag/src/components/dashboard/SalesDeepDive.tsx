@@ -470,7 +470,7 @@ function TeamSummaryPanel({ summary, dataReadAt }: { summary: TeamSummary; dataR
         <Tile label="Order Booking" value={fmtRs(summary.totalOB)} />
         <Tile label="Sales Received" value={fmtRs(summary.totalSale)} />
         <Tile label="Total Visits" value={fmtNum(summary.totalVisits)} />
-        <Tile label="Total Retailers" value={fmtNum(summary.totalRetailers)} />
+        <Tile label="Total Retailers" value={fmtNum(summary.totalRetailers)} sub="Source: Dashboard Data tab (typed by State Head)" />
         {summary.directDealerOB > 0 && (
           <Tile label="Direct Dealer OB" value={fmtRs(summary.directDealerOB)} />
         )}
@@ -560,6 +560,9 @@ function RetailerSpreadPanel({ spread }: { spread: RetailerSpread }) {
             Total Retailers
           </span>
           <span className="text-lg font-semibold">{spread.totalRetailers}</span>
+          <span className="text-[10px] text-muted-foreground leading-tight">
+            Source: member working sheet rows (excl. Removed Parties)
+          </span>
           <div className="flex gap-3 text-[11px] mt-0.5">
             <span className={cn("font-medium", activeBand(spread.activePct))}>
               {spread.activeRetailers} active ({fmtPct(spread.activePct)})
@@ -2466,7 +2469,7 @@ export default function SalesDeepDive() {
             <Tile label="Cost Ratio (cost / sale)" value={fmtPct(kpis.costRatio)} sub="(CTC + T.A.) / sale received" />
 
             <SectionLabel>Retailer Coverage (Dashboard)</SectionLabel>
-            <Tile label="Total Old Retailers" value={fmtNum(kpis.totalOldRetailers)} />
+            <Tile label="Total Old Retailers" value={fmtNum(kpis.totalOldRetailers)} sub="Source: Dashboard Data tab" />
             <Tile label="Visited" value={fmtNum(kpis.visitedRetailers)} />
             <Tile label="Non-Visited" value={fmtNum(kpis.nonVisitedRetailers)} />
             <Tile label="New Party Order Booking" value={fmtRs(kpis.newPartyOrderBooking)} />
@@ -2474,7 +2477,7 @@ export default function SalesDeepDive() {
               <Tile label="Business per Retailer" value={fmtRs(kpis.businessPerRetailer)} />
             )}
             {kpis.totalRetailers != null && (
-              <Tile label="Total Retailers" value={fmtNum(kpis.totalRetailers)} />
+              <Tile label="Total Retailers" value={fmtNum(kpis.totalRetailers)} sub="Source: Dashboard Data tab (typed by State Head)" />
             )}
             {kpis.directDealersCount != null && (
               <Tile label="Direct Dealers" value={fmtNum(kpis.directDealersCount)} />

@@ -2174,6 +2174,9 @@ export default function DistributorDeepDive() {
                     data.sharedRetailers.filter((r) => r.isActive).length} active`
                 )}
               </div>
+              <div className="text-[10px] text-muted-foreground leading-tight mt-0.5">
+                Source: member working sheet rows (excl. Removed Parties; shared retailers counted once)
+              </div>
             </div>
             <div className="border border-border rounded-lg p-3">
               <div className="text-xs text-muted-foreground mb-1">Distributors</div>

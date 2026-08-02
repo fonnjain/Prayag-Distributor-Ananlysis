@@ -1,19 +1,23 @@
-// Targets tab: read roster + saved targets, preview pro-rata splits.
-// Google Sheets access is strictly read-only. The POST /targets upsert
-// endpoint has been removed — the Target Master sheet is read-only like
-// every other sheet in the pipeline.
+// Targets tab: read roster + saved targets, preview pro-rata splits, and
+// save member targets. Google Sheets stays strictly read-only — saves land
+// in the member_targets database table, which overlays the (frozen) Target
+// Master sheet per member.
 import { Router, type IRouter, type Request, type Response } from "express";
 import { loadRoster } from "../lib/mgmt/roster.js";
 import { normName } from "../lib/mgmt/names.js";
 import {
   TARGET_FIELDS,
   type FieldValues,
+  type FieldMonthly,
   loadTargetsForFy,
   priorYearActuals,
   activeMembers,
   computeSplit,
   balanceSplit,
+  validateRow,
 } from "../lib/mgmt/targets.js";
+import { upsertMemberTargets } from "../lib/mgmt/memberTargetsStore.js";
+import { invalidateMgmtDataCache } from "./mgmt.js";
 import { getCachedStateDashboard, loadStateDashboard } from "../lib/mgmt/stateDashboard.js";
 
 const router: IRouter = Router();
@@ -143,6 +147,9 @@ router.get(
           name: s.name,
           priorYearActual: input[i].priorYearActual,
           allocated: s.allocated,
+          // A new joiner (no prior-year history) gets an equal per-head
+          // share — surfaced so the UI can say so instead of implying zero.
+          basis: input[i].priorYearActual > 0 ? "prior-year" : "equal-share",
         })),
       });
     } catch (err) {
@@ -152,11 +159,120 @@ router.get(
   },
 );
 
-// POST /targets is not available. Google Sheets access is read-only.
-router.post("/targets", (_req: Request, res: Response): void => {
-  res.status(405).json({
-    error: "Sheets access is read-only. Writing targets to Google Sheets is not permitted.",
-  });
+// POST /targets — save member targets to the member_targets database table.
+// The Target Master Google Sheet stays read-only (it is the seed); explicit
+// user saves land in the DB and overlay the sheet per member. DB rows carry
+// source='user' and are never touched by any seed or background job.
+router.post("/targets", async (req: Request, res: Response): Promise<void> => {
+  const body = (req.body ?? {}) as {
+    fy?: unknown;
+    updatedBy?: unknown;
+    rows?: unknown;
+  };
+  const fy = typeof body.fy === "string" && FY_PATTERN.test(body.fy) ? body.fy : null;
+  if (!fy) {
+    res.status(400).json({ error: "fy must look like 2026-27" });
+    return;
+  }
+  if (!Array.isArray(body.rows) || body.rows.length === 0) {
+    res.status(400).json({ error: "rows must be a non-empty array" });
+    return;
+  }
+  if (body.rows.length > 300) {
+    res.status(400).json({ error: "Too many rows in one save (max 300)" });
+    return;
+  }
+  const updatedBy = (
+    typeof body.updatedBy === "string" && body.updatedBy.trim() !== ""
+      ? body.updatedBy.trim()
+      : "targets-page"
+  ).slice(0, 80);
+
+  try {
+    const roster = await loadRoster();
+    const rosterByKey = new Map(
+      activeMembers(roster.members).map((m) => [m.normKey, m]),
+    );
+
+    const parsed: Array<{
+      teamMember: string;
+      stateHead: string;
+      annual: FieldValues;
+      monthly: FieldMonthly;
+    }> = [];
+    const errors: string[] = [];
+    const seenKeys = new Set<string>();
+
+    for (const raw of body.rows as Array<Record<string, unknown>>) {
+      const teamMember = typeof raw?.teamMember === "string" ? raw.teamMember.trim() : "";
+      if (!teamMember) {
+        errors.push("A row is missing teamMember");
+        continue;
+      }
+      const memberKey = normName(teamMember);
+      if (seenKeys.has(memberKey)) {
+        errors.push(`"${teamMember}" appears more than once in this save`);
+        continue;
+      }
+      seenKeys.add(memberKey);
+      const rosterMember = rosterByKey.get(memberKey);
+      const annualRaw = (raw.annual ?? {}) as Record<string, unknown>;
+      const monthlyRaw = (raw.monthly ?? {}) as Record<string, unknown>;
+      const annual: FieldValues = {
+        primary: numOrNull(annualRaw.primary),
+        secondary: numOrNull(annualRaw.secondary),
+        directDealer: numOrNull(annualRaw.directDealer),
+        businessPlan: numOrNull(annualRaw.businessPlan),
+      };
+      const monthly: FieldMonthly = {
+        primary: [], secondary: [], directDealer: [], businessPlan: [],
+      };
+      for (const f of TARGET_FIELDS) {
+        const arr = Array.isArray(monthlyRaw[f]) ? (monthlyRaw[f] as unknown[]) : [];
+        monthly[f] = Array.from({ length: 12 }, (_, i) => numOrNull(arr[i]));
+      }
+      const row = {
+        fy,
+        // Store the canonical roster spelling so DB rows join cleanly.
+        teamMember: rosterMember?.name ?? teamMember,
+        stateHead: rosterMember?.stateHead ?? "",
+        level: "TM" as const,
+        annual,
+        monthly,
+        updatedBy,
+        updatedAt: new Date().toISOString(),
+      };
+      const rowErrors = validateRow(row, new Set(rosterByKey.keys()));
+      if (rowErrors.length > 0) {
+        errors.push(...rowErrors);
+        continue;
+      }
+      parsed.push({
+        teamMember: row.teamMember,
+        stateHead: row.stateHead,
+        annual,
+        monthly,
+      });
+    }
+
+    if (errors.length > 0) {
+      res.status(422).json({ error: errors.slice(0, 8).join("; ") });
+      return;
+    }
+
+    const result = await upsertMemberTargets(fy, parsed, updatedBy);
+    // Reports and management snapshots read targets via loadTargetsForFy;
+    // drop cached payloads so the new values show up immediately.
+    invalidateMgmtDataCache(fy);
+    req.log.info(
+      { fy, updated: result.updated, appended: result.appended, updatedBy },
+      "member targets saved",
+    );
+    res.json({ fy, updated: result.updated, appended: result.appended });
+  } catch (err) {
+    req.log.error({ err, fy }, "member targets save failed");
+    res.status(500).json({ error: "Could not save targets. Try again in a minute." });
+  }
 });
 
 export default router;

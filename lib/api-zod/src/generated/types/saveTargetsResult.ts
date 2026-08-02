@@ -8,8 +8,8 @@
 
 export interface SaveTargetsResult {
   fy: string;
-  /** Rows updated in place in the Target Master sheet. */
+  /** Existing member rows updated in the database. */
   updated: number;
-  /** New rows appended to the Target Master sheet. */
+  /** New member rows inserted into the database. */
   appended: number;
 }

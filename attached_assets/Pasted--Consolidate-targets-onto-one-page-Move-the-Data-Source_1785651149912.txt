@@ -1,0 +1,140 @@
+# Consolidate targets onto one page
+
+*Move the Data Sources editors into Targets. But "keep them in sync" is not quite the right frame — read the first section before sending.*
+
+---
+
+## They are not two copies of one dataset
+
+| | Data Sources | Targets page |
+|---|---|---|
+| **Level** | State Head, monthly | team member, annual + monthly |
+| **Measure** | **Primary sale only** | Primary / Secondary / Sales / Visit |
+| **Store** | `primary_state_targets` (**database**) | Prayag Target Master (**Google Sheet**) |
+| **Writable** | **yes — the only writable target store** | **no — 405, Sheets read-only** |
+| **Unit** | Lakh | varies |
+| **Extras** | seasonal weights, Auto Calculate | pro-rata split, reconciliation strip |
+
+So there is no shared dataset to sync. There are **two different things in two different stores**, and one of them cannot be saved at all.
+
+## Which means there are two problems, not one
+
+**1. State Head primary targets are writable but poorly presented.** Moving that grid onto the Targets page fixes it, and is what you asked for.
+
+**2. Member targets are well presented but cannot be saved anywhere.** Both pages return **405 "Sheets access is read-only"**. The Targets page currently has a **dead Save button** — someone can enter a full year of member targets, click save, and lose all of it.
+
+The second is the more serious. And the fix is the same move already made for State Head targets when Sheets went read-only: **give member targets a database table.**
+
+---
+
+## Prompt 1 — move the editors, one page
+
+```
+Prayag app - consolidate targets onto the Targets page. Same global rules.
+
+Today there are two target editors on Data Sources (/sources) and a separate
+Targets page (/targets). The Data Sources editors hold the real data; the Targets
+page has the better presentation. Move the editors, keep the presentation.
+
+1. MOVE 'State Head Targets' FROM /sources TO /targets as its own section.
+   Keep everything that makes it work:
+     the 12-month x State Head grid, values in Lakh
+     the seasonal calibration row (Apr 4.2% ... Mar 13.6%)
+     Auto Calculate - implied annual from filled months, spread across empty ones
+     the 'user' source marker - user-entered figures are NEVER overwritten by
+       re-seeding or auto-calculation
+     the Company Total row - Apr-26 Rs 1,677 L ... Jul-26 Rs 3,273 L
+   It keeps reading and writing primary_state_targets. No change to the store.
+
+2. MOVE 'Secondary Targets' likewise, with its cadence selector
+   (Annual / Half-Yearly / Quarterly / Monthly).
+
+3. REMOVE BOTH EDITORS FROM /sources and leave a link to /targets. Data Sources
+   should describe sources, not edit targets - having an editor there is why the
+   two pages drifted apart.
+
+4. THE TWO SECTIONS ARE DIFFERENT DATA - label them so.
+   State Head Targets  = PRIMARY sale target, per head, per month, in Lakh,
+                         stored in the database, WRITABLE
+   Member Targets      = four measures per member, annual and monthly,
+                         from the Target Master sheet, currently READ-ONLY
+   Do not merge them into one grid and do not imply one is a breakdown of the
+   other. A State Head's primary target is not the sum of their members'
+   secondary targets - they are different measures.
+
+5. SHOW THE RECONCILIATION WHERE IT IS MEANINGFUL. The Targets page already has
+   a reconciliation strip comparing member totals to a State Head total. Keep it
+   WITHIN the member grid. Do not reconcile member secondary targets against
+   State Head primary targets - that comparison is meaningless.
+
+Acceptance:
+  both editors work on /targets exactly as they did on /sources
+  saving a State Head monthly target still writes to primary_state_targets
+  a user-entered cell still survives a re-seed and an Auto Calculate
+  Company Total still reads Apr-26 Rs 1,677 L and Jul-26 Rs 3,273 L
+  /sources no longer edits targets and links to /targets
+  each section states its measure, level, unit and store
+  the State Head page, Reports, Warning System and AI reports all still read the
+    same figures - confirm Rizvi Q1 still traces to Rs 22.30 Cr
+```
+
+---
+
+## Prompt 2 — the dead Save button
+
+**Send this second. It matters more than the move.**
+
+```
+Prayag app - member targets cannot be saved, and the Save button hides it.
+
+POST /api/targets returns 405 'Sheets access is read-only'. So a user can enter a
+full year of member targets across four measures, press Save, and lose all of it.
+The button gives no warning that it will fail.
+
+TWO OPTIONS. Take the second unless there is a reason not to.
+
+OPTION A - honest failure. Disable the Save button, state plainly that member
+targets are read-only and where they are maintained instead. Cheap, and stops the
+data loss today.
+
+OPTION B - make them writable, the same way State Head targets already were.
+When Sheets went read-only, State Head targets moved to primary_state_targets
+and became editable. Member targets need the same:
+   a member_targets table - fiscal year, member, measure (primary / secondary /
+     sales / visit), period (annual or a month label), value, source marker
+   the Target Master sheet becomes the SEED, exactly as the State Head Dashboard
+     seeds plan figures today
+   user-entered values carry a 'user' marker and are never overwritten by a
+     re-seed - the same protection State Head targets have
+   POST /api/targets writes to the table instead of returning 405
+
+REPORT FIRST, BEFORE BUILDING:
+   how many members currently have saved targets in the Target Master sheet
+   whether every member on the 182-person roster is present there
+   whether the sheet is still being maintained by anyone, or is now frozen
+     history
+
+If the sheet is no longer maintained, Option B is not optional - it is the only
+way targets get set at all for a new member or a new fiscal year.
+
+Acceptance for Option B:
+  a member target saved on /targets persists across a restart
+  a re-seed does not overwrite a user-entered value
+  the pro-rata split writes proposed values that can then be edited
+  the reconciliation strip matches after saving
+  the State Head page, Reports and Warning System read the new store
+```
+
+---
+
+## One thing to decide before either
+
+**Is the Prayag Target Master sheet still maintained?**
+
+If someone still edits it, it should stay the source and the app should keep reading it. If it is now frozen history — which the phrase *"older saved targets... no longer written"* suggests — then **member targets currently have no home at all**, and Option B is the only route.
+
+Worth asking Deepak. It is a one-line answer that decides the shape of the work.
+
+---
+
+*Based on the Data Sources and Targets page documentation, 1 August 2026*

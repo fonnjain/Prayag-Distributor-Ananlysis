@@ -16,6 +16,7 @@ import {
 import { normName, priorFy } from "./names.js";
 import { loadRoster, mgmtSources, type RosterMember } from "./roster.js";
 import { loadOrderFile } from "./orders.js";
+import { loadDbTargetsForFy } from "./memberTargetsStore.js";
 
 export const TARGET_FIELDS = [
   "primary",
@@ -127,11 +128,25 @@ async function loadStoredRows(): Promise<StoredRow[]> {
 }
 
 export async function loadTargetsForFy(fy: string): Promise<Map<string, TargetRow>> {
-  const stored = await loadStoredRows();
+  // Sheet is the read-only seed; DB rows (explicit user saves) overlay it and
+  // win per member. Known curl-test rows in the sheet are discarded — they
+  // were confirmed as API tests, not real targets (Aug 2026 decision).
+  const [stored, dbRows] = await Promise.all([
+    loadStoredRows().catch((err) => {
+      // Degraded: Sheets seed unavailable — serve DB-only rather than fail,
+      // but make the outage visible in the server log.
+      console.error("[targets] Target Master sheet read failed; serving DB-only", err);
+      return [] as StoredRow[];
+    }),
+    loadDbTargetsForFy(fy),
+  ]);
   const map = new Map<string, TargetRow>();
   for (const row of stored) {
-    if (row.fy === fy) map.set(normName(row.teamMember), row);
+    if (row.fy !== fy) continue;
+    if (row.updatedBy.toLowerCase().startsWith("curl-test")) continue;
+    map.set(normName(row.teamMember), row);
   }
+  for (const [key, row] of dbRows) map.set(key, row);
   return map;
 }
 

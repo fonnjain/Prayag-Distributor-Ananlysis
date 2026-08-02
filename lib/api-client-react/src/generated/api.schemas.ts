@@ -838,10 +838,10 @@ export interface AnalyticsReport {
   compareByHead: AnalyticsHeadStat[];
   retention: AnalyticsRetention;
   margins: AnalyticsMargins;
-  /** Product-group breakdown by revenue for the requested FY. Always from sale_line.group_canon. */
-  groups: AnalyticsGroupStat[];
   /** Which data source produced this report. */
   source: AnalyticsReportSource;
+  /** Product-group breakdown by revenue for the requested FY. Always from sale_line.group_canon. */
+  groups: AnalyticsGroupStat[];
 }
 
 export interface MgmtRegion {
@@ -1906,10 +1906,23 @@ export interface TargetsResponse {
   members: TargetsMember[];
 }
 
+/**
+ * How this member's share was derived: pro-rata from prior-year actuals, or an equal per-head share because the member has no prior-year history (e.g. a new joiner).
+ */
+export type SplitPreviewMemberBasis = typeof SplitPreviewMemberBasis[keyof typeof SplitPreviewMemberBasis];
+
+
+export const SplitPreviewMemberBasis = {
+  'prior-year': 'prior-year',
+  'equal-share': 'equal-share',
+} as const;
+
 export interface SplitPreviewMember {
   name: string;
   priorYearActual: number;
   allocated: TargetFieldValues;
+  /** How this member's share was derived: pro-rata from prior-year actuals, or an equal per-head share because the member has no prior-year history (e.g. a new joiner). */
+  basis: SplitPreviewMemberBasis;
 }
 
 export interface SplitPreviewResponse {
@@ -1942,9 +1955,9 @@ export interface SaveTargetsRequest {
 
 export interface SaveTargetsResult {
   fy: string;
-  /** Rows updated in place in the Target Master sheet. */
+  /** Existing member rows updated in the database. */
   updated: number;
-  /** New rows appended to the Target Master sheet. */
+  /** New member rows inserted into the database. */
   appended: number;
 }
 

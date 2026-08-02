@@ -271,7 +271,12 @@ export const GetAnalyticsResponse = zod.object({
   "provisional": zod.boolean(),
   "message": zod.string().nullable()
 }),
-  "source": zod.enum(['sap', 'register']).describe('Which data source produced this report.')
+  "source": zod.enum(['sap', 'register']).describe('Which data source produced this report.'),
+  "groups": zod.array(zod.object({
+  "group": zod.string(),
+  "amount": zod.number(),
+  "sharePct": zod.number()
+})).describe('Product-group breakdown by revenue for the requested FY. Always from sale_line.group_canon.\n')
 })
 
 
@@ -1056,8 +1061,8 @@ export const GetTargetsResponse = zod.object({
 
 
 /**
- * Validates and upserts one row per team member into the Prayag Target Master Google Sheet, keyed by fiscal year and team member. Monthly cells left blank fall back to an equal twelfth of the annual figure.
- * @summary Save targets to the Target Master sheet
+ * Validates and upserts one row per team member into the member_targets database table, keyed by fiscal year and team member. Saved rows carry source='user' and are never overwritten by any seed or background job. The Target Master Google Sheet stays read-only as the seed underneath.
+ * @summary Save member targets to the database
  */
 export const saveTargetsBodyFyRegExp = new RegExp('^\\d{4}-\\d{2}$');
 
@@ -1085,8 +1090,8 @@ export const SaveTargetsBody = zod.object({
 
 export const SaveTargetsResponse = zod.object({
   "fy": zod.string(),
-  "updated": zod.number().describe('Rows updated in place in the Target Master sheet.'),
-  "appended": zod.number().describe('New rows appended to the Target Master sheet.')
+  "updated": zod.number().describe('Existing member rows updated in the database.'),
+  "appended": zod.number().describe('New member rows inserted into the database.')
 })
 
 
@@ -1114,7 +1119,8 @@ export const GetTargetSplitPreviewResponse = zod.object({
   "secondary": zod.number().nullable().describe('Secondary target in rupees.'),
   "directDealer": zod.number().nullable().describe('Direct Dealer target in rupees.'),
   "businessPlan": zod.number().nullable().describe('Business Plan in rupees.')
-})
+}),
+  "basis": zod.enum(['prior-year', 'equal-share']).describe('How this member\'s share was derived: pro-rata from prior-year actuals, or an equal per-head share because the member has no prior-year history (e.g. a new joiner).\n')
 }))
 })
 

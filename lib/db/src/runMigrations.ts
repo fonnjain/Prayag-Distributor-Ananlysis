@@ -115,6 +115,28 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    id: "007_member_targets",
+    sql: `
+      -- Writable home for member-level targets (the Target Master Google
+      -- Sheet is read-only and effectively abandoned). One row per
+      -- (fy, team_member); only explicit user saves write here.
+      CREATE TABLE IF NOT EXISTS member_targets (
+        id          SERIAL      PRIMARY KEY,
+        fy          TEXT        NOT NULL,
+        team_member TEXT        NOT NULL,
+        state_head  TEXT        NOT NULL DEFAULT '',
+        level       TEXT        NOT NULL DEFAULT 'TM',
+        annual      JSONB       NOT NULL,
+        monthly     JSONB       NOT NULL,
+        source      TEXT        NOT NULL DEFAULT 'user',
+        updated_by  TEXT        NOT NULL DEFAULT '',
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT member_targets_uq UNIQUE (fy, team_member)
+      );
+    `,
+  },
+  {
     id: "006_drop_mgmt_data_snapshot",
     sql: `
       -- GET /api/mgmt/data now uses the generic route_payload_snapshot layer

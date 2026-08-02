@@ -82,4 +82,5 @@
 - [SKU head scope across levels](sku-head-scope-retailer.md) — retailer level needs head→member resolution (register head_canon = member names); FY24-25/25-26 sale_line rows carry no head/state; head seasonality is FY23-24-only evidence.
 - [State Head onboarding](state-head-onboarding.md) — config-only: member_sheet_map.json normSecKey→fileId; own-sheet OB = old-party + new-party + direct dealer, exactly.
 - [SD4 Rizvi distributor deep dive](sd4-rizvi-distributor.md) — cold-cache partial loads need retries; dashboard-vs-sheet retailer counts drift; blank reconciliation is on blankOb>0 (7 members), not blank-row count.
+- [Member targets database home](member-targets-db-home.md) — member_targets DB overlays read-only Target Master sheet; user rows never re-seeded; POST must invalidateMgmtDataCache; add tables via migration runner not drizzle push.
 - [Month-complete lock rule](month-complete-lock-rule.md) — complete when max invoice hits month-end OR the lock instant (lastDay+7d) passes; payload-logic changes need versioned snapshot keys.

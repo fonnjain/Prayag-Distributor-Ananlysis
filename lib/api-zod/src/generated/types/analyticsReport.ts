@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AnalyticsGroupStat } from './analyticsGroupStat';
 import type { AnalyticsHeadStat } from './analyticsHeadStat';
 import type { AnalyticsMargins } from './analyticsMargins';
 import type { AnalyticsMonthStat } from './analyticsMonthStat';
@@ -28,4 +29,6 @@ export interface AnalyticsReport {
   margins: AnalyticsMargins;
   /** Which data source produced this report. */
   source: AnalyticsReportSource;
+  /** Product-group breakdown by revenue for the requested FY. Always from sale_line.group_canon. */
+  groups: AnalyticsGroupStat[];
 }

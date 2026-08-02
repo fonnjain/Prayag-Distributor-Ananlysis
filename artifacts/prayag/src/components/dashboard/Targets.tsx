@@ -7,6 +7,8 @@ import {
 } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import PrimaryStateTargetsEditor from "./PrimaryStateTargetsEditor";
+import SecondaryTargetsEditor from "./SecondaryTargetsEditor";
 import {
   Target,
   Loader2,
@@ -168,6 +170,7 @@ export default function Targets() {
     setSplitting(true);
     try {
       const preview = await getTargetSplitPreview(params as never);
+      const newJoiners = preview.members.filter((m) => m.basis === "equal-share");
       setEdits((prev) => {
         const map = new Map(prev);
         for (const sm of preview.members) {
@@ -182,7 +185,11 @@ export default function Targets() {
         }
         return map;
       });
-      setNotice("Split applied. Adjust any member, then save.");
+      setNotice(
+        newJoiners.length > 0
+          ? `Split applied. ${newJoiners.length} member${newJoiners.length === 1 ? " has" : "s have"} no prior-year history (new joiner) and received an equal per-head share instead of zero — adjust if needed, then save.`
+          : "Split applied. Adjust any member, then save.",
+      );
     } catch (e) {
       setError(extractError(e, "Could not compute the split. Try again in a minute."));
     } finally {
@@ -232,7 +239,7 @@ export default function Targets() {
     try {
       const result = await save.mutateAsync({ data: { fy, rows } });
       setNotice(
-        `Saved ${result.updated + result.appended} member${result.updated + result.appended === 1 ? "" : "s"} to the Target Master sheet.`,
+        `Saved ${result.updated + result.appended} member${result.updated + result.appended === 1 ? "" : "s"}. Values are stored in the database and picked up by reports immediately.`,
       );
       setEdits((prev) => {
         const map = new Map(prev);
@@ -245,35 +252,53 @@ export default function Targets() {
     }
   };
 
-  if (targets.isLoading) {
+  if (targets.isLoading || targets.isError || !data) {
+    // Member section is still loading (or failed) — the two editors above are
+    // independent sections and should render regardless.
     return (
-      <div className="flex items-center justify-center py-24 text-muted-foreground">
-        <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading roster and targets
-      </div>
-    );
-  }
-
-  if (targets.isError || !data) {
-    return (
-      <div className="py-24 text-center text-sm text-destructive">
-        Could not load targets. Please refresh the page.
+      <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-6xl mx-auto">
+        <PrimaryStateTargetsEditor />
+        <SecondaryTargetsEditor />
+        {targets.isLoading ? (
+          <div className="flex items-center justify-center py-16 text-muted-foreground">
+            <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading roster and member targets
+          </div>
+        ) : (
+          <div className="py-16 text-center text-sm text-destructive">
+            Could not load member targets. Please refresh the page.
+          </div>
+        )}
       </div>
     );
   }
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-6xl mx-auto">
+      {/* Section 1 — State Head Targets: PRIMARY sale target, per head, per month,
+          in Lakh, stored in the database (primary_state_targets), writable. */}
+      <PrimaryStateTargetsEditor />
+
+      {/* Section 2 — Secondary Targets: secondary order booking per team member,
+          entered at a chosen cadence. Different measure and level from section 1;
+          neither is a breakdown of the other. */}
+      <SecondaryTargetsEditor />
+
+      {/* Section 3 — Member Targets: four measures per member, annual + monthly,
+          from the Target Master sheet. */}
       <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
         <CardHeader className="px-6 pt-6 pb-4">
           <CardTitle className="text-xl flex items-center gap-2">
             <Target className="w-5 h-5 text-primary" />
-            Targets
+            Member Targets
           </CardTitle>
           <CardDescription>
-            Set annual targets per team member, or enter State Head totals and
-            split them pro-rata by last year's actuals. Saved to the Prayag
-            Target Master Google Sheet; the management report reads them for
-            achievement columns.
+            Four measures per team member (Primary / Secondary / Direct Dealer /
+            Business Plan), annual with monthly overrides, stored in the
+            database. Enter directly, or enter State Head totals and split them
+            pro-rata by last year&apos;s actuals (new joiners with no history get
+            an equal per-head share). Note: these are member-level figures across
+            four measures — not a breakdown of the State Head Targets grid above,
+            which is the monthly primary target per head.
           </CardDescription>
         </CardHeader>
         <CardContent className="px-6 pb-6 space-y-6">
@@ -465,7 +490,7 @@ export default function Targets() {
             className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {save.isPending ? (
-              <><Loader2 className="w-4 h-4 animate-spin" /> Saving to Google Sheets</>
+              <><Loader2 className="w-4 h-4 animate-spin" /> Saving</>
             ) : (
               <><Save className="w-4 h-4" /> Save targets</>
             )}

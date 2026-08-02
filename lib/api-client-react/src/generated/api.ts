@@ -1628,8 +1628,8 @@ export const getSaveTargetsUrl = () => {
 }
 
 /**
- * Validates and upserts one row per team member into the Prayag Target Master Google Sheet, keyed by fiscal year and team member. Monthly cells left blank fall back to an equal twelfth of the annual figure.
- * @summary Save targets to the Target Master sheet
+ * Validates and upserts one row per team member into the member_targets database table, keyed by fiscal year and team member. Saved rows carry source='user' and are never overwritten by any seed or background job. The Target Master Google Sheet stays read-only as the seed underneath.
+ * @summary Save member targets to the database
  */
 export const saveTargets = async (saveTargetsRequest: SaveTargetsRequest, options?: RequestInit): Promise<SaveTargetsResult> => {
 
@@ -1677,7 +1677,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveTargetsMutationError = ErrorType<ErrorResponse>
 
     /**
- * @summary Save targets to the Target Master sheet
+ * @summary Save member targets to the database
  */
 export const useSaveTargets = <TError = ErrorType<ErrorResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveTargets>>, TError,{data: BodyType<SaveTargetsRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
