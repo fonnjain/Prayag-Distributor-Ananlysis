@@ -474,6 +474,62 @@ function isClosedFy(fy: string): boolean {
   return fyStartYear(fy) < fyStartYear(currentFy());
 }
 
+/** "2026-27" → "2025-26"; null if fy is malformed. */
+export function priorFyOf(fy: string): string | null {
+  const startY = fyStartYear(fy);
+  if (isNaN(startY)) return null;
+  const py = startY - 1;
+  return `${py}-${String(startY).slice(2)}`;
+}
+
+// ── Prior-year quarter resolution ─────────────────────────────────────────────
+//
+// Prior-year quarterly OB for one member. Primary source: the Data tab's
+// explicit last-year columns (lastYearQ1–Q4, e.g. "Q1 Last Year"). Some FYs
+// (FY2026-27) label them plainly "Q1".."Q4" instead — those are not matched by
+// the named-column detector and land in kpis.extra. Plain Q1–Q4 is ambiguous
+// (could be the current FY's own quarters), so the fallback is only trusted
+// when the four quarters cross-foot against the prior-FY TOTALORDER column
+// (e.g. TOTALORDER2526 for prior FY 2025-26) within 1%.
+export function resolvePriorYearQuarters(
+  kpis: Pick<MemberKpis, "lastYearQ1" | "lastYearQ2" | "lastYearQ3" | "lastYearQ4"> & {
+    extra?: Record<string, unknown>;
+  },
+  fyPrior: string | null,
+): (number | null)[] | null {
+  const explicit = [kpis.lastYearQ1, kpis.lastYearQ2, kpis.lastYearQ3, kpis.lastYearQ4];
+  if (explicit.some((q) => q != null)) return explicit;
+  if (!fyPrior) return null;
+
+  const ex = kpis.extra ?? {};
+  const num = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+  const qs = [num(ex["Q1"]), num(ex["Q2"]), num(ex["Q3"]), num(ex["Q4"])];
+  if (qs.every((q) => q == null)) return null;
+
+  // "2025-26" → "2526"
+  const [a, b] = fyPrior.split("-");
+  const suffix = a && b ? `${a.slice(2)}${b}` : null;
+  const total = suffix ? num(ex[`TOTALORDER${suffix}`]) : null;
+  if (total == null || total <= 0) return null;
+  const sum = qs.reduce<number>((s, q) => s + (q ?? 0), 0);
+  if (Math.abs(sum - total) > 0.01 * total) return null;
+  return qs;
+}
+
+/** Populate lastYearQ1–Q4 in place from the plain Q1–Q4 fallback when the
+ *  explicit columns are absent. Idempotent (explicit values win). */
+function applyPriorYearQuarterFallback(member: MemberKpis, fy: string): void {
+  const explicit = [member.lastYearQ1, member.lastYearQ2, member.lastYearQ3, member.lastYearQ4];
+  if (explicit.some((q) => q != null)) return;
+  const qs = resolvePriorYearQuarters(member, priorFyOf(fy));
+  if (!qs) return;
+  member.lastYearQ1 = qs[0];
+  member.lastYearQ2 = qs[1];
+  member.lastYearQ3 = qs[2];
+  member.lastYearQ4 = qs[3];
+}
+
 // ── DB snapshot: persist and restore the Data-tab parse result ────────────────
 //
 // Closed FYs are served from the DB snapshot on cold start — Sheets is never
@@ -510,6 +566,9 @@ async function loadDeepDiveFromDb(fy: string): Promise<CacheEntry | null> {
       .limit(1);
     if (rows.length === 0) return null;
     const snap = rows[0].data as SnapData;
+    // Snapshots persisted before the plain Q1–Q4 fallback existed carry null
+    // lastYearQ1–Q4 with the raw quarters still in extra — resolve on load.
+    for (const m of snap.allMembers) applyPriorYearQuarterFallback(m, fy);
     return {
       allMembers: snap.allMembers,
       rawHeaders: snap.rawHeaders,
@@ -899,6 +958,7 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
       totalVisitsYtd:       cols.totalVisitsYtd >= 0 ? cellNum(row[cols.totalVisitsYtd]) : null,
       extra,
     });
+    applyPriorYearQuarterFallback(members[members.length - 1], fy);
   }
 
   logger.info(

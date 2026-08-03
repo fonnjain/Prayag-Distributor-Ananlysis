@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { loadDeepDiveData } from "../lib/mgmt/deepDiveData.js";
+import { loadDeepDiveData, resolvePriorYearQuarters } from "../lib/mgmt/deepDiveData.js";
 import { respondIfQuotaError } from "../lib/quotaResponse.js";
 import { loadStateDashboard, type SecMember } from "../lib/mgmt/stateDashboard.js";
 import { buildMemberPayload } from "../lib/mgmt/aiPayload.js";
@@ -80,34 +80,11 @@ function priorYearSamePeriod(
   return total;
 }
 
-// Prior-year quarterly OB for one member. Primary source: the Data tab's
-// explicit last-year columns (lastYearQ1–Q4). Some FYs label them plainly
-// "Q1".."Q4" instead — those land in kpis.extra. Plain Q1–Q4 is ambiguous
-// (could be the current FY's own quarters), so the fallback is only trusted
-// when the four quarters cross-foot against the prior-FY TOTALORDER column
-// (e.g. TOTALORDER2526 for prior FY 2025-26) within 1%.
-function priorYearQuarters(
-  kpis: { lastYearQ1: number | null; lastYearQ2: number | null; lastYearQ3: number | null; lastYearQ4: number | null; extra?: Record<string, unknown> },
-  fyPrior: string,
-): (number | null)[] | null {
-  const explicit = [kpis.lastYearQ1, kpis.lastYearQ2, kpis.lastYearQ3, kpis.lastYearQ4];
-  if (explicit.some((q) => q != null)) return explicit;
-
-  const ex = kpis.extra ?? {};
-  const num = (v: unknown): number | null =>
-    typeof v === "number" && Number.isFinite(v) ? v : null;
-  const qs = [num(ex["Q1"]), num(ex["Q2"]), num(ex["Q3"]), num(ex["Q4"])];
-  if (qs.every((q) => q == null)) return null;
-
-  // "2025-26" → "2526"
-  const [a, b] = fyPrior.split("-");
-  const suffix = a && b ? `${a.slice(2)}${b}` : null;
-  const total = suffix ? num(ex[`TOTALORDER${suffix}`]) : null;
-  if (total == null || total <= 0) return null;
-  const sum = qs.reduce<number>((s, q) => s + (q ?? 0), 0);
-  if (Math.abs(sum - total) > 0.01 * total) return null;
-  return qs;
-}
+// Prior-year quarterly OB for one member — shared logic lives in
+// deepDiveData.ts (resolvePriorYearQuarters), which also bakes the resolved
+// values into kpis.lastYearQ1–Q4 at parse time. Kept as a thin wrapper so
+// this route also works against payloads from older snapshots.
+const priorYearQuarters = resolvePriorYearQuarters;
 
 // ── B1 real-value inputs ──────────────────────────────────────────────────────
 // Segment-weighted Laspeyres inflation for one member: weight each per-category

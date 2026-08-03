@@ -15,3 +15,6 @@ description: How the "growth below price inflation" warning (family B) computes 
 
 ## Cold-build degraded snapshots
 Bumping the warnings snapshot key forces cold rebuilds; if a blocking request races the startup prewarm, Sheets 429 negative-caching can make an entire team read as J1 ("no working sheet") and that degraded payload gets PERSISTED and also cached in-process (10-min TTL — DB delete alone doesn't clear it). Recovery: delete the `route_payload_snapshot` rows, wait out the in-memory TTL/quota, then rebuild. The warnings route has no "only complete loads may overwrite snapshot" guard (distributor DD has one).
+
+## Update (Aug 2026)
+The plain Q1–Q4 fallback (with prior-FY TOTALORDER cross-foot) moved from routes/warnings.ts into deepDiveData.ts as `resolvePriorYearQuarters` + parse-time `applyPriorYearQuarterFallback`; kpis.lastYearQ1–Q4 are now populated at parse and on DB snapshot load, so all consumers (AI payload priorYears, warnings) see resolved values.
