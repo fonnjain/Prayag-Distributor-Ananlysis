@@ -11,7 +11,14 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { useState, useEffect, lazy, Suspense } from "react";
 import { useLocation } from "wouter";
 import PeriodPicker, { defaultPeriodValue, type PeriodValue } from "@/components/ui/PeriodPicker";
-import StateFilter from "@/components/ui/StateFilter";
+import { Download } from "lucide-react";
+import {
+  CompanyReportFilterBar,
+  EMPTY_ENTITY_FILTER,
+  entityFilterQuery,
+  hasEntityFilter,
+  type EntityFilterValue,
+} from "@/components/dashboard/CompanyReportFilters";
 import CustomerRanking, { type CustomerRow } from "@/components/customers/CustomerRanking";
 import CustomerDetail from "@/components/customers/CustomerDetail";
 import CustomerAtRisk from "@/components/customers/CustomerChurn";
@@ -73,7 +80,9 @@ export default function CustomersPage() {
   const [fyLy, setFyLy] = useState("2025-26");
   const [periodValue, setPeriodValue] = useState<PeriodValue>(defaultPeriodValue());
   const [entityType, setEntityType] = useState("all");
-  const [selectedStates, setSelectedStates] = useState<string[]>([]);
+  // Shared State Head / State / Distributor filter (same bar as Products/Growth).
+  const [entityFilter, setEntityFilter] = useState<EntityFilterValue>(EMPTY_ENTITY_FILTER);
+  const filterQuery = entityFilterQuery(entityFilter);
 
   // Available months from DB
   const [availableMonths, setAvailableMonths] = useState<string[]>([]);
@@ -198,8 +207,7 @@ export default function CustomersPage() {
       monthsLy: monthsLy.join(","),
       entityType,
     });
-    if (selectedStates.length) params.set("states", selectedStates.join(","));
-    fetch(`${BASE}/api/customers/performance?${params}`)
+    fetch(`${BASE}/api/customers/performance?${params}${filterQuery}`)
       .then((r) => r.json())
       .then((d) => {
         setRankData(d.data ?? []);
@@ -213,7 +221,7 @@ export default function CustomersPage() {
       })
       .catch(() => {})
       .finally(() => setRankLoading(false));
-  }, [fyCy, fyLy, monthsCy.join(","), monthsLy.join(","), entityType, selectedStates.join(",")]);
+  }, [fyCy, fyLy, monthsCy.join(","), monthsLy.join(","), entityType, filterQuery]);
 
   const periodLabel = monthsCy.length
     ? `${monthsCy[0]} – ${monthsCy[monthsCy.length - 1]}`
@@ -287,8 +295,19 @@ export default function CustomersPage() {
             onChange={(next) => setPeriodValue(next)}
           />
 
-          {/* State filter */}
-          <StateFilter selected={selectedStates} onChange={setSelectedStates} />
+          {/* Shared State Head / State / Distributor filter */}
+          <CompanyReportFilterBar fy={fyCy} value={entityFilter} onChange={setEntityFilter} />
+
+          {/* Excel export — Rankings with the active period + filters */}
+          <a
+            href={`${BASE}/api/customers/export?fyCy=${fyCy}&fyLy=${fyLy}&monthsCy=${monthsCy.join(",")}&monthsLy=${monthsLy.join(",")}&entityType=${entityType}${filterQuery}`}
+            download
+            className="flex items-center gap-1.5 rounded border border-border px-2 py-1 text-xs font-medium hover:bg-muted/40"
+            data-testid="button-export-excel-customers"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export
+          </a>
 
           <span className="text-xs text-muted-foreground hidden md:block">
             {periodLabel}
@@ -318,6 +337,12 @@ export default function CustomersPage() {
           <div className="mb-3 rounded-md border border-amber-400/40 bg-amber-500/5 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
             {partialMonths.join(", ")} {partialMonths.length === 1 ? "is" : "are"} in progress and excluded from all comparisons. Data through the last complete month ({completeMonths[completeMonths.length - 1] ?? "none"}) is used.
           </div>
+        )}
+
+        {hasEntityFilter(entityFilter) && (
+          <p className="mb-3 text-[11px] text-amber-700 dark:text-amber-400">
+            Filters active — figures below are a subset and will not match the unfiltered totals.
+          </p>
         )}
 
         {activeSection === "rankings" && seasonalProjection && seasonalProjection.pctElapsed > 0 && seasonalProjection.pctElapsed < 95 && completeMonths.length < 12 && (
@@ -369,6 +394,7 @@ export default function CustomersPage() {
             monthsCy={monthsCy}
             monthsLy={monthsLy}
             entityType={entityType}
+            filterQuery={filterQuery}
           />
         )}
 
@@ -379,6 +405,7 @@ export default function CustomersPage() {
             monthsCy={monthsCy}
             monthsLy={monthsLy}
             entityType={entityType}
+            filterQuery={filterQuery}
           />
         )}
 

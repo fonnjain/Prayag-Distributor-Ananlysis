@@ -3,6 +3,7 @@
 // All analytics lead with QUANTITY (pcs). Realized price = Value / Qty.
 // Primary (distributor/dealer) and secondary (retailer) are never blended.
 import { Router } from "express";
+import ExcelJS from "exceljs";
 import {
   listCustomers,
   getCustomerCategories,
@@ -26,6 +27,12 @@ import {
   isFrozen,
 } from "../lib/customers/registerSync.js";
 import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
+import {
+  hasEntityFilterValues,
+  resolvePriorEntityFilter,
+  type EntityFilter,
+} from "../lib/saleLineFilter.js";
+import { parseJsonArray } from "./companyReports.js";
 import { computeAllMultipliers } from "../lib/customers/laspeyres.js";
 import { getSplit } from "../lib/headSplits.js";
 import {
@@ -57,6 +64,17 @@ function parseEntityType(val: unknown): EntityType {
 }
 
 const FY_PATTERN = /^\d{4}-\d{2}$/;
+
+// Shared State Head / State / Distributor filter (same JSON-array params the
+// Products / Growth pages use). Returns undefined when no filter is active.
+function parseEntityFilter(req: import("express").Request): EntityFilter | undefined {
+  const filter: EntityFilter = {
+    heads: parseJsonArray(req.query.heads),
+    states: parseJsonArray(req.query.states),
+    customers: parseJsonArray(req.query.customers),
+  };
+  return hasEntityFilterValues(filter) ? filter : undefined;
+}
 
 function sameMonths(a: string[], b: string[]): boolean {
   return a.length === b.length && a.join(",") === b.join(",");
@@ -121,10 +139,20 @@ router.get("/customers/performance", async (req, res) => {
   const monthsCyParam = parseMonthList(req.query.monthsCy);
   const entityType = parseEntityType(req.query.entityType);
 
-  const statesParam = req.query.states as string | undefined;
-  const states = statesParam ? statesParam.split(",").map((s) => s.trim()).filter(Boolean) : [];
-  const head = (req.query.head as string | undefined) ?? "";
   const monthsLyParam = parseMonthList(req.query.monthsLy);
+  const entityFilter = parseEntityFilter(req);
+
+  // Legacy filters: `states` (comma-separated raw state_canon values) and
+  // `head` (exact head_canon). The shared filter bar reuses the `states` query
+  // param but sends a JSON array, so when the shared filter is active the
+  // legacy interpretation MUST be disabled — otherwise `states=["DELHI"]`
+  // would also be applied verbatim to sl.state_canon and match nothing.
+  const statesParam = req.query.states as string | undefined;
+  const states =
+    !entityFilter && statesParam
+      ? statesParam.split(",").map((s) => s.trim()).filter(Boolean)
+      : [];
+  const head = entityFilter ? "" : ((req.query.head as string | undefined) ?? "");
 
   try {
     // If no months specified, use all available months for the CY
@@ -135,8 +163,17 @@ router.get("/customers/performance", async (req, res) => {
     const monthsCy = monthsCyParam.length ? monthsCyParam : availableCy;
     const monthsLy = monthsLyParam.length ? monthsLyParam : toLyMonths(monthsCy);
 
+    // LY side of head/state filters resolves to the CURRENT-FY customer set
+    // (heads/states move between FYs; see resolvePriorEntityFilter).
+    const filterLy = entityFilter
+      ? await resolvePriorEntityFilter(fyCy, entityFilter)
+      : undefined;
+
     const build = async (): Promise<Record<string, unknown>> => {
-    const rows = await listCustomers({ fyCy, fyLy, monthsCy, monthsLy, entityType, states, head });
+    const rows = await listCustomers({
+      fyCy, fyLy, monthsCy, monthsLy, entityType, states, head,
+      filterCy: entityFilter, filterLy,
+    });
     const elapsed = calcPctElapsed(monthsCy);
     const projectFactor = elapsed > 0 ? SEASONAL_TOTAL / elapsed : null;
 
@@ -147,7 +184,7 @@ router.get("/customers/performance", async (req, res) => {
     const headYoySplit = head ? getSplit(head, fyCy, fyLy) : null;
 
     return {
-      fyCy, fyLy, monthsCy, monthsLy, entityType, data: rows,
+      fyCy, fyLy, monthsCy, monthsLy, entityType, filtered: !!entityFilter, data: rows,
       headYoySplit: headYoySplit
         ? { priorCanon: headYoySplit.priorCanon, splitFromFy: headYoySplit.splitFromFy }
         : null,
@@ -168,6 +205,7 @@ router.get("/customers/performance", async (req, res) => {
       FY_PATTERN.test(fyLy) &&
       states.length === 0 &&
       !head &&
+      !entityFilter &&
       isDefaultMonthSelection(monthsCy, monthsLy, [completeCy, availableCy]);
     const payload = isDefaultVariant
       ? await serveWithSnapshot({
@@ -256,6 +294,7 @@ router.get("/customers/churn", async (req, res) => {
   const entityType = parseEntityType(req.query.entityType);
 
   const monthsLyParam = parseMonthList(req.query.monthsLy);
+  const entityFilter = parseEntityFilter(req);
 
   try {
     const [availableCy, completeCy] = await Promise.all([
@@ -265,17 +304,27 @@ router.get("/customers/churn", async (req, res) => {
     const monthsCy = monthsCyParam.length ? monthsCyParam : availableCy;
     const monthsLy = monthsLyParam.length ? monthsLyParam : toLyMonths(monthsCy);
 
+    const filterLy = entityFilter
+      ? await resolvePriorEntityFilter(fyCy, entityFilter)
+      : undefined;
+
     const build = async (): Promise<Record<string, unknown>> => {
       const [atRisk, newCustomers] = await Promise.all([
-        getAtRisk({ entityType }),
-        getNewCustomers({ fyCy, fyLy, monthsCy, monthsLy, entityType }),
+        // At-risk scoring spans all FYs, so it scopes by the resolved
+        // current-FY customer set rather than raw head/state columns.
+        getAtRisk({ entityType, filter: filterLy }),
+        getNewCustomers({
+          fyCy, fyLy, monthsCy, monthsLy, entityType,
+          filterCy: entityFilter, filterLy,
+        }),
       ]);
-      return { fyCy, fyLy, monthsCy, monthsLy, atRisk, newCustomers };
+      return { fyCy, fyLy, monthsCy, monthsLy, filtered: !!entityFilter, atRisk, newCustomers };
     };
 
     const isDefaultVariant =
       FY_PATTERN.test(fyCy) &&
       FY_PATTERN.test(fyLy) &&
+      !entityFilter &&
       isDefaultMonthSelection(monthsCy, monthsLy, [completeCy, availableCy]);
     // At-risk scoring depends on "days since last order", so churn snapshots
     // are never served as final (no frozen flag) — the background refresh
@@ -309,6 +358,7 @@ router.get("/customers/shrinkers", async (req, res) => {
       : "customer";
 
   const monthsLyParam = parseMonthList(req.query.monthsLy);
+  const entityFilter = parseEntityFilter(req);
 
   try {
     const [availableCy, completeCy] = await Promise.all([
@@ -318,6 +368,10 @@ router.get("/customers/shrinkers", async (req, res) => {
     const monthsCy = monthsCyParam.length ? monthsCyParam : availableCy;
     const monthsLy = monthsLyParam.length ? monthsLyParam : toLyMonths(monthsCy);
 
+    const filterLy = entityFilter
+      ? await resolvePriorEntityFilter(fyCy, entityFilter)
+      : undefined;
+
     const build = async (): Promise<Record<string, unknown>> => {
       const shrinkers = await getPriceShrinkers({
         fyCy,
@@ -326,13 +380,16 @@ router.get("/customers/shrinkers", async (req, res) => {
         monthsLy,
         grain: grain as "customer" | "category" | "product",
         entityType,
+        filterCy: entityFilter,
+        filterLy,
       });
-      return { fyCy, fyLy, monthsCy, monthsLy, grain, data: shrinkers };
+      return { fyCy, fyLy, monthsCy, monthsLy, grain, filtered: !!entityFilter, data: shrinkers };
     };
 
     const isDefaultVariant =
       FY_PATTERN.test(fyCy) &&
       FY_PATTERN.test(fyLy) &&
+      !entityFilter &&
       isDefaultMonthSelection(monthsCy, monthsLy, [completeCy, availableCy]);
     const payload = isDefaultVariant
       ? await serveWithSnapshot({
@@ -461,6 +518,109 @@ router.get("/customers/schemes/:id/push-list", async (req, res) => {
   }
 });
 
+// ── Excel export — customer rankings ──────────────────────────────────────────
+
+const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8EDF5" } };
+const MAX_EXPORT_ROWS_PER_SHEET = 20_000;
+const MAX_CONCURRENT_EXPORTS = 2;
+let activeExports = 0;
+
+router.get("/customers/export", async (req, res) => {
+  const fyCy = (req.query.fyCy as string) || "2026-27";
+  const fyLy = (req.query.fyLy as string) || "2025-26";
+  if (!FY_PATTERN.test(fyCy) || !FY_PATTERN.test(fyLy)) {
+    res.status(400).json({ error: "Invalid fyCy/fyLy — expected YYYY-YY" });
+    return;
+  }
+  const monthsCyParam = parseMonthList(req.query.monthsCy);
+  const monthsLyParam = parseMonthList(req.query.monthsLy);
+  const entityType = parseEntityType(req.query.entityType);
+  const entityFilter = parseEntityFilter(req);
+
+  if (activeExports >= MAX_CONCURRENT_EXPORTS) {
+    res.status(429).json({ error: "Another export is already running — try again in a few seconds." });
+    return;
+  }
+  activeExports++;
+  try {
+    const availableCy = await getAvailableMonths(fyCy);
+    const monthsCy = monthsCyParam.length ? monthsCyParam : availableCy;
+    const monthsLy = monthsLyParam.length ? monthsLyParam : toLyMonths(monthsCy);
+    const filterLy = entityFilter
+      ? await resolvePriorEntityFilter(fyCy, entityFilter)
+      : undefined;
+
+    const rows = await listCustomers({
+      fyCy, fyLy, monthsCy, monthsLy, entityType,
+      filterCy: entityFilter, filterLy,
+    });
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "Prayag Sales Intelligence";
+
+    // Cover sheet — basis + active filters, so a filtered file is
+    // self-describing and never mistaken for unfiltered company totals.
+    const info = wb.addWorksheet("Info");
+    info.columns = [{ width: 26 }, { width: 95 }];
+    const infoRows: Array<[string, string]> = [
+      ["Page", `Customer Performance — FY ${fyCy} vs ${fyLy} primary sales by customer (sale_line register)`],
+      ["FY (current)", fyCy],
+      ["FY (compare)", fyLy],
+      ["Months (current)", monthsCy.join(", ") || "All"],
+      ["Months (compare)", monthsLy.join(", ") || "All"],
+      ["Entity type", entityType],
+      ["State Head filter", entityFilter?.heads?.length ? entityFilter.heads.join(", ") : "All"],
+      ["State filter", entityFilter?.states?.length ? entityFilter.states.join(", ") : "All"],
+      ["Distributor filter", entityFilter?.customers?.length ? entityFilter.customers.join(", ") : "All"],
+      ["Note", "Quantity leads (pcs); realized price = value / qty. Prior-FY figures for head/state filters use the current-FY customer set."],
+    ];
+    for (const [k, v] of infoRows) {
+      const row = info.addRow([k, v]);
+      row.getCell(1).font = { bold: true };
+    }
+
+    const ws = wb.addWorksheet("Rankings");
+    const columns = [
+      { header: "Customer", key: "customer", width: 42 },
+      { header: "Type", key: "entityType", width: 14 },
+      { header: "State", key: "state", width: 18 },
+      { header: `Qty ${fyCy}`, key: "qtyCy", width: 12 },
+      { header: `Qty ${fyLy}`, key: "qtyLy", width: 12 },
+      { header: `Value ${fyCy} (INR)`, key: "valCy", width: 16 },
+      { header: `Value ${fyLy} (INR)`, key: "valLy", width: 16 },
+      { header: "Qty growth %", key: "qtyGrowthPct", width: 13 },
+      { header: "Value growth %", key: "valGrowthPct", width: 14 },
+      { header: `Realized price ${fyCy}`, key: "priceCy", width: 17 },
+      { header: `Realized price ${fyLy}`, key: "priceLy", width: 17 },
+    ];
+    ws.columns = columns.map((c) => ({ header: c.header, key: c.key, width: c.width }));
+    ws.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.fill = HEADER_FILL;
+    });
+    const truncated = rows.length > MAX_EXPORT_ROWS_PER_SHEET;
+    for (const r of rows.slice(0, MAX_EXPORT_ROWS_PER_SHEET)) {
+      ws.addRow(columns.map((c) => (r as unknown as Record<string, unknown>)[c.key] ?? ""));
+    }
+    if (truncated) {
+      const row = ws.addRow([`… truncated: showing ${MAX_EXPORT_ROWS_PER_SHEET.toLocaleString()} of ${rows.length.toLocaleString()} rows. Narrow the filters to export the rest.`]);
+      row.font = { italic: true };
+    }
+    ws.views = [{ state: "frozen", ySplit: 1 }];
+
+    const buf = await wb.xlsx.writeBuffer();
+    const suffix = entityFilter ? "_filtered" : "";
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="Customers_${fyCy}${suffix}_${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    res.send(Buffer.from(buf));
+  } catch (err) {
+    req.log.error({ err }, "customers export error");
+    res.status(500).json({ error: "Export failed" });
+  } finally {
+    activeExports--;
+  }
+});
+
 // ── Distributor scheme-risk ────────────────────────────────────────────────────
 
 router.get("/customers/distributor-risk", async (req, res) => {
@@ -470,14 +630,22 @@ router.get("/customers/distributor-risk", async (req, res) => {
   ensureRegisterSynced(fyLy);
   const monthsCy = parseMonthList(req.query.monthsCy);
   const monthsLy = parseMonthList(req.query.monthsLy);
+  const entityFilter = parseEntityFilter(req);
 
   if (!monthsCy.length || !monthsLy.length) {
-    res.json({ rows: [], summary: { total: 0, onTrack: 0, atRisk: 0, zeroBuyers: 0, atRiskRevenue: 0, zeroBuyerRevenue: 0 } });
+    res.json({ rows: [], summary: { total: 0, onTrack: 0, atRisk: 0, zeroBuyers: 0, atRiskRevenue: 0, zeroBuyerRevenue: 0 }, filtered: !!entityFilter });
     return;
   }
 
   try {
-    const rows = await getDistributorRisk({ fyCy, fyLy, monthsCy, monthsLy });
+    // LY side resolves head/state values to the current-FY customer set.
+    const filterLy = entityFilter
+      ? await resolvePriorEntityFilter(fyCy, entityFilter)
+      : undefined;
+    const rows = await getDistributorRisk({
+      fyCy, fyLy, monthsCy, monthsLy,
+      filterCy: entityFilter, filterLy,
+    });
     const summary = {
       total: rows.length,
       onTrack: rows.filter((r) => r.status === "on_track").length,
@@ -486,7 +654,7 @@ router.get("/customers/distributor-risk", async (req, res) => {
       atRiskRevenue: rows.filter((r) => r.status !== "on_track").reduce((s, r) => s + r.lyVal, 0),
       zeroBuyerRevenue: rows.filter((r) => r.status === "zero").reduce((s, r) => s + r.lyVal, 0),
     };
-    res.json({ rows, summary });
+    res.json({ rows, summary, filtered: !!entityFilter });
   } catch (err) {
     req.log.error(err);
     res.status(500).json({ error: "Failed to compute distributor risk" });

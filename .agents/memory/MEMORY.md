@@ -92,6 +92,7 @@
 - [C2 Comparison UI](c2-comparison-ui.md) — render-only page over C1; flags/rankEligible are API fields, never inferred; every export surface carries the full basis block.
 - [C1 Comparison contract](comparison-contract.md) — POST /api/comparison; basis bound to entity type; guard 2 blocks cross-FY shape mismatch; frozen anchors from sale_line_current not verify_anchors totals.
 - [Engine Generated Targets](target-engine.md) — overrides-only persistence, growth-split weights, date-derived baseline, member pro-rata fallback when distributor-TM map is empty.
+- [Shared entity filter rollout](shared-entity-filter-rollout.md) — filtered never snapshots; prior/cross-FY scope via current-FY customer set; JSON `states` param collides with legacy comma format; retailer level rejects filters.
 - [Company Reports filters + export](company-reports-filters.md) — prior-FY entity scope resolved via current-FY customer set; month filter intersects like months; filtered requests never snapshot.
 - [Secondary person target engine](secondary-person-target-engine.md) — person targets on secondary basis only; overrides reflow into route splits; fallback chain never yields zero; pool = roster − declared coverage per state.
 - [C3 matrix + cohort modes](c3-matrix-cohorts.md) — achievementTotal is a percent; company-wide = aggregate per-head deep dives; minutes-long builds need 202-poll pattern; sheet cohorts are territory-only.

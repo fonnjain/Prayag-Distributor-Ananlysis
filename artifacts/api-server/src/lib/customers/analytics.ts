@@ -10,6 +10,7 @@
 import { pool } from "@workspace/db";
 import { isMonthComplete } from "../analytics/analytics.js";
 import { stateVariantsFromArray } from "../stateCanon.js";
+import { entityCondsText, type EntityFilter } from "../saleLineFilter.js";
 
 // ── Month helpers ─────────────────────────────────────────────────────────────
 
@@ -237,8 +238,12 @@ export async function listCustomers(params: {
   entityType?: EntityType;
   states?: string[];
   head?: string;
+  /** Shared State Head / State / Distributor filter — applied to CY rows. */
+  filterCy?: EntityFilter;
+  /** Prior-FY resolution of filterCy (customer set) — applied to LY rows. */
+  filterLy?: EntityFilter;
 }): Promise<CustomerRow[]> {
-  const { fyCy, fyLy, monthsCy, monthsLy, entityType = "all", states: rawStates = [], head = "" } = params;
+  const { fyCy, fyLy, monthsCy, monthsLy, entityType = "all", states: rawStates = [], head = "", filterCy, filterLy } = params;
   // Expand canonical/raw state names to all DB split-variants so DELHI A and DELHI NCR
   // are both matched when the caller passes "DELHI".
   const states = stateVariantsFromArray(rawStates);
@@ -249,6 +254,11 @@ export async function listCustomers(params: {
       : entityType === "direct_dealer"
       ? `AND sl.type_raw ILIKE '%direct%'`
       : "";
+
+  // Shared entity filter: CY rows use the filter directly; LY rows use the
+  // prior-FY customer-set resolution (see saleLineFilter.resolvePriorEntityFilter).
+  const cyF = entityCondsText(filterCy, "sl", 7);
+  const lyF = entityCondsText(filterLy, "sl", 7 + cyF.params.length);
 
   // $5 = states array (empty array = no filter), $6 = head (empty string = no filter).
   // head_canon in sale_line_all stores the normalized state head name exactly as entered;
@@ -265,8 +275,8 @@ export async function listCustomers(params: {
     FROM sale_line_current sl
     WHERE customer IS NOT NULL
       AND (
-        (fy = $1 AND month_label = ANY($3::text[]))
-        OR (fy = $2 AND month_label = ANY($4::text[]))
+        (fy = $1 AND month_label = ANY($3::text[])${cyF.text})
+        OR (fy = $2 AND month_label = ANY($4::text[])${lyF.text})
       )
       ${typeFilter}
       AND ($5::text[] = '{}' OR sl.state_canon = ANY($5::text[]))
@@ -286,7 +296,7 @@ export async function listCustomers(params: {
     val_cy: unknown;
     qty_ly: unknown;
     val_ly: unknown;
-  }>(query, [fyCy, fyLy, monthsCy, monthsLy, states, head]);
+  }>(query, [fyCy, fyLy, monthsCy, monthsLy, states, head, ...cyF.params, ...lyF.params]);
 
   return res.rows.map(buildCustomerRow);
 }
@@ -518,8 +528,10 @@ export async function getNewCustomers(params: {
   monthsCy: string[];
   monthsLy: string[];
   entityType?: EntityType;
+  filterCy?: EntityFilter;
+  filterLy?: EntityFilter;
 }): Promise<ChurnRow[]> {
-  const { fyCy, fyLy, monthsCy, monthsLy, entityType = "all" } = params;
+  const { fyCy, fyLy, monthsCy, monthsLy, entityType = "all", filterCy, filterLy } = params;
 
   const typeFilter =
     entityType === "distributor"
@@ -527,6 +539,9 @@ export async function getNewCustomers(params: {
       : entityType === "direct_dealer"
       ? `AND type_raw ILIKE '%direct%'`
       : "";
+
+  const cyF = entityCondsText(filterCy, "", 5);
+  const lyF = entityCondsText(filterLy, "", 5 + cyF.params.length);
 
   const res = await pool.query<{
     customer: string;
@@ -540,7 +555,7 @@ export async function getNewCustomers(params: {
     WITH ly_customers AS (
       SELECT DISTINCT customer
       FROM sale_line_current
-      WHERE fy = $2 AND month_label = ANY($4::text[]) AND customer IS NOT NULL
+      WHERE fy = $2 AND month_label = ANY($4::text[]) AND customer IS NOT NULL${lyF.text}
     ),
     cy_data AS (
       SELECT
@@ -552,7 +567,7 @@ export async function getNewCustomers(params: {
         COUNT(DISTINCT month_label) AS months_ordered
       FROM sale_line_current
       WHERE fy = $1 AND month_label = ANY($3::text[]) AND customer IS NOT NULL
-        ${typeFilter}
+        ${typeFilter}${cyF.text}
       GROUP BY customer
     )
     SELECT c.*
@@ -560,7 +575,7 @@ export async function getNewCustomers(params: {
     WHERE c.customer NOT IN (SELECT customer FROM ly_customers)
     ORDER BY val_ly DESC
     `,
-    [fyCy, fyLy, monthsCy, monthsLy],
+    [fyCy, fyLy, monthsCy, monthsLy, ...cyF.params, ...lyF.params],
   );
 
   return res.rows.map((r) => ({
@@ -584,8 +599,12 @@ export async function getPriceShrinkers(params: {
   monthsLy: string[];
   grain: "customer" | "category" | "product";
   entityType?: EntityType;
+  filterCy?: EntityFilter;
+  filterLy?: EntityFilter;
 }): Promise<ShrinkerRow[]> {
-  const { fyCy, fyLy, monthsCy, monthsLy, grain, entityType = "all" } = params;
+  const { fyCy, fyLy, monthsCy, monthsLy, grain, entityType = "all", filterCy, filterLy } = params;
+  const cyF = entityCondsText(filterCy, "sl", 5);
+  const lyF = entityCondsText(filterLy, "sl", 5 + cyF.params.length);
 
   const typeFilter =
     entityType === "distributor"
@@ -633,8 +652,8 @@ export async function getPriceShrinkers(params: {
     FROM sale_line_current sl ${joinClause}
     WHERE customer IS NOT NULL
       AND (
-        (fy = $1 AND month_label = ANY($3::text[]))
-        OR (fy = $2 AND month_label = ANY($4::text[]))
+        (fy = $1 AND month_label = ANY($3::text[])${cyF.text})
+        OR (fy = $2 AND month_label = ANY($4::text[])${lyF.text})
       )
       ${typeFilter}
     GROUP BY ${groupBy}${grain === "product" ? ", im.item_name" : ""}
@@ -648,7 +667,7 @@ export async function getPriceShrinkers(params: {
       (COALESCE(SUM(amount::numeric) FILTER (WHERE fy = $1 AND month_label = ANY($3::text[])), 0) -
        COALESCE(SUM(amount::numeric) FILTER (WHERE fy = $2 AND month_label = ANY($4::text[])), 0)) DESC
     `,
-    [fyCy, fyLy, monthsCy, monthsLy],
+    [fyCy, fyLy, monthsCy, monthsLy, ...cyF.params, ...lyF.params],
   );
 
   return res.rows.map((r) => {
@@ -750,8 +769,15 @@ export type AtRiskRow = {
 
 export async function getAtRisk(params: {
   entityType?: EntityType;
+  /**
+   * Shared entity filter, pre-resolved to a current-FY customer set (or a
+   * customers-only filter) by the route — at-risk scoring spans all FYs, and
+   * historical head/state columns can disagree for reassigned parties.
+   */
+  filter?: EntityFilter;
 }): Promise<AtRiskRow[]> {
-  const { entityType = "all" } = params;
+  const { entityType = "all", filter } = params;
+  const entF = entityCondsText(filter, "sl", 1);
 
   const typeFilter =
     entityType === "distributor"
@@ -787,7 +813,7 @@ export async function getAtRisk(params: {
           )
         ) AS order_date
       FROM sale_line_current sl
-      WHERE sl.customer IS NOT NULL AND sl.month_label IS NOT NULL
+      WHERE sl.customer IS NOT NULL AND sl.month_label IS NOT NULL${entF.text}
     ),
     valid_od AS (
       SELECT customer, order_date FROM order_dates WHERE order_date IS NOT NULL
@@ -834,7 +860,7 @@ export async function getAtRisk(params: {
       (CURRENT_DATE - lo.last_order_date)::numeric / NULLIF(cg.median_gap, 0) DESC
     LIMIT 500
     `,
-    [],
+    entF.params,
   );
 
   return res.rows.map((r) => {
@@ -921,9 +947,16 @@ export async function getDistributorRisk(params: {
   fyLy: string;
   monthsCy: string[];
   monthsLy: string[];
+  /** Shared entity filter for the CY side (raw heads/states/customers). */
+  filterCy?: EntityFilter;
+  /** LY side — pre-resolved via resolvePriorEntityFilter (customer set). */
+  filterLy?: EntityFilter;
 }): Promise<DistributorRiskRow[]> {
-  const { fyCy, fyLy, monthsCy, monthsLy } = params;
+  const { fyCy, fyLy, monthsCy, monthsLy, filterCy, filterLy } = params;
   if (!monthsCy.length || !monthsLy.length) return [];
+
+  const cyCond = entityCondsText(filterCy, "sl", 5);
+  const lyCond = entityCondsText(filterLy, "sl", 5 + cyCond.params.length);
 
   const res = await pool.query<{
     customer: string;
@@ -935,14 +968,14 @@ export async function getDistributorRisk(params: {
     `
     WITH cy AS (
       SELECT customer, SUM(amount::numeric) AS cy_val
-      FROM sale_line_current
-      WHERE fy = $1 AND month_label = ANY($2::text[]) AND customer IS NOT NULL
+      FROM sale_line_current sl
+      WHERE fy = $1 AND month_label = ANY($2::text[]) AND customer IS NOT NULL${cyCond.text}
       GROUP BY customer
     ),
     ly AS (
       SELECT customer, SUM(amount::numeric) AS ly_val
-      FROM sale_line_current
-      WHERE fy = $3 AND month_label = ANY($4::text[]) AND customer IS NOT NULL
+      FROM sale_line_current sl
+      WHERE fy = $3 AND month_label = ANY($4::text[]) AND customer IS NOT NULL${lyCond.text}
       GROUP BY customer
     )
     SELECT
@@ -957,7 +990,7 @@ export async function getDistributorRisk(params: {
     LEFT JOIN cy USING (customer)
     ORDER BY (ly.ly_val - COALESCE(cy.cy_val, 0)) DESC
     `,
-    [fyCy, monthsCy, fyLy, monthsLy],
+    [fyCy, monthsCy, fyLy, monthsLy, ...cyCond.params, ...lyCond.params],
   );
 
   return res.rows.map((r) => {

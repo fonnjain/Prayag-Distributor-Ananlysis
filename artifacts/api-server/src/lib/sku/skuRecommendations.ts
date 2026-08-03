@@ -24,6 +24,11 @@ import {
   getEverSoldPerSegment,
 } from "./catalogue.js";
 import type { SkuLevel, SkuScope } from "./skuFacts.js";
+import {
+  entityCondsAliased,
+  resolvePriorEntityFilter,
+  type EntityFilter,
+} from "../saleLineFilter.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -71,12 +76,15 @@ export type RecommendationParams = {
   level: SkuLevel;
   scope: SkuScope;
   scopeId?: string;
+  /** Shared State Head / State / Distributor filter (primary channels only). */
+  entityFilter?: EntityFilter;
 };
 
 export async function getSkuRecommendations(
   params: RecommendationParams,
 ): Promise<SkuRecommendationsResult> {
-  const { fy, monthLabels, level, scope, scopeId } = params;
+  const { fy, monthLabels, level, scope, scopeId, entityFilter } = params;
+  const entityFilterSql = entityCondsAliased(entityFilter, "sl");
 
   // ── Level filter (same logic as skuFacts.ts) ──────────────────────────────
 
@@ -109,6 +117,7 @@ export async function getSkuRecommendations(
       AND sl.code IS NOT NULL AND sl.code <> ''
       ${levelFilter}
       ${scopeFilter}
+      ${entityFilterSql}
     GROUP BY sl.code, COALESCE(sl.group_canon, sl.group_raw, 'Unmapped')
   `);
 
@@ -142,6 +151,15 @@ export async function getSkuRecommendations(
   const boughtArr = [...boughtCodeSet];
   const notBoughtFilter = sql`AND sl.code != ALL(ARRAY[${sql.join(boughtArr.map((c) => sql`${c}`), sql`, `)}])`;
 
+  // Cross-FY scope: resolve head/state filter values (which describe the
+  // selected FY) to that FY's customer set for the all-FY gap query — old rows
+  // for reassigned distributors carry different head/state values.
+  const historicalFilter =
+    entityFilter && (entityFilter.heads?.length || entityFilter.states?.length)
+      ? await resolvePriorEntityFilter(fy, entityFilter)
+      : entityFilter;
+  const historicalFilterSql = entityCondsAliased(historicalFilter, "sl");
+
   const gapResult = await db.execute<{
     segment: string;
     code: string;
@@ -165,6 +183,7 @@ export async function getSkuRecommendations(
         AND sl.code IS NOT NULL AND sl.code <> ''
         ${levelFilter}
         ${scopeFilter}
+        ${historicalFilterSql}
         ${fiscalMonthFilter}
         ${notBoughtFilter}
       GROUP BY COALESCE(sl.group_canon, sl.group_raw, 'Unmapped'), sl.code

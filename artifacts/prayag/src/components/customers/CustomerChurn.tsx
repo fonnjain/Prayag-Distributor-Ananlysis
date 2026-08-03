@@ -403,12 +403,15 @@ export default function CustomerAtRisk({
   monthsCy,
   monthsLy,
   entityType,
+  filterQuery = "",
 }: {
   fyCy: string;
   fyLy: string;
   monthsCy: string[];
   monthsLy: string[];
   entityType: string;
+  /** Shared entity-filter query fragment ("&heads=[...]…") from CustomersPage. */
+  filterQuery?: string;
 }) {
   const [atRisk, setAtRisk] = useState<AtRiskRow[]>([]);
   const [newCust, setNewCust] = useState<NewRow[]>([]);
@@ -431,7 +434,7 @@ export default function CustomerAtRisk({
       monthsLy: monthsLy.join(","),
       entityType,
     });
-    fetch(`${BASE}/api/customers/churn?${params}`)
+    fetch(`${BASE}/api/customers/churn?${params}${filterQuery}`)
       .then((r) => r.json())
       .then((d) => {
         setAtRisk(d.atRisk ?? []);
@@ -440,7 +443,7 @@ export default function CustomerAtRisk({
       .catch(() => {})
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fyCy, fyLy, monthsCy.join(","), monthsLy.join(","), entityType]);
+  }, [fyCy, fyLy, monthsCy.join(","), monthsLy.join(","), entityType, filterQuery]);
 
   // Scheme risk
   useEffect(() => {
@@ -452,7 +455,7 @@ export default function CustomerAtRisk({
       monthsCy: monthsCy.join(","),
       monthsLy: monthsLy.join(","),
     });
-    fetch(`${BASE}/api/customers/distributor-risk?${params}`)
+    fetch(`${BASE}/api/customers/distributor-risk?${params}${filterQuery}`)
       .then((r) => r.json())
       .then((d) => {
         setSchemeRows(d.rows ?? []);
@@ -461,7 +464,7 @@ export default function CustomerAtRisk({
       .catch(() => {})
       .finally(() => setSchemeLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fyCy, fyLy, monthsCy.join(","), monthsLy.join(",")]);
+  }, [fyCy, fyLy, monthsCy.join(","), monthsLy.join(","), filterQuery]);
 
   const highCount = atRisk.filter((r) => r.riskLevel === "high").length;
   const mildCount = atRisk.filter((r) => r.riskLevel === "mild").length;

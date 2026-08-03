@@ -46,12 +46,15 @@ export default function PriceShrinkers({
   monthsCy,
   monthsLy,
   entityType,
+  filterQuery = "",
 }: {
   fyCy: string;
   fyLy: string;
   monthsCy: string[];
   monthsLy: string[];
   entityType: string;
+  /** Shared entity-filter query fragment ("&heads=[...]…") from CustomersPage. */
+  filterQuery?: string;
 }) {
   const [grain, setGrain] = useState<Grain>("customer");
   const [data, setData] = useState<ShrinkerRow[]>([]);
@@ -70,12 +73,12 @@ export default function PriceShrinkers({
       grain,
       entityType,
     });
-    fetch(`${BASE}/api/customers/shrinkers?${params}`)
+    fetch(`${BASE}/api/customers/shrinkers?${params}${filterQuery}`)
       .then((r) => r.json())
       .then((d) => setData(d.data ?? []))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [fyCy, fyLy, monthsCy.join(","), monthsLy.join(","), grain, entityType]);
+  }, [fyCy, fyLy, monthsCy.join(","), monthsLy.join(","), grain, entityType, filterQuery]);
 
   return (
     <div className="flex flex-col gap-4">

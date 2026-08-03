@@ -22,7 +22,14 @@ import SkuDiscounts from "@/components/sku/SkuDiscounts";
 import SkuSeasonality from "@/components/sku/SkuSeasonality";
 import SkuMovement from "@/components/sku/SkuMovement";
 import { cn } from "@/lib/utils";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Download } from "lucide-react";
+import {
+  CompanyReportFilterBar,
+  EMPTY_ENTITY_FILTER,
+  entityFilterQuery,
+  hasEntityFilter,
+  type EntityFilterValue,
+} from "@/components/dashboard/CompanyReportFilters";
 
 const BASE = (import.meta as { env: Record<string, string> }).env.BASE_URL?.replace(/\/$/, "") ?? "";
 
@@ -86,6 +93,11 @@ export default function SkuPage() {
   const [periodId, setPeriodId] = useState<PeriodPresetId>("q1");
   // State-head scope — "" = company-wide. Applies to Overview/Drill facts and Timing.
   const [scopeHead, setScopeHead] = useState<string>("");
+  // Shared State Head / State / Distributor filter (same bar as Products/Growth).
+  // Primary channels only — the secondary register has no state/distributor
+  // columns, so the bar is hidden (and the filter dropped) for retailer level.
+  const [entityFilter, setEntityFilter] = useState<EntityFilterValue>(EMPTY_ENTITY_FILTER);
+  const filterQuery = level === "retailer" ? "" : entityFilterQuery(entityFilter);
 
   // Section state
   const [section, setSection] = useState<Section>("overview");
@@ -142,7 +154,7 @@ export default function SkuPage() {
       monthTo: String(period.monthTo),
     });
     if (scopeHead) params.set("scopeId", scopeHead);
-    fetch(`${BASE}/api/sku/facts?${params}`)
+    fetch(`${BASE}/api/sku/facts?${params}${filterQuery}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json() as Promise<FactsResponse>;
@@ -150,7 +162,7 @@ export default function SkuPage() {
       .then(setOverviewData)
       .catch((e: Error) => setOverviewError(e.message))
       .finally(() => setOverviewLoading(false));
-  }, [fy, level, period.monthFrom, period.monthTo, scopeHead]);
+  }, [fy, level, period.monthFrom, period.monthTo, scopeHead, filterQuery]);
 
   useEffect(() => { fetchOverview(); }, [fetchOverview]);
 
@@ -169,7 +181,7 @@ export default function SkuPage() {
       segment: drillSegment,
     });
     if (scopeHead) params.set("scopeId", scopeHead);
-    fetch(`${BASE}/api/sku/facts?${params}`)
+    fetch(`${BASE}/api/sku/facts?${params}${filterQuery}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json() as Promise<FactsResponse>;
@@ -177,7 +189,7 @@ export default function SkuPage() {
       .then(setDrillData)
       .catch((e: Error) => setDrillError(e.message))
       .finally(() => setDrillLoading(false));
-  }, [section, drillSegment, fy, level, period.monthFrom, period.monthTo, scopeHead]);
+  }, [section, drillSegment, fy, level, period.monthFrom, period.monthTo, scopeHead, filterQuery]);
 
   // ── Fetch focus (K3 recommendations) ─────────────────────────────────────────
 
@@ -192,7 +204,7 @@ export default function SkuPage() {
       monthFrom: String(period.monthFrom),
       monthTo: String(period.monthTo),
     });
-    fetch(`${BASE}/api/sku/recommendations?${params}`)
+    fetch(`${BASE}/api/sku/recommendations?${params}${filterQuery}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json() as Promise<FocusData>;
@@ -200,7 +212,7 @@ export default function SkuPage() {
       .then(setFocusData)
       .catch((e: Error) => setFocusError(e.message))
       .finally(() => setFocusLoading(false));
-  }, [section, fy, level, period.monthFrom, period.monthTo]);
+  }, [section, fy, level, period.monthFrom, period.monthTo, filterQuery]);
 
   // ── Fetch distributor list (eager — pre-load when level or FY changes) ────────
 
@@ -494,6 +506,22 @@ export default function SkuPage() {
             </select>
           )}
 
+          {/* Shared State Head / State / Distributor filter — primary channels only */}
+          {level !== "retailer" && (
+            <CompanyReportFilterBar fy={fy} value={entityFilter} onChange={setEntityFilter} />
+          )}
+
+          {/* Excel export — Segments + Codes for the current level/period/filters */}
+          <a
+            href={`${BASE}/api/sku/export?fy=${fy}&level=${level}&monthFrom=${period.monthFrom}&monthTo=${period.monthTo}${scopeHead ? `&scope=head&scopeId=${encodeURIComponent(scopeHead)}` : ""}${filterQuery}`}
+            download
+            className="flex items-center gap-1.5 rounded border border-border px-2 py-1 text-xs font-medium hover:bg-muted/40"
+            data-testid="button-export-excel-sku"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export
+          </a>
+
           {/* FY + Period — hidden on Trends / Timing (span all FYs) */}
           {section !== "trends" && section !== "timing" && (
             <>
@@ -551,6 +579,12 @@ export default function SkuPage() {
 
       {/* ── Content ─────────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto p-4">
+        {level !== "retailer" && hasEntityFilter(entityFilter) && (
+          <p className="mb-3 text-[11px] text-amber-700 dark:text-amber-400">
+            Filters active — figures below are a subset and will not match the unfiltered totals.
+            Breadth denominators (codes ever sold) stay company-wide.
+          </p>
+        )}
         {/* Not available notice (overview/drill only) */}
         {notAvailable && section !== "trends" && (
           <div className="mb-4 rounded-md border border-amber-400/40 bg-amber-500/5 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">

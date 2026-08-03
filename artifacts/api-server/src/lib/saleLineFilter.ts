@@ -7,7 +7,7 @@
 //
 // Names must match sale_line values: heads → head_canon, states → the
 // NORMALISED state (normStateExpr output), customers → customer.
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import { db, saleLines } from "@workspace/db";
 
 export type EntityFilter = {
@@ -52,6 +52,88 @@ export function entityConds(f?: EntityFilter) {
   if (f?.states?.length) conds.push(inList(normStateExpr(), f.states));
   if (f?.customers?.length) conds.push(inList(sql<string>`coalesce(${saleLines.customer}, '')`, f.customers));
   return conds;
+}
+
+/**
+ * Aliased variant of normStateExpr for raw-SQL query builders that reference
+ * sale_line_current under a table alias (e.g. `sl`). Same normalisation rules.
+ */
+export function normStateExprAliased(alias: string): SQL<string> {
+  const col = sql.raw(`${alias}.state_canon`);
+  return sql<string>`CASE
+    WHEN ${col} IN ('DELHI A', 'DELHI NCR')              THEN 'DELHI'
+    WHEN ${col} IN ('UP ( A )', 'UP (AS)', 'UP (S)')      THEN 'UTTAR PRADESH'
+    WHEN ${col} = 'HP'                                    THEN 'HIMACHAL PRADESH'
+    WHEN ${col} = 'KARNATAKA (B)'                         THEN 'KARNATAKA'
+    ELSE COALESCE(${col}, 'Unmapped')
+  END`;
+}
+
+/**
+ * Entity filter as a single appendable SQL chunk (`AND (…)` or empty) for
+ * drizzle `db.execute(sql\`…\`)` queries that alias sale_line_current.
+ * Semantics identical to entityConds().
+ */
+export function entityCondsAliased(f: EntityFilter | undefined, alias: string): SQL {
+  if (!f || (!f.none && !hasEntityFilterValues(f))) return sql``;
+  const parts: SQL[] = [];
+  if (f.none) parts.push(sql`false`);
+  if (f.heads?.length) {
+    parts.push(
+      sql`coalesce(${sql.raw(`${alias}.head_canon`)}, 'Unmapped') IN (${sql.join(f.heads.map((v) => sql`${v}`), sql`, `)})`,
+    );
+  }
+  if (f.states?.length) {
+    parts.push(sql`${normStateExprAliased(alias)} IN (${sql.join(f.states.map((v) => sql`${v}`), sql`, `)})`);
+  }
+  if (f.customers?.length) {
+    parts.push(
+      sql`coalesce(${sql.raw(`${alias}.customer`)}, '') IN (${sql.join(f.customers.map((v) => sql`${v}`), sql`, `)})`,
+    );
+  }
+  return sql`AND (${sql.join(parts, sql` AND `)})`;
+}
+
+/**
+ * Entity filter for text-parameterised pg pool queries. Returns a SQL
+ * fragment (leading " AND (…)" or "") plus the positional params, starting at
+ * $startIdx. node-postgres binds JS arrays to ::text[] correctly, so ANY() is
+ * safe here (the drizzle ANY(jsArray) pitfall does not apply).
+ */
+export function entityCondsText(
+  f: EntityFilter | undefined,
+  alias: string,
+  startIdx: number,
+): { text: string; params: unknown[] } {
+  if (!f || (!f.none && !hasEntityFilterValues(f))) return { text: "", params: [] };
+  const a = alias ? `${alias}.` : "";
+  const parts: string[] = [];
+  const params: unknown[] = [];
+  let i = startIdx;
+  if (f.none) parts.push("false");
+  const stateCase = `CASE
+    WHEN ${a}state_canon IN ('DELHI A', 'DELHI NCR')          THEN 'DELHI'
+    WHEN ${a}state_canon IN ('UP ( A )', 'UP (AS)', 'UP (S)')  THEN 'UTTAR PRADESH'
+    WHEN ${a}state_canon = 'HP'                                THEN 'HIMACHAL PRADESH'
+    WHEN ${a}state_canon = 'KARNATAKA (B)'                     THEN 'KARNATAKA'
+    ELSE COALESCE(${a}state_canon, 'Unmapped')
+  END`;
+  if (f.heads?.length) {
+    parts.push(`COALESCE(${a}head_canon, 'Unmapped') = ANY($${i}::text[])`);
+    params.push(f.heads);
+    i++;
+  }
+  if (f.states?.length) {
+    parts.push(`${stateCase} = ANY($${i}::text[])`);
+    params.push(f.states);
+    i++;
+  }
+  if (f.customers?.length) {
+    parts.push(`COALESCE(${a}customer, '') = ANY($${i}::text[])`);
+    params.push(f.customers);
+    i++;
+  }
+  return { text: ` AND (${parts.join(" AND ")})`, params };
 }
 
 /**

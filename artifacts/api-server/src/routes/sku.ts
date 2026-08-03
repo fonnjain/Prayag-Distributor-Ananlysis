@@ -52,8 +52,27 @@ import {
   clearK4Cache,
 } from "../lib/sku/skuK4.js";
 import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
+import ExcelJS from "exceljs";
+import {
+  hasEntityFilterValues,
+  type EntityFilter,
+} from "../lib/saleLineFilter.js";
+import { parseJsonArray } from "./companyReports.js";
 
 const router = Router();
+
+// Shared State Head / State / Distributor filter (same JSON-array params as
+// the Products / Growth pages). Returns undefined when no filter is active.
+// Only valid for primary channels — routes reject it for level='retailer'
+// (the secondary register has no state/customer dimensions).
+function parseEntityFilter(req: Request): EntityFilter | undefined {
+  const filter: EntityFilter = {
+    heads: parseJsonArray(req.query.heads),
+    states: parseJsonArray(req.query.states),
+    customers: parseJsonArray(req.query.customers),
+  };
+  return hasEntityFilterValues(filter) ? filter : undefined;
+}
 
 // Snapshot TTL for heavy SKU payloads. Only company-scope, unsegmented
 // variants are snapshotted (the default page-load requests) so the key space
@@ -116,6 +135,15 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
       ? req.query.segment.trim()
       : undefined;
 
+  const entityFilter = parseEntityFilter(req);
+  if (entityFilter && level === "retailer") {
+    res.status(400).json({
+      error:
+        "State Head / State / Distributor filters are not available for the retailer level — the secondary register has no state or distributor columns.",
+    });
+    return;
+  }
+
   const build = async (): Promise<Record<string, unknown>> => {
     const result = await loadSkuFacts({
       fy,
@@ -124,6 +152,7 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
       scopeId,
       monthLabels,
       segment,
+      entityFilter,
     });
 
     return {
@@ -134,6 +163,7 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
       scope,
       scopeId: scopeId ?? null,
       segment: segment ?? null,
+      filtered: !!entityFilter,
       // NET source documented explicitly (acceptance criterion).
       netSource:
         level === "retailer"
@@ -155,10 +185,10 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
   };
 
   try {
-    // Snapshot-first for company-scope, unsegmented requests (the page-load
-    // variant); scoped/segmented drill-downs stay live.
+    // Snapshot-first for company-scope, unsegmented, unfiltered requests (the
+    // page-load variant); scoped/segmented/filtered drill-downs stay live.
     const payload =
-      scope === "company" && !segment
+      scope === "company" && !segment && !entityFilter
         ? await serveWithSnapshot({
             key: `sku-facts|${fy}|${level}|${monthFrom}-${monthTo}`,
             ttlMs: SKU_SNAPSHOT_TTL_MS,
@@ -404,6 +434,15 @@ router.get("/sku/recommendations", async (req: Request, res: Response): Promise<
   const monthTo   = intParam(req, "monthTo", monthFrom, 12, 12);
   const monthLabels = fiscalMonthsToLabels(fy, monthFrom, monthTo);
 
+  const entityFilter = parseEntityFilter(req);
+  if (entityFilter && level === "retailer") {
+    res.status(400).json({
+      error:
+        "State Head / State / Distributor filters are not available for the retailer level — the secondary register has no state or distributor columns.",
+    });
+    return;
+  }
+
   try {
     const build = async (): Promise<Record<string, unknown>> => {
       const result = await getSkuRecommendations({
@@ -412,11 +451,12 @@ router.get("/sku/recommendations", async (req: Request, res: Response): Promise<
         level: level as SkuLevel,
         scope: scope as SkuScope,
         scopeId,
+        entityFilter,
       });
-      return { fy, monthFrom, monthTo, level, scope, scopeId: scopeId ?? null, ...result };
+      return { fy, monthFrom, monthTo, level, scope, scopeId: scopeId ?? null, filtered: !!entityFilter, ...result };
     };
     const payload =
-      scope === "company"
+      scope === "company" && !entityFilter
         ? await serveWithSnapshot({
             key: `sku-recommendations|${fy}|${level}|${monthFrom}-${monthTo}`,
             ttlMs: SKU_SNAPSHOT_TTL_MS,
@@ -428,6 +468,149 @@ router.get("/sku/recommendations", async (req: Request, res: Response): Promise<
   } catch (err) {
     req.log.error({ err, fy, level }, "sku recommendations failed");
     res.status(500).json({ error: "Could not load SKU recommendations." });
+  }
+});
+
+// ── GET /api/sku/export — Excel export of SKU facts ──────────────────────────
+
+const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8EDF5" } };
+const MAX_EXPORT_ROWS_PER_SHEET = 20_000;
+const MAX_CONCURRENT_EXPORTS = 2;
+let activeExports = 0;
+
+router.get("/sku/export", async (req: Request, res: Response): Promise<void> => {
+  const fy =
+    typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
+      ? req.query.fy.trim()
+      : "2026-27";
+  const level = typeof req.query.level === "string" ? req.query.level.trim() : "distributor";
+  if (!VALID_LEVELS.has(level)) {
+    res.status(400).json({ error: `level must be one of: ${[...VALID_LEVELS].join(", ")}` });
+    return;
+  }
+  const monthFrom = intParam(req, "monthFrom", 1, 12, 1);
+  const monthTo   = intParam(req, "monthTo", monthFrom, 12, 12);
+  const monthLabels = fiscalMonthsToLabels(fy, monthFrom, monthTo);
+
+  // Legacy state-head scope — must be honoured so the export matches the
+  // figures on screen when the page is scoped to one head's territory.
+  const scope = typeof req.query.scope === "string" ? req.query.scope.trim() : "company";
+  if (!VALID_SCOPES.has(scope)) {
+    res.status(400).json({ error: `scope must be one of: ${[...VALID_SCOPES].join(", ")}` });
+    return;
+  }
+  const scopeId =
+    scope !== "company" && typeof req.query.scopeId === "string" && req.query.scopeId.trim()
+      ? req.query.scopeId.trim()
+      : undefined;
+  if (scope !== "company" && !scopeId) {
+    res.status(400).json({ error: "scopeId is required when scope is 'head' or 'customer'" });
+    return;
+  }
+
+  const entityFilter = parseEntityFilter(req);
+  if (entityFilter && level === "retailer") {
+    res.status(400).json({
+      error:
+        "State Head / State / Distributor filters are not available for the retailer level — the secondary register has no state or distributor columns.",
+    });
+    return;
+  }
+
+  if (activeExports >= MAX_CONCURRENT_EXPORTS) {
+    res.status(429).json({ error: "Another export is already running — try again in a few seconds." });
+    return;
+  }
+  activeExports++;
+  try {
+    const result = await loadSkuFacts({
+      fy,
+      level: level as SkuLevel,
+      scope: scope as SkuScope,
+      scopeId,
+      monthLabels,
+      entityFilter,
+    });
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "Prayag Sales Intelligence";
+
+    // Cover sheet — basis + active filters, so a filtered file is
+    // self-describing and never mistaken for unfiltered company totals.
+    const info = wb.addWorksheet("Info");
+    info.columns = [{ width: 26 }, { width: 95 }];
+    const netSource =
+      level === "retailer"
+        ? "secondary_sku_line.net_amount (Sub Total column from secondary register)"
+        : "sale_line.amount (taxable value / net invoice amount)";
+    const infoRows: Array<[string, string]> = [
+      ["Page", `SKU Deep Dive — FY ${fy}, level '${level}', months ${monthFrom}–${monthTo} (fiscal)`],
+      ["FY", fy],
+      ["Level", level],
+      ["Scope", scope === "company" ? "Company-wide" : `${scope}: ${scopeId}`],
+      ["Months (fiscal)", `${monthFrom}–${monthTo}`],
+      ["NET source", netSource],
+      ["State Head filter", entityFilter?.heads?.length ? entityFilter.heads.join(", ") : "All"],
+      ["State filter", entityFilter?.states?.length ? entityFilter.states.join(", ") : "All"],
+      ["Distributor filter", entityFilter?.customers?.length ? entityFilter.customers.join(", ") : "All"],
+      ["Note", "Breadth denominator (codesEverSold) is cross-FY and company-wide; it is NOT reduced by filters. Qty must never be summed across codes/segments (litres vs pieces)."],
+    ];
+    for (const [k, v] of infoRows) {
+      const row = info.addRow([k, v]);
+      row.getCell(1).font = { bold: true };
+    }
+
+    const facts = result.facts;
+    const segWs = wb.addWorksheet("Segments");
+    const segCols = [
+      { header: "Segment", key: "segment", width: 26 },
+      { header: "Qty", key: "qty", width: 12 },
+      { header: "Net (INR)", key: "net", width: 16 },
+      { header: "Net share", key: "netShare", width: 11 },
+      { header: "Codes bought", key: "codesBought", width: 13 },
+      { header: "Codes ever sold", key: "codesEverSold", width: 15 },
+      { header: "Breadth %", key: "breadthPct", width: 11 },
+      { header: "Unbought value (INR)", key: "unboughtValue", width: 19 },
+    ];
+    segWs.columns = segCols.map((c) => ({ header: c.header, key: c.key, width: c.width }));
+    segWs.getRow(1).eachCell((cell) => { cell.font = { bold: true }; cell.fill = HEADER_FILL; });
+    for (const r of (facts?.bySegment ?? []).slice(0, MAX_EXPORT_ROWS_PER_SHEET)) {
+      segWs.addRow(segCols.map((c) => (r as unknown as Record<string, unknown>)[c.key] ?? ""));
+    }
+    segWs.views = [{ state: "frozen", ySplit: 1 }];
+
+    const codeWs = wb.addWorksheet("Codes");
+    const codeCols = [
+      { header: "Code", key: "code", width: 14 },
+      { header: "Item", key: "itemName", width: 40 },
+      { header: "Segment", key: "segment", width: 24 },
+      { header: "Qty", key: "qty", width: 12 },
+      { header: "Net (INR)", key: "net", width: 16 },
+      { header: "Net share", key: "netShare", width: 11 },
+    ];
+    codeWs.columns = codeCols.map((c) => ({ header: c.header, key: c.key, width: c.width }));
+    codeWs.getRow(1).eachCell((cell) => { cell.font = { bold: true }; cell.fill = HEADER_FILL; });
+    const codes = facts?.byCode ?? [];
+    const truncated = codes.length > MAX_EXPORT_ROWS_PER_SHEET || !!facts?.truncated;
+    for (const r of codes.slice(0, MAX_EXPORT_ROWS_PER_SHEET)) {
+      codeWs.addRow(codeCols.map((c) => (r as unknown as Record<string, unknown>)[c.key] ?? ""));
+    }
+    if (truncated) {
+      const row = codeWs.addRow(["… truncated: the code list is capped. Narrow the filters to export the rest."]);
+      row.font = { italic: true };
+    }
+    codeWs.views = [{ state: "frozen", ySplit: 1 }];
+
+    const buf = await wb.xlsx.writeBuffer();
+    const suffix = entityFilter ? "_filtered" : "";
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="SKU_${level}_${fy}${suffix}_${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    res.send(Buffer.from(buf));
+  } catch (err) {
+    req.log.error({ err, fy, level }, "sku export failed");
+    res.status(500).json({ error: "Export failed" });
+  } finally {
+    activeExports--;
   }
 });
 

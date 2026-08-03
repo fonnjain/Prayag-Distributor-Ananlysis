@@ -31,6 +31,11 @@ import {
   canonGroupFromMap,
 } from "./catalogue.js";
 import { logger } from "../logger.js";
+import {
+  entityCondsAliased,
+  resolvePriorEntityFilter,
+  type EntityFilter,
+} from "../saleLineFilter.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -201,12 +206,15 @@ type PrimaryFactParams = {
   scope: SkuScope;
   scopeId?: string;
   segment?: string; // optional segment filter
+  /** Shared State Head / State / Distributor filter (primary channels only). */
+  entityFilter?: EntityFilter;
 };
 
 export async function getPrimarySkuFacts(
   params: PrimaryFactParams,
 ): Promise<SkuFactsResult["facts"]> {
-  const { fy, monthLabels, level, scope, scopeId, segment } = params;
+  const { fy, monthLabels, level, scope, scopeId, segment, entityFilter } = params;
+  const entityFilterSql = entityCondsAliased(entityFilter, "sl");
 
   // Level filter — three cases:
   //   project      → only Non-territory / Project / Govt head_canon
@@ -258,6 +266,7 @@ export async function getPrimarySkuFacts(
       ${levelFilter}
       ${scopeFilter}
       ${segmentFilter}
+      ${entityFilterSql}
     GROUP BY sl.code, COALESCE(sl.group_canon, sl.group_raw, 'Unmapped'), im.item_name, sl.month_label
     ORDER BY COALESCE(sl.group_canon, sl.group_raw, 'Unmapped'), sl.code, sl.month_label
   `);
@@ -280,6 +289,16 @@ export async function getPrimarySkuFacts(
   const boughtCodes = [...new Set(rows.rows.map((r) => r.code))];
   if (boughtCodes.length === 0) return facts;
 
+  // Cross-FY scope: head/state filter values describe the SELECTED FY — a
+  // distributor reassigned between FYs carries different head/state on old
+  // rows. Resolve heads/states once to the selected-FY customer set and use
+  // that (customer-only) filter for the all-FY historical query.
+  const historicalFilter =
+    entityFilter && (entityFilter.heads?.length || entityFilter.states?.length)
+      ? await resolvePriorEntityFilter(fy, entityFilter)
+      : entityFilter;
+  const historicalFilterSql = entityCondsAliased(historicalFilter, "sl");
+
   // Extract fiscal-month prefixes ("Apr", "May", "Jun") from the label list.
   const fiscalMonths = [...new Set(monthLabels.map((m) => m.split("-")[0]))];
   const fiscalMonthFilter = sql`AND split_part(sl.month_label, '-', 1) = ANY(ARRAY[${sql.join(fiscalMonths.map((m) => sql`${m}`), sql`, `)}])`;
@@ -296,6 +315,7 @@ export async function getPrimarySkuFacts(
       ${levelFilter}
       ${scopeFilter}
       ${segmentFilter}
+      ${historicalFilterSql}
       ${fiscalMonthFilter}
       AND sl.code != ALL(ARRAY[${sql.join(boughtCodes.map((c) => sql`${c}`), sql`, `)}])
     GROUP BY 1
@@ -858,12 +878,19 @@ export type SkuFactsParams = {
   scopeId?: string;
   monthLabels: string[];
   segment?: string;
+  /**
+   * Shared State Head / State / Distributor filter. Only meaningful for the
+   * primary channels (distributor/direct_dealer/project) — the secondary
+   * register lacks state/customer dimensions, so routes must reject a filter
+   * for level='retailer'.
+   */
+  entityFilter?: EntityFilter;
 };
 
 export async function loadSkuFacts(
   params: SkuFactsParams,
 ): Promise<SkuFactsResult> {
-  const { fy, level, scope, scopeId, monthLabels, segment } = params;
+  const { fy, level, scope, scopeId, monthLabels, segment, entityFilter } = params;
 
   const capability = await getSkuCapability(fy);
 
@@ -886,7 +913,7 @@ export async function loadSkuFacts(
     }
     facts = await getSecondarySkuFacts({ fy, monthLabels, scope, scopeId, segment, headKeys });
   } else {
-    facts = await getPrimarySkuFacts({ fy, monthLabels, level, scope, scopeId, segment });
+    facts = await getPrimarySkuFacts({ fy, monthLabels, level, scope, scopeId, segment, entityFilter });
   }
 
   // Log unmapped summary
