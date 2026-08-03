@@ -959,6 +959,12 @@ export type MemberTargetSnapshot = {
   /** Secondary OB + direct-dealer OB (YTD) — allocation weight for rollups. */
   obTotal: number;
   sale: number;
+  /** T2 additions — person-level secondary engine needs these. */
+  state: string;
+  workingDaysActual: number | null;
+  elapsedMonths: number | null;
+  /** Declared retailer count (BH "Grand Total Retailers"). */
+  totalRetailers: number | null;
 };
 
 export async function loadMemberTargetSnapshots(
@@ -975,6 +981,10 @@ export async function loadMemberTargetSnapshots(
     monthlyTarget: m.monthlyTarget,
     obTotal: (m.orderBooking ?? 0) + (m.directDealersOrder ?? 0),
     sale: m.sale ?? 0,
+    state: extractStateName(m),
+    workingDaysActual: m.workingDaysActual,
+    elapsedMonths: m.elapsedMonths,
+    totalRetailers: m.totalRetailers,
   }));
 }
 

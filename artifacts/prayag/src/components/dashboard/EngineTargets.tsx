@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { Loader2, RefreshCw, AlertTriangle, Sparkles, Undo2 } from "lucide-react";
+import PeopleEngineTargets from "./PeopleEngineTargets";
 
 const API = import.meta.env.BASE_URL.replace(/\/$/, "") + "/api";
 
@@ -117,6 +118,7 @@ const SUBTABS = [
   { key: "oldSku", label: "Existing Sales Old SKU" },
   { key: "newSku", label: "Existing Sales New SKU" },
   { key: "newCustomers", label: "New Customers" },
+  { key: "people", label: "People (Secondary)" },
 ] as const;
 
 type SubTab = (typeof SUBTABS)[number]["key"];
@@ -293,7 +295,10 @@ export default function EngineTargets() {
 
       {notice && <p className="text-sm text-amber-600">{notice}</p>}
 
-      {/* Baseline strip — always visible */}
+      {tab === "people" && <PeopleEngineTargets />}
+      {tab !== "people" && (
+      <>
+      {/* Baseline strip — visible on all primary-basis tabs */}
       <Card className="border-border/50 bg-card/50">
         <CardContent className="px-6 py-4 flex flex-wrap gap-x-8 gap-y-2 text-sm">
           <span>
@@ -337,6 +342,8 @@ export default function EngineTargets() {
           route={combined.routes.find((r) => r.key === "newCustomers")!}
           realTerms={realTerms}
         />
+      )}
+      </>
       )}
     </div>
   );

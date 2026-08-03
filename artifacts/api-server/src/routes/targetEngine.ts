@@ -18,9 +18,41 @@ import {
   loadOverrides,
   fyForDate,
 } from "../lib/mgmt/targetEngine.js";
+import { computeSecondaryEngineTargets } from "../lib/mgmt/targetEngineSecondary.js";
 import { logger } from "../lib/logger.js";
 
 const router = Router();
+
+// T2 — person-level targets on the SECONDARY basis (salespeople + heads).
+// GET /api/target-engine/people?fy=2026-27&scaleTo=<rupees>&today=<date>
+router.get("/target-engine/people", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const todayRaw = typeof req.query.today === "string" ? req.query.today.trim() : "";
+    let today: Date | undefined;
+    if (todayRaw) {
+      const d = new Date(todayRaw);
+      if (isNaN(d.getTime())) {
+        res.status(400).json({ error: `Invalid today= date: ${todayRaw}` });
+        return;
+      }
+      today = d;
+    }
+    const fy = typeof req.query.fy === "string" && req.query.fy.trim() ? req.query.fy.trim() : undefined;
+    let scaleTo: number | null = null;
+    if (typeof req.query.scaleTo === "string" && req.query.scaleTo.trim()) {
+      scaleTo = Number(req.query.scaleTo);
+      if (!isFinite(scaleTo) || scaleTo <= 0) {
+        res.status(400).json({ error: `Invalid scaleTo= value: ${req.query.scaleTo}` });
+        return;
+      }
+    }
+    const result = await computeSecondaryEngineTargets({ fy, today, scaleTo });
+    res.json(result);
+  } catch (err) {
+    logger.error({ err }, "target-engine/people failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
 
 router.get("/target-engine", async (req: Request, res: Response): Promise<void> => {
   try {

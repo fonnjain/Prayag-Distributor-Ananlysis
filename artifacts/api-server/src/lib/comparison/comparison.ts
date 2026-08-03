@@ -316,6 +316,8 @@ export type ComparisonResponse = {
     entityType: EntityType;
     basis: "primary" | "secondary";
     channel: "territory" | "project" | "all";
+    /** Prominent scope statement — repeat this next to any figure shown to a user. */
+    channelLabel: string;
     population: "activeOnly" | "includeLeft";
     normalise: string;
     periods: { label: string; fy: string; completeness: string; months: string[] }[];
@@ -778,7 +780,7 @@ export async function runComparison(req: ComparisonRequest): Promise<ComparisonR
     blocked: false,
     basis: {
       entityType: req.entityType,
-      basis, channel, population, normalise,
+      basis, channel, channelLabel: channelLabel(channel), population, normalise,
       periods: periods.map((p) => ({ label: p.label, fy: p.fy, completeness: p.completeness, months: p.monthLabels })),
       sources: sourcesUsed,
     },
@@ -808,10 +810,23 @@ function blockedResponse(
     guards,
     basis: {
       entityType: req.entityType,
-      basis, channel: channel as any, population: population as any, normalise,
+      basis, channel: channel as any, channelLabel: channelLabel(channel as any),
+      population: population as any, normalise,
       periods: periods.map((p) => ({ label: p.label, fy: p.fy, completeness: p.completeness, months: p.monthLabels })),
     },
   };
+}
+
+/** Scope statement repeated on every response — the figures below only make
+ *  sense against other figures with the SAME channel scope. */
+function channelLabel(channel: "territory" | "project" | "all"): string {
+  if (channel === "territory") {
+    return "TERRITORY ONLY — project & institutional (Non-territory / Project / Govt) business is EXCLUDED. Do not compare these figures against all-channel totals from other pages; the register's all-channel figure is higher by the project amount.";
+  }
+  if (channel === "project") {
+    return "PROJECT / INSTITUTIONAL CHANNEL ONLY — territory business is excluded.";
+  }
+  return "ALL CHANNELS — territory plus project/institutional blended. Guard 5 flags this; prefer territory with project as its own panel.";
 }
 
 // ── Cell computation ─────────────────────────────────────────────────────────

@@ -91,4 +91,5 @@
 - [Warning B1 real-value](warning-b1-real-value.md) — plain Q1–Q4 fallback needs TOTALORDER cross-foot; brandToBroad bridges secondary segments to category multipliers; snapshot key bumps risk persisted degraded J1 builds.
 - [C1 Comparison contract](comparison-contract.md) — POST /api/comparison; basis bound to entity type; guard 2 blocks cross-FY shape mismatch; frozen anchors from sale_line_current not verify_anchors totals.
 - [Engine Generated Targets](target-engine.md) — overrides-only persistence, growth-split weights, date-derived baseline, member pro-rata fallback when distributor-TM map is empty.
+- [Secondary person target engine](secondary-person-target-engine.md) — person targets on secondary basis only; overrides reflow into route splits; fallback chain never yields zero; pool = roster − declared coverage per state.
 - [Distributor DD stale fallback](distributor-dd-stale-fallback.md) — member-sheet Sheets failures return 200 with membersFailed>0, not throws; only complete loads may overwrite the snapshot.

@@ -1,0 +1,143 @@
+# T2 — Engine targets per salesperson and State Head
+
+*The engine works. It now needs to produce a target per person, which requires changing the basis it computes on.*
+
+---
+
+## The problem underneath the request
+
+The engine baseline is **₹361 Cr from `sale_line` — that is PRIMARY**, and its customers are **distributors** (572 in the old-SKU population).
+
+**Salespeople do not sell to distributors.** They book **secondary** business from **retailers** — the only one of the four measures that carries a salesperson name at all.
+
+| | Primary | Secondary |
+|---|---|---|
+| Flow | Prayag → distributor | retailer → distributor |
+| Customers | 572 distributors | 11,338 retailers |
+| **Carries a salesperson?** | **no** | **yes — the only one** |
+| Includes project/govt | yes, ₹20.65 Cr | no |
+
+So a salesperson target cannot be cut from the primary baseline. **The three populations have to be rebuilt on the secondary register** — which is loaded for FY2025-26 at 379,441 lines.
+
+That is also the more meaningful basis: **a retailer is the salesperson's own book; a distributor is not.**
+
+---
+
+```
+Prayag app - Engine Generated Targets, Phase T2. Same global rules.
+Targets must be per SALESPERSON and per STATE HEAD, with a list and filters.
+
+1. CHANGE THE BASIS FOR PERSON-LEVEL TARGETS.
+
+   The current engine computes on sale_line - PRIMARY, customers are
+   distributors. Salespeople carry SECONDARY business from retailers, which is
+   the only measure carrying a salesperson name.
+
+   Rebuild the three populations on the FY2025-26 SECONDARY register, at
+   RETAILER x ITEM CODE:
+     OLD SKU        retailer bought in FY2025-26 AND this code in FY2025-26
+     NEW SKU        that retailer, codes they did NOT buy
+     NEW CUSTOMER   retailer with no FY2025-26 business at all
+
+   KEEP THE PRIMARY ENGINE AS IT IS for the company and distributor view -
+   it is correct for that population. Label the two clearly:
+     company / distributor targets  -> primary basis
+     salesperson / head targets     -> secondary basis
+   NEVER blend them and never present one as a breakdown of the other. Primary
+   and secondary are different populations and will not reconcile.
+
+   Report the secondary FY2025-26 baseline total and confirm it against the
+   register.
+
+2. THE NEW-CUSTOMER POOL IS ALREADY QUANTIFIED - do not invent it.
+   18,117 registered retailers. 11,338 have secondary coverage (a non-
+   deduplicated sum, so the true figure is lower). AT LEAST 6,779 REGISTERED
+   RETAILERS HAVE NO COVERAGE AT ALL.
+   That is the addressable new-customer list. Attribute it by state and by the
+   salesperson whose territory covers it, so the target lands on someone.
+
+3. BUILD BOTTOM-UP, NOT TOP-DOWN.
+   Compute each salesperson's target from THEIR OWN retailer x code history,
+   then sum to State Head, then to company. Do not take a company number and
+   divide it.
+   A bottom-up total will not land exactly on any company figure. Show the
+   implied company total, and offer an optional scaling factor to reconcile to
+   a chosen company target - with the factor VISIBLE, never applied silently.
+
+4. THE LIST AND THE FILTERS - what was asked for.
+
+   A row per salesperson, and a row per State Head:
+     name | State Head | state | baseline (their own secondary FY2025-26)
+     old SKU target | new SKU target | new customer target | COMBINED
+     current User Filled target | difference
+     source marker: generated | user-edited
+
+   FILTERS AT THE TOP: State Head, then salesperson. Selecting a head filters
+   the salesperson list to that team. Selecting nobody shows everyone.
+   Default view is ALL, sorted by combined target descending.
+
+   Show the head row as the sum of its members, and flag where the two differ.
+
+5. GUARDS - this is where the engine earns its place.
+
+   a) THE ELEVEN ZERO-TARGET MEMBERS. Gourav Trivedi, Bhavesh N Ranpara,
+      Vishant Bandhral, Ritesh Thakur, Arvind Kumar, Brinder Singh, Narendra
+      Kumar Sharma, Anuj Sharma (member), Ram Kumar Vashishtha, Himanshu
+      Sharma, and Pravat Kumar Dash carry real business with NO target.
+      Every one should now receive a generated target from their own history.
+      Report the count that moves from "no target recorded" to a figure - this
+      is the single most valuable thing the engine does on day one.
+
+   b) TWO HEADS WITH NO BUSINESS. Sunil Mohanty and Anuj Sharma have no target
+      and no recorded business. Sunil Mohanty has ONE retailer, Anuj Sharma
+      FIVE. A bottom-up target from a base of one retailer is meaningless.
+      Fall back to a state or peer-quintile median, LABEL IT AS A FALLBACK, and
+      state the basis on the row.
+
+   c) LEFT MEMBERS get no target. Twelve company-wide. History preserved.
+
+   d) NEW MEMBERS WITH NO BASELINE - a member who joined this year has no
+      FY2025-26 history. Use the peer median for their state and size band,
+      labelled as such. Do not return zero and do not skip them.
+
+   e) WORKING DAYS RUN 8 TO 79. A member with 8 days of tenure cannot carry a
+      full-year target. Pro-rate the first-year target by expected tenure and
+      say so on the row.
+
+6. SEASONAL MONTHLY SPLIT PER PERSON, using each segment's own curve weighted
+   by that person's segment mix - not the company curve. A member selling
+   mostly water tank has a different shape from one selling CPVC.
+
+7. EVERY GENERATED FIGURE IS EDITABLE, carries a 'user' marker once edited, and
+   is never overwritten by regeneration. Show what the engine would have
+   proposed where a user value differs.
+
+Acceptance - report each with the computed value:
+   the secondary FY2025-26 baseline total, reconciled to the register
+   the three populations rebuilt on retailer x code, each pair in exactly one
+   a list with a row per salesperson AND per State Head, filterable by both
+   head rows equal the sum of their members, or the difference is flagged
+   the eleven zero-target members all receive a generated target - report the
+     count and the total
+   Sunil Mohanty and Anuj Sharma receive a labelled FALLBACK target, not zero
+     and not a figure derived from one retailer
+   LEFT members receive none
+   monthly splits use each person's own segment mix
+   the primary company/distributor engine is UNCHANGED and still labelled
+     separately from the secondary person-level engine
+   an edited value survives regeneration
+```
+
+---
+
+## One thing to decide
+
+**Should a State Head's target be the sum of their members, or set independently?**
+
+They are not the same thing. A head also carries **primary** targets in `primary_state_targets`, which is a different measure entirely — Prayag to distributor, including project business their team never touches.
+
+My suggestion: **show both, never merge them.** A head's secondary target is the sum of their team; their primary target is set separately. Presenting one as the other has caused confusion on every page where it has been tried.
+
+---
+
+*Baseline figures verified against the frozen registers, 3 August 2026*
