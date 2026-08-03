@@ -22,6 +22,20 @@ export default function OrderMomentum() {
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      {/* Export — the order-book aggregates carry only month and group
+          dimensions, so the shared State Head / State / Distributor filter
+          bar does not apply to this page. */}
+      <div className="flex items-center justify-end">
+        <a
+          href="/api/momentum-reports/export"
+          download
+          className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/40"
+          data-testid="button-export-excel-momentum"
+        >
+          <Download className="w-3.5 h-3.5" />
+          Export Excel
+        </a>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <KPICard 
           title="Orders YTD (FY26-27)" 

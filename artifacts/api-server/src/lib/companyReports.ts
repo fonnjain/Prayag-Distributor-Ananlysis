@@ -14,6 +14,9 @@ import { and, eq, inArray, lte, or, isNull, sql } from "drizzle-orm";
 import { db, saleLines, itemMaster } from "@workspace/db";
 import { isMonthComplete } from "./analytics/analytics.js";
 import { priorFy as computePriorFy, fyStartYear } from "./mgmt/names.js";
+import { entityConds, normStateExpr, resolvePriorEntityFilter } from "./saleLineFilter.js";
+
+export { normStateExpr } from "./saleLineFilter.js";
 
 // ── Month label helpers ───────────────────────────────────────────────────────
 
@@ -116,24 +119,13 @@ export type CompanyReportsFilter = {
   heads?: string[];
   states?: string[];
   customers?: string[];
+  /** Match nothing — set when a prior-FY scope resolves to zero customers. */
+  none?: boolean;
 };
 
 export function hasActiveFilter(f?: CompanyReportsFilter): boolean {
   if (!f) return false;
   return Boolean(f.months?.length || f.heads?.length || f.states?.length || f.customers?.length);
-}
-
-// sql.join IN-clause (ANY(jsArray) silently matches nothing with drizzle).
-function inList(expr: ReturnType<typeof sql<string>>, values: string[]) {
-  return sql`${expr} IN (${sql.join(values.map((v) => sql`${v}`), sql`, `)})`;
-}
-
-function entityConds(f?: CompanyReportsFilter) {
-  const conds = [];
-  if (f?.heads?.length) conds.push(inList(sql<string>`coalesce(${saleLines.headCanon}, 'Unmapped')`, f.heads));
-  if (f?.states?.length) conds.push(inList(normStateExpr(), f.states));
-  if (f?.customers?.length) conds.push(inList(sql<string>`coalesce(${saleLines.customer}, '')`, f.customers));
-  return conds;
 }
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -209,14 +201,7 @@ async function resolvePriorFilter(
   fy: string,
   filter?: CompanyReportsFilter,
 ): Promise<CompanyReportsFilter | undefined> {
-  if (!filter || !(filter.heads?.length || filter.states?.length)) return filter;
-  const custRows = await db.selectDistinct({ customer: sql<string>`coalesce(${saleLines.customer}, '')` })
-    .from(saleLines)
-    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current"), ...entityConds(filter)));
-  const customers = custRows.map((r) => r.customer).filter(Boolean);
-  // Empty resolution would mean "IN ()" (invalid SQL) — use an impossible
-  // sentinel so the prior year correctly returns nothing.
-  return { customers: customers.length > 0 ? customers : ["\u0000none"] };
+  return resolvePriorEntityFilter(fy, filter);
 }
 export async function buildCompanyReports(
   fy: string,
@@ -475,22 +460,6 @@ export async function buildCompanyReports(
 }
 
 // ── Private query functions ───────────────────────────────────────────────────
-
-/**
- * SQL expression that normalises management territory splits to canonical geographic
- * state names.  Use this everywhere instead of bare coalesce(stateCanon, 'Unmapped')
- * so that DELHI A + DELHI NCR aggregate together, UP variants merge into UTTAR PRADESH,
- * HP maps to HIMACHAL PRADESH, and KARNATAKA (B) maps to KARNATAKA.
- */
-export function normStateExpr() {
-  return sql<string>`CASE
-    WHEN ${saleLines.stateCanon} IN ('DELHI A', 'DELHI NCR')              THEN 'DELHI'
-    WHEN ${saleLines.stateCanon} IN ('UP ( A )', 'UP (AS)', 'UP (S)')      THEN 'UTTAR PRADESH'
-    WHEN ${saleLines.stateCanon} = 'HP'                                    THEN 'HIMACHAL PRADESH'
-    WHEN ${saleLines.stateCanon} = 'KARNATAKA (B)'                         THEN 'KARNATAKA'
-    ELSE COALESCE(${saleLines.stateCanon}, 'Unmapped')
-  END`;
-}
 
 function whereClause(fyStr: string, months: string[], filter?: CompanyReportsFilter) {
   const conds = [eq(saleLines.fy, fyStr), eq(saleLines.versionStatus, "current"), ...entityConds(filter)];

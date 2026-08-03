@@ -1,9 +1,4 @@
-import { useState } from "react";
-import {
-  useGetAnalytics,
-  getGetAnalyticsQueryKey,
-  type AnalyticsYoy,
-} from "@workspace/api-client-react";
+import { useState, useEffect, useMemo } from "react";
 import { formatINR, formatCompact } from "@/data/dataset";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,11 +12,56 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { TrendingUp, TrendingDown, Users, Loader2, RefreshCw, AlertTriangle } from "lucide-react";
+import { TrendingUp, TrendingDown, Users, Loader2, RefreshCw, AlertTriangle, Download } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useGlobalFilter } from "@/data/global-filter-context";
+import {
+  CompanyReportFilterBar,
+  EMPTY_ENTITY_FILTER,
+  entityFilterQuery,
+  hasEntityFilter,
+  type EntityFilterValue,
+} from "./CompanyReportFilters";
 
-const FY_OPTIONS = ["2026-27", "2025-26"];
+type AnalyticsYoy = { current: number; prior: number; pct: number | null };
+
+type MonthStat = {
+  monthLabel: string;
+  monthName: string;
+  amount: number;
+  territoryAmount: number;
+  institutionalAmount: number;
+  maxInvoiceDate: string | null;
+  complete: boolean;
+};
+
+type AnalyticsPayload = {
+  fy: string;
+  compareFy: string;
+  filtered?: boolean;
+  months: MonthStat[];
+  compareMonths: MonthStat[];
+  comparableMonths: string[];
+  yoy: { overall: AnalyticsYoy; territory: AnalyticsYoy; institutional: AnalyticsYoy };
+  invoicesInPeriod: number;
+  customersInPeriod: number;
+  byHead: Array<{ head: string; amount: number; sharePct: number; isTerritory: boolean }>;
+  retention: {
+    periodMonths: string[];
+    retained: number;
+    newCustomers: number;
+    lost: number;
+    retainedRevenue: number;
+    newRevenue: number;
+    lostPriorRevenue: number;
+  };
+  margins: {
+    byGroup: Array<{ group: string; revenue: number; margin: number }>;
+    coveragePct: number;
+    provisional: boolean;
+    message: string | null;
+  };
+};
 
 function toCr(value: number): string {
   return `₹${(value / 1e7).toLocaleString("en-IN", { maximumFractionDigits: 2 })} Cr`;
@@ -63,31 +103,63 @@ export default function Growth() {
   const gridColor = isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)";
   const tickColor = isDark ? "#98999C" : "#71717a";
 
-  const query = useGetAnalytics(
-    { fy },
-    {
-      query: {
-        queryKey: getGetAnalyticsQueryKey({ fy }),
-        staleTime: 5 * 60 * 1000,
-        refetchOnWindowFocus: false,
-      },
-    },
-  );
-  const report = query.data;
+  const [entityFilter, setEntityFilter] = useState<EntityFilterValue>(EMPTY_ENTITY_FILTER);
+  const [report, setReport] = useState<AnalyticsPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
-  if (query.isLoading) {
+  const queryStr = useMemo(
+    () => `?fy=${encodeURIComponent(fy)}${entityFilterQuery(entityFilter)}`,
+    [fy, entityFilter],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetch(`/api/analytics${queryStr}`)
+      .then((r) => {
+        if (!r.ok) return r.json().then((e: { error?: string }) => { throw new Error(e.error ?? r.statusText); });
+        return r.json() as Promise<AnalyticsPayload>;
+      })
+      .then((d) => { if (!cancelled) { setReport(d); setLoading(false); } })
+      .catch((err: Error) => { if (!cancelled) { setError(err.message); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [queryStr, reloadKey]);
+
+  const filterBar = (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <CompanyReportFilterBar fy={fy} value={entityFilter} onChange={setEntityFilter} />
+      <a
+        href={`/api/analytics/export${queryStr}`}
+        download
+        className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/40"
+        data-testid="button-export-excel-growth"
+      >
+        <Download className="h-3.5 w-3.5" />
+        Export Excel
+      </a>
+    </div>
+  );
+
+  if (loading && !report) {
     return (
-      <div className="flex items-center gap-2 text-muted-foreground p-6">
-        <Loader2 className="w-4 h-4 animate-spin" />
-        Computing growth analytics...
+      <div className="space-y-6">
+        {filterBar}
+        <div className="flex items-center gap-2 text-muted-foreground p-6">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          Computing growth analytics...
+        </div>
       </div>
     );
   }
-  if (query.isError || !report) {
+  if (error || !report) {
     return (
       <div className="p-6 space-y-3">
+        {filterBar}
         <p className="text-sm text-destructive">Could not load growth analytics.</p>
-        <Button variant="outline" size="sm" onClick={() => void query.refetch()}>
+        <Button variant="outline" size="sm" onClick={() => setReloadKey((k) => k + 1)}>
           <RefreshCw className="w-4 h-4 mr-1.5" />
           Retry
         </Button>
@@ -113,6 +185,13 @@ export default function Growth() {
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      {filterBar}
+      {hasEntityFilter(entityFilter) && (
+        <p className="text-[11px] text-amber-700 dark:text-amber-400">
+          Filters active — figures below are a subset and will not match the unfiltered totals.
+          Last year is scoped to this year's distributors for the selected heads/states.
+        </p>
+      )}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-lg font-semibold font-display">Growth vs FY {report.compareFy}</h2>

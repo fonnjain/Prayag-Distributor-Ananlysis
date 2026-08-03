@@ -14,6 +14,12 @@ import { db, saleLines, costMaster } from "@workspace/db";
 import { SAP_FY } from "../sap/config.js";
 import { isSapVerified } from "../sap/verify.js";
 import { getSapAggregate, type SapAggregate } from "../sap/source.js";
+import {
+  entityConds,
+  hasEntityFilterValues,
+  resolvePriorEntityFilter,
+  type EntityFilter,
+} from "../saleLineFilter.js";
 
 const MONTH_NAMES = [
   "Apr",
@@ -97,7 +103,7 @@ export type MonthStat = {
   complete: boolean;
 };
 
-async function monthlyStats(fy: string): Promise<MonthStat[]> {
+async function monthlyStats(fy: string, filter?: EntityFilter): Promise<MonthStat[]> {
   const rows = await db
     .select({
       monthLabel: sql<string>`coalesce(${saleLines.monthLabel}, '')`,
@@ -106,7 +112,7 @@ async function monthlyStats(fy: string): Promise<MonthStat[]> {
       maxDate: sql<string | null>`max(${saleLines.invoiceDate})::text`,
     })
     .from(saleLines)
-    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")))
+    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current"), ...entityConds(filter)))
     .groupBy(sql`1`);
 
   const stats: MonthStat[] = [];
@@ -162,14 +168,14 @@ export type GroupStat = {
 // Product-group breakdown by revenue. Always sourced from sale_line.groupCanon
 // regardless of whether SAP is the primary source — group classification lives
 // in the register and is present in both FY26-27 SAP-verified and non-verified paths.
-async function groupStats(fy: string): Promise<GroupStat[]> {
+async function groupStats(fy: string, filter?: EntityFilter): Promise<GroupStat[]> {
   const rows = await db
     .select({
       group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
       amount: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8`,
     })
     .from(saleLines)
-    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")))
+    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current"), ...entityConds(filter)))
     .groupBy(sql`1`);
   const total = rows.reduce((s, r) => s + r.amount, 0);
   return rows
@@ -181,7 +187,7 @@ async function groupStats(fy: string): Promise<GroupStat[]> {
     .sort((a, b) => b.amount - a.amount);
 }
 
-async function headStats(fy: string): Promise<HeadStat[]> {
+async function headStats(fy: string, filter?: EntityFilter): Promise<HeadStat[]> {
   const rows = await db
     .select({
       head: sql<string>`coalesce(${saleLines.headCanon}, 'Unmapped')`,
@@ -189,7 +195,7 @@ async function headStats(fy: string): Promise<HeadStat[]> {
       amount: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8`,
     })
     .from(saleLines)
-    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")))
+    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current"), ...entityConds(filter)))
     .groupBy(sql`1`);
   const total = rows.reduce((s, r) => s + r.amount, 0);
   return rows
@@ -207,6 +213,7 @@ type CustomerPeriod = Map<string, number>;
 async function customerRevenue(
   fy: string,
   monthLabels: string[],
+  filter?: EntityFilter,
 ): Promise<CustomerPeriod> {
   if (monthLabels.length === 0) return new Map();
   const rows = await db
@@ -215,7 +222,7 @@ async function customerRevenue(
       amount: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8`,
     })
     .from(saleLines)
-    .where(and(eq(saleLines.fy, fy), inArray(saleLines.monthLabel, monthLabels), eq(saleLines.versionStatus, "current")))
+    .where(and(eq(saleLines.fy, fy), inArray(saleLines.monthLabel, monthLabels), eq(saleLines.versionStatus, "current"), ...entityConds(filter)))
     .groupBy(sql`1`);
   const map: CustomerPeriod = new Map();
   for (const row of rows) {
@@ -249,7 +256,7 @@ export type Margins = {
 
 // Margin = SUM(amount) - SUM(qty * fg_cost), only over codes in cost_master.
 // Coverage = share of FY revenue whose codes have a cost.
-async function margins(fy: string): Promise<Margins> {
+async function margins(fy: string, filter?: EntityFilter): Promise<Margins> {
   const [coverage] = await db
     .select({
       total: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8`,
@@ -257,7 +264,7 @@ async function margins(fy: string): Promise<Margins> {
     })
     .from(saleLines)
     .leftJoin(costMaster, eq(saleLines.code, costMaster.code))
-    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")));
+    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current"), ...entityConds(filter)));
 
   const total = coverage?.total ?? 0;
   const covered = coverage?.covered ?? 0;
@@ -280,7 +287,7 @@ async function margins(fy: string): Promise<Margins> {
     })
     .from(saleLines)
     .innerJoin(costMaster, eq(saleLines.code, costMaster.code))
-    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current")))
+    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current"), ...entityConds(filter)))
     .groupBy(sql`1`);
 
   return {
@@ -303,6 +310,7 @@ async function margins(fy: string): Promise<Margins> {
 async function saleLinePeriodCounts(
   fy: string,
   monthLabels: string[],
+  filter?: EntityFilter,
 ): Promise<{ invoices: number; customers: number }> {
   if (monthLabels.length === 0) return { invoices: 0, customers: 0 };
   const [row] = await db
@@ -311,7 +319,7 @@ async function saleLinePeriodCounts(
       customers: sql<number>`count(distinct ${saleLines.customer})::int`,
     })
     .from(saleLines)
-    .where(and(eq(saleLines.fy, fy), inArray(saleLines.monthLabel, monthLabels), eq(saleLines.versionStatus, "current")));
+    .where(and(eq(saleLines.fy, fy), inArray(saleLines.monthLabel, monthLabels), eq(saleLines.versionStatus, "current"), ...entityConds(filter)));
   return { invoices: row?.invoices ?? 0, customers: row?.customers ?? 0 };
 }
 
@@ -327,13 +335,13 @@ export interface FyAnalyticsSource {
   margins(): Promise<Margins>;
 }
 
-function saleLineSource(fy: string): FyAnalyticsSource {
+function saleLineSource(fy: string, filter?: EntityFilter): FyAnalyticsSource {
   return {
-    monthlyStats: () => monthlyStats(fy),
-    headStats: () => headStats(fy),
-    customerRevenue: (labels) => customerRevenue(fy, labels),
-    periodCounts: (labels) => saleLinePeriodCounts(fy, labels),
-    margins: () => margins(fy),
+    monthlyStats: () => monthlyStats(fy, filter),
+    headStats: () => headStats(fy, filter),
+    customerRevenue: (labels) => customerRevenue(fy, labels, filter),
+    periodCounts: (labels) => saleLinePeriodCounts(fy, labels, filter),
+    margins: () => margins(fy, filter),
   };
 }
 
@@ -458,6 +466,8 @@ function sapSource(agg: SapAggregate): FyAnalyticsSource {
 export type AnalyticsReport = {
   fy: string;
   source: "sap" | "register";
+  /** True when a State Head / State / Distributor filter narrowed the data. */
+  filtered: boolean;
   compareFy: string;
   months: MonthStat[];
   compareMonths: MonthStat[];
@@ -485,16 +495,26 @@ export function priorFy(fy: string): string {
 export async function buildAnalytics(
   fy: string,
   compareFy: string,
+  filter?: EntityFilter,
 ): Promise<AnalyticsReport> {
   // Verification-gated cutover: FY2026-27 reads from the SAP primary-sales
   // upload only once it is verified; otherwise (and for every other FY) it
   // falls back to the invoice-line register. The comparison FY is ALWAYS
   // sourced from the register.
-  const useSap = fy === SAP_FY && (await isSapVerified(fy));
+  //
+  // Entity filters (heads/states/customers) are row-level sale_line
+  // conditions, so a filtered request always reads the register — the SAP
+  // aggregate has no per-line entity dimensions.
+  const filtered = hasEntityFilterValues(filter);
+  const useSap = !filtered && fy === SAP_FY && (await isSapVerified(fy));
   const currentSource: FyAnalyticsSource = useSap
     ? sapSource(await getSapAggregate(fy))
-    : saleLineSource(fy);
-  const compareSource = saleLineSource(compareFy);
+    : saleLineSource(fy, filter);
+  // Prior-FY entity scope: heads/states describe the CURRENT FY territory
+  // tree, so resolve them to the current-FY customer set before filtering
+  // the comparison year (reassigned parties would otherwise mislead).
+  const compareFilter = filtered ? await resolvePriorEntityFilter(fy, filter) : undefined;
+  const compareSource = saleLineSource(compareFy, compareFilter);
 
   const [months, compareMonths, byHead, compareByHead, marginData, groups] =
     await Promise.all([
@@ -503,7 +523,7 @@ export async function buildAnalytics(
       currentSource.headStats(),
       compareSource.headStats(),
       currentSource.margins(),
-      groupStats(fy),
+      groupStats(fy, filter),
     ]);
 
   // Comparable months: complete in the current FY AND complete in the prior
@@ -557,6 +577,7 @@ export async function buildAnalytics(
   return {
     fy,
     source: useSap ? "sap" : "register",
+    filtered,
     compareFy,
     months,
     compareMonths,
