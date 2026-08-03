@@ -16,7 +16,11 @@ type PeriodSpec = {
   monthFrom?: number;
   monthTo?: number;
 };
-type MeasureDef = { id: string; label: string; money: boolean; sources: string[] | null };
+type MeasureDef = {
+  id: string; label: string; money: boolean; sources: string[] | null;
+  // C2b declarations from the API — rendered verbatim, never inferred.
+  periodPair?: boolean; sourceNote?: string | null; guardNote?: string | null;
+};
 type GuardResult = { id: number; name: string; status: "pass" | "annotated" | "blocked" | "notApplicable"; detail: string | null; data?: unknown };
 type TrendMeta = {
   level: number | null; levelPeriod: string | null; levelIsPartial?: boolean;
@@ -293,6 +297,13 @@ export default function ComparisonDeepDive() {
   const [pbFrom, setPbFrom] = useState(1);
   const [pbTo, setPbTo] = useState(3);
 
+  // C2b — explicit baseline for period-pair measures (new SKUs / new customers).
+  const [useBaseline, setUseBaseline] = useState(false);
+  const [blFy, setBlFy] = useState(FYS[1] ?? FYS[0]);
+  const [blKind, setBlKind] = useState<PeriodSpec["kind"]>("fy");
+  const [blQuarter, setBlQuarter] = useState(1);
+  const [blMonth, setBlMonth] = useState(1);
+
   useEffect(() => {
     fetch("/api/comparison/catalogue").then((r) => r.json()).then(setCatalogue).catch(() => {});
   }, []);
@@ -340,6 +351,13 @@ export default function ComparisonDeepDive() {
     normalise,
     population,
     ...(contextHead ? { context: { stateHead: contextHead } } : {}),
+    ...(useBaseline && measures.some((id) => defsById.get(id)?.periodPair)
+      ? { baseline: {
+            kind: blKind, fy: blFy,
+            ...(blKind === "quarter" ? { quarter: blQuarter } : {}),
+            ...(blKind === "month" ? { month: blMonth } : {}),
+          } }
+      : {}),
   });
 
   const run = async (overrideHead?: string) => {
@@ -688,6 +706,30 @@ export default function ComparisonDeepDive() {
               </button>
             </div>
           </div>
+          {measures.some((id) => defsById.get(id)?.periodPair) && (
+            <div className="flex flex-col gap-1">
+              <FieldLabel>Baseline (for "new …" measures)</FieldLabel>
+              <div className="flex flex-wrap items-center gap-2">
+                <button onClick={() => setUseBaseline((b) => !b)}
+                  className={cn("rounded-md border px-2 py-1.5 text-xs",
+                    useBaseline ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted/40")}
+                  data-testid="toggle-baseline">
+                  {useBaseline ? "baseline on" : "set baseline"}
+                </button>
+                {useBaseline && (<>
+                  <SelectBox value={blFy} options={FYS} onChange={setBlFy} testId="select-baseline-fy" />
+                  <SelectBox value={blKind} options={["fy", "ytd", "quarter", "month"] as const} onChange={(v) => setBlKind(v)} testId="select-baseline-kind" />
+                  {blKind === "quarter" && <SelectBox value={String(blQuarter)} options={["1", "2", "3", "4"]} labels={{ "1": "Q1", "2": "Q2", "3": "Q3", "4": "Q4" }} onChange={(v) => setBlQuarter(Number(v))} />}
+                  {blKind === "month" && <SelectBox value={String(blMonth)} options={FISCAL_MONTHS.map((_, i) => String(i + 1))} labels={Object.fromEntries(FISCAL_MONTHS.map((m, i) => [String(i + 1), m]))} onChange={(v) => setBlMonth(Number(v))} />}
+                </>)}
+                {!useBaseline && (
+                  <span className="max-w-[26rem] text-[11px] text-muted-foreground">
+                    "New" only means anything against a baseline — without one these measures come back disabled with the reason, never zero.
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {(entities.length > 0 || periods.length > 0) && (
@@ -714,8 +756,13 @@ export default function ComparisonDeepDive() {
                   onClick={() => setMeasures((ms) => ms.includes(m.id) ? ms.filter((x) => x !== m.id) : [...ms, m.id])}
                   className={cn("rounded-md border px-2 py-1 text-[11px]",
                     measures.includes(m.id) ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted/40")}
+                  title={[
+                    m.sourceNote ? `Source: ${m.sourceNote}` : null,
+                    m.guardNote ? `Guard: ${m.guardNote}` : null,
+                    m.periodPair ? "Period-pair: needs a baseline period" : null,
+                  ].filter(Boolean).join("\n") || undefined}
                   data-testid={`toggle-measure-${m.id}`}>
-                  {m.label}
+                  {m.label}{m.periodPair ? " ↔" : ""}
                 </button>
               ))}
             </div>

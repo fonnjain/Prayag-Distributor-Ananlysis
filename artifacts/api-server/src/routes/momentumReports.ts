@@ -9,6 +9,7 @@ import { Router } from "express";
 import ExcelJS from "exceljs";
 import { ensureSeeded } from "../lib/dashboard/sync.js";
 import { respondIfQuotaError } from "../lib/quotaResponse.js";
+import { parseMonthsParam } from "../lib/periodMonths.js";
 
 const router = Router();
 
@@ -25,6 +26,14 @@ type OrdersData = {
 };
 
 router.get("/momentum-reports/export", async (req, res) => {
+  // Optional sub-year period — matches the page's client-side slice. The
+  // Momentum basis is always FY 2026-27.
+  const monthsResult = parseMonthsParam(req.query.months, "2026-27");
+  if (!monthsResult.ok) {
+    res.status(400).json({ error: monthsResult.error });
+    return;
+  }
+  const months = monthsResult.months;
   if (activeExports >= MAX_CONCURRENT_EXPORTS) {
     res.status(429).json({ error: "Another export is already running — try again in a few seconds." });
     return;
@@ -34,6 +43,16 @@ router.get("/momentum-reports/export", async (req, res) => {
     const snapshot = await ensureSeeded();
     const data = snapshot.data as unknown as OrdersData;
 
+    // Slice the monthly aggregates by month name (rows carry tab month names
+    // like "Apr"); the group breakdown has no month dimension in the source.
+    const selectedNames = months?.map((l) => l.slice(0, 3));
+    const monthly = selectedNames
+      ? data.orders_fy2627.monthly.filter((m) =>
+          selectedNames.includes(String(m.month).slice(0, 3)))
+      : data.orders_fy2627.monthly;
+    // Truncated to 2 dp (figures are never rounded).
+    const periodTotal = Math.trunc(monthly.reduce((s, m) => s + m.value_cr, 0) * 100) / 100;
+
     const wb = new ExcelJS.Workbook();
     wb.creator = "Prayag Sales Intelligence";
 
@@ -42,8 +61,13 @@ router.get("/momentum-reports/export", async (req, res) => {
     const infoRows: Array<[string, string]> = [
       ["Page", "Momentum — FY26-27 secondary order-book pipeline (order value by month and group)"],
       ["Data synced at", snapshot.syncedAt.toISOString()],
-      ["Orders YTD (Cr)", String(data.totals.orders_fy2627_ytd_cr)],
+      ["Period", months?.length ? months.join(", ") : "Full FY (YTD)"],
+      [months?.length ? "Orders in period (Cr)" : "Orders YTD (Cr)",
+        months?.length ? String(periodTotal) : String(data.totals.orders_fy2627_ytd_cr)],
       ["Note", "Order-book aggregates carry only month and group dimensions — State Head / State / Distributor filters do not exist in this source, so this export always covers the whole company."],
+      ...(months?.length
+        ? [["Note (groups)", "The Order Groups sheet always covers the full FY — the group breakdown has no monthly dimension in the source."] as [string, string]]
+        : []),
     ];
     for (const [k, v] of infoRows) {
       const row = info.addRow([k, v]);
@@ -68,7 +92,7 @@ router.get("/momentum-reports/export", async (req, res) => {
     addSheet("Monthly Orders", [
       { header: "Month", key: "month", width: 12 },
       { header: "Order Value (Cr)", key: "value_cr", width: 18 },
-    ], data.orders_fy2627.monthly as unknown as Array<Record<string, unknown>>);
+    ], monthly as unknown as Array<Record<string, unknown>>);
 
     addSheet("Order Groups", [
       { header: "Group", key: "group", width: 28 },

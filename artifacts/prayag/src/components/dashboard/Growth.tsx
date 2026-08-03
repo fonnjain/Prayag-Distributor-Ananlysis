@@ -16,6 +16,7 @@ import {
 import { TrendingUp, TrendingDown, Users, Loader2, RefreshCw, AlertTriangle, Download } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useGlobalFilter } from "@/data/global-filter-context";
+import { usePeriodMonths } from "@/data/period-months";
 import {
   CompanyReportFilterBar,
   EMPTY_ENTITY_FILTER,
@@ -110,9 +111,10 @@ export default function Growth() {
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
+  const period = usePeriodMonths();
   const queryStr = useMemo(
-    () => `?fy=${encodeURIComponent(fy)}${entityFilterQuery(entityFilter)}`,
-    [fy, entityFilter],
+    () => `?fy=${encodeURIComponent(fy)}${period.param}${entityFilterQuery(entityFilter)}`,
+    [fy, period.param, entityFilter],
   );
 
   useEffect(() => {

@@ -30,13 +30,13 @@ const PAGE_CAPABILITIES: Record<string, PeriodCapability> = {
   "state-head":              "FULL",
   "primary-performance":     "FULL",
   "secondary-performance":   "FULL",
+  "products":                "FULL",     // months param → sale_line month_label
+  "momentum":                "FULL",     // client-side slice of order-book monthly aggregates
+  "growth":                  "FULL",     // months param → /api/analytics period slice
   // ── FY_ONLY — honours the FY selector; sub-year period has no effect ──────
   // Source is YTD-only or the page has not yet been wired for monthly slicing.
   // Move to FULL after fixing, one page at a time (PA2 priority order).
   "overview":                "FY_ONLY",
-  "products":                "FY_ONLY",
-  "momentum":                "FY_ONLY",
-  "growth":                  "FY_ONLY",
   "pending":                 "FY_ONLY",   // Pending Orders
   "sources":                 "FY_ONLY",   // Data Sources
   "reports":                 "FY_ONLY",

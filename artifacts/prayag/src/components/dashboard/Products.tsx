@@ -6,6 +6,7 @@ import { trunc2 } from "@/lib/trunc";
 import { useState, useEffect, useMemo } from "react";
 import { formatCompact, CHART_COLOR_LIST } from "@/data/dataset";
 import { useGlobalFilter } from "@/data/global-filter-context";
+import { usePeriodMonths } from "@/data/period-months";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { Download } from "lucide-react";
@@ -36,14 +37,15 @@ type Payload = {
 
 export default function Products() {
   const { fy } = useGlobalFilter();
+  const period = usePeriodMonths();
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [entityFilter, setEntityFilter] = useState<EntityFilterValue>(EMPTY_ENTITY_FILTER);
 
   const query = useMemo(
-    () => `?fy=${encodeURIComponent(fy)}${entityFilterQuery(entityFilter)}`,
-    [fy, entityFilter],
+    () => `?fy=${encodeURIComponent(fy)}${period.param}${entityFilterQuery(entityFilter)}`,
+    [fy, period.param, entityFilter],
   );
 
   useEffect(() => {

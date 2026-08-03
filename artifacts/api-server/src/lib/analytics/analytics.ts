@@ -168,14 +168,23 @@ export type GroupStat = {
 // Product-group breakdown by revenue. Always sourced from sale_line.groupCanon
 // regardless of whether SAP is the primary source — group classification lives
 // in the register and is present in both FY26-27 SAP-verified and non-verified paths.
-async function groupStats(fy: string, filter?: EntityFilter): Promise<GroupStat[]> {
+async function groupStats(
+  fy: string,
+  filter?: EntityFilter,
+  monthLabels?: string[],
+): Promise<GroupStat[]> {
   const rows = await db
     .select({
       group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
       amount: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8`,
     })
     .from(saleLines)
-    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current"), ...entityConds(filter)))
+    .where(and(
+      eq(saleLines.fy, fy),
+      eq(saleLines.versionStatus, "current"),
+      ...(monthLabels && monthLabels.length > 0 ? [inArray(saleLines.monthLabel, monthLabels)] : []),
+      ...entityConds(filter),
+    ))
     .groupBy(sql`1`);
   const total = rows.reduce((s, r) => s + r.amount, 0);
   return rows
@@ -187,7 +196,11 @@ async function groupStats(fy: string, filter?: EntityFilter): Promise<GroupStat[
     .sort((a, b) => b.amount - a.amount);
 }
 
-async function headStats(fy: string, filter?: EntityFilter): Promise<HeadStat[]> {
+async function headStats(
+  fy: string,
+  filter?: EntityFilter,
+  monthLabels?: string[],
+): Promise<HeadStat[]> {
   const rows = await db
     .select({
       head: sql<string>`coalesce(${saleLines.headCanon}, 'Unmapped')`,
@@ -195,7 +208,12 @@ async function headStats(fy: string, filter?: EntityFilter): Promise<HeadStat[]>
       amount: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8`,
     })
     .from(saleLines)
-    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current"), ...entityConds(filter)))
+    .where(and(
+      eq(saleLines.fy, fy),
+      eq(saleLines.versionStatus, "current"),
+      ...(monthLabels && monthLabels.length > 0 ? [inArray(saleLines.monthLabel, monthLabels)] : []),
+      ...entityConds(filter),
+    ))
     .groupBy(sql`1`);
   const total = rows.reduce((s, r) => s + r.amount, 0);
   return rows
@@ -256,7 +274,14 @@ export type Margins = {
 
 // Margin = SUM(amount) - SUM(qty * fg_cost), only over codes in cost_master.
 // Coverage = share of FY revenue whose codes have a cost.
-async function margins(fy: string, filter?: EntityFilter): Promise<Margins> {
+async function margins(
+  fy: string,
+  filter?: EntityFilter,
+  monthLabels?: string[],
+): Promise<Margins> {
+  const monthConds = monthLabels && monthLabels.length > 0
+    ? [inArray(saleLines.monthLabel, monthLabels)]
+    : [];
   const [coverage] = await db
     .select({
       total: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8`,
@@ -264,7 +289,7 @@ async function margins(fy: string, filter?: EntityFilter): Promise<Margins> {
     })
     .from(saleLines)
     .leftJoin(costMaster, eq(saleLines.code, costMaster.code))
-    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current"), ...entityConds(filter)));
+    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current"), ...monthConds, ...entityConds(filter)));
 
   const total = coverage?.total ?? 0;
   const covered = coverage?.covered ?? 0;
@@ -287,7 +312,7 @@ async function margins(fy: string, filter?: EntityFilter): Promise<Margins> {
     })
     .from(saleLines)
     .innerJoin(costMaster, eq(saleLines.code, costMaster.code))
-    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current"), ...entityConds(filter)))
+    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current"), ...monthConds, ...entityConds(filter)))
     .groupBy(sql`1`);
 
   return {
@@ -329,19 +354,22 @@ async function saleLinePeriodCounts(
 // is agnostic to which source is active for a given FY.
 export interface FyAnalyticsSource {
   monthlyStats(): Promise<MonthStat[]>;
-  headStats(): Promise<HeadStat[]>;
+  /** monthLabels restricts to a sub-year period (register source only — the
+   *  SAP aggregate has no month×head/cost dimensions, so buildAnalytics never
+   *  selects the SAP source when a period is active). */
+  headStats(monthLabels?: string[]): Promise<HeadStat[]>;
   customerRevenue(monthLabels: string[]): Promise<Map<string, number>>;
   periodCounts(monthLabels: string[]): Promise<{ invoices: number; customers: number }>;
-  margins(): Promise<Margins>;
+  margins(monthLabels?: string[]): Promise<Margins>;
 }
 
 function saleLineSource(fy: string, filter?: EntityFilter): FyAnalyticsSource {
   return {
     monthlyStats: () => monthlyStats(fy, filter),
-    headStats: () => headStats(fy, filter),
+    headStats: (labels) => headStats(fy, filter, labels),
     customerRevenue: (labels) => customerRevenue(fy, labels, filter),
     periodCounts: (labels) => saleLinePeriodCounts(fy, labels, filter),
-    margins: () => margins(fy, filter),
+    margins: (labels) => margins(fy, filter, labels),
   };
 }
 
@@ -496,6 +524,13 @@ export async function buildAnalytics(
   fy: string,
   compareFy: string,
   filter?: EntityFilter,
+  /**
+   * Optional sub-year period: month labels of the CURRENT fy (e.g. ["Apr-26",
+   * "May-26"]). Restricts every figure — YoY, retention, counts, monthly
+   * charts and group mix — to those months (matched to the prior FY by month
+   * name). Empty/undefined = all complete months (default behaviour).
+   */
+  periodLabels?: string[],
 ): Promise<AnalyticsReport> {
   // Verification-gated cutover: FY2026-27 reads from the SAP primary-sales
   // upload only once it is verified; otherwise (and for every other FY) it
@@ -506,7 +541,20 @@ export async function buildAnalytics(
   // conditions, so a filtered request always reads the register — the SAP
   // aggregate has no per-line entity dimensions.
   const filtered = hasEntityFilterValues(filter);
-  const useSap = !filtered && fy === SAP_FY && (await isSapVerified(fy));
+
+  // Sub-year period: restrict by month NAME (Apr, May, …) so the same slice
+  // applies to both fiscal years.
+  const selectedNames = periodLabels && periodLabels.length > 0
+    ? new Set(
+        periodLabels
+          .map((l) => parseMonthLabel(l)?.name)
+          .filter((n): n is string => n != null),
+      )
+    : null;
+
+  // Like entity filters, a sub-year period always reads the register — the
+  // SAP aggregate has no month×head or month×cost dimensions.
+  const useSap = !filtered && !selectedNames && fy === SAP_FY && (await isSapVerified(fy));
   const currentSource: FyAnalyticsSource = useSap
     ? sapSource(await getSapAggregate(fy))
     : saleLineSource(fy, filter);
@@ -516,15 +564,36 @@ export async function buildAnalytics(
   const compareFilter = filtered ? await resolvePriorEntityFilter(fy, filter) : undefined;
   const compareSource = saleLineSource(compareFy, compareFilter);
 
-  const [months, compareMonths, byHead, compareByHead, marginData, groups] =
-    await Promise.all([
-      currentSource.monthlyStats(),
-      compareSource.monthlyStats(),
-      currentSource.headStats(),
-      compareSource.headStats(),
-      currentSource.margins(),
-      groupStats(fy, filter),
-    ]);
+  const [monthsAll, compareMonthsAll] = await Promise.all([
+    currentSource.monthlyStats(),
+    compareSource.monthlyStats(),
+  ]);
+
+  const months = selectedNames
+    ? monthsAll.filter((m) => selectedNames.has(m.monthName))
+    : monthsAll;
+  const compareMonths = selectedNames
+    ? compareMonthsAll.filter((m) => selectedNames.has(m.monthName))
+    : compareMonthsAll;
+
+  // Period-scoped labels per FY (undefined = full FY, the default). Derived
+  // from the REQUESTED labels, not from the data, so a period with no rows
+  // yet still restricts the queries (an empty array would mean "no filter").
+  // Prior-FY labels are the same month names one year earlier (Apr-26 → Apr-25).
+  const curPeriodLabels = selectedNames ? periodLabels : undefined;
+  const priorPeriodLabels = selectedNames
+    ? periodLabels!.map((l) => {
+        const [name, yy] = l.split("-");
+        return `${name}-${String(parseInt(yy, 10) - 1).padStart(2, "0")}`;
+      })
+    : undefined;
+
+  const [byHead, compareByHead, marginData, groups] = await Promise.all([
+    currentSource.headStats(curPeriodLabels),
+    compareSource.headStats(priorPeriodLabels),
+    currentSource.margins(curPeriodLabels),
+    groupStats(fy, filter, curPeriodLabels),
+  ]);
 
   // Comparable months: complete in the current FY AND complete in the prior
   // FY (matched by month name, e.g. Apr-26 vs Apr-25).

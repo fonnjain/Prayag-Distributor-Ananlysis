@@ -11,3 +11,9 @@ description: Durable rules for applying the shared State Head/State/Distributor 
 - **Retailer/secondary channel**: the secondary register has no state or distributor dimensions — reject shared filters at that level (HTTP 400) and hide the bar, rather than silently ignoring them.
 - **Exports**: filtered exports must be self-describing (Info cover sheet naming basis + active filters, `_filtered` filename suffix) and keep the row cap + concurrency guard.
 - **SKU breadth denominators** (codesEverSold) intentionally stay company-wide under filters; state this on the export cover sheet.
+
+## Sub-year period (months param) rollout — Aug 2026
+- Products (/api/product-reports), Growth (/api/analytics) and the Momentum export accept `months=Apr-26,May-26` (comma labels). Validate with `parseMonthsParam` in api-server `lib/periodMonths.ts` — it rejects cross-FY labels (Apr-25 under fy 2026-27) and dedupes; never reduce labels to bare month names before validating.
+- A months selection, like entity filters, always bypasses snapshots AND forces the register source in buildAnalytics (SAP aggregate has no month×head/month×cost dims).
+- Pass the REQUESTED labels into head/margin/group queries, not labels derived from returned data — an empty derived array silently means "no filter" (full FY).
+- Frontend: `usePeriodMonths()` in prayag `src/data/period-months.ts` (primary bound per PA1). Momentum slices client-side; its group chart stays full-FY (source has no month×group).

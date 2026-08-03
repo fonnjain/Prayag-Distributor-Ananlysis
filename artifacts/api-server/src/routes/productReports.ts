@@ -8,7 +8,7 @@
 // never summed across products/groups. WATER TANK rows report litres.
 import { Router } from "express";
 import ExcelJS from "exceljs";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, saleLines, itemMaster } from "@workspace/db";
 import {
   entityConds,
@@ -17,6 +17,7 @@ import {
 } from "../lib/saleLineFilter.js";
 import { parseJsonArray } from "./companyReports.js";
 import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
+import { parseMonthsParam } from "../lib/periodMonths.js";
 import { isFrozen } from "../lib/customers/registerSync.js";
 import { respondIfQuotaError } from "../lib/quotaResponse.js";
 
@@ -38,6 +39,8 @@ export type ProductRow = {
 export type ProductReportsPayload = {
   fy: string;
   filtered: boolean;
+  /** Month labels the figures are restricted to (empty = full FY). */
+  months: string[];
   total: number;
   products: ProductRow[];
 };
@@ -45,6 +48,7 @@ export type ProductReportsPayload = {
 export async function buildProductReports(
   fy: string,
   filter?: EntityFilter,
+  months?: string[],
 ): Promise<ProductReportsPayload> {
   const rows = await db
     .select({
@@ -58,7 +62,12 @@ export async function buildProductReports(
     })
     .from(saleLines)
     .leftJoin(itemMaster, eq(saleLines.code, itemMaster.code))
-    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current"), ...entityConds(filter)))
+    .where(and(
+      eq(saleLines.fy, fy),
+      eq(saleLines.versionStatus, "current"),
+      ...(months && months.length > 0 ? [inArray(saleLines.monthLabel, months)] : []),
+      ...entityConds(filter),
+    ))
     .groupBy(saleLines.code);
 
   const products = rows
@@ -75,13 +84,14 @@ export async function buildProductReports(
   return {
     fy,
     filtered: hasEntityFilterValues(filter),
+    months: months ?? [],
     total: products.reduce((s, p) => s + p.amount, 0),
     products,
   };
 }
 
 function parseParams(req: import("express").Request, res: import("express").Response):
-  | { fy: string; filter: EntityFilter | undefined }
+  | { fy: string; filter: EntityFilter | undefined; months: string[] | undefined }
   | null {
   const fy = typeof req.query.fy === "string" && req.query.fy.trim() !== ""
     ? req.query.fy.trim()
@@ -90,23 +100,29 @@ function parseParams(req: import("express").Request, res: import("express").Resp
     res.status(400).json({ error: "Invalid fy — expected YYYY-YY" });
     return null;
   }
+  const monthsResult = parseMonthsParam(req.query.months, fy);
+  if (!monthsResult.ok) {
+    res.status(400).json({ error: monthsResult.error });
+    return null;
+  }
+  const months = monthsResult.months;
   const filter: EntityFilter = {
     heads: parseJsonArray(req.query.heads),
     states: parseJsonArray(req.query.states),
     customers: parseJsonArray(req.query.customers),
   };
-  return { fy, filter: hasEntityFilterValues(filter) ? filter : undefined };
+  return { fy, filter: hasEntityFilterValues(filter) ? filter : undefined, months };
 }
 
 router.get("/product-reports", async (req, res) => {
   const params = parseParams(req, res);
   if (!params) return;
-  const { fy, filter } = params;
+  const { fy, filter, months } = params;
   try {
-    if (filter) {
-      // Active filters — always build live, never cache or snapshot
-      // (the key space would be unbounded).
-      res.json(await buildProductReports(fy, filter));
+    if (filter || (months && months.length > 0)) {
+      // Active filters or a sub-year period — always build live, never cache
+      // or snapshot (the key space would be unbounded).
+      res.json(await buildProductReports(fy, filter, months));
       return;
     }
     const payload = await serveWithSnapshot({
@@ -134,7 +150,7 @@ let activeExports = 0;
 router.get("/product-reports/export", async (req, res) => {
   const params = parseParams(req, res);
   if (!params) return;
-  const { fy, filter } = params;
+  const { fy, filter, months } = params;
 
   if (activeExports >= MAX_CONCURRENT_EXPORTS) {
     res.status(429).json({ error: "Another export is already running — try again in a few seconds." });
@@ -142,7 +158,7 @@ router.get("/product-reports/export", async (req, res) => {
   }
   activeExports++;
   try {
-    const p = await buildProductReports(fy, filter);
+    const p = await buildProductReports(fy, filter, months);
 
     const wb = new ExcelJS.Workbook();
     wb.creator = "Prayag Sales Intelligence";
@@ -154,6 +170,7 @@ router.get("/product-reports/export", async (req, res) => {
     const infoRows: Array<[string, string]> = [
       ["Page", `Products — FY ${p.fy} primary sales by product (sale_line register)`],
       ["FY", p.fy],
+      ["Month filter", months?.length ? months.join(", ") : "Full FY"],
       ["Total sales (INR)", String(p.total)],
       ["State Head filter", filter?.heads?.length ? filter.heads.join(", ") : "All"],
       ["State filter", filter?.states?.length ? filter.states.join(", ") : "All"],

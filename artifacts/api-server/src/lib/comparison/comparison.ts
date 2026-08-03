@@ -16,6 +16,7 @@ import { PROJECT_HEAD_CANON } from "../sku/catalogue.js";
 import { computeCategoryMultipliers, computeCompanyMultiplier } from "../customers/laspeyres.js";
 import { getSeasonality } from "../sku/skuK4.js";
 import { loadDeepDiveData, loadRegistry, type MemberKpis } from "../mgmt/deepDiveData.js";
+import type { RetailerRow } from "../mgmt/memberSheet.js";
 import { fyForDate, priorFy } from "../mgmt/targetEngine.js";
 import { logger } from "../logger.js";
 
@@ -52,6 +53,11 @@ export type ComparisonRequest = {
   population?: "activeOnly" | "includeLeft"; // default activeOnly
   /** Context to disambiguate member names (guard 10). */
   context?: { stateHead?: string };
+  /** C2b: explicit baseline period for period-pair measures (new SKUs, new
+   *  customers) in Mode B (single period). In Mode A each period's baseline is
+   *  the one before it. Without a baseline, period-pair measures are DISABLED
+   *  with the reason — never returned as zero. */
+  baseline?: PeriodSpec;
   /** Simulation hook, mirrors the target engine. */
   today?: string;
 };
@@ -191,6 +197,14 @@ type MeasureDef = {
   sources?: string[];
   /** Guard 11: minimum sample; below it the figure is suppressed. */
   minSample?: number;
+  /** C2b: needs a baseline period — undefined without one, never zero. */
+  periodPair?: boolean;
+  /** C2b declaration: the named source, where more than one exists. */
+  sourceNote?: string;
+  /** C2b declaration: behaviour when the denominator is zero or data absent. */
+  guardNote?: string;
+  /** Valid for member entities only (sheet-level detail a head cannot aggregate cheaply). */
+  memberOnly?: boolean;
 };
 
 const MEMBER_MEASURES: MeasureDef[] = [
@@ -208,6 +222,83 @@ const MEMBER_MEASURES: MeasureDef[] = [
   { id: "paceRatio",        label: "Pace ratio (achievement ÷ elapsed share)", money: false, fyToDateOnly: true },
   { id: "registerOb",       label: "Secondary OB from register (period-exact)", money: true },
   { id: "correlation",      label: "OB↔sale correlation across retailers", money: false, fyToDateOnly: true, minSample: 5 },
+
+  // ── C2b: period-pair measures — undefined without a baseline, never zero ──
+  { id: "newSkusExistingCount", label: "New SKUs to existing customers (count)", money: false, periodPair: true,
+    sourceNote: "secondary SKU register (secondary_sku_line) — distinct (retailer, code) pairs; the customer is a RETAILER",
+    guardNote: "period-pair: Mode B needs an explicit baseline or the measure is disabled with the reason" },
+  { id: "newSkusExistingValue", label: "New SKUs to existing customers (value)", money: true, periodPair: true,
+    sourceNote: "secondary SKU register (secondary_sku_line) — net amount of the new (retailer, code) pairs in the selected period",
+    guardNote: "period-pair: Mode B needs an explicit baseline or the measure is disabled with the reason" },
+  { id: "newCustomersCount", label: "New customers (count)", money: false, periodPair: true,
+    sourceNote: "secondary register (secondary_register_line) — retailers with business in the selected period and none in the baseline",
+    guardNote: "period-pair: Mode B needs an explicit baseline or the measure is disabled with the reason" },
+  { id: "newCustomersValue", label: "New customers (value)", money: true, periodPair: true,
+    sourceNote: "secondary register (secondary_register_line) — net amount from baseline-new retailers in the selected period",
+    guardNote: "period-pair: Mode B needs an explicit baseline or the measure is disabled with the reason" },
+
+  // ── C2b: the four separately named coverage measures (no measure is called
+  // just "coverage", and secondary ÷ primary is NOT offered — different
+  // populations; State Head glossary Correction 1) ──
+  { id: "activeRetailerShare", label: "Active retailer share (%)", money: false, fyToDateOnly: true, memberOnly: true,
+    sourceNote: "member working sheet — active rows ÷ total rows",
+    guardNote: "sheet unavailable → 'member sheet unavailable', never zero" },
+  { id: "visitCoverage", label: "Visit coverage (%)", money: false, fyToDateOnly: true, memberOnly: true,
+    sourceNote: "visits done = Data tab column AF (all-type cumulative); visits required = member working sheet 'Visits Required' sum",
+    guardNote: "required = 0 → undefined, not infinite" },
+  { id: "segmentCoverage", label: "Segment coverage (%)", money: false,
+    sourceNote: "secondary SKU register — distinct segments sold in the period ÷ segments available (sold company-wide in the same FY)",
+    guardNote: "no segments available in the FY → undefined" },
+  { id: "skuBreadthShare", label: "SKU breadth (%)", money: false,
+    sourceNote: "secondary SKU register — distinct codes bought in the period ÷ codes ever sold company-wide (all FYs)",
+    guardNote: "no codes ever sold → undefined" },
+
+  // ── C2b: cost measures — TWO ratios, kept separate; their divergence is diagnostic ──
+  { id: "costPerVisit", label: "Cost per visit", money: true, fyToDateOnly: true,
+    sourceNote: "cost = monthly CTC × elapsed complete months (Data tab column BD, the member's OWN) + YTD travel (T.A. Bill); visits = Data tab column AF (all-type cumulative)",
+    guardNote: "no cost data → 'not recorded' (blank is not zero cost); visits = 0 → undefined" },
+  { id: "costRatioOb", label: "Cost ratio on order booking (%)", money: false, fyToDateOnly: true,
+    sourceNote: "cost (CTC × BD elapsed months + YTD travel) ÷ secondary OB (I + J)",
+    guardNote: "no cost data → 'not recorded'; OB = 0 → undefined, not infinite and not zero" },
+  { id: "costRatioSales", label: "Cost ratio on sales received (%)", money: false, fyToDateOnly: true,
+    sourceNote: "cost (CTC × BD elapsed months + YTD travel) ÷ sales received (AY)",
+    guardNote: "sales = 0 → UNDEFINED, not infinite and not zero (the OB ratio still computes); no cost data → 'not recorded'" },
+
+  // ── C2b: measures added alongside — all already computed elsewhere ──
+  { id: "unassignedShare", label: "Unassigned retailer share (%)", money: false, fyToDateOnly: true, memberOnly: true,
+    sourceNote: "member working sheet — rows with no assigned distributor ÷ total rows",
+    guardNote: "sheet unavailable → 'member sheet unavailable'" },
+  { id: "visitsToUnassigned", label: "Visits to unassigned retailers", money: false, fyToDateOnly: true, memberOnly: true,
+    sourceNote: "member working sheet — visit total over rows with no assigned distributor",
+    guardNote: "sheet unavailable → 'member sheet unavailable'" },
+  { id: "customersRetained", label: "Customer states — retained", money: false, fyToDateOnly: true, memberOnly: true,
+    sourceNote: "member working sheet — active AND business plan > 0" },
+  { id: "customersReactivated", label: "Customer states — reactivated", money: false, fyToDateOnly: true, memberOnly: true,
+    sourceNote: "member working sheet — active without a business plan" },
+  { id: "customersAtRisk", label: "Customer states — at risk", money: false, fyToDateOnly: true, memberOnly: true,
+    sourceNote: "member working sheet — dormant but visited AND planned (the recoverable pool)" },
+  { id: "customersNever", label: "Customer states — never established", money: false, fyToDateOnly: true, memberOnly: true,
+    sourceNote: "member working sheet — dormant without both a visit and a plan" },
+  { id: "removedParties", label: "Removed parties (count)", money: false, fyToDateOnly: true, memberOnly: true,
+    sourceNote: "member working sheet 'Removed Parties' section, labelled by LAST ACTIVE YEAR — the sheet holds no removal date" },
+  { id: "businessPerActiveRetailer", label: "Business per active retailer", money: true, fyToDateOnly: true, memberOnly: true,
+    sourceNote: "member working sheet — total OB ÷ active retailers",
+    guardNote: "no active retailers → undefined" },
+  { id: "effectiveRetailers", label: "Effective retailers (10,000 ÷ HHI)", money: false, fyToDateOnly: true, memberOnly: true,
+    sourceNote: "member working sheet — concentration expressed as an equivalent count, preferred to a raw HHI",
+    guardNote: "no positive OB → undefined" },
+  { id: "top5Share", label: "Top-5 retailer share (%)", money: false, fyToDateOnly: true, memberOnly: true,
+    sourceNote: "member working sheet — top-5 retailers' OB ÷ total OB",
+    guardNote: "no OB → undefined" },
+];
+
+// A head aggregates its members: sheet-level measures (working-sheet rows)
+// stay member-only; the head catalogue adds the territory gap value.
+const HEAD_MEASURES: MeasureDef[] = [
+  ...MEMBER_MEASURES.filter((d) => !d.memberOnly),
+  { id: "gapValue", label: "Gap value (SKU push list, territory only)", money: true,
+    sourceNote: "SKU push list — sum of actionable segment gaps (gapNet) for the head's territory",
+    guardNote: "push list unavailable → 'could not compute', never zero" },
 ];
 
 const CATALOGUE: Record<EntityType, MeasureDef[]> = {
@@ -215,13 +306,20 @@ const CATALOGUE: Record<EntityType, MeasureDef[]> = {
     { id: "net",      label: "NET (primary sale)", money: true },
     { id: "quantity", label: "Quantity",           money: false },
   ],
-  head: MEMBER_MEASURES,
+  head: HEAD_MEASURES,
   member: MEMBER_MEASURES,
   distributor: [
     { id: "primarySale", label: "Primary sale (NET)",  money: true },
     { id: "primaryOb",   label: "Primary OB",          money: true },
     { id: "pending",     label: "Pending (OB − sale)", money: true },
     { id: "skuBreadth",  label: "SKU breadth (distinct codes)", money: false },
+    // C2b: for a distributor the "customer" is the distributor themselves, from sale_line.
+    { id: "newSkusExistingCount", label: "New SKUs bought (count)", money: false, periodPair: true,
+      sourceNote: "primary register (sale_line) — distinct codes bought in the selected period that this distributor did not buy in the baseline",
+      guardNote: "period-pair: Mode B needs an explicit baseline or the measure is disabled with the reason" },
+    { id: "newSkusExistingValue", label: "New SKUs bought (value)", money: true, periodPair: true,
+      sourceNote: "primary register (sale_line) — NET of the baseline-new codes in the selected period",
+      guardNote: "period-pair: Mode B needs an explicit baseline or the measure is disabled with the reason" },
   ],
   retailer: [
     { id: "secondaryOb",   label: "Secondary OB (register)", money: true },
@@ -237,6 +335,13 @@ const CATALOGUE: Record<EntityType, MeasureDef[]> = {
     { id: "net",             label: "NET",              money: true },
     { id: "quantity",        label: "Quantity",         money: false },
     { id: "customersBuying", label: "Customers buying", money: false },
+    // C2b: the register discount is a SECONDARY-register figure — named so.
+    { id: "effectiveDiscount", label: "Effective discount (%, secondary register)", money: false,
+      sourceNote: "secondary SKU register Discount column (retailer-level, beside Sub Total) — a DIFFERENT measure from the primary MRP discount; net-amount-weighted average",
+      guardNote: "no secondary SKU rows for the code in the period → 'not recorded'" },
+    { id: "discountVariance", label: "Discount spread across customers (pp)", money: false,
+      sourceNote: "secondary SKU register — max − min customer-average discount on the same code in the period",
+      guardNote: "fewer than 2 customers → undefined (a spread needs at least two)" },
   ],
 };
 
@@ -245,7 +350,14 @@ export function CATALOGUE_SUMMARY() {
   return Object.fromEntries(
     Object.entries(CATALOGUE).map(([et, defs]) => [
       et,
-      defs.map((d) => ({ id: d.id, label: d.label, money: d.money, sources: d.sources ?? null })),
+      defs.map((d) => ({
+        id: d.id, label: d.label, money: d.money, sources: d.sources ?? null,
+        // C2b declarations: every measure states its source, whether it is
+        // period-pair (needs a baseline), and its zero/absent guard behaviour.
+        periodPair: d.periodPair ?? false,
+        sourceNote: d.sourceNote ?? null,
+        guardNote: d.guardNote ?? null,
+      })),
     ]),
   );
 }
@@ -506,6 +618,25 @@ export async function runComparison(req: ComparisonRequest): Promise<ComparisonR
 
   // ── Period resolution + completeness (from data, not config) ──
   const periods = await resolvePeriods(req.periods, basis, today);
+
+  // ── C2b: baseline for period-pair measures ──
+  // Mode A (>1 period): each period's baseline is the one before it in the
+  // request; the first period has none. Mode B (1 period): the request must
+  // name a baseline explicitly, or period-pair measures are disabled with the
+  // reason — never returned as zero.
+  const wantsPeriodPair = measureSpecs.some(
+    (m) => catalogue.find((d) => d.id === m.measure)?.periodPair,
+  );
+  let explicitBaseline: ResolvedPeriod | null = null;
+  if (req.baseline != null && wantsPeriodPair) {
+    if (typeof req.baseline !== "object" || Array.isArray(req.baseline) || typeof (req.baseline as any).kind !== "string" || typeof (req.baseline as any).fy !== "string") {
+      throw new ComparisonError("'baseline' must be a period spec object like { kind: 'fy', fy: '2025-26' }");
+    }
+    explicitBaseline = (await resolvePeriods([req.baseline], basis, today))[0];
+  }
+  // A baseline without any period-pair measure is ignored (nothing uses it).
+  const baselineFor = (idx: number): ResolvedPeriod | null =>
+    periods.length > 1 ? (idx > 0 ? periods[idx - 1] : explicitBaseline) : explicitBaseline;
 
   const guards: GuardResult[] = [];
   const notes: string[] = [];
@@ -811,13 +942,22 @@ export async function runComparison(req: ComparisonRequest): Promise<ComparisonR
         }
       }
 
-      for (const p of periods) {
+      for (let pIdx = 0; pIdx < periods.length; pIdx++) {
+        const p = periods[pIdx];
         let cell: CellValue = { value: null };
         try {
-          if (def.fyToDateOnly && !(p.spec.kind === "fy" || p.spec.kind === "ytd") && p.fy === currentFy) {
+          const baselineP = def.periodPair ? baselineFor(pIdx) : null;
+          if (def.periodPair && !baselineP) {
+            cell = {
+              value: null,
+              note: periods.length > 1
+                ? `'${def.id}' is a period-pair measure — ${p.label} is the first period in the trajectory, so it has no earlier baseline in this request (pass 'baseline' to supply one)`
+                : `'${def.id}' is a period-pair measure — "new" only means anything against a baseline. Pass 'baseline' (a period spec) to enable it; without one the measure is disabled, not zero.`,
+            };
+          } else if (def.fyToDateOnly && !(p.spec.kind === "fy" || p.spec.kind === "ytd") && p.fy === currentFy) {
             cell = { value: null, note: `'${def.id}' is a Data-tab FY-to-date figure; it cannot be filtered to ${p.label}. Use kind:'ytd' or the period-exact 'registerOb'.` };
           } else {
-            cell = await computeCell(req.entityType, e, def, m, p, basis, channel, currentFy);
+            cell = await computeCell(req.entityType, e, def, m, p, basis, channel, currentFy, baselineP);
           }
           // Guard 8/9 overlays
           if ((def.id === "target" || def.id === "achievement") && (zeroTargetNames.includes(e.name) || noBiz)) {
@@ -1118,6 +1258,7 @@ async function computeCell(
   basis: "primary" | "secondary",
   channel: "territory" | "project" | "all",
   currentFy: string,
+  baselineP: ResolvedPeriod | null = null,
 ): Promise<CellValue> {
   if (p.completeness === "noActualsRecorded") {
     return { value: null, note: "not recorded yet — the period has a plan but no actuals" };
@@ -1150,9 +1291,58 @@ async function computeCell(
         WHERE fy = ${p.fy} AND ${monthIn(p.monthLabels)} AND ${channelFilter(channel)} AND code = ${e.key}`);
       if (def.id === "net") return { value: Number(r.v) };
       if (def.id === "quantity") return { value: Number(r.q) };
+      if (def.id === "customersBuying") return { value: Number(r.c) };
+      // C2b: register discount measures — SECONDARY SKU register, named so.
+      if (def.id === "effectiveDiscount" || def.id === "discountVariance") {
+        const d = await one(sql`
+          WITH perCust AS (
+            SELECT lower(trim(retailer)) AS rk,
+                   sum(net_amount::float8) AS v,
+                   sum(discount_pct::float8 * net_amount::float8) / nullif(sum(net_amount::float8), 0) AS avg_d
+            FROM secondary_sku_line
+            WHERE fy = ${p.fy} AND ${monthIn(p.monthLabels)} AND upper(trim(item_code)) = upper(trim(${e.key}))
+              AND discount_pct IS NOT NULL AND net_amount IS NOT NULL
+            GROUP BY 1
+          )
+          SELECT count(*)::int AS custs,
+                 sum(avg_d * v) / nullif(sum(v), 0) AS wavg,
+                 max(avg_d) - min(avg_d) AS spread
+          FROM perCust WHERE avg_d IS NOT NULL`);
+        const srcNote = "secondary SKU register Discount column — a DIFFERENT measure from the primary MRP discount";
+        if (def.id === "effectiveDiscount") {
+          return Number(d.custs) > 0 && d.wavg != null
+            ? { value: round2(Number(d.wavg)), note: `${srcNote}; net-weighted average over ${d.custs} customers` }
+            : { value: null, note: `not recorded — no secondary SKU rows with a discount for this code in ${p.label}` };
+        }
+        return Number(d.custs) >= 2 && d.spread != null
+          ? { value: round2(Number(d.spread)), note: `${srcNote}; max − min customer-average discount across ${d.custs} customers` }
+          : { value: null, note: `undefined — a spread needs at least 2 customers with a recorded discount (found ${d.custs ?? 0})` };
+      }
       return { value: Number(r.c) };
     }
     case "distributor": {
+      // C2b period-pair: new codes vs the baseline period, from sale_line.
+      if (def.id === "newSkusExistingCount" || def.id === "newSkusExistingValue") {
+        const r = await one(sql`
+          WITH base AS (
+            SELECT DISTINCT code FROM sale_line_current
+            WHERE fy = ${baselineP!.fy} AND month_label IN (${sql.join(baselineP!.monthLabels.map((l) => sql`${l}`), sql`, `)})
+              AND lower(trim(customer)) = lower(trim(${e.key}))
+          ),
+          cur AS (
+            SELECT code, sum(amount::float8) AS v FROM sale_line_current
+            WHERE fy = ${p.fy} AND ${monthIn(p.monthLabels)}
+              AND lower(trim(customer)) = lower(trim(${e.key}))
+            GROUP BY 1
+          )
+          SELECT count(*)::int AS n, coalesce(sum(cur.v),0) AS v
+          FROM cur WHERE cur.code IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM base WHERE base.code = cur.code)`);
+        return {
+          value: def.id === "newSkusExistingCount" ? Number(r.n) : Number(r.v),
+          note: `codes bought in ${p.label} that this distributor did not buy in the baseline ${baselineP!.label}`,
+        };
+      }
       const sale = await one(sql`
         SELECT coalesce(sum(amount::float8),0) AS v, count(DISTINCT code)::int AS b
         FROM sale_line_current
@@ -1179,7 +1369,7 @@ async function computeCell(
     }
     case "member":
     case "head": {
-      return computeMemberCell(entityType, e, def, m, p, currentFy);
+      return computeMemberCell(entityType, e, def, m, p, currentFy, baselineP);
     }
   }
 }
@@ -1191,15 +1381,109 @@ async function computeMemberCell(
   m: MeasureSpec,
   p: ResolvedPeriod,
   currentFy: string,
+  baselineP: ResolvedPeriod | null = null,
 ): Promise<CellValue> {
+  // Register-backed member/head measures aggregate over MEMBER names —
+  // register head_canon holds member names, not the state head's own name.
+  const names = entityType === "head" ? (e.memberKpis ?? []).map((k) => k.name) : [e.name];
+  const nameIn = names.length > 0
+    ? sql.join(names.map((n) => sql`lower(trim(${n}))`), sql`, `)
+    : null;
+
+  // ── C2b: period-pair measures (work for ANY period, like registerOb) ──
+  if (def.id === "newSkusExistingCount" || def.id === "newSkusExistingValue") {
+    if (!nameIn) return { value: null, note: "no members resolved for this head" };
+    const bMonths = sql.join(baselineP!.monthLabels.map((l) => sql`${l}`), sql`, `);
+    const r = await one(sql`
+      WITH base AS (
+        SELECT DISTINCT lower(trim(retailer)) AS rk, upper(trim(item_code)) AS code
+        FROM secondary_sku_line
+        WHERE fy = ${baselineP!.fy} AND month_label IN (${bMonths})
+          AND lower(trim(head_canon)) IN (${nameIn}) AND retailer IS NOT NULL
+      ),
+      base_cust AS (SELECT DISTINCT rk FROM base),
+      cur AS (
+        SELECT lower(trim(retailer)) AS rk, upper(trim(item_code)) AS code,
+               sum(net_amount::float8) AS v
+        FROM secondary_sku_line
+        WHERE fy = ${p.fy} AND ${monthIn(p.monthLabels)}
+          AND lower(trim(head_canon)) IN (${nameIn}) AND retailer IS NOT NULL
+        GROUP BY 1, 2
+      )
+      SELECT count(*)::int AS n, coalesce(sum(cur.v), 0) AS v
+      FROM cur
+      JOIN base_cust USING (rk)
+      LEFT JOIN base ON base.rk = cur.rk AND base.code = cur.code
+      WHERE base.code IS NULL`);
+    return {
+      value: def.id === "newSkusExistingCount" ? Number(r.n) : Number(r.v),
+      note: `(retailer, code) pairs in ${p.label} where the retailer had business in the baseline ${baselineP!.label} but not this code — secondary SKU register`,
+    };
+  }
+  if (def.id === "newCustomersCount" || def.id === "newCustomersValue") {
+    if (!nameIn) return { value: null, note: "no members resolved for this head" };
+    const bMonths = sql.join(baselineP!.monthLabels.map((l) => sql`${l}`), sql`, `);
+    const r = await one(sql`
+      WITH base AS (
+        SELECT DISTINCT lower(trim(customer)) AS rk FROM secondary_register_line
+        WHERE fy = ${baselineP!.fy} AND month_label IN (${bMonths})
+          AND lower(trim(head_canon)) IN (${nameIn}) AND customer IS NOT NULL
+      ),
+      cur AS (
+        SELECT lower(trim(customer)) AS rk, sum(net_amount::float8) AS v
+        FROM secondary_register_line
+        WHERE fy = ${p.fy} AND ${monthIn(p.monthLabels)}
+          AND lower(trim(head_canon)) IN (${nameIn}) AND customer IS NOT NULL
+        GROUP BY 1
+      )
+      SELECT count(*)::int AS n, coalesce(sum(cur.v), 0) AS v
+      FROM cur WHERE cur.rk IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM base WHERE base.rk = cur.rk)`);
+    return {
+      value: def.id === "newCustomersCount" ? Number(r.n) : Number(r.v),
+      note: `retailers with business in ${p.label} and none in the baseline ${baselineP!.label} — secondary register`,
+    };
+  }
+
+  // ── C2b: period-capable coverage measures from the secondary SKU register ──
+  if (def.id === "segmentCoverage" || def.id === "skuBreadthShare") {
+    if (!nameIn) return { value: null, note: "no members resolved for this head" };
+    if (def.id === "segmentCoverage") {
+      const r = await one(sql`
+        SELECT
+          (SELECT count(DISTINCT segment_canon)::int FROM secondary_sku_line
+            WHERE fy = ${p.fy} AND ${monthIn(p.monthLabels)}
+              AND lower(trim(head_canon)) IN (${nameIn}) AND segment_canon IS NOT NULL) AS sold,
+          (SELECT count(DISTINCT segment_canon)::int FROM secondary_sku_line
+            WHERE fy = ${p.fy} AND segment_canon IS NOT NULL) AS avail`);
+      const avail = Number(r.avail);
+      if (avail === 0) return { value: null, note: `undefined — no segments recorded company-wide in FY${p.fy}'s secondary SKU register` };
+      return { value: round2((Number(r.sold) / avail) * 100), note: `${r.sold} of ${avail} segments available (sold company-wide in FY${p.fy}) — secondary SKU register` };
+    }
+    const r = await one(sql`
+      SELECT
+        (SELECT count(DISTINCT upper(trim(item_code)))::int FROM secondary_sku_line
+          WHERE fy = ${p.fy} AND ${monthIn(p.monthLabels)}
+            AND lower(trim(head_canon)) IN (${nameIn})) AS bought,
+        (SELECT count(DISTINCT upper(trim(item_code)))::int FROM secondary_sku_line) AS ever`);
+    const ever = Number(r.ever);
+    if (ever === 0) return { value: null, note: "undefined — no codes ever sold in the secondary SKU register" };
+    return { value: round2((Number(r.bought) / ever) * 100), note: `${r.bought} of ${ever} codes ever sold company-wide (all FYs) — secondary SKU register` };
+  }
+
+  // ── C2b: head-only gap value from the SKU push list ──
+  if (def.id === "gapValue") {
+    const { getSkuRecommendations } = await import("../sku/skuRecommendations.js");
+    const rec = await getSkuRecommendations({
+      fy: p.fy, monthLabels: p.monthLabels, level: "distributor", scope: "head", scopeId: e.name,
+    });
+    return { value: rec.totalGapNet ?? null, note: "total actionable segment gap (gapNet) from the SKU push list — territory only" };
+  }
+
   // Period-exact register OB works for any period. Register head_canon holds
   // MEMBER names, so a head entity aggregates over its members' names.
   if (def.id === "registerOb") {
-    const names = entityType === "head"
-      ? (e.memberKpis ?? []).map((k) => k.name)
-      : [e.name];
-    if (names.length === 0) return { value: null, note: "no members resolved for this head" };
-    const nameIn = sql.join(names.map((n) => sql`lower(trim(${n}))`), sql`, `);
+    if (!nameIn) return { value: null, note: "no members resolved for this head" };
     const r = await one(sql`
       SELECT coalesce(sum(net_amount::float8),0) AS v
       FROM secondary_register_line
@@ -1290,6 +1574,136 @@ async function computeMemberCell(
       }
       return { value: round3(pearson(pairs)), note: `OB↔sale across ${pairs.length} retailers` };
     }
+    // ── C2b: cost measures. cost = monthly CTC × elapsed complete months
+    // (column BD, the member's OWN — never a team figure) + YTD travel. ──
+    case "costPerVisit":
+    case "costRatioOb":
+    case "costRatioSales": {
+      const memberCost = (k: MemberKpis): number | null => {
+        if (k.ctcMonthly == null) return null; // blank cost is NOT zero cost
+        const elapsed = k.elapsedMonthsFromSheet ?? k.elapsedMonths;
+        if (elapsed == null) return null;
+        return k.ctcMonthly * elapsed + (k.taBillStCost ?? 0);
+      };
+      const ks = entityType === "member"
+        ? (e.kpis ? [e.kpis] : [])
+        : (e.memberKpis ?? []).filter((k) => !k.isLeft);
+      const recorded = ks.filter((k) => memberCost(k) != null);
+      if (recorded.length === 0) {
+        return { value: null, note: "not recorded — no CTC/elapsed-months data on the Data tab for this entity; a blank cost cell is not a zero cost" };
+      }
+      // Cost sums over members WITH recorded cost; denominators (visits, OB,
+      // sales) sum over ALL active members — otherwise a head's ratio would
+      // silently drop the excluded members' activity and overstate the ratio.
+      const cost = recorded.reduce((s, k) => s + (memberCost(k) as number), 0);
+      const missing = ks.length - recorded.length;
+      const missNote = missing > 0 ? `; cost missing for ${missing} of ${ks.length} members (their cost is excluded — the denominator still covers all members)` : "";
+      if (def.id === "costPerVisit") {
+        const v = ks.reduce((s, k) => s + (k.totalVisitsYtd ?? 0), 0);
+        return v > 0
+          ? { value: round2(cost / v), note: `cost = CTC × BD elapsed months + YTD travel; visits = Data tab column AF (all-type cumulative)${missNote}` }
+          : { value: null, note: `undefined — no visits recorded (column AF); cost ₹${round2(cost)} cannot be spread over zero visits${missNote}` };
+      }
+      if (def.id === "costRatioOb") {
+        const ob = ks.reduce((s, k) => s + (k.orderBooking ?? 0) + (k.directDealersOrder ?? 0), 0);
+        return ob > 0
+          ? { value: round2((cost / ob) * 100), note: `cost ÷ secondary OB (I + J), as %${missNote}` }
+          : { value: null, note: `UNDEFINED — order booking is 0; a ratio on zero is not infinite and not zero${missNote}` };
+      }
+      const sales = ks.reduce((s, k) => s + (k.sale ?? 0), 0);
+      return sales > 0
+        ? { value: round2((cost / sales) * 100), note: `cost ÷ sales received (AY), as %${missNote}` }
+        : { value: null, note: `UNDEFINED — sales received is 0, so cost ÷ sales does not exist (not infinite, not zero). The OB ratio 'costRatioOb' still computes${missNote}` };
+    }
+
+    // ── C2b: member-sheet measures (member entities only) ──
+    case "activeRetailerShare":
+    case "visitCoverage":
+    case "unassignedShare":
+    case "visitsToUnassigned":
+    case "customersRetained":
+    case "customersReactivated":
+    case "customersAtRisk":
+    case "customersNever":
+    case "removedParties":
+    case "businessPerActiveRetailer":
+    case "effectiveRetailers":
+    case "top5Share": {
+      if (entityType === "head") {
+        return { value: null, note: `'${def.id}' reads the member working sheet; it is member-only — compare member entities instead` };
+      }
+      const dd = await loadDeepDiveData(currentFy, undefined, e.key, { skipExtras: true });
+      const detail = dd.retailerDetail;
+      if (!detail || detail.status !== "ok") {
+        return { value: null, note: "member sheet unavailable — the working sheet could not be read; this is missing data, not zero" };
+      }
+      const rows = detail.rows;
+      const spread = detail.spread;
+      switch (def.id) {
+        case "activeRetailerShare":
+          return rows.length > 0
+            ? { value: round2((rows.filter((r) => r.isActive).length / rows.length) * 100), note: `${rows.filter((r) => r.isActive).length} active of ${rows.length} retailers — member working sheet` }
+            : { value: null, note: "undefined — the working sheet has no retailer rows" };
+        case "visitCoverage": {
+          const required = rows.reduce((s, r) => s + (r.visitsRequired ?? 0), 0);
+          const done = e.kpis?.totalVisitsYtd ?? null;
+          if (required <= 0) return { value: null, note: "undefined — no visit requirement recorded on the working sheet (a ratio on zero required is not 100%)" };
+          if (done == null) return { value: null, note: "not recorded — Data tab column AF (visits done) is blank" };
+          return { value: round2((done / required) * 100), note: `visits done ${done} (Data tab column AF, all-type cumulative) ÷ required ${required} (working sheet)` };
+        }
+        case "unassignedShare": {
+          const un = rows.filter((r) => !r.distributor || r.distributor.trim() === "" || r.distributor.trim() === "--");
+          return rows.length > 0
+            ? { value: round2((un.length / rows.length) * 100), note: `${un.length} of ${rows.length} retailers have no assigned distributor — member working sheet` }
+            : { value: null, note: "undefined — no retailer rows" };
+        }
+        case "visitsToUnassigned": {
+          const un = rows.filter((r) => !r.distributor || r.distributor.trim() === "" || r.distributor.trim() === "--");
+          return { value: un.reduce((s, r) => s + (r.totalVisit ?? 0), 0), note: `visit total over ${un.length} retailers with no assigned distributor — member working sheet` };
+        }
+        case "customersRetained":
+        case "customersReactivated":
+        case "customersAtRisk":
+        case "customersNever": {
+          const active = rows.filter((r) => r.isActive);
+          const dormant = rows.filter((r) => !r.isActive);
+          const states: Record<string, RetailerRow[]> = {
+            customersRetained: active.filter((r) => (r.businessPlan ?? 0) > 0),
+            customersReactivated: active.filter((r) => !((r.businessPlan ?? 0) > 0)),
+            customersAtRisk: dormant.filter((r) => (r.totalVisit ?? 0) > 0 && (r.businessPlan ?? 0) > 0),
+            customersNever: dormant.filter((r) => !((r.totalVisit ?? 0) > 0 && (r.businessPlan ?? 0) > 0)),
+          };
+          return { value: states[def.id].length, note: `of ${rows.length} retailers on the working sheet (states use activity + plan + visits, same definitions as the AI reports)` };
+        }
+        case "removedParties": {
+          const removed = detail.removedRows ?? [];
+          const byYear = new Map<string, number>();
+          for (const r of removed) {
+            const y = r.lastActiveYear ?? "unknown";
+            byYear.set(y, (byYear.get(y) ?? 0) + 1);
+          }
+          const breakdown = [...byYear.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([y, n]) => `${y}: ${n}`).join(", ");
+          return { value: removed.length, note: removed.length > 0
+            ? `by LAST ACTIVE YEAR (the sheet holds no removal date) — ${breakdown}`
+            : "no rows in the 'Removed Parties' section" };
+        }
+        case "businessPerActiveRetailer":
+          return spread.businessPerActiveRetailer != null
+            ? { value: round2(spread.businessPerActiveRetailer), note: "total OB ÷ active retailers — member working sheet" }
+            : { value: null, note: "undefined — no active retailers with order booking" };
+        case "effectiveRetailers":
+          return spread.concentrationIndex != null && spread.concentrationIndex > 0
+            ? { value: round2(10000 / spread.concentrationIndex), note: `10,000 ÷ HHI (${round2(spread.concentrationIndex)}) — an equivalent-count reading of concentration` }
+            : { value: null, note: "undefined — no positive order booking to measure concentration on" };
+        case "top5Share":
+          return spread.top5ObShare != null
+            ? { value: round2(spread.top5ObShare), note: "top-5 retailers' OB ÷ total OB — member working sheet" }
+            : { value: null, note: "undefined — no order booking recorded" };
+      }
+      return { value: null, note: `measure '${def.id}' not computable` };
+    }
+
     default:
       return { value: null, note: `measure '${def.id}' not computable` };
   }

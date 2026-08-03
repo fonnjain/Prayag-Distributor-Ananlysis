@@ -1,0 +1,143 @@
+# C2b — More measures on the Comparison page
+
+*Six requested, three of which need care. Plus the ones I would add alongside.*
+
+---
+
+## Three of the six are period-pair measures
+
+**New SKUs to existing customers** and **New Customers** cannot be computed for a single period. "New" only means anything against a baseline.
+
+In Mode A (trajectory) that is natural — each period compares to the one before. In **Mode B (peer, one period) they need an explicit baseline selector**, or they must be disabled with the reason stated.
+
+## And "Coverage" means five different things here
+
+| Reading | Formula |
+|---|---|
+| Retailer activation | active retailers ÷ total retailers |
+| Visit coverage | visits done ÷ visits required |
+| Segment coverage | segments sold ÷ segments available |
+| SKU breadth | codes bought ÷ codes ever sold |
+| **Secondary ÷ primary** | **not a valid ratio — different populations** |
+
+The last one is Correction 1 in the State Head glossary. **Name the specific coverage rather than offering one ambiguous measure.**
+
+## Why both cost ratios are needed
+
+| Member | Cost | /OB | /sale |
+|---|---|---|---|
+| Prasun Chatterjee | ₹1,55,654 | 5.9% | 6.0% |
+| Shivam Chauhan | ₹1,09,925 | 5.1% | **5.7%** |
+| Tarun Giri | ₹1,23,437 | 4.4% | **3.7%** |
+| **Ravi (Faridabad)** | ₹89,956 | **39.5%** | **undefined** |
+| **Rahul Singh** | ₹11,766 | 3.7% | **undefined** |
+
+**Two members have zero recorded sales**, so the ratio on sales is undefined while the ratio on OB works fine. And **Ravi at 39.5% on OB** is a genuine outlier that a sales-based ratio would have hidden entirely.
+
+---
+
+```
+Prayag app - Comparison page, additional measures. Same global rules.
+NO NEW COMPUTATION beyond what the API already serves - extend the measure
+catalogue and its guards.
+
+1. THE SIX REQUESTED.
+
+   a) NEW SKUs SOLD TO EXISTING CUSTOMERS - COUNT and VALUE, both.
+      Distinct (customer, code) pairs where the customer had business in the
+      BASELINE period but not this code, and bought it in the selected period.
+      This is the same population the Targets engine calls "Existing Sales New
+      SKU" - reuse it, do not recompute.
+      PERIOD-PAIR MEASURE: undefined without a baseline. In Mode B require an
+      explicit baseline selector; if none is chosen, disable the measure with
+      the reason rather than returning zero.
+      For a member the customer is a RETAILER, from the secondary register.
+      For a distributor it is the distributor themselves, from sale_line.
+
+   b) NEW CUSTOMERS - COUNT and VALUE.
+      Customers with no baseline-period business. Same period-pair rule.
+      For a member, the addressable pool is already quantified: 18,117
+      registered retailers against 11,338 with secondary coverage.
+
+   c) COVERAGE - do NOT offer one measure by this name. Offer these, each
+      separately labelled:
+         Active retailer share      active / total retailers
+         Visit coverage             visits done / visits required
+         Segment coverage           segments sold / segments available
+         SKU breadth                codes bought / codes ever sold
+      DO NOT offer secondary / primary as a coverage ratio. They are different
+      populations - primary includes project and institutional business that
+      secondary never touches. That is Correction 1 in the State Head glossary.
+
+   d) COST PER VISIT - cost / visits done.
+      NAME WHICH VISITS. Three sources exist: Data tab column AF (all-type
+      cumulative), the working sheet total, and visited-in-month. Default to
+      column AF and state it.
+
+   e) COST RATIO ON ORDER BOOKING - cost / (I + J)
+   f) COST RATIO ON SALES RECEIVED - cost / AY
+
+      KEEP THEM AS TWO MEASURES, never one. Where OB and sales diverge the
+      ratios diverge with them, and that divergence is diagnostic. A member
+      with a sales-lag month reads normal on OB and inflated on sales.
+      GUARDS:
+        sales = 0 -> the sales ratio is UNDEFINED, not infinite and not zero.
+          Ravi (Faridabad) and Rahul Singh both have zero recorded sales while
+          their OB ratios compute fine at 39.5 and 3.7 per cent.
+        no cost data -> "not recorded". Cost is not captured for every member;
+          a blank must not read as zero cost.
+        cost = (monthly CTC x elapsed complete months) + YTD travel. Use the
+          member's OWN elapsed months from column BD, never a team figure.
+
+2. MEASURES I WOULD ADD ALONGSIDE - all already computed elsewhere:
+
+   UNASSIGNED SHARE       unassigned / total retailers. The strongest
+                          relationship in the project and currently absent
+                          from this page entirely.
+   VISITS TO UNASSIGNED   effort spent where a retailer cannot order
+   ACTIVE RETAILER SHARE  active / total
+   CUSTOMER STATES        retained / reactivated / at risk / never, as four
+                          measures. At risk is the largest recoverable pool
+                          on any page.
+   REMOVED PARTIES        count, labelled by LAST ACTIVE YEAR - the sheet
+                          holds no removal date
+   BUSINESS PER ACTIVE RETAILER
+   EFFECTIVE RETAILERS    10,000 / HHI - concentration, prefer to a raw HHI
+   TOP-5 SHARE
+   GAP VALUE              from the SKU push list, territory only
+   EFFECTIVE DISCOUNT     and its VARIANCE across customers on the same code
+   REAL-TERMS OB          deflated by that segment's own Laspeyres index
+
+3. EVERY NEW MEASURE MUST DECLARE:
+     its source, by name, where more than one exists
+     whether it is period-pair and therefore needs a baseline
+     which entity types it is valid for - requesting it on the wrong type
+       returns the invalid-measure error, never a silent blank
+     its guard behaviour when the denominator is zero or the data absent
+
+Acceptance - show the rendered result:
+  new SKUs to existing customers returns count AND value, and is disabled with
+    a reason in Mode B when no baseline is selected
+  new customers likewise
+  four separately named coverage measures exist; no measure called simply
+    "Coverage"; secondary / primary is not offered
+  cost per visit names which visit source it used
+  the two cost ratios appear as separate measures
+  Ravi (Faridabad) shows 39.5 per cent on OB and UNDEFINED on sales
+  a member with no cost data reads "not recorded", not zero
+  unassigned share is available and returns for a named member
+  requesting any new measure on an invalid entity type returns the error
+    listing valid measures
+```
+
+---
+
+## The one I would prioritise
+
+**Unassigned share is not on this page**, and it is the strongest relationship the project has found — **96.0% active with an assigned distributor against 5.0% without**.
+
+For a comparison tool meant to support decisions, that is the measure most likely to explain why one member's numbers differ from another's. Everything else describes the outcome; that one points at a cause.
+
+---
+
+*Cost figures computed from Anant Singh's mapped active members, 3 August 2026*

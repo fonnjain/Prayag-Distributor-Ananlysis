@@ -1,0 +1,155 @@
+# M1 — Momentum page rebuild
+
+*The page currently shows levels. Momentum is about rate, direction and what to do about it.*
+
+---
+
+## The problem in one line
+
+**₹111.98 Cr is a level, not momentum.** A bar chart of monthly order value is monthly totals, not direction. Neither tells anyone whether the business is accelerating, decelerating, or simply following its own seasonal shape.
+
+## What the page should be saying today
+
+| | |
+|---|---|
+| Apr–Jul FY2026-27 | ₹101.31 Cr |
+| Apr–Jul FY2025-26 | ₹100.89 Cr |
+| Nominal | **+0.4%** |
+| **Real** (index 1.069) | **−6.1%** |
+
+And the two years before it: FY2024-25 **−8.6% real**, FY2025-26 **−1.0% real**.
+
+**Three consecutive years of real decline.** That is the headline this page should lead with, and nothing on it currently says so.
+
+---
+
+```
+Prayag app - rebuild the Momentum page. Same global rules. NO NEW COMPUTATION
+where an existing service already provides it - reuse the comparison API, the
+Laspeyres index, the seasonal curves, the push list and the whitespace analysis.
+
+Momentum is about RATE and DIRECTION, not level. Every rate on this page must be
+seasonally adjusted and shown in real terms, or it is noise.
+
+1. THE HEADLINE STRIP - replace the single Orders YTD tile.
+
+   ARE WE ON PACE?
+     nominal growth on like months, AND real growth using the segment-weighted
+     Laspeyres index
+     Apr-Jul FY2026-27 Rs 101.31 Cr against Rs 100.89 Cr = +0.4 per cent
+     nominal, -6.1 per cent real
+     show the three-year real series beside it: -8.6, -1.0, -6.1
+   ACCELERATING OR DECELERATING?
+     the change in the RATE, not the level - is this month's growth rate above
+     or below last month's
+   RUN RATE TO YEAR END
+     projected on the SEASONAL curve, never a flat extrapolation. 13 of 14
+     segments peak Q4, so a linear projection from Q2 understates the year.
+     State the curve used.
+
+2. SEASONAL ADJUSTMENT IS MANDATORY, NOT OPTIONAL.
+   Q2 is structurally the weakest quarter for most of the catalogue. A raw
+   month-on-month decline in August would be flagged as a red flag every single
+   year, wrongly.
+   Every rate shown must be against that segment's own expected share of the
+   year. Garden Pipe does 43.3 per cent of its year in Q4 and 12.0 per cent now
+   - being "down" in Q2 is its normal shape.
+   Where a figure is seasonally adjusted, say so on the figure.
+
+3. THE PIPELINE PANEL - currently absent, and it is the leading indicator.
+     order booking, dispatch, and pending as a SHARE of booking
+     Apr-Jul: booking Rs 110.32 Cr, dispatch Rs 98.71 Cr, pending Rs 11.60 Cr
+       = 10.5 per cent
+     THE DIRECTION OF THAT SHARE IS THE SIGNAL:
+       rising  - orders being taken faster than they can be served
+       falling - demand softening ahead of the revenue line
+     Track it monthly and state which way it is moving.
+
+4. LEADING INDICATORS - all computable, none currently shown.
+     new customers this period against last
+     new SKUs placed with existing customers - count and value
+     first-order codes, the fastest proof a push worked
+     breadth trend - members and distributors whose code count is narrowing
+     at-risk customers - bought last year, nothing yet this year
+     effective discount trend - margin leaking as volume is chased
+   These move BEFORE revenue does. That is what makes them worth a page.
+
+5. RED FLAGS - ranked by severity, each with its evidence and its size.
+   Compute, do not hardcode. Suggested set, all derivable today:
+
+     REAL DECLINE          growth below the segment's own price index
+     FALLING FROM HIGH     entities above every threshold but declining - the
+                           Warning System fires below 50 per cent, so a member
+                           who has gone 85 to 70 raises NOTHING today. This is
+                           the most valuable flag on the page.
+     PENDING BUILD-UP      pending share rising month on month
+     BREADTH NARROWING     code count falling, ranked BY VALUE not by count
+     AT-RISK CONCENTRATION where at-risk value is concentrated in few customers
+     COVERAGE DECAY        unassigned share rising
+     DISCOUNT CREEP        effective discount rising against flat volume
+     SEGMENT DIVERGENCE    a segment declining materially faster than the
+                           company, on its own seasonal curve
+     CUSTOMER COUNT FLAT   the base not growing - roughly 607 to 610 between
+                           comparable quarters
+
+   EVERY FLAG STATES: what it is, how big, which entities, and since when.
+   A flag without a size is not actionable.
+
+6. CORRECTIVE MEASURES - each flag links to the list that fixes it. Do NOT
+   invent new analysis; point at what exists:
+
+     narrow breadth        -> the SKU push list, tiered, with named peers
+     at-risk customers     -> the win-back list, ranked by prior-year value
+     unassigned retailers  -> the assignment gap - an ADMINISTRATIVE fix, the
+                              fastest available. 96.0 per cent of assigned
+                              retailers are active against 5.0 per cent of
+                              unassigned
+     no distributor at all -> the coverage gap - a strategic appointment, slow
+     lost codes            -> proven demand, known customer, warmest list
+     discount creep        -> the discount variance report, per code
+     falling from high     -> the comparison matrix, that entity's trajectory
+
+   Rank corrective measures by EASE, not by size of prize. Range depth inside a
+   segment already bought is the cheapest thing anyone can do - shelf space and
+   the relationship already exist.
+
+7. GUARDS - the same twelve as the comparison contract.
+   In particular: like months only; real terms on every cross-year figure;
+   territory channel by default with the channelLabel stated; a partial month
+   excluded from any rate; LEFT members excluded; zero-target and no-business
+   entities reported as such and never as zero.
+
+Acceptance - show the rendered result:
+  the headline shows nominal AND real, with the three-year real series
+  a seasonally adjusted rate is labelled as such and names the curve
+  the run-rate projection uses the seasonal curve, not a flat extrapolation
+  the pipeline panel shows pending as a share of booking and its direction
+  at least six leading indicators are populated
+  red flags are ranked, each with size, entities and start date
+  the falling-from-high flag is populated and lists who is in it
+  every corrective measure links to an existing list rather than new analysis
+  no rate is shown without seasonal adjustment or a statement that it is raw
+  the channelLabel appears on the page
+```
+
+---
+
+## The flag I would build first
+
+**Falling from high.** Every alert in this app is threshold-based — the Warning System fires below 50%, low performers below 50%.
+
+**A member who has gone from 85% to 70% triggers nothing.** They are above every line, and they are the most actionable person in the company because the decline is early and reversible.
+
+Nothing in the app can currently see them. That single flag would justify the page on its own.
+
+---
+
+## And the honest headline
+
+Three years of real decline is uncomfortable, and it is what the data says. **A momentum page that shows ₹111.98 Cr and a rising bar chart is telling the opposite story** — the bars rise because prices rose, not because more product moved.
+
+If this page is going to inform decisions, that is the first thing it has to say.
+
+---
+
+*Figures verified against the frozen registers and the source registers, 3 August 2026*

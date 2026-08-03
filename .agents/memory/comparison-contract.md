@@ -22,3 +22,11 @@ Module: `artifacts/api-server/src/lib/comparison/comparison.ts`; route `POST /ap
 
 ## Names useful for tests
 Ambiguous: "Ashutosh Kumar" (Sandeep Dadheech/Dhanbad vs Anant Singh/Rudrapur). No-business member: Anuj Sharma (head **Sunil Mohanty** — Mohanty is a head, not a member). Tenure pair: Rahul Singh 11 days vs Amey Deodhar 77. Untargeted under Sulinder Pal: Ritesh Thakur, Arvind Kumar, Brinder Singh.
+
+## C2b measure-catalogue rules (Aug 2026)
+- Every measure declares `sourceNote` (named source), `guardNote` (zero/absent behaviour) and `periodPair` in the catalogue; UI renders them verbatim (render-only).
+- **Period-pair measures ("new X") are undefined without a baseline, never zero**: Mode A baseline = previous period in trajectory (first period disabled with reason); Mode B needs an explicit `baseline` period spec in the request (400 if malformed, ignored when no period-pair measure selected).
+- Cost = monthly CTC × elapsed months (Data-tab BD, the member's OWN) + YTD travel. Head cost ratios: cost sums only members with recorded cost, but the DENOMINATOR (visits/OB/sales) sums ALL members — otherwise the ratio overstates. Missing cost → "not recorded", zero denominator → UNDEFINED note.
+- No measure is named just "Coverage" (four separately named ones); secondary÷primary coverage is intentionally not offered (different populations).
+- Head and member catalogues now differ (`HEAD_MEASURES` filters `memberOnly` sheet measures, adds `gapValue`); member-sheet measures are member-only by design.
+- SQL anti-joins in period-pair queries must use NOT EXISTS (whitespace-only names normalise to NULL and poison NOT IN).

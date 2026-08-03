@@ -111,7 +111,7 @@ export function projectExclusionMeta(set: Set<string>): ProjectExclusionMeta {
  *                      genuinely territory-attributed rows stay in),
  *   head absent      → customer bridge decides.
  */
-function territoryFilterSql(projSet: Set<string>) {
+export function territoryFilterSql(projSet: Set<string>) {
   const names = [...projSet];
   const bridgeNotIn =
     names.length === 0

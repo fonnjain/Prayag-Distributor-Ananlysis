@@ -11,6 +11,7 @@ import { hasEntityFilterValues, type EntityFilter } from "../lib/saleLineFilter.
 import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
 import { isFrozen } from "../lib/customers/registerSync.js";
 import { parseJsonArray } from "./companyReports.js";
+import { parseMonthsParam } from "../lib/periodMonths.js";
 
 const router: IRouter = Router();
 
@@ -19,7 +20,7 @@ const DEFAULT_FY = "2026-27";
 const ANALYTICS_TTL_MS = 15 * 60 * 1000;
 
 function parseParams(req: Request, res: Response):
-  | { fy: string; compareFy: string; filter: EntityFilter | undefined }
+  | { fy: string; compareFy: string; filter: EntityFilter | undefined; months: string[] | undefined }
   | null {
   const fyRaw = req.query["fy"];
   const fy =
@@ -42,7 +43,12 @@ function parseParams(req: Request, res: Response):
     states: parseJsonArray(req.query.states),
     customers: parseJsonArray(req.query.customers),
   };
-  return { fy, compareFy, filter: hasEntityFilterValues(filter) ? filter : undefined };
+  const monthsResult = parseMonthsParam(req.query.months, fy);
+  if (!monthsResult.ok) {
+    res.status(400).json({ error: monthsResult.error });
+    return null;
+  }
+  return { fy, compareFy, filter: hasEntityFilterValues(filter) ? filter : undefined, months: monthsResult.months };
 }
 
 router.get(
@@ -50,12 +56,12 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     const params = parseParams(req, res);
     if (!params) return;
-    const { fy, compareFy, filter } = params;
+    const { fy, compareFy, filter, months } = params;
     try {
-      if (filter) {
-        // Active entity filters — always build live, never cache or snapshot
-        // (the key space would be unbounded).
-        res.json(await buildAnalytics(fy, compareFy, filter));
+      if (filter || (months && months.length > 0)) {
+        // Active entity filters or a sub-year period — always build live,
+        // never cache or snapshot (the key space would be unbounded).
+        res.json(await buildAnalytics(fy, compareFy, filter, months));
         return;
       }
       // Snapshot-first: serve the last persisted payload instantly. Both the
@@ -189,7 +195,7 @@ function buildWorkbook(p: AnalyticsReport, filter?: EntityFilter): ExcelJS.Workb
 router.get("/analytics/export", async (req: Request, res: Response): Promise<void> => {
   const params = parseParams(req, res);
   if (!params) return;
-  const { fy, compareFy, filter } = params;
+  const { fy, compareFy, filter, months } = params;
 
   if (activeExports >= MAX_CONCURRENT_EXPORTS) {
     res.status(429).json({ error: "Another export is already running — try again in a few seconds." });
@@ -197,10 +203,10 @@ router.get("/analytics/export", async (req: Request, res: Response): Promise<voi
   }
   activeExports++;
   try {
-    const payload = await buildAnalytics(fy, compareFy, filter);
+    const payload = await buildAnalytics(fy, compareFy, filter, months);
     const wb = buildWorkbook(payload, filter);
     const buf = await wb.xlsx.writeBuffer();
-    const suffix = filter ? "_filtered" : "";
+    const suffix = filter || (months && months.length > 0) ? "_filtered" : "";
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="Growth_${fy}${suffix}_${new Date().toISOString().slice(0, 10)}.xlsx"`);
     res.send(Buffer.from(buf));
