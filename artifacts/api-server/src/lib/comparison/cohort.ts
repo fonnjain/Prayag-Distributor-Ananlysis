@@ -58,7 +58,20 @@ export type CohortResponse = {
   /** Pairwise difference for two-cohort rules — never without both populations. */
   difference?: { value: number | null; label: string; sampleNote: string };
   correlation?: { r: number | null; n: number; suppressed: boolean; note: string };
+  /** C4: server-computed suggested actions built only from the figures above. */
+  suggestions?: CohortSuggestion[];
   notes: string[];
+};
+
+export type CohortSuggestion = {
+  rank: number;
+  kind: "cohort-gap";
+  action: string;
+  /** The exact figures the suggestion rests on. */
+  evidence: string;
+  /** The rule's readings ALWAYS travel with the suggestion — the data often
+   *  cannot distinguish cause from effect. */
+  caveats: string[];
 };
 
 export class CohortError extends Error {
@@ -131,6 +144,42 @@ async function loadCompanyWideDistributorData(fy: string) {
 }
 
 export async function runCohort(req: CohortRequest): Promise<CohortResponse> {
+  const res = await runCohortInner(req);
+  return { ...res, ...(buildCohortSuggestions(res) ?? {}) };
+}
+
+/** C4: turn a finished cohort result into at most two suggested actions.
+ *  Uses ONLY figures already in the response; readings are mandatory caveats. */
+function buildCohortSuggestions(res: CohortResponse): { suggestions: CohortSuggestion[] } | null {
+  const suggestions: CohortSuggestion[] = [];
+  const valued = res.cohorts.filter((c) => c.value != null);
+  if (valued.length >= 2) {
+    const sorted = [...valued].sort((a, b) => a.value! - b.value!);
+    const weak = sorted[0], strong = sorted[sorted.length - 1];
+    const gapText = res.difference && res.difference.value != null
+      ? `gap ${res.difference.value} — ${res.difference.label}; ${res.difference.sampleNote}`
+      : `populations ${weak.population.toLocaleString("en-IN")} vs ${strong.population.toLocaleString("en-IN")}`;
+    suggestions.push({
+      rank: 1, kind: "cohort-gap",
+      action: `Focus effort on the '${weak.name}' cohort — it trails '${strong.name}' on ${weak.valueLabel}.`,
+      evidence: `${weak.name}: ${weak.value} vs ${strong.name}: ${strong.value} (${weak.valueLabel}); ${gapText}.`,
+      caveats: [...res.basis.readings],
+    });
+  }
+  if (res.correlation && !res.correlation.suppressed && res.correlation.r != null) {
+    suggestions.push({
+      rank: suggestions.length + 1, kind: "cohort-gap",
+      action: Math.abs(res.correlation.r) < 0.3
+        ? `Treat the cohort gap as directional, not proof — the member-level correlation is weak.`
+        : `The member-level correlation supports acting on this split.`,
+      evidence: `r = ${res.correlation.r}, n = ${res.correlation.n}. ${res.correlation.note}`,
+      caveats: [...res.basis.readings],
+    });
+  }
+  return suggestions.length ? { suggestions } : null;
+}
+
+async function runCohortInner(req: CohortRequest): Promise<CohortResponse> {
   const today = req.today ? new Date(req.today) : new Date();
   const currentFy = fyForDate(today);
   const fy = req.fy ?? currentFy;

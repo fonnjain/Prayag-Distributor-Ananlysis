@@ -29,14 +29,17 @@ type QuadrantView = {
 };
 type RosterChange = { entity: string; fromFy: string; toFy: string; joiners: string[]; leavers: string[]; note: string };
 type CohortGroup = { name: string; population: number; value: number | null; valueLabel: string; note?: string };
+type CohortSuggestion = { rank: number; kind: string; action: string; evidence: string; caveats: string[] };
 type CohortResult = {
   blocked: false;
   basis: { rule: string; ruleDetail: string; fy: string; channel: string; channelLabel: string; readings: string[] };
   cohorts: CohortGroup[];
   difference?: { value: number | null; label: string; sampleNote: string };
   correlation?: { r: number | null; n: number; suppressed: boolean; note: string };
+  suggestions?: CohortSuggestion[];
   notes: string[];
 };
+type Suggestion = { rank: number; kind: string; entity: string; measure?: string; measureLabel?: string; action: string; evidence: string; level?: number; direction?: number; caveats: string[] };
 type CellValue = { value: number | string | null; real?: number | null; realIndex?: number | null; realIndexName?: string | null; note?: string | null; suppressed?: boolean };
 type MatrixRow = { entity: string; measure: string; measureLabel: string; source: string | null; excludeFromRanking?: boolean; flags?: string[]; rankEligible?: boolean; rankBlockReason?: string | null; cells: CellValue[]; trend?: TrendMeta; };
 type BasisBlock = {
@@ -46,7 +49,7 @@ type BasisBlock = {
   sources?: Record<string, string>;
 };
 type OkResponse = {
-  blocked: false; basis: Required<BasisBlock>; guards: GuardResult[]; matrix: MatrixRow[]; quadrants?: QuadrantView[]; rosterChanges?: RosterChange[];
+  blocked: false; basis: Required<BasisBlock>; guards: GuardResult[]; matrix: MatrixRow[]; quadrants?: QuadrantView[]; rosterChanges?: RosterChange[]; suggestions?: Suggestion[];
   likeForLike?: { entity: string; headlineAchievement: number | null; likeForLikeAchievement: number | null; untargetedMembers: string[] }[];
   notes: string[];
 };
@@ -617,6 +620,18 @@ export default function ComparisonDeepDive() {
                     {" — "}<span className="text-muted-foreground">{cohortResult.correlation.note}</span>
                   </div>
                 )}
+                {cohortResult.suggestions && cohortResult.suggestions.length > 0 && (
+                  <div className="rounded-lg border border-border bg-card p-3 text-xs space-y-2" data-testid="cohort-suggestions">
+                    <p className="font-semibold">Suggested actions</p>
+                    {cohortResult.suggestions.map((sg) => (
+                      <div key={sg.rank} className="rounded-md border border-border/60 p-2.5" data-testid={`cohort-suggestion-${sg.rank}`}>
+                        <p className="font-semibold">#{sg.rank} · {sg.action}</p>
+                        <p className="mt-0.5 text-muted-foreground"><span className="font-medium text-foreground">Evidence: </span>{sg.evidence}</p>
+                        {sg.caveats.length > 0 && <p className="mt-0.5 text-amber-800 dark:text-amber-300"><span className="font-medium">Both readings carry: </span>{sg.caveats.join(" ")}</p>}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {cohortResult.notes.length > 0 && (
                   <div className="rounded-lg border border-border bg-muted/20 p-3 text-xs space-y-1">
                     {cohortResult.notes.map((n, i) => <p key={i} className="text-muted-foreground">• {n}</p>)}
@@ -1000,6 +1015,25 @@ export default function ComparisonDeepDive() {
               </div>
             );
           })()}
+
+          {/* C4: suggested actions — rendered verbatim from the API, never derived here */}
+          {ok.suggestions && ok.suggestions.length > 0 && (
+            <div className="rounded-lg border border-border bg-card p-3" data-testid="suggestions-panel">
+              <p className="mb-1 text-xs font-semibold">Suggested actions</p>
+              <p className="mb-2 text-[11px] text-muted-foreground">Ranked by the server from the quadrant and roster facts above — every suggestion carries its evidence; nothing is inferred on this page.</p>
+              <div className="space-y-2">
+                {ok.suggestions.map((sg) => (
+                  <div key={sg.rank} className={cn("rounded-md border p-2.5", sg.kind === "high-falling" ? "border-red-400/60 bg-red-500/5" : sg.kind === "low-falling" ? "border-orange-400/50 bg-orange-500/5" : "border-amber-400/50 bg-amber-500/5")} data-testid={`suggestion-${sg.rank}`}>
+                    <p className="text-[11px] font-semibold">#{sg.rank} · {sg.action}</p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground"><span className="font-medium text-foreground">Evidence: </span>{sg.evidence}</p>
+                    {sg.caveats.length > 0 && (
+                      <p className="mt-0.5 text-[11px] text-amber-800 dark:text-amber-300"><span className="font-medium">Caveat: </span>{sg.caveats.join(" ")}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Roster changes — a head's direction can move purely from membership */}
           {ok.rosterChanges && ok.rosterChanges.length > 0 && (

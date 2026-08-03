@@ -312,6 +312,14 @@ router.post("/comparison/export", async (req: Request, res: Response): Promise<v
         for (const rc of result.rosterChanges) rs.addRow([rc.entity, rc.fromFy, rc.toFy, rc.joiners.join(", "), rc.leavers.join(", "), rc.note]);
         rs.getColumn(1).width = 22; rs.getColumn(4).width = 40; rs.getColumn(5).width = 40; rs.getColumn(6).width = 60;
       }
+      if (result.suggestions?.length) {
+        const sg = wb.addWorksheet("Suggestions");
+        writeBasisHeader(sg, result);
+        sg.addRow(["#", "Kind", "Entity", "Measure", "Suggested action", "Evidence", "Caveats"]).font = { bold: true };
+        for (const su of result.suggestions)
+          sg.addRow([su.rank, su.kind, su.entity, su.measureLabel ?? "", su.action, su.evidence, su.caveats.join(" | ")]);
+        sg.getColumn(3).width = 24; sg.getColumn(5).width = 60; sg.getColumn(6).width = 80; sg.getColumn(7).width = 60;
+      }
       if (result.likeForLike?.length) {
         const lf = wb.addWorksheet("Like-for-like");
         writeBasisHeader(lf, result);

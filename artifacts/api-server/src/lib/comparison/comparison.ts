@@ -359,6 +359,23 @@ export type RosterChange = {
   note: string;
 };
 
+/** C4: a server-computed suggested action. The UI renders these verbatim —
+ *  every figure cited is a field here, never re-derived client-side. */
+export type Suggestion = {
+  rank: number;
+  kind: "high-falling" | "low-falling" | "roster-context";
+  entity: string;
+  measure?: string;
+  measureLabel?: string;
+  action: string;
+  /** The exact figures the suggestion rests on, in plain words. */
+  evidence: string;
+  level?: number;
+  direction?: number;
+  /** Caveats that MUST travel with the suggestion (roster changes, ambiguity). */
+  caveats: string[];
+};
+
 export type ComparisonResponse = {
   blocked: false;
   basis: {
@@ -379,6 +396,8 @@ export type ComparisonResponse = {
   /** Mode C: joiners/leavers per head when periods span FYs — a head's direction
    *  can move purely from membership. */
   rosterChanges?: RosterChange[];
+  /** C4: ranked suggested actions — high-falling first, always with evidence. */
+  suggestions?: Suggestion[];
   /** Head groups: headline vs like-for-like achievement (guard 8). */
   likeForLike?: {
     entity: string;
@@ -973,6 +992,63 @@ export async function runComparison(req: ComparisonRequest): Promise<ComparisonR
     else notes.push("roster changed between compared years for: " + [...new Set(rosterChanges.map((r) => r.entity))].join(", ") + " — see rosterChanges before reading a head's direction as performance");
   }
 
+  // ── C4: suggestion layer — built ONLY from eligible quadrant entries and
+  // roster facts already computed above; nothing here invents a new figure. ──
+  let suggestions: Suggestion[] | undefined;
+  if (quadrants?.length || rosterChanges?.length) {
+    suggestions = [];
+    const rosterByEntity = new Map<string, RosterChange[]>();
+    for (const rc of rosterChanges ?? []) {
+      const list = rosterByEntity.get(rc.entity) ?? [];
+      list.push(rc); rosterByEntity.set(rc.entity, list);
+    }
+    const rowOf = (measure: string, entity: string) =>
+      matrix.find((r) => r.measure === measure && r.entity === entity);
+    for (const q of quadrants ?? []) {
+      const falling = q.groups.filter((g) => g.quadrant === "high-falling" || g.quadrant === "low-falling");
+      for (const g of falling) {
+        for (const e of g.entities) { // already sorted steepest fall first
+          const row = rowOf(q.measure, e.entity);
+          // Guard 7 marks unnormalised measures rankEligible:false under the
+          // tenure guard — a median-relative suggestion from such a row would
+          // assert exactly the ranking the guard forbids. Skip it.
+          if (row?.rankEligible === false) continue;
+          const t = row?.trend;
+          const caveats: string[] = [];
+          for (const rc of rosterByEntity.get(e.entity) ?? []) caveats.push(rc.note);
+          suggestions.push({
+            rank: 0, // assigned after global sort
+            kind: g.quadrant === "high-falling" ? "high-falling" : "low-falling",
+            entity: e.entity, measure: q.measure, measureLabel: q.measureLabel,
+            action: g.quadrant === "high-falling"
+              ? `Review ${e.entity} first — ${q.measureLabel} is still above the group median but falling; this is the cheapest moment to intervene.`
+              : `Put ${e.entity} on the intervention list — ${q.measureLabel} is below the group median and still falling.`,
+            evidence: `level ${e.level} (${t?.levelPeriod ?? "latest period"}${t?.levelIsPartial ? ", partial period" : ""}) vs group median split ${q.levelSplit}; direction ${e.direction} per period step over ${t?.usedPeriods.join(", ") ?? "complete periods"}. ${t?.directionBasis ?? ""}`.trim(),
+            level: e.level, direction: e.direction,
+            caveats,
+          });
+        }
+      }
+    }
+    // Roster-context suggestions for entities not already covered by a falling entry.
+    const covered = new Set(suggestions.map((sg) => sg.entity));
+    for (const [entity, rcs] of rosterByEntity) {
+      if (covered.has(entity)) continue;
+      suggestions.push({
+        rank: 0, kind: "roster-context", entity,
+        action: `Read ${entity}'s trend with the roster change in mind before acting on it.`,
+        evidence: rcs.map((rc) => `${rc.fromFy}→${rc.toFy}: ${rc.joiners.length} joined, ${rc.leavers.length} left`).join("; "),
+        caveats: rcs.map((rc) => rc.note),
+      });
+    }
+    // Order: high-falling (steepest fall first), then low-falling, then roster-context.
+    const kindOrder = { "high-falling": 0, "low-falling": 1, "roster-context": 2 } as const;
+    suggestions.sort((a, b) => kindOrder[a.kind] - kindOrder[b.kind] || (a.direction ?? 0) - (b.direction ?? 0));
+    suggestions = suggestions.slice(0, 12);
+    suggestions.forEach((sg, i) => { sg.rank = i + 1; });
+    if (suggestions.length === 0) suggestions = undefined;
+  }
+
   guards.sort((a, b) => a.id - b.id);
 
   return {
@@ -987,6 +1063,7 @@ export async function runComparison(req: ComparisonRequest): Promise<ComparisonR
     matrix,
     ...(quadrants ? { quadrants } : {}),
     ...(rosterChanges ? { rosterChanges } : {}),
+    ...(suggestions ? { suggestions } : {}),
     ...(likeForLike.length > 0 ? { likeForLike } : {}),
     notes,
   };
