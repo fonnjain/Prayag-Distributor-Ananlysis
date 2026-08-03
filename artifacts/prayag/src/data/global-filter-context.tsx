@@ -31,7 +31,7 @@ export const QUARTER_RANGES: Record<"q1"|"q2"|"q3"|"q4", [FiscalMonthIdx, Fiscal
   q4: [9, 11],
 };
 
-const DEFAULT_FY = "2026-27";
+export const DEFAULT_FY = "2026-27";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

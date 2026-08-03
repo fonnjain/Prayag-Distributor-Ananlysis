@@ -24,6 +24,7 @@ import {
   ShieldAlert,
   Info,
   Loader2,
+  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -494,6 +495,15 @@ export default function WarningSystem() {
           </Select>
         </div>
         <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">FY {fy}</span>
+        <a
+          href={`${API}/warnings/export?fy=${encodeURIComponent(fy)}&stateHead=${encodeURIComponent(stateHead)}`}
+          download
+          className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/40"
+          data-testid="button-export-excel-warnings"
+        >
+          <Download className="w-3.5 h-3.5" />
+          Export Excel
+        </a>
         <Button
           variant="outline"
           size="sm"

@@ -193,6 +193,141 @@ router.get("/warnings", async (req, res) => {
   }
 });
 
+// ── Excel export ─────────────────────────────────────────────────────────────
+// GET /api/warnings/export?fy=&stateHead= — the same payload as /warnings,
+// rendered as an xlsx workbook (Info + Team Summary + Members + Warnings).
+
+const HEADER_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8EDF5" } } as const;
+const MAX_CONCURRENT_EXPORTS = 2;
+let activeExports = 0;
+
+router.get("/warnings/export", async (req, res) => {
+  const fy =
+    typeof req.query.fy === "string" && req.query.fy.trim()
+      ? req.query.fy.trim()
+      : "2026-27";
+  const stateHeadRaw =
+    typeof req.query.stateHead === "string" ? req.query.stateHead.trim() : "";
+  if (!stateHeadRaw) {
+    res.status(400).json({ error: "stateHead query parameter is required" });
+    return;
+  }
+  if (activeExports >= MAX_CONCURRENT_EXPORTS) {
+    res.status(429).json({ error: "Another export is already running — try again in a few seconds." });
+    return;
+  }
+  activeExports++;
+  try {
+    const ExcelJS = (await import("exceljs")).default;
+    const p = await buildWarningsResponse(fy, stateHeadRaw);
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "Prayag Sales Intelligence";
+
+    const addSheet = (
+      name: string,
+      columns: Array<{ header: string; key: string; width?: number }>,
+      rows: Array<Record<string, unknown>>,
+    ) => {
+      const ws = wb.addWorksheet(name);
+      ws.columns = columns.map((c) => ({ header: c.header, key: c.key, width: c.width ?? 18 }));
+      ws.getRow(1).eachCell((cell) => {
+        cell.font = { bold: true };
+        cell.fill = HEADER_FILL;
+      });
+      for (const r of rows) ws.addRow(columns.map((c) => r[c.key] ?? ""));
+      ws.views = [{ state: "frozen", ySplit: 1 }];
+    };
+
+    const info = wb.addWorksheet("Info");
+    info.columns = [{ width: 28 }, { width: 80 }];
+    const infoRows: Array<[string, string]> = [
+      ["Page", "Warning System — field team performance warnings"],
+      ["FY", p.fy],
+      ["State Head", p.stateHead],
+      ["YTD elapsed", `${(p.elapsedFraction * 100).toFixed(1)}%`],
+      ["Total retailers", p.teamSummary.totalRetailers.toLocaleString()],
+      ["Unassigned retailers", p.teamSummary.unassignedRetailers.toLocaleString()],
+      ["Visits to unassigned", p.teamSummary.visitsToUnassigned.toLocaleString()],
+      ["Members with sheet", String(p.teamSummary.membersWithSheet)],
+      ["Members without sheet", String(p.teamSummary.membersWithoutSheet)],
+      ["Note", "One row per member per warning on the Warnings sheet. Suppressed = collapsed beneath a root cause; N/A = metric not computable, absent is not zero."],
+    ];
+    for (const [k, v] of infoRows) {
+      const row = info.addRow([k, v]);
+      row.getCell(1).font = { bold: true };
+    }
+
+    addSheet("Members", [
+      { header: "Member", key: "name", width: 30 },
+      { header: "Has sheet", key: "hasSheet", width: 10 },
+      { header: "Retailers", key: "retailers", width: 11 },
+      { header: "Unassigned", key: "unassigned", width: 11 },
+      { header: "Working days", key: "workingDays", width: 13 },
+      { header: "RED", key: "red", width: 7 },
+      { header: "ORANGE", key: "orange", width: 9 },
+      { header: "YELLOW", key: "yellow", width: 9 },
+      { header: "Suppressed", key: "suppressed", width: 11 },
+    ], p.members.map((m) => ({
+      name: m.name,
+      hasSheet: m.hasMappedSheet ? "Yes" : "No",
+      retailers: m.retailersTotal ?? "",
+      unassigned: m.unassignedCount ?? "",
+      workingDays: m.workingDaysActual ?? "",
+      red: m.rootWarnings.filter((w) => w.severity === "RED").length,
+      orange: m.rootWarnings.filter((w) => w.severity === "ORANGE").length,
+      yellow: m.rootWarnings.filter((w) => w.severity === "YELLOW").length,
+      suppressed: m.suppressedCount,
+    })));
+
+    const warningRows: Array<Record<string, unknown>> = [];
+    for (const m of p.members) {
+      const push = (w: (typeof m.rootWarnings)[number], kind: string) =>
+        warningRows.push({
+          member: m.name,
+          kind,
+          code: w.code,
+          title: w.title,
+          severity: w.severity,
+          trend: w.trend ?? "",
+          metric: w.metric.formatted,
+          action: w.notAvailableReason ?? w.suggestedAction,
+          suppressedBy: w.suppressedBy ?? "",
+        });
+      for (const w of m.rootWarnings) push(w, "Root");
+      for (const w of m.jFlags) push(w, "Info flag");
+      for (const w of m.suppressedWarnings) push(w, "Suppressed");
+    }
+    addSheet("Warnings", [
+      { header: "Member", key: "member", width: 28 },
+      { header: "Kind", key: "kind", width: 11 },
+      { header: "Code", key: "code", width: 7 },
+      { header: "Warning", key: "title", width: 44 },
+      { header: "Severity", key: "severity", width: 10 },
+      { header: "Trend", key: "trend", width: 11 },
+      { header: "Metric", key: "metric", width: 22 },
+      { header: "Suggested action / reason", key: "action", width: 70 },
+      { header: "Suppressed by", key: "suppressedBy", width: 13 },
+    ], warningRows);
+
+    const buf = await wb.xlsx.writeBuffer();
+    const safeHead = p.stateHead.replace(/[^A-Za-z0-9]+/g, "_");
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="Warnings_${fy}_${safeHead}_${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    res.send(Buffer.from(buf));
+  } catch (err) {
+    if (err instanceof SnapshotHttpError) {
+      res.status(err.status).json(err.body);
+      return;
+    }
+    if (respondIfQuotaError(err, res)) return;
+    req.log?.error({ err }, "warnings export: error");
+    res.status(500).json({ error: "Export failed" });
+  } finally {
+    activeExports--;
+  }
+});
+
 // Full live build of the warnings payload. Pure of caches/snapshots — errors
 // are thrown as SnapshotHttpError so the route (and only the blocking path)
 // can map them to HTTP responses; background refreshes just log them.

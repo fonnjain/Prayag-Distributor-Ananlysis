@@ -36,7 +36,7 @@ const FY_RE = /^\d{4}-\d{2}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH_LABEL_RE = /^[A-Z][a-z]{2}-\d{2}$/;
 
-function parseJsonArray(raw: unknown): string[] | undefined {
+export function parseJsonArray(raw: unknown): string[] | undefined {
   if (typeof raw !== "string" || raw === "") return undefined;
   try {
     const v = JSON.parse(raw);
@@ -67,7 +67,6 @@ function parseFilter(query: Record<string, unknown>, res: import("express").Resp
 router.get("/company-reports", async (req, res) => {
   const rawFy = typeof req.query.fy === "string" ? req.query.fy : "2026-27";
   const rawAsOf = typeof req.query.asOf === "string" ? req.query.asOf : undefined;
-
   if (!FY_RE.test(rawFy)) {
     res.status(400).json({ error: "Invalid fy — expected YYYY-YY" });
     return;

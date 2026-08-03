@@ -162,10 +162,13 @@ export function CompanyReportFilterBar({
   fy,
   value,
   onChange,
+  showCustomers = true,
 }: {
   fy: string;
   value: EntityFilterValue;
   onChange: (next: EntityFilterValue) => void;
+  /** Hide the Distributor level for pages whose data has no distributor dimension. */
+  showCustomers?: boolean;
 }) {
   const [tree, setTree] = useState<FilterTree | null>(null);
   const [error, setError] = useState(false);
@@ -241,13 +244,15 @@ export function CompanyReportFilterBar({
         selected={value.states}
         onChange={(states) => onChange({ ...value, states })}
       />
-      <MultiSelect
-        label="Distributor"
-        options={customerOptions}
-        selected={value.customers}
-        onChange={(customers) => onChange({ ...value, customers })}
-        searchable
-      />
+      {showCustomers && (
+        <MultiSelect
+          label="Distributor"
+          options={customerOptions}
+          selected={value.customers}
+          onChange={(customers) => onChange({ ...value, customers })}
+          searchable
+        />
+      )}
       {hasEntityFilter(value) && (
         <button
           className="text-[11px] text-muted-foreground underline hover:text-foreground"

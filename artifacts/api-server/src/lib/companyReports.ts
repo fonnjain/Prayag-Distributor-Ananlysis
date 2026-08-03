@@ -205,23 +205,27 @@ export type CompanyReportsPayload = {
   monthlyPrimary: Array<{ label: string; amount: number; byHead: Record<string, number> }>;
 };
 
-// ── Main builder ──────────────────────────────────────────────────────────────
-
+async function resolvePriorFilter(
+  fy: string,
+  filter?: CompanyReportsFilter,
+): Promise<CompanyReportsFilter | undefined> {
+  if (!filter || !(filter.heads?.length || filter.states?.length)) return filter;
+  const custRows = await db.selectDistinct({ customer: sql<string>`coalesce(${saleLines.customer}, '')` })
+    .from(saleLines)
+    .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current"), ...entityConds(filter)));
+  const customers = custRows.map((r) => r.customer).filter(Boolean);
+  // Empty resolution would mean "IN ()" (invalid SQL) — use an impossible
+  // sentinel so the prior year correctly returns nothing.
+  return { customers: customers.length > 0 ? customers : ["\u0000none"] };
+}
 export async function buildCompanyReports(
   fy: string,
   asOfDate?: string,
   filter?: CompanyReportsFilter,
 ): Promise<CompanyReportsPayload> {
   const priorFyStr = computePriorFy(fy);
-  let { current: likeMonths, prior: likeMonthsPrior } = await computeLikeMonths(fy);
-  // Month filter: intersect the requested labels with the complete like months
-  // so RULE 1 (like months) still holds under any sub-year selection.
-  if (filter?.months?.length) {
-    const wanted = new Set(filter.months);
-    const keep = likeMonths.map((m, i) => [m, likeMonthsPrior[i]] as const).filter(([m]) => wanted.has(m));
-    likeMonths = keep.map(([m]) => m);
-    likeMonthsPrior = keep.map(([, p]) => p);
-  }
+  const like = await computeLikeMonths(fy);
+  const { likeMonths, likeMonthsPrior } = applyMonthFilter(like.current, like.prior, filter);
   const today = asOfDate ?? new Date().toISOString().slice(0, 10);
 
   if (likeMonths.length === 0) {
@@ -237,21 +241,8 @@ export async function buildCompanyReports(
     return empty;
   }
 
-  // Prior-FY entity scope: head/state filters describe the CURRENT FY's
-  // territory tree, but historical head/state columns are backfilled per
-  // customer and can disagree for reassigned parties. To keep both years on
-  // the same population, resolve heads/states to the current-FY customer set
-  // and filter the prior FY by those customers only.
-  let priorFilter = filter;
-  if (filter && (filter.heads?.length || filter.states?.length)) {
-    const custRows = await db.selectDistinct({ customer: sql<string>`coalesce(${saleLines.customer}, '')` })
-      .from(saleLines)
-      .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current"), ...entityConds(filter)));
-    const customers = custRows.map((r) => r.customer).filter(Boolean);
-    // Empty resolution would mean "IN ()" (invalid SQL) — use an impossible
-    // sentinel so the prior year correctly returns nothing.
-    priorFilter = { customers: customers.length > 0 ? customers : ["\u0000none"] };
-  }
+  // Prior-FY entity scope — see resolvePriorFilter.
+  const priorFilter = await resolvePriorFilter(fy, filter);
 
   // All DB queries run in parallel
   const [
@@ -626,4 +617,16 @@ async function queryMonthlyByHead(fyStr: string, filter?: CompanyReportsFilter) 
     head: sql<string>`coalesce(${saleLines.headCanon}, 'Unmapped')`,
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
   }).from(saleLines).where(and(eq(saleLines.fy, fyStr), eq(saleLines.versionStatus, "current"), ...entityConds(filter))).groupBy(sql`1, 2`);
+}
+
+
+function applyMonthFilter(
+  likeMonths: string[],
+  likeMonthsPrior: string[],
+  filter?: CompanyReportsFilter,
+): { likeMonths: string[]; likeMonthsPrior: string[] } {
+  if (!filter?.months?.length) return { likeMonths, likeMonthsPrior };
+  const wanted = new Set(filter.months);
+  const keep = likeMonths.map((m, i) => [m, likeMonthsPrior[i]] as const).filter(([m]) => wanted.has(m));
+  return { likeMonths: keep.map(([m]) => m), likeMonthsPrior: keep.map(([, p]) => p) };
 }

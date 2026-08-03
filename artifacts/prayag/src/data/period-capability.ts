@@ -34,8 +34,6 @@ const PAGE_CAPABILITIES: Record<string, PeriodCapability> = {
   // Source is YTD-only or the page has not yet been wired for monthly slicing.
   // Move to FULL after fixing, one page at a time (PA2 priority order).
   "overview":                "FY_ONLY",
-  "regional":                "FY_ONLY",
-  "resources":               "FY_ONLY",   // Coverage
   "products":                "FY_ONLY",
   "momentum":                "FY_ONLY",
   "growth":                  "FY_ONLY",
@@ -51,6 +49,8 @@ const PAGE_CAPABILITIES: Record<string, PeriodCapability> = {
 
   // ── NONE — not period-scoped at all, by design ────────────────────────────
   "warnings":                "NONE",  // always current FY, independent of global filter
+  "regional":                "NONE",  // current-FY order-book snapshot only — no FY dimension in source
+  "resources":               "NONE",  // Coverage — roster snapshot only, no FY dimension in source
   "comparison":              "NONE",  // page has its own period builder (C2)
   "targets":                 "NONE",  // local FY selector inside the component
   "data-health":             "NONE",  // local FY selector inside the component
