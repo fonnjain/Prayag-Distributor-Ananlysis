@@ -1162,8 +1162,8 @@ export async function buildManagementWorkbook(
             total: true,
           },
       ordersMissingKey
-        ? { header: `Total Dealer ${s}`, kind: "int", missing: ordersMissingKey }
-        : { header: `Total Dealer ${s}`, kind: "int", get: (r) => ord(r, (x) => x.totalRetailers), total: true },
+        ? { header: `Total Retailers ${s}`, kind: "int", missing: ordersMissingKey }
+        : { header: `Total Retailers ${s}`, kind: "int", get: (r) => ord(r, (x) => x.totalRetailers), total: true },
       targetsMissingKey
         ? { header: `Business Plan ${s}`, kind: "money", missing: targetsMissingKey }
         : {

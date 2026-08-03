@@ -1,0 +1,114 @@
+# Distributor Deep Dive — works for one head of twelve
+
+*Diagnose before fixing. And one question matters more than the fix.*
+
+---
+
+## The message does not match the roster
+
+> *"0 member sheets loaded, 2 not yet mapped"* — for **Biju C.O**, who has **12 members**.
+
+If the page knew about 12 and had mapped none, it would say 12. **Saying 2 means it is reading a member list that holds only two** — not the roster, and not what SD9 onboarded.
+
+## Only the first head works
+
+| Head | Members | Sales DD | Distributor DD |
+|---|---|---|---|
+| **Anant Singh** | 13 | works | **works** |
+| Sandeep Dadheech | 74 | onboarded SD1 | **fails** |
+| Syed Aqil Rizvi | 32 | onboarded SD3 | **fails** |
+| Lalan Kumar | 15 | onboarded SD6 | **fails** |
+| Biju C.O + 7 others | 48 | onboarded SD9 | **fails** |
+
+**Anant Singh was the first onboarding, wired directly in the D-series. Every head onboarded through the SD-series fails.**
+
+## The likely cause
+
+The Distributor Deep Dive reads **the same retailer rows** as the Sales Deep Dive — just grouped by Assigned Distributor rather than by member. If Sales works for Sandeep and Distributor does not, **the two pages are reading different member-sheet maps.**
+
+That would be the **fifth** service built locally and then needed everywhere, after the identity registry, the period resolver, the primary period service and `stateCanon`.
+
+---
+
+# The question that matters more than the fix
+
+**SD4, SD7 and SD10 were reported complete, with acceptance figures.**
+
+SD4 required Rizvi's blank group to reconcile to **₹61,57,806 across exactly seven members**. SD7 required Lalan's blank group to be **empty**. SD10 required Nasir's to reconcile to **₹39,73,417**.
+
+**If the page cannot load their sheets, none of those acceptances can have passed against real data.**
+
+That needs answering before anything is rebuilt, because it determines whether this is one broken lookup or three phases that reported success without producing it.
+
+---
+
+```
+Prayag app - Distributor Deep Dive works for Anant Singh only. Diagnose first,
+report before changing anything.
+
+1. WHY DOES IT SAY "2 NOT YET MAPPED" FOR A 12-MEMBER HEAD?
+   Report the member list the Distributor Deep Dive resolves for Biju C.O, and
+   where it reads it from. Then the same for Sandeep Dadheech, Syed Aqil Rizvi
+   and Lalan Kumar.
+
+2. DOES IT READ THE SAME MAP AS THE SALES DEEP DIVE?
+   Report, side by side per head: the member-sheet map the Sales Deep Dive uses
+   and the one the Distributor Deep Dive uses. If they are different objects,
+   that is the fault - the two pages read the SAME retailer rows and differ only
+   in how they group them.
+
+3. WHAT DID SD4, SD7 AND SD10 ACTUALLY RUN AGAINST?
+   Those phases were reported complete with acceptance figures:
+     SD4  Rizvi's blank group reconciles to Rs 61,57,806 across seven members
+     SD7  Lalan's blank group is EMPTY - he has zero direct-dealer business
+     SD10 Nasir Hussain Khan's blank group reconciles to Rs 39,73,417
+   If the page cannot load those members' sheets, those figures cannot have come
+   from real data. Report whether each acceptance was computed or asserted, and
+   what the page returns for each head today.
+   This is not a reprimand - it determines whether this is one broken lookup or
+   three phases that need re-running.
+
+4. THEN FIX IT AS A SHARED SERVICE, NOT A PATCH.
+   One member-sheet resolver, used by the Sales Deep Dive, the Distributor Deep
+   Dive, the SKU Deep Dive, the Warning System, the AI payload and the report
+   generator. Any page that needs a member's retailer rows calls it.
+   This is the fifth time a service has been built locally and then needed
+   everywhere - identity registry, period resolver, primary period service,
+   stateCanon, and now this. Build it shared from the start.
+
+   Report every location that currently resolves a member sheet, and confirm
+   each now calls the shared resolver.
+
+5. THEN RE-VERIFY, PER HEAD, and report the value:
+     member sheets loaded of members on the roster
+     the five Assigned Distributor field states, counted
+     the blank group reconciled against that head's Direct Dealers Order:
+        Anant Singh          Rs 14,49,394
+        Sandeep Dadheech     Rs  1,40,628 - one member only
+        Syed Aqil Rizvi      Rs 61,57,806 - seven members
+        Lalan Kumar          ZERO - his blank group must be EMPTY
+        Nasir Hussain Khan   Rs 39,73,417 - 46 per cent of his booking
+        the remaining heads  report as computed
+     retailer count against the dashboard, with the sheet count beside it where
+       they differ by more than 3
+
+Acceptance:
+  all twelve heads load their member sheets, with the count reported per head
+  the Sales and Distributor pages resolve the SAME map from the SAME service
+  every location resolving a member sheet is listed and confirmed
+  the blank group reconciles per head to the figures above
+  Lalan Kumar's blank group is empty
+  the SD4, SD7 and SD10 acceptance question is answered plainly
+```
+
+---
+
+## Why the shared resolver matters more than the immediate fix
+
+Wiring Biju's twelve sheets into the Distributor page would make this screen work today. **It would leave the same fault waiting for the SKU Deep Dive, the Warning System's new distributor tab, and the AI payload** — all of which need the same rows.
+
+Every one of the four previous local-service extractions was found by a bug rather than by design. This is the fifth, and it is now a predictable pattern rather than a surprise.
+
+---
+
+*Roster and acceptance figures from the live State Head Dashboard, 3 August 2026*

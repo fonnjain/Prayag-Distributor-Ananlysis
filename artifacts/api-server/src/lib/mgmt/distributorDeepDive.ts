@@ -354,14 +354,14 @@ type AnchorShape = {
   primary_anchors?: Record<string, { closedMonths?: string[] } | string | number>;
 };
 /** Return the list of closed month labels for a given FY, e.g. ["Apr-26","May-26","Jun-26"]. */
-function closedMonthsForFy(fy: string): string[] {
+export function closedMonthsForFy(fy: string): string[] {
   const a = readVerifyAnchors<AnchorShape>().primary_anchors?.[fy];
   if (!a || typeof a !== "object") return [];
   return (a as { closedMonths?: string[] }).closedMonths ?? [];
 }
 
 /** "2026-27" → "2025-26" */
-function prevFyLabel(fy: string): string {
+export function prevFyLabel(fy: string): string {
   const p = fy.split("-");
   if (p.length !== 2) return fy;
   const start = parseInt(p[0], 10);
@@ -370,7 +370,7 @@ function prevFyLabel(fy: string): string {
 
 /** Map closed months of current FY to same calendar months in prior FY.
  *  e.g. ["Apr-26","Jun-26"] → ["Apr-25","Jun-25"] */
-function toPriorYearMonths(months: string[]): string[] {
+export function toPriorYearMonths(months: string[]): string[] {
   return months.map((m) => {
     const parts = m.split("-");
     if (parts.length !== 2) return m;
@@ -1530,8 +1530,30 @@ export async function loadDistributorDeepDiveResilientWith(
     if (!isDegradedLoad(result)) return result; // e.g. no sheets mapped yet
     // Degraded (some/all member sheets failed) → prefer the last saved snapshot.
     const snap = await serveSnapshot(`degraded: ${result.membersFailed} sheet(s) failed, ${result.membersLoaded} loaded`);
-    // No snapshot yet — serve the partial live payload rather than nothing.
-    return snap ?? result;
+    if (snap) return snap;
+    // No snapshot yet (first-ever load of this head) — retry the live build
+    // once after a short pause; a cold quota burst often clears immediately.
+    // Without this, a first visit can render "0 sheets loaded" and look like
+    // a mapping fault when it is a transient Sheets failure.
+    logger.warn(
+      { fy, stateHead: selectedStateHead, failed: result.membersFailed, loaded: result.membersLoaded },
+      "distributorDeepDive: degraded load with no snapshot — retrying once",
+    );
+    await deps.sleep(2_000);
+    let retry: DistributorDeepDiveResult | null = null;
+    try {
+      retry = await deps.build(fy, selectedStateHead);
+    } catch {
+      /* fall through to the original partial payload */
+    }
+    if (retry && isCompleteLoad(retry)) {
+      deps.staleMap.delete(key);
+      void deps.saveSnap(key, retry);
+      return retry;
+    }
+    // Serve whichever partial pass read more sheets.
+    if (retry && retry.membersLoaded > result.membersLoaded) return retry;
+    return result;
   }
 
   // The build itself threw (e.g. the Data-tab read failed hard).

@@ -516,7 +516,7 @@ export default function CombinedPerformanceDashboard() {
                   secTotal
                     ? secTotal.planRecorded === 0
                       ? "no actuals recorded yet"
-                      : `${fmtNum(secTotal.totalDealers)} total dealers`
+                      : `${fmtNum(secTotal.totalDealers)} total retailers`
                     : undefined
                 }
               />

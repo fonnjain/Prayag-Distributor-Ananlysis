@@ -1,0 +1,156 @@
+# W2 — Distributor warnings
+
+*Answering the question the placeholder asks, then correcting the proposed rule set.*
+
+---
+
+# The answer: there is no sub-dealer level
+
+**The channel is two levels deep.**
+
+```
+Prayag
+ ├── Distributor ──→ Retailer          the main route
+ └── Direct Dealer                     PARALLEL - no distributor above them
+```
+
+**Evidence, all from the data:**
+
+1. **Column K "Total Dealer" sums to 11,536** — that is the Secondary Retail Reach figure on the Overview. It counts **retailers**.
+2. **Member sheets carry "Assigned Distributor" against each retailer.** One join, one level. There is no third column pointing at anything between them.
+3. **"Direct Dealers Order" is column J**, a separate measure from secondary OB — business bought **direct from Prayag**, not through a distributor.
+
+## But "dealer" means two different things, and that needs fixing
+
+| Term | Level | Source |
+|---|---|---|
+| **Direct Dealer** | **same level as a distributor** | column J, blank Assigned Distributor |
+| **Total Dealer** (col K) | **retailer / outlet level** | column K, a non-deduplicated sum |
+
+**A direct dealer is not a dealer beneath a distributor. It is a customer of Prayag with no distributor above it.** That collision is worth renaming before more is built on top of it — `Total Dealer` should read `Total Retailers` or `Retail Outlets`.
+
+---
+
+# The proposed rule set needs correcting
+
+**A1–A4 do not apply to distributors.** They are target warnings, and **Prayag sets targets for salespeople, not for distributors.** There is no distributor target anywhere in the data. Applying A1 to a distributor would require inventing one.
+
+The distributor relationship is commercial, not a performance-managed one. **The warnings should be about the health of the relationship**, not about whether someone hit a number nobody gave them.
+
+---
+
+```
+Prayag app - Warning System, Distributors tab. Same global rules.
+
+FIRST, THE ANSWER TO THE QUESTION IN THE PLACEHOLDER:
+There is NO sub-dealer level. The channel is Prayag -> Distributor -> Retailer,
+with Direct Dealers as a PARALLEL branch buying straight from Prayag with no
+distributor above them. Column K "Total Dealer" counts RETAILERS - it sums to
+11,536, the Secondary Retail Reach figure. Rename it "Total Retailers" so it
+stops colliding with "Direct Dealer", which sits at the distributor level.
+
+DROP A1-A4 FROM THIS TAB. They are target warnings and distributors have no
+targets. Do not derive one.
+
+BUILD THESE INSTEAD - all computable from data already loaded.
+
+RECENCY AND FLOW
+  R1  DAYS SINCE LAST ORDER
+      today - MAX(invoice date). Red / Orange / Yellow banded against that
+      distributor's OWN historical order interval, not a fixed number of days.
+      A distributor who orders monthly and a distributor who orders weekly are
+      not comparable on a single threshold.
+  R2  FILL RATE FALLING
+      dispatch / order booking. Falling means orders are being taken and not
+      served - a supply signal, not a distributor problem.
+  R3  PENDING BUILD-UP
+      pending as a share of that distributor's booking, and its direction.
+  F1  FLOW GAP
+      primary in-flow minus secondary out-flow, same period.
+      STATE BOTH READINGS EVERY TIME: stock building at the distributor, OR
+      business moving outside the attributed channel. No distributor stock
+      statements exist, so they cannot be distinguished.
+      NEVER phrase this as an accusation.
+
+RANGE AND VALUE
+  B1  BREADTH NARROWING
+      distinct codes bought falling versus the prior comparable period.
+      Rank BY VALUE, not by code count - losing 5 high-value codes matters
+      more than losing 20 marginal ones.
+  B2  LOST CODES
+      bought in the prior period, absent now. Ranked by prior-period value.
+      Proven demand, known customer - the warmest recovery list available.
+  D1  DISCOUNT ABOVE NORM
+      this distributor's effective discount against the territory norm for the
+      same codes. The VARIANCE is the finding - one distributor materially
+      below another on the same item is a commercial conversation.
+  D2  DISCOUNT CREEP
+      effective discount rising while volume is flat or falling.
+
+CONCENTRATION - BOTH DIRECTIONS
+  G2  PRAYAG'S DEPENDENCE
+      this distributor's share of party order booking within their state.
+      A single distributor carrying most of a state is Prayag's risk.
+  G3  THE DISTRIBUTOR'S OWN CONCENTRATION
+      their top-3 and top-5 retailer share, and effective retailers
+      (10,000 / HHI). Their fragility becomes Prayag's one step later.
+
+THE RETAILER BASE BENEATH THEM
+  E1  AT-RISK RETAILERS
+      bought last year, nothing yet this year, beneath this distributor.
+      Sized by prior-year value. NOT churn on a partial year.
+  E2  UNASSIGNED IN THEIR DISTRICTS
+      retailers in districts this distributor serves who are assigned to
+      nobody. 96.0 per cent of assigned retailers are active against 5.0 per
+      cent of unassigned - this is an ADMINISTRATIVE fix and the fastest
+      available.
+  E3  ACTIVE SHARE FALLING
+      active retailers beneath them as a share of total, over time.
+
+REAL TERMS
+  V1  REAL DECLINE
+      growth below that distributor's own segment-weighted price index.
+      The company index is 1.069 but the spread runs CPVC 1.007 to water tank
+      1.181 - use their own mix, never one company figure.
+      Three consecutive years of real decline company-wide makes this the
+      warning most likely to fire, and the most honest.
+
+GUARDS - the same discipline as the member tab:
+  a distributor with too few orders to establish an interval is NOT flagged on
+    R1 - report "insufficient history"
+  concentration and correlation suppressed below a stated sample size
+  project and institutional customers EXCLUDED from territory baselines and
+    shown as their own channel
+  every cross-year money figure shows real terms with the index named
+  a partial period is excluded from any rate
+  frozen years state the anchor used
+
+SUPPRESSION - a root cause hides its symptoms, as on the member tab:
+  R1 at Red (no orders for a long time) hides B1, D2, E3 - a dormant
+    distributor will trivially show narrowing breadth and falling activity
+  insufficient history hides everything derived from a trend
+
+Acceptance - show the computed result:
+  the Total Dealer column is renamed and the direct-dealer collision is gone
+  A1-A4 do not appear on this tab
+  R1 bands against each distributor's own order interval, not a fixed day count
+  the flow gap states both readings and is not phrased as an accusation
+  breadth narrowing is ranked by value
+  G2 names the largest distributor by state share
+  E2 links to the assignment gap list
+  V1 uses each distributor's own segment mix, not the company index
+  a distributor with insufficient history is reported as such, not flagged
+  suppression works - a dormant distributor shows R1 and not five symptoms
+```
+
+---
+
+## The two flags I would build first
+
+**E2 — unassigned retailers in their districts.** It is the strongest relationship in the project, it is an administrative fix rather than a selling one, and it is the fastest thing anyone can act on.
+
+**V1 — real decline.** Three consecutive years of real decline company-wide means this will fire widely, and it is the honest reading that nominal figures hide.
+
+---
+
+*Channel structure and figures verified against the live dashboard and the frozen registers, 3 August 2026*

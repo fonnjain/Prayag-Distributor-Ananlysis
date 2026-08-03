@@ -193,6 +193,44 @@ router.get("/warnings", async (req, res) => {
   }
 });
 
+// ── W2: Distributor warnings ─────────────────────────────────────────────────
+// GET /api/warnings/distributors?fy=&stateHead= — relationship-health warnings
+// for the distributor channel. No target warnings (A1–A4): distributors have
+// no targets, and none are derived.
+
+router.get("/warnings/distributors", async (req, res) => {
+  const fy =
+    typeof req.query.fy === "string" && req.query.fy.trim()
+      ? req.query.fy.trim()
+      : "2026-27";
+  const stateHeadRaw =
+    typeof req.query.stateHead === "string" ? req.query.stateHead.trim() : "";
+  if (!stateHeadRaw) {
+    res.status(400).json({ error: "stateHead query parameter is required" });
+    return;
+  }
+  req.log?.info({ fy, stateHead: stateHeadRaw }, "warnings/distributors: request");
+  try {
+    const { buildDistributorWarnings } = await import("../lib/mgmt/warnings/distributorEngine.js");
+    const response = await serveWithSnapshot({
+      key: `warnings-dist|v2|${fy}|${stateHeadRaw.toLowerCase()}`,
+      ttlMs: WARNINGS_TTL_MS,
+      build: () => buildDistributorWarnings(fy, stateHeadRaw),
+      log: req.log,
+      frozen: isFrozen(fy),
+    });
+    res.json(response);
+  } catch (err) {
+    if (err instanceof SnapshotHttpError) {
+      res.status(err.status).json(err.body);
+      return;
+    }
+    if (respondIfQuotaError(err, res)) return;
+    req.log?.error({ err }, "warnings/distributors: error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ── Excel export ─────────────────────────────────────────────────────────────
 // GET /api/warnings/export?fy=&stateHead= — the same payload as /warnings,
 // rendered as an xlsx workbook (Info + Team Summary + Members + Warnings).

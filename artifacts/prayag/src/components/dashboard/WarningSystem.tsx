@@ -89,6 +89,44 @@ interface WarningsResponse {
   meta?: { snapshotSavedAt?: number; refreshing?: boolean };
 }
 
+// ── W2: distributor warnings types (mirror backend DistributorWarningsResponse) ──
+
+interface DistributorWarnings {
+  normKey: string;
+  name: string;
+  retailerCount: number;
+  activeCount: number;
+  orderBooking: number;
+  obSharePct: number | null;
+  hasFlows: boolean;
+  insufficientHistory: boolean;
+  daysSinceLastOrder: number | null;
+  rootWarnings: WarningCard[];
+  suppressedWarnings: WarningCard[];
+  suppressedCount: number;
+}
+
+interface DistributorWarningsResponse {
+  fy: string;
+  stateHead: string;
+  availableStateHeads: string[];
+  period: string;
+  channelNote: string;
+  distributors: DistributorWarnings[];
+  directDealer: { retailerCount: number; dashboardOb: number | null } | null;
+  summary: {
+    distributorCount: number;
+    withWarnings: number;
+    largestShare: { name: string; sharePct: number } | null;
+    totalRetailers: number;
+    assignmentGapRetailers: number;
+    indexBasis: string;
+  };
+  membersFailed: number;
+  stale?: boolean;
+  meta?: { snapshotSavedAt?: number; refreshing?: boolean };
+}
+
 // ── Severity helpers ──────────────────────────────────────────────────────────
 
 const SEV_CONFIG: Record<
@@ -401,6 +439,92 @@ function Stat({
   );
 }
 
+// ── W2: Distributor panel ─────────────────────────────────────────────────────
+
+function DistributorPanel({ dist }: { dist: DistributorWarnings }) {
+  const [showSuppressed, setShowSuppressed] = useState(false);
+  const reds = dist.rootWarnings.filter((w) => w.severity === "RED").length;
+  const oranges = dist.rootWarnings.filter((w) => w.severity === "ORANGE").length;
+  const yellows = dist.rootWarnings.filter((w) => w.severity === "YELLOW").length;
+  const realWarnings = dist.rootWarnings.filter((w) => w.severity !== "NOT_AVAILABLE");
+
+  return (
+    <Card className="overflow-hidden" data-testid={`card-distributor-${dist.normKey}`}>
+      <CardHeader className="px-4 py-3 bg-muted/20 border-b">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center shrink-0">
+              <Store className="w-3.5 h-3.5 text-muted-foreground" />
+            </div>
+            <div className="min-w-0">
+              <p className="font-semibold text-sm truncate">{dist.name}</p>
+              <p className="text-[11px] text-muted-foreground">
+                {dist.retailerCount} retailers · {dist.activeCount} active
+                {dist.obSharePct != null ? ` · ${trunc2(dist.obSharePct)}% of party OB` : ""}
+                {dist.daysSinceLastOrder != null
+                  ? ` · last order ${dist.daysSinceLastOrder}d ago`
+                  : ""}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            {reds > 0 && (
+              <span className="text-[11px] font-bold text-red-600 bg-red-100 rounded px-1.5 py-0.5">
+                {reds} RED
+              </span>
+            )}
+            {oranges > 0 && (
+              <span className="text-[11px] font-bold text-orange-600 bg-orange-100 rounded px-1.5 py-0.5">
+                {oranges} ORG
+              </span>
+            )}
+            {yellows > 0 && (
+              <span className="text-[11px] font-bold text-yellow-700 bg-yellow-100 rounded px-1.5 py-0.5">
+                {yellows} YLW
+              </span>
+            )}
+            {realWarnings.length === 0 && !dist.insufficientHistory && (
+              <span className="text-[11px] font-medium text-green-600 bg-green-100 rounded px-1.5 py-0.5">
+                All clear
+              </span>
+            )}
+            {dist.insufficientHistory && (
+              <span className="text-[11px] font-medium text-muted-foreground bg-muted rounded px-1.5 py-0.5">
+                Insufficient history
+              </span>
+            )}
+          </div>
+        </div>
+      </CardHeader>
+      {(dist.rootWarnings.length > 0 || dist.suppressedWarnings.length > 0) && (
+        <CardContent className="px-4 py-3 space-y-2">
+          {dist.rootWarnings.map((w) => (
+            <WarningCardRow key={w.code} w={w} />
+          ))}
+          {dist.suppressedWarnings.length > 0 && (
+            <>
+              <button
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => setShowSuppressed((s) => !s)}
+                data-testid={`button-suppressed-${dist.normKey}`}
+              >
+                {showSuppressed ? (
+                  <ChevronUp className="w-3 h-3" />
+                ) : (
+                  <ChevronDown className="w-3 h-3" />
+                )}
+                {dist.suppressedCount} suppressed — a root cause hides its symptoms
+              </button>
+              {showSuppressed &&
+                dist.suppressedWarnings.map((w) => <WarningCardRow key={w.code} w={w} dimmed />)}
+            </>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 const API = import.meta.env.BASE_URL.replace(/\/$/, "") + "/api";
@@ -469,6 +593,61 @@ export default function WarningSystem() {
       if (retryTimer.current !== undefined) clearTimeout(retryTimer.current);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── W2: distributor warnings — fetched lazily when the tab is opened ───────
+  const [tab, setTab] = useState("state-heads");
+  const [distData, setDistData] = useState<DistributorWarningsResponse | null>(null);
+  // The head we last successfully fetched for — compared against the SELECTED
+  // head (server may canonicalise casing, so never compare response.stateHead).
+  const [distHead, setDistHead] = useState<string | null>(null);
+  const [distLoading, setDistLoading] = useState(false);
+  const [distError, setDistError] = useState<string | null>(null);
+  const distSeq = useRef(0);
+
+  const loadDist = useCallback(
+    async (sh: string) => {
+      const seq = ++distSeq.current;
+      setDistLoading(true);
+      setDistError(null);
+      try {
+        const res = await fetch(
+          `${API}/warnings/distributors?fy=${encodeURIComponent(fy)}&stateHead=${encodeURIComponent(sh)}`,
+        );
+        if (seq !== distSeq.current) return;
+        if (!res.ok) throw new Error(`Distributor warnings failed (${res.status})`);
+        const json = (await res.json()) as DistributorWarningsResponse;
+        if (seq !== distSeq.current) return;
+        setDistData(json);
+        setDistHead(sh);
+      } catch (e) {
+        if (seq !== distSeq.current) return;
+        setDistError((e as Error).message);
+      } finally {
+        if (seq === distSeq.current) setDistLoading(false);
+      }
+    },
+    [fy],
+  );
+
+  // Fetch when the Distributors tab is first opened or the state head changes.
+  useEffect(() => {
+    if (tab === "distributors" && (!distData || distHead !== stateHead)) {
+      loadDist(stateHead);
+    }
+  }, [tab, stateHead]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const distDataUrl = distData
+    ? `${API}/warnings/distributors?fy=${encodeURIComponent(fy)}&stateHead=${encodeURIComponent(distData.stateHead)}`
+    : null;
+  useSnapshotRefresh(distData?.meta, distDataUrl, (fresh) => {
+    // Only commit a background refresh that still matches the active head.
+    const f = fresh as DistributorWarningsResponse;
+    setDistData((prev) => (prev && prev.stateHead === f.stateHead ? f : prev));
+  });
+
+  // Never render the PREVIOUS head's distributor cards under a new selection —
+  // show the loading state until the matching payload arrives.
+  const distCurrent = distData && distHead === stateHead ? distData : null;
 
   return (
     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -540,7 +719,7 @@ export default function WarningSystem() {
 
       {/* Tabs */}
       {data && (
-        <Tabs defaultValue="state-heads">
+        <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="mb-4">
             <TabsTrigger value="state-heads" className="flex items-center gap-1.5">
               <Users className="w-3.5 h-3.5" />
@@ -591,26 +770,110 @@ export default function WarningSystem() {
             </div>
           </TabsContent>
 
-          {/* ── Distributors tab (W2 placeholder) ─────────────────────── */}
-          <TabsContent value="distributors" className="mt-0">
-            <Card className="border-dashed">
-              <CardContent className="flex flex-col items-center justify-center py-16 text-center gap-3">
-                <AlertTriangle className="w-8 h-8 text-muted-foreground/40" />
-                <div>
-                  <p className="font-semibold text-foreground/70">Distributors tab — coming in W2</p>
-                  <p className="text-sm text-muted-foreground mt-1 max-w-sm">
-                    Will show distributor-level warnings: A1–A4, C4 order recency, G2 single-distributor
-                    dependency, G3 retailer concentration, H1–H3 flow and recency, and E1 at-risk
-                    retailers beneath each distributor.
-                  </p>
-                  <p className="text-xs text-muted-foreground/70 mt-2">
-                    Before building: confirm whether a genuine sub-dealer level exists between distributors
-                    and retailers. In current data, column K "Total Dealer" counts retail outlets — so
-                    dealer = retailer at one level.
-                  </p>
+          {/* ── Distributors tab (W2) ─────────────────────────────────── */}
+          <TabsContent value="distributors" className="mt-0 space-y-4">
+            {distError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {distError}
+              </div>
+            )}
+            {distLoading && !distCurrent && (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground flex items-center gap-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Reading member sheets and registers for {stateHead}'s distributors — the first load
+                  can take a minute or two.
                 </div>
-              </CardContent>
-            </Card>
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="h-24 rounded-xl bg-muted/40 animate-pulse" />
+                ))}
+              </div>
+            )}
+            {distCurrent && (
+              <>
+                <SnapshotBanner meta={distCurrent.meta} />
+                {/* Channel + period note */}
+                <div className="rounded-lg border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground space-y-1">
+                  <p className="flex items-start gap-1.5">
+                    <Info className="w-3.5 h-3.5 shrink-0 mt-px" />
+                    <span>{distCurrent.channelNote}</span>
+                  </p>
+                  <p className="pl-5">
+                    {distCurrent.period} · {distCurrent.summary.indexBasis}
+                  </p>
+                  {distCurrent.membersFailed > 0 && (
+                    <p className="pl-5 text-orange-600">
+                      {distCurrent.membersFailed} member sheet(s) failed to load this pass — figures may
+                      be incomplete.
+                    </p>
+                  )}
+                </div>
+
+                {/* Summary strip */}
+                <Card>
+                  <CardContent className="grid grid-cols-2 sm:grid-cols-5 gap-4 px-4 py-3">
+                    <Stat
+                      label="Distributors"
+                      value={String(distCurrent.summary.distributorCount)}
+                    />
+                    <Stat
+                      label="With warnings"
+                      value={String(distCurrent.summary.withWarnings)}
+                      highlight={distCurrent.summary.withWarnings > 0}
+                    />
+                    <Stat
+                      label="Total Retailers beneath them"
+                      value={distCurrent.summary.totalRetailers.toLocaleString("en-IN")}
+                      note="retail outlets — formerly 'Total Dealer'"
+                    />
+                    <Stat
+                      label="Largest share of party OB"
+                      value={
+                        distCurrent.summary.largestShare
+                          ? `${trunc2(distCurrent.summary.largestShare.sharePct)}%`
+                          : "—"
+                      }
+                      note={distCurrent.summary.largestShare?.name}
+                      highlight={(distCurrent.summary.largestShare?.sharePct ?? 0) >= 40}
+                    />
+                    <Stat
+                      label="Unassigned retailers (E2)"
+                      value={String(distCurrent.summary.assignmentGapRetailers)}
+                      note="administrative fix — see Distributor Deep Dive"
+                      highlight={distCurrent.summary.assignmentGapRetailers > 0}
+                    />
+                  </CardContent>
+                </Card>
+
+                {/* Direct dealer parallel branch */}
+                {distCurrent.directDealer && (
+                  <div className="rounded-lg border border-border bg-muted/10 px-4 py-2.5 text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground/80">
+                      Direct Dealers — parallel branch:
+                    </span>{" "}
+                    {distCurrent.directDealer.retailerCount} buying straight from Prayag with no
+                    distributor above them
+                    {distCurrent.directDealer.dashboardOb != null
+                      ? ` · OB ₹${trunc2(distCurrent.directDealer.dashboardOb / 1e5)} L (Data tab)`
+                      : ""}
+                    . Not covered by these warnings — they have no distributor relationship to
+                    assess.
+                  </div>
+                )}
+
+                {/* Distributor cards */}
+                <div className="space-y-3">
+                  {distCurrent.distributors.map((d) => (
+                    <DistributorPanel key={d.normKey} dist={d} />
+                  ))}
+                  {distCurrent.distributors.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-8">
+                      No distributors found for {distCurrent.stateHead}.
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
           </TabsContent>
         </Tabs>
       )}

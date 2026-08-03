@@ -425,6 +425,7 @@ type DistributorDeepDiveResult = {
   partyObTotal: number;
   membersLoaded: number;
   membersNotMapped: number;
+  membersFailed?: number; // absent in snapshots saved before Aug 2026
   whitespace: TerritoryWhitespace | null;
   concentration: CustomerConcentration | null;
   capacityCheck: CapacityCheck | null;
@@ -2113,9 +2114,27 @@ export default function DistributorDeepDive() {
           <span className="text-xs text-muted-foreground">
             {data.membersLoaded} member sheet{data.membersLoaded !== 1 ? "s" : ""} loaded
             {data.membersNotMapped > 0 && `, ${data.membersNotMapped} not yet mapped`}
+            {(data.membersFailed ?? 0) > 0 && (
+              <span className="text-amber-600 font-medium">
+                {`, ${data.membersFailed} failed to load`}
+              </span>
+            )}
           </span>
         )}
       </div>
+
+      {/* Failed-sheets notice: Google Sheets choked on this pass — the page is
+          incomplete, NOT unmapped. Distinct from the "not yet mapped" count. */}
+      {data && !loading && (data.membersFailed ?? 0) > 0 && (
+        <div
+          className="rounded-md border border-amber-500/30 bg-amber-50/60 px-4 py-3 text-sm text-amber-800 dark:bg-amber-900/10 dark:text-amber-300"
+          data-testid="banner-failed-sheets-distributor-deep-dive"
+        >
+          {data.membersFailed} member sheet{data.membersFailed !== 1 ? "s" : ""} could not be read
+          on this pass (Google Sheets was busy) — the figures below are incomplete. Refresh in a
+          minute to retry.
+        </div>
+      )}
 
       {/* ── Quota wait ─────────────────────────────────────────────── */}
       {quotaWait && <QuotaWaitBanner testId="banner-quota-wait-distributor-deep-dive" />}
