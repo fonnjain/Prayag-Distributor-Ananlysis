@@ -77,6 +77,7 @@ Prayag India — Sales Intelligence: a mobile-first dashboard over live Google S
 ## User preferences
 
 - No emojis anywhere (UI, code, or copy).
+- Figures are never rounded — truncate to exactly two decimal places everywhere in the UI (₹341.149 Cr shows as ₹341.14 Cr). Use `trunc2` / `trunc2IN` / `t2n` from `artifacts/prayag/src/lib/trunc.ts` for all new figure displays; integer counts (retailers, populations) stay whole numbers.
 
 ## Standing constraints
 

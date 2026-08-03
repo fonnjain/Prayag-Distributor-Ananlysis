@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // SKU Deep Dive — Overview section.
 //
 // Shows all 17 canonical segments in a sortable table.
@@ -44,14 +45,14 @@ interface Props {
 }
 
 function fmtCr(n: number): string {
-  return `₹${(n / 1e7).toFixed(2)} Cr`;
+  return `₹${trunc2((n / 1e7))} Cr`;
 }
 
 function fmtGapNet(n: number): string {
   if (n === 0) return "—";
   const cr = n / 1e7;
-  if (cr >= 1) return `₹${cr.toFixed(1)} Cr`;
-  return `₹${(n / 1e5).toFixed(1)} L`;
+  if (cr >= 1) return `₹${trunc2(cr)} Cr`;
+  return `₹${trunc2((n / 1e5))} L`;
 }
 
 export default function SkuOverview({ rows, loading, onDrill, unmapped, summary }: Props) {
@@ -149,7 +150,7 @@ export default function SkuOverview({ rows, loading, onDrill, unmapped, summary 
           </span>
           {unmapped && unmapped.codeCount > 0 && (
             <span className="text-amber-600 dark:text-amber-400">
-              {unmapped.codeCount} unmapped codes ({(unmapped.valueShare * 100).toFixed(1)}% of net)
+              {unmapped.codeCount} unmapped codes ({trunc2((unmapped.valueShare * 100))}% of net)
             </span>
           )}
         </div>
@@ -196,7 +197,7 @@ export default function SkuOverview({ rows, loading, onDrill, unmapped, summary 
                       />
                     </div>
                     <span className="text-xs tabular-nums text-muted-foreground w-8 text-right">
-                      {(row.netShare * 100).toFixed(1)}%
+                      {trunc2((row.netShare * 100))}%
                     </span>
                   </div>
                 </TableCell>
@@ -243,7 +244,7 @@ export default function SkuOverview({ rows, loading, onDrill, unmapped, summary 
                       />
                     </div>
                     <span className="text-xs tabular-nums text-muted-foreground w-10 text-right">
-                      {row.breadthPct.toFixed(1)}%
+                      {trunc2(row.breadthPct)}%
                     </span>
                   </div>
                 </TableCell>

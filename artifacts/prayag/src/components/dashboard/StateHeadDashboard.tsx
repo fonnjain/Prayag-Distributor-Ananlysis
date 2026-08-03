@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 import { LoadingState } from "@/components/ui/loading-state";
 import { QuotaWaitBanner, quotaDelayMs, quotaOrThrow } from "./quotaWait";
 import { SnapshotBanner, useSnapshotRefresh } from "./snapshotRefresh";
@@ -220,12 +221,12 @@ const VIEWS: { id: View; label: string }[] = [
 
 function fmtCr(n: number | null, digits = 2): string {
   if (n == null) return "—";
-  return `\u20b9${(n / 1e7).toFixed(digits)} Cr`;
+  return `\u20b9${trunc2(n / 1e7)} Cr`;
 }
 
 function fmtPct(n: number | null): string {
   if (n == null) return "—";
-  return `${(n * 100).toFixed(1)}%`;
+  return `${trunc2((n * 100))}%`;
 }
 
 function fmtN(n: number | null): string {
@@ -995,7 +996,7 @@ export default function StateHeadDashboard() {
               {data.meta.primaryAttributionDiagnostics.distMapAvailable
                 ? `Primary attribution: ${
                     data.meta.primaryAttributionDiagnostics.attributionPct != null
-                      ? `${(data.meta.primaryAttributionDiagnostics.attributionPct * 100).toFixed(0)}% of order value attributed to named members`
+                      ? `${trunc2((data.meta.primaryAttributionDiagnostics.attributionPct * 100))}% of order value attributed to named members`
                       : "distributor map loaded"
                   }`
                 : "Distributor map loading in background — per-member primary columns will populate on next refresh."}
@@ -1023,7 +1024,7 @@ export default function StateHeadDashboard() {
                   className="text-right"
                   title={
                     seasonalInfo
-                      ? `Split seasonally from annual — not ÷12. ${seasonalInfo.periodLabel} (${seasonalInfo.months} months) carries ${(seasonalInfo.share * 100).toFixed(1)}% of annual vs ${seasonalInfo.flatShare.toFixed(1)}% flat. Calibrated from FY${seasonalInfo.cal.fy} actuals (single year).`
+                      ? `Split seasonally from annual — not ÷12. ${seasonalInfo.periodLabel} (${seasonalInfo.months} months) carries ${trunc2((seasonalInfo.share * 100))}% of annual vs ${trunc2(seasonalInfo.flatShare)}% flat. Calibrated from FY${seasonalInfo.cal.fy} actuals (single year).`
                       : undefined
                   }
                 />
@@ -1045,7 +1046,7 @@ export default function StateHeadDashboard() {
                     className="text-right"
                     title={
                       r.targetPrimaryAnnual != null && r.targetPrimary != null && seasonalInfo
-                        ? `${seasonalInfo.periodLabel} target ₹${(r.targetPrimary / 1e7).toFixed(2)} Cr = annual ₹${(r.targetPrimaryAnnual / 1e7).toFixed(2)} Cr × ${(seasonalInfo.share * 100).toFixed(1)}% seasonal share (flat ÷12 × ${seasonalInfo.months} = ₹${(r.targetPrimaryAnnual / 12 * seasonalInfo.months / 1e7).toFixed(2)} Cr; FY${seasonalInfo.cal.fy} calibration)`
+                        ? `${seasonalInfo.periodLabel} target ₹${trunc2((r.targetPrimary / 1e7))} Cr = annual ₹${trunc2((r.targetPrimaryAnnual / 1e7))} Cr × ${trunc2((seasonalInfo.share * 100))}% seasonal share (flat ÷12 × ${seasonalInfo.months} = ₹${trunc2((r.targetPrimaryAnnual / 12 * seasonalInfo.months / 1e7))} Cr; FY${seasonalInfo.cal.fy} calibration)`
                         : undefined
                     }
                   >

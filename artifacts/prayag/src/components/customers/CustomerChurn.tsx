@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // Customer At-Risk & New — three-tab view.
 //
 // Scheme Risk: like-months LY vs CY comparison for every customer who bought
@@ -80,7 +81,7 @@ function GrowthCell({ pct }: { pct: number | null }) {
   return (
     <span className={`tabular-nums font-mono text-sm ${cls}`}>
       {pct >= 0 ? "+" : ""}
-      {pct.toFixed(1)}%
+      {trunc2(pct)}%
     </span>
   );
 }
@@ -147,13 +148,13 @@ function SchemeRiskPanel({
           {
             label: "On track",
             value: summary.onTrack,
-            sub: `${summary.total > 0 ? ((summary.onTrack / summary.total) * 100).toFixed(0) : 0}%`,
+            sub: `${summary.total > 0 ? trunc2(((summary.onTrack / summary.total) * 100)) : 0}%`,
             cls: "text-green-600 dark:text-green-400",
           },
           {
             label: "At risk",
             value: summary.atRisk,
-            sub: `${summary.total > 0 ? ((summary.atRisk / summary.total) * 100).toFixed(0) : 0}%`,
+            sub: `${summary.total > 0 ? trunc2(((summary.atRisk / summary.total) * 100)) : 0}%`,
             cls: "text-amber-700 dark:text-amber-400",
           },
           {
@@ -331,7 +332,7 @@ function AtRiskTable({ rows }: { rows: AtRiskRow[] }) {
                 {row.daysSinceLast}d
               </TableCell>
               <TableCell className="text-right font-mono text-sm text-muted-foreground">
-                {row.gapRatio.toFixed(1)}×
+                {trunc2(row.gapRatio)}×
               </TableCell>
               <TableCell className="text-right text-sm text-muted-foreground">
                 {row.lastOrderDate ?? "—"}

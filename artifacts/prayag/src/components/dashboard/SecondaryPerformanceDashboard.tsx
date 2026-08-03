@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // Secondary Performance dashboard — authoritative data from STATE HEAD DASHBOARD.
 //
 // SOURCE (read-only):
@@ -106,12 +107,12 @@ const PERIODS = [
 
 function fmtCr(n: number | null | undefined): string {
   if (n == null || n === 0) return "—";
-  return `\u20b9${(n / 1e7).toFixed(2)} Cr`;
+  return `\u20b9${trunc2((n / 1e7))} Cr`;
 }
 
 function fmtPct(n: number | null | undefined): string {
   if (n == null) return "—";
-  return `${(n * 100).toFixed(1)}%`;
+  return `${trunc2((n * 100))}%`;
 }
 
 function fmtNum(n: number | null | undefined): string {
@@ -132,7 +133,7 @@ function AchBadge({ pct }: { pct: number | null }) {
   const cls = achBandBg(p);
   return (
     <span className={cn("ml-1.5 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium", cls)}>
-      {p.toFixed(0)}%
+      {trunc2(p)}%
     </span>
   );
 }
@@ -535,7 +536,7 @@ export default function SecondaryPerformanceDashboard() {
                       <span className="text-muted-foreground ml-1">({m.stateHead})</span>
                     </span>
                     <span className="font-mono text-amber-700 dark:text-amber-400 ml-2">
-                      {ach != null ? `${(ach * 100).toFixed(0)}%` : "—"}
+                      {ach != null ? `${trunc2((ach * 100))}%` : "—"}
                     </span>
                   </div>
                 );

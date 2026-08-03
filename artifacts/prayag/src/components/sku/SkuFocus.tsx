@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // SKU Deep Dive — Review section (K3 company-wide gap review).
 //
 // Company-wide review list: for each segment, the codes that NO distributor
@@ -44,15 +45,15 @@ export type FocusData = {
 
 function fmtCr(n: number): string {
   const cr = n / 1e7;
-  if (cr >= 1) return `₹${cr.toFixed(2)} Cr`;
-  return `₹${(n / 1e5).toFixed(1)} L`;
+  if (cr >= 1) return `₹${trunc2(cr)} Cr`;
+  return `₹${trunc2((n / 1e5))} L`;
 }
 
 function fmtNet(n: number): string {
   const cr = n / 1e7;
-  if (cr >= 1) return `₹${cr.toFixed(2)} Cr`;
+  if (cr >= 1) return `₹${trunc2(cr)} Cr`;
   const l = n / 1e5;
-  if (l >= 1) return `₹${l.toFixed(1)} L`;
+  if (l >= 1) return `₹${trunc2(l)} L`;
   return `₹${Math.round(n / 1000)}k`;
 }
 
@@ -153,8 +154,8 @@ function RecommendationCard({
 }) {
   const gapCr = rec.gapNet / 1e7;
   const gapLabel = gapCr >= 1
-    ? `₹${gapCr.toFixed(1)} Cr gap`
-    : `₹${(rec.gapNet / 1e5).toFixed(1)} L gap`;
+    ? `₹${trunc2(gapCr)} Cr gap`
+    : `₹${trunc2((rec.gapNet / 1e5))} L gap`;
 
   return (
     <div className="rounded-lg border bg-card">
@@ -174,7 +175,7 @@ function RecommendationCard({
               <span className="font-medium text-foreground">{gapLabel}</span>
               <span>{rec.gapCodeCount.toLocaleString()} gap codes</span>
               <span className={cn("font-medium", breadthColour(rec.breadthPct))}>
-                {rec.breadthPct.toFixed(0)}% breadth
+                {trunc2(rec.breadthPct)}% breadth
               </span>
               <span>({rec.codesBought} bought · {rec.codesEverSold} ever sold)</span>
             </div>

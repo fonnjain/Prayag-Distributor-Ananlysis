@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // DS1 — Organisation: State Heads level.
 // Three-level model: State Heads → States (DS2) → Employees (DS3).
 // This file implements Level 1 only; DS2 and DS3 tabs are shown as locked.
@@ -574,7 +575,7 @@ function HeadRow({
                       Customers: <strong>{String(f.detail.customerCount)}</strong>
                       {f.detail.revenueInr != null && (
                         <span>
-                          {" · "}₹{((f.detail.revenueInr as number) / 1e7).toFixed(2)} Cr
+                          {" · "}₹{trunc2(((f.detail.revenueInr as number) / 1e7))} Cr
                         </span>
                       )}
                     </p>

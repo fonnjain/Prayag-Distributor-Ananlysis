@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listDriveFiles, type DriveFile } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -62,7 +63,7 @@ function formatSize(size?: string): string | null {
     value /= 1024;
     unit++;
   }
-  return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+  return `${unit === 0 ? value : trunc2(value)} ${units[unit]}`;
 }
 
 function formatDate(iso?: string): string | null {

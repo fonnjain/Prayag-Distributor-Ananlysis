@@ -1,3 +1,4 @@
+import { trunc2, trunc2IN } from "@/lib/trunc";
 // C2 — Comparison Deep Dive: trajectory (Mode A) and peer (Mode B) views.
 // NO NEW COMPUTATION — this page calls POST /api/comparison and renders what
 // comes back, including its refusals. A refusal is a result, not an error.
@@ -77,8 +78,8 @@ function periodLabel(p: PeriodSpec): string {
 function fmtValue(v: number | string | null, money: boolean): string {
   if (v == null) return "";
   if (typeof v === "string") return v;
-  if (money) return `₹${(v / 1e7).toLocaleString("en-IN", { maximumFractionDigits: 2, minimumFractionDigits: 2 })} Cr`;
-  return v.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  if (money) return `₹${trunc2IN((v / 1e7))} Cr`;
+  return trunc2IN(v);
 }
 
 // ── Small UI helpers ─────────────────────────────────────────────────────────
@@ -167,7 +168,7 @@ function Sparkline({ values }: { values: (number | null)[] }) {
   const range = max - min || 1;
   const W = 84, H = 24;
   const pts = values.map((v, i) => v == null ? null : [4 + (i * (W - 8)) / Math.max(1, values.length - 1), H - 3 - ((v - min) / range) * (H - 6)] as const);
-  const path = pts.filter(Boolean).map((p, i) => `${i === 0 ? "M" : "L"}${p![0].toFixed(1)},${p![1].toFixed(1)}`).join(" ");
+  const path = pts.filter(Boolean).map((p, i) => `${i === 0 ? "M" : "L"}${trunc2(p![0])},${trunc2(p![1])}`).join(" ");
   const zeroY = H - 3 - ((0 - min) / range) * (H - 6);
   return (
     <svg width={W} height={H} className="text-primary" aria-label="trend, zero-based scale">
@@ -597,7 +598,7 @@ export default function ComparisonDeepDive() {
                           <td className="px-3 py-2 text-right font-mono tabular-nums">
                             {c.value == null ? <span className="italic text-muted-foreground font-sans">—</span>
                               : c.valueLabel.includes("₹") ? fmtValue(c.value, true)
-                              : c.value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                              : trunc2IN(c.value)}
                           </td>
                           <td className="px-3 py-2 text-muted-foreground">{c.valueLabel}</td>
                           <td className="px-3 py-2 text-muted-foreground">{c.note ?? ""}</td>
@@ -609,7 +610,7 @@ export default function ComparisonDeepDive() {
                 {cohortResult.difference && (
                   <div className="rounded-lg border border-border bg-card p-3 text-xs" data-testid="cohort-difference">
                     <span className="font-semibold">Difference: </span>
-                    {cohortResult.difference.value == null ? "n/a" : cohortResult.difference.value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                    {cohortResult.difference.value == null ? "n/a" : trunc2IN(cohortResult.difference.value)}
                     {" "}({cohortResult.difference.label}) — <span className="text-muted-foreground">{cohortResult.difference.sampleNote}</span>
                   </div>
                 )}
@@ -1067,8 +1068,8 @@ export default function ComparisonDeepDive() {
                   {ok.likeForLike.map((l) => (
                     <tr key={l.entity} className="border-b border-border/30">
                       <td className="py-1.5 pr-3 font-medium">{l.entity}</td>
-                      <td className="py-1.5 pr-3 text-right font-mono tabular-nums">{l.headlineAchievement == null ? "—" : `${l.headlineAchievement.toLocaleString("en-IN", { maximumFractionDigits: 1 })}%`}</td>
-                      <td className="py-1.5 pr-3 text-right font-mono tabular-nums">{l.likeForLikeAchievement == null ? "—" : `${l.likeForLikeAchievement.toLocaleString("en-IN", { maximumFractionDigits: 1 })}%`}</td>
+                      <td className="py-1.5 pr-3 text-right font-mono tabular-nums">{l.headlineAchievement == null ? "—" : `${trunc2IN(l.headlineAchievement)}%`}</td>
+                      <td className="py-1.5 pr-3 text-right font-mono tabular-nums">{l.likeForLikeAchievement == null ? "—" : `${trunc2IN(l.likeForLikeAchievement)}%`}</td>
                       <td className="py-1.5">{l.untargetedMembers.length > 0 ? l.untargetedMembers.join(", ") : "—"}</td>
                     </tr>
                   ))}

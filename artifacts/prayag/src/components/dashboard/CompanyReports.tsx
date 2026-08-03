@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // Company-wide primary sales Reports 1-7.
 //
 // All reports read from sale_line (live register chain).
@@ -91,7 +92,7 @@ type Payload = {
 // ── Formatters ────────────────────────────────────────────────────────────────
 
 function fmtCr(n: number): string {
-  return `\u20b9${(n / 1e7).toFixed(2)} Cr`;
+  return `\u20b9${trunc2((n / 1e7))} Cr`;
 }
 
 function fmtPct(n: number | null | undefined): string {
@@ -926,7 +927,7 @@ export default function CompanyReports() {
                     )}
                   >
                     {headline.growthPct >= 0 ? "up" : "down"}{" "}
-                    {Math.abs(headline.growthPct).toFixed(1)}% on like months
+                    {trunc2(Math.abs(headline.growthPct))}% on like months
                   </span>
                 )}
               </div>

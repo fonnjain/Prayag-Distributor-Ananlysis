@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // SKU Deep Dive — Timing / Seasonality section (K4).
 //
 // GET /api/sku/seasonality  (FY-independent — spans all loaded FYs)
@@ -47,12 +48,12 @@ const QUARTER_STYLES: Record<number, string> = {
 
 function fmtCr(n: number): string {
   const cr = n / 1e7;
-  if (cr >= 1) return `₹${cr.toFixed(2)} Cr`;
-  return `₹${(n / 1e5).toFixed(1)} L`;
+  if (cr >= 1) return `₹${trunc2(cr)} Cr`;
+  return `₹${trunc2((n / 1e5))} L`;
 }
 
 function pct(v: number): string {
-  return `${(v * 100).toFixed(0)}%`;
+  return `${trunc2((v * 100))}%`;
 }
 
 function consistencyColour(n: number): string {

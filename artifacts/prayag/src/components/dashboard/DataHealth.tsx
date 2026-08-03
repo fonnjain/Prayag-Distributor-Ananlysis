@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // Data Health — comprehensive multi-anchor-set verification dashboard.
 // Calls GET /api/audit?fy=<fy> (which wraps runFullVerify + extra groups) and renders
 // all check groups with pass / warn / fail / pending / skip status chips.
@@ -53,14 +54,14 @@ type FullVerifyReport = {
 // ── Formatters ────────────────────────────────────────────────────────────────
 
 function fmtCr(n: number): string {
-  return "\u20b9" + (Math.abs(n) / 1e7).toFixed(2) + " Cr";
+  return "\u20b9" + trunc2((Math.abs(n) / 1e7)) + " Cr";
 }
 
 function fmtActual(c: HealthCheck): string {
   if (c.actual == null) return "—";
   if (c.unit === "money") return fmtCr(c.actual);
   if (c.unit === "count") return c.actual.toLocaleString("en-IN");
-  if (c.unit === "pct") return c.actual.toFixed(1) + "%";
+  if (c.unit === "pct") return trunc2(c.actual) + "%";
   return "—";
 }
 
@@ -68,13 +69,13 @@ function fmtExpected(c: HealthCheck): string {
   if (c.expected == null) return "—";
   if (c.unit === "money") return fmtCr(c.expected);
   if (c.unit === "count") return c.expected.toLocaleString("en-IN");
-  if (c.unit === "pct") return c.expected.toFixed(1) + "%";
+  if (c.unit === "pct") return trunc2(c.expected) + "%";
   return "—";
 }
 
 function fmtDelta(n: number | null): string {
   if (n == null) return "—";
-  return (n >= 0 ? "+" : "") + n.toFixed(2) + "%";
+  return (n >= 0 ? "+" : "") + trunc2(n) + "%";
 }
 
 // ── Status chip ───────────────────────────────────────────────────────────────
@@ -579,10 +580,10 @@ export default function DataHealth() {
                       <td className="py-2 px-2 text-right tabular-nums align-middle">{r.dbCurrentRows.toLocaleString("en-IN")}</td>
                       <td className="py-2 px-2 text-right tabular-nums align-middle">{r.sheetRows.toLocaleString("en-IN")}</td>
                       <td className="py-2 px-2 text-right tabular-nums align-middle whitespace-nowrap">
-                        {"\u20b9"}{(r.dbCurrentTotal / 1e7).toFixed(2)} Cr
+                        {"\u20b9"}{trunc2((r.dbCurrentTotal / 1e7))} Cr
                       </td>
                       <td className="py-2 px-2 text-right tabular-nums align-middle whitespace-nowrap">
-                        {"\u20b9"}{(r.sheetTotal / 1e7).toFixed(2)} Cr
+                        {"\u20b9"}{trunc2((r.sheetTotal / 1e7))} Cr
                       </td>
                       <td className={cn(
                         "py-2 pl-2 pr-4 text-right tabular-nums font-medium align-middle whitespace-nowrap",
@@ -593,7 +594,7 @@ export default function DataHealth() {
                         {r.rowDelta === 0 ? "—" : (r.rowDelta > 0 ? "+" : "") + r.rowDelta.toLocaleString("en-IN") + " rows"}
                         {r.rowDelta !== 0 && (
                           <span className="text-xs font-normal ml-1 opacity-70">
-                            ({r.divergencePct.toFixed(1)}%)
+                            ({trunc2(r.divergencePct)}%)
                           </span>
                         )}
                       </td>

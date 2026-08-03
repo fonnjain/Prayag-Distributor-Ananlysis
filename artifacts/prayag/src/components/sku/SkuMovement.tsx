@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // SKU Deep Dive — Movement section (K4).
 //
 // Three sub-views (internal tabs), all fy-driven:
@@ -63,9 +64,9 @@ export type LostCodesResult = {
 
 function fmtCr(n: number): string {
   const cr = n / 1e7;
-  if (cr >= 1) return `₹${cr.toFixed(2)} Cr`;
+  if (cr >= 1) return `₹${trunc2(cr)} Cr`;
   const l = n / 1e5;
-  if (l >= 1) return `₹${l.toFixed(1)} L`;
+  if (l >= 1) return `₹${trunc2(l)} L`;
   return `₹${Math.round(n / 1000)}k`;
 }
 

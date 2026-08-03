@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // Editable state-head monthly target grid — the single canonical source for
 // primary state-head targets.  Reads from GET /api/primary-state-targets/by-head
 // and writes via PUT /api/primary-state-targets/by-head.
@@ -46,7 +47,7 @@ type ByHeadData = {
 
 function fmtL(n: number): string {
   if (!n) return "";
-  return n % 1 === 0 ? String(Math.round(n)) : n.toFixed(1);
+  return n % 1 === 0 ? String(Math.round(n)) : trunc2(n);
 }
 
 function parseL(s: string): number {
@@ -55,7 +56,7 @@ function parseL(s: string): number {
 }
 
 function fmtPct(n: number): string {
-  return (n * 100).toFixed(1);
+  return trunc2((n * 100));
 }
 
 // ── Editable seasonal calibration panel ──────────────────────────────────────
@@ -146,7 +147,7 @@ function SeasonalPanel({ calibration, overrides, onOverride, onReset, onAutoCalc
           return (
             <span key={q}>
               <span className="text-muted-foreground/70">{q}</span>{" "}
-              <span className="font-mono text-foreground/70">{(qShare * 100).toFixed(1)}%</span>
+              <span className="font-mono text-foreground/70">{trunc2((qShare * 100))}%</span>
             </span>
           );
         })}

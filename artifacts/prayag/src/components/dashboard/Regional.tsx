@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // Regional — FY26-27 order-book retail sales by state, head, and retailer
 // (its original basis), now with State Head / State filters and an Excel
 // export. The data is aggregate-level (dashboard snapshot), so there is no
@@ -121,7 +122,7 @@ export default function Regional() {
                       tickLine={false}
                       axisLine={false}
                       tick={{ fontSize: 12, fill: tickColor }}
-                      tickFormatter={(val) => `₹${(val / 10000000).toFixed(0)}Cr`}
+                      tickFormatter={(val) => `₹${trunc2((val / 10000000))}Cr`}
                     />
                     <YAxis
                       dataKey="state"

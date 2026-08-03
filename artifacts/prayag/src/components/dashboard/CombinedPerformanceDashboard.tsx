@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // Combined Performance — Primary vs Secondary.
 //
 // CORRECT business model:
@@ -124,12 +125,12 @@ type DashboardData = {
 
 function fmtCr(n: number | null | undefined): string {
   if (n == null) return "—";
-  return `\u20b9${(n / 1e7).toFixed(2)} Cr`;
+  return `\u20b9${trunc2((n / 1e7))} Cr`;
 }
 
 function fmtPct(n: number | null | undefined, decimals = 1): string {
   if (n == null || !Number.isFinite(n)) return "—";
-  return `${(n * 100).toFixed(decimals)}%`;
+  return `${trunc2(n * 100)}%`;
 }
 
 function fmtNum(n: number | null | undefined): string {
@@ -550,7 +551,7 @@ export default function CombinedPerformanceDashboard() {
               <div className="space-y-0.5">
                 {anomalies.map((a, i) => (
                   <p key={i} className="text-[10px] text-amber-700 dark:text-amber-400 pl-5">
-                    {a.name} ({a.stateHead}) — {a.monthLabel}: sales {fmtCr(a.salesAmount)} vs orders {fmtCr(a.orderedAmount)} ({a.ratio.toFixed(1)}x)
+                    {a.name} ({a.stateHead}) — {a.monthLabel}: sales {fmtCr(a.salesAmount)} vs orders {fmtCr(a.orderedAmount)} ({trunc2(a.ratio)}x)
                   </p>
                 ))}
               </div>
@@ -614,7 +615,7 @@ export default function CombinedPerformanceDashboard() {
                         </td>
                         <td className="py-2 px-3 text-right font-mono text-xs text-muted-foreground">
                           {group.coveragePct != null
-                            ? `${(group.coveragePct * 100).toFixed(1)}%`
+                            ? `${trunc2((group.coveragePct * 100))}%`
                             : "—"}
                         </td>
                       </tr>
@@ -655,7 +656,7 @@ export default function CombinedPerformanceDashboard() {
                             </td>
                             <td className="py-1.5 px-3 text-right font-mono text-xs text-muted-foreground">
                               {m.coveragePct != null
-                                ? `${(m.coveragePct * 100).toFixed(1)}%`
+                                ? `${trunc2((m.coveragePct * 100))}%`
                                 : "—"}
                             </td>
                           </tr>

@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // Distributor Deep Dive — Phase D1
 //
 // Reads all member working sheets under a state head, groups retailer rows by
@@ -451,7 +452,7 @@ const CONCENTRATION_THRESHOLD = 60;
 
 function pct(n: number | null): string {
   if (n === null) return "--";
-  return n.toFixed(1) + "%";
+  return trunc2(n) + "%";
 }
 
 function visits(n: number | null): string {
@@ -657,7 +658,7 @@ function FlowPanel({ flows, distName }: { flows: DistributorFlows | null; distNa
               </div>
               <div className="text-xs text-muted-foreground">
                 {flows.fillRate !== null
-                  ? `${flows.fillRate.toFixed(1)}% fill rate`
+                  ? `${trunc2(flows.fillRate)}% fill rate`
                   : ""}
               </div>
             </div>
@@ -677,7 +678,7 @@ function FlowPanel({ flows, distName }: { flows: DistributorFlows | null; distNa
           <div>
             <span className="text-xs text-muted-foreground">Dispatches per month: </span>
             <span className="font-medium">
-              {flows.ordersPerMonth !== null ? flows.ordersPerMonth.toFixed(1) : "--"}
+              {flows.ordersPerMonth !== null ? trunc2(flows.ordersPerMonth) : "--"}
             </span>
           </div>
           <div>
@@ -723,7 +724,7 @@ function FlowPanel({ flows, distName }: { flows: DistributorFlows | null; distNa
                   {flows.growthPct >= 0
                     ? <TrendingUp className="w-4 h-4" />
                     : <TrendingDown className="w-4 h-4" />}
-                  {flows.growthPct >= 0 ? "+" : ""}{flows.growthPct.toFixed(1)}%
+                  {flows.growthPct >= 0 ? "+" : ""}{trunc2(flows.growthPct)}%
                 </div>
               )}
             </div>
@@ -838,7 +839,7 @@ function SkuSpreadPanel({
           <div className="rounded-md border border-border px-3 py-2">
             <div className="text-xs text-muted-foreground">Cross-sell depth</div>
             <div className="font-bold text-lg tabular-nums">
-              {spread.crossSellDepth?.toFixed(1) ?? "--"}
+              {spread.crossSellDepth != null ? trunc2(spread.crossSellDepth) : "--"}
               <span className="text-sm font-normal text-muted-foreground"> avg lines/retailer</span>
             </div>
           </div>
@@ -875,7 +876,7 @@ function SkuSpreadPanel({
                   </div>
                   <div className="w-24 shrink-0 text-xs tabular-nums text-right">
                     {formatINR(seg.net)}
-                    <span className="text-muted-foreground ml-1">{seg.pct.toFixed(1)}%</span>
+                    <span className="text-muted-foreground ml-1">{trunc2(seg.pct)}%</span>
                   </div>
                 </div>
               ))}
@@ -1289,7 +1290,7 @@ function CustomerConcentrationPanel({ c }: { c: CustomerConcentration }) {
               <div className="font-semibold text-sm tabular-nums">{formatINR(ob)}</div>
               {p != null && (
                 <div className={`text-xs font-medium mt-0.5 ${p >= 60 ? "text-amber-600" : "text-muted-foreground"}`}>
-                  {p.toFixed(1)}%
+                  {trunc2(p)}%
                   {p >= 60 && <AlertTriangle className="inline w-3 h-3 ml-0.5 mb-0.5" />}
                 </div>
               )}
@@ -1327,9 +1328,9 @@ function CustomerConcentrationPanel({ c }: { c: CustomerConcentration }) {
                       </td>
                       <td className="py-1.5 pr-3 text-muted-foreground hidden sm:table-cell">{row.channel}</td>
                       <td className="py-1.5 pr-3 text-right tabular-nums">{formatINR(row.orderBooking)}</td>
-                      <td className="py-1.5 pr-3 text-right tabular-nums">{row.sharePct.toFixed(1)}%</td>
+                      <td className="py-1.5 pr-3 text-right tabular-nums">{trunc2(row.sharePct)}%</td>
                       <td className={`py-1.5 text-right tabular-nums font-medium ${row.cumulativePct >= 60 ? "text-amber-600" : "text-muted-foreground"}`}>
-                        {row.cumulativePct.toFixed(1)}%
+                        {trunc2(row.cumulativePct)}%
                       </td>
                     </tr>
                   ))}
@@ -1375,7 +1376,7 @@ function CustomerConcentrationPanel({ c }: { c: CustomerConcentration }) {
                       {sg.visits != null && sg.visits > 0 && (
                         <div>
                           {sg.visits} visit{sg.visits !== 1 ? "s" : ""}
-                          {sg.visitSharePct != null && ` (${sg.visitSharePct.toFixed(0)}%)`}
+                          {sg.visitSharePct != null && ` (${trunc2(sg.visitSharePct)}%)`}
                         </div>
                       )}
                       {sg.bizPerVisit != null && sg.bizPerVisit > 0 && totalVisits != null && (
@@ -1469,8 +1470,8 @@ function InvestmentPanel({
 
   const { tier, effectiveDiscount: disc, costToServe: cts, roi } = investment;
 
-  const fmtL = (v: number) => "Rs " + (v / 100_000).toFixed(2) + "L";
-  const fmtPct = (v: number) => v.toFixed(1) + " %";
+  const fmtL = (v: number) => "Rs " + trunc2((v / 100_000)) + "L";
+  const fmtPct = (v: number) => trunc2(v) + " %";
 
   return (
     <div className="mt-3 border-t border-border pt-3">
@@ -1548,7 +1549,7 @@ function InvestmentPanel({
           {roi ? (
             <>
               <p className="text-sm font-semibold tabular-nums">
-                {roi.netToCostMultiple.toFixed(1)}x
+                {trunc2(roi.netToCostMultiple)}x
               </p>
               <p className="text-[10px] text-muted-foreground mt-0.5">
                 {fmtL(roi.netRevenue)} net / {fmtL(roi.visitCostToServe)} cost
@@ -1638,10 +1639,10 @@ function InvestmentPanel({
         </table>
         {disc?.sampleLineGross != null && (
           <p className="mt-1.5 text-muted-foreground">
-            Discount check: Rs {disc.sampleLineGross.toFixed(0)} gross × (1 −{" "}
-            {disc.sampleLineDiscountPct?.toFixed(1)} %) = Rs{" "}
-            {disc.sampleLineComputed?.toFixed(0)}{" "}
-            (registered: Rs {disc.sampleLineNet?.toFixed(0)})
+            Discount check: Rs {trunc2(disc.sampleLineGross)} gross × (1 −{" "}
+            {disc.sampleLineDiscountPct != null ? trunc2(disc.sampleLineDiscountPct) : "--"} %) = Rs{" "}
+            {disc.sampleLineComputed != null ? trunc2(disc.sampleLineComputed) : "--"}{" "}
+            (registered: Rs {disc.sampleLineNet != null ? trunc2(disc.sampleLineNet) : "--"})
           </p>
         )}
       </details>
@@ -1802,7 +1803,7 @@ function RetailerConcentrationBar({ rc }: { rc: RetailerConcentration }) {
           <p className={`text-sm font-semibold tabular-nums ${
             (rc.topRetailerSharePct ?? 0) > 60 ? "text-amber-600" : ""
           }`}>
-            {rc.topRetailerSharePct != null ? rc.topRetailerSharePct.toFixed(1) + "%" : "--"}
+            {rc.topRetailerSharePct != null ? trunc2(rc.topRetailerSharePct) + "%" : "--"}
           </p>
           <p className="text-[10px] text-muted-foreground mt-0.5 truncate" title={rc.topRetailerName ?? ""}>
             {rc.topRetailerName ?? "--"}
@@ -1813,13 +1814,13 @@ function RetailerConcentrationBar({ rc }: { rc: RetailerConcentration }) {
           <p className={`text-sm font-semibold tabular-nums ${
             (rc.top5SharePct ?? 0) > 80 ? "text-amber-600" : ""
           }`}>
-            {rc.top5SharePct != null ? rc.top5SharePct.toFixed(1) + "%" : "--"}
+            {rc.top5SharePct != null ? trunc2(rc.top5SharePct) + "%" : "--"}
           </p>
         </div>
         <div className="rounded bg-muted/40 p-2">
           <p className="text-[10px] text-muted-foreground mb-0.5">Top-10 share</p>
           <p className="text-sm font-semibold tabular-nums">
-            {rc.top10SharePct != null ? rc.top10SharePct.toFixed(1) + "%" : "--"}
+            {rc.top10SharePct != null ? trunc2(rc.top10SharePct) + "%" : "--"}
           </p>
         </div>
       </div>
@@ -1906,14 +1907,14 @@ function CapacityCheckPanel({ check }: { check: CapacityCheck }) {
                   </span>
                 </td>
                 <td className="py-1 text-right tabular-nums">
-                  {b.demandedRetailerVisitsPerMonth.toFixed(1)}
+                  {trunc2(b.demandedRetailerVisitsPerMonth)}
                 </td>
               </tr>
             ))}
             <tr className="font-semibold border-t border-border">
               <td className="py-1 pr-3">Total</td>
               <td className="py-1 pr-3"></td>
-              <td className="py-1 text-right tabular-nums">{check.demandedPerMonth.toFixed(1)}</td>
+              <td className="py-1 text-right tabular-nums">{trunc2(check.demandedPerMonth)}</td>
             </tr>
           </tbody>
         </table>
@@ -2528,7 +2529,7 @@ export default function DistributorDeepDive() {
                   <TrendingDown className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                   <span>
                     Unassigned share vs achievement correlation:{" "}
-                    <span className="font-semibold tabular-nums">r = {data.unassignedCorrelation.toFixed(2)}</span>
+                    <span className="font-semibold tabular-nums">r = {trunc2(data.unassignedCorrelation)}</span>
                     {data.unassignedCorrelation < -0.5
                       ? " — strong negative signal: members with more unassigned retailers tend to achieve significantly less."
                       : data.unassignedCorrelation < -0.3
@@ -2565,7 +2566,7 @@ export default function DistributorDeepDive() {
                           <td className="py-1.5 pr-3 text-right tabular-nums font-medium">{s.retailerCount.toLocaleString("en-IN")}</td>
                           <td className={`py-1.5 pr-3 text-right tabular-nums ${noneShare > 50 ? "text-amber-600 font-semibold" : "text-muted-foreground"}`}>
                             {s.noneCount.toLocaleString("en-IN")}
-                            <span className="text-xs ml-1">({noneShare.toFixed(0)}%)</span>
+                            <span className="text-xs ml-1">({trunc2(noneShare)}%)</span>
                           </td>
                           <td className={`py-1.5 pr-3 text-right tabular-nums ${
                             s.noneActivePct != null && s.noneActivePct > 15 ? "text-amber-600" : "text-muted-foreground"
@@ -2578,10 +2579,10 @@ export default function DistributorDeepDive() {
                           <td className={`py-1.5 pr-3 text-right tabular-nums ${
                             s.effectiveDistributors != null && s.effectiveDistributors < 2 ? "text-amber-600 font-semibold" : "text-muted-foreground"
                           }`}>
-                            {s.effectiveDistributors != null ? s.effectiveDistributors.toFixed(1) : "—"}
+                            {s.effectiveDistributors != null ? trunc2(s.effectiveDistributors) : "—"}
                           </td>
                           <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground">
-                            {s.effectiveRetailers != null ? s.effectiveRetailers.toFixed(0) : "—"}
+                            {s.effectiveRetailers != null ? trunc2(s.effectiveRetailers) : "—"}
                           </td>
                           <td className="py-1.5 pr-3 text-right tabular-nums text-muted-foreground text-xs">
                             {s.coverageGapDistricts > 0
@@ -2637,7 +2638,7 @@ export default function DistributorDeepDive() {
                         <td className="py-1.5 pr-4 font-medium">{c.a}</td>
                         <td className="py-1.5 pr-4 font-medium">{c.b}</td>
                         <td className={`py-1.5 text-right tabular-nums font-semibold ${c.similarity > 0.8 ? "text-destructive" : "text-amber-600"}`}>
-                          {(c.similarity * 100).toFixed(0)}%
+                          {trunc2((c.similarity * 100))}%
                         </td>
                       </tr>
                     ))}

@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // Primary Performance dashboard — Prayag to Distributor / Direct Dealer.
 //
 // Three tiers, each degrading independently:
@@ -219,7 +220,7 @@ type VelocityResponse = {
 
 function fmtCr(n: number | null | undefined): string {
   if (n == null || n === 0) return "—";
-  return `\u20b9${(n / 1e7).toFixed(2)} Cr`;
+  return `\u20b9${trunc2((n / 1e7))} Cr`;
 }
 
 function fmtNum(n: number): string {
@@ -242,7 +243,7 @@ function PendingChip({ pending, booking }: { pending: number; booking: number })
       )}
     >
       <AlertTriangle className="h-2.5 w-2.5" />
-      {pct.toFixed(0)}% pending
+      {trunc2(pct)}% pending
     </span>
   );
 }
@@ -1002,9 +1003,9 @@ export default function PrimaryPerformanceDashboard() {
                     >
                       <p className="text-[10px] text-muted-foreground font-medium">{ct.month}</p>
                       <p className="text-xs font-mono mt-0.5">
-                        {ct.targetLakh.toFixed(0)} L
+                        {trunc2(ct.targetLakh)} L
                         {stateData.actualsAvailable && (
-                          <span className="text-muted-foreground"> / {ct.actualLakh.toFixed(0)}</span>
+                          <span className="text-muted-foreground"> / {trunc2(ct.actualLakh)}</span>
                         )}
                       </p>
                       {stateData.actualsAvailable && ct.achievementPct != null && (
@@ -1014,7 +1015,7 @@ export default function PrimaryPerformanceDashboard() {
                             achBandText(ct.achievementPct),
                           )}
                         >
-                          {ct.achievementPct.toFixed(1)}%
+                          {trunc2(ct.achievementPct)}%
                         </p>
                       )}
                       <p className="text-[9px] text-muted-foreground/60 mt-0.5">Tgt / Act (Lakh)</p>
@@ -1053,7 +1054,7 @@ export default function PrimaryPerformanceDashboard() {
                     <div className="flex items-center gap-3">
                       <div className="text-right">
                         <span className="text-xs font-mono text-muted-foreground">
-                          {head.totalTargetLakh.toFixed(0)} Lakh target
+                          {trunc2(head.totalTargetLakh)} Lakh target
                         </span>
                         {stateData.actualsAvailable && head.achievementPct != null && (
                           <span
@@ -1062,7 +1063,7 @@ export default function PrimaryPerformanceDashboard() {
                               achBandText(head.achievementPct),
                             )}
                           >
-                            {head.achievementPct.toFixed(1)}%
+                            {trunc2(head.achievementPct)}%
                           </span>
                         )}
                       </div>
@@ -1152,15 +1153,15 @@ export default function PrimaryPerformanceDashboard() {
                                       stateData.actualsAvailable ? (
                                         <div className="grid grid-cols-2">
                                           <span className="px-2 py-1.5 text-right tabular-nums">
-                                            {cell.targetLakh.toFixed(0)}
+                                            {trunc2(cell.targetLakh)}
                                           </span>
                                           <span className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
-                                            {cell.actualLakh.toFixed(0)}
+                                            {trunc2(cell.actualLakh)}
                                           </span>
                                         </div>
                                       ) : (
                                         <span className="px-2 py-1.5 text-right tabular-nums block">
-                                          {cell.targetLakh.toFixed(0)}
+                                          {trunc2(cell.targetLakh)}
                                         </span>
                                       )
                                     ) : (
@@ -1174,10 +1175,10 @@ export default function PrimaryPerformanceDashboard() {
                                 {stateData.actualsAvailable ? (
                                   <div className="grid grid-cols-3">
                                     <span className="px-2 py-1.5 text-right tabular-nums font-medium">
-                                      {st.totalTargetLakh.toFixed(0)}
+                                      {trunc2(st.totalTargetLakh)}
                                     </span>
                                     <span className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
-                                      {st.totalActualLakh.toFixed(0)}
+                                      {trunc2(st.totalActualLakh)}
                                     </span>
                                     <span
                                       className={cn(
@@ -1190,13 +1191,13 @@ export default function PrimaryPerformanceDashboard() {
                                       {st.isNewTerritory
                                         ? "new"
                                         : st.achievementPct != null
-                                          ? `${st.achievementPct.toFixed(1)}%`
+                                          ? `${trunc2(st.achievementPct)}%`
                                           : "—"}
                                     </span>
                                   </div>
                                 ) : (
                                   <span className="px-2 py-1.5 text-right tabular-nums font-medium block">
-                                    {st.totalTargetLakh.toFixed(0)}
+                                    {trunc2(st.totalTargetLakh)}
                                   </span>
                                 )}
                               </td>
@@ -1224,11 +1225,11 @@ export default function PrimaryPerformanceDashboard() {
                                 >
                                   {stateData.actualsAvailable ? (
                                     <div className="grid grid-cols-2">
-                                      <span className="px-2 py-1.5 text-right tabular-nums">{tgt.toFixed(0)}</span>
-                                      <span className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{act.toFixed(0)}</span>
+                                      <span className="px-2 py-1.5 text-right tabular-nums">{trunc2(tgt)}</span>
+                                      <span className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{trunc2(act)}</span>
                                     </div>
                                   ) : (
-                                    <span className="px-2 py-1.5 text-right tabular-nums block">{tgt.toFixed(0)}</span>
+                                    <span className="px-2 py-1.5 text-right tabular-nums block">{trunc2(tgt)}</span>
                                   )}
                                 </td>
                               );
@@ -1236,19 +1237,19 @@ export default function PrimaryPerformanceDashboard() {
                             <td className="border-l border-border/50 p-0">
                               {stateData.actualsAvailable ? (
                                 <div className="grid grid-cols-3">
-                                  <span className="px-2 py-1.5 text-right tabular-nums">{head.totalTargetLakh.toFixed(0)}</span>
-                                  <span className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{head.totalActualLakh.toFixed(0)}</span>
+                                  <span className="px-2 py-1.5 text-right tabular-nums">{trunc2(head.totalTargetLakh)}</span>
+                                  <span className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">{trunc2(head.totalActualLakh)}</span>
                                   <span
                                     className={cn(
                                       "px-2 py-1.5 text-right font-semibold",
                                       achBandText(head.achievementPct),
                                     )}
                                   >
-                                    {head.achievementPct != null ? `${head.achievementPct.toFixed(1)}%` : "—"}
+                                    {head.achievementPct != null ? `${trunc2(head.achievementPct)}%` : "—"}
                                   </span>
                                 </div>
                               ) : (
-                                <span className="px-2 py-1.5 text-right tabular-nums block">{head.totalTargetLakh.toFixed(0)}</span>
+                                <span className="px-2 py-1.5 text-right tabular-nums block">{trunc2(head.totalTargetLakh)}</span>
                               )}
                             </td>
                           </tr>
@@ -1327,10 +1328,10 @@ export default function PrimaryPerformanceDashboard() {
                   Company
                 </span>
                 <span className="text-sm font-mono font-medium">
-                  {velocityData.company.actualLakh.toFixed(0)} L actual
+                  {trunc2(velocityData.company.actualLakh)} L actual
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  / {velocityData.company.targetLakh.toFixed(0)} L target
+                  / {trunc2(velocityData.company.targetLakh)} L target
                 </span>
                 <span className="text-sm font-semibold">
                   {velocityData.company.actualPct}%
@@ -1387,7 +1388,7 @@ export default function PrimaryPerformanceDashboard() {
                       {head.actualPct}%
                     </span>
                     <span className="text-xs text-muted-foreground">
-                      ({head.actualLakh.toFixed(1)} L / {head.targetLakh.toFixed(0)} L)
+                      ({trunc2(head.actualLakh)} L / {trunc2(head.targetLakh)} L)
                     </span>
                     {!velocityData.isEarlyMonth && (
                       <>

@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // Products — per-product primary sales from sale_line for the selected FY,
 // with the shared State Head / State / Distributor filter bar and an Excel
 // export. The page is FY_ONLY: it honours the global FY selector but has no
@@ -106,7 +107,7 @@ export default function Products() {
                       tickLine={false}
                       axisLine={false}
                       tick={{ fontSize: 12, fill: "#888" }}
-                      tickFormatter={(val) => `₹${(val / 10000000).toFixed(0)}Cr`}
+                      tickFormatter={(val) => `₹${trunc2((val / 10000000))}Cr`}
                     />
                     <YAxis
                       dataKey="product"

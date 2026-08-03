@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // Factory pending order book — quantity view.
 // Source: REPORT 2 tab of the internal pending sheet.
 // All figures are in UNITS (pieces). Water tanks are in PIECES in this sheet,
@@ -47,7 +48,7 @@ function fmtQty(n: number): string {
 }
 
 function fmtCr(n: number): string {
-  return "\u20b9" + (n / 1e7).toFixed(2) + " Cr";
+  return "\u20b9" + trunc2((n / 1e7)) + " Cr";
 }
 
 // ── Collapsible head section ──────────────────────────────────────────────────

@@ -1,3 +1,4 @@
+import { trunc2IN } from "@/lib/trunc";
 // ── T1 — Engine Generated Targets tab ────────────────────────────────────────
 // Sub-tabs: Combined | Existing Sales Old SKU | Existing Sales New SKU | New Customers.
 // All figures are engine PROPOSALS; user edits persist and survive regeneration.
@@ -104,11 +105,11 @@ type EngineResult = {
 // ── Formatting ───────────────────────────────────────────────────────────────
 
 function cr(n: number): string {
-  return `₹${(n / 1e7).toLocaleString("en-IN", { maximumFractionDigits: 2 })} Cr`;
+  return `₹${trunc2IN((n / 1e7))} Cr`;
 }
 function lakh(n: number): string {
   if (Math.abs(n) >= 1e7) return cr(n);
-  return `₹${(n / 1e5).toLocaleString("en-IN", { maximumFractionDigits: 1 })} L`;
+  return `₹${trunc2IN((n / 1e5))} L`;
 }
 
 // ── Component ────────────────────────────────────────────────────────────────

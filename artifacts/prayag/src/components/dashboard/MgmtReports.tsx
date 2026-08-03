@@ -1,3 +1,4 @@
+import { trunc2IN } from "@/lib/trunc";
 import { useMemo, useState } from "react";
 import {
   useGetMgmtOptions,
@@ -53,10 +54,7 @@ function SourceBadge({ source }: { source: MgmtSourceStatus }) {
 }
 
 function formatCr(rupees: number): string {
-  return `${(rupees / 1e7).toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })} Cr`;
+  return `${trunc2IN((rupees / 1e7))} Cr`;
 }
 
 function CheckChip({ status }: { status: MgmtVerifyCheck["status"] }) {

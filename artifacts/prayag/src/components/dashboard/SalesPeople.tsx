@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // SalesPeople — flat monthly secondary-sales table.
 //
 // Data source: GET /api/mgmt/data (STATE HEAD DASHBOARD).
@@ -40,8 +41,8 @@ type Member = {
 
 function fmt(n: number | null | undefined): string {
   if (n == null) return "—";
-  if (Math.abs(n) >= 1e7) return `₹${(n / 1e7).toFixed(2)} Cr`;
-  if (Math.abs(n) >= 1e5) return `₹${(n / 1e5).toFixed(2)} L`;
+  if (Math.abs(n) >= 1e7) return `₹${trunc2((n / 1e7))} Cr`;
+  if (Math.abs(n) >= 1e5) return `₹${trunc2((n / 1e5))} L`;
   return `₹${Math.round(n).toLocaleString("en-IN")}`;
 }
 
@@ -395,7 +396,7 @@ export default function SalesPeople() {
                         <span className="text-muted-foreground">No plan</span>
                       ) : (
                         <span className={achClass(ach)}>
-                          {ach != null ? `${ach.toFixed(1)}%` : "—"}
+                          {ach != null ? `${trunc2(ach)}%` : "—"}
                         </span>
                       )}
                     </td>
@@ -411,7 +412,7 @@ export default function SalesPeople() {
                   <td className="px-3 py-2 text-right tabular-nums">{fmt(summary.ob)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmt(summary.sales)}</td>
                   <td className={`px-3 py-2 text-right tabular-nums ${currentMonth ? "text-amber-600 dark:text-amber-400" : achClass(summaryAch)}`}>
-                    {currentMonth ? "In progress" : summaryAch != null ? `${summaryAch.toFixed(1)}%` : "—"}
+                    {currentMonth ? "In progress" : summaryAch != null ? `${trunc2(summaryAch)}%` : "—"}
                   </td>
                 </tr>
               </tfoot>

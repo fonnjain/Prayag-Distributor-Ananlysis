@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 import { useState, useEffect, useCallback } from "react";
 import { Loader2, Save, CheckCircle2, AlertTriangle } from "lucide-react";
 import {
@@ -46,7 +47,7 @@ function toDisplayValues(monthly: number[], cadence: Cadence): number[] {
 
 function fmtCr(n: number): string {
   if (!n || n === 0) return "";
-  return (n / 1e7).toFixed(2);
+  return trunc2((n / 1e7));
 }
 
 function parseCr(s: string): number {
@@ -56,7 +57,7 @@ function parseCr(s: string): number {
 
 function annualCr(monthly: number[]): string {
   const total = monthly.reduce((s, v) => s + v, 0);
-  return total > 0 ? (total / 1e7).toFixed(2) : "—";
+  return total > 0 ? trunc2((total / 1e7)) : "—";
 }
 
 function emptyEdits(cadence: Cadence): string[] {
@@ -329,7 +330,7 @@ export default function PrimaryTargetsEntry() {
                 <div key={m} className="flex flex-col items-center">
                   <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">{m}</span>
                   <span className="font-mono text-foreground/70">
-                    {((data.data!.seasonalCalibration!.monthly[i] ?? 0) * 100).toFixed(1)}%
+                    {trunc2(((data.data!.seasonalCalibration!.monthly[i] ?? 0) * 100))}%
                   </span>
                 </div>
               ))}
@@ -339,7 +340,7 @@ export default function PrimaryTargetsEntry() {
                 <span key={q}>
                   <span className="text-muted-foreground/70">{q}</span>{" "}
                   <span className="font-mono text-foreground/70">
-                    {((data.data!.seasonalCalibration!.quarterly[i] ?? 0) * 100).toFixed(1)}%
+                    {trunc2(((data.data!.seasonalCalibration!.quarterly[i] ?? 0) * 100))}%
                   </span>
                 </span>
               ))}

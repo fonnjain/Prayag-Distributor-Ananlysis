@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { useDashboard } from "@/data/dashboard-context";
@@ -29,7 +30,7 @@ type UnmatchedPayload = {
 };
 
 const fmtL = (n: number) =>
-  n >= 1e7 ? `₹${(n / 1e7).toFixed(2)} Cr` : `₹${(n / 1e5).toFixed(2)} L`;
+  n >= 1e7 ? `₹${trunc2((n / 1e7))} Cr` : `₹${trunc2((n / 1e5))} L`;
 
 const STATUS_BADGE: Record<UnmatchedName["registryStatus"], { label: string; cls: string }> = {
   resolvable: { label: "Registry match", cls: "bg-green-100 text-green-800 dark:bg-green-950/50 dark:text-green-300" },

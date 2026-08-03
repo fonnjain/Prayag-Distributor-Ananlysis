@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // Sales Deep Dive — Phase 1 + Phase 2
 // Phase 1: STATE HEAD DASHBOARD 'Data' tab KPIs (source A).
 // Phase 2: member's own working sheet retailer-level detail (source B).
@@ -297,9 +298,9 @@ interface DeepDiveData {
 function fmtRs(v: number | null | undefined): string {
   if (v == null) return "—";
   if (Math.abs(v) >= 1_00_00_000)
-    return `Rs ${(v / 1_00_00_000).toFixed(2)} Cr`;
+    return `Rs ${trunc2((v / 1_00_00_000))} Cr`;
   if (Math.abs(v) >= 1_00_000)
-    return `Rs ${(v / 1_00_000).toFixed(2)} L`;
+    return `Rs ${trunc2((v / 1_00_000))} L`;
   return `Rs ${v.toLocaleString("en-IN")}`;
 }
 
@@ -310,15 +311,15 @@ function fmtNum(v: number | null | undefined): string {
 
 function fmtPct(v: number | null | undefined): string {
   if (v == null) return "—";
-  return `${v.toFixed(1)}%`;
+  return `${trunc2(v)}%`;
 }
 
 // Whole-rupee formatter for per-unit cost metrics (no decimal places).
 function fmtRsWhole(v: number | null | undefined): string {
   if (v == null) return "—";
   const r = Math.round(v);
-  if (Math.abs(r) >= 1_00_00_000) return `Rs ${(r / 1_00_00_000).toFixed(0)} Cr`;
-  if (Math.abs(r) >= 1_00_000) return `Rs ${(r / 1_00_000).toFixed(0)} L`;
+  if (Math.abs(r) >= 1_00_00_000) return `Rs ${trunc2((r / 1_00_00_000))} Cr`;
+  if (Math.abs(r) >= 1_00_000) return `Rs ${trunc2((r / 1_00_000))} L`;
   return `Rs ${r.toLocaleString("en-IN")}`;
 }
 
@@ -759,7 +760,7 @@ function RetailerSpreadPanel({ spread }: { spread: RetailerSpread }) {
           </span>
           <span className="text-lg font-semibold">
             {spread.concentrationIndex != null && spread.concentrationIndex > 0
-              ? (10000 / spread.concentrationIndex).toFixed(1)
+              ? trunc2((10000 / spread.concentrationIndex))
               : "—"}
           </span>
           <span className="text-[11px] text-muted-foreground">
@@ -1057,7 +1058,7 @@ function VisitPatternPanel({ pattern }: { pattern: VisitPattern }) {
                     {b.activeCount}
                   </td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(b.visitsDone)}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">{b.avgVisits.toFixed(1)}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">{trunc2(b.avgVisits)}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{fmtRs(b.avgOb)}</td>
                 </tr>
               ))}
@@ -1093,7 +1094,7 @@ function CapacityPanel({
         <span className="block mt-1">
           <span className="font-medium text-foreground">Pace check (Q1): </span>
           {fmtNum(capacity.dataCutoffWorkingDays)} Mon–Sat days (data window ends {capacity.dataWindowEndDate}) ·{" "}
-          <span className="font-semibold text-foreground">{capacity.demonstratedVisitsPerDay.toFixed(2)} visits/day</span>
+          <span className="font-semibold text-foreground">{trunc2(capacity.demonstratedVisitsPerDay)} visits/day</span>
         </span>
       </div>
 
@@ -1171,7 +1172,7 @@ function CapacityPanel({
                         : h.coveragePct >= 60 ? "text-amber-700 dark:text-amber-400"
                         : "text-red-700 dark:text-red-400",
                     )}>
-                      {h.coveragePct.toFixed(1)}%
+                      {trunc2(h.coveragePct)}%
                     </td>
                   </tr>
                 ))}
@@ -1206,7 +1207,7 @@ function CapacityPanel({
                     {capacity.annualCapacityAnchor > 0 &&
                      (capacity.remainingRequired + (capacity.annualCapacityAnchor - capacity.feasibleRemainingVisits)) > 0
                       ? `~${((capacity.annualCapacityAnchor /
-                          (capacity.remainingRequired + (capacity.annualCapacityAnchor - capacity.feasibleRemainingVisits))) * 100).toFixed(0)}%`
+                          (capacity.remainingRequired + (capacity.annualCapacityAnchor - capacity.feasibleRemainingVisits))) * 100)}%`
                       : "—"}
                   </td>
                 </tr>
@@ -1426,7 +1427,7 @@ function SkuSpreadPanel({ spread }: { spread: SkuSpread }) {
           <span className="text-xl font-bold text-foreground">
             {distinct} <span className="text-sm font-normal text-muted-foreground">of {universe}</span>
           </span>
-          <span className="text-[11px] text-muted-foreground">{coveragePct.toFixed(1)}% of all segments</span>
+          <span className="text-[11px] text-muted-foreground">{trunc2(coveragePct)}% of all segments</span>
         </div>
 
         <div className="rounded-lg border border-border bg-card px-4 py-3 flex flex-col gap-1">
@@ -1434,7 +1435,7 @@ function SkuSpreadPanel({ spread }: { spread: SkuSpread }) {
             Cross-sell Depth
           </span>
           <span className="text-xl font-bold text-foreground">
-            {(spread.crossSellDepth ?? 0).toFixed(1)}
+            {trunc2((spread.crossSellDepth ?? 0))}
           </span>
           <span className="text-[11px] text-muted-foreground">avg segments per customer</span>
         </div>
@@ -1470,7 +1471,7 @@ function SkuSpreadPanel({ spread }: { spread: SkuSpread }) {
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-sm font-semibold text-foreground">{fmtRs(seg.net)}</p>
-                  <p className="text-[11px] text-muted-foreground">{seg.pct.toFixed(1)}%</p>
+                  <p className="text-[11px] text-muted-foreground">{trunc2(seg.pct)}%</p>
                 </div>
               </div>
             ))}
@@ -1581,7 +1582,7 @@ function AvsBPanel({
           </div>
           <span className="text-xs text-muted-foreground">
             Variance: {fmtRs(Math.abs(variance))}{" "}
-            {variancePct != null && `(${Math.abs(variancePct).toFixed(2)}%)`}
+            {variancePct != null && `(${trunc2(Math.abs(variancePct))}%)`}
             {variance > 0 ? " — A exceeds B" : variance < 0 ? " — B exceeds A" : " — exact match"}
           </span>
         </div>
@@ -1697,7 +1698,7 @@ function RunRatePanel({
                   : "text-amber-700 dark:text-amber-400",
               )}
             >
-              {projVsPlanPct.toFixed(1)}%
+              {trunc2(projVsPlanPct)}%
             </span>
           </div>
           <div className="h-2 bg-muted rounded-full overflow-hidden">
@@ -1768,7 +1769,7 @@ function RoiCostPanel({ roi, memberName }: { roi: RoiCost; memberName: string })
             "text-2xl font-bold",
             roi.obToCostMultiple != null ? multipleColour(roi.obToCostMultiple) : "",
           )}>
-            {roi.obToCostMultiple != null ? `${roi.obToCostMultiple.toFixed(1)}x` : "—"}
+            {roi.obToCostMultiple != null ? `${trunc2(roi.obToCostMultiple)}x` : "—"}
           </span>
           <span className="text-[11px] text-muted-foreground">Revenue-to-cost (OB)</span>
         </div>
@@ -1780,7 +1781,7 @@ function RoiCostPanel({ roi, memberName }: { roi: RoiCost; memberName: string })
             "text-2xl font-bold",
             roi.saleToCostMultiple != null ? multipleColour(roi.saleToCostMultiple) : "",
           )}>
-            {roi.saleToCostMultiple != null ? `${roi.saleToCostMultiple.toFixed(1)}x` : "—"}
+            {roi.saleToCostMultiple != null ? `${trunc2(roi.saleToCostMultiple)}x` : "—"}
           </span>
           <span className="text-[11px] text-muted-foreground">Revenue-to-cost (Sale)</span>
         </div>
@@ -1797,7 +1798,7 @@ function RoiCostPanel({ roi, memberName }: { roi: RoiCost; memberName: string })
               : "text-red-700 dark:text-red-400"
               : "",
           )}>
-            {roi.costRatioPct != null ? `${roi.costRatioPct.toFixed(2)}%` : "—"}
+            {roi.costRatioPct != null ? `${trunc2(roi.costRatioPct)}%` : "—"}
           </span>
           <span className="text-[11px] text-muted-foreground">Total cost ÷ order booking ({toDateLabel})</span>
         </div>
@@ -2082,7 +2083,7 @@ function PeriodSelectorPanel({ kpis, months, dateFilterLabel }: PeriodSelectorPa
                       d.sale >= priorYear ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
                     )}>
                       {d.sale >= priorYear ? "+" : ""}
-                      {(((d.sale - priorYear) / priorYear) * 100).toFixed(1)}% YoY
+                      {trunc2(((d.sale - priorYear) / priorYear) * 100)}% YoY
                     </span>
                   )}
                 </td>

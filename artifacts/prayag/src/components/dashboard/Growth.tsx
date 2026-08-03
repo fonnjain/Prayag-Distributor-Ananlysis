@@ -1,3 +1,4 @@
+import { trunc2IN } from "@/lib/trunc";
 import { useState, useEffect, useMemo } from "react";
 import { formatINR, formatCompact } from "@/data/dataset";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -64,7 +65,7 @@ type AnalyticsPayload = {
 };
 
 function toCr(value: number): string {
-  return `₹${(value / 1e7).toLocaleString("en-IN", { maximumFractionDigits: 2 })} Cr`;
+  return `₹${trunc2IN((value / 1e7))} Cr`;
 }
 
 function YoyCard({ title, split, subtitle }: { title: string; split: AnalyticsYoy; subtitle: string }) {

@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 import { formatCompact, CHART_COLORS, CHART_COLOR_LIST } from "@/data/dataset";
 import { useDashboard } from "@/data/dashboard-context";
 import {
@@ -167,7 +168,7 @@ export default function Overview() {
                   tickLine={false} 
                   axisLine={false} 
                   tick={{ fontSize: 12, fill: tickColor }} 
-                  tickFormatter={(val) => `₹${(val / 10000000).toFixed(0)}Cr`}
+                  tickFormatter={(val) => `₹${trunc2((val / 10000000))}Cr`}
                   dx={-10}
                 />
                 <Tooltip content={<CustomTooltip />} isAnimationActive={false} cursor={{ stroke: gridColor, strokeWidth: 1, fill: "transparent" }} />

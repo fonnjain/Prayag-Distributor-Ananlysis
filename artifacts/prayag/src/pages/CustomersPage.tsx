@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // Customer Performance — distributor, dealer, retailer analytics.
 //
 // Rule Zero: UNITS FIRST, VALUE SECOND. Every view leads with qty (pcs).
@@ -323,10 +324,10 @@ export default function CustomersPage() {
           <div className="mb-3 rounded-md border border-blue-200/60 bg-blue-50/50 px-3 py-2 text-xs text-blue-800 dark:border-blue-800/40 dark:bg-blue-950/30 dark:text-blue-300">
             <span className="font-medium">Seasonal context:</span>{" "}
             {monthsCy.length === 1 ? monthsCy[0] : `${monthsCy[0]}–${monthsCy[monthsCy.length - 1]}`}{" "}
-            represents {seasonalProjection.pctElapsed.toFixed(1)}% of the annual total (seasonal weights).
+            represents {trunc2(seasonalProjection.pctElapsed)}% of the annual total (seasonal weights).
             {seasonalProjection.projectFactor != null && (
               <span>
-                {" "}Full-year projection = period total &times; {seasonalProjection.projectFactor.toFixed(1)}.
+                {" "}Full-year projection = period total &times; {trunc2(seasonalProjection.projectFactor)}.
                 Comparisons are like-period (same months vs prior year), not annual verdicts.
               </span>
             )}

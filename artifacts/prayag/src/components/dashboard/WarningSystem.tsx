@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { QuotaWaitBanner, quotaDelayMs, quotaOrThrow } from "./quotaWait";
 import { SnapshotBanner, useSnapshotRefresh } from "./snapshotRefresh";
@@ -335,7 +336,7 @@ function TeamSummary({
           <ShieldAlert className="w-4 h-4 text-muted-foreground" />
           {stateHead} — Team Overview
           <span className="text-xs font-normal text-muted-foreground ml-1">
-            YTD {(elapsedFraction * 100).toFixed(0)}% elapsed
+            YTD {trunc2((elapsedFraction * 100))}% elapsed
           </span>
         </CardTitle>
       </CardHeader>
@@ -348,7 +349,7 @@ function TeamSummary({
             highlight={summary.unassignedRetailers > 200}
             note={
               summary.totalRetailers > 0
-                ? `${((summary.unassignedRetailers / summary.totalRetailers) * 100).toFixed(0)}% of total`
+                ? `${trunc2(((summary.unassignedRetailers / summary.totalRetailers) * 100))}% of total`
                 : undefined
             }
           />

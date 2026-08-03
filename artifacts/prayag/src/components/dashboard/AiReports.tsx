@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -701,7 +702,7 @@ function MonthPlanCard({ mp }: { mp: MonthPlan }) {
                   <td className="px-3 py-1.5 font-medium">{t.name}</td>
                   <td className="px-3 py-1.5 text-muted-foreground">{t.district ?? "—"}</td>
                   <td className="px-3 py-1.5 text-muted-foreground">{t.distanceKm ?? "—"}</td>
-                  <td className="px-3 py-1.5">{t.ob > 0 ? `₹${(t.ob / 100000).toFixed(1)}L` : "—"}</td>
+                  <td className="px-3 py-1.5">{t.ob > 0 ? `₹${trunc2((t.ob / 100000))}L` : "—"}</td>
                   <td className="px-3 py-1.5">
                     <Badge variant={t.priority === "maintain" ? "default" : t.priority === "develop" ? "secondary" : "outline"} className="text-xs">{t.priority}</Badge>
                   </td>
@@ -742,8 +743,8 @@ function DistributorTable({ payload }: { payload: DistributorPayloadSubset }) {
                   {d.name}
                   {d.isConcentrationRisk && <span className="ml-1 text-[10px] text-amber-700 font-semibold">SPD</span>}
                 </td>
-                <td className="py-1.5 px-2">{cr(d.orderBooking).toFixed(2)}</td>
-                <td className="py-1.5 px-2">{d.obSharePct != null ? `${d.obSharePct.toFixed(1)}%` : "—"}</td>
+                <td className="py-1.5 px-2">{trunc2(cr(d.orderBooking))}</td>
+                <td className="py-1.5 px-2">{d.obSharePct != null ? `${trunc2(d.obSharePct)}%` : "—"}</td>
                 <td className="py-1.5 px-2">{d.retailerCount}</td>
                 <td className="py-1.5 px-2">{d.activeCount}</td>
                 <td className="py-1.5 px-2">
@@ -755,7 +756,7 @@ function DistributorTable({ payload }: { payload: DistributorPayloadSubset }) {
                 </td>
                 <td className="py-1.5 px-2">
                   {d.flows && d.flows.hasPrimaryData
-                    ? <span className={cn(d.flows.flowGap != null && d.flows.flowGap > 0 ? "text-amber-700" : "")}>{d.flows.flowGap != null ? cr(d.flows.flowGap).toFixed(2) : "—"}</span>
+                    ? <span className={cn(d.flows.flowGap != null && d.flows.flowGap > 0 ? "text-amber-700" : "")}>{d.flows.flowGap != null ? trunc2(cr(d.flows.flowGap)) : "—"}</span>
                     : <span className="text-muted-foreground/60">no data</span>}
                 </td>
               </tr>
@@ -784,7 +785,7 @@ function WhitespaceCard({ payload }: { payload: DistributorPayloadSubset }) {
               { label: "Distributor Retailers", value: cs.namedDistributorRetailers },
               { label: "Direct Dealers (parallel)", value: cs.directDealerRetailers },
               { label: "Unassigned", value: cs.unassignedRetailers },
-              { label: "Distributor OB (Cr)", value: cr(cs.partyObTotal).toFixed(2) },
+              { label: "Distributor OB (Cr)", value: trunc2(cr(cs.partyObTotal)) },
             ].map((k) => (
               <div key={k.label} className="rounded-lg border border-border/50 p-3 text-center">
                 <p className="text-base font-bold">{k.value}</p>
@@ -806,7 +807,7 @@ function WhitespaceCard({ payload }: { payload: DistributorPayloadSubset }) {
               <p className="text-xs font-semibold text-amber-800">Coverage Gap</p>
               <p className="text-xs text-amber-700">{ws.totalCoverageGapRetailers} retailers across {ws.totalCoverageGapDistricts} districts — no distributor, appoint one (strategic)</p>
               {ws.coverageGapDistricts.slice(0, 4).map((d) => (
-                <p key={d.district} className="text-[10px] text-amber-600">{d.district}: ₹{(d.priorYearOb / 100000).toFixed(1)}L prior-year demand</p>
+                <p key={d.district} className="text-[10px] text-amber-600">{d.district}: ₹{trunc2((d.priorYearOb / 100000))}L prior-year demand</p>
               ))}
             </div>
           </div>
@@ -1575,10 +1576,10 @@ export default function AiReports() {
                           <tr key={i} className="border-t border-border/30 hover:bg-muted/20">
                             <td className="py-1.5 px-2 text-muted-foreground">{i + 1}</td>
                             <td className="py-1.5 px-2 font-medium">{m.name}</td>
-                            <td className="py-1.5 px-2">{cr(m.totalOB).toFixed(2)}</td>
-                            <td className="py-1.5 px-2">{m.target != null ? cr(m.target).toFixed(2) : "—"}</td>
-                            <td className="py-1.5 px-2">{m.achievementPct != null ? `${m.achievementPct.toFixed(1)}%` : "—"}</td>
-                            <td className="py-1.5 px-2">{cr((m as any).sale).toFixed(2)}</td>
+                            <td className="py-1.5 px-2">{trunc2(cr(m.totalOB))}</td>
+                            <td className="py-1.5 px-2">{m.target != null ? trunc2(cr(m.target)) : "—"}</td>
+                            <td className="py-1.5 px-2">{m.achievementPct != null ? `${trunc2(m.achievementPct)}%` : "—"}</td>
+                            <td className="py-1.5 px-2">{trunc2(cr((m as any).sale))}</td>
                           </tr>
                         ))}
                       </tbody>

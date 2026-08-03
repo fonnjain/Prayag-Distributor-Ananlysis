@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // Scheme Nudge Engine — live nudge list + supporting dashboards.
 //
 // Tabs:
@@ -18,14 +19,14 @@ import { Badge } from "@/components/ui/badge";
 
 function inr(val: number | null | undefined): string {
   if (val == null) return "—";
-  if (Math.abs(val) >= 1e7) return `₹${(val / 1e7).toFixed(2)} Cr`;
-  if (Math.abs(val) >= 1e5) return `₹${(val / 1e5).toFixed(2)} L`;
+  if (Math.abs(val) >= 1e7) return `₹${trunc2((val / 1e7))} Cr`;
+  if (Math.abs(val) >= 1e5) return `₹${trunc2((val / 1e5))} L`;
   return `₹${val.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 }
 
 function pct(val: number | null | undefined, decimals = 1): string {
   if (val == null) return "—";
-  return `${(val * 100).toFixed(decimals)}%`;
+  return `${trunc2(val * 100)}%`;
 }
 
 function roiColor(roi: number | null): string {
@@ -539,7 +540,7 @@ export default function SchemeNudgeEngine() {
             "At risk" means the projected full-year total is below prior year — not a settled verdict,
             a projection
             {annualData && annualData.rows.length > 0
-              ? ` based on ${annualData.completeMonths.length} month${annualData.completeMonths.length !== 1 ? "s" : ""} (${annualData.rows[0]?.seasonalityPctElapsed?.toFixed(1) ?? "?"}% of annual total).`
+              ? ` based on ${annualData.completeMonths.length} month${annualData.completeMonths.length !== 1 ? "s" : ""} (${annualData.rows[0]?.seasonalityPctElapsed != null ? trunc2(annualData.rows[0].seasonalityPctElapsed) : "?"}% of annual total).`
               : "."}
             {" "}The scheme clause "must not be less than last year" cannot be adjudicated until year-end.
           </p>
@@ -580,7 +581,7 @@ export default function SchemeNudgeEngine() {
                           : "text-red-600 dark:text-red-400"
                         }`}>
                           {r.projectedVsLyPct != null
-                            ? `${r.projectedVsLyPct >= 0 ? "+" : ""}${(r.projectedVsLyPct * 100).toFixed(1)}%`
+                            ? `${r.projectedVsLyPct >= 0 ? "+" : ""}${trunc2((r.projectedVsLyPct * 100))}%`
                             : "—"}
                         </td>
                         <td className="px-3 py-1.5 text-right text-muted-foreground">

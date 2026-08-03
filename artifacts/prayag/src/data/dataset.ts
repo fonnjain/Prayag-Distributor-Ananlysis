@@ -1,22 +1,25 @@
+import { trunc2, t2n } from "@/lib/trunc";
 import rawData from './prayag_data.json';
 
 export const data = rawData.data;
 export const manifest = rawData.manifest;
 
 export function formatINR(value: number): string {
+  // No rounding: truncate to 2 decimals first, always show exactly 2.
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(value);
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(t2n(value));
 }
 
 export function formatCrore(value: number): string {
-  return `₹${(value / 10000000).toFixed(2)} Cr`;
+  return `₹${trunc2((value / 10000000))} Cr`;
 }
 
 export function formatLakh(value: number): string {
-  return `₹${(value / 100000).toFixed(2)} L`;
+  return `₹${trunc2((value / 100000))} L`;
 }
 
 export function formatCompact(value: number): string {

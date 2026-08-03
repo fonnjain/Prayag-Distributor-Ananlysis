@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // SKU Deep Dive — Push section (K3b peer-cohort recommendations).
 //
 // Per-distributor push list.  The user selects one distributor; we find their
@@ -111,17 +112,17 @@ function TierBadge({ tier, label }: { tier: 1 | 2 | 3 | 4; label: string }) {
 
 function fmtNet(n: number): string {
   const cr = n / 1e7;
-  if (cr >= 1) return `₹${cr.toFixed(2)} Cr`;
+  if (cr >= 1) return `₹${trunc2(cr)} Cr`;
   const l = n / 1e5;
-  if (l >= 1) return `₹${l.toFixed(1)} L`;
+  if (l >= 1) return `₹${trunc2(l)} L`;
   return `₹${Math.round(n / 1000)}k`;
 }
 
 function fmtCohortFyNet(n: number): string {
   const cr = n / 1e7;
-  if (cr >= 0.1) return `₹${cr.toFixed(1)} Cr`;
+  if (cr >= 0.1) return `₹${trunc2(cr)} Cr`;
   const l = n / 1e5;
-  if (l >= 1) return `₹${l.toFixed(0)} L`;
+  if (l >= 1) return `₹${trunc2(l)} L`;
   return "< ₹1 L";
 }
 
@@ -516,7 +517,7 @@ function PushSegmentCard({
                              bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/20"
                   title={
                     seg.peakQuarterShare != null
-                      ? `share of annual revenue in peak quarter: ${(seg.peakQuarterShare * 100).toFixed(0)}%`
+                      ? `share of annual revenue in peak quarter: ${trunc2((seg.peakQuarterShare * 100))}%`
                       : "peak quarter for this segment"
                   }
                 >

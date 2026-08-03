@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // Secondary Targets editor — per-team-member secondary order-booking targets.
 // Extracted from DataSources.tsx so it can live on the Targets page.
 import { useState, useEffect, useCallback } from "react";
@@ -29,12 +30,12 @@ const CADENCE_LENGTHS: Record<Cadence, number> = {
 
 function fmtCrPrior(n: number | null | undefined): string {
   if (n == null) return "—";
-  return `\u20b9${(n / 1e7).toFixed(2)} Cr`;
+  return `\u20b9${trunc2((n / 1e7))} Cr`;
 }
 
 function fmtCr(n: number): string {
   if (!n || n === 0) return "";
-  return (n / 1e7).toFixed(2);
+  return trunc2((n / 1e7));
 }
 
 function parseCr(s: string): number {
@@ -280,7 +281,7 @@ export default function SecondaryTargetsEditor() {
                         {m.name}
                         {hasSaved && !isDirty && (
                           <span className="ml-2 text-xs text-muted-foreground tabular-nums">
-                            ₹{(annual / 1e7).toFixed(2)} Cr
+                            ₹{trunc2((annual / 1e7))} Cr
                           </span>
                         )}
                         {isDirty && <span className="ml-2 text-xs text-primary">edited</span>}

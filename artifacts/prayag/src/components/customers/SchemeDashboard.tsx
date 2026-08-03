@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // Scheme Dashboard — configurable scheme engine.
 // Shows per-entity tracking, push list (the prioritized call list), and scheme admin.
 // No schemes are hardcoded — the client supplies them via the admin form.
@@ -400,7 +401,7 @@ function TrackingTable({
                 {scheme.usePriceMultiplier && (
                   <TableCell className="text-right text-xs text-muted-foreground">
                     {r.multiplier != null
-                      ? `${r.multiplier.toFixed(4)} (${r.multiplierLevel})`
+                      ? `${trunc2(r.multiplier)} (${r.multiplierLevel})`
                       : "—"}
                   </TableCell>
                 )}

@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // SKU Deep Dive — Segment drill-down section.
 //
 // Shows code-level breakdown for a single canonical segment.
@@ -42,8 +43,8 @@ interface Props {
 
 function fmtCr(n: number): string {
   const cr = n / 1e7;
-  if (cr >= 1) return `₹${cr.toFixed(2)} Cr`;
-  return `₹${(n / 1e5).toFixed(2)} L`;
+  if (cr >= 1) return `₹${trunc2(cr)} Cr`;
+  return `₹${trunc2((n / 1e5))} L`;
 }
 
 function breadthLabel(pct: number): string {
@@ -116,7 +117,7 @@ export default function SkuDrill({ segment, rows, loading, truncated, onBack, se
           </span>
           <span>
             <span className={cn("font-medium", breadthLabel(segmentFact.breadthPct))}>
-              {segmentFact.breadthPct.toFixed(1)}% breadth
+              {trunc2(segmentFact.breadthPct)}% breadth
             </span>
             <span className="text-muted-foreground ml-1">
               ({segmentFact.codesBought} of {segmentFact.codesEverSold} ever-sold codes)
@@ -160,7 +161,7 @@ export default function SkuDrill({ segment, rows, loading, truncated, onBack, se
             <TableBody>
               {sorted.map((row, idx) => {
                 const monthsActive = Object.keys(row.monthDistribution).length;
-                const netPct = (row.netShare * 100).toFixed(1);
+                const netPct = trunc2((row.netShare * 100));
                 return (
                   <TableRow key={row.code}>
                     <TableCell className="text-muted-foreground text-xs tabular-nums w-8">

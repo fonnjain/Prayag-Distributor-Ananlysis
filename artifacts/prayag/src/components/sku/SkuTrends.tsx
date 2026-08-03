@@ -1,3 +1,4 @@
+import { trunc2 } from "@/lib/trunc";
 // SKU Deep Dive — Trends section (K4).
 //
 // Three views driven by GET /api/sku/trend:
@@ -61,11 +62,11 @@ function segColor(idx: number): string {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function breadthPct(codesBought: number, everSold: number): number {
-  return everSold > 0 ? +((codesBought / everSold) * 100).toFixed(1) : 0;
+  return everSold > 0 ? +trunc2(((codesBought / everSold) * 100)) : 0;
 }
 
 function fmtCr(n: number): string {
-  return `₹${(n / 1e7).toFixed(2)} Cr`;
+  return `₹${trunc2((n / 1e7))} Cr`;
 }
 
 function abbr(seg: string, max = 14): string {
@@ -186,7 +187,7 @@ export default function SkuTrends({ data }: Props) {
         const total = fyNetTotals[fy] ?? 0;
         return {
           fy,
-          share: row && total > 0 ? +((row.net / total) * 100).toFixed(1) : null,
+          share: row && total > 0 ? +trunc2(((row.net / total) * 100)) : null,
         };
       });
       return { segment: seg, cells };
@@ -370,7 +371,7 @@ export default function SkuTrends({ data }: Props) {
               {netShareTable.map(({ segment, cells }) => {
                 const first = cells.find((c) => c.share !== null)?.share ?? null;
                 const last = [...cells].reverse().find((c) => c.share !== null)?.share ?? null;
-                const shift = first !== null && last !== null ? +(last - first).toFixed(1) : null;
+                const shift = first !== null && last !== null ? +trunc2((last - first)) : null;
                 return (
                   <tr key={segment} className="border-b last:border-0 hover:bg-muted/30">
                     <td className="py-1.5 px-3 font-medium whitespace-nowrap">

@@ -1,3 +1,4 @@
+import { trunc2, trunc2IN } from "@/lib/trunc";
 // Per-salesperson report view and Excel download.
 //
 // Report sections rendered:
@@ -27,10 +28,7 @@ import {
 // -------------------------------------------------------------------------
 
 function formatCr(rupees: number): string {
-  return `${(rupees / 1e7).toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })} Cr`;
+  return `${trunc2IN((rupees / 1e7))} Cr`;
 }
 
 function formatInt(n: number): string {
@@ -940,7 +938,7 @@ function PrimarySection({ report }: { report: SalesRepReport }) {
         <div className="p-3 rounded-lg border border-border/50 bg-background/50">
           <p className="text-xs text-muted-foreground">Bridge coverage (head)</p>
           <p className="text-base font-semibold tabular-nums mt-0.5">
-            {p.headTotal > 0 ? `${p.bridgeCoverage.toFixed(1)}%` : "-"}
+            {p.headTotal > 0 ? `${trunc2(p.bridgeCoverage)}%` : "-"}
           </p>
           <p className="text-xs text-muted-foreground">of head register mapped to any TM</p>
         </div>
@@ -1282,7 +1280,7 @@ export function SalesReports({
               Primary basis uses dispatched-sale data from the state-head register,
               matched to this rep via the Party TM Map bridge.
               {report.primary.available && report.primary.headTotal > 0 && (
-                <> Bridge coverage for this head: {report.primary.bridgeCoverage.toFixed(1)}%.</>
+                <> Bridge coverage for this head: {trunc2(report.primary.bridgeCoverage)}%.</>
               )}
             </p>
           </div>
