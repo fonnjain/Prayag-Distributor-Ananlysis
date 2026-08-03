@@ -44,13 +44,14 @@ const PAGE_CAPABILITIES: Record<string, PeriodCapability> = {
   "reports":                 "FY_ONLY",
   "analyst":                 "FY_ONLY",   // AI Analyst
   "ai-reports":              "FY_ONLY",   // AI Reports  ← PA2 priority 1
-  "company-reports":         "FY_ONLY",
+  "company-reports":         "FULL",     // month/quarter filter → server months param
   "salespeople":             "FULL",      // Sales People — SOBR gives per-month Plan/OB/Sales for 162 secondary members; 19 primary-role members show "—" for monthly cells (no SOBR row)
   "deep-dive":               "FY_ONLY",   // Sales Deep Dive  ← PA2 priority 3
   "distributor-deep-dive":   "FY_ONLY",   // Distributor Deep Dive  ← PA2 priority 5
 
   // ── NONE — not period-scoped at all, by design ────────────────────────────
   "warnings":                "NONE",  // always current FY, independent of global filter
+  "comparison":              "NONE",  // page has its own period builder (C2)
   "targets":                 "NONE",  // local FY selector inside the component
   "data-health":             "NONE",  // local FY selector inside the component
 

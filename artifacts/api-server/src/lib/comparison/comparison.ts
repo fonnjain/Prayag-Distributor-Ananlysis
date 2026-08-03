@@ -307,6 +307,11 @@ export type MatrixRow = {
   source: string | null;
   /** Guard 9: excluded from any ranking by consumers. */
   excludeFromRanking?: boolean;
+  /** Authoritative row flags — render verbatim: TENURE, NO TARGET, NO BUSINESS, INSUFFICIENT SAMPLE. */
+  flags?: string[];
+  /** Guard 7: false when ranking on this measure would mislead; consumers must not sort by it. */
+  rankEligible?: boolean;
+  rankBlockReason?: string | null;
   cells: CellValue[];           // one per period, in request order
 };
 
@@ -368,6 +373,8 @@ async function all<T = any>(q: any): Promise<T[]> {
 
 const MIN_CORRELATION_SAMPLE = 5;
 const TENURE_RATIO_THRESHOLD = 2; // working-day ratio beyond which absolutes are suppressed
+// Measures already expressed per unit — safe to rank even when the tenure guard fired.
+const PER_UNIT_MEASURE_IDS = new Set(["visitsPerDay", "achievement", "paceRatio", "correlation", "elapsedMonths", "workingDays"]);
 
 export async function runComparison(req: ComparisonRequest): Promise<ComparisonResponse | BlockedResponse> {
   const today = req.today ? new Date(req.today) : new Date();
@@ -713,10 +720,19 @@ export async function runComparison(req: ComparisonRequest): Promise<ComparisonR
         measure: def.id,
         measureLabel: def.label,
         source: sourcesUsed[def.id] ?? null,
+        flags: [],
         cells: [],
       };
       const noBiz = noBusinessNames.includes(e.name);
-      if (noBiz) row.excludeFromRanking = true;
+      if (noBiz) { row.excludeFromRanking = true; row.flags!.push("NO BUSINESS"); }
+      if (!noBiz && zeroTargetNames.includes(e.name)) row.flags!.push("NO TARGET");
+      if (suppressAbsoluteVisits) {
+        row.flags!.push("TENURE");
+        if (!PER_UNIT_MEASURE_IDS.has(def.id)) {
+          row.rankEligible = false;
+          row.rankBlockReason = "tenure guard fired (working days differ materially) — ranking on an unnormalised measure would mislead; sort a per-day or ratio column instead";
+        }
+      }
 
       for (const p of periods) {
         let cell: CellValue = { value: null };
@@ -741,6 +757,7 @@ export async function runComparison(req: ComparisonRequest): Promise<ComparisonR
           if (def.id === "correlation" && typeof cell.value === "string" && cell.value.startsWith("SUPPRESSED")) {
             const n = cell.note ?? "";
             correlationSuppressed = n;
+            if (!row.flags!.includes("INSUFFICIENT SAMPLE")) row.flags!.push("INSUFFICIENT SAMPLE");
             cell = { value: null, suppressed: true, note: n };
           }
           // Guard 4 overlay: real terms for cross-year money

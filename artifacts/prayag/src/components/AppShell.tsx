@@ -54,6 +54,7 @@ const NAV: NavGroup[] = [
       { id: "ai-reports",     label: "AI Reports",      path: "/ai-reports",      icon: FileSpreadsheet },
       { id: "reports",         label: "Reports",         path: "/reports",         icon: FileSpreadsheet },
       { id: "company-reports", label: "Company Reports", path: "/company-reports", icon: BarChartIcon },
+      { id: "comparison",      label: "Comparison",      path: "/comparison",      icon: LineChart },
       { id: "targets",         label: "Targets",         path: "/targets",         icon: Target },
       { id: "pending",         label: "Pending Orders",  path: "/pending",         icon: ClipboardList },
       { id: "sources",         label: "Organization",    path: "/sources",         icon: Database },

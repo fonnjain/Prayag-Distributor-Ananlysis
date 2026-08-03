@@ -106,6 +106,36 @@ function toDeepRows(map: Map<string, { thisFy: number; lastFy: number }>): Repor
     .sort((a, b) => b.thisFy - a.thisFy);
 }
 
+// ── Filters ───────────────────────────────────────────────────────────────────
+
+/** Optional entity/period filters. Names must match sale_line values:
+ *  heads → head_canon, states → the NORMALISED state (normStateExpr output),
+ *  customers → customer. months → current-FY month labels (subset). */
+export type CompanyReportsFilter = {
+  months?: string[];
+  heads?: string[];
+  states?: string[];
+  customers?: string[];
+};
+
+export function hasActiveFilter(f?: CompanyReportsFilter): boolean {
+  if (!f) return false;
+  return Boolean(f.months?.length || f.heads?.length || f.states?.length || f.customers?.length);
+}
+
+// sql.join IN-clause (ANY(jsArray) silently matches nothing with drizzle).
+function inList(expr: ReturnType<typeof sql<string>>, values: string[]) {
+  return sql`${expr} IN (${sql.join(values.map((v) => sql`${v}`), sql`, `)})`;
+}
+
+function entityConds(f?: CompanyReportsFilter) {
+  const conds = [];
+  if (f?.heads?.length) conds.push(inList(sql<string>`coalesce(${saleLines.headCanon}, 'Unmapped')`, f.heads));
+  if (f?.states?.length) conds.push(inList(normStateExpr(), f.states));
+  if (f?.customers?.length) conds.push(inList(sql<string>`coalesce(${saleLines.customer}, '')`, f.customers));
+  return conds;
+}
+
 // ── Public types ──────────────────────────────────────────────────────────────
 
 export type ReportRow = {
@@ -180,9 +210,18 @@ export type CompanyReportsPayload = {
 export async function buildCompanyReports(
   fy: string,
   asOfDate?: string,
+  filter?: CompanyReportsFilter,
 ): Promise<CompanyReportsPayload> {
   const priorFyStr = computePriorFy(fy);
-  const { current: likeMonths, prior: likeMonthsPrior } = await computeLikeMonths(fy);
+  let { current: likeMonths, prior: likeMonthsPrior } = await computeLikeMonths(fy);
+  // Month filter: intersect the requested labels with the complete like months
+  // so RULE 1 (like months) still holds under any sub-year selection.
+  if (filter?.months?.length) {
+    const wanted = new Set(filter.months);
+    const keep = likeMonths.map((m, i) => [m, likeMonthsPrior[i]] as const).filter(([m]) => wanted.has(m));
+    likeMonths = keep.map(([m]) => m);
+    likeMonthsPrior = keep.map(([, p]) => p);
+  }
   const today = asOfDate ?? new Date().toISOString().slice(0, 10);
 
   if (likeMonths.length === 0) {
@@ -196,6 +235,22 @@ export async function buildCompanyReports(
       monthlyPrimary: [],
     };
     return empty;
+  }
+
+  // Prior-FY entity scope: head/state filters describe the CURRENT FY's
+  // territory tree, but historical head/state columns are backfilled per
+  // customer and can disagree for reassigned parties. To keep both years on
+  // the same population, resolve heads/states to the current-FY customer set
+  // and filter the prior FY by those customers only.
+  let priorFilter = filter;
+  if (filter && (filter.heads?.length || filter.states?.length)) {
+    const custRows = await db.selectDistinct({ customer: sql<string>`coalesce(${saleLines.customer}, '')` })
+      .from(saleLines)
+      .where(and(eq(saleLines.fy, fy), eq(saleLines.versionStatus, "current"), ...entityConds(filter)));
+    const customers = custRows.map((r) => r.customer).filter(Boolean);
+    // Empty resolution would mean "IN ()" (invalid SQL) — use an impossible
+    // sentinel so the prior year correctly returns nothing.
+    priorFilter = { customers: customers.length > 0 ? customers : ["\u0000none"] };
   }
 
   // All DB queries run in parallel
@@ -218,30 +273,30 @@ export async function buildCompanyReports(
     monthlyByHead,
   ] = await Promise.all([
     // Reports 1+2: by state
-    queryByState(fy, likeMonths),
-    queryByState(priorFyStr, likeMonthsPrior),
+    queryByState(fy, likeMonths, filter),
+    queryByState(priorFyStr, likeMonthsPrior, priorFilter),
     // Report 3: by group
-    queryByGroup(fy, likeMonths),
-    queryByGroup(priorFyStr, likeMonthsPrior),
+    queryByGroup(fy, likeMonths, filter),
+    queryByGroup(priorFyStr, likeMonthsPrior, priorFilter),
     // Report 3A: state × group
-    queryByStateGroup(fy, likeMonths),
-    queryByStateGroup(priorFyStr, likeMonthsPrior),
+    queryByStateGroup(fy, likeMonths, filter),
+    queryByStateGroup(priorFyStr, likeMonthsPrior, priorFilter),
     // Report 3B: party × group
-    queryByPartyGroup(fy, likeMonths),
-    queryByPartyGroup(priorFyStr, likeMonthsPrior),
+    queryByPartyGroup(fy, likeMonths, filter),
+    queryByPartyGroup(priorFyStr, likeMonthsPrior, priorFilter),
     // Report 4: qty per group+customer+state
-    queryQty(fy, likeMonths),
-    queryQty(priorFyStr, likeMonthsPrior),
+    queryQty(fy, likeMonths, filter),
+    queryQty(priorFyStr, likeMonthsPrior, priorFilter),
     // Report 5: by customer
-    queryByCustomer(fy, likeMonths),
-    queryByCustomer(priorFyStr, likeMonthsPrior),
+    queryByCustomer(fy, likeMonths, filter),
+    queryByCustomer(priorFyStr, likeMonthsPrior, priorFilter),
     // Report 6 (3C): full prior year by group
-    queryByGroupFull(priorFyStr),
+    queryByGroupFull(priorFyStr, priorFilter),
     // Report 7: as-of
-    queryAsOf(fy, today),
+    queryAsOf(fy, today, filter),
     // Monthly primary (for Combined page)
-    queryMonthlyTotal(fy),
-    queryMonthlyByHead(fy),
+    queryMonthlyTotal(fy, filter),
+    queryMonthlyByHead(fy, filter),
   ]);
 
   // ── Reports 1 & 2 ──────────────────────────────────────────────────────────
@@ -436,7 +491,7 @@ export async function buildCompanyReports(
  * so that DELHI A + DELHI NCR aggregate together, UP variants merge into UTTAR PRADESH,
  * HP maps to HIMACHAL PRADESH, and KARNATAKA (B) maps to KARNATAKA.
  */
-function normStateExpr() {
+export function normStateExpr() {
   return sql<string>`CASE
     WHEN ${saleLines.stateCanon} IN ('DELHI A', 'DELHI NCR')              THEN 'DELHI'
     WHEN ${saleLines.stateCanon} IN ('UP ( A )', 'UP (AS)', 'UP (S)')      THEN 'UTTAR PRADESH'
@@ -446,57 +501,58 @@ function normStateExpr() {
   END`;
 }
 
-function whereClause(fyStr: string, months: string[]) {
-  if (months.length === 0) return and(eq(saleLines.fy, fyStr), eq(saleLines.versionStatus, "current"));
-  return and(eq(saleLines.fy, fyStr), inArray(saleLines.monthLabel, months), eq(saleLines.versionStatus, "current"));
+function whereClause(fyStr: string, months: string[], filter?: CompanyReportsFilter) {
+  const conds = [eq(saleLines.fy, fyStr), eq(saleLines.versionStatus, "current"), ...entityConds(filter)];
+  if (months.length > 0) conds.push(inArray(saleLines.monthLabel, months));
+  return and(...conds);
 }
 
-async function queryByState(fyStr: string, months: string[]) {
+async function queryByState(fyStr: string, months: string[], filter?: CompanyReportsFilter) {
   if (months.length === 0) return [];
   return db.select({
     state: normStateExpr(),
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
-  }).from(saleLines).where(whereClause(fyStr, months)).groupBy(sql`1`);
+  }).from(saleLines).where(whereClause(fyStr, months, filter)).groupBy(sql`1`);
 }
 
-async function queryByGroup(fyStr: string, months: string[]) {
+async function queryByGroup(fyStr: string, months: string[], filter?: CompanyReportsFilter) {
   if (months.length === 0) return [];
   return db.select({
     group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
-  }).from(saleLines).where(whereClause(fyStr, months)).groupBy(sql`1`);
+  }).from(saleLines).where(whereClause(fyStr, months, filter)).groupBy(sql`1`);
 }
 
-async function queryByGroupFull(fyStr: string) {
+async function queryByGroupFull(fyStr: string, filter?: CompanyReportsFilter) {
   return db.select({
     group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
-  }).from(saleLines).where(and(eq(saleLines.fy, fyStr), eq(saleLines.versionStatus, "current"))).groupBy(sql`1`);
+  }).from(saleLines).where(and(eq(saleLines.fy, fyStr), eq(saleLines.versionStatus, "current"), ...entityConds(filter))).groupBy(sql`1`);
 }
 
-async function queryByStateGroup(fyStr: string, months: string[]) {
+async function queryByStateGroup(fyStr: string, months: string[], filter?: CompanyReportsFilter) {
   if (months.length === 0) return [];
   return db.select({
     state: normStateExpr(),
     group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
-  }).from(saleLines).where(whereClause(fyStr, months)).groupBy(sql`1, 2`);
+  }).from(saleLines).where(whereClause(fyStr, months, filter)).groupBy(sql`1, 2`);
 }
 
-async function queryByPartyGroup(fyStr: string, months: string[]) {
+async function queryByPartyGroup(fyStr: string, months: string[], filter?: CompanyReportsFilter) {
   if (months.length === 0) return [];
   return db.select({
     customer: sql<string>`coalesce(${saleLines.customer}, '')`,
     state: normStateExpr(),
     group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
-  }).from(saleLines).where(whereClause(fyStr, months)).groupBy(sql`1, 2, 3`);
+  }).from(saleLines).where(whereClause(fyStr, months, filter)).groupBy(sql`1, 2, 3`);
 }
 
 // Report 4: qty per group+customer+state, broken out by group_raw so WATER TANK
 // litres are never merged with pipe pieces in the same row.
 // RULE 2: results are grouped BY group — caller must never sum qty across groups.
-async function queryQty(fyStr: string, months: string[]) {
+async function queryQty(fyStr: string, months: string[], filter?: CompanyReportsFilter) {
   if (months.length === 0) return [];
   const rows = await db.select({
     group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
@@ -509,24 +565,24 @@ async function queryQty(fyStr: string, months: string[]) {
   })
     .from(saleLines)
     .leftJoin(itemMaster, eq(saleLines.code, itemMaster.code))
-    .where(whereClause(fyStr, months))
+    .where(whereClause(fyStr, months, filter))
     .groupBy(sql`1, 2, 3, 4`);
   return rows;
 }
 
-async function queryByCustomer(fyStr: string, months: string[]) {
+async function queryByCustomer(fyStr: string, months: string[], filter?: CompanyReportsFilter) {
   if (months.length === 0) return [];
   return db.select({
     customer: sql<string>`coalesce(${saleLines.customer}, '')`,
     state: normStateExpr(),
     head: sql<string>`coalesce(${saleLines.headCanon}, 'Unmapped')`,
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
-  }).from(saleLines).where(whereClause(fyStr, months)).groupBy(sql`1, 2, 3`);
+  }).from(saleLines).where(whereClause(fyStr, months, filter)).groupBy(sql`1, 2, 3`);
 }
 
 // Report 7: totals up to and including asOfDate.
 // Rows with NULL invoice_date fall back to: include if month_label <= asOfMonth.
-async function queryAsOf(fyStr: string, asOfDate: string) {
+async function queryAsOf(fyStr: string, asOfDate: string, filter?: CompanyReportsFilter) {
   // Derive the month label for the asOf date (e.g. "2026-07-13" → "Jul-26")
   const dt = new Date(asOfDate + "T00:00:00Z");
   const MONTHS_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -547,6 +603,7 @@ async function queryAsOf(fyStr: string, asOfDate: string) {
     .where(
       and(
         eq(saleLines.fy, fyStr),
+        ...entityConds(filter),
         or(
           lte(saleLines.invoiceDate, asOfDate),
           and(isNull(saleLines.invoiceDate), monthsUpTo.length > 0 ? inArray(saleLines.monthLabel, monthsUpTo) : eq(saleLines.fy, fyStr)),
@@ -556,17 +613,17 @@ async function queryAsOf(fyStr: string, asOfDate: string) {
     .groupBy(sql`1, 2, 3`);
 }
 
-async function queryMonthlyTotal(fyStr: string) {
+async function queryMonthlyTotal(fyStr: string, filter?: CompanyReportsFilter) {
   return db.select({
     label: sql<string>`coalesce(${saleLines.monthLabel}, '')`,
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
-  }).from(saleLines).where(and(eq(saleLines.fy, fyStr), eq(saleLines.versionStatus, "current"))).groupBy(sql`1`);
+  }).from(saleLines).where(and(eq(saleLines.fy, fyStr), eq(saleLines.versionStatus, "current"), ...entityConds(filter))).groupBy(sql`1`);
 }
 
-async function queryMonthlyByHead(fyStr: string) {
+async function queryMonthlyByHead(fyStr: string, filter?: CompanyReportsFilter) {
   return db.select({
     label: sql<string>`coalesce(${saleLines.monthLabel}, '')`,
     head: sql<string>`coalesce(${saleLines.headCanon}, 'Unmapped')`,
     amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
-  }).from(saleLines).where(and(eq(saleLines.fy, fyStr), eq(saleLines.versionStatus, "current"))).groupBy(sql`1, 2`);
+  }).from(saleLines).where(and(eq(saleLines.fy, fyStr), eq(saleLines.versionStatus, "current"), ...entityConds(filter))).groupBy(sql`1, 2`);
 }

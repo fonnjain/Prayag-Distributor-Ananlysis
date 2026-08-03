@@ -13,6 +13,7 @@ import Analyst from "@/components/dashboard/Analyst";
 import AiReports from "@/components/dashboard/AiReports";
 import MgmtReports from "@/components/dashboard/MgmtReports";
 import CompanyReports from "@/components/dashboard/CompanyReports";
+import ComparisonDeepDive from "@/components/dashboard/ComparisonDeepDive";
 import Targets from "@/components/dashboard/Targets";
 import DataHealth from "@/components/dashboard/DataHealth";
 import WarningSystem from "@/components/dashboard/WarningSystem";
@@ -56,6 +57,7 @@ const AREAS = [
   { id: "ai-reports",     label: "AI Reports",      component: AiReports },
   { id: "reports",         label: "Reports",         component: MgmtReports },
   { id: "company-reports", label: "Company Reports", component: CompanyReports },
+  { id: "comparison",      label: "Comparison",      component: ComparisonDeepDive },
   { id: "targets",         label: "Targets",         component: Targets },
   { id: "pending",         label: "Pending Orders",  component: PendingOrders },
   { id: "sources",         label: "Organization",    component: DataSources },

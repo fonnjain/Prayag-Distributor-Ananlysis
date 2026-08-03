@@ -9,8 +9,15 @@ import { useState, useEffect, useMemo } from "react";
 import { useGlobalFilter } from "@/data/global-filter-context";
 import { QuotaWaitBanner, quotaDelayMs } from "./quotaWait";
 import { SnapshotBanner, useSnapshotRefresh } from "./snapshotRefresh";
-import { AlertTriangle, Info, ChevronDown, ChevronUp } from "lucide-react";
+import { AlertTriangle, Info, ChevronDown, ChevronUp, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  CompanyReportFilterBar,
+  EMPTY_ENTITY_FILTER,
+  entityFilterQuery,
+  hasEntityFilter,
+  type EntityFilterValue,
+} from "./CompanyReportFilters";
 
 // ── Types (matching server CompanyReportsPayload) ─────────────────────────────
 
@@ -745,11 +752,33 @@ export default function CompanyReports() {
   // FY comes from the global filter bar (page is FY_ONLY) — a second local
   // selector previously disagreed with the global one and left stale-year
   // figures on screen.
-  const { fy } = useGlobalFilter();
+  const { fy, periodMode, effectivePeriodFrom, effectivePrimaryPeriodTo, effectivePeriodLabel } = useGlobalFilter();
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeReport, setActiveReport] = useState<ReportId>("1");
+  const [entityFilter, setEntityFilter] = useState<EntityFilterValue>(EMPTY_ENTITY_FILTER);
+
+  // Sub-year period → explicit month labels for the server. YTD / Full Year
+  // send no months param (server default = all complete like months).
+  const monthsParam = useMemo(() => {
+    if (periodMode === "ytd" || periodMode === "full") return "";
+    const fyStart = parseInt(fy.split("-")[0], 10);
+    if (isNaN(fyStart)) return "";
+    const NAMES = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
+    const labels: string[] = [];
+    for (let m = effectivePeriodFrom; m <= effectivePrimaryPeriodTo; m++) {
+      const yy = m <= 9 ? fyStart : fyStart + 1;
+      labels.push(`${NAMES[m - 1]}-${String(yy).slice(-2)}`);
+    }
+    return labels.length > 0 ? `&months=${encodeURIComponent(labels.join(","))}` : "";
+  }, [periodMode, fy, effectivePeriodFrom, effectivePrimaryPeriodTo]);
+
+  const filterQuery = useMemo(
+    () => `${monthsParam}${entityFilterQuery(entityFilter)}`,
+    [monthsParam, entityFilter],
+  );
+  const filtersActive = monthsParam !== "" || hasEntityFilter(entityFilter);
   // True while Google Sheets is briefly rate-limiting reads (503 quota);
   // the effect auto-retries after the server's retryAfter hint.
   const [quotaWait, setQuotaWait] = useState(false);
@@ -757,7 +786,7 @@ export default function CompanyReports() {
 
   // Cold-start snapshot: while meta.refreshing is true the server is rebuilding
   // in the background — poll silently and swap the fresh figures in.
-  const dataUrl = `/api/company-reports?fy=${encodeURIComponent(fy)}`;
+  const dataUrl = `/api/company-reports?fy=${encodeURIComponent(fy)}${filterQuery}`;
   useSnapshotRefresh(data?.meta, dataUrl, (fresh) => setData(fresh as Payload));
 
   useEffect(() => {
@@ -766,7 +795,7 @@ export default function CompanyReports() {
     setError(null);
     // Never leave the previous year's figures on screen while the new year loads.
     setData(null);
-    fetch(`/api/company-reports?fy=${encodeURIComponent(fy)}`)
+    fetch(dataUrl)
       .then((r) => {
         if (!r.ok)
           return r
@@ -797,7 +826,7 @@ export default function CompanyReports() {
     return () => {
       if (retryTimer !== undefined) clearTimeout(retryTimer);
     };
-  }, [fy, retryTick]);
+  }, [dataUrl, retryTick]);
 
   // Report 2: same data as Report 1 but sorted by growth
   const report2Rows = useMemo((): ReportRow[] => {
@@ -841,7 +870,31 @@ export default function CompanyReports() {
             {data && likeMonthsLabel ? ` Comparing ${likeMonthsLabel} FY ${fy} vs FY ${data.priorFy}.` : ""}
           </p>
         </div>
+        <a
+          href={`/api/company-reports/export?fy=${encodeURIComponent(fy)}${filterQuery}`}
+          download
+          className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/40"
+          data-testid="button-export-excel"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Export Excel
+        </a>
       </div>
+
+      {/* Entity filters — State Head → State → Distributor (cascading) */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <CompanyReportFilterBar fy={fy} value={entityFilter} onChange={setEntityFilter} />
+        {periodMode !== "ytd" && periodMode !== "full" && (
+          <span className="rounded-md bg-blue-500/10 px-2 py-1 text-[11px] text-blue-800 dark:text-blue-300">
+            Period: {effectivePeriodLabel} — compared against the same months last year
+          </span>
+        )}
+      </div>
+      {filtersActive && (
+        <p className="text-[11px] text-amber-700 dark:text-amber-400">
+          Filters active — figures below are a subset and will not match the unfiltered company totals.
+        </p>
+      )}
 
       {/* Loading / error */}
       {loading && <div className="py-12 text-center text-sm text-muted-foreground">Loading reports...</div>}

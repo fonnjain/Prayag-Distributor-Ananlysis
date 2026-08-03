@@ -1,0 +1,132 @@
+# C2 — Comparison Deep Dive, trajectory and peer views
+
+*The contract is proven. This puts a screen on it — for the two modes people actually use.*
+
+---
+
+## What C1 established, and must not be weakened
+
+Twelve guards, verified with live responses. **C2 adds no logic.** It renders what `/api/comparison` returns, including its refusals.
+
+**The `channelLabel` sits above the data, not below it.** Territory-only figures are legitimately different from all-channel figures on other pages, and that line is the only thing preventing the next investigation.
+
+---
+
+```
+Prayag app - Comparison Deep Dive, Phase C2 of 4. Same global rules.
+Build the UI for Mode A (trajectory) and Mode B (peer). NO NEW COMPUTATION -
+this page calls POST /api/comparison and renders what comes back.
+
+If a figure is not in the API response, it does not appear on screen. If the
+API blocks, the page shows the block and its reason - it does not fall back to
+an unguarded query.
+
+1. THE PAGE, AT /comparison
+
+   TOP - SELECTION
+     Compare:   [entity type]  then  [+ add entity]  (1..N)
+     Across:    [period]       then  [+ add period]  (1..N)
+     Measures:  multi-select, FILTERED to those valid for the entity type
+     Basis:     primary | secondary
+     Channel:   territory (default) | project | all
+     Normalise: absolute | per elapsed month | per working day | per retailer
+                | per visit | real terms
+     Population: active only (default) | include LEFT
+
+   Selecting one entity and many periods gives MODE A - trajectory.
+   Selecting many entities and one period gives MODE B - peer.
+   Selecting many of both is Mode C and belongs to C3 - for now, disable the
+   second axis once the first is multi-selected, and say why.
+
+2. THE BASIS STRIP - directly beneath the selector, above any figure.
+
+   Render the full basis block the API returns, never a summary of it:
+     source per measure, period with its completeness flag, channelLabel in
+     full, population, normalisation, and EVERY guard that fired with what it
+     did.
+
+   The channelLabel text must appear in full, not truncated or behind a
+   tooltip:
+     "TERRITORY ONLY - project & institutional business is EXCLUDED. Do not
+      compare these figures against all-channel totals from other pages."
+
+   A blocked response renders the SAME strip plus the block reason, in place
+   of the data. A refusal is a result, not an error state - style it as
+   information, not as a failure.
+
+3. MODE A - TRAJECTORY. One entity, many periods.
+     a row per measure, a column per period, plus change and direction
+     where a period is partial or has no actuals, the cell says so - never a
+       zero, never a blank
+     where a cross-year money measure is shown, nominal AND real side by side
+       with the segment index named
+     a small sparkline per measure, no axis tricks - zero-based, or state that
+       it is not
+
+   Worked example to verify against:
+     Q1 FY2026-27 Rs 67.40 Cr vs Q1 FY2025-26 Rs 69.47 Cr, labelled like-months,
+     territory only. Water tank Q1 Rs 2.72 Cr nominal is Rs 2.37 Cr in prior-year
+     prices on its own index; CPVC barely moves.
+
+4. MODE B - PEER. Many entities, one period.
+     a row per entity, a column per measure
+     sort by any column, but NEVER rank on an unnormalised measure where the
+       tenure guard has fired - grey the sort control and say why
+     the guard column shows which entities carry a flag: TENURE, NO TARGET,
+       NO BUSINESS, INSUFFICIENT SAMPLE
+     entities excluded from ranking appear at the bottom in a separate block
+       titled "not ranked", with the reason - not hidden, not mixed in
+
+   Worked example to verify against:
+     Rahul Singh 11 working days vs Amey Deodhar 77 - absolute visits
+     suppressed, per-day shown as 9.9 vs 3.0, tenure guard visible on both rows.
+     Anuj Sharma reads "not recorded yet" and sits in the not-ranked block.
+
+5. WHAT THE PAGE MUST NOT DO
+     no blended or composite score - a single number hides which measure moved
+     no primary-versus-secondary ratio - offer two labelled panels instead
+     no chart that omits a guard-flagged entity without saying so
+     no default that hides a refusal
+     no client-side recomputation of anything the API returned
+
+6. EXPORT. PDF and Excel, both carrying the FULL basis strip on every page or
+   sheet. A figure that leaves this page without its basis is exactly the
+   problem the contract was built to prevent.
+
+Acceptance - show the rendered result, not a description:
+  Mode A on one member across Q1 FY2025-26 and Q1 FY2026-27 renders like-months
+    with the channelLabel in full
+  a cross-year money comparison shows nominal and real with the segment index
+    named per segment, not one company figure
+  Mode B on Rahul Singh and Amey Deodhar suppresses absolute visits, shows
+    9.9 vs 3.0 per day, and flags both rows TENURE
+  Sulinder Pal's team shows headline 42.8 per cent AND like-for-like 41.5 per
+    cent with the three untargeted members named on screen
+  Anuj Sharma appears in a "not ranked" block with "not recorded yet"
+  selecting "Ashutosh Kumar" without a head renders the disambiguation naming
+    Dhanbad under Sandeep Dadheech and Rudrapur under Anant Singh
+  requesting fill rate on a member renders the invalid-measure error listing
+    the valid member measures
+  a blocked comparison renders the basis strip and the reason, styled as
+    information
+  a PDF export carries the full basis strip
+  no figure appears on screen that is not in the API response
+```
+
+---
+
+## The design point worth holding
+
+**A refusal is a result.** The instinct will be to style a block as an error — red, apologetic, something to be got past. It should read like a finding: *this comparison would mislead, here is why, here is what you could compare instead.*
+
+That framing is what makes people trust the numbers that do render.
+
+---
+
+## After C2
+
+**C3** adds the matrix and cohort modes — level and direction together, which is where decisions come from. **C4** adds the suggestion layer, reusing the existing push list and whitespace rather than computing anything new.
+
+---
+
+*Figures verified against the C1 API responses and the frozen registers, 3 August 2026*
