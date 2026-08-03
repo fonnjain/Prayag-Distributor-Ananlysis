@@ -99,3 +99,4 @@
 - [Momentum insights page](momentum-insights.md) — one period scope for every panel; territory basis needs the project-customer bridge on NULL-head rows; unavailable ≠ zero.
 - [Distributor warnings W2](distributor-warnings-w2.md) — no A-family (no targets); R1 vs own order interval; closed like-months on both FYs; D1 norm = territory cohort minus self; gate UI on requested head.
 - [Distributor DD stale fallback](distributor-dd-stale-fallback.md) — member-sheet Sheets failures return 200 with membersFailed>0, not throws; only complete loads may overwrite the snapshot.
+- [Comparison guard validation](comparison-guard-validation.md) — validation steps that curl the API must self-provision a disposable server when none is reachable; live data lacks a missing-cost head, so that path is unit-tested.

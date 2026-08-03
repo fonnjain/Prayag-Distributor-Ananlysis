@@ -1374,6 +1374,58 @@ async function computeCell(
   }
 }
 
+// ── C2b: cost cell — pure, exported for the guard-regression unit test. ──
+// Contract (must never regress silently):
+//   • cost sums ONLY members with recorded cost (blank cost is NOT zero cost);
+//   • the DENOMINATOR (visits / OB / sales) sums ALL active members — a
+//     recorded-members-only denominator would overstate the ratio;
+//   • partially missing cost annotates the cell with the full-team wording;
+//   • zero denominator → UNDEFINED note (never 0, never Infinity);
+//   • no cost recorded at all → 'not recorded' note.
+export type CostKpisLike = Pick<
+  MemberKpis,
+  "ctcMonthly" | "elapsedMonthsFromSheet" | "elapsedMonths" | "taBillStCost"
+  | "totalVisitsYtd" | "orderBooking" | "directDealersOrder" | "sale"
+>;
+
+export function computeCostCell(
+  defId: "costPerVisit" | "costRatioOb" | "costRatioSales",
+  ks: CostKpisLike[],
+): CellValue {
+  const memberCost = (k: CostKpisLike): number | null => {
+    if (k.ctcMonthly == null) return null; // blank cost is NOT zero cost
+    const elapsed = k.elapsedMonthsFromSheet ?? k.elapsedMonths;
+    if (elapsed == null) return null;
+    return k.ctcMonthly * elapsed + (k.taBillStCost ?? 0);
+  };
+  const recorded = ks.filter((k) => memberCost(k) != null);
+  if (recorded.length === 0) {
+    return { value: null, note: "not recorded — no CTC/elapsed-months data on the Data tab for this entity; a blank cost cell is not a zero cost" };
+  }
+  // Cost sums over members WITH recorded cost; denominators (visits, OB,
+  // sales) sum over ALL active members — otherwise a head's ratio would
+  // silently drop the excluded members' activity and overstate the ratio.
+  const cost = recorded.reduce((s, k) => s + (memberCost(k) as number), 0);
+  const missing = ks.length - recorded.length;
+  const missNote = missing > 0 ? `; cost missing for ${missing} of ${ks.length} members (their cost is excluded — the denominator still covers all members)` : "";
+  if (defId === "costPerVisit") {
+    const v = ks.reduce((s, k) => s + (k.totalVisitsYtd ?? 0), 0);
+    return v > 0
+      ? { value: round2(cost / v), note: `cost = CTC × BD elapsed months + YTD travel; visits = Data tab column AF (all-type cumulative)${missNote}` }
+      : { value: null, note: `undefined — no visits recorded (column AF); cost ₹${round2(cost)} cannot be spread over zero visits${missNote}` };
+  }
+  if (defId === "costRatioOb") {
+    const ob = ks.reduce((s, k) => s + (k.orderBooking ?? 0) + (k.directDealersOrder ?? 0), 0);
+    return ob > 0
+      ? { value: round2((cost / ob) * 100), note: `cost ÷ secondary OB (I + J), as %${missNote}` }
+      : { value: null, note: `UNDEFINED — order booking is 0; a ratio on zero is not infinite and not zero${missNote}` };
+  }
+  const sales = ks.reduce((s, k) => s + (k.sale ?? 0), 0);
+  return sales > 0
+    ? { value: round2((cost / sales) * 100), note: `cost ÷ sales received (AY), as %${missNote}` }
+    : { value: null, note: `UNDEFINED — sales received is 0, so cost ÷ sales does not exist (not infinite, not zero). The OB ratio 'costRatioOb' still computes${missNote}` };
+}
+
 async function computeMemberCell(
   entityType: "member" | "head",
   e: ResolvedEntity,
@@ -1579,41 +1631,10 @@ async function computeMemberCell(
     case "costPerVisit":
     case "costRatioOb":
     case "costRatioSales": {
-      const memberCost = (k: MemberKpis): number | null => {
-        if (k.ctcMonthly == null) return null; // blank cost is NOT zero cost
-        const elapsed = k.elapsedMonthsFromSheet ?? k.elapsedMonths;
-        if (elapsed == null) return null;
-        return k.ctcMonthly * elapsed + (k.taBillStCost ?? 0);
-      };
       const ks = entityType === "member"
         ? (e.kpis ? [e.kpis] : [])
         : (e.memberKpis ?? []).filter((k) => !k.isLeft);
-      const recorded = ks.filter((k) => memberCost(k) != null);
-      if (recorded.length === 0) {
-        return { value: null, note: "not recorded — no CTC/elapsed-months data on the Data tab for this entity; a blank cost cell is not a zero cost" };
-      }
-      // Cost sums over members WITH recorded cost; denominators (visits, OB,
-      // sales) sum over ALL active members — otherwise a head's ratio would
-      // silently drop the excluded members' activity and overstate the ratio.
-      const cost = recorded.reduce((s, k) => s + (memberCost(k) as number), 0);
-      const missing = ks.length - recorded.length;
-      const missNote = missing > 0 ? `; cost missing for ${missing} of ${ks.length} members (their cost is excluded — the denominator still covers all members)` : "";
-      if (def.id === "costPerVisit") {
-        const v = ks.reduce((s, k) => s + (k.totalVisitsYtd ?? 0), 0);
-        return v > 0
-          ? { value: round2(cost / v), note: `cost = CTC × BD elapsed months + YTD travel; visits = Data tab column AF (all-type cumulative)${missNote}` }
-          : { value: null, note: `undefined — no visits recorded (column AF); cost ₹${round2(cost)} cannot be spread over zero visits${missNote}` };
-      }
-      if (def.id === "costRatioOb") {
-        const ob = ks.reduce((s, k) => s + (k.orderBooking ?? 0) + (k.directDealersOrder ?? 0), 0);
-        return ob > 0
-          ? { value: round2((cost / ob) * 100), note: `cost ÷ secondary OB (I + J), as %${missNote}` }
-          : { value: null, note: `UNDEFINED — order booking is 0; a ratio on zero is not infinite and not zero${missNote}` };
-      }
-      const sales = ks.reduce((s, k) => s + (k.sale ?? 0), 0);
-      return sales > 0
-        ? { value: round2((cost / sales) * 100), note: `cost ÷ sales received (AY), as %${missNote}` }
-        : { value: null, note: `UNDEFINED — sales received is 0, so cost ÷ sales does not exist (not infinite, not zero). The OB ratio 'costRatioOb' still computes${missNote}` };
+      return computeCostCell(def.id, ks);
     }
 
     // ── C2b: member-sheet measures (member entities only) ──
