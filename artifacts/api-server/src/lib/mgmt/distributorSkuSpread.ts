@@ -73,7 +73,7 @@ const BRAND_TO_BROAD: Record<string, string> = {
   "VIGNETTE": "PTMT / Faucets",
 };
 
-function brandToBroad(brand: string): string {
+export function brandToBroad(brand: string): string {
   if (BRAND_TO_BROAD[brand]) return BRAND_TO_BROAD[brand];
   const b = brand.toUpperCase();
   if (/^C\.?P[\s.\-]/.test(b) || b.includes("CDA") || b.includes(" SERIES")) {

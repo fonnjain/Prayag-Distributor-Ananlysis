@@ -10,7 +10,7 @@ export type WarningTrend = "IMPROVING" | "WORSENING" | "STABLE";
 
 export type WarningCard = {
   code: string;            // "A1", "D1", "J3", etc.
-  family: string;          // "A", "C", "D", "E", "G", "I", "J"
+  family: string;          // "A", "B", "C", "D", "E", "G", "I", "J"
   title: string;
   severity: WarningSeverity;
   baseSeverity: WarningSeverity; // before trend adjustment (for display)

@@ -14,6 +14,15 @@ import {
   prewarmSnapshot,
   SnapshotHttpError,
 } from "../lib/payloadSnapshot.js";
+import type { RealValueInput } from "../lib/mgmt/warnings/engine.js";
+import {
+  computeCategoryMultipliers,
+  computeCompanyMultiplier,
+  type CategoryMultiplierMap,
+  type MultiplierResult,
+} from "../lib/customers/laspeyres.js";
+import { computeSkuSpread } from "../lib/mgmt/skuSpread.js";
+import { brandToBroad } from "../lib/mgmt/distributorSkuSpread.js";
 import { logger } from "../lib/logger.js";
 import { isFrozen } from "../lib/customers/registerSync.js";
 
@@ -47,6 +56,118 @@ const FALLBACK_NORM_WORKING_DAYS = 65;
 // 55-day cutoff against a hardcoded 65-day norm — same ratio, now team-derived).
 const PARTIAL_TENURE_RATIO = 0.85;
 
+// Prior FY string: "2026-27" → "2025-26".
+function priorFyOf(fy: string): string | null {
+  const startY = parseInt(fy.split("-")[0], 10);
+  if (isNaN(startY)) return null;
+  const py = startY - 1;
+  return `${py}-${String(startY).slice(2)}`;
+}
+
+// Prior-year OB for the same period as the first `recordedMonthCount` fiscal
+// months, pro-rated from the prior FY's quarterly actuals (lastYearQ1–Q4).
+// E.g. 4 recorded months = Q1 in full + 1/3 of Q2.
+function priorYearSamePeriod(
+  quarters: (number | null)[],
+  recordedMonthCount: number,
+): number | null {
+  if (quarters.every((q) => q == null)) return null;
+  let total = 0;
+  for (let i = 0; i < 4; i++) {
+    const monthsCovered = Math.min(3, Math.max(0, recordedMonthCount - i * 3));
+    total += (quarters[i] ?? 0) * (monthsCovered / 3);
+  }
+  return total;
+}
+
+// Prior-year quarterly OB for one member. Primary source: the Data tab's
+// explicit last-year columns (lastYearQ1–Q4). Some FYs label them plainly
+// "Q1".."Q4" instead — those land in kpis.extra. Plain Q1–Q4 is ambiguous
+// (could be the current FY's own quarters), so the fallback is only trusted
+// when the four quarters cross-foot against the prior-FY TOTALORDER column
+// (e.g. TOTALORDER2526 for prior FY 2025-26) within 1%.
+function priorYearQuarters(
+  kpis: { lastYearQ1: number | null; lastYearQ2: number | null; lastYearQ3: number | null; lastYearQ4: number | null; extra?: Record<string, unknown> },
+  fyPrior: string,
+): (number | null)[] | null {
+  const explicit = [kpis.lastYearQ1, kpis.lastYearQ2, kpis.lastYearQ3, kpis.lastYearQ4];
+  if (explicit.some((q) => q != null)) return explicit;
+
+  const ex = kpis.extra ?? {};
+  const num = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+  const qs = [num(ex["Q1"]), num(ex["Q2"]), num(ex["Q3"]), num(ex["Q4"])];
+  if (qs.every((q) => q == null)) return null;
+
+  // "2025-26" → "2526"
+  const [a, b] = fyPrior.split("-");
+  const suffix = a && b ? `${a.slice(2)}${b}` : null;
+  const total = suffix ? num(ex[`TOTALORDER${suffix}`]) : null;
+  if (total == null || total <= 0) return null;
+  const sum = qs.reduce<number>((s, q) => s + (q ?? 0), 0);
+  if (Math.abs(sum - total) > 0.01 * total) return null;
+  return qs;
+}
+
+// ── B1 real-value inputs ──────────────────────────────────────────────────────
+// Segment-weighted Laspeyres inflation for one member: weight each per-category
+// multiplier (group_canon categories from primary sale_line) by the member's
+// secondary-register segment mix (brand_canon → broad segment via brandToBroad).
+// Segments with no category multiplier fall back to the company multiplier.
+async function memberInflation(
+  normKey: string,
+  fy: string,
+  fyPrior: string,
+  catMap: CategoryMultiplierMap,
+  company: MultiplierResult | null,
+): Promise<{ multiplier: number; basis: string } | null> {
+  let segments: { segment: string; net: number }[] = [];
+  try {
+    let spread = await computeSkuSpread(normKey, fy);
+    if (!spread.netBySegment?.length) {
+      // Live-FY mix may be thin early in the year — use the prior FY's mix.
+      spread = await computeSkuSpread(normKey, fyPrior);
+    }
+    segments = (spread.netBySegment ?? [])
+      .filter((s) => s.net > 0)
+      .map((s) => ({ segment: s.segment, net: s.net }));
+  } catch (err) {
+    logger.warn({ err, normKey, fy }, "warnings: segment mix load failed");
+  }
+
+  const companyM = company?.multiplier ?? null;
+  if (segments.length === 0) {
+    return companyM != null
+      ? { multiplier: companyM, basis: "company-level index" }
+      : null;
+  }
+
+  let weighted = 0;
+  let totalNet = 0;
+  let matched = 0;
+  for (const s of segments) {
+    const broad = brandToBroad(s.segment);
+    const cat = catMap.get(broad);
+    const m = cat?.multiplier ?? companyM;
+    if (m == null) continue;
+    if (cat) matched++;
+    weighted += s.net * m;
+    totalNet += s.net;
+  }
+  if (totalNet <= 0) {
+    return companyM != null
+      ? { multiplier: companyM, basis: "company-level index" }
+      : null;
+  }
+  return {
+    multiplier: weighted / totalNet,
+    basis:
+      matched > 0
+        ? `segment-weighted, ${matched} of ${segments.length} segments matched`
+        : "company-level index",
+  };
+}
+
 function median(values: number[]): number | null {
   if (values.length === 0) return null;
   const s = [...values].sort((a, b) => a - b);
@@ -77,7 +198,7 @@ router.get("/warnings", async (req, res) => {
     // meta.snapshotSavedAt + meta.refreshing, rebuilding in the background
     // (the live build blocks ~9s on Sheets loads on a cold cache).
     const response = await serveWithSnapshot({
-      key: `warnings|v3|${fy}|${stateHeadRaw.toLowerCase()}`,
+      key: `warnings|v5|${fy}|${stateHeadRaw.toLowerCase()}`,
       ttlMs: WARNINGS_TTL_MS,
       build: () => buildWarningsResponse(fy, stateHeadRaw),
       log: req.log,
@@ -173,6 +294,22 @@ async function buildWarningsResponse(
       }
     } catch {
       // fall through with the raw name
+    }
+
+    // B1 inputs: Laspeyres multipliers (prior FY → current FY), computed once
+    // per team build. Failure here degrades gracefully — B1 simply not raised.
+    const fyPrior = priorFyOf(fy);
+    let catMultipliers: CategoryMultiplierMap = new Map();
+    let companyMultiplier: MultiplierResult | null = null;
+    if (fyPrior) {
+      try {
+        [companyMultiplier, catMultipliers] = await Promise.all([
+          computeCompanyMultiplier(fyPrior, fy),
+          computeCategoryMultipliers(fyPrior, fy),
+        ]);
+      } catch (err) {
+        logger.warn({ err, fy, fyPrior }, "warnings: Laspeyres multipliers unavailable");
+      }
     }
 
     // 2. Load deep dive data for each member in parallel.
@@ -323,6 +460,49 @@ async function buildWarningsResponse(
           ? data.kpis.elapsedMonths / 12
           : null;
 
+      // B1 real-value input: nominal YoY growth over the recorded period vs
+      // the member's segment-weighted Laspeyres inflation.
+      let realValue: RealValueInput | null = null;
+      if (fyPrior && data.kpis) {
+        const recordedCount =
+          secMonths?.filter((m) => !m.notYetRecorded).length ?? 0;
+        const currentOB =
+          recordedCount > 0
+            ? secMonths!
+                .filter((m) => !m.notYetRecorded)
+                .reduce((s, m) => s + m.orderedAmount, 0)
+            : (payload.performance.totalOB ?? 0);
+        const quarters = priorYearQuarters(data.kpis, fyPrior);
+        const priorSame =
+          recordedCount > 0 && quarters
+            ? priorYearSamePeriod(quarters, recordedCount)
+            : null;
+        if (priorSame != null && priorSame > 0 && currentOB > 0) {
+          const inflation = await memberInflation(
+            ref.normKey,
+            fy,
+            fyPrior,
+            catMultipliers,
+            companyMultiplier,
+          );
+          if (inflation) {
+            const nominalGrowthPct = ((currentOB - priorSame) / priorSame) * 100;
+            const realGrowthPct =
+              ((1 + nominalGrowthPct / 100) / inflation.multiplier - 1) * 100;
+            realValue = {
+              nominalGrowthPct,
+              inflationPct: (inflation.multiplier - 1) * 100,
+              realGrowthPct,
+              inflationBasis: inflation.basis,
+            };
+            logger.debug(
+              { member: ref.name, currentOB, priorSame, ...realValue },
+              "warnings: B1 real-value input",
+            );
+          }
+        }
+      }
+
       const allWarnings = computeMemberWarnings({
         payload,
         rows,
@@ -332,6 +512,7 @@ async function buildWarningsResponse(
         memberElapsedFraction,
         teamNormWorkingDays,
         partialTenureCutoffDays,
+        realValue,
       });
 
       const { rootWarnings, suppressedWarnings, jFlags } = splitWarnings(allWarnings);
@@ -413,7 +594,7 @@ export async function prewarmWarningsSnapshots(fy: string): Promise<void> {
   for (const stateHead of stateHeads) {
     try {
       const result = await prewarmSnapshot({
-        key: `warnings|v3|${fy}|${stateHead.toLowerCase()}`,
+        key: `warnings|v5|${fy}|${stateHead.toLowerCase()}`,
         ttlMs: WARNINGS_TTL_MS,
         build: () => buildWarningsResponse(fy, stateHead),
       });

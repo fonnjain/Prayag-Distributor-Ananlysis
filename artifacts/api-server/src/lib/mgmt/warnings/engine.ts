@@ -1,4 +1,4 @@
-// Warning System engine — W1 (families A, C, D, E, G, I, J)
+// Warning System engine — W1 (families A, B, C, D, E, G, I, J)
 // All metrics come from EXISTING verified computation. No new arithmetic.
 
 import type { AiPayload } from "../aiPayload.js";
@@ -708,6 +708,47 @@ function computeI2(cost: AiPayload["cost"], months: Month[]): WarningCard | null
   });
 }
 
+// B1 — Growth below price inflation ("real value")
+// Nominal YoY growth vs the member's segment-weighted Laspeyres price
+// inflation. A member whose nominal growth is below inflation is quietly
+// shrinking in real terms. The growth/inflation numbers are computed by the
+// caller (they need DB access); the engine only bands and formats them.
+export type RealValueInput = {
+  nominalGrowthPct: number;  // current recorded YTD OB vs prior-year same period
+  inflationPct: number;      // segment-weighted Laspeyres inflation, %
+  realGrowthPct: number;     // ((1 + g) / multiplier − 1) × 100
+  inflationBasis: string;    // e.g. "segment-weighted (4 segments)" or "company"
+};
+
+function computeB1(rv: RealValueInput, months: Month[]): WarningCard | null {
+  // Fires only when real (deflated) growth is negative — nominal growth
+  // below segment inflation. Bands on the real growth shortfall.
+  const base = severityBelow(rv.realGrowthPct, -10, -5, 0);
+  if (!base) return null;
+  const obVals = recordedMonths(months).map((m) => m.orderedAmount);
+  const trend = detectTrend(obVals);
+  const sev = applyTrend(base, trend);
+  const sign = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+  return makeCard({
+    code: "B1",
+    family: "B",
+    title: "Growth below price inflation",
+    severity: sev,
+    baseSeverity: base,
+    trend,
+    metric: {
+      value: rv.realGrowthPct,
+      label: "Real (inflation-adjusted) YoY growth",
+      formatted: `Nominal ${sign(rv.nominalGrowthPct)} vs inflation ${sign(rv.inflationPct)} → real ${sign(rv.realGrowthPct)}`,
+    },
+    threshold: { red: -10, orange: -5, yellow: 0, direction: "below" },
+    source: `secondary register YoY vs Laspeyres price index (${rv.inflationBasis})`,
+    suggestedAction:
+      "The rupee number grew slower than prices — check volumes, not value, before crediting growth",
+    suppresses: [],
+  });
+}
+
 // J1 — No working sheet mapped
 function makeJ1(): WarningCard {
   return makeCard({
@@ -878,6 +919,9 @@ export function computeMemberWarnings(opts: {
   // Partial-tenure cutoff in working days — derived from the team median by
   // the caller (0.85 × median), never hardcoded.
   partialTenureCutoffDays?: number;
+  // B1 real-value input, computed by the caller (needs DB access for the
+  // Laspeyres multipliers and prior-year figures). Null = not computable.
+  realValue?: RealValueInput | null;
 }): WarningCard[] {
   const { payload, rows, kpisWorkingDaysActual, secMemberMonths, elapsedFraction, teamNormWorkingDays } = opts;
   const paceElapsedFraction =
@@ -947,6 +991,14 @@ export function computeMemberWarnings(opts: {
 
     const a2 = computeA2(totalOB, payload.targets.businessPlan, paceElapsedFraction, months);
     if (a2) warnings.push(a2);
+  }
+
+  // ── B warnings ─────────────────────────────────────────────────────────────
+  // Skipped for partial tenure (YoY basis not comparable) and for cross-FY
+  // key splits (prior year would read as zero).
+  if (!isPartialTenure && !CROSS_FY_KEY_SPLITS[normKey(payload.identity.member ?? "")] && opts.realValue) {
+    const b1 = computeB1(opts.realValue, months);
+    if (b1) warnings.push(b1);
   }
 
   const a3 = computeA3(months);
