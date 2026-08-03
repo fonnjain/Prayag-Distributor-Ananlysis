@@ -222,6 +222,41 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    id: "010_backfill_secondary_sku_segment_canon",
+    sql: `
+      -- Backfill secondary_sku_line.segment_canon for rows ingested before
+      -- config/group_map.json learned the PSCode_3 / register brand vocabulary
+      -- ("P.T.M.T. SYMET", "CPVC DURALIFE", "C.P. 5000 SERIES", ...).
+      -- Keep this VALUES list consistent with config/group_map.json.
+      -- Idempotent: only touches rows whose segment_canon is still NULL.
+      UPDATE secondary_sku_line s SET segment_canon = m.canon
+      FROM (VALUES
+        ('P.T.M.T. SYMET',             'PTMT / Faucets'),
+        ('VIGNETTE',                   'PTMT / Faucets'),
+        ('CPVC DURALIFE',              'CPVC'),
+        ('UPVC AQUAFRESH',             'UPVC'),
+        ('SWR DRAINTECH',              'SWR'),
+        ('C.P-CDA',                    'CP (Chrome-Plated)'),
+        ('C.P. 5000 SERIES',           'CP (Chrome-Plated)'),
+        ('C.P. 6000 SERIES',           'CP (Chrome-Plated)'),
+        ('C.P. 7000 SERIES',           'CP (Chrome-Plated)'),
+        ('C.P. 8000 SERIES',           'CP (Chrome-Plated)'),
+        ('C.P. 9000 SERIES',           'CP (Chrome-Plated)'),
+        ('P.V.C. GARDEN PIPE',         'Garden Pipe'),
+        ('CISTERNS & SEAT COVERS',     'CISTERN'),
+        ('S.STEEL SINK',               'Sink'),
+        ('AGRITEC',                    'AGRI'),
+        ('AGRI AGRITEC',               'AGRI'),
+        ('WATER TANKS',                'WATER TANK'),
+        ('COLUMN PIPE',                'COLUMN'),
+        ('WATER HEATER',               'Sanitaryware'),
+        ('COCKROACH TRAPS & GRATINGS', 'Connection / Waste'),
+        ('MANHOLE COVER',              'Connection / Waste')
+      ) AS m(raw, canon)
+      WHERE s.segment_canon IS NULL AND s.segment_raw = m.raw;
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

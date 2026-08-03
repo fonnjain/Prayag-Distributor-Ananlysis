@@ -50,3 +50,7 @@ Sheet IDs in `lib/secondary/skuLoader.ts:SKU_SHEET_IDS`. FY2026-27 deliberately 
 - Primary (distributor/direct_dealer): `sale_line.amount` = taxable value / net invoice amount.
 - Secondary (retailer): `secondary_sku_line.net_amount` = Sub Total column from register.
 - `Order Total` is never used for analytics.
+
+## Rule: register brand vocabulary must land in group_map.json
+**Why:** brand-style segment names from register drops that aren't in group_map.json ingest with segment_canon NULL, and coverage measures silently understate (found Aug 2026 when a full FY showed "0 of N segments").
+**How to apply:** when a new brand name appears in a register drop, add it as a group_map.json alias AND extend the segment_canon backfill migration; a unit test guards the known vocabulary. Same vocabulary is duplicated in brandToBroad() — keep in sync.
