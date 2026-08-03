@@ -89,4 +89,6 @@
 - [Numeric guard 2-dp rounding](numeric-guard-rounding.md) — allowlist includes 2-dp lakh/crore display forms of every payload number; sums still flagged.
 - [Month-complete lock rule](month-complete-lock-rule.md) — complete when max invoice hits month-end OR the lock instant (lastDay+7d) passes; payload-logic changes need versioned snapshot keys.
 - [Warning B1 real-value](warning-b1-real-value.md) — plain Q1–Q4 fallback needs TOTALORDER cross-foot; brandToBroad bridges secondary segments to category multipliers; snapshot key bumps risk persisted degraded J1 builds.
+- [C1 Comparison contract](comparison-contract.md) — POST /api/comparison; basis bound to entity type; guard 2 blocks cross-FY shape mismatch; frozen anchors from sale_line_current not verify_anchors totals.
+- [Engine Generated Targets](target-engine.md) — overrides-only persistence, growth-split weights, date-derived baseline, member pro-rata fallback when distributor-TM map is empty.
 - [Distributor DD stale fallback](distributor-dd-stale-fallback.md) — member-sheet Sheets failures return 200 with membersFailed>0, not throws; only complete loads may overwrite the snapshot.

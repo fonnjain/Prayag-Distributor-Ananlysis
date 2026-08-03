@@ -1,0 +1,171 @@
+# T1 — Engine Generated Targets
+
+*A second tab on the Targets page that builds targets from what each customer actually bought, rather than from a percentage applied to a total.*
+
+---
+
+## Structure
+
+```
+Targets page
+├── User Filled            (the current page, relabelled)
+└── Engine Generated       (new)
+    ├── Combined           ← first tab, the headline
+    ├── Existing Sales Old SKU
+    ├── Existing Sales New SKU
+    └── New Customers
+```
+
+**Baseline: FY2025-26 actuals — ₹361.00 Cr, frozen.** It rolls forward automatically: when FY2026-27 closes it becomes the baseline, and this year's new customers become next year's existing customers. Derive the baseline year from the current fiscal year, never a config list.
+
+---
+
+## The context this has to sit in
+
+| FY | ₹ Cr | Nominal | **Real** |
+|---|---|---|---|
+| FY2024-25 | 341.14 | −2.3% | **−8.6%** |
+| FY2025-26 | 361.00 | +5.8% | **−1.0%** |
+| FY2026-27 Apr–Jul | — | +0.4% | **−6.1%** |
+
+**Real volume has shrunk every loaded year.** A 25% nominal target is **17% real volume growth** against a business that has never grown more than 5.8% nominal. The engine must show that, because a target the field dismisses stops working as a management tool.
+
+---
+
+```
+Prayag app - Engine Generated Targets. New tab on the Targets page. Same global
+rules. This is a generator, not a report - it produces editable proposals.
+
+1. TAB STRUCTURE.
+   Relabel the existing Targets content as 'User Filled'.
+   Add 'Engine Generated' with four sub-tabs in this order:
+     Combined | Existing Sales Old SKU | Existing Sales New SKU | New Customers
+   Combined is the landing tab.
+
+2. BASELINE - FY2025-26 ACTUALS, not targets.
+   Rs 361.00 Cr, 145,613 rows, frozen. Growing an unmet target compounds a miss;
+   grow what was actually sold.
+   Derive the baseline year from today's date - the year before the current
+   fiscal year. When FY2026-27 closes it becomes the baseline with no code
+   change. Simulate a date of 1 April 2027 and confirm the baseline advances.
+
+3. THE THREE POPULATIONS, computed at customer x item-code level from sale_line,
+   primary channel, project and institutional EXCLUDED:
+
+   EXISTING OLD SKU   customer bought in the baseline year AND this code in the
+                      baseline year
+   EXISTING NEW SKU   customer bought in the baseline year, did NOT buy this code
+   NEW CUSTOMERS      customer has no baseline-year business at all
+
+   Every customer x code pair falls in exactly one. Report the three counts and
+   confirm they reconcile to the baseline total of Rs 361.00 Cr.
+
+4. PARAMETERS - all editable, all with computed defaults.
+
+   a) AVERAGE PRICE INCREASE - PER SEGMENT, not one company figure.
+      The Laspeyres index already exists. Company is 1.069, but the spread is
+      enormous: CPVC 1.007, PTMT 1.047, CP 1.113, water tank 1.181.
+      A single 6.9 per cent would set water-tank targets BELOW that segment's own
+      price inflation. Default each segment to its own index, editable per
+      segment, with the company figure shown for reference.
+
+   b) INFLATION - default 7 per cent, used as a FLOOR, not a multiplier.
+      Price increase is already inside the growth. Do not stack them. Instead
+      flag any segment whose target fails to beat 7 per cent in real terms, and
+      say so on the row.
+
+   c) TARGET INCREASE - default 25 per cent, user input.
+      ALONGSIDE IT, ALWAYS SHOW THE REAL-TERMS EQUIVALENT:
+      "25% nominal = 17% real volume growth. The business did -1.0% real in
+       FY2025-26 and is running -6.1% real this year."
+      Management may still choose 25. They must choose it knowing.
+
+5. COMBINED TAB - THE WEIGHTS APPLY TO GROWTH, NOT TO THE TOTAL.
+
+   base Rs 361.00 Cr, increase 25 per cent, growth Rs 90.25 Cr.
+   The weights split THE GROWTH between the three routes. Applied to the total
+   they are incoherent - old-SKU business alone cannot carry Rs 451 Cr.
+
+   DEFAULT WEIGHTS 25 / 45 / 30, user editable, must sum to 100.
+
+   These differ from an initial 15/35/50 proposal, and the reason is evidence:
+     range depth is 67 per cent of a real push list and the cheapest route to
+       act on - shelf space and the relationship already exist
+     breadth headroom is large - CP 1,000 of 2,657 codes bought, PTMT 895 of
+       1,675
+     the customer COUNT is flat, roughly 607 to 610 between comparable quarters,
+       so new-customer acquisition is the hardest route and should not carry the
+       heaviest weight
+   Show both splits side by side on first use so the choice is visible, and let
+   the user set whatever they want.
+
+   Report per tab: baseline value, growth allocated, resulting target.
+
+6. EACH TAB SHIPS WITH ITS LIST. This is the part that makes a target actionable.
+
+   OLD SKU      the customers and codes carrying it, ranked by baseline value
+   NEW SKU      THE K3 PUSH LIST - already built. Tiered range depth, lapsed,
+                peer gap; named peers - "13 of 27 peers your size buy this code
+                and you do not". Do NOT invent a new list; read the existing one.
+   NEW CUSTOMERS the whitespace analysis - districts with retailers and no
+                distributor, and the assignment gap where a distributor already
+                operates. Also already built.
+
+   A target of Rs 31 Cr is abstract. Forty named codes with peer evidence is a
+   week's work a salesperson can start on Monday.
+
+7. SEASONAL MONTHLY SPLIT - not flat.
+   13 of 14 segments peak Q4 on territory-only curves. A flat monthly target
+   makes the field fail in Q2 and look like heroes in Q4.
+   Split each target across months using that segment's own seasonal curve from
+   the three closed years. Show the curve used.
+
+8. ROLL UP TO MEMBER, AND HEAD.
+   Computed at customer x code, aggregated to member via the distributor and
+   retailer attribution already in place, then to State Head.
+   Member level is where a target becomes actionable.
+
+9. FIX THE ZERO-TARGET PROBLEM - arguably the most valuable immediate use.
+   Eleven members currently carry a to-date target of ZERO while doing real
+   business, and TWO ENTIRE HEADS - Sunil Mohanty and Anuj Sharma - have no
+   target at all.
+   The engine can generate a target for every one of them from their own
+   baseline history. Report how many members move from "no target recorded" to
+   a generated figure.
+
+10. GENERATED IS A PROPOSAL, NOT A COMMITMENT.
+    Every generated figure is editable. An edited value carries a 'user' marker
+    and is NEVER overwritten by regeneration - the same protection State Head
+    targets already have.
+    Show, per row, whether the value is generated or user-edited, and what the
+    engine would have proposed if it differs.
+
+Acceptance - report each with the computed value:
+   the three populations reconcile to Rs 361.00 Cr with no customer x code pair
+     in two populations or none
+   per-segment price indices default correctly - CPVC 1.007, water tank 1.181
+   the real-terms equivalent is shown beside every nominal target
+   Combined weights split GROWTH and sum to 100; changing a weight changes the
+     three tab targets and not the total
+   each tab shows its list, and the New SKU list is the existing push list with
+     named peers rather than a new computation
+   monthly splits follow each segment's own seasonal curve, not a flat twelfth
+   targets roll up to member and to State Head
+   every member currently on zero target receives a generated proposal, and the
+     count is reported
+   an edited value survives regeneration
+   simulate 1 April 2027 and confirm the baseline advances to FY2026-27 with no
+     code change
+```
+
+---
+
+## Two things to watch
+
+**The 25% default is the number that will be argued about.** Showing the real-terms equivalent beside it is what keeps the argument honest — the choice stays with management, but nobody can set it without seeing that the business has shrunk in real terms three years running.
+
+**The weights are a business judgement, not a calculation.** 25/45/30 is what the evidence supports; 15/35/50 is defensible if the intent is deliberately to force new-customer acquisition. Showing both on first use makes it a decision rather than a default nobody examined.
+
+---
+
+*Baseline and growth figures verified against the frozen registers, 2 August 2026*

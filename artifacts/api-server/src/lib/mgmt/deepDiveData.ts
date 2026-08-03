@@ -947,6 +947,37 @@ export async function loadRegistry(fy: string): Promise<IdentityRegistry | null>
   return _registry.get(fy) ?? null;
 }
 
+/** Lightweight target snapshot per member from the Data tab — for the target
+ *  engine's zero-target detection.  Adds no Sheets overhead when FY is warm. */
+export type MemberTargetSnapshot = {
+  name: string;
+  normKey: string;
+  stateHead: string;
+  isLeft: boolean;
+  totalTargetToDate: number | null;
+  monthlyTarget: number | null;
+  /** Secondary OB + direct-dealer OB (YTD) — allocation weight for rollups. */
+  obTotal: number;
+  sale: number;
+};
+
+export async function loadMemberTargetSnapshots(
+  fy: string,
+): Promise<MemberTargetSnapshot[] | null> {
+  const entry = await loadAllMembers(fy);
+  if (!entry) return null;
+  return entry.allMembers.map((m) => ({
+    name: m.name,
+    normKey: m.normKey,
+    stateHead: m.stateHead,
+    isLeft: m.isLeft,
+    totalTargetToDate: m.totalTargetToDate,
+    monthlyTarget: m.monthlyTarget,
+    obTotal: (m.orderBooking ?? 0) + (m.directDealersOrder ?? 0),
+    sale: m.sale ?? 0,
+  }));
+}
+
 async function loadAllMembers(fy: string): Promise<CacheEntry | null> {
   clearExpired();
   const hit = _cache.get(fy);

@@ -1,0 +1,157 @@
+# C1 — Comparison Deep Dive, the contract layer
+
+*API only. No UI in this phase. If the guards work, the rest is presentation; if they do not, no interface will save it.*
+
+---
+
+```
+Prayag app - Comparison Deep Dive, Phase C1 of 4. Same global rules as every
+earlier phase. NO UI IN THIS PHASE. Build the selection schema, the measure
+catalogue and all twelve guards, and prove them with an API.
+
+The page exists because every comparison that has gone wrong in this project
+went wrong the same way - the two sides were not on the same basis. Nine real
+examples, all encountered here:
+
+   Prasun 73 retailers vs Shivam 136        different sources
+   Anant Singh 51.7% vs 58.4%               before/after excluding 3 leavers
+   Rahul Singh 11 days vs Amey 77 days      pace not normalised
+   Jul Rs 27.36 Cr vs Jun Rs 31.43 Cr       13 of 14 segments peak Q4
+   FY25-26 Rs 361 Cr vs FY24-25 Rs 341 Cr   +5.8% nominal, -1.0% REAL
+   HDPE gap Rs 32.65 Cr vs Rs 0.01 Cr       with vs without project
+   Q1 FY26-27 vs full FY25-26               partial vs complete
+   Sandeep 100% active vs Anant 96%         different retailer definitions
+   Sulinder Pal 45.6%                       3 of 5 have no target
+
+This phase must make each of those IMPOSSIBLE, not merely documented.
+
+1. THE SELECTION SCHEMA.
+
+   comparison = {
+     entityType : company | head | member | distributor | retailer | segment | code
+     entities   : [id, ...]        1..N, or a cohort rule
+     periods    : [period, ...]    1..N
+     measures   : [measure, ...]
+     basis      : primary | secondary          NEVER mixed silently
+     normalise  : absolute | perElapsedMonth | perWorkingDay | perRetailer
+                | perVisit | realTerms
+     channel    : territory | project | all    default territory
+     population : activeOnly | includeLeft     default activeOnly
+   }
+
+   PERIOD GRAMMAR: month (Jul-26), quarter (Q1 FY2026-27), fiscal year,
+   YTD, samePeriodLastYear (auto-derived, like months only), custom range.
+   EVERY PERIOD CARRIES A COMPLETENESS FLAG: complete | partial |
+   noActualsRecorded. Derive it from the data, not a config list.
+
+2. THE MEASURE CATALOGUE - only measures VALID for that entity type are
+   offered. This is what prevents most category errors before they happen.
+
+   MEMBER and HEAD: secondary OB (I+J), sales received (AY), target (BM),
+     achievement (recomputed), retailers (THREE sources, each named),
+     visits (THREE sources), pace ratio, cost and cost ratio, unassigned
+     share, customer states, SKU breadth
+   DISTRIBUTOR: primary sale, primary OB, pending, fill rate, SKU breadth,
+     gap value, effective discount, tier A/B/C, retailers served, effective
+     retailers, flow gap
+   RETAILER: secondary OB, codes bought, assigned distributor, active/dormant,
+     last order date. LIVE YEAR IS APR-JUN ONLY - the register has no July
+   SEGMENT and CODE: NET, quantity, customers buying, breadth, discount and
+     its variance, seasonal curve, gap value, peer penetration
+
+   Requesting a measure invalid for the entity type returns an error naming
+   the entity type and the valid measures. It does not silently return null.
+
+3. THE TWELVE GUARDS. Each either BLOCKS the comparison or ANNOTATES it.
+   Report which fired on every response.
+
+    1 SOURCE       both sides must use the same source. Mixing sheet row
+                   counts with Data-tab declared counts is BLOCKED, not
+                   footnoted. Prasun reads 62 declared and 73 from his sheet.
+    2 LIKE MONTHS  a partial period compares only to the same months of
+                   another year. Q1 against a full FY is BLOCKED.
+    3 SEASONAL     comparing different quarters shows each segment's seasonal
+                   index beside the figure. 13 of 14 peak Q4 on territory
+                   curves.
+    4 REAL TERMS   any cross-year money comparison shows nominal AND real
+                   using that segment's own Laspeyres index - CPVC 1.007 to
+                   water tank 1.181, company 1.069. Never one company figure
+                   across segments.
+    5 CHANNEL      territory by default. Project shown as its own panel,
+                   never blended into a territory baseline. Project was 6 per
+                   cent of revenue and 78 per cent of apparent opportunity.
+    6 POPULATION   LEFT members excluded from current-period comparison,
+                   history preserved. If the roster differs between the
+                   periods being compared, NAME the members who joined or
+                   left and state the effect. Excluding three leavers moved
+                   one team 51.7 to 58.4 per cent.
+    7 TENURE       members whose elapsed months or working days differ
+                   materially are compared ONLY on normalised measures.
+                   Working days run 8 to 79 company-wide. Absolute visit
+                   counts are suppressed and per-day shown instead.
+    8 ZERO TARGET  "no target recorded", never 0 per cent. Where a group
+                   contains untargeted members, report headline AND
+                   like-for-like. Sulinder Pal has 3 of 5 untargeted.
+    9 NO BUSINESS  a period with a plan and no actuals reads "not recorded
+                   yet". Sunil Mohanty and Anuj Sharma have no target and no
+                   business - undefined, not zero, and excluded from ranking.
+   10 IDENTITY     two people are named Ashutosh Kumar. An ambiguous entity
+                   selection returns an error naming both candidates with
+                   their head and headquarter. Never take the first match.
+   11 SAMPLE       correlations, concentration and effective-retailer figures
+                   are suppressed below a stated minimum and say so. Sunil
+                   Mohanty has one retailer; that is not a distribution.
+   12 FROZEN       a comparison against a closed year states the frozen anchor
+                   used: FY2023-24 Rs 349.02 Cr, FY2024-25 Rs 341.14 Cr,
+                   FY2025-26 Rs 361.00 Cr.
+
+4. EVERY RESPONSE CARRIES A BASIS BLOCK - source, period with completeness,
+   channel, population, normalisation, and the guards that fired. A consumer
+   that ignores it still gets correct numbers; a consumer that reads it can
+   explain them.
+
+5. ROUTE: POST /api/comparison
+   Body is the selection schema. Response is the basis block, the guard
+   results, and the value matrix. No rendering, no charts, no suggestions -
+   those are C2 to C4.
+
+Acceptance - prove each by showing the response, not by asserting success:
+  a member-vs-member comparison on retailers where one side would use sheet
+    rows and the other declared counts is BLOCKED with the reason
+  Q1 FY2026-27 against full FY2025-26 is BLOCKED as partial vs complete
+  Q1 FY2026-27 against Q1 FY2025-26 is ALLOWED and labelled like-months
+  a cross-year money comparison returns nominal AND real, with the segment
+    index named - confirm water tank uses 1.181 and CPVC 1.007
+  comparing Rahul Singh (11 working days) with Amey Deodhar (77) suppresses
+    absolute visits and returns per-day figures with the tenure guard noted
+  a comparison including Sulinder Pal returns headline AND like-for-like with
+    the three untargeted members named
+  a comparison including Sunil Mohanty or Anuj Sharma returns "no target and
+    no recorded business", not zero, and they are excluded from ranking
+  entity "Ashutosh Kumar" with no head returns an error naming both, with
+    their heads and headquarters
+  a correlation requested on fewer than the minimum sample is suppressed with
+    the sample size stated
+  a comparison against FY2025-26 names the frozen anchor Rs 361.00 Cr
+  requesting a distributor measure on a member entity returns an error listing
+    the valid member measures
+  every response carries the basis block
+
+DO NOT BUILD ANY UI IN THIS PHASE. C2 adds trajectory and peer views, C3 the
+matrix and cohort modes, C4 the suggestion layer. If a guard cannot be proven
+by an API response here, it will not hold once there is a chart in front of it.
+```
+
+---
+
+## Why C1 alone
+
+**Every guard is a rule that has already been broken once.** Guard 1 cost three separate investigations. Guard 4 is why a −1.0% real year read as +5.8% growth. Guard 5 is why HDPE sat at the top of a push list it had no business being on.
+
+A chart makes those failures harder to see, not easier. Proving the contract against an API — where the response either says *blocked, and here is why* or returns a basis block — is the only way to know it holds.
+
+**C2 to C4 are presentation.** They are worth building, and they are not worth building first.
+
+---
+
+*Schema and figures verified against the frozen registers and the live dashboard, 2 August 2026*

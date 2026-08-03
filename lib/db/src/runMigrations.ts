@@ -200,6 +200,28 @@ const MIGRATIONS: Migration[] = [
       DROP TABLE IF EXISTS mgmt_data_snapshot;
     `,
   },
+  {
+    id: "009_engine_targets",
+    sql: `
+      -- Engine-Generated Targets (T1): stores user-edited parameters and
+      -- per-row overrides for the target engine. Engine proposals are always
+      -- recomputed live; ONLY explicit user edits are persisted here, so
+      -- regeneration can never overwrite them. engine_value keeps the
+      -- proposal that was current when the user edited, for display.
+      CREATE TABLE IF NOT EXISTS engine_targets (
+        id           SERIAL      PRIMARY KEY,
+        fy           TEXT        NOT NULL,
+        row_key      TEXT        NOT NULL,
+        value        JSONB       NOT NULL,
+        engine_value JSONB,
+        source       TEXT        NOT NULL DEFAULT 'user',
+        updated_by   TEXT        NOT NULL DEFAULT '',
+        updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT engine_targets_uq UNIQUE (fy, row_key)
+      );
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

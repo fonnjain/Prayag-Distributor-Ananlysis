@@ -78,7 +78,38 @@ function inr(n: number): string {
   return n.toLocaleString("en-IN");
 }
 
+import EngineTargets from "./EngineTargets";
+
 export default function Targets() {
+  const [tab, setTab] = useState<"user" | "engine">("user");
+  return (
+    <div className="space-y-6 max-w-6xl mx-auto">
+      <div className="inline-flex rounded-md border border-border/50 p-0.5 text-sm">
+        <button
+          onClick={() => setTab("user")}
+          className={cn(
+            "px-4 py-1.5 rounded font-medium transition-colors",
+            tab === "user" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          User Filled
+        </button>
+        <button
+          onClick={() => setTab("engine")}
+          className={cn(
+            "px-4 py-1.5 rounded font-medium transition-colors",
+            tab === "engine" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          Engine Generated
+        </button>
+      </div>
+      {tab === "user" ? <UserFilledTargets /> : <EngineTargets />}
+    </div>
+  );
+}
+
+function UserFilledTargets() {
   const [fy, setFy] = useState(FYS[0]);
   const targets = useGetTargets({ fy });
   const save = useSaveTargets();
