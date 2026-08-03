@@ -94,4 +94,5 @@
 - [Engine Generated Targets](target-engine.md) — overrides-only persistence, growth-split weights, date-derived baseline, member pro-rata fallback when distributor-TM map is empty.
 - [Company Reports filters + export](company-reports-filters.md) — prior-FY entity scope resolved via current-FY customer set; month filter intersects like months; filtered requests never snapshot.
 - [Secondary person target engine](secondary-person-target-engine.md) — person targets on secondary basis only; overrides reflow into route splits; fallback chain never yields zero; pool = roster − declared coverage per state.
+- [C3 matrix + cohort modes](c3-matrix-cohorts.md) — achievementTotal is a percent; company-wide = aggregate per-head deep dives; minutes-long builds need 202-poll pattern; sheet cohorts are territory-only.
 - [Distributor DD stale fallback](distributor-dd-stale-fallback.md) — member-sheet Sheets failures return 200 with membersFailed>0, not throws; only complete loads may overwrite the snapshot.

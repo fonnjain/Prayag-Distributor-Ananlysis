@@ -1,0 +1,131 @@
+# C3 — Matrix and Cohort modes
+
+*The roster is complete. This is the phase where the page starts producing decisions rather than figures.*
+
+---
+
+## Why the matrix matters more than the first two modes
+
+Trajectory tells you a member is at 45%. Peer tells you he is below his team. **Neither tells you whether he is climbing or sliding** — and those are opposite conversations with the same number.
+
+**Level and direction together is the whole point.** A member at 45% and rising needs support; one at 55% and falling needs a different discussion this week.
+
+With 182 members across twelve heads now onboarded, this is the first phase that can look at the whole company at once.
+
+---
+
+```
+Prayag app - Comparison Deep Dive, Phase C3 of 4. Same global rules.
+Add Mode C (matrix) and Mode D (cohort). NO NEW COMPUTATION - both call
+POST /api/comparison and render what it returns, including refusals.
+
+The twelve guards from C1 apply unchanged. The basis strip and the full
+channelLabel remain above the data.
+
+1. MODE C - THE MATRIX. Many entities x many periods.
+
+   Enable the second axis that C2 deliberately disabled.
+
+   LAYOUT: entities down, periods across, ONE measure at a time. A matrix of
+   many entities x many periods x many measures is unreadable - make the
+   measure a selector, not a third axis.
+
+   EACH CELL CARRIES: the value, and the change from the previous period in
+   that row. Not a colour alone - a reader must be able to take the number.
+
+   THE TWO DERIVED COLUMNS ARE THE POINT:
+     LEVEL      the latest period's value
+     DIRECTION  the trend across the selected periods, stated as a slope on
+                the normalised measure, not eyeballed from colour
+
+   Then the quadrant view, which is what turns this into a decision:
+     high level, rising      performing and improving
+     high level, falling     the early-warning quadrant - most valuable
+     low level, rising       recovering, leave alone
+     low level, falling      the intervention list
+
+   THE FALLING-FROM-HIGH QUADRANT IS THE ONE NOBODY SEES TODAY. A member at
+   70 per cent who was at 85 raises no warning anywhere in the app - they are
+   above every threshold. Surface that quadrant first.
+
+   GUARDS IN A MATRIX:
+     a cell whose period is partial or has no actuals shows so, never a zero,
+       and is EXCLUDED from the direction calculation
+     an entity flagged TENURE is shown but not given a direction - too few
+       periods of comparable tenure to establish one
+     a period where the roster changed names the joiners and leavers, because
+       a head's direction can move purely from membership. Excluding three
+       leavers moved one team 51.7 to 58.4 per cent with no performance change
+     cross-year money cells show real terms with the segment index named
+
+2. MODE D - COHORT. Group against group.
+
+   A cohort is a RULE, not a hand-picked list, so it re-evaluates as data
+   changes. Support at minimum:
+     retailers WITH an assigned distributor  vs  WITHOUT
+     members above vs below a stated achievement band
+     distributors by tier A / B / C
+     customers retained vs reactivated vs at risk vs never
+     segments in season this quarter vs out of season
+     members with a mapped working sheet vs without
+
+   Report per cohort: the population count, the measure, and the difference
+   WITH ITS SAMPLE SIZE. A difference between cohorts of 3 and 800 is not a
+   finding.
+
+   THE ASSIGNMENT COHORT IS THE ONE TO GET RIGHT. It is the strongest
+   relationship in the project and now computable across all twelve heads:
+     Anant Singh   96.0 per cent active with a distributor, 5.0 without,
+                   member correlation -0.90 (n=10)
+     Sandeep       100 versus 16, correlation -0.33 (n=66)
+   With 182 members loaded, report the company-wide figure and state plainly
+   whether the retailer-level gap holds and what the correlation is at full
+   scale. A weak correlation reported honestly is worth more than a strong one
+   assumed.
+   CARRY BOTH READINGS as always - a retailer with no distributor may have no
+   route to order, OR '--' may be written when a retailer goes dormant. The
+   data cannot distinguish them.
+
+3. WHAT NEITHER MODE MAY DO
+     no composite score across measures
+     no colour without the number beside it
+     no direction computed across periods of differing completeness
+     no cohort difference reported without both population counts
+     no entity silently dropped from a matrix - a guard-flagged row is shown
+       with its flag, or listed below as excluded with the reason
+
+4. EXPORT carries the full basis block, as in C2, plus the cohort rules used.
+
+Acceptance - show the rendered result:
+  a matrix of one head's members across four quarters on achievement, with
+    level and direction columns and the quadrant view
+  the falling-from-high quadrant is populated and listed first - report who is
+    in it company-wide
+  a partial period cell says so and is excluded from direction
+  a head whose roster changed between periods names the joiners and leavers
+  a cross-year money matrix shows real terms per segment
+  the assignment cohort reports company-wide across all 182 members, with the
+    retailer-level gap, the member-level correlation, and the sample size
+  a cohort with a small population states the count and suppresses the
+    correlation
+  Ashutosh Kumar in a matrix resolves by head, not by name
+  no figure appears that is not in the API response
+```
+
+---
+
+## The output I would look at first
+
+**The falling-from-high quadrant.** Every alerting mechanism in this app is threshold-based — the Warning System fires below 50%, low performers below 50%. **A member who has gone from 85% to 70% triggers nothing**, because they are above every line.
+
+That is the most useful thing a matrix can surface, and nothing in the app can currently see it.
+
+---
+
+## After C3
+
+**C4** is the suggestion layer — ranked observations with the evidence behind them, reusing the existing push list and whitespace rather than computing anything new. That is the phase that turns the page from something a manager reads into something that tells them where to look.
+
+---
+
+*Figures verified against the C1 API and the frozen registers, 3 August 2026*

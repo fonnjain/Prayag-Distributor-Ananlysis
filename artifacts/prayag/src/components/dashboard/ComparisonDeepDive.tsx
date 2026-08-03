@@ -17,8 +17,28 @@ type PeriodSpec = {
 };
 type MeasureDef = { id: string; label: string; money: boolean; sources: string[] | null };
 type GuardResult = { id: number; name: string; status: "pass" | "annotated" | "blocked" | "notApplicable"; detail: string | null; data?: unknown };
+type TrendMeta = {
+  level: number | null; levelPeriod: string | null; levelIsPartial?: boolean;
+  direction: number | null; directionBasis: string | null;
+  usedPeriods: string[]; excludedPeriods: { label: string; reason: string }[];
+};
+type QuadrantView = {
+  measure: string; measureLabel: string; levelSplit: number; splitRule: string;
+  groups: { quadrant: string; label: string; entities: { entity: string; level: number; direction: number }[] }[];
+  noDirection: { entity: string; reason: string }[];
+};
+type RosterChange = { entity: string; fromFy: string; toFy: string; joiners: string[]; leavers: string[]; note: string };
+type CohortGroup = { name: string; population: number; value: number | null; valueLabel: string; note?: string };
+type CohortResult = {
+  blocked: false;
+  basis: { rule: string; ruleDetail: string; fy: string; channel: string; channelLabel: string; readings: string[] };
+  cohorts: CohortGroup[];
+  difference?: { value: number | null; label: string; sampleNote: string };
+  correlation?: { r: number | null; n: number; suppressed: boolean; note: string };
+  notes: string[];
+};
 type CellValue = { value: number | string | null; real?: number | null; realIndex?: number | null; realIndexName?: string | null; note?: string | null; suppressed?: boolean };
-type MatrixRow = { entity: string; measure: string; measureLabel: string; source: string | null; excludeFromRanking?: boolean; flags?: string[]; rankEligible?: boolean; rankBlockReason?: string | null; cells: CellValue[] };
+type MatrixRow = { entity: string; measure: string; measureLabel: string; source: string | null; excludeFromRanking?: boolean; flags?: string[]; rankEligible?: boolean; rankBlockReason?: string | null; cells: CellValue[]; trend?: TrendMeta; };
 type BasisBlock = {
   entityType?: string; basis?: string; channel?: string; channelLabel?: string;
   population?: string; normalise?: string;
@@ -26,7 +46,7 @@ type BasisBlock = {
   sources?: Record<string, string>;
 };
 type OkResponse = {
-  blocked: false; basis: Required<BasisBlock>; guards: GuardResult[]; matrix: MatrixRow[];
+  blocked: false; basis: Required<BasisBlock>; guards: GuardResult[]; matrix: MatrixRow[]; quadrants?: QuadrantView[]; rosterChanges?: RosterChange[];
   likeForLike?: { entity: string; headlineAchievement: number | null; likeForLikeAchievement: number | null; untargetedMembers: string[] }[];
   notes: string[];
 };
@@ -252,6 +272,14 @@ export default function ComparisonDeepDive() {
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDesc, setSortDesc] = useState(true);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [view, setView] = useState<"compare" | "cohorts">("compare");
+  const [matrixMeasure, setMatrixMeasure] = useState<string | null>(null);
+  // Mode D — cohort state
+  const [cohortRule, setCohortRule] = useState<string>("assignment");
+  const [cohortBand, setCohortBand] = useState<number>(50);
+  const [cohortResult, setCohortResult] = useState<CohortResult | null>(null);
+  const [cohortLoading, setCohortLoading] = useState(false);
+  const [cohortError, setCohortError] = useState<string | null>(null);
 
   // Period builder state
   const [pbFy, setPbFy] = useState(FYS[0]);
@@ -283,11 +311,12 @@ export default function ComparisonDeepDive() {
   const defsById = useMemo(() => new Map(measureDefs.map((m) => [m.id, m])), [measureDefs]);
 
   // Mode: many periods = trajectory (A); many entities = peer (B).
-  const modeA = periods.length > 1;
-  const modeB = entities.length > 1;
-  const lockPeriods = modeB;   // Mode C belongs to C3
-  const lockEntities = modeA;
-  const LOCK_MSG = "Level and direction together (many entities × many periods) is the matrix view — it arrives in the next phase. Clear one axis to multi-select the other.";
+  const modeA = periods.length > 1 && entities.length <= 1;
+  const modeC = periods.length > 1 && entities.length > 1;
+  const modeB = entities.length > 1 && !modeC;
+  const lockPeriods = false;
+  const lockEntities = false;
+  const LOCK_MSG = "";
 
   const addPeriod = () => {
     const p: PeriodSpec = { kind: pbKind, fy: pbFy };
@@ -328,6 +357,61 @@ export default function ComparisonDeepDive() {
   };
 
   const canRun = measures.length > 0 && periods.length > 0 && (entityType === "company" || entities.length > 0);
+
+  const runCohortQuery = async () => {
+    setCohortLoading(true); setCohortError(null); setCohortResult(null);
+    try {
+      const body: Record<string, unknown> = { rule: cohortRule, channel };
+      if (cohortRule === "achievementBand") body.band = cohortBand / 100;
+      // The build runs server-side detached from the request; a 202 means
+      // "still building" — keep polling until the cached result is ready.
+      const deadline = Date.now() + 15 * 60 * 1000;
+      for (;;) {
+        const r = await fetch("/api/comparison/cohort", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        });
+        let data: any = null;
+        try { data = await r.json(); } catch {
+          throw new Error(`the server took too long to answer (HTTP ${r.status}) — the build is likely still running; press Build again in a minute`);
+        }
+        if (r.status === 202 && data?.building) {
+          if (Date.now() > deadline) throw new Error("the cohort build is taking unusually long — try again later");
+          await new Promise((res) => setTimeout(res, (data.retryAfter ?? 20) * 1000));
+          continue;
+        }
+        if (r.ok) { setCohortResult(data); return; }
+        throw new Error(data?.error ?? `HTTP ${r.status}`);
+      }
+    } catch (e) {
+      setCohortError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCohortLoading(false);
+    }
+  };
+
+  const exportCohortPdf = () => {
+    if (!cohortResult) return;
+    const el = document.getElementById("cohort-print-root");
+    if (!el) return;
+    const w = window.open("", "_blank", "width=900,height=700");
+    if (!w) return;
+    w.document.write(`<!doctype html><html><head><title>Cohorts</title><style>
+      body{font-family:system-ui,sans-serif;font-size:11px;color:#111;margin:24px}
+      table{border-collapse:collapse;width:100%;margin-top:8px}
+      th,td{border:1px solid #ccc;padding:4px 6px;text-align:left;vertical-align:top}
+      .basis{border:1px solid #99c;background:#eef3fb;padding:8px 10px;margin-bottom:10px;font-weight:600}
+      .muted{color:#666;font-size:10px}
+    </style></head><body>
+      <div class="basis">${cohortResult.basis.channelLabel.replace(/</g, "&lt;")}</div>
+      <div class="basis">Cohort rule: ${cohortResult.basis.ruleDetail.replace(/</g, "&lt;")}<br/>
+        Rule id: ${cohortResult.basis.rule.replace(/</g, "&lt;")} · FY: ${cohortResult.basis.fy.replace(/</g, "&lt;")} · Channel: ${cohortResult.basis.channel.replace(/</g, "&lt;")}</div>
+      ${(cohortResult.basis.readings ?? []).length ? `<div class="basis">Readings — both interpretations carry:<br/>${cohortResult.basis.readings.map((r) => `• ${r.replace(/</g, "&lt;")}`).join("<br/>")}</div>` : ""}
+      ${el.innerHTML}
+      <p class="muted">Generated ${new Date().toLocaleString("en-IN")} — cohorts are rules, re-evaluated on live data.</p>
+    </body></html>`);
+    w.document.close(); w.focus();
+    setTimeout(() => w.print(), 300);
+  };
 
   // Disambiguation candidates from guard 10 on a blocked response.
   const disambiguation = useMemo(() => {
@@ -425,6 +509,131 @@ export default function ComparisonDeepDive() {
 
   return (
     <div className="space-y-4">
+      {/* ── View toggle: comparisons vs rule-based cohorts ── */}
+      <div className="flex gap-1 rounded-lg border border-border bg-card p-1 w-fit">
+        {(["compare", "cohorts"] as const).map((v) => (
+          <button key={v} onClick={() => setView(v)}
+            className={cn("rounded-md px-3 py-1.5 text-xs font-medium", view === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted/40")}
+            data-testid={`view-${v}`}>
+            {v === "compare" ? "Compare" : "Cohorts"}
+          </button>
+        ))}
+      </div>
+
+      {view === "cohorts" && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-end gap-x-5 gap-y-3 rounded-lg border border-border bg-card p-3">
+            <div className="flex flex-col gap-1">
+              <FieldLabel>Cohort rule (a rule, not a hand-picked list)</FieldLabel>
+              <SelectBox value={cohortRule}
+                options={["assignment", "achievementBand", "distributorTier", "customerStatus", "segmentSeason", "sheetMapped"] as const}
+                labels={{
+                  assignment: "Retailers: with vs without distributor",
+                  achievementBand: "Members: above vs below achievement band",
+                  distributorTier: "Distributors: by tier A/B/C",
+                  customerStatus: "Customers: retained / reactivated / lapsed",
+                  segmentSeason: "Segments: in vs out of season this quarter",
+                  sheetMapped: "Members: working sheet mapped vs not",
+                }}
+                onChange={setCohortRule} testId="select-cohort-rule" />
+            </div>
+            {cohortRule === "achievementBand" && (
+              <div className="flex flex-col gap-1">
+                <FieldLabel>Band (%)</FieldLabel>
+                <input type="number" min={1} max={400} value={cohortBand}
+                  onChange={(e) => setCohortBand(Number(e.target.value) || 50)}
+                  className="w-20 rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+                  data-testid="input-cohort-band" />
+              </div>
+            )}
+            <div className="flex flex-col gap-1">
+              <FieldLabel>Channel</FieldLabel>
+              <SelectBox value={channel} options={CHANNELS} onChange={(v) => setChannel(v)} testId="select-cohort-channel" />
+            </div>
+            <button onClick={runCohortQuery} disabled={cohortLoading}
+              className={cn("rounded-md bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground", cohortLoading && "opacity-50")}
+              data-testid="button-run-cohort">
+              {cohortLoading ? "Building cohorts… (the company-wide rules can take a few minutes on a cold start)" : "Build cohorts"}
+            </button>
+            {cohortResult && (
+              <button onClick={exportCohortPdf} className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-muted/40" data-testid="button-export-cohort-pdf">
+                <Printer className="h-3 w-3" /> PDF
+              </button>
+            )}
+          </div>
+
+          {cohortError && <div className="rounded-lg border border-border bg-card p-3 text-sm text-destructive" data-testid="cohort-error">{cohortError}</div>}
+
+          {cohortResult && (
+            <div className="space-y-3">
+              {/* Basis — channel label + rule detail ABOVE any figure */}
+              <div className="space-y-1.5 rounded-lg border border-border bg-card p-3 text-xs" data-testid="cohort-basis-strip">
+                <p className="font-semibold">{cohortResult.basis.channelLabel}</p>
+                <p className="text-muted-foreground"><span className="font-medium text-foreground">Rule:</span> {cohortResult.basis.ruleDetail}</p>
+                {cohortResult.basis.readings.map((r, i) => (
+                  <p key={i} className="flex items-start gap-1.5 text-muted-foreground"><Info className="mt-0.5 h-3 w-3 shrink-0" />{r}</p>
+                ))}
+              </div>
+              <div id="cohort-print-root" className="space-y-3">
+                <div className="overflow-auto rounded-lg border border-border">
+                  <table className="w-full text-xs" data-testid="table-cohorts">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/30">
+                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">Cohort</th>
+                        <th className="px-3 py-2 text-right font-medium text-muted-foreground">Population</th>
+                        <th className="px-3 py-2 text-right font-medium text-muted-foreground">Value</th>
+                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">Measure</th>
+                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">Note</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cohortResult.cohorts.map((c) => (
+                        <tr key={c.name} className="border-b border-border/30">
+                          <td className="px-3 py-2 font-medium">{c.name}</td>
+                          <td className="px-3 py-2 text-right font-mono tabular-nums">{c.population.toLocaleString("en-IN")}</td>
+                          <td className="px-3 py-2 text-right font-mono tabular-nums">
+                            {c.value == null ? <span className="italic text-muted-foreground font-sans">—</span>
+                              : c.valueLabel.includes("₹") ? fmtValue(c.value, true)
+                              : c.value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="px-3 py-2 text-muted-foreground">{c.valueLabel}</td>
+                          <td className="px-3 py-2 text-muted-foreground">{c.note ?? ""}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {cohortResult.difference && (
+                  <div className="rounded-lg border border-border bg-card p-3 text-xs" data-testid="cohort-difference">
+                    <span className="font-semibold">Difference: </span>
+                    {cohortResult.difference.value == null ? "n/a" : cohortResult.difference.value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                    {" "}({cohortResult.difference.label}) — <span className="text-muted-foreground">{cohortResult.difference.sampleNote}</span>
+                  </div>
+                )}
+                {cohortResult.correlation && (
+                  <div className="rounded-lg border border-border bg-card p-3 text-xs" data-testid="cohort-correlation">
+                    <span className="font-semibold">Correlation: </span>
+                    {cohortResult.correlation.suppressed ? <span className="italic">suppressed</span> : `r = ${cohortResult.correlation.r} (n = ${cohortResult.correlation.n})`}
+                    {" — "}<span className="text-muted-foreground">{cohortResult.correlation.note}</span>
+                  </div>
+                )}
+                {cohortResult.notes.length > 0 && (
+                  <div className="rounded-lg border border-border bg-muted/20 p-3 text-xs space-y-1">
+                    {cohortResult.notes.map((n, i) => <p key={i} className="text-muted-foreground">• {n}</p>)}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {!cohortResult && !cohortError && !cohortLoading && (
+            <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+              Pick a rule and press Build cohorts. A cohort is a rule — it re-evaluates as data changes, so the same question stays answered.
+            </div>
+          )}
+        </div>
+      )}
+
+      {view === "compare" && (<>
       {/* ── Selection ── */}
       <div className="space-y-3 rounded-lg border border-border bg-card p-3">
         <div className="flex flex-wrap items-end gap-x-5 gap-y-3">
@@ -478,9 +687,6 @@ export default function ComparisonDeepDive() {
               {periods.map((p, i) => <Chip key={i} onRemove={periods.length > 1 || entities.length > 0 ? () => setPeriods((ps) => ps.filter((_, j) => j !== i)) : undefined}>{periodLabel(p)}</Chip>)}
             </div>
           </div>
-        )}
-        {(lockPeriods || lockEntities) && (
-          <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground"><Info className="mt-0.5 h-3 w-3 shrink-0" />{LOCK_MSG}</p>
         )}
 
         <div className="flex flex-wrap items-end gap-x-5 gap-y-3 border-t border-border/60 pt-3">
@@ -570,7 +776,7 @@ export default function ComparisonDeepDive() {
       {ok && (
         <div id="comparison-print-root" className="space-y-4">
           {/* Mode A — trajectory: rows per measure, columns per period */}
-          {!modeB && (
+          {!modeB && !modeC && (
             <div className="overflow-auto rounded-lg border border-border">
               <table className="w-full text-xs" data-testid="table-trajectory">
                 <thead>
@@ -676,6 +882,140 @@ export default function ComparisonDeepDive() {
             </>
           )}
 
+          {/* Mode C — matrix: entities × periods, one measure at a time */}
+          {modeC && (() => {
+            const mIds = [...new Set(ok.matrix.map((r) => r.measure))];
+            const mSel = matrixMeasure && mIds.includes(matrixMeasure) ? matrixMeasure : mIds[0];
+            const rows = ok.matrix.filter((r) => r.measure === mSel);
+            const money = defsById.get(mSel)?.money ?? false;
+            const quad = ok.quadrants?.find((q) => q.measure === mSel);
+            return (
+              <div className="space-y-4">
+                {mIds.length > 1 && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] text-muted-foreground">Matrix shows one measure at a time:</span>
+                    {mIds.map((mid) => (
+                      <button key={mid} onClick={() => setMatrixMeasure(mid)}
+                        className={cn("rounded-md border px-2 py-1 text-[11px]", mid === mSel ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted/40")}
+                        data-testid={`matrix-measure-${mid}`}>
+                        {defsById.get(mid)?.label ?? mid}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="overflow-auto rounded-lg border border-border">
+                  <table className="w-full text-xs" data-testid="table-matrix">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/30">
+                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">Entity</th>
+                        {ok.basis.periods.map((pp, i) => (
+                          <th key={i} className="px-3 py-2 text-right font-medium text-muted-foreground">{pp.label}<div className="text-[10px] font-normal">{pp.completeness}</div></th>
+                        ))}
+                        <th className="px-3 py-2 text-right font-medium text-muted-foreground">Level<div className="text-[10px] font-normal">latest value</div></th>
+                        <th className="px-3 py-2 text-right font-medium text-muted-foreground">Direction<div className="text-[10px] font-normal">slope, complete periods only</div></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row) => {
+                        const t = row.trend;
+                        return (
+                          <tr key={row.entity} className="border-b border-border/30">
+                            <td className="px-3 py-2">
+                              <div className="font-medium">{row.entity}</div>
+                              <div className="flex flex-wrap gap-1">{(row.flags ?? []).map((f) => <span key={f} className="rounded bg-amber-500/10 px-1 py-0.5 text-[9px] text-amber-800 dark:text-amber-300">{f}</span>)}</div>
+                            </td>
+                            {row.cells.map((c, ci) => {
+                              const prev = ci > 0 ? row.cells[ci - 1] : null;
+                              const cv = c.real ?? c.value; const pv = prev ? (prev.real ?? prev.value) : null;
+                              const delta = typeof cv === "number" && typeof pv === "number" ? cv - pv : null;
+                              return (
+                                <td key={ci} className="px-3 py-2 text-right">
+                                  <CellRender cell={c} money={money} />
+                                  {delta != null && (
+                                    <div className={cn("text-[10px] font-mono tabular-nums", delta >= 0 ? "text-green-700 dark:text-green-400" : "text-red-700 dark:text-red-400")}>
+                                      {delta >= 0 ? "▲ +" : "▼ "}{fmtValue(delta, money)}
+                                    </div>
+                                  )}
+                                </td>
+                              );
+                            })}
+                            <td className="px-3 py-2 text-right font-mono tabular-nums">
+                              {t?.level == null ? <span className="italic text-muted-foreground font-sans">—</span> : (<>
+                                {fmtValue(t.level, money)}
+                                {t.levelIsPartial && <div className="text-[9px] font-sans text-muted-foreground">partial period</div>}
+                              </>)}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              {t?.direction == null
+                                ? <span className="block max-w-[180px] text-left text-[10px] italic text-muted-foreground" title={t?.directionBasis ?? undefined}>{t?.directionBasis ?? "—"}</span>
+                                : (<>
+                                    <span className={cn("font-mono tabular-nums", t.direction >= 0 ? "text-green-700 dark:text-green-400" : "text-red-700 dark:text-red-400")}>
+                                      {t.direction >= 0 ? "↗ +" : "↘ "}{fmtValue(t.direction, money)}
+                                    </span>
+                                    {t.excludedPeriods.length > 0 && (
+                                      <div className="max-w-[180px] text-left text-[9px] text-muted-foreground">
+                                        excluded: {t.excludedPeriods.map((x) => x.label).join(", ")}
+                                      </div>
+                                    )}
+                                  </>)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Quadrants — falling-from-high FIRST: the story nobody sees today */}
+                {quad && (
+                  <div className="rounded-lg border border-border bg-card p-3" data-testid="quadrant-panel">
+                    <p className="mb-1 text-xs font-semibold">Quadrants — {quad.measureLabel}</p>
+                    <p className="mb-2 text-[11px] text-muted-foreground">{quad.splitRule} (split at {fmtValue(quad.levelSplit, money)})</p>
+                    {quad.groups.length === 0 && <p className="text-xs italic text-muted-foreground">{quad.splitRule}</p>}
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {quad.groups.map((g) => (
+                        <div key={g.quadrant} className={cn("rounded-md border p-2.5", g.quadrant === "high-falling" ? "border-red-400/60 bg-red-500/5" : "border-border/60")} data-testid={`quadrant-${g.quadrant}`}>
+                          <p className={cn("text-[11px] font-semibold", g.quadrant === "high-falling" && "text-red-800 dark:text-red-300")}>{g.label}</p>
+                          {g.entities.length === 0 ? <p className="mt-1 text-[11px] italic text-muted-foreground">none</p> : (
+                            <ul className="mt-1 space-y-0.5">
+                              {g.entities.map((e) => (
+                                <li key={e.entity} className="flex justify-between gap-2 text-[11px]">
+                                  <span>{e.entity}</span>
+                                  <span className="font-mono tabular-nums text-muted-foreground">{fmtValue(e.level, money)} / {e.direction >= 0 ? "+" : ""}{fmtValue(e.direction, money)}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {quad.noDirection.length > 0 && (
+                      <div className="mt-2 border-t border-border/40 pt-2 text-[11px] text-muted-foreground" data-testid="quadrant-no-direction">
+                        <span className="font-medium text-foreground">Shown without a direction: </span>
+                        {quad.noDirection.map((x) => `${x.entity} (${x.reason})`).join("; ")}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Roster changes — a head's direction can move purely from membership */}
+          {ok.rosterChanges && ok.rosterChanges.length > 0 && (
+            <div className="rounded-lg border border-amber-400/50 bg-amber-500/5 p-3" data-testid="roster-changes-panel">
+              <p className="mb-2 text-xs font-semibold text-amber-900 dark:text-amber-200">Roster changed between the compared years</p>
+              {ok.rosterChanges.map((rc, i) => (
+                <div key={i} className="border-t border-amber-400/20 py-1.5 text-[11px] first:border-t-0">
+                  <span className="font-medium">{rc.entity}</span> — FY{rc.fromFy} → FY{rc.toFy}:
+                  {rc.joiners.length > 0 && <span> joined: {rc.joiners.join(", ")}.</span>}
+                  {rc.leavers.length > 0 && <span> left: {rc.leavers.join(", ")}.</span>}
+                  <span className="text-muted-foreground"> {rc.note}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Like-for-like — headline vs targeted-only, untargeted named */}
           {ok.likeForLike && ok.likeForLike.length > 0 && (
             <div className="rounded-lg border border-border bg-card p-3" data-testid="like-for-like-block">
@@ -708,9 +1048,10 @@ export default function ComparisonDeepDive() {
       {!result && !error && !loading && (
         <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
           Pick what to compare, add periods or peers, choose measures, then press Compare.<br />
-          <span className="text-xs">One entity across many periods shows a trajectory. Many entities in one period shows a peer view.</span>
+          <span className="text-xs">One entity across many periods shows a trajectory. Many entities in one period shows a peer view. Both together shows the matrix — level and direction at once.</span>
         </div>
       )}
+      </>)}
     </div>
   );
 }

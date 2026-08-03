@@ -313,6 +313,50 @@ export type MatrixRow = {
   rankEligible?: boolean;
   rankBlockReason?: string | null;
   cells: CellValue[];           // one per period, in request order
+  /** Mode C (matrix): level + direction across the requested periods.
+   *  Present when the request has >1 period. Authoritative — consumers must
+   *  not recompute a slope client-side. */
+  trend?: TrendMeta;
+};
+
+export type TrendMeta = {
+  /** The latest period's usable value (real terms when present). */
+  level: number | null;
+  levelPeriod: string | null;
+  levelIsPartial?: boolean;
+  /** Least-squares slope per period step over COMPLETE periods only. */
+  direction: number | null;
+  directionBasis: string | null;
+  usedPeriods: string[];
+  /** Periods excluded from the direction calculation, each with its reason. */
+  excludedPeriods: { label: string; reason: string }[];
+};
+
+export type QuadrantGroup = {
+  quadrant: "high-falling" | "low-falling" | "high-rising" | "low-rising";
+  label: string;
+  entities: { entity: string; level: number; direction: number }[];
+};
+
+export type QuadrantView = {
+  measure: string;
+  measureLabel: string;
+  /** The level split value and the rule that produced it — never a hidden threshold. */
+  levelSplit: number;
+  splitRule: string;
+  /** Ordered: high-falling (the early-warning quadrant) FIRST. */
+  groups: QuadrantGroup[];
+  /** Entities shown but given no direction, with the reason. Never silently dropped. */
+  noDirection: { entity: string; reason: string }[];
+};
+
+export type RosterChange = {
+  entity: string;
+  fromFy: string;
+  toFy: string;
+  joiners: string[];
+  leavers: string[];
+  note: string;
 };
 
 export type ComparisonResponse = {
@@ -330,6 +374,11 @@ export type ComparisonResponse = {
   };
   guards: GuardResult[];
   matrix: MatrixRow[];
+  /** Mode C: quadrant view per measure — present when >1 entity AND >1 period. */
+  quadrants?: QuadrantView[];
+  /** Mode C: joiners/leavers per head when periods span FYs — a head's direction
+   *  can move purely from membership. */
+  rosterChanges?: RosterChange[];
   /** Head groups: headline vs like-for-like achievement (guard 8). */
   likeForLike?: {
     entity: string;
@@ -614,10 +663,19 @@ export async function runComparison(req: ComparisonRequest): Promise<ComparisonR
 
   // ── Guard 7 — TENURE ──
   let suppressAbsoluteVisits = false;
+  // Entities whose OWN tenure is materially short vs the set — their trend gets
+  // no direction (a short-tenure member's slope is mostly their start date).
+  // Distinct from the set-wide ranking suppression, which fires for everyone.
+  const shortTenureNames = new Set<string>();
   if (req.entityType === "member" && entities.length > 1) {
     const wds = entities.map((e) => e.kpis?.workingDaysActual ?? null);
     const known = wds.filter((w): w is number => w != null && w > 0);
     if (known.length >= 2) {
+      const maxWd = Math.max(...known);
+      for (const e of entities) {
+        const wd = e.kpis?.workingDaysActual ?? null;
+        if (wd != null && wd > 0 && maxWd / wd > TENURE_RATIO_THRESHOLD) shortTenureNames.add(e.name);
+      }
       const ratio = Math.max(...known) / Math.min(...known);
       if (ratio > TENURE_RATIO_THRESHOLD) {
         suppressAbsoluteVisits = true;
@@ -791,6 +849,130 @@ export async function runComparison(req: ComparisonRequest): Promise<ComparisonR
     guards.push(guard(11, "notApplicable", null));
   }
 
+  // ── Mode C: trend (level + direction) per row, quadrants per measure ──
+  let quadrants: QuadrantView[] | undefined;
+  if (periods.length > 1) {
+    for (const row of matrix) {
+      const tenureBlocked = shortTenureNames.has(row.entity);
+      const used: { idx: number; v: number; label: string }[] = [];
+      const excluded: { label: string; reason: string }[] = [];
+      row.cells.forEach((c, i) => {
+        const p = periods[i];
+        const v = (c.real ?? c.value);
+        if (typeof v !== "number") {
+          excluded.push({ label: p.label, reason: c.note ?? (p.completeness === "noActualsRecorded" ? "no actuals recorded" : "no numeric value") });
+        } else if (p.completeness !== "complete") {
+          excluded.push({ label: p.label, reason: `period is ${p.completeness} — a partial period would fake a fall` });
+        } else {
+          used.push({ idx: i, v, label: p.label });
+        }
+      });
+      // LEVEL: the latest period with a numeric value (partial allowed, but said so).
+      let level: number | null = null, levelPeriod: string | null = null, levelIsPartial = false;
+      for (let i = row.cells.length - 1; i >= 0; i--) {
+        const v = (row.cells[i].real ?? row.cells[i].value);
+        if (typeof v === "number") { level = v; levelPeriod = periods[i].label; levelIsPartial = periods[i].completeness !== "complete"; break; }
+      }
+      // DIRECTION: least-squares slope over complete periods only.
+      let direction: number | null = null, directionBasis: string | null = null;
+      if (tenureBlocked) {
+        directionBasis = "no direction — this member's working days are materially fewer than peers (tenure guard); a slope would mostly measure their start date";
+      } else if (used.length < 2) {
+        directionBasis = `no direction — only ${used.length} complete numeric period(s); a slope needs at least 2`;
+      } else {
+        const n = used.length;
+        // x = the period's actual position in the requested sequence, so a gap
+        // (e.g. an excluded partial Q2 between Q1 and Q3) counts as two steps,
+        // not one — otherwise the "per period step" claim would be wrong.
+        const mx = used.reduce((a, u) => a + u.idx, 0) / n;
+        const my = used.reduce((a, u) => a + u.v, 0) / n;
+        let num = 0, den = 0;
+        used.forEach((u) => { num += (u.idx - mx) * (u.v - my); den += (u.idx - mx) ** 2; });
+        direction = den > 0 ? round3(num / den) : 0;
+        const real = row.cells.some((c) => c.real != null);
+        directionBasis = `least-squares slope per period step over ${n} complete periods${real ? " (real terms where available)" : ""}`;
+      }
+      row.trend = { level, levelPeriod, ...(levelIsPartial ? { levelIsPartial } : {}), direction, directionBasis, usedPeriods: used.map((u) => u.label), excludedPeriods: excluded };
+    }
+
+    if (entities.length > 1) {
+      quadrants = [];
+      for (const m of measureSpecs) {
+        const def = catalogue.find((d) => d.id === m.measure)!;
+        const rows = matrix.filter((r) => r.measure === def.id);
+        const eligible = rows.filter((r) => r.trend?.level != null && r.trend?.direction != null && !r.excludeFromRanking);
+        const noDirection = rows
+          .filter((r) => !eligible.includes(r))
+          .map((r) => ({
+            entity: r.entity,
+            reason: r.excludeFromRanking ? "excluded from ranking (guard 9 — no target and no recorded business)"
+              : r.trend?.level == null ? "no usable level value"
+              : (r.trend?.directionBasis ?? "no direction"),
+          }));
+        if (eligible.length < 2) {
+          quadrants.push({ measure: def.id, measureLabel: def.label, levelSplit: 0,
+            splitRule: `quadrants need at least 2 entities with a level and a direction; ${eligible.length} qualify`, groups: [], noDirection });
+          continue;
+        }
+        const levels = eligible.map((r) => r.trend!.level!).sort((a, b) => a - b);
+        const mid = Math.floor(levels.length / 2);
+        const levelSplit = levels.length % 2 ? levels[mid] : (levels[mid - 1] + levels[mid]) / 2;
+        const mk = (q: QuadrantGroup["quadrant"], label: string, f: (l: number, d: number) => boolean): QuadrantGroup => ({
+          quadrant: q, label,
+          entities: eligible
+            .filter((r) => f(r.trend!.level!, r.trend!.direction!))
+            .map((r) => ({ entity: r.entity, level: r.trend!.level!, direction: r.trend!.direction! }))
+            .sort((a, b) => a.direction - b.direction),
+        });
+        quadrants.push({
+          measure: def.id, measureLabel: def.label,
+          levelSplit: round3(levelSplit),
+          splitRule: "level split at the median of entity levels; direction split at slope 0 — both stated, never a hidden threshold",
+          groups: [
+            mk("high-falling", "high level, falling — the early-warning quadrant", (l, d) => l >= levelSplit && d < 0),
+            mk("low-falling", "low level, falling — the intervention list", (l, d) => l < levelSplit && d < 0),
+            mk("high-rising", "high level, rising — performing and improving", (l, d) => l >= levelSplit && d >= 0),
+            mk("low-rising", "low level, rising — recovering, leave alone", (l, d) => l < levelSplit && d >= 0),
+          ],
+          noDirection,
+        });
+      }
+    }
+  }
+
+  // ── Mode C: roster changes per head when periods span FYs ──
+  let rosterChanges: RosterChange[] | undefined;
+  if (req.entityType === "head" && fys.length > 1) {
+    rosterChanges = [];
+    const fyOrder: string[] = [];
+    for (const p of periods) if (!fyOrder.includes(p.fy)) fyOrder.push(p.fy);
+    for (const e of entities) {
+      const rosterByFy = new Map<string, Set<string> | null>();
+      for (const fy of fyOrder) {
+        try {
+          const dd = await loadDeepDiveData(fy, e.name, undefined, { skipExtras: true });
+          rosterByFy.set(fy, new Set(dd.members.map((m) => m.name)));
+        } catch { rosterByFy.set(fy, null); }
+      }
+      for (let i = 1; i < fyOrder.length; i++) {
+        const a = rosterByFy.get(fyOrder[i - 1]), b = rosterByFy.get(fyOrder[i]);
+        if (!a || !b) {
+          rosterChanges.push({ entity: e.name, fromFy: fyOrder[i - 1], toFy: fyOrder[i], joiners: [], leavers: [],
+            note: `roster unavailable for ${!a ? fyOrder[i - 1] : fyOrder[i]} — membership change cannot be verified for this pair` });
+          continue;
+        }
+        const joiners = [...b].filter((n) => !a.has(n)).sort();
+        const leavers = [...a].filter((n) => !b.has(n)).sort();
+        if (joiners.length || leavers.length) {
+          rosterChanges.push({ entity: e.name, fromFy: fyOrder[i - 1], toFy: fyOrder[i], joiners, leavers,
+            note: `the head's direction can move purely from membership — ${joiners.length} joined, ${leavers.length} left between FY${fyOrder[i - 1]} and FY${fyOrder[i]}` });
+        }
+      }
+    }
+    if (rosterChanges.length === 0) rosterChanges = undefined;
+    else notes.push("roster changed between compared years for: " + [...new Set(rosterChanges.map((r) => r.entity))].join(", ") + " — see rosterChanges before reading a head's direction as performance");
+  }
+
   guards.sort((a, b) => a.id - b.id);
 
   return {
@@ -803,6 +985,8 @@ export async function runComparison(req: ComparisonRequest): Promise<ComparisonR
     },
     guards,
     matrix,
+    ...(quadrants ? { quadrants } : {}),
+    ...(rosterChanges ? { rosterChanges } : {}),
     ...(likeForLike.length > 0 ? { likeForLike } : {}),
     notes,
   };
