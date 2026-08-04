@@ -55,3 +55,5 @@ These label every count with its exact sheet source so Claude can cite provenanc
 ## A4A deck guard fix
 `aiArtifacts.ts` line ~727: changed `guardCustom(a4aDeck, payload, null)` to `guardCustom(a4aDeck, payload, memberSummary)`.
 This allows per-member figures in the deck (OB, sale, achievementPct per member) to be validated.
+
+**Head-as-member rows in the Data tab (Aug 2026):** the member block can contain a row whose NAME is itself a State Head. Rule in deepDiveData roster parse: if the row's own head cell is BLANK, it is a misplaced HEAD row — reset the merged-cell fill-down to that head and skip it (Prashant Onam Naik case; carry-forward had wrongly attributed him to Sunil Patel). If the head cell is explicitly FILLED, it is a genuine dual role — keep as member (Anuj Sharma under Sunil Mohanty). Never blanket-exclude head-named member rows; the blank-vs-filled head cell is the discriminator.

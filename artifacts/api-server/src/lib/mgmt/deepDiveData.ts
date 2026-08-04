@@ -724,6 +724,17 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
   const members: MemberKpis[] = [];
   let currentStateHead = "";
 
+  // Pre-pass: collect every explicit state-head name in the head column.
+  // Needed to classify member rows whose NAME is itself a head (see below).
+  const knownHeadKeys = new Set<string>();
+  for (let i = dataStart; i < allRows.length; i++) {
+    const h = cellStr((allRows[i] ?? [])[cols.stateHead]);
+    if (h) {
+      const k = normSecKey(h);
+      if (k) knownHeadKeys.add(k);
+    }
+  }
+
   // Identify extra columns (anything not in the named column set).
   const namedCols = new Set<number>([
     cols.stateHead, cols.teamMember, cols.hq, cols.designation, cols.contact,
@@ -763,6 +774,29 @@ async function loadAllMembersUncached(fy: string): Promise<CacheEntry | null> {
 
     const normKey = normSecKey(rawName);
     if (!normKey) continue;
+
+    // Head-as-member classification. Some rows in the member block carry a
+    // NAME that is itself a State Head (e.g. Prashant Onam Naik at a row
+    // whose head cell is blank). The merged-cell fill-down would attribute
+    // such a row to whichever head happened to be above it. Rule:
+    //   - head cell BLANK  → this is a misplaced HEAD row, not a member.
+    //     Reset the fill-down to this head and skip the row.
+    //   - head cell FILLED → a genuine dual role declared by the sheet
+    //     (e.g. Anuj Sharma listed under Sunil Mohanty). Keep as member.
+    if (knownHeadKeys.has(normKey)) {
+      if (!rawHead) {
+        logger.warn(
+          { fy, row: i + 1, name: rawName, carriedHead: currentStateHead },
+          "deepDiveData: head row found inside member block (blank head cell) — treated as head, not member",
+        );
+        currentStateHead = rawName;
+        continue;
+      }
+      logger.info(
+        { fy, row: i + 1, name: rawName, declaredHead: rawHead },
+        "deepDiveData: dual-role row — head explicitly listed as a member (kept)",
+      );
+    }
 
     // Collect extra fields (all header-detected columns not in namedCols).
     const extra: Record<string, number | string | null> = {};

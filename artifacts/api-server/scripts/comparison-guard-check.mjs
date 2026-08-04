@@ -102,14 +102,27 @@ function check(name, ok, detail) {
 }
 
 async function post(body) {
-  const res = await bounded(`${base}/comparison`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  let json = null;
-  try { json = await res.json(); } catch { /* leave null */ }
-  return { status: res.status, json };
+  // One retry on timeout: a freshly-booted disposable server may spend the
+  // first request cold-loading member sheets from Google Sheets; the retry
+  // hits warm caches and finishes fast. A second timeout is a real failure.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await bounded(`${base}/comparison`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      let json = null;
+      try { json = await res.json(); } catch { /* leave null */ }
+      return { status: res.status, json };
+    } catch (err) {
+      if (attempt === 0 && err?.name === "TimeoutError") {
+        console.log("INFO  request timed out on cold server — retrying once against warm caches");
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
 function cell(json, measure, entity) {

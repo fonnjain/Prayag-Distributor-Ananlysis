@@ -19,3 +19,5 @@ Onboarding a head's team is **config-only**: add each member as `normSecKey(name
 
 ## Drive search route semantics (Aug 2026)
 GET /api/drive/files?q=<substring> wraps q as a `name contains` clause — raw Drive query syntax ("in parents", operators) does NOT work through it. Disambiguate same-name files by listing tabs (listSheetTabs), never by folder listing. A search miss means NOT SHARED with the service account, not that the file doesn't exist — ask the user for a direct link.
+
+**Sheet-title matching rule (user-confirmed, Aug 2026):** when hunting for a member's working sheet in Drive, match on a normalised name (lowercase alphanumerics, normSecKey-style), never exact title. Three known title drifts: "k.v thamizhaselvan" (extra "a"), JITHENDER REDDY (surname missing), HEMANT SRIVASTAVA (middle name missing). Sheets may also live outside the head's team folder.
