@@ -60,3 +60,5 @@ routes to territory (tier 2) and reports show split rows instead of one.
 **How to apply:** Any code that filters `state_canon =` for geographic purposes
 must call `stateVariants()` and use `inArray()` or `ANY(ARRAY[...])` instead of equality.
 Quintile computation groups by `head_canon` (territory), not `state_canon` — unaffected.
+
+**Two-layer vocabulary (confirmed Aug 2026):** sheet spellings (W-BENGAL, MAHARASTRA L/R/S, TAMILNADU, UP ( R )) are canonicalised AT INGEST via config/normalize.json state_map (canonState in registers/normalize.ts) — the DB state_canon column never contains them. STATE_CANON_NORMALISE / normStateExpr is a second, smaller layer for territory splits the ingest map deliberately keeps (DELHI A/NCR, UP ( A )/(AS)/(S), HP, KARNATAKA (B)). JAMMU and KASHMIR are stored separately and NO layer merges them into "Jammu and Kashmir" — open business decision. Manual sheet checks that filter on one sheet spelling will not reconcile against DB figures.
