@@ -1,0 +1,121 @@
+# Apply the FY2025-26 state attribution
+
+*The validation is what makes this safe. One check before applying, and one thing deliberately left undone.*
+
+---
+
+## Why this is approved
+
+**376 customers compared, ₹300.02 Cr of derived attribution, zero state-vs-state disagreements.**
+
+That closes the concern that FY2025-26 state was inferred rather than sourced. Every state figure in the frozen year now has a source behind it — West Bengal at ₹76.64 Cr included.
+
+## What moves
+
+| | Before | After |
+|---|---|---|
+| No state at all | ₹47.98 Cr | **₹3.93 Cr** |
+| Non-territory / Project / Govt | ₹15.21 Cr | ~₹51.7 Cr |
+| Named states | ₹313.02 Cr | ~₹320.6 Cr |
+| **Total** | **₹361.00 Cr** | **₹361.00 Cr** |
+
+**The anchor does not move. Only the labels do.** That is the safest possible change to a frozen year.
+
+---
+
+```
+Prayag app - apply the FY2025-26 state attribution from the State Head files.
+Same global rules. This touches a FROZEN year, so follow the sequence exactly.
+
+1. CHECK THIS BEFORE APPLYING ANYTHING.
+   Rs 36.5 Cr moves from NULL state into Non-territory / Project / Govt.
+   Territory-channel views EXCLUDE Non-territory by rule.
+
+   Report whether territory views currently exclude NULL-state rows as well.
+     if YES  - this is purely a labelling gain and no territory figure moves
+     if NO   - every FY2025-26 territory figure drops by up to Rs 36.5 Cr.
+               That is CORRECT, but it is visible, and anything already quoted
+               from that year changes.
+
+   Report the FY2025-26 territory total before and after under both readings.
+   Do not proceed until this is stated.
+
+2. MAP THE LABEL VARIANTS FIRST.
+   48 customers are held as "Non-territory / Project / Govt" in the register and
+   as "PROJECT" or "OTHER" in the files. Those are the SAME classification with
+   different labels - KAKKAR TRADERS at Rs 3.05 Cr is the largest.
+   Add them to the shared vocabulary map so the next audit does not report them
+   as disagreements. This is the same class of problem that produced this whole
+   investigation.
+
+3. APPLY, through the unfreeze-with-reason route.
+   Reason: "FY2025-26 state attribution from the State Head 2026-27 files -
+   source-based, replaces per-customer backfill inference. Total unchanged."
+
+   Apply only the 141 matched customers, Rs 44.05 Cr:
+     24 customers Rs 36.18 Cr -> Non-territory / Project / Govt, MOHAN IMPEX
+        Rs 35.73 Cr among them, confirmed to the rupee against the PROJECT file
+     29 customers Rs 1.78 Cr -> Uttar Pradesh
+     the remainder to Delhi, Haryana, Rajasthan, Kashmir, West Bengal,
+        Uttarakhand, Assam, Jammu, Bihar, Odisha, Himachal, Maharashtra,
+        Karnataka, Punjab, Andhra Pradesh as the files state
+
+   Apply head names through the EXISTING alias map. The files use the old
+   vocabulary - RIZVI JI JI, BIJJU, Snadeep ji, Pawan JI, LALAN, Nasir JI,
+   Anant Singh JI, SULINDER PAL JI. Create no new heads.
+
+4. DO NOT ATTRIBUTE THE REMAINING Rs 3.93 Cr.
+   104 customers with no file match. Several carry name hints - YASH TRADERS
+   (UP), Tirupati Enterprises (UP), DAS ENTERPRISE (NEWTOWN-WB), AGROA
+   INFRASTRUCTURES (HP).
+
+   DO NOT run a name-parenthetical pass. That is inference, and we have just
+   replaced inference with a source. Guessing 1.1 per cent of the year to make a
+   number look tidier is the wrong trade after this work.
+
+   Leave them labelled "state not attributed" and list them for the business.
+   G M TRADING CORPORATION at Rs 80.3 lakh is a single name someone will
+   recognise immediately - that is a five-minute question to Deepak, not a
+   modelling problem.
+
+5. VERIFY AFTER APPLYING, and report each:
+     145,613 rows and Rs 361.00 Cr - the anchor must be unchanged
+     the per-state before-and-after table, every state, so the change is
+       auditable
+     the no-state residual is Rs 3.93 Cr across 104 customers
+     Non-territory / Project / Govt totals roughly Rs 51.7 Cr
+     no new head_canon values were created
+     re-freeze the year and confirm the startup assertion passes
+
+6. THEN REPORT WHAT MOVED DOWNSTREAM.
+   Every FY2025-26 state figure changes. Name which pages and reports now show
+   different numbers:
+     Company Reports 1, 2, 3, 5, 6 - state and state-group breakdowns
+     the Comparison page's frozen-anchor references
+     any AI report already generated citing FY2025-26 state figures
+     year-on-year state comparisons on every page
+   A figure that was quoted last week and is different this week needs to be
+   explainable, not just correct.
+
+Acceptance:
+  the territory-versus-NULL question is answered BEFORE anything is applied
+  the 48 label variants are mapped into the shared vocabulary
+  Rs 44.05 Cr is attributed from the files, Rs 3.93 Cr is left labelled
+  MOHAN IMPEX lands in Non-territory / Project / Govt at Rs 35.73 Cr
+  the anchor reads 145,613 rows and Rs 361.00 Cr afterwards
+  a per-state before-and-after table is produced
+  the year is re-frozen and the startup assertion passes
+  no name-parenthetical inference is used anywhere
+```
+
+---
+
+## The principle worth keeping
+
+**We just replaced inference with a source, and the source agreed with the inference on 376 of 376 customers.** That is a good outcome for the backfill as well as for the files.
+
+The temptation now is to close the last 1.1% with a name-parsing rule. **Don't.** An honestly unattributed ₹3.93 Cr is worth more than a tidy total built on `(UP)` in a customer name — and the business can resolve most of it in one conversation.
+
+---
+
+*Control figures verified against the uploaded State Head files and the frozen register, 4 August 2026*
