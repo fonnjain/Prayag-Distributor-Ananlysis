@@ -36,7 +36,8 @@ export default function Overview() {
       ? fy2526Query.data.months.reduce((sum, m) => sum + m.amount, 0)
       : null;
 
-  // FY26-27 monthly order booking — complete months only, from analytics endpoint.
+  // FY26-27 monthly sales (dispatch) — complete months only, from the sale
+  // register via the analytics endpoint. NOT order booking.
   const fy2627Query = useGetAnalytics(
     { fy: "2026-27" },
     {
@@ -51,6 +52,11 @@ export default function Overview() {
     month: m.monthLabel,
     sales: m.amount,
   })) ?? [];
+  // Sales dispatched YTD for the current FY — same empty-months guard as FY25-26.
+  const fy2627SalesYtd =
+    fy2627Query.data && fy2627Query.data.months.length > 0
+      ? fy2627Query.data.months.reduce((sum, m) => sum + m.amount, 0)
+      : null;
 
   const { theme } = useTheme();
   const isDark = theme === "dark";
@@ -107,6 +113,16 @@ export default function Overview() {
             "All channels",
           ]}
         />
+        <KPICard
+          title="Sales YTD (FY26-27)"
+          value={fy2627SalesYtd != null ? formatCompact(fy2627SalesYtd) : "—"}
+          icon={<IndianRupee className="w-5 h-5" />}
+          detail={[
+            "Primary sale & dispatch",
+            "Source: sale_line register (complete months)",
+            "All channels, incl. project & institutional",
+          ]}
+        />
         <KPICard 
           title="Retailers" 
           value={data.totals.retailers.toLocaleString()} 
@@ -143,10 +159,10 @@ export default function Overview() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2">
           <CardHeader className="px-5 pt-5 pb-2 flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base font-semibold">FY26-27 Order Booking</CardTitle>
+            <CardTitle className="text-base font-semibold">FY26-27 Sales (Dispatch)</CardTitle>
             <CSVLink 
               data={fy2627Monthly} 
-              filename="fy2627-order-booking.csv" 
+              filename="fy2627-sales-dispatch.csv" 
               className="print:hidden flex items-center justify-center w-[28px] h-[28px] rounded-md transition-colors hover:bg-muted text-muted-foreground"
               aria-label="Export chart data"
             >
