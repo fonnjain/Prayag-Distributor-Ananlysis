@@ -31,7 +31,7 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { PROJECT_HEAD_CANON } from "./catalogue.js";
-import { SKU_SHEET_IDS, secondarySkuFyHasData } from "../secondary/skuLoader.js";
+import { SKU_SHEET_IDS, secondarySkuFyHasData, getSecondarySkuFyPeriodLabel } from "../secondary/skuLoader.js";
 import { logger } from "../logger.js";
 
 const CLOSED_FYS = ["2023-24", "2024-25", "2025-26"];
@@ -829,12 +829,15 @@ export async function getBlockedCapabilities(): Promise<BlockedResult> {
           : `cost_master has ${n} rows but has not been verified as a genuine cost source.`,
     },
     liveYearRetailer: await (async () => {
-      const has = await secondarySkuFyHasData("2026-27");
+      const [has, periodLabel] = await Promise.all([
+        secondarySkuFyHasData("2026-27"),
+        getSecondarySkuFyPeriodLabel("2026-27"),
+      ]);
       return has
         ? {
             blocked: false,
             reason:
-              "FY2026-27 secondary register loaded from the PSCode_3 xlsx drop (Apr–Jun 2026). " +
+              `FY2026-27 secondary register loaded from the PSCode_3 xlsx drop (${periodLabel ?? "partial period"}). ` +
               "Retailer SKU activity and secondary discount are computable for the covered months; " +
               "coverage extends only when a fresh export is loaded.",
           }

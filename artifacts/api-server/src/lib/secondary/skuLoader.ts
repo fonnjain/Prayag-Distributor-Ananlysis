@@ -342,11 +342,13 @@ export const SUPPORTED_SKU_FYS = Object.keys(SKU_SHEET_IDS);
 // as a one-time PSCode_3 xlsx drop, source='pscode3_xlsx'), so gates must ask
 // the database — not SKU_SHEET_IDS — whether register data exists for an FY.
 const fyDataCache = new Map<string, { has: boolean; at: number }>();
+const fyMonthsCache = new Map<string, { months: string[]; at: number }>();
 const FY_DATA_TTL_MS = 10 * 60 * 1000;
 
 /** Drop the presence cache — call after any load/reload of secondary_sku_line. */
 export function clearSecondarySkuFyCache(): void {
   fyDataCache.clear();
+  fyMonthsCache.clear();
 }
 
 /** True when secondary_sku_line has at least one row for the FY (10-min cache). */
@@ -359,4 +361,43 @@ export async function secondarySkuFyHasData(fy: string): Promise<boolean> {
   const has = res.rows.length > 0;
   fyDataCache.set(fy, { has, at: Date.now() });
   return has;
+}
+
+// Month-name → fiscal index (Apr=1 … Mar=12) for ordering.
+const MONTH_IDX: Record<string, number> = {
+  Apr: 1, May: 2, Jun: 3, Jul: 4, Aug: 5, Sep: 6,
+  Oct: 7, Nov: 8, Dec: 9, Jan: 10, Feb: 11, Mar: 12,
+};
+
+/**
+ * Returns a human-readable period string for the months loaded in
+ * secondary_sku_line for the given FY, e.g. "Apr–Jul 2026" or "Apr 2026".
+ * Returns null when no data exists.  Result is cached for 10 minutes.
+ */
+export async function getSecondarySkuFyPeriodLabel(fy: string): Promise<string | null> {
+  const hit = fyMonthsCache.get(fy);
+  if (hit && Date.now() - hit.at < FY_DATA_TTL_MS) {
+    return hit.months.length === 0 ? null : hit.months.join("|"); // stored as joined; decoded below
+  }
+  const res = await db.execute<{ month_label: string }>(
+    sqlRaw`SELECT DISTINCT month_label FROM secondary_sku_line WHERE fy = ${fy}`,
+  );
+  const months = res.rows
+    .map((r) => r.month_label)
+    .sort((a, b) => {
+      const ai = MONTH_IDX[a.split("-")[0]] ?? 99;
+      const bi = MONTH_IDX[b.split("-")[0]] ?? 99;
+      return ai - bi;
+    });
+  fyMonthsCache.set(fy, { months, at: Date.now() });
+  if (months.length === 0) return null;
+  // Format: "Apr–Jul 2026" or "Apr 2026" (single month)
+  // month_label format is "Mmm-YY", e.g. "Apr-26" → year = "20YY"
+  const yearSuffix = months[0].split("-")[1] ?? "??";
+  const calYear = `20${yearSuffix}`;
+  const firstMon = months[0].split("-")[0];
+  const lastMon = months[months.length - 1].split("-")[0];
+  return firstMon === lastMon
+    ? `${firstMon} ${calYear}`
+    : `${firstMon}–${lastMon} ${calYear}`;
 }
