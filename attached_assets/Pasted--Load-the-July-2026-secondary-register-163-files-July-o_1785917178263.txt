@@ -1,0 +1,115 @@
+# Load the July 2026 secondary register
+
+*163 files, July only. Same structure as the Apr–Jun drop, same traps. Controls verified independently.*
+
+---
+
+## Independently computed controls
+
+| | |
+|---|---|
+| Files | **163** |
+| Raw lines | **36,805** |
+| Raw NET | **₹23.93 Cr** |
+| Duplicate groups | **13** (14 files) |
+| Value to drop | **₹1.59 Cr** · 2,658 rows |
+| **Deduped lines** | **34,147** |
+| **Deduped NET** | **₹22.34 Cr** |
+| Effective discount | **49.5%** — consistent with Apr–Jun's 48.6% |
+
+**This drop is July only.** Every dated row falls in Jul-26; there is no Apr–Jun overlap to reconcile.
+
+---
+
+```
+Prayag app - load the July 2026 secondary register. Same global rules.
+163 per-salesperson xlsx files, same structure as the Apr-Jun drop.
+
+1. STRUCTURE - unchanged from the previous drop.
+   Sheet1, header rows 1-2, data from row 3, and a "Total:" row at the end of
+   every file which MUST be excluded - parsing it as data doubles the file.
+
+   Columns: A Sr.No. | B Date | C Retailer Id | D Retailer | E Order ID
+            F Segment | G Cat. No. | H Qty | I MRP | J Order Value
+            K Distributor | L Discount (%) | M Sub Total | N Order Total
+
+   NET IS SUB TOTAL (column M), line level. Order Total is an order footer on
+   the last line only - summing it across lines double-counts.
+
+   CARRY FORWARD THE MERGED FIELDS - Date, Order ID and Segment appear only on
+   the first line of each order. Without carry-forward the month split is wrong
+   while the grand total looks right, which is how the last drop was misread.
+
+2. RESOLVE 13 DUPLICATE GROUPS BEFORE LOADING - Rs 1.59 Cr, 2,658 rows.
+   Each pair is an identical export under two names. I verified four directly:
+   same row counts AND same Order IDs.
+
+     AJEET YADAV / AJOY BORAH                        Rs 25.35 L   281 rows
+     ASHUTOSH KUAMR / ASHUTOSH KUMAR                 Rs 21.37 L   368 rows
+     O.P. KALRA / OM DUTT DWIVEDI                    Rs 17.69 L   484 rows
+     SUMANTA SINGHA / SUMIT PAREEK                   Rs 17.65 L   134 rows
+     SASIKANT PRASAD / SASIKUMAR A                   Rs 13.48 L   235 rows
+     AMIT DAMODHAR JADHAV / AMIT HARIDASJI BELONKAR  Rs 12.61 L   150 rows
+     HRUSIKESH SATAPATHY / ILESH VYAS                Rs 12.27 L   157 rows
+     GULAB SINGH / HARDEEP KHINDA                    Rs  8.41 L   134 rows
+     SANDEEP AMRUT SONAWANE / SANDEEP DADHEECH       Rs  7.12 L   117 rows
+     KUNAL SANJAY SASANE / L.SELVAGANAPATHY          Rs  6.01 L   184 rows
+     MANOJ YADAV / MANOKARAN                         Rs  4.98 L   152 rows
+     KANHAIYA LAL SALVI / KANISH KHANNA / KAPIL THAKUR  Rs 4.08 L 117 rows  (3-way)
+     RAVI FARIDABAD / RAVI KANT MAHATO               Rs  3.65 L    28 rows
+
+   Confirm each by matching Order IDs, then load ONE copy per group. The same
+   pairs appeared in the Apr-Jun drop - keep whichever name the previous load
+   kept, so the two months attribute to the same person.
+
+3. THREE ASHUTOSH FILES - two collapse, one must NOT.
+     ASHUTOSH KUAMR            Rs 21.37 L  368 rows
+     ASHUTOSH KUMAR            Rs 21.37 L  368 rows   identical - a typo pair
+     ASHUTOSH KUMAR(RUDRAPUR)  Rs  7.75 L   98 rows   GENUINELY DIFFERENT
+   Rudrapur is Anant Singh's member; the other is Sandeep Dadheech's. Merging
+   them combines two men's books across two State Heads.
+
+4. SANDEEP DADHEECH IS A STATE HEAD, NOT A SALESPERSON.
+   His file duplicates SANDEEP AMRUT SONAWANE exactly - 117 rows, same Order
+   IDs - and the same pairing appeared in the Apr-Jun drop.
+   Load it once under Sonawane. Report this to whoever generates these exports:
+   a head is being written out under a salesperson PS code, twice running.
+
+5. FILENAME TYPOS - match on a NORMALISED name, never an exact title. Present in
+   this drop: ARVIND KUAMR, ROHIT KUAMR, PAWAN KUAMR, ASHUTOSH KUAMR, RONI
+   GUPATA, PRATHEES CC, NITIN PARASAD BAGHEL, PRABHAKR PRATAP SINGH, SHOYKARAN
+   NAI, JITENDER REDDY KATUKURI, UNMESH DILIP THAKUR.
+
+6. DO NOT OVERWRITE THE DASHBOARD. The State Head Dashboard SOBR tab stays
+   authoritative for member-level secondary OB and Sales Received. This register
+   is the ITEM-CODE detail beneath it. Where they differ, report the difference.
+
+Acceptance - report the computed value:
+  163 files read, 36,805 raw lines, Rs 23.93 Cr raw NET
+  13 duplicate groups resolved by Order ID match, 14 files dropped
+  34,147 lines and Rs 22.34 Cr loaded
+  effective discount 49.5 per cent
+  every row falls in Jul-26 - no Apr-Jun overlap
+  ASHUTOSH KUMAR(RUDRAPUR) remains a separate record from ASHUTOSH KUMAR
+  the running Apr-Jul total reads Rs 81.36 Cr - Rs 59.02 Cr plus Rs 22.34 Cr
+  the same duplicate names resolve to the same person as in the Apr-Jun load
+
+7. THEN CHECK WHAT THIS UNBLOCKS.
+   Retailer-level SKU for FY2026-27 currently covers Apr-Jun only and says so.
+   With July loaded it should extend to Apr-Jul with no code change - the
+   coverage note is derived from the loaded months. Confirm it updated itself
+   rather than needing an edit.
+   Report the FY2026-27 retailer-level SKU coverage before and after.
+```
+
+---
+
+## Two things worth passing back to the business
+
+**A State Head is being exported as a salesperson, twice running.** `SANDEEP DADHEECH` and `SANDEEP AMRUT SONAWANE` are byte-identical in both drops. That is a fault in whatever generates these files, and it will recur every month until someone fixes it.
+
+**The same thirteen duplicate pairs appear each time.** Resolving them here works, but it is manual effort repeated monthly. Worth asking whether the export can emit one file per PS code rather than one per name variant.
+
+---
+
+*Controls computed independently from the 163 files, 5 August 2026*
