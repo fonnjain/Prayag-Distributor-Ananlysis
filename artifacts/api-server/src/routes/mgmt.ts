@@ -62,6 +62,13 @@ const router: IRouter = Router();
 const FY_PATTERN = /^\d{4}-\d{2}$/;
 const DEFAULT_FY = "2025-26";
 
+// Reason text attached to any pending field that is negative.
+// A negative pending (sale > booking) means goods were dispatched against
+// orders committed in a prior period.  Both possibilities — legitimate
+// backlog-clearing and a data fault — need to be visible; zero conceals both.
+const NEGATIVE_PENDING_NOTE =
+  "dispatches exceed this period's booking — prior-period orders fulfilled";
+
 // ── Cold-start fast path for GET /mgmt/data ──────────────────────────────────
 // Assembling rows requires large Sheets reads (up to 380 k rows per FY), so
 // the route is served through the shared snapshot layer (lib/payloadSnapshot):
@@ -809,16 +816,20 @@ async function buildMgmtDataPayload(
     const obTotal = primaryBookingTotal;
     const saleTotal = primarySaleTotal;
     // Only meaningful when both sides cover the SAME period basis; a full-FY
-    // sale against a period-filtered booking produces nonsense (large
-    // negatives). Never report a negative pending — booking coverage gaps
-    // (e.g. dispatches against prior-FY orders) make it unknowable, not <0.
-    // When the selected period IS the full FY, an FY-total side and a
-    // period-filtered side cover the same months — treat as matching bases.
+    // sale against a period-filtered booking produces nonsense. When the
+    // selected period IS the full FY, an FY-total side and a period-filtered
+    // side cover the same months — treat as matching bases.
+    // A negative result is legitimate (dispatches against prior-period orders)
+    // and must be surfaced, not clamped to zero.
     const pendingBasisMatch =
       primaryBookingPeriodFiltered === salePeriodFiltered || monthLabels.length >= 12;
     const pendingOrdersTotal =
       obTotal > 0 && saleTotal > 0 && pendingBasisMatch
-        ? Math.max(0, obTotal - saleTotal)
+        ? obTotal - saleTotal
+        : null;
+    const pendingOrdersTotalNote =
+      pendingOrdersTotal != null && pendingOrdersTotal < 0
+        ? NEGATIVE_PENDING_NOTE
         : null;
 
     // PS1: period-specific company-level secondary totals for the meta block.
@@ -869,6 +880,7 @@ async function buildMgmtDataPayload(
         ...(orderBookingPrimarySource ? { orderBookingPrimarySource } : {}),
         // Derived: orders booked but not yet dispatched
         ...(pendingOrdersTotal != null ? { pendingOrdersTotal } : {}),
+        ...(pendingOrdersTotalNote != null ? { pendingOrdersTotalNote } : {}),
         // Raw sheet totals for OB (Primary) and Sale (Dispatched) tiles —
         // includes Non-territory + unresolved-head buckets that the per-head
         // breakdown filters out. Frontend uses these for the company-level tiles.
@@ -1024,14 +1036,19 @@ router.get("/mgmt/primary", async (req: Request, res: Response): Promise<void> =
       .map((head) => {
         const booking = primaryPeriod.booking.byHead.get(head) ?? 0;
         const sale = primaryPeriod.sale.byHead.get(head) ?? 0;
+        const pending =
+          saleHeadsAvailable && pendingBasisMatch ? booking - sale : null;
         return {
           head,
           booking,
           sale,
-          pending:
-            saleHeadsAvailable && pendingBasisMatch
-              ? Math.max(0, booking - sale)
-              : null,
+          pending,
+          // Surface the reason when sale exceeded booking — a negative pending
+          // is either prior-period orders being fulfilled (legitimate) or a data
+          // fault.  Either way it must be visible, not clamped to zero.
+          ...(pending != null && pending < 0
+            ? { pendingNote: NEGATIVE_PENDING_NOTE }
+            : {}),
         };
       })
       .sort((a, b) => b.booking - a.booking);
@@ -1040,8 +1057,10 @@ router.get("/mgmt/primary", async (req: Request, res: Response): Promise<void> =
     const companySale = primaryPeriod.sale.total;
     const companyPending =
       companyBooking > 0 && companySale > 0 && pendingBasisMatch
-        ? Math.max(0, companyBooking - companySale)
+        ? companyBooking - companySale
         : null;
+    const companyPendingNote =
+      companyPending != null && companyPending < 0 ? NEGATIVE_PENDING_NOTE : null;
 
     // Build head-level primary target map from state targets for use in the response.
     const dbHeadTargetMap = await buildPrimaryTargetMapFromStateTargets(fy).catch((): Map<string, number[]> => new Map());
@@ -1061,6 +1080,7 @@ router.get("/mgmt/primary", async (req: Request, res: Response): Promise<void> =
       companyBooking,
       companySale,
       companyPending,
+      ...(companyPendingNote != null ? { companyPendingNote } : {}),
       byHead,
       byDistributor: sheetData.byDistributor,
       byMember,

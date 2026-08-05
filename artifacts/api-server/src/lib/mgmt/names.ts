@@ -34,6 +34,15 @@ export function normParty(raw: unknown): string {
     .replace(/[^a-z0-9]+/g, "");
 }
 
+// Bucket name used by all three byHead loaders when a STATE HEAD value in the
+// source data cannot be matched to any canonical roster head.  Using a shared
+// constant guarantees all unresolved amounts accumulate into exactly one entry
+// in the merged byHead map regardless of which loader produced them.
+//
+// "Unattributed" (blank STATE HEAD in the source row) is a separate bucket
+// and is handled independently by each loader.
+export const UNRESOLVED_HEAD = "[Unresolved]";
+
 // Head-name key: normName plus stripping the honorific "ji"/"sir" suffix, so
 // "ANANT SINGH JI" (register) and "Anant Singh" (bridge/roster) share a key.
 export function normHead(raw: unknown): string {

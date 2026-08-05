@@ -95,6 +95,8 @@ type DashboardMeta = {
   orderBookingPrimarySource?: string | null;
   /** Company-wide pending orders = orderBookingPrimary total minus headSales total. */
   pendingOrdersTotal?: number | null;
+  /** Set when pendingOrdersTotal < 0 — explains why sale exceeded booking. */
+  pendingOrdersTotalNote?: string | null;
   /**
    * True when Sale (Dispatched) is queried from sale_line for exactly the
    * selected period (not always a FY total).  Undefined on older API versions.
@@ -911,7 +913,11 @@ export default function StateHeadDashboard() {
           <KpiTile
             label="Pending Orders"
             value={fmtCr(data.meta.pendingOrdersTotal ?? kpi.pendingOrders)}
-            sub={`${primaryPeriodLabel}${kpi.primaryOrderBooking != null ? " · Order Booking minus Dispatched" : ""}`}
+            sub={
+              data.meta.pendingOrdersTotalNote
+                ? `${primaryPeriodLabel} · ${data.meta.pendingOrdersTotalNote}`
+                : `${primaryPeriodLabel}${kpi.primaryOrderBooking != null ? " · Order Booking minus Dispatched" : ""}`
+            }
           />
         </div>
       )}

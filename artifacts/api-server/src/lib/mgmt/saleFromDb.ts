@@ -12,7 +12,7 @@
 
 import { db, saleLines } from "@workspace/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { buildHeadResolver } from "./names.js";
+import { buildHeadResolver, UNRESOLVED_HEAD } from "./names.js";
 import { loadRoster } from "./roster.js";
 import { logger } from "../logger.js";
 
@@ -127,6 +127,7 @@ export async function loadDispatchSaleFromDb(
     }
 
     // Resolve normHead keys → canonical display names (same as roster's stateHead).
+    // Any name not matched routes to UNRESOLVED_HEAD — never a raw normHead string.
     const byHead = new Map<string, number>();
     try {
       const roster = await loadRoster();
@@ -135,13 +136,20 @@ export async function loadDispatchSaleFromDb(
       );
       const resolve = buildHeadResolver(canonicalHeads);
       for (const [key, amt] of byNormKey) {
-        const display = resolve(key) ?? key;
-        byHead.set(display, (byHead.get(display) ?? 0) + amt);
+        const display = resolve(key);
+        if (!display) {
+          logger.warn({ fy, key, amt }, "saleFromDb: unresolved head name → routing to [Unresolved]");
+        }
+        const bucket = display ?? UNRESOLVED_HEAD;
+        byHead.set(bucket, (byHead.get(bucket) ?? 0) + amt);
       }
     } catch {
-      // Roster unavailable — use normHead keys as-is.
-      for (const [key, amt] of byNormKey) {
-        byHead.set(key, amt);
+      // Roster unavailable — all territorial amounts go to [Unresolved].
+      let total = 0;
+      for (const [, amt] of byNormKey) total += amt;
+      if (total > 0) {
+        logger.warn({ fy, total }, "saleFromDb: roster unavailable — territorial amounts bucketed as [Unresolved]");
+        byHead.set(UNRESOLVED_HEAD, total);
       }
     }
     if (nonTerritoryTotal > 0) {

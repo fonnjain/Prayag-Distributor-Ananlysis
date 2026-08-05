@@ -14,7 +14,7 @@ import {
   readTabRowsChunked,
   type SheetCellValue,
 } from "../registers/sheetsApi.js";
-import { normHead, buildHeadResolver } from "./names.js";
+import { normHead, buildHeadResolver, UNRESOLVED_HEAD } from "./names.js";
 import { loadRoster } from "./roster.js";
 import { logger } from "../logger.js";
 
@@ -201,6 +201,8 @@ async function _loadStateHeadSaleUncached(fy: string): Promise<StateHeadSaleResu
     }
 
     // Resolve normHead keys to canonical roster display names.
+    // Any key that cannot be matched routes to UNRESOLVED_HEAD so it never
+    // leaks as a raw normHead string into the merged byHead map.
     const byHead = new Map<string, number>();
     try {
       const roster = await loadRoster();
@@ -209,13 +211,21 @@ async function _loadStateHeadSaleUncached(fy: string): Promise<StateHeadSaleResu
       );
       const resolve = buildHeadResolver(canonicalHeads);
       for (const [key, amt] of byNormKey) {
-        const display = resolve(key) ?? key;
-        byHead.set(display, (byHead.get(display) ?? 0) + amt);
+        const display = resolve(key);
+        if (!display) {
+          logger.warn({ fy, key, amt }, "stateHeadSale: unresolved head name → routing to [Unresolved]");
+        }
+        const bucket = display ?? UNRESOLVED_HEAD;
+        byHead.set(bucket, (byHead.get(bucket) ?? 0) + amt);
       }
     } catch {
-      // Roster unavailable — use raw normHead keys.
-      for (const [key, amt] of byNormKey) {
-        byHead.set(key, amt);
+      // Roster unavailable — all territorial amounts go to [Unresolved] so
+      // they remain in one named bucket rather than scattered normHead keys.
+      let total = 0;
+      for (const [, amt] of byNormKey) total += amt;
+      if (total > 0) {
+        logger.warn({ fy, total }, "stateHeadSale: roster unavailable — territorial amounts bucketed as [Unresolved]");
+        byHead.set(UNRESOLVED_HEAD, total);
       }
     }
     if (nonTerritoryTotal > 0) {

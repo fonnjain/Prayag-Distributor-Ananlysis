@@ -18,7 +18,7 @@ import {
   readTabRowsChunked,
   type SheetCellValue,
 } from "../registers/sheetsApi.js";
-import { normHead, buildHeadResolver } from "./names.js";
+import { normHead, buildHeadResolver, UNRESOLVED_HEAD } from "./names.js";
 import { loadRoster } from "./roster.js";
 import { logger } from "../logger.js";
 
@@ -229,7 +229,9 @@ async function _loadOrderBookSaleUncached(fy: string): Promise<OrderBookSale> {
 
     // ── Resolve normHead keys → canonical display names ────────────────────────
     // Build the resolver once and apply it to both the aggregate and per-tab maps.
-    let resolve: (key: string) => string | null = (k) => k;
+    // Initial resolver returns null so that the UNRESOLVED_HEAD guard fires when
+    // the roster is unavailable — same behaviour as when a head fails to match.
+    let resolve: (key: string) => string | null = (_k) => null;
     try {
       const roster = await loadRoster();
       const canonicalHeads = new Set(
@@ -237,14 +239,21 @@ async function _loadOrderBookSaleUncached(fy: string): Promise<OrderBookSale> {
       );
       resolve = buildHeadResolver(canonicalHeads);
     } catch {
-      // Roster unavailable — use normHead keys as-is.
+      logger.warn({ fy }, "orderBookSale: roster unavailable — unresolved heads will be bucketed as [Unresolved]");
     }
 
     // Aggregate (all months) → byHead
+    // Any name that cannot be matched to a canonical head goes to UNRESOLVED_HEAD
+    // rather than leaking as a raw normHead string.  This ensures the merged byHead
+    // in mgmt/primary never produces two rows for the same physical person.
     const byHead = new Map<string, number>();
     for (const [key, amt] of byNormKeyAll) {
-      const display = resolve(key) ?? key;
-      byHead.set(display, (byHead.get(display) ?? 0) + amt);
+      const display = resolve(key);
+      if (!display) {
+        logger.warn({ fy, key, amt }, "orderBookSale: unresolved head name → routing to [Unresolved]");
+      }
+      const bucket = display ?? UNRESOLVED_HEAD;
+      byHead.set(bucket, (byHead.get(bucket) ?? 0) + amt);
     }
     if (nonTerritoryAll > 0) {
       byHead.set("Non-territory", (byHead.get("Non-territory") ?? 0) + nonTerritoryAll);
@@ -254,13 +263,13 @@ async function _loadOrderBookSaleUncached(fy: string): Promise<OrderBookSale> {
       byHead.set("Unattributed", (byHead.get("Unattributed") ?? 0) + unattributedAll);
     }
 
-    // Per-tab → byHeadByMonth
+    // Per-tab → byHeadByMonth (same resolver, no duplicate warn — aggregate covers it)
     const byHeadByMonth = new Map<string, Map<string, number>>();
     for (const [tabTitle, { byNormKey: tabNK, nonTerritory: tabNT, unattributed: tabUA }] of tabAccums) {
       const tabHead = new Map<string, number>();
       for (const [key, amt] of tabNK) {
-        const display = resolve(key) ?? key;
-        tabHead.set(display, (tabHead.get(display) ?? 0) + amt);
+        const bucket = resolve(key) ?? UNRESOLVED_HEAD;
+        tabHead.set(bucket, (tabHead.get(bucket) ?? 0) + amt);
       }
       if (tabNT > 0) {
         tabHead.set("Non-territory", (tabHead.get("Non-territory") ?? 0) + tabNT);

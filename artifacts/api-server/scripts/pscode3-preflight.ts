@@ -81,28 +81,36 @@ const normAlpha = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 // ── Name lists ─────────────────────────────────────────────────────────────────
 //
-// KNOWN_STATE_HEADS — 12 pure roll-up heads (no individual PS code).
+// KNOWN_STATE_HEADS — 11 pure roll-up heads (no individual PS code).
 //   A PSCode_3 file under any of these names is a mislabelled export.
 //   → blocking (exit 1)
 //
-//   To refresh, run:
-//     psql $DATABASE_URL -c "SELECT DISTINCT head_canon FROM sale_line
-//       WHERE head_canon IS NOT NULL
-//       AND head_canon != 'Non-territory / Project / Govt' ORDER BY 1;"
-//   Note: Shailesh Sharma appears in the State Head workbooks for FY2026-27
-//   but has no primary register rows yet for that FY; include him here until
-//   his position is formally confirmed as departed.
+//   Sourced from three-way reconciliation (Aug 2026):
+//     • Dashboard Data tab (STATE HEAD DASHBOARD, Data tab, stateHead column)
+//     • sale_line FY2026-27 head_canon
+//     • State Head register (SALE SHEET 26-27, read by stateHeadSale)
+//
+//   Only names that appear on the Dashboard Data tab are included here as
+//   confirmed heads.  Additions/removals should be cross-checked against all
+//   three sources before committing.
+//
+//   NOT included (reasons documented):
+//     Narendra Sharma  — member under Sunil Mohanty; appears in sale_line
+//                        FY2026-27 because col L of the Narendra Sharma State
+//                        Head file was picked up as a head attribution.  His
+//                        PSCode_3 file (if present) is legitimate personal sales.
+//     Shailesh Sharma  — absent from all three sources as of Aug 2026.
 //
 const KNOWN_STATE_HEADS: string[] = [
   "Anant Singh",
   "Biju C.O",
   "Lalan Kumar",
-  "Narendra Sharma",
   "Nasir Hussain Khan",
   "Pawan Sharma",
+  "Prashant Onam Naik",   // Karnataka, 5 members; no dispatch rows yet FY26-27
   "Sandeep Dadheech",
-  "Shailesh Sharma",   // in FY26-27 State Head workbooks; no primary rows yet
   "Sulinder Pal",
+  "Sunil Mohanty",         // 3 members; no dispatch rows yet FY26-27
   "Sunil Patel",
   "Syed Aqil Rizvi",
 ];

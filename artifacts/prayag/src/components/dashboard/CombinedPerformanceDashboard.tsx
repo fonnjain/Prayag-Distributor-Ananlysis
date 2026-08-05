@@ -106,6 +106,8 @@ type DashboardMeta = {
   headSales?: Record<string, number>;
   orderBookingPrimary?: Record<string, number>;
   pendingOrdersTotal?: number | null;
+  /** Set when pendingOrdersTotal < 0 — explains why sale exceeded booking. */
+  pendingOrdersTotalNote?: string | null;
   secondarySource?: string | null;
   secondaryTotal?: SecondaryTotal | null;
   secondaryCoveragePct?: number | null;
@@ -477,7 +479,9 @@ export default function CombinedPerformanceDashboard() {
                 value={fmtCr(headSalesTotal || null)}
                 note={
                   primaryBookingTotal > 0 && data.meta.pendingOrdersTotal != null
-                    ? `${fmtCr(data.meta.pendingOrdersTotal)} pending`
+                    ? data.meta.pendingOrdersTotalNote
+                      ? `${fmtCr(data.meta.pendingOrdersTotal)} pending — ${data.meta.pendingOrdersTotalNote}`
+                      : `${fmtCr(data.meta.pendingOrdersTotal)} pending`
                     : undefined
                 }
                 warn={(data.meta.pendingOrdersTotal ?? 0) / (primaryBookingTotal || 1) > 0.25}

@@ -32,6 +32,8 @@ type HeadRow = {
   booking: number;
   sale: number;
   pending: number | null;
+  /** Set when pending < 0 — explains why sale exceeded booking. */
+  pendingNote?: string | null;
 };
 
 type DistributorRow = {
@@ -767,7 +769,16 @@ export default function PrimaryPerformanceDashboard() {
                     {row.sale > 0 ? fmtCr(row.sale) : "—"}
                   </td>
                   <td className="py-2 px-3 text-right font-mono text-xs text-muted-foreground">
-                    {row.pending != null && row.pending > 0 ? fmtCr(row.pending) : "—"}
+                    {row.pending != null && row.pending !== 0 ? (
+                      row.pending < 0 ? (
+                        <span
+                          className="text-amber-600 dark:text-amber-400"
+                          title={row.pendingNote ?? "dispatches exceed booking"}
+                        >
+                          {fmtCr(row.pending)}
+                        </span>
+                      ) : fmtCr(row.pending)
+                    ) : "—"}
                   </td>
                 </tr>
               ))}
@@ -781,9 +792,16 @@ export default function PrimaryPerformanceDashboard() {
                   {fmtCr(data.companySale)}
                 </td>
                 <td className="py-2 px-3 text-right font-mono text-xs text-muted-foreground">
-                  {data.companyPending != null && data.companyPending > 0
-                    ? fmtCr(data.companyPending)
-                    : "—"}
+                  {data.companyPending != null && data.companyPending !== 0 ? (
+                    data.companyPending < 0 ? (
+                      <span
+                        className="text-amber-600 dark:text-amber-400"
+                        title={(data as { companyPendingNote?: string }).companyPendingNote ?? "dispatches exceed booking"}
+                      >
+                        {fmtCr(data.companyPending)}
+                      </span>
+                    ) : fmtCr(data.companyPending)
+                  ) : "—"}
                 </td>
               </tr>
             </tbody>
