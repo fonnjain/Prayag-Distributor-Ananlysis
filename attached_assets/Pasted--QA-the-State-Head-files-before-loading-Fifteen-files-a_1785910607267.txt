@@ -1,0 +1,117 @@
+# QA the State Head files before loading
+
+*Fifteen files are being attached directly. Verify them against known controls before anything reads them.*
+
+---
+
+## Independently verified controls
+
+I read all fifteen files and computed these. **If the agent's figures differ, one of us has a parsing fault** — and that matters more than the loading itself.
+
+| | |
+|---|---|
+| Files | **15** |
+| Line rows across all files | **191,770** |
+| Tagged **FY-2025-26** | **₹362.82 Cr** |
+| Tagged **FY-2026-27** | **₹104.72 Cr** |
+| MOHAN IMPEX in the PROJECT file | **₹35.73 Cr** |
+| Frozen FY2025-26 register anchor | ₹361.00 Cr — files are **0.5% higher**, live-file drift |
+
+---
+
+```
+Prayag app - QA the fifteen State Head files before loading them. Same global
+rules. Report every value; do not assert success.
+
+1. STRUCTURE - there is NO HEADER ROW. Row 1 is data. Columns are positional:
+
+     A  invoice number          B  invoice date        C  customer name
+     D  item code               E  dispatch date       F  quantity
+     G  rate                    H  amount              I  segment / group
+     J  station                 K  STATE               L  STATE HEAD
+     M  product group           N  fiscal year         O  fiscal year
+
+   The line data is on a tab named 'Sheet1'. Other tabs (Report 1, Report 2,
+   Report 3A/3B/3C, Report 4, Report 7, Sale & Collection, Sheet2, Sheet10) are
+   PRE-BUILT REPORTS, not source data. Read Sheet1 only. If a file has no
+   Sheet1, report it rather than falling through to another tab.
+
+2. CONTROL TOTALS - confirm each and report the value:
+     15 files
+     191,770 line rows in total across all Sheet1 tabs
+     FY-2025-26 tagged rows total Rs 362.82 Cr
+     FY-2026-27 tagged rows total Rs 104.72 Cr
+     MOHAN IMPEX in the PROJECT file totals Rs 35.73 Cr
+
+   THE FILES SPAN TWO FISCAL YEARS despite being named "2026-27". Column N and
+   column O carry the year tag. Split on it - do not assume the filename.
+
+   The FY2025-26 portion is Rs 362.82 Cr against the frozen register's
+   Rs 361.00 Cr - 0.5 per cent higher, consistent with live-file drift. Report
+   the difference; do not adjust either figure to match the other.
+
+3. FILE NAMES USE THE OLD HEAD VOCABULARY. Apply the EXISTING alias map. Create
+   no new heads.
+     Anant Singh JI      RIZVI JI JI       Snadeep ji        BIJJU
+     Pawan JI            Nasir JI          LALAN             SULINDER PAL JI
+     ANUJ SHARMA         Sunil Patel       NARENDRA SHARMA
+     PROJECT             Other             Tamilnadu         AP TELENGANA
+
+   NOTE FOUR OF THESE ARE NOT HEAD NAMES AT ALL:
+     PROJECT and Other are CHANNELS
+     Tamilnadu and AP TELENGANA are STATES
+   Do not create head_canon entries for any of the four. Report how their rows
+   are attributed - by the STATE HEAD value in column L, not by the filename.
+
+   NARENDRA SHARMA is a MEMBER under Sunil Mohanty on the dashboard roster, not
+   a head. Report what column L holds in that file before deciding anything.
+
+4. THE STATE VOCABULARY IN COLUMN K IS THE SHEET'S, NOT THE DATABASE'S.
+   Expect DELHI A, UP ( A ), KARNATAKA (B), JAMMU, KASHMIR and possibly
+   W-BENGAL, MAHARASTRA L/R, Tamilnadu, UP ( R ).
+   Route every value through the shared canonState normalisation at load. Report
+   the DISTINCT raw values found in column K across all fifteen files, with row
+   counts - that list is the ground truth for what the sheet vocabulary actually
+   contains, and it settles a dispute that has already cost two rounds.
+
+5. LOAD TO A SCRATCH TABLE. Do NOT write to sale_line and do NOT unfreeze
+   anything in this phase. This is verification only.
+
+6. CROSS-CHECK AGAINST THE REGISTER, and report each:
+     how many of the 245 unattributed FY2025-26 customers appear in the files
+     the value they carry
+     how many of the already-attributed customers appear, and whether their
+       state in the files matches the register's derived state
+     any customer where the two DISAGREE on state - that is the finding that
+       matters, and the expectation is zero
+
+7. FLAG WITHOUT FIXING:
+     rows where column K is blank
+     rows where column L is blank
+     customer names appearing under more than one state across files
+     customer names appearing under more than one head across files
+     any FY tag other than FY-2025-26 or FY-2026-27
+   Report counts and the largest examples by value. Do not resolve them here.
+
+Acceptance - report the computed value for each:
+  15 files, 191,770 rows, Rs 362.82 Cr FY2025-26, Rs 104.72 Cr FY2026-27
+  MOHAN IMPEX Rs 35.73 Cr in the PROJECT file
+  the distinct raw values in column K, with counts
+  the count of the 245 unattributed customers that resolve, and their value
+  zero state disagreements against the register's derived attribution, or the
+    exceptions named
+  PROJECT, Other, Tamilnadu and AP TELENGANA create no new heads
+  nothing is written to sale_line and nothing is unfrozen
+```
+
+---
+
+## The two checks that matter most
+
+**The distinct list of column K values.** That is the ground truth for the sheet's state vocabulary, and it has already cost two rounds of investigation — my read of the FY2026-27 sale sheet said `W-BENGAL` and `MAHARASTRA L/R`; the database audit said those spellings exist nowhere. **These files will settle which layer holds what.**
+
+**Zero state disagreements.** The earlier validation found none across 376 customers. If these fifteen files produce disagreements where that comparison did not, something in the parsing differs — and it is better to find that before ₹44 Cr is reattributed on the strength of it.
+
+---
+
+*Control figures computed independently from the fifteen files, 4 August 2026*
