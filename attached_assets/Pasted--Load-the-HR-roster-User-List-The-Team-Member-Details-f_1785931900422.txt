@@ -1,0 +1,148 @@
+# Load the HR roster — User_List
+
+*The Team Member Details file the Data Sources panel says is not connected. It resolves four open questions and unblocks three things the app has never had.*
+
+---
+
+## Independently verified controls
+
+| | |
+|---|---|
+| Rows | **613** |
+| Active | **180** · Deactive 433 |
+| Order Type, active | Secondary **126** · Both **48** · Primary **6** |
+| CTC present | **174 of 180** — ₹74,03,712 monthly, **₹8.88 Cr annualised** |
+| Latitude/longitude | **177 of 180** |
+| Assigned Segment | **180 of 180** |
+| Date of Joining | 179 of 180 |
+| CTC range | ₹20,000 to ₹1,95,835 · median ₹33,718 |
+
+---
+
+```
+Prayag app - load the HR roster (User_List). Same global rules.
+This is the "Team Member Details (HR)" file the Data Sources panel reports as
+not shared. It is now available.
+
+DO NOT CHANGE ANY REPORT FORMAT. Prayag produces those and they stay as they
+are. This changes what can be COMPUTED, not what is presented.
+
+1. COLUMNS AVAILABLE
+   S.No, Date Created, Designation, Name, Mobile, Employee Code, Email, State,
+   City, District, Area, Address, Date of Joining, Date of Leaving, Weekly Off,
+   Reporting Manager, Manager Code, Status, Created By, Last Updated By/On,
+   First/Latest Mobile App Login, Device Information, Headquarter, Working
+   State, Working District, Assigned Segment, App Version, Order Type, Date of
+   Birth, CTC, Pincode, Latitude, Longitude
+
+   Note CTC is comma-formatted in places ("33,050") - strip separators before
+   parsing or 174 values silently become null.
+
+2. RESOLVE FOUR OPEN HEAD QUESTIONS - the file answers all four, and three
+   earlier conclusions were WRONG.
+
+     Taninki Ramesh Babu   ACTIVE    Executive Sales    reports to Suresh Kumar Nair
+     Suresh Kumar Nair     DEACTIVE  Regional Sales Mgr reports to Sandeep Dadheech
+     Shailesh Sharma       DEACTIVE  Senior Sales Exec
+     Narendra Sharma       not present (only Narendra Kumar Jain, Deactive)
+
+   NONE OF THEM IS A STATE HEAD. The State Head workbooks name them because they
+   held territory, not because they were heads.
+
+   THIS ALSO CLOSES THE TAMIL NADU QUESTION. "BABU" in the Tamilnadu workbook is
+   Taninki Ramesh Babu, an Executive Sales rep reporting to Suresh Kumar Nair.
+   GRAHAA PRIYA ENTERPRISES therefore belongs to Sandeep Dadheech exactly as the
+   register says - the workbook was a visibility record, not an ownership claim.
+   Remove Babu, Suresh Nair and Shailesh Sharma from any head list; keep them as
+   people with the status this file gives.
+
+3. THE ORGANISATION IS DEEPER THAN THE APP MODELS - report before changing.
+   The app assumes head -> member, two levels. This file shows at least four:
+
+     Sandeep Dadheech (Vice President)
+       Pravat Kumar Dash (Regional Sales Manager)   7 reports
+       Soumen Ghosh (Senior Area Sales Manager)     5 reports
+       Sujeet Singh (Assistant Regional Sales Mgr)  5 reports
+     Lalan Kumar (RSM)
+       Tejas Lunawat (Area Sales Manager)           7 reports
+     Biju C.O
+       Prashant Onam Naik (State Head-Sales)        5 reports
+
+   32 ACTIVE PEOPLE HAVE DIRECT REPORTS.
+
+   PRASHANT ONAM NAIK REPORTS TO BIJU C.O - he is not a peer State Head, he sits
+   beneath one. That contradicts the dashboard, which lists him as a head.
+
+   This also explains an anomaly already on record: Pravat Kumar Dash carries the
+   second-largest order booking on Sandeep's team with NO TARGET. He is a
+   Regional Sales Manager with seven reports - a manager, not an underperforming
+   salesperson.
+
+   REPORT the full Reporting Manager tree before changing any hierarchy. Do not
+   restructure the app's head-member model in this phase - state what the file
+   says and let the business confirm it.
+
+4. CTC - 174 of 180 active have it. Rs 74,03,712 monthly, Rs 8.88 Cr annualised,
+   range Rs 20,000 to Rs 1,95,835, median Rs 33,718.
+
+   The Data Sources panel currently says cost columns "stay blank until payroll
+   and expense sheets are connected". This is that source.
+   Cost ratio, return on cost and cost per visit become computable for nearly
+   every member rather than partially.
+   The 6 without CTC must read "not recorded", never zero - a zero cost ratio
+   would rank them as the most efficient people in the company.
+
+5. THREE THINGS THE APP HAS NEVER HAD.
+
+   a) LATITUDE AND LONGITUDE - 177 of 180.
+      The visit plan currently ranks development targets by business plan
+      divided by distance, using a proxy. Real coordinates replace it.
+
+   b) ASSIGNED SEGMENT - 180 of 180, per person.
+      The SKU push list currently recommends codes without knowing whether that
+      person is authorised to sell them. Filter recommendations by assigned
+      segment and report how many current recommendations fall outside it.
+
+   c) ORDER TYPE - Secondary 126, Both 48, Primary 6.
+      The app treats this as binary via column BG. FORTY-EIGHT PEOPLE DO BOTH,
+      and their targets and achievement are currently measured on one side only.
+      Report who they are and what it means for their figures.
+
+6. RECONCILE THE ROSTER, name by name.
+     HR file active        180
+     dashboard Data tab    183 rows, 171 active, 12 LEFT
+     State Head page       181 members
+   This file has EMPLOYEE CODES; the dashboard does not. Use them as the stable
+   identifier where both sources carry a person.
+   Report every person in one source and not the other, both directions.
+
+7. THIS MAY SETTLE THE ASHUTOSH COLLISION PERMANENTLY.
+   Two people are named Ashutosh Kumar - one under Anant Singh in Uttarakhand,
+   one under Sandeep Dadheech in Jharkhand. If both appear here with distinct
+   employee codes, that code becomes the identity key and the geography rule
+   becomes a fallback rather than the primary test. Report what the file holds
+   for both.
+
+Acceptance - report the computed value:
+  613 rows read, 180 active, 433 deactive
+  CTC parsed for 174 with comma separators handled - Rs 74,03,712 monthly
+  the four head questions answered from the file, with status and designation
+  the full Reporting Manager tree, showing the 32 people who have reports
+  Prashant Onam Naik shown as reporting to Biju C.O
+  lat/long present for 177, assigned segment for 180, order type split reported
+  the roster reconciliation both ways against the dashboard
+  what the file holds for both Ashutosh Kumars
+  NO report format is changed
+```
+
+---
+
+## What I would not do yet
+
+**Do not restructure the head-member model.** The file says Prashant Onam Naik reports to Biju C.O and that 32 people have reports — but the dashboard, the targets, the warnings and every report are built on a two-level model.
+
+**Report what the file says, then let the business confirm it.** If the hierarchy really is four deep, that is a design change worth making deliberately rather than as a side effect of loading a roster.
+
+---
+
+*Controls computed independently from User_List.csv, 5 August 2026*
