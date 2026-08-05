@@ -5,7 +5,7 @@
 // fixed indices in the comments are the expected positions as of FY26-27.
 
 import { readAllTabRows } from "../registers/sheetsApi.js";
-import { normName } from "./names.js";
+import { normSecKey } from "./names.js";
 import { mgmtSources } from "./roster.js";
 
 export type HrSfaRecord = {
@@ -116,7 +116,7 @@ export async function loadHrSfaDashboard(): Promise<Map<string, HrSfaRecord>> {
     const r = rows[i] ?? [];
     const name = toStr(r[iName]);
     if (!name) continue;
-    const nk = normName(name);
+    const nk = normSecKey(name);
     if (!nk) continue;
 
     const g = (idx: number): unknown => (idx >= 0 ? r[idx] : undefined);

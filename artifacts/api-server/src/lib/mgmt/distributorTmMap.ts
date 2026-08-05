@@ -20,7 +20,7 @@ import {
   readTabRowsChunked,
   type SheetCellValue,
 } from "../registers/sheetsApi.js";
-import { normParty, normName } from "./names.js";
+import { normParty, normName, normSecKey } from "./names.js";
 import { logger } from "../logger.js";
 
 const DRIVE_BASE = "https://www.googleapis.com/drive/v3";
@@ -286,7 +286,7 @@ async function buildMapUncached(): Promise<DistributorTmMap> {
     for (const res of results) {
       if (res.status !== "fulfilled" || !res.value) continue;
       const { memberName, entries } = res.value;
-      const memberNormKey = normName(memberName);
+      const memberNormKey = normSecKey(memberName);
       if (!memberNormKey) continue;
       memberCount++;
       let dCount = 0;

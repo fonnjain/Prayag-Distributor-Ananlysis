@@ -10,7 +10,7 @@
 import mgmtSourcesJson from "../../../config/mgmt_sources.json";
 import { logger } from "../logger.js";
 import { readAllTabRows, listSheetTabs, getGoogleAccessToken } from "../registers/sheetsApi.js";
-import { normName } from "./names.js";
+import { normName, normSecKey } from "./names.js";
 
 export type RosterMember = {
   stateHead: string;
@@ -137,7 +137,7 @@ async function tryHrRoster(): Promise<RosterMember[] | null> {
         stateHead: cManager ? str(row.getCell(cManager).value) : "",
         state: cState ? str(row.getCell(cState).value) : "",
         name,
-        normKey: normName(name),
+        normKey: normSecKey(name),
         workingState: cState ? str(row.getCell(cState).value) : "",
         headquarter: cHq ? str(row.getCell(cHq).value) : "",
         dojSerial: null,
@@ -196,15 +196,22 @@ async function loadFallbackRoster(): Promise<RosterMember[]> {
     const name = str(r[2]);
     const stateHead = str(r[0]);
     if (!name || !stateHead) continue;
-    const key = normName(name);
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const key = normName(name);           // normName for extras join (secondary tab)
+    const nsk = normSecKey(name);         // normSecKey: keeps parentheticals → roster normKey
+    // Dedup on (normName, stateHead) compound key so two members who share a
+    // base name under *different* state heads both survive.  Using normName
+    // alone caused "Ashutosh Kumar (Rudrapur)" to be silently dropped because
+    // normName strips the parenthetical and produces the same key as plain
+    // "Ashutosh Kumar" (Dhanbad, Sandeep Dadheech's team).
+    const dedupKey = `${key}:${normName(stateHead)}`;
+    if (seen.has(dedupKey)) continue;
+    seen.add(dedupKey);
     const extra = extras.get(key);
     members.push({
       stateHead,
       state: str(r[1]),
       name,
-      normKey: key,
+      normKey: nsk,
       workingState: str(r[3]),
       headquarter: str(r[4]),
       dojSerial: num(r[5]) ?? extra?.doj ?? null,

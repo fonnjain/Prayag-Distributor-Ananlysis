@@ -598,19 +598,20 @@ async function buildMgmtDataPayload(
       buildPrimaryTargetMapFromStateTargets(fy).catch((): Map<string, number[]> => new Map()),
     ]);
     const { rows, ordersAvailable, targetsAvailable, rosterSource, orderStatus, nameMatches, xlsxTargetDiagnostic } = assembled;
-    // Build a joinKey → SecMember[] multi-map.
-    // When a joinKey is unique the lookup is O(1).  When two SHD members share
-    // the same joinKey (same normName), co-existence in the same SOBR tab for
-    // the same period proves they are distinct people — disambiguate using the
-    // state head rather than falling back to an arbitrary first-entry-wins rule.
+    // Build a normKey (normSecKey) → SecMember[] multi-map.
+    // normKey keeps parentheticals so "Ashutosh Kumar" and
+    // "Ashutosh Kumar (Rudrapur)" are distinct keys with no collision.
+    // Previously indexed by joinKey (normName, strips parentheticals) which
+    // required state-head disambiguation on every collision; that is no longer
+    // needed when every key is already unique.
     const secByKeyMulti = new Map<string, SecMember[]>();
     if (secDash) {
       for (const sm of secDash.members) {
-        const bucket = secByKeyMulti.get(sm.joinKey);
+        const bucket = secByKeyMulti.get(sm.normKey);
         if (bucket) {
           bucket.push(sm);
         } else {
-          secByKeyMulti.set(sm.joinKey, [sm]);
+          secByKeyMulti.set(sm.normKey, [sm]);
         }
       }
     }

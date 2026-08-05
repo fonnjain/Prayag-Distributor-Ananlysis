@@ -32,6 +32,7 @@ import {
 } from "../registers/sheetsApi.js";
 import {
   normName,
+  normSecKey,
   parseOrderDate,
   mgmtMonthIndex,
   fyShort,
@@ -448,7 +449,7 @@ async function loadOrderFileUncached(
         // being out of the fiscal year, so the annual total reconciles to the
         // workbook's own grand total and the signed-off per-head figures.
         const monthIdx = mgmtMonthIndex(dateSerial);
-        const key = normName(tmRaw);
+        const key = normSecKey(tmRaw);
         if (!key) continue;
         let agg = perTm.get(key);
         if (!agg) {

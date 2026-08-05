@@ -212,4 +212,65 @@ export const SEED_FLAGS: SeedFlag[] = [
       customerCount: 1,
     },
   },
+  // ── Flags from HR roster analysis (Aug 2026) ─────────────────────────────
+  {
+    headId: "sunil-mohanty",
+    flagType: "unresolved_head_canon",
+    severity: "warning",
+    title: "[Unresolved] byHead entry — 'Narendra Sharma' (90 sale_line rows, FY2026-27)",
+    detail: {
+      headCanonValue: "Narendra Sharma",
+      rowCount: 90,
+      bookingLakhs: 42.2,
+      saleLakhs: 5.5,
+      description:
+        "90 sale_line rows carry head_canon = 'Narendra Sharma'. Narendra Sharma is a member under Sunil Mohanty, not a State Head. These rows produce an '[Unresolved]' entry in byHead (₹42.2L booking / ₹5.5L sale). Pending business confirmation to re-attribute head_canon to 'Sunil Mohanty' in the DB.",
+    },
+  },
+  {
+    headId: "prashant-onam-naik",
+    flagType: "hierarchy_contradiction",
+    severity: "warning",
+    title: "HR file contradicts dashboard — reports to Biju C.O, not a peer State Head",
+    detail: {
+      employeeCode: "45896996663",
+      reportingManager: "Biju C.O",
+      designation: "State Head-Sales",
+      directReports: 5,
+      description:
+        "In the HR roster file, Prashant Onam Naik (Emp #45896996663, designation 'State Head-Sales') has Biju C.O as Reporting Manager and 5 active direct reports of his own. The dashboard treats him as a peer State Head. Business must confirm: (a) keep as a sub-head under Biju, (b) demote to member, or (c) retain as a peer State Head with the HR file updated.",
+    },
+  },
+  {
+    headId: null,
+    flagType: "member_hr_deactive",
+    severity: "warning",
+    title: "3 active dashboard members are deactive in HR",
+    detail: {
+      members: [
+        { name: "SANOJ M.", empCode: "25896696" },
+        { name: "Shafeeq Parengal", empCode: "65895896" },
+        { name: "Vishant Bandhral", empCode: "1007" },
+      ],
+      description:
+        "These 3 members appear as active (isLeft=false) in the State Head Dashboard but are marked deactive in the HR file. If they have left the company, their rows and any attributed figures should be reviewed for reassignment to active heads.",
+    },
+  },
+  {
+    headId: null,
+    flagType: "member_no_hr_record",
+    severity: "warning",
+    title: "5 active dashboard members have no HR record",
+    detail: {
+      members: [
+        "Anuj Sharma",
+        "Brinder Singh",
+        "Himanshu Sharma",
+        "Narendra Kumar Sharma",
+        "Ram Kumar Vashishtha",
+      ],
+      description:
+        "These 5 members appear as active in the State Head Dashboard but have no record anywhere in the HR file — not active, not deactive, simply absent. Source of truth unclear; may be pre-system hires or data entry gaps. Do not use these rows for cost or CTC analysis until confirmed.",
+    },
+  },
 ];
