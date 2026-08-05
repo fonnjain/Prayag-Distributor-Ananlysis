@@ -498,6 +498,8 @@ export async function assembleRows(
         leftDateSerial: null,
         activeLeft: "Left",
         channel: "",
+        empCode: null,
+        designation: null,
       };
       // Respect any active state scope filter. Departed TMs have no known
       // state, so they are excluded when a state filter is active.

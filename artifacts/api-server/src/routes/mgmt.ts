@@ -344,9 +344,11 @@ router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> =
         // connected, not partial.
         status: roster ? "connected" : "missing",
         detail: roster
-          ? roster.source === "hr_roster"
-            ? `${roster.members.length} team members from the HR roster workbook`
-            : `${roster.members.length} team members from the live STATE HEAD DASHBOARD identity columns — the working source of truth for the roster. (A separate Team Member Details (HR) file exists but is not shared; the dashboard identity columns are used by design, not as a stopgap.)`
+          ? roster.source === "hr_roster_csv"
+            ? `${roster.members.length} team members from User_List.csv (HR SFA system — 35 columns: emp code, designation, DOJ, CTC, active/deactive status)`
+            : roster.source === "hr_roster"
+              ? `${roster.members.length} team members from Team Member Details.xlsx (Drive — 7 columns, identity only; no emp code or status)`
+              : `${roster.members.length} team members from the live STATE HEAD DASHBOARD identity columns (fallback — emp code and status unavailable)`
           : "The roster could not be loaded. Connect the Google account to enable state and member filtering.",
       },
       {
@@ -767,7 +769,8 @@ async function buildMgmtDataPayload(
         workingDays: sfa?.workingDays ?? null,
         ctcMonthly: sec?.salary ?? sfa?.ctcMonthly ?? null,
         costRatioPct: sfa?.costRatioPct ?? null,
-        designation: sfa?.designation ?? null,
+        designation: sfa?.designation ?? r.m.designation ?? null,
+        empCode: r.m.empCode ?? null,
         // Primary attribution (from distributor-TM map + primary sheets)
         primaryOrderAmount: primStats?.orderAmount ?? null,
         primarySaleAmount: primStats?.saleAmount ?? null,

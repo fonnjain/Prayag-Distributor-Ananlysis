@@ -1,14 +1,19 @@
 // Roster spine for the management report: one row per team member, rolled up
 // to a State Head.
 //
-// Intended source: the "Team Member Details" HR workbook (config
-// mgmt_sources.hr_roster). That Drive file is not currently shared with the
-// connected account, so the loader falls back to the identity columns of the
-// live STATE HEAD DASHBOARD workbook (Data tab + SECONDARY tab fixed columns).
-// Only identity/roster fields are read from the fallback; scorecard metrics
-// are always computed from raw sources or left blank.
+// Source priority:
+//   1. hr_roster.csv  — User_List.csv from the HR SFA system (35 columns:
+//      emp code, designation, DOJ, CTC, active/deactive status, lat/lng …).
+//      Copied to config/hr_roster.csv at each HR data refresh.
+//   2. Team Member Details.xlsx  — older Drive workbook (7 columns, identity
+//      only). Used only when the CSV is absent.
+//   3. STATE HEAD DASHBOARD Data tab  — live Sheets fallback when both HR
+//      files are unavailable.
 import mgmtSourcesJson from "../../../config/mgmt_sources.json";
 import { logger } from "../logger.js";
+import { readFileSync, existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { readAllTabRows, listSheetTabs, getGoogleAccessToken } from "../registers/sheetsApi.js";
 import { normName, normSecKey } from "./names.js";
 
@@ -27,11 +32,18 @@ export type RosterMember = {
   leftDateSerial: number | null;
   activeLeft: string;
   channel: string;
+  /** Employee code from User_List.csv; null when roster comes from an older source. */
+  empCode: string | null;
+  /** Designation from User_List.csv; null when roster comes from an older source. */
+  designation: string | null;
 };
 
 export type Roster = {
   members: RosterMember[];
-  source: "hr_roster" | "state_head_dashboard";
+  /** hr_roster_csv = User_List.csv (HR SFA, 35 cols, authoritative)
+   *  hr_roster     = Team Member Details.xlsx (Drive, 7 cols, identity only)
+   *  state_head_dashboard = live STATE HEAD DASHBOARD Data tab (last resort) */
+  source: "hr_roster_csv" | "hr_roster" | "state_head_dashboard";
   loadedAt: number;
 };
 
@@ -148,11 +160,152 @@ async function tryHrRoster(): Promise<RosterMember[] | null> {
         leftDateSerial: null,
         activeLeft: "",
         channel: "",
+        empCode: null,       // 7-col Drive xlsx has no emp code
+        designation: null,   // 7-col Drive xlsx has no designation
       });
     });
     return members.length > 0 ? members : null;
   } catch (err) {
     logger.warn({ err }, "hr_roster workbook unavailable; using fallback");
+    return null;
+  }
+}
+
+// ── CSV enrichment (User_List.csv, HR SFA system) ─────────────────────────────
+//
+// User_List.csv (config/hr_roster.csv) is the HR SFA system export — 35 columns
+// including Employee Code, Designation, Date of Joining, CTC, Status (Active /
+// Deactive), lat/lng, Assigned Segment, etc.
+//
+// ARCHITECTURE: the CSV is NOT used as the member list because it contains the
+// full historical churn log (440+ rows across all FYs). The member list always
+// comes from the live STATE HEAD DASHBOARD Data tab (~182 current members).
+// The CSV is indexed by normSecKey and used to ENRICH each dashboard member
+// with emp code, designation, CTC, DOJ, and status.
+//
+// Source label: "hr_roster_csv"
+
+const MONTHS_CSV: Record<string, number> = {
+  january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
+  july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
+};
+
+/** Parse "DD-Month-YYYY" → Excel serial (days since 1899-12-31). */
+function parseCsvDate(s: string): number | null {
+  if (!s) return null;
+  const parts = s.trim().split("-");
+  if (parts.length !== 3) return null;
+  const day = parseInt(parts[0], 10);
+  const month = MONTHS_CSV[parts[1].toLowerCase()];
+  const year = parseInt(parts[2], 10);
+  if (isNaN(day) || month === undefined || isNaN(year)) return null;
+  const date = new Date(Date.UTC(year, month, day));
+  return Math.floor(date.getTime() / 86_400_000) + 25_569;
+}
+
+/** Minimal RFC-4180-correct CSV line parser (handles quoted fields + escaped quotes). */
+function parseCsvLine(line: string): string[] {
+  const fields: string[] = [];
+  let i = 0;
+  while (i <= line.length) {
+    if (line[i] === '"') {
+      let end = i + 1;
+      while (end < line.length) {
+        if (line[end] === '"' && line[end + 1] === '"') { end += 2; }
+        else if (line[end] === '"') { break; }
+        else { end++; }
+      }
+      fields.push(line.slice(i + 1, end).replace(/""/g, '"'));
+      i = end + 2; // skip closing quote + comma
+    } else {
+      const end = line.indexOf(",", i);
+      if (end === -1) { fields.push(line.slice(i)); break; }
+      fields.push(line.slice(i, end));
+      i = end + 1;
+    }
+  }
+  return fields;
+}
+
+type CsvHrEnrichment = {
+  empCode: string | null;
+  designation: string | null;
+  monthlyCtc: number | null;
+  dojSerial: number | null;
+  leftDateSerial: number | null;
+  /** "Active" | "LEFT" derived from Status column. */
+  activeLeft: string;
+};
+
+/**
+ * Reads User_List.csv and returns a normSecKey → enrichment map.
+ * Returns null when the file is absent or malformed.
+ * When the same name appears multiple times (e.g. re-hired), the most recent
+ * Active row wins; if all are Deactive the first is kept.
+ */
+function loadCsvHrEnrichment(): Map<string, CsvHrEnrichment> | null {
+  try {
+    // esbuild bundles everything to dist/index.mjs so import.meta.url points
+    // to dist/, one level above config/.  Try candidates in priority order.
+    const __dir = dirname(fileURLToPath(import.meta.url));
+    const candidates = [
+      join(__dir, "../config/hr_roster.csv"),
+      join(process.cwd(), "config/hr_roster.csv"),
+      join(process.cwd(), "artifacts/api-server/config/hr_roster.csv"),
+    ];
+    const csvPath = candidates.find((p) => existsSync(p)) ?? candidates[0];
+    const content = readFileSync(csvPath, "utf8");
+    const lines = content.split(/\r?\n/).filter((l) => l.trim());
+    if (lines.length < 2) return null;
+
+    const headers = parseCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
+    const col = (needle: string) =>
+      headers.findIndex((h) => h === needle.toLowerCase());
+
+    const cName  = col("name");
+    const cEmp   = col("employee code");
+    const cDesig = col("designation");
+    const cDoj   = col("date of joining");
+    const cDol   = col("date of leaving");
+    const cStatus = col("status");
+    const cCtc   = col("ctc");
+
+    if (cName < 0 || cStatus < 0) {
+      logger.warn("hr_roster.csv: missing required columns (name/status)");
+      return null;
+    }
+
+    const map = new Map<string, CsvHrEnrichment>();
+    for (let i = 1; i < lines.length; i++) {
+      const f = parseCsvLine(lines[i]);
+      const name = f[cName]?.trim() ?? "";
+      if (!name) continue;
+      const nsk = normSecKey(name);
+      const statusRaw = (f[cStatus] ?? "").trim().toLowerCase();
+      const activeLeft = statusRaw === "active" ? "Active" : "LEFT";
+      const ctcRaw = cCtc >= 0 ? parseFloat(f[cCtc] ?? "") : NaN;
+      const entry: CsvHrEnrichment = {
+        empCode:        cEmp   >= 0 ? (f[cEmp]?.trim()   || null) : null,
+        designation:    cDesig >= 0 ? (f[cDesig]?.trim() || null) : null,
+        monthlyCtc:     Number.isFinite(ctcRaw) ? ctcRaw : null,
+        dojSerial:      cDoj   >= 0 ? parseCsvDate(f[cDoj] ?? "") : null,
+        leftDateSerial: cDol   >= 0 ? parseCsvDate(f[cDol] ?? "") : null,
+        activeLeft,
+      };
+      // Prefer Active rows over Deactive when the same name appears multiple times.
+      const existing = map.get(nsk);
+      if (!existing || (existing.activeLeft !== "Active" && activeLeft === "Active")) {
+        map.set(nsk, entry);
+      }
+    }
+
+    logger.info(
+      { entries: map.size },
+      "hr_roster.csv enrichment loaded (User_List.csv — HR SFA system)",
+    );
+    return map.size > 0 ? map : null;
+  } catch (err) {
+    logger.warn({ err }, "hr_roster.csv unreadable; emp code / designation unavailable");
     return null;
   }
 }
@@ -222,6 +375,8 @@ async function loadFallbackRoster(): Promise<RosterMember[]> {
       leftDateSerial: num(r[51]),
       activeLeft: str(r[52]),
       channel: str(r[58]),
+      empCode: null,       // Data tab has no emp code column
+      designation: null,   // designation comes from hrSfa map, not roster
     });
   }
   return members;
@@ -242,17 +397,61 @@ export async function loadRoster(): Promise<Roster> {
 }
 
 async function loadRosterUncached(): Promise<Roster> {
-  const hr = await tryHrRoster();
-  if (hr) {
-    rosterCache = { members: hr, source: "hr_roster", loadedAt: Date.now() };
+  // Member list always comes from the STATE HEAD DASHBOARD Data tab (~182 current
+  // members). This is the source of truth for WHO appears in the dashboard; it
+  // is maintained by the business and already excludes members from earlier FYs
+  // who are no longer relevant.
+  //
+  // Source priority for identity / HR metadata ON those members:
+  //   hr_roster_csv  — User_List.csv (HR SFA system, 35 cols); applied as an
+  //                    enrichment map (normSecKey → emp code / designation / CTC).
+  //                    The CSV itself is NOT used as the member list because it
+  //                    contains the full historical churn log (440+ rows).
+  //   hr_roster      — Team Member Details.xlsx (Drive, 7 cols, identity only).
+  //   state_head_dashboard — no supplemental HR file; pure fallback.
+
+  // 1. Build the member list from the State Head Dashboard.
+  const members = await loadFallbackRoster();
+
+  // 2. Try to enrich each member with CSV HR data (emp code, designation, CTC).
+  const csvMap = loadCsvHrEnrichment();
+  if (csvMap) {
+    let matched = 0;
+    for (const m of members) {
+      const hr = csvMap.get(m.normKey);
+      if (!hr) continue;
+      matched++;
+      m.empCode      = hr.empCode;
+      m.designation  = hr.designation;
+      m.monthlyCtc   = hr.monthlyCtc ?? m.monthlyCtc;
+      // Use CSV DOJ when the dashboard DOJ is absent.
+      if (!m.dojSerial && hr.dojSerial) m.dojSerial = hr.dojSerial;
+      // CSV left-date and status are more precise than the dashboard column.
+      if (hr.leftDateSerial) m.leftDateSerial = hr.leftDateSerial;
+    }
+    logger.info(
+      { total: members.length, matched },
+      "roster: CSV HR enrichment applied (User_List.csv)",
+    );
+    rosterCache = { members, source: "hr_roster_csv", loadedAt: Date.now() };
     return rosterCache;
   }
-  const members = await loadFallbackRoster();
-  rosterCache = {
-    members,
-    source: "state_head_dashboard",
-    loadedAt: Date.now(),
-  };
+
+  // 3. Try to enrich from the Drive HR xlsx (7-col identity workbook).
+  const hrXlsx = await tryHrRoster();
+  if (hrXlsx) {
+    // The Drive xlsx has no emp code / designation but may have contact numbers.
+    const xlsxByKey = new Map(hrXlsx.map((m) => [m.normKey, m]));
+    for (const m of members) {
+      const x = xlsxByKey.get(m.normKey);
+      if (x?.contactNumber) m.contactNumber = x.contactNumber;
+    }
+    rosterCache = { members, source: "hr_roster", loadedAt: Date.now() };
+    return rosterCache;
+  }
+
+  // 4. No supplemental HR file — use the dashboard data as-is.
+  rosterCache = { members, source: "state_head_dashboard", loadedAt: Date.now() };
   return rosterCache;
 }
 

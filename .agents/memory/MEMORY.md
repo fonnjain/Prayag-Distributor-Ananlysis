@@ -61,6 +61,7 @@
 - [Phase A4 visit plan + deck architecture](phase-a4-deck-visitplan.md) — pool splice fix, unassigned exclusion, poolExhausted, 27-slide A4A format, memberSummary from MemberKpis.
 - [PS1 Ashutosh Kumar joinKey collision](ps1-ashutosh-kumar-collision.md) — RECONCILED; secByKeyMulti + secLookup fix applied; Rudrapur is genuine member; secondaryReadAt timestamp in API meta; TOTAL row #REF! formula errors block cross-check.
 - [normSecKey alignment](normSecKey-alignment.md) — 5 files aligned (roster/distributorTmMap/mgmt/hrSfaDashboard/orders) so all member-keyed maps use normSecKey; fixes Ashutosh Kumar dedup collision.
+- [HR Roster CSV architecture](hr-roster-csv.md) — CSV is enrichment only (not member list); member list = State Head Dashboard; path = dist/../config/hr_roster.csv; empCode+designation in RosterMember + API rows.
 - [Phase A8 metrics graph architecture](a8-graph-architecture.md) — graph routes + graph-traversal Analyst; field name corrections; acceptance anchors verified; A8-C not yet built.
 - [Presentation route streaming requirement](presentation-streaming.md) — A4A 27-slide deck needs max_tokens=32000; Anthropic SDK requires streaming for >10-min requests; use messages.stream() not messages.create().
 - [Warning System W1 architecture](warning-system-w1.md) — GET /api/warnings route; cold-start ~9s (Sheets loads), warm cache ~21ms; skipExtras=true skips winBack+skuSpread.
