@@ -1,9 +1,9 @@
 import { trunc2 } from "@/lib/trunc";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { useDashboard } from "@/data/dashboard-context";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { FileText, Database, FolderGit2, CheckCircle2, Clock, Target, UserX } from "lucide-react";
+import { FileText, Database, FolderGit2, CheckCircle2, Clock, Target, UserX, Upload, Users } from "lucide-react";
 import Organisation from "./Organisation";
 
 // ── Unmatched order-booking names ────────────────────────────────────────────
@@ -117,6 +117,130 @@ function UnmatchedNamesCard() {
   );
 }
 
+// ── Roster refresh card ───────────────────────────────────────────────────────
+// Lets an admin upload a fresh User_List.csv from the HR SFA system without
+// requiring a redeploy. The endpoint overwrites config/hr_roster.csv, clears
+// the roster cache, and invalidates all mgmt-data snapshots.
+
+type RosterRefreshResult = {
+  ok: boolean;
+  memberCount: number;
+  activeCount: number;
+  source: string;
+  csvPath: string;
+  refreshedAt: string;
+};
+
+function RosterRefreshCard() {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [status, setStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
+  const [result, setResult] = useState<RosterRefreshResult | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  async function handleFile(file: File) {
+    // Collect the admin secret before reading the file — abort early if the
+    // user cancels the prompt (matches the lockAnchorNow pattern in DataHealth).
+    const secret = window.prompt(
+      "Enter the admin secret (SESSION_SECRET) to authorise the roster update:",
+    );
+    if (!secret) return;
+
+    setStatus("uploading");
+    setResult(null);
+    setErrorMsg(null);
+    try {
+      const text = await file.text();
+      const res = await fetch("/api/admin/roster/refresh", {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/csv",
+          "X-Admin-Secret": secret,
+        },
+        body: text,
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setErrorMsg(json?.error ?? `Server error ${res.status}`);
+        setStatus("error");
+        return;
+      }
+      setResult(json as RosterRefreshResult);
+      setStatus("done");
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : String(e));
+      setStatus("error");
+    }
+  }
+
+  return (
+    <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+      <CardHeader className="px-6 pt-6 pb-3">
+        <CardTitle className="text-xl flex items-center gap-2">
+          <Users className="w-5 h-5 text-primary" />
+          Refresh HR Roster
+        </CardTitle>
+        <CardDescription>
+          Upload the latest <code className="text-xs font-mono">User_List.csv</code> from the HR SFA system to
+          bring the team list up to date without a server redeploy.
+          The file replaces <code className="text-xs font-mono">config/hr_roster.csv</code> and
+          invalidates all cached report data immediately.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="px-6 pb-6 space-y-3">
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".csv,text/csv"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleFile(file);
+            // reset so the same file can be re-uploaded if needed
+            e.target.value = "";
+          }}
+        />
+        <button
+          disabled={status === "uploading"}
+          onClick={() => fileRef.current?.click()}
+          className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium
+                     hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          <Upload className="w-4 h-4" />
+          {status === "uploading" ? "Uploading…" : "Upload User_List.csv"}
+        </button>
+
+        {status === "done" && result && (
+          <div className="rounded-lg border border-green-500/30 bg-green-50/50 dark:bg-green-950/20 px-4 py-3 text-sm space-y-1">
+            <p className="font-medium text-green-700 dark:text-green-400 flex items-center gap-1.5">
+              <CheckCircle2 className="w-4 h-4" /> Roster updated
+            </p>
+            <p className="text-muted-foreground">
+              {result.memberCount} members loaded ({result.activeCount} active) · Source: <span className="font-mono text-xs">{result.source}</span>
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Refreshed at {new Date(result.refreshedAt).toLocaleString()}
+            </p>
+          </div>
+        )}
+
+        {status === "error" && errorMsg && (
+          <div className="rounded-lg border border-red-500/30 bg-red-50/50 dark:bg-red-950/20 px-4 py-3 text-sm text-red-700 dark:text-red-400">
+            {errorMsg}
+          </div>
+        )}
+
+        <p className="text-xs text-muted-foreground">
+          Expected format: the 35-column <strong>User_List.csv</strong> exported from the SFA system
+          (columns: Name, Employee Code, Designation, Status, Date of Joining, Date of Leaving, CTC, …).
+          The roster is enrichment-only — the member list itself comes from the live STATE HEAD DASHBOARD,
+          so uploading this file updates HR metadata (emp code, designation, CTC, active status) but does
+          not add or remove members from the dashboard.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function DataSources() {
   const { manifest } = useDashboard();
   const generatedDate = new Date(manifest.generated);
@@ -128,6 +252,9 @@ export default function DataSources() {
 
       {/* Largest single data-quality item on this page */}
       <UnmatchedNamesCard />
+
+      {/* HR roster CSV refresh — lets admin update the team list without a redeploy */}
+      <RosterRefreshCard />
 
       {/* Target editors moved to the Targets page — Data Sources describes sources, it does not edit targets. */}
       <Card className="border-border/50 bg-card/50 backdrop-blur-sm">

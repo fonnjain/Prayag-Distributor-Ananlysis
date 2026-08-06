@@ -25,6 +25,7 @@ import {
 } from "./lib/mgmt/primarySheets.js";
 import { isFyOpen } from "./lib/customers/registerSync.js";
 import { restoreAnchorsFromStorage } from "./lib/config/verifyAnchors.js";
+import { restoreRosterCsvFromGcs } from "./lib/mgmt/roster.js";
 import { prewarmWarningsSnapshots } from "./routes/warnings.js";
 import { prewarmMgmtDataSnapshots } from "./routes/mgmt.js";
 
@@ -57,6 +58,13 @@ runMigrations()
       info: (msg) => logger.info(msg),
       warn: (msg) => logger.warn(msg),
     });
+    // Restore the uploaded hr_roster.csv from object storage if GCS has a copy,
+    // overwriting the packaged baseline so the most recently uploaded roster is
+    // always served regardless of redeployments.  Non-fatal — a GCS outage here
+    // falls back to the packaged CSV; the business can re-upload when GCS recovers.
+    await restoreRosterCsvFromGcs().catch((err) =>
+      logger.warn({ err }, "hr_roster.csv: startup GCS restore failed; using packaged baseline"),
+    );
   })
   .then(() => {
     app.listen(port, (err) => {

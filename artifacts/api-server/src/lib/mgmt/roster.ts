@@ -12,10 +12,12 @@
 import mgmtSourcesJson from "../../../config/mgmt_sources.json";
 import { logger } from "../logger.js";
 import { readFileSync, existsSync } from "node:fs";
+import { writeFile, rename, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { readAllTabRows, listSheetTabs, getGoogleAccessToken } from "../registers/sheetsApi.js";
 import { normName, normSecKey } from "./names.js";
+import { objectStorageClient } from "../objectStorage.js";
 
 export type RosterMember = {
   stateHead: string;
@@ -98,6 +100,91 @@ export function mgmtSources(): MgmtSources {
 
 const ROSTER_TTL_MS = 15 * 60_000;
 let rosterCache: Roster | null = null;
+
+// ── Object Storage (GCS) persistence for hr_roster.csv ───────────────────────
+// The local config/hr_roster.csv file is packaged with the server at build time
+// but uploaded copies overwrite it in the running container.  In production,
+// container replacement (redeploy or instance restart) reverts to the packaged
+// file.  We mirror every upload to GCS and restore from GCS at cold-start so
+// the most recently uploaded file always wins regardless of deploys.
+//
+// Errors in GCS operations are logged as warnings and never thrown — the local
+// file remains the fast path; GCS is the durable backup.
+
+function parseGcsPath(path: string): { bucketName: string; objectName: string } {
+  const p = path.startsWith("/") ? path : `/${path}`;
+  const parts = p.split("/");
+  return { bucketName: parts[1], objectName: parts.slice(2).join("/") };
+}
+
+function gcsRosterCsvPath(): string | null {
+  const dir = process.env.PRIVATE_OBJECT_DIR;
+  if (!dir) return null;
+  return `${dir.replace(/\/$/, "")}/config/hr_roster.csv`;
+}
+
+/**
+ * Tracks whether a GCS restore has been attempted this process lifetime.
+ * Set by restoreRosterCsvFromGcs() regardless of success or failure, so we
+ * only hit GCS once per process on the lazy-restore code path.
+ */
+let _rosterGcsRestoreAttempted = false;
+
+/**
+ * Persists the CSV text to GCS so it survives deployment restarts.
+ * Non-blocking — callers should not await this unless they need the error.
+ */
+export async function saveRosterCsvToGcs(csvText: string): Promise<void> {
+  const gcsPath = gcsRosterCsvPath();
+  if (!gcsPath) return;
+  try {
+    const { bucketName, objectName } = parseGcsPath(gcsPath);
+    const file = objectStorageClient.bucket(bucketName).file(objectName);
+    await file.save(Buffer.from(csvText, "utf8"), {
+      contentType: "text/csv",
+      resumable: false,
+    });
+    logger.info("hr_roster.csv: persisted to object storage");
+  } catch (err) {
+    logger.warn({ err }, "hr_roster.csv: could not save to object storage");
+  }
+}
+
+/**
+ * Restores hr_roster.csv from GCS to the local path if GCS has a copy,
+ * overwriting any existing packaged fallback so GCS is always authoritative.
+ * Sets _rosterGcsRestoreAttempted regardless of outcome so the lazy path
+ * in loadRosterUncached does not repeat the GCS round-trip.
+ * Returns the local path written, or null when GCS has no copy or fails.
+ */
+export async function restoreRosterCsvFromGcs(): Promise<string | null> {
+  _rosterGcsRestoreAttempted = true;
+  const gcsPath = gcsRosterCsvPath();
+  if (!gcsPath) return null;
+  try {
+    const { bucketName, objectName } = parseGcsPath(gcsPath);
+    const file = objectStorageClient.bucket(bucketName).file(objectName);
+    const [exists] = await file.exists();
+    if (!exists) return null;
+    const [content] = await file.download();
+    const csvText = content.toString("utf8");
+    // Use a durable writable path — the CWD-relative uploads-adjacent config dir
+    // survives across redeployments within the same container.  Write to the first
+    // candidate regardless of existence so GCS always wins over the packaged file.
+    const localPath = hrRosterCsvWritePath();
+    // Atomic write: temp file + rename so readers never see a partial file.
+    const tmpPath = `${localPath}.tmp`;
+    const dir = dirname(localPath);
+    await mkdir(dir, { recursive: true });
+    await writeFile(tmpPath, csvText, "utf8");
+    await rename(tmpPath, localPath);
+    logger.info({ localPath }, "hr_roster.csv: restored from object storage");
+    return localPath;
+  } catch (err) {
+    logger.warn({ err }, "hr_roster.csv: could not restore from object storage");
+    return null;
+  }
+}
 
 function str(v: unknown): string {
   if (v == null) return "";
@@ -283,6 +370,41 @@ type CsvHrEnrichment = {
 };
 
 /**
+ * Returns the canonical WRITE target for hr_roster.csv.
+ *
+ * Uses the same runtime-writable uploads directory as dashboardXlsx.ts and
+ * orders.ts so the path is guaranteed to exist in both dev and production
+ * regardless of the esbuild output layout.  Uploads and GCS restores write
+ * here; the directory is created on demand before each write.
+ */
+export function hrRosterCsvWritePath(): string {
+  const uploadDir = resolve(process.env.ORDER_UPLOAD_DIR ?? join(process.cwd(), "uploads"));
+  return join(uploadDir, "hr_roster.csv");
+}
+
+/**
+ * Resolves the path to hr_roster.csv for reading.
+ *
+ * Checks the canonical write path first (picks up runtime uploads / GCS
+ * restores), then falls back to the packaged baseline candidates so the
+ * first cold boot before any upload still has data.
+ *
+ * esbuild bundles everything to dist/index.mjs so import.meta.url points
+ * to dist/, one level above config/.
+ */
+export function hrRosterCsvPath(): string {
+  const writePath = hrRosterCsvWritePath();
+  if (existsSync(writePath)) return writePath;
+  const __dir = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    join(__dir, "../config/hr_roster.csv"),
+    join(process.cwd(), "config/hr_roster.csv"),
+    join(process.cwd(), "artifacts/api-server/config/hr_roster.csv"),
+  ];
+  return candidates.find((p) => existsSync(p)) ?? candidates[0];
+}
+
+/**
  * Reads User_List.csv and returns a normSecKey → enrichment map.
  * Returns null when the file is absent or malformed.
  * When the same name appears multiple times (e.g. re-hired), the most recent
@@ -302,15 +424,7 @@ type CsvHrResult = {
  */
 function loadCsvHrEnrichment(): CsvHrResult | null {
   try {
-    // esbuild bundles everything to dist/index.mjs so import.meta.url points
-    // to dist/, one level above config/.  Try candidates in priority order.
-    const __dir = dirname(fileURLToPath(import.meta.url));
-    const candidates = [
-      join(__dir, "../config/hr_roster.csv"),
-      join(process.cwd(), "config/hr_roster.csv"),
-      join(process.cwd(), "artifacts/api-server/config/hr_roster.csv"),
-    ];
-    const csvPath = candidates.find((p) => existsSync(p)) ?? candidates[0];
+    const csvPath = hrRosterCsvPath();
     const content = readFileSync(csvPath, "utf8");
     const lines = content.split(/\r?\n/).filter((l) => l.trim());
     if (lines.length < 2) return null;
@@ -473,6 +587,17 @@ async function loadRosterUncached(): Promise<Roster> {
   const members = await loadFallbackRoster();
 
   // 2. Try to enrich each member with CSV HR data (emp code, designation, CTC).
+  // Always try to restore from GCS if it hasn't been attempted yet this process
+  // lifetime. This ensures a GCS-uploaded roster supersedes the packaged fallback
+  // even when the packaged file exists on disk (e.g. after a redeploy).
+  // The startup path in index.ts also calls restoreRosterCsvFromGcs() so this
+  // is normally a no-op (the flag is already set); it acts as a belt-and-suspenders
+  // catch for the rare case where the startup restore ran before GCS was reachable.
+  if (!_rosterGcsRestoreAttempted) {
+    await restoreRosterCsvFromGcs().catch((err) =>
+      logger.warn({ err }, "GCS roster restore failed; continuing without CSV"),
+    );
+  }
   const csvResult = loadCsvHrEnrichment();
   if (csvResult) {
     const { enrichment: csvMap, rawNames: csvRawNames } = csvResult;

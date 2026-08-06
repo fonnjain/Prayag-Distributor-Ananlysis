@@ -1,6 +1,10 @@
 // Management Reports: filter options + Excel generation.
 import { Router, type IRouter, type Request, type Response } from "express";
-import { loadRoster, mgmtSources } from "../lib/mgmt/roster.js";
+import express from "express";
+import { writeFile, rename as renameFile, mkdir as mkdirAsync } from "node:fs/promises";
+import { dirname } from "node:path";
+import { loadRoster, invalidateRosterCache, hrRosterCsvWritePath, saveRosterCsvToGcs, mgmtSources } from "../lib/mgmt/roster.js";
+import { isAdminToken } from "../lib/adminAuth.js";
 import { respondIfQuotaError } from "../lib/quotaResponse.js";
 import { resolveOrderFileId, getOrderLoadStatus, loadOrderFile } from "../lib/mgmt/orders.js";
 import {
@@ -378,10 +382,7 @@ router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> =
       states: sts,
     }));
     const seasonalCalibration = getSeasonalCalibration();
-    // Surface unmatched dashboard members (those with no CSV row in User_List.csv)
-    // so operators can spot name-spelling gaps or genuinely absent SFA entries.
-    const unmatchedFromCsv = roster?.unmatchedFromCsv ?? [];
-    res.json({ fys, defaultFy: DEFAULT_FY, regions, states, sources, seasonalCalibration, unmatchedFromCsv });
+    res.json({ fys, defaultFy: DEFAULT_FY, regions, states, sources, seasonalCalibration });
   } catch (err) {
     if (respondIfQuotaError(err, res)) return;
     req.log.error({ err }, "mgmt options failed");
@@ -1443,5 +1444,130 @@ router.get("/mgmt/bridge/status", async (req: Request, res: Response): Promise<v
   }
 });
 
+// ── POST /admin/roster/refresh ────────────────────────────────────────────────
+// Accepts a fresh User_List.csv export from the HR SFA system, overwrites
+// config/hr_roster.csv, clears the in-process roster cache and all mgmt-data
+// snapshots, and returns the updated active-member count.
+//
+// Auth: X-Admin-Secret: <SESSION_SECRET> header required (same pattern as
+//       POST /registers/:fy/lock-month-anchor).  The SESSION_SECRET env var
+//       is the admin credential; a DB API key is not sufficient authority for
+//       durable config mutations.
+//
+// Usage:
+//   curl -X POST /api/admin/roster/refresh \
+//        -H "Content-Type: text/csv" \
+//        -H "X-Admin-Secret: $SESSION_SECRET" \
+//        --data-binary @User_List.csv
+//
+// The body must be UTF-8 CSV with the 35-column User_List.csv schema.  Exact
+// required header columns ("Name", "Status") are validated before the file is
+// written; at least one parseable data row is required.
+router.post(
+  "/admin/roster/refresh",
+  express.raw({ type: "*/*", limit: "20mb" }),
+  async (req: Request, res: Response): Promise<void> => {
+    // ── 1. Admin auth ──────────────────────────────────────────────────────
+    const adminSecret = String(req.headers["x-admin-secret"] ?? "").trim();
+    if (!isAdminToken(adminSecret)) {
+      res.status(401).json({
+        error: "Admin authorisation required. Pass the SESSION_SECRET as: X-Admin-Secret: <SESSION_SECRET>",
+      });
+      return;
+    }
+
+    try {
+      // ── 2. Body present ────────────────────────────────────────────────
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+        res.status(400).json({
+          error: "Send the User_List.csv file as the raw request body (Content-Type: text/csv or application/octet-stream).",
+        });
+        return;
+      }
+
+      const csvText = req.body.toString("utf8");
+      const lines = csvText.split(/\r?\n/).filter((l) => l.trim());
+      if (lines.length < 2) {
+        res.status(422).json({
+          error: "The uploaded file has fewer than two lines — it does not look like a valid User_List.csv.",
+        });
+        return;
+      }
+
+      // ── 3. Exact header validation ─────────────────────────────────────
+      // Split only the first line into column headers using a simple comma
+      // split (sufficient for the header row which never has quoted commas).
+      const headers = lines[0].split(",").map((h) => h.trim().toLowerCase().replace(/^"|"$/g, ""));
+      const missing: string[] = [];
+      for (const required of ["name", "status"]) {
+        if (!headers.includes(required)) missing.push(required);
+      }
+      if (missing.length > 0) {
+        res.status(422).json({
+          error: `The uploaded CSV is missing required column(s): ${missing.map((c) => `"${c}"`).join(", ")}. ` +
+            "This does not look like a User_List.csv from the HR SFA system.",
+          detectedHeaders: headers.slice(0, 10),
+        });
+        return;
+      }
+
+      // ── 4. At least one parseable data row ────────────────────────────
+      // The second line must have the same number of commas as the header
+      // (a rough structural check before we overwrite the live file).
+      const headerColCount = headers.length;
+      const secondLineColCount = lines[1].split(",").length;
+      if (secondLineColCount < Math.max(5, Math.floor(headerColCount * 0.5))) {
+        res.status(422).json({
+          error: "The first data row has far fewer columns than the header — the file may be truncated or misformatted.",
+          headerColumns: headerColCount,
+          dataRowColumns: secondLineColCount,
+        });
+        return;
+      }
+
+      // ── 5. Atomic write + GCS persist + invalidate ────────────────────
+      // Always write to the canonical runtime-writable path (uploads/) so uploads
+      // land in the same location that GCS restores write to — NOT the dist/config
+      // path which does not exist in the production build output.
+      const csvPath = hrRosterCsvWritePath();
+      const tmpPath = `${csvPath}.tmp`;
+      // Ensure the parent directory exists (uploads/ is created on demand).
+      await mkdirAsync(dirname(csvPath), { recursive: true });
+      await writeFile(tmpPath, csvText, "utf8");
+      await renameFile(tmpPath, csvPath);
+      req.log.info(
+        { csvPath, bytes: req.body.length, rows: lines.length - 1 },
+        "admin/roster/refresh: hr_roster.csv overwritten",
+      );
+
+      // Persist to object storage so the file survives deployment restarts.
+      // Non-blocking — failure is logged but does NOT fail the request.
+      void saveRosterCsvToGcs(csvText).catch((err) =>
+        req.log.warn({ err }, "admin/roster/refresh: GCS persist failed (non-fatal)"),
+      );
+
+      // Clear caches so the next request re-reads the new file.
+      invalidateRosterCache();
+      invalidateMgmtDataCache();
+
+      // ── 6. Return new counts ───────────────────────────────────────────
+      const roster = await loadRoster();
+      const activeCount = roster.members.filter((m) => !m.activeLeft || m.activeLeft === "Active").length;
+
+      res.json({
+        ok: true,
+        memberCount: roster.members.length,
+        activeCount,
+        csvRows: lines.length - 1,
+        source: roster.source,
+        csvPath,
+        refreshedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      req.log.error({ err }, "admin/roster/refresh failed");
+      res.status(500).json({ error: "Could not refresh the roster CSV." });
+    }
+  },
+);
 
 export default router;
