@@ -38,6 +38,24 @@ export type RosterMember = {
   designation: string | null;
 };
 
+/** A dashboard member that had no matching row in User_List.csv. */
+export type UnmatchedCsvMember = {
+  /** Display name from the STATE HEAD DASHBOARD. */
+  name: string;
+  /** normSecKey used for the CSV lookup that found no match. */
+  normKey: string;
+  /** State head this member reports to. */
+  stateHead: string;
+  /** State from the dashboard. */
+  state: string;
+  /** Best-match name from the CSV by edit distance (on normSecKey). */
+  closestCsvName: string | null;
+  /** normSecKey of the closest CSV candidate. */
+  closestCsvKey: string | null;
+  /** Edit distance between normKey and closestCsvKey (null when CSV is empty). */
+  editDistance: number | null;
+};
+
 export type Roster = {
   members: RosterMember[];
   /** hr_roster_csv = User_List.csv (HR SFA, 35 cols, authoritative)
@@ -45,6 +63,12 @@ export type Roster = {
    *  state_head_dashboard = live STATE HEAD DASHBOARD Data tab (last resort) */
   source: "hr_roster_csv" | "hr_roster" | "state_head_dashboard";
   loadedAt: number;
+  /**
+   * Dashboard members that had no matching row in User_List.csv, each with
+   * the closest CSV candidate by edit distance. Only populated when source is
+   * "hr_roster_csv" (i.e. the CSV was actually loaded and applied).
+   */
+  unmatchedFromCsv: UnmatchedCsvMember[];
 };
 
 type MgmtSources = {
@@ -171,6 +195,27 @@ async function tryHrRoster(): Promise<RosterMember[] | null> {
   }
 }
 
+// ── Edit-distance helper for closest-CSV-candidate matching ───────────────────
+
+/** Levenshtein distance between two strings (operates on their characters). */
+function editDistance(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  // Use two rolling rows to keep memory O(min(m,n)).
+  if (m === 0) return n;
+  if (n === 0) return m;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  const curr = new Array<number>(n + 1);
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    [prev] = [[...curr]];
+  }
+  return prev[n];
+}
+
 // ── CSV enrichment (User_List.csv, HR SFA system) ─────────────────────────────
 //
 // User_List.csv (config/hr_roster.csv) is the HR SFA system export — 35 columns
@@ -243,7 +288,19 @@ type CsvHrEnrichment = {
  * When the same name appears multiple times (e.g. re-hired), the most recent
  * Active row wins; if all are Deactive the first is kept.
  */
-function loadCsvHrEnrichment(): Map<string, CsvHrEnrichment> | null {
+type CsvHrResult = {
+  enrichment: Map<string, CsvHrEnrichment>;
+  /** normSecKey → raw display name from CSV (used for closest-candidate labels). */
+  rawNames: Map<string, string>;
+};
+
+/**
+ * Reads User_List.csv and returns an enrichment map + a raw-name map.
+ * Returns null when the file is absent or malformed.
+ * When the same name appears multiple times (e.g. re-hired), the most recent
+ * Active row wins; if all are Deactive the first is kept.
+ */
+function loadCsvHrEnrichment(): CsvHrResult | null {
   try {
     // esbuild bundles everything to dist/index.mjs so import.meta.url points
     // to dist/, one level above config/.  Try candidates in priority order.
@@ -276,6 +333,7 @@ function loadCsvHrEnrichment(): Map<string, CsvHrEnrichment> | null {
     }
 
     const map = new Map<string, CsvHrEnrichment>();
+    const rawNames = new Map<string, string>();
     for (let i = 1; i < lines.length; i++) {
       const f = parseCsvLine(lines[i]);
       const name = f[cName]?.trim() ?? "";
@@ -296,6 +354,7 @@ function loadCsvHrEnrichment(): Map<string, CsvHrEnrichment> | null {
       const existing = map.get(nsk);
       if (!existing || (existing.activeLeft !== "Active" && activeLeft === "Active")) {
         map.set(nsk, entry);
+        rawNames.set(nsk, name);
       }
     }
 
@@ -303,7 +362,7 @@ function loadCsvHrEnrichment(): Map<string, CsvHrEnrichment> | null {
       { entries: map.size },
       "hr_roster.csv enrichment loaded (User_List.csv — HR SFA system)",
     );
-    return map.size > 0 ? map : null;
+    return map.size > 0 ? { enrichment: map, rawNames } : null;
   } catch (err) {
     logger.warn({ err }, "hr_roster.csv unreadable; emp code / designation unavailable");
     return null;
@@ -414,12 +473,36 @@ async function loadRosterUncached(): Promise<Roster> {
   const members = await loadFallbackRoster();
 
   // 2. Try to enrich each member with CSV HR data (emp code, designation, CTC).
-  const csvMap = loadCsvHrEnrichment();
-  if (csvMap) {
+  const csvResult = loadCsvHrEnrichment();
+  if (csvResult) {
+    const { enrichment: csvMap, rawNames: csvRawNames } = csvResult;
     let matched = 0;
+    const unmatchedFromCsv: UnmatchedCsvMember[] = [];
+    const csvKeys = [...csvMap.keys()]; // normSecKey strings for edit-distance scan
     for (const m of members) {
       const hr = csvMap.get(m.normKey);
-      if (!hr) continue;
+      if (!hr) {
+        // Find closest CSV candidate by edit distance on normSecKey.
+        let bestKey: string | null = null;
+        let bestDist: number | null = null;
+        for (const csvKey of csvKeys) {
+          const d = editDistance(m.normKey, csvKey);
+          if (bestDist === null || d < bestDist) {
+            bestDist = d;
+            bestKey = csvKey;
+          }
+        }
+        unmatchedFromCsv.push({
+          name: m.name,
+          normKey: m.normKey,
+          stateHead: m.stateHead,
+          state: m.state,
+          closestCsvName: bestKey ? (csvRawNames.get(bestKey) ?? null) : null,
+          closestCsvKey: bestKey,
+          editDistance: bestDist,
+        });
+        continue;
+      }
       matched++;
       m.empCode      = hr.empCode;
       m.designation  = hr.designation;
@@ -430,10 +513,11 @@ async function loadRosterUncached(): Promise<Roster> {
       if (hr.leftDateSerial) m.leftDateSerial = hr.leftDateSerial;
     }
     logger.info(
-      { total: members.length, matched },
+      { total: members.length, matched, unmatched: unmatchedFromCsv.length,
+        unmatchedNames: unmatchedFromCsv.map((u) => u.name) },
       "roster: CSV HR enrichment applied (User_List.csv)",
     );
-    rosterCache = { members, source: "hr_roster_csv", loadedAt: Date.now() };
+    rosterCache = { members, source: "hr_roster_csv", loadedAt: Date.now(), unmatchedFromCsv };
     return rosterCache;
   }
 
@@ -446,12 +530,12 @@ async function loadRosterUncached(): Promise<Roster> {
       const x = xlsxByKey.get(m.normKey);
       if (x?.contactNumber) m.contactNumber = x.contactNumber;
     }
-    rosterCache = { members, source: "hr_roster", loadedAt: Date.now() };
+    rosterCache = { members, source: "hr_roster", loadedAt: Date.now(), unmatchedFromCsv: [] };
     return rosterCache;
   }
 
   // 4. No supplemental HR file — use the dashboard data as-is.
-  rosterCache = { members, source: "state_head_dashboard", loadedAt: Date.now() };
+  rosterCache = { members, source: "state_head_dashboard", loadedAt: Date.now(), unmatchedFromCsv: [] };
   return rosterCache;
 }
 

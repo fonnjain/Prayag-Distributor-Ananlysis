@@ -378,7 +378,10 @@ router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> =
       states: sts,
     }));
     const seasonalCalibration = getSeasonalCalibration();
-    res.json({ fys, defaultFy: DEFAULT_FY, regions, states, sources, seasonalCalibration });
+    // Surface unmatched dashboard members (those with no CSV row in User_List.csv)
+    // so operators can spot name-spelling gaps or genuinely absent SFA entries.
+    const unmatchedFromCsv = roster?.unmatchedFromCsv ?? [];
+    res.json({ fys, defaultFy: DEFAULT_FY, regions, states, sources, seasonalCalibration, unmatchedFromCsv });
   } catch (err) {
     if (respondIfQuotaError(err, res)) return;
     req.log.error({ err }, "mgmt options failed");
