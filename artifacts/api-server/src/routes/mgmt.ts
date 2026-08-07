@@ -1371,7 +1371,8 @@ router.get("/mgmt/distributor-directory", async (req: Request, res: Response): P
 router.get("/mgmt/member-sheet-coverage", async (req: Request, res: Response): Promise<void> => {
   try {
     const { coverageByHead } = await import("../lib/mgmt/memberResolver.js");
-    const heads = await coverageByHead();
+    const includeLeft = req.query.includeLeft === "1" || req.query.includeLeft === "true";
+    const heads = await coverageByHead(includeLeft);
     const totals = heads.reduce(
       (a, h) => ({ members: a.members + h.members, withSheet: a.withSheet + h.withSheet }),
       { members: 0, withSheet: 0 },

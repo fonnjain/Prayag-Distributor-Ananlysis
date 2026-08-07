@@ -83,14 +83,17 @@ export type HeadCoverage = {
   members: number;
   withSheet: number;
   withoutSheet: string[];
+  /** Only populated when includeLeft=true: unmapped names with LEFT status. */
+  withoutSheetDetail?: { name: string; state: string; isLeft: boolean }[];
 };
 
-/** Per-head members-with-a-mapped-working-sheet counts (acceptance metric). */
-export async function coverageByHead(): Promise<HeadCoverage[]> {
+/** Per-head members-with-a-mapped-working-sheet counts (acceptance metric).
+ *  By default LEFT members are excluded; pass includeLeft to count everyone. */
+export async function coverageByHead(includeLeft = false): Promise<HeadCoverage[]> {
   const team = await resolveTeam();
   const byHead = new Map<string, HeadCoverage>();
   for (const m of team) {
-    if (m.isLeft) continue;
+    if (m.isLeft && !includeLeft) continue;
     let c = byHead.get(m.stateHead);
     if (!c) {
       c = { stateHead: m.stateHead, members: 0, withSheet: 0, withoutSheet: [] };
@@ -98,7 +101,12 @@ export async function coverageByHead(): Promise<HeadCoverage[]> {
     }
     c.members++;
     if (m.fileId) c.withSheet++;
-    else c.withoutSheet.push(m.name);
+    else {
+      c.withoutSheet.push(m.name);
+      if (includeLeft) {
+        (c.withoutSheetDetail ??= []).push({ name: m.name, state: m.state, isLeft: m.isLeft });
+      }
+    }
   }
   return [...byHead.values()].sort((a, b) => a.stateHead.localeCompare(b.stateHead));
 }

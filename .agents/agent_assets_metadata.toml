@@ -151,3 +151,10 @@ uri = "file://exports/AI_Reports_Documentation.docx"
 type = "word_document"
 title = "AI Reports Documentation (Word)"
 description = "How AI Reports works, the document types it can generate, and its guarantees and limits."
+
+[[outputs]]
+id = "vtKa5BJLGP8roQ_xUHDFD"
+uri = "file://.agents/outputs/prayag-source-code.zip"
+type = "unspecified"
+title = "Prayag source code (complete)"
+description = "Database schema, API server architecture (lib + routes + config + scripts), and all frontend pages/components for the Prayag Sales Intelligence app — 432 files."
