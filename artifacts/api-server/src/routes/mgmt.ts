@@ -1367,11 +1367,22 @@ router.get("/mgmt/distributor-tab", async (req: Request, res: Response): Promise
     const fy = String(req.query.fy ?? "2026-27");
     const dist = String(req.query.dist ?? "");
     const tab = String(req.query.tab ?? "");
+    // Optional global-period restriction: "Apr-26,May-26". Whole FY when absent.
+    // Fail closed: an invalid token 400s rather than silently widening to the full FY.
+    let months: string[] | null = null;
+    if (typeof req.query.months === "string" && req.query.months.trim() !== "") {
+      const tokens = req.query.months.split(",").map((m) => m.trim());
+      if (tokens.some((m) => !/^[A-Z][a-z]{2}-\d{2}$/.test(m))) {
+        res.status(400).json({ error: "months must be comma-separated labels like Apr-26" });
+        return;
+      }
+      months = tokens;
+    }
     if (!dist) { res.status(400).json({ error: "dist (distributor normKey) is required" }); return; }
     const tabs = await import("../lib/mgmt/distributorTabs.js");
-    if (tab === "secondary") res.json(await tabs.buildSecondaryTab(fy, dist));
-    else if (tab === "sku") res.json(await tabs.buildSkuEvolution(fy, dist));
-    else if (tab === "push") res.json(await tabs.buildPushTab(fy, dist));
+    if (tab === "secondary") res.json(await tabs.buildSecondaryTab(fy, dist, months));
+    else if (tab === "sku") res.json(await tabs.buildSkuEvolution(fy, dist, months));
+    else if (tab === "push") res.json(await tabs.buildPushTab(fy, dist, months));
     else res.status(400).json({ error: "tab must be secondary | sku | push" });
   } catch (err) {
     req.log.error({ err }, "mgmt/distributor-tab: handler threw");

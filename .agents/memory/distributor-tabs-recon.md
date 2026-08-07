@@ -19,3 +19,10 @@ description: Architecture and identity rules for the Secondary Sales / SKU Evolu
 - Flow-gap language must always state both readings (stock building OR business outside the attributed channel); verdict CLEAR_STOCK_FIRST when primary-in ≥ ₹5L and flow-through <50%.
 - SKU existing/new/lost classifier (`classifySkuPopulations`) is the single shared definition, applied to both registers with like-months prior-FY baseline; growth shares are signed and can exceed 100%.
 - Frontend: tabs live in DistributorTabsPanel.tsx; DistributorDeepDive.tsx wraps overview content in a `display:contents`/`hidden` div keyed on the tab.
+
+## Period (months) filtering — Aug 2026
+- The three tab builders take optional `months: string[]` (global period filter); `monthCond()` appends `AND month_label IN (...)` to register SQL. Recon/name mapping stays FY-wide (identity only).
+- Route fails closed: any invalid `months` token → HTTP 400 (never silently widen to full FY).
+- Dormant-retailer check is like-for-like: selected months vs the same fiscal months of the prior FY (`toPriorYearMonths`).
+- Member-sheet-derived figures (Overview OB/Sale, unassigned counts, districts) carry no month detail — they always show full FY; UI banners + coverage note say so explicitly.
+- Page capability flipped FY_ONLY → FULL; frontend passes `usePeriodMonths().param` into the tab URLs (useApi keyed by URL, so refetch is automatic).

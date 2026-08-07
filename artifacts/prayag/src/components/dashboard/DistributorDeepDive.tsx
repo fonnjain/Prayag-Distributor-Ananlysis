@@ -18,6 +18,7 @@ import { trunc2 } from "@/lib/trunc";
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { QuotaWaitBanner, quotaDelayMs, quotaOrThrow } from "./quotaWait";
 import { useGlobalFilter } from "@/data/global-filter-context";
+import { usePeriodMonths } from "@/data/period-months";
 import { REGION_GROUPS } from "../ui/StateFilter";
 import { achBandText } from "@/lib/achievementBands";
 import {
@@ -2044,7 +2045,8 @@ function PerMemberAnalysisSection({ perMember }: { perMember: MemberDistributorR
 type GeoMode = "all" | "region" | "state";
 
 export default function DistributorDeepDive() {
-  const { fy }                    = useGlobalFilter();
+  const { fy, effectivePeriodLabel: periodLabel } = useGlobalFilter();
+  const period = usePeriodMonths();
   const [stateHead, setStateHead] = useState("");
   // ── Filter chain: Geography → Distributor → State Head ──────────────
   const [dir, setDir]             = useState<DistributorDirectory | null>(null);
@@ -2448,10 +2450,23 @@ export default function DistributorDeepDive() {
           fy={fy}
           dist={distFilter}
           distName={distFilter ? (dir?.distributors.find((d) => d.normKey === distFilter)?.name ?? distFilter) : null}
+          monthsParam={period.param}
+          periodLabel={period.active ? periodLabel : null}
         />
       )}
 
       <div className={ddTab === "overview" ? "contents" : "hidden"}>
+      {period.active && (
+        <div
+          className="rounded-md border border-border bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground"
+          data-testid="banner-dd-period-overview"
+        >
+          The period filter (<strong>{periodLabel}</strong>) applies to the register-backed tabs
+          (Secondary Sales, Existing vs New SKU, Where &amp; How to Push). The Overview figures below
+          come from the members' working sheets, which carry one OB/Sale column per financial year —
+          they always show the full FY {fy}.
+        </div>
+      )}
       {dirError && (
         <div className="border border-destructive/40 bg-destructive/5 rounded-lg p-4 text-sm text-destructive">
           {dirError}

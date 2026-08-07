@@ -267,9 +267,9 @@ function BothReadings() {
   );
 }
 
-export function SecondaryTabView({ fy, dist, recon }: { fy: string; dist: string; recon: DistributorRecon | null }) {
+export function SecondaryTabView({ fy, dist, recon, monthsParam = "" }: { fy: string; dist: string; recon: DistributorRecon | null; monthsParam?: string }) {
   const { data, error, loading } = useApi<SecondaryTab>(
-    `${API}/mgmt/distributor-tab?fy=${encodeURIComponent(fy)}&dist=${encodeURIComponent(dist)}&tab=secondary`);
+    `${API}/mgmt/distributor-tab?fy=${encodeURIComponent(fy)}&dist=${encodeURIComponent(dist)}&tab=secondary${monthsParam}`);
   if (loading) return <Spinner label="Reading the secondary register…" />;
   if (error) return <div className="text-sm text-destructive">{error}</div>;
   if (!data) return null;
@@ -440,9 +440,9 @@ function SkuSideView({ side, label }: { side: SkuSide; label: string }) {
   );
 }
 
-export function SkuTabView({ fy, dist, recon }: { fy: string; dist: string; recon: DistributorRecon | null }) {
+export function SkuTabView({ fy, dist, recon, monthsParam = "" }: { fy: string; dist: string; recon: DistributorRecon | null; monthsParam?: string }) {
   const { data, error, loading } = useApi<SkuTab>(
-    `${API}/mgmt/distributor-tab?fy=${encodeURIComponent(fy)}&dist=${encodeURIComponent(dist)}&tab=sku`);
+    `${API}/mgmt/distributor-tab?fy=${encodeURIComponent(fy)}&dist=${encodeURIComponent(dist)}&tab=sku${monthsParam}`);
   if (loading) return <Spinner label="Comparing SKU populations against the like-months baseline…" />;
   if (error) return <div className="text-sm text-destructive">{error}</div>;
   if (!data) return null;
@@ -464,9 +464,9 @@ export function SkuTabView({ fy, dist, recon }: { fy: string; dist: string; reco
 
 // ── Tab 3: Where and how to push ─────────────────────────────────────────────
 
-export function PushTabView({ fy, dist, recon }: { fy: string; dist: string; recon: DistributorRecon | null }) {
+export function PushTabView({ fy, dist, recon, monthsParam = "" }: { fy: string; dist: string; recon: DistributorRecon | null; monthsParam?: string }) {
   const { data, error, loading } = useApi<PushTab>(
-    `${API}/mgmt/distributor-tab?fy=${encodeURIComponent(fy)}&dist=${encodeURIComponent(dist)}&tab=push`);
+    `${API}/mgmt/distributor-tab?fy=${encodeURIComponent(fy)}&dist=${encodeURIComponent(dist)}&tab=push${monthsParam}`);
   if (loading) return <Spinner label="Checking the flow gap and building the push list…" />;
   if (error) return <div className="text-sm text-destructive">{error}</div>;
   if (!data) return null;
@@ -629,9 +629,14 @@ export function PushTabView({ fy, dist, recon }: { fy: string; dist: string; rec
 
 export type DdTab = "overview" | "secondary" | "sku" | "push";
 
-export function DistributorTabsPanel({ tab, fy, dist, distName }: {
+export function DistributorTabsPanel({ tab, fy, dist, distName, monthsParam, periodLabel }: {
   tab: Exclude<DdTab, "overview">; fy: string; dist: string; distName: string | null;
+  /** Query fragment from usePeriodMonths().param ("&months=..." or ""). */
+  monthsParam?: string;
+  /** Human label of the selected period, shown when a sub-year period is active. */
+  periodLabel?: string | null;
 }) {
+  const mp = monthsParam ?? "";
   const { data: recon } = useApi<DistributorRecon>(
     `${API}/mgmt/distributor-recon?fy=${encodeURIComponent(fy)}`);
   if (!dist) {
@@ -648,9 +653,14 @@ export function DistributorTabsPanel({ tab, fy, dist, distName }: {
   return (
     <div className="space-y-3">
       {distName && <h3 className="text-base font-semibold">{distName}</h3>}
-      {tab === "secondary" && <SecondaryTabView fy={fy} dist={dist} recon={recon} />}
-      {tab === "sku" && <SkuTabView fy={fy} dist={dist} recon={recon} />}
-      {tab === "push" && <PushTabView fy={fy} dist={dist} recon={recon} />}
+      {mp && periodLabel && (
+        <div className="text-xs text-muted-foreground border border-border rounded px-3 py-1.5" data-testid="dd-period-note">
+          Register figures below are filtered to <strong>{periodLabel}</strong>. Name reconciliation stays FY-wide.
+        </div>
+      )}
+      {tab === "secondary" && <SecondaryTabView fy={fy} dist={dist} recon={recon} monthsParam={mp} />}
+      {tab === "sku" && <SkuTabView fy={fy} dist={dist} recon={recon} monthsParam={mp} />}
+      {tab === "push" && <PushTabView fy={fy} dist={dist} recon={recon} monthsParam={mp} />}
     </div>
   );
 }

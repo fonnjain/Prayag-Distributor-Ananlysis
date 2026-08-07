@@ -362,7 +362,18 @@ export type SecondaryTabResult = {
   unattributedNote: string;       // the prominent unmatched-value statement
 };
 
-export async function buildSecondaryTab(fy: string, distKey: string): Promise<SecondaryTabResult> {
+/** Optional month-label restriction ("" = whole FY). Appends AND month_label IN (...). */
+function monthCond(months: string[] | null | undefined) {
+  return months && months.length > 0
+    ? sql` AND month_label IN (${sql.join(months.map((m) => sql`${m}`), sql`, `)})`
+    : sql``;
+}
+
+export async function buildSecondaryTab(
+  fy: string,
+  distKey: string,
+  months: string[] | null = null,
+): Promise<SecondaryTabResult> {
   const recon = await buildDistributorRecon(fy);
   const dir = await loadDistributorDirectory(fy);
   const d = dir.distributors.find((x) => x.normKey === distKey);
@@ -382,7 +393,7 @@ export async function buildSecondaryTab(fy: string, distKey: string): Promise<Se
            SUM(net_amount::numeric)::text AS net,
            SUM(gross_amount::numeric)::text AS gross
     FROM secondary_sku_line
-    WHERE fy = ${fy} AND distributor IN (${sql.join(secNames.map((n) => sql`${n}`), sql`, `)})
+    WHERE fy = ${fy} AND distributor IN (${sql.join(secNames.map((n) => sql`${n}`), sql`, `)})${monthCond(months)}
     GROUP BY item_code, segment_canon, month_label, retailer, head_canon
   `);
 
@@ -423,7 +434,7 @@ export async function buildSecondaryTab(fy: string, distKey: string): Promise<Se
              SUM(amount::numeric)::text AS value
       FROM sale_line_current
       WHERE fy = ${fy} AND code IS NOT NULL AND is_territory = true
-        AND customer IN (${sql.join(saleNames.map((n) => sql`${n}`), sql`, `)})
+        AND customer IN (${sql.join(saleNames.map((n) => sql`${n}`), sql`, `)})${monthCond(months)}
       GROUP BY code
     `);
     for (const r of priRows.rows) {
@@ -470,13 +481,17 @@ export async function buildSecondaryTab(fy: string, distKey: string): Promise<Se
   const primaryInTotal = [...priByCode.values()].reduce((a, b) => a + b.value, 0);
   const topRet = [...byRetailer.entries()].sort((a, b) => b[1].net - a[1].net);
   const top5 = topRet.slice(0, 5).reduce((a, [, v]) => a + v.net, 0);
-  const monthsLoaded = recon.monthsLoaded;
+  const monthsLoaded = months && months.length > 0
+    ? recon.monthsLoaded.filter((m) => months.includes(m))
+    : recon.monthsLoaded;
 
   return {
     fy,
     distributor: { name: d.name, normKey: distKey },
     monthsLoaded,
-    coverageNote: monthsLoaded.length > 0
+    coverageNote: months && months.length > 0
+      ? `Filtered to selected period ${months[0]}–${months[months.length - 1]} (${monthsLoaded.length} of ${months.length} selected month${months.length === 1 ? "" : "s"} present in the secondary register)`
+      : monthsLoaded.length > 0
       ? `Secondary register covers ${monthsLoaded[0]}–${monthsLoaded[monthsLoaded.length - 1]} (${monthsLoaded.length} month${monthsLoaded.length === 1 ? "" : "s"} loaded)`
       : "No secondary register months loaded for this FY",
     netAmount: net,
@@ -690,14 +705,20 @@ function buildSide(
   };
 }
 
-export async function buildSkuEvolution(fy: string, distKey: string): Promise<SkuEvolutionResult> {
+export async function buildSkuEvolution(
+  fy: string,
+  distKey: string,
+  months: string[] | null = null,
+): Promise<SkuEvolutionResult> {
   const recon = await buildDistributorRecon(fy);
   const dir = await loadDistributorDirectory(fy);
   const d = dir.distributors.find((x) => x.normKey === distKey);
   if (!d) throw new Error(`Unknown distributor key: ${distKey}`);
 
   const baselineFy = prevFyLabel(fy);
-  const curMonths = recon.monthsLoaded;                 // like months only
+  // Like months only: default = every loaded secondary month; a selected
+  // period narrows both sides to the same fiscal months.
+  const curMonths = months && months.length > 0 ? months : recon.monthsLoaded;
   const baseMonths = toPriorYearMonths(curMonths);
   const baselineNote = `Baseline = same fiscal months of ${baselineFy} (${baseMonths.join(", ") || "none"}), frozen register anchors (sale_line_current / secondary register).`;
 
@@ -821,7 +842,11 @@ async function segmentPeakQuarters(closedFy: string) {
   return result;
 }
 
-export async function buildPushTab(fy: string, distKey: string): Promise<PushTabResult> {
+export async function buildPushTab(
+  fy: string,
+  distKey: string,
+  months: string[] | null = null,
+): Promise<PushTabResult> {
   const recon = await buildDistributorRecon(fy);
   const dir = await loadDistributorDirectory(fy);
   const d = dir.distributors.find((x) => x.normKey === distKey);
@@ -829,7 +854,8 @@ export async function buildPushTab(fy: string, distKey: string): Promise<PushTab
 
   const saleNames = recon.saleNamesByKey[distKey] ?? [];
   const secNames = recon.secondaryNamesByKey[distKey] ?? [];
-  const secTab = await buildSecondaryTab(fy, distKey);
+  // Verdict flow gap respects the selected period (same window on both sides).
+  const secTab = await buildSecondaryTab(fy, distKey, months);
 
   // ── Verdict FIRST: check the flow gap before recommending anything ─────────
   let verdict: PushTabResult["verdict"];
@@ -856,12 +882,17 @@ export async function buildPushTab(fy: string, distKey: string): Promise<PushTab
     const vals = await db.execute<{ customer: string; v: string }>(sql`
       SELECT customer, SUM(amount::numeric)::text AS v FROM sale_line_current
       WHERE fy = ${fy} AND is_territory = true
-        AND customer IN (${sql.join(saleNames.map((n) => sql`${n}`), sql`, `)})
+        AND customer IN (${sql.join(saleNames.map((n) => sql`${n}`), sql`, `)})${monthCond(months)}
       GROUP BY customer ORDER BY SUM(amount::numeric) DESC LIMIT 1
     `);
     pushKey = vals.rows[0]?.customer ?? saleNames[0];
     try {
-      push = await getSkuPushList({ fy, monthLabels: recon.monthsLoaded, level: "distributor", distributorKey: pushKey });
+      push = await getSkuPushList({
+        fy,
+        monthLabels: months && months.length > 0 ? months : recon.monthsLoaded,
+        level: "distributor",
+        distributorKey: pushKey,
+      });
     } catch (e) {
       logger.warn({ err: (e as Error).message, pushKey }, "distributorTabs: push list failed");
     }
@@ -877,7 +908,7 @@ export async function buildPushTab(fy: string, distKey: string): Promise<PushTab
       SELECT segment_canon AS seg, retailer, MAX(head_canon) AS head, SUM(net_amount::numeric)::text AS net
       FROM secondary_sku_line
       WHERE fy = ${fy} AND retailer IS NOT NULL
-        AND distributor IN (${sql.join(secNames.map((n) => sql`${n}`), sql`, `)})
+        AND distributor IN (${sql.join(secNames.map((n) => sql`${n}`), sql`, `)})${monthCond(months)}
       GROUP BY segment_canon, retailer
     `);
     for (const r of rows.rows) {
@@ -901,14 +932,14 @@ export async function buildPushTab(fy: string, distKey: string): Promise<PushTab
                (SUM(discount_pct::numeric * net_amount::numeric) / NULLIF(SUM(net_amount::numeric),0))::text AS d
         FROM secondary_sku_line
         WHERE fy = ${fy} AND item_code IN (${sql.join(codeList.map((c) => sql`${c}`), sql`, `)})
-          AND distributor IN (${sql.join(secNames.map((n) => sql`${n}`), sql`, `)})
+          AND distributor IN (${sql.join(secNames.map((n) => sql`${n}`), sql`, `)})${monthCond(months)}
         GROUP BY item_code
       `),
       db.execute<{ code: string; d: string }>(sql`
         SELECT item_code AS code,
                (SUM(discount_pct::numeric * net_amount::numeric) / NULLIF(SUM(net_amount::numeric),0))::text AS d
         FROM secondary_sku_line
-        WHERE fy = ${fy} AND item_code IN (${sql.join(codeList.map((c) => sql`${c}`), sql`, `)})
+        WHERE fy = ${fy} AND item_code IN (${sql.join(codeList.map((c) => sql`${c}`), sql`, `)})${monthCond(months)}
         GROUP BY item_code
       `),
     ]);
@@ -958,18 +989,21 @@ export async function buildPushTab(fy: string, distKey: string): Promise<PushTab
     // Districts come from the deep-dive retailer rows via the directory head payloads;
     // secondary register has no district column, so derive dormancy from it instead:
     // retailers with prior-FY net but zero this FY under this distributor.
+    // With a selected period, both sides use like months (prior = same fiscal
+    // months of the prior FY) so the comparison stays like-for-like.
+    const priorMonths = months && months.length > 0 ? toPriorYearMonths(months) : null;
     const rows = await db.execute<{ retailer: string; head: string | null; prior: string; cur: string }>(sql`
       WITH prior AS (
         SELECT retailer, MAX(head_canon) AS head, SUM(net_amount::numeric) AS v
         FROM secondary_sku_line
         WHERE fy = ${priorFy} AND retailer IS NOT NULL
-          AND distributor IN (${sql.join(secNames.map((n) => sql`${n}`), sql`, `)})
+          AND distributor IN (${sql.join(secNames.map((n) => sql`${n}`), sql`, `)})${monthCond(priorMonths)}
         GROUP BY retailer
       ), cur AS (
         SELECT retailer, SUM(net_amount::numeric) AS v
         FROM secondary_sku_line
         WHERE fy = ${fy} AND retailer IS NOT NULL
-          AND distributor IN (${sql.join(secNames.map((n) => sql`${n}`), sql`, `)})
+          AND distributor IN (${sql.join(secNames.map((n) => sql`${n}`), sql`, `)})${monthCond(months)}
         GROUP BY retailer
       )
       SELECT p.retailer, p.head, p.v::text AS prior, COALESCE(c.v,0)::text AS cur
@@ -1045,7 +1079,9 @@ export async function buildPushTab(fy: string, distKey: string): Promise<PushTab
       dormantRetailers: dormant,
       soleCoverageDistricts: [...new Set(soleCoverageDistricts)].sort(),
       districts: [...distDistricts].sort(),
-      note: "Unassigned-retailer activation is an administrative fix — the fastest push available. Unassigned counts are per serving salesperson (member sheets carry no district on unassigned rows). Dormant retailers ranked by prior-year secondary value (source: secondary register).",
+      note: (months && months.length > 0
+        ? "Unassigned counts and district coverage come from the member working sheets, which carry no month detail — they always reflect the full FY regardless of the selected period. Dormant retailers compare the selected months against the SAME months of the prior FY. "
+        : "") + "Unassigned-retailer activation is an administrative fix — the fastest push available. Unassigned counts are per serving salesperson (member sheets carry no district on unassigned rows). Dormant retailers ranked by prior-year secondary value (source: secondary register).",
     },
   };
 }
