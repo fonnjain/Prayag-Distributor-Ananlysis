@@ -95,13 +95,17 @@ export type NudgeRow = {
   schemeId: string;
   basketName: string;
   billedSoFar: number;
+  /** Threshold of the slab currently occupied (null = below the first slab). */
+  currentSlab: number | null;
   currentRate: number;
   currentEarnings: number;
   nextSlab: number;
   nextRate: number | null;
+  /** nextSlab × nextRate — what the whole quarter pays at the next slab. */
+  nextEarnings: number | null;
   gap: number;
-  theyEarn: number | null;
-  roi: number | null;
+  extraEarn: number | null;
+  extraRoi: number | null;
   rewardType: "pct" | "trip" | "pct_or_trip";
   tripLabel: string | null;
   status: "NUDGE" | "BLOCKED" | "AT_MAX" | "TRIP_ZONE";
@@ -259,10 +263,11 @@ export async function computeNudgeList(
       if (!blocked.includes(customer)) blocked.push(customer);
       nudges.push({
         customer, stateHead, schemeId, basketName: scheme.name,
-        billedSoFar, currentRate, currentEarnings,
+        billedSoFar, currentSlab: currentSlab?.threshold ?? null, currentRate, currentEarnings,
         nextSlab: nextSlab?.threshold ?? 0, nextRate: nextSlab?.rate ?? null,
+        nextEarnings: nextSlab && nextSlab.rate != null ? nextSlab.threshold * nextSlab.rate : null,
         gap: nextSlab ? nextSlab.threshold - billedSoFar : 0,
-        theyEarn: null, roi: null,
+        extraEarn: null, extraRoi: null,
         rewardType: nextSlab?.rewardType ?? "pct",
         tripLabel: nextSlab?.reward ?? null,
         status: "BLOCKED",
@@ -274,9 +279,9 @@ export async function computeNudgeList(
     if (!nextSlab) {
       nudges.push({
         customer, stateHead, schemeId, basketName: scheme.name,
-        billedSoFar, currentRate, currentEarnings,
-        nextSlab: 0, nextRate: null, gap: 0,
-        theyEarn: null, roi: null, rewardType: "pct",
+        billedSoFar, currentSlab: currentSlab?.threshold ?? null, currentRate, currentEarnings,
+        nextSlab: 0, nextRate: null, nextEarnings: null, gap: 0,
+        extraEarn: null, extraRoi: null, rewardType: "pct",
         tripLabel: null, status: "AT_MAX", blockedReason: null,
       });
       continue;
@@ -287,9 +292,9 @@ export async function computeNudgeList(
     if (nextSlab.rewardType === "trip") {
       nudges.push({
         customer, stateHead, schemeId, basketName: scheme.name,
-        billedSoFar, currentRate, currentEarnings,
-        nextSlab: nextSlab.threshold, nextRate: null, gap,
-        theyEarn: null, roi: null, rewardType: "trip",
+        billedSoFar, currentSlab: currentSlab?.threshold ?? null, currentRate, currentEarnings,
+        nextSlab: nextSlab.threshold, nextRate: null, nextEarnings: null, gap,
+        extraEarn: null, extraRoi: null, rewardType: "trip",
         tripLabel: nextSlab.reward ?? null,
         status: "TRIP_ZONE", blockedReason: null,
       });
@@ -298,26 +303,27 @@ export async function computeNudgeList(
     }
 
     const nextRate = nextSlab.rate ?? 0;
-    const theyEarn = nextSlab.threshold * nextRate - billedSoFar * currentRate;
-    const roi = gap > 0 ? theyEarn / gap : 0;
+    const nextEarnings = nextSlab.threshold * nextRate;
+    const extraEarn = nextEarnings - billedSoFar * currentRate;
+    const extraRoi = gap > 0 ? extraEarn / gap : 0;
 
-    if (roi < roiThreshold) continue; // Below ROI threshold — suppress
+    if (extraRoi < roiThreshold) continue; // Below ROI threshold — suppress
 
     totalOpportunity += gap;
     nudges.push({
       customer, stateHead, schemeId, basketName: scheme.name,
-      billedSoFar, currentRate, currentEarnings,
-      nextSlab: nextSlab.threshold, nextRate, gap,
-      theyEarn, roi, rewardType: "pct",
+      billedSoFar, currentSlab: currentSlab?.threshold ?? null, currentRate, currentEarnings,
+      nextSlab: nextSlab.threshold, nextRate, nextEarnings, gap,
+      extraEarn, extraRoi, rewardType: "pct",
       tripLabel: null, status: "NUDGE", blockedReason: null,
     });
   }
 
-  // Sort by theyEarn descending (nulls last)
+  // Sort by extraEarn descending (nulls last)
   nudges.sort((a, b) => {
     if (a.status === "BLOCKED" && b.status !== "BLOCKED") return 1;
     if (b.status === "BLOCKED" && a.status !== "BLOCKED") return -1;
-    return (b.theyEarn ?? 0) - (a.theyEarn ?? 0);
+    return (b.extraEarn ?? 0) - (a.extraEarn ?? 0);
   });
 
   return {

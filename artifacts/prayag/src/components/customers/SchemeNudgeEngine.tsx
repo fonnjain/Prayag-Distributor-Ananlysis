@@ -10,7 +10,7 @@ import { trunc2 } from "@/lib/trunc";
 //   6. Scheme Master — reference slabs + basket map
 //
 // All data comes from /api/schemes/nudge, /cockpit, /annual, /master.
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, Fragment } from "react";
 import { AlertTriangle, Lock, TrendingUp, TrendingDown, RefreshCw, ChevronUp, ChevronDown, Gift } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,11 +29,16 @@ function pct(val: number | null | undefined, decimals = 1): string {
   return `${trunc2(val * 100)}%`;
 }
 
-function roiColor(roi: number | null): string {
-  if (roi == null) return "text-muted-foreground";
-  if (roi >= 0.12) return "text-green-600 dark:text-green-400 font-semibold";
-  if (roi >= 0.08) return "text-blue-600 dark:text-blue-400";
+function extraRoiColor(extraRoi: number | null): string {
+  if (extraRoi == null) return "text-muted-foreground";
+  if (extraRoi >= 0.12) return "text-green-600 dark:text-green-400 font-semibold";
+  if (extraRoi >= 0.08) return "text-blue-600 dark:text-blue-400";
   return "text-foreground";
+}
+
+/** Full Indian-format rupees for the worked calculation (no L/Cr shortening). */
+function rsFull(val: number): string {
+  return Math.round(val).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 }
 
 function qLabel(q: string): string {
@@ -64,13 +69,15 @@ type NudgeRow = {
   schemeId: string;
   basketName: string;
   billedSoFar: number;
+  currentSlab: number | null;
   currentRate: number;
   currentEarnings: number;
   nextSlab: number;
   nextRate: number | null;
+  nextEarnings: number | null;
   gap: number;
-  theyEarn: number | null;
-  roi: number | null;
+  extraEarn: number | null;
+  extraRoi: number | null;
   rewardType: "pct" | "trip" | "pct_or_trip";
   tripLabel: string | null;
   status: "NUDGE" | "BLOCKED" | "AT_MAX" | "TRIP_ZONE";
@@ -171,9 +178,10 @@ export default function SchemeNudgeEngine() {
   const [schemeFilter, setSchemeFilter] = useState<string>("all");
   const [headFilter, setHeadFilter] = useState<string>("all");
   const [showBlocked, setShowBlocked] = useState(false);
-  const [sortKey, setSortKey] = useState<"theyEarn" | "roi" | "gap" | "billedSoFar">("theyEarn");
+  const [sortKey, setSortKey] = useState<"extraEarn" | "extraRoi" | "gap" | "currentEarnings">("extraEarn");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [search, setSearch] = useState("");
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
 
   function fetchNudge() {
     setNudgeLoading(true);
@@ -251,17 +259,17 @@ export default function SchemeNudgeEngine() {
   // Sales head rollup
   const headRollup = useMemo(() => {
     if (!nudgeData) return [];
-    const map = new Map<string, { head: string; nudges: number; opportunity: number; theyEarn: number }>();
+    const map = new Map<string, { head: string; nudges: number; opportunity: number; extraEarn: number }>();
     for (const n of nudgeData.nudges) {
       if (n.status !== "NUDGE") continue;
       const head = n.stateHead ?? "Unassigned";
-      const cur = map.get(head) ?? { head, nudges: 0, opportunity: 0, theyEarn: 0 };
+      const cur = map.get(head) ?? { head, nudges: 0, opportunity: 0, extraEarn: 0 };
       cur.nudges++;
       cur.opportunity += n.gap;
-      cur.theyEarn += n.theyEarn ?? 0;
+      cur.extraEarn += n.extraEarn ?? 0;
       map.set(head, cur);
     }
-    return [...map.values()].sort((a, b) => b.theyEarn - a.theyEarn);
+    return [...map.values()].sort((a, b) => b.extraEarn - a.extraEarn);
   }, [nudgeData]);
 
   function SortBtn({ k }: { k: typeof sortKey }) {
@@ -397,30 +405,82 @@ export default function SchemeNudgeEngine() {
               />
               Show blocked
             </label>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs ml-auto"
+              onClick={() => {
+                const esc = (v: string | number | null) =>
+                  v == null ? "" : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
+                const header = [
+                  "Distributor", "State Head", "Scheme", "Billed", "Current slab", "Current rate",
+                  "Current earn", "Next slab", "Next rate", "Next earn", "Gap",
+                  "Extra Earn", "Extra ROI", "Status",
+                ];
+                const lines = displayNudges.map((n) => [
+                  esc(n.customer), esc(n.stateHead), esc(SCHEME_SHORT[n.schemeId] ?? n.schemeId),
+                  esc(n.billedSoFar),
+                  n.currentSlab != null ? esc(n.currentSlab) : esc(n.status),
+                  esc(trunc2(n.currentRate * 100) + "%"),
+                  esc(Math.round(n.currentEarnings)),
+                  n.nextSlab > 0 ? esc(n.nextSlab) : esc(n.status),
+                  n.nextRate != null ? esc(trunc2(n.nextRate * 100) + "%") : esc(n.status),
+                  n.nextEarnings != null ? esc(Math.round(n.nextEarnings)) : esc(n.status),
+                  n.nextSlab > 0 ? esc(n.gap) : esc(n.status),
+                  n.extraEarn != null ? esc(Math.round(n.extraEarn)) : esc(n.status),
+                  n.extraRoi != null ? esc(trunc2(n.extraRoi * 100) + "%") : esc(n.status),
+                  esc(n.status),
+                ].join(","));
+                const csv = [header.join(","), ...lines].join("\n");
+                const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(blob);
+                a.download = `nudge-list-${fy}-${quarter}.csv`;
+                a.click();
+                URL.revokeObjectURL(a.href);
+              }}
+            >
+              Export
+            </Button>
           </div>
+
+          <p className="text-xs text-muted-foreground">
+            A slab pays its rate on the distributor's ENTIRE quarterly billing, not just the amount
+            above the threshold. Crossing a slab re-prices everything already bought - which is why
+            Extra Earn is far bigger than the margin on the gap alone.
+          </p>
 
           {nudgeLoading ? (
             <div className="text-xs text-muted-foreground py-6 text-center">Computing nudges...</div>
           ) : (
             <div className="overflow-x-auto rounded border">
-              <table className="w-full text-xs">
+              <table className="w-full text-xs min-w-[980px]">
                 <thead>
                   <tr className="border-b bg-muted/50 text-muted-foreground">
                     <th className="px-3 py-2 text-left font-medium">#</th>
                     <th className="px-3 py-2 text-left font-medium">Distributor</th>
                     <th className="px-3 py-2 text-left font-medium">Scheme</th>
+                    <th className="px-3 py-2 text-right font-medium">Current slab</th>
+                    <th className="px-3 py-2 text-right font-medium">Current rate</th>
                     <th className="px-3 py-2 text-right font-medium">
-                      Billed <SortBtn k="billedSoFar" />
+                      Current earn <SortBtn k="currentEarnings" />
                     </th>
                     <th className="px-3 py-2 text-right font-medium">Next slab</th>
+                    <th className="px-3 py-2 text-right font-medium">Next rate</th>
                     <th className="px-3 py-2 text-right font-medium">
                       Gap <SortBtn k="gap" />
                     </th>
-                    <th className="px-3 py-2 text-right font-medium">
-                      They earn <SortBtn k="theyEarn" />
+                    <th
+                      className="px-3 py-2 text-right font-medium"
+                      title="What the DISTRIBUTOR earns extra by reaching the next slab, after re-pricing his whole quarter. Not Prayag's cost."
+                    >
+                      Extra Earn <SortBtn k="extraEarn" />
                     </th>
-                    <th className="px-3 py-2 text-right font-medium">
-                      ROI <SortBtn k="roi" />
+                    <th
+                      className="px-3 py-2 text-right font-medium"
+                      title="Extra Earn per rupee of extra purchase needed to get there."
+                    >
+                      Extra ROI <SortBtn k="extraRoi" />
                     </th>
                     <th className="px-3 py-2 text-left font-medium">Status</th>
                   </tr>
@@ -428,45 +488,75 @@ export default function SchemeNudgeEngine() {
                 <tbody>
                   {displayNudges.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="py-8 text-center text-muted-foreground">
+                      <td colSpan={12} className="py-8 text-center text-muted-foreground">
                         No nudges for selected filters.
                       </td>
                     </tr>
                   ) : (
-                    displayNudges.map((n, i) => (
-                      <tr key={`${n.customer}|${n.schemeId}`} className="border-b last:border-0 hover:bg-muted/30">
-                        <td className="px-3 py-1.5 text-muted-foreground">{i + 1}</td>
-                        <td className="px-3 py-1.5">
-                          <div className="font-medium leading-tight">{n.customer}</div>
-                          {n.stateHead && (
-                            <div className="text-[10px] text-muted-foreground">{n.stateHead}</div>
+                    displayNudges.map((n, i) => {
+                      const rowKey = `${n.customer}|${n.schemeId}`;
+                      const expandable = n.extraEarn != null && n.extraRoi != null;
+                      const expanded = expandedRow === rowKey;
+                      return (
+                        <Fragment key={rowKey}>
+                          <tr
+                            className={`border-b last:border-0 hover:bg-muted/30 ${expandable ? "cursor-pointer" : ""}`}
+                            onClick={() => expandable && setExpandedRow(expanded ? null : rowKey)}
+                            data-testid={`nudge-row-${i}`}
+                          >
+                            <td className="px-3 py-1.5 text-muted-foreground">{i + 1}</td>
+                            <td className="px-3 py-1.5">
+                              <div className="font-medium leading-tight whitespace-nowrap">{n.customer}</div>
+                              {n.stateHead && (
+                                <div className="text-[10px] text-muted-foreground">{n.stateHead}</div>
+                              )}
+                            </td>
+                            <td className="px-3 py-1.5 text-muted-foreground whitespace-nowrap">
+                              {SCHEME_SHORT[n.schemeId] ?? n.schemeId}
+                            </td>
+                            <td className="px-3 py-1.5 text-right tabular-nums">
+                              {n.currentSlab != null ? inr(n.currentSlab) : <span className="text-muted-foreground">{n.status}</span>}
+                            </td>
+                            <td className="px-3 py-1.5 text-right tabular-nums">{pct(n.currentRate)}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums">{inr(n.currentEarnings)}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                              {n.nextSlab > 0
+                                ? inr(n.nextSlab)
+                                : <span>{n.status}</span>}
+                            </td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                              {n.nextRate != null ? pct(n.nextRate) : <span>{n.status}</span>}
+                            </td>
+                            <td className="px-3 py-1.5 text-right tabular-nums">
+                              {n.nextSlab > 0 ? inr(n.gap) : <span className="text-muted-foreground">{n.status}</span>}
+                            </td>
+                            <td className="px-3 py-1.5 text-right tabular-nums font-medium">
+                              {n.extraEarn != null
+                                ? inr(n.extraEarn)
+                                : <span className="text-muted-foreground">{n.rewardType === "trip" && n.tripLabel ? `${n.status} (${n.tripLabel})` : n.status}</span>}
+                            </td>
+                            <td className={`px-3 py-1.5 text-right tabular-nums ${extraRoiColor(n.extraRoi)}`}>
+                              {n.extraRoi != null ? pct(n.extraRoi) : <span>{n.status}</span>}
+                            </td>
+                            <td className="px-3 py-1.5">
+                              <StatusBadge status={n.status} blockedReason={n.blockedReason} />
+                            </td>
+                          </tr>
+                          {expanded && expandable && (
+                            <tr className="border-b bg-muted/20" data-testid={`nudge-calc-${i}`}>
+                              <td colSpan={12} className="px-6 py-2">
+                                <div className="font-mono text-[11px] leading-5 whitespace-pre overflow-x-auto">
+                                  {`Gap          = ${rsFull(n.nextSlab)} - ${rsFull(n.billedSoFar)} = Rs ${rsFull(n.gap)}\n`}
+                                  {`Extra Earn   = (${rsFull(n.nextSlab)} x ${trunc2((n.nextRate ?? 0) * 100)}%) - (${rsFull(n.billedSoFar)} x ${trunc2(n.currentRate * 100)}%)\n`}
+                                  {`             = ${rsFull(n.nextEarnings ?? 0)} - ${rsFull(n.currentEarnings)} = Rs ${rsFull(n.extraEarn ?? 0)}\n`}
+                                  {`Extra ROI    = ${rsFull(n.extraEarn ?? 0)} / ${rsFull(n.gap)} = ${trunc2((n.extraRoi ?? 0) * 100)}%`}
+                                </div>
+                              </td>
+                            </tr>
                           )}
-                        </td>
-                        <td className="px-3 py-1.5 text-muted-foreground whitespace-nowrap">
-                          {SCHEME_SHORT[n.schemeId] ?? n.schemeId}
-                        </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">{inr(n.billedSoFar)}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-                          {n.rewardType === "trip"
-                            ? inr(n.nextSlab)
-                            : n.nextRate != null
-                            ? `${inr(n.nextSlab)} @ ${pct(n.nextRate)}`
-                            : inr(n.nextSlab)}
-                        </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">{inr(n.gap)}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums font-medium">
-                          {n.rewardType === "trip"
-                            ? <span className="text-purple-600 dark:text-purple-400">{n.tripLabel ?? "Trip"}</span>
-                            : inr(n.theyEarn)}
-                        </td>
-                        <td className={`px-3 py-1.5 text-right tabular-nums ${roiColor(n.roi)}`}>
-                          {n.roi != null ? pct(n.roi) : "—"}
-                        </td>
-                        <td className="px-3 py-1.5">
-                          <StatusBadge status={n.status} blockedReason={n.blockedReason} />
-                        </td>
-                      </tr>
-                    ))
+                        </Fragment>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -624,7 +714,7 @@ export default function SchemeNudgeEngine() {
                     <th className="px-3 py-2 text-left font-medium">Sales head</th>
                     <th className="px-3 py-2 text-right font-medium">Nudge count</th>
                     <th className="px-3 py-2 text-right font-medium">Opportunity (gap)</th>
-                    <th className="px-3 py-2 text-right font-medium">They earn (total)</th>
+                    <th className="px-3 py-2 text-right font-medium">Extra Earn (total)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -633,7 +723,7 @@ export default function SchemeNudgeEngine() {
                       <td className="px-3 py-1.5 font-medium">{row.head}</td>
                       <td className="px-3 py-1.5 text-right">{row.nudges}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums">{inr(row.opportunity)}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums font-medium text-green-700 dark:text-green-400">{inr(row.theyEarn)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums font-medium text-green-700 dark:text-green-400">{inr(row.extraEarn)}</td>
                     </tr>
                   ))}
                 </tbody>
