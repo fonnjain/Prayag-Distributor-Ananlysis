@@ -86,7 +86,8 @@ function rejectIfFrozen(
 }
 
 /**
- * Month-level freeze guard (7th-of-following-month rule, clock-derived).
+ * Month-level freeze guard (freeze at 00:00 on the 8th of the following month,
+ * grace 1st–7th inclusive, clock-derived).
  * Frozen months are PERMANENT — there is no unfreeze escape hatch.
  * Dry-run requests always pass — they never write.
  */
@@ -301,7 +302,7 @@ router.post("/registers/:fy/tombstone-orphans", async (req, res) => {
  *
  * Manual trigger for the monthly full-replace pipeline (same code path as the
  * nightly sync). Reads the whole FY sheet, then per month:
- *   frozen (7th-of-following-month rule) → skipped (anchored on first encounter)
+ *   frozen (freeze on the 8th of the following month) → skipped (anchored on first encounter)
  *   open → short-read guard, then delete+insert in one transaction.
  *
  * force=true accepts a read below the 98% short-read tolerance and resets the
@@ -4767,7 +4768,7 @@ router.get("/registers/:fy/tank-sync-dryrun", async (req, res) => {
  * Month anchor-lock status for the Data Health page. For every month of the
  * FY whose calendar month has ENDED, reports whether it is locked into
  * verify_anchors.json (primary_anchors[fy].closedMonths), the lock deadline
- * (the day before the clock-derived freeze on the 7th of the following
+ * (the last grace day before the clock-derived freeze at 00:00 on the 8th of the following
  * month), and whether the deadline has passed without a lock.
  */
 router.get("/registers/:fy/lock-status", (req, res) => {
@@ -4802,7 +4803,7 @@ router.get("/registers/:fy/lock-status", (req, res) => {
       if (now.getTime() < monthEnd) continue;
       const label = `${MONTH_ABBR[mon]}-${String(year % 100).padStart(2, "0")}`;
       const freezesAt = monthFreezeAt(label);
-      // Deadline = the day before the automatic freeze (e.g. Aug 6 for Jul-26).
+      // Deadline = the last grace day before the automatic freeze (e.g. Aug 7 for Jul-26).
       const deadline = freezesAt != null ? new Date(freezesAt.getTime() - 24 * 3600 * 1000) : null;
       const locked = closedMonths.includes(label);
       months.push({
@@ -4830,7 +4831,7 @@ router.get("/registers/:fy/lock-status", (req, res) => {
  *
  * Run AFTER data owners have confirmed the sheet is final and after any
  * force-resync, but BEFORE the month-freeze guard activates (i.e. before the
- * 7th of the following month).
+ * 8th of the following month; grace 1st–7th inclusive).
  *
  * Auth: X-Admin-Secret: <SESSION_SECRET> (env var, not a DB API key).
  * This is intentionally separate from the DB-backed API-key system — any user

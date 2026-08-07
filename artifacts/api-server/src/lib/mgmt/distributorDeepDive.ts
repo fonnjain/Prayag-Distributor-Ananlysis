@@ -303,6 +303,9 @@ export type DistributorDeepDiveResult = {
   /** True when the live build failed transiently and the last saved snapshot
    *  was served instead — figures may be slightly out of date. */
   stale?: boolean;
+  /** True when a saved snapshot was served immediately (fast path) while a
+   *  background rebuild refreshes it — figures update on the next visit. */
+  refreshing?: boolean;
 };
 
 // ── Distributor field classification ─────────────────────────────────────────
@@ -1449,11 +1452,19 @@ function distDdSnapKey(fy: string, stateHead: string | undefined): string {
   return `${DIST_DD_SNAP_PREFIX}${fy}|${(stateHead ?? "").trim().toUpperCase()}`;
 }
 
+/** Strip response-only transport flags so they are never persisted into a
+ *  snapshot (and never re-served from one). */
+function stripTransportFlags(p: DistributorDeepDiveResult): DistributorDeepDiveResult {
+  const { stale: _s, refreshing: _r, ...clean } = p;
+  return clean;
+}
+
 async function saveDistDdSnapshot(key: string, payload: DistributorDeepDiveResult): Promise<void> {
   try {
+    const clean = stripTransportFlags(payload);
     await db
       .insert(routePayloadSnapshots)
-      .values({ key, payload: payload as unknown as Record<string, unknown> })
+      .values({ key, payload: clean as unknown as Record<string, unknown> })
       .onConflictDoUpdate({
         target: routePayloadSnapshots.key,
         set: { payload: payload as unknown as Record<string, unknown>, savedAt: new Date() },
@@ -1470,18 +1481,23 @@ export async function loadDistDdSnapshotOnly(
   fy: string,
   stateHead: string,
 ): Promise<DistributorDeepDiveResult | null> {
-  return loadDistDdSnapshot(distDdSnapKey(fy, stateHead));
+  return (await loadDistDdSnapshot(distDdSnapKey(fy, stateHead)))?.payload ?? null;
 }
 
-async function loadDistDdSnapshot(key: string): Promise<DistributorDeepDiveResult | null> {
+export type DistDdSnapMeta = { payload: DistributorDeepDiveResult; savedAt: number };
+
+async function loadDistDdSnapshot(key: string): Promise<DistDdSnapMeta | null> {
   try {
     const rows = await db
-      .select({ payload: routePayloadSnapshots.payload })
+      .select({ payload: routePayloadSnapshots.payload, savedAt: routePayloadSnapshots.savedAt })
       .from(routePayloadSnapshots)
       .where(eq(routePayloadSnapshots.key, key))
       .limit(1);
     if (rows.length === 0) return null;
-    return rows[0].payload as unknown as DistributorDeepDiveResult;
+    return {
+      payload: rows[0].payload as unknown as DistributorDeepDiveResult,
+      savedAt: rows[0].savedAt instanceof Date ? rows[0].savedAt.getTime() : Number(rows[0].savedAt ?? 0),
+    };
   } catch (err) {
     logger.warn({ err, key }, "distributorDeepDive: snapshot load failed");
     return null;
@@ -1506,11 +1522,13 @@ export function isDegradedLoad(r: Pick<DistributorDeepDiveResult, "error" | "mem
 /** Injectable dependencies so the fallback decision logic is unit-testable. */
 export type ResilientDeps = {
   build: (fy: string, stateHead?: string) => Promise<DistributorDeepDiveResult>;
-  loadSnap: (key: string) => Promise<DistributorDeepDiveResult | null>;
+  loadSnap: (key: string) => Promise<DistDdSnapMeta | null>;
   saveSnap: (key: string, payload: DistributorDeepDiveResult) => Promise<void>;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
   staleMap: Map<string, { payload: DistributorDeepDiveResult; until: number }>;
+  /** Keys with a background refresh in flight (dedupe). */
+  refreshInFlight: Set<string>;
 };
 
 const defaultDeps: ResilientDeps = {
@@ -1520,26 +1538,71 @@ const defaultDeps: ResilientDeps = {
   now: () => Date.now(),
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   staleMap: _staleFallback,
+  refreshInFlight: new Set<string>(),
 };
+
+// ── Snapshot-first serving (stale-while-revalidate) ───────────────────────────
+// A state-head-filtered request used to trigger a full live build (~10 member
+// working-sheet reads at concurrency 4 — minutes when cold) even though the
+// background warmer keeps a per-head snapshot fresh. Now: a snapshot younger
+// than SNAP_SERVE_MAX_AGE_MS is served immediately; if it is older than
+// SNAP_REFRESH_AGE_MS, ONE background rebuild is kicked off (deduped per key)
+// and, on a complete load, replaces the snapshot for the next visit.
+const SNAP_SERVE_MAX_AGE_MS = 6.5 * 3_600_000; // warmer cadence (6h) + margin
+const SNAP_REFRESH_AGE_MS = 15 * 60_000; // matches the member-sheet cache TTL
 
 export async function loadDistributorDeepDiveResilientWith(
   fy: string,
   selectedStateHead: string | undefined,
   deps: ResilientDeps,
+  opts?: { bypassSnapshot?: boolean },
 ): Promise<DistributorDeepDiveResult> {
   const key = distDdSnapKey(fy, selectedStateHead);
+
+  // ── Fast path: serve the saved snapshot immediately (stale-while-revalidate).
+  // Skipped when opts.bypassSnapshot (the background warmer must build live,
+  // otherwise it would read back its own snapshot and never refresh anything).
+  let preloadedSnap: DistDdSnapMeta | null | undefined;
+  if (selectedStateHead && !opts?.bypassSnapshot) {
+    preloadedSnap = await deps.loadSnap(key);
+    if (preloadedSnap) {
+      const age = deps.now() - preloadedSnap.savedAt;
+      if (age <= SNAP_SERVE_MAX_AGE_MS) {
+        if (age > SNAP_REFRESH_AGE_MS && !deps.refreshInFlight.has(key)) {
+          deps.refreshInFlight.add(key);
+          void (async () => {
+            try {
+              const r = await deps.build(fy, selectedStateHead);
+              if (isCompleteLoad(r)) {
+                deps.staleMap.delete(key);
+                await deps.saveSnap(key, r);
+              }
+            } catch (err) {
+              logger.warn({ err, fy, stateHead: selectedStateHead }, "distributorDeepDive: background snapshot refresh failed");
+            } finally {
+              deps.refreshInFlight.delete(key);
+            }
+          })();
+          return { ...stripTransportFlags(preloadedSnap.payload), refreshing: true };
+        }
+        return stripTransportFlags(preloadedSnap.payload);
+      }
+      // Snapshot too old to serve blind — fall through to a live build, but
+      // keep it as the failure fallback without a second DB read.
+    }
+  }
 
   const serveSnapshot = async (reason: string): Promise<DistributorDeepDiveResult | null> => {
     const cached = deps.staleMap.get(key);
     if (cached && deps.now() < cached.until) return { ...cached.payload, stale: true };
-    const snap = await deps.loadSnap(key);
+    const snap = preloadedSnap !== undefined ? preloadedSnap : await deps.loadSnap(key);
     if (!snap) return null;
     logger.warn(
       { fy, stateHead: selectedStateHead, reason },
       "distributorDeepDive: live build unusable — serving stale snapshot",
     );
-    deps.staleMap.set(key, { payload: snap, until: deps.now() + STALE_SERVE_MS });
-    return { ...snap, stale: true };
+    deps.staleMap.set(key, { payload: snap.payload, until: deps.now() + STALE_SERVE_MS });
+    return { ...snap.payload, stale: true };
   };
 
   let result: DistributorDeepDiveResult | null = null;
@@ -1612,6 +1675,7 @@ export async function loadDistributorDeepDiveResilientWith(
 export async function loadDistributorDeepDiveResilient(
   fy: string,
   selectedStateHead?: string,
+  opts?: { bypassSnapshot?: boolean },
 ): Promise<DistributorDeepDiveResult> {
-  return loadDistributorDeepDiveResilientWith(fy, selectedStateHead, defaultDeps);
+  return loadDistributorDeepDiveResilientWith(fy, selectedStateHead, defaultDeps, opts);
 }

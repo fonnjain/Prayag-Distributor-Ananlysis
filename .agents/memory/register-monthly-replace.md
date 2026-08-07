@@ -1,6 +1,6 @@
 ---
 name: Register monthly full-replace pipeline
-description: Open-FY register sync design (Aug 2026) — nightly per-month delete+insert replace, DB-persisted short-read baseline, clock-derived month freeze on the 7th.
+description: Open-FY register sync design (Aug 2026) — nightly per-month delete+insert replace, DB-persisted short-read baseline, clock-derived month freeze at 00:00 on the 8th (grace 1st–7th inclusive).
 ---
 
 # Register monthly full-replace pipeline (supersedes versioned sync for open FY)
@@ -10,7 +10,7 @@ The sale register sheet has NO stable row identity (col-A serials renumber on re
 **Design (user-mandated, replaces identity-key approach):**
 - Nightly (24h) sync reads the whole FY sheet; each non-frozen month is deleted and re-inserted in ONE transaction (`replaceOpenMonths` in `monthlyReplace.ts`). No identity key, dedup, tombstone, supersede, or revive.
 - Only guard: abort if read < 98% of `register_month_state.last_good_rows` (DB-persisted baseline, survives restarts). `force=true` overrides and resets the baseline.
-- Months freeze permanently on the 7th of the following month, derived from the CLOCK (never config). Frozen month = no read/write; rows+amount anchored in `register_month_state` and asserted on startup (`assertMonthAnchors`).
+- Months freeze permanently at 00:00 on the 8TH of the following month (grace 1st–7th inclusive), derived from the CLOCK (never config). Frozen month = no read/write; rows+amount anchored in `register_month_state` and asserted on startup (`assertMonthAnchors`).
 - Each month is processed inside `pg_advisory_xact_lock(hashtext('register-month|fy|month'))`; baseline read, guard, delete+insert, and state upsert are all in that one transaction (concurrent scheduler + manual route cannot interleave). Freeze-transition anchors come only from a verified replace, never from an unverified DB snapshot.
 - Routes: POST `/registers/:fy/replace-months` (?force / ?now require API key), GET `/registers/:fy/month-state`. Legacy month-mutating routes (tombstone-orphans, orphan-audit apply/reverse, invoice-restore-apply) return 423 on frozen months; force-resync `clearFirst` is refused for FYs with frozen months.
 
@@ -19,3 +19,9 @@ The sale register sheet has NO stable row identity (col-A serials renumber on re
 **Why:** correctness by construction (DB == last read, always); the only failure mode left is a bad read, caught by the baseline guard.
 
 **How to apply:** never reintroduce sheet-serial or identity-key reconciliation for the open FY. Old versioned-sync machinery still exists in `ingest.ts` for legacy routes but is out of the sync path. FY-level frozen registers (23-24/24-25/25-26) are a separate, unchanged system.
+
+**Freeze rules (Aug 2026 corrections):**
+- Freeze instant = 00:00 UTC on the **8th** of the following month, NOT the 7th — "7 days of grace" means the 1st–7th inclusive. `isMonthComplete` grace (analytics) is 8 days in lockstep.
+- **Strict freeze-transition guard:** the final freeze replace aborts on ANY row shortfall vs last good read (not the routine 98% tolerance). July 2026 froze 20 rows / ₹3.91 L short precisely because 0.14% was inside the daily tolerance. `?force=true` on replace-months is the operator escape hatch for a genuine late shrink.
+- A replace of an unfrozen month clears stale frozen_* columns (migration path when a freeze-rule change reopens a month).
+- Post-freeze sheet **deletions** (DB > sheet) are by design ignored — the frozen DB is authoritative (Jun-26: 2 invoices removed from sheet after freeze).

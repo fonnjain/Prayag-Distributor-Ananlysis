@@ -417,7 +417,8 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
 
     // ── Step 3: monthly full replace ─────────────────────────────────────────
     // No identity key, no dedup, no tombstone, no supersede, no revive.
-    // Frozen months (7th-of-following-month rule) are skipped; each open month
+    // Frozen months (freeze at 00:00 on the 8th of the following month; grace
+    // 1st–7th inclusive) are skipped; each open month
     // is deleted and re-inserted from the read in ONE transaction, guarded by
     // the DB-persisted short-read baseline in register_month_state.
     const replaceSummary = await replaceOpenMonths({ fy, lines: linesForSync });
@@ -431,7 +432,7 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
 
     // Which months were actually replaced this run. Between the 1st and 6th
     // this is two months (prior month in its edit grace window + open month);
-    // from the 7th the prior month freezes and the set narrows to one.
+    // from the 8th the prior month is frozen and the set narrows to one.
     const replacedMonths = replaceSummary.months
       .filter((m) => m.action === "replaced" || m.action === "frozen-anchored")
       .map((m) => `${m.month}(${m.rowsWritten} rows, ₹${((m.sheetAmount ?? 0) / 1e7).toFixed(2)} Cr)`);

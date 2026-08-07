@@ -73,7 +73,7 @@
 - [Frozen registers system](frozen-registers-freeze.md) — closed FYs 23-24/24-25/25-26 anchor-frozen; every mutating register route needs rejectIfFrozen(); HTTP 423 unless unfreeze+reason.
 - [SKU K4 discounts/movement](sku-k4-discounts-movement.md) — register discount_pct is a % (gross×(1−d%)=SubTotal, 100% verified); FY-conditional project bridge; in-process backfill route (shell nohup gets reaped).
 - [Register serial instability](register-serial-instability.md) — sheet serials shift on re-sort; serial-in-identity caused July doubling twice; never key on sheet serial, blast-radius guard masks it.
-- [Register monthly full-replace](register-monthly-replace.md) — open-FY sync is nightly per-month delete+insert (no identity key); DB short-read baseline; months freeze on the 7th (clock-derived) with anchors.
+- [Register monthly full-replace](register-monthly-replace.md) — open-FY sync is nightly per-month delete+insert (no identity key); DB short-read baseline; months freeze at 00:00 on the 8th (grace 1st–7th; strict any-shortfall guard at freeze) with anchors.
 - [OB mirror sync](ob-mirror-sync.md) — primary_order_line default ingest is append-only (drifts stale); replace mode + 6h open-FY scheduler + audit check 7.0 keep it aligned with the Order Sheet.
 - [Tank dedup serial collision](tank-dedup-serial-collision.md) — synthetic serials must be assigned AFTER tank resolution; pre-resolution ltr-based keys cause dedupeBySerialNo collision when different ltr amounts floor to same pieces.
 - [Primary sale totals-only path](primary-sale-totals-only.md) — head-less FYs (24-25/25-26) keep period-exact DB totals with empty byHead; pending needs matching period bases, clamp ≥0, else null.

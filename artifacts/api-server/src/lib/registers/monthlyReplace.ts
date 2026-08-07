@@ -16,7 +16,8 @@
 //      If the sheet holds two identical rows, both are written.
 //      Acceptance: rows written equals rows read, exactly.
 //
-// FREEZE RULE: a month freezes permanently on the 7th of the following month
+// FREEZE RULE: a month freezes permanently at 00:00 UTC on the 8th of the
+// following month (grace window: the 1st through the 7th inclusive)
 // (seven days of grace for late entries). Derived from the clock, never a
 // config list. A frozen month is skipped entirely — no read, no write. Its row
 // count and amount total are recorded once at freeze time and asserted on
@@ -40,16 +41,20 @@ const MONTH_INDEX: Record<string, number> = {
   Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
 };
 
-/** UTC instant at which a month label like "Jul-26" freezes: 7th of the
- *  following month. Null for unparseable labels (they never freeze). */
+/** UTC instant at which a month label like "Jul-26" freezes: START OF THE 8TH
+ *  of the following month. Seven days of grace from the 1st means the 1st
+ *  through the 7th INCLUSIVE — freezing at 00:00 on the 7th (the original
+ *  implementation) gave every month only six grace days and locked July 2026
+ *  while it was still inside its edit window.
+ *  Null for unparseable labels (they never freeze). */
 export function monthFreezeAt(monthLabel: string): Date | null {
   const m = /^([A-Z][a-z]{2})-(\d{2})$/.exec(monthLabel);
   if (!m) return null;
   const mon = MONTH_INDEX[m[1]];
   if (mon === undefined) return null;
   const year = 2000 + parseInt(m[2], 10);
-  // 7th of the following month, midnight UTC.
-  return new Date(Date.UTC(mon === 11 ? year + 1 : year, (mon + 1) % 12, 7));
+  // Start of the 8th of the following month, midnight UTC (grace: 1st–7th).
+  return new Date(Date.UTC(mon === 11 ? year + 1 : year, (mon + 1) % 12, 8));
 }
 
 export function isMonthFrozen(monthLabel: string, now: Date = new Date()): boolean {
@@ -63,7 +68,7 @@ const MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct",
  * Every month label of the FY whose calendar month has STARTED as of `now`
  * and which is not yet frozen. This is the rule-based sync scope: between the
  * 1st and 6th of a month it contains BOTH the prior month (still in its edit
- * window) and the current month (even if its tab is empty); from the 7th only
+ * window) and the current month (even if its tab is empty); from the 8th only
  * the current month. Future months are excluded.
  * FY format "2026-27" → Apr-26 … Mar-27.
  */
@@ -249,6 +254,25 @@ async function processOneMonth(
       // ── Short-read guard (applies to open months AND the final freeze-
       //    transition replace — a truncated read must never become an anchor).
       const lastGood = st?.lastGoodRows ?? null;
+
+      // ── STRICT freeze-transition guard ───────────────────────────────────
+      // A freeze is the one write that can never be corrected afterwards, so
+      // it gets the strictest check: if this final read returns even ONE row
+      // fewer than the last successful read of the month, the freeze ABORTS
+      // and is retried on the next tick — it must never lock a partial state.
+      // (The 98% tolerance below is for routine daily replaces, where a
+      // transient short read costs nothing because tomorrow corrects it.)
+      if (!force && frozen && lastGood != null && sheetRows < lastGood) {
+        logger.error(
+          { fy, month, sheetRows, lastGood },
+          "monthly replace: freeze-transition read BELOW last good read — freeze ABORTED, will retry next tick",
+        );
+        return {
+          month, action: "aborted-short-read" as const, sheetRows, sheetAmount,
+          dbRowsBefore: null, rowsWritten: null, lastGoodRows: lastGood,
+          detail: `freeze aborted: read ${sheetRows} < last good ${lastGood} — a freeze never locks fewer rows than previously confirmed`,
+        };
+      }
       // Fires when a month with a POSITIVE baseline reads materially fewer
       // rows. The explicit `sheetRows === 0` branch closes a rounding gap:
       // for tiny baselines (e.g. 1 row) floor(1 × 0.98) = 0 and an empty read
@@ -308,7 +332,12 @@ async function processOneMonth(
         lastGoodRows: sheetRows,
         lastGoodAmount: String(sheetAmount),
         lastReplacedAt: now,
-        ...(frozen ? { frozenAt: now, frozenRows: written, frozenAmount: String(sheetAmount) } : {}),
+        // A replace of an UNFROZEN month invalidates any stale anchor (e.g. a
+        // month unfrozen by a freeze-window correction): clearing it here keeps
+        // assertMonthAnchors honest until the real freeze re-records it.
+        ...(frozen
+          ? { frozenAt: now, frozenRows: written, frozenAmount: String(sheetAmount) }
+          : { frozenAt: null, frozenRows: null, frozenAmount: null }),
       };
       await tx
         .insert(registerMonthState)

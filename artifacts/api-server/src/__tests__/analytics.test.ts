@@ -20,16 +20,16 @@ describe("isMonthComplete", () => {
     ).toBe(false);
   });
 
-  it("is complete at the month-lock instant (00:00 on the 7th of the following month), even without a last-day invoice", () => {
-    // Register months freeze at 00:00 UTC on the 7th of the following month —
-    // after that the data cannot change, so the month is complete regardless
-    // of where its invoices stop (e.g. Oct-24's last invoice was Oct-30).
-    expect(isMonthComplete("Jun-26", "2026-06-15", Date.UTC(2026, 6, 7))).toBe(true);
-    expect(isMonthComplete("Jun-26", "2026-06-15", NOW)).toBe(true); // NOW = Jul-8
+  it("is complete at the month-lock instant (00:00 on the 8th of the following month), even without a last-day invoice", () => {
+    // Register months freeze at 00:00 UTC on the 8TH of the following month
+    // (grace: 1st–7th inclusive) — after that the data cannot change, so the
+    // month is complete regardless of where its invoices stop.
+    expect(isMonthComplete("Jun-26", "2026-06-15", Date.UTC(2026, 6, 7, 23, 59))).toBe(false);
+    expect(isMonthComplete("Jun-26", "2026-06-15", Date.UTC(2026, 6, 8))).toBe(true);
     expect(isMonthComplete("Oct-24", "2024-10-30", NOW)).toBe(true);
-    // Year boundary: Dec-25 with partial dates locks at 00:00 on Jan 7 2026.
-    expect(isMonthComplete("Dec-25", "2025-12-28", Date.UTC(2026, 0, 6, 23, 59))).toBe(false);
-    expect(isMonthComplete("Dec-25", "2025-12-28", Date.UTC(2026, 0, 7))).toBe(true);
+    // Year boundary: Dec-25 with partial dates locks at 00:00 on Jan 8 2026.
+    expect(isMonthComplete("Dec-25", "2025-12-28", Date.UTC(2026, 0, 7, 23, 59))).toBe(false);
+    expect(isMonthComplete("Dec-25", "2025-12-28", Date.UTC(2026, 0, 8))).toBe(true);
   });
 
   it("falls back to the calendar when a month has no invoice dates (historical registers without a DATE column)", () => {

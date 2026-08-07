@@ -63,7 +63,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 // even if no invoice happens to land on its literal last calendar day
 // (e.g. Oct-24's last invoice was Oct-30, which used to drop the whole month
 // from Company Reports' like-months comparison).
-const MONTH_COMPLETE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+const MONTH_COMPLETE_GRACE_MS = 8 * 24 * 60 * 60 * 1000; // lock at 00:00 on the 8th (grace: 1st–7th inclusive)
 
 // A month is complete when its max invoice date reaches the month's last
 // calendar day, OR once the month-lock grace window (7 days past month end,
@@ -84,8 +84,8 @@ export function isMonthComplete(
     }
     // Data exists but no invoice reached the last calendar day — still
     // complete once the month locks. The lock instant is 00:00 UTC on the
-    // 7th of the following month = lastDay 00:00 + 7 days (lastDay + 1 day
-    // is the 1st of the next month, + 6 more days reaches the 7th).
+    // 8TH of the following month = lastDay 00:00 + 8 days (grace runs the
+    // 1st through the 7th inclusive), matching monthFreezeAt exactly.
     return now >= lastDay.getTime() + MONTH_COMPLETE_GRACE_MS;
   }
   // Fully elapsed means the whole last day is over, i.e. we are at or past

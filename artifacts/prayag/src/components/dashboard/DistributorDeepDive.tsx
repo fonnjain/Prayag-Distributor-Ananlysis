@@ -442,6 +442,7 @@ type DistributorDeepDiveResult = {
   /** True when the server served the last saved snapshot because Google Sheets
    *  was briefly busy — figures may be slightly out of date. */
   stale?: boolean;
+  refreshing?: boolean;
 };
 
 // ── Distributor directory (filter-chain index) ───────────────────────────────
@@ -2093,6 +2094,29 @@ export default function DistributorDeepDive() {
       const json: DistributorDeepDiveResult = await res.json();
       if (seq !== reqSeq.current) return;
       setData(json);
+      // Snapshot served while the server rebuilds in the background — silently
+      // refetch (no loading spinner) until the fresh figures land, max 3 tries.
+      if (json.refreshing && stateHeadVal) {
+        let tries = 0;
+        const silentRefetch = async () => {
+          if (seq !== reqSeq.current || tries >= 3) return;
+          tries += 1;
+          try {
+            const r2 = await fetch(`${API}/mgmt/distributor-deep-dive?${params}`);
+            if (seq !== reqSeq.current || !r2.ok) return;
+            const j2: DistributorDeepDiveResult = await r2.json();
+            if (seq !== reqSeq.current) return;
+            if (j2.refreshing) {
+              retryTimer.current = setTimeout(silentRefetch, 60_000);
+            } else {
+              setData(j2);
+            }
+          } catch {
+            /* silent — the snapshot on screen is fine */
+          }
+        };
+        retryTimer.current = setTimeout(silentRefetch, 75_000);
+      }
       // Auto-populate state head from first available if the selector is empty.
       if (!stateHeadVal && json.stateHeads.length > 0) {
         setStateHead(json.stateHeads[0]);
@@ -2414,6 +2438,17 @@ export default function DistributorDeepDive() {
 
       {/* ── Quota wait ─────────────────────────────────────────────── */}
       {quotaWait && <QuotaWaitBanner testId="banner-quota-wait-distributor-deep-dive" />}
+
+      {/* Background-refresh notice: saved figures shown instantly, fresh ones on the way */}
+      {data?.refreshing && !data?.stale && !fetchError && (
+        <div
+          className="rounded-md border border-sky-500/30 bg-sky-50/60 px-4 py-3 text-sm text-sky-800 dark:bg-sky-900/10 dark:text-sky-300"
+          data-testid="banner-refreshing-distributor-deep-dive"
+        >
+          Showing saved figures — the latest are being fetched in the background and
+          will appear automatically in a minute or two.
+        </div>
+      )}
 
       {/* Stale-snapshot notice: Sheets was briefly busy, showing saved figures */}
       {data?.stale && !fetchError && (

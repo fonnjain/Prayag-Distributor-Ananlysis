@@ -10,8 +10,14 @@ describe("openMonthLabels", () => {
     expect(openMonthLabels("2026-27", now)).toEqual(["Jul-26", "Aug-26"]);
   });
 
-  it("7 Aug: July freezes, only August remains", () => {
-    const now = new Date(Date.UTC(2026, 7, 7, 0, 0, 1)); // 7 Aug 2026
+  it("7 Aug: July is STILL in its grace window (1st–7th inclusive)", () => {
+    const now = new Date(Date.UTC(2026, 7, 7, 12)); // 7 Aug 2026
+    expect(isMonthFrozen("Jul-26", now)).toBe(false);
+    expect(openMonthLabels("2026-27", now)).toEqual(["Jul-26", "Aug-26"]);
+  });
+
+  it("8 Aug 00:00: July freezes, only August remains", () => {
+    const now = new Date(Date.UTC(2026, 7, 8, 0, 0, 1)); // 8 Aug 2026
     expect(isMonthFrozen("Jul-26", now)).toBe(true);
     expect(openMonthLabels("2026-27", now)).toEqual(["Aug-26"]);
   });
@@ -63,5 +69,22 @@ describe("empty-month guard arithmetic", () => {
   it("materially-short positive reads abort; within-tolerance reads pass", () => {
     expect(guardFires(11848, 11000)).toBe(true);   // below 98%
     expect(guardFires(11848, 11700)).toBe(false);  // within tolerance
+  });
+});
+
+describe("strict freeze-transition guard arithmetic", () => {
+  // Mirrors the strict condition in processOneMonth: at the freeze transition
+  // even a ONE-row shortfall vs the last good read must abort the freeze.
+  const freezeAborts = (lastGood: number | null, sheetRows: number) =>
+    lastGood != null && sheetRows < lastGood;
+
+  it("aborts a freeze on any shortfall, even one row", () => {
+    expect(freezeAborts(13803, 13802)).toBe(true);
+    expect(freezeAborts(13803, 13783)).toBe(true); // the July 2026 incident: 0.14% short, inside the 98% daily tolerance
+  });
+  it("allows a freeze at parity or growth", () => {
+    expect(freezeAborts(13803, 13803)).toBe(false);
+    expect(freezeAborts(13803, 13850)).toBe(false);
+    expect(freezeAborts(null, 0)).toBe(false); // never-read month cannot abort
   });
 });

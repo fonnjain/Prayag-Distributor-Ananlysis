@@ -13,7 +13,16 @@ import {
   loadDistributorDeepDiveResilientWith,
   type ResilientDeps,
   type DistributorDeepDiveResult,
+  type DistDdSnapMeta,
 } from "../lib/mgmt/distributorDeepDive.js";
+
+// Old enough that the snapshot-first fast path skips it (> 6.5h before NOW_MS)
+// so the legacy failure-fallback behavior stays exercised.
+const NOW_MS = 1_000_000_000;
+const OLD_SAVED_AT = NOW_MS - 7 * 3_600_000;
+function meta(payload: DistributorDeepDiveResult, savedAt = OLD_SAVED_AT): DistDdSnapMeta {
+  return { payload, savedAt };
+}
 
 function makeResult(over: Partial<DistributorDeepDiveResult> = {}): DistributorDeepDiveResult {
   return {
@@ -45,9 +54,10 @@ function makeDeps(over: Partial<ResilientDeps> = {}): ResilientDeps {
     build: vi.fn(async () => makeResult()),
     loadSnap: vi.fn(async () => null),
     saveSnap: vi.fn(async () => undefined),
-    now: () => 1_000_000,
+    now: () => NOW_MS,
     sleep: vi.fn(async () => undefined),
     staleMap: new Map(),
+    refreshInFlight: new Set<string>(),
     ...over,
   };
 }
@@ -96,7 +106,7 @@ describe("loadDistributorDeepDiveResilientWith", () => {
       build: vi.fn(async () =>
         makeResult({ membersLoaded: 0, membersFailed: 8, error: "No working sheets could be loaded for this state head." }),
       ),
-      loadSnap: vi.fn(async () => snap),
+      loadSnap: vi.fn(async () => meta(snap)),
     });
     const out = await loadDistributorDeepDiveResilientWith("2026-27", "Anant Singh", deps);
     expect(out.stale).toBe(true);
@@ -109,7 +119,7 @@ describe("loadDistributorDeepDiveResilientWith", () => {
     const snap = makeResult({ partyObTotal: 456 });
     const deps = makeDeps({
       build: vi.fn(async () => makeResult({ membersLoaded: 5, membersFailed: 3, partyObTotal: 99 })),
-      loadSnap: vi.fn(async () => snap),
+      loadSnap: vi.fn(async () => meta(snap)),
     });
     const out = await loadDistributorDeepDiveResilientWith("2026-27", "Anant Singh", deps);
     expect(out.stale).toBe(true);
@@ -129,7 +139,7 @@ describe("loadDistributorDeepDiveResilientWith", () => {
     const snap = makeResult({ partyObTotal: 777 });
     const deps = makeDeps({
       build: vi.fn(async () => { throw new Error("Sheets 429"); }),
-      loadSnap: vi.fn(async () => snap),
+      loadSnap: vi.fn(async () => meta(snap)),
     });
     const out = await loadDistributorDeepDiveResilientWith("2026-27", "Anant Singh", deps);
     expect(out.stale).toBe(true);
@@ -152,7 +162,7 @@ describe("loadDistributorDeepDiveResilientWith", () => {
   it("stale window: serves the in-memory fallback without re-reading the DB", async () => {
     const snap = makeResult({ partyObTotal: 321 });
     const staleMap: ResilientDeps["staleMap"] = new Map([
-      ["dist-deep-dive|2026-27|ANANT SINGH", { payload: snap, until: 2_000_000 }],
+      ["dist-deep-dive|2026-27|ANANT SINGH", { payload: snap, until: NOW_MS + 1_000_000 }],
     ]);
     const deps = makeDeps({
       build: vi.fn(async () => { throw new Error("Sheets 429"); }),
@@ -161,6 +171,78 @@ describe("loadDistributorDeepDiveResilientWith", () => {
     const out = await loadDistributorDeepDiveResilientWith("2026-27", "Anant Singh", deps);
     expect(out.stale).toBe(true);
     expect(out.partyObTotal).toBe(321);
-    expect(deps.loadSnap).not.toHaveBeenCalled();
+    // Snapshot-first now consults loadSnap once (returns null here); the
+    // in-memory stale window must still prevent a second DB read on failure.
+    expect(deps.loadSnap).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe("snapshot-first serving (stale-while-revalidate)", () => {
+  it("fresh snapshot: served immediately, no live build, no refresh", async () => {
+    const snap = makeResult({ partyObTotal: 555 });
+    const deps = makeDeps({ loadSnap: vi.fn(async () => meta(snap, NOW_MS - 60_000)) });
+    const out = await loadDistributorDeepDiveResilientWith("2026-27", "Anant Singh", deps);
+    expect(out.partyObTotal).toBe(555);
+    expect(out.refreshing).toBeUndefined();
+    expect(deps.build).not.toHaveBeenCalled();
+  });
+
+  it("aging snapshot (>15 min, <6.5h): served immediately with refreshing=true and ONE background rebuild", async () => {
+    const snap = makeResult({ partyObTotal: 666 });
+    const fresh = makeResult({ partyObTotal: 777 });
+    const deps = makeDeps({
+      loadSnap: vi.fn(async () => meta(snap, NOW_MS - 3_600_000)),
+      build: vi.fn(async () => fresh),
+    });
+    const out = await loadDistributorDeepDiveResilientWith("2026-27", "Anant Singh", deps);
+    expect(out.partyObTotal).toBe(666); // snapshot served, not the rebuild
+    expect(out.refreshing).toBe(true);
+    await vi.waitFor(() => expect(deps.saveSnap).toHaveBeenCalledTimes(1));
+    expect(deps.build).toHaveBeenCalledTimes(1);
+    // dedupe: a second request while a refresh is in flight does not rebuild
+    deps.refreshInFlight.add("dist-deep-dive|2026-27|ANANT SINGH");
+    await loadDistributorDeepDiveResilientWith("2026-27", "Anant Singh", deps);
+    expect(deps.build).toHaveBeenCalledTimes(1);
+  });
+
+  it("background rebuild that comes back degraded never overwrites the snapshot", async () => {
+    const snap = makeResult({ partyObTotal: 888 });
+    const deps = makeDeps({
+      loadSnap: vi.fn(async () => meta(snap, NOW_MS - 3_600_000)),
+      build: vi.fn(async () => makeResult({ membersLoaded: 2, membersFailed: 6 })),
+    });
+    const out = await loadDistributorDeepDiveResilientWith("2026-27", "Anant Singh", deps);
+    expect(out.refreshing).toBe(true);
+    await vi.waitFor(() => expect(deps.refreshInFlight.size).toBe(0));
+    expect(deps.saveSnap).not.toHaveBeenCalled();
+  });
+
+  it("bypassSnapshot (warmer): builds live even when a fresh snapshot exists", async () => {
+    const snap = makeResult({ partyObTotal: 111 });
+    const deps = makeDeps({ loadSnap: vi.fn(async () => meta(snap, NOW_MS - 1_000)) });
+    const out = await loadDistributorDeepDiveResilientWith("2026-27", "Anant Singh", deps, { bypassSnapshot: true });
+    expect(deps.build).toHaveBeenCalledTimes(1);
+    expect(out.refreshing).toBeUndefined();
+    expect(deps.saveSnap).toHaveBeenCalledTimes(1); // complete live load persisted
+  });
+
+  it("snapshot older than 6.5h: falls through to the live build", async () => {
+    const snap = makeResult({ partyObTotal: 222 });
+    const deps = makeDeps({ loadSnap: vi.fn(async () => meta(snap)) });
+    const out = await loadDistributorDeepDiveResilientWith("2026-27", "Anant Singh", deps);
+    expect(deps.build).toHaveBeenCalledTimes(1);
+    expect(out.refreshing).toBeUndefined();
+  });
+});
+
+describe("transport-flag hygiene", () => {
+  it("a polluted snapshot (persisted stale/refreshing flags) is served clean", async () => {
+    const polluted = { ...makeResult({ partyObTotal: 999 }), stale: true, refreshing: true };
+    const deps = makeDeps({ loadSnap: vi.fn(async () => meta(polluted, NOW_MS - 60_000)) });
+    const out = await loadDistributorDeepDiveResilientWith("2026-27", "Anant Singh", deps);
+    expect(out.partyObTotal).toBe(999);
+    expect(out.stale).toBeUndefined();
+    expect(out.refreshing).toBeUndefined();
   });
 });

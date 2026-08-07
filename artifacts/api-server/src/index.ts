@@ -196,7 +196,9 @@ runMigrations()
         const heads = [...new Set(roster.members.map((m) => m.stateHead).filter(Boolean))];
         for (const head of heads) {
           try {
-            const r = await loadDistributorDeepDiveResilient(fy, head);
+            // bypassSnapshot: the warmer must build live — snapshot-first
+            // serving would hand it back its own snapshot and never refresh.
+            const r = await loadDistributorDeepDiveResilient(fy, head, { bypassSnapshot: true });
             logger.info(
               { head, fy, loaded: r.membersLoaded, failed: r.membersFailed, stale: r.stale ?? false },
               "distributor snapshot warmer: head done",
@@ -224,7 +226,7 @@ runMigrations()
     logger.error({ err }, "assertFrozenAnchors: unexpected failure"),
   );
 
-  // Assert frozen-MONTH anchors (7th-of-following-month freeze rule) for every
+  // Assert frozen-MONTH anchors (freeze at 00:00 on the 8th of the following month) for every
   // configured FY. A mismatch means something wrote to a frozen month.
   for (const fy of Object.keys(REGISTER_SHEET_IDS)) {
     void assertMonthAnchors(fy).catch((err) =>
