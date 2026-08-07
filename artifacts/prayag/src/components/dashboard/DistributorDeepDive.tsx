@@ -35,6 +35,7 @@ import {
   TrendingDown,
 } from "lucide-react";
 import { formatCompact } from "@/data/dataset";
+import { DistributorTabsPanel, type DdTab } from "./DistributorTabsPanel";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -2052,6 +2053,7 @@ export default function DistributorDeepDive() {
   const [selRegions, setSelRegions] = useState<string[]>([]);
   const [selStates, setSelStates]   = useState<string[]>([]);
   const [distFilter, setDistFilter] = useState("");
+  const [ddTab, setDdTab] = useState<DdTab>("overview");
   const [data, setData]           = useState<DistributorDeepDiveResult | null>(null);
   const [loading, setLoading]     = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -2417,6 +2419,39 @@ export default function DistributorDeepDive() {
           )}
         </div>
       )}
+      {/* ── Tab bar ─────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap gap-1 border-b border-border" data-testid="dd-tab-bar">
+        {([
+          ["overview", "Overview"],
+          ["secondary", "Secondary Sales"],
+          ["sku", "Existing vs New SKU"],
+          ["push", "Where & How to Push"],
+        ] as [DdTab, string][]).map(([k, label]) => (
+          <button
+            key={k}
+            onClick={() => setDdTab(k)}
+            className={`px-3 py-1.5 text-sm rounded-t-md border border-b-0 ${
+              ddTab === k
+                ? "bg-background border-border font-semibold"
+                : "bg-muted/40 border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+            data-testid={`dd-tab-${k}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {ddTab !== "overview" && (
+        <DistributorTabsPanel
+          tab={ddTab}
+          fy={fy}
+          dist={distFilter}
+          distName={distFilter ? (dir?.distributors.find((d) => d.normKey === distFilter)?.name ?? distFilter) : null}
+        />
+      )}
+
+      <div className={ddTab === "overview" ? "contents" : "hidden"}>
       {dirError && (
         <div className="border border-destructive/40 bg-destructive/5 rounded-lg p-4 text-sm text-destructive">
           {dirError}
@@ -3068,6 +3103,7 @@ export default function DistributorDeepDive() {
           <span>Reading member working sheets...</span>
         </div>
       )}
+      </div>{/* end overview wrapper */}
     </div>
   );
 }

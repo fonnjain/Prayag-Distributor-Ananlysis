@@ -1349,6 +1349,36 @@ router.get("/mgmt/distributor-deep-dive", async (req: Request, res: Response): P
   }
 });
 
+// GET /api/mgmt/distributor-recon — vocabulary reconciliation report
+router.get("/mgmt/distributor-recon", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const fy = String(req.query.fy ?? "2026-27");
+    const { buildDistributorRecon } = await import("../lib/mgmt/distributorTabs.js");
+    res.json(await buildDistributorRecon(fy));
+  } catch (err) {
+    req.log.error({ err }, "mgmt/distributor-recon: handler threw");
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// GET /api/mgmt/distributor-tab?fy=&dist=<normKey>&tab=secondary|sku|push
+router.get("/mgmt/distributor-tab", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const fy = String(req.query.fy ?? "2026-27");
+    const dist = String(req.query.dist ?? "");
+    const tab = String(req.query.tab ?? "");
+    if (!dist) { res.status(400).json({ error: "dist (distributor normKey) is required" }); return; }
+    const tabs = await import("../lib/mgmt/distributorTabs.js");
+    if (tab === "secondary") res.json(await tabs.buildSecondaryTab(fy, dist));
+    else if (tab === "sku") res.json(await tabs.buildSkuEvolution(fy, dist));
+    else if (tab === "push") res.json(await tabs.buildPushTab(fy, dist));
+    else res.status(400).json({ error: "tab must be secondary | sku | push" });
+  } catch (err) {
+    req.log.error({ err }, "mgmt/distributor-tab: handler threw");
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // GET /api/mgmt/distributor-directory
 // Cross-head distributor index for the Geography → Distributor → State Head
 // filter chain. Snapshot-backed per head; canonical state vocabulary.

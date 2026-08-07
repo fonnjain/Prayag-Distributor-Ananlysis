@@ -686,7 +686,7 @@ function trigramsOf(s: string): Set<string> {
 }
 
 /** Jaccard similarity on character trigrams of two normDistKey strings. */
-function jaccardTrigram(a: string, b: string): number {
+export function jaccardTrigram(a: string, b: string): number {
   const sa = trigramsOf(a), sb = trigramsOf(b);
   let inter = 0;
   for (const t of sa) if (sb.has(t)) inter++;

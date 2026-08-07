@@ -1,0 +1,115 @@
+GOAL
+Customers > Schemes > Nudge List currently shows a column called "They earn"
+and one called "ROI". Two problems.
+
+First, the names are wrong. "They earn" does not say what the number is, and
+"ROI" reads like a company return when it is the distributor's extra earning
+per rupee of extra purchase. Rename them to "Extra Earn" and "Extra ROI".
+
+Second, a salesperson cannot reproduce either figure from what is on screen.
+The table shows Billed, Next slab and Gap, but not the current slab rate, the
+current earning, or the earning at the next slab. So the two most important
+numbers arrive as assertions the salesperson has to take on trust, in front of
+a distributor who will ask how it was worked out. Expose every variable.
+
+PART 1 - RENAME
+In artifacts/api-server/src/lib/schemes/nudge.ts and
+artifacts/prayag/src/components/customers/SchemeNudgeEngine.tsx:
+
+  NudgeRow.theyEarn  ->  NudgeRow.extraEarn
+  NudgeRow.roi       ->  NudgeRow.extraRoi
+
+Both fields appear only in those two files - rename the field, not just the
+label. Also rename the sort key "theyEarn" to "extraEarn", the roiColor helper
+to extraRoiColor, and every visible label:
+
+  "They earn"          ->  "Extra Earn"
+  "They earn (total)"  ->  "Extra Earn (total)"   (Sales Head tab)
+  "ROI"                ->  "Extra ROI"
+
+DO NOT rename the `roi` query parameter on GET /api/schemes/nudges in
+routes/schemes.ts. That is the suppression threshold, not this column, and
+renaming it would break existing links. Leave it exactly as it is.
+
+PART 2 - EXPOSE THE VARIABLES
+Add two fields to NudgeRow so the arithmetic is fully derivable from the
+response:
+
+  currentSlab: number | null    the threshold of the slab the distributor
+                                is currently in (getCurrentSlab already
+                                computes this - it is simply not returned)
+  nextEarnings: number | null   nextSlab * nextRate
+
+currentRate and currentEarnings already exist on NudgeRow and are already
+computed. They are just not rendered. Render them.
+
+The Nudge List table should carry these columns, in this order:
+
+  Distributor | Scheme | Current slab | Current rate | Current earn |
+  Next slab | Next rate | Gap | Extra Earn | Extra ROI | Status
+
+Keep the table horizontally scrollable rather than shrinking the font below
+readable size.
+
+PART 3 - THE WORKED CALCULATION
+Clicking a row expands an inline strip underneath it showing the calculation
+in that distributor's own numbers, using the real values, not a template.
+For B R ASSOCIATES the strip must read as:
+
+  Gap          = 6,00,000 - 4,24,920 = Rs 1,75,080
+  Extra Earn   = (6,00,000 x 6.00%) - (4,24,920 x 5.00%)
+               = 36,000 - 21,246 = Rs 14,754
+  Extra ROI    = 14,754 / 1,75,080 = 8.42%
+
+Above the table, add one line of explanation, because this mechanic is the
+whole reason the numbers are large and nobody guesses it:
+
+  "A slab pays its rate on the distributor's ENTIRE quarterly billing, not
+   just the amount above the threshold. Crossing a slab re-prices everything
+   already bought - which is why Extra Earn is far bigger than the margin on
+   the gap alone."
+
+Tooltips:
+  Extra Earn - "What the DISTRIBUTOR earns extra by reaching the next slab,
+                after re-pricing his whole quarter. Not Prayag's cost."
+  Extra ROI  - "Extra Earn per rupee of extra purchase needed to get there."
+
+PART 4 - NULLS
+Rows with status AT_MAX (no next slab) and TRIP_ZONE (reward is a trip, no
+rate) have no Extra Earn or Extra ROI. Render the status word in those cells.
+Never render 0, and never render a dash that could be read as zero. The same
+applies to currentSlab and nextEarnings when they are null.
+
+CONVENTIONS
+- Two decimals, truncated not rounded, using trunc2 from
+  artifacts/prayag/src/lib/trunc.ts. No emojis.
+- Add all new columns to the Export output as well.
+- Never console.log in server code - use req.log in handlers, logger elsewhere.
+
+VERIFICATION - report all five before saying this is done
+Do not report success from reading the code. Run these and paste the output.
+
+1. Unchanged anchors. For FY2026-27, Q2 (Jul-Sep), no filters, report the
+   LIVE NUDGES count and the GAP TO CLOSE total BEFORE and AFTER the change.
+   They are currently 51 and Rs 28.21 L. Both must be identical afterwards -
+   this is a rename plus additive fields and must not change what is
+   suppressed or included. If either moved, stop and report it.
+
+2. Suppression still works. Confirm GET /api/schemes/nudges?roi=0.05 still
+   filters at 5% and that the query parameter name is unchanged. Report the
+   row count at roi=0.05 and at roi=0.12; the second must be smaller.
+
+3. Identity check across every NUDGE row:
+      extraEarn  == nextEarnings - currentEarnings   (within Rs 1)
+      extraRoi   == extraEarn / gap                  (within 0.0001)
+      gap        == nextSlab - billedSoFar           (within Rs 1)
+   Report the count of rows failing any of the three. All must be 0.
+
+4. Worked example. Print every field for B R ASSOCIATES (Syed Aqil Rizvi,
+   CP/Sink): currentSlab, currentRate, currentEarnings, nextSlab, nextRate,
+   nextEarnings, gap, extraEarn, extraRoi. Expected from the current screen:
+   billed 4,24,920, gap 1,75,080, extraEarn 14,754, extraRoi 8.42%.
+
+5. Null handling. Report how many rows have status AT_MAX and how many
+   TRIP_ZONE, and paste one rendered row of each showing that the Extra Earn
+   and Extra ROI cells contain the status word and not a zero.
