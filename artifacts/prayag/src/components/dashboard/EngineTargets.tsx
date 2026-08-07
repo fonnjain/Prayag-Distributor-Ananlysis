@@ -492,6 +492,18 @@ function CombinedTab(props: {
                   <td className="py-2 text-right font-medium">{cr(r.target)}</td>
                 </tr>
               ))}
+              <tr className="border-b border-border/50 font-medium bg-muted/30">
+                <td className="py-2">Total (territory routes)</td>
+                <td className="py-2 text-right">
+                  {cr(combined.routes.reduce((s, r) => s + r.baselineValue, 0))}
+                </td>
+                <td className="py-2 text-right">
+                  {cr(combined.routes.reduce((s, r) => s + r.growthAllocated, 0))}
+                </td>
+                <td className="py-2 text-right">
+                  {cr(combined.routes.reduce((s, r) => s + r.target, 0))}
+                </td>
+              </tr>
               <tr className="text-muted-foreground">
                 <td className="py-2">Project / Govt (carried at baseline, outside territory routes)</td>
                 <td className="py-2 text-right">{cr(combined.projectCarriedAtBaseline)}</td>
