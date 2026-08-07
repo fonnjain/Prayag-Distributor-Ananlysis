@@ -14,7 +14,7 @@ import { loadDeepDiveData, normSecKey } from "../deepDiveData.js";
 import { buildMemberPayload, buildStateHeadPayload } from "../aiPayload.js";
 import { loadDistributorDeepDive, normDistKey } from "../distributorDeepDive.js";
 import { loadRoster } from "../roster.js";
-import memberSheetMapRaw from "../../../../config/member_sheet_map.json" with { type: "json" };
+import { MEMBER_FILE_MAP as memberSheetMap } from "../memberResolver.js";
 import { logger } from "../../logger.js";
 import {
   resolveSkuGaps,
@@ -24,8 +24,6 @@ import {
   resolveSkuDetail,
   likeMonthsWindow,
 } from "./skuNodes.js";
-
-const memberSheetMap = memberSheetMapRaw as Record<string, string>;
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 

@@ -9,10 +9,8 @@ import type { GraphIndex, LevelMeta } from "./types.js";
 import { GAP_NODE_REGISTRY, KNOWN_KEY_SPLITS } from "./gapNodes.js";
 import { getCachedStateDashboard } from "../stateDashboard.js";
 import { loadRoster } from "../roster.js";
-import memberSheetMapRaw from "../../../../config/member_sheet_map.json" with { type: "json" };
+import { MEMBER_FILE_MAP as memberSheetMap } from "../memberResolver.js";
 import { normSecKey } from "../deepDiveData.js";
-
-const memberSheetMap = memberSheetMapRaw as Record<string, string>;
 
 const KNOWN_FYS = ["2026-27", "2025-26", "2024-25", "2023-24", "2022-23", "2021-22"];
 

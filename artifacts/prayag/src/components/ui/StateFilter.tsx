@@ -24,6 +24,12 @@ const STATE_CANON_NORMALISE: Record<string, string> = {
   "UP (S)":        "UTTAR PRADESH",
   "HP":            "HIMACHAL PRADESH",
   "KARNATAKA (B)": "KARNATAKA",
+  "JAMMU":         "JAMMU AND KASHMIR",
+  "KASHMIR":       "JAMMU AND KASHMIR",
+  "J&K":           "JAMMU AND KASHMIR",
+  "CHATTISGARH":   "CHHATTISGARH",
+  "MAHARASHTRA 2": "MAHARASHTRA",
+  "AP":            "ANDHRA PRADESH",
 };
 
 /** Normalise a raw state_canon value to the canonical name shown in the UI. */
@@ -33,15 +39,15 @@ export const REGION_GROUPS: { region: string; states: string[] }[] = [
   {
     region: "North",
     // Canonical geographic states only — no split-territory duplicates.
-    states: ["UTTAR PRADESH", "HARYANA", "PUNJAB", "RAJASTHAN", "HIMACHAL PRADESH", "UTTARAKHAND", "DELHI", "CHANDIGARH", "KASHMIR", "JAMMU"],
+    states: ["UTTAR PRADESH", "EAST U.P", "WEST U.P", "HARYANA", "PUNJAB", "RAJASTHAN", "HIMACHAL PRADESH", "UTTARAKHAND", "DELHI", "CHANDIGARH", "JAMMU AND KASHMIR"],
   },
   {
     region: "East",
-    states: ["WEST BENGAL", "BIHAR", "JHARKHAND", "ODISHA", "ASSAM"],
+    states: ["WEST BENGAL", "BIHAR", "JHARKHAND", "ODISHA", "ASSAM", "NORTH EAST"],
   },
   {
     region: "South",
-    states: ["KERALA", "TAMIL NADU", "AP", "TELANGANA", "KARNATAKA", "GOA"],
+    states: ["KERALA", "TAMIL NADU", "ANDHRA PRADESH", "TELANGANA", "KARNATAKA", "GOA"],
   },
   {
     region: "West",

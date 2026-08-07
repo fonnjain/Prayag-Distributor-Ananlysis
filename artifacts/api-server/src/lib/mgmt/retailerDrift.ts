@@ -16,7 +16,7 @@
  */
 
 import { loadDeepDiveData, type MemberRef } from "./deepDiveData.js";
-import { getMemberFileId } from "./memberSheet.js";
+import { getMemberFileId } from "./memberResolver.js";
 import { logger } from "../logger.js";
 
 /** |typed − sheet| ≤ TOLERANCE counts as in-sync (routine churn). */

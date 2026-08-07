@@ -175,6 +175,49 @@ runMigrations()
     setInterval(() => void runObMirrorSync(), 6 * 3_600_000).unref();
   }
 
+  // Distributor deep-dive snapshot warmer. In production the page is only as
+  // good as its last complete snapshot (degraded Sheets loads serve the
+  // snapshot), so build every head's deep dive SEQUENTIALLY — one head at a
+  // time, pausing between heads — shortly after startup and then every 6h.
+  // Sequential + bounded per-head concurrency keeps the Sheets read rate under
+  // the per-minute quota that a cold parallel burst used to trip.
+  {
+    let ddWarmInFlight = false;
+    const warmDistributorSnapshots = async (): Promise<void> => {
+      if (ddWarmInFlight) return;
+      ddWarmInFlight = true;
+      try {
+        const { loadDistributorDeepDiveResilient } = await import(
+          "./lib/mgmt/distributorDeepDive.js"
+        );
+        const { loadRoster } = await import("./lib/mgmt/roster.js");
+        const fy = "2026-27";
+        const roster = await loadRoster();
+        const heads = [...new Set(roster.members.map((m) => m.stateHead).filter(Boolean))];
+        for (const head of heads) {
+          try {
+            const r = await loadDistributorDeepDiveResilient(fy, head);
+            logger.info(
+              { head, fy, loaded: r.membersLoaded, failed: r.membersFailed, stale: r.stale ?? false },
+              "distributor snapshot warmer: head done",
+            );
+          } catch (err) {
+            logger.warn({ err, head }, "distributor snapshot warmer: head failed");
+          }
+          // Pause between heads so consecutive cold teams never stack reads.
+          await new Promise((r) => setTimeout(r, 30_000));
+        }
+      } catch (err) {
+        logger.error({ err }, "distributor snapshot warmer: failed");
+      } finally {
+        ddWarmInFlight = false;
+      }
+    };
+    // First run 3 min after startup (after register warm-up), then every 6h.
+    setTimeout(() => void warmDistributorSnapshots(), 3 * 60_000).unref();
+    setInterval(() => void warmDistributorSnapshots(), 6 * 3_600_000).unref();
+  }
+
   // Assert frozen-FY anchors in the background. Any mismatch means something
   // wrote to an immutable year — logged at ERROR and exposed via /registers/freeze-status.
   void assertFrozenAnchors().catch((err) =>

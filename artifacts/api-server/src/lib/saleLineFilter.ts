@@ -9,6 +9,30 @@
 // NORMALISED state (normStateExpr output), customers → customer.
 import { and, eq, sql, type SQL } from "drizzle-orm";
 import { db, saleLines } from "@workspace/db";
+import { STATE_CANON_NORMALISE } from "./stateCanon.js";
+
+// Derive the CASE branches from the single shared canon map so a new
+// territory-split mapping (e.g. J&K, CHATTISGARH, AP) propagates to every
+// sale_line report filter automatically. Values are trusted constants from
+// stateCanon.ts; the string form is only embedded via sql.raw/plain text with
+// single quotes escaped defensively.
+const q = (s: string) => `'${s.replace(/'/g, "''")}'`;
+const CANON_GROUPS: [canonical: string, raws: string[]][] = (() => {
+  const byCanon = new Map<string, string[]>();
+  for (const [raw, canon] of Object.entries(STATE_CANON_NORMALISE)) {
+    const arr = byCanon.get(canon) ?? [];
+    arr.push(raw);
+    byCanon.set(canon, arr);
+  }
+  return [...byCanon.entries()];
+})();
+
+function stateCaseSql(colExpr: string): string {
+  const whens = CANON_GROUPS.map(
+    ([canon, raws]) => `WHEN ${colExpr} IN (${raws.map(q).join(", ")}) THEN ${q(canon)}`,
+  ).join("\n    ");
+  return `CASE\n    ${whens}\n    ELSE COALESCE(${colExpr}, 'Unmapped')\n  END`;
+}
 
 export type EntityFilter = {
   heads?: string[];
@@ -31,13 +55,13 @@ export function hasEntityFilterValues(f?: EntityFilter): boolean {
  * PRADESH, and KARNATAKA (B) maps to KARNATAKA.
  */
 export function normStateExpr() {
-  return sql<string>`CASE
-    WHEN ${saleLines.stateCanon} IN ('DELHI A', 'DELHI NCR')              THEN 'DELHI'
-    WHEN ${saleLines.stateCanon} IN ('UP ( A )', 'UP (AS)', 'UP (S)')      THEN 'UTTAR PRADESH'
-    WHEN ${saleLines.stateCanon} = 'HP'                                    THEN 'HIMACHAL PRADESH'
-    WHEN ${saleLines.stateCanon} = 'KARNATAKA (B)'                         THEN 'KARNATAKA'
-    ELSE COALESCE(${saleLines.stateCanon}, 'Unmapped')
-  END`;
+  // Compose around the drizzle column ref so the rendered table name/alias is
+  // always correct regardless of how the query maps saleLines.
+  const whens = CANON_GROUPS.map(
+    ([canon, raws]) =>
+      sql`WHEN ${saleLines.stateCanon} IN (${sql.raw(raws.map(q).join(", "))}) THEN ${sql.raw(q(canon))}`,
+  );
+  return sql<string>`CASE ${sql.join(whens, sql` `)} ELSE COALESCE(${saleLines.stateCanon}, 'Unmapped') END`;
 }
 
 // sql.join IN-clause (ANY(jsArray) silently matches nothing with drizzle).
@@ -59,14 +83,7 @@ export function entityConds(f?: EntityFilter) {
  * sale_line_current under a table alias (e.g. `sl`). Same normalisation rules.
  */
 export function normStateExprAliased(alias: string): SQL<string> {
-  const col = sql.raw(`${alias}.state_canon`);
-  return sql<string>`CASE
-    WHEN ${col} IN ('DELHI A', 'DELHI NCR')              THEN 'DELHI'
-    WHEN ${col} IN ('UP ( A )', 'UP (AS)', 'UP (S)')      THEN 'UTTAR PRADESH'
-    WHEN ${col} = 'HP'                                    THEN 'HIMACHAL PRADESH'
-    WHEN ${col} = 'KARNATAKA (B)'                         THEN 'KARNATAKA'
-    ELSE COALESCE(${col}, 'Unmapped')
-  END`;
+  return sql<string>`${sql.raw(stateCaseSql(`${alias}.state_canon`))}`;
 }
 
 /**
@@ -111,13 +128,7 @@ export function entityCondsText(
   const params: unknown[] = [];
   let i = startIdx;
   if (f.none) parts.push("false");
-  const stateCase = `CASE
-    WHEN ${a}state_canon IN ('DELHI A', 'DELHI NCR')          THEN 'DELHI'
-    WHEN ${a}state_canon IN ('UP ( A )', 'UP (AS)', 'UP (S)')  THEN 'UTTAR PRADESH'
-    WHEN ${a}state_canon = 'HP'                                THEN 'HIMACHAL PRADESH'
-    WHEN ${a}state_canon = 'KARNATAKA (B)'                     THEN 'KARNATAKA'
-    ELSE COALESCE(${a}state_canon, 'Unmapped')
-  END`;
+  const stateCase = stateCaseSql(`${a}state_canon`);
   if (f.heads?.length) {
     parts.push(`COALESCE(${a}head_canon, 'Unmapped') = ANY($${i}::text[])`);
     params.push(f.heads);

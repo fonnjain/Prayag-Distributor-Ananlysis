@@ -732,22 +732,44 @@ export async function loadDistributorDeepDive(
 
   if (!selectedStateHead || !members.length) return empty();
 
-  // Step 2: Load all member working sheets in parallel.
-  // 60 s timeout: large teams (74 members) exhaust the 20 s budget on cold loads.
+  // Step 2: Load member working sheets with BOUNDED concurrency. A fully
+  // parallel load of a 74-member team fires ~150 Sheets reads in one burst and
+  // reliably trips the per-minute read quota in production (429), so the load
+  // degrades and no snapshot is ever saved — which is exactly why the page
+  // "worked for Anant Singh only" in prod. A small worker pool keeps the read
+  // rate under the quota while warm-cache loads stay fast (cached sheets
+  // resolve instantly regardless of pool size).
   const TIMEOUT_MS = 60_000;
-  const sheetResults = await Promise.allSettled(
-    members.map((m) =>
-      Promise.race([
-        loadMemberSheet(m.normKey, m.name, fy),
-        new Promise<{ status: "error"; error: string }>((resolve) =>
-          setTimeout(
-            () => resolve({ status: "error", error: "timeout after 20s" }),
-            TIMEOUT_MS,
-          ),
-        ),
-      ]),
-    ),
-  );
+  const SHEET_CONCURRENCY = 4;
+  const sheetResults: PromiseSettledResult<
+    Awaited<ReturnType<typeof loadMemberSheet>> | { status: "error"; error: string }
+  >[] = new Array(members.length);
+  {
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      while (next < members.length) {
+        const i = next++;
+        const m = members[i];
+        try {
+          const v = await Promise.race([
+            loadMemberSheet(m.normKey, m.name, fy),
+            new Promise<{ status: "error"; error: string }>((resolve) =>
+              setTimeout(
+                () => resolve({ status: "error", error: `timeout after ${TIMEOUT_MS / 1000}s` }),
+                TIMEOUT_MS,
+              ),
+            ),
+          ]);
+          sheetResults[i] = { status: "fulfilled", value: v };
+        } catch (err) {
+          sheetResults[i] = { status: "rejected", reason: err };
+        }
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(SHEET_CONCURRENCY, members.length) }, () => worker()),
+    );
+  }
 
   type RichRow = RetailerRow & { memberName: string; memberState: string };
   // SD2: per-member accumulator — populated during classification (Step 4).
@@ -1439,6 +1461,16 @@ async function saveDistDdSnapshot(key: string, payload: DistributorDeepDiveResul
   } catch (err) {
     logger.warn({ err, key }, "distributorDeepDive: snapshot save failed (non-fatal)");
   }
+}
+
+/** Snapshot-first read for cross-head consumers (distributor directory):
+ *  returns the last saved payload without attempting a live Sheets build.
+ *  Null when this head has never completed a build. */
+export async function loadDistDdSnapshotOnly(
+  fy: string,
+  stateHead: string,
+): Promise<DistributorDeepDiveResult | null> {
+  return loadDistDdSnapshot(distDdSnapKey(fy, stateHead));
 }
 
 async function loadDistDdSnapshot(key: string): Promise<DistributorDeepDiveResult | null> {

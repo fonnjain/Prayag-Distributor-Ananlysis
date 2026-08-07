@@ -1,0 +1,135 @@
+# Distributor Deep Dive — fix the mapping, then rebuild the filters
+
+*Two parts. The second cannot be built usefully until the first is done.*
+
+---
+
+## Why the order matters
+
+The proposed filter chain is **State → Distributor → State Head**. Distributors are derived from retailer rows in **member working sheets**.
+
+**With one head mapped, the distributor dropdown lists only Anant Singh's distributors whatever state is selected.** Building the filter first produces a working control over empty data.
+
+---
+
+# Part 1 — The mapping, finally
+
+This was diagnosed and never closed. The app has been published several times since, so **if it were purely a publish gap it would have resolved itself.** It hasn't — which means the mappings were never persisted.
+
+```
+Prayag app - Distributor Deep Dive still works for Anant Singh only. This was
+diagnosed previously and not closed. Finish it.
+
+1. ANSWER THE QUESTION THAT WAS NEVER ANSWERED.
+   Report the count of members WITH a mapped working sheet, per State Head, in
+   BOTH databases - dev (heliumdb) and production (neondb).
+   The app has been published repeatedly since the diagnosis, so a publish gap
+   alone cannot explain it. State plainly whether the mappings exist in either
+   database.
+
+2. IF NEITHER HAS THEM, the SD1 / SD3 / SD6 / SD9 phases did not persist their
+   member-sheet maps, and the acceptance figures they reported did not come from
+   sheets. Say so - it determines whether to re-run them or promote data.
+
+   The file IDs are all recorded in the phase documents:
+     Sandeep Dadheech    74 members, four folders
+     Syed Aqil Rizvi     32 members, two folders
+     Lalan Kumar         15 members, one folder
+     Biju C.O and seven other heads   48 members
+   Re-registering from those lists is mechanical if the mappings are simply
+   absent.
+
+3. FIX IT AS ONE SHARED RESOLVER, not per page. One service returning, for a
+   given head: the roster, LEFT status, and the mapped working sheet where one
+   exists. Used by the Sales Deep Dive, Distributor Deep Dive, SKU Deep Dive,
+   Warning System, AI payload, report generator and comparison API.
+   Report every location that resolves a member sheet today, and confirm each
+   now calls it.
+
+Acceptance:
+  members-with-sheet reported per head, for both databases
+  all twelve heads load their member sheets
+  the Distributor Deep Dive returns data for every head, not just Anant Singh
+  the Warning System stops showing J1 for members who have sheets
+```
+
+---
+
+# Part 2 — The filter chain
+
+```
+Prayag app - Distributor Deep Dive filters. Same global rules. Build AFTER the
+mapping is fixed and every head returns data.
+
+Replace the current State Head selector with a three-stage chain:
+
+  1. GEOGRAPHY   All India (default) | Region | State (multi-select)
+                 | State Head's states
+  2. DISTRIBUTOR filtered to the geography selected
+  3. STATE HEAD  filtered to the geography selected
+
+Geography comes first because a distributor is a geographic entity. A user
+asking "who serves Maharashtra" should not need to know which head covers it.
+
+1. THE GEOGRAPHY CONTROL - four modes, one control.
+   ALL INDIA        default, everything
+   REGION           North / South / East / West, multi-select.
+                    REUSE the region mapping the Reports page already uses -
+                    do not define a second one.
+   STATE            multi-select, any combination
+   STATE HEAD'S STATES  picking a head selects the states they cover, as a
+                    convenience shortcut - the selection remains a set of
+                    STATES, not a head filter
+
+2. NORMALISE THE STATE VOCABULARY IN THE PICKER.
+   state_canon holds DELHI A, DELHI NCR, UP ( A ), UP (AS), KARNATAKA (B),
+   JAMMU, KASHMIR. The picker must offer DELHI, UTTAR PRADESH, KARNATAKA and
+   JAMMU AND KASHMIR - one entry each - and match all variants underneath
+   through the shared stateCanon module.
+   Selecting DELHI must return DELHI A and DELHI NCR rows. This has already
+   caused a halved-results bug on Customer Performance; do not repeat it.
+
+3. STATES ARE COVERED BY MORE THAN ONE HEAD. Selecting a state may return
+   several:
+     Karnataka   Prashant Onam Naik AND Sandeep Dadheech
+     Rajasthan   Pawan Sharma AND Sunil Mohanty
+     West U.P    Anant Singh, Anuj Sharma AND Sunil Mohanty
+   Show every head serving the selection. Do NOT assume one state maps to one
+   head.
+
+4. THE DISTRIBUTOR DROPDOWN filters to the geography, showing each distributor
+   with its state and its net for the selected period so the list is orderable
+   by size rather than alphabetically.
+   A distributor operating in more than one state appears once, with its states
+   listed.
+
+5. STATE HEAD becomes the THIRD filter, narrowing within the geography rather
+   than defining it. Selecting nothing shows all heads serving the selection.
+
+6. THE HEADER STATES THE ACTIVE SELECTION IN FULL - geography, distributor
+   count, heads included, period, and the channel label. A figure on this page
+   is now the product of three filters, and a reader must be able to see all
+   three without opening a menu.
+
+Acceptance - show the rendered result:
+  All India returns every head, not only Anant Singh
+  selecting DELHI returns DELHI A and DELHI NCR rows
+  selecting North returns the same states the Reports page uses for North
+  selecting Karnataka shows BOTH Prashant Onam Naik and Sandeep Dadheech
+  the distributor dropdown reflects the geography and is orderable by net
+  selecting a State Head's states populates the state multi-select, and the
+    selection remains editable as states
+  the header states geography, distributors, heads, period and channel
+```
+
+---
+
+## One thing to decide
+
+**Should the geography filter use the distributor's state, or the retailer's state?**
+
+They differ. A distributor in Delhi may serve retailers in Haryana. **My suggestion is the distributor's own state**, since this page is about distributors — but the header should say which, because the two produce different lists and someone will eventually ask.
+
+---
+
+*Verified against the live dashboard and the frozen registers, 5 August 2026*

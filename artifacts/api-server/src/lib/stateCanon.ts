@@ -18,6 +18,14 @@ export const STATE_CANON_NORMALISE: Record<string, string> = {
   "UP (S)":        "UTTAR PRADESH",
   "HP":            "HIMACHAL PRADESH",
   "KARNATAKA (B)": "KARNATAKA",
+  "JAMMU":         "JAMMU AND KASHMIR",
+  "KASHMIR":       "JAMMU AND KASHMIR",
+  "J&K":           "JAMMU AND KASHMIR",
+  "CHATTISGARH":   "CHHATTISGARH",
+  "MAHARASHTRA 2": "MAHARASHTRA",
+  "AP":            "ANDHRA PRADESH",
+  // EAST U.P / WEST U.P stay distinct on purpose — the business treats them as
+  // separate territories (West UP has its own head set).
 };
 
 /** Return the canonical geographic state name for a raw state_canon value. */

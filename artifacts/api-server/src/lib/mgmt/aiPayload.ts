@@ -20,7 +20,7 @@
 //   No new Sheets reads — only already-loaded data.
 //   Never hand raw retailer rows to Claude.
 
-import { getMemberFileId } from "./memberSheet.js";
+import { getMemberFileId } from "./memberResolver.js";
 import type { MemberKpis } from "./deepDiveData.js";
 import type { MemberSheetData, RetailerRow, RetailerSpread } from "./memberSheet.js";
 import type { VisitPlan } from "./visitPlan.js";

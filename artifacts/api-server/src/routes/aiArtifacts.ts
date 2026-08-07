@@ -30,7 +30,7 @@ import {
 } from "../lib/mgmt/aiPayload.js";
 import { runNumericGuard, runPeriodGuard, type GuardResult, type PeriodGuardResult } from "../lib/mgmt/numericGuard.js";
 import type { VisitPlan } from "../lib/mgmt/visitPlan.js";
-import { getMemberFileId } from "../lib/mgmt/memberSheet.js";
+import { getMemberFileId } from "../lib/mgmt/memberResolver.js";
 
 const router: IRouter = Router();
 

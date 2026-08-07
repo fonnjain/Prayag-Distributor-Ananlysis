@@ -1349,6 +1349,41 @@ router.get("/mgmt/distributor-deep-dive", async (req: Request, res: Response): P
   }
 });
 
+// GET /api/mgmt/distributor-directory
+// Cross-head distributor index for the Geography → Distributor → State Head
+// filter chain. Snapshot-backed per head; canonical state vocabulary.
+router.get("/mgmt/distributor-directory", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const fy = typeof req.query.fy === "string" ? req.query.fy.trim() : "2026-27";
+    const { loadDistributorDirectory } = await import("../lib/mgmt/distributorDirectory.js");
+    res.json(await loadDistributorDirectory(fy));
+  } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
+    req.log.error({ err }, "mgmt/distributor-directory: handler threw");
+    res.status(500).json({ error: "Could not build the distributor directory." });
+  }
+});
+
+// GET /api/mgmt/member-sheet-coverage
+// Acceptance metric for the shared member-sheet resolver: per state head, how
+// many roster members have a mapped working sheet (config/member_sheet_map.json,
+// bundled — identical in dev and production). Lists the unmapped names.
+router.get("/mgmt/member-sheet-coverage", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { coverageByHead } = await import("../lib/mgmt/memberResolver.js");
+    const heads = await coverageByHead();
+    const totals = heads.reduce(
+      (a, h) => ({ members: a.members + h.members, withSheet: a.withSheet + h.withSheet }),
+      { members: 0, withSheet: 0 },
+    );
+    res.json({ source: "config/member_sheet_map.json (bundled)", totals, heads });
+  } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
+    req.log.error({ err }, "mgmt/member-sheet-coverage: handler threw");
+    res.status(500).json({ error: "Could not compute member-sheet coverage." });
+  }
+});
+
 // ── D7: distributor tier overrides ───────────────────────────────────────────
 //
 // GET  /api/mgmt/distributor-tier-override?fy=...&stateHead=...

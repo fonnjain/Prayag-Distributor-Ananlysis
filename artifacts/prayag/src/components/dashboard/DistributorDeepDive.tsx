@@ -18,6 +18,7 @@ import { trunc2 } from "@/lib/trunc";
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { QuotaWaitBanner, quotaDelayMs, quotaOrThrow } from "./quotaWait";
 import { useGlobalFilter } from "@/data/global-filter-context";
+import { REGION_GROUPS } from "../ui/StateFilter";
 import { achBandText } from "@/lib/achievementBands";
 import {
   AlertTriangle,
@@ -441,6 +442,37 @@ type DistributorDeepDiveResult = {
   /** True when the server served the last saved snapshot because Google Sheets
    *  was briefly busy — figures may be slightly out of date. */
   stale?: boolean;
+};
+
+// ── Distributor directory (filter-chain index) ───────────────────────────────
+
+type DirectoryDistributor = {
+  name: string;
+  normKey: string;
+  states: string[];   // canonical geographic states (serving members' states)
+  heads: string[];
+  retailerCount: number;
+  activeCount: number;
+  orderBooking: number;
+  sale: number;
+};
+
+type DirectoryHead = {
+  name: string;
+  states: string[];
+  distributorCount: number;
+  orderBooking: number;
+  stale: boolean;
+  failed: boolean;
+};
+
+type DistributorDirectory = {
+  fy: string;
+  basis: string;
+  basisLabel: string;
+  states: string[];
+  heads: DirectoryHead[];
+  distributors: DirectoryDistributor[];
 };
 
 // ── API ──────────────────────────────────────────────────────────────────────
@@ -2007,9 +2039,18 @@ function PerMemberAnalysisSection({ perMember }: { perMember: MemberDistributorR
 
 // ── Main component ────────────────────────────────────────────────────────────
 
+type GeoMode = "all" | "region" | "state";
+
 export default function DistributorDeepDive() {
   const { fy }                    = useGlobalFilter();
   const [stateHead, setStateHead] = useState("");
+  // ── Filter chain: Geography → Distributor → State Head ──────────────
+  const [dir, setDir]             = useState<DistributorDirectory | null>(null);
+  const [dirError, setDirError]   = useState<string | null>(null);
+  const [geoMode, setGeoMode]     = useState<GeoMode>("all");
+  const [selRegions, setSelRegions] = useState<string[]>([]);
+  const [selStates, setSelStates]   = useState<string[]>([]);
+  const [distFilter, setDistFilter] = useState("");
   const [data, setData]           = useState<DistributorDeepDiveResult | null>(null);
   const [loading, setLoading]     = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -2064,42 +2105,241 @@ export default function DistributorDeepDive() {
     }
   }, []);
 
+  // Load the cross-head distributor directory (drives the filter chain).
+  useEffect(() => {
+    let cancelled = false;
+    setDir(null);
+    setDirError(null);
+    fetch(`${API}/mgmt/distributor-directory?fy=${encodeURIComponent(fy)}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Directory load failed (${res.status})`);
+        const json: DistributorDirectory = await res.json();
+        if (!cancelled) setDir(json);
+      })
+      .catch((err) => {
+        if (!cancelled) setDirError(err instanceof Error ? err.message : "Directory load failed");
+      });
+    return () => { cancelled = true; };
+  }, [fy]);
+
   // Reload whenever global FY changes.
   useEffect(() => {
     setData(null);
     setExpandedDist(null);
-    load(fy, stateHead);
+    if (stateHead) load(fy, stateHead);
   }, [fy]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleStateHeadChange(next: string) {
     setStateHead(next);
     setData(null);
     setExpandedDist(null);
-    load(fy, next);
+    if (next) load(fy, next);
   }
 
   function toggleDist(normKey: string) {
     setExpandedDist((prev) => (prev === normKey ? null : normKey));
   }
 
-  const stateHeads = data?.stateHeads ?? [];
+  // ── Geography resolution ─────────────────────────────────────────────
+  // null = All India (no state restriction); otherwise a canonical-state set.
+  const geoStates: Set<string> | null = (() => {
+    if (geoMode === "region") {
+      const s = new Set<string>();
+      for (const g of REGION_GROUPS) {
+        if (selRegions.includes(g.region)) for (const st of g.states) s.add(st);
+      }
+      return s.size ? s : null;
+    }
+    if (geoMode === "state") {
+      return selStates.length ? new Set(selStates) : null;
+    }
+    return null;
+  })();
+
+  const inGeo = (states: string[]): boolean =>
+    geoStates === null || states.some((s) => geoStates.has(s));
+
+  const headsInGeo = (dir?.heads ?? []).filter((h) => inGeo(h.states));
+  const distsInGeo = (dir?.distributors ?? []).filter(
+    (d) => inGeo(d.states) && (!distFilter || d.normKey === distFilter),
+  );
+  // Heads offered in the third filter: heads serving the geography (and, when a
+  // distributor is picked, heads whose teams serve that distributor).
+  const headOptions = headsInGeo.filter(
+    (h) => !distFilter || distsInGeo.some((d) => d.heads.includes(h.name)),
+  );
+  const headsIncluded = stateHead
+    ? headOptions.filter((h) => h.name === stateHead)
+    : headOptions;
+
+  // Keep an invalidated head selection from sticking when the geography changes.
+  useEffect(() => {
+    if (stateHead && dir && !headOptions.some((h) => h.name === stateHead)) {
+      setStateHead("");
+      setData(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geoMode, selRegions.join("|"), selStates.join("|"), distFilter, dir]);
+
+  const geoLabel =
+    geoMode === "all" || geoStates === null
+      ? "All India"
+      : geoMode === "region"
+        ? selRegions.join(" + ")
+        : selStates.join(", ");
+
+  // Directory states → picker options (canonical, one entry per geographic state).
+  const stateOptions = dir?.states ?? [];
+  const distStatesByKey = new Map((dir?.distributors ?? []).map((d) => [d.normKey, d.states]));
+
   const hasConcentrationRisk = data?.distributors.some((d) => d.isConcentrationRisk) ?? false;
+
+  // In the single-head detail view, the geography + distributor filters still
+  // narrow the distributor table (states come from the directory).
+  const detailDistributors = (data?.distributors ?? []).filter((d) => {
+    if (distFilter && d.normKey !== distFilter) return false;
+    if (geoStates === null) return true;
+    const states = distStatesByKey.get(d.normKey);
+    return !states || states.some((s) => geoStates.has(s));
+  });
 
   return (
     <div className="space-y-6">
-      {/* ── Filter bar ─────────────────────────────────────────────── */}
-      <div className="flex flex-wrap gap-3 items-center">
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-muted-foreground">State Head</label>
+      {/* ── Filter chain: Geography → Distributor → State Head ─────── */}
+      <div className="flex flex-wrap gap-3 items-end">
+        {/* 1. Geography */}
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">1 · Geography</label>
+          <div className="flex items-center gap-2">
+            <select
+              value={geoMode}
+              onChange={(e) => {
+                const m = e.target.value as GeoMode;
+                setGeoMode(m);
+                if (m === "all") { setSelRegions([]); setSelStates([]); }
+              }}
+              className="border border-border rounded-md px-2.5 py-1.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+              data-testid="select-geo-mode"
+            >
+              <option value="all">All India</option>
+              <option value="region">Region</option>
+              <option value="state">State</option>
+            </select>
+            {geoMode === "region" && (
+              <div className="flex items-center gap-1.5">
+                {REGION_GROUPS.map((g) => (
+                  <button
+                    key={g.region}
+                    onClick={() =>
+                      setSelRegions((prev) =>
+                        prev.includes(g.region)
+                          ? prev.filter((r) => r !== g.region)
+                          : [...prev, g.region],
+                      )
+                    }
+                    className={`px-2.5 py-1.5 rounded-md text-sm border ${
+                      selRegions.includes(g.region)
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background border-border text-muted-foreground hover:bg-muted/40"
+                    }`}
+                    data-testid={`button-region-${g.region.toLowerCase()}`}
+                  >
+                    {g.region}
+                  </button>
+                ))}
+              </div>
+            )}
+            {geoMode === "state" && (
+              <>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v && !selStates.includes(v)) setSelStates((p) => [...p, v]);
+                  }}
+                  className="border border-border rounded-md px-2.5 py-1.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring min-w-[160px]"
+                  data-testid="select-add-state"
+                >
+                  <option value="">Add state…</option>
+                  {stateOptions
+                    .filter((s) => !selStates.includes(s))
+                    .map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                </select>
+                {/* Convenience: a head's states → the state multi-select (stays editable as states) */}
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const h = (dir?.heads ?? []).find((x) => x.name === e.target.value);
+                    if (h) setSelStates((p) => [...new Set([...p, ...h.states])]);
+                  }}
+                  className="border border-border rounded-md px-2.5 py-1.5 text-sm bg-background text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  data-testid="select-head-states"
+                >
+                  <option value="">+ a head's states…</option>
+                  {(dir?.heads ?? []).map((h) => (
+                    <option key={h.name} value={h.name}>{h.name}</option>
+                  ))}
+                </select>
+              </>
+            )}
+          </div>
+          {geoMode === "state" && selStates.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {selStates.map((s) => (
+                <span
+                  key={s}
+                  className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs"
+                >
+                  {s}
+                  <button
+                    onClick={() => setSelStates((p) => p.filter((x) => x !== s))}
+                    className="text-muted-foreground hover:text-foreground"
+                    aria-label={`Remove ${s}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 2. Distributor (filtered to geography, ordered by net) */}
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">2 · Distributor</label>
+          <select
+            value={distFilter}
+            onChange={(e) => setDistFilter(e.target.value)}
+            className="border border-border rounded-md px-2.5 py-1.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring min-w-[220px] max-w-[340px]"
+            disabled={!dir}
+            data-testid="select-distributor"
+          >
+            <option value="">All distributors ({(dir?.distributors ?? []).filter((d) => inGeo(d.states)).length})</option>
+            {(dir?.distributors ?? [])
+              .filter((d) => inGeo(d.states))
+              .map((d) => (
+                <option key={d.normKey} value={d.normKey}>
+                  {d.name} — {d.states.join("/") || "?"} — {formatINR(d.orderBooking)}
+                </option>
+              ))}
+          </select>
+        </div>
+
+        {/* 3. State Head (narrows within the geography) */}
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">3 · State Head</label>
           <select
             value={stateHead}
             onChange={(e) => handleStateHeadChange(e.target.value)}
             className="border border-border rounded-md px-2.5 py-1.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring min-w-[180px]"
-            disabled={stateHeads.length === 0}
+            disabled={!dir}
+            data-testid="select-state-head"
           >
-            <option value="">All state heads</option>
-            {stateHeads.map((h) => (
-              <option key={h} value={h}>{h}</option>
+            <option value="">All heads serving selection ({headOptions.length})</option>
+            {headOptions.map((h) => (
+              <option key={h.name} value={h.name}>{h.name}</option>
             ))}
           </select>
         </div>
@@ -2122,6 +2362,42 @@ export default function DistributorDeepDive() {
           </span>
         )}
       </div>
+
+      {/* ── Active-selection header — every figure below is the product of
+             three filters, so all three are stated in full. ─────────────── */}
+      {dir && (
+        <div
+          className="rounded-md border border-border bg-muted/20 px-4 py-2.5 text-sm"
+          data-testid="header-active-selection"
+        >
+          <span className="font-semibold">{geoLabel}</span>
+          <span className="text-muted-foreground"> · </span>
+          <span>
+            {distFilter
+              ? `1 distributor (${dir.distributors.find((d) => d.normKey === distFilter)?.name ?? distFilter})`
+              : `${distsInGeo.length} distributors`}
+          </span>
+          <span className="text-muted-foreground"> · </span>
+          <span>
+            {headsIncluded.length === 1
+              ? `Head: ${headsIncluded[0].name}`
+              : `${headsIncluded.length} state heads (${headsIncluded.map((h) => h.name).join(", ")})`}
+          </span>
+          <span className="text-muted-foreground"> · FY {fy} · Party / secondary channel</span>
+          <div className="text-xs text-muted-foreground mt-0.5">{dir.basisLabel}</div>
+          {stateHead && (
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Head detail below shows {stateHead}'s full team figures; the geography and
+              distributor filters narrow the Distributor Overview table only.
+            </div>
+          )}
+        </div>
+      )}
+      {dirError && (
+        <div className="border border-destructive/40 bg-destructive/5 rounded-lg p-4 text-sm text-destructive">
+          {dirError}
+        </div>
+      )}
 
       {/* Failed-sheets notice: Google Sheets choked on this pass — the page is
           incomplete, NOT unmapped. Distinct from the "not yet mapped" count. */}
@@ -2162,10 +2438,64 @@ export default function DistributorDeepDive() {
         </div>
       )}
 
-      {/* ── No state head selected ─────────────────────────────────── */}
-      {!loading && data && !stateHead && (
-        <div className="text-muted-foreground text-sm text-center py-12">
-          Select a state head to see the distributor breakdown.
+      {/* ── Multi-head overview (no single head selected) ───────────── */}
+      {!stateHead && dir && (
+        <SectionCard title={`Distributors — ${geoLabel} (${distsInGeo.length})`}>
+          <p className="text-xs text-muted-foreground mb-3">
+            Every head serving the selection is included. Pick a state head above for
+            the full deep dive (flows, SKU spread, investment, whitespace).
+            Ordered by order booking (net).
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm" data-testid="table-distributor-overview">
+              <thead>
+                <tr className="border-b border-border text-muted-foreground text-xs">
+                  <th className="text-left py-2 pr-4 font-medium">Distributor</th>
+                  <th className="text-left py-2 pr-4 font-medium">State(s)</th>
+                  <th className="text-left py-2 pr-4 font-medium">State head(s)</th>
+                  <th className="text-right py-2 pr-3 font-medium">Retailers</th>
+                  <th className="text-right py-2 pr-3 font-medium">Active</th>
+                  <th className="text-right py-2 pr-4 font-medium">Order Booking</th>
+                  <th className="text-right py-2 font-medium">Sale</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/50">
+                {distsInGeo.map((d) => (
+                  <tr key={d.normKey} className="hover:bg-muted/30">
+                    <td className="py-2 pr-4 font-medium">{d.name}</td>
+                    <td className="py-2 pr-4 text-xs text-muted-foreground">{d.states.join(", ") || "--"}</td>
+                    <td className="py-2 pr-4 text-xs">{d.heads.join(", ")}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums">{d.retailerCount}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums">{d.activeCount}</td>
+                    <td className="py-2 pr-4 text-right tabular-nums font-medium">{formatINR(d.orderBooking)}</td>
+                    <td className="py-2 text-right tabular-nums text-muted-foreground">
+                      {d.sale > 0 ? formatINR(d.sale) : "--"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-border font-semibold text-sm">
+                  <td colSpan={3} className="py-2 pr-4 text-muted-foreground">Total</td>
+                  <td className="py-2 pr-3 text-right tabular-nums">
+                    {distsInGeo.reduce((s, d) => s + d.retailerCount, 0)}
+                  </td>
+                  <td className="py-2 pr-3 text-right tabular-nums">
+                    {distsInGeo.reduce((s, d) => s + d.activeCount, 0)}
+                  </td>
+                  <td className="py-2 pr-4 text-right tabular-nums">
+                    {formatINR(distsInGeo.reduce((s, d) => s + d.orderBooking, 0))}
+                  </td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </SectionCard>
+      )}
+      {!stateHead && !dir && !dirError && (
+        <div className="flex items-center justify-center gap-2 text-muted-foreground text-sm py-12">
+          <Loader2 className="w-4 h-4 animate-spin" /> Building the distributor directory…
         </div>
       )}
 
@@ -2261,7 +2591,7 @@ export default function DistributorDeepDive() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/50">
-                    {data.distributors.map((dist) => (
+                    {detailDistributors.map((dist) => (
                       <>
                         <tr
                           key={dist.normKey}
@@ -2344,15 +2674,19 @@ export default function DistributorDeepDive() {
                   {/* Totals row */}
                   <tfoot>
                     <tr className="border-t-2 border-border font-semibold text-sm">
-                      <td colSpan={2} className="py-2 pr-4 text-muted-foreground">Party total</td>
-                      <td className="py-2 pr-3 text-right tabular-nums">
-                        {data.distributors.reduce((s, d) => s + d.retailerCount, 0)}
+                      <td colSpan={2} className="py-2 pr-4 text-muted-foreground">
+                        {detailDistributors.length === data.distributors.length
+                          ? "Party total"
+                          : `Filtered total (${detailDistributors.length} of ${data.distributors.length})`}
                       </td>
                       <td className="py-2 pr-3 text-right tabular-nums">
-                        {data.distributors.reduce((s, d) => s + d.activeCount, 0)}
+                        {detailDistributors.reduce((s, d) => s + d.retailerCount, 0)}
+                      </td>
+                      <td className="py-2 pr-3 text-right tabular-nums">
+                        {detailDistributors.reduce((s, d) => s + d.activeCount, 0)}
                       </td>
                       <td className="py-2 pr-4 text-right tabular-nums">
-                        {formatINR(data.distributors.reduce((s, d) => s + d.orderBooking, 0))}
+                        {formatINR(detailDistributors.reduce((s, d) => s + d.orderBooking, 0))}
                       </td>
                       <td colSpan={4}></td>
                     </tr>

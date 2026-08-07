@@ -39,7 +39,7 @@
 //   Never console.log — use logger.
 //   Config JSON statically imported (esbuild bundles it; no cwd-relative reads).
 
-import memberSheetMapRaw from "../../../config/member_sheet_map.json" assert { type: "json" };
+import { MEMBER_FILE_MAP } from "./memberResolver.js";
 import { logger } from "../logger.js";
 import {
   computeVisitPlan,
@@ -54,11 +54,7 @@ import {
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const MEMBER_FILE_MAP: Record<string, string> = Object.fromEntries(
-  Object.entries(memberSheetMapRaw as Record<string, string>).filter(
-    ([k]) => k !== "_comment",
-  ),
-);
+// MEMBER_FILE_MAP now lives in memberResolver.ts — the single shared resolver.
 
 const SUMMARY_TAB_PREFIX = "SUMMARY REPORT";
 
@@ -1027,9 +1023,7 @@ function computeSpread(
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export function getMemberFileId(normKey: string): string | undefined {
-  return MEMBER_FILE_MAP[normKey];
-}
+export { getMemberFileId } from "./memberResolver.js";
 
 export async function loadMemberSheet(
   memberKey: string,

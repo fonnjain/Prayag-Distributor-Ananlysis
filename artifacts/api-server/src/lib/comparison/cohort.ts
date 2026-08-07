@@ -10,7 +10,7 @@ import { db } from "@workspace/db";
 import { fyForDate } from "../mgmt/targetEngine.js";
 import { loadDeepDiveData } from "../mgmt/deepDiveData.js";
 import { loadDistributorDeepDiveResilient } from "../mgmt/distributorDeepDive.js";
-import { getMemberFileId } from "../mgmt/memberSheet.js";
+import { getMemberFileId } from "../mgmt/memberResolver.js";
 import { getAtRisk } from "../customers/analytics.js";
 import { getSeasonality } from "../sku/skuK4.js";
 import { PROJECT_HEAD_CANON } from "../sku/catalogue.js";
