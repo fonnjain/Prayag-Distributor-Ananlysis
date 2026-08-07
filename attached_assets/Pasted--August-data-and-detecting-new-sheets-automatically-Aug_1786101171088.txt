@@ -1,0 +1,121 @@
+# August data, and detecting new sheets automatically
+
+*August is live. A new tab has also appeared in the Sale Sheet that must not be read as sales.*
+
+---
+
+## What is there now — read 5 August
+
+### SALE SHEET 26-27 · `19LQGpkbZiecGaXdBvl48rPZT2LUz3sKekeKX5fHu7Ps`
+
+| Tab | Rows | ₹ Cr | Change since 1 Aug |
+|---|---|---|---|
+| Apr | 5,542 | 13.11 | — |
+| May | 11,812 | 28.28 | — |
+| **Jun** | **12,860** | **31.42** | **−8 rows, −₹0.01 Cr** |
+| **July** | **13,803** | **32.10** | **+1,955 rows, +₹4.74 Cr** |
+| **Aug** | **102** | **0.17** | **new — live** |
+| **`Sheet11`** | 4,598 | 26.77 | **NOT SALES DATA** |
+
+### Order Sheet 26-27 · `1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A`
+
+| Tab | Rows | ₹ Cr | Change |
+|---|---|---|---|
+| Apr / May / Jun | unchanged | — | — |
+| **July** | **14,448** | **34.23** | **+636 rows, +₹1.67 Cr** |
+| **Aug** | **423** | **0.75** | **new — live** |
+
+---
+
+## `Sheet11` — a scratch tab that would corrupt the total
+
+It has **completely different columns**: `Bill From`, `Item Code`, `Quantity`, `Taxable Value`, `GROUP`, `MAIN GROUP`, **`WEIGHT`, `TOTAL WEIGHT`** — plus a second block of `GROUP / QTY / VALUE / WEIGHT`.
+
+**No invoice number. No date. No month column.** It is somebody's weight and tonnage working area.
+
+> **A loader that sums every tab would silently add ₹26.77 Cr of non-sales data** — a 20% overstatement. This is exactly the case for detecting new tabs and refusing to guess.
+
+---
+
+```
+Prayag app - August data and automatic new-sheet detection. Same global rules.
+
+1. AUGUST IS LIVE IN BOTH REGISTERS. No new file IDs are needed - the Aug tabs
+   sit inside the workbooks already configured.
+     SALE SHEET 26-27  Aug tab   102 rows   Rs 0.17 Cr
+     Order Sheet 26-27 Aug tab   423 rows   Rs 0.75 Cr
+   Confirm the nightly replace now covers Aug-26, and that the baseline rises
+   from 0 without the read guard firing.
+
+2. JULY IS STILL MOVING - it is inside its grace window until 7 August.
+     Sale Sheet  11,848 -> 13,803 rows,  Rs 27.36 -> Rs 32.10 Cr  (+Rs 4.74 Cr)
+     Order Sheet 13,812 -> 14,448 rows,  Rs 32.56 -> Rs 34.23 Cr  (+Rs 1.67 Cr)
+   This is Deepak's confirmed 3-to-5 day entry window and is expected. Confirm
+   the nightly replace is picking July up daily, and that it FREEZES on 7 August
+   with its anchor recorded at whatever the sheet holds that morning.
+
+3. JUNE HAS LOST 8 ROWS - Rs 0.01 Cr. June should have frozen on 7 July.
+   Report whether June is frozen in the database, and whether the DB still holds
+   12,868 rows against the sheet's 12,860. If June is frozen the DB is correct
+   and the SHEET has changed after freezing - which is worth knowing, because it
+   means the frozen anchor and the live sheet will drift apart permanently.
+   Do not change the frozen year. Report the divergence.
+
+4. A NEW TAB HAS APPEARED AND MUST NOT BE READ AS SALES.
+   'Sheet11' in SALE SHEET 26-27 holds 4,598 rows and Rs 26.77 Cr of NON-SALES
+   data - a weight and tonnage working area with columns Bill From, Item Code,
+   Quantity, Taxable Value, GROUP, MAIN GROUP, WEIGHT, TOTAL WEIGHT. It has no
+   invoice number, no date and no month column.
+   A loader summing every tab would overstate the year by 20 per cent.
+
+5. BUILD NEW-TAB DETECTION - this is the durable part of this task.
+
+   On every sync, compare the workbook's tab list against the tabs the loader
+   recognises. For any tab that is NEW:
+     a) do NOT read it into sales data
+     b) log it by name with its row count
+     c) test it for the expected shape - a month tab must have an invoice-number
+        column, a date column and a taxable-value column in the known positions
+     d) if it MATCHES the shape and its name parses to a month, propose it for
+        inclusion and report the proposal - do not auto-include
+     e) if it does NOT match, mark it ignored with the reason
+
+   Expected month tab names are Apr through Mar. A tab named Sheet11, WT,
+   INDEX, Combined, --report, LAST MONTH ORDER or a person's name is not a
+   month and must never be read.
+
+   MATCH MONTH TABS BY PARSING THE NAME, not by a hardcoded list - so Sep, Oct
+   and the rest are found automatically when they appear. A tab that parses to a
+   month AND has the right shape is a real month; anything else is reported.
+
+6. THE SAME DETECTION FOR NEW FILES.
+   Each fiscal year adds new workbooks - a new Sale Sheet, a new Order Sheet, a
+   new secondary drop. When the fiscal year turns, report which configured file
+   IDs no longer match the current year and what the new ones should be, rather
+   than silently reading last year's file.
+
+Acceptance - report each:
+  Aug-26 loads from both registers with its row counts
+  the Aug baseline rises from 0 without the guard firing
+  July is replaced daily until 7 August, then freezes with its anchor
+  the June divergence is reported, and the frozen year is NOT changed
+  Sheet11 is detected as new, logged, tested, and IGNORED with its reason
+  a simulated new tab named 'Sep' with the correct shape is PROPOSED, not
+    auto-included
+  a simulated new tab named 'Scratch' is ignored
+  the total loaded from SALE SHEET excludes Sheet11 entirely
+```
+
+---
+
+## Why detection matters more than the August load
+
+August itself is routine — the tabs already exist and the nightly replace should pick them up.
+
+**`Sheet11` is the reason to build detection now.** It appeared without warning, holds a plausible-looking `Taxable Value` column, and would inflate the year by a fifth if summed. Nobody would have caught it except by noticing the total looked wrong — which is how the ₹33 Cr July inflation was found, several days late.
+
+**A tab that is new should be reported, not read.**
+
+---
+
+*Both registers read 5 August 2026*
