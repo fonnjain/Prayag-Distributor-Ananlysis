@@ -1,6 +1,5 @@
-import { trunc2IN } from "@/lib/trunc";
 import { useState, useEffect, useMemo } from "react";
-import { formatINR, formatCompact } from "@/data/dataset";
+import { formatCompact } from "@/data/dataset";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -65,10 +64,6 @@ type AnalyticsPayload = {
   };
 };
 
-function toCr(value: number): string {
-  return `₹${trunc2IN((value / 1e7))} Cr`;
-}
-
 function YoyCard({ title, split, subtitle }: { title: string; split: AnalyticsYoy; subtitle: string }) {
   const pct = split.pct;
   const up = pct != null && pct >= 0;
@@ -77,7 +72,7 @@ function YoyCard({ title, split, subtitle }: { title: string; split: AnalyticsYo
       <CardContent className="p-5 space-y-1.5">
         <p className="text-sm text-muted-foreground">{title}</p>
         <div className="flex items-baseline gap-2 flex-wrap">
-          <span className="text-2xl font-semibold font-display">{toCr(split.current)}</span>
+          <span className="text-2xl font-semibold font-display">{formatCompact(split.current)}</span>
           {pct != null && (
             <span
               className={`inline-flex items-center gap-1 text-sm font-medium ${
@@ -91,7 +86,7 @@ function YoyCard({ title, split, subtitle }: { title: string; split: AnalyticsYo
           )}
         </div>
         <p className="text-xs text-muted-foreground">
-          vs {toCr(split.prior)} — {subtitle}
+          vs {formatCompact(split.prior)} — {subtitle}
         </p>
       </CardContent>
     </Card>
@@ -276,10 +271,10 @@ export default function Growth() {
               </div>
             </div>
             <ul className="text-sm text-muted-foreground space-y-1">
-              <li>Retained customers billed {toCr(retention.retainedRevenue)} this period.</li>
-              <li>New customers added {toCr(retention.newRevenue)}.</li>
+              <li>Retained customers billed {formatCompact(retention.retainedRevenue)} this period.</li>
+              <li>New customers added {formatCompact(retention.newRevenue)}.</li>
               <li>
-                Lost customers were worth {toCr(retention.lostPriorRevenue)} in the same period
+                Lost customers were worth {formatCompact(retention.lostPriorRevenue)} in the same period
                 last year.
               </li>
             </ul>
@@ -335,7 +330,7 @@ export default function Growth() {
                   <div key={g.group} className="flex justify-between text-sm">
                     <span>{g.group}</span>
                     <span className="tabular-nums">
-                      {formatINR(g.margin)} on {formatINR(g.revenue)}
+                      {formatCompact(g.margin)} on {formatCompact(g.revenue)}
                     </span>
                   </div>
                 ))}
