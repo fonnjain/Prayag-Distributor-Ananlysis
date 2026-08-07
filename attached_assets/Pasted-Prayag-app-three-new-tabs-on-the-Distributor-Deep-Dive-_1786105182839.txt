@@ -1,0 +1,92 @@
+Prayag app - three new tabs on the Distributor Deep Dive. Same global rules.
+All three respect the geography -> distributor -> state head filter chain.
+
+0. RECONCILE THE TWO DISTRIBUTOR VOCABULARIES FIRST. Report before building.
+   Distinct names in each source, exact matches, matches after normalisation,
+   and names appearing in only one.
+   Apply the identity rule - same only if the name matches AND the state agrees
+   AND they do not appear as separate rows for the same period. NEVER auto-merge
+   on similarity. A wrongly merged distributor produces a concentration figure
+   that is simply false and the numeric guard cannot catch it.
+
+TAB 1 - SECONDARY SALES
+   What retailers bought FROM this distributor, from the FY2026-27 secondary
+   register. Apr-Jul only, Rs 81.36 Cr company-wide. The coverage note must
+   derive from the loaded months, never be hardcoded.
+
+   Show: secondary NET, gross, effective discount; retailers buying and how many
+   active; codes and segments moved; month distribution; top retailers with
+   concentration.
+
+   THEN THE FLOW GAP AT ITEM-CODE LEVEL - the point of the tab.
+     primary in (bought from Prayag) vs secondary out (sold to retailers)
+   STATE BOTH READINGS EVERY TIME: stock building at the distributor, OR
+   business moving outside the attributed channel. No stock statements exist, so
+   they cannot be distinguished. NEVER phrase it as an accusation.
+   Flag any CODE where primary in is large and secondary out is near zero -
+   stock sitting still, far more actionable than a total.
+
+TAB 2 - EXISTING vs NEW SKU
+   Reuse the Targets engine's three populations. Do not write a second
+   definition.
+
+   Per distributor, on BOTH primary (what they buy) and secondary (what their
+   retailers buy):
+     EXISTING SKU  in the baseline period AND this period - value, codes, growth
+     NEW SKU       this period, NOT in the baseline - value, codes, segments
+     LOST SKU      in the baseline, absent now - ranked by baseline value
+
+   Baseline is the same fiscal months of the prior year, like months only. For a
+   closed prior year, state the frozen anchor used.
+
+   THE READING THAT MATTERS: a distributor growing on EXISTING SKU alone is
+   buying more of the same and is exposed if those lines soften. One growing on
+   NEW SKU is widening. Report both as a SHARE OF GROWTH, not just totals.
+
+   Show real terms beside nominal using that distributor's own segment mix - the
+   index runs CPVC 1.007 to water tank 1.181.
+
+TAB 3 - WHERE AND HOW TO PUSH
+   CHECK THE FLOW GAP BEFORE RECOMMENDING ANYTHING. A distributor whose primary
+   in far exceeds secondary out is already carrying stock; pushing more SKU at
+   them is wrong. Lead the tab with the verdict: PUSH, or CLEAR STOCK FIRST.
+
+   Then the push list - reuse the K3 engine, do not rebuild it:
+     TIER 1 RANGE   codes in a segment they already buy - 67 per cent of one
+                    real list, and the cheapest route
+     TIER 2 LAPSED  bought before, stopped - proven demand from this customer
+     TIER 3 ACTIVE  peers buy it, in a segment they are active in
+     TIER 4 NEW     peers buy it, in a segment they do not touch
+   Top 10 by default, ranked within tier by peer penetration x median peer net.
+   NAME THE PEERS - "13 of 27 peers your size in your state buy this and you do
+   not" is arguable in a way a target never is.
+
+   THE "HOW", not just the "where". Each recommendation carries:
+     the segment's PEAK QUARTER on territory-only curves - 13 of 14 peak Q4, so
+       a Q4 code pushed in August is January groundwork and must say so
+     WHICH RETAILERS beneath this distributor could take it
+     THE DISCOUNT POSITION - flag any code already 5 points or more above its
+       own territory norm. Volume on an over-discounted code is a margin
+       question first
+     THE SALESPERSON covering those retailers, so the list reaches someone who
+       can act
+
+   ALSO SHOW COVERAGE, a different kind of push:
+     unassigned retailers in their districts - 96.0 per cent of assigned
+       retailers are active against 5.0 per cent of unassigned, and this is an
+       ADMINISTRATIVE fix, the fastest available
+     dormant retailers beneath them, ranked by prior-year value
+     districts they serve with no distributor coverage at all
+
+Acceptance - show the rendered result:
+  the two vocabularies reconciled and the match rate reported
+  Tab 1 shows secondary NET with a derived coverage note, and the flow gap per
+    segment and per code
+  a code with high primary in and near-zero secondary out is flagged
+  Tab 2 reports existing, new and lost on BOTH primary and secondary, with
+    growth split between existing and new
+  real terms use that distributor's own segment mix
+  Tab 3 leads with PUSH or CLEAR STOCK FIRST
+  the push list is tiered, capped at 10, with named peers and peak quarters
+  unassigned retailers in their districts are listed
+  no figure appears without its source named
