@@ -476,6 +476,52 @@ router.get("/registers/anchor-health", (_req, res) => {
 });
 
 /**
+ * GET /registers/tab-audit
+ *
+ * New-tab / new-file detection report:
+ *   tabs  — every workbook tab the loaders do NOT read as sales/order data,
+ *           with status (proposed | ignored), the concrete reason, grid rows,
+ *           and first/last sighting. Populated on every register sync.
+ *   files — configured register file IDs per FY vs the clock-derived current
+ *           FY: when the fiscal year turns, this flags that no workbook is
+ *           configured for the new FY instead of silently reading last year's.
+ */
+router.get("/registers/tab-audit", async (req, res) => {
+  try {
+    const { currentFyLabel } = await import("../lib/registers/tabAudit.js");
+    const { pool } = await import("@workspace/db");
+    const rows = await pool.query(
+      `SELECT sheet_id, tab_name, fy, register, status, reason, grid_rows,
+              first_seen_at, last_seen_at
+       FROM register_tab_audit
+       ORDER BY register, fy DESC, status, tab_name`,
+    );
+    const cfg = rawRegisterSheetsCfg as unknown as {
+      registers?: Record<string, string>;
+      sap_source?: Record<string, string>;
+    };
+    const configured = Object.fromEntries(
+      Object.entries(cfg.registers ?? {}).filter(([k]) => /^\d{4}-\d{2}$/.test(k)),
+    );
+    const currentFy = currentFyLabel();
+    res.json({
+      tabs: rows.rows,
+      files: {
+        currentFy,
+        configuredSaleRegisters: configured,
+        currentFyConfigured: Boolean(configured[currentFy]),
+        note: configured[currentFy]
+          ? `Sale register for ${currentFy} is configured.`
+          : `NO sale register configured for ${currentFy} — add the new workbook ID to config/register_sheets.json instead of letting the sync read last year's file.`,
+      },
+    });
+  } catch (err) {
+    req.log.error({ err }, "tab-audit: failed");
+    res.status(500).json({ error: "Could not load tab audit." });
+  }
+});
+
+/**
  * POST /registers/run-sync-tick
  *
  * Manually triggers one scheduled-sync tick (same logic as the 6-hour timer).

@@ -1254,7 +1254,34 @@ export async function ingestOrderBookingFy(
 
   const tabs = await listSheetTabs(sheetId);
 
+  // New-tab detection: a monthly-named tab is ingested only when its calendar
+  // month has started (a 'Sep' tab appearing in August is proposed, not read).
+  // Every other tab the loader does not ingest — unknown, lookup, combined,
+  // per-head — is recorded in the register_tab_audit ledger with its reason.
+  const { classifyTabName, auditRegisterTabs } = await import("../registers/tabAudit.js");
+  const ingestTabs: typeof tabs = [];
+  const auditTabs: Array<(typeof tabs)[number] & { presetReason?: string }> = [];
   for (const tab of tabs) {
+    const cls = classifyOrderTab(tab.title.trim());
+    if (cls.role === "monthly") {
+      if (classifyTabName(tab.title.trim(), fy).kind === "month-future") {
+        auditTabs.push(tab); // shape-tested → proposed, never auto-included
+      } else {
+        ingestTabs.push(tab);
+      }
+    } else if (cls.role === "unknown") {
+      auditTabs.push(tab); // shape-tested to explain what it is
+    } else {
+      auditTabs.push({ ...tab, presetReason: cls.excludedReason ?? "Known non-data tab." });
+    }
+  }
+  if (!dryRun && auditTabs.length > 0) {
+    await auditRegisterTabs({ sheetId, fy, register: "order", tabs: auditTabs }).catch((err) =>
+      logger.warn({ err, fy, tabs: auditTabs.map((t) => t.title) }, "ingestOrderBookingFy: tab audit failed — unrecognised tabs NOT recorded this run"),
+    );
+  }
+
+  for (const tab of ingestTabs) {
     const cls = classifyOrderTab(tab.title.trim());
     if (cls.role !== "monthly") continue;
 
@@ -1469,9 +1496,14 @@ export async function ingestOrderBookingFy(
         .selectDistinct({ sourceTab: primaryOrderLines.sourceTab })
         .from(primaryOrderLines)
         .where(eq(primaryOrderLines.fy, fy));
+      // Keep = every tab physically present in the workbook, NOT just the tabs
+      // replaced this run: a monthly tab deliberately skipped by policy (e.g.
+      // an early 'Sep' tab whose month has not started) must never have its
+      // existing mirror rows deleted as an "orphan". Only tabs that vanished
+      // from the sheet itself are orphans.
       const orphans = computeOrphanTabs(
         existing.map((r) => r.sourceTab),
-        replacedTabs,
+        tabs.map((t) => t.title.trim()),
       );
       for (const orphan of orphans) {
         await db

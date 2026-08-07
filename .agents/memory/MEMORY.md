@@ -103,4 +103,5 @@
 - [Distributor DD stale fallback](distributor-dd-stale-fallback.md) — member-sheet Sheets failures return 200 with membersFailed>0, not throws; only complete loads may overwrite the snapshot.
 - [Deep Dive prod-empty pattern](distributor-deep-dive-prod-empty.md) — parallel Sheets bursts + complete-load snapshot gating = prod-only empty pages; memberResolver is the mapping source of truth.
 - [Deep Dive filter chain + canon](deep-dive-filter-chain.md) — distributor directory (snapshot-only reads), geography = serving member's state; saleLineFilter CASE derives from STATE_CANON_NORMALISE.
+- [Register new-tab detection](register-tab-audit.md) — unrecognised tabs are shape-tested and proposed/ignored, never read; orphan cleanup must keep policy-skipped tabs; audit failures must WARN.
 - [Comparison guard validation](comparison-guard-validation.md) — validation steps that curl the API must self-provision a disposable server when none is reachable; live data lacks a missing-cost head, so that path is unit-tested.

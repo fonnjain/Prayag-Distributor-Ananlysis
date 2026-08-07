@@ -232,6 +232,21 @@ export async function listSheetTabs(spreadsheetId: string): Promise<SheetTab[]> 
 
 export type SheetCellValue = string | number | boolean | null;
 
+// Reads only the first `maxRows` rows of one tab — used by the tab-audit
+// shape test, which needs the header area of an unrecognised tab without
+// paying for a full read.
+export async function readTabRowsSample(
+  spreadsheetId: string,
+  title: string,
+  maxRows = 25,
+): Promise<SheetCellValue[][]> {
+  const range = `${quoteTitle(title)}!A1:AZ${maxRows}`;
+  const data = (await sheetsGet(
+    `/${spreadsheetId}/values/${encodeURIComponent(range)}?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`,
+  )) as { values?: SheetCellValue[][] };
+  return data.values ?? [];
+}
+
 // Reads every populated row of one tab in 50k-row chunks. Values arrive
 // UNFORMATTED with dates as Excel serial numbers. The Sheets API omits
 // trailing empty cells and rows; rows are returned as-is (0-indexed arrays).

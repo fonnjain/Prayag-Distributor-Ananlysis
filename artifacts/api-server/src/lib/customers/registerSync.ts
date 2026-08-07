@@ -253,7 +253,7 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
     const unmapped = emptyUnmapped();
     const lines: InsertSaleLine[] = [];
 
-    const { rowsScanned, tabsRead } = await readRegisterFromSheets(
+    const { rowsScanned, tabsRead, tabsNotRead } = await readRegisterFromSheets(
       spreadsheetId,
       fy,
       (values, columns, tabMonthLabel) => {
@@ -262,6 +262,15 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
         lines.push(toSaleLine(result.row, occurrence, unmapped, "sheets"));
       },
     );
+
+    // New-tab detection: every workbook tab NOT read as sales data is logged,
+    // shape-tested and recorded as proposed/ignored. Never blocks the sync.
+    if (tabsNotRead && tabsNotRead.length > 0) {
+      const { auditRegisterTabs } = await import("../registers/tabAudit.js");
+      await auditRegisterTabs({ sheetId: spreadsheetId, fy, register: "sale", tabs: tabsNotRead }).catch((err) =>
+        logger.warn({ err, fy, tabs: tabsNotRead.map((t) => t.title) }, "register sync: tab audit failed — unrecognised tabs NOT recorded this run"),
+      );
+    }
 
     // ── Guard: zero-row abort ────────────────────────────────────────────────
     // A silent empty read (API outage, auth error, or wrong tab detection) must

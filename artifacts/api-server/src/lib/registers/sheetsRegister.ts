@@ -17,7 +17,8 @@ import {
   type CellValue,
   type RegisterColumns,
 } from "./normalize.js";
-import { listSheetTabs, readTabRowsChunked, type SheetCellValue } from "./sheetsApi.js";
+import { listSheetTabs, readTabRowsChunked, type SheetCellValue, type SheetTab } from "./sheetsApi.js";
+import { classifyTabName } from "./tabAudit.js";
 import { logger } from "../logger.js";
 
 // Monthly tab name pattern. Handles abbreviated and full month names, with or
@@ -32,6 +33,10 @@ export type RegisterReadResult = {
   columns: RegisterColumns;
   rowsScanned: number;
   tabsRead: string[];
+  /** Tabs present in the workbook that were NOT read as sales data: non-month
+   *  names (Sheet11, WT, INDEX, …) and month tabs whose calendar month has not
+   *  started yet. Callers on the sync path feed these into auditRegisterTabs. */
+  tabsNotRead: SheetTab[];
 };
 
 // Streams all register data tabs of a live spreadsheet.
@@ -50,14 +55,26 @@ export async function readRegisterFromSheets(
   onRow: (values: CellValue[], columns: RegisterColumns, tabMonthLabel?: string) => void,
 ): Promise<RegisterReadResult> {
   const tabs = await listSheetTabs(spreadsheetId);
+  // A month tab is selected by PARSING its name against the FY — not just the
+  // regex — and only when its calendar month has started. A 'Sep' tab
+  // appearing in August is therefore NOT read (it surfaces in tabsNotRead for
+  // the audit to propose); a scratch tab like 'Sheet11' never parses to a
+  // month and is never read.
   const monthlyTabs = tabs
-    .filter((t) => MONTHLY_TAB_RE.test(t.title))
+    .filter(
+      (t) =>
+        MONTHLY_TAB_RE.test(t.title) &&
+        classifyTabName(t.title, fyOverride).kind === "month-started",
+    )
     .sort((a, b) => a.title.localeCompare(b.title));
 
   const tabsToRead =
     monthlyTabs.length > 0
       ? monthlyTabs.map((t) => t.title)
       : [REGISTER_TAB];
+
+  const readSet = new Set(tabsToRead);
+  const tabsNotRead = tabs.filter((t) => !readSet.has(t.title));
 
   let totalRowsScanned = 0;
   let lastColumns: RegisterColumns | null = null;
@@ -127,7 +144,7 @@ export async function readRegisterFromSheets(
     );
   }
 
-  return { columns: lastColumns, rowsScanned: totalRowsScanned, tabsRead };
+  return { columns: lastColumns, rowsScanned: totalRowsScanned, tabsRead, tabsNotRead };
 }
 
 export type { SheetCellValue };

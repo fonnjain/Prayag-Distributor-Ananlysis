@@ -137,6 +137,29 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    id: "011_register_tab_audit",
+    sql: `
+      -- Ledger of workbook tabs seen by register syncs that the loaders do NOT
+      -- read as sales/order data: scratch tabs (Sheet11), early future-month
+      -- tabs (a 'Sep' tab appearing in August), lookup/summary tabs. Each row
+      -- records why the tab was excluded and when it was first noticed, so a
+      -- new tab is reported instead of silently read or silently dropped.
+      DROP TABLE IF EXISTS register_tab_audit;
+      CREATE TABLE register_tab_audit (
+        sheet_id      text NOT NULL,
+        tab_name      text NOT NULL,
+        fy            text NOT NULL,
+        register      text NOT NULL,
+        status        text NOT NULL,
+        reason        text,
+        grid_rows     integer,
+        first_seen_at timestamptz NOT NULL DEFAULT now(),
+        last_seen_at  timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (sheet_id, tab_name, fy, register)
+      );
+    `,
+  },
+  {
     id: "008_backfill_state_head_2425_2526",
     sql: `
       -- FY2024-25 and FY2025-26 registers (Schema B, 11 columns) carry no
