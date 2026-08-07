@@ -34,7 +34,7 @@ import {
   TrendingUp,
   TrendingDown,
 } from "lucide-react";
-import { formatINR } from "@/data/dataset";
+import { formatCompact } from "@/data/dataset";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -536,8 +536,8 @@ function RetailerTable({ retailers, memberName }: {
               <th className="text-left py-2 pr-4 font-medium">Member</th>
             )}
             <th className="text-left py-2 pr-4 font-medium">Location</th>
-            <th className="text-right py-2 pr-4 font-medium">OB (Rs)</th>
-            <th className="text-right py-2 pr-4 font-medium">Sale (Rs)</th>
+            <th className="text-right py-2 pr-4 font-medium">OB (₹)</th>
+            <th className="text-right py-2 pr-4 font-medium">Sale (₹)</th>
             <th className="text-right py-2 font-medium">Visits</th>
           </tr>
         </thead>
@@ -564,12 +564,12 @@ function RetailerTable({ retailers, memberName }: {
                 {[r.city, r.district].filter(Boolean).join(", ") || "--"}
               </td>
               <td className="py-1.5 pr-4 text-right tabular-nums">
-                {r.orderBooking > 0 ? formatINR(r.orderBooking) : (
+                {r.orderBooking > 0 ? formatCompact(r.orderBooking) : (
                   <span className="text-muted-foreground">--</span>
                 )}
               </td>
               <td className="py-1.5 pr-4 text-right tabular-nums">
-                {r.sale > 0 ? formatINR(r.sale) : (
+                {r.sale > 0 ? formatCompact(r.sale) : (
                   <span className="text-muted-foreground">--</span>
                 )}
               </td>
@@ -604,11 +604,11 @@ function FlowPanel({ flows, distName }: { flows: DistributorFlows | null; distNa
           <div className="mt-2.5 grid grid-cols-2 gap-3">
             <div>
               <div className="text-xs text-muted-foreground">Order Booking (primary)</div>
-              <div className="font-semibold tabular-nums text-sm">{formatINR(flows.primaryOb)}</div>
+              <div className="font-semibold tabular-nums text-sm">{formatCompact(flows.primaryOb)}</div>
             </div>
             <div>
               <div className="text-xs text-muted-foreground">Secondary Out (member sheets)</div>
-              <div className="font-semibold tabular-nums text-sm">{formatINR(flows.secondaryOut)}</div>
+              <div className="font-semibold tabular-nums text-sm">{formatCompact(flows.secondaryOut)}</div>
             </div>
           </div>
         )}
@@ -632,7 +632,7 @@ function FlowPanel({ flows, distName }: { flows: DistributorFlows | null; distNa
             <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
               Primary In — Prayag to Distributor
             </div>
-            <div className="text-xl font-bold tabular-nums">{formatINR(flows.primaryDispatch)}</div>
+            <div className="text-xl font-bold tabular-nums">{formatCompact(flows.primaryDispatch)}</div>
             <div className="text-xs text-muted-foreground">Primary sales register</div>
             {flows.matchedCustomers.length > 0 && (
               <div className="text-xs text-muted-foreground italic">
@@ -644,7 +644,7 @@ function FlowPanel({ flows, distName }: { flows: DistributorFlows | null; distNa
             <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
               Secondary Out — Distributor to Retailers
             </div>
-            <div className="text-xl font-bold tabular-nums">{formatINR(flows.secondaryOut)}</div>
+            <div className="text-xl font-bold tabular-nums">{formatCompact(flows.secondaryOut)}</div>
             <div className="text-xs text-muted-foreground">Member sheets (FY to date)</div>
           </div>
         </div>
@@ -658,7 +658,7 @@ function FlowPanel({ flows, distName }: { flows: DistributorFlows | null; distNa
           }`}>
             <span className="font-semibold">Flow gap: </span>
             <span className="tabular-nums font-bold">
-              {flows.flowGap >= 0 ? "+" : ""}{formatINR(flows.flowGap)}
+              {flows.flowGap >= 0 ? "+" : ""}{formatCompact(flows.flowGap)}
             </span>
             <span className="ml-2 opacity-80">
               {gapPositive
@@ -673,12 +673,12 @@ function FlowPanel({ flows, distName }: { flows: DistributorFlows | null; distNa
           <div className="grid grid-cols-3 gap-3 pt-1 border-t border-border/60">
             <div>
               <div className="text-xs text-muted-foreground">Order Booking</div>
-              <div className="font-semibold tabular-nums text-sm">{formatINR(flows.primaryOb)}</div>
+              <div className="font-semibold tabular-nums text-sm">{formatCompact(flows.primaryOb)}</div>
               <div className="text-xs text-muted-foreground">primary, non-institutional</div>
             </div>
             <div>
               <div className="text-xs text-muted-foreground">Dispatched</div>
-              <div className="font-semibold tabular-nums text-sm">{formatINR(flows.primaryDispatch)}</div>
+              <div className="font-semibold tabular-nums text-sm">{formatCompact(flows.primaryDispatch)}</div>
               <div className="text-xs text-muted-foreground">primary register</div>
             </div>
             <div>
@@ -688,7 +688,7 @@ function FlowPanel({ flows, distName }: { flows: DistributorFlows | null; distNa
                   ? "text-amber-600 dark:text-amber-400"
                   : "text-muted-foreground"
               }`}>
-                {flows.pendingValue !== null ? formatINR(flows.pendingValue) : "--"}
+                {flows.pendingValue !== null ? formatCompact(flows.pendingValue) : "--"}
               </div>
               <div className="text-xs text-muted-foreground">
                 {flows.fillRate !== null
@@ -736,7 +736,7 @@ function FlowPanel({ flows, distName }: { flows: DistributorFlows | null; distNa
                 <div className="text-xs text-muted-foreground">This period</div>
                 <div className="font-semibold tabular-nums text-sm">
                   {flows.currentPeriodDispatch !== null
-                    ? formatINR(flows.currentPeriodDispatch)
+                    ? formatCompact(flows.currentPeriodDispatch)
                     : "--"}
                 </div>
               </div>
@@ -745,7 +745,7 @@ function FlowPanel({ flows, distName }: { flows: DistributorFlows | null; distNa
                 <div className="text-xs text-muted-foreground">Prior period</div>
                 <div className="font-semibold tabular-nums text-sm">
                   {flows.priorPeriodDispatch !== null
-                    ? formatINR(flows.priorPeriodDispatch)
+                    ? formatCompact(flows.priorPeriodDispatch)
                     : "no data"}
                 </div>
               </div>
@@ -909,7 +909,7 @@ function SkuSpreadPanel({
                     />
                   </div>
                   <div className="w-24 shrink-0 text-xs tabular-nums text-right">
-                    {formatINR(seg.net)}
+                    {formatCompact(seg.net)}
                     <span className="text-muted-foreground ml-1">{trunc2(seg.pct)}%</span>
                   </div>
                 </div>
@@ -937,13 +937,13 @@ function SkuSpreadPanel({
                     />
                   </div>
                   <div className="w-24 shrink-0 text-xs tabular-nums text-right">
-                    {formatINR(b.net)}
+                    {formatCompact(b.net)}
                   </div>
                 </div>
               ))}
               {brands.length > 8 && (
                 <div className="text-xs text-muted-foreground pl-48 pt-0.5">
-                  + {brands.length - 8} more product lines (total {formatINR(totalNet)})
+                  + {brands.length - 8} more product lines (total {formatCompact(totalNet)})
                 </div>
               )}
             </div>
@@ -1049,7 +1049,7 @@ function WhitespacePanel({ whitespace }: { whitespace: TerritoryWhitespace }) {
                 no distributor.{" "}
                 {whitespace.coverageGapPriorYearOb > 0 && (
                   <span className="font-medium">
-                    {formatINR(whitespace.coverageGapPriorYearOb)} prior-year demand,{" "}
+                    {formatCompact(whitespace.coverageGapPriorYearOb)} prior-year demand,{" "}
                     {whitespace.coverageGapVisits} visits already spent.
                   </span>
                 )}
@@ -1126,10 +1126,10 @@ function WhitespacePanel({ whitespace }: { whitespace: TerritoryWhitespace }) {
                           )}
                         </td>
                         <td className="py-2 pr-3 text-right tabular-nums">
-                          {d.priorYearOb > 0 ? formatINR(d.priorYearOb) : "--"}
+                          {d.priorYearOb > 0 ? formatCompact(d.priorYearOb) : "--"}
                         </td>
                         <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
-                          {currentOb > 0 ? formatINR(currentOb) : "--"}
+                          {currentOb > 0 ? formatCompact(currentOb) : "--"}
                         </td>
                         <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
                           {totalVisitsVal > 0 ? totalVisitsVal : "--"}
@@ -1172,12 +1172,12 @@ function WhitespacePanel({ whitespace }: { whitespace: TerritoryWhitespace }) {
                                       {r.visits != null ? r.visits : "--"}
                                     </td>
                                     <td className="py-1 pr-3 text-right tabular-nums">
-                                      {r.ob > 0 ? formatINR(r.ob) : (
+                                      {r.ob > 0 ? formatCompact(r.ob) : (
                                         <span className="text-muted-foreground">No orders</span>
                                       )}
                                     </td>
                                     <td className="py-1 text-right tabular-nums">
-                                      {r.sale > 0 ? formatINR(r.sale) : "--"}
+                                      {r.sale > 0 ? formatCompact(r.sale) : "--"}
                                     </td>
                                   </tr>
                                 ))}
@@ -1241,10 +1241,10 @@ function WhitespacePanel({ whitespace }: { whitespace: TerritoryWhitespace }) {
                         <td className="py-1.5 pr-3 font-medium text-foreground">{e.name}</td>
                         <td className="py-1.5 pr-3">{e.district}</td>
                         <td className="py-1.5 pr-3 text-right tabular-nums">
-                          {e.ob > 0 ? formatINR(e.ob) : "--"}
+                          {e.ob > 0 ? formatCompact(e.ob) : "--"}
                         </td>
                         <td className="py-1.5 pr-3 text-right tabular-nums">
-                          {e.sale > 0 ? formatINR(e.sale) : "--"}
+                          {e.sale > 0 ? formatCompact(e.sale) : "--"}
                         </td>
                         <td className="py-1.5 text-right tabular-nums">
                           {e.visits != null ? e.visits : "--"}
@@ -1305,7 +1305,7 @@ function CustomerConcentrationPanel({ c }: { c: CustomerConcentration }) {
               </span>
               {c.newPartyOrderBooking != null && c.newPartyOrderBooking > 0 && (
                 <span className="ml-1">
-                  ({formatINR(c.newPartyOrderBooking)} OB)
+                  ({formatCompact(c.newPartyOrderBooking)} OB)
                 </span>
               )}
             </span>
@@ -1321,7 +1321,7 @@ function CustomerConcentrationPanel({ c }: { c: CustomerConcentration }) {
           ].map(({ label, pct: p, ob }) => (
             <div key={label} className="rounded-lg border border-border bg-muted/30 px-3 py-2">
               <div className="text-xs text-muted-foreground mb-0.5">{label}</div>
-              <div className="font-semibold text-sm tabular-nums">{formatINR(ob)}</div>
+              <div className="font-semibold text-sm tabular-nums">{formatCompact(ob)}</div>
               {p != null && (
                 <div className={`text-xs font-medium mt-0.5 ${p >= 60 ? "text-amber-600" : "text-muted-foreground"}`}>
                   {trunc2(p)}%
@@ -1361,7 +1361,7 @@ function CustomerConcentrationPanel({ c }: { c: CustomerConcentration }) {
                         )}
                       </td>
                       <td className="py-1.5 pr-3 text-muted-foreground hidden sm:table-cell">{row.channel}</td>
-                      <td className="py-1.5 pr-3 text-right tabular-nums">{formatINR(row.orderBooking)}</td>
+                      <td className="py-1.5 pr-3 text-right tabular-nums">{formatCompact(row.orderBooking)}</td>
                       <td className="py-1.5 pr-3 text-right tabular-nums">{trunc2(row.sharePct)}%</td>
                       <td className={`py-1.5 text-right tabular-nums font-medium ${row.cumulativePct >= 60 ? "text-amber-600" : "text-muted-foreground"}`}>
                         {trunc2(row.cumulativePct)}%
@@ -1405,7 +1405,7 @@ function CustomerConcentrationPanel({ c }: { c: CustomerConcentration }) {
                     <div className="text-xl font-bold tabular-nums">{sg.count}</div>
                     <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
                       {sg.state !== "never" && obVal > 0 && (
-                        <div>{obLabel}: <span className="font-medium text-foreground">{formatINR(obVal)}</span></div>
+                        <div>{obLabel}: <span className="font-medium text-foreground">{formatCompact(obVal)}</span></div>
                       )}
                       {sg.visits != null && sg.visits > 0 && (
                         <div>
@@ -1414,7 +1414,7 @@ function CustomerConcentrationPanel({ c }: { c: CustomerConcentration }) {
                         </div>
                       )}
                       {sg.bizPerVisit != null && sg.bizPerVisit > 0 && totalVisits != null && (
-                        <div>{formatINR(sg.bizPerVisit)}/visit</div>
+                        <div>{formatCompact(sg.bizPerVisit)}/visit</div>
                       )}
                     </div>
                   </div>
@@ -1436,9 +1436,9 @@ function CustomerConcentrationPanel({ c }: { c: CustomerConcentration }) {
                     <TrendingUp className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                     <span>
                       Reactivated customers yield{" "}
-                      <span className="font-medium">{formatINR(reactivated.bizPerVisit)}/visit</span>
+                      <span className="font-medium">{formatCompact(reactivated.bizPerVisit)}/visit</span>
                       {" "}vs{" "}
-                      <span className="font-medium">{formatINR(retained.bizPerVisit)}/visit</span>
+                      <span className="font-medium">{formatCompact(retained.bizPerVisit)}/visit</span>
                       {" "}for retained — recovery visits are high-return.
                     </span>
                   </div>
@@ -1451,7 +1451,7 @@ function CustomerConcentrationPanel({ c }: { c: CustomerConcentration }) {
                     <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                     <span>
                       {atRisk.count} customer{atRisk.count !== 1 ? "s" : ""} with{" "}
-                      <span className="font-medium">{formatINR(atRisk.obLastYear)}</span>
+                      <span className="font-medium">{formatCompact(atRisk.obLastYear)}</span>
                       {" "}prior-year OB have no booking yet this year (cutoff: {c.dataCutoffLabel}).
                     </span>
                   </div>
@@ -1504,7 +1504,7 @@ function InvestmentPanel({
 
   const { tier, effectiveDiscount: disc, costToServe: cts, roi } = investment;
 
-  const fmtL = (v: number) => "Rs " + trunc2((v / 100_000)) + "L";
+  
   const fmtPct = (v: number) => trunc2(v) + " %";
 
   return (
@@ -1537,7 +1537,7 @@ function InvestmentPanel({
                 {fmtPct(disc.weightedDiscountPct)}
               </p>
               <p className="text-[10px] text-muted-foreground mt-0.5">
-                Net {fmtL(disc.netTotal)} / {disc.recentFy}
+                Net {formatCompact(disc.netTotal)} / {disc.recentFy}
               </p>
               {disc.abovePeerMedian && disc.peerMedianDiscountPct != null && (
                 <p className="text-[10px] text-amber-700 mt-0.5">
@@ -1563,10 +1563,10 @@ function InvestmentPanel({
           {cts ? (
             <>
               <p className="text-sm font-semibold tabular-nums">
-                {fmtL(cts.visitCostToServe)}
+                {formatCompact(cts.visitCostToServe)}
               </p>
               <p className="text-[10px] text-muted-foreground mt-0.5">
-                {cts.distributorVisits} visits × Rs{" "}
+                {cts.distributorVisits} visits × ₹{" "}
                 {Math.round(cts.memberCostPerVisit).toLocaleString("en-IN")} / visit
               </p>
             </>
@@ -1586,7 +1586,7 @@ function InvestmentPanel({
                 {trunc2(roi.netToCostMultiple)}x
               </p>
               <p className="text-[10px] text-muted-foreground mt-0.5">
-                {fmtL(roi.netRevenue)} net / {fmtL(roi.visitCostToServe)} cost
+                {formatCompact(roi.netRevenue)} net / {formatCompact(roi.visitCostToServe)} cost
               </p>
             </>
           ) : (
@@ -1673,10 +1673,10 @@ function InvestmentPanel({
         </table>
         {disc?.sampleLineGross != null && (
           <p className="mt-1.5 text-muted-foreground">
-            Discount check: Rs {trunc2(disc.sampleLineGross)} gross × (1 −{" "}
-            {disc.sampleLineDiscountPct != null ? trunc2(disc.sampleLineDiscountPct) : "--"} %) = Rs{" "}
+            Discount check: ₹{trunc2(disc.sampleLineGross)} gross × (1 −{" "}
+            {disc.sampleLineDiscountPct != null ? trunc2(disc.sampleLineDiscountPct) : "--"} %) = ₹{" "}
             {disc.sampleLineComputed != null ? trunc2(disc.sampleLineComputed) : "--"}{" "}
-            (registered: Rs {disc.sampleLineNet != null ? trunc2(disc.sampleLineNet) : "--"})
+            (registered: ₹{disc.sampleLineNet != null ? trunc2(disc.sampleLineNet) : "--"})
           </p>
         )}
       </details>
@@ -2023,7 +2023,7 @@ function PerMemberAnalysisSection({ perMember }: { perMember: MemberDistributorR
                     {m.achievementTotal != null ? pct(m.achievementTotal) : "--"}
                   </td>
                   <td className="py-1.5 pr-3 text-right tabular-nums text-xs text-muted-foreground">
-                    {m.blankOb != null && m.blankOb > 0 ? formatINR(m.blankOb) : "--"}
+                    {m.blankOb != null && m.blankOb > 0 ? formatCompact(m.blankOb) : "--"}
                   </td>
                   <td className="py-1.5 text-right tabular-nums text-xs text-muted-foreground">
                     {m.removedCount > 0 ? m.removedCount : "--"}
@@ -2345,7 +2345,7 @@ export default function DistributorDeepDive() {
               .filter((d) => inGeo(d.states))
               .map((d) => (
                 <option key={d.normKey} value={d.normKey}>
-                  {d.name} — {d.states.join("/") || "?"} — {formatINR(d.orderBooking)}
+                  {d.name} — {d.states.join("/") || "?"} — {formatCompact(d.orderBooking)}
                 </option>
               ))}
           </select>
@@ -2502,9 +2502,9 @@ export default function DistributorDeepDive() {
                     <td className="py-2 pr-4 text-xs">{d.heads.join(", ")}</td>
                     <td className="py-2 pr-3 text-right tabular-nums">{d.retailerCount}</td>
                     <td className="py-2 pr-3 text-right tabular-nums">{d.activeCount}</td>
-                    <td className="py-2 pr-4 text-right tabular-nums font-medium">{formatINR(d.orderBooking)}</td>
+                    <td className="py-2 pr-4 text-right tabular-nums font-medium">{formatCompact(d.orderBooking)}</td>
                     <td className="py-2 text-right tabular-nums text-muted-foreground">
-                      {d.sale > 0 ? formatINR(d.sale) : "--"}
+                      {d.sale > 0 ? formatCompact(d.sale) : "--"}
                     </td>
                   </tr>
                 ))}
@@ -2519,7 +2519,7 @@ export default function DistributorDeepDive() {
                     {distsInGeo.reduce((s, d) => s + d.activeCount, 0)}
                   </td>
                   <td className="py-2 pr-4 text-right tabular-nums">
-                    {formatINR(distsInGeo.reduce((s, d) => s + d.orderBooking, 0))}
+                    {formatCompact(distsInGeo.reduce((s, d) => s + d.orderBooking, 0))}
                   </td>
                   <td></td>
                 </tr>
@@ -2557,13 +2557,13 @@ export default function DistributorDeepDive() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="border border-border rounded-lg p-3">
               <div className="text-xs text-muted-foreground mb-1">Party OB</div>
-              <div className="font-bold text-lg tabular-nums">{formatINR(data.partyObTotal)}</div>
+              <div className="font-bold text-lg tabular-nums">{formatCompact(data.partyObTotal)}</div>
               <div className="text-xs text-muted-foreground">via distributors</div>
             </div>
             <div className="border border-border rounded-lg p-3">
               <div className="text-xs text-muted-foreground mb-1">Direct Dealer OB</div>
               <div className="font-bold text-lg tabular-nums">
-                {data.directDealer ? formatINR(data.directDealer.orderBooking) : "--"}
+                {data.directDealer ? formatCompact(data.directDealer.orderBooking) : "--"}
               </div>
               <div className="text-xs text-muted-foreground">parallel channel</div>
             </div>
@@ -2655,10 +2655,10 @@ export default function DistributorDeepDive() {
                             </span>
                           </td>
                           <td className="py-2 pr-4 text-right tabular-nums font-medium">
-                            {formatINR(dist.orderBooking)}
+                            {formatCompact(dist.orderBooking)}
                           </td>
                           <td className="py-2 pr-4 text-right tabular-nums text-muted-foreground">
-                            {dist.sale > 0 ? formatINR(dist.sale) : "--"}
+                            {dist.sale > 0 ? formatCompact(dist.sale) : "--"}
                           </td>
                           <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
                             {visits(dist.visits)}
@@ -2721,7 +2721,7 @@ export default function DistributorDeepDive() {
                         {detailDistributors.reduce((s, d) => s + d.activeCount, 0)}
                       </td>
                       <td className="py-2 pr-4 text-right tabular-nums">
-                        {formatINR(detailDistributors.reduce((s, d) => s + d.orderBooking, 0))}
+                        {formatCompact(detailDistributors.reduce((s, d) => s + d.orderBooking, 0))}
                       </td>
                       <td colSpan={4}></td>
                     </tr>
@@ -2746,7 +2746,7 @@ export default function DistributorDeepDive() {
                     <tr className="border-b border-border text-muted-foreground text-xs">
                       <th className="text-left py-2 pr-4 font-medium">Retailer</th>
                       <th className="text-left py-2 pr-4 font-medium">Distributors</th>
-                      <th className="text-right py-2 pr-4 font-medium">OB (Rs)</th>
+                      <th className="text-right py-2 pr-4 font-medium">OB (₹)</th>
                       <th className="text-right py-2 font-medium">Visits</th>
                     </tr>
                   </thead>
@@ -2765,7 +2765,7 @@ export default function DistributorDeepDive() {
                           {r.distributorParts.join(" + ")}
                         </td>
                         <td className="py-1.5 pr-4 text-right tabular-nums">
-                          {r.orderBooking > 0 ? formatINR(r.orderBooking) : "--"}
+                          {r.orderBooking > 0 ? formatCompact(r.orderBooking) : "--"}
                         </td>
                         <td className="py-1.5 text-right tabular-nums text-muted-foreground">
                           {visits(r.visits)}
@@ -2792,7 +2792,7 @@ export default function DistributorDeepDive() {
                 {data.directDealer.dashboardOb != null && data.directDealer.dashboardOb > 0 && (
                   <div className="mb-3 px-3 py-2 rounded-md bg-emerald-50 border border-emerald-100 text-xs">
                     <span className="text-muted-foreground">Order Booking (Data tab)  </span>
-                    <span className="font-semibold tabular-nums text-emerald-800">{formatINR(data.directDealer.dashboardOb)}</span>
+                    <span className="font-semibold tabular-nums text-emerald-800">{formatCompact(data.directDealer.dashboardOb)}</span>
                     {data.directDealer.dashboardMember && (
                       <span className="text-muted-foreground ml-1">— {data.directDealer.dashboardMember}</span>
                     )}
@@ -2802,8 +2802,8 @@ export default function DistributorDeepDive() {
                   {[
                     { label: "Retailers", value: String(data.directDealer.retailerCount) },
                     { label: "Active",    value: String(data.directDealer.activeCount)   },
-                    { label: "OB (sheet rows)", value: data.directDealer.orderBooking > 0 ? formatINR(data.directDealer.orderBooking) : "Rs 0" },
-                    { label: "Sale",      value: data.directDealer.sale > 0 ? formatINR(data.directDealer.sale) : "--" },
+                    { label: "OB (sheet rows)", value: data.directDealer.orderBooking > 0 ? formatCompact(data.directDealer.orderBooking) : "₹0" },
+                    { label: "Sale",      value: data.directDealer.sale > 0 ? formatCompact(data.directDealer.sale) : "--" },
                     { label: "Visits",    value: visits(data.directDealer.visits) },
                   ].map(({ label, value }) => (
                     <div key={label}>
@@ -2833,7 +2833,7 @@ export default function DistributorDeepDive() {
                     { label: "Active",    value: String(data.noneAssigned.activeCount)                              },
                     { label: "Visits",    value: visits(data.noneAssigned.visits)                                   },
                     { label: "Visit %",   value: pct(data.noneAssigned.visitSharePct)                               },
-                    { label: "OB",        value: data.noneAssigned.orderBooking > 0 ? formatINR(data.noneAssigned.orderBooking) : "Rs 0" },
+                    { label: "OB",        value: data.noneAssigned.orderBooking > 0 ? formatCompact(data.noneAssigned.orderBooking) : "₹0" },
                   ].map(({ label, value }) => (
                     <div key={label}>
                       <div className="text-xs text-muted-foreground">{label}</div>

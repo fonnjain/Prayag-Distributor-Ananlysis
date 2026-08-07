@@ -22,13 +22,18 @@ export function formatLakh(value: number): string {
   return `₹${trunc2((value / 100000))} L`;
 }
 
+/** Adaptive Indian-format amount: ₹2.14 Cr / ₹4.35 L / ₹12.5 K / ₹850.
+ *  Tier chosen on magnitude, so negatives (e.g. flow gaps) format correctly. */
 export function formatCompact(value: number): string {
-  if (value >= 10000000) {
-    return formatCrore(value);
-  } else if (value >= 100000) {
-    return formatLakh(value);
-  }
-  return formatINR(value);
+  const sign = value < 0 ? "-" : "";
+  const abs = Math.abs(value);
+  if (abs >= 10000000) return sign + formatCrore(abs);
+  if (abs >= 100000) return sign + formatLakh(abs);
+  if (abs >= 1000) return `${sign}₹${trunc2(abs / 1000)} K`;
+  // Truncate (never round) like every other tier, and normalise -0 → 0 so a
+  // tiny negative never renders as "-₹0".
+  const t = Math.trunc(abs);
+  return `${t === 0 ? "" : sign}₹${t.toLocaleString("en-IN")}`;
 }
 
 export const CHART_COLORS = {
