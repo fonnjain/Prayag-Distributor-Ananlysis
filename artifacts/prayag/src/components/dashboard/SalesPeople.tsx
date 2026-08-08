@@ -12,6 +12,7 @@ import { trunc2 } from "@/lib/trunc";
 // FY + month selection driven by the global filter context (GlobalFilterBar).
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { achBandText } from "@/lib/achievementBands";
+import { sumRange as sumRangeOver, achPct } from "@/lib/periodRange";
 import { useGlobalFilter, type FiscalMonthIdx, FISCAL_MONTH_NAMES } from "@/data/global-filter-context";
 import { SnapshotBanner, useSnapshotRefresh, type SnapshotMeta } from "./snapshotRefresh";
 
@@ -45,13 +46,6 @@ function fmt(n: number | null | undefined): string {
   if (Math.abs(n) >= 1e5) return `₹${trunc2((n / 1e5))} L`;
   return `₹${Math.round(n).toLocaleString("en-IN")}`;
 }
-
-function achPct(sales: number | null, plan: number | null): number | null {
-  if (plan == null || plan <= 0) return null;
-  if (sales == null) return null;
-  return (sales / plan) * 100;
-}
-
 /** Calendar month of today (0=Jan … 11=Dec) and year. */
 function nowCalMonthYear(): { calMonth: number; calYear: number } {
   const d = new Date();
@@ -107,18 +101,11 @@ export default function SalesPeople() {
   const singleMonth = idxFrom === idxTo;
 
   // Sum a monthly array over the selected range. Null when no month in the
-  // range carries a value (so "—" renders, not 0).
+  // range carries a value (so "—" renders, not 0). Logic lives in
+  // lib/periodRange.ts so it is unit-tested (see periodRange.test.ts).
   const sumRange = useCallback(
-    (arr: (number | null | undefined)[] | null | undefined): number | null => {
-      if (!arr) return null;
-      let sum = 0;
-      let seen = false;
-      for (let i = idxFrom; i <= idxTo; i++) {
-        const v = arr[i];
-        if (v != null) { sum += v; seen = true; }
-      }
-      return seen ? sum : null;
-    },
+    (arr: (number | null | undefined)[] | null | undefined): number | null =>
+      sumRangeOver(arr, idxFrom, idxTo),
     [idxFrom, idxTo],
   );
 
