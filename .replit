@@ -24,6 +24,10 @@ args = "comparison-guards"
 task = "workflow.run"
 args = "prayag-period-guards"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "growth-report-guards"
+
 [[workflows.workflow]]
 name = "comparison-guards"
 author = "agent"
@@ -42,6 +46,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/prayag exec vitest run src/lib/__tests__/periodRange.test.ts src/data/__tests__/period-capability.test.ts"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
+name = "growth-report-guards"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "node artifacts/api-server/scripts/growth-report-guard-check.mjs"
 
 [workflows.workflow.metadata]
 outputType = "console"
