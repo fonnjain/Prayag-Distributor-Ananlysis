@@ -421,15 +421,27 @@ type PrimaryAgg = {
 /**
  * D2: Compute and attach flow data to each DistributorGroup in place.
  * Called after D1 aggregation is complete.
+ *
+ * @param months Optional period filter. When provided, primary dispatch totals
+ *   are restricted to those months so they match the global period filter.
+ *   secondaryOut (member sheets) is always full-FY and is labelled accordingly.
+ *   OB (order booking) is always full-FY regardless of the period filter.
  */
 async function loadDistributorFlows(
   fy: string,
   stateHead: string,
   distGroups: DistributorGroup[],
+  months?: string[],
 ): Promise<void> {
   if (!distGroups.length) return;
 
-  const closedMonths = closedMonthsForFy(fy);
+  // When a period filter is active, YoY compares the intersection of selected
+  // months with the closed-month list (so Apr–Jun compares against Apr–Jun prior
+  // year, not the whole FY's closed months).
+  const allClosedMonths = closedMonthsForFy(fy);
+  const closedMonths = months && months.length > 0
+    ? allClosedMonths.filter((m) => months.includes(m))
+    : allClosedMonths;
   const prevFy = prevFyLabel(fy);
   const priorMonths = toPriorYearMonths(closedMonths);
   const today = new Date();
@@ -441,7 +453,7 @@ async function loadDistributorFlows(
 
   try {
     [slRows, obRows, priorSlRows] = await Promise.all([
-      // Current FY: all months, grouped by (customer, month_label)
+      // Current FY: period-restricted months (or all months when no filter).
       db
         .select({
           customer:        sql<string>`coalesce(${saleLines.customer}, '')`,
@@ -455,6 +467,7 @@ async function loadDistributorFlows(
           eq(saleLines.fy, fy),
           eq(saleLines.headCanon, stateHead),
           eq(saleLines.versionStatus, "current"),
+          ...(months && months.length > 0 ? [inArray(saleLines.monthLabel, months)] : []),
         ))
         .groupBy(saleLines.customer, saleLines.monthLabel),
 
@@ -580,7 +593,11 @@ async function loadDistributorFlows(
       `${priorMonths[0]} – ${priorMonths[priorMonths.length - 1]}`
     : "insufficient closed months for YoY";
 
-  const fyPeriod = `FY ${fy} YTD`;
+  const fyPeriod = months && months.length > 0
+    ? months.length === 1
+      ? months[0]
+      : `${months[0]}–${months[months.length - 1]}`
+    : `FY ${fy} YTD`;
 
   // ── Attach flows to each distGroup ────────────────────────────────────────
   for (const g of distGroups) {
@@ -718,6 +735,7 @@ function computeNamingCandidates(groups: DistributorGroup[]): NamingCandidate[] 
 export async function loadDistributorDeepDive(
   fy: string,
   selectedStateHead?: string,
+  months?: string[],
 ): Promise<DistributorDeepDiveResult> {
   // Step 1: Load member list via the deepDiveData cache (avoids a second
   // Sheets read for the Data tab; the result is already cached or loading).
@@ -1221,7 +1239,7 @@ export async function loadDistributorDeepDive(
   logger.info({ count: namingCandidates.length }, "distributorDeepDive SD2: naming candidates");
 
   // Step 10 (D2): Attach primary flow data to each distributor group.
-  await loadDistributorFlows(fy, selectedStateHead, distGroups);
+  await loadDistributorFlows(fy, selectedStateHead, distGroups, months);
 
   // Step 11 (D3): Attach SKU/segment spread from secondary_register_line.
   await loadDistributorSkuSpread(fy, distGroups);
@@ -1521,7 +1539,7 @@ export function isDegradedLoad(r: Pick<DistributorDeepDiveResult, "error" | "mem
 
 /** Injectable dependencies so the fallback decision logic is unit-testable. */
 export type ResilientDeps = {
-  build: (fy: string, stateHead?: string) => Promise<DistributorDeepDiveResult>;
+  build: (fy: string, stateHead?: string, months?: string[]) => Promise<DistributorDeepDiveResult>;
   loadSnap: (key: string) => Promise<DistDdSnapMeta | null>;
   saveSnap: (key: string, payload: DistributorDeepDiveResult) => Promise<void>;
   now: () => number;
@@ -1532,7 +1550,7 @@ export type ResilientDeps = {
 };
 
 const defaultDeps: ResilientDeps = {
-  build: loadDistributorDeepDive,
+  build: (fy, stateHead, months) => loadDistributorDeepDive(fy, stateHead, months),
   loadSnap: loadDistDdSnapshot,
   saveSnap: saveDistDdSnapshot,
   now: () => Date.now(),
@@ -1556,14 +1574,20 @@ export async function loadDistributorDeepDiveResilientWith(
   selectedStateHead: string | undefined,
   deps: ResilientDeps,
   opts?: { bypassSnapshot?: boolean },
+  months?: string[],
 ): Promise<DistributorDeepDiveResult> {
   const key = distDdSnapKey(fy, selectedStateHead);
+
+  // Filtered requests (sub-year period) never serve from or write the snapshot.
+  // The snapshot represents the full-FY unfiltered payload.
+  const isFiltered = months && months.length > 0;
 
   // ── Fast path: serve the saved snapshot immediately (stale-while-revalidate).
   // Skipped when opts.bypassSnapshot (the background warmer must build live,
   // otherwise it would read back its own snapshot and never refresh anything).
+  // Also skipped for filtered requests — those always go live.
   let preloadedSnap: DistDdSnapMeta | null | undefined;
-  if (selectedStateHead && !opts?.bypassSnapshot) {
+  if (selectedStateHead && !opts?.bypassSnapshot && !isFiltered) {
     preloadedSnap = await deps.loadSnap(key);
     if (preloadedSnap) {
       const age = deps.now() - preloadedSnap.savedAt;
@@ -1572,7 +1596,7 @@ export async function loadDistributorDeepDiveResilientWith(
           deps.refreshInFlight.add(key);
           void (async () => {
             try {
-              const r = await deps.build(fy, selectedStateHead);
+              const r = await deps.build(fy, selectedStateHead, undefined);
               if (isCompleteLoad(r)) {
                 deps.staleMap.delete(key);
                 await deps.saveSnap(key, r);
@@ -1608,20 +1632,22 @@ export async function loadDistributorDeepDiveResilientWith(
   let result: DistributorDeepDiveResult | null = null;
   let buildErr: unknown = null;
   try {
-    result = await deps.build(fy, selectedStateHead);
+    result = await deps.build(fy, selectedStateHead, months);
   } catch (err) {
     buildErr = err;
   }
 
   if (result) {
     if (!selectedStateHead) return result; // state-head list only — nothing to snapshot
-    if (isCompleteLoad(result)) {
+    // Filtered requests never write the snapshot (snapshot = full-FY unfiltered).
+    if (isCompleteLoad(result) && !isFiltered) {
       // Only a demonstrably complete load may replace the last known-good
       // snapshot — a partial Sheets outage must never overwrite it.
       deps.staleMap.delete(key);
       void deps.saveSnap(key, result);
       return result;
     }
+    if (isFiltered) return result; // filtered: return as-is, no snapshot I/O
     if (!isDegradedLoad(result)) return result; // e.g. no sheets mapped yet
     // Degraded (some/all member sheets failed) → prefer the last saved snapshot.
     const snap = await serveSnapshot(`degraded: ${result.membersFailed} sheet(s) failed, ${result.membersLoaded} loaded`);
@@ -1637,7 +1663,7 @@ export async function loadDistributorDeepDiveResilientWith(
     await deps.sleep(2_000);
     let retry: DistributorDeepDiveResult | null = null;
     try {
-      retry = await deps.build(fy, selectedStateHead);
+      retry = await deps.build(fy, selectedStateHead, months);
     } catch {
       /* fall through to the original partial payload */
     }
@@ -1652,7 +1678,7 @@ export async function loadDistributorDeepDiveResilientWith(
   }
 
   // The build itself threw (e.g. the Data-tab read failed hard).
-  const snap = await serveSnapshot(buildErr instanceof Error ? buildErr.message : String(buildErr));
+  const snap = isFiltered ? null : await serveSnapshot(buildErr instanceof Error ? buildErr.message : String(buildErr));
   if (snap) return snap;
 
   // No snapshot at all (first-ever load) — retry the live build once after a
@@ -1662,7 +1688,7 @@ export async function loadDistributorDeepDiveResilientWith(
     "distributorDeepDive: live build failed with no snapshot — retrying once",
   );
   await deps.sleep(1_500);
-  return deps.build(fy, selectedStateHead);
+  return deps.build(fy, selectedStateHead, months);
 }
 
 /**
@@ -1671,11 +1697,15 @@ export async function loadDistributorDeepDiveResilientWith(
  * degraded 200 payload with failed member sheets) → serve the last saved
  * snapshot with stale=true; no snapshot at all → one retry after a short
  * pause, then let the error propagate to the route's hard-error handler.
+ *
+ * When months are provided (sub-year period filter), the snapshot is bypassed
+ * entirely — filtered requests always go live and never write the snapshot.
  */
 export async function loadDistributorDeepDiveResilient(
   fy: string,
   selectedStateHead?: string,
   opts?: { bypassSnapshot?: boolean },
+  months?: string[],
 ): Promise<DistributorDeepDiveResult> {
-  return loadDistributorDeepDiveResilientWith(fy, selectedStateHead, defaultDeps, opts);
+  return loadDistributorDeepDiveResilientWith(fy, selectedStateHead, defaultDeps, opts, months);
 }

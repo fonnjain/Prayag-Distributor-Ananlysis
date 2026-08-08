@@ -647,28 +647,36 @@ function FlowPanel({ flows, distName }: { flows: DistributorFlows | null; distNa
               Secondary Out — Distributor to Retailers
             </div>
             <div className="text-xl font-bold tabular-nums">{formatCompact(flows.secondaryOut)}</div>
-            <div className="text-xs text-muted-foreground">Member sheets (FY to date)</div>
+            <div className="text-xs text-muted-foreground">
+              Member sheets (full FY — sheet columns are annual)
+            </div>
           </div>
         </div>
 
         {/* Flow gap observation */}
-        {flows.flowGap !== null && (
-          <div className={`rounded-md px-3 py-2.5 text-xs leading-relaxed ${
-            gapPositive
-              ? "bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800/50 text-blue-900 dark:text-blue-200"
-              : "bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800/50 text-orange-900 dark:text-orange-200"
-          }`}>
-            <span className="font-semibold">Flow gap: </span>
-            <span className="tabular-nums font-bold">
-              {flows.flowGap >= 0 ? "+" : ""}{formatCompact(flows.flowGap)}
-            </span>
-            <span className="ml-2 opacity-80">
-              {gapPositive
-                ? "Primary in exceeds secondary out — may indicate stock building at the distributor, or business moving outside the attributed retailer channel."
-                : "Secondary out exceeds primary in — may indicate prior-period stock being liquidated, or secondary reported against a different primary FY."}
-            </span>
-          </div>
-        )}
+        {flows.flowGap !== null && (() => {
+          // Detect period-filtered mode: period field is a date range, not "FY … YTD".
+          const isFiltered = !flows.period.startsWith("FY ");
+          return (
+            <div className={`rounded-md px-3 py-2.5 text-xs leading-relaxed ${
+              gapPositive
+                ? "bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800/50 text-blue-900 dark:text-blue-200"
+                : "bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800/50 text-orange-900 dark:text-orange-200"
+            }`}>
+              <span className="font-semibold">Flow gap: </span>
+              <span className="tabular-nums font-bold">
+                {flows.flowGap >= 0 ? "+" : ""}{formatCompact(flows.flowGap)}
+              </span>
+              <span className="ml-2 opacity-80">
+                {isFiltered
+                  ? "Period-specific primary dispatch minus full-FY secondary out — bases differ, so this gap is directional only."
+                  : gapPositive
+                    ? "Primary in exceeds secondary out — may indicate stock building at the distributor, or business moving outside the attributed retailer channel."
+                    : "Secondary out exceeds primary in — may indicate prior-period stock being liquidated, or secondary reported against a different primary FY."}
+              </span>
+            </div>
+          );
+        })()}
 
         {/* Pending: OB vs dispatch */}
         {flows.primaryOb !== null && (
@@ -2074,7 +2082,7 @@ export default function DistributorDeepDive() {
     };
   }, []);
 
-  const load = useCallback(async (fyVal: string, stateHeadVal: string) => {
+  const load = useCallback(async (fyVal: string, stateHeadVal: string, monthsParam: string) => {
     const seq = ++reqSeq.current;
     // A new load supersedes any pending quota retry.
     if (retryTimer.current !== undefined) clearTimeout(retryTimer.current);
@@ -2084,13 +2092,15 @@ export default function DistributorDeepDive() {
     try {
       const params = new URLSearchParams({ fy: fyVal });
       if (stateHeadVal) params.set("stateHead", stateHeadVal);
-      const res = await fetch(`${API}/mgmt/distributor-deep-dive?${params}`);
+      // monthsParam is e.g. "&months=Apr-26%2CMay-26" or "" for full FY.
+      const url = `${API}/mgmt/distributor-deep-dive?${params}${monthsParam}`;
+      const res = await fetch(url);
       if (seq !== reqSeq.current) return; // superseded by a newer load
       const q = await quotaOrThrow(res);
       if (q) {
         setQuotaWait(true);
         retryTimer.current = setTimeout(
-          () => load(fyVal, stateHeadVal),
+          () => load(fyVal, stateHeadVal, monthsParam),
           quotaDelayMs(q.retryAfter),
         );
         return;
@@ -2100,13 +2110,15 @@ export default function DistributorDeepDive() {
       setData(json);
       // Snapshot served while the server rebuilds in the background — silently
       // refetch (no loading spinner) until the fresh figures land, max 3 tries.
-      if (json.refreshing && stateHeadVal) {
+      // Only applicable for full-FY (unfiltered) requests — filtered ones are
+      // always live and never serve a snapshot.
+      if (json.refreshing && stateHeadVal && !monthsParam) {
         let tries = 0;
         const silentRefetch = async () => {
           if (seq !== reqSeq.current || tries >= 3) return;
           tries += 1;
           try {
-            const r2 = await fetch(`${API}/mgmt/distributor-deep-dive?${params}`);
+            const r2 = await fetch(url);
             if (seq !== reqSeq.current || !r2.ok) return;
             const j2: DistributorDeepDiveResult = await r2.json();
             if (seq !== reqSeq.current) return;
@@ -2150,18 +2162,18 @@ export default function DistributorDeepDive() {
     return () => { cancelled = true; };
   }, [fy]);
 
-  // Reload whenever global FY changes.
+  // Reload whenever global FY or period filter changes.
   useEffect(() => {
     setData(null);
     setExpandedDist(null);
-    if (stateHead) load(fy, stateHead);
-  }, [fy]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (stateHead) load(fy, stateHead, period.param);
+  }, [fy, period.param]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleStateHeadChange(next: string) {
     setStateHead(next);
     setData(null);
     setExpandedDist(null);
-    if (next) load(fy, next);
+    if (next) load(fy, next, period.param);
   }
 
   function toggleDist(normKey: string) {
@@ -2461,10 +2473,12 @@ export default function DistributorDeepDive() {
           className="rounded-md border border-border bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground"
           data-testid="banner-dd-period-overview"
         >
-          The period filter (<strong>{periodLabel}</strong>) applies to the register-backed tabs
-          (Secondary Sales, Existing vs New SKU, Where &amp; How to Push). The Overview figures below
-          come from the members' working sheets, which carry one OB/Sale column per financial year —
-          they always show the full FY {fy}.
+          Period filter active: <strong>{periodLabel}</strong>.{" "}
+          <span className="font-medium text-foreground/80">Primary dispatch, pending, recency, frequency, and year-on-year figures</span>{" "}
+          in the Flows panel are restricted to this period.{" "}
+          <span className="font-medium text-foreground/80">Order booking and secondary out</span>{" "}
+          come from member working sheets (one column per FY) and always show the full FY {fy} —
+          any resulting flow gap crosses two different bases and should be read as directional only.
         </div>
       )}
       {dirError && (
@@ -2735,7 +2749,7 @@ export default function DistributorDeepDive() {
                                 distName={dist.name}
                                 stateHead={stateHead}
                                 fy={fy}
-                                onOverrideSaved={() => load(fy, stateHead)}
+                                onOverrideSaved={() => load(fy, stateHead, period.param)}
                               />
                               {dist.retailerConcentration && (
                                 <RetailerConcentrationBar rc={dist.retailerConcentration} />

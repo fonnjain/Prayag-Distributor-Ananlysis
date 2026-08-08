@@ -1330,17 +1330,35 @@ router.get("/mgmt/retailer-drift", async (req: Request, res: Response): Promise<
 // GET /api/mgmt/distributor-deep-dive
 // Phase D1: groups retailer rows from all member working sheets under a state
 // head by their Assigned Distributor field.
+//
+// Optional: ?months=Apr-26,May-26  — restricts register-derived figures
+// (primary dispatch, flow gap) to the named months.  Sheet-based figures
+// (OB, secondary out from member sheets) are always full-FY.  Filtered
+// requests bypass the snapshot entirely (never served from or written to it).
 router.get("/mgmt/distributor-deep-dive", async (req: Request, res: Response): Promise<void> => {
   try {
     const fy         = typeof req.query.fy         === "string" ? req.query.fy.trim()         : "2026-27";
     const stateHead  = typeof req.query.stateHead  === "string" ? req.query.stateHead.trim()  : undefined;
 
-    req.log.info({ fy, stateHead }, "mgmt/distributor-deep-dive: request received");
+    // Parse optional period filter — same validation as distributor-tab.
+    let months: string[] | undefined;
+    if (typeof req.query.months === "string" && req.query.months.trim() !== "") {
+      const tokens = req.query.months.split(",").map((m) => m.trim());
+      if (tokens.some((m) => !/^[A-Z][a-z]{2}-\d{2}$/.test(m))) {
+        res.status(400).json({ error: "months must be comma-separated labels like Apr-26" });
+        return;
+      }
+      months = tokens;
+    }
+
+    req.log.info({ fy, stateHead, months }, "mgmt/distributor-deep-dive: request received");
 
     // Resilient loader: a transient Sheets failure serves the last saved
     // snapshot with a `stale` flag instead of a hard 500 (see distributorDeepDive.ts).
+    // Filtered requests always go live (bypassSnapshot is implicitly handled
+    // inside loadDistributorDeepDiveResilient when months are provided).
     const { loadDistributorDeepDiveResilient } = await import("../lib/mgmt/distributorDeepDive.js");
-    const result = await loadDistributorDeepDiveResilient(fy, stateHead);
+    const result = await loadDistributorDeepDiveResilient(fy, stateHead, undefined, months);
     res.json(result);
   } catch (err) {
     if (respondIfQuotaError(err, res)) return;
