@@ -709,10 +709,23 @@ export type SkuTrendParams = {
   scope: SkuScope;
   scopeId?: string;
   segment?: string;
+  /**
+   * Optional fiscal-month-name restriction ('Apr'..'Mar'), applied to EVERY
+   * FY in the series so cross-year comparisons stay like-for-like (e.g. Q1
+   * vs Q1). month_label is 'Apr-26' style, so we match on the name part.
+   */
+  monthNames?: string[] | null;
 };
 
 export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResult> {
   const { level, scope, scopeId, segment } = params;
+  const monthNames = params.monthNames && params.monthNames.length > 0 && params.monthNames.length < 12
+    ? params.monthNames
+    : null;
+  const monthFilterFor = (col: ReturnType<typeof sql>) =>
+    monthNames
+      ? sql`AND split_part(${col}, '-', 1) IN (${sql.join(monthNames.map((m) => sql`${m}`), sql`, `)})`
+      : sql``;
 
   type RawTrendRow = {
     fy: string; month_label: string; segment: string;
@@ -744,6 +757,7 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
           SUM(sku.net_amount::numeric)::text       AS net
         FROM secondary_sku_line sku
         WHERE sku.item_code IS NOT NULL AND sku.item_code <> ''
+          ${monthFilterFor(sql`sku.month_label`)}
           ${scopeFilter} ${segFilter}
         GROUP BY sku.fy, sku.month_label, COALESCE(sku.segment_canon, 'Unmapped')
         ORDER BY sku.fy, sku.month_label
@@ -756,6 +770,7 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
           SUM(sku.net_amount::numeric)::text       AS net
         FROM secondary_sku_line sku
         WHERE sku.item_code IS NOT NULL AND sku.item_code <> ''
+          ${monthFilterFor(sql`sku.month_label`)}
           ${scopeFilter} ${segFilter}
         GROUP BY sku.fy, COALESCE(sku.segment_canon, 'Unmapped')
         ORDER BY sku.fy
@@ -795,6 +810,7 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
         FROM sale_line_current sl
         WHERE sl.version_status = 'current'
           AND sl.code IS NOT NULL AND sl.code <> ''
+          ${monthFilterFor(sql`sl.month_label`)}
           ${levelFilter} ${scopeFilter} ${segFilter}
         GROUP BY sl.fy, sl.month_label,
                  COALESCE(sl.group_canon, sl.group_raw, 'Unmapped')
@@ -809,6 +825,7 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
         FROM sale_line_current sl
         WHERE sl.version_status = 'current'
           AND sl.code IS NOT NULL AND sl.code <> ''
+          ${monthFilterFor(sql`sl.month_label`)}
           ${levelFilter} ${scopeFilter} ${segFilter}
         GROUP BY sl.fy, COALESCE(sl.group_canon, sl.group_raw, 'Unmapped')
         ORDER BY sl.fy

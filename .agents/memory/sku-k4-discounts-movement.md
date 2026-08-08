@@ -28,3 +28,6 @@ loadSecSkuFromSheets(fy, sheetId, dryRun) — positional args; readTabRowsChunke
 Segments carry peakQuarter/Label/Share; codes carry discountAboveNorm (≥5pts above own closed-years territory norm; current side uses the push list's period). Enrichment is try-catch non-fatal.
 
 **Movement white-page crash (fixed Aug 2026):** `breadth-trend` returns `projectExclusion` as an object `{basis,bridgedCustomers,note}`; the frontend typed it as string and rendered it as a React child → whole-page crash. Render `.note` and runtime-guard array fields. Lesson: frontend types that "mirror backend" must be checked against the live payload, esbuild/vite won't catch the mismatch.
+
+## Like-months period convention (Aug 2026)
+Cross-FY SKU endpoints (trend, breadth-trend, lost-codes) accept monthFrom/monthTo and apply them as fiscal month NAMES (`split_part(month_label,'-',1) IN (...)`) to EVERY FY, so Q1 compares to Q1. In-process cache keys must include the month set; `/sku/trend` snapshot serves only unfiltered requests. first-orders instead uses FY-specific labels (fiscalMonthsToLabels).

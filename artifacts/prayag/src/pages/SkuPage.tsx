@@ -271,6 +271,11 @@ export default function SkuPage() {
         ? { level, scope: "head", scopeId: scopeHead }
         : { level, scope: "company" },
     );
+    // Like-months restriction across every FY (Q1 vs Q1, YTD vs same months…).
+    if (period.monthFrom !== 1 || period.monthTo !== 12) {
+      params.set("monthFrom", String(period.monthFrom));
+      params.set("monthTo", String(period.monthTo));
+    }
     fetch(`${BASE}/api/sku/trend?${params}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -279,7 +284,7 @@ export default function SkuPage() {
       .then(setTrendData)
       .catch((e: Error) => setTrendError(e.message))
       .finally(() => setTrendLoading(false));
-  }, [section, level, scopeHead]);
+  }, [section, level, scopeHead, period.monthFrom, period.monthTo]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
@@ -556,12 +561,13 @@ export default function SkuPage() {
               {scopeHead
                 ? `${levelLabel[level]} · ${scopeHead} · All FYs`
                 : `${levelLabel[level]} · All heads · All FYs`}
+              {(period.monthFrom !== 1 || period.monthTo !== 12) && ` · ${periodLabel} each FY`}
             </span>
           )}
 
           {section === "timing" && (
             <span className="text-xs text-muted-foreground hidden lg:block">
-              Seasonality · All FYs
+              Seasonality · All FYs (period filter does not apply — curves span whole years)
             </span>
           )}
         </div>
@@ -574,6 +580,15 @@ export default function SkuPage() {
           <p className="mb-3 text-[11px] text-amber-700 dark:text-amber-400">
             Filters active — figures below are a subset and will not match the unfiltered totals.
             Breadth denominators (codes ever sold) stay company-wide.
+          </p>
+        )}
+        {/* Entity filter does NOT reach these tabs' endpoints — say so rather
+            than letting a selection silently look applied. */}
+        {level !== "retailer" && hasEntityFilter(entityFilter) &&
+          section !== "overview" && section !== "drill" && section !== "focus" && (
+          <p className="mb-3 text-[11px] text-amber-700 dark:text-amber-400">
+            The State / Distributor filter does not apply to this tab — figures below are
+            unfiltered. It applies on Overview, Drill and Review.
           </p>
         )}
         {/* Not available notice (overview/drill only) */}
@@ -689,7 +704,12 @@ export default function SkuPage() {
         {section === "timing" && <SkuSeasonality head={scopeHead || null} />}
 
         {section === "movement" && (
-          <SkuMovement fy={fy} periodLabel={`Full FY ${fy}`} />
+          <SkuMovement
+            fy={fy}
+            monthFrom={period.monthFrom}
+            monthTo={period.monthTo}
+            periodLabel={periodLabel}
+          />
         )}
       </div>
     </div>

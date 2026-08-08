@@ -336,6 +336,20 @@ router.get("/sku/catalogue", async (req: Request, res: Response): Promise<void> 
 //   scopeId  (required when scope != company)
 //   segment  (optional)  filter to a single canonical segment
 
+// Fiscal month names in fiscal order (Apr = 1). Used by cross-FY endpoints
+// where a period must apply to EVERY fiscal year (like-months), so
+// FY-specific labels from fiscalMonthsToLabels don't fit.
+const FISCAL_NAMES = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
+
+/** Parse monthFrom/monthTo (1–12 fiscal) into month names, or null when absent/full-year. */
+function monthNamesParam(req: Request): string[] | null {
+  const monthFrom = intParam(req, "monthFrom", 1, 12, 0);
+  const monthTo = intParam(req, "monthTo", monthFrom || 1, 12, 0);
+  if (monthFrom < 1 || monthTo < monthFrom) return null;
+  if (monthFrom === 1 && monthTo === 12) return null;
+  return FISCAL_NAMES.slice(monthFrom - 1, monthTo);
+}
+
 router.get("/sku/trend", async (req: Request, res: Response): Promise<void> => {
   const level = typeof req.query.level === "string" ? req.query.level.trim() : "distributor";
   if (!VALID_LEVELS.has(level)) {
@@ -364,6 +378,8 @@ router.get("/sku/trend", async (req: Request, res: Response): Promise<void> => {
       ? req.query.segment.trim()
       : undefined;
 
+  const monthNames = monthNamesParam(req);
+
   try {
     const build = (): Promise<Record<string, unknown>> =>
       getSkuTrend({
@@ -371,9 +387,10 @@ router.get("/sku/trend", async (req: Request, res: Response): Promise<void> => {
         scope: scope as SkuScope,
         scopeId,
         segment,
+        monthNames,
       }) as Promise<Record<string, unknown>>;
     const result =
-      scope === "company" && !segment
+      scope === "company" && !segment && !monthNames
         ? await serveWithSnapshot({
             key: `sku-trend-v2|${level}`,
             ttlMs: SKU_SNAPSHOT_TTL_MS,
@@ -850,7 +867,7 @@ router.get("/sku/breadth-trend", async (req: Request, res: Response): Promise<vo
       : "2025-26";
   const priorFy = prevFy(latestFy);
   try {
-    res.json(await getBreadthTrend(latestFy, priorFy));
+    res.json(await getBreadthTrend(latestFy, priorFy, monthNamesParam(req)));
   } catch (err) {
     req.log.error({ err, latestFy }, "sku breadth-trend failed");
     res.status(500).json({ error: "Could not compute breadth trend." });
@@ -889,7 +906,7 @@ router.get("/sku/lost-codes", async (req: Request, res: Response): Promise<void>
       : "2026-27";
   const priorFy = prevFy(fy);
   try {
-    res.json(await getLostCodes(fy, priorFy));
+    res.json(await getLostCodes(fy, priorFy, monthNamesParam(req)));
   } catch (err) {
     req.log.error({ err, fy }, "sku lost-codes failed");
     res.status(500).json({ error: "Could not compute lost codes." });

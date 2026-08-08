@@ -10,7 +10,7 @@ import { trunc2 } from "@/lib/trunc";
 //   additional display logic.  achPct() does not need to know about ob.
 // Primary-role members (19) have no SOBR row → monthly cells show "—" (FY data only).
 // FY + month selection driven by the global filter context (GlobalFilterBar).
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { achBandText } from "@/lib/achievementBands";
 import { useGlobalFilter, type FiscalMonthIdx, FISCAL_MONTH_NAMES } from "@/data/global-filter-context";
 import { SnapshotBanner, useSnapshotRefresh, type SnapshotMeta } from "./snapshotRefresh";
@@ -88,13 +88,39 @@ function achClass(pct: number | null): string {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function SalesPeople() {
-  // FY + month driven by global filter (GlobalFilterBar handles the UI).
+  // FY + period driven by global filter (GlobalFilterBar handles the UI).
   const {
     fy,
     effectiveMonthIdx: monthIdx,
+    effectivePeriodFrom,
+    effectivePeriodTo,
+    effectivePeriodLabel,
     setMonthIdx,
     setPeriodMode,
   } = useGlobalFilter();
+
+  // Selected fiscal-month index range (0-based, inclusive). Quarter / YTD /
+  // Full Year / custom aggregate across the range; single-month modes keep
+  // the original per-month semantics (open-month banners, "not recorded").
+  const idxFrom = effectivePeriodFrom - 1;
+  const idxTo = Math.max(idxFrom, effectivePeriodTo - 1);
+  const singleMonth = idxFrom === idxTo;
+
+  // Sum a monthly array over the selected range. Null when no month in the
+  // range carries a value (so "—" renders, not 0).
+  const sumRange = useCallback(
+    (arr: (number | null | undefined)[] | null | undefined): number | null => {
+      if (!arr) return null;
+      let sum = 0;
+      let seen = false;
+      for (let i = idxFrom; i <= idxTo; i++) {
+        const v = arr[i];
+        if (v != null) { sum += v; seen = true; }
+      }
+      return seen ? sum : null;
+    },
+    [idxFrom, idxTo],
+  );
 
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(false);
@@ -138,8 +164,16 @@ export default function SalesPeople() {
       .finally(() => setLoading(false));
   }, [fy]);
 
-  const currentMonth = isCurrentCalMonth(monthIdx, fy);
-  const futureMonth = isFutureMonth(monthIdx, fy);
+  // Open/future-month semantics only apply to single-month selections.
+  // A range (quarter / YTD / full year / custom) aggregates whatever has
+  // been recorded; the range never lies entirely in an open month.
+  const currentMonth = singleMonth && isCurrentCalMonth(monthIdx, fy);
+  const futureMonth = singleMonth && isFutureMonth(monthIdx, fy);
+  // A range that spans the current open month (e.g. Full Year on the open FY)
+  // still deserves the in-progress caveat on totals.
+  const rangeIncludesOpen = !singleMonth &&
+    Array.from({ length: idxTo - idxFrom + 1 }, (_, i) => idxFrom + i)
+      .some((fi) => isCurrentCalMonth(fi, fy));
 
   // Sorted list of all distinct state heads for the dropdown.
   const stateHeads = useMemo(
@@ -177,17 +211,17 @@ export default function SalesPeople() {
       if (sortKey === "name") { av = a.name; bv = b.name; }
       else if (sortKey === "stateHead") { av = a.stateHead; bv = b.stateHead; }
       else if (sortKey === "plan") {
-        av = a.monthlyPlan?.[monthIdx] ?? null;
-        bv = b.monthlyPlan?.[monthIdx] ?? null;
+        av = sumRange(a.monthlyPlan);
+        bv = sumRange(b.monthlyPlan);
       } else if (sortKey === "ob") {
-        av = a.monthlyOrderBooked?.[monthIdx] ?? null;
-        bv = b.monthlyOrderBooked?.[monthIdx] ?? null;
+        av = sumRange(a.monthlyOrderBooked);
+        bv = sumRange(b.monthlyOrderBooked);
       } else if (sortKey === "sales") {
-        av = a.monthlySalesReceived?.[monthIdx] ?? null;
-        bv = b.monthlySalesReceived?.[monthIdx] ?? null;
+        av = sumRange(a.monthlySalesReceived);
+        bv = sumRange(b.monthlySalesReceived);
       } else if (sortKey === "ach") {
-        av = achPct(a.monthlySalesReceived?.[monthIdx] ?? null, a.monthlyPlan?.[monthIdx] ?? null);
-        bv = achPct(b.monthlySalesReceived?.[monthIdx] ?? null, b.monthlyPlan?.[monthIdx] ?? null);
+        av = achPct(sumRange(a.monthlySalesReceived), sumRange(a.monthlyPlan));
+        bv = achPct(sumRange(b.monthlySalesReceived), sumRange(b.monthlyPlan));
       }
       if (av === null && bv === null) return 0;
       if (av === null) return 1;
@@ -199,7 +233,7 @@ export default function SalesPeople() {
       const diff = (av as number) - (bv as number);
       return sortDir === "asc" ? diff : -diff;
     });
-  }, [filteredRows, sortKey, sortDir, monthIdx]);
+  }, [filteredRows, sortKey, sortDir, sumRange]);
 
   function toggleSort(key: typeof sortKey) {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -223,14 +257,14 @@ export default function SalesPeople() {
   const summary = useMemo(() => {
     let plan = 0, ob = 0, sales = 0, count = 0;
     for (const r of sortedRows) {
-      const p = r.monthlyPlan?.[monthIdx] ?? 0;
-      const o = r.monthlyOrderBooked?.[monthIdx] ?? 0;
-      const s = r.monthlySalesReceived?.[monthIdx] ?? 0;
+      const p = sumRange(r.monthlyPlan) ?? 0;
+      const o = sumRange(r.monthlyOrderBooked) ?? 0;
+      const s = sumRange(r.monthlySalesReceived) ?? 0;
       plan += p; ob += o; sales += s;
       if (p > 0) count++;
     }
     return { plan, ob, sales, count };
-  }, [sortedRows, monthIdx]);
+  }, [sortedRows, sumRange]);
 
   const summaryAch = achPct(summary.sales, summary.plan);
 
@@ -306,6 +340,11 @@ export default function SalesPeople() {
           {FISCAL_MONTHS[monthIdx]} is the current open month. Data is in progress — achievement percentages are not yet meaningful. Values entered so far are shown.
         </div>
       )}
+      {rangeIncludesOpen && (
+        <div className="rounded border border-amber-300 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          The selected period ({effectivePeriodLabel}) includes the current open month — totals include values entered so far.
+        </div>
+      )}
       {futureMonth && (
         <div className="rounded border border-border/40 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
           {FISCAL_MONTHS[monthIdx]} has not started yet. No data available.
@@ -317,9 +356,9 @@ export default function SalesPeople() {
         <div className="grid grid-cols-4 gap-2">
           {[
             { label: "Members with plan", value: summary.count.toString() },
-            { label: "Plan", value: fmt(summary.plan) },
-            { label: "OB", value: fmt(summary.ob) },
-            { label: "Sales", value: fmt(summary.sales) },
+            { label: `Plan (${effectivePeriodLabel})`, value: fmt(summary.plan) },
+            { label: `OB (${effectivePeriodLabel})`, value: fmt(summary.ob) },
+            { label: `Sales (${effectivePeriodLabel})`, value: fmt(summary.sales) },
           ].map((t) => (
             <div key={t.label} className="rounded border bg-card p-3">
               <p className="text-xs text-muted-foreground">{t.label}</p>
@@ -364,10 +403,12 @@ export default function SalesPeople() {
                 </tr>
               )}
               {sortedRows.map((r) => {
-                const plan = r.monthlyPlan?.[monthIdx] ?? null;
-                const ob = r.monthlyOrderBooked?.[monthIdx] ?? null;
-                const sales = r.monthlySalesReceived?.[monthIdx] ?? null;
-                const notRecorded = r.monthlyNotYetRecorded?.[monthIdx] ?? false;
+                const plan = sumRange(r.monthlyPlan);
+                const ob = sumRange(r.monthlyOrderBooked);
+                const sales = sumRange(r.monthlySalesReceived);
+                // "Not recorded" is a single-month concept; a range simply
+                // sums the months that have been recorded.
+                const notRecorded = singleMonth ? (r.monthlyNotYetRecorded?.[monthIdx] ?? false) : false;
                 const ach = achPct(sales, plan);
 
                 return (

@@ -80,14 +80,34 @@ function fmtCr(n: number): string {
 
 interface Props {
   fy: string;
+  /** Fiscal month range (1–12); passed to every sub-view so the global
+      period filter applies (like-months on both compared FYs). */
+  monthFrom: number;
+  monthTo: number;
   periodLabel: string;
+}
+
+/** Query params shared by all Movement endpoints. */
+function movementParams(fy: string, monthFrom: number, monthTo: number): URLSearchParams {
+  const params = new URLSearchParams({ fy });
+  if (monthFrom !== 1 || monthTo !== 12) {
+    params.set("monthFrom", String(monthFrom));
+    params.set("monthTo", String(monthTo));
+  }
+  return params;
+}
+
+interface ViewProps {
+  fy: string;
+  monthFrom: number;
+  monthTo: number;
 }
 
 type SubView = "breadth" | "first" | "lost";
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export default function SkuMovement({ fy, periodLabel }: Props) {
+export default function SkuMovement({ fy, monthFrom, monthTo, periodLabel }: Props) {
   const [view, setView] = useState<SubView>("breadth");
 
   return (
@@ -116,9 +136,9 @@ export default function SkuMovement({ fy, periodLabel }: Props) {
         <span className="ml-auto text-xs text-muted-foreground hidden lg:block">{periodLabel}</span>
       </div>
 
-      {view === "breadth" && <BreadthTrendView fy={fy} />}
-      {view === "first" && <FirstOrdersView fy={fy} />}
-      {view === "lost" && <LostCodesView fy={fy} />}
+      {view === "breadth" && <BreadthTrendView fy={fy} monthFrom={monthFrom} monthTo={monthTo} />}
+      {view === "first" && <FirstOrdersView fy={fy} monthFrom={monthFrom} monthTo={monthTo} />}
+      {view === "lost" && <LostCodesView fy={fy} monthFrom={monthFrom} monthTo={monthTo} />}
     </div>
   );
 }
@@ -145,7 +165,7 @@ function ErrorBox({ msg }: { msg: string }) {
 
 // ── Breadth trend ────────────────────────────────────────────────────────────────
 
-function BreadthTrendView({ fy }: { fy: string }) {
+function BreadthTrendView({ fy, monthFrom, monthTo }: ViewProps) {
   const [data, setData] = useState<BreadthTrendResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -153,7 +173,7 @@ function BreadthTrendView({ fy }: { fy: string }) {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    const params = new URLSearchParams({ fy });
+    const params = movementParams(fy, monthFrom, monthTo);
     fetch(`${BASE}/api/sku/breadth-trend?${params}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -162,7 +182,7 @@ function BreadthTrendView({ fy }: { fy: string }) {
       .then(setData)
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [fy]);
+  }, [fy, monthFrom, monthTo]);
 
   if (loading) return <Loading />;
   if (error) return <ErrorBox msg={error} />;
@@ -232,7 +252,7 @@ function BreadthTrendView({ fy }: { fy: string }) {
 
 // ── First orders ─────────────────────────────────────────────────────────────────
 
-function FirstOrdersView({ fy }: { fy: string }) {
+function FirstOrdersView({ fy, monthFrom, monthTo }: ViewProps) {
   const [data, setData] = useState<FirstOrdersResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -241,7 +261,7 @@ function FirstOrdersView({ fy }: { fy: string }) {
   const fetchData = useCallback(() => {
     setLoading(true);
     setError(null);
-    const params = new URLSearchParams({ fy });
+    const params = movementParams(fy, monthFrom, monthTo);
     fetch(`${BASE}/api/sku/first-orders?${params}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -250,7 +270,7 @@ function FirstOrdersView({ fy }: { fy: string }) {
       .then(setData)
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [fy]);
+  }, [fy, monthFrom, monthTo]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -347,7 +367,7 @@ function FirstOrdersView({ fy }: { fy: string }) {
 
 // ── Lost codes ───────────────────────────────────────────────────────────────────
 
-function LostCodesView({ fy }: { fy: string }) {
+function LostCodesView({ fy, monthFrom, monthTo }: ViewProps) {
   const [data, setData] = useState<LostCodesResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -355,7 +375,7 @@ function LostCodesView({ fy }: { fy: string }) {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    const params = new URLSearchParams({ fy });
+    const params = movementParams(fy, monthFrom, monthTo);
     fetch(`${BASE}/api/sku/lost-codes?${params}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -364,7 +384,7 @@ function LostCodesView({ fy }: { fy: string }) {
       .then(setData)
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [fy]);
+  }, [fy, monthFrom, monthTo]);
 
   if (loading) return <Loading />;
   if (error) return <ErrorBox msg={error} />;

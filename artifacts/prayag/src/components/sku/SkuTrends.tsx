@@ -354,6 +354,9 @@ export default function SkuTrends({ data }: Props) {
           this year and was unattributed last year, so it sits in the
           FY2024-25 territory total and not in FY2025-26. Year-on-year
           shifts in this table are not like-for-like. Under review.
+          Restated on a like-for-like basis, three of five segment shifts
+          reverse direction. The shift column is withheld pending a decision
+          on the customer&apos;s classification.
         </p>
         <h3 className="text-sm font-semibold mb-1">
           Net mix shift
@@ -407,23 +410,11 @@ export default function SkuTrends({ data }: Props) {
                         )}
                       </td>
                     ))}
-                    <td className="py-1.5 px-3 text-right tabular-nums font-medium">
-                      {shift !== null ? (
-                        <span
-                          className={cn(
-                            shift > 0.5
-                              ? "text-emerald-600 dark:text-emerald-400"
-                              : shift < -0.5
-                                ? "text-red-600 dark:text-red-400"
-                                : "text-muted-foreground",
-                          )}
-                        >
-                          {shift > 0 ? "+" : ""}
-                          {shift}pp
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground/40">—</span>
-                      )}
+                    {/* Shift withheld — FY2024-25 vs FY2025-26 channel-basis break
+                        (see disclosure above). Restore the computed value once the
+                        customer's classification is decided. */}
+                    <td className="py-1.5 px-3 text-right text-muted-foreground">
+                      under review
                     </td>
                   </tr>
                 );

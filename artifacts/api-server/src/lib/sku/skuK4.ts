@@ -614,8 +614,18 @@ export type BreadthTrendResult = {
   projectExclusion: ProjectExclusionMeta;
 };
 
-export async function getBreadthTrend(latestFy: string, priorFy: string): Promise<BreadthTrendResult> {
-  return cached(`breadth:${latestFy}:${priorFy}`, async () => {
+export async function getBreadthTrend(
+  latestFy: string,
+  priorFy: string,
+  monthNames?: string[] | null,
+): Promise<BreadthTrendResult> {
+  // Like-months restriction: applied to EVERY FY (month_label is 'Apr-26'
+  // style, so match on the name part) so breadth is compared Q1-vs-Q1 etc.
+  const mn = monthNames && monthNames.length > 0 && monthNames.length < 12 ? monthNames : null;
+  const mFilter = mn
+    ? sql`AND split_part(month_label, '-', 1) IN (${sql.join(mn.map((m) => sql`${m}`), sql`, `)})`
+    : sql``;
+  return cached(`breadth:${latestFy}:${priorFy}:${mn ? mn.join(",") : "all"}`, async () => {
     const projSet = await getProjectCustomerSet();
     const terr = territoryFilterSql(projSet);
 
@@ -625,17 +635,17 @@ export async function getBreadthTrend(latestFy: string, priorFy: string): Promis
              count(DISTINCT coalesce(group_canon, group_raw, 'Unmapped'))::int AS segments,
              sum(amount::float8) AS net
       FROM sale_line_current
-      WHERE ${terr}
+      WHERE ${terr} ${mFilter}
       GROUP BY 1, 2
     `);
 
     const dropRows = await db.execute(sql`
       WITH prior AS (
         SELECT upper(trim(coalesce(customer,'?'))) AS customer, code, sum(amount::float8) AS net
-        FROM sale_line_current WHERE fy = ${priorFy} AND ${terr} GROUP BY 1, 2
+        FROM sale_line_current WHERE fy = ${priorFy} AND ${terr} ${mFilter} GROUP BY 1, 2
       ), latest AS (
         SELECT DISTINCT upper(trim(coalesce(customer,'?'))) AS customer, code
-        FROM sale_line_current WHERE fy = ${latestFy} AND ${terr}
+        FROM sale_line_current WHERE fy = ${latestFy} AND ${terr} ${mFilter}
       ), still_active AS (
         SELECT DISTINCT customer FROM latest
       )
@@ -773,8 +783,16 @@ export type LostCodesResult = {
   projectExclusion: ProjectExclusionMeta;
 };
 
-export async function getLostCodes(fy: string, priorFy: string): Promise<LostCodesResult> {
-  return cached(`lost:${fy}:${priorFy}`, async () => {
+export async function getLostCodes(
+  fy: string,
+  priorFy: string,
+  monthNames?: string[] | null,
+): Promise<LostCodesResult> {
+  const mn = monthNames && monthNames.length > 0 && monthNames.length < 12 ? monthNames : null;
+  const mFilter = mn
+    ? sql`AND split_part(month_label, '-', 1) IN (${sql.join(mn.map((m) => sql`${m}`), sql`, `)})`
+    : sql``;
+  return cached(`lost:${fy}:${priorFy}:${mn ? mn.join(",") : "all"}`, async () => {
     const projSet = await getProjectCustomerSet();
     const terr = territoryFilterSql(projSet);
     const rows = await db.execute(sql`
@@ -782,10 +800,10 @@ export async function getLostCodes(fy: string, priorFy: string): Promise<LostCod
         SELECT upper(trim(coalesce(customer,'?'))) AS customer, code,
                max(coalesce(group_canon, group_raw, 'Unmapped')) AS segment,
                sum(amount::float8) AS net, sum(qty::float8) AS qty
-        FROM sale_line_current WHERE fy = ${priorFy} AND ${terr} GROUP BY 1, 2
+        FROM sale_line_current WHERE fy = ${priorFy} AND ${terr} ${mFilter} GROUP BY 1, 2
       ), cur AS (
         SELECT DISTINCT upper(trim(coalesce(customer,'?'))) AS customer, code
-        FROM sale_line_current WHERE fy = ${fy} AND ${terr}
+        FROM sale_line_current WHERE fy = ${fy} AND ${terr} ${mFilter}
       ), still_active AS (SELECT DISTINCT customer FROM cur)
       SELECT p.customer, p.code, p.segment, p.net AS prior_net, p.qty AS prior_qty
       FROM prior p
