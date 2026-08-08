@@ -163,12 +163,15 @@ export function CompanyReportFilterBar({
   value,
   onChange,
   showCustomers = true,
+  showHeads = true,
 }: {
   fy: string;
   value: EntityFilterValue;
   onChange: (next: EntityFilterValue) => void;
   /** Hide the Distributor level for pages whose data has no distributor dimension. */
   showCustomers?: boolean;
+  /** Hide the State Head level for pages that already have a dedicated head scope control. */
+  showHeads?: boolean;
 }) {
   const [tree, setTree] = useState<FilterTree | null>(null);
   const [error, setError] = useState(false);
@@ -232,12 +235,14 @@ export function CompanyReportFilterBar({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <MultiSelect
-        label="State Head"
-        options={headOptions}
-        selected={value.heads}
-        onChange={(heads) => onChange({ ...value, heads })}
-      />
+      {showHeads && (
+        <MultiSelect
+          label="State Head"
+          options={headOptions}
+          selected={value.heads}
+          onChange={(heads) => onChange({ ...value, heads })}
+        />
+      )}
       <MultiSelect
         label="State"
         options={stateOptions}

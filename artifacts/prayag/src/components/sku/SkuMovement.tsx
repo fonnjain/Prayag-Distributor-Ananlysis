@@ -27,10 +27,16 @@ export type Narrower = {
   priorFy: string;
 };
 
+export type ProjectExclusionMeta = {
+  basis: string;
+  bridgedCustomers: number;
+  note: string;
+};
+
 export type BreadthTrendResult = {
   compared: { latestFy: string; priorFy: string };
   narrowers: Narrower[];
-  projectExclusion: string;
+  projectExclusion: ProjectExclusionMeta;
 };
 
 export type FirstOrderCode = { code: string; segment: string; firstMonth: string; net: number };
@@ -160,7 +166,7 @@ function BreadthTrendView({ fy }: { fy: string }) {
 
   if (loading) return <Loading />;
   if (error) return <ErrorBox msg={error} />;
-  if (!data || data.narrowers.length === 0) {
+  if (!data || !Array.isArray(data.narrowers) || data.narrowers.length === 0) {
     return (
       <p className="text-sm text-muted-foreground py-8 text-center">
         No narrowing customers found for FY {fy} vs prior.
@@ -217,7 +223,9 @@ function BreadthTrendView({ fy }: { fy: string }) {
           </TableBody>
         </Table>
       </div>
-      <p className="px-4 py-2 text-xs text-muted-foreground border-t">{data.projectExclusion}</p>
+      {data.projectExclusion?.note && (
+        <p className="px-4 py-2 text-xs text-muted-foreground border-t">{data.projectExclusion.note}</p>
+      )}
     </div>
   );
 }
@@ -257,7 +265,7 @@ function FirstOrdersView({ fy }: { fy: string }) {
 
   if (loading) return <Loading />;
   if (error) return <ErrorBox msg={error} />;
-  if (!data || data.customers.length === 0) {
+  if (!data || !Array.isArray(data.customers) || data.customers.length === 0) {
     return (
       <p className="text-sm text-muted-foreground py-8 text-center">
         No first-ever codes recorded for FY {fy}.
@@ -360,7 +368,7 @@ function LostCodesView({ fy }: { fy: string }) {
 
   if (loading) return <Loading />;
   if (error) return <ErrorBox msg={error} />;
-  if (!data || data.lost.length === 0) {
+  if (!data || !Array.isArray(data.lost) || data.lost.length === 0) {
     return (
       <p className="text-sm text-muted-foreground py-8 text-center">
         No lost codes found for FY {fy}.

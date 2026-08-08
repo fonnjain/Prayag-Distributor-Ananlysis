@@ -1,0 +1,69 @@
+Prayag app - extend the identity registry to distributors, dealers and
+retailers. Same global rules. Report before merging anything.
+
+The salesperson collision was solved by finding an identifier already in the
+data - Employee Code. The same identifiers exist for other entities and are not
+being used.
+
+1. RETAILERS - RET# IS THE KEY. Names become display only.
+   Present in both the member sheets and the secondary register. It is a MERGED
+   cell like Order ID, Date and Segment - carry forward, or coverage reads 15.7
+   per cent instead of ~100.
+   Two different RET# are two different retailers, ALWAYS, even with identical
+   names. One RET# with several name spellings is ONE retailer - the spellings
+   are variants and the ID resolves them.
+   Report: distinct RET# per fiscal year; RET# carrying more than one name
+   spelling; and rows with NO RET# at all, which need the name-plus-geography
+   fallback.
+
+2. DISTRIBUTORS - DIST# WHERE IT EXISTS, geography where it does not.
+   The Retailer-Distributor Data workbook carries DIST# for 269; 318 transact.
+   Report the ~49 with no DIST#.
+   Where there is no ID, identity is name AND state AND district. Two records
+   are the same only if all three agree and they do not appear as separate rows
+   for the same period.
+
+3. DIRECT DEALERS AND PRIMARY CUSTOMERS - no ID exists.
+   Identity is name AND state AND station. Report how many distinct customer
+   names in sale_line resolve to the same normalised form across different
+   states - those are definitively different and must never merge.
+
+4. THE DISPROOF TESTS, in order. Any ONE of these proves two records are
+   DIFFERENT, with no override:
+     different stable ID (RET#, DIST#, employee code)
+     they appear as separate rows in the same tab for the same period
+     different state in the same fiscal year
+     different district or station in the same fiscal year
+   Similarity can only SUGGEST a match. Geography can DISPROVE one.
+
+5. NEVER AUTO-MERGE ON SIMILARITY - not even with the state agreeing.
+   That reasoning has been wrong twice: Shiv Kumar versus Shiv Kumar Patel were
+   different people in different states; K Suresh Kumar versus J.SURESH KUMAR
+   are the same head and state, separated only by headquarter.
+   Report candidate pairs with both sides' ID, state, district and value, and
+   let a human decide.
+   Where both sides have transactions in the SAME period, mark them
+   RESOLVED-DIFFERENT automatically and stop asking.
+
+6. THE ASYMMETRY, which sets how cautious to be per entity:
+     a wrong RETAILER merge inflates one and deletes another
+     a wrong DISTRIBUTOR merge produces a false concentration figure that the
+       numeric guard CANNOT catch - every individual number stays correct
+     a missed merge is two rows a human can see
+   Merge only on an ID. Everything else is a candidate.
+
+7. ONE SHARED REGISTRY for all entity types, alongside the member registry
+   already built. An ambiguous lookup returns an error naming every candidate
+   with its distinguishing field - never the first match.
+   Report every location that currently resolves a retailer, distributor or
+   customer by name, and confirm each now calls it.
+
+Acceptance - report the computed value:
+  distinct RET# per FY, and the count with more than one name spelling
+  rows with no RET# and how the fallback resolves them
+  the ~49 transacting distributors with no DIST#
+  candidate pairs listed with ID, state, district and value - not merged
+  pairs transacting in the same period marked RESOLVED-DIFFERENT
+  the 15 spelling-variant pairs re-tested against RET#/DIST# - report how many
+    the IDs resolve outright
+  every name-based resolution location listed and confirmed

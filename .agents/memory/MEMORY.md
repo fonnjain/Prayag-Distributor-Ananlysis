@@ -71,7 +71,7 @@
 - [SD2 Distributor Deep Dive](sd2-distributor-deep-dive.md) — byState/perMember/correlation/namingCandidates + dashboardOb; TIMEOUT_MS=60s; perMemberAcc in Step 4; MemberRef extended; verified Sandeep Dadheech r=−0.333.
 - [Primary period-aware service](primary-period-service.md) — single shared loader for booking+sale; resolved ₹0.42 Cr gap; Q1 anchors ₹77.76/₹72.86/₹4.90 Cr; period-filter flag drives FY-total warning UI.
 - [Frozen registers system](frozen-registers-freeze.md) — closed FYs 23-24/24-25/25-26 anchor-frozen; every mutating register route needs rejectIfFrozen(); HTTP 423 unless unfreeze+reason.
-- [SKU K4 discounts/movement](sku-k4-discounts-movement.md) — register discount_pct is a % (gross×(1−d%)=SubTotal, 100% verified); FY-conditional project bridge; in-process backfill route (shell nohup gets reaped).
+- [SKU K4 discounts/movement](sku-k4-discounts-movement.md) — register discount_pct is a %; projectExclusion is an object (render .note, not the object — caused Movement white-page crash); in-process backfill route.
 - [Register serial instability](register-serial-instability.md) — sheet serials shift on re-sort; serial-in-identity caused July doubling twice; never key on sheet serial, blast-radius guard masks it.
 - [Register monthly full-replace](register-monthly-replace.md) — open-FY sync is nightly per-month delete+insert (no identity key); DB short-read baseline; months freeze at 00:00 on the 8th (grace 1st–7th; strict any-shortfall guard at freeze) with anchors.
 - [OB mirror sync](ob-mirror-sync.md) — primary_order_line default ingest is append-only (drifts stale); replace mode + 6h open-FY scheduler + audit check 7.0 keep it aligned with the Order Sheet.
@@ -105,4 +105,5 @@
 - [Deep Dive filter chain + canon](deep-dive-filter-chain.md) — distributor directory (snapshot-only reads), geography = serving member's state; saleLineFilter CASE derives from STATE_CANON_NORMALISE.
 - [Register new-tab detection](register-tab-audit.md) — unrecognised tabs are shape-tested and proposed/ignored, never read; orphan cleanup must keep policy-skipped tabs; audit failures must WARN.
 - [Distributor tabs + vocabulary recon](distributor-tabs-recon.md) — sheet↔register identity rule (never merge on spelling), territory-only primary aggregates, no prior-FY directory builds; 34.5% unattributed banner is mandatory.
+- [Project head reclassification](project-head-reclassification.md) — cross-FY mix claims need a per-customer head_canon stability check; NULL-head→project moves (MOHAN IMPEX ~₹36 Cr) evade state_canon tests.
 - [Comparison guard validation](comparison-guard-validation.md) — validation steps that curl the API must self-provision a disposable server when none is reachable; live data lacks a missing-cost head, so that path is unit-tested.

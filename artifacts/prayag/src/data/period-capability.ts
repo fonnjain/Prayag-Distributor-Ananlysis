@@ -46,6 +46,7 @@ const PAGE_CAPABILITIES: Record<string, PeriodCapability> = {
   "salespeople":             "FULL",      // Sales People — SOBR gives per-month Plan/OB/Sales for 162 secondary members; 19 primary-role members show "—" for monthly cells (no SOBR row)
   "deep-dive":               "FY_ONLY",   // Sales Deep Dive  ← PA2 priority 3
   "distributor-deep-dive":   "FULL",      // register-backed tabs honour months; sheet-based overview stays FY-wide (noted in UI)
+  "sku":                     "FULL",      // SKU Deep Dive — Overview/Drill/Review/Push/Discounts honour monthFrom/monthTo; Trends/Timing span all FYs (noted in UI)
 
   // ── NONE — not period-scoped at all, by design ────────────────────────────
   "warnings":                "NONE",  // always current FY, independent of global filter

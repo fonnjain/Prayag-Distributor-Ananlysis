@@ -23,6 +23,8 @@ import SkuSeasonality from "@/components/sku/SkuSeasonality";
 import SkuMovement from "@/components/sku/SkuMovement";
 import { cn } from "@/lib/utils";
 import { ChevronLeft, Download } from "lucide-react";
+import GlobalFilterBar from "@/components/GlobalFilterBar";
+import { useGlobalFilter } from "@/data/global-filter-context";
 import {
   CompanyReportFilterBar,
   EMPTY_ENTITY_FILTER,
@@ -32,23 +34,6 @@ import {
 } from "@/components/dashboard/CompanyReportFilters";
 
 const BASE = (import.meta as { env: Record<string, string> }).env.BASE_URL?.replace(/\/$/, "") ?? "";
-
-// ── Period presets ─────────────────────────────────────────────────────────────
-// FY-relative months: April = 1, March = 12.
-
-const PERIOD_PRESETS = [
-  { id: "q1",   label: "Q1 (Apr–Jun)",  monthFrom: 1,  monthTo: 3  },
-  { id: "q2",   label: "Q2 (Jul–Sep)",  monthFrom: 4,  monthTo: 6  },
-  { id: "q3",   label: "Q3 (Oct–Dec)",  monthFrom: 7,  monthTo: 9  },
-  { id: "q4",   label: "Q4 (Jan–Mar)",  monthFrom: 10, monthTo: 12 },
-  { id: "h1",   label: "H1 (Apr–Sep)",  monthFrom: 1,  monthTo: 6  },
-  { id: "h2",   label: "H2 (Oct–Mar)",  monthFrom: 7,  monthTo: 12 },
-  { id: "full", label: "Full Year",     monthFrom: 1,  monthTo: 12 },
-] as const;
-
-type PeriodPresetId = (typeof PERIOD_PRESETS)[number]["id"];
-
-const FYS = ["2026-27", "2025-26", "2024-25", "2023-24", "2022-23"];
 
 // ── Response shapes ────────────────────────────────────────────────────────────
 
@@ -87,17 +72,24 @@ type Section = "overview" | "drill" | "focus" | "push" | "trends" | "discounts" 
 type Level = "distributor" | "direct_dealer" | "retailer" | "project";
 
 export default function SkuPage() {
-  // Filters
-  const [fy, setFy] = useState("2026-27");
+  // Filters — FY and period come from the global filter bar (PA1 capability: FULL).
+  const { fy, effectivePeriodFrom, effectivePrimaryPeriodTo, effectivePeriodLabel } = useGlobalFilter();
   const [level, setLevel] = useState<Level>("distributor");
-  const [periodId, setPeriodId] = useState<PeriodPresetId>("q1");
   // State-head scope — "" = company-wide. Applies to Overview/Drill facts and Timing.
   const [scopeHead, setScopeHead] = useState<string>("");
   // Shared State Head / State / Distributor filter (same bar as Products/Growth).
   // Primary channels only — the secondary register has no state/distributor
   // columns, so the bar is hidden (and the filter dropped) for retailer level.
-  const [entityFilter, setEntityFilter] = useState<EntityFilterValue>(EMPTY_ENTITY_FILTER);
-  const filterQuery = level === "retailer" ? "" : entityFilterQuery(entityFilter);
+  const [entityFilter, setEntityFilterRaw] = useState<EntityFilterValue>(EMPTY_ENTITY_FILTER);
+  // The State Head control of the shared bar is hidden on this page (the scope
+  // dropdown is the sole head filter) — force heads empty so a stale/pruned
+  // head selection can never silently filter queries while invisible.
+  const setEntityFilter = useCallback(
+    (v: EntityFilterValue) => setEntityFilterRaw({ ...v, heads: [] }),
+    [],
+  );
+  const filterQuery =
+    level === "retailer" ? "" : entityFilterQuery({ ...entityFilter, heads: [] });
 
   // Section state
   const [section, setSection] = useState<Section>("overview");
@@ -133,7 +125,9 @@ export default function SkuPage() {
   const [trendLoading, setTrendLoading] = useState(false);
   const [trendError, setTrendError] = useState<string | null>(null);
 
-  const period = PERIOD_PRESETS.find((p) => p.id === periodId) ?? PERIOD_PRESETS[0];
+  // 1-based fiscal month bounds from the global period selector. Primary bound
+  // (effectivePrimaryPeriodTo) — SKU facts read sale_line / register data.
+  const period = { monthFrom: effectivePeriodFrom, monthTo: effectivePrimaryPeriodTo };
 
   // State-head options for the scope selector (distinct headCanon from the
   // distributor list — the same vocabulary sale_line carries).
@@ -143,9 +137,11 @@ export default function SkuPage() {
 
   // ── Fetch overview (all segments, no segment filter) ─────────────────────────
 
-  const fetchOverview = useCallback(() => {
+  useEffect(() => {
+    let cancelled = false;
     setOverviewLoading(true);
     setOverviewError(null);
+    setOverviewData(null);
     const params = new URLSearchParams({
       fy,
       level,
@@ -159,19 +155,20 @@ export default function SkuPage() {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json() as Promise<FactsResponse>;
       })
-      .then(setOverviewData)
-      .catch((e: Error) => setOverviewError(e.message))
-      .finally(() => setOverviewLoading(false));
+      .then((d) => { if (!cancelled) setOverviewData(d); })
+      .catch((e: Error) => { if (!cancelled) setOverviewError(e.message); })
+      .finally(() => { if (!cancelled) setOverviewLoading(false); });
+    return () => { cancelled = true; };
   }, [fy, level, period.monthFrom, period.monthTo, scopeHead, filterQuery]);
-
-  useEffect(() => { fetchOverview(); }, [fetchOverview]);
 
   // ── Fetch drill (single segment) ─────────────────────────────────────────────
 
   useEffect(() => {
     if (section !== "drill" || !drillSegment) return;
+    let cancelled = false;
     setDrillLoading(true);
     setDrillError(null);
+    setDrillData(null);
     const params = new URLSearchParams({
       fy,
       level,
@@ -186,17 +183,20 @@ export default function SkuPage() {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json() as Promise<FactsResponse>;
       })
-      .then(setDrillData)
-      .catch((e: Error) => setDrillError(e.message))
-      .finally(() => setDrillLoading(false));
+      .then((d) => { if (!cancelled) setDrillData(d); })
+      .catch((e: Error) => { if (!cancelled) setDrillError(e.message); })
+      .finally(() => { if (!cancelled) setDrillLoading(false); });
+    return () => { cancelled = true; };
   }, [section, drillSegment, fy, level, period.monthFrom, period.monthTo, scopeHead, filterQuery]);
 
   // ── Fetch focus (K3 recommendations) ─────────────────────────────────────────
 
   useEffect(() => {
     if (section !== "focus") return;
+    let cancelled = false;
     setFocusLoading(true);
     setFocusError(null);
+    setFocusData(null);
     const params = new URLSearchParams({
       fy,
       level,
@@ -209,9 +209,10 @@ export default function SkuPage() {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json() as Promise<FocusData>;
       })
-      .then(setFocusData)
-      .catch((e: Error) => setFocusError(e.message))
-      .finally(() => setFocusLoading(false));
+      .then((d) => { if (!cancelled) setFocusData(d); })
+      .catch((e: Error) => { if (!cancelled) setFocusError(e.message); })
+      .finally(() => { if (!cancelled) setFocusLoading(false); });
+    return () => { cancelled = true; };
   }, [section, fy, level, period.monthFrom, period.monthTo, filterQuery]);
 
   // ── Fetch distributor list (eager — pre-load when level or FY changes) ────────
@@ -236,8 +237,10 @@ export default function SkuPage() {
 
   useEffect(() => {
     if (section !== "push" || !selectedDistributor) return;
+    let cancelled = false;
     setPushLoading(true);
     setPushError(null);
+    setPushData(null);
     const params = new URLSearchParams({
       fy,
       level,
@@ -250,9 +253,10 @@ export default function SkuPage() {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json() as Promise<PushListResult>;
       })
-      .then(setPushData)
-      .catch((e: Error) => setPushError(e.message))
-      .finally(() => setPushLoading(false));
+      .then((d) => { if (!cancelled) setPushData(d); })
+      .catch((e: Error) => { if (!cancelled) setPushError(e.message); })
+      .finally(() => { if (!cancelled) setPushLoading(false); });
+    return () => { cancelled = true; };
   }, [section, fy, level, period.monthFrom, period.monthTo, selectedDistributor]);
 
   // ── Fetch trend (all FYs) ─────────────────────────────────────────────────────
@@ -315,7 +319,7 @@ export default function SkuPage() {
     (r) => r.segment === drillSegment,
   ) ?? null;
 
-  const periodLabel = `${period.label}  FY ${fy}`;
+  const periodLabel = `${effectivePeriodLabel}  FY ${fy}`;
 
   // Level display name
   const levelLabel: Record<Level, string> = {
@@ -327,6 +331,9 @@ export default function SkuPage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      {/* Global FY + period selector (capability FULL for /sku) */}
+      <GlobalFilterBar />
+
       {/* ── Top bar ─────────────────────────────────────────────────────────── */}
       <header className="flex items-center gap-2 border-b px-4 py-2.5 flex-shrink-0 flex-wrap">
         {/* Title + breadcrumb */}
@@ -511,12 +518,19 @@ export default function SkuPage() {
             </select>
           )}
 
-          {/* Shared State Head / State / Distributor filter — primary channels only.
-              Hidden on Trends and Timing: getSkuTrend/getSkuTiming do not accept
-              entityFilter, so showing the bar would make it appear functional when
-              it isn't. Use the scope dropdown above instead. */}
-          {level !== "retailer" && section !== "trends" && section !== "timing" && (
-            <CompanyReportFilterBar fy={fy} value={entityFilter} onChange={setEntityFilter} />
+          {/* Shared State / Distributor filter — primary channels only. Shown ONLY
+              on sections whose endpoints accept entityFilter (Overview / Drill /
+              Review); elsewhere the bar would appear functional when it isn't.
+              State Head is hidden here — the scope dropdown above is the single
+              head control on this page. */}
+          {level !== "retailer" &&
+            (section === "overview" || section === "drill" || section === "focus") && (
+            <CompanyReportFilterBar
+              fy={fy}
+              value={entityFilter}
+              onChange={setEntityFilter}
+              showHeads={false}
+            />
           )}
 
           {/* Excel export — Segments + Codes for the current level/period/filters */}
@@ -530,45 +544,11 @@ export default function SkuPage() {
             Export
           </a>
 
-          {/* FY + Period — hidden on Trends / Timing (span all FYs) */}
+          {/* FY + period come from the global filter bar above. */}
           {section !== "trends" && section !== "timing" && (
-            <>
-              <select
-                value={fy}
-                onChange={(e) => {
-                  setFy(e.target.value);
-                  setOverviewData(null);
-                  setDrillData(null);
-                  setFocusData(null);
-                  setPushData(null);
-                }}
-                className="rounded border bg-background px-2 py-1 text-xs"
-              >
-                {FYS.map((f) => (
-                  <option key={f} value={f}>FY {f}</option>
-                ))}
-              </select>
-
-              <select
-                value={periodId}
-                onChange={(e) => {
-                  setPeriodId(e.target.value as PeriodPresetId);
-                  setOverviewData(null);
-                  setDrillData(null);
-                  setFocusData(null);
-                  setPushData(null);
-                }}
-                className="rounded border bg-background px-2 py-1 text-xs"
-              >
-                {PERIOD_PRESETS.map((p) => (
-                  <option key={p.id} value={p.id}>{p.label}</option>
-                ))}
-              </select>
-
-              <span className="text-xs text-muted-foreground hidden lg:block">
-                {levelLabel[level]} · {periodLabel}
-              </span>
-            </>
+            <span className="text-xs text-muted-foreground hidden lg:block">
+              {levelLabel[level]} · {periodLabel}
+            </span>
           )}
 
           {section === "trends" && (
@@ -589,7 +569,8 @@ export default function SkuPage() {
 
       {/* ── Content ─────────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto p-4">
-        {level !== "retailer" && hasEntityFilter(entityFilter) && section !== "trends" && section !== "timing" && (
+        {level !== "retailer" && hasEntityFilter(entityFilter) &&
+          (section === "overview" || section === "drill" || section === "focus") && (
           <p className="mb-3 text-[11px] text-amber-700 dark:text-amber-400">
             Filters active — figures below are a subset and will not match the unfiltered totals.
             Breadth denominators (codes ever sold) stay company-wide.
@@ -708,7 +689,7 @@ export default function SkuPage() {
         {section === "timing" && <SkuSeasonality head={scopeHead || null} />}
 
         {section === "movement" && (
-          <SkuMovement fy={fy} periodLabel={periodLabel} />
+          <SkuMovement fy={fy} periodLabel={`Full FY ${fy}`} />
         )}
       </div>
     </div>

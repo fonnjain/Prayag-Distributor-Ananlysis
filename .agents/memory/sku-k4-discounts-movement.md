@@ -26,3 +26,5 @@ loadSecSkuFromSheets(fy, sheetId, dryRun) — positional args; readTabRowsChunke
 
 ## Push-list enrichment
 Segments carry peakQuarter/Label/Share; codes carry discountAboveNorm (≥5pts above own closed-years territory norm; current side uses the push list's period). Enrichment is try-catch non-fatal.
+
+**Movement white-page crash (fixed Aug 2026):** `breadth-trend` returns `projectExclusion` as an object `{basis,bridgedCustomers,note}`; the frontend typed it as string and rendered it as a React child → whole-page crash. Render `.note` and runtime-guard array fields. Lesson: frontend types that "mirror backend" must be checked against the live payload, esbuild/vite won't catch the mismatch.
