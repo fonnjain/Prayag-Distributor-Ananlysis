@@ -241,7 +241,9 @@ export default function SkuTrends({ data }: Props) {
         <h3 className="text-sm font-semibold mb-1">
           Breadth % by month
           <span className="ml-1.5 text-xs font-normal text-muted-foreground">
-            codesBought ÷ codesEverSold (global denominator)
+            {data.level === "project"
+            ? "codesBought ÷ codesEverSold (project codes)"
+            : "codesBought ÷ codesEverSold (territory codes)"}
           </span>
         </h3>
         <ResponsiveContainer width="100%" height={280}>
@@ -291,7 +293,9 @@ export default function SkuTrends({ data }: Props) {
         <h3 className="text-sm font-semibold mb-1">
           Breadth % by FY
           <span className="ml-1.5 text-xs font-normal text-muted-foreground">
-            full-year distinct codes ÷ codesEverSold
+            {data.level === "project"
+              ? "full-year distinct codes ÷ codesEverSold (project codes)"
+              : "full-year distinct codes ÷ codesEverSold (territory codes)"}
           </span>
         </h3>
         <ResponsiveContainer width="100%" height={260}>

@@ -262,7 +262,11 @@ export default function SkuPage() {
     setTrendLoading(true);
     setTrendError(null);
     setTrendData(null);
-    const params = new URLSearchParams({ level, scope: "company" });
+    const params = new URLSearchParams(
+      scopeHead
+        ? { level, scope: "head", scopeId: scopeHead }
+        : { level, scope: "company" },
+    );
     fetch(`${BASE}/api/sku/trend?${params}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -271,7 +275,7 @@ export default function SkuPage() {
       .then(setTrendData)
       .catch((e: Error) => setTrendError(e.message))
       .finally(() => setTrendLoading(false));
-  }, [section, level]);
+  }, [section, level, scopeHead]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
@@ -487,7 +491,7 @@ export default function SkuPage() {
             <option value="retailer">Retailer</option>
           </select>
 
-          {/* State-head scope — applies to Overview / Drill / Timing */}
+          {/* State-head scope — applies to Overview / Drill / Trends / Timing */}
           {level !== "project" && (
             <select
               value={scopeHead}
@@ -495,6 +499,7 @@ export default function SkuPage() {
                 setScopeHead(e.target.value);
                 setOverviewData(null);
                 setDrillData(null);
+                setTrendData(null);
               }}
               className="rounded border bg-background px-2 py-1 text-xs"
               title="Scope figures to one State Head's territory"
@@ -506,8 +511,11 @@ export default function SkuPage() {
             </select>
           )}
 
-          {/* Shared State Head / State / Distributor filter — primary channels only */}
-          {level !== "retailer" && (
+          {/* Shared State Head / State / Distributor filter — primary channels only.
+              Hidden on Trends and Timing: getSkuTrend/getSkuTiming do not accept
+              entityFilter, so showing the bar would make it appear functional when
+              it isn't. Use the scope dropdown above instead. */}
+          {level !== "retailer" && section !== "trends" && section !== "timing" && (
             <CompanyReportFilterBar fy={fy} value={entityFilter} onChange={setEntityFilter} />
           )}
 
@@ -565,7 +573,9 @@ export default function SkuPage() {
 
           {section === "trends" && (
             <span className="text-xs text-muted-foreground hidden lg:block">
-              {levelLabel[level]} · All FYs
+              {scopeHead
+                ? `${levelLabel[level]} · ${scopeHead} · All FYs`
+                : `${levelLabel[level]} · All heads · All FYs`}
             </span>
           )}
 
@@ -579,7 +589,7 @@ export default function SkuPage() {
 
       {/* ── Content ─────────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto p-4">
-        {level !== "retailer" && hasEntityFilter(entityFilter) && (
+        {level !== "retailer" && hasEntityFilter(entityFilter) && section !== "trends" && section !== "timing" && (
           <p className="mb-3 text-[11px] text-amber-700 dark:text-amber-400">
             Filters active — figures below are a subset and will not match the unfiltered totals.
             Breadth denominators (codes ever sold) stay company-wide.

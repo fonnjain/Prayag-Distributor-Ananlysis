@@ -1,0 +1,195 @@
+# SKU Trends fix - Replit prompt
+
+*Paste the block below into Replit as a single change. Copy from "GOAL" to the end.*
+
+**changeDescription:** `SKU Trends: wire scope, hide inert filters, align breadth denominator`
+
+---
+
+```
+GOAL
+Two faults on SKU Deep Dive > Trends. Both make a number on screen mean
+something other than what the reader thinks it means.
+
+FAULT 1 - four filters are displayed and none of them do anything.
+In artifacts/prayag/src/pages/SkuPage.tsx the trend fetch builds its query as
+  new URLSearchParams({ level, scope: "company" })
+with a dependency array of [section, level]. The State Head scope dropdown is
+ignored, and changing it does not even re-trigger the fetch. Separately the
+CompanyReportFilterBar (State Head / State / Distributor) renders whenever
+level != "retailer", including on Trends, and entityFilter is never passed to
+/api/sku/trend at all. So a salesperson sets his own State Head and reads the
+company-wide number believing it is his territory.
+
+FAULT 2 - the same segment shows two different breadth percentages depending
+on which tab you are on, and both are labelled "breadth %".
+In artifacts/api-server/src/lib/sku/skuFacts.ts:
+  getSkuTrend()  calls getEverSoldPerSegment()          <- global denominator
+  loadSkuFacts() calls getEverSoldPerSegmentProject()   when level = project
+                   or getEverSoldPerSegmentTerritory()  otherwise
+The global denominator counts every code ever sold anywhere, including codes
+only ever sold to Project / Govt entities. But the Trends NUMERATOR is already
+territory-filtered - the query carries the same head_canon != PROJECT_HEAD_CANON
+guard the rest of the page uses. So Trends divides a territory numerator by an
+all-channel denominator, and every breadth figure on that tab reads
+systematically LOWER than the same segment on Overview.
+
+Do PART A first and run CHECKPOINT A before starting PART B. If both parts are
+applied before anything is measured, a figure that moves cannot be attributed
+to either one.
+
+================================================================================
+PART A - THE FILTERS
+================================================================================
+
+A1. WIRE THE STATE HEAD SCOPE DROPDOWN
+GET /api/sku/trend already accepts scope=head and scopeId. Use them.
+
+  const params = new URLSearchParams(
+    scopeHead
+      ? { level, scope: "head", scopeId: scopeHead }
+      : { level, scope: "company" }
+  );
+
+Add scopeHead to the useEffect dependency array so changing it refetches, and
+clear trendData in the scopeHead onChange handler the same way the other
+sections are cleared.
+
+Do NOT change the snapshot logic in routes/sku.ts. It already serves the cached
+snapshot only when scope === "company" && !segment, which is correct - a
+head-scoped request must build fresh.
+
+Update the code comment above that dropdown. It currently reads
+"applies to Overview / Drill / Timing" and will now apply to Trends too.
+
+A2. HIDE THE FILTERS THAT CANNOT WORK
+getSkuTrend does not accept an entityFilter, so State Head / State /
+Distributor cannot work on this tab without plumbing that is out of scope here.
+Do not plumb it. Hide it.
+
+  {level !== "retailer" && section !== "trends" && (
+    <CompanyReportFilterBar ... />
+  )}
+
+Check whether Timing has the same problem. If getSkuTiming also ignores
+entityFilter, hide it there too. Report what you find either way rather than
+assuming.
+
+A3. SAY WHAT THE READER IS LOOKING AT
+The header currently shows "Distributor - All FYs" on Trends. Make it name the
+scope so nobody has to guess:
+
+  scopeHead ? `${levelLabel[level]} - ${scopeHead} - All FYs`
+            : `${levelLabel[level]} - All heads - All FYs`
+
+Also check the amber "Filters active" banner. It fires on
+hasEntityFilter(entityFilter). Once the bar is hidden on Trends, a stale
+entityFilter left in state from another tab could still fire the banner on a
+screen that has no filters - suppress the banner on Trends as well.
+
+================================================================================
+CHECKPOINT A - run these and paste the output before starting PART B
+================================================================================
+
+A-1. Scope actually changes the numbers. For level=distributor, capture the
+     FY2025-26 codesBought for the CP (Chrome-Plated) segment with no head
+     selected, then again with one named State Head selected. Paste both. They
+     MUST differ. If they are identical, scopeId is not reaching the query.
+
+A-2. Company scope unchanged. With no head selected, capture the full fyTotals
+     array for level=distributor BEFORE and AFTER Part A. Identical. This is
+     additive wiring and must not move the unscoped numbers.
+
+A-3. Snapshot not poisoned. Request Trends with a head selected, then with no
+     head selected, then with the head again. Report the CP FY2025-26 figure at
+     each of the three steps. Step 3 must equal step 1. If a head-scoped result
+     got cached under the company key, step 2 will return head-scoped numbers -
+     report it if so.
+
+A-4. Filter bar gone. Confirm the State Head / State / Distributor bar does not
+     render on Trends, still renders on Overview, and that the amber "Filters
+     active" banner does not appear on Trends. State what you found on Timing.
+
+Do not start PART B until all four are reported.
+
+================================================================================
+PART B - THE DENOMINATOR
+================================================================================
+
+B1. SELECT THE SAME DENOMINATOR loadSkuFacts USES
+In getSkuTrend():
+
+  const everSoldMap =
+    level === "project"
+      ? await getEverSoldPerSegmentProject()
+      : await getEverSoldPerSegmentTerritory();
+
+Import whichever of those is not already imported into skuFacts.ts from
+./catalogue.js. Do NOT change getEverSoldPerSegment() itself - other callers
+may rely on the global count.
+
+B2. BUST THE SNAPSHOT
+The trend response is cached under the key `sku-trend|${level}` in
+routes/sku.ts. Every cached value is now wrong. Change the key to
+`sku-trend-v2|${level}` so stale snapshots cannot be served. Do not rely on the
+TTL expiring on its own.
+
+B3. UPDATE THE LABEL
+In artifacts/prayag/src/components/sku/SkuTrends.tsx the chart subtitle reads
+"codesBought / codesEverSold (global denominator)". It is no longer global.
+Drive it from the level:
+
+  project level  -> "codesBought / codesEverSold (project codes)"
+  otherwise      -> "codesBought / codesEverSold (territory codes)"
+
+Do the same for the "Breadth % by FY" subtitle.
+
+B4. DO NOT TOUCH
+The Net mix shift table. It works on net value shares, not on codesEverSold,
+and this change must not move a single figure in it.
+
+================================================================================
+CHECKPOINT B - run these and paste the output
+================================================================================
+
+B-1. The two tabs now agree. This is the whole point of the change. For
+     level=distributor, FY2025-26, full-year period, no head selected, print the
+     breadth % for these five segments from BOTH sources - the Overview tab and
+     the Trends "Breadth % by FY" bar: PTMT / Faucets, CP (Chrome-Plated), CPVC,
+     SWR, UPVC. Each pair must match to two decimal places. Report all ten
+     numbers, not a summary.
+
+B-2. Direction of travel. Report the OLD and NEW Trends breadth % for those same
+     five segments. Every new figure must be equal to or HIGHER than the old one,
+     because the denominator got smaller. If any segment went DOWN, STOP - the
+     wrong denominator was selected for that level.
+
+B-3. Net mix shift untouched. Print the full Net mix shift table BEFORE and
+     AFTER. Every cell identical, including the Shift column and the FY totals in
+     the footnote. If anything moved, the change leaked.
+
+B-4. Snapshot key. Confirm the cache key changed and that the first request
+     after restart returns the new figures rather than a cached old set. Report
+     the CP FY2025-26 breadth from that first request.
+
+================================================================================
+CONVENTIONS
+================================================================================
+- Two decimals, truncated not rounded, using trunc2 from
+  artifacts/prayag/src/lib/trunc.ts. No emojis.
+- Never console.log in server code - use req.log in handlers, logger elsewhere.
+- Report produced values, never assertions that something worked. "Verified" is
+  not a result; a number is.
+```
+
+---
+
+## Notes for you, not for Replit
+
+**Why the checkpoint matters.** Part A can change what a head-scoped user sees, and Part B changes every breadth figure on the tab. Run separately they are each attributable; run together, a wrong number has two possible causes and you will spend an hour finding out which.
+
+**The one to watch is B-2.** The new breadth figures can only move in one direction - up - because the denominator shrinks. If any segment falls, the agent selected the project denominator for a territory level. The numbers would look entirely plausible and be wrong.
+
+**A-1 is the test that the wiring is real.** If the two figures come back identical, the scopeId never reached the query and the dropdown is still decorative - which is the exact fault being fixed, so an identical pair means nothing changed.
+
+**Still outstanding after this.** State and Distributor filtering on Trends remains unavailable rather than misleading - hidden, not fixed. Plumbing `entityFilter` through `getSkuTrend` (and into the snapshot cache key) is a larger change and worth doing on its own if the business asks for territory-level range trends.

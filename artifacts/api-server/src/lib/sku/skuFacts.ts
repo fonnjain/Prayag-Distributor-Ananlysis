@@ -861,8 +861,15 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
     fyNetTotals[r.fy] = (fyNetTotals[r.fy] ?? 0) + r.net;
   }
 
-  // everSold denominator
-  const everSoldMap = await getEverSoldPerSegment();
+  // everSold denominator — must use the SAME population as loadSkuFacts():
+  // territory-only codes for territory levels, project-only codes for project.
+  // Do NOT use getEverSoldPerSegment() here; that global count includes codes
+  // sold exclusively to Project/Govt channels, making the territory breadth % read
+  // systematically low vs the Overview tab which uses the territory denominator.
+  const everSoldMap =
+    level === "project"
+      ? await getEverSoldPerSegmentProject()
+      : await getEverSoldPerSegmentTerritory();
   const everSold: Record<string, number> = {};
   for (const [seg, cnt] of everSoldMap) everSold[seg] = cnt;
 
