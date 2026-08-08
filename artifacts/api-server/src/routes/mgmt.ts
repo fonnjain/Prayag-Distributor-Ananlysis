@@ -165,6 +165,11 @@ export function invalidateMgmtDataCache(fy?: string): void {
   void import("../lib/mgmt/distributorDeepDive.js")
     .then((m) => m.invalidateFilteredDistDdCache(fy))
     .catch(() => { /* cache module unavailable — nothing cached to drop */ });
+  // Growth report payloads are cached in memory; invalidate them so a
+  // re-sync / upload never serves a stale growth report.
+  void import("./aiGrowthReport.js")
+    .then((m) => m.invalidateGrowthReportCache(fy))
+    .catch(() => { /* cache module unavailable — nothing cached to drop */ });
 }
 
 // Minimal logger surface shared by req.log (pino-http) and the app logger.

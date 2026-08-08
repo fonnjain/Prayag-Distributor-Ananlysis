@@ -27,11 +27,42 @@ import { getBlockedCustomers } from "../lib/schemes/dues.js";
 import { fiscalMonthsToLabels } from "../lib/mgmt/primaryPeriod.js";
 import { assembleRows } from "../lib/mgmt/report.js";
 import { runNumericGuard, type GuardResult } from "../lib/mgmt/numericGuard.js";
+import { isFrozen } from "../lib/customers/registerSync.js";
 
 const router: IRouter = Router();
 const MODEL = "claude-sonnet-4-6";
 const PROJECT_HEAD = "Non-territory / Project / Govt";
 const FY_PATTERN = /^\d{4}-\d{2}$/;
+
+// ── Growth report snapshot cache ──────────────────────────────────────────────
+// Open-FY results are cached for 15 minutes — the same window as the member-
+// sheet cache, so a re-request within that window can never see newer data.
+// Closed-FY results are stored permanently (no TTL) because the underlying
+// registers are frozen and can never change.
+// The cache is invalidated by invalidateGrowthReportCache(), called whenever
+// invalidateMgmtDataCache() runs (re-sync, dashboard xlsx upload, etc.).
+
+const GROWTH_CACHE_TTL_MS = 15 * 60_000;
+const GROWTH_CACHE_PREFIX = "growth-report|";
+
+type GrowthCacheEntry = { payload: Record<string, unknown>; until: number | null };
+const growthCache = new Map<string, GrowthCacheEntry>();
+
+function growthCacheKey(
+  fy: string, scope: string, stateHead: string, state: string,
+  monthFrom: number, monthTo: number,
+  dormantRevival: number, atRiskRecovery: number, rangeUptake: number,
+): string {
+  return `${GROWTH_CACHE_PREFIX}${fy}|${scope}|${stateHead}|${state}|${monthFrom}|${monthTo}|${dormantRevival}|${atRiskRecovery}|${rangeUptake}`;
+}
+
+/** Drop cached growth report payloads.
+ *  Called whenever a register re-sync / dashboard upload invalidates mgmt caches. */
+export function invalidateGrowthReportCache(fy?: string): void {
+  if (!fy) { growthCache.clear(); return; }
+  const prefix = `${GROWTH_CACHE_PREFIX}${fy}|`;
+  for (const k of growthCache.keys()) if (k.startsWith(prefix)) growthCache.delete(k);
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -448,6 +479,8 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
     return;
   }
 
+  const forceFresh = b.forceFresh === true || b.forceFresh === "true";
+
   const scopeLabel = scope === "company" ? "All India" :
     scope === "statehead" ? stateHead :
     state;
@@ -461,6 +494,16 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
 
   const headFilter  = scope === "statehead" ? stateHead : null;
   const stateFilter = scope === "state"     ? state     : null;
+
+  // ── Cache check ───────────────────────────────────────────────────────────
+  const cacheKey = growthCacheKey(fy, scope, stateHead, state, monthFrom, monthTo, dormantRevival, atRiskRecovery, rangeUptake);
+  if (!forceFresh) {
+    const hit = growthCache.get(cacheKey);
+    if (hit && (hit.until === null || Date.now() < hit.until)) {
+      res.json({ ...hit.payload, cachedAt: hit.payload.generatedAt });
+      return;
+    }
+  }
 
   try {
     // ── Load data in parallel ─────────────────────────────────────────────────
@@ -1043,7 +1086,8 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       growthPayload as unknown as Parameters<typeof runNumericGuard>[1],
     );
 
-    res.json({
+    const generatedAt = new Date().toISOString();
+    const responsePayload: Record<string, unknown> = {
       type:             "full-growth-report",
       fy,
       scope,
@@ -1054,8 +1098,8 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       priorPeriodLabel,
       monthFrom,
       monthTo,
-      dataCutoff:       new Date().toISOString().slice(0, 10),
-      generatedAt:      new Date().toISOString(),
+      dataCutoff:       generatedAt.slice(0, 10),
+      generatedAt,
       assumptions: {
         dormantRevival,
         atRiskRecovery,
@@ -1079,7 +1123,16 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       deduplication,
       narrative: sectionNarratives,
       guard,
-    });
+    };
+
+    // ── Store in cache ────────────────────────────────────────────────────────
+    // Closed FYs are frozen (registers never change) — store permanently.
+    // Open FYs: store for 15 minutes (aligns with member-sheet cache TTL).
+    const frozen = isFrozen(fy);
+    const until = frozen ? null : Date.now() + GROWTH_CACHE_TTL_MS;
+    growthCache.set(cacheKey, { payload: responsePayload, until });
+
+    res.json({ ...responsePayload, cachedAt: undefined });
   } catch (err) {
     req.log.error({ err }, "full-report/growth failed");
     res.status(500).json({ error: "Could not generate growth report." });
