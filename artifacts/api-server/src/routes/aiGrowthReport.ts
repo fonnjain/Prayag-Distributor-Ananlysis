@@ -329,6 +329,28 @@ async function queryProjectGaps(
   return res.rows;
 }
 
+// ── Secondary SKU line availability check ─────────────────────────────────────
+//
+// Returns true when secondary_sku_line has at least one row for the given FY
+// (and optional state), regardless of whether any opportunity queries return rows.
+// This is intentionally separate from the opportunity queries so that "no
+// qualifying distributor" and "data not loaded" produce different messages.
+
+async function querySecondarySkuLineExists(
+  fy: string,
+  stateFilter?: string | null,
+): Promise<boolean> {
+  const stateClause = stateFilter ? sql`AND state_canon = ${stateFilter}` : sql``;
+  const res = await db.execute<{ n: string }>(sql`
+    SELECT COUNT(*)::text AS n
+    FROM   secondary_sku_line
+    WHERE  fy = ${fy}
+      ${stateClause}
+    LIMIT 1
+  `);
+  return parseInt(res.rows[0]?.n ?? "0") > 0;
+}
+
 // ── Company-scope distributor activation (SQL-only, no Sheets deep dive) ──────
 //
 // Counts all distinct retailers that appeared for each distributor across the
@@ -345,6 +367,7 @@ type DistActivationRow = {
 async function queryDistributorActivationCompany(
   fy: string,
   labels: string[],
+  stateFilter?: string | null,
 ): Promise<DistActivationRow[]> {
   // secondary_sku_line only covers closed FYs — return empty for FYs with no data
   const check = await db.execute<{ n: string }>(sql`
@@ -355,6 +378,7 @@ async function queryDistributorActivationCompany(
   const periodFrag = labels.length > 0
     ? sql`AND month_label IN (${sql.join(labels.map(l => sql`${l}`), sql`, `)})`
     : sql``;
+  const stateClause = stateFilter ? sql`AND state_canon = ${stateFilter}` : sql``;
 
   const res = await db.execute<DistActivationRow>(sql`
     WITH all_ret AS (
@@ -364,6 +388,7 @@ async function queryDistributorActivationCompany(
       WHERE  fy = ${fy}
         AND  distributor IS NOT NULL AND TRIM(distributor) != ''
         AND  retailer    IS NOT NULL AND TRIM(retailer)    != ''
+        ${stateClause}
     ),
     active_ret AS (
       SELECT distributor,
@@ -374,6 +399,7 @@ async function queryDistributorActivationCompany(
         AND  retailer    IS NOT NULL AND TRIM(retailer)    != ''
         AND  net_amount  > 0
         ${periodFrag}
+        ${stateClause}
     )
     SELECT a.distributor,
            COUNT(DISTINCT a.rkey)::text  AS retailer_count,
@@ -401,11 +427,16 @@ type DistRangeGapRow = {
   gap: string;
 };
 
-async function queryDistributorRangeGapCompany(fy: string): Promise<DistRangeGapRow[]> {
+async function queryDistributorRangeGapCompany(
+  fy: string,
+  stateFilter?: string | null,
+): Promise<DistRangeGapRow[]> {
   const check = await db.execute<{ n: string }>(sql`
     SELECT COUNT(*)::text AS n FROM secondary_sku_line WHERE fy = ${fy} LIMIT 1
   `);
   if (parseInt(check.rows[0]?.n ?? "0") === 0) return [];
+
+  const stateClause = stateFilter ? sql`AND state_canon = ${stateFilter}` : sql``;
 
   const res = await db.execute<DistRangeGapRow>(sql`
     WITH dist_segs AS (
@@ -417,6 +448,7 @@ async function queryDistributorRangeGapCompany(fy: string): Promise<DistRangeGap
         AND  segment_canon IS NOT NULL AND TRIM(segment_canon) != ''
         AND  TRIM(segment_canon) != 'Unmapped'
         AND  net_amount  > 0
+        ${stateClause}
       GROUP  BY distributor
       HAVING COUNT(DISTINCT segment_canon) >= 1
     ),
@@ -644,13 +676,19 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       deepDive = await loadDistributorDeepDive(fy, stateHead).catch(() => null);
     }
 
-    // Company-scope distributor data (SQL-only path — runs in parallel with other queries)
+    // Company- and state-scope distributor data (SQL-only path — runs in parallel with other queries)
     let companyActivationRows: DistActivationRow[] = [];
     let companyRangeGapRows: DistRangeGapRow[] = [];
-    if (scope === "company") {
-      [companyActivationRows, companyRangeGapRows] = await Promise.all([
-        queryDistributorActivationCompany(fy, labels).catch((): DistActivationRow[] => []),
-        queryDistributorRangeGapCompany(fy).catch((): DistRangeGapRow[] => []),
+    // stateSecondaryHasData: independent availability signal — true when secondary_sku_line has
+    // rows for this FY+state regardless of whether any opportunity query returns results.
+    let stateSecondaryHasData = false;
+    if (scope === "company" || scope === "state") {
+      [companyActivationRows, companyRangeGapRows, stateSecondaryHasData] = await Promise.all([
+        queryDistributorActivationCompany(fy, labels, stateFilter).catch((): DistActivationRow[] => []),
+        queryDistributorRangeGapCompany(fy, stateFilter).catch((): DistRangeGapRow[] => []),
+        scope === "state"
+          ? querySecondarySkuLineExists(fy, stateFilter).catch((): boolean => false)
+          : Promise.resolve(false),
       ]);
     }
 
@@ -796,7 +834,7 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
         }
       }
       lowActivationDists.sort((a, b) => b.dormantCount - a.dormantCount);
-    } else if (scope === "company" && companyActivationRows.length > 0) {
+    } else if ((scope === "company" || scope === "state") && companyActivationRows.length > 0) {
       for (const r of companyActivationRows) {
         const total  = parseInt(r.retailer_count) || 0;
         const active = parseInt(r.active_count)   || 0;
@@ -844,8 +882,10 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       valueHigh: t2(activateValueHigh),
       valueLow:  t2(activateValueLow),
       lowActivationDistributors: lowActivationDists.slice(0, 20),
-      distributorNote: scope === "state"
-        ? "Distributor-level activation data requires state-head or company scope — not available at state scope."
+      distributorNote: scope === "state" && !stateSecondaryHasData
+        ? "Distributor activation data not available for this state in the secondary register for this FY."
+        : scope === "state"
+        ? "Source: secondary item-code register filtered to this state. Activation = active retailers in selected period ÷ all retailers seen this FY. Distributor names are as recorded in the secondary register."
         : scope === "company" && companyActivationRows.length === 0
         ? "Distributor activation data not available for this FY — secondary register not yet loaded for company scope."
         : scope === "company"
@@ -899,8 +939,8 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
           valueLow:  t2(valueHigh / 2),
         });
       }
-    } else if (scope === "company" && companyRangeGapRows.length > 0) {
-      // Company scope: use SQL-only path from secondary_sku_line (segment_canon as brand proxy)
+    } else if ((scope === "company" || scope === "state") && companyRangeGapRows.length > 0) {
+      // Company/state scope: use SQL-only path from secondary_sku_line (segment_canon as brand proxy)
       const peerMedian = parseFloat(companyRangeGapRows[0]?.peer_median ?? "0") || 0;
       const perCodeQuarterly = peerMedian > 0
         ? (medianNet / Math.max(1, labels.length / 3)) / peerMedian
@@ -932,6 +972,8 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
 
     const widenDataSource = scope === "statehead"
       ? "brand_canon from secondary register (Sheets-based deep dive)"
+      : scope === "state"
+      ? "segment_canon from secondary item-code register filtered to this state (SQL-only path)"
       : "segment_canon from secondary item-code register (SQL-only path)";
 
     const widen = {
@@ -945,8 +987,10 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       segmentRollup,
       notAvailable: widenDists.length === 0,
       notAvailableReason: widenDists.length > 0 ? null :
-        scope === "state"
-          ? "Distributor SKU spread requires state-head or company scope — not available at state scope."
+        scope === "state" && !stateSecondaryHasData
+          ? "Secondary register data not available for this state in this FY — range gap cannot be computed."
+          : scope === "state"
+          ? "All distributors in this state meet or exceed the peer segment range — no range gap identified."
           : scope === "company"
           ? "Secondary register data not available for this FY — range gap cannot be computed company-wide."
           : "SKU spread data not available for this state head.",
@@ -1063,7 +1107,10 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       { item: "Stock levels", reason: "Inventory data is not ingested into this system." },
     ];
     if (scope === "state") {
-      unavailableItems.push({ item: "Distributor activation and SKU range by distributor", reason: "Requires state-head or company scope — not available at state scope." });
+      if (!stateSecondaryHasData) {
+        unavailableItems.push({ item: "Distributor activation (state)", reason: "Secondary register not yet loaded for this state in this FY — activation data unavailable." });
+        unavailableItems.push({ item: "Distributor range gap (state)", reason: "Secondary register not yet loaded for this state in this FY — range gap data unavailable." });
+      }
       unavailableItems.push({ item: "Silent distributor and concentration flags", reason: "Requires state-head scope." });
     } else if (scope === "company") {
       if (companyActivationRows.length === 0) {
