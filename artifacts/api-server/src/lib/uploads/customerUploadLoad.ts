@@ -431,7 +431,8 @@ export async function runCustomerUploadLoad(opts: { dryRun: boolean; endPool?: b
           row.assignedSegment, row.createdDate, row.createdBy, row.sourceFile, rg, "customer-upload",
           // preserved attribution (null when there was no human edit)
           a?.stateHead ?? null,
-          a?.headConfidence ?? null,
+          // head_confidence is NOT NULL DEFAULT 'Guessed' — never insert NULL.
+          a?.headConfidence ?? "Guessed",
           a?.notes ?? null,
         );
       }
