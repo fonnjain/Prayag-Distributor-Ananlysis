@@ -28,6 +28,10 @@ args = "prayag-period-guards"
 task = "workflow.run"
 args = "growth-report-guards"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "type-check-guards"
+
 [[workflows.workflow]]
 name = "comparison-guards"
 author = "agent"
@@ -57,6 +61,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "node artifacts/api-server/scripts/growth-report-guard-check.mjs"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
+name = "type-check-guards"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server exec tsc --noEmit && pnpm --filter @workspace/prayag exec tsc --noEmit"
 
 [workflows.workflow.metadata]
 outputType = "console"
