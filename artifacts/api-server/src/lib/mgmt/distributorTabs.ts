@@ -376,18 +376,40 @@ export function monthCond(months: string[] | null | undefined) {
     : sql``;
 }
 
+/** Aggregation scope for the Secondary / SKU tabs: either one distributor
+ *  (normKey) or a set of distributors (e.g. every distributor served by a
+ *  state head's team, optionally narrowed by geography). */
+export type TabScope = { keys: string[]; label: string };
+
+function resolveTabScope(
+  dir: Awaited<ReturnType<typeof loadDistributorDirectory>>,
+  distKey: string | TabScope,
+): { keys: string[]; name: string; normKey: string } {
+  if (typeof distKey === "string") {
+    const d = dir.distributors.find((x) => x.normKey === distKey);
+    if (!d) throw new Error(`Unknown distributor key: ${distKey}`);
+    return { keys: [distKey], name: d.name, normKey: distKey };
+  }
+  return { keys: distKey.keys, name: distKey.label, normKey: "" };
+}
+
+function unionNames(keys: string[], byKey: Record<string, string[]>): string[] {
+  const out = new Set<string>();
+  for (const k of keys) for (const n of byKey[k] ?? []) out.add(n);
+  return [...out];
+}
+
 export async function buildSecondaryTab(
   fy: string,
-  distKey: string,
+  distKey: string | TabScope,
   months: string[] | null = null,
 ): Promise<SecondaryTabResult> {
   const recon = await buildDistributorRecon(fy);
   const dir = await loadDistributorDirectory(fy);
-  const d = dir.distributors.find((x) => x.normKey === distKey);
-  if (!d) throw new Error(`Unknown distributor key: ${distKey}`);
+  const scope = resolveTabScope(dir, distKey);
 
-  const secNames = recon.secondaryNamesByKey[distKey] ?? [];
-  const saleNames = recon.saleNamesByKey[distKey] ?? [];
+  const secNames = unionNames(scope.keys, recon.secondaryNamesByKey);
+  const saleNames = unionNames(scope.keys, recon.saleNamesByKey);
 
   // Secondary rows for this distributor (item-code register).
   const secAgg = secNames.length === 0 ? { rows: [] as any[] } : await db.execute<{
@@ -494,7 +516,7 @@ export async function buildSecondaryTab(
 
   return {
     fy,
-    distributor: { name: d.name, normKey: distKey },
+    distributor: { name: scope.name, normKey: scope.normKey },
     monthsLoaded,
     coverageNote: months && months.length > 0
       ? `Filtered to selected period ${months[0]}–${months[months.length - 1]} (${monthsLoaded.length} of ${months.length} selected month${months.length === 1 ? "" : "s"} present in the secondary register)`
@@ -714,13 +736,12 @@ function buildSide(
 
 export async function buildSkuEvolution(
   fy: string,
-  distKey: string,
+  distKey: string | TabScope,
   months: string[] | null = null,
 ): Promise<SkuEvolutionResult> {
   const recon = await buildDistributorRecon(fy);
   const dir = await loadDistributorDirectory(fy);
-  const d = dir.distributors.find((x) => x.normKey === distKey);
-  if (!d) throw new Error(`Unknown distributor key: ${distKey}`);
+  const scope = resolveTabScope(dir, distKey);
 
   const baselineFy = prevFyLabel(fy);
   // Like months only: default = every loaded secondary month; a selected
@@ -729,13 +750,20 @@ export async function buildSkuEvolution(
   const baseMonths = toPriorYearMonths(curMonths);
   const baselineNote = `Baseline = same fiscal months of ${baselineFy} (${baseMonths.join(", ") || "none"}), frozen register anchors (sale_line_current / secondary register).`;
 
-  const saleNames = recon.saleNamesByKey[distKey] ?? [];
+  const saleNames = unionNames(scope.keys, recon.saleNamesByKey);
   // Baseline-FY register names drift; map them against the SAME sheet vocabulary
   // (lightweight — never builds a prior-FY directory / Sheets pass).
-  const base = await mapRegisterNamesForKey(baselineFy, distKey, dir).catch(() => null);
-  const baseSaleNames = base?.saleNames ?? saleNames;
-  const secNames = recon.secondaryNamesByKey[distKey] ?? [];
-  const baseSecNames = base?.secNames ?? secNames;
+  const baseParts = await Promise.all(
+    scope.keys.map((k) => mapRegisterNamesForKey(baselineFy, k, dir).catch(() => null)),
+  );
+  const anyBase = baseParts.some((b) => b !== null);
+  const secNames = unionNames(scope.keys, recon.secondaryNamesByKey);
+  const baseSaleNames = anyBase
+    ? [...new Set(baseParts.flatMap((b) => b?.saleNames ?? []))]
+    : saleNames;
+  const baseSecNames = anyBase
+    ? [...new Set(baseParts.flatMap((b) => b?.secNames ?? []))]
+    : secNames;
 
   let multipliers: Map<string, number> | null = null;
   try {
@@ -772,7 +800,7 @@ export async function buildSkuEvolution(
     reading = `Business contracted vs the like-months baseline; lost SKU worth ₹${(side.lost.value / 1e5).toFixed(1)} L (baseline value) is the first place to look.`;
   }
 
-  return { fy, baselineFy, distributor: { name: d.name, normKey: distKey }, primary, secondary, reading };
+  return { fy, baselineFy, distributor: { name: scope.name, normKey: scope.normKey }, primary, secondary, reading };
 }
 
 // ── Tab 3: Where and how to push ─────────────────────────────────────────────

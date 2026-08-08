@@ -2427,8 +2427,9 @@ export default function DistributorDeepDive() {
           <div className="text-xs text-muted-foreground mt-0.5">{dir.basisLabel}</div>
           {stateHead && (
             <div className="text-xs text-muted-foreground mt-0.5">
-              Head detail below shows {stateHead}'s full team figures; the geography and
-              distributor filters narrow the Distributor Overview table only.
+              Head detail below shows {stateHead}'s full team figures. The geography and
+              distributor filters narrow the Distributor Overview table; the Secondary Sales
+              and SKU tabs follow the selected head (or a single distributor when picked).
             </div>
           )}
         </div>
@@ -2462,6 +2463,8 @@ export default function DistributorDeepDive() {
           fy={fy}
           dist={distFilter}
           distName={distFilter ? (dir?.distributors.find((d) => d.normKey === distFilter)?.name ?? distFilter) : null}
+          stateHead={stateHead}
+          geoStates={geoStates ? [...geoStates] : undefined}
           monthsParam={period.param}
           periodLabel={period.active ? periodLabel : null}
         />

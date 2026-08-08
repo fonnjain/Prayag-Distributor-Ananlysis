@@ -1,0 +1,101 @@
+GOAL
+Add report generation to the AI Reports page. Two report types, one
+pipeline. The user picks a type, picks a subject, picks a period, and
+gets a rendered report they can read on screen and download.
+
+These are NOT the same report at two scopes. A distributor report names
+items and retailers. A state-head report names distributors and people.
+Do not build one template with a scope switch - the output is padded and
+unreadable at one end or the other.
+
+REPORT TYPE 1 - DISTRIBUTOR
+Sections in this fixed order. Every section states its own period.
+
+  1  Headline        net, quantity, realised per piece, codes bought,
+                     active retailers - all vs the SAME months prior FY
+  2  Five levers     Activate / Widen / Recover / Read / Close, each with
+                     its current position and a priority of High, Medium,
+                     Low or None
+  3  Reach           retailers on book, active, activation %, unassigned
+                     count, top-5 retailer share, effective retailers
+  4  Range           per segment: net, share, codes he buys, peer median,
+                     gap. Then the peer group definition and his rank.
+                     Then tier counts. Then the top 8 recommendations with
+                     peers-buying and peer median quarterly net.
+  5  Recovery        At Risk retailer count and their prior-year value,
+                     lost codes, reactivated
+  6  Rhythm          orders this period, orders per month, days since last
+                     order, both years
+  7  Scheme          billed, current slab and rate, next slab and rate,
+                     gap, Extra Earn, Extra ROI, and the split of Extra
+                     Earn into new-purchase and re-pricing components
+  8  Tier            score with all four components and their basis, plus
+                     the recommended cadence
+  9  What to do      This week, and an ordered visit plan
+  10 Not available   what is missing and why
+
+REPORT TYPE 2 - STATE HEAD
+  1  Headline        team net, quantity, achievement against target,
+                     active member count
+  2  Team table      one row per member: net, growth, retailers declared
+                     vs sheet, achievement. Name the source of each count.
+  3  Coverage        distributors, retailers, districts with no distributor,
+                     unassigned retailers by district
+  4  Distributor mix distributors by tier, concentration flags above 60%,
+                     the largest single-customer dependency in the state
+  5  Range           state-level codes bought vs the national peer picture,
+                     and the five distributors with the widest range gaps
+                     BY VALUE - named
+  6  Attention       hidden shrinkers in the state (value up, quantity
+                     down), narrowers, and distributors silent 6+ weeks -
+                     all named
+  7  Schemes         live nudges in the state ranked by Extra Earn with
+                     Extra ROI beside each, and total gap to close
+  8  What to do      ranked actions with names attached
+  9  Not available   what is missing and why
+
+HARD RULES - these are why the reports are trusted
+- Every figure names its period. Comparisons are the SAME months in the
+  prior FY, never a rolling window and never a different length.
+- Where a count has two sources (retailers declared vs retailers from
+  sheets), print BOTH and label each. Never silently pick one.
+- Never print 0 for a missing value. Print the reason: "no target
+  recorded", "not recorded yet", "no prior year". A zero reads as a fact.
+- Territory figures exclude the project channel. State that in the header
+  of any section carrying a territory figure.
+- No margin, profit or cost-derived figure anywhere. It does not exist in
+  the system. Section 10 / 9 must say so explicitly.
+- Two decimals, truncated not rounded, using the existing trunc helper.
+  The shift or delta columns must be computed from the SAME truncated
+  values that are displayed, so the printed numbers reconcile.
+- No emojis.
+
+GENERATION
+- The narrative sentences (headline reading, lever priorities, the visit
+  plan) may be model-generated. Every NUMBER must come from the existing
+  query layer - never from the model. Pass computed figures in and have
+  the model write around them.
+- If a section has no data, render the section with its reason line
+  rather than omitting it. A missing section reads as an oversight.
+
+OUTPUT
+- Render on screen first.
+- Download as PDF. If the user also asks for slides, produce a PPTX.
+- When more than one file is produced, deliver a single ZIP.
+- Filename pattern: Subject_Period_ReportType, no spaces.
+
+VERIFICATION - report all five before saying this is done
+1. Generate a distributor report for a real distributor with a full prior
+   year. Print its headline net and quantity, then run the same figures
+   directly against sale_line for the same months. They must match to the
+   rupee. Report both.
+2. Generate the SAME report twice. Confirm every number is identical
+   across the two runs. If any figure moves, the model is generating
+   numbers and that must be fixed before anything else.
+3. Generate a state-head report for a head with at least one member
+   carrying no target. Confirm the member row reads "no target recorded"
+   and not 0%.
+4. Print the section list actually rendered for a subject with sparse
+   data. Confirm no section was silently dropped.
+5. Generate both types for one subject and confirm the ZIP contains
+   exactly the expected files with the expected names.

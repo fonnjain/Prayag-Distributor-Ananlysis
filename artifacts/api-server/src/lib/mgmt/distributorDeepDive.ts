@@ -1568,6 +1568,23 @@ const defaultDeps: ResilientDeps = {
 // and, on a complete load, replaces the snapshot for the next visit.
 const SNAP_SERVE_MAX_AGE_MS = 6.5 * 3_600_000; // warmer cadence (6h) + margin
 const SNAP_REFRESH_AGE_MS = 15 * 60_000; // matches the member-sheet cache TTL
+// Complete period-filtered builds are cached in memory for the same window as
+// the member-sheet cache — a filtered rebuild sooner can't see newer data.
+const FILTERED_CACHE_MS = 15 * 60_000;
+// Degraded (partial-sheet) filtered loads: short window only — long enough to
+// absorb rapid re-selects, short enough to retry for a complete read soon.
+const FILTERED_DEGRADED_CACHE_MS = 2 * 60_000;
+
+/** Drop cached period-filtered deep-dive payloads. Called whenever a register
+ *  re-sync / dashboard upload invalidates the mgmt caches — a filtered build
+ *  made just before a sync must not be served for its full TTL afterwards. */
+export function invalidateFilteredDistDdCache(fy?: string): void {
+  if (!fy) { filteredCache.clear(); return; }
+  // Keys look like `dist-deep-dive|<fy>|<HEAD>|<sorted months>`.
+  const prefix = `${DIST_DD_SNAP_PREFIX}${fy}|`;
+  for (const k of filteredCache.keys()) if (k.startsWith(prefix)) filteredCache.delete(k);
+}
+const filteredCache = new Map<string, { payload: DistributorDeepDiveResult; until: number }>();
 
 export async function loadDistributorDeepDiveResilientWith(
   fy: string,
@@ -1581,6 +1598,36 @@ export async function loadDistributorDeepDiveResilientWith(
   // Filtered requests (sub-year period) never serve from or write the snapshot.
   // The snapshot represents the full-FY unfiltered payload.
   const isFiltered = months && months.length > 0;
+
+  // ── Filtered-request cache ────────────────────────────────────────────────
+  // A period-filtered build (e.g. Q1) is a full live build — minutes when the
+  // member-sheet cache is cold. Cache complete filtered results in memory for
+  // the member-sheet cache TTL (15 min) so re-selecting the same period is
+  // instant. Never persisted; underlying data can't change faster than that TTL.
+  if (isFiltered && selectedStateHead) {
+    const fKey = `${key}|${[...months].sort().join(",")}`;
+    const hit = filteredCache.get(fKey);
+    if (hit && deps.now() < hit.until) return hit.payload;
+    let result: DistributorDeepDiveResult;
+    try {
+      result = await deps.build(fy, selectedStateHead, months);
+    } catch (err) {
+      // One retry after a short pause (mirrors the unfiltered path).
+      await deps.sleep(1_500);
+      result = await deps.build(fy, selectedStateHead, months);
+    }
+    // Complete loads cache for the member-sheet TTL; degraded loads (some
+    // sheets failed — usually a transient quota burst) cache briefly so rapid
+    // period toggles don't each trigger a minute-long rebuild, while still
+    // retrying for a complete read soon.
+    const ttl = isCompleteLoad(result) ? FILTERED_CACHE_MS : FILTERED_DEGRADED_CACHE_MS;
+    filteredCache.set(fKey, { payload: result, until: deps.now() + ttl });
+    // Bound the cache: drop expired entries opportunistically.
+    if (filteredCache.size > 200) {
+      for (const [k, v] of filteredCache) if (deps.now() >= v.until) filteredCache.delete(k);
+    }
+    return result;
+  }
 
   // ── Fast path: serve the saved snapshot immediately (stale-while-revalidate).
   // Skipped when opts.bypassSnapshot (the background warmer must build live,

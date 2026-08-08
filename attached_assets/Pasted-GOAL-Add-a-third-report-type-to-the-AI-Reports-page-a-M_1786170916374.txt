@@ -1,0 +1,160 @@
+GOAL
+Add a third report type to the AI Reports page: a MASTER GROWTH REPORT.
+Scope selector: whole company, one State Head, or one state.
+
+This report answers one question - where is the next rupee of growth, and
+whose name is on it. It is a ranked ledger of quantified opportunities,
+not a strategy document. Every line must name entities and carry a figure
+computed from the register.
+
+THE HARD CONSTRAINT
+The model writes prose ONLY. It never produces a number, a name, a rank or
+a total. Every figure is computed in the query layer and passed in. If a
+section has no data, render the section with its reason line - never let
+the model fill the gap with plausible-sounding text.
+
+Any recommendation that cannot name at least one distributor, retailer or
+item code is not a recommendation. Drop it.
+
+SECTIONS, IN THIS ORDER
+
+1  EXECUTIVE SUMMARY
+   - Total addressable opportunity for the scope, stated as a RANGE not a
+     point estimate, with the conversion assumptions printed beside it
+   - The five levers ranked by size, each with its named-entity count
+   - The single largest opportunity, named
+   - The single largest RISK to existing revenue, named
+   - The non-additivity note (see DOUBLE COUNTING below) - always printed,
+     never suppressed
+
+2  THE OPPORTUNITY LEDGER
+   One table, ranked by value descending. Columns:
+     Rank | Lever | Named entity | What to do | Value | Effort | Confidence
+   Effort: Low / Medium / High. Confidence: High where the figure is pure
+   arithmetic (schemes), Medium where it rests on a stated conversion
+   assumption, Low where it rests on peer inference.
+   Cap at 40 rows. Print the count of rows omitted and their combined value.
+
+3  ACTIVATE
+   - Unassigned retailers by head and district, with counts and the split
+     between "distributor already operates here" (fixable this week) and
+     "no distributor in district" (coverage item)
+   - Distributors below 40% activation, named, with their dormant counts
+   - Sizing per distributor: dormant retailers x MEDIAN quarterly order of
+     that distributor's ACTIVE retailers x conversion assumption
+   - Never use the mean. One large retailer distorts it badly.
+
+4  WIDEN
+   - Distributors ranked by range gap VALUE, named, top 20
+   - Per distributor: codes bought, peer median, tier 1 and 2 counts, and
+     the peer-median quarterly net of those tier 1 and 2 items only
+   - Tiers 3 and 4 are EXCLUDED from sizing. They are real opportunities
+     but too speculative to put in a total.
+   - Segment rollup: which segments carry the most range gap across the
+     scope
+
+5  RECOVER
+   - At Risk retailers by head, with prior-year value
+   - Lost item codes by segment, with prior-year value
+   - Sizing: prior-year value x recovery assumption
+   - Split At Risk by silence duration: under 3 months, 3 to 6, over 6.
+     Recovery odds fall sharply with time and the report should show that
+     rather than treat all At Risk names as equivalent.
+
+6  PROTECT  (this is value at risk, NOT upside - never add it to the total)
+   - Hidden shrinkers: accounts where value is up and quantity is down,
+     named, with both percentages
+   - Narrowers: accounts whose item-code count fell most, named, with the
+     code count both years
+   - Concentration: any distributor above 60% of a state, named
+   - Silent distributors: no order in 6+ weeks, ranked by size
+
+7  CLOSE
+   - Live scheme nudges in scope, ranked by Extra Earn, with Extra ROI
+     beside each and the gap
+   - Total Extra Earn available at ROI >= 8%, and separately at 5-8%
+   - Exclude blocked accounts from the total and list them separately as
+     a collections opportunity with the scheme value as the argument
+   - Days remaining to the 25th cut-off, prominently
+
+8  WHERE NOT TO LOOK
+   - Any apparent gap that is majority project business, named and sized
+   - Any gap concentrated in fewer than 6 customers, named
+   This section is mandatory and must never be empty-suppressed. If there
+   is nothing to report, print "No project-contaminated or concentrated
+   gaps identified in this scope."
+
+9  CAPACITY CHECK
+   - Visits the ledger implies, against the visits the team currently makes
+   - If the ledger exceeds capacity, say so explicitly and print how far
+   - A plan that does not fit the working days is a fiction and the report
+     must say that rather than imply everything is achievable
+
+10 ASSUMPTIONS AND LIMITS
+   - Every conversion assumption used, with its default and current value
+   - What cannot be computed and why (margin, credit, stock)
+   - The comparison basis used, and any known basis break
+
+DOUBLE COUNTING - precedence rules, enforced in code
+A retailer or distributor may appear in more than one lever's narrative
+but must be counted in only ONE lever's total. Precedence, highest first:
+
+   1. CLOSE      (arithmetic, no assumption)
+   2. RECOVER    (specific, proven prior purchase)
+   3. ACTIVATE   (dormant but never a prior buyer)
+   4. WIDEN      (peer inference)
+
+So an At Risk retailer counts in RECOVER, not ACTIVATE. A distributor with
+both a scheme position and a range gap counts the scheme in CLOSE and the
+range separately in WIDEN, because those are different rupees - but the
+same retailer's dormancy is counted once.
+
+Print the deduplication effect in the executive summary: "Levers sum to
+Rs X before deduplication; Rs Y after."
+
+SIZING RULES
+- Conversion assumptions are USER-ADJUSTABLE with these defaults:
+    dormant retailer revival     25%
+    At Risk recovery             35%
+    range recommendation uptake  40%
+  Every one is printed on the report beside the figure it drives.
+- Totals are shown as a RANGE: half the assumption to the full assumption.
+  A single point estimate will be quoted as a forecast and it is not one.
+- NO extrapolation from averages anywhere. Historical comparisons use the
+  same fiscal months in prior years, actuals only.
+- Project and non-territory business is excluded from all opportunity
+  figures. State this in the header of every sized section.
+
+KNOWN BASIS BREAK - handle explicitly
+FY2024-25 and FY2025-26 are not on the same channel basis: one customer
+(Rs 35.73 Cr) is project-classified in FY2025-26 and was unattributed in
+FY2024-25. Any section of this report that compares those two years must
+carry the disclosure line already added to the SKU Trends mix table, and
+must exclude that customer from both years when computing a YoY figure.
+If the section cannot be computed on a like-for-like basis, print the
+reason rather than the number.
+
+OUTPUT
+- Render on screen, then PDF. PPTX on request (14-18 slides: summary,
+  ledger, one slide per lever, where-not-to-look, capacity, assumptions).
+- More than one file goes out as a single ZIP.
+- Filename: Scope_Period_MasterGrowthReport
+
+VERIFICATION - report all six before saying this is done
+1. REPRODUCIBILITY. Generate the same report twice, same scope and period.
+   Every number must be identical. If any figure moves, the model is
+   generating numbers - stop and fix that before anything else.
+2. DEDUPLICATION. Print the pre-dedup and post-dedup totals and the count
+   of entities that appeared in more than one lever. Then print 5 of those
+   entities showing which lever claimed each and why.
+3. NO ORPHAN CLAIMS. Print the count of ledger rows with no named entity
+   attached. Must be 0.
+4. PROJECT EXCLUSION. Print the total opportunity with and without the
+   project-channel filter. The difference must be nameable - print the top
+   5 project customers it removes.
+5. CAPACITY. For a scope where the ledger exceeds team capacity, paste the
+   section showing it. Confirm it states the shortfall rather than
+   implying the plan is achievable.
+6. BASIS BREAK. Confirm any FY2024-25 vs FY2025-26 comparison in the
+   report either carries the disclosure line or prints a reason instead of
+   a figure. Paste the rendered text.

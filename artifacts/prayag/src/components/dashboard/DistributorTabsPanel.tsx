@@ -267,9 +267,9 @@ function BothReadings() {
   );
 }
 
-export function SecondaryTabView({ fy, dist, recon, monthsParam = "" }: { fy: string; dist: string; recon: DistributorRecon | null; monthsParam?: string }) {
+export function SecondaryTabView({ fy, scope, recon, monthsParam = "" }: { fy: string; scope: string; recon: DistributorRecon | null; monthsParam?: string }) {
   const { data, error, loading } = useApi<SecondaryTab>(
-    `${API}/mgmt/distributor-tab?fy=${encodeURIComponent(fy)}&dist=${encodeURIComponent(dist)}&tab=secondary${monthsParam}`);
+    `${API}/mgmt/distributor-tab?fy=${encodeURIComponent(fy)}&${scope}&tab=secondary${monthsParam}`);
   if (loading) return <Spinner label="Reading the secondary register…" />;
   if (error) return <div className="text-sm text-destructive">{error}</div>;
   if (!data) return null;
@@ -440,9 +440,9 @@ function SkuSideView({ side, label }: { side: SkuSide; label: string }) {
   );
 }
 
-export function SkuTabView({ fy, dist, recon, monthsParam = "" }: { fy: string; dist: string; recon: DistributorRecon | null; monthsParam?: string }) {
+export function SkuTabView({ fy, scope, recon, monthsParam = "" }: { fy: string; scope: string; recon: DistributorRecon | null; monthsParam?: string }) {
   const { data, error, loading } = useApi<SkuTab>(
-    `${API}/mgmt/distributor-tab?fy=${encodeURIComponent(fy)}&dist=${encodeURIComponent(dist)}&tab=sku${monthsParam}`);
+    `${API}/mgmt/distributor-tab?fy=${encodeURIComponent(fy)}&${scope}&tab=sku${monthsParam}`);
   if (loading) return <Spinner label="Comparing SKU populations against the like-months baseline…" />;
   if (error) return <div className="text-sm text-destructive">{error}</div>;
   if (!data) return null;
@@ -464,9 +464,9 @@ export function SkuTabView({ fy, dist, recon, monthsParam = "" }: { fy: string; 
 
 // ── Tab 3: Where and how to push ─────────────────────────────────────────────
 
-export function PushTabView({ fy, dist, recon, monthsParam = "" }: { fy: string; dist: string; recon: DistributorRecon | null; monthsParam?: string }) {
+export function PushTabView({ fy, scope, recon, monthsParam = "" }: { fy: string; scope: string; recon: DistributorRecon | null; monthsParam?: string }) {
   const { data, error, loading } = useApi<PushTab>(
-    `${API}/mgmt/distributor-tab?fy=${encodeURIComponent(fy)}&dist=${encodeURIComponent(dist)}&tab=push${monthsParam}`);
+    `${API}/mgmt/distributor-tab?fy=${encodeURIComponent(fy)}&${scope}&tab=push${monthsParam}`);
   if (loading) return <Spinner label="Checking the flow gap and building the push list…" />;
   if (error) return <div className="text-sm text-destructive">{error}</div>;
   if (!data) return null;
@@ -629,8 +629,12 @@ export function PushTabView({ fy, dist, recon, monthsParam = "" }: { fy: string;
 
 export type DdTab = "overview" | "secondary" | "sku" | "push";
 
-export function DistributorTabsPanel({ tab, fy, dist, distName, monthsParam, periodLabel }: {
+export function DistributorTabsPanel({ tab, fy, dist, distName, stateHead, geoStates, monthsParam, periodLabel }: {
   tab: Exclude<DdTab, "overview">; fy: string; dist: string; distName: string | null;
+  /** Selected state head — scopes Secondary/SKU tabs when no single distributor is picked. */
+  stateHead?: string;
+  /** Canonical geography states from filter 1 (empty/undefined = All India). */
+  geoStates?: string[];
   /** Query fragment from usePeriodMonths().param ("&months=..." or ""). */
   monthsParam?: string;
   /** Human label of the selected period, shown when a sub-year period is active. */
@@ -639,12 +643,21 @@ export function DistributorTabsPanel({ tab, fy, dist, distName, monthsParam, per
   const mp = monthsParam ?? "";
   const { data: recon } = useApi<DistributorRecon>(
     `${API}/mgmt/distributor-recon?fy=${encodeURIComponent(fy)}`);
-  if (!dist) {
+
+  // Scope: a single distributor when picked; otherwise the selected head's
+  // whole team (Secondary / SKU only — the push tab is per-distributor).
+  const headScoped = !dist && !!stateHead && tab !== "push";
+  const scope = dist
+    ? `dist=${encodeURIComponent(dist)}`
+    : `head=${encodeURIComponent(stateHead ?? "")}${geoStates && geoStates.length ? `&states=${encodeURIComponent(geoStates.join(","))}` : ""}`;
+
+  if (!dist && !headScoped) {
     return (
       <div className="space-y-4">
         <div className="text-sm text-muted-foreground border border-border rounded-lg p-4">
-          Pick a single distributor in filter&nbsp;2 above to open this tab. Meanwhile, here is how
-          the two distributor vocabularies reconcile — the foundation every joined figure rests on.
+          {tab === "push"
+            ? <>The push list is built per distributor (peer-cohort comparison). Pick a single distributor in filter&nbsp;2 above to open it. Meanwhile, here is how the two distributor vocabularies reconcile.</>
+            : <>Pick a state head in filter&nbsp;3 or a single distributor in filter&nbsp;2 above to open this tab. Meanwhile, here is how the two distributor vocabularies reconcile — the foundation every joined figure rests on.</>}
         </div>
         <ReconPanel fy={fy} />
       </div>
@@ -652,15 +665,23 @@ export function DistributorTabsPanel({ tab, fy, dist, distName, monthsParam, per
   }
   return (
     <div className="space-y-3">
-      {distName && <h3 className="text-base font-semibold">{distName}</h3>}
+      {dist
+        ? (distName && <h3 className="text-base font-semibold">{distName}</h3>)
+        : (
+          <div className="text-xs text-muted-foreground border border-border rounded px-3 py-1.5" data-testid="dd-head-scope-note">
+            Showing <strong>{stateHead}</strong>'s whole team — every distributor served by this head
+            {geoStates && geoStates.length ? " in the selected geography" : ""}, aggregated. Pick a single
+            distributor in filter&nbsp;2 to drill in.
+          </div>
+        )}
       {mp && periodLabel && (
         <div className="text-xs text-muted-foreground border border-border rounded px-3 py-1.5" data-testid="dd-period-note">
           Register figures below are filtered to <strong>{periodLabel}</strong>. Name reconciliation stays FY-wide.
         </div>
       )}
-      {tab === "secondary" && <SecondaryTabView fy={fy} dist={dist} recon={recon} monthsParam={mp} />}
-      {tab === "sku" && <SkuTabView fy={fy} dist={dist} recon={recon} monthsParam={mp} />}
-      {tab === "push" && <PushTabView fy={fy} dist={dist} recon={recon} monthsParam={mp} />}
+      {tab === "secondary" && <SecondaryTabView fy={fy} scope={scope} recon={recon} monthsParam={mp} />}
+      {tab === "sku" && <SkuTabView fy={fy} scope={scope} recon={recon} monthsParam={mp} />}
+      {tab === "push" && <PushTabView fy={fy} scope={scope} recon={recon} monthsParam={mp} />}
     </div>
   );
 }

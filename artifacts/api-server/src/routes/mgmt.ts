@@ -160,6 +160,11 @@ export function invalidateMgmtDataCache(fy?: string): void {
   // both hold the same payload (including target columns), so leaving either
   // would re-serve stale targets right after a dashboard xlsx upload.
   invalidateSnapshots(fy ? `${MGMT_DATA_KEY_PREFIX}${fy}|` : MGMT_DATA_KEY_PREFIX);
+  // Period-filtered distributor deep-dive payloads are cached in memory with
+  // a TTL; a re-sync/upload must not leave them serving pre-sync figures.
+  void import("../lib/mgmt/distributorDeepDive.js")
+    .then((m) => m.invalidateFilteredDistDdCache(fy))
+    .catch(() => { /* cache module unavailable — nothing cached to drop */ });
 }
 
 // Minimal logger surface shared by req.log (pino-http) and the app logger.
@@ -1397,7 +1402,70 @@ router.get("/mgmt/distributor-tab", async (req: Request, res: Response): Promise
       }
       months = tokens;
     }
-    if (!dist) { res.status(400).json({ error: "dist (distributor normKey) is required" }); return; }
+    // Head-scoped aggregation: when no single distributor is picked, a state
+    // head (optionally narrowed by geography states) can scope the Secondary
+    // and SKU tabs across every distributor served by that head's team.
+    const head = String(req.query.head ?? "").trim();
+    const statesRaw = String(req.query.states ?? "").trim();
+    const geoStates = statesRaw ? statesRaw.split(",").map((s) => s.trim()).filter(Boolean) : null;
+    if (!dist && !head) {
+      res.status(400).json({ error: "dist (distributor normKey) or head (state head name) is required" });
+      return;
+    }
+    const tabs = await import("../lib/mgmt/distributorTabs.js");
+    if (!dist) {
+      if (tab === "push") {
+        res.status(400).json({ error: "The push tab is per-distributor — pick a single distributor." });
+        return;
+      }
+      const { loadDistributorDirectory } = await import("../lib/mgmt/distributorDirectory.js");
+      const dir = await loadDistributorDirectory(fy);
+      const candidateKeys = dir.distributors
+        .filter((d) =>
+          d.heads.includes(head) &&
+          (geoStates === null || d.states.length === 0 || d.states.some((s) => geoStates.includes(s))))
+        .map((d) => d.normKey);
+      if (candidateKeys.length === 0) {
+        res.status(404).json({
+          error: `${head} has no distributors mapped in the ${fy} directory${geoStates ? " within the selected geography" : ""} — nothing to aggregate yet. This usually means the head's member working sheets carry no distributor assignments.`,
+        });
+        return;
+      }
+      // Same fail-closed identity rule as the single-distributor path: a
+      // normKey covering more than one DIST# identity must never be blended.
+      // Ambiguous keys are EXCLUDED from the aggregate and disclosed in the
+      // label rather than silently merged.
+      let keys: string[];
+      let ambiguousCount = 0;
+      try {
+        const { loadDistributorRegistry } = await import("../lib/mgmt/distributorRegistry.js");
+        const registry = await loadDistributorRegistry();
+        keys = candidateKeys.filter((k) => {
+          const r = registry.resolve(k);
+          if (r.kind === "ambiguous") { ambiguousCount += 1; return false; }
+          return true;
+        });
+      } catch (regErr) {
+        req.log.error({ err: regErr }, "mgmt/distributor-tab: registry unavailable — failing closed (head scope)");
+        res.status(503).json({
+          error:
+            "Distributor identity registry is unavailable, so the head's distributor names cannot be verified as single identities. Retry shortly.",
+        });
+        return;
+      }
+      if (keys.length === 0) {
+        res.status(409).json({ error: `Every distributor name under ${head} is ambiguous in the identity registry — resolve them before aggregating.` });
+        return;
+      }
+      const scope = {
+        keys,
+        label: `${head} — ${keys.length} distributor${keys.length === 1 ? "" : "s"}${ambiguousCount > 0 ? ` (${ambiguousCount} ambiguous name${ambiguousCount === 1 ? "" : "s"} excluded)` : ""}`,
+      };
+      if (tab === "secondary") res.json(await tabs.buildSecondaryTab(fy, scope, months));
+      else if (tab === "sku") res.json(await tabs.buildSkuEvolution(fy, scope, months));
+      else res.status(400).json({ error: "tab must be secondary | sku | push" });
+      return;
+    }
     // Shared identity registry: if this normKey covers more than one DIST#
     // identity, refuse rather than silently blend two distributors' figures.
     // FAIL CLOSED: if the registry cannot be loaded we cannot rule out an
@@ -1419,7 +1487,6 @@ router.get("/mgmt/distributor-tab", async (req: Request, res: Response): Promise
       });
       return;
     }
-    const tabs = await import("../lib/mgmt/distributorTabs.js");
     if (tab === "secondary") res.json(await tabs.buildSecondaryTab(fy, dist, months));
     else if (tab === "sku") res.json(await tabs.buildSkuEvolution(fy, dist, months));
     else if (tab === "push") res.json(await tabs.buildPushTab(fy, dist, months));

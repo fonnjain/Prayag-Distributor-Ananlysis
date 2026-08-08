@@ -1,5 +1,8 @@
 import { trunc2 } from "@/lib/trunc";
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import FullDistributorReport, { type FullDistributorReportData } from "@/components/ai/FullDistributorReport";
+import FullStateHeadReport, { type FullStateHeadReportData } from "@/components/ai/FullStateHeadReport";
+import FullGrowthReport, { type FullGrowthReportData } from "@/components/ai/FullGrowthReport";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
@@ -179,9 +182,10 @@ type SlideSpec = {
 
 // ── Artifact types ────────────────────────────────────────────────────────────
 
-type MemberArtifactType = "statehead-report" | "suggestions" | "travel-plan" | "performance-review" | "presentation";
-type DistributorArtifactType = "distributor-statehead-report" | "distributor-report" | "distributor-suggestions" | "distributor-review" | "distributor-presentation";
-type ArtifactType = MemberArtifactType | DistributorArtifactType;
+type MemberArtifactType = "statehead-report" | "full-statehead-report" | "suggestions" | "travel-plan" | "performance-review" | "presentation";
+type DistributorArtifactType = "distributor-statehead-report" | "distributor-report" | "full-distributor-report" | "distributor-suggestions" | "distributor-review" | "distributor-presentation";
+type GrowthReportType = "full-growth-report";
+type ArtifactType = MemberArtifactType | DistributorArtifactType | GrowthReportType;
 
 // ── Generation result union ───────────────────────────────────────────────────
 
@@ -192,6 +196,10 @@ type GenerationResult =
   | ({ type: "travel-plan"; fy: string; member: string; dataCutoff: string; generatedAt?: string; sections: Record<string, Section>; guard: GuardResult; monthPlans: MonthPlan[]; visitCapacity: { gap: number; feasibleRemainingVisits: number; remainingRequired: number } | null } & PeriodMeta)
   | ({ type: "performance-review"; fy: string; member: string; dataCutoff: string; generatedAt?: string; sections: Record<string, Section>; guard: GuardResult; dataQualityFlags: string[] } & PeriodMeta)
   | ({ type: "presentation"; fy: string; member: string | null; stateHead: string | null; dataCutoff: string; generatedAt?: string; deckTitle: string; deckSubtitle: string; slides: SlideSpec[]; teamSlides: SlideSpec[] | null; memberSlides: DeckMemberSlide[] | null; closingSlides: SlideSpec[] | null; guard: GuardResult; payload: AiPayloadSubset; memberRanking: MemberRankingEntry[] | null } & PeriodMeta)
+  // ── Full structured reports ──
+  | FullDistributorReportData
+  | FullStateHeadReportData
+  | FullGrowthReportData
   // ── Distributor ──
   | { type: "distributor-statehead-report"; fy: string; stateHead: string; dataCutoff: string; sections: Record<string, Section>; guard: GuardResult; payload: DistributorPayloadSubset }
   | { type: "distributor-report"; fy: string; stateHead: string; distributor: string; dataCutoff: string; sections: Record<string, Section>; guard: GuardResult; payload: DistributorPayloadSubset }
@@ -990,25 +998,27 @@ function BatchMemberCard({ doc }: { doc: BatchDoc }) {
 // ── Report type config ────────────────────────────────────────────────────────
 
 const MEMBER_REPORT_TYPES: { id: MemberArtifactType; label: string; requiresMember?: true; requiresStateHead?: true }[] = [
-  { id: "statehead-report",   label: "State Head Report",    requiresStateHead: true },
-  { id: "suggestions",        label: "Suggestions",          requiresMember: true },
-  { id: "travel-plan",        label: "Travel Plan",          requiresMember: true },
-  { id: "performance-review", label: "Performance Review",   requiresMember: true },
-  { id: "presentation",       label: "Presentation" },
+  { id: "full-statehead-report", label: "State Head Report (Full)",  requiresStateHead: true },
+  { id: "statehead-report",      label: "State Head Report (Legacy)", requiresStateHead: true },
+  { id: "suggestions",           label: "Suggestions",               requiresMember: true },
+  { id: "travel-plan",           label: "Travel Plan",               requiresMember: true },
+  { id: "performance-review",    label: "Performance Review",        requiresMember: true },
+  { id: "presentation",          label: "Presentation" },
 ];
 
 const DISTRIBUTOR_REPORT_TYPES: { id: DistributorArtifactType; label: string; requiresStateHead: true; requiresDistributor?: true }[] = [
-  { id: "distributor-statehead-report",  label: "Territory Report",       requiresStateHead: true },
-  { id: "distributor-suggestions",       label: "Suggestions",            requiresStateHead: true },
-  { id: "distributor-report",            label: "Distributor Report",     requiresStateHead: true, requiresDistributor: true },
-  { id: "distributor-review",            label: "Distributor Review",     requiresStateHead: true, requiresDistributor: true },
-  { id: "distributor-presentation",      label: "Presentation",           requiresStateHead: true },
+  { id: "full-distributor-report",       label: "Distributor Report (Full)",  requiresStateHead: true, requiresDistributor: true },
+  { id: "distributor-statehead-report",  label: "Territory Report",           requiresStateHead: true },
+  { id: "distributor-suggestions",       label: "Suggestions",                requiresStateHead: true },
+  { id: "distributor-report",            label: "Distributor Report (Legacy)", requiresStateHead: true, requiresDistributor: true },
+  { id: "distributor-review",            label: "Distributor Review",         requiresStateHead: true, requiresDistributor: true },
+  { id: "distributor-presentation",      label: "Presentation",               requiresStateHead: true },
 ];
 
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function AiReports() {
-  const { fy, periodMode }              = useGlobalFilter();
+  const { fy, periodMode, effectivePeriodFrom, effectivePeriodTo } = useGlobalFilter();
   const [stateHead, setStateHead]       = useState("");
   const [member, setMember]             = useState("");
   const [distributorName, setDistributorName] = useState("");
@@ -1017,6 +1027,13 @@ export default function AiReports() {
   const [error, setError]               = useState<string | null>(null);
   const [result, setResult]             = useState<GenerationResult | null>(null);
   const [signedOff, setSignedOff]       = useState(false);
+
+  // ── Growth report scope ──────────────────────────────────────────────────────
+  const [growthScope, setGrowthScope]   = useState<"company"|"statehead"|"state">("statehead");
+  const [growthState, setGrowthState]   = useState("");
+  const [dormantRevivalPct, setDormantRevivalPct] = useState(25);
+  const [atRiskRecoveryPct, setAtRiskRecoveryPct] = useState(35);
+  const [rangeUptakePct, setRangeUptakePct]       = useState(40);
 
   // ── Batch state ─────────────────────────────────────────────────────────────
   const [batchMode, setBatchMode]       = useState(false);
@@ -1072,9 +1089,15 @@ export default function AiReports() {
     }
   }, [chatMessages, isChatting]);
 
-  const isDistributorType = (t: ArtifactType): t is DistributorArtifactType => t.startsWith("distributor-");
+  const isDistributorType = (t: ArtifactType): t is DistributorArtifactType =>
+    t.startsWith("distributor-") || t === "full-distributor-report";
 
   const isEnabled = useCallback((type: ArtifactType) => {
+    if (type === "full-growth-report") {
+      if (growthScope === "statehead" && !stateHead.trim()) return false;
+      if (growthScope === "state" && !growthState.trim()) return false;
+      return true;
+    }
     if (isDistributorType(type)) {
       const def = DISTRIBUTOR_REPORT_TYPES.find((r) => r.id === type)!;
       if (!stateHead.trim()) return false;
@@ -1086,7 +1109,7 @@ export default function AiReports() {
       if (def.requiresStateHead && !stateHead.trim()) return false;
       return true;
     }
-  }, [member, stateHead, distributorName]);
+  }, [member, stateHead, distributorName, growthScope, growthState]);
 
   const canGenerate = isEnabled(reportType);
 
@@ -1096,17 +1119,49 @@ export default function AiReports() {
     setResult(null);
     setSignedOff(false);
 
-    const body: Record<string, string> = { fy, period: periodMode };
-    if (stateHead.trim()) body.stateHead = stateHead.trim();
-    if (member.trim()) body.member = member.trim();
-    if (distributorName.trim()) body.distributor = distributorName.trim();
+    // Full structured reports use a different endpoint and accept monthFrom/monthTo.
+    const isFullReport = reportType === "full-distributor-report" || reportType === "full-statehead-report";
+    const isGrowthReport = reportType === ("full-growth-report" as ArtifactType);
+    let endpoint: string;
+    let bodyObj: Record<string, unknown>;
 
-    const endpoint = `/api/ai/${reportType}`;
+    if (isGrowthReport) {
+      endpoint = "/api/ai/full-report/growth";
+      bodyObj = {
+        fy,
+        scope: growthScope,
+        stateHead: growthScope === "statehead" ? (stateHead.trim() || undefined) : undefined,
+        state:     growthScope === "state"     ? (growthState.trim() || undefined)  : undefined,
+        monthFrom: effectivePeriodFrom,
+        monthTo: effectivePeriodTo,
+        dormantRevivalPct: dormantRevivalPct / 100,
+        atRiskRecoveryPct: atRiskRecoveryPct / 100,
+        rangeUptakePct:    rangeUptakePct    / 100,
+      };
+    } else if (isFullReport) {
+      endpoint = reportType === "full-distributor-report"
+        ? "/api/ai/full-report/distributor"
+        : "/api/ai/full-report/statehead";
+      bodyObj = {
+        fy,
+        stateHead: stateHead.trim() || undefined,
+        distributor: distributorName.trim() || undefined,
+        monthFrom: effectivePeriodFrom,
+        monthTo: effectivePeriodTo,
+      };
+    } else {
+      endpoint = `/api/ai/${reportType}`;
+      bodyObj = { fy, period: periodMode } as Record<string, unknown>;
+      if (stateHead.trim()) bodyObj.stateHead = stateHead.trim();
+      if (member.trim()) bodyObj.member = member.trim();
+      if (distributorName.trim()) bodyObj.distributor = distributorName.trim();
+    }
+
     try {
       const resp = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(bodyObj),
       });
       if (!resp.ok) {
         const e = await resp.json().catch(() => ({ error: resp.statusText }));
@@ -1336,6 +1391,103 @@ export default function AiReports() {
             </div>
           </div>
 
+          {/* ── Master Growth Report ── */}
+          <div className="space-y-1.5 border border-border/40 rounded-lg p-3 bg-muted/10">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Company-Wide Growth Report</p>
+              <button
+                onClick={() => { setReportType("full-growth-report"); setResult(null); setSignedOff(false); }}
+                className={cn(
+                  "px-3 py-1.5 rounded-md text-xs font-medium border transition-colors",
+                  reportType === "full-growth-report"
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : isEnabled("full-growth-report")
+                    ? "border-border text-foreground hover:bg-muted"
+                    : "border-border/40 text-muted-foreground/50 cursor-not-allowed",
+                )}
+              >
+                Master Growth Report
+              </button>
+            </div>
+
+            {/* Scope — shown only when this type is selected */}
+            {reportType === "full-growth-report" && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                {/* Scope selector */}
+                <div className="space-y-1">
+                  <Label className="text-xs">Scope</Label>
+                  <div className="flex gap-2">
+                    {(["company", "statehead", "state"] as const).map(s => (
+                      <button
+                        key={s}
+                        onClick={() => setGrowthScope(s)}
+                        className={cn(
+                          "px-2.5 py-1 rounded text-xs font-medium border transition-colors",
+                          growthScope === s ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted",
+                        )}
+                      >
+                        {s === "company" ? "Company" : s === "statehead" ? "State Head" : "State"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* State Head — only when scope = statehead */}
+                {growthScope === "statehead" && (
+                  <div className="space-y-1">
+                    <Label htmlFor="gr-sh" className="text-xs">State Head</Label>
+                    <select
+                      id="gr-sh"
+                      value={stateHead}
+                      onChange={(e) => setStateHead(e.target.value)}
+                      className="w-full h-8 px-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                    >
+                      <option value="">— select —</option>
+                      {stateHeadOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                  </div>
+                )}
+
+                {/* State — only when scope = state */}
+                {growthScope === "state" && (
+                  <div className="space-y-1">
+                    <Label htmlFor="gr-state" className="text-xs">State</Label>
+                    <Input
+                      id="gr-state"
+                      value={growthState}
+                      onChange={(e) => setGrowthState(e.target.value)}
+                      placeholder="e.g. RAJASTHAN"
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                )}
+
+                {/* Conversion assumptions */}
+                <div className="space-y-1 col-span-full sm:col-span-1">
+                  <Label className="text-xs">Conversion assumptions</Label>
+                  <div className="flex flex-wrap gap-3">
+                    {[
+                      { label: "Dormant revival %", value: dormantRevivalPct, set: setDormantRevivalPct },
+                      { label: "At-risk recovery %", value: atRiskRecoveryPct, set: setAtRiskRecoveryPct },
+                      { label: "Range uptake %", value: rangeUptakePct, set: setRangeUptakePct },
+                    ].map(a => (
+                      <div key={a.label} className="flex items-center gap-1">
+                        <span className="text-[10px] text-muted-foreground whitespace-nowrap">{a.label}:</span>
+                        <input
+                          type="number"
+                          min={0} max={100} step={1}
+                          value={a.value}
+                          onChange={(e) => a.set(Math.max(0, Math.min(100, Number(e.target.value))))}
+                          className="w-14 h-7 px-2 text-xs rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Member / team reports */}
           <div className="space-y-1.5">
             <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Member and Team Reports</p>
@@ -1540,8 +1692,95 @@ export default function AiReports() {
       {/* Results */}
       {result && (
         <div className="space-y-4">
-          <GuardBanner guard={result.guard} />
+          <GuardBanner guard={result.guard as GuardResult} />
           {"dataCutoff" in result && <PeriodMismatchBanner result={result as PeriodMeta & { dataCutoff: string }} />}
+
+          {/* ── Full Distributor Report ── */}
+          {result.type === "full-distributor-report" && (
+            <>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold">{result.distributor} — Distributor Report (Full)</p>
+                  <p className="text-xs text-muted-foreground">{result.stateHead} · {result.periodLabel} · Data cutoff: {result.dataCutoff}</p>
+                </div>
+                <Button size="sm" variant="outline" onClick={() => {
+                  const w = window.open("", "_blank");
+                  if (!w) return;
+                  const el = document.getElementById("full-report-print-zone");
+                  w.document.write(`<html><head><title>Distributor Report — ${result.distributor}</title><style>
+                    body{font-family:system-ui,sans-serif;font-size:11px;max-width:900px;margin:2rem auto;color:#111}
+                    h1{font-size:1rem;font-weight:600}h2{font-size:0.8rem;font-weight:600;border-bottom:1px solid #ddd;padding-bottom:2px;margin-top:1.5rem}
+                    table{width:100%;border-collapse:collapse}td,th{padding:2px 4px;border-bottom:1px solid #eee;text-align:left}th{color:#666}
+                    @media print{body{margin:1rem}}
+                  </style></head><body>${el?.innerHTML ?? ""}</body></html>`);
+                  w.document.close(); w.print();
+                }}>
+                  <FileDown className="w-3.5 h-3.5 mr-1.5" />Export PDF
+                </Button>
+              </div>
+              <div id="full-report-print-zone">
+                <FullDistributorReport data={result} />
+              </div>
+            </>
+          )}
+
+          {/* ── Full Growth Report ── */}
+          {result.type === "full-growth-report" && (
+            <>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold">Master Growth Report — {result.scopeLabel}</p>
+                  <p className="text-xs text-muted-foreground">{result.periodLabel} · Data to {result.dataCutoff}</p>
+                </div>
+                <Button size="sm" variant="outline" onClick={() => {
+                  const w = window.open("", "_blank");
+                  if (!w) return;
+                  const el = document.getElementById("full-growth-print-zone");
+                  w.document.write(`<html><head><title>Master Growth Report — ${result.scopeLabel}</title><style>
+                    body{font-family:system-ui,sans-serif;font-size:11px;max-width:960px;margin:2rem auto;color:#111}
+                    h1{font-size:1rem;font-weight:600}h2{font-size:0.8rem;font-weight:600;border-bottom:1px solid #ddd;padding-bottom:2px;margin-top:1.5rem}
+                    table{width:100%;border-collapse:collapse}td,th{padding:2px 4px;border-bottom:1px solid #eee;text-align:left}th{color:#666}
+                    @media print{body{margin:1rem}}
+                  </style></head><body>${el?.innerHTML ?? ""}</body></html>`);
+                  w.document.close(); w.print();
+                }}>
+                  <FileDown className="w-3.5 h-3.5 mr-1.5" />Export PDF
+                </Button>
+              </div>
+              <div id="full-growth-print-zone">
+                <FullGrowthReport data={result} />
+              </div>
+            </>
+          )}
+
+          {/* ── Full State Head Report ── */}
+          {result.type === "full-statehead-report" && (
+            <>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold">{result.stateHead} — State Head Report (Full)</p>
+                  <p className="text-xs text-muted-foreground">{result.periodLabel} · Data cutoff: {result.dataCutoff}</p>
+                </div>
+                <Button size="sm" variant="outline" onClick={() => {
+                  const w = window.open("", "_blank");
+                  if (!w) return;
+                  const el = document.getElementById("full-statehead-print-zone");
+                  w.document.write(`<html><head><title>State Head Report — ${result.stateHead}</title><style>
+                    body{font-family:system-ui,sans-serif;font-size:11px;max-width:900px;margin:2rem auto;color:#111}
+                    h1{font-size:1rem;font-weight:600}h2{font-size:0.8rem;font-weight:600;border-bottom:1px solid #ddd;padding-bottom:2px;margin-top:1.5rem}
+                    table{width:100%;border-collapse:collapse}td,th{padding:2px 4px;border-bottom:1px solid #eee;text-align:left}th{color:#666}
+                    @media print{body{margin:1rem}}
+                  </style></head><body>${el?.innerHTML ?? ""}</body></html>`);
+                  w.document.close(); w.print();
+                }}>
+                  <FileDown className="w-3.5 h-3.5 mr-1.5" />Export PDF
+                </Button>
+              </div>
+              <div id="full-statehead-print-zone">
+                <FullStateHeadReport data={result} />
+              </div>
+            </>
+          )}
 
           {/* ── State Head Report ── */}
           {result.type === "statehead-report" && (
