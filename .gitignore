@@ -54,3 +54,7 @@ artifacts/api-server/uploads/
 # Playwright test output (run artefacts, not source)
 **/test-results/
 **/playwright-report/
+
+# Editor backup/temp files (may contain PII from user uploads)
+attached_assets/.*~
+attached_assets/.*.csv.*~
