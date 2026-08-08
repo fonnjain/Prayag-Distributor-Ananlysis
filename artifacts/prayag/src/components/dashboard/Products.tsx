@@ -28,11 +28,34 @@ type ProductRow = {
   amount: number;
 };
 
+type MrpConflict = {
+  code: string;
+  feature: string;
+  product: string;
+  options: { segment: string; mrp: number | null }[];
+};
+
+type UnmappedSegment = { segment: string; codes: number };
+
+type RegisterGap = {
+  totalUnresolved: number;
+  totalCodes: number;
+  prefixes: { prefix: string; codes: number }[];
+};
+
+type ProductDataQuality = {
+  mrpConflicts: MrpConflict[];
+  unmappedSegments: UnmappedSegment[];
+  unmappedCodeTotal: number;
+  registerGap: RegisterGap;
+};
+
 type Payload = {
   fy: string;
   filtered: boolean;
   total: number;
   products: ProductRow[];
+  dataQuality?: ProductDataQuality;
 };
 
 export default function Products() {
@@ -135,6 +158,104 @@ export default function Products() {
               )}
             </CardContent>
           </Card>
+
+          {data.dataQuality && (
+            <div className="grid gap-4 md:grid-cols-3">
+              {/* (a) Unresolved MRP conflicts */}
+              <Card className="border-amber-300/60 dark:border-amber-500/40">
+                <CardHeader className="px-5 pt-5 pb-2">
+                  <CardTitle className="text-sm font-semibold text-amber-700 dark:text-amber-400">
+                    Unresolved MRP conflicts
+                  </CardTitle>
+                  <p className="text-[11px] text-muted-foreground font-normal">
+                    Same code + colour listed under two segments at different prices — loaded
+                    under both, awaiting a business decision. Not picked silently.
+                  </p>
+                </CardHeader>
+                <CardContent className="px-5 pb-5 pt-1 space-y-3">
+                  {data.dataQuality.mrpConflicts.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">None.</p>
+                  ) : (
+                    data.dataQuality.mrpConflicts.map((c) => (
+                      <div key={`${c.code}-${c.feature}`} className="text-xs">
+                        <div className="font-medium">
+                          {c.code}
+                          {c.feature ? ` (${c.feature})` : ""}
+                        </div>
+                        <div className="text-muted-foreground">{c.product}</div>
+                        <ul className="mt-0.5">
+                          {c.options.map((o, i) => (
+                            <li key={i} className="tabular-nums">
+                              {o.segment} → ₹{o.mrp ?? "—"}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* (b) Segment not yet mapped */}
+              <Card className="border-border">
+                <CardHeader className="px-5 pt-5 pb-2">
+                  <CardTitle className="text-sm font-semibold">Segment not yet mapped</CardTitle>
+                  <p className="text-[11px] text-muted-foreground font-normal">
+                    {data.dataQuality.unmappedCodeTotal.toLocaleString("en-IN")} codes across
+                    these marketing segments have no canonical mapping yet — a segment is not
+                    guessed for them.
+                  </p>
+                </CardHeader>
+                <CardContent className="px-5 pb-5 pt-1">
+                  {data.dataQuality.unmappedSegments.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">None.</p>
+                  ) : (
+                    <ul className="space-y-1 text-xs">
+                      {data.dataQuality.unmappedSegments.map((s) => (
+                        <li key={s.segment} className="flex items-center justify-between gap-2">
+                          <span className="text-muted-foreground">{s.segment}</span>
+                          <span className="tabular-nums font-medium">
+                            {s.codes.toLocaleString("en-IN")}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* (c) Register-code gap */}
+              <Card className="border-border">
+                <CardHeader className="px-5 pt-5 pb-2">
+                  <CardTitle className="text-sm font-semibold">Register codes not in master</CardTitle>
+                  <p className="text-[11px] text-muted-foreground font-normal">
+                    {data.dataQuality.registerGap.totalUnresolved.toLocaleString("en-IN")} of{" "}
+                    {data.dataQuality.registerGap.totalCodes.toLocaleString("en-IN")} FY {data.fy}{" "}
+                    register codes fail to resolve to any product code (exact-first resolver).
+                    Top prefixes below size the catalogue gap.
+                  </p>
+                </CardHeader>
+                <CardContent className="px-5 pb-5 pt-1">
+                  {data.dataQuality.registerGap.prefixes.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      All register codes resolve.
+                    </p>
+                  ) : (
+                    <ul className="space-y-1 text-xs">
+                      {data.dataQuality.registerGap.prefixes.map((p) => (
+                        <li key={p.prefix} className="flex items-center justify-between gap-2">
+                          <span className="text-muted-foreground font-mono">{p.prefix}</span>
+                          <span className="tabular-nums font-medium">
+                            {p.codes.toLocaleString("en-IN")}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          )}
 
           <Card>
             <CardHeader className="px-5 pt-5 pb-2">

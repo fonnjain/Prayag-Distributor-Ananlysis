@@ -3,7 +3,10 @@ import {
   text,
   timestamp,
   serial,
+  integer,
+  boolean,
   index,
+  unique,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -35,6 +38,28 @@ export const customerMaster = pgTable(
     headConfidence: text("head_confidence").notNull().default("Guessed"),
     supplyingDistributor: text("supplying_distributor"),
     notes: text("notes"),
+    // Upload-sourced attributes (migration 015_customer_upload_junctions).
+    gst: text("gst"),
+    pincode: text("pincode"),
+    area: text("area"),
+    email: text("email"),
+    address: text("address"),
+    // Retailer "Lead Status" (Pending/Approved). Kept SEPARATE from the status
+    // column so the two file vocabularies are never normalised together.
+    leadStatus: text("lead_status"),
+    // Raw status string exactly as the source file spelled it.
+    statusSource: text("status_source"),
+    // Real entity classification from the distributor file "Customer Type"
+    // column: "Distributors" / "Direct Dealers". Fixes the broken
+    // type_raw ILIKE '%direct%' filter (type_raw holds product groups).
+    entityType: text("entity_type"),
+    assignedSegment: text("assigned_segment"),
+    createdDate: text("created_date"),
+    createdBy: text("created_by"),
+    sourceFile: text("source_file"),
+    // Non-null ONLY for the 59 same-state+district, different-phone duplicate
+    // groups that need human review. Never used to auto-merge.
+    reviewGroup: integer("review_group"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     editedBy: text("edited_by"),
@@ -44,6 +69,46 @@ export const customerMaster = pgTable(
     index("cm_state_head_idx").on(t.stateHead),
     index("cm_state_idx").on(t.state),
     index("cm_status_idx").on(t.status),
+  ],
+);
+
+// Junction: one row per retailer per named salesperson in the comma-separated
+// (quote-aware) "Assign User" cell. Never store the raw string as the
+// relationship. user_norm_key uses normSecKey from the api-server names lib.
+export const retailerUser = pgTable(
+  "retailer_user",
+  {
+    id: serial("id").primaryKey(),
+    retailerId: text("retailer_id").notNull(),
+    userName: text("user_name").notNull(),
+    userNormKey: text("user_norm_key").notNull(),
+    resolved: boolean("resolved").notNull().default(false),
+    position: integer("position").notNull().default(0),
+  },
+  (t) => [
+    index("ru_user_idx").on(t.userNormKey),
+    unique("retailer_user_uk").on(t.retailerId, t.userNormKey),
+  ],
+);
+
+// Junction: one row per retailer per named distributor in the comma-separated
+// (quote-aware) "Assign Distributor Name" cell. dist_norm_key uses the
+// distributor identity registry's normDistKey; resolved_dist_id is the matched
+// distributor's DIST# id.
+export const retailerDistributor = pgTable(
+  "retailer_distributor",
+  {
+    id: serial("id").primaryKey(),
+    retailerId: text("retailer_id").notNull(),
+    distributorName: text("distributor_name").notNull(),
+    distNormKey: text("dist_norm_key").notNull(),
+    resolvedDistId: text("resolved_dist_id"),
+    resolved: boolean("resolved").notNull().default(false),
+    position: integer("position").notNull().default(0),
+  },
+  (t) => [
+    index("rd_dist_idx").on(t.distNormKey),
+    unique("retailer_distributor_uk").on(t.retailerId, t.distNormKey),
   ],
 );
 
@@ -105,3 +170,5 @@ export type CustomerMaster = typeof customerMaster.$inferSelect;
 export type InsertCustomerMaster = z.infer<typeof insertCustomerMasterSchema>;
 export type CustomerMasterLog = typeof customerMasterLog.$inferSelect;
 export type CustomerMismatch = typeof customerMismatchQueue.$inferSelect;
+export type RetailerUser = typeof retailerUser.$inferSelect;
+export type RetailerDistributor = typeof retailerDistributor.$inferSelect;

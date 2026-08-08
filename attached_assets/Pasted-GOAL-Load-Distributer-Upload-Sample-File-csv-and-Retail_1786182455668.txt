@@ -1,0 +1,87 @@
+GOAL
+Load Distributer_Upload_Sample_File.csv and Retailer_Upload_Sample_file.csv
+into the EXISTING Customer Data page and the EXISTING customer_master table
+(which currently holds zero rows). Do NOT create new pages or parallel tables.
+Both files share the same column family - use ONE loader with a type
+parameter, not two loaders.
+
+PARSING
+- Encoding is cp1252, not UTF-8.
+- Real CSV parser; address fields contain embedded newlines.
+- Distributor file: expect 3,316 data rows, 32 columns.
+- Retailer file: expect 76,678 data rows, 44 columns, about 37 MB. Batch the
+  insert; do not load it in a single statement.
+- If you get 3,390 or 79,547 rows you are splitting on newlines - stop.
+
+STATUS - the two files use DIFFERENT vocabularies. Do not normalise them
+together.
+- Distributor Status: "Approved" 778, "Pending" 2,538. There is NO Active
+  concept. This tells you approval state, NOT whether they trade.
+- Retailer Status: "Lead" 54,610, "Inactive" 16,583, "Active" 5,485.
+- Retailer Lead Status: "Pending" 54,596, "Approved" 22,082.
+Show Active retailers as the headline count. Show Leads separately. Never add
+Leads into a coverage figure.
+
+ENTITY TYPE - this fixes a known broken filter
+Distributor file "Customer Type" gives a REAL entity classification:
+Distributors 2,107, Direct Dealers 1,209. The existing direct-dealer filter
+matches type_raw ILIKE '%direct%', but type_raw holds PRODUCT GROUPS and
+returns zero silently. Repoint the direct-dealer filter at this field.
+Do not delete the old filter; leave it and mark it superseded.
+
+MULTI-VALUE FIELDS - the most important instruction here
+"Assign User" and "Assign Distributor Name" on the retailer file are
+COMMA-SEPARATED LISTS, not single values.
+
+  51.2 percent of Active retailers name MORE THAN ONE salesperson.
+  36.7 percent name MORE THAN ONE distributor.
+  Maximum observed: 10 users in one cell, 8 distributors in one cell.
+
+Read as single values, the joins resolve at 48.75 and 62.88 percent. Split on
+comma and they resolve at 99.78 and 96.82 percent. A single-value read
+silently discards half the assignments.
+
+Create JUNCTION TABLES - retailer_user and retailer_distributor - one row per
+retailer per named party. Do not store the raw string as the relationship.
+
+The split must be QUOTE-AWARE. At least one distributor name contains a comma:
+"Chhinamastike Sanitation Pvt. Ltd. ( Previously Balajee Ent., Deoghar)".
+A naive comma split fragments it and orphans 87 retailers. After a quote-aware
+split only 15 orphan names should remain out of 365.
+
+DEDUPLICATION - flag, never auto-merge
+Distributor file has 152 duplicate name groups covering 339 rows. Adjudicate
+by attributes, do not merge on name:
+   79 groups: different State Name        -> DISTINCT firms, keep separate
+   12 groups: different District          -> DISTINCT firms, keep separate
+    2 groups: different GST               -> DISTINCT firms, keep separate
+   59 groups: same state, same district, different phone -> NEEDS REVIEW
+Load all rows. Render the 59 review groups on the Customer Data page with
+company name, address, district, phone and GST side by side so a human can
+decide. Never merge two customers on name similarity alone.
+
+WHAT TO SHOW ON THE PAGE
+- Active retailers 5,485, of which 40 have NO distributor assigned. That 40 is
+  the actionable unassigned list - show it by district.
+- 744 distinct distributor names are referenced by active retailers, against
+  269 Channel Partners the app currently reports. Show both counts side by
+  side with their sources named. Do not reconcile them silently.
+- Referential integrity panel: percentage of assignment slots resolving to the
+  distributor master and to the HR roster, computed AFTER the comma split.
+
+VERIFICATION - paste produced values for all seven
+1. Rows parsed: distributor (expect 3,316), retailer (expect 76,678).
+2. Retailer Status breakdown and Distributor Status breakdown as loaded.
+3. Junction table row counts. For Active retailers expect about 10,686
+   user slots and 8,640 distributor slots. If these equal the retailer count
+   you did not split - stop and fix.
+4. Percentage of distributor slots resolving to the distributor master
+   (expect about 96.82) and of user slots resolving to the HR roster file
+   (expect about 99.78). Print the count of remaining orphan names (expect
+   about 15) and list them.
+5. Confirm the Chhinamastike name survives as ONE distributor, not two
+   fragments, and print the number of retailers attached to it.
+6. Print the count of Active retailers with no distributor assigned (expect
+   40) and their districts.
+7. Confirm the direct-dealer filter now returns non-zero, and print the count
+   of Direct Dealers and Distributors it returns.

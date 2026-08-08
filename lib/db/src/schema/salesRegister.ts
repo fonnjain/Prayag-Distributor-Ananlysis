@@ -94,6 +94,35 @@ export const itemMaster = pgTable("item_master", {
   itemGroup: text("item_group"),
   unit: text("unit"),
   mrp: numeric("mrp"),
+  // Product_Upload_Sample_File.csv attributes (migration 014). The master
+  // stays keyed on code; per-colour/length variants live in itemMasterVariant.
+  segmentSource: text("segment_source"),
+  segmentCanon: text("segment_canon"),
+  uploadName: text("upload_name"),
+  // 'product_upload' where MRP was backfilled from the upload (only where the
+  // rate-list MRP was NULL — the rate-list MRP is never overwritten).
+  mrpSource: text("mrp_source"),
+});
+
+// Colour/length variants of an item_master code, each with its own MRP.
+// A child table of item_master (NOT a parallel catalogue): variant-level
+// keys, dedup and MRP conflicts live here so item_master can stay keyed on
+// code (exact-code joins in productReports/companyReports/sku depend on it).
+// The natural key is (code, UPPER(TRIM(feature))); conflicts (a code listed
+// under two segments with different MRP) keep BOTH rows, so the uniqueness
+// constraint also includes segment_source.
+export const itemMasterVariant = pgTable("item_master_variant", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull(),
+  featureName: text("feature_name").notNull().default(""),
+  productName: text("product_name"),
+  segmentSource: text("segment_source"),
+  segmentCanon: text("segment_canon"),
+  mrp: numeric("mrp"),
+  mrpConflict: boolean("mrp_conflict").notNull().default(false),
+  imageLink: text("image_link"),
+  sourceFile: text("source_file"),
+  loadedAt: timestamp("loaded_at", { withTimezone: true }).defaultNow(),
 });
 
 // Real finished-good costs. Empty until a genuine Cost Master is supplied;
@@ -128,6 +157,10 @@ export const insertSaleLineSchema = createInsertSchema(saleLines).omit({
   ingestedAt: true,
 });
 export const insertItemMasterSchema = createInsertSchema(itemMaster);
+export const insertItemMasterVariantSchema = createInsertSchema(itemMasterVariant).omit({
+  id: true,
+  loadedAt: true,
+});
 export const insertCostMasterSchema = createInsertSchema(costMaster);
 export const insertIngestRunSchema = createInsertSchema(ingestRuns).omit({
   id: true,
@@ -137,6 +170,8 @@ export type InsertSaleLine = z.infer<typeof insertSaleLineSchema>;
 export type SaleLine = typeof saleLines.$inferSelect;
 export type InsertItemMaster = z.infer<typeof insertItemMasterSchema>;
 export type ItemMaster = typeof itemMaster.$inferSelect;
+export type InsertItemMasterVariant = z.infer<typeof insertItemMasterVariantSchema>;
+export type ItemMasterVariant = typeof itemMasterVariant.$inferSelect;
 export type InsertCostMaster = z.infer<typeof insertCostMasterSchema>;
 export type CostMaster = typeof costMaster.$inferSelect;
 export type InsertIngestRun = z.infer<typeof insertIngestRunSchema>;

@@ -15,6 +15,8 @@ import {
   customerMaster,
   customerMasterLog,
   customerMismatchQueue,
+  retailerUser,
+  retailerDistributor,
   type CustomerMaster,
 } from "@workspace/db";
 import {
@@ -35,7 +37,16 @@ import { stateVariants } from "../lib/stateCanon.js";
 const router = Router();
 
 const VALID_TYPES = new Set(["Distributor", "Direct Dealer", "Retailer"]);
-const VALID_STATUSES = new Set(["Active", "Inactive", "Closed", "Converted"]);
+// The customer-upload load (Aug 2026) introduces two SEPARATE source
+// vocabularies that must NOT be normalised together:
+//   Distributor Status : "Approved" / "Pending"
+//   Retailer Status    : "Lead" / "Inactive" / "Active"
+// We EXTEND the validation set (rather than corrupt data) so inline edits and
+// import commits accept the raw values as loaded.
+const VALID_STATUSES = new Set([
+  "Active", "Inactive", "Closed", "Converted",
+  "Approved", "Pending", "Lead",
+]);
 const VALID_CONFIDENCE = new Set(["Confirmed", "Guessed"]);
 
 const EXPORT_COLUMNS: Array<{ key: keyof CustomerMaster; header: string; width: number }> = [
@@ -411,6 +422,154 @@ router.post("/customer-master/mismatch/:mid/resolve", async (req: Request, res: 
   } catch (err) {
     req.log.error({ err, mid }, "mismatch resolve failed");
     res.status(500).json({ error: "Could not resolve mismatch." });
+  }
+});
+
+// ── ENTITY-TYPE COUNTS (fixes the broken direct-dealer filter) ───────────────
+// Authoritative Direct-Dealer / Distributor split from the upload
+// (customer_master.entity_type). Replaces the transactional
+// `type_raw ILIKE '%direct%'` predicate that returned zero.
+router.get("/customer-master/entity-type-counts", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const rows = await db
+      .select({ entityType: customerMaster.entityType, count: sql<number>`count(*)::int` })
+      .from(customerMaster)
+      .where(sql`${customerMaster.entityType} IS NOT NULL`)
+      .groupBy(customerMaster.entityType);
+    const counts: Record<string, number> = {};
+    for (const r of rows) if (r.entityType) counts[r.entityType] = r.count;
+    res.json({
+      directDealers: counts["Direct Dealers"] ?? 0,
+      distributors: counts["Distributors"] ?? 0,
+      source: "customer_master.entity_type (upload)",
+      counts,
+    });
+  } catch (err) {
+    req.log.error({ err }, "entity-type-counts failed");
+    res.status(500).json({ error: "Could not compute entity-type counts." });
+  }
+});
+
+// ── UPLOAD INSIGHTS (Customer Data page panels) ──────────────────────────────
+router.get("/customer-master/upload-insights", async (req: Request, res: Response): Promise<void> => {
+  try {
+    // Headline retailer status breakdown (raw vocab, kept separate).
+    const retStatus = await db
+      .select({ status: customerMaster.status, count: sql<number>`count(*)::int` })
+      .from(customerMaster)
+      .where(eq(customerMaster.sourceFile, "retailer"))
+      .groupBy(customerMaster.status);
+    const retStatusMap: Record<string, number> = {};
+    for (const r of retStatus) retStatusMap[r.status] = r.count;
+
+    // Distributor status breakdown (separate vocab).
+    const distStatus = await db
+      .select({ status: customerMaster.status, count: sql<number>`count(*)::int` })
+      .from(customerMaster)
+      .where(eq(customerMaster.sourceFile, "distributor"))
+      .groupBy(customerMaster.status);
+    const distStatusMap: Record<string, number> = {};
+    for (const r of distStatus) distStatusMap[r.status] = r.count;
+
+    // 40 Active retailers with NO distributor assigned, by district.
+    const unassigned = await db.execute<{ district: string | null; count: number }>(sql`
+      SELECT COALESCE(cm.district, '(none)') AS district, COUNT(*)::int AS count
+      FROM customer_master cm
+      WHERE cm.source_file = 'retailer' AND cm.status = 'Active'
+        AND NOT EXISTS (SELECT 1 FROM retailer_distributor rd WHERE rd.retailer_id = cm.id)
+      GROUP BY cm.district
+      ORDER BY count DESC, district
+    `);
+    const unassignedRows = unassigned.rows;
+    const unassignedTotal = unassignedRows.reduce((a, r) => a + Number(r.count), 0);
+
+    // Referenced distributor-name universe vs the app's Channel Partner count.
+    const referenced = await db.execute<{ names: number }>(sql`
+      SELECT COUNT(DISTINCT rd.dist_norm_key)::int AS names
+      FROM retailer_distributor rd
+      JOIN customer_master cm ON cm.id = rd.retailer_id
+      WHERE cm.status = 'Active'
+    `);
+    const referencedNames = Number(referenced.rows[0]?.names ?? 0);
+    const channelPartners = await db.execute<{ n: number }>(sql`
+      SELECT COUNT(*)::int AS n FROM customer_master WHERE entity_type = 'Distributors'
+    `);
+
+    // Referential-integrity panel (post-split slot resolution).
+    const distSlots = await db.execute<{ total: number; resolved: number }>(sql`
+      SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE resolved)::int AS resolved
+      FROM retailer_distributor
+    `);
+    const userSlots = await db.execute<{ total: number; resolved: number }>(sql`
+      SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE resolved)::int AS resolved
+      FROM retailer_user
+    `);
+    const dS = distSlots.rows[0] ?? { total: 0, resolved: 0 };
+    const uS = userSlots.rows[0] ?? { total: 0, resolved: 0 };
+    const pct = (r: number, t: number) => (t > 0 ? Math.round((r / t) * 10000) / 100 : 0);
+
+    // Orphan distributor names referenced by Active retailers.
+    const orphans = await db.execute<{ name: string }>(sql`
+      SELECT DISTINCT rd.distributor_name AS name
+      FROM retailer_distributor rd
+      JOIN customer_master cm ON cm.id = rd.retailer_id
+      WHERE cm.status = 'Active' AND NOT rd.resolved
+      ORDER BY rd.distributor_name
+    `);
+
+    // 59 review groups (same state+district, different phone). company,
+    // address, district, phone, GST side-by-side.
+    const reviewRows = await db
+      .select({
+        reviewGroup: customerMaster.reviewGroup,
+        id: customerMaster.id,
+        company: customerMaster.company,
+        address: customerMaster.address,
+        district: customerMaster.district,
+        state: customerMaster.state,
+        phone: customerMaster.mobile,
+        gst: customerMaster.gst,
+      })
+      .from(customerMaster)
+      .where(sql`${customerMaster.reviewGroup} IS NOT NULL`)
+      .orderBy(asc(customerMaster.reviewGroup), asc(customerMaster.company));
+    const reviewGroups = new Map<number, typeof reviewRows>();
+    for (const r of reviewRows) {
+      if (r.reviewGroup == null) continue;
+      const list = reviewGroups.get(r.reviewGroup) ?? [];
+      list.push(r);
+      reviewGroups.set(r.reviewGroup, list);
+    }
+
+    res.json({
+      retailer: {
+        active: retStatusMap["Active"] ?? 0,   // headline
+        lead: retStatusMap["Lead"] ?? 0,        // shown separately, NEVER coverage
+        inactive: retStatusMap["Inactive"] ?? 0,
+        statusBreakdown: retStatusMap,
+      },
+      distributor: { statusBreakdown: distStatusMap },
+      unassignedActiveRetailers: { total: unassignedTotal, byDistrict: unassignedRows },
+      distributorNameReconciliation: {
+        referencedByActiveRetailers: referencedNames,
+        referencedSource: "retailer_distributor (Assign Distributor Name, comma-split, Active retailers)",
+        channelPartners: Number(channelPartners.rows[0]?.n ?? 0),
+        channelPartnersSource: "customer_master.entity_type = 'Distributors' (upload)",
+      },
+      referentialIntegrity: {
+        distributorSlots: { total: dS.total, resolved: dS.resolved, pct: pct(dS.resolved, dS.total) },
+        userSlots: { total: uS.total, resolved: uS.resolved, pct: pct(uS.resolved, uS.total) },
+        orphanCount: orphans.rows.length,
+        orphanNames: orphans.rows.map((o) => o.name),
+      },
+      reviewGroups: Array.from(reviewGroups.entries()).map(([groupNo, members]) => ({
+        groupNo,
+        members,
+      })),
+    });
+  } catch (err) {
+    req.log.error({ err }, "upload-insights failed");
+    res.status(500).json({ error: "Could not compute upload insights." });
   }
 });
 

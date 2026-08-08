@@ -109,4 +109,5 @@
 - [Distributor identity registry](distributor-identity-registry.md) — DIST# only merge key; distributor_identity table + resolver; ambiguous names error with candidates; trigram sim==1 pairs are strongest candidates.
 - [Retailer identity (RET#) registry](retailer-identity-registry.md) — RET# is the retailer key (merged cells need carry-forward; SR.NO must never bind); registry resolves found/ambiguous/fallback, never first-match.
 - [Comparison guard validation](comparison-guard-validation.md) — validation steps that curl the API must self-provision a disposable server when none is reachable; live data lacks a missing-cost head, so that path is unit-tested.
+- [Upload master loads](upload-master-loads.md) — cp1252 upload CSVs; item_master_variant child table; roster compound-key enrichment; customer junctions + transactional loader rules.
 - [Distributor tab head scoping](distributor-tab-head-scope.md) — Secondary/SKU tabs aggregate a head's distributors (registry-guarded); push per-distributor; filtered deep-dive cache + invalidation.

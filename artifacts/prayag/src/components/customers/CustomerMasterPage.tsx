@@ -12,6 +12,7 @@
 // Export: download current filtered view as xlsx.
 import {
   useState,
+  useEffect,
   useRef,
   useCallback,
   type ChangeEvent,
@@ -49,6 +50,7 @@ const TABS = [
   { id: "Distributor",    label: "Distributors" },
   { id: "Direct Dealer",  label: "Direct Dealers" },
   { id: "Retailer",       label: "Retailers" },
+  { id: "insights",       label: "Upload Insights" },
   { id: "queue",          label: "Review Queue" },
 ] as const;
 
@@ -329,6 +331,188 @@ function ReviewQueue() {
   );
 }
 
+// ── Upload Insights panel ──────────────────────────────────────────────────────
+// Surfaces the Distributer/Retailer upload load: headline Active retailers
+// (Leads kept separate, NEVER folded into coverage), the 40 unassigned Active
+// retailers by district, the referenced-distributor-name vs Channel-Partner
+// reconciliation, the post-split referential-integrity panel, and the 59
+// review groups (same state+district, different phone) for human adjudication.
+
+interface UploadInsights {
+  retailer: {
+    active: number; lead: number; inactive: number;
+    statusBreakdown: Record<string, number>;
+  };
+  distributor: { statusBreakdown: Record<string, number> };
+  unassignedActiveRetailers: {
+    total: number;
+    byDistrict: Array<{ district: string | null; count: number }>;
+  };
+  distributorNameReconciliation: {
+    referencedByActiveRetailers: number; referencedSource: string;
+    channelPartners: number; channelPartnersSource: string;
+  };
+  referentialIntegrity: {
+    distributorSlots: { total: number; resolved: number; pct: number };
+    userSlots: { total: number; resolved: number; pct: number };
+    orphanCount: number; orphanNames: string[];
+  };
+  reviewGroups: Array<{
+    groupNo: number;
+    members: Array<{
+      id: string; company: string; address: string | null;
+      district: string | null; state: string | null;
+      phone: string | null; gst: string | null;
+    }>;
+  }>;
+}
+
+function fmt(n: number): string {
+  return n.toLocaleString("en-IN");
+}
+
+function UploadInsightsPanel() {
+  const [data, setData] = useState<UploadInsights | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+    setLoading(true);
+    setError(null);
+    fetch(`${BASE}/api/customer-master/upload-insights`)
+      .then((r) => { if (!r.ok) throw new Error("Failed to load insights"); return r.json(); })
+      .then((d: UploadInsights) => { if (!ignore) { setData(d); setLoading(false); } })
+      .catch((e: Error) => { if (!ignore) { setError(e.message); setLoading(false); } });
+    return () => { ignore = true; };
+  }, []);
+
+  if (loading) return <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">Loading insights…</div>;
+  if (error || !data) return <div className="flex items-center justify-center h-32 text-destructive text-sm">{error ?? "No data."}</div>;
+
+  const ri = data.referentialIntegrity;
+  const rec = data.distributorNameReconciliation;
+
+  return (
+    <div className="space-y-6">
+      {/* Headline retailer status: Active headline, Leads separate */}
+      <section>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Retailer status</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="rounded-lg border p-3 bg-emerald-50 dark:bg-emerald-900/20">
+            <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300">{fmt(data.retailer.active)}</p>
+            <p className="text-xs text-muted-foreground">Active retailers (headline)</p>
+          </div>
+          <div className="rounded-lg border p-3">
+            <p className="text-2xl font-bold">{fmt(data.retailer.lead)}</p>
+            <p className="text-xs text-muted-foreground">Leads (shown separately — never coverage)</p>
+          </div>
+          <div className="rounded-lg border p-3">
+            <p className="text-2xl font-bold">{fmt(data.retailer.inactive)}</p>
+            <p className="text-xs text-muted-foreground">Inactive</p>
+          </div>
+          <div className="rounded-lg border p-3">
+            <p className="text-sm font-medium mb-1">Distributor status</p>
+            {Object.entries(data.distributor.statusBreakdown).map(([k, v]) => (
+              <p key={k} className="text-xs text-muted-foreground">{k}: <strong>{fmt(v)}</strong></p>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* 40 unassigned Active retailers by district */}
+      <section>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+          Actionable: {fmt(data.unassignedActiveRetailers.total)} Active retailers with NO distributor assigned
+        </h2>
+        <div className="rounded border overflow-hidden max-w-md">
+          <table className="w-full text-xs">
+            <thead><tr className="bg-muted/40 border-b"><th className="px-3 py-1.5 text-left font-medium">District</th><th className="px-3 py-1.5 text-right font-medium">Count</th></tr></thead>
+            <tbody className="divide-y">
+              {data.unassignedActiveRetailers.byDistrict.map((r) => (
+                <tr key={r.district ?? "(none)"}><td className="px-3 py-1.5">{r.district ?? "(none)"}</td><td className="px-3 py-1.5 text-right">{r.count}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Referenced distributor names vs Channel Partners — sources named */}
+      <section>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Distributor-name reconciliation (not reconciled silently)</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="rounded-lg border p-3">
+            <p className="text-2xl font-bold">{fmt(rec.referencedByActiveRetailers)}</p>
+            <p className="text-xs font-medium">Distinct distributor names referenced by Active retailers</p>
+            <p className="text-[11px] text-muted-foreground mt-1">Source: {rec.referencedSource}</p>
+          </div>
+          <div className="rounded-lg border p-3">
+            <p className="text-2xl font-bold">{fmt(rec.channelPartners)}</p>
+            <p className="text-xs font-medium">Channel Partners</p>
+            <p className="text-[11px] text-muted-foreground mt-1">Source: {rec.channelPartnersSource}</p>
+          </div>
+        </div>
+      </section>
+
+      {/* Referential integrity — post-split resolution % */}
+      <section>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Referential integrity (post comma-split)</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="rounded-lg border p-3">
+            <p className="text-2xl font-bold">{ri.distributorSlots.pct}%</p>
+            <p className="text-xs text-muted-foreground">Distributor slots resolving to distributor master ({fmt(ri.distributorSlots.resolved)} / {fmt(ri.distributorSlots.total)})</p>
+          </div>
+          <div className="rounded-lg border p-3">
+            <p className="text-2xl font-bold">{ri.userSlots.pct}%</p>
+            <p className="text-xs text-muted-foreground">User slots resolving to HR roster ({fmt(ri.userSlots.resolved)} / {fmt(ri.userSlots.total)})</p>
+          </div>
+        </div>
+        <div className="mt-3">
+          <p className="text-xs font-medium mb-1">{ri.orphanCount} orphan distributor name{ri.orphanCount === 1 ? "" : "s"} (referenced by Active retailers, unresolved)</p>
+          <ul className="text-xs text-muted-foreground list-disc pl-5 space-y-0.5">
+            {ri.orphanNames.map((n) => <li key={n}>{n}</li>)}
+          </ul>
+        </div>
+      </section>
+
+      {/* 59 review groups side-by-side */}
+      <section>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+          {data.reviewGroups.length} duplicate-name review groups (same state + district, different phone — never auto-merged)
+        </h2>
+        <div className="space-y-3">
+          {data.reviewGroups.map((g) => (
+            <div key={g.groupNo} className="rounded border overflow-x-auto">
+              <table className="w-full text-xs min-w-[720px]">
+                <thead>
+                  <tr className="bg-muted/40 border-b">
+                    <th className="px-3 py-1.5 text-left font-medium">Group #{g.groupNo} — Company</th>
+                    <th className="px-3 py-1.5 text-left font-medium">Address</th>
+                    <th className="px-3 py-1.5 text-left font-medium">District</th>
+                    <th className="px-3 py-1.5 text-left font-medium">Phone</th>
+                    <th className="px-3 py-1.5 text-left font-medium">GST</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {g.members.map((m) => (
+                    <tr key={m.id}>
+                      <td className="px-3 py-1.5"><span className="font-medium">{m.company}</span> <span className="text-muted-foreground font-mono">{m.id}</span></td>
+                      <td className="px-3 py-1.5 text-muted-foreground">{m.address ?? "—"}</td>
+                      <td className="px-3 py-1.5">{m.district ?? "—"}</td>
+                      <td className="px-3 py-1.5 font-mono">{m.phone ?? "—"}</td>
+                      <td className="px-3 py-1.5 font-mono">{m.gst ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function CustomerMasterPage() {
@@ -358,7 +542,7 @@ export default function CustomerMasterPage() {
   const qc = useQueryClient();
   const update = useUpdateCustomerMasterRecord();
 
-  const isCustomerTab = activeTab !== "queue";
+  const isCustomerTab = activeTab !== "queue" && activeTab !== "insights";
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const listParams: any = isCustomerTab ? {
@@ -585,6 +769,9 @@ export default function CustomerMasterPage() {
 
           {/* Review queue */}
           {activeTab === "queue" && <ReviewQueue />}
+
+          {/* Upload insights */}
+          {activeTab === "insights" && <UploadInsightsPanel />}
 
           {/* Customer table */}
           {isCustomerTab && (

@@ -319,6 +319,81 @@ const MIGRATIONS: Migration[] = [
         ON distributor_identity_alias (norm_key);
     `,
   },
+  {
+    id: "014_product_upload_variants",
+    sql: `
+      -- Product_Upload_Sample_File.csv load (Aug 2026).
+      -- item_master stays keyed on code (existing joins depend on that);
+      -- colour/length variants with per-variant MRP live in item_master_variant,
+      -- a child table of the same master (NOT a parallel catalogue).
+      ALTER TABLE item_master ADD COLUMN IF NOT EXISTS segment_source TEXT;
+      ALTER TABLE item_master ADD COLUMN IF NOT EXISTS segment_canon  TEXT;
+      ALTER TABLE item_master ADD COLUMN IF NOT EXISTS upload_name    TEXT;
+      ALTER TABLE item_master ADD COLUMN IF NOT EXISTS mrp_source     TEXT;
+
+      CREATE TABLE IF NOT EXISTS item_master_variant (
+        id             SERIAL      PRIMARY KEY,
+        code           TEXT        NOT NULL,
+        feature_name   TEXT        NOT NULL DEFAULT '',
+        product_name   TEXT,
+        segment_source TEXT,
+        segment_canon  TEXT,
+        mrp            NUMERIC,
+        mrp_conflict   BOOLEAN     NOT NULL DEFAULT FALSE,
+        image_link     TEXT,
+        source_file    TEXT,
+        loaded_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+        -- conflicts (e.g. TTS-01/02/03 listed under two segments with
+        -- different MRP) keep BOTH rows, so uniqueness includes segment_source
+        CONSTRAINT item_master_variant_uk UNIQUE (code, feature_name, segment_source)
+      );
+      CREATE INDEX IF NOT EXISTS imv_code_idx ON item_master_variant (code);
+    `,
+  },
+  {
+    id: "015_customer_upload_junctions",
+    sql: `
+      -- Distributer/Retailer_Upload_Sample_File.csv load (Aug 2026).
+      -- customer_master gains upload-sourced attributes; multi-value
+      -- Assign User / Assign Distributor Name become junction tables.
+      ALTER TABLE customer_master ADD COLUMN IF NOT EXISTS gst              TEXT;
+      ALTER TABLE customer_master ADD COLUMN IF NOT EXISTS pincode          TEXT;
+      ALTER TABLE customer_master ADD COLUMN IF NOT EXISTS area             TEXT;
+      ALTER TABLE customer_master ADD COLUMN IF NOT EXISTS email            TEXT;
+      ALTER TABLE customer_master ADD COLUMN IF NOT EXISTS address          TEXT;
+      ALTER TABLE customer_master ADD COLUMN IF NOT EXISTS lead_status      TEXT;
+      ALTER TABLE customer_master ADD COLUMN IF NOT EXISTS status_source    TEXT;
+      ALTER TABLE customer_master ADD COLUMN IF NOT EXISTS entity_type      TEXT;
+      ALTER TABLE customer_master ADD COLUMN IF NOT EXISTS assigned_segment TEXT;
+      ALTER TABLE customer_master ADD COLUMN IF NOT EXISTS created_date     TEXT;
+      ALTER TABLE customer_master ADD COLUMN IF NOT EXISTS created_by       TEXT;
+      ALTER TABLE customer_master ADD COLUMN IF NOT EXISTS source_file      TEXT;
+      ALTER TABLE customer_master ADD COLUMN IF NOT EXISTS review_group     INTEGER;
+
+      CREATE TABLE IF NOT EXISTS retailer_user (
+        id            SERIAL  PRIMARY KEY,
+        retailer_id   TEXT    NOT NULL,
+        user_name     TEXT    NOT NULL,
+        user_norm_key TEXT    NOT NULL,
+        resolved      BOOLEAN NOT NULL DEFAULT FALSE,
+        position      INTEGER NOT NULL DEFAULT 0,
+        CONSTRAINT retailer_user_uk UNIQUE (retailer_id, user_norm_key)
+      );
+      CREATE INDEX IF NOT EXISTS ru_user_idx ON retailer_user (user_norm_key);
+
+      CREATE TABLE IF NOT EXISTS retailer_distributor (
+        id               SERIAL  PRIMARY KEY,
+        retailer_id      TEXT    NOT NULL,
+        distributor_name TEXT    NOT NULL,
+        dist_norm_key    TEXT    NOT NULL,
+        resolved_dist_id TEXT,
+        resolved         BOOLEAN NOT NULL DEFAULT FALSE,
+        position         INTEGER NOT NULL DEFAULT 0,
+        CONSTRAINT retailer_distributor_uk UNIQUE (retailer_id, dist_norm_key)
+      );
+      CREATE INDEX IF NOT EXISTS rd_dist_idx ON retailer_distributor (dist_norm_key);
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

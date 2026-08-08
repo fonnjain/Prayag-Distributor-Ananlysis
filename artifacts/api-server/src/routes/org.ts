@@ -18,7 +18,7 @@ import {
 } from "@workspace/db";
 import { eq, ilike, or, desc, isNull } from "drizzle-orm";
 import { SEED_HEADS, SEED_FLAGS } from "../lib/org/seedData.js";
-import { loadRoster } from "../lib/mgmt/roster.js";
+import { loadRoster, loadRosterHealth } from "../lib/mgmt/roster.js";
 
 const router = Router();
 
@@ -115,6 +115,25 @@ router.get("/org/state-heads", async (req, res) => {
     res.json({ heads: enriched, globalFlags, seeded, totalMembers });
   } catch (err) {
     res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── GET /api/org/roster-health ───────────────────────────────────────────────
+// Read-only roster-health panel computed from hr_roster.csv (Sales_User_List):
+// Active/Deactive counts, coverage %, Order Type breakdown, bad-employee-code
+// names, the shared-placeholder-code pair, the name-reversed possible duplicate
+// flagged for review, and Reporting Managers that resolve to no row. Advisory
+// only — nothing here auto-fixes or merges.
+
+router.get("/org/roster-health", async (_req, res) => {
+  try {
+    const health = loadRosterHealth();
+    if (!health) {
+      return res.status(503).json({ error: "roster CSV unavailable" });
+    }
+    return res.json(health);
+  } catch (err) {
+    return res.status(500).json({ error: String(err) });
   }
 });
 

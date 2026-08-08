@@ -94,6 +94,33 @@ interface OrgData {
   totalMembers: number;
 }
 
+interface RosterHealth {
+  rowsParsed: number;
+  activeCount: number;
+  deactiveCount: number;
+  coverage: {
+    designation: number;
+    reportingManager: number;
+    ctc: number;
+    headquarter: number;
+    workingState: number;
+    assignedSegment: number;
+  };
+  orderType: Record<string, number>;
+  badEmpCodeNames: string[];
+  sharedEmpCode: {
+    empCode: string;
+    people: Array<{ name: string; city: string; reportingManager: string }>;
+  } | null;
+  possibleDuplicate: {
+    empCode: string;
+    rows: Array<{ name: string; city: string; status: string }>;
+  } | null;
+  unresolvedManagers: string[];
+  ambiguousNameCount: number;
+  ambiguousNames: Array<{ name: string; count: number }>;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function statusBadge(status: HeadStatus) {
@@ -677,6 +704,233 @@ function AuditTrail() {
   );
 }
 
+// ── Roster health panel ──────────────────────────────────────────────────────
+// Read-only overlay computed from hr_roster.csv (Sales_User_List). Every item
+// is advisory — HR corrects at source; the app never auto-fixes or merges.
+
+function CoverageBar({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="tabular-nums font-medium">{value.toFixed(1)}%</span>
+      </div>
+      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+        <div
+          className={cn(
+            "h-full rounded-full",
+            value >= 99 ? "bg-emerald-500" : value >= 90 ? "bg-amber-500" : "bg-red-500",
+          )}
+          style={{ width: `${Math.min(100, value)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function RosterHealthPanel() {
+  const [health, setHealth] = useState<RosterHealth | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showAllBad, setShowAllBad] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`${API}/org/roster-health`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`Server error ${r.status}`);
+        return r.json();
+      })
+      .then((d: RosterHealth) => { if (!cancelled) setHealth(d); })
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : "Load failed"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading roster health…
+      </div>
+    );
+  }
+  if (error || !health) {
+    return (
+      <div className="rounded-lg border border-border/50 bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+        Roster health unavailable ({error ?? "no data"}).
+      </div>
+    );
+  }
+
+  const orderEntries = Object.entries(health.orderType).sort((a, b) => b[1] - a[1]);
+  const badNames = showAllBad ? health.badEmpCodeNames : health.badEmpCodeNames.slice(0, 10);
+
+  return (
+    <div className="rounded-lg border border-border/50 bg-background p-4 space-y-4">
+      <div className="flex items-center gap-2">
+        <Users className="h-4 w-4 text-primary" />
+        <h4 className="text-sm font-semibold">Roster health</h4>
+        <span className="text-xs text-muted-foreground">
+          hr_roster.csv (Sales_User_List) · {health.rowsParsed} rows
+        </span>
+      </div>
+
+      {/* Active / Deactive */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="rounded-md border border-border/50 px-3 py-2">
+          <p className="text-xs text-muted-foreground">Active</p>
+          <p className="text-lg font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+            {health.activeCount}
+          </p>
+        </div>
+        <div className="rounded-md border border-border/50 px-3 py-2">
+          <p className="text-xs text-muted-foreground">Deactive</p>
+          <p className="text-lg font-semibold tabular-nums text-muted-foreground">
+            {health.deactiveCount}
+          </p>
+        </div>
+        <div className="rounded-md border border-border/50 px-3 py-2 col-span-2">
+          <p className="text-xs text-muted-foreground mb-1">Order Type (active)</p>
+          <div className="flex flex-wrap gap-1.5">
+            {orderEntries.map(([k, v]) => (
+              <Badge
+                key={k}
+                className="bg-muted text-foreground border-0 text-xs py-0 px-2 tabular-nums"
+              >
+                {k}: {v}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Coverage */}
+      <div>
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+          Coverage (active members)
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+          <CoverageBar label="Designation" value={health.coverage.designation} />
+          <CoverageBar label="Reporting Manager" value={health.coverage.reportingManager} />
+          <CoverageBar label="CTC" value={health.coverage.ctc} />
+          <CoverageBar label="Headquarter" value={health.coverage.headquarter} />
+          <CoverageBar label="Working State" value={health.coverage.workingState} />
+          <CoverageBar label="Assigned Segment" value={health.coverage.assignedSegment} />
+        </div>
+      </div>
+
+      {/* Bad employee codes */}
+      <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/20 px-3 py-2.5 space-y-2">
+        <p className="text-xs font-medium text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          {health.badEmpCodeNames.length} active members with an implausible employee code
+        </p>
+        <p className="text-xs text-amber-700 dark:text-amber-400">
+          Codes that are non-numeric or longer than 4 digits (mobile numbers, keyboard
+          input in the wrong field). Flagged for HR to correct at source — not auto-fixed.
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          {badNames.map((n) => (
+            <span
+              key={n}
+              className="text-xs bg-white/60 dark:bg-amber-900/30 rounded px-1.5 py-0.5 text-amber-900 dark:text-amber-200"
+            >
+              {n}
+            </span>
+          ))}
+        </div>
+        {health.badEmpCodeNames.length > 10 && (
+          <button
+            className="text-xs text-amber-700 dark:text-amber-400 underline"
+            onClick={() => setShowAllBad((x) => !x)}
+          >
+            {showAllBad ? "Show first 10" : `Show all ${health.badEmpCodeNames.length}`}
+          </button>
+        )}
+      </div>
+
+      {/* Shared placeholder code */}
+      {health.sharedEmpCode && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/20 px-3 py-2.5 space-y-1">
+          <p className="text-xs font-medium text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            Employee code {health.sharedEmpCode.empCode} shared by two different active people
+          </p>
+          {health.sharedEmpCode.people.map((p) => (
+            <p key={p.name} className="text-xs text-amber-900 dark:text-amber-200">
+              {p.name} ({p.city}, reporting to {p.reportingManager})
+            </p>
+          ))}
+          <p className="text-xs text-amber-700 dark:text-amber-400">
+            Two real people sharing a placeholder code — both kept.
+          </p>
+        </div>
+      )}
+
+      {/* Possible name-reversed duplicate */}
+      {health.possibleDuplicate && (
+        <div className="rounded-md border border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/20 px-3 py-2.5 space-y-1">
+          <p className="text-xs font-medium text-blue-800 dark:text-blue-300 flex items-center gap-1.5">
+            <Info className="h-3.5 w-3.5 shrink-0" />
+            Possible duplicate under employee code {health.possibleDuplicate.empCode} — flagged for review
+          </p>
+          {health.possibleDuplicate.rows.map((r) => (
+            <p key={r.name} className="text-xs text-blue-900 dark:text-blue-200">
+              {r.name} ({r.city}, {r.status})
+            </p>
+          ))}
+          <p className="text-xs text-blue-700 dark:text-blue-400">
+            Looks like one person entered twice with the name reversed. Review manually —
+            not merged automatically.
+          </p>
+        </div>
+      )}
+
+      {/* Ambiguous duplicate names */}
+      {health.ambiguousNameCount > 0 && (
+        <div className="rounded-md border border-blue-200 bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/20 px-3 py-2.5 space-y-1.5">
+          <p className="text-xs font-medium text-blue-800 dark:text-blue-300 flex items-center gap-1.5">
+            <Info className="h-3.5 w-3.5 shrink-0" />
+            {health.ambiguousNameCount} duplicate name{health.ambiguousNameCount !== 1 ? "s" : ""} — resolved only by reporting manager
+          </p>
+          <p className="text-xs text-blue-700 dark:text-blue-400">
+            The same name appears on multiple rows under different managers. Enrichment is
+            matched on name + reporting manager; a name with no manager match attaches nothing
+            rather than another person's employee code / designation / CTC.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {health.ambiguousNames.map((a) => (
+              <span
+                key={a.name}
+                className="text-xs bg-white/60 dark:bg-blue-900/30 rounded px-1.5 py-0.5 text-blue-900 dark:text-blue-200"
+              >
+                {a.name} ×{a.count}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Unresolved managers */}
+      <div className="rounded-md border border-border/50 bg-muted/20 px-3 py-2.5">
+        <p className="text-xs font-medium text-muted-foreground">
+          Reporting Managers not resolving to a roster row: {health.unresolvedManagers.length}
+        </p>
+        {health.unresolvedManagers.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-1.5">
+            {health.unresolvedManagers.map((m) => (
+              <span key={m} className="text-xs bg-muted rounded px-1.5 py-0.5">
+                {m}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export default function Organisation() {
@@ -833,6 +1087,9 @@ export default function Organisation() {
                 </div>
               </div>
             )}
+
+            {/* Roster health panel (from hr_roster.csv / Sales_User_List) */}
+            <RosterHealthPanel />
 
             {/* Global flags (non-territory etc.) */}
             {openGlobalFlags.map((f) => (

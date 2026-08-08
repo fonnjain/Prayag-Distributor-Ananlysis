@@ -145,6 +145,13 @@ async function queryHeadline(
       AND month_label IN (${labelFrag})
       AND code IS NOT NULL AND code != ''
       AND (head_canon IS NULL OR head_canon != ${PROJECT_HEAD})
+      -- SUPERSEDED (customer-upload load, Aug 2026): type_raw holds PRODUCT
+      -- GROUPS, not entity classes, so ILIKE '%direct%' does not reliably
+      -- separate distributors from direct dealers. The authoritative
+      -- Direct-Dealer / Distributor classification now lives in
+      -- customer_master.entity_type (keyed by DIST#). This transactional
+      -- predicate is retained for sale-line scoping only; do not treat it as
+      -- the entity-type source.
       AND (type_raw IS NULL OR type_raw NOT ILIKE '%direct%')
   `);
   return res.rows[0] ?? { net: null, qty: null, codes: null };

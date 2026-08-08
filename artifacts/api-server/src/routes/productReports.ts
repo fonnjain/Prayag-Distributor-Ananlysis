@@ -11,6 +11,10 @@ import ExcelJS from "exceljs";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, saleLines, itemMaster } from "@workspace/db";
 import {
+  resolveProductCode,
+  buildResolverIndex,
+} from "../lib/sku/productCodeResolver.js";
+import {
   entityConds,
   hasEntityFilterValues,
   type EntityFilter,
@@ -36,6 +40,37 @@ export type ProductRow = {
   amount: number;
 };
 
+/** A code+feature listed under two segments with different MRP — kept
+ *  unresolved (loaded under both) pending a business decision. */
+export type MrpConflict = {
+  code: string;
+  feature: string;
+  product: string;
+  options: { segment: string; mrp: number | null }[];
+};
+
+/** A segment name from the product upload that has no canonical mapping yet
+ *  (MANHOLE COVER / WATER HEATER / COCKROACH TRAPS & GRATINGS). */
+export type UnmappedSegment = {
+  segment: string;
+  codes: number;
+};
+
+/** Register codes (this FY) that fail to resolve to any master code,
+ *  grouped by family prefix, so the catalogue gap is sized and visible. */
+export type RegisterGap = {
+  totalUnresolved: number;
+  totalCodes: number;
+  prefixes: { prefix: string; codes: number }[];
+};
+
+export type ProductDataQuality = {
+  mrpConflicts: MrpConflict[];
+  unmappedSegments: UnmappedSegment[];
+  unmappedCodeTotal: number;
+  registerGap: RegisterGap;
+};
+
 export type ProductReportsPayload = {
   fy: string;
   filtered: boolean;
@@ -43,7 +78,113 @@ export type ProductReportsPayload = {
   months: string[];
   total: number;
   products: ProductRow[];
+  /** Data-quality panels from the Product_Upload_Sample_File.csv load. */
+  dataQuality: ProductDataQuality;
 };
+
+/** Family prefix for an unresolved register code: leading letters up to and
+ *  including a hyphen (PTA-, CPCS-), else the leading letter run, else the
+ *  bucket "(numeric)" for all-digit codes. Mirrors the loader script. */
+function familyPrefix(code: string): string {
+  const hyphen = /^([A-Za-z]+-)/.exec(code);
+  if (hyphen) return hyphen[1];
+  const alpha = /^([A-Za-z]+)/.exec(code);
+  if (alpha) return alpha[1];
+  return "(numeric)";
+}
+
+/**
+ * Build the three data-quality panels the Products page renders:
+ *   (a) the unresolved MRP conflicts (TTS-01/02/03),
+ *   (b) the "segment not yet mapped" UNMAPPED segments,
+ *   (c) the unresolved register-code gap for this FY, grouped by prefix.
+ * These do NOT depend on the entity/month filter — they describe the loaded
+ * master and the whole FY register — so they are computed once per FY.
+ */
+export async function buildProductDataQuality(fy: string): Promise<ProductDataQuality> {
+  // (a) MRP conflicts — variants flagged mrp_conflict, grouped by (code,feature).
+  const conflictRows = await db.execute<{
+    code: string;
+    feature_name: string;
+    product_name: string | null;
+    segment_source: string | null;
+    mrp: string | null;
+  }>(sql`
+    SELECT code, feature_name, product_name, segment_source, mrp
+    FROM item_master_variant
+    WHERE mrp_conflict = TRUE
+    ORDER BY code, feature_name, segment_source
+  `);
+  const conflictMap = new Map<string, MrpConflict>();
+  for (const r of conflictRows.rows) {
+    const key = `${r.code}\u0000${r.feature_name}`;
+    let c = conflictMap.get(key);
+    if (!c) {
+      c = {
+        code: r.code,
+        feature: r.feature_name,
+        product: r.product_name ?? "",
+        options: [],
+      };
+      conflictMap.set(key, c);
+    }
+    c.options.push({
+      segment: r.segment_source ?? "",
+      mrp: r.mrp === null ? null : Number(r.mrp),
+    });
+  }
+  const mrpConflicts = Array.from(conflictMap.values());
+
+  // (b) UNMAPPED segments — distinct source segments whose canon is UNMAPPED,
+  //     with the code count per source segment.
+  const unmappedRows = await db.execute<{ segment_source: string; codes: string }>(sql`
+    SELECT segment_source, count(DISTINCT code)::text AS codes
+    FROM item_master_variant
+    WHERE segment_canon = 'UNMAPPED'
+    GROUP BY segment_source
+    ORDER BY segment_source
+  `);
+  const unmappedSegments = unmappedRows.rows.map((r) => ({
+    segment: r.segment_source ?? "",
+    codes: Number(r.codes),
+  }));
+  const unmappedTotalRow = await db.execute<{ codes: string }>(sql`
+    SELECT count(DISTINCT code)::text AS codes
+    FROM item_master_variant
+    WHERE segment_canon = 'UNMAPPED'
+  `);
+  const unmappedCodeTotal = Number(unmappedTotalRow.rows[0]?.codes ?? 0);
+
+  // (c) Register-code gap — resolve every distinct FY code against the master
+  //     using the shared resolver (exact first). Group the unresolved by prefix.
+  const masterRes = await db.execute<{ code: string }>(sql`SELECT code FROM item_master`);
+  const { has, codes } = buildResolverIndex(masterRes.rows.map((r) => r.code));
+  const fyCodesRes = await db.execute<{ code: string }>(
+    sql`SELECT DISTINCT code FROM sale_line WHERE fy = ${fy}`,
+  );
+  const fyCodes = fyCodesRes.rows.map((r) => r.code);
+  const prefixCounts = new Map<string, number>();
+  let totalUnresolved = 0;
+  for (const c of fyCodes) {
+    const r = resolveProductCode(c, has, codes);
+    if (r.method === "unresolved") {
+      totalUnresolved++;
+      const p = familyPrefix(c);
+      prefixCounts.set(p, (prefixCounts.get(p) ?? 0) + 1);
+    }
+  }
+  const prefixes = Array.from(prefixCounts.entries())
+    .map(([prefix, cnt]) => ({ prefix, codes: cnt }))
+    .sort((a, b) => b.codes - a.codes || a.prefix.localeCompare(b.prefix))
+    .slice(0, 10);
+
+  return {
+    mrpConflicts,
+    unmappedSegments,
+    unmappedCodeTotal,
+    registerGap: { totalUnresolved, totalCodes: fyCodes.length, prefixes },
+  };
+}
 
 export async function buildProductReports(
   fy: string,
@@ -81,12 +222,15 @@ export async function buildProductReports(
     }))
     .sort((a, b) => b.amount - a.amount);
 
+  const dataQuality = await buildProductDataQuality(fy);
+
   return {
     fy,
     filtered: hasEntityFilterValues(filter),
     months: months ?? [],
     total: products.reduce((s, p) => s + p.amount, 0),
     products,
+    dataQuality,
   };
 }
 
@@ -126,7 +270,7 @@ router.get("/product-reports", async (req, res) => {
       return;
     }
     const payload = await serveWithSnapshot({
-      key: `product-reports|v1|${fy}`,
+      key: `product-reports|v2|${fy}`,
       ttlMs: PRODUCT_REPORTS_TTL_MS,
       build: () => buildProductReports(fy) as unknown as Promise<Record<string, unknown>>,
       log: req.log,

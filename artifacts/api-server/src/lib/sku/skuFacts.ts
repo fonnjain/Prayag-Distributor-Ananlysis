@@ -161,6 +161,14 @@ export async function getSkuCapability(fy: string): Promise<SkuCapability> {
   const distCount = distRows ? parseInt(distRows.rows[0]?.cnt ?? "0", 10) : 0;
 
   // Direct dealer count
+  // SUPERSEDED (customer-upload load, Aug 2026): `type_raw ILIKE '%direct%'`
+  // silently returns zero because type_raw holds PRODUCT GROUPS, not entity
+  // classes. The authoritative Direct-Dealer / Distributor split now lives in
+  // customer_master.entity_type ('Direct Dealers' / 'Distributors'), keyed by
+  // DIST# id — see GET /api/customer-master/entity-type-counts and the
+  // Customer Data page. This transactional predicate is left in place (not
+  // deleted) for the sale-line breadth denominators; the entity-type
+  // classification is served from the master.
   const ddRows = await db.execute<{ cnt: string }>(sql`
     SELECT COUNT(*)::text AS cnt
     FROM sale_line_current

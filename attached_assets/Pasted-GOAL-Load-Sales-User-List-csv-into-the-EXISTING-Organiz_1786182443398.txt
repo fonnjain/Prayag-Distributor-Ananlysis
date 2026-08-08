@@ -1,0 +1,72 @@
+GOAL
+Load Sales_User_List.csv into the EXISTING Organization page and the EXISTING
+HR roster table.
+
+DUPLICATION RISK - read this first
+The app already reads an HR roster file (hr_roster.csv, 35 columns, 613 rows).
+Sales_User_List.csv is the SAME source refreshed: 33 columns, 609 rows. It is
+missing only "Last Updated By" and "Last Updated On".
+
+Do NOT create a second roster table, a second loader, or a second page.
+Point the existing loader at this file, treat those two columns as optional,
+and report which file is now authoritative. There must be exactly one HR
+source when you are done.
+
+PARSING
+- Encoding is cp1252, not UTF-8.
+- Real CSV parser. Expect 609 data rows, 33 columns. 863 means you split on
+  newlines - fix it.
+- Status values are "Active" and "Deactive" (not Inactive). Expect 179 Active,
+  430 Deactive.
+
+IDENTITY KEY - do not use Employee Code as primary
+Employee Code in this file is unreliable. Measured across the 179 active
+members:
+  117  plausible code (4 digits or fewer)
+   37  other long numeric
+   14  round-number placeholder
+    7  contains "+" characters
+    4  looks like a mobile number
+
+Real values present: 78900000000000000000 (20 digits), 289696+35486,
++589695++++, 5++9565+5+, 9638527410.
+
+Primary key is normSecKey(Name) + ":" + normSecKey(Reporting Manager).
+normSecKey KEEPS parentheticals. Employee Code is a CONFIRMING attribute only,
+used when it is 4 digits or fewer and numeric.
+
+Flag on the Organization page, do not auto-fix:
+- 62 active members whose employee code fails the plausibility test. List them
+  by name so HR can correct at source. They look like mobile numbers or
+  keyboard input in the wrong field.
+- Employee code 5900000000000 held by two different active people: Jijo
+  (Manjeri, reporting to SANOJ M.) and Basit Ahmad Pala (Anantnag, reporting to
+  Nasir Hussain Khan). Two real people sharing a placeholder - keep both.
+- Employee code 940 held by "Balamurugan .V" and "V. Balamurugan", both
+  Deactive, Madurai and Trichy. This looks like ONE person entered twice with
+  the name reversed. Flag for review. Do NOT merge automatically.
+
+THE ASHUTOSH CASE
+The file contains "Ashutosh Kumar (Rudrapur)" (code 5289696934, under Anant
+Singh) and "Ashutosh Kumar" with no parenthetical (code 639, under Sandeep
+Dadheech). These are two different people. The compound name+manager key keeps
+them separate; a name-only key will drop one. Assert both survive the load.
+
+NEVER auto-merge two people on name similarity. Similarity may only suggest;
+a difference in reporting manager, state or headquarter disproves.
+
+WHAT TO SHOW
+Designation is populated for all 179 active. Reporting Manager 93.9%, CTC
+98.9%, Headquarter / Working State / Assigned Segment 100%. Order Type:
+Secondary 124, Both 47, Primary 8. Render these as the roster health panel.
+
+VERIFICATION - paste produced values for all five
+1. Rows parsed (expect 609), Active (expect 179), Deactive (expect 430).
+2. Confirm in one sentence that only ONE HR roster table and ONE loader now
+   exist, and name the file the loader reads.
+3. Print both Ashutosh rows as loaded, with their keys, confirming two
+   distinct records.
+4. Print the count of active members flagged for bad employee code (expect 62)
+   and the first 10 by name.
+5. Print the count of members in the roster whose Reporting Manager does not
+   resolve to another row in the same file. Name them.

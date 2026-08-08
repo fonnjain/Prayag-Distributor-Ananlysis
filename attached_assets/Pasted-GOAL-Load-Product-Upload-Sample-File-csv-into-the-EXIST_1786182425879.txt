@@ -1,0 +1,100 @@
+GOAL
+Load Product_Upload_Sample_File.csv into the EXISTING Products page and the
+EXISTING product master table. Do NOT create a new page, a new table, or a
+parallel catalogue. If a product table already exists, extend or refresh it.
+
+PARSING
+- Encoding is NOT UTF-8. Read as cp1252 (fall back latin-1). A plain UTF-8
+  read fails on byte 0xA0.
+- Use a real CSV parser. Expected result: 6,108 data rows, 6 columns.
+  If you get 6,353 rows you are splitting on newlines - stop and fix.
+
+NATURAL KEY - this is the important part
+The key is (Product Code, UPPER(TRIM(Feature Name))), NOT Product Code alone.
+Feature Name holds the COLOUR or length variant, and price varies by colour.
+Example: code 4012 "ECO Orissa Pan" is White Rs 1,960, Ivory Rs 2,350,
+Blue/Green/Pink Rs 2,450. Those are correct prices, not conflicts.
+
+- Uppercase Feature Name before keying. The file mixes WHITE (341 rows) and
+  White (158), IVORY (318) and Ivory (124).
+- Blank Feature Name is valid - 5,003 rows have no variant. Key it as ''.
+- One cell holds "IVORY,WHITE" (code 453). Split it into two rows.
+
+Expected: 6,108 rows collapse to 6,055 distinct keys.
+
+DEDUPLICATION
+- 50 rows are exact duplicates (same code, same colour, same MRP) across 30
+  keys. Drop the redundant copies.
+- After that, exactly 3 keys carry a genuine MRP conflict - TTS-01, TTS-02,
+  TTS-03 (Teflon tape), each listed under both C.P-CDA and P.T.M.T. SYMET
+  with a Rs 2 difference. Do NOT pick one silently. Load both, flag them as
+  unresolved on the page, and surface them for a business decision.
+
+SEGMENT MAPPING
+The file uses 22 marketing segment names. Map to canonical segments. Store
+BOTH - keep the original as segment_source and add segment_canon. Do not
+overwrite the source value.
+
+  P.T.M.T. SYMET             -> PTMT
+  CISTERNS & SEAT COVERS     -> PTMT
+  C.P-CDA                    -> CP
+  C.P. 5000 SERIES           -> CP
+  C.P. 6000 SERIES           -> CP
+  C.P. 7000 SERIES           -> CP
+  C.P. 8000 SERIES           -> CP
+  C.P. 9000 SERIES           -> CP
+  CPVC DURALIFE              -> CPVC
+  UPVC AQUAFRESH             -> UPVC
+  SWR DRAINTECH              -> SWR
+  AGRITEC                    -> Agri
+  HDPE PIPE                  -> HDPE
+  COLUMN PIPE                -> HDPE
+  P.V.C. GARDEN PIPE         -> Garden Pipe
+  S.STEEL SINK               -> Sink
+  WATER TANKS                -> Water Tank
+  SANITARYWARE               -> Sanitaryware
+  HARDWARE                   -> Hardware
+  MANHOLE COVER              -> UNMAPPED
+  WATER HEATER               -> UNMAPPED
+  COCKROACH TRAPS & GRATINGS -> UNMAPPED
+
+The last three are deliberately UNMAPPED pending a business decision (109
+codes total). Render them on the page as "segment not yet mapped". Do not
+guess a segment for them.
+
+REGISTER JOIN NORMALISATION
+The sale register writes codes differently from this master. Implement a
+resolver used in THIS ORDER - exact first, always:
+
+  1. Exact match on Product Code.
+  2. If the register code is "P" followed by all digits, strip the P.
+     Verified: P6818->6818, P6806, P6875, P6812, P6802 all resolve.
+  3. If the register code ends in a colour letter after an optional space or
+     hyphen (B, G, P, J, W), strip that suffix to get the base code and treat
+     the suffix as the colour. Verified: 7118-B->7118, 4011B, 4011G, 4019-P,
+     4051-B, 4303 J all resolve.
+  4. Collapse internal whitespace. Verified: register Q724MB -> master Q724 MB.
+
+Step 1 MUST run before steps 2 and 3. Codes 130-B, 141-E, 121-E, 129-C are
+legitimate register codes that match exactly; stripping their suffix would
+break them.
+
+KNOWN GAP - report it, do not paper over it
+These families have ZERO codes in this master and are actively selling in the
+Apr-26 register: PTA-, CPCS-, CPA-, CPHF-, PIF-, PFV-, PIS-, PSS-, SNGP-,
+SNBR-. A second product file is needed. On the Products page show a count of
+register codes that fail to resolve, grouped by prefix, so the gap is visible
+and sized.
+
+VERIFICATION - paste produced values for all five
+1. Row count parsed (expect 6,108) and distinct keys after colour keying
+   (expect 6,055). If either differs, stop and report.
+2. Count of rows dropped as exact duplicates (expect 50).
+3. Print the 3 unresolved MRP conflicts as rendered on the page.
+4. Run the register-join resolver over all distinct codes in sale_line for
+   FY2026-27. Print: total distinct codes, resolved exact, resolved by P-strip,
+   resolved by colour-suffix strip, resolved by whitespace, and UNRESOLVED.
+   Then print the top 10 unresolved prefixes with their code counts.
+5. Print the count of codes now carrying an MRP that previously had none, and
+   the FY2026-27 net value those codes represent. This is the size of the gap
+   this file closes.
