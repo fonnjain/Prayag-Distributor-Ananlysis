@@ -113,3 +113,5 @@
 - [Distributor tab head scoping](distributor-tab-head-scope.md) — Secondary/SKU tabs aggregate a head's distributors (registry-guarded); push per-distributor; filtered deep-dive cache + invalidation.
 - [Ratio-based wipe canary](wipe-canary-ratio.md) — activation test canary: rows ≥0.60×, distributors ≥0.70× prior like-month (live denominators); per-month rules catch what totals hide.
 - [FY anchor auto-derivation](fy-anchor-derivation.md) — never hardcode last-complete/open FY; use fyAnchors.ts derivation with grace window + loud failure.
+- [Momentum entity filters](momentum-entity-filter.md) — person→distributor→register-spelling resolution (case trap); filtered payloads skip company-only panels, never cache.
+- [PII attached_assets trap](pii-attached-assets.md) — never `git add -A` with uploads present; PII CSVs were purged once (users list etc.); attached_assets/*.csv is gitignored — keep it that way.
