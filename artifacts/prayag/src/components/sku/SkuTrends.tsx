@@ -345,6 +345,16 @@ export default function SkuTrends({ data }: Props) {
 
       {/* ── Net share shift table ────────────────────────────────────────── */}
       <div>
+        {/* Channel-basis disclosure — FY2024-25 vs FY2025-26 are not like-for-like
+            (one large customer was unattributed in 2024-25 and project in 2025-26).
+            Plain text by request; do not restyle or move below the table. */}
+        <p className="text-xs mb-2">
+          FY2024-25 and FY2025-26 are not on the same channel basis. One
+          customer (net Rs 35.73 Cr in FY2025-26) is classified as project
+          this year and was unattributed last year, so it sits in the
+          FY2024-25 territory total and not in FY2025-26. Year-on-year
+          shifts in this table are not like-for-like. Under review.
+        </p>
         <h3 className="text-sm font-semibold mb-1">
           Net mix shift
           <span className="ml-1.5 text-xs font-normal text-muted-foreground">
