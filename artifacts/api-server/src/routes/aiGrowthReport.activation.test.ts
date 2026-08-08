@@ -20,11 +20,21 @@
 //   small seeded fixture.  Qualifying the table name here as public.secondary_sku_line
 //   bypasses that override without needing a separate pool or connection.
 //
-// ANCHORS (FY 2025-26, the most recent fully-closed FY with secondary_sku_line):
-//   Row count         : ≥10 000 (actual ≈379 000)
-//   Activation query  : ≥40 distributors returned (LIMIT 50; actual saturates at 50)
-//   Range-gap query   : ≥15 distributors below peer median (LIMIT 20; actual saturates at 20)
-//   Range-gap median  : peer_median segment count between 2 and 15 (actual = 5)
+// OPEN-FY WIPE CANARY (ratio-based, replaces the former static floors):
+//   Rule 1  rows(month, openFY)                >= 0.60 * rows(sameMonth, priorFY)   — PER MONTH
+//   Rule 2  rows(completedMonths, openFY)      >= 0.70 * rows(sameMonths, priorFY)  — TOTAL
+//   Rule 3  distinct distributors(month, open) >= 0.70 * distinct distributors(sameMonth, priorFY) — PER MONTH
+//   All denominators are read LIVE from the prior FY's like-months at test time —
+//   never hardcoded, because a prior-year re-sync would silently stale them.
+//   Rules 1 and 3 are per month because Rule 2 alone cannot see a single-month
+//   wipe. A month with zero prior-FY rows is skipped with a console.warn, never
+//   a silent pass.
+//
+//   GRANULARITY LIMIT: secondary_sku_line has no order-date column, so these
+//   checks assert at MONTH granularity only (month_label). A partial wipe
+//   *within* a month is undetectable here. The runtime abort-before-delete
+//   guard in the ingest path can be stricter, because source rows there do
+//   carry dates.
 //
 // GUARD_FY IS DERIVED AUTOMATICALLY — no manual update needed at FY close.
 //   The anchor FY is the newest calendar-closed FY whose secondary_sku_line
@@ -48,17 +58,21 @@ import {
 
 // ── GUARD_FY derivation (shared pattern from src/lib/fyAnchors.ts) ────────────
 
-// Full ingest marker: FY 2025-26 has ≈379 000 rows; ≥10 000 across 12 months
-// gives a large buffer against partial ingests while still catching a wipe.
-const MIN_FULL_INGEST_ROWS = 10_000;
-
-const GUARD_OPTS: DeriveGuardFyOpts = {
-  minRows: MIN_FULL_INGEST_ROWS,
-  sourceLabel: "public.secondary_sku_line",
-};
+// Full-ingest marker is DERIVED from live stats, not hardcoded: an FY counts as
+// fully ingested when it has 12 months and at least half the row count of the
+// largest FY present. This scales with data volume instead of pinning a magic
+// number that a growing (or shrinking) business would silently stale.
+function deriveMinFullIngestRows(stats: FyIngestStats[]): number {
+  const maxRows = Math.max(1, ...stats.map((s) => s.rows));
+  return Math.floor(maxRows / 2);
+}
 
 function deriveGuardFy(stats: FyIngestStats[], now: Date): string {
-  return deriveGuardFyShared(stats, now, GUARD_OPTS);
+  const opts: DeriveGuardFyOpts = {
+    minRows: deriveMinFullIngestRows(stats),
+    sourceLabel: "public.secondary_sku_line",
+  };
+  return deriveGuardFyShared(stats, now, opts);
 }
 
 // Resolved in beforeAll from live DB stats.
@@ -167,6 +181,85 @@ async function runRangeGapQuery(fy: string): Promise<DistRangeGapRow[]> {
   return res.rows;
 }
 
+// ── Open-FY wipe canary (ratio-based) ─────────────────────────────────────────
+
+const RULE1_ROWS_RATIO = 0.6;   // per-month rows vs prior like-month
+const RULE2_TOTAL_RATIO = 0.7;  // completed-month total vs prior like-months
+const RULE3_DIST_RATIO = 0.7;   // per-month distinct distributors vs prior like-month
+
+// Denominators are read LIVE from the prior FY at test time via this query —
+// never hardcoded, so a prior-year re-sync can never stale them.
+export const WIPE_CANARY_STATS_SQL = `
+    SELECT fy,
+           month_label,
+           COUNT(*)::text                                        AS rows,
+           COUNT(DISTINCT NULLIF(TRIM(distributor), ''))::text   AS distributors
+    FROM   public.secondary_sku_line
+    WHERE  fy = ANY($1::text[])
+    GROUP  BY fy, month_label
+`;
+
+export type MonthStat = { rows: number; distributors: number };
+
+/** Month labels of `fy` whose calendar month has fully elapsed before `now`. */
+export function completedMonthLabels(fy: string, now: Date): string[] {
+  const startYear = parseInt(fy.slice(0, 4), 10);
+  return fyMonthLabels(fy).filter((_, i) => {
+    const monthIdx = (3 + i) % 12; // Apr=3 .. Mar=2
+    const year = startYear + (monthIdx < 3 ? 1 : 0);
+    // First instant of the FOLLOWING month must not be in the future.
+    const monthEnd = Date.UTC(year, monthIdx + 1, 1);
+    return monthEnd <= now.getTime();
+  });
+}
+
+/** "Apr-26" → "Apr-25": same month name in the prior FY. */
+export function priorLikeMonth(label: string): string {
+  const [mon, yy] = label.split("-");
+  return `${mon}-${String(parseInt(yy!, 10) - 1).padStart(2, "0")}`;
+}
+
+export function priorFyOf(fy: string): string {
+  const start = parseInt(fy.slice(0, 4), 10) - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
+}
+
+type RuleResult = { label: string; actual: number; floor: number; pass: boolean; skipped: boolean };
+
+/** Rule 1 / Rule 3 per-month evaluation. Zero prior denominator → skipped (warned by caller). */
+export function evalPerMonthRule(
+  label: string,
+  actual: number,
+  priorDenominator: number,
+  ratio: number,
+): RuleResult {
+  if (priorDenominator <= 0) {
+    return { label, actual, floor: 0, pass: true, skipped: true };
+  }
+  const floor = ratio * priorDenominator;
+  return { label, actual, floor, pass: actual >= floor, skipped: false };
+}
+
+/** Rule 2 total evaluation over the completed months. */
+export function evalTotalRule(
+  openTotal: number,
+  priorTotal: number,
+  ratio: number,
+): RuleResult {
+  if (priorTotal <= 0) {
+    return { label: "total", actual: openTotal, floor: 0, pass: true, skipped: true };
+  }
+  const floor = ratio * priorTotal;
+  return { label: "total", actual: openTotal, floor, pass: openTotal >= floor, skipped: false };
+}
+
+// Resolved in beforeAll.
+let OPEN_FY = "";
+let PRIOR_FY = "";
+let COMPLETED_LABELS: string[] = [];
+let openMonthStats = new Map<string, MonthStat>();  // label → stat (open FY)
+let priorMonthStats = new Map<string, MonthStat>(); // label → stat (prior FY)
+
 // ── Cached query results ───────────────────────────────────────────────────────
 // Each SQL query scans ≈379 000 rows; caching in beforeAll keeps total test
 // runtime well under the 60 s vitest timeout.
@@ -195,6 +288,26 @@ beforeAll(async () => {
   FULL_FY_LABELS = fyMonthLabels(GUARD_FY);
   console.log(`[activation guard] anchoring on FY ${GUARD_FY}`);
 
+  // Wipe canary: open FY vs prior FY like-months, denominators read live.
+  const now = new Date(Date.now());
+  const openStart = fyStartYear(now);
+  OPEN_FY = `${openStart}-${String((openStart + 1) % 100).padStart(2, "0")}`;
+  PRIOR_FY = priorFyOf(OPEN_FY);
+  COMPLETED_LABELS = completedMonthLabels(OPEN_FY, now);
+  const canaryRes = await pool.query<{ fy: string; month_label: string; rows: string; distributors: string }>(
+    WIPE_CANARY_STATS_SQL,
+    [[OPEN_FY, PRIOR_FY]],
+  );
+  openMonthStats = new Map();
+  priorMonthStats = new Map();
+  for (const r of canaryRes.rows) {
+    const stat: MonthStat = { rows: parseInt(r.rows, 10), distributors: parseInt(r.distributors, 10) };
+    (r.fy === OPEN_FY ? openMonthStats : priorMonthStats).set(r.month_label, stat);
+  }
+  console.log(
+    `[wipe canary] open FY ${OPEN_FY}, prior FY ${PRIOR_FY}, completed months: ${COMPLETED_LABELS.join(", ")}`,
+  );
+
   // Run sequentially to avoid DB pool contention when the full validation
   // suite is running alongside other test files.  The activation query
   // scans ≈379 000 rows and takes ≈27 s; parallel execution can push the
@@ -212,17 +325,96 @@ beforeAll(async () => {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe("distributor activation guard — live public-schema DB", () => {
-  it("secondary_sku_line has data for GUARD_FY (table not wiped)", () => {
-    // Actual row count for FY 2025-26 is ≈379 000.
-    // ≥10 000 gives a large buffer against partial ingests while still catching a wipe.
-    expect(rowCountN).toBeGreaterThanOrEqual(10_000);
+describe("open-FY wipe canary — ratio floors vs live prior-FY like-months", () => {
+  it("GUARD_FY still has rows (anchor FY not wiped)", () => {
+    // The anchor FY's exact size is asserted implicitly by deriveGuardFy
+    // (it must clear the derived full-ingest threshold to be chosen at all);
+    // here we only assert it is non-empty so the cached queries are meaningful.
+    expect(rowCountN).toBeGreaterThan(0);
   });
 
-  it("activation query returns ≥40 distributors (query saturates at LIMIT 50 with real data)", () => {
-    // The query has LIMIT 50; actual result saturates at 50 (≈241 distributors in DB).
-    // ≥40 is a conservative floor: 0 rows if the table is wiped, ~50 with real data.
-    expect(activationRows.length).toBeGreaterThanOrEqual(40);
+  it("Rule 1: per-month open-FY rows >= 0.60 x prior like-month rows", () => {
+    expect(COMPLETED_LABELS.length).toBeGreaterThan(0);
+    for (const label of COMPLETED_LABELS) {
+      const prior = priorMonthStats.get(priorLikeMonth(label));
+      const open = openMonthStats.get(label);
+      const r = evalPerMonthRule(label, open?.rows ?? 0, prior?.rows ?? 0, RULE1_ROWS_RATIO);
+      if (r.skipped) {
+        console.warn(`[wipe canary] Rule 1 SKIPPED for ${label}: prior like-month ${priorLikeMonth(label)} has zero rows`);
+        continue;
+      }
+      console.log(`[wipe canary] Rule 1 ${label}: actual=${r.actual} floor=${r.floor} (prior ${priorLikeMonth(label)}=${prior!.rows})`);
+      expect(r.actual, `Rule 1 FAILED for ${label}: ${r.actual} < floor ${r.floor}`).toBeGreaterThanOrEqual(r.floor);
+    }
+  });
+
+  it("Rule 2: completed-month open-FY total >= 0.70 x prior like-month total", () => {
+    let openTotal = 0;
+    let priorTotal = 0;
+    for (const label of COMPLETED_LABELS) {
+      openTotal += openMonthStats.get(label)?.rows ?? 0;
+      priorTotal += priorMonthStats.get(priorLikeMonth(label))?.rows ?? 0;
+    }
+    const r = evalTotalRule(openTotal, priorTotal, RULE2_TOTAL_RATIO);
+    if (r.skipped) {
+      console.warn("[wipe canary] Rule 2 SKIPPED: prior FY like-months have zero rows");
+      return;
+    }
+    console.log(`[wipe canary] Rule 2 total: actual=${r.actual} floor=${r.floor} (prior total=${priorTotal})`);
+    expect(r.actual, `Rule 2 FAILED: ${r.actual} < floor ${r.floor}`).toBeGreaterThanOrEqual(r.floor);
+  });
+
+  it("Rule 3: per-month open-FY distinct distributors >= 0.70 x prior like-month", () => {
+    for (const label of COMPLETED_LABELS) {
+      const prior = priorMonthStats.get(priorLikeMonth(label));
+      const open = openMonthStats.get(label);
+      const r = evalPerMonthRule(label, open?.distributors ?? 0, prior?.distributors ?? 0, RULE3_DIST_RATIO);
+      if (r.skipped) {
+        console.warn(`[wipe canary] Rule 3 SKIPPED for ${label}: prior like-month ${priorLikeMonth(label)} has zero distributors`);
+        continue;
+      }
+      console.log(`[wipe canary] Rule 3 ${label}: actual=${r.actual} floor=${r.floor} (prior ${priorLikeMonth(label)}=${prior!.distributors})`);
+      expect(r.actual, `Rule 3 FAILED for ${label}: ${r.actual} < floor ${r.floor}`).toBeGreaterThanOrEqual(r.floor);
+    }
+  });
+
+  it("negative simulation: an Apr wipe fails Rule 1 + Rule 3 for Apr but passes Rule 2", () => {
+    // Filtered row set, nothing deleted: zero out the first completed month in
+    // a COPY of the live stats and re-evaluate. This asymmetry — Rule 2 blind,
+    // Rules 1/3 loud — is the whole justification for the per-month rules.
+    const wipedLabel = COMPLETED_LABELS[0]!;
+    const priorLabel = priorLikeMonth(wipedLabel);
+    const prior = priorMonthStats.get(priorLabel);
+    expect(prior, `prior like-month ${priorLabel} must have data for this simulation`).toBeTruthy();
+
+    const r1 = evalPerMonthRule(wipedLabel, 0, prior!.rows, RULE1_ROWS_RATIO);
+    const r3 = evalPerMonthRule(wipedLabel, 0, prior!.distributors, RULE3_DIST_RATIO);
+    expect(r1.skipped).toBe(false);
+    expect(r1.pass, `Rule 1 must FAIL for wiped ${wipedLabel}`).toBe(false);
+    expect(r3.skipped).toBe(false);
+    expect(r3.pass, `Rule 3 must FAIL for wiped ${wipedLabel}`).toBe(false);
+
+    let openTotal = 0;
+    let priorTotal = 0;
+    for (const label of COMPLETED_LABELS) {
+      openTotal += label === wipedLabel ? 0 : openMonthStats.get(label)?.rows ?? 0;
+      priorTotal += priorMonthStats.get(priorLikeMonth(label))?.rows ?? 0;
+    }
+    const r2 = evalTotalRule(openTotal, priorTotal, RULE2_TOTAL_RATIO);
+    console.log(
+      `[wipe canary] simulation (${wipedLabel} wiped): Rule 1 pass=${r1.pass}, Rule 3 pass=${r3.pass}, ` +
+      `Rule 2 actual=${r2.actual} floor=${r2.floor} pass=${r2.pass}`,
+    );
+    expect(r2.skipped).toBe(false);
+    expect(r2.pass, "Rule 2 alone must NOT catch a single-month wipe (that is why Rules 1/3 exist)").toBe(true);
+  });
+});
+
+describe("distributor activation guard — live public-schema DB", () => {
+  it("activation query returns distributors for GUARD_FY (not empty)", () => {
+    // Numeric wipe detection now lives in the ratio-based canary above; this
+    // only asserts the query still produces rows for the anchor FY.
+    expect(activationRows.length).toBeGreaterThan(0);
   });
 
   it("every returned distributor has retailer_count ≥ 3 (HAVING clause intact)", () => {
@@ -242,10 +434,10 @@ describe("distributor activation guard — live public-schema DB", () => {
 });
 
 describe("distributor range-gap guard — live public-schema DB", () => {
-  it("range-gap query returns ≥15 distributors below peer median (query saturates at LIMIT 20)", () => {
-    // The query has LIMIT 20; actual result saturates at 20 (≈200+ below median in DB).
-    // ≥15 is a conservative floor: 0 rows if the table is wiped, 20 with real data.
-    expect(rangeGapRows.length).toBeGreaterThanOrEqual(15);
+  it("range-gap query returns distributors below peer median (not empty)", () => {
+    // Numeric wipe detection lives in the ratio-based canary; this asserts the
+    // query still produces below-median rows for the anchor FY.
+    expect(rangeGapRows.length).toBeGreaterThan(0);
   });
 
   it("peer_median segment count is within plausible range [2, 15]", () => {
