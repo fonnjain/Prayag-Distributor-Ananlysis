@@ -1,0 +1,45 @@
+Build the ratio-based wipe canary directly in
+artifacts/api-server/src/routes/aiGrowthReport.activation.test.ts, replacing
+the static floors (>=10,000 rows, >=40 distributors, >=15) entirely. No
+fallbacks, no parallel version.
+
+Three rules. All denominators read LIVE from the prior FY's like-months at
+test time — never hardcoded, because a prior-year re-sync would silently
+stale them.
+
+  Rule 1  rows(month, openFY)         >= 0.60 * rows(sameMonth, priorFY)
+  Rule 2  rows(completedMonths, open) >= 0.70 * rows(sameMonths, prior)
+  Rule 3  distinct distributors(month, openFY)
+                                      >= 0.70 * distinct distributors(
+                                                  sameMonth, priorFY)
+
+Rules 1 and 3 are PER MONTH. That is the point — Rule 2 alone cannot see a
+single-month wipe. A month with zero prior-FY rows is skipped with a
+console.warn, never a silent pass.
+
+Record in a header comment: secondary_sku_line has no order-date column, so
+these checks assert at MONTH granularity only. A partial wipe within a month
+is undetectable here. The runtime abort-before-delete guard in the ingest path
+can be stricter, because source rows there do carry dates.
+
+VERIFICATION — and this time I need the commit to resolve.
+
+1. Print the commit hash, then immediately print the output of
+   `git cat-file -t <hash>` and `git log -1 --stat <hash>` for that same hash.
+   If the hash does not resolve, say so and stop.
+2. Print all twelve computed floors and actuals as the test evaluates them:
+   four Rule 1, four Rule 3, one Rule 2. Expected from the baseline —
+   Rule 1 floors 14,156 / 18,534 / 18,904 / 19,214
+   Rule 3 floors 117.6 / 130.2 / 126.0 / 128.8
+   Rule 2 floor 82,611
+   Confirm each against live data rather than restating my numbers.
+3. Print the query that reads the prior-FY denominators.
+4. Negative test, filtered row set, delete nothing: simulate an Apr-26 wipe.
+   Confirm Rule 1 Apr FAILS, Rule 3 Apr FAILS, and Rule 2 PASSES. That
+   asymmetry is the whole justification for the per-month rules.
+5. Confirm the strings 10000, >= 40 and >= 15 no longer appear in the file,
+   with the grep output.
+6. Full verbose test run.
+7. Merge state: is the commit an ancestor of main? Print
+   `git merge-base --is-ancestor <hash> main` and its exit code. If it is not
+   merged, say so plainly — do not describe the work as done.
