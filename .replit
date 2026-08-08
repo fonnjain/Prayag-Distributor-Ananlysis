@@ -69,12 +69,12 @@ outputType = "console"
 name = "type-check-guards"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/api-server exec tsc --noEmit && pnpm --filter @workspace/prayag exec tsc --noEmit"
-
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm run typecheck"
 
 [agent]
 stack = "PNPM_WORKSPACE"
