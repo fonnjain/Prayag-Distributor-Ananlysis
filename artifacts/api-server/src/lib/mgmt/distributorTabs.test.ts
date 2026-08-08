@@ -40,7 +40,8 @@ import {
   buildSkuEvolution,
   buildPushTab,
 } from "./distributorTabs.js";
-import { toPriorYearMonths } from "./distributorDeepDive.js";
+import { toPriorYearMonths, loadDistDdSnapshotOnly } from "./distributorDeepDive.js";
+import { loadDistributorDirectory } from "./distributorDirectory.js";
 
 // ── Directory mock ────────────────────────────────────────────────────────────
 // Hoisted by vitest before any imports so distributorTabs.ts receives the mock
@@ -54,17 +55,38 @@ import { toPriorYearMonths } from "./distributorDeepDive.js";
 // So normKey === raw (preserved exactly).
 vi.mock("./distributorDirectory.js", () => ({
   loadDistributorDirectory: vi.fn().mockResolvedValue({
+    fy: "1900-01",
+    basis: "distributor-own-state",
+    basisLabel: "mock",
+    states: [],
+    heads: [],
     distributors: [
       {
         name: "MOCK TEST DISTRIBUTOR",
         normKey: "MOCK TEST DISTRIBUTOR",
         states: [],
         heads: [],
+        retailerCount: 0,
+        activeCount: 0,
+        orderBooking: 0,
+        sale: 0,
       },
     ],
     builtAt: 0,
   }),
 }));
+
+// ── Deep-dive snapshot mock ───────────────────────────────────────────────────
+// Preserves the real toPriorYearMonths and prevFyLabel implementations so the
+// existing section 4 tests continue to work.  loadDistDdSnapshotOnly is stubbed
+// to null by default; individual describe blocks override it as needed.
+vi.mock("./distributorDeepDive.js", async (importActual) => {
+  const actual = await importActual<typeof import("./distributorDeepDive.js")>();
+  return {
+    ...actual,
+    loadDistDdSnapshotOnly: vi.fn().mockResolvedValue(null),
+  };
+});
 
 // ── Test fixtures ─────────────────────────────────────────────────────────────
 const SCHEMA = "dashboard_test";
@@ -482,5 +504,222 @@ describe("buildPushTab — dormant-retailer prior-year month scoping", () => {
     const names = result.coverage.dormantRetailers.map((r) => r.name);
     expect(names).toContain("RETAILER-C");
     expect(names).not.toContain("RETAILER-A");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 5. buildPushTab — unassignedByMember FULL-FY INVARIANT
+//
+//    unassignedByMember is sourced from the deep-dive snapshot (loadDistDdSnapshotOnly),
+//    which carries no month dimension.  Selecting a period must NOT change these
+//    counts — they always reflect the full FY state of the member working sheets.
+//
+//    Two specific contracts are guarded:
+//      a) The unassignedByMember array is identical (same members, same counts)
+//         whether months is null or a specific selection — because the snapshot
+//         read is unconditional (no monthCond applied to snapshot lookup).
+//      b) coverage.note explicitly states the full-FY caveat when a period is
+//         selected, so the UI always has the opportunity to surface it.
+//
+//    The mock snapshot carries exactly ONE member ("MOCK MEMBER") with
+//    noneCount=7 for the TEST_DIST distributor.  That value must appear
+//    unchanged in both the filtered and unfiltered calls.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Minimal DistributorDeepDiveResult shape (only the fields consumed by buildPushTab).
+const MOCK_MEMBER_NAME = "MOCK MEMBER";
+const MOCK_MEMBER_NONE_COUNT = 7;
+const MOCK_SNAPSHOT = {
+  fy: CUR_FY,
+  stateHeads: ["MOCK HEAD"],
+  distributors: [
+    {
+      normKey: TEST_DIST,
+      name: TEST_DIST,
+      retailerCount: 10,
+      activeCount: 8,
+      dormantCount: 2,
+      orderBooking: 0,
+      sale: 0,
+      visits: null,
+      obSharePct: null,
+      isConcentrationRisk: false,
+      confirmedCount: 10,
+      guessedCount: 0,
+      flows: null,
+      retailers: [
+        {
+          name: "RETAILER-X",
+          memberName: MOCK_MEMBER_NAME,
+          district: "MOCK DISTRICT",
+          orderBooking: 0,
+          sale: 0,
+          visits: null,
+          isActive: true,
+          confirmedHead: true,
+        },
+      ],
+    },
+  ],
+  perMember: [
+    {
+      name: MOCK_MEMBER_NAME,
+      normKey: "MOCK MEMBER",
+      state: "MOCK STATE",
+      isLeft: false,
+      totalRetailers: 20,
+      removedCount: 0,
+      namedCount: 13,
+      noneCount: MOCK_MEMBER_NONE_COUNT,
+      blankCount: 0,
+      sharedCount: 0,
+      blankOb: 0,
+      noneSharePct: 35,
+      namedActivePct: 80,
+      noneActivePct: 40,
+      noneVisits: null,
+      noneVisitSharePct: null,
+      achievementTotal: null,
+    },
+  ],
+  sharedRetailers: [],
+  directDealer: null,
+  noneAssigned: null,
+  mappingQuality: null,
+  partyObTotal: 0,
+  membersLoaded: 1,
+  membersNotMapped: 0,
+  membersFailed: 0,
+  whitespace: null,
+  concentration: null,
+  capacityCheck: null,
+  byState: [],
+  unassignedCorrelation: null,
+  namingCandidates: [],
+  error: null,
+} as any;
+
+describe("buildPushTab — unassignedByMember is always full-FY (snapshot-sourced)", () => {
+  // Before each test in this block: give the mock distributor a head so that
+  // buildPushTab actually calls loadDistDdSnapshotOnly, and configure the
+  // snapshot mock to return the controlled data above.
+  beforeAll(() => {
+    vi.mocked(loadDistributorDirectory).mockResolvedValue({
+      fy: CUR_FY,
+      basis: "distributor-own-state",
+      basisLabel: "mock",
+      states: [],
+      heads: [],
+      distributors: [
+        {
+          name: TEST_DIST,
+          normKey: TEST_DIST,
+          states: [],
+          heads: ["MOCK HEAD"],
+          retailerCount: 0,
+          activeCount: 0,
+          orderBooking: 0,
+          sale: 0,
+        },
+      ],
+      builtAt: 0,
+    });
+    vi.mocked(loadDistDdSnapshotOnly).mockResolvedValue(MOCK_SNAPSHOT);
+  });
+
+  // Restore the defaults after this block so later tests (if any) are unaffected.
+  afterAll(() => {
+    vi.mocked(loadDistributorDirectory).mockResolvedValue({
+      fy: CUR_FY,
+      basis: "distributor-own-state",
+      basisLabel: "mock",
+      states: [],
+      heads: [],
+      distributors: [
+        {
+          name: TEST_DIST,
+          normKey: TEST_DIST,
+          states: [],
+          heads: [],
+          retailerCount: 0,
+          activeCount: 0,
+          orderBooking: 0,
+          sale: 0,
+        },
+      ],
+      builtAt: 0,
+    });
+    vi.mocked(loadDistDdSnapshotOnly).mockResolvedValue(null);
+  });
+
+  it("unassignedByMember carries the mock member's noneCount from the snapshot", async () => {
+    // Verify the snapshot mock is wired correctly: the member must appear with
+    // the expected unassigned count regardless of period.
+    const result = await buildPushTab(CUR_FY, TEST_DIST, null);
+    const entry = result.coverage.unassignedByMember.find(
+      (u) => u.member === MOCK_MEMBER_NAME,
+    );
+    expect(entry).toBeDefined();
+    expect(entry!.unassigned).toBe(MOCK_MEMBER_NONE_COUNT);
+  });
+
+  it("unassignedByMember count is identical when a period is selected vs full FY", async () => {
+    // Core invariant: the snapshot read has no month dimension.  Adding a period
+    // filter must not change the unassigned counts.
+    const [filtered, unfiltered] = await Promise.all([
+      buildPushTab(CUR_FY, TEST_DIST, ["Apr-26", "May-26"]),
+      buildPushTab(CUR_FY, TEST_DIST, null),
+    ]);
+    expect(filtered.coverage.unassignedByMember).toEqual(
+      unfiltered.coverage.unassignedByMember,
+    );
+  });
+
+  it("unassigned count does not change across different period selections", async () => {
+    // A different period selection (single month vs two months vs three months)
+    // must all yield the same snapshot-derived count.
+    const [rApr, rQ1, rNull] = await Promise.all([
+      buildPushTab(CUR_FY, TEST_DIST, ["Apr-26"]),
+      buildPushTab(CUR_FY, TEST_DIST, ["Apr-26", "May-26", "Jun-26"]),
+      buildPushTab(CUR_FY, TEST_DIST, null),
+    ]);
+    const countFor = (r: typeof rNull) =>
+      r.coverage.unassignedByMember.find((u) => u.member === MOCK_MEMBER_NAME)
+        ?.unassigned ?? null;
+
+    expect(countFor(rApr)).toBe(MOCK_MEMBER_NONE_COUNT);
+    expect(countFor(rQ1)).toBe(MOCK_MEMBER_NONE_COUNT);
+    expect(countFor(rNull)).toBe(MOCK_MEMBER_NONE_COUNT);
+  });
+
+  it("coverage.note mentions full-FY caveat when a period is selected", async () => {
+    // The note must surface the caveat so the UI has the text to display.
+    // If someone removes the conditional note or changes its wording to omit
+    // this key phrase, this test fails and alerts the author.
+    const result = await buildPushTab(CUR_FY, TEST_DIST, ["Apr-26", "May-26"]);
+    expect(result.coverage.note).toContain("full FY regardless of the selected period");
+  });
+
+  it("coverage.note does not contain the full-FY caveat when no period is selected", async () => {
+    // When months=null the caveat is unnecessary (the figures ARE full-FY),
+    // so the note should not prepend the clarifying sentence.
+    const result = await buildPushTab(CUR_FY, TEST_DIST, null);
+    expect(result.coverage.note).not.toContain("full FY regardless of the selected period");
+  });
+
+  it("loadDistDdSnapshotOnly is called with (fy, head) and not with any months arg", async () => {
+    // Structural guard: the snapshot loader must never receive a months parameter.
+    // If someone adds monthCond to the snapshot lookup, the call signature changes
+    // and loadDistDdSnapshotOnly would need to accept months — which would break
+    // the full-FY guarantee.  Checking the call args here catches that drift.
+    vi.mocked(loadDistDdSnapshotOnly).mockClear();
+    await buildPushTab(CUR_FY, TEST_DIST, ["Apr-26", "May-26"]);
+    expect(vi.mocked(loadDistDdSnapshotOnly)).toHaveBeenCalledWith(CUR_FY, "MOCK HEAD");
+    // Called with exactly 2 arguments — no months sneaked in as a third arg.
+    const calls = vi.mocked(loadDistDdSnapshotOnly).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const args of calls) {
+      expect(args).toHaveLength(2);
+    }
   });
 });
