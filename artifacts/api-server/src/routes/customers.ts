@@ -35,6 +35,7 @@ import {
 import { parseJsonArray } from "./companyReports.js";
 import { computeAllMultipliers } from "../lib/customers/laspeyres.js";
 import { getSplit } from "../lib/headSplits.js";
+import { currentOpenFy, deriveSaleLineCohortFy } from "../lib/fyAnchors.js";
 import {
   listSchemes,
   getScheme,
@@ -624,8 +625,8 @@ router.get("/customers/export", async (req, res) => {
 // ── Distributor scheme-risk ────────────────────────────────────────────────────
 
 router.get("/customers/distributor-risk", async (req, res) => {
-  const fyCy = typeof req.query.fyCy === "string" ? req.query.fyCy : "2026-27";
-  const fyLy = typeof req.query.fyLy === "string" ? req.query.fyLy : "2025-26";
+  const fyCy = typeof req.query.fyCy === "string" ? req.query.fyCy : currentOpenFy();
+  const fyLy = typeof req.query.fyLy === "string" ? req.query.fyLy : await deriveSaleLineCohortFy();
   ensureRegisterSynced(fyCy);
   ensureRegisterSynced(fyLy);
   const monthsCy = parseMonthList(req.query.monthsCy);

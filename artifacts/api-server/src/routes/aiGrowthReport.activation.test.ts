@@ -37,83 +37,28 @@
 
 import { beforeAll, describe, it, expect } from "vitest";
 import { pool } from "@workspace/db";
+import {
+  deriveGuardFy as deriveGuardFyShared,
+  fyMonthLabels,
+  fyStartYear,
+  newestClosedFy,
+  type FyIngestStats,
+  type DeriveGuardFyOpts,
+} from "../lib/fyAnchors.js";
 
-// ── GUARD_FY derivation (pure helpers, unit-tested below) ─────────────────────
+// ── GUARD_FY derivation (shared pattern from src/lib/fyAnchors.ts) ────────────
 
 // Full ingest marker: FY 2025-26 has ≈379 000 rows; ≥10 000 across 12 months
 // gives a large buffer against partial ingests while still catching a wipe.
 const MIN_FULL_INGEST_ROWS = 10_000;
-// After an FY closes (March 31), nightly ingests may take a while to finish
-// loading its final months. Within this window the guard tolerates anchoring
-// on the prior FY; after it, a missing/partial newest-closed FY is a failure.
-const GRACE_DAYS_AFTER_FY_CLOSE = 90;
 
-/** "2025-26" for a start year of 2025. */
-function fyLabel(startYear: number): string {
-  return `${startYear}-${String((startYear + 1) % 100).padStart(2, "0")}`;
-}
+const GUARD_OPTS: DeriveGuardFyOpts = {
+  minRows: MIN_FULL_INGEST_ROWS,
+  sourceLabel: "public.secondary_sku_line",
+};
 
-/** Fiscal-year start year for a date (fiscal year runs April–March). */
-function fyStartYear(now: Date): number {
-  return now.getUTCMonth() >= 3 ? now.getUTCFullYear() : now.getUTCFullYear() - 1;
-}
-
-/** The newest FY that is calendar-closed (its March 31 end has passed). */
-export function newestClosedFy(now: Date): string {
-  return fyLabel(fyStartYear(now) - 1);
-}
-
-/** Prior FY label: "2025-26" → "2024-25". */
-export function priorFy(fy: string): string {
-  return fyLabel(parseInt(fy.slice(0, 4), 10) - 1);
-}
-
-/** End instant of an FY's grace window: March 31 of end year + grace days. */
-export function fyGraceDeadline(fy: string): Date {
-  const startYear = parseInt(fy.slice(0, 4), 10);
-  const end = Date.UTC(startYear + 1, 2, 31); // March 31
-  return new Date(end + GRACE_DAYS_AFTER_FY_CLOSE * 24 * 3600 * 1000);
-}
-
-/** Month labels "Apr-25" … "Mar-26" for fy "2025-26". */
-export function fyMonthLabels(fy: string): string[] {
-  const startYear = parseInt(fy.slice(0, 4), 10);
-  const names = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
-  return names.map((name, i) => {
-    const year = i < 9 ? startYear : startYear + 1;
-    return `${name}-${String(year % 100).padStart(2, "0")}`;
-  });
-}
-
-export type FyIngestStats = { fy: string; rows: number; months: number };
-
-/**
- * Pick the guard anchor FY from per-FY ingest stats.
- * Walks back from the newest calendar-closed FY to the first FY whose ingest
- * looks complete. Throws (fails the whole guard) if the newest closed FY is
- * still not fully ingested after its grace window — that is exactly the
- * "anchor silently pinned to old data" condition this guard must catch.
- */
-export function deriveGuardFy(stats: FyIngestStats[], now: Date): string {
-  const byFy = new Map(stats.map((s) => [s.fy, s]));
-  const isComplete = (fy: string) => {
-    const s = byFy.get(fy);
-    return s != null && s.rows >= MIN_FULL_INGEST_ROWS && s.months >= 12;
-  };
-  let fy = newestClosedFy(now);
-  for (let hops = 0; hops < 10; hops++, fy = priorFy(fy)) {
-    if (isComplete(fy)) return fy;
-    if (now.getTime() > fyGraceDeadline(fy).getTime() && hops === 0) {
-      const s = byFy.get(fy);
-      throw new Error(
-        `GUARD anchor stale: FY ${fy} closed more than ${GRACE_DAYS_AFTER_FY_CLOSE} days ago but its ` +
-        `secondary_sku_line ingest is incomplete (rows=${s?.rows ?? 0}, months=${s?.months ?? 0}; ` +
-        `need ≥${MIN_FULL_INGEST_ROWS} rows across 12 months). Finish ingesting FY ${fy} — the guard ` +
-        `refuses to keep anchoring on an older FY.`,
-      );
-    }
-  }
-  throw new Error("GUARD anchor: no fully-ingested closed FY found in public.secondary_sku_line");
+function deriveGuardFy(stats: FyIngestStats[], now: Date): string {
+  return deriveGuardFyShared(stats, now, GUARD_OPTS);
 }
 
 // Resolved in beforeAll from live DB stats.
@@ -356,13 +301,13 @@ describe("GUARD_FY derivation", () => {
   it("fails loudly when the newest closed FY is still incomplete after the grace window", () => {
     const now = new Date(Date.UTC(2027, 7, 1)); // Aug 2027, grace long over
     expect(() => deriveGuardFy([full("2025-26"), { fy: "2026-27", rows: 500, months: 2 }], now))
-      .toThrow(/GUARD anchor stale: FY 2026-27/);
+      .toThrow(/FY anchor stale: FY 2026-27/);
   });
 
   it("does not treat a 12-month FY with too few rows as complete", () => {
     const now = new Date(Date.UTC(2027, 7, 1));
     expect(() => deriveGuardFy([full("2025-26"), { fy: "2026-27", rows: 9_000, months: 12 }], now))
-      .toThrow(/GUARD anchor stale/);
+      .toThrow(/FY anchor stale/);
   });
 
   it("resolved live GUARD_FY is a calendar-closed FY with 12 derived month labels", () => {

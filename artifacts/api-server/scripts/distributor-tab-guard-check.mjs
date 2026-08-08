@@ -25,6 +25,27 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+// ── Open FY derived from the clock (fiscal year runs April–March) ────────────
+// Never hardcode the open FY: when a new FY starts, a hardcoded year would
+// silently keep exercising last year's data paths.
+const _now = new Date();
+const _fyStart = _now.getUTCMonth() >= 3 ? _now.getUTCFullYear() : _now.getUTCFullYear() - 1;
+const OPEN_FY = `${_fyStart}-${String((_fyStart + 1) % 100).padStart(2, "0")}`;
+const FY_M1 = `Apr-${String(_fyStart % 100).padStart(2, "0")}`; // first month label of the open FY
+const FY_M2 = `May-${String(_fyStart % 100).padStart(2, "0")}`;
+// Prior-year baseline labels: same month names, one calendar year back
+// (mirrors toPriorYearMonths on the server).
+const toPriorYear = (label) => {
+  const [name, yy] = label.split("-");
+  return `${name}-${String((Number(yy) + 99) % 100).padStart(2, "0")}`;
+};
+// Self-check the derivation so a rollover regression fails here, not in CI noise.
+if (toPriorYear("Apr-26") !== "Apr-25" || toPriorYear("Jan-00") !== "Jan-99") {
+  console.error("FAIL  toPriorYear month derivation self-check");
+  process.exit(1);
+}
+
+
 const REQUEST_TIMEOUT_MS = Number(process.env.GUARD_REQUEST_TIMEOUT_MS ?? 120000);
 // Short timeout for validation-only probes that need no data load.
 const VALIDATION_TIMEOUT_MS = Math.min(REQUEST_TIMEOUT_MS, 30000);
@@ -156,7 +177,7 @@ console.log(`\nDistributor-tab guard checks against ${base}\n`);
 // ── 1. Invalid months token → 400 ────────────────────────────────────────────
 {
   const r = await safeFetch(
-    `${base}/mgmt/distributor-tab?fy=2026-27&dist=some-key&tab=secondary&months=invalid-token`,
+    `${base}/mgmt/distributor-tab?fy=${OPEN_FY}&dist=some-key&tab=secondary&months=invalid-token`,
     {}, VALIDATION_TIMEOUT_MS,
   );
   check("invalid months token returns HTTP 400", r.status === 400, `status=${r.status}`);
@@ -170,7 +191,7 @@ console.log(`\nDistributor-tab guard checks against ${base}\n`);
 // ── 2. Mixed valid/invalid tokens → 400 ──────────────────────────────────────
 {
   const r = await safeFetch(
-    `${base}/mgmt/distributor-tab?fy=2026-27&dist=some-key&tab=secondary&months=Apr-26,bad`,
+    `${base}/mgmt/distributor-tab?fy=${OPEN_FY}&dist=some-key&tab=secondary&months=${FY_M1},bad`,
     {}, VALIDATION_TIMEOUT_MS,
   );
   check("one invalid token in comma-separated list returns HTTP 400",
@@ -180,7 +201,7 @@ console.log(`\nDistributor-tab guard checks against ${base}\n`);
 // ── 3. Missing dist → 400 ────────────────────────────────────────────────────
 {
   const r = await safeFetch(
-    `${base}/mgmt/distributor-tab?fy=2026-27&tab=secondary`,
+    `${base}/mgmt/distributor-tab?fy=${OPEN_FY}&tab=secondary`,
     {}, VALIDATION_TIMEOUT_MS,
   );
   check("missing dist returns HTTP 400", r.status === 400, `status=${r.status}`);
@@ -189,7 +210,7 @@ console.log(`\nDistributor-tab guard checks against ${base}\n`);
 // ── 4. Invalid tab → 400 ─────────────────────────────────────────────────────
 {
   const r = await safeFetch(
-    `${base}/mgmt/distributor-tab?fy=2026-27&dist=some-key&tab=unknown`,
+    `${base}/mgmt/distributor-tab?fy=${OPEN_FY}&dist=some-key&tab=unknown`,
     {}, VALIDATION_TIMEOUT_MS,
   );
   check("invalid tab value returns HTTP 400", r.status === 400, `status=${r.status}`);
@@ -211,7 +232,7 @@ let distKey = process.env.GUARD_DIST_KEY ?? null;
 let liveChecksSkipped = false;
 if (!distKey) {
   // Fetch the directory to find a real distributor key.
-  const dirRes = await safeFetch(`${base}/mgmt/distributor-directory?fy=2026-27`);
+  const dirRes = await safeFetch(`${base}/mgmt/distributor-directory?fy=${OPEN_FY}`);
   if (!dirRes.ok || dirRes._error) {
     const reason = dirRes._error
       ? `request error: ${dirRes._error}`
@@ -236,12 +257,12 @@ if (!distKey) {
 }
 
 if (distKey) {
-  const selectedMonths = ["Apr-26", "May-26"];
+  const selectedMonths = [FY_M1, FY_M2];
   const encKey = encodeURIComponent(distKey);
 
   const [unfRes, filtRes] = await Promise.all([
-    safeFetch(`${base}/mgmt/distributor-tab?fy=2026-27&dist=${encKey}&tab=secondary`),
-    safeFetch(`${base}/mgmt/distributor-tab?fy=2026-27&dist=${encKey}&tab=secondary&months=${selectedMonths.join(",")}`),
+    safeFetch(`${base}/mgmt/distributor-tab?fy=${OPEN_FY}&dist=${encKey}&tab=secondary`),
+    safeFetch(`${base}/mgmt/distributor-tab?fy=${OPEN_FY}&dist=${encKey}&tab=secondary&months=${selectedMonths.join(",")}`),
   ]);
 
   if (!unfRes.ok || !filtRes.ok) {
@@ -275,10 +296,10 @@ if (distKey) {
   }
 
   // 8. SKU tab: baselineMonths = toPriorYearMonths(selection).
-  const skuMonths = "Apr-26,May-26";
-  const expectedBase = ["Apr-25", "May-25"];
+  const skuMonths = `${FY_M1},${FY_M2}`;
+  const expectedBase = [FY_M1, FY_M2].map(toPriorYear);
   const skuRes = await safeFetch(
-    `${base}/mgmt/distributor-tab?fy=2026-27&dist=${encKey}&tab=sku&months=${skuMonths}`,
+    `${base}/mgmt/distributor-tab?fy=${OPEN_FY}&dist=${encKey}&tab=sku&months=${skuMonths}`,
   );
   if (!skuRes.ok) {
     console.log(`  SKIP  SKU baseline check (sku tab returned ${skuRes.status} for '${distKey}')`);
@@ -304,7 +325,7 @@ if (distKey) {
 // tests in src/lib/mgmt/distributorTabs.test.ts.
 {
   const r = await safeFetch(
-    `${base}/mgmt/distributor-tab?fy=2026-27&dist=some-key&tab=push&months=invalid-token`,
+    `${base}/mgmt/distributor-tab?fy=${OPEN_FY}&dist=some-key&tab=push&months=invalid-token`,
     {}, VALIDATION_TIMEOUT_MS,
   );
   check("push tab: invalid months token returns HTTP 400", r.status === 400, `status=${r.status}`);

@@ -25,6 +25,16 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+// ── Open FY derived from the clock (fiscal year runs April–March) ────────────
+// Never hardcode the open FY: when a new FY starts, a hardcoded year would
+// silently keep exercising last year's data paths.
+const _now = new Date();
+const _fyStart = _now.getUTCMonth() >= 3 ? _now.getUTCFullYear() : _now.getUTCFullYear() - 1;
+const OPEN_FY = `${_fyStart}-${String((_fyStart + 1) % 100).padStart(2, "0")}`;
+const FY_M1 = `Apr-${String(_fyStart % 100).padStart(2, "0")}`; // first month label of the open FY
+const FY_M2 = `May-${String(_fyStart % 100).padStart(2, "0")}`;
+
+
 // Every request is bounded — a validation step must terminate deterministically.
 const REQUEST_TIMEOUT_MS = Number(process.env.GUARD_REQUEST_TIMEOUT_MS ?? 120000);
 const bounded = (url, init = {}) => fetch(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
@@ -137,7 +147,7 @@ function cell(json, measure, entity) {
   const { status, json } = await post({
     entityType: "member",
     entities: ["Ravi (Faridabad)"],
-    periods: [{ kind: "ytd", fy: "2026-27" }],
+    periods: [{ kind: "ytd", fy: OPEN_FY }],
     measures: ["costRatioOb", "costRatioSales"],
   });
   check("ravi request returns 200", status === 200, `status=${status} body=${JSON.stringify(json).slice(0, 300)}`);
@@ -160,7 +170,7 @@ function cell(json, measure, entity) {
   const { status, json } = await post({
     entityType: "member",
     entities: ["Rahul Singh"],
-    periods: [{ kind: "ytd", fy: "2026-27" }],
+    periods: [{ kind: "ytd", fy: OPEN_FY }],
     measures: ["newCustomersCount"],
   });
   check("period-pair request returns 200", status === 200, `status=${status}`);
@@ -184,7 +194,7 @@ function cell(json, measure, entity) {
   const { status, json } = await post({
     entityType: "head",
     entities: [FIXTURE_HEAD],
-    periods: [{ kind: "ytd", fy: "2026-27" }],
+    periods: [{ kind: "ytd", fy: OPEN_FY }],
     measures: ["activeRetailerShare"], // memberOnly measure
   });
   check("head + member-only measure returns 400", status === 400, `status=${status} body=${JSON.stringify(json).slice(0, 300)}`);
@@ -204,7 +214,7 @@ function cell(json, measure, entity) {
   const r2 = await post({
     entityType: "head",
     entities: [FIXTURE_HEAD],
-    periods: [{ kind: "ytd", fy: "2026-27" }],
+    periods: [{ kind: "ytd", fy: OPEN_FY }],
     measures: ["costRatioOb"],
   });
   check("fixture-head costRatioOb request returns 200", r2.status === 200, `status=${r2.status} body=${JSON.stringify(r2.json).slice(0, 300)}`);
@@ -234,7 +244,7 @@ function cell(json, measure, entity) {
     const rm = await post({
       entityType: "member",
       entities: teamNames,
-      periods: [{ kind: "ytd", fy: "2026-27" }],
+      periods: [{ kind: "ytd", fy: OPEN_FY }],
       measures: ["costRatioOb", "secondaryOb"],
       context: { stateHead: FIXTURE_HEAD },
     });

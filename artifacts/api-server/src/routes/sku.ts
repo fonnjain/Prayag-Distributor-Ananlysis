@@ -59,6 +59,7 @@ import {
   type EntityFilter,
 } from "../lib/saleLineFilter.js";
 import { parseJsonArray } from "./companyReports.js";
+import { deriveSaleLineCohortFy } from "../lib/fyAnchors.js";
 
 const router = Router();
 
@@ -865,7 +866,7 @@ router.get("/sku/breadth-trend", async (req: Request, res: Response): Promise<vo
   const latestFy =
     typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
       ? req.query.fy.trim()
-      : "2025-26";
+      : await deriveSaleLineCohortFy();
   const priorFy = prevFy(latestFy);
   try {
     res.json(await getBreadthTrend(latestFy, priorFy, monthNamesParam(req)));

@@ -5,7 +5,7 @@
  * peer distributors are CURRENTLY buying but the target is not.
  *
  * Cohort rules (per user spec):
- *  - Cohort size / quintile defined on COHORT_FY (last complete FY = 2025-26).
+ *  - Cohort size / quintile defined on COHORT_FY (last complete FY, auto-derived).
  *    Using the open FY for cohort membership would be circular.
  *  - Quintile computed within target's state (head_canon).
  *    If state has < MIN_STATE_DISTRIBUTORS, widen to national quintile.
@@ -30,8 +30,12 @@ import type { SkuLevel } from "./skuFacts.js";
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 import { normaliseStateCanon, stateVariants, STATE_CANON_NORMALISE } from "../stateCanon.js";
+import { deriveSaleLineCohortFy } from "../fyAnchors.js";
 
-const COHORT_FY = "2025-26";
+// COHORT_FY (the last complete FY) is derived at runtime from sale_line_current
+// ingest stats via deriveSaleLineCohortFy() — newest fully-ingested closed FY,
+// with a grace window after FY close and a loud failure if the newly closed FY
+// is not ingested in time. Never hardcode it here.
 const MIN_STATE_DISTRIBUTORS = 8;
 const MIN_PEERS_PER_CODE = 3;
 const TOP_CODES_PER_SEGMENT = 10;
@@ -210,6 +214,7 @@ export async function getDistributorList(
   activeFy: string,
   level: SkuLevel,
 ): Promise<DistributorListItem[]> {
+  const COHORT_FY = await deriveSaleLineCohortFy();
   const levelFilter = buildLevelFilter(level);
 
   // ── 1. Active distributors: bought ≥1 order in the selected FY ──────────────
@@ -325,6 +330,7 @@ export async function getSkuPushList(
   params: PushListParams,
 ): Promise<PushListResult> {
   const { fy, monthLabels, level, distributorKey } = params;
+  const COHORT_FY = await deriveSaleLineCohortFy();
   const levelFilter = buildLevelFilter(level);
 
   // ── 1. Build cohort from COHORT_FY ─────────────────────────────────────────

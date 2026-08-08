@@ -33,8 +33,13 @@ import { sql } from "drizzle-orm";
 import { PROJECT_HEAD_CANON } from "./catalogue.js";
 import { SKU_SHEET_IDS, secondarySkuFyHasData, getSecondarySkuFyPeriodLabel } from "../secondary/skuLoader.js";
 import { logger } from "../logger.js";
+import { deriveSaleLineClosedFys, currentOpenFy } from "../fyAnchors.js";
 
-const CLOSED_FYS = ["2023-24", "2024-25", "2025-26"];
+// Closed-FY list is derived at runtime from sale_line_current ingest stats
+// (all fully-ingested calendar-closed FYs, ascending), with a grace window
+// after FY close and a loud failure if the newly closed FY is not ingested
+// in time. Never hardcode it here.
+const getClosedFys = deriveSaleLineClosedFys;
 const FY_MONTHS = [
   "Apr", "May", "Jun", "Jul", "Aug", "Sep",
   "Oct", "Nov", "Dec", "Jan", "Feb", "Mar",
@@ -431,6 +436,7 @@ export async function getSeasonality(
   head?: string,
 ): Promise<SeasonalityResult> {
   return cached(`seasonality:${channel}:${head ?? ""}`, async () => {
+    const CLOSED_FYS = await getClosedFys();
     const chanFilter =
       channel === "territory" ? territoryFilterSql(await getProjectCustomerSet()) : sql`TRUE`;
     // Optional state-head scope: sale_line.head_canon carries the state head.
@@ -550,6 +556,7 @@ export async function getDiscountNormFlags(
 ): Promise<Map<string, DiscountNormFlag>> {
   const out = new Map<string, DiscountNormFlag>();
   if (codes.length === 0) return out;
+  const CLOSED_FYS = await getClosedFys();
   const projSet = await getProjectCustomerSet();
   const terr = territoryFilterSql(projSet);
   const codeList = sql.join(codes.map((c) => sql`${c}`), sql`, `);
@@ -626,6 +633,7 @@ export async function getBreadthTrend(
     ? sql`AND split_part(month_label, '-', 1) IN (${sql.join(mn.map((m) => sql`${m}`), sql`, `)})`
     : sql``;
   return cached(`breadth:${latestFy}:${priorFy}:${mn ? mn.join(",") : "all"}`, async () => {
+    const CLOSED_FYS = await getClosedFys();
     const projSet = await getProjectCustomerSet();
     const terr = territoryFilterSql(projSet);
 
@@ -678,7 +686,7 @@ export async function getBreadthTrend(
       .slice(0, 50);
 
     return {
-      fys: [...CLOSED_FYS, "2026-27"],
+      fys: [...CLOSED_FYS, currentOpenFy()],
       compared: { latestFy, priorFy },
       narrowers,
       projectExclusion: projectExclusionMeta(projSet),
@@ -847,22 +855,23 @@ export async function getBlockedCapabilities(): Promise<BlockedResult> {
           : `cost_master has ${n} rows but has not been verified as a genuine cost source.`,
     },
     liveYearRetailer: await (async () => {
+      const openFy = currentOpenFy();
       const [has, periodLabel] = await Promise.all([
-        secondarySkuFyHasData("2026-27"),
-        getSecondarySkuFyPeriodLabel("2026-27"),
+        secondarySkuFyHasData(openFy),
+        getSecondarySkuFyPeriodLabel(openFy),
       ]);
       return has
         ? {
             blocked: false,
             reason:
-              `FY2026-27 secondary register loaded from the PSCode_3 xlsx drop (${periodLabel ?? "partial period"}). ` +
+              `FY${openFy} secondary register loaded from the PSCode_3 xlsx drop (${periodLabel ?? "partial period"}). ` +
               "Retailer SKU activity and secondary discount are computable for the covered months; " +
               "coverage extends only when a fresh export is loaded.",
           }
         : {
             blocked: true,
             reason:
-              "No FY2026-27 secondary register exists — retailer SKU activity and secondary discount are not computable for the live year.",
+              `No FY${openFy} secondary register exists — retailer SKU activity and secondary discount are not computable for the live year.`,
           };
     })(),
   };

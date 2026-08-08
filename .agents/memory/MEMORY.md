@@ -111,3 +111,4 @@
 - [Comparison guard validation](comparison-guard-validation.md) — validation steps that curl the API must self-provision a disposable server when none is reachable; live data lacks a missing-cost head, so that path is unit-tested.
 - [Upload master loads](upload-master-loads.md) — cp1252 upload CSVs; item_master_variant child table; roster compound-key enrichment; customer junctions + transactional loader rules.
 - [Distributor tab head scoping](distributor-tab-head-scope.md) — Secondary/SKU tabs aggregate a head's distributors (registry-guarded); push per-distributor; filtered deep-dive cache + invalidation.
+- [FY anchor auto-derivation](fy-anchor-derivation.md) — never hardcode last-complete/open FY; use fyAnchors.ts derivation with grace window + loud failure.
