@@ -392,6 +392,10 @@ export async function runCustomerUploadLoad(opts: { dryRun: boolean; endPool?: b
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    // Cross-instance exclusion: in-memory job gating is process-local only
+    // (autoscale can run replicas). The advisory xact lock guarantees a single
+    // writer per load kind across all instances and legacy CLI runs.
+    await client.query("SELECT pg_advisory_xact_lock(74011001)");
 
     // Preserve human edits: snapshot existing attribution before the reset so a
     // re-run never clobbers hand-set state_head / head_confidence / notes.

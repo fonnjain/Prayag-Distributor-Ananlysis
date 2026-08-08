@@ -369,6 +369,8 @@ export async function runProductUploadLoad(opts: { write: boolean; endPool?: boo
   // ── WRITE (idempotent) ------------------------------------------------------
   if (!DRY) {
     await db.transaction(async (tx) => {
+      // Cross-instance exclusion (see customerUploadLoad.ts).
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(74011002)`);
       // Replace this file's variants (idempotent re-run).
       await tx.execute(
         sql`DELETE FROM item_master_variant WHERE source_file = ${SOURCE_FILE}`,
