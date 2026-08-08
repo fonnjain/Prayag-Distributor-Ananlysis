@@ -124,8 +124,8 @@ export default function Products() {
               {topProducts.length === 0 ? (
                 <p className="text-xs text-muted-foreground py-6 text-center">No data for this selection.</p>
               ) : (
-                <ResponsiveContainer width="100%" height={400} debounce={0}>
-                  <BarChart data={topProducts} layout="vertical" margin={{ top: 5, right: 30, left: 100, bottom: 5 }}>
+                <ResponsiveContainer width="100%" height={460} debounce={0}>
+                  <BarChart data={topProducts} layout="vertical" margin={{ top: 5, right: 30, left: 8, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="rgba(150,150,150,0.1)" />
                     <XAxis
                       type="number"
@@ -139,8 +139,17 @@ export default function Products() {
                       type="category"
                       tickLine={false}
                       axisLine={false}
-                      tick={{ fontSize: 11, fill: "#888" }}
-                      width={120}
+                      width={190}
+                      interval={0}
+                      tick={({ x, y, payload }: { x: number; y: number; payload: { value: string } }) => {
+                        const name = String(payload.value);
+                        const label = name.length > 26 ? `${name.slice(0, 25).trimEnd()}…` : name;
+                        return (
+                          <text x={x} y={y} dy={4} textAnchor="end" fontSize={11} fill="#888">
+                            {label}
+                          </text>
+                        );
+                      }}
                     />
                     <Tooltip
                       content={<CustomTooltip />}

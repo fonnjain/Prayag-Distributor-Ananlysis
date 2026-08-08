@@ -58,3 +58,4 @@ artifacts/api-server/uploads/
 # Editor backup/temp files (may contain PII from user uploads)
 attached_assets/.*~
 attached_assets/.*.csv.*~
+attached_assets/*.csv

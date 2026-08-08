@@ -14,11 +14,18 @@ import { useTheme } from "next-themes";
 import { trunc2 } from "@/lib/trunc";
 import { usePeriodMonths } from "@/data/period-months";
 import { CustomTooltip } from "./shared";
+import {
+  CompanyReportFilterBar,
+  EMPTY_ENTITY_FILTER,
+  entityFilterQuery,
+  hasEntityFilter,
+  type EntityFilterValue,
+} from "./CompanyReportFilters";
 
 type Insights = {
   meta: {
     fy: string; likeMonths: string[]; priorLikeMonths: string[];
-    channelLabel: string; latestMonthNote: string | null; guards: string[];
+    channelLabel: string; latestMonthNote: string | null; filterNote: string | null; guards: string[];
   };
   headline: {
     nominal: { current: number; prior: number; growthPct: number | null };
@@ -80,13 +87,29 @@ export default function OrderMomentum() {
   const [data, setData] = useState<Insights | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [entityFilter, setEntityFilter] = useState<EntityFilterValue>(EMPTY_ENTITY_FILTER);
+  const [person, setPerson] = useState<string>("");
+  const [people, setPeople] = useState<{ name: string; stateHead: string | null }[]>([]);
+
+  useEffect(() => {
+    let dead = false;
+    fetch("/api/momentum/people")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((j) => { if (!dead) setPeople(j.people ?? []); })
+      .catch(() => { /* the person filter simply stays empty */ });
+    return () => { dead = true; };
+  }, []);
 
   const monthsQ = period.active ? `?months=${encodeURIComponent(period.labels.join(","))}` : "";
+  const filterQ =
+    entityFilterQuery(entityFilter) + (person ? `&person=${encodeURIComponent(person)}` : "");
+  const fullQ = filterQ ? (monthsQ ? `${monthsQ}${filterQ}` : `?${filterQ.slice(1)}`) : monthsQ;
+  const filtered = hasEntityFilter(entityFilter) || Boolean(person);
   useEffect(() => {
     let dead = false;
     setLoading(true);
     setError(null);
-    fetch(`/api/momentum/insights${monthsQ}`)
+    fetch(`/api/momentum/insights${fullQ}`)
       .then(async (r) => {
         const j = await r.json();
         if (!r.ok) throw new Error(j.error ?? `HTTP ${r.status}`);
@@ -95,10 +118,58 @@ export default function OrderMomentum() {
       .catch((e) => { if (!dead) setError(e.message); })
       .finally(() => { if (!dead) setLoading(false); });
     return () => { dead = true; };
-  }, [monthsQ]);
+  }, [fullQ]);
 
-  if (loading) return <div className="py-16 text-center text-sm text-muted-foreground">Reading rate and direction from the registers…</div>;
-  if (error || !data) return <div className="py-16 text-center text-sm text-red-500">Momentum insights failed: {error}</div>;
+  // Filters stay usable even while loading / on an error so a bad selection
+  // can always be corrected in place.
+  const filterControls = (
+    <div className="flex flex-wrap items-end gap-3">
+      <CompanyReportFilterBar fy={data?.meta.fy ?? "2026-27"} value={entityFilter} onChange={setEntityFilter} />
+      <label className="flex flex-col gap-1 text-xs">
+        <span className="text-muted-foreground">Person</span>
+        <select
+          className="h-8 min-w-[180px] rounded-md border border-border bg-background px-2 text-xs"
+          value={person}
+          onChange={(e) => setPerson(e.target.value)}
+          data-testid="select-momentum-person"
+        >
+          <option value="">All</option>
+          {people.map((p) => (
+            <option key={p.name} value={p.name}>
+              {p.name}{p.stateHead ? ` — ${p.stateHead}` : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+      {person && (
+        <button
+          type="button"
+          className="h-8 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-muted/40"
+          onClick={() => setPerson("")}
+          data-testid="button-clear-momentum-person"
+        >
+          Clear person
+        </button>
+      )}
+    </div>
+  );
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        {filterControls}
+        <div className="py-16 text-center text-sm text-muted-foreground">Reading rate and direction from the registers…</div>
+      </div>
+    );
+  }
+  if (error || !data) {
+    return (
+      <div className="space-y-6">
+        {filterControls}
+        <div className="py-16 text-center text-sm text-red-500">Momentum insights failed: {error}</div>
+      </div>
+    );
+  }
 
   const h = data.headline;
   const realIsDecline = (h.real.growthPct ?? 0) < 0;
@@ -112,17 +183,36 @@ export default function OrderMomentum() {
           {" · like months "}{data.meta.likeMonths[0]}–{data.meta.likeMonths[data.meta.likeMonths.length - 1]}
           {" vs "}{data.meta.priorLikeMonths[0]}–{data.meta.priorLikeMonths[data.meta.priorLikeMonths.length - 1]}
           {data.meta.latestMonthNote && <span className="block italic">{data.meta.latestMonthNote}</span>}
+          {data.meta.filterNote && (
+            <span className="block italic text-primary" data-testid="text-momentum-filter-note">
+              Filtered — {data.meta.filterNote}
+            </span>
+          )}
         </div>
-        <a
-          href={`/api/momentum-reports/export${monthsQ}`}
-          download
-          className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/40"
-          data-testid="button-export-excel-momentum"
-        >
-          <Download className="w-3.5 h-3.5" />
-          Export Excel
-        </a>
+        {filtered ? (
+          <span
+            className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground/60 cursor-not-allowed"
+            title="The Excel export is company-wide only — clear the filters to export"
+            data-testid="button-export-excel-momentum-disabled"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Export Excel
+          </span>
+        ) : (
+          <a
+            href={`/api/momentum-reports/export${monthsQ}`}
+            download
+            className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/40"
+            data-testid="button-export-excel-momentum"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Export Excel
+          </a>
+        )}
       </div>
+
+      {/* Entity filters: State Head / State / Distributor + individual person */}
+      {filterControls}
 
       {/* 1. HEADLINE STRIP */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

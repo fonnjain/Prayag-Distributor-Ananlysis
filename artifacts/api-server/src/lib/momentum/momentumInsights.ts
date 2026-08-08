@@ -32,6 +32,12 @@ import { monthlyShare, getSeasonalCalibration } from "../seasonal.js";
 import { fiscalMonthsToLabels } from "../mgmt/primaryPeriod.js";
 import { loadDeepDiveData } from "../mgmt/deepDiveData.js";
 import { priorFy } from "../mgmt/targetEngine.js";
+import {
+  type EntityFilter,
+  hasEntityFilterValues,
+  entityCondsAliased,
+  resolvePriorEntityFilter,
+} from "../saleLineFilter.js";
 import { logger } from "../logger.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -69,6 +75,8 @@ export type MomentumInsights = {
     channel: "territory";
     channelLabel: string;
     latestMonthNote: string | null;
+    /** Human description of the active entity filter, null when unfiltered. */
+    filterNote: string | null;
     generatedAt: string;
     guards: string[];
   };
@@ -141,10 +149,14 @@ const TTL_MS = 30 * 60_000;
 export async function buildMomentumInsights(
   fy: string,
   requestedLabels: string[] | null,
+  filter?: EntityFilter,
   today: Date = new Date(),
 ): Promise<MomentumInsights> {
+  // Filtered requests are never cached (shared entity filter rollout rule) —
+  // the cache only ever holds the default company-wide payload.
+  const hasFilter = Boolean(filter && (filter.none || hasEntityFilterValues(filter)));
   const cacheKey = `${fy}|${(requestedLabels ?? []).join(",")}|${today.toISOString().slice(0, 10)}`;
-  if (_cache && _cache.key === cacheKey && Date.now() - _cache.at < TTL_MS) return _cache.data;
+  if (!hasFilter && _cache && _cache.key === cacheKey && Date.now() - _cache.at < TTL_MS) return _cache.data;
 
   const nClosed = closedMonthCount(fy, today);
   if (nClosed === 0) throw new Error(`FY${fy} has no closed month yet — momentum needs at least one complete month`);
@@ -173,22 +185,43 @@ export async function buildMomentumInsights(
   // the SKU services), not be blanket-included.
   const terr = territoryFilterSql(await getProjectCustomerSet());
 
+  // Entity filter (State Head / State / Distributor / person-resolved
+  // customers). The current FY uses the filter as given; every prior FY uses
+  // the CURRENT-FY customer set (heads/states can disagree historically for
+  // reassigned parties — same rule as company reports).
+  const priorFilter = hasFilter ? await resolvePriorEntityFilter(fy, filter) : undefined;
+  const ec = hasFilter ? entityCondsAliased(filter, "sale_line_current") : sql``;
+  const ecPrior = hasFilter ? entityCondsAliased(priorFilter, "sale_line_current") : sql``;
+  // Order-book lines match on the resolved customer set, case-insensitively
+  // (the order sheet and sale sheet can differ in case/spacing).
+  const orderCustomers = hasFilter
+    ? (priorFilter?.customers ?? filter?.customers ?? []).map((c) => c.toUpperCase().trim())
+    : [];
+  const ecOrder = !hasFilter
+    ? sql``
+    : orderCustomers.length > 0
+      ? sql`AND upper(trim(coalesce(customer,''))) IN (${sql.join(orderCustomers.map((c) => sql`${c}`), sql`, `)})`
+      : sql`AND false`;
+
   const fys = [fy, priorFy(fy), priorFy(priorFy(fy)), priorFy(priorFy(priorFy(fy)))]; // e.g. 26-27, 25-26, 24-25, 23-24
   const labelsFor = (f: string) => monthIdx.map((i) => fiscalMonthsToLabels(f, i, i)[0]);
 
   // ── Parallel loads ──
   const [sums, multipliers, seasonality, deepDive, atRiskRows, firstOrders, lostCodes] = await Promise.all([
     // like-months territory sale per FY
-    Promise.all(fys.map((f) =>
+    Promise.all(fys.map((f, i) =>
       one(sql`SELECT coalesce(sum(amount::float8),0) AS v, count(DISTINCT upper(trim(customer)))::int AS custs
-              FROM sale_line_current WHERE fy = ${f} AND ${monthIn(labelsFor(f))} AND ${terr}`),
+              FROM sale_line_current WHERE fy = ${f} AND ${monthIn(labelsFor(f))} AND ${terr} ${i === 0 ? ec : ecPrior}`),
     )),
     Promise.all([0, 1, 2].map((i) => computeCompanyMultiplier(fys[i + 1], fys[i]).catch(() => null))),
     getSeasonality("territory").catch(() => null),
-    loadDeepDiveData(fy).catch(() => null),
-    getAtRisk({}).catch(() => null), // null = unavailable, never an empty (zero) list
-    getFirstOrderCodes(fy, likeMonths, null).catch(() => null),
-    getLostCodes(fy, priorFy(fy)).catch(() => null),
+    // Member-sheet / service panels are company-wide only — with an entity
+    // filter active they are skipped (marked unavailable), never silently
+    // shown unfiltered.
+    hasFilter ? Promise.resolve(null) : loadDeepDiveData(fy).catch(() => null),
+    hasFilter ? Promise.resolve(null) : getAtRisk({}).catch(() => null), // null = unavailable, never an empty (zero) list
+    hasFilter ? Promise.resolve(null) : getFirstOrderCodes(fy, likeMonths, null).catch(() => null),
+    hasFilter ? Promise.resolve(null) : getLostCodes(fy, priorFy(fy)).catch(() => null),
   ]);
 
   // ── 1. Headline ──
@@ -230,10 +263,10 @@ export async function buildMomentumInsights(
   const priorAll = labelsFor(fys[1]);
   const monthlyCur = await all(sql`
     SELECT month_label, sum(amount::float8) AS v FROM sale_line_current
-    WHERE fy = ${fy} AND ${monthIn(likeMonths)} AND ${terr} GROUP BY 1`);
+    WHERE fy = ${fy} AND ${monthIn(likeMonths)} AND ${terr} ${ec} GROUP BY 1`);
   const monthlyPrior = await all(sql`
     SELECT month_label, sum(amount::float8) AS v FROM sale_line_current
-    WHERE fy = ${fys[1]} AND ${monthIn(priorAll)} AND ${terr} GROUP BY 1`);
+    WHERE fy = ${fys[1]} AND ${monthIn(priorAll)} AND ${terr} ${ecPrior} GROUP BY 1`);
   const curMap = new Map(monthlyCur.map((r) => [r.month_label as string, Number(r.v)]));
   const priMap = new Map(monthlyPrior.map((r) => [r.month_label as string, Number(r.v)]));
   const accelMonths = likeMonths.map((l, i) => {
@@ -264,7 +297,7 @@ export async function buildMomentumInsights(
   const shareOfYear = monthIdx.reduce((s, i) => s + monthlyShare(i - 1), 0) * 100;
   const ytd = cur; // same selected months, same territory basis as the headline
   const priorTotal = await one(sql`
-    SELECT coalesce(sum(amount::float8),0) AS v FROM sale_line_current WHERE fy = ${fys[1]} AND ${terr}`);
+    SELECT coalesce(sum(amount::float8),0) AS v FROM sale_line_current WHERE fy = ${fys[1]} AND ${terr} ${ecPrior}`);
   const runRate: MomentumInsights["runRate"] = {
     ytd: cr(ytd),
     curveShareOfYear: r2(shareOfYear),
@@ -278,7 +311,7 @@ export async function buildMomentumInsights(
   // ── 4. Pipeline — booking, dispatch, pending share; the direction is the signal ──
   const bookingRows = await all(sql`
     SELECT month_label, sum(taxable_value::float8) AS v FROM primary_order_line
-    WHERE fy = ${fy} AND ${monthIn(likeMonths)} AND is_territory GROUP BY 1`);
+    WHERE fy = ${fy} AND ${monthIn(likeMonths)} AND is_territory ${ecOrder} GROUP BY 1`);
   const bookMap = new Map(bookingRows.map((r) => [r.month_label as string, Number(r.v)]));
   const pipeMonths = likeMonths.map((l) => {
     const booking = bookMap.get(l) ?? 0;
@@ -315,25 +348,25 @@ export async function buildMomentumInsights(
   const likeMonthsPrior = labelsFor(fys[1]);
   const [newCust, newSku, breadth, discount] = await Promise.all([
     one(sql`
-      WITH base AS (SELECT DISTINCT upper(trim(customer)) AS c FROM sale_line_current WHERE fy = ${fys[1]} AND ${terr}),
+      WITH base AS (SELECT DISTINCT upper(trim(customer)) AS c FROM sale_line_current WHERE fy = ${fys[1]} AND ${terr} ${ecPrior}),
       cur AS (SELECT upper(trim(customer)) AS c, sum(amount::float8) AS v FROM sale_line_current
-              WHERE fy = ${fy} AND ${monthIn(likeMonths)} AND ${terr} GROUP BY 1)
+              WHERE fy = ${fy} AND ${monthIn(likeMonths)} AND ${terr} ${ec} GROUP BY 1)
       SELECT count(*)::int AS n, coalesce(sum(cur.v),0) AS v FROM cur
       WHERE cur.c IS NOT NULL AND NOT EXISTS (SELECT 1 FROM base WHERE base.c = cur.c)`),
     one(sql`
-      WITH base AS (SELECT DISTINCT upper(trim(customer)) AS c, code FROM sale_line_current WHERE fy = ${fys[1]} AND ${terr}),
+      WITH base AS (SELECT DISTINCT upper(trim(customer)) AS c, code FROM sale_line_current WHERE fy = ${fys[1]} AND ${terr} ${ecPrior}),
       base_cust AS (SELECT DISTINCT c FROM base),
       cur AS (SELECT upper(trim(customer)) AS c, code, sum(amount::float8) AS v FROM sale_line_current
-              WHERE fy = ${fy} AND ${monthIn(likeMonths)} AND ${terr} GROUP BY 1, 2)
+              WHERE fy = ${fy} AND ${monthIn(likeMonths)} AND ${terr} ${ec} GROUP BY 1, 2)
       SELECT count(*)::int AS n, coalesce(sum(cur.v),0) AS v
       FROM cur JOIN base_cust USING (c)
       LEFT JOIN base ON base.c = cur.c AND base.code = cur.code
       WHERE base.code IS NULL`),
     all(sql`
       WITH cur AS (SELECT upper(trim(customer)) AS c, count(DISTINCT code)::int AS n FROM sale_line_current
-                   WHERE fy = ${fy} AND ${monthIn(likeMonths)} AND ${terr} GROUP BY 1),
+                   WHERE fy = ${fy} AND ${monthIn(likeMonths)} AND ${terr} ${ec} GROUP BY 1),
       pri AS (SELECT upper(trim(customer)) AS c, count(DISTINCT code)::int AS n, sum(amount::float8) AS v FROM sale_line_current
-              WHERE fy = ${fys[1]} AND ${monthIn(likeMonthsPrior)} AND ${terr} GROUP BY 1)
+              WHERE fy = ${fys[1]} AND ${monthIn(likeMonthsPrior)} AND ${terr} ${ecPrior} GROUP BY 1)
       SELECT pri.c AS customer, pri.n AS prior_codes, coalesce(cur.n,0) AS cur_codes, pri.v AS prior_value
       FROM pri LEFT JOIN cur USING (c)
       WHERE coalesce(cur.n,0) < pri.n AND pri.n >= 3
@@ -362,8 +395,12 @@ export async function buildMomentumInsights(
 
   const firstOrderCount = firstOrders ? firstOrders.customers.reduce((s, c) => s + c.codes.length, 0) : null;
   const firstOrderValue = firstOrders ? firstOrders.customers.reduce((s, c) => s + c.totalNet, 0) : null;
-  const curD = discount.cur_d != null ? Number(discount.cur_d) : null;
-  const priD = discount.pri_d != null ? Number(discount.pri_d) : null;
+  // The secondary SKU register carries distributor names from a DIFFERENT
+  // vocabulary than sale_line customers (never merge on spelling) — with an
+  // entity filter active the discount trend cannot be scoped, so it is marked
+  // unavailable rather than silently shown company-wide.
+  const curD = !hasFilter && discount.cur_d != null ? Number(discount.cur_d) : null;
+  const priD = !hasFilter && discount.pri_d != null ? Number(discount.pri_d) : null;
   const secVolGrowth = pct(Number(discount.cur_v), Number(discount.pri_v));
 
   const leading: LeadingIndicator[] = [
@@ -377,7 +414,7 @@ export async function buildMomentumInsights(
       direction: Number(newSku.n) > 0 ? "up" : "flat", href: "/sku" },
     { id: "firstOrderCodes", label: "First-order codes (fastest proof a push worked)",
       current: firstOrderCount, currentValue: firstOrderValue != null ? cr(firstOrderValue) : null, prior: null,
-      note: firstOrders ? "codes bought for the first time ever in the period — SKU service" : "SKU service unavailable",
+      note: firstOrders ? "codes bought for the first time ever in the period — SKU service" : hasFilter ? "not available with an entity filter — the SKU service is company-wide only" : "SKU service unavailable",
       direction: null, href: "/sku" },
     { id: "breadthNarrowing", label: "Customers whose code count is narrowing",
       current: breadth.length, currentValue: cr(breadth.reduce((s, r) => s + Number(r.prior_value ?? 0), 0)), prior: null,
@@ -388,12 +425,16 @@ export async function buildMomentumInsights(
       currentValue: atRiskAvailable ? cr(atRiskTotalValue) : null, prior: null,
       note: atRiskAvailable
         ? `${atRiskHigh.length} high (>2× their median gap); value = their FY${fys[1]} business — median-gap scoring`
-        : "not available right now — the at-risk service failed to load; this is NOT a zero",
+        : hasFilter
+          ? "not available with an entity filter — at-risk scoring is company-wide only; this is NOT a zero"
+          : "not available right now — the at-risk service failed to load; this is NOT a zero",
       direction: atRiskAvailable ? (atRiskRows!.length > 0 ? "down" : "flat") : null, href: "/customers" },
     { id: "effectiveDiscount", label: "Effective discount trend (secondary register)",
       current: curD != null ? r2(curD) : null, prior: priD != null ? r2(priD) : null,
       note: curD == null || priD == null
-        ? "not recorded — secondary SKU register discount missing for one of the periods"
+        ? hasFilter
+          ? "not available with an entity filter — the secondary register cannot be scoped to this selection"
+          : "not recorded — secondary SKU register discount missing for one of the periods"
         : `net-weighted %, like months YoY; secondary volume ${secVolGrowth != null ? (secVolGrowth >= 0 ? "+" : "") + secVolGrowth + "%" : "n/a"}`,
       direction: curD != null && priD != null ? (curD > priD + 0.25 ? "up" : curD < priD - 0.25 ? "down" : "flat") : null,
       href: "/sku" },
@@ -534,9 +575,9 @@ export async function buildMomentumInsights(
   // SEGMENT DIVERGENCE — a segment declining materially faster than the company, on its own curve
   const segRows = await all(sql`
     WITH cur AS (SELECT coalesce(group_canon, group_raw, 'Unmapped') AS seg, sum(amount::float8) AS v
-                 FROM sale_line_current WHERE fy = ${fy} AND ${monthIn(likeMonths)} AND ${terr} GROUP BY 1),
+                 FROM sale_line_current WHERE fy = ${fy} AND ${monthIn(likeMonths)} AND ${terr} ${ec} GROUP BY 1),
     pri AS (SELECT coalesce(group_canon, group_raw, 'Unmapped') AS seg, sum(amount::float8) AS v
-            FROM sale_line_current WHERE fy = ${fys[1]} AND ${monthIn(likeMonthsPrior)} AND ${terr} GROUP BY 1)
+            FROM sale_line_current WHERE fy = ${fys[1]} AND ${monthIn(likeMonthsPrior)} AND ${terr} ${ecPrior} GROUP BY 1)
     SELECT pri.seg, pri.v AS pv, coalesce(cur.v,0) AS cv FROM pri LEFT JOIN cur USING (seg)
     WHERE pri.v > 5000000 ORDER BY pri.v DESC`);
   const companyYoY = headline.nominal.growthPct ?? 0;
@@ -599,6 +640,15 @@ export async function buildMomentumInsights(
       channel: "territory",
       channelLabel: `territory channel (project/govt head "${PROJECT_HEAD_CANON}" excluded)`,
       latestMonthNote: [latestMonthNote, filteredNote].filter(Boolean).join("; ") || null,
+      filterNote: hasFilter
+        ? [
+            filter?.heads?.length ? `State Head: ${filter.heads.join(", ")}` : null,
+            filter?.states?.length ? `State: ${filter.states.join(", ")}` : null,
+            filter?.customers?.length ? `Distributor/party: ${filter.customers.length} selected` : null,
+            filter?.none ? "selection matches no parties — every figure is zero by construction" : null,
+          ].filter(Boolean).join(" · ") +
+          " — prior-FY figures scoped to the same parties (current-FY customer set); the real-terms index and the seasonal run-rate curve remain COMPANY-wide (not entity-specific); member-sheet, SKU-service and secondary-register panels are unavailable under a filter"
+        : null,
       generatedAt: new Date().toISOString(),
       guards: [
         "like months only — every YoY rate compares identical fiscal months",
@@ -617,7 +667,7 @@ export async function buildMomentumInsights(
     redFlags: flags,
   };
 
-  logger.info({ fy, likeMonths: likeMonths.length, flags: flags.length }, "momentumInsights: built");
-  _cache = { key: cacheKey, at: Date.now(), data };
+  logger.info({ fy, likeMonths: likeMonths.length, flags: flags.length, filtered: hasFilter }, "momentumInsights: built");
+  if (!hasFilter) _cache = { key: cacheKey, at: Date.now(), data };
   return data;
 }

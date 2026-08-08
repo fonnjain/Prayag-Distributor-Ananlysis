@@ -33,6 +33,8 @@ export type DirectoryDistributor = {
   states: string[];
   /** State heads whose teams serve this distributor. */
   heads: string[];
+  /** Team members (display names) whose retailer rows name this distributor. */
+  members: string[];
   retailerCount: number;
   activeCount: number;
   /** Party order booking (net) for the FY — the ordering measure. */
@@ -101,7 +103,7 @@ async function buildDirectory(fy: string): Promise<DistributorDirectory> {
     }
   }
 
-  type Acc = DirectoryDistributor & { _states: Set<string>; _heads: Set<string> };
+  type Acc = DirectoryDistributor & { _states: Set<string>; _heads: Set<string>; _members: Set<string> };
   const dists = new Map<string, Acc>();
   const heads: DirectoryHead[] = [];
 
@@ -130,9 +132,9 @@ async function buildDirectory(fy: string): Promise<DistributorDirectory> {
         let acc = dists.get(d.normKey);
         if (!acc) {
           acc = {
-            name: d.name, normKey: d.normKey, states: [], heads: [],
+            name: d.name, normKey: d.normKey, states: [], heads: [], members: [],
             retailerCount: 0, activeCount: 0, orderBooking: 0, sale: 0,
-            _states: new Set(), _heads: new Set(),
+            _states: new Set(), _heads: new Set(), _members: new Set(),
           };
           dists.set(d.normKey, acc);
         }
@@ -142,6 +144,7 @@ async function buildDirectory(fy: string): Promise<DistributorDirectory> {
         acc.sale += d.sale;
         acc._heads.add(head);
         for (const row of d.retailers) {
+          if (row.memberName) acc._members.add(row.memberName.trim());
           const st = memberState.get(normMemberKey(row.memberName));
           if (st) acc._states.add(st);
         }
@@ -165,6 +168,7 @@ async function buildDirectory(fy: string): Promise<DistributorDirectory> {
       name: a.name, normKey: a.normKey,
       states: [...a._states].sort(),
       heads: [...a._heads].sort(),
+      members: [...a._members].sort(),
       retailerCount: a.retailerCount, activeCount: a.activeCount,
       orderBooking: a.orderBooking, sale: a.sale,
     }))
