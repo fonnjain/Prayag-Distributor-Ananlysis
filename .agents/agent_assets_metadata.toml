@@ -158,3 +158,10 @@ uri = "file://.agents/outputs/prayag-source-code.zip"
 type = "unspecified"
 title = "Prayag source code (complete)"
 description = "Database schema, API server architecture (lib + routes + config + scripts), and all frontend pages/components for the Prayag Sales Intelligence app — 432 files."
+
+[[outputs]]
+id = "WV_WLk2WRS84Kr5rXQC7q"
+uri = "file://artifacts/prayag/public/api-reference.md"
+type = "text"
+title = "Prayag API Reference"
+description = "Complete API documentation — 14 endpoint groups, 100+ routes, auth guide, common params, and HTTP status codes."
