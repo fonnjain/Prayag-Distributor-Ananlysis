@@ -857,7 +857,7 @@ export async function getAtRisk(params: {
       ${typeFilter}
     GROUP BY cg.customer, cg.median_gap, lo.last_order_date
     ORDER BY
-      (CURRENT_DATE - lo.last_order_date)::numeric / NULLIF(cg.median_gap, 0) DESC
+      (CURRENT_DATE - lo.last_order_date)::integer DESC
     LIMIT 500
     `,
     entF.params,
