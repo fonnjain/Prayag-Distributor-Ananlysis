@@ -27,7 +27,8 @@
 //   All denominators are read LIVE from the prior FY's like-months at test time —
 //   never hardcoded, because a prior-year re-sync would silently stale them.
 //   Rules 1 and 3 are per month because Rule 2 alone cannot see a single-month
-//   wipe. A month with zero prior-FY rows is skipped with a console.warn, never
+//   wipe. A month with zero prior-FY rows FAILS the test as a baseline-integrity
+//   violation (the evaluator marks it skipped; callers treat skipped as fail), never
 //   a silent pass.
 //
 //   GRANULARITY LIMIT: secondary_sku_line has no order-date column, so these
@@ -334,21 +335,29 @@ describe("open-FY wipe canary — ratio floors vs live prior-FY like-months", ()
   });
 
   it("Rule 1: per-month open-FY rows >= 0.60 x prior like-month rows", () => {
-    expect(COMPLETED_LABELS.length).toBeGreaterThan(0);
+    if (COMPLETED_LABELS.length === 0) {
+      // April of a new FY: no month has completed yet, the canary is not
+      // applicable. This is an expected calendar state, not a data problem.
+      console.warn(`[wipe canary] Rule 1 NOT APPLICABLE: no completed month yet in open FY ${OPEN_FY}`);
+      return;
+    }
     for (const label of COMPLETED_LABELS) {
       const prior = priorMonthStats.get(priorLikeMonth(label));
       const open = openMonthStats.get(label);
       const r = evalPerMonthRule(label, open?.rows ?? 0, prior?.rows ?? 0, RULE1_ROWS_RATIO);
-      if (r.skipped) {
-        console.warn(`[wipe canary] Rule 1 SKIPPED for ${label}: prior like-month ${priorLikeMonth(label)} has zero rows`);
-        continue;
-      }
+      // Missing prior baseline is itself an integrity failure — a wiped prior
+      // FY must not silently disarm the canary.
+      expect(r.skipped, `Rule 1 BASELINE MISSING for ${label}: prior like-month ${priorLikeMonth(label)} has zero rows`).toBe(false);
       console.log(`[wipe canary] Rule 1 ${label}: actual=${r.actual} floor=${r.floor} (prior ${priorLikeMonth(label)}=${prior!.rows})`);
       expect(r.actual, `Rule 1 FAILED for ${label}: ${r.actual} < floor ${r.floor}`).toBeGreaterThanOrEqual(r.floor);
     }
   });
 
   it("Rule 2: completed-month open-FY total >= 0.70 x prior like-month total", () => {
+    if (COMPLETED_LABELS.length === 0) {
+      console.warn(`[wipe canary] Rule 2 NOT APPLICABLE: no completed month yet in open FY ${OPEN_FY}`);
+      return;
+    }
     let openTotal = 0;
     let priorTotal = 0;
     for (const label of COMPLETED_LABELS) {
@@ -356,23 +365,21 @@ describe("open-FY wipe canary — ratio floors vs live prior-FY like-months", ()
       priorTotal += priorMonthStats.get(priorLikeMonth(label))?.rows ?? 0;
     }
     const r = evalTotalRule(openTotal, priorTotal, RULE2_TOTAL_RATIO);
-    if (r.skipped) {
-      console.warn("[wipe canary] Rule 2 SKIPPED: prior FY like-months have zero rows");
-      return;
-    }
+    expect(r.skipped, "Rule 2 BASELINE MISSING: prior FY like-months have zero rows").toBe(false);
     console.log(`[wipe canary] Rule 2 total: actual=${r.actual} floor=${r.floor} (prior total=${priorTotal})`);
     expect(r.actual, `Rule 2 FAILED: ${r.actual} < floor ${r.floor}`).toBeGreaterThanOrEqual(r.floor);
   });
 
   it("Rule 3: per-month open-FY distinct distributors >= 0.70 x prior like-month", () => {
+    if (COMPLETED_LABELS.length === 0) {
+      console.warn(`[wipe canary] Rule 3 NOT APPLICABLE: no completed month yet in open FY ${OPEN_FY}`);
+      return;
+    }
     for (const label of COMPLETED_LABELS) {
       const prior = priorMonthStats.get(priorLikeMonth(label));
       const open = openMonthStats.get(label);
       const r = evalPerMonthRule(label, open?.distributors ?? 0, prior?.distributors ?? 0, RULE3_DIST_RATIO);
-      if (r.skipped) {
-        console.warn(`[wipe canary] Rule 3 SKIPPED for ${label}: prior like-month ${priorLikeMonth(label)} has zero distributors`);
-        continue;
-      }
+      expect(r.skipped, `Rule 3 BASELINE MISSING for ${label}: prior like-month ${priorLikeMonth(label)} has zero distributors`).toBe(false);
       console.log(`[wipe canary] Rule 3 ${label}: actual=${r.actual} floor=${r.floor} (prior ${priorLikeMonth(label)}=${prior!.distributors})`);
       expect(r.actual, `Rule 3 FAILED for ${label}: ${r.actual} < floor ${r.floor}`).toBeGreaterThanOrEqual(r.floor);
     }
@@ -382,6 +389,10 @@ describe("open-FY wipe canary — ratio floors vs live prior-FY like-months", ()
     // Filtered row set, nothing deleted: zero out the first completed month in
     // a COPY of the live stats and re-evaluate. This asymmetry — Rule 2 blind,
     // Rules 1/3 loud — is the whole justification for the per-month rules.
+    if (COMPLETED_LABELS.length === 0) {
+      console.warn(`[wipe canary] simulation NOT APPLICABLE: no completed month yet in open FY ${OPEN_FY}`);
+      return;
+    }
     const wipedLabel = COMPLETED_LABELS[0]!;
     const priorLabel = priorLikeMonth(wipedLabel);
     const prior = priorMonthStats.get(priorLabel);
@@ -407,6 +418,32 @@ describe("open-FY wipe canary — ratio floors vs live prior-FY like-months", ()
     );
     expect(r2.skipped).toBe(false);
     expect(r2.pass, "Rule 2 alone must NOT catch a single-month wipe (that is why Rules 1/3 exist)").toBe(true);
+  });
+
+  it("missing prior baseline is flagged skipped by the evaluators (callers fail on it)", () => {
+    // A wiped PRIOR FY must not silently disarm the canary: the pure
+    // evaluators mark zero-denominator as skipped, and the rule tests above
+    // assert skipped === false, turning missing baseline into a hard failure.
+    expect(evalPerMonthRule("Apr-26", 12345, 0, RULE1_ROWS_RATIO).skipped).toBe(true);
+    expect(evalPerMonthRule("Apr-26", 0, 0, RULE3_DIST_RATIO).skipped).toBe(true);
+    expect(evalTotalRule(12345, 0, RULE2_TOTAL_RATIO).skipped).toBe(true);
+  });
+
+  it("completedMonthLabels: April boundary and FY rollover (pure)", () => {
+    // April of a new FY: no completed month yet — canary not applicable.
+    expect(completedMonthLabels("2026-27", new Date(Date.UTC(2026, 3, 1)))).toEqual([]);
+    expect(completedMonthLabels("2026-27", new Date(Date.UTC(2026, 3, 30)))).toEqual([]);
+    // May 1: April has just completed.
+    expect(completedMonthLabels("2026-27", new Date(Date.UTC(2026, 4, 1)))).toEqual(["Apr-26"]);
+    // Calendar-year rollover inside the FY: Jan/Feb/Mar carry the NEXT year suffix.
+    expect(completedMonthLabels("2026-27", new Date(Date.UTC(2027, 1, 1)))).toEqual([
+      "Apr-26", "May-26", "Jun-26", "Jul-26", "Aug-26", "Sep-26",
+      "Oct-26", "Nov-26", "Dec-26", "Jan-27",
+    ]);
+    // Prior like-month mapping crosses the rollover correctly.
+    expect(priorLikeMonth("Jan-27")).toBe("Jan-26");
+    expect(priorLikeMonth("Apr-26")).toBe("Apr-25");
+    expect(priorFyOf("2026-27")).toBe("2025-26");
   });
 });
 
