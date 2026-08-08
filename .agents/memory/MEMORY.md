@@ -114,4 +114,5 @@
 - [Ratio-based wipe canary](wipe-canary-ratio.md) — activation test canary: rows ≥0.60×, distributors ≥0.70× prior like-month (live denominators); per-month rules catch what totals hide.
 - [FY anchor auto-derivation](fy-anchor-derivation.md) — never hardcode last-complete/open FY; use fyAnchors.ts derivation with grace window + loud failure.
 - [Momentum entity filters](momentum-entity-filter.md) — person→distributor→register-spelling resolution (case trap); filtered payloads skip company-only panels, never cache.
+- [Prod master-load routes](prod-master-loads.md) — prod DB read-only from workspace; loads run in-app via X-Admin-Secret routes + advisory locks; NOT NULL-with-default columns must never get explicit NULL.
 - [PII attached_assets trap](pii-attached-assets.md) — never `git add -A` with uploads present; PII CSVs were purged once (users list etc.); attached_assets/*.csv is gitignored — keep it that way.
