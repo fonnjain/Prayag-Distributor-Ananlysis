@@ -364,7 +364,7 @@ type DistActivationRow = {
   active_count: string;
 };
 
-async function queryDistributorActivationCompany(
+export async function queryDistributorActivationCompany(
   fy: string,
   labels: string[],
   stateFilter?: string | null,
@@ -427,7 +427,7 @@ type DistRangeGapRow = {
   gap: string;
 };
 
-async function queryDistributorRangeGapCompany(
+export async function queryDistributorRangeGapCompany(
   fy: string,
   stateFilter?: string | null,
 ): Promise<DistRangeGapRow[]> {
@@ -817,11 +817,11 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
     if (deepDive) {
       for (const d of deepDive.distributors as DistributorGroup[]) {
         if (!d.retailerCount || d.retailerCount === 0) continue;
-        const actPct = (d.activeCount / d.retailerCount) * 100;
+        const actPct = (active / total) * 100;
         if (actPct < 40) {
-          const dormant = d.retailerCount - d.activeCount;
+          const dormant  = total - active;
           // Size: dormant_count × median active retailer quarterly order × revival_assumption
-          const valueHigh = dormant * quarterlyMedian * dormantRevival;
+        const valueHigh = gap * perCodeQuarterly * rangeUptake;
           lowActivationDists.push({
             name: d.name,
             retailerCount: d.retailerCount,
@@ -842,7 +842,7 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
         const actPct = (active / total) * 100;
         if (actPct < 40) {
           const dormant  = total - active;
-          const valueHigh = dormant * quarterlyMedian * dormantRevival;
+        const valueHigh = gap * perCodeQuarterly * rangeUptake;
           lowActivationDists.push({
             name: r.distributor,
             retailerCount: total,
@@ -922,13 +922,13 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
         : null;
 
       for (const d of (deepDive.distributors as DistributorGroup[]).slice(0, 20)) {
-        const brands = d.skuSpread?.distinctBrands ?? null;
-        const gap = brands != null && peerMedianBrands != null ? peerMedianBrands - brands : null;
+        const brands  = parseInt(r.distinct_segments) || 0;
+        const gap     = parseFloat(r.gap) || 0;
         if (gap == null || gap <= 0) continue;
         // Size: gap_codes × peer_median_quarterly_per_code × uptake
-        const perCodeQuarterly = peerMedianBrands && peerMedianBrands > 0
-          ? (medianNet / Math.max(1, labels.length / 3)) / peerMedianBrands
-          : 0;
+      const perCodeQuarterly = peerMedian > 0
+        ? (medianNet / Math.max(1, labels.length / 3)) / peerMedian
+        : 0;
         const valueHigh = gap * perCodeQuarterly * rangeUptake;
         widenDists.push({
           name: d.name,
