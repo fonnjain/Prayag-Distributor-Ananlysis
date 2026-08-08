@@ -1,0 +1,402 @@
+// Guard-regression tests for the distributor-tab period-filter contract.
+//
+// WHAT THESE TESTS PROTECT:
+//   monthCond() in distributorTabs.ts appends "AND month_label IN (...)" to
+//   every DB query when a months selection is passed. If that clause is silently
+//   dropped, filtered requests widen back to the full FY and the regression is
+//   invisible to API callers.
+//
+//   Tests are divided into three groups:
+//
+//   1. Pure-function tests (no DB) — sortMonths ordering, MONTH_LABEL_RE format
+//      validation, toPriorYearMonths baseline shift.  These import directly from
+//      the implementation so any change to the exported regex or function
+//      behaviour is immediately caught here.
+//
+//   2. monthCond isolation DB tests — seed known rows into
+//      dashboard_test.secondary_sku_line, execute the real monthCond SQL fragment
+//      against those rows, assert the clause restricts output to selected months.
+//      Deterministic; no Sheets dependency.
+//
+//   3. Full tab-builder integration tests — seed the same test rows and call
+//      buildSecondaryTab / buildSkuEvolution directly (with the distributor
+//      directory module mocked to return a single controlled entry).  These
+//      exercise every ${monthCond(months)} call site inside the actual tab
+//      builders, not just the helper in isolation.  A regression that removes
+//      monthCond from only ONE of the four query sites inside buildSecondaryTab
+//      would still be caught here.
+//
+//   HTTP-level assertions (400 on invalid months, live API filter checks) live
+//   in scripts/distributor-tab-guard-check.mjs.
+
+import { afterAll, beforeAll, describe, it, expect, vi } from "vitest";
+import { db, pool } from "@workspace/db";
+import { sql } from "drizzle-orm";
+import {
+  sortMonths,
+  MONTH_LABEL_RE,
+  monthCond,
+  buildSecondaryTab,
+  buildSkuEvolution,
+} from "./distributorTabs.js";
+import { toPriorYearMonths } from "./distributorDeepDive.js";
+
+// ── Directory mock ────────────────────────────────────────────────────────────
+// Hoisted by vitest before any imports so distributorTabs.ts receives the mock
+// when it calls loadDistributorDirectory.
+//
+// normDistKey("MOCK TEST DISTRIBUTOR"):
+//   .toUpperCase() → "MOCK TEST DISTRIBUTOR" (already upper)
+//   no TRADERS/ENTERPRISES/INDUSTRIES/PVTLTD matches
+//   .replace(/[^A-Z0-9 ]/g, "") → "MOCK TEST DISTRIBUTOR" (spaces kept)
+//   .replace(/\s+/g, " ").trim() → "MOCK TEST DISTRIBUTOR"
+// So normKey === raw (preserved exactly).
+vi.mock("./distributorDirectory.js", () => ({
+  loadDistributorDirectory: vi.fn().mockResolvedValue({
+    distributors: [
+      {
+        name: "MOCK TEST DISTRIBUTOR",
+        normKey: "MOCK TEST DISTRIBUTOR",
+        states: [],
+        heads: [],
+      },
+    ],
+    builtAt: 0,
+  }),
+}));
+
+// ── Test fixtures ─────────────────────────────────────────────────────────────
+const SCHEMA = "dashboard_test";
+const TEST_DIST = "MOCK TEST DISTRIBUTOR";  // raw name = normKey for this fixture
+const CUR_FY  = "1900-01";                  // current FY — no real data at this key
+const BASE_FY = "1899-00";                  // prevFyLabel(CUR_FY) — baseline FY
+
+// Seeded secondary_sku_line data for CUR_FY:
+//   Apr-26: CODE1=1000 + CODE2=500 = 1500
+//   May-26: CODE1=800              =  800
+//   Jun-26: CODE1=1200             = 1200   ← outside Apr+May selection
+//   FY total:                        3500
+//
+// Seeded secondary_sku_line data for BASE_FY:
+//   Apr-25: CODE1=700
+//   May-25: CODE1=300
+//   Base total for toPriorYearMonths(["Apr-26","May-26"]) = ["Apr-25","May-25"]: 1000
+
+beforeAll(async () => {
+  // Minimal secondary_sku_line table in the test schema.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ${SCHEMA}.secondary_sku_line (
+      line_uid      text PRIMARY KEY,
+      fy            text NOT NULL,
+      month_label   text NOT NULL,
+      distributor   text,
+      retailer      text,
+      item_code     text NOT NULL,
+      segment_canon text,
+      head_canon    text,
+      qty           numeric,
+      net_amount    numeric,
+      gross_amount  numeric,
+      discount_pct  numeric,
+      source        text NOT NULL DEFAULT 'test'
+    )
+  `);
+
+  // Minimal sale_line_current table — empty; primary queries return no rows
+  // (buildSecondaryTab proceeds with primaryMatched=false, which is valid).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ${SCHEMA}.sale_line_current (
+      fy          text,
+      month_label text,
+      customer    text,
+      amount      numeric,
+      is_territory boolean,
+      state_canon text,
+      station     text,
+      code        text,
+      group_canon text
+    )
+  `);
+
+  // Remove leftovers from any previous interrupted run.
+  await pool.query(
+    `DELETE FROM ${SCHEMA}.secondary_sku_line WHERE fy IN ($1, $2)`,
+    [CUR_FY, BASE_FY],
+  );
+
+  // Seed current FY rows.
+  await pool.query(
+    `INSERT INTO ${SCHEMA}.secondary_sku_line
+       (line_uid, fy, month_label, distributor, item_code, segment_canon,
+        net_amount, gross_amount, source)
+     VALUES
+       ('g-c1', $1, 'Apr-26', $2, 'CODE1', 'SegA', 1000, 1100, 'test'),
+       ('g-c2', $1, 'Apr-26', $2, 'CODE2', 'SegA',  500,  550, 'test'),
+       ('g-c3', $1, 'May-26', $2, 'CODE1', 'SegA',  800,  880, 'test'),
+       ('g-c4', $1, 'Jun-26', $2, 'CODE1', 'SegA', 1200, 1320, 'test')`,
+    [CUR_FY, TEST_DIST],
+  );
+
+  // Seed baseline FY rows (toPriorYearMonths(["Apr-26","May-26"]) = ["Apr-25","May-25"]).
+  await pool.query(
+    `INSERT INTO ${SCHEMA}.secondary_sku_line
+       (line_uid, fy, month_label, distributor, item_code, segment_canon,
+        net_amount, gross_amount, source)
+     VALUES
+       ('g-b1', $1, 'Apr-25', $2, 'CODE1', 'SegA', 700, 770, 'test'),
+       ('g-b2', $1, 'May-25', $2, 'CODE1', 'SegA', 300, 330, 'test')`,
+    [BASE_FY, TEST_DIST],
+  );
+});
+
+afterAll(async () => {
+  await pool.query(
+    `DELETE FROM ${SCHEMA}.secondary_sku_line WHERE fy IN ($1, $2)`,
+    [CUR_FY, BASE_FY],
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 1. PURE-FUNCTION TESTS (no DB)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("MONTH_LABEL_RE — month-label format (imported from distributorTabs.ts)", () => {
+  it("accepts well-formed labels for each fiscal-year boundary month", () => {
+    expect(MONTH_LABEL_RE.test("Apr-26")).toBe(true);
+    expect(MONTH_LABEL_RE.test("Mar-27")).toBe(true);
+    expect(MONTH_LABEL_RE.test("Jan-27")).toBe(true);
+  });
+  it("rejects all-lowercase month abbreviation", () => {
+    expect(MONTH_LABEL_RE.test("apr-26")).toBe(false);
+  });
+  it("rejects all-uppercase month abbreviation", () => {
+    expect(MONTH_LABEL_RE.test("APR-26")).toBe(false);
+  });
+  it("rejects a label with a four-digit year (would bypass the filter silently)", () => {
+    expect(MONTH_LABEL_RE.test("Apr-2026")).toBe(false);
+  });
+  it("rejects a FY-style string that would silently widen the filter", () => {
+    expect(MONTH_LABEL_RE.test("2026-27")).toBe(false);
+  });
+  it("rejects numeric month abbreviation", () => {
+    expect(MONTH_LABEL_RE.test("04-26")).toBe(false);
+  });
+  it("rejects a label with no year suffix", () => {
+    expect(MONTH_LABEL_RE.test("Apr")).toBe(false);
+  });
+  it("rejects an empty string", () => {
+    expect(MONTH_LABEL_RE.test("")).toBe(false);
+  });
+  it("rejects a label with trailing whitespace", () => {
+    expect(MONTH_LABEL_RE.test("Apr-26 ")).toBe(false);
+  });
+});
+
+describe("sortMonths — fiscal-year order (Apr first, Mar last)", () => {
+  it("sorts Apr before May", () => {
+    expect(sortMonths(["May-26", "Apr-26"])).toEqual(["Apr-26", "May-26"]);
+  });
+  it("places Jan–Mar after Dec", () => {
+    expect(sortMonths(["Jan-27", "Dec-26", "Apr-26"])).toEqual(["Apr-26", "Dec-26", "Jan-27"]);
+  });
+  it("deduplicates identical labels", () => {
+    expect(sortMonths(["Apr-26", "Apr-26", "May-26"])).toEqual(["Apr-26", "May-26"]);
+  });
+  it("returns an empty array for empty input", () => {
+    expect(sortMonths([])).toEqual([]);
+  });
+});
+
+describe("toPriorYearMonths — SKU baseline shift", () => {
+  it("shifts a single month back by one year", () => {
+    expect(toPriorYearMonths(["Apr-26"])).toEqual(["Apr-25"]);
+  });
+  it("shifts Jan correctly (calendar crossover inside a FY)", () => {
+    expect(toPriorYearMonths(["Jan-27"])).toEqual(["Jan-26"]);
+  });
+  it("shifts a Q1 selection to last year's Q1", () => {
+    expect(toPriorYearMonths(["Apr-26", "May-26", "Jun-26"]))
+      .toEqual(["Apr-25", "May-25", "Jun-25"]);
+  });
+  it("preserves the length of the selection (no silent widening)", () => {
+    const cur = ["Apr-26", "May-26", "Jun-26", "Jul-26"];
+    expect(toPriorYearMonths(cur).length).toBe(cur.length);
+  });
+  it("returns an empty array for empty input", () => {
+    expect(toPriorYearMonths([])).toEqual([]);
+  });
+});
+
+describe("SKU evolution baseline invariant", () => {
+  it("a Q1 selection produces a Q1 baseline, not a Q2 baseline", () => {
+    expect(toPriorYearMonths(["Apr-26", "May-26", "Jun-26"]))
+      .not.toEqual(toPriorYearMonths(["Jul-26", "Aug-26", "Sep-26"]));
+  });
+  it("baseline month count matches current month count", () => {
+    for (const sel of [["Apr-26"], ["Apr-26", "May-26"], ["Apr-26", "May-26", "Jun-26"]]) {
+      expect(toPriorYearMonths(sel).length).toBe(sel.length);
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 2. monthCond ISOLATION DB TESTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("monthCond — SQL filter correctness (seeded DB)", () => {
+  it("restricts results to selected months — Jun-26 absent when Apr+May selected", async () => {
+    const selected = ["Apr-26", "May-26"];
+    const rows = await db.execute<{ month_label: string; net: string }>(sql`
+      SELECT month_label, SUM(net_amount::numeric)::text AS net
+      FROM secondary_sku_line
+      WHERE fy = ${CUR_FY} AND distributor = ${TEST_DIST}
+        ${monthCond(selected)}
+      GROUP BY month_label ORDER BY month_label
+    `);
+    const months = rows.rows.map((r) => r.month_label);
+    // Primary regression check: if monthCond is dropped, Jun-26 appears.
+    expect(months).not.toContain("Jun-26");
+    expect(months).toContain("Apr-26");
+    expect(months).toContain("May-26");
+  });
+
+  it("filtered total equals sum of selected months only, not the full FY", async () => {
+    const rows = await db.execute<{ net: string }>(sql`
+      SELECT SUM(net_amount::numeric)::text AS net
+      FROM secondary_sku_line
+      WHERE fy = ${CUR_FY} AND distributor = ${TEST_DIST}
+        ${monthCond(["Apr-26", "May-26"])}
+    `);
+    const filtered = parseFloat(rows.rows[0]?.net ?? "0");
+    expect(filtered).toBe(2300);     // Apr(1500) + May(800)
+    expect(filtered).not.toBe(3500); // never the FY total
+  });
+
+  it("monthCond(null) returns all months — no restriction applied", async () => {
+    const rows = await db.execute<{ month_label: string }>(sql`
+      SELECT DISTINCT month_label FROM secondary_sku_line
+      WHERE fy = ${CUR_FY} AND distributor = ${TEST_DIST}
+        ${monthCond(null)}
+      ORDER BY month_label
+    `);
+    const months = rows.rows.map((r) => r.month_label);
+    expect(months).toContain("Apr-26");
+    expect(months).toContain("May-26");
+    expect(months).toContain("Jun-26");
+  });
+
+  it("monthCond([]) returns all months — empty array treated as no filter", async () => {
+    const rows = await db.execute<{ month_label: string }>(sql`
+      SELECT DISTINCT month_label FROM secondary_sku_line
+      WHERE fy = ${CUR_FY} AND distributor = ${TEST_DIST}
+        ${monthCond([])}
+    `);
+    expect(rows.rows.map((r) => r.month_label)).toContain("Jun-26");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 3. FULL TAB-BUILDER INTEGRATION TESTS
+//    These call buildSecondaryTab / buildSkuEvolution directly with the mocked
+//    directory and the seeded DB data. They exercise ALL ${monthCond(months)}
+//    call sites inside the tab builders — not just the helper in isolation.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("buildSecondaryTab — period filter through the full query chain", () => {
+  it("filtered netAmount contains only selected months' data — never the FY total", async () => {
+    const result = await buildSecondaryTab(CUR_FY, TEST_DIST, ["Apr-26", "May-26"]);
+    // If monthCond is dropped from ANY query inside buildSecondaryTab, netAmount
+    // widens to 3500 (all three months) and this assertion fails.
+    expect(result.netAmount).toBe(2300);
+    expect(result.netAmount).not.toBe(3500);
+  });
+
+  it("filtered monthly breakdown contains only selected months — Jun-26 absent", async () => {
+    const result = await buildSecondaryTab(CUR_FY, TEST_DIST, ["Apr-26", "May-26"]);
+    const months = result.monthly.map((m) => m.month);
+    expect(months).not.toContain("Jun-26");
+    expect(months).toContain("Apr-26");
+    expect(months).toContain("May-26");
+  });
+
+  it("filtered netAmount = sum of monthly net values (internal consistency)", async () => {
+    const result = await buildSecondaryTab(CUR_FY, TEST_DIST, ["Apr-26", "May-26"]);
+    const monthlySum = result.monthly.reduce((s, m) => s + m.net, 0);
+    expect(Math.abs(result.netAmount - monthlySum)).toBeLessThan(1);
+  });
+
+  it("unfiltered result includes all three months and netAmount = FY total", async () => {
+    const result = await buildSecondaryTab(CUR_FY, TEST_DIST, null);
+    const months = result.monthly.map((m) => m.month);
+    expect(months).toContain("Apr-26");
+    expect(months).toContain("May-26");
+    expect(months).toContain("Jun-26");
+    expect(result.netAmount).toBe(3500);
+  });
+
+  it("filtered netAmount is strictly less than unfiltered netAmount", async () => {
+    const [filtered, unfiltered] = await Promise.all([
+      buildSecondaryTab(CUR_FY, TEST_DIST, ["Apr-26", "May-26"]),
+      buildSecondaryTab(CUR_FY, TEST_DIST, null),
+    ]);
+    expect(filtered.netAmount).toBeLessThan(unfiltered.netAmount);
+  });
+
+  it("single-month filter returns exactly that month's net", async () => {
+    const result = await buildSecondaryTab(CUR_FY, TEST_DIST, ["Apr-26"]);
+    expect(result.netAmount).toBe(1500);           // CODE1(1000) + CODE2(500)
+    expect(result.monthly).toHaveLength(1);
+    expect(result.monthly[0].month).toBe("Apr-26");
+  });
+
+  it("monthsLoaded reflects the filtered window, not the full FY", async () => {
+    const result = await buildSecondaryTab(CUR_FY, TEST_DIST, ["Apr-26", "May-26"]);
+    // monthsLoaded must be the intersection of the selection with present months.
+    expect(result.monthsLoaded).not.toContain("Jun-26");
+    expect(result.monthsLoaded).toContain("Apr-26");
+    expect(result.monthsLoaded).toContain("May-26");
+  });
+});
+
+describe("buildSkuEvolution — baseline months through the full query chain", () => {
+  it("currentMonths equals the passed months selection", async () => {
+    const result = await buildSkuEvolution(CUR_FY, TEST_DIST, ["Apr-26", "May-26"]);
+    // secondary register has data for this period; secondary side must be non-null.
+    expect(result.secondary).not.toBeNull();
+    const side = result.secondary!;
+    // currentMonths must be the selection, not all loaded months.
+    expect(side.currentMonths.sort()).toEqual(["Apr-26", "May-26"].sort());
+  });
+
+  it("baselineMonths equals toPriorYearMonths(selection) — not a wider window", async () => {
+    const result = await buildSkuEvolution(CUR_FY, TEST_DIST, ["Apr-26", "May-26"]);
+    expect(result.secondary).not.toBeNull();
+    const side = result.secondary!;
+    // If months is ignored inside buildSkuEvolution, baselineMonths would be
+    // toPriorYearMonths(recon.monthsLoaded) = ["Apr-25","May-25","Jun-25"],
+    // which does NOT equal ["Apr-25","May-25"]. The assertion below catches it.
+    expect(side.baselineMonths.sort()).toEqual(["Apr-25", "May-25"].sort());
+    expect(side.baselineMonths).not.toContain("Jun-25");
+  });
+
+  it("a different selection produces a different baseline (not always the full prior FY)", async () => {
+    const [rApr, rMay] = await Promise.all([
+      buildSkuEvolution(CUR_FY, TEST_DIST, ["Apr-26"]),
+      buildSkuEvolution(CUR_FY, TEST_DIST, ["May-26"]),
+    ]);
+    const baseApr = (rApr.secondary ?? rApr.primary)?.baselineMonths ?? [];
+    const baseMay = (rMay.secondary ?? rMay.primary)?.baselineMonths ?? [];
+    expect(baseApr.sort()).not.toEqual(baseMay.sort());
+  });
+
+  it("baseline has data from the shifted prior months (seeded base FY)", async () => {
+    const result = await buildSkuEvolution(CUR_FY, TEST_DIST, ["Apr-26", "May-26"]);
+    expect(result.secondary).not.toBeNull();
+    const side = result.secondary!;
+    // The base FY has CODE1 in Apr-25+May-25 (1000) and the current FY has
+    // CODE1 (1800) + fresh CODE2 (500). totalBaseline must be > 0.
+    expect(side.totalBaseline).toBeGreaterThan(0);
+    // And existing SKU (CODE1 present in both sides) must be found.
+    expect(side.existing.codes).toBeGreaterThan(0);
+  });
+});

@@ -29,7 +29,7 @@ isValidation = true
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/api-server exec vitest run src/lib/comparison/costCell.test.ts && node artifacts/api-server/scripts/comparison-guard-check.mjs"
+args = "pnpm --filter @workspace/api-server exec vitest run src/lib/comparison/costCell.test.ts src/lib/mgmt/distributorTabs.test.ts && node artifacts/api-server/scripts/comparison-guard-check.mjs && node artifacts/api-server/scripts/distributor-tab-guard-check.mjs"
 
 [agent]
 stack = "PNPM_WORKSPACE"

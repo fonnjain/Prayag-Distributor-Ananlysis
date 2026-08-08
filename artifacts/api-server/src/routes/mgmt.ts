@@ -1390,7 +1390,8 @@ router.get("/mgmt/distributor-tab", async (req: Request, res: Response): Promise
     let months: string[] | null = null;
     if (typeof req.query.months === "string" && req.query.months.trim() !== "") {
       const tokens = req.query.months.split(",").map((m) => m.trim());
-      if (tokens.some((m) => !/^[A-Z][a-z]{2}-\d{2}$/.test(m))) {
+      const { MONTH_LABEL_RE } = await import("../lib/mgmt/distributorTabs.js");
+      if (tokens.some((m) => !MONTH_LABEL_RE.test(m))) {
         res.status(400).json({ error: "months must be comma-separated labels like Apr-26" });
         return;
       }

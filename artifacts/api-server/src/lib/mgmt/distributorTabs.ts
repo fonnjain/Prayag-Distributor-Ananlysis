@@ -362,8 +362,15 @@ export type SecondaryTabResult = {
   unattributedNote: string;       // the prominent unmatched-value statement
 };
 
+/**
+ * Month-label format accepted by the distributor-tab route handler.
+ * Exported so the route handler and guard tests share the single definition;
+ * any change here must be reflected in the route's 400 response and vice-versa.
+ */
+export const MONTH_LABEL_RE = /^[A-Z][a-z]{2}-\d{2}$/;
+
 /** Optional month-label restriction ("" = whole FY). Appends AND month_label IN (...). */
-function monthCond(months: string[] | null | undefined) {
+export function monthCond(months: string[] | null | undefined) {
   return months && months.length > 0
     ? sql` AND month_label IN (${sql.join(months.map((m) => sql`${m}`), sql`, `)})`
     : sql``;
