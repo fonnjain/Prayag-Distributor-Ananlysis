@@ -106,4 +106,5 @@
 - [Register new-tab detection](register-tab-audit.md) — unrecognised tabs are shape-tested and proposed/ignored, never read; orphan cleanup must keep policy-skipped tabs; audit failures must WARN.
 - [Distributor tabs + vocabulary recon](distributor-tabs-recon.md) — sheet↔register identity rule (never merge on spelling), territory-only primary aggregates, no prior-FY directory builds; 34.5% unattributed banner is mandatory.
 - [Project head reclassification](project-head-reclassification.md) — cross-FY mix claims need a per-customer head_canon stability check; NULL-head→project moves (MOHAN IMPEX ~₹36 Cr) evade state_canon tests.
+- [Distributor identity registry](distributor-identity-registry.md) — DIST# only merge key; distributor_identity table + resolver; ambiguous names error with candidates; trigram sim==1 pairs are strongest candidates.
 - [Comparison guard validation](comparison-guard-validation.md) — validation steps that curl the API must self-provision a disposable server when none is reachable; live data lacks a missing-cost head, so that path is unit-tested.

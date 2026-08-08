@@ -1398,6 +1398,27 @@ router.get("/mgmt/distributor-tab", async (req: Request, res: Response): Promise
       months = tokens;
     }
     if (!dist) { res.status(400).json({ error: "dist (distributor normKey) is required" }); return; }
+    // Shared identity registry: if this normKey covers more than one DIST#
+    // identity, refuse rather than silently blend two distributors' figures.
+    // FAIL CLOSED: if the registry cannot be loaded we cannot rule out an
+    // ambiguous key, so refuse (503) rather than silently blend two
+    // distributors' figures — exactly the error this guard exists to prevent.
+    try {
+      const { loadDistributorRegistry } = await import("../lib/mgmt/distributorRegistry.js");
+      const registry = await loadDistributorRegistry();
+      const resolved = registry.resolve(dist);
+      if (resolved.kind === "ambiguous") {
+        res.status(400).json({ error: resolved.message, candidates: resolved.candidates });
+        return;
+      }
+    } catch (regErr) {
+      req.log.error({ err: regErr }, "mgmt/distributor-tab: registry unavailable — failing closed");
+      res.status(503).json({
+        error:
+          "Distributor identity registry is unavailable, so this name cannot be verified as one distributor. Retry shortly.",
+      });
+      return;
+    }
     const tabs = await import("../lib/mgmt/distributorTabs.js");
     if (tab === "secondary") res.json(await tabs.buildSecondaryTab(fy, dist, months));
     else if (tab === "sku") res.json(await tabs.buildSkuEvolution(fy, dist, months));
@@ -1421,6 +1442,23 @@ router.get("/mgmt/distributor-directory", async (req: Request, res: Response): P
     if (respondIfQuotaError(err, res)) return;
     req.log.error({ err }, "mgmt/distributor-directory: handler threw");
     res.status(500).json({ error: "Could not build the distributor directory." });
+  }
+});
+
+// GET /api/mgmt/distributor-identity?fy=
+// Distributor identity report: registry counts, transacting distributors with
+// no DIST# (name+state+district identity fallback), and similar-name candidate
+// pairs with ID/state/district/value — reported for a human decision, NEVER
+// auto-merged. Pairs transacting in the same period are RESOLVED-DIFFERENT.
+router.get("/mgmt/distributor-identity", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const fy = typeof req.query.fy === "string" ? req.query.fy.trim() : "2026-27";
+    const { buildDistributorIdentityReport } = await import("../lib/mgmt/distributorRegistry.js");
+    res.json(await buildDistributorIdentityReport(fy));
+  } catch (err) {
+    if (respondIfQuotaError(err, res)) return;
+    req.log.error({ err }, "mgmt/distributor-identity: handler threw");
+    res.status(500).json({ error: "Could not build the distributor identity report." });
   }
 });
 

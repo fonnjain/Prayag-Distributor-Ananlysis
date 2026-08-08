@@ -280,6 +280,45 @@ const MIGRATIONS: Migration[] = [
       WHERE s.segment_canon IS NULL AND s.segment_raw = m.raw;
     `,
   },
+  {
+    id: "012_distributor_identity",
+    sql: `
+      -- Persisted distributor identity registry. DIST# is the only merge key;
+      -- rows without one are identified by name + state + district.
+      CREATE TABLE IF NOT EXISTS distributor_identity (
+        id          SERIAL      PRIMARY KEY,
+        dist_id     TEXT,
+        name        TEXT        NOT NULL,
+        norm_key    TEXT        NOT NULL,
+        state       TEXT,
+        district    TEXT,
+        source      TEXT        NOT NULL,
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT distributor_identity_uk UNIQUE (dist_id)
+      );
+      CREATE INDEX IF NOT EXISTS distributor_identity_norm_key_idx
+        ON distributor_identity (norm_key);
+    `,
+  },
+  {
+    id: "013_distributor_identity_alias",
+    sql: `
+      -- Alternate spellings observed in other sources (member sheets / Party TM
+      -- Map bridge, registers), each mapped to its authoritative DIST#. This is
+      -- what lets a transaction spelled differently resolve to the same identity.
+      CREATE TABLE IF NOT EXISTS distributor_identity_alias (
+        id          SERIAL      PRIMARY KEY,
+        dist_id     TEXT        NOT NULL,
+        alias       TEXT        NOT NULL,
+        norm_key    TEXT        NOT NULL,
+        source      TEXT        NOT NULL,
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT distributor_identity_alias_uk UNIQUE (dist_id, norm_key)
+      );
+      CREATE INDEX IF NOT EXISTS distributor_identity_alias_norm_key_idx
+        ON distributor_identity_alias (norm_key);
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

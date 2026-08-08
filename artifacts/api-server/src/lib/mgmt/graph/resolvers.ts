@@ -13,6 +13,7 @@ import { loadPrimaryPeriodData, fiscalMonthsToLabels } from "../primaryPeriod.js
 import { loadDeepDiveData, normSecKey } from "../deepDiveData.js";
 import { buildMemberPayload, buildStateHeadPayload } from "../aiPayload.js";
 import { loadDistributorDeepDive, normDistKey } from "../distributorDeepDive.js";
+import { loadDistributorRegistry } from "../distributorRegistry.js";
 import { loadRoster } from "../roster.js";
 import { MEMBER_FILE_MAP as memberSheetMap } from "../memberResolver.js";
 import { logger } from "../../logger.js";
@@ -357,7 +358,51 @@ async function resolveSalespersonMonth(memberName: string, fy: string, month: st
 // ── Distributor node ───────────────────────────────────────────────────────────
 
 async function resolveDistributor(distributorName: string, fy: string): Promise<GraphNode> {
-  const distKey = normDistKey(distributorName);
+  // Shared identity registry: an ambiguous name (several DIST# identities
+  // behind one normKey) fails loudly with every candidate — never first-match.
+  // FAIL CLOSED: if the registry cannot be loaded we cannot rule out an
+  // ambiguous name, so we refuse rather than fall back to name-key matching —
+  // that fallback is exactly the silent-blend this registry exists to prevent.
+  const registry = await loadDistributorRegistry().catch(() => null);
+  if (!registry) {
+    return {
+      path: `distributor/${distributorName}/${fy}`,
+      level: "distributor",
+      fy,
+      name: distributorName,
+      measures: [],
+      population: "Identity registry unavailable — cannot verify the name maps to one distributor",
+      source: "distributorRegistry",
+      cutoff: "N/A",
+      flags: [
+        "DISTRIBUTOR_IDENTITY_UNAVAILABLE: the distributor identity registry could not be loaded; refusing name-key matching because an ambiguous name would silently blend two distributors. Retry shortly.",
+      ],
+      parent: null,
+      children: [],
+      childrenSumToParent: null,
+      isGap: false,
+    };
+  }
+  const resolved = registry.resolve(distributorName);
+  if (resolved?.kind === "ambiguous") {
+    return {
+      path: `distributor/${distributorName}/${fy}`,
+      level: "distributor",
+      fy,
+      name: distributorName,
+      measures: [],
+      population: "Ambiguous distributor name — multiple identities",
+      source: "distributorRegistry",
+      cutoff: "N/A",
+      flags: [`DISTRIBUTOR_AMBIGUOUS: ${resolved.message}`],
+      parent: null,
+      children: [],
+      childrenSumToParent: null,
+      isGap: false,
+    };
+  }
+  const distKey =
+    resolved?.kind === "found" ? resolved.record.normKey : normDistKey(distributorName);
   const roster  = await loadRoster().catch(() => null);
   const heads   = roster
     ? [...new Set(roster.members.map((m) => m.stateHead).filter(Boolean))]

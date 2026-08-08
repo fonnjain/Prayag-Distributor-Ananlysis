@@ -21,6 +21,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { loadDistributorDeepDive } from "../lib/mgmt/distributorDeepDive.js";
 import { normDistKey } from "../lib/mgmt/distributorDeepDive.js";
+import { loadDistributorRegistry } from "../lib/mgmt/distributorRegistry.js";
 import {
   buildDistributorPayload,
   type DistributorAiPayload,
@@ -181,8 +182,16 @@ router.post("/ai/distributor-report", async (req: Request, res: Response): Promi
   req.log.info({ fy, stateHead, distributor }, "ai/distributor-report: request");
 
   try {
+    // Shared identity registry: an ambiguous name (multiple DIST# identities
+    // behind one normKey) errors with every candidate — never a first match.
+    const registry = await loadDistributorRegistry();
+    const resolved = registry.resolve(distributor);
+    if (resolved.kind === "ambiguous") {
+      res.status(400).json({ error: resolved.message, candidates: resolved.candidates });
+      return;
+    }
     const result = await loadDistributorDeepDive(fy, stateHead);
-    const normKey = normDistKey(distributor);
+    const normKey = resolved.kind === "found" ? resolved.record.normKey : normDistKey(distributor);
     const found = result.distributors.find((d) => d.normKey === normKey);
     if (!found) {
       res.status(404).json({ error: `Distributor '${distributor}' not found for state head '${stateHead}' in FY${fy}.` });
@@ -309,8 +318,15 @@ router.post("/ai/distributor-review", async (req: Request, res: Response): Promi
   req.log.info({ fy, stateHead, distributor }, "ai/distributor-review: request");
 
   try {
+    // Shared identity registry: ambiguous names error with candidates.
+    const registry = await loadDistributorRegistry();
+    const resolved = registry.resolve(distributor);
+    if (resolved.kind === "ambiguous") {
+      res.status(400).json({ error: resolved.message, candidates: resolved.candidates });
+      return;
+    }
     const result = await loadDistributorDeepDive(fy, stateHead);
-    const normKey = normDistKey(distributor);
+    const normKey = resolved.kind === "found" ? resolved.record.normKey : normDistKey(distributor);
     const found = result.distributors.find((d) => d.normKey === normKey);
     if (!found) {
       res.status(404).json({ error: `Distributor '${distributor}' not found for state head '${stateHead}' in FY${fy}.` });
