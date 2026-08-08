@@ -40,6 +40,7 @@ import {
   getItemMasterGapForFy,
 } from "../lib/sku/catalogue.js";
 import { fiscalMonthsToLabels } from "../lib/mgmt/primaryPeriod.js";
+import { isAdminToken } from "../lib/adminAuth.js";
 import {
   getPrimaryDiscountByCode,
   getSecondaryDiscountByCode,
@@ -918,12 +919,22 @@ router.get("/sku/lost-codes", async (req: Request, res: Response): Promise<void>
 
 const _skuBackfill: { running: boolean; log: string[] } = { running: false, log: [] };
 
-const BACKFILL_ALLOWED_FYS = new Set(["2023-24", "2024-25", "2025-26"]);
+const BACKFILL_ALLOWED_FYS = new Set(["2021-22", "2022-23", "2023-24", "2024-25", "2025-26"]);
 
 router.post("/sku/secondary-backfill", async (req: Request, res: Response): Promise<void> => {
+  // Admin auth: this route mutates (and with replace=true, destructively
+  // swaps) production analytics rows — confirm/reason params are a
+  // deliberate-action guard, not authorization.
+  const adminSecret = String(req.headers["x-admin-secret"] ?? "").trim();
+  if (!isAdminToken(adminSecret)) {
+    res.status(401).json({
+      error: "Admin authorisation required. Pass the SESSION_SECRET as: X-Admin-Secret: <SESSION_SECRET>",
+    });
+    return;
+  }
   // Deliberate-action guard, matching the frozen-register convention:
-  // requires ?confirm=true&reason=<text>. FYs are allowlisted to the three
-  // closed years with configured SKU sheets — nothing else is loadable.
+  // requires ?confirm=true&reason=<text>. FYs are allowlisted to closed
+  // years with configured SKU sheets — nothing else is loadable.
   if (req.query.confirm !== "true" || typeof req.query.reason !== "string" || !req.query.reason.trim()) {
     res.status(423).json({
       error: "secondary backfill requires ?confirm=true&reason=<text> (deliberate action guard)",
@@ -950,19 +961,29 @@ router.post("/sku/secondary-backfill", async (req: Request, res: Response): Prom
     const { loadSecSkuFromSheets, SKU_SHEET_IDS: sheetIds } = await import(
       "../lib/secondary/skuLoader.js"
     );
+    // replace=true (task 172 RET# backfill): atomic per-FY swap of the
+    // sheets-sourced rows so retailer_id gains genuine RET# values.
+    const replace = req.query.replace === "true";
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     for (const fy of fys) {
-      try {
-        const sheetId = sheetIds[fy];
-        if (!sheetId) {
-          _skuBackfill.log.push(`${fy}: no SKU sheet configured — skipped`);
-          continue;
+      const sheetId = sheetIds[fy];
+      if (!sheetId) {
+        _skuBackfill.log.push(`${fy}: no SKU sheet configured — skipped`);
+        continue;
+      }
+      // Sheets per-minute quota is shared with the live loaders — retry each
+      // FY a few times with a cool-down instead of failing the whole run.
+      for (let attempt = 1; attempt <= 4; attempt++) {
+        try {
+          const r = await loadSecSkuFromSheets(fy, sheetId, false, { replace });
+          _skuBackfill.log.push(
+            `${fy}: parsed=${r.rowsParsed} inserted=${r.rowsInserted} withRetId=${r.rowsWithRetId} tabs=${r.tabsWithItemCodes}/${r.tabs}${replace ? " (replaced)" : ""}`,
+          );
+          break;
+        } catch (err) {
+          _skuBackfill.log.push(`${fy}: attempt ${attempt} FAILED — ${String(err).slice(0, 200)}`);
+          if (attempt < 4) await sleep(90_000);
         }
-        const r = await loadSecSkuFromSheets(fy, sheetId, false);
-        _skuBackfill.log.push(
-          `${fy}: parsed=${r.rowsParsed} inserted=${r.rowsInserted} tabs=${r.tabsWithItemCodes}/${r.tabs}`,
-        );
-      } catch (err) {
-        _skuBackfill.log.push(`${fy}: FAILED — ${String(err)}`);
       }
     }
     _skuBackfill.log.push(`done ${new Date().toISOString()}`);

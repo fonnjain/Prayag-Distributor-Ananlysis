@@ -33,6 +33,7 @@ import { db } from "@workspace/db";
 import { sql, type SQL } from "drizzle-orm";
 import { logger } from "../logger.js";
 import type { DistributorGroup } from "./distributorDeepDive.js";
+import { getRetailerRegistry, normRetailerName } from "./retailerRegistry.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -295,6 +296,24 @@ export async function loadDistributorInvestment(
       }
     }
     const allRetailers = Array.from(retailerToNormKey.keys());
+
+    // Retailer identity check (task 172): secondary_register_line carries no
+    // RET#, so the discount query below matches by name (name+distributor
+    // fallback). Surface names the registry knows map to multiple RET#s —
+    // their rows may include a different retailer's discounts.
+    try {
+      const registry = await getRetailerRegistry();
+      const ambiguous = registry.ambiguousNameKeys();
+      const hits = allRetailers.filter((n) => ambiguous.has(normRetailerName(n)));
+      if (hits.length > 0) {
+        logger.warn(
+          { fy, ambiguousNames: hits.length, sample: hits.slice(0, 5) },
+          "distributorInvestment: retailer names mapping to multiple RET#s — name-keyed discount rows may mix retailers",
+        );
+      }
+    } catch (err) {
+      logger.warn({ err }, "distributorInvestment: retailer registry unavailable — ambiguity check skipped");
+    }
 
     if (allRetailers.length > 0) {
       try {

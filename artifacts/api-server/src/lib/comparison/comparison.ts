@@ -1296,7 +1296,9 @@ async function computeCell(
       if (def.id === "effectiveDiscount" || def.id === "discountVariance") {
         const d = await one(sql`
           WITH perCust AS (
-            SELECT lower(trim(retailer)) AS rk,
+            -- RET# is the retailer identity when present (task 172): same-name
+            -- distinct retailers must not merge; same-RET# spellings must not split.
+            SELECT coalesce(nullif(trim(retailer_id), ''), lower(trim(retailer))) AS rk,
                    sum(net_amount::float8) AS v,
                    sum(discount_pct::float8 * net_amount::float8) / nullif(sum(net_amount::float8), 0) AS avg_d
             FROM secondary_sku_line
@@ -1446,27 +1448,37 @@ async function computeMemberCell(
   if (def.id === "newSkusExistingCount" || def.id === "newSkusExistingValue") {
     if (!nameIn) return { value: null, note: "no members resolved for this head" };
     const bMonths = sql.join(baselineP!.monthLabels.map((l) => sql`${l}`), sql`, `);
+    // Retailer identity (task 172): match by RET# when BOTH sides carry one;
+    // fall back to the name key when either side lacks an ID. A plain
+    // coalesce key would mis-declare every pair "new" across periods with
+    // asymmetric RET# coverage.
     const r = await one(sql`
       WITH base AS (
-        SELECT DISTINCT lower(trim(retailer)) AS rk, upper(trim(item_code)) AS code
+        SELECT DISTINCT nullif(trim(retailer_id), '') AS rid, lower(trim(retailer)) AS rname, upper(trim(item_code)) AS code
         FROM secondary_sku_line
         WHERE fy = ${baselineP!.fy} AND month_label IN (${bMonths})
           AND lower(trim(head_canon)) IN (${nameIn}) AND retailer IS NOT NULL
       ),
-      base_cust AS (SELECT DISTINCT rk FROM base),
       cur AS (
-        SELECT lower(trim(retailer)) AS rk, upper(trim(item_code)) AS code,
+        SELECT nullif(trim(retailer_id), '') AS rid, lower(trim(retailer)) AS rname, upper(trim(item_code)) AS code,
                sum(net_amount::float8) AS v
         FROM secondary_sku_line
         WHERE fy = ${p.fy} AND ${monthIn(p.monthLabels)}
           AND lower(trim(head_canon)) IN (${nameIn}) AND retailer IS NOT NULL
-        GROUP BY 1, 2
+        GROUP BY 1, 2, 3
       )
       SELECT count(*)::int AS n, coalesce(sum(cur.v), 0) AS v
       FROM cur
-      JOIN base_cust USING (rk)
-      LEFT JOIN base ON base.rk = cur.rk AND base.code = cur.code
-      WHERE base.code IS NULL`);
+      WHERE EXISTS (
+        SELECT 1 FROM base b WHERE
+          CASE WHEN cur.rid IS NOT NULL AND b.rid IS NOT NULL
+               THEN b.rid = cur.rid ELSE b.rname = cur.rname END
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM base b WHERE b.code = cur.code AND
+          CASE WHEN cur.rid IS NOT NULL AND b.rid IS NOT NULL
+               THEN b.rid = cur.rid ELSE b.rname = cur.rname END
+      )`);
     return {
       value: def.id === "newSkusExistingCount" ? Number(r.n) : Number(r.v),
       note: `(retailer, code) pairs in ${p.label} where the retailer had business in the baseline ${baselineP!.label} but not this code — secondary SKU register`,

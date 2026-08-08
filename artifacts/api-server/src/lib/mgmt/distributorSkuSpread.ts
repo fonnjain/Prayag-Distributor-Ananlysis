@@ -27,6 +27,7 @@ import { sql } from "drizzle-orm";
 import { logger } from "../logger.js";
 import type { DistributorGroup } from "./distributorDeepDive.js";
 import { secondaryCoverageNote } from "./skuSpread.js";
+import { getRetailerRegistry, normRetailerName } from "./retailerRegistry.js";
 
 // ─── Broad segment universe (17 categories, from group_map.json keys) ─────────
 
@@ -151,6 +152,13 @@ export type DistributorSkuSpread = {
   concentrationHhi?: number;           // HHI (0–10000)
   matchedRetailers?: number;           // D1 retailers that appeared in secondary data
   whitespace?: WhitespaceHint[];       // ranked easiest first
+  /**
+   * D1 retailer names that the retailer registry knows map to MULTIPLE
+   * distinct RET#s (task 172). secondary_register_line carries no RET#, so
+   * name-keyed matching for these names may include rows belonging to a
+   * different retailer with the same name — surfaced, never silently merged.
+   */
+  ambiguousRetailerNames?: number;
 };
 
 // ─── Internal aggregation types ───────────────────────────────────────────────
@@ -196,6 +204,36 @@ export async function loadDistributorSkuSpread(
   }
 
   if (normToDistKey.size === 0) return;
+
+  // ── Retailer identity check (task 172) ─────────────────────────────────────
+  // secondary_register_line has no RET#, so matching below is name-keyed
+  // (name+distributor fallback). Consult the registry for names that are
+  // KNOWN to map to multiple distinct RET#s and count them per distributor —
+  // never silently merged, always surfaced.
+  const ambiguousByDist = new Map<string, number>();
+  try {
+    const registry = await getRetailerRegistry();
+    const ambiguous = registry.ambiguousNameKeys();
+    for (const g of distGroups) {
+      let n = 0;
+      for (const r of g.retailers) {
+        if (ambiguous.has(normRetailerName(r.name))) n++;
+      }
+      if (n > 0) ambiguousByDist.set(g.normKey, n);
+    }
+    if (ambiguousByDist.size > 0) {
+      logger.warn(
+        {
+          fy,
+          distributorsAffected: ambiguousByDist.size,
+          totalAmbiguousNames: [...ambiguousByDist.values()].reduce((s, n) => s + n, 0),
+        },
+        "distributorSkuSpread: retailer names mapping to multiple RET#s — name-keyed rows may include a different retailer",
+      );
+    }
+  } catch (err) {
+    logger.warn({ err }, "distributorSkuSpread: retailer registry unavailable — ambiguity check skipped");
+  }
 
   const normRetailerList = [...normToDistKey.keys()];
 
@@ -523,6 +561,8 @@ export async function loadDistributorSkuSpread(
   for (const g of distGroups) {
     const spread = spreads.get(g.normKey);
     if (spread) {
+      const amb = ambiguousByDist.get(g.normKey);
+      if (amb) spread.ambiguousRetailerNames = amb;
       (g as DistributorGroup & { skuSpread?: DistributorSkuSpread }).skuSpread = spread;
     }
   }

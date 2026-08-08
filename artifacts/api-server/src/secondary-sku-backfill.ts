@@ -30,16 +30,19 @@ type Args = {
   all: boolean;
   commit: boolean;
   catalogueOnly: boolean;
+  /** Delete the FY's sheets-sourced rows before reloading (RET# backfill). */
+  replace: boolean;
 };
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { all: false, commit: false, catalogueOnly: false };
+  const args: Args = { all: false, commit: false, catalogueOnly: false, replace: false };
   for (let i = 0; i < argv.length; i++) {
     switch (argv[i]) {
       case "--fy":       args.fy = argv[++i]; break;
       case "--all":      args.all = true; break;
       case "--commit":   args.commit = true; break;
       case "--dry-run":  args.commit = false; break;
+      case "--replace":  args.replace = true; break;
       case "--catalogue-only": args.catalogueOnly = true; break;
     }
   }
@@ -112,7 +115,11 @@ async function main(): Promise<void> {
     console.log(`   Sheet ID: ${sheetId}`);
 
     try {
-      const result = await loadSecSkuFromSheets(fy, sheetId, dryRun);
+      // --replace (task 172 RET# backfill): carry-forward changes lineUids, so
+      // the FY's sheets-sourced rows are swapped atomically inside the loader
+      // (delete+insert in one txn, only after all tabs parsed). pscode3_*
+      // sourced rows are untouched.
+      const result = await loadSecSkuFromSheets(fy, sheetId, dryRun, { replace: args.replace });
       console.log(`   Tabs total:         ${result.tabs}`);
       console.log(`   Tabs with Cat. No.: ${result.tabsWithItemCodes}`);
       console.log(`   Rows parsed:        ${result.rowsParsed.toLocaleString()}`);
@@ -121,6 +128,7 @@ async function main(): Promise<void> {
       } else {
         console.log(`   Rows inserted (new):${result.rowsInserted.toLocaleString()}`);
       }
+      console.log(`   Rows with RET#:     ${result.rowsWithRetId.toLocaleString()} (${result.rowsParsed > 0 ? Math.round((result.rowsWithRetId / result.rowsParsed) * 1000) / 10 : 0}%)`);
       if (result.noItemCode > 0) console.log(`   No Cat. No.:        ${result.noItemCode}`);
       if (result.noMonth > 0)    console.log(`   No date/month:      ${result.noMonth}`);
       if (result.skipped > 0)    console.log(`   Skipped (no value): ${result.skipped}`);

@@ -412,24 +412,29 @@ export async function buildSecondaryTab(
   const saleNames = unionNames(scope.keys, recon.saleNamesByKey);
 
   // Secondary rows for this distributor (item-code register).
+  // Retailer identity: key on RET# when the row carries one (retailer names
+  // are display-only — identical names can be different retailers), falling
+  // back to the lowercased name only for rows without an ID.
   const secAgg = secNames.length === 0 ? { rows: [] as any[] } : await db.execute<{
     item_code: string; segment: string | null; month_label: string;
-    retailer: string | null; head: string | null;
+    rkey: string | null; retailer: string | null; head: string | null;
     qty: string; net: string; gross: string;
   }>(sql`
-    SELECT item_code, segment_canon AS segment, month_label, retailer, head_canon AS head,
+    SELECT item_code, segment_canon AS segment, month_label,
+           COALESCE(NULLIF(TRIM(retailer_id), ''), LOWER(TRIM(retailer))) AS rkey,
+           MAX(retailer) AS retailer, head_canon AS head,
            SUM(qty::numeric)::text AS qty,
            SUM(net_amount::numeric)::text AS net,
            SUM(gross_amount::numeric)::text AS gross
     FROM secondary_sku_line
     WHERE fy = ${fy} AND distributor IN (${sql.join(secNames.map((n) => sql`${n}`), sql`, `)})${monthCond(months)}
-    GROUP BY item_code, segment_canon, month_label, retailer, head_canon
+    GROUP BY item_code, segment_canon, month_label, rkey, head_canon
   `);
 
   let net = 0, gross = 0;
   const byMonth = new Map<string, { net: number; retailers: Set<string> }>();
   const bySeg = new Map<string, { net: number; qty: number; codes: Set<string> }>();
-  const byRetailer = new Map<string, { net: number; salesperson: string | null }>();
+  const byRetailer = new Map<string, { name: string; net: number; salesperson: string | null }>();
   const secByCode = new Map<string, { qty: number; net: number; segment: string | null }>();
   for (const r of secAgg.rows) {
     const rNet = parseFloat(r.net) || 0, rGross = parseFloat(r.gross) || 0, rQty = parseFloat(r.qty) || 0;
@@ -437,14 +442,14 @@ export async function buildSecondaryTab(
     let m = byMonth.get(r.month_label);
     if (!m) byMonth.set(r.month_label, (m = { net: 0, retailers: new Set() }));
     m.net += rNet;
-    if (r.retailer) m.retailers.add(r.retailer);
+    if (r.rkey) m.retailers.add(r.rkey);
     const seg = r.segment ?? "Unmapped";
     let s = bySeg.get(seg);
     if (!s) bySeg.set(seg, (s = { net: 0, qty: 0, codes: new Set() }));
     s.net += rNet; s.qty += rQty; s.codes.add(r.item_code);
-    if (r.retailer) {
-      let ret = byRetailer.get(r.retailer);
-      if (!ret) byRetailer.set(r.retailer, (ret = { net: 0, salesperson: null }));
+    if (r.rkey) {
+      let ret = byRetailer.get(r.rkey);
+      if (!ret) byRetailer.set(r.rkey, (ret = { name: r.retailer ?? r.rkey, net: 0, salesperson: null }));
       ret.net += rNet;
       if (r.head) ret.salesperson = r.head;
     }
@@ -537,8 +542,8 @@ export async function buildSecondaryTab(
       net: byMonth.get(m)!.net,
       retailers: byMonth.get(m)!.retailers.size,
     })),
-    topRetailers: topRet.slice(0, 10).map(([name, v]) => ({
-      name,
+    topRetailers: topRet.slice(0, 10).map(([, v]) => ({
+      name: v.name,
       net: v.net,
       sharePct: net > 0 ? (v.net / net) * 100 : 0,
       salesperson: v.salesperson,
@@ -939,12 +944,15 @@ export async function buildPushTab(
   // Retailer activity by segment + own/territory discount norms (secondary register).
   const retBySeg = new Map<string, { name: string; net: number; salesperson: string | null }[]>();
   if (secNames.length > 0) {
+    // RET#-keyed grouping: same-name retailers under different RET#s stay
+    // distinct rows; the name is display-only (MAX picks one spelling).
     const rows = await db.execute<{ seg: string | null; retailer: string; head: string | null; net: string }>(sql`
-      SELECT segment_canon AS seg, retailer, MAX(head_canon) AS head, SUM(net_amount::numeric)::text AS net
+      SELECT segment_canon AS seg,
+             MAX(retailer) AS retailer, MAX(head_canon) AS head, SUM(net_amount::numeric)::text AS net
       FROM secondary_sku_line
       WHERE fy = ${fy} AND retailer IS NOT NULL
         AND distributor IN (${sql.join(secNames.map((n) => sql`${n}`), sql`, `)})${monthCond(months)}
-      GROUP BY segment_canon, retailer
+      GROUP BY segment_canon, COALESCE(NULLIF(TRIM(retailer_id), ''), LOWER(TRIM(retailer)))
     `);
     for (const r of rows.rows) {
       const seg = r.seg ?? "Unmapped";
@@ -1027,23 +1035,37 @@ export async function buildPushTab(
     // With a selected period, both sides use like months (prior = same fiscal
     // months of the prior FY) so the comparison stays like-for-like.
     const priorMonths = months && months.length > 0 ? toPriorYearMonths(months) : null;
+    // RET#-keyed dormancy with asymmetric-coverage-safe join semantics:
+    // match RET#-to-RET# only when BOTH sides carry an ID; when either side
+    // lacks one, fall back to normalized-name equality. A direct coalesce-key
+    // join would falsely mark a retailer dormant whenever its ID coverage
+    // differs between the two FYs.
     const rows = await db.execute<{ retailer: string; head: string | null; prior: string; cur: string }>(sql`
       WITH prior AS (
-        SELECT retailer, MAX(head_canon) AS head, SUM(net_amount::numeric) AS v
+        SELECT NULLIF(TRIM(retailer_id), '') AS rid,
+               LOWER(TRIM(retailer)) AS nname,
+               MAX(retailer) AS retailer, MAX(head_canon) AS head, SUM(net_amount::numeric) AS v
         FROM secondary_sku_line
         WHERE fy = ${priorFy} AND retailer IS NOT NULL
           AND distributor IN (${sql.join(secNames.map((n) => sql`${n}`), sql`, `)})${monthCond(priorMonths)}
-        GROUP BY retailer
+        GROUP BY 1, 2
       ), cur AS (
-        SELECT retailer, SUM(net_amount::numeric) AS v
+        SELECT NULLIF(TRIM(retailer_id), '') AS rid,
+               LOWER(TRIM(retailer)) AS nname,
+               SUM(net_amount::numeric) AS v
         FROM secondary_sku_line
         WHERE fy = ${fy} AND retailer IS NOT NULL
           AND distributor IN (${sql.join(secNames.map((n) => sql`${n}`), sql`, `)})${monthCond(months)}
-        GROUP BY retailer
+        GROUP BY 1, 2
       )
-      SELECT p.retailer, p.head, p.v::text AS prior, COALESCE(c.v,0)::text AS cur
-      FROM prior p LEFT JOIN cur c USING (retailer)
-      WHERE COALESCE(c.v,0) <= 0
+      SELECT p.retailer, p.head, p.v::text AS prior, COALESCE(SUM(c.v), 0)::text AS cur
+      FROM prior p
+      LEFT JOIN cur c ON (
+        (p.rid IS NOT NULL AND c.rid IS NOT NULL AND p.rid = c.rid)
+        OR ((p.rid IS NULL OR c.rid IS NULL) AND p.nname = c.nname)
+      )
+      GROUP BY p.rid, p.nname, p.retailer, p.head, p.v
+      HAVING COALESCE(SUM(c.v), 0) <= 0
       ORDER BY p.v DESC LIMIT 25
     `);
     for (const r of rows.rows) {

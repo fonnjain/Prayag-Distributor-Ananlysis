@@ -21,13 +21,17 @@ import { db, secondarySkuLines, type InsertSecSkuLine } from "@workspace/db";
 import { listSheetTabs, readTabRowsChunked, type SheetCellValue } from "../registers/sheetsApi.js";
 import { toMonthLabel } from "./normalize.js";
 import { canonGroupFromMap } from "../sku/catalogue.js";
+import { clearRetailerRegistry } from "../mgmt/retailerRegistry.js";
 import { logger } from "../logger.js";
 
 // ── Column header aliases ────────────────────────────────────────────────────
 
 const COL_ALIASES: Record<string, string[]> = {
   date:        ["DATE", "MONTH", "M0NTH"],
-  retailerId:  ["SR.NO", "S.NO", "S. NO.", "SNO", "RETAILER ID"],
+  // Genuine retailer identity column. Older layouts (FY2021-22/22-23) title it
+  // just "ID"; newer layouts (FY2024-25+) title it "RETAILER ID". Never SR.NO —
+  // that is a row serial, not an identity (it polluted retailer_id historically).
+  retailerId:  ["RETAILER ID", "RET#", "RET #", "RET NO", "RET. NO", "RET ID", "ID"],
   retailer:    ["RETAILER", "RETAILERS", "RETAILER NAME"],
   orderId:     ["ORDER ID", "ORDER NO"],
   segment:     ["SEGMENT", "CATEGORY", "CAT", "BRAND", "GROUP", "PRODUCTGROUP"],
@@ -52,6 +56,20 @@ function detectColumns(headerRow: SheetCellValue[]): ColMap | null {
 
   const map: ColMap = {} as ColMap;
   for (const [field, aliases] of Object.entries(COL_ALIASES)) {
+    if (field === "retailer") {
+      // Exact match only — "RETAILER ID" startsWith "RETAILER" and must NOT
+      // bind the retailer NAME column to the identity column.
+      map.retailer = normalized.findIndex((h) => aliases.includes(h));
+      continue;
+    }
+    if (field === "retailerId") {
+      // "ID" must be an exact header match (startsWith would be too loose),
+      // and the retailerId column must never be the SR.NO serial column.
+      map.retailerId = normalized.findIndex(
+        (h) => h === "ID" || h === "RETAILER ID" || h.startsWith("RET#") || h.startsWith("RET #") || h === "RET NO" || h === "RET. NO" || h === "RET ID",
+      );
+      continue;
+    }
     map[field as keyof ColMap] = find(aliases);
   }
 
@@ -74,6 +92,17 @@ function cellNum(v: SheetCellValue): number | null {
 /** Simple key normalisation: lowercase + collapse whitespace. */
 function normKey(raw: string): string {
   return raw.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Normalise a genuine retailer identity value: "ret# 12345" → "RET#12345".
+ * Returns null for anything that is not a RET# value (e.g. a bare row serial),
+ * so a mis-detected serial column can never pollute retailer_id again.
+ */
+export function normaliseRetId(raw: string): string | null {
+  const v = raw.toUpperCase().replace(/\s+/g, "");
+  const m = v.match(/^RET#?(\d+)$/);
+  return m ? `RET#${m[1]}` : null;
 }
 
 // ── Line UID ─────────────────────────────────────────────────────────────────
@@ -100,15 +129,16 @@ type ParseResult = {
   skipped: number;
   noItemCode: number;
   noMonth: number;
+  rowsWithRetId: number;
 };
 
-function parseTab(
+export function parseTab(
   tabTitle: string,
   rawRows: SheetCellValue[][],
   fy: string,
   sheetId: string,
 ): ParseResult {
-  const result: ParseResult = { rows: [], skipped: 0, noItemCode: 0, noMonth: 0 };
+  const result: ParseResult = { rows: [], skipped: 0, noItemCode: 0, noMonth: 0, rowsWithRetId: 0 };
 
   // Find the header row (first row where we can detect itemCode column).
   let cols: ColMap | null = null;
@@ -126,6 +156,19 @@ function parseTab(
   // Occurrence counter: counts rows sharing the same natural key.
   const occurrenceMap = new Map<string, number>();
 
+  // Merged-cell carry-forward. RET#, Date, Order ID, Segment, Retailer and
+  // Distributor are MERGED cells in these registers: the Sheets API returns a
+  // value only on the first row of each merge block and null on the rest.
+  // Without carry-forward, RET# coverage reads ~15% instead of ~100%.
+  const carry: {
+    date: SheetCellValue;
+    retailer: string;
+    retailerId: string | null;
+    distributor: string;
+    segmentRaw: string;
+    headRaw: string;
+  } = { date: null, retailer: "", retailerId: null, distributor: "", segmentRaw: "", headRaw: "" };
+
   for (let i = dataStart; i < rawRows.length; i++) {
     const cells = rawRows[i];
     if (!cells || cells.every((c) => c == null || String(c).trim() === "")) continue;
@@ -133,15 +176,35 @@ function parseTab(
     const itemCode = cellStr(cells[cols.itemCode] ?? null);
     if (!itemCode) { result.noItemCode++; continue; }
 
-    const dateVal = cols.date >= 0 ? cells[cols.date] : null;
-    const monthLabel = toMonthLabel(dateVal ?? null, fy);
+    // Retailer name drives the carry group: a non-blank name starts a new
+    // merge block, so the carried RET# from the previous block must never
+    // leak into a new block whose own RET# cell is blank.
+    const retailerRaw = cols.retailer >= 0 ? cellStr(cells[cols.retailer] ?? null) : "";
+    const retIdRaw    = cols.retailerId >= 0 ? cellStr(cells[cols.retailerId] ?? null) : "";
+    if (retailerRaw) {
+      carry.retailer = retailerRaw;
+      carry.retailerId = retIdRaw ? normaliseRetId(retIdRaw) : null;
+    } else if (retIdRaw) {
+      carry.retailerId = normaliseRetId(retIdRaw);
+    }
+
+    const rawDate = cols.date >= 0 ? cells[cols.date] : null;
+    if (rawDate != null && String(rawDate).trim() !== "") carry.date = rawDate;
+    const distRaw = cols.distributor >= 0 ? cellStr(cells[cols.distributor] ?? null) : "";
+    if (distRaw) carry.distributor = distRaw;
+    const segRaw = cols.segment >= 0 ? cellStr(cells[cols.segment] ?? null) : "";
+    if (segRaw) carry.segmentRaw = segRaw;
+    const headRawCell = cols.head >= 0 ? cellStr(cells[cols.head] ?? null) : "";
+    if (headRawCell) carry.headRaw = headRawCell;
+
+    const monthLabel = toMonthLabel(carry.date ?? null, fy);
     if (!monthLabel) { result.noMonth++; continue; }
 
-    const retailer   = cols.retailer >= 0 ? cellStr(cells[cols.retailer] ?? null) : "";
-    const retailerId = cols.retailerId >= 0 ? cellStr(cells[cols.retailerId] ?? null) : null;
-    const distributor= cols.distributor >= 0 ? cellStr(cells[cols.distributor] ?? null) : "";
-    const headRaw    = cols.head >= 0 ? cellStr(cells[cols.head] ?? null) : "";
-    const segmentRaw = cols.segment >= 0 ? cellStr(cells[cols.segment] ?? null) : null;
+    const retailer   = carry.retailer;
+    const retailerId = carry.retailerId;
+    const distributor= carry.distributor;
+    const headRaw    = carry.headRaw;
+    const segmentRaw = carry.segmentRaw || null;
     const qty        = cols.qty >= 0 ? cellNum(cells[cols.qty] ?? null) : null;
     const mrp        = cols.mrp >= 0 ? cellNum(cells[cols.mrp] ?? null) : null;
     const grossAmt   = cols.grossAmount >= 0 ? cellNum(cells[cols.grossAmount] ?? null) : null;
@@ -182,6 +245,7 @@ function parseTab(
       discountPct: discountPct != null ? String(discountPct) : null,
       source: `sheets_sku_backfill:${sheetId}`,
     });
+    if (retailerId) result.rowsWithRetId++;
   }
 
   return result;
@@ -218,6 +282,7 @@ export type SkuLoadResult = {
   noItemCode: number;
   noMonth: number;
   skipped: number;
+  rowsWithRetId: number;
   dryRun: boolean;
 };
 
@@ -227,12 +292,55 @@ export type SkuLoadResult = {
  * dryRun=true (default): parses and validates but writes nothing.
  * dryRun=false: inserts into secondary_sku_line (ON CONFLICT DO NOTHING).
  */
+// ── Replace-mode sanity gate (pure, unit-tested) ──────────────────────────────
+//
+// Guards the destructive delete in replace mode. A successfully *read* but
+// unparseable/empty/truncated workbook must never replace existing rows.
+
+export const REPLACE_MIN_ROWS = 1_000;
+export const REPLACE_MIN_RETID_COVERAGE = 0.9;
+export const REPLACE_MIN_EXISTING_RATIO = 0.5;
+
+export function checkReplaceSanity(input: {
+  rowsParsed: number;
+  rowsWithRetId: number;
+  tabsWithItemCodes: number;
+  existingRows: number;
+}): { ok: true } | { ok: false; reason: string } {
+  const { rowsParsed, rowsWithRetId, tabsWithItemCodes, existingRows } = input;
+  if (tabsWithItemCodes < 1) {
+    return { ok: false, reason: "no data tab with item codes was found in the workbook" };
+  }
+  if (rowsParsed < REPLACE_MIN_ROWS) {
+    return {
+      ok: false,
+      reason: `only ${rowsParsed} rows parsed (< ${REPLACE_MIN_ROWS} minimum) — workbook looks empty or malformed`,
+    };
+  }
+  const coverage = rowsWithRetId / rowsParsed;
+  if (coverage < REPLACE_MIN_RETID_COVERAGE) {
+    return {
+      ok: false,
+      reason: `RET# coverage ${(coverage * 100).toFixed(1)}% is below ${REPLACE_MIN_RETID_COVERAGE * 100}% — carry-forward or column detection likely broke`,
+    };
+  }
+  if (existingRows > 0 && rowsParsed < existingRows * REPLACE_MIN_EXISTING_RATIO) {
+    return {
+      ok: false,
+      reason: `parsed ${rowsParsed} rows but ${existingRows} rows already exist (< ${REPLACE_MIN_EXISTING_RATIO * 100}% of existing) — refusing a suspiciously small replacement`,
+    };
+  }
+  return { ok: true };
+}
+
 export async function loadSecSkuFromSheets(
   fy: string,
   sheetId: string,
   dryRun = true,
+  opts: { replace?: boolean } = {},
 ): Promise<SkuLoadResult> {
-  logger.info({ fy, sheetId, dryRun }, "skuLoader: starting");
+  const replace = opts.replace === true && !dryRun;
+  logger.info({ fy, sheetId, dryRun, replace }, "skuLoader: starting");
 
   const tabs = await listSheetTabs(sheetId);
   logger.info({ fy, sheetId, tabCount: tabs.length }, "skuLoader: tabs discovered");
@@ -243,6 +351,11 @@ export async function loadSecSkuFromSheets(
   let totalNoItemCode = 0;
   let totalNoMonth = 0;
   let totalSkipped = 0;
+  let totalWithRetId = 0;
+  // replace mode: buffer every parsed row so the delete+insert happens in one
+  // transaction only after ALL Sheets reads succeeded — a mid-read quota
+  // failure must never leave the FY half-loaded.
+  const bufferedRows: InsertSecSkuLine[] = [];
 
   for (const tab of tabs) {
     // Skip obviously non-data tabs by title.
@@ -281,8 +394,16 @@ export async function loadSecSkuFromSheets(
     totalNoMonth += parseResult.noMonth;
     totalSkipped += parseResult.skipped;
     totalParsed += parseResult.rows.length;
+    totalWithRetId += parseResult.rowsWithRetId;
 
-    const inserted = await insertBatch(parseResult.rows, dryRun);
+    let inserted: number;
+    if (replace) {
+      // push(...rows) overflows the call stack on 300k-row tabs — loop instead.
+      for (const r of parseResult.rows) bufferedRows.push(r);
+      inserted = parseResult.rows.length; // written after all tabs parse
+    } else {
+      inserted = await insertBatch(parseResult.rows, dryRun);
+    }
     totalInserted += inserted;
 
     logger.info(
@@ -297,6 +418,42 @@ export async function loadSecSkuFromSheets(
     );
   }
 
+  if (replace) {
+    // Fail-closed sanity gate: atomicity alone would happily replace an FY
+    // with a bad-but-complete parse. Refuse to delete anything unless the
+    // parsed set looks like a genuine full workbook.
+    const existingRes = await db.execute<{ n: string }>(
+      sqlRaw`SELECT COUNT(*)::text AS n FROM secondary_sku_line WHERE fy = ${fy} AND source LIKE 'sheets_sku_backfill:%'`,
+    );
+    const existingRows = parseInt(existingRes.rows[0]?.n ?? "0", 10);
+    const gate = checkReplaceSanity({
+      rowsParsed: totalParsed,
+      rowsWithRetId: totalWithRetId,
+      tabsWithItemCodes,
+      existingRows,
+    });
+    if (!gate.ok) {
+      throw new Error(`skuLoader: replace refused for FY${fy} — ${gate.reason}`);
+    }
+    // All tabs parsed successfully — atomic swap of the FY's sheets-sourced rows.
+    totalInserted = 0;
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sqlRaw`DELETE FROM secondary_sku_line WHERE fy = ${fy} AND source LIKE 'sheets_sku_backfill:%'`,
+      );
+      for (let i = 0; i < bufferedRows.length; i += INSERT_BATCH) {
+        const batch = bufferedRows.slice(i, i + INSERT_BATCH);
+        const inserted = await tx
+          .insert(secondarySkuLines)
+          .values(batch)
+          .onConflictDoNothing()
+          .returning({ lineUid: secondarySkuLines.lineUid });
+        totalInserted += inserted.length;
+      }
+    });
+    logger.info({ fy, replaced: bufferedRows.length, inserted: totalInserted }, "skuLoader: replace txn committed");
+  }
+
   const result: SkuLoadResult = {
     fy,
     sheetId,
@@ -307,6 +464,7 @@ export async function loadSecSkuFromSheets(
     noItemCode: totalNoItemCode,
     noMonth: totalNoMonth,
     skipped: totalSkipped,
+    rowsWithRetId: totalWithRetId,
     dryRun,
   };
 
@@ -349,6 +507,7 @@ const FY_DATA_TTL_MS = 10 * 60 * 1000;
 export function clearSecondarySkuFyCache(): void {
   fyDataCache.clear();
   fyMonthsCache.clear();
+  clearRetailerRegistry();
 }
 
 /** True when secondary_sku_line has at least one row for the FY (10-min cache). */

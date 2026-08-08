@@ -1332,6 +1332,21 @@ router.get("/mgmt/retailer-drift", async (req: Request, res: Response): Promise<
   }
 });
 
+// GET /api/mgmt/retailer-identity
+// Task 172: retailer identity acceptance report — distinct RET# per FY,
+// RET#s with multiple spellings (ONE retailer each), same-name distinct
+// RET#s (RESOLVED-DIFFERENT — reported, never merged), and rows still
+// resolving via the name+geography fallback.
+router.get("/mgmt/retailer-identity", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { buildRetailerIdentityReport } = await import("../lib/mgmt/retailerRegistry.js");
+    res.json(await buildRetailerIdentityReport());
+  } catch (err) {
+    req.log.error({ err }, "mgmt/retailer-identity: handler threw");
+    res.status(500).json({ error: "Could not build retailer identity report." });
+  }
+});
+
 // GET /api/mgmt/distributor-deep-dive
 // Phase D1: groups retailer rows from all member working sheets under a state
 // head by their Assigned Distributor field.

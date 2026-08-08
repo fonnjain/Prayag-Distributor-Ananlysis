@@ -71,6 +71,18 @@ vi.mock("./distributorDirectory.js", () => ({
         orderBooking: 0,
         sale: 0,
       },
+      {
+        // Isolated fixture distributor for the RET# identity regression tests
+        // (keeps their rows out of the month-filter total assertions above).
+        name: "MOCK RETID DISTRIBUTOR",
+        normKey: "MOCK RETID DISTRIBUTOR",
+        states: [],
+        heads: [],
+        retailerCount: 0,
+        activeCount: 0,
+        orderBooking: 0,
+        sale: 0,
+      },
     ],
     builtAt: 0,
   }),
@@ -91,6 +103,7 @@ vi.mock("./distributorDeepDive.js", async (importActual) => {
 // ── Test fixtures ─────────────────────────────────────────────────────────────
 const SCHEMA = "dashboard_test";
 const TEST_DIST = "MOCK TEST DISTRIBUTOR";  // raw name = normKey for this fixture
+const RETID_DIST = "MOCK RETID DISTRIBUTOR"; // isolated RET# identity fixtures
 const CUR_FY  = "1900-01";                  // current FY — no real data at this key
 const BASE_FY = "1899-00";                  // prevFyLabel(CUR_FY) — baseline FY
 
@@ -124,6 +137,10 @@ beforeAll(async () => {
       source        text NOT NULL DEFAULT 'test'
     )
   `);
+  // Older test schemas predate the RET# identity column.
+  await pool.query(
+    `ALTER TABLE ${SCHEMA}.secondary_sku_line ADD COLUMN IF NOT EXISTS retailer_id text`,
+  );
 
   // Minimal sale_line_current table — empty; primary queries return no rows
   // (buildSecondaryTab proceeds with primaryMatched=false, which is valid).
@@ -194,6 +211,47 @@ beforeAll(async () => {
        ('g-p-b1', $1, 'Apr-25', $2, 'RETAILER-A', 'CODE1', 'SegA', 700, 770, 'test'),
        ('g-p-b2', $1, 'Jun-25', $2, 'RETAILER-C', 'CODE1', 'SegA', 500, 550, 'test')`,
     [BASE_FY, TEST_DIST],
+  );
+
+  // ── RET# identity regression fixtures ──────────────────────────────────────
+  // Two DIFFERENT retailers sharing the identical display name "TWIN STORES":
+  //   RET#111 — active in CUR_FY Apr-26 (net 400)
+  //   RET#222 — active in CUR_FY Apr-26 (net 250)
+  // If retailer aggregation keys on the name, they'd collapse into one 650
+  // entry. RET#-keyed aggregation must keep them distinct.
+  //
+  // Dormancy pair: display name "GHOST MART" —
+  //   RET#333 had BASE_FY Apr-25 sales and NOTHING in CUR_FY → dormant.
+  //   RET#444 (same name!) is active in CUR_FY Apr-26.
+  // A name-keyed prior⋈cur join would let RET#444's activity mask RET#333's
+  // dormancy; the RET#-keyed join must still report GHOST MART as dormant.
+  await pool.query(
+    `INSERT INTO ${SCHEMA}.secondary_sku_line
+       (line_uid, fy, month_label, distributor, retailer, retailer_id, item_code, segment_canon,
+        net_amount, gross_amount, source)
+     VALUES
+       ('g-r-c1', $1, 'Apr-26', $3, 'TWIN STORES', 'RET#111', 'CODE1', 'SegA', 400, 440, 'test'),
+       ('g-r-c2', $1, 'Apr-26', $3, 'TWIN STORES', 'RET#222', 'CODE1', 'SegA', 250, 275, 'test'),
+       ('g-r-c3', $1, 'Apr-26', $3, 'GHOST MART',  'RET#444', 'CODE2', 'SegA', 100, 110, 'test'),
+       ('g-r-b1', $2, 'Apr-25', $3, 'GHOST MART',  'RET#333', 'CODE1', 'SegA', 900, 990, 'test')`,
+    [CUR_FY, BASE_FY, RETID_DIST],
+  );
+
+  // Asymmetric ID coverage across FYs (must NOT be reported dormant):
+  //   LEGACY SHOP — prior FY row HAS RET#555, current FY row has NO id but is
+  //                 active. A coalesce-key join would miss the match.
+  //   NEWID SHOP  — prior FY row has NO id, current FY row HAS RET#666 and is
+  //                 active. Same trap in the other direction.
+  await pool.query(
+    `INSERT INTO ${SCHEMA}.secondary_sku_line
+       (line_uid, fy, month_label, distributor, retailer, retailer_id, item_code, segment_canon,
+        net_amount, gross_amount, source)
+     VALUES
+       ('g-a-b1', $2, 'Apr-25', $3, 'LEGACY SHOP', 'RET#555', 'CODE1', 'SegA', 600, 660, 'test'),
+       ('g-a-c1', $1, 'Apr-26', $3, 'LEGACY SHOP', NULL,      'CODE1', 'SegA', 150, 165, 'test'),
+       ('g-a-b2', $2, 'Apr-25', $3, 'NEWID SHOP',  NULL,      'CODE1', 'SegA', 450, 495, 'test'),
+       ('g-a-c2', $1, 'Apr-26', $3, 'NEWID SHOP',  'RET#666', 'CODE1', 'SegA', 120, 132, 'test')`,
+    [CUR_FY, BASE_FY, RETID_DIST],
   );
 });
 
@@ -646,6 +704,16 @@ describe("buildPushTab — unassignedByMember is always full-FY (snapshot-source
           orderBooking: 0,
           sale: 0,
         },
+        {
+          name: RETID_DIST,
+          normKey: RETID_DIST,
+          states: [],
+          heads: [],
+          retailerCount: 0,
+          activeCount: 0,
+          orderBooking: 0,
+          sale: 0,
+        },
       ],
       builtAt: 0,
     });
@@ -721,5 +789,64 @@ describe("buildPushTab — unassignedByMember is always full-FY (snapshot-source
     for (const args of calls) {
       expect(args).toHaveLength(2);
     }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 5. RET# RETAILER IDENTITY — no silent merge on identical display names
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Fixtures (distributor = MOCK RETID DISTRIBUTOR, isolated from the totals
+// assertions above):
+//   TWIN STORES  RET#111  CUR_FY Apr-26 net 400
+//   TWIN STORES  RET#222  CUR_FY Apr-26 net 250   ← same name, DIFFERENT retailer
+//   GHOST MART   RET#444  CUR_FY Apr-26 net 100
+//   GHOST MART   RET#333  BASE_FY Apr-25 net 900  ← same name, no CUR_FY sales
+//
+// Invariants: name-keyed aggregation would collapse TWIN STORES into one 650
+// entry and let RET#444's activity mask RET#333's dormancy. RET#-keyed logic
+// must keep counts, values, and dormant status distinct.
+
+describe("buildSecondaryTab — RET# identity keeps same-name retailers distinct", () => {
+  it("two TWIN STORES RET#s count as two retailers with separate values", async () => {
+    const result = await buildSecondaryTab(CUR_FY, RETID_DIST, null);
+    // TWIN STORES ×2 + GHOST MART (RET#444) + LEGACY SHOP (name-keyed, no ID)
+    // + NEWID SHOP (RET#666) = 5 distinct retailers.
+    expect(result.retailerCount).toBe(5);
+    expect(result.activeRetailerCount).toBe(5);
+    const twins = result.topRetailers.filter((r) => r.name === "TWIN STORES");
+    expect(twins).toHaveLength(2);
+    expect(twins.map((t) => t.net).sort((a, b) => a - b)).toEqual([250, 400]);
+    // No merged 650 entry.
+    expect(result.topRetailers.some((r) => r.net === 650)).toBe(false);
+  });
+
+  it("monthly retailer counts use identity keys, not names", async () => {
+    const result = await buildSecondaryTab(CUR_FY, RETID_DIST, ["Apr-26"]);
+    const apr = result.monthly.find((m) => m.month === "Apr-26");
+    expect(apr?.retailers).toBe(5);
+  });
+});
+
+describe("buildPushTab — RET#-keyed dormancy is not masked by a same-name active retailer", () => {
+  it("GHOST MART (RET#333) is dormant even though RET#444 (same name) is active", async () => {
+    const result = await buildPushTab(CUR_FY, RETID_DIST, null);
+    const ghost = result.coverage.dormantRetailers.find((r) => r.name === "GHOST MART");
+    expect(ghost).toBeDefined();
+    expect(ghost?.priorYearValue).toBe(900);
+    // TWIN STORES has no prior-FY activity — must not be reported dormant.
+    expect(result.coverage.dormantRetailers.some((r) => r.name === "TWIN STORES")).toBe(false);
+  });
+
+  it("asymmetric ID coverage does not create false dormancy (ID in prior, none in current)", async () => {
+    // LEGACY SHOP: prior FY carries RET#555, current FY row has no ID but is
+    // active — the conditional join must fall back to name equality.
+    const result = await buildPushTab(CUR_FY, RETID_DIST, null);
+    expect(result.coverage.dormantRetailers.some((r) => r.name === "LEGACY SHOP")).toBe(false);
+  });
+
+  it("asymmetric ID coverage does not create false dormancy (no ID in prior, ID in current)", async () => {
+    const result = await buildPushTab(CUR_FY, RETID_DIST, null);
+    expect(result.coverage.dormantRetailers.some((r) => r.name === "NEWID SHOP")).toBe(false);
   });
 });
