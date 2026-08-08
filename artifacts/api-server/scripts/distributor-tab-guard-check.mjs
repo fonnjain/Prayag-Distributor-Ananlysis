@@ -249,6 +249,24 @@ if (distKey) {
   }
 }
 
+// ── 9. Push tab: invalid months → 400 ────────────────────────────────────────
+// The push tab honours the same months-validation path as secondary/sku tabs.
+// This check confirms it is wired identically at the route level; the
+// dormant-retailer prior-year scoping logic is covered by the DB-seeded vitest
+// tests in src/lib/mgmt/distributorTabs.test.ts.
+{
+  const r = await safeFetch(
+    `${base}/mgmt/distributor-tab?fy=2026-27&dist=some-key&tab=push&months=invalid-token`,
+    {}, VALIDATION_TIMEOUT_MS,
+  );
+  check("push tab: invalid months token returns HTTP 400", r.status === 400, `status=${r.status}`);
+  if (r.status === 400) {
+    const body = await r.json().catch(() => ({}));
+    check("push tab: 400 body mentions 'months'", /months/i.test(body.error ?? ""),
+      `body=${JSON.stringify(body).slice(0, 200)}`);
+  }
+}
+
 console.log(
   failures === 0
     ? "\nAll distributor-tab guard checks passed."

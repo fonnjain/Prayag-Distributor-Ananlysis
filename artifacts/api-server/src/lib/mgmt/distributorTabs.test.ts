@@ -38,6 +38,7 @@ import {
   monthCond,
   buildSecondaryTab,
   buildSkuEvolution,
+  buildPushTab,
 } from "./distributorTabs.js";
 import { toPriorYearMonths } from "./distributorDeepDive.js";
 
@@ -145,6 +146,31 @@ beforeAll(async () => {
      VALUES
        ('g-b1', $1, 'Apr-25', $2, 'CODE1', 'SegA', 700, 770, 'test'),
        ('g-b2', $1, 'May-25', $2, 'CODE1', 'SegA', 300, 330, 'test')`,
+    [BASE_FY, TEST_DIST],
+  );
+
+  // Seed retailer rows for the push-tab dormant-retailer test.
+  //
+  // BASE_FY retailer data:
+  //   RETAILER-A: active in Apr-25 (inside toPriorYearMonths(["Apr-26","May-26"]))
+  //   RETAILER-C: active in Jun-25 ONLY (OUTSIDE toPriorYearMonths(["Apr-26","May-26"]))
+  //
+  // Neither retailer has any CUR_FY activity in Apr-26/May-26, so the
+  // dormancy condition (COALESCE(cur.v,0)=0) holds for both.
+  //
+  // The regression invariant:
+  //   With months=["Apr-26","May-26"], priorMonths=["Apr-25","May-25"] →
+  //   RETAILER-A appears (Apr-25 is in prior months) but RETAILER-C does not
+  //   (Jun-25 is NOT in prior months).
+  //   If the months argument is silently dropped from the prior-FY query,
+  //   RETAILER-C would appear — and the "not.toContain" assertion below fails.
+  await pool.query(
+    `INSERT INTO ${SCHEMA}.secondary_sku_line
+       (line_uid, fy, month_label, distributor, retailer, item_code, segment_canon,
+        net_amount, gross_amount, source)
+     VALUES
+       ('g-p-b1', $1, 'Apr-25', $2, 'RETAILER-A', 'CODE1', 'SegA', 700, 770, 'test'),
+       ('g-p-b2', $1, 'Jun-25', $2, 'RETAILER-C', 'CODE1', 'SegA', 500, 550, 'test')`,
     [BASE_FY, TEST_DIST],
   );
 });
@@ -398,5 +424,63 @@ describe("buildSkuEvolution — baseline months through the full query chain", (
     expect(side.totalBaseline).toBeGreaterThan(0);
     // And existing SKU (CODE1 present in both sides) must be found.
     expect(side.existing.codes).toBeGreaterThan(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 4. buildPushTab — DORMANT RETAILER PRIOR-YEAR MONTH SCOPING
+//
+//    Regression guard for the priorMonths path in buildPushTab (~line 1001):
+//      const priorMonths = months && months.length > 0 ? toPriorYearMonths(months) : null;
+//
+//    The dormant-retailer query gates the prior-FY side on monthCond(priorMonths).
+//    If the months argument is silently dropped, the prior query widens to the
+//    full prior FY and RETAILER-C (Jun-25 only) would appear as dormant even
+//    when months=["Apr-26","May-26"].  The "not.toContain" assertion catches it.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("buildPushTab — dormant-retailer prior-year month scoping", () => {
+  it("RETAILER-A (Apr-25 active) appears in dormant when Apr-26/May-26 selected", async () => {
+    // RETAILER-A has BASE_FY Apr-25 activity but no CUR_FY Apr-26/May-26
+    // activity → must appear in dormantRetailers.
+    const result = await buildPushTab(CUR_FY, TEST_DIST, ["Apr-26", "May-26"]);
+    const names = result.coverage.dormantRetailers.map((r) => r.name);
+    expect(names).toContain("RETAILER-A");
+  });
+
+  it("RETAILER-C (Jun-25 only) is absent from dormant when Apr-26/May-26 selected", async () => {
+    // toPriorYearMonths(["Apr-26","May-26"]) = ["Apr-25","May-25"].
+    // Jun-25 is NOT in that window, so RETAILER-C must be excluded from the
+    // prior-FY CTE.  If monthCond(priorMonths) is dropped, RETAILER-C appears
+    // and this assertion fails — catching the regression.
+    const result = await buildPushTab(CUR_FY, TEST_DIST, ["Apr-26", "May-26"]);
+    const names = result.coverage.dormantRetailers.map((r) => r.name);
+    expect(names).not.toContain("RETAILER-C");
+  });
+
+  it("RETAILER-C does appear in dormant when no months selected (full prior FY)", async () => {
+    // Confirm the test data is structurally sound: with months=null, priorMonths
+    // is null (no restriction) and Jun-25 is in scope — RETAILER-C must appear.
+    const result = await buildPushTab(CUR_FY, TEST_DIST, null);
+    const names = result.coverage.dormantRetailers.map((r) => r.name);
+    expect(names).toContain("RETAILER-C");
+  });
+
+  it("prior-year value of RETAILER-A comes from Apr-25 only (700), not wider window", async () => {
+    // Guards against a silent month-widening that would accumulate more than the
+    // Apr-25 row's net_amount (700) into priorYearValue.
+    const result = await buildPushTab(CUR_FY, TEST_DIST, ["Apr-26", "May-26"]);
+    const entry = result.coverage.dormantRetailers.find((r) => r.name === "RETAILER-A");
+    expect(entry).toBeDefined();
+    expect(entry!.priorYearValue).toBe(700);
+  });
+
+  it("a different month selection shifts the prior window accordingly", async () => {
+    // When only Jun-26 is selected, priorMonths = ["Jun-25"] → RETAILER-C (Jun-25)
+    // becomes eligible and RETAILER-A (Apr-25 only) is excluded.
+    const result = await buildPushTab(CUR_FY, TEST_DIST, ["Jun-26"]);
+    const names = result.coverage.dormantRetailers.map((r) => r.name);
+    expect(names).toContain("RETAILER-C");
+    expect(names).not.toContain("RETAILER-A");
   });
 });
