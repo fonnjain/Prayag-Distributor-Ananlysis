@@ -392,7 +392,7 @@ router.get("/sku/trend", async (req: Request, res: Response): Promise<void> => {
     const result =
       scope === "company" && !segment && !monthNames
         ? await serveWithSnapshot({
-            key: `sku-trend-v2|${level}`,
+            key: `sku-trend-v4|${level}`,
             ttlMs: SKU_SNAPSHOT_TTL_MS,
             build,
             log: req.log,

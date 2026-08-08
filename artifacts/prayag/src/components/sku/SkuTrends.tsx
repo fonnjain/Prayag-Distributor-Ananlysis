@@ -34,6 +34,24 @@ export type TrendFyRow = {
   net: number;
 };
 
+export type TrendChannelMover = {
+  customer: string;
+  direction: "territory_to_project" | "project_to_territory";
+  netFrom: number;
+  netTo: number;
+};
+
+export type TrendChannelMoverPair = {
+  fromFy: string;
+  toFy: string;
+  sameChannel: number;
+  channelChanged: number;
+  newCustomers: number;
+  movers: TrendChannelMover[];
+  netChangedTo: number;
+  netChangedFrom: number;
+};
+
 export type TrendData = {
   level: string;
   fys: string[];
@@ -42,6 +60,7 @@ export type TrendData = {
   monthly: TrendMonthRow[];
   fyTotals: TrendFyRow[];
   fyNetTotals: Record<string, number>;
+  channelMovers?: TrendChannelMoverPair[] | null;
 };
 
 interface Props {
@@ -428,6 +447,65 @@ export default function SkuTrends({ data }: Props) {
             ` Total net per FY: ${fys.map((fy) => `${fy} ${fmtCr(fyNetTotals[fy] ?? 0)}`).join(", ")}.`}
         </p>
       </div>
+
+      <ChannelMoversNote pairs={data.channelMovers ?? null} level={data.level} />
+    </div>
+  );
+}
+
+// ── Channel movers disclosure ─────────────────────────────────────────────────
+//
+// Customers whose head classification switched between territory and
+// project/govt across two compared FYs move their entire book across the
+// comparison boundary — the mix shifts above are then partly attribution,
+// not trade. Disclose them so the reader knows the comparison basis changed.
+
+function ChannelMoversNote({
+  pairs,
+  level,
+}: {
+  pairs: TrendChannelMoverPair[] | null;
+  level: string;
+}) {
+  const relevant = (pairs ?? []).filter((p) => p.channelChanged > 0);
+  if (relevant.length === 0) return null;
+
+  return (
+    <div className="rounded-md border border-amber-300/50 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700/40 p-3 space-y-2">
+      <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+        Channel movers — comparison basis changed
+      </p>
+      <p className="text-xs text-amber-800/90 dark:text-amber-200/80">
+        The following customers were classified {level === "project" ? "outside" : "inside"} the
+        territory channel in one FY and moved {level === "project" ? "into" : "out of"} the
+        project/govt channel in the next (or vice-versa). Their figures sit on different sides
+        of the FY comparison above, so part of the mix shift is attribution, not trade.
+      </p>
+      {relevant.map((p) => (
+        <div key={`${p.fromFy}-${p.toFy}`} className="text-xs text-amber-900 dark:text-amber-100">
+          <p className="font-medium">
+            FY {p.fromFy} → FY {p.toFy}: {p.channelChanged} customer
+            {p.channelChanged === 1 ? "" : "s"} switched channel
+            {" "}({fmtCr(p.netChangedTo)} of FY {p.toFy} net; {fmtCr(p.netChangedFrom)} in FY {p.fromFy}).
+            {" "}{p.sameChannel} unchanged, {p.newCustomers} new.
+          </p>
+          {p.movers.length > 0 && (
+            <ul className="mt-1 space-y-0.5 pl-4 list-disc">
+              {p.movers.map((m) => (
+                <li key={m.customer}>
+                  <span className="font-medium">{m.customer}</span>
+                  {" — "}
+                  {m.direction === "territory_to_project"
+                    ? "territory → project/govt"
+                    : "project/govt → territory"}
+                  {": "}
+                  {fmtCr(m.netFrom)} (FY {p.fromFy}) vs {fmtCr(m.netTo)} (FY {p.toFy})
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

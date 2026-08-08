@@ -36,6 +36,14 @@ import {
   resolvePriorEntityFilter,
   type EntityFilter,
 } from "../saleLineFilter.js";
+import {
+  buildChannelMoverPairs,
+  type MoverCustRow,
+  type SkuChannelMover,
+  type SkuChannelMoverPair,
+} from "./channelMovers.js";
+
+export type { SkuChannelMover, SkuChannelMoverPair };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -702,6 +710,15 @@ export type SkuTrendResult = {
   monthly: SkuTrendMonthRow[];
   fyTotals: SkuTrendFyRow[];
   fyNetTotals: Record<string, number>;
+  /**
+   * Channel-mover disclosure (primary levels only; null for retailer or when
+   * the check could not run). A customer whose head_canon moves between NULL/
+   * territory and the project head across two FYs shifts their whole book
+   * across the territory-vs-project comparison boundary — the mix table's
+   * FY-over-FY shifts are then partly attribution, not trade. This block
+   * quantifies that so readers know the comparison basis changed.
+   */
+  channelMovers: SkuChannelMoverPair[] | null;
 };
 
 export type SkuTrendParams = {
@@ -878,6 +895,80 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
     fyNetTotals[r.fy] = (fyNetTotals[r.fy] ?? 0) + r.net;
   }
 
+  // Channel-mover stability check (primary levels only). Per customer per FY:
+  // is the customer classified project (any project-head row) or territory?
+  // COALESCE(bool_or(...), false) — bool_or over NULL comparisons silently
+  // misbuckets; head_canon IS NULL is explicitly territory.
+  //
+  // Population alignment with the trend queries above:
+  //   - net_in_level uses the SAME level predicate (project / direct_dealer /
+  //     distributor incl. the project-head exclusion) AND, for scope='head',
+  //     the same head_canon = scopeId row restriction. Only customers with a
+  //     non-zero in-level net in one of the pair's FYs are candidates, so the
+  //     disclosure never counts sales that were never in the charts.
+  //   - Classification and side-nets use the customer's whole (scope- and
+  //     segment-filtered) book, so a leaver's netTo shows what now books on
+  //     the other side of the boundary. See channelMovers.ts for the rules.
+  let channelMovers: SkuChannelMoverPair[] | null = null;
+  if (level !== "retailer") {
+    try {
+      const segFilterMovers = segment
+        ? sql`AND COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') = ${segment}`
+        : sql``;
+      const custScopeFilter =
+        scope === "customer" && scopeId ? sql`AND sl.customer = ${scopeId}` : sql``;
+      // Row-level in-level predicate — mirror of levelFilter + head scope.
+      const isProjRow = sql`sl.head_canon = ${PROJECT_HEAD_CANON}`;
+      const notProjRow = sql`(sl.head_canon IS NULL OR sl.head_canon != ${PROJECT_HEAD_CANON})`;
+      const levelPred =
+        level === "project"
+          ? isProjRow
+          : level === "direct_dealer"
+            ? sql`(sl.type_raw ILIKE '%direct%' AND ${notProjRow})`
+            : sql`((sl.type_raw IS NULL OR sl.type_raw NOT ILIKE '%direct%') AND ${notProjRow})`;
+      const inLevelPred =
+        scope === "head" && scopeId
+          ? sql`(${levelPred} AND sl.head_canon = ${scopeId})`
+          : levelPred;
+
+      const custRows = await db.execute<{
+        fy: string;
+        customer: string;
+        is_project: boolean;
+        net_territory: string | null;
+        net_project: string | null;
+        net_in_level: string | null;
+      }>(sql`
+        SELECT
+          sl.fy,
+          sl.customer,
+          COALESCE(bool_or(${isProjRow}), false) AS is_project,
+          SUM(sl.amount::numeric) FILTER (WHERE ${notProjRow})::text  AS net_territory,
+          SUM(sl.amount::numeric) FILTER (WHERE ${isProjRow})::text   AS net_project,
+          SUM(sl.amount::numeric) FILTER (WHERE ${inLevelPred})::text AS net_in_level
+        FROM sale_line_current sl
+        WHERE sl.version_status = 'current'
+          AND sl.code IS NOT NULL AND sl.code <> ''
+          AND sl.customer IS NOT NULL AND sl.customer <> ''
+          ${segFilterMovers} ${custScopeFilter}
+        GROUP BY sl.fy, sl.customer
+      `);
+
+      const moverRows: MoverCustRow[] = custRows.rows.map((r) => ({
+        fy: r.fy,
+        customer: r.customer,
+        isProject: r.is_project === true,
+        netTerritory: parseFloat(r.net_territory ?? "0") || 0,
+        netProject: parseFloat(r.net_project ?? "0") || 0,
+        netInLevel: parseFloat(r.net_in_level ?? "0") || 0,
+      }));
+      channelMovers = buildChannelMoverPairs(moverRows, fys);
+    } catch (err) {
+      logger.warn({ err, level }, "sku trend: channel-mover check failed");
+      channelMovers = null;
+    }
+  }
+
   // everSold denominator — must use the SAME population as loadSkuFacts():
   // territory-only codes for territory levels, project-only codes for project.
   // Do NOT use getEverSoldPerSegment() here; that global count includes codes
@@ -890,7 +981,7 @@ export async function getSkuTrend(params: SkuTrendParams): Promise<SkuTrendResul
   const everSold: Record<string, number> = {};
   for (const [seg, cnt] of everSoldMap) everSold[seg] = cnt;
 
-  return { level, fys, fyMonths, everSold, monthly, fyTotals, fyNetTotals };
+  return { level, fys, fyMonths, everSold, monthly, fyTotals, fyNetTotals, channelMovers };
 }
 
 // ── Main entry point ──────────────────────────────────────────────────────────
