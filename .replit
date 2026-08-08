@@ -20,6 +20,10 @@ author = "agent"
 task = "workflow.run"
 args = "comparison-guards"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "prayag-period-guards"
+
 [[workflows.workflow]]
 name = "comparison-guards"
 author = "agent"
@@ -30,6 +34,17 @@ isValidation = true
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/api-server exec vitest run src/lib/comparison/costCell.test.ts src/lib/mgmt/distributorTabs.test.ts && node artifacts/api-server/scripts/comparison-guard-check.mjs && node artifacts/api-server/scripts/distributor-tab-guard-check.mjs"
+
+[[workflows.workflow]]
+name = "prayag-period-guards"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/prayag exec vitest run src/lib/__tests__/periodRange.test.ts src/data/__tests__/period-capability.test.ts"
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [agent]
 stack = "PNPM_WORKSPACE"
