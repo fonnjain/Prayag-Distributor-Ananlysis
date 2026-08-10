@@ -782,7 +782,7 @@ export default function CustomerMasterPage() {
               {!isLoading && rows.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-48 text-muted-foreground gap-2">
                   <p className="text-sm font-medium">No records found</p>
-                  <p className="text-xs">Import an xlsx file to seed the customer master.</p>
+                  <p className="text-xs">No customers of this type are loaded. Master data is loaded from the admin Master Data page (CSV upload); xlsx import only updates existing rows.</p>
                 </div>
               )}
               {!isLoading && rows.length > 0 && (

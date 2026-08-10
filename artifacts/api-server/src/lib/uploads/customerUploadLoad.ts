@@ -237,7 +237,11 @@ function parseAndValidate(
   return { header, idx, data };
 }
 
-export interface CustomerLoadResult { dryRun: boolean; customerMaster: number; retailerUser: number; retailerDistributor: number; }
+export interface CustomerLoadResult {
+  dryRun: boolean; customerMaster: number; retailerUser: number; retailerDistributor: number;
+  /** distributor-file rows whose Customer Type was blank/unrecognised → type NULL */
+  typeNull: number; typeNullRows: string[];
+}
 export async function runCustomerUploadLoad(opts: { dryRun: boolean; endPool?: boolean }): Promise<CustomerLoadResult> {
   const DRY_RUN = opts.dryRun;
   const DIST_CSV = latestAttached("Distributer_Upload_Sample_File_");
@@ -258,7 +262,7 @@ export async function runCustomerUploadLoad(opts: { dryRun: boolean; endPool?: b
   const distByNormKey = new Map<string, string>();
 
   interface CMRow {
-    id: string; company: string; type: string; status: string;
+    id: string; company: string; type: string | null; status: string;
     contact: string | null; mobile: string | null; state: string | null;
     district: string | null; city: string | null; gst: string | null;
     pincode: string | null; area: string | null; email: string | null;
@@ -268,16 +272,28 @@ export async function runCustomerUploadLoad(opts: { dryRun: boolean; endPool?: b
   }
   const cmRows: CMRow[] = [];
 
+  // Customer Type (plural, as stored in the CSV) → singular type used by the
+  // app's tab filters. Anything else (or blank) leaves type NULL — never
+  // silently defaulted to Distributor.
+  const TYPE_FROM_CUSTOMER_TYPE: Record<string, string> = {
+    "Distributors": "Distributor",
+    "Direct Dealers": "Direct Dealer",
+  };
+  const typeNullRows: string[] = [];
+
   for (const r of distData) {
     const id = r[di["Id"]].trim();
     const rawStatus = s(r[di["Status"]]);
     const company = (r[di["Company Name"]] ?? "").trim() || id;
     const nk = normDistKey(company);
     if (!distByNormKey.has(nk)) distByNormKey.set(nk, id);
+    const customerType = s(r[di["Customer Type"]]);
+    const derivedType = customerType != null ? TYPE_FROM_CUSTOMER_TYPE[customerType.trim()] ?? null : null;
+    if (derivedType === null) typeNullRows.push(`${id} (${company}) Customer Type=${JSON.stringify(customerType)}`);
     cmRows.push({
       id,
       company,
-      type: "Distributor",
+      type: derivedType,
       status: rawStatus ?? "Pending",       // raw as-is (Approved/Pending)
       statusSource: rawStatus,
       contact: s(r[di["Contact Person 1"]]),
@@ -417,7 +433,7 @@ export async function runCustomerUploadLoad(opts: { dryRun: boolean; endPool?: b
     );
     console.log("=== customer-upload-load DONE (DRY RUN) ===");
     if (opts.endPool) await pool.end();
-    return { dryRun: true, customerMaster: cmRows.length, retailerUser: juBatch.length, retailerDistributor: jdBatch.length };
+    return { dryRun: true, customerMaster: cmRows.length, retailerUser: juBatch.length, retailerDistributor: jdBatch.length, typeNull: typeNullRows.length, typeNullRows };
   }
 
   // ── PHASE 2: single transaction. Snapshot human attribution, delete, then
@@ -529,7 +545,7 @@ export async function runCustomerUploadLoad(opts: { dryRun: boolean; endPool?: b
 
     await client.query("COMMIT");
     console.log("=== customer-upload-load DONE ===");
-    return { dryRun: false, customerMaster: inserted, retailerUser: juIns, retailerDistributor: jdIns };
+    return { dryRun: false, customerMaster: inserted, retailerUser: juIns, retailerDistributor: jdIns, typeNull: typeNullRows.length, typeNullRows };
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("[transaction] rolled back — master left untouched:", err);

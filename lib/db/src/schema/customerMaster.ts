@@ -27,7 +27,9 @@ export const customerMaster = pgTable(
   {
     id: text("id").primaryKey(),
     company: text("company").notNull(),
-    type: text("type").notNull(),
+    // Nullable since migration 016: rows whose upload Customer Type is blank
+    // or unrecognised keep type NULL (never silently defaulted).
+    type: text("type"),
     status: text("status").notNull().default("Active"),
     contact: text("contact"),
     mobile: text("mobile"),

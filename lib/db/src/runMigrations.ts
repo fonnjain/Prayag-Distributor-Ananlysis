@@ -394,6 +394,16 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS rd_dist_idx ON retailer_distributor (dist_norm_key);
     `,
   },
+  {
+    id: "016_customer_master_type_nullable",
+    sql: `
+      -- The distributor upload's Customer Type drives customer_master.type
+      -- (Distributors -> Distributor, Direct Dealers -> Direct Dealer). Rows
+      -- with any other / blank Customer Type must NOT be defaulted to
+      -- Distributor — they carry type NULL until adjudicated.
+      ALTER TABLE customer_master ALTER COLUMN type DROP NOT NULL;
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {
