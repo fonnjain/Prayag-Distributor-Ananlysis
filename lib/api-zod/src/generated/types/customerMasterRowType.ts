@@ -6,7 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type CustomerMasterRowType = typeof CustomerMasterRowType[keyof typeof CustomerMasterRowType];
+export type CustomerMasterRowType = typeof CustomerMasterRowType[keyof typeof CustomerMasterRowType] | null;
 
 
 export const CustomerMasterRowType = {

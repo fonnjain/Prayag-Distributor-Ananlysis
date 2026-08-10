@@ -4230,11 +4230,13 @@ components:
         ok: { type: boolean }
     CustomerMasterRow:
       type: object
-      required: [id, company, type, status, headConfidence, createdAt, updatedAt]
+      required: [id, company, status, headConfidence, createdAt, updatedAt]
       properties:
         id: { type: string }
         company: { type: string }
-        type: { type: string, enum: [Distributor, "Direct Dealer", Retailer] }
+        # Nullable since migration 016: upload rows whose Customer Type is
+        # blank/unrecognised carry type NULL (never defaulted).
+        type: { type: string, enum: [Distributor, "Direct Dealer", Retailer], nullable: true }
         status: { type: string, enum: [Active, Inactive, Closed, Converted] }
         contact: { type: string, nullable: true }
         mobile: { type: string, nullable: true }

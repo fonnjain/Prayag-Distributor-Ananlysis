@@ -1974,7 +1974,7 @@ export const ListCustomerMasterResponse = zod.object({
   "rows": zod.array(zod.object({
   "id": zod.string(),
   "company": zod.string(),
-  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']),
+  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']).nullish(),
   "status": zod.enum(['Active', 'Inactive', 'Closed', 'Converted']),
   "contact": zod.string().nullish(),
   "mobile": zod.string().nullish(),
@@ -2026,7 +2026,7 @@ export const PreviewCustomerMasterImportResponse = zod.object({
   "insertSample": zod.array(zod.object({
   "id": zod.string(),
   "company": zod.string(),
-  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']),
+  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']).nullish(),
   "status": zod.enum(['Active', 'Inactive', 'Closed', 'Converted']),
   "contact": zod.string().nullish(),
   "mobile": zod.string().nullish(),
@@ -2044,7 +2044,7 @@ export const PreviewCustomerMasterImportResponse = zod.object({
   "rows": zod.record(zod.string(), zod.object({
   "id": zod.string(),
   "company": zod.string(),
-  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']),
+  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']).nullish(),
   "status": zod.enum(['Active', 'Inactive', 'Closed', 'Converted']),
   "contact": zod.string().nullish(),
   "mobile": zod.string().nullish(),
@@ -2071,7 +2071,7 @@ export const CommitCustomerMasterImportBody = zod.object({
   "rows": zod.record(zod.string(), zod.object({
   "id": zod.string(),
   "company": zod.string(),
-  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']),
+  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']).nullish(),
   "status": zod.enum(['Active', 'Inactive', 'Closed', 'Converted']),
   "contact": zod.string().nullish(),
   "mobile": zod.string().nullish(),
@@ -2157,7 +2157,7 @@ export const GetCustomerMasterRecordResponse = zod.object({
   "row": zod.object({
   "id": zod.string(),
   "company": zod.string(),
-  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']),
+  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']).nullish(),
   "status": zod.enum(['Active', 'Inactive', 'Closed', 'Converted']),
   "contact": zod.string().nullish(),
   "mobile": zod.string().nullish(),
@@ -2214,7 +2214,7 @@ export const UpdateCustomerMasterRecordResponse = zod.object({
   "row": zod.object({
   "id": zod.string(),
   "company": zod.string(),
-  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']),
+  "type": zod.enum(['Distributor', 'Direct Dealer', 'Retailer']).nullish(),
   "status": zod.enum(['Active', 'Inactive', 'Closed', 'Converted']),
   "contact": zod.string().nullish(),
   "mobile": zod.string().nullish(),

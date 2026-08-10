@@ -1993,7 +1993,7 @@ export interface OkResponse {
   ok: boolean;
 }
 
-export type CustomerMasterRowType = typeof CustomerMasterRowType[keyof typeof CustomerMasterRowType];
+export type CustomerMasterRowType = typeof CustomerMasterRowType[keyof typeof CustomerMasterRowType] | null;
 
 
 export const CustomerMasterRowType = {
@@ -2023,7 +2023,7 @@ export const CustomerMasterRowHeadConfidence = {
 export interface CustomerMasterRow {
   id: string;
   company: string;
-  type: CustomerMasterRowType;
+  type?: CustomerMasterRowType;
   status: CustomerMasterRowStatus;
   contact?: string | null;
   mobile?: string | null;

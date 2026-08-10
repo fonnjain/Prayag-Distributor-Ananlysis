@@ -185,7 +185,7 @@ router.post(
         incoming[id] = {
           id,
           company: g("Company") ?? "",
-          type: g("Type") ?? "",
+          type: g("Type") ?? null,
           status: g("Status") ?? "Active",
           contact: g("Contact"),
           mobile: g("Mobile"),
@@ -293,7 +293,7 @@ router.post(
         const hc = normaliseConfidence(row.headConfidence);
         if (!old) {
           toInsert.push({
-            id, company: row.company ?? "", type: row.type ?? "", status: row.status ?? "Active",
+            id, company: row.company ?? "", type: row.type ? row.type : null, status: row.status ?? "Active",
             contact: row.contact ?? null, mobile: row.mobile ?? null, state: row.state ?? null,
             district: row.district ?? null, city: row.city ?? null, stateHead: row.stateHead ?? null,
             headConfidence: hc,
@@ -301,6 +301,9 @@ router.post(
           });
         } else {
           const normalised = { ...row, headConfidence: hc } as Record<string, unknown>;
+          // Blank type on import means "no change of classification" → store NULL,
+          // never an empty-string fourth value.
+          if (normalised.type === "") normalised.type = null;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const patch: Record<string, any> = { updatedAt: now, editedBy };
           const logEntries: Array<typeof customerMasterLog.$inferInsert> = [];

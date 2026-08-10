@@ -12,7 +12,7 @@ import type { CustomerMasterRowType } from './customerMasterRowType';
 export interface CustomerMasterRow {
   id: string;
   company: string;
-  type: CustomerMasterRowType;
+  type?: CustomerMasterRowType;
   status: CustomerMasterRowStatus;
   contact?: string | null;
   mobile?: string | null;
