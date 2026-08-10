@@ -1031,6 +1031,7 @@ export default function AiReports() {
   // ── Growth report scope ──────────────────────────────────────────────────────
   const [growthScope, setGrowthScope]   = useState<"company"|"statehead"|"state">("statehead");
   const [growthState, setGrowthState]   = useState("");
+  const [growthCachedAt, setGrowthCachedAt] = useState<string | null>(null);
   const [dormantRevivalPct, setDormantRevivalPct] = useState(25);
   const [atRiskRecoveryPct, setAtRiskRecoveryPct] = useState(35);
   const [rangeUptakePct, setRangeUptakePct]       = useState(40);
@@ -1113,11 +1114,12 @@ export default function AiReports() {
 
   const canGenerate = isEnabled(reportType);
 
-  const generate = async () => {
+  const generate = async (forceFresh = false) => {
     setIsLoading(true);
     setError(null);
     setResult(null);
     setSignedOff(false);
+    setGrowthCachedAt(null);
 
     // Full structured reports use a different endpoint and accept monthFrom/monthTo.
     const isFullReport = reportType === "full-distributor-report" || reportType === "full-statehead-report";
@@ -1137,6 +1139,7 @@ export default function AiReports() {
         dormantRevivalPct: dormantRevivalPct / 100,
         atRiskRecoveryPct: atRiskRecoveryPct / 100,
         rangeUptakePct:    rangeUptakePct    / 100,
+        forceFresh: forceFresh || undefined,
       };
     } else if (isFullReport) {
       endpoint = reportType === "full-distributor-report"
@@ -1168,7 +1171,12 @@ export default function AiReports() {
         throw new Error((e as { error?: string }).error ?? "Request failed");
       }
       const data = await resp.json() as Record<string, unknown>;
-      setResult({ type: reportType, ...data } as GenerationResult);
+      if (isGrowthReport && typeof data.cachedAt === "string") {
+        setGrowthCachedAt(data.cachedAt);
+      }
+      const { cachedAt: _cachedAt, ...reportData } = data;
+      void _cachedAt;
+      setResult({ type: reportType, ...reportData } as GenerationResult);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
@@ -1567,7 +1575,7 @@ export default function AiReports() {
                 )}
               </Button>
             ) : (
-              <Button onClick={generate} disabled={isLoading || !canGenerate} size="sm">
+              <Button onClick={() => { void generate(); }} disabled={isLoading || !canGenerate} size="sm">
                 {isLoading ? "Generating..." : "Generate"}
               </Button>
             )}
@@ -1731,6 +1739,18 @@ export default function AiReports() {
                 <div>
                   <p className="text-sm font-semibold">Master Growth Report — {result.scopeLabel}</p>
                   <p className="text-xs text-muted-foreground">{result.periodLabel} · Data to {result.dataCutoff}</p>
+                  {growthCachedAt && (
+                    <p className="text-xs text-amber-700 mt-0.5">
+                      Loaded from cache (generated at {new Date(growthCachedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})
+                      {" · "}
+                      <button
+                        className="underline hover:text-amber-900 font-medium"
+                        onClick={() => { void generate(true); }}
+                      >
+                        Refresh
+                      </button>
+                    </p>
+                  )}
                 </div>
                 <Button size="sm" variant="outline" onClick={() => {
                   const w = window.open("", "_blank");
