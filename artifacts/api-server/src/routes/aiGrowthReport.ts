@@ -112,6 +112,27 @@ function stripFences(s: string): string {
   return s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
 }
 
+// ── WIDEN (deepDive) sizing — pure, exported for unit tests ──────────────────
+//
+// State-head scope sizes each distributor's range gap vs the peer-median
+// distinct-brand count from the Sheets-based deep dive:
+//   perCodeQuarterly = (medianNet / max(1, months/3)) / peerMedianBrands
+//   valueHigh        = gapBrands × perCodeQuarterly × rangeUptake
+//   valueLow         = valueHigh / 2
+export function widenDeepDiveSizing(
+  gapBrands: number,
+  peerMedianBrands: number,
+  medianNet: number,
+  monthCount: number,
+  rangeUptake: number,
+): { valueHigh: number; valueLow: number } {
+  const perCodeQuarterly = peerMedianBrands > 0
+    ? (medianNet / Math.max(1, monthCount / 3)) / peerMedianBrands
+    : 0;
+  const valueHigh = gapBrands * perCodeQuarterly * rangeUptake;
+  return { valueHigh, valueLow: valueHigh / 2 };
+}
+
 // ── SQL queries ───────────────────────────────────────────────────────────────
 
 type CustomerStateRow = {
@@ -930,23 +951,22 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
         ? allSpread[Math.floor(allSpread.length / 2)]
         : null;
 
-      const perCodeQuarterlyDd = peerMedianBrands != null && peerMedianBrands > 0
-        ? (medianNet / Math.max(1, labels.length / 3)) / peerMedianBrands
-        : 0;
       for (const d of (deepDive.distributors as DistributorGroup[]).slice(0, 20)) {
         const brands = d.skuSpread?.distinctBrands ?? null;
         if (brands == null || peerMedianBrands == null) continue;
         const gap = peerMedianBrands - brands;
         if (gap <= 0) continue;
         // Size: gap_codes × peer_median_quarterly_per_code × uptake
-        const valueHigh = gap * perCodeQuarterlyDd * rangeUptake;
+        const { valueHigh, valueLow } = widenDeepDiveSizing(
+          gap, peerMedianBrands, medianNet, labels.length, rangeUptake,
+        );
         widenDists.push({
           name: d.name,
           distinctBrands: brands,
           broadSegments: d.skuSpread?.broadSegmentsCovered ?? null,
           rangeGapNote: `peer median: ${peerMedianBrands} brands; gap: ${gap} brands`,
           valueHigh: t2(valueHigh),
-          valueLow:  t2(valueHigh / 2),
+          valueLow:  t2(valueLow),
         });
       }
     } else if ((scope === "company" || scope === "state") && companyRangeGapRows.length > 0) {
@@ -971,6 +991,19 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       }
     }
 
+    // Deduplication (CLOSE > RECOVER > ACTIVATE > WIDEN): a distributor already
+    // claimed by a higher-precedence lever (as a sale_line customer) must not be
+    // counted again under WIDEN — the state-head deep dive and sale_line share
+    // entity names, so the same account can appear in both sources.
+    const widenDroppedCount = widenDists.length;
+    const dedupedWidenDists = widenDists.filter(d => {
+      const key = d.name.toUpperCase();
+      return !closeEntities.has(key) && !recoverEntitySet.has(key) && !activateEntitySet.has(key);
+    });
+    widenDists.length = 0;
+    widenDists.push(...dedupedWidenDists);
+    const widenDedupDropped = widenDroppedCount - widenDists.length;
+
     // Segment rollup for WIDEN (codes_lost already shows segment gap)
     const segmentRollup = lostCodeRows.slice(0, 10).map(r => ({
       segment: r.segment,
@@ -991,6 +1024,9 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       peerNote: "Value uses primary sales peer median ÷ segment count as per-segment proxy. Peer median computed from all distributors in secondary register for this FY.",
       excludesProjectNote: "Territory figures only — project/non-territory channel excluded.",
       dataSourceNote: widenDists.length > 0 ? widenDataSource : null,
+      dedupNote: widenDedupDropped > 0
+        ? `${widenDedupDropped} distributor(s) already counted in CLOSE, RECOVER or ACTIVATE — excluded from WIDEN.`
+        : null,
       top20Distributors: widenDists.slice(0, 20),
       valueHigh: t2(totalWidenValueHigh),
       valueLow:  t2(totalWidenValueHigh / 2),
@@ -1155,7 +1191,9 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
 
     // ── Deduplication ─────────────────────────────────────────────────────────
     // CLOSE > RECOVER > ACTIVATE > WIDEN
-    // WIDEN is distributor-level (different entity type) — not deduplicated against RECOVER/ACTIVATE
+    // WIDEN is deduplicated by entity name against CLOSE/RECOVER/ACTIVATE above
+    // (§4) — the state-head deep dive lists distributors under the same names
+    // sale_line uses for customers, so name-level dedup is required.
     const multiLeverExamples: Array<{ entity: string; claimedByLever: string; reason: string }> = [];
 
     // Customers appearing in both CLOSE and RECOVER/ACTIVATE
@@ -1312,8 +1350,15 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
     }));
 
     // ── Numeric guard ─────────────────────────────────────────────────────────
-    const allNarrative = Object.values(sectionNarratives).join(" ");
+    // The dedup note is code-generated and always carries ₹ figures, so the
+    // guard deterministically evaluates at least one figure even when Claude's
+    // prose (intentionally) contains no digits.
+    const allNarrative = [
+      ...Object.values(sectionNarratives),
+      executiveSummary.deduplicationNote,
+    ].join(" ");
     const growthPayload = {
+      preDedupTotal: executiveSummary.preDedupTotal,
       fy, scope: scopeLabel,
       totalOpportunityHigh: executiveSummary.totalOpportunityHigh,
       postDedupTotal: executiveSummary.postDedupTotal,

@@ -112,6 +112,7 @@
 - [Upload master loads](upload-master-loads.md) — cp1252 upload CSVs; item_master_variant child table; roster compound-key enrichment; customer junctions + transactional loader rules.
 - [Distributor tab head scoping](distributor-tab-head-scope.md) — Secondary/SKU tabs aggregate a head's distributors (registry-guarded); push per-distributor; filtered deep-dive cache + invalidation.
 - [Ratio-based wipe canary](wipe-canary-ratio.md) — activation test canary: rows ≥0.60×, distributors ≥0.70× prior like-month (live denominators); per-month rules catch what totals hide.
+- [Growth Report WIDEN](growth-report-widen.md) — state-head WIDEN sizing formula + must dedup by entity NAME vs CLOSE/RECOVER/ACTIVATE; guard needs a code-gen ₹ figure in narrative.
 - [FY anchor auto-derivation](fy-anchor-derivation.md) — never hardcode last-complete/open FY; use fyAnchors.ts derivation with grace window + loud failure.
 - [Momentum entity filters](momentum-entity-filter.md) — person→distributor→register-spelling resolution (case trap); filtered payloads skip company-only panels, never cache.
 - [Prod master-load routes](prod-master-loads.md) — prod DB read-only from workspace; loads run in-app via X-Admin-Secret routes + advisory locks; NOT NULL-with-default columns must never get explicit NULL.

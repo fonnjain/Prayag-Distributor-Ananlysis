@@ -185,7 +185,7 @@ router.post(
         incoming[id] = {
           id,
           company: g("Company") ?? "",
-          type: g("Type") ?? null,
+          type: g("Type") ?? undefined,
           status: g("Status") ?? "Active",
           contact: g("Contact"),
           mobile: g("Mobile"),
@@ -293,7 +293,7 @@ router.post(
         const hc = normaliseConfidence(row.headConfidence);
         if (!old) {
           toInsert.push({
-            id, company: row.company ?? "", type: row.type ? row.type : null, status: row.status ?? "Active",
+            id, company: row.company ?? "", type: row.type ? row.type : "", status: row.status ?? "Active",
             contact: row.contact ?? null, mobile: row.mobile ?? null, state: row.state ?? null,
             district: row.district ?? null, city: row.city ?? null, stateHead: row.stateHead ?? null,
             headConfidence: hc,
