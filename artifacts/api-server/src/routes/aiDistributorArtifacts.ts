@@ -1,4 +1,5 @@
 // Phase A5 — Distributor AI artifact routes.
+import { currentOpenFy } from "../lib/fyAnchors.js";
 //
 // Five routes sharing the A1 numeric guard and no-arithmetic constraint.
 // Architecture: app = numbers.  Claude = judgement.
@@ -62,7 +63,7 @@ function parseBody(body: unknown): {
 } {
   const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
   return {
-    fy: typeof b.fy === "string" && b.fy.trim() ? b.fy.trim() : "2026-27",
+    fy: typeof b.fy === "string" && b.fy.trim() ? b.fy.trim() : currentOpenFy(),
     stateHead: typeof b.stateHead === "string" && b.stateHead.trim() ? b.stateHead.trim() : undefined,
     distributor: typeof b.distributor === "string" && b.distributor.trim() ? b.distributor.trim() : undefined,
   };

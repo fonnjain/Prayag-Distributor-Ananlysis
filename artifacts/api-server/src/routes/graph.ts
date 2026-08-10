@@ -6,6 +6,7 @@
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
+import { currentOpenFy } from "../lib/fyAnchors.js";
 import { buildGraphIndex } from "../lib/mgmt/graph/graphIndex.js";
 import { resolvePath, resolveWildcard } from "../lib/mgmt/graph/resolvers.js";
 import type { ResolveRequest, ResolveResponse } from "../lib/mgmt/graph/types.js";
@@ -22,7 +23,7 @@ const GRAPH_INDEX_TTL_MS = 15 * 60 * 1000;
 // ── GET /api/graph/index ──────────────────────────────────────────────────────
 
 router.get("/graph/index", async (req: Request, res: Response): Promise<void> => {
-  const fy     = String(req.query.fy     ?? "2026-27");
+  const fy     = String(req.query.fy     ?? currentOpenFy());
   const period = req.query.period ? String(req.query.period) : undefined;
 
   try {
@@ -49,7 +50,7 @@ router.get("/graph/index", async (req: Request, res: Response): Promise<void> =>
 router.post("/graph/resolve", async (req: Request, res: Response): Promise<void> => {
   const body = req.body as Partial<ResolveRequest>;
   const paths     = Array.isArray(body.paths) ? (body.paths as string[]) : [];
-  const defaultFy = String(body.fy ?? "2026-27");
+  const defaultFy = String(body.fy ?? currentOpenFy());
 
   if (paths.length === 0) {
     res.status(400).json({ error: "paths[] is required and must be non-empty" });

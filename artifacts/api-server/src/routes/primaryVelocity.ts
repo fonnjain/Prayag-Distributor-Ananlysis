@@ -1,4 +1,5 @@
 // GET /primary-performance/velocity?fy=2026-27
+import { currentOpenFy } from "../lib/fyAnchors.js";
 //
 // Intra-month order-booking pace for the CURRENT open month.
 // Scores each state head against the company pacing curve (FY2025-26 derived),
@@ -150,7 +151,7 @@ router.get(
     const fy =
       typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
         ? req.query.fy.trim()
-        : "2026-27";
+        : currentOpenFy();
 
     // Current date (server time)
     const now    = new Date();

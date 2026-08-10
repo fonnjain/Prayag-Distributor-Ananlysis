@@ -1,4 +1,5 @@
 // Phase A6 — Batch AI artifact generation.
+import { currentOpenFy } from "../lib/fyAnchors.js";
 //
 // POST /api/ai/batch
 //   Streams Server-Sent Events (text/event-stream) for each member of a state head.
@@ -226,7 +227,7 @@ async function generateDoc(reportType: BatchReportType, payload: AiPayload, visi
 
 router.post("/ai/batch", async (req: Request, res: Response): Promise<void> => {
   const body = req.body as Record<string, unknown>;
-  const fy         = typeof body.fy         === "string" ? body.fy.trim()         : "2026-27";
+  const fy         = typeof body.fy         === "string" ? body.fy.trim()         : currentOpenFy();
   const stateHead  = typeof body.stateHead  === "string" ? body.stateHead.trim()  : "";
   const reportType = typeof body.reportType === "string" ? body.reportType.trim() : "";
 

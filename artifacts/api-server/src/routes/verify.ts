@@ -1,4 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
+import { currentOpenFy } from "../lib/fyAnchors.js";
 import {
   REGISTER_SHEET_IDS,
   buildVerifyReport,
@@ -8,10 +9,10 @@ import {
 
 const router: IRouter = Router();
 
-const DEFAULT_FY = "2026-27";
+// Default FY derives from the calendar so the page never opens on a stale year.
 
 function resolveFy(raw: unknown): string | null {
-  const fy = typeof raw === "string" && raw.trim() !== "" ? raw.trim() : DEFAULT_FY;
+  const fy = typeof raw === "string" && raw.trim() !== "" ? raw.trim() : currentOpenFy();
   return fy in REGISTER_SHEET_IDS ? fy : null;
 }
 
@@ -70,10 +71,10 @@ router.post(
  *
  * Two-step confirmation protocol — deletion requires both steps:
  *
- * Step 1 — dry run (default): POST { "fy": "2026-27" }
+ * Step 1 — dry run (default): POST { "fy": currentOpenFy() }
  *   Returns { dryRun: true, toPrune: N, pruned: 0 } without touching any data.
  *
- * Step 2 — confirm: POST { "fy": "2026-27", "confirm": true, "expectedCount": N }
+ * Step 2 — confirm: POST { "fy": currentOpenFy(), "confirm": true, "expectedCount": N }
  *   expectedCount must equal the toPrune value from step 1.
  *   Deletes only when the count still matches (prevents stale confirmations).
  *   Returns { dryRun: false, toPrune: N, pruned: N }.

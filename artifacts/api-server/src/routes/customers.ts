@@ -35,7 +35,7 @@ import {
 import { parseJsonArray } from "./companyReports.js";
 import { computeAllMultipliers } from "../lib/customers/laspeyres.js";
 import { getSplit } from "../lib/headSplits.js";
-import { currentOpenFy, deriveSaleLineCohortFy } from "../lib/fyAnchors.js";
+import { currentOpenFy, deriveSaleLineCohortFy, priorFy } from "../lib/fyAnchors.js";
 import {
   listSchemes,
   getScheme,
@@ -135,8 +135,8 @@ router.get("/customers/months", async (req, res) => {
 // ── Customer rankings with YoY ─────────────────────────────────────────────────
 
 router.get("/customers/performance", async (req, res) => {
-  const fyCy = (req.query.fyCy as string) || "2026-27";
-  const fyLy = (req.query.fyLy as string) || "2025-26";
+  const fyCy = (req.query.fyCy as string) || currentOpenFy();
+  const fyLy = (req.query.fyLy as string) || priorFy(currentOpenFy());
   const monthsCyParam = parseMonthList(req.query.monthsCy);
   const entityType = parseEntityType(req.query.entityType);
 
@@ -232,8 +232,8 @@ router.get("/customers/detail", async (req, res) => {
     res.status(400).json({ error: "customer is required" });
     return;
   }
-  const fyCy = (req.query.fyCy as string) || "2026-27";
-  const fyLy = (req.query.fyLy as string) || "2025-26";
+  const fyCy = (req.query.fyCy as string) || currentOpenFy();
+  const fyLy = (req.query.fyLy as string) || priorFy(currentOpenFy());
   const monthsCyParam = parseMonthList(req.query.monthsCy);
   const category = req.query.category as string | undefined;
 
@@ -289,8 +289,8 @@ router.get("/customers/history", async (req, res) => {
 // normal gap is longer than the current period are not flagged.
 
 router.get("/customers/churn", async (req, res) => {
-  const fyCy = (req.query.fyCy as string) || "2026-27";
-  const fyLy = (req.query.fyLy as string) || "2025-26";
+  const fyCy = (req.query.fyCy as string) || currentOpenFy();
+  const fyLy = (req.query.fyLy as string) || priorFy(currentOpenFy());
   const monthsCyParam = parseMonthList(req.query.monthsCy);
   const entityType = parseEntityType(req.query.entityType);
 
@@ -348,8 +348,8 @@ router.get("/customers/churn", async (req, res) => {
 // ── Revenue-up, volume-down flag list ──────────────────────────────────────────
 
 router.get("/customers/shrinkers", async (req, res) => {
-  const fyCy = (req.query.fyCy as string) || "2026-27";
-  const fyLy = (req.query.fyLy as string) || "2025-26";
+  const fyCy = (req.query.fyCy as string) || currentOpenFy();
+  const fyLy = (req.query.fyLy as string) || priorFy(currentOpenFy());
   const monthsCyParam = parseMonthList(req.query.monthsCy);
   const entityType = parseEntityType(req.query.entityType);
   const grainRaw = req.query.grain as string;
@@ -411,8 +411,8 @@ router.get("/customers/shrinkers", async (req, res) => {
 // ── Laspeyres price multipliers ────────────────────────────────────────────────
 
 router.get("/customers/multiplier", async (req, res) => {
-  const fyLy = (req.query.fyLy as string) || "2025-26";
-  const fyCy = (req.query.fyCy as string) || "2026-27";
+  const fyLy = (req.query.fyLy as string) || priorFy(currentOpenFy());
+  const fyCy = (req.query.fyCy as string) || currentOpenFy();
 
   try {
     const result = await computeAllMultipliers(fyLy, fyCy);
@@ -527,8 +527,8 @@ const MAX_CONCURRENT_EXPORTS = 2;
 let activeExports = 0;
 
 router.get("/customers/export", async (req, res) => {
-  const fyCy = (req.query.fyCy as string) || "2026-27";
-  const fyLy = (req.query.fyLy as string) || "2025-26";
+  const fyCy = (req.query.fyCy as string) || currentOpenFy();
+  const fyLy = (req.query.fyLy as string) || priorFy(currentOpenFy());
   if (!FY_PATTERN.test(fyCy) || !FY_PATTERN.test(fyLy)) {
     res.status(400).json({ error: "Invalid fyCy/fyLy — expected YYYY-YY" });
     return;

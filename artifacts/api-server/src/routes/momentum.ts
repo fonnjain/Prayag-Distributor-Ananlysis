@@ -15,9 +15,9 @@ import { loadDistributorDirectory } from "../lib/mgmt/distributorDirectory.js";
 import { loadRoster } from "../lib/mgmt/roster.js";
 import { normMemberKey } from "../lib/mgmt/memberResolver.js";
 import { logger } from "../lib/logger.js";
+import { currentOpenFy } from "../lib/fyAnchors.js";
 
 const router = Router();
-const FY = "2026-27";
 
 function parseJsonArray(v: unknown): string[] | undefined {
   if (typeof v !== "string" || !v) return undefined;
@@ -40,8 +40,8 @@ function parseJsonArray(v: unknown): string[] | undefined {
  * entityConds matches exactly. A distributor with no primary line simply
  * contributes nothing (correct: zero primary business).
  */
-async function personCustomers(person: string): Promise<string[]> {
-  const dir = await loadDistributorDirectory(FY);
+async function personCustomers(person: string, fy: string): Promise<string[]> {
+  const dir = await loadDistributorDirectory(fy);
   const key = normMemberKey(person);
   const sheetNames = dir.distributors
     .filter((d) => d.members.some((m) => normMemberKey(m) === key))
@@ -56,7 +56,8 @@ async function personCustomers(person: string): Promise<string[]> {
 
 router.get("/momentum/insights", async (req, res) => {
   try {
-    const parsed = parseMonthsParam(req.query.months, FY);
+    const fy = currentOpenFy(); // request-time derivation — never open on a stale year
+    const parsed = parseMonthsParam(req.query.months, fy);
     if (!parsed.ok) {
       res.status(400).json({ error: parsed.error });
       return;
@@ -74,7 +75,7 @@ router.get("/momentum/insights", async (req, res) => {
     }
     const person = typeof req.query.person === "string" ? req.query.person.trim() : "";
     if (person) {
-      const dists = await personCustomers(person);
+      const dists = await personCustomers(person, fy);
       if (dists.length === 0) {
         // Explicit: the person resolved to no distributors — match nothing,
         // never fall back to unfiltered figures.
@@ -88,7 +89,7 @@ router.get("/momentum/insights", async (req, res) => {
       }
     }
     if (!filter?.none && !hasEntityFilterValues(filter)) filter = undefined;
-    const data = await buildMomentumInsights(FY, parsed.months ?? null, filter);
+    const data = await buildMomentumInsights(fy, parsed.months ?? null, filter);
     res.json(data);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

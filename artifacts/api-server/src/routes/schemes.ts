@@ -1,4 +1,5 @@
 // Scheme Nudge Engine routes.
+import { currentOpenFy } from "../lib/fyAnchors.js";
 //
 // GET /api/schemes/nudge?fy=2026-27&q=Q2&roi=0.05
 //   Full nudge list — ranked by what the distributor earns.
@@ -62,7 +63,7 @@ async function resolveQ(
 // ── Nudge list ────────────────────────────────────────────────────────────────
 
 router.get("/schemes/nudge", async (req, res) => {
-  const fy = String(req.query.fy ?? "2026-27");
+  const fy = String(req.query.fy ?? currentOpenFy());
   const q = await resolveQ(req.query.q, fy);
   const roiThreshold = parseFloat(String(req.query.roi ?? "0.05")) || 0.05;
   const head = String(req.query.head ?? "");
@@ -84,7 +85,7 @@ router.get("/schemes/nudge", async (req, res) => {
 // ── Cockpit ───────────────────────────────────────────────────────────────────
 
 router.get("/schemes/cockpit", async (req, res) => {
-  const fy = String(req.query.fy ?? "2026-27");
+  const fy = String(req.query.fy ?? currentOpenFy());
   const q = await resolveQ(req.query.q, fy);
   const head = String(req.query.head ?? "");
 
@@ -102,7 +103,7 @@ router.get("/schemes/cockpit", async (req, res) => {
 // ── Annual tracker ────────────────────────────────────────────────────────────
 
 router.get("/schemes/annual", async (req, res) => {
-  const fy = String(req.query.fy ?? "2026-27");
+  const fy = String(req.query.fy ?? currentOpenFy());
 
   try {
     const completeMonths = await getCompleteMonths(fy);

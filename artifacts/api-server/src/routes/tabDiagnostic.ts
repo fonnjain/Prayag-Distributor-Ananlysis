@@ -7,6 +7,7 @@
 // The disputed-rows table is only meaningful after the first post-migration
 // backfill run: before that first run, all rows show sheet_confirmed_at=null.
 import { Router, type Request, type Response } from "express";
+import { currentOpenFy } from "../lib/fyAnchors.js";
 import { and, eq, sql } from "drizzle-orm";
 import { db, saleLines } from "@workspace/db";
 import {
@@ -21,7 +22,7 @@ router.get(
   "/mgmt/tab-diagnostic",
   async (req: Request, res: Response): Promise<void> => {
     const fy =
-      typeof req.query["fy"] === "string" ? req.query["fy"].trim() : "2026-27";
+      typeof req.query["fy"] === "string" ? req.query["fy"].trim() : currentOpenFy();
 
     const bookingSheetId = BOOKING_SHEETS[fy] ?? null;
     const saleSheetId = SALE_SHEETS[fy] ?? null;

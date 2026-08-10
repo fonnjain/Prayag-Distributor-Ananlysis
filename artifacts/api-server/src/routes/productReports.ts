@@ -1,4 +1,5 @@
 // GET /api/product-reports?fy=2026-27&heads=[..]&states=[..]&customers=[..]
+import { currentOpenFy } from "../lib/fyAnchors.js";
 //   Products page data: per-product sales from sale_line for the FY, with the
 //   shared State Head / State / Distributor filters (values from
 //   /api/company-reports/filters).
@@ -28,7 +29,7 @@ import { respondIfQuotaError } from "../lib/quotaResponse.js";
 const router = Router();
 
 const FY_RE = /^\d{4}-\d{2}$/;
-const DEFAULT_FY = "2026-27";
+// Default FY derives from the calendar so the page never opens on a stale year.
 const PRODUCT_REPORTS_TTL_MS = 10 * 60 * 1000;
 
 export type ProductRow = {
@@ -239,7 +240,7 @@ function parseParams(req: import("express").Request, res: import("express").Resp
   | null {
   const fy = typeof req.query.fy === "string" && req.query.fy.trim() !== ""
     ? req.query.fy.trim()
-    : DEFAULT_FY;
+    : currentOpenFy();
   if (!FY_RE.test(fy)) {
     res.status(400).json({ error: "Invalid fy — expected YYYY-YY" });
     return null;

@@ -1,4 +1,5 @@
 // GET /primary-targets/state-achievement?fy=2026-27&months=Apr-26,May-26,Jun-26,Jul-26
+import { currentOpenFy } from "../lib/fyAnchors.js";
 //
 // Returns state-bifurcated primary order-booking targets with actuals from the
 // Order Book FY2627 sheet.  Achievement = actual booking / target.
@@ -86,7 +87,7 @@ router.get(
     const fy =
       typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
         ? req.query.fy.trim()
-        : "2026-27";
+        : currentOpenFy();
 
     const monthsParam =
       typeof req.query.months === "string" ? req.query.months.trim() : "";

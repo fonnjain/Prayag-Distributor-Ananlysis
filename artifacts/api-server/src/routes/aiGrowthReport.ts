@@ -13,6 +13,7 @@
 //  - Deduplication: CLOSE > RECOVER > ACTIVATE > WIDEN (enforced in code).
 
 import { Router, type IRouter, type Request, type Response } from "express";
+import { currentOpenFy } from "../lib/fyAnchors.js";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
@@ -600,7 +601,7 @@ type LedgerRow = {
 
 router.post("/ai/full-report/growth", async (req: Request, res: Response): Promise<void> => {
   const b = (req.body ?? {}) as Record<string, unknown>;
-  const fy       = typeof b.fy === "string" && FY_PATTERN.test(b.fy.trim()) ? b.fy.trim() : "2026-27";
+  const fy       = typeof b.fy === "string" && FY_PATTERN.test(b.fy.trim()) ? b.fy.trim() : currentOpenFy();
   const scope    = typeof b.scope === "string" && ["company","statehead","state"].includes(b.scope) ? b.scope as "company"|"statehead"|"state" : "company";
   const stateHead = typeof b.stateHead === "string" ? b.stateHead.trim() : "";
   const state     = typeof b.state    === "string" ? b.state.trim()     : "";
@@ -926,13 +927,7 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       const peerMedianBrands = allSpread.length > 0
         ? allSpread[Math.floor(allSpread.length / 2)]
         : null;
-
-      const perCodeQuarterlyDd = peerMedianBrands != null && peerMedianBrands > 0
-        ? (medianNet / Math.max(1, labels.length / 3)) / peerMedianBrands
-        : 0;
-      for (const d of (deepDive.distributors as DistributorGroup[]).slice(0, 20)) {
         const brands  = parseInt(r.distinct_segments) || 0;
-        if (brands == null || peerMedianBrands == null) continue;
         const gap     = parseFloat(r.gap) || 0;
         if (gap <= 0) continue;
         const valueHigh = gap * perCodeQuarterly * rangeUptake;

@@ -1,4 +1,5 @@
 // Targets tab: read roster + saved targets, preview pro-rata splits, and
+import { currentOpenFy } from "../lib/fyAnchors.js";
 // save member targets. Google Sheets stays strictly read-only — saves land
 // in the member_targets database table, which overlays the (frozen) Target
 // Master sheet per member.
@@ -27,10 +28,10 @@ const router: IRouter = Router();
 const TARGETS_SNAPSHOT_TTL_MS = 15 * 60 * 1000;
 
 const FY_PATTERN = /^\d{4}-\d{2}$/;
-const DEFAULT_FY = "2026-27";
+// Default FY derives from the calendar so the page never opens on a stale year.
 
 function parseFy(v: unknown): string | null {
-  const fy = typeof v === "string" && v.trim() !== "" ? v.trim() : DEFAULT_FY;
+  const fy = typeof v === "string" && v.trim() !== "" ? v.trim() : currentOpenFy();
   return FY_PATTERN.test(fy) ? fy : null;
 }
 

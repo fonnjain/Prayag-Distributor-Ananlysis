@@ -1,4 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
+import { currentOpenFy } from "../lib/fyAnchors.js";
 import { db, saleLines } from "@workspace/db";
 import { and, eq, sql } from "drizzle-orm";
 import { ORDER_BOOKING_SHEET_IDS } from "../lib/mgmt/primaryAttribution.js";
@@ -177,7 +178,7 @@ router.get(
 router.get(
   "/orders/selftest",
   async (req: Request, res: Response): Promise<void> => {
-    const fy = typeof req.query["fy"] === "string" ? req.query["fy"].trim() : "2026-27";
+    const fy = typeof req.query["fy"] === "string" ? req.query["fy"].trim() : currentOpenFy();
     const sheetId = ORDER_BOOKING_SHEET_IDS[fy];
     if (!sheetId) {
       res.status(400).json({ error: `No Order Booking sheet configured for FY${fy}` });
@@ -413,6 +414,9 @@ router.get(
   "/orders/fy-reconcile",
   async (req: Request, res: Response): Promise<void> => {
     const fy =
+      // Intentional per-FY anchor: this endpoint is a historical three-way
+      // reconciliation of the FY2024-25 order book across the workbooks that
+      // contain it (see comments above) — it is not an open-FY default.
       typeof req.query["fy"] === "string" ? req.query["fy"].trim() : "2024-25";
     req.log.info({ fy }, "orders fy-reconcile: starting");
 

@@ -59,7 +59,7 @@ import {
   type EntityFilter,
 } from "../lib/saleLineFilter.js";
 import { parseJsonArray } from "./companyReports.js";
-import { deriveSaleLineCohortFy } from "../lib/fyAnchors.js";
+import { currentOpenFy, deriveSaleLineCohortFy, deriveSaleLineClosedFys } from "../lib/fyAnchors.js";
 
 const router = Router();
 
@@ -104,7 +104,7 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
   const fy =
     typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
       ? req.query.fy.trim()
-      : "2026-27";
+      : currentOpenFy();
 
   const level = typeof req.query.level === "string" ? req.query.level.trim() : "distributor";
   if (!VALID_LEVELS.has(level)) {
@@ -211,11 +211,15 @@ router.get("/sku/capability", async (req: Request, res: Response): Promise<void>
   const fys =
     typeof req.query.fy === "string"
       ? [req.query.fy.trim()].filter((f) => FY_PATTERN.test(f))
-      : ["2024-25", "2025-26", "2026-27"];
+      : null;
 
   try {
+    // Default set derives from ingested closed FYs (last two) + the open FY,
+    // so this list rolls over automatically at FY close.
+    const closed = fys ? [] : await deriveSaleLineClosedFys();
+    const fyList = fys ?? [...closed.slice(-2), currentOpenFy()];
     const results = await Promise.all(
-      fys.map(async (fy) => ({ fy, capability: await getSkuCapability(fy) })),
+      fyList.map(async (fy) => ({ fy, capability: await getSkuCapability(fy) })),
     );
     res.json({ capabilities: results });
   } catch (err) {
@@ -425,7 +429,7 @@ router.get("/sku/recommendations", async (req: Request, res: Response): Promise<
   const fy =
     typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
       ? req.query.fy.trim()
-      : "2026-27";
+      : currentOpenFy();
 
   const level = typeof req.query.level === "string" ? req.query.level.trim() : "distributor";
   if (!VALID_LEVELS.has(level)) {
@@ -501,7 +505,7 @@ router.get("/sku/export", async (req: Request, res: Response): Promise<void> => 
   const fy =
     typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
       ? req.query.fy.trim()
-      : "2026-27";
+      : currentOpenFy();
   const level = typeof req.query.level === "string" ? req.query.level.trim() : "distributor";
   if (!VALID_LEVELS.has(level)) {
     res.status(400).json({ error: `level must be one of: ${[...VALID_LEVELS].join(", ")}` });
@@ -647,7 +651,7 @@ router.get("/sku/distributors", async (req: Request, res: Response): Promise<voi
   const fy =
     typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
       ? req.query.fy.trim()
-      : "2026-27";
+      : currentOpenFy();
   const level = typeof req.query.level === "string" ? req.query.level.trim() : "distributor";
   if (!VALID_LEVELS.has(level)) {
     res.status(400).json({ error: `level must be one of: ${[...VALID_LEVELS].join(", ")}` });
@@ -686,7 +690,7 @@ router.get("/sku/push-list", async (req: Request, res: Response): Promise<void> 
   const fy =
     typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
       ? req.query.fy.trim()
-      : "2026-27";
+      : currentOpenFy();
   const level = typeof req.query.level === "string" ? req.query.level.trim() : "distributor";
   if (!VALID_LEVELS.has(level)) {
     res.status(400).json({ error: `level must be one of: ${[...VALID_LEVELS].join(", ")}` });
@@ -823,7 +827,7 @@ router.get("/sku/discounts", async (req: Request, res: Response): Promise<void> 
   const fy =
     typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
       ? req.query.fy.trim()
-      : "2026-27";
+      : currentOpenFy();
   const channel = req.query.channel === "project" ? "project" : "territory";
   const monthFrom = intParam(req, "monthFrom", 1, 12, 0);
   const monthTo = intParam(req, "monthTo", monthFrom || 1, 12, 0);
@@ -882,7 +886,7 @@ router.get("/sku/first-orders", async (req: Request, res: Response): Promise<voi
   const fy =
     typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
       ? req.query.fy.trim()
-      : "2026-27";
+      : currentOpenFy();
   const monthFrom = intParam(req, "monthFrom", 1, 12, 0);
   const monthTo = intParam(req, "monthTo", monthFrom || 1, 12, 0);
   const monthLabels =
@@ -905,7 +909,7 @@ router.get("/sku/lost-codes", async (req: Request, res: Response): Promise<void>
   const fy =
     typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
       ? req.query.fy.trim()
-      : "2026-27";
+      : currentOpenFy();
   const priorFy = prevFy(fy);
   try {
     res.json(await getLostCodes(fy, priorFy, monthNamesParam(req)));

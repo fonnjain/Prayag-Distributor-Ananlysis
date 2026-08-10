@@ -1,4 +1,5 @@
 // GET  /primary-state-targets/by-head?fy=2026-27
+import { currentOpenFy } from "../lib/fyAnchors.js";
 // PUT  /primary-state-targets/by-head
 //
 // Unified read/write interface for state-head monthly targets stored in
@@ -39,7 +40,7 @@ router.get(
     const fy =
       typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
         ? req.query.fy.trim()
-        : "2026-27";
+        : currentOpenFy();
 
     try {
       const rows = await db

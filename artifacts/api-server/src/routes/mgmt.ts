@@ -1,5 +1,6 @@
 // Management Reports: filter options + Excel generation.
 import { Router, type IRouter, type Request, type Response } from "express";
+import { currentOpenFy, deriveSaleLineCohortFy } from "../lib/fyAnchors.js";
 import express from "express";
 import { writeFile, rename as renameFile, mkdir as mkdirAsync } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -64,7 +65,10 @@ const router: IRouter = Router();
 // fiscalMonthsToLabels is imported from primaryPeriod.ts (single source of truth).
 
 const FY_PATTERN = /^\d{4}-\d{2}$/;
-const DEFAULT_FY = "2025-26";
+// Default FY for management pages: the newest fully-ingested closed FY,
+// derived at request time (never hardcoded) so pages cannot open on an
+// outdated year after a rollover.
+const defaultMgmtFy = deriveSaleLineCohortFy;
 
 // Reason text attached to any pending field that is negative.
 // A negative pending (sale > booking) means goods were dispatched against
@@ -188,9 +192,10 @@ async function targetsSource(req: Request): Promise<{
   detail: string;
 }> {
   try {
+    const targetsFy = await defaultMgmtFy();
     const [map, dbRows] = await Promise.all([
-      loadTargetsForFy(DEFAULT_FY),
-      loadDbTargetsForFy(DEFAULT_FY).catch(() => new Map<string, TargetRow>()),
+      loadTargetsForFy(targetsFy),
+      loadDbTargetsForFy(targetsFy).catch(() => new Map<string, TargetRow>()),
     ]);
     const dbCount = dbRows.size;
     // Sheet-only share = merged entries whose key has no DB overlay (DB rows
@@ -217,7 +222,7 @@ async function targetsSource(req: Request): Promise<{
       name: "Targets and business plans",
       status: lowCoverage ? "partial" : "connected",
       detail:
-        `Targets exist for ${map.size}${ofRoster} for ${DEFAULT_FY}` +
+        `Targets exist for ${map.size}${ofRoster} for ${targetsFy}` +
         ` (${sheetCount} from the Target Master sheet, ${dbCount} saved in the app).` +
         (lowCoverage
           ? " The Target Master sheet is effectively unmaintained — it is not being filled in, not merely awaiting entry. New targets should be set in the Targets tab, which saves to the app database."
@@ -244,7 +249,7 @@ const _unmatchedCache = new Map<string, { at: number; payload: unknown }>();
 const UNMATCHED_TTL_MS = 10 * 60 * 1000;
 
 router.get("/mgmt/unmatched-names", async (req: Request, res: Response): Promise<void> => {
-  const fy = typeof req.query.fy === "string" && req.query.fy ? req.query.fy : DEFAULT_FY;
+  const fy = typeof req.query.fy === "string" && req.query.fy ? req.query.fy : await defaultMgmtFy();
   const hit = _unmatchedCache.get(fy);
   if (hit && Date.now() - hit.at < UNMATCHED_TTL_MS) {
     res.json(hit.payload);
@@ -329,20 +334,21 @@ router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> =
     // report build already recorded a precise load status, surface that.
     let ordersStatus: string;
     let ordersDetail: string;
-    const recorded = getOrderLoadStatus(DEFAULT_FY);
+    const ordersFy = await defaultMgmtFy();
+    const recorded = getOrderLoadStatus(ordersFy);
     if (recorded && recorded.status !== "no-file") {
       ordersStatus = recorded.status === "ok" ? "connected" : "partial";
       ordersDetail =
         recorded.status === "ok"
-          ? `Order booking workbook connected for ${DEFAULT_FY} (${recorded.rowsRead ?? 0} rows read). Earlier years (2021-22 to 2025-26) are connected.`
-          : `${recorded.detail} Earlier years (2021-22 to 2025-26) are connected.`;
+          ? `Order booking workbook connected for ${ordersFy} (${recorded.rowsRead ?? 0} rows read). Earlier years (2021-22 onwards) are connected.`
+          : `${recorded.detail} Earlier years (2021-22 onwards) are connected.`;
     } else {
       try {
-        const currentFyFile = await resolveOrderFileId(DEFAULT_FY);
+        const currentFyFile = await resolveOrderFileId(ordersFy);
         ordersStatus = currentFyFile ? "connected" : "partial";
         ordersDetail = currentFyFile
           ? "Order booking workbooks found for the selected years."
-          : `No ${DEFAULT_FY} order booking workbook exists in the Drive folder yet; ${DEFAULT_FY} order columns will be blank until it is created. Earlier years (2021-22 to 2025-26) are connected.`;
+          : `No ${ordersFy} order booking workbook exists in the Drive folder yet; ${ordersFy} order columns will be blank until it is created. Earlier years (2021-22 onwards) are connected.`;
       } catch (err) {
         req.log.warn({ err }, "order booking folder check failed");
         ordersStatus = "partial";
@@ -392,7 +398,7 @@ router.get("/mgmt/options", async (req: Request, res: Response): Promise<void> =
       states: sts,
     }));
     const seasonalCalibration = getSeasonalCalibration();
-    res.json({ fys, defaultFy: DEFAULT_FY, regions, states, sources, seasonalCalibration });
+    res.json({ fys, defaultFy: await defaultMgmtFy(), regions, states, sources, seasonalCalibration });
   } catch (err) {
     if (respondIfQuotaError(err, res)) return;
     req.log.error({ err }, "mgmt options failed");
@@ -538,7 +544,7 @@ router.get("/mgmt/data", async (req: Request, res: Response): Promise<void> => {
   const fy =
     typeof req.query.fy === "string" && req.query.fy.trim() !== ""
       ? req.query.fy.trim()
-      : DEFAULT_FY;
+      : await defaultMgmtFy();
   if (!FY_PATTERN.test(fy)) {
     res.status(400).json({ error: "fy must look like 2026-27" });
     return;
@@ -950,7 +956,7 @@ router.get("/mgmt/primary", async (req: Request, res: Response): Promise<void> =
   const fy =
     typeof req.query.fy === "string" && req.query.fy.trim()
       ? req.query.fy.trim()
-      : "2026-27";
+      : currentOpenFy();
   if (!FY_PATTERN.test(fy)) {
     res.status(400).json({ error: "fy must look like 2026-27" });
     return;
@@ -1123,7 +1129,7 @@ router.get("/mgmt/primary", async (req: Request, res: Response): Promise<void> =
 
 router.post("/mgmt/report", async (req: Request, res: Response): Promise<void> => {
   const body = (req.body ?? {}) as Record<string, unknown>;
-  const fy = typeof body.fy === "string" && body.fy.trim() !== "" ? body.fy.trim() : DEFAULT_FY;
+  const fy = typeof body.fy === "string" && body.fy.trim() !== "" ? body.fy.trim() : await defaultMgmtFy();
   if (!FY_PATTERN.test(fy)) {
     res.status(400).json({ error: "fy must look like 2026-27" });
     return;
@@ -1201,7 +1207,7 @@ router.post("/mgmt/report", async (req: Request, res: Response): Promise<void> =
 // delta%, an internal cross-foot, and any roster head missing from output.
 router.get("/mgmt/verify", async (req: Request, res: Response): Promise<void> => {
   const raw = req.query.fy;
-  const fy = typeof raw === "string" && raw.trim() !== "" ? raw.trim() : "2025-26";
+  const fy = typeof raw === "string" && raw.trim() !== "" ? raw.trim() : await defaultMgmtFy();
   if (!FY_PATTERN.test(fy)) {
     res.status(400).json({ error: "fy must look like 2025-26" });
     return;
@@ -1264,7 +1270,7 @@ router.get("/mgmt/deep-dive", async (req: Request, res: Response): Promise<void>
     const fy =
       typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
         ? req.query.fy.trim()
-        : "2026-27";
+        : currentOpenFy();
 
     const selectedStateHead =
       typeof req.query.stateHead === "string" ? req.query.stateHead.trim() : undefined;
@@ -1323,7 +1329,7 @@ router.get("/mgmt/deep-dive", async (req: Request, res: Response): Promise<void>
 router.get("/mgmt/retailer-drift", async (req: Request, res: Response): Promise<void> => {
   try {
     const fy = typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
-      ? req.query.fy.trim() : "2026-27";
+      ? req.query.fy.trim() : currentOpenFy();
     const stateHead = typeof req.query.stateHead === "string" ? req.query.stateHead.trim() : "";
     if (!stateHead) { res.status(400).json({ error: "stateHead is required" }); return; }
 
@@ -1362,7 +1368,7 @@ router.get("/mgmt/retailer-identity", async (req: Request, res: Response): Promi
 // requests bypass the snapshot entirely (never served from or written to it).
 router.get("/mgmt/distributor-deep-dive", async (req: Request, res: Response): Promise<void> => {
   try {
-    const fy         = typeof req.query.fy         === "string" ? req.query.fy.trim()         : "2026-27";
+    const fy         = typeof req.query.fy         === "string" ? req.query.fy.trim()         : currentOpenFy();
     const stateHead  = typeof req.query.stateHead  === "string" ? req.query.stateHead.trim()  : undefined;
 
     // Parse optional period filter — same validation as distributor-tab.
@@ -1395,7 +1401,7 @@ router.get("/mgmt/distributor-deep-dive", async (req: Request, res: Response): P
 // GET /api/mgmt/distributor-recon — vocabulary reconciliation report
 router.get("/mgmt/distributor-recon", async (req: Request, res: Response): Promise<void> => {
   try {
-    const fy = String(req.query.fy ?? "2026-27");
+    const fy = String(req.query.fy ?? currentOpenFy());
     const { buildDistributorRecon } = await import("../lib/mgmt/distributorTabs.js");
     res.json(await buildDistributorRecon(fy));
   } catch (err) {
@@ -1407,7 +1413,7 @@ router.get("/mgmt/distributor-recon", async (req: Request, res: Response): Promi
 // GET /api/mgmt/distributor-tab?fy=&dist=<normKey>&tab=secondary|sku|push
 router.get("/mgmt/distributor-tab", async (req: Request, res: Response): Promise<void> => {
   try {
-    const fy = String(req.query.fy ?? "2026-27");
+    const fy = String(req.query.fy ?? currentOpenFy());
     const dist = String(req.query.dist ?? "");
     const tab = String(req.query.tab ?? "");
     // Optional global-period restriction: "Apr-26,May-26". Whole FY when absent.
@@ -1522,7 +1528,7 @@ router.get("/mgmt/distributor-tab", async (req: Request, res: Response): Promise
 // filter chain. Snapshot-backed per head; canonical state vocabulary.
 router.get("/mgmt/distributor-directory", async (req: Request, res: Response): Promise<void> => {
   try {
-    const fy = typeof req.query.fy === "string" ? req.query.fy.trim() : "2026-27";
+    const fy = typeof req.query.fy === "string" ? req.query.fy.trim() : currentOpenFy();
     const { loadDistributorDirectory } = await import("../lib/mgmt/distributorDirectory.js");
     res.json(await loadDistributorDirectory(fy));
   } catch (err) {
@@ -1539,7 +1545,7 @@ router.get("/mgmt/distributor-directory", async (req: Request, res: Response): P
 // auto-merged. Pairs transacting in the same period are RESOLVED-DIFFERENT.
 router.get("/mgmt/distributor-identity", async (req: Request, res: Response): Promise<void> => {
   try {
-    const fy = typeof req.query.fy === "string" ? req.query.fy.trim() : "2026-27";
+    const fy = typeof req.query.fy === "string" ? req.query.fy.trim() : currentOpenFy();
     const { buildDistributorIdentityReport } = await import("../lib/mgmt/distributorRegistry.js");
     res.json(await buildDistributorIdentityReport(fy));
   } catch (err) {
@@ -1579,7 +1585,7 @@ router.get("/mgmt/member-sheet-coverage", async (req: Request, res: Response): P
 router.get("/mgmt/distributor-tier-override", async (req: Request, res: Response): Promise<void> => {
   try {
     const fy = typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
-      ? req.query.fy.trim() : "2026-27";
+      ? req.query.fy.trim() : currentOpenFy();
     const stateHead = typeof req.query.stateHead === "string" ? req.query.stateHead.trim() : "";
     if (!stateHead) { res.status(400).json({ error: "stateHead is required" }); return; }
     const rows = await db.select().from(distributorTierOverrideTable).where(

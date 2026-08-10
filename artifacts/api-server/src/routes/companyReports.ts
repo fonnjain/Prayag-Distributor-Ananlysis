@@ -1,4 +1,5 @@
 // GET /api/company-reports?fy=2026-27&asOf=2026-07-13
+import { currentOpenFy } from "../lib/fyAnchors.js";
 //   Optional filters: months (comma-sep labels e.g. "Apr-26,May-26"),
 //   heads / states / customers (JSON-encoded string arrays).
 // GET /api/company-reports/filters?fy= — cascading dropdown options
@@ -65,7 +66,7 @@ function parseFilter(query: Record<string, unknown>, res: import("express").Resp
 }
 
 router.get("/company-reports", async (req, res) => {
-  const rawFy = typeof req.query.fy === "string" ? req.query.fy : "2026-27";
+  const rawFy = typeof req.query.fy === "string" ? req.query.fy : currentOpenFy();
   const rawAsOf = typeof req.query.asOf === "string" ? req.query.asOf : undefined;
   if (!FY_RE.test(rawFy)) {
     res.status(400).json({ error: "Invalid fy — expected YYYY-YY" });
@@ -110,7 +111,7 @@ router.get("/company-reports", async (req, res) => {
 // returned here are exactly what the data route's filters match against.
 
 router.get("/company-reports/filters", async (req, res) => {
-  const rawFy = typeof req.query.fy === "string" ? req.query.fy : "2026-27";
+  const rawFy = typeof req.query.fy === "string" ? req.query.fy : currentOpenFy();
   if (!FY_RE.test(rawFy)) {
     res.status(400).json({ error: "Invalid fy — expected YYYY-YY" });
     return;
@@ -279,7 +280,7 @@ function buildWorkbook(p: CompanyReportsPayload, filter?: CompanyReportsFilter):
 }
 
 router.get("/company-reports/export", async (req, res) => {
-  const rawFy = typeof req.query.fy === "string" ? req.query.fy : "2026-27";
+  const rawFy = typeof req.query.fy === "string" ? req.query.fy : currentOpenFy();
   const rawAsOf = typeof req.query.asOf === "string" ? req.query.asOf : undefined;
   if (!FY_RE.test(rawFy)) {
     res.status(400).json({ error: "Invalid fy — expected YYYY-YY" });

@@ -1,4 +1,5 @@
 // Phase A1 — GET /api/ai/payload
+import { currentOpenFy } from "../lib/fyAnchors.js";
 //
 // Returns the verified metrics payload: a pre-computed, fully reconciled data
 // structure that later AI phases will receive instead of raw sheet data.
@@ -22,7 +23,7 @@ import {
 const router: IRouter = Router();
 
 const FY_PATTERN = /^\d{4}-\d{2}$/;
-const DEFAULT_FY = "2026-27";
+// Default FY derives from the calendar so the page never opens on a stale year.
 
 // Normalise the 'period' query param to a canonical string.
 function normalisePeriod(raw: unknown): string {
@@ -43,7 +44,7 @@ router.get("/ai/payload", async (req: Request, res: Response): Promise<void> => 
   const fy =
     typeof req.query.fy === "string" && req.query.fy.trim()
       ? req.query.fy.trim()
-      : DEFAULT_FY;
+      : currentOpenFy();
 
   if (!FY_PATTERN.test(fy)) {
     res.status(400).json({ error: "fy must look like 2026-27" });

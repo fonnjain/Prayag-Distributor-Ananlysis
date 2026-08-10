@@ -5,6 +5,7 @@ import path from "node:path";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { isAdminToken, isMonthInFy } from "../lib/adminAuth.js";
 import { pushAnchorsToStorage, atomicWriteWithRollback, anchorsFilePath, readVerifyAnchors } from "../lib/config/verifyAnchors.js";
+import { currentOpenFy } from "../lib/fyAnchors.js";
 import { and, eq } from "drizzle-orm";
 import { pool, db, saleLines, type InsertSaleLine } from "@workspace/db";
 import {
@@ -4403,7 +4404,7 @@ router.get("/registers/sap-coverage-check", async (req, res) => {
 // (and optionally invoice). Shows description, qty, amount for confirmation.
 // Drive is read-only: no writes.
 router.get("/registers/sap-check", async (req, res) => {
-  const fy      = typeof req.query.fy      === "string" ? req.query.fy      : "2026-27";
+  const fy      = typeof req.query.fy      === "string" ? req.query.fy      : currentOpenFy();
   const code    = typeof req.query.code    === "string" ? req.query.code    : "";
   const invoice = typeof req.query.invoice === "string" ? req.query.invoice : "";
 

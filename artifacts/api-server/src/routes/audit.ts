@@ -12,6 +12,7 @@ import {
 import { runExtraGroups } from "../lib/audit/extraGroups.js";
 import { buildAuditWorkbook } from "../lib/audit/workbook.js";
 import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
+import { currentOpenFy, deriveSaleLineCohortFy, deriveSaleLineClosedFys } from "../lib/fyAnchors.js";
 
 const router: IRouter = Router();
 
@@ -22,11 +23,22 @@ const router: IRouter = Router();
 const AUDIT_SNAPSHOT_TTL_MS = 15 * 60 * 1000;
 
 const FY_PATTERN = /^\d{4}-\d{2}$/;
-const VALID_FYS = ["2024-25", "2025-26", "2026-27"];
 
-function resolveFy(raw: unknown): string | null {
-  const fy = typeof raw === "string" && raw.trim() !== "" ? raw.trim() : "2025-26";
-  return FY_PATTERN.test(fy) && VALID_FYS.includes(fy) ? fy : null;
+// Valid FYs derive from what is actually ingested (fully-ingested closed FYs
+// in sale_line_current) plus the calendar-open FY — never a fixed list, so a
+// new year is accepted the moment it exists and the default rolls forward
+// automatically. Default = newest fully-ingested closed FY.
+async function validFys(): Promise<string[]> {
+  const closed = await deriveSaleLineClosedFys();
+  const open = currentOpenFy();
+  return closed.includes(open) ? closed : [...closed, open];
+}
+
+async function resolveFy(raw: unknown): Promise<{ fy: string | null; valid: string[] }> {
+  const valid = await validFys();
+  const fy =
+    typeof raw === "string" && raw.trim() !== "" ? raw.trim() : await deriveSaleLineCohortFy();
+  return { fy: FY_PATTERN.test(fy) && valid.includes(fy) ? fy : null, valid };
 }
 
 // Shared runner — used by both JSON and download endpoints.
@@ -49,9 +61,9 @@ async function runAudit(fy: string): Promise<FullVerifyReport> {
 // Returns FullVerifyReport (same shape as /mgmt/verify) but with more groups
 // and the runFullVerify checks (not just the old runVerify secondary checks).
 router.get("/audit", async (req: Request, res: Response): Promise<void> => {
-  const fy = resolveFy(req.query["fy"]);
+  const { fy, valid } = await resolveFy(req.query["fy"]);
   if (!fy) {
-    res.status(400).json({ error: `Unknown FY. Valid values: ${VALID_FYS.join(", ")}` });
+    res.status(400).json({ error: `Unknown FY. Valid values: ${valid.join(", ")}` });
     return;
   }
   try {
@@ -72,9 +84,9 @@ router.get("/audit", async (req: Request, res: Response): Promise<void> => {
 // Returns a .xlsx workbook with 8 tabs: Summary, Checks, Failures, Source Health,
 // Unmatched Names, Head Reconciliation, Cross-foots, Anchors.
 router.get("/audit/download", async (req: Request, res: Response): Promise<void> => {
-  const fy = resolveFy(req.query["fy"]);
+  const { fy, valid } = await resolveFy(req.query["fy"]);
   if (!fy) {
-    res.status(400).json({ error: `Unknown FY. Valid values: ${VALID_FYS.join(", ")}` });
+    res.status(400).json({ error: `Unknown FY. Valid values: ${valid.join(", ")}` });
     return;
   }
   try {

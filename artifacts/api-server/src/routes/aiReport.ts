@@ -1,4 +1,5 @@
 // Phase A2 — POST /api/ai/report
+import { currentOpenFy } from "../lib/fyAnchors.js";
 //
 // Full generation chain: A1 payload  →  Anthropic API  →  structured JSON
 // response  →  numeric guard  →  HTTP response.
@@ -44,7 +45,7 @@ function parseRequest(body: unknown): AiReportRequest | { error: string } {
   const b = body as Record<string, unknown>;
   if (typeof b.member !== "string" || !b.member.trim()) return { error: "member is required." };
   return {
-    fy:        typeof b.fy === "string" && b.fy.trim() ? b.fy.trim() : "2026-27",
+    fy:        typeof b.fy === "string" && b.fy.trim() ? b.fy.trim() : currentOpenFy(),
     stateHead: typeof b.stateHead === "string" && b.stateHead.trim() ? b.stateHead.trim() : undefined,
     member:    b.member.trim(),
     period:    typeof b.period === "string" && b.period.trim() ? b.period.trim() : "ytd",

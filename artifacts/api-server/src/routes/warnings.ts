@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { currentOpenFy } from "../lib/fyAnchors.js";
 import { loadDeepDiveData, resolvePriorYearQuarters } from "../lib/mgmt/deepDiveData.js";
 import { respondIfQuotaError } from "../lib/quotaResponse.js";
 import { loadStateDashboard, type SecMember } from "../lib/mgmt/stateDashboard.js";
@@ -158,7 +159,7 @@ router.get("/warnings", async (req, res) => {
   const fy =
     typeof req.query.fy === "string" && req.query.fy.trim()
       ? req.query.fy.trim()
-      : "2026-27";
+      : currentOpenFy();
 
   const stateHeadRaw =
     typeof req.query.stateHead === "string" ? req.query.stateHead.trim() : "";
@@ -202,7 +203,7 @@ router.get("/warnings/distributors", async (req, res) => {
   const fy =
     typeof req.query.fy === "string" && req.query.fy.trim()
       ? req.query.fy.trim()
-      : "2026-27";
+      : currentOpenFy();
   const stateHeadRaw =
     typeof req.query.stateHead === "string" ? req.query.stateHead.trim() : "";
   if (!stateHeadRaw) {
@@ -243,7 +244,7 @@ router.get("/warnings/export", async (req, res) => {
   const fy =
     typeof req.query.fy === "string" && req.query.fy.trim()
       ? req.query.fy.trim()
-      : "2026-27";
+      : currentOpenFy();
   const stateHeadRaw =
     typeof req.query.stateHead === "string" ? req.query.stateHead.trim() : "";
   if (!stateHeadRaw) {

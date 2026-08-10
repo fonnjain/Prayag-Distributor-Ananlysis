@@ -18,6 +18,7 @@
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
+import { currentOpenFy } from "../lib/fyAnchors.js";
 import { AnalyzeSalesBody, AnalyzeSalesResponse } from "@workspace/api-zod";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { buildGraphIndex, graphIndexToPromptText } from "../lib/mgmt/graph/graphIndex.js";
@@ -224,7 +225,7 @@ router.post("/analyze", async (req: Request, res: Response): Promise<void> => {
   }
 
   const question = parsed.data.question;
-  const defaultFy = ((parsed.data as Record<string, unknown>)["fy"] as string | undefined) ?? "2026-27";
+  const defaultFy = ((parsed.data as Record<string, unknown>)["fy"] as string | undefined) ?? currentOpenFy();
 
   try {
     // Build graph index (uses cached data — fast).

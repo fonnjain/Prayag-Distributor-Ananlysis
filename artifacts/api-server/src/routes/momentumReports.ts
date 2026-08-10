@@ -26,8 +26,10 @@ type OrdersData = {
 };
 
 router.get("/momentum-reports/export", async (req, res) => {
-  // Optional sub-year period — matches the page's client-side slice. The
-  // Momentum basis is always FY 2026-27.
+  // Optional sub-year period — matches the page's client-side slice.
+  // Intentional per-FY anchor: this export reads the dashboard snapshot's
+  // orders_fy2627 block, which only exists for FY 2026-27 — month labels must
+  // validate against that FY, not the calendar-open one.
   const monthsResult = parseMonthsParam(req.query.months, "2026-27");
   if (!monthsResult.ok) {
     res.status(400).json({ error: monthsResult.error });

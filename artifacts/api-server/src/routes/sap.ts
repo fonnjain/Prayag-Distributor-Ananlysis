@@ -1,4 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
+import { currentOpenFy } from "../lib/fyAnchors.js";
 import { Readable } from "node:stream";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage.js";
 import { streamSapWorkbook } from "../lib/sap/sapStream.js";
@@ -184,7 +185,7 @@ router.get(
     const formatRaw = req.query["format"];
 
     const fy =
-      typeof fyRaw === "string" && fyRaw.trim() !== "" ? fyRaw.trim() : "2026-27";
+      typeof fyRaw === "string" && fyRaw.trim() !== "" ? fyRaw.trim() : currentOpenFy();
     const month =
       typeof monthRaw === "string" && monthRaw.trim() !== ""
         ? monthRaw.trim()
@@ -251,7 +252,7 @@ router.get(
     const formatRaw = req.query["format"];
 
     const fy =
-      typeof fyRaw === "string" && fyRaw.trim() !== "" ? fyRaw.trim() : "2026-27";
+      typeof fyRaw === "string" && fyRaw.trim() !== "" ? fyRaw.trim() : currentOpenFy();
     const month =
       typeof monthRaw === "string" && monthRaw.trim() !== ""
         ? monthRaw.trim()
@@ -318,7 +319,7 @@ router.get(
     const monthRaw = req.query["month"];
 
     const fy =
-      typeof fyRaw === "string" && fyRaw.trim() !== "" ? fyRaw.trim() : "2026-27";
+      typeof fyRaw === "string" && fyRaw.trim() !== "" ? fyRaw.trim() : currentOpenFy();
     const month =
       typeof monthRaw === "string" && monthRaw.trim() !== ""
         ? monthRaw.trim()

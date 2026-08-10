@@ -1,4 +1,5 @@
 // GET /api/analytics?fy=2026-27&compare=2025-26
+import { currentOpenFy } from "../lib/fyAnchors.js";
 //   Optional entity filters: heads / states / customers (JSON-encoded string
 //   arrays, values from /api/company-reports/filters). Filtered requests
 //   always build live (never snapshot — unbounded key space) and always read
@@ -16,7 +17,7 @@ import { parseMonthsParam } from "../lib/periodMonths.js";
 const router: IRouter = Router();
 
 const FY_PATTERN = /^\d{4}-\d{2}$/;
-const DEFAULT_FY = "2026-27";
+// Default FY derives from the calendar so the page never opens on a stale year.
 const ANALYTICS_TTL_MS = 15 * 60 * 1000;
 
 function parseParams(req: Request, res: Response):
@@ -24,7 +25,7 @@ function parseParams(req: Request, res: Response):
   | null {
   const fyRaw = req.query["fy"];
   const fy =
-    typeof fyRaw === "string" && fyRaw.trim() !== "" ? fyRaw.trim() : DEFAULT_FY;
+    typeof fyRaw === "string" && fyRaw.trim() !== "" ? fyRaw.trim() : currentOpenFy();
   if (!FY_PATTERN.test(fy)) {
     res.status(400).json({ error: "fy must look like 2026-27" });
     return null;

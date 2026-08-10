@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { currentOpenFy } from "../lib/fyAnchors.js";
 import {
   loadPrimaryTargetEntries,
   savePrimaryTargetEntries,
@@ -29,7 +30,7 @@ router.get("/primary-targets", async (req: Request, res: Response): Promise<void
   const fy =
     typeof req.query.fy === "string" && req.query.fy.trim()
       ? req.query.fy.trim()
-      : "2026-27";
+      : currentOpenFy();
   if (!FY_PATTERN.test(fy)) {
     res.status(400).json({ error: "fy must look like 2026-27" });
     return;

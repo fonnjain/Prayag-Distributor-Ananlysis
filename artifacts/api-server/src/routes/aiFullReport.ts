@@ -22,6 +22,7 @@
 //   State head:  "what to do" (§8).
 
 import { Router, type IRouter, type Request, type Response } from "express";
+import { currentOpenFy } from "../lib/fyAnchors.js";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
@@ -339,7 +340,7 @@ function safeGuard(payload: unknown, content: { title: string; body: string }): 
 
 router.post("/ai/full-report/distributor", async (req: Request, res: Response): Promise<void> => {
   const b = (req.body ?? {}) as Record<string, unknown>;
-  const fy          = typeof b.fy === "string" && FY_PATTERN.test(b.fy.trim()) ? b.fy.trim() : "2026-27";
+  const fy          = typeof b.fy === "string" && FY_PATTERN.test(b.fy.trim()) ? b.fy.trim() : currentOpenFy();
   const stateHead   = typeof b.stateHead === "string" && b.stateHead.trim() ? b.stateHead.trim() : "";
   const distributor = typeof b.distributor === "string" && b.distributor.trim() ? b.distributor.trim() : "";
   const monthFrom   = Math.max(1,  Math.min(12, Number(b.monthFrom ?? 1)));
@@ -624,7 +625,7 @@ Output JSON with this exact schema:
 
 router.post("/ai/full-report/statehead", async (req: Request, res: Response): Promise<void> => {
   const b = (req.body ?? {}) as Record<string, unknown>;
-  const fy        = typeof b.fy === "string" && FY_PATTERN.test(b.fy.trim()) ? b.fy.trim() : "2026-27";
+  const fy        = typeof b.fy === "string" && FY_PATTERN.test(b.fy.trim()) ? b.fy.trim() : currentOpenFy();
   const stateHead = typeof b.stateHead === "string" && b.stateHead.trim() ? b.stateHead.trim() : "";
   const monthFrom = Math.max(1,  Math.min(12, Number(b.monthFrom ?? 1)));
   const monthTo   = Math.max(monthFrom, Math.min(12, Number(b.monthTo ?? 12)));

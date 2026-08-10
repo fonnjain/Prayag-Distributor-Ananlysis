@@ -13,6 +13,7 @@ import {
   type RepNode,
 } from "../lib/mgmt/salespeople.js";
 import { priorFy } from "../lib/mgmt/names.js";
+import { deriveSaleLineCohortFy } from "../lib/fyAnchors.js";
 import { buildSalesReports, type SalesRepReport } from "../lib/mgmt/salesReports.js";
 import { buildRepReportWorkbook } from "../lib/mgmt/repReports.js";
 
@@ -123,7 +124,6 @@ const FIXTURE_TREE = {
 const router: IRouter = Router();
 
 const FY_PATTERN = /^\d{4}-\d{2}$/;
-const DEFAULT_FY = "2025-26";
 
 const EMOJI_PATTERN =
   /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FE0F}\u{1F1E6}-\u{1F1FF}\u{200D}\u{2122}\u{2139}\u{2328}\u{23E9}-\u{23FA}\u{24C2}\u{25AA}\u{25AB}\u{25B6}\u{25C0}\u{25FB}-\u{25FE}]/gu;
@@ -132,14 +132,16 @@ function stripEmojis(text: string): string {
   return text.replace(EMOJI_PATTERN, "").replace(/[ \t]+\n/g, "\n").trim();
 }
 
-function fyParam(raw: unknown): string {
-  return typeof raw === "string" && raw.trim() !== "" ? raw.trim() : DEFAULT_FY;
+// Default FY derives from ingest (newest fully-ingested closed FY) so the
+// page never opens on an outdated year after a rollover.
+async function fyParam(raw: unknown): Promise<string> {
+  return typeof raw === "string" && raw.trim() !== "" ? raw.trim() : deriveSaleLineCohortFy();
 }
 
 const cr = (n: number): string => `${(n / 1e7).toFixed(2)} Cr`;
 
 router.get("/salespeople/tree", async (req: Request, res: Response): Promise<void> => {
-  const fy = fyParam(req.query.fy);
+  const fy = await fyParam(req.query.fy);
   if (!FY_PATTERN.test(fy)) {
     res.status(400).json({ error: "fy must look like 2025-26" });
     return;
@@ -161,7 +163,7 @@ router.get("/salespeople/tree", async (req: Request, res: Response): Promise<voi
 });
 
 router.get("/salespeople/deep-dive", async (req: Request, res: Response): Promise<void> => {
-  const fy = fyParam(req.query.fy);
+  const fy = await fyParam(req.query.fy);
   const repKey = typeof req.query.repKey === "string" ? req.query.repKey.trim() : "";
   const scope = req.query.scope === "team" ? "team" : "own";
   if (!FY_PATTERN.test(fy)) {
@@ -184,7 +186,7 @@ router.get("/salespeople/deep-dive", async (req: Request, res: Response): Promis
 });
 
 router.get("/salespeople/verify", async (req: Request, res: Response): Promise<void> => {
-  const fy = fyParam(req.query.fy);
+  const fy = await fyParam(req.query.fy);
   if (!FY_PATTERN.test(fy)) {
     res.status(400).json({ error: "fy must look like 2025-26" });
     return;
@@ -260,7 +262,7 @@ router.get(
   "/salespeople/:key/reports",
   async (req: Request, res: Response): Promise<void> => {
     const repKey = typeof req.params.key === "string" ? req.params.key.trim() : "";
-    const fy = fyParam(req.query.fy);
+    const fy = await fyParam(req.query.fy);
     const scope = req.query.scope === "team" ? "team" : "own";
     const basis = req.query.basis === "primary" ? "primary" : "secondary";
     const filterState = typeof req.query.state === "string" ? req.query.state.trim() : undefined;
@@ -296,7 +298,7 @@ router.get(
   "/salespeople/:key/reports/download",
   async (req: Request, res: Response): Promise<void> => {
     const repKey = typeof req.params.key === "string" ? req.params.key.trim() : "";
-    const fy = fyParam(req.query.fy);
+    const fy = await fyParam(req.query.fy);
     const basis = req.query.basis === "primary" ? "primary" : "secondary";
     const scope = req.query.scope === "team" ? "team" : "own";
     if (!repKey) {

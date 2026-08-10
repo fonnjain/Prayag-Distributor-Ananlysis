@@ -1,4 +1,5 @@
 // Phase A7 — Ask Claude: stateless Q&A grounded in the current selection's payload.
+import { currentOpenFy } from "../lib/fyAnchors.js";
 //
 // POST /api/ai/chat
 //   Body: {
@@ -72,7 +73,7 @@ ${JSON.stringify(payload, null, 2)}`;
 router.post("/ai/chat", async (req: Request, res: Response): Promise<void> => {
   const body = (req.body && typeof req.body === "object" ? req.body : {}) as Record<string, unknown>;
 
-  const fy        = typeof body.fy        === "string" && body.fy.trim()        ? body.fy.trim()        : "2026-27";
+  const fy        = typeof body.fy        === "string" && body.fy.trim()        ? body.fy.trim()        : currentOpenFy();
   const stateHead = typeof body.stateHead === "string" && body.stateHead.trim() ? body.stateHead.trim() : undefined;
   const memberRaw = typeof body.member    === "string" && body.member.trim()    ? body.member.trim()    : undefined;
   const period    = typeof body.period    === "string" && body.period.trim()    ? body.period.trim()    : "ytd";
