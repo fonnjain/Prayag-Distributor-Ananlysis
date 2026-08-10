@@ -56,6 +56,9 @@ function growthCacheKey(
   return `${GROWTH_CACHE_PREFIX}${fy}|${scope}|${stateHead}|${state}|${monthFrom}|${monthTo}|${dormantRevival}|${atRiskRecovery}|${rangeUptake}`;
 }
 
+/** @internal — exported for unit tests only; do not read in production code paths. */
+export { growthCache as _growthCacheForTest };
+
 /** Drop cached growth report payloads.
  *  Called whenever a register re-sync / dashboard upload invalidates mgmt caches. */
 export function invalidateGrowthReportCache(fy?: string): void {
@@ -817,13 +820,13 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
     if (deepDive) {
       for (const d of deepDive.distributors as DistributorGroup[]) {
         if (!d.retailerCount || d.retailerCount === 0) continue;
-        const total  = d.retailerCount;
-        const active = d.activeCount;
+        const total  = parseInt(r.retailer_count) || 0;
+        const active = parseInt(r.active_count)   || 0;
         const actPct = (active / total) * 100;
         if (actPct < 40) {
           const dormant  = total - active;
           // Size: dormant_count × median active retailer quarterly order × revival_assumption
-          const valueHigh = dormant * quarterlyMedian * dormantRevival;
+        const valueHigh = gap * perCodeQuarterly * rangeUptake;
           lowActivationDists.push({
             name: d.name,
             retailerCount: d.retailerCount,
@@ -845,7 +848,7 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
         if (actPct < 40) {
           const dormant  = total - active;
           // Size: dormant_count × median active retailer quarterly order × revival_assumption
-          const valueHigh = dormant * quarterlyMedian * dormantRevival;
+        const valueHigh = gap * perCodeQuarterly * rangeUptake;
           lowActivationDists.push({
             name: r.distributor,
             retailerCount: total,
@@ -928,12 +931,11 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
         ? (medianNet / Math.max(1, labels.length / 3)) / peerMedianBrands
         : 0;
       for (const d of (deepDive.distributors as DistributorGroup[]).slice(0, 20)) {
-        const brands = d.skuSpread?.distinctBrands ?? null;
+        const brands  = parseInt(r.distinct_segments) || 0;
         if (brands == null || peerMedianBrands == null) continue;
-        const gap = peerMedianBrands - brands;
+        const gap     = parseFloat(r.gap) || 0;
         if (gap <= 0) continue;
-        // Size: gap_codes × peer_median_quarterly_per_code × uptake
-        const valueHigh = gap * perCodeQuarterlyDd * rangeUptake;
+        const valueHigh = gap * perCodeQuarterly * rangeUptake;
         widenDists.push({
           name: d.name,
           distinctBrands: brands,
