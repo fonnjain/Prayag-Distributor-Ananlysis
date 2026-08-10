@@ -138,8 +138,10 @@ async function queryCustomerStates(
   const curFrag    = sql.join(labels.length  > 0 ? labels.map(l => sql`${l}`)       : [sql`NULL`], sql`, `);
   const priorFrag  = sql.join(priorLabels.length > 0 ? priorLabels.map(l => sql`${l}`) : [sql`NULL`], sql`, `);
   const py = prevFy(fy);
-  const headClause  = headFilter  ? sql`AND sl.head_canon = ${headFilter}`  : sql``;
-  const stateClause = stateFilter ? sql`AND sl.state_canon = ${stateFilter}` : sql``;
+  // NOTE: the all_rows CTE selects FROM sale_line WITHOUT an alias — these
+  // clauses must use bare column names (an `sl.` prefix 500s the whole report).
+  const headClause  = headFilter  ? sql`AND head_canon = ${headFilter}`  : sql``;
+  const stateClause = stateFilter ? sql`AND state_canon = ${stateFilter}` : sql``;
 
   const res = await db.execute<CustomerStateRow>(sql`
     WITH all_rows AS (
