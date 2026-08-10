@@ -37,6 +37,41 @@ export function latestAttached(prefix: string): string {
   if (matches.length === 0) throw new Error(`no file matching ${prefix}*.csv in ${dir}`);
   return path.join(dir, matches[matches.length - 1]);
 }
+// ── upload-generation guard ─────────────────────────────────────────────────
+// Uploaded files carry an epoch-ms timestamp suffix (e.g. *_1786193253055.csv).
+// Files from ONE upload land within milliseconds of each other; files from
+// different uploads are minutes-to-days apart. If a future upload delivers only
+// one of the distributor/retailer pair, resolving each independently as
+// "latest" would silently mix two generations. Refuse to load unless both
+// timestamps fall within a small window.
+export const UPLOAD_GENERATION_TOLERANCE_MS = 5 * 60 * 1000;
+export function uploadTimestamp(filePath: string): number {
+  const m = path.basename(filePath).match(/_(\d{10,})\.csv$/i);
+  if (!m) {
+    throw new Error(
+      `cannot extract upload timestamp from filename: ${path.basename(filePath)} ` +
+      `(expected an epoch-ms suffix like _1786193253055.csv)`,
+    );
+  }
+  return Number(m[1]);
+}
+export function assertSameUploadGeneration(
+  distPath: string,
+  retPath: string,
+  toleranceMs: number = UPLOAD_GENERATION_TOLERANCE_MS,
+): void {
+  const dt = uploadTimestamp(distPath);
+  const rt = uploadTimestamp(retPath);
+  const gap = Math.abs(dt - rt);
+  if (gap > toleranceMs) {
+    throw new Error(
+      `upload generation mismatch: ${path.basename(distPath)} and ${path.basename(retPath)} ` +
+      `differ by ${Math.round(gap / 1000)}s (> ${toleranceMs / 1000}s tolerance). ` +
+      `The distributor and retailer CSVs must come from the SAME upload — ` +
+      `re-upload BOTH files together, then re-run the load.`,
+    );
+  }
+}
 function rosterPath(): string {
   for (const cand of [
     path.resolve(process.cwd(), "config/hr_roster.csv"),
@@ -207,6 +242,7 @@ export async function runCustomerUploadLoad(opts: { dryRun: boolean; endPool?: b
   const DRY_RUN = opts.dryRun;
   const DIST_CSV = latestAttached("Distributer_Upload_Sample_File_");
   const RET_CSV = latestAttached("Retailer_Upload_Sample_file_");
+  assertSameUploadGeneration(DIST_CSV, RET_CSV);
   console.log(`[files] dist=${DIST_CSV} ret=${RET_CSV}`);
   console.log(`=== customer-upload-load START${DRY_RUN ? " (DRY RUN)" : ""} ===`);
 
