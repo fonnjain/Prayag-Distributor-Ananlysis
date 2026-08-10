@@ -14,10 +14,90 @@
 //   POST /api/admin/masters/product-load?write=1     -> 202 { job }
 //   GET  /api/admin/masters/load-status              -> per-job state + result
 // Only one job of each kind may run at a time.
-import { Router, type Request, type Response } from "express";
+import { Router, raw, type Request, type Response } from "express";
+import { readdirSync, existsSync, statSync } from "node:fs";
+import { writeFile, rename, mkdir } from "node:fs/promises";
+import path from "node:path";
 import { isAdminToken } from "../lib/adminAuth.js";
+import { objectStorageClient } from "../lib/objectStorage.js";
 
 const router = Router();
+
+// ── Master CSV kinds ──────────────────────────────────────────────────────────
+// The loaders resolve the LATEST attached_assets file matching these prefixes
+// (see customerUploadLoad.latestAttached / productUploadLoad.latestProductCsv).
+// Uploads are ALSO persisted to object storage under masters/<kind>.csv so a
+// fresh deployment (empty local attached_assets) can restore them before a load.
+type MasterKind = "distributor" | "retailer" | "product";
+const MASTER_KINDS: Record<MasterKind, { prefix: string; label: string }> = {
+  distributor: { prefix: "Distributer_Upload_Sample_File_", label: "Distributor master CSV" },
+  retailer: { prefix: "Retailer_Upload_Sample_file_", label: "Retailer master CSV" },
+  product: { prefix: "Product_Upload_Sample_File_", label: "Product master CSV" },
+};
+const isMasterKind = (v: string): v is MasterKind => v in MASTER_KINDS;
+
+function attachedDirWritable(): string {
+  for (const cand of [
+    path.resolve(process.cwd(), "attached_assets"),
+    path.resolve(process.cwd(), "../../attached_assets"),
+  ]) {
+    if (existsSync(cand)) return cand;
+  }
+  // Fresh deployment container: create it next to cwd (repo root in prod).
+  return path.resolve(process.cwd(), "attached_assets");
+}
+
+function latestLocal(kind: MasterKind): { path: string; mtimeMs: number; size: number } | null {
+  const dir = attachedDirWritable();
+  if (!existsSync(dir)) return null;
+  const { prefix } = MASTER_KINDS[kind];
+  const matches = readdirSync(dir).filter((f) => f.startsWith(prefix) && f.endsWith(".csv")).sort();
+  if (matches.length === 0) return null;
+  const p = path.join(dir, matches[matches.length - 1]);
+  const st = statSync(p);
+  return { path: p, mtimeMs: st.mtimeMs, size: st.size };
+}
+
+function gcsFile(kind: MasterKind) {
+  const bucketId = process.env["DEFAULT_OBJECT_STORAGE_BUCKET_ID"];
+  if (!bucketId) return null;
+  return objectStorageClient.bucket(bucketId).file(`masters/${kind}.csv`);
+}
+
+async function writeLocalCsv(kind: MasterKind, buf: Buffer): Promise<string> {
+  const dir = attachedDirWritable();
+  await mkdir(dir, { recursive: true });
+  const dest = path.join(dir, `${MASTER_KINDS[kind].prefix}${Date.now()}.csv`);
+  const tmp = `${dest}.tmp`;
+  await writeFile(tmp, buf);
+  await rename(tmp, dest); // atomic: latestAttached never sees a partial file
+  return dest;
+}
+
+/**
+ * Ensures the latest uploaded CSV for `kind` exists locally where the loaders
+ * look. If object storage holds a copy newer than the local latest (or there
+ * is no local file at all — fresh deployment), it is downloaded first.
+ */
+async function ensureMasterCsvLocal(kind: MasterKind): Promise<void> {
+  const file = gcsFile(kind);
+  if (!file) {
+    if (!latestLocal(kind)) throw new Error(`${MASTER_KINDS[kind].label}: no local file and object storage is not configured`);
+    return;
+  }
+  const [exists] = await file.exists();
+  const local = latestLocal(kind);
+  if (!exists) {
+    if (!local) throw new Error(`${MASTER_KINDS[kind].label}: not found locally or in object storage — upload it first`);
+    return;
+  }
+  const [meta] = await file.getMetadata();
+  const gcsUpdatedMs = meta.updated ? new Date(String(meta.updated)).getTime() : 0;
+  if (local && local.mtimeMs >= gcsUpdatedMs) return; // local is current
+  const [content] = await file.download();
+  await writeLocalCsv(kind, content);
+  console.log(`[masters] ${kind}: restored ${content.length} bytes from object storage`);
+}
 
 interface JobState {
   status: "idle" | "running" | "done" | "failed";
@@ -66,18 +146,107 @@ function startJob(
   res.status(202).json({ ok: true, kind, params, note: "Load started in background. Poll GET /api/admin/masters/load-status." });
 }
 
+// ── CSV upload (raw body, not multipart). Content-Type text/csv keeps this
+// outside the global express.json 20 MB limit; the retailer file is ~37 MB.
+router.post(
+  "/admin/masters/upload/:kind",
+  raw({ type: () => true, limit: "120mb" }),
+  async (req: Request, res: Response): Promise<void> => {
+    if (!requireAdmin(req, res)) return;
+    const kind = String(req.params.kind);
+    if (!isMasterKind(kind)) {
+      res.status(400).json({ error: `Unknown kind '${kind}'. Expected one of: ${Object.keys(MASTER_KINDS).join(", ")}` });
+      return;
+    }
+    const buf = req.body as Buffer;
+    if (!Buffer.isBuffer(buf) || buf.length === 0) {
+      res.status(400).json({ error: "Empty upload body. Send the CSV bytes with Content-Type: text/csv." });
+      return;
+    }
+    // Cheap sanity check before accepting: first line must look like a CSV header.
+    const firstLine = buf.subarray(0, 4096).toString("latin1").split(/\r?\n/)[0] ?? "";
+    if (!firstLine.includes(",")) {
+      res.status(400).json({ error: "File does not look like a CSV (no comma in the first line). Not stored." });
+      return;
+    }
+    try {
+      const localPath = await writeLocalCsv(kind, buf);
+      let persisted = false;
+      let persistError: string | null = null;
+      const file = gcsFile(kind);
+      if (file) {
+        try {
+          await file.save(buf, { contentType: "text/csv", resumable: false });
+          persisted = true;
+        } catch (err) {
+          persistError = err instanceof Error ? err.message : String(err);
+        }
+      } else {
+        persistError = "DEFAULT_OBJECT_STORAGE_BUCKET_ID is not set";
+      }
+      res.json({
+        ok: true,
+        kind,
+        bytes: buf.length,
+        storedAs: path.basename(localPath),
+        persistedToObjectStorage: persisted,
+        persistWarning: persisted ? null : `Upload accepted locally but NOT persisted to object storage (${persistError}); it will not survive a redeploy.`,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+);
+
+// ── Per-kind file status: what the loaders would read right now. ─────────────
+router.get("/admin/masters/files", async (req: Request, res: Response): Promise<void> => {
+  if (!requireAdmin(req, res)) return;
+  const out: Record<string, unknown> = {};
+  for (const kind of Object.keys(MASTER_KINDS) as MasterKind[]) {
+    const local = latestLocal(kind);
+    let gcs: { exists: boolean; updated: string | null; size: number | null } = { exists: false, updated: null, size: null };
+    const file = gcsFile(kind);
+    if (file) {
+      try {
+        const [exists] = await file.exists();
+        if (exists) {
+          const [meta] = await file.getMetadata();
+          gcs = { exists: true, updated: meta.updated ? String(meta.updated) : null, size: meta.size ? Number(meta.size) : null };
+        }
+      } catch {
+        // object storage unreachable — report local state only
+      }
+    }
+    out[kind] = {
+      label: MASTER_KINDS[kind].label,
+      local: local ? { file: path.basename(local.path), size: local.size, modified: new Date(local.mtimeMs).toISOString() } : null,
+      objectStorage: gcs,
+    };
+  }
+  res.json(out);
+});
+
 router.post("/admin/masters/customer-load", async (req: Request, res: Response): Promise<void> => {
   if (!requireAdmin(req, res)) return;
   const dryRun = String(req.query.dryRun ?? "") === "1";
   const { runCustomerUploadLoad } = await import("../lib/uploads/customerUploadLoad.js");
-  startJob("customer", { dryRun }, () => runCustomerUploadLoad({ dryRun }), res);
+  startJob("customer", { dryRun }, async () => {
+    // Fresh deployments have an empty attached_assets — restore from object
+    // storage before the loader resolves its input files.
+    await ensureMasterCsvLocal("distributor");
+    await ensureMasterCsvLocal("retailer");
+    return runCustomerUploadLoad({ dryRun });
+  }, res);
 });
 
 router.post("/admin/masters/product-load", async (req: Request, res: Response): Promise<void> => {
   if (!requireAdmin(req, res)) return;
   const write = String(req.query.write ?? "") === "1";
   const { runProductUploadLoad } = await import("../lib/uploads/productUploadLoad.js");
-  startJob("product", { write }, () => runProductUploadLoad({ write }), res);
+  startJob("product", { write }, async () => {
+    await ensureMasterCsvLocal("product");
+    return runProductUploadLoad({ write });
+  }, res);
 });
 
 router.get("/admin/masters/load-status", (req: Request, res: Response): void => {

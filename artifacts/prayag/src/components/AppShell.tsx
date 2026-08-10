@@ -95,6 +95,7 @@ const NAV: NavGroup[] = [
     items: [
       { id: "api-portal", label: "API Portal",  path: "/dev/api",  icon: Braces },
       { id: "api-keys",   label: "API Keys",    path: "/dev/keys", icon: Key },
+      { id: "masters",    label: "Master Data", path: "/dev/masters", icon: Database },
     ],
   },
 ];

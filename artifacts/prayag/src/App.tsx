@@ -10,6 +10,7 @@ import CustomersPage from "@/pages/CustomersPage";
 import SkuPage from "@/pages/SkuPage";
 import DevPortalPage from "@/pages/DevPortalPage";
 import DevApiKeysPage from "@/pages/DevApiKeysPage";
+import DevMastersPage from "@/pages/DevMastersPage";
 import NotFound from "@/pages/not-found";
 import { DashboardProvider } from "@/data/dashboard-context";
 import { GlobalFilterProvider } from "@/data/global-filter-context";
@@ -38,6 +39,7 @@ function Router() {
         {/* Developer Portal */}
         <Route path="/dev/api" component={DevPortalPage} />
         <Route path="/dev/keys" component={DevApiKeysPage} />
+        <Route path="/dev/masters" component={DevMastersPage} />
         <Route path="/dev" component={DevPortalPage} />
         {/* Dashboard areas */}
         <Route path="/" component={Dashboard} />
