@@ -1,120 +1,130 @@
-// Configurable Scheme Engine.
+// Configurable Scheme Engine — CRUD + tracking helpers for /customers/schemes.
 //
-// Schemes reward customers for hitting order thresholds (value or qty).
-// The engine is data-driven — no scheme is hardcoded. The client supplies
-// the actual slabs via the admin screen.
+// The old generic scheme_def / scheme_slab tables (integer PKs) have been
+// replaced by the new five-table scheme model (migration 017). Schemes now
+// have stable text PKs (e.g. "CP_LALAN"). The CRUD routes use these helpers.
 //
-// Laspeyres deflation is optional (usePriceMultiplier flag on the scheme).
-// When enabled:
-//   scheme_target   = value_LY × multiplier × (1 + desired_real_growth_pct / 100)
-//   deflated_actual = actual_value / multiplier
-//   achievement %   = deflated_actual / value_LY
+// Create / update / delete are intentionally retired — scheme data is now
+// loaded from the Q2 workbook via POST /api/admin/schemes/load. Calling these
+// helpers returns null / false so the route layer can issue a 405 response.
 //
-// Push list: entities within 20% of the next slab threshold (or within reach
-// at run-rate), sorted by effort-to-reward (smallest gap × largest benefit first).
-import { pool, db, schemeDefs, schemeSlabs } from "@workspace/db";
-import { eq, and, asc } from "drizzle-orm";
-import type { SchemeDef, SchemeSlab, InsertSchemeDef, InsertSchemeSlab } from "@workspace/db";
-import { resolveCustomerMultiplier, computeCompanyMultiplier, computeCategoryMultipliers, type CategoryMultiplierMap } from "./laspeyres.js";
+// computeSchemeTracking / getPushList are retained and now operate only on
+// cumulative_value schemes with cumulative rupee slabs. Quantity/free-goods
+// slabs (single_bill_quantity) are not covered by this engine.
+//
+// TERRITORY: tracking applies the scheme's territory via stateCanonsForAbbrevs,
+// which inverts the territory_group.states[] abbreviations to the canonical
+// sale_line.state_canon values used in the WHERE clause.
+import { pool } from "@workspace/db";
+import { stateCanonsForAbbrevs } from "../schemes/territoryResolver.js";
+import { buildAudienceFilterSQL } from "../schemes/audienceFilter.js";
 
-export type { SchemeDef, SchemeSlab };
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-// ── CRUD ──────────────────────────────────────────────────────────────────────
+export type SchemeDef = {
+  id: number;           // synthetic positional number for route compat
+  schemeId: string;     // actual stable text PK (e.g. "CP_LALAN")
+  name: string;
+  audience: string[];
+  settlement: string;
+  qualificationBasis: string;
+  territoryGroup: string | null;
+  productScope: string | null;
+  periodFrom: string;
+  periodTo: string | null;
+  periodNote: string | null;
+};
 
-export async function listSchemes(): Promise<
-  Array<SchemeDef & { slabs: SchemeSlab[] }>
-> {
-  const defs = await db.select().from(schemeDefs).orderBy(asc(schemeDefs.id));
-  if (!defs.length) return [];
-  const ids = defs.map((d) => d.id);
-  const allSlabs = await db
-    .select()
-    .from(schemeSlabs)
-    .orderBy(asc(schemeSlabs.schemeId), asc(schemeSlabs.slabOrder));
-  const slabMap = new Map<number, SchemeSlab[]>();
-  for (const s of allSlabs) {
-    const arr = slabMap.get(s.schemeId) ?? [];
-    arr.push(s);
-    slabMap.set(s.schemeId, arr);
+export type SchemeSlab = {
+  id: number;
+  schemeId: string;
+  slabOrder: number;
+  thresholdFrom: string;
+  thresholdTo: string | null;
+  unit: string;
+  rate: string | null;
+  altReward: string | null;
+  freeGoods: string | null;
+  rewardStatus: string;
+  rawText: string | null;
+};
+
+// ── CRUD (read-only) ──────────────────────────────────────────────────────────
+
+export async function listSchemes(): Promise<Array<SchemeDef & { slabs: SchemeSlab[] }>> {
+  const [schemesRes, slabsRes] = await Promise.all([
+    pool.query<{
+      scheme_id: string; name: string; audience: string[]; settlement: string;
+      qualification_basis: string; territory_group: string | null;
+      product_scope: string | null; period_from: string; period_to: string | null;
+      period_note: string | null;
+    }>(`SELECT * FROM scheme ORDER BY scheme_id`),
+    pool.query<{
+      id: number; scheme_id: string; slab_order: number; threshold_from: string;
+      threshold_to: string | null; unit: string; rate: string | null; alt_reward: string | null;
+      free_goods: string | null; reward_status: string; raw_text: string | null;
+    }>(`SELECT * FROM scheme_slab ORDER BY scheme_id, slab_order`),
+  ]);
+
+  const slabsByScheme = new Map<string, SchemeSlab[]>();
+  for (const row of slabsRes.rows) {
+    const arr = slabsByScheme.get(row.scheme_id) ?? [];
+    arr.push({
+      id: row.id,
+      schemeId: row.scheme_id,
+      slabOrder: row.slab_order,
+      thresholdFrom: row.threshold_from,
+      thresholdTo: row.threshold_to,
+      unit: row.unit,
+      rate: row.rate,
+      altReward: row.alt_reward,
+      freeGoods: row.free_goods,
+      rewardStatus: row.reward_status,
+      rawText: row.raw_text,
+    });
+    slabsByScheme.set(row.scheme_id, arr);
   }
-  return defs.map((d) => ({ ...d, slabs: slabMap.get(d.id) ?? [] }));
+
+  return schemesRes.rows.map((row, idx) => ({
+    id: idx + 1,
+    schemeId: row.scheme_id,
+    name: row.name,
+    audience: row.audience,
+    settlement: row.settlement,
+    qualificationBasis: row.qualification_basis,
+    territoryGroup: row.territory_group,
+    productScope: row.product_scope,
+    periodFrom: row.period_from,
+    periodTo: row.period_to,
+    periodNote: row.period_note,
+    slabs: slabsByScheme.get(row.scheme_id) ?? [],
+  }));
 }
 
+/** Return the scheme at synthetic position id (1-based, sorted by scheme_id). */
 export async function getScheme(
   id: number,
 ): Promise<(SchemeDef & { slabs: SchemeSlab[] }) | null> {
-  const [def] = await db.select().from(schemeDefs).where(eq(schemeDefs.id, id));
-  if (!def) return null;
-  const slabs = await db
-    .select()
-    .from(schemeSlabs)
-    .where(eq(schemeSlabs.schemeId, id))
-    .orderBy(asc(schemeSlabs.slabOrder));
-  return { ...def, slabs };
+  const schemes = await listSchemes();
+  return schemes[id - 1] ?? null;
 }
 
-export async function createScheme(
-  input: InsertSchemeDef,
-  slabs: Omit<InsertSchemeSlab, "schemeId">[],
-): Promise<SchemeDef & { slabs: SchemeSlab[] }> {
-  const [def] = await db.insert(schemeDefs).values(input).returning();
-  if (!slabs.length) return { ...def!, slabs: [] };
-  const insertedSlabs = await db
-    .insert(schemeSlabs)
-    .values(slabs.map((s, i) => ({ ...s, schemeId: def!.id, slabOrder: i + 1 })))
-    .returning();
-  return { ...def!, slabs: insertedSlabs };
+/** Retired — scheme data is managed via POST /api/admin/schemes/load. */
+export async function createScheme(): Promise<null> {
+  return null; // route layer should return 405
 }
 
-export async function updateScheme(
-  id: number,
-  input: Partial<InsertSchemeDef>,
-  newSlabs?: Omit<InsertSchemeSlab, "schemeId">[],
-): Promise<(SchemeDef & { slabs: SchemeSlab[] }) | null> {
-  const [updated] = await db
-    .update(schemeDefs)
-    .set({ ...input, updatedAt: new Date() })
-    .where(eq(schemeDefs.id, id))
-    .returning();
-  if (!updated) return null;
-  if (newSlabs !== undefined) {
-    await db.delete(schemeSlabs).where(eq(schemeSlabs.schemeId, id));
-    if (newSlabs.length > 0) {
-      await db
-        .insert(schemeSlabs)
-        .values(newSlabs.map((s, i) => ({ ...s, schemeId: id, slabOrder: i + 1 })));
-    }
-  }
-  const slabs = await db
-    .select()
-    .from(schemeSlabs)
-    .where(eq(schemeSlabs.schemeId, id))
-    .orderBy(asc(schemeSlabs.slabOrder));
-  return { ...updated, slabs };
+/** Retired — scheme data is managed via POST /api/admin/schemes/load. */
+export async function updateScheme(): Promise<null> {
+  return null; // route layer should return 405
 }
 
-export async function deleteScheme(id: number): Promise<boolean> {
-  const result = await db
-    .delete(schemeDefs)
-    .where(eq(schemeDefs.id, id))
-    .returning();
-  return result.length > 0;
+/** Retired — scheme data is managed via POST /api/admin/schemes/load. */
+export async function deleteScheme(): Promise<false> {
+  return false; // route layer should return 405
 }
 
 // ── Period helpers ─────────────────────────────────────────────────────────────
-
-function fyToDateRange(fy: string): { start: Date; end: Date } {
-  const year = parseInt(fy.split("-")[0], 10);
-  return { start: new Date(year, 3, 1), end: new Date(year + 1, 2, 31) };
-}
-
-function schemePeriod(scheme: SchemeDef): { start: Date; end: Date } | null {
-  if (scheme.periodStart && scheme.periodEnd) {
-    return { start: new Date(scheme.periodStart), end: new Date(scheme.periodEnd) };
-  }
-  if (scheme.fy) return fyToDateRange(scheme.fy);
-  return null;
-}
 
 function daysRemaining(end: Date): number {
   const now = new Date();
@@ -127,142 +137,130 @@ function daysElapsed(start: Date): number {
 }
 
 // ── Achievement query ──────────────────────────────────────────────────────────
+// Only cumulative rupee (cumulative_value) schemes are supported here.
+// single_bill_quantity / single_bill_value / free-goods slabs are not tracked.
 
 async function fetchEntityAchievements(
   scheme: SchemeDef,
   period: { start: Date; end: Date },
-): Promise<Map<string, { customer: string; achievement: number; valLy: number }>> {
-  const scopeCond =
-    scheme.scopeType === "category" && scheme.scopeValues?.length
-      ? `AND COALESCE(group_canon, group_raw, '') = ANY($3::text[])`
-      : scheme.scopeType === "product_list" && scheme.scopeValues?.length
-      ? `AND code = ANY($3::text[])`
-      : "";
+): Promise<Map<string, { customer: string; achievement: number }>> {
+  if (scheme.qualificationBasis !== "cumulative_value") return new Map();
 
-  const entityCond = scheme.namedEntityList?.length
-    ? `AND customer = ANY($4::text[])`
-    : "";
+  // ── Audience filter ───────────────────────────────────────────────────────
+  // Uses distributor_identity to exclude known distributors for sub_dealer audience.
+  // See audienceFilter.ts for the full audience → customer-type mapping.
+  const audienceFilter = buildAudienceFilterSQL(scheme.audience, "sl");
 
-  const typeFilter = scheme.appliesTo.includes("direct_dealer")
-    ? scheme.appliesTo.includes("distributor")
-      ? ""
-      : `AND type_raw ILIKE '%direct%'`
-    : scheme.appliesTo.includes("distributor")
-    ? `AND (type_raw IS NULL OR type_raw NOT ILIKE '%direct%')`
-    : "";
+  // ── Territory filter ──────────────────────────────────────────────────────
+  // territory_group.states[] stores abbreviations (e.g. "WB", "WUP") while
+  // sale_line.state_canon stores full canonical names ("WEST BENGAL", "UP (A)").
+  // We invert via stateCanonsForAbbrevs so the WHERE clause uses state_canon.
+  const params: (Date | string | string[])[] = [period.start, period.end];
+  let territoryClause = "";
+  if (scheme.territoryGroup) {
+    const tgRes = await pool.query<{ states: string[] }>(
+      `SELECT states FROM territory_group WHERE group_raw = $1`,
+      [scheme.territoryGroup],
+    );
+    const abbrevs = tgRes.rows[0]?.states ?? [];
+    const validStateCanons = stateCanonsForAbbrevs(abbrevs);
+    if (validStateCanons.length > 0) {
+      params.push(validStateCanons);
+      territoryClause = `AND sl.state_canon = ANY($${params.length}::text[])`;
+    }
+  }
 
-  const metric = scheme.basis === "qty" ? `SUM(qty::numeric)` : `SUM(amount::numeric)`;
-
-  const params: unknown[] = [period.start, period.end];
-  if (scopeCond) params.push(scheme.scopeValues ?? []);
-  if (entityCond) params.push(scheme.namedEntityList ?? []);
+  // ── Product scope filter via scheme_item_group ────────────────────────────
+  // Restrict to only the group_raw values mapped to this scheme. This enforces
+  // the Q2 workbook's product scope (e.g. CP scheme counts only CP sales).
+  // If the basket is empty, return no results — never silently treat as "all
+  // products" since that would inflate achievement and advance uneligible slabs.
+  const igRes = await pool.query<{ item_group: string }>(
+    `SELECT item_group FROM scheme_item_group WHERE scheme_id = $1`,
+    [scheme.schemeId],
+  );
+  const itemGroups = igRes.rows.map((r) => r.item_group);
+  if (!itemGroups.length) {
+    // No basket mapping — product scope unknown; return empty to be safe.
+    return new Map();
+  }
+  params.push(itemGroups);
+  const itemGroupClause = `AND sl.group_raw = ANY($${params.length}::text[])`;
 
   const res = await pool.query<{
     customer: string;
     achievement: string;
-    val_ly: string;
   }>(
     `
     SELECT
-      customer,
-      ${metric} AS achievement,
-      0 AS val_ly
-    FROM sale_line_current
-    WHERE customer IS NOT NULL
-      AND invoice_date IS NOT NULL
-      AND invoice_date::date >= $1::date
-      AND invoice_date::date <= $2::date
-      ${scopeCond}
-      ${entityCond}
-      ${typeFilter}
-    GROUP BY customer
+      sl.customer,
+      SUM(sl.amount::numeric) AS achievement
+    FROM sale_line_current sl
+    WHERE sl.customer IS NOT NULL
+      AND sl.invoice_date IS NOT NULL
+      AND sl.invoice_date::date >= $1::date
+      AND sl.invoice_date::date <= $2::date
+      AND (sl.is_territory IS NULL OR sl.is_territory = true)
+      ${audienceFilter}
+      ${territoryClause}
+      ${itemGroupClause}
+    GROUP BY sl.customer
     `,
     params,
   );
 
-  const map = new Map<string, { customer: string; achievement: number; valLy: number }>();
+  const map = new Map<string, { customer: string; achievement: number }>();
   for (const r of res.rows) {
     map.set(r.customer, {
       customer: r.customer,
       achievement: parseFloat(r.achievement ?? "0"),
-      valLy: 0,
     });
   }
   return map;
 }
 
-// ── Per-entity tracking ───────────────────────────────────────────────────────
+// ── Per-entity tracking ────────────────────────────────────────────────────────
 
 export type EntityTracking = {
   customer: string;
-  achievement: number;          // current basis achievement (₹ or pcs)
-  deflatedAchievement: number | null; // achievement / multiplier (when scheme uses multiplier)
-  currentSlabIdx: number;       // index into slabs, -1 = none reached
-  nextSlabIdx: number;          // -1 = no next slab (already at top)
+  achievement: number;
+  currentSlabIdx: number;
+  nextSlabIdx: number;
   distanceToNextSlab: number | null;
   daysRemaining: number;
   projectedTotal: number;
-  willReachNextSlab: boolean | null; // null = no data to project
+  willReachNextSlab: boolean | null;
   currentBenefitValue: number | null;
   nextBenefitValue: number | null;
-  multiplier: number | null;
-  multiplierLevel: string | null;
 };
 
 export async function computeSchemeTracking(
-  schemeId: number,
+  schemeIdNum: number,
 ): Promise<EntityTracking[]> {
-  const scheme = await getScheme(schemeId);
-  if (!scheme || !scheme.slabs.length) return [];
-  const period = schemePeriod(scheme);
-  if (!period) return [];
+  const scheme = await getScheme(schemeIdNum);
+  // Only track cumulative_value schemes — quantity/free-goods slabs are not
+  // supported by this value-based achievement calculator.
+  if (!scheme || scheme.qualificationBasis !== "cumulative_value") return [];
+  if (!scheme.slabs.length) return [];
 
-  const slabs = scheme.slabs.sort((a, b) => a.slabOrder - b.slabOrder);
-  const achievements = await fetchEntityAchievements(scheme, period);
-  const remaining = daysRemaining(period.end);
-  const elapsed = daysElapsed(period.start);
+  // Derive period from scheme's periodFrom/periodTo
+  if (!scheme.periodFrom) return [];
+  const start = new Date(scheme.periodFrom);
+  const end = scheme.periodTo ? new Date(scheme.periodTo) : new Date();
 
-  // Pre-compute multipliers for deflated achievement if needed
-  let companyM: Awaited<ReturnType<typeof computeCompanyMultiplier>> | null = null;
-  let catMap: CategoryMultiplierMap | null = null;
-  const fyLy = scheme.fy
-    ? `${parseInt(scheme.fy.split("-")[0], 10) - 1}-${scheme.fy.split("-")[0].slice(-2)}`
-    : null;
-  const fyCy = scheme.fy ?? null;
-
-  if (scheme.usePriceMultiplier && fyLy && fyCy) {
-    [companyM, catMap] = await Promise.all([
-      computeCompanyMultiplier(fyLy, fyCy),
-      computeCategoryMultipliers(fyLy, fyCy),
-    ]);
-  }
+  const slabs = [...scheme.slabs].sort((a, b) => a.slabOrder - b.slabOrder);
+  const achievements = await fetchEntityAchievements(scheme, { start, end });
+  const remaining = daysRemaining(end);
+  const elapsed = daysElapsed(start);
 
   const results: EntityTracking[] = [];
 
   for (const { customer, achievement } of achievements.values()) {
-    let deflated: number | null = null;
-    let multiplier: number | null = null;
-    let multiplierLevel: string | null = null;
-
-    if (scheme.usePriceMultiplier && fyLy && fyCy) {
-      const mResult = await resolveCustomerMultiplier({
-        customer,
-        fyLy,
-        fyCy,
-        companyMultiplier: companyM ?? undefined,
-        categoryMultipliers: catMap ?? undefined,
-      });
-      multiplier = mResult.multiplier;
-      multiplierLevel = mResult.level;
-      deflated = scheme.basis === "value" ? achievement / multiplier : null;
-    }
-
-    const effectiveAchievement = deflated ?? achievement;
-    const thresholds = slabs.map((s) => parseFloat(s.threshold));
+    const thresholds = slabs.map((s) => parseFloat(s.thresholdFrom));
 
     let currentSlabIdx = -1;
     for (let i = thresholds.length - 1; i >= 0; i--) {
-      if (effectiveAchievement >= thresholds[i]) {
+      if (achievement >= thresholds[i]) {
         currentSlabIdx = i;
         break;
       }
@@ -272,30 +270,25 @@ export async function computeSchemeTracking(
       currentSlabIdx < slabs.length - 1 ? currentSlabIdx + 1 : -1;
     const nextThreshold = nextSlabIdx >= 0 ? thresholds[nextSlabIdx] : null;
     const distanceToNextSlab =
-      nextThreshold != null ? nextThreshold - effectiveAchievement : null;
+      nextThreshold != null ? nextThreshold - achievement : null;
 
     const runRate = elapsed > 0 ? achievement / elapsed : 0;
     const projectedTotal = achievement + runRate * remaining;
-    const projEffective = deflated != null ? projectedTotal / (multiplier ?? 1) : projectedTotal;
     const willReachNextSlab =
-      nextThreshold != null ? projEffective >= nextThreshold : null;
+      nextThreshold != null ? projectedTotal >= nextThreshold : null;
 
     const benefitForSlab = (idx: number): number | null => {
       if (idx < 0 || idx >= slabs.length) return null;
       const slab = slabs[idx];
-      const pct = parseFloat(slab.benefitType === "pct" ? slab.benefitValue : "0");
-      if (slab.benefitType === "pct") {
-        return scheme.basis === "value"
-          ? (achievement * pct) / 100
-          : null; // can't compute ₹ benefit for qty-based schemes without a value
-      }
-      return parseFloat(slab.benefitValue);
+      if (slab.rewardStatus === "needs_clarification") return null;
+      const rate = slab.rate != null ? parseFloat(slab.rate) : null;
+      if (rate == null) return null;
+      return achievement * rate;
     };
 
     results.push({
       customer,
       achievement,
-      deflatedAchievement: deflated,
       currentSlabIdx,
       nextSlabIdx,
       distanceToNextSlab,
@@ -304,17 +297,14 @@ export async function computeSchemeTracking(
       willReachNextSlab,
       currentBenefitValue: benefitForSlab(currentSlabIdx),
       nextBenefitValue: benefitForSlab(nextSlabIdx),
-      multiplier,
-      multiplierLevel,
     });
   }
 
-  // Sort by achievement descending
   results.sort((a, b) => b.achievement - a.achievement);
   return results;
 }
 
-// ── Push list ─────────────────────────────────────────────────────────────────
+// ── Push list ──────────────────────────────────────────────────────────────────
 
 export type PushListEntry = {
   customer: string;
@@ -326,31 +316,29 @@ export type PushListEntry = {
   projectedShortfall: number;
   willReachNextSlab: boolean;
   nextBenefitValue: number | null;
-  effortToRewardScore: number; // lower gap, higher benefit = higher score
+  effortToRewardScore: number;
 };
 
-const PUSH_THRESHOLD_PCT = 0.20; // within 20% of the next slab
+const PUSH_THRESHOLD_PCT = 0.20;
 
 export async function getPushList(schemeId: number): Promise<PushListEntry[]> {
   const tracking = await computeSchemeTracking(schemeId);
   const scheme = await getScheme(schemeId);
   if (!scheme) return [];
 
-  const slabs = scheme.slabs.sort((a, b) => a.slabOrder - b.slabOrder);
-
+  const slabs = [...scheme.slabs].sort((a, b) => a.slabOrder - b.slabOrder);
   const entries: PushListEntry[] = [];
 
   for (const t of tracking) {
-    if (t.nextSlabIdx < 0) continue; // already at top slab
-    const nextThreshold = parseFloat(slabs[t.nextSlabIdx].threshold);
+    if (t.nextSlabIdx < 0) continue;
+    const nextThreshold = parseFloat(slabs[t.nextSlabIdx].thresholdFrom);
     const distance = t.distanceToNextSlab ?? (nextThreshold - t.achievement);
     const pct = distance / nextThreshold;
-    if (pct > PUSH_THRESHOLD_PCT && !t.willReachNextSlab) continue; // too far
+    if (pct > PUSH_THRESHOLD_PCT && !t.willReachNextSlab) continue;
 
     const benefitValue = t.nextBenefitValue;
-    const effortToRewardScore = benefitValue != null && benefitValue > 0
-      ? distance / benefitValue
-      : distance;
+    const effortToRewardScore =
+      benefitValue != null && benefitValue > 0 ? distance / benefitValue : distance;
 
     entries.push({
       customer: t.customer,
@@ -366,7 +354,6 @@ export async function getPushList(schemeId: number): Promise<PushListEntry[]> {
     });
   }
 
-  // Sort: smallest gap × largest benefit first (lowest effortToRewardScore)
   entries.sort((a, b) => a.effortToRewardScore - b.effortToRewardScore);
   return entries;
 }

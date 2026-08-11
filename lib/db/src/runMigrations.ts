@@ -404,6 +404,78 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE customer_master ALTER COLUMN type DROP NOT NULL;
     `,
   },
+  {
+    id: "017_scheme_schema_rebuild",
+    sql: `
+      -- Replace the old generic scheme_def / scheme_slab tables with the new
+      -- five-table model that matches the actual Q2 FY2026-27 workbook structure.
+      --
+      -- Drop order: scheme_slab (FK child) first, then scheme_def (parent).
+      -- The new scheme_slab table also reuses the name, so we must drop before
+      -- creating. Both DROPs are guarded so the migration is safe on a fresh DB.
+      DROP TABLE IF EXISTS scheme_slab;
+      DROP TABLE IF EXISTS scheme_def;
+
+      -- ── territory_group ──────────────────────────────────────────────────
+      CREATE TABLE IF NOT EXISTS territory_group (
+        group_raw   TEXT        PRIMARY KEY,
+        label       TEXT        NOT NULL,
+        states      TEXT[]      NOT NULL
+      );
+
+      -- ── scheme ───────────────────────────────────────────────────────────
+      CREATE TABLE IF NOT EXISTS scheme (
+        scheme_id             TEXT        PRIMARY KEY,
+        name                  TEXT        NOT NULL,
+        audience              TEXT[]      NOT NULL,
+        settlement            TEXT        NOT NULL,
+        qualification_basis   TEXT        NOT NULL,
+        territory_group       TEXT        REFERENCES territory_group (group_raw),
+        product_scope         TEXT,
+        period_from           DATE        NOT NULL,
+        period_to             DATE,
+        period_note           TEXT,
+        audience_source_term  TEXT,
+        funding_note          TEXT
+      );
+
+      -- ── scheme_slab ───────────────────────────────────────────────────────
+      CREATE TABLE IF NOT EXISTS scheme_slab (
+        id              SERIAL      PRIMARY KEY,
+        scheme_id       TEXT        NOT NULL REFERENCES scheme (scheme_id) ON DELETE CASCADE,
+        slab_order      INTEGER     NOT NULL,
+        threshold_from  NUMERIC     NOT NULL,
+        threshold_to    NUMERIC,
+        unit            TEXT        NOT NULL,
+        rate            NUMERIC,
+        alt_reward      TEXT,
+        free_goods      TEXT,
+        reward_status   TEXT        NOT NULL DEFAULT 'ok',
+        raw_text        TEXT
+      );
+      CREATE INDEX IF NOT EXISTS scheme_slab_scheme_order_idx
+        ON scheme_slab (scheme_id, slab_order);
+
+      -- ── scheme_item_group ─────────────────────────────────────────────────
+      CREATE TABLE IF NOT EXISTS scheme_item_group (
+        id          SERIAL  PRIMARY KEY,
+        item_group  TEXT    NOT NULL,
+        scheme_id   TEXT    NOT NULL REFERENCES scheme (scheme_id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS scheme_item_group_item_idx
+        ON scheme_item_group (item_group);
+
+      -- ── special_pricing ───────────────────────────────────────────────────
+      CREATE TABLE IF NOT EXISTS special_pricing (
+        id              SERIAL  PRIMARY KEY,
+        customer_name   TEXT    NOT NULL,
+        effective_from  DATE    NOT NULL,
+        effective_to    DATE,
+        note            TEXT,
+        rate_rows       JSONB   NOT NULL
+      );
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

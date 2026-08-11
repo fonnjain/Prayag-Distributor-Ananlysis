@@ -11,7 +11,7 @@ import { currentOpenFy } from "../lib/fyAnchors.js";
 //   Annual tracker: progress toward annual slab + anti-decline projection.
 //
 // GET /api/schemes/master
-//   Reference: all schemes and slabs from the master config.
+//   Reference: all schemes and slabs from the DB (JSON retired).
 import { Router } from "express";
 import {
   computeNudgeList,
@@ -20,7 +20,7 @@ import {
   getQuarterMonths,
 } from "../lib/schemes/nudge.js";
 import { getBlockedCustomers } from "../lib/schemes/dues.js";
-import schemeMaster from "../../config/scheme_master.json";
+import { pool } from "@workspace/db";
 import { getCompleteMonths } from "../lib/customers/analytics.js";
 
 const router = Router();
@@ -115,10 +115,28 @@ router.get("/schemes/annual", async (req, res) => {
   }
 });
 
-// ── Scheme master (reference) ─────────────────────────────────────────────────
+// ── Scheme master (reference) — reads from DB ─────────────────────────────────
 
-router.get("/schemes/master", (_req, res) => {
-  res.json(schemeMaster);
+router.get("/schemes/master", async (_req, res) => {
+  try {
+    const [schemesRes, slabsRes, territoryRes, itemGroupRes, specialRes] = await Promise.all([
+      pool.query(`SELECT * FROM scheme ORDER BY scheme_id`),
+      pool.query(`SELECT * FROM scheme_slab ORDER BY scheme_id, slab_order`),
+      pool.query(`SELECT * FROM territory_group ORDER BY group_raw`),
+      pool.query(`SELECT * FROM scheme_item_group ORDER BY item_group, scheme_id`),
+      pool.query(`SELECT * FROM special_pricing ORDER BY customer_name`),
+    ]);
+    res.json({
+      schemes: schemesRes.rows,
+      slabs: slabsRes.rows,
+      territoryGroups: territoryRes.rows,
+      itemGroups: itemGroupRes.rows,
+      specialPricing: specialRes.rows,
+      _source: "database",
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to load scheme master from DB" });
+  }
 });
 
 export default router;

@@ -254,4 +254,101 @@ router.get("/admin/masters/load-status", (req: Request, res: Response): void => 
   res.json(jobs);
 });
 
+// ── Scheme seed route ─────────────────────────────────────────────────────────
+// POST /api/admin/schemes/load — truncates and re-inserts the five scheme
+// tables from the Q2 FY2026-27 workbook seed data. Idempotent (truncate-then-
+// insert). Runs inside a single transaction.
+router.post("/admin/schemes/load", async (req: Request, res: Response): Promise<void> => {
+  if (!requireAdmin(req, res)) return;
+  const { pool } = await import("@workspace/db");
+  const {
+    TERRITORY_GROUPS,
+    SCHEMES,
+    SCHEME_SLABS,
+    SCHEME_ITEM_GROUPS,
+    SPECIAL_PRICING,
+  } = await import("../lib/schemes/schemeSeedData.js");
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Truncate in FK-safe order (children first)
+    await client.query("TRUNCATE scheme_item_group, special_pricing, scheme_slab, scheme, territory_group CASCADE");
+
+    // Insert territory groups
+    for (const tg of TERRITORY_GROUPS) {
+      await client.query(
+        `INSERT INTO territory_group (group_raw, label, states) VALUES ($1, $2, $3)`,
+        [tg.groupRaw, tg.label, tg.states],
+      );
+    }
+
+    // Insert schemes
+    for (const s of SCHEMES) {
+      await client.query(
+        `INSERT INTO scheme
+           (scheme_id, name, audience, settlement, qualification_basis,
+            territory_group, product_scope, period_from, period_to, period_note,
+            audience_source_term, funding_note)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [
+          s.schemeId, s.name, s.audience, s.settlement, s.qualificationBasis,
+          s.territoryGroup, s.productScope, s.periodFrom, s.periodTo, s.periodNote,
+          s.audienceSourceTerm, s.fundingNote,
+        ],
+      );
+    }
+
+    // Insert slabs
+    for (const sl of SCHEME_SLABS) {
+      await client.query(
+        `INSERT INTO scheme_slab
+           (scheme_id, slab_order, threshold_from, threshold_to, unit,
+            rate, alt_reward, free_goods, reward_status, raw_text)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [
+          sl.schemeId, sl.slabOrder, sl.thresholdFrom, sl.thresholdTo, sl.unit,
+          sl.rate, sl.altReward, sl.freeGoods, sl.rewardStatus, sl.rawText,
+        ],
+      );
+    }
+
+    // Insert item groups
+    for (const ig of SCHEME_ITEM_GROUPS) {
+      await client.query(
+        `INSERT INTO scheme_item_group (item_group, scheme_id) VALUES ($1, $2)`,
+        [ig.itemGroup, ig.schemeId],
+      );
+    }
+
+    // Insert special pricing
+    for (const sp of SPECIAL_PRICING) {
+      await client.query(
+        `INSERT INTO special_pricing (customer_name, effective_from, effective_to, note, rate_rows)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [sp.customerName, sp.effectiveFrom, sp.effectiveTo, sp.note, JSON.stringify(sp.rateRows)],
+      );
+    }
+
+    await client.query("COMMIT");
+
+    res.json({
+      ok: true,
+      counts: {
+        territoryGroups: TERRITORY_GROUPS.length,
+        schemes: SCHEMES.length,
+        slabs: SCHEME_SLABS.length,
+        itemGroups: SCHEME_ITEM_GROUPS.length,
+        specialPricing: SPECIAL_PRICING.length,
+      },
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  } finally {
+    client.release();
+  }
+});
+
 export default router;

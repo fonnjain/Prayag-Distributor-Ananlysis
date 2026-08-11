@@ -10,16 +10,46 @@
 //   roi       = they_earn / gap
 //
 // ROI FILTER: suppress nudges where roi < roi_threshold (default 5%).
-// A nudge engine that cries wolf gets ignored and the whole feature is dead.
+//
+// TERRITORY ROUTING:
+//   Each CP/PTMT scheme covers a specific territory (Lalan, KL/KA, Wahid, etc.)
+//   The sale_line.state_canon is resolved to territory state abbreviations via
+//   STATE_CANON_TO_ABBREVS (territoryResolver.ts). These abbreviations are
+//   matched against territory_group.states[] loaded from DB. The correct scheme
+//   for an item_group+territory pair is resolved explicitly — never "first
+//   alphabetically".
 //
 // CONDITIONS (all applied before any nudge is shown):
-//   1. Slab base = SALE (dispatched), not order booking — we query sale_line_all.
+//   1. Slab base = SALE (dispatched), not order booking.
 //   2. Exclude is_territory = false (non-territory, Govt, Project etc).
 //   3. Exclude customers matching GOVT/GEM/JJM/PROJECT patterns in name.
 //   4. BLOCKED = distributor with overdue bills (from dues fetcher).
-//   5. Deadline = 25th of the last month of the quarter, not end of month.
+//   5. Deadline = 25th of the last month of the quarter.
 import { pool } from "@workspace/db";
-import schemeMaster from "../../../config/scheme_master.json";
+import {
+  STATE_CANON_TO_ABBREVS,
+  stateCanonsForAbbrevs,
+} from "./territoryResolver.js";
+import { buildAudienceFilterSQL } from "./audienceFilter.js";
+
+// ── Constants (formerly from scheme_master.json) ──────────────────────────────
+
+const EXCLUDE_PATTERNS_RAW = ["GOVT", "GOVERNMENT", "GEM", "JJM", "PROJECT"];
+const EXCLUDE_PATTERNS = EXCLUDE_PATTERNS_RAW.map((p) => p.toUpperCase());
+
+export const DEFAULT_ROI_THRESHOLD = 0.05;
+
+const SEASONALITY: Record<string, number> = {
+  Apr: 4.2,  May: 8.2,  Jun: 8.3,
+  Jul: 7.3,  Aug: 7.0,  Sep: 7.4,
+  Oct: 7.1,  Nov: 8.5,  Dec: 10.1,
+  Jan: 10.1, Feb: 9.6,  Mar: 12.3,
+};
+
+// Re-export the mapping so callers don't need to import from two places
+export { STATE_CANON_TO_ABBREVS, stateCanonsForAbbrevs };
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export type SchemeSlab = {
   threshold: number;
@@ -31,47 +61,43 @@ export type SchemeSlab = {
 export type SchemeConfig = {
   id: string;
   name: string;
+  /** 'cumulative_quarter' | 'cumulative_year' */
   basis: string;
   slabs: SchemeSlab[];
-  stateRestriction?: string[];
+  territoryGroup: string | null;
+  /** Flat set of state abbreviations this scheme covers */
+  territoryStates: Set<string>;
+  /** Audience types eligible for this scheme (e.g. ['sub_dealer'], ['direct_dealer','sub_dealer']) */
+  audience: string[];
 };
 
-// Quarter → month labels for a given FY
+// ── Quarter helpers ───────────────────────────────────────────────────────────
+
 export function getQuarterMonths(fy: string, q: "Q1" | "Q2" | "Q3" | "Q4"): string[] {
   const [startYr] = fy.split("-").map(Number);
-  const endYrSuffix = String(startYr + 1).slice(-2);
-  const startSuffix = String(startYr).slice(-2);
+  const s = String(startYr).slice(-2);
+  const e = String(startYr + 1).slice(-2);
   const map: Record<string, string[]> = {
-    Q1: [`Apr-${startSuffix}`, `May-${startSuffix}`, `Jun-${startSuffix}`],
-    Q2: [`Jul-${startSuffix}`, `Aug-${startSuffix}`, `Sep-${startSuffix}`],
-    Q3: [`Oct-${startSuffix}`, `Nov-${startSuffix}`, `Dec-${startSuffix}`],
-    Q4: [`Jan-${endYrSuffix}`, `Feb-${endYrSuffix}`, `Mar-${endYrSuffix}`],
+    Q1: [`Apr-${s}`, `May-${s}`, `Jun-${s}`],
+    Q2: [`Jul-${s}`, `Aug-${s}`, `Sep-${s}`],
+    Q3: [`Oct-${s}`, `Nov-${s}`, `Dec-${s}`],
+    Q4: [`Jan-${e}`, `Feb-${e}`, `Mar-${e}`],
   };
   return map[q] ?? map.Q1;
-}
-
-export function getCurrentQuarter(fy: string): "Q1" | "Q2" | "Q3" | "Q4" {
-  const now = new Date();
-  const month = now.getMonth() + 1; // 1-12
-  if (month >= 4 && month <= 6) return "Q1";
-  if (month >= 7 && month <= 9) return "Q2";
-  if (month >= 10 && month <= 12) return "Q3";
-  return "Q4";
 }
 
 export function getQuarterDeadline(fy: string, q: "Q1" | "Q2" | "Q3" | "Q4"): Date {
   const [startYr] = fy.split("-").map(Number);
   const deadlineMap: Record<string, [number, number]> = {
-    Q1: [startYr, 6],  // 25 Jun
-    Q2: [startYr, 9],  // 25 Sep
-    Q3: [startYr, 12], // 25 Dec
-    Q4: [startYr + 1, 3], // 25 Mar
+    Q1: [startYr, 6],
+    Q2: [startYr, 9],
+    Q3: [startYr, 12],
+    Q4: [startYr + 1, 3],
   };
   const [yr, mo] = deadlineMap[q] ?? deadlineMap.Q2;
   return new Date(yr, mo - 1, 25);
 }
 
-// Find the slab the customer is currently in (highest threshold crossed)
 function getCurrentSlab(slabs: SchemeSlab[], amount: number): SchemeSlab | null {
   let current: SchemeSlab | null = null;
   for (const s of slabs) {
@@ -81,7 +107,6 @@ function getCurrentSlab(slabs: SchemeSlab[], amount: number): SchemeSlab | null 
   return current;
 }
 
-// Find the next slab threshold above current billing
 function getNextSlab(slabs: SchemeSlab[], amount: number): SchemeSlab | null {
   for (const s of slabs) {
     if (s.threshold > amount) return s;
@@ -89,19 +114,224 @@ function getNextSlab(slabs: SchemeSlab[], amount: number): SchemeSlab | null {
   return null;
 }
 
+function isExcluded(customer: string): boolean {
+  const upper = customer.toUpperCase();
+  return EXCLUDE_PATTERNS.some((p) => upper.includes(p));
+}
+
+// ── DB loader: schemes + territory groups ─────────────────────────────────────
+
+interface DbSchemeRow {
+  scheme_id: string;
+  name: string;
+  qualification_basis: string;
+  territory_group: string | null;
+  period_from: string;
+  period_to: string | null;
+  audience: string[];
+  slab_order: number;
+  threshold_from: string;
+  rate: string | null;
+  alt_reward: string | null;
+  reward_status: string;
+}
+
+interface DbItemGroupRow {
+  item_group: string;
+  scheme_id: string;
+}
+
+interface DbTerritoryGroupRow {
+  group_raw: string;
+  states: string[];
+}
+
+/**
+ * Load all usable cumulative-value schemes from DB, reconstruct SCHEMES map,
+ * BASKET_MAP, and an abbrev → [group_raw] index for territory routing.
+ * Schemes with reward_status='needs_clarification' are excluded from all slabs.
+ */
+async function loadSchemesFromDb(): Promise<{
+  schemeMap: Map<string, SchemeConfig>;
+  basketMap: Map<string, string[]>;
+  /** state abbreviation (from territory_group.states[]) → [group_raw] */
+  abbrevToGroups: Map<string, string[]>;
+}> {
+  const [schemeRes, groupRes, territoryRes] = await Promise.all([
+    pool.query<DbSchemeRow>(`
+      SELECT
+        s.scheme_id,
+        s.name,
+        s.qualification_basis,
+        s.territory_group,
+        s.period_from::text,
+        s.period_to::text,
+        s.audience,
+        ss.slab_order,
+        ss.threshold_from::text,
+        ss.rate::text,
+        ss.alt_reward,
+        ss.reward_status
+      FROM scheme s
+      JOIN scheme_slab ss ON ss.scheme_id = s.scheme_id
+      WHERE s.qualification_basis = 'cumulative_value'
+        AND ss.reward_status != 'needs_clarification'
+      ORDER BY s.scheme_id, ss.slab_order
+    `),
+    pool.query<DbItemGroupRow>(
+      `SELECT item_group, scheme_id FROM scheme_item_group`,
+    ),
+    pool.query<DbTerritoryGroupRow>(
+      `SELECT group_raw, states FROM territory_group`,
+    ),
+  ]);
+
+  // ── Build abbrev → [group_raw] index ─────────────────────────────────────
+  const abbrevToGroups = new Map<string, string[]>();
+  for (const tg of territoryRes.rows) {
+    for (const abbrev of tg.states) {
+      const arr = abbrevToGroups.get(abbrev) ?? [];
+      arr.push(tg.group_raw);
+      abbrevToGroups.set(abbrev, arr);
+    }
+  }
+
+  // ── Build territory_group → Set<abbrev> for each scheme ──────────────────
+  const groupToAbbrevs = new Map<string, Set<string>>();
+  for (const tg of territoryRes.rows) {
+    groupToAbbrevs.set(tg.group_raw, new Set(tg.states));
+  }
+
+  // ── Build schemeMap ───────────────────────────────────────────────────────
+  const schemeMap = new Map<string, SchemeConfig>();
+  for (const row of schemeRes.rows) {
+    let config = schemeMap.get(row.scheme_id);
+    if (!config) {
+      let basis = "cumulative_quarter";
+      if (row.period_from && row.period_to) {
+        const daysDiff =
+          (new Date(row.period_to).getTime() - new Date(row.period_from).getTime()) /
+          (1000 * 60 * 60 * 24);
+        if (daysDiff > 180) basis = "cumulative_year";
+      } else if (!row.period_to) {
+        basis = "cumulative_year";
+      }
+
+      const tgRaw = row.territory_group;
+      const territoryStates: Set<string> =
+        tgRaw && groupToAbbrevs.has(tgRaw)
+          ? new Set(groupToAbbrevs.get(tgRaw)!)
+          : new Set(["ALL"]); // "All States" scheme covers everything
+
+      config = {
+        id: row.scheme_id,
+        name: row.name,
+        basis,
+        slabs: [],
+        territoryGroup: tgRaw,
+        territoryStates,
+        audience: row.audience ?? [],
+      };
+      schemeMap.set(row.scheme_id, config);
+    }
+
+    const rate = row.rate != null ? parseFloat(row.rate) : null;
+    const rewardType: SchemeSlab["rewardType"] =
+      row.alt_reward != null && rate != null
+        ? "pct_or_trip"
+        : row.alt_reward != null
+        ? "trip"
+        : "pct";
+    config.slabs.push({
+      threshold: parseFloat(row.threshold_from),
+      rate,
+      reward: row.alt_reward ?? undefined,
+      rewardType,
+    });
+  }
+
+  // ── Build basketMap ───────────────────────────────────────────────────────
+  const basketMap = new Map<string, string[]>();
+  for (const row of groupRes.rows) {
+    if (!schemeMap.has(row.scheme_id)) continue; // only cumulative_value
+    const arr = basketMap.get(row.item_group) ?? [];
+    if (!arr.includes(row.scheme_id)) arr.push(row.scheme_id);
+    basketMap.set(row.item_group, arr);
+  }
+
+  return { schemeMap, basketMap, abbrevToGroups };
+}
+
+// ── Territory resolver ────────────────────────────────────────────────────────
+// Given a sale_line.state_canon and a set of candidate scheme_ids (from the
+// basket map for a given item_group), return the ONE scheme whose territory
+// covers this state. Returns null when no scheme covers the state (e.g. TN).
+//
+// For ambiguous states (UTTAR PRADESH → [WUP, EUP]; MAHARASHTRA → [MAH-Lalan,
+// MAH-Wahid]), the abbreviation list in STATE_CANON_TO_ABBREVS is ordered by
+// priority: the first abbrev whose territory group has a matching scheme wins.
+
+function resolveSchemeForState(
+  stateCanon: string | null,
+  candidateIds: string[],
+  schemeMap: Map<string, SchemeConfig>,
+): string | null {
+  if (!stateCanon) return null;
+
+  const abbrevs = STATE_CANON_TO_ABBREVS[stateCanon.trim()];
+
+  // Unknown state — cannot route
+  if (abbrevs === undefined) return null;
+
+  // State not covered by any scheme territory (e.g. Tamil Nadu, GEM)
+  if (abbrevs.length === 0) return null;
+
+  // "All States" sentinel: every scheme covers this; use first candidate
+  if (abbrevs.includes("ALL")) {
+    return candidateIds[0] ?? null;
+  }
+
+  // Try each abbreviation in priority order
+  for (const abbrev of abbrevs) {
+    for (const schemeId of candidateIds) {
+      const scheme = schemeMap.get(schemeId);
+      if (!scheme) continue;
+
+      // "All States" scheme (territory_group = null or states = ["ALL"])
+      if (scheme.territoryGroup === null || scheme.territoryStates.has("ALL")) {
+        return schemeId;
+      }
+
+      if (scheme.territoryStates.has(abbrev)) {
+        return schemeId;
+      }
+    }
+  }
+
+  // No territory match — check for an "All States" fallback among candidates
+  for (const schemeId of candidateIds) {
+    const scheme = schemeMap.get(schemeId);
+    if (scheme && (scheme.territoryGroup === null || scheme.territoryStates.has("ALL"))) {
+      return schemeId;
+    }
+  }
+
+  return null;
+}
+
+// ── NudgeRow / NudgeResult types ──────────────────────────────────────────────
+
 export type NudgeRow = {
   customer: string;
   stateHead: string | null;
   schemeId: string;
   basketName: string;
   billedSoFar: number;
-  /** Threshold of the slab currently occupied (null = below the first slab). */
   currentSlab: number | null;
   currentRate: number;
   currentEarnings: number;
   nextSlab: number;
   nextRate: number | null;
-  /** nextSlab × nextRate — what the whole quarter pays at the next slab. */
   nextEarnings: number | null;
   gap: number;
   extraEarn: number | null;
@@ -111,20 +341,6 @@ export type NudgeRow = {
   status: "NUDGE" | "BLOCKED" | "AT_MAX" | "TRIP_ZONE";
   blockedReason: string | null;
 };
-
-// Exclude non-retail customers by name pattern
-const EXCLUDE_PATTERNS = (schemeMaster.conditions.excludePatterns as string[]).map(
-  (p) => p.toUpperCase(),
-);
-
-function isExcluded(customer: string): boolean {
-  const upper = customer.toUpperCase();
-  return EXCLUDE_PATTERNS.some((p) => upper.includes(p));
-}
-
-const BASKET_MAP = schemeMaster.basketMap as Record<string, string>;
-const SCHEMES: SchemeConfig[] = schemeMaster.schemes as SchemeConfig[];
-const SCHEME_MAP = new Map(SCHEMES.map((s) => [s.id, s]));
 
 export type NudgeResult = {
   fy: string;
@@ -140,12 +356,14 @@ export type NudgeResult = {
   duesDataAvailable: boolean;
 };
 
+// ── computeNudgeList ──────────────────────────────────────────────────────────
+
 export async function computeNudgeList(
   fy: string,
   q: "Q1" | "Q2" | "Q3" | "Q4",
   blockedCustomers: Set<string>,
   duesDataAvailable: boolean,
-  roiThreshold: number = schemeMaster.conditions.defaultRoiThreshold,
+  roiThreshold: number = DEFAULT_ROI_THRESHOLD,
   head: string = "",
 ): Promise<NudgeResult> {
   const months = getQuarterMonths(fy, q);
@@ -154,45 +372,58 @@ export async function computeNudgeList(
     (deadline.getTime() - Date.now()) / (1000 * 60 * 60 * 24),
   );
 
-  // Build a VALUES list of (group, scheme_id) for the join
-  const basketEntries = Object.entries(BASKET_MAP);
-  if (!basketEntries.length) {
-    return {
-      fy, quarter: q, months, deadline: deadline.toDateString(),
-      daysToDeadline, totalOpportunity: 0, totalSchemeCost: 0,
-      nudgeCount: 0, nudges: [], blocked: [], duesDataAvailable,
-    };
-  }
+  // ── Load schemes + territory data from DB ─────────────────────────────────
+  const { schemeMap, basketMap, abbrevToGroups: _abbrevToGroups } =
+    await loadSchemesFromDb();
 
-  // Quarterly cumulative schemes only (not single-bill or annual — those are separate)
-  const quarterlySchemeIds = SCHEMES
+  const quarterlySchemeIds = [...schemeMap.values()]
     .filter((s) => s.basis === "cumulative_quarter")
     .map((s) => s.id);
 
-  const quarterlyGroups = basketEntries
-    .filter(([, sid]) => quarterlySchemeIds.includes(sid))
-    .map(([g]) => g);
+  // Collect item_groups that map to at least one quarterly scheme
+  const quarterlyGroups: string[] = [];
+  for (const [group, schemeIds] of basketMap.entries()) {
+    if (schemeIds.some((sid) => quarterlySchemeIds.includes(sid))) {
+      quarterlyGroups.push(group);
+    }
+  }
 
   if (!quarterlyGroups.length || !months.length) {
     return {
-      fy, quarter: q, months, deadline: deadline.toDateString(),
+      fy, quarter: q, months, deadline: deadline.toISOString().slice(0, 10),
       daysToDeadline, totalOpportunity: 0, totalSchemeCost: 0,
       nudgeCount: 0, nudges: [], blocked: [], duesDataAvailable,
     };
   }
+
+  // ── Audience filter for quarterly schemes ────────────────────────────────
+  // Collect all distinct audiences across the quarterly scheme set. If every
+  // quarterly scheme restricts to sub_dealer (the typical Q2 setup), exclude
+  // known distributors from the sale_line_current aggregation. A scheme with
+  // a broader audience (e.g. both sub_dealer + direct_dealer) opts the entire
+  // nudge list out of the distributor exclusion to avoid false negatives.
+  const quarterlyAudiences: string[][] = [];
+  for (const sid of quarterlySchemeIds) {
+    const scheme = schemeMap.get(sid);
+    if (scheme) quarterlyAudiences.push(scheme.audience);
+  }
+  // Union of all audiences
+  const allAudiences = [...new Set(quarterlyAudiences.flat())];
+  const audienceFilter = buildAudienceFilterSQL(allAudiences, "sl");
 
   const monthPlaceholders = months.map((_, i) => `$${i + 2}`).join(", ");
   const groupPlaceholders = quarterlyGroups
     .map((_, i) => `$${months.length + 2 + i}`)
     .join(", ");
-  // head is always the last positional param; empty string = no filter
   const headParamIdx = months.length + quarterlyGroups.length + 2;
 
+  // Include state_canon in the SELECT+GROUP BY so territory routing works
   const sql = `
     SELECT
       sl.customer,
-      sl.group_raw   AS group_raw,
-      sl.head_canon  AS state_head,
+      sl.group_raw,
+      sl.state_canon,
+      sl.head_canon AS state_head,
       SUM(sl.amount::numeric) AS total_amount
     FROM sale_line_current sl
     WHERE sl.fy = $1
@@ -200,7 +431,8 @@ export async function computeNudgeList(
       AND sl.group_raw IN (${groupPlaceholders})
       AND (sl.is_territory IS NULL OR sl.is_territory = true)
       AND ($${headParamIdx}::text = '' OR sl.head_canon = $${headParamIdx}::text)
-    GROUP BY sl.customer, sl.group_raw, sl.head_canon
+      ${audienceFilter}
+    GROUP BY sl.customer, sl.group_raw, sl.state_canon, sl.head_canon
     ORDER BY SUM(sl.amount::numeric) DESC
   `;
 
@@ -208,24 +440,32 @@ export async function computeNudgeList(
   const { rows } = await pool.query<{
     customer: string;
     group_raw: string;
+    state_canon: string | null;
     state_head: string | null;
     total_amount: string;
   }>(sql, params);
 
-  // Group by (customer, scheme_id) — a customer may buy multiple groups in the same basket
-  const buckets = new Map<string, {
-    customer: string;
-    schemeId: string;
-    stateHead: string | null;
-    total: number;
-  }>();
+  // Route each (customer, group_raw, state_canon) to the correct scheme.
+  // A customer may appear multiple times with the same group if their state_canon
+  // differs across invoices (rare); accumulate into a single (customer, scheme) bucket.
+  const buckets = new Map<
+    string,
+    { customer: string; schemeId: string; stateHead: string | null; total: number }
+  >();
 
   for (const row of rows) {
     const customer = row.customer ?? "";
     if (!customer || isExcluded(customer)) continue;
-    const rawUpper = (row.group_raw ?? "").toUpperCase().trim();
-    const schemeId = BASKET_MAP[row.group_raw] ?? BASKET_MAP[rawUpper];
-    if (!schemeId) continue;
+
+    const candidateIds = (basketMap.get(row.group_raw) ?? []).filter((sid) =>
+      quarterlySchemeIds.includes(sid),
+    );
+    if (!candidateIds.length) continue;
+
+    // Explicit territory resolution
+    const schemeId = resolveSchemeForState(row.state_canon, candidateIds, schemeMap);
+    if (!schemeId) continue; // state not covered by any scheme (e.g. Tamil Nadu)
+
     const key = `${customer}|${schemeId}`;
     const existing = buckets.get(key);
     const amount = parseFloat(row.total_amount ?? "0");
@@ -241,20 +481,19 @@ export async function computeNudgeList(
     }
   }
 
+  // ── Compute nudge rows ────────────────────────────────────────────────────
   const nudges: NudgeRow[] = [];
   const blocked: string[] = [];
   let totalOpportunity = 0;
   let totalSchemeCost = 0;
 
   for (const { customer, schemeId, stateHead, total: billedSoFar } of buckets.values()) {
-    const scheme = SCHEME_MAP.get(schemeId);
+    const scheme = schemeMap.get(schemeId);
     if (!scheme) continue;
 
     const isBlocked = blockedCustomers.has(customer.toUpperCase().trim());
-
     const currentSlab = getCurrentSlab(scheme.slabs, billedSoFar);
     const nextSlab = getNextSlab(scheme.slabs, billedSoFar);
-
     const currentRate = currentSlab?.rate ?? 0;
     const currentEarnings = currentRate * billedSoFar;
     totalSchemeCost += currentEarnings;
@@ -263,15 +502,20 @@ export async function computeNudgeList(
       if (!blocked.includes(customer)) blocked.push(customer);
       nudges.push({
         customer, stateHead, schemeId, basketName: scheme.name,
-        billedSoFar, currentSlab: currentSlab?.threshold ?? null, currentRate, currentEarnings,
-        nextSlab: nextSlab?.threshold ?? 0, nextRate: nextSlab?.rate ?? null,
-        nextEarnings: nextSlab && nextSlab.rate != null ? nextSlab.threshold * nextSlab.rate : null,
+        billedSoFar,
+        currentSlab: currentSlab?.threshold ?? null,
+        currentRate, currentEarnings,
+        nextSlab: nextSlab?.threshold ?? 0,
+        nextRate: nextSlab?.rate ?? null,
+        nextEarnings:
+          nextSlab && nextSlab.rate != null
+            ? nextSlab.threshold * nextSlab.rate
+            : null,
         gap: nextSlab ? nextSlab.threshold - billedSoFar : 0,
         extraEarn: null, extraRoi: null,
         rewardType: nextSlab?.rewardType ?? "pct",
         tripLabel: nextSlab?.reward ?? null,
-        status: "BLOCKED",
-        blockedReason: "OVERDUE_BILLS",
+        status: "BLOCKED", blockedReason: "OVERDUE_BILLS",
       });
       continue;
     }
@@ -279,10 +523,13 @@ export async function computeNudgeList(
     if (!nextSlab) {
       nudges.push({
         customer, stateHead, schemeId, basketName: scheme.name,
-        billedSoFar, currentSlab: currentSlab?.threshold ?? null, currentRate, currentEarnings,
+        billedSoFar,
+        currentSlab: currentSlab?.threshold ?? null,
+        currentRate, currentEarnings,
         nextSlab: 0, nextRate: null, nextEarnings: null, gap: 0,
-        extraEarn: null, extraRoi: null, rewardType: "pct",
-        tripLabel: null, status: "AT_MAX", blockedReason: null,
+        extraEarn: null, extraRoi: null,
+        rewardType: "pct", tripLabel: null,
+        status: "AT_MAX", blockedReason: null,
       });
       continue;
     }
@@ -292,10 +539,12 @@ export async function computeNudgeList(
     if (nextSlab.rewardType === "trip") {
       nudges.push({
         customer, stateHead, schemeId, basketName: scheme.name,
-        billedSoFar, currentSlab: currentSlab?.threshold ?? null, currentRate, currentEarnings,
+        billedSoFar,
+        currentSlab: currentSlab?.threshold ?? null,
+        currentRate, currentEarnings,
         nextSlab: nextSlab.threshold, nextRate: null, nextEarnings: null, gap,
-        extraEarn: null, extraRoi: null, rewardType: "trip",
-        tripLabel: nextSlab.reward ?? null,
+        extraEarn: null, extraRoi: null,
+        rewardType: "trip", tripLabel: nextSlab.reward ?? null,
         status: "TRIP_ZONE", blockedReason: null,
       });
       totalOpportunity += gap;
@@ -307,19 +556,21 @@ export async function computeNudgeList(
     const extraEarn = nextEarnings - billedSoFar * currentRate;
     const extraRoi = gap > 0 ? extraEarn / gap : 0;
 
-    if (extraRoi < roiThreshold) continue; // Below ROI threshold — suppress
+    if (extraRoi < roiThreshold) continue;
 
     totalOpportunity += gap;
     nudges.push({
       customer, stateHead, schemeId, basketName: scheme.name,
-      billedSoFar, currentSlab: currentSlab?.threshold ?? null, currentRate, currentEarnings,
+      billedSoFar,
+      currentSlab: currentSlab?.threshold ?? null,
+      currentRate, currentEarnings,
       nextSlab: nextSlab.threshold, nextRate, nextEarnings, gap,
-      extraEarn, extraRoi, rewardType: "pct",
-      tripLabel: null, status: "NUDGE", blockedReason: null,
+      extraEarn, extraRoi,
+      rewardType: "pct", tripLabel: null,
+      status: "NUDGE", blockedReason: null,
     });
   }
 
-  // Sort by extraEarn descending (nulls last)
   nudges.sort((a, b) => {
     if (a.status === "BLOCKED" && b.status !== "BLOCKED") return 1;
     if (b.status === "BLOCKED" && a.status !== "BLOCKED") return -1;
@@ -329,17 +580,13 @@ export async function computeNudgeList(
   return {
     fy, quarter: q, months,
     deadline: deadline.toISOString().slice(0, 10),
-    daysToDeadline,
-    totalOpportunity,
-    totalSchemeCost,
+    daysToDeadline, totalOpportunity, totalSchemeCost,
     nudgeCount: nudges.filter((n) => n.status === "NUDGE").length,
-    nudges,
-    blocked,
-    duesDataAvailable,
+    nudges, blocked, duesDataAvailable,
   };
 }
 
-// ── Cockpit (management summary) ─────────────────────────────────────────────
+// ── Cockpit ────────────────────────────────────────────────────────────────────
 
 export type CockpitRow = {
   schemeId: string;
@@ -393,11 +640,13 @@ export function buildCockpit(nudgeResult: NudgeResult): CockpitResult {
     totalLiveOpportunity: nudgeResult.totalOpportunity,
     totalSchemeCost: nudgeResult.totalSchemeCost,
     totalNudges: nudgeResult.nudgeCount,
-    byScheme: [...byScheme.values()].sort((a, b) => b.opportunityAmount - a.opportunityAmount),
+    byScheme: [...byScheme.values()].sort(
+      (a, b) => b.opportunityAmount - a.opportunityAmount,
+    ),
   };
 }
 
-// ── Annual Tracker ────────────────────────────────────────────────────────────
+// ── Annual Tracker ─────────────────────────────────────────────────────────────
 
 export type AnnualRow = {
   customer: string;
@@ -410,7 +659,7 @@ export type AnnualRow = {
   atRisk: boolean;
   currentSlabIdx: number;
   currentRate: number | null;
-  schemeId: "A_DIST";
+  schemeId: string;
 };
 
 export async function computeAnnualTracker(
@@ -421,46 +670,146 @@ export async function computeAnnualTracker(
   const [startYr] = fy.split("-").map(Number);
   const priorFy = `${startYr - 1}-${String(startYr).slice(-2)}`;
 
-  const seasonality = schemeMaster.seasonality as Record<string, number>;
-
-  // Elapsed seasonality share
   const elapsedPct = completeMonths.reduce((sum, ml) => {
-    const mon = ml.slice(0, 3); // 'Apr' from 'Apr-26'
-    return sum + (seasonality[mon] ?? 0);
+    const mon = ml.slice(0, 3);
+    return sum + (SEASONALITY[mon] ?? 0);
   }, 0);
 
+  // ── Load the annual scheme from DB ──────────────────────────────────────
+  // (cumulative_value, period spans full FY i.e. > 180 days)
+  const [annualRes, schemeMetaRes] = await Promise.all([
+    pool.query<{
+      scheme_id: string;
+      threshold_from: string;
+      rate: string | null;
+      slab_order: number;
+    }>(`
+      SELECT s.scheme_id, ss.threshold_from::text, ss.rate::text, ss.slab_order
+      FROM scheme s
+      JOIN scheme_slab ss ON ss.scheme_id = s.scheme_id
+      WHERE s.qualification_basis = 'cumulative_value'
+        AND s.period_to IS NOT NULL
+        AND (s.period_to::date - s.period_from::date) > 180
+        AND ss.reward_status != 'needs_clarification'
+      ORDER BY s.scheme_id, ss.slab_order
+    `),
+    pool.query<{
+      scheme_id: string;
+      audience: string[];
+      territory_group: string | null;
+    }>(`
+      SELECT scheme_id, audience, territory_group
+      FROM scheme
+      WHERE qualification_basis = 'cumulative_value'
+        AND period_to IS NOT NULL
+        AND (period_to::date - period_from::date) > 180
+      ORDER BY scheme_id
+      LIMIT 1
+    `),
+  ]);
+
+  const annualSchemeId = annualRes.rows[0]?.scheme_id ?? "ANNUAL_WB";
+  const annualSlabs: SchemeSlab[] = annualRes.rows
+    .filter((r) => r.scheme_id === annualSchemeId)
+    .map((r) => ({
+      threshold: parseFloat(r.threshold_from),
+      rate: r.rate != null ? parseFloat(r.rate) : null,
+      rewardType: "pct" as const,
+    }));
+
+  if (!annualSlabs.length) return [];
+
+  const schemeMeta = schemeMetaRes.rows[0];
+  const audience: string[] = schemeMeta?.audience ?? ["direct_dealer", "sub_dealer"];
+  const territoryGroupRaw = schemeMeta?.territory_group ?? null;
+
+  // ── Territory filter ─────────────────────────────────────────────────────
+  // Load the territory group's abbreviations and invert them to state_canon values.
+  // ANNUAL_WB covers WB/ORISSA/NE/BIHAR/JHARKHAND.
+  let territoryStateCanons: string[] = [];
+  if (territoryGroupRaw) {
+    const tgRes = await pool.query<{ states: string[] }>(
+      `SELECT states FROM territory_group WHERE group_raw = $1`,
+      [territoryGroupRaw],
+    );
+    const abbrevs = tgRes.rows[0]?.states ?? [];
+    territoryStateCanons = stateCanonsForAbbrevs(abbrevs);
+  }
+
+  // ── Item-group filter (product scope) ────────────────────────────────────
+  // The annual scheme says "ON ALL PRODUCTS EXCEPT - WATER TANK / GARDEN PIPE
+  // / QUAA & FERN". The scheme_item_group table lists the INCLUDED item_groups.
+  const igRes = await pool.query<{ item_group: string }>(
+    `SELECT item_group FROM scheme_item_group WHERE scheme_id = $1`,
+    [annualSchemeId],
+  );
+  const annualItemGroups = igRes.rows.map((r) => r.item_group);
+
+  // ── Audience SQL fragment ─────────────────────────────────────────────────
+  // Uses distributor_identity to exclude known distributors for sub_dealer audience.
+  // See audienceFilter.ts for the full audience → customer-type mapping.
+  const audienceFilter = buildAudienceFilterSQL(audience, "sl");
+
+  // ── Build parameterised query ─────────────────────────────────────────────
   const monthPlaceholders = completeMonths.map((_, i) => `$${i + 2}`).join(", ");
   const priorMonths = completeMonths.map((ml) => {
     const [mon] = ml.split("-");
-    const [pStartYr] = priorFy.split("-").map(Number);
-    return `${mon}-${String(pStartYr).slice(-2)}`;
+    return `${mon}-${String(startYr - 1).slice(-2)}`;
   });
-  const priorPlaceholders = priorMonths.map((_, i) => `$${completeMonths.length + i + 3}`).join(", ");
 
-  // The annual scheme applies to all groups — sum all territory sale
+  // Base param index: $1=fy, $2..$(1+M)=months, $(2+M)=priorFy, $(3+M...) = priorMonths
+  const priorFyIdx = completeMonths.length + 2;
+  const priorPlaceholders = priorMonths.map((_, i) =>
+    `$${priorFyIdx + 1 + i}`,
+  ).join(", ");
+
+  // Territory and item-group params start after prior months
+  let paramIdx = priorFyIdx + priorMonths.length + 1;
+  let territoryClause = "";
+  let territoryParam: string[] = [];
+  if (territoryStateCanons.length > 0) {
+    territoryClause = `AND sl.state_canon = ANY($${paramIdx}::text[])`;
+    territoryParam = territoryStateCanons;
+    paramIdx++;
+  }
+
+  let itemGroupClause = "";
+  let itemGroupParam: string[] = [];
+  if (annualItemGroups.length > 0) {
+    itemGroupClause = `AND sl.group_raw = ANY($${paramIdx}::text[])`;
+    itemGroupParam = annualItemGroups;
+    // paramIdx++ not needed since this is the last param
+  }
+
   const sql = `
     WITH cy AS (
-      SELECT customer, head_canon AS state_head, SUM(amount::numeric) AS total
-      FROM sale_line_all
-      WHERE fy = $1
-        AND version_status = 'current'
-        AND month_label IN (${monthPlaceholders})
-        AND (is_territory IS NULL OR is_territory = true)
-      GROUP BY customer, head_canon
+      SELECT sl.customer, sl.head_canon AS state_head, SUM(sl.amount::numeric) AS total
+      FROM sale_line_all sl
+      WHERE sl.fy = $1
+        AND sl.version_status = 'current'
+        AND sl.month_label IN (${monthPlaceholders})
+        AND (sl.is_territory IS NULL OR sl.is_territory = true)
+        ${audienceFilter}
+        ${territoryClause}
+        ${itemGroupClause}
+      GROUP BY sl.customer, sl.head_canon
     ),
     ly AS (
-      SELECT customer, SUM(amount::numeric) AS total
-      FROM sale_line_all
-      WHERE fy = $${completeMonths.length + 2}
-        AND version_status = 'current'
-        AND month_label IN (${priorPlaceholders})
-        AND (is_territory IS NULL OR is_territory = true)
-      GROUP BY customer
+      SELECT sl.customer, SUM(sl.amount::numeric) AS total
+      FROM sale_line_all sl
+      WHERE sl.fy = $${priorFyIdx}
+        AND sl.version_status = 'current'
+        AND sl.month_label IN (${priorPlaceholders})
+        AND (sl.is_territory IS NULL OR sl.is_territory = true)
+        ${audienceFilter}
+        ${territoryClause}
+        ${itemGroupClause}
+      GROUP BY sl.customer
     )
     SELECT
       cy.customer,
       cy.state_head,
-      cy.total AS cy_total,
+      cy.total  AS cy_total,
       COALESCE(ly.total, 0) AS ly_total
     FROM cy
     LEFT JOIN ly USING (customer)
@@ -469,7 +818,15 @@ export async function computeAnnualTracker(
     LIMIT 500
   `;
 
-  const params = [fy, ...completeMonths, priorFy, ...priorMonths];
+  const params: (string | string[])[] = [
+    fy,
+    ...completeMonths,
+    priorFy,
+    ...priorMonths,
+    ...( territoryParam.length > 0 ? [territoryParam] : [] ),
+    ...( itemGroupParam.length > 0 ? [itemGroupParam] : [] ),
+  ];
+
   const { rows } = await pool.query<{
     customer: string;
     state_head: string | null;
@@ -477,26 +834,16 @@ export async function computeAnnualTracker(
     ly_total: string;
   }>(sql, params);
 
-  const aDistScheme = SCHEME_MAP.get("A_DIST");
-  if (!aDistScheme) return [];
-
   return rows.map((row) => {
     const cyTotal = parseFloat(row.cy_total ?? "0");
     const lyTotal = parseFloat(row.ly_total ?? "0");
-
-    // Annualise: projected = cyTotal / elapsed% × 100
     const projectedTotal =
       elapsedPct > 0 ? (cyTotal / elapsedPct) * 100 : cyTotal;
-
     const projectedVsLyPct =
       lyTotal > 0 ? (projectedTotal - lyTotal) / lyTotal : null;
-
     const atRisk = lyTotal > 0 && projectedTotal < lyTotal;
-
-    const currentSlab = getCurrentSlab(aDistScheme.slabs, cyTotal);
-    const slabIdx = currentSlab
-      ? aDistScheme.slabs.indexOf(currentSlab)
-      : -1;
+    const currentSlab = getCurrentSlab(annualSlabs, cyTotal);
+    const slabIdx = currentSlab ? annualSlabs.indexOf(currentSlab) : -1;
 
     return {
       customer: row.customer,
@@ -509,7 +856,7 @@ export async function computeAnnualTracker(
       atRisk,
       currentSlabIdx: slabIdx,
       currentRate: currentSlab?.rate ?? null,
-      schemeId: "A_DIST" as const,
+      schemeId: annualSchemeId,
     };
   });
 }

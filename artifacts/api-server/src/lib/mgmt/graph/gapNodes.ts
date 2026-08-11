@@ -36,8 +36,8 @@ export const GAP_NODE_REGISTRY: GapNodeMeta[] = [
   {
     path: "gap/scheme-definitions",
     reason:
-      "scheme_def and scheme_slab tables are empty. The nudge engine reads a SEPARATE bundled " +
-      "JSON (scheme_master.json); the two systems are unconnected.",
+      "Scheme success page not yet built. Nudge/cockpit/annual routes read the DB (migration 017). " +
+      "scheme_master.json retired (now scheme_master.DEPRECATED.json).",
     blocks:
       "Scheme eligibility, scheme-ROI comparison, scheme-cost inclusion in true cost-to-serve.",
   },

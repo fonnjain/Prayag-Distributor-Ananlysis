@@ -435,18 +435,13 @@ router.get("/customers/schemes", async (req, res) => {
   }
 });
 
-router.post("/customers/schemes", async (req, res) => {
-  const { slabs, ...schemeInput } = req.body as { slabs?: unknown[]; [k: string]: unknown };
-  try {
-    const scheme = await createScheme(
-      schemeInput as Parameters<typeof createScheme>[0],
-      (slabs ?? []) as Parameters<typeof createScheme>[1],
-    );
-    res.status(201).json(scheme);
-  } catch (err) {
-    req.log.error(err);
-    res.status(400).json({ error: "Failed to create scheme" });
-  }
+router.post("/customers/schemes", (_req, res) => {
+  // Scheme creation via this route is retired. All scheme data is loaded from
+  // the Q2 workbook via POST /api/admin/schemes/load (admin-gated).
+  res.status(405).json({
+    error: "Scheme creation via this route is not supported.",
+    hint: "Use POST /api/admin/schemes/load to reload scheme data from the workbook.",
+  });
 });
 
 router.get("/customers/schemes/:id", async (req, res) => {
@@ -462,35 +457,18 @@ router.get("/customers/schemes/:id", async (req, res) => {
   }
 });
 
-router.put("/customers/schemes/:id", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (!Number.isFinite(id)) { res.status(400).json({ error: "Invalid id" }); return; }
-  const { slabs, ...input } = req.body as { slabs?: unknown[]; [k: string]: unknown };
-  try {
-    const updated = await updateScheme(
-      id,
-      input as Parameters<typeof updateScheme>[1],
-      slabs as Parameters<typeof updateScheme>[2],
-    );
-    if (!updated) { res.status(404).json({ error: "Not found" }); return; }
-    res.json(updated);
-  } catch (err) {
-    req.log.error(err);
-    res.status(400).json({ error: "Failed to update scheme" });
-  }
+router.put("/customers/schemes/:id", (_req, res) => {
+  res.status(405).json({
+    error: "Scheme updates via this route are not supported.",
+    hint: "Use POST /api/admin/schemes/load to reload scheme data from the workbook.",
+  });
 });
 
-router.delete("/customers/schemes/:id", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (!Number.isFinite(id)) { res.status(400).json({ error: "Invalid id" }); return; }
-  try {
-    const ok = await deleteScheme(id);
-    if (!ok) { res.status(404).json({ error: "Not found" }); return; }
-    res.status(204).send();
-  } catch (err) {
-    req.log.error(err);
-    res.status(500).json({ error: "Failed to delete scheme" });
-  }
+router.delete("/customers/schemes/:id", (_req, res) => {
+  res.status(405).json({
+    error: "Scheme deletion via this route is not supported.",
+    hint: "Use POST /api/admin/schemes/load to reload scheme data from the workbook.",
+  });
 });
 
 // ── Scheme tracking + push list ────────────────────────────────────────────────
