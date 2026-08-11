@@ -17,6 +17,7 @@
 
 import crypto from "node:crypto";
 import { sql as sqlRaw } from "drizzle-orm";
+import { assertSkuWipeGuard } from "../sku/skuWipeGuard.js";
 import { db, secondarySkuLines, type InsertSecSkuLine } from "@workspace/db";
 import { listSheetTabs, readTabRowsChunked, type SheetCellValue } from "../registers/sheetsApi.js";
 import { toMonthLabel } from "./normalize.js";
@@ -337,7 +338,13 @@ export async function loadSecSkuFromSheets(
   fy: string,
   sheetId: string,
   dryRun = true,
-  opts: { replace?: boolean } = {},
+  opts: {
+    replace?: boolean;
+    /** Skip the wipe guard. Must be set explicitly — never default, never env var. */
+    skipGuard?: boolean;
+    /** Human-readable label for who set skipGuard (required when skipGuard=true). */
+    skipGuardLabel?: string;
+  } = {},
 ): Promise<SkuLoadResult> {
   const replace = opts.replace === true && !dryRun;
   logger.info({ fy, sheetId, dryRun, replace }, "skuLoader: starting");
@@ -438,6 +445,19 @@ export async function loadSecSkuFromSheets(
     // All tabs parsed successfully — atomic swap of the FY's sheets-sourced rows.
     totalInserted = 0;
     await db.transaction(async (tx) => {
+      // ── Wipe guard: runs BEFORE the DELETE, inside this transaction ────────
+      // Throws WipeGuardAbortError on ratio violation — Drizzle rolls back.
+      await assertSkuWipeGuard({
+        tx: tx as any,
+        fy,
+        incoming: bufferedRows.map((r) => ({
+          monthLabel: r.monthLabel,
+          distributor: r.distributor ?? null,
+        })),
+        skipGuard: opts.skipGuard === true,
+        callerLabel: opts.skipGuardLabel ?? "loadSecSkuFromSheets opts.skipGuard",
+        sourceLike: "sheets_sku_backfill:%",
+      });
       await tx.execute(
         sqlRaw`DELETE FROM secondary_sku_line WHERE fy = ${fy} AND source LIKE 'sheets_sku_backfill:%'`,
       );

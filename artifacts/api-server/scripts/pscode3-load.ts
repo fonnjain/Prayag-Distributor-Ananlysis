@@ -12,12 +12,16 @@ import path from "node:path";
 import { sql } from "drizzle-orm";
 import { db, secondarySkuLines, type InsertSecSkuLine } from "@workspace/db";
 import { canonGroupFromMap } from "../src/lib/sku/catalogue.js";
+import { assertSkuWipeGuard, WipeGuardAbortError } from "../src/lib/sku/skuWipeGuard.js";
 
 const DIR = "/tmp/pscode3/PSCODE 3 NEW REPORT";
 const FY = "2026-27";
 const SOURCE = "pscode3_xlsx";
 // Destructive replace of the whole FY — writes require an explicit --write flag.
 const DRY = !process.argv.includes("--write");
+// Skip the wipe guard for legitimate small loads (single-month re-sync, new-FY
+// bootstrap). Must be passed explicitly — never defaulted, never from env vars.
+const SKIP_GUARD = process.argv.includes("--skip-guard");
 
 // One winner per duplicate-export group (identical Order IDs verified in the
 // analysis pass). Winner = the name that matches the FY2026-27 SOBR dashboard
@@ -177,6 +181,15 @@ if (Math.abs(prasunNet - 1_834_504) > 5) throw new Error(`abort: Prasun control 
 // the SAME transaction as the sku load so the two tables can never disagree.
 const BRAND_SOURCE = "pscode3_brand_rollup";
 await db.transaction(async (tx) => {
+  // ── Wipe guard: must run BEFORE the DELETE, inside this transaction ────────
+  // Throws WipeGuardAbortError on ratio violation — Drizzle rolls back.
+  await assertSkuWipeGuard({
+    tx: tx as any,
+    fy: FY,
+    incoming: rows.map((r) => ({ monthLabel: r.monthLabel, distributor: r.distributor ?? null })),
+    skipGuard: SKIP_GUARD,
+    callerLabel: "pscode3-load.ts --skip-guard flag",
+  });
   await tx.execute(sql`DELETE FROM secondary_sku_line WHERE fy = ${FY}`);
   for (let i = 0; i < rows.length; i += 1000) {
     await tx.insert(secondarySkuLines).values(rows.slice(i, i + 1000));
