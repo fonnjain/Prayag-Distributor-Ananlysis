@@ -1,0 +1,118 @@
+GOAL
+Rebuild the Schemes data model to hold the real Q2 FY2026-27 scheme
+structure, and load the Q2 workbook. This task is SCHEMA AND LOAD ONLY.
+Do not build the Success tab or the AI generator - separate tasks.
+
+CONTEXT YOU NEED
+Two scheme systems currently exist and are not connected: scheme_def /
+scheme_slab (empty) and a bundled JSON with 13 schemes read by the nudge
+engine. Consolidate onto the DB tables. The bundled JSON becomes dead - do
+not leave both live.
+
+MODEL - these fields are what the real data requires
+
+scheme
+  scheme_id
+  title                  e.g. "Quarterly Scheme - CP / Sink / Sanitaryware"
+  audience[]             ARRAY: distributor | direct_dealer | sub_dealer |
+                         super_distributor
+                         Annual Scheme carries TWO: direct_dealer AND
+                         sub_dealer. A single flag cannot hold this.
+  settlement             primary | secondary | pass_through
+                         primary  = we pay the customer
+                         secondary= we fund the distributor to pay
+                         pass_through = distributor runs it, we fund via
+                         extra discount (Free Quantity Scheme)
+  qualification_basis    cumulative_value | single_bill_value |
+                         single_bill_quantity
+                         THIS IS CRITICAL. Cumulative accrues across the
+                         quarter; single-bill resets every invoice; quantity
+                         ignores value entirely. The existing Extra Earn
+                         formula assumes cumulative and is WRONG on the
+                         other two.
+  territory_group        the raw scope string from the sheet, verbatim
+  product_scope          the raw product string from the sheet, verbatim
+  period_from, period_to period_to NULLABLE for open-ended schemes
+  period_note            e.g. "Till further change", "onwards"
+  audience_source_term   the sheet's own word, e.g. "SUB-DEALER"
+  funding_note           for pass_through, e.g. "8% additional discount in
+                         bill; 3% extra CN above 1000 pcs"
+
+scheme_slab
+  scheme_id, slab_order
+  threshold_from, threshold_to    NULL upper bound = "& above"
+  unit                            value | pieces | master_cartons
+  rate                            numeric, NULL where no cash rate exists
+  alt_reward                      text, e.g. "Trip to Goa - 1 person, 3N/4D"
+  free_goods                      text, e.g. "110 Pcs", "1 PPR welding machine"
+  reward_status                   ok | needs_clarification
+  raw_text                        the slab's original text, always stored
+
+TRIP-OR-PERCENTAGE SLABS
+Where a slab reads "Trip to X OR N%", store rate = N and alt_reward = the
+trip text, reward_status = ok. Extra Earn and nudges then compute off rate
+exactly as today, with no new engine. The trip is a display label.
+
+THE TWO AMBIGUOUS SLABS - do not interpret them
+  1. PTMT-CP, A.P. AND TELENGANA, "On Billing of Rs.15,00,000 & Above"
+  2. Annual Scheme, "Rs.25.00 Lac to Rs.49.99 Lac"
+Set reward_status = needs_clarification, rate = NULL, store raw_text
+verbatim, and render the original wording on screen. EXCLUDE them from every
+nudge, Extra Earn and achievement calculation. Never substitute a guessed
+rate. Show a visible "wording under review" marker so the gap is obvious
+rather than silent.
+
+TERRITORY GROUPS - map, do not parse
+Scope strings carry person and market qualifiers inside the state list:
+  "Delhi/ NCR/ W.UP/ UK/ RAJ/ HR/PB/ HP/ GUJRAT/ MAH (Mr. Lalan)"
+  "E.UP/MP/CHTS/MAH (WAHID MKT.)"
+Create a territory_group table mapping each group to its member states, with
+the raw string retained. NOTE: Maharashtra appears in TWO groups with
+DIFFERENT slabs - the mapping must be group-to-states, never state-to-group.
+The same product family has three different slab tables by territory (CP
+starts at Rs.30,000 / Rs.40,000 / Rs.50,000 depending on group).
+
+SUPER DISTRIBUTOR
+Add super_distributor as a channel level, flagged REGIONAL and present only
+for Kerala & Karnataka. Two schemes in the file address different levels of
+the same chain ("FOR SUPER DISTRIBUTOR" and "FOR DISTRIBUTOR BY SUPER
+DISTRIBUTOR"). Do not merge them.
+
+SUB-DEALER = RETAILER
+Map audience sub_dealer to the retailer population, and keep
+audience_source_term = "SUB-DEALER" so the sheet's own language stays
+visible on screen.
+
+QUARTER ORGANISATION
+A scheme belongs to EVERY quarter its window overlaps. Show its true dates,
+not the quarter's. Schemes that are annual or open-ended get their own
+section rather than being forced into a quarter. Q2 FY2026-27 =
+01-07-2026 to 30-09-2026.
+
+NETT BILLING - not a scheme
+The "Nett Billing" sheet is a negotiated net price list for one named
+customer (M/s GRAHAA PRIYA ENTERPRISES), with no slabs and no qualification.
+Do NOT load it into scheme tables. Create a separate Special Pricing view and
+link to it from the Schemes page.
+
+LOAD
+Load the attached Q2 workbook. Expected: 9 sheets producing roughly 20
+scheme blocks. Report the exact count you load, by sheet.
+
+VERIFICATION - produced values, and a hash that resolves
+1. Count of schemes loaded, grouped by audience, by settlement, and by
+   qualification_basis. Print all three breakdowns.
+2. Print the Annual Scheme row showing BOTH audiences on one scheme.
+3. Print the two needs_clarification slabs exactly as rendered on the page,
+   and confirm both return NULL from the Extra Earn calculation rather than
+   a number.
+4. Print every distinct territory_group with its mapped states. Confirm
+   Maharashtra appears in two groups with different slab tables, and print
+   the first slab threshold for each.
+5. Print the count of slabs by unit (value / pieces / master_cartons) and by
+   qualification_basis.
+6. Confirm the bundled 13-scheme JSON is no longer read anywhere. Print the
+   grep result.
+7. Confirm Nett Billing is NOT in scheme tables, and print where it did go.
+8. Commit hash, then git cat-file -t on that hash, then
+   git merge-base --is-ancestor <hash> main with its exit code.

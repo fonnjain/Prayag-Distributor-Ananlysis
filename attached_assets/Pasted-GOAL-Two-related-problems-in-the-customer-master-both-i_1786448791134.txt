@@ -1,0 +1,97 @@
+GOAL
+Two related problems in the customer master, both introduced with the recent
+CSV load. Fix them together - they are the same file and the same work.
+
+DO NOT START THIS WHILE THE SCHEMES TASK IS RUNNING. Wait until that merges.
+
+============================================================
+PART 1 - THE DIRECT DEALERS TAB RETURNS ZERO
+============================================================
+
+Customer Data > Direct Dealers shows "No records found" and always will.
+
+The loader (customerUploadLoad.ts, distributor file) hardcodes
+    type: "Distributor"
+for ALL 3,316 rows, and writes the real classification into entity_type as
+the PLURAL strings straight from the CSV ("Distributors" / "Direct Dealers").
+
+The tab filter (customerMaster.ts:39) compares against the SINGULAR:
+    VALID_TYPES = new Set(["Distributor", "Direct Dealer", "Retailer"])
+    WHERE customer_master.type = 'Direct Dealer'
+
+So zero rows exist with type = 'Direct Dealer'. Two consequences:
+  - Direct Dealers tab: 0 rows, should be 1,209
+  - Distributors tab: shows all 3,316, should be 2,107 (it is currently
+    counting direct dealers as distributors)
+
+FIX IT IN THE LOADER, not the filter. I want the column correct, not worked
+around - anything else that reads `type` inherits the error otherwise.
+
+  1. Derive type from each row's Customer Type, normalising plural to
+     singular:
+         "Distributors"   -> "Distributor"
+         "Direct Dealers" -> "Direct Dealer"
+     Keep entity_type storing the raw CSV string unchanged.
+
+  2. If Customer Type is blank or anything else, leave type NULL. Do NOT
+     default to Distributor. Count those rows and report them.
+
+  3. Backfill the 3,316 existing rows from their stored entity_type.
+     Transactional. Print before and after counts.
+
+  4. Retailer rows currently have entity_type NULL and type "Retailer".
+     Report whether that is intended - do NOT change it in this task.
+
+============================================================
+PART 2 - TYPE ERRORS IN THE SAME FILE
+============================================================
+
+A type check of api-server surfaces about 30 real errors (excluding
+dependency-resolution noise). Eleven of them - a third of the total - are in
+routes/customerMaster.ts, all from the recent work:
+
+  line 220  TS7053  implicit any: expression of type string|number|symbol
+                    used to index type {}
+  line 221  TS2538  symbol cannot be used as an index type
+  line 222  TS2538  same
+  line 224  TS2339  Property 'company' does not exist on type '{}'
+  line 311  TS7053  same pattern as 220
+  line 312  TS2538
+  line 314  TS2538  (twice)
+  line 614  TS2538  (twice)
+  line 619  TS2345  string|number|symbol not assignable to string
+
+These are all the same root cause: an object typed as {} being indexed with
+an untyped key. They pass at runtime until a key of an unexpected shape
+arrives, which is exactly what a CSV load can produce.
+
+Give those objects real types rather than casting to any. If a row shape is
+genuinely dynamic, type it as Record<string, string> and validate the keys
+you actually read.
+
+Do NOT fix type errors in other files in this task - extraGroups.ts,
+primaryStateAchievement.ts and skuPushList.ts have their own and should be
+separate.
+
+============================================================
+ALSO
+============================================================
+The Direct Dealers empty state reads "Import an xlsx file to seed the
+customer master." No import has ever run - the data arrived via the admin
+CSV route - and the importer accepts xlsx only. Correct the text so it does
+not point at an unused path.
+
+============================================================
+VERIFICATION - produced values, and a hash that resolves
+============================================================
+1. Post-backfill counts grouped by type AND by entity_type. Expect
+   type='Distributor' 2,107, type='Direct Dealer' 1,209, type='Retailer'
+   76,678, total 79,994.
+2. Row count returned by the Direct Dealers tab (expect 1,209) and by the
+   Distributors tab (expect 2,107, DOWN from the incorrect 3,316).
+3. Count of distributor-file rows where type ended up NULL. Name them if any.
+4. Re-run the type check on api-server. Print the count of errors in
+   routes/customerMaster.ts before and after. After must be 0.
+5. Confirm you did not touch extraGroups.ts, primaryStateAchievement.ts or
+   skuPushList.ts. Print the diff file list.
+6. Commit hash, then `git cat-file -t <hash>`, then
