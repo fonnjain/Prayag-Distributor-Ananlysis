@@ -40,11 +40,9 @@ import { cn } from "@/lib/utils";
 
 const BASE = (import.meta as { env: Record<string, string> }).env.BASE_URL?.replace(/\/$/, "") ?? "";
 
-const CANONICAL_HEADS = [
-  "Syed Aqil Rizvi", "Biju C.O", "Sandeep Dadheech", "Pawan Sharma",
-  "Nasir Hussain Khan", "Anant Singh", "Babu", "Lalan Kumar",
-  "Suresh Nair", "Sunil Patel", "Sulinder Pal",
-];
+// State heads are fetched live from /api/org/state-heads so the filter and
+// edit dropdowns always reflect the current person registry (no hardcoded list).
+// Populated in CustomerMasterPage via useEffect; passed down as a prop.
 
 const TABS = [
   { id: "Distributor",    label: "Distributors" },
@@ -518,6 +516,22 @@ function UploadInsightsPanel() {
 export default function CustomerMasterPage() {
   const [activeTab, setActiveTab] = useState<TabId>("Distributor");
 
+  // State heads — fetched live from the person registry so the dropdowns
+  // always reflect the current territory structure (no hardcoded list).
+  const [stateHeads, setStateHeads] = useState<string[]>([]);
+  useEffect(() => {
+    fetch(`${BASE}/api/org/state-heads`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((d: { heads: Array<{ displayName: string; status: string }> }) => {
+        const active = d.heads
+          .filter((h) => h.status === "active")
+          .map((h) => h.displayName)
+          .sort((a, b) => a.localeCompare(b));
+        setStateHeads(active);
+      })
+      .catch(() => {/* leave empty — dropdowns degrade gracefully */});
+  }, []);
+
   // Filters
   const [search, setSearch] = useState("");
   const [filterHead, setFilterHead] = useState("");
@@ -713,7 +727,7 @@ export default function CustomerMasterPage() {
               className="rounded border bg-background px-2 py-1 text-xs"
             >
               <option value="">All Heads</option>
-              {CANONICAL_HEADS.map((h) => <option key={h} value={h}>{h}</option>)}
+              {stateHeads.map((h) => <option key={h} value={h}>{h}</option>)}
             </select>
             <select
               value={filterStatus}
@@ -880,7 +894,7 @@ export default function CustomerMasterPage() {
                                     onStart={() => {}}
                                     onSave={(v) => saveEdit(row.id, "stateHead", v)}
                                     onCancel={cancelEdit}
-                                    options={["", ...CANONICAL_HEADS]}
+                                    options={["", ...stateHeads]}
                                   />
                                 ) : (
                                   <span
