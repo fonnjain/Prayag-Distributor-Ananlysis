@@ -90,18 +90,34 @@ export async function loadPersonRegistry(): Promise<void> {
       continue;
     }
 
-    // Map every alias form → canonical.
+    // alias_secondary is the display name written into sale_line.head_canon
+    // (e.g. "Pawan Sharma" for the state head whose HR name is "Pawan Kumar Sharma").
+    // All alias_primary entries must resolve to this same display name so that
+    // the register pipeline produces consistent head_canon values.
+    // If alias_secondary is absent, fall back to canonical_name.
+    const lookupTarget = row.alias_secondary ?? canonical;
+
+    // Map every alias form → lookupTarget.
     for (const alias of row.alias_primary ?? []) {
-      headAliasLookup.set(alias.toUpperCase().trim(), canonical);
-    }
-    if (row.alias_secondary) {
-      headAliasLookup.set(row.alias_secondary.toUpperCase().trim(), canonical);
+      headAliasLookup.set(alias.toUpperCase().trim(), lookupTarget);
     }
     if (row.alias_sheet) {
-      headAliasLookup.set(row.alias_sheet.toUpperCase().trim(), canonical);
+      headAliasLookup.set(row.alias_sheet.toUpperCase().trim(), lookupTarget);
     }
-    // Self-mapping so already-canonical spellings pass through.
-    headAliasLookup.set(canonical.toUpperCase().trim(), canonical);
+    // Self-mappings so already-canonical spellings pass through.
+    // Use conditional set so that a non-state-head's canonical name does not
+    // overwrite a state-head alias that was registered earlier.
+    // (State heads have lower IDs and are processed first; ORDER BY id ensures
+    // their alias_primary entries land in the map before non-state-heads.)
+    if (!headAliasLookup.has(canonical.toUpperCase().trim())) {
+      headAliasLookup.set(canonical.toUpperCase().trim(), lookupTarget);
+    }
+    if (row.alias_secondary) {
+      // The display name itself should also resolve to lookupTarget.
+      if (!headAliasLookup.has(row.alias_secondary.toUpperCase().trim())) {
+        headAliasLookup.set(row.alias_secondary.toUpperCase().trim(), lookupTarget);
+      }
+    }
 
     if (row.is_state_head) {
       // Gate set: primary aliases that identify this person as a state head
