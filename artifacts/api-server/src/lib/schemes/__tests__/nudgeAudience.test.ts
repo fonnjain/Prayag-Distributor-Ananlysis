@@ -108,6 +108,7 @@ beforeAll(async () => {
     "ADD COLUMN IF NOT EXISTS invoice_date DATE",
     "ADD COLUMN IF NOT EXISTS invoice_no TEXT",
     "ADD COLUMN IF NOT EXISTS version_status TEXT",
+    "ADD COLUMN IF NOT EXISTS channel TEXT",
   ]) {
     await pool.query(`ALTER TABLE ${SCHEMA}.sale_line_current ${col}`);
   }

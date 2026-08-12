@@ -1,0 +1,56 @@
+GOAL
+The rate-list Sheet2 channel (Retail / Govt / Project / JJM / Gem / Export) is
+already read and matched on every SAP derive, then discarded. Persist it.
+
+WHAT ALREADY EXISTS - do not rebuild it
+  lib/sap/rateList.ts   reads Sheet1 (items) and Sheet2 (customers), builds a
+                        cached Map keyed on normParty(name), and CustomerInfo
+                        already carries { name, head, state, channel }. The
+                        column resolver already looks for GROUP | CHANNEL |
+                        PAYMENTTR.
+  lib/sap/derive.ts     calls matchCustomer(), then uses info.head and
+                        info.state and IGNORES info.channel entirely.
+
+So the value is fetched on every derive and thrown away. This task stores it.
+
+CHANGES
+1. Add a nullable `channel` text column to sale_line, with an index on
+   (fy, channel). Migration only - do not alter existing columns.
+
+2. In derive.ts, write info.channel through to the row. Normalise to a fixed
+   vocabulary, storing the raw value alongside if it does not match:
+       Retail | Govt | Project | JJM | Gem | Export | Unmapped
+   A customer with no rate-list match gets channel = NULL, NOT 'Retail'.
+   Never default a missing channel to a trading value.
+
+3. Backfill existing FY2026-27 and FY2025-26 rows from the same rate-list map.
+   Report how many rows resolve and how many stay NULL.
+
+4. In lib/schemes/nudge.ts, replace the name-pattern exclusion
+       EXCLUDE_PATTERNS_RAW = ["GOVT","GOVERNMENT","GEM","JJM","PROJECT"]
+   with an exact channel comparison. That substring test on a customer NAME is
+   fragile - it will fire on any trading name containing those letters. Keep
+   the old patterns in the file as a commented fallback with a note saying why
+   they were replaced, but do not execute them.
+
+DO NOT
+- Do not change head_canon, state_canon, or PROJECT_HEAD_CANON.
+- Do not change the reportFilterVocab mapping that collapses GOVT/GEM/JJM into
+  "NON-TERRITORY / PROJECT / GOVT". Existing reports must not move in this
+  task. The point here is to make the distinction AVAILABLE, not to start
+  using it in reports.
+
+VERIFY - produced values, and a hash that resolves
+1. Row counts by channel for FY2026-27 and FY2025-26, including NULL.
+2. Confirm total sale_line row count and total net are UNCHANGED before and
+   after the backfill. Print both. If either moved, stop and report.
+3. Cross-check: count rows where head_canon = 'Non-territory / Project / Govt'
+   against count where channel IN (Govt, Project, JJM, Gem, Export). Print
+   both numbers and the difference. They should be close; explain any gap
+   rather than adjusting anything.
+4. Print the count of customers in the rate-list map that resolve to each
+   channel, and the count of sale_line customers with no rate-list match.
+5. Print the nudge exclusion count before and after the change. If it moved,
+   name the customers that changed status and say which are genuine.
+6. Commit hash, git cat-file -t on it, git merge-base --is-ancestor <hash>
+   main with exit code.

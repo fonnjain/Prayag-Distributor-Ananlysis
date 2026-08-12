@@ -498,6 +498,8 @@ export function toSaleLine(
   occurrence: OccurrenceCounter,
   unmapped: UnmappedReport,
   source: "sheets" | "xlsx_backfill",
+  /** Rate-list channel (already normalised by normalizeChannel). NULL = no match. */
+  channel?: string | null,
 ): InsertSaleLine {
   const key = lineUidKey(row);
   const { headCanon, isTerritory } = canonHead(row.headRaw, unmapped);
@@ -522,6 +524,7 @@ export function toSaleLine(
     headRaw: row.headRaw,
     headCanon,
     isTerritory,
+    channel: channel ?? null,
     typeRaw: row.typeRaw,
     source,
     versionStatus: "current",

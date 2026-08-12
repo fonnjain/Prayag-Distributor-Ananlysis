@@ -62,6 +62,10 @@ export const saleLines = pgTable(
     headRaw: text("head_raw"),
     headCanon: text("head_canon"),
     isTerritory: boolean("is_territory"),
+    // Rate-list channel: Retail | Govt | Project | JJM | Gem | Export | Unmapped.
+    // NULL = customer not found in the rate-list customer master (never defaults
+    // to 'Retail'). Populated by the backfill route and by future ingest passes.
+    channel: text("channel"),
     typeRaw: text("type_raw"),
     source: text("source").notNull(), // 'sheets' | 'xlsx_backfill'
     ingestedAt: timestamp("ingested_at", { withTimezone: true }).defaultNow(),
@@ -82,6 +86,7 @@ export const saleLines = pgTable(
     index("sale_line_fy_group_idx").on(t.fy, t.groupCanon),
     index("sale_line_version_idx").on(t.versionStatus),
     index("sale_line_identity_idx").on(t.fy, t.invoiceNo, t.code, t.qty, t.monthLabel),
+    index("sale_line_fy_channel_idx").on(t.fy, t.channel),
   ],
 );
 

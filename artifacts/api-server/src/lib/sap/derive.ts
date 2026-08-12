@@ -23,6 +23,23 @@ export const UNMAPPED_GROUP = "Unmapped";
 export const UNMAPPED_HEAD = "Unmapped (review)";
 export const UNMAPPED_STATE = "Unmapped (review)";
 
+// Fixed channel vocabulary.  A customer with no rate-list match gets NULL —
+// never a default of 'Retail'.  Raw values that do not match any canonical
+// token are stored as 'Unmapped' (not dropped) so they remain queryable.
+export const CHANNEL_VOCAB = new Set([
+  "Retail", "Govt", "Project", "JJM", "Gem", "Export",
+]);
+
+export function normalizeChannel(raw: string | null): string | null {
+  if (raw == null || raw.trim() === "") return null;
+  const trimmed = raw.trim();
+  // Case-insensitive match against the canonical set.
+  for (const canonical of CHANNEL_VOCAB) {
+    if (canonical.toLowerCase() === trimmed.toLowerCase()) return canonical;
+  }
+  return "Unmapped";
+}
+
 const territoryHeadKeys = normalizeConfig.territory_heads as string[];
 const territoryDisplays = territoryHeadKeys.map(
   (k) => (headAlias as Record<string, string>)[k] ?? titleCase(k),

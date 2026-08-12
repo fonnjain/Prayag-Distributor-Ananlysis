@@ -1,0 +1,93 @@
+GOAL
+The same person appears under three different names in three systems, resolved
+today by two JSON files that must agree. Replace both with one table, editable
+on the Organization page.
+
+THE PROBLEM, WITH EVIDENCE
+  Primary chain    (rate list Sheet2, sale register):  "SANDEEP JI"
+  Secondary chain  (CRM Working Sheets):               "Sandeep Dadheech"
+  HR (User_List.csv):                                  "Sandeep Dadheech"
+
+  Primary "RIZVI JI" = secondary "AQIL RIZVI" = HR "Syed Aqil Rizvi"
+  Primary "BIJJU"    = secondary/HR "Biju C.O"
+  Primary "LALAN"    = "Lalan Kumar"
+  Primary "NASIR HUSAIN" = "Nasir Hussain Khan"
+  Primary "PAWAN KUMAR"  = HR "Pawan Kumar Sharma"   <-- see the trap below
+
+THE TRAP - do not get this wrong
+"PAWAN KUMAR" is TWO different people:
+  - In rate list Sheet2 head column (alongside SANDEEP JI, ANANT SINGH), it is
+    a STATE HEAD. HR canonical name: "Pawan Kumar Sharma". His seven CRM team
+    members all list "Pawan Kumar Sharma" as Reporting Manager. 206 rows.
+  - In the CRM roster member column, "PAWAN KUMAR" is a TEAM MEMBER under
+    Nasir Hussain Khan. A different person.
+Resolve by ROLE, never by name alone. A prior merge of this name left
+Rs 259.4 Cr reading as zero prior-year.
+
+TABLE
+person_registry
+  employee_code        from HR. PRIMARY key where present and <= 4 digits.
+  canonical_name       from HR
+  alias_primary        rate-list / sale-register form, e.g. "SANDEEP JI"
+  alias_secondary      CRM form, e.g. "Sandeep Dadheech"
+  alias_sheet          working-sheet form where it differs
+  reporting_manager    from HR - the TRUE five-tier line
+  state_head           the ROLLUP head - from the CRM roster
+  is_state_head        boolean
+  is_person            boolean
+
+reporting_manager and state_head are DIFFERENT FIELDS and both must be stored.
+Riyas V reports to SANOJ M. and rolls up to Biju C.O. Storing one loses the
+other. Measured against HR, 16 CRM members listed under Biju C.O actually
+report to five different managers - that is the five-tier hierarchy, not an
+error.
+
+NON-PERSON HEADS
+OTHER, PROJECT, GOVT, JJM, GEM are head values in the primary chain but are
+not people. Store them with is_person = false so head resolution succeeds
+without inventing an employee. "OTHER" is a real bucket (811 rows) with its
+own state-head file - treat it as a head, not as unassigned.
+
+EMPLOYEE CODE IS NOT ALWAYS USABLE
+Of 179 active HR members: 117 have a plausible code (<= 4 digits), 37 other
+long numeric, 14 round-number placeholders, 7 contain "+" characters, 4 look
+like mobile numbers. Real values include 78900000000000000000 and 289696+35486.
+Where the code fails plausibility, key on
+normSecKey(name) + ":" + normSecKey(reporting_manager) and flag the row for HR
+correction. Do not silently accept a bad code as an identity.
+
+Employee code 5900000000000 is held by TWO active people - Jijo (Manjeri,
+under SANOJ M.) and Basit Ahmad Pala (Anantnag, under Nasir Hussain Khan).
+Keep both. Code 940 is held by "Balamurugan .V" and "V. Balamurugan", both
+Deactive - same person entered twice with the name reversed. Flag, do not
+merge.
+
+RETIRE THE JSON FILES
+head_alias.json and the territory_heads list in normalize.json both currently
+have to contain a name for the primary pipeline to work - "PAWAN KUMAR." was
+in only one and failed silently for three fiscal years. Point both consumers
+at the registry and retire the files. Keep the startup assertion that fails
+loudly when a head in the register has no registry entry.
+
+UI
+Organization page: view and edit the registry. Editing an alias must not
+change historical attribution retroactively without an explicit confirmation
+step - show what would change and how many rows, before saving.
+
+VERIFY - produced values, and a hash that resolves
+1. Print every distinct head value found in the FY2026-27 sale register, with
+   its registry resolution and is_person flag. Any unresolved head is a
+   failure - name it.
+2. Print both Ashutosh Kumar rows with their keys, confirming two distinct
+   people survive.
+3. Print the registry row for Pawan Kumar Sharma and, separately, the CRM
+   member PAWAN KUMAR under Nasir Hussain Khan. Confirm they are two records.
+4. Print the count of active HR members whose employee code fails plausibility
+   (expect about 62) and confirm they resolved on the name+manager key.
+5. Confirm head_alias.json and the normalize.json territory_heads list are no
+   longer read. Print the grep result.
+6. Anchor: print FY2025-26 total net by head BEFORE and AFTER this change.
+   They must be identical - this is an alias consolidation, not a
+   re-attribution. If any head's total moved, stop and report.
+7. Commit hash, git cat-file -t, git merge-base --is-ancestor main with exit
+   code.

@@ -34,8 +34,19 @@ import { buildAudienceFilterSQL } from "./audienceFilter.js";
 
 // ── Constants (formerly from scheme_master.json) ──────────────────────────────
 
-const EXCLUDE_PATTERNS_RAW = ["GOVT", "GOVERNMENT", "GEM", "JJM", "PROJECT"];
-const EXCLUDE_PATTERNS = EXCLUDE_PATTERNS_RAW.map((p) => p.toUpperCase());
+// RETIRED: substring name-pattern exclusion — replaced by exact channel comparison
+// in the SQL WHERE clause (sale_line.channel column, populated from the rate-list
+// customer master).  The patterns below fired on any customer name that happened
+// to contain these strings, e.g. "PROJECT DEALER" or "GEM MARKETING" being
+// silently excluded even when they were legitimate sub-dealers.  Kept here as a
+// reference in case the channel column is temporarily empty.
+//
+// const EXCLUDE_PATTERNS_RAW = ["GOVT", "GOVERNMENT", "GEM", "JJM", "PROJECT"];
+// const EXCLUDE_PATTERNS = EXCLUDE_PATTERNS_RAW.map((p) => p.toUpperCase());
+// function isExcluded(customer: string): boolean {
+//   const upper = customer.toUpperCase();
+//   return EXCLUDE_PATTERNS.some((p) => upper.includes(p));
+// }
 
 export const DEFAULT_ROI_THRESHOLD = 0.05;
 
@@ -126,11 +137,6 @@ function getNextSlab(slabs: SchemeSlab[], amount: number): SchemeSlab | null {
     if (s.threshold > amount) return s;
   }
   return null;
-}
-
-function isExcluded(customer: string): boolean {
-  const upper = customer.toUpperCase();
-  return EXCLUDE_PATTERNS.some((p) => upper.includes(p));
 }
 
 // ── DB loader: schemes + territory groups ─────────────────────────────────────
@@ -447,6 +453,7 @@ export async function computeNudgeList(
       AND sl.month_label IN (${monthPlaceholders})
       AND sl.group_raw IN (${groupPlaceholders})
       AND (sl.is_territory IS NULL OR sl.is_territory = true)
+      AND (sl.channel IS NULL OR sl.channel = 'Retail')
       AND ($${headParamIdx}::text = '' OR sl.head_canon = $${headParamIdx}::text)
       ${audienceFilter}
     GROUP BY sl.customer, sl.group_raw, sl.state_canon, sl.head_canon
@@ -472,7 +479,7 @@ export async function computeNudgeList(
 
   for (const row of rows) {
     const customer = row.customer ?? "";
-    if (!customer || isExcluded(customer)) continue;
+    if (!customer) continue;
 
     const candidateIds = (basketMap.get(row.group_raw) ?? []).filter((sid) =>
       quarterlySchemeIds.includes(sid),
@@ -992,6 +999,7 @@ export async function computeSuccessList(
         AND sl.month_label IN (${monthPh})
         AND sl.group_raw IN (${groupPh})
         AND (sl.is_territory IS NULL OR sl.is_territory = true)
+        AND (sl.channel IS NULL OR sl.channel = 'Retail')
         AND ($${headIdx}::text = '' OR sl.head_canon = $${headIdx}::text)
         ${audienceFilter}
       GROUP BY sl.customer, sl.group_raw, sl.state_canon, sl.head_canon
@@ -1009,7 +1017,7 @@ export async function computeSuccessList(
 
     for (const row of dbRows) {
       const customer = row.customer ?? "";
-      if (!customer || isExcluded(customer)) continue;
+      if (!customer) continue;
 
       // Only consider scheme IDs in this audience group (not all quarterly)
       const candidateIds = (basketMap.get(row.group_raw) ?? []).filter((id) =>

@@ -500,6 +500,28 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    id: "020_sale_line_channel",
+    sql: `
+      -- Add the rate-list channel column to sale_line_all.
+      -- Retail | Govt | Project | JJM | Gem | Export | Unmapped | NULL (no match).
+      -- NULL means the customer was not found in the rate-list customer master —
+      -- never defaulted to 'Retail'.  Backfill runs in-app via the admin route.
+      ALTER TABLE sale_line_all
+        ADD COLUMN IF NOT EXISTS channel TEXT;
+
+      CREATE INDEX IF NOT EXISTS sale_line_fy_channel_idx
+        ON sale_line_all (fy, channel);
+
+      -- Refresh both views so they pick up the new column.  PostgreSQL caches
+      -- column definitions at CREATE VIEW time; ALTER TABLE on the base table
+      -- requires CREATE OR REPLACE on every dependent view in dependency order.
+      CREATE OR REPLACE VIEW sale_line AS
+        SELECT * FROM sale_line_all WHERE version_status = 'current';
+      CREATE OR REPLACE VIEW sale_line_current AS
+        SELECT * FROM sale_line WHERE version_status = 'current';
+    `,
+  },
+  {
     id: "019_rename_scheme_slab_to_reward_slab",
     sql: `
       -- Dev DBs that ran the original 017 have the NEW-shape table under the
