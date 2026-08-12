@@ -10,14 +10,17 @@
 //   - If OLD MRP is blank OR equals NEW MRP → write only the current row
 //   - Otherwise → write OLD row (is_current=false, effective_to=wef)
 //                 AND NEW row (is_current=true,  effective_from=wef)
+//
+// Composite key: mrp_master PK is (item_code, segment).
+// is_ambiguous_code = TRUE for every (item_code, segment) row when that
+// item_code appears in more than one segment. Register lookups for those
+// codes MUST supply a segment; no fallback is attempted.
 import ExcelJS from "exceljs";
 import { existsSync } from "fs";
 import { join } from "path";
 import { pool } from "@workspace/db";
 
 // ── Path resolution ────────────────────────────────────────────────────────
-// Works both in dev (pnpm --filter @workspace/api-server run dev, cwd =
-// artifacts/api-server/) and in production (cwd = repo root).
 function findMrpDir(): string {
   const candidates = [
     join(process.cwd(), "config/mrp_files"),
@@ -287,12 +290,25 @@ async function parseQuaaFern(filePath: string): Promise<MrpRow[]> {
   return rows;
 }
 
+// ── Collision report ──────────────────────────────────────────────────────
+export interface AmbiguousCodeEntry {
+  itemCode: string;
+  segment1: string;
+  itemName1: string;
+  currentMrp1: number;
+  segment2: string;
+  itemName2: string;
+  currentMrp2: number;
+}
+
 // ── Stats ─────────────────────────────────────────────────────────────────
 export interface LoadStats {
   rowsPerFile: Record<string, number>;
-  totalMasterRows: number;
+  totalMasterRows: number;   // distinct (item_code, segment) pairs
   totalHistoryRows: number;
-  duplicatesDropped: number;
+  intraDuplicatesDropped: number;   // duplicate (item_code, segment) within the same file
+  ambiguousCodesCount: number;      // item_codes appearing in 2+ segments
+  collisions: AmbiguousCodeEntry[]; // side-by-side comparison for price-list owners
 }
 
 // ── Main load function ────────────────────────────────────────────────────
@@ -321,22 +337,58 @@ export async function loadMrpFiles(): Promise<LoadStats> {
 
   const allRows: MrpRow[] = [...ptmt, ...pipe, ...cp, ...san, ...hw, ...qf];
 
-  // Deduplicate mrp_master by item_code (first occurrence wins).
+  // ── Step 1: Deduplicate by (item_code, segment) — first occurrence wins.
+  // This handles codes that appear multiple times within the same file/tab.
   const seen = new Set<string>();
   const masterRows: MrpRow[] = [];
-  let duplicatesDropped = 0;
+  let intraDuplicatesDropped = 0;
   for (const row of allRows) {
-    if (seen.has(row.itemCode)) {
-      duplicatesDropped++;
+    const key = `${row.itemCode}|${row.segment}`;
+    if (seen.has(key)) {
+      intraDuplicatesDropped++;
       continue;
     }
-    seen.add(row.itemCode);
+    seen.add(key);
     masterRows.push(row);
   }
 
-  // Build history rows (ALL rows, not just master-unique).
+  // ── Step 2: Identify ambiguous codes (same item_code, different segments).
+  // Build a map: item_code → Set of segments that carry it.
+  const codeSegments = new Map<string, string[]>();
+  for (const row of masterRows) {
+    const segs = codeSegments.get(row.itemCode) ?? [];
+    segs.push(row.segment);
+    codeSegments.set(row.itemCode, segs);
+  }
+  const ambiguousCodes = new Set<string>();
+  for (const [code, segs] of codeSegments) {
+    if (segs.length > 1) ambiguousCodes.add(code);
+  }
+
+  // ── Step 3: Build collision report (side-by-side view for price-list owners).
+  const collisions: AmbiguousCodeEntry[] = [];
+  for (const code of ambiguousCodes) {
+    const segs = codeSegments.get(code)!;
+    // Report first two segments (all known cases are exactly 2 segments)
+    const row1 = masterRows.find((r) => r.itemCode === code && r.segment === segs[0])!;
+    const row2 = masterRows.find((r) => r.itemCode === code && r.segment === segs[1])!;
+    collisions.push({
+      itemCode: code,
+      segment1: row1.segment,
+      itemName1: row1.itemName,
+      currentMrp1: row1.newMrp,
+      segment2: row2.segment,
+      itemName2: row2.itemName,
+      currentMrp2: row2.newMrp,
+    });
+  }
+  collisions.sort((a, b) => a.itemCode.localeCompare(b.itemCode));
+
+  // ── Step 4: Build history rows (all parsed rows, not just master-unique).
+  // History rows are keyed by (item_code, segment) for the FK.
   interface HistRow {
     itemCode: string;
+    segment: string;
     mrp: number;
     effectiveFrom: string;
     effectiveTo: string | null;
@@ -344,7 +396,9 @@ export async function loadMrpFiles(): Promise<LoadStats> {
     isCurrent: boolean;
   }
   const histRows: HistRow[] = [];
-  for (const row of allRows) {
+  // Use masterRows (already deduped by (item_code, segment)) for history too,
+  // so each (item_code, segment) produces at most 2 history rows (old + current).
+  for (const row of masterRows) {
     const hasOld =
       row.oldMrp != null &&
       row.oldMrp > 0 &&
@@ -352,6 +406,7 @@ export async function loadMrpFiles(): Promise<LoadStats> {
     if (hasOld) {
       histRows.push({
         itemCode: row.itemCode,
+        segment: row.segment,
         mrp: row.oldMrp!,
         effectiveFrom: row.oldEffectiveFrom,
         effectiveTo: row.effectiveFrom,
@@ -361,6 +416,7 @@ export async function loadMrpFiles(): Promise<LoadStats> {
     }
     histRows.push({
       itemCode: row.itemCode,
+      segment: row.segment,
       mrp: row.newMrp,
       effectiveFrom: row.effectiveFrom,
       effectiveTo: null,
@@ -369,7 +425,7 @@ export async function loadMrpFiles(): Promise<LoadStats> {
     });
   }
 
-  // Full replace in a single transaction.
+  // ── Step 5: Full replace in a single transaction.
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -383,8 +439,8 @@ export async function loadMrpFiles(): Promise<LoadStats> {
     for (let i = 0; i < masterRows.length; i += BATCH) {
       const batch = masterRows.slice(i, i + BATCH);
       const vals = batch.map((r, idx) => {
-        const base = idx * 5;
-        return `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5})`;
+        const base = idx * 6;
+        return `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6})`;
       });
       const params = batch.flatMap((r) => [
         r.itemCode,
@@ -392,9 +448,13 @@ export async function loadMrpFiles(): Promise<LoadStats> {
         r.segment,
         r.series || null,
         r.packing || null,
+        ambiguousCodes.has(r.itemCode),
       ]);
       await client.query(
-        `INSERT INTO mrp_master (item_code,item_name,segment,series,packing) VALUES ${vals.join(",")} ON CONFLICT (item_code) DO NOTHING`,
+        `INSERT INTO mrp_master
+           (item_code, item_name, segment, series, packing, is_ambiguous_code)
+         VALUES ${vals.join(",")}
+         ON CONFLICT (item_code, segment) DO NOTHING`,
         params,
       );
     }
@@ -403,11 +463,12 @@ export async function loadMrpFiles(): Promise<LoadStats> {
     for (let i = 0; i < histRows.length; i += BATCH) {
       const batch = histRows.slice(i, i + BATCH);
       const vals = batch.map((r, idx) => {
-        const base = idx * 6;
-        return `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6})`;
+        const base = idx * 7;
+        return `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7})`;
       });
       const params = batch.flatMap((r) => [
         r.itemCode,
+        r.segment,
         String(r.mrp),
         r.effectiveFrom,
         r.effectiveTo,
@@ -415,7 +476,9 @@ export async function loadMrpFiles(): Promise<LoadStats> {
         r.isCurrent,
       ]);
       await client.query(
-        `INSERT INTO mrp_history (item_code,mrp,effective_from,effective_to,source_file,is_current) VALUES ${vals.join(",")}`,
+        `INSERT INTO mrp_history
+           (item_code, segment, mrp, effective_from, effective_to, source_file, is_current)
+         VALUES ${vals.join(",")}`,
         params,
       );
     }
@@ -432,6 +495,8 @@ export async function loadMrpFiles(): Promise<LoadStats> {
     rowsPerFile,
     totalMasterRows: masterRows.length,
     totalHistoryRows: histRows.length,
-    duplicatesDropped,
+    intraDuplicatesDropped,
+    ambiguousCodesCount: ambiguousCodes.size,
+    collisions,
   };
 }

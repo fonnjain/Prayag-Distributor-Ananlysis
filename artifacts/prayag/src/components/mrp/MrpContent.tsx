@@ -1,7 +1,7 @@
 // MRP Master page — browse effective-dated prices by segment and series.
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { IndianRupee, Search, ChevronLeft, ChevronRight, History, X, Info, Loader2 } from "lucide-react";
+import { IndianRupee, Search, ChevronLeft, ChevronRight, History, X, Info, Loader2, AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,7 @@ interface MrpRow {
   segment: string;
   series: string | null;
   packing: string | null;
+  isAmbiguousCode: boolean;
   currentMrp: number | null;
   effectiveFrom: string | null;
   historyCount: number;
@@ -48,6 +49,7 @@ interface MrpMeta {
   seriesBySegment: Record<string, string[]>;
   totalCodes: number;
   codesWithRevision: number;
+  ambiguousCodes: number;
 }
 
 interface HistoryEntry {
@@ -65,7 +67,15 @@ interface HistoryResponse {
   segment: string;
   series: string | null;
   packing: string | null;
+  isAmbiguousCode: boolean;
+  availableSegments?: string[];
   history: HistoryEntry[];
+}
+
+// Tracks which (code, segment) pair the history panel is open for
+interface HistoryTarget {
+  code: string;
+  segment: string;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -104,15 +114,16 @@ function SegmentBadge({ segment }: { segment: string }) {
 
 // ── History panel ──────────────────────────────────────────────────────────
 function HistoryPanel({
-  code,
+  target,
   onClose,
 }: {
-  code: string;
+  target: HistoryTarget;
   onClose: () => void;
 }) {
+  const url = `${BASE}/api/mrp/${encodeURIComponent(target.code)}/history?segment=${encodeURIComponent(target.segment)}`;
   const { data, isLoading, error } = useQuery<HistoryResponse>({
-    queryKey: ["mrp-history", code],
-    queryFn: () => fetch(`${BASE}/api/mrp/${encodeURIComponent(code)}/history`).then((r) => r.json()),
+    queryKey: ["mrp-history", target.code, target.segment],
+    queryFn: () => fetch(url).then((r) => r.json()),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -127,9 +138,7 @@ function HistoryPanel({
           <div className="flex items-center gap-2">
             <History className="h-4 w-4 text-slate-500" />
             <span className="font-semibold text-slate-800">Price History</span>
-            {data && (
-              <SegmentBadge segment={data.segment} />
-            )}
+            {data && <SegmentBadge segment={data.segment} />}
           </div>
           <button
             onClick={onClose}
@@ -142,10 +151,26 @@ function HistoryPanel({
         {/* Item info */}
         {data && (
           <div className="border-b bg-slate-50 px-4 py-3">
-            <p className="text-sm font-mono font-medium text-slate-700">{data.itemCode}</p>
-            <p className="text-sm text-slate-600 mt-0.5">{data.itemName ?? "—"}</p>
-            {data.series && (
-              <p className="text-xs text-slate-500 mt-0.5">{data.series}{data.packing ? ` · ${data.packing}` : ""}</p>
+            <div className="flex items-start gap-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-mono font-medium text-slate-700">{data.itemCode}</p>
+                <p className="text-sm text-slate-600 mt-0.5">{data.itemName ?? "—"}</p>
+                {data.series && (
+                  <p className="text-xs text-slate-500 mt-0.5">{data.series}{data.packing ? ` · ${data.packing}` : ""}</p>
+                )}
+              </div>
+            </div>
+            {/* Ambiguous code notice */}
+            {data.isAmbiguousCode && data.availableSegments && (
+              <div className="mt-2 flex items-start gap-1.5 rounded bg-amber-50 border border-amber-200 px-2.5 py-1.5">
+                <AlertTriangle className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
+                <p className="text-xs text-amber-800">
+                  <span className="font-medium">Ambiguous code.</span>{" "}
+                  This catalogue number exists in{" "}
+                  {data.availableSegments.join(" and ")}. Showing {data.segment} history only.
+                  Register lookups require a segment to resolve correctly.
+                </p>
+              </div>
             )}
           </div>
         )}
@@ -237,7 +262,7 @@ export default function MrpContent() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [offset, setOffset] = useState(0);
-  const [historyCode, setHistoryCode] = useState<string | null>(null);
+  const [historyTarget, setHistoryTarget] = useState<HistoryTarget | null>(null);
 
   // Debounce search
   useEffect(() => {
@@ -309,9 +334,31 @@ export default function MrpContent() {
               <span className="font-semibold text-slate-900">{meta.codesWithRevision.toLocaleString("en-IN")}</span>{" "}
               with revision
             </span>
+            {meta.ambiguousCodes > 0 && (
+              <span
+                className="flex items-center gap-1 text-amber-700 font-medium"
+                title="Same catalogue number exists in multiple segments. Register lookups require a segment to resolve correctly."
+              >
+                <AlertTriangle className="h-3.5 w-3.5" />
+                {meta.ambiguousCodes} ambiguous
+              </span>
+            )}
           </div>
         )}
       </div>
+
+      {/* Ambiguous-code notice banner — shown when not filtered to a single segment */}
+      {meta && meta.ambiguousCodes > 0 && segment === ALL && (
+        <div className="bg-amber-50 border-b border-amber-200 px-6 py-2 flex items-start gap-2 text-xs text-amber-800">
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
+          <span>
+            <span className="font-medium">{meta.ambiguousCodes} catalogue numbers appear in two segments</span>{" "}
+            (e.g. CNS-15 exists in both PTMT and CP as different products).
+            Rows marked <span className="font-mono bg-amber-100 rounded px-1">⚠ Ambiguous</span> need
+            segment context to resolve correctly. Route to the price-list owner for master-data correction.
+          </span>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="bg-white border-b px-6 py-3 flex items-center gap-3 flex-wrap">
@@ -378,7 +425,7 @@ export default function MrpContent() {
   <BASE_URL>/api/admin/mrp/load | jq .`}
               </pre>
               <p className="text-xs text-slate-500">
-                This reads the 6 workbooks and populates mrp_master + mrp_history (~5 500 codes).
+                This reads the 6 workbooks and populates mrp_master + mrp_history (~5 700 codes).
               </p>
             </CardContent>
           </Card>
@@ -392,7 +439,7 @@ export default function MrpContent() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50">
-                  <TableHead className="w-[140px]">Code</TableHead>
+                  <TableHead className="w-[160px]">Code</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead className="w-[140px]">Segment</TableHead>
                   <TableHead className="w-[160px]">Series</TableHead>
@@ -413,61 +460,74 @@ export default function MrpContent() {
                       ))}
                     </TableRow>
                   ))}
-                {!isLoading && listData?.rows.map((row) => (
-                  <TableRow
-                    key={row.itemCode}
-                    className="hover:bg-slate-50 cursor-pointer"
-                    onClick={() => setHistoryCode(row.itemCode)}
-                  >
-                    <TableCell>
-                      <span className="font-mono text-xs font-medium text-slate-700">
-                        {row.itemCode}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-sm text-slate-600 line-clamp-2">
-                        {row.itemName ?? <span className="italic text-slate-400">—</span>}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <SegmentBadge segment={row.segment} />
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-xs text-slate-600">{row.series ?? "—"}</span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <span className="font-semibold text-slate-800">
-                        {fmt(row.currentMrp)}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-xs text-slate-500">
-                        {fmtDate(row.effectiveFrom)}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-center">
-                      {row.historyCount > 1 ? (
-                        <Badge variant="outline" className="text-xs">
-                          {row.historyCount}
-                        </Badge>
-                      ) : (
-                        <span className="text-xs text-slate-400">1</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setHistoryCode(row.itemCode);
-                        }}
-                        className="rounded p-1 hover:bg-slate-100 text-slate-400 hover:text-slate-600"
-                        title="View price history"
-                      >
-                        <History className="h-3.5 w-3.5" />
-                      </button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {!isLoading && listData?.rows.map((row) => {
+                  const rowKey = `${row.itemCode}|${row.segment}`;
+                  return (
+                    <TableRow
+                      key={rowKey}
+                      className={`hover:bg-slate-50 cursor-pointer ${
+                        row.isAmbiguousCode ? "bg-amber-50/40" : ""
+                      }`}
+                      onClick={() => setHistoryTarget({ code: row.itemCode, segment: row.segment })}
+                    >
+                      <TableCell>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-mono text-xs font-medium text-slate-700">
+                            {row.itemCode}
+                          </span>
+                          {row.isAmbiguousCode && (
+                            <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-amber-700 bg-amber-100 rounded px-1 py-0.5 w-fit">
+                              <AlertTriangle className="h-2.5 w-2.5" />
+                              Ambiguous
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm text-slate-600 line-clamp-2">
+                          {row.itemName ?? <span className="italic text-slate-400">—</span>}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <SegmentBadge segment={row.segment} />
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-xs text-slate-600">{row.series ?? "—"}</span>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <span className="font-semibold text-slate-800">
+                          {fmt(row.currentMrp)}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-xs text-slate-500">
+                          {fmtDate(row.effectiveFrom)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {row.historyCount > 1 ? (
+                          <Badge variant="outline" className="text-xs">
+                            {row.historyCount}
+                          </Badge>
+                        ) : (
+                          <span className="text-xs text-slate-400">1</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setHistoryTarget({ code: row.itemCode, segment: row.segment });
+                          }}
+                          className="rounded p-1 hover:bg-slate-100 text-slate-400 hover:text-slate-600"
+                          title="View price history"
+                        >
+                          <History className="h-3.5 w-3.5" />
+                        </button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
                 {!isLoading && listData?.rows.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={8} className="text-center text-slate-400 py-12">
@@ -514,9 +574,12 @@ export default function MrpContent() {
         </div>
       )}
 
-      {/* History panel */}
-      {historyCode && (
-        <HistoryPanel code={historyCode} onClose={() => setHistoryCode(null)} />
+      {/* History panel — always passes (code, segment) so the endpoint never needs to guess */}
+      {historyTarget && (
+        <HistoryPanel
+          target={historyTarget}
+          onClose={() => setHistoryTarget(null)}
+        />
       )}
     </div>
   );

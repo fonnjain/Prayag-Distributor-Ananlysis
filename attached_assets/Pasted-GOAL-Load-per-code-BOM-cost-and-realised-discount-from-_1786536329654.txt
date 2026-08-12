@@ -1,0 +1,76 @@
+GOAL
+Load per-code BOM cost and realised discount from the GP MARGIN workbooks.
+
+THIS ENDS A DOCUMENTED LIMITATION. Every deliverable in this project states
+"no product cost data is loaded, so margin cannot be computed anywhere in this
+application." That stops being true when this lands. Do not change any
+existing report in this task - just make the data available.
+
+SOURCE - 133 workbooks
+  GP MARGIN FY 25-26: 107 files, 8 segment folders, 13-14 files each
+  GP MARGIN FY 26-27:  26 files, 8 segment folders, 3 files each (Apr/May/Jun)
+Segments: CP, Garden Pipe, Hardware, PTMT, Plumbing, Sanitaryware, Sink,
+Waste Pipe & Connection.
+
+MONTHLY IS TRUTH. CUMULATIVE IS VALIDATION ONLY.
+Some files are cumulative - "( Apr To Oct 25-26)", "1st Qtr (25-26)". Loading
+these as months would double-count badly. Rules:
+  - Load ONLY monthly files into the fact table.
+  - Use cumulative files to CHECK the monthly sum. Report any month range
+    where monthly-sum and cumulative disagree by more than 1%.
+  - Detect cumulative files by content (a date range or "Qtr" in the name),
+    not by position. Print which files you classified as cumulative.
+
+Filenames are inconsistent - "Oct 25#U201326", "PTMT SALE GP MARGIN July
+25-26._.xlsx", mixed case. Parse the month from content where the filename is
+ambiguous, and report any file you could not classify.
+
+STRUCTURE - per segment tab (e.g. the PTMT tab), header on row 3:
+  S.NO | CODE | QTY | WEIGHT | TOTAL WEIGHT | MRP | Discount | AVG SALE |
+  BOM COST | Sale Value As P | Sale Value As P | Avg Sale Rate 2 |
+  Bom Cost 25-26 | Growth % New Bom | Growth % Avg Rate
+Row 2 above the header carries column totals - do not load it as data.
+
+Discount is a FRACTION (0.5353 = realised sale is 46.47% of MRP), not a
+percentage. Store as given and label it clearly.
+
+SCHEMA
+margin_fact
+  fy · month_label · segment · item_code
+  qty · weight · mrp · discount_frac
+  avg_sale · bom_cost
+  sale_value · bom_value
+  source_file · loaded_at
+Index on (fy, month_label, item_code) and (fy, segment).
+
+BOM COST IS FACTORY COST - confirmed by the business. Store it as bom_cost and
+label every derived figure as GROSS margin / contribution, never "profit".
+There is still no freight, overhead or SG&A in this data. A field that says
+"margin" without qualification will be read as profit and it is not.
+
+DO NOT
+- Do not change any existing report, ranking, or the scheme engine.
+- Do not touch sale_line.
+- Do not compute or display margin anywhere yet. This task loads data only.
+
+VERIFY - produced values, and a hash that resolves
+1. Files loaded, files classified cumulative and skipped, files unparseable.
+   Name every file in the last two groups.
+2. Row counts by FY and segment. Distinct item codes.
+3. VALIDATION: for each segment where a cumulative file exists, print the
+   monthly sum of qty and sale_value against the cumulative figure, and the
+   percentage difference. Flag anything above 1%.
+4. Company-level bom_cost% by segment for FY2025-26, weighted by sale value.
+   Against the SUMMARY tab of GP MARGIN MONTH ON MONTH SUMMARY, expect
+   approximately: PTMT 23.78, CP 60.53, Plumbing 67.85, Sink 67.27,
+   Garden Pipe 85.72, Sanitaryware 60.78. Print yours beside those and
+   explain any gap over 2 points.
+5. Coverage: distinct codes in margin_fact that also appear in sale_line
+   FY2025-26, as a count and as a percentage of FY2025-26 net. This tells us
+   how much of the business we can now compute margin on.
+6. Codes where bom_cost > avg_sale (negative contribution). Print the count
+   and the top 10 by quantity. These are either data errors or genuinely
+   loss-making lines - either is worth knowing.
+7. Confirm sale_line is unchanged.
+8. Commit hash, git cat-file -t, git merge-base --is-ancestor <hash> main
+   with exit code.

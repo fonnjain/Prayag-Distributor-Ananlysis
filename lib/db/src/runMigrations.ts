@@ -586,6 +586,61 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    id: "023_mrp_composite_key",
+    sql: `
+      -- Upgrade mrp_master PK from (item_code) to (item_code, segment).
+      --
+      -- Motivation: codes such as CNS-15 appear in both the PTMT and CP
+      -- catalogues as genuinely different products with independent price
+      -- histories. Keying on item_code alone caused two problems:
+      --   1. Only the first-seen segment's master row was stored (the other
+      --      was silently dropped).
+      --   2. mrp_history accumulated multiple is_current=TRUE rows for the
+      --      same item_code from different workbooks.
+      -- The composite key gives each (item_code, segment) pair its own master
+      -- row and its own clean history. is_ambiguous_code flags the codes that
+      -- appear in more than one segment so the UI and resolver can warn rather
+      -- than guess.
+      --
+      -- Drop in FK-dependency order (history first, then master).
+      DROP TABLE IF EXISTS mrp_history;
+      DROP TABLE IF EXISTS mrp_master;
+
+      -- mrp_master: composite PK (item_code, segment).
+      CREATE TABLE mrp_master (
+        item_code         TEXT    NOT NULL,
+        item_name         TEXT,
+        segment           TEXT    NOT NULL,
+        series            TEXT,
+        packing           TEXT,
+        is_ambiguous_code BOOLEAN NOT NULL DEFAULT FALSE,
+        PRIMARY KEY (item_code, segment)
+      );
+
+      -- mrp_history: FK references composite PK; segment stored for efficient
+      -- per-(code, segment) queries without joining back to mrp_master.
+      CREATE TABLE mrp_history (
+        id             SERIAL  PRIMARY KEY,
+        item_code      TEXT    NOT NULL,
+        segment        TEXT    NOT NULL,
+        mrp            NUMERIC NOT NULL,
+        effective_from DATE    NOT NULL,
+        effective_to   DATE,
+        source_file    TEXT    NOT NULL,
+        is_current     BOOLEAN NOT NULL DEFAULT TRUE,
+        FOREIGN KEY (item_code, segment)
+          REFERENCES mrp_master (item_code, segment)
+          ON DELETE CASCADE
+      );
+
+      CREATE INDEX mrp_history_item_seg_idx
+        ON mrp_history (item_code, segment);
+      CREATE INDEX mrp_history_current_idx
+        ON mrp_history (item_code, segment, is_current)
+        WHERE is_current = TRUE;
+    `,
+  },
+  {
     id: "019_rename_scheme_slab_to_reward_slab",
     sql: `
       -- Dev DBs that ran the original 017 have the NEW-shape table under the
