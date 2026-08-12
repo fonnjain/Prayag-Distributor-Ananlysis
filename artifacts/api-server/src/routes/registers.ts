@@ -48,6 +48,7 @@ import {
   resolveWaterTankRow,
   buildSapLookupMap,
 } from "../lib/registers/tankResolution.js";
+import { backfillSaleChannel } from "../lib/sap/backfillChannel.js";
 
 const router = Router();
 
@@ -380,7 +381,20 @@ router.post("/registers/:fy/replace-months", async (req, res) => {
     });
 
     const summary = await replaceOpenMonths({ fy, lines: resolvedLines, force, now: nowOverride });
-    res.json({ ...summary, rowsScanned, tabsRead });
+
+    // Channel backfill: run immediately after every manual replace so the
+    // NULL-channel gap never persists past this request.
+    const rowsWritten = summary.months.reduce((n, m) => n + (m.rowsWritten ?? 0), 0);
+    let channelBackfill: Awaited<ReturnType<typeof backfillSaleChannel>> | null = null;
+    if (rowsWritten > 0) {
+      try {
+        channelBackfill = await backfillSaleChannel([fy]);
+      } catch (bfErr) {
+        req.log.warn({ bfErr, fy }, "replace-months: channel backfill failed (non-fatal)");
+      }
+    }
+
+    res.json({ ...summary, rowsScanned, tabsRead, channelBackfill });
   } catch (err: unknown) {
     req.log.error({ err, fy }, "replace-months failed");
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });

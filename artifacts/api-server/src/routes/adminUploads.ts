@@ -357,11 +357,16 @@ router.post("/admin/schemes/load", async (req: Request, res: Response): Promise<
 // Idempotent: rows already having a non-null channel are left unchanged.
 // Reports resolved / stayed-NULL counts and confirms total row count is unchanged.
 //
+// The same backfill now runs automatically at the end of every open-FY Sheets
+// sync (registerSync.ts + routes/registers.ts), so this route is an ad-hoc
+// escape hatch only.
+//
 // Auth: X-Admin-Secret (same as other admin routes).
 // Body: { fys?: string[] }  — defaults to ["2026-27","2025-26"]
 import { pool } from "@workspace/db";
-import { getRateListMaps, matchCustomer } from "../lib/sap/rateList.js";
+import { backfillSaleChannel } from "../lib/sap/backfillChannel.js";
 import { normalizeChannel } from "../lib/sap/derive.js";
+import { getRateListMaps } from "../lib/sap/rateList.js";
 
 router.post(
   "/admin/backfill-sale-channel",
@@ -388,52 +393,10 @@ router.post(
       const beforeRows = parseInt(before.rows[0].total_rows, 10);
       const beforeNet = parseFloat(before.rows[0].total_net ?? "0");
 
-      // 2. Load rate-list customer map
-      const maps = await getRateListMaps();
+      // 2. Run shared backfill (loads rate list, resolves, batch-updates).
+      const backfill = await backfillSaleChannel(fys);
 
-      // 3. Fetch distinct customers that still have NULL channel for these FYs
-      const { rows: nullRows } = await pool.query<{ customer: string }>(
-        `SELECT DISTINCT customer FROM sale_line_all
-         WHERE fy = ANY($1::text[]) AND channel IS NULL AND customer IS NOT NULL`,
-        [fys],
-      );
-
-      let resolved = 0;
-      let unmapped = 0;
-      const BATCH = 500;
-
-      // 4. Resolve each distinct customer and batch-UPDATE
-      const updates: { channel: string; customer: string }[] = [];
-      for (const { customer } of nullRows) {
-        const info = matchCustomer(customer, maps);
-        const ch = normalizeChannel(info?.channel ?? null);
-        if (ch !== null) {
-          updates.push({ channel: ch, customer });
-          resolved++;
-        } else {
-          unmapped++;
-        }
-      }
-
-      for (let i = 0; i < updates.length; i += BATCH) {
-        const batch = updates.slice(i, i + BATCH);
-        // Build a VALUES list for a single UPDATE … FROM (VALUES …) statement
-        const vals = batch
-          .map((_, j) => `($${j * 2 + 1}, $${j * 2 + 2}::text)`)
-          .join(", ");
-        const params: string[] = batch.flatMap(({ customer, channel }) => [customer, channel]);
-        await pool.query(
-          `UPDATE sale_line_all AS sl
-           SET channel = v.channel
-           FROM (VALUES ${vals}) AS v(customer, channel)
-           WHERE sl.customer = v.customer
-             AND sl.fy = ANY($${params.length + 1}::text[])
-             AND sl.channel IS NULL`,
-          [...params, fys],
-        );
-      }
-
-      // 5. Verify totals unchanged
+      // 3. Verify totals unchanged
       const after = await pool.query<{ total_rows: string; total_net: string }>(
         `SELECT COUNT(*) AS total_rows, SUM(amount::numeric) AS total_net
          FROM sale_line_all WHERE fy = ANY($1::text[])`,
@@ -460,7 +423,7 @@ router.post(
         return;
       }
 
-      // 6. Channel distribution after backfill
+      // 4. Channel distribution after backfill
       const { rows: dist } = await pool.query<{ channel: string | null; cnt: string }>(
         `SELECT channel, COUNT(*) AS cnt
          FROM sale_line_all WHERE fy = ANY($1::text[])
@@ -468,7 +431,7 @@ router.post(
         [fys],
       );
 
-      // 7. Cross-check: head_canon non-territory vs channel non-Retail
+      // 5. Cross-check: head_canon non-territory vs channel non-Retail
       const { rows: cc } = await pool.query<{ head_count: string; channel_count: string }>(
         `SELECT
            COUNT(*) FILTER (WHERE head_canon = 'Non-territory / Project / Govt') AS head_count,
@@ -478,7 +441,8 @@ router.post(
         [fys],
       );
 
-      // 8. Rate-list map counts per channel
+      // 6. Rate-list map counts per channel (for diagnostic transparency)
+      const maps = await getRateListMaps();
       const channelMapCounts: Record<string, number> = {};
       for (const info of maps.customers.values()) {
         const ch = normalizeChannel(info.channel) ?? "NULL";
@@ -491,9 +455,10 @@ router.post(
         afterRows,
         beforeNet: Math.round(beforeNet),
         afterNet: Math.round(afterNet),
-        distinctCustomersProcessed: nullRows.length,
-        resolvedToChannel: resolved,
-        stayedNull: unmapped,
+        distinctCustomersProcessed: backfill.distinctNullCustomers,
+        resolvedToChannel: backfill.resolved,
+        stayedNull: backfill.residualCount,
+        residualCustomers: backfill.residualCustomers,
         channelDistribution: dist.map((r) => ({ channel: r.channel, count: parseInt(r.cnt, 10) })),
         crossCheck: {
           headNonTerritoryCount: parseInt(cc[0].head_count, 10),

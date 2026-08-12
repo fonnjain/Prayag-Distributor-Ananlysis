@@ -30,6 +30,7 @@ import {
   assertUnmappedEmpty,
 } from "../registers/ingest.js";
 import { replaceOpenMonths, assertMonthAnchors } from "../registers/monthlyReplace.js";
+import { backfillSaleChannel } from "../sap/backfillChannel.js";
 import {
   resolveWaterTankRow,
   buildSapLookupMap,
@@ -425,6 +426,20 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
 
     const inserted = replaceSummary.months.reduce((n, m) => n + (m.rowsWritten ?? 0), 0);
     const aborted = replaceSummary.months.filter((m) => m.action === "aborted-short-read" || m.action === "failed");
+
+    // ── Step 3b: channel backfill ─────────────────────────────────────────────
+    // The Sheets ingest always writes channel = NULL (the register carries no
+    // rate-list data). Backfill runs here, immediately after every replace that
+    // wrote at least one row, so the NULL-channel window is bounded to the
+    // duration of one sync run rather than requiring a manual admin call.
+    //
+    // Assertion: any residual NULL-channel customers (genuinely absent from
+    // Sheet2) are named in the WARN log so the rate-list team can add them.
+    if (inserted > 0) {
+      await backfillSaleChannel([fy]).catch((err: unknown) =>
+        logger.warn({ fy, err }, "register sync: channel backfill failed (non-fatal — channel stays NULL until next run)"),
+      );
+    }
     const incomingCountByFyMonth = new Map<string, number>();
     for (const m of replaceSummary.months) {
       incomingCountByFyMonth.set(`${fy}|${m.month}`, m.sheetRows);
