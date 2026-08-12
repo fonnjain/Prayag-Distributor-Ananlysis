@@ -14,7 +14,7 @@ import ExcelJS from "exceljs";
 import { ensureSeeded } from "../lib/dashboard/sync.js";
 import { respondIfQuotaError } from "../lib/quotaResponse.js";
 import { parseJsonArray } from "./companyReports.js";
-import { normHead, normState } from "../lib/reportFilterVocab.js";
+import { normHead, normState, displayHead, displayState } from "../lib/reportFilterVocab.js";
 import type { ByState, HeadRetail, TopRetailer } from "../lib/dashboard/transform.js";
 
 const router = Router();
@@ -88,13 +88,16 @@ export function filterRegional(
     (r) => !retailerStateSet || retailerStateSet.has(normState(r.state)),
   );
 
+  // Apply display normalisation: filtering above uses raw names so normHead /
+  // normState matching works correctly; the payload returned to the UI uses
+  // canonical readable names (Sandeep Dadheech, West Bengal, …).
   return {
     filtered,
     headsFullTerritory: Boolean(stateSet),
     syncedAt,
-    byState,
-    headsRetail,
-    topRetailers,
+    byState: byState.map((r) => ({ ...r, state: displayState(r.state), head: displayHead(r.head) })),
+    headsRetail: headsRetail.map((h) => ({ ...h, head: displayHead(h.head) })),
+    topRetailers: topRetailers.map((r) => ({ ...r, state: displayState(r.state) })),
   };
 }
 
