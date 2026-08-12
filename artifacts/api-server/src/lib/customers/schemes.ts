@@ -1,6 +1,6 @@
 // Configurable Scheme Engine — CRUD + tracking helpers for /customers/schemes.
 //
-// The old generic scheme_def / scheme_slab tables (integer PKs) have been
+// The old generic scheme_def / scheme_reward_slab tables (integer PKs) have been
 // replaced by the new five-table scheme model (migration 017). Schemes now
 // have stable text PKs (e.g. "CP_LALAN"). The CRUD routes use these helpers.
 //
@@ -63,7 +63,7 @@ export async function listSchemes(): Promise<Array<SchemeDef & { slabs: SchemeSl
       id: number; scheme_id: string; slab_order: number; threshold_from: string;
       threshold_to: string | null; unit: string; rate: string | null; alt_reward: string | null;
       free_goods: string | null; reward_status: string; raw_text: string | null;
-    }>(`SELECT * FROM scheme_slab ORDER BY scheme_id, slab_order`),
+    }>(`SELECT * FROM scheme_reward_slab ORDER BY scheme_id, slab_order`),
   ]);
 
   const slabsByScheme = new Map<string, SchemeSlab[]>();

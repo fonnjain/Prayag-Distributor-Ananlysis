@@ -34,4 +34,12 @@ export * from "./orgStateHeads";
 export * from "./secondarySkuRegister";
 export * from "./routePayloadSnapshot";
 export * from "./distributorIdentity";
-export * from "./schemes";
+// NOTE: schemes.ts is intentionally NOT exported from this index.
+// All five scheme tables (scheme, scheme_reward_slab, territory_group,
+// scheme_item_group, special_pricing) are managed exclusively by
+// migration 017 in runMigrations.ts using raw SQL, in the correct
+// FK-dependency order.  Exporting them here would cause Replit's
+// deployment provision step to diff them against production and
+// generate a failing migration (it does not respect tablesFilter
+// in drizzle.config.ts).  The tablesFilter entries remain as
+// documentation but are not relied upon for correctness.

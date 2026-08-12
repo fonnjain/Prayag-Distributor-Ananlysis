@@ -2,12 +2,12 @@
 //
 // Five tables:
 //   scheme           — one row per distinct scheme block from the workbook
-//   scheme_slab      — ordered slab tiers for each scheme
+//   scheme_reward_slab      — ordered slab tiers for each scheme
 //   territory_group  — territory-group label → constituent states
 //   scheme_item_group— basket map: item_group → scheme_id (can be M:M)
 //   special_pricing  — customer-specific net billing rates (not scheme tables)
 //
-// Migration 017 drops the old scheme_def / scheme_slab tables (old generic
+// Migration 017 drops the old scheme_def / scheme_reward_slab tables (old generic
 // schema) and creates these five tables.
 
 import {
@@ -64,10 +64,10 @@ export const scheme = pgTable("scheme", {
   fundingNote: text("funding_note"),
 });
 
-// ── scheme_slab ───────────────────────────────────────────────────────────────
+// ── scheme_reward_slab ───────────────────────────────────────────────────────────────
 
 export const schemeSlab = pgTable(
-  "scheme_slab",
+  "scheme_reward_slab",
   {
     id: serial("id").primaryKey(),
     schemeId: text("scheme_id")
@@ -110,7 +110,7 @@ export const schemeSlab = pgTable(
     /** Verbatim text from the workbook cell (for audit). */
     rawText: text("raw_text"),
   },
-  (t) => [index("scheme_slab_scheme_order_idx").on(t.schemeId, t.slabOrder)],
+  (t) => [index("scheme_reward_slab_scheme_order_idx").on(t.schemeId, t.slabOrder)],
 );
 
 // ── territory_group ───────────────────────────────────────────────────────────

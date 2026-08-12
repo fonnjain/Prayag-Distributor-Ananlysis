@@ -142,7 +142,7 @@ router.get("/schemes/master", async (_req, res) => {
   try {
     const [schemesRes, slabsRes, territoryRes, itemGroupRes, specialRes] = await Promise.all([
       pool.query(`SELECT * FROM scheme ORDER BY scheme_id`),
-      pool.query(`SELECT * FROM scheme_slab ORDER BY scheme_id, slab_order`),
+      pool.query(`SELECT * FROM scheme_reward_slab ORDER BY scheme_id, slab_order`),
       pool.query(`SELECT * FROM territory_group ORDER BY group_raw`),
       pool.query(`SELECT * FROM scheme_item_group ORDER BY item_group, scheme_id`),
       pool.query(`SELECT * FROM special_pricing ORDER BY customer_name`),

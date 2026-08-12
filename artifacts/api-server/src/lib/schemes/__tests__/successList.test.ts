@@ -59,7 +59,7 @@ beforeAll(async () => {
     )
   `);
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS ${SCHEMA}.scheme_slab (
+    CREATE TABLE IF NOT EXISTS ${SCHEMA}.scheme_reward_slab (
       scheme_id TEXT, slab_order INT, threshold_from NUMERIC,
       threshold_to NUMERIC, unit TEXT, rate NUMERIC, alt_reward TEXT,
       free_goods TEXT, reward_status TEXT DEFAULT 'ok', raw_text TEXT
@@ -103,7 +103,7 @@ beforeAll(async () => {
   // ── Cleanup leftovers ─────────────────────────────────────────────────────
   await pool.query(`DELETE FROM ${SCHEMA}.sale_line_current WHERE fy = $1`, [TEST_FY]);
   for (const sid of [SCHEME_SUB, SCHEME_DIST]) {
-    await pool.query(`DELETE FROM ${SCHEMA}.scheme_slab        WHERE scheme_id = $1`, [sid]);
+    await pool.query(`DELETE FROM ${SCHEMA}.scheme_reward_slab        WHERE scheme_id = $1`, [sid]);
     await pool.query(`DELETE FROM ${SCHEMA}.scheme_item_group  WHERE scheme_id = $1`, [sid]);
     await pool.query(`DELETE FROM ${SCHEMA}.scheme             WHERE scheme_id = $1`, [sid]);
   }
@@ -125,7 +125,7 @@ beforeAll(async () => {
             'cumulative_value', $2, '1998-07-01', '1998-09-30')
   `, [SCHEME_SUB, TERR_GROUP]);
   await pool.query(`
-    INSERT INTO ${SCHEMA}.scheme_slab (scheme_id, slab_order, threshold_from, rate, reward_status)
+    INSERT INTO ${SCHEMA}.scheme_reward_slab (scheme_id, slab_order, threshold_from, rate, reward_status)
     VALUES ($1, 1, $2, $3, 'ok'),
            ($1, 2, $4, 0.05, 'ok')
   `, [SCHEME_SUB, SLAB1_THRESH, SLAB1_RATE, SLAB2_THRESH]);
@@ -143,7 +143,7 @@ beforeAll(async () => {
             'cumulative_value', $2, '1998-07-01', '1998-09-30')
   `, [SCHEME_DIST, TERR_GROUP]);
   await pool.query(`
-    INSERT INTO ${SCHEMA}.scheme_slab (scheme_id, slab_order, threshold_from, rate, reward_status)
+    INSERT INTO ${SCHEMA}.scheme_reward_slab (scheme_id, slab_order, threshold_from, rate, reward_status)
     VALUES ($1, 1, $2, $3, 'ok'),
            ($1, 2, $4, 0.05, 'ok')
   `, [SCHEME_DIST, SLAB1_THRESH, SLAB1_RATE, SLAB2_THRESH]);
@@ -190,7 +190,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await pool.query(`DELETE FROM ${SCHEMA}.sale_line_current WHERE fy = $1`, [TEST_FY]);
   for (const sid of [SCHEME_SUB, SCHEME_DIST]) {
-    await pool.query(`DELETE FROM ${SCHEMA}.scheme_slab        WHERE scheme_id = $1`, [sid]);
+    await pool.query(`DELETE FROM ${SCHEMA}.scheme_reward_slab        WHERE scheme_id = $1`, [sid]);
     await pool.query(`DELETE FROM ${SCHEMA}.scheme_item_group  WHERE scheme_id = $1`, [sid]);
     await pool.query(`DELETE FROM ${SCHEMA}.scheme             WHERE scheme_id = $1`, [sid]);
   }

@@ -32,5 +32,6 @@ export default defineConfig({
     "!territory_group",
     "!scheme_item_group",
     "!special_pricing",
+    "!scheme_reward_slab",
   ],
 });

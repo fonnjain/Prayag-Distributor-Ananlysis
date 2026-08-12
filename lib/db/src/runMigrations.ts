@@ -459,8 +459,11 @@ const MIGRATIONS: Migration[] = [
         funding_note          TEXT
       );
 
-      -- ── scheme_slab ───────────────────────────────────────────────────────
-      CREATE TABLE IF NOT EXISTS scheme_slab (
+      -- ── scheme_reward_slab ───────────────────────────────────────────────
+      -- Named differently from the legacy scheme_slab on purpose: the publish
+      -- diff must see DROP old + CREATE new, never an in-place ALTER of a
+      -- same-named table with an incompatible shape.
+      CREATE TABLE IF NOT EXISTS scheme_reward_slab (
         id              SERIAL      PRIMARY KEY,
         scheme_id       TEXT        NOT NULL REFERENCES scheme (scheme_id) ON DELETE CASCADE,
         slab_order      INTEGER     NOT NULL,
@@ -473,8 +476,8 @@ const MIGRATIONS: Migration[] = [
         reward_status   TEXT        NOT NULL DEFAULT 'ok',
         raw_text        TEXT
       );
-      CREATE INDEX IF NOT EXISTS scheme_slab_scheme_order_idx
-        ON scheme_slab (scheme_id, slab_order);
+      CREATE INDEX IF NOT EXISTS scheme_reward_slab_scheme_order_idx
+        ON scheme_reward_slab (scheme_id, slab_order);
 
       -- ── scheme_item_group ─────────────────────────────────────────────────
       CREATE TABLE IF NOT EXISTS scheme_item_group (
@@ -494,6 +497,27 @@ const MIGRATIONS: Migration[] = [
         note            TEXT,
         rate_rows       JSONB   NOT NULL
       );
+    `,
+  },
+  {
+    id: "019_rename_scheme_slab_to_reward_slab",
+    sql: `
+      -- Dev DBs that ran the original 017 have the NEW-shape table under the
+      -- legacy name scheme_slab. Rename it (preserving seeded slab data) so
+      -- dev and prod converge on scheme_reward_slab. Idempotent: no-op when
+      -- the rename already happened or 017 created the new name directly.
+      DO $do$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.tables
+                   WHERE table_schema = 'public' AND table_name = 'scheme_slab')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.tables
+                   WHERE table_schema = 'public' AND table_name = 'scheme_reward_slab') THEN
+          ALTER TABLE scheme_slab RENAME TO scheme_reward_slab;
+          ALTER INDEX IF EXISTS scheme_slab_scheme_order_idx
+            RENAME TO scheme_reward_slab_scheme_order_idx;
+        END IF;
+      END
+      $do$;
     `,
   },
 ];

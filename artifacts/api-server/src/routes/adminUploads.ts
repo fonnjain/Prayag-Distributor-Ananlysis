@@ -274,7 +274,7 @@ router.post("/admin/schemes/load", async (req: Request, res: Response): Promise<
     await client.query("BEGIN");
 
     // Truncate in FK-safe order (children first)
-    await client.query("TRUNCATE scheme_item_group, special_pricing, scheme_slab, scheme, territory_group CASCADE");
+    await client.query("TRUNCATE scheme_item_group, special_pricing, scheme_reward_slab, scheme, territory_group CASCADE");
 
     // Insert territory groups
     for (const tg of TERRITORY_GROUPS) {
@@ -303,7 +303,7 @@ router.post("/admin/schemes/load", async (req: Request, res: Response): Promise<
     // Insert slabs
     for (const sl of SCHEME_SLABS) {
       await client.query(
-        `INSERT INTO scheme_slab
+        `INSERT INTO scheme_reward_slab
            (scheme_id, slab_order, threshold_from, threshold_to, unit,
             rate, alt_reward, free_goods, reward_status, raw_text)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,

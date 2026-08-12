@@ -189,7 +189,7 @@ async function loadSchemesFromDb(): Promise<{
         ss.alt_reward,
         ss.reward_status
       FROM scheme s
-      JOIN scheme_slab ss ON ss.scheme_id = s.scheme_id
+      JOIN scheme_reward_slab ss ON ss.scheme_id = s.scheme_id
       WHERE s.qualification_basis = 'cumulative_value'
         AND ss.reward_status != 'needs_clarification'
       ORDER BY s.scheme_id, ss.slab_order
@@ -703,7 +703,7 @@ export async function computeAnnualTracker(
     }>(`
       SELECT s.scheme_id, ss.threshold_from::text, ss.rate::text, ss.slab_order
       FROM scheme s
-      JOIN scheme_slab ss ON ss.scheme_id = s.scheme_id
+      JOIN scheme_reward_slab ss ON ss.scheme_id = s.scheme_id
       WHERE s.qualification_basis = 'cumulative_value'
         AND s.period_to IS NOT NULL
         AND (s.period_to::date - s.period_from::date) > 180

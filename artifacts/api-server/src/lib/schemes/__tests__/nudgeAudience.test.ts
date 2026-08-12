@@ -6,13 +6,13 @@
 // DOES appear and receives a nudge.
 //
 // DB setup:
-//  - Temp tables for scheme, scheme_slab, territory_group, scheme_item_group
+//  - Temp tables for scheme, scheme_reward_slab, territory_group, scheme_item_group
 //    in the dashboard_test schema
 //  - Temp sale_line_current table (one distributor row, one retailer row, same
 //    amount and item_group so both would qualify if audience were ignored)
 //  - distributor_identity row for the distributor customer's norm_key
 //
-// The test does NOT create a `scheme_def` or `scheme_slab` with old-style
+// The test does NOT create a `scheme_def` or `scheme_reward_slab` with old-style
 // integer PKs — only the new text-PK scheme tables.
 import { afterAll, beforeAll, describe, it, expect } from "vitest";
 import { pool } from "@workspace/db";
@@ -57,7 +57,7 @@ beforeAll(async () => {
     )
   `);
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS ${SCHEMA}.scheme_slab (
+    CREATE TABLE IF NOT EXISTS ${SCHEMA}.scheme_reward_slab (
       scheme_id      TEXT,
       slab_order     INT,
       threshold_from NUMERIC,
@@ -130,7 +130,7 @@ beforeAll(async () => {
 
   // ── Clean up leftovers ────────────────────────────────────────────────────
   await pool.query(`DELETE FROM ${SCHEMA}.sale_line_current WHERE fy = $1`, [TEST_FY]);
-  await pool.query(`DELETE FROM ${SCHEMA}.scheme_slab WHERE scheme_id = $1`, [SCHEME_ID]);
+  await pool.query(`DELETE FROM ${SCHEMA}.scheme_reward_slab WHERE scheme_id = $1`, [SCHEME_ID]);
   await pool.query(`DELETE FROM ${SCHEMA}.scheme_item_group WHERE scheme_id = $1`, [SCHEME_ID]);
   await pool.query(`DELETE FROM ${SCHEMA}.territory_group WHERE group_raw = $1`, [TERR_GROUP]);
   await pool.query(`DELETE FROM ${SCHEMA}.scheme WHERE scheme_id = $1`, [SCHEME_ID]);
@@ -145,7 +145,7 @@ beforeAll(async () => {
             $2, '1999-04-01', '1999-06-30')
   `, [SCHEME_ID, TERR_GROUP]);
   await pool.query(`
-    INSERT INTO ${SCHEMA}.scheme_slab (scheme_id, slab_order, threshold_from, rate, reward_status)
+    INSERT INTO ${SCHEMA}.scheme_reward_slab (scheme_id, slab_order, threshold_from, rate, reward_status)
     VALUES ($1, 1, 500000, 0.03, 'ok'),
            ($1, 2, 1000000, 0.05, 'ok')
   `, [SCHEME_ID]);
@@ -186,7 +186,7 @@ beforeAll(async () => {
 afterAll(async () => {
   // Clean up test rows (don't drop sale_line_current — it's shared with other tests)
   await pool.query(`DELETE FROM ${SCHEMA}.sale_line_current WHERE fy = $1`, [TEST_FY]);
-  await pool.query(`DELETE FROM ${SCHEMA}.scheme_slab WHERE scheme_id = $1`, [SCHEME_ID]);
+  await pool.query(`DELETE FROM ${SCHEMA}.scheme_reward_slab WHERE scheme_id = $1`, [SCHEME_ID]);
   await pool.query(`DELETE FROM ${SCHEMA}.scheme_item_group WHERE scheme_id = $1`, [SCHEME_ID]);
   await pool.query(`DELETE FROM ${SCHEMA}.territory_group WHERE group_raw = $1`, [TERR_GROUP]);
   await pool.query(`DELETE FROM ${SCHEMA}.scheme WHERE scheme_id = $1`, [SCHEME_ID]);

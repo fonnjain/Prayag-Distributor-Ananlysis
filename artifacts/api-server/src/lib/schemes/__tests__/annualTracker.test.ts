@@ -8,7 +8,7 @@
 //  5. Dual audience (direct_dealer + sub_dealer): no customer-type restriction
 //  6. Returns empty array when completeMonths is []
 //
-// All required tables (scheme, scheme_slab, territory_group, scheme_item_group,
+// All required tables (scheme, scheme_reward_slab, territory_group, scheme_item_group,
 // sale_line_all) are created in the dashboard_test schema (via the search_path
 // set by setup-db.ts) so queries from computeAnnualTracker resolve there.
 // Tables are dropped in afterAll to leave no residue.
@@ -64,7 +64,7 @@ beforeAll(async () => {
     )
   `);
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS ${SCHEMA}.scheme_slab (
+    CREATE TABLE IF NOT EXISTS ${SCHEMA}.scheme_reward_slab (
       scheme_id      TEXT,
       slab_order     INT,
       threshold_from NUMERIC,
@@ -93,7 +93,7 @@ beforeAll(async () => {
 
   // ── Clean up any leftover rows from a previous interrupted run ────────────
   await pool.query(`DELETE FROM ${SCHEMA}.sale_line_all WHERE fy = $1`, [TEST_FY]);
-  await pool.query(`DELETE FROM ${SCHEMA}.scheme_slab WHERE scheme_id = 'ANNUAL_WB'`);
+  await pool.query(`DELETE FROM ${SCHEMA}.scheme_reward_slab WHERE scheme_id = 'ANNUAL_WB'`);
   await pool.query(`DELETE FROM ${SCHEMA}.scheme_item_group WHERE scheme_id = 'ANNUAL_WB'`);
   await pool.query(`DELETE FROM ${SCHEMA}.territory_group WHERE group_raw = 'WB_TEST_GROUP'`);
   await pool.query(`DELETE FROM ${SCHEMA}.scheme WHERE scheme_id = 'ANNUAL_WB'`);
@@ -115,7 +115,7 @@ beforeAll(async () => {
     )
   `);
   await pool.query(`
-    INSERT INTO ${SCHEMA}.scheme_slab (scheme_id, slab_order, threshold_from, rate, reward_status)
+    INSERT INTO ${SCHEMA}.scheme_reward_slab (scheme_id, slab_order, threshold_from, rate, reward_status)
     VALUES
       ('ANNUAL_WB', 1, $1, 0.04, 'ok'),
       ('ANNUAL_WB', 2, 1500000, 0.06, 'ok')
@@ -153,7 +153,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await pool.query(`DELETE FROM ${SCHEMA}.sale_line_all WHERE fy = $1`, [TEST_FY]);
-  await pool.query(`DELETE FROM ${SCHEMA}.scheme_slab WHERE scheme_id = 'ANNUAL_WB'`);
+  await pool.query(`DELETE FROM ${SCHEMA}.scheme_reward_slab WHERE scheme_id = 'ANNUAL_WB'`);
   await pool.query(`DELETE FROM ${SCHEMA}.scheme_item_group WHERE scheme_id = 'ANNUAL_WB'`);
   await pool.query(`DELETE FROM ${SCHEMA}.territory_group WHERE group_raw = 'WB_TEST_GROUP'`);
   await pool.query(`DELETE FROM ${SCHEMA}.scheme WHERE scheme_id = 'ANNUAL_WB'`);
