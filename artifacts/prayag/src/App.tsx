@@ -8,6 +8,7 @@ import Dashboard, { AREA_IDS } from "@/pages/Dashboard";
 import SalesPage from "@/pages/SalesPage";
 import CustomersPage from "@/pages/CustomersPage";
 import SkuPage from "@/pages/SkuPage";
+import MrpPage from "@/pages/MrpPage";
 import DevPortalPage from "@/pages/DevPortalPage";
 import DevApiKeysPage from "@/pages/DevApiKeysPage";
 import DevMastersPage from "@/pages/DevMastersPage";
@@ -33,6 +34,8 @@ function Router() {
         <Route path="/sales" component={SalesPage} />
         {/* SKU Deep Dive */}
         <Route path="/sku" component={SkuPage} />
+        {/* MRP Master */}
+        <Route path="/mrp" component={MrpPage} />
         {/* Customer Performance */}
         <Route path="/customers/:section" component={CustomersPage} />
         <Route path="/customers" component={CustomersPage} />

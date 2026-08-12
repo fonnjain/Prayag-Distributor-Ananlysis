@@ -1,0 +1,80 @@
+GOAL
+Build the MRP master in Distributor Analysis. This app becomes the single
+source of truth for Prayag MRP. The Competition Analysis app currently holds
+its own mrp_price_history (150 codes) - it will read from us later, in a
+separate task. Do NOT read MRP from the competition app.
+
+SOURCE - 6 workbooks, one per segment, each with a "w.e.f." date in the
+filename:
+  PTMT MRP w.e.f. List as on 05th March, 2026.xlsx
+  New CP MRP w.e.f. 01st Aug, 2026.xlsx
+  SANITARYWARE NEW MRP w.e.f. 01st May, 2026.xlsx
+  MRP w.e.f. 01st Feb, 2026 Pipe & Fitting.xlsx
+  NEW HARDWARE Price List as on 01st Mar, 2026.xlsx
+  MRP w.e.f. 15th Feb, 2024 QUAA & FERN.xlsx
+
+The PTMT workbook has a MASTER tab with columns:
+  TYPE | SERIES | CAT No. | NAME | OLD MRP | NEW MRP | PACKING
+Other workbooks vary - inspect each and report the tab and column layout you
+found rather than assuming they match.
+
+SCHEMA - effective-dated, append-only
+mrp_master
+  item_code          normalised, the join key to sale_line
+  item_name
+  segment            canonical (PTMT, CP, Sanitaryware, ...)
+  series             e.g. Allied, Quadra, Delta, Ibix, Ovian, Novo
+  packing            nullable
+mrp_history
+  item_code
+  mrp
+  effective_from     from the workbook's w.e.f. date
+  effective_to       NULL for current; set when superseded
+  source_file
+  is_current
+
+THE OLD MRP / NEW MRP PAIR IS A REVISION, NOT TWO COLUMNS.
+Each row gives you two history entries: OLD MRP with effective_to = the w.e.f.
+date, NEW MRP with effective_from = the w.e.f. date. Load both. That gives one
+prior revision free, which is what makes a June sale valuable against June's
+MRP rather than today's.
+
+Where OLD MRP is blank or equals NEW MRP, write only the current row.
+
+CODE NORMALISATION - reuse what exists
+The register writes codes differently from the masters. The product-master
+resolver already handles this. Apply the SAME rules in this order:
+  1. exact match
+  2. strip a leading "P" before an all-digit code  (P6818 -> 6818)
+  3. strip a trailing colour letter after an optional space or hyphen
+     (7118-B -> 7118, 4011B, 4303 J)
+  4. collapse internal whitespace  (Q724MB -> Q724 MB)
+Exact must run first - 130-B, 141-E, 121-E are legitimate codes that would
+break under rule 3.
+
+Note the MASTER tab uses "CNS-15", "146-Q" style codes while the register uses
+"4018", "PTA-55". Report the match rate and do not silently drop unmatched
+codes.
+
+PAGE
+New MRP page. Per item: code, name, segment, series, current MRP, effective
+from, and the revision history. Filter by segment and series. Show the count
+of codes with no MRP and the count of MRP rows that match no register code -
+both gaps are findings, not errors to hide.
+
+VERIFY - produced values, and a hash that resolves
+1. Rows loaded per workbook, and per segment. Print the tab and column layout
+   you found in each of the 6 files.
+2. Distinct item codes in mrp_master, and how many have more than one
+   history row.
+3. Match rate against sale_line FY2026-27 distinct codes: resolved exact, by
+   P-strip, by colour-suffix, by whitespace, and UNRESOLVED. Print the top 10
+   unresolved prefixes with counts.
+4. Count of codes now carrying an MRP that previously had none, and the
+   FY2026-27 net those codes represent. This sizes the gap this closes.
+5. Pick 3 codes with an OLD/NEW pair and print their full history rows,
+   confirming effective_to on the old row equals effective_from on the new.
+6. Confirm sale_line row count and net are UNCHANGED. This task adds tables;
+   it must not touch the register.
+7. Commit hash, git cat-file -t, git merge-base --is-ancestor <hash> main
+   with exit code.

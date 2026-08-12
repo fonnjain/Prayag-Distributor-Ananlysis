@@ -42,6 +42,7 @@ import graphRouter from "./graph";
 import warningsRouter from "./warnings";
 import orgRouter from "./org";
 import skuRouter from "./sku";
+import mrpRouter from "./mrp";
 
 const router: IRouter = Router();
 
@@ -88,5 +89,6 @@ router.use(graphRouter);
 router.use(warningsRouter);
 router.use(orgRouter);
 router.use(skuRouter);
+router.use(mrpRouter);
 
 export default router;

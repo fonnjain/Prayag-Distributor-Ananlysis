@@ -18,7 +18,7 @@ import {
   ClipboardList, Database, ShieldCheck,
   LayoutDashboard, Users, ShoppingBag,
   AlertTriangle, UserMinus, Settings, Store, BookOpen, Network,
-  ChevronDown, ChevronRight, Menu, X, Sun, Moon, Braces, Key, Layers,
+  ChevronDown, ChevronRight, Menu, X, Sun, Moon, Braces, Key, Layers, IndianRupee,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -74,6 +74,7 @@ const NAV: NavGroup[] = [
       { id: "deep-dive",              label: "Sales Deep Dive",        path: "/sales/deep-dive",              icon: BookOpen },
       { id: "distributor-deep-dive",  label: "Distributor Deep Dive",  path: "/sales/distributor-deep-dive",  icon: Network  },
       { id: "sku-deep-dive",          label: "SKU Deep Dive",          path: "/sku",                          icon: Layers   },
+      { id: "mrp",                    label: "MRP Master",             path: "/mrp",                          icon: IndianRupee },
     ],
   },
   {
@@ -109,6 +110,9 @@ function activeIds(location: string): { groupId: string; itemId: string } {
   }
   if (location === "/sku" || location.startsWith("/sku/")) {
     return { groupId: "sales", itemId: "sku-deep-dive" };
+  }
+  if (location === "/mrp") {
+    return { groupId: "sales", itemId: "mrp" };
   }
   if (location.startsWith("/customers")) {
     const slug = location.replace(/^\/customers\/?/, "").split("?")[0];

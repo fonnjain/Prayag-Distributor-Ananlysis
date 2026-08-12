@@ -119,3 +119,4 @@
 - [Prod master-load routes](prod-master-loads.md) — prod DB read-only from workspace; loads run in-app via X-Admin-Secret routes + advisory locks; NOT NULL-with-default columns must never get explicit NULL.
 - [PII attached_assets trap](pii-attached-assets.md) — never `git add -A` with uploads present; PII CSVs were purged once (users list etc.); attached_assets/*.csv is gitignored — keep it that way.
 - [aiGrowthReport merge corruption](aigrowth-merge-corruption.md) — merges keep pasting SQL-branch vars into the deepDive ACTIVATE/WIDEN loops; typecheck after any merge touching that route.
+- [MRP Master pipeline](mrp-master.md) — migration 022; 6-workbook loader; 5,694 codes; 9,211 history rows; admin POST load route; /mrp page under SALES nav.

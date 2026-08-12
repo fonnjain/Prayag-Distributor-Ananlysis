@@ -553,6 +553,39 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    id: "022_mrp_tables",
+    sql: `
+      -- MRP master — effective-dated, append-only.
+      -- mrp_master: one row per normalised item code (join key to sale_line.code).
+      -- mrp_history: effective-dated price rows; effective_to = NULL means current.
+      -- The OLD MRP / NEW MRP pair from each workbook produces two history rows
+      -- (old with effective_to = w.e.f. date; new with effective_from = w.e.f.).
+      CREATE TABLE IF NOT EXISTS mrp_master (
+        item_code    TEXT    PRIMARY KEY,
+        item_name    TEXT,
+        segment      TEXT    NOT NULL,
+        series       TEXT,
+        packing      TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS mrp_history (
+        id             SERIAL  PRIMARY KEY,
+        item_code      TEXT    NOT NULL REFERENCES mrp_master(item_code) ON DELETE CASCADE,
+        mrp            NUMERIC NOT NULL,
+        effective_from DATE    NOT NULL,
+        effective_to   DATE,
+        source_file    TEXT    NOT NULL,
+        is_current     BOOLEAN NOT NULL DEFAULT TRUE
+      );
+
+      CREATE INDEX IF NOT EXISTS mrp_history_item_idx
+        ON mrp_history (item_code);
+      CREATE INDEX IF NOT EXISTS mrp_history_current_idx
+        ON mrp_history (item_code, is_current)
+        WHERE is_current = TRUE;
+    `,
+  },
+  {
     id: "019_rename_scheme_slab_to_reward_slab",
     sql: `
       -- Dev DBs that ran the original 017 have the NEW-shape table under the
