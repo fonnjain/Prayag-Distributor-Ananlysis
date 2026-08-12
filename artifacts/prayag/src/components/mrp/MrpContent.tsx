@@ -1,7 +1,9 @@
 // MRP Master page — browse effective-dated prices by segment and series.
-import { useState, useEffect } from "react";
+// Two tabs: Catalogue (price list) and Calculator (back-calculation from retailer price → MRP).
+import { useState, useEffect, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { IndianRupee, Search, ChevronLeft, ChevronRight, History, X, Info, Loader2, AlertTriangle } from "lucide-react";
+import { IndianRupee, Search, ChevronLeft, ChevronRight, History, X, Info, Loader2, AlertTriangle, Calculator } from "lucide-react";
+import MrpCalculator from "./MrpCalculator";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -256,13 +258,33 @@ function HistoryPanel({
 const PAGE_SIZE = 50;
 const ALL = "__ALL__";
 
+type ActiveTab = "catalogue" | "calculator";
+
+interface CalcTarget {
+  code: string;
+  segment: string;
+  /** Bumped to force MrpCalculator to re-mount when a different row is clicked. */
+  key: number;
+}
+
 export default function MrpContent() {
+  const [activeTab, setActiveTab] = useState<ActiveTab>("catalogue");
+  const [calcTarget, setCalcTarget] = useState<CalcTarget | null>(null);
+  const [calcKeyCounter, setCalcKeyCounter] = useState(0);
+
   const [segment, setSegment] = useState<string>(ALL);
   const [series, setSeries] = useState<string>(ALL);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [offset, setOffset] = useState(0);
   const [historyTarget, setHistoryTarget] = useState<HistoryTarget | null>(null);
+
+  const openCalculator = useCallback((code: string, seg: string) => {
+    const k = calcKeyCounter + 1;
+    setCalcKeyCounter(k);
+    setCalcTarget({ code, segment: seg, key: k });
+    setActiveTab("calculator");
+  }, [calcKeyCounter]);
 
   // Debounce search
   useEffect(() => {
@@ -324,28 +346,67 @@ export default function MrpContent() {
             </p>
           </div>
         </div>
-        {meta && (
-          <div className="flex items-center gap-4 text-sm text-slate-600">
-            <span>
-              <span className="font-semibold text-slate-900">{meta.totalCodes.toLocaleString("en-IN")}</span>{" "}
-              codes
-            </span>
-            <span>
-              <span className="font-semibold text-slate-900">{meta.codesWithRevision.toLocaleString("en-IN")}</span>{" "}
-              with revision
-            </span>
-            {meta.ambiguousCodes > 0 && (
-              <span
-                className="flex items-center gap-1 text-amber-700 font-medium"
-                title="Same catalogue number exists in multiple segments. Register lookups require a segment to resolve correctly."
-              >
-                <AlertTriangle className="h-3.5 w-3.5" />
-                {meta.ambiguousCodes} ambiguous
-              </span>
-            )}
+        <div className="flex items-center gap-4">
+          {/* Tab switcher */}
+          <div className="flex rounded-md border border-slate-200 overflow-hidden text-sm">
+            <button
+              onClick={() => setActiveTab("catalogue")}
+              className={`px-4 py-1.5 flex items-center gap-1.5 transition-colors ${
+                activeTab === "catalogue"
+                  ? "bg-slate-100 text-slate-800 font-medium"
+                  : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              Catalogue
+            </button>
+            <button
+              onClick={() => setActiveTab("calculator")}
+              className={`px-4 py-1.5 flex items-center gap-1.5 transition-colors border-l border-slate-200 ${
+                activeTab === "calculator"
+                  ? "bg-blue-50 text-blue-700 font-medium"
+                  : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              <Calculator className="h-3.5 w-3.5" />
+              Calculator
+            </button>
           </div>
-        )}
+          {/* Stats (catalogue only) */}
+          {activeTab === "catalogue" && meta && (
+            <div className="flex items-center gap-4 text-sm text-slate-600">
+              <span>
+                <span className="font-semibold text-slate-900">{meta.totalCodes.toLocaleString("en-IN")}</span>{" "}
+                codes
+              </span>
+              <span>
+                <span className="font-semibold text-slate-900">{meta.codesWithRevision.toLocaleString("en-IN")}</span>{" "}
+                with revision
+              </span>
+              {meta.ambiguousCodes > 0 && (
+                <span
+                  className="flex items-center gap-1 text-amber-700 font-medium"
+                  title="Same catalogue number exists in multiple segments. Register lookups require a segment to resolve correctly."
+                >
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  {meta.ambiguousCodes} ambiguous
+                </span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Calculator tab */}
+      {activeTab === "calculator" && (
+        <MrpCalculator
+          key={calcTarget?.key ?? 0}
+          initialCode={calcTarget?.code}
+          initialSegment={calcTarget?.segment}
+        />
+      )}
+
+      {/* Catalogue tab content below */}
+      {activeTab === "catalogue" && <>
 
       {/* Ambiguous-code notice banner — shown when not filtered to a single segment */}
       {meta && meta.ambiguousCodes > 0 && segment === ALL && (
@@ -446,7 +507,7 @@ export default function MrpContent() {
                   <TableHead className="w-[110px] text-right">Current MRP</TableHead>
                   <TableHead className="w-[130px]">Effective From</TableHead>
                   <TableHead className="w-[80px] text-center">Revisions</TableHead>
-                  <TableHead className="w-[60px]" />
+                  <TableHead className="w-[90px]" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -514,16 +575,28 @@ export default function MrpContent() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setHistoryTarget({ code: row.itemCode, segment: row.segment });
-                          }}
-                          className="rounded p-1 hover:bg-slate-100 text-slate-400 hover:text-slate-600"
-                          title="View price history"
-                        >
-                          <History className="h-3.5 w-3.5" />
-                        </button>
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setHistoryTarget({ code: row.itemCode, segment: row.segment });
+                            }}
+                            className="rounded p-1 hover:bg-slate-100 text-slate-400 hover:text-slate-600"
+                            title="View price history"
+                          >
+                            <History className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openCalculator(row.itemCode, row.segment);
+                            }}
+                            className="rounded p-1 hover:bg-blue-50 text-slate-400 hover:text-blue-600"
+                            title="Open in back-calculator"
+                          >
+                            <Calculator className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -581,6 +654,8 @@ export default function MrpContent() {
           onClose={() => setHistoryTarget(null)}
         />
       )}
+
+      </> /* end activeTab === "catalogue" */}
     </div>
   );
 }

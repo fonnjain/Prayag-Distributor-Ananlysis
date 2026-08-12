@@ -252,15 +252,21 @@ export default function MarginContent() {
             </CardHeader>
             <CardContent className="text-sm text-slate-600 space-y-2">
               <p>Trigger a load from Google Drive with:</p>
-              <pre className="bg-slate-100 rounded p-3 text-xs overflow-auto">
-{`curl -s -X POST \\
+                <pre className="bg-slate-100 rounded p-3 text-xs overflow-auto">
+{`# Step 1 — kick off (returns 202 immediately)
+curl -s -X POST \\
   -H "X-Admin-Secret: <SESSION_SECRET>" \\
-  <BASE_URL>/api/admin/margin/load | jq .`}
+  <BASE_URL>/api/admin/margin/load | jq .
+
+# Step 2 — poll until status = "done"
+curl -s \\
+  -H "X-Admin-Secret: <SESSION_SECRET>" \\
+  <BASE_URL>/api/admin/margin/load-status | jq .status`}
               </pre>
               <p className="text-xs text-slate-500">
-                Reads 133 GP MARGIN workbooks (FY2025-26 + FY2026-27) from Drive,
-                classifies monthly vs cumulative, validates cross-totals, and populates
-                margin_fact.
+                Downloads 177+ GP MARGIN files from Google Drive (~15 min).
+                Returns 202 immediately — rows appear in this page as they land.
+                Refresh the page or watch the stats update.
               </p>
             </CardContent>
           </Card>

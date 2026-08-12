@@ -45,6 +45,7 @@ export async function getGoogleAccessToken(): Promise<string> {
   const url = `https://${hostname}/api/v2/connection?include_secrets=true`;
   const res = await fetch(url, {
     headers: { Accept: "application/json", "X-Replit-Token": xReplitToken },
+    signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) {
     throw new Error(`Failed to fetch google-drive connection (${res.status})`);
@@ -162,6 +163,11 @@ function sweepGetCache(): void {
   }
 }
 
+// Per-request timeout for Sheets API calls. Some spreadsheets cause the Sheets
+// API to hang indefinitely (no response, no error). 45 s is generous for even
+// the largest 50k-row chunk; the retry loop gives up to 4 attempts total.
+const SHEETS_REQUEST_TIMEOUT_MS = 45_000;
+
 async function sheetsGetUncached(path: string): Promise<unknown> {
   const spreadsheetId = spreadsheetIdFromPath(path);
   let lastError: Error | null = null;
@@ -169,6 +175,7 @@ async function sheetsGetUncached(path: string): Promise<unknown> {
     const token = await getGoogleAccessToken();
     const res = await fetch(`${SHEETS_BASE}${path}`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(SHEETS_REQUEST_TIMEOUT_MS),
     });
     if (res.ok) return res.json();
     const body = await res.text().catch(() => "");

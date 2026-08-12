@@ -1,8 +1,10 @@
 // GP Margin fact-table loader.
 //
-// Reads all GP MARGIN workbooks for FY2025-26 (107 files) and FY2026-27 (26
-// files) from Google Drive, classifies each as monthly or cumulative, parses
-// every GP-margin tab, and (re)populates the margin_fact table.
+// Reads all GP MARGIN workbooks for FY2025-26 and FY2026-27 from Google Drive
+// via the SHEETS API (spreadsheets.values.get, not Drive export).
+//
+// Drive files.export hangs for spreadsheets > ~10 MB — see sheets.ts comment.
+// All reads now go through fetchWorkbook(), which works for any sheet size.
 //
 // MONTHLY IS TRUTH.  Cumulative files are used only to cross-validate that the
 // per-month sums agree with the cumulative total within 1%.  They are NOT
@@ -15,15 +17,116 @@
 // figure "gross margin" / "gross contribution", never "profit" — no freight,
 // overhead or SG&A is included.
 
-import ExcelJS from "exceljs";
+import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import { pool } from "@workspace/db";
 import {
+  listDriveFiles,
   listDriveFolder,
-  downloadDriveFileBuffer,
-  findDriveFoldersByName,
   type DriveApiFile,
 } from "../googleDrive.js";
+import {
+  type WorkbookLike,
+  type WorksheetLike,
+  type CellLike,
+} from "../sheets.js";
 import { logger } from "../logger.js";
+
+// dist/ lives next to this bundle.
+const DIST_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+// OS `timeout` command — sends SIGTERM to the child after N seconds.
+// Guaranteed to fire at the OS level regardless of the child's JS event loop.
+const TIMEOUT_CMD = "/nix/store/jb9bfccdjapvscfis6viz02c64i0vwny-replit-runtime-path/bin/timeout";
+
+// Standalone fetcher script (compiled separately by esbuild).
+const FETCHER_PATH = path.join(DIST_DIR, "gpMarginFetcher.mjs");
+
+// Current Node.js executable.
+const NODE_EXEC = process.execPath;
+
+// ── OS-timeout subprocess fetch ────────────────────────────────────────────
+// Runs the Sheets API read in a CHILD PROCESS under the Unix `timeout` command.
+//
+// Why not worker_threads or Promise.race + setTimeout?
+// When certain Google Sheets cause undici's socket to hang, Node.js's timer
+// phase (setTimeout/setInterval) becomes unable to fire for that isolate —
+// even inside isolated workers.  The symptom: a 90 s timer set at T fires
+// correctly for files that complete before 90 s, but never fires for the
+// stuck file.
+//
+// The `timeout` command solves this at the OS level: after N seconds it sends
+// SIGTERM to the child Node.js process.  The child's stdout/stderr pipes close.
+// The parent's execFile callback fires via an *I/O* event (pipe-close), which
+// the parent processes reliably even when its timer phase is saturated.
+//
+// Result schema (written atomically to child stdout):
+//   { ok: true,  sheets: [{name, rows}…] }
+//   { ok: false, error: string }
+//
+// If the child is killed mid-write (partial JSON), JSON.parse fails and the
+// load treats that file as a fetch failure.
+
+type WorkerSheets = Array<{ name: string; rows: (string | number | boolean | null)[][] }>;
+
+function buildWorkbookFromWorkerData(sheets: WorkerSheets): WorkbookLike {
+  const worksheets: WorksheetLike[] = sheets.map(({ name, rows }) => ({
+    name,
+    eachRow(cb: (row: { getCell(col: number): CellLike }, rowNumber: number) => void) {
+      for (let i = 0; i < rows.length; i++) {
+        const cells = rows[i] ?? [];
+        if (cells.every((c) => c == null || c === "")) continue;
+        cb(
+          {
+            getCell(col1Based: number): CellLike {
+              return { value: cells[col1Based - 1] ?? null };
+            },
+          },
+          i + 1,
+        );
+      }
+    },
+  }));
+  return {
+    worksheets,
+    getWorksheet(name: string) {
+      return worksheets.find((w) => w.name === name);
+    },
+  };
+}
+
+async function fetchWorkbookViaProcess(
+  fileId: string,
+  timeoutSec = 90,
+): Promise<WorkbookLike> {
+  return new Promise<WorkbookLike>((resolve, reject) => {
+    execFile(
+      TIMEOUT_CMD,
+      [String(timeoutSec), NODE_EXEC, "--enable-source-maps", FETCHER_PATH, fileId],
+      { maxBuffer: 50 * 1024 * 1024 },
+      (err, stdout) => {
+        // stdout may contain valid JSON even when err is set (child wrote then errored).
+        if (stdout) {
+          try {
+            const result = JSON.parse(stdout) as
+              | { ok: true; sheets: WorkerSheets }
+              | { ok: false; error: string };
+            if (result.ok) {
+              resolve(buildWorkbookFromWorkerData(result.sheets));
+              return;
+            }
+            reject(new Error(result.error));
+            return;
+          } catch {
+            // partial JSON (child killed mid-write) — fall through to err handling
+          }
+        }
+        reject(err ?? new Error(`fetcher produced no output (fileId=${fileId})`));
+      },
+    );
+  });
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -52,6 +155,7 @@ interface ClassifiedFile {
   segment: string;
   monthLabel: string | null;
   classification: FileClass;
+  mimeType: string;
 }
 
 interface ColMap {
@@ -120,7 +224,6 @@ const MONTH_FY_HALF: Record<string, "first" | "second"> = {
 };
 
 function fyYears(fy: string): { first: number; second: number } {
-  // "2025-26" → first=25, second=26
   const [a, b] = fy.split("-");
   return {
     first: parseInt(a.slice(2), 10),
@@ -154,7 +257,6 @@ function classifyFilename(name: string): FileClass {
   return "unknown";
 }
 
-// Build month_label like "Apr-25" from a filename given the FY string.
 function parseMonthLabel(name: string, fy: string): string | null {
   const months = extractMonths(name);
   if (months.length !== 1) return null;
@@ -185,6 +287,23 @@ function canonicalSegment(folderName: string): string {
   return folderName;
 }
 
+// ── Cell helpers (Sheets API values — no formula objects, no richText) ─────
+
+function cellNum(cell: CellLike): number | null {
+  const v = cell.value;
+  if (v == null || v === "") return null;
+  if (typeof v === "number") return isFinite(v) ? v : null;
+  // Sheets API may return numbers as strings in some locales
+  const n = parseFloat(String(v).replace(/,/g, ""));
+  return isFinite(n) ? n : null;
+}
+
+function cellStr(cell: CellLike): string {
+  const v = cell.value;
+  if (v == null) return "";
+  return String(v).trim();
+}
+
 // ── GP-margin tab detection ────────────────────────────────────────────────
 // Scans rows 2-6 for a row where:
 //   • col B contains CODE or ITEM CODE
@@ -192,23 +311,29 @@ function canonicalSegment(folderName: string): string {
 //   • the row contains BOM COST or PUR RATE
 
 function detectGpMarginTabs(
-  wb: ExcelJS.Workbook,
-): { ws: ExcelJS.Worksheet; headerRow: number; colMap: ColMap }[] {
-  const hits: { ws: ExcelJS.Worksheet; headerRow: number; colMap: ColMap }[] = [];
+  wb: WorkbookLike,
+): { ws: WorksheetLike; headerRow: number; colMap: ColMap }[] {
+  const hits: { ws: WorksheetLike; headerRow: number; colMap: ColMap }[] = [];
 
   for (const ws of wb.worksheets) {
-    for (let ri = 2; ri <= 6; ri++) {
+    let hit: { headerRow: number; colMap: ColMap } | null = null;
+
+    ws.eachRow((row, ri) => {
+      if (hit) return; // already found header for this sheet
+      if (ri < 2 || ri > 8) return; // header must be in rows 2-8
+
       const cells: string[] = [];
-      for (let ci = 1; ci <= 20; ci++) {
+      for (let ci = 1; ci <= 25; ci++) {
         cells.push(
-          (ws.getRow(ri).getCell(ci).text ?? "")
+          String(row.getCell(ci).value ?? "")
             .replace(/\s+/g, " ")
             .trim()
             .toUpperCase(),
         );
       }
+
       // Col B (index 1) must contain CODE
-      if (!cells[1]?.includes("CODE")) continue;
+      if (!cells[1]?.includes("CODE")) return;
       const hasDiscount = cells.some((c) => c === "DISCOUNT" || c.startsWith("DISCOUNT"));
       const hasBom = cells.some(
         (c) =>
@@ -217,19 +342,21 @@ function detectGpMarginTabs(
           c.includes("PUR RATE") ||
           c.includes("PURRATE"),
       );
-      if (!hasDiscount || !hasBom) continue;
+      if (!hasDiscount || !hasBom) return;
 
       const colMap = buildColMap(cells);
-      if (!colMap) continue;
-      hits.push({ ws, headerRow: ri, colMap });
-      break;
+      if (!colMap) return;
+      hit = { headerRow: ri, colMap };
+    });
+
+    if (hit) {
+      hits.push({ ws, headerRow: (hit as { headerRow: number; colMap: ColMap }).headerRow, colMap: (hit as { headerRow: number; colMap: ColMap }).colMap });
     }
   }
   return hits;
 }
 
 function buildColMap(cells: string[]): ColMap | null {
-  // cells is 0-indexed (cells[0] = col A), returns 1-based column numbers
   const idx = (...patterns: string[]): number | null => {
     for (const p of patterns) {
       let i = cells.findIndex((c) => c === p);
@@ -240,7 +367,6 @@ function buildColMap(cells: string[]): ColMap | null {
     return null;
   };
 
-  // Find all SALE VALUE columns (first = per avg sale rate, second = per bom)
   const saleValueCols: number[] = [];
   cells.forEach((c, i) => {
     if (c.includes("SALE VALUE") || c.includes("SALEVALUE")) saleValueCols.push(i + 1);
@@ -259,42 +385,10 @@ function buildColMap(cells: string[]): ColMap | null {
   };
 }
 
-// ── Cell helpers ───────────────────────────────────────────────────────────
-
-function cellNum(cell: ExcelJS.Cell): number | null {
-  const v = cell.value;
-  if (v == null) return null;
-  if (typeof v === "number") return isFinite(v) ? v : null;
-  if (typeof v === "object" && "result" in v) {
-    const r = (v as ExcelJS.CellFormulaValue).result;
-    if (typeof r === "number") return isFinite(r) ? r : null;
-    if (r == null) return null;
-  }
-  const n = parseFloat(String(v));
-  return isFinite(n) ? n : null;
-}
-
-function cellStr(cell: ExcelJS.Cell): string {
-  const v = cell.value;
-  if (v == null) return "";
-  if (typeof v === "string") return v.trim();
-  if (typeof v === "number") return String(v);
-  if (typeof v === "object") {
-    if ("richText" in v)
-      return (v as ExcelJS.CellRichTextValue).richText.map((r) => r.text).join("").trim();
-    if ("result" in v) {
-      const r = (v as ExcelJS.CellFormulaValue).result;
-      return r != null ? String(r).trim() : "";
-    }
-    if ("text" in v) return (v as ExcelJS.CellHyperlinkValue).text.trim();
-  }
-  return String(v).trim();
-}
-
 // ── Row extraction ─────────────────────────────────────────────────────────
 
 function extractRows(
-  ws: ExcelJS.Worksheet,
+  ws: WorksheetLike,
   headerRow: number,
   colMap: ColMap,
   fy: string,
@@ -303,7 +397,7 @@ function extractRows(
   sourceFile: string,
 ): MarginRow[] {
   const rows: MarginRow[] = [];
-  ws.eachRow({ includeEmpty: false }, (row, ri) => {
+  ws.eachRow((row, ri) => {
     if (ri <= headerRow) return;
     const itemCode = cellStr(row.getCell(colMap.code));
     if (!itemCode) return;
@@ -345,13 +439,13 @@ function extractRows(
 // ── Parse cumulative file for validation totals ────────────────────────────
 
 function parseCumulativeTotals(
-  wb: ExcelJS.Workbook,
+  wb: WorkbookLike,
 ): { qty: number; saleValue: number } | null {
   const tabs = detectGpMarginTabs(wb);
   if (tabs.length === 0) return null;
   let totalQty = 0, totalSale = 0;
   for (const { ws, headerRow, colMap } of tabs) {
-    ws.eachRow({ includeEmpty: false }, (row, ri) => {
+    ws.eachRow((row, ri) => {
       if (ri <= headerRow) return;
       const code = cellStr(row.getCell(colMap.code));
       const upper = code.toUpperCase();
@@ -365,17 +459,34 @@ function parseCumulativeTotals(
 
 // ── Drive discovery ────────────────────────────────────────────────────────
 
-async function discoverFyFolders(): Promise<{ fy: string; folderId: string; name: string }[]> {
-  const folders = await findDriveFoldersByName("GP MARGIN FY");
-  const result: { fy: string; folderId: string; name: string }[] = [];
-  for (const f of folders) {
-    if (f.name.includes("25-26") || f.name.includes("2025-26")) {
-      result.push({ fy: "2025-26", folderId: f.id, name: f.name });
-    } else if (f.name.includes("26-27") || f.name.includes("2026-27")) {
-      result.push({ fy: "2026-27", folderId: f.id, name: f.name });
-    }
+interface SegmentFolderInfo {
+  folderId: string;
+  fy: string;
+  segment: string;
+  name: string;
+  isWrapper: boolean;
+}
+
+function detectFy(folderName: string): "2025-26" | "2026-27" | null {
+  if (/25-26|2025-26/.test(folderName)) return "2025-26";
+  if (/26-27|2026-27/.test(folderName)) return "2026-27";
+  return null;
+}
+
+async function discoverSegmentFolders(): Promise<SegmentFolderInfo[]> {
+  const result = await listDriveFiles({ q: "GP MARGIN" });
+  const folders: SegmentFolderInfo[] = [];
+
+  for (const item of result.files) {
+    if (item.mimeType !== "application/vnd.google-apps.folder") continue;
+    const fy = detectFy(item.name);
+    if (!fy) continue;
+    const isWrapper = /^GP MARGIN FY/i.test(item.name.trim());
+    const segment = canonicalSegment(item.name);
+    folders.push({ folderId: item.id, fy, segment, name: item.name, isWrapper });
   }
-  return result;
+
+  return folders;
 }
 
 // ── Main load ──────────────────────────────────────────────────────────────
@@ -395,51 +506,67 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
     negativeContributionTop10: [],
   };
 
-  // 1 — discover FY folders
-  const fyFolders = await discoverFyFolders();
-  if (fyFolders.length === 0) {
+  // 1 — discover all segment-level GP MARGIN folders
+  const segmentFolders = await discoverSegmentFolders();
+  if (segmentFolders.length === 0) {
     throw new Error(
-      "No 'GP MARGIN FY' folders found on Google Drive. " +
+      "No GP MARGIN folders found for FY 2025-26 or 2026-27 on Google Drive. " +
         "Ensure the Drive integration has access to those folders.",
     );
   }
-  logger.info({ found: fyFolders.map((f) => f.name) }, "gpMargin: FY folders");
+  logger.info(
+    { found: segmentFolders.map((f) => `${f.fy}|${f.segment}|${f.name}`) },
+    "gpMargin: segment folders discovered",
+  );
 
-  // 2 — classify all files
+  // 2 — classify all spreadsheets inside each segment folder
   const allClassified: ClassifiedFile[] = [];
+  const seenFileIds = new Set<string>();
 
-  for (const { fy, folderId } of fyFolders) {
-    const children = await listDriveFolder(folderId);
+  function isSpreadsheet(f: DriveApiFile): boolean {
+    return (
+      f.mimeType === "application/vnd.google-apps.spreadsheet" ||
+      /\.(xlsx|xls)$/i.test(f.name)
+    );
+  }
+
+  async function scanFolder(
+    folderId: string,
+    fy: string,
+    segment: string,
+  ): Promise<void> {
+    let children: DriveApiFile[];
+    try {
+      children = await listDriveFolder(folderId);
+    } catch (err) {
+      logger.warn({ folderId, err }, "gpMargin: folder list failed");
+      return;
+    }
 
     for (const child of children) {
-      const isFolder = child.mimeType === "application/vnd.google-apps.folder";
-
-      if (isFolder) {
-        const segment = canonicalSegment(child.name);
-        const segFiles = await listDriveFolder(child.id);
-        for (const f of segFiles) {
-          if (!/\.(xlsx|xls)$/i.test(f.name)) continue;
-          report.filesScanned++;
-          const cls = classifyFilename(f.name);
-          const monthLabel = cls === "monthly" ? parseMonthLabel(f.name, fy) : null;
-          allClassified.push({
-            file: f, fy, segment,
-            monthLabel,
-            classification: cls === "monthly" && monthLabel == null ? "unknown" : cls,
-          });
-        }
-      } else {
-        if (!/\.(xlsx|xls)$/i.test(child.name)) continue;
-        report.filesScanned++;
-        const cls = classifyFilename(child.name);
-        allClassified.push({
-          file: child, fy,
-          segment: "SUMMARY",
-          monthLabel: null,
-          classification: cls === "monthly" ? "unknown" : cls,
-        });
+      if (child.mimeType === "application/vnd.google-apps.folder") {
+        const childSegment = canonicalSegment(child.name) === "UNKNOWN" ? segment : canonicalSegment(child.name);
+        await scanFolder(child.id, fy, childSegment);
+        continue;
       }
+      if (!isSpreadsheet(child)) continue;
+      if (seenFileIds.has(child.id)) continue;
+      seenFileIds.add(child.id);
+
+      report.filesScanned++;
+      const cls = classifyFilename(child.name);
+      const monthLabel = cls === "monthly" ? parseMonthLabel(child.name, fy) : null;
+      allClassified.push({
+        file: child, fy, segment,
+        monthLabel,
+        mimeType: child.mimeType,
+        classification: cls === "monthly" && monthLabel == null ? "unknown" : cls,
+      });
     }
+  }
+
+  for (const sf of segmentFolders) {
+    await scanFolder(sf.folderId, sf.fy, sf.segment);
   }
 
   const monthlyFiles    = allClassified.filter((f) => f.classification === "monthly");
@@ -456,60 +583,74 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
     "gpMargin: classification done",
   );
 
-  // 3 — parse monthly files
+  // 3 — parse monthly files via Sheets API.
+  //
+  // Each file is fetched in a worker thread with a 90 s per-worker timeout
+  // (`worker.terminate()` is the only reliable kill switch for hanging sockets).
+  // Files are processed in parallel batches of BATCH_SIZE so that a stuck
+  // worker for one file cannot stall the rest of the load.
   const allRows: MarginRow[] = [];
-  // Track cumulative parsed totals for validation, keyed by "fy|segment"
   const cumulativeParsed: Map<string, { filename: string; qty: number; saleValue: number }> = new Map();
 
-  for (const cf of monthlyFiles) {
-    let buf: Buffer;
-    try {
-      buf = await downloadDriveFileBuffer(cf.file.id);
-    } catch (err) {
-      logger.warn({ file: cf.file.name, err }, "gpMargin: download failed");
-      report.filesUnknown.push({ name: cf.file.name, fy: cf.fy, segment: cf.segment, reason: "download failed" });
-      continue;
-    }
+  const BATCH_SIZE = 5;
+  const WORKER_TIMEOUT_MS = 90_000;
 
-    let wb: ExcelJS.Workbook;
+  async function fetchAndParse(
+    cf: (typeof monthlyFiles)[0],
+    idx: number,
+  ): Promise<void> {
+    logger.info(
+      { n: idx, of: monthlyFiles.length, file: cf.file.name, fy: cf.fy, segment: cf.segment },
+      "gpMargin: reading monthly file",
+    );
+    let wb: WorkbookLike;
     try {
-      wb = new ExcelJS.Workbook();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await wb.xlsx.load(buf as any);
+      wb = await fetchWorkbookViaProcess(cf.file.id, WORKER_TIMEOUT_MS / 1000);
     } catch (err) {
-      logger.warn({ file: cf.file.name, err }, "gpMargin: parse failed");
-      report.filesUnknown.push({ name: cf.file.name, fy: cf.fy, segment: cf.segment, reason: "parse failed" });
-      continue;
+      logger.warn({ file: cf.file.name, err: String(err) }, "gpMargin: fetch failed — skipping");
+      report.filesUnknown.push({ name: cf.file.name, fy: cf.fy, segment: cf.segment, reason: `fetch failed: ${String(err)}` });
+      return;
     }
 
     const tabs = detectGpMarginTabs(wb);
     if (tabs.length === 0) {
-      logger.warn({ file: cf.file.name, segment: cf.segment }, "gpMargin: no GP margin tabs found");
+      logger.warn({ file: cf.file.name, segment: cf.segment, sheets: wb.worksheets.map((w) => w.name) }, "gpMargin: no GP margin tabs — skipping");
       report.filesUnknown.push({ name: cf.file.name, fy: cf.fy, segment: cf.segment, reason: "no GP margin tabs detected" });
-      continue;
+      return;
     }
 
+    let fileRows = 0;
     for (const { ws, headerRow, colMap } of tabs) {
       const rows = extractRows(ws, headerRow, colMap, cf.fy, cf.monthLabel!, cf.segment, cf.file.name);
       allRows.push(...rows);
+      fileRows += rows.length;
     }
+    logger.info(
+      { n: idx, of: monthlyFiles.length, file: cf.file.name, tabs: tabs.length, rows: fileRows },
+      "gpMargin: file loaded",
+    );
     report.filesLoaded++;
   }
 
-  // 4 — parse cumulative files for validation cross-totals
+  for (let b = 0; b < monthlyFiles.length; b += BATCH_SIZE) {
+    const batch = monthlyFiles.slice(b, b + BATCH_SIZE);
+    logger.info(
+      { batchStart: b + 1, batchEnd: b + batch.length, total: monthlyFiles.length },
+      "gpMargin: starting batch",
+    );
+    await Promise.allSettled(
+      batch.map((cf, i) => fetchAndParse(cf, b + i + 1)),
+    );
+    logger.info({ batchStart: b + 1, batchEnd: b + batch.length }, "gpMargin: batch complete");
+  }
+
+  // 4 — parse cumulative files for cross-validation (subprocess, same timeout)
   for (const cf of cumulativeFiles) {
-    let buf: Buffer;
-    try { buf = await downloadDriveFileBuffer(cf.file.id); } catch { continue; }
-    let wb: ExcelJS.Workbook;
-    try {
-      wb = new ExcelJS.Workbook();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await wb.xlsx.load(buf as any);
-    } catch { continue; }
+    let wb: WorkbookLike;
+    try { wb = await fetchWorkbookViaProcess(cf.file.id, 90); } catch { continue; }
     const totals = parseCumulativeTotals(wb);
     if (totals) {
       const key = `${cf.fy}|${cf.segment}`;
-      // Use last cumulative file per segment (likely widest range)
       cumulativeParsed.set(key, { filename: cf.file.name, ...totals });
     }
   }

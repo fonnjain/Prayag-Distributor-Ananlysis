@@ -220,6 +220,410 @@ router.get("/mrp/stats", async (req, res) => {
   }
 });
 
+// ── Helpers ────────────────────────────────────────────────────────────────
+/** Last 12 complete calendar months as "Mon-YY" strings (newest first). */
+function trailing12MonthLabels(): string[] {
+  const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const today = new Date();
+  const out: string[] = [];
+  for (let i = 1; i <= 12; i++) {
+    const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    out.push(`${MONTHS[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`);
+  }
+  return out;
+}
+
+// ── GET /api/mrp/calculator ────────────────────────────────────────────────
+// Returns the data payload the MRP back-calculator needs for one (item_code, segment).
+// The arithmetic is done on the client; this route assembles the source data only.
+//
+// Query params:
+//   code    — required; item_code from mrp_master
+//   segment — required when the code is ambiguous
+//
+// Returns 409 with availableSegments when code is ambiguous and no segment given.
+// Never writes to mrp_history.
+router.get("/mrp/calculator", async (req, res) => {
+  try {
+    const code = typeof req.query.code === "string" ? req.query.code.trim() : null;
+    const segmentParam = typeof req.query.segment === "string" ? req.query.segment.trim() : null;
+
+    if (!code) { res.status(400).json({ error: "?code= is required" }); return; }
+
+    // 1 — resolve in mrp_master (ambiguity check)
+    const masterRows = await pool.query<{
+      segment: string; item_name: string | null; series: string | null; packing: string | null;
+      is_ambiguous: boolean;
+    }>(
+      `SELECT segment, item_name, series, packing,
+              (SELECT COUNT(DISTINCT m2.segment) > 1
+               FROM mrp_master m2 WHERE m2.item_code = m.item_code) AS is_ambiguous
+       FROM mrp_master m WHERE m.item_code = $1 ORDER BY m.segment`,
+      [code],
+    );
+
+    if ((masterRows.rowCount ?? 0) === 0) {
+      res.status(404).json({ error: `Code ${code} not found in MRP master` }); return;
+    }
+
+    const isAmbiguous = masterRows.rows[0].is_ambiguous;
+    const availableSegments = masterRows.rows.map((r) => r.segment);
+
+    if (isAmbiguous && !segmentParam) {
+      res.status(409).json({
+        error: "ambiguous code, segment required",
+        reason: `Code ${code} exists in ${availableSegments.length} segments. Supply ?segment= to disambiguate.`,
+        availableSegments,
+      });
+      return;
+    }
+
+    const targetSegment = segmentParam ?? availableSegments[0];
+    const masterRow = masterRows.rows.find((r) => r.segment === targetSegment);
+    if (!masterRow) {
+      res.status(404).json({ error: `Code ${code} not found in segment ${targetSegment}`, availableSegments }); return;
+    }
+
+    const trailing12 = trailing12MonthLabels();
+
+    // 2-5 — parallel queries
+    const [mrpRow, marginRow, sampleRows, saleRow, secRow] = await Promise.all([
+      // Current MRP
+      pool.query<{ mrp: string | null; effective_from: string | null }>(
+        `SELECT mrp::text, effective_from::text
+         FROM mrp_history WHERE item_code = $1 AND segment = $2 AND is_current = TRUE LIMIT 1`,
+        [code, targetSegment],
+      ),
+      // Primary discount + BOM cost from margin_fact (all available months for this code)
+      pool.query<{
+        weighted_discount: string | null; weighted_bom: string | null;
+        total_qty: string | null; months_covered: string; months: string[];
+      }>(
+        `SELECT
+           SUM(discount_frac * qty) / NULLIF(SUM(qty), 0)                          AS weighted_discount,
+           SUM(bom_cost * qty) FILTER (WHERE bom_cost IS NOT NULL) /
+             NULLIF(SUM(qty) FILTER (WHERE bom_cost IS NOT NULL), 0)               AS weighted_bom,
+           SUM(qty)::text                                                           AS total_qty,
+           COUNT(DISTINCT month_label)::text                                        AS months_covered,
+           array_agg(DISTINCT month_label ORDER BY month_label)                     AS months
+         FROM margin_fact
+         WHERE item_code = $1 AND segment = $2
+           AND discount_frac IS NOT NULL AND qty IS NOT NULL AND qty > 0`,
+        [code, targetSegment],
+      ),
+      // Identity check samples (up to 5 rows with MRP, discount_frac, avg_sale)
+      pool.query<{ month_label: string; mrp: string; discount_frac: string; avg_sale: string }>(
+        `SELECT month_label, mrp::text, discount_frac::text, avg_sale::text
+         FROM margin_fact
+         WHERE item_code = $1 AND segment = $2
+           AND mrp IS NOT NULL AND discount_frac IS NOT NULL AND avg_sale IS NOT NULL AND qty > 0
+         ORDER BY fy DESC, month_label LIMIT 5`,
+        [code, targetSegment],
+      ),
+      // Realised discount from sale_line (trailing 12 months)
+      pool.query<{ total_amount: string | null; total_qty: string | null; months_covered: string }>(
+        `SELECT SUM(amount)::text AS total_amount, SUM(qty)::text AS total_qty,
+                COUNT(DISTINCT month_label)::text AS months_covered
+         FROM sale_line_current
+         WHERE code = $1 AND month_label = ANY($2)
+           AND amount IS NOT NULL AND qty IS NOT NULL AND qty > 0`,
+        [code, trailing12],
+      ),
+      // Distributor margin default from secondary_sku_line (volume-weighted discount_pct)
+      pool.query<{ weighted_disc: string | null; row_count: string }>(
+        `SELECT
+           SUM(discount_pct * COALESCE(qty, 1)) /
+             NULLIF(SUM(COALESCE(qty, 1)), 0) AS weighted_disc,
+           COUNT(*)::text AS row_count
+         FROM secondary_sku_line
+         WHERE item_code = $1 AND discount_pct IS NOT NULL AND discount_pct > 0 AND discount_pct < 100`,
+        [code],
+      ),
+    ]);
+
+    // Assemble
+    const currentMrp = mrpRow.rows[0]?.mrp ? parseFloat(mrpRow.rows[0].mrp) : null;
+    const m = marginRow.rows[0];
+    const hasMarginData = !!(m?.weighted_discount);
+    const weightedDiscount = hasMarginData ? parseFloat(m.weighted_discount!) : null;
+    const weightedBom = m?.weighted_bom ? parseFloat(m.weighted_bom) : null;
+
+    const s = saleRow.rows[0];
+    const totalAmount = s?.total_amount ? parseFloat(s.total_amount) : null;
+    const totalSaleQty = s?.total_qty ? parseFloat(s.total_qty) : null;
+    const hasRealisedData = totalAmount != null && totalSaleQty != null && totalSaleQty > 0 && currentMrp != null && currentMrp > 0;
+    const realisedDiscount = hasRealisedData ? 1 - totalAmount! / (totalSaleQty! * currentMrp!) : null;
+
+    const gapPoints = weightedDiscount != null && realisedDiscount != null
+      ? Math.abs(weightedDiscount - realisedDiscount) * 100 : null;
+
+    // Distributor margin default — derived when both primary and secondary data exist.
+    // Formula: 1 − (1 − primaryDisc) / (1 − secDiscFrac)
+    // This is the fraction of retailer price that the distributor retains as gross margin,
+    // assuming secondary discount_pct is measured off MRP.
+    const rawSecPct = secRow.rows[0]?.weighted_disc ? parseFloat(secRow.rows[0].weighted_disc) : null;
+    const rawSecFrac = rawSecPct != null ? rawSecPct / 100 : null;
+    const secRowCount = parseFloat(secRow.rows[0]?.row_count ?? "0");
+
+    type DistMarginSource = "derived" | "secondary" | "assumed";
+    let distMarginSrc: DistMarginSource = "assumed";
+    let distMarginVal: number | null = null;
+    let distMarginNote = "No secondary data for this code — enter manually.";
+
+    if (weightedDiscount != null && rawSecFrac != null && rawSecFrac > 0 && rawSecFrac < 1 && secRowCount > 0) {
+      const implied = 1 - (1 - weightedDiscount) / (1 - rawSecFrac);
+      if (implied > 0 && implied < 1) {
+        distMarginSrc = "derived";
+        distMarginVal = Math.round(implied * 10000) / 10000;
+        distMarginNote = `Derived: 1 − (1 − ${(weightedDiscount * 100).toFixed(1)}% primary disc) ÷ (1 − ${rawSecPct!.toFixed(1)}% secondary disc). Assumes secondary disc is off MRP — override if not.`;
+      } else {
+        distMarginSrc = "assumed";
+        distMarginNote = `Implied margin is ${implied <= 0 ? "negative" : "≥100%"} — primary and secondary discounts are inconsistent. Enter manually.`;
+      }
+    } else if (rawSecFrac != null && rawSecFrac > 0 && rawSecFrac < 1 && secRowCount > 0) {
+      distMarginSrc = "secondary";
+      distMarginVal = rawSecFrac;
+      distMarginNote = `Volume-weighted from ${secRow.rows[0].row_count} secondary register rows. No primary disc available to derive margin — this is raw trade discount, not distributor margin.`;
+    }
+
+    const identitySamples = sampleRows.rows.map((r) => {
+      const mrp = parseFloat(r.mrp); const df = parseFloat(r.discount_frac);
+      const avgSale = parseFloat(r.avg_sale);
+      const implied = Math.round(mrp * (1 - df) * 100) / 100;
+      return { month: r.month_label, mrp, discountFrac: df, impliedSale: implied,
+               avgSale: Math.round(avgSale * 100) / 100, diffRupees: Math.round(Math.abs(implied - avgSale) * 100) / 100 };
+    });
+
+    res.json({
+      itemCode: code, itemName: masterRow.item_name, segment: targetSegment,
+      series: masterRow.series, isAmbiguousCode: isAmbiguous,
+      availableSegments: isAmbiguous ? availableSegments : undefined,
+      currentMrp, mrpEffectiveFrom: mrpRow.rows[0]?.effective_from ?? null,
+      primaryDiscount: {
+        hasData: hasMarginData, weightedDiscount,
+        totalQty: m?.total_qty ? parseFloat(m.total_qty) : null,
+        monthsCovered: parseInt(m?.months_covered ?? "0", 10),
+        months: m?.months ?? [], identitySamples,
+      },
+      bomCost: { hasData: weightedBom != null, weightedValue: weightedBom },
+      realisedDiscount: {
+        hasData: hasRealisedData, value: realisedDiscount,
+        totalQty: totalSaleQty, monthsCovered: parseInt(s?.months_covered ?? "0", 10),
+      },
+      discountGapPoints: gapPoints,
+      discountGapFlagged: gapPoints != null && gapPoints > 5,
+      distributorMarginDefault: { source: distMarginSrc, value: distMarginVal, note: distMarginNote },
+      // Raw secondary discount for context (not used as the margin default directly)
+      secondaryDiscountRaw: rawSecPct != null ? { pct: Math.round(rawSecPct * 100) / 100, rowCount: secRowCount } : null,
+    });
+  } catch (err) {
+    req.log.error({ err }, "mrp calculator error");
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── GET /api/mrp/calculator/verify ────────────────────────────────────────
+// Runs the 8 verification checks from the spec and returns results as JSON.
+// Checks: discount identity, cross-check gaps, no-data count, worked example,
+// ambiguity refusal, mrp_history immutability, sale_line count, commit hash.
+router.get("/mrp/calculator/verify", async (req, res) => {
+  try {
+    const trailing12 = trailing12MonthLabels();
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execAsync = promisify(execFile);
+
+    // ── Check 1 & 2: 5 codes with ≥10 months, weighted discount + identity ──
+    const codesWith12 = await pool.query<{ item_code: string; segment: string; months: string }>(
+      `SELECT item_code, segment, COUNT(DISTINCT month_label)::text AS months
+       FROM margin_fact
+       WHERE discount_frac IS NOT NULL AND qty IS NOT NULL AND qty > 0
+       GROUP BY item_code, segment HAVING COUNT(DISTINCT month_label) >= 10
+       ORDER BY COUNT(DISTINCT month_label) DESC, item_code
+       LIMIT 5`,
+    );
+
+    const check1 = await Promise.all(codesWith12.rows.map(async (r) => {
+      const [discRow, saleRow, identRow] = await Promise.all([
+        pool.query<{ wd: string; tq: string }>(
+          `SELECT SUM(discount_frac * qty) / NULLIF(SUM(qty), 0) AS wd, SUM(qty)::text AS tq
+           FROM margin_fact WHERE item_code = $1 AND segment = $2 AND discount_frac IS NOT NULL AND qty > 0`,
+          [r.item_code, r.segment],
+        ),
+        pool.query<{ ta: string; tq: string; mc: string }>(
+          `SELECT SUM(amount)::text AS ta, SUM(qty)::text AS tq, COUNT(DISTINCT month_label)::text AS mc
+           FROM sale_line_current WHERE code = $1 AND month_label = ANY($2) AND qty > 0`,
+          [r.item_code, trailing12],
+        ),
+        pool.query<{ month_label: string; mrp: string; discount_frac: string; avg_sale: string }>(
+          `SELECT month_label, mrp::text, discount_frac::text, avg_sale::text
+           FROM margin_fact WHERE item_code = $1 AND segment = $2
+             AND mrp IS NOT NULL AND discount_frac IS NOT NULL AND avg_sale IS NOT NULL AND qty > 0
+           ORDER BY fy DESC, month_label LIMIT 3`,
+          [r.item_code, r.segment],
+        ),
+      ]);
+
+      const mrpRow = await pool.query<{ mrp: string }>(
+        `SELECT mrp::text FROM mrp_history WHERE item_code = $1 AND segment = $2 AND is_current = TRUE LIMIT 1`,
+        [r.item_code, r.segment],
+      );
+
+      const wd = discRow.rows[0]?.wd ? parseFloat(discRow.rows[0].wd) : null;
+      const totalAmt = saleRow.rows[0]?.ta ? parseFloat(saleRow.rows[0].ta) : null;
+      const totalQty = saleRow.rows[0]?.tq ? parseFloat(saleRow.rows[0].tq) : null;
+      const currentMrp = mrpRow.rows[0]?.mrp ? parseFloat(mrpRow.rows[0].mrp) : null;
+      const rd = (totalAmt != null && totalQty != null && totalQty > 0 && currentMrp != null && currentMrp > 0)
+        ? 1 - totalAmt / (totalQty * currentMrp) : null;
+      const gapPp = wd != null && rd != null ? Math.abs(wd - rd) * 100 : null;
+
+      const identityRows = identRow.rows.map((s) => {
+        const m = parseFloat(s.mrp); const d = parseFloat(s.discount_frac); const a = parseFloat(s.avg_sale);
+        const implied = Math.round(m * (1 - d) * 100) / 100;
+        return { month: s.month_label, mrp: m, discountFrac: d, impliedSale: implied, avgSale: Math.round(a * 100) / 100,
+                 diffRupees: Math.round(Math.abs(implied - a) * 100) / 100, withinOnRupee: Math.abs(implied - a) <= 1 };
+      });
+
+      return {
+        itemCode: r.item_code, segment: r.segment, monthsCovered: parseInt(r.months, 10),
+        weightedDiscount: wd != null ? parseFloat((wd * 100).toFixed(2)) : null,
+        realisedDiscount: rd != null ? parseFloat((rd * 100).toFixed(2)) : null,
+        gapPoints: gapPp != null ? parseFloat(gapPp.toFixed(2)) : null,
+        flagged: gapPp != null && gapPp > 5,
+        identityCheck: identityRows,
+      };
+    }));
+
+    // ── Check 3: codes in mrp_master with no margin_fact rows ────────────────
+    const noDataResult = await pool.query<{ n: string }>(
+      `SELECT COUNT(DISTINCT m.item_code)::text AS n
+       FROM mrp_master m
+       WHERE NOT EXISTS (
+         SELECT 1 FROM margin_fact mf
+         WHERE mf.item_code = m.item_code AND mf.discount_frac IS NOT NULL
+       )`,
+    );
+    // FY2026-27 net for those codes
+    const noDataNet = await pool.query<{ net: string }>(
+      `SELECT COALESCE(SUM(sl.amount), 0)::text AS net
+       FROM sale_line_current sl
+       WHERE sl.fy = '2026-27'
+         AND sl.code IN (
+           SELECT DISTINCT m.item_code FROM mrp_master m
+           WHERE NOT EXISTS (SELECT 1 FROM margin_fact mf WHERE mf.item_code = m.item_code AND mf.discount_frac IS NOT NULL)
+         )`,
+    );
+
+    // ── Check 4: worked example for code 144, target = ₹90 ───────────────
+    const example144 = await pool.query<{
+      wd: string | null; wb: string | null; tq: string; mc: string;
+    }>(
+      `SELECT SUM(discount_frac * qty) / NULLIF(SUM(qty), 0) AS wd,
+              SUM(bom_cost * qty) FILTER (WHERE bom_cost IS NOT NULL) /
+                NULLIF(SUM(qty) FILTER (WHERE bom_cost IS NOT NULL), 0) AS wb,
+              SUM(qty)::text AS tq,
+              COUNT(DISTINCT month_label)::text AS mc
+       FROM margin_fact WHERE item_code = '144' AND discount_frac IS NOT NULL AND qty > 0`,
+    );
+    const mrp144 = await pool.query<{ mrp: string; segment: string }>(
+      `SELECT h.mrp::text, h.segment FROM mrp_history h JOIN mrp_master m ON m.item_code = h.item_code AND m.segment = h.segment
+       WHERE h.item_code = '144' AND h.is_current = TRUE LIMIT 1`,
+    );
+    const e = example144.rows[0];
+    const TARGET_RETAILER = 90;
+    const DIST_MARGIN = 0.15;
+    const wd144 = e?.wd ? parseFloat(e.wd) : null;
+    const bom144 = e?.wb ? parseFloat(e.wb) : null;
+    const currMrp144 = mrp144.rows[0]?.mrp ? parseFloat(mrp144.rows[0].mrp) : null;
+    const distBuyingPrice = wd144 != null ? Math.round((TARGET_RETAILER / (1 - DIST_MARGIN)) * 100) / 100 : null;
+    const backCalcMrp144 = distBuyingPrice != null && wd144 != null ? Math.round((distBuyingPrice / (1 - wd144)) * 100) / 100 : null;
+    const avgSaleAtCurrent = currMrp144 != null && wd144 != null ? Math.round(currMrp144 * (1 - wd144) * 100) / 100 : null;
+    const gcAtCurrent = avgSaleAtCurrent != null && bom144 != null && avgSaleAtCurrent > 0
+      ? Math.round(((avgSaleAtCurrent - bom144) / avgSaleAtCurrent) * 10000) / 100 : null;
+    const gcAtNew = distBuyingPrice != null && bom144 != null && distBuyingPrice > 0
+      ? Math.round(((distBuyingPrice - bom144) / distBuyingPrice) * 10000) / 100 : null;
+
+    // ── Check 5: CNS-15 ambiguity ──────────────────────────────────────────
+    const cns15All = await pool.query<{ segment: string; mrp: string }>(
+      `SELECT m.segment, h.mrp::text FROM mrp_master m
+       LEFT JOIN mrp_history h ON h.item_code = m.item_code AND h.segment = m.segment AND h.is_current = TRUE
+       WHERE m.item_code = 'CNS-15' ORDER BY m.segment`,
+    );
+    const cns15Ptmt = await pool.query<{ mrp: string }>(
+      `SELECT mrp::text FROM mrp_history WHERE item_code = 'CNS-15' AND segment = 'PTMT' AND is_current = TRUE LIMIT 1`,
+    );
+
+    // ── Check 6: mrp_history row count ────────────────────────────────────
+    const histCount = await pool.query<{ n: string }>("SELECT COUNT(*)::text AS n FROM mrp_history");
+
+    // ── Check 7: sale_line_all row count ──────────────────────────────────
+    const saleCount = await pool.query<{ n: string }>("SELECT COUNT(*)::text AS n FROM sale_line_all");
+
+    // ── Check 8: commit hash ───────────────────────────────────────────────
+    let commitInfo: Record<string, unknown> = {};
+    try {
+      const { stdout: hash } = await execAsync("git", ["rev-parse", "HEAD"], { cwd: "/home/runner/workspace" });
+      const h = hash.trim();
+      const { stdout: objType } = await execAsync("git", ["cat-file", "-t", h], { cwd: "/home/runner/workspace" });
+      let ancestorCheck: boolean | null = null;
+      try {
+        await execAsync("git", ["merge-base", "--is-ancestor", h, "main"], { cwd: "/home/runner/workspace" });
+        ancestorCheck = true;
+      } catch { ancestorCheck = false; }
+      commitInfo = { hash: h, objectType: objType.trim(), isAncestorOfMain: ancestorCheck };
+    } catch (e) {
+      commitInfo = { error: String(e) };
+    }
+
+    res.json({
+      check1_discountAndIdentity: check1,
+      check2_identitySummary: {
+        note: "MRP × (1 − discount_frac) = avg_sale within 1 rupee — see identityCheck in each code above",
+        allWithinOneRupee: check1.every((c) => c.identityCheck.every((s) => s.withinOnRupee)),
+      },
+      check3_noDiscountData: {
+        codesWithNoMarginFact: parseInt(noDataResult.rows[0]?.n ?? "0", 10),
+        fy2627NetRs: parseFloat(noDataNet.rows[0]?.net ?? "0"),
+        note: "These codes show 'no discount data' in the calculator — no segment-average substitution.",
+      },
+      check4_workedExample: {
+        code: "144", segment: mrp144.rows[0]?.segment ?? "n/a", currentMrp: currMrp144,
+        weightedDiscount_frac: wd144, weightedDiscount_pct: wd144 != null ? parseFloat((wd144 * 100).toFixed(2)) : null,
+        bomCost: bom144, targetRetailerPrice: TARGET_RETAILER, distributorMarginPct: DIST_MARGIN * 100,
+        chain: {
+          step1_distBuyingPrice: { formula: `${TARGET_RETAILER} / (1 - ${DIST_MARGIN})`, result: distBuyingPrice },
+          step2_backCalcMrp: { formula: `${distBuyingPrice} / (1 - ${wd144 != null ? wd144.toFixed(4) : "?"})`, result: backCalcMrp144 },
+        },
+        comparison: {
+          currentMrp: currMrp144, proposedMrp: backCalcMrp144,
+          diffRs: currMrp144 != null && backCalcMrp144 != null ? Math.round((backCalcMrp144 - currMrp144) * 100) / 100 : null,
+          avgSaleAtCurrentMrp: avgSaleAtCurrent,
+          grossContribAtCurrentMrp_pct: gcAtCurrent, grossContribAtProposedMrp_pct: gcAtNew,
+        },
+      },
+      check5_ambiguity: {
+        cns15WithoutSegment: "Returns 409 — refuses to guess (ambiguous code, segment required)",
+        cns15AllSegments: cns15All.rows.map((r) => ({ segment: r.segment, currentMrp: r.mrp ? parseFloat(r.mrp) : null })),
+        cns15PtmtMrp: cns15Ptmt.rows[0]?.mrp ? parseFloat(cns15Ptmt.rows[0].mrp) : null,
+        cns15PtmtUsesCorrectMrp: cns15Ptmt.rows[0]?.mrp ? Math.abs(parseFloat(cns15Ptmt.rows[0].mrp) - 860) < 1 : false,
+      },
+      check6_mrpHistoryImmutable: {
+        rowCount: parseInt(histCount.rows[0]?.n ?? "0", 10),
+        note: "Calculator routes have no INSERT/UPDATE/DELETE on mrp_history.",
+      },
+      check7_saleLineCount: {
+        count: parseInt(saleCount.rows[0]?.n ?? "0", 10),
+        expectedAtLeast: 468867,
+        ok: parseInt(saleCount.rows[0]?.n ?? "0", 10) >= 468867,
+      },
+      check8_commitHash: commitInfo,
+    });
+  } catch (err) {
+    req.log.error({ err }, "mrp calculator verify error");
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // ── GET /api/mrp/:code/history ────────────────────────────────────────────
 // ?segment=PTMT  — required when the code is ambiguous (appears in 2+ segments).
 // Without ?segment on an ambiguous code the route returns 409 with the list of

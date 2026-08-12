@@ -83,6 +83,7 @@ export async function listDriveFolder(folderId: string): Promise<DriveApiFile[]>
       "fields",
       "nextPageToken, files(id, name, mimeType, modifiedTime, size)",
     );
+    params.set("spaces", "drive");
     params.set("supportsAllDrives", "true");
     params.set("includeItemsFromAllDrives", "true");
     if (pageToken) params.set("pageToken", pageToken);
@@ -107,20 +108,38 @@ export async function listDriveFolder(folderId: string): Promise<DriveApiFile[]>
   return all;
 }
 
-// ── Download the raw bytes of a non-native Drive file (e.g. xlsx). ────────
-export async function downloadDriveFileBuffer(fileId: string): Promise<Buffer> {
+// ── Download or export a Drive file as xlsx bytes. ───────────────────────
+// • Native Google Sheets → use the /export endpoint (converts to xlsx on the fly).
+// • Uploaded xlsx / xls files → use alt=media (direct download).
+// Uses Promise.race for the timeout — the Replit connector does NOT support
+// AbortController.signal, so we race a rejection promise instead.
+export async function downloadDriveFileBuffer(
+  fileId: string,
+  mimeType?: string,
+  timeoutMs = 45_000,
+): Promise<Buffer> {
   const connectors = new ReplitConnectors();
-  const response = await connectors.proxy(
-    "google-drive",
-    `/drive/v3/files/${fileId}?alt=media`,
-    { method: "GET" },
+  const isNativeSheet = mimeType === "application/vnd.google-apps.spreadsheet";
+  const url = isNativeSheet
+    ? `/drive/v3/files/${fileId}/export?mimeType=application%2Fvnd.openxmlformats-officedocument.spreadsheetml.sheet`
+    : `/drive/v3/files/${fileId}?alt=media`;
+
+  const timeoutP = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(`Drive download timed out after ${timeoutMs}ms`)), timeoutMs),
   );
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`Drive download error ${response.status}: ${body}`);
-  }
-  const ab = await response.arrayBuffer();
-  return Buffer.from(ab);
+
+  const downloadP = connectors
+    .proxy("google-drive", url, { method: "GET" })
+    .then(async (response) => {
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        throw new Error(`Drive download error ${response.status}: ${body}`);
+      }
+      const ab = await response.arrayBuffer();
+      return Buffer.from(ab);
+    });
+
+  return Promise.race([downloadP, timeoutP]);
 }
 
 // ── Search for folders whose name contains a given string. ────────────────

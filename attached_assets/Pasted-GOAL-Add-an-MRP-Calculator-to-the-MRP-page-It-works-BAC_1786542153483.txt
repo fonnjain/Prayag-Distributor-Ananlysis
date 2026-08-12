@@ -1,0 +1,97 @@
+GOAL
+Add an MRP Calculator to the MRP page. It works BACKWARDS from the price that
+matters commercially - what the retailer pays - to the MRP that produces it.
+
+Today MRP is an input and the net price is whatever falls out. That is the
+wrong way round. MRP is a printed number; the net price is the commercial
+reality. This calculator makes MRP the output.
+
+THE CHAIN - two steps
+  target retailer buying price
+    / (1 - distributor margin)   -> distributor buying price
+    / (1 - primary discount)     -> BACK-CALCULATED MRP
+
+Both steps are user-editable with a stated default. Show the value at each
+step, not just the final MRP.
+
+What the retailer charges a walk-in customer is out of scope. Do not model it,
+do not ask for it, do not display a consumer price anywhere.
+
+THE PRIMARY DISCOUNT - confirmed source
+Use the Discount column from the GP MARGIN workbooks (margin_fact.
+discount_frac), matched per item_code, volume-weighted over the TRAILING 12
+MONTHS.
+
+  weighted_discount = SUM(discount_frac x qty) / SUM(qty)   over 12 months
+
+That column is a FRACTION of MRP given away, not a percentage. Verified on
+code 144: MRP 216.40, discount 0.5353, AVG SALE 100.55, and
+216.40 x (1 - 0.5353) = 100.56. Confirm this identity holds on load for a
+sample and report any code where it does not.
+
+Show the register's realised MRP discount BESIDE it as a cross-check. If the
+two differ by more than 5 points, flag it - the margin workbook is the plan,
+the register is what happened, and a gap between them is a finding.
+
+NO DISCOUNT DATA
+Where a code has no margin_fact rows in the trailing 12 months, display
+"no discount data" and require the user to enter one. Do NOT substitute a
+segment average, a company average, or the last known value. A silently
+inferred discount produces a confidently wrong MRP.
+
+THE DISTRIBUTOR MARGIN
+Default from the secondary register discount where the code has secondary
+activity. User-editable. Store the SOURCE of the value alongside it -
+assumed | survey | user - and display it. The Market Survey page will supply
+better values for this later; building the source field now means that swap
+needs no rework.
+
+WHAT THE CALCULATOR SHOWS
+For a chosen item code, side by side:
+  current MRP (from mrp_history, with its effective date and segment)
+  back-calculated MRP
+  the difference, in rupees and percent
+  the value at every step of the chain
+  bom_cost and the resulting gross contribution at the NEW price
+  the same at the CURRENT price, so the margin consequence is visible
+
+If bom_cost is unavailable for that code, say so. Never show a contribution
+figure computed from a missing cost.
+
+BOM cost is FACTORY cost - no freight, overhead or SG&A. Label every derived
+figure GROSS CONTRIBUTION, never "profit" or "margin" unqualified.
+
+AMBIGUOUS CODES
+56 codes exist in two segments with different products and different MRPs
+(CNS-15 is a Concealed Stop Cock in PTMT at Rs 860 and a different item in CP
+at Rs 1,020). The calculator must resolve on (item_code, segment), never on
+code alone. If a code is ambiguous and no segment is given, refuse and ask -
+do not pick one.
+
+IT PROPOSES, A HUMAN APPROVES
+The calculator NEVER writes to mrp_history. It produces a proposal. Writing a
+new MRP requires an explicit separate action with a confirmation step showing
+what changes and the margin impact. No auto-apply and no bulk apply in this
+task.
+
+VERIFY - produced values, and a hash that resolves
+1. Pick 5 codes with margin data across all 12 months. For each print:
+   trailing-12-month volume-weighted discount, the register's realised
+   discount, and the difference. Flag any above 5 points.
+2. Confirm the identity MRP x (1 - discount_frac) = AVG SALE holds within
+   1 rupee on those 5 codes. Print the arithmetic.
+3. Count of codes in mrp_master with NO margin_fact rows in the trailing 12
+   months - these show "no discount data". Print the count and their
+   FY2026-27 net.
+4. Worked example: take code 144, a target retailer buying price of your
+   choosing, and print every step of the chain to the back-calculated MRP,
+   then compare against its current MRP and show the gross contribution at
+   both prices.
+5. Ambiguity: run the calculator on CNS-15 without a segment. Confirm it
+   refuses rather than picking one. Then run it for PTMT and confirm it uses
+   Rs 860, not Rs 1,020.
+6. Confirm mrp_history is UNCHANGED by using the calculator - same row count
+   before and after.
+7. Confirm sale_line unchanged at 468,867.
+8. Commit hash, git cat-file -t, git merge-base --is-ancestor <hash> main
+   with exit code.

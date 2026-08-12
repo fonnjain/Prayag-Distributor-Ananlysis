@@ -99,8 +99,31 @@ router.get("/margin/list", async (req, res) => {
   }
 });
 
+// In-memory job state for the long-running load (177+ Drive exports take 15+ min).
+// Only one load can run at a time; subsequent requests return the current status.
+type JobState =
+  | { status: "idle" }
+  | { status: "running"; startedAt: string }
+  | { status: "done"; finishedAt: string; report: object }
+  | { status: "error"; finishedAt: string; error: string };
+
+let loadJob: JobState = { status: "idle" };
+
+// ── GET /api/admin/margin/load-status ─────────────────────────────────────
+router.get("/admin/margin/load-status", (req, res) => {
+  const token = String(req.headers["x-admin-secret"] ?? "").trim();
+  if (!isAdminToken(token)) {
+    res.status(401).json({ error: "Admin authorisation required." });
+    return;
+  }
+  res.json(loadJob);
+});
+
 // ── POST /api/admin/margin/load ────────────────────────────────────────────
-router.post("/admin/margin/load", async (req, res) => {
+// Returns 202 immediately; runs the load in the background.
+// Poll GET /api/admin/margin/load-status (same X-Admin-Secret header) to track progress.
+// Poll GET /api/margin/stats to see rows land in real time.
+router.post("/admin/margin/load", (req, res) => {
   const token = String(req.headers["x-admin-secret"] ?? "").trim();
   if (!isAdminToken(token)) {
     res.status(401).json({
@@ -109,26 +132,56 @@ router.post("/admin/margin/load", async (req, res) => {
     return;
   }
 
-  try {
-    const report = await loadGpMarginFiles();
-    res.json({
-      ok: true,
-      filesScanned:  report.filesScanned,
-      filesLoaded:   report.filesLoaded,
-      filesCumulative: report.filesCumulative,
-      filesSummary:    report.filesSummary,
-      filesUnknown:    report.filesUnknown,
-      rowsInserted:    report.rowsInserted,
-      rowsByFySegment: report.rowsByFySegment,
-      distinctCodes:   report.distinctCodes,
-      cumulativeValidation: report.cumulativeValidation,
-      cumulativeFlags:      report.cumulativeValidation.filter((c) => c.flag).length,
-      negativeContributionCount: report.negativeContributionCount,
-      negativeContributionTop10: report.negativeContributionTop10,
+  if (loadJob.status === "running") {
+    res.status(409).json({
+      error: "A load is already in progress.",
+      startedAt: (loadJob as { status: "running"; startedAt: string }).startedAt,
+      tip: "Poll GET /api/admin/margin/load-status for progress.",
     });
-  } catch (err) {
-    res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
+    return;
   }
+
+  const startedAt = new Date().toISOString();
+  loadJob = { status: "running", startedAt };
+  res.status(202).json({
+    ok: true,
+    status: "running",
+    startedAt,
+    message:
+      "Load started in the background (177+ Drive exports, ~15 min). " +
+      "Poll GET /api/admin/margin/load-status with the same X-Admin-Secret header. " +
+      "Rows appear in GET /api/margin/stats as they land.",
+  });
+
+  // Fire-and-forget — do NOT await
+  loadGpMarginFiles()
+    .then((report) => {
+      loadJob = {
+        status: "done",
+        finishedAt: new Date().toISOString(),
+        report: {
+          filesScanned:  report.filesScanned,
+          filesLoaded:   report.filesLoaded,
+          filesCumulative: report.filesCumulative,
+          filesSummary:    report.filesSummary,
+          filesUnknown:    report.filesUnknown,
+          rowsInserted:    report.rowsInserted,
+          rowsByFySegment: report.rowsByFySegment,
+          distinctCodes:   report.distinctCodes,
+          cumulativeValidation: report.cumulativeValidation,
+          cumulativeFlags:      report.cumulativeValidation.filter((c) => c.flag).length,
+          negativeContributionCount: report.negativeContributionCount,
+          negativeContributionTop10: report.negativeContributionTop10,
+        },
+      };
+    })
+    .catch((err) => {
+      loadJob = {
+        status: "error",
+        finishedAt: new Date().toISOString(),
+        error: String(err instanceof Error ? err.message : err),
+      };
+    });
 });
 
 export default router;
