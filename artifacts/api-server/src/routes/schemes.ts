@@ -17,6 +17,7 @@ import {
   computeNudgeList,
   buildCockpit,
   computeAnnualTracker,
+  computeSuccessList,
   getQuarterMonths,
 } from "../lib/schemes/nudge.js";
 import { getBlockedCustomers } from "../lib/schemes/dues.js";
@@ -112,6 +113,26 @@ router.get("/schemes/annual", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "schemes/annual error");
     res.status(500).json({ error: "Failed to compute annual tracker" });
+  }
+});
+
+// ── Success list ──────────────────────────────────────────────────────────────
+//
+// GET /api/schemes/success?fy=2026-27&q=Q2&head=&family=
+//   Distributors who have already crossed at least one slab this quarter,
+//   ranked by earned ₹. Includes settlement breakdown (company / pass_through / primary).
+
+router.get("/schemes/success", async (req, res) => {
+  const fy = String(req.query.fy ?? currentOpenFy());
+  const q = await resolveQ(req.query.q, fy);
+  const head = String(req.query.head ?? "");
+
+  try {
+    const result = await computeSuccessList(fy, q, head);
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "schemes/success error");
+    res.status(500).json({ error: "Failed to compute success list" });
   }
 });
 

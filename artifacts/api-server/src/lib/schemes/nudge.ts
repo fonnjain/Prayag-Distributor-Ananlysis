@@ -69,7 +69,21 @@ export type SchemeConfig = {
   territoryStates: Set<string>;
   /** Audience types eligible for this scheme (e.g. ['sub_dealer'], ['direct_dealer','sub_dealer']) */
   audience: string[];
+  /** Settlement channel: 'company' | 'pass_through' | 'primary' | null */
+  settlement: string | null;
 };
+
+// ── Scheme family classification ───────────────────────────────────────────────
+
+export type SchemeFamily = "cp" | "ptmt" | "annual" | "other";
+
+export function schemeFamily(schemeId: string): SchemeFamily {
+  const id = schemeId.toUpperCase();
+  if (id.startsWith("Q_CP") || id.startsWith("SB_CP")) return "cp";
+  if (id.startsWith("Q_PTMT") || id.startsWith("SB_PTMT")) return "ptmt";
+  if (id.startsWith("A_") || id.includes("ANNUAL")) return "annual";
+  return "other";
+}
 
 // ── Quarter helpers ───────────────────────────────────────────────────────────
 
@@ -129,6 +143,7 @@ interface DbSchemeRow {
   period_from: string;
   period_to: string | null;
   audience: string[];
+  settlement: string | null;
   slab_order: number;
   threshold_from: string;
   rate: string | null;
@@ -167,6 +182,7 @@ async function loadSchemesFromDb(): Promise<{
         s.period_from::text,
         s.period_to::text,
         s.audience,
+        s.settlement,
         ss.slab_order,
         ss.threshold_from::text,
         ss.rate::text,
@@ -231,6 +247,7 @@ async function loadSchemesFromDb(): Promise<{
         territoryGroup: tgRaw,
         territoryStates,
         audience: row.audience ?? [],
+        settlement: row.settlement ?? null,
       };
       schemeMap.set(row.scheme_id, config);
     }
@@ -859,4 +876,220 @@ export async function computeAnnualTracker(
       schemeId: annualSchemeId,
     };
   });
+}
+
+// ── Success List ───────────────────────────────────────────────────────────────
+//
+// Distributors who have already crossed at least one slab this quarter.
+//
+// KEY DESIGN: Unlike computeNudgeList, which unions all quarterly scheme
+// audiences into a single SQL filter (causing schemes with a narrower audience
+// to apply their exclusion across all schemes), computeSuccessList groups
+// schemes by their audience signature and runs one DB query per group. This
+// ensures each scheme's eligibility rules apply only to that scheme's rows.
+//
+// Example: if Q_CP has audience=['sub_dealer'] and Q_DIST has
+// audience=['distributor'], they are executed as two separate queries so
+// registered distributors are correctly included for Q_DIST and excluded for
+// Q_CP, rather than being excluded from both because sub_dealer is in the
+// union.
+
+export type SuccessRow = {
+  customer: string;
+  stateHead: string | null;
+  schemeId: string;
+  basketName: string;
+  family: SchemeFamily;
+  settlement: string | null;
+  billedSoFar: number;
+  currentSlab: number;        // threshold of the slab they're at
+  currentRate: number;        // rate at that slab (fraction, e.g. 0.02 = 2%)
+  earnedRs: number;           // billedSoFar × currentRate
+  isAtMax: boolean;           // no next slab exists
+};
+
+export type SuccessResult = {
+  fy: string;
+  quarter: string;
+  months: string[];
+  rows: SuccessRow[];
+  totalEarnedRs: number;
+  totalCompanyCost: number;     // sum where settlement = 'company'
+  totalPassThrough: number;     // sum where settlement = 'pass_through'
+  totalPrimary: number;         // sum where settlement = 'primary'
+  byFamily: Array<{
+    family: SchemeFamily;
+    count: number;
+    totalEarnedRs: number;
+    settlement: string | null;
+  }>;
+};
+
+function emptySuccessResult(fy: string, q: string, months: string[]): SuccessResult {
+  return { fy, quarter: q, months, rows: [], totalEarnedRs: 0,
+    totalCompanyCost: 0, totalPassThrough: 0, totalPrimary: 0, byFamily: [] };
+}
+
+export async function computeSuccessList(
+  fy: string,
+  q: "Q1" | "Q2" | "Q3" | "Q4",
+  head: string = "",
+): Promise<SuccessResult> {
+  const months = getQuarterMonths(fy, q);
+  if (!months.length) return emptySuccessResult(fy, q, months);
+
+  const { schemeMap, basketMap } = await loadSchemesFromDb();
+
+  // Quarterly schemes only
+  const quarterlySchemes = [...schemeMap.values()].filter(
+    (s) => s.basis === "cumulative_quarter",
+  );
+  if (!quarterlySchemes.length) return emptySuccessResult(fy, q, months);
+
+  // Group quarterly schemes by audience signature so each group gets its own
+  // SQL query with the correct audience filter (not a union across all schemes).
+  const audienceGroups = new Map<string, SchemeConfig[]>();
+  for (const scheme of quarterlySchemes) {
+    const sig = [...scheme.audience].sort().join("|");
+    const group = audienceGroups.get(sig) ?? [];
+    group.push(scheme);
+    audienceGroups.set(sig, group);
+  }
+
+  // Accumulate (customer, scheme_id) billing buckets across all audience groups.
+  const buckets = new Map<
+    string,
+    { customer: string; schemeId: string; stateHead: string | null; total: number }
+  >();
+
+  for (const schemes of audienceGroups.values()) {
+    const schemeIds = new Set(schemes.map((s) => s.id));
+
+    // Collect item_groups whose basketMap entry includes at least one scheme
+    // from this audience group.
+    const groupsForAudience: string[] = [];
+    for (const [ig, ids] of basketMap.entries()) {
+      if (ids.some((id) => schemeIds.has(id))) groupsForAudience.push(ig);
+    }
+    if (!groupsForAudience.length) continue;
+
+    // Build the audience filter using this group's shared audience signature.
+    const audienceFilter = buildAudienceFilterSQL(schemes[0].audience, "sl");
+
+    const monthPh = months.map((_, i) => `$${i + 2}`).join(", ");
+    const groupPh = groupsForAudience.map((_, i) => `$${months.length + 2 + i}`).join(", ");
+    const headIdx = months.length + groupsForAudience.length + 2;
+
+    const sql = `
+      SELECT
+        sl.customer,
+        sl.group_raw,
+        sl.state_canon,
+        sl.head_canon AS state_head,
+        SUM(sl.amount::numeric) AS total_amount
+      FROM sale_line_current sl
+      WHERE sl.fy = $1
+        AND sl.month_label IN (${monthPh})
+        AND sl.group_raw IN (${groupPh})
+        AND (sl.is_territory IS NULL OR sl.is_territory = true)
+        AND ($${headIdx}::text = '' OR sl.head_canon = $${headIdx}::text)
+        ${audienceFilter}
+      GROUP BY sl.customer, sl.group_raw, sl.state_canon, sl.head_canon
+      ORDER BY SUM(sl.amount::numeric) DESC
+    `;
+
+    const params: (string | string[])[] = [fy, ...months, ...groupsForAudience, head];
+    const { rows: dbRows } = await pool.query<{
+      customer: string;
+      group_raw: string;
+      state_canon: string | null;
+      state_head: string | null;
+      total_amount: string;
+    }>(sql, params);
+
+    for (const row of dbRows) {
+      const customer = row.customer ?? "";
+      if (!customer || isExcluded(customer)) continue;
+
+      // Only consider scheme IDs in this audience group (not all quarterly)
+      const candidateIds = (basketMap.get(row.group_raw) ?? []).filter((id) =>
+        schemeIds.has(id),
+      );
+      if (!candidateIds.length) continue;
+
+      const resolvedId = resolveSchemeForState(row.state_canon, candidateIds, schemeMap);
+      if (!resolvedId) continue;
+
+      const key = `${customer}|${resolvedId}`;
+      const amount = parseFloat(row.total_amount ?? "0");
+      const existing = buckets.get(key);
+      if (existing) {
+        existing.total += amount;
+      } else {
+        buckets.set(key, {
+          customer,
+          schemeId: resolvedId,
+          stateHead: row.state_head,
+          total: amount,
+        });
+      }
+    }
+  }
+
+  // Compute success rows: only those who've crossed at least one ₹ slab
+  // (rate != null). Trip-only slabs (rate = null) are excluded — they earn a
+  // trip, not a ₹ payout, so they don't belong in the settlement breakdown.
+  const rows: SuccessRow[] = [];
+  for (const { customer, schemeId, stateHead, total: billedSoFar } of buckets.values()) {
+    const scheme = schemeMap.get(schemeId);
+    if (!scheme) continue;
+
+    const currentSlab = getCurrentSlab(scheme.slabs, billedSoFar);
+    if (!currentSlab || currentSlab.rate == null || currentSlab.rate === 0) continue;
+
+    const nextSlab = getNextSlab(scheme.slabs, billedSoFar);
+    rows.push({
+      customer,
+      stateHead,
+      schemeId,
+      basketName: scheme.name,
+      family: schemeFamily(schemeId),
+      settlement: scheme.settlement,
+      billedSoFar,
+      currentSlab: currentSlab.threshold,
+      currentRate: currentSlab.rate,
+      earnedRs: billedSoFar * currentSlab.rate,
+      isAtMax: !nextSlab,
+    });
+  }
+
+  rows.sort((a, b) => b.earnedRs - a.earnedRs);
+
+  // Settlement and family rollups
+  let totalCompanyCost = 0, totalPassThrough = 0, totalPrimary = 0;
+  const familyMap = new Map<SchemeFamily, { count: number; totalEarnedRs: number; settlement: string | null }>();
+  for (const r of rows) {
+    if (r.settlement === "company") totalCompanyCost += r.earnedRs;
+    else if (r.settlement === "pass_through") totalPassThrough += r.earnedRs;
+    else if (r.settlement === "primary") totalPrimary += r.earnedRs;
+
+    const cur = familyMap.get(r.family) ?? { count: 0, totalEarnedRs: 0, settlement: r.settlement };
+    cur.count++;
+    cur.totalEarnedRs += r.earnedRs;
+    familyMap.set(r.family, cur);
+  }
+
+  return {
+    fy,
+    quarter: q,
+    months,
+    rows,
+    totalEarnedRs: rows.reduce((s, r) => s + r.earnedRs, 0),
+    totalCompanyCost,
+    totalPassThrough,
+    totalPrimary,
+    byFamily: [...familyMap.entries()]
+      .map(([family, v]) => ({ family, ...v }))
+      .sort((a, b) => b.totalEarnedRs - a.totalEarnedRs),
+  };
 }

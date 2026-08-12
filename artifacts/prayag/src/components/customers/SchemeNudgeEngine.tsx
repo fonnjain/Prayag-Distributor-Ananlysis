@@ -147,10 +147,44 @@ type SchemeMaster = {
   trips: Array<{ label: string; requirement: string; threshold: number }>;
 };
 
+// ── Success types ─────────────────────────────────────────────────────────────
+
+type SuccessRow = {
+  customer: string;
+  stateHead: string | null;
+  schemeId: string;
+  basketName: string;
+  family: "cp" | "ptmt" | "annual" | "other";
+  settlement: string | null;
+  billedSoFar: number;
+  currentSlab: number;
+  currentRate: number;
+  earnedRs: number;
+  isAtMax: boolean;
+};
+
+type SuccessResult = {
+  fy: string;
+  quarter: string;
+  months: string[];
+  rows: SuccessRow[];
+  totalEarnedRs: number;
+  totalCompanyCost: number;
+  totalPassThrough: number;
+  totalPrimary: number;
+  byFamily: Array<{
+    family: string;
+    count: number;
+    totalEarnedRs: number;
+    settlement: string | null;
+  }>;
+};
+
 // ── Tab bar ───────────────────────────────────────────────────────────────────
 
 const TABS = [
   { id: "nudge",   label: "Nudge List"     },
+  { id: "success", label: "Success"        },
   { id: "cockpit", label: "Cockpit"        },
   { id: "annual",  label: "Annual Tracker" },
   { id: "heads",   label: "Sales Head"     },
@@ -174,6 +208,11 @@ export default function SchemeNudgeEngine() {
   const [cockpitData, setCockpitData] = useState<CockpitResult | null>(null);
   const [annualData, setAnnualData] = useState<{ rows: AnnualRow[]; completeMonths: string[] } | null>(null);
   const [masterData, setMasterData] = useState<SchemeMaster | null>(null);
+  const [successData, setSuccessData] = useState<SuccessResult | null>(null);
+  const [successLoading, setSuccessLoading] = useState(false);
+  const [successHeadFilter, setSuccessHeadFilter] = useState("all");
+  const [successFamilyFilter, setSuccessFamilyFilter] = useState("all");
+  const [successSearch, setSuccessSearch] = useState("");
 
   const [schemeFilter, setSchemeFilter] = useState<string>("all");
   const [headFilter, setHeadFilter] = useState<string>("all");
@@ -212,9 +251,19 @@ export default function SchemeNudgeEngine() {
       .catch(() => {});
   }
 
+  function fetchSuccess() {
+    setSuccessLoading(true);
+    fetch(`/api/schemes/success?fy=${fy}&q=${quarter}`)
+      .then((r) => r.json() as Promise<SuccessResult>)
+      .then(setSuccessData)
+      .catch(() => {})
+      .finally(() => setSuccessLoading(false));
+  }
+
   useEffect(() => { fetchNudge(); }, [fy, quarter]);
   useEffect(() => { if (tab === "annual" && !annualData) fetchAnnual(); }, [tab]);
   useEffect(() => { if (tab === "master" && !masterData) fetchMaster(); }, [tab]);
+  useEffect(() => { if (tab === "success") fetchSuccess(); }, [tab, fy, quarter]);
 
   // Filtered + sorted nudge rows
   const displayNudges = useMemo(() => {
@@ -271,6 +320,16 @@ export default function SchemeNudgeEngine() {
     }
     return [...map.values()].sort((a, b) => b.extraEarn - a.extraEarn);
   }, [nudgeData]);
+
+  function applySuccessFilters(r: SuccessRow): boolean {
+    if (successFamilyFilter !== "all" && r.family !== successFamilyFilter) return false;
+    if (successHeadFilter !== "all" && (r.stateHead ?? "—") !== successHeadFilter) return false;
+    if (successSearch) {
+      const q = successSearch.toLowerCase();
+      if (!r.customer.toLowerCase().includes(q) && !(r.stateHead ?? "").toLowerCase().includes(q)) return false;
+    }
+    return true;
+  }
 
   function SortBtn({ k }: { k: typeof sortKey }) {
     const active = sortKey === k;
@@ -567,6 +626,163 @@ export default function SchemeNudgeEngine() {
             <div className="text-[10px] text-muted-foreground flex items-center gap-1">
               <AlertTriangle className="h-3 w-3 text-amber-500" />
               Dues check unavailable: {nudgeData.duesError}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── SUCCESS LIST ───────────────────────────────────────────────────── */}
+      {tab === "success" && (
+        <div className="space-y-4">
+          {/* Summary KPI tiles */}
+          {successData && (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <KpiTile label="Distributors earning" value={String(successData.rows.length)} sub={`${qLabel(successData.quarter)} ${successData.fy}`} />
+              <KpiTile label="Total scheme cost" value={inr(successData.totalEarnedRs)} sub="all settled channels" />
+              <KpiTile label="Company cost" value={inr(successData.totalCompanyCost)} sub="Prayag bears" />
+              <KpiTile label="Pass-through" value={inr(successData.totalPassThrough + successData.totalPrimary)} sub="settled via channel" />
+            </div>
+          )}
+
+          {/* By-family summary */}
+          {successData && successData.byFamily.length > 0 && (
+            <div className="overflow-x-auto rounded border">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b bg-muted/50 text-muted-foreground">
+                    <th className="px-3 py-2 text-left font-medium">Scheme family</th>
+                    <th className="px-3 py-2 text-right font-medium">Distributors</th>
+                    <th className="px-3 py-2 text-right font-medium">Total earned</th>
+                    <th className="px-3 py-2 text-left font-medium">Settlement</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {successData.byFamily.map((f) => (
+                    <tr key={f.family} className="border-b last:border-0">
+                      <td className="px-3 py-1.5 font-medium capitalize">{
+                        f.family === "cp" ? "CP / Sink" :
+                        f.family === "ptmt" ? "PTMT" :
+                        f.family === "annual" ? "Annual" : "Other"
+                      }</td>
+                      <td className="px-3 py-1.5 text-right">{f.count}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums font-medium">{inr(f.totalEarnedRs)}</td>
+                      <td className="px-3 py-1.5">
+                        <SettlementBadge settlement={f.settlement} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Filters */}
+          <div className="flex flex-wrap gap-2">
+            <input
+              type="text"
+              placeholder="Search distributor..."
+              value={successSearch}
+              onChange={(e) => setSuccessSearch(e.target.value)}
+              className="h-7 rounded border bg-background px-2 text-xs w-44"
+            />
+            <select
+              className="h-7 rounded border bg-background px-2 text-xs"
+              value={successFamilyFilter}
+              onChange={(e) => setSuccessFamilyFilter(e.target.value)}
+            >
+              <option value="all">All families</option>
+              <option value="cp">CP / Sink</option>
+              <option value="ptmt">PTMT</option>
+              <option value="other">Other</option>
+            </select>
+            <select
+              className="h-7 rounded border bg-background px-2 text-xs"
+              value={successHeadFilter}
+              onChange={(e) => setSuccessHeadFilter(e.target.value)}
+            >
+              <option value="all">All heads</option>
+              {successData
+                ? [...new Set(successData.rows.map((r) => r.stateHead ?? "—"))].sort().map((h) => (
+                    <option key={h} value={h}>{h}</option>
+                  ))
+                : null}
+            </select>
+            <button
+              className="ml-auto h-7 rounded border bg-background px-2 text-xs hover:bg-muted"
+              onClick={() => {
+                if (!successData) return;
+                const visible = successData.rows.filter(applySuccessFilters);
+                const esc = (v: string | number | null) =>
+                  v == null ? "" : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
+                const header = ["Distributor","State Head","Scheme","Family","Settlement","Billed","Slab","Rate","Earned ₹","At Max"];
+                const lines = visible.map((r) => [
+                  esc(r.customer), esc(r.stateHead), esc(SCHEME_SHORT[r.schemeId] ?? r.schemeId),
+                  esc(r.family), esc(r.settlement),
+                  esc(Math.round(r.billedSoFar)), esc(Math.round(r.currentSlab)),
+                  esc(trunc2(r.currentRate * 100) + "%"), esc(Math.round(r.earnedRs)),
+                  esc(r.isAtMax ? "Y" : ""),
+                ].join(","));
+                const csv = [header.join(","), ...lines].join("\n");
+                const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(blob);
+                a.download = `scheme-success-${fy}-${quarter}.csv`;
+                a.click();
+                URL.revokeObjectURL(a.href);
+              }}
+            >
+              Export
+            </button>
+          </div>
+
+          {successLoading ? (
+            <div className="text-xs text-muted-foreground py-6 text-center">Computing success list...</div>
+          ) : !successData || successData.rows.length === 0 ? (
+            <div className="text-xs text-muted-foreground py-6 text-center">
+              No distributors have crossed a slab yet for {qLabel(quarter)} {fy}.
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded border">
+              <table className="w-full text-xs min-w-[780px]">
+                <thead>
+                  <tr className="border-b bg-muted/50 text-muted-foreground">
+                    <th className="px-3 py-2 text-left font-medium">#</th>
+                    <th className="px-3 py-2 text-left font-medium">Distributor</th>
+                    <th className="px-3 py-2 text-left font-medium">Scheme</th>
+                    <th className="px-3 py-2 text-right font-medium">Billed</th>
+                    <th className="px-3 py-2 text-right font-medium">Slab</th>
+                    <th className="px-3 py-2 text-right font-medium">Rate</th>
+                    <th className="px-3 py-2 text-right font-medium">Earned ₹</th>
+                    <th className="px-3 py-2 text-left font-medium">Settlement</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {successData.rows.filter(applySuccessFilters).map((r, i) => (
+                    <tr key={`${r.customer}|${r.schemeId}`} className="border-b last:border-0 hover:bg-muted/30">
+                      <td className="px-3 py-1.5 text-muted-foreground">{i + 1}</td>
+                      <td className="px-3 py-1.5">
+                        <div className="font-medium leading-tight">{r.customer}</div>
+                        {r.stateHead && <div className="text-[10px] text-muted-foreground">{r.stateHead}</div>}
+                      </td>
+                      <td className="px-3 py-1.5 text-muted-foreground whitespace-nowrap">
+                        {SCHEME_SHORT[r.schemeId] ?? r.schemeId}
+                        {r.isAtMax && (
+                          <span className="ml-1.5 text-[10px] text-green-600 dark:text-green-400 font-medium">MAX</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{inr(r.billedSoFar)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">≥ {inr(r.currentSlab)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{pct(r.currentRate)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-green-700 dark:text-green-400">
+                        {inr(r.earnedRs)}
+                      </td>
+                      <td className="px-3 py-1.5">
+                        <SettlementBadge settlement={r.settlement} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
@@ -878,4 +1094,21 @@ function StatusBadge({ status, blockedReason }: { status: string; blockedReason:
     );
   }
   return <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">Nudge</span>;
+}
+
+function SettlementBadge({ settlement }: { settlement: string | null }) {
+  if (!settlement) return <span className="text-muted-foreground text-[10px]">—</span>;
+  const styles: Record<string, string> = {
+    company:      "bg-blue-100 text-blue-700 border-blue-300 dark:bg-blue-900/30 dark:text-blue-300",
+    pass_through: "bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-300",
+    primary:      "bg-purple-100 text-purple-700 border-purple-300 dark:bg-purple-900/30 dark:text-purple-300",
+  };
+  const labels: Record<string, string> = {
+    company: "Company", pass_through: "Pass-through", primary: "Primary",
+  };
+  return (
+    <span className={`inline-block rounded border px-1.5 py-0.5 text-[10px] font-medium ${styles[settlement] ?? "bg-muted text-muted-foreground"}`}>
+      {labels[settlement] ?? settlement}
+    </span>
+  );
 }
