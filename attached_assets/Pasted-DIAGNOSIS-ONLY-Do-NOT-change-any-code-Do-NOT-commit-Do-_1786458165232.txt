@@ -1,0 +1,87 @@
+DIAGNOSIS ONLY. Do NOT change any code. Do NOT commit. Do NOT restart
+anything except to reproduce. Report produced values.
+
+THE FAULT
+growth-report-guards fails on:
+    POST /ai/full-report/growth?scope=statehead&stateHead=Anant Singh
+    -> status 502, body null
+
+The guard then aborts, so nothing downstream of that call has been checked
+for some time. You reported this as pre-existing and not a regression from
+the workflow restarts - I accept that, but it is not resolved, and this
+route is the whole master growth report.
+
+A 502 with a null body means the request died before a response was formed.
+The three candidates are a Sheets quota, an AI call timing out, and a code
+fault. I want to know which, with evidence.
+
+────────────────────────────────────────────────
+1. REPRODUCE AND CAPTURE THE ACTUAL ERROR
+────────────────────────────────────────────────
+Call the route directly against the dev server and paste:
+  - the full api-server log for that request, from the first line to the
+    last, not a summary
+  - the stack trace if one is thrown
+  - the elapsed time between request start and failure
+
+A null body usually means the process crashed, a proxy timed out, or an
+unhandled rejection killed the handler before it could respond. Say which
+of those it is.
+
+────────────────────────────────────────────────
+2. NARROW THE SCOPE - which part fails
+────────────────────────────────────────────────
+The route builds several sections. Determine how far it gets before dying.
+
+  a. Does the same route succeed at COMPANY scope?
+         POST /ai/full-report/growth?scope=company
+     If company works and statehead does not, the fault is in the
+     statehead-specific path.
+
+  b. Does it fail for EVERY state head, or only Anant Singh? Try at least
+     three others - Sandeep Dadheech, Lalan Kumar, Syed Aqil Rizvi. Print
+     status for each.
+
+  c. Print the last section the handler successfully computed before it
+     died. If the sections are logged, paste that sequence.
+
+────────────────────────────────────────────────
+3. RULE THE THREE CANDIDATES IN OR OUT
+────────────────────────────────────────────────
+  SHEETS QUOTA
+    Does the statehead path read member working sheets? If yes, print how
+    many sheets it loads for Anant Singh and whether any 429 / quota error
+    appears in the log. Note the 4-at-a-time worker pool exists - confirm
+    whether this path uses it or bypasses it.
+
+  AI TIMEOUT
+    Does the handler make an Anthropic API call? Print the configured
+    timeout, the elapsed time before failure, and whether the AI call
+    returned, errored, or hung. If it hung, print how long.
+
+  CODE FAULT
+    Any unhandled exception, undefined access, or failed assertion in the
+    trace. Note that tsc --noEmit is clean, so this would be a runtime
+    fault rather than a type error.
+
+State plainly which one it is. If it is none of the three, say what it
+actually is.
+
+────────────────────────────────────────────────
+4. HOW LONG HAS IT BEEN BROKEN
+────────────────────────────────────────────────
+Print the last date growth-report-guards passed end to end. If it has never
+passed, say so. I want to know whether this route has EVER worked at
+statehead scope, because if it has not, the guard has been protecting
+nothing since it was written.
+
+────────────────────────────────────────────────
+5. BLAST RADIUS
+────────────────────────────────────────────────
+  - Does the same fault affect /ai/full-report/distributor?
+  - Does it affect the production deployment, or only dev? Prod was
+    reported healthy - confirm whether a statehead growth report can
+    actually be generated in prod right now.
+
+Report all five. Do not propose a fix in this task - I want the diagnosis
+first, and I will decide what to do with it.

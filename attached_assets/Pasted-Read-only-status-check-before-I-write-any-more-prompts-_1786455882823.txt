@@ -1,0 +1,100 @@
+Read-only status check before I write any more prompts. Do NOT change
+anything, do NOT fix anything, do NOT commit. Produced values only.
+
+My picture of the codebase comes from a GitHub zip exported before 06:00 UTC
+on 10 August, so it is stale and some of the items below may already be done.
+For each, print the CURRENT state on main. Where something is already fixed,
+say so and give the commit hash - do not re-do it.
+
+────────────────────────────────────────────────────────────
+1. ROSTER DEDUP KEY
+────────────────────────────────────────────────────────────
+Handover v6 specifies dedup on
+    normSecKey(name) + ":" + normSecKey(stateHead)
+My stale copy shows lib/mgmt/roster.ts using normName on BOTH sides, which
+is weaker - normName strips parentheticals, so two same-named members under
+the SAME head would still collide silently.
+
+Print the dedup key line as it exists on main now, with its line number.
+Then print the roster entries for both Ashutosh Kumars (Rudrapur under Anant
+Singh, Dhanbad under Sandeep Dadheech) showing their computed keys, and
+confirm both survive the load.
+
+────────────────────────────────────────────────────────────
+2. TERRITORY PREDICATE - two definitions
+────────────────────────────────────────────────────────────
+My stale copy shows 15 occurrences of the LOOSE form
+    (head_canon IS NULL OR head_canon != 'Non-territory / Project / Govt')
+which treats NULL head as territory, and 1 occurrence of a STRICTER form
+    head_canon IS NOT NULL AND head_canon != ...
+plus a customer-name bridge, in skuK4.ts.
+
+Print the current count of each form and the files they appear in. State
+plainly whether the codebase still has two different definitions of
+"territory", and if so which pages use which.
+
+────────────────────────────────────────────────────────────
+3. RANKINGS PRICE COLUMN - mix contamination
+────────────────────────────────────────────────────────────
+Customer Performance > Rankings computes realised price as total value over
+total quantity, summed across ALL product groups per customer. That is a
+blended basket average, not a price - a customer shifting from taps to pipe
+shows a large "price change" with no price change anywhere. The codebase has
+a proper Laspeyres decomposition in lib/customers/laspeyres.ts used by
+schemes/targets/comparison, but my stale copy shows Rankings not using it.
+
+Print whether lib/customers/analytics.ts now contains any like-for-like or
+mix decomposition (search for lflPrice, mixEffect, laspeyres). If not,
+confirm the price column is still the naive blended figure.
+
+────────────────────────────────────────────────────────────
+4. RUNTIME PRE-DELETE GUARD (task #201)
+────────────────────────────────────────────────────────────
+The three-rule wipe canary in aiGrowthReport.activation.test.ts is confirmed
+on main (4caeeaf, d79c9e5) - I verified it myself. But that is a CI test: it
+DETECTS a wipe at the next test run and cannot PREVENT one.
+
+Does an abort-before-delete guard exist inside the ingest path itself
+(registerSync, the SKU loader, or wherever open-FY secondary rows are
+deleted or replaced)? If yes, print the code path showing the abort happens
+BEFORE the delete and inside the transaction. If no, say plainly that no
+runtime prevention exists.
+
+Also print the current status of task #201 in the tracker.
+
+────────────────────────────────────────────────────────────
+5. REMAINING TYPE ERRORS
+────────────────────────────────────────────────────────────
+You reported tsc --noEmit on api-server exits clean. My stale copy showed
+about 30 real errors, of which 11 were in routes/customerMaster.ts (now
+fixed) and the rest in:
+    lib/audit/extraGroups.ts            7  (property access on {})
+    routes/primaryStateAchievement.ts   4  (unknown -> string)
+    lib/sku/skuPushList.ts              2  (Set<unknown> -> Set<string>)
+    lib/mgmt/distributorTabs.ts         1
+    lib/mgmt/salesReports.ts            1
+    lib/secondary/gate3Runner.ts        2
+    lib/mgmt/aiStateHeadExtras.ts       1
+
+Re-run tsc --noEmit on api-server and paste the FULL output including the
+exit code. If it is genuinely clean, these were resolved too - tell me when
+and by which commit. If errors remain, print them.
+
+────────────────────────────────────────────────────────────
+6. WORKFLOW HEALTH
+────────────────────────────────────────────────────────────
+Several sessions ago api-server and web went down after task merges landed.
+Are both workflows running now? Print their current status. If either is
+down, that outranks everything above.
+
+────────────────────────────────────────────────────────────
+7. SCHEMES TASK
+────────────────────────────────────────────────────────────
+Confirm the Q2 schemes schema task merged: commit hash,
+git cat-file -t on it, and git merge-base --is-ancestor <hash> main with
+its exit code.
+
+────────────────────────────────────────────────────────────
+Answer all seven. Where an item is already resolved, say so with the commit
+and move on - I would rather find five of these done than write five
+unnecessary prompts.

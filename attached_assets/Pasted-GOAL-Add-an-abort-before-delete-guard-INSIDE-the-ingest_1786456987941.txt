@@ -1,0 +1,68 @@
+GOAL
+Add an abort-before-delete guard INSIDE the ingest path - registerSync, the
+SKU loader, or wherever open-FY rows in secondary_sku_line are deleted or
+replaced.
+
+This is NOT the CI canary in aiGrowthReport.activation.test.ts. That test
+detects a wipe at the next CI run and cannot prevent one - and as the last
+few days showed, the next CI run can be days away when a workflow is down.
+This task is about prevention.
+
+WHY IT CAN BE STRICTER THAN THE CANARY
+secondary_sku_line has no order-date column, so the CI canary can only
+assert at MONTH granularity - a partial wipe within a month is invisible to
+it. The source rows entering the ingest DO carry dates. Use them.
+
+BEHAVIOUR
+Before any statement that deletes or replaces open-FY rows, compare the
+INCOMING batch against what is currently in the table for the same scope:
+
+    incoming rows      <  0.60 x existing rows       -> ABORT
+    incoming distinct
+      distributors     <  0.70 x existing distinct   -> ABORT
+
+Per month, using the dates on the incoming rows, not just in aggregate. A
+batch that carries a full August but only half of July must be refused.
+
+The guard ABORTS the transaction. It does not warn and continue. It does not
+delete and then complain. Nothing is written and nothing is removed.
+
+On abort, log: scope, existing count, incoming count, the ratio, and which
+month failed. Surface it as a visible failure, not a debug line.
+
+OVERRIDE
+One explicit override for legitimate small loads - a genuine single-month
+re-sync, or a new FY's first ingest. It must be:
+  - an explicit parameter passed by the caller
+  - logged every time it is used, with who/what set it
+  - never a default, never an environment variable, never inferred
+
+FIRST INGEST OF A NEW FY
+When the open FY has zero existing rows, there is nothing to protect. Skip
+the guard and log that it was not applicable. Do not fail.
+
+DO NOT
+- Do not change the CI canary in aiGrowthReport.activation.test.ts. It stays.
+- Do not change any threshold in that test.
+- Do not touch the schemes tables or anything from task #221.
+
+VERIFICATION - produced values, and a hash that resolves
+1. Print the exact code path where the abort happens, showing it is BEFORE
+   the delete statement and INSIDE the transaction.
+2. NEGATIVE TEST - full batch. Run an ingest against a scratch copy with a
+   deliberately truncated batch: full Aug, only 50% of Jul. Confirm the
+   transaction aborts, print the row count for Jul BEFORE and AFTER, and
+   confirm they are identical (nothing deleted).
+3. NEGATIVE TEST - distributors. Same method, batch with 60% of the existing
+   distributor count. Confirm abort, print before/after distinct counts.
+4. POSITIVE TEST. Run a normal full ingest. Confirm it completes, the guard
+   does not fire, and print the resulting row count.
+5. OVERRIDE TEST. Run the truncated batch WITH the override set. Confirm it
+   proceeds and that the override use is logged. Paste the log line.
+6. NEW-FY TEST. Run against an FY with zero existing rows. Confirm the guard
+   skips with a "not applicable" log rather than failing.
+7. Confirm aiGrowthReport.activation.test.ts is unchanged. Print the diff
+   file list for the whole commit.
+8. Commit hash, then `git cat-file -t <hash>`, then
+   `git merge-base --is-ancestor <hash> main` with its exit code. If the
+   merge does not land, say so plainly and leave the task open.
