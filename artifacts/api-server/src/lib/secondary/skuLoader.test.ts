@@ -1,7 +1,15 @@
 // Task 172 guards: RET# column detection, merged-cell carry-forward, and
 // serial-pollution prevention in the secondary SKU loader.
 import { describe, it, expect } from "vitest";
-import { parseTab, normaliseRetId, checkReplaceSanity } from "./skuLoader.js";
+import {
+  parseTab,
+  normaliseRetId,
+  checkReplaceSanity,
+  checkOpenFyWipeGuard,
+  priorLikeMonthLabel,
+  priorFyLabel,
+  WIPE_GUARD_RATIO,
+} from "./skuLoader.js";
 
 describe("checkReplaceSanity (pre-delete gate for replace mode)", () => {
   const good = { rowsParsed: 300_000, rowsWithRetId: 300_000, tabsWithItemCodes: 4, existingRows: 250_000 };
@@ -94,5 +102,104 @@ describe("parseTab RET# handling", () => {
     const res = parseTab("T", rows as never, "2021-22", "sheet2");
     expect(res.rows[0].retailerId).toBe("RET#555");
     expect(res.rows[1].retailerId).toBeNull();
+  });
+});
+
+// ── Open-FY wipe guard (abort-before-delete, pure unit tests) ─────────────────
+
+describe("priorLikeMonthLabel / priorFyLabel helpers", () => {
+  it("maps each month label to the same month in the prior fiscal year", () => {
+    expect(priorLikeMonthLabel("Apr-26")).toBe("Apr-25");
+    expect(priorLikeMonthLabel("Jan-27")).toBe("Jan-26");
+    expect(priorLikeMonthLabel("Mar-27")).toBe("Mar-26");
+  });
+
+  it("maps FY labels to the prior FY", () => {
+    expect(priorFyLabel("2026-27")).toBe("2025-26");
+    expect(priorFyLabel("2025-26")).toBe("2024-25");
+    expect(priorFyLabel("2024-25")).toBe("2023-24");
+  });
+});
+
+describe("checkOpenFyWipeGuard (pure, no DB)", () => {
+  // Helper: build Maps from plain objects for readability.
+  const mkMap = (obj: Record<string, number>) => new Map(Object.entries(obj));
+
+  it("passes when every month is well above the ratio floor", () => {
+    const incoming = mkMap({ "Apr-26": 10_000, "May-26": 9_500 });
+    // Prior like-months: Apr-25 = 10_000, May-25 = 9_000
+    const prior = mkMap({ "Apr-25": 10_000, "May-25": 9_000 });
+    expect(checkOpenFyWipeGuard(incoming, prior)).toEqual({ ok: true });
+  });
+
+  it("passes when incoming exactly equals the ratio floor", () => {
+    const incoming = mkMap({ "Apr-26": 6_000 }); // exactly 60% of 10_000
+    const prior    = mkMap({ "Apr-25": 10_000 });
+    expect(checkOpenFyWipeGuard(incoming, prior)).toEqual({ ok: true });
+  });
+
+  it("triggers when a batch is 10% of the prior like-month (abort-path)", () => {
+    // 10% is well below the 60% floor — the guard must fire.
+    const incoming = mkMap({ "Apr-26": 1_000 }); // 10% of 10_000
+    const prior    = mkMap({ "Apr-25": 10_000 });
+    const result = checkOpenFyWipeGuard(incoming, prior);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.violations).toHaveLength(1);
+      expect(result.violations[0].month).toBe("Apr-26");
+      expect(result.violations[0].incoming).toBe(1_000);
+      expect(result.violations[0].priorRows).toBe(10_000);
+      expect(result.violations[0].floor).toBe(10_000 * WIPE_GUARD_RATIO);
+      expect(result.reason).toMatch(/Apr-26/);
+    }
+  });
+
+  it("triggers even for a single violating month among several passing ones", () => {
+    const incoming = mkMap({ "Apr-26": 9_000, "May-26": 500 }); // May is 5% of prior
+    const prior    = mkMap({ "Apr-25": 10_000, "May-25": 10_000 });
+    const result = checkOpenFyWipeGuard(incoming, prior);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.violations).toHaveLength(1);
+      expect(result.violations[0].month).toBe("May-26");
+    }
+  });
+
+  it("skips months with no prior baseline (first-ever load, new month)", () => {
+    // Prior FY has no data for Apr-25 — the guard must not fire.
+    const incoming = mkMap({ "Apr-26": 1 }); // tiny batch, but no baseline
+    const prior    = new Map<string, number>(); // empty: no prior data
+    expect(checkOpenFyWipeGuard(incoming, prior)).toEqual({ ok: true });
+  });
+
+  it("skips months where prior baseline is 0", () => {
+    const incoming = mkMap({ "Apr-26": 1 });
+    const prior    = mkMap({ "Apr-25": 0 }); // explicit zero → no baseline
+    expect(checkOpenFyWipeGuard(incoming, prior)).toEqual({ ok: true });
+  });
+
+  it("respects a custom ratio override", () => {
+    // Using 0.30 override: 3_500 / 10_000 = 35% > 30% → passes
+    const incoming = mkMap({ "Apr-26": 3_500 });
+    const prior    = mkMap({ "Apr-25": 10_000 });
+    expect(checkOpenFyWipeGuard(incoming, prior, 0.30)).toEqual({ ok: true });
+
+    // Same data with default 0.60 → fails
+    expect(checkOpenFyWipeGuard(incoming, prior)).toMatchObject({ ok: false });
+  });
+
+  it("guard fires before the DELETE: a violation must produce a non-ok result with a clear reason", () => {
+    // Regression guard: the error message must describe the month and counts
+    // so an operator can diagnose which month triggered the abort.
+    const incoming = mkMap({ "Jul-26": 200 }); // 2% of prior
+    const prior    = mkMap({ "Jul-25": 10_000 });
+    const result = checkOpenFyWipeGuard(incoming, prior);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain("Jul-26");
+      expect(result.reason).toContain("incoming=200");
+      expect(result.reason).toMatch(/floor=\d+/);
+      expect(result.reason).toContain("Jul-25=10000");
+    }
   });
 });

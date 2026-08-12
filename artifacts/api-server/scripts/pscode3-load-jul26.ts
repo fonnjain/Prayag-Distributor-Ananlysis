@@ -19,6 +19,7 @@ import path from "node:path";
 import { sql } from "drizzle-orm";
 import { db, secondarySkuLines, type InsertSecSkuLine } from "@workspace/db";
 import { canonGroupFromMap } from "../src/lib/sku/catalogue.js";
+import { checkOpenFyWipeGuard, priorLikeMonthLabel, priorFyLabel } from "../src/lib/secondary/skuLoader.js";
 
 const DIR = "/tmp/jul26/PSCode 3 NEW REPORTS JULY2026";
 const FY = "2026-27";
@@ -225,6 +226,24 @@ if (Math.abs(deduped.net - 223_400_000) > 2_000_000) throw new Error(`abort: NET
 if (months.size !== 1 || !months.has(MONTH)) throw new Error(`abort: unexpected months ${[...months]} in load`);
 
 await db.transaction(async (tx) => {
+  // ── Wipe guard: runs BEFORE the DELETE, inside the transaction ─────────────
+  // Compares Jul-26 incoming row count against prior-FY Jul-25 row count.
+  // A batch below 60% of the prior like-month rolls back the transaction —
+  // no data is ever deleted.
+  const PRIOR_FY = priorFyLabel(FY);
+  const priorMonthLbl = priorLikeMonthLabel(MONTH); // "Jul-25"
+  const priorRes = await tx.execute<{ rows: string }>(
+    sql`SELECT COUNT(*)::text AS rows FROM secondary_sku_line WHERE fy = ${PRIOR_FY} AND month_label = ${priorMonthLbl}`,
+  );
+  const priorRows = parseInt(((priorRes.rows[0] as { rows: string }) ?? { rows: "0" }).rows, 10);
+  const priorByMonth = new Map([[priorMonthLbl, priorRows]]);
+  const incomingByMonth = new Map([[MONTH, rows.length]]);
+  const guard = checkOpenFyWipeGuard(incomingByMonth, priorByMonth);
+  if (!guard.ok) {
+    throw new Error(`pscode3-load-jul26: wipe guard triggered — ${guard.reason}`);
+  }
+  console.log(`Wipe guard passed: ${MONTH} incoming=${rows.length} vs prior ${priorMonthLbl}=${priorRows}`);
+
   // Remove Jul-26 from both tables (leave Apr/May/Jun intact)
   await tx.execute(sql`DELETE FROM secondary_sku_line WHERE fy = ${FY} AND month_label = ${MONTH}`);
   await tx.execute(sql`DELETE FROM secondary_register_line WHERE fy = ${FY} AND month_label = ${MONTH} AND source = ${BRAND_SOURCE}`);

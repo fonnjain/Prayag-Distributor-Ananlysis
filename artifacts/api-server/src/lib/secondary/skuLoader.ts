@@ -302,6 +302,7 @@ export const REPLACE_MIN_ROWS = 1_000;
 export const REPLACE_MIN_RETID_COVERAGE = 0.9;
 export const REPLACE_MIN_EXISTING_RATIO = 0.5;
 
+export const WIPE_GUARD_RATIO = 0.60; // 60% floor: incoming >= 60% of prior like-month
 export function checkReplaceSanity(input: {
   rowsParsed: number;
   rowsWithRetId: number;
@@ -579,4 +580,64 @@ export async function getSecondarySkuFyPeriodLabel(fy: string): Promise<string |
   return firstMon === lastMon
     ? `${firstMon} ${calYear}`
     : `${firstMon}–${lastMon} ${calYear}`;
+}
+
+/** "2025-26" → "2024-25" */
+export function priorFyLabel(fy: string): string {
+  const start = parseInt(fy.slice(0, 4), 10) - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
+}
+
+/**
+ * Pure per-month ratio check. Given:
+ *   incomingByMonth  — month_label → incoming row count from the new batch
+ *   priorByMonth     — prior-FY like-month label → existing DB row count
+ *
+ * Returns ok when every month with a prior baseline is above the ratio floor.
+ * Months whose prior baseline is 0 (new month, no prior history) are skipped —
+ * they are not evidence of a wipe.
+ *
+ * The guard fires before the DELETE, so on failure no data is ever deleted.
+ */
+export function checkOpenFyWipeGuard(
+  incomingByMonth: Map<string, number>,
+  priorByMonth: Map<string, number>,
+  ratio: number = WIPE_GUARD_RATIO,
+): { ok: true } | { ok: false; reason: string; violations: WipeGuardViolation[] } {
+  const violations: WipeGuardViolation[] = [];
+
+  for (const [month, incoming] of incomingByMonth) {
+    const priorLike = priorLikeMonthLabel(month);
+    const priorRows = priorByMonth.get(priorLike) ?? 0;
+    if (priorRows === 0) continue; // no baseline → skip (first load of this month)
+    const floor = priorRows * ratio;
+    if (incoming < floor) {
+      violations.push({ month, incoming, priorLike, priorRows, floor });
+    }
+  }
+
+  if (violations.length === 0) return { ok: true };
+
+  const desc = violations
+    .map(
+      (v) =>
+        `${v.month}: incoming=${v.incoming} < floor=${v.floor.toFixed(0)} ` +
+        `(${(ratio * 100).toFixed(0)}% of prior ${v.priorLike}=${v.priorRows})`,
+    )
+    .join("; ");
+  return { ok: false, reason: `per-month wipe guard: ${desc}`, violations };
+}
+
+export type WipeGuardViolation = {
+  month: string;
+  incoming: number;
+  priorLike: string;
+  priorRows: number;
+  floor: number;
+};
+
+/** "Apr-26" → "Apr-25": the same calendar month in the prior fiscal year. */
+export function priorLikeMonthLabel(label: string): string {
+  const [mon, yy] = label.split("-");
+  return `${mon}-${String(parseInt(yy!, 10) - 1).padStart(2, "0")}`;
 }

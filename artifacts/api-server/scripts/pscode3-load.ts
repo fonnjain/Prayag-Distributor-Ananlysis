@@ -180,6 +180,7 @@ if (Math.abs(prasunNet - 1_834_504) > 5) throw new Error(`abort: Prasun control 
 // feeds segment-spread, win-back and effective-discount views. It is refreshed in
 // the SAME transaction as the sku load so the two tables can never disagree.
 const BRAND_SOURCE = "pscode3_brand_rollup";
+
 await db.transaction(async (tx) => {
   // ── Wipe guard: must run BEFORE the DELETE, inside this transaction ────────
   // Throws WipeGuardAbortError on ratio violation — Drizzle rolls back.
