@@ -4,6 +4,7 @@
 //   Dashboard — Overview, Regional, Coverage, Products, Momentum, Growth,
 //               AI Analyst, Reports, Company Reports, Targets, Pending, Sources, Health
 //   Sales     — State Head, Sales People, Primary, Secondary, Combined
+//   MRP       — MRP Master, Margin (GP contribution data)
 //   Customers — Rankings, Price Shrinkers, At Risk & New, Schemes
 //
 // The sidebar is always visible on desktop.  On mobile a hamburger opens it as
@@ -74,7 +75,15 @@ const NAV: NavGroup[] = [
       { id: "deep-dive",              label: "Sales Deep Dive",        path: "/sales/deep-dive",              icon: BookOpen },
       { id: "distributor-deep-dive",  label: "Distributor Deep Dive",  path: "/sales/distributor-deep-dive",  icon: Network  },
       { id: "sku-deep-dive",          label: "SKU Deep Dive",          path: "/sku",                          icon: Layers   },
-      { id: "mrp",                    label: "MRP Master",             path: "/mrp",                          icon: IndianRupee },
+    ],
+  },
+  {
+    id: "mrp",
+    label: "MRP",
+    icon: IndianRupee,
+    items: [
+      { id: "mrp-master", label: "MRP Master", path: "/mrp",        icon: IndianRupee },
+      { id: "margin",     label: "Margin",     path: "/mrp/margin", icon: BarChart3   },
     ],
   },
   {
@@ -94,8 +103,8 @@ const NAV: NavGroup[] = [
     label: "Developer",
     icon: Braces,
     items: [
-      { id: "api-portal", label: "API Portal",  path: "/dev/api",  icon: Braces },
-      { id: "api-keys",   label: "API Keys",    path: "/dev/keys", icon: Key },
+      { id: "api-portal", label: "API Portal",  path: "/dev/api",     icon: Braces },
+      { id: "api-keys",   label: "API Keys",    path: "/dev/keys",    icon: Key },
       { id: "masters",    label: "Master Data", path: "/dev/masters", icon: Database },
     ],
   },
@@ -111,17 +120,20 @@ function activeIds(location: string): { groupId: string; itemId: string } {
   if (location === "/sku" || location.startsWith("/sku/")) {
     return { groupId: "sales", itemId: "sku-deep-dive" };
   }
-  if (location === "/mrp") {
-    return { groupId: "sales", itemId: "mrp" };
+  if (location === "/mrp" || location === "/mrp/") {
+    return { groupId: "mrp", itemId: "mrp-master" };
+  }
+  if (location === "/mrp/margin" || location.startsWith("/mrp/margin")) {
+    return { groupId: "mrp", itemId: "margin" };
   }
   if (location.startsWith("/customers")) {
     const slug = location.replace(/^\/customers\/?/, "").split("?")[0];
-    const item = NAV[2].items.find((i) => i.id === slug) ?? NAV[2].items[0];
+    const item = NAV[3].items.find((i) => i.id === slug) ?? NAV[3].items[0];
     return { groupId: "customers", itemId: item.id };
   }
   if (location.startsWith("/dev")) {
     const slug = location.replace(/^\/dev\/?/, "").split("?")[0] || "api-portal";
-    const item = NAV[3].items.find((i) => i.id === slug) ?? NAV[3].items[0];
+    const item = NAV[4].items.find((i) => i.id === slug) ?? NAV[4].items[0];
     return { groupId: "developer", itemId: item.id };
   }
   // Dashboard
@@ -143,6 +155,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     dashboard: activeGroupId === "dashboard",
     sales:     activeGroupId === "sales",
+    mrp:       activeGroupId === "mrp",
     customers: activeGroupId === "customers",
     developer: activeGroupId === "developer",
   });

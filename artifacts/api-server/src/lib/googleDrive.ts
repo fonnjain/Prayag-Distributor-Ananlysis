@@ -67,3 +67,87 @@ export async function listDriveFiles(opts: {
     nextPageToken: data.nextPageToken,
   };
 }
+
+// ── List all children of a Drive folder (files + subfolders). ─────────────
+// Paginates automatically; returns up to 1 000 items.
+export async function listDriveFolder(folderId: string): Promise<DriveApiFile[]> {
+  const connectors = new ReplitConnectors();
+  const all: DriveApiFile[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const params = new URLSearchParams();
+    params.set("q", `'${folderId}' in parents and trashed = false`);
+    params.set("pageSize", "200");
+    params.set(
+      "fields",
+      "nextPageToken, files(id, name, mimeType, modifiedTime, size)",
+    );
+    params.set("supportsAllDrives", "true");
+    params.set("includeItemsFromAllDrives", "true");
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const response = await connectors.proxy(
+      "google-drive",
+      `/drive/v3/files?${params.toString()}`,
+      { method: "GET" },
+    );
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`Drive folder list error ${response.status}: ${body}`);
+    }
+    const data = (await response.json()) as {
+      files?: DriveApiFile[];
+      nextPageToken?: string;
+    };
+    all.push(...(data.files ?? []));
+    pageToken = data.nextPageToken;
+  } while (pageToken);
+
+  return all;
+}
+
+// ── Download the raw bytes of a non-native Drive file (e.g. xlsx). ────────
+export async function downloadDriveFileBuffer(fileId: string): Promise<Buffer> {
+  const connectors = new ReplitConnectors();
+  const response = await connectors.proxy(
+    "google-drive",
+    `/drive/v3/files/${fileId}?alt=media`,
+    { method: "GET" },
+  );
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Drive download error ${response.status}: ${body}`);
+  }
+  const ab = await response.arrayBuffer();
+  return Buffer.from(ab);
+}
+
+// ── Search for folders whose name contains a given string. ────────────────
+export async function findDriveFoldersByName(
+  nameContains: string,
+): Promise<DriveApiFile[]> {
+  const connectors = new ReplitConnectors();
+  const escaped = nameContains.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const params = new URLSearchParams();
+  params.set(
+    "q",
+    `name contains '${escaped}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+  );
+  params.set("pageSize", "20");
+  params.set("fields", "files(id, name, mimeType)");
+  params.set("supportsAllDrives", "true");
+  params.set("includeItemsFromAllDrives", "true");
+
+  const response = await connectors.proxy(
+    "google-drive",
+    `/drive/v3/files?${params.toString()}`,
+    { method: "GET" },
+  );
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Drive folder search error ${response.status}: ${body}`);
+  }
+  const data = (await response.json()) as { files?: DriveApiFile[] };
+  return data.files ?? [];
+}

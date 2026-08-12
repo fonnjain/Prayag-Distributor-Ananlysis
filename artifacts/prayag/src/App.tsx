@@ -9,6 +9,7 @@ import SalesPage from "@/pages/SalesPage";
 import CustomersPage from "@/pages/CustomersPage";
 import SkuPage from "@/pages/SkuPage";
 import MrpPage from "@/pages/MrpPage";
+import MarginPage from "@/pages/MarginPage";
 import DevPortalPage from "@/pages/DevPortalPage";
 import DevApiKeysPage from "@/pages/DevApiKeysPage";
 import DevMastersPage from "@/pages/DevMastersPage";
@@ -34,7 +35,8 @@ function Router() {
         <Route path="/sales" component={SalesPage} />
         {/* SKU Deep Dive */}
         <Route path="/sku" component={SkuPage} />
-        {/* MRP Master */}
+        {/* MRP section */}
+        <Route path="/mrp/margin" component={MarginPage} />
         <Route path="/mrp" component={MrpPage} />
         {/* Customer Performance */}
         <Route path="/customers/:section" component={CustomersPage} />

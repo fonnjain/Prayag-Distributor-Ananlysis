@@ -661,6 +661,34 @@ const MIGRATIONS: Migration[] = [
       $do$;
     `,
   },
+  {
+    id: "024_margin_fact",
+    sql: `
+      CREATE TABLE IF NOT EXISTS margin_fact (
+        id            SERIAL       PRIMARY KEY,
+        fy            TEXT         NOT NULL,
+        month_label   TEXT         NOT NULL,
+        segment       TEXT         NOT NULL,
+        item_code     TEXT         NOT NULL,
+        tab_name      TEXT,
+        qty           NUMERIC,
+        weight        NUMERIC,
+        mrp           NUMERIC,
+        -- Fraction, not percentage. 0.5353 means realised sale is 46.47% of MRP.
+        -- Label every derived figure "gross margin" / "gross contribution", never "profit".
+        -- bom_cost is factory cost only; no freight, overhead or SG&A is included.
+        discount_frac NUMERIC,
+        avg_sale      NUMERIC,
+        bom_cost      NUMERIC,
+        sale_value    NUMERIC,
+        bom_value     NUMERIC,
+        source_file   TEXT         NOT NULL,
+        loaded_at     TIMESTAMPTZ  NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS idx_margin_fact_fy_month_code ON margin_fact (fy, month_label, item_code);
+      CREATE INDEX IF NOT EXISTS idx_margin_fact_fy_segment    ON margin_fact (fy, segment);
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

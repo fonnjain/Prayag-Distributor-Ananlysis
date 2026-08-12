@@ -43,6 +43,7 @@ import warningsRouter from "./warnings";
 import orgRouter from "./org";
 import skuRouter from "./sku";
 import mrpRouter from "./mrp";
+import gpMarginRouter from "./gpMargin";
 
 const router: IRouter = Router();
 
@@ -90,5 +91,6 @@ router.use(warningsRouter);
 router.use(orgRouter);
 router.use(skuRouter);
 router.use(mrpRouter);
+router.use(gpMarginRouter);
 
 export default router;
