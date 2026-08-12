@@ -245,8 +245,9 @@ function trailing12MonthLabels(): string[] {
 // Never writes to mrp_history.
 router.get("/mrp/calculator", async (req, res) => {
   try {
-    const code = typeof req.query.code === "string" ? req.query.code.trim() : null;
-    const segmentParam = typeof req.query.segment === "string" ? req.query.segment.trim() : null;
+    const code = typeof req.query.code === "string" ? req.query.code : undefined;
+    const segmentParam =
+      typeof req.query.segment === "string" ? req.query.segment : null;
 
     if (!code) { res.status(400).json({ error: "?code= is required" }); return; }
 
@@ -269,6 +270,7 @@ router.get("/mrp/calculator", async (req, res) => {
     const isAmbiguous = masterRows.rows[0].is_ambiguous;
     const availableSegments = masterRows.rows.map((r) => r.segment);
 
+    // Ambiguous code with no segment supplied → refuse to guess
     if (isAmbiguous && !segmentParam) {
       res.status(409).json({
         error: "ambiguous code, segment required",
@@ -278,6 +280,7 @@ router.get("/mrp/calculator", async (req, res) => {
       return;
     }
 
+    // Determine which segment to use
     const targetSegment = segmentParam ?? availableSegments[0];
     const masterRow = masterRows.rows.find((r) => r.segment === targetSegment);
     if (!masterRow) {
@@ -357,6 +360,8 @@ router.get("/mrp/calculator", async (req, res) => {
     const gapPoints = weightedDiscount != null && realisedDiscount != null
       ? Math.abs(weightedDiscount - realisedDiscount) * 100 : null;
 
+    const secDisc = secRow.rows[0]?.weighted_disc ? parseFloat(secRow.rows[0].weighted_disc) : null;
+
     // Distributor margin default — derived when both primary and secondary data exist.
     // Formula: 1 − (1 − primaryDisc) / (1 − secDiscFrac)
     // This is the fraction of retailer price that the distributor retains as gross margin,
@@ -423,10 +428,14 @@ router.get("/mrp/calculator", async (req, res) => {
 });
 
 // ── GET /api/mrp/calculator/verify ────────────────────────────────────────
-// Runs the 8 verification checks from the spec and returns results as JSON.
-// Checks: discount identity, cross-check gaps, no-data count, worked example,
-// ambiguity refusal, mrp_history immutability, sale_line count, commit hash.
+// Admin-only: runs 8 verification checks (expensive full-table queries + git).
+// Requires X-Admin-Secret header.
 router.get("/mrp/calculator/verify", async (req, res) => {
+  const token = String(req.headers["x-admin-secret"] ?? "").trim();
+  if (!isAdminToken(token)) {
+    res.status(401).json({ error: "Admin authorisation required." });
+    return;
+  }
   try {
     const trailing12 = trailing12MonthLabels();
     const { execFile } = await import("node:child_process");
@@ -494,9 +503,10 @@ router.get("/mrp/calculator/verify", async (req, res) => {
       };
     }));
 
-    // ── Check 3: codes in mrp_master with no margin_fact rows ────────────────
-    const noDataResult = await pool.query<{ n: string }>(
-      `SELECT COUNT(DISTINCT m.item_code)::text AS n
+    // ── Check 3: codes in mrp_master with no margin_fact rows (trailing 12M) ──
+    const noDataResult = await pool.query<{ n: string; net: string }>(
+      `SELECT COUNT(DISTINCT m.item_code)::text AS n,
+              COALESCE(SUM(sl.amount), 0)::text  AS net
        FROM mrp_master m
        WHERE NOT EXISTS (
          SELECT 1 FROM margin_fact mf

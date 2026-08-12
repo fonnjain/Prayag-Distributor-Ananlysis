@@ -54,7 +54,9 @@ router.get("/margin/stats", async (_req, res) => {
 // ── GET /api/margin/list ───────────────────────────────────────────────────
 router.get("/margin/list", async (req, res) => {
   try {
-    const fy      = typeof req.query.fy      === "string" ? req.query.fy      : null;
+    const fy       = typeof req.query.fy === "string" ? req.query.fy : null;
+
+    const fyClause = fy ? "AND fy = $1" : "";
     const segment = typeof req.query.segment === "string" ? req.query.segment : null;
     const q       = typeof req.query.q       === "string" ? req.query.q       : null;
     const limit   = Math.min(parseInt(String(req.query.limit  ?? "100"), 10), 500);
@@ -182,6 +184,121 @@ router.post("/admin/margin/load", (req, res) => {
         error: String(err instanceof Error ? err.message : err),
       };
     });
+});
+
+// ── GET /api/margin/trend ─────────────────────────────────────────────────
+// Returns monthly GC% trend by segment, per-segment summary cards, and
+// top-50 negative-contribution codes.  Optional ?fy= filter.
+router.get("/margin/trend", async (req, res) => {
+  try {
+    const fy       = typeof req.query.fy === "string" ? req.query.fy : null;
+    const fyClause = fy ? "AND fy = $1" : "";
+    const fyParam  = fy ? [fy] : [];
+
+    const [monthly, segSummary, negCodes] = await Promise.all([
+      // Monthly weighted-average GC% per segment
+      pool.query<{
+        fy: string; month_label: string; segment: string;
+        total_sale: string; total_bom: string;
+      }>(
+        `SELECT fy, month_label, segment,
+                SUM(sale_value)::text AS total_sale,
+                SUM(bom_value)::text  AS total_bom
+           FROM margin_fact
+          WHERE sale_value IS NOT NULL AND bom_value IS NOT NULL
+            ${fyClause}
+          GROUP BY fy, month_label, segment
+          ORDER BY TO_DATE(month_label, 'Mon-YY'), segment`,
+        fyParam,
+      ),
+      // Per-segment totals: avg GC%, total sale, month-count, negative codes
+      pool.query<{
+        segment: string;
+        total_sale: string; total_bom: string;
+        month_count: string; neg_codes: string;
+      }>(
+        `SELECT segment,
+                SUM(sale_value)::text  AS total_sale,
+                SUM(bom_value)::text   AS total_bom,
+                COUNT(DISTINCT month_label)::text AS month_count,
+                COUNT(DISTINCT CASE WHEN avg_sale IS NOT NULL AND bom_cost IS NOT NULL AND bom_cost > avg_sale THEN item_code END)::text AS neg_codes
+           FROM margin_fact
+          WHERE sale_value IS NOT NULL AND bom_value IS NOT NULL
+            ${fyClause}
+          GROUP BY segment
+          ORDER BY segment`,
+        fyParam,
+      ),
+      // Top-50 negative-contribution codes
+      pool.query<{
+        item_code: string; segment: string;
+        total_sale: string; total_bom: string;
+      }>(
+        `SELECT item_code, segment,
+                SUM(sale_value)::text AS total_sale,
+                SUM(bom_value)::text  AS total_bom
+           FROM margin_fact
+          WHERE avg_sale IS NOT NULL AND bom_cost IS NOT NULL AND bom_cost > avg_sale
+            AND sale_value IS NOT NULL AND bom_value IS NOT NULL
+            ${fyClause}
+          GROUP BY item_code, segment
+          ORDER BY (SUM(sale_value) - SUM(bom_value)) ASC
+          LIMIT 50`,
+        fyParam,
+      ),
+    ]);
+
+    // Build monthly trend: { fy, month, [segment]: gcPct }
+    const monthMap = new Map<string, Record<string, string | number | null>>();
+    for (const r of monthly.rows) {
+      const key = `${r.fy}|${r.month_label}`;
+      if (!monthMap.has(key)) {
+        monthMap.set(key, { fy: r.fy, month: r.month_label });
+      }
+      const sale  = parseFloat(r.total_sale);
+      const bom   = parseFloat(r.total_bom);
+      const gcPct = isFinite(sale) && isFinite(bom) && sale > 0
+        ? ((sale - bom) / sale) * 100
+        : null;
+      const entry = monthMap.get(key)!;
+      entry[r.segment] = gcPct;
+    }
+    const monthlyTrend = Array.from(monthMap.values());
+
+    const segmentSummary = segSummary.rows.map((r) => {
+      const sale  = parseFloat(r.total_sale);
+      const bom   = parseFloat(r.total_bom);
+      const gcPct = isFinite(sale) && isFinite(bom) && sale > 0
+        ? ((sale - bom) / sale) * 100
+        : null;
+      return {
+        segment:        r.segment,
+        totalSaleValue: isFinite(sale) ? sale : 0,
+        totalBomValue:  isFinite(bom)  ? bom  : 0,
+        gcPct,
+        monthCount:    parseInt(r.month_count, 10),
+        negativeCodes: parseInt(r.neg_codes,   10),
+      };
+    });
+
+    const negativeCodes = negCodes.rows.map((r) => {
+      const sale  = parseFloat(r.total_sale);
+      const bom   = parseFloat(r.total_bom);
+      const gcPct = isFinite(sale) && isFinite(bom) && sale > 0
+        ? ((sale - bom) / sale) * 100
+        : null;
+      return {
+        itemCode:       r.item_code,
+        segment:        r.segment,
+        totalSaleValue: isFinite(sale) ? sale : 0,
+        gcPct,
+      };
+    });
+
+    res.json({ monthlyTrend, segmentSummary, negativeCodes });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
 });
 
 export default router;

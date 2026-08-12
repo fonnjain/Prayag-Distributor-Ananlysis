@@ -17,7 +17,7 @@
 // figure "gross margin" / "gross contribution", never "profit" — no freight,
 // overhead or SG&A is included.
 
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { pool } from "@workspace/db";
@@ -38,7 +38,17 @@ const DIST_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 // OS `timeout` command — sends SIGTERM to the child after N seconds.
 // Guaranteed to fire at the OS level regardless of the child's JS event loop.
-const TIMEOUT_CMD = "/nix/store/jb9bfccdjapvscfis6viz02c64i0vwny-replit-runtime-path/bin/timeout";
+// Resolved portably at startup via `which` so the path survives Nix store updates.
+function resolveTimeoutCmd(): string {
+  try {
+    const found = execFileSync("which", ["timeout"], { encoding: "utf8" }).trim();
+    if (found) return found;
+  } catch {
+    // ignore — fall through to bare name
+  }
+  return "timeout"; // last resort; will fail loudly if missing from PATH
+}
+const TIMEOUT_CMD = resolveTimeoutCmd();
 
 // Standalone fetcher script (compiled separately by esbuild).
 const FETCHER_PATH = path.join(DIST_DIR, "gpMarginFetcher.mjs");
@@ -655,7 +665,23 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
     }
   }
 
-  // 5 — truncate + insert
+  // 5 — coverage guard: refuse to wipe the table if fetch results are catastrophically low.
+  // This prevents a broken TIMEOUT_CMD or a connector-wide Sheets failure from silently
+  // replacing all existing margin data with zero rows.
+  if (monthlyFiles.length > 0) {
+    const minRequired = Math.max(5, Math.ceil(monthlyFiles.length * 0.40));
+    if (report.filesLoaded < minRequired) {
+      throw new Error(
+        `GP Margin load aborted — coverage too low to replace table: ` +
+        `${report.filesLoaded} of ${monthlyFiles.length} monthly files loaded successfully ` +
+        `(minimum required: ${minRequired}). ` +
+        `margin_fact has NOT been modified. ` +
+        `Fix the fetch failures and retry.`,
+      );
+    }
+  }
+
+  // 6 — truncate + insert
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
