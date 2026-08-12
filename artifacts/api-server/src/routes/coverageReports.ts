@@ -14,7 +14,7 @@ import ExcelJS from "exceljs";
 import { ensureSeeded } from "../lib/dashboard/sync.js";
 import { respondIfQuotaError } from "../lib/quotaResponse.js";
 import { parseJsonArray } from "./companyReports.js";
-import { normHead, normState, NORTH_EAST_STATES } from "../lib/reportFilterVocab.js";
+import { normHead, normState, displayHead, displayState, NORTH_EAST_STATES } from "../lib/reportFilterVocab.js";
 import type { HeadResource, CoverageRow, CoverageTotals } from "../lib/dashboard/transform.js";
 
 const router = Router();
@@ -94,13 +94,25 @@ export function buildPayload(
       }
     : data.coverage_totals;
 
+  // Apply canonical display names on the way out — filter logic above uses
+  // normHead/normState so matching is unaffected; only the rendered label changes.
+  const headsResourcesDisplay = headsResources.map((h) => ({
+    ...h,
+    head: displayHead(h.head),
+  }));
+
+  const coverageDisplay = coverage.map((c) => ({
+    ...c,
+    state: displayState(c.state),
+  }));
+
   return {
     filtered,
     headsFullTerritory: Boolean(stateSetRaw),
     syncedAt,
     coverageTotals,
-    headsResources,
-    coverage,
+    headsResources: headsResourcesDisplay,
+    coverage: coverageDisplay,
   };
 }
 
