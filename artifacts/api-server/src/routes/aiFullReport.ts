@@ -39,6 +39,14 @@ import { fiscalMonthsToLabels } from "../lib/mgmt/primaryPeriod.js";
 import { runNumericGuard, type GuardResult } from "../lib/mgmt/numericGuard.js";
 import type { AiPayload } from "../lib/mgmt/aiPayload.js";
 import { assembleRows } from "../lib/mgmt/report.js";
+import {
+  findLiveJobForCacheKey,
+  createJob,
+  markJobRunning,
+  markJobComplete,
+  markJobFailed,
+  loadJobResult,
+} from "../lib/aiReportJobQueue.js";
 
 const router: IRouter = Router();
 
@@ -337,6 +345,28 @@ function safeGuard(payload: unknown, content: { title: string; body: string }): 
 }
 
 // ── ROUTE 1: Distributor ───────────────────────────────────────────────────────
+
+// ── Job status polling ────────────────────────────────────────────────────────
+// Shared by both growth and statehead async jobs.
+// The growth router also exports this same underlying helper via aiReportJobQueue.
+router.get("/ai/full-report/status/:jobId", async (req: Request, res: Response): Promise<void> => {
+  const { jobId } = req.params;
+  if (!jobId || typeof jobId !== "string") {
+    res.status(400).json({ error: "jobId is required" });
+    return;
+  }
+  try {
+    const result = await loadJobResult(jobId);
+    if (result === null) {
+      res.status(404).json({ error: "Job not found or expired." });
+      return;
+    }
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "full-report/status failed");
+    res.status(500).json({ error: "Could not load job status." });
+  }
+});
 
 router.post("/ai/full-report/distributor", async (req: Request, res: Response): Promise<void> => {
   const b = (req.body ?? {}) as Record<string, unknown>;
@@ -639,7 +669,21 @@ router.post("/ai/full-report/statehead", async (req: Request, res: Response): Pr
   const priorPeriodLabel = buildPeriodLabel(py, monthFrom, monthTo);
   const quarter     = fiscalMonthToQuarter(monthTo);
 
+  // ── Async job — return 202 immediately, compute in background ─────────────
+  const cacheKey = `statehead|${fy}|${stateHead}|${monthFrom}|${monthTo}`;
   try {
+    const existingJobId = findLiveJobForCacheKey(cacheKey);
+    if (existingJobId) {
+      res.status(202).json({ jobId: existingJobId, status: "running" });
+      return;
+    }
+
+    const jobId = await createJob(cacheKey);
+    res.status(202).json({ jobId, status: "queued" });
+
+    void (async () => {
+      try {
+        await markJobRunning(jobId);
     // ── Load data in parallel ─────────────────────────────────────────────────
     const [deepDiveResult, rowsResult, blockedResult] = await Promise.all([
       loadDistributorDeepDive(fy, stateHead).catch((): DistributorDeepDiveResult | null => null),
@@ -890,21 +934,31 @@ Output JSON with this exact schema:
       { title: stateHead, body: gatherText(rankedActions) },
     );
 
-    res.json({
-      type: "full-statehead-report",
-      fy, stateHead, periodLabel, priorPeriodLabel, monthFrom, monthTo,
-      dataCutoff: new Date().toISOString().slice(0, 10),
-      generatedAt: new Date().toISOString(),
-      headline,
-      teamTable: { members: memberRows },
-      coverage, distributorMix, range: rangeData, attention, schemes,
-      whatToDo: { rankedActions },
-      notAvailable: { items: notAvailableItems },
-      guard: guard2,
-    });
-  } catch (err) {
-    req.log.error({ err }, "full-report/statehead failed");
-    res.status(500).json({ error: "Could not generate state head report." });
+        await markJobComplete(jobId, {
+          type: "full-statehead-report",
+          fy, stateHead, periodLabel, priorPeriodLabel, monthFrom, monthTo,
+          dataCutoff: new Date().toISOString().slice(0, 10),
+          generatedAt: new Date().toISOString(),
+          headline,
+          teamTable: { members: memberRows },
+          coverage, distributorMix, range: rangeData, attention, schemes,
+          whatToDo: { rankedActions },
+          notAvailable: { items: notAvailableItems },
+          guard: guard2,
+        });
+      } catch (innerErr) {
+        console.error("[statehead-report] background job failed:", innerErr);
+        await markJobFailed(
+          jobId,
+          innerErr instanceof Error ? innerErr.message : String(innerErr),
+        ).catch(() => { /* swallow secondary failure */ });
+      }
+    })();
+  } catch (outerErr) {
+    console.error("[statehead-report] job creation failed:", outerErr);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Could not queue state head report." });
+    }
   }
 });
 

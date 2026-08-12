@@ -1032,6 +1032,10 @@ export default function AiReports() {
   const [growthScope, setGrowthScope]   = useState<"company"|"statehead"|"state">("statehead");
   const [growthState, setGrowthState]   = useState("");
   const [growthCachedAt, setGrowthCachedAt] = useState<string | null>(null);
+
+  // ── Async job polling (growth + statehead full reports) ──────────────────────
+  const [pollJobId, setPollJobId]       = useState<string | null>(null);
+  const [pollElapsedSec, setPollElapsedSec] = useState(0);
   const [dormantRevivalPct, setDormantRevivalPct] = useState(25);
   const [atRiskRecoveryPct, setAtRiskRecoveryPct] = useState(35);
   const [rangeUptakePct, setRangeUptakePct]       = useState(40);
@@ -1090,6 +1094,76 @@ export default function AiReports() {
     }
   }, [chatMessages, isChatting]);
 
+  // ── Async job poll loop ───────────────────────────────────────────────────────
+  // Runs whenever a growth / statehead job is in-flight (pollJobId !== null).
+  // Polls GET /api/ai/full-report/status/:jobId every 3 s and clears itself
+  // (pollJobId → null) when the job completes, fails, or the component unmounts.
+  useEffect(() => {
+    if (!pollJobId) return;
+    let cancelled = false;
+    let timeoutHandle: ReturnType<typeof setTimeout>;
+    const startMs = Date.now();
+
+    const tick = async () => {
+      if (cancelled) return;
+      setPollElapsedSec(Math.round((Date.now() - startMs) / 1000));
+      try {
+        const res = await fetch(`/api/ai/full-report/status/${encodeURIComponent(pollJobId)}`);
+        if (cancelled) return;
+
+        if (res.status === 404) {
+          setError("Report job not found or expired. Please try again.");
+          setPollJobId(null);
+          setIsLoading(false);
+          return;
+        }
+
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({ error: res.statusText }));
+          setError((e as { error?: string }).error ?? "Status check failed");
+          setPollJobId(null);
+          setIsLoading(false);
+          return;
+        }
+
+        const data = await res.json() as { status: string; report?: Record<string, unknown>; error?: string };
+        if (cancelled) return;
+
+        if (data.status === "complete" && data.report) {
+          const rpt = data.report;
+          if (typeof rpt.cachedAt === "string") setGrowthCachedAt(rpt.cachedAt as string);
+          const { cachedAt: _c, ...reportData } = rpt;
+          void _c;
+          setResult({ ...reportData } as GenerationResult);
+          setPollJobId(null);
+          setIsLoading(false);
+          return;
+        }
+
+        if (data.status === "failed") {
+          setError(data.error ?? "Report generation failed.");
+          setPollJobId(null);
+          setIsLoading(false);
+          return;
+        }
+
+        // queued | running — schedule next tick
+        timeoutHandle = setTimeout(tick, 3000);
+      } catch (e) {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : "Poll failed");
+        setPollJobId(null);
+        setIsLoading(false);
+      }
+    };
+
+    void tick();
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutHandle);
+    };
+  }, [pollJobId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const isDistributorType = (t: ArtifactType): t is DistributorArtifactType =>
     t.startsWith("distributor-") || t === "full-distributor-report";
 
@@ -1120,10 +1194,14 @@ export default function AiReports() {
     setResult(null);
     setSignedOff(false);
     setGrowthCachedAt(null);
+    setPollJobId(null);
+    setPollElapsedSec(0);
 
     // Full structured reports use a different endpoint and accept monthFrom/monthTo.
     const isFullReport = reportType === "full-distributor-report" || reportType === "full-statehead-report";
     const isGrowthReport = reportType === ("full-growth-report" as ArtifactType);
+    // Routes that support async 202 jobs (growth + statehead)
+    const isAsyncJobRoute = isGrowthReport || reportType === "full-statehead-report";
     let endpoint: string;
     let bodyObj: Record<string, unknown>;
 
@@ -1160,16 +1238,33 @@ export default function AiReports() {
       if (distributorName.trim()) bodyObj.distributor = distributorName.trim();
     }
 
+    // Flag used in the finally block: if we're handing off to the poll loop,
+    // keep isLoading=true (the poll loop will clear it when done).
+    let enteringPollMode = false;
+
     try {
       const resp = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(bodyObj),
       });
+
+      // ── Async job path (growth + statehead) ──────────────────────────────────
+      // Server returns 202 with { jobId } when no cache hit is available.
+      // We hand control to the polling useEffect which updates state when done.
+      if (isAsyncJobRoute && resp.status === 202) {
+        const data = await resp.json() as { jobId: string; status: string };
+        enteringPollMode = true;
+        setPollJobId(data.jobId);
+        return; // finally will see enteringPollMode=true and not clear isLoading
+      }
+
       if (!resp.ok) {
         const e = await resp.json().catch(() => ({ error: resp.statusText }));
         throw new Error((e as { error?: string }).error ?? "Request failed");
       }
+
+      // 200: direct / cached result — handle synchronously
       const data = await resp.json() as Record<string, unknown>;
       if (isGrowthReport && typeof data.cachedAt === "string") {
         setGrowthCachedAt(data.cachedAt);
@@ -1180,7 +1275,9 @@ export default function AiReports() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
-      setIsLoading(false);
+      // Only clear loading here if we're NOT handing off to the poll loop.
+      // (finally always runs even after `return`, so we check the flag.)
+      if (!enteringPollMode) setIsLoading(false);
     }
   };
 
@@ -1576,7 +1673,11 @@ export default function AiReports() {
               </Button>
             ) : (
               <Button onClick={() => { void generate(); }} disabled={isLoading || !canGenerate} size="sm">
-                {isLoading ? "Generating..." : "Generate"}
+                {isLoading
+                  ? pollJobId
+                    ? `Generating… ${pollElapsedSec}s`
+                    : "Generating…"
+                  : "Generate"}
               </Button>
             )}
           </div>

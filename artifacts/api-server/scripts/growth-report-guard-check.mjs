@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-// Growth Report guard regression check (Task 182).
+// Growth Report guard regression check (Task 182 / Task 240).
 //
 // Asserts against the RUNNING api-server:
-//   1. POST /api/ai/full-report/growth with scope=statehead returns HTTP 200.
+//   1. POST /api/ai/full-report/growth with scope=statehead returns HTTP 202 (or 200
+//      on a cache hit). On 202 the script polls GET /api/ai/full-report/status/:jobId
+//      every 3 s until status === "complete" or 300 s has elapsed.
 //   2. deduplication.postDedupValue <= deduplication.preDedupValue.
 //   3. CLOSE > RECOVER > ACTIVATE > WIDEN precedence is reflected in ledger:
 //        a. precedenceRules lists all four levers in order.
@@ -23,6 +25,9 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const REQUEST_TIMEOUT_MS = Number(process.env.GUARD_REQUEST_TIMEOUT_MS ?? 300000);
+// Max time to poll for the async job to complete (default 300 s).
+const POLL_TIMEOUT_MS = Number(process.env.GUARD_POLL_TIMEOUT_MS ?? 300000);
+const POLL_INTERVAL_MS = 3000;
 
 // ── Server resolution ─────────────────────────────────────────────────────────
 
@@ -131,6 +136,90 @@ function check(label, cond, detail = "") {
   }
 }
 
+/**
+ * POST to the growth route, then poll until complete (or timeout).
+ * Returns the final body object (the completed report payload).
+ */
+async function fetchGrowthReport(base, stateHead) {
+  let resp;
+  let body;
+
+  // POST
+  try {
+    resp = await fetch(`${base}/ai/full-report/growth`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: "statehead", stateHead }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    try { body = await resp.json(); } catch { body = null; }
+  } catch (err) {
+    console.error(`FATAL: growth report POST failed: ${err?.message ?? err}`);
+    process.exit(2);
+  }
+
+  // Synchronous cache hit — server returned the report directly.
+  if (resp.status === 200) {
+    console.log(`  INFO  POST returned 200 (cache hit) — skipping poll`);
+    return { postStatus: 200, body };
+  }
+
+  // Expected async path: 202 with a jobId.
+  if (resp.status === 202) {
+    const jobId = body?.jobId;
+    if (!jobId) {
+      console.error(`FATAL: 202 response missing jobId — body: ${JSON.stringify(body)}`);
+      process.exit(2);
+    }
+    console.log(`  INFO  POST returned 202, jobId=${jobId} — polling status…`);
+
+    const deadline = Date.now() + POLL_TIMEOUT_MS;
+    let pollNum = 0;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      pollNum++;
+      let pollResp;
+      let pollBody;
+      try {
+        pollResp = await fetch(`${base}/ai/full-report/status/${encodeURIComponent(jobId)}`, {
+          signal: AbortSignal.timeout(15000),
+        });
+        try { pollBody = await pollResp.json(); } catch { pollBody = null; }
+      } catch (err) {
+        console.error(`FATAL: status poll #${pollNum} failed: ${err?.message ?? err}`);
+        process.exit(2);
+      }
+
+      if (pollResp.status === 404) {
+        console.error(`FATAL: jobId ${jobId} not found on server (404)`);
+        process.exit(2);
+      }
+
+      const status = pollBody?.status;
+      const elapsed = Math.round((Date.now() - (deadline - POLL_TIMEOUT_MS)) / 1000);
+      console.log(`  INFO  poll #${pollNum} (${elapsed}s): status=${status}`);
+
+      if (status === "complete") {
+        // The report is nested under pollBody.report
+        return { postStatus: 202, body: pollBody.report };
+      }
+
+      if (status === "failed") {
+        console.error(`FATAL: job failed — ${pollBody?.error ?? "no error detail"}`);
+        process.exit(2);
+      }
+      // status === "queued" | "running" — keep polling
+    }
+
+    console.error(`FATAL: job ${jobId} did not complete within ${POLL_TIMEOUT_MS / 1000}s`);
+    process.exit(2);
+  }
+
+  // Unexpected status
+  console.error(`FATAL: unexpected POST status ${resp.status} — body: ${JSON.stringify(body).slice(0, 400)}`);
+  process.exit(2);
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 const base = await resolveBase();
@@ -138,40 +227,17 @@ console.log(`\nGrowth report guard checks against ${base}\n`);
 
 const GUARD_HEAD = process.env.GUARD_GROWTH_HEAD ?? "Anant Singh";
 
-// One retry on cold-start timeout: the growth report builds deep-dive data and
-// queries Claude; the first call after a cold boot may exceed the timeout even
-// on a warm machine. A second timeout is a real failure.
-let resp = null;
-let body = null;
-for (let attempt = 0; ; attempt++) {
-  try {
-    resp = await fetch(`${base}/ai/full-report/growth`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scope: "statehead", stateHead: GUARD_HEAD }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    try { body = await resp.json(); } catch { body = null; }
-    break;
-  } catch (err) {
-    if (attempt === 0 && err?.name === "TimeoutError") {
-      console.log("INFO  request timed out on cold server — retrying once");
-      continue;
-    }
-    console.error(`FATAL: growth report request failed: ${err?.message ?? err}`);
-    process.exit(2);
-  }
-}
+const { postStatus, body } = await fetchGrowthReport(base, GUARD_HEAD);
 
-// ── Check 1: HTTP 200 ─────────────────────────────────────────────────────────
+// ── Check 1: POST returned 200 (cache) or 202 (async job started and completed) ─
 check(
-  `POST /ai/full-report/growth?scope=statehead&stateHead=${GUARD_HEAD} returns 200`,
-  resp.status === 200,
-  `status=${resp.status} body=${JSON.stringify(body).slice(0, 400)}`,
+  `POST /ai/full-report/growth?scope=statehead&stateHead=${GUARD_HEAD} returned 200 or 202`,
+  postStatus === 200 || postStatus === 202,
+  `status=${postStatus} body=${JSON.stringify(body).slice(0, 400)}`,
 );
 
-if (resp.status !== 200 || body == null) {
-  console.error("\nFATAL: cannot run further checks without a valid 200 response.");
+if (body == null) {
+  console.error("\nFATAL: cannot run further checks without a valid report payload.");
   process.exit(1);
 }
 

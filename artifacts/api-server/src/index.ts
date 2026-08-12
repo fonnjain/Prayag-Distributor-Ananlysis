@@ -28,6 +28,7 @@ import { restoreAnchorsFromStorage } from "./lib/config/verifyAnchors.js";
 import { restoreRosterCsvFromGcs } from "./lib/mgmt/roster.js";
 import { prewarmWarningsSnapshots } from "./routes/warnings.js";
 import { prewarmMgmtDataSnapshots } from "./routes/mgmt.js";
+import { cleanupOrphanedJobs } from "./lib/aiReportJobQueue.js";
 
 const rawPort = process.env["PORT"];
 
@@ -74,6 +75,11 @@ runMigrations()
   }
 
   logger.info({ port }, "Server listening");
+
+  // Mark any orphaned "queued"/"running" AI report jobs as failed.
+  // They belong to the previous server process and their background
+  // computations died with it; clients should retry rather than poll forever.
+  void cleanupOrphanedJobs();
 
   // Ensure baseline data exists, then kick off a live sync in the background so
   // the first load is instant and subsequent loads reflect the latest sheets.

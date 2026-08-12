@@ -29,6 +29,13 @@ import { fiscalMonthsToLabels } from "../lib/mgmt/primaryPeriod.js";
 import { assembleRows } from "../lib/mgmt/report.js";
 import { runNumericGuard, type GuardResult } from "../lib/mgmt/numericGuard.js";
 import { isFrozen } from "../lib/customers/registerSync.js";
+import {
+  findLiveJobForCacheKey,
+  createJob,
+  markJobRunning,
+  markJobComplete,
+  markJobFailed,
+} from "../lib/aiReportJobQueue.js";
 
 const router: IRouter = Router();
 const MODEL = "claude-sonnet-4-6";
@@ -661,7 +668,7 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
   const headFilter  = scope === "statehead" ? stateHead : null;
   const stateFilter = scope === "state"     ? state     : null;
 
-  // ── Cache check ───────────────────────────────────────────────────────────
+  // ── Cache check — synchronous 200 for warm cache hits ─────────────────────
   const cacheKey = growthCacheKey(fy, scope, stateHead, state, monthFrom, monthTo, dormantRevival, atRiskRecovery, rangeUptake);
   if (!forceFresh) {
     const hit = growthCache.get(cacheKey);
@@ -671,7 +678,23 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
     }
   }
 
+  // ── Async job — 202 for cold-start requests ───────────────────────────────
+  // Return immediately with a jobId; client polls GET /ai/full-report/status/:jobId.
+  // Deduplicate: if a job for the same cacheKey is already running, reuse it.
   try {
+    const existingJobId = findLiveJobForCacheKey(cacheKey);
+    if (existingJobId) {
+      res.status(202).json({ jobId: existingJobId, status: "running" });
+      return;
+    }
+
+    const jobId = await createJob(cacheKey);
+    res.status(202).json({ jobId, status: "queued" });
+
+    // Fire-and-forget: run the full computation in the background.
+    void (async () => {
+      try {
+        await markJobRunning(jobId);
     // ── Load data in parallel ─────────────────────────────────────────────────
     const [
       customerStateRows,
@@ -1412,17 +1435,30 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       guard,
     };
 
-    // ── Store in cache ────────────────────────────────────────────────────────
-    // Closed FYs are frozen (registers never change) — store permanently.
-    // Open FYs: store for 15 minutes (aligns with member-sheet cache TTL).
-    const frozen = isFrozen(fy);
-    const until = frozen ? null : Date.now() + GROWTH_CACHE_TTL_MS;
-    growthCache.set(cacheKey, { payload: responsePayload, until });
+        // ── Store in cache ─────────────────────────────────────────────────────
+        // Closed FYs are frozen — store permanently.
+        // Open FYs: store for 15 minutes (aligns with member-sheet cache TTL).
+        const frozen = isFrozen(fy);
+        const until = frozen ? null : Date.now() + GROWTH_CACHE_TTL_MS;
+        growthCache.set(cacheKey, { payload: responsePayload, until });
 
-    res.json({ ...responsePayload, cachedAt: undefined });
-  } catch (err) {
-    req.log.error({ err }, "full-report/growth failed");
-    res.status(500).json({ error: "Could not generate growth report." });
+        await markJobComplete(jobId, responsePayload);
+      } catch (innerErr) {
+        console.error("[growth-report] background job failed:", innerErr);
+        await markJobFailed(
+          jobId,
+          innerErr instanceof Error ? innerErr.message : String(innerErr),
+        ).catch(() => { /* swallow secondary failure */ });
+      }
+    })();
+  } catch (outerErr) {
+    // createJob() itself failed (rare DB error). The 202 was not sent yet at
+    // this point only if createJob threw synchronously before res.status(202);
+    // in practice this path produces an unhandled 500 to the client.
+    console.error("[growth-report] job creation failed:", outerErr);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Could not queue growth report." });
+    }
   }
 });
 

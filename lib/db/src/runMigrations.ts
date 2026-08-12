@@ -405,6 +405,26 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    id: "018_ai_report_job",
+    sql: `
+      -- Job-tracking table for async AI report generation (growth + statehead).
+      -- Status transitions: queued → running → complete | failed.
+      -- Completed payloads are stored in route_payload_snapshot (key "ai-job|{job_id}").
+      CREATE TABLE IF NOT EXISTS ai_report_job (
+        job_id       TEXT        PRIMARY KEY,
+        cache_key    TEXT        NOT NULL,
+        status       TEXT        NOT NULL DEFAULT 'queued',
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+        completed_at TIMESTAMPTZ,
+        error        TEXT
+      );
+      CREATE INDEX IF NOT EXISTS ai_report_job_cache_key_idx
+        ON ai_report_job (cache_key);
+      CREATE INDEX IF NOT EXISTS ai_report_job_created_at_idx
+        ON ai_report_job (created_at);
+    `,
+  },
+  {
     id: "017_scheme_schema_rebuild",
     sql: `
       -- Replace the old generic scheme_def / scheme_slab tables with the new
