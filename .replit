@@ -32,6 +32,10 @@ args = "growth-report-guards"
 task = "workflow.run"
 args = "type-check-guards"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "schemes-nudge-guards"
+
 [[workflows.workflow]]
 name = "comparison-guards"
 author = "agent"
@@ -75,6 +79,17 @@ outputType = "console"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm run typecheck"
+
+[[workflows.workflow]]
+name = "schemes-nudge-guards"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "node artifacts/api-server/scripts/schemes-nudge-guard-check.mjs"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [agent]
 stack = "PNPM_WORKSPACE"
