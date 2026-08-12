@@ -10,8 +10,13 @@
 import { titleCase } from "./util.js";
 import { buildHeadResolver, normName } from "../mgmt/names.js";
 import { NON_TERRITORY_BUCKET } from "../registers/normalize.js";
-import headAlias from "../../../config/head_alias.json";
+// head_alias.json and normalize.json territory_heads retired — maps now come
+// from person_registry DB table via personRegistry.ts.
 import normalizeConfig from "../../../config/normalize.json";
+import {
+  canonicalStateHeads,
+  institutionalHeads,
+} from "../personRegistry.js";
 import {
   matchCustomer,
   normCode,
@@ -40,11 +45,16 @@ export function normalizeChannel(raw: string | null): string | null {
   return "Unmapped";
 }
 
-const territoryHeadKeys = normalizeConfig.territory_heads as string[];
-const territoryDisplays = territoryHeadKeys.map(
-  (k) => (headAlias as Record<string, string>)[k] ?? titleCase(k),
-);
-const resolveTerritoryHead = buildHeadResolver(territoryDisplays);
+// Resolver is built lazily on first use so that canonicalStateHeads is
+// populated by loadPersonRegistry() before classifyHead() is ever called.
+let _resolveTerritoryHead: ((raw: string) => string | null) | null = null;
+function resolveTerritoryHead(raw: string): string | null {
+  if (!_resolveTerritoryHead) {
+    _resolveTerritoryHead = buildHeadResolver([...canonicalStateHeads]);
+  }
+  return _resolveTerritoryHead(raw);
+}
+
 const institutionalKeys = (normalizeConfig.institutional as string[]).map((t) =>
   normName(t),
 );

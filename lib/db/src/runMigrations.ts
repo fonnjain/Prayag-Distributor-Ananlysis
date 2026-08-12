@@ -522,6 +522,37 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    id: "021_person_registry",
+    sql: `
+      -- Single source of truth for the person/head identity model.
+      -- Replaces head_alias.json + normalize.json territory_heads as pipeline sources.
+      -- norm_key is the unique identity: plausible employee codes (≤4 digits) or
+      -- normSecKey(name):normSecKey(manager) for implausible codes.
+      CREATE TABLE IF NOT EXISTS person_registry (
+        id               SERIAL      PRIMARY KEY,
+        employee_code    TEXT,
+        code_plausible   BOOLEAN     NOT NULL DEFAULT FALSE,
+        norm_key         TEXT        NOT NULL UNIQUE,
+        canonical_name   TEXT        NOT NULL,
+        alias_primary    TEXT[],
+        alias_secondary  TEXT,
+        alias_sheet      TEXT,
+        reporting_manager TEXT,
+        state_head       TEXT,
+        is_state_head    BOOLEAN     NOT NULL DEFAULT FALSE,
+        is_person        BOOLEAN     NOT NULL DEFAULT TRUE,
+        hr_status        TEXT,
+        flag_notes       TEXT,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS pr_canonical_name_idx ON person_registry (canonical_name);
+      CREATE INDEX IF NOT EXISTS pr_is_state_head_idx  ON person_registry (is_state_head);
+      CREATE INDEX IF NOT EXISTS pr_is_person_idx      ON person_registry (is_person);
+      CREATE INDEX IF NOT EXISTS pr_employee_code_idx  ON person_registry (employee_code);
+    `,
+  },
+  {
     id: "019_rename_scheme_slab_to_reward_slab",
     sql: `
       -- Dev DBs that ran the original 017 have the NEW-shape table under the

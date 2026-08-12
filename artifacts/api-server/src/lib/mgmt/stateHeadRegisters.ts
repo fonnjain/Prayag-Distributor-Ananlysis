@@ -17,7 +17,8 @@
 // workbook load records a status so the report and the options endpoint can
 // surface the real failure (403 not shared / 404 wrong id / no register tab)
 // instead of a silent blank.
-import headAliasJson from "../../../config/head_alias.json";
+// head_alias.json retired — alias map now comes from person_registry DB table.
+import { headAliasLookup as _registryAliasLookup } from "../personRegistry.js";
 import { logger } from "../logger.js";
 import {
   readTabRowsChunked,
@@ -43,18 +44,18 @@ const INSTITUTIONAL_KEYS = new Set(["project", "govt", "gem", "jjm", "other"]);
 
 // normHead(register spelling) -> canonical roster display name. Canonical
 // names map to themselves so already-correct spellings pass through.
-const headAliasByKey: Map<string, string> = (() => {
-  const m = new Map<string, string>();
-  for (const [raw, canonical] of Object.entries(
-    headAliasJson as Record<string, string>,
-  )) {
-    const key = normHead(raw);
-    if (key) m.set(key, canonical);
-    const selfKey = normHead(canonical);
-    if (selfKey && !m.has(selfKey)) m.set(selfKey, canonical);
+// _registryAliasLookup stores UPPERCASE keys; normHead returns lowercase.
+// This helper bridges the two normalizations.
+function aliasLookupByNormHead(key: string): string | undefined {
+  for (const [rk, rv] of _registryAliasLookup) {
+    if (normHead(rk) === key) return rv;
   }
-  return m;
-})();
+  return undefined;
+}
+const headAliasByKey = {
+  get: aliasLookupByNormHead,
+  has: (key: string) => aliasLookupByNormHead(key) !== undefined,
+};
 
 // Resolve a raw register STATE HEAD value. Blank values are decided by the
 // caller (they inherit the file's dominant head when one exists).

@@ -5,7 +5,11 @@
 import { createHash } from "node:crypto";
 import type { InsertSecRegLine } from "@workspace/db";
 import normalizeConfig from "../../../config/normalize.json";
-import headAliasConfigRaw from "../../../config/head_alias.json";
+// head_alias.json retired — alias and territory maps now come from person_registry DB table.
+import {
+  headAliasLookup as _registryAliasLookup,
+  territoryHeads as _registryTerritoryHeads,
+} from "../personRegistry.js";
 import colMapsConfig from "../../../config/secondary_column_maps.json";
 import type { CellValue, SecColMap, SecGrain, SecParsedRow, SecUnmappedReport } from "./types.js";
 import { bumpSecUnmapped } from "./types.js";
@@ -117,14 +121,10 @@ export function toMonthLabel(v: CellValue, fy: string): string | null {
 
 // ── Alias and normalisation maps ──────────────────────────────────────────────
 
-const headAliasConfig = headAliasConfigRaw as Record<string, string>;
-
-// Build a name->canon map from head_alias.json (raw -> canonical) and
-// normalize.json territory_heads (canonical list).
-const HEAD_ALIAS: Map<string, string> = new Map();
-for (const [raw, canon] of Object.entries(headAliasConfig)) {
-  HEAD_ALIAS.set(raw.toUpperCase().trim(), canon);
-}
+// HEAD_ALIAS now sourced from person_registry DB table via _registryAliasLookup.
+// It starts empty at module load and is populated by loadPersonRegistry() before
+// any register ingest runs.
+const HEAD_ALIAS = _registryAliasLookup;
 
 const STATE_MAP: Map<string, string> = new Map(
   Object.entries(
@@ -285,11 +285,8 @@ export function canonBrand(raw: string | null): string | null {
 
 // Classify territory: a row is territorial when headCanon is in the territory
 // list AND the state does not contain channel tokens (PROJECT, GOVT, OTHER).
-const TERRITORY_HEADS = new Set<string>(
-  (normalizeConfig as { territory_heads: string[] }).territory_heads.map(
-    (h) => h.toUpperCase().trim(),
-  ),
-);
+// TERRITORY_HEADS now sourced from person_registry DB table via _registryTerritoryHeads.
+const TERRITORY_HEADS = _registryTerritoryHeads;
 const CHANNEL_TOKENS = new Set<string>(
   (
     normalizeConfig as { state_channel_tokens: string[] }

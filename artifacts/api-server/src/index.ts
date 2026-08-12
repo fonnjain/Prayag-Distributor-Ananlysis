@@ -29,6 +29,10 @@ import { restoreRosterCsvFromGcs } from "./lib/mgmt/roster.js";
 import { prewarmWarningsSnapshots } from "./routes/warnings.js";
 import { prewarmMgmtDataSnapshots } from "./routes/mgmt.js";
 import { cleanupOrphanedJobs } from "./lib/aiReportJobQueue.js";
+import {
+  loadPersonRegistry,
+  assertHeadCoverage,
+} from "./lib/personRegistry.js";
 
 const rawPort = process.env["PORT"];
 
@@ -66,6 +70,16 @@ runMigrations()
     await restoreRosterCsvFromGcs().catch((err) =>
       logger.warn({ err }, "hr_roster.csv: startup GCS restore failed; using packaged baseline"),
     );
+    // Load person registry from DB so head alias maps are populated before
+    // any register ingest or SAP derive runs.  Falls back gracefully when the
+    // table is empty (e.g. first deploy before seed) — maps remain empty and
+    // canonHead() returns null for all heads (same as unmapped behaviour).
+    await loadPersonRegistry().catch((err) =>
+      logger.warn({ err }, "[personRegistry] startup load failed; head alias maps will be empty"),
+    );
+    // Non-fatal coverage check — logs WARN for any FY2026-27 register head not
+    // resolved by the registry.  Run in background after register data is ready.
+    void assertHeadCoverage();
   })
   .then(() => {
     app.listen(port, (err) => {

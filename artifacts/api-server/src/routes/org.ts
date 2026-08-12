@@ -19,6 +19,13 @@ import {
 import { eq, ilike, or, desc, isNull } from "drizzle-orm";
 import { SEED_HEADS, SEED_FLAGS } from "../lib/org/seedData.js";
 import { loadRoster, loadRosterHealth } from "../lib/mgmt/roster.js";
+import {
+  seedPersonRegistry,
+  getRegistryRows,
+  patchRegistryRow,
+  previewAliasImpact,
+  loadPersonRegistry,
+} from "../lib/personRegistry.js";
 
 const router = Router();
 
@@ -453,6 +460,79 @@ router.post("/org/seed", async (req, res) => {
     }
 
     res.json({ created, skipped, flagsCreated, aliasesAdded });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── Person Registry routes ────────────────────────────────────────────────────
+
+// GET /api/person-registry — list all rows, ordered by state head first then name.
+router.get("/person-registry", async (_req, res) => {
+  try {
+    const rows = await getRegistryRows();
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// PATCH /api/person-registry/:id — update aliases on a registry row.
+// Body: { aliasPrimary?, aliasSecondary?, aliasSheet?, stateHead?, flagNotes? }
+router.patch("/person-registry/:id", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const patch = req.body as {
+      aliasPrimary?: string[];
+      aliasSecondary?: string | null;
+      aliasSheet?: string | null;
+      stateHead?: string | null;
+      flagNotes?: string | null;
+    };
+    const updated = await patchRegistryRow(id, patch);
+    if (!updated) {
+      res.status(404).json({ error: "Row not found or no fields to update" });
+      return;
+    }
+    // Reload the in-memory maps so the change takes effect immediately.
+    await loadPersonRegistry();
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// POST /api/person-registry/preview-impact — dry-run alias change.
+// Body: { id: number, newAliases: string[] }
+router.post("/person-registry/preview-impact", async (req, res) => {
+  try {
+    const { id, newAliases } = req.body as {
+      id: number;
+      newAliases: string[];
+    };
+    if (!id || !Array.isArray(newAliases)) {
+      res.status(400).json({ error: "id and newAliases are required" });
+      return;
+    }
+    const impact = await previewAliasImpact(id, newAliases);
+    res.json(impact);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// POST /api/person-registry/seed — one-time seed from JSON config + HR CSV.
+// Idempotent: safe to call twice (ON CONFLICT DO NOTHING).
+router.post("/person-registry/seed", async (_req, res) => {
+  try {
+    const report = await seedPersonRegistry();
+    // Reload maps after seeding.
+    await loadPersonRegistry();
+    res.json({ ok: true, ...report });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

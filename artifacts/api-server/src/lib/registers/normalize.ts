@@ -5,7 +5,12 @@ import { createHash } from "node:crypto";
 import type { InsertSaleLine } from "@workspace/db";
 import groupMapConfig from "../../../config/group_map.json";
 import normalizeConfig from "../../../config/normalize.json";
-import headAliasConfigRaw from "../../../config/head_alias.json";
+// head_alias.json retired — head/territory maps now come from person_registry DB table.
+import {
+  headAliasLookup,
+  territoryHeads,
+  institutionalHeads,
+} from "../personRegistry.js";
 
 export type CellValue = string | number | boolean | Date | null | undefined;
 
@@ -224,60 +229,9 @@ for (const [canon, raws] of Object.entries(
   for (const raw of raws) groupLookup.set(raw.toUpperCase(), canon);
 }
 
-// Build alias map from raw uppercase key → canonical display name.
-// Covers spelling variants (BIJJU→Biju C.O, SNADEEP JI→Sandeep Dadheech, etc.).
-const headAliasLookup = new Map<string, string>(
-  Object.entries(headAliasConfigRaw as Record<string, string>).map(
-    ([raw, canon]) => [raw.toUpperCase().trim(), canon],
-  ),
-);
-
-const territoryHeads = new Set(
-  (normalizeConfig.territory_heads as string[]).map((h) => h.toUpperCase()),
-);
-
-// ── Startup integrity check ────────────────────────────────────────────────────
-//
-// canonHead() is a two-gate function: it resolves aliases ONLY for keys that
-// first pass the territoryHeads gate.  Any head_alias.json key that maps to a
-// known state-head canonical name but is absent from territory_heads will be
-// silently discarded as unmapped — the alias entry has no effect.
-//
-// This assertion fails loudly at module load time (i.e. server startup) rather
-// than silently routing rows to unmapped_heads.  The two files must stay in sync;
-// this is the enforcement mechanism.
-(function assertAliasKeysGated() {
-  // Pass 1: collect all canonical state-head names — the values that territory
-  // keys resolve to through headAliasLookup.
-  const stateHeadCanons = new Set<string>();
-  for (const raw of normalizeConfig.territory_heads as string[]) {
-    const key = raw.toUpperCase().trim();
-    const canon = headAliasLookup.get(key);
-    if (canon) stateHeadCanons.add(canon);
-  }
-
-  // Pass 2: find alias keys that map to a state-head canon but are not gated.
-  const ungated: string[] = [];
-  for (const [key, canon] of headAliasLookup) {
-    if (stateHeadCanons.has(canon) && !territoryHeads.has(key)) {
-      ungated.push(`"${key}" → "${canon}"`);
-    }
-  }
-
-  if (ungated.length > 0) {
-    throw new Error(
-      `normalize.ts: startup integrity check failed.\n` +
-      `The following head_alias.json keys map to a state-head canonical name but are\n` +
-      `absent from normalize.json territory_heads.  canonHead() would silently discard\n` +
-      `them — add each key to territory_heads to fix:\n` +
-      ungated.map((s) => `  ${s}`).join("\n"),
-    );
-  }
-})();
-
-const institutionalHeads = new Set(
-  (normalizeConfig.institutional as string[]).map((h) => h.toUpperCase()),
-);
+// headAliasLookup, territoryHeads, institutionalHeads are imported from
+// personRegistry.ts above.  They start empty and are populated by
+// loadPersonRegistry() before any register ingest runs.
 export const NON_TERRITORY_BUCKET = normalizeConfig.non_territory_bucket as string;
 const stateMap = new Map<string, string>(
   Object.entries(normalizeConfig.state_map as Record<string, string>).map(

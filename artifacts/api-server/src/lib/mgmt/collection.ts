@@ -10,24 +10,19 @@
 import { readAllTabRows } from "../registers/sheetsApi.js";
 import { normHead, normName } from "./names.js";
 import { mgmtSources } from "./roster.js";
-import headAliasJson from "../../../config/head_alias.json";
-
-// Build the alias map once at module load (same as stateHeadRegisters.ts).
-const headAliasByKey: Map<string, string> = (() => {
-  const m = new Map<string, string>();
-  for (const [raw, canonical] of Object.entries(
-    headAliasJson as Record<string, string>,
-  )) {
-    m.set(normHead(raw), normName(canonical));
-  }
-  return m;
-})();
+// head_alias.json retired — alias map now comes from person_registry DB table.
+import { headAliasLookup as _registryAliasLookup } from "../personRegistry.js";
 
 function resolveHeadKey(raw: unknown): string | null {
   if (raw == null || raw === "") return null;
   const key = normHead(String(raw));
   if (!key) return null;
-  return headAliasByKey.get(key) ?? key;
+  // headAliasLookup stores uppercase keys; normHead returns lowercase.
+  // Try both forms: the registry lookup uses toUpperCase keys.
+  const upperKey = String(raw).toUpperCase().trim();
+  return _registryAliasLookup.get(upperKey)
+    ? normName(_registryAliasLookup.get(upperKey)!)
+    : key;
 }
 
 function toNum(v: unknown): number | null {

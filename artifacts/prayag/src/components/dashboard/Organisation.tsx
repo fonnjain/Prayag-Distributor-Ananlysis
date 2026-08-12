@@ -931,10 +931,390 @@ function RosterHealthPanel() {
   );
 }
 
+// ── Person Registry panel ──────────────────────────────────────────────────────
+
+interface RegistryRow {
+  id: number;
+  employee_code: string | null;
+  code_plausible: boolean;
+  norm_key: string;
+  canonical_name: string;
+  alias_primary: string[] | null;
+  alias_secondary: string | null;
+  alias_sheet: string | null;
+  reporting_manager: string | null;
+  state_head: string | null;
+  is_state_head: boolean;
+  is_person: boolean;
+  hr_status: string | null;
+  flag_notes: string | null;
+}
+
+interface ImpactPreview {
+  rowCount: number;
+  affectedCustomers: string[];
+}
+
+function PersonRegistryPanel() {
+  const [rows, setRows] = useState<RegistryRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [seeding, setSeeding] = useState(false);
+  const [seedMsg, setSeedMsg] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editAliases, setEditAliases] = useState("");
+  const [editSecondary, setEditSecondary] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [impact, setImpact] = useState<ImpactPreview | null>(null);
+  const [showImpact, setShowImpact] = useState(false);
+  const [filterGroup, setFilterGroup] = useState<"all" | "state-heads" | "members" | "non-person">("all");
+
+  async function loadRows() {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetch(`${API}/person-registry`);
+      if (!r.ok) throw new Error(`Server error ${r.status}`);
+      const data: RegistryRow[] = await r.json();
+      setRows(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Load failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void loadRows(); }, []);
+
+  async function handleSeed() {
+    setSeeding(true);
+    setSeedMsg(null);
+    try {
+      const r = await fetch(`${API}/person-registry/seed`, { method: "POST" });
+      const d = await r.json() as Record<string, unknown>;
+      if (!r.ok) { setError(String(d.error ?? "Seed failed")); return; }
+      setSeedMsg(`Seeded — state heads: ${d.stateHeads}, members: ${d.members}, non-persons: ${d.nonPersons}, skipped: ${d.skipped}`);
+      await loadRows();
+    } finally {
+      setSeeding(false);
+    }
+  }
+
+  async function handlePreviewImpact() {
+    if (editingId == null) return;
+    const aliases = editAliases.split(",").map((a) => a.trim()).filter(Boolean);
+    const r = await fetch(`${API}/person-registry/preview-impact`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: editingId, newAliases: aliases }),
+    });
+    const d = await r.json() as ImpactPreview;
+    setImpact(d);
+    setShowImpact(true);
+  }
+
+  async function handleSave() {
+    if (editingId == null) return;
+    setSaving(true);
+    try {
+      const aliases = editAliases.split(",").map((a) => a.trim()).filter(Boolean);
+      const r = await fetch(`${API}/person-registry/${editingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          aliasPrimary: aliases.length > 0 ? aliases : undefined,
+          aliasSecondary: editSecondary || null,
+        }),
+      });
+      if (!r.ok) { const e = await r.json() as { error?: string }; setError(e.error ?? "Save failed"); return; }
+      setEditingId(null);
+      setShowImpact(false);
+      setImpact(null);
+      await loadRows();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const filtered = useMemo(() => {
+    let data = rows;
+    if (filterGroup === "state-heads") data = data.filter((r) => r.is_state_head);
+    else if (filterGroup === "members") data = data.filter((r) => r.is_person && !r.is_state_head);
+    else if (filterGroup === "non-person") data = data.filter((r) => !r.is_person);
+    const q = search.trim().toLowerCase();
+    if (!q) return data;
+    return data.filter((r) =>
+      r.canonical_name.toLowerCase().includes(q) ||
+      (r.alias_primary ?? []).some((a) => a.toLowerCase().includes(q)) ||
+      (r.alias_secondary ?? "").toLowerCase().includes(q) ||
+      (r.state_head ?? "").toLowerCase().includes(q) ||
+      (r.reporting_manager ?? "").toLowerCase().includes(q),
+    );
+  }, [rows, search, filterGroup]);
+
+  const stateHeadCount = rows.filter((r) => r.is_state_head).length;
+  const memberCount = rows.filter((r) => r.is_person && !r.is_state_head).length;
+  const implausibleCount = rows.filter((r) => r.is_person && r.flag_notes && r.flag_notes.includes("Implausible")).length;
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading person registry…
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* KPI strip */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-lg border border-border/50 bg-background px-4 py-3">
+          <p className="text-xs text-muted-foreground">State Heads</p>
+          <p className="text-xl font-semibold tabular-nums">{stateHeadCount}</p>
+        </div>
+        <div className="rounded-lg border border-border/50 bg-background px-4 py-3">
+          <p className="text-xs text-muted-foreground">Members</p>
+          <p className="text-xl font-semibold tabular-nums">{memberCount}</p>
+        </div>
+        <div className="rounded-lg border border-border/50 bg-background px-4 py-3">
+          <p className="text-xs text-muted-foreground">Implausible codes</p>
+          <p className="text-xl font-semibold tabular-nums text-amber-600 dark:text-amber-400">
+            {implausibleCount || "—"}
+          </p>
+        </div>
+      </div>
+
+      {error && (
+        <div className="rounded-md border border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-950/20 px-4 py-2 text-xs text-red-700 dark:text-red-400">
+          {error}
+        </div>
+      )}
+      {seedMsg && (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/20 px-4 py-2 text-xs text-emerald-700 dark:text-emerald-400">
+          {seedMsg}
+        </div>
+      )}
+
+      {/* Seed button (only show when empty) */}
+      {rows.length === 0 && (
+        <div className="rounded-lg border border-dashed border-border/60 px-6 py-8 text-center space-y-3">
+          <p className="text-sm text-muted-foreground">Registry is empty. Run seed to populate from config files + HR roster.</p>
+          <Button size="sm" onClick={() => void handleSeed()} disabled={seeding}>
+            {seeding ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Seeding…</> : "Seed Registry"}
+          </Button>
+        </div>
+      )}
+
+      {rows.length > 0 && (
+        <>
+          {/* Toolbar */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="relative flex-1 min-w-48">
+              <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search name, alias, head…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+            <select
+              value={filterGroup}
+              onChange={(e) => setFilterGroup(e.target.value as typeof filterGroup)}
+              className="text-sm rounded-md border border-input bg-background px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="all">All ({rows.length})</option>
+              <option value="state-heads">State Heads ({stateHeadCount})</option>
+              <option value="members">Members ({memberCount})</option>
+              <option value="non-person">Non-person ({rows.filter((r) => !r.is_person).length})</option>
+            </select>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void handleSeed()}
+              disabled={seeding}
+              className="shrink-0"
+            >
+              {seeding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              <span className="ml-1.5 hidden sm:inline">Re-seed</span>
+            </Button>
+          </div>
+
+          {/* Table */}
+          <div className="rounded-lg border border-border/50 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-muted/40 border-b border-border/50">
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Canonical Name</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Role</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide hidden md:table-cell">Primary Aliases</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide hidden lg:table-cell">CRM / Secondary</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide hidden lg:table-cell">State Head</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide hidden xl:table-cell">Emp Code</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Edit</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/30">
+                  {filtered.map((row) => (
+                    <>
+                      <tr key={row.id} className={cn("hover:bg-muted/20 transition-colors", editingId === row.id && "bg-muted/30")}>
+                        <td className="px-4 py-2.5">
+                          <div className="font-medium">{row.canonical_name}</div>
+                          {row.flag_notes && (
+                            <div className="text-xs text-amber-600 dark:text-amber-400 mt-0.5 flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3 shrink-0" />{row.flag_notes}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          {!row.is_person ? (
+                            <Badge className="bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 border-0 text-xs py-0 px-2">Non-person</Badge>
+                          ) : row.is_state_head ? (
+                            <Badge className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-0 text-xs py-0 px-2">State Head</Badge>
+                          ) : (
+                            <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border-0 text-xs py-0 px-2">Member</Badge>
+                          )}
+                          {row.hr_status === "Deactive" && (
+                            <Badge className="ml-1 bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 border-0 text-xs py-0 px-2">Deactive</Badge>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 hidden md:table-cell">
+                          <div className="flex flex-wrap gap-1 max-w-xs">
+                            {(row.alias_primary ?? []).slice(0, 4).map((a) => (
+                              <span key={a} className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-mono bg-muted/60 text-muted-foreground">{a}</span>
+                            ))}
+                            {(row.alias_primary ?? []).length > 4 && (
+                              <span className="text-xs text-muted-foreground">+{(row.alias_primary ?? []).length - 4}</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5 hidden lg:table-cell text-sm text-muted-foreground">{row.alias_secondary ?? "—"}</td>
+                        <td className="px-4 py-2.5 hidden lg:table-cell text-sm text-muted-foreground">{row.state_head ?? "—"}</td>
+                        <td className="px-4 py-2.5 hidden xl:table-cell">
+                          {row.employee_code ? (
+                            <span className={cn("text-xs font-mono", row.code_plausible ? "text-foreground" : "text-amber-600 dark:text-amber-400")}>
+                              {row.employee_code}
+                              {!row.code_plausible && <AlertTriangle className="h-3 w-3 inline ml-1" />}
+                            </span>
+                          ) : "—"}
+                        </td>
+                        <td className="px-4 py-2.5 text-right">
+                          <button
+                            onClick={() => {
+                              if (editingId === row.id) { setEditingId(null); setShowImpact(false); }
+                              else {
+                                setEditingId(row.id);
+                                setEditAliases((row.alias_primary ?? []).join(", "));
+                                setEditSecondary(row.alias_secondary ?? "");
+                                setShowImpact(false);
+                                setImpact(null);
+                              }
+                            }}
+                            className="text-xs text-primary hover:underline"
+                          >
+                            {editingId === row.id ? "Cancel" : "Edit"}
+                          </button>
+                        </td>
+                      </tr>
+                      {editingId === row.id && (
+                        <tr key={`${row.id}-edit`} className="bg-muted/20">
+                          <td colSpan={7} className="px-4 py-4">
+                            <div className="space-y-3 max-w-2xl">
+                              <div className="space-y-1.5">
+                                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                                  Primary aliases (comma-separated, UPPERCASE register forms)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={editAliases}
+                                  onChange={(e) => { setEditAliases(e.target.value); setShowImpact(false); setImpact(null); }}
+                                  placeholder="SANDEEP JI, SNADEEP JI, SANDEEP"
+                                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                                  CRM / secondary alias
+                                </label>
+                                <input
+                                  type="text"
+                                  value={editSecondary}
+                                  onChange={(e) => setEditSecondary(e.target.value)}
+                                  placeholder="Sandeep Dadheech"
+                                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                                />
+                              </div>
+
+                              {/* Impact preview */}
+                              {showImpact && impact && (
+                                <div className={cn(
+                                  "rounded-md border px-4 py-3 text-xs",
+                                  impact.rowCount > 0
+                                    ? "border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/20 text-amber-800 dark:text-amber-300"
+                                    : "border-emerald-200 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400",
+                                )}>
+                                  {impact.rowCount === 0 ? (
+                                    <p>No existing register rows would be affected by this alias change.</p>
+                                  ) : (
+                                    <>
+                                      <p className="font-medium flex items-center gap-1.5">
+                                        <AlertTriangle className="h-3.5 w-3.5" />
+                                        {impact.rowCount.toLocaleString()} sale register rows would be re-classified.
+                                      </p>
+                                      <p className="mt-1 text-amber-700 dark:text-amber-400">
+                                        Affected head_canon values: {impact.affectedCustomers.join(", ")}
+                                      </p>
+                                      <p className="mt-1">This is for NEW ingests — existing historical data is not retroactively changed.</p>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+
+                              <div className="flex items-center gap-2">
+                                {!showImpact ? (
+                                  <Button size="sm" variant="outline" onClick={() => void handlePreviewImpact()}>
+                                    Preview Impact
+                                  </Button>
+                                ) : (
+                                  <Button size="sm" onClick={() => void handleSave()} disabled={saving}>
+                                    {saving ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Saving…</> : "Confirm & Save"}
+                                  </Button>
+                                )}
+                                <button
+                                  className="text-xs text-muted-foreground hover:text-foreground"
+                                  onClick={() => { setEditingId(null); setShowImpact(false); setImpact(null); }}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            {filtered.length} of {rows.length} rows shown.
+            Person registry replaces head_alias.json and normalize.json territory_heads as pipeline sources.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export default function Organisation() {
-  const [tab, setTab] = useState<"heads" | "states" | "employees">("heads");
+  const [tab, setTab] = useState<"heads" | "states" | "employees" | "registry">("heads");
   const [data, setData] = useState<OrgData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -992,6 +1372,7 @@ export default function Organisation() {
 
   const TABS = [
     { id: "heads", label: "State Heads", icon: Users, locked: false },
+    { id: "registry", label: "Person Registry", icon: null, locked: false },
     { id: "states", label: "States", icon: null, locked: true, ds: "DS2" },
     { id: "employees", label: "Employees", icon: null, locked: true, ds: "DS3" },
   ] as const;
@@ -1218,6 +1599,11 @@ export default function Organisation() {
               </>
             )}
           </div>
+        )}
+
+        {/* ── Person Registry tab ──────────────────────────────────────────── */}
+        {tab === "registry" && (
+          <PersonRegistryPanel />
         )}
 
         {/* ── Locked tabs ─────────────────────────────────────────────────── */}
