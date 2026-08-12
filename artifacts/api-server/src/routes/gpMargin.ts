@@ -124,7 +124,7 @@ router.get("/admin/margin/load-status", (req, res) => {
 // ── POST /api/admin/margin/load ────────────────────────────────────────────
 // Returns 202 immediately; runs the load in the background.
 // Poll GET /api/admin/margin/load-status (same X-Admin-Secret header) to track progress.
-// Poll GET /api/margin/stats to see rows land in real time.
+// Poll GET /api/admin/margin/load-status to track progress; rows become visible only after the load commits.
 router.post("/admin/margin/load", (req, res) => {
   const token = String(req.headers["x-admin-secret"] ?? "").trim();
   if (!isAdminToken(token)) {

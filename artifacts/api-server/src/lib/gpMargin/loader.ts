@@ -1,10 +1,8 @@
 // GP Margin fact-table loader.
 //
-// Reads all GP MARGIN workbooks for FY2025-26 and FY2026-27 from Google Drive
-// via the SHEETS API (spreadsheets.values.get, not Drive export).
-//
-// Drive files.export hangs for spreadsheets > ~10 MB — see sheets.ts comment.
-// All reads now go through fetchWorkbook(), which works for any sheet size.
+// Reads all GP MARGIN workbooks for FY2025-26 and FY2026-27 from Google Drive.
+// Primary path: Sheets API subprocess.  Fallback: Drive export (xlsx bytes via
+// downloadDriveFileBuffer) for files that hang on the Sheets API (e.g. CP segment).
 //
 // MONTHLY IS TRUTH.  Cumulative files are used only to cross-validate that the
 // per-month sums agree with the cumulative total within 1%.  They are NOT
@@ -20,10 +18,12 @@
 import { execFile, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import ExcelJS from "exceljs";
 import { pool } from "@workspace/db";
 import {
   listDriveFiles,
   listDriveFolder,
+  downloadDriveFileBuffer,
   type DriveApiFile,
 } from "../googleDrive.js";
 import {
@@ -138,8 +138,24 @@ async function fetchWorkbookViaProcess(
   });
 }
 
-// ── Types ──────────────────────────────────────────────────────────────────
-
+function excelCellValue(raw: unknown): unknown {
+  if (raw == null || typeof raw !== "object") return raw;
+  // exceljs formula result
+  if ("result" in (raw as Record<string, unknown>)) {
+    return excelCellValue((raw as { result: unknown }).result);
+  }
+  // exceljs rich-text
+  if ("richText" in (raw as Record<string, unknown>)) {
+    return (raw as { richText: { text: string }[] }).richText
+      .map((r) => r.text)
+      .join("");
+  }
+  // exceljs hyperlink
+  if ("text" in (raw as Record<string, unknown>)) {
+    return (raw as { text: unknown }).text;
+  }
+  return null;
+}
 interface MarginRow {
   fy: string;
   monthLabel: string;
@@ -616,10 +632,27 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
     let wb: WorkbookLike;
     try {
       wb = await fetchWorkbookViaProcess(cf.file.id, WORKER_TIMEOUT_MS / 1000);
-    } catch (err) {
-      logger.warn({ file: cf.file.name, err: String(err) }, "gpMargin: fetch failed — skipping");
-      report.filesUnknown.push({ name: cf.file.name, fy: cf.fy, segment: cf.segment, reason: `fetch failed: ${String(err)}` });
-      return;
+    } catch (sheetsErr) {
+      // Sheets API subprocess timed out (common for large CP segment files).
+      // Retry via the Drive export API — different code path, no Sheets quota.
+      logger.warn(
+        { file: cf.file.name, err: String(sheetsErr) },
+        "gpMargin: Sheets fetch failed — retrying via Drive export",
+      );
+      try {
+        wb = await fetchWorkbookViaDriveExport(cf.file.id, cf.mimeType);
+        logger.info({ file: cf.file.name }, "gpMargin: Drive export fallback succeeded");
+      } catch (driveErr) {
+        logger.warn(
+          { file: cf.file.name, sheetsErr: String(sheetsErr), driveErr: String(driveErr) },
+          "gpMargin: Drive export fallback also failed — skipping",
+        );
+        report.filesUnknown.push({
+          name: cf.file.name, fy: cf.fy, segment: cf.segment,
+          reason: `fetch failed (sheets: ${String(sheetsErr)}; drive: ${String(driveErr)})`,
+        });
+        return;
+      }
     }
 
     const tabs = detectGpMarginTabs(wb);
@@ -657,7 +690,13 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
   // 4 — parse cumulative files for cross-validation (subprocess, same timeout)
   for (const cf of cumulativeFiles) {
     let wb: WorkbookLike;
-    try { wb = await fetchWorkbookViaProcess(cf.file.id, 90); } catch { continue; }
+    try {
+      wb = await fetchWorkbookViaProcess(cf.file.id, 90);
+    } catch {
+      // Sheets subprocess timed out — retry via Drive export for cross-validation too.
+      try { wb = await fetchWorkbookViaDriveExport(cf.file.id, cf.mimeType); }
+      catch { continue; }
+    }
     const totals = parseCumulativeTotals(wb);
     if (totals) {
       const key = `${cf.fy}|${cf.segment}`;
@@ -770,4 +809,44 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
 
   logger.info({ rows: report.rowsInserted, codes: report.distinctCodes, files: report.filesLoaded }, "gpMargin: load complete");
   return report;
+}
+
+async function fetchWorkbookViaDriveExport(
+  fileId: string,
+  mimeType: string,
+  timeoutMs = 120_000,
+): Promise<WorkbookLike> {
+  const rawBuf = await downloadDriveFileBuffer(fileId, mimeType, timeoutMs);
+  const excelWb = new ExcelJS.Workbook();
+  // exceljs types declare load(buffer: Buffer) using the legacy non-generic
+  // Buffer; newer @types/node returns Buffer<ArrayBufferLike> which tsc
+  // rejects.  The runtime value is identical — suppress the mismatch.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await excelWb.xlsx.load(rawBuf as any);
+
+  const worksheets: WorksheetLike[] = excelWb.worksheets.map((ws) => ({
+    name: ws.name,
+    eachRow(
+      cb: (row: { getCell(col: number): CellLike }, rowNumber: number) => void,
+    ) {
+      ws.eachRow((row, rowNumber) => {
+        cb(
+          {
+            getCell(col1Based: number): CellLike {
+              const cell = row.getCell(col1Based);
+              return { value: excelCellValue(cell.value) };
+            },
+          },
+          rowNumber,
+        );
+      });
+    },
+  }));
+
+  return {
+    worksheets,
+    getWorksheet(name: string) {
+      return worksheets.find((w) => w.name === name);
+    },
+  };
 }

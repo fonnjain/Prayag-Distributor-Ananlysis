@@ -245,9 +245,9 @@ function trailing12MonthLabels(): string[] {
 // Never writes to mrp_history.
 router.get("/mrp/calculator", async (req, res) => {
   try {
-    const code = typeof req.query.code === "string" ? req.query.code : undefined;
+    const code = typeof req.query.code === "string" ? req.query.code.trim() : null;
     const segmentParam =
-      typeof req.query.segment === "string" ? req.query.segment : null;
+      typeof req.query.segment === "string" ? req.query.segment.trim() : null;
 
     if (!code) { res.status(400).json({ error: "?code= is required" }); return; }
 
@@ -297,7 +297,7 @@ router.get("/mrp/calculator", async (req, res) => {
          FROM mrp_history WHERE item_code = $1 AND segment = $2 AND is_current = TRUE LIMIT 1`,
         [code, targetSegment],
       ),
-      // Primary discount + BOM cost from margin_fact (all available months for this code)
+      // Primary discount + BOM cost from margin_fact (trailing 12 complete months)
       pool.query<{
         weighted_discount: string | null; weighted_bom: string | null;
         total_qty: string | null; months_covered: string; months: string[];
@@ -311,8 +311,9 @@ router.get("/mrp/calculator", async (req, res) => {
            array_agg(DISTINCT month_label ORDER BY month_label)                     AS months
          FROM margin_fact
          WHERE item_code = $1 AND segment = $2
+           AND month_label = ANY($3)
            AND discount_frac IS NOT NULL AND qty IS NOT NULL AND qty > 0`,
-        [code, targetSegment],
+        [code, targetSegment, trailing12],
       ),
       // Identity check samples (up to 5 rows with MRP, discount_frac, avg_sale)
       pool.query<{ month_label: string; mrp: string; discount_frac: string; avg_sale: string }>(
@@ -504,24 +505,33 @@ router.get("/mrp/calculator/verify", async (req, res) => {
     }));
 
     // ── Check 3: codes in mrp_master with no margin_fact rows (trailing 12M) ──
-    const noDataResult = await pool.query<{ n: string; net: string }>(
-      `SELECT COUNT(DISTINCT m.item_code)::text AS n,
-              COALESCE(SUM(sl.amount), 0)::text  AS net
+    // "No data" means no discount_frac rows in the trailing 12 complete months.
+    const noDataResult = await pool.query<{ n: string }>(
+      `SELECT COUNT(DISTINCT m.item_code)::text AS n
        FROM mrp_master m
        WHERE NOT EXISTS (
          SELECT 1 FROM margin_fact mf
-         WHERE mf.item_code = m.item_code AND mf.discount_frac IS NOT NULL
+         WHERE mf.item_code = m.item_code
+           AND mf.discount_frac IS NOT NULL
+           AND mf.month_label = ANY($1)
        )`,
+      [trailing12],
     );
-    // FY2026-27 net for those codes
+    // FY2026-27 primary-sale net for those codes
     const noDataNet = await pool.query<{ net: string }>(
       `SELECT COALESCE(SUM(sl.amount), 0)::text AS net
        FROM sale_line_current sl
        WHERE sl.fy = '2026-27'
          AND sl.code IN (
            SELECT DISTINCT m.item_code FROM mrp_master m
-           WHERE NOT EXISTS (SELECT 1 FROM margin_fact mf WHERE mf.item_code = m.item_code AND mf.discount_frac IS NOT NULL)
+           WHERE NOT EXISTS (
+             SELECT 1 FROM margin_fact mf
+             WHERE mf.item_code = m.item_code
+               AND mf.discount_frac IS NOT NULL
+               AND mf.month_label = ANY($1)
+           )
          )`,
+      [trailing12],
     );
 
     // ── Check 4: worked example for code 144, target = ₹90 ───────────────

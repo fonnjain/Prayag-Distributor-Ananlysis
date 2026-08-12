@@ -21,9 +21,6 @@ async function buildAll() {
       path.resolve(artifactDir, "src/secondary-backfill.ts"),
       path.resolve(artifactDir, "src/secondary-gate3.ts"),
       path.resolve(artifactDir, "src/secondary-sku-backfill.ts"),
-      // Worker thread for GP Margin spreadsheet fetches (needs separate bundle
-      // so worker.terminate() can reliably kill a hanging Sheets API call).
-      path.resolve(artifactDir, "src/gpMarginWorker.ts"),
       // Standalone fetcher run via OS `timeout` command — I/O-based pipe-close
       // fires even when the parent's timer phase is saturated.
       path.resolve(artifactDir, "src/gpMarginFetcher.ts"),

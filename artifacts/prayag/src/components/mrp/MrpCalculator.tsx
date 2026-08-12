@@ -178,6 +178,7 @@ export default function MrpCalculator({ initialCode, initialSegment }: MrpCalcul
   const [targetRetailerPrice, setTargetRetailerPrice] = useState<string>("");
   const [distributorMarginPct, setDistributorMarginPct] = useState<string>("");
   const [distMarginSource, setDistMarginSource] = useState<"secondary" | "assumed" | "user">("assumed");
+  const [manualPrimaryDiscountPct, setManualPrimaryDiscountPct] = useState<string>("");
   const [showIdentity, setShowIdentity] = useState(false);
 
   // Trigger lookup
@@ -201,7 +202,7 @@ export default function MrpCalculator({ initialCode, initialSegment }: MrpCalcul
   const isAmbigError = rawData && "availableSegments" in rawData && "error" in rawData;
   const data = (rawData && !isAmbigError) ? (rawData as CalculatorData) : null;
 
-  // When data loads, seed distributor margin from default
+  // When data loads, seed distributor margin from default; reset manual primary discount
   const seededRef = useRef<string>("");
   useEffect(() => {
     if (!data) return;
@@ -216,6 +217,8 @@ export default function MrpCalculator({ initialCode, initialSegment }: MrpCalcul
       setDistributorMarginPct("");
       setDistMarginSource("assumed");
     }
+    // Reset manual primary discount whenever a new code is loaded
+    setManualPrimaryDiscountPct("");
   }, [data]);
 
   // Handle ambiguous response
@@ -230,7 +233,10 @@ export default function MrpCalculator({ initialCode, initialSegment }: MrpCalcul
   // ── Derived calc ────────────────────────────────────────────────────────
   const trp = parseFloat(targetRetailerPrice) || null;
   const dm = parseFloat(distributorMarginPct) / 100 || null;
-  const pd = data?.primaryDiscount.weightedDiscount ?? null;
+  // Primary discount: user override takes precedence; fall back to workbook value.
+  const pd = manualPrimaryDiscountPct
+    ? parseFloat(manualPrimaryDiscountPct) / 100
+    : (data?.primaryDiscount.hasData ? (data.primaryDiscount.weightedDiscount ?? null) : null);
   const currentMrp = data?.currentMrp ?? null;
   const bom = data?.bomCost.weightedValue ?? null;
 
@@ -540,32 +546,48 @@ export default function MrpCalculator({ initialCode, initialSegment }: MrpCalcul
               </div>
             </div>
 
-            {/* If no margin data, allow manual primary discount */}
-            {!data.primaryDiscount.hasData && (
-              <div className="mt-4">
-                <label className="block text-xs text-slate-500 mb-1">
-                  Primary discount % <span className="text-amber-600">(no workbook data — enter manually)</span>
-                </label>
-                <Input
-                  id="manual-pd"
-                  type="number"
-                  min={0}
-                  max={99}
-                  step={0.1}
-                  placeholder="e.g. 50.0"
-                  className="font-mono max-w-xs"
-                  onChange={(e) => {
-                    // Inject into calculation by patching pd via a local override
-                    // We store it in the targetRetailerPrice field's companion; easier to
-                    // just carry a local state but we'll let the parent recalc pick it up.
-                    // For now we disable calculation until data is available.
-                  }}
-                />
-                <p className="text-[11px] text-amber-700 mt-1">
+            {/* Primary discount override — always shown; defaults to workbook value when available */}
+            <div className="mt-4">
+              <label className="block text-xs text-slate-500 mb-1">
+                Primary discount %{" "}
+                {data.primaryDiscount.hasData ? (
+                  <span className={`ml-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                    manualPrimaryDiscountPct ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700"
+                  }`}>
+                    {manualPrimaryDiscountPct ? "override" : "workbook"}
+                  </span>
+                ) : (
+                  <span className="ml-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-700">
+                    no workbook data — required
+                  </span>
+                )}
+              </label>
+              <Input
+                id="manual-pd"
+                type="number"
+                min={0}
+                max={99}
+                step={0.1}
+                placeholder={
+                  data.primaryDiscount.hasData && data.primaryDiscount.weightedDiscount != null
+                    ? (data.primaryDiscount.weightedDiscount * 100).toFixed(1)
+                    : "e.g. 50.0"
+                }
+                value={manualPrimaryDiscountPct}
+                className="font-mono max-w-xs"
+                onChange={(e) => setManualPrimaryDiscountPct(e.target.value)}
+              />
+              <p className="text-[11px] text-slate-400 mt-1">
+                {data.primaryDiscount.hasData
+                  ? "Leave blank to use the workbook-derived weighted discount. Enter a value to override it."
+                  : "No GP Margin workbook rows found — you must enter this figure manually."}
+              </p>
+              {!data.primaryDiscount.hasData && (
+                <p className="text-[11px] text-amber-700 mt-0.5">
                   A silently inferred discount produces a confidently wrong MRP — always verify this figure.
                 </p>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           {/* ── Chain display ────────────────────────────────────────────── */}
