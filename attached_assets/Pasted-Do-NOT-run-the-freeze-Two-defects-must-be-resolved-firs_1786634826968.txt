@@ -1,0 +1,69 @@
+Do NOT run the freeze. Two defects must be resolved first, because the freeze
+is permanent.
+
+ACCEPTED
+Garden Pipe is resolved. Every FY2025-26 month is exactly 2x, and the 2.62pp
+shift is pure composition - FY2026-27 rows average 89.30% BOM against 63.10%
+for FY2025-26, and removing one FY2025-26 copy raised FY2026-27's weight from
+12.9% to 22.9%. Your reconstruction recovers 66.49% and 69.10% against the
+actuals, which only works if the copies were row-for-row identical. No action.
+
+============================================================
+DEFECT 1 - THE DEDUP GATE IS INSUFFICIENT
+============================================================
+PTMT copies pass the gate (matching rounded sums of qty, avgSale, bomCost)
+while individual codes carry different avgSale or bomCost values. Predicted
+23.51% against actual 22.45% - a 1.06pp gap, far beyond the ~0.05pp rounding
+noise of contentSig.
+
+The gate must compare ROW BY ROW on item code, not on aggregate sums.
+
+For every (segment, month) group with more than one copy:
+  - Compare code by code. Same code, same values in every copy -> identical,
+    keep one, log the SKIP.
+  - Same code, DIFFERENT value in any of qty, avg_sale, bom_cost, mrp or
+    discount -> CONFLICT. Do not pick one. Report both filenames, both values,
+    both modifiedTimes.
+  - Code present in one copy only -> that is an extra row, resolvable by
+    union, not a conflict.
+
+Then re-run and report for PTMT:
+  a. Per month: number of copies found, rows per copy, and whether they were
+     identical, extra-rows-only, or genuinely conflicting.
+  b. Which months had 3 or more copies, and how many.
+  c. For every genuine conflict, the item codes that disagree, with each
+     copy's avg_sale and bom_cost, and both files' modifiedTime and owner.
+  d. PTMT segment BOM% under the corrected gate.
+
+Apply the same corrected comparison to every segment, not just PTMT. Report
+any other segment that turns out to have row-level conflicts.
+
+============================================================
+DEFECT 2 - MISSING MONTHS
+============================================================
+PTMT is missing Jan-26, Feb-26 and Mar-26. That is Q4 FY2025-26 - the peak
+quarter, roughly 35% of the annual volume - absent from the largest segment
+by value (Rs 165.83 Cr).
+
+Hardware is missing Nov-25.
+
+You report these as genuine Drive gaps rather than parsing failures. Confirm
+that properly before we accept it:
+  e. List every file the loader saw in both PTMT FY2025-26 folders, with
+     filename and modifiedTime. All of them, not only the ones it loaded.
+  f. State plainly whether a PTMT file for Jan-26, Feb-26 or Mar-26 exists
+     under any name, including cumulative or oddly-named files.
+  g. Same for Hardware Nov-25.
+  h. If any exist but were rejected, print the reason - unparsed, classified
+     cumulative, or no GP margin tab detected.
+
+If those files genuinely do not exist, that is a request to Prayag, not a code
+fix - and PTMT's trailing-12 window is missing its peak quarter, which every
+contribution figure for PTMT inherits.
+
+============================================================
+THEN STOP
+============================================================
+Report both defects. Do not freeze, do not re-enable the contribution
+ranking, do not resolve the five Sanitaryware months. Once frozen there is no
+correction path, so nothing freezes until PTMT is understood.

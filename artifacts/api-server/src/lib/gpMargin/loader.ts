@@ -216,17 +216,33 @@ export interface LoadReport {
   filesCumulative: { name: string; fy: string; segment: string }[];
   filesSummary: { name: string; fy: string }[];
   filesUnknown: { name: string; fy: string; segment: string; reason: string }[];
-  /** Duplicate files skipped because their fingerprint matched an already-kept file. */
+  /** Duplicate files skipped because every code and value matched row-for-row. */
   filesSkipped: { skipped: string; keptInstead: string; segment: string; monthLabel: string }[];
-  /** Files for the same (segment, month) that have conflicting content — neither was loaded.
-   *  file1Meta / file2Meta are populated from the Drive files.get API (modifiedTime + owners).
-   *  Never infer which copy is "current" from folder position or filename — use modifiedTime. */
+  /** Groups where copies agree on all shared-code values but some codes appear in only
+   *  a subset of files (extra rows).  The union of all codes was loaded — no data lost. */
+  filesUnion: {
+    files: string[];
+    segment: string;
+    monthLabel: string;
+    extraCodes: { code: string; fromFile: string }[];
+    rowsLoaded: number;
+  }[];
+  /** Groups where at least one shared item code carries different values across copies.
+   *  NONE of the files was loaded — requires manual resolution.
+   *  files[].modifiedTime / files[].owners come from Drive files.get at load time.
+   *  Never infer currency from folder position or filename — use modifiedTime. */
   filesConflict: {
-    file1: string; file1Id: string;
-    file1ModifiedTime?: string; file1Owners?: string[];
-    file2: string; file2Id: string;
-    file2ModifiedTime?: string; file2Owners?: string[];
-    segment: string; monthLabel: string; difference: string;
+    files: { name: string; id: string; modifiedTime?: string; owners?: string[] }[];
+    segment: string;
+    monthLabel: string;
+    codeDiffs: {
+      code: string;
+      values: {
+        filename: string;
+        qty: number | null; avgSale: number | null;
+        bomCost: number | null; mrp: number | null; discountFrac: number | null;
+      }[];
+    }[];
   }[];
   rowsInserted: number;
   rowsByFySegment: Record<string, number>;
@@ -243,34 +259,124 @@ export interface LoadReport {
 interface ParsedResult {
   cf: ClassifiedFile;
   rows: MarginRow[];
-  /**
-   * Dedup identity key: segment | monthLabel | rowCount | sorted-distinct-codes.
-   * Two files producing the same key are structurally identical.
-   */
-  fingerprintKey: string;
-  /**
-   * Quick content signature: rounded sums of qty, avgSale, bomCost.
-   * Combined with fingerprintKey to detect same-structure-but-different-values
-   * conflicts.
-   */
-  contentSig: string;
 }
 
-function computeFingerprint(
-  segment: string,
-  monthLabel: string,
-  rows: MarginRow[],
-): { fingerprintKey: string; contentSig: string } {
-  const codes = [...new Set(rows.map((r) => r.itemCode))].sort().join(",");
-  const fingerprintKey = `${segment}|${monthLabel}|${rows.length}|${codes}`;
-  let qtySum = 0, saleSum = 0, costSum = 0;
-  for (const r of rows) {
-    qtySum  += r.qty      ?? 0;
-    saleSum += r.avgSale  ?? 0;
-    costSum += r.bomCost  ?? 0;
+// ── Numeric equality with tiny tolerance for float representation noise ────────
+function numsEqual(a: number | null | undefined, b: number | null | undefined): boolean {
+  if (a == null && b == null) return true;   // both absent
+  if (a == null || b == null) return false;  // one absent, one present
+  if (a === b) return true;                  // fast path: exact match
+  const mag = (Math.abs(a) + Math.abs(b)) / 2;
+  return mag < 1e-12 || Math.abs(a - b) / mag < 1e-9;
+}
+
+// ── Row-by-row code-level comparison for deduplication ────────────────────────
+
+interface CodeDiff {
+  code: string;
+  values: {
+    filename: string;
+    qty: number | null;
+    avgSale: number | null;
+    bomCost: number | null;
+    mrp: number | null;
+    discountFrac: number | null;
+  }[];
+}
+
+type CompareResult =
+  | { kind: "identical"; rows: MarginRow[]; skippedFiles: string[] }
+  | { kind: "union"; rows: MarginRow[]; extraCodes: { code: string; fromFile: string }[] }
+  | { kind: "conflict"; codeDiffs: CodeDiff[] };
+
+/**
+ * Compare multiple ParsedResult objects for the same (segment, monthLabel).
+ *
+ *   identical — every copy carries the same codes with identical values.
+ *               Keep the first; log the rest as SKIP.
+ *   union     — copies agree on every shared code's values, but some codes appear
+ *               in only a subset of files.  Load the union (superset) of all codes.
+ *   conflict  — at least one code that appears in 2+ files has differing values.
+ *               Load NONE; report the disagreeing codes and each file's values.
+ *
+ * Aggregate-sum equality (the old gate) is not sufficient: two files can have the
+ * same rounded sum(qty)/sum(avgSale)/sum(bomCost) while individual codes carry
+ * different per-unit costs — confirmed for PTMT (1.06pp BOM% gap).
+ */
+function compareCodeLevel(group: ParsedResult[]): CompareResult {
+  const maps = group.map((g) => new Map(g.rows.map((r) => [r.itemCode, r])));
+  const allCodes = new Set<string>(group.flatMap((g) => g.rows.map((r) => r.itemCode)));
+
+  const codeDiffs: CodeDiff[] = [];
+  const extraItems: { code: string; fromFile: string; row: MarginRow }[] = [];
+
+  for (const code of allCodes) {
+    const present = group
+      .map((g, i) => ({ i, filename: g.cf.file.name, row: maps[i].get(code) }))
+      .filter((e): e is { i: number; filename: string; row: MarginRow } => e.row !== undefined);
+
+    if (present.length === 1) {
+      // Present in exactly one file — extra row; no conflict possible.
+      extraItems.push({ code, fromFile: present[0].filename, row: present[0].row });
+    } else {
+      // Present in 2+ files — check value agreement across those files.
+      const base = present[0].row;
+      const hasDiff = present.slice(1).some(
+        (e) =>
+          !numsEqual(e.row.qty, base.qty) ||
+          !numsEqual(e.row.avgSale, base.avgSale) ||
+          !numsEqual(e.row.bomCost, base.bomCost) ||
+          !numsEqual(e.row.mrp, base.mrp) ||
+          !numsEqual(e.row.discountFrac, base.discountFrac),
+      );
+      if (hasDiff) {
+        codeDiffs.push({
+          code,
+          values: present.map((e) => ({
+            filename: e.filename,
+            qty: e.row.qty,
+            avgSale: e.row.avgSale,
+            bomCost: e.row.bomCost,
+            mrp: e.row.mrp,
+            discountFrac: e.row.discountFrac,
+          })),
+        });
+      } else if (present.length < group.length) {
+        // Agrees across files that have it, but missing from some others.
+        extraItems.push({ code, fromFile: present[0].filename, row: base });
+      }
+      // All files have it and all agree → covered by base row set; no action needed.
+    }
   }
-  const contentSig = `qty=${Math.round(qtySum)},sale=${saleSum.toFixed(1)},cost=${costSum.toFixed(1)}`;
-  return { fingerprintKey, contentSig };
+
+  if (codeDiffs.length > 0) {
+    return { kind: "conflict", codeDiffs };
+  }
+
+  if (extraItems.length === 0) {
+    return {
+      kind: "identical",
+      rows: group[0].rows,
+      skippedFiles: group.slice(1).map((g) => g.cf.file.name),
+    };
+  }
+
+  // Extra-codes-only: build union = first file's rows + extra codes from other files.
+  const firstCodeSet = new Set(group[0].rows.map((r) => r.itemCode));
+  const unionRows: MarginRow[] = [...group[0].rows];
+  const seenExtra = new Set<string>();
+  for (const { code, row } of extraItems) {
+    if (!firstCodeSet.has(code) && !seenExtra.has(code)) {
+      unionRows.push(row);
+      seenExtra.add(code);
+    }
+  }
+
+  const reportedExtra = extraItems
+    .filter((e, idx, arr) => arr.findIndex((x) => x.code === e.code) === idx)
+    .map((e) => ({ code: e.code, fromFile: e.fromFile }));
+
+  return { kind: "union", rows: unionRows, extraCodes: reportedExtra };
 }
 
 // ── Month helpers ──────────────────────────────────────────────────────────
@@ -636,6 +742,7 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
     filesSummary: [],
     filesUnknown: [],
     filesSkipped: [],
+    filesUnion: [],
     filesConflict: [],
     rowsInserted: 0,
     rowsByFySegment: {},
@@ -790,8 +897,7 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
     );
     report.filesLoaded++;
 
-    const { fingerprintKey, contentSig } = computeFingerprint(cf.segment, cf.monthLabel!, fileRows);
-    parsedResults.push({ cf, rows: fileRows, fingerprintKey, contentSig });
+    parsedResults.push({ cf, rows: fileRows });
   }
 
   for (let b = 0; b < monthlyFiles.length; b += BATCH_SIZE) {
@@ -806,22 +912,27 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
     logger.info({ batchStart: b + 1, batchEnd: b + batch.length }, "gpMargin: batch complete");
   }
 
-  // 3b — Content-fingerprint deduplication.
+  // 3b — Row-by-row code-level deduplication.
   //
-  // Drive sometimes has two folders per segment per FY (e.g. "Plumbing GP MARGIN 25-26"
-  // inside "GP MARGIN FY 25-26" AND "PLUMBING SALE GP MARGIN 25-26" at the top level).
-  // The same monthly files appear in both folders with DIFFERENT file IDs, so seenFileIds
-  // cannot catch them.  We deduplicate here on content rather than identity.
+  // Drive may have two folders per segment per FY (e.g. "Plumbing GP MARGIN 25-26" inside
+  // "GP MARGIN FY 25-26" AND "PLUMBING SALE GP MARGIN 25-26" at the top level).  The same
+  // monthly files appear in both folders with DIFFERENT file IDs, so seenFileIds cannot catch
+  // them.  We deduplicate here by comparing files code-by-code.
   //
-  // Fingerprint key = segment | monthLabel | rowCount | sorted-distinct-codes
-  //   • Same key + same contentSig → identical duplicate → keep first, skip rest (logged).
-  //   • Same (segment, monthLabel) but different fingerprintKey or same key but different
-  //     contentSig → CONFLICT (two versions of the same month) → load NEITHER (logged).
+  // Three outcomes per (segment, monthLabel) group with multiple files:
+  //   identical — every copy carries the same codes and identical per-code values.
+  //               Keep the first; log the rest as SKIP.
+  //   union     — copies agree on every shared code's values, but some codes appear in only a
+  //               subset of files (extra rows only).  Load the union (superset) — no data lost.
+  //   conflict  — at least one code present in 2+ files carries different values across them.
+  //               Load NONE; record the disagreeing codes with both files' values and metadata.
+  //               Never infer which copy is "current" from folder position or filename.
   //
-  // A silent choice between two conflicting versions would make wrong data permanent.
+  // Aggregate-sum equality (the old gate) was insufficient: two files can have identical
+  // rounded sum(qty)/sum(avgSale)/sum(bomCost) while individual codes carry different values
+  // (confirmed for PTMT: 1.06pp BOM% gap despite passing the old gate).
   const allRows: MarginRow[] = [];
 
-  // Group by (segment, monthLabel)
   const byMonth = new Map<string, ParsedResult[]>();
   for (const pr of parsedResults) {
     const k = `${pr.cf.segment}|${pr.cf.monthLabel!}`;
@@ -830,87 +941,74 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
     byMonth.set(k, arr);
   }
 
-  for (const [monthKey, group] of byMonth.entries()) {
+  for (const [, group] of byMonth.entries()) {
     if (group.length === 1) {
-      // No duplicate — keep unconditionally.
       allRows.push(...group[0].rows);
       continue;
     }
 
-    // Multiple files for the same (segment, month).
-    const allSameFingerprint = group.every((r) => r.fingerprintKey === group[0].fingerprintKey);
-    const allSameContent     = group.every((r) => r.contentSig     === group[0].contentSig);
+    const cmp = compareCodeLevel(group);
+    const seg = group[0].cf.segment;
+    const ml  = group[0].cf.monthLabel!;
 
-    if (allSameFingerprint && allSameContent) {
-      // All files are structurally and numerically identical → keep the first, skip the rest.
-      allRows.push(...group[0].rows);
-      for (const dup of group.slice(1)) {
+    if (cmp.kind === "identical") {
+      allRows.push(...cmp.rows);
+      for (const skipped of cmp.skippedFiles) {
         logger.warn(
-          {
-            segment: dup.cf.segment,
-            monthLabel: dup.cf.monthLabel!,
-            keptInstead: group[0].cf.file.name,
-            skipped: dup.cf.file.name,
-            fingerprintKey: group[0].fingerprintKey,
-          },
-          "gpMargin: duplicate file skipped — identical content fingerprint",
+          { segment: seg, monthLabel: ml, keptInstead: group[0].cf.file.name, skipped },
+          "gpMargin: duplicate file skipped — row-for-row identical",
         );
-        report.filesSkipped.push({
-          skipped: dup.cf.file.name,
-          keptInstead: group[0].cf.file.name,
-          segment: dup.cf.segment,
-          monthLabel: dup.cf.monthLabel!,
-        });
+        report.filesSkipped.push({ skipped, keptInstead: group[0].cf.file.name, segment: seg, monthLabel: ml });
       }
+
+    } else if (cmp.kind === "union") {
+      allRows.push(...cmp.rows);
+      logger.info(
+        {
+          segment: seg, monthLabel: ml,
+          files: group.map((g) => g.cf.file.name),
+          extraCodes: cmp.extraCodes.map((e) => e.code),
+          rowsLoaded: cmp.rows.length,
+        },
+        "gpMargin: extra-codes-only duplicate — union loaded",
+      );
+      report.filesUnion.push({
+        files: group.map((g) => g.cf.file.name),
+        segment: seg, monthLabel: ml,
+        extraCodes: cmp.extraCodes,
+        rowsLoaded: cmp.rows.length,
+      });
+
     } else {
-      // Files differ in structure or values → load NONE to prevent silent wrong data.
-      // Fetch Drive metadata (modifiedTime + owners) for all files in the group in parallel.
-      // Never infer which copy is "current" from folder position or filename — callers must
-      // use modifiedTime.  A metadata fetch failure is non-fatal; fields default to undefined.
-      const filenames = group.map((r) => r.cf.file.name);
-      const metaResults = await Promise.all(
-        group.map((r) =>
-          getDriveFileMeta(r.cf.file.id).catch((err) => {
-            logger.warn({ fileId: r.cf.file.id, err: String(err) }, "gpMargin: conflict metadata fetch failed");
+      // conflict — fetch Drive metadata for all files in parallel (non-fatal).
+      const metas = await Promise.all(
+        group.map((g) =>
+          getDriveFileMeta(g.cf.file.id).catch((err) => {
+            logger.warn({ fileId: g.cf.file.id, err: String(err) }, "gpMargin: conflict metadata fetch failed");
             return null;
           }),
         ),
       );
-
-      for (let i = 0; i < group.length; i++) {
-        for (let j = i + 1; j < group.length; j++) {
-          const a = group[i], b = group[j];
-          const metaA = metaResults[i];
-          const metaB = metaResults[j];
-          const difference = a.fingerprintKey !== b.fingerprintKey
-            ? `row_count: ${a.rows.length} vs ${b.rows.length}; ` +
-              `codes: "${a.fingerprintKey.split("|").slice(3).join("|").slice(0, 80)}" ` +
-              `vs "${b.fingerprintKey.split("|").slice(3).join("|").slice(0, 80)}"`
-            : `same structure, different values — contentSig: "${a.contentSig}" vs "${b.contentSig}"`;
-          report.filesConflict.push({
-            file1: a.cf.file.name,
-            file1Id: a.cf.file.id,
-            file1ModifiedTime: metaA?.modifiedTime,
-            file1Owners: metaA?.owners?.map((o) => `${o.displayName} <${o.emailAddress}>`),
-            file2: b.cf.file.name,
-            file2Id: b.cf.file.id,
-            file2ModifiedTime: metaB?.modifiedTime,
-            file2Owners: metaB?.owners?.map((o) => `${o.displayName} <${o.emailAddress}>`),
-            segment: a.cf.segment,
-            monthLabel: a.cf.monthLabel!,
-            difference,
-          });
-        }
-      }
       logger.error(
         {
-          monthKey,
-          files: filenames,
-          fingerprints: group.map((r) => r.fingerprintKey),
-          contentSigs: group.map((r) => r.contentSig),
+          segment: seg, monthLabel: ml,
+          files: group.map((g) => g.cf.file.name),
+          codeDiffsCount: cmp.codeDiffs.length,
+          conflictCodes: cmp.codeDiffs.map((d) => d.code).slice(0, 10),
         },
-        "gpMargin: CONFLICT — multiple files for same segment/month have different content; loading NONE",
+        "gpMargin: CONFLICT — shared item codes have differing values; loading NONE",
       );
+      report.filesConflict.push({
+        files: group.map((g, i) => ({
+          name: g.cf.file.name,
+          id: g.cf.file.id,
+          modifiedTime: metas[i]?.modifiedTime,
+          owners: metas[i]?.owners?.map((o) => `${o.displayName} <${o.emailAddress}>`),
+        })),
+        segment: seg,
+        monthLabel: ml,
+        codeDiffs: cmp.codeDiffs,
+      });
     }
   }
 

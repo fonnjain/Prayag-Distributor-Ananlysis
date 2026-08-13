@@ -176,6 +176,7 @@ router.post("/admin/margin/load", (req, res) => {
           negativeContributionCount: report.negativeContributionCount,
           negativeContributionTop10: report.negativeContributionTop10,
           filesSkipped:  report.filesSkipped,
+          filesUnion:    report.filesUnion,
           filesConflict: report.filesConflict,
         },
       };
@@ -389,6 +390,209 @@ router.get("/admin/margin/conflict-audit", async (req, res) => {
     // Sort by monthLabel for consistent output
     auditResults.sort((a, b) => a.monthLabel.localeCompare(b.monthLabel));
     res.json({ ok: true, conflictMonths: auditResults });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// ── GET /api/admin/margin/folder-audit ───────────────────────────────────────
+// Defect-2 investigation: list every file the Drive search sees in each
+// GP MARGIN folder for the requested segments and FY, with filename +
+// modifiedTime.  Does NOT download or parse workbooks — filename analysis only.
+// Flags whether each file has a recognisable month label and which months
+// are missing relative to a full 12-month FY.
+//
+// Query params:
+//   ?segments=PTMT,Hardware   (comma-separated; default "PTMT,Hardware")
+//   ?fy=2025-26               (default "2025-26")
+router.get("/admin/margin/folder-audit", async (req, res) => {
+  const token = String(req.headers["x-admin-secret"] ?? "").trim();
+  if (!isAdminToken(token)) { res.status(401).json({ error: "Admin authorisation required." }); return; }
+
+  const segmentsParam = typeof req.query.segments === "string" ? req.query.segments : "PTMT,Hardware";
+  const fy            = typeof req.query.fy       === "string" ? req.query.fy       : "2025-26";
+  const targetSegments = segmentsParam.split(",").map((s) => s.trim()).filter(Boolean);
+
+  // Month-from-filename extraction.  Mirrors the loader's MONTH_CANON + MONTH_FY_HALF logic.
+  const MONTH_ABBR: Record<string, string> = {
+    jan: "Jan", january: "Jan",
+    feb: "Feb", february: "Feb",
+    mar: "Mar", march: "Mar",
+    apr: "Apr", april: "Apr",
+    may: "May",
+    jun: "Jun", june: "Jun",
+    jul: "Jul", july: "Jul",
+    aug: "Aug", august: "Aug",
+    sep: "Sep", sept: "Sep", september: "Sep",
+    oct: "Oct", october: "Oct",
+    nov: "Nov", november: "Nov",
+    dec: "Dec", december: "Dec",
+  };
+  // FY2025-26: Apr-25..Sep-25 are first half (year=25), Oct-25..Mar-26 are second half (year=26).
+  const SECOND_HALF = new Set(["Oct", "Nov", "Dec", "Jan", "Feb", "Mar"]);
+  const [fyStart, fyEnd] = fy.split("-");
+  const yearFirst = fyStart?.slice(-2) ?? "25";
+  const yearSecond = fyEnd?.slice(-2) ?? "26";
+
+  function extractMonthLabel(name: string): string | null {
+    const lower = name.toLowerCase();
+    for (const [key, canon] of Object.entries(MONTH_ABBR)) {
+      const re = new RegExp(`\\b${key}\\b`, "i");
+      if (re.test(lower)) {
+        const year = SECOND_HALF.has(canon) ? yearSecond : yearFirst;
+        return `${canon}-${year}`;
+      }
+    }
+    return null;
+  }
+
+  const ALL_MONTHS = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"]
+    .map((m) => `${m}-${SECOND_HALF.has(m) ? yearSecond : yearFirst}`);
+
+  try {
+    const fyShort = fy.replace(/20(\d\d)-20?(\d\d)/, "$1-$2"); // "2025-26" → "25-26"
+    const fyVariants = [fy, fyShort];                           // e.g. ["2025-26", "25-26"]
+
+    // Replicate discoverSegmentFolders from the loader exactly.
+    // Use the same generic "GP MARGIN" search (not segment-prefixed), then match
+    // each folder name against the same regex patterns the loader uses.
+    // Wrapper folders (name starts with "GP MARGIN FY") are scanned for children.
+    const SEGMENT_PATTERNS: [RegExp, string][] = [
+      [/waste\s*pipe/i, "Waste Pipe & Connection"],
+      [/garden\s*pipe/i, "Garden Pipe"],
+      [/sanitar/i,       "Sanitaryware"],
+      [/plumb/i,         "Plumbing"],
+      [/hardware/i,      "Hardware"],
+      [/ptmt/i,          "PTMT"],
+      [/\bcp\b|chrome/i, "CP"],
+      [/sink/i,          "Sink"],
+    ];
+    function matchSegment(name: string): string | null {
+      for (const [re, seg] of SEGMENT_PATTERNS) {
+        if (re.test(name)) return seg;
+      }
+      return null;
+    }
+
+    type FolderEntry = { id: string; name: string };
+    const segmentFolderMap = new Map<string, FolderEntry[]>();
+
+    function addToMap(seg: string, entry: FolderEntry) {
+      const arr = segmentFolderMap.get(seg) ?? [];
+      if (!arr.some((e) => e.id === entry.id)) arr.push(entry);
+      segmentFolderMap.set(seg, arr);
+    }
+
+    // Same single-search approach as the loader
+    const searchResult = await listDriveFiles({ q: "GP MARGIN" });
+
+    // _debug: return raw search results before any filtering so the caller can
+    // verify what names and mimeTypes came back from Drive.
+    const _debugRaw = searchResult.files.map((f) => ({
+      name: f.name, mimeType: f.mimeType, id: f.id,
+      modifiedTime: f.modifiedTime,
+      matchesFY: fyVariants.some((v) => f.name.includes(v)),
+      matchedSegment: matchSegment(f.name),
+      isFolder: f.mimeType === "application/vnd.google-apps.folder",
+      isWrapper: /^GP MARGIN FY/i.test(f.name.trim()),
+    }));
+
+    const wrapperIds: string[] = [];
+
+    for (const item of searchResult.files) {
+      if (item.mimeType !== "application/vnd.google-apps.folder") continue;
+      if (!fyVariants.some((v) => item.name.includes(v))) continue;
+
+      const isWrapper = /^GP MARGIN FY/i.test(item.name.trim());
+      if (isWrapper) {
+        wrapperIds.push(item.id);
+      } else {
+        const seg = matchSegment(item.name);
+        if (seg && targetSegments.includes(seg)) {
+          addToMap(seg, { id: item.id, name: item.name });
+        }
+      }
+    }
+
+    // Scan wrapper folders' children (same as scanFolder in the loader)
+    const _debugWrapperChildren: { wrapperId: string; children: string[] }[] = [];
+    for (const wrapperId of wrapperIds) {
+      const children = await listDriveFolder(wrapperId);
+      _debugWrapperChildren.push({ wrapperId, children: children.map((c) => c.name) });
+      for (const child of children) {
+        if (child.mimeType !== "application/vnd.google-apps.folder") continue;
+        const seg = matchSegment(child.name);
+        if (seg && targetSegments.includes(seg)) {
+          addToMap(seg, { id: child.id, name: child.name });
+        }
+      }
+    }
+
+    const results: Record<string, {
+      folders: FolderEntry[];
+      files: {
+        id: string; name: string; modifiedTime?: string;
+        monthLabel: string | null;
+        classification: "monthly" | "cumulative" | "summary" | "unknown";
+        folderName: string;
+      }[];
+      missingMonths: string[];
+    }> = {};
+
+    type FileMeta = { id: string; name: string; modifiedTime?: string; monthLabel: string | null; classification: "monthly" | "cumulative" | "summary" | "unknown"; folderName: string };
+
+    for (const seg of targetSegments) {
+      const folders = segmentFolderMap.get(seg) ?? [];
+      const allFiles: FileMeta[] = [];
+      const seenIds = new Set<string>();
+
+      for (const folder of folders) {
+        const children = await listDriveFolder(folder.id);
+        for (const child of children) {
+          if (seenIds.has(child.id)) continue;
+          seenIds.add(child.id);
+
+          const isSpreadsheet =
+            child.mimeType === "application/vnd.google-apps.spreadsheet" ||
+            /\.(xlsx|xls)$/i.test(child.name);
+          if (!isSpreadsheet) continue;
+
+          const lname = child.name.toLowerCase();
+          let classification: FileMeta["classification"] = "unknown";
+          if (/cumul|annual|yearly|full.?year|ytd/i.test(lname)) {
+            classification = "cumulative";
+          } else if (/summary|summar/i.test(lname)) {
+            classification = "summary";
+          } else {
+            const ml = extractMonthLabel(child.name);
+            if (ml) classification = "monthly";
+          }
+
+          allFiles.push({
+            id: child.id,
+            name: child.name,
+            modifiedTime: child.modifiedTime,
+            monthLabel: extractMonthLabel(child.name),
+            classification,
+            folderName: folder.name,
+          });
+        }
+      }
+
+      allFiles.sort((a, b) => (a.monthLabel ?? a.name).localeCompare(b.monthLabel ?? b.name));
+
+      const loadedMonths = new Set(
+        allFiles
+          .filter((f) => f.classification === "monthly" && f.monthLabel)
+          .map((f) => f.monthLabel!),
+      );
+      const missingMonths = ALL_MONTHS.filter((m) => !loadedMonths.has(m));
+
+      results[seg] = { folders, files: allFiles, missingMonths };
+    }
+
+    res.json({ ok: true, fy, segments: targetSegments, results, _debug: { rawCount: searchResult.files.length, raw: _debugRaw, wrapperChildren: _debugWrapperChildren } });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });
