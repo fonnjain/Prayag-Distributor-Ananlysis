@@ -215,6 +215,10 @@ export interface LoadReport {
   filesCumulative: { name: string; fy: string; segment: string }[];
   filesSummary: { name: string; fy: string }[];
   filesUnknown: { name: string; fy: string; segment: string; reason: string }[];
+  /** Duplicate files skipped because their fingerprint matched an already-kept file. */
+  filesSkipped: { skipped: string; keptInstead: string; segment: string; monthLabel: string }[];
+  /** Files for the same (segment, month) that have conflicting content — neither was loaded. */
+  filesConflict: { file1: string; file2: string; segment: string; monthLabel: string; difference: string }[];
   rowsInserted: number;
   rowsByFySegment: Record<string, number>;
   distinctCodes: number;
@@ -223,6 +227,41 @@ export interface LoadReport {
   negativeContributionTop10: {
     code: string; segment: string; qty: number; avgSale: number; bomCost: number;
   }[];
+}
+
+// ── Parsed-file result (for dedup) ────────────────────────────────────────
+
+interface ParsedResult {
+  cf: ClassifiedFile;
+  rows: MarginRow[];
+  /**
+   * Dedup identity key: segment | monthLabel | rowCount | sorted-distinct-codes.
+   * Two files producing the same key are structurally identical.
+   */
+  fingerprintKey: string;
+  /**
+   * Quick content signature: rounded sums of qty, avgSale, bomCost.
+   * Combined with fingerprintKey to detect same-structure-but-different-values
+   * conflicts.
+   */
+  contentSig: string;
+}
+
+function computeFingerprint(
+  segment: string,
+  monthLabel: string,
+  rows: MarginRow[],
+): { fingerprintKey: string; contentSig: string } {
+  const codes = [...new Set(rows.map((r) => r.itemCode))].sort().join(",");
+  const fingerprintKey = `${segment}|${monthLabel}|${rows.length}|${codes}`;
+  let qtySum = 0, saleSum = 0, costSum = 0;
+  for (const r of rows) {
+    qtySum  += r.qty      ?? 0;
+    saleSum += r.avgSale  ?? 0;
+    costSum += r.bomCost  ?? 0;
+  }
+  const contentSig = `qty=${Math.round(qtySum)},sale=${saleSum.toFixed(1)},cost=${costSum.toFixed(1)}`;
+  return { fingerprintKey, contentSig };
 }
 
 // ── Month helpers ──────────────────────────────────────────────────────────
@@ -585,6 +624,8 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
     filesCumulative: [],
     filesSummary: [],
     filesUnknown: [],
+    filesSkipped: [],
+    filesConflict: [],
     rowsInserted: 0,
     rowsByFySegment: {},
     distinctCodes: 0,
@@ -676,7 +717,11 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
   // (`worker.terminate()` is the only reliable kill switch for hanging sockets).
   // Files are processed in parallel batches of BATCH_SIZE so that a stuck
   // worker for one file cannot stall the rest of the load.
-  const allRows: MarginRow[] = [];
+  //
+  // Parsed results are collected first (not pushed directly to allRows) so that
+  // content-fingerprint deduplication can run across the full result set before
+  // any rows are committed.  See Step 3b below.
+  const parsedResults: ParsedResult[] = [];
   const cumulativeParsed: Map<string, { filename: string; qty: number; saleValue: number }> = new Map();
 
   const BATCH_SIZE = 5;
@@ -684,10 +729,10 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
 
   async function fetchAndParse(
     cf: (typeof monthlyFiles)[0],
-    idx: number,
+    fileIdx: number,
   ): Promise<void> {
     logger.info(
-      { n: idx, of: monthlyFiles.length, file: cf.file.name, fy: cf.fy, segment: cf.segment },
+      { n: fileIdx, of: monthlyFiles.length, file: cf.file.name, fy: cf.fy, segment: cf.segment },
       "gpMargin: reading monthly file",
     );
     let wb: WorkbookLike;
@@ -723,17 +768,19 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
       return;
     }
 
-    let fileRows = 0;
+    const fileRows: MarginRow[] = [];
     for (const { ws, headerRow, colMap } of tabs) {
       const rows = extractRows(ws, headerRow, colMap, cf.fy, cf.monthLabel!, cf.segment, cf.file.name);
-      allRows.push(...rows);
-      fileRows += rows.length;
+      fileRows.push(...rows);
     }
     logger.info(
-      { n: idx, of: monthlyFiles.length, file: cf.file.name, tabs: tabs.length, rows: fileRows },
+      { n: fileIdx, of: monthlyFiles.length, file: cf.file.name, tabs: tabs.length, rows: fileRows.length },
       "gpMargin: file loaded",
     );
     report.filesLoaded++;
+
+    const { fingerprintKey, contentSig } = computeFingerprint(cf.segment, cf.monthLabel!, fileRows);
+    parsedResults.push({ cf, rows: fileRows, fingerprintKey, contentSig });
   }
 
   for (let b = 0; b < monthlyFiles.length; b += BATCH_SIZE) {
@@ -746,6 +793,94 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
       batch.map((cf, i) => fetchAndParse(cf, b + i + 1)),
     );
     logger.info({ batchStart: b + 1, batchEnd: b + batch.length }, "gpMargin: batch complete");
+  }
+
+  // 3b — Content-fingerprint deduplication.
+  //
+  // Drive sometimes has two folders per segment per FY (e.g. "Plumbing GP MARGIN 25-26"
+  // inside "GP MARGIN FY 25-26" AND "PLUMBING SALE GP MARGIN 25-26" at the top level).
+  // The same monthly files appear in both folders with DIFFERENT file IDs, so seenFileIds
+  // cannot catch them.  We deduplicate here on content rather than identity.
+  //
+  // Fingerprint key = segment | monthLabel | rowCount | sorted-distinct-codes
+  //   • Same key + same contentSig → identical duplicate → keep first, skip rest (logged).
+  //   • Same (segment, monthLabel) but different fingerprintKey or same key but different
+  //     contentSig → CONFLICT (two versions of the same month) → load NEITHER (logged).
+  //
+  // A silent choice between two conflicting versions would make wrong data permanent.
+  const allRows: MarginRow[] = [];
+
+  // Group by (segment, monthLabel)
+  const byMonth = new Map<string, ParsedResult[]>();
+  for (const pr of parsedResults) {
+    const k = `${pr.cf.segment}|${pr.cf.monthLabel!}`;
+    const arr = byMonth.get(k) ?? [];
+    arr.push(pr);
+    byMonth.set(k, arr);
+  }
+
+  for (const [monthKey, group] of byMonth.entries()) {
+    if (group.length === 1) {
+      // No duplicate — keep unconditionally.
+      allRows.push(...group[0].rows);
+      continue;
+    }
+
+    // Multiple files for the same (segment, month).
+    const allSameFingerprint = group.every((r) => r.fingerprintKey === group[0].fingerprintKey);
+    const allSameContent     = group.every((r) => r.contentSig     === group[0].contentSig);
+
+    if (allSameFingerprint && allSameContent) {
+      // All files are structurally and numerically identical → keep the first, skip the rest.
+      allRows.push(...group[0].rows);
+      for (const dup of group.slice(1)) {
+        logger.warn(
+          {
+            segment: dup.cf.segment,
+            monthLabel: dup.cf.monthLabel!,
+            keptInstead: group[0].cf.file.name,
+            skipped: dup.cf.file.name,
+            fingerprintKey: group[0].fingerprintKey,
+          },
+          "gpMargin: duplicate file skipped — identical content fingerprint",
+        );
+        report.filesSkipped.push({
+          skipped: dup.cf.file.name,
+          keptInstead: group[0].cf.file.name,
+          segment: dup.cf.segment,
+          monthLabel: dup.cf.monthLabel!,
+        });
+      }
+    } else {
+      // Files differ in structure or values → load NONE to prevent silent wrong data.
+      const filenames = group.map((r) => r.cf.file.name);
+      for (let i = 0; i < group.length; i++) {
+        for (let j = i + 1; j < group.length; j++) {
+          const a = group[i], b = group[j];
+          const difference = a.fingerprintKey !== b.fingerprintKey
+            ? `row_count: ${a.rows.length} vs ${b.rows.length}; ` +
+              `codes: "${a.fingerprintKey.split("|").slice(3).join("|").slice(0, 80)}" ` +
+              `vs "${b.fingerprintKey.split("|").slice(3).join("|").slice(0, 80)}"`
+            : `same structure, different values — contentSig: "${a.contentSig}" vs "${b.contentSig}"`;
+          report.filesConflict.push({
+            file1: a.cf.file.name,
+            file2: b.cf.file.name,
+            segment: a.cf.segment,
+            monthLabel: a.cf.monthLabel!,
+            difference,
+          });
+        }
+      }
+      logger.error(
+        {
+          monthKey,
+          files: filenames,
+          fingerprints: group.map((r) => r.fingerprintKey),
+          contentSigs: group.map((r) => r.contentSig),
+        },
+        "gpMargin: CONFLICT — multiple files for same segment/month have different content; loading NONE",
+      );
+    }
   }
 
   // 4 — parse cumulative files for cross-validation (subprocess, same timeout)
