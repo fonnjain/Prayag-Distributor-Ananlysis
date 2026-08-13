@@ -332,6 +332,14 @@ export type FlowGapCode = {
    *  OR business moving outside the attributed channel (indistinguishable:
    *  no stock statements exist). */
   flagged: boolean;
+  /**
+   * GROSS CONTRIBUTION — factory cost only. Not profit.
+   * Estimated as (primaryInQty − secondaryOutQty) × contributionPerUnit.
+   * null = no cost data in margin_fact trailing 12 months; sort last.
+   */
+  opportunityContribution: number | null;
+  /** Volume-weighted contributionPerUnit from margin_fact. null = no cost data. */
+  contributionPerUnit: number | null;
 };
 
 export type SecondaryTabResult = {
@@ -498,10 +506,32 @@ export async function buildSecondaryTab(
       // material in (≥ ₹1 L) with out < 10% of in → stock sitting still, or
       // business moving outside the attributed channel.
       flagged: primaryInValue >= 100_000 && secondaryOutValue < primaryInValue * 0.1,
+      contributionPerUnit: null as number | null,
+      opportunityContribution: null as number | null,
     };
   });
-  flowGapByCode.sort((a, b) =>
-    (b.flagged ? 1 : 0) - (a.flagged ? 1 : 0) || Math.abs(b.gapValue) - Math.abs(a.gapValue));
+  // Enrich flowGapByCode with gross contribution (factory cost only).
+  try {
+    const { getCodeContributions } = await import("../sku/skuContribution.js");
+    const codes = flowGapByCode.map((c) => c.code);
+    const contrib = await getCodeContributions(codes);
+    for (const c of flowGapByCode) {
+      const cc = contrib.get(c.code);
+      const gapQty = c.primaryInQty - c.secondaryOutQty;
+      c.contributionPerUnit     = cc?.contributionPerUnit ?? null;
+      c.opportunityContribution = cc ? gapQty * cc.contributionPerUnit : null;
+    }
+  } catch {
+    // margin_fact unavailable — keep nulls from type defaults.
+  }
+  // Default sort: opportunityContribution DESC (null last), then |gap| DESC
+  flowGapByCode.sort((a, b) => {
+    const ao = a.opportunityContribution, bo = b.opportunityContribution;
+    if (ao == null && bo == null) return Math.abs(b.gapValue) - Math.abs(a.gapValue);
+    if (ao == null) return 1;
+    if (bo == null) return -1;
+    return bo - ao || Math.abs(b.gapValue) - Math.abs(a.gapValue);
+  });
 
   const segGap = new Map<string, { primaryIn: number; secondaryOut: number }>();
   for (const c of flowGapByCode) {
@@ -827,6 +857,13 @@ export type PushRecommendation = {
   ownDiscountPct: number | null;
   territoryNormPct: number | null;
   overDiscounted: boolean;        // own ≥ norm + 5 points
+  /**
+   * GROSS CONTRIBUTION — factory cost only. Not profit.
+   * null = no cost data in margin_fact trailing 12 months; sort last.
+   */
+  contributionPerUnit: number | null;
+  /** (avg_sale − bom_cost) / avg_sale as 0–1. null = no cost data. */
+  contributionPct: number | null;
 };
 
 export type PushTabResult = {
@@ -1021,8 +1058,26 @@ export async function buildPushTab(
         overDiscounted: own != null && norm != null && own >= norm + 5,
       };
     })
-    .sort((a, b) => a.tier - b.tier || b.peerCount * b.peerNet - a.peerCount * a.peerNet)
-    .slice(0, 10);
+    .map((r) => ({ ...r, contributionPerUnit: null as number | null, contributionPct: null as number | null }))
+    .slice(0, 30); // over-fetch before contribution re-rank
+
+  // Enrich with gross contribution data and re-sort by contribution DESC (null last).
+  try {
+    const { getCodeContributions, sortByContrib } = await import("../sku/skuContribution.js");
+    const contrib = await getCodeContributions(recommendations.map((r) => r.code));
+    for (const r of recommendations) {
+      const c = contrib.get(r.code);
+      r.contributionPerUnit = c?.contributionPerUnit ?? null;
+      r.contributionPct     = c?.contributionPct     ?? null;
+    }
+    recommendations.sort(
+      (a, b) => sortByContrib(a.contributionPerUnit, b.contributionPerUnit)
+                 || a.tier - b.tier || b.peerCount * b.peerNet - a.peerCount * a.peerNet,
+    );
+  } catch {
+    recommendations.sort((a, b) => a.tier - b.tier || b.peerCount * b.peerNet - a.peerCount * a.peerNet);
+  }
+  const finalRecs = recommendations.slice(0, 10);
 
   // ── Coverage: the administrative push ───────────────────────────────────────
   const distDistricts = new Set<string>();
@@ -1130,7 +1185,7 @@ export async function buildPushTab(
     cohortBasis: push?.cohortBasis ?? "none",
     suppressed: push?.suppressed ?? false,
     suppressReason: push?.suppressReason ?? null,
-    recommendations,
+    recommendations: finalRecs,
     coverage: {
       unassignedByMember,
       dormantRetailers: dormant,

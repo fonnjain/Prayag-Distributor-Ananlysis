@@ -780,14 +780,25 @@ export async function getFirstOrderCodes(
 export type LostCodesResult = {
   fy: string;
   priorFy: string;
-  /** Per customer-code, ranked by prior-year value. */
+  /** Per customer-code, ranked by opportunity contribution (null last). */
   lost: {
     customer: string;
     code: string;
     segment: string;
     priorNet: number;
     priorQty: number;
+    /**
+     * GROSS CONTRIBUTION — factory cost only. Not profit.
+     * null = no cost data in margin_fact trailing 12 months; sort last.
+     */
+    contributionPerUnit: number | null;
+    /** (avg_sale − bom_cost) / avg_sale as 0–1. null = no cost data. */
+    contributionPct: number | null;
+    /** priorQty × contributionPerUnit. null = no cost data. */
+    opportunityContribution: number | null;
   }[];
+  /** Codes with no margin_fact data: count and share of total prior net. */
+  noCostData: { codeCount: number; sharePct: number };
   projectExclusion: ProjectExclusionMeta;
 };
 
@@ -821,16 +832,46 @@ export async function getLostCodes(
       ORDER BY p.net DESC
       LIMIT 500
     `);
+    const baseLost = (rows.rows as Record<string, unknown>[]).map((r) => ({
+      customer: String(r.customer),
+      code: String(r.code),
+      segment: String(r.segment),
+      priorNet: num(r.prior_net),
+      priorQty: num(r.prior_qty),
+      contributionPerUnit: null as number | null,
+      contributionPct: null as number | null,
+      opportunityContribution: null as number | null,
+    }));
+
+    // Enrich with gross contribution data (trailing 12 months from margin_fact).
+    try {
+      const { getCodeContributions, sortByContrib } = await import("./skuContribution.js");
+      const contrib = await getCodeContributions(baseLost.map((l) => l.code));
+      for (const l of baseLost) {
+        const c = contrib.get(l.code);
+        if (c) {
+          l.contributionPerUnit  = c.contributionPerUnit;
+          l.contributionPct      = c.contributionPct;
+          l.opportunityContribution = l.priorQty * c.contributionPerUnit;
+        }
+      }
+      // Re-sort: opportunityContribution DESC (null last), then priorNet DESC
+      baseLost.sort(
+        (a, b) => sortByContrib(a.opportunityContribution, b.opportunityContribution)
+                   || b.priorNet - a.priorNet,
+      );
+    } catch {
+      // Contribution data unavailable — keep prior-net sort (already DESC from SQL).
+    }
+
+    let noCost = 0, noCostNet = 0, totalNet = 0;
+    for (const l of baseLost) { totalNet += l.priorNet; if (l.contributionPerUnit == null) { noCost++; noCostNet += l.priorNet; } }
+
     return {
       fy,
       priorFy,
-      lost: (rows.rows as Record<string, unknown>[]).map((r) => ({
-        customer: String(r.customer),
-        code: String(r.code),
-        segment: String(r.segment),
-        priorNet: num(r.prior_net),
-        priorQty: num(r.prior_qty),
-      })),
+      lost: baseLost,
+      noCostData: { codeCount: noCost, sharePct: totalNet > 0 ? Math.round(noCostNet / totalNet * 1000) / 10 : 0 },
       projectExclusion: projectExclusionMeta(projSet),
     };
   });

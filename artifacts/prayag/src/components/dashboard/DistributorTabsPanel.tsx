@@ -40,6 +40,13 @@ type FlowGapCode = {
   primaryInQty: number; primaryInValue: number;
   secondaryOutQty: number; secondaryOutValue: number;
   gapValue: number; flagged: boolean;
+  /**
+   * GROSS CONTRIBUTION — factory cost only. Not profit.
+   * = (primaryInQty − secondaryOutQty) × contributionPerUnit.
+   * null = no cost data; rows sort last.
+   */
+  opportunityContribution: number | null;
+  contributionPerUnit: number | null;
 };
 
 type SecondaryTab = {
@@ -78,6 +85,12 @@ type PushRec = {
   peakQuarter: string | null; peakQuarterSharePct: number | null; timingNote: string | null;
   candidateRetailers: { name: string; segmentNet: number; salesperson: string | null }[];
   ownDiscountPct: number | null; territoryNormPct: number | null; overDiscounted: boolean;
+  /**
+   * GROSS CONTRIBUTION — factory cost only. Not profit.
+   * null = no cost data in margin_fact trailing 12 months; sorts last.
+   */
+  contributionPerUnit: number | null;
+  contributionPct: number | null;
 };
 
 type PushTab = {
@@ -360,14 +373,18 @@ export function SecondaryTabView({ fy, scope, recon, monthsParam = "" }: { fy: s
             </div>
             <div>
               <h5 className="text-xs font-semibold text-muted-foreground uppercase">
-                By code — flagged first (large primary in, near-zero secondary out: stock sitting still)
+                By code — gross contribution descending (no-cost-data last)
               </h5>
+              <p className="text-[11px] text-muted-foreground mb-1">
+                Gross contribution = factory cost only. Not profit.
+              </p>
               <table className="w-full text-xs mt-1">
                 <thead><tr className="text-left text-muted-foreground border-b border-border">
                   <th className="py-1 pr-2">Code</th><th className="py-1 pr-2">Segment</th>
                   <th className="py-1 pr-2 text-right">In (qty)</th><th className="py-1 pr-2 text-right">In (₹)</th>
                   <th className="py-1 pr-2 text-right">Out (qty)</th><th className="py-1 pr-2 text-right">Out (₹)</th>
-                  <th className="py-1 text-right">Gap</th>
+                  <th className="py-1 pr-2 text-right">Gap</th>
+                  <th className="py-1 text-right text-emerald-700 dark:text-emerald-400" title="GROSS CONTRIBUTION — factory cost only. Not profit.">Gross contrib</th>
                 </tr></thead>
                 <tbody>
                   {data.flowGapByCode.slice(0, 25).map((c) => (
@@ -379,7 +396,12 @@ export function SecondaryTabView({ fy, scope, recon, monthsParam = "" }: { fy: s
                       <td className="py-1 pr-2 text-right">{formatCompact(c.primaryInValue)}</td>
                       <td className="py-1 pr-2 text-right">{Math.round(c.secondaryOutQty)}</td>
                       <td className="py-1 pr-2 text-right">{formatCompact(c.secondaryOutValue)}</td>
-                      <td className="py-1 text-right">{formatCompact(c.gapValue)}</td>
+                      <td className="py-1 pr-2 text-right">{formatCompact(c.gapValue)}</td>
+                      <td className="py-1 text-right text-emerald-700 dark:text-emerald-400 font-medium">
+                        {c.opportunityContribution != null
+                          ? formatCompact(c.opportunityContribution)
+                          : <span className="text-muted-foreground italic font-normal text-[10px]">—</span>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -529,7 +551,16 @@ export function PushTabView({ fy, scope, recon, monthsParam = "" }: { fy: string
               </div>
               <p className="text-xs mt-1">
                 <strong>{r.peerCount} of {r.segmentPeerCount} peers your size in your territory buy this and this distributor does not</strong>
-                {" "}(peer net {formatCompact(r.peerNet)}). <Source>K3 push engine, peer cohort</Source>
+                {" "}(peer net {formatCompact(r.peerNet)}).{" "}
+                {r.contributionPct != null ? (
+                  <span className="text-emerald-700 dark:text-emerald-400 font-medium">
+                    Gross contrib {Math.round(r.contributionPct * 100)}%{" "}
+                    <span className="font-normal text-muted-foreground text-[10px]">(factory cost only)</span>
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground text-[10px] italic">no cost data</span>
+                )}{" "}
+                <Source>K3 push engine, peer cohort</Source>
               </p>
               {r.timingNote && (
                 <p className="text-xs text-muted-foreground mt-1">

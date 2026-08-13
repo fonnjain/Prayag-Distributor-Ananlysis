@@ -22,6 +22,12 @@ export type GapCode = {
   itemName: string | null;
   priorNet: number;
   lastFy: string;
+  /**
+   * GROSS CONTRIBUTION — factory cost only. Not profit.
+   * null = no cost data; code sorts last.
+   */
+  contributionPerUnit: number | null;
+  contributionPct: number | null;
 };
 
 export type SegmentRecommendation = {
@@ -39,6 +45,8 @@ export type FocusData = {
   recommendations: SegmentRecommendation[];
   fiscalMonths: string[];
   totalGapNet: number;
+  totalGapContribution?: number | null;
+  noCostData?: { codeCount: number; sharePct: number };
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -203,6 +211,12 @@ function RecommendationCard({
               <TableHead className="py-1.5">Code</TableHead>
               <TableHead className="py-1.5 hidden sm:table-cell">Item Name</TableHead>
               <TableHead className="py-1.5 text-right">Prior net ({monthRange})</TableHead>
+              <TableHead
+                className="py-1.5 text-right hidden lg:table-cell"
+                title="GROSS CONTRIBUTION — factory cost only. Not profit."
+              >
+                Gross contrib
+              </TableHead>
               <TableHead className="py-1.5 text-right hidden md:table-cell">Last FY</TableHead>
             </TableRow>
           </TableHeader>
@@ -222,6 +236,15 @@ function RecommendationCard({
                 </TableCell>
                 <TableCell className="py-1.5 text-right tabular-nums text-xs whitespace-nowrap">
                   {fmtNet(code.priorNet)}
+                </TableCell>
+                <TableCell className="py-1.5 text-right tabular-nums text-xs whitespace-nowrap hidden lg:table-cell">
+                  {code.contributionPct != null ? (
+                    <span className="text-emerald-700 dark:text-emerald-400">
+                      {Math.round(code.contributionPct * 100)}%
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground italic text-[10px]">no cost data</span>
+                  )}
                 </TableCell>
                 <TableCell className="py-1.5 text-right text-xs text-muted-foreground
                                      hidden md:table-cell whitespace-nowrap">

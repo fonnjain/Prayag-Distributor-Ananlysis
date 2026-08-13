@@ -117,6 +117,13 @@ export type PushCode = {
    */
   tier: 1 | 2 | 3 | 4;
   tierLabel: "Range" | "Lapsed" | "Active" | "New";
+  /**
+   * GROSS CONTRIBUTION — factory cost only. Not profit.
+   * null = no cost data in margin_fact trailing 12 months; sort last.
+   */
+  contributionPerUnit: number | null;
+  /** (avg_sale − bom_cost) / avg_sale as 0–1. null = no cost data. */
+  contributionPct: number | null;
 };
 
 export type SegmentPushCard = {
@@ -160,6 +167,9 @@ export type PushListResult = {
   peerNames: string[];
   segments: SegmentPushCard[];
   fiscalMonths: string[];
+  /** Codes with no margin_fact data (null contribution): count and share of total peer net.
+   *  Populated by the route handler after getSkuPushList returns. */
+  noCostData?: { codeCount: number; sharePct: number };
 };
 
 // ── Internal cohort types ──────────────────────────────────────────────────────
@@ -598,6 +608,8 @@ export async function getSkuPushList(
         lastFy: r.last_fy,
         tier,
         tierLabel,
+        contributionPerUnit: null,
+        contributionPct: null,
       };
       const existing = fbSegMap.get(seg);
       if (existing) {
@@ -809,6 +821,8 @@ export async function getSkuPushList(
       lastFy: r.last_fy,
       tier,
       tierLabel,
+      contributionPerUnit: null,
+      contributionPct: null,
     };
     const existing = segMap.get(seg);
     if (existing) {

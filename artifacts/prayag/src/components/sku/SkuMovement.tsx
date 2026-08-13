@@ -58,12 +58,21 @@ export type LostCode = {
   segment: string;
   priorNet: number;
   priorQty: number;
+  /**
+   * GROSS CONTRIBUTION — factory cost only. Not profit.
+   * null = no cost data; rows sort last.
+   */
+  contributionPerUnit: number | null;
+  contributionPct: number | null;
+  /** priorQty × contributionPerUnit. null = no cost data. */
+  opportunityContribution: number | null;
 };
 
 export type LostCodesResult = {
   fy: string;
   priorFy: string;
   lost: LostCode[];
+  noCostData?: { codeCount: number; sharePct: number };
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -400,10 +409,19 @@ function LostCodesView({ fy, monthFrom, monthTo }: ViewProps) {
     <div className="rounded-lg border bg-card">
       <div className="px-4 pt-3 pb-2 border-b">
         <h3 className="text-sm font-semibold">
-          Lost codes — bought in {data.priorFy}, absent in {data.fy}, ranked by prior-year value
+          Lost codes — bought in {data.priorFy}, absent in {data.fy}, ranked by gross contribution
         </h3>
         <p className="text-xs text-muted-foreground mt-0.5">
-          the warmest list available: proven demand, known customer
+          the warmest list available: proven demand, known customer ·{" "}
+          <span title="GROSS CONTRIBUTION — factory cost only. Not profit.">
+            gross contribution = factory cost only (not profit)
+          </span>
+          {data.noCostData && data.noCostData.codeCount > 0 && (
+            <span className="ml-2 text-amber-700 dark:text-amber-400">
+              · {data.noCostData.codeCount} code{data.noCostData.codeCount === 1 ? "" : "s"} with no cost data
+              ({data.noCostData.sharePct}% of prior net) — sorted last
+            </span>
+          )}
         </p>
       </div>
       <div className="overflow-x-auto">
@@ -414,7 +432,13 @@ function LostCodesView({ fy, monthFrom, monthTo }: ViewProps) {
               <TableHead className="py-1.5">Code</TableHead>
               <TableHead className="py-1.5 hidden sm:table-cell">Segment</TableHead>
               <TableHead className="py-1.5 text-right hidden md:table-cell">Prior qty</TableHead>
-              <TableHead className="py-1.5 text-right pr-4">Prior net</TableHead>
+              <TableHead className="py-1.5 text-right">Prior net</TableHead>
+              <TableHead
+                className="py-1.5 text-right hidden lg:table-cell"
+                title="GROSS CONTRIBUTION — factory cost only. Not profit. Sorted descending; no-cost-data rows last."
+              >
+                Gross contrib
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -432,8 +456,17 @@ function LostCodesView({ fy, monthFrom, monthTo }: ViewProps) {
                 <TableCell className="py-1.5 text-right text-xs tabular-nums text-muted-foreground hidden md:table-cell whitespace-nowrap">
                   {l.priorQty.toLocaleString()}
                 </TableCell>
-                <TableCell className="py-1.5 text-right text-xs tabular-nums whitespace-nowrap pr-4 font-medium">
+                <TableCell className="py-1.5 text-right text-xs tabular-nums whitespace-nowrap font-medium">
                   {fmtCr(l.priorNet)}
+                </TableCell>
+                <TableCell className="py-1.5 text-right text-xs tabular-nums whitespace-nowrap hidden lg:table-cell">
+                  {l.opportunityContribution != null ? (
+                    <span className="text-emerald-700 dark:text-emerald-400">
+                      {fmtCr(l.opportunityContribution)}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground italic text-[10px]">no cost data</span>
+                  )}
                 </TableCell>
               </TableRow>
             ))}

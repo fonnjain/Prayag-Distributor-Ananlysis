@@ -39,6 +39,13 @@ export type GapCode = {
   priorNet: number;
   /** Most recent FY in which this code appeared (any period). */
   lastFy: string;
+  /**
+   * GROSS CONTRIBUTION — factory cost only. Not profit.
+   * null = no cost data in margin_fact trailing 12 months; sort last.
+   */
+  contributionPerUnit: number | null;
+  /** (avg_sale − bom_cost) / avg_sale as 0–1. null = no cost data. */
+  contributionPct: number | null;
 };
 
 export type SegmentRecommendation = {
@@ -56,12 +63,16 @@ export type SegmentRecommendation = {
 };
 
 export type SkuRecommendationsResult = {
-  /** Segments with actionable gaps, ranked by gapNet descending. */
+  /** Segments with actionable gaps, ranked by gapContribution descending (gapNet when no cost data). */
   recommendations: SegmentRecommendation[];
   /** Fiscal-month prefixes used in same-period comparison (e.g. ["Apr","May","Jun"]). */
   fiscalMonths: string[];
   /** Total gap net across all segments. */
   totalGapNet: number;
+  /** Total gross contribution of all gap codes (null when no cost data at all). */
+  totalGapContribution: number | null;
+  /** Codes with no margin_fact data: count and share of total gap net. */
+  noCostData: { codeCount: number; sharePct: number };
 };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -137,7 +148,7 @@ export async function getSkuRecommendations(
   }
 
   if (boughtCodeSet.size === 0) {
-    return { recommendations: [], fiscalMonths: [], totalGapNet: 0 };
+    return { recommendations: [], fiscalMonths: [], totalGapNet: 0, totalGapContribution: null, noCostData: { codeCount: 0, sharePct: 0 } };
   }
 
   // ── Step 2: fiscal month prefixes for same-period comparison ─────────────
@@ -245,6 +256,8 @@ export async function getSkuRecommendations(
       itemName: r.item_name,
       priorNet: parseFloat(r.prior_net) || 0,
       lastFy: r.last_fy,
+      contributionPerUnit: null,
+      contributionPct: null,
     };
     if (existing) {
       existing.topGapCodes.push(code);
@@ -285,5 +298,5 @@ export async function getSkuRecommendations(
 
   const totalGapNet = recommendations.reduce((s, r) => s + r.gapNet, 0);
 
-  return { recommendations, fiscalMonths, totalGapNet };
+  return { recommendations, fiscalMonths, totalGapNet, totalGapContribution: null, noCostData: { codeCount: 0, sharePct: 0 } };
 }

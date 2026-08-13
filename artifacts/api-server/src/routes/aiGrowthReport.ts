@@ -621,6 +621,13 @@ type LedgerRow = {
   whatToDo: string;
   valueLow: number | null;
   valueHigh: number | null;
+  /**
+   * GROSS CONTRIBUTION — factory cost only. Not profit.
+   * Estimated as valueHigh × segment-level contribution% (trailing 12-month margin_fact).
+   * null = no cost data available for this entity's primary segment.
+   */
+  contributionHigh: number | null;
+  contributionLow: number | null;
   effort: "Low" | "Medium" | "High";
   confidence: "High" | "Medium" | "Low";
   conversionAssumption?: number;
@@ -1265,6 +1272,7 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
         lever: "CLOSE", entityType: "customer", entityName: n.customer,
         valueLow: n.extraEarn != null ? t2(n.extraEarn) : null,
         valueHigh: n.extraEarn != null ? t2(n.extraEarn) : null,
+        contributionHigh: null, contributionLow: null,
         effort: "Low", confidence: "High",
         basisNote: "Arithmetic — extra earn to reach next scheme tier. No conversion assumption.",
       });
@@ -1277,6 +1285,7 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
         lever: "RECOVER", entityType: "customer", entityName: r.customer,
         valueLow: t2(priorNet * atRiskRecovery / 2),
         valueHigh: t2(priorNet * atRiskRecovery),
+        contributionHigh: null, contributionLow: null,
         effort: "Medium", confidence: "Medium",
         conversionAssumption: atRiskRecovery,
         basisNote: `Prior-year value × ${Math.round(atRiskRecovery * 100)}% recovery assumption.`,
@@ -1289,6 +1298,7 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
         lever: "ACTIVATE", entityType: "distributor", entityName: d.name,
         valueLow: d.dormantValueLow,
         valueHigh: d.dormantValueHigh,
+        contributionHigh: null, contributionLow: null,
         effort: "Medium", confidence: "Low",
         conversionAssumption: dormantRevival,
         basisNote: `Dormant retailer count × median active retailer quarterly value × ${Math.round(dormantRevival * 100)}% revival assumption.`,
@@ -1301,14 +1311,65 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
         lever: "WIDEN", entityType: "distributor", entityName: d.name,
         valueLow: d.valueLow,
         valueHigh: d.valueHigh,
+        contributionHigh: null, contributionLow: null,
         effort: "Medium", confidence: "Low",
         conversionAssumption: rangeUptake,
         basisNote: `Range gap codes × per-code peer median quarterly value × ${Math.round(rangeUptake * 100)}% uptake assumption.`,
       });
     }
 
-    // Sort by valueHigh descending, cap at 40
-    rawLedger.sort((a, b) => (b.valueHigh ?? 0) - (a.valueHigh ?? 0));
+    // ── Enrich with gross contribution (segment-level estimates) ─────────────
+    // Adds contributionHigh/Low using trailing-12-month segment contribution%
+    // from margin_fact. Entities with no segment match get null (sort last).
+    let segmentContribRates: { segment: string; contributionPct: number }[] = [];
+    try {
+      const { getSegmentContributions } = await import("../lib/sku/skuContribution.js");
+      const { db } = await import("@workspace/db");
+      const { sql } = await import("drizzle-orm");
+      const segRates = await getSegmentContributions();
+      segmentContribRates = [...segRates.entries()].map(([segment, v]) => ({ segment, contributionPct: v.contributionPct }));
+
+      // Batch-look up each entity's primary segment from sale_line_current.
+      const entityNames = [...new Set(rawLedger.map((r) => r.entityName.toUpperCase().trim()))];
+      if (entityNames.length > 0) {
+        const segRes = await db.execute<{ customer: string; segment: string }>(sql`
+          SELECT upper(trim(coalesce(customer,'?'))) AS customer,
+                 coalesce(group_canon, group_raw, 'Unmapped') AS segment
+          FROM   sale_line_current
+          WHERE  fy = ${fy}
+            AND  upper(trim(coalesce(customer,'?'))) = ANY(ARRAY[${sql.join(entityNames.map((n) => sql`${n}`), sql`, `)}])
+          GROUP  BY 1, 2
+          ORDER  BY SUM(amount::float8) DESC
+        `);
+        // Pick top-net segment per entity
+        const entitySegment = new Map<string, string>();
+        for (const r of segRes.rows) {
+          if (!entitySegment.has(r.customer)) entitySegment.set(r.customer, r.segment);
+        }
+        for (const row of rawLedger) {
+          const seg = entitySegment.get(row.entityName.toUpperCase().trim());
+          const rate = seg ? segRates.get(seg) : null;
+          (row as Record<string, unknown>).contributionHigh = rate && row.valueHigh != null ? Math.round(row.valueHigh * rate.contributionPct * 100) / 100 : null;
+          (row as Record<string, unknown>).contributionLow  = rate && row.valueLow  != null ? Math.round(row.valueLow  * rate.contributionPct * 100) / 100 : null;
+        }
+      }
+    } catch {
+      // Contribution data unavailable — contributionHigh/Low will be null on all rows.
+      for (const row of rawLedger) {
+        (row as Record<string, unknown>).contributionHigh = null;
+        (row as Record<string, unknown>).contributionLow  = null;
+      }
+    }
+
+    // Sort by contributionHigh DESC (null last), then valueHigh DESC, cap at 40
+    rawLedger.sort((a, b) => {
+      const ah = (a as Record<string, unknown>).contributionHigh as number | null;
+      const bh = (b as Record<string, unknown>).contributionHigh as number | null;
+      if (ah == null && bh == null) return (b.valueHigh ?? 0) - (a.valueHigh ?? 0);
+      if (ah == null) return 1;
+      if (bh == null) return -1;
+      return bh - ah || (b.valueHigh ?? 0) - (a.valueHigh ?? 0);
+    });
     const omittedRows = rawLedger.slice(40);
     const topRows = rawLedger.slice(0, 40);
     const omittedValue = omittedRows.reduce((s, r) => s + (r.valueHigh ?? 0), 0);

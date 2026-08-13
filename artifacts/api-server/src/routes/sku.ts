@@ -476,6 +476,50 @@ router.get("/sku/recommendations", async (req: Request, res: Response): Promise<
         scopeId,
         entityFilter,
       });
+      // Enrich with gross contribution data.
+      try {
+        const { getCodeContributions, sortByContrib } = await import("../lib/sku/skuContribution.js");
+        const allCodes = result.recommendations.flatMap((s) => s.topGapCodes.map((c) => c.code));
+        const contrib = await getCodeContributions(allCodes);
+        let noCost = 0, noCostNet = 0, totalNet = 0, totalContrib = 0, hasContrib = false;
+        for (const seg of result.recommendations) {
+          for (const c of seg.topGapCodes) {
+            const cc = contrib.get(c.code);
+            (c as Record<string, unknown>).contributionPerUnit = cc?.contributionPerUnit ?? null;
+            (c as Record<string, unknown>).contributionPct    = cc?.contributionPct    ?? null;
+            totalNet += c.priorNet;
+            if (cc) { hasContrib = true; totalContrib += c.priorNet * cc.contributionPct; }
+            else { noCost++; noCostNet += c.priorNet; }
+          }
+          // Re-sort codes: contribution DESC (null last) → priorNet DESC
+          seg.topGapCodes.sort((a, b) =>
+            sortByContrib(
+              (a as Record<string, unknown>).contributionPerUnit as number | null,
+              (b as Record<string, unknown>).contributionPerUnit as number | null,
+            ) || b.priorNet - a.priorNet,
+          );
+          // Tag each segment with its total gap contribution (for segment ordering)
+          const segContrib = seg.topGapCodes.reduce((s, c) => {
+            const cc = contrib.get(c.code);
+            return s + (cc ? c.priorNet * cc.contributionPct : 0);
+          }, 0);
+          (seg as Record<string, unknown>).gapContribution = hasContrib ? segContrib : null;
+        }
+        // Re-sort segments: gapContribution DESC (null last) → gapNet DESC
+        result.recommendations.sort((a, b) =>
+          sortByContrib(
+            (a as Record<string, unknown>).gapContribution as number | null,
+            (b as Record<string, unknown>).gapContribution as number | null,
+          ) || b.gapNet - a.gapNet,
+        );
+        (result as Record<string, unknown>).noCostData = {
+          codeCount: noCost,
+          sharePct:  totalNet > 0 ? Math.round(noCostNet / totalNet * 1000) / 10 : 0,
+        };
+        (result as Record<string, unknown>).totalGapContribution = hasContrib ? totalContrib : null;
+      } catch (err) {
+        req.log.warn({ err }, "sku recommendations contribution enrichment failed");
+      }
       return { fy, monthFrom, monthTo, level, scope, scopeId: scopeId ?? null, filtered: !!entityFilter, ...result };
     };
     const payload =
@@ -787,6 +831,35 @@ router.get("/sku/push-list", async (req: Request, res: Response): Promise<void> 
             : null;
         }
       }
+
+      // Enrich codes with gross contribution (factory cost only) and re-sort DESC.
+      const { getCodeContributions, sortByContrib } = await import("../lib/sku/skuContribution.js");
+      const allCodesForContrib = new Set<string>();
+      for (const seg of result.segments ?? []) {
+        for (const c of seg.topCodes ?? []) allCodesForContrib.add(c.code);
+      }
+      const contrib = await getCodeContributions([...allCodesForContrib]);
+      let noCostCodes = 0, noCostNet = 0, totalContribNet = 0;
+      for (const seg of result.segments ?? []) {
+        for (const c of seg.topCodes ?? []) {
+          const cc = contrib.get(c.code);
+          (c as Record<string, unknown>).contributionPerUnit = cc?.contributionPerUnit ?? null;
+          (c as Record<string, unknown>).contributionPct    = cc?.contributionPct    ?? null;
+          totalContribNet += c.peerNet;
+          if (!cc) { noCostCodes++; noCostNet += c.peerNet; }
+        }
+        // Re-sort: contribution DESC (null last) → tier ASC → peerCount DESC
+        seg.topCodes.sort((a, b) =>
+          sortByContrib(
+            (a as Record<string, unknown>).contributionPerUnit as number | null,
+            (b as Record<string, unknown>).contributionPerUnit as number | null,
+          ) || a.tier - b.tier || b.peerCount - a.peerCount,
+        );
+      }
+      (result as Record<string, unknown>).noCostData = {
+        codeCount: noCostCodes,
+        sharePct:  totalContribNet > 0 ? Math.round(noCostNet / totalContribNet * 1000) / 10 : 0,
+      };
       // Stable re-rank: in-season first, then next-quarter, then groundwork;
       // the underlying gap-value order is preserved within each band.
       if (Array.isArray(result.segments)) {

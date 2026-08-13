@@ -43,6 +43,13 @@ export type PushCode = {
   tierLabel: "Range" | "Lapsed" | "Active" | "New";
   /** K4: set when this code is pushed at a discount above its own norm. */
   discountAboveNorm: DiscountAboveNorm | null;
+  /**
+   * GROSS CONTRIBUTION — factory cost only. Not profit.
+   * null = no cost data; code sorts last.
+   */
+  contributionPerUnit: number | null;
+  /** (avg_sale − bom_cost) / avg_sale as 0–1. null = no cost data. */
+  contributionPct: number | null;
 };
 
 export type SegmentPushCard = {
@@ -78,6 +85,8 @@ export type PushListResult = {
   fallbackTier?: "state" | "territory" | "national";
   /** Human-readable pool scope for display when isFallback=true. */
   fallbackScopeName?: string;
+  /** Codes with no margin_fact data: count and share of total peer net. */
+  noCostData?: { codeCount: number; sharePct: number };
   /** Names of the peer distributors backing this list (sorted). */
   peerNames?: string[];
   segments: SegmentPushCard[];
@@ -577,6 +586,12 @@ function PushSegmentCard({
                 {isFallback ? "Stocking" : "Peers buying"}
               </TableHead>
               <TableHead className="py-1.5 text-right">{netLabel}</TableHead>
+              <TableHead
+                className="py-1.5 text-right hidden lg:table-cell"
+                title="GROSS CONTRIBUTION — factory cost only. Not profit."
+              >
+                Gross contrib
+              </TableHead>
               <TableHead className="py-1.5 text-right hidden md:table-cell">Last FY</TableHead>
             </TableRow>
           </TableHeader>
@@ -616,6 +631,15 @@ function PushSegmentCard({
                 </TableCell>
                 <TableCell className="py-1.5 text-right tabular-nums text-xs whitespace-nowrap">
                   {fmtNet(code.peerNet)}
+                </TableCell>
+                <TableCell className="py-1.5 text-right tabular-nums text-xs whitespace-nowrap hidden lg:table-cell">
+                  {code.contributionPct != null ? (
+                    <span className="text-emerald-700 dark:text-emerald-400">
+                      {Math.round(code.contributionPct * 100)}%
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground italic text-[10px]">no cost data</span>
+                  )}
                 </TableCell>
                 <TableCell className="py-1.5 text-right text-xs text-muted-foreground
                                      hidden md:table-cell whitespace-nowrap">

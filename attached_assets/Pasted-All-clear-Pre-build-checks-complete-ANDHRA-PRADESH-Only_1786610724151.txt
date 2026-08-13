@@ -1,0 +1,113 @@
+All clear. Pre-build checks complete:
+
+ANDHRA PRADESH: Only AP in DB. No ANDHRA PRADESH value exists. AP joins the split group with parent "Andhra Pradesh" (is_split=true, single member). ✓
+CHHATTISGARH/CHATTISGARH: Only CHHATTISGARH in DB. CHATTISGARH is the HR roster spelling but never reaches state_canon. Single entry, no grouping needed. ✓
+Full alias scan: All 19 remaining non-split values are genuine distinct states — no further hidden aliases. ✓
+HITESH rows: Not 11 rows — 374 line rows across FY23-24/25-26/26-27, two customers: JAI NARAIN GARG & SONS (KAROL BAGH) and KONARK SANITARY (HAUZ QAZI). Both are Delhi-area businesses; "HITESH" is almost certainly a state rep's name typed into the state field. Source correction needed in the register.
+Now let me read the key files I'll be touching before writing anything:
+
+
+
+8 actions
+Analyzing the migration system
+Planning the implementation phase
+Good — I have the architecture. Let me read the remaining key files in parallel before writing code:
+
+
+
+5 actions
+Let me read the remaining files I need before writing code:
+
+
+
+6 actions
+Now I have everything I need. Let me implement all at once — migration, route, analytics fix, and the complete frontend rewrite. Starting with the backend:
+
+
+
+5 actions
+Good — Organisation and PrimaryPerformanceDashboard only reference states in data display, not user-facing pickers. Now I have everything. Writing all files in parallel:
+
+
+
+2 actions
+Now the remaining backend files — all independent, so batched:
+
+
+
+4 actions
+Let me read the DistributorDeepDive state variable declarations before writing:
+
+
+
+3 actions
+Now writing all remaining files in parallel — route, index, analytics fix, and full frontend rewrite:
+
+
+
+6 actions
+Now writing the four frontend files in parallel:
+
+
+
+2 actions
+Now the three remaining frontend files — all independent, batched:
+
+
+
+14 actions
+Now I have all the context needed. Writing the three remaining frontend edits in parallel:
+
+
+
+4 actions
+Now the functional content edits — all three in parallel:
+
+
+
+4 actions
+Now fixing the remaining CompanyReports.tsx changes — 3A section, 3B section, and Report3ATable signature:
+
+
+
+3 actions
+Let me check logs and run the type-check:
+
+
+
+5 actions
+Type-check passed clean. Now running the verification steps from the spec — restart the API server to apply migration 025, then run all SQL checks in parallel:
+
+
+
+5 actions
+37 rows confirmed, structure correct, GEM/JJM/Non-territory/HITESH all picker_visible=false. Now the arithmetic verification steps in parallel:
+
+
+
+4 actions
+All checks pass. Now committing and updating memory in parallel:
+
+
+
+5 actions
+Done. Here's the verification summary:
+
+Check	Result
+state_hierarchy rows	37 ✓
+FY25-26 frozen anchor	₹360.9954 Cr / 145,613 rows ✓
+Split arithmetic (both FYs, all 7 groups)	Parent = sum of children to the rupee ✓
+BIHAR net (regression)	Unchanged across all 4 FYs ✓
+Distinct state_canon in sale_line	37 — matches hierarchy exactly ✓
+GEM / JJM / HITESH / Non-territory	In table, picker_visible = false ✓
+Typecheck	Clean ✓
+Commit	296eefe
+What changed:
+
+Migration 025 seeds the 37-row state_hierarchy table on every server start (idempotent ON CONFLICT DO UPDATE).
+GET /api/state-hierarchy?fy= returns the full table with per-state net and row count for the FY.
+StateFilter.tsx — full rewrite: two-level dropdown, module-level singleton cache, parent toggles all children, partial-select indicator on parents. REGION_GROUPS kept exported (now uses actual DB leaf values like "DELHI A" instead of canonical "DELHI", which fixes a silent miss in the DistributorDeepDive region mode).
+CompanyReportFilters — state MultiSelect replaced with StateFilter, available restricted to the head-scoped filter tree.
+CompanyReports 3A sub-report — text search replaced with StateFilter; 3B party text input is now its own independent variable.
+DistributorDeepDive state mode — the two chained <select> dropdowns and chip list replaced with a single <StateFilter>.
+analytics.ts — stateVariantsFromArray expansion removed; the frontend now always sends complete leaf sets

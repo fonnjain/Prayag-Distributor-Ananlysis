@@ -12,6 +12,12 @@ type Assumption = { label: string; defaultValue: number; currentValue: number; d
 type LedgerRow = {
   rank: number; lever: string; entityType: string; entityName: string; whatToDo: string;
   valueLow: number | null; valueHigh: number | null;
+  /**
+   * GROSS CONTRIBUTION — factory cost only. Not profit.
+   * Estimated using segment-level trailing-12-month margin_fact rates.
+   * null = no cost data for this entity's primary segment.
+   */
+  contributionHigh: number | null; contributionLow: number | null;
   effort: "Low" | "Medium" | "High"; confidence: "High" | "Medium" | "Low";
   conversionAssumption?: number; basisNote?: string;
 };
@@ -219,8 +225,10 @@ export default function FullGrowthReport({ data }: { data: FullGrowthReportData 
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead><tr className="border-b border-border/40">
-              {["#", "Lever", "Entity", "What to Do", "Low (₹ Cr)", "High (₹ Cr)", "Effort", "Confidence"].map(h => (
-                <th key={h} className="py-2 px-2 text-left font-medium text-muted-foreground whitespace-nowrap">{h}</th>
+              {["#", "Lever", "Entity", "What to Do", "Net Low (₹ Cr)", "Net High (₹ Cr)", "Gross Contrib High", "Effort", "Confidence"].map(h => (
+                <th key={h} className={`py-2 px-2 text-left font-medium text-muted-foreground whitespace-nowrap${h === "Gross Contrib High" ? " text-emerald-700 dark:text-emerald-400" : ""}`}
+                  title={h === "Gross Contrib High" ? "GROSS CONTRIBUTION — factory cost only. Not profit. Sorted by this column descending; no-cost-data rows last." : undefined}
+                >{h}</th>
               ))}
             </tr></thead>
             <tbody>
@@ -232,6 +240,11 @@ export default function FullGrowthReport({ data }: { data: FullGrowthReportData 
                   <td className="py-1.5 px-2 max-w-[240px] text-muted-foreground">{r.whatToDo}</td>
                   <td className="py-1.5 px-2">₹{cr(r.valueLow != null ? r.valueLow * 10_000_000 : null)}</td>
                   <td className="py-1.5 px-2 font-medium">₹{cr(r.valueHigh != null ? r.valueHigh * 10_000_000 : null)}</td>
+                  <td className="py-1.5 px-2 font-medium text-emerald-700 dark:text-emerald-400">
+                    {r.contributionHigh != null
+                      ? `₹${cr(r.contributionHigh * 10_000_000)}`
+                      : <span className="text-muted-foreground italic font-normal text-[10px]">no cost data</span>}
+                  </td>
                   <td className="py-1.5 px-2"><EffortBadge v={r.effort} /></td>
                   <td className="py-1.5 px-2"><ConfidenceBadge v={r.confidence} /></td>
                 </tr>
