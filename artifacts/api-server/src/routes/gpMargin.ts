@@ -174,6 +174,8 @@ router.post("/admin/margin/load", (req, res) => {
           cumulativeFlags:      report.cumulativeValidation.filter((c) => c.flag).length,
           negativeContributionCount: report.negativeContributionCount,
           negativeContributionTop10: report.negativeContributionTop10,
+          filesSkipped:  report.filesSkipped,
+          filesConflict: report.filesConflict,
         },
       };
     })
