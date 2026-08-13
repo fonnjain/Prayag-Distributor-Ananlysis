@@ -409,19 +409,13 @@ function LostCodesView({ fy, monthFrom, monthTo }: ViewProps) {
     <div className="rounded-lg border bg-card">
       <div className="px-4 pt-3 pb-2 border-b">
         <h3 className="text-sm font-semibold">
-          Lost codes — bought in {data.priorFy}, absent in {data.fy}, ranked by gross contribution
+          Lost codes — bought in {data.priorFy}, absent in {data.fy}, ranked by prior-year value
         </h3>
         <p className="text-xs text-muted-foreground mt-0.5">
-          the warmest list available: proven demand, known customer ·{" "}
-          <span title="GROSS CONTRIBUTION — factory cost only. Not profit.">
-            gross contribution = factory cost only (not profit)
-          </span>
-          {data.noCostData && data.noCostData.codeCount > 0 && (
-            <span className="ml-2 text-amber-700 dark:text-amber-400">
-              · {data.noCostData.codeCount} code{data.noCostData.codeCount === 1 ? "" : "s"} with no cost data
-              ({data.noCostData.sharePct}% of prior net) — sorted last
-            </span>
-          )}
+          the warmest list available: proven demand, known customer
+        </p>
+        <p className="text-[11px] text-amber-700 dark:text-amber-400 font-medium mt-1">
+          Contribution figures are being recalculated — do not use for prioritisation.
         </p>
       </div>
       <div className="overflow-x-auto">
@@ -460,13 +454,7 @@ function LostCodesView({ fy, monthFrom, monthTo }: ViewProps) {
                   {fmtCr(l.priorNet)}
                 </TableCell>
                 <TableCell className="py-1.5 text-right text-xs tabular-nums whitespace-nowrap hidden lg:table-cell">
-                  {l.opportunityContribution != null ? (
-                    <span className="text-emerald-700 dark:text-emerald-400">
-                      {fmtCr(l.opportunityContribution)}
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground italic text-[10px]">no cost data</span>
-                  )}
+                  <span className="text-muted-foreground italic text-[10px]">under review</span>
                 </TableCell>
               </TableRow>
             ))}

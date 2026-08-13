@@ -203,6 +203,9 @@ function RecommendationCard({
       </div>
 
       {/* Top gap codes table */}
+      <div className="text-[11px] text-amber-700 dark:text-amber-400 font-medium px-1 py-1 bg-amber-50/60 dark:bg-amber-900/10 rounded mb-1">
+        Contribution figures are being recalculated — do not use for prioritisation.
+      </div>
       <div className="overflow-x-auto">
         <Table>
           <TableHeader>
@@ -238,13 +241,7 @@ function RecommendationCard({
                   {fmtNet(code.priorNet)}
                 </TableCell>
                 <TableCell className="py-1.5 text-right tabular-nums text-xs whitespace-nowrap hidden lg:table-cell">
-                  {code.contributionPct != null ? (
-                    <span className="text-emerald-700 dark:text-emerald-400">
-                      {Math.round(code.contributionPct * 100)}%
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground italic text-[10px]">no cost data</span>
-                  )}
+                  <span className="text-muted-foreground italic text-[10px]">under review</span>
                 </TableCell>
                 <TableCell className="py-1.5 text-right text-xs text-muted-foreground
                                      hidden md:table-cell whitespace-nowrap">

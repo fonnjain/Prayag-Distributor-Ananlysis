@@ -855,11 +855,8 @@ export async function getLostCodes(
           l.opportunityContribution = l.priorQty * c.contributionPerUnit;
         }
       }
-      // Re-sort: opportunityContribution DESC (null last), then priorNet DESC
-      baseLost.sort(
-        (a, b) => sortByContrib(a.opportunityContribution, b.opportunityContribution)
-                   || b.priorNet - a.priorNet,
-      );
+      // Sort: priorNet DESC (net value; contribution under review).
+      baseLost.sort((a, b) => b.priorNet - a.priorNet);
     } catch {
       // Contribution data unavailable — keep prior-net sort (already DESC from SQL).
     }

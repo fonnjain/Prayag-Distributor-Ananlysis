@@ -1361,15 +1361,8 @@ router.post("/ai/full-report/growth", async (req: Request, res: Response): Promi
       }
     }
 
-    // Sort by contributionHigh DESC (null last), then valueHigh DESC, cap at 40
-    rawLedger.sort((a, b) => {
-      const ah = (a as Record<string, unknown>).contributionHigh as number | null;
-      const bh = (b as Record<string, unknown>).contributionHigh as number | null;
-      if (ah == null && bh == null) return (b.valueHigh ?? 0) - (a.valueHigh ?? 0);
-      if (ah == null) return 1;
-      if (bh == null) return -1;
-      return bh - ah || (b.valueHigh ?? 0) - (a.valueHigh ?? 0);
-    });
+    // Sort: valueHigh DESC (net value; contribution under review).
+    rawLedger.sort((a, b) => (b.valueHigh ?? 0) - (a.valueHigh ?? 0));
     const omittedRows = rawLedger.slice(40);
     const topRows = rawLedger.slice(0, 40);
     const omittedValue = omittedRows.reduce((s, r) => s + (r.valueHigh ?? 0), 0);

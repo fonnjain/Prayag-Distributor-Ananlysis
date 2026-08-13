@@ -373,10 +373,10 @@ export function SecondaryTabView({ fy, scope, recon, monthsParam = "" }: { fy: s
             </div>
             <div>
               <h5 className="text-xs font-semibold text-muted-foreground uppercase">
-                By code — gross contribution descending (no-cost-data last)
+                By code — largest gap first
               </h5>
-              <p className="text-[11px] text-muted-foreground mb-1">
-                Gross contribution = factory cost only. Not profit.
+              <p className="text-[11px] text-amber-700 dark:text-amber-400 font-medium mb-1">
+                Contribution figures are being recalculated — do not use for prioritisation.
               </p>
               <table className="w-full text-xs mt-1">
                 <thead><tr className="text-left text-muted-foreground border-b border-border">
@@ -397,10 +397,8 @@ export function SecondaryTabView({ fy, scope, recon, monthsParam = "" }: { fy: s
                       <td className="py-1 pr-2 text-right">{Math.round(c.secondaryOutQty)}</td>
                       <td className="py-1 pr-2 text-right">{formatCompact(c.secondaryOutValue)}</td>
                       <td className="py-1 pr-2 text-right">{formatCompact(c.gapValue)}</td>
-                      <td className="py-1 text-right text-emerald-700 dark:text-emerald-400 font-medium">
-                        {c.opportunityContribution != null
-                          ? formatCompact(c.opportunityContribution)
-                          : <span className="text-muted-foreground italic font-normal text-[10px]">—</span>}
+                      <td className="py-1 text-right">
+                        <span className="text-muted-foreground italic text-[10px]">under review</span>
                       </td>
                     </tr>
                   ))}
@@ -552,14 +550,7 @@ export function PushTabView({ fy, scope, recon, monthsParam = "" }: { fy: string
               <p className="text-xs mt-1">
                 <strong>{r.peerCount} of {r.segmentPeerCount} peers your size in your territory buy this and this distributor does not</strong>
                 {" "}(peer net {formatCompact(r.peerNet)}).{" "}
-                {r.contributionPct != null ? (
-                  <span className="text-emerald-700 dark:text-emerald-400 font-medium">
-                    Gross contrib {Math.round(r.contributionPct * 100)}%{" "}
-                    <span className="font-normal text-muted-foreground text-[10px]">(factory cost only)</span>
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground text-[10px] italic">no cost data</span>
-                )}{" "}
+                <span className="text-muted-foreground text-[10px] italic">gross contrib — under review</span>{" "}
                 <Source>K3 push engine, peer cohort</Source>
               </p>
               {r.timingNote && (

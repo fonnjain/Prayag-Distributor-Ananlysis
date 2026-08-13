@@ -224,6 +224,9 @@ export default function FullGrowthReport({ data }: { data: FullGrowthReportData 
       <CollapseCard title="§2 Opportunity Ledger" badge={<Badge variant="outline" className="text-[10px]">{ledger.rows.length} rows</Badge>} defaultOpen>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
+            <div className="text-[11px] text-amber-700 dark:text-amber-400 font-medium px-2 py-1 bg-amber-50/60 dark:bg-amber-900/10 rounded mb-1">
+              Contribution figures are being recalculated — do not use for prioritisation.
+            </div>
             <thead><tr className="border-b border-border/40">
               {["#", "Lever", "Entity", "What to Do", "Net Low (₹ Cr)", "Net High (₹ Cr)", "Gross Contrib High", "Effort", "Confidence"].map(h => (
                 <th key={h} className={`py-2 px-2 text-left font-medium text-muted-foreground whitespace-nowrap${h === "Gross Contrib High" ? " text-emerald-700 dark:text-emerald-400" : ""}`}
@@ -240,10 +243,8 @@ export default function FullGrowthReport({ data }: { data: FullGrowthReportData 
                   <td className="py-1.5 px-2 max-w-[240px] text-muted-foreground">{r.whatToDo}</td>
                   <td className="py-1.5 px-2">₹{cr(r.valueLow != null ? r.valueLow * 10_000_000 : null)}</td>
                   <td className="py-1.5 px-2 font-medium">₹{cr(r.valueHigh != null ? r.valueHigh * 10_000_000 : null)}</td>
-                  <td className="py-1.5 px-2 font-medium text-emerald-700 dark:text-emerald-400">
-                    {r.contributionHigh != null
-                      ? `₹${cr(r.contributionHigh * 10_000_000)}`
-                      : <span className="text-muted-foreground italic font-normal text-[10px]">no cost data</span>}
+                  <td className="py-1.5 px-2">
+                    <span className="text-muted-foreground italic text-[10px]">under review</span>
                   </td>
                   <td className="py-1.5 px-2"><EffortBadge v={r.effort} /></td>
                   <td className="py-1.5 px-2"><ConfidenceBadge v={r.confidence} /></td>

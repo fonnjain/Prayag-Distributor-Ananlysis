@@ -577,6 +577,9 @@ function PushSegmentCard({
       {/* Gap codes table */}
       <div className="overflow-x-auto">
         <Table>
+          <div className="px-4 py-1.5 text-[11px] text-amber-700 dark:text-amber-400 font-medium bg-amber-50/60 dark:bg-amber-900/10 rounded -mx-0 mb-1">
+            Contribution figures are being recalculated — do not use for prioritisation.
+          </div>
           <TableHeader>
             <TableRow className="text-xs">
               <TableHead className="py-1.5 pl-4 w-8">#</TableHead>
@@ -633,13 +636,7 @@ function PushSegmentCard({
                   {fmtNet(code.peerNet)}
                 </TableCell>
                 <TableCell className="py-1.5 text-right tabular-nums text-xs whitespace-nowrap hidden lg:table-cell">
-                  {code.contributionPct != null ? (
-                    <span className="text-emerald-700 dark:text-emerald-400">
-                      {Math.round(code.contributionPct * 100)}%
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground italic text-[10px]">no cost data</span>
-                  )}
+                  <span className="text-muted-foreground italic text-[10px]">under review</span>
                 </TableCell>
                 <TableCell className="py-1.5 text-right text-xs text-muted-foreground
                                      hidden md:table-cell whitespace-nowrap">

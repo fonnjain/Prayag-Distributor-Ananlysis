@@ -491,27 +491,11 @@ router.get("/sku/recommendations", async (req: Request, res: Response): Promise<
             if (cc) { hasContrib = true; totalContrib += c.priorNet * cc.contributionPct; }
             else { noCost++; noCostNet += c.priorNet; }
           }
-          // Re-sort codes: contribution DESC (null last) → priorNet DESC
-          seg.topGapCodes.sort((a, b) =>
-            sortByContrib(
-              (a as Record<string, unknown>).contributionPerUnit as number | null,
-              (b as Record<string, unknown>).contributionPerUnit as number | null,
-            ) || b.priorNet - a.priorNet,
-          );
-          // Tag each segment with its total gap contribution (for segment ordering)
-          const segContrib = seg.topGapCodes.reduce((s, c) => {
-            const cc = contrib.get(c.code);
-            return s + (cc ? c.priorNet * cc.contributionPct : 0);
-          }, 0);
-          (seg as Record<string, unknown>).gapContribution = hasContrib ? segContrib : null;
+          // Codes: priorNet DESC (net value; contribution under review).
+          seg.topGapCodes.sort((a, b) => b.priorNet - a.priorNet);
         }
-        // Re-sort segments: gapContribution DESC (null last) → gapNet DESC
-        result.recommendations.sort((a, b) =>
-          sortByContrib(
-            (a as Record<string, unknown>).gapContribution as number | null,
-            (b as Record<string, unknown>).gapContribution as number | null,
-          ) || b.gapNet - a.gapNet,
-        );
+        // Segments: gapNet DESC (net value; contribution under review).
+        result.recommendations.sort((a, b) => b.gapNet - a.gapNet);
         (result as Record<string, unknown>).noCostData = {
           codeCount: noCost,
           sharePct:  totalNet > 0 ? Math.round(noCostNet / totalNet * 1000) / 10 : 0,
@@ -848,13 +832,8 @@ router.get("/sku/push-list", async (req: Request, res: Response): Promise<void> 
           totalContribNet += c.peerNet;
           if (!cc) { noCostCodes++; noCostNet += c.peerNet; }
         }
-        // Re-sort: contribution DESC (null last) → tier ASC → peerCount DESC
-        seg.topCodes.sort((a, b) =>
-          sortByContrib(
-            (a as Record<string, unknown>).contributionPerUnit as number | null,
-            (b as Record<string, unknown>).contributionPerUnit as number | null,
-          ) || a.tier - b.tier || b.peerCount - a.peerCount,
-        );
+        // Sort: tier ASC → peerCount DESC (net value; contribution under review).
+        seg.topCodes.sort((a, b) => a.tier - b.tier || b.peerCount - a.peerCount);
       }
       (result as Record<string, unknown>).noCostData = {
         codeCount: noCostCodes,

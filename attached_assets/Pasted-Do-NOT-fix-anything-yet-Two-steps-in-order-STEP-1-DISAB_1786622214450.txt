@@ -1,0 +1,43 @@
+Do NOT fix anything yet. Two steps, in order.
+
+STEP 1 — DISABLE THE CONTRIBUTION RANKING
+The month-label bug means every contribution figure on screen is computed from
+the wrong twelve months, and the Garden Pipe / Sink gaps mean the rates
+themselves are wrong for those segments.
+
+Revert the DEFAULT SORT on all five surfaces back to net value. Keep the
+Gross contrib column but render every value as "under review" with a visible
+note: "Contribution figures are being recalculated - do not use for
+prioritisation." Do not delete the column or the code.
+
+A ranking that is confidently in the wrong order is worse than the revenue
+ranking it replaced. Confirm when done.
+
+STEP 2 — DIAGNOSE THE THREE DATA DEFECTS, do not fix them
+2a. MONTH LABELS. Print the loader code that derives month_label from the
+    filename or content. Show exactly where "25-26" yields "26" for Oct/Nov/
+    Dec. Print the count of affected rows per segment. Do NOT correct them
+    yet - I want to see the fix before it runs, because relabelling months
+    moves data between fiscal years.
+
+2b. THE BOM DEFINITION. This needs settling, not guessing. Open one Garden
+    Pipe monthly workbook and one Sink workbook. Print EVERY column header on
+    the segment tab, and for three codes print every numeric value in the row.
+    Then print the same three codes' figures from the SUMMARY tab.
+
+    I want to see whether the SUMMARY tab's higher percentage comes from a
+    different column, an added freight or conversion element, or a different
+    denominator. If PTMT and Sanitaryware reconcile and Garden Pipe and Sink
+    do not, the difference is visible in those workbooks.
+
+2c. PLUMBING. Print the exact folder path the loader scanned for each segment,
+    and what it found under the Plumbing folder. The source has a "Plumbing
+    GP MARGIN" folder with 13 files for FY2025-26 and 3 for FY2026-27.
+
+2d. DOUBLE-LOADING. Print the loader logic that chooses between the Sheets
+    path and the Drive fallback, and why both persist. Also print why no
+    cumulative file was loaded - the classifier should have found "Apr To Oct
+    25-26" and "1st Qtr" files and marked them cumulative rather than skipping
+    them silently.
+
+Report all four. No code changes beyond Step 1.

@@ -524,14 +524,8 @@ export async function buildSecondaryTab(
   } catch {
     // margin_fact unavailable — keep nulls from type defaults.
   }
-  // Default sort: opportunityContribution DESC (null last), then |gap| DESC
-  flowGapByCode.sort((a, b) => {
-    const ao = a.opportunityContribution, bo = b.opportunityContribution;
-    if (ao == null && bo == null) return Math.abs(b.gapValue) - Math.abs(a.gapValue);
-    if (ao == null) return 1;
-    if (bo == null) return -1;
-    return bo - ao || Math.abs(b.gapValue) - Math.abs(a.gapValue);
-  });
+  // Sort: |gap value| DESC (net value; contribution under review).
+  flowGapByCode.sort((a, b) => Math.abs(b.gapValue) - Math.abs(a.gapValue));
 
   const segGap = new Map<string, { primaryIn: number; secondaryOut: number }>();
   for (const c of flowGapByCode) {
@@ -1070,10 +1064,8 @@ export async function buildPushTab(
       r.contributionPerUnit = c?.contributionPerUnit ?? null;
       r.contributionPct     = c?.contributionPct     ?? null;
     }
-    recommendations.sort(
-      (a, b) => sortByContrib(a.contributionPerUnit, b.contributionPerUnit)
-                 || a.tier - b.tier || b.peerCount * b.peerNet - a.peerCount * a.peerNet,
-    );
+    // Sort: tier ASC → peerCount×peerNet DESC (net value; contribution under review).
+    recommendations.sort((a, b) => a.tier - b.tier || b.peerCount * b.peerNet - a.peerCount * a.peerNet);
   } catch {
     recommendations.sort((a, b) => a.tier - b.tier || b.peerCount * b.peerNet - a.peerCount * a.peerNet);
   }
