@@ -1,0 +1,98 @@
+GOAL
+The state filter currently offers a flat list. Some states exist in the data
+only as territory splits, so selecting the parent state misses rows, and
+selecting a split gives no way to see the whole state.
+
+Make it two levels: a parent state that selects ALL its splits, with every
+split individually selectable underneath.
+
+  Uttar Pradesh          <- selects East U.P AND West U.P AND all UP variants
+    East U.P
+    West U.P
+  Delhi
+    DELHI
+    DELHI NCR
+  Jammu and Kashmir
+    JAMMU
+    KASHMIR
+
+THE PROBLEM THIS FIXES
+state_canon holds split values - DELHI A, DELHI NCR, UP ( A ), UP (AS),
+KARNATAKA (B), JAMMU, KASHMIR. Filtering on raw values has already halved
+results on Customer Performance once, because selecting DELHI did not return
+the DELHI NCR rows.
+
+There is a second vocabulary layer to be aware of: the SOURCE SHEETS hold
+W-BENGAL, MAHARASTRA L/R/S, Tamilnadu, UP ( R ) and canonState() converts
+these at ingest. An audit of state_canon will NOT show the sheet variants.
+This task works on state_canon only - do not change canonState().
+
+DISCOVER THE SPLITS - DO NOT HARDCODE THEM
+The values listed above come from handover documents and may be incomplete or
+stale. Derive the actual mapping from the data:
+
+1. Print EVERY distinct state_canon value in sale_line, with its row count and
+   net, for FY2026-27 and FY2025-26 separately.
+2. Print every distinct Working State value in the HR roster, after splitting
+   comma-separated cells.
+3. Print every distinct STATE value in the rate-list customer master.
+
+Then propose the parent mapping from what you actually found, and print it for
+approval BEFORE building the filter. I want to see the mapping before it is
+wired in.
+
+SCHEMA
+  state_hierarchy
+    state_canon      the split value as stored, e.g. "DELHI NCR"
+    state_parent     the rolled-up state, e.g. "Delhi"
+    is_split         true where state_parent differs from state_canon
+    display_order
+
+Every state_canon value must map to exactly one parent. A value that is not
+split maps to itself with is_split = false. No value may be left unmapped -
+report any that cannot be assigned rather than defaulting them.
+
+FILTER BEHAVIOUR
+- Selecting a PARENT returns every row whose state_canon maps to it.
+- Selecting a SPLIT returns only that split.
+- Both are selectable in the same picker, parent first, splits indented.
+- Multi-select works across levels: a user may pick "Uttar Pradesh" and
+  "JAMMU" together.
+- The picker shows the row count or net beside each entry, so a user can see
+  a split is small before selecting it.
+
+DO NOT MERGE ANYTHING
+The splits are real territory divisions with different State Heads and, in the
+case of schemes, different slab tables. Maharashtra appears in two scheme
+territory groups with DIFFERENT first-slab thresholds - CP starts at Rs 30,000
+in one and Rs 40,000 in the other. Collapsing splits would break that.
+
+JAMMU and KASHMIR specifically: the register holds them as two states
+(Rs 1.40 Cr and Rs 1.26 Cr); the HR roster holds "JAMMU AND KASHMIR" as one.
+Map both register values to a parent "Jammu and Kashmir" so the parent
+selection works - but keep them as separate splits. Do not merge the
+underlying rows.
+
+WHERE IT APPLIES
+Apply the new picker everywhere a state filter exists today. List the pages
+you changed. At minimum this includes Company Reports, Regional Reports,
+Customer Performance, SKU Deep Dive and Distributor Deep Dive - confirm from
+the code rather than trusting that list.
+
+VERIFY - produced values, and a hash that resolves
+1. Print the full state_hierarchy mapping as built - every state_canon value
+   with its parent and is_split flag. Confirm zero unmapped values.
+2. ARITHMETIC CHECK, the important one. For each parent that has splits,
+   print: the net returned when the PARENT is selected, and the sum of the
+   nets returned when each of its SPLITS is selected individually. These must
+   be equal to the rupee. Print both columns and the difference.
+3. Print the FY2025-26 total net with the filter set to "All". It must read
+   Rs 360.9954 Cr / 145,613 rows - unchanged from the frozen anchor.
+4. Regression: pick one page that had a state filter before. Print its net for
+   a single non-split state (e.g. BIHAR) before and after this change. It must
+   be identical.
+5. Confirm no row's state_canon value was altered - print the distinct count
+   before and after.
+6. List the pages where the picker was applied.
+7. Commit hash, git cat-file -t, git merge-base --is-ancestor <hash> main
+   with exit code.
