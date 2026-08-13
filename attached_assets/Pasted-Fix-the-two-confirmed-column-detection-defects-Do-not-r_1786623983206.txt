@@ -1,0 +1,46 @@
+Fix the two confirmed column-detection defects. Do not re-enable the
+contribution ranking - that stays off.
+
+1. SANITARYWARE — idx() precision ordering
+idx("BOM COST","BOMCOST","PUR RATE","PURRATE") matches "Growth % New Bom Cost
+VS Old Bom Cost" at col 12 via includes(), before reaching "PUR RATE 2025-26"
+at col 7.
+
+Restructure so precision beats pattern order:
+   pass 1: exact match, all patterns
+   pass 2: startsWith, all patterns
+   pass 3: includes, all patterns
+And in pass 3, reject any header containing "Growth" or "%" — a growth column
+can never be a cost column.
+
+Apply the same fix to every idx() call, not just the cost one. The same trap
+catches any header that happens to contain a pattern string.
+
+Then CHECK CP the same way. It reads 3.39 points below the reference and its
+headers have never been inspected. Print CP's column headers verbatim and
+which column idx() resolves for cost.
+
+2. PLUMBING — the 25-column scan window
+detectGpMarginTabs scans cols 1-25. The Plumbing workbook is dual-section and
+"Bom Cost (25-26)" is at col 27, so no tab is ever detected.
+
+Widen the scan to the actual used range of the sheet rather than a hardcoded
+25. If a bound is needed, use the last populated column.
+
+Confirm the Plumbing left section (BOM material breakdown - Item Code, Consum.
+Qty., BOP Rate, RM Rate, Total Cost) is NOT picked up as a second data region.
+The loader must read the right-hand sales section only.
+
+VERIFY - produced values
+a. Sanitaryware bom_cost after reload: print 5 codes with avg_sale, bom_cost
+   and BOM%. Expect 4011 at 333.41 / 54.8%, 4018 at 557.01 / 66.1%,
+   4012 at 431.03 / 55.7%.
+b. Segment BOM% for Sanitaryware before and after. Before reads 59.12% from a
+   broken column - after should differ.
+c. CP column headers verbatim, the column idx() resolves, and CP's segment
+   BOM% before and after.
+d. Plumbing: rows loaded, distinct codes, segment BOM%, and 3 sample codes
+   with their values.
+e. Confirm no other segment's bom_cost changed.
+f. Commit hash, git cat-file -t, git merge-base --is-ancestor main with exit
+   code.
