@@ -1,0 +1,84 @@
+GOAL
+Every opportunity figure in this application is ranked on REVENUE. With BOM
+cost now loaded, that is the wrong sort key.
+
+Gross contribution varies enormously by segment - PTMT runs at roughly 76%,
+Garden Pipe at roughly 14%. Ranked on revenue, a rupee of Garden Pipe counts
+the same as a rupee of PTMT. On contribution they are five times apart. The
+field is currently being pointed at items in the wrong order.
+
+This is a sort key and a column. It is not a redesign.
+
+WHERE TO APPLY IT
+Add gross contribution alongside net value, and make it the DEFAULT sort, on:
+
+  SKU push list          per-distributor peer-cohort recommendations
+  SKU recommendations    the headroom ranking
+  Master Growth Report   the opportunity ledger, all five levers
+  Lost codes             the recovery list
+  Distributor deep dive  SKU spread and range gap tables
+
+Search for any other ranking that sorts on net or sale_value and report what
+you find. Do not change them without telling me first.
+
+THE CALCULATION
+  contribution_per_unit = avg_sale - bom_cost
+  contribution_pct      = (avg_sale - bom_cost) / avg_sale
+  opportunity_contribution = opportunity_qty x contribution_per_unit
+
+Use the trailing 12 months of margin_fact, volume-weighted, per item code.
+Where a code has margin data in some months only, use what exists and report
+the coverage.
+
+KEEP BOTH COLUMNS VISIBLE
+Never replace net value with contribution. Show both. A salesperson needs the
+rupee value for the conversation with the distributor and the contribution to
+know which item to raise first. Removing revenue would make the push list
+harder to use, not easier.
+
+Default sort is contribution descending. Net value remains sortable.
+
+WHERE THERE IS NO COST
+Codes with no margin_fact rows must show "no cost data" and sort LAST, not
+zero. A code sorting to the bottom because its cost is unknown is correct;
+one sorting to the bottom because contribution computed as zero is a lie.
+
+Print the count of codes affected and their share of the ranked value, so the
+size of the blind spot is visible on the page.
+
+LABELLING - get this right
+BOM cost is FACTORY cost. No freight, no overhead, no SG&A.
+
+Label every derived figure GROSS CONTRIBUTION. Never "margin", never "profit",
+never "GP" unqualified. Add a one-line note wherever it appears: "Gross
+contribution - factory cost only. Not profit."
+
+Six existing deliverables state that margin cannot be computed anywhere in
+this application. That is about to stop being true, and the difference
+between gross contribution and profit is exactly where someone will
+over-claim.
+
+DO NOT
+- Do not change any net or quantity figure. This adds a column and a sort.
+- Do not change the scheme engine in this task. Extra Earn stays as it is;
+  scheme profitability is a separate piece of work.
+- Do not change any total. The Master Growth Report headline stays
+  Rs 9.67 Cr on revenue; contribution is shown alongside, not instead.
+
+VERIFY - produced values, and a hash that resolves
+1. For the SKU push list on one distributor with good margin coverage, print
+   the top 10 ranked by NET and the top 10 ranked by CONTRIBUTION, side by
+   side. They should differ materially. If the two lists are nearly identical,
+   the contribution figure is not being applied.
+2. Print segment-level contribution% as the ranking sees it, and confirm it
+   matches the loaded margin data - PTMT high, Garden Pipe low.
+3. Count of codes in the ranked output with no cost data, and their share of
+   total ranked net.
+4. Confirm every net and quantity figure on those pages is UNCHANGED. Print
+   one page's totals before and after.
+5. Confirm the Master Growth Report headline is still Rs 9.67 Cr post-dedup.
+6. Paste the rendered label text wherever contribution appears, confirming it
+   reads "gross contribution" and carries the factory-cost note.
+7. List every file changed.
+8. Commit hash, git cat-file -t, git merge-base --is-ancestor <hash> main
+   with exit code.

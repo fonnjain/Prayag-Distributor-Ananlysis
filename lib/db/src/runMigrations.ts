@@ -689,6 +689,78 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_margin_fact_fy_segment    ON margin_fact (fy, segment);
     `,
   },
+  {
+    id: "025_state_hierarchy",
+    sql: `
+      -- Every distinct state_canon value maps to one parent.
+      -- Splits (DELHI A, DELHI NCR, UP ( A ) …) share a parent; non-splits map to themselves.
+      -- picker_visible=false keeps non-geographic channel codes out of the UI while
+      -- preserving them in the table so verification arithmetic stays exact.
+      CREATE TABLE IF NOT EXISTS state_hierarchy (
+        state_canon    TEXT    PRIMARY KEY,
+        state_parent   TEXT    NOT NULL,
+        is_split       BOOLEAN NOT NULL DEFAULT false,
+        picker_visible BOOLEAN NOT NULL DEFAULT true,
+        display_order  INTEGER NOT NULL DEFAULT 999
+      );
+
+      INSERT INTO state_hierarchy
+        (state_canon, state_parent, is_split, picker_visible, display_order)
+      VALUES
+        -- ── Delhi splits ────────────────────────────────────────────────────
+        ('DELHI A',                         'Delhi',                         true,  true,   10),
+        ('DELHI NCR',                       'Delhi',                         true,  true,   11),
+        -- ── North: HP, J&K, Chandigarh ──────────────────────────────────────
+        ('HIMACHAL PRADESH',                'HIMACHAL PRADESH',              false, true,   12),
+        ('CHANDIGARH',                      'CHANDIGARH',                    false, true,   14),
+        ('JAMMU',                           'Jammu and Kashmir',             true,  true,   15),
+        ('KASHMIR',                         'Jammu and Kashmir',             true,  true,   16),
+        -- ── Uttar Pradesh splits ─────────────────────────────────────────────
+        ('UTTAR PRADESH',                   'Uttar Pradesh',                 true,  true,   20),
+        ('UP ( A )',                         'Uttar Pradesh',                 true,  true,   21),
+        ('UP (AS)',                          'Uttar Pradesh',                 true,  true,   22),
+        -- ── Uttarakhand ──────────────────────────────────────────────────────
+        ('UTTARAKHAND',                     'UTTARAKHAND',                   false, true,   25),
+        -- ── Haryana, Rajasthan splits, Punjab ────────────────────────────────
+        ('HARYANA',                         'HARYANA',                       false, true,   30),
+        ('RAJASTHAN',                       'Rajasthan',                     true,  true,   32),
+        ('RAJASTHAN (N)',                    'Rajasthan',                     true,  true,   33),
+        ('PUNJAB',                          'PUNJAB',                        false, true,   35),
+        -- ── East ─────────────────────────────────────────────────────────────
+        ('ASSAM',                           'ASSAM',                         false, true,   40),
+        ('WEST BENGAL',                     'WEST BENGAL',                   false, true,   43),
+        ('BIHAR',                           'BIHAR',                         false, true,   45),
+        ('JHARKHAND',                       'JHARKHAND',                     false, true,   47),
+        ('ODISHA',                          'ODISHA',                        false, true,   50),
+        -- ── South ────────────────────────────────────────────────────────────
+        ('AP',                              'Andhra Pradesh',                true,  true,   55),
+        ('TELANGANA',                       'TELANGANA',                     false, true,   56),
+        ('KERALA',                          'KERALA',                        false, true,   57),
+        ('GOA',                             'GOA',                           false, true,   58),
+        ('KARNATAKA',                       'Karnataka',                     true,  true,   60),
+        ('KARNATAKA (B)',                   'Karnataka',                     true,  true,   61),
+        ('TAMIL NADU',                      'Tamil Nadu',                    true,  true,   65),
+        ('TAMILNADU (S)',                    'Tamil Nadu',                    true,  true,   66),
+        -- ── West ─────────────────────────────────────────────────────────────
+        ('MAHARASHTRA',                     'MAHARASHTRA',                   false, true,   72),
+        ('GUJARAT',                         'GUJARAT',                       false, true,   75),
+        ('MADHYA PRADESH',                  'MADHYA PRADESH',                false, true,   78),
+        ('CHHATTISGARH',                    'CHHATTISGARH',                  false, true,   80),
+        -- ── Remote geographic ─────────────────────────────────────────────────
+        ('ANDAMAN',                         'ANDAMAN',                       false, true,  100),
+        ('NEPAL',                           'NEPAL',                         false, true,  110),
+        -- ── Non-geographic channel codes (in hierarchy for arithmetic, not in picker) ──
+        ('GEM',                             'GEM',                           false, false, 900),
+        ('JJM',                             'JJM',                           false, false, 901),
+        ('Non-territory / Project / Govt',  'Non-territory / Project / Govt',false, false, 902),
+        ('HITESH',                          'HITESH',                        false, false, 903)
+      ON CONFLICT (state_canon) DO UPDATE SET
+        state_parent   = EXCLUDED.state_parent,
+        is_split       = EXCLUDED.is_split,
+        picker_visible = EXCLUDED.picker_visible,
+        display_order  = EXCLUDED.display_order;
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

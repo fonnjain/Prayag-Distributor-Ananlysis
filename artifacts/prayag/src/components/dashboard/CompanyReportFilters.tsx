@@ -8,6 +8,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { ChevronDown, X, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import StateFilter from "../ui/StateFilter";
 
 export type EntityFilterValue = {
   heads: string[];
@@ -243,11 +244,11 @@ export function CompanyReportFilterBar({
           onChange={(heads) => onChange({ ...value, heads })}
         />
       )}
-      <MultiSelect
-        label="State"
-        options={stateOptions}
+      <StateFilter
         selected={value.states}
         onChange={(states) => onChange({ ...value, states })}
+        available={stateOptions.length > 0 ? new Set(stateOptions) : undefined}
+        label="State"
       />
       {showCustomers && (
         <MultiSelect

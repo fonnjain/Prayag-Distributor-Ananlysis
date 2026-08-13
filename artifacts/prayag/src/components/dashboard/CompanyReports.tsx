@@ -19,6 +19,7 @@ import {
   hasEntityFilter,
   type EntityFilterValue,
 } from "./CompanyReportFilters";
+import StateFilter from "../ui/StateFilter";
 
 // ── Types (matching server CompanyReportsPayload) ─────────────────────────────
 
@@ -345,8 +346,9 @@ function Report3({
   likeMonths: string[];
 }) {
   const [sub, setSub] = useState<"overall" | "3a" | "3b" | "3c">("overall");
-  const [stateFilter, setStateFilter] = useState("");
-  const [groupFilter, setGroupFilter] = useState("");
+  const [stateSelected, setStateSelected] = useState<string[]>([]);
+  const [partyFilter, setPartyFilter]     = useState("");
+  const [groupFilter, setGroupFilter]     = useState("");
 
   const SUBS = [
     { id: "overall", label: "3 — Overall" },
@@ -384,25 +386,24 @@ function Report3({
 
       {sub === "3a" && (
         <div className="space-y-3">
-          <div className="flex gap-2">
-            <input
-              value={stateFilter}
-              onChange={(e) => setStateFilter(e.target.value)}
-              placeholder="Filter by state..."
-              className="flex-1 text-xs rounded border border-border/50 bg-background px-2 py-1"
+          <div className="flex flex-wrap items-center gap-2">
+            <StateFilter
+              selected={stateSelected}
+              onChange={setStateSelected}
+              label="State"
             />
             <input
               value={groupFilter}
               onChange={(e) => setGroupFilter(e.target.value)}
               placeholder="Filter by group..."
-              className="flex-1 text-xs rounded border border-border/50 bg-background px-2 py-1"
+              className="text-xs rounded border border-border/50 bg-background px-2 py-1"
             />
           </div>
           <Report3ATable
             rows={data.r3a_byStateGroup}
             fy={fy}
             priorFy={priorFy}
-            stateFilter={stateFilter}
+            stateSelected={stateSelected}
             groupFilter={groupFilter}
           />
         </div>
@@ -412,8 +413,8 @@ function Report3({
         <div className="space-y-3">
           <div className="flex gap-2">
             <input
-              value={stateFilter}
-              onChange={(e) => setStateFilter(e.target.value)}
+              value={partyFilter}
+              onChange={(e) => setPartyFilter(e.target.value)}
               placeholder="Filter by party..."
               className="flex-1 text-xs rounded border border-border/50 bg-background px-2 py-1"
             />
@@ -428,7 +429,7 @@ function Report3({
             rows={data.r3b_byPartyGroup}
             fy={fy}
             priorFy={priorFy}
-            partyFilter={stateFilter}
+            partyFilter={partyFilter}
             groupFilter={groupFilter}
           />
         </div>
@@ -445,13 +446,13 @@ function Report3ATable({
   rows,
   fy,
   priorFy,
-  stateFilter,
+  stateSelected,
   groupFilter,
 }: {
   rows: Array<{ state: string; group: string; thisFy: number; lastFy: number }>;
   fy: string;
   priorFy: string;
-  stateFilter: string;
+  stateSelected: string[];
   groupFilter: string;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -459,7 +460,7 @@ function Report3ATable({
   const filtered = rows
     .filter(
       (r) =>
-        (!stateFilter || r.state.toLowerCase().includes(stateFilter.toLowerCase())) &&
+        (!stateSelected.length || stateSelected.includes(r.state)) &&
         (!groupFilter || r.group.toLowerCase().includes(groupFilter.toLowerCase())),
     )
     .sort((a, b) => b.thisFy - a.thisFy);

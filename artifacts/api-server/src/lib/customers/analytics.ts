@@ -9,7 +9,6 @@
 // LY conversion: "Apr-26" → "Apr-25" (same month name, year suffix −1).
 import { pool } from "@workspace/db";
 import { isMonthComplete } from "../analytics/analytics.js";
-import { stateVariantsFromArray } from "../stateCanon.js";
 import { entityCondsText, type EntityFilter } from "../saleLineFilter.js";
 
 // ── Month helpers ─────────────────────────────────────────────────────────────
@@ -244,9 +243,11 @@ export async function listCustomers(params: {
   filterLy?: EntityFilter;
 }): Promise<CustomerRow[]> {
   const { fyCy, fyLy, monthsCy, monthsLy, entityType = "all", states: rawStates = [], head = "", filterCy, filterLy } = params;
-  // Expand canonical/raw state names to all DB split-variants so DELHI A and DELHI NCR
-  // are both matched when the caller passes "DELHI".
-  const states = stateVariantsFromArray(rawStates);
+  // State filter: the new hierarchical picker sends the full set of leaf state_canon
+  // values directly (e.g. selecting "Delhi" parent → ["DELHI A", "DELHI NCR"]).
+  // No server-side expansion is applied — selecting a single split returns only that
+  // split's rows, which is the intended behaviour.
+  const states = rawStates;
 
   const typeFilter =
     entityType === "distributor"

@@ -1,0 +1,66 @@
+Approved with two corrections, then build.
+
+CORRECTION 1 — AP joins Andhra Pradesh
+AP is listed as non-split. It is not: the HR roster and customer master both
+write "ANDHRA PRADESH" for the same state. Map:
+
+  AP              -> Andhra Pradesh
+  ANDHRA PRADESH  -> Andhra Pradesh   (if it appears in state_canon at all)
+
+Selecting Andhra Pradesh must return the Rs 2.18 Cr currently sitting under AP.
+
+Also check CHHATTISGARH (register spelling) against CHATTISGARH (HR roster
+spelling). If both reach state_canon, group them under one parent
+"Chhattisgarh". Print what you find.
+
+Then re-scan every remaining non-split value for the same problem: a value
+that is a different spelling or abbreviation of another state rather than a
+genuinely standalone one. Print any you find before building.
+
+CORRECTION 2 — the four non-geographic values stay OUT of the picker
+GEM, JJM, Non-territory / Project / Govt and HITESH are not states. They are
+channel classifications that ended up in state_canon because the rate list
+overwrites the state column when a party is non-territory.
+
+There is already a channel column on sale_line carrying Retail, Govt, Project,
+JJM, Gem, Export. That is where this belongs.
+
+  - Keep all four in state_hierarchy mapping to themselves, so the arithmetic
+    in verification 2 stays exact.
+  - Do NOT show them in the state picker. A user filtering to "GEM" would get
+    a figure that looks like a territory number and is not.
+  - HITESH is 11 rows / Rs 0.02 Cr and looks like a person's name typed into a
+    state field. Exclude it and report the customers on those rows so the
+    source can be corrected.
+
+SPLIT MAPPING — approved as proposed
+The six groups are right, including the three you found that I had not listed
+(RAJASTHAN (N), TAMILNADU (S), KARNATAKA/KARNATAKA (B)). Parent names as you
+have them.
+
+Note UP (AS) and RAJASTHAN (N) are new in 2026-27 and KARNATAKA became
+KARNATAKA (B) mid-history. That means a parent selection spanning two fiscal
+years must include BOTH the old and new split values - your mapping does this
+correctly, but call it out in verification 2.
+
+APPLY EVERYWHERE
+Apply the picker to every page and tab where a state filter exists, without
+exception. Your list covers CompanyReportFilters, DistributorTabsPanel,
+DistributorDeepDive, Customer Performance and SKU Deep Dive.
+
+Search the whole frontend for any other state filter - dropdown, multi-select,
+or a states[] parameter sent to the server - and apply it there too. Print the
+complete list of files you changed.
+
+Replace the plain-text state search box on CompanyReports.tsx with the proper
+picker as well. A free-text box on a column holding "UP ( A )" and "DELHI NCR"
+cannot work reliably.
+
+VERIFICATION - as specified, plus these
+- Print the corrected mapping in full before wiring it in.
+- Verification 2 (parent net = sum of split nets) must be run for EVERY parent
+  that has splits, across BOTH FY2025-26 and FY2026-27, since some splits only
+  exist in one year.
+- Confirm the four non-geographic values are absent from the picker but
+  present in the hierarchy table.
+- Print the 11 HITESH rows with their customer names.

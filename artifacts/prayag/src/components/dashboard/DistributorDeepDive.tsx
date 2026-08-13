@@ -19,7 +19,7 @@ import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { QuotaWaitBanner, quotaDelayMs, quotaOrThrow } from "./quotaWait";
 import { useGlobalFilter } from "@/data/global-filter-context";
 import { usePeriodMonths } from "@/data/period-months";
-import { REGION_GROUPS } from "../ui/StateFilter";
+import StateFilter, { REGION_GROUPS } from "../ui/StateFilter";
 import { achBandText } from "@/lib/achievementBands";
 import {
   AlertTriangle,
@@ -2290,60 +2290,14 @@ export default function DistributorDeepDive() {
               </div>
             )}
             {geoMode === "state" && (
-              <>
-                <select
-                  value=""
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v && !selStates.includes(v)) setSelStates((p) => [...p, v]);
-                  }}
-                  className="border border-border rounded-md px-2.5 py-1.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring min-w-[160px]"
-                  data-testid="select-add-state"
-                >
-                  <option value="">Add state…</option>
-                  {stateOptions
-                    .filter((s) => !selStates.includes(s))
-                    .map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                </select>
-                {/* Convenience: a head's states → the state multi-select (stays editable as states) */}
-                <select
-                  value=""
-                  onChange={(e) => {
-                    const h = (dir?.heads ?? []).find((x) => x.name === e.target.value);
-                    if (h) setSelStates((p) => [...new Set([...p, ...h.states])]);
-                  }}
-                  className="border border-border rounded-md px-2.5 py-1.5 text-sm bg-background text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  data-testid="select-head-states"
-                >
-                  <option value="">+ a head's states…</option>
-                  {(dir?.heads ?? []).map((h) => (
-                    <option key={h.name} value={h.name}>{h.name}</option>
-                  ))}
-                </select>
-              </>
+              <StateFilter
+                selected={selStates}
+                onChange={setSelStates}
+                available={stateOptions.length > 0 ? new Set(stateOptions) : undefined}
+                label="State"
+              />
             )}
           </div>
-          {geoMode === "state" && selStates.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-1">
-              {selStates.map((s) => (
-                <span
-                  key={s}
-                  className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs"
-                >
-                  {s}
-                  <button
-                    onClick={() => setSelStates((p) => p.filter((x) => x !== s))}
-                    className="text-muted-foreground hover:text-foreground"
-                    aria-label={`Remove ${s}`}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* 2. Distributor (filtered to geography, ordered by net) */}

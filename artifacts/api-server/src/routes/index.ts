@@ -44,6 +44,7 @@ import orgRouter from "./org";
 import skuRouter from "./sku";
 import mrpRouter from "./mrp";
 import gpMarginRouter from "./gpMargin";
+import stateHierarchyRouter from "./stateHierarchy";
 
 const router: IRouter = Router();
 
@@ -92,5 +93,6 @@ router.use(orgRouter);
 router.use(skuRouter);
 router.use(mrpRouter);
 router.use(gpMarginRouter);
+router.use(stateHierarchyRouter);
 
 export default router;
