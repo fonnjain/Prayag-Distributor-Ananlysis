@@ -7,7 +7,8 @@
 
 import { Router } from "express";
 import { isAdminToken } from "../lib/adminAuth.js";
-import { loadGpMarginFiles } from "../lib/gpMargin/loader.js";
+import { loadGpMarginFiles, detectGpMarginTabs, extractRows, fetchWorkbookViaDriveExport } from "../lib/gpMargin/loader.js";
+import { listDriveFiles, listDriveFolder, getDriveFileMeta } from "../lib/googleDrive.js";
 import { pool } from "@workspace/db";
 
 const router = Router();
@@ -186,6 +187,212 @@ router.post("/admin/margin/load", (req, res) => {
         error: String(err instanceof Error ? err.message : err),
       };
     });
+});
+
+// ── GET /api/admin/margin/conflict-audit ──────────────────────────────────
+// One-time diagnostic: for the 5 Sanitaryware months that have two Drive copies
+// with different content, compare them in detail:
+//   1. modifiedTime + owners for each file copy
+//   2. Extra item codes in each version (with item name, qty, avg_sale, bom_cost)
+//   3. Whether extra codes appear in sale_line for that month
+//   4. Whether any shared-code row differs in qty, avg_sale, bom_cost, mrp, discount
+//   5. BOM% computed separately from each file copy
+router.get("/admin/margin/conflict-audit", async (req, res) => {
+  const token = String(req.headers["x-admin-secret"] ?? "").trim();
+  if (!isAdminToken(token)) { res.status(401).json({ error: "Admin authorisation required." }); return; }
+
+  try {
+    // ── 1. Discover Sanitaryware GP MARGIN folders (FY 2025-26) ─────────────
+    const allFolderSearch = await listDriveFiles({ q: "GP MARGIN" });
+    const sanFolders = allFolderSearch.files.filter((f) =>
+      f.mimeType === "application/vnd.google-apps.folder" &&
+      /sanitar/i.test(f.name) &&
+      /25-26|2025-26/.test(f.name),
+    );
+
+    // ── 2. Collect all spreadsheet children ──────────────────────────────────
+    type FileEntry = { id: string; name: string; mimeType: string; modifiedTime?: string; folderName: string };
+    const allFiles: FileEntry[] = [];
+    for (const folder of sanFolders) {
+      const children = await listDriveFolder(folder.id);
+      for (const child of children) {
+        if (
+          child.mimeType === "application/vnd.google-apps.spreadsheet" ||
+          /\.(xlsx|xls)$/i.test(child.name)
+        ) {
+          allFiles.push({ ...child, folderName: folder.name });
+        }
+      }
+    }
+
+    // ── 3. Parse month label from filename (mirrors fixed loader logic) ───────
+    const MONTH_MAP: Record<string, { canon: string; half: "first" | "second" }> = {
+      jan: { canon: "Jan", half: "second" }, january: { canon: "Jan", half: "second" },
+      feb: { canon: "Feb", half: "second" }, february: { canon: "Feb", half: "second" },
+      mar: { canon: "Mar", half: "second" }, march: { canon: "Mar", half: "second" },
+      apr: { canon: "Apr", half: "first" }, april: { canon: "Apr", half: "first" },
+      may: { canon: "May", half: "first" },
+      jun: { canon: "Jun", half: "first" }, june: { canon: "Jun", half: "first" },
+      jul: { canon: "Jul", half: "first" }, july: { canon: "Jul", half: "first" },
+      aug: { canon: "Aug", half: "first" }, august: { canon: "Aug", half: "first" },
+      sep: { canon: "Sep", half: "first" }, sept: { canon: "Sep", half: "first" }, september: { canon: "Sep", half: "first" },
+      oct: { canon: "Oct", half: "first" }, october: { canon: "Oct", half: "first" },
+      nov: { canon: "Nov", half: "first" }, november: { canon: "Nov", half: "first" },
+      dec: { canon: "Dec", half: "first" }, december: { canon: "Dec", half: "first" },
+    };
+    function parseML(name: string, fy: string): string | null {
+      const lower = name.toLowerCase();
+      const found: { canon: string; half: "first" | "second" }[] = [];
+      for (const [key, val] of Object.entries(MONTH_MAP)) {
+        if (new RegExp(`(?<![a-z])${key}(?![a-z])`, "i").test(lower) && !found.some((f) => f.canon === val.canon))
+          found.push(val);
+      }
+      if (found.length !== 1) return null;
+      const [a, b] = fy.split("-");
+      const firstY = parseInt(a.slice(-2), 10);
+      const secondY = parseInt(b, 10);
+      const y = found[0].half === "first" ? firstY : secondY;
+      return `${found[0].canon}-${y.toString().padStart(2, "0")}`;
+    }
+
+    // ── 4. Group files by month label; find conflict pairs ───────────────────
+    const CONFLICT_MONTHS = new Set(["Mar-26", "Jan-26", "Feb-26", "May-25", "Aug-25"]);
+    const byMonth = new Map<string, FileEntry[]>();
+    for (const f of allFiles) {
+      const ml = parseML(f.name, "2025-26");
+      if (!ml || !CONFLICT_MONTHS.has(ml)) continue;
+      const arr = byMonth.get(ml) ?? [];
+      arr.push(f);
+      byMonth.set(ml, arr);
+    }
+
+    // ── 5. For each conflict month: metadata → download → parse → compare ────
+    type ParsedRow = {
+      itemCode: string; qty: number | null; mrp: number | null;
+      discountFrac: number | null; avgSale: number | null; bomCost: number | null;
+    };
+
+    const auditResults = [];
+
+    for (const [monthLabel, files] of byMonth.entries()) {
+      if (files.length < 2) continue; // only process true pairs
+
+      // Metadata pass (parallel)
+      const metas = await Promise.all(files.map((f) => getDriveFileMeta(f.id)));
+
+      // Download + parse pass (sequential to avoid hammering Drive quota)
+      const versions: Array<{ filename: string; rows: ParsedRow[]; parseError?: string }> = [];
+      for (const f of files) {
+        let rows: ParsedRow[] = [];
+        let parseError: string | undefined;
+        try {
+          const wb = await fetchWorkbookViaDriveExport(f.id, f.mimeType, 120_000);
+          const tabs = detectGpMarginTabs(wb);
+          for (const { ws, headerRow, colMap } of tabs) {
+            const raw = extractRows(ws, headerRow, colMap, "2025-26", monthLabel, "Sanitaryware", f.name);
+            rows.push(...raw.map((r) => ({
+              itemCode: r.itemCode,
+              qty: r.qty,
+              mrp: r.mrp,
+              discountFrac: r.discountFrac,
+              avgSale: r.avgSale,
+              bomCost: r.bomCost,
+            })));
+          }
+        } catch (err) {
+          parseError = String(err instanceof Error ? err.message : err);
+        }
+        versions.push({ filename: f.name, rows, parseError });
+      }
+
+      // Compute BOM% per version
+      function bomPct(rows: ParsedRow[]): number | null {
+        const valid = rows.filter((r) => r.bomCost != null && r.avgSale != null && r.avgSale > 0);
+        if (valid.length === 0) return null;
+        return Math.round(valid.reduce((s, r) => s + (r.bomCost! / r.avgSale!) * 100, 0) / valid.length * 100) / 100;
+      }
+
+      // Find extra codes and shared-row diffs
+      const [v1, v2] = versions;
+      const map1 = new Map(v1.rows.map((r) => [r.itemCode, r]));
+      const map2 = new Map(v2.rows.map((r) => [r.itemCode, r]));
+
+      const extraIn1 = [...map1.keys()].filter((c) => !map2.has(c));
+      const extraIn2 = [...map2.keys()].filter((c) => !map1.has(c));
+
+      const sharedDiffs: Array<{ code: string; field: string; file1Val: number | null; file2Val: number | null }> = [];
+      for (const code of map1.keys()) {
+        if (!map2.has(code)) continue;
+        const r1 = map1.get(code)!;
+        const r2 = map2.get(code)!;
+        for (const field of ["qty", "avgSale", "bomCost", "mrp", "discountFrac"] as const) {
+          const a = r1[field], b = r2[field];
+          if (a === b) continue;
+          // Flag if diff > 0.01% of average (catches rounding noise only)
+          const avg = ((a ?? 0) + (b ?? 0)) / 2;
+          const diffPct = avg !== 0 ? Math.abs((a ?? 0) - (b ?? 0)) / Math.abs(avg) * 100 : 100;
+          if (diffPct > 0.01) sharedDiffs.push({ code, field, file1Val: a, file2Val: b });
+        }
+      }
+
+      const allExtra = [...extraIn1, ...extraIn2];
+
+      // Enrich extra codes: item_master name + sale_line presence
+      const [imRes, slRes] = await Promise.all([
+        allExtra.length > 0
+          ? pool.query<{ code: string; item_name: string | null }>(
+              `SELECT code, item_name FROM item_master WHERE code = ANY($1)`, [allExtra])
+          : Promise.resolve({ rows: [] as { code: string; item_name: string | null }[] }),
+        allExtra.length > 0
+          ? pool.query<{ code: string; qty_sold: string }>(
+              `SELECT code, SUM(qty)::text AS qty_sold FROM sale_line
+               WHERE code = ANY($1) AND month_label = $2
+               GROUP BY code`, [allExtra, monthLabel])
+          : Promise.resolve({ rows: [] as { code: string; qty_sold: string }[] }),
+      ]);
+
+      const imMap = new Map(imRes.rows.map((r) => [r.code, r.item_name]));
+      const slMap = new Map(slRes.rows.map((r) => [r.code, r.qty_sold]));
+
+      function enrichExtra(codes: string[], fromMap: Map<string, ParsedRow>) {
+        return codes.map((code) => {
+          const r = fromMap.get(code);
+          return {
+            code,
+            itemName: imMap.get(code) ?? null,
+            qty: r?.qty ?? null,
+            avgSale: r?.avgSale ?? null,
+            bomCost: r?.bomCost ?? null,
+            inSaleLine: slMap.has(code),
+            saleLineQty: slMap.get(code) ?? null,
+          };
+        });
+      }
+
+      auditResults.push({
+        monthLabel,
+        files: files.map((f, i) => ({
+          filename: f.name,
+          folderName: f.folderName,
+          modifiedTime: metas[i]?.modifiedTime ?? null,
+          owners: metas[i]?.owners?.map((o) => `${o.displayName} <${o.emailAddress}>`) ?? [],
+          rowCount: versions[i]?.rows.length ?? 0,
+          bomPct: bomPct(versions[i]?.rows ?? []),
+          parseError: versions[i]?.parseError ?? null,
+        })),
+        extraInFile1: enrichExtra(extraIn1, map1),
+        extraInFile2: enrichExtra(extraIn2, map2),
+        sharedRowDiffs: sharedDiffs,
+      });
+    }
+
+    // Sort by monthLabel for consistent output
+    auditResults.sort((a, b) => a.monthLabel.localeCompare(b.monthLabel));
+    res.json({ ok: true, conflictMonths: auditResults });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
 });
 
 // ── GET /api/margin/trend ─────────────────────────────────────────────────

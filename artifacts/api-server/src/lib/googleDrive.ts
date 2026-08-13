@@ -142,6 +142,33 @@ export async function downloadDriveFileBuffer(
   return Promise.race([downloadP, timeoutP]);
 }
 
+// ── Get metadata for a single file (modifiedTime + owners). ─────────────
+export async function getDriveFileMeta(fileId: string): Promise<{
+  id: string;
+  name: string;
+  modifiedTime?: string;
+  owners?: { displayName: string; emailAddress: string }[];
+}> {
+  const connectors = new ReplitConnectors();
+  const params = new URLSearchParams();
+  params.set("fields", "id,name,modifiedTime,owners");
+  params.set("supportsAllDrives", "true");
+  const response = await connectors.proxy(
+    "google-drive",
+    `/drive/v3/files/${fileId}?${params.toString()}`,
+    { method: "GET" },
+  );
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Drive files.get error ${response.status}: ${body}`);
+  }
+  return response.json() as Promise<{
+    id: string; name: string;
+    modifiedTime?: string;
+    owners?: { displayName: string; emailAddress: string }[];
+  }>;
+}
+
 // ── Search for folders whose name contains a given string. ────────────────
 export async function findDriveFoldersByName(
   nameContains: string,

@@ -284,7 +284,9 @@ const MONTH_CANON: Record<string, string> = {
 const MONTH_FY_HALF: Record<string, "first" | "second"> = {
   Apr: "first", May: "first", Jun: "first",
   Jul: "first", Aug: "first", Sep: "first",
-  Oct: "second", Nov: "second", Dec: "second",
+  // Oct–Dec belong to the first calendar year of the Indian FY (Apr–Mar).
+  // e.g. FY2025-26 October = Oct-25, not Oct-26.
+  Oct: "first", Nov: "first", Dec: "first",
   Jan: "second", Feb: "second", Mar: "second",
 };
 
@@ -378,7 +380,7 @@ function cellStr(cell: CellLike): string {
 // Column scan covers the full used range (up to 50 cols) so that dual-section
 // workbooks like Plumbing — where BOM Cost appears at col 27+ — are detected.
 
-function detectGpMarginTabs(
+export function detectGpMarginTabs(
   wb: WorkbookLike,
 ): { ws: WorksheetLike; headerRow: number; colMap: ColMap }[] {
   const hits: { ws: WorksheetLike; headerRow: number; colMap: ColMap }[] = [];
@@ -513,7 +515,7 @@ function buildColMap(cells: string[]): ColMap | null {
 
 // ── Row extraction ─────────────────────────────────────────────────────────
 
-function extractRows(
+export function extractRows(
   ws: WorksheetLike,
   headerRow: number,
   colMap: ColMap,
@@ -1007,7 +1009,7 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
   return report;
 }
 
-async function fetchWorkbookViaDriveExport(
+export async function fetchWorkbookViaDriveExport(
   fileId: string,
   mimeType: string,
   timeoutMs = 120_000,
