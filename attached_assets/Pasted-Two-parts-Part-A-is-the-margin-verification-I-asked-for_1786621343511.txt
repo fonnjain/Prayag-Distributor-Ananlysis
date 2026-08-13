@@ -1,0 +1,44 @@
+Two parts. Part A is the margin verification I asked for and have not
+received. Part B checks the re-ranking against it. Read-only, change nothing.
+
+PART A - MARGIN INGESTION VERIFICATION
+
+1. Files loaded, files classified cumulative and skipped, files unparseable.
+   Name every file in the last two groups.
+2. Row counts by FY and segment. Distinct item codes.
+3. For each segment with a cumulative file, print the monthly sum of qty and
+   sale_value against the cumulative figure and the % difference. Flag over 1%.
+4. BOM COST SANITY CHECK. Company-level bom_cost% by segment for FY2025-26,
+   weighted by sale value, against the SUMMARY tab:
+       PTMT 23.78 · CP 60.53 · Plumbing 67.85
+       Sink 67.27 · Garden Pipe 85.72 · Sanitaryware 60.78
+   Print yours beside those. Explain any gap over 2 points.
+5. Confirm MRP x (1 - discount_frac) = AVG SALE within 1 rupee. Arithmetic for
+   5 codes, plus the count of failing rows.
+6. Codes where bom_cost > avg_sale. Count, and top 10 by quantity with
+   segment.
+7. Confirm sale_line unchanged at 468,867.
+
+PART B - CHECKS ON THE RE-RANKING
+
+8. CPS-20 shows 41.4% gross contribution. Print its segment, its avg_sale,
+   its bom_cost, and the segment's company-level contribution%. If the code
+   sits far from its segment rate, say why.
+
+9. THE PROOF THE RANKING CHANGED. For one distributor with good margin
+   coverage, print the top 10 push recommendations ranked by NET beside the
+   top 10 ranked by CONTRIBUTION. They must differ materially. If the two
+   lists are nearly identical, the sort is not being applied.
+
+10. Confirm every net and quantity figure on the five changed surfaces is
+    UNCHANGED. Print one page's totals before and after.
+
+11. Confirm the Master Growth Report headline is still Rs 9.67 Cr post-dedup -
+    contribution was to be shown alongside, never instead.
+
+12. Paste the rendered label text wherever contribution appears. It must read
+    "gross contribution" and carry a factory-cost note. Not "margin", not
+    "profit", not "GP".
+
+13. Commit hash for the re-ranking, git cat-file -t, and
+    git merge-base --is-ancestor <hash> main with exit code.
