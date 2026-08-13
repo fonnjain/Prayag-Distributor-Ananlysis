@@ -331,10 +331,13 @@ function cellStr(cell: CellLike): string {
 }
 
 // ── GP-margin tab detection ────────────────────────────────────────────────
-// Scans rows 2-6 for a row where:
+// Scans rows 1-12 for a row where:
 //   • col B contains CODE or ITEM CODE
 //   • the row contains DISCOUNT
 //   • the row contains BOM COST or PUR RATE
+//
+// Column scan covers the full used range (up to 50 cols) so that dual-section
+// workbooks like Plumbing — where BOM Cost appears at col 27+ — are detected.
 
 function detectGpMarginTabs(
   wb: WorkbookLike,
@@ -346,10 +349,10 @@ function detectGpMarginTabs(
 
     ws.eachRow((row, ri) => {
       if (hit) return; // already found header for this sheet
-      if (ri < 2 || ri > 8) return; // header must be in rows 2-8
+      if (ri > 12) return; // header must be in rows 1-12
 
       const cells: string[] = [];
-      for (let ci = 1; ci <= 25; ci++) {
+      for (let ci = 1; ci <= 50; ci++) {
         cells.push(
           String(row.getCell(ci).value ?? "")
             .replace(/\s+/g, " ")
@@ -357,6 +360,8 @@ function detectGpMarginTabs(
             .toUpperCase(),
         );
       }
+      // Trim trailing empty cells so the array length reflects actual content
+      while (cells.length > 0 && cells[cells.length - 1] === "") cells.pop();
 
       // Col B (index 1) must contain CODE
       if (!cells[1]?.includes("CODE")) return;
@@ -383,15 +388,71 @@ function detectGpMarginTabs(
 }
 
 function buildColMap(cells: string[]): ColMap | null {
+  // ── Precision-ordered column lookup ──────────────────────────────────────
+  // Three passes across ALL patterns before falling to the next precision tier.
+  // This prevents a low-precision match on an early pattern from beating a
+  // high-precision match on a later pattern.
+  //
+  // Pass 1 — exact match (all patterns)
+  // Pass 2 — startsWith (all patterns)
+  // Pass 3 — includes  (all patterns), but reject growth / percentage headers
+  //           because a column like "Growth % New Bom Cost VS Old Bom Cost"
+  //           must never be treated as a cost column.
   const idx = (...patterns: string[]): number | null => {
+    // Pass 1: exact
     for (const p of patterns) {
-      let i = cells.findIndex((c) => c === p);
-      if (i < 0) i = cells.findIndex((c) => c.startsWith(p));
-      if (i < 0) i = cells.findIndex((c) => c.includes(p));
+      const i = cells.findIndex((c) => c === p);
+      if (i >= 0) return i + 1;
+    }
+    // Pass 2: startsWith
+    for (const p of patterns) {
+      const i = cells.findIndex((c) => c.startsWith(p));
+      if (i >= 0) return i + 1;
+    }
+    // Pass 3: includes — skip growth/percentage columns
+    for (const p of patterns) {
+      const i = cells.findIndex(
+        (c) => c.includes(p) && !c.includes("GROWTH") && !c.includes("%"),
+      );
       if (i >= 0) return i + 1;
     }
     return null;
   };
+
+  // Resolve the two anchor columns first — they establish which "section" of
+  // a dual-section workbook (e.g. Plumbing) contains the actual sales data.
+  const avgSaleCol = idx("AVG SALE RATE", "AVG SALE", "AVGSALE");
+  const bomCostCol = idx("BOM COST", "BOMCOST", "PUR RATE", "PURRATE");
+
+  // sectionStart: the leftmost position of the key cost/sale columns.
+  // For single-section workbooks this is just left of col 8-9.
+  // For dual-section workbooks (Plumbing: cols 19-33) this jumps to col 25+,
+  // pushing the CODE and QTY search window into the correct right-hand section.
+  const sectionStart =
+    avgSaleCol != null || bomCostCol != null
+      ? Math.min(avgSaleCol ?? Infinity, bomCostCol ?? Infinity) - 1
+      : cells.length;
+
+  // CODE: search right-to-left from just before sectionStart.
+  // The rightmost exact "CODE" / "ITEM CODE" wins, so the sales-section code
+  // column is preferred over any same-named BOM-breakdown column to its left.
+  const codeCol = (() => {
+    for (let i = sectionStart - 1; i >= 0; i--) {
+      const h = cells[i];
+      if (h === "CODE" || h === "ITEM CODE") return i + 1;
+    }
+    return 2; // fallback: col B
+  })();
+
+  // QTY: same right-to-left search so we pick the sales QTY, not a BOM
+  // consumption quantity that appears earlier in a dual-section layout.
+  const qtyCol = (() => {
+    for (let i = sectionStart - 1; i >= 0; i--) {
+      const h = cells[i];
+      if (h === "QTY" || h.startsWith("QTY")) return i + 1;
+    }
+    return 3; // fallback: col C
+  })();
 
   const saleValueCols: number[] = [];
   cells.forEach((c, i) => {
@@ -399,13 +460,13 @@ function buildColMap(cells: string[]): ColMap | null {
   });
 
   return {
-    code: 2,
-    qty: idx("QTY") ?? 3,
+    code: codeCol,
+    qty: qtyCol,
     weight: idx("TOTAL  WEIGHT", "TOTAL WEIGHT", "TOTALWEIGHT") ?? idx("WEIGHT"),
     mrp: idx("MRP"),
     discount: idx("DISCOUNT"),
-    avgSale: idx("AVG SALE RATE", "AVG SALE", "AVGSALE"),
-    bomCost: idx("BOM COST", "BOMCOST", "PUR RATE", "PURRATE"),
+    avgSale: avgSaleCol,
+    bomCost: bomCostCol,
     saleValue: saleValueCols[0] ?? null,
     bomValue: saleValueCols[1] ?? null,
   };
