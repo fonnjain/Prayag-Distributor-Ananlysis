@@ -1,0 +1,118 @@
+GOAL
+Two parts, in this order. Part A must complete and be reported before Part B
+runs, because the freeze is permanent and there is no way to undo it.
+
+============================================================
+PART A - RESOLVE TWO OUTSTANDING QUESTIONS FIRST
+Read-only. Do not change data. Report produced values.
+============================================================
+
+A1. THE BOM% SHIFTS ON DEDUP
+Removing byte-identical duplicates CANNOT move a volume-weighted average -
+mathematically impossible. But Garden Pipe moved 66.49% to 69.11% (+2.62pp)
+and PTMT 22.45% to 23.60% (+1.15pp).
+
+Your dedup gate compares rounded SUMS of qty, avgSale and bomCost. Two files
+can agree on those totals and differ in composition, which would move a
+weighted average exactly this way.
+
+For Garden Pipe and PTMT print:
+  a. Row count and total qty per month_label, before and after dedup.
+  b. Any month where "before" was not exactly 2x "after".
+  c. For any such month, both source filenames and what differed row by row.
+  d. Distinct item codes before and after. If codes disappeared, name them.
+
+A2. PTMT MONTH COVERAGE
+CP, Garden Pipe, Plumbing and Sink each show 15 months. PTMT shows 12.
+FY2025-26 has 12 months and 3 of FY2026-27 are loaded, so 15 is the full set.
+
+Print the month_label list per segment for both FYs and name exactly which
+months PTMT is missing. Then say whether the source files for those months
+exist on Drive and were skipped, or do not exist.
+
+STOP AND REPORT AFTER A1 AND A2. Do not proceed to Part B until I confirm.
+If a segment lost real rows or is missing real months, freezing would make
+that permanent and unfixable.
+
+============================================================
+PART B - HARD FREEZE (only after I confirm Part A)
+============================================================
+
+THE RULE
+A month freezes on the 7th of the following month, computed from the load
+date, never from a config list.
+    June 2026 data  -> frozen from 7 July 2026
+    A load on 6 July still picks up June changes. A load on 8 July does not.
+
+A frozen month is never re-read from source. The loader skips it and logs the
+skip: segment, month, freeze date.
+
+Store on the row: frozen_at, and source_file_at_freeze, so it is always
+possible to say which version of a sheet a frozen figure came from.
+
+NO UNFREEZE PATH
+There is deliberately no way to re-open a frozen month. Not a parameter, not
+an environment variable, not an admin endpoint. Late corrections to a closed
+month are accepted as lost - the business has judged that impact negligible.
+
+If a frozen month must ever be corrected, that is a deliberate database
+operation done knowingly, not a feature of the loader. Do not build one.
+
+RESOLVE THE FIVE SANITARYWARE CONFLICTS BEFORE FREEZING
+Aug-25, Jan-26, Feb-26, Mar-26 and May-25 are all past their freeze dates.
+You reported no shared-row differences in any of them - the two copies differ
+only by extra rows.
+
+Load the UNION of both copies, deduplicated by item code. Every code present
+in either copy is kept. This needs no ruling because the copies do not
+disagree about any shared value; one simply has rows the other lacks.
+
+Log which codes came from which file. Then freeze.
+
+BACKFILL
+Mark every already-loaded month that is past its freeze date as frozen, with
+frozen_at set to the date it would have frozen and source_file_at_freeze set
+to the file currently on the row.
+
+All of FY2025-26 freezes. For FY2026-27: Apr, May, Jun and Jul freeze; Aug
+stays open until 7 September.
+
+CONFLICT RULE FOR OPEN MONTHS ONLY
+Two copies differing ONLY by extra rows: load the union, deduplicated by item
+code. Do not prompt - this is no longer a decision.
+
+Two copies holding the SAME item code with DIFFERENT values (qty, avg_sale,
+bom_cost, MRP or discount): load neither for that code, and report both
+filenames, both values and both modifiedTimes. That is a genuine disagreement
+and needs a person.
+
+Compare ROW BY ROW on item code, not on rounded aggregate sums.
+
+SHOW IT IN THE APP
+Every contribution figure states the date its margin data was loaded and
+whether the month is frozen. The existing label becomes:
+    "Gross contribution - factory cost only. Not profit. Margin data frozen
+     <date>."
+or, for an open month:
+    "Gross contribution - factory cost only. Not profit. Loaded <date>
+     (open month)."
+
+DO NOT
+- Do not re-enable the contribution ranking. The "under review" banners stay
+  on until I say otherwise.
+- Do not change sale_line.
+- Do not change any figure outside margin_fact.
+
+VERIFY PART B - produced values
+1. Every (segment, month) pair with its frozen flag and frozen_at date.
+   Confirm all FY2025-26 and Apr-Jul FY2026-27 frozen, Aug-26 open.
+2. Run the loader twice. Confirm the second run fetches nothing for frozen
+   months. Paste the skip log.
+3. The union result for the five Sanitaryware months: rows before, rows after,
+   and which codes came from which file. Expect PGY-4 (Aug-25), 4 codes
+   (Jan-26), 4 codes (Feb-26), PGY-10 (Mar-26), 2 codes (May-25).
+4. Segment BOM% before and after the union - expect movement under 0.2pp.
+5. Confirm no frozen row's values changed during the backfill.
+6. Confirm sale_line is unchanged.
+7. Commit hash, git cat-file -t, git merge-base --is-ancestor main with exit
+   code.

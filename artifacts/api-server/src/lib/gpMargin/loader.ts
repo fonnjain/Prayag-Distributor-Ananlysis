@@ -24,6 +24,7 @@ import {
   listDriveFiles,
   listDriveFolder,
   downloadDriveFileBuffer,
+  getDriveFileMeta,
   type DriveApiFile,
 } from "../googleDrive.js";
 import {
@@ -217,8 +218,16 @@ export interface LoadReport {
   filesUnknown: { name: string; fy: string; segment: string; reason: string }[];
   /** Duplicate files skipped because their fingerprint matched an already-kept file. */
   filesSkipped: { skipped: string; keptInstead: string; segment: string; monthLabel: string }[];
-  /** Files for the same (segment, month) that have conflicting content — neither was loaded. */
-  filesConflict: { file1: string; file2: string; segment: string; monthLabel: string; difference: string }[];
+  /** Files for the same (segment, month) that have conflicting content — neither was loaded.
+   *  file1Meta / file2Meta are populated from the Drive files.get API (modifiedTime + owners).
+   *  Never infer which copy is "current" from folder position or filename — use modifiedTime. */
+  filesConflict: {
+    file1: string; file1Id: string;
+    file1ModifiedTime?: string; file1Owners?: string[];
+    file2: string; file2Id: string;
+    file2ModifiedTime?: string; file2Owners?: string[];
+    segment: string; monthLabel: string; difference: string;
+  }[];
   rowsInserted: number;
   rowsByFySegment: Record<string, number>;
   distinctCodes: number;
@@ -855,10 +864,24 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
       }
     } else {
       // Files differ in structure or values → load NONE to prevent silent wrong data.
+      // Fetch Drive metadata (modifiedTime + owners) for all files in the group in parallel.
+      // Never infer which copy is "current" from folder position or filename — callers must
+      // use modifiedTime.  A metadata fetch failure is non-fatal; fields default to undefined.
       const filenames = group.map((r) => r.cf.file.name);
+      const metaResults = await Promise.all(
+        group.map((r) =>
+          getDriveFileMeta(r.cf.file.id).catch((err) => {
+            logger.warn({ fileId: r.cf.file.id, err: String(err) }, "gpMargin: conflict metadata fetch failed");
+            return null;
+          }),
+        ),
+      );
+
       for (let i = 0; i < group.length; i++) {
         for (let j = i + 1; j < group.length; j++) {
           const a = group[i], b = group[j];
+          const metaA = metaResults[i];
+          const metaB = metaResults[j];
           const difference = a.fingerprintKey !== b.fingerprintKey
             ? `row_count: ${a.rows.length} vs ${b.rows.length}; ` +
               `codes: "${a.fingerprintKey.split("|").slice(3).join("|").slice(0, 80)}" ` +
@@ -866,7 +889,13 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
             : `same structure, different values — contentSig: "${a.contentSig}" vs "${b.contentSig}"`;
           report.filesConflict.push({
             file1: a.cf.file.name,
+            file1Id: a.cf.file.id,
+            file1ModifiedTime: metaA?.modifiedTime,
+            file1Owners: metaA?.owners?.map((o) => `${o.displayName} <${o.emailAddress}>`),
             file2: b.cf.file.name,
+            file2Id: b.cf.file.id,
+            file2ModifiedTime: metaB?.modifiedTime,
+            file2Owners: metaB?.owners?.map((o) => `${o.displayName} <${o.emailAddress}>`),
             segment: a.cf.segment,
             monthLabel: a.cf.monthLabel!,
             difference,
