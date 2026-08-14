@@ -273,22 +273,21 @@ router.post("/competitor-price/refresh", async (req: Request, res: Response) => 
 
 // ── PATCH /api/competitor-price/:id/map ───────────────────────────────────
 // Map or unmap a competitor row to a Prayag item code.
-// Body: { prayagItemCode: string | null }
-// Requires a valid API key (recorded as mapped_by).
+// Body: { prayagItemCode: string | null, mappedBy?: string }
+// No credential required — mappedBy is self-declared (same pattern as market survey recorder).
 router.patch("/competitor-price/:id/map", async (req: Request, res: Response) => {
-  if (!req.apiKey) {
-    res.status(401).json({ error: "A valid API key is required to map competitor rows" });
-    return;
-  }
-
   const id = parseInt(String(req.params.id), 10);
   if (!Number.isFinite(id)) {
     res.status(400).json({ error: "Invalid id" });
     return;
   }
 
-  const { prayagItemCode } = req.body as { prayagItemCode: string | null | undefined };
-  const code = prayagItemCode?.trim() || null;
+  const { prayagItemCode, mappedBy } = req.body as {
+    prayagItemCode: string | null | undefined;
+    mappedBy?: string;
+  };
+  const code       = prayagItemCode?.trim() || null;
+  const mapperName = mappedBy?.trim() || "(anonymous)";  // self-declared, unverified
 
   // If mapping to a code, verify it exists in mrp_master
   if (code) {
@@ -315,7 +314,7 @@ router.patch("/competitor-price/:id/map", async (req: Request, res: Response) =>
          mapped_at        = $3
      WHERE id = $4
      RETURNING id, competitor_name, prayag_item_code, mapped_by, mapped_at::text`,
-    [code, code ? req.apiKey.name : null, code ? new Date() : null, id],
+    [code, code ? mapperName : null, code ? new Date() : null, id],
   );
 
   if (!rows.length) {

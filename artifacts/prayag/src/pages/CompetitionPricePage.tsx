@@ -1,68 +1,88 @@
-// CompetitionPricePage — browse the Sparsh Pearl competitor price snapshot and
-// map their rows to our Prayag item codes.
-//
-// Snapshot is fetched daily from https://prayag-competition-analysis.replit.app.
-// "net price" is DERIVED (MRP × 60%) — never a real street price. Every number
-// carries its brand, fetch date, and the word "derived".
-//
-// Three states per code:
-//   no-row    — no competitor row exists (competitor doesn't cover this product)
-//   unmapped  — row exists but prayag_item_code not yet set
-//   mapped    — row linked to a Prayag code; appears in the MRP Calculator
+// CompetitionPricePage.tsx
+// Mapping a competitor row to a Prayag item code is an ordinary in-app action.
+// No credential required — mapper identity is self-declared (stored in localStorage
+// under "prayag_ms_recorder", same key as the Market Survey recorder name).
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
-const BASE = import.meta.env.BASE_URL;
-const API  = (p: string) => `${BASE}api/${p}`;
-
-// ── Types ─────────────────────────────────────────────────────────────────
-
-interface SnapshotInfo {
-  rowCount: number; mappedCount: number;
-  fetchedAt: string | null; refreshInFlight: boolean; lastError: string | null;
-}
-interface CompetitorRow {
-  id: number;
-  competitorBrand: string; competitorCode: string; competitorName: string | null;
-  category: string;
-  mrp: number | null; netPriceDerived: number | null; discountPctAssumed: number | null;
-  fetchedAt: string;
-  prayagItemCode: string | null; mappedBy: string | null; mappedAt: string | null;
-}
-
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function fmtDate(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const API  = (path: string) => `${BASE}/api/${path}`;
+
+function fmtDate(s: string | null | undefined): string {
+  if (!s) return "—";
+  try { return new Date(s).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }); }
+  catch { return s; }
 }
+
+// ── Types ──────────────────────────────────────────────────────────────────
+
+interface CompetitorRow {
+  id:                 number;
+  competitorBrand:    string;
+  competitorCode:     string;
+  competitorName:     string | null;
+  category:           string;
+  mrp:                number | null;
+  netPriceDerived:    number | null;
+  discountPctAssumed: number | null;
+  fetchedAt:          string;
+  prayagItemCode:     string | null;
+  mappedBy:           string | null;
+  mappedAt:           string | null;
+}
+
+interface SnapshotInfo {
+  rowCount:        number;
+  mappedCount:     number;
+  fetchedAt:       string | null;
+  refreshInFlight: boolean;
+  lastError:       string | null;
+}
+
+// ── Snapshot banner ────────────────────────────────────────────────────────
 
 function SnapshotBanner({ info }: { info: SnapshotInfo | undefined }) {
   if (!info) return null;
-  const age = info.fetchedAt ? fmtDate(info.fetchedAt) : "never";
+
+  const unmapped = info.rowCount - info.mappedCount;
+  const ageDays  = info.fetchedAt
+    ? Math.floor((Date.now() - new Date(info.fetchedAt).getTime()) / 86_400_000)
+    : null;
+  const stale    = ageDays != null && ageDays > 2;
+
   return (
-    <div className={`flex items-center gap-3 rounded-lg border px-4 py-2 text-sm ${
-      info.lastError ? "bg-amber-50 border-amber-200" : "bg-muted/40"
-    }`}>
-      <span className="flex-1">
-        {info.lastError
-          ? <><span className="font-medium text-amber-700">⚠ Fetch failed.</span> Last good snapshot: {age}</>
-          : <>Competitor data from <strong>{age}</strong> · {info.rowCount} rows · {info.mappedCount} mapped</>
-        }
-      </span>
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
       {info.lastError && (
-        <span className="text-xs text-amber-600 max-w-xs truncate" title={info.lastError}>
-          {info.lastError}
+        <span className="text-destructive font-medium">
+          Last fetch failed — {info.lastError.slice(0, 120)}
         </span>
       )}
+      {stale && !info.lastError && (
+        <span className="text-amber-700">
+          Snapshot is {ageDays} day{ageDays !== 1 ? "s" : ""} old
+        </span>
+      )}
+      {info.fetchedAt && (
+        <span>Fetched {fmtDate(info.fetchedAt)}</span>
+      )}
+      {info.rowCount > 0 && (
+        <span>
+          {unmapped} of {info.rowCount} row{info.rowCount !== 1 ? "s" : ""} unmapped
+        </span>
+      )}
+      {info.refreshInFlight && <span className="text-blue-600">Refresh in progress…</span>}
     </div>
   );
 }
 
 // ── Inline mapping form ────────────────────────────────────────────────────
 
-function MapForm({ row, apiKey, onDone }: { row: CompetitorRow; apiKey: string; onDone: () => void }) {
+const LS_RECORDER = "prayag_ms_recorder";
+
+function MapForm({ row, mappedBy, onDone }: { row: CompetitorRow; mappedBy: string; onDone: () => void }) {
   const [code, setCode] = useState(row.prayagItemCode ?? "");
   const qc = useQueryClient();
 
@@ -70,14 +90,15 @@ function MapForm({ row, apiKey, onDone }: { row: CompetitorRow; apiKey: string; 
     mutationFn: async (prayagItemCode: string | null) => {
       const r = await fetch(API(`competitor-price/${row.id}/map`), {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
-        body: JSON.stringify({ prayagItemCode }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prayagItemCode, mappedBy: mappedBy || "(anonymous)" }),
       });
       if (!r.ok) { const b = await r.json(); throw new Error(b.error ?? `HTTP ${r.status}`); }
       return r.json();
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["cp-rows"] });
+      qc.invalidateQueries({ queryKey: ["cp-rows-all"] });
       qc.invalidateQueries({ queryKey: ["cp-info"] });
       onDone();
     },
@@ -116,15 +137,15 @@ function MapForm({ row, apiKey, onDone }: { row: CompetitorRow; apiKey: string; 
 
 // ── Main page ──────────────────────────────────────────────────────────────
 
-const LS_KEY = "prayag_api_key";
-
 export default function CompetitionPricePage() {
-  const [apiKey] = useState<string>(() => {
-    try { return localStorage.getItem(LS_KEY) ?? ""; } catch { return ""; }
-  });
+  // Self-declared recorder name — shared with Market Survey (same localStorage key).
+  const mappedBy = (() => {
+    try { return localStorage.getItem(LS_RECORDER) ?? ""; } catch { return ""; }
+  })();
+
   const [categoryFilter, setCategoryFilter] = useState("");
-  const [searchQ, setSearchQ] = useState("");
-  const [mappingId, setMappingId] = useState<number | null>(null);
+  const [searchQ,        setSearchQ       ] = useState("");
+  const [mappingId,      setMappingId     ] = useState<number | null>(null);
 
   const { data: info } = useQuery<SnapshotInfo>({
     queryKey: ["cp-info"],
@@ -142,11 +163,9 @@ export default function CompetitionPricePage() {
     },
   });
 
-  const rows    = rowsQ.data?.rows ?? [];
-  const cats    = [...new Set(rows.map((r) => r.category))].sort();
-  const allCats = categoryFilter ? [...new Set(rowsQ.data?.rows.map((r) => r.category) ?? [])].sort() : cats;
+  const rows = rowsQ.data?.rows ?? [];
 
-  // category list from all rows (unfiltered) — refetch once without filter
+  // Category list from all rows (unfiltered)
   const allRowsQ = useQuery<{ rows: CompetitorRow[] }>({
     queryKey: ["cp-rows-all"],
     queryFn: () => fetch(API("competitor-price")).then((r) => r.json()),
@@ -173,9 +192,10 @@ export default function CompetitionPricePage() {
           </div>
         </div>
         <SnapshotBanner info={info} />
-        {!apiKey && (
-          <p className="text-xs text-amber-700 bg-amber-50 rounded px-3 py-1.5 border border-amber-200">
-            No API key found. Go to Market Survey and enter your key — then return here to map rows.
+        {mappedBy && (
+          <p className="text-xs text-muted-foreground">
+            Mapping as <span className="font-medium">{mappedBy}</span>{" "}
+            <span className="text-muted-foreground/60">(self-declared — set in Market Survey)</span>
           </p>
         )}
       </div>
@@ -243,7 +263,7 @@ export default function CompetitionPricePage() {
                   </td>
                   <td className="px-4 py-2">
                     {mappingId === r.id ? (
-                      <MapForm row={r} apiKey={apiKey} onDone={() => setMappingId(null)} />
+                      <MapForm row={r} mappedBy={mappedBy} onDone={() => setMappingId(null)} />
                     ) : r.prayagItemCode ? (
                       <div>
                         <span className="font-mono font-medium text-green-700">{r.prayagItemCode}</span>
@@ -256,7 +276,7 @@ export default function CompetitionPricePage() {
                     )}
                   </td>
                   <td className="px-4 py-2">
-                    {mappingId !== r.id && apiKey && (
+                    {mappingId !== r.id && (
                       <button
                         className="text-xs text-primary underline"
                         onClick={() => setMappingId(r.id)}
