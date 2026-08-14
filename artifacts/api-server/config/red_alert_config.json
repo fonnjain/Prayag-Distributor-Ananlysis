@@ -1,0 +1,80 @@
+{
+  "_note": "Red Alert detection thresholds. All values are configurable — change here, not in source code. Capitalized comment keys explain each threshold.",
+
+  "CATEGORY_A_SALESPERSON": {
+    "_note": "Performance alerts for individual territory managers and teams. Requires a target to be present (Guard 7).",
+
+    "A1_THRESHOLD_PCT": 35,
+    "A1_THRESHOLD_NOTE": "Cumulative OB / pro-rated-to-date target below this % triggers A1. 35% means running at half-speed vs the seasonal plan.",
+    "A1_SUSTAINED_MONTHS": 2,
+    "A1_SUSTAINED_NOTE": "Number of consecutive complete months the achievement must stay below A1_THRESHOLD_PCT before the alert fires.",
+
+    "A2_NOTE": "A2 fires on a single complete month with ordered_amount = 0 when plan_amount > 0. No separate threshold needed.",
+
+    "A3_THRESHOLD_PCT": 45,
+    "A3_THRESHOLD_NOTE": "Target-weighted team secondary achievement below this % triggers A3.",
+    "A3_SUSTAINED_MONTHS": 2,
+    "A3_SUSTAINED_NOTE": "Number of consecutive complete months the team achievement must stay below A3_THRESHOLD_PCT."
+  },
+
+  "CATEGORY_B_DEALERS_RETAILERS": {
+    "_note": "Alerts on individual customer / retailer behaviour. Like-months comparison only (Guard 2).",
+
+    "B1_REAL_GROWTH_FLOOR_PCT": -20,
+    "B1_NOTE": "Real value growth (= nominal growth minus MRP-index increase) below this % triggers B1.",
+
+    "B2_NOMINAL_DECLINE_FLOOR_PCT": 25,
+    "B2_NOTE": "Nominal like-month value decline >= this % triggers B2.",
+    "B2_SUSTAINED_PERIODS": 2,
+    "B2_SUSTAINED_NOTE": "B2 requires decline in the current period vs prior AND in the prior period vs prior-prior.",
+
+    "B3_NOTE": "B3 fires when a customer has zero purchase now and non-zero in the prior comparable period. Single occurrence, no threshold.",
+
+    "B4_SEGMENT_FLOOR_RUPEES": 500000,
+    "B4_SEGMENT_FLOOR_NOTE": "B4 requires the prior-period segment value to be at least this amount (₹5 L) before a segment dropout is flagged.",
+    "B4_NOTE": "B4 fires when a segment bought in the prior period has zero purchase now.",
+
+    "B5_BREADTH_DROP_FLOOR_PCT": 50,
+    "B5_BREADTH_DROP_FLOOR_NOTE": "Distinct item codes must drop by at least this % from prior period.",
+    "B5_PRIOR_CODE_FLOOR": 20,
+    "B5_PRIOR_CODE_FLOOR_NOTE": "B5 only fires when the customer held >= this many distinct codes in the prior period."
+  },
+
+  "CATEGORY_C_TERRITORY_SEGMENT": {
+    "_note": "Territory, segment, and operational health alerts.",
+
+    "C1_CONCENTRATION_SHARE_PCT": 60,
+    "C1_CONCENTRATION_NOTE": "A customer carrying >= this share of a state's territory value triggers concentration check.",
+    "C1_DECLINE_PCT": 15,
+    "C1_DECLINE_NOTE": "The concentrated customer must decline >= this % for C1 to fire.",
+
+    "C2_STATE_DECLINE_PCT": 15,
+    "C2_STATE_DECLINE_NOTE": "State territory value down >= this % triggers C2.",
+    "C2_SUSTAINED_PERIODS": 2,
+    "C2_SUSTAINED_NOTE": "C2 requires decline in the current period AND the prior period.",
+
+    "C3_SEGMENT_UNDER_INDEX_PTS": 20,
+    "C3_NOTE": "A segment >= this many percentage points below the company rate (adjusted for its own seasonal position) triggers C3.",
+
+    "C4_GROSS_CONTRIBUTION_DROP_PCT": 15,
+    "C4_NOTE": "Gross contribution down >= this % while volume is up triggers C4. Only fires where factory cost (bom_cost) exists in margin_fact.",
+
+    "C5_SHEET_STALENESS_DAYS": 10,
+    "C5_NOTE": "A member whose working sheet has not been successfully read for >= this many days triggers C5."
+  },
+
+  "MATERIALITY_FLOORS": {
+    "_note": "Minimum prior-period value for a customer to be considered for B-category alerts.",
+    "DISTRIBUTOR_RUPEES": 2500000,
+    "DISTRIBUTOR_NOTE": "₹25 L prior-year territory value floor for distributor-level B alerts.",
+    "DIRECT_DEALER_RUPEES": 1500000,
+    "DIRECT_DEALER_NOTE": "₹15 L prior-year territory value floor for direct-dealer-level B alerts.",
+    "RETAILER_RUPEES": 200000,
+    "RETAILER_NOTE": "₹2 L prior-year secondary value floor for retailer-level B alerts."
+  },
+
+  "GUARD_THRESHOLDS": {
+    "PARTIAL_TENURE_WORKING_DAYS": 55,
+    "PARTIAL_TENURE_NOTE": "Members with fewer than this many working days are excluded from A-category performance alerts (Guard 8)."
+  }
+}

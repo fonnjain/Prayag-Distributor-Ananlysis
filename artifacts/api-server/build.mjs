@@ -24,6 +24,8 @@ async function buildAll() {
       // Standalone fetcher run via OS `timeout` command — I/O-based pipe-close
       // fires even when the parent's timer phase is saturated.
       path.resolve(artifactDir, "src/gpMarginFetcher.ts"),
+      // Red Alert calibration script — detection logic only, no routes/UI/tables.
+      path.resolve(artifactDir, "src/redAlertCalibrate.ts"),
     ],
     platform: "node",
     bundle: true,
