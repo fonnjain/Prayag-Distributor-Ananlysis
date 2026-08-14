@@ -1,0 +1,103 @@
+GOAL
+A new Market Survey page. A Prayag salesperson, on a visit, records what a
+retailer is currently buying from a competitor and at what price.
+
+This is the missing input. The competition data we hold is 150 codes, one
+brand, one snapshot from March 2026, and its "net price" is a guess - a flat
+40% discount applied to MRP. The survey supplies the real number.
+
+WHO FILLS IT IN
+A Prayag salesperson or pre-sales member, during a visit. Not the retailer.
+The respondent is the person being asked about, not the person typing.
+
+THE FORM
+1. RESPONDENT
+   - Existing Prayag buyer, or new prospect (dropdown, required)
+   - If existing: pick from the customer master, searchable. Store the
+     customer id, not a typed name.
+   - If new: free text name, plus state and district from the same state
+     picker used elsewhere. Do NOT create a customer master record from a
+     survey - flag it for review instead.
+   - Who recorded it: the logged-in member, captured automatically.
+
+2. WHAT THEY BUY
+   - Segment (dropdown, canonical segments)
+   - Product (dropdown, filtered to that segment, from mrp_master)
+   - Competitor brand: FREE TEXT with autocomplete against brands already
+     recorded. Do NOT restrict to a fixed list - we currently know of one
+     competitor and the field will find more. Normalise on save (trim, case)
+     and show a count of how many surveys already name that brand.
+   - Competitor's product name or code: free text, optional.
+
+3. THE PRICE - two ways in, one stored value
+   Either:
+     (a) enter the NET PRICE the retailer pays, or
+     (b) enter MRP and DISCOUNT %, and the net computes
+   Show the computed value live in both directions. Store net_price as the
+   canonical figure, and store mrp and discount_pct as entered when they were
+   the entry route, so the working is preserved.
+
+   Net price means WHAT THE RETAILER PAYS. Not what the shop charges a
+   walk-in customer - that is out of scope and must not be asked for
+   anywhere on this form.
+
+   Also capture: unit (piece, box, carton), and pack size if the competitor
+   sells in a different pack.
+
+4. CONTEXT (all optional, all useful)
+   - Why they buy it there: price, availability, credit terms, relationship,
+     scheme, quality (multi-select)
+   - Approximate monthly volume
+   - Free-text note
+
+SCHEMA
+  market_survey
+    id · surveyed_at · recorded_by (member) · customer_id nullable ·
+    prospect_name nullable · state · district ·
+    segment · prayag_item_code nullable ·
+    competitor_brand · competitor_product nullable ·
+    net_price · mrp nullable · discount_pct nullable · entry_mode ·
+    unit · pack_size nullable ·
+    reasons[] · monthly_volume nullable · note nullable ·
+    created_at
+
+Index on (segment, competitor_brand), (prayag_item_code), (state, district).
+
+WHAT THE PAGE SHOWS BACK
+This is the part that makes people fill it in. A survey form with no output
+gets abandoned.
+
+  - Recent submissions by this member, editable for 24 hours then locked
+  - Per Prayag item code: our MRP, the median surveyed competitor net price,
+    the number of surveys behind it, and the spread
+  - By competitor brand: how many surveys, which segments, price range
+  - Coverage gaps: segments and states with fewer than 5 surveys
+
+NEVER show a single survey as though it were a market price. Always show the
+count. One response is an anecdote; twenty is evidence. Where n is below 5,
+label it "indicative only".
+
+DO NOT
+- Do not create customer_master records from survey entries.
+- Do not write to the competition app. This is read-only with respect to it.
+- Do not feed survey prices into any MRP calculation yet. That comes later
+  and needs its own review.
+- Do not touch margin_fact, sale_line or anything scheme-related.
+
+VERIFY - produced values, and a hash that resolves
+1. Submit one survey each way - net price direct, and MRP plus discount.
+   Print both stored rows showing net_price, mrp, discount_pct and entry_mode.
+   Confirm the computed net matches the arithmetic.
+2. Submit a survey naming a competitor brand not previously seen. Confirm it
+   saves, and that the brand then appears in the autocomplete for the next
+   entry.
+3. Submit for an existing Prayag customer and for a new prospect. Confirm the
+   first stores customer_id and the second does not, and that no
+   customer_master row was created either way.
+4. Print the per-item summary for one code with at least 2 surveys, showing
+   our MRP, the median surveyed net, and n.
+5. Confirm a code with n=1 renders as "indicative only".
+6. Confirm customer_master, margin_fact and sale_line row counts are
+   unchanged.
+7. Commit hash, git cat-file -t, git merge-base --is-ancestor main with exit
+   code.
