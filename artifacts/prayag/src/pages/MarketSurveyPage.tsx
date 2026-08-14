@@ -53,7 +53,8 @@ const UNIT_OPTIONS = ["piece", "box", "carton", "kg", "litre", "set"];
 // ── API helpers ───────────────────────────────────────────────────────────
 
 function makeHeaders(apiKey: string, withBody = false) {
-  const h: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
+  const h: Record<string, string> = {};
+  if (apiKey) h["Authorization"] = `Bearer ${apiKey}`;
   if (withBody) h["Content-Type"] = "application/json";
   return h;
 }
@@ -720,7 +721,7 @@ function MyRecentTab({ apiKey }: { apiKey: string }) {
 function SummaryTab({ apiKey }: { apiKey: string }) {
   const { data, isPending } = useQuery<{ rows: SummaryRow[] }>({
     queryKey: ["ms-summary"],
-    queryFn: () => apiFetch<{ rows: SummaryRow[] }>("market-survey/summary", apiKey || "none"),
+    queryFn: () => apiFetch<{ rows: SummaryRow[] }>("market-survey/summary", apiKey),
   });
 
   if (isPending) return <p className="text-sm text-muted-foreground p-4">Loading…</p>;
@@ -767,7 +768,7 @@ function SummaryTab({ apiKey }: { apiKey: string }) {
 function BrandsTab({ apiKey }: { apiKey: string }) {
   const { data, isPending } = useQuery<{ rows: BrandRow[] }>({
     queryKey: ["ms-by-brand"],
-    queryFn: () => apiFetch<{ rows: BrandRow[] }>("market-survey/by-brand", apiKey || "none"),
+    queryFn: () => apiFetch<{ rows: BrandRow[] }>("market-survey/by-brand", apiKey),
   });
 
   if (isPending) return <p className="text-sm text-muted-foreground p-4">Loading…</p>;
@@ -815,7 +816,7 @@ function CoverageTab({ apiKey }: { apiKey: string }) {
     queryFn: () =>
       apiFetch<{ thresholdForAdequacy: number; gapSegments: { segment: string; total: number; hasGap: boolean }[] }>(
         "market-survey/coverage",
-        apiKey || "none",
+        apiKey,
       ),
   });
 
