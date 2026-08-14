@@ -721,7 +721,12 @@ router.post("/market-survey/prospect", async (req, res) => {
 router.get("/market-survey/prospects", async (req, res) => {
   try {
     const status = str(req.query.status) ?? "pending";
-    const result = await pool.query(
+    const result = await pool.query<{
+      id: number; name: string; contact: string; contact_person: string | null;
+      district: string; state: string; type: string; for_distributor_id: string | null;
+      submitted_by: string; submitted_at: string; status: string;
+      approved_customer_id: string | null; approved_at: string | null; note: string | null;
+    }>(
       `SELECT id, name, contact, contact_person, district, state, type,
               for_distributor_id, submitted_by, submitted_at, status,
               approved_customer_id, approved_at, note
@@ -731,7 +736,24 @@ router.get("/market-survey/prospects", async (req, res) => {
        LIMIT 200`,
       [status],
     );
-    res.json({ rows: result.rows });
+    res.json({
+      rows: result.rows.map((r) => ({
+        id:               r.id,
+        name:             r.name,
+        contact:          r.contact,
+        contactPerson:    r.contact_person,
+        district:         r.district,
+        state:            r.state,
+        type:             r.type,
+        forDistributorId: r.for_distributor_id,
+        submittedBy:      r.submitted_by,
+        submittedAt:      r.submitted_at,
+        status:           r.status,
+        approvedCustomerId: r.approved_customer_id,
+        approvedAt:       r.approved_at,
+        note:             r.note,
+      })),
+    });
   } catch {
     res.status(500).json({ error: "Failed to load prospects" });
   }
