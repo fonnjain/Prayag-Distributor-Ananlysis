@@ -100,6 +100,17 @@ export type CustomerSaleRow = {
   qty: number;     // SUM(qty)
 };
 
+// Unfiltered channel/head metadata for Guard 1.
+// Queried WITHOUT the is_territory filter so customers reclassified to
+// Project/Govt/non-territory still appear in the current window.
+export type CustomerMetaRow = {
+  fy: string;
+  monthLabel: string;
+  customer: string;
+  channel: string | null;
+  headCanon: string | null;
+};
+
 export type CustomerCodeRow = {
   fy: string;
   monthLabel: string;
@@ -168,6 +179,11 @@ export type DetectionContext = {
   // Sale data — territory rows only; all FYs needed for like-month comparisons
   customerSale: CustomerSaleRow[];
   customerCode: CustomerCodeRow[];
+
+  // Unfiltered channel/head metadata (no is_territory filter) — Guard 1 only.
+  // Customers reclassified to Project/non-territory vanish from customerSale;
+  // this separate field keeps them visible so the reclassification is detectable.
+  customerMeta: CustomerMetaRow[];
 
   // Secondary member data
   secHeadMonths: SecHeadMonthRow[];

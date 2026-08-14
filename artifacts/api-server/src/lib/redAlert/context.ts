@@ -6,6 +6,7 @@ import type {
   DetectionContext,
   CustomerSaleRow,
   CustomerCodeRow,
+  CustomerMetaRow,
   SecHeadMonthRow,
   MrpHistoryRow,
   MarginFactRow,
@@ -34,6 +35,7 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
 
   const [
     saleRes,
+    metaRes,
     codeRes,
     secHeadRes,
     mrpHistRes,
@@ -45,7 +47,7 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
     frozenRes,
     secCompleteRes,
   ] = await Promise.all([
-    // 1. Customer sale aggregates — territory rows by fy/month/customer/group
+    // 1a. Customer sale aggregates — territory rows by fy/month/customer/group
     pool.query<{
       fy: string; month_label: string; customer: string;
       head_canon: string | null; state_canon: string | null;
@@ -60,6 +62,20 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
         WHERE fy = ANY(${fyArr}) AND is_territory = true
           AND customer IS NOT NULL
         GROUP BY fy, month_label, customer, head_canon, state_canon, channel, group_canon`,
+      fyParams,
+    ),
+
+    // 1b. Unfiltered channel/head metadata (NO is_territory filter) — Guard 1 only.
+    // Customers reclassified to Project/Govt/non-territory vanish from 1a; this
+    // separate query keeps them visible so Guard 1 can detect the reclassification.
+    pool.query<{
+      fy: string; month_label: string; customer: string;
+      channel: string | null; head_canon: string | null;
+    }>(
+      `SELECT fy, month_label, customer, channel, head_canon
+         FROM sale_line_current
+        WHERE fy = ANY(${fyArr}) AND customer IS NOT NULL
+        GROUP BY fy, month_label, customer, channel, head_canon`,
       fyParams,
     ),
 
@@ -190,6 +206,14 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
     qty: Number(r.qty),
   }));
 
+  const customerMeta: CustomerMetaRow[] = metaRes.rows.map((r) => ({
+    fy: r.fy,
+    monthLabel: r.month_label,
+    customer: r.customer,
+    channel: r.channel,
+    headCanon: r.head_canon,
+  }));
+
   const customerCode: CustomerCodeRow[] = codeRes.rows.map((r) => ({
     fy: r.fy,
     monthLabel: r.month_label,
@@ -295,6 +319,7 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
   return {
     pool,
     customerSale,
+    customerMeta,
     customerCode,
     secHeadMonths,
     mrpHistory,

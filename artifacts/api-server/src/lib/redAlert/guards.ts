@@ -21,14 +21,15 @@ import type { RawAlert, GuardResult, DetectionContext } from "./types.js";
 
 // ── Guard context helpers ─────────────────────────────────────────────────────
 
-// Scoped to the alert's window months, not the full FY, so a reclassification
-// that occurs outside the compared period cannot suppress a valid alert.
+// Uses customerMeta (unfiltered — no is_territory filter) so that customers
+// reclassified to Project/Govt/non-territory still appear in the current window.
+// Scoped to the alert's window months so out-of-window changes can't suppress.
 function customerChannelsForWindow(
   ctx: DetectionContext, customer: string, fy: string, months: string[],
 ): Set<string> {
   const ms = new Set(months);
   const seen = new Set<string>();
-  for (const r of ctx.customerSale) {
+  for (const r of ctx.customerMeta) {
     if (r.customer === customer && r.fy === fy && ms.has(r.monthLabel) && r.channel != null) {
       seen.add(r.channel);
     }
@@ -41,7 +42,7 @@ function customerHeadsForWindow(
 ): Set<string> {
   const ms = new Set(months);
   const seen = new Set<string>();
-  for (const r of ctx.customerSale) {
+  for (const r of ctx.customerMeta) {
     if (r.customer === customer && r.fy === fy && ms.has(r.monthLabel) && r.headCanon != null) {
       seen.add(r.headCanon);
     }
@@ -77,23 +78,51 @@ function guard1ChannelReclassification(
   if (!["B1", "B2", "B3", "B4", "B5", "C1"].includes(alert.code)) return { pass: true };
   const { entityKey, currentMonths, priorMonths } = alert;
 
-  // Scoped to the alert's own window months — a reclassification that occurs
-  // outside the compared window must not suppress a valid within-window alert.
+  // Uses customerMeta (unfiltered) and is scoped to the alert's own window months.
+  // Uses symmetric comparison: flag if ANY value appears in one window but not the other,
+  // including the case where the current set is empty (customer moved out of territory).
   const curChannels = customerChannelsForWindow(ctx, entityKey, currentFy, currentMonths);
   const priChannels = customerChannelsForWindow(ctx, entityKey, priorFy, priorMonths);
   const curHeads = customerHeadsForWindow(ctx, entityKey, currentFy, currentMonths);
   const priHeads = customerHeadsForWindow(ctx, entityKey, priorFy, priorMonths);
 
-  for (const c of curChannels) {
-    if (!priChannels.has(c) && priChannels.size > 0) {
-      return { pass: false, guard: 1, reason: `Customer channel changed within window: now "${c}" (prior: ${[...priChannels].join(", ")})` };
+  // Symmetric channel check — catches both new channels (current-only) and lost channels
+  // (prior-only, including the empty-current case where every prior channel is "lost").
+  if (priChannels.size > 0) {
+    for (const c of priChannels) {
+      if (!curChannels.has(c)) {
+        return {
+          pass: false, guard: 1,
+          reason: `Customer channel changed within window: prior had "${c}", `
+            + `current has ${curChannels.size > 0 ? `"${[...curChannels].join('", "')}"` : "no channel rows (possible non-territory reclassification)"}`,
+        };
+      }
+    }
+    for (const c of curChannels) {
+      if (!priChannels.has(c)) {
+        return { pass: false, guard: 1, reason: `Customer gained channel "${c}" in current window (prior: ${[...priChannels].join(", ")})` };
+      }
     }
   }
-  for (const h of curHeads) {
-    if (!priHeads.has(h) && priHeads.size > 0) {
-      return { pass: false, guard: 1, reason: `Customer head_canon changed within window: now "${h}" (prior: ${[...priHeads].join(", ")})` };
+
+  // Symmetric head_canon check
+  if (priHeads.size > 0) {
+    for (const h of priHeads) {
+      if (!curHeads.has(h)) {
+        return {
+          pass: false, guard: 1,
+          reason: `Customer head_canon changed within window: prior had "${h}", `
+            + `current has ${curHeads.size > 0 ? `"${[...curHeads].join('", "')}"` : "no head rows"}`,
+        };
+      }
+    }
+    for (const h of curHeads) {
+      if (!priHeads.has(h)) {
+        return { pass: false, guard: 1, reason: `Customer head_canon added "${h}" in current window (prior: ${[...priHeads].join(", ")})` };
+      }
     }
   }
+
   return { pass: true };
 }
 
