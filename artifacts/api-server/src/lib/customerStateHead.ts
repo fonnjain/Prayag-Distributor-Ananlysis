@@ -341,6 +341,57 @@ async function passStateLookup(pool: Queryable, idFilter?: string[]): Promise<nu
   return total;
 }
 
+// ── Cascade-states filter ─────────────────────────────────────────────────────
+
+export interface StateHierarchyRow {
+  canon: string;
+  parent: string;
+  isSplit: boolean;
+}
+
+/**
+ * Given the raw state strings stored in customer_master for a particular state
+ * head, and the full ordered state_hierarchy list (allRows), returns the
+ * filtered subset that head serves — including parent-aggregate rows whenever
+ * any of their children are matched.
+ *
+ * Returns null in two cases (caller should fall back to allRows):
+ *   1. rawStates is empty  → backfill has not yet run for this head.
+ *   2. Filtering yields 0  → vocabulary mismatch (no overlap with hierarchy).
+ *
+ * This function is intentionally pure so it can be unit-tested without a DB.
+ */
+export function buildCascadeStates(
+  rawStates: string[],
+  allRows: StateHierarchyRow[],
+): StateHierarchyRow[] | null {
+  if (!rawStates.length) return null;
+
+  // Normalise each raw customer_master.state value to the vocabulary used in
+  // state_hierarchy.state_canon.
+  const normSet = new Set<string>();
+  for (const s of rawStates) {
+    const n = normaliseCustomerState(s);
+    if (n) normSet.add(n);
+  }
+
+  // Collect parents of any matched leaf so the parent-aggregate row is included.
+  const parentSet = new Set<string>();
+  for (const row of allRows) {
+    if (normSet.has(row.canon)) parentSet.add(row.parent);
+  }
+
+  // A row is kept if:
+  //   • it is itself a matched leaf (normSet.has(canon))
+  //   • it is a leaf whose parent is a matched canon (split states)
+  //   • it is a parent-aggregate row for matched children
+  const filtered = allRows.filter(
+    (r) => normSet.has(r.canon) || normSet.has(r.parent) || parentSet.has(r.canon),
+  );
+
+  return filtered.length ? filtered : null;
+}
+
 // ── Picker alias resolution ───────────────────────────────────────────────────
 
 /**

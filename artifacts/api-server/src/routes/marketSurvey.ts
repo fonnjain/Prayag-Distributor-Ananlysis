@@ -596,26 +596,15 @@ router.get("/market-survey/cascade-states", async (req, res) => {
       return;
     }
 
-    // Normalise raw customer states to the vocabulary used in state_hierarchy.
-    const { normaliseCustomerState } = await import("../lib/customerStateHead.js");
-    const normSet = new Set<string>();
-    for (const r of headStates.rows) {
-      const n = normaliseCustomerState(r.state);
-      if (n) normSet.add(n);
-    }
-
-    // Intersect with state_hierarchy for ordering and parent grouping.
-    // Include a parent-aggregate row when any of its children are in the set.
-    const parentSet = new Set<string>();
-    for (const row of allRows) {
-      if (normSet.has(row.canon)) parentSet.add(row.parent);
-    }
-    const filtered = allRows.filter(
-      (r) => normSet.has(r.canon) || normSet.has(r.parent) || parentSet.has(r.canon),
+    // Normalise and intersect with state_hierarchy (pure helper — also tested).
+    const { buildCascadeStates } = await import("../lib/customerStateHead.js");
+    const filtered = buildCascadeStates(
+      headStates.rows.map((r) => r.state),
+      allRows,
     );
 
-    // If filtering left 0 rows (state vocab mismatch), fall back to all states.
-    res.json({ states: filtered.length ? filtered : allRows });
+    // null → vocab mismatch or empty rows → fall back to all states.
+    res.json({ states: filtered ?? allRows });
   } catch {
     res.status(500).json({ error: "Failed to load states" });
   }
