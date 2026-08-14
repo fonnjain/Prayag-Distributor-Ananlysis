@@ -1,10 +1,14 @@
 // Red Alert — Category C (territory/segment/operational) engine.
 // C1: a customer >= 60% of a state's value declines >= 15%.
 // C2: a state's territory value down >= 15%, sustained 2 periods.
-// C3: a segment >= 20 pts below company rate (adjusted for seasonal position).
+// C3: a segment >= 20 pts below company rate; only fires when the comparison
+//     window covers >= 20% of annual seasonal weight (prevents noise from 1-month views).
 // C4: volume up while gross contribution down >= 15% (gate: bom_cost exists).
-// C5: a head's working sheet not read for >= 10 days.
+// C5: a head's working sheet not read for >= 10 days (operational, open-FY only).
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import type { RawAlert, DetectionContext } from "./types.js";
 
 type CConfig = {
@@ -16,6 +20,52 @@ type CConfig = {
   C4_GROSS_CONTRIBUTION_DROP_PCT: number;
   C5_SHEET_STALENESS_DAYS: number;
 };
+
+// ── Seasonal weights ──────────────────────────────────────────────────────────
+// Monthly weights Apr=0 … Mar=11, sourced from config/seasonal_weights.json.
+// Used by C3 to require the comparison window covers a meaningful fraction of
+// the year before raising a segment-vs-company-rate gap alert.
+
+type SeasonalConfig = {
+  versions: Array<{ fy: string; monthly: number[] }>;
+  default: string;
+};
+
+let _seasonalWeights: number[] | null = null;
+
+function getMonthlyWeights(): number[] {
+  if (_seasonalWeights) return _seasonalWeights;
+  const candidates = [
+    resolve(dirname(fileURLToPath(import.meta.url)), "../../config/seasonal_weights.json"),
+    resolve(dirname(fileURLToPath(import.meta.url)), "../config/seasonal_weights.json"),
+  ];
+  for (const p of candidates) {
+    try {
+      const cfg = JSON.parse(readFileSync(p, "utf8")) as SeasonalConfig;
+      const ver = cfg.versions.find((v) => v.fy === cfg.default) ?? cfg.versions[0];
+      if (ver) { _seasonalWeights = ver.monthly; return _seasonalWeights; }
+    } catch { /* try next */ }
+  }
+  // Fallback: uniform weights (1/12 each) — safe but no seasonal filtering
+  _seasonalWeights = Array(12).fill(1 / 12) as number[];
+  return _seasonalWeights;
+}
+
+// Map month label "Apr-26" → index 0 (Apr=0 … Mar=11)
+const MONTH_IDX: Record<string, number> = {
+  Apr: 0, May: 1, Jun: 2, Jul: 3, Aug: 4, Sep: 5, Oct: 6, Nov: 7, Dec: 8, Jan: 9, Feb: 10, Mar: 11,
+};
+
+function periodSeasonalWeight(months: string[]): number {
+  const weights = getMonthlyWeights();
+  return months.reduce((sum, m) => {
+    const name = m.split("-")[0] ?? "";
+    const idx = MONTH_IDX[name] ?? 0;
+    return sum + (weights[idx] ?? 0);
+  }, 0);
+}
+
+// ── Utility helpers ───────────────────────────────────────────────────────────
 
 function prevFy(fy: string): string {
   const start = parseInt(fy.slice(0, 4), 10);
@@ -30,29 +80,18 @@ function toPriorYearMonths(months: string[]): string[] {
   });
 }
 
-// State-level territory value for a given FY + months (all customers in that state)
-function stateValue(
-  ctx: DetectionContext,
-  fy: string,
-  months: string[],
-  stateCanon: string,
-): number {
+function stateValue(ctx: DetectionContext, fy: string, months: string[], stateCanon: string): number {
   const ms = new Set(months);
   return ctx.customerSale
     .filter((r) => r.fy === fy && ms.has(r.monthLabel) && r.stateCanon === stateCanon)
     .reduce((s, r) => s + r.value, 0);
 }
 
-// State → customer → value for a given FY + months
-function stateCustomerValues(
-  ctx: DetectionContext,
-  fy: string,
-  months: string[],
-): Map<string, Map<string, number>> {
+function stateCustomerValues(ctx: DetectionContext, fy: string, months: string[]): Map<string, Map<string, number>> {
   const ms = new Set(months);
   const out = new Map<string, Map<string, number>>();
   for (const r of ctx.customerSale) {
-    if (!r.fy || r.fy !== fy || !ms.has(r.monthLabel) || !r.stateCanon) continue;
+    if (r.fy !== fy || !ms.has(r.monthLabel) || !r.stateCanon) continue;
     if (!out.has(r.stateCanon)) out.set(r.stateCanon, new Map());
     const cm = out.get(r.stateCanon)!;
     cm.set(r.customer, (cm.get(r.customer) ?? 0) + r.value);
@@ -60,12 +99,7 @@ function stateCustomerValues(
   return out;
 }
 
-// Segment → value for a given FY + months
-function segmentValues(
-  ctx: DetectionContext,
-  fy: string,
-  months: string[],
-): Map<string, number> {
+function segmentValues(ctx: DetectionContext, fy: string, months: string[]): Map<string, number> {
   const ms = new Set(months);
   const out = new Map<string, number>();
   for (const r of ctx.customerSale) {
@@ -75,7 +109,6 @@ function segmentValues(
   return out;
 }
 
-// Total territory value for a given FY + months
 function totalValue(ctx: DetectionContext, fy: string, months: string[]): number {
   const ms = new Set(months);
   return ctx.customerSale
@@ -83,12 +116,16 @@ function totalValue(ctx: DetectionContext, fy: string, months: string[]): number
     .reduce((s, r) => s + r.value, 0);
 }
 
+// ── Main engine ───────────────────────────────────────────────────────────────
+
 export function buildCategoryCAlerts(
   ctx: DetectionContext,
   currentFy: string,
   currentMonths: string[],
   cfg: CConfig,
-  nowDate: Date,
+  /** Reference date for C5 staleness. For a closed FY pass the FY-end date,
+   *  not today, so historical sheets don't appear stale relative to the present. */
+  asOfDate: Date,
 ): RawAlert[] {
   const alerts: RawAlert[] = [];
   if (currentMonths.length === 0) return alerts;
@@ -98,7 +135,7 @@ export function buildCategoryCAlerts(
   const priorPriorFy = prevFy(priorFy);
   const priorPriorMonths = toPriorYearMonths(priorMonths);
 
-  // ── C1: customer concentration ───────────────────────────────────────────
+  // ── C1: customer concentration ────────────────────────────────────────────
   const curStateCust = stateCustomerValues(ctx, currentFy, currentMonths);
   const priStateCust = stateCustomerValues(ctx, priorFy, priorMonths);
 
@@ -139,7 +176,7 @@ export function buildCategoryCAlerts(
     }
   }
 
-  // ── C2: state territory down >= 15%, sustained 2 periods ─────────────────
+  // ── C2: state territory down >= 15%, sustained 2 periods ──────────────────
   const allStates = new Set<string>();
   for (const r of ctx.customerSale) {
     if (r.stateCanon) allStates.add(r.stateCanon);
@@ -153,13 +190,11 @@ export function buildCategoryCAlerts(
     const declinePct = ((curVal - priVal) / priVal) * 100;
     if (declinePct > -cfg.C2_STATE_DECLINE_PCT) continue;
 
-    // Sustained: prior vs prior-prior also down >= threshold
     let sustained = cfg.C2_SUSTAINED_PERIODS <= 1;
     if (!sustained) {
       const priorPriorVal = stateValue(ctx, priorPriorFy, priorPriorMonths, state);
       if (priorPriorVal > 0) {
-        const priorDecline = ((priVal - priorPriorVal) / priorPriorVal) * 100;
-        sustained = priorDecline <= -cfg.C2_STATE_DECLINE_PCT;
+        sustained = ((priVal - priorPriorVal) / priorPriorVal) * 100 <= -cfg.C2_STATE_DECLINE_PCT;
       }
     }
     if (!sustained) continue;
@@ -172,63 +207,62 @@ export function buildCategoryCAlerts(
       entityType: "state",
       currentMonths,
       priorMonths,
-      numbers: {
-        currentValue: curVal,
-        priorValue: priVal,
-        declinePct: -declinePct,
-        valueGrowthPct: declinePct,
-      },
+      numbers: { currentValue: curVal, priorValue: priVal, declinePct: -declinePct, valueGrowthPct: declinePct },
       rupeesAtStake: priVal - curVal,
     });
   }
 
-  // ── C3: segment >= 20 pts below company rate ──────────────────────────────
-  const companyCurrentVal = totalValue(ctx, currentFy, currentMonths);
-  const companyPriorVal = totalValue(ctx, priorFy, priorMonths);
-  const companyGrowthPct = companyPriorVal > 0
-    ? ((companyCurrentVal - companyPriorVal) / companyPriorVal) * 100
-    : null;
+  // ── C3: segment >= N pts below company rate ───────────────────────────────
+  // Seasonal gate: only fire when the comparison window covers >= 20% of annual
+  // seasonal weight. A 1-month or very short window creates volatile, noisy gaps
+  // between segment and company rates.
+  const C3_MIN_PERIOD_WEIGHT = 0.20;
+  const periodWeight = periodSeasonalWeight(currentMonths);
 
-  if (companyGrowthPct !== null) {
-    const curSegs = segmentValues(ctx, currentFy, currentMonths);
-    const priSegs = segmentValues(ctx, priorFy, priorMonths);
+  if (periodWeight >= C3_MIN_PERIOD_WEIGHT) {
+    const companyCurrentVal = totalValue(ctx, currentFy, currentMonths);
+    const companyPriorVal = totalValue(ctx, priorFy, priorMonths);
+    const companyGrowthPct = companyPriorVal > 0
+      ? ((companyCurrentVal - companyPriorVal) / companyPriorVal) * 100
+      : null;
 
-    for (const [seg, priVal] of priSegs) {
-      if (seg === "Unmapped" || priVal === 0) continue;
-      const curVal = curSegs.get(seg) ?? 0;
-      const segGrowthPct = ((curVal - priVal) / priVal) * 100;
-      const gapPts = companyGrowthPct - segGrowthPct;
+    if (companyGrowthPct !== null) {
+      const curSegs = segmentValues(ctx, currentFy, currentMonths);
+      const priSegs = segmentValues(ctx, priorFy, priorMonths);
 
-      if (gapPts >= cfg.C3_SEGMENT_UNDER_INDEX_PTS) {
-        alerts.push({
-          code: "C3",
-          category: "C",
-          entity: seg,
-          entityKey: seg,
-          entityType: "segment",
-          currentMonths,
-          priorMonths,
-          numbers: {
-            statePct: segGrowthPct,
-            companyPct: companyGrowthPct,
-            gapPts,
-            currentValue: curVal,
-            priorValue: priVal,
-          },
-          rupeesAtStake: priVal - curVal,
-        });
+      for (const [seg, priVal] of priSegs) {
+        if (seg === "Unmapped" || priVal === 0) continue;
+        const curVal = curSegs.get(seg) ?? 0;
+        const segGrowthPct = ((curVal - priVal) / priVal) * 100;
+        const gapPts = companyGrowthPct - segGrowthPct;
+
+        if (gapPts >= cfg.C3_SEGMENT_UNDER_INDEX_PTS) {
+          alerts.push({
+            code: "C3",
+            category: "C",
+            entity: seg,
+            entityKey: seg,
+            entityType: "segment",
+            currentMonths,
+            priorMonths,
+            numbers: {
+              statePct: segGrowthPct,
+              companyPct: companyGrowthPct,
+              gapPts,
+              currentValue: curVal,
+              priorValue: priVal,
+              periodSeasonalWeight: periodWeight,
+            },
+            rupeesAtStake: priVal - curVal,
+          });
+        }
       }
     }
   }
 
   // ── C4: volume up, gross contribution down >= 15% ─────────────────────────
-  // Aggregate margin_fact for current and prior periods (company-wide, all segments with bom_cost)
-  const marginMonthsCur = new Set(
-    currentMonths.map((m) => `${currentFy}|${m}`),
-  );
-  const marginMonthsPri = new Set(
-    priorMonths.map((m) => `${priorFy}|${m}`),
-  );
+  const marginMonthsCur = new Set(currentMonths.map((m) => `${currentFy}|${m}`));
+  const marginMonthsPri = new Set(priorMonths.map((m) => `${priorFy}|${m}`));
 
   let c4CurQty = 0, c4CurGC = 0, c4PriQty = 0, c4PriGC = 0;
   const c4Segments = new Set<string>();
@@ -237,15 +271,8 @@ export function buildCategoryCAlerts(
     if (r.bomCost == null || r.bomCost <= 0) continue;
     const key = `${r.fy}|${r.monthLabel}`;
     const gc = r.saleValue - r.qty * r.bomCost;
-    if (marginMonthsCur.has(key)) {
-      c4CurQty += r.qty;
-      c4CurGC += gc;
-      c4Segments.add(r.segment);
-    }
-    if (marginMonthsPri.has(key)) {
-      c4PriQty += r.qty;
-      c4PriGC += gc;
-    }
+    if (marginMonthsCur.has(key)) { c4CurQty += r.qty; c4CurGC += gc; c4Segments.add(r.segment); }
+    if (marginMonthsPri.has(key)) { c4PriQty += r.qty; c4PriGC += gc; }
   }
 
   if (c4PriQty > 0 && c4CurQty > c4PriQty && c4PriGC > 0) {
@@ -274,21 +301,20 @@ export function buildCategoryCAlerts(
   }
 
   // ── C5: sheet not read for >= staleness days ──────────────────────────────
+  // Only considers members active in the current FY.
+  // Uses `asOfDate` (not today) for the staleness calculation so that running
+  // calibration against a closed FY does not make all historical sheets appear stale.
+  // Skip members where ingested_at is not recorded (untracked, not stale).
   const stalenessDays = cfg.C5_SHEET_STALENESS_DAYS;
-  // Restrict to members who appear in the current FY secondary data only.
-  const allHeads = [...new Set(
+  const currentFyHeads = [...new Set(
     ctx.secHeadMonths.filter((r) => r.fy === currentFy).map((r) => r.headCanon),
   )];
 
-  for (const headCanon of allHeads) {
+  for (const headCanon of currentFyHeads) {
     const lastRead = ctx.lastSheetRead.get(headCanon);
-    // If ingested_at is not populated for this member, skip C5 entirely — we
-    // cannot distinguish "never loaded" from "load timestamp not recorded yet".
-    // C5 requires the ingestion pipeline to record ingested_at on every sheet read.
-    if (lastRead == null) continue;
+    if (lastRead == null) continue; // ingested_at not tracked for this member — skip
 
-    const daysSince = (nowDate.getTime() - lastRead.getTime()) / 86_400_000;
-
+    const daysSince = (asOfDate.getTime() - lastRead.getTime()) / 86_400_000;
     if (daysSince >= stalenessDays) {
       const person = ctx.persons.find((p) => p.normKey === headCanon);
       const name = person?.canonicalName ?? headCanon;
@@ -301,11 +327,13 @@ export function buildCategoryCAlerts(
         entityType: "member",
         currentMonths,
         priorMonths: [],
-        numbers: {
-          daysSinceRead: daysSince === Infinity ? 9999 : Math.round(daysSince),
-        },
+        numbers: { daysSinceRead: Math.round(daysSince) },
         rupeesAtStake: 0,
-        extraForReport: { stateHead: stateHead ?? "—", lastReadDate: lastRead?.toISOString().slice(0, 10) ?? "never" },
+        extraForReport: {
+          stateHead: stateHead ?? "—",
+          lastReadDate: lastRead.toISOString().slice(0, 10),
+          asOfDate: asOfDate.toISOString().slice(0, 10),
+        },
       });
     }
   }

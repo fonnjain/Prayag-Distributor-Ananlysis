@@ -100,9 +100,22 @@ export type DetectAlertsOptions = {
    * For the open FY, pass frozenMonths.get(fy) converted to an array.
    */
   primaryCompleteMonths?: string[];
-  /** Defaults to now. */
+  /** Defaults to now. Used by guards (Guard 9) and C5 staleness. */
   nowDate?: Date;
+  /**
+   * Reference date for C5 sheet-staleness calculation.
+   * For a closed FY pass the FY-end date (March 31) so that historical sheets
+   * are not spuriously flagged stale relative to today.
+   * Defaults to nowDate when omitted.
+   */
+  c5AsOfDate?: Date;
 };
+
+// FY end date: March 31 of the year after start. e.g. "2025-26" → 2026-03-31
+function fyEndDate(fy: string): Date {
+  const startYear = parseInt(fy.slice(0, 4), 10);
+  return new Date(Date.UTC(startYear + 1, 2, 31)); // month 2 = March (0-indexed)
+}
 
 export function detectAlerts(
   ctx: DetectionContext,
@@ -110,6 +123,9 @@ export function detectAlerts(
 ): CalibrationResult {
   const { fy } = opts;
   const nowDate = opts.nowDate ?? new Date(Date.now());
+  // C5 asOf: use explicit override, or FY-end for closed FYs, or now for the open FY
+  const c5AsOfDate = opts.c5AsOfDate
+    ?? (isFyClosed(fy, nowDate) ? fyEndDate(fy) : nowDate);
   const priorFy = prevFy(fy);
 
   // ── Resolve primary-complete months (B/C) ──────────────────────────────────
@@ -157,7 +173,7 @@ export function detectAlerts(
     C3_SEGMENT_UNDER_INDEX_PTS: cfg.CATEGORY_C_TERRITORY_SEGMENT.C3_SEGMENT_UNDER_INDEX_PTS,
     C4_GROSS_CONTRIBUTION_DROP_PCT: cfg.CATEGORY_C_TERRITORY_SEGMENT.C4_GROSS_CONTRIBUTION_DROP_PCT,
     C5_SHEET_STALENESS_DAYS: cfg.CATEGORY_C_TERRITORY_SEGMENT.C5_SHEET_STALENESS_DAYS,
-  }, nowDate);
+  }, c5AsOfDate);
 
   const allCandidates: RawAlert[] = [...aAlerts, ...bAlerts, ...cAlerts];
 
