@@ -41,6 +41,7 @@ import {
 } from "../lib/sku/catalogue.js";
 import { fiscalMonthsToLabels } from "../lib/mgmt/primaryPeriod.js";
 import { isAdminToken } from "../lib/adminAuth.js";
+import { WipeGuardAbortError } from "../lib/sku/skuWipeGuard.js";
 import {
   getPrimaryDiscountByCode,
   getSecondaryDiscountByCode,
@@ -974,7 +975,54 @@ router.get("/sku/lost-codes", async (req: Request, res: Response): Promise<void>
 // ── K4: secondary SKU backfill trigger (runs in-process; shell-run CLIs get
 // reaped by the environment). Fire-and-forget; poll GET for status.
 
-const _skuBackfill: { running: boolean; log: string[] } = { running: false, log: [] };
+/** Structured body returned when a wipe guard abort is stored on _skuBackfill. */
+export type GuardAbortBody = {
+  code: "WIPE_GUARD_ABORT";
+  fy: string;
+  month: string;
+  rule: "rows" | "distributors" | "member";
+  head: string | null;
+  existing: number;
+  incoming: number;
+};
+
+/**
+ * Classify a caught error from loadSecSkuFromSheets.
+ *
+ * Returns { kind: "guard_abort", body } for WipeGuardAbortError — the caller
+ * should surface body in the API response and NOT retry (a guard abort is a
+ * deliberate refusal, not a transient failure).
+ *
+ * Returns { kind: "other", message } for everything else — the caller may
+ * retry (e.g. on Sheets quota exhaustion).
+ */
+export function classifyBackfillError(err: unknown):
+  | { kind: "guard_abort"; body: GuardAbortBody }
+  | { kind: "other"; message: string } {
+  if (err instanceof WipeGuardAbortError) {
+    return {
+      kind: "guard_abort",
+      body: {
+        code: "WIPE_GUARD_ABORT",
+        fy: err.fy,
+        month: err.month,
+        rule: err.rule,
+        head: err.head ?? null,
+        existing: err.existing,
+        incoming: err.incoming,
+      },
+    };
+  }
+  return { kind: "other", message: String(err).slice(0, 200) };
+}
+
+const _skuBackfill: {
+  running: boolean;
+  log: string[];
+  /** Set when the last completed run ended with a WipeGuardAbortError.
+   *  Cleared at the start of each new run. */
+  guardAbort: GuardAbortBody | null;
+} = { running: false, log: [], guardAbort: null };
 
 const BACKFILL_ALLOWED_FYS = new Set(["2021-22", "2022-23", "2023-24", "2024-25", "2025-26"]);
 
@@ -1013,6 +1061,7 @@ router.post("/sku/secondary-backfill", async (req: Request, res: Response): Prom
   }
   req.log.info({ fys, reason: req.query.reason }, "sku secondary backfill triggered");
   _skuBackfill.running = true;
+  _skuBackfill.guardAbort = null;
   _skuBackfill.log = [`started ${new Date().toISOString()} for ${fys.join(", ")}`];
   void (async () => {
     const { loadSecSkuFromSheets, SKU_SHEET_IDS: sheetIds } = await import(
@@ -1030,6 +1079,9 @@ router.post("/sku/secondary-backfill", async (req: Request, res: Response): Prom
       }
       // Sheets per-minute quota is shared with the live loaders — retry each
       // FY a few times with a cool-down instead of failing the whole run.
+      // Guard aborts (WipeGuardAbortError) are NOT retried — they are a
+      // deliberate refusal that must be resolved before re-running.
+      let guardAborted = false;
       for (let attempt = 1; attempt <= 4; attempt++) {
         try {
           const r = await loadSecSkuFromSheets(fy, sheetId, false, { replace });
@@ -1038,10 +1090,25 @@ router.post("/sku/secondary-backfill", async (req: Request, res: Response): Prom
           );
           break;
         } catch (err) {
-          _skuBackfill.log.push(`${fy}: attempt ${attempt} FAILED — ${String(err).slice(0, 200)}`);
+          const classified = classifyBackfillError(err);
+          if (classified.kind === "guard_abort") {
+            // Store structured data for the GET status endpoint (returns 409).
+            _skuBackfill.guardAbort = classified.body;
+            _skuBackfill.log.push(
+              `${fy}: WIPE GUARD ABORT (rule=${classified.body.rule})` +
+                (classified.body.head ? ` head="${classified.body.head}"` : "") +
+                ` month=${classified.body.month}` +
+                ` existing=${classified.body.existing} incoming=${classified.body.incoming}` +
+                ` — fix the missing member tab and re-run`,
+            );
+            guardAborted = true;
+            break; // do not retry a guard abort
+          }
+          _skuBackfill.log.push(`${fy}: attempt ${attempt} FAILED — ${classified.message}`);
           if (attempt < 4) await sleep(90_000);
         }
       }
+      if (guardAborted) break; // abort the whole run, not just this FY
     }
     _skuBackfill.log.push(`done ${new Date().toISOString()}`);
     _skuBackfill.running = false;
@@ -1051,6 +1118,13 @@ router.post("/sku/secondary-backfill", async (req: Request, res: Response): Prom
 });
 
 router.get("/sku/secondary-backfill", (_req: Request, res: Response): void => {
+  // Return 409 when the last completed run was aborted by the wipe guard so
+  // callers can distinguish a guard refusal (actionable, fix the workbook)
+  // from a still-running or clean-completed run.
+  if (_skuBackfill.guardAbort && !_skuBackfill.running) {
+    res.status(409).json(_skuBackfill);
+    return;
+  }
   res.json(_skuBackfill);
 });
 
