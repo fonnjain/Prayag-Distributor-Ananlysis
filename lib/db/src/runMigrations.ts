@@ -803,6 +803,47 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    id: "028_market_survey_prospect",
+    sql: `
+      -- Pending new distributor / retailer records submitted via the Market Survey page.
+      -- These are NOT written to customer_master directly — they sit here for approval.
+      -- When approved, approved_customer_id is set to the new customer_master.id.
+      -- market_survey.pending_prospect_id links a survey to its pending prospect so
+      -- the survey is not blocked waiting for approval.
+      CREATE TABLE IF NOT EXISTS market_survey_prospect (
+        id                   SERIAL       PRIMARY KEY,
+        name                 TEXT         NOT NULL,
+        contact              TEXT         NOT NULL,
+        contact_person       TEXT,
+        address              TEXT,
+        district             TEXT         NOT NULL,
+        state                TEXT         NOT NULL,
+        area                 TEXT,
+        pincode              TEXT,
+        gst                  TEXT,
+        type                 TEXT         NOT NULL CHECK (type IN ('Distributor','Retailer')),
+        for_distributor_id   TEXT         REFERENCES customer_master(id),
+        source               TEXT         NOT NULL DEFAULT 'market_survey',
+        submitted_by         TEXT         NOT NULL,
+        submitted_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
+        status               TEXT         NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending','approved','rejected')),
+        approved_customer_id TEXT         REFERENCES customer_master(id),
+        approved_at          TIMESTAMPTZ,
+        note                 TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_msp_status       ON market_survey_prospect (status);
+      CREATE INDEX IF NOT EXISTS idx_msp_type         ON market_survey_prospect (type);
+      CREATE INDEX IF NOT EXISTS idx_msp_submitted_by ON market_survey_prospect (submitted_by);
+      CREATE INDEX IF NOT EXISTS idx_msp_submitted_at ON market_survey_prospect (submitted_at DESC);
+
+      -- Link a survey row to the pending prospect it was recorded against.
+      ALTER TABLE market_survey
+        ADD COLUMN IF NOT EXISTS pending_prospect_id INTEGER
+          REFERENCES market_survey_prospect(id);
+    `,
+  },
+  {
     id: "027_competitor_price",
     sql: `
       -- Local snapshot of competitor pricing from the Prayag Competition Analysis app.

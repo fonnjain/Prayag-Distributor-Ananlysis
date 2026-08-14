@@ -1,0 +1,147 @@
+GOAL
+Rebuild the Market Survey page. The current form does not reflect how a
+salesperson actually works - it asks for a customer by free-text search with
+no idea of who that person covers - and the layout is cramped.
+
+============================================================
+1. REMOVE THE API KEY FIELD - do this first
+============================================================
+There is a "Paste your API key here..." input at the top of the page. Remove
+it entirely.
+
+An API key must never be requested from a user on a page like this. If the
+competition data needs a key, it is COMPETITION_API_KEY in Secrets, used
+server-side only, never in the client bundle and never typed by a person.
+
+Confirm the key does not appear in any client-side bundle after removal.
+
+============================================================
+2. THE CASCADE - this is the main change
+============================================================
+Replace the free-text customer search with a scope cascade. Each level
+filters the next.
+
+  STATE HEAD        from person_registry where is_state_head
+                    default to the logged-in member's own head if they have
+                    one; otherwise no default
+
+  STATE             from state_hierarchy, using the two-level parent/split
+                    picker built for the state filter. Restricted to states
+                    that head actually covers.
+                    Selecting a parent selects all its splits.
+
+  DISTRIBUTOR       from customer_master where type = 'Distributor' or
+                    'Direct Dealer', in the selected state(s)
+                    Plus an option: "+ New distributor"
+
+  RETAILER          from customer_master where type = 'Retailer', in the
+                    selected state(s), and served by the selected
+                    distributor via the retailer_distributor junction table
+                    Plus an option: "+ New retailer"
+
+Each dropdown is disabled until the one above it has a value, and shows a
+count - "Distributor (34 in Bihar)". Empty results say why: "No distributors
+recorded in this state" is different from "select a state first".
+
+Remember retailer_distributor is a MANY-TO-MANY junction - 36.7% of active
+retailers name more than one distributor. A retailer appears under every
+distributor they are linked to. Do not assume one.
+
+============================================================
+3. NEW DISTRIBUTOR / NEW RETAILER
+============================================================
+Selecting "+ New" opens an inline panel, not a separate page. Capture:
+
+  Name (required)
+  Contact number (required)
+  Contact person
+  Address
+  District (required)   State is inherited from the cascade - do not re-ask
+  Area / locality
+  Pincode
+  GST number (optional)
+  For a new retailer: which distributor serves them - defaults to the one
+  already selected in the cascade
+
+DO NOT write these into customer_master. Write them to the existing Review
+Queue on the Customer Data page as pending records, flagged as
+source = 'market_survey', with who submitted them and when. Someone approves
+them there.
+
+The survey itself stores the pending record's id, so the survey is not
+blocked waiting for approval. If the pending record is later approved and
+becomes a real customer, the survey should resolve to it.
+
+============================================================
+4. SEGMENT AND ITEM CODE - make it a real cascade
+============================================================
+  SEGMENT     dropdown, canonical segments, from what exists in mrp_master
+  ITEM CODE   dropdown filtered to that segment, showing "code - name"
+              searchable, since some segments carry hundreds of codes
+
+Item code is disabled until a segment is chosen. Show the count -
+"Item code (1,830 in PTMT)".
+
+When an item code is selected, show OUR MRP for it immediately beside the
+field, with its effective date. That gives the salesperson the comparison
+while they are still typing the competitor's price.
+
+For the 56 ambiguous codes that exist in two segments, resolve on
+(code, segment) - the segment is already known from the cascade.
+
+============================================================
+5. LAYOUT
+============================================================
+Current problems: the form sits in a narrow inner-scrolling column inside the
+page, producing two scrollbars; the results panel occupies half the width
+showing "No data yet"; fields are cramped.
+
+  - Remove the inner scroll. Let the page scroll normally.
+  - Form takes the full content width. Two columns where fields are short
+    (unit and pack size, district and pincode) rather than one narrow column.
+  - The results panel collapses to a single line when empty - "Submit a
+    survey with a product code to see comparisons" - and expands only when
+    there is data. Do not reserve half the screen for an empty state.
+  - Group the form into the four numbered steps it already has, but let each
+    step be visible without scrolling within a box.
+  - Required fields marked once, clearly. The asterisks are currently
+    inconsistent.
+
+Follow the existing design conventions of the app - the same typography,
+spacing and colour as the Distributor Deep Dive and MRP pages. Do not
+introduce a new visual style for this one page.
+
+============================================================
+DO NOT
+============================================================
+- Do not create customer_master records directly.
+- Do not touch margin_fact, sale_line, mrp_history or scheme tables.
+- Do not feed survey prices into any MRP calculation. That remains a later,
+  separately reviewed step.
+- Do not lose any data already captured - the existing market_survey rows
+  must survive.
+
+============================================================
+VERIFY - produced values, and a hash that resolves
+============================================================
+1. Confirm the API key field is gone. Paste the grep showing
+   COMPETITION_API_KEY does not appear in any client bundle.
+2. Walk the cascade for one State Head: print the states offered, then the
+   distributors for one state with the count, then the retailers for one
+   distributor with the count. Confirm each level is disabled until the one
+   above has a value.
+3. Pick a retailer linked to TWO distributors. Confirm they appear under
+   both.
+4. Submit a survey with "+ New retailer". Print the pending record created,
+   confirm it is in the Review Queue with source = 'market_survey', and
+   confirm customer_master row count is UNCHANGED at 79,994.
+5. Select segment PTMT then the item code dropdown. Print the count offered
+   and confirm it matches mrp_master for that segment. Confirm our MRP
+   displays beside the field with its effective date.
+6. Select an ambiguous code (CNS-15) via the PTMT segment. Confirm it shows
+   Rs 860, not the CP price of Rs 1,020.
+7. Confirm existing market_survey rows still exist and render.
+8. Screenshot the page at 1280px wide showing no inner scrollbar and the
+   collapsed empty results panel.
+9. Commit hash, git cat-file -t, git merge-base --is-ancestor main with exit
+   code.

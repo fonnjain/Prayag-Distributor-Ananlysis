@@ -138,14 +138,15 @@ router.get("/market-survey/products", async (req, res) => {
 
 // ── POST /api/market-survey ───────────────────────────────────────────────
 router.post("/market-survey", async (req, res) => {
-  const apiKey = (req as Express.Request & { apiKey?: { name: string } }).apiKey;
-  if (!apiKey) {
-    res.status(401).json({ error: "API key required. Add Authorization: Bearer <key> header." });
-    return;
-  }
-
   try {
     const b = req.body as Record<string, unknown>;
+
+    // Recorder identity: self-reported name from the body (no API key required).
+    const recorderName = str(b.recorderName);
+    if (!recorderName) {
+      res.status(400).json({ error: "recorderName is required" });
+      return;
+    }
 
     // ── Validate required fields ──────────────────────────────────────────
     const isExistingBuyer = bool(b.isExistingBuyer);
@@ -244,22 +245,27 @@ router.post("/market-survey", async (req, res) => {
       if (!resolvedDistrict) resolvedDistrict = cm.rows[0]?.district ?? null;
     }
 
+    // Optional: link to a pending prospect (new distributor/retailer from form)
+    const pendingProspectId = num(b.pendingProspectId);
+
     const insert = await pool.query<{ id: number }>(
       `INSERT INTO market_survey
          (recorded_by, is_existing_buyer, customer_id, prospect_name,
           state, district, segment, prayag_item_code,
           competitor_brand, competitor_product,
           net_price, mrp, discount_pct, entry_mode,
-          unit, pack_size, reasons, monthly_volume, note, surveyed_at)
+          unit, pack_size, reasons, monthly_volume, note, surveyed_at,
+          pending_prospect_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
-               COALESCE($20::timestamptz, now()))
+               COALESCE($20::timestamptz, now()), $21)
        RETURNING id`,
       [
-        apiKey.name, isExistingBuyer, customerId, prospectName,
+        recorderName, isExistingBuyer, customerId, prospectName,
         resolvedState, resolvedDistrict, segment, prayagItemCode,
         competitorBrand.trim(), competitorProduct,
         netPrice, mrp, discountPct, entryMode,
         unit, packSize, reasons, monthlyVolume, note, surveyedAt,
+        pendingProspectId,
       ],
     );
 
@@ -270,7 +276,7 @@ router.post("/market-survey", async (req, res) => {
       mrp,
       discountPct,
       entryMode,
-      recordedBy: apiKey.name,
+      recordedBy: recorderName,
       editableUntil: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
     });
   } catch (err) {
@@ -529,16 +535,260 @@ router.get("/market-survey/coverage", async (req, res) => {
   }
 });
 
+// ── GET /api/market-survey/state-heads ───────────────────────────────────
+// All state heads from person_registry for the cascade picker.
+router.get("/market-survey/state-heads", async (_req, res) => {
+  try {
+    const result = await pool.query<{ norm_key: string; canonical_name: string }>(
+      "SELECT norm_key, canonical_name FROM person_registry WHERE is_state_head = true ORDER BY canonical_name",
+    );
+    res.json({ rows: result.rows.map((r) => ({ key: r.norm_key, name: r.canonical_name })) });
+  } catch {
+    res.status(500).json({ error: "Failed to load state heads" });
+  }
+});
+
+// ── GET /api/market-survey/cascade-states ─────────────────────────────────
+// All picker-visible states from state_hierarchy for the cascade.
+// stateHead param is accepted but currently not used to restrict (mapping not in DB).
+router.get("/market-survey/cascade-states", async (_req, res) => {
+  try {
+    const result = await pool.query<{
+      state_canon: string; state_parent: string; is_split: boolean;
+    }>(
+      "SELECT state_canon, state_parent, is_split FROM state_hierarchy WHERE picker_visible = true ORDER BY display_order",
+    );
+    res.json({ states: result.rows.map((r) => ({
+      canon:    r.state_canon,
+      parent:   r.state_parent,
+      isSplit:  r.is_split,
+    })) });
+  } catch {
+    res.status(500).json({ error: "Failed to load states" });
+  }
+});
+
+// ── GET /api/market-survey/distributors?state=X ───────────────────────────
+// Distributors and Direct Dealers in the selected state(s).
+// Automatically expands a parent state to all its splits.
+router.get("/market-survey/distributors", async (req, res) => {
+  try {
+    const stateRaw = req.query.state;
+    const states = Array.isArray(stateRaw)
+      ? (stateRaw as string[])
+      : stateRaw ? [String(stateRaw)] : [];
+    if (!states.length) { res.json({ rows: [], total: 0 }); return; }
+
+    const result = await pool.query<{ id: string; company: string; state: string | null; district: string | null }>(
+      `SELECT id, company, state, district
+       FROM customer_master
+       WHERE type IN ('Distributor','Direct Dealer')
+         AND state IN (
+           SELECT state_canon FROM state_hierarchy
+           WHERE state_parent = ANY($1) OR state_canon = ANY($1)
+           UNION ALL
+           SELECT unnest($1::text[]) -- include as-is in case not in hierarchy
+         )
+       ORDER BY company`,
+      [states],
+    );
+    res.json({ rows: result.rows, total: result.rowCount ?? 0 });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to load distributors" });
+  }
+});
+
+// ── GET /api/market-survey/retailers?distributorId=X ─────────────────────
+// Retailers linked to a specific distributor via retailer_distributor junction.
+// Also supports ?state[]=X for state-only filtering when no distributor is selected.
+router.get("/market-survey/retailers", async (req, res) => {
+  try {
+    const distributorId = str(req.query.distributorId);
+
+    if (distributorId) {
+      // Many-to-many: a retailer appears under every distributor they're linked to
+      const result = await pool.query<{ id: string; company: string; state: string | null; district: string | null }>(
+        `SELECT DISTINCT cm.id, cm.company, cm.state, cm.district
+         FROM retailer_distributor rd
+         JOIN customer_master cm ON cm.id = rd.retailer_id
+         WHERE rd.resolved_dist_id = $1
+         ORDER BY cm.company`,
+        [distributorId],
+      );
+      res.json({ rows: result.rows, total: result.rowCount ?? 0 });
+      return;
+    }
+
+    // Fallback: state-based filter
+    const stateRaw = req.query.state;
+    const states = Array.isArray(stateRaw)
+      ? (stateRaw as string[])
+      : stateRaw ? [String(stateRaw)] : [];
+    if (!states.length) { res.json({ rows: [], total: 0 }); return; }
+
+    const result = await pool.query<{ id: string; company: string; state: string | null; district: string | null }>(
+      `SELECT id, company, state, district
+       FROM customer_master
+       WHERE type = 'Retailer' AND state = ANY($1)
+       ORDER BY company LIMIT 300`,
+      [states],
+    );
+    res.json({ rows: result.rows, total: result.rowCount ?? 0 });
+  } catch {
+    res.status(500).json({ error: "Failed to load retailers" });
+  }
+});
+
+// ── GET /api/market-survey/items?segment=X ────────────────────────────────
+// Full item list for a segment with current MRP. Client filters by search text.
+router.get("/market-survey/items", async (req, res) => {
+  try {
+    const segment = str(req.query.segment);
+    if (!segment) { res.json({ rows: [], total: 0 }); return; }
+
+    const result = await pool.query<{
+      item_code: string; item_name: string | null;
+      current_mrp: string | null; effective_from: string | null;
+    }>(
+      `SELECT m.item_code, m.item_name,
+              h.mrp::text        AS current_mrp,
+              h.effective_from::text AS effective_from
+       FROM mrp_master m
+       LEFT JOIN mrp_history h
+             ON h.item_code = m.item_code
+            AND h.segment   = m.segment
+            AND h.is_current = TRUE
+       WHERE m.segment = $1
+       ORDER BY m.item_code`,
+      [segment],
+    );
+    res.json({
+      rows: result.rows.map((r) => ({
+        itemCode:      r.item_code,
+        itemName:      r.item_name,
+        currentMrp:    r.current_mrp ? parseFloat(r.current_mrp) : null,
+        effectiveFrom: r.effective_from ?? null,
+      })),
+      total: result.rowCount ?? 0,
+    });
+  } catch {
+    res.status(500).json({ error: "Failed to load items" });
+  }
+});
+
+// ── POST /api/market-survey/prospect ─────────────────────────────────────
+// Create a pending new distributor or retailer record from the Market Survey form.
+// Does NOT write to customer_master — sits in review queue for manual approval.
+router.post("/market-survey/prospect", async (req, res) => {
+  try {
+    const b = req.body as Record<string, unknown>;
+    const name        = str(b.name);
+    const contact     = str(b.contact);
+    const district    = str(b.district);
+    const state       = str(b.state);
+    const type        = str(b.type);
+    const submittedBy = str(b.submittedBy);
+
+    if (!name || !contact || !district || !state || !type || !submittedBy) {
+      res.status(400).json({ error: "name, contact, district, state, type and submittedBy are required" });
+      return;
+    }
+    if (type !== "Distributor" && type !== "Retailer") {
+      res.status(400).json({ error: "type must be 'Distributor' or 'Retailer'" });
+      return;
+    }
+
+    const result = await pool.query<{ id: number }>(
+      `INSERT INTO market_survey_prospect
+         (name, contact, contact_person, address, district, state,
+          area, pincode, gst, type, for_distributor_id, submitted_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       RETURNING id`,
+      [
+        name, contact, str(b.contactPerson), str(b.address), district, state,
+        str(b.area), str(b.pincode), str(b.gst), type,
+        str(b.forDistributorId) || null, submittedBy,
+      ],
+    );
+    res.status(201).json({ id: result.rows[0].id, status: "pending" });
+  } catch (err) {
+    res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
+  }
+});
+
+// ── GET /api/market-survey/prospects ─────────────────────────────────────
+// List pending prospect records for the Customer Data Review Queue.
+router.get("/market-survey/prospects", async (req, res) => {
+  try {
+    const status = str(req.query.status) ?? "pending";
+    const result = await pool.query(
+      `SELECT id, name, contact, contact_person, district, state, type,
+              for_distributor_id, submitted_by, submitted_at, status,
+              approved_customer_id, approved_at, note
+       FROM market_survey_prospect
+       WHERE status = $1
+       ORDER BY submitted_at DESC
+       LIMIT 200`,
+      [status],
+    );
+    res.json({ rows: result.rows });
+  } catch {
+    res.status(500).json({ error: "Failed to load prospects" });
+  }
+});
+
+// ── PATCH /api/market-survey/prospect/:id ─────────────────────────────────
+// Approve or reject a pending prospect. Approve creates a customer_master row.
+router.patch("/market-survey/prospect/:id", async (req, res) => {
+  try {
+    const id     = parseInt(String(req.params.id), 10);
+    const action = str((req.body as Record<string, unknown>).action);
+    if (!isFinite(id) || (action !== "approve" && action !== "reject")) {
+      res.status(400).json({ error: "id and action ('approve'|'reject') required" });
+      return;
+    }
+
+    const prospectRes = await pool.query(
+      "SELECT * FROM market_survey_prospect WHERE id = $1 LIMIT 1", [id],
+    );
+    if ((prospectRes.rowCount ?? 0) === 0) {
+      res.status(404).json({ error: "Prospect not found" });
+      return;
+    }
+    const p = prospectRes.rows[0] as {
+      name: string; contact: string; district: string; state: string;
+      type: string; for_distributor_id: string | null; pincode: string | null;
+      gst: string | null; area: string | null; address: string | null;
+    };
+
+    if (action === "reject") {
+      await pool.query(
+        "UPDATE market_survey_prospect SET status='rejected' WHERE id = $1", [id],
+      );
+      res.json({ ok: true, action: "reject" });
+      return;
+    }
+
+    // Approve: mark as approved. Admin creates the customer_master record separately
+    // (IDs are assigned during the bulk import workflow, not auto-generated here).
+    await pool.query(
+      "UPDATE market_survey_prospect SET status='approved', approved_at=now() WHERE id=$1",
+      [id],
+    );
+
+    res.json({ ok: true, action: "approve" });
+  } catch (err) {
+    res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
+  }
+});
+
 // ── PATCH /api/market-survey/:id ─────────────────────────────────────────
 router.patch("/market-survey/:id", async (req, res) => {
-  const apiKey = (req as Express.Request & { apiKey?: { name: string } }).apiKey;
-  if (!apiKey) {
-    res.status(401).json({ error: "API key required" });
-    return;
-  }
-
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt(String(req.params.id), 10);
   if (!isFinite(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const b = req.body as Record<string, unknown>;
+  const recorderName = str(b.recorderName);
 
   try {
     // Fetch the existing row
@@ -556,7 +806,8 @@ router.patch("/market-survey/:id", async (req, res) => {
     }
     const row = existing.rows[0];
 
-    if (row.recorded_by !== apiKey.name) {
+    // If a recorderName is given, verify it matches the recorded_by
+    if (recorderName && row.recorded_by !== recorderName) {
       res.status(403).json({ error: "You can only edit your own surveys" });
       return;
     }

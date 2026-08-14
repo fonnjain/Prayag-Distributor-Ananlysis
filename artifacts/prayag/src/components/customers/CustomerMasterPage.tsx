@@ -18,7 +18,7 @@ import {
   type ChangeEvent,
   type KeyboardEvent,
 } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import {
   useListCustomerMaster,
   getListCustomerMasterQueryKey,
@@ -235,6 +235,105 @@ function ImportPreviewDialog({ preview, onCommit, onCancel, committing }: Import
   );
 }
 
+// ── Pending market-survey prospects ───────────────────────────────────────────
+
+interface MsProspectRow {
+  id: number; name: string; contact: string; contactPerson: string | null;
+  district: string; state: string; type: string;
+  submittedBy: string; submittedAt: string; status: string;
+}
+
+function PendingProspects() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery<{ rows: MsProspectRow[] }>({
+    queryKey: ["ms-prospects-pending"],
+    queryFn: () => fetch(`${BASE}/api/market-survey/prospects?status=pending`).then((r) => r.json()),
+    refetchInterval: 30_000,
+  });
+
+  const resolve = useMutation({
+    mutationFn: async ({ id, action }: { id: number; action: "approve" | "reject" }) => {
+      const r = await fetch(`${BASE}/api/market-survey/prospect/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ms-prospects-pending"] }),
+  });
+
+  const rows = data?.rows ?? [];
+
+  if (isLoading) return <div className="text-sm text-muted-foreground py-2">Loading…</div>;
+
+  if (rows.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-24 text-muted-foreground text-sm">
+        No pending prospect submissions from Market Survey.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-muted-foreground">
+        New distributors and retailers submitted via Market Survey.
+        Approve to acknowledge for master import; reject to dismiss.
+        Approved records still need manual entry in customer_master via the bulk import.
+      </p>
+      <div className="rounded border overflow-hidden">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="bg-muted/40 border-b">
+              <th className="px-3 py-2 text-left font-medium">Name</th>
+              <th className="px-3 py-2 text-left font-medium">Type</th>
+              <th className="px-3 py-2 text-left font-medium">State / District</th>
+              <th className="px-3 py-2 text-left font-medium">Contact</th>
+              <th className="px-3 py-2 text-left font-medium">Submitted by</th>
+              <th className="px-3 py-2 text-left font-medium">When</th>
+              <th className="px-3 py-2 text-left font-medium">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {rows.map((row) => (
+              <tr key={row.id} className="hover:bg-muted/30">
+                <td className="px-3 py-2 font-medium">{row.name}</td>
+                <td className="px-3 py-2 text-muted-foreground">{row.type}</td>
+                <td className="px-3 py-2 text-muted-foreground">{row.state}{row.district ? ` · ${row.district}` : ""}</td>
+                <td className="px-3 py-2 text-muted-foreground">{row.contact}</td>
+                <td className="px-3 py-2 text-muted-foreground">{row.submittedBy}</td>
+                <td className="px-3 py-2 text-muted-foreground">
+                  {new Date(row.submittedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                </td>
+                <td className="px-3 py-2">
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => resolve.mutate({ id: row.id, action: "approve" })}
+                      disabled={resolve.isPending}
+                      className="px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-100 text-emerald-800 hover:bg-emerald-200 disabled:opacity-50 transition-colors"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => resolve.mutate({ id: row.id, action: "reject" })}
+                      disabled={resolve.isPending}
+                      className="px-2 py-0.5 rounded text-[11px] font-medium bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50 transition-colors"
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ── Review queue tab ──────────────────────────────────────────────────────────
 
 function ReviewQueue() {
@@ -263,15 +362,24 @@ function ReviewQueue() {
 
   if (pending.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-48 text-muted-foreground gap-2">
-        <div className="text-4xl">&#10003;</div>
-        <p className="text-sm font-medium">Review queue is empty</p>
-        <p className="text-xs">No pending head-attribution mismatches.</p>
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col items-center justify-center h-32 text-muted-foreground gap-2">
+          <div className="text-4xl">&#10003;</div>
+          <p className="text-sm font-medium">No pending head-attribution mismatches.</p>
+        </div>
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <h3 className="text-sm font-semibold">Pending Market Survey Prospects</h3>
+            <span className="text-xs text-muted-foreground">New customers submitted via field survey</span>
+          </div>
+          <PendingProspects />
+        </div>
       </div>
     );
   }
 
   return (
+    <div className="space-y-6">
     <div className="space-y-1">
       <p className="text-xs text-muted-foreground mb-3">
         These customers have a different State Head in the live sale sheet vs the master.
@@ -326,6 +434,14 @@ function ReviewQueue() {
         </table>
       </div>
     </div>
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <h3 className="text-sm font-semibold">Pending Market Survey Prospects</h3>
+        <span className="text-xs text-muted-foreground">New customers submitted via field survey</span>
+      </div>
+      <PendingProspects />
+    </div>
+  </div>
   );
 }
 
