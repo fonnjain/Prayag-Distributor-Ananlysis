@@ -454,10 +454,17 @@ export async function loadSecSkuFromSheets(
         incoming: bufferedRows.map((r) => ({
           monthLabel: r.monthLabel,
           distributor: r.distributor ?? null,
+          head: r.headCanon ?? null,
         })),
         skipGuard: opts.skipGuard === true,
         callerLabel: opts.skipGuardLabel ?? "loadSecSkuFromSheets opts.skipGuard",
         sourceLike: "sheets_sku_backfill:%",
+        // Explicit flag: this loader always maps headCanon into the head
+        // dimension, so Rule 3 (per-member drop check) must always run.
+        // Setting this to true means Rule 3 fires even when all parsed heads
+        // happen to be null — a workbook that loses the head column is refused
+        // rather than silently bypassing the member check.
+        memberGuardEnabled: true,
       });
       await tx.execute(
         sqlRaw`DELETE FROM secondary_sku_line WHERE fy = ${fy} AND source LIKE 'sheets_sku_backfill:%'`,

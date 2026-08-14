@@ -3,7 +3,7 @@
 // Tests run against the real dev DB using a reserved FY label "TEST-WG" that
 // is cleaned up before and after each test so it cannot interfere with live data.
 //
-// WHAT IS BEING VERIFIED (spec items 1–6):
+// WHAT IS BEING VERIFIED (spec items 1–7):
 //   1. NEGATIVE — rows:    Jul 50% of existing → guard fires BEFORE delete,
 //                          transaction rolls back, row count unchanged.
 //   2. NEGATIVE — dists:   Jul 60% of existing distinct distributors → abort.
@@ -14,6 +14,10 @@
 //                          both months' DB counts remain untouched.
 //   6. NEW-FY (zero rows): Guard skips with "not applicable" log rather than
 //                          failing.
+//   7. PER-MEMBER DROP:    Member A has 100 existing rows, Member B has 500.
+//                          Incoming omits Member A entirely (company-wide ratio
+//                          = 83% > 60%, so Rules 1 & 2 pass).  Rule 3 fires
+//                          because Member A has zero incoming rows for the month.
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { sql } from "drizzle-orm";
@@ -22,8 +26,10 @@ import {
   assertSkuWipeGuard,
   WipeGuardAbortError,
   incomingMonthStats,
+  incomingMonthHeadStats,
   GUARD_ROWS_RATIO,
   GUARD_DIST_RATIO,
+  GUARD_HEAD_MIN_ROWS,
 } from "./skuWipeGuard.js";
 
 const TEST_FY = "TEST-WG";
@@ -35,10 +41,12 @@ function incRows(
   month: string,
   count: number,
   distributors: string[],
-): Array<{ monthLabel: string; distributor: string }> {
+  head?: string,
+): Array<{ monthLabel: string; distributor: string; head: string | null }> {
   return Array.from({ length: count }, (_, i) => ({
     monthLabel: month,
     distributor: distributors[i % distributors.length]!,
+    head: head ?? null,
   }));
 }
 
@@ -59,6 +67,47 @@ async function seed(month: string, count: number, distributors: string[]): Promi
     await pool.query(
       `INSERT INTO secondary_sku_line
          (line_uid, fy, month_label, item_code, source, distributor)
+       VALUES ${vals.join(", ")}
+       ON CONFLICT DO NOTHING`,
+      params,
+    );
+  }
+}
+
+/**
+ * Seed rows with a specific head_canon value so Rule 3 (per-member check) is
+ * exercised.  The line_uid incorporates head so it never clashes with seeds
+ * from the regular seed() helper.
+ */
+async function seedWithHead(
+  month: string,
+  count: number,
+  head: string,
+  distributors: string[],
+): Promise<void> {
+  if (count === 0) return;
+  const batchSize = 500;
+  for (let start = 0; start < count; start += batchSize) {
+    const end = Math.min(start + batchSize, count);
+    const vals: string[] = [];
+    const params: (string | null)[] = [];
+    let p = 1;
+    for (let i = start; i < end; i++) {
+      const dist = distributors[i % distributors.length]!;
+      vals.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
+      params.push(
+        `tst-h-${month}-${head}-${dist}-${i}`,
+        TEST_FY,
+        month,
+        `X${i % 10}`,
+        "test_wipe_guard",
+        dist,
+        head,
+      );
+    }
+    await pool.query(
+      `INSERT INTO secondary_sku_line
+         (line_uid, fy, month_label, item_code, source, distributor, head_canon)
        VALUES ${vals.join(", ")}
        ON CONFLICT DO NOTHING`,
       params,
@@ -113,6 +162,35 @@ describe("incomingMonthStats", () => {
     expect(stats.get("Apr-26")).toEqual({ rows: 3, distinctDistributors: 2 });
     expect(stats.get("May-26")).toEqual({ rows: 1, distinctDistributors: 1 });
     expect(stats.has(null as any)).toBe(false);
+  });
+});
+
+describe("incomingMonthHeadStats", () => {
+  it("counts rows per (month, head) pair, normalising head to lowercase", () => {
+    const rows = [
+      { monthLabel: "Apr-26", head: "Member A" },
+      { monthLabel: "Apr-26", head: "MEMBER A" }, // same head, different case
+      { monthLabel: "Apr-26", head: "Member B" },
+      { monthLabel: "May-26", head: "Member A" },
+      { monthLabel: "May-26", head: null },        // blank head — excluded
+      { monthLabel: null,     head: "Member C" },  // blank month — excluded
+    ];
+    const stats = incomingMonthHeadStats(rows);
+    // "Member A" and "MEMBER A" should collapse to the same normalised key
+    expect(stats.get("Apr-26|member a")).toBe(2);
+    expect(stats.get("Apr-26|member b")).toBe(1);
+    expect(stats.get("May-26|member a")).toBe(1);
+    // null month / null head rows must be absent
+    expect(stats.size).toBe(3);
+  });
+
+  it("returns an empty map when all rows have blank month or head", () => {
+    const rows = [
+      { monthLabel: null,  head: "Member A" },
+      { monthLabel: "Apr-26", head: null },
+      { monthLabel: "Apr-26", head: "  " }, // whitespace-only head
+    ];
+    expect(incomingMonthHeadStats(rows).size).toBe(0);
   });
 });
 
@@ -309,5 +387,140 @@ describe("assertSkuWipeGuard", () => {
 
     expect(afterJul).toBe(beforeJul);
     expect(afterAug).toBe(beforeAug);
+  });
+
+  // ── Test 7: PER-MEMBER DROP — Rule 3 fires when a member's rows are absent ─
+  //
+  // Scenario: the company has two members for Jul-99.
+  //   Member A: 100 existing rows
+  //   Member B: 500 existing rows
+  //   Total:    600 existing rows
+  //
+  // The incoming batch is sourced from a workbook where Member A's PSCode2 tab
+  // is completely absent.  Member B's data is intact (500 rows).
+  //
+  //   Company-wide ratio:  500 / 600 = 0.833 — Rule 1 passes (≥ 0.60).
+  //   Distributor ratio:   not an issue.
+  //   Rule 3 (per-member): Member A had 100 existing rows but 0 incoming
+  //                        → guard fires.
+  it("7: aborts via Rule 3 when one member's rows are entirely absent from the incoming batch", async () => {
+    const MEMBER_A = "member-a";
+    const MEMBER_B = "member-b";
+
+    // Seed: Member A has 100 rows, Member B has 500 rows for Jul-99.
+    await seedWithHead("Jul-99", 100, MEMBER_A, DISTS_5);
+    await seedWithHead("Jul-99", 500, MEMBER_B, DISTS_5);
+
+    const totalBefore = await dbCount("Jul-99");
+    console.log(`\n[T7] Jul-99 BEFORE: ${totalBefore} rows (A=100, B=500)`);
+
+    // Verify Rule 1 would pass on its own (company-wide ratio = 83% > 60%).
+    expect(500 / totalBefore).toBeGreaterThan(GUARD_ROWS_RATIO);
+
+    // Incoming: only Member B's rows — Member A is completely absent.
+    const incoming = incRows("Jul-99", 500, DISTS_5, MEMBER_B);
+
+    // Confirm Member A is not represented at all (the exact failure scenario).
+    expect(incoming.some((r) => r.head?.includes("member-a"))).toBe(false);
+
+    let caughtError: unknown;
+    await expect(
+      db.transaction(async (tx) => {
+        await assertSkuWipeGuard({
+          tx: tx as any,
+          fy: TEST_FY,
+          incoming,
+          skipGuard: false,
+          callerLabel: "test-7",
+          memberGuardEnabled: true, // explicit — loader always sets this
+        });
+        // Rule 3 must throw before reaching the DELETE.
+        await tx.execute(sql`DELETE FROM secondary_sku_line WHERE fy = ${TEST_FY}`);
+      }),
+    ).rejects.toSatisfy((err: unknown) => {
+      caughtError = err;
+      return (
+        err instanceof WipeGuardAbortError &&
+        err.rule === "member" &&
+        err.month === "Jul-99" &&
+        err.head === MEMBER_A &&
+        err.incoming === 0 &&
+        err.existing >= GUARD_HEAD_MIN_ROWS
+      );
+    });
+
+    const totalAfter = await dbCount("Jul-99");
+    console.log(`[T7] Jul-99 AFTER: ${totalAfter} rows (must equal BEFORE — transaction rolled back)`);
+    console.log(`[T7] Error: ${(caughtError as Error).message}`);
+
+    // Transaction must have rolled back — no rows deleted.
+    expect(totalAfter).toBe(totalBefore);
+    expect(caughtError).toBeInstanceOf(WipeGuardAbortError);
+    expect((caughtError as WipeGuardAbortError).rule).toBe("member");
+    expect((caughtError as WipeGuardAbortError).head).toBe(MEMBER_A);
+    expect((caughtError as WipeGuardAbortError).existing).toBeGreaterThanOrEqual(GUARD_HEAD_MIN_ROWS);
+    expect((caughtError as WipeGuardAbortError).incoming).toBe(0);
+    expect((caughtError as WipeGuardAbortError).ratio).toBe(0);
+  });
+
+  // ── Test 8: ALL-NULL HEADS — Rule 3 fires even when incoming has no head values ─
+  //
+  // Scenario: a malformed workbook succeeds parsing but the head column is
+  // absent, so every row's headCanon is null.  The incoming row count equals
+  // the existing total, so Rules 1 & 2 both pass.  Because memberGuardEnabled
+  // is true, Rule 3 still runs and fires for the first existing (month, head)
+  // pair it finds — preventing a wholesale erasure of member attribution.
+  //
+  // This is the bypass that inference-based activation ("callerPassedHead")
+  // would have missed: incoming.some(r => r.head != null) === false, which
+  // would have silently skipped Rule 3.
+  it("8: aborts via Rule 3 when memberGuardEnabled=true but all incoming heads are null", async () => {
+    const MEMBER_X = "member-x";
+
+    // Seed enough rows to exceed GUARD_HEAD_MIN_ROWS.
+    await seedWithHead("Jul-99", 100, MEMBER_X, DISTS_5);
+
+    const totalBefore = await dbCount("Jul-99");
+    console.log(`\n[T8] Jul-99 BEFORE: ${totalBefore} rows (head=${MEMBER_X})`);
+
+    // Incoming: same row count (100%), but every head is null — simulates a
+    // workbook where the head column has been lost.
+    const incoming = incRows("Jul-99", 100, DISTS_5); // head defaults to null
+    expect(incoming.every((r) => r.head === null)).toBe(true);
+
+    // Company-wide ratio is 100/100 = 1.0 — Rules 1 & 2 pass.
+    // Rule 3 must still fire because memberGuardEnabled=true.
+    let caughtError: unknown;
+    await expect(
+      db.transaction(async (tx) => {
+        await assertSkuWipeGuard({
+          tx: tx as any,
+          fy: TEST_FY,
+          incoming,
+          skipGuard: false,
+          callerLabel: "test-8",
+          memberGuardEnabled: true, // explicit — must not be inferred from head presence
+        });
+        await tx.execute(sql`DELETE FROM secondary_sku_line WHERE fy = ${TEST_FY}`);
+      }),
+    ).rejects.toSatisfy((err: unknown) => {
+      caughtError = err;
+      return (
+        err instanceof WipeGuardAbortError &&
+        err.rule === "member" &&
+        err.month === "Jul-99" &&
+        err.incoming === 0 &&
+        err.existing >= GUARD_HEAD_MIN_ROWS
+      );
+    });
+
+    const totalAfter = await dbCount("Jul-99");
+    console.log(`[T8] Jul-99 AFTER: ${totalAfter} rows (must equal BEFORE — transaction rolled back)`);
+    console.log(`[T8] Error: ${(caughtError as Error).message}`);
+
+    expect(totalAfter).toBe(totalBefore);
+    expect((caughtError as WipeGuardAbortError).rule).toBe("member");
+    expect((caughtError as WipeGuardAbortError).incoming).toBe(0);
+    expect((caughtError as WipeGuardAbortError).existing).toBeGreaterThanOrEqual(GUARD_HEAD_MIN_ROWS);
   });
 });
