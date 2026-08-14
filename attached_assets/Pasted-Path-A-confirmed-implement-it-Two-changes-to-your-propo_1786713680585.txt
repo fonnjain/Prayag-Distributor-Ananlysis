@@ -1,0 +1,45 @@
+Path A confirmed - implement it. Two changes to your proposal first.
+
+1. THE TWO SOURCES DISAGREE - do not mix them in one sentence
+secondary_register_line gives Ayan 415 lines / 71,470 qty.
+secondary_sku_line gives 92 lines / 20,272 qty. Same customer, same window,
+4.5x apart.
+
+Your Tab 1 warning says "...bought from Prayag in N of 12 months (lineCount
+lines), but not this item." That reads as though all 415 lines were checked.
+Only 92 were. If the missing 323 lines contain the item, the warning is wrong.
+
+Derive BOTH the customer-level and item-level figures from secondary_sku_line,
+so the sentence is internally consistent. Keep the register-line count only in
+the separate info block, clearly labelled as a different source, or drop it.
+
+Also report why the two differ - is secondary_sku_line only populated where an
+item code resolved? Print the count of secondary_register_line rows for Ayan
+that have no matching secondary_sku_line row.
+
+2. CUT THE GREEN CONFIRMATIONS
+Four of your six messages tell a salesperson their correct choice was correct.
+On a phone in a shop that is four things to read that carry no decision.
+
+Keep: the two ⚠ warnings, and the customer-level info block shown once.
+Drop: the ✓ "Consistent with Tab 1" and "Consistent with Tab 2" messages. If
+you keep anything there, make it a quiet one-line fact with no tick and no tab
+recommendation.
+
+3. TAB 3 unchanged - the customer_master existence check is correct as built.
+
+VERIFY
+a. For Ayan Enterprise and an item code he DID buy (use one of the 58 - 123,
+   324, 144), print what the form shows on Tab 1 and on Tab 2. Confirm Tab 1
+   is quiet and Tab 2 warns.
+b. Same for an item code he did NOT buy. Confirm Tab 1 warns and Tab 2 is
+   quiet.
+c. Print the API response for both cases, showing itemFound, itemLineCount
+   and itemQty.
+d. Cross-check one item-level figure against a direct secondary_sku_line
+   query. They must match exactly.
+e. Print every rendered message verbatim as shipped.
+f. Confirm the customer-level info block and the item-level warning now cite
+   the same source.
+g. Commit hash, git cat-file -t, and git merge-base --is-ancestor <hash> main
+   with the exit code - note the argument order, commit first then main.

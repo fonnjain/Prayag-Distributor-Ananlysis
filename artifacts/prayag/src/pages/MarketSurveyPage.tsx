@@ -26,7 +26,18 @@ interface HierarchyState { canon: string; parent: string; isSplit: boolean }
 interface CustomerRow { id: string; company: string; state: string | null; district: string | null }
 interface ItemRow { itemCode: string; itemName: string | null; currentMrp: number | null; effectiveFrom: string | null }
 interface MetaResponse { segments: string[]; knownBrands: { brand: string; surveyCount: number }[] }
-interface PurchaseLookup { found: boolean; totalQty: number; lineCount: number; customerName: string; months: string[] }
+interface PurchaseLookup {
+  found: boolean;           // any secondary_sku_line rows for this retailer in last 12 months
+  skuLineCount: number;     // customer-level line count (secondary_sku_line)
+  skuTotalQty: number;      // customer-level qty (secondary_sku_line)
+  monthCount: number;       // distinct months with purchases
+  itemFound: boolean;       // this specific item_code found in secondary_sku_line
+  itemLineCount: number;    // item-level line count
+  itemQty: number;          // item-level qty
+  customerName: string;
+  prayagItemCode: string | null;
+  months: string[];
+}
 
 interface SurveyRow {
   id: number; surveyedAt: string; recordedBy: string;
@@ -328,27 +339,26 @@ function ItemLineCard({ line, lineIndex, totalLines, segments, knownBrands, reta
         </Field>
       </div>
 
-      {/* Purchase lookup warning */}
+      {/* Purchase lookup — customer info + tab warnings */}
       {lookupEnabled && lookup && (
-        <div>
+        <div className="space-y-1">
+          {/* Customer-level info block: quiet, one line, source labelled */}
           {lookup.found ? (
-            <>
-              <div className="rounded-md bg-green-50 border border-green-200 px-3 py-2 text-xs text-green-800">
-                ✓ {lookup.customerName} had <strong>{lookup.lineCount} line{lookup.lineCount !== 1 ? "s" : ""}</strong> in the secondary register in the last 12 months (qty {lookup.totalQty.toFixed(0)})
-              </div>
-              {surveyType === "new_sku" && (
-                <Warn>⚠ Purchase records found — this item may belong in Tab 1 (Existing SKU), not Tab 2. Submit anyway if you are certain.</Warn>
-              )}
-            </>
+            <p className="text-xs text-muted-foreground px-1">
+              {lookup.customerName} — {lookup.skuLineCount} line{lookup.skuLineCount !== 1 ? "s" : ""} across {lookup.monthCount} of 12 months in secondary SKU records ({lookup.skuTotalQty.toFixed(0)} pieces).
+            </p>
           ) : (
-            <>
-              <div className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
-                No purchase of {line.prayagItemCode} recorded for {lookup.customerName} in the last 12 months.
-              </div>
-              {surveyType === "existing_sku" && (
-                <Warn>⚠ No recent purchase found — this item may belong in Tab 2 (New SKU), not Tab 1. Submit anyway if you are certain.</Warn>
-              )}
-            </>
+            <p className="text-xs text-muted-foreground px-1">
+              {lookup.customerName} — no secondary SKU records in the last 12 months.
+            </p>
+          )}
+          {/* Tab 1 warning: item not found → may belong in Tab 2 */}
+          {surveyType === "existing_sku" && !lookup.itemFound && (
+            <Warn>⚠ No purchase of {lookup.prayagItemCode} found in secondary SKU records in the last 12 months. This survey may belong in Tab 2 (New SKU). Submit anyway if you are certain.</Warn>
+          )}
+          {/* Tab 2 warning: item found → may belong in Tab 1 */}
+          {surveyType === "new_sku" && lookup.itemFound && (
+            <Warn>⚠ {lookup.prayagItemCode} was purchased in secondary SKU records in the last 12 months ({lookup.itemLineCount} line{lookup.itemLineCount !== 1 ? "s" : ""}, {lookup.itemQty.toFixed(0)} pieces). This survey may belong in Tab 1 (Existing SKU). Submit anyway if you are certain.</Warn>
           )}
         </div>
       )}

@@ -138,12 +138,15 @@ router.get("/market-survey/products", async (req, res) => {
 });
 
 // ── GET /api/market-survey/purchase-lookup ────────────────────────────────
-// Check whether a customer (retailer) appears in the secondary register for
-// the last 12 months. Optionally echoes back prayagItemCode for context.
-// Used by the survey form to warn when Tab 1/2 choice may be wrong.
+// Check secondary_sku_line (item-code-resolved rows only) for:
+//   - customer-level: did this retailer appear at all in the last 12 months?
+//   - item-level:     was this specific prayagItemCode purchased?
+// Both figures come from the same table so the warning text is internally consistent.
+// Note: secondary_sku_line only contains rows where a brand resolved to an item_code;
+// secondary_register_line has broader coverage but no item_code column.
 router.get("/market-survey/purchase-lookup", async (req, res) => {
   try {
-    const customerId    = str(req.query.customerId);
+    const customerId     = str(req.query.customerId);
     const prayagItemCode = str(req.query.prayagItemCode);
 
     if (!customerId) { res.status(400).json({ error: "customerId required" }); return; }
@@ -157,8 +160,9 @@ router.get("/market-survey/purchase-lookup", async (req, res) => {
       return;
     }
     const customerName = cmResult.rows[0].company;
+    const namePat = `%${customerName.replace(/[%_]/g, "\\$&")}%`;
 
-    // Compute last 12 month labels ("Apr-25", "Aug-26", …)
+    // Compute last 12 month labels ("Sep-25" … "Aug-26")
     const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
     const now  = new Date();
     const last12: string[] = [];
@@ -167,31 +171,56 @@ router.get("/market-survey/purchase-lookup", async (req, res) => {
       last12.push(`${MON[d.getMonth()]}-${String(d.getFullYear()).slice(2)}`);
     }
 
-    const result = await pool.query<{
-      total_qty: string; line_count: string; months: string[] | null;
-    }>(
-      `SELECT
-         COALESCE(SUM(qty), 0)::text                                              AS total_qty,
-         COUNT(*)::text                                                            AS line_count,
-         ARRAY_AGG(DISTINCT month_label ORDER BY month_label)
-           FILTER (WHERE month_label IS NOT NULL)                                 AS months
-       FROM secondary_register_line
-       WHERE customer ILIKE $1
-         AND month_label = ANY($2)`,
-      [`%${customerName.replace(/[%_]/g, "\\$&")}%`, last12],
-    );
+    // Both queries target secondary_sku_line so the numbers are from the same source.
+    const [custResult, itemResult] = await Promise.all([
+      // Customer-level: all item_codes for this retailer in last 12 months
+      pool.query<{ line_count: string; total_qty: string; months: string[] | null }>(
+        `SELECT
+           COUNT(*)::text                                                           AS line_count,
+           COALESCE(SUM(qty), 0)::text                                             AS total_qty,
+           ARRAY_AGG(DISTINCT month_label ORDER BY month_label)
+             FILTER (WHERE month_label IS NOT NULL)                                AS months
+         FROM secondary_sku_line
+         WHERE retailer ILIKE $1
+           AND month_label = ANY($2)`,
+        [namePat, last12],
+      ),
+      // Item-level: this specific item_code only (only meaningful if prayagItemCode supplied)
+      prayagItemCode
+        ? pool.query<{ line_count: string; total_qty: string }>(
+            `SELECT
+               COUNT(*)::text                      AS line_count,
+               COALESCE(SUM(qty), 0)::text         AS total_qty
+             FROM secondary_sku_line
+             WHERE retailer ILIKE $1
+               AND item_code = $2
+               AND month_label = ANY($3)`,
+            [namePat, prayagItemCode, last12],
+          )
+        : Promise.resolve({ rows: [{ line_count: "0", total_qty: "0" }] }),
+    ]);
 
-    const row       = result.rows[0];
-    const lineCount = parseInt(row?.line_count ?? "0", 10);
-    const totalQty  = parseFloat(row?.total_qty ?? "0");
+    const custRow      = custResult.rows[0];
+    const skuLineCount = parseInt(custRow?.line_count ?? "0", 10);
+    const skuTotalQty  = parseFloat(custRow?.total_qty  ?? "0");
+    const months       = custRow?.months ?? [];
+    const monthCount   = months.length;
+
+    const itemRow      = itemResult.rows[0];
+    const itemLineCount = parseInt(itemRow?.line_count ?? "0", 10);
+    const itemQty       = parseFloat(itemRow?.total_qty  ?? "0");
 
     res.json({
-      found:        lineCount > 0,
-      totalQty,
-      lineCount,
+      found:         skuLineCount > 0,
+      skuLineCount,
+      skuTotalQty,
+      monthCount,
+      itemFound:     itemLineCount > 0,
+      itemLineCount,
+      itemQty,
       customerName,
       prayagItemCode,
-      months:       row?.months ?? [],
+      months,
     });
   } catch (err) {
     res.status(500).json({ error: String(err) });
