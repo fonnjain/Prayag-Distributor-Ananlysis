@@ -516,4 +516,80 @@ router.post(
   },
 );
 
+// ── GET /api/admin/customer-state-head-report ─────────────────────────────────
+// Returns a summary of customer_master state-head coverage:
+//   - counts per head_confidence value (including NULL as 'Guessed')
+//   - up to 100 unresolved (state_head IS NULL) sample rows with id, company,
+//     state, and type so the data gap can be investigated and fixed.
+// Optional query param: ?state=X  narrows the sample + unresolved count to one state.
+// Protected by X-Admin-Secret.
+router.get(
+  "/admin/customer-state-head-report",
+  async (req: Request, res: Response): Promise<void> => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const { pool: dbPool } = await import("@workspace/db");
+      const stateFilter = typeof req.query.state === "string" ? req.query.state.trim() : null;
+
+      // Counts per head_confidence (NULL rows counted as 'Guessed' per the backfill convention)
+      const { rows: confidenceCounts } = await dbPool.query<{
+        confidence: string;
+        count: string;
+      }>(
+        `SELECT COALESCE(head_confidence, 'Guessed') AS confidence,
+                COUNT(*) AS count
+           FROM customer_master
+          GROUP BY COALESCE(head_confidence, 'Guessed')
+          ORDER BY count DESC`,
+      );
+
+      // Unresolved sample: state_head IS NULL, optionally filtered by state
+      const sampleParams: string[] = [];
+      const stateClause = stateFilter
+        ? (sampleParams.push(stateFilter), `AND state = $${sampleParams.length}`)
+        : "";
+
+      const { rows: unresolvedSample } = await dbPool.query<{
+        id: string;
+        company: string | null;
+        state: string | null;
+        type: string | null;
+      }>(
+        `SELECT id, company, state, type
+           FROM customer_master
+          WHERE state_head IS NULL
+          ${stateClause}
+          ORDER BY state NULLS LAST, company
+          LIMIT 100`,
+        sampleParams,
+      );
+
+      // Unresolved total count (same state filter)
+      const { rows: unresolvedCountRows } = await dbPool.query<{ total: string }>(
+        `SELECT COUNT(*) AS total
+           FROM customer_master
+          WHERE state_head IS NULL
+          ${stateClause}`,
+        sampleParams,
+      );
+
+      res.json({
+        confidenceCounts: confidenceCounts.map((r) => ({
+          confidence: r.confidence,
+          count: Number(r.count),
+        })),
+        unresolved: {
+          total: Number(unresolvedCountRows[0]?.total ?? 0),
+          stateFilter: stateFilter ?? null,
+          sample: unresolvedSample,
+        },
+      });
+    } catch (err) {
+      req.log.error({ err }, "customer-state-head-report failed");
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+);
+
 export default router;
+
