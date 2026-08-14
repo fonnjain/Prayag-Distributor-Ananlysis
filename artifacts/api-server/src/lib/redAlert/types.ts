@@ -185,8 +185,10 @@ export type DetectionContext = {
   // Customer master (entity type)
   customerMaster: Map<string, CustomerMasterRow>;  // keyed by company name (normalised)
 
-  // Retailer → distributor across FYs (for Guard 5)
-  retailerDistributors: Map<string, Map<string, Set<string>>>;  // retailer → fy → Set<distributor>
+  // Retailer → distributor mappings keyed by `${fy}|${monthLabel}` (for Guard 5).
+  // Preserving the month dimension prevents a reassignment outside the alert window
+  // from suppressing a legitimate within-window B3.
+  retailerDistributors: Map<string, Map<string, Set<string>>>;  // retailer → `${fy}|${month_label}` → Set<distributor>
 
   // Frozen months per FY (for Guard 3 — primary data completeness)
   frozenMonths: Map<string, Set<string>>;  // fy → Set<monthLabel>

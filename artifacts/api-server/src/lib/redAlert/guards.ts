@@ -21,20 +21,47 @@ import type { RawAlert, GuardResult, DetectionContext } from "./types.js";
 
 // ── Guard context helpers ─────────────────────────────────────────────────────
 
-function customerChannelsForFy(ctx: DetectionContext, customer: string, fy: string): Set<string> {
+// Scoped to the alert's window months, not the full FY, so a reclassification
+// that occurs outside the compared period cannot suppress a valid alert.
+function customerChannelsForWindow(
+  ctx: DetectionContext, customer: string, fy: string, months: string[],
+): Set<string> {
+  const ms = new Set(months);
   const seen = new Set<string>();
   for (const r of ctx.customerSale) {
-    if (r.customer === customer && r.fy === fy && r.channel != null) seen.add(r.channel);
+    if (r.customer === customer && r.fy === fy && ms.has(r.monthLabel) && r.channel != null) {
+      seen.add(r.channel);
+    }
   }
   return seen;
 }
 
-function customerHeadsForFy(ctx: DetectionContext, customer: string, fy: string): Set<string> {
+function customerHeadsForWindow(
+  ctx: DetectionContext, customer: string, fy: string, months: string[],
+): Set<string> {
+  const ms = new Set(months);
   const seen = new Set<string>();
   for (const r of ctx.customerSale) {
-    if (r.customer === customer && r.fy === fy && r.headCanon != null) seen.add(r.headCanon);
+    if (r.customer === customer && r.fy === fy && ms.has(r.monthLabel) && r.headCanon != null) {
+      seen.add(r.headCanon);
+    }
   }
   return seen;
+}
+
+// Returns the set of distributors serving a retailer within a specific set of months in a FY.
+// Uses the month-keyed retailerDistributors map so only within-window attribution is considered.
+function distForWindow(
+  ctx: DetectionContext, retailer: string, fy: string, months: string[],
+): Set<string> {
+  const out = new Set<string>();
+  const retailerMap = ctx.retailerDistributors.get(retailer);
+  if (!retailerMap) return out;
+  for (const month of months) {
+    const key = `${fy}|${month}`;
+    for (const d of retailerMap.get(key) ?? []) out.add(d);
+  }
+  return out;
 }
 
 // ── Guard implementations ─────────────────────────────────────────────────────
@@ -48,21 +75,23 @@ function guard1ChannelReclassification(
   alert: RawAlert, ctx: DetectionContext, currentFy: string, priorFy: string,
 ): GuardResult {
   if (!["B1", "B2", "B3", "B4", "B5", "C1"].includes(alert.code)) return { pass: true };
-  const { entityKey } = alert;
+  const { entityKey, currentMonths, priorMonths } = alert;
 
-  const curChannels = customerChannelsForFy(ctx, entityKey, currentFy);
-  const priChannels = customerChannelsForFy(ctx, entityKey, priorFy);
-  const curHeads = customerHeadsForFy(ctx, entityKey, currentFy);
-  const priHeads = customerHeadsForFy(ctx, entityKey, priorFy);
+  // Scoped to the alert's own window months — a reclassification that occurs
+  // outside the compared window must not suppress a valid within-window alert.
+  const curChannels = customerChannelsForWindow(ctx, entityKey, currentFy, currentMonths);
+  const priChannels = customerChannelsForWindow(ctx, entityKey, priorFy, priorMonths);
+  const curHeads = customerHeadsForWindow(ctx, entityKey, currentFy, currentMonths);
+  const priHeads = customerHeadsForWindow(ctx, entityKey, priorFy, priorMonths);
 
   for (const c of curChannels) {
     if (!priChannels.has(c) && priChannels.size > 0) {
-      return { pass: false, guard: 1, reason: `Customer channel changed: now "${c}" (prior: ${[...priChannels].join(", ")})` };
+      return { pass: false, guard: 1, reason: `Customer channel changed within window: now "${c}" (prior: ${[...priChannels].join(", ")})` };
     }
   }
   for (const h of curHeads) {
     if (!priHeads.has(h) && priHeads.size > 0) {
-      return { pass: false, guard: 1, reason: `Customer head_canon changed: now "${h}" (prior: ${[...priHeads].join(", ")})` };
+      return { pass: false, guard: 1, reason: `Customer head_canon changed within window: now "${h}" (prior: ${[...priHeads].join(", ")})` };
     }
   }
   return { pass: true };
@@ -153,14 +182,17 @@ function guard5DistributorReassignment(
   alert: RawAlert, ctx: DetectionContext, currentFy: string, priorFy: string,
 ): GuardResult {
   if (alert.code !== "B3") return { pass: true };
-  const { entityKey } = alert;
+  const { entityKey, currentMonths, priorMonths } = alert;
 
-  const curDists = ctx.retailerDistributors.get(entityKey)?.get(currentFy) ?? new Set<string>();
-  const priDists = ctx.retailerDistributors.get(entityKey)?.get(priorFy) ?? new Set<string>();
+  // Compare distributor sets scoped to the alert's window months only — a
+  // reassignment that happens outside the compared window must not suppress
+  // a legitimate within-window zero-purchase finding.
+  const curDists = distForWindow(ctx, entityKey, currentFy, currentMonths);
+  const priDists = distForWindow(ctx, entityKey, priorFy, priorMonths);
 
-  if (priDists.size === 0) return { pass: true }; // no prior distributor mapping — can't assess
+  if (priDists.size === 0) return { pass: true }; // no prior attribution in window — can't assess
 
-  // (a) Distributor set changed between periods (any addition or removal)
+  // (a) Distributor set changed between the two windows (any addition or removal)
   const changedDistributors =
     [...priDists].some((d) => !curDists.has(d)) ||
     [...curDists].some((d) => !priDists.has(d));
@@ -168,18 +200,18 @@ function guard5DistributorReassignment(
   if (changedDistributors) {
     return {
       pass: false, guard: 5,
-      reason: `Retailer "${entityKey}" served by different distributors across periods `
-        + `(prior: ${[...priDists].join(", ")}; current: ${curDists.size > 0 ? [...curDists].join(", ") : "none"}) `
+      reason: `Retailer "${entityKey}" served by different distributors within the alert windows `
+        + `(prior window: ${[...priDists].join(", ")}; current window: ${curDists.size > 0 ? [...curDists].join(", ") : "none"}) `
         + `— possible redistribution, not confirmed dropout`,
     };
   }
 
-  // (b) Absent from current but not from prior — could be a secondary attribution gap
+  // (b) Absent from current window but attributed in prior window — redistribution gap
   if (curDists.size === 0 && priDists.size > 0) {
     return {
       pass: false, guard: 5,
-      reason: `Retailer "${entityKey}" absent from current-period secondary data `
-        + `but had distributor attribution in prior period — possible redistribution gap`,
+      reason: `Retailer "${entityKey}" absent from current-window secondary data `
+        + `but had distributor attribution in the prior window — possible redistribution gap`,
     };
   }
 

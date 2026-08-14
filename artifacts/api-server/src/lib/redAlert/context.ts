@@ -148,13 +148,16 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
       [],
     ),
 
-    // 9. Retailer-distributor mapping (for Guard 5)
-    pool.query<{ fy: string; retailer: string; distributor: string }>(
-      `SELECT fy, retailer, distributor
+    // 9. Retailer-distributor mapping per month (for Guard 5).
+    // month_label is preserved so guards compare only within the alert's window,
+    // not across the full FY — a reassignment outside the window must not suppress
+    // a valid within-window B3.
+    pool.query<{ fy: string; month_label: string; retailer: string; distributor: string }>(
+      `SELECT fy, month_label, retailer, distributor
          FROM secondary_sku_line
         WHERE fy = ANY(${secFyArr})
           AND retailer IS NOT NULL AND distributor IS NOT NULL
-        GROUP BY fy, retailer, distributor`,
+        GROUP BY fy, month_label, retailer, distributor`,
       secFyList,
     ),
 
@@ -254,13 +257,15 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
     });
   }
 
-  // Build retailer → fy → Set<distributor>
+  // Build retailer → `${fy}|${monthLabel}` → Set<distributor>
+  // Month-level granularity so Guard 5 can compare only within the alert window.
   const retailerDistributors = new Map<string, Map<string, Set<string>>>();
   for (const r of retailDistRes.rows) {
     if (!retailerDistributors.has(r.retailer)) retailerDistributors.set(r.retailer, new Map());
-    const fyMap = retailerDistributors.get(r.retailer)!;
-    if (!fyMap.has(r.fy)) fyMap.set(r.fy, new Set());
-    fyMap.get(r.fy)!.add(r.distributor);
+    const monthMap = retailerDistributors.get(r.retailer)!;
+    const key = `${r.fy}|${r.month_label}`;
+    if (!monthMap.has(key)) monthMap.set(key, new Set());
+    monthMap.get(key)!.add(r.distributor);
   }
 
   // Build frozen months: fy → Set<monthLabel>
