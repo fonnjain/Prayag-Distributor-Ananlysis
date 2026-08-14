@@ -1,12 +1,13 @@
-// GET  /api/market-survey/meta               — segments, known brands, picker states, current recorder
-// GET  /api/market-survey/customers          — customer_master autocomplete (?q=)
-// GET  /api/market-survey/products           — mrp_master autocomplete (?segment=&q=)
-// GET  /api/market-survey                   — list surveys (?segment=&brand=&recorder=&limit=&offset=)
-// POST /api/market-survey                   — submit; recorded_by = recorderName from body (self-declared, not authenticated)
-// GET  /api/market-survey/summary           — per-item MRP vs median competitor net price
-// GET  /api/market-survey/by-brand          — competitor brand aggregates
-// GET  /api/market-survey/coverage          — segments × states with <5 surveys
-// PATCH /api/market-survey/:id              — edit within 24 h (same recorder)
+// GET  /api/market-survey/meta                    — segments, known brands, picker states
+// GET  /api/market-survey/customers               — customer_master autocomplete (?q=)
+// GET  /api/market-survey/products                — mrp_master autocomplete (?segment=&q=)
+// GET  /api/market-survey/purchase-lookup         — secondary register check (?customerId=&prayagItemCode=)
+// GET  /api/market-survey                        — list surveys (?segment=&brand=&recorder=&limit=&offset=)
+// POST /api/market-survey                        — submit multi-line; recorded_by = recorderName (self-declared)
+// GET  /api/market-survey/summary                — per-item MRP vs median competitor net price
+// GET  /api/market-survey/by-brand               — competitor brand aggregates
+// GET  /api/market-survey/coverage               — segments × states with <5 surveys
+// PATCH /api/market-survey/:id                   — edit within 24 h (same recorder)
 
 import { Router } from "express";
 import { pool } from "@workspace/db";
@@ -136,151 +137,225 @@ router.get("/market-survey/products", async (req, res) => {
   }
 });
 
+// ── GET /api/market-survey/purchase-lookup ────────────────────────────────
+// Check whether a customer (retailer) appears in the secondary register for
+// the last 12 months. Optionally echoes back prayagItemCode for context.
+// Used by the survey form to warn when Tab 1/2 choice may be wrong.
+router.get("/market-survey/purchase-lookup", async (req, res) => {
+  try {
+    const customerId    = str(req.query.customerId);
+    const prayagItemCode = str(req.query.prayagItemCode);
+
+    if (!customerId) { res.status(400).json({ error: "customerId required" }); return; }
+
+    const cmResult = await pool.query<{ company: string }>(
+      "SELECT company FROM customer_master WHERE id = $1 LIMIT 1",
+      [customerId],
+    );
+    if (!cmResult.rows.length) {
+      res.status(404).json({ error: "Customer not found" });
+      return;
+    }
+    const customerName = cmResult.rows[0].company;
+
+    // Compute last 12 month labels ("Apr-25", "Aug-26", …)
+    const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const now  = new Date();
+    const last12: string[] = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      last12.push(`${MON[d.getMonth()]}-${String(d.getFullYear()).slice(2)}`);
+    }
+
+    const result = await pool.query<{
+      total_qty: string; line_count: string; months: string[] | null;
+    }>(
+      `SELECT
+         COALESCE(SUM(qty), 0)::text                                              AS total_qty,
+         COUNT(*)::text                                                            AS line_count,
+         ARRAY_AGG(DISTINCT month_label ORDER BY month_label)
+           FILTER (WHERE month_label IS NOT NULL)                                 AS months
+       FROM secondary_register_line
+       WHERE customer ILIKE $1
+         AND month_label = ANY($2)`,
+      [`%${customerName.replace(/[%_]/g, "\\$&")}%`, last12],
+    );
+
+    const row       = result.rows[0];
+    const lineCount = parseInt(row?.line_count ?? "0", 10);
+    const totalQty  = parseFloat(row?.total_qty ?? "0");
+
+    res.json({
+      found:        lineCount > 0,
+      totalQty,
+      lineCount,
+      customerName,
+      prayagItemCode,
+      months:       row?.months ?? [],
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // ── POST /api/market-survey ───────────────────────────────────────────────
+// Submit a multi-line survey (one retailer, N item observations).
+// Body: { recorderName, surveyType, customerId?, prospectName?,
+//         pendingProspectId?, state?, district?, surveyedAt?,
+//         lines: [{ segment, competitorBrand, entryMode, netPrice|mrp+discountPct,
+//                   prayagItemCode?, competitorProduct?, unit?, packSize?, note? }] }
+// recorded_by is self-declared — unverified.
 router.post("/market-survey", async (req, res) => {
   try {
     const b = req.body as Record<string, unknown>;
 
-    // Recorder identity: self-declared name typed by the user on their device and
-    // stored in localStorage. It is NOT authenticated — anyone can type any name.
-    // This is intentional for a field tool where API-key distribution is impractical,
-    // but reviewers should treat recorded_by as an unverified label, not a credential.
+    // ── Recorder ──────────────────────────────────────────────────────────
     const recorderName = str(b.recorderName);
-    if (!recorderName) {
-      res.status(400).json({ error: "recorderName is required" });
+    if (!recorderName) { res.status(400).json({ error: "recorderName is required" }); return; }
+
+    // ── Survey type ───────────────────────────────────────────────────────
+    const surveyType = str(b.surveyType);
+    const VALID_TYPES = ["existing_sku", "new_sku", "new_customer"];
+    if (!surveyType || !VALID_TYPES.includes(surveyType)) {
+      res.status(400).json({ error: "surveyType must be existing_sku | new_sku | new_customer" });
+      return;
+    }
+    const isExistingBuyer = surveyType !== "new_customer";
+
+    // ── Lines ─────────────────────────────────────────────────────────────
+    const rawLines = Array.isArray(b.lines) ? (b.lines as Record<string, unknown>[]) : null;
+    if (!rawLines || rawLines.length === 0) {
+      res.status(400).json({ error: "lines must be a non-empty array" });
       return;
     }
 
-    // ── Validate required fields ──────────────────────────────────────────
-    const isExistingBuyer = bool(b.isExistingBuyer);
-    if (isExistingBuyer === null) {
-      res.status(400).json({ error: "isExistingBuyer (boolean) is required" });
-      return;
-    }
-
-    const segment = str(b.segment);
-    if (!segment) { res.status(400).json({ error: "segment is required" }); return; }
-
-    const competitorBrand = str(b.competitorBrand);
-    if (!competitorBrand) { res.status(400).json({ error: "competitorBrand is required" }); return; }
-
-    const entryMode = str(b.entryMode);
-    if (entryMode !== "net_direct" && entryMode !== "mrp_discount") {
-      res.status(400).json({ error: "entryMode must be 'net_direct' or 'mrp_discount'" });
-      return;
-    }
-
-    // ── Net price ──────────────────────────────────────────────────────────
-    let netPrice: number | null = null;
-    let mrp: number | null = null;
-    let discountPct: number | null = null;
-
-    if (entryMode === "net_direct") {
-      netPrice = num(b.netPrice);
-      if (netPrice === null || netPrice <= 0) {
-        res.status(400).json({ error: "netPrice must be a positive number for entry_mode net_direct" });
-        return;
-      }
-    } else {
-      mrp = num(b.mrp);
-      discountPct = num(b.discountPct);
-      if (mrp === null || mrp <= 0) {
-        res.status(400).json({ error: "mrp must be a positive number for entry_mode mrp_discount" });
-        return;
-      }
-      if (discountPct === null || discountPct < 0 || discountPct >= 100) {
-        res.status(400).json({ error: "discountPct must be 0–99.99 for entry_mode mrp_discount" });
-        return;
-      }
-      netPrice = Math.round(mrp * (1 - discountPct / 100) * 100) / 100;
-    }
-
-    // ── Respondent ────────────────────────────────────────────────────────
-    const customerId    = isExistingBuyer ? str(b.customerId)    : null;
-    const prospectName  = isExistingBuyer ? null                 : str(b.prospectName);
-    const state         = str(b.state)    ?? null;
-    const district      = str(b.district) ?? null;
+    // ── Retailer fields (shared across all lines) ─────────────────────────
+    const customerId       = isExistingBuyer ? str(b.customerId)   : null;
+    const prospectName     = !isExistingBuyer ? str(b.prospectName) : null;
+    let   resolvedState    = str(b.state)    ?? null;
+    let   resolvedDistrict = str(b.district) ?? null;
+    const pendingProspectId = num(b.pendingProspectId);
+    const surveyedAt        = str(b.surveyedAt);
 
     if (isExistingBuyer && !customerId) {
-      res.status(400).json({ error: "customerId is required when isExistingBuyer is true" });
+      res.status(400).json({ error: "customerId required for existing_sku / new_sku surveys" });
       return;
     }
-    if (!isExistingBuyer && !prospectName) {
-      res.status(400).json({ error: "prospectName is required when isExistingBuyer is false" });
+    if (!isExistingBuyer && !prospectName && pendingProspectId == null) {
+      res.status(400).json({ error: "prospectName or pendingProspectId required for new_customer surveys" });
       return;
     }
 
-    // ── Optional fields ───────────────────────────────────────────────────
-    const prayagItemCode    = str(b.prayagItemCode);
-    const competitorProduct = str(b.competitorProduct);
-    const unit              = str(b.unit) ?? "piece";
-    const packSize          = str(b.packSize);
-    const reasons           = Array.isArray(b.reasons)
-      ? (b.reasons as unknown[]).map(String).filter(Boolean)
-      : [];
-    const monthlyVolume     = num(b.monthlyVolume);
-    const note              = str(b.note);
-
-    // ── surveyed_at (defaults to now if not provided) ─────────────────────
-    const surveyedAt = str(b.surveyedAt); // ISO string or null
-
-    // ── Verify customerId exists if given ─────────────────────────────────
     if (customerId) {
-      const check = await pool.query(
-        "SELECT 1 FROM customer_master WHERE id = $1 LIMIT 1",
-        [customerId],
-      );
+      const check = await pool.query("SELECT 1 FROM customer_master WHERE id = $1 LIMIT 1", [customerId]);
       if ((check.rowCount ?? 0) === 0) {
         res.status(400).json({ error: `Customer ${customerId} not found in customer_master` });
         return;
       }
+      if (!resolvedState || !resolvedDistrict) {
+        const cm = await pool.query<{ state: string | null; district: string | null }>(
+          "SELECT state, district FROM customer_master WHERE id = $1 LIMIT 1", [customerId],
+        );
+        if (!resolvedState)    resolvedState    = cm.rows[0]?.state    ?? null;
+        if (!resolvedDistrict) resolvedDistrict = cm.rows[0]?.district ?? null;
+      }
     }
 
-    // ── Derive state from customer if existing buyer and state not provided ─
-    let resolvedState = state;
-    let resolvedDistrict = district;
-    if (isExistingBuyer && customerId && (!resolvedState || !resolvedDistrict)) {
-      const cm = await pool.query<{ state: string | null; district: string | null }>(
-        "SELECT state, district FROM customer_master WHERE id = $1 LIMIT 1",
-        [customerId],
+    // ── Validate + parse each line ────────────────────────────────────────
+    interface ParsedLine {
+      segment: string; prayagItemCode: string | null; competitorBrand: string;
+      competitorProduct: string | null; netPrice: number; mrp: number | null;
+      discountPct: number | null; entryMode: string; unit: string;
+      packSize: string | null; reasons: string[]; monthlyVolume: number | null; note: string | null;
+    }
+    const parsedLines: ParsedLine[] = [];
+
+    for (let i = 0; i < rawLines.length; i++) {
+      const l = rawLines[i];
+      const n = i + 1;
+
+      const segment = str(l.segment);
+      if (!segment) { res.status(400).json({ error: `Line ${n}: segment required` }); return; }
+
+      const competitorBrand = str(l.competitorBrand);
+      if (!competitorBrand) { res.status(400).json({ error: `Line ${n}: competitorBrand required` }); return; }
+
+      const entryMode = str(l.entryMode);
+      if (entryMode !== "net_direct" && entryMode !== "mrp_discount") {
+        res.status(400).json({ error: `Line ${n}: entryMode must be net_direct or mrp_discount` }); return;
+      }
+
+      let lineNet: number;
+      let lineMrp: number | null = null;
+      let lineDisc: number | null = null;
+
+      if (entryMode === "net_direct") {
+        const np = num(l.netPrice);
+        if (np === null || np <= 0) { res.status(400).json({ error: `Line ${n}: netPrice must be positive` }); return; }
+        lineNet = np;
+      } else {
+        lineMrp  = num(l.mrp);
+        lineDisc = num(l.discountPct);
+        if (!lineMrp || lineMrp <= 0) { res.status(400).json({ error: `Line ${n}: mrp must be positive` }); return; }
+        if (lineDisc === null || lineDisc < 0 || lineDisc >= 100) {
+          res.status(400).json({ error: `Line ${n}: discountPct must be 0–99.99` }); return;
+        }
+        lineNet = Math.round(lineMrp * (1 - lineDisc / 100) * 100) / 100;
+      }
+
+      parsedLines.push({
+        segment,
+        prayagItemCode:    str(l.prayagItemCode),
+        competitorBrand:   competitorBrand.trim(),
+        competitorProduct: str(l.competitorProduct),
+        netPrice:          lineNet,
+        mrp:               lineMrp,
+        discountPct:       lineDisc,
+        entryMode,
+        unit:              str(l.unit) ?? "piece",
+        packSize:          str(l.packSize),
+        reasons:           Array.isArray(l.reasons) ? (l.reasons as unknown[]).map(String).filter(Boolean) : [],
+        monthlyVolume:     num(l.monthlyVolume),
+        note:              str(l.note),
+      });
+    }
+
+    // ── Generate survey_id (groups all lines from this submission) ─────────
+    const surveyId = crypto.randomUUID();
+
+    // ── Insert one row per line ───────────────────────────────────────────
+    const insertedRows: Array<{ id: number; netPrice: number }> = [];
+    for (const pl of parsedLines) {
+      const ins = await pool.query<{ id: number }>(
+        `INSERT INTO market_survey
+           (recorded_by, is_existing_buyer, customer_id, prospect_name,
+            state, district, segment, prayag_item_code,
+            competitor_brand, competitor_product,
+            net_price, mrp, discount_pct, entry_mode,
+            unit, pack_size, reasons, monthly_volume, note, surveyed_at,
+            pending_prospect_id, survey_id, survey_type)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
+                 COALESCE($20::timestamptz, now()), $21, $22, $23)
+         RETURNING id`,
+        [
+          recorderName, isExistingBuyer, customerId,
+          prospectName ?? (pendingProspectId != null ? null : str(b.prospectName)),
+          resolvedState, resolvedDistrict, pl.segment, pl.prayagItemCode,
+          pl.competitorBrand, pl.competitorProduct,
+          pl.netPrice, pl.mrp, pl.discountPct, pl.entryMode,
+          pl.unit, pl.packSize, pl.reasons, pl.monthlyVolume, pl.note,
+          surveyedAt, pendingProspectId, surveyId, surveyType,
+        ],
       );
-      if (!resolvedState)    resolvedState    = cm.rows[0]?.state    ?? null;
-      if (!resolvedDistrict) resolvedDistrict = cm.rows[0]?.district ?? null;
+      insertedRows.push({ id: ins.rows[0].id, netPrice: pl.netPrice });
     }
-
-    // Optional: link to a pending prospect (new distributor/retailer from form)
-    const pendingProspectId = num(b.pendingProspectId);
-
-    const insert = await pool.query<{ id: number }>(
-      `INSERT INTO market_survey
-         (recorded_by, is_existing_buyer, customer_id, prospect_name,
-          state, district, segment, prayag_item_code,
-          competitor_brand, competitor_product,
-          net_price, mrp, discount_pct, entry_mode,
-          unit, pack_size, reasons, monthly_volume, note, surveyed_at,
-          pending_prospect_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
-               COALESCE($20::timestamptz, now()), $21)
-       RETURNING id`,
-      [
-        recorderName, isExistingBuyer, customerId, prospectName,
-        resolvedState, resolvedDistrict, segment, prayagItemCode,
-        competitorBrand.trim(), competitorProduct,
-        netPrice, mrp, discountPct, entryMode,
-        unit, packSize, reasons, monthlyVolume, note, surveyedAt,
-        pendingProspectId,
-      ],
-    );
 
     res.status(201).json({
-      ok: true,
-      id: insert.rows[0].id,
-      netPrice,
-      mrp,
-      discountPct,
-      entryMode,
-      recordedBy: recorderName,
-      editableUntil: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+      ok:          true,
+      surveyId,
+      rows:        insertedRows,
+      rowCount:    insertedRows.length,
+      recordedBy:  recorderName,
     });
   } catch (err) {
     req.log?.error({ err }, "market-survey POST error");
@@ -317,7 +392,7 @@ router.get("/market-survey", async (req, res) => {
         net_price: string; mrp: string | null; discount_pct: string | null;
         entry_mode: string; unit: string; pack_size: string | null;
         reasons: string[]; monthly_volume: string | null; note: string | null;
-        created_at: string;
+        created_at: string; survey_id: string | null; survey_type: string | null;
       }>(
         `SELECT s.id, s.surveyed_at, s.recorded_by,
                 s.is_existing_buyer, s.customer_id,
@@ -328,7 +403,7 @@ router.get("/market-survey", async (req, res) => {
                 s.net_price::text, s.mrp::text, s.discount_pct::text,
                 s.entry_mode, s.unit, s.pack_size,
                 s.reasons, s.monthly_volume::text, s.note,
-                s.created_at
+                s.created_at, s.survey_id, s.survey_type
          FROM market_survey s
          LEFT JOIN customer_master cm ON cm.id = s.customer_id
          ${where}
@@ -371,6 +446,8 @@ router.get("/market-survey", async (req, res) => {
         monthlyVolume: r.monthly_volume ? parseFloat(r.monthly_volume) : null,
         note: r.note,
         createdAt: r.created_at,
+        surveyId: r.survey_id ?? null,
+        surveyType: r.survey_type ?? null,
         editable: new Date(r.created_at).getTime() + 24 * 3600 * 1000 > now,
       })),
     });

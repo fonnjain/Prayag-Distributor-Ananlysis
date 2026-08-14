@@ -871,6 +871,30 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_cp_brand_cat   ON competitor_price (competitor_brand, category);
     `,
   },
+  {
+    id: "029_market_survey_batched_lines",
+    sql: `
+      -- survey_id groups all lines from one multi-item submission.
+      -- survey_type is the explicit tab choice (never inferred from field population).
+      -- Existing rows get survey_type='unclassified' and a unique survey_id each.
+      ALTER TABLE market_survey
+        ADD COLUMN IF NOT EXISTS survey_id   UUID,
+        ADD COLUMN IF NOT EXISTS survey_type TEXT
+          CHECK (survey_type IN ('existing_sku','new_sku','new_customer','unclassified'));
+
+      UPDATE market_survey
+        SET survey_id   = gen_random_uuid(),
+            survey_type = 'unclassified'
+        WHERE survey_id IS NULL;
+
+      ALTER TABLE market_survey
+        ALTER COLUMN survey_id   SET NOT NULL,
+        ALTER COLUMN survey_type SET NOT NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_ms_survey_id   ON market_survey (survey_id);
+      CREATE INDEX IF NOT EXISTS idx_ms_survey_type ON market_survey (survey_type);
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {
