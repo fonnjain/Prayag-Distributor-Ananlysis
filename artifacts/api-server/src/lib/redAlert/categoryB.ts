@@ -4,6 +4,12 @@
 // B3: zero purchase now, non-zero in prior comparable period.
 // B4: a segment with prior value >= 5L has zero purchase now.
 // B5: distinct item codes down >= 50%, prior >= 20 codes.
+//
+// DATA SOURCES:
+//   Retailers: secondary_sku_line (ctx.retailerSale + ctx.retailerSku)
+//     — the authoritative sell-out source. sale_line_current (primary dispatch)
+//       records distributor→company shipments and does NOT carry per-retailer figures.
+//   Distributors / direct dealers: sale_line_current (ctx.customerSale + ctx.customerCode)
 
 import type { RawAlert, DetectionContext } from "./types.js";
 import { computeMrpIndex } from "./mrpIndex.js";
@@ -35,7 +41,8 @@ function materialityFloor(type: CustomerType, cfg: BConfig): number {
   return cfg.MATERIALITY_FLOORS.RETAILER_RUPEES;
 }
 
-// Aggregate sale value for a set of customers across a set of months in a FY.
+// ── Primary-data helpers (distributors / direct dealers) ──────────────────────
+
 function customerValue(ctx: DetectionContext, customer: string, fy: string, months: string[]): number {
   const ms = new Set(months);
   return ctx.customerSale
@@ -43,7 +50,6 @@ function customerValue(ctx: DetectionContext, customer: string, fy: string, mont
     .reduce((s, r) => s + r.value, 0);
 }
 
-// All distinct customers appearing in any of the given months/fy
 function customersIn(ctx: DetectionContext, fy: string, months: string[]): Set<string> {
   const ms = new Set(months);
   const out = new Set<string>();
@@ -53,7 +59,6 @@ function customersIn(ctx: DetectionContext, fy: string, months: string[]): Set<s
   return out;
 }
 
-// Distinct item codes for customer in fy/months
 function distinctCodes(ctx: DetectionContext, customer: string, fy: string, months: string[]): Set<string> {
   const ms = new Set(months);
   const out = new Set<string>();
@@ -63,7 +68,6 @@ function distinctCodes(ctx: DetectionContext, customer: string, fy: string, mont
   return out;
 }
 
-// Segment (group_canon) → value for customer in fy/months
 function segmentValues(ctx: DetectionContext, customer: string, fy: string, months: string[]): Map<string, number> {
   const ms = new Set(months);
   const out = new Map<string, number>();
@@ -75,13 +79,99 @@ function segmentValues(ctx: DetectionContext, customer: string, fy: string, mont
   return out;
 }
 
-// "2026-27" → "2025-26"
+// ── Pre-built lookup indexes for secondary retailer data ──────────────────────
+// Built ONCE per buildRetailerBAlerts call so per-retailer lookups are O(months),
+// not O(rows). With 838 k rows and 18 k retailers the naive approach hangs.
+
+type RetailerIndex = {
+  // retailer → `${fy}|${monthLabel}` → net_amount total
+  valueByMonth: Map<string, Map<string, number>>;
+  // retailer → `${fy}|${monthLabel}` → Set<itemCode>
+  codesByMonth: Map<string, Map<string, Set<string>>>;
+  // retailer → `${fy}|${monthLabel}` → segmentCanon → net_amount total
+  segsByMonth: Map<string, Map<string, Map<string, number>>>;
+  // all retailers with sale rows in a given `${fy}|${monthLabel}` window key
+  retailersInWindow: Map<string, Set<string>>;  // window key → Set<retailer>
+};
+
+function buildRetailerIndex(ctx: DetectionContext): RetailerIndex {
+  const valueByMonth   = new Map<string, Map<string, number>>();
+  const codesByMonth   = new Map<string, Map<string, Set<string>>>();
+  const segsByMonth    = new Map<string, Map<string, Map<string, number>>>();
+  const retailersInWindow = new Map<string, Set<string>>();
+
+  for (const r of ctx.retailerSale) {
+    const wk = `${r.fy}|${r.monthLabel}`;
+    if (!retailersInWindow.has(wk)) retailersInWindow.set(wk, new Set());
+    retailersInWindow.get(wk)!.add(r.retailer);
+
+    if (!valueByMonth.has(r.retailer)) valueByMonth.set(r.retailer, new Map());
+    const vm = valueByMonth.get(r.retailer)!;
+    vm.set(wk, (vm.get(wk) ?? 0) + r.value);
+  }
+
+  for (const r of ctx.retailerSku) {
+    const wk = `${r.fy}|${r.monthLabel}`;
+
+    if (!codesByMonth.has(r.retailer)) codesByMonth.set(r.retailer, new Map());
+    const cm = codesByMonth.get(r.retailer)!;
+    if (!cm.has(wk)) cm.set(wk, new Set());
+    cm.get(wk)!.add(r.itemCode);
+
+    if (!segsByMonth.has(r.retailer)) segsByMonth.set(r.retailer, new Map());
+    const sm = segsByMonth.get(r.retailer)!;
+    if (!sm.has(wk)) sm.set(wk, new Map());
+    const seg = r.segmentCanon ?? "Unmapped";
+    const segMap = sm.get(wk)!;
+    segMap.set(seg, (segMap.get(seg) ?? 0) + r.value);
+  }
+
+  return { valueByMonth, codesByMonth, segsByMonth, retailersInWindow };
+}
+
+function idxRetailerValue(idx: RetailerIndex, retailer: string, fy: string, months: string[]): number {
+  const vm = idx.valueByMonth.get(retailer);
+  if (!vm) return 0;
+  let total = 0;
+  for (const m of months) total += vm.get(`${fy}|${m}`) ?? 0;
+  return total;
+}
+
+function idxRetailersIn(idx: RetailerIndex, fy: string, months: string[]): Set<string> {
+  const out = new Set<string>();
+  for (const m of months) {
+    for (const r of idx.retailersInWindow.get(`${fy}|${m}`) ?? []) out.add(r);
+  }
+  return out;
+}
+
+function idxRetailerCodes(idx: RetailerIndex, retailer: string, fy: string, months: string[]): Set<string> {
+  const cm = idx.codesByMonth.get(retailer);
+  if (!cm) return new Set();
+  const out = new Set<string>();
+  for (const m of months) for (const c of cm.get(`${fy}|${m}`) ?? []) out.add(c);
+  return out;
+}
+
+function idxRetailerSegs(idx: RetailerIndex, retailer: string, fy: string, months: string[]): Map<string, number> {
+  const sm = idx.segsByMonth.get(retailer);
+  const out = new Map<string, number>();
+  if (!sm) return out;
+  for (const m of months) {
+    for (const [seg, v] of sm.get(`${fy}|${m}`) ?? []) {
+      out.set(seg, (out.get(seg) ?? 0) + v);
+    }
+  }
+  return out;
+}
+
+// ── FY helpers ────────────────────────────────────────────────────────────────
+
 function prevFy(fy: string): string {
   const start = parseInt(fy.slice(0, 4), 10);
   return `${start - 1}-${String(start % 100).padStart(2, "0")}`;
 }
 
-// Map current-FY months to prior-FY months: ["Apr-26"] → ["Apr-25"]
 function toPriorYearMonths(months: string[]): string[] {
   return months.map((m) => {
     const parts = m.split("-");
@@ -90,21 +180,20 @@ function toPriorYearMonths(months: string[]): string[] {
   });
 }
 
-export function buildCategoryBAlerts(
+// ── B-alert builder for PRIMARY entities (distributors / direct dealers) ──────
+
+function buildPrimaryBAlerts(
   ctx: DetectionContext,
   currentFy: string,
   currentMonths: string[],
+  priorFy: string,
+  priorMonths: string[],
+  priorPriorFy: string,
+  priorPriorMonths: string[],
   cfg: BConfig,
 ): RawAlert[] {
   const alerts: RawAlert[] = [];
-  if (currentMonths.length === 0) return alerts;
 
-  const priorFy = prevFy(currentFy);
-  const priorMonths = toPriorYearMonths(currentMonths);
-  const priorPriorFy = prevFy(priorFy);
-  const priorPriorMonths = toPriorYearMonths(priorMonths);
-
-  // All customers who appear in either the current or prior period
   const allCustomers = new Set([
     ...customersIn(ctx, currentFy, currentMonths),
     ...customersIn(ctx, priorFy, priorMonths),
@@ -112,149 +201,231 @@ export function buildCategoryBAlerts(
 
   for (const customer of allCustomers) {
     const ctype = customerType(ctx, customer);
+    if (ctype === "retailer") continue; // retailers handled separately
+
     const floor = materialityFloor(ctype, cfg);
-
     const currentVal = customerValue(ctx, customer, currentFy, currentMonths);
-    const priorVal = customerValue(ctx, customer, priorFy, priorMonths);
+    const priorVal   = customerValue(ctx, customer, priorFy, priorMonths);
 
-    // Materiality: prior-year value must meet the floor
     if (priorVal < floor) continue;
 
     const valueGrowthPct = priorVal > 0 ? ((currentVal - priorVal) / priorVal) * 100 : null;
 
-    // ── B3: zero now, non-zero before ────────────────────────────────────────
+    // B3
     if (currentVal === 0 && priorVal > 0) {
       alerts.push({
-        code: "B3",
-        category: "B",
-        entity: customer,
-        entityKey: customer,
-        entityType: ctype,
-        currentMonths,
-        priorMonths,
+        code: "B3", category: "B", entity: customer, entityKey: customer, entityType: ctype,
+        currentMonths, priorMonths,
         numbers: { currentValue: 0, priorValue: priorVal, valueGrowthPct: -100 },
         rupeesAtStake: priorVal,
       });
-      continue; // B3 suppresses B1/B2/B4/B5 for this customer (applied in detectAlerts)
+      continue;
     }
 
     if (currentVal === 0 || priorVal === 0 || valueGrowthPct === null) continue;
 
-    // ── B1: real growth < floor ──────────────────────────────────────────────
+    // B1
     const mrpResult = computeMrpIndex(ctx, customer, priorMonths, currentMonths);
     if (mrpResult != null) {
       const realGrowthPct = valueGrowthPct - mrpResult.mrpIncreasePct;
       const realisedRealGrowthPct = valueGrowthPct - mrpResult.realisedIncreasePct;
       if (realGrowthPct < cfg.B1_REAL_GROWTH_FLOOR_PCT) {
         alerts.push({
-          code: "B1",
-          category: "B",
-          entity: customer,
-          entityKey: customer,
-          entityType: ctype,
-          currentMonths,
-          priorMonths,
-          numbers: {
-            currentValue: currentVal,
-            priorValue: priorVal,
-            valueGrowthPct,
-            mrpIncreasePct: mrpResult.mrpIncreasePct,
-            realGrowthPct,
-            realisedRealGrowthPct,
-            mrpCoveragePct: mrpResult.coveragePct,
-          },
+          code: "B1", category: "B", entity: customer, entityKey: customer, entityType: ctype,
+          currentMonths, priorMonths,
+          numbers: { currentValue: currentVal, priorValue: priorVal, valueGrowthPct,
+            mrpIncreasePct: mrpResult.mrpIncreasePct, realGrowthPct, realisedRealGrowthPct,
+            mrpCoveragePct: mrpResult.coveragePct },
           rupeesAtStake: priorVal - currentVal,
-          extraForReport: {
-            mrpBasketSize: mrpResult.basketSize,
-            mrpCoveragePct: mrpResult.coveragePct,
-            realisedRealGrowthPct,
-          },
+          extraForReport: { mrpBasketSize: mrpResult.basketSize, mrpCoveragePct: mrpResult.coveragePct, realisedRealGrowthPct },
         });
       }
     }
 
-    // ── B2: nominal decline >= 25%, sustained 2 periods ──────────────────────
-    const declinePct = -valueGrowthPct; // positive means decline
+    // B2
+    const declinePct = -valueGrowthPct;
     if (declinePct >= cfg.B2_NOMINAL_DECLINE_FLOOR_PCT) {
-      // Check sustained: prior vs prior-prior must ALSO show >= 25% decline
       const priorPriorVal = customerValue(ctx, customer, priorPriorFy, priorPriorMonths);
-      const sustained =
-        cfg.B2_SUSTAINED_PERIODS <= 1 ||
-        (priorPriorVal > 0 &&
-          ((priorPriorVal - priorVal) / priorPriorVal) * 100 >= cfg.B2_NOMINAL_DECLINE_FLOOR_PCT);
-
+      const sustained = cfg.B2_SUSTAINED_PERIODS <= 1 ||
+        (priorPriorVal > 0 && ((priorPriorVal - priorVal) / priorPriorVal) * 100 >= cfg.B2_NOMINAL_DECLINE_FLOOR_PCT);
       if (sustained) {
         alerts.push({
-          code: "B2",
-          category: "B",
-          entity: customer,
-          entityKey: customer,
-          entityType: ctype,
-          currentMonths,
-          priorMonths,
-          numbers: {
-            currentValue: currentVal,
-            priorValue: priorVal,
-            priorPriorValue: priorPriorVal,
-            declinePct,
-            valueGrowthPct,
-          },
+          code: "B2", category: "B", entity: customer, entityKey: customer, entityType: ctype,
+          currentMonths, priorMonths,
+          numbers: { currentValue: currentVal, priorValue: priorVal, priorPriorValue: priorPriorVal, declinePct, valueGrowthPct },
           rupeesAtStake: priorVal - currentVal,
         });
       }
     }
 
-    // ── B4: segment dropout ──────────────────────────────────────────────────
+    // B4
     const priorSegs = segmentValues(ctx, customer, priorFy, priorMonths);
-    const curSegs = segmentValues(ctx, customer, currentFy, currentMonths);
-
+    const curSegs   = segmentValues(ctx, customer, currentFy, currentMonths);
     for (const [seg, priorSegVal] of priorSegs) {
       if (priorSegVal < cfg.B4_SEGMENT_FLOOR_RUPEES) continue;
-      const curSegVal = curSegs.get(seg) ?? 0;
-      if (curSegVal === 0) {
+      if ((curSegs.get(seg) ?? 0) === 0) {
         alerts.push({
-          code: "B4",
-          category: "B",
-          entity: `${customer} — ${seg}`,
-          entityKey: customer,
-          entityType: ctype,
-          currentMonths,
-          priorMonths,
+          code: "B4", category: "B", entity: `${customer} — ${seg}`, entityKey: customer, entityType: ctype,
+          currentMonths, priorMonths,
           numbers: { priorValue: priorSegVal, currentValue: 0 },
-          rupeesAtStake: priorSegVal,
-          extraForReport: { segment: seg },
+          rupeesAtStake: priorSegVal, extraForReport: { segment: seg },
         });
       }
     }
 
-    // ── B5: breadth collapse ──────────────────────────────────────────────────
+    // B5 — "at least 50% drop" means curCodes.size <= threshold (boundary inclusive)
     const priorCodes = distinctCodes(ctx, customer, priorFy, priorMonths);
-    const curCodes = distinctCodes(ctx, customer, currentFy, currentMonths);
-
+    const curCodes   = distinctCodes(ctx, customer, currentFy, currentMonths);
     if (
       priorCodes.size >= cfg.B5_PRIOR_CODE_FLOOR &&
-      curCodes.size < priorCodes.size * (1 - cfg.B5_BREADTH_DROP_FLOOR_PCT / 100)
+      curCodes.size <= priorCodes.size * (1 - cfg.B5_BREADTH_DROP_FLOOR_PCT / 100)
     ) {
       const dropPct = ((priorCodes.size - curCodes.size) / priorCodes.size) * 100;
       alerts.push({
-        code: "B5",
-        category: "B",
-        entity: customer,
-        entityKey: customer,
-        entityType: ctype,
-        currentMonths,
-        priorMonths,
-        numbers: {
-          codePrior: priorCodes.size,
-          codeCurrent: curCodes.size,
-          declinePct: dropPct,
-          priorValue: priorVal,
-          currentValue: currentVal,
-        },
+        code: "B5", category: "B", entity: customer, entityKey: customer, entityType: ctype,
+        currentMonths, priorMonths,
+        numbers: { codePrior: priorCodes.size, codeCurrent: curCodes.size, declinePct: dropPct, priorValue: priorVal, currentValue: currentVal },
         rupeesAtStake: priorVal - currentVal,
       });
     }
   }
 
   return alerts;
+}
+
+// ── B-alert builder for SECONDARY entities (retailers) ────────────────────────
+
+function buildRetailerBAlerts(
+  ctx: DetectionContext,
+  currentFy: string,
+  currentMonths: string[],
+  priorFy: string,
+  priorMonths: string[],
+  priorPriorFy: string,
+  priorPriorMonths: string[],
+  cfg: BConfig,
+): RawAlert[] {
+  const alerts: RawAlert[] = [];
+
+  // Build index once — O(rows). All per-retailer lookups below are then O(months).
+  const idx = buildRetailerIndex(ctx);
+
+  const allRetailers = new Set([
+    ...idxRetailersIn(idx, currentFy, currentMonths),
+    ...idxRetailersIn(idx, priorFy, priorMonths),
+  ]);
+
+  const floor = materialityFloor("retailer", cfg);
+
+  for (const retailer of allRetailers) {
+    const currentVal = idxRetailerValue(idx, retailer, currentFy, currentMonths);
+    const priorVal   = idxRetailerValue(idx, retailer, priorFy, priorMonths);
+
+    if (priorVal < floor) continue;
+
+    const valueGrowthPct = priorVal > 0 ? ((currentVal - priorVal) / priorVal) * 100 : null;
+
+    // B3
+    if (currentVal === 0 && priorVal > 0) {
+      alerts.push({
+        code: "B3", category: "B", entity: retailer, entityKey: retailer, entityType: "retailer",
+        currentMonths, priorMonths,
+        numbers: { currentValue: 0, priorValue: priorVal, valueGrowthPct: -100 },
+        rupeesAtStake: priorVal,
+      });
+      continue;
+    }
+
+    if (currentVal === 0 || priorVal === 0 || valueGrowthPct === null) continue;
+
+    // B1 — MRP index computed from primary SKU basket keyed on retailer id.
+    // Null if no MRP history for this retailer's codes (B1 is then skipped).
+    const mrpResult = computeMrpIndex(ctx, retailer, priorMonths, currentMonths);
+    if (mrpResult != null) {
+      const realGrowthPct = valueGrowthPct - mrpResult.mrpIncreasePct;
+      const realisedRealGrowthPct = valueGrowthPct - mrpResult.realisedIncreasePct;
+      if (realGrowthPct < cfg.B1_REAL_GROWTH_FLOOR_PCT) {
+        alerts.push({
+          code: "B1", category: "B", entity: retailer, entityKey: retailer, entityType: "retailer",
+          currentMonths, priorMonths,
+          numbers: { currentValue: currentVal, priorValue: priorVal, valueGrowthPct,
+            mrpIncreasePct: mrpResult.mrpIncreasePct, realGrowthPct, realisedRealGrowthPct,
+            mrpCoveragePct: mrpResult.coveragePct },
+          rupeesAtStake: priorVal - currentVal,
+          extraForReport: { mrpBasketSize: mrpResult.basketSize, mrpCoveragePct: mrpResult.coveragePct, realisedRealGrowthPct },
+        });
+      }
+    }
+
+    // B2
+    const declinePct = -valueGrowthPct;
+    if (declinePct >= cfg.B2_NOMINAL_DECLINE_FLOOR_PCT) {
+      const priorPriorVal = idxRetailerValue(idx, retailer, priorPriorFy, priorPriorMonths);
+      const sustained = cfg.B2_SUSTAINED_PERIODS <= 1 ||
+        (priorPriorVal > 0 && ((priorPriorVal - priorVal) / priorPriorVal) * 100 >= cfg.B2_NOMINAL_DECLINE_FLOOR_PCT);
+      if (sustained) {
+        alerts.push({
+          code: "B2", category: "B", entity: retailer, entityKey: retailer, entityType: "retailer",
+          currentMonths, priorMonths,
+          numbers: { currentValue: currentVal, priorValue: priorVal, priorPriorValue: priorPriorVal, declinePct, valueGrowthPct },
+          rupeesAtStake: priorVal - currentVal,
+        });
+      }
+    }
+
+    // B4 — segment dropout using secondary_sku_line segment_canon
+    const priorSegs = idxRetailerSegs(idx, retailer, priorFy, priorMonths);
+    const curSegs   = idxRetailerSegs(idx, retailer, currentFy, currentMonths);
+    for (const [seg, priorSegVal] of priorSegs) {
+      if (priorSegVal < cfg.B4_SEGMENT_FLOOR_RUPEES) continue;
+      if ((curSegs.get(seg) ?? 0) === 0) {
+        alerts.push({
+          code: "B4", category: "B", entity: `${retailer} — ${seg}`, entityKey: retailer, entityType: "retailer",
+          currentMonths, priorMonths,
+          numbers: { priorValue: priorSegVal, currentValue: 0 },
+          rupeesAtStake: priorSegVal, extraForReport: { segment: seg },
+        });
+      }
+    }
+
+    // B5 — breadth collapse using secondary_sku_line item_code.
+    // "at least X% drop" includes the exact boundary (<=).
+    const priorCodes = idxRetailerCodes(idx, retailer, priorFy, priorMonths);
+    const curCodes   = idxRetailerCodes(idx, retailer, currentFy, currentMonths);
+    if (
+      priorCodes.size >= cfg.B5_PRIOR_CODE_FLOOR &&
+      curCodes.size <= priorCodes.size * (1 - cfg.B5_BREADTH_DROP_FLOOR_PCT / 100)
+    ) {
+      const dropPct = ((priorCodes.size - curCodes.size) / priorCodes.size) * 100;
+      alerts.push({
+        code: "B5", category: "B", entity: retailer, entityKey: retailer, entityType: "retailer",
+        currentMonths, priorMonths,
+        numbers: { codePrior: priorCodes.size, codeCurrent: curCodes.size, declinePct: dropPct, priorValue: priorVal, currentValue: currentVal },
+        rupeesAtStake: priorVal - currentVal,
+      });
+    }
+  }
+
+  return alerts;
+}
+
+// ── Root export ───────────────────────────────────────────────────────────────
+
+export function buildCategoryBAlerts(
+  ctx: DetectionContext,
+  currentFy: string,
+  currentMonths: string[],
+  cfg: BConfig,
+): RawAlert[] {
+  if (currentMonths.length === 0) return [];
+
+  const priorFy         = prevFy(currentFy);
+  const priorMonths     = toPriorYearMonths(currentMonths);
+  const priorPriorFy    = prevFy(priorFy);
+  const priorPriorMonths = toPriorYearMonths(priorMonths);
+
+  return [
+    ...buildPrimaryBAlerts(ctx, currentFy, currentMonths, priorFy, priorMonths, priorPriorFy, priorPriorMonths, cfg),
+    ...buildRetailerBAlerts(ctx, currentFy, currentMonths, priorFy, priorMonths, priorPriorFy, priorPriorMonths, cfg),
+  ];
 }

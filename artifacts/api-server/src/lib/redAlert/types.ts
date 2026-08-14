@@ -100,6 +100,26 @@ export type CustomerSaleRow = {
   qty: number;     // SUM(qty)
 };
 
+// Retailer-level sale aggregates from secondary_sku_line (the authoritative source
+// for retailer transactions). Used by B1–B5 for retailer-type entities; primary
+// sale_line_current is NOT used for retailers because it records primary dispatch
+// (distributor→company) not per-retailer sell-out.
+export type RetailerSaleRow = {
+  fy: string;
+  monthLabel: string;
+  retailer: string;          // RET# identifier from secondary_sku_line.retailer
+  value: number;             // SUM(net_amount) for the retailer/month
+};
+
+export type RetailerSkuRow = {
+  fy: string;
+  monthLabel: string;
+  retailer: string;
+  itemCode: string;
+  segmentCanon: string | null;
+  value: number;             // SUM(net_amount)
+};
+
 // Unfiltered channel/head metadata for Guard 1.
 // Queried WITHOUT the is_territory filter so customers reclassified to
 // Project/Govt/non-territory still appear in the current window.
@@ -176,9 +196,15 @@ export type CustomerMasterRow = {
 export type DetectionContext = {
   pool: DbPool;
 
-  // Sale data — territory rows only; all FYs needed for like-month comparisons
+  // Primary sale data — territory rows only; used for distributors/direct dealers
   customerSale: CustomerSaleRow[];
   customerCode: CustomerCodeRow[];
+
+  // Secondary retailer sale data from secondary_sku_line — authoritative for retailers.
+  // Retailers do not appear in sale_line_current (primary dispatch); their sell-out
+  // transactions live here. B1–B5 route to this source for retailer-type entities.
+  retailerSale: RetailerSaleRow[];
+  retailerSku: RetailerSkuRow[];
 
   // Unfiltered channel/head metadata (no is_territory filter) — Guard 1 only.
   // Customers reclassified to Project/non-territory vanish from customerSale;

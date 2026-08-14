@@ -27,6 +27,8 @@ function makeCtx(overrides: {
     customerSale: [],
     customerMeta: overrides.customerMeta ?? [],
     customerCode: [],
+    retailerSale: [],
+    retailerSku: [],
     secHeadMonths: [],
     mrpHistory: [],
     ambiguousCodes: new Set(),

@@ -7,6 +7,8 @@ import type {
   CustomerSaleRow,
   CustomerCodeRow,
   CustomerMetaRow,
+  RetailerSaleRow,
+  RetailerSkuRow,
   SecHeadMonthRow,
   MrpHistoryRow,
   MarginFactRow,
@@ -46,6 +48,8 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
     retailDistRes,
     frozenRes,
     secCompleteRes,
+    retailerSaleRes,
+    retailerSkuRes,
   ] = await Promise.all([
     // 1a. Customer sale aggregates — territory rows by fy/month/customer/group
     pool.query<{
@@ -190,6 +194,30 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
         WHERE fy = ANY(${secFyArr}) AND not_yet_recorded = false`,
       secFyList,
     ),
+
+    // 12. Retailer sale aggregates from secondary_sku_line — authoritative for B1–B5.
+    // Retailers are not represented in sale_line_current (primary dispatch); their
+    // sell-out transactions live only in secondary_sku_line.
+    pool.query<{ fy: string; month_label: string; retailer: string; val: string }>(
+      `SELECT fy, month_label, retailer, SUM(net_amount)::float8::text AS val
+         FROM secondary_sku_line
+        WHERE fy = ANY(${secFyArr}) AND retailer IS NOT NULL
+        GROUP BY fy, month_label, retailer`,
+      secFyList,
+    ),
+
+    // 13. Retailer SKU aggregates (for B4 segment dropout, B5 code breadth).
+    pool.query<{
+      fy: string; month_label: string; retailer: string;
+      item_code: string; segment_canon: string | null; val: string;
+    }>(
+      `SELECT fy, month_label, retailer, item_code, segment_canon,
+              SUM(net_amount)::float8::text AS val
+         FROM secondary_sku_line
+        WHERE fy = ANY(${secFyArr}) AND retailer IS NOT NULL AND item_code IS NOT NULL
+        GROUP BY fy, month_label, retailer, item_code, segment_canon`,
+      secFyList,
+    ),
   ]);
 
   // ── Build typed arrays ──────────────────────────────────────────────────────
@@ -281,6 +309,22 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
     });
   }
 
+  const retailerSale: RetailerSaleRow[] = retailerSaleRes.rows.map((r) => ({
+    fy: r.fy,
+    monthLabel: r.month_label,
+    retailer: r.retailer,
+    value: Number(r.val),
+  }));
+
+  const retailerSku: RetailerSkuRow[] = retailerSkuRes.rows.map((r) => ({
+    fy: r.fy,
+    monthLabel: r.month_label,
+    retailer: r.retailer,
+    itemCode: r.item_code,
+    segmentCanon: r.segment_canon,
+    value: Number(r.val),
+  }));
+
   // Build retailer → `${fy}|${monthLabel}` → Set<distributor>
   // Month-level granularity so Guard 5 can compare only within the alert window.
   const retailerDistributors = new Map<string, Map<string, Set<string>>>();
@@ -321,6 +365,8 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
     customerSale,
     customerMeta,
     customerCode,
+    retailerSale,
+    retailerSku,
     secHeadMonths,
     mrpHistory,
     ambiguousCodes,
