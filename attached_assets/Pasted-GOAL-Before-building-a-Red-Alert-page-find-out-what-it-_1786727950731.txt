@@ -1,0 +1,139 @@
+GOAL
+Before building a Red Alert page, find out what it would actually fire. Build
+the detection logic, run it against completed periods, and report the counts.
+Do NOT build a page in this task.
+
+The framework caps the page at 20 alerts. If the proposed thresholds would
+have produced 200, they are too loose. If 2, too tight. That has to be known
+before anyone sees a page.
+
+BUILD THE DETECTION LOGIC ONLY
+A module that, given a fiscal year and period, returns the alerts that would
+fire. No UI, no persistence, no routing.
+
+THRESHOLDS - configurable, not hardcoded. Defaults below.
+Put them in a config file, not inline constants. The existing Warning System
+hardcodes its thresholds and that is a known problem - do not repeat it.
+
+CATEGORY A - SALESPERSON
+  A1  secondary OB / PRO-RATED to-date secondary target < 35%
+      sustained: 2 consecutive complete months
+      PRO-RATED means using the seasonal curve, never a flat annual figure.
+      Q1 carries 20.9% of the year and Q4 carries 34.6% - 35% of the ANNUAL
+      target in August is roughly on pace; 35% of the pro-rated target is half
+      speed. Getting this wrong inverts the alert.
+
+  A2  secondary OB = 0 in a complete recorded month, with a target present
+      single occurrence
+
+  A3  team secondary achievement, target-weighted, < 45%
+      sustained: 2 consecutive complete months
+      Report both the headline figure and the like-for-like figure excluding
+      leavers - on one team that difference was 51.7% vs 58.4%.
+
+CATEGORY B - DEALERS AND RETAILERS
+  B1  real growth worse than -20%
+      real growth = value growth % minus MRP increase %
+
+      THE MRP INDEX IS NEW - build it:
+        basket   = item codes the customer bought in the PRIOR period, with
+                   their prior-period quantities
+        mrpIndex = SUM(prior qty x MRP now) / SUM(prior qty x MRP then)
+        mrpIncrease% = (mrpIndex - 1) x 100
+
+      Both MRP figures from mrp_history, which is effective-dated - "MRP then"
+      means the price in force DURING the prior period, not today's.
+
+      Resolve ambiguous codes on (item_code, segment). 56 codes exist in two
+      segments at different prices; CNS-15 is Rs 860 in PTMT and Rs 1,020 in
+      CP. A code-only lookup will use the wrong price.
+
+      Also compute the REALISED-price index alongside (the existing Laspeyres).
+      Do not trigger on it - report it, so the cause is separable:
+        real decline on both bases        -> genuine volume loss
+        real decline on MRP basis only    -> discount leakage
+
+  B2  nominal value down 25% or more, like months
+      sustained: 2 consecutive periods
+
+  B3  zero purchase now, purchased in the prior comparable period
+      single occurrence
+
+  B4  a segment bought in the prior period with zero purchase now
+      floor: prior segment value >= Rs 5 L
+
+  B5  distinct item codes down 50% or more
+      floor: held >= 20 codes in the prior period
+
+CATEGORY C
+  C1  a customer carrying >= 60% of a state's value declines >= 15%
+  C2  a state's territory value down >= 15%, sustained 2 periods
+  C3  a segment >= 20 points below the company rate, judged against its OWN
+      seasonal curve
+  C4  volume up while gross contribution down >= 15%
+      gate: only where factory cost exists for the codes involved
+      label it GROSS CONTRIBUTION - never profit, never margin
+  C5  a head's working sheets not read for >= 10 days
+
+MATERIALITY FLOORS - configurable
+  distributor    prior-year value >= Rs 25 L
+  direct dealer  prior-year value >= Rs 15 L
+  retailer       prior-year value >= Rs 2 L
+  segment (B4)   prior segment value >= Rs 5 L
+  state (C2)     no floor
+
+============================================================
+THE GUARDS - implement all ten. An alert that fails any guard
+does not fire, and the reason is recorded.
+============================================================
+ 1. CHANNEL RECLASSIFICATION. Exclude any customer whose channel or
+    head_canon changed between the two periods. One customer moved to project
+    classification between years worth Rs 35.73 Cr and reads as a total
+    collapse when compared naively. This guard alone prevents the largest
+    false alert in the system.
+ 2. LIKE MONTHS ONLY. Never compare unequal windows or different months.
+ 3. COMPLETE MONTHS ONLY. Exclude the current month and any unsettled month.
+    Secondary data runs one month behind primary.
+ 4. IDENTITY RESOLUTION. Resolve customers and members through
+    person_registry before comparing. Two people share the name Ashutosh
+    Kumar; one head appears as both Sulinder and Sulindar.
+ 5. DISTRIBUTOR REASSIGNMENT. A retailer moving between distributors is not a
+    lost retailer. Over a third of active retailers link to more than one.
+ 6. TERRITORY ONLY. Exclude project, govt, JJM, GeM and export on every alert.
+    Use the channel column on sale_line, not a name pattern.
+ 7. NO TARGET, NO ALERT. Eleven members carry business with no recorded
+    target. They are never alerted on achievement.
+ 8. PARTIAL TENURE. Below 55 working days, no performance alert.
+ 9. SHEET-READ FAILURE IS NOT ZERO. If a source failed to load, suppress.
+    A quota failure once left eleven of twelve heads reading empty - every one
+    would have alerted.
+10. COST DATA GATE. C4 fires only where factory cost exists.
+
+SUPPRESSION
+  C5 data blackout  -> suppresses every alert for that team
+  B3 stopped        -> suppresses B1, B2, B4, B5 for that customer
+  A3 team           -> suppresses nothing; both team and individuals matter
+
+============================================================
+THE CALIBRATION RUN - this is the deliverable
+============================================================
+Run the detection against FY2025-26 (complete) and FY2026-27 to date. Report:
+
+1. Alert count by code, for each period. A table: code, count, combined
+   rupees at stake.
+2. TOTAL count per period. If it exceeds 20, say by how much and print what
+   thresholds would bring it to 20.
+3. Count SUPPRESSED by each guard, per guard. I want to know which guards are
+   doing work - a guard that never fires may be wrong.
+4. For each of A1, B1, B2, B3: print the top 5 alerts that would fire, with
+   the entity named and the numbers behind them.
+5. For B1 specifically: print 5 customers with BOTH the MRP-based real growth
+   and the realised-price real growth, so I can see the discount-leakage split.
+6. Print any alert where the two periods have materially different month
+   counts - that should be impossible under guard 2, so a non-zero count means
+   the guard is not working.
+7. Confirm no page, no route and no stored alert was created.
+8. Commit hash, git cat-file -t, git merge-base --is-ancestor <hash> main with
+   exit code - commit first, main second.
+
+Do NOT build the page. I want to see what fires before anyone sees a screen.
