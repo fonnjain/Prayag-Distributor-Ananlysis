@@ -1,0 +1,97 @@
+GOAL
+Pull competitor pricing from the Prayag Competition Analysis app and show it
+alongside our MRP and the Market Survey figures.
+
+Read-only. This app never writes to the competition app.
+
+THE SOURCE - know its limits before you build
+  Base URL     https://prayag-competition-analysis.replit.app/api
+  Auth         Bearer token, already in Secrets as COMPETITION_API_KEY
+  Endpoint     GET /v1/comparison
+
+What it actually holds today:
+  Competitor brands   ONE - Sparsh Pearl
+  Rows                150, of which 140 carry a price
+  Categories          CPVC and uPVC only
+  Snapshot            a single date, 5 March 2026
+  Versioning          NONE - re-uploading a price sheet replaces the rows
+
+So this covers roughly 150 codes in two categories against one competitor, at
+one point in time five months ago. Our margin data covers about 2,000 codes
+across eight segments monthly, and the survey will grow. Build the UI so this
+reads as one thin input among several, not as authoritative market pricing.
+
+Its "net price" is also NOT observed - the competition app computes it by
+applying a flat 40% default discount to MRP. Label it as derived, never as a
+street price. The Market Survey captures real net prices and the two must
+never be presented as equivalent.
+
+WHAT TO BUILD
+1. A client that calls GET /v1/comparison with the bearer token, on a
+   schedule (daily is ample given the data changes rarely) and on demand.
+
+2. Store a LOCAL SNAPSHOT with a fetched_at timestamp. Do not query the
+   competition app on every page load - it is a separate Replit app and will
+   be slow or asleep.
+
+   competitor_price
+     competitor_brand · competitor_code · competitor_name · category
+     mrp · net_price_derived · discount_pct_assumed
+     source_fetched_at · prayag_item_code nullable
+   Index on (prayag_item_code), (competitor_brand, category).
+
+3. MAPPING TO OUR CODES - do not guess
+   The competition app has no mapping table linking a competitor product to a
+   Prayag code. Do NOT infer one from name similarity.
+
+   Leave prayag_item_code NULL on import. Add a small mapping UI where a
+   person links a competitor row to one of our codes, stored explicitly with
+   who mapped it and when. Unmapped rows still display; they just cannot sit
+   beside one of our items.
+
+4. WHERE IT APPEARS
+   - MRP page: for a Prayag code with a mapped competitor row, show the
+     competitor's MRP beside ours, with the brand and the fetch date.
+   - Market Survey page: on the per-item summary, add a competitor-MRP column
+     beside our MRP and the surveyed median net.
+
+   Every competitor figure carries its brand, its fetch date, and the word
+   "derived" on the net price. A number without those three is misleading.
+
+5. FAILURE BEHAVIOUR
+   If the competition app is unreachable, show the last good snapshot with
+   its age - "Competitor data from 5 March 2026, last checked <date>". Never
+   show stale data as current, and never show an empty column that looks like
+   "no competitor sells this".
+
+   Distinguish three states explicitly: no competitor row exists for this
+   code · a row exists but is unmapped · fetch failed.
+
+DO NOT
+- Do not write to the competition app, in any form.
+- Do not feed competitor prices into the MRP calculator or any pricing
+  recommendation yet. That comes later and needs its own review.
+- Do not put COMPETITION_API_KEY anywhere in the client bundle. Server-side
+  only.
+- Do not touch margin_fact, sale_line, market_survey or mrp_history.
+
+VERIFY - produced values, and a hash that resolves
+1. Fetch once. Print rows imported, distinct brands, distinct categories, and
+   the count with a price versus without. Expect roughly 150 rows, 1 brand,
+   2 categories, 140 priced.
+2. Print 5 imported rows in full, showing mrp, net_price_derived and the
+   assumed discount, so the 40% assumption is visible.
+3. Confirm prayag_item_code is NULL on every row at import. Print the count.
+4. Map two rows by hand through the UI. Print both, showing who mapped them
+   and when, and confirm they now appear beside our MRP on the MRP page.
+5. Simulate the competition app being unreachable - block the call or use a
+   bad URL. Confirm the page shows the last snapshot WITH its age and does
+   not render an empty or zero price. Paste the rendered text.
+6. Confirm the three states render distinguishably: no competitor row,
+   unmapped row, fetch failed. Paste all three.
+7. Confirm COMPETITION_API_KEY does not appear in any client-side bundle.
+   Print the grep result.
+8. Confirm margin_fact, sale_line, market_survey and mrp_history row counts
+   are unchanged.
+9. Commit hash, git cat-file -t, git merge-base --is-ancestor main with exit
+   code.
