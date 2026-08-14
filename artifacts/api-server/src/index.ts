@@ -28,6 +28,7 @@ import { restoreAnchorsFromStorage } from "./lib/config/verifyAnchors.js";
 import { restoreRosterCsvFromGcs } from "./lib/mgmt/roster.js";
 import { prewarmWarningsSnapshots } from "./routes/warnings.js";
 import { prewarmMgmtDataSnapshots } from "./routes/mgmt.js";
+import { scheduleCompetitorRefresh } from "./routes/competitorPrice.js";
 import { cleanupOrphanedJobs } from "./lib/aiReportJobQueue.js";
 import {
   loadPersonRegistry,
@@ -165,6 +166,11 @@ runMigrations()
     ensureRegisterSynced(fy);
   }
   startScheduledRegisterSync();
+
+  // Fetch competitor price snapshot from the Prayag Competition Analysis app.
+  // First run 5 min after startup, then every 24 h. Server-side only —
+  // COMPETITION_API_KEY never reaches the client bundle.
+  scheduleCompetitorRefresh();
 
   // Keep the primary_order_line OB mirror aligned with the live Order Sheet.
   // Runs alongside the register sync cadence (every 6h) for the OPEN FY only,

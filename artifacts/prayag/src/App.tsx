@@ -11,6 +11,7 @@ import SkuPage from "@/pages/SkuPage";
 import MrpPage from "@/pages/MrpPage";
 import MarginPage from "@/pages/MarginPage";
 import MarketSurveyPage from "@/pages/MarketSurveyPage";
+import CompetitionPricePage from "@/pages/CompetitionPricePage";
 import DevPortalPage from "@/pages/DevPortalPage";
 import DevApiKeysPage from "@/pages/DevApiKeysPage";
 import DevMastersPage from "@/pages/DevMastersPage";
@@ -37,6 +38,7 @@ function Router() {
         {/* SKU Deep Dive */}
         <Route path="/sku" component={SkuPage} />
         {/* MRP section */}
+        <Route path="/mrp/competition" component={CompetitionPricePage} />
         <Route path="/mrp/margin" component={MarginPage} />
         <Route path="/mrp" component={MrpPage} />
         {/* Market Survey */}

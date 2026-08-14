@@ -718,11 +718,39 @@ function MyRecentTab({ apiKey }: { apiKey: string }) {
   );
 }
 
+interface CpRow {
+  prayagItemCode: string | null;
+  competitorBrand: string;
+  mrp: number | null;
+  netPriceDerived: number | null;
+  discountPctAssumed: number | null;
+  fetchedAt: string;
+}
+
 function SummaryTab({ apiKey }: { apiKey: string }) {
   const { data, isPending } = useQuery<{ rows: SummaryRow[] }>({
     queryKey: ["ms-summary"],
     queryFn: () => apiFetch<{ rows: SummaryRow[] }>("market-survey/summary", apiKey),
   });
+
+  // Competitor snapshot — small dataset (≤150 rows), join client-side
+  const { data: cpData } = useQuery<{ rows: CpRow[]; snapshotFetchedAt: string | null }>({
+    queryKey: ["cp-rows-mapped"],
+    queryFn: () => fetch(`${BASE}api/competitor-price?mappedOnly=true`).then((r) => r.json()),
+    staleTime: 10 * 60_000,
+  });
+
+  // Build Map: prayagItemCode → competitor row (first match per code)
+  const cpByCode = new Map<string, CpRow>();
+  for (const cp of cpData?.rows ?? []) {
+    if (cp.prayagItemCode && !cpByCode.has(cp.prayagItemCode)) {
+      cpByCode.set(cp.prayagItemCode, cp);
+    }
+  }
+
+  const cpFetchedAt = cpData?.snapshotFetchedAt
+    ? new Date(cpData.snapshotFetchedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+    : null;
 
   if (isPending) return <p className="text-sm text-muted-foreground p-4">Loading…</p>;
   if (!data?.rows.length) return <p className="text-sm text-muted-foreground p-4">No data yet — submit surveys with a Prayag product code to see comparisons here.</p>;
@@ -735,31 +763,53 @@ function SummaryTab({ apiKey }: { apiKey: string }) {
             <th className="py-2 text-left">Code</th>
             <th className="py-2 text-left">Segment</th>
             <th className="py-2 text-right">Our MRP</th>
-            <th className="py-2 text-right">Competitor median</th>
+            <th className="py-2 text-right">Comp. MRP</th>
+            <th className="py-2 text-right">Comp. net <span className="font-normal">(derived)</span></th>
+            <th className="py-2 text-right">Survey median</th>
             <th className="py-2 text-right">Range</th>
             <th className="py-2 text-right">n</th>
           </tr>
         </thead>
         <tbody className="divide-y">
-          {data.rows.map((r) => (
-            <tr key={`${r.segment}/${r.itemCode}`} className="hover:bg-muted/40">
-              <td className="py-2 font-medium">
-                {r.itemCode}
-                {r.indicativeOnly && <IndicativeBadge />}
-              </td>
-              <td className="py-2 text-muted-foreground">{r.segment}</td>
-              <td className="py-2 text-right">{r.currentMrp != null ? `₹${r.currentMrp}` : "—"}</td>
-              <td className="py-2 text-right font-medium">₹{r.medianCompetitorNet.toFixed(2)}</td>
-              <td className="py-2 text-right text-muted-foreground">
-                {r.minNet === r.maxNet ? "—" : `₹${r.minNet.toFixed(0)}–${r.maxNet.toFixed(0)}`}
-              </td>
-              <td className="py-2 text-right">{r.n}</td>
-            </tr>
-          ))}
+          {data.rows.map((r) => {
+            const cp = cpByCode.get(r.itemCode);
+            return (
+              <tr key={`${r.segment}/${r.itemCode}`} className="hover:bg-muted/40">
+                <td className="py-2 font-medium">
+                  {r.itemCode}
+                  {r.indicativeOnly && <IndicativeBadge />}
+                </td>
+                <td className="py-2 text-muted-foreground">{r.segment}</td>
+                <td className="py-2 text-right">{r.currentMrp != null ? `₹${r.currentMrp}` : "—"}</td>
+                {/* Competitor columns */}
+                <td className="py-2 text-right">
+                  {cp ? (
+                    <span title={`${cp.competitorBrand} · snapshot ${cpFetchedAt ?? "unknown"}`}>
+                      {cp.mrp != null ? `₹${cp.mrp.toFixed(2)}` : "—"}
+                    </span>
+                  ) : <span className="text-muted-foreground/40">—</span>}
+                </td>
+                <td className="py-2 text-right">
+                  {cp?.netPriceDerived != null ? (
+                    <span className="text-muted-foreground" title={`Derived: ${cp.discountPctAssumed}% off MRP — not a street price`}>
+                      ₹{cp.netPriceDerived.toFixed(2)}
+                    </span>
+                  ) : <span className="text-muted-foreground/40">—</span>}
+                </td>
+                <td className="py-2 text-right font-medium">₹{r.medianCompetitorNet.toFixed(2)}</td>
+                <td className="py-2 text-right text-muted-foreground">
+                  {r.minNet === r.maxNet ? "—" : `₹${r.minNet.toFixed(0)}–${r.maxNet.toFixed(0)}`}
+                </td>
+                <td className="py-2 text-right">{r.n}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
       <p className="mt-2 text-[11px] text-muted-foreground px-1">
-        Columns marked "indicative only" have fewer than 5 surveys. Never cite a single observation as a market price.
+        "Indicative only" = fewer than 5 surveys. Comp. net is derived at 40% off Sparsh Pearl MRP — not an observed street price.
+        {cpFetchedAt && <span className="ml-1">Competitor snapshot: {cpFetchedAt}.</span>}
+        Map codes on the <a href="/mrp/competition" className="underline">Competition Prices</a> page.
       </p>
     </div>
   );

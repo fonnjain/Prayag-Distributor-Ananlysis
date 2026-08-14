@@ -84,8 +84,9 @@ const NAV: NavGroup[] = [
     label: "MRP",
     icon: IndianRupee,
     items: [
-      { id: "mrp-master", label: "MRP Master", path: "/mrp",        icon: IndianRupee },
-      { id: "margin",     label: "Margin",     path: "/mrp/margin", icon: BarChart3   },
+      { id: "mrp-master",  label: "MRP Master",   path: "/mrp",            icon: IndianRupee },
+      { id: "margin",      label: "Margin",        path: "/mrp/margin",     icon: BarChart3   },
+      { id: "competition", label: "Competition",   path: "/mrp/competition",icon: Layers      },
     ],
   },
   {
@@ -135,6 +136,9 @@ function activeIds(location: string): { groupId: string; itemId: string } {
   }
   if (location === "/mrp/margin" || location.startsWith("/mrp/margin")) {
     return { groupId: "mrp", itemId: "margin" };
+  }
+  if (location === "/mrp/competition" || location.startsWith("/mrp/competition")) {
+    return { groupId: "mrp", itemId: "competition" };
   }
   if (location.startsWith("/market-survey")) {
     return { groupId: "market", itemId: "market-survey" };

@@ -161,6 +161,92 @@ function ChainStep({
   );
 }
 
+// ── Competitor panel ───────────────────────────────────────────────────────
+// Shows competitor rows mapped to this Prayag code from the local snapshot.
+// Three explicit states: no-row, unmapped (row exists but not linked), fetch-error.
+// Every figure carries brand, fetch date, and the word "derived" on the net price.
+
+interface CompetitorRowEntry {
+  id: number; competitorBrand: string; competitorName: string | null;
+  category: string; mrp: number | null; netPriceDerived: number | null;
+  discountPctAssumed: number | null; fetchedAt: string;
+}
+interface CompetitorForCode {
+  code: string; rows: CompetitorRowEntry[];
+  snapshotFetchedAt: string | null; lastError: string | null;
+}
+
+function CompetitorPanel({ code }: { code: string }) {
+  const { data, isError, isPending } = useQuery<CompetitorForCode>({
+    queryKey: ["competitor-for-code", code],
+    queryFn: () =>
+      fetch(`${BASE}/api/competitor-price/for-code/${encodeURIComponent(code)}`).then((r) => r.json()),
+    staleTime: 10 * 60_000,
+  });
+
+  if (isPending) return null;
+
+  const fmtDate = (iso: string | null) =>
+    iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : null;
+
+  const snapshotAge = fmtDate(data?.snapshotFetchedAt ?? null);
+
+  // State 1: fetch failed or error field set
+  if (isError || data?.lastError) {
+    return (
+      <div className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+        <span className="font-medium">⚠ Competitor data unavailable.</span>{" "}
+        {snapshotAge
+          ? `Last snapshot: ${snapshotAge}. Stale figures — nothing has changed since that date.`
+          : "Competition app could not be reached."}
+      </div>
+    );
+  }
+
+  // State 2: no mapped row for this code
+  if (!data?.rows.length) {
+    return (
+      <div className="mt-3 rounded border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-400 flex items-center gap-2">
+        <span>No competitor row mapped for code <span className="font-mono">{code}</span>.</span>
+        <a href="/mrp/competition" className="underline text-slate-500 hover:text-slate-700">
+          Map one →
+        </a>
+      </div>
+    );
+  }
+
+  // State 3: mapped rows found
+  return (
+    <div className="mt-3 rounded border border-blue-100 bg-blue-50/40 px-3 py-2 text-xs space-y-1.5">
+      <div className="flex items-center justify-between">
+        <span className="font-medium text-slate-600 text-[11px] uppercase tracking-wide">
+          Competitor — Sparsh Pearl
+        </span>
+        {snapshotAge && (
+          <span className="text-[10px] text-slate-400">snapshot {snapshotAge}</span>
+        )}
+      </div>
+      {data.rows.map((r) => (
+        <div key={r.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+          <span className="text-slate-600 font-medium">{r.competitorName}</span>
+          <span className="text-slate-400">{r.category}</span>
+          {r.mrp != null && (
+            <span className="font-mono text-slate-700">MRP ₹{r.mrp.toFixed(2)}</span>
+          )}
+          {r.netPriceDerived != null && (
+            <span className="text-slate-500">
+              net ₹{r.netPriceDerived.toFixed(2)}
+              <span className="ml-0.5 text-slate-400">
+                (derived, {r.discountPctAssumed}% off MRP — not a street price)
+              </span>
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────────
 interface MrpCalculatorProps {
   initialCode?: string;
@@ -725,6 +811,9 @@ export default function MrpCalculator({ initialCode, initialSegment }: MrpCalcul
               </p>
             </div>
           )}
+
+          {/* Competitor context — always shown when a code is loaded */}
+          <CompetitorPanel code={data.itemCode} />
         </>
       )}
 

@@ -802,6 +802,34 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_ms_created_at  ON market_survey (created_at DESC);
     `,
   },
+  {
+    id: "027_competitor_price",
+    sql: `
+      -- Local snapshot of competitor pricing from the Prayag Competition Analysis app.
+      -- Fetched daily; never written to from the client bundle.
+      -- prayag_item_code is NULL at import and set manually via the mapping UI.
+      -- net_price_derived = mrp × (1 − discount_pct_assumed / 100); label as "derived".
+      CREATE TABLE IF NOT EXISTS competitor_price (
+        id                   SERIAL        PRIMARY KEY,
+        competitor_brand     TEXT          NOT NULL,
+        competitor_code      TEXT          NOT NULL,  -- their row id (as string)
+        competitor_name      TEXT,
+        category             TEXT          NOT NULL,
+        mrp                  NUMERIC(12,2),
+        net_price_derived    NUMERIC(12,2),
+        discount_pct_assumed NUMERIC(5,2)  DEFAULT 40,
+        source_fetched_at    TIMESTAMPTZ   NOT NULL,
+        prayag_item_code     TEXT,
+        mapped_by            TEXT,
+        mapped_at            TIMESTAMPTZ,
+        created_at           TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+        UNIQUE (competitor_brand, competitor_code)
+      );
+      CREATE INDEX IF NOT EXISTS idx_cp_prayag_code ON competitor_price (prayag_item_code)
+        WHERE prayag_item_code IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_cp_brand_cat   ON competitor_price (competitor_brand, category);
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {
