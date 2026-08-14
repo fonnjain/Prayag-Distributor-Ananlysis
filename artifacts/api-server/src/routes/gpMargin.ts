@@ -7,7 +7,8 @@
 
 import { Router } from "express";
 import { isAdminToken } from "../lib/adminAuth.js";
-import { loadGpMarginFiles, detectGpMarginTabs, extractRows, fetchWorkbookViaDriveExport } from "../lib/gpMargin/loader.js";
+import { loadGpMarginFiles, fetchSegmentConflictDetail, detectGpMarginTabs, extractRows, fetchWorkbookViaDriveExport } from "../lib/gpMargin/loader.js";
+import type { ConflictDetailRow } from "../lib/gpMargin/loader.js";
 import { listDriveFiles, listDriveFolder, getDriveFileMeta } from "../lib/googleDrive.js";
 import { pool } from "@workspace/db";
 
@@ -112,6 +113,65 @@ type JobState =
 
 let loadJob: JobState = { status: "idle" };
 
+// ── PTMT conflict detail job ───────────────────────────────────────────────
+// Read-only — never writes to margin_fact.  Fetches both Drive copies of
+// PTMT Jan-26 / Feb-26 / Mar-26 and returns a side-by-side BOM comparison.
+
+type ConflictDetailJob =
+  | { status: "idle" }
+  | { status: "running"; startedAt: string }
+  | { status: "done"; finishedAt: string; rows: ConflictDetailRow[] }
+  | { status: "error"; finishedAt: string; error: string };
+
+let conflictDetailJob: ConflictDetailJob = { status: "idle" };
+
+// POST — start the fetch (fire-and-forget; each of the 6 files has a 90s timeout)
+router.post("/admin/margin/ptmt-conflict-detail", (req, res) => {
+  const token = String(req.headers["x-admin-secret"] ?? "").trim();
+  if (!isAdminToken(token)) {
+    res.status(401).json({ error: "Admin authorisation required." });
+    return;
+  }
+  if (conflictDetailJob.status === "running") {
+    res.status(409).json({
+      error: "Already running.",
+      startedAt: (conflictDetailJob as { status: "running"; startedAt: string }).startedAt,
+    });
+    return;
+  }
+  const startedAt = new Date().toISOString();
+  conflictDetailJob = { status: "running", startedAt };
+  res.status(202).json({
+    ok: true,
+    status: "running",
+    startedAt,
+    message: "Poll GET /api/admin/margin/ptmt-conflict-detail/status for progress (~9 min worst-case).",
+  });
+
+  // Fire-and-forget
+  fetchSegmentConflictDetail("PTMT", "2025-26", ["Jan-26", "Feb-26", "Mar-26"])
+    .then((rows) => {
+      conflictDetailJob = { status: "done", finishedAt: new Date().toISOString(), rows };
+    })
+    .catch((err) => {
+      conflictDetailJob = {
+        status: "error",
+        finishedAt: new Date().toISOString(),
+        error: String(err instanceof Error ? err.message : err),
+      };
+    });
+});
+
+// GET — poll status / retrieve results
+router.get("/admin/margin/ptmt-conflict-detail/status", (req, res) => {
+  const token = String(req.headers["x-admin-secret"] ?? "").trim();
+  if (!isAdminToken(token)) {
+    res.status(401).json({ error: "Admin authorisation required." });
+    return;
+  }
+  res.json(conflictDetailJob);
+});
+
 // ── GET /api/admin/margin/load-status ─────────────────────────────────────
 router.get("/admin/margin/load-status", (req, res) => {
   const token = String(req.headers["x-admin-secret"] ?? "").trim();
@@ -144,20 +204,34 @@ router.post("/admin/margin/load", (req, res) => {
     return;
   }
 
+  // Optional segment filter: POST body { segments: ["Garden Pipe", "Sink"] }
+  // Limits the load to those segments only and scopes the DELETE to match.
+  const rawSegments = req.body?.segments;
+  const segments: string[] | undefined =
+    Array.isArray(rawSegments)
+      ? rawSegments.map(String).filter(Boolean)
+      : typeof rawSegments === "string"
+        ? rawSegments.split(",").map((s) => s.trim()).filter(Boolean)
+        : undefined;
+
   const startedAt = new Date().toISOString();
   loadJob = { status: "running", startedAt };
+  const segMsg = segments && segments.length > 0
+    ? `Segment-targeted load for: ${segments.join(", ")}. `
+    : "Full load (177+ Drive exports, ~15 min). ";
   res.status(202).json({
     ok: true,
     status: "running",
     startedAt,
+    segments: segments ?? "all",
     message:
-      "Load started in the background (177+ Drive exports, ~15 min). " +
+      segMsg +
       "Poll GET /api/admin/margin/load-status with the same X-Admin-Secret header. " +
       "Rows appear in GET /api/margin/stats as they land.",
   });
 
   // Fire-and-forget — do NOT await
-  loadGpMarginFiles()
+  loadGpMarginFiles({ segments })
     .then((report) => {
       loadJob = {
         status: "done",

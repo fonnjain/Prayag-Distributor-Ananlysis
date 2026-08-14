@@ -270,6 +270,16 @@ function numsEqual(a: number | null | undefined, b: number | null | undefined): 
   return mag < 1e-12 || Math.abs(a - b) / mag < 1e-9;
 }
 
+/** For conflict-detection only: treat null and 0 as equivalent no-cost markers.
+ *  Stored values are never coerced — NULL and 0 remain distinguishable in margin_fact,
+ *  because 0 may one day represent a real (zero) BOM cost. */
+function bomCostEqual(a: number | null | undefined, b: number | null | undefined): boolean {
+  const aNone = a == null || a === 0;
+  const bNone = b == null || b === 0;
+  if (aNone && bNone) return true;   // both are "no cost" — not a conflict
+  return numsEqual(a, b);
+}
+
 // ── Row-by-row code-level comparison for deduplication ────────────────────────
 
 interface CodeDiff {
@@ -325,7 +335,7 @@ function compareCodeLevel(group: ParsedResult[]): CompareResult {
         (e) =>
           !numsEqual(e.row.qty, base.qty) ||
           !numsEqual(e.row.avgSale, base.avgSale) ||
-          !numsEqual(e.row.bomCost, base.bomCost) ||
+          !bomCostEqual(e.row.bomCost, base.bomCost) ||
           !numsEqual(e.row.mrp, base.mrp) ||
           !numsEqual(e.row.discountFrac, base.discountFrac),
       );
@@ -734,7 +744,7 @@ async function discoverSegmentFolders(): Promise<SegmentFolderInfo[]> {
 
 // ── Main load ──────────────────────────────────────────────────────────────
 
-export async function loadGpMarginFiles(): Promise<LoadReport> {
+export async function loadGpMarginFiles(opts?: { segments?: string[] }): Promise<LoadReport> {
   const report: LoadReport = {
     filesScanned: 0,
     filesLoaded: 0,
@@ -820,6 +830,12 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
   const summaryFiles    = allClassified.filter((f) => f.classification === "summary");
   const unknownFiles    = allClassified.filter((f) => f.classification === "unknown");
 
+  // When opts.segments is given, restrict the load to those segments only.
+  // Step 6 DELETE is also scoped so other segments' rows are untouched.
+  const segFilter = opts?.segments && opts.segments.length > 0 ? opts.segments : null;
+  const filteredMonthly    = segFilter ? monthlyFiles.filter((f) => segFilter.includes(f.segment!))    : monthlyFiles;
+  const filteredCumulative = segFilter ? cumulativeFiles.filter((f) => segFilter.includes(f.segment!)) : cumulativeFiles;
+
   report.filesCumulative = cumulativeFiles.map((f) => ({ name: f.file.name, fy: f.fy, segment: f.segment }));
   report.filesSummary    = summaryFiles.map((f)    => ({ name: f.file.name, fy: f.fy }));
   report.filesUnknown    = unknownFiles.map((f)    => ({ name: f.file.name, fy: f.fy, segment: f.segment, reason: "unparseable filename" }));
@@ -850,7 +866,7 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
     fileIdx: number,
   ): Promise<void> {
     logger.info(
-      { n: fileIdx, of: monthlyFiles.length, file: cf.file.name, fy: cf.fy, segment: cf.segment },
+      { n: fileIdx, of: filteredMonthly.length, file: cf.file.name, fy: cf.fy, segment: cf.segment },
       "gpMargin: reading monthly file",
     );
     let wb: WorkbookLike;
@@ -892,7 +908,7 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
       fileRows.push(...rows);
     }
     logger.info(
-      { n: fileIdx, of: monthlyFiles.length, file: cf.file.name, tabs: tabs.length, rows: fileRows.length },
+      { n: fileIdx, of: filteredMonthly.length, file: cf.file.name, tabs: tabs.length, rows: fileRows.length },
       "gpMargin: file loaded",
     );
     report.filesLoaded++;
@@ -900,10 +916,10 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
     parsedResults.push({ cf, rows: fileRows });
   }
 
-  for (let b = 0; b < monthlyFiles.length; b += BATCH_SIZE) {
-    const batch = monthlyFiles.slice(b, b + BATCH_SIZE);
+  for (let b = 0; b < filteredMonthly.length; b += BATCH_SIZE) {
+    const batch = filteredMonthly.slice(b, b + BATCH_SIZE);
     logger.info(
-      { batchStart: b + 1, batchEnd: b + batch.length, total: monthlyFiles.length },
+      { batchStart: b + 1, batchEnd: b + batch.length, total: filteredMonthly.length },
       "gpMargin: starting batch",
     );
     await Promise.allSettled(
@@ -1013,7 +1029,7 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
   }
 
   // 4 — parse cumulative files for cross-validation (subprocess, same timeout)
-  for (const cf of cumulativeFiles) {
+  for (const cf of filteredCumulative) {
     let wb: WorkbookLike;
     try {
       wb = await fetchWorkbookViaProcess(cf.file.id, 90);
@@ -1030,14 +1046,23 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
   }
 
   // 5 — coverage guard: refuse to wipe the table if fetch results are catastrophically low.
-  // This prevents a broken TIMEOUT_CMD or a connector-wide Sheets failure from silently
-  // replacing all existing margin data with zero rows.
-  if (monthlyFiles.length > 0) {
-    const minRequired = Math.max(5, Math.ceil(monthlyFiles.length * 0.40));
+  // For segment-targeted loads, require at least 1 file loaded (no 40% threshold — Drive's
+  // absence of a segment's files is already caught by filteredMonthly.length === 0 below).
+  // For full loads, the 40% threshold catches connector-wide Sheets failures.
+  if (segFilter && filteredMonthly.length === 0) {
+    throw new Error(
+      `GP Margin segment reload aborted — no monthly files found on Drive for ` +
+      `segment(s): ${segFilter.join(", ")}. margin_fact has NOT been modified.`,
+    );
+  }
+  if (filteredMonthly.length > 0) {
+    const minRequired = segFilter
+      ? 1
+      : Math.max(5, Math.ceil(filteredMonthly.length * 0.40));
     if (report.filesLoaded < minRequired) {
       throw new Error(
         `GP Margin load aborted — coverage too low to replace table: ` +
-        `${report.filesLoaded} of ${monthlyFiles.length} monthly files loaded successfully ` +
+        `${report.filesLoaded} of ${filteredMonthly.length} monthly files loaded successfully ` +
         `(minimum required: ${minRequired}). ` +
         `margin_fact has NOT been modified. ` +
         `Fix the fetch failures and retry.`,
@@ -1049,7 +1074,16 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query("DELETE FROM margin_fact");
+    if (segFilter) {
+      // Segment-targeted reload: only remove rows for the segments being reloaded
+      // so all other segments' data survives.
+      await client.query(
+        "DELETE FROM margin_fact WHERE segment = ANY($1::text[])",
+        [segFilter],
+      );
+    } else {
+      await client.query("DELETE FROM margin_fact");
+    }
 
     const CHUNK = 500;
     for (let i = 0; i < allRows.length; i += CHUNK) {
@@ -1134,6 +1168,161 @@ export async function loadGpMarginFiles(): Promise<LoadReport> {
 
   logger.info({ rows: report.rowsInserted, codes: report.distinctCodes, files: report.filesLoaded }, "gpMargin: load complete");
   return report;
+}
+
+// ── Read-only conflict detail (no DB writes) ───────────────────────────────
+
+export interface ConflictDetailRow {
+  month: string;
+  files: { name: string; id: string }[];
+  /** Code-level diffs — empty if copies are identical or only one copy was found. */
+  codeDiffs: {
+    code: string;
+    qty: number | null;
+    avgSale: number | null;
+    copies: { filename: string; bomCost: number | null; bomPct: number | null }[];
+  }[];
+  /** Top 10 differing codes sorted by qty desc. */
+  top10ByQty: {
+    code: string;
+    qty: number;
+    avgSale: number;
+    copies: { filename: string; bomCost: number | null; bomPct: number | null }[];
+  }[];
+  /** Weighted BOM% for each file copy across its full code set. */
+  segBomPctPerCopy: { filename: string; bomPct: number | null }[];
+}
+
+/**
+ * Fetch and compare all Drive copies of specific months for a given segment+FY.
+ * Never writes to the database — read-only diagnostic.
+ *
+ * Use to produce an owner-facing comparison table when two Drive copies carry
+ * different BOM cost values and a human must decide which is authoritative.
+ */
+export async function fetchSegmentConflictDetail(
+  segment: string,
+  fy: string,
+  targetMonths: string[],
+): Promise<ConflictDetailRow[]> {
+  const segmentFolders = await discoverSegmentFolders();
+  const seenFileIds = new Set<string>();
+  const allClassified: ClassifiedFile[] = [];
+
+  async function scanFolderReadOnly(
+    folderId: string,
+    folderFy: string,
+    folderSegment: string,
+  ): Promise<void> {
+    let children: DriveApiFile[];
+    try { children = await listDriveFolder(folderId); } catch { return; }
+    for (const child of children) {
+      if (child.mimeType === "application/vnd.google-apps.folder") {
+        const childSeg =
+          canonicalSegment(child.name) === "UNKNOWN" ? folderSegment : canonicalSegment(child.name);
+        await scanFolderReadOnly(child.id, folderFy, childSeg);
+        continue;
+      }
+      if (
+        child.mimeType !== "application/vnd.google-apps.spreadsheet" &&
+        !/\.(xlsx|xls)$/i.test(child.name)
+      ) continue;
+      if (seenFileIds.has(child.id)) continue;
+      seenFileIds.add(child.id);
+      if (folderSegment !== segment) continue;
+      const cls = classifyFilename(child.name);
+      if (cls !== "monthly") continue;
+      const ml = parseMonthLabel(child.name, folderFy);
+      if (!ml || !targetMonths.includes(ml)) continue;
+      allClassified.push({
+        file: child, fy: folderFy, segment: folderSegment,
+        monthLabel: ml, mimeType: child.mimeType, classification: "monthly",
+      });
+    }
+  }
+
+  for (const sf of segmentFolders) {
+    if (sf.fy !== fy) continue;
+    await scanFolderReadOnly(sf.folderId, sf.fy, sf.segment);
+  }
+
+  // Fetch each file — Sheets subprocess first, Drive export fallback
+  const TIMEOUT_S = 90;
+  const parsedResults: ParsedResult[] = [];
+  for (const cf of allClassified) {
+    let wb: WorkbookLike;
+    try {
+      wb = await fetchWorkbookViaProcess(cf.file.id, TIMEOUT_S);
+    } catch (sheetsErr) {
+      try { wb = await fetchWorkbookViaDriveExport(cf.file.id, cf.mimeType); }
+      catch { continue; }
+    }
+    const tabs = detectGpMarginTabs(wb);
+    if (tabs.length === 0) continue;
+    const fileRows: MarginRow[] = [];
+    for (const { ws, headerRow, colMap } of tabs) {
+      fileRows.push(...extractRows(ws, headerRow, colMap, cf.fy, cf.monthLabel!, cf.segment, cf.file.name));
+    }
+    parsedResults.push({ cf, rows: fileRows });
+  }
+
+  // Group by month and compare
+  const byMonth = new Map<string, ParsedResult[]>();
+  for (const pr of parsedResults) {
+    const k = pr.cf.monthLabel!;
+    const arr = byMonth.get(k) ?? [];
+    arr.push(pr);
+    byMonth.set(k, arr);
+  }
+
+  const results: ConflictDetailRow[] = [];
+  for (const month of targetMonths) {
+    const group = byMonth.get(month) ?? [];
+    const files = group.map((g) => ({ name: g.cf.file.name, id: g.cf.file.id }));
+
+    if (group.length < 2) {
+      results.push({ month, files, codeDiffs: [], top10ByQty: [], segBomPctPerCopy: [] });
+      continue;
+    }
+
+    const cmp = compareCodeLevel(group);
+    if (cmp.kind !== "conflict") {
+      results.push({ month, files, codeDiffs: [], top10ByQty: [], segBomPctPerCopy: [] });
+      continue;
+    }
+
+    const codeDiffs = cmp.codeDiffs.map((d) => ({
+      code: d.code,
+      qty:     d.values[0]?.qty     ?? null,
+      avgSale: d.values[0]?.avgSale ?? null,
+      copies: d.values.map((v) => ({
+        filename: v.filename,
+        bomCost: v.bomCost,
+        bomPct:
+          v.avgSale != null && v.avgSale !== 0 && v.bomCost != null
+            ? +((1 - v.bomCost / v.avgSale) * 100).toFixed(2)
+            : null,
+      })),
+    }));
+
+    const top10ByQty = [...codeDiffs]
+      .sort((a, b) => (b.qty ?? 0) - (a.qty ?? 0))
+      .slice(0, 10)
+      .map((d) => ({ code: d.code, qty: d.qty ?? 0, avgSale: d.avgSale ?? 0, copies: d.copies }));
+
+    const segBomPctPerCopy = group.map((g) => {
+      const totalSale = g.rows.reduce((s, r) => s + (r.avgSale ?? 0) * (r.qty ?? 0), 0);
+      const totalBom  = g.rows.reduce((s, r) => s + (r.bomCost ?? 0) * (r.qty ?? 0), 0);
+      return {
+        filename: g.cf.file.name,
+        bomPct: totalSale > 0 ? +((1 - totalBom / totalSale) * 100).toFixed(2) : null,
+      };
+    });
+
+    results.push({ month, files, codeDiffs, top10ByQty, segBomPctPerCopy });
+  }
+
+  return results;
 }
 
 export async function fetchWorkbookViaDriveExport(
