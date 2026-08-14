@@ -237,6 +237,184 @@ function parseAndValidate(
   return { header, idx, data };
 }
 
+// ── Exported row types ────────────────────────────────────────────────────────
+// Moved to module scope so executeCustomerMasterReload and integration tests
+// can reference the parsed-row shape without the CSV-parsing layer.
+
+export interface CustomerMasterRow {
+  id: string; company: string; type: string | null; status: string;
+  contact: string | null; mobile: string | null; state: string | null;
+  district: string | null; city: string | null; gst: string | null;
+  pincode: string | null; area: string | null; email: string | null;
+  address: string | null; leadStatus: string | null; statusSource: string | null;
+  entityType: string | null; assignedSegment: string | null;
+  createdDate: string | null; createdBy: string | null; sourceFile: string;
+}
+export interface JunctionUserRow {
+  retailerId: string; userName: string; userNormKey: string; position: number; resolved: boolean;
+}
+export interface JunctionDistRow {
+  retailerId: string; distributorName: string; distNormKey: string; position: number;
+  resolved: boolean; resolvedDistId: string | null;
+}
+
+/**
+ * Execute the customer-master reload transaction:
+ *   1. Snapshot state_head / head_confidence / notes for all existing rows.
+ *   2. DELETE FROM retailer_user, retailer_distributor, customer_master.
+ *   3. INSERT cmRows with snapshotted attribution re-applied per id.
+ *   4. INSERT junction rows (juBatch, jdBatch).
+ *   5. COMMIT, then await deriveForIds for newly-inserted rows still NULL.
+ *
+ * Extracted from runCustomerUploadLoad so integration tests can drive the real
+ * transaction with synthetic row data — without needing CSV files.
+ */
+export async function executeCustomerMasterReload(
+  cmRows: CustomerMasterRow[],
+  juBatch: JunctionUserRow[],
+  jdBatch: JunctionDistRow[],
+  reviewGroupOf: Map<string, number>,
+  opts?: {
+    /**
+     * When true, awaits the post-commit deriveForIds call before returning.
+     * Default false (fire-and-forget) preserves the original non-blocking
+     * semantics so uploads don't block on Drive availability.
+     * Pass true only in tests where you need the derived state to be visible
+     * before asserting.
+     */
+    awaitDerive?: boolean;
+  },
+): Promise<{ inserted: number; retailerUser: number; retailerDistributor: number }> {
+  const CM_CHUNK = 1000;
+  const J_CHUNK = 1000;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // Cross-instance exclusion: advisory xact lock guarantees a single writer
+    // per load kind across all instances and legacy CLI runs.
+    await client.query("SELECT pg_advisory_xact_lock(74011001)");
+
+    // Preserve human edits: snapshot existing attribution before the reset so a
+    // re-run never clobbers hand-set state_head / head_confidence / notes.
+    interface Attribution { stateHead: string | null; headConfidence: string | null; notes: string | null; }
+    const attrib = new Map<string, Attribution>();
+    const snap = await client.query<{ id: string; state_head: string | null; head_confidence: string | null; notes: string | null }>(
+      `SELECT id, state_head, head_confidence, notes
+         FROM customer_master
+        WHERE state_head IS NOT NULL`,
+    );
+    for (const row of snap.rows) {
+      attrib.set(row.id, { stateHead: row.state_head, headConfidence: row.head_confidence, notes: row.notes });
+    }
+    console.log(`[attribution] snapshotted ${attrib.size} rows with a non-null state_head to re-apply`);
+
+    // Idempotent reset (inside the txn) of rows this loader owns.
+    await client.query(`DELETE FROM retailer_user`);
+    await client.query(`DELETE FROM retailer_distributor`);
+    await client.query(`DELETE FROM customer_master`);
+
+    // Insert customer_master, re-applying preserved attribution per id.
+    let inserted = 0;
+    for (const c of chunk(cmRows, CM_CHUNK)) {
+      const vals: unknown[] = [];
+      const tuples: string[] = [];
+      let p = 1;
+      for (const row of c) {
+        const rg = reviewGroupOf.get(row.id) ?? null;
+        const a = attrib.get(row.id);
+        tuples.push(
+          `($${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++})`,
+        );
+        vals.push(
+          row.id, row.company, row.type, row.status, row.contact, row.mobile,
+          row.state, row.district, row.city, row.gst, row.pincode, row.area,
+          row.email, row.address, row.leadStatus, row.statusSource, row.entityType,
+          row.assignedSegment, row.createdDate, row.createdBy, row.sourceFile, rg, "customer-upload",
+          // preserved attribution (null when there was no prior resolved row)
+          a?.stateHead ?? null,
+          // head_confidence is NOT NULL DEFAULT 'Guessed' — never insert NULL.
+          a?.headConfidence ?? "Guessed",
+          a?.notes ?? null,
+        );
+      }
+      await client.query(
+        `INSERT INTO customer_master
+          (id, company, type, status, contact, mobile, state, district, city,
+           gst, pincode, area, email, address, lead_status, status_source,
+           entity_type, assigned_segment, created_date, created_by, source_file,
+           review_group, edited_by, state_head, head_confidence, notes)
+         VALUES ${tuples.join(",")}
+         ON CONFLICT (id) DO NOTHING`,
+        vals,
+      );
+      inserted += c.length;
+    }
+    console.log(`[customer_master] inserted ${inserted} rows (attribution re-applied for ${attrib.size})`);
+
+    // Insert junctions (dedup on (retailer_id, norm_key)).
+    let juIns = 0;
+    for (const c of chunk(juBatch, J_CHUNK)) {
+      const vals: unknown[] = [];
+      const tuples: string[] = [];
+      let p = 1;
+      for (const j of c) {
+        tuples.push(`($${p++},$${p++},$${p++},$${p++},$${p++})`);
+        vals.push(j.retailerId, j.userName, j.userNormKey, j.resolved, j.position);
+      }
+      await client.query(
+        `INSERT INTO retailer_user (retailer_id, user_name, user_norm_key, resolved, position)
+         VALUES ${tuples.join(",")}
+         ON CONFLICT (retailer_id, user_norm_key) DO NOTHING`,
+        vals,
+      );
+      juIns += c.length;
+    }
+    let jdIns = 0;
+    for (const c of chunk(jdBatch, J_CHUNK)) {
+      const vals: unknown[] = [];
+      const tuples: string[] = [];
+      let p = 1;
+      for (const j of c) {
+        tuples.push(`($${p++},$${p++},$${p++},$${p++},$${p++},$${p++})`);
+        vals.push(j.retailerId, j.distributorName, j.distNormKey, j.resolvedDistId, j.resolved, j.position);
+      }
+      await client.query(
+        `INSERT INTO retailer_distributor (retailer_id, distributor_name, dist_norm_key, resolved_dist_id, resolved, position)
+         VALUES ${tuples.join(",")}
+         ON CONFLICT (retailer_id, dist_norm_key) DO NOTHING`,
+        vals,
+      );
+      jdIns += c.length;
+    }
+    console.log(`[junctions] retailer_user rows sent=${juIns}, retailer_distributor rows sent=${jdIns}`);
+
+    await client.query("COMMIT");
+    console.log("=== customer-upload-load DONE ===");
+
+    // Import-time state_head derivation for newly inserted rows (outside the
+    // transaction — fire-and-forget by default so uploads don't block on Drive
+    // availability; pass opts.awaitDerive=true in tests to synchronise).
+    if (inserted > 0) {
+      const { rows: newIds } = await pool.query<{ id: string }>(
+        `SELECT id FROM customer_master WHERE state_head IS NULL`,
+      );
+      if (newIds.length) {
+        const { deriveForIds } = await import("../customerStateHead.js");
+        const p = deriveForIds(pool, newIds.map((r) => r.id));
+        if (opts?.awaitDerive) await p;
+      }
+    }
+
+    return { inserted, retailerUser: juIns, retailerDistributor: jdIns };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("[transaction] rolled back — master left untouched:", err);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export interface CustomerLoadResult {
   dryRun: boolean; customerMaster: number; retailerUser: number; retailerDistributor: number;
   /** distributor-file rows whose Customer Type was blank/unrecognised → type NULL */
@@ -261,16 +439,7 @@ export async function runCustomerUploadLoad(opts: { dryRun: boolean; endPool?: b
   // map normDistKey(companyName) → DIST# id (first wins).
   const distByNormKey = new Map<string, string>();
 
-  interface CMRow {
-    id: string; company: string; type: string | null; status: string;
-    contact: string | null; mobile: string | null; state: string | null;
-    district: string | null; city: string | null; gst: string | null;
-    pincode: string | null; area: string | null; email: string | null;
-    address: string | null; leadStatus: string | null; statusSource: string | null;
-    entityType: string | null; assignedSegment: string | null;
-    createdDate: string | null; createdBy: string | null; sourceFile: string;
-  }
-  const cmRows: CMRow[] = [];
+  const cmRows: CustomerMasterRow[] = [];
 
   // Customer Type (plural, as stored in the CSV) → singular type used by the
   // app's tab filters. Anything else (or blank) leaves type NULL — never
@@ -321,7 +490,7 @@ export async function runCustomerUploadLoad(opts: { dryRun: boolean; endPool?: b
   // 152-group / 339-row census exactly).
   const norm = (v: string | null) => (v ?? "").trim().toUpperCase();
   const nameGroupKey = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "");
-  const groups = new Map<string, CMRow[]>();
+  const groups = new Map<string, CustomerMasterRow[]>();
   for (const row of cmRows) {
     const key = nameGroupKey(row.company);
     const list = groups.get(key) ?? [];
@@ -355,10 +524,8 @@ export async function runCustomerUploadLoad(opts: { dryRun: boolean; endPool?: b
   const ri = ret.idx;
   const retData = ret.data;
 
-  interface JU { retailerId: string; userName: string; userNormKey: string; position: number; resolved: boolean; }
-  interface JD { retailerId: string; distributorName: string; distNormKey: string; position: number; resolved: boolean; resolvedDistId: string | null; }
-  const juBatch: JU[] = [];
-  const jdBatch: JD[] = [];
+  const juBatch: JunctionUserRow[] = [];
+  const jdBatch: JunctionDistRow[] = [];
   const rosterKeys = loadRosterNormKeys();
 
   for (const row of retData) {
@@ -436,135 +603,18 @@ export async function runCustomerUploadLoad(opts: { dryRun: boolean; endPool?: b
     return { dryRun: true, customerMaster: cmRows.length, retailerUser: juBatch.length, retailerDistributor: jdBatch.length, typeNull: typeNullRows.length, typeNullRows };
   }
 
-  // ── PHASE 2: single transaction. Snapshot human attribution, delete, then
-  // re-insert with attribution re-applied. Any error rolls the whole thing back
-  // so the master is never left empty or half-written. ────────────────────────
-  const CM_CHUNK = 1000;
-  const J_CHUNK = 1000;
-  const client = await pool.connect();
+  // ── PHASE 2: snapshot-delete-reinsert transaction + import-time derivation ──
   try {
-    await client.query("BEGIN");
-    // Cross-instance exclusion: in-memory job gating is process-local only
-    // (autoscale can run replicas). The advisory xact lock guarantees a single
-    // writer per load kind across all instances and legacy CLI runs.
-    await client.query("SELECT pg_advisory_xact_lock(74011001)");
-
-    // Preserve human edits: snapshot existing attribution before the reset so a
-    // re-run never clobbers hand-set state_head / head_confidence / notes.
-    interface Attribution { stateHead: string | null; headConfidence: string | null; notes: string | null; }
-    const attrib = new Map<string, Attribution>();
-    const snap = await client.query<{ id: string; state_head: string | null; head_confidence: string | null; notes: string | null }>(
-      `SELECT id, state_head, head_confidence, notes
-         FROM customer_master
-        WHERE state_head IS NOT NULL`,
-    );
-    for (const row of snap.rows) {
-      attrib.set(row.id, { stateHead: row.state_head, headConfidence: row.head_confidence, notes: row.notes });
-    }
-    console.log(`[attribution] snapshotted ${attrib.size} rows with a non-null state_head to re-apply`);
-
-    // Idempotent reset (inside the txn) of rows this loader owns.
-    await client.query(`DELETE FROM retailer_user`);
-    await client.query(`DELETE FROM retailer_distributor`);
-    await client.query(`DELETE FROM customer_master`);
-
-    // Insert customer_master, re-applying preserved attribution per id.
-    let inserted = 0;
-    for (const c of chunk(cmRows, CM_CHUNK)) {
-      const vals: unknown[] = [];
-      const tuples: string[] = [];
-      let p = 1;
-      for (const row of c) {
-        const rg = reviewGroupOf.get(row.id) ?? null;
-        const a = attrib.get(row.id);
-        tuples.push(
-          `($${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++})`,
-        );
-        vals.push(
-          row.id, row.company, row.type, row.status, row.contact, row.mobile,
-          row.state, row.district, row.city, row.gst, row.pincode, row.area,
-          row.email, row.address, row.leadStatus, row.statusSource, row.entityType,
-          row.assignedSegment, row.createdDate, row.createdBy, row.sourceFile, rg, "customer-upload",
-          // preserved attribution (null when there was no human edit)
-          a?.stateHead ?? null,
-          // head_confidence is NOT NULL DEFAULT 'Guessed' — never insert NULL.
-          a?.headConfidence ?? "Guessed",
-          a?.notes ?? null,
-        );
-      }
-      await client.query(
-        `INSERT INTO customer_master
-          (id, company, type, status, contact, mobile, state, district, city,
-           gst, pincode, area, email, address, lead_status, status_source,
-           entity_type, assigned_segment, created_date, created_by, source_file,
-           review_group, edited_by, state_head, head_confidence, notes)
-         VALUES ${tuples.join(",")}
-         ON CONFLICT (id) DO NOTHING`,
-        vals,
-      );
-      inserted += c.length;
-    }
-    console.log(`[customer_master] inserted ${inserted} rows (attribution re-applied for ${attrib.size})`);
-
-    // Insert junctions (dedup on (retailer_id, norm_key)).
-    let juIns = 0;
-    for (const c of chunk(juBatch, J_CHUNK)) {
-      const vals: unknown[] = [];
-      const tuples: string[] = [];
-      let p = 1;
-      for (const j of c) {
-        tuples.push(`($${p++},$${p++},$${p++},$${p++},$${p++})`);
-        vals.push(j.retailerId, j.userName, j.userNormKey, j.resolved, j.position);
-      }
-      await client.query(
-        `INSERT INTO retailer_user (retailer_id, user_name, user_norm_key, resolved, position)
-         VALUES ${tuples.join(",")}
-         ON CONFLICT (retailer_id, user_norm_key) DO NOTHING`,
-        vals,
-      );
-      juIns += c.length;
-    }
-    let jdIns = 0;
-    for (const c of chunk(jdBatch, J_CHUNK)) {
-      const vals: unknown[] = [];
-      const tuples: string[] = [];
-      let p = 1;
-      for (const j of c) {
-        tuples.push(`($${p++},$${p++},$${p++},$${p++},$${p++},$${p++})`);
-        vals.push(j.retailerId, j.distributorName, j.distNormKey, j.resolvedDistId, j.resolved, j.position);
-      }
-      await client.query(
-        `INSERT INTO retailer_distributor (retailer_id, distributor_name, dist_norm_key, resolved_dist_id, resolved, position)
-         VALUES ${tuples.join(",")}
-         ON CONFLICT (retailer_id, dist_norm_key) DO NOTHING`,
-        vals,
-      );
-      jdIns += c.length;
-    }
-    console.log(`[junctions] retailer_user rows sent=${juIns}, retailer_distributor rows sent=${jdIns}`);
-
-    await client.query("COMMIT");
-    console.log("=== customer-upload-load DONE ===");
-
-    // Import-time state_head derivation: run chain + state-lookup for all
-    // newly inserted rows (outside the transaction — non-fatal if it fails).
-    if (inserted > 0 && !opts.dryRun) {
-      const { rows: newIds } = await pool.query<{ id: string }>(
-        `SELECT id FROM customer_master WHERE state_head IS NULL`,
-      );
-      if (newIds.length) {
-        const { deriveForIds } = await import("../customerStateHead.js");
-        void deriveForIds(pool, newIds.map((r) => r.id));
-      }
-    }
-
-    return { dryRun: false, customerMaster: inserted, retailerUser: juIns, retailerDistributor: jdIns, typeNull: typeNullRows.length, typeNullRows };
-  } catch (err) {
-    await client.query("ROLLBACK");
-    console.error("[transaction] rolled back — master left untouched:", err);
-    throw err;
+    const reload = await executeCustomerMasterReload(cmRows, juBatch, jdBatch, reviewGroupOf);
+    return {
+      dryRun: false,
+      customerMaster: reload.inserted,
+      retailerUser: reload.retailerUser,
+      retailerDistributor: reload.retailerDistributor,
+      typeNull: typeNullRows.length,
+      typeNullRows,
+    };
   } finally {
-    client.release();
     if (opts.endPool) await pool.end();
   }
 }
