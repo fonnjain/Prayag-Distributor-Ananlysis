@@ -1,0 +1,44 @@
+The API-vs-DB match is exact and the warnings are correctly advisory. But
+your last paragraph describes a defect, not a design note.
+
+THE PROBLEM
+secondary_register_line has no item_code, so the lookup answers "has this
+customer bought ANYTHING from us in 12 months" - but the warning text says
+"this ITEM may belong in Tab 2".
+
+Consequence: Ayan Enterprise has 415 lines across 11 months, so Tab 2 will
+warn on EVERY item code - including ones he has genuinely never bought, which
+is precisely what Tab 2 exists to record. The warning fires on the correct
+answer.
+
+Tab 1 only warns for customers who have bought nothing at all, which the tab
+already knows.
+
+Both warnings are inverted in practice. A salesperson using Tab 2 correctly
+gets told they are wrong every time, which is the fastest way to train people
+to ignore a warning.
+
+REPORT FIRST, do not change anything yet
+  a. Does ANY table hold retailer-level purchases at ITEM CODE granularity?
+     Check secondary_sku_line - it carries item_code and retailer. Print its
+     columns and confirm whether a retailer + item_code lookup is possible.
+  b. If it is, print for RET#9690 (Ayan Enterprise) the count of distinct item
+     codes bought in the last 12 months, and whether CP-101 is among them.
+  c. If secondary_sku_line does not link to a named retailer, say so plainly.
+
+THEN, depending on (a):
+
+IF item-level data exists:
+  Repoint the lookup at it. The warning then means what it says. Keep the
+  customer-level count as secondary context - "bought from us in 9 of 12
+  months, but never this item" is a more useful sentence than either fact
+  alone.
+
+IF it does not:
+  Change the WORDS to match the check. Drop the tab recommendation entirely.
+  Replace with a neutral statement:
+      "This customer purchased from Prayag in 11 of the last 12 months
+       (415 lines). Item-level history is not available."
+  A warning that cannot distinguish the two tabs must not recommend a tab.
+
+Either way, print the new text verbatim before you ship it.
