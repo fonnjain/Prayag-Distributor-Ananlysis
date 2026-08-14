@@ -12,7 +12,7 @@
 //   Distributors / direct dealers: sale_line_current (ctx.customerSale + ctx.customerCode)
 
 import type { RawAlert, DetectionContext } from "./types.js";
-import { computeMrpIndex } from "./mrpIndex.js";
+import { computeMrpIndex, computeRetailerMrpIndex } from "./mrpIndex.js";
 
 type BConfig = {
   B1_REAL_GROWTH_FLOOR_PCT: number;
@@ -338,9 +338,9 @@ function buildRetailerBAlerts(
 
     if (currentVal === 0 || priorVal === 0 || valueGrowthPct === null) continue;
 
-    // B1 — MRP index computed from primary SKU basket keyed on retailer id.
-    // Null if no MRP history for this retailer's codes (B1 is then skipped).
-    const mrpResult = computeMrpIndex(ctx, retailer, priorMonths, currentMonths);
+    // B1 — uses secondary-basket MRP index (value-weighted Laspeyres from retailerSku).
+    // Primary customerCode is NOT consulted; retailer IDs are absent from that source.
+    const mrpResult = computeRetailerMrpIndex(ctx, retailer, priorMonths, currentMonths);
     if (mrpResult != null) {
       const realGrowthPct = valueGrowthPct - mrpResult.mrpIncreasePct;
       const realisedRealGrowthPct = valueGrowthPct - mrpResult.realisedIncreasePct;

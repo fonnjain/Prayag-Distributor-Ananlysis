@@ -47,9 +47,12 @@ type RaConfig = {
 function loadConfig(): RaConfig {
   // Works from both src/ (during dev/typecheck, __dirname = src/lib/redAlert)
   // and dist/ (after build, __dirname = dist).
+  const dir = dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    resolve(dirname(fileURLToPath(import.meta.url)), "../../config/red_alert_config.json"),
-    resolve(dirname(fileURLToPath(import.meta.url)), "../config/red_alert_config.json"),
+    resolve(dir, "../config/red_alert_config.json"),         // dist/ → root/config/
+    resolve(dir, "../../../config/red_alert_config.json"),   // src/lib/redAlert/ → root/config/
+    resolve(dir, "../../config/red_alert_config.json"),      // src/lib/ → root/config/
+    resolve(process.cwd(), "config/red_alert_config.json"),  // cwd fallback
   ];
   for (const p of candidates) {
     try { return JSON.parse(readFileSync(p, "utf8")) as RaConfig; } catch { /* try next */ }

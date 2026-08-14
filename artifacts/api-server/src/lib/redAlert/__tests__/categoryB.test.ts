@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from "vitest";
 import { buildCategoryBAlerts } from "../categoryB.js";
+import { detectAlerts } from "../detectAlerts.js";
 import type { DetectionContext, RetailerSaleRow, RetailerSkuRow } from "../types.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -62,9 +63,10 @@ function rskuRow(fy: string, monthLabel: string, retailer: string, itemCode: str
   return { fy, monthLabel, retailer, itemCode, segmentCanon: "SegA", value };
 }
 
-const CUR_FY  = "2026-27";
-const PRIOR_FY = "2025-26";
-const CUR_MONTHS  = ["Apr-26", "May-26"];
+const CUR_FY       = "2026-27";
+const PRIOR_FY     = "2025-26";
+const PRIOR_PRIOR_FY = "2024-25";
+const CUR_MONTHS   = ["Apr-26", "May-26"];
 const PRIOR_MONTHS = ["Apr-25", "May-25"];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -130,6 +132,140 @@ describe("Category B — retailer data source", () => {
     const b3 = alerts.filter((a) => a.code === "B3" && a.entityKey === "DIST-ALPHA");
     expect(b3).toHaveLength(1);
     expect(b3[0]!.entityType).toBe("distributor");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B1 regression: retailer B1 fires using ONLY secondary data (no primary rows)
+// ─────────────────────────────────────────────────────────────────────────────
+describe("Category B — retailer B1 (secondary-basket MRP index)", () => {
+  it("B1 fires for a retailer using secondary_sku_line data; zero customerCode rows required", () => {
+    // Retailer had good prior sales. Current period: nominal value declined but MRP rose a lot
+    // → real growth is negative. MRP history has one code with a 30% increase.
+    // Real growth = nominal growth pct - MRP increase pct < -20% threshold → should fire.
+    const ctx = makeCtx({
+      retailerSale: [
+        rsRow(PRIOR_FY, "Apr-25", "RET-B1", 100_000),
+        rsRow(CUR_FY,   "Apr-26", "RET-B1",  85_000), // -15% nominal
+      ],
+      retailerSku: [
+        // Prior period basket: code CODE-A, segment SegA, value 100k
+        rskuRow(PRIOR_FY, "Apr-25", "RET-B1", "CODE-A", 100_000),
+        rskuRow(CUR_FY,   "Apr-26", "RET-B1", "CODE-A",  85_000),
+      ],
+      mrpHistory: [
+        // CODE-A had MRP 100 in the prior period and 130 now = +30% MRP increase
+        {
+          itemCode: "CODE-A", segment: "SegA",
+          mrp: 100, effectiveFrom: "2025-01-01", effectiveTo: "2026-03-31", isCurrent: false,
+        },
+        {
+          itemCode: "CODE-A", segment: "SegA",
+          mrp: 130, effectiveFrom: "2026-04-01", effectiveTo: null, isCurrent: true,
+        },
+      ],
+      // customerCode is intentionally empty — proving no primary rows are needed
+    });
+
+    const alerts = buildCategoryBAlerts(ctx, CUR_FY, ["Apr-26"], CFG);
+    const b1 = alerts.filter((a) => a.code === "B1" && a.entityKey === "RET-B1");
+    expect(b1).toHaveLength(1);
+    expect(b1[0]!.entityType).toBe("retailer");
+    // real growth = -15% nominal - 30% MRP = -45%, well below -20% floor
+    expect(b1[0]!.numbers.realGrowthPct).toBeLessThan(CFG.B1_REAL_GROWTH_FLOOR_PCT);
+    expect(b1[0]!.numbers.mrpIncreasePct).toBeGreaterThan(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B3 end-to-end: genuine retailer dropout reaches final alerts through detectAlerts
+// ─────────────────────────────────────────────────────────────────────────────
+describe("Category B — B3 end-to-end through detectAlerts", () => {
+  // Populate frozenMonths so Guard 3 (complete months) allows the analysis months.
+  const FROZEN = new Map<string, Set<string>>([
+    [CUR_FY,         new Set(["Apr-26"])],
+    [PRIOR_FY,       new Set(["Apr-25"])],
+    [PRIOR_PRIOR_FY, new Set(["Apr-24"])],
+  ]);
+
+  it("E2E-B3-pass: a genuine retailer dropout reaches final alert results (not suppressed)", () => {
+    // Retailer had prior secondary activity; zero current activity.
+    // Prior distributor attribution present; current window: no attribution at all.
+    // Guard 5 (after case-b removal) must NOT suppress this.
+    const retailerDistributors = new Map<string, Map<string, Set<string>>>();
+    const rdm = new Map<string, Set<string>>();
+    rdm.set(`${PRIOR_FY}|Apr-25`, new Set(["DistA"])); // prior attribution
+    // current window has NO distributor rows — genuine dropout, not redistribution
+    retailerDistributors.set("RET-DROPOUT", rdm);
+
+    const ctx: DetectionContext = {
+      pool: null as unknown as DetectionContext["pool"],
+      customerSale: [], customerMeta: [], customerCode: [],
+      retailerSale: [rsRow(PRIOR_FY, "Apr-25", "RET-DROPOUT", 500_000)],
+      retailerSku: [],
+      secHeadMonths: [],
+      mrpHistory: [], ambiguousCodes: new Set(), marginFact: [], persons: [],
+      customerMaster: new Map(),
+      retailerDistributors,
+      frozenMonths: FROZEN,
+      secCompleteMonths: new Map(),
+      lastSheetRead: new Map(),
+    };
+
+    const result = detectAlerts(ctx, {
+      fy: CUR_FY,
+      primaryCompleteMonths: ["Apr-26"],
+      nowDate: new Date("2026-08-01"),
+      c5AsOfDate: new Date("2026-08-01"),
+    });
+
+    const b3 = result.alerts.filter((a) => a.code === "B3" && a.entityKey === "RET-DROPOUT");
+    expect(b3).toHaveLength(1);
+    expect(b3[0]!.entityType).toBe("retailer");
+
+    // Confirm Guard 5 did not suppress it
+    const g5Suppressed = result.suppressed.filter(
+      (s) => s.alert.entityKey === "RET-DROPOUT" && s.guard === 5,
+    );
+    expect(g5Suppressed).toHaveLength(0);
+  });
+
+  it("E2E-B3-suppress: B3 is suppressed by Guard 5 when distributor changed in-window (redistribution)", () => {
+    // Retailer had prior attribution DistA; current window shows DistB → redistribution.
+    const retailerDistributors = new Map<string, Map<string, Set<string>>>();
+    const rdm = new Map<string, Set<string>>();
+    rdm.set(`${PRIOR_FY}|Apr-25`, new Set(["DistA"]));
+    rdm.set(`${CUR_FY}|Apr-26`,   new Set(["DistB"]));  // different distributor → redistribution
+    retailerDistributors.set("RET-REDIR", rdm);
+
+    const ctx: DetectionContext = {
+      pool: null as unknown as DetectionContext["pool"],
+      customerSale: [], customerMeta: [], customerCode: [],
+      retailerSale: [rsRow(PRIOR_FY, "Apr-25", "RET-REDIR", 500_000)],
+      retailerSku: [],
+      secHeadMonths: [],
+      mrpHistory: [], ambiguousCodes: new Set(), marginFact: [], persons: [],
+      customerMaster: new Map(),
+      retailerDistributors,
+      frozenMonths: FROZEN,
+      secCompleteMonths: new Map(),
+      lastSheetRead: new Map(),
+    };
+
+    const result = detectAlerts(ctx, {
+      fy: CUR_FY,
+      primaryCompleteMonths: ["Apr-26"],
+      nowDate: new Date("2026-08-01"),
+      c5AsOfDate: new Date("2026-08-01"),
+    });
+
+    const b3Final = result.alerts.filter((a) => a.code === "B3" && a.entityKey === "RET-REDIR");
+    expect(b3Final).toHaveLength(0);
+
+    const g5Suppressed = result.suppressed.filter(
+      (s) => s.alert.entityKey === "RET-REDIR" && s.guard === 5,
+    );
+    expect(g5Suppressed).toHaveLength(1);
   });
 });
 

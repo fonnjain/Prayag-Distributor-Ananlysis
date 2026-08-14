@@ -70,6 +70,85 @@ function monthLabelToEndDate(label: string): string {
   return lastDay.toISOString().slice(0, 10);
 }
 
+// ── Retailer MRP index (value-weighted, secondary data) ──────────────────────
+// secondary_sku_line carries net_amount but not qty; we therefore use a
+// value-weighted Laspeyres price index rather than a quantity-weighted one.
+// This is the standard approximation when only values are available.
+// The realised-price component is omitted (requires avg_rate from qty).
+
+export function computeRetailerMrpIndex(
+  ctx: DetectionContext,
+  retailer: string,
+  priorMonths: string[],
+  currentMonths: string[],
+): MrpIndexResult | null {
+  if (priorMonths.length === 0 || currentMonths.length === 0) return null;
+
+  const priorMonthSet   = new Set(priorMonths);
+  const currentMonthSet = new Set(currentMonths);
+  const lastPriorMonth  = priorMonths[priorMonths.length - 1]!;
+  const priorAsOf       = monthLabelToEndDate(lastPriorMonth);
+
+  // Build value basket: item_code + segment → { priorValue, curValue }
+  type REntry = { seg: string | null; priorValue: number; curValue: number };
+  const basket = new Map<string, REntry>();
+
+  for (const r of ctx.retailerSku) {
+    if (r.retailer !== retailer) continue;
+    const key = `${r.itemCode}|${r.segmentCanon ?? ""}`;
+    if (priorMonthSet.has(r.monthLabel)) {
+      const prev = basket.get(key) ?? { seg: r.segmentCanon, priorValue: 0, curValue: 0 };
+      prev.priorValue += r.value;
+      basket.set(key, prev);
+    } else if (currentMonthSet.has(r.monthLabel)) {
+      const prev = basket.get(key) ?? { seg: r.segmentCanon, priorValue: 0, curValue: 0 };
+      prev.curValue += r.value;
+      basket.set(key, prev);
+    }
+  }
+
+  if (basket.size === 0) return null;
+
+  // Value-weighted Laspeyres: Σ(priorValue × P_cur/P_pri) / Σ(priorValue)
+  let mrpNumerator = 0;
+  let mrpDenominator = 0;
+  let coveredValue = 0;
+  let totalPriorValue = 0;
+
+  for (const [key, entry] of basket) {
+    if (entry.priorValue <= 0) continue;
+    totalPriorValue += entry.priorValue;
+
+    const [code] = key.split("|") as [string, string];
+    const seg    = entry.seg ?? "";
+
+    const mrpThen = findMrp(ctx.mrpHistory, code, seg, priorAsOf);
+    const mrpNow  = ctx.ambiguousCodes.has(code)
+      ? findCurrentMrp(ctx.mrpHistory, code, seg)
+      : ctx.mrpHistory.find((r) => r.itemCode === code && r.isCurrent)?.mrp ?? null;
+
+    if (mrpThen != null && mrpNow != null && mrpThen > 0) {
+      mrpNumerator   += entry.priorValue * mrpNow;
+      mrpDenominator += entry.priorValue * mrpThen;
+      coveredValue   += entry.priorValue;
+    }
+  }
+
+  if (mrpDenominator === 0) return null;
+
+  const mrpIndex     = mrpNumerator / mrpDenominator;
+  const mrpIncreasePct = (mrpIndex - 1) * 100;
+
+  return {
+    mrpIncreasePct,
+    realisedIncreasePct: mrpIncreasePct,   // no qty → use MRP figure conservatively
+    basketSize: basket.size,
+    coveredValue,
+    totalPriorValue,
+    coveragePct: totalPriorValue > 0 ? (coveredValue / totalPriorValue) * 100 : 0,
+  };
+}
+
 export function computeMrpIndex(
   ctx: DetectionContext,
   customer: string,

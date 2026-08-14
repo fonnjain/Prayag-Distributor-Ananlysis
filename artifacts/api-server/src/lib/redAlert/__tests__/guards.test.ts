@@ -180,6 +180,20 @@ describe("Guard 5 — distributor reassignment", () => {
     expectNotGuard(result, 5);
   });
 
+  it("T3d: absent current-window attribution does NOT suppress B3 (genuine dropout, not redistribution)", () => {
+    // Prior window: retailer served by DistA.
+    // Current window: NO distributor rows at all → genuine dropout signal.
+    // Guard 5 (case b removed) must NOT suppress this.
+    const ctx = makeCtxG5(distMap([
+      ["2025-26|Apr-25", ["DistA"]],
+      // current window Apr-26 has NO distributor attribution
+    ]));
+
+    const alert = makeB3Alert({ currentMonths: ["Apr-26"], priorMonths: ["Apr-25"] });
+    const result = runGuards(alert, ctx, "2026-27", "2025-26", new Date(), 55);
+    expectNotGuard(result, 5);
+  });
+
   it("T3c: an out-of-window distributor change (Jul-26) does NOT suppress a B3 on Apr-26", () => {
     const ctx = makeCtxG5(distMap([
       ["2025-26|Apr-25", ["DistA"]],

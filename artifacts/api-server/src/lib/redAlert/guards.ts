@@ -221,7 +221,15 @@ function guard5DistributorReassignment(
 
   if (priDists.size === 0) return { pass: true }; // no prior attribution in window — can't assess
 
-  // (a) Distributor set changed between the two windows (any addition or removal)
+  // Only suppress when BOTH windows have attribution AND the distributor set changed.
+  // If curDists is empty (current window has zero attribution), the retailer may be a
+  // genuine dropout — Guard 5 cannot distinguish redistribution from dropout without
+  // a positive current-period signal. Treating absent attribution as redistribution
+  // would suppress every confirmed B3 dropout, so we require a positive change.
+  if (curDists.size === 0) return { pass: true };
+
+  // (a) Distributor set changed between the two windows (any addition or removal).
+  //     Both windows have attribution, so this is a clear redistribution signal.
   const changedDistributors =
     [...priDists].some((d) => !curDists.has(d)) ||
     [...curDists].some((d) => !priDists.has(d));
@@ -230,17 +238,8 @@ function guard5DistributorReassignment(
     return {
       pass: false, guard: 5,
       reason: `Retailer "${entityKey}" served by different distributors within the alert windows `
-        + `(prior window: ${[...priDists].join(", ")}; current window: ${curDists.size > 0 ? [...curDists].join(", ") : "none"}) `
+        + `(prior window: ${[...priDists].join(", ")}; current window: ${[...curDists].join(", ")}) `
         + `— possible redistribution, not confirmed dropout`,
-    };
-  }
-
-  // (b) Absent from current window but attributed in prior window — redistribution gap
-  if (curDists.size === 0 && priDists.size > 0) {
-    return {
-      pass: false, guard: 5,
-      reason: `Retailer "${entityKey}" absent from current-window secondary data `
-        + `but had distributor attribution in the prior window — possible redistribution gap`,
     };
   }
 
