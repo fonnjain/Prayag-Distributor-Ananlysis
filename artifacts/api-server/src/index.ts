@@ -34,6 +34,7 @@ import {
   loadPersonRegistry,
   assertHeadCoverage,
 } from "./lib/personRegistry.js";
+import { logCoverage as logCustomerStateHeadCoverage } from "./lib/customerStateHead.js";
 
 const rawPort = process.env["PORT"];
 
@@ -81,6 +82,8 @@ runMigrations()
     // Non-fatal coverage check — logs WARN for any FY2026-27 register head not
     // resolved by the registry.  Run in background after register data is ready.
     void assertHeadCoverage();
+    // One-line startup log: how many customer_master rows have a state_head.
+    void logCustomerStateHeadCoverage().catch(() => {/* non-fatal */});
   })
   .then(() => {
     app.listen(port, (err) => {

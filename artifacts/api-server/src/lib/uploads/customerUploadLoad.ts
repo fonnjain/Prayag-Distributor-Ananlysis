@@ -545,6 +545,19 @@ export async function runCustomerUploadLoad(opts: { dryRun: boolean; endPool?: b
 
     await client.query("COMMIT");
     console.log("=== customer-upload-load DONE ===");
+
+    // Import-time state_head derivation: run chain + state-lookup for all
+    // newly inserted rows (outside the transaction — non-fatal if it fails).
+    if (inserted > 0 && !opts.dryRun) {
+      const { rows: newIds } = await pool.query<{ id: string }>(
+        `SELECT id FROM customer_master WHERE state_head IS NULL`,
+      );
+      if (newIds.length) {
+        const { deriveForIds } = await import("../customerStateHead.js");
+        void deriveForIds(pool, newIds.map((r) => r.id));
+      }
+    }
+
     return { dryRun: false, customerMaster: inserted, retailerUser: juIns, retailerDistributor: jdIns, typeNull: typeNullRows.length, typeNullRows };
   } catch (err) {
     await client.query("ROLLBACK");

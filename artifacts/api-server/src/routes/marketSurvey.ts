@@ -553,19 +553,69 @@ router.get("/market-survey/state-heads", async (_req, res) => {
 
 // ── GET /api/market-survey/cascade-states ─────────────────────────────────
 // All picker-visible states from state_hierarchy for the cascade.
-// stateHead param is accepted but currently not used to restrict (mapping not in DB).
-router.get("/market-survey/cascade-states", async (_req, res) => {
+// When ?stateHead=<canonicalName> is supplied, restricts to states that head
+// serves (derived from customer_master.state_head). Falls back to all 33
+// states when no customer rows exist for the head (backfill not yet run).
+router.get("/market-survey/cascade-states", async (req, res) => {
   try {
-    const result = await pool.query<{
+    const stateHeadRaw = typeof req.query.stateHead === "string" ? req.query.stateHead.trim() : null;
+
+    // Full ordered list from state_hierarchy (always fetched for display ordering).
+    const allStates = await pool.query<{
       state_canon: string; state_parent: string; is_split: boolean;
     }>(
       "SELECT state_canon, state_parent, is_split FROM state_hierarchy WHERE picker_visible = true ORDER BY display_order",
     );
-    res.json({ states: result.rows.map((r) => ({
-      canon:    r.state_canon,
-      parent:   r.state_parent,
-      isSplit:  r.is_split,
-    })) });
+    const allRows = allStates.rows.map((r) => ({
+      canon:   r.state_canon,
+      parent:  r.state_parent,
+      isSplit: r.is_split,
+    }));
+
+    if (!stateHeadRaw) {
+      res.json({ states: allRows });
+      return;
+    }
+
+    // The picker sends person_registry.canonical_name (HR name), but
+    // customer_master.state_head stores COALESCE(alias_secondary, canonical_name)
+    // (the sale-line display canonical, e.g. "Pawan Sharma" ≠ "Pawan Kumar Sharma").
+    // Resolve to the stored form before filtering so the WHERE clause matches.
+    const { resolvePickerToStoredHead } = await import("../lib/customerStateHead.js");
+    const storedHead = await resolvePickerToStoredHead(pool, stateHeadRaw);
+
+    // Fetch distinct raw states from customer_master for this head.
+    const headStates = await pool.query<{ state: string }>(
+      `SELECT DISTINCT state FROM customer_master WHERE state_head = $1 AND state IS NOT NULL`,
+      [storedHead],
+    );
+
+    if (!headStates.rows.length) {
+      // Backfill not yet run for this head → graceful fallback: return all states.
+      res.json({ states: allRows });
+      return;
+    }
+
+    // Normalise raw customer states to the vocabulary used in state_hierarchy.
+    const { normaliseCustomerState } = await import("../lib/customerStateHead.js");
+    const normSet = new Set<string>();
+    for (const r of headStates.rows) {
+      const n = normaliseCustomerState(r.state);
+      if (n) normSet.add(n);
+    }
+
+    // Intersect with state_hierarchy for ordering and parent grouping.
+    // Include a parent-aggregate row when any of its children are in the set.
+    const parentSet = new Set<string>();
+    for (const row of allRows) {
+      if (normSet.has(row.canon)) parentSet.add(row.parent);
+    }
+    const filtered = allRows.filter(
+      (r) => normSet.has(r.canon) || normSet.has(r.parent) || parentSet.has(r.canon),
+    );
+
+    // If filtering left 0 rows (state vocab mismatch), fall back to all states.
+    res.json({ states: filtered.length ? filtered : allRows });
   } catch {
     res.status(500).json({ error: "Failed to load states" });
   }

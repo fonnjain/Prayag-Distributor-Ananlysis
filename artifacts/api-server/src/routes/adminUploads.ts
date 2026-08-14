@@ -474,4 +474,46 @@ router.post(
   },
 );
 
+// ── POST /api/admin/backfill-customer-state-head ───────────────────────────────
+// One-off derivation of customer_master.state_head from three sources:
+//   1. Exact sale_line company-name match  (confidence='sale_line')
+//   2. distributorTmMap → person_registry chain  (confidence='chain')
+//   3. Single-head state lookup  (confidence='state_lookup')
+// Protected by X-Admin-Secret. Advisory lock prevents concurrent runs.
+router.post(
+  "/admin/backfill-customer-state-head",
+  async (req: Request, res: Response): Promise<void> => {
+    const token = String(req.headers["x-admin-secret"] ?? "").trim();
+    const { isAdminToken } = await import("../lib/adminAuth.js");
+    if (!isAdminToken(token)) {
+      res.status(401).json({ error: "Admin authorisation required." });
+      return;
+    }
+    try {
+      const { pool: dbPool } = await import("@workspace/db");
+      const { runFullBackfill } = await import("../lib/customerStateHead.js");
+
+      // Acquire a transaction-scoped advisory lock on a single client and run
+      // ALL backfill queries through that same client so the lock truly covers
+      // the work.  pg_advisory_xact_lock releases automatically on COMMIT/ROLLBACK.
+      const client = await dbPool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock(74011002)");
+        const counts = await runFullBackfill(client);
+        await client.query("COMMIT");
+        res.json({ ok: true, counts });
+      } catch (err) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
+    } catch (err) {
+      req.log.error({ err }, "backfill-customer-state-head failed");
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+);
+
 export default router;

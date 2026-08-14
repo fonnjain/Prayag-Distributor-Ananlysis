@@ -620,8 +620,13 @@ export default function MarketSurveyPage() {
   });
 
   const statesQ = useQuery<{ states: HierarchyState[] }>({
-    queryKey: ["ms-cascade-states"],
-    queryFn: () => fetch(API("market-survey/cascade-states")).then((r) => r.json()),
+    queryKey: ["ms-cascade-states", form.stateHeadName],
+    queryFn: () => {
+      const url = form.stateHeadName
+        ? API(`market-survey/cascade-states?stateHead=${encodeURIComponent(form.stateHeadName)}`)
+        : API("market-survey/cascade-states");
+      return fetch(url).then((r) => r.json());
+    },
     staleTime: 60 * 60_000,
   });
 
