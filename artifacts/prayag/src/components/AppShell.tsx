@@ -5,6 +5,7 @@
 //               AI Analyst, Reports, Company Reports, Targets, Pending, Sources, Health
 //   Sales     — State Head, Sales People, Primary, Secondary, Combined
 //   MRP       — MRP Master, Margin (GP contribution data)
+//   Market    — Market Survey (competitor pricing intelligence)
 //   Customers — Rankings, Price Shrinkers, At Risk & New, Schemes
 //
 // The sidebar is always visible on desktop.  On mobile a hamburger opens it as
@@ -20,6 +21,7 @@ import {
   LayoutDashboard, Users, ShoppingBag,
   AlertTriangle, UserMinus, Settings, Store, BookOpen, Network,
   ChevronDown, ChevronRight, Menu, X, Sun, Moon, Braces, Key, Layers, IndianRupee,
+  Globe, FileSearch,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -87,6 +89,14 @@ const NAV: NavGroup[] = [
     ],
   },
   {
+    id: "market",
+    label: "Market",
+    icon: Globe,
+    items: [
+      { id: "market-survey", label: "Market Survey", path: "/market-survey", icon: FileSearch },
+    ],
+  },
+  {
     id: "customers",
     label: "Customers",
     icon: Store,
@@ -126,14 +136,17 @@ function activeIds(location: string): { groupId: string; itemId: string } {
   if (location === "/mrp/margin" || location.startsWith("/mrp/margin")) {
     return { groupId: "mrp", itemId: "margin" };
   }
+  if (location.startsWith("/market-survey")) {
+    return { groupId: "market", itemId: "market-survey" };
+  }
   if (location.startsWith("/customers")) {
     const slug = location.replace(/^\/customers\/?/, "").split("?")[0];
-    const item = NAV[3].items.find((i) => i.id === slug) ?? NAV[3].items[0];
+    const item = NAV[4].items.find((i) => i.id === slug) ?? NAV[4].items[0];
     return { groupId: "customers", itemId: item.id };
   }
   if (location.startsWith("/dev")) {
     const slug = location.replace(/^\/dev\/?/, "").split("?")[0] || "api-portal";
-    const item = NAV[4].items.find((i) => i.id === slug) ?? NAV[4].items[0];
+    const item = NAV[5].items.find((i) => i.id === slug) ?? NAV[5].items[0];
     return { groupId: "developer", itemId: item.id };
   }
   // Dashboard
@@ -156,6 +169,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     dashboard: activeGroupId === "dashboard",
     sales:     activeGroupId === "sales",
     mrp:       activeGroupId === "mrp",
+    market:    activeGroupId === "market",
     customers: activeGroupId === "customers",
     developer: activeGroupId === "developer",
   });

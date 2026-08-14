@@ -761,6 +761,47 @@ const MIGRATIONS: Migration[] = [
         display_order  = EXCLUDED.display_order;
     `,
   },
+  {
+    id: "026_market_survey",
+    sql: `
+      -- Stores retailer visit price surveys recorded by Prayag salespeople.
+      -- customer_id references customer_master(id) (TEXT PK like "RET#92823").
+      -- net_price is always the canonical stored value; mrp + discount_pct are
+      -- stored when entry_mode = 'mrp_discount' so the working is preserved.
+      -- Editing is allowed for 24 hours after created_at (enforced in the API).
+      CREATE TABLE IF NOT EXISTS market_survey (
+        id                SERIAL       PRIMARY KEY,
+        surveyed_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
+        recorded_by       TEXT         NOT NULL,
+        is_existing_buyer BOOLEAN      NOT NULL,
+        customer_id       TEXT         REFERENCES customer_master(id),
+        prospect_name     TEXT,
+        state             TEXT,
+        district          TEXT,
+        segment           TEXT         NOT NULL,
+        prayag_item_code  TEXT,
+        competitor_brand  TEXT         NOT NULL,
+        competitor_product TEXT,
+        net_price         NUMERIC(12,2) NOT NULL,
+        mrp               NUMERIC(12,2),
+        discount_pct      NUMERIC(8,4),
+        entry_mode        TEXT         NOT NULL
+          CHECK (entry_mode IN ('net_direct','mrp_discount')),
+        unit              TEXT         NOT NULL DEFAULT 'piece',
+        pack_size         TEXT,
+        reasons           TEXT[]       NOT NULL DEFAULT '{}',
+        monthly_volume    NUMERIC(12,2),
+        note              TEXT,
+        created_at        TIMESTAMPTZ  NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS idx_ms_seg_brand   ON market_survey (segment, competitor_brand);
+      CREATE INDEX IF NOT EXISTS idx_ms_item_code   ON market_survey (prayag_item_code)
+        WHERE prayag_item_code IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_ms_state       ON market_survey (state);
+      CREATE INDEX IF NOT EXISTS idx_ms_recorded_by ON market_survey (recorded_by);
+      CREATE INDEX IF NOT EXISTS idx_ms_created_at  ON market_survey (created_at DESC);
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {
