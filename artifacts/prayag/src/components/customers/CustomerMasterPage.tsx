@@ -291,7 +291,7 @@ function PendingProspects() {
               <th className="px-3 py-2 text-left font-medium">Type</th>
               <th className="px-3 py-2 text-left font-medium">State / District</th>
               <th className="px-3 py-2 text-left font-medium">Contact</th>
-              <th className="px-3 py-2 text-left font-medium">Submitted by</th>
+              <th className="px-3 py-2 text-left font-medium">Submitted by <span className="font-normal text-muted-foreground">(self-declared)</span></th>
               <th className="px-3 py-2 text-left font-medium">When</th>
               <th className="px-3 py-2 text-left font-medium">Action</th>
             </tr>

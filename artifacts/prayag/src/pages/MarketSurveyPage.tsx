@@ -17,6 +17,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 const BASE = import.meta.env.BASE_URL;
 const API  = (path: string) => `${BASE}api/${path}`;
 const LS_RECORDER = "prayag_ms_recorder";
+// The old market-survey page stored a shared API key under "prayag_api_key".
+// Clear it on load so stale credentials do not linger on field devices.
+try { localStorage.removeItem("prayag_api_key"); } catch { /* ignore */ }
 
 // ── Types ─────────────────────────────────────────────────────────────────
 

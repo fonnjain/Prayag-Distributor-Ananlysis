@@ -2,7 +2,7 @@
 // GET  /api/market-survey/customers          — customer_master autocomplete (?q=)
 // GET  /api/market-survey/products           — mrp_master autocomplete (?segment=&q=)
 // GET  /api/market-survey                   — list surveys (?segment=&brand=&recorder=&limit=&offset=)
-// POST /api/market-survey                   — submit (requires API key → recorded_by)
+// POST /api/market-survey                   — submit; recorded_by = recorderName from body (self-declared, not authenticated)
 // GET  /api/market-survey/summary           — per-item MRP vs median competitor net price
 // GET  /api/market-survey/by-brand          — competitor brand aggregates
 // GET  /api/market-survey/coverage          — segments × states with <5 surveys
@@ -141,7 +141,10 @@ router.post("/market-survey", async (req, res) => {
   try {
     const b = req.body as Record<string, unknown>;
 
-    // Recorder identity: self-reported name from the body (no API key required).
+    // Recorder identity: self-declared name typed by the user on their device and
+    // stored in localStorage. It is NOT authenticated — anyone can type any name.
+    // This is intentional for a field tool where API-key distribution is impractical,
+    // but reviewers should treat recorded_by as an unverified label, not a credential.
     const recorderName = str(b.recorderName);
     if (!recorderName) {
       res.status(400).json({ error: "recorderName is required" });
