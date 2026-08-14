@@ -19,7 +19,7 @@ type Pool = typeof defaultPool;
 // Accepts both Pool and PoolClient (both expose the same query() signature).
 type Queryable = Pick<Pool, "query">;
 import { normParty } from "./mgmt/names.js";
-import { loadDistributorTmMap, type DistributorTmMap } from "./mgmt/distributorTmMap.js";
+import { loadDistributorTmMap, getDistributorTmMapIfReady, type DistributorTmMap } from "./mgmt/distributorTmMap.js";
 import { logger } from "./logger.js";
 
 // ── State normalisation ──────────────────────────────────────────────────────
@@ -483,13 +483,56 @@ export async function runFullBackfill(
  * (newly inserted rows from a bulk import). Does NOT run the sale_line pass —
  * that pass is relatively expensive and import-time sale_line matches are
  * rare; run the full backfill periodically for complete coverage.
+ *
+ * @param distMap  Optional pre-built distributorTmMap. When omitted the
+ *   function uses getDistributorTmMapIfReady() (non-blocking). If the map
+ *   is not yet warm the chain pass is skipped and a WARN is emitted so the
+ *   next scheduled backfill can pick up any multi-head-state customers that
+ *   could not be resolved.
  */
-export async function deriveForIds(pool: Queryable, ids: string[]): Promise<void> {
+export async function deriveForIds(
+  pool: Queryable,
+  ids: string[],
+  distMap?: DistributorTmMap,
+): Promise<void> {
   if (!ids.length) return;
   try {
-    const chain = await passChain(pool, ids);
+    // Resolve the map to use for the chain pass:
+    // 1. Caller-supplied map (e.g. passed from the backfill route that already
+    //    built it).
+    // 2. In-memory cache if already warm — non-blocking, no Drive calls.
+    // 3. If neither is available, skip the chain pass rather than triggering a
+    //    30–60 s blocking Drive build at import time.
+    const mapToUse = distMap ?? getDistributorTmMapIfReady();
+
+    let chain = 0;
+    let chainSkipReason: "map-not-ready" | "no-distributor-link" | null = null;
+
+    if (mapToUse === null) {
+      // Map not ready — skip silently except for the WARN below.
+      chainSkipReason = "map-not-ready";
+      logger.warn(
+        { customerIds: ids, count: ids.length },
+        "[customerStateHead] import-time chain pass skipped — distributorTmMap not ready; " +
+          "multi-head-state customers (West U.P., Karnataka, East U.P.) will be picked up " +
+          "by the next scheduled backfill",
+      );
+    } else {
+      chain = await passChain(pool, ids, mapToUse);
+      if (chain === 0) chainSkipReason = "no-distributor-link";
+    }
+
     const state = await passStateLookup(pool, ids);
-    logger.info({ ids: ids.length, chain, state }, "[customerStateHead] import-time derivation done");
+
+    logger.info(
+      {
+        ids: ids.length,
+        chain,
+        chainSkipReason,
+        state,
+      },
+      "[customerStateHead] import-time derivation done",
+    );
   } catch (err) {
     logger.warn({ err }, "[customerStateHead] import-time derivation failed (non-fatal)");
   }
