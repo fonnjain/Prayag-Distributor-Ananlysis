@@ -492,6 +492,48 @@ router.post(
     try {
       const { pool: dbPool } = await import("@workspace/db");
       const { runFullBackfill } = await import("../lib/customerStateHead.js");
+      const {
+        getDistributorTmMapIfReady,
+        loadDistributorTmMap,
+      } = await import("../lib/mgmt/distributorTmMap.js");
+
+      // ── Resolve the distributorTmMap before entering the advisory lock. ──────
+      // At startup the map is built from Drive and cached for 1 h.  If the
+      // backfill is called after the TTL expires a fresh build would be triggered
+      // from inside the locked transaction — that build may fail with "No
+      // spreadsheet files found" on production because Drive access behaves
+      // differently in that call path.  Instead we:
+      //   1. Return the warm cache when available (zero extra Drive traffic).
+      //   2. If the cache is stale/cold, attempt a blocking rebuild now (outside
+      //      the lock) and gate on its success.
+      //   3. If the map cannot be built, return 503 so the caller can retry once
+      //      the background build completes (typically ~30–60 s after startup).
+      let distMap = getDistributorTmMapIfReady();
+      if (!distMap) {
+        req.log.info("backfill-customer-state-head: distributorTmMap not cached; building now");
+        distMap = await loadDistributorTmMap().catch((err) => {
+          req.log.warn({ err }, "backfill-customer-state-head: distributorTmMap build failed");
+          return null;
+        });
+      }
+      if (!distMap || distMap.error) {
+        const detail = distMap?.error ?? "map build failed";
+        req.log.warn(
+          { detail },
+          "backfill-customer-state-head: distributorTmMap not ready; aborting with 503",
+        );
+        res.status(503).json({
+          error: "distributorTmMap is not ready. Retry in 60 s.",
+          detail,
+          retryAfter: 60,
+        });
+        return;
+      }
+
+      req.log.info(
+        { memberCount: distMap.memberCount, uniqueParties: distMap.byPartyKey.size },
+        "backfill-customer-state-head: using distributorTmMap snapshot",
+      );
 
       // Acquire a transaction-scoped advisory lock on a single client and run
       // ALL backfill queries through that same client so the lock truly covers
@@ -500,7 +542,7 @@ router.post(
       try {
         await client.query("BEGIN");
         await client.query("SELECT pg_advisory_xact_lock(74011002)");
-        const counts = await runFullBackfill(client);
+        const counts = await runFullBackfill(client, distMap);
         await client.query("COMMIT");
         res.json({ ok: true, counts });
       } catch (err) {

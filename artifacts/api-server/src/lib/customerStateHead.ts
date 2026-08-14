@@ -19,7 +19,7 @@ type Pool = typeof defaultPool;
 // Accepts both Pool and PoolClient (both expose the same query() signature).
 type Queryable = Pick<Pool, "query">;
 import { normParty } from "./mgmt/names.js";
-import { loadDistributorTmMap } from "./mgmt/distributorTmMap.js";
+import { loadDistributorTmMap, type DistributorTmMap } from "./mgmt/distributorTmMap.js";
 import { logger } from "./logger.js";
 
 // ── State normalisation ──────────────────────────────────────────────────────
@@ -189,10 +189,17 @@ async function passSaleLine(pool: Queryable, idFilter?: string[]): Promise<numbe
  * Direct Dealer, and Retailer customers whose state_head is still NULL.
  * Applies a territory guard to reject plausible mis-maps.
  * Returns the number of rows updated.
+ *
+ * @param prebuiltDistMap  Optional already-built map to avoid a redundant Drive call.
+ *   When omitted the function falls back to loadDistributorTmMap() (blocking build).
  */
-async function passChain(pool: Queryable, idFilter?: string[]): Promise<number> {
+async function passChain(
+  pool: Queryable,
+  idFilter?: string[],
+  prebuiltDistMap?: DistributorTmMap,
+): Promise<number> {
   const [distMap, personStateHead, headTerritory] = await Promise.all([
-    loadDistributorTmMap(),
+    prebuiltDistMap ? Promise.resolve(prebuiltDistMap) : loadDistributorTmMap(),
     buildPersonStateHeadMap(pool),
     buildHeadTerritoryMap(pool),
   ]);
@@ -432,8 +439,15 @@ export interface BackfillCounts {
  * Run all three passes over the entire customer_master table.
  * Caller must hold an advisory lock before calling and pass the same locked
  * queryable (client or pool) so all queries execute under that exclusion.
+ *
+ * @param distMap  Pre-fetched distributorTmMap.  The caller is responsible for
+ *   ensuring the map is ready (no error) before passing it.  When omitted the
+ *   chain pass falls back to loadDistributorTmMap() (may trigger a Drive build).
  */
-export async function runFullBackfill(pool: Queryable): Promise<BackfillCounts> {
+export async function runFullBackfill(
+  pool: Queryable,
+  distMap?: DistributorTmMap,
+): Promise<BackfillCounts> {
   const { rows: [{ total }] } = await pool.query<{ total: string }>(
     "SELECT COUNT(*) AS total FROM customer_master",
   );
@@ -442,8 +456,15 @@ export async function runFullBackfill(pool: Queryable): Promise<BackfillCounts> 
   const slCount = await passSaleLine(pool);
   logger.info({ slCount }, "[customerStateHead] pass 1 (sale_line) done");
 
-  const chainCount = await passChain(pool);
-  logger.info({ chainCount }, "[customerStateHead] pass 2 (chain) done");
+  const chainCount = await passChain(pool, undefined, distMap);
+  if (chainCount === 0) {
+    logger.warn(
+      { distMapReady: !!distMap, distMapError: distMap?.error ?? null },
+      "[customerStateHead] pass 2 (chain) resolved 0 rows — check distributorTmMap readiness",
+    );
+  } else {
+    logger.info({ chainCount }, "[customerStateHead] pass 2 (chain) done");
+  }
 
   const stateCount = await passStateLookup(pool);
   logger.info({ stateCount }, "[customerStateHead] pass 3 (state_lookup) done");
