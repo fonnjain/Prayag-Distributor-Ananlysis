@@ -1,4 +1,5 @@
 import { trunc2 } from "@/lib/trunc";
+import { AlertTriangle } from "lucide-react";
 // SKU Deep Dive — Review section (K3 company-wide gap review).
 //
 // Company-wide review list: for each segment, the codes that NO distributor
@@ -41,12 +42,40 @@ export type SegmentRecommendation = {
   topGapCodes: GapCode[];
 };
 
+export type CoverageWarning = {
+  flaggedMemberCount: number;
+  totalMembers: number;
+  threshold: number;
+  flaggedMembers: Array<{
+    headCanon: string | null;
+    qtyRatio: number | null;
+    flag: "low" | "no-sku";
+  }>;
+  note: string;
+};
+
+/** Mirrors the server-side CoverageStatus type. */
+export type CoverageStatus = "verified" | "insufficient" | "unverified";
+
 export type FocusData = {
   recommendations: SegmentRecommendation[];
   fiscalMonths: string[];
   totalGapNet: number;
   totalGapContribution?: number | null;
   noCostData?: { codeCount: number; sharePct: number };
+  /**
+   * Present for level='retailer'. When not "verified", the `recommendations`
+   * array is empty (suppressed by the server) and must not be rendered as
+   * actionable push cards.
+   *   "verified"     — PSCode2 coverage is adequate; recommendations are trustworthy.
+   *   "insufficient" — one or more members are below the coverage threshold; suppressed.
+   *   "unverified"   — the coverage query failed; suppressed (fail-closed).
+   *   undefined      — non-retailer level; ignore and render normally.
+   */
+  coverageStatus?: CoverageStatus;
+  coverageWarning?: CoverageWarning | null;
+  /** Human-readable explanation when coverageStatus !== "verified". */
+  suppressionNote?: string;
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -80,9 +109,10 @@ interface Props {
   error: string | null;
   onDrill: (segment: string) => void;
   periodLabel: string;
+  level?: string;
 }
 
-export default function SkuFocus({ data, loading, error, onDrill, periodLabel }: Props) {
+export default function SkuFocus({ data, loading, error, onDrill, periodLabel, level }: Props) {
   if (loading) {
     return (
       <div className="space-y-3">
@@ -101,6 +131,57 @@ export default function SkuFocus({ data, loading, error, onDrill, periodLabel }:
     );
   }
 
+  // ── Fail-closed coverage gate — must run BEFORE the empty-list check ─────────
+  // When coverageStatus is not "verified", the server already returned
+  // recommendations=[] (suppressed). We render an explicit blocking panel so
+  // the analyst cannot mistake the empty list for "no gaps" and cannot see
+  // stale cached cards from a previous render.
+  if (data && level === "retailer" && data.coverageStatus && data.coverageStatus !== "verified") {
+    const { coverageStatus, coverageWarning, suppressionNote } = data;
+    const isUnverified = coverageStatus === "unverified";
+    return (
+      <div
+        className={cn(
+          "flex gap-3 rounded-md border px-4 py-3 text-sm",
+          isUnverified
+            ? "border-red-300 bg-red-50 text-red-900 dark:border-red-700 dark:bg-red-950/60 dark:text-red-200"
+            : "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-200",
+        )}
+      >
+        <AlertTriangle
+          className={cn(
+            "mt-0.5 h-5 w-5 flex-shrink-0",
+            isUnverified
+              ? "text-red-600 dark:text-red-400"
+              : "text-amber-600 dark:text-amber-400",
+          )}
+        />
+        <div className="space-y-1.5">
+          <p className="font-semibold leading-snug">
+            {isUnverified
+              ? "Retailer recommendations unavailable — data quality check failed"
+              : "Retailer recommendations suppressed — secondary stock data may be incomplete"}
+          </p>
+          <p className="text-xs leading-relaxed opacity-90">
+            {suppressionNote ??
+              (isUnverified
+                ? "The PSCode2 coverage check could not complete. Recommendations are withheld to prevent false pushes."
+                : "PSCode2 (secondary_sku_line) coverage is below the required threshold for one or more members. " +
+                  "Gap codes would include items a retailer already stocks. " +
+                  "Verify or reload the PSCode2 tabs to unlock recommendations.")}
+          </p>
+          {!isUnverified && coverageWarning && coverageWarning.flaggedMembers.length > 0 && (
+            <p className="text-xs opacity-75">
+              Flagged:{" "}
+              {coverageWarning.flaggedMembers.map((m) => m.headCanon ?? "(unknown)").join(", ")}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Empty or absent data ────────────────────────────────────────────────────
   if (!data || data.recommendations.length === 0) {
     return (
       <p className="text-sm text-muted-foreground py-8 text-center">
@@ -108,6 +189,9 @@ export default function SkuFocus({ data, loading, error, onDrill, periodLabel }:
       </p>
     );
   }
+
+  // ── Normal render ─────────────────────────────────────────────────────────
+  // Reached for non-retailer levels, and for retailer when coverageStatus="verified".
 
   const { recommendations, fiscalMonths, totalGapNet } = data;
   const monthRange = fiscalMonths.length > 0

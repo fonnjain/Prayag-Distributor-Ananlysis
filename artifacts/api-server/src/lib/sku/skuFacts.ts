@@ -137,6 +137,20 @@ export type SkuFactsResult = {
       segmentsBought: number;
     };
   } | null;
+  /**
+   * Only set for level='retailer'. Non-null when one or more members have
+   * PSCode2 (secondary_sku_line) qty below the coverage threshold relative to
+   * their Summary Report (secondary_register_line) qty.
+   *
+   * When coverageWarning is non-null, the gap codes and unboughtValue figures
+   * may include items the retailer already stocks — secondary_sku_line is
+   * missing rows for those members. Push recommendations from these figures
+   * should be treated as indicative, not authoritative.
+   *
+   * null  = coverage check ran and every member passed.
+   * undefined = check was not run (level is not 'retailer').
+   */
+  coverageWarning?: import("../secondary/skuCoverageGuard.js").CoverageWarning | null;
 };
 
 // ── Capability detection ──────────────────────────────────────────────────────
@@ -377,6 +391,7 @@ type SecondaryFactParams = {
 // separate PS-code name vocabulary, so not every member is expected to match —
 // the counts are surfaced so the mismatch is visible, never silent.
 
+import { checkSkuVsRegisterCoverage, buildCoverageWarning } from "../secondary/skuCoverageGuard.js";
 import memberNameAliasRaw from "../../../config/member_name_alias.json" with { type: "json" };
 const MEMBER_NAME_ALIAS: Record<string, string> = Object.fromEntries(
   Object.entries(memberNameAliasRaw as Record<string, string>).filter(
@@ -1025,6 +1040,8 @@ export async function loadSkuFacts(
 
   let facts: SkuFactsResult["facts"];
   let headResolution: SecondaryHeadResolution | null = null;
+  let coverageWarning: SkuFactsResult["coverageWarning"] = undefined;
+
   if (level === "retailer") {
     let headKeys: string[] | undefined;
     if (scope === "head" && scopeId) {
@@ -1035,6 +1052,40 @@ export async function loadSkuFacts(
       if (headResolution) headKeys = headResolution.matchedKeys;
     }
     facts = await getSecondarySkuFacts({ fy, monthLabels, scope, scopeId, segment, headKeys });
+
+    // ── Synchronous PSCode2 coverage check ────────────────────────────────────
+    // Runs IN the request path (not fire-and-forget) so the coverageWarning
+    // field is always present in the response when PSCode2 data is inadequate.
+    // When secondary_sku_line understates a member's qty vs secondary_register_line,
+    // gap codes (unboughtValue) may include items the retailer already stocks.
+    try {
+      const coverageReport = await checkSkuVsRegisterCoverage(fy);
+      // For head-scoped requests, restrict the warning to the resolved members
+      // for that state head. Company-wide requests evaluate all members.
+      const relevantMembers =
+        scope === "head" && headKeys && headKeys.length > 0
+          ? coverageReport.members.filter(
+              (m) => m.headCanon !== null && headKeys!.includes(m.headCanon),
+            )
+          : coverageReport.members;
+      coverageWarning = buildCoverageWarning(relevantMembers) ?? null;
+
+      if (coverageWarning) {
+        logger.warn(
+          {
+            fy,
+            scope,
+            scopeId: scopeId ?? null,
+            flaggedMemberCount: coverageWarning.flaggedMemberCount,
+            totalMembers: coverageWarning.totalMembers,
+          },
+          "sku: PSCode2 coverage warning — gap figures may include items already stocked",
+        );
+      }
+    } catch (err) {
+      logger.warn({ err, fy, scope }, "sku: PSCode2 coverage check failed — gap figures unverified");
+      // coverageWarning stays undefined: the caller knows the check could not run.
+    }
   } else {
     facts = await getPrimarySkuFacts({ fy, monthLabels, level, scope, scopeId, segment, entityFilter });
   }
@@ -1047,5 +1098,5 @@ export async function loadSkuFacts(
     );
   }
 
-  return { capability, facts, headResolution };
+  return { capability, facts, headResolution, coverageWarning };
 }

@@ -661,6 +661,7 @@ export default function SkuPage() {
             error={focusError}
             onDrill={handleFocusDrill}
             periodLabel={periodLabel}
+            level={level}
           />
         )}
 

@@ -54,6 +54,13 @@ import {
   clearK4Cache,
 } from "../lib/sku/skuK4.js";
 import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
+import {
+  checkSkuVsRegisterCoverage,
+  buildCoverageWarning,
+  buildCoverageStatus,
+  COVERAGE_THRESHOLD,
+} from "../lib/secondary/skuCoverageGuard.js";
+import type { CoverageStatus } from "../lib/secondary/skuCoverageGuard.js";
 import ExcelJS from "exceljs";
 import {
   hasEntityFilterValues,
@@ -183,6 +190,17 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
       // register member names (the register uses a separate PS-code name
       // vocabulary, so membersMatched may be < membersTotal).
       memberResolution: result.headResolution ?? null,
+      /**
+       * level='retailer' only. Non-null when PSCode2 (secondary_sku_line) qty
+       * is below the coverage threshold for one or more members relative to
+       * their Summary Report (secondary_register_line) totals. When non-null,
+       * the gap codes and unboughtValue in `facts` may include items the
+       * retailer already stocks. Push recommendations based on these figures
+       * should be treated as indicative, not authoritative.
+       * null  = coverage check ran and every member passed.
+       * undefined/absent = level is not 'retailer'.
+       */
+      coverageWarning: result.coverageWarning ?? undefined,
       facts: result.facts,
     };
   };
@@ -468,6 +486,104 @@ router.get("/sku/recommendations", async (req: Request, res: Response): Promise<
   }
 
   try {
+    // ── Retailer level: fail-closed coverage gate ─────────────────────────────
+    //
+    // secondary_sku_line (PSCode2 tab) may understate per-retailer volumes vs
+    // secondary_register_line (Summary Report).  When coverage is inadequate,
+    // gap codes include items a retailer already stocks — returning them as
+    // push recommendations is actively misleading.
+    //
+    // We run the coverage check synchronously BEFORE building recommendations
+    // and suppress the full recommendations list whenever:
+    //   • coverage is insufficient (< threshold for any member)   → "insufficient"
+    //   • the coverage query itself fails                          → "unverified"
+    //
+    // This is intentionally fail-closed: a query error is not treated as
+    // "probably fine" — it suppresses output so false pushes cannot fire silently.
+    if (level === "retailer") {
+      let coverageStatus: CoverageStatus = "unverified";
+      let coverageWarning = null;
+
+      try {
+        const report = await checkSkuVsRegisterCoverage(fy);
+        coverageStatus = buildCoverageStatus(report.members);
+        coverageWarning = coverageStatus === "insufficient"
+          ? buildCoverageWarning(report.members)
+          : null;
+      } catch (err) {
+        req.log.warn(
+          { err, fy },
+          "sku recommendations: PSCode2 coverage check failed — suppressing retailer recommendations (fail-closed)",
+        );
+        coverageStatus = "unverified";
+      }
+
+      if (coverageStatus !== "verified") {
+        // Suppressed: return an empty recommendations list so no push cards render.
+        const suppressionNote =
+          coverageStatus === "insufficient"
+            ? `Retailer recommendations suppressed: PSCode2 (secondary_sku_line) coverage is below ` +
+              `${Math.round(COVERAGE_THRESHOLD * 100)}% for ` +
+              `${coverageWarning?.flaggedMemberCount ?? "some"} of ` +
+              `${coverageWarning?.totalMembers ?? "?"} member(s). ` +
+              `Verify or reload the PSCode2 tabs before acting on gap recommendations.`
+            : "Retailer recommendations suppressed: PSCode2 coverage check failed. " +
+              "Recommendations cannot be verified and are withheld to prevent false pushes.";
+        req.log.warn({ fy, coverageStatus }, suppressionNote);
+        res.json({
+          fy, monthFrom, monthTo, level,
+          scope, scopeId: scopeId ?? null,
+          coverageStatus,
+          coverageWarning,
+          suppressionNote,
+          // Empty list — the UI must never render these as actionable cards.
+          recommendations: [],
+          fiscalMonths: monthLabels,
+          totalGapNet: 0,
+        });
+        return;
+      }
+
+      // Verified: build recommendations normally and tag the response.
+      const result = await getSkuRecommendations({
+        fy, monthLabels, level: "retailer", scope: scope as SkuScope, scopeId, entityFilter,
+      });
+      try {
+        const { getCodeContributions } = await import("../lib/sku/skuContribution.js");
+        const allCodes = result.recommendations.flatMap((s) => s.topGapCodes.map((c) => c.code));
+        const contrib = await getCodeContributions(allCodes);
+        let noCost = 0, noCostNet = 0, totalNet = 0, totalContrib = 0, hasContrib = false;
+        for (const seg of result.recommendations) {
+          for (const c of seg.topGapCodes) {
+            const cc = contrib.get(c.code);
+            (c as Record<string, unknown>).contributionPerUnit = cc?.contributionPerUnit ?? null;
+            (c as Record<string, unknown>).contributionPct    = cc?.contributionPct    ?? null;
+            totalNet += c.priorNet;
+            if (cc) { hasContrib = true; totalContrib += c.priorNet * cc.contributionPct; }
+            else { noCost++; noCostNet += c.priorNet; }
+          }
+          seg.topGapCodes.sort((a, b) => b.priorNet - a.priorNet);
+        }
+        result.recommendations.sort((a, b) => b.gapNet - a.gapNet);
+        (result as Record<string, unknown>).noCostData = {
+          codeCount: noCost,
+          sharePct:  totalNet > 0 ? Math.round(noCostNet / totalNet * 1000) / 10 : 0,
+        };
+        (result as Record<string, unknown>).totalGapContribution = hasContrib ? totalContrib : null;
+      } catch (err) {
+        req.log.warn({ err }, "sku retailer recommendations: contribution enrichment failed");
+      }
+      res.json({
+        fy, monthFrom, monthTo, level,
+        scope, scopeId: scopeId ?? null, filtered: !!entityFilter,
+        coverageStatus,
+        coverageWarning: null,
+        ...result,
+      });
+      return;
+    }
+
+    // ── Non-retailer levels: standard build + snapshot path ───────────────────
     const build = async (): Promise<Record<string, unknown>> => {
       const result = await getSkuRecommendations({
         fy,
@@ -479,7 +595,7 @@ router.get("/sku/recommendations", async (req: Request, res: Response): Promise<
       });
       // Enrich with gross contribution data.
       try {
-        const { getCodeContributions, sortByContrib } = await import("../lib/sku/skuContribution.js");
+        const { getCodeContributions } = await import("../lib/sku/skuContribution.js");
         const allCodes = result.recommendations.flatMap((s) => s.topGapCodes.map((c) => c.code));
         const contrib = await getCodeContributions(allCodes);
         let noCost = 0, noCostNet = 0, totalNet = 0, totalContrib = 0, hasContrib = false;
@@ -1126,6 +1242,96 @@ router.get("/sku/secondary-backfill", (_req: Request, res: Response): void => {
     return;
   }
   res.json(_skuBackfill);
+});
+
+// ── GET /api/sku/retailer-coverage ───────────────────────────────────────────
+//
+// Admin diagnostic: compares per-member and per-retailer totals between
+// secondary_sku_line (PSCode2 tab) and secondary_register_line (Summary Report).
+//
+// When secondary_sku_line understates a retailer's qty, K3 gap recommendations
+// may fire for items the retailer already stocks. This endpoint surfaces the
+// gap so it can be investigated before recommendations reach analysts.
+//
+// Query params:
+//   fy              (required)  e.g. 2025-26
+//   view            (optional)  "member" (default) | "retailer"
+//   threshold       (optional)  0–1 float, default 0.60
+//   minRegisterQty  (optional)  integer, default 100 (retailer view; filter noise)
+//   showAll         (optional)  "true" to include ok/no-register rows (default: flagged only)
+//
+// Requires X-Admin-Secret header.
+
+router.get("/sku/retailer-coverage", async (req: Request, res: Response): Promise<void> => {
+  const adminSecret = String(req.headers["x-admin-secret"] ?? "").trim();
+  if (!isAdminToken(adminSecret)) {
+    res.status(401).json({
+      error: "Admin authorisation required. Pass the SESSION_SECRET as: X-Admin-Secret: <SESSION_SECRET>",
+    });
+    return;
+  }
+
+  const fy =
+    typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
+      ? req.query.fy.trim()
+      : null;
+  if (!fy) {
+    res.status(400).json({ error: "fy is required (e.g. ?fy=2025-26)" });
+    return;
+  }
+
+  const view = req.query.view === "retailer" ? "retailer" : "member";
+  const showAll = req.query.showAll === "true";
+
+  const thresholdRaw = parseFloat(String(req.query.threshold ?? ""));
+  const threshold =
+    Number.isFinite(thresholdRaw) && thresholdRaw > 0 && thresholdRaw <= 1
+      ? thresholdRaw
+      : undefined;
+
+  const minRegisterQtyRaw = parseInt(String(req.query.minRegisterQty ?? ""), 10);
+  const minRegisterQty =
+    Number.isFinite(minRegisterQtyRaw) && minRegisterQtyRaw >= 0
+      ? minRegisterQtyRaw
+      : undefined;
+
+  try {
+    const { computeRetailerGap } = await import("../lib/secondary/skuCoverageGuard.js");
+
+    if (view === "retailer") {
+      const report = await computeRetailerGap(fy, { threshold, minRegisterQty });
+      const retailers = showAll
+        ? report.retailers
+        : report.retailers.filter((r) => r.flag !== "ok");
+      res.json({
+        view: "retailer",
+        fy,
+        threshold: report.threshold,
+        minRegisterQty: report.minRegisterQty,
+        totalRetailers: report.totalRetailers,
+        flaggedCount: report.flaggedCount,
+        note: "retailer join is on normalised name (lowercase+collapsed whitespace). 'no-sku' means the name appears in secondary_register_line.customer but not in secondary_sku_line.retailer — likely a spelling difference or a missing PSCode2 row.",
+        retailers,
+      });
+    } else {
+      const report = await checkSkuVsRegisterCoverage(fy, { threshold });
+      const members = showAll
+        ? report.members
+        : report.members.filter((m) => m.flag !== "ok" && m.flag !== "no-register");
+      res.json({
+        view: "member",
+        fy,
+        threshold: report.threshold,
+        totalMembers: report.totalMembers,
+        flaggedCount: report.flaggedCount,
+        note: "Per-member (head_canon) comparison of secondary_sku_line vs secondary_register_line totals. 'low' means PSCode2 may be incomplete for that member; K3 gap recommendations for their retailers may be overstated.",
+        members,
+      });
+    }
+  } catch (err) {
+    req.log.error({ err, fy, view }, "sku retailer-coverage failed");
+    res.status(500).json({ error: "Could not compute retailer coverage report." });
+  }
 });
 
 function prevFy(fy: string): string {

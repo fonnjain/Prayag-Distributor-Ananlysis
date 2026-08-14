@@ -497,7 +497,22 @@ export async function loadSecSkuFromSheets(
   };
 
   logger.info(result, "skuLoader: complete");
-  if (!dryRun && totalInserted > 0) clearSecondarySkuFyCache();
+  if (!dryRun && totalInserted > 0) {
+    clearSecondarySkuFyCache();
+    // Post-load coverage check: compare per-member sku_line totals vs register
+    // totals and warn when PSCode2 appears incomplete. This is a background
+    // diagnostic — the ingest is already committed. Any failure is logged at WARN
+    // so it is never silently discarded; it does not block the response.
+    import("./skuCoverageGuard.js")
+      .then(({ checkSkuVsRegisterCoverage }) =>
+        checkSkuVsRegisterCoverage(fy).catch((err: unknown) =>
+          logger.warn({ fy, err }, "skuLoader: post-load coverage check query failed"),
+        ),
+      )
+      .catch((importErr: unknown) =>
+        logger.warn({ fy, importErr }, "skuLoader: failed to import skuCoverageGuard — post-load coverage check skipped"),
+      );
+  }
   return result;
 }
 
