@@ -31,6 +31,8 @@ import {
   recordSecIngestRun,
   buildSecIngestRun,
 } from "./ingest.js";
+import { assertRegisterWipeGuard } from "./registerWipeGuard.js";
+import { db } from "@workspace/db";
 import type { InsertSecRegLine } from "@workspace/db";
 import sheetsConfig from "../../../config/secondary_sheets.json";
 import colMapsConfig from "../../../config/secondary_column_maps.json";
@@ -301,6 +303,23 @@ export async function loadSecRegisterFromXlsx(
 
   if (!dryRun && !anyFailed) {
     existingInDb = await countExistingSecLineUids(lines.map((l) => l.lineUid));
+    // Per-member wipe guard: abort if any head_canon with meaningful existing
+    // rows is completely absent from the incoming batch, even when aggregate
+    // ratios pass.  Explicit opt-in: this loader always maps headCanon, so
+    // Rule 3 (per-member drop check) must always run.
+    await assertRegisterWipeGuard({
+      tx: db,
+      fy,
+      incoming: lines.map((l) => ({ monthLabel: l.monthLabel, customer: l.customer ?? null, head: l.headCanon ?? null })),
+      skipGuard: false,
+      callerLabel: "loadSecRegisterFromXlsx",
+      // No sourceLike: compare incoming against ALL existing rows for the FY,
+      // regardless of original source.  A source-specific filter would cause the
+      // guard to see zero existing rows when the FY was previously seeded by a
+      // different loader (e.g. Sheets), treating it as a first ingest and silently
+      // bypassing all three rules.
+      memberGuardEnabled: true,
+    });
     const ins = await insertSecRegLineBatches(lines, false);
     rowsInserted = ins.inserted;
   } else if (dryRun) {
@@ -675,6 +694,23 @@ export async function loadSecRegisterFromSheets(
 
   if (!dryRun && !anyFailed) {
     existingInDb = await countExistingSecLineUids(lines.map((l) => l.lineUid));
+    // Per-member wipe guard: abort if any head_canon with meaningful existing
+    // rows is completely absent from the incoming batch, even when aggregate
+    // ratios pass.  Explicit opt-in: this loader always maps headCanon, so
+    // Rule 3 (per-member drop check) must always run.
+    await assertRegisterWipeGuard({
+      tx: db,
+      fy,
+      incoming: lines.map((l) => ({ monthLabel: l.monthLabel, customer: l.customer ?? null, head: l.headCanon ?? null })),
+      skipGuard: false,
+      callerLabel: "loadSecRegisterFromSheets",
+      // No sourceLike: compare incoming against ALL existing rows for the FY,
+      // regardless of original source.  A source-specific filter would cause the
+      // guard to see zero existing rows when the FY was previously seeded by a
+      // different loader (e.g. xlsx_backfill), treating it as a first ingest and
+      // silently bypassing all three rules.
+      memberGuardEnabled: true,
+    });
     const ins = await insertSecRegLineBatches(lines, false);
     rowsInserted = ins.inserted;
   } else if (dryRun) {
