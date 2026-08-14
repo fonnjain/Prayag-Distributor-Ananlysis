@@ -1,0 +1,115 @@
+GOAL
+Two changes to the Market Survey.
+
+1. Multiple item lines per survey. Today one submission captures one product.
+   A salesperson standing in a shop sees several, and should not re-enter the
+   retailer four times.
+
+2. Three tabs, because three different questions are being asked and they need
+   different fields and produce different actions.
+
+============================================================
+THE THREE TABS
+============================================================
+
+TAB 1 — EXISTING CUSTOMER, EXISTING SKU
+  The retailer buys from Prayag AND buys this same item from a competitor.
+  The question: we are losing share on an item we already sell him.
+  Required: Prayag item code, our MRP shown, competitor brand, their price.
+  This is the most actionable tab - the relationship and the shelf space
+  already exist.
+
+TAB 2 — EXISTING CUSTOMER, NEW SKU
+  The retailer buys from Prayag but buys THIS item from a competitor only.
+  The question: a range gap with a named competitor attached.
+  Required: Prayag item code (the equivalent we could sell him), our MRP,
+  competitor brand, their price.
+  Feeds the push-list conversation with evidence.
+
+TAB 3 — NEW CUSTOMER
+  The retailer buys nothing from Prayag.
+  The question: what is a prospect currently paying, and to whom.
+  Required: competitor brand, their product, their price, segment.
+  Prayag item code is OPTIONAL here - offer "our nearest equivalent" as a
+  link, not a requirement.
+
+Store the tab on every row as survey_type. Do not infer it later from whether
+fields are populated.
+
+============================================================
+VALIDATE THE TAB CHOICE FROM DATA, DO NOT JUST TRUST IT
+============================================================
+When a retailer and an item code are both selected, look up the secondary
+register for the last 12 months and show plainly:
+
+  "This retailer bought 451 from you in the last 12 months - 340 pcs"
+     or
+  "No purchase of 451 recorded in the last 12 months"
+
+On TAB 1, if there is no recorded purchase, warn - it may belong in Tab 2.
+On TAB 2, if there IS a recorded purchase, warn - it may belong in Tab 1.
+Warn, do not block. The register may be incomplete and the salesperson is
+standing in the shop.
+
+On TAB 3, show whether the retailer exists in customer_master at all. If they
+do, they are not a new customer and the survey belongs in Tab 1 or 2.
+
+============================================================
+MULTIPLE ITEM LINES
+============================================================
+Section 1 (retailer) and the recorder are captured ONCE per survey.
+Section 2 becomes a repeating block: segment, item code, competitor brand,
+competitor product, price, unit, pack size.
+
+  - "+ Add another item" adds a line
+  - Each line can be removed
+  - Each line validates independently - one bad line does not block the others
+  - Our MRP shows per line as the item code is chosen
+  - On save, write ONE row per item line, all sharing the same retailer,
+    recorder, survey_type and timestamp, linked by a survey_id
+
+A salesperson recording four competitor items at one shop enters the shop
+once and the products four times. That is the shape of the visit.
+
+============================================================
+MAKE THE TABS SELF-EXPLANATORY
+============================================================
+Each tab carries one line of plain text under its title saying who it is for.
+Something like:
+
+  Tab 1: "He buys this item from us AND from someone else."
+  Tab 2: "He buys from us, but buys this item from someone else."
+  Tab 3: "He buys nothing from us yet."
+
+Do not rely on the tab label alone. Somebody using this for the first time in
+a shop should not have to guess.
+
+============================================================
+DO NOT
+============================================================
+- Do not create customer_master rows. New retailers still go to the Review
+  Queue as pending prospects.
+- Do not feed any survey price into MRP calculations or pricing
+  recommendations.
+- Do not lose existing market_survey rows. Backfill survey_type on them -
+  mark them 'unclassified' rather than guessing.
+
+============================================================
+VERIFY - produced values, and a hash that resolves
+============================================================
+1. Submit one survey on Tab 1 with THREE item lines. Print all three stored
+   rows, confirming they share survey_id, retailer, recorder and timestamp,
+   and differ only in the item fields.
+2. On Tab 1, pick a retailer and an item code they have NOT bought. Confirm
+   the warning appears and that submission is still allowed.
+3. On Tab 2, pick a retailer and an item code they HAVE bought. Confirm the
+   opposite warning appears.
+4. On Tab 3, pick a retailer who exists in customer_master. Confirm it says so.
+5. Print the purchase lookup for one retailer and item code, and confirm it
+   matches the secondary register for the last 12 months.
+6. Confirm existing market_survey rows survive with survey_type
+   'unclassified'. Print the count.
+7. Confirm customer_master row count unchanged at 79,994.
+8. Screenshot each of the three tabs at 1280px.
+9. Commit hash, git cat-file -t, git merge-base --is-ancestor main with exit
+   code.

@@ -1,0 +1,55 @@
+There are TWO different API keys here and the page has conflated them.
+
+KEY 1 - OUTBOUND, ours to the competition app
+COMPETITION_API_KEY in Replit Secrets, used server-side by competitionClient.ts
+to fetch from prayag-competition-analysis.replit.app. This is CORRECT and
+stays exactly as it is. It is never in the client bundle and no user ever sees
+it. Do not touch it.
+
+Evidence it is working: 150 rows fetched, snapshot dated 14 Aug 2026. The
+competition data arrived fine.
+
+KEY 2 - INBOUND, a user authorising an action on OUR app
+This is what the banner on /mrp/competition is asking for: "No API key found.
+Go to Market Survey and enter your key — then return here to map rows."
+
+That is the one to remove. Mapping a competitor row to a Prayag item code is
+an ordinary in-app action. It does not need a credential typed by a
+salesperson.
+
+The banner is also now a dead end - Market Survey no longer has a key field,
+so it points somewhere that cannot help. And every inbound API key was revoked
+in the earlier task, so mapping may be impossible for anyone right now.
+0 of 150 rows are mapped.
+
+REPORT FIRST, before changing anything
+  a. What exactly is PATCH /:id/map gated on? A bearer header, a key in
+     localStorage, or something else? Print the guard.
+  b. Given all inbound keys are revoked (COUNT(*) WHERE is_revoked = false
+     is 0), can mapping succeed for anyone today, or is the feature dead?
+  c. Is that banner live logic or leftover text from before the Market Survey
+     rebuild?
+
+THEN
+1. Remove the inbound key requirement from mapping. Record who mapped a row
+   the same way the survey records its recorder - a name held locally,
+   labelled self-declared. Not a credential.
+
+2. Replace the banner. If there is nothing to say, show nothing. Keep the
+   states that ARE worth showing: snapshot age, fetch failure, and how many
+   rows are unmapped.
+
+3. Search the whole frontend for any other place that asks for, stores, or
+   sends an inbound API key from the browser. Print every hit. I want to know
+   this is the last one.
+
+VERIFY
+a. Map two competitor rows with no inbound key present. Confirm both save and
+   print who mapped them and when.
+b. Confirm COMPETITION_API_KEY still works - print the fetch result and
+   confirm the outbound call still succeeds server-side.
+c. Confirm COMPETITION_API_KEY is still absent from the client bundle.
+d. Paste the grep from item 3.
+e. Screenshot /mrp/competition with the banner replaced.
+f. Commit hash, git cat-file -t, git merge-base --is-ancestor main with exit
+   code.
