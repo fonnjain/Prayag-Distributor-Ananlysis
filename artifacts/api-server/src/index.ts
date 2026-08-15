@@ -33,6 +33,7 @@ import { cleanupOrphanedJobs } from "./lib/aiReportJobQueue.js";
 import {
   loadPersonRegistry,
   assertHeadCoverage,
+  assertPersonTableCoverage,
 } from "./lib/personRegistry.js";
 import { logCoverage as logCustomerStateHeadCoverage } from "./lib/customerStateHead.js";
 import { loadAndPersistStateDashboard } from "./lib/secondary/stateHeadLoader.js";
@@ -84,6 +85,14 @@ runMigrations()
     // Non-fatal coverage check — logs WARN for any FY2026-27 register head not
     // resolved by the registry.  Run in background after register data is ready.
     void assertHeadCoverage();
+    // Non-fatal person-table coverage check — warns when a person_registry
+    // member (is_person=true, is_state_head=false) has no matching row in the
+    // person table.  Without a person row, migration 034 cannot backfill
+    // state_head on the registry row, leaving secondary_sku_line rows for
+    // that member with state_canon=NULL and invisible in territory roll-ups.
+    void assertPersonTableCoverage().catch((err) =>
+      logger.warn({ err }, "[personRegistry] person-table coverage check failed (non-fatal)"),
+    );
     // One-line startup log: how many customer_master rows have a state_head.
     void logCustomerStateHeadCoverage().catch(() => {/* non-fatal */});
     // ── secondary_sku_line state_canon residual check ─────────────────────────

@@ -491,7 +491,14 @@ export async function reconcilePersonRegistryStateHeads(): Promise<{
   membersUpdated: number;
   stateHeadsUpdated: number;
 }> {
-  // Step A: propagate from person table (requires seed data to be present)
+  // Step A: propagate from person table (requires seed data to be present).
+  //
+  // The join normalises both sides with REGEXP_REPLACE + LOWER + TRIM so that
+  // internal whitespace differences ("Anant  Singh" vs "Anant Singh") do not
+  // prevent a match.  This must stay in sync with the JS normalisation in
+  // findRegistryMembersWithoutPersonRow() so the startup coverage check and
+  // this reconciliation step are always in agreement about which members are
+  // "covered".
   const memberRes = await pool.query<{ count: string }>(`
     WITH updated AS (
       UPDATE person_registry pr
@@ -499,7 +506,8 @@ export async function reconcilePersonRegistryStateHeads(): Promise<{
           updated_at = now()
       FROM person p
       JOIN person sh ON sh.person_id = p.state_head_person_id
-      WHERE LOWER(TRIM(p.name)) = LOWER(TRIM(pr.canonical_name))
+      WHERE REGEXP_REPLACE(LOWER(TRIM(p.name)),           '\\s+', ' ', 'g')
+          = REGEXP_REPLACE(LOWER(TRIM(pr.canonical_name)), '\\s+', ' ', 'g')
         AND p.state_head_person_id IS NOT NULL
         AND pr.state_head IS NULL
       RETURNING pr.id
@@ -524,6 +532,90 @@ export async function reconcilePersonRegistryStateHeads(): Promise<{
     membersUpdated: parseInt(memberRes.rows[0]?.count ?? "0", 10),
     stateHeadsUpdated: parseInt(headRes.rows[0]?.count ?? "0", 10),
   };
+}
+
+// ── Person-table coverage check ──────────────────────────────────────────────
+//
+// If a team member is seeded into person_registry (from the HR roster) but
+// never added to the person table (migration 030), migration 034 / the
+// reconcilePersonRegistryStateHeads() call cannot set state_head on their
+// registry row.  That leaves secondary_sku_line rows attributed to that member
+// with state_canon=NULL, making them invisible in territory roll-ups.
+//
+// This function compares every person_registry member (is_person=true,
+// is_state_head=false) against the person table and emits a WARNING for each
+// registry member that has no matching person row.  It is non-fatal: the server
+// starts regardless so operators can fix the gap without a restart cycle.
+
+export interface PersonTableCoverageResult {
+  /** Registry members with no matching person table row (by canonical_name). */
+  missing: string[];
+  /** Total registry members checked (is_person=true, is_state_head=false). */
+  total: number;
+}
+
+/**
+ * Pure helper: given two name sets, return the names present in registryNames
+ * but absent from personNames (case-insensitive, whitespace-normalised).
+ *
+ * Exported so unit tests can exercise the matching logic without a DB.
+ */
+export function findRegistryMembersWithoutPersonRow(
+  registryNames: string[],
+  personNames: string[],
+): string[] {
+  const personNormSet = new Set(
+    personNames.map((n) => n.toLowerCase().replace(/\s+/g, " ").trim()),
+  );
+  return registryNames.filter(
+    (n) => !personNormSet.has(n.toLowerCase().replace(/\s+/g, " ").trim()),
+  );
+}
+
+/**
+ * Startup check — call after loadPersonRegistry().
+ *
+ * Compares person_registry members against the person table and warns when
+ * a member has no matching person row.  Non-fatal: always resolves, never
+ * rejects.
+ */
+export async function assertPersonTableCoverage(): Promise<PersonTableCoverageResult> {
+  // Fetch all non-state-head persons from person_registry.
+  const { rows: regRows } = await pool.query<{ canonical_name: string }>(`
+    SELECT canonical_name
+    FROM person_registry
+    WHERE is_person = TRUE
+      AND is_state_head = FALSE
+    ORDER BY canonical_name
+  `);
+
+  // Fetch all names from the person table (migration 030).
+  const { rows: personRows } = await pool.query<{ name: string }>(`
+    SELECT name FROM person
+  `);
+
+  const registryNames = regRows.map((r) => r.canonical_name);
+  const personNames = personRows.map((r) => r.name);
+
+  const missing = findRegistryMembersWithoutPersonRow(registryNames, personNames);
+  const total = registryNames.length;
+
+  if (missing.length > 0) {
+    console.warn(
+      `[personRegistry] PERSON TABLE GAP — ${missing.length} of ${total} registry ` +
+        `member(s) have no matching row in the person table. ` +
+        `Their secondary_sku_line rows will have state_canon=NULL and be invisible ` +
+        `in territory roll-ups until a person row is added for each:\n` +
+        missing.map((n) => `  • ${n}`).join("\n"),
+    );
+  } else if (total > 0) {
+    console.log(
+      `[personRegistry] Person-table coverage OK: all ${total} registry ` +
+        `member(s) have a matching person table row.`,
+    );
+  }
+
+  return { missing, total };
 }
 
 // ── Registry read helpers (for API routes) ───────────────────────────────────
