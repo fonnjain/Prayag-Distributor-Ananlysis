@@ -27,6 +27,7 @@ async function buildAll() {
       // Red Alert calibration script — detection logic only, no routes/UI/tables.
       path.resolve(artifactDir, "src/redAlertCalibrate.ts"),
       path.resolve(artifactDir, "src/redAlertDiagnoseB3B5.ts"),
+      path.resolve(artifactDir, "src/redAlertFullReport.ts"),
     ],
     platform: "node",
     bundle: true,
