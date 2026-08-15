@@ -26,6 +26,7 @@ async function buildAll() {
       path.resolve(artifactDir, "src/gpMarginFetcher.ts"),
       // Red Alert calibration script — detection logic only, no routes/UI/tables.
       path.resolve(artifactDir, "src/redAlertCalibrate.ts"),
+      path.resolve(artifactDir, "src/redAlertDiagnoseB3B5.ts"),
     ],
     platform: "node",
     bundle: true,
