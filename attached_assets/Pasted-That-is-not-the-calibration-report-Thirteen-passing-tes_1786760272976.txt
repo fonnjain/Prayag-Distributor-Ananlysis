@@ -1,0 +1,40 @@
+That is not the calibration report. Thirteen passing tests and one guard's
+count tells me the engine runs; it does not tell me what would fire, which was
+the deliverable.
+
+Produce all eight items from the prompt. Read-only, nothing rendered.
+
+1. Alert count by code, for FY2025-26 and FY2026-27 to date. Table: code,
+   count, combined rupees at stake.
+2. TOTAL count per period. If it exceeds 20, say by how much, and print what
+   thresholds would bring it to 20.
+3. Count suppressed by EACH guard, per guard. All ten. A guard that never
+   fires may be wrong; one doing all the work may be masking something.
+4. Top 5 alerts for A1, B1, B2 and B3, entity named, with the numbers behind
+   them.
+5. For B1: five customers with BOTH the MRP-based real growth and the
+   realised-price real growth, so the discount-leakage split is visible.
+6. Any alert where the two periods have different month counts. Should be
+   zero under Guard 2 - a non-zero count means that guard is not working.
+7. Confirm no page, route or stored alert was created.
+8. Commit hash, git cat-file -t, then git merge-base --is-ancestor <hash> main
+   with its exit code. Commit first, main second.
+
+AND ANSWER THIS SEPARATELY
+
+Guard 3 suppressed 822 and 636 retailer alerts. That means the raw count
+before suppression was in the high hundreds, against a page cap of 20.
+
+  a. What is the raw alert count BEFORE any guard, per period? If it is ~900,
+     the thresholds are far too loose and that is the finding.
+  b. Which months are missing from register_month_state, and why? "Secondary
+     months not in register_month_state" may be a month-state gap rather than
+     genuinely incomplete data. If those months hold real data, Guard 3 is
+     hiding alerts that should fire.
+  c. Print the months present in register_month_state against the months
+     present in secondary_sku_line, for both FYs. If they differ, say which
+     is authoritative.
+
+Item (b) matters most. A guard suppressing hundreds of alerts is either
+protecting us from noise or hiding the signal, and right now I cannot tell
+which.
