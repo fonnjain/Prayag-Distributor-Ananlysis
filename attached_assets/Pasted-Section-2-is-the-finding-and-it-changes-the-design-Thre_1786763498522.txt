@@ -1,0 +1,46 @@
+Section 2 is the finding and it changes the design. Three things.
+
+1. ROLL B3 UP TO DISTRIBUTOR LEVEL - do this instead of raising the floor
+74% of the 66 stops sit under 5 distributors, and 35 of 36 are still active.
+This is a servicing pattern, not 66 independent decisions.
+
+Replace the per-retailer B3 with a distributor-level alert:
+  "Avirasico International - 17 retailers stopped, Rs 2.77 Cr prior value,
+   distributor still active in FY2026-27 (Rs 4.96 Cr)"
+listing the retailers beneath it, expandable.
+
+Trigger when a distributor has >= 3 stopped retailers, or stopped retailers
+worth >= Rs 50 L. Keep single-retailer stops as individual alerts only above
+a high floor.
+
+That takes 66 to roughly 10 without discarding anything. Re-run and report the
+count.
+
+2. THREE THINGS TO CHECK FIRST
+  a. The rupee figures do not reconcile. B1 totals Rs 15.73 Cr across 121
+     alerts but excluding 103 removes Rs 17.90 Cr. B5 totals Rs 8.06 Cr and
+     excluding 47 removes Rs 8.68 Cr. You cannot remove more than the total.
+     Print how each figure is computed - "rupees at stake" and "excluded
+     value" appear to use different bases.
+  b. Your head table lists Suven Sengupta, Sarbjit Singh Chawla, Debasish
+     Adhikary, Pravat Kumar Dash - those are MEMBERS, not State Heads. Redo
+     the concentration analysis at true State Head level via person_registry.
+     35 members may roll up to 3 heads.
+  c. ARADHYA KEDIA appears on the Momentum page as 471 -> 0 codes on breadth
+     narrowing, and here as active at Rs 1.56 Cr. Print their primary and
+     secondary figures for both periods side by side. If they stopped buying
+     from Prayag while still selling to retailers, that is destocking - and it
+     would explain 15 retailers stopping beneath them.
+
+3. THE CAP MEANS VISIBLE AT ONE TIME
+Not fired per period. Your calibration counts cumulative fires over 4 and 12
+months; a page shows what is currently unresolved.
+
+Report, for FY2026-27 as at today: how many alerts would be OPEN right now
+under the lifecycle rules - raised, condition still holding, not cleared. That
+is the number the cap applies to.
+
+Do not change any threshold until 1 and 3 are done. Rolling up B3 and
+measuring open-at-once may bring the page inside the cap with no floor change
+at all - and the proposed B1 floor would discard Rs 17.90 Cr of real signal to
+solve a problem that may not exist.
