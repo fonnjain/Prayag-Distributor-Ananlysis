@@ -283,13 +283,14 @@ function TypeChangeForm({ customerId, currentType, adminSecret, onDone }:
   const qc = useQueryClient();
   const [newType, setNewType] = useState(currentType);
   const [reason, setReason] = useState("");
+  const [changedBy, setChangedBy] = useState("");
 
   const mut = useMutation({
     mutationFn: () =>
       fetch(`${BASE}/api/master/customers/${customerId}/type`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", "X-Admin-Secret": adminSecret },
-        body: JSON.stringify({ new_type: newType, reason }),
+        body: JSON.stringify({ new_type: newType, reason, changed_by: changedBy || "operator" }),
       }).then(async (r) => { if (!r.ok) throw new Error((await r.json()).error ?? r.statusText); return r.json(); }),
     onSuccess: (d) => {
       if (d.changed) {
@@ -330,9 +331,20 @@ function TypeChangeForm({ customerId, currentType, adminSecret, onDone }:
         </Select>
       </div>
       <div className="space-y-1.5">
-        <label className="text-xs text-muted-foreground">Reason <span className="text-destructive">*</span></label>
+        <label className="text-xs text-muted-foreground">
+          Reason <span className="text-destructive">*</span>
+          <span className="ml-1 font-normal text-muted-foreground">(→ change_log.reason)</span>
+        </label>
         <Input value={reason} onChange={(e) => setReason(e.target.value)}
           placeholder="Required — why is this type changing?" className="h-8 text-sm" />
+      </div>
+      <div className="space-y-1.5">
+        <label className="text-xs text-muted-foreground">
+          Your name / changed_by
+          <span className="ml-1 font-normal text-muted-foreground">(→ change_log.changed_by)</span>
+        </label>
+        <Input value={changedBy} onChange={(e) => setChangedBy(e.target.value)}
+          placeholder="operator" className="h-8 text-sm" />
       </div>
       <div className="flex gap-2">
         <Button size="sm" onClick={() => mut.mutate()}

@@ -1210,8 +1210,9 @@ router.patch("/master/customers/:id/assign", async (req, res) => {
 // Change a customer's type (e.g. distributor → project).
 //
 // REASON IS MANDATORY — type changes silently broke year-on-year comparison
-// in this system before. The reason is written to change_log.changed_by so
-// every type edit has a permanent, human-readable audit trail.
+// in this system before. The reason is written to change_log.reason.
+// changed_by holds the operator identity (who), reason holds the why.
+// Both must be queryable independently ("who changed X?" vs "why was X changed?").
 //
 // Effective dating: the change_log row carries the timestamp; the customer
 // row is updated in place. Use change_log to reconstruct the type history.
@@ -1220,7 +1221,11 @@ router.patch("/master/customers/:id/type", async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
     const customerId = String(req.params.id);
-    const { new_type, reason } = req.body as { new_type: string; reason: string };
+    const { new_type, reason, changed_by } = req.body as {
+      new_type: string;
+      reason: string;
+      changed_by?: string;
+    };
 
     if (!reason?.trim()) {
       return void res.status(400).json({
@@ -1257,11 +1262,12 @@ router.patch("/master/customers/:id/type", async (req, res) => {
         [new_type, customerId],
       );
 
-      // change_log: reason goes into changed_by so it always surfaces in the audit trail
+      // changed_by = who made the change (operator identity)
+      // reason     = why the type changed (mandatory audit note)
       await client.query(
-        `INSERT INTO change_log (entity_type, entity_id, field, old_value, new_value, changed_by)
-         VALUES ('customer', $1, 'type', $2, $3, $4)`,
-        [customerId, oldType, new_type, reason.trim()],
+        `INSERT INTO change_log (entity_type, entity_id, field, old_value, new_value, changed_by, reason)
+         VALUES ('customer', $1, 'type', $2, $3, $4, $5)`,
+        [customerId, oldType, new_type, changed_by?.trim() || "operator", reason.trim()],
       );
 
       await client.query("COMMIT");
