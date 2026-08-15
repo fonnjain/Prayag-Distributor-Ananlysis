@@ -98,7 +98,8 @@ describe("Guard 1 — channel reclassification", () => {
       priorMonths:   ["Apr-25", "May-25", "Jun-25"],
     });
 
-    const result = runGuards(alert, ctx, "2026-27", "2025-26", new Date(), 55);
+    const result = runGuards(alert, ctx, "2026-27", "2025-26", new Date(), 55,
+        new Set(alert.currentMonths), new Set(alert.priorMonths));
     expectNotGuard(result, 1);
   });
 
@@ -112,7 +113,8 @@ describe("Guard 1 — channel reclassification", () => {
     });
 
     const alert = makeB3Alert({ currentMonths: ["Apr-26"], priorMonths: ["Apr-25"] });
-    const result = runGuards(alert, ctx, "2026-27", "2025-26", new Date(), 55);
+    const result = runGuards(alert, ctx, "2026-27", "2025-26", new Date(), 55,
+        new Set(alert.currentMonths), new Set(alert.priorMonths));
     const failed = expectGuard(result, 1);
     expect(failed.reason).toMatch(/channel/i);
   });
@@ -128,7 +130,8 @@ describe("Guard 1 — channel reclassification", () => {
     });
 
     const alert = makeB3Alert({ currentMonths: ["Apr-26"], priorMonths: ["Apr-25"] });
-    const result = runGuards(alert, ctx, "2026-27", "2025-26", new Date(), 55);
+    const result = runGuards(alert, ctx, "2026-27", "2025-26", new Date(), 55,
+        new Set(alert.currentMonths), new Set(alert.priorMonths));
     const failed = expectGuard(result, 1);
     expect(failed.reason).toMatch(/channel/i);
   });
@@ -164,7 +167,8 @@ describe("Guard 5 — distributor reassignment", () => {
     ]));
 
     const alert = makeB3Alert({ currentMonths: ["Apr-26"], priorMonths: ["Apr-25"] });
-    const result = runGuards(alert, ctx, "2026-27", "2025-26", new Date(), 55);
+    const result = runGuards(alert, ctx, "2026-27", "2025-26", new Date(), 55,
+        new Set(alert.currentMonths), new Set(alert.priorMonths));
     const failed = expectGuard(result, 5);
     expect(failed.reason).toMatch(/different distributor/i);
   });
@@ -176,7 +180,8 @@ describe("Guard 5 — distributor reassignment", () => {
     ]));
 
     const alert = makeB3Alert({ currentMonths: ["Apr-26"], priorMonths: ["Apr-25"] });
-    const result = runGuards(alert, ctx, "2026-27", "2025-26", new Date(), 55);
+    const result = runGuards(alert, ctx, "2026-27", "2025-26", new Date(), 55,
+        new Set(alert.currentMonths), new Set(alert.priorMonths));
     expectNotGuard(result, 5);
   });
 
@@ -190,7 +195,8 @@ describe("Guard 5 — distributor reassignment", () => {
     ]));
 
     const alert = makeB3Alert({ currentMonths: ["Apr-26"], priorMonths: ["Apr-25"] });
-    const result = runGuards(alert, ctx, "2026-27", "2025-26", new Date(), 55);
+    const result = runGuards(alert, ctx, "2026-27", "2025-26", new Date(), 55,
+        new Set(alert.currentMonths), new Set(alert.priorMonths));
     expectNotGuard(result, 5);
   });
 
@@ -205,7 +211,8 @@ describe("Guard 5 — distributor reassignment", () => {
       currentMonths: ["Apr-26"],  // Jul-26 NOT in the window
       priorMonths:   ["Apr-25"],
     });
-    const result = runGuards(alert, ctx, "2026-27", "2025-26", new Date(), 55);
+    const result = runGuards(alert, ctx, "2026-27", "2025-26", new Date(), 55,
+        new Set(alert.currentMonths), new Set(alert.priorMonths));
     expectNotGuard(result, 5);
   });
 });

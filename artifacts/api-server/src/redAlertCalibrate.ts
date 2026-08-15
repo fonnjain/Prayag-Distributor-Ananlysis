@@ -229,6 +229,107 @@ function printSection6(results: CalibrationResult[]): void {
   }
 }
 
+// ── Section 9: Guard 3 deep-dive ──────────────────────────────────────────────
+// a. Raw candidate count BEFORE any guard, per period and per code.
+// b/c. register_month_state vs secondary_sku_line month coverage per FY.
+async function printSection9(
+  results: CalibrationResult[],
+  dbPool: typeof pool,
+): Promise<void> {
+  printSection(9, "Guard 3 deep-dive — raw pre-guard counts + month coverage audit");
+
+  // ── 9a: raw counts ─────────────────────────────────────────────────────────
+  console.log("\n  9a. Raw alert candidates BEFORE any guard:\n");
+  const codes: AlertCode[] = ["A1","A2","A3","B1","B2","B3","B4","B5","C1","C2","C3","C4","C5"];
+  const headerA = "Code  " + results.map((r) => r.fy.padEnd(10)).join("  ");
+  console.log("  " + headerA);
+  console.log("  " + sep("-", 50));
+  for (const code of codes) {
+    const cols = results.map((r) => String(r.rawByCode[code]).padEnd(10));
+    console.log(`  ${code.padEnd(6)}${cols.join("  ")}`);
+  }
+  console.log();
+  for (const r of results) {
+    const finalCount = r.alerts.length + r.suppressed.length;
+    console.log(`  ${r.fy}: RAW ${r.rawCount} candidates → ${r.alerts.length} final alerts `
+      + `(${r.rawCount - r.alerts.length} suppressed, ${finalCount - r.rawCount < 0 ? "?" : ""} `
+      + `including ${r.crossSuppressed} cross-suppressed after guards)`);
+  }
+
+  // ── 9b/c: month coverage table ─────────────────────────────────────────────
+  console.log("\n  9b/c. Month coverage: register_month_state vs secondary_sku_line\n");
+  console.log("  Authoritative source for retailers: secondary_sku_line (sell-out data).");
+  console.log("  Guard 3 gates B/C alerts on primary frozen months (register_month_state).");
+  console.log("  If a month has secondary_sku_line rows but is NOT in register_month_state,");
+  console.log("  Guard 3 is blocking retailer alerts on real data.\n");
+
+  const FYS = [FY_COMPLETE, FY_YTD];
+
+  const [rmsResult, skulResult] = await Promise.all([
+    dbPool.query<{ fy: string; month_label: string }>(
+      `SELECT DISTINCT fy, month_label FROM register_month_state
+       WHERE fy = ANY($1) ORDER BY fy, month_label`,
+      [FYS],
+    ),
+    dbPool.query<{ fy: string; month_label: string; row_count: string }>(
+      `SELECT fy, month_label, COUNT(*)::text AS row_count
+       FROM secondary_sku_line WHERE fy = ANY($1)
+       GROUP BY fy, month_label ORDER BY fy, month_label`,
+      [FYS],
+    ),
+  ]);
+
+  // Index by FY
+  const rmsByFy = new Map<string, Set<string>>();
+  for (const r of rmsResult.rows) {
+    if (!rmsByFy.has(r.fy)) rmsByFy.set(r.fy, new Set());
+    rmsByFy.get(r.fy)!.add(r.month_label);
+  }
+
+  const skulByFy = new Map<string, Map<string, number>>();
+  for (const r of skulResult.rows) {
+    if (!skulByFy.has(r.fy)) skulByFy.set(r.fy, new Map());
+    skulByFy.get(r.fy)!.set(r.month_label, parseInt(r.row_count, 10));
+  }
+
+  for (const fy of FYS) {
+    const rmsMonths = rmsByFy.get(fy) ?? new Set<string>();
+    const skulMonths = skulByFy.get(fy) ?? new Map<string, number>();
+    const allMonths = new Set([...rmsMonths, ...skulMonths.keys()]);
+    const sorted = [...allMonths].sort();
+
+    console.log(`  FY ${fy}:`);
+    console.log(`  ${"Month".padEnd(10)} ${"In RMS (primary frozen)?".padEnd(26)} ${"In SKU line (rows)".padEnd(22)} ${"Guard 3 blocks?"}`);
+    console.log(`  ${sep("-", 70)}`);
+
+    let blockedCount = 0;
+    let blockedRows = 0;
+    for (const m of sorted) {
+      const inRms = rmsMonths.has(m);
+      const skulRows = skulMonths.get(m) ?? 0;
+      const blocked = !inRms && skulRows > 0;
+      if (blocked) { blockedCount++; blockedRows += skulRows; }
+      const flag = blocked ? "⚠ YES" : inRms ? "no" : "—";
+      console.log(
+        `  ${m.padEnd(10)} ${ inRms ? "yes".padEnd(26) : "no".padEnd(26) } `
+        + `${skulRows > 0 ? String(skulRows).padEnd(22) : "—".padEnd(22)} ${flag}`
+      );
+    }
+    console.log();
+    if (blockedCount > 0) {
+      console.log(`  ⚠  FY ${fy}: ${blockedCount} month(s) with ${blockedRows.toLocaleString()} secondary_sku_line rows `
+        + `are BLOCKED by Guard 3 (absent from register_month_state).`);
+      console.log(`     These months have real secondary data but Guard 3 treats them as incomplete.`);
+      console.log(`     Finding: Guard 3 is hiding genuine retailer signals, not protecting from noise.`);
+    } else if (skulMonths.size === 0) {
+      console.log(`  No secondary_sku_line rows for FY ${fy}.`);
+    } else {
+      console.log(`  ✓  FY ${fy}: all secondary months are present in register_month_state.`);
+    }
+    console.log();
+  }
+}
+
 // ── Section 7: Confirmation ────────────────────────────────────────────────────
 function printSection7(): void {
   printSection(7, "Confirmation — no page, route, or stored alert created");
@@ -309,7 +410,7 @@ async function main(): Promise<void> {
 
   const results = [resultComplete, resultYtd];
 
-  // ── Print all 8 sections ────────────────────────────────────────────────────
+  // ── Print all sections ──────────────────────────────────────────────────────
   printSection1(results);
   printSection2(results);
   printSection3(results);
@@ -318,6 +419,7 @@ async function main(): Promise<void> {
   printSection6(results);
   printSection7();
   printSection8();
+  await printSection9(results, pool);
 
   console.log();
   console.log(sep("═"));

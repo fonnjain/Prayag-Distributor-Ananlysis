@@ -180,6 +180,17 @@ export function detectAlerts(
 
   const allCandidates: RawAlert[] = [...aAlerts, ...bAlerts, ...cAlerts];
 
+  // ── Build effective complete-month sets for Guard 3 ────────────────────────
+  // Closed FYs are not backfilled into register_month_state, so frozenMonths for
+  // a closed FY is always empty. Guard 3 must treat all 12 months as complete for
+  // any FY whose year-end (March 31) has already passed.
+  const effectiveCurrentMonths: Set<string> = isFyClosed(fy, nowDate)
+    ? new Set(fyMonthLabels(fy))
+    : new Set(primaryCompleteMonths);
+  const effectivePriorMonths: Set<string> = isFyClosed(priorFy, nowDate)
+    ? new Set(fyMonthLabels(priorFy))
+    : new Set([...(ctx.frozenMonths.get(priorFy) ?? [])]);
+
   // ── Run guards ──────────────────────────────────────────────────────────────
   const minWorkingDays = cfg.GUARD_THRESHOLDS.PARTIAL_TENURE_WORKING_DAYS;
   const passedAlerts: RawAlert[] = [];
@@ -187,7 +198,10 @@ export function detectAlerts(
   const suppressedByGuard: Record<number, number> = {};
 
   for (const alert of allCandidates) {
-    const result = runGuards(alert, ctx, fy, priorFy, nowDate, minWorkingDays);
+    const result = runGuards(
+      alert, ctx, fy, priorFy, nowDate, minWorkingDays,
+      effectiveCurrentMonths, effectivePriorMonths,
+    );
     if (result.pass) {
       passedAlerts.push(alert);
     } else {
@@ -263,15 +277,18 @@ export function detectAlerts(
   }
 
   // ── Build by-code summary ───────────────────────────────────────────────────
-  const byCode = {} as Record<AlertCode, { count: number; rupeesAtStake: number }>;
   const allCodes: AlertCode[] = ["A1","A2","A3","B1","B2","B3","B4","B5","C1","C2","C3","C4","C5"];
-  for (const code of allCodes) {
-    byCode[code] = { count: 0, rupeesAtStake: 0 };
-  }
+  const byCode = {} as Record<AlertCode, { count: number; rupeesAtStake: number }>;
+  for (const code of allCodes) { byCode[code] = { count: 0, rupeesAtStake: 0 }; }
   for (const alert of finalAlerts) {
     byCode[alert.code].count += 1;
     byCode[alert.code].rupeesAtStake += alert.rupeesAtStake;
   }
+
+  // ── Raw pre-guard counts (for calibration report section 9a) ───────────────
+  const rawByCode = {} as Record<AlertCode, number>;
+  for (const code of allCodes) { rawByCode[code] = 0; }
+  for (const a of allCandidates) { rawByCode[a.code] += 1; }
 
   const allSuppressed = [...guardSuppressed, ...crossSuppressed];
 
@@ -284,5 +301,7 @@ export function detectAlerts(
     suppressedByGuard,
     crossSuppressed: crossSuppressed.length,
     byCode,
+    rawCount: allCandidates.length,
+    rawByCode,
   };
 }

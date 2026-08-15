@@ -156,25 +156,37 @@ function guard2LikeMonths(alert: RawAlert): GuardResult {
 
 /**
  * Guard 3 — COMPLETE MONTHS ONLY.
- * For B/C category (primary data): use frozenMonths.
- * For A category: completeness is handled by the A engine (not_yet_recorded=false).
- * C5: a point-in-time freshness check — does not require period completeness.
+ * Validates that each month in the alert's window was complete at the time the
+ * alert was built. Uses the EFFECTIVE complete-month sets derived by detectAlerts()
+ * rather than re-querying frozenMonths directly.
+ *
+ * Key design: detectAlerts() treats closed FYs as having all 12 months complete
+ * (register_month_state is not backfilled for historical periods). Guard 3 must
+ * honour the same definition — otherwise it would block every B/C alert for any
+ * closed FY whose rows happen to be absent from register_month_state.
+ *
+ * The caller (runGuards) receives effectiveCurrentMonths and effectivePriorMonths
+ * built by detectAlerts() from: frozenMonths for open FYs, or fyMonthLabels() for
+ * closed FYs. Guard 3 simply checks that the alert's months are subsets of those.
+ *
+ * A: completeness handled by the A engine (not_yet_recorded=false).
+ * C5: operational freshness check — no prior-period window.
  */
 function guard3CompleteMonths(
-  alert: RawAlert, ctx: DetectionContext, currentFy: string, priorFy: string,
+  alert: RawAlert,
+  effectiveCurrentMonths: Set<string>,
+  effectivePriorMonths: Set<string>,
 ): GuardResult {
   if (alert.category === "A") return { pass: true };
-  if (alert.code === "C5") return { pass: true }; // operational freshness alert — no period dependency
-  const frozenCur = ctx.frozenMonths.get(currentFy) ?? new Set<string>();
-  const frozenPri = ctx.frozenMonths.get(priorFy) ?? new Set<string>();
+  if (alert.code === "C5") return { pass: true };
   for (const m of alert.currentMonths) {
-    if (!frozenCur.has(m)) {
-      return { pass: false, guard: 3, reason: `Month "${m}" in ${currentFy} not yet frozen` };
+    if (!effectiveCurrentMonths.has(m)) {
+      return { pass: false, guard: 3, reason: `Month "${m}" not in effective complete months for current FY` };
     }
   }
   for (const m of alert.priorMonths) {
-    if (!frozenPri.has(m)) {
-      return { pass: false, guard: 3, reason: `Month "${m}" in ${priorFy} not yet frozen` };
+    if (!effectivePriorMonths.has(m)) {
+      return { pass: false, guard: 3, reason: `Month "${m}" not in effective complete months for prior FY` };
     }
   }
   return { pass: true };
@@ -347,11 +359,15 @@ export function runGuards(
   priorFy: string,
   nowDate: Date,
   minWorkingDays: number,
+  /** Effective complete months for the current FY — all 12 for closed FYs, frozenMonths for open. */
+  effectiveCurrentMonths: Set<string>,
+  /** Effective complete months for the prior FY — all 12 for closed FYs, frozenMonths for open. */
+  effectivePriorMonths: Set<string>,
 ): GuardResult {
   const checks: GuardResult[] = [
     guard1ChannelReclassification(alert, ctx, currentFy, priorFy),
     guard2LikeMonths(alert),
-    guard3CompleteMonths(alert, ctx, currentFy, priorFy),
+    guard3CompleteMonths(alert, effectiveCurrentMonths, effectivePriorMonths),
     guard4IdentityResolution(alert, ctx),
     guard5DistributorReassignment(alert, ctx, currentFy, priorFy),
     guard6TerritoryOnly(alert, ctx, currentFy),

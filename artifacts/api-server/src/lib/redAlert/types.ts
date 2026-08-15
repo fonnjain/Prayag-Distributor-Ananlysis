@@ -85,6 +85,10 @@ export type CalibrationResult = {
   suppressedByGuard: Record<number, number>; // guard# → count
   crossSuppressed: number;       // count suppressed by B3/C5 cross-rules
   byCode: Record<AlertCode, { count: number; rupeesAtStake: number }>;
+  // Raw candidates BEFORE any guard — used by the calibration report to show
+  // how many alerts the engines produce before the guard layer filters them.
+  rawCount: number;
+  rawByCode: Record<AlertCode, number>;
 };
 
 // Pre-fetched DB context — built once per calibration run, shared across periods.
