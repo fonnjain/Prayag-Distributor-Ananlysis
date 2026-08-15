@@ -21,6 +21,9 @@ function makeCtx(overrides: {
   customerMeta?: CustomerMetaRow[];
   retailerDistributors?: Map<string, Map<string, Set<string>>>;
   frozenMonths?: Map<string, Set<string>>;
+  persons?: DetectionContext["persons"];
+  personsByNameKey?: DetectionContext["personsByNameKey"];
+  secHeadMonths?: DetectionContext["secHeadMonths"];
 } = {}): DetectionContext {
   return {
     pool: null as unknown as DetectionContext["pool"],
@@ -29,16 +32,17 @@ function makeCtx(overrides: {
     customerCode: [],
     retailerSale: [],
     retailerSku: [],
-    secHeadMonths: [],
+    secHeadMonths: overrides.secHeadMonths ?? [],
     mrpHistory: [],
     ambiguousCodes: new Set(),
     marginFact: [],
-    persons: [],
+    persons: overrides.persons ?? [],
     customerMaster: new Map(),
     retailerDistributors: overrides.retailerDistributors ?? new Map(),
     frozenMonths: overrides.frozenMonths ?? ALL_WINDOW_MONTHS_FROZEN,
     secCompleteMonths: new Map(),
     lastSheetRead: new Map(),
+    personsByNameKey: overrides.personsByNameKey ?? new Set(),
   };
 }
 
@@ -134,6 +138,91 @@ describe("Guard 1 — channel reclassification", () => {
         new Set(alert.currentMonths), new Set(alert.priorMonths));
     const failed = expectGuard(result, 1);
     expect(failed.reason).toMatch(/channel/i);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Guard 4: Identity resolution — name-key fallback
+// ─────────────────────────────────────────────────────────────────────────────
+describe("Guard 4 — identity resolution", () => {
+  function makeA1Alert(entityKey: string): RawAlert {
+    return {
+      code: "A1",
+      category: "A",
+      entity: entityKey,
+      entityKey,
+      entityType: "member",
+      currentMonths: ["Apr-26", "May-26"],
+      priorMonths:   ["Apr-25", "May-25"],
+      numbers: { achievementPct: 40, cumulativeTarget: 1_000_000, cumulativeOb: 400_000 },
+      rupeesAtStake: 600_000,
+    };
+  }
+
+  it("G4-1: exact normKey match passes Guard 4", () => {
+    const ctx = makeCtx({
+      persons: [{ normKey: "abhijitdas", canonicalName: "Abhijit Das", stateHead: null, isStateHead: false, hrStatus: null, isPerson: true }],
+      personsByNameKey: new Set(["abhijitdas"]),
+      secHeadMonths: [{ fy: "2026-27", headCanon: "abhijitdas", stateHead: null, monthLabel: "Apr-26", monthIdx: 1, planAmount: 500_000, orderedAmount: 200_000, receivedAmount: null, notYetRecorded: false, isAnomaly: false, ingestedAt: new Date() }],
+    });
+    const result = runGuards(makeA1Alert("abhijitdas"), ctx, "2026-27", "2025-26", new Date(), 0);
+    // Guard 4 should pass; alert may fail later guards (G7, G8, G9) — that's fine
+    if (!result.pass) expect(result.guard).not.toBe(4);
+  });
+
+  it("G4-2: name-key fallback resolves when normKey is an employee code", () => {
+    // Registry stores norm_key="639" (employee code) for "Ashutosh Kumar".
+    // head_canon in secondary data is "ashutoshkumar".
+    // personsByNameKey should contain "ashutoshkumar" derived from canonical_name.
+    const ctx = makeCtx({
+      persons: [{ normKey: "639", canonicalName: "Ashutosh Kumar", stateHead: null, isStateHead: false, hrStatus: null, isPerson: true }],
+      personsByNameKey: new Set(["ashutoshkumar"]),
+      secHeadMonths: [{ fy: "2026-27", headCanon: "ashutoshkumar", stateHead: null, monthLabel: "Apr-26", monthIdx: 1, planAmount: 500_000, orderedAmount: 200_000, receivedAmount: null, notYetRecorded: false, isAnomaly: false, ingestedAt: new Date() }],
+    });
+    const result = runGuards(makeA1Alert("ashutoshkumar"), ctx, "2026-27", "2025-26", new Date(), 0);
+    if (!result.pass) expect(result.guard).not.toBe(4);
+  });
+
+  it("G4-3: name-key fallback resolves when normKey is a collision-disambiguation key", () => {
+    // Registry stores norm_key="ashutoshkumarrudrapur:anantsingh".
+    // head_canon is "ashutoshkumarrudrapur" (base part before ":").
+    // personsByNameKey should contain "ashutoshkumarrudrapur".
+    const ctx = makeCtx({
+      persons: [{ normKey: "ashutoshkumarrudrapur:anantsingh", canonicalName: "Ashutosh Kumar (Rudrapur)", stateHead: null, isStateHead: false, hrStatus: null, isPerson: true }],
+      personsByNameKey: new Set(["ashutoshkumarrudrapur"]),
+      secHeadMonths: [{ fy: "2026-27", headCanon: "ashutoshkumarrudrapur", stateHead: null, monthLabel: "Apr-26", monthIdx: 1, planAmount: 500_000, orderedAmount: 200_000, receivedAmount: null, notYetRecorded: false, isAnomaly: false, ingestedAt: new Date() }],
+    });
+    const result = runGuards(makeA1Alert("ashutoshkumarrudrapur"), ctx, "2026-27", "2025-26", new Date(), 0);
+    if (!result.pass) expect(result.guard).not.toBe(4);
+  });
+
+  it("G4-4: Guard 4 suppresses when entityKey is absent from both persons and personsByNameKey", () => {
+    const ctx = makeCtx({
+      persons: [],
+      personsByNameKey: new Set(),
+    });
+    const result = runGuards(makeA1Alert("unknownmember"), ctx, "2026-27", "2025-26", new Date(), 0);
+    expectGuard(result, 4);
+  });
+
+  it("G4-5: is_person=false exact match suppresses even when normKey matches", () => {
+    const ctx = makeCtx({
+      persons: [{ normKey: "stateheadkey", canonicalName: "State Head Name", stateHead: null, isStateHead: true, hrStatus: null, isPerson: false }],
+      personsByNameKey: new Set(),
+    });
+    const result = runGuards(makeA1Alert("stateheadkey"), ctx, "2026-27", "2025-26", new Date(), 0);
+    expectGuard(result, 4);
+  });
+
+  it("G4-6: A3 alerts bypass Guard 4 entirely (team-level alert, not a person key)", () => {
+    const ctx = makeCtx({ persons: [], personsByNameKey: new Set() });
+    const a3: RawAlert = {
+      code: "A3", category: "A", entity: "State Head", entityKey: "stateheadkey",
+      entityType: "team", currentMonths: ["Apr-26", "May-26"], priorMonths: ["Apr-25", "May-25"],
+      numbers: { achievementPct: 50, teamMemberCount: 5 }, rupeesAtStake: 2_000_000,
+    };
+    const result = runGuards(a3, ctx, "2026-27", "2025-26", new Date(), 0);
+    if (!result.pass) expect(result.guard).not.toBe(4);
   });
 });
 

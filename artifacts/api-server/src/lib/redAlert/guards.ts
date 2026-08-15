@@ -197,18 +197,34 @@ function guard3CompleteMonths(
  * A1 and A2 only: resolve individual members through person_registry.
  * A3 is a team-level alert keyed on a state-head name, not a person norm_key —
  * the person_registry lookup would always fail for it and must not apply.
+ *
+ * Two lookup paths (applied in order):
+ *   1. Exact normKey match — catches rows whose norm_key IS the head_canon.
+ *   2. personsByNameKey fallback — catches the common case where person_registry
+ *      uses employee-code norm_keys (e.g. "788") or collision-disambiguation keys
+ *      (e.g. "abhisheksingh:rajansrivastava") while secondary_head_month.head_canon
+ *      stores only the base name part (e.g. "abhisheksingh").
  */
 function guard4IdentityResolution(alert: RawAlert, ctx: DetectionContext): GuardResult {
   if (!["A1", "A2"].includes(alert.code)) return { pass: true };
   const { entityKey } = alert;
-  const person = ctx.persons.find((p) => p.normKey === entityKey);
-  if (!person) {
-    return { pass: false, guard: 4, reason: `Member "${entityKey}" not found in person_registry` };
+
+  // Path 1: exact norm_key match (is_person checked on the matched row).
+  const personExact = ctx.persons.find((p) => p.normKey === entityKey);
+  if (personExact) {
+    if (!personExact.isPerson) {
+      return { pass: false, guard: 4, reason: `Registry entry "${entityKey}" is not a person (is_person=false)` };
+    }
+    return { pass: true };
   }
-  if (!person.isPerson) {
-    return { pass: false, guard: 4, reason: `Registry entry "${entityKey}" is not a person (is_person=false)` };
+
+  // Path 2: name-key fallback — head_canon is the base part of a disambiguation key
+  // or the normalised canonical name.  The set only contains is_person=true entries.
+  if (ctx.personsByNameKey.has(entityKey)) {
+    return { pass: true };
   }
-  return { pass: true };
+
+  return { pass: false, guard: 4, reason: `Member "${entityKey}" not found in person_registry` };
 }
 
 /**

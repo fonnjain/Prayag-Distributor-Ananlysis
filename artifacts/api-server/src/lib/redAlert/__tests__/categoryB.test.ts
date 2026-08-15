@@ -50,6 +50,7 @@ function makeCtx(overrides: Partial<Pick<DetectionContext,
     frozenMonths: new Map(),
     secCompleteMonths: new Map(),
     lastSheetRead: new Map(),
+    personsByNameKey: new Set(),
   };
 }
 
@@ -210,6 +211,7 @@ describe("Category B — B3 end-to-end through detectAlerts", () => {
       frozenMonths: FROZEN,
       secCompleteMonths: new Map(),
       lastSheetRead: new Map(),
+      personsByNameKey: new Set(),
     };
 
     const result = detectAlerts(ctx, {
@@ -250,6 +252,7 @@ describe("Category B — B3 end-to-end through detectAlerts", () => {
       frozenMonths: FROZEN,
       secCompleteMonths: new Map(),
       lastSheetRead: new Map(),
+      personsByNameKey: new Set(),
     };
 
     const result = detectAlerts(ctx, {

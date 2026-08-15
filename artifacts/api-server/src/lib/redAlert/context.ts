@@ -15,6 +15,7 @@ import type {
   PersonRow,
   CustomerMasterRow,
 } from "./types.js";
+import { normSecKey } from "../mgmt/names.js";
 
 export async function buildDetectionContext(pool: DbPool, fys: string[]): Promise<DetectionContext> {
   // We need 3 FYs of sale data: prior-prior, prior, current — for "sustained" checks.
@@ -298,6 +299,40 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
     isPerson: r.is_person,
   }));
 
+  // Build a secondary lookup set for Guard 4.
+  //
+  // secondary_head_month.head_canon is written by the register ingest pipeline
+  // using normSecKey(memberName): lowercase alphanumerics only, no spaces or
+  // punctuation (src/lib/mgmt/names.ts).  person_registry.norm_key is either:
+  //   (a) a numeric employee code ("788", "1001"), or
+  //   (b) a collision-disambiguation string "basename:stateheadname"
+  //       where basename = normSecKey(memberName).
+  //
+  // Guard 4 receives entityKey = head_canon.  It will never equal a numeric
+  // employee code or a full collision key, so we need a secondary set indexed
+  // by normSecKey(canonicalName) — which equals the base part of (b) and the
+  // value that the pipeline would store as head_canon for (a).
+  //
+  // Using the shared normSecKey helper keeps this in sync with the pipeline.
+  const personsByNameKey = new Set<string>();
+  for (const p of persons) {
+    if (!p.isPerson) continue;
+    if (p.normKey.includes(":")) {
+      // Collision-disambiguation format: "ashutoshkumarrudrapur:anantsingh"
+      // The base part before ":" IS the head_canon key; extract it directly.
+      const baseName = p.normKey.split(":")[0]!;
+      if (baseName) personsByNameKey.add(baseName);
+    } else {
+      // Numeric employee-code format (e.g. "788") or a bare name key.
+      // Derive the head_canon-equivalent key via normSecKey — the same function
+      // the register pipeline uses when writing head_canon, so names with
+      // parentheses ("Ashutosh Kumar (Rudrapur)"), hyphens, apostrophes, etc.
+      // normalise identically in both directions.
+      const nameKey = normSecKey(p.canonicalName);
+      if (nameKey) personsByNameKey.add(nameKey);
+    }
+  }
+
   // Build customer master map keyed by UPPER(TRIM(company))
   const customerMaster = new Map<string, CustomerMasterRow>();
   for (const r of custMasterRes.rows) {
@@ -377,6 +412,7 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
     frozenMonths,
     secCompleteMonths,
     lastSheetRead,
+    personsByNameKey,
   };
 }
 

@@ -244,4 +244,13 @@ export type DetectionContext = {
 
   // Last sheet read per member (for C5)
   lastSheetRead: Map<string, Date>;  // headCanon → latest ingested_at across all months
+
+  // Secondary lookup for Guard 4: base name keys (head_canon format) that resolve to
+  // a person with is_person=true.  Built from two sources:
+  //   (a) the part before ":" in collision-disambiguation norm_keys
+  //       e.g. "ashutoshkumarrudrapur:anantsingh" → "ashutoshkumarrudrapur"
+  //   (b) LOWER(REPLACE(REPLACE(canonical_name,' ',''),'.','')) for numeric norm_keys
+  // Allows Guard 4 to resolve entityKeys that come from secondary_head_month.head_canon
+  // even when the registry's primary norm_key is an employee code or contains a suffix.
+  personsByNameKey: Set<string>;
 };
