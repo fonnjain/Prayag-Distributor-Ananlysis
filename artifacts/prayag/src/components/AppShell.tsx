@@ -10,7 +10,7 @@
 //
 // The sidebar is always visible on desktop.  On mobile a hamburger opens it as
 // a slide-over.  Groups are collapsible via a chevron on the group header.
-import { useState, type ReactNode } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { useLocation } from "wouter";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
@@ -19,11 +19,33 @@ import {
   Bot, FileSpreadsheet, BarChart2 as BarChartIcon, Target,
   ClipboardList, Database, ShieldCheck,
   LayoutDashboard, Users, ShoppingBag,
-  AlertTriangle, UserMinus, Settings, Store, BookOpen, Network,
+  AlertTriangle, Bell, UserMinus, Settings, Store, BookOpen, Network,
   ChevronDown, ChevronRight, Menu, X, Sun, Moon, Braces, Key, Layers, IndianRupee,
   Globe, FileSearch,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+// Live open-alert count — polled every 5 minutes to power the nav badge.
+function useAlertCount(): number {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    async function fetch_() {
+      try {
+        const res = await fetch(`${BASE}/api/alerts/count`);
+        if (!res.ok) return;
+        const data = await res.json() as { open?: number };
+        if (!cancelled) setCount(data.open ?? 0);
+      } catch { /* non-fatal */ }
+    }
+    void fetch_();
+    const interval = setInterval(() => void fetch_(), 5 * 60_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+  return count;
+}
 
 // ── Nav registry ───────────────────────────────────────────────────────────────
 
@@ -61,6 +83,7 @@ const NAV: NavGroup[] = [
       { id: "targets",         label: "Targets",         path: "/targets",         icon: Target },
       { id: "pending",         label: "Pending Orders",  path: "/pending",         icon: ClipboardList },
       { id: "sources",         label: "Organization",    path: "/sources",         icon: Database },
+      { id: "alerts",          label: "Red Alerts",      path: "/alerts",          icon: Bell },
       { id: "warnings",        label: "Warning System",  path: "/warnings",        icon: AlertTriangle },
       { id: "data-health",     label: "Data Health",     path: "/data-health",     icon: ShieldCheck },
     ],
@@ -182,6 +205,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [location, setLocation] = useLocation();
   const { theme, setTheme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const alertCount = useAlertCount();
 
   const { groupId: activeGroupId, itemId: activeItemId } = activeIds(location);
 
@@ -266,6 +290,11 @@ export default function AppShell({ children }: { children: ReactNode }) {
                       >
                         <Icon className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
                         <span className="truncate">{item.label}</span>
+                        {item.id === "alerts" && alertCount > 0 && (
+                          <span className="ml-auto inline-flex items-center justify-center rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold min-w-[16px] h-4 px-1">
+                            {alertCount > 99 ? "99+" : alertCount}
+                          </span>
+                        )}
                       </button>
                     );
                   })}

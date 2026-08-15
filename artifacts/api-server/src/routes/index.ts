@@ -48,6 +48,7 @@ import gpMarginRouter from "./gpMargin";
 import stateHierarchyRouter from "./stateHierarchy";
 import marketSurveyRouter from "./marketSurvey";
 import competitorPriceRouter from "./competitorPrice";
+import alertsRouter from "./alerts";
 
 const router: IRouter = Router();
 
@@ -100,5 +101,6 @@ router.use(gpMarginRouter);
 router.use(stateHierarchyRouter);
 router.use(marketSurveyRouter);
 router.use(competitorPriceRouter);
+router.use(alertsRouter);
 
 export default router;

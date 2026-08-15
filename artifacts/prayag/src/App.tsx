@@ -17,6 +17,7 @@ import DevApiKeysPage from "@/pages/DevApiKeysPage";
 import DevMastersPage from "@/pages/DevMastersPage";
 import OrgPeoplePage from "@/pages/OrgPeoplePage";
 import OrgCustomersPage from "@/pages/OrgCustomersPage";
+import AlertsPage from "@/pages/AlertsPage";
 import NotFound from "@/pages/not-found";
 import { DashboardProvider } from "@/data/dashboard-context";
 import { GlobalFilterProvider } from "@/data/global-filter-context";
@@ -48,6 +49,8 @@ function Router() {
         {/* Customer Performance */}
         <Route path="/customers/:section" component={CustomersPage} />
         <Route path="/customers" component={CustomersPage} />
+        {/* Alerts */}
+        <Route path="/alerts" component={AlertsPage} />
         {/* Organisation */}
         <Route path="/org/people" component={OrgPeoplePage} />
         <Route path="/org/customers" component={OrgCustomersPage} />

@@ -360,6 +360,35 @@ runMigrations()
     setInterval(() => void runSecDashSync(), 6 * 3_600_000).unref();
   }
 
+  // ── Red Alert detection scheduler ─────────────────────────────────────────
+  // Runs the fingerprint-based persistence runner every 6 hours. Non-fatal on
+  // failure — alerts remain stale but the server keeps serving other routes.
+  {
+    let alertDetectInFlight = false;
+    const runAlertDetect = async (): Promise<void> => {
+      if (alertDetectInFlight) return;
+      alertDetectInFlight = true;
+      try {
+        const { runAlertDetection } = await import(
+          "./lib/redAlert/alertPersistence.js"
+        );
+        const stats = await runAlertDetection();
+        logger.info(
+          { new: stats.new, updated: stats.updated, cleared: stats.cleared, totalOpen: stats.totalOpen },
+          "scheduled alert detection: done",
+        );
+      } catch (err) {
+        logger.error({ err }, "scheduled alert detection: failed");
+      } finally {
+        alertDetectInFlight = false;
+      }
+    };
+    // First run 10 min after startup (after register and secondary warm-ups),
+    // then every 6 hours. Using .unref() so the timer doesn't prevent clean exit.
+    setTimeout(() => void runAlertDetect(), 10 * 60_000).unref();
+    setInterval(() => void runAlertDetect(), 6 * 3_600_000).unref();
+  }
+
   // Assert frozen-FY anchors in the background. Any mismatch means something
   // wrote to an immutable year — logged at ERROR and exposed via /registers/freeze-status.
   void assertFrozenAnchors().catch((err) =>

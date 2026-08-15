@@ -1129,6 +1129,54 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  // ── 035: alert + alert_action tables ──────────────────────────────────────
+  {
+    id: "035_alert_tables",
+    sql: `
+      -- Persistence layer for the Red Alert detection engine.
+      -- alert: one row per (fy, code, entityKey, analysisWindow) fingerprint.
+      -- alert_action: audit trail of acknowledge actions.
+
+      CREATE TABLE IF NOT EXISTS alert (
+        id              SERIAL      PRIMARY KEY,
+        fingerprint     TEXT        NOT NULL UNIQUE,
+        fy              TEXT        NOT NULL,
+        code            TEXT        NOT NULL,
+        entity          TEXT        NOT NULL,
+        entity_key      TEXT        NOT NULL,
+        entity_type     TEXT        NOT NULL,
+        period_label    TEXT        NOT NULL,
+        status          TEXT        NOT NULL DEFAULT 'open'
+          CHECK (status IN ('open','acknowledged','cleared')),
+        periods_open    INTEGER     NOT NULL DEFAULT 1,
+        rupees_at_stake NUMERIC     NOT NULL DEFAULT 0,
+        detail          JSONB       NOT NULL DEFAULT '{}',
+        guards_passed   JSONB       NOT NULL DEFAULT '[]',
+        suppressed_by   INTEGER     REFERENCES alert(id),
+        linked_alert_id INTEGER     REFERENCES alert(id),
+        clear_reason    TEXT,
+        first_seen_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_seen_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      CREATE INDEX IF NOT EXISTS alert_fy_status_idx  ON alert (fy, status);
+      CREATE INDEX IF NOT EXISTS alert_code_idx       ON alert (code);
+      CREATE INDEX IF NOT EXISTS alert_entity_key_idx ON alert (entity_key);
+      CREATE INDEX IF NOT EXISTS alert_linked_idx     ON alert (linked_alert_id)
+        WHERE linked_alert_id IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS alert_action (
+        id         SERIAL      PRIMARY KEY,
+        alert_id   INTEGER     NOT NULL REFERENCES alert(id) ON DELETE CASCADE,
+        action     TEXT        NOT NULL,
+        by_person  TEXT        NOT NULL DEFAULT '',
+        at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+        note       TEXT
+      );
+      CREATE INDEX IF NOT EXISTS alert_action_alert_id_idx ON alert_action (alert_id);
+      CREATE INDEX IF NOT EXISTS alert_action_at_idx       ON alert_action (at DESC);
+    `,
+  },
   {
     id: "034_populate_person_registry_state_head",
     sql: `
