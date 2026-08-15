@@ -1,0 +1,158 @@
+GOAL
+The Red Alert detection engine is built and calibrated. Two things are
+missing: the alerts are not STORED, and there is no page.
+
+Today every run recomputes from scratch. That is why the calibration reported
+"all 97 currently open" - nothing can clear because nothing persists. An alert
+list that cannot show what is new, what has been seen, and what has been
+running for three periods is a report, not an alert page.
+
+Build persistence first, then the page on top of it.
+
+============================================================
+PART 1 - PERSISTENCE
+============================================================
+
+alert
+  alert_id
+  code                  A1 A2 A3 B1..B5 C1..C5 S1
+  entity_type           person | customer | distributor | state | segment
+  entity_key            the stable id, not a name
+  entity_name           for display, resolved at raise time
+  fingerprint           code + entity_key + the condition's defining period
+  severity              critical | warning
+  rupees_at_stake
+  detail                JSON - the figures behind the alert, whatever the
+                        card needs to render without recomputing
+  guards_passed         JSON array of the ten guard names it cleared
+  first_raised_at
+  last_seen_at
+  periods_open          how many consecutive detection runs it has appeared in
+  status                open | acknowledged | cleared
+  cleared_at
+  clear_reason          condition_no_longer_holds | superseded | manual
+
+alert_action
+  alert_id · action (acknowledged | note | reopened) · by_person
+  at · note
+
+RAISE AND MATCH ON FINGERPRINT, NOT ON A NEW ROW EACH RUN
+Each detection run:
+  - fingerprint matches an OPEN or ACKNOWLEDGED alert  -> update last_seen_at,
+    increment periods_open, refresh rupees_at_stake and detail. Do NOT create
+    a duplicate and do NOT reset acknowledgement.
+  - no match                                            -> raise a new alert
+  - an open alert whose condition no longer fires        -> set cleared,
+    clear_reason = condition_no_longer_holds
+
+ACKNOWLEDGING DOES NOT CLEAR
+An acknowledged alert stays visible, marked, until the condition itself
+clears. Someone seeing a problem is not the same as the problem going away.
+
+NEVER AUTO-DISMISS
+An alert that disappears without anyone seeing it has failed. Clearing is
+always recorded with a reason and stays in history.
+
+HISTORY IS KEPT
+Cleared alerts are never deleted. A distributor alerting three quarters
+running is a different story from one alerting once, and only history shows
+that.
+
+SUPPRESSION - store the relationship, do not hide the row
+  C5 data blackout -> suppresses every alert for that team
+  B3 stopped       -> suppresses B1 B2 B4 B5 for that customer
+A suppressed alert is stored with status open and a suppressed_by reference.
+The page collapses it under the suppressor; it is not deleted, because the
+suppressor clearing must reveal it again.
+
+============================================================
+PART 2 - THE PAGE
+============================================================
+
+Two sections, separate budgets. Do NOT force them into one list - a bad month
+for the sales team must not push a destocking distributor off the page.
+
+  SALESPEOPLE      A1/A2 merged (Member Not Contributing), A3
+  CUSTOMERS        B-category, C-category, S1 destocking
+
+Within each section, rank by RUPEES AT STAKE, not by percentage severity. A
+25% fall at a Rs 5 Cr distributor outranks a 60% fall at a Rs 30 L one.
+
+EVERY CARD SHOWS
+  who            named person, customer or distributor - never a statistic
+  how much       rupees at stake
+  since when     first raised, and how many periods open
+  the numbers    the figures behind it, so nobody has to ask
+  what to do     the suggested action
+  guards passed  which of the ten it cleared - available on expand, not
+                 prominent, but present. When someone challenges an alert,
+                 and they will, the answer has to be on the page.
+
+PERSISTENCE MUST BE VISIBLE
+An alert open for three or more periods looks DIFFERENT from one raised this
+week. Repeated appearance is itself a signal - usually that whatever was
+supposed to happen did not. Show "open 3 periods" prominently on those.
+
+ROLLED-UP AND LINKED ALERTS
+B3 distributor cards expand to list the retailers beneath them.
+Where a distributor fires BOTH a rolled-up B3 and the S1 destocking alert,
+link them and render as ONE story. Aradhya Kedia's 15 stopped retailers and
+their destocking are the same event: they stopped because the distributor
+stopped buying and the stock ran out. Two cards would tell it twice and
+explain it neither time.
+
+ACKNOWLEDGEMENT
+A button on each card. Records who and when, and asks for an optional note.
+The card stays, marked acknowledged, with the acknowledger's name and date.
+
+THE PAGE CAP
+Show at most 20 per section. Below that, a single line: "N further alerts
+below the display cut, Rs X combined" - so nothing is hidden, but the page
+stays to what a person will actually read.
+
+DATA BLACKOUT AT THE TOP
+C5 is a credibility alert, not a performance one. If a head's sheets have not
+been read for 10 days or more, that appears at the TOP of the page and
+suppresses every other alert for that team, with a line saying why. Their
+figures cannot be trusted, so their alerts must not be acted on.
+
+WHAT THIS PAGE IS NOT
+Not a scorecard. Not a dashboard. There is no green state and no "all clear"
+badge. An empty page means nothing is wrong, and that is the correct display.
+
+============================================================
+DO NOT
+============================================================
+- Do not change any detection threshold. They are calibrated.
+- Do not change the guards.
+- Do not build routing or notification. That needs a business decision on who
+  receives what, and it has not been made. Build the page so routing can be
+  added later without rework.
+- Do not touch sale_line, margin_fact, mrp_history, customer or person.
+
+============================================================
+VERIFY - produced values, and a hash that resolves
+============================================================
+1. Run detection twice in succession with no data change. Confirm the SECOND
+   run creates zero new alerts, updates last_seen_at on all of them, and
+   increments periods_open to 2. Print the counts. If it duplicates, the
+   fingerprint is wrong and everything else is unreliable.
+2. Acknowledge an alert, then run detection again. Confirm it stays
+   acknowledged and does NOT revert to open. Print before and after.
+3. Force a condition to stop firing. Confirm the alert clears with
+   clear_reason = condition_no_longer_holds, and confirm the row still
+   EXISTS in history. Print it.
+4. Print the current page as rendered: both sections, ranked, with the counts
+   above and below the cut.
+5. Print one alert open for 3+ periods and confirm it renders differently.
+6. Print the Aradhya Kedia case: confirm the rolled-up B3 and the S1
+   destocking alert are linked and render as one story, not two cards.
+7. Expand one B3 distributor card and confirm the retailers beneath are
+   listed.
+8. Trigger C5 for one head. Confirm it appears at the top and that their
+   other alerts are collapsed beneath it with a reason shown.
+9. Print the guards_passed array on one alert.
+10. Confirm sale_line, margin_fact, mrp_history, customer and person row
+    counts are unchanged.
+11. Commit hash, git cat-file -t, then
+    git merge-base --is-ancestor <hash> main - commit first, main second.
