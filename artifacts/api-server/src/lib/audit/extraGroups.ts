@@ -723,6 +723,141 @@ async function runSapLagGroup(): Promise<CheckGroup> {
   }
 }
 
+// ── Group 11 — Secondary sheet pipeline staleness ─────────────────────────────
+//
+// Checks MAX(ingested_at) across ALL members in secondary_head_month for the
+// open FY. A per-member C5 alert fires when an individual sheet is 30 days
+// stale, but that threshold is intentionally loose. This group adds a COARSER
+// operational check: if the most-recent ingest across ANY member is older than
+// SECONDARY_PIPELINE_STALE_DAYS (2 days), the 6-hour secondary dashboard
+// scheduler (wired in index.ts) has been failing consistently.
+//
+// The check is open-FY only. Closed FYs are frozen and never re-ingested.
+//
+// SECONDARY_PIPELINE_STALE_DAYS = 2 because the scheduler runs every 6 hours;
+// a 2-day gap means ≥8 consecutive ticks failed — a genuine pipeline stall,
+// not a momentary blip.
+
+export const SECONDARY_PIPELINE_STALE_DAYS = 2;
+
+/** Pure classifier for secondary pipeline freshness — exported for unit tests. */
+export type SecondaryPipelineFreshness = {
+  /** "pass" | "warn" | "fail". null when latestAt is null (no data). */
+  status: "pass" | "warn" | "fail" | "no_data";
+  daysSince: number | null;
+  note: string;
+};
+
+export function classifySecondaryPipelineFreshness(
+  latestAt: Date | null,
+  memberCount: number,
+  openFy: string,
+  now: Date,
+): SecondaryPipelineFreshness {
+  if (latestAt == null) {
+    return {
+      status: "no_data",
+      daysSince: null,
+      note: `No ingested_at recorded for any FY${openFy} secondary member — the 6-hour secondary dashboard scheduler has not successfully run yet, or secondary_head_month is empty. Expected: data populated by the scheduler on first run (~5 min after server start).`,
+    };
+  }
+
+  const daysSince = (now.getTime() - latestAt.getTime()) / 86_400_000;
+  const daysSinceRounded = Math.round(daysSince * 10) / 10;
+
+  if (daysSince <= 1) {
+    return {
+      status: "pass",
+      daysSince,
+      note: `Secondary sheet pipeline is current. Latest ingest: ${latestAt.toISOString().slice(0, 16)} UTC (${daysSinceRounded} days ago), covering ${memberCount} FY${openFy} member(s). 6-hour scheduler is running normally.`,
+    };
+  }
+
+  if (daysSince <= SECONDARY_PIPELINE_STALE_DAYS) {
+    return {
+      status: "warn",
+      daysSince,
+      note: `Secondary sheet pipeline for FY${openFy} may be lagging. Latest ingest: ${latestAt.toISOString().slice(0, 16)} UTC (${daysSinceRounded} days ago). The 6-hour scheduler should produce a gap < 1 day in steady state. Check server logs for scheduler errors.`,
+    };
+  }
+
+  return {
+    status: "fail",
+    daysSince,
+    note: `FAIL: Secondary sheet pipeline appears STALLED. Latest ingest across all FY${openFy} members: ${latestAt.toISOString().slice(0, 16)} UTC (${daysSinceRounded} days ago, threshold: ${SECONDARY_PIPELINE_STALE_DAYS} days). At least 8 consecutive 6-hour scheduler ticks have failed. Check: (1) server logs for loadAndPersistStateDashboard errors, (2) Sheets API quota, (3) whether the server process was recently replaced without the scheduler re-arming. ${memberCount} member(s) are serving stale secondary data.`,
+  };
+}
+
+async function runSecondaryPipelineGroup(): Promise<CheckGroup> {
+  const { currentOpenFy } = await import("../fyAnchors.js");
+  const openFy = currentOpenFy();
+
+  try {
+    const { rows } = await pool.query<{
+      latest_at: Date | null;
+      member_count: string;
+    }>(
+      `SELECT MAX(ingested_at) AS latest_at, COUNT(DISTINCT head_canon)::text AS member_count
+       FROM secondary_head_month
+       WHERE fy = $1`,
+      [openFy],
+    );
+
+    const row = rows[0];
+    const latestAt: Date | null = row?.latest_at ?? null;
+    const memberCount = parseInt(row?.member_count ?? "0", 10);
+    const now = new Date();
+    const result = classifySecondaryPipelineFreshness(latestAt, memberCount, openFy, now);
+
+    if (result.status === "no_data") {
+      return {
+        id: "secondary_pipeline",
+        label: `Group 11 — Secondary sheet pipeline freshness (FY${openFy})`,
+        available: true,
+        checks: [
+          {
+            key: "secondary_pipeline_freshness",
+            label: `11.1 — MAX(ingested_at) from secondary_head_month (FY${openFy})`,
+            unit: "count",
+            expected: null,
+            actual: null,
+            deltaPct: null,
+            status: "warn",
+            note: result.note,
+          },
+        ],
+      };
+    }
+
+    return {
+      id: "secondary_pipeline",
+      label: `Group 11 — Secondary sheet pipeline freshness (FY${openFy})`,
+      available: true,
+      checks: [
+        {
+          key: "secondary_pipeline_freshness",
+          label: `11.1 — MAX(ingested_at) from secondary_head_month (FY${openFy})`,
+          unit: "count",
+          expected: SECONDARY_PIPELINE_STALE_DAYS * 24,
+          actual: result.daysSince != null ? Math.round(result.daysSince * 24) : null,
+          deltaPct: null,
+          status: result.status,
+          note: result.note,
+        },
+      ],
+    };
+  } catch (err) {
+    logger.warn({ err }, "audit: secondary pipeline group threw");
+    return {
+      id: "secondary_pipeline",
+      label: `Group 11 — Secondary sheet pipeline freshness (FY${openFy})`,
+      available: false,
+      pendingNote: `Secondary pipeline check failed — check server logs: ${err instanceof Error ? err.message : String(err)}`,
+      checks: [],
+    };
+  }
+}
+
 // ── Entry point ────────────────────────────────────────────────────────────────
 
 // ── Group 10 — Frozen register anchors (independent reconciliation) ──────────
@@ -797,7 +932,7 @@ export async function runFrozenAnchorGroup(): Promise<CheckGroup> {
 }
 
 export async function runExtraGroups(fy: string): Promise<CheckGroup[]> {
-  const [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag, frozenAnchors] =
+  const [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag, frozenAnchors, secondaryPipeline] =
     await Promise.all([
       runTruncationGroup(),
       runReportLogicGroup(fy),
@@ -805,6 +940,7 @@ export async function runExtraGroups(fy: string): Promise<CheckGroup[]> {
       runPendingCrossCheckGroup(),
       runSapLagGroup(),
       runFrozenAnchorGroup(),
+      runSecondaryPipelineGroup(),
     ]);
-  return [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag, frozenAnchors];
+  return [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag, frozenAnchors, secondaryPipeline];
 }

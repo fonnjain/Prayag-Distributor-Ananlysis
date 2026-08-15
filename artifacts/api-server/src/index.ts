@@ -1,6 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
-import { runMigrations } from "@workspace/db";
+import { runMigrations, pool } from "@workspace/db";
 import {
   ensureSeeded,
   syncDashboard,
@@ -35,6 +35,8 @@ import {
   assertHeadCoverage,
 } from "./lib/personRegistry.js";
 import { logCoverage as logCustomerStateHeadCoverage } from "./lib/customerStateHead.js";
+import { loadAndPersistStateDashboard } from "./lib/secondary/stateHeadLoader.js";
+import { currentOpenFy } from "./lib/fyAnchors.js";
 
 const rawPort = process.env["PORT"];
 
@@ -84,6 +86,46 @@ runMigrations()
     void assertHeadCoverage();
     // One-line startup log: how many customer_master rows have a state_head.
     void logCustomerStateHeadCoverage().catch(() => {/* non-fatal */});
+    // ── Secondary sheet pipeline staleness check ──────────────────────────────
+    // If MAX(ingested_at) across ALL members in secondary_head_month is > 2 days
+    // old, the 6-hour secondary dashboard scheduler (wired below in the listen
+    // block) has not run — or has failed every tick since startup.
+    // Emit a loud WARNING so the gap is visible in server logs on every restart.
+    //
+    // Threshold: 2 days ≈ 8 missed scheduler ticks.  A brief restart never
+    // causes a gap this large because the scheduler fires within 5 min of boot.
+    void (async () => {
+      const SECONDARY_PIPELINE_STALE_DAYS = 2;
+      try {
+        const openFy = currentOpenFy();
+        const { rows } = await pool.query<{ latest_at: Date | null }>(
+          `SELECT MAX(ingested_at) AS latest_at FROM secondary_head_month WHERE fy = $1`,
+          [openFy],
+        );
+        const latestAt = rows[0]?.latest_at ?? null;
+        if (latestAt == null) {
+          logger.warn(
+            { fy: openFy },
+            "[secondaryPipeline] startup check: no ingested_at recorded for any FY member — first scheduled sync has not run yet, or secondary_head_month is empty",
+          );
+        } else {
+          const daysSince = (Date.now() - latestAt.getTime()) / 86_400_000;
+          if (daysSince > SECONDARY_PIPELINE_STALE_DAYS) {
+            logger.warn(
+              { fy: openFy, lastIngestAt: latestAt.toISOString(), daysSince: Math.round(daysSince * 10) / 10 },
+              `[secondaryPipeline] STALL DETECTED: FY${openFy} secondary sheet data last ingested ${Math.round(daysSince * 10) / 10} days ago (threshold: ${SECONDARY_PIPELINE_STALE_DAYS} days). The 6-hour secondary dashboard scheduler may have been failing. Check server logs and Sheets API quota.`,
+            );
+          } else {
+            logger.info(
+              { fy: openFy, lastIngestAt: latestAt.toISOString(), daysSince: Math.round(daysSince * 10) / 10 },
+              "[secondaryPipeline] startup check: pipeline is current",
+            );
+          }
+        }
+      } catch (err) {
+        logger.warn({ err }, "[secondaryPipeline] startup staleness check failed (non-fatal)");
+      }
+    })();
   })
   .then(() => {
     app.listen(port, (err) => {
@@ -247,6 +289,46 @@ runMigrations()
     // First run 3 min after startup (after register warm-up), then every 6h.
     setTimeout(() => void warmDistributorSnapshots(), 3 * 60_000).unref();
     setInterval(() => void warmDistributorSnapshots(), 6 * 3_600_000).unref();
+  }
+
+  // ── Secondary dashboard scheduler ─────────────────────────────────────────
+  // Keeps secondary_head_month current for the open FY by re-reading the State
+  // Head Dashboard (Google Sheet) on a 6-hour cadence.  Failures leave the prior
+  // ingested_at unchanged so the staleness check always reflects the LAST
+  // SUCCESSFUL sync, not the last attempted one.
+  //
+  // Only runs for the open FY — closed FYs are frozen and never re-ingested
+  // from the dashboard (their data comes from xlsx uploads).
+  {
+    let secDashSyncInFlight = false;
+    const runSecDashSync = async (): Promise<void> => {
+      if (secDashSyncInFlight) return;
+      secDashSyncInFlight = true;
+      const openFy = currentOpenFy();
+      try {
+        const summary = await loadAndPersistStateDashboard(openFy);
+        const anyFailed = summary.assertions.some((a) => !a.passed);
+        if (anyFailed) {
+          logger.warn(
+            { fy: openFy, assertions: summary.assertions.filter((a) => !a.passed) },
+            "scheduled secondary dashboard sync: validation failed — ingested_at NOT updated",
+          );
+        } else {
+          logger.info(
+            { fy: openFy, rowsRead: summary.rowsRead, dataRows: summary.dataRows },
+            "scheduled secondary dashboard sync: done",
+          );
+        }
+      } catch (err) {
+        logger.error({ err, fy: openFy }, "scheduled secondary dashboard sync: failed");
+      } finally {
+        secDashSyncInFlight = false;
+      }
+    };
+    // First run 5 min after startup (after the register and booking warm-ups
+    // have had time to settle), then every 6 hours.
+    setTimeout(() => void runSecDashSync(), 5 * 60_000).unref();
+    setInterval(() => void runSecDashSync(), 6 * 3_600_000).unref();
   }
 
   // Assert frozen-FY anchors in the background. Any mismatch means something
