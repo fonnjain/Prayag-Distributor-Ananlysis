@@ -1,0 +1,49 @@
+Section C is the most valuable output this framework has produced. Aradhya
+Kedia stopped buying in October 2025 and sold Rs 9.39 Cr from stock over the
+following ten months. The 15 retailers beneath them are stock-out, not 15
+purchase decisions - and nobody noticed for ten months. That is a supply-side
+failure no existing page could see.
+
+Approve #297 (rollup) and #298 (state_canon). Three things first.
+
+1. MAHABIR SALES - the explanation does not hold
+9 stopped retailers, and you say each rolled up "under a different distributor
+with a higher-value primary relationship". B3 is about SECONDARY - which
+distributor the retailer actually bought FROM. Rolling a stopped retailer to a
+distributor they did not buy from attributes the stop to the wrong party.
+
+Print, for those 9: which distributor they bought from in the prior window per
+secondary_sku_line, and which distributor the rollup assigned them to. If
+those differ, the rollup key is wrong.
+
+2. ADD A DESTOCKING ALERT - this is the real finding
+Aradhya Kedia is not a "stopped retailers" story. It is a distributor who
+stopped buying while continuing to sell down inventory.
+
+New alert: distributor with zero primary purchase for >= 3 consecutive months
+while secondary continues. Report the primary gap, the secondary sold from
+stock, and the month secondary starts falling - that is when the stock runs
+out and the retailers beneath them go silent.
+
+This should fire BEFORE the retailers stop, which is the point. Run it
+retrospectively against FY2025-26 and FY2026-27 and print how many
+distributors it catches and when each would first have fired.
+
+3. TERRITORIAL CONCENTRATION
+Sandeep Dadheech carries 40 of 66 stops, Rs 14.25 Cr, across 14 members. That
+warrants its own alert: a State Head whose territory holds a disproportionate
+share of stopped retailers. Propose a threshold.
+
+Note 24 of 66 have no State Head mapped, so the concentration may be higher.
+#298 first, then re-run this.
+
+ON THE CAP - your reading is right
+It is per section, not one total. B-category at 7 is fine.
+
+A-category at 31 is the question, and I suspect the answer is not a threshold.
+A1 (17, below 35%) and A2 (13, zero booking) will overlap heavily - a member
+booking zero is by definition below 35%. Print the overlap. If it is large,
+they should be ONE alert with a severity level, not two.
+
+Do not touch the B1 floor. That is FY2025-26 historical calibration and the
+live page runs on the current year.
