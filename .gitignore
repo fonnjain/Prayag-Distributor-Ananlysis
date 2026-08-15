@@ -59,3 +59,4 @@ artifacts/api-server/uploads/
 attached_assets/.*~
 attached_assets/.*.csv.*~
 attached_assets/*.csv
+uploads/hr_roster.csv
