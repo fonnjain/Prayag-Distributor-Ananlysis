@@ -16,6 +16,7 @@ import DevPortalPage from "@/pages/DevPortalPage";
 import DevApiKeysPage from "@/pages/DevApiKeysPage";
 import DevMastersPage from "@/pages/DevMastersPage";
 import OrgPeoplePage from "@/pages/OrgPeoplePage";
+import OrgCustomersPage from "@/pages/OrgCustomersPage";
 import NotFound from "@/pages/not-found";
 import { DashboardProvider } from "@/data/dashboard-context";
 import { GlobalFilterProvider } from "@/data/global-filter-context";
@@ -49,6 +50,7 @@ function Router() {
         <Route path="/customers" component={CustomersPage} />
         {/* Organisation */}
         <Route path="/org/people" component={OrgPeoplePage} />
+        <Route path="/org/customers" component={OrgCustomersPage} />
         {/* Developer Portal */}
         <Route path="/dev/api" component={DevPortalPage} />
         <Route path="/dev/keys" component={DevApiKeysPage} />

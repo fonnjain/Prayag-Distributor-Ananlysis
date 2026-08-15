@@ -114,7 +114,8 @@ const NAV: NavGroup[] = [
     label: "Organisation",
     icon: Users,
     items: [
-      { id: "org-people", label: "People", path: "/org/people", icon: Users },
+      { id: "org-people",     label: "People",    path: "/org/people",     icon: Users },
+      { id: "org-customers",  label: "Customers", path: "/org/customers",  icon: Store },
     ],
   },
   {
@@ -159,7 +160,9 @@ function activeIds(location: string): { groupId: string; itemId: string } {
   }
   if (location.startsWith("/org")) {
     const grp = NAV.find((g) => g.id === "org")!;
-    return { groupId: "org", itemId: grp.items[0]!.id };
+    const slug = location.replace(/^\/org\//, "").split("?")[0];
+    const item = grp.items.find((i) => i.path === `/org/${slug}`) ?? grp.items[0];
+    return { groupId: "org", itemId: item!.id };
   }
   if (location.startsWith("/dev")) {
     const slug = location.replace(/^\/dev\/?/, "").split("?")[0] || "api-portal";

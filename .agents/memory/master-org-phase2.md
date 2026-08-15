@@ -1,9 +1,9 @@
 ---
-name: Master Org Phase 2 — people management
-description: Routes, impact gate, and verification protocol for the Phase 2 organisation people page.
+name: Master Org Phase 2+3 — people and customer management
+description: Routes, impact gate, customer reassignment, and verification protocol for the Phase 2/3 organisation pages.
 ---
 
-## Routes (artifacts/api-server/src/routes/masterOrg.ts)
+## Routes — Phase 2 (people)
 
 - `GET /api/master/designations` — 14 designations ordered by rank
 - `GET /api/master/people` — paginated list; params: q, active, designation_id, page, limit
@@ -12,36 +12,54 @@ description: Routes, impact gate, and verification protocol for the Phase 2 orga
 - `PATCH /api/master/people/:id` — edit (name, employee_code, designation_id, reports_to_person_id); reports_to change requires acknowledgedSubTree + acknowledgedCustomers
 - `POST /api/master/people/:id/deactivate` — requires acknowledgedSubTree + acknowledgedCustomers; re-verified server-side
 - `POST /api/master/people/:id/reactivate` — no impact gate needed
-- `GET /api/master/unresolved-links` — 14 seed distributor names, 372 lost links
+- `GET /api/master/unresolved-links` — 13 rows (was 14; Chhinamastike split merged)
+- `POST /api/master/unresolved-links/:id/resolve` — mark mapped or confirmed_gone
 - `GET /api/master/verify/inactive-managers` — active people reporting to inactive managers
 
-## Impact gate protocol
+## Routes — Phase 3 (customers)
+
+- `GET /api/master/customers` — paginated list; params: q, type, page, limit; includes current (open) assignment
+- `GET /api/master/customers/by-head` — FY2025-26 totals from sale_line grouped by head_canon **(MUST be declared before /:id)**
+- `GET /api/master/customers/:id` — detail + current + history + links
+- `PATCH /api/master/customers/:id/assign` — reassign with effective dating (closes old row, opens new)
+
+## Impact gate protocol (people)
 
 1. Frontend calls GET /impact → shows modal with exact numbers
 2. User clicks confirm → POST /deactivate (or PATCH with reports_to) with `{ acknowledgedSubTree, acknowledgedCustomers }`
 3. Server re-runs impact queries; if numbers changed → 409 (force re-preview)
 4. Missing acknowledgment fields → 422
 
-**Why:** "nothing may save until confirmed" requirement. The acknowledged counts in the body ensure the user saw the real numbers before the mutation happened.
+## Effective dating protocol (customers)
 
-## Verification 6 lifecycle
+- Old open assignment: `effective_to = CURRENT_DATE`
+- New assignment: `effective_from = CURRENT_DATE`
+- FY2025-26 queries use `sale_line.head_canon` — NEVER touched by customer_assignment edits
+- `/by-head` result is invariant to any reassignment (verified: diff empty)
 
-- Returned 0 at Phase 1 (all 179 active, no inactive managers exist)
-- After deactivating Anant Singh (person_id=9): count=10, all 10 direct reports orphaned
-- After reactivating: back to 0
-- The check is at GET /api/master/verify/inactive-managers — call it after any deactivation
+## Seed unresolved links (migration 031 + 032)
 
-## seed_unresolved_link (migration 031)
+13 rows in `seed_unresolved_link`. Two auto-resolved:
+- DIST#39381 "Prayag Sale Corporation NE" — xlsx truncated name at 25 chars; 109 links
+- DIST#9236 "Chhinamastike Sanitation Pvt. Ltd." — xlsx split name at comma; 174 link rows (different retailer sets in each half)
+- 195 customer_link rows actually recovered (88 xlsx entries reference retailers absent from customer table — structural)
 
-14 distributor names from the seed that matched no customer row. 372 links lost.
-Phase 3 UI will surface these for operator resolution (map to customer_id or confirm_gone).
+## Verification anchors (Aug 2026)
 
-## Verified impact numbers (Aug 2026)
+Phase 2 deactivation test — Anant Singh (person_id=9): subTree=10, SH=782, TM=5, total=787
+Phase 3 by-head test — before/after DIST#31809 reassignment: diff=empty (13 head rows unchanged)
 
-Anant Singh (person_id=9): subTree=10, SH=782, TM=5, total=787
+Effective dating in DB after reassignment:
+- Old row: effective_from=2026-08-15, effective_to=2026-08-15 (closed same day)
+- New row: effective_from=2026-08-15, effective_to=NULL (open)
 
-## change_log fields written on deactivation
+## change_log fields on deactivation
 
 - `is_active`: old=true → new=false
 - `deactivation_impact_acknowledged`: new=JSON{subTreeCount, totalCustomersAffected}
 - On reactivate: `is_active`: old=false → new=true
+
+## TypeScript gotcha in masterOrg.ts
+
+All early-exit `return res.status(N).json(...)` calls inside async handlers must use `return void res.status(N).json(...)`.
+Plain `return res.json(x)` mixed with paths that end without return → TS7030.

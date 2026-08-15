@@ -1,4 +1,4 @@
-// Master Organisation — Phase 2 people management.
+// Master Organisation — Phase 2 people management + Phase 3 customer management.
 //
 // Rules enforced here:
 // - No hard deletes on person. Deactivation sets is_active=false.
@@ -8,6 +8,9 @@
 //   shown; the server re-verifies and rejects on mismatch (HTTP 409).
 // - Cycle guard: a new reports_to is rejected if it is a descendant of the
 //   person being edited (would create a loop in the hierarchy).
+// - Customer reassignment uses effective dating: the old assignment row is
+//   closed (effective_to = today) and a new row is opened. This keeps
+//   historical FY analytics stable — sale_line.head_canon is never touched.
 import { Router } from "express";
 import { pool } from "@workspace/db";
 import { isAdminToken } from "../lib/adminAuth.js";
@@ -30,11 +33,11 @@ function requireAdmin(req: any, res: any): boolean {
 
 router.get("/master/designations", async (_req, res) => {
   try {
-    const { rows } = await pool.query<{
-      designation_id: number;
-      name: string;
-      rank: number;
-    }>(`SELECT designation_id, name, rank FROM designation ORDER BY rank, name`);
+    const { rows } = await pool.query(
+      `SELECT designation_id, name, rank
+       FROM designation
+       ORDER BY rank`,
+    );
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -42,314 +45,219 @@ router.get("/master/designations", async (_req, res) => {
 });
 
 // ── GET /api/master/people ────────────────────────────────────────────────────
-// Query params: q (text search), active (true|false|all), designation_id, page, limit
+// Paginated list of people with optional search and filters.
+// Query params: q (name search), active (true/false/all), designation_id, page, limit
 
 router.get("/master/people", async (req, res) => {
   try {
-    const q = (req.query.q as string | undefined)?.trim() ?? "";
-    const active = req.query.active as string | undefined;
-    const designationId = req.query.designation_id
+    const q = String(req.query.q ?? "").trim();
+    const activeFilter = String(req.query.active ?? "all");
+    const desigId = req.query.designation_id
       ? Number(req.query.designation_id)
       : null;
-    const page = Math.max(1, Number(req.query.page ?? 1));
-    const limit = Math.min(200, Math.max(1, Number(req.query.limit ?? 50)));
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
     const offset = (page - 1) * limit;
 
-    const conditions: string[] = [];
+    const where: string[] = [];
     const params: unknown[] = [];
-    let idx = 1;
 
     if (q) {
-      conditions.push(`p.name ILIKE $${idx++}`);
       params.push(`%${q}%`);
+      where.push(`p.name ILIKE $${params.length}`);
     }
-    if (active === "true") {
-      conditions.push(`p.is_active = true`);
-    } else if (active === "false") {
-      conditions.push(`p.is_active = false`);
-    }
-    if (designationId !== null) {
-      conditions.push(`p.designation_id = $${idx++}`);
-      params.push(designationId);
+    if (activeFilter === "true") where.push("p.is_active = true");
+    else if (activeFilter === "false") where.push("p.is_active = false");
+
+    if (desigId !== null) {
+      params.push(desigId);
+      where.push(`p.designation_id = $${params.length}`);
     }
 
-    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const wc = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
-    const { rows } = await pool.query<{
-      person_id: number;
-      name: string;
-      employee_code: string | null;
-      designation_id: number | null;
-      designation_name: string | null;
-      designation_rank: number | null;
-      reports_to_person_id: number | null;
-      reports_to_name: string | null;
-      state_head_person_id: number | null;
-      is_state_head: boolean;
-      is_active: boolean;
-      direct_reports: number;
-      customers_as_sh: number;
-      customers_as_tm: number;
-      total: number;
-    }>(
-      `SELECT
-         p.person_id,
-         p.name,
-         p.employee_code,
-         p.designation_id,
-         d.name            AS designation_name,
-         d.rank            AS designation_rank,
-         p.reports_to_person_id,
-         mgr.name          AS reports_to_name,
-         p.state_head_person_id,
-         p.is_state_head,
-         p.is_active,
-         (SELECT COUNT(*) FROM person r WHERE r.reports_to_person_id = p.person_id)::int
-                           AS direct_reports,
-         (SELECT COUNT(*) FROM customer_assignment ca
-          WHERE ca.state_head_person_id = p.person_id AND ca.effective_to IS NULL)::int
-                           AS customers_as_sh,
-         (SELECT COUNT(*) FROM customer_assignment ca
-          WHERE ca.person_id = p.person_id AND ca.effective_to IS NULL)::int
-                           AS customers_as_tm,
-         COUNT(*) OVER()::int AS total
-       FROM person p
-       LEFT JOIN designation d  ON d.designation_id = p.designation_id
-       LEFT JOIN person mgr     ON mgr.person_id = p.reports_to_person_id
-       ${where}
-       ORDER BY p.is_active DESC, d.rank NULLS LAST, p.name
-       LIMIT ${limit} OFFSET ${offset}`,
-      params,
-    );
+    const [countRes, dataRes] = await Promise.all([
+      pool.query(`SELECT COUNT(*) FROM person p ${wc}`, params),
+      pool.query(
+        `SELECT p.person_id,
+                p.name,
+                p.employee_code,
+                p.is_active,
+                p.is_state_head,
+                p.headquarter,
+                d.name AS designation_name,
+                d.rank AS designation_rank,
+                (SELECT COUNT(*) FROM person sub WHERE sub.reports_to_person_id = p.person_id) AS direct_report_count,
+                (SELECT COUNT(*) FROM customer_assignment ca WHERE ca.state_head_person_id = p.person_id AND ca.effective_to IS NULL) AS customers_as_state_head,
+                (SELECT COUNT(*) FROM customer_assignment ca WHERE ca.person_id = p.person_id AND ca.effective_to IS NULL) AS customers_as_tm
+         FROM person p
+         LEFT JOIN designation d ON d.designation_id = p.designation_id
+         ${wc}
+         ORDER BY p.is_active DESC, d.rank ASC NULLS LAST, p.name
+         LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+        [...params, limit, offset],
+      ),
+    ]);
 
-    const total = rows[0]?.total ?? 0;
-    res.json({
-      people: rows.map(({ total: _t, ...r }) => r),
-      total,
-      page,
-      limit,
-      pages: Math.ceil(total / limit),
-    });
+    res.json({ total: Number(countRes.rows[0].count), people: dataRes.rows });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
 });
 
 // ── GET /api/master/people/:id ────────────────────────────────────────────────
-// Full detail: person + reporting chain up + direct reports list + territories.
+// Full detail for one person: identity, reporting chain, direct reports,
+// territories, customer-scope stats, and change log.
 
 router.get("/master/people/:id", async (req, res) => {
-  const personId = Number(req.params.id);
-  if (!Number.isFinite(personId)) {
-    res.status(400).json({ error: "Invalid id" });
-    return;
-  }
   try {
-    const { rows } = await pool.query<{
-      person_id: number;
-      name: string;
-      employee_code: string | null;
-      designation_id: number | null;
-      designation_name: string | null;
-      designation_rank: number | null;
-      reports_to_person_id: number | null;
-      reports_to_name: string | null;
-      state_head_person_id: number | null;
-      state_head_name: string | null;
-      is_state_head: boolean;
-      is_active: boolean;
-      direct_reports: number;
-      customers_as_sh: number;
-      customers_as_tm: number;
-      created_at: string;
-    }>(
-      `SELECT
-         p.person_id,
-         p.name,
-         p.employee_code,
-         p.designation_id,
-         d.name            AS designation_name,
-         d.rank            AS designation_rank,
-         p.reports_to_person_id,
-         mgr.name          AS reports_to_name,
-         p.state_head_person_id,
-         sh.name           AS state_head_name,
-         p.is_state_head,
-         p.is_active,
-         (SELECT COUNT(*) FROM person r WHERE r.reports_to_person_id = p.person_id)::int
-                           AS direct_reports,
-         (SELECT COUNT(*) FROM customer_assignment ca
-          WHERE ca.state_head_person_id = p.person_id AND ca.effective_to IS NULL)::int
-                           AS customers_as_sh,
-         (SELECT COUNT(*) FROM customer_assignment ca
-          WHERE ca.person_id = p.person_id AND ca.effective_to IS NULL)::int
-                           AS customers_as_tm,
-         p.created_at
-       FROM person p
-       LEFT JOIN designation d  ON d.designation_id = p.designation_id
-       LEFT JOIN person mgr     ON mgr.person_id = p.reports_to_person_id
-       LEFT JOIN person sh      ON sh.person_id = p.state_head_person_id
-       WHERE p.person_id = $1`,
-      [personId],
-    );
-    if (!rows.length) {
-      res.status(404).json({ error: "Person not found" });
-      return;
-    }
-    const person = rows[0]!;
+    const personId = Number(req.params.id);
 
-    // Direct reports list
-    const { rows: directReports } = await pool.query<{
-      person_id: number;
-      name: string;
-      designation_name: string | null;
-      is_active: boolean;
-    }>(
-      `SELECT p.person_id, p.name, d.name AS designation_name, p.is_active
-       FROM person p
-       LEFT JOIN designation d ON d.designation_id = p.designation_id
-       WHERE p.reports_to_person_id = $1
-       ORDER BY p.name`,
-      [personId],
-    );
-
-    // Reporting chain upward (up to 8 levels)
-    const { rows: chainRows } = await pool.query<{
-      person_id: number;
-      name: string;
-      designation_name: string | null;
-      level: number;
-    }>(
-      `WITH RECURSIVE chain AS (
-         SELECT person_id, name, designation_id, reports_to_person_id, 1 AS level
-         FROM person WHERE person_id = (SELECT reports_to_person_id FROM person WHERE person_id = $1)
-         UNION ALL
-         SELECT p.person_id, p.name, p.designation_id, p.reports_to_person_id, c.level + 1
-         FROM person p JOIN chain c ON p.person_id = c.reports_to_person_id
-         WHERE c.level < 8
-       )
-       SELECT c.person_id, c.name, d.name AS designation_name, c.level
-       FROM chain c
-       LEFT JOIN designation d ON d.designation_id = c.designation_id
-       ORDER BY c.level`,
-      [personId],
-    );
-
-    // Territories
-    const { rows: territories } = await pool.query<{
-      territory_id: number;
-      name: string;
-      parent_name: string | null;
-      effective_from: string;
-      effective_to: string | null;
-    }>(
-      `SELECT t.territory_id, t.name, par.name AS parent_name,
-              pt.effective_from::text, pt.effective_to::text
-       FROM person_territory pt
-       JOIN territory t ON t.territory_id = pt.territory_id
-       LEFT JOIN territory par ON par.territory_id = t.parent_territory_id
-       WHERE pt.person_id = $1
-       ORDER BY pt.effective_from`,
-      [personId],
-    );
-
-    // Recent change log
-    const { rows: changeLog } = await pool.query<{
-      id: number;
-      field: string;
-      old_value: string | null;
-      new_value: string | null;
-      changed_by: string | null;
-      changed_at: string;
-    }>(
-      `SELECT id, field, old_value, new_value, changed_by, changed_at::text
-       FROM change_log
-       WHERE entity_type = 'person' AND entity_id = $1
-       ORDER BY changed_at DESC LIMIT 20`,
-      [String(personId)],
-    );
-
-    res.json({
-      person,
-      directReports,
-      reportingChain: chainRows,
-      territories,
-      changeLog,
-    });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// ── GET /api/master/people/:id/impact ─────────────────────────────────────────
-// Returns the full impact preview for deactivation OR a reports_to change.
-// Always call this before any mutation that can affect hierarchy or customers.
-
-router.get("/master/people/:id/impact", async (req, res) => {
-  const personId = Number(req.params.id);
-  if (!Number.isFinite(personId)) {
-    res.status(400).json({ error: "Invalid id" });
-    return;
-  }
-  try {
-    const [personResult, directReportsResult, subTreeResult, asShResult, asTmResult] =
+    const [personRes, directRes, chainRes, terrRes, logRes] =
       await Promise.all([
-        pool.query<{ person_id: number; name: string; is_active: boolean }>(
-          `SELECT person_id, name, is_active FROM person WHERE person_id = $1`,
+        pool.query(
+          `SELECT p.person_id, p.name, p.employee_code, p.is_active,
+                  p.is_state_head, p.headquarter, p.order_type, p.source,
+                  d.designation_id, d.name AS designation_name,
+                  mgr.person_id AS manager_id, mgr.name AS manager_name,
+                  sh.person_id  AS state_head_id, sh.name AS state_head_name,
+                  (SELECT COUNT(*) FROM customer_assignment ca
+                   WHERE ca.state_head_person_id = p.person_id AND ca.effective_to IS NULL
+                  ) AS customers_as_state_head,
+                  (SELECT COUNT(*) FROM customer_assignment ca
+                   WHERE ca.person_id = p.person_id AND ca.effective_to IS NULL
+                  ) AS customers_as_tm
+           FROM person p
+           LEFT JOIN designation  d   ON d.designation_id = p.designation_id
+           LEFT JOIN person       mgr ON mgr.person_id    = p.reports_to_person_id
+           LEFT JOIN person       sh  ON sh.person_id     = p.state_head_person_id
+           WHERE p.person_id = $1`,
           [personId],
         ),
-        // Direct reports (names, not just count)
-        pool.query<{ person_id: number; name: string; designation_name: string | null }>(
-          `SELECT p.person_id, p.name, d.name AS designation_name
+        // Direct reports
+        pool.query(
+          `SELECT p.person_id, p.name, p.is_active, d.name AS designation_name
            FROM person p
            LEFT JOIN designation d ON d.designation_id = p.designation_id
            WHERE p.reports_to_person_id = $1
            ORDER BY p.name`,
           [personId],
         ),
-        // Full subtree count (all descendants, not just direct)
-        pool.query<{ sub_tree_count: number }>(
-          `WITH RECURSIVE subtree AS (
-             SELECT person_id FROM person WHERE reports_to_person_id = $1
+        // Reporting chain upward (up to 10 levels)
+        pool.query(
+          `WITH RECURSIVE chain AS (
+             SELECT p.person_id, p.name, p.reports_to_person_id, 1 AS depth
+             FROM person p WHERE p.person_id = $1
              UNION ALL
-             SELECT p.person_id FROM person p
-             JOIN subtree s ON p.reports_to_person_id = s.person_id
+             SELECT p.person_id, p.name, p.reports_to_person_id, c.depth + 1
+             FROM person p JOIN chain c ON c.reports_to_person_id = p.person_id
+             WHERE c.depth < 10
            )
-           SELECT COUNT(*)::int AS sub_tree_count FROM subtree`,
+           SELECT person_id, name, depth FROM chain
+           WHERE person_id <> $1
+           ORDER BY depth`,
           [personId],
         ),
-        // Customers where this person is state head (active assignments)
-        pool.query<{ count: number }>(
-          `SELECT COUNT(*)::int AS count FROM customer_assignment
-           WHERE state_head_person_id = $1 AND effective_to IS NULL`,
+        // Territories
+        pool.query(
+          `SELECT t.territory_id, t.name, t.type, pt.effective_from::text, pt.effective_to::text
+           FROM person_territory pt
+           JOIN territory t ON t.territory_id = pt.territory_id
+           WHERE pt.person_id = $1 AND pt.effective_to IS NULL
+           ORDER BY t.name`,
           [personId],
         ),
-        // Customers where this person is the assigned TM (active assignments)
-        pool.query<{ count: number }>(
-          `SELECT COUNT(*)::int AS count FROM customer_assignment
-           WHERE person_id = $1 AND effective_to IS NULL`,
-          [personId],
+        // Change log
+        pool.query(
+          `SELECT field, old_value, new_value, changed_by, changed_at::text
+           FROM change_log
+           WHERE entity_type = 'person' AND entity_id = $1
+           ORDER BY changed_at DESC
+           LIMIT 50`,
+          [String(personId)],
         ),
       ]);
 
-    if (!personResult.rows.length) {
-      res.status(404).json({ error: "Person not found" });
-      return;
-    }
+    if (!personRes.rows[0])
+      return void res.status(404).json({ error: "Person not found" });
 
-    const directReports = directReportsResult.rows;
-    const subTreeCount = subTreeResult.rows[0]!.sub_tree_count;
-    const customersAsStateHead = asShResult.rows[0]!.count;
-    const customersAsTm = asTmResult.rows[0]!.count;
-    const totalCustomersAffected = customersAsStateHead + customersAsTm;
+    const p = personRes.rows[0];
+    const csh = Number(p.customers_as_state_head);
+    const ctm = Number(p.customers_as_tm);
 
     res.json({
-      person: personResult.rows[0]!,
-      directReports,          // array — shown by name in the modal
-      subTreeCount,            // includes direct reports + all descendants
-      customersAsStateHead,    // assignments where this person = state_head_person_id
-      customersAsTm,           // assignments where this person = person_id
-      totalCustomersAffected,  // sum of the two above
+      person: p,
+      directReports: directRes.rows,
+      reportingChain: chainRes.rows,
+      territories: terrRes.rows,
+      changeLog: logRes.rows,
+      customerScope: {
+        asStateHead: csh,
+        asTm: ctm,
+        total: csh + ctm,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── GET /api/master/people/:id/impact ────────────────────────────────────────
+// Pre-mutation impact check. Returns the full sub-tree count and customer
+// counts that must be acknowledged before deactivation or manager reassignment.
+
+router.get("/master/people/:id/impact", async (req, res) => {
+  try {
+    const personId = Number(req.params.id);
+
+    // Full subtree (recursive, not just direct reports)
+    const treeRes = await pool.query(
+      `WITH RECURSIVE tree AS (
+         SELECT person_id FROM person WHERE reports_to_person_id = $1
+         UNION ALL
+         SELECT p.person_id FROM person p JOIN tree t ON t.person_id = p.reports_to_person_id
+       )
+       SELECT person_id FROM tree`,
+      [personId],
+    );
+
+    const subTreeCount = treeRes.rows.length;
+    const subTreeIds = treeRes.rows.map((r: { person_id: number }) => r.person_id);
+
+    // Direct reports (names for display)
+    const directRes = await pool.query(
+      `SELECT person_id, name FROM person WHERE reports_to_person_id = $1 ORDER BY name`,
+      [personId],
+    );
+
+    // Customers assigned as state head or TM (open assignments only)
+    const custRes = await pool.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE ca.state_head_person_id = $1) AS as_state_head,
+         COUNT(*) FILTER (WHERE ca.person_id = $1)            AS as_tm
+       FROM customer_assignment ca
+       WHERE ca.effective_to IS NULL
+         AND (ca.state_head_person_id = $1 OR ca.person_id = $1)`,
+      [personId],
+    );
+
+    const csh = Number(custRes.rows[0]?.as_state_head ?? 0);
+    const ctm = Number(custRes.rows[0]?.as_tm ?? 0);
+
+    // Person name
+    const nameRes = await pool.query(
+      `SELECT name FROM person WHERE person_id = $1`,
+      [personId],
+    );
+
+    res.json({
+      person: nameRes.rows[0] ?? null,
+      directReports: directRes.rows,
+      subTreeCount,
+      subTreeIds,
+      customersAsStateHead: csh,
+      customersAsTm: ctm,
+      totalCustomersAffected: csh + ctm,
     });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -357,379 +265,263 @@ router.get("/master/people/:id/impact", async (req, res) => {
 });
 
 // ── PATCH /api/master/people/:id ──────────────────────────────────────────────
-// Edits: name, employee_code, designation_id, reports_to_person_id.
-// Changing reports_to REQUIRES acknowledgedSubTree + acknowledgedCustomers in body.
-// is_active is NOT edited here — use /deactivate or /reactivate.
+// Edit name, employee_code, designation_id, reports_to_person_id.
+// Changing reports_to requires the client to pass acknowledged sub-tree
+// and customer counts from a prior /impact call; server re-verifies.
 
 router.patch("/master/people/:id", async (req, res) => {
   if (!requireAdmin(req, res)) return;
-
-  const personId = Number(req.params.id);
-  if (!Number.isFinite(personId)) {
-    res.status(400).json({ error: "Invalid id" });
-    return;
-  }
-
-  const {
-    name,
-    employee_code,
-    designation_id,
-    reports_to_person_id,
-    acknowledgedSubTree,
-    acknowledgedCustomers,
-    changed_by,
-  } = req.body as {
-    name?: string;
-    employee_code?: string | null;
-    designation_id?: number | null;
-    reports_to_person_id?: number | null;
-    acknowledgedSubTree?: number;
-    acknowledgedCustomers?: number;
-    changed_by?: string;
-  };
-
-  const client = await pool.connect();
   try {
-    await client.query("BEGIN");
+    const personId = Number(req.params.id);
+    const {
+      name,
+      employee_code,
+      designation_id,
+      reports_to_person_id,
+      acknowledgedSubTree,
+      acknowledgedCustomers,
+      changed_by,
+    } = req.body as {
+      name?: string;
+      employee_code?: string;
+      designation_id?: number | null;
+      reports_to_person_id?: number | null;
+      acknowledgedSubTree?: number;
+      acknowledgedCustomers?: number;
+      changed_by?: string;
+    };
 
-    // Fetch current state
-    const { rows: current } = await client.query<{
-      person_id: number;
-      name: string;
-      employee_code: string | null;
-      designation_id: number | null;
-      reports_to_person_id: number | null;
-      is_active: boolean;
-    }>(
-      `SELECT person_id, name, employee_code, designation_id, reports_to_person_id, is_active
-       FROM person WHERE person_id = $1 FOR UPDATE`,
+    // Read current state
+    const current = await pool.query(
+      `SELECT name, employee_code, designation_id, reports_to_person_id
+       FROM person WHERE person_id = $1`,
       [personId],
     );
-    if (!current.length) {
-      await client.query("ROLLBACK");
-      res.status(404).json({ error: "Person not found" });
-      return;
-    }
-    const cur = current[0]!;
+    if (!current.rows[0])
+      return void res.status(404).json({ error: "Person not found" });
+    const prev = current.rows[0];
 
-    // If reports_to is changing, require impact acknowledgment + cycle check
-    const newReportsTo = reports_to_person_id !== undefined ? reports_to_person_id : cur.reports_to_person_id;
+    // If reports_to is changing, require impact acknowledgment
     const reportsToChanging =
       reports_to_person_id !== undefined &&
-      reports_to_person_id !== cur.reports_to_person_id;
+      reports_to_person_id !== prev.reports_to_person_id;
 
     if (reportsToChanging) {
       if (acknowledgedSubTree === undefined || acknowledgedCustomers === undefined) {
-        await client.query("ROLLBACK");
-        res.status(422).json({
+        return void res.status(422).json({
           error:
-            "Changing reports_to requires acknowledgedSubTree and acknowledgedCustomers " +
-            "from the /impact preview to be included in the request body.",
+            "Changing reports_to requires acknowledgedSubTree and acknowledgedCustomers from /impact",
         });
-        return;
       }
 
-      // Re-verify the impact numbers match what the client acknowledged
-      const [subTreeRes, custRes] = await Promise.all([
-        client.query<{ n: number }>(
-          `WITH RECURSIVE sub AS (
+      // Cycle guard
+      if (reports_to_person_id !== null) {
+        const cycleCheck = await pool.query(
+          `WITH RECURSIVE tree AS (
              SELECT person_id FROM person WHERE reports_to_person_id = $1
              UNION ALL
-             SELECT p.person_id FROM person p JOIN sub s ON p.reports_to_person_id = s.person_id
+             SELECT p.person_id FROM person p JOIN tree t ON t.person_id = p.reports_to_person_id
            )
-           SELECT COUNT(*)::int AS n FROM sub`,
-          [personId],
-        ),
-        client.query<{ n: number }>(
-          `SELECT (
-             (SELECT COUNT(*) FROM customer_assignment WHERE state_head_person_id = $1 AND effective_to IS NULL) +
-             (SELECT COUNT(*) FROM customer_assignment WHERE person_id = $1 AND effective_to IS NULL)
-           )::int AS n`,
-          [personId],
-        ),
-      ]);
-      const actualSubTree = subTreeRes.rows[0]!.n;
-      const actualCustomers = custRes.rows[0]!.n;
-      if (actualSubTree !== acknowledgedSubTree || actualCustomers !== acknowledgedCustomers) {
-        await client.query("ROLLBACK");
-        res.status(409).json({
-          error:
-            "Impact has changed since preview — please re-fetch /impact and confirm again.",
-          current: { subTreeCount: actualSubTree, totalCustomersAffected: actualCustomers },
-        });
-        return;
-      }
-
-      // Cycle guard: ensure newReportsTo is not a descendant of personId
-      if (newReportsTo !== null) {
-        const { rows: cycleCheck } = await client.query<{ found: boolean }>(
-          `WITH RECURSIVE sub AS (
-             SELECT person_id FROM person WHERE reports_to_person_id = $1
-             UNION ALL
-             SELECT p.person_id FROM person p JOIN sub s ON p.reports_to_person_id = s.person_id
-           )
-           SELECT EXISTS(SELECT 1 FROM sub WHERE person_id = $2) AS found`,
-          [personId, newReportsTo],
+           SELECT 1 FROM tree WHERE person_id = $2 LIMIT 1`,
+          [personId, reports_to_person_id],
         );
-        if (cycleCheck[0]!.found) {
-          await client.query("ROLLBACK");
-          res.status(422).json({
-            error:
-              "Cannot set reports_to: that person is already in this person's reporting subtree. " +
-              "This would create a cycle.",
-          });
-          return;
-        }
+        if (cycleCheck.rowCount)
+          return void res.status(400).json({ error: "Cycle detected: new manager is a descendant of this person" });
       }
-    }
 
-    // Build update fields
-    const updates: string[] = [];
-    const updateParams: unknown[] = [];
-    const changeEntries: Array<{ field: string; old_value: string | null; new_value: string | null }> = [];
-    let pi = 1;
+      // Re-verify impact
+      const impactRes = await pool.query(
+        `WITH RECURSIVE tree AS (
+           SELECT person_id FROM person WHERE reports_to_person_id = $1
+           UNION ALL
+           SELECT p.person_id FROM person p JOIN tree t ON t.person_id = p.reports_to_person_id
+         )
+         SELECT COUNT(*) AS sub_tree FROM tree`,
+        [personId],
+      );
+      const custRes = await pool.query(
+        `SELECT COUNT(*) AS cust FROM customer_assignment
+         WHERE effective_to IS NULL
+           AND (state_head_person_id = $1 OR person_id = $1)`,
+        [personId],
+      );
+      const liveSubTree = Number(impactRes.rows[0].sub_tree);
+      const liveCust = Number(custRes.rows[0].cust);
 
-    const addField = (
-      col: string,
-      oldVal: unknown,
-      newVal: unknown,
-    ) => {
-      if (newVal !== undefined && String(newVal ?? "") !== String(oldVal ?? "")) {
-        updates.push(`${col} = $${pi++}`);
-        updateParams.push(newVal ?? null);
-        changeEntries.push({
-          field: col,
-          old_value: oldVal == null ? null : String(oldVal),
-          new_value: newVal == null ? null : String(newVal),
+      if (liveSubTree !== acknowledgedSubTree || liveCust !== acknowledgedCustomers) {
+        return void res.status(409).json({
+          error: "Impact has changed since preview — please re-fetch /impact and confirm again.",
+          current: { subTreeCount: liveSubTree, totalCustomersAffected: liveCust },
         });
       }
-    };
-
-    addField("name", cur.name, name?.trim() || undefined);
-    addField("employee_code", cur.employee_code, employee_code !== undefined ? (employee_code?.trim() || null) : undefined);
-    addField("designation_id", cur.designation_id, designation_id !== undefined ? designation_id : undefined);
-    addField("reports_to_person_id", cur.reports_to_person_id, reports_to_person_id !== undefined ? reports_to_person_id : undefined);
-
-    if (!updates.length) {
-      await client.query("ROLLBACK");
-      res.status(200).json({ message: "No changes" });
-      return;
     }
 
-    updates.push(`updated_at = NOW()`);
+    // Apply updates and write change log
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
 
-    await client.query(
-      `UPDATE person SET ${updates.join(", ")} WHERE person_id = $${pi}`,
-      [...updateParams, personId],
-    );
+      const fields: { col: string; val: unknown }[] = [];
+      if (name !== undefined && name !== prev.name) fields.push({ col: "name", val: name });
+      if (employee_code !== undefined && employee_code !== prev.employee_code)
+        fields.push({ col: "employee_code", val: employee_code });
+      if (designation_id !== undefined && designation_id !== prev.designation_id)
+        fields.push({ col: "designation_id", val: designation_id });
+      if (reportsToChanging)
+        fields.push({ col: "reports_to_person_id", val: reports_to_person_id });
 
-    // Write change_log entries
-    for (const entry of changeEntries) {
+      if (fields.length === 0) {
+        await client.query("ROLLBACK");
+        return void res.json({ success: true, changed: false });
+      }
+
+      const setClauses = fields
+        .map((f, i) => `${f.col} = $${i + 2}`)
+        .join(", ");
       await client.query(
-        `INSERT INTO change_log (entity_type, entity_id, field, old_value, new_value, changed_by)
-         VALUES ('person', $1, $2, $3, $4, $5)`,
-        [String(personId), entry.field, entry.old_value, entry.new_value, changed_by ?? null],
+        `UPDATE person SET ${setClauses} WHERE person_id = $1`,
+        [personId, ...fields.map((f) => f.val)],
       );
+
+      for (const f of fields) {
+        await client.query(
+          `INSERT INTO change_log (entity_type, entity_id, field, old_value, new_value, changed_by)
+           VALUES ('person', $1, $2, $3, $4, $5)`,
+          [
+            String(personId),
+            f.col,
+            String((prev as any)[f.col] ?? ""),
+            String(f.val ?? ""),
+            changed_by ?? "operator",
+          ],
+        );
+      }
+
+      await client.query("COMMIT");
+      res.json({ success: true, changed: true });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
     }
-
-    await client.query("COMMIT");
-
-    // Return updated person
-    const { rows: updated } = await pool.query(
-      `SELECT p.*, d.name AS designation_name FROM person p
-       LEFT JOIN designation d ON d.designation_id = p.designation_id
-       WHERE p.person_id = $1`,
-      [personId],
-    );
-    res.json({ person: updated[0]! });
   } catch (err) {
-    await client.query("ROLLBACK");
     res.status(500).json({ error: String(err) });
-  } finally {
-    client.release();
   }
 });
 
 // ── POST /api/master/people/:id/deactivate ────────────────────────────────────
-// Body: { acknowledgedSubTree, acknowledgedCustomers, changed_by }
-// Server re-verifies impact numbers match; rejects with 409 if they changed.
+// Deactivate a person. Refuses to proceed unless the client acknowledges the
+// exact sub-tree count and customer count from a prior /impact call.
 
 router.post("/master/people/:id/deactivate", async (req, res) => {
   if (!requireAdmin(req, res)) return;
-
-  const personId = Number(req.params.id);
-  if (!Number.isFinite(personId)) {
-    res.status(400).json({ error: "Invalid id" });
-    return;
-  }
-
-  const {
-    acknowledgedSubTree,
-    acknowledgedCustomers,
-    changed_by,
-  } = req.body as {
-    acknowledgedSubTree: number;
-    acknowledgedCustomers: number;
-    changed_by?: string;
-  };
-
-  if (acknowledgedSubTree === undefined || acknowledgedCustomers === undefined) {
-    res.status(422).json({
-      error:
-        "Deactivation requires acknowledgedSubTree and acknowledgedCustomers " +
-        "from the /impact preview. Fetch /impact, show the user the counts, " +
-        "and include their acknowledged values here.",
-    });
-    return;
-  }
-
-  const client = await pool.connect();
   try {
-    await client.query("BEGIN");
+    const personId = Number(req.params.id);
+    const { acknowledgedSubTree, acknowledgedCustomers, changed_by } =
+      req.body as {
+        acknowledgedSubTree?: number;
+        acknowledgedCustomers?: number;
+        changed_by?: string;
+      };
 
-    const { rows: current } = await client.query<{
-      is_active: boolean;
-      name: string;
-    }>(
-      `SELECT is_active, name FROM person WHERE person_id = $1 FOR UPDATE`,
+    if (acknowledgedSubTree === undefined || acknowledgedCustomers === undefined) {
+      return void res.status(422).json({
+        error:
+          "Must pass acknowledgedSubTree and acknowledgedCustomers (from /impact) to confirm awareness of impact.",
+      });
+    }
+
+    // Re-verify impact server-side
+    const impactRes = await pool.query(
+      `WITH RECURSIVE tree AS (
+         SELECT person_id FROM person WHERE reports_to_person_id = $1
+         UNION ALL
+         SELECT p.person_id FROM person p JOIN tree t ON t.person_id = p.reports_to_person_id
+       )
+       SELECT COUNT(*) AS sub_tree FROM tree`,
       [personId],
     );
-    if (!current.length) {
-      await client.query("ROLLBACK");
-      res.status(404).json({ error: "Person not found" });
-      return;
-    }
-    if (!current[0]!.is_active) {
-      await client.query("ROLLBACK");
-      res.status(409).json({ error: "Person is already inactive" });
-      return;
-    }
+    const custRes = await pool.query(
+      `SELECT COUNT(*) AS cust FROM customer_assignment
+       WHERE effective_to IS NULL
+         AND (state_head_person_id = $1 OR person_id = $1)`,
+      [personId],
+    );
+    const liveSubTree = Number(impactRes.rows[0].sub_tree);
+    const liveCust = Number(custRes.rows[0].cust);
 
-    // Re-verify impact numbers
-    const [subTreeRes, custRes] = await Promise.all([
-      client.query<{ n: number }>(
-        `WITH RECURSIVE sub AS (
-           SELECT person_id FROM person WHERE reports_to_person_id = $1
-           UNION ALL
-           SELECT p.person_id FROM person p JOIN sub s ON p.reports_to_person_id = s.person_id
-         )
-         SELECT COUNT(*)::int AS n FROM sub`,
-        [personId],
-      ),
-      client.query<{ n: number }>(
-        `SELECT (
-           (SELECT COUNT(*) FROM customer_assignment WHERE state_head_person_id = $1 AND effective_to IS NULL) +
-           (SELECT COUNT(*) FROM customer_assignment WHERE person_id = $1 AND effective_to IS NULL)
-         )::int AS n`,
-        [personId],
-      ),
-    ]);
-    const actualSubTree = subTreeRes.rows[0]!.n;
-    const actualCustomers = custRes.rows[0]!.n;
-
-    if (actualSubTree !== Number(acknowledgedSubTree) || actualCustomers !== Number(acknowledgedCustomers)) {
-      await client.query("ROLLBACK");
-      res.status(409).json({
+    if (liveSubTree !== acknowledgedSubTree || liveCust !== acknowledgedCustomers) {
+      return void res.status(409).json({
         error:
           "Impact has changed since preview — please re-fetch /impact and confirm again.",
-        current: { subTreeCount: actualSubTree, totalCustomersAffected: actualCustomers },
+        current: { subTreeCount: liveSubTree, totalCustomersAffected: liveCust },
       });
-      return;
     }
 
-    // Execute deactivation
-    await client.query(
-      `UPDATE person SET is_active = false, updated_at = NOW() WHERE person_id = $1`,
-      [personId],
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
 
-    await client.query(
-      `INSERT INTO change_log (entity_type, entity_id, field, old_value, new_value, changed_by)
-       VALUES ('person', $1, 'is_active', 'true', 'false', $2)`,
-      [String(personId), changed_by ?? null],
-    );
+      await client.query(
+        `UPDATE person SET is_active = false WHERE person_id = $1`,
+        [personId],
+      );
 
-    // Log acknowledged impact for audit trail
-    await client.query(
-      `INSERT INTO change_log (entity_type, entity_id, field, old_value, new_value, changed_by)
-       VALUES ('person', $1, 'deactivation_impact_acknowledged', NULL,
-               $2, $3)`,
-      [
-        String(personId),
-        JSON.stringify({ subTreeCount: actualSubTree, totalCustomersAffected: actualCustomers }),
-        changed_by ?? null,
-      ],
-    );
+      // Log the deactivation and the acknowledged impact
+      await client.query(
+        `INSERT INTO change_log (entity_type, entity_id, field, old_value, new_value, changed_by)
+         VALUES
+           ('person', $1, 'is_active',                     'true',  'false', $2),
+           ('person', $1, 'deactivation_impact_acknowledged', NULL, $3,      $2)`,
+        [
+          String(personId),
+          changed_by ?? "operator",
+          JSON.stringify({ subTreeCount: liveSubTree, totalCustomersAffected: liveCust }),
+        ],
+      );
 
-    await client.query("COMMIT");
-
-    res.json({
-      success: true,
-      personId,
-      deactivatedAt: new Date().toISOString(),
-      impact: { subTreeCount: actualSubTree, totalCustomersAffected: actualCustomers },
-    });
+      await client.query("COMMIT");
+      res.json({
+        success: true,
+        impact: { subTreeCount: liveSubTree, totalCustomersAffected: liveCust },
+      });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   } catch (err) {
-    await client.query("ROLLBACK");
     res.status(500).json({ error: String(err) });
-  } finally {
-    client.release();
   }
 });
 
 // ── POST /api/master/people/:id/reactivate ────────────────────────────────────
-// No impact check needed — reactivation never orphans anyone.
 
 router.post("/master/people/:id/reactivate", async (req, res) => {
   if (!requireAdmin(req, res)) return;
-
-  const personId = Number(req.params.id);
-  if (!Number.isFinite(personId)) {
-    res.status(400).json({ error: "Invalid id" });
-    return;
-  }
-
-  const client = await pool.connect();
   try {
-    await client.query("BEGIN");
+    const personId = Number(req.params.id);
+    const { changed_by } = req.body as { changed_by?: string };
 
-    const { rows } = await client.query<{ is_active: boolean }>(
-      `SELECT is_active FROM person WHERE person_id = $1 FOR UPDATE`,
+    await pool.query(
+      `UPDATE person SET is_active = true WHERE person_id = $1`,
       [personId],
     );
-    if (!rows.length) {
-      await client.query("ROLLBACK");
-      res.status(404).json({ error: "Person not found" });
-      return;
-    }
-    if (rows[0]!.is_active) {
-      await client.query("ROLLBACK");
-      res.status(409).json({ error: "Person is already active" });
-      return;
-    }
-
-    await client.query(
-      `UPDATE person SET is_active = true, updated_at = NOW() WHERE person_id = $1`,
-      [personId],
-    );
-    await client.query(
+    await pool.query(
       `INSERT INTO change_log (entity_type, entity_id, field, old_value, new_value, changed_by)
        VALUES ('person', $1, 'is_active', 'false', 'true', $2)`,
-      [String(personId), (req.body as any).changed_by ?? null],
+      [String(personId), changed_by ?? "operator"],
     );
-
-    await client.query("COMMIT");
-    res.json({ success: true, personId, reactivatedAt: new Date().toISOString() });
+    res.json({ success: true });
   } catch (err) {
-    await client.query("ROLLBACK");
     res.status(500).json({ error: String(err) });
-  } finally {
-    client.release();
   }
 });
 
 // ── GET /api/master/unresolved-links ─────────────────────────────────────────
-// The 14 distributor names from the seed that matched no customer row.
+// The distributor names from the seed that matched no customer row.
 // Surfaced in Phase 3 UI so operators can map or confirm gone.
 
 router.get("/master/unresolved-links", async (_req, res) => {
@@ -756,11 +548,46 @@ router.get("/master/unresolved-links", async (_req, res) => {
   }
 });
 
-// ── Verification 6: inactive-manager check ────────────────────────────────────
-// GET /api/master/verify/inactive-managers
-// Returns people whose reports_to manager is inactive.
-// Returned 0 at Phase 1 because all 179 people were active.
-// Becomes meaningful once deactivation is used.
+// ── POST /api/master/unresolved-links/:id/resolve ─────────────────────────────
+// Mark a seed unresolved link as mapped or confirmed gone.
+
+router.post("/master/unresolved-links/:id/resolve", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const linkId = Number(req.params.id);
+    const { action, mapped_to_id, resolved_by } = req.body as {
+      action: "map" | "confirm_gone";
+      mapped_to_id?: string;
+      resolved_by?: string;
+    };
+
+    if (action === "map" && !mapped_to_id) {
+      return void res.status(400).json({ error: "mapped_to_id required for action=map" });
+    }
+
+    if (mapped_to_id) {
+      const check = await pool.query(
+        "SELECT 1 FROM customer WHERE customer_id = $1", [mapped_to_id]);
+      if (!check.rowCount)
+        return void res.status(404).json({ error: `Customer ${mapped_to_id} not found` });
+    }
+
+    await pool.query(
+      `UPDATE seed_unresolved_link
+       SET resolution = $1, mapped_to_id = $2, resolved_by = $3, resolved_at = NOW()
+       WHERE id = $4`,
+      [action === "map" ? "mapped" : "confirmed_gone", mapped_to_id ?? null, resolved_by ?? "operator", linkId],
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── GET /api/master/verify/inactive-managers ─────────────────────────────────
+// Verification 6: active people whose manager is inactive.
+// Returns 0 when all is well; becomes meaningful once deactivation is used.
 
 router.get("/master/verify/inactive-managers", async (_req, res) => {
   try {
@@ -793,6 +620,252 @@ router.get("/master/verify/inactive-managers", async (_req, res) => {
           ? "Clean — no active person reports to an inactive manager."
           : `${rows.length} active people report to an inactive manager.`,
     });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 3 — CUSTOMER MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── GET /api/master/customers ─────────────────────────────────────────────────
+// Paginated list of customers with their current (open) assignment.
+// Query params: q, type, page, limit
+
+router.get("/master/customers", async (req, res) => {
+  try {
+    const q = String(req.query.q ?? "").trim();
+    const type = String(req.query.type ?? "").trim();
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+    const offset = (page - 1) * limit;
+
+    const where: string[] = [];
+    const params: unknown[] = [];
+
+    if (q) {
+      params.push(`%${q}%`);
+      where.push(`(c.name ILIKE $${params.length} OR c.customer_id ILIKE $${params.length})`);
+    }
+    if (type) {
+      params.push(type);
+      where.push(`c.type = $${params.length}`);
+    }
+
+    const wc = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+    const [countRes, dataRes] = await Promise.all([
+      pool.query(`SELECT COUNT(*) FROM customer c ${wc}`, params),
+      pool.query(
+        `SELECT c.customer_id,
+                c.name,
+                c.type,
+                c.status,
+                ca.person_id,
+                p.name       AS person_name,
+                ca.state_head_person_id,
+                sh.name      AS state_head_name,
+                ca.confidence,
+                ca.effective_from::text,
+                EXISTS(
+                  SELECT 1 FROM customer_link cl
+                  WHERE cl.retailer_id = c.customer_id OR cl.distributor_id = c.customer_id
+                ) AS has_link
+         FROM customer c
+         LEFT JOIN customer_assignment ca
+           ON ca.customer_id = c.customer_id AND ca.effective_to IS NULL
+         LEFT JOIN person p  ON p.person_id  = ca.person_id
+         LEFT JOIN person sh ON sh.person_id = ca.state_head_person_id
+         ${wc}
+         ORDER BY c.name
+         LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+        [...params, limit, offset],
+      ),
+    ]);
+
+    res.json({ total: Number(countRes.rows[0].count), customers: dataRes.rows });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── GET /api/master/customers/by-head ────────────────────────────────────────
+// FY2025-26 totals from sale_line grouped by head_canon.
+//
+// PHASE 3 VERIFICATION ANCHOR:
+//   Call this before and after any customer reassignment.  The result must be
+//   IDENTICAL because sale_line.head_canon is baked at register-ingestion time
+//   and is never touched by customer_assignment edits.  If any row changes,
+//   effective dating is broken.
+//
+// IMPORTANT: this route must be declared before /:id to avoid Express
+// matching "by-head" as a customer_id parameter.
+
+router.get("/master/customers/by-head", async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT head_canon,
+              COUNT(DISTINCT customer) AS customers,
+              ROUND(SUM(amount) / 10000000.0, 4) AS crore
+       FROM sale_line
+       WHERE fy = '2025-26'
+       GROUP BY head_canon
+       ORDER BY crore DESC`,
+    );
+    res.json({ fy: "2025-26", source: "sale_line.head_canon", rows });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── GET /api/master/customers/:id ────────────────────────────────────────────
+// Full detail: customer row, current + historical assignments, and links.
+
+router.get("/master/customers/:id", async (req, res) => {
+  try {
+    const customerId = String(req.params.id);
+
+    const [custRes, histRes, linksRes] = await Promise.all([
+      pool.query(
+        `SELECT c.customer_id, c.name, c.type, c.status, c.territory_id,
+                t.name AS territory_name
+         FROM customer c
+         LEFT JOIN territory t ON t.territory_id = c.territory_id
+         WHERE c.customer_id = $1`,
+        [customerId],
+      ),
+      pool.query(
+        `SELECT ca.id,
+                ca.person_id,      p.name  AS person_name,
+                ca.state_head_person_id, sh.name AS state_head_name,
+                ca.confidence,
+                ca.set_by,
+                ca.effective_from::text,
+                ca.effective_to::text,
+                ca.set_at::text
+         FROM customer_assignment ca
+         LEFT JOIN person p  ON p.person_id  = ca.person_id
+         LEFT JOIN person sh ON sh.person_id = ca.state_head_person_id
+         WHERE ca.customer_id = $1
+         ORDER BY ca.effective_from DESC, ca.set_at DESC`,
+        [customerId],
+      ),
+      pool.query(
+        `SELECT cl.id,
+                cl.link_order,
+                cl.retailer_id,    r.name AS retailer_name,
+                cl.distributor_id, d.name AS distributor_name,
+                cl.effective_from::text,
+                cl.effective_to::text
+         FROM customer_link cl
+         JOIN customer r ON r.customer_id = cl.retailer_id
+         JOIN customer d ON d.customer_id = cl.distributor_id
+         WHERE cl.retailer_id = $1 OR cl.distributor_id = $1
+         ORDER BY cl.link_order, cl.effective_from`,
+        [customerId],
+      ),
+    ]);
+
+    if (!custRes.rows[0])
+      return void res.status(404).json({ error: "Customer not found" });
+
+    const currentAssignment =
+      histRes.rows.find((r: { effective_to: string | null }) => !r.effective_to) ?? null;
+
+    res.json({
+      customer: custRes.rows[0],
+      currentAssignment,
+      assignmentHistory: histRes.rows,
+      links: linksRes.rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── PATCH /api/master/customers/:id/assign ────────────────────────────────────
+// Reassign a customer to a different TM and/or state head.
+//
+// Effective-dating contract:
+//   The current open assignment row gets effective_to = CURRENT_DATE.
+//   A new row is inserted with effective_from = CURRENT_DATE.
+//
+//   FY2025-26 analytics read sale_line.head_canon (baked at ingestion, never
+//   modified here), so /by-head results are invariant to any reassignment.
+//   The new assignment rows take effect for future period queries only.
+
+router.patch("/master/customers/:id/assign", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const customerId = String(req.params.id);
+    const { person_id, state_head_person_id, confidence, changed_by } =
+      req.body as {
+        person_id: number | null;
+        state_head_person_id: number | null;
+        confidence?: string;
+        changed_by?: string;
+      };
+
+    const safeConf = ["confirmed", "assign_user_chain", "state_lookup", "guessed"].includes(
+      confidence ?? "",
+    )
+      ? confidence!
+      : "confirmed";
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Read current open assignment for change_log
+      const prevRes = await client.query(
+        `SELECT person_id, state_head_person_id
+         FROM customer_assignment
+         WHERE customer_id = $1 AND effective_to IS NULL`,
+        [customerId],
+      );
+      const prev = prevRes.rows[0] ?? null;
+
+      // Close existing open assignment
+      await client.query(
+        `UPDATE customer_assignment
+         SET effective_to = CURRENT_DATE
+         WHERE customer_id = $1 AND effective_to IS NULL`,
+        [customerId],
+      );
+
+      // Open new assignment
+      await client.query(
+        `INSERT INTO customer_assignment
+           (customer_id, person_id, state_head_person_id, confidence, effective_from, set_by)
+         VALUES ($1, $2, $3, $4, CURRENT_DATE, $5)`,
+        [customerId, person_id ?? null, state_head_person_id ?? null, safeConf, changed_by ?? "app_edit"],
+      );
+
+      // Write change log entries
+      if ((prev?.person_id ?? null) !== person_id) {
+        await client.query(
+          `INSERT INTO change_log (entity_type, entity_id, field, old_value, new_value, changed_by)
+           VALUES ('customer', $1, 'person_id', $2, $3, $4)`,
+          [customerId, prev?.person_id?.toString() ?? null, person_id?.toString() ?? null, changed_by ?? "app_edit"],
+        );
+      }
+      if ((prev?.state_head_person_id ?? null) !== state_head_person_id) {
+        await client.query(
+          `INSERT INTO change_log (entity_type, entity_id, field, old_value, new_value, changed_by)
+           VALUES ('customer', $1, 'state_head_person_id', $2, $3, $4)`,
+          [customerId, prev?.state_head_person_id?.toString() ?? null, state_head_person_id?.toString() ?? null, changed_by ?? "app_edit"],
+        );
+      }
+
+      await client.query("COMMIT");
+      res.json({ success: true, customerId });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
