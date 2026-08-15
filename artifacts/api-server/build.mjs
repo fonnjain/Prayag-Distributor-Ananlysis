@@ -29,6 +29,7 @@ async function buildAll() {
       path.resolve(artifactDir, "src/redAlertDiagnoseB3B5.ts"),
       path.resolve(artifactDir, "src/redAlertFullReport.ts"),
       path.resolve(artifactDir, "src/redAlertDiagnoseItems.ts"),
+      path.resolve(artifactDir, "src/redAlertDiagnoseItems3.ts"),
     ],
     platform: "node",
     bundle: true,
