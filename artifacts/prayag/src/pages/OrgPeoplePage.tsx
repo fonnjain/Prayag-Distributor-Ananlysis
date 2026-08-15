@@ -180,6 +180,44 @@ export default function OrgPeoplePage() {
     reports_to_open: false,
   });
 
+  // ── State-head re-sync ───────────────────────────────────────────────────
+  const [resyncState, setResyncState] = useState<
+    "idle" | "running" | "done" | "error"
+  >("idle");
+  const [resyncResult, setResyncResult] = useState<{
+    personSync: { step1Updated: number; step2Updated: number } | null;
+    updated: number;
+    residual: { nullCount: number; total: number };
+    fy: string;
+  } | null>(null);
+
+  async function handleResyncStateHead() {
+    if (!secret) return;
+    setResyncState("running");
+    setResyncResult(null);
+    try {
+      const r = await fetch("/api/sku/backfill-state-canon?syncFromPerson=true", {
+        method: "POST",
+        headers: { "X-Admin-Secret": secret },
+      });
+      if (!r.ok) throw new Error(await r.text());
+      const data = await r.json();
+      setResyncResult(data);
+      setResyncState("done");
+      toast({
+        title: "State-head re-sync complete",
+        description: `Registry rows synced: ${data.personSync?.step1Updated ?? 0} (members) + ${data.personSync?.step2Updated ?? 0} (state heads). SKU lines updated: ${data.updated}.`,
+      });
+    } catch (err) {
+      setResyncState("error");
+      toast({
+        title: "Re-sync failed",
+        description: String(err),
+        variant: "destructive",
+      });
+    }
+  }
+
   // Impact modal
   const [impactData, setImpactData] = useState<ImpactData | null>(null);
   const [impactLoading, setImpactLoading] = useState(false);
@@ -395,16 +433,43 @@ export default function OrgPeoplePage() {
             </Button>
           </form>
         ) : (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <UserCheck className="size-4 text-emerald-600" />
-            <span>Edit access unlocked</span>
+          <div className="flex items-center gap-3">
             <Button
               size="sm"
-              variant="ghost"
-              onClick={() => { sessionStorage.removeItem("adminSecret"); setSecret(""); }}
+              variant="outline"
+              disabled={resyncState === "running"}
+              onClick={handleResyncStateHead}
+              title="Propagate state_head_person_id corrections from the person table into person_registry, then re-run the secondary_sku_line state_canon backfill."
             >
-              <X className="size-3.5" />
+              {resyncState === "running" ? (
+                <Loader2 className="size-3.5 animate-spin mr-1.5" />
+              ) : (
+                <RefreshCw className="size-3.5 mr-1.5" />
+              )}
+              Re-sync state head
             </Button>
+            {resyncState === "done" && resyncResult && (
+              <span className="text-xs text-muted-foreground">
+                Registry: {(resyncResult.personSync?.step1Updated ?? 0) + (resyncResult.personSync?.step2Updated ?? 0)} rows ·{" "}
+                SKU lines: {resyncResult.updated} updated
+              </span>
+            )}
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <UserCheck className="size-4 text-emerald-600" />
+              <span>Edit access unlocked</span>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  sessionStorage.removeItem("adminSecret");
+                  setSecret("");
+                  setResyncState("idle");
+                  setResyncResult(null);
+                }}
+              >
+                <X className="size-3.5" />
+              </Button>
+            </div>
           </div>
         )}
       </div>

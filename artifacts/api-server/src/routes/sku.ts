@@ -1250,7 +1250,13 @@ router.get("/sku/secondary-backfill", (_req: Request, res: Response): void => {
 // current person_registry.state_head values.  Safe to call at any time —
 // idempotent (only touches NULL state_canon rows).
 //
-// Optional query param: fy (e.g. 2025-26) — limits the update to one FY.
+// Optional query params:
+//   fy               (e.g. 2025-26) — limits the backfill to one FY.
+//   syncFromPerson   "true" — first re-propagates person_registry.state_head
+//                    from the person table (mirrors migration 034 steps 1 & 2),
+//                    then runs the backfill.  Use this after correcting a
+//                    person's state_head_person_id in the person table.
+//
 // Requires X-Admin-Secret header.
 
 router.post("/sku/backfill-state-canon", async (req: Request, res: Response): Promise<void> => {
@@ -1262,13 +1268,29 @@ router.post("/sku/backfill-state-canon", async (req: Request, res: Response): Pr
     return;
   }
   const fy = typeof req.query.fy === "string" ? req.query.fy : undefined;
+  const syncFromPerson = req.query.syncFromPerson === "true";
   try {
-    const { backfillSkuStateCanon, getSkuStateCanonResidual } = await import(
-      "../lib/secondary/skuLoader.js"
-    );
+    const { backfillSkuStateCanon, getSkuStateCanonResidual, syncPersonRegistryStateHead } =
+      await import("../lib/secondary/skuLoader.js");
+
+    let personSync: { step1Updated: number; step2Updated: number } | null = null;
+    if (syncFromPerson) {
+      personSync = await syncPersonRegistryStateHead();
+      req.log.info(
+        { step1Updated: personSync.step1Updated, step2Updated: personSync.step2Updated },
+        "sku backfill-state-canon: person_registry sync complete",
+      );
+    }
+
     const updated = await backfillSkuStateCanon(fy);
     const { nullCount, total } = await getSkuStateCanonResidual();
-    res.json({ updated, residual: { nullCount, total }, fy: fy ?? "all" });
+    res.json({
+      syncFromPerson,
+      personSync,
+      updated,
+      residual: { nullCount, total },
+      fy: fy ?? "all",
+    });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

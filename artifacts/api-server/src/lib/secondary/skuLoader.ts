@@ -586,6 +586,67 @@ export async function loadSecSkuFromSheets(
 // ── State-canon backfill ──────────────────────────────────────────────────────
 
 /**
+ * Propagate state_head from the person table into person_registry.
+ *
+ * Mirrors migration 034 steps 1 & 2:
+ *   Step 1 — for each non-state-head person whose name matches a registry row,
+ *             set person_registry.state_head to the name of their state-head
+ *             (looked up via person.state_head_person_id → person.name).
+ *   Step 2 — state heads themselves: ensure their own registry row has
+ *             state_head = their own canonical_name.
+ *
+ * Unlike the migration, this is NOT idempotent in the "only touches NULL" sense:
+ * it also overwrites existing values so a correction to state_head_person_id
+ * propagates even when person_registry.state_head was already set (possibly to
+ * the wrong value).  This is the intended behaviour for the self-service sync.
+ *
+ * @returns Object with step1Updated and step2Updated row counts.
+ */
+export async function syncPersonRegistryStateHead(): Promise<{
+  step1Updated: number;
+  step2Updated: number;
+}> {
+  // Step 1: propagate state_head from person → person_registry via name match.
+  // Overwrites existing values so corrections to state_head_person_id take effect.
+  const step1Res = await db.execute<{ updated: string }>(sqlRaw`
+    WITH updates AS (
+      UPDATE person_registry pr
+      SET
+        state_head = sh.name,
+        updated_at = now()
+      FROM person p
+      JOIN person sh ON sh.person_id = p.state_head_person_id
+      WHERE LOWER(TRIM(p.name)) = LOWER(TRIM(pr.canonical_name))
+        AND p.state_head_person_id IS NOT NULL
+      RETURNING pr.canonical_name
+    )
+    SELECT COUNT(*)::text AS updated FROM updates
+  `);
+  const step1Updated = parseInt(step1Res.rows[0]?.updated ?? "0", 10);
+
+  // Step 2: state heads themselves — state_head = their own canonical_name.
+  // Overwrites existing values (same reason as step 1).
+  const step2Res = await db.execute<{ updated: string }>(sqlRaw`
+    WITH updates AS (
+      UPDATE person_registry pr
+      SET
+        state_head = pr.canonical_name,
+        updated_at = now()
+      WHERE pr.is_state_head = TRUE
+      RETURNING pr.canonical_name
+    )
+    SELECT COUNT(*)::text AS updated FROM updates
+  `);
+  const step2Updated = parseInt(step2Res.rows[0]?.updated ?? "0", 10);
+
+  logger.info(
+    { step1Updated, step2Updated },
+    "syncPersonRegistryStateHead: complete",
+  );
+  return { step1Updated, step2Updated };
+}
+
+/**
  * Backfill secondary_sku_line.state_canon for rows whose head_canon resolves
  * to a person_registry entry that now has a non-null state_head.
  *
