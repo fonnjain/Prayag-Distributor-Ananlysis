@@ -895,6 +895,137 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_ms_survey_type ON market_survey (survey_type);
     `,
   },
+  {
+    id: "030_master_org_schema",
+    sql: `
+      -- ── designation ──────────────────────────────────────────────────────────
+      -- Controlled vocabulary. Rank 1 = most senior. Never free-text on a person.
+      CREATE TABLE IF NOT EXISTS designation (
+        designation_id  SERIAL PRIMARY KEY,
+        name            TEXT NOT NULL UNIQUE,
+        rank            INTEGER NOT NULL,
+        is_system       BOOLEAN NOT NULL DEFAULT false,
+        created_by      TEXT,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      -- ── person ───────────────────────────────────────────────────────────────
+      -- Editable master for salespeople. person_id is the identity key — NOT
+      -- employee_code (62 of 179 have implausible codes).
+      CREATE TABLE IF NOT EXISTS person (
+        person_id              SERIAL PRIMARY KEY,
+        name                   TEXT NOT NULL,
+        employee_code          TEXT,           -- informational only; nullable
+        designation_id         INTEGER REFERENCES designation(designation_id),
+        reports_to_person_id   INTEGER REFERENCES person(person_id),
+        state_head_person_id   INTEGER REFERENCES person(person_id),
+        is_state_head          BOOLEAN NOT NULL DEFAULT false,
+        is_active              BOOLEAN NOT NULL DEFAULT true,
+        headquarter            TEXT,
+        order_type             TEXT,
+        source                 TEXT NOT NULL DEFAULT 'app_created'
+          CHECK (source IN ('hr_sheet','app_created')),
+        created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_person_name          ON person (name);
+      CREATE INDEX IF NOT EXISTS idx_person_reports_to    ON person (reports_to_person_id);
+      CREATE INDEX IF NOT EXISTS idx_person_state_head    ON person (state_head_person_id);
+
+      -- ── territory ────────────────────────────────────────────────────────────
+      -- States and splits. East U.P and West U.P stay separate; both point at
+      -- Uttar Pradesh as parent. Reuses the same vocabulary as state_hierarchy.
+      CREATE TABLE IF NOT EXISTS territory (
+        territory_id        SERIAL PRIMARY KEY,
+        name                TEXT NOT NULL UNIQUE,
+        parent_territory_id INTEGER REFERENCES territory(territory_id),
+        is_split            BOOLEAN NOT NULL DEFAULT false
+      );
+      CREATE INDEX IF NOT EXISTS idx_territory_parent ON territory (parent_territory_id);
+
+      -- ── person_territory ─────────────────────────────────────────────────────
+      -- Many-to-many: a person holds several states; a state has several people.
+      CREATE TABLE IF NOT EXISTS person_territory (
+        person_id       INTEGER NOT NULL REFERENCES person(person_id),
+        territory_id    INTEGER NOT NULL REFERENCES territory(territory_id),
+        effective_from  DATE NOT NULL DEFAULT CURRENT_DATE,
+        effective_to    DATE,
+        PRIMARY KEY (person_id, territory_id, effective_from)
+      );
+
+      -- ── customer ─────────────────────────────────────────────────────────────
+      -- Editable master for all customer entities (DIST#, RET#, etc.).
+      -- The existing customer_master table is NOT replaced — it continues to
+      -- serve as the operational read-only source. This table is the new truth.
+      CREATE TABLE IF NOT EXISTS customer (
+        customer_id   TEXT PRIMARY KEY,     -- preserves DIST#/RET# identifiers
+        name          TEXT NOT NULL,
+        type          TEXT NOT NULL CHECK (type IN
+          ('distributor','direct_dealer','retailer','sub_dealer',
+           'project','govt','other')),
+        territory_id  INTEGER REFERENCES territory(territory_id),
+        status        TEXT,
+        source        TEXT NOT NULL DEFAULT 'import'
+          CHECK (source IN ('import','app_created','customer_master')),
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_customer_type      ON customer (type);
+      CREATE INDEX IF NOT EXISTS idx_customer_territory ON customer (territory_id);
+
+      -- ── customer_assignment ──────────────────────────────────────────────────
+      -- Effective-dated assignment of a customer to a salesperson and state head.
+      -- Reports always read the assignment IN FORCE during the period being
+      -- reported, not today's. Reassigning a customer must never change history.
+      CREATE TABLE IF NOT EXISTS customer_assignment (
+        id                    SERIAL PRIMARY KEY,
+        customer_id           TEXT NOT NULL REFERENCES customer(customer_id),
+        person_id             INTEGER REFERENCES person(person_id),
+        state_head_person_id  INTEGER REFERENCES person(person_id),
+        confidence            TEXT NOT NULL CHECK (confidence IN
+          ('confirmed','assign_user_chain','state_lookup','guessed')),
+        effective_from        DATE NOT NULL DEFAULT CURRENT_DATE,
+        effective_to          DATE,
+        set_by                TEXT,
+        set_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_ca_customer    ON customer_assignment (customer_id);
+      CREATE INDEX IF NOT EXISTS idx_ca_person      ON customer_assignment (person_id);
+      CREATE INDEX IF NOT EXISTS idx_ca_state_head  ON customer_assignment (state_head_person_id);
+      CREATE INDEX IF NOT EXISTS idx_ca_effective   ON customer_assignment (customer_id, effective_from, effective_to);
+
+      -- ── customer_link ────────────────────────────────────────────────────────
+      -- Retailer → distributor. Many-to-many: over a third of active retailers
+      -- link to more than one distributor. Do NOT collapse to one.
+      CREATE TABLE IF NOT EXISTS customer_link (
+        id             SERIAL PRIMARY KEY,
+        retailer_id    TEXT NOT NULL REFERENCES customer(customer_id),
+        distributor_id TEXT NOT NULL REFERENCES customer(customer_id),
+        link_order     INTEGER NOT NULL DEFAULT 1,
+        effective_from DATE NOT NULL DEFAULT CURRENT_DATE,
+        effective_to   DATE,
+        UNIQUE (retailer_id, distributor_id, effective_from)
+      );
+      CREATE INDEX IF NOT EXISTS idx_cl_retailer     ON customer_link (retailer_id);
+      CREATE INDEX IF NOT EXISTS idx_cl_distributor  ON customer_link (distributor_id);
+
+      -- ── change_log ───────────────────────────────────────────────────────────
+      -- Every edit, without exception.
+      CREATE TABLE IF NOT EXISTS change_log (
+        id           BIGSERIAL PRIMARY KEY,
+        entity_type  TEXT NOT NULL,
+        entity_id    TEXT NOT NULL,
+        field        TEXT NOT NULL,
+        old_value    TEXT,
+        new_value    TEXT,
+        changed_by   TEXT,
+        changed_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        reason       TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_cl_entity ON change_log (entity_type, entity_id);
+      CREATE INDEX IF NOT EXISTS idx_cl_when   ON change_log (changed_at);
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

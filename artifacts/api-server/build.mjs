@@ -30,6 +30,8 @@ async function buildAll() {
       path.resolve(artifactDir, "src/redAlertFullReport.ts"),
       path.resolve(artifactDir, "src/redAlertDiagnoseItems.ts"),
       path.resolve(artifactDir, "src/redAlertDiagnoseItems3.ts"),
+      // One-time seed import for the master org tables (Phase 1).
+      path.resolve(artifactDir, "src/masterSeedImport.ts"),
     ],
     platform: "node",
     bundle: true,
