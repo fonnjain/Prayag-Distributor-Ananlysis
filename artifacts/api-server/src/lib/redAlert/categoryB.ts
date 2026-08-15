@@ -22,6 +22,10 @@ type BConfig = {
   B5_BREADTH_DROP_FLOOR_PCT: number;
   B5_PRIOR_CODE_FLOOR: number;
   MATERIALITY_FLOORS: { DISTRIBUTOR_RUPEES: number; DIRECT_DEALER_RUPEES: number; RETAILER_RUPEES: number };
+  // B3 retailer rollup thresholds
+  B3_RETAILER_ROLLUP_MIN_RETAILERS: number;
+  B3_RETAILER_ROLLUP_MIN_COMBINED_RUPEES: number;
+  B3_RETAILER_INDIVIDUAL_FLOOR_RUPEES: number;
 };
 
 type CustomerType = "distributor" | "direct_dealer" | "retailer";
@@ -409,6 +413,105 @@ function buildRetailerBAlerts(
   return alerts;
 }
 
+// ── B3 retailer rollup ────────────────────────────────────────────────────────
+// Aggregates per-retailer B3 stops into distributor-level cards.
+// Rule (applied in order):
+//   1. If ≥ B3_RETAILER_ROLLUP_MIN_RETAILERS stopped retailers share a primary
+//      distributor, OR combined prior value ≥ B3_RETAILER_ROLLUP_MIN_COMBINED_RUPEES:
+//      emit ONE distributor-level alert; retailer list in extraForReport.
+//   2. Individual retailers where no qualifying group exists survive only if
+//      their own prior value ≥ B3_RETAILER_INDIVIDUAL_FLOOR_RUPEES.
+//   3. Everything else is suppressed.
+//
+// "Primary distributor" = the distributor with the highest prior-window value
+// for that retailer, from ctx.retailerPrimaryDist[priorFy][retailer].
+// If no mapping exists (retailer never appeared with a distributor), the
+// retailer is kept as-is at its individual floor.
+function rollupB3Retailers(
+  rawB3: RawAlert[],
+  ctx: DetectionContext,
+  priorFy: string,
+  cfg: BConfig,
+): RawAlert[] {
+  const out: RawAlert[] = [];
+  const priorDistMap = ctx.retailerPrimaryDist.get(priorFy) ?? new Map<string, string>();
+
+  // Group retailer B3 alerts by their primary distributor
+  type RetailerEntry = { retailer: string; priorValue: number; alert: RawAlert };
+  const byDist = new Map<string, RetailerEntry[]>();
+  const noDist: RetailerEntry[] = [];
+
+  for (const alert of rawB3) {
+    if (alert.entityType !== "retailer") {
+      out.push(alert); // non-retailer B3 (distributor / direct dealer) — pass through
+      continue;
+    }
+    const dist = priorDistMap.get(alert.entityKey);
+    const priorVal = alert.numbers.priorValue ?? 0;
+    if (!dist) {
+      noDist.push({ retailer: alert.entityKey, priorValue: priorVal, alert });
+      continue;
+    }
+    if (!byDist.has(dist)) byDist.set(dist, []);
+    byDist.get(dist)!.push({ retailer: alert.entityKey, priorValue: priorVal, alert });
+  }
+
+  // Process each distributor group
+  for (const [dist, entries] of byDist) {
+    const combinedPrior = entries.reduce((s, e) => s + e.priorValue, 0);
+    const shouldRoll =
+      entries.length >= cfg.B3_RETAILER_ROLLUP_MIN_RETAILERS ||
+      combinedPrior >= cfg.B3_RETAILER_ROLLUP_MIN_COMBINED_RUPEES;
+
+    if (shouldRoll) {
+      // One distributor-level alert
+      const firstAlert = entries[0]!.alert;
+      out.push({
+        code: "B3",
+        category: "B",
+        entity: dist,
+        entityKey: dist,
+        entityType: "distributor",
+        currentMonths: firstAlert.currentMonths,
+        priorMonths: firstAlert.priorMonths,
+        numbers: {
+          currentValue: 0,
+          priorValue: combinedPrior,
+          valueGrowthPct: -100,
+          retailerCount: entries.length,
+        },
+        rupeesAtStake: combinedPrior,
+        extraForReport: {
+          retailers: entries.map((e) => e.retailer).join(","),
+          retailerCount: entries.length,
+          combinedPriorValue: combinedPrior,
+          rollupTrigger:
+            entries.length >= cfg.B3_RETAILER_ROLLUP_MIN_RETAILERS
+              ? `${entries.length} retailers ≥ threshold of ${cfg.B3_RETAILER_ROLLUP_MIN_RETAILERS}`
+              : `combined prior ₹${(combinedPrior / 1e7).toFixed(2)} Cr ≥ ₹${(cfg.B3_RETAILER_ROLLUP_MIN_COMBINED_RUPEES / 1e7).toFixed(2)} Cr`,
+        },
+      });
+    } else {
+      // Group doesn't qualify — each retailer survives only above individual floor
+      for (const e of entries) {
+        if (e.priorValue >= cfg.B3_RETAILER_INDIVIDUAL_FLOOR_RUPEES) {
+          out.push(e.alert);
+        }
+        // else: suppressed (below floor, small group)
+      }
+    }
+  }
+
+  // Retailers with no distributor mapping — apply individual floor
+  for (const e of noDist) {
+    if (e.priorValue >= cfg.B3_RETAILER_INDIVIDUAL_FLOOR_RUPEES) {
+      out.push(e.alert);
+    }
+  }
+
+  return out;
+}
+
 // ── Root export ───────────────────────────────────────────────────────────────
 
 export function buildCategoryBAlerts(
@@ -424,8 +527,13 @@ export function buildCategoryBAlerts(
   const priorPriorFy    = prevFy(priorFy);
   const priorPriorMonths = toPriorYearMonths(priorMonths);
 
-  return [
-    ...buildPrimaryBAlerts(ctx, currentFy, currentMonths, priorFy, priorMonths, priorPriorFy, priorPriorMonths, cfg),
-    ...buildRetailerBAlerts(ctx, currentFy, currentMonths, priorFy, priorMonths, priorPriorFy, priorPriorMonths, cfg),
-  ];
+  const primaryAlerts  = buildPrimaryBAlerts(ctx, currentFy, currentMonths, priorFy, priorMonths, priorPriorFy, priorPriorMonths, cfg);
+  const retailerRaw    = buildRetailerBAlerts(ctx, currentFy, currentMonths, priorFy, priorMonths, priorPriorFy, priorPriorMonths, cfg);
+
+  // Apply B3 rollup to retailer stops; other retailer codes (B1,B2,B4,B5) are unaffected.
+  const retailerB3Raw  = retailerRaw.filter((a) => a.code === "B3");
+  const retailerOther  = retailerRaw.filter((a) => a.code !== "B3");
+  const retailerB3Rolled = rollupB3Retailers(retailerB3Raw, ctx, priorFy, cfg);
+
+  return [...primaryAlerts, ...retailerOther, ...retailerB3Rolled];
 }

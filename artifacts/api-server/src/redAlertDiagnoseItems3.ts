@@ -434,7 +434,7 @@ function diagnoseA1A2Overlap(ytdAlerts: Array<{ code: string; entityKey: string;
   console.log(`\n  A2-only members (zero booking):`);
   for (const k of a2Only.slice(0, 8)) {
     const a = a2.find((a) => a.entityKey === k);
-    console.log(`    ${k.padEnd(40)} plan: ${cr(Number(a?.numbers.cumulativeTarget ?? a?.rupeesAtStake ?? 0))}`);
+    console.log(`    ${k.padEnd(40)} plan: ${cr(Number(a?.numbers.cumulativeTarget ?? (a as any)?.rupeesAtStake ?? 0))}`);
   }
   if (a2Only.length > 8) console.log(`    … ${a2Only.length - 8} more`);
 }

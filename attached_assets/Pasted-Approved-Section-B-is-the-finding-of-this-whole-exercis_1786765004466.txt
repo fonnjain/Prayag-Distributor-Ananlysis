@@ -1,0 +1,52 @@
+Approved. Section B is the finding of this whole exercise - an alert that
+fires six months before the symptom, once in sixteen months, silent on every
+other distributor.
+
+And I was wrong on Mahabir. Prior-window aggregate volume is not the same as
+primary supplier, and the rollup is using the right one. Seven of nine bought
+overwhelmingly from Avirasico; Rs 12,000 against Rs 16.34 L is a trickle, not
+a supply channel.
+
+BUILD, in this order:
+
+1. #298 - state_canon on secondary SKU rows. Everything else is better with
+   it and the territorial threshold is blocked without it.
+
+2. THE DESTOCKING ALERT. Highest value, cleanest signal.
+   Trigger: zero primary purchase for >= 3 consecutive months while secondary
+   continues.
+   The card must show: months since last primary invoice, secondary sold from
+   stock since then, the month secondary begins falling, and the retailers
+   beneath them.
+   Frame it as a SUPPLY signal, not a sales one. A distributor with Rs 21.53
+   Cr of annual secondary stopped buying and nobody noticed for ten months.
+
+3. #297 - B3 distributor rollup. 66 to 7, nothing discarded.
+   Where a rolled-up distributor ALSO fires the destocking alert, link them.
+   Aradhya Kedia's 15 stopped retailers and their destocking are one story and
+   must read as one on the page.
+
+4. A1/A2 MERGE into "Member Not Contributing", severity-banded:
+      Critical - zero booking in a complete recorded month
+      Warning  - booking above zero, achievement below 35% pro-rated
+   One card per member, never two.
+
+5. TERRITORIAL CONCENTRATION - hold until #298 lands, then apply
+   >= 10 stopped retailers AND >= 30% share. Re-run first: with 24 of 66
+   currently unmapped the denominator is incomplete and the threshold may
+   need moving.
+
+STILL NEEDED, and it is not a code question:
+Who receives a Red Alert, and how. Nothing routes anywhere today. A destocking
+alert that fires in January and sits on a page nobody opens until August has
+achieved nothing. Decide the recipient before this ships, not after.
+
+VERIFY on delivery
+- Destocking run retrospectively over both FYs: which distributors, first-fire
+  month, and confirm it stays silent on the rest.
+- B3 rolled count, and confirm the suppressed retailers appear beneath their
+  distributor card.
+- The merged A card: confirm no member appears twice, and print the 6 former
+  double-fires now showing once at Critical.
+- Open-alert count per section on the live FY2026-27 page.
+- Commit hash, cat-file, merge-base --is-ancestor <hash> main with exit code.

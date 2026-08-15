@@ -27,6 +27,10 @@ const CFG = {
   B5_BREADTH_DROP_FLOOR_PCT: 50,
   B5_PRIOR_CODE_FLOOR: 20,
   MATERIALITY_FLOORS: FLOORS_LOOSE,
+  // B3 rollup — set permissive values so unit tests see individual retailer alerts
+  B3_RETAILER_ROLLUP_MIN_RETAILERS: 999,
+  B3_RETAILER_ROLLUP_MIN_COMBINED_RUPEES: 1e12,
+  B3_RETAILER_INDIVIDUAL_FLOOR_RUPEES: 0,
 };
 
 function makeCtx(overrides: Partial<Pick<DetectionContext,
@@ -51,6 +55,9 @@ function makeCtx(overrides: Partial<Pick<DetectionContext,
     secCompleteMonths: new Map(),
     lastSheetRead: new Map(),
     personsByNameKey: new Set(),
+    retailerPrimaryDist: new Map(),
+    distSecMonthly: new Map(),
+    headToStateHead: new Map(),
   };
 }
 
@@ -202,7 +209,7 @@ describe("Category B — B3 end-to-end through detectAlerts", () => {
     const ctx: DetectionContext = {
       pool: null as unknown as DetectionContext["pool"],
       customerSale: [], customerMeta: [], customerCode: [],
-      retailerSale: [rsRow(PRIOR_FY, "Apr-25", "RET-DROPOUT", 1_500_000)], // ≥ ₹10 L RETAILER_RUPEES floor
+      retailerSale: [rsRow(PRIOR_FY, "Apr-25", "RET-DROPOUT", 3_000_000)], // ≥ ₹25 L B3 individual floor
       retailerSku: [],
       secHeadMonths: [],
       mrpHistory: [], ambiguousCodes: new Set(), marginFact: [], persons: [],
@@ -212,6 +219,9 @@ describe("Category B — B3 end-to-end through detectAlerts", () => {
       secCompleteMonths: new Map(),
       lastSheetRead: new Map(),
       personsByNameKey: new Set(),
+      retailerPrimaryDist: new Map(),
+      distSecMonthly: new Map(),
+      headToStateHead: new Map(),
     };
 
     const result = detectAlerts(ctx, {
@@ -243,7 +253,7 @@ describe("Category B — B3 end-to-end through detectAlerts", () => {
     const ctx: DetectionContext = {
       pool: null as unknown as DetectionContext["pool"],
       customerSale: [], customerMeta: [], customerCode: [],
-      retailerSale: [rsRow(PRIOR_FY, "Apr-25", "RET-REDIR", 1_500_000)], // ≥ ₹10 L RETAILER_RUPEES floor
+      retailerSale: [rsRow(PRIOR_FY, "Apr-25", "RET-REDIR", 3_000_000)], // ≥ ₹25 L B3 individual floor
       retailerSku: [],
       secHeadMonths: [],
       mrpHistory: [], ambiguousCodes: new Set(), marginFact: [], persons: [],
@@ -253,6 +263,9 @@ describe("Category B — B3 end-to-end through detectAlerts", () => {
       secCompleteMonths: new Map(),
       lastSheetRead: new Map(),
       personsByNameKey: new Set(),
+      retailerPrimaryDist: new Map(),
+      distSecMonthly: new Map(),
+      headToStateHead: new Map(),
     };
 
     const result = detectAlerts(ctx, {

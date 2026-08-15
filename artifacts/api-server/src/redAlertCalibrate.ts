@@ -362,6 +362,9 @@ function printSection10(
     B5_BREADTH_DROP_FLOOR_PCT: 20,
     B5_PRIOR_CODE_FLOOR: 5,
     MATERIALITY_FLOORS: { DISTRIBUTOR_RUPEES: 0, DIRECT_DEALER_RUPEES: 0, RETAILER_RUPEES: 0 },
+    B3_RETAILER_ROLLUP_MIN_RETAILERS: 999,          // suppress rollup in raw-count section
+    B3_RETAILER_ROLLUP_MIN_COMBINED_RUPEES: 1e12,   // so we see individual counts
+    B3_RETAILER_INDIVIDUAL_FLOOR_RUPEES: 0,
   };
 
   const rawB = buildCategoryBAlerts(ctx, currentFy, primaryCompleteMonths, lowBCfg);

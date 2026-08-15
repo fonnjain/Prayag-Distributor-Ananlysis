@@ -51,6 +51,8 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
     secCompleteRes,
     retailerSaleRes,
     retailerSkuRes,
+    retailerPrimaryDistRes,
+    distSecMonthlyRes,
   ] = await Promise.all([
     // 1a. Customer sale aggregates — territory rows by fy/month/customer/group
     pool.query<{
@@ -219,6 +221,28 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
         GROUP BY fy, month_label, retailer, item_code, segment_canon`,
       secFyList,
     ),
+
+    // 14. Primary distributor per retailer per FY — for B3 rollup.
+    // DISTINCT ON picks the highest-value distributor for each (fy, retailer) pair.
+    pool.query<{ fy: string; retailer: string; distributor: string }>(
+      `SELECT DISTINCT ON (fy, retailer)
+              fy, retailer, distributor
+         FROM secondary_sku_line
+        WHERE fy = ANY(${secFyArr})
+          AND retailer IS NOT NULL AND distributor IS NOT NULL
+        GROUP BY fy, retailer, distributor
+        ORDER BY fy, retailer, SUM(net_amount) DESC`,
+      secFyList,
+    ),
+
+    // 15. Distributor monthly secondary sell-through — for S1 destocking.
+    pool.query<{ fy: string; month_label: string; distributor: string; val: string }>(
+      `SELECT fy, month_label, distributor, SUM(net_amount)::float8::text AS val
+         FROM secondary_sku_line
+        WHERE fy = ANY(${secFyArr}) AND distributor IS NOT NULL
+        GROUP BY fy, month_label, distributor`,
+      secFyList,
+    ),
   ]);
 
   // ── Build typed arrays ──────────────────────────────────────────────────────
@@ -360,6 +384,25 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
     value: Number(r.val),
   }));
 
+  // Build retailerPrimaryDist: fy → retailer → primary_distributor
+  const retailerPrimaryDist = new Map<string, Map<string, string>>();
+  for (const r of retailerPrimaryDistRes.rows) {
+    if (!retailerPrimaryDist.has(r.fy)) retailerPrimaryDist.set(r.fy, new Map());
+    retailerPrimaryDist.get(r.fy)!.set(r.retailer, r.distributor);
+  }
+
+  // Build distSecMonthly: `${distributor}|${fy}|${monthLabel}` → net_amount
+  const distSecMonthly = new Map<string, number>();
+  for (const r of distSecMonthlyRes.rows) {
+    distSecMonthly.set(`${r.distributor}|${r.fy}|${r.month_label}`, Number(r.val));
+  }
+
+  // Build headToStateHead: LOWER(canonical_name) → state_head (from person_registry)
+  const headToStateHead = new Map<string, string | null>();
+  for (const p of persons) {
+    headToStateHead.set(p.canonicalName.toLowerCase(), p.stateHead);
+  }
+
   // Build retailer → `${fy}|${monthLabel}` → Set<distributor>
   // Month-level granularity so Guard 5 can compare only within the alert window.
   const retailerDistributors = new Map<string, Map<string, Set<string>>>();
@@ -413,6 +456,9 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
     secCompleteMonths,
     lastSheetRead,
     personsByNameKey,
+    retailerPrimaryDist,
+    distSecMonthly,
+    headToStateHead,
   };
 }
 

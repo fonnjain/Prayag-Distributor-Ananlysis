@@ -12,6 +12,7 @@ import { runGuards } from "./guards.js";
 import { buildCategoryAAlerts } from "./categoryA.js";
 import { buildCategoryBAlerts } from "./categoryB.js";
 import { buildCategoryCAlerts } from "./categoryC.js";
+import { buildCategorySAlerts } from "./categoryS.js";
 
 // Load config at module initialisation via readFileSync so it works both from
 // src/ (tsc typecheck) and from dist/ (esbuild output) without resolveJsonModule
@@ -30,6 +31,9 @@ type RaConfig = {
     B2_NOMINAL_DECLINE_FLOOR_PCT: number; B2_SUSTAINED_PERIODS: number;
     B4_SEGMENT_FLOOR_RUPEES: number;
     B5_BREADTH_DROP_FLOOR_PCT: number; B5_PRIOR_CODE_FLOOR: number;
+    B3_RETAILER_ROLLUP_MIN_RETAILERS: number;
+    B3_RETAILER_ROLLUP_MIN_COMBINED_RUPEES: number;
+    B3_RETAILER_INDIVIDUAL_FLOOR_RUPEES: number;
   };
   CATEGORY_C_TERRITORY_SEGMENT: {
     C1_CONCENTRATION_SHARE_PCT: number; C1_DECLINE_PCT: number;
@@ -37,6 +41,10 @@ type RaConfig = {
     C3_SEGMENT_UNDER_INDEX_PTS: number;
     C4_GROSS_CONTRIBUTION_DROP_PCT: number;
     C5_SHEET_STALENESS_DAYS: number;
+  };
+  CATEGORY_S_SUPPLY: {
+    S1_CONSECUTIVE_ZERO_MONTHS: number;
+    S1_MIN_SECONDARY_RUPEES: number;
   };
   MATERIALITY_FLOORS: {
     DISTRIBUTOR_RUPEES: number; DIRECT_DEALER_RUPEES: number; RETAILER_RUPEES: number;
@@ -161,6 +169,9 @@ export function detectAlerts(
     B4_SEGMENT_FLOOR_RUPEES: cfg.CATEGORY_B_DEALERS_RETAILERS.B4_SEGMENT_FLOOR_RUPEES,
     B5_BREADTH_DROP_FLOOR_PCT: cfg.CATEGORY_B_DEALERS_RETAILERS.B5_BREADTH_DROP_FLOOR_PCT,
     B5_PRIOR_CODE_FLOOR: cfg.CATEGORY_B_DEALERS_RETAILERS.B5_PRIOR_CODE_FLOOR,
+    B3_RETAILER_ROLLUP_MIN_RETAILERS: cfg.CATEGORY_B_DEALERS_RETAILERS.B3_RETAILER_ROLLUP_MIN_RETAILERS,
+    B3_RETAILER_ROLLUP_MIN_COMBINED_RUPEES: cfg.CATEGORY_B_DEALERS_RETAILERS.B3_RETAILER_ROLLUP_MIN_COMBINED_RUPEES,
+    B3_RETAILER_INDIVIDUAL_FLOOR_RUPEES: cfg.CATEGORY_B_DEALERS_RETAILERS.B3_RETAILER_INDIVIDUAL_FLOOR_RUPEES,
     MATERIALITY_FLOORS: {
       DISTRIBUTOR_RUPEES: cfg.MATERIALITY_FLOORS.DISTRIBUTOR_RUPEES,
       DIRECT_DEALER_RUPEES: cfg.MATERIALITY_FLOORS.DIRECT_DEALER_RUPEES,
@@ -178,7 +189,12 @@ export function detectAlerts(
     C5_SHEET_STALENESS_DAYS: cfg.CATEGORY_C_TERRITORY_SEGMENT.C5_SHEET_STALENESS_DAYS,
   }, c5AsOfDate);
 
-  const allCandidates: RawAlert[] = [...aAlerts, ...bAlerts, ...cAlerts];
+  const sAlerts = buildCategorySAlerts(ctx, fy, primaryCompleteMonths, {
+    S1_CONSECUTIVE_ZERO_MONTHS: cfg.CATEGORY_S_SUPPLY.S1_CONSECUTIVE_ZERO_MONTHS,
+    S1_MIN_SECONDARY_RUPEES: cfg.CATEGORY_S_SUPPLY.S1_MIN_SECONDARY_RUPEES,
+  });
+
+  const allCandidates: RawAlert[] = [...aAlerts, ...bAlerts, ...cAlerts, ...sAlerts];
 
   // ── Build effective complete-month sets for Guard 3 ────────────────────────
   // Closed FYs are not backfilled into register_month_state, so frozenMonths for
@@ -217,7 +233,6 @@ export function detectAlerts(
   );
 
   // Rule 2: C5 fired for a member → suppress ALL alerts for that member's team.
-  // C5 entity is the member; find their stateHead.
   const c5Teams = new Set<string>();
   for (const alert of passedAlerts) {
     if (alert.code === "C5") {
@@ -225,17 +240,29 @@ export function detectAlerts(
       if (stateHead) c5Teams.add(stateHead);
     }
   }
-  // Build a map of headCanon → stateHead for suppression lookup
-  const headToStateHead = new Map<string, string>();
+  // Build a map of headCanon → stateHead for suppression lookup (from secHeadMonths)
+  const headToStateHeadSuppression = new Map<string, string>();
   for (const r of ctx.secHeadMonths) {
-    if (r.stateHead) headToStateHead.set(r.headCanon, r.stateHead);
+    if (r.stateHead) headToStateHeadSuppression.set(r.headCanon, r.stateHead);
   }
+
+  // Rule 3: A2 fired for an entity → suppress A1 for the SAME entityKey.
+  // A2 (zero booking = Critical) supersedes A1 (below threshold = Warning) for the same member.
+  const a2Members = new Set(
+    passedAlerts.filter((a) => a.code === "A2").map((a) => a.entityKey),
+  );
+
+  // Rule 4: S1 (destocking) distributor entityKey → link B3 distributor rollup cards
+  // (cross-linking in extraForReport, not suppression).
+  const s1Distributors = new Set(
+    passedAlerts.filter((a) => a.code === "S1").map((a) => a.entityKey),
+  );
 
   const finalAlerts: RawAlert[] = [];
   const crossSuppressed: SuppressedAlert[] = [];
 
   for (const alert of passedAlerts) {
-    // B3 cross-suppression
+    // B3 cross-suppression: stop detail alerts when entity stopped buying entirely
     if (
       b3Customers.has(alert.entityKey) &&
       ["B1", "B2", "B4", "B5"].includes(alert.code)
@@ -249,9 +276,20 @@ export function detectAlerts(
       continue;
     }
 
-    // C5 cross-suppression: if any team member has C5, suppress all A-category alerts for that team
+    // A2→A1 cross-suppression: A2 (zero booking) supersedes A1 (below threshold) for same member
+    if (alert.code === "A1" && a2Members.has(alert.entityKey)) {
+      crossSuppressed.push({
+        alert,
+        guard: 0,
+        reason: `A2 (zero booking — Critical) fired for this member — A1 (below threshold — Warning) superseded`,
+        suppressingCode: "A2",
+      });
+      continue;
+    }
+
+    // C5 cross-suppression: data blackout → suppress performance alerts for that team
     if (alert.category === "A") {
-      const memberStateHead = headToStateHead.get(alert.entityKey);
+      const memberStateHead = headToStateHeadSuppression.get(alert.entityKey);
       if (memberStateHead && c5Teams.has(memberStateHead)) {
         crossSuppressed.push({
           alert,
@@ -273,11 +311,24 @@ export function detectAlerts(
       }
     }
 
+    // B3-S1 cross-linking: if a rolled-up B3 distributor also has a destocking alert,
+    // annotate the B3 card so the UI can link them. Not a suppression — both fire.
+    if (alert.code === "B3" && alert.entityType === "distributor" && s1Distributors.has(alert.entityKey)) {
+      finalAlerts.push({
+        ...alert,
+        extraForReport: {
+          ...alert.extraForReport,
+          hasDestockingAlert: 1,  // 1 = true (extraForReport only allows string|number|null|undefined)
+        },
+      });
+      continue;
+    }
+
     finalAlerts.push(alert);
   }
 
   // ── Build by-code summary ───────────────────────────────────────────────────
-  const allCodes: AlertCode[] = ["A1","A2","A3","B1","B2","B3","B4","B5","C1","C2","C3","C4","C5"];
+  const allCodes: AlertCode[] = ["A1","A2","A3","B1","B2","B3","B4","B5","C1","C2","C3","C4","C5","S1"];
   const byCode = {} as Record<AlertCode, { count: number; rupeesAtStake: number }>;
   for (const code of allCodes) { byCode[code] = { count: 0, rupeesAtStake: 0 }; }
   for (const alert of finalAlerts) {

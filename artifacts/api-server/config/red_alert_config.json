@@ -1,80 +1,69 @@
 {
-  "_note": "Red Alert detection thresholds. All values are configurable — change here, not in source code. Capitalized comment keys explain each threshold.",
-
+  "_note": "Red Alert detection thresholds. All values are configurable \u2014 change here, not in source code. Capitalized comment keys explain each threshold.",
   "CATEGORY_A_SALESPERSON": {
     "_note": "Performance alerts for individual territory managers and teams. Requires a target to be present (Guard 7).",
-
     "A1_THRESHOLD_PCT": 35,
     "A1_THRESHOLD_NOTE": "Cumulative OB / pro-rated-to-date target below this % triggers A1. 35% means running at half-speed vs the seasonal plan.",
     "A1_SUSTAINED_MONTHS": 2,
     "A1_SUSTAINED_NOTE": "Number of consecutive complete months the achievement must stay below A1_THRESHOLD_PCT before the alert fires.",
-
     "A2_NOTE": "A2 fires on a single complete month with ordered_amount = 0 when plan_amount > 0. No separate threshold needed.",
-
     "A3_THRESHOLD_PCT": 45,
     "A3_THRESHOLD_NOTE": "Target-weighted team secondary achievement below this % triggers A3.",
     "A3_SUSTAINED_MONTHS": 2,
     "A3_SUSTAINED_NOTE": "Number of consecutive complete months the team achievement must stay below A3_THRESHOLD_PCT."
   },
-
   "CATEGORY_B_DEALERS_RETAILERS": {
-    "_note": "Alerts on individual customer / retailer behaviour. Like-months comparison only (Guard 2). Calibrated Aug 2026: retailer floor raised from ₹2 L to ₹10 L; B2 tightened from 25% to 40%; B5 code floor raised from 20 to 30; B5 drop floor raised from 50% to 60%.",
-
+    "_note": "Alerts on individual customer / retailer behaviour. Like-months comparison only (Guard 2). Calibrated Aug 2026: retailer floor raised from \u20b92 L to \u20b910 L; B2 tightened from 25% to 40%; B5 code floor raised from 20 to 30; B5 drop floor raised from 50% to 60%.",
     "B1_REAL_GROWTH_FLOOR_PCT": -20,
-    "B1_NOTE": "Real value growth (= nominal growth minus MRP-index increase) below this % triggers B1. At ₹10 L+ retailer floor this generates ~55 alerts per full FY — within the 20-alert page cap when sorted by rupees at stake.",
-
+    "B1_NOTE": "Real value growth (= nominal growth minus MRP-index increase) below this % triggers B1. At \u20b910 L+ retailer floor this generates ~55 alerts per full FY \u2014 within the 20-alert page cap when sorted by rupees at stake.",
     "B2_NOMINAL_DECLINE_FLOOR_PCT": 40,
     "B2_NOTE": "Nominal like-month value decline >= this % triggers B2. Raised from 25%: the 25% floor produced 87 retailer alerts in FY2025-26; 40% targets only severe sustained collapses.",
     "B2_SUSTAINED_PERIODS": 2,
     "B2_SUSTAINED_NOTE": "B2 requires decline in the current period vs prior AND in the prior period vs prior-prior.",
-
     "B3_NOTE": "B3 fires when a customer has zero purchase now and non-zero in the prior comparable period. Single occurrence, no threshold.",
-
     "B4_SEGMENT_FLOOR_RUPEES": 500000,
-    "B4_SEGMENT_FLOOR_NOTE": "B4 requires the prior-period segment value to be at least this amount (₹5 L) before a segment dropout is flagged.",
+    "B4_SEGMENT_FLOOR_NOTE": "B4 requires the prior-period segment value to be at least this amount (\u20b95 L) before a segment dropout is flagged.",
     "B4_NOTE": "B4 fires when a segment bought in the prior period has zero purchase now.",
-
     "B5_BREADTH_DROP_FLOOR_PCT": 60,
     "B5_BREADTH_DROP_FLOOR_NOTE": "Distinct item codes must drop by at least this % from prior period. Raised from 50%: a 50% drop in a 20-code basket is common seasonal variance; 60% targets structural collapse.",
     "B5_PRIOR_CODE_FLOOR": 30,
-    "B5_PRIOR_CODE_FLOOR_NOTE": "B5 only fires when the customer held >= this many distinct codes in the prior period. Raised from 20 to 30: ensures the breadth baseline is meaningful."
+    "B5_PRIOR_CODE_FLOOR_NOTE": "B5 only fires when the customer held >= this many distinct codes in the prior period. Raised from 20 to 30: ensures the breadth baseline is meaningful.",
+    "B3_RETAILER_ROLLUP_MIN_RETAILERS": 3,
+    "B3_RETAILER_ROLLUP_MIN_COMBINED_RUPEES": 5000000,
+    "B3_RETAILER_INDIVIDUAL_FLOOR_RUPEES": 2500000
   },
-
   "CATEGORY_C_TERRITORY_SEGMENT": {
-    "_note": "Territory, segment, and operational health alerts. C1/C2 require state_canon populated in sale_line_current; currently only FY2023-24 and FY2026-27 have territory rows with state_canon — older Schema-B FYs (2024-25, 2025-26) have is_territory=false and no state_canon, so C1/C2 will fire 0 for those FYs.",
-
+    "_note": "Territory, segment, and operational health alerts. C1/C2 require state_canon populated in sale_line_current; currently only FY2023-24 and FY2026-27 have territory rows with state_canon \u2014 older Schema-B FYs (2024-25, 2025-26) have is_territory=false and no state_canon, so C1/C2 will fire 0 for those FYs.",
     "C1_CONCENTRATION_SHARE_PCT": 60,
     "C1_CONCENTRATION_NOTE": "A customer carrying >= this share of a state's territory value triggers concentration check.",
     "C1_DECLINE_PCT": 15,
     "C1_DECLINE_NOTE": "The concentrated customer must decline >= this % for C1 to fire.",
-
     "C2_STATE_DECLINE_PCT": 15,
     "C2_STATE_DECLINE_NOTE": "State territory value down >= this % triggers C2.",
     "C2_SUSTAINED_PERIODS": 2,
     "C2_SUSTAINED_NOTE": "C2 requires decline in the current period AND the prior period.",
-
     "C3_SEGMENT_UNDER_INDEX_PTS": 20,
     "C3_NOTE": "A segment >= this many percentage points below the company rate (adjusted for its own seasonal position) triggers C3.",
-
     "C4_GROSS_CONTRIBUTION_DROP_PCT": 15,
     "C4_NOTE": "Gross contribution down >= this % while volume is up triggers C4. Only fires where factory cost (bom_cost) exists in margin_fact.",
-
     "C5_SHEET_STALENESS_DAYS": 30,
     "C5_NOTE": "A member whose working sheet has not been successfully read for >= this many days triggers C5. The secondary sheet pipeline runs every 6 hours when the server is active, so steady-state gaps are < 1 day. 30 days catches a genuinely broken pipeline (silent for a full calendar month) without false-positives from brief server downtime or a restart. The prior value of 10 days fired for all 161 FY2026-27 members after a 26-day server-inactive gap, well above the 20-alert page cap."
   },
-
   "MATERIALITY_FLOORS": {
-    "_note": "Minimum prior-period value for a customer to be considered for B-category alerts. Retailer floor raised from ₹2 L to ₹10 L (Aug 2026 calibration): at ₹2 L the engine produced 1,193 retailer alerts in FY2025-26 full-year; at ₹10 L the eligible pool falls to ~994 retailers and alert volume drops to a manageable level sortable by rupees at stake.",
+    "_note": "Minimum prior-period value for a customer to be considered for B-category alerts. Retailer floor raised from \u20b92 L to \u20b910 L (Aug 2026 calibration): at \u20b92 L the engine produced 1,193 retailer alerts in FY2025-26 full-year; at \u20b910 L the eligible pool falls to ~994 retailers and alert volume drops to a manageable level sortable by rupees at stake.",
     "DISTRIBUTOR_RUPEES": 2500000,
-    "DISTRIBUTOR_NOTE": "₹25 L prior-year territory value floor for distributor-level B alerts.",
+    "DISTRIBUTOR_NOTE": "\u20b925 L prior-year territory value floor for distributor-level B alerts.",
     "DIRECT_DEALER_RUPEES": 1500000,
-    "DIRECT_DEALER_NOTE": "₹15 L prior-year territory value floor for direct-dealer-level B alerts.",
+    "DIRECT_DEALER_NOTE": "\u20b915 L prior-year territory value floor for direct-dealer-level B alerts.",
     "RETAILER_RUPEES": 1000000,
-    "RETAILER_NOTE": "₹10 L prior-year secondary value floor for retailer-level B alerts. Raised from ₹2 L: the smaller floor covered ~2,300 eligible retailers and generated excessive noise."
+    "RETAILER_NOTE": "\u20b910 L prior-year secondary value floor for retailer-level B alerts. Raised from \u20b92 L: the smaller floor covered ~2,300 eligible retailers and generated excessive noise."
   },
-
   "GUARD_THRESHOLDS": {
     "PARTIAL_TENURE_WORKING_DAYS": 55,
     "PARTIAL_TENURE_NOTE": "Members with fewer than this many working days are excluded from A-category performance alerts (Guard 8)."
+  },
+  "CATEGORY_S_SUPPLY": {
+    "S1_CONSECUTIVE_ZERO_MONTHS": 3,
+    "S1_MIN_SECONDARY_RUPEES": 500000
   }
 }

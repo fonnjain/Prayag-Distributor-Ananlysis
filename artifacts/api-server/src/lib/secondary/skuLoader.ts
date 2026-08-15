@@ -232,6 +232,7 @@ export function parseTab(
       headRaw: headRaw || null,
       headCanon,
       stateRaw: null,
+      // stateCanon populated by post-load UPDATE (backfillSkuStateCanon) from person_registry
       stateCanon: null,
       retailer: retailer || null,
       retailerId: retailerId || null,

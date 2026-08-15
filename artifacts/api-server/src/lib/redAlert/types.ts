@@ -13,7 +13,8 @@ export type DbPool = {
 export type AlertCode =
   | "A1" | "A2" | "A3"         // Category A — salesperson
   | "B1" | "B2" | "B3" | "B4" | "B5"  // Category B — dealer/retailer
-  | "C1" | "C2" | "C3" | "C4" | "C5"; // Category C — territory/segment
+  | "C1" | "C2" | "C3" | "C4" | "C5"  // Category C — territory/segment
+  | "S1";                               // Category S — supply chain (destocking)
 
 export type EntityType =
   | "member"        // individual territory manager
@@ -52,7 +53,7 @@ export type AlertNumbers = {
 
 export type RawAlert = {
   code: AlertCode;
-  category: "A" | "B" | "C";
+  category: "A" | "B" | "C" | "S";
   entity: string;          // human-readable name for reports
   entityKey: string;       // DB lookup key (customer name, head_canon, state_canon, segment)
   entityType: EntityType;
@@ -235,6 +236,19 @@ export type DetectionContext = {
   // Preserving the month dimension prevents a reassignment outside the alert window
   // from suppressing a legitimate within-window B3.
   retailerDistributors: Map<string, Map<string, Set<string>>>;  // retailer → `${fy}|${month_label}` → Set<distributor>
+
+  // Primary (highest-value) distributor per retailer per FY — for B3 rollup.
+  // Built from secondary_sku_line: for each (fy, retailer), the distributor with the
+  // highest SUM(net_amount). Used to attribute a stopped retailer to its main supplier.
+  retailerPrimaryDist: Map<string, Map<string, string>>;  // fy → retailer → primary_distributor
+
+  // Distributor monthly secondary sell-through — for S1 destocking detection.
+  // Key: `${distributor_name}|${fy}|${monthLabel}`. Value: SUM(net_amount).
+  distSecMonthly: Map<string, number>;  // `${dist}|${fy}|${month}` → net_amount
+
+  // head_canon → state_head mapping derived from person_registry.
+  // head_canon = LOWER(canonical_name). Used by the territorial concentration alert.
+  headToStateHead: Map<string, string | null>;  // head_canon → state_head
 
   // Frozen months per FY (for Guard 3 — primary data completeness)
   frozenMonths: Map<string, Set<string>>;  // fy → Set<monthLabel>
