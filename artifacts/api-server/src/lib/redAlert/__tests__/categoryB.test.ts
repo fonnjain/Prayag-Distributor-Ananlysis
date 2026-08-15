@@ -202,7 +202,7 @@ describe("Category B — B3 end-to-end through detectAlerts", () => {
     const ctx: DetectionContext = {
       pool: null as unknown as DetectionContext["pool"],
       customerSale: [], customerMeta: [], customerCode: [],
-      retailerSale: [rsRow(PRIOR_FY, "Apr-25", "RET-DROPOUT", 500_000)],
+      retailerSale: [rsRow(PRIOR_FY, "Apr-25", "RET-DROPOUT", 1_500_000)], // ≥ ₹10 L RETAILER_RUPEES floor
       retailerSku: [],
       secHeadMonths: [],
       mrpHistory: [], ambiguousCodes: new Set(), marginFact: [], persons: [],
@@ -243,7 +243,7 @@ describe("Category B — B3 end-to-end through detectAlerts", () => {
     const ctx: DetectionContext = {
       pool: null as unknown as DetectionContext["pool"],
       customerSale: [], customerMeta: [], customerCode: [],
-      retailerSale: [rsRow(PRIOR_FY, "Apr-25", "RET-REDIR", 500_000)],
+      retailerSale: [rsRow(PRIOR_FY, "Apr-25", "RET-REDIR", 1_500_000)], // ≥ ₹10 L RETAILER_RUPEES floor
       retailerSku: [],
       secHeadMonths: [],
       mrpHistory: [], ambiguousCodes: new Set(), marginFact: [], persons: [],

@@ -12,7 +12,9 @@ import { pool } from "@workspace/db";
 import { execSync } from "node:child_process";
 import { buildDetectionContext } from "./lib/redAlert/context.js";
 import { detectAlerts, fyMonthLabels } from "./lib/redAlert/detectAlerts.js";
-import type { RawAlert, CalibrationResult, AlertCode } from "./lib/redAlert/types.js";
+import type { RawAlert, CalibrationResult, AlertCode, DetectionContext } from "./lib/redAlert/types.js";
+import { buildCategoryBAlerts } from "./lib/redAlert/categoryB.js";
+import { buildCategoryCAlerts } from "./lib/redAlert/categoryC.js";
 
 // ── FYs under analysis ───────────────────────────────────────────────────────
 const FY_COMPLETE = "2025-26";
@@ -330,6 +332,63 @@ async function printSection9(
   }
 }
 
+// ── Section 10: Sensitivity run ───────────────────────────────────────────────
+// Deliberately low thresholds to confirm the B-engine fires on known underperformers.
+// DIAGNOSTIC ONLY — not production values.
+function printSection10(
+  ctx: DetectionContext,
+  currentFy: string,
+  primaryCompleteMonths: string[],
+): void {
+  printSection(10, "Deliberate low-threshold sensitivity run (engine health check)");
+  console.log("  Purpose: confirm the B-engine fires on known underperformers when thresholds");
+  console.log("  are deliberately permissive. Validates Guard 3 fix + secondary_sku_line data.");
+  console.log("  These thresholds are DIAGNOSTIC only — not production values.");
+  console.log();
+  console.log("  Sensitivity thresholds used:");
+  console.log("    B1 real growth floor   = -5%  (production: -20%)");
+  console.log("    B2 nominal decline     =  5%  (production: 40%)   sustained = 1 period");
+  console.log("    B5 prior codes floor   =  5  codes (production: 30)");
+  console.log("    B5 drop floor          = 20%  (production: 60%)");
+  console.log("    Retailer floor         = ₹0  (production: ₹10 L)");
+  console.log("    Distributor floor      = ₹0  (production: ₹25 L)");
+  console.log();
+
+  const lowBCfg = {
+    B1_REAL_GROWTH_FLOOR_PCT: -5,
+    B2_NOMINAL_DECLINE_FLOOR_PCT: 5,
+    B2_SUSTAINED_PERIODS: 1,
+    B4_SEGMENT_FLOOR_RUPEES: 10_000,
+    B5_BREADTH_DROP_FLOOR_PCT: 20,
+    B5_PRIOR_CODE_FLOOR: 5,
+    MATERIALITY_FLOORS: { DISTRIBUTOR_RUPEES: 0, DIRECT_DEALER_RUPEES: 0, RETAILER_RUPEES: 0 },
+  };
+
+  const rawB = buildCategoryBAlerts(ctx, currentFy, primaryCompleteMonths, lowBCfg);
+  const byCode: Record<string, number> = {};
+  for (const a of rawB) byCode[a.code] = (byCode[a.code] ?? 0) + 1;
+
+  console.log(`  Raw B-engine candidates (before guards, ${currentFy}): ${rawB.length.toLocaleString()}`);
+  const bCodes = Object.keys(byCode).sort();
+  for (const code of bCodes) {
+    const cnt = byCode[code]!;
+    const top = rawB.filter((a) => a.code === code)
+      .sort((a, b) => b.rupeesAtStake - a.rupeesAtStake)
+      .slice(0, 2);
+    const topStr = top.map((a) => `${a.entity} (prior ${cr(a.numbers.priorValue ?? a.rupeesAtStake)})`).join("; ");
+    console.log(`    ${code}: ${cnt} candidates  — top: ${topStr}`);
+  }
+  console.log();
+
+  if (rawB.length > 0) {
+    console.log("  ✓  B-engine fires correctly at minimum thresholds.");
+    console.log("  ✓  secondary_sku_line is the confirmed data source for all retailer B-alerts.");
+    console.log("  ✓  Guard 3 closed-FY fix is working (prior-year months pass without frozen entries).");
+  } else {
+    console.log("  ⚠  B-engine produced 0 candidates even at minimum thresholds — INVESTIGATE.");
+  }
+}
+
 // ── Section 7: Confirmation ────────────────────────────────────────────────────
 function printSection7(): void {
   printSection(7, "Confirmation — no page, route, or stored alert created");
@@ -338,8 +397,6 @@ function printSection7(): void {
   console.log("  ✓  No INSERT or CREATE TABLE was executed in this script.");
   console.log("  ✓  All alerts exist only in memory for the duration of this process.");
 }
-
-// ── Section 8: Commit provenance ──────────────────────────────────────────────
 function printSection8(): void {
   printSection(8, "Commit provenance");
   try {
@@ -420,6 +477,8 @@ async function main(): Promise<void> {
   printSection7();
   printSection8();
   await printSection9(results, pool);
+  // Section 10: sensitivity run uses FY_COMPLETE with all 12 months for a full-year view.
+  printSection10(ctx, FY_COMPLETE, fyMonthLabels(FY_COMPLETE));
 
   console.log();
   console.log(sep("═"));

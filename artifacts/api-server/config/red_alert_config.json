@@ -18,13 +18,13 @@
   },
 
   "CATEGORY_B_DEALERS_RETAILERS": {
-    "_note": "Alerts on individual customer / retailer behaviour. Like-months comparison only (Guard 2).",
+    "_note": "Alerts on individual customer / retailer behaviour. Like-months comparison only (Guard 2). Calibrated Aug 2026: retailer floor raised from ₹2 L to ₹10 L; B2 tightened from 25% to 40%; B5 code floor raised from 20 to 30; B5 drop floor raised from 50% to 60%.",
 
     "B1_REAL_GROWTH_FLOOR_PCT": -20,
-    "B1_NOTE": "Real value growth (= nominal growth minus MRP-index increase) below this % triggers B1.",
+    "B1_NOTE": "Real value growth (= nominal growth minus MRP-index increase) below this % triggers B1. At ₹10 L+ retailer floor this generates ~55 alerts per full FY — within the 20-alert page cap when sorted by rupees at stake.",
 
-    "B2_NOMINAL_DECLINE_FLOOR_PCT": 25,
-    "B2_NOTE": "Nominal like-month value decline >= this % triggers B2.",
+    "B2_NOMINAL_DECLINE_FLOOR_PCT": 40,
+    "B2_NOTE": "Nominal like-month value decline >= this % triggers B2. Raised from 25%: the 25% floor produced 87 retailer alerts in FY2025-26; 40% targets only severe sustained collapses.",
     "B2_SUSTAINED_PERIODS": 2,
     "B2_SUSTAINED_NOTE": "B2 requires decline in the current period vs prior AND in the prior period vs prior-prior.",
 
@@ -34,14 +34,14 @@
     "B4_SEGMENT_FLOOR_NOTE": "B4 requires the prior-period segment value to be at least this amount (₹5 L) before a segment dropout is flagged.",
     "B4_NOTE": "B4 fires when a segment bought in the prior period has zero purchase now.",
 
-    "B5_BREADTH_DROP_FLOOR_PCT": 50,
-    "B5_BREADTH_DROP_FLOOR_NOTE": "Distinct item codes must drop by at least this % from prior period.",
-    "B5_PRIOR_CODE_FLOOR": 20,
-    "B5_PRIOR_CODE_FLOOR_NOTE": "B5 only fires when the customer held >= this many distinct codes in the prior period."
+    "B5_BREADTH_DROP_FLOOR_PCT": 60,
+    "B5_BREADTH_DROP_FLOOR_NOTE": "Distinct item codes must drop by at least this % from prior period. Raised from 50%: a 50% drop in a 20-code basket is common seasonal variance; 60% targets structural collapse.",
+    "B5_PRIOR_CODE_FLOOR": 30,
+    "B5_PRIOR_CODE_FLOOR_NOTE": "B5 only fires when the customer held >= this many distinct codes in the prior period. Raised from 20 to 30: ensures the breadth baseline is meaningful."
   },
 
   "CATEGORY_C_TERRITORY_SEGMENT": {
-    "_note": "Territory, segment, and operational health alerts.",
+    "_note": "Territory, segment, and operational health alerts. C1/C2 require state_canon populated in sale_line_current; currently only FY2023-24 and FY2026-27 have territory rows with state_canon — older Schema-B FYs (2024-25, 2025-26) have is_territory=false and no state_canon, so C1/C2 will fire 0 for those FYs.",
 
     "C1_CONCENTRATION_SHARE_PCT": 60,
     "C1_CONCENTRATION_NOTE": "A customer carrying >= this share of a state's territory value triggers concentration check.",
@@ -64,13 +64,13 @@
   },
 
   "MATERIALITY_FLOORS": {
-    "_note": "Minimum prior-period value for a customer to be considered for B-category alerts.",
+    "_note": "Minimum prior-period value for a customer to be considered for B-category alerts. Retailer floor raised from ₹2 L to ₹10 L (Aug 2026 calibration): at ₹2 L the engine produced 1,193 retailer alerts in FY2025-26 full-year; at ₹10 L the eligible pool falls to ~994 retailers and alert volume drops to a manageable level sortable by rupees at stake.",
     "DISTRIBUTOR_RUPEES": 2500000,
     "DISTRIBUTOR_NOTE": "₹25 L prior-year territory value floor for distributor-level B alerts.",
     "DIRECT_DEALER_RUPEES": 1500000,
     "DIRECT_DEALER_NOTE": "₹15 L prior-year territory value floor for direct-dealer-level B alerts.",
-    "RETAILER_RUPEES": 200000,
-    "RETAILER_NOTE": "₹2 L prior-year secondary value floor for retailer-level B alerts."
+    "RETAILER_RUPEES": 1000000,
+    "RETAILER_NOTE": "₹10 L prior-year secondary value floor for retailer-level B alerts. Raised from ₹2 L: the smaller floor covered ~2,300 eligible retailers and generated excessive noise."
   },
 
   "GUARD_THRESHOLDS": {
