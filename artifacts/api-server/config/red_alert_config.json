@@ -59,8 +59,8 @@
     "C4_GROSS_CONTRIBUTION_DROP_PCT": 15,
     "C4_NOTE": "Gross contribution down >= this % while volume is up triggers C4. Only fires where factory cost (bom_cost) exists in margin_fact.",
 
-    "C5_SHEET_STALENESS_DAYS": 10,
-    "C5_NOTE": "A member whose working sheet has not been successfully read for >= this many days triggers C5."
+    "C5_SHEET_STALENESS_DAYS": 30,
+    "C5_NOTE": "A member whose working sheet has not been successfully read for >= this many days triggers C5. The secondary sheet pipeline runs every 6 hours when the server is active, so steady-state gaps are < 1 day. 30 days catches a genuinely broken pipeline (silent for a full calendar month) without false-positives from brief server downtime or a restart. The prior value of 10 days fired for all 161 FY2026-27 members after a 26-day server-inactive gap, well above the 20-alert page cap."
   },
 
   "MATERIALITY_FLOORS": {
