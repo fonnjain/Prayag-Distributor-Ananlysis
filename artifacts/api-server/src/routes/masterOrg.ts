@@ -30,13 +30,12 @@ function requireAdmin(req: any, res: any): boolean {
 }
 
 // ── GET /api/master/designations ──────────────────────────────────────────────
+// Returns all designation records ordered by rank (lowest rank = most senior).
 
 router.get("/master/designations", async (_req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT designation_id, name, rank
-       FROM designation
-       ORDER BY rank`,
+      `SELECT designation_id, name, rank FROM designation ORDER BY rank ASC NULLS LAST`,
     );
     res.json(rows);
   } catch (err) {
@@ -45,16 +44,14 @@ router.get("/master/designations", async (_req, res) => {
 });
 
 // ── GET /api/master/people ────────────────────────────────────────────────────
-// Paginated list of people with optional search and filters.
-// Query params: q (name search), active (true/false/all), designation_id, page, limit
+// Paginated list of people with search, active-filter, and designation filter.
+// Query params: q, active (true/false/all), designation_id, page, limit
 
 router.get("/master/people", async (req, res) => {
   try {
     const q = String(req.query.q ?? "").trim();
     const activeFilter = String(req.query.active ?? "all");
-    const desigId = req.query.designation_id
-      ? Number(req.query.designation_id)
-      : null;
+    const desigId = req.query.designation_id ? Number(req.query.designation_id) : null;
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
     const offset = (page - 1) * limit;
@@ -68,7 +65,6 @@ router.get("/master/people", async (req, res) => {
     }
     if (activeFilter === "true") where.push("p.is_active = true");
     else if (activeFilter === "false") where.push("p.is_active = false");
-
     if (desigId !== null) {
       params.push(desigId);
       where.push(`p.designation_id = $${params.length}`);
@@ -79,19 +75,20 @@ router.get("/master/people", async (req, res) => {
     const [countRes, dataRes] = await Promise.all([
       pool.query(`SELECT COUNT(*) FROM person p ${wc}`, params),
       pool.query(
-        `SELECT p.person_id,
-                p.name,
-                p.employee_code,
-                p.is_active,
-                p.is_state_head,
-                p.headquarter,
-                d.name AS designation_name,
-                d.rank AS designation_rank,
-                (SELECT COUNT(*) FROM person sub WHERE sub.reports_to_person_id = p.person_id) AS direct_report_count,
-                (SELECT COUNT(*) FROM customer_assignment ca WHERE ca.state_head_person_id = p.person_id AND ca.effective_to IS NULL) AS customers_as_state_head,
-                (SELECT COUNT(*) FROM customer_assignment ca WHERE ca.person_id = p.person_id AND ca.effective_to IS NULL) AS customers_as_tm
+        `SELECT p.person_id, p.name, p.employee_code, p.is_active, p.is_state_head,
+                d.designation_id, d.name AS designation_name, d.rank AS designation_rank,
+                mgr.person_id AS reports_to_person_id, mgr.name AS reports_to_name,
+                (SELECT COUNT(*) FROM person sub WHERE sub.reports_to_person_id = p.person_id
+                ) AS direct_reports,
+                (SELECT COUNT(*) FROM customer_assignment ca
+                 WHERE ca.state_head_person_id = p.person_id AND ca.effective_to IS NULL
+                ) AS customers_as_sh,
+                (SELECT COUNT(*) FROM customer_assignment ca
+                 WHERE ca.person_id = p.person_id AND ca.effective_to IS NULL
+                ) AS customers_as_tm
          FROM person p
-         LEFT JOIN designation d ON d.designation_id = p.designation_id
+         LEFT JOIN designation d   ON d.designation_id = p.designation_id
+         LEFT JOIN person      mgr ON mgr.person_id    = p.reports_to_person_id
          ${wc}
          ORDER BY p.is_active DESC, d.rank ASC NULLS LAST, p.name
          LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
@@ -99,7 +96,73 @@ router.get("/master/people", async (req, res) => {
       ),
     ]);
 
-    res.json({ total: Number(countRes.rows[0].count), people: dataRes.rows });
+    const total = Number(countRes.rows[0].count);
+    res.json({ people: dataRes.rows, total, page, pages: Math.ceil(total / limit) });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 3 — CUSTOMER MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── GET /api/master/customers ─────────────────────────────────────────────────
+// Paginated list of customers with their current (open) assignment.
+// Query params: q, type, page, limit
+
+router.get("/master/customers", async (req, res) => {
+  try {
+    const q = String(req.query.q ?? "").trim();
+    const type = String(req.query.type ?? "").trim();
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+    const offset = (page - 1) * limit;
+
+    const where: string[] = [];
+    const params: unknown[] = [];
+
+    if (q) {
+      params.push(`%${q}%`);
+      where.push(`(c.name ILIKE $${params.length} OR c.customer_id ILIKE $${params.length})`);
+    }
+    if (type) {
+      params.push(type);
+      where.push(`c.type = $${params.length}`);
+    }
+
+    const wc = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+    const [countRes, dataRes] = await Promise.all([
+      pool.query(`SELECT COUNT(*) FROM customer c ${wc}`, params),
+      pool.query(
+        `SELECT c.customer_id,
+                c.name,
+                c.type,
+                c.status,
+                ca.person_id,
+                p.name       AS person_name,
+                ca.state_head_person_id,
+                sh.name      AS state_head_name,
+                ca.confidence,
+                ca.effective_from::text,
+                EXISTS(
+                  SELECT 1 FROM customer_link cl
+                  WHERE cl.retailer_id = c.customer_id OR cl.distributor_id = c.customer_id
+                ) AS has_link
+         FROM customer c
+         LEFT JOIN customer_assignment ca
+           ON ca.customer_id = c.customer_id AND ca.effective_to IS NULL
+         LEFT JOIN person p  ON p.person_id  = ca.person_id
+         LEFT JOIN person sh ON sh.person_id = ca.state_head_person_id
+         ${wc}
+         ORDER BY c.name
+         LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+        [...params, limit, offset],
+      ),
+    ]);
+
+    res.json({ total: Number(countRes.rows[0].count), customers: dataRes.rows });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -119,8 +182,8 @@ router.get("/master/people/:id", async (req, res) => {
           `SELECT p.person_id, p.name, p.employee_code, p.is_active,
                   p.is_state_head, p.headquarter, p.order_type, p.source,
                   d.designation_id, d.name AS designation_name,
-                  mgr.person_id AS manager_id, mgr.name AS manager_name,
-                  sh.person_id  AS state_head_id, sh.name AS state_head_name,
+                  mgr.person_id AS reports_to_person_id, mgr.name AS reports_to_name,
+                  sh.person_id  AS state_head_person_id, sh.name AS state_head_name,
                   (SELECT COUNT(*) FROM customer_assignment ca
                    WHERE ca.state_head_person_id = p.person_id AND ca.effective_to IS NULL
                   ) AS customers_as_state_head,
@@ -182,8 +245,9 @@ router.get("/master/people/:id", async (req, res) => {
       return void res.status(404).json({ error: "Person not found" });
 
     const p = personRes.rows[0];
-    const csh = Number(p.customers_as_state_head);
-    const ctm = Number(p.customers_as_tm);
+    // Customer scope counts are inlined in the person query (customers_as_state_head/as_tm).
+    const csh = Number(p.customers_as_state_head ?? 0);
+    const ctm = Number(p.customers_as_tm ?? 0);
 
     res.json({
       person: p,
@@ -230,19 +294,23 @@ router.get("/master/people/:id/impact", async (req, res) => {
       [personId],
     );
 
-    // Customers assigned as state head or TM (open assignments only)
+    // Customers assigned as state head or TM (open assignments only).
+    // COUNT(DISTINCT customer_id) is used for the total so that a customer where
+    // this person is BOTH state_head and TM is not double-counted.
     const custRes = await pool.query(
       `SELECT
-         COUNT(*) FILTER (WHERE ca.state_head_person_id = $1) AS as_state_head,
-         COUNT(*) FILTER (WHERE ca.person_id = $1)            AS as_tm
-       FROM customer_assignment ca
-       WHERE ca.effective_to IS NULL
-         AND (ca.state_head_person_id = $1 OR ca.person_id = $1)`,
+         COUNT(*) FILTER (WHERE state_head_person_id = $1) AS as_state_head,
+         COUNT(*) FILTER (WHERE person_id = $1)            AS as_tm,
+         COUNT(DISTINCT customer_id)                       AS total_distinct
+       FROM customer_assignment
+       WHERE effective_to IS NULL
+         AND (state_head_person_id = $1 OR person_id = $1)`,
       [personId],
     );
 
     const csh = Number(custRes.rows[0]?.as_state_head ?? 0);
     const ctm = Number(custRes.rows[0]?.as_tm ?? 0);
+    const totalDistinct = Number(custRes.rows[0]?.total_distinct ?? 0);
 
     // Person name
     const nameRes = await pool.query(
@@ -257,7 +325,7 @@ router.get("/master/people/:id/impact", async (req, res) => {
       subTreeIds,
       customersAsStateHead: csh,
       customersAsTm: ctm,
-      totalCustomersAffected: csh + ctm,
+      totalCustomersAffected: totalDistinct,
     });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -290,16 +358,15 @@ router.patch("/master/people/:id", async (req, res) => {
       acknowledgedCustomers?: number;
       changed_by?: string;
     };
-
-    // Read current state
-    const current = await pool.query(
-      `SELECT name, employee_code, designation_id, reports_to_person_id
+    // Read current state of this person
+    const prevRes = await pool.query(
+      `SELECT name, employee_code, designation_id, reports_to_person_id, is_active
        FROM person WHERE person_id = $1`,
       [personId],
     );
-    if (!current.rows[0])
+    if (!prevRes.rows[0])
       return void res.status(404).json({ error: "Person not found" });
-    const prev = current.rows[0];
+    const prev = prevRes.rows[0];
 
     // If reports_to is changing, require impact acknowledgment
     const reportsToChanging =
@@ -329,7 +396,7 @@ router.patch("/master/people/:id", async (req, res) => {
           return void res.status(400).json({ error: "Cycle detected: new manager is a descendant of this person" });
       }
 
-      // Re-verify impact
+      // Re-verify impact counts match what the client acknowledged
       const impactRes = await pool.query(
         `WITH RECURSIVE tree AS (
            SELECT person_id FROM person WHERE reports_to_person_id = $1
@@ -339,24 +406,24 @@ router.patch("/master/people/:id", async (req, res) => {
          SELECT COUNT(*) AS sub_tree FROM tree`,
         [personId],
       );
-      const custRes = await pool.query(
-        `SELECT COUNT(*) AS cust FROM customer_assignment
+      const custImpactRes = await pool.query(
+        `SELECT COUNT(DISTINCT customer_id) AS cust FROM customer_assignment
          WHERE effective_to IS NULL
            AND (state_head_person_id = $1 OR person_id = $1)`,
         [personId],
       );
       const liveSubTree = Number(impactRes.rows[0].sub_tree);
-      const liveCust = Number(custRes.rows[0].cust);
+      const liveCust = Number(custImpactRes.rows[0].cust);
 
       if (liveSubTree !== acknowledgedSubTree || liveCust !== acknowledgedCustomers) {
         return void res.status(409).json({
-          error: "Impact has changed since preview — please re-fetch /impact and confirm again.",
+          error:
+            "Impact has changed since preview — please re-fetch /impact and confirm again.",
           current: { subTreeCount: liveSubTree, totalCustomersAffected: liveCust },
         });
       }
-    }
+    } // end if (reportsToChanging)
 
-    // Apply updates and write change log
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -443,7 +510,7 @@ router.post("/master/people/:id/deactivate", async (req, res) => {
       [personId],
     );
     const custRes = await pool.query(
-      `SELECT COUNT(*) AS cust FROM customer_assignment
+      `SELECT COUNT(DISTINCT customer_id) AS cust FROM customer_assignment
        WHERE effective_to IS NULL
          AND (state_head_person_id = $1 OR person_id = $1)`,
       [personId],
@@ -526,23 +593,13 @@ router.post("/master/people/:id/reactivate", async (req, res) => {
 
 router.get("/master/unresolved-links", async (_req, res) => {
   try {
-    const { rows } = await pool.query<{
-      id: number;
-      raw_name: string;
-      link_count: number;
-      notes: string | null;
-      resolution: string | null;
-      mapped_to_id: string | null;
-      resolved_by: string | null;
-      resolved_at: string | null;
-    }>(
-      `SELECT id, raw_name, link_count, notes, resolution, mapped_to_id,
-              resolved_by, resolved_at::text
+    const { rows } = await pool.query(
+      `SELECT id, raw_name, link_count, notes, resolution, mapped_to_id, resolved_by, resolved_at::text
        FROM seed_unresolved_link
-       ORDER BY link_count DESC`,
+       ORDER BY resolution NULLS FIRST, link_count DESC`,
     );
-    const totalLostLinks = rows.reduce((s, r) => s + r.link_count, 0);
-    res.json({ items: rows, totalLostLinks, unresolvedCount: rows.filter(r => !r.resolution).length });
+    const totalLostLinks = rows.reduce((s: number, r: any) => s + Number(r.link_count ?? 0), 0);
+    res.json({ items: rows, totalLostLinks, unresolvedCount: rows.filter((r: any) => !r.resolution).length });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -591,24 +648,11 @@ router.post("/master/unresolved-links/:id/resolve", async (req, res) => {
 
 router.get("/master/verify/inactive-managers", async (_req, res) => {
   try {
-    const { rows } = await pool.query<{
-      person_id: number;
-      name: string;
-      designation_name: string | null;
-      manager_id: number;
-      manager_name: string;
-      manager_active: boolean;
-    }>(
-      `SELECT
-         p.person_id,
-         p.name,
-         d.name  AS designation_name,
-         mgr.person_id AS manager_id,
-         mgr.name      AS manager_name,
-         mgr.is_active AS manager_active
+    const { rows } = await pool.query(
+      `SELECT p.person_id, p.name, p.employee_code,
+              mgr.person_id AS manager_person_id, mgr.name AS manager_name
        FROM person p
        JOIN person mgr ON mgr.person_id = p.reports_to_person_id
-       LEFT JOIN designation d ON d.designation_id = p.designation_id
        WHERE p.is_active = true AND mgr.is_active = false
        ORDER BY mgr.name, p.name`,
     );
@@ -620,71 +664,6 @@ router.get("/master/verify/inactive-managers", async (_req, res) => {
           ? "Clean — no active person reports to an inactive manager."
           : `${rows.length} active people report to an inactive manager.`,
     });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// PHASE 3 — CUSTOMER MANAGEMENT
-// ═══════════════════════════════════════════════════════════════════════════
-
-// ── GET /api/master/customers ─────────────────────────────────────────────────
-// Paginated list of customers with their current (open) assignment.
-// Query params: q, type, page, limit
-
-router.get("/master/customers", async (req, res) => {
-  try {
-    const q = String(req.query.q ?? "").trim();
-    const type = String(req.query.type ?? "").trim();
-    const page = Math.max(1, Number(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
-    const offset = (page - 1) * limit;
-
-    const where: string[] = [];
-    const params: unknown[] = [];
-
-    if (q) {
-      params.push(`%${q}%`);
-      where.push(`(c.name ILIKE $${params.length} OR c.customer_id ILIKE $${params.length})`);
-    }
-    if (type) {
-      params.push(type);
-      where.push(`c.type = $${params.length}`);
-    }
-
-    const wc = where.length ? `WHERE ${where.join(" AND ")}` : "";
-
-    const [countRes, dataRes] = await Promise.all([
-      pool.query(`SELECT COUNT(*) FROM customer c ${wc}`, params),
-      pool.query(
-        `SELECT c.customer_id,
-                c.name,
-                c.type,
-                c.status,
-                ca.person_id,
-                p.name       AS person_name,
-                ca.state_head_person_id,
-                sh.name      AS state_head_name,
-                ca.confidence,
-                ca.effective_from::text,
-                EXISTS(
-                  SELECT 1 FROM customer_link cl
-                  WHERE cl.retailer_id = c.customer_id OR cl.distributor_id = c.customer_id
-                ) AS has_link
-         FROM customer c
-         LEFT JOIN customer_assignment ca
-           ON ca.customer_id = c.customer_id AND ca.effective_to IS NULL
-         LEFT JOIN person p  ON p.person_id  = ca.person_id
-         LEFT JOIN person sh ON sh.person_id = ca.state_head_person_id
-         ${wc}
-         ORDER BY c.name
-         LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-        [...params, limit, offset],
-      ),
-    ]);
-
-    res.json({ total: Number(countRes.rows[0].count), customers: dataRes.rows });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -732,9 +711,9 @@ router.get("/master/customers/unassigned", async (req, res) => {
     const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
     const offset = (page - 1) * limit;
 
-    const conds: string[] = ["ca.effective_to IS NULL", "ca.person_id IS NULL"];
-    const params: unknown[] = [];
-    let pi = 1;
+      const conds = ["ca.effective_to IS NULL", "ca.person_id IS NULL"];
+      const params: unknown[] = [];
+      let pi = 1;
     if (type) { conds.push(`c.type = $${pi++}`); params.push(type); }
     if (territoryId) { conds.push(`c.territory_id = $${pi++}`); params.push(territoryId); }
     const where = conds.join(" AND ");
@@ -909,15 +888,11 @@ router.post("/master/customers/bulk-assign", async (req, res) => {
 router.get("/master/customers/review-queue", async (_req, res) => {
   try {
     const result = await pool.query(
-      `SELECT rq.id, rq.name, rq.type, rq.notes,
-              rq.submitted_by, rq.submitted_at, rq.review_status,
-              rq.reviewed_by, rq.reviewed_at, rq.approved_customer_id,
-              t.name AS territory_name,
-              p.name AS proposed_person_name
-       FROM customer_review_queue rq
-       LEFT JOIN territory t ON t.territory_id = rq.proposed_territory_id
-       LEFT JOIN person p ON p.person_id = rq.proposed_person_id
-       ORDER BY rq.submitted_at DESC`,
+      `SELECT id, name, type, proposed_territory_id, proposed_person_id,
+              notes, submitted_by, review_status, reviewed_by, reviewed_at,
+              created_at::text
+       FROM customer_review_queue
+       ORDER BY created_at DESC`,
     );
     const pending = result.rows.filter((r) => r.review_status === "pending").length;
     res.json({ total: result.rows.length, pending, items: result.rows });
@@ -946,16 +921,24 @@ router.post("/master/customers/review-queue", async (req, res) => {
       return void res.status(400).json({ error: "name is required" });
     }
 
-    const validTypes = ["retailer","distributor","direct_dealer","sub_dealer","project","govt","other"];
+    const validTypes = [
+      "retailer","distributor","direct_dealer","sub_dealer","project","govt","other",
+    ];
     const safeType = validTypes.includes(type ?? "") ? type! : "retailer";
 
     const result = await pool.query(
       `INSERT INTO customer_review_queue
-         (name, type, proposed_territory_id, proposed_person_id, notes, submitted_by)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, name, type, review_status, submitted_at`,
-      [name.trim(), safeType, proposed_territory_id ?? null,
-       proposed_person_id ?? null, notes ?? null, submitted_by ?? "unknown"],
+         (name, type, proposed_territory_id, proposed_person_id, notes, submitted_by, review_status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+       RETURNING *`,
+      [
+        name.trim(),
+        safeType,
+        proposed_territory_id ?? null,
+        proposed_person_id ?? null,
+        notes ?? null,
+        submitted_by ?? null,
+      ],
     );
 
     res.status(201).json({ success: true, item: result.rows[0] });

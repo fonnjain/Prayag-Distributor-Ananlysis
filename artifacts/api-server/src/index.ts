@@ -86,6 +86,35 @@ runMigrations()
     void assertHeadCoverage();
     // One-line startup log: how many customer_master rows have a state_head.
     void logCustomerStateHeadCoverage().catch(() => {/* non-fatal */});
+    // ── secondary_sku_line state_canon residual check ─────────────────────────
+    // If state_canon is NULL on more than ~17k rows (the irreducible structural
+    // residual from names that never appear in any register with a head column),
+    // migration 032 or the post-load backfill has not run yet.
+    // Threshold: 50k rows — well above the structural residual but below the
+    // 549k gap that existed before this migration.
+    void (async () => {
+      try {
+        const { getSkuStateCanonResidual, SKU_STATE_CANON_MATERIALITY_THRESHOLD } = await import(
+          "./lib/secondary/skuLoader.js"
+        );
+        const { nullCount, total } = await getSkuStateCanonResidual();
+        if (total === 0) return; // table not yet loaded — skip
+        if (nullCount > SKU_STATE_CANON_MATERIALITY_THRESHOLD) {
+          logger.warn(
+            { nullCount, total, threshold: SKU_STATE_CANON_MATERIALITY_THRESHOLD },
+            `[skuStateCanon] WARNING: ${nullCount.toLocaleString()} of ${total.toLocaleString()} secondary_sku_line rows have state_canon=NULL — exceeds threshold of ${SKU_STATE_CANON_MATERIALITY_THRESHOLD.toLocaleString()}. ` +
+              "Migration 034 should have resolved this. Re-seed person_registry or POST /api/sku/backfill-state-canon.",
+          );
+        } else {
+          logger.info(
+            { nullCount, total },
+            `[skuStateCanon] state_canon coverage OK: ${nullCount.toLocaleString()} NULL rows of ${total.toLocaleString()} total (within materiality threshold)`,
+          );
+        }
+      } catch (err) {
+        logger.warn({ err }, "[skuStateCanon] startup residual check failed (non-fatal)");
+      }
+    })();
     // ── Secondary sheet pipeline staleness check ──────────────────────────────
     // If MAX(ingested_at) across ALL members in secondary_head_month is > 2 days
     // old, the 6-hour secondary dashboard scheduler (wired below in the listen

@@ -1244,6 +1244,36 @@ router.get("/sku/secondary-backfill", (_req: Request, res: Response): void => {
   res.json(_skuBackfill);
 });
 
+// ── POST /api/sku/backfill-state-canon ───────────────────────────────────────
+//
+// Admin route: re-runs the state_canon backfill on secondary_sku_line from the
+// current person_registry.state_head values.  Safe to call at any time —
+// idempotent (only touches NULL state_canon rows).
+//
+// Optional query param: fy (e.g. 2025-26) — limits the update to one FY.
+// Requires X-Admin-Secret header.
+
+router.post("/sku/backfill-state-canon", async (req: Request, res: Response): Promise<void> => {
+  const adminSecret = String(req.headers["x-admin-secret"] ?? "").trim();
+  if (!isAdminToken(adminSecret)) {
+    res.status(401).json({
+      error: "Admin authorisation required. Pass the SESSION_SECRET as: X-Admin-Secret: <SESSION_SECRET>",
+    });
+    return;
+  }
+  const fy = typeof req.query.fy === "string" ? req.query.fy : undefined;
+  try {
+    const { backfillSkuStateCanon, getSkuStateCanonResidual } = await import(
+      "../lib/secondary/skuLoader.js"
+    );
+    const updated = await backfillSkuStateCanon(fy);
+    const { nullCount, total } = await getSkuStateCanonResidual();
+    res.json({ updated, residual: { nullCount, total }, fy: fy ?? "all" });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // ── GET /api/sku/retailer-coverage ───────────────────────────────────────────
 //
 // Admin diagnostic: compares per-member and per-retailer totals between

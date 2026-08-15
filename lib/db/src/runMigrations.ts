@@ -19,11 +19,6 @@
 
 import { pool } from "./index.js";
 
-interface Migration {
-  id: string;
-  sql: string;
-}
-
 const MIGRATIONS: Migration[] = [
   {
     id: "002_ingest_run_rows_per_month",
@@ -1134,6 +1129,85 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    id: "034_populate_person_registry_state_head",
+    sql: `
+      -- Populate person_registry.state_head from the Phase 1 person table.
+      --
+      -- The person table (migration 030) stores state_head_person_id as a FK to
+      -- the person who is the state head for each territory member.  person_registry
+      -- was built from the HR roster which only knows the direct reporting manager,
+      -- not necessarily the state head — so many rows have state_head = NULL.
+      -- 549k secondary_sku_line rows resolve a head but cannot roll up to a territory
+      -- because the corresponding person_registry.state_head is NULL.
+      --
+      -- Step 1: Propagate state_head from person → person_registry via name match.
+      -- Idempotent: only touches rows where state_head IS NULL.
+      UPDATE person_registry pr
+      SET
+        state_head = sh.name,
+        updated_at = now()
+      FROM person p
+      JOIN person sh ON sh.person_id = p.state_head_person_id
+      WHERE LOWER(TRIM(p.name)) = LOWER(TRIM(pr.canonical_name))
+        AND p.state_head_person_id IS NOT NULL
+        AND pr.state_head IS NULL;
+
+      -- Step 2: State heads themselves — ensure their own state_head field is set
+      -- to their canonical name (they are their own territory head).
+      UPDATE person_registry pr
+      SET
+        state_head = pr.canonical_name,
+        updated_at = now()
+      WHERE pr.is_state_head = TRUE
+        AND pr.state_head IS NULL;
+
+      -- Step 3: Backfill secondary_sku_line.state_canon from person_registry.
+      --
+      -- head_canon is produced by skuLoader's headNormKey():
+      --   headNormKey(x) = x.toLowerCase().replace(/\s+/g, " ").trim()
+      -- In SQL: REGEXP_REPLACE(LOWER(TRIM(x)), '\s+', ' ', 'g')
+      --
+      -- Join strategy (two paths, priority-ordered):
+      --   Path A — exact norm_key match: works for employee-code norm_keys.
+      --   Path B — normalised display name: alias_secondary holds the secondary-register
+      --            display spelling (the TEAM MEMBER column value); canonical_name is the
+      --            fallback when alias_secondary is absent.
+      --
+      -- Only unambiguous matches: a head_canon must resolve to exactly one state_head
+      -- across all registry entries (both paths). HAVING COUNT(DISTINCT) = 1 rejects
+      -- any head_canon where two or more registry rows disagree — those names are left
+      -- NULL and reported in the residual warning.  MIN() is deterministic when the
+      -- distinct count is 1 (all values are identical).
+      WITH registry_norm AS (
+        SELECT
+          norm_key,
+          REGEXP_REPLACE(LOWER(TRIM(COALESCE(alias_secondary, canonical_name))), '\s+', ' ', 'g')
+            AS display_key,
+          state_head
+        FROM person_registry
+        WHERE state_head IS NOT NULL
+      ),
+      head_match AS (
+        SELECT
+          ssl.head_canon,
+          MIN(rm.state_head) AS state_head   -- safe: MIN when COUNT(DISTINCT) = 1
+        FROM secondary_sku_line ssl
+        JOIN registry_norm rm
+          ON ssl.head_canon = rm.norm_key          -- Path A: exact registry key
+          OR ssl.head_canon = rm.display_key       -- Path B: normalised display/alias name
+        WHERE ssl.state_canon IS NULL
+          AND ssl.head_canon IS NOT NULL
+        GROUP BY ssl.head_canon
+        HAVING COUNT(DISTINCT rm.state_head) = 1   -- reject ambiguous head names
+      )
+      UPDATE secondary_sku_line ssl
+      SET state_canon = hm.state_head
+      FROM head_match hm
+      WHERE ssl.head_canon = hm.head_canon
+        AND ssl.state_canon IS NULL;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).
@@ -1169,4 +1243,9 @@ export async function runMigrations(): Promise<void> {
       client.release();
     }
   }
+}
+
+interface Migration {
+  id: string;
+  sql: string;
 }

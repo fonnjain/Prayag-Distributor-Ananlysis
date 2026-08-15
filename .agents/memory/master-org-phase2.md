@@ -1,65 +1,27 @@
 ---
 name: Master Org Phase 2+3 — people and customer management
-description: Routes, impact gate, customer reassignment, and verification protocol for the Phase 2/3 organisation pages.
+description: Durable operational decisions for the Phase 2/3 organisation routes.
 ---
 
-## Routes — Phase 2 (people)
+## Impact gate — double-count invariant
 
-- `GET /api/master/designations` — 14 designations ordered by rank
-- `GET /api/master/people` — paginated list; params: q, active, designation_id, page, limit
-- `GET /api/master/people/:id` — full detail + directReports + reportingChain + territories + changeLog
-- `GET /api/master/people/:id/impact` — subTreeCount + directReports + customersAsStateHead + customersAsTm + totalCustomersAffected
-- `PATCH /api/master/people/:id` — edit (name, employee_code, designation_id, reports_to_person_id); reports_to change requires acknowledgedSubTree + acknowledgedCustomers
-- `POST /api/master/people/:id/deactivate` — requires acknowledgedSubTree + acknowledgedCustomers; re-verified server-side
-- `POST /api/master/people/:id/reactivate` — no impact gate needed
-- `GET /api/master/unresolved-links` — 13 rows (was 14; Chhinamastike split merged)
-- `POST /api/master/unresolved-links/:id/resolve` — mark mapped or confirmed_gone
-- `GET /api/master/verify/inactive-managers` — active people reporting to inactive managers
+GET /impact returns `totalCustomersAffected = COUNT(DISTINCT customer_id)`, NOT the sum of separate role counts. A customer where the person is both state_head and TM must count once. The PATCH/deactivate re-verification query must use the identical `COUNT(DISTINCT customer_id)` predicate; mismatching counting rules cause spurious 409 rejections for dual-role assignments.
 
-## Routes — Phase 3 (customers)
-
-- `GET /api/master/customers` — paginated list; params: q, type, page, limit; includes current (open) assignment
-- `GET /api/master/customers/by-head` — FY2025-26 totals from sale_line grouped by head_canon **(MUST be declared before /:id)**
-- `GET /api/master/customers/:id` — detail + current + history + links
-- `PATCH /api/master/customers/:id/assign` — reassign with effective dating (closes old row, opens new)
-
-## Impact gate protocol (people)
-
-1. Frontend calls GET /impact → shows modal with exact numbers
-2. User clicks confirm → POST /deactivate (or PATCH with reports_to) with `{ acknowledgedSubTree, acknowledgedCustomers }`
-3. Server re-runs impact queries; if numbers changed → 409 (force re-preview)
-4. Missing acknowledgment fields → 422
+**Why:** The impact system lets operators acknowledge exact counts before irreversible hierarchy changes. Even a one-off mismatch (e.g. dual-role customer) produces a 409 that can never be resolved without a code fix.
 
 ## Effective dating protocol (customers)
 
-- Old open assignment: `effective_to = CURRENT_DATE`
-- New assignment: `effective_from = CURRENT_DATE`
-- FY2025-26 queries use `sale_line.head_canon` — NEVER touched by customer_assignment edits
-- `/by-head` result is invariant to any reassignment (verified: diff empty)
+Reassignment closes the old open assignment (`effective_to = CURRENT_DATE`) and opens a new one. `sale_line.head_canon` is baked at register ingest and is never touched. GET /customers/by-head result must be invariant to any reassignment — use it as a before/after diff canary.
 
-## Seed unresolved links (migration 031 + 032)
+**How to apply:** GET /customers/by-head must be declared before /:id in Express route registration order to prevent "by-head" from matching the :id param.
 
-13 rows in `seed_unresolved_link`. Two auto-resolved:
-- DIST#39381 "Prayag Sale Corporation NE" — xlsx truncated name at 25 chars; 109 links
-- DIST#9236 "Chhinamastike Sanitation Pvt. Ltd." — xlsx split name at comma; 174 link rows (different retailer sets in each half)
-- 195 customer_link rows actually recovered (88 xlsx entries reference retailers absent from customer table — structural)
+## Route correction: unresolved-links and inactive-managers
 
-## Verification anchors (Aug 2026)
+GET /master/unresolved-links queries `seed_unresolved_link` (not `sale_line`).  
+GET /master/verify/inactive-managers joins `person` to `person` on `reports_to_person_id` (not `sale_line`).
 
-Phase 2 deactivation test — Anant Singh (person_id=9): subTree=10, SH=782, TM=5, total=787
-Phase 3 by-head test — before/after DIST#31809 reassignment: diff=empty (13 head rows unchanged)
+**Why:** Both routes were accidentally written to query sale_line in an earlier merge, returning sales aggregates instead of org-graph data.
 
-Effective dating in DB after reassignment:
-- Old row: effective_from=2026-08-15, effective_to=2026-08-15 (closed same day)
-- New row: effective_from=2026-08-15, effective_to=NULL (open)
+## TypeScript gotcha
 
-## change_log fields on deactivation
-
-- `is_active`: old=true → new=false
-- `deactivation_impact_acknowledged`: new=JSON{subTreeCount, totalCustomersAffected}
-- On reactivate: `is_active`: old=false → new=true
-
-## TypeScript gotcha in masterOrg.ts
-
-All early-exit `return res.status(N).json(...)` calls inside async handlers must use `return void res.status(N).json(...)`.
-Plain `return res.json(x)` mixed with paths that end without return → TS7030.
+All early-exit paths inside async handlers must use `return void res.status(N).json(...)`. Plain `return res.json(x)` mixed with void paths → TS7030.

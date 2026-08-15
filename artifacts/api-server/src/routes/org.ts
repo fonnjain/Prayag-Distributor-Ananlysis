@@ -527,12 +527,31 @@ router.post("/person-registry/preview-impact", async (req, res) => {
 
 // POST /api/person-registry/seed — one-time seed from JSON config + HR CSV.
 // Idempotent: safe to call twice (ON CONFLICT DO NOTHING).
+// After seeding, propagates state_head from the Phase 1 person table and
+// triggers a full secondary_sku_line.state_canon backfill so both operations
+// are covered in the natural fresh-deploy sequence:
+//   masterSeedImport (person table) → this endpoint (registry + reconciliation + SKU backfill)
 router.post("/person-registry/seed", async (_req, res) => {
   try {
     const report = await seedPersonRegistry();
     // Reload maps after seeding.
     await loadPersonRegistry();
-    res.json({ ok: true, ...report });
+
+    // Propagate state_head from the Phase 1 person table into person_registry.
+    // This is the authoritative reconciliation path on fresh deployments where
+    // migration 034 fires before the person table is populated.
+    const { reconcilePersonRegistryStateHeads } = await import(
+      "../lib/personRegistry.js"
+    );
+    const reconcileResult = await reconcilePersonRegistryStateHeads();
+
+    // Backfill secondary_sku_line.state_canon now that registy state heads exist.
+    const { backfillSkuStateCanon } = await import(
+      "../lib/secondary/skuLoader.js"
+    );
+    const skuBackfillUpdated = await backfillSkuStateCanon();
+
+    res.json({ ok: true, ...report, reconcileResult, skuBackfillUpdated });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

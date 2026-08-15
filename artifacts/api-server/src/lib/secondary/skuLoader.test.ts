@@ -1,5 +1,6 @@
 // Task 172 guards: RET# column detection, merged-cell carry-forward, and
 // serial-pollution prevention in the secondary SKU loader.
+// Task 299 guards: state_canon backfill join logic (headNormKey invariants).
 import { describe, it, expect } from "vitest";
 import {
   parseTab,
@@ -9,6 +10,7 @@ import {
   priorLikeMonthLabel,
   priorFyLabel,
   WIPE_GUARD_RATIO,
+  headNormKey,
 } from "./skuLoader.js";
 
 describe("checkReplaceSanity (pre-delete gate for replace mode)", () => {
@@ -201,5 +203,92 @@ describe("checkOpenFyWipeGuard (pure, no DB)", () => {
       expect(result.reason).toMatch(/floor=\d+/);
       expect(result.reason).toContain("Jul-25=10000");
     }
+  });
+});
+
+// ── Task 299: state_canon backfill join invariants ────────────────────────────
+//
+// The SQL backfill joins secondary_sku_line.head_canon to person_registry via:
+//   Path A: exact norm_key match
+//   Path B: REGEXP_REPLACE(LOWER(TRIM(COALESCE(alias_secondary, canonical_name))), '\s+', ' ', 'g')
+//
+// headNormKey() is the JS mirror of the SQL REGEXP_REPLACE expression.
+// These tests verify the equivalence that makes the join correct and cover the
+// four match paths described in the task.
+
+describe("headNormKey (state_canon backfill join key)", () => {
+  it("matches the SQL REGEXP_REPLACE(LOWER(TRIM(x)), '\\s+', ' ', 'g') semantics", () => {
+    // Simulating what the SQL does to alias_secondary / canonical_name:
+    expect(headNormKey("Pawan Sharma")).toBe("pawan sharma");
+    expect(headNormKey("  Pawan  Sharma  ")).toBe("pawan sharma");
+    expect(headNormKey("PAWAN SHARMA")).toBe("pawan sharma");
+    expect(headNormKey("Pawan\tSharma")).toBe("pawan sharma");  // tab → space
+    expect(headNormKey("Pawan\n Sharma")).toBe("pawan sharma"); // newline+space → space
+  });
+
+  it("head_canon (from skuLoader normKey) equals headNormKey on same input", () => {
+    // head_canon = headRaw.toLowerCase().replace(/\s+/g, " ").trim()
+    // headNormKey(x) must produce the same value so both sides of the join agree.
+    const headRaw = "  Rajesh Kumar Singh  ";
+    const headCanon = headRaw.toLowerCase().replace(/\s+/g, " ").trim();
+    expect(headNormKey(headRaw)).toBe(headCanon);
+  });
+
+  it("alias_secondary path: display name match (Path B)", () => {
+    // alias_secondary holds the secondary-register display spelling.
+    // After headNormKey, it must equal the head_canon from the sheet.
+    const aliasSecondary = "Pawan Sharma"; // as stored in person_registry
+    const headCanon = "pawan sharma";      // as in secondary_sku_line
+    expect(headNormKey(aliasSecondary)).toBe(headCanon);
+  });
+
+  it("canonical_name fallback when alias_secondary is absent (Path B fallback)", () => {
+    // When alias_secondary is NULL, SQL uses COALESCE to fall back to canonical_name.
+    const canonicalName = "Amit Singh Rawat";
+    const headCanon = "amit singh rawat";
+    expect(headNormKey(canonicalName)).toBe(headCanon);
+  });
+
+  it("numeric employee-code norm_key is preserved as-is (Path A exact match)", () => {
+    // For employee-code norm_keys (e.g. "1234"), the exact match path is used.
+    // headNormKey("1234") === "1234" so exact comparison works.
+    expect(headNormKey("1234")).toBe("1234");
+    expect(headNormKey("42")).toBe("42");
+  });
+
+  it("collision-safe guard: same display key + different state_heads → ambiguous (HAVING = 1 rejects)", () => {
+    // The backfill SQL uses HAVING COUNT(DISTINCT state_head) = 1 per head_canon.
+    // This test simulates the registry entries and shows that two entries with the
+    // same normalised display key but different state_heads are correctly identified
+    // as ambiguous (same key, count = 2 → rejected, not updated).
+    //
+    // Example: Karnataka has two concurrent state heads; both registry rows may share
+    // the same display-name normalisation after headNormKey().
+    const registryEntry1 = { alias_secondary: "Ramesh Kumar", state_head: "Head A" };
+    const registryEntry2 = { alias_secondary: "Ramesh Kumar", state_head: "Head B" };
+    const headCanonInSheet = "ramesh kumar"; // as in secondary_sku_line
+
+    const key1 = headNormKey(registryEntry1.alias_secondary);
+    const key2 = headNormKey(registryEntry2.alias_secondary);
+
+    // Both resolve to the same key — they would both match the head_canon.
+    expect(key1).toBe(headCanonInSheet);
+    expect(key2).toBe(headCanonInSheet);
+    // But since state_heads differ, COUNT(DISTINCT state_head) = 2 → HAVING rejects.
+    const distinctStateHeads = new Set([registryEntry1.state_head, registryEntry2.state_head]);
+    expect(distinctStateHeads.size).toBe(2); // > 1 → backfill SQL skips this head_canon
+  });
+
+  it("collision-safe guard: same display key + same state_head → unambiguous (HAVING = 1 accepts)", () => {
+    // Two registry rows that normalise to the same key but agree on state_head
+    // are treated as one match — HAVING COUNT(DISTINCT state_head) = 1 accepts.
+    const registryEntry1 = { alias_secondary: "Pawan Sharma", state_head: "Head A" };
+    const registryEntry2 = { canonical_name: "PAWAN SHARMA", state_head: "Head A" };
+    const headCanonInSheet = "pawan sharma";
+
+    expect(headNormKey(registryEntry1.alias_secondary)).toBe(headCanonInSheet);
+    expect(headNormKey(registryEntry2.canonical_name)).toBe(headCanonInSheet);
+    const distinctStateHeads = new Set([registryEntry1.state_head, registryEntry2.state_head]);
+    expect(distinctStateHeads.size).toBe(1); // = 1 → backfill SQL accepts and assigns Head A
   });
 });

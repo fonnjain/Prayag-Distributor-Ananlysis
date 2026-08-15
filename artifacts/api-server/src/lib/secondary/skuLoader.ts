@@ -90,10 +90,20 @@ function cellNum(v: SheetCellValue): number | null {
   return isFinite(n) ? n : null;
 }
 
-/** Simple key normalisation: lowercase + collapse whitespace. */
-function normKey(raw: string): string {
+/**
+ * Simple key normalisation: lowercase + collapse whitespace.
+ *
+ * Exported so tests can verify the JS function matches the SQL expression used
+ * in the state_canon backfill:
+ *   REGEXP_REPLACE(LOWER(TRIM(x)), '\s+', ' ', 'g')
+ *
+ * Both produce the same result — this equivalence is what makes the join correct.
+ */
+export function headNormKey(raw: string): string {
   return raw.toLowerCase().replace(/\s+/g, " ").trim();
 }
+/** Alias kept for internal callers — do not export separately to avoid confusion. */
+const normKey = headNormKey;
 
 /**
  * Normalise a genuine retailer identity value: "ret# 12345" → "RET#12345".
@@ -479,6 +489,54 @@ export async function loadSecSkuFromSheets(
           .returning({ lineUid: secondarySkuLines.lineUid });
         totalInserted += inserted.length;
       }
+      // ── State-canon backfill — runs INSIDE the replace transaction ──────────
+      // Failure here rolls back the entire replace so the FY is never left in a
+      // state where rows are inserted but state_canon is missing.  The .catch()
+      // wrapper used for append-only loads is intentionally absent here.
+      //
+      // Join uses the same two-path strategy as backfillSkuStateCanon():
+      //   Path A — exact norm_key (employee-code keys)
+      //   Path B — normalised alias_secondary / canonical_name (display-name keys)
+      // Collision-safe: only updates head_canons where all matching registry entries
+      // agree on the same state_head (HAVING COUNT(DISTINCT) = 1).  Ambiguous names
+      // are left NULL and counted in the residual warning.
+      const backfillResult = await tx.execute<{ updated: string }>(sqlRaw`
+        WITH registry_norm AS (
+          SELECT
+            norm_key,
+            REGEXP_REPLACE(LOWER(TRIM(COALESCE(alias_secondary, canonical_name))), '\s+', ' ', 'g')
+              AS display_key,
+            state_head
+          FROM person_registry
+          WHERE state_head IS NOT NULL
+        ),
+        head_match AS (
+          SELECT
+            ssl.head_canon,
+            MIN(rm.state_head) AS state_head
+          FROM secondary_sku_line ssl
+          JOIN registry_norm rm
+            ON ssl.head_canon = rm.norm_key
+            OR ssl.head_canon = rm.display_key
+          WHERE ssl.fy = ${fy}
+            AND ssl.state_canon IS NULL
+            AND ssl.head_canon IS NOT NULL
+          GROUP BY ssl.head_canon
+          HAVING COUNT(DISTINCT rm.state_head) = 1
+        ),
+        done AS (
+          UPDATE secondary_sku_line ssl
+          SET state_canon = hm.state_head
+          FROM head_match hm
+          WHERE ssl.head_canon = hm.head_canon
+            AND ssl.fy = ${fy}
+            AND ssl.state_canon IS NULL
+          RETURNING ssl.line_uid
+        )
+        SELECT COUNT(*)::text AS updated FROM done
+      `);
+      const stateCanonUpdated = parseInt(backfillResult.rows[0]?.updated ?? "0", 10);
+      logger.info({ fy, stateCanonUpdated }, "skuLoader: state_canon backfill complete (in replace txn)");
     });
     logger.info({ fy, replaced: bufferedRows.length, inserted: totalInserted }, "skuLoader: replace txn committed");
   }
@@ -498,6 +556,14 @@ export async function loadSecSkuFromSheets(
   };
 
   logger.info(result, "skuLoader: complete");
+
+  // After an append-only live load, backfill state_canon for newly inserted
+  // rows that are still NULL.  Replace-mode loads do this inside their
+  // transaction (above).  This call propagates errors — a backfill failure is
+  // treated the same as an insert failure: the caller gets an exception.
+  if (!dryRun && !replace) {
+    await backfillSkuStateCanon(fy);
+  }
   if (!dryRun && totalInserted > 0) {
     clearSecondarySkuFyCache();
     // Post-load coverage check: compare per-member sku_line totals vs register
@@ -516,6 +582,93 @@ export async function loadSecSkuFromSheets(
   }
   return result;
 }
+
+// ── State-canon backfill ──────────────────────────────────────────────────────
+
+/**
+ * Backfill secondary_sku_line.state_canon for rows whose head_canon resolves
+ * to a person_registry entry that now has a non-null state_head.
+ *
+ * Called automatically after every live (non-dry-run) SKU load, and exposed
+ * for direct use by the SKU route (POST /api/sku/backfill-state-canon).
+ *
+ * Idempotent: only touches rows where state_canon IS NULL.
+ *
+ * @param fy Optional — limit to a single FY; omit to cover all FYs.
+ * @returns Number of rows updated.
+ */
+export async function backfillSkuStateCanon(fy?: string): Promise<number> {
+  // head_canon is produced by normKey(headRaw):
+  //   normKey(x) = x.toLowerCase().replace(/\s+/g, " ").trim()
+  //
+  // Join strategy (mirroring migration 034 step 3):
+  //   Path A — exact norm_key match (employee-code registry keys)
+  //   Path B — normalised alias_secondary / canonical_name match
+  //            (REGEXP_REPLACE replicates the JS normKey() function in SQL)
+  // Collision-safe: only updates unambiguous head_canons (HAVING COUNT(DISTINCT) = 1).
+  // Ambiguous names (two registry entries disagree on state_head) are left NULL.
+  const fyClause = fy ? sqlRaw`AND ssl.fy = ${fy}` : sqlRaw``;
+  const fyUpdateClause = fy ? sqlRaw`AND ssl.fy = ${fy}` : sqlRaw``;
+  const result = await db.execute<{ updated: string }>(sqlRaw`
+    WITH registry_norm AS (
+      SELECT
+        norm_key,
+        REGEXP_REPLACE(LOWER(TRIM(COALESCE(alias_secondary, canonical_name))), '\s+', ' ', 'g')
+          AS display_key,
+        state_head
+      FROM person_registry
+      WHERE state_head IS NOT NULL
+    ),
+    head_match AS (
+      SELECT
+        ssl.head_canon,
+        MIN(rm.state_head) AS state_head
+      FROM secondary_sku_line ssl
+      JOIN registry_norm rm
+        ON ssl.head_canon = rm.norm_key
+        OR ssl.head_canon = rm.display_key
+      WHERE ssl.state_canon IS NULL
+        AND ssl.head_canon IS NOT NULL
+        ${fyClause}
+      GROUP BY ssl.head_canon
+      HAVING COUNT(DISTINCT rm.state_head) = 1
+    ),
+    updated AS (
+      UPDATE secondary_sku_line ssl
+      SET state_canon = hm.state_head
+      FROM head_match hm
+      WHERE ssl.head_canon = hm.head_canon
+        AND ssl.state_canon IS NULL
+        ${fyUpdateClause}
+      RETURNING ssl.line_uid
+    )
+    SELECT COUNT(*)::text AS updated FROM updated
+  `);
+  const count = parseInt(result.rows[0]?.updated ?? "0", 10);
+  logger.info({ fy: fy ?? "all", updated: count }, "backfillSkuStateCanon: complete");
+  return count;
+}
+
+/**
+ * Materialality check: count NULL state_canon rows in secondary_sku_line.
+ * Irreducible structural residual is ~17k (unmapped head names).
+ * Returns { nullCount, total } for use by startup guard and admin routes.
+ */
+export async function getSkuStateCanonResidual(): Promise<{ nullCount: number; total: number }> {
+  const result = await db.execute<{ null_count: string; total: string }>(sqlRaw`
+    SELECT
+      COUNT(*) FILTER (WHERE state_canon IS NULL)::text AS null_count,
+      COUNT(*)::text AS total
+    FROM secondary_sku_line
+  `);
+  return {
+    nullCount: parseInt(result.rows[0]?.null_count ?? "0", 10),
+    total: parseInt(result.rows[0]?.total ?? "0", 10),
+  };
+}
+
+/** Rows with a NULL state_canon that exceed this count trigger a startup WARN. */
+export const SKU_STATE_CANON_MATERIALITY_THRESHOLD = 50_000;
 
 // ── Sheet ID registry ─────────────────────────────────────────────────────────
 

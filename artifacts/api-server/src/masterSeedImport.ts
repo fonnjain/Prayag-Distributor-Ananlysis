@@ -516,6 +516,17 @@ async function main(): Promise<void> {
       console.log(`    ${r.tbl.padEnd(22)} ${r.cnt}`);
     }
 
+    // ── State-head reconciliation ─────────────────────────────────────────────
+    // Migration 034 propagates state_head on a clean schema where person is still
+    // empty, so it is recorded as applied but does nothing useful.  Calling the
+    // reconciliation here (after persons are seeded) is the authoritative path for
+    // fresh deployments.  Idempotent: only touches NULL rows, safe to run twice.
+    console.log("\n  Reconciling person_registry.state_head from person table...");
+    const { reconcilePersonRegistryStateHeads } = await import("./lib/personRegistry.js");
+    const { membersUpdated, stateHeadsUpdated } = await reconcilePersonRegistryStateHeads();
+    console.log(`    Members updated: ${membersUpdated}`);
+    console.log(`    State heads updated: ${stateHeadsUpdated}`);
+
     console.log("\n✅ Import complete.");
 
   } finally {

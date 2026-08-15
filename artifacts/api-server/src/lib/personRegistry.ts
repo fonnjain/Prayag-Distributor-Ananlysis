@@ -473,6 +473,59 @@ export async function seedPersonRegistry(): Promise<SeedReport> {
   return report;
 }
 
+// ── State-head reconciliation ─────────────────────────────────────────────────
+
+/**
+ * Idempotent reconciliation: propagate `state_head` from the Phase 1 `person`
+ * table into `person_registry`.  Must be called after the master seed import
+ * because migration 034 fires before seed data exists on fresh deployments.
+ *
+ * Step A — members: join person → person.state_head_person_id → sh.name.
+ * Step B — state heads themselves: set state_head = canonical_name.
+ *
+ * Only touches rows where state_head IS NULL.  Safe to call multiple times.
+ *
+ * @returns Object with counts of rows updated in each step.
+ */
+export async function reconcilePersonRegistryStateHeads(): Promise<{
+  membersUpdated: number;
+  stateHeadsUpdated: number;
+}> {
+  // Step A: propagate from person table (requires seed data to be present)
+  const memberRes = await pool.query<{ count: string }>(`
+    WITH updated AS (
+      UPDATE person_registry pr
+      SET state_head = sh.name,
+          updated_at = now()
+      FROM person p
+      JOIN person sh ON sh.person_id = p.state_head_person_id
+      WHERE LOWER(TRIM(p.name)) = LOWER(TRIM(pr.canonical_name))
+        AND p.state_head_person_id IS NOT NULL
+        AND pr.state_head IS NULL
+      RETURNING pr.id
+    )
+    SELECT COUNT(*)::text AS count FROM updated
+  `);
+
+  // Step B: state heads' own registry row
+  const headRes = await pool.query<{ count: string }>(`
+    WITH updated AS (
+      UPDATE person_registry pr
+      SET state_head = pr.canonical_name,
+          updated_at = now()
+      WHERE pr.is_state_head = TRUE
+        AND pr.state_head IS NULL
+      RETURNING pr.id
+    )
+    SELECT COUNT(*)::text AS count FROM updated
+  `);
+
+  return {
+    membersUpdated: parseInt(memberRes.rows[0]?.count ?? "0", 10),
+    stateHeadsUpdated: parseInt(headRes.rows[0]?.count ?? "0", 10),
+  };
+}
+
 // ── Registry read helpers (for API routes) ───────────────────────────────────
 
 export async function getRegistryRows(): Promise<PersonRegistryRow[]> {
