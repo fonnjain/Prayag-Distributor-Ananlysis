@@ -126,3 +126,4 @@
 - [GP Margin trend route](gp-margin-trend.md) — GET /api/margin/trend; months sorted chronologically via TO_DATE(month_label,'Mon-YY'); coverage guard aborts DELETE when <40% files loaded; timeout cmd resolved via `which` not hardcoded Nix path.
 - [Red Alert calibration findings](red-alert-calibration.md) — Guard 3 closed-FY fix; B-retailer=secondary_sku_line; B-primary/C1/C2 fire 0 for FY24-25/25-26 (no is_territory rows + null state_canon); revised thresholds Aug 2026.
 - [Red Alert Category S + B3 rollup](red-alert-category-s-b3-rollup.md) — S1 destocking (norm2 linkage, FY-spanning streak), B3 rollup rules (3-retailer/₹50L group, ₹25L individual), A2→A1 cross-suppression, state_canon backfill from person_registry.
+- [Master Org Phase 2 — people management](master-org-phase2.md) — /api/master/people routes; deactivation requires impact acknowledgment gate (422 without, 409 on mismatch, 200 with correct counts).

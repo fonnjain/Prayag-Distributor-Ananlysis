@@ -110,6 +110,14 @@ const NAV: NavGroup[] = [
     ],
   },
   {
+    id: "org",
+    label: "Organisation",
+    icon: Users,
+    items: [
+      { id: "org-people", label: "People", path: "/org/people", icon: Users },
+    ],
+  },
+  {
     id: "developer",
     label: "Developer",
     icon: Braces,
@@ -145,13 +153,19 @@ function activeIds(location: string): { groupId: string; itemId: string } {
   }
   if (location.startsWith("/customers")) {
     const slug = location.replace(/^\/customers\/?/, "").split("?")[0];
-    const item = NAV[4].items.find((i) => i.id === slug) ?? NAV[4].items[0];
-    return { groupId: "customers", itemId: item.id };
+    const grp = NAV.find((g) => g.id === "customers")!;
+    const item = grp.items.find((i) => i.id === slug) ?? grp.items[0];
+    return { groupId: "customers", itemId: item!.id };
+  }
+  if (location.startsWith("/org")) {
+    const grp = NAV.find((g) => g.id === "org")!;
+    return { groupId: "org", itemId: grp.items[0]!.id };
   }
   if (location.startsWith("/dev")) {
     const slug = location.replace(/^\/dev\/?/, "").split("?")[0] || "api-portal";
-    const item = NAV[5].items.find((i) => i.id === slug) ?? NAV[5].items[0];
-    return { groupId: "developer", itemId: item.id };
+    const grp = NAV.find((g) => g.id === "developer")!;
+    const item = grp.items.find((i) => i.id === slug) ?? grp.items[0];
+    return { groupId: "developer", itemId: item!.id };
   }
   // Dashboard
   const slug = location === "/" ? "overview" : location.replace(/^\//, "").split("?")[0];

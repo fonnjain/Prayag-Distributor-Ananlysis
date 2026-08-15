@@ -1026,6 +1026,46 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_cl_when   ON change_log (changed_at);
     `,
   },
+  {
+    id: "031_seed_unresolved_links",
+    sql: `
+      -- Retailer→distributor links from the seed that could not be matched to a
+      -- customer row because the distributor name in the link tab differed from
+      -- every name in the Customers tab.  14 names, 372 affected links.
+      -- Phase 3 UI surfaces these so operators can map or confirm gone.
+      CREATE TABLE IF NOT EXISTS seed_unresolved_link (
+        id           SERIAL PRIMARY KEY,
+        raw_name     TEXT NOT NULL UNIQUE,   -- exact string from the seed xlsx
+        link_count   INTEGER NOT NULL,       -- number of retailer links that were dropped
+        notes        TEXT,                  -- operator notes
+        resolution   TEXT CHECK (resolution IN ('mapped', 'confirmed_gone', NULL)),
+        mapped_to_id TEXT REFERENCES customer(customer_id),
+        resolved_by  TEXT,
+        resolved_at  TIMESTAMPTZ,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      -- Populate the 14 names discovered during seed import (2026-08-15).
+      -- Row counts: 372 links from unmatched distributor names + 64 from missing
+      -- retailer rows = 436 total skipped (as reported in Phase 1 verification).
+      INSERT INTO seed_unresolved_link (raw_name, link_count, notes) VALUES
+        ('Prayag Sale Corporation Ne',                                       109, 'Cell value appears truncated in xlsx'),
+        ('Chhinamastike Sanitation Pvt. Ltd. ( Previously Balajee Ent.',     87,  'Name split across rows in xlsx — likely same company as "Deoghar)" row'),
+        ('Deoghar)',                                                          87,  'Continuation of "Chhinamastike Sanitation..." row above'),
+        ('M/S Manoj Hardware And Paint Store',                               36,  NULL),
+        ('Simis Enterprises ( Non Active)',                                  11,  'Marked non-active in source'),
+        ('Ms Vashnavi Enterprise',                                            8,  NULL),
+        ('M/S Mansaa Associates',                                             8,  NULL),
+        ('Ms Heaven Trading Hub',                                             5,  NULL),
+        ('Prabhusurat (Non Active)',                                          5,  'Marked non-active in source'),
+        ('M Plastico(Non Active)',                                            5,  'Marked non-active in source'),
+        ('Num Traders(Not Active)',                                           5,  'Marked not-active in source'),
+        ('Ms Aum Sai Enterprises',                                            3,  NULL),
+        ('Krishna Sanitary',                                                  2,  NULL),
+        ('Nawander Company (Non Active)',                                     1,  'Marked non-active in source')
+      ON CONFLICT (raw_name) DO NOTHING;
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {
