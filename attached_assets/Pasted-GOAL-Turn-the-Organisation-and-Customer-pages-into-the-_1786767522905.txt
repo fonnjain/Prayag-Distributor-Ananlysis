@@ -1,0 +1,244 @@
+GOAL
+Turn the Organisation and Customer pages into the editable master for people,
+hierarchy, territories and customer assignment. Today both derive from Google
+Sheets that are read-only, and most distributor State Heads read "Guessed"
+with no value. After this, the app holds the truth and a person can change it.
+
+Attached: Prayag_Master_Seed.xlsx. Nine tabs, each mapping to one table.
+Import it ONCE. After that the app is the master.
+
+BUILD IN THREE PHASES. Report verification after each and STOP. Do not begin
+the next phase until I confirm. This is the largest change in the project and
+it touches attribution.
+
+============================================================
+PHASE 1 — SCHEMA AND IMPORT
+============================================================
+
+person
+  person_id · employee_code · name · designation_id · reports_to_person_id
+  state_head_person_id (rollup, denormalised) · is_state_head · is_active
+  headquarter · order_type · source (hr_sheet | app_created)
+
+designation
+  designation_id · name · rank · is_system · created_by · created_at
+  Rank 1 is most senior. A CONTROLLED VOCABULARY - never free text on a
+  person. New designations are created explicitly and get a rank.
+
+territory
+  territory_id · name · parent_territory_id · is_split
+  Splits are NEVER merged. East U.P and West U.P stay separate and both point
+  at Uttar Pradesh as parent. Reuse the state_hierarchy already built for the
+  state filter rather than creating a second list - if that table already
+  holds these, point at it.
+
+person_territory
+  person_id · territory_id · effective_from · effective_to
+  MANY-TO-MANY. A person holds several states; a state has several people.
+
+customer
+  customer_id · name · type (distributor | direct_dealer | retailer |
+  sub_dealer | project | govt | other) · territory_id · status · source
+
+customer_assignment
+  customer_id · person_id · state_head_person_id · confidence
+  effective_from · effective_to · set_by · set_at
+
+customer_link          retailer -> distributor
+  retailer_id · distributor_id · link_order · effective_from · effective_to
+  MANY-TO-MANY. Over a third of active retailers name more than one
+  distributor. Do NOT collapse to one.
+
+change_log
+  entity_type · entity_id · field · old_value · new_value · changed_by
+  changed_at · reason
+  Every edit, without exception.
+
+EFFECTIVE DATING IS NOT OPTIONAL
+Every assignment carries effective_from and effective_to. Reassigning a
+customer must NEVER change historical attribution.
+
+One customer reclassified between years already broke every year-on-year
+territory comparison in this system - Rs 35.73 Cr appearing as a total
+collapse. If users can reassign freely without effective dating, every
+historical figure becomes unstable and no report can be trusted.
+
+Reports read the assignment IN FORCE during the period being reported, not
+today's.
+
+CONFIDENCE LADDER
+  confirmed          a human set it in the app          highest
+  assign_user_chain  derived from the named salesperson  (what the seed uses)
+  state_lookup       derived from the state alone
+  guessed            fallback - what most rows show today
+
+Editing a value promotes it to 'confirmed'. Editing IS the confidence upgrade.
+Show the confidence on every row, as the Customer Data page already does.
+
+IMPORT
+Import the attached workbook. Expected: 179 people, 14 designations, ~36
+territories, 260 person-territory rows, 3,316 customers, 5,485 active
+retailers, 8,630 retailer links, 404 reassignment-queue entries.
+
+Do NOT create anything not in the file. Do NOT guess a State Head where the
+seed leaves it blank - blank means unresolved and must stay visible as such.
+
+PHASE 1 VERIFY - stop and report
+  1. Row counts per table against the expected figures above.
+  2. Count of customers by confidence level.
+  3. Count of customers with NO state head - these are the red rows in the
+     seed. Confirm they imported as blank, not guessed.
+  4. Confirm every person's reports_to resolves to another person or is null
+     for a root. Print any that do not.
+  5. Confirm no cycle exists in the hierarchy. Print the check.
+  6. Print the 3 people whose reports_to is a person marked is_active = false.
+  7. Confirm sale_line, margin_fact, mrp_history and market_survey are
+     untouched. Print row counts.
+  8. Commit hash, git cat-file -t, git merge-base --is-ancestor <hash> main.
+
+============================================================
+PHASE 2 — THE ORGANISATION PAGE
+============================================================
+
+A tree view of the hierarchy, expandable, with an edit panel per person.
+
+EDIT A PERSON
+  Designation   dropdown from the designation table, PLUS "add new
+                designation" which asks for a name and a rank
+  Reports to    dropdown of any active person. Must reject a cycle.
+  Territories   multi-select from the territory table, showing splits
+                indented under their parent
+  Active        toggle. Deactivating must ask what happens to their
+                customers and their direct reports - see below.
+
+ADD A PERSON
+  Name, employee code, designation, reports to, territories.
+  Employee code is OPTIONAL and must not be the identity key - 62 of 179
+  active people have an implausible code (mobile numbers, "+" characters,
+  20-digit values). Key on person_id.
+
+INSERT A MANAGER ABOVE AN EXISTING TEAM
+  Explicit action, not a series of edits. Pick the people who will report to
+  the new person, and who the new person reports to. The system re-points the
+  selected reports in one transaction.
+
+MOVE A PERSON TO A DIFFERENT HEAD
+  Changes the rollup for that person AND everyone below them.
+  MANDATORY IMPACT PREVIEW before saving:
+      "Moving Shanker Singh from Pawan Kumar Sharma to Anant Singh.
+       Affects 3 people below them and 741 customers.
+       Historical attribution before <date> is unchanged."
+  Nothing saves until the preview is confirmed.
+
+DEACTIVATING A PERSON
+  Refuse to leave customers orphaned. Ask, in one flow:
+      their direct reports -> reassign to whom
+      their customers      -> reassign to whom
+  A person may be deactivated with customers still attached only if the user
+  explicitly chooses to leave them - and they then appear in the reassignment
+  queue.
+
+DIVERGENCE FROM THE SHEET
+  The HR sheet keeps updating. Where the app value differs from the latest
+  sheet value, flag it visibly - the page already says "App overlay - Google
+  Drive is read-only; divergences are flagged". Keep that. The app value wins;
+  the sheet value stays visible beside it.
+
+PHASE 2 VERIFY - stop and report
+  1. Change a designation. Print the change_log row.
+  2. Add a new designation and assign it. Confirm it appears in the dropdown
+     for everyone.
+  3. Move a person with a team below them. Paste the impact preview text and
+     confirm the count of affected people and customers is correct.
+  4. Attempt to create a cycle - set A to report to B where B reports to A.
+     Confirm it is refused and paste the message.
+  5. Add a new person with a team beneath them using the insert-manager
+     action. Print the before and after reporting lines.
+  6. Deactivate a person holding customers. Paste the flow. Confirm nothing
+     is orphaned silently.
+  7. Confirm all edits appear in change_log with who and when.
+  8. Commit hash and ancestry check.
+
+============================================================
+PHASE 3 — THE CUSTOMER PAGE
+============================================================
+
+A hierarchy view: State -> Distributor -> the secondary customers beneath.
+
+  State (splits shown separately, parent selectable)
+    State Head
+      Distributor  (and Direct Dealer)
+        Retailers / sub-dealers linked to that distributor
+
+RETAILERS LINK TO MORE THAN ONE DISTRIBUTOR
+Over a third do. A strict tree cannot represent that. Show a retailer under
+EVERY distributor they link to, with a marker showing they have others, and
+the count. Do not pick one and hide the rest - the current app already loses
+half the assignments that way.
+
+EDIT A CUSTOMER
+  State Head          dropdown, promotes confidence to 'confirmed'
+  Salesperson         dropdown of active people
+  Type                distributor / direct_dealer / retailer / sub_dealer /
+                      project / govt / other
+  Territory           from the territory table, splits selectable
+  Distributor link    for a retailer: add or remove links, many allowed
+
+MOVE A CUSTOMER
+  Same mandatory impact preview as moving a person:
+      "Moving DIST#61201 from Pawan Kumar Sharma to Anant Singh.
+       FY2026-27 value to date Rs X. Historical attribution before <date>
+       is unchanged. Year-on-year comparisons spanning this date will show a
+       basis break and will be flagged."
+  That last sentence is not decoration. A reassignment IS a basis break and
+  comparison surfaces must know.
+
+ADD A CUSTOMER
+  Goes to the existing Review Queue as pending, not straight into the master.
+  Approving there creates the customer record. Keep that gate.
+
+BULK REASSIGNMENT - build this, it is the first real job
+404 departed salespeople still hold customers: 3,290 active retailers and
+3,167 distributors and dealers. Reassigning those one at a time is unusable.
+
+  Select a departed person -> see all their customers -> select all or some
+  -> reassign to a named active person -> single impact preview -> one
+  transaction.
+
+Seed tab "Reassignment queue" lists all 404 ranked by urgency.
+
+TYPE CHANGES ARE THE DANGEROUS ONE
+Changing a customer's type - distributor to project, say - is exactly what
+broke year-on-year comparison before. Require a reason on that edit
+specifically, record it in change_log, and effective-date it so history holds.
+
+PHASE 3 VERIFY - stop and report
+  1. Print the hierarchy for one state, showing a retailer that appears under
+     two distributors with its marker.
+  2. Change a customer's State Head. Confirm confidence moves from
+     assign_user_chain to confirmed. Print both rows.
+  3. Move a customer. Paste the impact preview including the basis-break line.
+  4. Bulk-reassign all customers of one departed person. Print the count moved
+     and confirm one change_log entry per customer.
+  5. Change a customer's type. Confirm a reason is required and recorded.
+  6. Confirm historical attribution is unchanged: pick a customer, reassign
+     them, then print FY2025-26 value by head before and after. It must be
+     IDENTICAL. If any head's total moved, effective dating is not working and
+     that is a stop condition.
+  7. Add a customer. Confirm it lands in the Review Queue and NOT in the
+     master.
+  8. Confirm sale_line row count and FY2025-26 total unchanged -
+     145,613 rows / Rs 360.9954 Cr.
+  9. Commit hash and ancestry check.
+
+============================================================
+DO NOT
+============================================================
+- Do not write to any Google Sheet. Drive stays read-only.
+- Do not change sale_line, margin_fact, mrp_history, market_survey or any
+  scheme table.
+- Do not auto-resolve a blank State Head. Blank means unknown and must stay
+  visible.
+- Do not delete a person or customer. Deactivate only - history depends on
+  them existing.
+- Do not build all three phases before reporting. Stop after each.
