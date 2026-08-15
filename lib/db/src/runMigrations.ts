@@ -1110,6 +1110,30 @@ const MIGRATIONS: Migration[] = [
       ON CONFLICT (retailer_id, distributor_id, effective_from) DO NOTHING;
 `,
   },
+
+  // ── 033: customer_review_queue ─────────────────────────────────────────────
+  {
+    id: "033_customer_review_queue",
+    sql: `
+      CREATE TABLE IF NOT EXISTS customer_review_queue (
+        id                    SERIAL PRIMARY KEY,
+        name                  TEXT NOT NULL,
+        type                  TEXT NOT NULL DEFAULT 'retailer'
+                                CHECK (type IN ('retailer','distributor','direct_dealer',
+                                                'sub_dealer','project','govt','other')),
+        proposed_territory_id INT  REFERENCES territory(territory_id),
+        proposed_person_id    INT  REFERENCES person(person_id),
+        notes                 TEXT,
+        submitted_by          TEXT NOT NULL DEFAULT 'unknown',
+        submitted_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+        review_status         TEXT NOT NULL DEFAULT 'pending'
+                                CHECK (review_status IN ('pending','approved','rejected')),
+        reviewed_by           TEXT,
+        reviewed_at           TIMESTAMPTZ,
+        approved_customer_id  TEXT            -- set on approval (no FK; NEW# ids are generated)
+      );
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

@@ -719,6 +719,341 @@ router.get("/master/customers/by-head", async (_req, res) => {
   }
 });
 
+// ── GET /api/master/customers/unassigned ─────────────────────────────────────
+// Customers with person_id IS NULL in their current open assignment.
+// Returns customers list + territory breakdown for the bulk-assign workflow.
+// Params: type, territory_id, page, limit
+
+router.get("/master/customers/unassigned", async (req, res) => {
+  try {
+    const type = String(req.query.type ?? "").trim();
+    const territoryId = req.query.territory_id ? Number(req.query.territory_id) : null;
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+    const offset = (page - 1) * limit;
+
+    const conds: string[] = ["ca.effective_to IS NULL", "ca.person_id IS NULL"];
+    const params: unknown[] = [];
+    let pi = 1;
+    if (type) { conds.push(`c.type = $${pi++}`); params.push(type); }
+    if (territoryId) { conds.push(`c.territory_id = $${pi++}`); params.push(territoryId); }
+    const where = conds.join(" AND ");
+
+    const [countRes, rowsRes, groupsRes] = await Promise.all([
+      pool.query(
+        `SELECT COUNT(*) FROM customer_assignment ca
+         JOIN customer c ON c.customer_id = ca.customer_id
+         WHERE ${where}`,
+        params,
+      ),
+      pool.query(
+        `SELECT c.customer_id, c.name, c.type, c.status,
+                c.territory_id, t.name AS territory_name
+         FROM customer_assignment ca
+         JOIN customer c ON c.customer_id = ca.customer_id
+         LEFT JOIN territory t ON t.territory_id = c.territory_id
+         WHERE ${where}
+         ORDER BY t.name NULLS LAST, c.type, c.name
+         LIMIT $${pi} OFFSET $${pi + 1}`,
+        [...params, limit, offset],
+      ),
+      // Territory breakdown (always unfiltered by type/territory so the sidebar is complete)
+      pool.query(
+        `SELECT c.territory_id, t.name AS territory_name,
+                COUNT(*) AS customer_count,
+                SUM(CASE WHEN c.type = 'retailer' THEN 1 ELSE 0 END)                           AS retailers,
+                SUM(CASE WHEN c.type IN ('distributor','direct_dealer','sub_dealer') THEN 1 ELSE 0 END) AS dist_dealer
+         FROM customer_assignment ca
+         JOIN customer c ON c.customer_id = ca.customer_id
+         LEFT JOIN territory t ON t.territory_id = c.territory_id
+         WHERE ca.effective_to IS NULL AND ca.person_id IS NULL
+         GROUP BY c.territory_id, t.name
+         ORDER BY customer_count DESC`,
+      ),
+    ]);
+
+    res.json({
+      total: Number(countRes.rows[0].count),
+      customers: rowsRes.rows,
+      territoryGroups: groupsRes.rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── POST /api/master/customers/bulk-assign ────────────────────────────────────
+// Bulk reassign unassigned (person_id IS NULL) customers to a TM.
+//
+// Form A — explicit list:  { customer_ids: string[], to_person_id, ... }
+// Form B — filter-based:   { type?, territory_id?, to_person_id, ... }
+//   (all NULL-assigned customers matching optional type + territory filters)
+//
+// Each customer gets:
+//   • its current open assignment closed (effective_to = CURRENT_DATE)
+//   • a new open assignment inserted (effective_from = CURRENT_DATE)
+//   • ONE change_log entry (field='person_id', old_value=NULL, new_value=id)
+//
+// FY2025-26 /by-head totals are invariant — sale_line is never touched here.
+
+router.post("/master/customers/bulk-assign", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const {
+      customer_ids,
+      type: typeFilter,
+      territory_id,
+      to_person_id,
+      to_state_head_person_id,
+      changed_by,
+    } = req.body as {
+      customer_ids?: string[];
+      type?: string;
+      territory_id?: number;
+      to_person_id: number;
+      to_state_head_person_id?: number | null;
+      changed_by?: string;
+    };
+
+    if (!to_person_id) {
+      return void res.status(400).json({ error: "to_person_id is required" });
+    }
+
+    // Verify target person
+    const targetRes = await pool.query(
+      "SELECT person_id, name FROM person WHERE person_id = $1 AND is_active = true",
+      [to_person_id],
+    );
+    if (!targetRes.rows[0]) {
+      return void res.status(404).json({ error: `Person ${to_person_id} not found or inactive` });
+    }
+
+    // Resolve which customer_ids to move
+    let targets: string[];
+    if (customer_ids && customer_ids.length > 0) {
+      // Form A — explicit list; validate each is actually unassigned
+      const chk = await pool.query(
+        `SELECT ca.customer_id FROM customer_assignment ca
+         WHERE ca.effective_to IS NULL AND ca.person_id IS NULL
+           AND ca.customer_id = ANY($1::text[])`,
+        [customer_ids],
+      );
+      targets = chk.rows.map((r) => r.customer_id);
+    } else {
+      // Form B — filter-based
+      const conds = ["ca.effective_to IS NULL", "ca.person_id IS NULL"];
+      const params: unknown[] = [];
+      let pi = 1;
+      if (typeFilter) { conds.push(`c.type = $${pi++}`); params.push(typeFilter); }
+      if (territory_id) { conds.push(`c.territory_id = $${pi++}`); params.push(territory_id); }
+      const filt = await pool.query(
+        `SELECT ca.customer_id FROM customer_assignment ca
+         JOIN customer c ON c.customer_id = ca.customer_id
+         WHERE ${conds.join(" AND ")}`,
+        params,
+      );
+      targets = filt.rows.map((r) => r.customer_id);
+    }
+
+    if (targets.length === 0) {
+      return void res.json({ moved: 0, toPersonId: to_person_id,
+        toPersonName: targetRes.rows[0].name, customerIds: [] });
+    }
+
+    const client = await pool.connect();
+    let moved = 0;
+    try {
+      await client.query("BEGIN");
+      for (const customerId of targets) {
+        await client.query(
+          `UPDATE customer_assignment SET effective_to = CURRENT_DATE
+           WHERE customer_id = $1 AND effective_to IS NULL`,
+          [customerId],
+        );
+        await client.query(
+          `INSERT INTO customer_assignment
+             (customer_id, person_id, state_head_person_id, confidence, effective_from, set_by)
+           VALUES ($1, $2, $3, 'confirmed', CURRENT_DATE, $4)`,
+          [customerId, to_person_id, to_state_head_person_id ?? null, changed_by ?? "bulk_assign"],
+        );
+        await client.query(
+          `INSERT INTO change_log
+             (entity_type, entity_id, field, old_value, new_value, changed_by)
+           VALUES ('customer', $1, 'person_id', NULL, $2, $3)`,
+          [customerId, String(to_person_id), changed_by ?? "bulk_assign"],
+        );
+        moved++;
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    res.json({
+      moved,
+      toPersonId: to_person_id,
+      toPersonName: targetRes.rows[0].name,
+      customerIds: targets,
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── GET /api/master/customers/review-queue ─────────────────────────────────────
+// List all entries in the customer review queue (proposed new customers).
+
+router.get("/master/customers/review-queue", async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT rq.id, rq.name, rq.type, rq.notes,
+              rq.submitted_by, rq.submitted_at, rq.review_status,
+              rq.reviewed_by, rq.reviewed_at, rq.approved_customer_id,
+              t.name AS territory_name,
+              p.name AS proposed_person_name
+       FROM customer_review_queue rq
+       LEFT JOIN territory t ON t.territory_id = rq.proposed_territory_id
+       LEFT JOIN person p ON p.person_id = rq.proposed_person_id
+       ORDER BY rq.submitted_at DESC`,
+    );
+    const pending = result.rows.filter((r) => r.review_status === "pending").length;
+    res.json({ total: result.rows.length, pending, items: result.rows });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── POST /api/master/customers/review-queue ────────────────────────────────────
+// Propose a new customer. Lands in review queue — NOT in customer table.
+// No admin secret required; anyone can propose; an admin must approve.
+
+router.post("/master/customers/review-queue", async (req, res) => {
+  try {
+    const { name, type, proposed_territory_id, proposed_person_id, notes, submitted_by } =
+      req.body as {
+        name: string;
+        type?: string;
+        proposed_territory_id?: number;
+        proposed_person_id?: number;
+        notes?: string;
+        submitted_by?: string;
+      };
+
+    if (!name?.trim()) {
+      return void res.status(400).json({ error: "name is required" });
+    }
+
+    const validTypes = ["retailer","distributor","direct_dealer","sub_dealer","project","govt","other"];
+    const safeType = validTypes.includes(type ?? "") ? type! : "retailer";
+
+    const result = await pool.query(
+      `INSERT INTO customer_review_queue
+         (name, type, proposed_territory_id, proposed_person_id, notes, submitted_by)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, name, type, review_status, submitted_at`,
+      [name.trim(), safeType, proposed_territory_id ?? null,
+       proposed_person_id ?? null, notes ?? null, submitted_by ?? "unknown"],
+    );
+
+    res.status(201).json({ success: true, item: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── POST /api/master/customers/review-queue/:id/approve ───────────────────────
+// Admin approves a pending entry → creates customer row + optional assignment.
+// New customer_id is NEW#XXXXXX (queue item id zero-padded to 6 chars).
+
+router.post("/master/customers/review-queue/:id/approve", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const queueId = Number(req.params.id);
+    const { reviewed_by } = req.body as { reviewed_by?: string };
+
+    const qRes = await pool.query(
+      "SELECT * FROM customer_review_queue WHERE id = $1",
+      [queueId],
+    );
+    if (!qRes.rows[0]) return void res.status(404).json({ error: "Queue item not found" });
+    const item = qRes.rows[0];
+    if (item.review_status !== "pending") {
+      return void res.status(409).json({ error: `Item is already ${item.review_status}` });
+    }
+
+    const newCustomerId = `NEW#${String(queueId).padStart(6, "0")}`;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      await client.query(
+        `INSERT INTO customer (customer_id, name, type) VALUES ($1, $2, $3)`,
+        [newCustomerId, item.name, item.type],
+      );
+
+      if (item.proposed_person_id) {
+        await client.query(
+          `INSERT INTO customer_assignment
+             (customer_id, person_id, confidence, effective_from, set_by)
+           VALUES ($1, $2, 'confirmed', CURRENT_DATE, $3)`,
+          [newCustomerId, item.proposed_person_id, reviewed_by ?? "admin_approve"],
+        );
+      }
+
+      await client.query(
+        `UPDATE customer_review_queue
+         SET review_status = 'approved', reviewed_by = $1,
+             reviewed_at = now(), approved_customer_id = $2
+         WHERE id = $3`,
+        [reviewed_by ?? "admin_approve", newCustomerId, queueId],
+      );
+
+      await client.query("COMMIT");
+      res.json({ success: true, customerId: newCustomerId });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── POST /api/master/customers/review-queue/:id/reject ────────────────────────
+
+router.post("/master/customers/review-queue/:id/reject", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const queueId = Number(req.params.id);
+    const { reviewed_by, reason } = req.body as { reviewed_by?: string; reason?: string };
+
+    const result = await pool.query(
+      `UPDATE customer_review_queue
+       SET review_status = 'rejected',
+           reviewed_by   = $1,
+           reviewed_at   = now(),
+           notes         = CASE WHEN notes IS NOT NULL
+                             THEN notes || ' | Rejection: ' || COALESCE($2,'(no reason)')
+                             ELSE 'Rejection: ' || COALESCE($2,'(no reason)')
+                           END
+       WHERE id = $3 AND review_status = 'pending'
+       RETURNING id`,
+      [reviewed_by ?? "admin_reject", reason ?? null, queueId],
+    );
+    if ((result.rowCount ?? 0) === 0) {
+      return void res.status(409).json({ error: "Item not found or already reviewed" });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // ── GET /api/master/customers/:id ────────────────────────────────────────────
 // Full detail: customer row, current + historical assignments, and links.
 
@@ -860,6 +1195,77 @@ router.patch("/master/customers/:id/assign", async (req, res) => {
 
       await client.query("COMMIT");
       res.json({ success: true, customerId });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── PATCH /api/master/customers/:id/type ──────────────────────────────────────
+// Change a customer's type (e.g. distributor → project).
+//
+// REASON IS MANDATORY — type changes silently broke year-on-year comparison
+// in this system before. The reason is written to change_log.changed_by so
+// every type edit has a permanent, human-readable audit trail.
+//
+// Effective dating: the change_log row carries the timestamp; the customer
+// row is updated in place. Use change_log to reconstruct the type history.
+
+router.patch("/master/customers/:id/type", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const customerId = String(req.params.id);
+    const { new_type, reason } = req.body as { new_type: string; reason: string };
+
+    if (!reason?.trim()) {
+      return void res.status(400).json({
+        error:
+          "reason is required for type changes — " +
+          "type edits broke year-on-year comparison before and must carry a permanent audit note",
+      });
+    }
+
+    const validTypes = [
+      "retailer","distributor","direct_dealer","sub_dealer","project","govt","other",
+    ];
+    if (!validTypes.includes(new_type)) {
+      return void res.status(400).json({
+        error: `new_type must be one of: ${validTypes.join(", ")}`,
+      });
+    }
+
+    const current = await pool.query(
+      "SELECT type FROM customer WHERE customer_id = $1",
+      [customerId],
+    );
+    if (!current.rows[0]) return void res.status(404).json({ error: "Customer not found" });
+
+    const oldType = current.rows[0].type as string;
+    if (oldType === new_type) return void res.json({ success: true, changed: false, reason: "no-op" });
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      await client.query(
+        "UPDATE customer SET type = $1 WHERE customer_id = $2",
+        [new_type, customerId],
+      );
+
+      // change_log: reason goes into changed_by so it always surfaces in the audit trail
+      await client.query(
+        `INSERT INTO change_log (entity_type, entity_id, field, old_value, new_value, changed_by)
+         VALUES ('customer', $1, 'type', $2, $3, $4)`,
+        [customerId, oldType, new_type, reason.trim()],
+      );
+
+      await client.query("COMMIT");
+      res.json({ success: true, changed: true, oldType, newType: new_type });
     } catch (err) {
       await client.query("ROLLBACK");
       throw err;

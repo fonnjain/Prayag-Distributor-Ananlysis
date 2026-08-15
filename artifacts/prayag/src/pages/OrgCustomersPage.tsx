@@ -1,18 +1,21 @@
-// Phase 3 — Customer management page.
+// Phase 3 — Customer management page (tabs: Customers · Unassigned · Review Queue)
 //
-// Two-panel layout (mirrors OrgPeoplePage):
-//   Left  — search + type filter + paginated customer list
-//   Right — customer detail: current assignment, full history (collapsible),
-//           reassign form (admin-gated), distributor↔retailer link list
+// Tab 0 — Customers
+//   Two-panel: search + type filter + list | detail (assignment, history, links,
+//   type-change admin form).
 //
-// Bottom strip — unresolved seed links (13 remaining, 2 auto-resolved).
+// Tab 1 — Unassigned
+//   Territory sidebar → customer list → bulk-assign form.
+//   The main job: 3,381 NULL-person_id rows need to reach a TM.
 //
-// Verification contract (the check the user will run):
-//   GET /api/master/customers/by-head before reassignment
-//   PATCH /api/master/customers/:id/assign
-//   GET /api/master/customers/by-head after reassignment
-//   The two responses must be byte-for-byte identical.
-//   sale_line.head_canon is baked at ingestion; this route never touches it.
+// Tab 2 — Review Queue
+//   Propose-new-customer form + list of pending/approved/rejected entries.
+//   Admin can approve (creates customer row) or reject.
+//
+// Invariant guarantee:
+//   GET /api/master/customers/by-head produces IDENTICAL results before and
+//   after ANY bulk-assign or single-assign operation. sale_line.head_canon is
+//   baked at ingestion and is never written by these routes.
 
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -37,11 +40,18 @@ import { cn } from "@/lib/utils";
 import {
   Search, Lock, Unlock, ChevronDown, ChevronRight,
   Link2, AlertTriangle, CheckCircle2, Store, Users,
+  RefreshCw, ClipboardList, UserCheck,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Shared types ──────────────────────────────────────────────────────────────
+
+interface PersonOption {
+  person_id: number;
+  name: string;
+  designation_name: string | null;
+}
 
 interface CustomerRow {
   customer_id: string;
@@ -70,17 +80,6 @@ interface Assignment {
   set_at: string;
 }
 
-interface Link {
-  id: number;
-  link_order: number;
-  retailer_id: string;
-  retailer_name: string;
-  distributor_id: string;
-  distributor_name: string;
-  effective_from: string;
-  effective_to: string | null;
-}
-
 interface CustomerDetail {
   customer: {
     customer_id: string;
@@ -92,62 +91,79 @@ interface CustomerDetail {
   };
   currentAssignment: Assignment | null;
   assignmentHistory: Assignment[];
-  links: Link[];
+  links: { id: number; link_order: number; retailer_id: string; retailer_name: string; distributor_id: string; distributor_name: string }[];
 }
 
-interface PersonOption {
-  person_id: number;
+interface UnassignedCustomer {
+  customer_id: string;
   name: string;
-  designation_name: string | null;
+  type: string;
+  status: string | null;
+  territory_id: number | null;
+  territory_name: string | null;
 }
 
-interface UnresolvedLink {
+interface TerritoryGroup {
+  territory_id: number | null;
+  territory_name: string | null;
+  customer_count: number;
+  retailers: number;
+  dist_dealer: number;
+}
+
+interface QueueItem {
   id: number;
-  raw_name: string;
-  link_count: number;
+  name: string;
+  type: string;
   notes: string | null;
-  resolution: string | null;
-  mapped_to_id: string | null;
+  submitted_by: string;
+  submitted_at: string;
+  review_status: "pending" | "approved" | "rejected";
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  approved_customer_id: string | null;
+  territory_name: string | null;
+  proposed_person_name: string | null;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+const VALID_TYPES = ["retailer","distributor","direct_dealer","sub_dealer","project","govt","other"];
 
 function typeBadge(type: string) {
   const map: Record<string, string> = {
-    distributor: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
-    retailer: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
-    direct_dealer: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300",
-    sub_dealer: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300",
-    project: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+    distributor:  "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
+    retailer:     "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
+    direct_dealer:"bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300",
+    sub_dealer:   "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300",
+    project:      "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+    govt:         "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300",
   };
   return (
-    <span className={cn("text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide", map[type] ?? "bg-muted text-muted-foreground")}>
-      {type.replace("_", " ")}
+    <span className={cn("text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide",
+      map[type] ?? "bg-muted text-muted-foreground")}>
+      {type.replace(/_/g, " ")}
     </span>
   );
 }
 
 function confidenceDot(conf: string | null) {
   const map: Record<string, string> = {
-    confirmed: "bg-green-500",
-    assign_user_chain: "bg-blue-400",
-    state_lookup: "bg-yellow-400",
-    guessed: "bg-gray-400",
+    confirmed:          "bg-green-500",
+    assign_user_chain:  "bg-blue-400",
+    state_lookup:       "bg-yellow-400",
+    guessed:            "bg-gray-400",
   };
   return (
-    <span
-      title={conf ?? "unassigned"}
-      className={cn("inline-block w-2 h-2 rounded-full flex-shrink-0", map[conf ?? ""] ?? "bg-gray-300")}
-    />
+    <span title={conf ?? "unassigned"}
+      className={cn("inline-block w-2 h-2 rounded-full flex-shrink-0",
+        map[conf ?? ""] ?? "bg-gray-300")} />
   );
 }
 
-// ── Hooks ─────────────────────────────────────────────────────────────────────
-
 function useAdminSecret() {
   const [secret, setSecretState] = useState(() =>
-    sessionStorage.getItem("master_admin_secret") ?? "",
-  );
+    sessionStorage.getItem("master_admin_secret") ?? "");
   const setSecret = (s: string) => {
     sessionStorage.setItem("master_admin_secret", s);
     setSecretState(s);
@@ -164,30 +180,48 @@ function usePersonList() {
   });
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+// ── Admin unlock widget ───────────────────────────────────────────────────────
 
-function AssignForm({
-  customerId,
-  current,
-  adminSecret,
-  onDone,
-}: {
-  customerId: string;
-  current: Assignment | null;
-  adminSecret: string;
-  onDone: () => void;
-}) {
+function AdminBar({ secret, setSecret }: { secret: string; setSecret: (s: string) => void }) {
+  const [input, setInput] = useState("");
+  const { toast } = useToast();
+  const unlock = () => {
+    if (!input.trim()) return;
+    setSecret(input.trim());
+    setInput("");
+    toast({ title: "Admin mode enabled" });
+  };
+  return (
+    <div className="flex items-center gap-2">
+      {secret ? (
+        <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+          <Unlock size={13} /> Admin
+        </div>
+      ) : (
+        <div className="flex items-center gap-1">
+          <Lock size={13} className="text-muted-foreground" />
+          <Input type="password" value={input} onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && unlock()}
+            placeholder="Admin secret" className="h-7 w-44 text-xs" />
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={unlock}>Unlock</Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TAB 0 — CUSTOMERS (existing two-panel + type-change)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function AssignForm({ customerId, current, adminSecret, onDone }:
+  { customerId: string; current: Assignment | null; adminSecret: string; onDone: () => void }) {
   const { toast } = useToast();
   const qc = useQueryClient();
-  const { data: peopleData } = usePersonList();
-  const people = peopleData?.people ?? [];
-
-  const [personId, setPersonId] = useState<string>(
-    current?.person_id?.toString() ?? "",
-  );
-  const [shId, setShId] = useState<string>(
-    current?.state_head_person_id?.toString() ?? "",
-  );
+  const { data: pd } = usePersonList();
+  const people = pd?.people ?? [];
+  const [personId, setPersonId] = useState(current?.person_id?.toString() ?? "");
+  const [shId, setShId] = useState(current?.state_head_person_id?.toString() ?? "");
   const [reason, setReason] = useState("");
 
   const mut = useMutation({
@@ -195,153 +229,142 @@ function AssignForm({
       fetch(`${BASE}/api/master/customers/${customerId}/assign`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", "X-Admin-Secret": adminSecret },
-        body: JSON.stringify({
-          person_id: personId ? Number(personId) : null,
+        body: JSON.stringify({ person_id: personId ? Number(personId) : null,
           state_head_person_id: shId ? Number(shId) : null,
-          confidence: "confirmed",
-          changed_by: reason || "operator",
-        }),
-      }).then(async (r) => {
-        if (!r.ok) throw new Error((await r.json()).error ?? r.statusText);
-        return r.json();
-      }),
+          confidence: "confirmed", changed_by: reason || "operator" }),
+      }).then(async (r) => { if (!r.ok) throw new Error((await r.json()).error ?? r.statusText); return r.json(); }),
     onSuccess: () => {
-      toast({ title: "Assignment updated", description: `${customerId} reassigned successfully.` });
+      toast({ title: "Assignment updated" });
       qc.invalidateQueries({ queryKey: ["master-customer-detail", customerId] });
       qc.invalidateQueries({ queryKey: ["master-customers"] });
       onDone();
     },
-    onError: (err: Error) => {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
-    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
-  const noChange =
-    (personId || "") === (current?.person_id?.toString() ?? "") &&
+  const noChange = (personId || "") === (current?.person_id?.toString() ?? "") &&
     (shId || "") === (current?.state_head_person_id?.toString() ?? "");
 
   return (
     <div className="space-y-3 pt-3 border-t">
-      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-        Reassign
-      </div>
-      <div className="space-y-2">
+      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Reassign</div>
+      <div className="space-y-1.5">
         <label className="text-xs text-muted-foreground">Territory Manager</label>
         <Select value={personId} onValueChange={setPersonId}>
-          <SelectTrigger className="h-8 text-sm">
-            <SelectValue placeholder="— none —" />
-          </SelectTrigger>
+          <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="— none —" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="">— none —</SelectItem>
             {people.map((p) => (
               <SelectItem key={p.person_id} value={String(p.person_id)}>
-                {p.name}
-                {p.designation_name ? ` · ${p.designation_name}` : ""}
+                {p.name}{p.designation_name ? ` · ${p.designation_name}` : ""}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
       </div>
-      <div className="space-y-2">
-        <label className="text-xs text-muted-foreground">State Head</label>
-        <Select value={shId} onValueChange={setShId}>
-          <SelectTrigger className="h-8 text-sm">
-            <SelectValue placeholder="— none —" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">— none —</SelectItem>
-            {people.filter((p) => p.designation_name?.toLowerCase().includes("manager") ||
-              p.designation_name?.toLowerCase().includes("vp") ||
-              p.designation_name?.toLowerCase().includes("president")).map((p) => (
-              <SelectItem key={p.person_id} value={String(p.person_id)}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         <label className="text-xs text-muted-foreground">Reason / changed_by</label>
-        <Input
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          placeholder="operator name or reason"
-          className="h-8 text-sm"
-        />
+        <Input value={reason} onChange={(e) => setReason(e.target.value)}
+          placeholder="operator name or reason" className="h-8 text-sm" />
       </div>
       <div className="flex gap-2">
-        <Button
-          size="sm"
-          onClick={() => mut.mutate()}
-          disabled={mut.isPending || noChange}
-          className="flex-1"
-        >
-          {mut.isPending ? "Saving…" : "Confirm reassignment"}
+        <Button size="sm" onClick={() => mut.mutate()} disabled={mut.isPending || noChange} className="flex-1">
+          {mut.isPending ? "Saving…" : "Confirm"}
         </Button>
-        <Button size="sm" variant="outline" onClick={onDone}>
-          Cancel
-        </Button>
+        <Button size="sm" variant="outline" onClick={onDone}>Cancel</Button>
       </div>
-      <p className="text-[11px] text-muted-foreground">
-        Creates a new effective row from today. Historical sale_line figures are
-        unaffected — verify with <code className="font-mono">/api/master/customers/by-head</code>.
-      </p>
     </div>
   );
 }
 
-function HistoryRow({ a }: { a: Assignment }) {
-  const isCurrent = !a.effective_to;
+function TypeChangeForm({ customerId, currentType, adminSecret, onDone }:
+  { customerId: string; currentType: string; adminSecret: string; onDone: () => void }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [newType, setNewType] = useState(currentType);
+  const [reason, setReason] = useState("");
+
+  const mut = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/master/customers/${customerId}/type`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "X-Admin-Secret": adminSecret },
+        body: JSON.stringify({ new_type: newType, reason }),
+      }).then(async (r) => { if (!r.ok) throw new Error((await r.json()).error ?? r.statusText); return r.json(); }),
+    onSuccess: (d) => {
+      if (d.changed) {
+        toast({ title: "Type changed", description: `${currentType} → ${newType}. Recorded in change_log.` });
+        qc.invalidateQueries({ queryKey: ["master-customer-detail", customerId] });
+        qc.invalidateQueries({ queryKey: ["master-customers"] });
+      } else {
+        toast({ title: "No change", description: "Type is already " + newType });
+      }
+      onDone();
+    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  const noReason = !reason.trim();
+  const noChange = newType === currentType;
+
   return (
-    <div className={cn("rounded p-2 text-xs space-y-0.5 border", isCurrent ? "border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-800" : "border-border bg-muted/30")}>
-      <div className="flex items-center gap-1.5">
-        {confidenceDot(a.confidence)}
-        <span className="font-medium">{a.person_name ?? "— unassigned —"}</span>
-        {isCurrent && <Badge variant="outline" className="text-[10px] h-4 px-1 border-blue-400 text-blue-600">current</Badge>}
+    <div className="space-y-3 pt-3 border-t border-amber-200 dark:border-amber-800">
+      <div className="text-xs font-medium text-amber-700 dark:text-amber-400 uppercase tracking-wide">
+        ⚠ Change type — reason required
       </div>
-      {a.state_head_name && (
-        <div className="text-muted-foreground pl-3.5">SH: {a.state_head_name}</div>
-      )}
-      <div className="text-muted-foreground pl-3.5">
-        {a.effective_from} → {a.effective_to ?? "open"}
-        {a.set_by ? ` · set by ${a.set_by}` : ""}
+      <Alert className="border-amber-200 bg-amber-50 dark:bg-amber-950/20 py-2">
+        <AlertDescription className="text-xs text-amber-800 dark:text-amber-300">
+          Type changes broke year-on-year comparison before. The reason is permanently
+          recorded in <code className="font-mono">change_log.changed_by</code>.
+        </AlertDescription>
+      </Alert>
+      <div className="space-y-1.5">
+        <label className="text-xs text-muted-foreground">New type</label>
+        <Select value={newType} onValueChange={setNewType}>
+          <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {VALID_TYPES.map((t) => (
+              <SelectItem key={t} value={t}>{t.replace(/_/g, " ")}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1.5">
+        <label className="text-xs text-muted-foreground">Reason <span className="text-destructive">*</span></label>
+        <Input value={reason} onChange={(e) => setReason(e.target.value)}
+          placeholder="Required — why is this type changing?" className="h-8 text-sm" />
+      </div>
+      <div className="flex gap-2">
+        <Button size="sm" onClick={() => mut.mutate()}
+          disabled={mut.isPending || noChange || noReason} className="flex-1">
+          {mut.isPending ? "Saving…" : "Confirm type change"}
+        </Button>
+        <Button size="sm" variant="outline" onClick={onDone}>Cancel</Button>
       </div>
     </div>
   );
 }
 
-function DetailPanel({
-  customerId,
-  adminSecret,
-}: {
-  customerId: string;
-  adminSecret: string;
-}) {
+function DetailPanel({ customerId, adminSecret }:
+  { customerId: string; adminSecret: string }) {
   const { data, isLoading, error } = useQuery<CustomerDetail>({
     queryKey: ["master-customer-detail", customerId],
-    queryFn: () =>
-      fetch(`${BASE}/api/master/customers/${customerId}`).then((r) => r.json()),
+    queryFn: () => fetch(`${BASE}/api/master/customers/${customerId}`).then((r) => r.json()),
     enabled: !!customerId,
   });
 
   const [editing, setEditing] = useState(false);
+  const [typeEditing, setTypeEditing] = useState(false);
   const [histOpen, setHistOpen] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
 
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Loading…</div>;
-  if (error || !data)
-    return (
-      <div className="p-6 text-sm text-destructive">
-        {String(error ?? "Customer not found")}
-      </div>
-    );
+  if (error || !data) return <div className="p-6 text-sm text-destructive">{String(error ?? "Not found")}</div>;
 
   const { customer, currentAssignment, assignmentHistory, links } = data;
-  const isAdmin = !!adminSecret;
 
   return (
     <div className="p-5 space-y-5 overflow-y-auto h-full">
-      {/* Header */}
       <div>
         <div className="flex items-start justify-between gap-2">
           <div>
@@ -349,16 +372,9 @@ function DetailPanel({
             <div className="flex items-center gap-2 mt-1">
               {typeBadge(customer.type)}
               <span className="text-xs text-muted-foreground font-mono">{customer.customer_id}</span>
-              {customer.status && customer.status !== "active" && (
-                <span className="text-[10px] text-orange-600 font-medium uppercase">{customer.status}</span>
-              )}
             </div>
           </div>
-          {links.length > 0 && (
-            <span title="Has distributor↔retailer links" className="text-blue-500 mt-1">
-              <Link2 size={16} />
-            </span>
-          )}
+          {links.length > 0 && <Link2 size={16} className="text-blue-500 mt-1 flex-shrink-0" />}
         </div>
         {customer.territory_name && (
           <p className="text-xs text-muted-foreground mt-1">Territory: {customer.territory_name}</p>
@@ -373,48 +389,60 @@ function DetailPanel({
             <div className="flex items-center gap-2">
               {confidenceDot(currentAssignment.confidence)}
               <span className="font-medium text-sm">{currentAssignment.person_name ?? "— unassigned —"}</span>
-              <Badge variant="outline" className="text-[10px] h-4 px-1 ml-auto">
-                {currentAssignment.confidence}
-              </Badge>
+              <Badge variant="outline" className="text-[10px] h-4 px-1 ml-auto">{currentAssignment.confidence}</Badge>
             </div>
             {currentAssignment.state_head_name && (
-              <p className="text-xs text-muted-foreground">State Head: {currentAssignment.state_head_name}</p>
+              <p className="text-xs text-muted-foreground">SH: {currentAssignment.state_head_name}</p>
             )}
-            <p className="text-xs text-muted-foreground">
-              From {currentAssignment.effective_from}
-              {currentAssignment.set_by ? ` · ${currentAssignment.set_by}` : ""}
-            </p>
+            <p className="text-xs text-muted-foreground">From {currentAssignment.effective_from}</p>
           </div>
         ) : (
           <p className="text-sm text-muted-foreground italic">No current assignment</p>
         )}
       </div>
 
-      {/* Reassign form */}
-      {isAdmin && !editing && (
-        <Button size="sm" variant="outline" onClick={() => setEditing(true)} className="w-full">
-          Reassign customer
-        </Button>
+      {/* Reassign + type-change buttons */}
+      {adminSecret && !editing && !typeEditing && (
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={() => setEditing(true)} className="flex-1">
+            Reassign
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setTypeEditing(true)}
+            className="flex-1 border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400">
+            Change type
+          </Button>
+        </div>
       )}
       {editing && (
-        <AssignForm
-          customerId={customerId}
-          current={currentAssignment}
-          adminSecret={adminSecret}
-          onDone={() => setEditing(false)}
-        />
+        <AssignForm customerId={customer.customer_id} current={currentAssignment}
+          adminSecret={adminSecret} onDone={() => setEditing(false)} />
+      )}
+      {typeEditing && (
+        <TypeChangeForm customerId={customer.customer_id} currentType={customer.type}
+          adminSecret={adminSecret} onDone={() => setTypeEditing(false)} />
       )}
 
       {/* Assignment history */}
       {assignmentHistory.length > 1 && (
         <Collapsible open={histOpen} onOpenChange={setHistOpen}>
-          <CollapsibleTrigger className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+          <CollapsibleTrigger className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
             {histOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-            Assignment history ({assignmentHistory.length})
+            History ({assignmentHistory.length})
           </CollapsibleTrigger>
           <CollapsibleContent className="pt-2 space-y-1.5">
             {assignmentHistory.map((a) => (
-              <HistoryRow key={a.id} a={a} />
+              <div key={a.id} className={cn("rounded p-2 text-xs space-y-0.5 border",
+                !a.effective_to ? "border-blue-200 bg-blue-50 dark:bg-blue-950/20" : "border-border bg-muted/30")}>
+                <div className="flex items-center gap-1.5">
+                  {confidenceDot(a.confidence)}
+                  <span className="font-medium">{a.person_name ?? "— unassigned —"}</span>
+                  {!a.effective_to && <Badge variant="outline" className="text-[10px] h-4 px-1 border-blue-400 text-blue-600">current</Badge>}
+                </div>
+                <div className="text-muted-foreground pl-3.5">
+                  {a.effective_from} → {a.effective_to ?? "open"}
+                  {a.set_by ? ` · ${a.set_by}` : ""}
+                </div>
+              </div>
             ))}
           </CollapsibleContent>
         </Collapsible>
@@ -423,17 +451,14 @@ function DetailPanel({
       {/* Links */}
       {links.length > 0 && (
         <Collapsible open={linksOpen} onOpenChange={setLinksOpen}>
-          <CollapsibleTrigger className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+          <CollapsibleTrigger className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
             {linksOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
             <Link2 size={12} />
-            {customer.type === "retailer"
-              ? `Distributors (${links.length})`
-              : `Linked retailers (${links.length})`}
+            {customer.type === "retailer" ? `Distributors (${links.length})` : `Linked retailers (${links.length})`}
           </CollapsibleTrigger>
           <CollapsibleContent className="pt-2 space-y-1">
             {links.map((l) => (
               <div key={l.id} className="text-xs bg-muted/40 rounded px-2 py-1 flex items-center gap-2">
-                <span className="text-muted-foreground w-4 text-center">{l.link_order}</span>
                 <span className="font-mono text-muted-foreground">
                   {customer.type === "retailer" ? l.distributor_id : l.retailer_id}
                 </span>
@@ -449,85 +474,14 @@ function DetailPanel({
   );
 }
 
-// ── Unresolved Links Panel ────────────────────────────────────────────────────
-
-function UnresolvedLinksPanel() {
-  const { data } = useQuery<{
-    items: UnresolvedLink[];
-    totalLostLinks: number;
-    unresolvedCount: number;
-  }>({
-    queryKey: ["master-unresolved-links"],
-    queryFn: () => fetch(`${BASE}/api/master/unresolved-links`).then((r) => r.json()),
-  });
-
-  const [open, setOpen] = useState(false);
-
-  if (!data) return null;
-  const { items, totalLostLinks, unresolvedCount } = data;
-
-  return (
-    <div className="border-t bg-muted/20">
-      <Collapsible open={open} onOpenChange={setOpen}>
-        <CollapsibleTrigger className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-medium hover:bg-muted/40 transition-colors">
-          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-          <AlertTriangle size={13} className={unresolvedCount > 0 ? "text-amber-500" : "text-green-500"} />
-          <span>
-            Unresolved seed links — {unresolvedCount} of {items.length} names pending
-            &nbsp;·&nbsp;{totalLostLinks} links total
-          </span>
-          <span className="ml-auto text-muted-foreground">
-            {items.filter((i) => i.resolution).length} resolved
-          </span>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="px-4 pb-3 space-y-1">
-            {items.map((item) => (
-              <div
-                key={item.id}
-                className={cn(
-                  "rounded px-2.5 py-1.5 text-xs flex items-start gap-2",
-                  item.resolution ? "bg-green-50 dark:bg-green-950/20" : "bg-amber-50 dark:bg-amber-950/20",
-                )}
-              >
-                <span className="mt-0.5 flex-shrink-0">
-                  {item.resolution ? (
-                    <CheckCircle2 size={13} className="text-green-600" />
-                  ) : (
-                    <AlertTriangle size={13} className="text-amber-500" />
-                  )}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium truncate">{item.raw_name}</div>
-                  <div className="text-muted-foreground">
-                    {item.link_count} links
-                    {item.notes ? ` · ${item.notes}` : ""}
-                    {item.mapped_to_id ? ` → ${item.mapped_to_id}` : ""}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-    </div>
-  );
-}
-
-// ── Main page ─────────────────────────────────────────────────────────────────
-
-export default function OrgCustomersPage() {
+function CustomersTab({ adminSecret }: { adminSecret: string }) {
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [type, setType] = useState("all");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<string | null>(null);
-  const { secret, setSecret } = useAdminSecret();
-  const [secretInput, setSecretInput] = useState("");
-  const { toast } = useToast();
-
-  // Debounce search
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => { setDebouncedQ(q); setPage(1); }, 300);
@@ -538,21 +492,539 @@ export default function OrgCustomersPage() {
   const { data, isLoading } = useQuery<{ total: number; customers: CustomerRow[] }>({
     queryKey: ["master-customers", debouncedQ, typeParam, page],
     queryFn: () =>
-      fetch(
-        `${BASE}/api/master/customers?q=${encodeURIComponent(debouncedQ)}&type=${typeParam}&page=${page}&limit=50`,
-      ).then((r) => r.json()),
+      fetch(`${BASE}/api/master/customers?q=${encodeURIComponent(debouncedQ)}&type=${typeParam}&page=${page}&limit=50`)
+        .then((r) => r.json()),
   });
 
   const customers = data?.customers ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / 50);
 
-  const unlock = () => {
-    if (!secretInput.trim()) return;
-    setSecret(secretInput.trim());
-    setSecretInput("");
-    toast({ title: "Admin mode enabled" });
-  };
+  return (
+    <div className="flex flex-1 min-h-0">
+      {/* Left list */}
+      <div className="w-72 flex-shrink-0 border-r flex flex-col">
+        <div className="p-3 border-b space-y-2">
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input value={q} onChange={(e) => setQ(e.target.value)}
+              placeholder="Search name or ID…" className="pl-8 h-8 text-sm" />
+          </div>
+          <Select value={type} onValueChange={(v) => { setType(v); setPage(1); }}>
+            <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All types</SelectItem>
+              {VALID_TYPES.map((t) => (
+                <SelectItem key={t} value={t}>{t.replace(/_/g, " ")}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {isLoading && <div className="p-4 text-sm text-muted-foreground text-center">Loading…</div>}
+          {!isLoading && customers.length === 0 && <div className="p-4 text-sm text-muted-foreground text-center">No results</div>}
+          {customers.map((c) => (
+            <button key={c.customer_id} onClick={() => setSelected(c.customer_id)}
+              className={cn("w-full text-left px-3 py-2.5 border-b hover:bg-muted/50 transition-colors",
+                selected === c.customer_id && "bg-muted")}>
+              <div className="flex items-start justify-between gap-1">
+                <span className="font-medium text-sm leading-tight truncate">{c.name}</span>
+                <div className="flex-shrink-0 flex items-center gap-1 mt-0.5">
+                  {c.has_link && <Link2 size={11} className="text-blue-400" />}
+                  {confidenceDot(c.confidence)}
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 mt-1">
+                {typeBadge(c.type)}
+                {c.person_name && <span className="text-[11px] text-muted-foreground truncate">{c.person_name}</span>}
+              </div>
+            </button>
+          ))}
+        </div>
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-3 py-2 border-t text-xs text-muted-foreground">
+            <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="disabled:opacity-40">← Prev</button>
+            <span>{page} / {totalPages}</span>
+            <button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)} className="disabled:opacity-40">Next →</button>
+          </div>
+        )}
+      </div>
+
+      {/* Right detail */}
+      <div className="flex-1 min-w-0 overflow-y-auto">
+        {selected ? (
+          <DetailPanel customerId={selected} adminSecret={adminSecret} />
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
+            <Store size={40} className="opacity-30" />
+            <p className="text-sm">Select a customer to view details</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TAB 1 — UNASSIGNED / BULK REASSIGN
+// ═══════════════════════════════════════════════════════════════════════════
+
+function UnassignedTab({ adminSecret }: { adminSecret: string }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const { data: pd } = usePersonList();
+  const people = pd?.people ?? [];
+
+  // Territory sidebar selection
+  const [selTerritory, setSelTerritory] = useState<number | null | "all">("all");
+  const [selType, setSelType] = useState("all");
+  const [page, setPage] = useState(1);
+
+  // Bulk form
+  const [toPersonId, setToPersonId] = useState("");
+  const [changedBy, setChangedBy] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectAll, setSelectAll] = useState(false);
+
+  const territoryParam = selTerritory === "all" ? undefined :
+    selTerritory === null ? "null" : String(selTerritory);
+  const typeParam = selType === "all" ? "" : selType;
+
+  const { data, isLoading, refetch } = useQuery<{
+    total: number;
+    customers: UnassignedCustomer[];
+    territoryGroups: TerritoryGroup[];
+  }>({
+    queryKey: ["master-unassigned", territoryParam, typeParam, page],
+    queryFn: () => {
+      const params = new URLSearchParams({ limit: "100", page: String(page) });
+      if (typeParam) params.set("type", typeParam);
+      if (selTerritory !== "all" && selTerritory !== null) params.set("territory_id", String(selTerritory));
+      return fetch(`${BASE}/api/master/customers/unassigned?${params}`).then((r) => r.json());
+    },
+  });
+
+  const groups = data?.territoryGroups ?? [];
+  const customers = data?.customers ?? [];
+  const total = data?.total ?? 0;
+
+  // Keep selectAll in sync
+  const visibleIds = customers.map((c) => c.customer_id);
+  useEffect(() => {
+    if (selectAll) setSelectedIds(new Set(visibleIds));
+    else setSelectedIds(new Set());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectAll, data]);
+
+  const bulkMut = useMutation({
+    mutationFn: () => {
+      const body: Record<string, unknown> = {
+        to_person_id: Number(toPersonId),
+        changed_by: changedBy || "bulk_assign",
+      };
+      if (selectedIds.size > 0) {
+        body.customer_ids = [...selectedIds];
+      } else {
+        if (typeParam) body.type = typeParam;
+        if (selTerritory !== "all" && selTerritory !== null)
+          body.territory_id = selTerritory;
+      }
+      return fetch(`${BASE}/api/master/customers/bulk-assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Admin-Secret": adminSecret },
+        body: JSON.stringify(body),
+      }).then(async (r) => {
+        if (!r.ok) throw new Error((await r.json()).error ?? r.statusText);
+        return r.json();
+      });
+    },
+    onSuccess: (d) => {
+      toast({
+        title: `Moved ${d.moved} customers`,
+        description: `→ ${d.toPersonName} · ${d.moved} change_log entries written`,
+      });
+      setSelectedIds(new Set());
+      setSelectAll(false);
+      qc.invalidateQueries({ queryKey: ["master-unassigned"] });
+      qc.invalidateQueries({ queryKey: ["master-customers"] });
+      refetch();
+    },
+    onError: (err: Error) =>
+      toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  const isBulkReady = adminSecret && toPersonId && (selectedIds.size > 0 || total > 0);
+  const moveCount = selectedIds.size > 0 ? selectedIds.size : total;
+
+  return (
+    <div className="flex flex-1 min-h-0">
+      {/* Territory sidebar */}
+      <div className="w-56 flex-shrink-0 border-r flex flex-col overflow-y-auto">
+        <div className="p-3 border-b text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          Territory
+        </div>
+        <button
+          onClick={() => { setSelTerritory("all"); setPage(1); setSelectAll(false); }}
+          className={cn("w-full text-left px-3 py-2 text-sm border-b hover:bg-muted/50",
+            selTerritory === "all" && "bg-muted font-medium")}>
+          All territories
+          <span className="ml-auto float-right text-xs text-muted-foreground">
+            {groups.reduce((s, g) => s + Number(g.customer_count), 0)}
+          </span>
+        </button>
+        {groups.map((g) => (
+          <button key={g.territory_id ?? "null"}
+            onClick={() => { setSelTerritory(g.territory_id); setPage(1); setSelectAll(false); }}
+            className={cn("w-full text-left px-3 py-2 text-sm border-b hover:bg-muted/50",
+              selTerritory === g.territory_id && "bg-muted font-medium")}>
+            <div className="flex justify-between items-baseline">
+              <span className="truncate pr-2">{g.territory_name ?? "No territory"}</span>
+              <span className="text-xs text-muted-foreground flex-shrink-0">{g.customer_count}</span>
+            </div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">
+              {g.dist_dealer}D · {g.retailers}R
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {/* Main content */}
+      <div className="flex-1 min-w-0 flex flex-col">
+        {/* Filter + bulk form */}
+        <div className="p-3 border-b bg-muted/20 flex flex-wrap items-end gap-3">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-muted-foreground">Type</label>
+            <Select value={selType} onValueChange={(v) => { setSelType(v); setPage(1); setSelectAll(false); }}>
+              <SelectTrigger className="h-8 w-36 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                {VALID_TYPES.map((t) => (
+                  <SelectItem key={t} value={t}>{t.replace(/_/g, " ")}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <label className="text-xs text-muted-foreground flex-shrink-0">Assign to</label>
+            <Select value={toPersonId} onValueChange={setToPersonId}>
+              <SelectTrigger className="h-8 flex-1 text-sm min-w-0"><SelectValue placeholder="Choose TM…" /></SelectTrigger>
+              <SelectContent>
+                {people.map((p) => (
+                  <SelectItem key={p.person_id} value={String(p.person_id)}>
+                    {p.name}{p.designation_name ? ` · ${p.designation_name}` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Input value={changedBy} onChange={(e) => setChangedBy(e.target.value)}
+            placeholder="changed_by" className="h-8 w-36 text-sm" />
+
+          <Button size="sm"
+            onClick={() => bulkMut.mutate()}
+            disabled={!isBulkReady || bulkMut.isPending}
+            className="bg-primary">
+            {bulkMut.isPending ? <RefreshCw size={13} className="animate-spin mr-1" /> : <UserCheck size={13} className="mr-1" />}
+            Assign {selectedIds.size > 0 ? selectedIds.size : moveCount} customers
+          </Button>
+        </div>
+
+        {!adminSecret && (
+          <Alert className="m-3 py-2">
+            <AlertDescription className="text-xs">Unlock admin secret to enable bulk reassignment.</AlertDescription>
+          </Alert>
+        )}
+
+        {/* Select all bar */}
+        <div className="px-3 py-1.5 border-b bg-muted/10 flex items-center gap-3 text-xs text-muted-foreground">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={selectAll}
+              onChange={(e) => setSelectAll(e.target.checked)} className="rounded" />
+            Select all {total} visible
+          </label>
+          {selectedIds.size > 0 && (
+            <span className="text-blue-600 font-medium">{selectedIds.size} selected</span>
+          )}
+          <span className="ml-auto">{isLoading ? "Loading…" : `${total} unassigned`}</span>
+        </div>
+
+        {/* Customer list */}
+        <div className="flex-1 overflow-y-auto">
+          {customers.map((c) => (
+            <label key={c.customer_id}
+              className="flex items-center gap-3 px-3 py-2 border-b hover:bg-muted/30 cursor-pointer">
+              <input type="checkbox"
+                checked={selectedIds.has(c.customer_id)}
+                onChange={(e) => {
+                  setSelectedIds((prev) => {
+                    const next = new Set(prev);
+                    e.target.checked ? next.add(c.customer_id) : next.delete(c.customer_id);
+                    return next;
+                  });
+                  if (!e.target.checked) setSelectAll(false);
+                }}
+                className="rounded flex-shrink-0" />
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-sm truncate">{c.name}</div>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  {typeBadge(c.type)}
+                  {c.territory_name && (
+                    <span className="text-[11px] text-muted-foreground">{c.territory_name}</span>
+                  )}
+                </div>
+              </div>
+              <span className="text-[11px] font-mono text-muted-foreground flex-shrink-0">
+                {c.customer_id}
+              </span>
+            </label>
+          ))}
+          {!isLoading && customers.length === 0 && (
+            <div className="p-8 text-center text-muted-foreground">
+              <UserCheck size={32} className="mx-auto mb-2 opacity-30" />
+              <p className="text-sm">No unassigned customers in this filter</p>
+            </div>
+          )}
+        </div>
+
+        {/* Pagination */}
+        {Math.ceil(total / 100) > 1 && (
+          <div className="flex items-center justify-between px-3 py-2 border-t text-xs text-muted-foreground">
+            <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="disabled:opacity-40">← Prev</button>
+            <span>{page} / {Math.ceil(total / 100)}</span>
+            <button disabled={page >= Math.ceil(total / 100)} onClick={() => setPage((p) => p + 1)} className="disabled:opacity-40">Next →</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TAB 2 — REVIEW QUEUE
+// ═══════════════════════════════════════════════════════════════════════════
+
+function ReviewQueueTab({ adminSecret }: { adminSecret: string }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const { data: pd } = usePersonList();
+  const people = pd?.people ?? [];
+
+  // Propose form
+  const [name, setName] = useState("");
+  const [type, setType] = useState("retailer");
+  const [notes, setNotes] = useState("");
+  const [submittedBy, setSubmittedBy] = useState("");
+
+  const { data, isLoading } = useQuery<{ total: number; pending: number; items: QueueItem[] }>({
+    queryKey: ["master-review-queue"],
+    queryFn: () => fetch(`${BASE}/api/master/customers/review-queue`).then((r) => r.json()),
+  });
+
+  const proposeMut = useMutation({
+    mutationFn: () =>
+      fetch(`${BASE}/api/master/customers/review-queue`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim(), type, notes: notes.trim() || null,
+          submitted_by: submittedBy.trim() || "unknown" }),
+      }).then(async (r) => { if (!r.ok) throw new Error((await r.json()).error ?? r.statusText); return r.json(); }),
+    onSuccess: (d) => {
+      toast({ title: "Proposed", description: `"${d.item.name}" added to review queue (id ${d.item.id})` });
+      setName(""); setNotes(""); setSubmittedBy("");
+      qc.invalidateQueries({ queryKey: ["master-review-queue"] });
+    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  const approveMut = useMutation({
+    mutationFn: ({ id, reviewed_by }: { id: number; reviewed_by: string }) =>
+      fetch(`${BASE}/api/master/customers/review-queue/${id}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Admin-Secret": adminSecret },
+        body: JSON.stringify({ reviewed_by }),
+      }).then(async (r) => { if (!r.ok) throw new Error((await r.json()).error ?? r.statusText); return r.json(); }),
+    onSuccess: (d) => {
+      toast({ title: "Approved", description: `Customer created: ${d.customerId}` });
+      qc.invalidateQueries({ queryKey: ["master-review-queue"] });
+      qc.invalidateQueries({ queryKey: ["master-customers"] });
+    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  const rejectMut = useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
+      fetch(`${BASE}/api/master/customers/review-queue/${id}/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Admin-Secret": adminSecret },
+        body: JSON.stringify({ reviewed_by: "admin", reason }),
+      }).then(async (r) => { if (!r.ok) throw new Error((await r.json()).error ?? r.statusText); return r.json(); }),
+    onSuccess: () => {
+      toast({ title: "Rejected" });
+      qc.invalidateQueries({ queryKey: ["master-review-queue"] });
+    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  const items = data?.items ?? [];
+
+  return (
+    <div className="flex flex-1 min-h-0">
+      {/* Left — propose form */}
+      <div className="w-72 flex-shrink-0 border-r p-4 space-y-4 overflow-y-auto">
+        <div>
+          <div className="text-sm font-medium mb-3">Propose new customer</div>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">Name <span className="text-destructive">*</span></label>
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Customer name" className="h-8 text-sm" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">Type</label>
+              <Select value={type} onValueChange={setType}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {VALID_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>{t.replace(/_/g, " ")}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">Notes</label>
+              <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional context" className="h-8 text-sm" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">Submitted by</label>
+              <Input value={submittedBy} onChange={(e) => setSubmittedBy(e.target.value)} placeholder="Your name" className="h-8 text-sm" />
+            </div>
+            <Button size="sm" onClick={() => proposeMut.mutate()}
+              disabled={!name.trim() || proposeMut.isPending} className="w-full">
+              {proposeMut.isPending ? "Submitting…" : "Submit proposal"}
+            </Button>
+          </div>
+        </div>
+
+        <Alert className="py-2">
+          <AlertDescription className="text-xs">
+            Proposed customers land in the review queue — NOT in the customer table.
+            Admin must approve before any customer_id is assigned.
+          </AlertDescription>
+        </Alert>
+      </div>
+
+      {/* Right — queue list */}
+      <div className="flex-1 min-w-0 overflow-y-auto">
+        {isLoading && <div className="p-6 text-sm text-muted-foreground">Loading…</div>}
+        {!isLoading && items.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+            <ClipboardList size={40} className="opacity-30" />
+            <p className="text-sm">No proposals yet</p>
+          </div>
+        )}
+        {items.map((item) => (
+          <QueueRow key={item.id} item={item} adminSecret={adminSecret}
+            onApprove={(reviewed_by) => approveMut.mutate({ id: item.id, reviewed_by })}
+            onReject={(reason) => rejectMut.mutate({ id: item.id, reason })} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function QueueRow({ item, adminSecret, onApprove, onReject }:
+  { item: QueueItem; adminSecret: string; onApprove: (by: string) => void; onReject: (r: string) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const [reviewer, setReviewer] = useState("");
+  const [rejectReason, setRejectReason] = useState("");
+
+  const statusIcon = item.review_status === "approved" ? (
+    <CheckCircle2 size={14} className="text-green-600" />
+  ) : item.review_status === "rejected" ? (
+    <AlertTriangle size={14} className="text-red-500" />
+  ) : (
+    <ClipboardList size={14} className="text-amber-500" />
+  );
+
+  return (
+    <div className={cn("border-b px-4 py-3", item.review_status === "approved" && "bg-green-50/50 dark:bg-green-950/10",
+      item.review_status === "rejected" && "bg-red-50/50 dark:bg-red-950/10")}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          {statusIcon}
+          <div className="min-w-0">
+            <div className="font-medium text-sm truncate">{item.name}</div>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              {typeBadge(item.type)}
+              <span className="text-[11px] text-muted-foreground">
+                #{item.id} · {item.submitted_by} · {new Date(item.submitted_at).toLocaleDateString()}
+              </span>
+            </div>
+          </div>
+        </div>
+        {item.review_status === "pending" && adminSecret && (
+          <button onClick={() => setExpanded((e) => !e)}
+            className="text-xs text-blue-600 flex-shrink-0 hover:underline">
+            {expanded ? "collapse" : "review"}
+          </button>
+        )}
+        {item.approved_customer_id && (
+          <span className="text-[11px] font-mono text-green-700 flex-shrink-0">{item.approved_customer_id}</span>
+        )}
+      </div>
+      {item.notes && <p className="text-xs text-muted-foreground mt-1 pl-6">{item.notes}</p>}
+      {expanded && item.review_status === "pending" && (
+        <div className="mt-3 pl-6 space-y-2">
+          <Input value={reviewer} onChange={(e) => setReviewer(e.target.value)}
+            placeholder="Reviewer name" className="h-7 text-xs" />
+          <div className="flex gap-2">
+            <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white"
+              onClick={() => onApprove(reviewer || "admin")}>
+              ✓ Approve → creates customer
+            </Button>
+            <Input value={rejectReason} onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="Reject reason" className="h-7 text-xs flex-1" />
+            <Button size="sm" variant="destructive" className="h-7 text-xs"
+              onClick={() => onReject(rejectReason)}>
+              ✗ Reject
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MAIN PAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+export default function OrgCustomersPage() {
+  const { secret, setSecret } = useAdminSecret();
+  const [tab, setTab] = useState(0);
+
+  // Unassigned count for badge
+  const { data: unassignedData } = useQuery<{ total: number; customers: unknown[]; territoryGroups: unknown[] }>({
+    queryKey: ["master-unassigned-total"],
+    queryFn: () => fetch(`${BASE}/api/master/customers/unassigned?limit=1`).then((r) => r.json()),
+    staleTime: 60_000,
+  });
+  const unassignedCount = unassignedData?.total ?? 0;
+
+  // Review queue pending count
+  const { data: queueData } = useQuery<{ total: number; pending: number; items: unknown[] }>({
+    queryKey: ["master-review-queue-count"],
+    queryFn: () => fetch(`${BASE}/api/master/customers/review-queue`).then((r) => r.json()),
+    staleTime: 60_000,
+  });
+  const pendingCount = queueData?.pending ?? 0;
+
+  const tabs = [
+    { label: "Customers", icon: <Store size={14} /> },
+    { label: `Unassigned ${unassignedCount ? `(${unassignedCount.toLocaleString()})` : ""}`, icon: <Users size={14} /> },
+    { label: `Review Queue ${pendingCount ? `(${pendingCount})` : ""}`, icon: <ClipboardList size={14} /> },
+  ];
 
   return (
     <div className="flex flex-col h-full">
@@ -560,135 +1032,31 @@ export default function OrgCustomersPage() {
       <div className="flex items-center justify-between px-5 py-3 border-b flex-shrink-0 bg-background">
         <div>
           <h1 className="text-base font-semibold">Organisation / Customers</h1>
-          <p className="text-xs text-muted-foreground">
-            {total.toLocaleString()} customers · Phase 3 of the editable master
-          </p>
+          <p className="text-xs text-muted-foreground">Phase 3 of the editable master</p>
         </div>
-        <div className="flex items-center gap-2">
-          {secret ? (
-            <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
-              <Unlock size={13} />
-              Admin
-            </div>
-          ) : (
-            <div className="flex items-center gap-1">
-              <Lock size={13} className="text-muted-foreground" />
-              <Input
-                type="password"
-                value={secretInput}
-                onChange={(e) => setSecretInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && unlock()}
-                placeholder="Admin secret to enable edits"
-                className="h-7 w-52 text-xs"
-              />
-              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={unlock}>
-                Unlock
-              </Button>
-            </div>
-          )}
-        </div>
+        <AdminBar secret={secret} setSecret={setSecret} />
       </div>
 
-      {/* Main body */}
-      <div className="flex flex-1 min-h-0">
-        {/* Left — list */}
-        <div className="w-72 flex-shrink-0 border-r flex flex-col">
-          {/* Filters */}
-          <div className="p-3 border-b space-y-2">
-            <div className="relative">
-              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Search name or ID…"
-                className="pl-8 h-8 text-sm"
-              />
-            </div>
-            <Select value={type} onValueChange={(v) => { setType(v); setPage(1); }}>
-              <SelectTrigger className="h-8 text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All types</SelectItem>
-                <SelectItem value="distributor">Distributor</SelectItem>
-                <SelectItem value="retailer">Retailer</SelectItem>
-                <SelectItem value="direct_dealer">Direct Dealer</SelectItem>
-                <SelectItem value="sub_dealer">Sub Dealer</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* List */}
-          <div className="flex-1 overflow-y-auto">
-            {isLoading && (
-              <div className="p-4 text-sm text-muted-foreground text-center">Loading…</div>
-            )}
-            {!isLoading && customers.length === 0 && (
-              <div className="p-4 text-sm text-muted-foreground text-center">No results</div>
-            )}
-            {customers.map((c) => (
-              <button
-                key={c.customer_id}
-                onClick={() => setSelected(c.customer_id)}
-                className={cn(
-                  "w-full text-left px-3 py-2.5 border-b hover:bg-muted/50 transition-colors",
-                  selected === c.customer_id && "bg-muted",
-                )}
-              >
-                <div className="flex items-start justify-between gap-1">
-                  <span className="font-medium text-sm leading-tight truncate">{c.name}</span>
-                  <div className="flex-shrink-0 flex items-center gap-1 mt-0.5">
-                    {c.has_link && <Link2 size={11} className="text-blue-400" />}
-                    {confidenceDot(c.confidence)}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5 mt-1">
-                  {typeBadge(c.type)}
-                  {c.person_name && (
-                    <span className="text-[11px] text-muted-foreground truncate">{c.person_name}</span>
-                  )}
-                </div>
-              </button>
-            ))}
-          </div>
-
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between px-3 py-2 border-t text-xs text-muted-foreground">
-              <button
-                disabled={page <= 1}
-                onClick={() => setPage((p) => p - 1)}
-                className="disabled:opacity-40 hover:text-foreground"
-              >
-                ← Prev
-              </button>
-              <span>{page} / {totalPages}</span>
-              <button
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => p + 1)}
-                className="disabled:opacity-40 hover:text-foreground"
-              >
-                Next →
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Right — detail */}
-        <div className="flex-1 min-w-0 overflow-y-auto">
-          {selected ? (
-            <DetailPanel customerId={selected} adminSecret={secret} />
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
-              <Store size={40} className="opacity-30" />
-              <p className="text-sm">Select a customer to view details</p>
-            </div>
-          )}
-        </div>
+      {/* Tab bar */}
+      <div className="flex border-b flex-shrink-0 bg-background">
+        {tabs.map((t, i) => (
+          <button key={i} onClick={() => setTab(i)}
+            className={cn(
+              "flex items-center gap-1.5 px-4 py-2.5 text-sm border-b-2 transition-colors",
+              tab === i
+                ? "border-primary text-primary font-medium"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            )}>
+            {t.icon}
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      {/* Unresolved links strip */}
-      <UnresolvedLinksPanel />
+      {/* Tab content */}
+      {tab === 0 && <CustomersTab adminSecret={secret} />}
+      {tab === 1 && <UnassignedTab adminSecret={secret} />}
+      {tab === 2 && <ReviewQueueTab adminSecret={secret} />}
     </div>
   );
 }
