@@ -170,7 +170,7 @@ describe("alertPersistence", () => {
     expect(Number(rows[0]?.periods_open)).toBe(2);
   });
 
-  it("increments periods_open when the analysis window advances to a new month", async () => {
+  it("updates period_label when the analysis window advances to a new month", async () => {
     // Simulates a month freeze: the analysis window grows from Apr-May to Apr-Jun.
     const alertQ1 = makeRawAlert({ currentMonths: ["Apr-99", "May-99"] });
     const alertQ2 = makeRawAlert({ currentMonths: ["Apr-99", "May-99", "Jun-99"] });
@@ -186,9 +186,11 @@ describe("alertPersistence", () => {
       `SELECT periods_open, period_label FROM alert WHERE fy = $1`,
       [TEST_FY],
     );
-    // periods_open must have incremented to 2 because the window advanced
+    // periods_open increments on every detection run — 2 runs → 2.
+    // (Under per-run counting this is true regardless of window advancement;
+    //  the meaningful assertion here is that period_label was updated.)
     expect(Number(rows[0]?.periods_open)).toBe(2);
-    // period_label is updated to the new window
+    // period_label is updated to reflect the new, wider window
     expect(rows[0]?.period_label).toBe("Apr-99..Jun-99");
   });
 
