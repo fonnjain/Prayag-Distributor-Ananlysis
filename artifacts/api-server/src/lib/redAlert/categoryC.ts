@@ -22,6 +22,8 @@ type CConfig = {
   C6_MIN_STOPS: number;
   C6_MIN_STOP_SHARE_PCT: number;
   C6_MATERIALITY_FLOOR_RUPEES: number;
+  /** Set false in red_alert_config.json to disable C6 without deleting its code. */
+  C6_ACTIVE?: boolean;
 };
 
 // ── Seasonal weights ──────────────────────────────────────────────────────────
@@ -355,6 +357,11 @@ export function buildCategoryCAlerts(
   //
   // C6 uses a retailer-level stop count (not distributor cards) so the alert naturally
   // detects territory-wide churn patterns rather than individual distributor failures.
+  //
+  // Set C6_ACTIVE=false in red_alert_config.json to disable without removing the code.
+  // Re-enable when: (a) normalised by territory size, (b) 23-stop gap reconciled,
+  // (c) running on a full quarter (not a partial secondary period).
+  if (cfg.C6_ACTIVE === false) return alerts;
   {
     // Build normalised name → state_head map from persons.
     // Normalisation strips all non-alphanumeric chars (handles "A. Prasath" ↔ "a.prasath").

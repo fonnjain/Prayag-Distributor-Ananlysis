@@ -890,9 +890,9 @@ router.get("/master/customers/review-queue", async (_req, res) => {
     const result = await pool.query(
       `SELECT id, name, type, proposed_territory_id, proposed_person_id,
               notes, submitted_by, review_status, reviewed_by, reviewed_at,
-              created_at::text
+              submitted_at::text AS created_at
        FROM customer_review_queue
-       ORDER BY created_at DESC`,
+       ORDER BY submitted_at DESC`,
     );
     const pending = result.rows.filter((r) => r.review_status === "pending").length;
     res.json({ total: result.rows.length, pending, items: result.rows });

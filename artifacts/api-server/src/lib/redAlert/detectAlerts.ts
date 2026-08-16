@@ -44,6 +44,7 @@ type RaConfig = {
     C6_MIN_STOPS: number;
     C6_MIN_STOP_SHARE_PCT: number;
     C6_MATERIALITY_FLOOR_RUPEES: number;
+    C6_ACTIVE?: boolean;
   };
   CATEGORY_S_SUPPLY: {
     S1_CONSECUTIVE_ZERO_MONTHS: number;
@@ -193,6 +194,7 @@ export function detectAlerts(
     C6_MIN_STOPS: cfg.CATEGORY_C_TERRITORY_SEGMENT.C6_MIN_STOPS,
     C6_MIN_STOP_SHARE_PCT: cfg.CATEGORY_C_TERRITORY_SEGMENT.C6_MIN_STOP_SHARE_PCT,
     C6_MATERIALITY_FLOOR_RUPEES: cfg.CATEGORY_C_TERRITORY_SEGMENT.C6_MATERIALITY_FLOOR_RUPEES,
+    C6_ACTIVE: cfg.CATEGORY_C_TERRITORY_SEGMENT.C6_ACTIVE,
   }, c5AsOfDate);
 
   const sAlerts = buildCategorySAlerts(ctx, fy, primaryCompleteMonths, {

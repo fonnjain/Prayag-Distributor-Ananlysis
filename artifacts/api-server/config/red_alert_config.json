@@ -51,6 +51,7 @@
     "C6_MIN_STOPS": 10,
     "C6_MIN_STOP_SHARE_PCT": 30,
     "C6_MATERIALITY_FLOOR_RUPEES": 1000000,
+    "C6_ACTIVE": false,
     "C6_NOTE": "Territorial concentration: a state head's territory accounts for >= C6_MIN_STOPS retailer stops AND >= C6_MIN_STOP_SHARE_PCT of all attributable stops. 'Stop' = retailer above the materiality floor (C6_MATERIALITY_FLOOR_RUPEES, same as RETAILER_RUPEES) that had non-zero prior-period purchases but zero in the current period. Denominator = all stopped retailers above floor with a resolvable state head; product-category registry rows (no hr_status AND not is_state_head) and unmapped retailers are excluded, and their rupees are NOT included in the total. Calibrated Aug 2026 at ₹10 L floor: Q1 FY2026-27 gives 66 eligible retailer stops. Sandeep Dadheech 52/66 (78.8%) fires; Syed Aqil Rizvi 10/66 (15.2%) does not. Threshold separates extreme territorial concentration from normal-level."
   },
   "MATERIALITY_FLOORS": {

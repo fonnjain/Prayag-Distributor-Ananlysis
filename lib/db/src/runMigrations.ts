@@ -1409,6 +1409,27 @@ const MIGRATIONS: Migration[] = [
         AND NOT ('NARENDRA KUMAR SHARMA' = ANY(COALESCE(alias_primary, '{}')));
     `,
   },
+  {
+    id: "039_alert_routing_on_raise",
+    sql: `
+      -- State head recipients: weekly digest only (per-territory alerts; immediate fire is noise).
+      UPDATE alert_recipient SET cadence = 'weekly' WHERE scope_type = 'state_head';
+
+      -- All-India existing '*' rows: weekly (these handle the digest for all categories).
+      UPDATE alert_recipient SET cadence = 'weekly' WHERE scope_type = 'all_india';
+
+      -- Add immediate on_raise rows for S-category and C-category alerts to all-India
+      -- recipients. These are level-1 rows so notifyAlert(triggerType='on_raise') fires them.
+      -- Deepak J (L1) — S* and C* immediate
+      INSERT INTO alert_recipient
+        (alert_code_pattern, scope_type, name, channel, contact, cadence, escalation_level)
+      VALUES
+        ('S*', 'all_india', 'Deepak J',      'whatsapp', '9910896007',         'on_raise', 1),
+        ('C*', 'all_india', 'Deepak J',      'whatsapp', '9910896007',         'on_raise', 1),
+        ('S*', 'all_india', 'Nitin Agarwal', 'email',    'ceo@prayagindia.com', 'on_raise', 1),
+        ('C*', 'all_india', 'Nitin Agarwal', 'email',    'ceo@prayagindia.com', 'on_raise', 1);
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).
