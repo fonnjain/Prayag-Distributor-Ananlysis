@@ -23,12 +23,12 @@
 //      run's writes visible.
 //
 // PERIOD COUNTING:
-//   periods_open counts distinct analytical windows in which the alert has
-//   been open — not detection-run executions. The fingerprint is fy|code|entityKey
-//   (months excluded) so the same row persists across window changes. We
-//   increment periods_open only when period_label changes (the frozen-month
-//   window has advanced). Multiple 6-hour runs within the same window leave
-//   periods_open unchanged.
+//   periods_open counts consecutive detection runs in which the alert has
+//   been observed — spec: "how many consecutive detection runs it has appeared
+//   in". It increments on every detection run, regardless of whether the
+//   analytical window (period_label) has changed. This lets the page show
+//   "open 3 periods" within hours of the alert first appearing, which is the
+//   intended signal that the situation has not resolved.
 
 import { pool } from "@workspace/db";
 import { buildDetectionContext } from "./context.js";
@@ -208,15 +208,13 @@ export async function persistAlerts(
       if (existing) {
         // periods_open increments only when the analytical window has advanced
         // (incoming period_label differs from what's stored).
-        const windowAdvanced = existing.period_label !== periodLabel;
-
         if (existing.status === "cleared") {
           // ── Recurrence: reopen a previously cleared alert ────────────────
           // Reset lifecycle fields; first_seen_at is preserved (original observation).
           await client.query(
             `UPDATE alert
                 SET status          = 'open',
-                    periods_open    = CASE WHEN $6 THEN periods_open + 1 ELSE periods_open END,
+                    periods_open    = periods_open + 1,
                     last_seen_at    = $1,
                     rupees_at_stake = $2,
                     detail          = $3::jsonb,
@@ -225,25 +223,26 @@ export async function persistAlerts(
                     clear_reason    = NULL,
                     suppressed_by   = NULL,
                     linked_alert_id = NULL
-              WHERE id = $7`,
-            [now, alert.rupeesAtStake, JSON.stringify(detail), alert.entity, periodLabel, windowAdvanced, existing.id],
+              WHERE id = $6`,
+            [now, alert.rupeesAtStake, JSON.stringify(detail), alert.entity, periodLabel, existing.id],
           );
           upsertedAlerts.push({ id: existing.id, code: alert.code, entityKey: alert.entityKey });
           reopenedCount++;
         } else {
           // ── Continuing open or acknowledged ──────────────────────────────
           // Never reset status: acknowledged stays acknowledged.
-          // Increment periods_open only when the analysis window has advanced.
+          // Increment periods_open on every detection run — spec: "how many
+          // consecutive detection runs it has appeared in".
           await client.query(
             `UPDATE alert
                 SET last_seen_at    = $1,
-                    periods_open    = CASE WHEN $6 THEN periods_open + 1 ELSE periods_open END,
+                    periods_open    = periods_open + 1,
                     rupees_at_stake = $2,
                     detail          = $3::jsonb,
                     entity          = $4,
                     period_label    = $5
-              WHERE id = $7`,
-            [now, alert.rupeesAtStake, JSON.stringify(detail), alert.entity, periodLabel, windowAdvanced, existing.id],
+              WHERE id = $6`,
+            [now, alert.rupeesAtStake, JSON.stringify(detail), alert.entity, periodLabel, existing.id],
           );
           upsertedAlerts.push({ id: existing.id, code: alert.code, entityKey: alert.entityKey });
           updatedCount++;
