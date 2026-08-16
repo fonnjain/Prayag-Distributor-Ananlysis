@@ -45,6 +45,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { PersonRegistryPanel } from "@/components/dashboard/Organisation";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -145,6 +146,9 @@ async function apiJson<T>(url: string, opts?: RequestInit): Promise<T> {
 export default function OrgPeoplePage() {
   const { toast } = useToast();
   const qc = useQueryClient();
+
+  // ── Tab ───────────────────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<"people" | "registry">("people");
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   const [secret, setSecret] = useState(
@@ -406,7 +410,7 @@ export default function OrgPeoplePage() {
         <div>
           <h1 className="text-lg font-semibold">Organisation / People</h1>
           <p className="text-sm text-muted-foreground">
-            179 people · Phase 2 of the editable master
+            {peopleData ? `${peopleData.total} people` : "Organisation"} · Phase 2 of the editable master
           </p>
         </div>
         {/* Admin secret lock */}
@@ -474,7 +478,31 @@ export default function OrgPeoplePage() {
         )}
       </div>
 
-      <div className="flex flex-1 min-h-0 overflow-hidden">
+      {/* ── Tab bar ────────────────────────────────────────────────────── */}
+      <div className="flex border-b shrink-0">
+        {(["people", "registry"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setActiveTab(t)}
+            className={cn(
+              "px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors",
+              activeTab === t
+                ? "border-foreground text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {t === "people" ? "People" : "Person Registry"}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "registry" && (
+        <div className="flex-1 overflow-y-auto p-6">
+          <PersonRegistryPanel />
+        </div>
+      )}
+
+      {activeTab === "people" && <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* ── Left panel: list ─────────────────────────────────────────── */}
         <div className="w-72 shrink-0 border-r flex flex-col min-h-0">
           {/* Filters */}
@@ -624,7 +652,7 @@ export default function OrgPeoplePage() {
             <div className="p-6 text-sm text-destructive">Person not found.</div>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* ── Impact confirmation modal ──────────────────────────────────── */}
       <ImpactModal

@@ -141,7 +141,7 @@ function RosterRefreshCard() {
     // Collect the admin secret before reading the file — abort early if the
     // user cancels the prompt (matches the lockAnchorNow pattern in DataHealth).
     const secret = window.prompt(
-      "Enter the admin secret (SESSION_SECRET) to authorise the roster update:",
+      "Enter the ADMIN_SECRET to authorise the roster update:",
     );
     if (!secret) return;
 

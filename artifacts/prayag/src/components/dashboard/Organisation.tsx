@@ -955,7 +955,7 @@ interface ImpactPreview {
   affectedCustomers: string[];
 }
 
-function PersonRegistryPanel() {
+export function PersonRegistryPanel() {
   const [rows, setRows] = useState<RegistryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
