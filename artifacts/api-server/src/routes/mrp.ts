@@ -733,7 +733,7 @@ router.get("/mrp/:code/history", async (req, res) => {
 router.post("/admin/mrp/load", async (req, res) => {
   const token = String(req.headers["x-admin-secret"] ?? "").trim();
   if (!isAdminToken(token)) {
-    res.status(401).json({ error: "Admin authorisation required. Pass the SESSION_SECRET as: X-Admin-Secret: <SESSION_SECRET>" });
+    res.status(401).json({ error: "Admin authorisation required. Pass ADMIN_SECRET as: X-Admin-Secret: <ADMIN_SECRET>" });
     return;
   }
 

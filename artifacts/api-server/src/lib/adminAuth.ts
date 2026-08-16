@@ -2,23 +2,23 @@
  * Privileged-admin helpers for endpoints that mutate durable config files
  * (e.g. POST /registers/:fy/lock-month-anchor).
  *
- * Admin authority is granted by presenting the SESSION_SECRET env var as the
- * Bearer token. This is intentionally separate from the DB-backed API-key
- * system: any user can create a DB API key via POST /api/keys, so possession
- * of a DB key is not sufficient to authorise config mutations.
+ * Admin authority is granted by presenting the ADMIN_SECRET env var as the
+ * X-Admin-Secret header. This is intentionally separate from both the
+ * DB-backed API-key system and from SESSION_SECRET.
  *
- * SESSION_SECRET is already a strong random secret managed outside the
- * codebase; reusing it as the admin credential avoids adding a new secret.
+ * SESSION_SECRET signs session cookies and must never leave the server.
+ * ADMIN_SECRET is the dedicated credential for operator-only routes.
+ * Set it as a Replit secret (a distinct, randomly-generated value).
  */
 import { timingSafeEqual } from "node:crypto";
 
 /**
- * Returns true iff `token` matches the SESSION_SECRET environment variable.
+ * Returns true iff `token` matches the ADMIN_SECRET environment variable.
  * Uses a timing-safe comparison to prevent length-oracle attacks.
- * Returns false if SESSION_SECRET is unset (server misconfiguration safety).
+ * Returns false if ADMIN_SECRET is unset (server misconfiguration safety).
  */
 export function isAdminToken(token: string): boolean {
-  const secret = process.env.SESSION_SECRET;
+  const secret = process.env.ADMIN_SECRET;
   if (!secret || !token) return false;
   // timingSafeEqual requires equal-length Buffers; a length mismatch is
   // safely rejected without timing leakage because secret length is not

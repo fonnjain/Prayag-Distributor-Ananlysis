@@ -1676,15 +1676,16 @@ router.get("/mgmt/bridge/status", async (req: Request, res: Response): Promise<v
 // config/hr_roster.csv, clears the in-process roster cache and all mgmt-data
 // snapshots, and returns the updated active-member count.
 //
-// Auth: X-Admin-Secret: <SESSION_SECRET> header required (same pattern as
-//       POST /registers/:fy/lock-month-anchor).  The SESSION_SECRET env var
-//       is the admin credential; a DB API key is not sufficient authority for
-//       durable config mutations.
+// Auth: X-Admin-Secret: <ADMIN_SECRET> header required (same pattern as
+//       POST /registers/:fy/lock-month-anchor).  ADMIN_SECRET is the
+//       dedicated operator credential; a DB API key is not sufficient authority
+//       for durable config mutations. SESSION_SECRET is separate — it signs
+//       session cookies and must never be used here.
 //
 // Usage:
 //   curl -X POST /api/admin/roster/refresh \
 //        -H "Content-Type: text/csv" \
-//        -H "X-Admin-Secret: $SESSION_SECRET" \
+//        -H "X-Admin-Secret: $ADMIN_SECRET" \
 //        --data-binary @User_List.csv
 //
 // The body must be UTF-8 CSV with the 35-column User_List.csv schema.  Exact
@@ -1698,7 +1699,7 @@ router.post(
     const adminSecret = String(req.headers["x-admin-secret"] ?? "").trim();
     if (!isAdminToken(adminSecret)) {
       res.status(401).json({
-        error: "Admin authorisation required. Pass the SESSION_SECRET as: X-Admin-Secret: <SESSION_SECRET>",
+        error: "Admin authorisation required. Pass ADMIN_SECRET as: X-Admin-Secret: <ADMIN_SECRET>",
       });
       return;
     }

@@ -13,12 +13,12 @@ import { notifyAlert } from "../lib/alertRouting/notify.js";
 import { buildDigest, runDigestAll } from "../lib/alertRouting/digest.js";
 import { runEscalation } from "../lib/alertRouting/escalate.js";
 import { invalidateSeverityCache } from "../lib/alertRouting/severity.js";
+import { isAdminToken } from "../lib/adminAuth.js";
 
 function requireAdmin(req: Request, res: Response): boolean {
-  const secret = (req as any).headers["x-admin-secret"];
-  const expected = process.env["SESSION_SECRET"];
-  if (!expected || secret !== expected) {
-    (res as any).status(401).json({ error: "Unauthorized" });
+  const token = String((req as any).headers["x-admin-secret"] ?? "").trim();
+  if (!isAdminToken(token)) {
+    (res as any).status(401).json({ error: "Admin authorisation required. Pass ADMIN_SECRET as: X-Admin-Secret: <ADMIN_SECRET>" });
     return false;
   }
   return true;

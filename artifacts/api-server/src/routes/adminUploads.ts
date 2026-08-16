@@ -6,7 +6,7 @@
 // filesystem (latest timestamped upload wins); both loaders fully validate the
 // files in memory before any DB mutation and are transactional/idempotent.
 //
-// Auth: X-Admin-Secret: <SESSION_SECRET> (same pattern as /admin/roster/refresh).
+// Auth: X-Admin-Secret: <ADMIN_SECRET> (same pattern as /admin/roster/refresh).
 //
 // The loads run in the background (the customer load parses a 37 MB CSV and
 // rewrites ~80k rows — too slow for a request/response cycle behind a proxy):
@@ -113,7 +113,7 @@ const jobs: Record<"customer" | "product", JobState> = { customer: emptyJob(), p
 function requireAdmin(req: Request, res: Response): boolean {
   const token = String(req.headers["x-admin-secret"] ?? "").trim();
   if (!isAdminToken(token)) {
-    res.status(401).json({ error: "Admin authorisation required. Pass the SESSION_SECRET as: X-Admin-Secret: <SESSION_SECRET>" });
+    res.status(401).json({ error: "Admin authorisation required. Pass ADMIN_SECRET as: X-Admin-Secret: <ADMIN_SECRET>" });
     return false;
   }
   return true;

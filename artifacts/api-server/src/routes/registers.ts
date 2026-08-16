@@ -4848,11 +4848,11 @@ router.get("/registers/:fy/lock-status", (req, res) => {
  * force-resync, but BEFORE the month-freeze guard activates (i.e. before the
  * 8th of the following month; grace 1st–7th inclusive).
  *
- * Auth: X-Admin-Secret: <SESSION_SECRET> (env var, not a DB API key).
+ * Auth: X-Admin-Secret: <ADMIN_SECRET> (env var, not a DB API key).
  * This is intentionally separate from the DB-backed API-key system — any user
  * can create a DB API key via POST /api/keys, so possession of a DB key is not
  * sufficient to authorise durable config mutations. Only the holder of the
- * SESSION_SECRET (server operator) can lock an anchor.
+ * ADMIN_SECRET (server operator) can lock an anchor.
  *
  * No server restart is required — all audit consumers call readVerifyAnchors()
  * fresh on every invocation, so the new anchor is visible to the next audit run.
@@ -4866,15 +4866,15 @@ router.post("/registers/:fy/lock-month-anchor", async (req, res) => {
   const { fy } = req.params;
   const month = typeof req.query.month === "string" ? req.query.month.trim() : "";
 
-  // Admin auth: X-Admin-Secret header must match SESSION_SECRET.
+  // Admin auth: X-Admin-Secret header must match ADMIN_SECRET.
   // We deliberately avoid the Authorization: Bearer header here because the
   // resolveApiKey middleware intercepts all Bearer tokens and rejects any that
-  // are not in the DB — the SESSION_SECRET is never in the DB, so that path
+  // are not in the DB — ADMIN_SECRET is never in the DB, so that path
   // would always return 401 before the handler runs.
   const adminSecret = String(req.headers["x-admin-secret"] ?? "").trim();
   if (!isAdminToken(adminSecret)) {
     res.status(401).json({
-      error: "Admin authorization required. Pass the SESSION_SECRET as: X-Admin-Secret: <SESSION_SECRET>",
+      error: "Admin authorization required. Pass ADMIN_SECRET as: X-Admin-Secret: <ADMIN_SECRET>",
     });
     return;
   }

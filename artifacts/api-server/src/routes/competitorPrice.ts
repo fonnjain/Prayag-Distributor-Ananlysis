@@ -253,7 +253,7 @@ router.get("/competitor-price/for-code/:code", async (req: Request, res: Respons
 // ── POST /api/competitor-price/refresh ────────────────────────────────────
 // Requires X-Admin-Secret header. Triggers a fresh fetch from the competition app.
 router.post("/competitor-price/refresh", async (req: Request, res: Response) => {
-  const adminSecret = process.env.ADMIN_SECRET ?? process.env.SESSION_SECRET ?? "";
+  const adminSecret = process.env.ADMIN_SECRET ?? "";
   const supplied    = req.headers["x-admin-secret"] as string | undefined;
   if (!supplied || supplied !== adminSecret) {
     res.status(403).json({ error: "X-Admin-Secret required" });

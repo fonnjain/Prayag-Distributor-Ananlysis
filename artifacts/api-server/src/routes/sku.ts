@@ -1149,7 +1149,7 @@ router.post("/sku/secondary-backfill", async (req: Request, res: Response): Prom
   const adminSecret = String(req.headers["x-admin-secret"] ?? "").trim();
   if (!isAdminToken(adminSecret)) {
     res.status(401).json({
-      error: "Admin authorisation required. Pass the SESSION_SECRET as: X-Admin-Secret: <SESSION_SECRET>",
+      error: "Admin authorisation required. Pass ADMIN_SECRET as: X-Admin-Secret: <ADMIN_SECRET>",
     });
     return;
   }
@@ -1263,7 +1263,7 @@ router.post("/sku/backfill-state-canon", async (req: Request, res: Response): Pr
   const adminSecret = String(req.headers["x-admin-secret"] ?? "").trim();
   if (!isAdminToken(adminSecret)) {
     res.status(401).json({
-      error: "Admin authorisation required. Pass the SESSION_SECRET as: X-Admin-Secret: <SESSION_SECRET>",
+      error: "Admin authorisation required. Pass ADMIN_SECRET as: X-Admin-Secret: <ADMIN_SECRET>",
     });
     return;
   }
@@ -1318,7 +1318,7 @@ router.get("/sku/retailer-coverage", async (req: Request, res: Response): Promis
   const adminSecret = String(req.headers["x-admin-secret"] ?? "").trim();
   if (!isAdminToken(adminSecret)) {
     res.status(401).json({
-      error: "Admin authorisation required. Pass the SESSION_SECRET as: X-Admin-Secret: <SESSION_SECRET>",
+      error: "Admin authorisation required. Pass ADMIN_SECRET as: X-Admin-Secret: <ADMIN_SECRET>",
     });
     return;
   }
