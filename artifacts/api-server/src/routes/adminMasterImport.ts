@@ -121,47 +121,32 @@ router.post(
     try {
       await client.query("BEGIN");
 
-      // ── 1. TRUNCATE in reverse FK order ─────────────────────────────────
-      // Two tables outside our 10 have FKs into the master set:
-      //   seed_unresolved_link  → customer.mapped_to_id
-      //   customer_review_queue → person.proposed_person_id / territory.proposed_territory_id
-      // Clear those first (they are small operational/staging tables).
-      const touchingCustomer = present("customer");
-      const touchingPerson = present("person");
-      const touchingTerritory = present("territory");
-      if (touchingCustomer || touchingPerson || touchingTerritory) {
-        // seed_unresolved_link references customer
-        if (touchingCustomer) {
-          await client.query(`TRUNCATE TABLE seed_unresolved_link RESTART IDENTITY`);
-        }
-        // customer_review_queue references person and territory
-        if (touchingPerson || touchingTerritory) {
-          await client.query(`TRUNCATE TABLE customer_review_queue RESTART IDENTITY`);
-        }
-      }
-
-      // Build the minimal truncate set within our 10 tables, in reverse
-      // dependency order.  CASCADE is intentionally absent — we manage
-      // the order explicitly to avoid silently clearing other tables.
-      const truncateOrder: (keyof typeof body)[] = [
-        "customer_link",
-        "customer_assignment",
-        "person_territory",
-        "customer",
-        "person",
-        "territory",
-        "designation",
-        "market_survey",
-        "engine_targets",
-        "special_pricing",
-      ];
-      for (const tbl of truncateOrder) {
-        if (present(tbl)) {
-          await client.query(
-            `TRUNCATE TABLE ${tbl} RESTART IDENTITY`,
-          );
-        }
-      }
+      // ── 1. TRUNCATE all 12 tables in one statement ───────────────────────
+      // PostgreSQL resolves FK order automatically when ALL tables in the
+      // FK dependency graph are listed together in a single TRUNCATE.
+      // Two tables outside our 10 also reference master tables:
+      //   seed_unresolved_link  → customer
+      //   customer_review_queue → person, territory
+      // Including them in the same statement avoids CASCADE wiping other data.
+      // We always clear the full set regardless of which tables are provided —
+      // this prevents partial-presence FK violations (e.g. truncating
+      // designation while person still exists referencing it).
+      await client.query(`
+        TRUNCATE TABLE
+          seed_unresolved_link,
+          customer_review_queue,
+          customer_link,
+          customer_assignment,
+          person_territory,
+          market_survey,
+          engine_targets,
+          special_pricing,
+          customer,
+          person,
+          territory,
+          designation
+        RESTART IDENTITY
+      `);
 
       const imported: Record<string, number> = {};
 
