@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { requireServerReady } from "../lib/serverReadiness";
 import healthRouter from "./health";
 import analyzeRouter from "./analyze";
 import driveRouter from "./drive";
@@ -53,6 +54,9 @@ import alertsRouter from "./alerts";
 const router: IRouter = Router();
 
 router.use(healthRouter);
+// All routes below this line are gated: they return 503 until the post-listen
+// background initialisation (person registry, roster CSV restore) completes.
+router.use(requireServerReady);
 router.use(analyzeRouter);
 router.use(driveRouter);
 router.use(dashboardRouter);
