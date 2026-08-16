@@ -230,7 +230,7 @@ export async function notifyAlert(
     // Build message body.
     const body =
       triggerType === "escalation" && daysSinceRaised != null
-        ? renderEscalationBody(alert, recipient.name, daysSinceRaised)
+        ? renderEscalationBody(alert, recipient.name, daysSinceRaised, recipient.escalationLevel)
         : renderOnRaiseBody(alert, recipient.name);
 
     const channelResult = await dispatch(

@@ -56,10 +56,11 @@ export function renderEscalationBody(
   alert: AlertRow,
   recipientName: string,
   daysSinceRaised: number,
+  targetLevel: number = 2,
 ): string {
   return [
     `⚠️ ESCALATION — ${alert.code} unacknowledged for ${daysSinceRaised} days`,
-    `Recipient (Level 2): ${recipientName}`,
+    `Recipient (Level ${targetLevel}): ${recipientName}`,
     `Entity: ${alert.entity}`,
     alert.rupeesAtStake > 0 ? `₹ at stake: ${fmtCr(alert.rupeesAtStake)}` : "",
     `Period: ${alert.periodLabel}`,

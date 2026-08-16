@@ -180,6 +180,77 @@ function EscalationLadder({
   );
 }
 
+// ── Readiness Panel ───────────────────────────────────────────────────────
+
+function ReadinessPanel({
+  recipients,
+  emptyLevels,
+}: {
+  recipients: Recipient[];
+  emptyLevels: number[];
+}) {
+  const issues: Array<{ key: string; title: string; description: string }> = [];
+
+  // 1 — Level 2 empty: unacknowledged alerts skip directly to CEO
+  if (emptyLevels.includes(2)) {
+    issues.push({
+      key: "l2_empty",
+      title: "Level 2 is empty — alerts skip straight to the CEO",
+      description:
+        "Any alert unacknowledged for 7 days (severe) or 14 days (digest) escalates from Level 1 directly to Level 3 (Nitin Agarwal). A skip row is logged at Level 2 explaining the bypass, but no one at Level 2 sees it. Add a Level 2 recipient to create a middle escalation step.",
+    });
+  }
+
+  // 2 — Recipients with no contact on file
+  const blankContacts = recipients.filter((r) => r.is_active && !r.contact);
+  if (blankContacts.length > 0) {
+    const names = blankContacts.map((r) => r.name).join(", ");
+    issues.push({
+      key: "blank_contacts",
+      title: `No contact on file: ${names}`,
+      description:
+        "Every alert matched to " +
+        (blankContacts.length === 1 ? "this recipient" : "these recipients") +
+        " will be logged as skipped with reason \"blank contact\". No message is sent. Add a phone number or email address to start receiving alerts.",
+    });
+  }
+
+  // 3 — WhatsApp recipients exist but there is no provider configured
+  const whatsappActive = recipients.filter(
+    (r) => r.is_active && r.channel === "whatsapp",
+  );
+  if (whatsappActive.length > 0) {
+    issues.push({
+      key: "no_whatsapp_provider",
+      title: "WhatsApp has no provider — deliveries will not transmit",
+      description:
+        `${whatsappActive.length} active recipient${whatsappActive.length !== 1 ? "s" : ""} use the WhatsApp channel (${whatsappActive.map((r) => r.name).join(", ")}). Deliveries are recorded as "pending" with reason "no provider configured" but no message reaches anyone. Configure a WhatsApp Business API provider to activate this channel.`,
+    });
+  }
+
+  if (issues.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-5 mb-1">
+      <h2 className="text-sm font-semibold text-amber-900 mb-3 flex items-center gap-2">
+        <AlertTriangle className="h-4 w-4 text-amber-600" />
+        Routing Readiness — {issues.length} issue{issues.length !== 1 ? "s" : ""} before this system is fully operational
+      </h2>
+      <ul className="space-y-3">
+        {issues.map((issue) => (
+          <li key={issue.key} className="flex gap-2.5">
+            <span className="mt-0.5 text-amber-500 shrink-0 text-sm leading-none">▲</span>
+            <div>
+              <p className="text-sm font-medium text-amber-900">{issue.title}</p>
+              <p className="text-xs text-amber-700 mt-0.5 leading-relaxed">{issue.description}</p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 // ── Recipient form ─────────────────────────────────────────────────────────
 
 const BLANK_FORM = {
@@ -427,6 +498,11 @@ export default function AlertRecipientsPage() {
           </div>
         )}
       </div>
+
+      {/* Readiness Panel — surfaces known blockers before operators are surprised */}
+      {!isLoading && data && (
+        <ReadinessPanel recipients={activeRecipients} emptyLevels={emptyLevels} />
+      )}
 
       {/* Escalation Ladder */}
       {!isLoading && data && (
