@@ -1380,6 +1380,15 @@ const MIGRATIONS: Migration[] = [
       ON CONFLICT DO NOTHING;
     `,
   },
+  {
+    id: "037_person_registry_state_head_source",
+    sql: `
+      -- Adds state_head_source to record HOW each state_head value was derived.
+      -- Values: self | reports_to_chain | crm_roster | unresolved
+      -- The populate-state-head-chain script fills this column via the chain walk.
+      ALTER TABLE person_registry ADD COLUMN IF NOT EXISTS state_head_source TEXT;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).
