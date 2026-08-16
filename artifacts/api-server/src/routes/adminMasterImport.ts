@@ -122,10 +122,27 @@ router.post(
       await client.query("BEGIN");
 
       // ── 1. TRUNCATE in reverse FK order ─────────────────────────────────
-      // Build the minimal truncate set.  We always truncate the tables we
-      // are about to reload, in reverse dependency order.  The CASCADE
-      // keyword is intentionally absent — we manage the order explicitly to
-      // avoid silently clearing tables we did not intend to touch.
+      // Two tables outside our 10 have FKs into the master set:
+      //   seed_unresolved_link  → customer.mapped_to_id
+      //   customer_review_queue → person.proposed_person_id / territory.proposed_territory_id
+      // Clear those first (they are small operational/staging tables).
+      const touchingCustomer = present("customer");
+      const touchingPerson = present("person");
+      const touchingTerritory = present("territory");
+      if (touchingCustomer || touchingPerson || touchingTerritory) {
+        // seed_unresolved_link references customer
+        if (touchingCustomer) {
+          await client.query(`TRUNCATE TABLE seed_unresolved_link RESTART IDENTITY`);
+        }
+        // customer_review_queue references person and territory
+        if (touchingPerson || touchingTerritory) {
+          await client.query(`TRUNCATE TABLE customer_review_queue RESTART IDENTITY`);
+        }
+      }
+
+      // Build the minimal truncate set within our 10 tables, in reverse
+      // dependency order.  CASCADE is intentionally absent — we manage
+      // the order explicitly to avoid silently clearing other tables.
       const truncateOrder: (keyof typeof body)[] = [
         "customer_link",
         "customer_assignment",
