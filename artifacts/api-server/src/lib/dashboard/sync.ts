@@ -30,6 +30,72 @@ export interface DashboardPayload {
   manifest: Record<string, unknown>;
 }
 
+// ── Pure helpers for the FY2026-27 snapshot block ─────────────────────────────
+// Exported for unit-testing; callers do not call these directly.
+
+const MONTH_FY_ORDER = [
+  "Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar",
+] as const;
+
+/**
+ * Given raw per-month aggregates from the DB, filters to complete months
+ * (using the same `isMonthComplete` rule as analytics.ts), sorts them in
+ * fiscal order (Apr → Mar), and derives the YTD total.
+ *
+ * The optional `now` argument lets tests pin the clock so completeness
+ * judgements are deterministic.
+ */
+export function selectCompleteFy2627Months(
+  monthRows: Array<{ monthLabel: string; amount: number; maxDate: string | null }>,
+  now?: number,
+): {
+  monthlySales: Array<{ monthLabel: string; amount: number }>;
+  ytdInr: number;
+  completeLabels: string[];
+} {
+  const completeMonths = monthRows
+    .filter((r) => r.monthLabel !== "" && isMonthComplete(r.monthLabel, r.maxDate, now))
+    .sort(
+      (a, b) =>
+        MONTH_FY_ORDER.indexOf(a.monthLabel.slice(0, 3) as (typeof MONTH_FY_ORDER)[number]) -
+        MONTH_FY_ORDER.indexOf(b.monthLabel.slice(0, 3) as (typeof MONTH_FY_ORDER)[number]),
+    );
+
+  if (completeMonths.length === 0) {
+    return { monthlySales: [], ytdInr: 0, completeLabels: [] };
+  }
+
+  const monthlySales = completeMonths.map((r) => ({
+    monthLabel: r.monthLabel,
+    amount: Math.round(r.amount),
+  }));
+  const ytdInr = monthlySales.reduce((s, m) => s + m.amount, 0);
+  const completeLabels = completeMonths.map((r) => r.monthLabel);
+
+  return { monthlySales, ytdInr, completeLabels };
+}
+
+/**
+ * Builds the sorted group-breakdown array (with sharePct) from a pre-filtered
+ * group aggregate (already restricted to complete-month labels by the caller's
+ * DB query).
+ */
+export function buildFy2627Groups(
+  groupRows: Array<{ group: string; amount: number }>,
+): Array<{ group: string; amount: number; sharePct: number }> {
+  const groupTotal = groupRows.reduce((s, r) => s + r.amount, 0);
+  return groupRows
+    .map((r) => ({
+      group: r.group,
+      amount: Math.round(r.amount),
+      sharePct:
+        groupTotal === 0 ? 0 : Math.round((r.amount / groupTotal) * 1000) / 10,
+    }))
+    .sort((a, b) => b.amount - a.amount);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+
 // Builds the aggregate dashboard payload entirely from the live Google Sheets.
 export async function buildSnapshot(): Promise<DashboardPayload> {
   // Each workbook fetch pulls only the tabs the transforms read; anything
@@ -176,9 +242,6 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
   //
   // "Complete" follows the same rule as analytics.ts: max invoice date reaches
   // month-end OR the register lock instant (8 days past month-end) has elapsed.
-  const MONTH_FY_ORDER = [
-    "Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar",
-  ];
   let fy2627MonthlySales: Array<{ monthLabel: string; amount: number }> = [];
   let fy2627Groups: Array<{ group: string; amount: number; sharePct: number }> = [];
   let fy2627SalesYtdInr = 0;
@@ -193,23 +256,12 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
       .where(and(eq(saleLines.fy, "2026-27"), eq(saleLines.versionStatus, "current")))
       .groupBy(sql`1`);
 
-    // Sort by fiscal month order (Apr first) and keep only complete months.
-    const completeMonths = monthRows
-      .filter((r) => r.monthLabel !== "" && isMonthComplete(r.monthLabel, r.maxDate))
-      .sort(
-        (a, b) =>
-          MONTH_FY_ORDER.indexOf(a.monthLabel.slice(0, 3)) -
-          MONTH_FY_ORDER.indexOf(b.monthLabel.slice(0, 3)),
-      );
+    const { monthlySales, ytdInr, completeLabels } = selectCompleteFy2627Months(monthRows);
 
-    if (completeMonths.length > 0) {
-      fy2627MonthlySales = completeMonths.map((r) => ({
-        monthLabel: r.monthLabel,
-        amount: Math.round(r.amount),
-      }));
-      fy2627SalesYtdInr = fy2627MonthlySales.reduce((s, m) => s + m.amount, 0);
+    if (completeLabels.length > 0) {
+      fy2627MonthlySales = monthlySales;
+      fy2627SalesYtdInr = ytdInr;
 
-      const completeLabels = completeMonths.map((r) => r.monthLabel);
       const groupRows = await db
         .select({
           group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
@@ -225,21 +277,13 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
         )
         .groupBy(sql`1`);
 
-      const groupTotal = groupRows.reduce((s, r) => s + r.amount, 0);
-      fy2627Groups = groupRows
-        .map((r) => ({
-          group: r.group,
-          amount: Math.round(r.amount),
-          sharePct:
-            groupTotal === 0 ? 0 : Math.round((r.amount / groupTotal) * 1000) / 10,
-        }))
-        .sort((a, b) => b.amount - a.amount);
+      fy2627Groups = buildFy2627Groups(groupRows);
     }
 
     logger.info(
       {
         fy: "2026-27",
-        complete_months: completeMonths.length,
+        complete_months: completeLabels.length,
         ytd_inr: fy2627SalesYtdInr,
       },
       "FY2026-27 snapshot data computed",
