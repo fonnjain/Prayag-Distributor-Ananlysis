@@ -122,6 +122,7 @@
 - [aiGrowthReport merge corruption](aigrowth-merge-corruption.md) — merges keep pasting SQL-branch vars into the deepDive ACTIVATE/WIDEN loops; typecheck after any merge touching that route.
 - [MRP Master pipeline](mrp-master.md) — migration 022; 6-workbook loader; 5,694 codes; 9,211 history rows; admin POST load route; /mrp page in top-level MRP nav section.
 - [GP Margin pipeline](gp-margin-pipeline.md) — margin_fact (migration 024); Drive export fallback for Sheets-hang files (CP segment); 177 monthly files; discount_frac is a fraction.
+- [Scheduler production gate](scheduler-production-gate.md) — all 8 interval schedulers (register sync, OB mirror, digest, alert detect, etc.) gate on NODE_ENV=production; one-time warmups unaffected.
 - [MRP Back-Calculator](mrp-calculator.md) — GET /api/mrp/calculator; distMargin default is DERIVED (not raw secDisc); routes before :code/history; avg_sale is a per-item constant (identity check gaps are expected).
 - [GP Margin trend route](gp-margin-trend.md) — GET /api/margin/trend; months sorted chronologically via TO_DATE(month_label,'Mon-YY'); coverage guard aborts DELETE when <40% files loaded; timeout cmd resolved via `which` not hardcoded Nix path.
 - [Red Alert calibration findings](red-alert-calibration.md) — Guard 3 closed-FY fix; B-retailer=secondary_sku_line; B-primary/C1/C2 fire 0 for FY24-25/25-26 (no is_territory rows + null state_canon); revised thresholds Aug 2026.

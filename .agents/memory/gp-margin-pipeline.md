@@ -29,6 +29,9 @@ description: margin_fact table, Drive-based loader, async load route, and known 
 - `GET /api/margin/stats` → rows visible only AFTER the full load completes (single-transaction commit).
 - Only one load at a time; 409 if another is running.
 
+## PTMT Jan/Feb/Mar-26 conflict
+Three PTMT months exist as **two physically separate files with differing `bom_cost` values** (same item codes, same qty, same avg_sale, different costs). The loader's CONFLICT path fires and loads NONE for those months. This is expected and correct — the source data is genuinely ambiguous. These three months are absent from `margin_fact` in both dev and production. Do not try to force-load one file over the other without reconciling the source cost data first.
+
 ## Classification counts (FY2025-26 + FY2026-27)
 - 177 monthly files, 51 cumulative, 2 summary, 0 unknown.
 - Cumulative files are cross-validated only (not inserted). Monthly files are truth.
