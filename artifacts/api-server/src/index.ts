@@ -29,6 +29,7 @@ import { restoreRosterCsvFromGcs } from "./lib/mgmt/roster.js";
 import { prewarmWarningsSnapshots } from "./routes/warnings.js";
 import { prewarmMgmtDataSnapshots } from "./routes/mgmt.js";
 import { restoreMarginLoadJob } from "./routes/gpMargin.js";
+import { startWeeklyDigestScheduler } from "./lib/alertRouting/scheduler.js";
 import { scheduleCompetitorRefresh } from "./routes/competitorPrice.js";
 import { cleanupOrphanedJobs } from "./lib/aiReportJobQueue.js";
 import {
@@ -487,6 +488,12 @@ startServer({
       setTimeout(() => void runAlertDetect(), 10 * 60_000).unref();
       setInterval(() => void runAlertDetect(), 6 * 3_600_000).unref();
     }
+
+    // ── Weekly alert digest scheduler ───────────────────────────────────────
+    // Polls every 15 min; fires Monday 07:30–09:30 IST when ≥24h since last run.
+    // Last run is persisted in alert_scheduler (migration 041) so a server
+    // restart never sends a duplicate digest.
+    startWeeklyDigestScheduler(currentOpenFy());
 
     // Assert frozen-FY anchors in the background.  Any mismatch means
     // something wrote to an immutable year — logged at ERROR and exposed via

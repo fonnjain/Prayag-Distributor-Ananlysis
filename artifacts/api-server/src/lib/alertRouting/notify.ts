@@ -238,6 +238,12 @@ export async function notifyAlert(
       recipient.contact,
       body,
       dryRun,
+      {
+        subject:
+          triggerType === "escalation"
+            ? `⚠️ Prayag Alert Escalation: ${alert.code} — ${alert.entity}`
+            : `🔴 Prayag Alert: ${alert.code} — ${alert.entity}`,
+      },
     );
 
     const row = await insertDelivery({

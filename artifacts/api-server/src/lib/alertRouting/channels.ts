@@ -4,8 +4,9 @@
  * Three channels are defined:
  *   in_app    — records the delivery row; the notification bell already reflects
  *               the open alert count.  No external call.
- *   email     — builds and transmits via nodemailer when SMTP_HOST is set;
- *               falls back to "no email provider configured" otherwise.
+ *   email     — sends via Resend HTTP API when RESEND_API_KEY is set (preferred);
+ *               falls back to nodemailer + SMTP when SMTP_HOST is set;
+ *               records a failed delivery row if neither is configured.
  *   whatsapp  — records the delivery row as status=pending with skip_reason
  *               "no provider configured".  Never transmits.  When a provider
  *               is chosen it drops in behind this interface unchanged.
@@ -21,78 +22,111 @@ export type ChannelResult = {
 /**
  * Dispatch a prepared message to the given channel.
  *
- * @param channel 'in_app' | 'email' | 'whatsapp'
- * @param contact phone or email address (null / unused for in_app)
- * @param body    rendered message body (always stored for audit)
- * @param dryRun  if true, never transmit; record delivery as 'sent' (dry run)
+ * @param channel  'in_app' | 'email' | 'whatsapp'
+ * @param contact  phone or email address (null / unused for in_app)
+ * @param body     rendered message body (always stored for audit)
+ * @param dryRun   if true, never transmit; record delivery as 'sent' (dry run)
+ * @param opts     optional: override the email subject line
  */
 export async function dispatch(
   channel: "in_app" | "email" | "whatsapp",
   contact: string | null,
   body: string,
   dryRun: boolean,
+  opts?: { subject?: string },
 ): Promise<ChannelResult> {
   if (dryRun) {
     logger.info(
       { channel, contact: contact ?? "(in_app)", bodyLength: body.length },
       "[alertRouting] dry-run — message body prepared, not transmitted",
     );
-    // WhatsApp is always pending even in dry-run, to demonstrate the status.
     if (channel === "whatsapp") {
       return { status: "pending", skipReason: "no provider configured" };
     }
-    // For email and in_app in dry-run, mark skip_reason so V9 can confirm
-    // no real transmission occurred.
     return { status: "sent", skipReason: "dry run" };
   }
 
   switch (channel) {
     case "in_app":
-      // The notification bell already reflects the open alert count.
-      // Recording the delivery row is the full in-app action.
       return { status: "sent", skipReason: null };
 
     case "email": {
-      const host = process.env["SMTP_HOST"];
-      if (!host) {
-        logger.warn(
-          { channel: "email", contact },
-          "[alertRouting] no SMTP provider configured — email delivery skipped",
-        );
-        return { status: "failed", skipReason: "no email provider configured" };
+      const subject = opts?.subject ?? "Prayag Alerts";
+      const from = process.env["RESEND_FROM"] ?? "onboarding@resend.dev";
+
+      // ── Option 1: Resend HTTP API (preferred — no SMTP setup needed) ──────
+      const resendKey = process.env["RESEND_API_KEY"];
+      if (resendKey) {
+        try {
+          const resp = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${resendKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              from,
+              to: [contact ?? ""],
+              subject,
+              text: body,
+            }),
+          });
+          if (resp.ok) {
+            logger.info({ channel: "email", contact, provider: "resend" }, "[alertRouting] email sent via Resend");
+            return { status: "sent", skipReason: null };
+          }
+          const errBody = await resp.text().catch(() => "");
+          const reason = `Resend ${resp.status}: ${errBody.slice(0, 200)}`;
+          logger.error({ channel: "email", contact, reason }, "[alertRouting] Resend email failed");
+          return { status: "failed", skipReason: reason };
+        } catch (err) {
+          const reason = `Resend fetch error: ${String(err)}`;
+          logger.error({ err, channel: "email", contact }, "[alertRouting] Resend fetch error");
+          return { status: "failed", skipReason: reason };
+        }
       }
-      try {
-        // Dynamic import so the server starts even when nodemailer is absent.
-        const nodemailer = await import("nodemailer" as any);
-        const transporter = nodemailer.createTransport({
-          host,
-          port: Number(process.env["SMTP_PORT"] ?? 587),
-          auth:
-            process.env["SMTP_USER"]
+
+      // ── Option 2: nodemailer + SMTP fallback ──────────────────────────────
+      const host = process.env["SMTP_HOST"];
+      if (host) {
+        try {
+          const nodemailer = await import("nodemailer" as any);
+          const transporter = nodemailer.createTransport({
+            host,
+            port: Number(process.env["SMTP_PORT"] ?? 587),
+            auth: process.env["SMTP_USER"]
               ? { user: process.env["SMTP_USER"], pass: process.env["SMTP_PASS"] }
               : undefined,
-        });
-        await transporter.sendMail({
-          from: process.env["SMTP_FROM"] ?? "alerts@prayag",
-          to: contact ?? "",
-          subject: "Prayag Red Alert",
-          text: body,
-        });
-        logger.info({ channel: "email", contact }, "[alertRouting] email sent");
-        return { status: "sent", skipReason: null };
-      } catch (err) {
-        logger.error({ err, channel: "email", contact }, "[alertRouting] email send failed");
-        return { status: "failed", skipReason: String(err) };
+          });
+          await transporter.sendMail({
+            from: process.env["SMTP_FROM"] ?? "alerts@prayag",
+            to: contact ?? "",
+            subject,
+            text: body,
+          });
+          logger.info({ channel: "email", contact, provider: "smtp" }, "[alertRouting] email sent via SMTP");
+          return { status: "sent", skipReason: null };
+        } catch (err) {
+          logger.error({ err, channel: "email", contact }, "[alertRouting] SMTP send failed");
+          return { status: "failed", skipReason: String(err) };
+        }
       }
+
+      // ── No provider configured ─────────────────────────────────────────────
+      logger.warn({ channel: "email", contact }, "[alertRouting] no email provider — set RESEND_API_KEY or SMTP_HOST");
+      return { status: "failed", skipReason: "no email provider configured (set RESEND_API_KEY or SMTP_HOST)" };
     }
 
     case "whatsapp":
-      // No provider configured yet.  Write the delivery row as pending so it
-      // is visible in the log with a readable reason.  Never silently skipped.
-      logger.info(
-        { contact },
-        "[alertRouting] whatsapp: no provider configured — delivery row written as pending",
-      );
+      logger.info({ contact }, "[alertRouting] whatsapp: no provider configured — delivery row written as pending");
       return { status: "pending", skipReason: "no provider configured" };
   }
+}
+
+/**
+ * Send a one-off test email to verify the email provider is working.
+ * Returns the channel result directly without writing a delivery row.
+ */
+export async function sendTestEmail(to: string, subject: string, body: string): Promise<ChannelResult> {
+  return dispatch("email", to, body, false, { subject });
 }

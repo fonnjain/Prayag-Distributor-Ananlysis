@@ -14,6 +14,8 @@ import { runAlertDetection } from "../lib/redAlert/alertPersistence.js";
 import { notifyAlert } from "../lib/alertRouting/notify.js";
 import { currentOpenFy } from "../lib/fyAnchors.js";
 import { logger } from "../lib/logger.js";
+import { runWeeklyDigestNow, getSchedulerStatus } from "../lib/alertRouting/scheduler.js";
+import { sendTestEmail } from "../lib/alertRouting/channels.js";
 
 const router = Router();
 
@@ -381,6 +383,86 @@ router.post("/alerts/:id/acknowledge", async (req, res) => {
     }
   } catch (err) {
     logger.error({ err }, "[alerts] acknowledge failed");
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── POST /api/admin/alerts/digest ──────────────────────────────────────────
+// Trigger the weekly digest immediately (admin only).
+// Body: { dryRun?: boolean, fy?: string, force?: boolean }
+//   dryRun  — writes delivery rows but does not transmit (default false)
+//   force   — bypasses the 24-hour dedup guard (default false)
+//   fy      — fiscal year to scope alerts (default: current open FY)
+router.post("/admin/alerts/digest", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const dryRun = req.body?.dryRun === true;
+    const force  = req.body?.force  !== false; // default true for manual triggers
+    const fy     = typeof req.body?.fy === "string" ? req.body.fy : currentOpenFy();
+
+    const result = await runWeeklyDigestNow({ dryRun, fy, force });
+
+    res.json({
+      ok: true,
+      dryRun,
+      fy,
+      totalSent:    result.totalSent,
+      totalSkipped: result.totalSkipped,
+      recipients: result.results.map((r) => ({
+        id:           r.recipientId,
+        name:         r.recipientName,
+        skipped:      r.skipped,
+        skipReason:   r.skipReason ?? null,
+        counts:       r.counts,
+        deliveryRows: r.deliveryRows.length,
+      })),
+    });
+  } catch (err) {
+    logger.error({ err }, "[alerts] digest trigger failed");
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── GET /api/admin/alerts/scheduler-status ──────────────────────────────────
+// Returns last digest time, next scheduled window, and in-flight flag.
+router.get("/admin/alerts/scheduler-status", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    res.json(await getSchedulerStatus());
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── POST /api/admin/alerts/test-email ──────────────────────────────────────
+// Send a one-off test email to verify the Resend/SMTP provider is working.
+// Body: { to: string, subject?: string, body?: string }
+//
+// NOTE: If RESEND_FROM is not set the email comes from onboarding@resend.dev,
+// which in Resend's sandbox can only be delivered to the account-owner's
+// address.  To send to arbitrary Prayag addresses, set RESEND_FROM to a
+// Resend-verified domain (e.g. alerts@prayagindia.com).
+router.post("/admin/alerts/test-email", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const to = typeof req.body?.to === "string" ? req.body.to.trim() : "";
+  if (!to) {
+    res.status(400).json({ error: "`to` email address is required" });
+    return;
+  }
+  try {
+    const subject = typeof req.body?.subject === "string"
+      ? req.body.subject
+      : "Prayag Alerts — email delivery test";
+    const body = typeof req.body?.body === "string"
+      ? req.body.body
+      : `This is a test email from the Prayag Red Alert system.\n\nSent at ${new Date().toISOString()} IST.\n\nIf you received this, email delivery is working correctly.`;
+
+    const result = await sendTestEmail(to, subject, body);
+
+    logger.info({ to, status: result.status }, "[alerts] test email dispatched");
+    res.json({ ok: true, to, ...result });
+  } catch (err) {
+    logger.error({ err }, "[alerts] test email failed");
     res.status(500).json({ error: String(err) });
   }
 });

@@ -221,6 +221,7 @@ export async function buildDigest(
     recipient.contact,
     body,
     dryRun,
+    { subject: `Prayag Alerts — Weekly Digest (${new Date().toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" })})` },
   );
 
   const deliveryRows: DeliveryRow[] = [];

@@ -1410,6 +1410,21 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    id: "041_alert_scheduler",
+    sql: `
+      -- Persistent state for the weekly digest scheduler.
+      -- Stores last_digest_at so the dedup guard survives server restarts.
+      CREATE TABLE IF NOT EXISTS alert_scheduler (
+        id             INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+        last_digest_at TIMESTAMPTZ,
+        updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      INSERT INTO alert_scheduler (id)
+        VALUES (1)
+        ON CONFLICT (id) DO NOTHING;
+    `,
+  },
+  {
     id: "040_margin_load_job",
     sql: `
       -- Persistent singleton row for the GP Margin load state.
