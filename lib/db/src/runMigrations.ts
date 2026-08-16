@@ -1410,6 +1410,27 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    id: "040_margin_load_job",
+    sql: `
+      -- Persistent singleton row for the GP Margin load state.
+      -- Survives server restarts; the route reads/writes this row so users can
+      -- see whether a previous load was killed mid-flight and why.
+      CREATE TABLE IF NOT EXISTS margin_load_job (
+        id          INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+        status      TEXT NOT NULL DEFAULT 'idle',
+        started_at  TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ,
+        segments    TEXT[],
+        error_msg   TEXT,
+        report      JSONB,
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      INSERT INTO margin_load_job (id, status)
+        VALUES (1, 'idle')
+        ON CONFLICT (id) DO NOTHING;
+    `,
+  },
+  {
     id: "039_alert_routing_on_raise",
     sql: `
       -- State head recipients: weekly digest only (per-territory alerts; immediate fire is noise).

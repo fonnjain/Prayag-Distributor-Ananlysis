@@ -11,6 +11,7 @@ import { loadGpMarginFiles, fetchSegmentConflictDetail, detectGpMarginTabs, extr
 import type { ConflictDetailRow } from "../lib/gpMargin/loader.js";
 import { listDriveFiles, listDriveFolder, getDriveFileMeta } from "../lib/googleDrive.js";
 import { pool } from "@workspace/db";
+import { logger } from "../lib/logger.js";
 
 const router = Router();
 
@@ -112,6 +113,106 @@ type JobState =
   | { status: "error"; finishedAt: string; error: string };
 
 let loadJob: JobState = { status: "idle" };
+
+// ── DB-backed load state persistence ─────────────────────────────────────────
+// Writes the current load state to the margin_load_job singleton row so the
+// status survives server restarts. All writes are fire-and-forget; a DB
+// failure is logged but never interrupts the load itself.
+
+async function dbSetJob(state: JobState, segments?: string[]): Promise<void> {
+  try {
+    const now = new Date().toISOString();
+    if (state.status === "idle") {
+      await pool.query(
+        `UPDATE margin_load_job
+            SET status='idle', started_at=NULL, finished_at=NULL,
+                segments=NULL, error_msg=NULL, report=NULL, updated_at=$1
+          WHERE id=1`,
+        [now],
+      );
+    } else if (state.status === "running") {
+      await pool.query(
+        `UPDATE margin_load_job
+            SET status='running', started_at=$1, finished_at=NULL,
+                segments=$2, error_msg=NULL, report=NULL, updated_at=$1
+          WHERE id=1`,
+        [state.startedAt, segments ?? null],
+      );
+    } else if (state.status === "done") {
+      await pool.query(
+        `UPDATE margin_load_job
+            SET status='done', finished_at=$1, report=$2::jsonb,
+                error_msg=NULL, updated_at=$1
+          WHERE id=1`,
+        [state.finishedAt, JSON.stringify(state.report)],
+      );
+    } else if (state.status === "error") {
+      await pool.query(
+        `UPDATE margin_load_job
+            SET status='error', finished_at=$1, error_msg=$2,
+                report=NULL, updated_at=$1
+          WHERE id=1`,
+        [state.finishedAt, state.error],
+      );
+    }
+  } catch (err) {
+    logger.warn({ err }, "[gpMargin] failed to persist load state to DB (non-fatal)");
+  }
+}
+
+/**
+ * Called once at server startup to restore the load state from DB into the
+ * module-level loadJob. If the DB shows status='running' the previous server
+ * process was killed mid-load — Postgres rolled back the transaction — so we
+ * mark it as error so the status endpoint shows an actionable message and the
+ * user knows to retrigger.
+ */
+export async function restoreMarginLoadJob(): Promise<void> {
+  try {
+    const { rows } = await pool.query<{
+      status: string;
+      started_at: string | null;
+      finished_at: string | null;
+      error_msg: string | null;
+      report: object | null;
+    }>(
+      "SELECT status, started_at, finished_at, error_msg, report FROM margin_load_job WHERE id=1 LIMIT 1",
+    );
+    if (!rows[0]) return;
+    const r = rows[0];
+    if (r.status === "running") {
+      // Server restarted while load was in progress — the DB transaction was
+      // rolled back by Postgres; margin_fact is intact but no new rows landed.
+      const msg = `Load killed by server restart (started ${r.started_at ?? "unknown"}, killed ${new Date().toISOString()})`;
+      loadJob = { status: "error", finishedAt: new Date().toISOString(), error: msg };
+      await pool.query(
+        `UPDATE margin_load_job
+            SET status='error', finished_at=now(), error_msg=$1, updated_at=now()
+          WHERE id=1`,
+        [msg],
+      );
+      logger.warn(
+        { startedAt: r.started_at },
+        "[gpMargin] margin load was running at startup — transaction rolled back, marked as killed",
+      );
+    } else if (r.status === "done" && r.report) {
+      loadJob = {
+        status: "done",
+        finishedAt: r.finished_at ?? new Date().toISOString(),
+        report: r.report,
+      };
+    } else if (r.status === "error" && r.error_msg) {
+      loadJob = {
+        status: "error",
+        finishedAt: r.finished_at ?? new Date().toISOString(),
+        error: r.error_msg,
+      };
+    }
+    // idle: leave module default
+  } catch (err) {
+    logger.warn({ err }, "[gpMargin] could not restore margin load state from DB (non-fatal)");
+  }
+}
 
 // ── PTMT conflict detail job ───────────────────────────────────────────────
 // Read-only — never writes to margin_fact.  Fetches both Drive copies of
@@ -216,6 +317,7 @@ router.post("/admin/margin/load", (req, res) => {
 
   const startedAt = new Date().toISOString();
   loadJob = { status: "running", startedAt };
+  void dbSetJob(loadJob, segments);
   const segMsg = segments && segments.length > 0
     ? `Segment-targeted load for: ${segments.join(", ")}. `
     : "Full load (177+ Drive exports, ~15 min). ";
@@ -254,6 +356,7 @@ router.post("/admin/margin/load", (req, res) => {
           filesConflict: report.filesConflict,
         },
       };
+      void dbSetJob(loadJob);
     })
     .catch((err) => {
       loadJob = {
@@ -261,6 +364,7 @@ router.post("/admin/margin/load", (req, res) => {
         finishedAt: new Date().toISOString(),
         error: String(err instanceof Error ? err.message : err),
       };
+      void dbSetJob(loadJob);
     });
 });
 

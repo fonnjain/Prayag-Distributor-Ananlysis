@@ -28,6 +28,7 @@ import { restoreAnchorsFromStorage } from "./lib/config/verifyAnchors.js";
 import { restoreRosterCsvFromGcs } from "./lib/mgmt/roster.js";
 import { prewarmWarningsSnapshots } from "./routes/warnings.js";
 import { prewarmMgmtDataSnapshots } from "./routes/mgmt.js";
+import { restoreMarginLoadJob } from "./routes/gpMargin.js";
 import { scheduleCompetitorRefresh } from "./routes/competitorPrice.js";
 import { cleanupOrphanedJobs } from "./lib/aiReportJobQueue.js";
 import {
@@ -224,6 +225,12 @@ startServer({
     // They belong to the previous server process and their background
     // computations died with it; clients should retry rather than poll forever.
     void cleanupOrphanedJobs();
+
+    // Restore GP Margin load state from DB: if the previous process was killed
+    // mid-load, marks the job as error so the status endpoint surfaces it.
+    void restoreMarginLoadJob().catch((err) =>
+      logger.warn({ err }, "margin job restore failed"),
+    );
 
     // Ensure baseline data exists, then kick off a live sync in the background
     // so the first load is instant and subsequent loads reflect the latest sheets.
