@@ -1016,9 +1016,17 @@ function UnassignedTab({ adminSecret }: { adminSecret: string }) {
                     <span className="text-[11px] text-muted-foreground">{c.territory_name}</span>
                   )}
                 </div>
+                {/* Formerly assigned to */}
+                {c.former_person_name_raw && (
+                  <div className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-1">
+                    <span className="opacity-60">Previously:</span>
+                    <span className="italic">{c.former_person_name_raw}</span>
+                    <span className="opacity-50">(departed)</span>
+                  </div>
+                )}
                 {/* Suggestion hint */}
                 {c.suggested_person_id !== null && (
-                  <div className="flex items-center gap-1 mt-1">
+                  <div className="flex items-center gap-1 mt-0.5">
                     <Lightbulb size={10} className="text-amber-400 flex-shrink-0" />
                     <span className="text-[11px] text-amber-700 dark:text-amber-300">
                       → {c.suggested_person_name}
