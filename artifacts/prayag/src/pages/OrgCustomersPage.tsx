@@ -386,7 +386,16 @@ function DetailPanel({ customerId, adminSecret }:
   { customerId: string; adminSecret: string }) {
   const { data, isLoading, error } = useQuery<CustomerDetail>({
     queryKey: ["master-customer-detail", customerId],
-    queryFn: () => fetch(`${BASE}/api/master/customers/${customerId}`).then((r) => r.json()),
+    queryFn: () =>
+      fetch(`${BASE}/api/master/customers/${customerId}`).then(async (r) => {
+        if (!r.ok) {
+          const body = await r.text();
+          let msg = r.statusText;
+          try { msg = (JSON.parse(body) as { error?: string }).error ?? msg; } catch { /* keep statusText */ }
+          throw new Error(msg);
+        }
+        return r.json() as Promise<CustomerDetail>;
+      }),
     enabled: !!customerId,
   });
 
@@ -396,9 +405,12 @@ function DetailPanel({ customerId, adminSecret }:
   const [linksOpen, setLinksOpen] = useState(false);
 
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Loading…</div>;
-  if (error || !data) return <div className="p-6 text-sm text-destructive">{String(error ?? "Not found")}</div>;
+  if (error || !data) return <div className="p-6 text-sm text-destructive">{String((error as Error | null)?.message ?? "Not found")}</div>;
 
   const { customer, currentAssignment, assignmentHistory, links } = data;
+  // Belt-and-suspenders: if server returned JSON in an unexpected shape, bail out
+  // rather than throwing and crashing the entire React root.
+  if (!customer) return <div className="p-6 text-sm text-destructive">Could not load customer data</div>;
 
   return (
     <div className="p-5 space-y-5 overflow-y-auto h-full">
