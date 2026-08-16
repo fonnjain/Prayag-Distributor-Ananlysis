@@ -1,0 +1,91 @@
+GOAL
+549,765 secondary rows resolve to a person whose own state_head is NULL in
+person_registry. Half the secondary register cannot roll up to a head. The
+Market Survey cascade hit the same gap, and it blocks the last Red Alert
+category.
+
+Two phases. Report after the first and STOP.
+
+============================================================
+PHASE 1 - POPULATE state_head
+============================================================
+
+DO NOT DERIVE IT FROM THE STATE
+A state can have several heads - Karnataka two, West U.P three, Rajasthan two.
+A state-to-head lookup will attribute members to the wrong head and do it
+silently. That is worse than leaving the column NULL.
+
+RESOLVE THROUGH THE PERSON'S OWN CHAIN, in this order:
+
+  1. The person IS a state head        -> state_head = themselves
+  2. Walk reports_to upward until you reach someone with is_state_head = true
+     -> that person. This is deterministic and it resolved 99.9% of active
+     retailers when the customer master was built.
+  3. The CRM dashboard roster gives a direct member-to-head mapping for 178
+     members. Use it where the chain does not resolve.
+  4. Still unresolved -> leave NULL and report it. Do not guess.
+
+Record HOW each row was resolved in a new column, state_head_source:
+    self | reports_to_chain | crm_roster | unresolved
+
+That column is the difference between a value you can trust and one you
+cannot. When a figure looks wrong later, the first question will be where the
+head came from.
+
+GUARD AGAINST THESE, all of which have already caused defects here:
+  - Cycles in reports_to. Cap the walk and report anything that hits the cap.
+  - Managers who have LEFT. Eight people report to three deactivated managers
+    (Suresh Kumar Nair, Mahendra Kumar Jain, Karuppasamy R). Keep walking
+    THROUGH them to the head above; do not stop at an inactive person.
+  - Name variants. Sulindar and Sulinder Pal are one person; Pawan Sharma is
+    Pawan Kumar Sharma. Resolve through the registry's own aliases, never on
+    a raw string.
+
+DO NOT touch secondary_sku_line, sale_line or any other table in this phase.
+Populate person_registry only.
+
+PHASE 1 VERIFY - stop and report
+  1. Rows in person_registry with state_head populated, before and after.
+  2. Breakdown by state_head_source. Print all four counts.
+  3. Every distinct state_head value with its member count. Confirm each is a
+     real person with is_state_head = true.
+  4. Any row that hit the cycle cap - name them.
+  5. The eight people reporting to a departed manager - print each with the
+     head they resolved to and confirm none stopped at the inactive person.
+  6. Rows still NULL, and why. Name them if under 50.
+  7. NOW re-measure the original gap: secondary_sku_line rows whose head
+     resolves to a person with a NULL state_head. Was 549,765. Print the new
+     figure.
+  8. Confirm sale_line, secondary_sku_line, margin_fact and customer row
+     counts are UNCHANGED.
+  9. Push. Print git rev-parse HEAD and git rev-parse origin/main - they must
+     match. Then git cat-file -t <hash> and
+     git merge-base --is-ancestor <hash> main with its exit code.
+
+============================================================
+PHASE 2 - THE TERRITORIAL CONCENTRATION ALERT
+============================================================
+Only after Phase 1 verifies.
+
+The threshold proposed earlier was >= 10 stopped retailers AND >= 30% share
+of total B3, held because 24 of 66 stops had no head mapped and the
+denominator was incomplete.
+
+  a. Re-run the B3 analysis now the denominator is complete. Print the stops
+     by State Head with counts, share and rupees.
+  b. The earlier figures were Sandeep Dadheech 40 stops / 60.6% / Rs 14.25 Cr
+     and Syed Aqil Rizvi 9 / 13.6%, with 24 unmapped. Print what those become.
+  c. Confirm whether >= 10 AND >= 30% still separates cleanly. If the newly
+     mapped 24 change the picture, propose a revised threshold and show what
+     fires at each candidate.
+  d. Then implement it as a Category C alert, wired into persistence and
+     routing like the rest.
+
+PHASE 2 VERIFY
+  1. The recomputed B3 breakdown by head.
+  2. Which heads fire at the chosen threshold, and which do not.
+  3. Confirm it persists, appears on the page, and routes - one delivery row
+     per recipient.
+  4. Confirm the alert count before and after, and that no other category
+     changed.
+  5. Push and print both git refs.
