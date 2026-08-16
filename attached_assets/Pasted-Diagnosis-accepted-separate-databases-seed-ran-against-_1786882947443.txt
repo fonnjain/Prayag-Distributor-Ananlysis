@@ -1,0 +1,43 @@
+Diagnosis accepted - separate databases, seed ran against dev only, and the
+hardcoded 179 is exactly the wrong failure mode: it says the data is there and
+the display is broken, when the reverse is true.
+
+Three things before #326.
+
+1. WHAT ELSE IS EMPTY IN PRODUCTION?
+The same gap applies to anything loaded through an import route rather than a
+migration. Print production row counts for:
+  person_registry · mrp_master · mrp_history · margin_fact
+  alert_recipient · alert · alert_delivery · market_survey
+  competitor_price · scheme tables · secondary_sku_line · sale_line
+
+Any that are empty in production but populated in dev are the same problem,
+and someone will find them as another blank page.
+
+2. SEED FROM CURRENT DEV STATE, NOT THE ORIGINAL WORKBOOK
+The seed file is days old. Since it was built, customers have been reassigned
+in dev, C6 was added and disabled, and the alert recipient table changed.
+Loading the original workbook into production gives a state nobody has been
+working with, and the two environments diverge from day one.
+
+Export the current dev state for the master tables and import that instead.
+Print what you export, with row counts.
+
+3. THE TWO ENVIRONMENTS NEED A STATED RELATIONSHIP
+Right now dev holds the real data and production holds none, which is
+backwards. Say plainly:
+  a. Which environment is authoritative going forward.
+  b. What happens to edits made in dev after production is seeded - do they
+     carry across, or does dev become a scratch copy?
+  c. Whether the 6-hourly sync, the alert detection and the digest scheduler
+     run in production, in dev, or in both.
+
+That last one matters. If detection runs in dev against dev data, the alerts
+people see in production are computed from a different database.
+
+VERIFY after seeding
+  - Production row counts for all seven master tables, matching dev.
+  - /org/people and /org/customers render with data. Print the counts shown.
+  - Person Registry tab renders under Organisation > People.
+  - Alert page count in production matches its own DB.
+  - Push, and print both git refs.
