@@ -664,7 +664,21 @@
       "fy2425_sales_inr": 3417311917,
       "retailer_sales_inr": 582958018,
       "orders_fy2627_ytd_cr": 111.18,
-      "secondary_retail_reach": 11590
+      "secondary_retail_reach": 11590,
+      "fy2627_sales_ytd_inr": 0,
+      "fy2627_monthly_sales": [
+        {
+          "monthLabel": "Apr-26",
+          "amount": 0
+        }
+      ],
+      "fy2627_groups": [
+        {
+          "group": "Unmapped",
+          "amount": 0,
+          "sharePct": 0
+        }
+      ]
     },
     "by_state": [
       {
@@ -1720,7 +1734,7 @@
   "manifest": {
     "notes": [
       "Share every file (or the parent folders) with the Replit service-account email, or the app cannot read them.",
-      "Native Google Sheets: read via the Sheets API (spreadsheets.values.get) — no 10MB cap. Use Drive export only for small sheets.",
+      "Native Google Sheets: read via the Sheets API (spreadsheets.values.get) \u2014 no 10MB cap. Use Drive export only for small sheets.",
       "The 5,065-retailer roster used for coverage did not appear in these two catalogs; add its file ID to primary_sources when known.",
       "INDEX and WT are TABS inside each Order Sheet, not separate files."
     ],
@@ -2183,7 +2197,7 @@
         "id": "1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A",
         "url": "https://docs.google.com/spreadsheets/d/1HFBAtvbAskejVkjuO8zHoEsE-pBAFij2ERMKFEvt64A/edit",
         "name": "Order Sheet 26-27",
-        "role": "Live order intake; monthly tabs Apr–Jul; INDEX/WT helper tabs",
+        "role": "Live order intake; monthly tabs Apr\u2013Jul; INDEX/WT helper tabs",
         "type": "Google Sheet",
         "period": "FY2026-27",
         "category": "Order Sheet"
@@ -2230,7 +2244,7 @@
         "name": "rate list",
         "role": "Item rates/reference imported into Order Sheet (Sheet1!B4:F, Sheet2!A2:F) for rate & group lookups",
         "type": "Google Sheet",
-        "period": "2020 → live",
+        "period": "2020 \u2192 live",
         "category": "Reference master (IMPORTRANGE source)"
       },
       {
@@ -2239,7 +2253,7 @@
         "name": "ORDER FORM RATE LIST",
         "role": "Related order-form / rate reference; not confirmed as the IMPORTRANGE source",
         "type": "Google Sheet",
-        "period": "2022 → live",
+        "period": "2022 \u2192 live",
         "category": "Related rate-list"
       },
       {

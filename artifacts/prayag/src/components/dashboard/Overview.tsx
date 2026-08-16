@@ -1,10 +1,6 @@
 import { trunc2 } from "@/lib/trunc";
 import { formatCompact, CHART_COLORS, CHART_COLOR_LIST } from "@/data/dataset";
 import { useDashboard } from "@/data/dashboard-context";
-import {
-  useGetAnalytics,
-  getGetAnalyticsQueryKey,
-} from "@workspace/api-client-react";
 
 type GroupStat = { group: string; amount: number; sharePct: number };
 import { KPICard, CustomTooltip, CustomLegend } from "./shared";
@@ -22,26 +18,22 @@ export default function Overview() {
   // changes, and it loads instantly even when the API server is warming up.
   const fy2526Total = data.totals.fy2526_sales_inr ?? null;
 
-  // FY26-27 monthly sales (dispatch) — complete months only, from the sale
-  // register via the analytics endpoint. NOT order booking.
-  const fy2627Query = useGetAnalytics(
-    { fy: "2026-27" },
-    {
-      query: {
-        queryKey: getGetAnalyticsQueryKey({ fy: "2026-27" }),
-        staleTime: 5 * 60 * 1000,
-        refetchOnWindowFocus: false,
-      },
-    },
-  );
-  const fy2627Monthly = fy2627Query.data?.months.map((m) => ({
+  // FY26-27 monthly sales (dispatch) — complete months only, sourced from the
+  // dashboard snapshot so the chart and YTD card are immediately available even
+  // when the API server is still warming up.  The snapshot is rebuilt on every
+  // scheduled sync (default: hourly) so figures stay current.
+  const snapshotMonthly = data.totals.fy2627_monthly_sales as Array<{
+    monthLabel: string;
+    amount: number;
+  }>;
+  const fy2627Monthly = snapshotMonthly.map((m) => ({
     month: m.monthLabel,
     sales: m.amount,
-  })) ?? [];
-  // Sales dispatched YTD for the current FY — same empty-months guard as FY25-26.
+  }));
+  // Show "—" when no complete months exist yet in the register.
   const fy2627SalesYtd =
-    fy2627Query.data && fy2627Query.data.months.length > 0
-      ? fy2627Query.data.months.reduce((sum, m) => sum + m.amount, 0)
+    data.totals.fy2627_sales_ytd_inr > 0
+      ? data.totals.fy2627_sales_ytd_inr
       : null;
 
   const { theme } = useTheme();
@@ -50,8 +42,8 @@ export default function Overview() {
   const gridColor = isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)";
   const tickColor = isDark ? "#98999C" : "#71717a";
 
-  // FY26-27 product-group mix from sale_line.group_canon via analytics endpoint.
-  const fy2627Groups: GroupStat[] = fy2627Query.data?.groups ?? [];
+  // FY26-27 product-group mix — sourced from the dashboard snapshot.
+  const fy2627Groups = (data.totals.fy2627_groups as GroupStat[]);
   const pieData: { name: string; value: number }[] = fy2627Groups.map((g) => ({
     name: g.group,
     value: g.amount,

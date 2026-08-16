@@ -1,5 +1,5 @@
 // Orchestrates building and persisting dashboard snapshots.
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, dashboardSnapshots, saleLines, type DashboardSnapshot } from "@workspace/db";
 import { logger } from "../logger.js";
 import { fetchWorkbook } from "../sheets.js";
@@ -9,6 +9,7 @@ import {
   buildResources,
   isMonthlyTabTitle,
 } from "./transform.js";
+import { isMonthComplete } from "../analytics/analytics.js";
 import { seed } from "./seed.js";
 import {
   checkRegisterGuard,
@@ -169,6 +170,87 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
     );
   }
 
+  // FY2026-27 monthly dispatch (complete months only) — sourced from the
+  // invoice-line register.  Included in the snapshot so the Overview page never
+  // needs a separate analytics API call and never shows "—" during API warmup.
+  //
+  // "Complete" follows the same rule as analytics.ts: max invoice date reaches
+  // month-end OR the register lock instant (8 days past month-end) has elapsed.
+  const MONTH_FY_ORDER = [
+    "Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar",
+  ];
+  let fy2627MonthlySales: Array<{ monthLabel: string; amount: number }> = [];
+  let fy2627Groups: Array<{ group: string; amount: number; sharePct: number }> = [];
+  let fy2627SalesYtdInr = 0;
+  try {
+    const monthRows = await db
+      .select({
+        monthLabel: sql<string>`coalesce(${saleLines.monthLabel}, '')`,
+        amount: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8`,
+        maxDate: sql<string | null>`max(${saleLines.invoiceDate})::text`,
+      })
+      .from(saleLines)
+      .where(and(eq(saleLines.fy, "2026-27"), eq(saleLines.versionStatus, "current")))
+      .groupBy(sql`1`);
+
+    // Sort by fiscal month order (Apr first) and keep only complete months.
+    const completeMonths = monthRows
+      .filter((r) => r.monthLabel !== "" && isMonthComplete(r.monthLabel, r.maxDate))
+      .sort(
+        (a, b) =>
+          MONTH_FY_ORDER.indexOf(a.monthLabel.slice(0, 3)) -
+          MONTH_FY_ORDER.indexOf(b.monthLabel.slice(0, 3)),
+      );
+
+    if (completeMonths.length > 0) {
+      fy2627MonthlySales = completeMonths.map((r) => ({
+        monthLabel: r.monthLabel,
+        amount: Math.round(r.amount),
+      }));
+      fy2627SalesYtdInr = fy2627MonthlySales.reduce((s, m) => s + m.amount, 0);
+
+      const completeLabels = completeMonths.map((r) => r.monthLabel);
+      const groupRows = await db
+        .select({
+          group: sql<string>`coalesce(${saleLines.groupCanon}, 'Unmapped')`,
+          amount: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8`,
+        })
+        .from(saleLines)
+        .where(
+          and(
+            eq(saleLines.fy, "2026-27"),
+            eq(saleLines.versionStatus, "current"),
+            inArray(saleLines.monthLabel, completeLabels),
+          ),
+        )
+        .groupBy(sql`1`);
+
+      const groupTotal = groupRows.reduce((s, r) => s + r.amount, 0);
+      fy2627Groups = groupRows
+        .map((r) => ({
+          group: r.group,
+          amount: Math.round(r.amount),
+          sharePct:
+            groupTotal === 0 ? 0 : Math.round((r.amount / groupTotal) * 1000) / 10,
+        }))
+        .sort((a, b) => b.amount - a.amount);
+    }
+
+    logger.info(
+      {
+        fy: "2026-27",
+        complete_months: completeMonths.length,
+        ytd_inr: fy2627SalesYtdInr,
+      },
+      "FY2026-27 snapshot data computed",
+    );
+  } catch (err) {
+    logger.error(
+      { err },
+      "FY2026-27 snapshot query failed — dispatch chart will use empty data",
+    );
+  }
+
   const data = {
     fy2425,
     orders_fy2627: orders.orders_fy2627,
@@ -189,6 +271,9 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
       fy2425_sales_inr: fy2425SalesInr,
       fy2526_sales_inr: fy2526SalesInr,
       orders_fy2627_ytd_cr: orders.orders_ytd_cr,
+      fy2627_sales_ytd_inr: fy2627SalesYtdInr,
+      fy2627_monthly_sales: fy2627MonthlySales,
+      fy2627_groups: fy2627Groups,
     },
   };
 
