@@ -109,10 +109,15 @@ runMigrations()
         const { nullCount, total } = await getSkuStateCanonResidual();
         if (total === 0) return; // table not yet loaded — skip
         if (nullCount > SKU_STATE_CANON_MATERIALITY_THRESHOLD) {
-          logger.warn(
+          logger.info(
             { nullCount, total, threshold: SKU_STATE_CANON_MATERIALITY_THRESHOLD },
-            `[skuStateCanon] WARNING: ${nullCount.toLocaleString()} of ${total.toLocaleString()} secondary_sku_line rows have state_canon=NULL — exceeds threshold of ${SKU_STATE_CANON_MATERIALITY_THRESHOLD.toLocaleString()}. ` +
-              "Migration 034 should have resolved this. Re-seed person_registry or POST /api/sku/backfill-state-canon.",
+            `[skuStateCanon] ${nullCount.toLocaleString()} of ${total.toLocaleString()} secondary_sku_line rows have state_canon=NULL — running automatic backfill`,
+          );
+          const { backfillSkuStateCanon } = await import("./lib/secondary/skuLoader.js");
+          const updated = await backfillSkuStateCanon();
+          logger.info(
+            { updated },
+            `[skuStateCanon] backfillSkuStateCanon: complete — ${updated.toLocaleString()} rows updated`,
           );
         } else {
           logger.info(
