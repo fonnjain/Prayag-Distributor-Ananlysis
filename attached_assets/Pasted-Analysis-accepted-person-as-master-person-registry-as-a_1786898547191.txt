@@ -1,0 +1,54 @@
+Analysis accepted - person as master, person_registry as alias layer, and the
+t.type root cause is a good catch. All 179 details were broken, not one.
+
+Implement the four items, but 2 and 4 need care.
+
+1. ADD person_id FK TO person_registry (nullable)
+Populate for the 177 matched active members. Historic departed rows keep NULL.
+This formalises what the bridge already does one-way and lets the register
+pipeline resolve head_canon to person_id without a name-match join.
+
+2. THE 57 PRODUCT-CATEGORY ROWS - set is_person = false, but check first
+You say nothing reads them today because they match no register head_canon.
+Confirm that BEFORE changing them:
+  a. Do any secondary_sku_line or sale_line rows have a head_canon matching
+     one of the 57? Print the count.
+  b. Does the red alert context scan or the Market Survey cascade currently
+     return any of them? Print what each returns before and after.
+If any register rows DO match, those rows lose their head resolution when the
+flag flips, and that changes attribution. Report before acting.
+
+3. THE 2 PERSON-ONLY ROWS - add to registry
+K Suresh Kumar (person_id 89) and S.Tirumala Rao (106) are active in person
+and absent from person_registry, so ten pipelines cannot see them.
+
+Before adding: print any register rows whose head_canon matches either name.
+If there are some, they are currently unresolved and this fixes real
+attribution - say how many rows and how much value.
+
+4. THE 4 ACTIVE REGISTRY-ONLY ROWS - report, do not seed
+Print their names, employee codes, hr_status and any register rows naming
+them. Are they real people missing from person, or stale HR rows? Do not seed
+them into person until I have seen that.
+
+============================================================
+THE STRUCTURAL POINT - raise as a task, do not fix now
+============================================================
+Ten pipelines read person_registry; one reads person. The derived table is
+doing the work of the master everywhere except the UI.
+
+That is why K Suresh Kumar is invisible to every register pipeline while
+being fully present in the editable master. The FK in item 1 is the first
+step, but the pipelines should eventually resolve THROUGH the registry TO
+person, not stop at the registry.
+
+Raise it. Do not start it - it touches head resolution across the whole
+register and needs its own verification.
+
+VERIFY
+  a. FK populated - count with person_id set, and count still NULL.
+  b. Item 2's before-and-after checks.
+  c. Item 3's register-row counts for both names.
+  d. Item 4's four rows.
+  e. Confirm sale_line, secondary_sku_line and customer row counts unchanged.
+  f. Push and both git refs.

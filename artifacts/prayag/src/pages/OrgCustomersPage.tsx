@@ -254,7 +254,7 @@ function AssignForm({ customerId, current, adminSecret, onDone }:
 
   const mut = useMutation({
     mutationFn: () =>
-      fetch(`${BASE}/api/master/customers/${customerId}/assign`, {
+      fetch(`${BASE}/api/master/customers/${encodeURIComponent(customerId)}/assign`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", "X-Admin-Secret": adminSecret },
         body: JSON.stringify({ person_id: personId ? Number(personId) : null,
@@ -315,7 +315,7 @@ function TypeChangeForm({ customerId, currentType, adminSecret, onDone }:
 
   const mut = useMutation({
     mutationFn: () =>
-      fetch(`${BASE}/api/master/customers/${customerId}/type`, {
+      fetch(`${BASE}/api/master/customers/${encodeURIComponent(customerId)}/type`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", "X-Admin-Secret": adminSecret },
         body: JSON.stringify({ new_type: newType, reason, changed_by: changedBy || "operator" }),
@@ -390,7 +390,7 @@ function DetailPanel({ customerId, adminSecret }:
   const { data, isLoading, error } = useQuery<CustomerDetail>({
     queryKey: ["master-customer-detail", customerId],
     queryFn: () =>
-      fetch(`${BASE}/api/master/customers/${customerId}`).then(async (r) => {
+      fetch(`${BASE}/api/master/customers/${encodeURIComponent(customerId)}`).then(async (r) => {
         if (!r.ok) {
           const body = await r.text();
           let msg = r.statusText;
