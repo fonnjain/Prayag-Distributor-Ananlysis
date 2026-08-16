@@ -1,0 +1,81 @@
+Routing verified directly against live main - L2 skip writes recipientId null
+at escalate.ts:162, blank contact skips with a reason at notify.ts:204,
+whatsapp returns pending with "no provider configured" at channels.ts:42
+without transmitting. The alertPersistence comments and tests are correct.
+
+Four things to close it out.
+
+============================================================
+1. ALWAYS PUSH BEFORE REPORTING
+============================================================
+origin/main sat three commits behind local while work was reported as
+complete. I can now read the repo directly, so anything unpushed reads to me
+as missing.
+
+From now on, every task ends with a push, and the verification prints:
+    git rev-parse HEAD
+    git rev-parse origin/main
+Both must match. If they differ, say so rather than reporting the task done.
+
+============================================================
+2. THE DIGEST - the one verification I have not seen
+============================================================
+V4 of the routing spec asked for a weekly digest generated in dry-run, with
+its counts printed BESIDE the page counts to confirm they match.
+
+That was not in your report. Produce it:
+  a. Generate a weekly digest for one State Head in dry-run. Paste the full
+     message body.
+  b. Print the digest's counts and the page's counts side by side for the
+     same scope. They must be identical.
+  c. Confirm the digest reads from STORED alerts and never recomputes. Print
+     the query.
+  d. Confirm a recipient with zero alerts receives NOTHING, and print the skip.
+
+If the page says 33 and the digest says 31, nobody trusts either. This is the
+check that decides whether the digest is usable.
+
+============================================================
+3. THE ESCALATION PATH END TO END
+============================================================
+Level 2 is deliberately empty, so an unacknowledged alert must skip it and
+reach level 3. Prove the whole chain in dry-run:
+
+  a. Raise a severe alert. Confirm delivery rows for the State Head AND
+     Deepak J, both level 1.
+  b. Leave it unacknowledged past the 7-day severe window. Confirm the
+     NULL-recipient skip row is written for level 2, and that Nitin Agarwal
+     receives it at level 3.
+  c. Confirm the level 3 message carries the ORIGINAL raise date and the days
+     open - not the escalation date.
+  d. Confirm level 1 still holds it. Escalation adds a recipient; it never
+     removes one.
+  e. Acknowledge a second alert before its window. Confirm no escalation
+     fires at all.
+
+============================================================
+4. WHAT AN OPERATOR SEES BEFORE THIS IS SWITCHED ON
+============================================================
+Three things are deliberately incomplete and someone will be surprised by
+each unless the page says so plainly:
+
+  - Level 2 has no recipient. Anything unacknowledged for 7 days goes
+    straight to the CEO.
+  - Sunil Mohanty has no contact on file.
+  - WhatsApp has no provider. Nothing sends on that channel.
+
+Surface all three on the settings page as a readiness panel - not buried in a
+log. State what will happen, not just that something is missing. For example:
+"Level 2 is empty. Unacknowledged alerts escalate from Level 1 directly to
+Level 3 (CEO) after 7 days."
+
+VERIFY
+  1. Push, then print git rev-parse HEAD and git rev-parse origin/main.
+  2. The digest body and the side-by-side counts.
+  3. The escalation chain output for a to e.
+  4. Screenshot or paste the readiness panel.
+  5. Confirm nothing was transmitted during verification.
+  6. Confirm detection, thresholds, guards and the alert store are unchanged -
+     print the alert count before and after.
+  7. git cat-file -t <hash>, then git merge-base --is-ancestor <hash> main
+     with its exit code.
