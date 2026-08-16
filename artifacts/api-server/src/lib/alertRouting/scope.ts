@@ -4,7 +4,7 @@ import type { AlertRow, Recipient } from "./types.js";
 /**
  * Determine whether an alert falls within a recipient's scope.
  *
- * scope_type='all'        — always matches.
+ * scope_type='all_india'  — always matches (Deepak J, CEO).
  * scope_type='state_head' — for person-type alerts, matches when the entity's
  *                           state head (from person_registry) equals scope_value.
  *                           For non-person entities, checks alert detail for a
@@ -15,10 +15,10 @@ export async function matchesScope(
   alert: AlertRow,
   recipient: Recipient,
 ): Promise<boolean> {
-  if (recipient.scopeType === "all") return true;
+  if (recipient.scopeType === "all_india") return true;
   if (recipient.scopeValue == null) return false;
 
-  if (alert.entityType === "person") {
+  if (alert.entityType === "person" || alert.entityType === "member") {
     const { rows } = await pool.query<{ state_head: string | null }>(
       `SELECT state_head FROM person_registry WHERE norm_key = $1 LIMIT 1`,
       [alert.entityKey],

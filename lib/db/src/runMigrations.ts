@@ -1329,6 +1329,57 @@ const MIGRATIONS: Migration[] = [
         ON alert_delivery(trigger_type, created_at);
     `,
   },
+  {
+    id: "037_alert_routing_v2",
+    sql: `
+      -- 1. Allow recipient_id to be NULL so we can record level-skip rows
+      --    (e.g. L2 skipped because no recipient is configured at that level).
+      ALTER TABLE alert_delivery ALTER COLUMN recipient_id DROP NOT NULL;
+
+      -- 2. Rename scope_type 'all' → 'all_india' for clarity.
+      UPDATE alert_recipient SET scope_type = 'all_india' WHERE scope_type = 'all';
+
+      -- 3. Escalation-config: window in days per level, with separate
+      --    severe-vs-digest tracks for level 1.
+      --      L1 → L2:  7 days for severe alerts, 14 days for digest alerts
+      --      L2 → L3:  7 days regardless of severity
+      CREATE TABLE IF NOT EXISTS alert_escalation_config (
+        level                INTEGER      PRIMARY KEY CHECK (level IN (1, 2)),
+        window_days_severe   INTEGER      NOT NULL DEFAULT 7,
+        window_days_digest   INTEGER      NOT NULL DEFAULT 14,
+        updated_at           TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+      );
+      INSERT INTO alert_escalation_config (level, window_days_severe, window_days_digest)
+      VALUES (1, 7, 14), (2, 7, 7)
+      ON CONFLICT (level) DO NOTHING;
+
+      -- 4. Seed real Level-1 recipients (12 State Heads + Deepak J all-India).
+      --    Sunil Mohanty has no HR record; seeded with NULL contact so the row
+      --    exists and can be completed in the UI later.
+      INSERT INTO alert_recipient
+        (name, escalation_level, scope_type, scope_value,
+         alert_code_pattern, channel, contact, cadence)
+      VALUES
+        -- State Heads (scope = their own territory)
+        ('Sandeep Dadheech',      1, 'state_head', 'Sandeep Dadheech',      '*', 'whatsapp', '9331103319', 'on_raise'),
+        ('Aqil Rizvi',            1, 'state_head', 'Aqil Rizvi',            '*', 'whatsapp', '9305083814', 'on_raise'),
+        ('Biju C.O',              1, 'state_head', 'Biju C.O',              '*', 'whatsapp', '9633200526', 'on_raise'),
+        ('Pawan Kumar Sharma',    1, 'state_head', 'Pawan Kumar Sharma',    '*', 'whatsapp', '9958040072', 'on_raise'),
+        ('Sulinder Pal',          1, 'state_head', 'Sulinder Pal',          '*', 'whatsapp', '9816258614', 'on_raise'),
+        ('Anant Singh',           1, 'state_head', 'Anant Singh',           '*', 'whatsapp', '7838915612', 'on_raise'),
+        ('Nasir Hussain Khan',    1, 'state_head', 'Nasir Hussain Khan',    '*', 'whatsapp', '9958065454', 'on_raise'),
+        ('Sunil Patel',           1, 'state_head', 'Sunil Patel',           '*', 'whatsapp', '9408709411', 'on_raise'),
+        ('Lalan Kumar',           1, 'state_head', 'Lalan Kumar',           '*', 'whatsapp', '9579398634', 'on_raise'),
+        ('Anuj Sharma',           1, 'state_head', 'Anuj Sharma',           '*', 'whatsapp', '8796339586', 'on_raise'),
+        ('Narendra Kumar Sharma', 1, 'state_head', 'Narendra Kumar Sharma', '*', 'whatsapp', '9828146028', 'on_raise'),
+        ('Sunil Mohanty',         1, 'state_head', 'Sunil Mohanty',         '*', 'whatsapp', NULL,         'on_raise'),
+        -- All-India Level 1
+        ('Deepak J',              1, 'all_india', NULL, '*', 'whatsapp', '9910896007', 'on_raise'),
+        -- Level 3 (CEO) — Level 2 is intentionally left blank
+        ('Nitin Agarwal',         3, 'all_india', NULL, '*', 'email',    'ceo@prayagindia.com', 'on_raise')
+      ON CONFLICT DO NOTHING;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

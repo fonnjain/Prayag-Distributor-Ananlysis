@@ -72,7 +72,7 @@ export async function getActiveRecipients(): Promise<Recipient[]> {
     alertCodePattern: r.alert_code_pattern,
     scopeType: r.scope_type as Recipient["scopeType"],
     scopeValue: r.scope_value,
-    escalationLevel: r.escalation_level as 1 | 2,
+    escalationLevel: r.escalation_level as 1 | 2 | 3,
     name: r.name,
     channel: r.channel as Recipient["channel"],
     contact: r.contact,
@@ -81,9 +81,9 @@ export async function getActiveRecipients(): Promise<Recipient[]> {
   }));
 }
 
-async function insertDelivery(params: {
+export async function insertDelivery(params: {
   alertId: number;
-  recipientId: number;
+  recipientId: number | null;
   channel: string;
   escalationLevel: number;
   triggerType: string;
@@ -121,7 +121,10 @@ async function insertDelivery(params: {
  * Fire notifications for a given alert.
  *
  * trigger_type='on_raise'   → level-1 recipients with cadence='on_raise' only.
- * trigger_type='escalation' → level-2 recipients only, for unacknowledged alerts.
+ * trigger_type='escalation' → recipients at the specified targetLevel (2 or 3).
+ *
+ * Blank-contact recipients receive a delivery row with status=skipped and a
+ * readable skip_reason instead of being silently dropped.
  *
  * In dry_run mode delivery rows are written but no messages are transmitted.
  * Idempotent in production (skips if a delivery row already exists for this
@@ -132,7 +135,9 @@ export async function notifyAlert(
   opts: {
     dryRun?: boolean;
     triggerType?: "on_raise" | "escalation";
-    /** If provided, only this recipient receives it (used internally by escalation). */
+    /** For escalation: which level to notify (2 or 3). Defaults to 2. */
+    targetLevel?: number;
+    /** If provided, only this recipient receives it (used internally). */
     recipientId?: number;
     /** Days since raised, injected for escalation message body. */
     daysSinceRaised?: number;
@@ -141,6 +146,7 @@ export async function notifyAlert(
   const {
     dryRun = true,
     triggerType = "on_raise",
+    targetLevel = 2,
     recipientId,
     daysSinceRaised,
   } = opts;
@@ -157,9 +163,9 @@ export async function notifyAlert(
   const now = new Date().toISOString();
 
   for (const recipient of candidates) {
-    // Level filter: on_raise → level 1 only; escalation → level 2 only.
+    // Level filter.
     if (triggerType === "on_raise" && recipient.escalationLevel !== 1) continue;
-    if (triggerType === "escalation" && recipient.escalationLevel !== 2) continue;
+    if (triggerType === "escalation" && recipient.escalationLevel !== targetLevel) continue;
 
     // Cadence filter: on_raise trigger only reaches recipients with cadence='on_raise'.
     if (triggerType === "on_raise" && recipient.cadence !== "on_raise") continue;
@@ -179,6 +185,46 @@ export async function notifyAlert(
         [alertId, recipient.id, triggerType],
       );
       if (existing.length > 0) continue;
+    }
+
+    // ── Blank-contact guard ──────────────────────────────────────────────
+    // A recipient with no contact must produce a visible skipped row.
+    // In-app channel does not need a contact address.
+    const needsContact = recipient.channel === "email" || recipient.channel === "whatsapp";
+    const blankContact = needsContact && (!recipient.contact || recipient.contact.trim() === "");
+
+    if (blankContact) {
+      const row = await insertDelivery({
+        alertId,
+        recipientId: recipient.id,
+        channel: recipient.channel,
+        escalationLevel: recipient.escalationLevel,
+        triggerType,
+        status: "skipped",
+        skipReason: "blank contact — no mobile or email on file",
+        messageBody: renderOnRaiseBody(alert, recipient.name),
+        sentAt: null,
+      });
+      const delivery: DeliveryRow = {
+        id: row.id,
+        alertId,
+        recipientId: recipient.id,
+        recipientName: recipient.name,
+        channel: recipient.channel,
+        escalationLevel: recipient.escalationLevel,
+        triggerType,
+        status: "skipped",
+        skipReason: "blank contact — no mobile or email on file",
+        messageBody: null,
+        sentAt: null,
+        createdAt: row.created_at,
+      };
+      results.push(delivery);
+      logger.warn(
+        { alertId, recipientId: recipient.id, recipientName: recipient.name },
+        "[alertRouting] delivery skipped — blank contact",
+      );
+      continue;
     }
 
     // Build message body.

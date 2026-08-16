@@ -1,10 +1,11 @@
 /**
  * Alert routing routes.
  *
- * Recipients: CRUD for alert_recipient rows.
- * Severity:   Read + patch for alert_severity_config rows.
- * Actions:    Notify, digest, escalate (all support dryRun flag).
- * Deliveries: GET delivery log for a specific alert.
+ * Recipients:          CRUD for alert_recipient rows.
+ * Severity config:     Read + patch for alert_severity_config rows.
+ * Escalation config:   Read + patch for alert_escalation_config rows.
+ * Actions:             Notify, digest, escalate (all support dryRun flag).
+ * Deliveries:          GET delivery log for a specific alert.
  */
 import { Router, Request, Response } from "express";
 import { pool } from "@workspace/db";
@@ -37,9 +38,18 @@ alertRoutingRouter.get("/alert-recipients", async (_req: Request, res: Response)
     const { rows } = await pool.query(
       `SELECT id, alert_code_pattern, scope_type, scope_value, escalation_level,
               name, channel, contact, cadence, is_active, created_at, updated_at
-       FROM alert_recipient ORDER BY escalation_level, id`,
+       FROM alert_recipient ORDER BY escalation_level, name`,
     );
-    res.json({ recipients: rows });
+    // Attach level coverage summary
+    const { rows: levelCounts } = await pool.query(
+      `SELECT escalation_level, COUNT(*) AS cnt
+       FROM alert_recipient WHERE is_active = TRUE
+       GROUP BY escalation_level`,
+    );
+    const byLevel: Record<number, number> = {};
+    for (const r of levelCounts) byLevel[r.escalation_level] = Number(r.cnt);
+    const emptyLevels = [1, 2, 3].filter((l) => !byLevel[l]);
+    res.json({ recipients: rows, byLevel, emptyLevels });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -51,7 +61,7 @@ alertRoutingRouter.post(
   async (req: Request, res: Response) => {
     const {
       alert_code_pattern,
-      scope_type = "all",
+      scope_type = "all_india",
       scope_value = null,
       escalation_level = 1,
       name,
@@ -68,16 +78,16 @@ alertRoutingRouter.post(
       res.status(400).json({ error: "channel must be whatsapp | email | in_app" });
       return;
     }
-    if (!["state_head", "all"].includes(scope_type as string)) {
-      res.status(400).json({ error: "scope_type must be state_head | all" });
+    if (!["state_head", "all_india"].includes(scope_type as string)) {
+      res.status(400).json({ error: "scope_type must be state_head | all_india" });
       return;
     }
     if (!["on_raise", "weekly"].includes(cadence as string)) {
       res.status(400).json({ error: "cadence must be on_raise | weekly" });
       return;
     }
-    if (![1, 2].includes(escalation_level as number)) {
-      res.status(400).json({ error: "escalation_level must be 1 or 2" });
+    if (![1, 2, 3].includes(escalation_level as number)) {
+      res.status(400).json({ error: "escalation_level must be 1, 2 or 3" });
       return;
     }
 
@@ -207,6 +217,43 @@ alertRoutingRouter.patch(
   },
 );
 
+// ─── Escalation config ────────────────────────────────────────────────────
+
+alertRoutingRouter.get("/alert-escalation-config", async (_req: Request, res: Response) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT level, window_days_severe, window_days_digest, updated_at
+       FROM alert_escalation_config ORDER BY level`,
+    );
+    res.json({ configs: rows });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+alertRoutingRouter.patch(
+  "/alert-escalation-config/:level",
+  requireAdminSecret,
+  async (req: Request, res: Response) => {
+    const level = Number(req.params.level);
+    const { window_days_severe, window_days_digest } = req.body as Record<string, unknown>;
+    try {
+      const { rows } = await pool.query(
+        `UPDATE alert_escalation_config
+         SET window_days_severe = COALESCE($2::int, window_days_severe),
+             window_days_digest  = COALESCE($3::int, window_days_digest),
+             updated_at = NOW()
+         WHERE level = $1 RETURNING *`,
+        [level, window_days_severe ?? null, window_days_digest ?? null],
+      );
+      if (!rows[0]) { res.status(404).json({ error: "Config not found" }); return; }
+      res.json({ config: rows[0] });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  },
+);
+
 // ─── Actions ──────────────────────────────────────────────────────────────
 
 /** POST /api/alert-routing/notify/:alertId */
@@ -296,7 +343,7 @@ alertRoutingRouter.get(
            ad.id,
            ad.alert_id,
            ad.recipient_id,
-           ar.name            AS recipient_name,
+           COALESCE(ar.name, '(level skipped — no recipient)') AS recipient_name,
            ad.channel,
            ad.escalation_level,
            ad.trigger_type,
@@ -307,7 +354,7 @@ alertRoutingRouter.get(
            ad.message_body,
            ad.created_at
          FROM alert_delivery ad
-         JOIN alert_recipient ar ON ar.id = ad.recipient_id
+         LEFT JOIN alert_recipient ar ON ar.id = ad.recipient_id
          WHERE ad.alert_id = $1
          ORDER BY ad.created_at DESC`,
         [id],

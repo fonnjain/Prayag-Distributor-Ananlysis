@@ -127,3 +127,4 @@
 - [Red Alert calibration findings](red-alert-calibration.md) — Guard 3 closed-FY fix; B-retailer=secondary_sku_line; B-primary/C1/C2 fire 0 for FY24-25/25-26 (no is_territory rows + null state_canon); revised thresholds Aug 2026.
 - [Red Alert Category S + B3 rollup](red-alert-category-s-b3-rollup.md) — S1 destocking (norm2 linkage, FY-spanning streak), B3 rollup rules (3-retailer/₹50L group, ₹25L individual), A2→A1 cross-suppression, state_canon backfill from person_registry.
 - [Master Org Phase 2 — people management](master-org-phase2.md) — /api/master/people routes; deactivation requires impact acknowledgment gate (422 without, 409 on mismatch, 200 with correct counts).
+- [Alert Routing v2](alert-routing-v2.md) — 3-level escalation; scope_type=all_india (not "all"); recipient_id nullable for L2 skip rows; blank contact → skipped row, never silent drop.

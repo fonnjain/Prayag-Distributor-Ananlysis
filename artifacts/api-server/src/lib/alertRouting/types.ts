@@ -1,9 +1,9 @@
 export type Recipient = {
   id: number;
   alertCodePattern: string;
-  scopeType: "state_head" | "all";
+  scopeType: "state_head" | "all_india";
   scopeValue: string | null;
-  escalationLevel: 1 | 2;
+  escalationLevel: 1 | 2 | 3;
   name: string;
   channel: "whatsapp" | "email" | "in_app";
   contact: string | null;
@@ -17,10 +17,16 @@ export type SeverityConfig = {
   escalationWindowDays: number;
 };
 
+export type EscalationConfig = {
+  level: 1 | 2;
+  windowDaysSevere: number;
+  windowDaysDigest: number;
+};
+
 export type DeliveryRow = {
   id: number;
   alertId: number;
-  recipientId: number;
+  recipientId: number | null;
   recipientName: string;
   channel: string;
   escalationLevel: number;
