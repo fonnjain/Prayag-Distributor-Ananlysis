@@ -83,10 +83,17 @@ const NAV: NavGroup[] = [
       { id: "targets",         label: "Targets",         path: "/targets",         icon: Target },
       { id: "pending",         label: "Pending Orders",  path: "/pending",         icon: ClipboardList },
       { id: "sources",         label: "Organization",    path: "/sources",         icon: Database },
-      { id: "alerts",          label: "Red Alerts",      path: "/alerts",          icon: Bell },
-      { id: "alert-recipients", label: "Alert Settings", path: "/alert-recipients", icon: Settings },
-      { id: "warnings",        label: "Warning System",  path: "/warnings",        icon: AlertTriangle },
       { id: "data-health",     label: "Data Health",     path: "/data-health",     icon: ShieldCheck },
+    ],
+  },
+  {
+    id: "alerts",
+    label: "Alerts",
+    icon: Bell,
+    items: [
+      { id: "red-alerts",       label: "Red Alerts",      path: "/alerts",           icon: Bell },
+      { id: "alert-settings",   label: "Alert Settings",  path: "/alert-recipients", icon: Settings },
+      { id: "warning-system",   label: "Warning System",  path: "/warnings",         icon: AlertTriangle },
     ],
   },
   {
@@ -156,9 +163,20 @@ const NAV: NavGroup[] = [
 
 // Determine which group & item is active from the current URL.
 function activeIds(location: string): { groupId: string; itemId: string } {
+  // Alerts group
+  if (location === "/alerts" || location.startsWith("/alerts?")) {
+    return { groupId: "alerts", itemId: "red-alerts" };
+  }
+  if (location === "/alert-recipients" || location.startsWith("/alert-recipients?")) {
+    return { groupId: "alerts", itemId: "alert-settings" };
+  }
+  if (location === "/warnings" || location.startsWith("/warnings?")) {
+    return { groupId: "alerts", itemId: "warning-system" };
+  }
   if (location.startsWith("/sales")) {
     const slug = location.replace(/^\/sales\/?/, "").split("?")[0];
-    const item = NAV[1].items.find((i) => i.id === slug) ?? NAV[1].items[0];
+    const salesGrp = NAV.find((g) => g.id === "sales")!;
+    const item = salesGrp.items.find((i) => i.id === slug) ?? salesGrp.items[0];
     return { groupId: "sales", itemId: item.id };
   }
   if (location === "/sku" || location.startsWith("/sku/")) {
@@ -213,6 +231,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   // Start with the active group expanded; others collapsed.
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     dashboard: activeGroupId === "dashboard",
+    alerts:    activeGroupId === "alerts",
     sales:     activeGroupId === "sales",
     mrp:       activeGroupId === "mrp",
     market:    activeGroupId === "market",
@@ -291,7 +310,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                       >
                         <Icon className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
                         <span className="truncate">{item.label}</span>
-                        {item.id === "alerts" && alertCount > 0 && (
+                        {item.id === "red-alerts" && alertCount > 0 && (
                           <span className="ml-auto inline-flex items-center justify-center rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold min-w-[16px] h-4 px-1">
                             {alertCount > 99 ? "99+" : alertCount}
                           </span>

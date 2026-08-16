@@ -16,7 +16,6 @@ import CompanyReports from "@/components/dashboard/CompanyReports";
 import ComparisonDeepDive from "@/components/dashboard/ComparisonDeepDive";
 import Targets from "@/components/dashboard/Targets";
 import DataHealth from "@/components/dashboard/DataHealth";
-import WarningSystem from "@/components/dashboard/WarningSystem";
 import PendingOrders from "@/components/dashboard/PendingOrders";
 import GlobalFilterBar from "@/components/GlobalFilterBar";
 import { useDashboard } from "@/data/dashboard-context";
@@ -52,7 +51,6 @@ const AREAS = [
   { id: "products",        label: "Products",        component: Products },
   { id: "momentum",        label: "Momentum",        component: OrderMomentum },
   { id: "growth",          label: "Growth",          component: Growth },
-  { id: "warnings",        label: "Warning System",  component: WarningSystem },
   { id: "analyst",         label: "AI Analyst",      component: Analyst },
   { id: "ai-reports",     label: "AI Reports",      component: AiReports },
   { id: "reports",         label: "Reports",         component: MgmtReports },

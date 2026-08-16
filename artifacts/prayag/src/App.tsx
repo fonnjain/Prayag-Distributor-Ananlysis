@@ -19,6 +19,7 @@ import OrgPeoplePage from "@/pages/OrgPeoplePage";
 import OrgCustomersPage from "@/pages/OrgCustomersPage";
 import AlertsPage from "@/pages/AlertsPage";
 import AlertRecipientsPage from "@/pages/AlertRecipientsPage";
+import WarningsPage from "@/pages/WarningsPage";
 import NotFound from "@/pages/not-found";
 import { DashboardProvider } from "@/data/dashboard-context";
 import { GlobalFilterProvider } from "@/data/global-filter-context";
@@ -53,6 +54,7 @@ function Router() {
         {/* Alerts */}
         <Route path="/alerts" component={AlertsPage} />
         <Route path="/alert-recipients" component={AlertRecipientsPage} />
+        <Route path="/warnings" component={WarningsPage} />
         {/* Organisation */}
         <Route path="/org/people" component={OrgPeoplePage} />
         <Route path="/org/customers" component={OrgCustomersPage} />
