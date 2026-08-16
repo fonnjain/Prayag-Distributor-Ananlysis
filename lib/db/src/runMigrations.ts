@@ -1456,6 +1456,56 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    // person_id FK formalises person as the authoritative master.
+    // Step 1: add nullable FK column + index.
+    // Step 2: populate via case-insensitive name match (covers 177 of 179 active members).
+    // Step 3: populate the 2 whose registry canonical_name has a punctuation difference
+    //         (K. Suresh Kumar → person 89; S. Tirumala Rao → person 106) via employee-code.
+    // Step 4: set is_person=false for the 74 geographic/product-category noise rows whose
+    //         canonical_name is a state, territory, or district name (e.g. ANDHRA PRADESH,
+    //         East U.P). These were seeded from HR-roster rows where a geography column was
+    //         parsed as a person name. Verified 0 matching rows in sale_line or
+    //         secondary_sku_line before flipping. is_state_head=false for all 74.
+    id: "043_person_registry_person_fk",
+    sql: `
+      -- Step 1: FK column + index
+      ALTER TABLE person_registry
+        ADD COLUMN IF NOT EXISTS person_id INTEGER REFERENCES person(person_id);
+      CREATE INDEX IF NOT EXISTS pr_person_id_idx ON person_registry(person_id);
+
+      -- Step 2: name match (handles 177 active members)
+      UPDATE person_registry pr
+      SET person_id = p.person_id
+      FROM person p
+      WHERE LOWER(TRIM(REGEXP_REPLACE(pr.canonical_name, '\\s+', ' ', 'g')))
+          = LOWER(TRIM(REGEXP_REPLACE(p.name,            '\\s+', ' ', 'g')))
+        AND pr.person_id IS NULL
+        AND pr.is_person = true;
+
+      -- Step 3: employee-code match for punctuation-different spellings
+      --   K. Suresh Kumar (reg 134) → person 89  (code 25696++21111)
+      --   S. Tirumala Rao (reg 253) → person 106 (code 3418596)
+      UPDATE person_registry pr
+      SET person_id = p.person_id
+      FROM person p
+      WHERE pr.id IN (134, 253)
+        AND pr.employee_code = p.employee_code
+        AND pr.employee_code IS NOT NULL
+        AND pr.person_id IS NULL;
+
+      -- Step 4: demote 74 geographic/product-category noise rows
+      UPDATE person_registry
+      SET is_person = false
+      WHERE id IN (
+        432,433,437,439,443,445,448,452,458,460,462,465,466,467,471,
+        472,475,479,480,482,485,486,491,492,493,496,501,502,505,508,
+        510,513,514,517,523,527,528,532,537,539,542,543,552,560,563,
+        566,568,570,572,574,579,581,588,590,594,617,624,630,636,648,
+        676,681,686,689,700,715,717,719,725,727,730,735,847,855
+      );
+    `,
+  },
+  {
     id: "039_alert_routing_on_raise",
     sql: `
       -- State head recipients: weekly digest only (per-territory alerts; immediate fire is noise).
