@@ -16,6 +16,7 @@ import {
   type RegisterGuardResult,
 } from "./registerGuard.js";
 import { readVerifyAnchors } from "../config/verifyAnchors.js";
+import { getFrozenAnchor } from "../customers/registerSync.js";
 
 // Live source workbooks (see manifest.primary_sources).
 const ITEMWISE_SALES_FY2425 = "1HgWelwHy73Ybc-1fBQMXhKxo2ctJToxgZLDWwJPmqz8";
@@ -122,6 +123,52 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
     fy2425SalesInr = fy2425.grand_total;
   }
 
+  // FY2025-26 primary dispatch total — sourced from the invoice-line register.
+  // FY2025-26 is frozen; the frozen anchor (amountRupees) is the authoritative
+  // fallback when the DB query fails or returns an incomplete result.
+  // Guard: all 12 months must be present and row count must match the frozen
+  // anchor.  No sheet total is available for this FY (register-only source).
+  const fy2526Anchor = getFrozenAnchor("2025-26");
+  let fy2526SalesInr: number = fy2526Anchor?.amountRupees ?? 0;
+  try {
+    const [fy2526DbRow] = await db
+      .select({
+        total: sql<string>`coalesce(sum(amount), 0)`,
+        distinct_months: sql<number>`count(distinct month_label)::int`,
+        row_count: sql<number>`count(*)::int`,
+      })
+      .from(saleLines)
+      .where(and(eq(saleLines.fy, "2025-26"), eq(saleLines.versionStatus, "current")));
+    const dbTotal = Number(fy2526DbRow?.total ?? 0);
+    const monthCount = fy2526DbRow?.distinct_months ?? 0;
+    const rowCount = fy2526DbRow?.row_count ?? 0;
+    const anchorRows = fy2526Anchor?.rows ?? 0;
+    if (monthCount === 12 && (anchorRows === 0 || rowCount >= anchorRows)) {
+      fy2526SalesInr = dbTotal;
+      logger.info(
+        { fy: "2025-26", db_total_inr: dbTotal, month_count: monthCount, row_count: rowCount },
+        "FY2025-26 sales total sourced from DB register",
+      );
+    } else {
+      logger.error(
+        {
+          fy: "2025-26",
+          db_total_inr: dbTotal,
+          month_count: monthCount,
+          row_count: rowCount,
+          anchor_rows: anchorRows,
+          fallback_inr: fy2526SalesInr,
+        },
+        "FY2025-26 register incomplete — falling back to frozen anchor total",
+      );
+    }
+  } catch (err) {
+    logger.error(
+      { err, fallback_inr: fy2526SalesInr },
+      "FY2025-26 sale_line query failed — falling back to frozen anchor total",
+    );
+  }
+
   const data = {
     fy2425,
     orders_fy2627: orders.orders_fy2627,
@@ -140,6 +187,7 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
       retailers: resources.retailers,
       retailer_sales_inr: resources.retailer_sales_inr,
       fy2425_sales_inr: fy2425SalesInr,
+      fy2526_sales_inr: fy2526SalesInr,
       orders_fy2627_ytd_cr: orders.orders_ytd_cr,
     },
   };

@@ -16,25 +16,11 @@ import { useTheme } from "next-themes";
 
 export default function Overview() {
   const { data } = useDashboard();
-  // FY25-26 total sales come from the invoice-line register (all 12 months
-  // are final), served by the analytics endpoint.
-  const fy2526Query = useGetAnalytics(
-    { fy: "2025-26" },
-    {
-      query: {
-        queryKey: getGetAnalyticsQueryKey({ fy: "2025-26" }),
-        staleTime: 5 * 60 * 1000,
-        refetchOnWindowFocus: false,
-      },
-    },
-  );
-  // Guard: treat an empty months array the same as no data — both render "—".
-  // Without this, an empty months array (e.g. production DB without FY25-26 loaded)
-  // causes reduce() to return 0, and 0 != null passes the ternary → shows "₹0".
-  const fy2526Total =
-    fy2526Query.data && fy2526Query.data.months.length > 0
-      ? fy2526Query.data.months.reduce((sum, m) => sum + m.amount, 0)
-      : null;
+  // FY25-26 total sales — sourced from the dashboard snapshot (which queries
+  // the frozen sale_line register on rebuild).  Using the snapshot avoids a
+  // separate analytics API call: the FY is frozen, so this figure never
+  // changes, and it loads instantly even when the API server is warming up.
+  const fy2526Total = data.totals.fy2526_sales_inr ?? null;
 
   // FY26-27 monthly sales (dispatch) — complete months only, from the sale
   // register via the analytics endpoint. NOT order booking.
@@ -99,7 +85,7 @@ export default function Overview() {
           icon={<IndianRupee className="w-5 h-5" />}
           detail={[
             "Primary sale & dispatch",
-            "Source: analytics endpoint",
+            "Source: sale_line register (all 12 months)",
             "All channels, incl. project & institutional",
           ]}
         />
