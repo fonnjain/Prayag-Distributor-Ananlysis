@@ -224,9 +224,11 @@ router.get("/master/people/:id", async (req, res) => {
         ),
         // Territories
         pool.query(
-          `SELECT t.territory_id, t.name, t.type, pt.effective_from::text, pt.effective_to::text
+          `SELECT t.territory_id, t.name, tp.name AS parent_name,
+                  pt.effective_from::text, pt.effective_to::text
            FROM person_territory pt
            JOIN territory t ON t.territory_id = pt.territory_id
+           LEFT JOIN territory tp ON tp.territory_id = t.parent_territory_id
            WHERE pt.person_id = $1 AND pt.effective_to IS NULL
            ORDER BY t.name`,
           [personId],

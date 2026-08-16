@@ -15,7 +15,6 @@ import CompetitionPricePage from "@/pages/CompetitionPricePage";
 import DevPortalPage from "@/pages/DevPortalPage";
 import DevApiKeysPage from "@/pages/DevApiKeysPage";
 import DevMastersPage from "@/pages/DevMastersPage";
-import OrgPeoplePage from "@/pages/OrgPeoplePage";
 import OrgCustomersPage from "@/pages/OrgCustomersPage";
 import AlertsPage from "@/pages/AlertsPage";
 import AlertRecipientsPage from "@/pages/AlertRecipientsPage";
@@ -55,8 +54,8 @@ function Router() {
         <Route path="/alerts" component={AlertsPage} />
         <Route path="/alert-recipients" component={AlertRecipientsPage} />
         <Route path="/warnings" component={WarningsPage} />
-        {/* Organisation */}
-        <Route path="/org/people" component={OrgPeoplePage} />
+        {/* Organisation — /org/people is an alias that opens the People tab */}
+        <Route path="/org/people" component={OrgCustomersPage} />
         <Route path="/org/customers" component={OrgCustomersPage} />
         {/* Developer Portal */}
         <Route path="/dev/api" component={DevPortalPage} />

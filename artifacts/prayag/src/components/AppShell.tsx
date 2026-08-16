@@ -144,7 +144,6 @@ const NAV: NavGroup[] = [
     label: "Organisation",
     icon: Users,
     items: [
-      { id: "org-people",     label: "People",    path: "/org/people",     icon: Users },
       { id: "org-customers",  label: "Customers", path: "/org/customers",  icon: Store },
     ],
   },
