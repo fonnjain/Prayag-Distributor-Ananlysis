@@ -104,10 +104,15 @@ interface UnassignedCustomer {
   // Suggestion fields
   state_head_person_id: number | null;
   state_head_name: string | null;
+  former_person_name_raw: string | null;
   suggested_person_id: number | null;
   suggested_person_name: string | null;
-  suggestion_rule: "territory_majority" | "state_head" | null;
+  suggestion_rule: "former_book" | "territory_majority" | "state_head" | null;
   suggestion_cover_count: number | null;
+  // Confidence band (territory_majority only)
+  confidence_band: "strong" | "moderate" | "weak" | null;
+  tm_cover_count: number | null;
+  territory_total_assigned: number | null;
 }
 
 interface TerritoryGroup {
@@ -120,6 +125,8 @@ interface TerritoryGroup {
   suggested_person_id: number | null;
   suggested_person_name: string | null;
   suggestion_cover_count: number | null;
+  territory_total_assigned: number | null;
+  confidence_band: "strong" | "moderate" | "weak" | null;
   with_suggestion: number;
 }
 
@@ -599,9 +606,37 @@ function CustomersTab({ adminSecret }: { adminSecret: string }) {
 // TAB 1 — UNASSIGNED / BULK REASSIGN
 // ═══════════════════════════════════════════════════════════════════════════
 
-function ruleLabel(rule: string | null, coverCount: number | null): string {
-  if (rule === "territory_majority")
-    return `territory majority · covers ${coverCount ?? "?"} assigned`;
+type Band = "strong" | "moderate" | "weak" | null;
+
+function bandBadge(band: Band): React.ReactNode {
+  if (!band) return null;
+  const styles: Record<NonNullable<Band>, string> = {
+    strong:   "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
+    moderate: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
+    weak:     "bg-red-100   text-red-800   dark:bg-red-900/30   dark:text-red-300",
+  };
+  return (
+    <span className={cn(
+      "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide",
+      styles[band],
+    )}>
+      {band}
+    </span>
+  );
+}
+
+function coverageText(
+  rule: string | null,
+  coverCount: number | null,
+  totalAssigned: number | null,
+): string {
+  if (rule === "former_book")
+    return `former book successor · inherited ${coverCount ?? "?"}`;
+  if (rule === "territory_majority") {
+    const n = coverCount ?? "?";
+    const m = totalAssigned ?? "?";
+    return `territory majority · covers ${n} of ${m} in territory`;
+  }
   if (rule === "state_head") return "state head";
   return "";
 }
@@ -779,9 +814,7 @@ function UnassignedTab({ adminSecret }: { adminSecret: string }) {
         {/* Per-territory rows */}
         {groups.map((g) => {
           const hasSuggestion = g.suggested_person_id !== null;
-          const pct = g.customer_count > 0
-            ? Math.round((Number(g.with_suggestion) / Number(g.customer_count)) * 100)
-            : 0;
+          const isWeak = g.confidence_band === "weak";
           return (
             <button key={g.territory_id ?? "null"}
               onClick={() => { setSelTerritory(g.territory_id); setPage(1); setSelectAll(false); }}
@@ -795,15 +828,16 @@ function UnassignedTab({ adminSecret }: { adminSecret: string }) {
               </div>
               <div className="flex items-center justify-between mt-0.5">
                 <span className="text-[11px] text-muted-foreground">{g.dist_dealer}D · {g.retailers}R</span>
-                {hasSuggestion && (
-                  <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
-                    {pct}% ✦
-                  </span>
-                )}
+                {hasSuggestion && bandBadge(g.confidence_band)}
               </div>
               {hasSuggestion && (
-                <div className="text-[10px] text-amber-700 dark:text-amber-300 truncate mt-0.5 opacity-80">
-                  → {g.suggested_person_name}
+                <div className={cn(
+                  "text-[10px] truncate mt-0.5",
+                  isWeak
+                    ? "text-muted-foreground line-through opacity-60"
+                    : "text-amber-700 dark:text-amber-300 opacity-80",
+                )}>
+                  {isWeak ? "⚠ weak — pick one-by-one" : `→ ${g.suggested_person_name}`}
                 </div>
               )}
             </button>
@@ -819,15 +853,18 @@ function UnassignedTab({ adminSecret }: { adminSecret: string }) {
           <div className="p-4 border-b bg-amber-50 dark:bg-amber-950/20 flex items-start gap-3">
             <Lightbulb size={18} className="text-amber-500 mt-0.5 flex-shrink-0" />
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium">
+              <div className="flex items-center gap-2 text-sm font-medium">
                 Accept all {confirmTerritory.with_suggestion} suggestions in {confirmTerritory.territory_name ?? "this territory"}?
+                {bandBadge(confirmTerritory.confidence_band)}
               </div>
               <div className="text-xs text-muted-foreground mt-0.5">
-                → {confirmTerritory.suggested_person_name} (territory majority
-                {confirmTerritory.suggestion_cover_count !== null
-                  ? ` · covers ${confirmTerritory.suggestion_cover_count} assigned customers`
-                  : ""})
-                · {confirmTerritory.with_suggestion} change_log entries will be written
+                → {confirmTerritory.suggested_person_name}
+                {" · covers "}
+                {confirmTerritory.suggestion_cover_count ?? "?"}
+                {" of "}
+                {confirmTerritory.territory_total_assigned ?? "?"}
+                {" currently assigned"}
+                {" · "}{confirmTerritory.with_suggestion} change_log entries will be written
                 {Number(confirmTerritory.customer_count) - Number(confirmTerritory.with_suggestion) > 0 && (
                   <> · {Number(confirmTerritory.customer_count) - Number(confirmTerritory.with_suggestion)} skipped (no suggestion)</>
                 )}
@@ -851,17 +888,33 @@ function UnassignedTab({ adminSecret }: { adminSecret: string }) {
 
         {/* ── Territory suggestion banner (when a territory is selected with suggestion) ── */}
         {!confirmTerritory && selGroup && selGroup.suggested_person_id !== null && (
-          <div className="px-4 py-2.5 border-b bg-amber-50/60 dark:bg-amber-950/10 flex items-center gap-3">
-            <TrendingUp size={15} className="text-amber-500 flex-shrink-0" />
+          <div className={cn(
+            "px-4 py-2.5 border-b flex items-center gap-3",
+            selGroup.confidence_band === "weak"
+              ? "bg-red-50/60 dark:bg-red-950/10"
+              : "bg-amber-50/60 dark:bg-amber-950/10",
+          )}>
+            <TrendingUp size={15} className={cn(
+              "flex-shrink-0",
+              selGroup.confidence_band === "weak" ? "text-red-400" : "text-amber-500",
+            )} />
             <div className="flex-1 min-w-0">
-              <span className="text-sm font-medium text-amber-800 dark:text-amber-300">
-                Suggested → {selGroup.suggested_person_name}
+              <span className={cn(
+                "text-sm font-medium",
+                selGroup.confidence_band === "weak"
+                  ? "text-red-700 dark:text-red-300"
+                  : "text-amber-800 dark:text-amber-300",
+              )}>
+                {selGroup.confidence_band === "weak"
+                  ? "Weak suggestion — pick individually"
+                  : `Suggested → ${selGroup.suggested_person_name}`}
               </span>
               <span className="text-xs text-muted-foreground ml-2">
-                territory majority · covers {selGroup.suggestion_cover_count ?? "?"} assigned customers
+                covers {selGroup.suggestion_cover_count ?? "?"} of {selGroup.territory_total_assigned ?? "?"} in territory
               </span>
+              {bandBadge(selGroup.confidence_band)}
             </div>
-            {adminSecret && (
+            {adminSecret && selGroup.confidence_band !== "weak" && (
               <Button size="sm"
                 className="h-7 text-xs bg-amber-500 hover:bg-amber-600 text-white flex-shrink-0"
                 onClick={() => setConfirmTerritory(selGroup)}>
@@ -971,7 +1024,7 @@ function UnassignedTab({ adminSecret }: { adminSecret: string }) {
                       → {c.suggested_person_name}
                     </span>
                     <span className="text-[10px] text-muted-foreground">
-                      ({ruleLabel(c.suggestion_rule, c.suggestion_cover_count)})
+                      ({coverageText(c.suggestion_rule, c.suggestion_cover_count, c.territory_total_assigned)})
                     </span>
                   </div>
                 )}

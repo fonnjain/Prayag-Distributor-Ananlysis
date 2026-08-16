@@ -17,7 +17,7 @@ import { pool } from "@workspace/db";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // The seed file path — resolve relative to repo root so it works from any cwd.
-const SEED_FILE = path.resolve(
+export const SEED_FILE = path.resolve(
   __dirname,
   "../../../attached_assets/Prayag_Master_Seed_1786767527963.xlsx",
 );
@@ -323,15 +323,19 @@ async function main(): Promise<void> {
       // Blank state_head → blank in DB (do NOT guess)
       const stateHeadId = stateHeadName ? (personMap.get(stateHeadName) ?? null) : null;
       const personId = salespersonName ? (personMap.get(salespersonName) ?? null) : null;
+      // Store the raw name when the salesperson could NOT be resolved (departed).
+      // When they ARE resolved, former_person_name_raw stays NULL (they are active).
+      const formerPersonNameRaw = (salespersonName && !personId) ? salespersonName : null;
       if (!stateHeadName) caNoStateHead++;
       const safeConf = ["confirmed","assign_user_chain","state_lookup","guessed"].includes(confidence)
         ? confidence : "guessed";
       const res = await client.query(
         `INSERT INTO customer_assignment
-           (customer_id, person_id, state_head_person_id, confidence, set_by)
-         VALUES ($1, $2, $3, $4, 'seed_import')
+           (customer_id, person_id, state_head_person_id, confidence, set_by,
+            former_person_name_raw)
+         VALUES ($1, $2, $3, $4, 'seed_import', $5)
          ON CONFLICT DO NOTHING`,
-        [custId, personId, stateHeadId, safeConf],
+        [custId, personId, stateHeadId, safeConf, formerPersonNameRaw],
       );
       caInserted += res.rowCount ?? 0;
     }
@@ -344,15 +348,17 @@ async function main(): Promise<void> {
       if (!custId) continue;
       const stateHeadId = stateHeadName ? (personMap.get(stateHeadName) ?? null) : null;
       const personId = salespersonName ? (personMap.get(salespersonName) ?? null) : null;
+      const formerPersonNameRaw = (salespersonName && !personId) ? salespersonName : null;
       if (!stateHeadName) caNoStateHead++;
       const safeConf = ["confirmed","assign_user_chain","state_lookup","guessed"].includes(confidence)
         ? confidence : "guessed";
       const res = await client.query(
         `INSERT INTO customer_assignment
-           (customer_id, person_id, state_head_person_id, confidence, set_by)
-         VALUES ($1, $2, $3, $4, 'seed_import')
+           (customer_id, person_id, state_head_person_id, confidence, set_by,
+            former_person_name_raw)
+         VALUES ($1, $2, $3, $4, 'seed_import', $5)
          ON CONFLICT DO NOTHING`,
-        [custId, personId, stateHeadId, safeConf],
+        [custId, personId, stateHeadId, safeConf, formerPersonNameRaw],
       );
       caInserted += res.rowCount ?? 0;
     }

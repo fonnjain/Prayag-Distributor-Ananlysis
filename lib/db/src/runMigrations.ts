@@ -1410,6 +1410,16 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    // Add former_person_name_raw to customer_assignment so the seed import can
+    // persist the salesperson name even when it could not be resolved to a
+    // person_id. Used by Rule 0 of the suggested-assignment engine.
+    id: "042_customer_assignment_former_person",
+    sql: `
+      ALTER TABLE customer_assignment
+        ADD COLUMN IF NOT EXISTS former_person_name_raw TEXT;
+    `,
+  },
+  {
     id: "041_alert_scheduler",
     sql: `
       -- Persistent state for the weekly digest scheduler.

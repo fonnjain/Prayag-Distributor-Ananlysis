@@ -1,0 +1,48 @@
+The tooling works and the GOA verification is clean. Two problems with the
+suggestion rule.
+
+1. 100% COVERAGE IS THE WARNING, NOT THE RESULT
+Amey Deodhar covers ONE assigned customer in Goa. That makes him the majority
+by default, and the rule suggested him for all three unassigned. That is not
+evidence - it is the only name in an almost-empty set.
+
+J. Kamal Kishore covering 70 in Andhra Pradesh is a real majority. Both appear
+in the same format on the card, so an operator accepting in bulk cannot tell
+them apart.
+
+Add a CONFIDENCE BAND to every suggestion and show it prominently:
+    strong    the suggested person covers >= 20 assigned customers in that
+              territory AND >= 50% of them
+    moderate  covers >= 5
+    weak      covers < 5 - which is most of the long tail
+
+Then:
+  a. Print the count of the 3,376 in each band.
+  b. "Accept all" must NOT be available on weak suggestions. Those need
+     picking one at a time, because the rule has nothing behind them.
+  c. Show the band on the card in words, not just a number. "covers 1 of 4 in
+     this territory" reads differently from "covers 70".
+
+2. THE RULE IGNORES THE DEPARTED PERSON
+I asked for the replacement for THAT PERSON - who now holds the largest share
+of the departed salesperson's former customers. You built territory majority,
+which does not look at the departed person at all.
+
+Those differ. If Shanker Singh's 741 customers are now split between two
+people, whoever took most of HIS book is a better suggestion than whoever
+happens to be largest in the state.
+
+The source data carries the previous salesperson name on most of these rows.
+Add it as rule 0, ahead of territory majority:
+    rule 0  the active person who now holds the most of THIS departed
+            person's former customers
+    rule a  territory majority (existing)
+    rule b  state head (existing)
+
+Print the count that resolves under each rule, and 10 examples showing the
+previous person, the suggestion, and which rule fired.
+
+3. ALSO SHOW THE PREVIOUS ASSIGNEE ON THE CARD
+"Previously: Shanker Singh (departed)" tells an operator why the row is blank
+and lets them sanity-check the suggestion. Right now the card shows only the
+suggestion with no history.

@@ -13,6 +13,7 @@
 //   historical FY analytics stable — sale_line.head_canon is never touched.
 import { Router } from "express";
 import { pool } from "@workspace/db";
+import type * as ExcelJSTypes from "exceljs";
 import { isAdminToken } from "../lib/adminAuth.js";
 
 const router = Router();
@@ -710,10 +711,35 @@ router.get("/master/customers/by-head", async (_req, res) => {
 //
 // Params: type, territory_id, page, limit
 
-// Shared CTE: territory majority person (one row per territory, rank = 1).
-// Uses distinct aliases (ca_tm / c_tm / p_tm) to avoid collisions with outer query.
-const TERRITORY_MAJORITY_CTE = `
-  ranked_tm AS (
+// ── Shared CTEs used by every unassigned-customer query ──────────────────────
+//
+// Three rules in priority order:
+//   0. former_book — active TM now holding the most of a departed person's former
+//      customers (derived once enough formerly-unassigned customers are accepted).
+//   a. territory_majority — active TM holding the most currently-assigned customers
+//      in the same territory (RANK CTE, cover_count + confidence_band).
+//   b. state_head — state_head_person_id already stored on the NULL assignment row.
+//   c. null — no suggestion.
+//
+// Confidence bands (territory_majority only):
+//   strong   cover_count ≥ 20 AND share ≥ 50 %
+//   moderate cover_count ≥ 5
+//   weak     cover_count < 5  — "Accept all" must be blocked in the UI.
+//
+// Aliases use short prefixes (at_, rtm_, tm_, r0_) to avoid shadowing outer-query
+// aliases (uca, c, t, sh).
+
+const UNASSIGNED_SHARED_CTES = `
+  -- 1. Total currently-assigned customers per territory (share denominator for band)
+  at_ AS (
+    SELECT c_at.territory_id, COUNT(*) AS total_assigned
+    FROM customer_assignment ca_at
+    JOIN customer c_at ON c_at.customer_id = ca_at.customer_id
+    WHERE ca_at.effective_to IS NULL AND ca_at.person_id IS NOT NULL
+    GROUP BY c_at.territory_id
+  ),
+  -- 2. Ranked territory-majority persons
+  rtm AS (
     SELECT
       c_tm.territory_id,
       ca_tm.person_id,
@@ -727,13 +753,51 @@ const TERRITORY_MAJORITY_CTE = `
     JOIN customer c_tm ON c_tm.customer_id = ca_tm.customer_id
     JOIN person   p_tm ON p_tm.person_id   = ca_tm.person_id
     WHERE ca_tm.effective_to IS NULL
-      AND ca_tm.person_id  IS NOT NULL
-      AND p_tm.is_active   = true
+      AND ca_tm.person_id IS NOT NULL
+      AND p_tm.is_active  = true
     GROUP BY c_tm.territory_id, ca_tm.person_id, p_tm.name
   ),
+  -- 3. Territory majority (rank=1) + confidence_band
   tm AS (
-    SELECT territory_id, person_id, person_name, cover_count
-    FROM ranked_tm WHERE rk = 1
+    SELECT
+      r.territory_id, r.person_id, r.person_name, r.cover_count,
+      a.total_assigned,
+      CASE
+        WHEN r.cover_count >= 20
+          AND r.cover_count::numeric / NULLIF(a.total_assigned, 0) >= 0.5
+          THEN 'strong'
+        WHEN r.cover_count >= 5 THEN 'moderate'
+        ELSE 'weak'
+      END AS confidence_band
+    FROM rtm r
+    LEFT JOIN at_ a ON a.territory_id = r.territory_id
+    WHERE r.rk = 1
+  ),
+  -- 4. Rule 0 — for each departed person, find the active TM who has accepted
+  --    the most of their former customers. Fires once at least one formerly-
+  --    unassigned customer is accepted (initially yields 0 rows).
+  r0_src AS (
+    SELECT
+      hist.former_person_name_raw AS former_head,
+      curr.person_id,
+      p0.name AS person_name,
+      COUNT(*)  AS inherited_count,
+      RANK() OVER (
+        PARTITION BY hist.former_person_name_raw
+        ORDER BY COUNT(*) DESC, curr.person_id ASC
+      ) AS rk
+    FROM customer_assignment hist
+    JOIN customer_assignment curr
+      ON curr.customer_id  = hist.customer_id
+      AND curr.effective_to IS NULL
+      AND curr.person_id   IS NOT NULL
+    JOIN person p0 ON p0.person_id = curr.person_id AND p0.is_active = true
+    WHERE hist.former_person_name_raw IS NOT NULL
+    GROUP BY hist.former_person_name_raw, curr.person_id, p0.name
+  ),
+  r0 AS (
+    SELECT former_head, person_id, person_name, inherited_count
+    FROM r0_src WHERE rk = 1
   )
 `;
 
@@ -763,56 +827,67 @@ router.get("/master/customers/unassigned", async (req, res) => {
          WHERE ${countWhere}`,
         params,
       ),
-      // Customer list: includes suggestion fields
+      // Customer list with Rule 0 / territory_majority / state_head suggestion fields
       pool.query(
-        `WITH ${TERRITORY_MAJORITY_CTE}
+        `WITH ${UNASSIGNED_SHARED_CTES}
          SELECT
            c.customer_id, c.name, c.type, c.status,
            c.territory_id,
-           t.name AS territory_name,
+           t.name  AS territory_name,
            uca.state_head_person_id,
+           uca.former_person_name_raw,
            sh.name AS state_head_name,
-           COALESCE(tm.person_id,   uca.state_head_person_id) AS suggested_person_id,
-           COALESCE(tm.person_name, sh.name)                  AS suggested_person_name,
+           COALESCE(r0.person_id, tm.person_id, uca.state_head_person_id)  AS suggested_person_id,
+           COALESCE(r0.person_name, tm.person_name, sh.name)               AS suggested_person_name,
            CASE
-             WHEN tm.person_id              IS NOT NULL THEN 'territory_majority'
-             WHEN uca.state_head_person_id  IS NOT NULL THEN 'state_head'
+             WHEN r0.person_id             IS NOT NULL THEN 'former_book'
+             WHEN tm.person_id             IS NOT NULL THEN 'territory_majority'
+             WHEN uca.state_head_person_id IS NOT NULL THEN 'state_head'
              ELSE NULL
            END AS suggestion_rule,
-           tm.cover_count AS suggestion_cover_count
+           COALESCE(r0.inherited_count, tm.cover_count::bigint) AS suggestion_cover_count,
+           tm.confidence_band,
+           tm.cover_count      AS tm_cover_count,
+           tm.total_assigned   AS territory_total_assigned
          FROM customer_assignment uca
          JOIN customer c ON c.customer_id = uca.customer_id
          LEFT JOIN territory t  ON t.territory_id  = c.territory_id
          LEFT JOIN person    sh ON sh.person_id     = uca.state_head_person_id
          LEFT JOIN tm           ON tm.territory_id  = c.territory_id
+         LEFT JOIN r0           ON r0.former_head   = uca.former_person_name_raw
          WHERE ${where}
          ORDER BY t.name NULLS LAST, c.type, c.name
          LIMIT $${pi} OFFSET $${pi + 1}`,
         [...params, limit, offset],
       ),
-      // Territory breakdown — always unfiltered so sidebar totals are always complete;
-      // includes per-territory suggestion and with_suggestion count.
+      // Territory groups — always unfiltered; suggestion data is territory-majority scoped
       pool.query(
-        `WITH ${TERRITORY_MAJORITY_CTE}
+        `WITH ${UNASSIGNED_SHARED_CTES}
          SELECT
            c.territory_id,
-           t.name  AS territory_name,
+           t.name   AS territory_name,
            COUNT(*) AS customer_count,
            SUM(CASE WHEN c.type = 'retailer'
                THEN 1 ELSE 0 END) AS retailers,
            SUM(CASE WHEN c.type IN ('distributor','direct_dealer','sub_dealer')
                THEN 1 ELSE 0 END) AS dist_dealer,
-           tm.person_id   AS suggested_person_id,
-           tm.person_name AS suggested_person_name,
-           tm.cover_count AS suggestion_cover_count,
-           SUM(CASE WHEN COALESCE(tm.person_id, uca.state_head_person_id) IS NOT NULL
-               THEN 1 ELSE 0 END) AS with_suggestion
+           tm.person_id        AS suggested_person_id,
+           tm.person_name      AS suggested_person_name,
+           tm.cover_count      AS suggestion_cover_count,
+           tm.total_assigned   AS territory_total_assigned,
+           tm.confidence_band,
+           SUM(CASE
+             WHEN COALESCE(r0.person_id, tm.person_id, uca.state_head_person_id) IS NOT NULL
+             THEN 1 ELSE 0 END) AS with_suggestion
          FROM customer_assignment uca
          JOIN customer c ON c.customer_id = uca.customer_id
          LEFT JOIN territory t ON t.territory_id = c.territory_id
          LEFT JOIN tm          ON tm.territory_id = c.territory_id
+         LEFT JOIN r0          ON r0.former_head  = uca.former_person_name_raw
          WHERE uca.effective_to IS NULL AND uca.person_id IS NULL
-         GROUP BY c.territory_id, t.name, tm.person_id, tm.person_name, tm.cover_count
+         GROUP BY c.territory_id, t.name,
+                  tm.person_id, tm.person_name, tm.cover_count,
+                  tm.total_assigned, tm.confidence_band
          ORDER BY customer_count DESC`,
       ),
     ]);
@@ -830,9 +905,10 @@ router.get("/master/customers/unassigned", async (req, res) => {
 // ── POST /api/master/customers/bulk-assign-suggested ─────────────────────────
 // Apply the computed suggestion to every unassigned customer in one territory.
 //
-// Suggestion rules applied server-side (identical to GET unassigned logic):
-//   a. territory_majority — most-common active TM among assigned customers in territory
-//   b. state_head         — state_head_person_id on the existing NULL-person assignment
+// Suggestion rules applied server-side (same priority as GET unassigned):
+//   0. former_book      — active TM who inherited the most of the departed person's book
+//   a. territory_majority — most-common active TM in territory
+//   b. state_head         — state_head_person_id on the NULL-person assignment row
 //   c. skipped            — no suggestion; not moved
 //
 // Each moved customer gets:
@@ -855,46 +931,69 @@ router.post("/master/customers/bulk-assign-suggested", async (req, res) => {
       return void res.status(400).json({ error: "territory_id is required" });
     }
 
-    // Step 1: territory majority person
-    const majorityRes = await pool.query<{
-      person_id: number; person_name: string; cover_count: string;
-    }>(
-      `SELECT ca_tm.person_id, p_tm.name AS person_name, COUNT(*) AS cover_count
-       FROM customer_assignment ca_tm
-       JOIN customer c_tm ON c_tm.customer_id = ca_tm.customer_id
-       JOIN person   p_tm ON p_tm.person_id   = ca_tm.person_id
-       WHERE ca_tm.effective_to IS NULL
-         AND ca_tm.person_id   IS NOT NULL
-         AND p_tm.is_active    = true
-         AND c_tm.territory_id = $1
-       GROUP BY ca_tm.person_id, p_tm.name
-       ORDER BY COUNT(*) DESC, ca_tm.person_id ASC
-       LIMIT 1`,
-      [territory_id],
-    );
+    // Step 1: territory majority + Rule 0 successors (parallel)
+    const [majorityRes, rule0Res, unassignedRes] = await Promise.all([
+      // Territory majority
+      pool.query<{ person_id: number; person_name: string }>(
+        `SELECT ca_tm.person_id, p_tm.name AS person_name, COUNT(*) AS cover_count
+         FROM customer_assignment ca_tm
+         JOIN customer c_tm ON c_tm.customer_id = ca_tm.customer_id
+         JOIN person   p_tm ON p_tm.person_id   = ca_tm.person_id
+         WHERE ca_tm.effective_to IS NULL
+           AND ca_tm.person_id IS NOT NULL AND p_tm.is_active = true
+           AND c_tm.territory_id = $1
+         GROUP BY ca_tm.person_id, p_tm.name
+         ORDER BY COUNT(*) DESC, ca_tm.person_id ASC LIMIT 1`,
+        [territory_id],
+      ),
+      // Rule 0: for each former_person_name_raw in this territory,
+      // which active TM now holds the most of those customers?
+      pool.query<{
+        former_head: string; person_id: number; person_name: string;
+      }>(
+        `WITH r0_src AS (
+           SELECT
+             hist.former_person_name_raw AS former_head,
+             curr.person_id,
+             p0.name AS person_name,
+             COUNT(*) AS inherited_count,
+             RANK() OVER (
+               PARTITION BY hist.former_person_name_raw
+               ORDER BY COUNT(*) DESC, curr.person_id ASC
+             ) AS rk
+           FROM customer_assignment hist
+           JOIN customer_assignment curr
+             ON curr.customer_id  = hist.customer_id
+             AND curr.effective_to IS NULL AND curr.person_id IS NOT NULL
+           JOIN person p0 ON p0.person_id = curr.person_id AND p0.is_active = true
+           WHERE hist.former_person_name_raw IS NOT NULL
+           GROUP BY hist.former_person_name_raw, curr.person_id, p0.name
+         )
+         SELECT former_head, person_id, person_name FROM r0_src WHERE rk = 1`,
+      ),
+      // All unassigned customers in this territory
+      pool.query<{
+        customer_id: string;
+        state_head_person_id: number | null;
+        state_head_name: string | null;
+        sh_is_active: boolean | null;
+        former_person_name_raw: string | null;
+      }>(
+        `SELECT uca.customer_id, uca.state_head_person_id, uca.former_person_name_raw,
+                sh.name AS state_head_name, sh.is_active AS sh_is_active
+         FROM customer_assignment uca
+         JOIN customer c ON c.customer_id = uca.customer_id
+         LEFT JOIN person sh ON sh.person_id = uca.state_head_person_id
+         WHERE uca.effective_to IS NULL AND uca.person_id IS NULL
+           AND c.territory_id = $1`,
+        [territory_id],
+      ),
+    ]);
+
     const majorityPerson = majorityRes.rows[0] ?? null;
+    const rule0Map = new Map(rule0Res.rows.map((r) => [r.former_head, r]));
 
-    // Step 2: all unassigned customers in this territory + their state heads
-    const unassignedRes = await pool.query<{
-      customer_id: string;
-      state_head_person_id: number | null;
-      state_head_name: string | null;
-      sh_is_active: boolean | null;
-    }>(
-      `SELECT uca.customer_id,
-              uca.state_head_person_id,
-              sh.name    AS state_head_name,
-              sh.is_active AS sh_is_active
-       FROM customer_assignment uca
-       JOIN customer c ON c.customer_id = uca.customer_id
-       LEFT JOIN person sh ON sh.person_id = uca.state_head_person_id
-       WHERE uca.effective_to IS NULL
-         AND uca.person_id    IS NULL
-         AND c.territory_id   = $1`,
-      [territory_id],
-    );
-
-    // Step 3: derive suggestion for each customer
+    // Step 2: derive per-customer suggestion (Rule 0 > territory_majority > state_head)
     type ToAssign = {
       customerId: string;
       personId: number;
@@ -906,7 +1005,18 @@ router.post("/master/customers/bulk-assign-suggested", async (req, res) => {
     const skippedIds: string[] = [];
 
     for (const row of unassignedRes.rows) {
-      if (majorityPerson) {
+      const r0 = row.former_person_name_raw
+        ? rule0Map.get(row.former_person_name_raw) : undefined;
+
+      if (r0) {
+        toAssign.push({
+          customerId:      row.customer_id,
+          personId:        r0.person_id,
+          personName:      r0.person_name,
+          rule:            "former_book",
+          stateHeadPersonId: row.state_head_person_id ?? null,
+        });
+      } else if (majorityPerson) {
         toAssign.push({
           customerId:      row.customer_id,
           personId:        majorityPerson.person_id,
@@ -978,6 +1088,127 @@ router.post("/master/customers/bulk-assign-suggested", async (req, res) => {
       moved,
       skipped:  skippedIds.length,
       breakdown: [...breakdown.values()],
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── POST /api/master/seed/backfill-former-persons ────────────────────────────
+// Re-reads Prayag_Master_Seed.xlsx and backfills former_person_name_raw on the
+// existing seed-imported customer_assignment rows where person_id IS NULL
+// (i.e. the departed salesperson could not be resolved at import time).
+//
+// Safe to run multiple times — uses UPDATE … WHERE, never INSERT.
+// Returns: { updated, noNameRows, alreadySet }
+
+import { fileURLToPath } from "url";
+import path from "path";
+import fs from "fs";
+
+// Locate the seed XLSX — the CWD differs between dev (artifact dir) and prod (repo root),
+// and import.meta.url depth varies, so we probe known candidate paths instead.
+function locateSeedFile(): string {
+  const candidates = [
+    // Prod / monorepo root cwd
+    path.resolve(process.cwd(), "attached_assets/Prayag_Master_Seed_1786767527963.xlsx"),
+    // Monorepo root derived from this file's location (src/routes/masterOrg.ts → ../../../../)
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../attached_assets/Prayag_Master_Seed_1786767527963.xlsx"),
+    // Same but one fewer level (in case cwd is artifact root)
+    path.resolve(process.cwd(), "../../attached_assets/Prayag_Master_Seed_1786767527963.xlsx"),
+    // Absolute fallback for this known workspace layout
+    "/home/runner/workspace/attached_assets/Prayag_Master_Seed_1786767527963.xlsx",
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  throw new Error(`Seed file not found. Tried: ${candidates.join(", ")}`);
+}
+
+router.post("/master/seed/backfill-former-persons", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    // Lazy-import ExcelJS so it doesn't increase cold-start on every request
+    const { default: ExcelJS } = await import("exceljs");
+
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(locateSeedFile());
+
+    const str = (v: unknown): string | null => {
+      if (v == null || v === "") return null;
+      return String(v).trim();
+    };
+    const readRows = (ws: ExcelJSTypes.Worksheet): unknown[][] => {
+      const out: unknown[][] = [];
+      ws.eachRow((row: ExcelJSTypes.Row, n: number) => {
+        if (n <= 4) return;
+        const vals = (row.values as unknown[]).slice(1);
+        if (vals.every((v) => v == null || v === "")) return;
+        out.push(vals);
+      });
+      return out;
+    };
+
+    // Collect person names already in the system
+    const personRows = await pool.query<{ name: string }>(
+      "SELECT name FROM person",
+    );
+    const personNames = new Set(personRows.rows.map((r) => r.name));
+
+    // Customers tab: col 0=custId, col 10=salesperson
+    // Retailers tab: col 0=custId, col 8=salesperson
+    const custWs = wb.getWorksheet("Customers");
+    const retWs  = wb.getWorksheet("Retailers");
+
+    const pairs: { custId: string; formerName: string }[] = [];
+    let noNameRows = 0;
+
+    for (const row of (custWs ? readRows(custWs) : [])) {
+      const custId = str(row[0]); const sp = str(row[10]);
+      if (!custId) continue;
+      if (!sp) { noNameRows++; continue; }
+      if (personNames.has(sp)) continue; // still active → not departed
+      pairs.push({ custId, formerName: sp });
+    }
+    for (const row of (retWs ? readRows(retWs) : [])) {
+      const custId = str(row[0]); const sp = str(row[8]);
+      if (!custId) continue;
+      if (!sp) { noNameRows++; continue; }
+      if (personNames.has(sp)) continue;
+      pairs.push({ custId, formerName: sp });
+    }
+
+    // Bulk-update in one transaction
+    const client = await pool.connect();
+    let updated = 0; let alreadySet = 0;
+    try {
+      await client.query("BEGIN");
+      for (const { custId, formerName } of pairs) {
+        const r = await client.query(
+          `UPDATE customer_assignment
+             SET former_person_name_raw = $1
+           WHERE customer_id = $2
+             AND person_id IS NULL
+             AND set_by = 'seed_import'
+             AND former_person_name_raw IS NULL`,
+          [formerName, custId],
+        );
+        if ((r.rowCount ?? 0) > 0) updated++;
+        else alreadySet++;
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    res.json({
+      updated,
+      alreadySet,
+      noNameRows,
+      totalPairs: pairs.length,
     });
   } catch (err) {
     res.status(500).json({ error: String(err) });
