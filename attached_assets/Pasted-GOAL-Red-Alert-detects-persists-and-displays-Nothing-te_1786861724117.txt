@@ -1,0 +1,145 @@
+GOAL
+Red Alert detects, persists and displays. Nothing tells anyone. Build routing.
+
+The destocking alert would have fired on Aradhya Kedia in January 2026,
+three months into his primary gap and six months before the retailers beneath
+him went silent. Everything is in place to have raised it, persisted it and
+marked it OPEN 3 PERIODS by March. Nobody would have seen it.
+
+============================================================
+THE ROUTING RULES - decided, build to these
+============================================================
+  A-category (salesperson)     -> the State Head
+  B, C and S categories        -> the State Head AND the CEO
+
+  Severe alerts                -> on raise, immediately
+  Salesperson alerts           -> weekly digest
+
+Severe means: any S-category (destocking), any C-category, and B3 distributor
+rollups. Everything else digests. Make this configurable rather than
+hardcoded - the line between "tell me now" and "tell me weekly" will move
+once people use it.
+
+Not one notification per alert. A notification per fire becomes noise within a
+fortnight and then nothing is read at all.
+
+============================================================
+TWO ESCALATION LEVELS, CONTACTS ENTERED BY THE USER
+============================================================
+alert_recipient
+  id
+  alert_code_pattern    'A*' | 'B*' | 'C*' | 'S*' | 'B3' | '*'
+  scope_type            state_head | all
+  scope_value           the head's person_id, or null for all
+  escalation_level      1 (first recipient) | 2 (escalates to)
+  name
+  channel               whatsapp | email | in_app
+  contact               phone number or email, entered by the user
+  cadence               on_raise | weekly
+  is_active
+
+alert_delivery
+  alert_id · recipient_id · channel · escalation_level
+  sent_at · delivered_at · opened_at · acknowledged_at
+  status                pending | sent | failed | skipped
+
+ESCALATION
+  Level 1 receives the alert when it is raised or in the digest.
+  If it is not ACKNOWLEDGED within the escalation window, level 2 receives it
+  with the original raise date and how long it has been open.
+
+  Escalation window: configurable, default 7 days for severe alerts, 14 for
+  digest alerts.
+
+  Escalating does not stop level 1 seeing it. Both hold it until it clears.
+
+A SETTINGS PAGE FOR THE CONTACTS
+The user enters names, phone numbers and email addresses per rule. Do not
+seed contacts from the HR file - phone numbers there are unverified and 62
+employee codes in that file are already implausible. The user types them,
+knowingly.
+
+For each rule show: which alerts it covers, which scope, who is level 1, who
+is level 2, and the escalation window.
+
+============================================================
+CHANNEL - WHATSAPP IS THE TARGET, NOT YET CONFIGURED
+============================================================
+Build the channel as an interface with three implementations:
+
+  in_app     works now - a notification bell and an unread count
+  email      works now - digest and on-raise
+  whatsapp   INTERFACE ONLY. Store the number, render the message body,
+             record the delivery row with status = pending, and log that no
+             provider is configured.
+
+Do NOT integrate a WhatsApp provider in this task. When one is chosen the
+implementation drops in behind the same interface with no change to the rules,
+the recipients or the digest.
+
+A recipient set to whatsapp must still be visible in the delivery log with a
+readable reason - "no provider configured" - never silently skipped.
+
+============================================================
+THE DIGEST
+============================================================
+Weekly, one message per recipient, covering their scope.
+
+  what is NEW since the last digest
+  what is STILL OPEN, with how many periods
+  what CLEARED since the last digest
+  what is ESCALATING to them from level 1
+
+If a recipient has nothing, send nothing. An empty digest teaches people to
+ignore the next one.
+
+The digest is generated from stored alerts, never recomputed. It must match
+the page exactly - if the page says 33 and the digest says 31, nobody trusts
+either.
+
+============================================================
+DELIVERY LOG ON THE PAGE
+============================================================
+Every alert card shows who was told, by which channel, and when. This is not
+decoration.
+
+Without it, "nobody told me" and "I was told and did not act" are
+indistinguishable - and that distinction is the whole reason an escalation
+page exists.
+
+Show acknowledged-by and acknowledged-at beside it.
+
+============================================================
+DO NOT
+============================================================
+- Do not integrate a WhatsApp provider.
+- Do not send anything to a real contact during verification. Use a dry-run
+  mode that writes delivery rows and renders the message body without
+  transmitting.
+- Do not seed contacts from HR data.
+- Do not change detection, thresholds, guards or the alert store.
+
+============================================================
+VERIFY - produced values, and a hash that resolves
+============================================================
+1. Create two rules: A* to a State Head at level 1 with a level 2 escalation,
+   and S* to the head and the CEO. Print both rows.
+2. Raise a severe alert in dry-run. Print the delivery rows created - one per
+   recipient - with channel and escalation_level.
+3. Set a recipient to whatsapp. Confirm the delivery row is created with
+   status pending and a reason of "no provider configured", and that it is
+   VISIBLE in the log rather than skipped.
+4. Generate a weekly digest for one recipient in dry-run. Paste the message
+   body. Confirm the counts match the page exactly - print both.
+5. Confirm a recipient with no alerts receives NOTHING. Print the skip.
+6. Leave an alert unacknowledged past the escalation window. Confirm level 2
+   receives it, that the message carries the original raise date and the days
+   open, and that level 1 still holds it.
+7. Acknowledge an alert before the window. Confirm no escalation fires.
+8. Print one alert card showing its delivery log - who, channel, when,
+   acknowledged by whom.
+9. Confirm no message was actually transmitted anywhere during verification.
+10. Confirm detection, thresholds and the alert store are unchanged - print
+    the alert count before and after.
+11. Commit hash, git cat-file -t, then git merge-base --is-ancestor <hash>
+    main with its exit code.
