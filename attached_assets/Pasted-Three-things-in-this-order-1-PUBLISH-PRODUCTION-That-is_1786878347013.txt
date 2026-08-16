@@ -1,0 +1,38 @@
+Three things, in this order.
+
+1. PUBLISH PRODUCTION. That is on me to ask for and on someone at Prayag to
+   click - I understand you cannot do it. Nothing else matters until it is up.
+   When it is, confirm the commit, that migrations 032-038 applied, and that
+   the alert page renders with the count matching the DB.
+
+2. DISABLE C6. Do not delete it - set it inactive in red_alert_config.json.
+
+   Your own assessment is the reason: "the metric is essentially Sandeep's
+   territory has most of the stops, and that will be structurally true in most
+   quarters." An alert that fires on the largest head every quarter is
+   dismissed within two cycles, and takes the page's credibility with it.
+
+   Three things must be true before it is re-enabled:
+     a. NORMALISED BY TERRITORY SIZE. Stops as a share of that head's own
+        active retailer base, compared against the company rate. If Sandeep
+        holds 60% of retailers and 81% of stops, that is signal. If he holds
+        78% of retailers, it is not. The card must show both shares.
+     b. THE 23-STOP GAP RECONCILED. Your SQL says 36 attributable, the engine
+        says 59. Find the difference before trusting either. "The alert's own
+        fields are authoritative" is a choice, not a reconciliation.
+     c. A FULL PERIOD. The current reading is two months because Jun-26 and
+        Jul-26 are not_yet_recorded. A concentration figure on a partial
+        quarter is not stable enough to alert on.
+
+3. THE SEVERE-ON-RAISE PATH HAS NEVER RUN
+   Every recipient is cadence='weekly' by schema default, so notifyAlert
+   skips them all on raise. Zero delivery rows have ever been written on
+   raise - including S1 destocking, which the spec named severe.
+
+   Set the all-India recipients (Deepak J, and Nitin Agarwal at L3) to
+   on_raise for S-category and C-category. State Heads stay weekly.
+
+   Then raise a severe alert in dry-run and confirm delivery rows are written
+   immediately. That path is currently untested in production.
+
+Do not re-enable C6 in this task.
