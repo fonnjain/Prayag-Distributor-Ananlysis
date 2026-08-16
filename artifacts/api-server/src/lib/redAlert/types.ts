@@ -13,7 +13,7 @@ export type DbPool = {
 export type AlertCode =
   | "A1" | "A2" | "A3"         // Category A — salesperson
   | "B1" | "B2" | "B3" | "B4" | "B5"  // Category B — dealer/retailer
-  | "C1" | "C2" | "C3" | "C4" | "C5"  // Category C — territory/segment
+  | "C1" | "C2" | "C3" | "C4" | "C5" | "C6"  // Category C — territory/segment
   | "S1";                               // Category S — supply chain (destocking)
 
 export type EntityType =
@@ -249,6 +249,11 @@ export type DetectionContext = {
   // head_canon → state_head mapping derived from person_registry.
   // head_canon = LOWER(canonical_name). Used by the territorial concentration alert.
   headToStateHead: Map<string, string | null>;  // head_canon → state_head
+
+  // Primary head_canon per (fy, retailer) — for C6 territorial concentration.
+  // Built from secondary_sku_line: for each (fy, retailer), the head_canon from the
+  // highest-value transaction row. Excludes rows where head_canon IS NULL.
+  retailerHeadCanon: Map<string, Map<string, string>>;  // fy → retailer → head_canon
 
   // Frozen months per FY (for Guard 3 — primary data completeness)
   frozenMonths: Map<string, Set<string>>;  // fy → Set<monthLabel>

@@ -53,7 +53,7 @@ function printSection(n: number, title: string): void {
 // ── Section 1: Alert count by code ────────────────────────────────────────────
 function printSection1(results: CalibrationResult[]): void {
   printSection(1, "Alert count by code, per period");
-  const codes: AlertCode[] = ["A1","A2","A3","B1","B2","B3","B4","B5","C1","C2","C3","C4","C5"];
+  const codes: AlertCode[] = ["A1","A2","A3","B1","B2","B3","B4","B5","C1","C2","C3","C4","C5","C6"];
   const header = "Code  " + results.map((r) => r.fy.padEnd(12)).join("  ");
   console.log(header);
   console.log(sep("-", 60));
@@ -86,7 +86,7 @@ function printSection2(results: CalibrationResult[]): void {
       const excess = total - PAGE_CAP;
       console.log(`  ⚠  Exceeds cap by ${excess}. Suggested tightening to reach ≤ 20:`);
       // Find codes with the most alerts as candidates to tighten
-      const codes: AlertCode[] = ["A1","A2","A3","B1","B2","B3","B4","B5","C1","C2","C3","C4","C5"];
+      const codes: AlertCode[] = ["A1","A2","A3","B1","B2","B3","B4","B5","C1","C2","C3","C4","C5","C6"];
       const byCnt = codes
         .map((c) => ({ c, cnt: r.byCode[c].count }))
         .filter((x) => x.cnt > 0)
@@ -242,7 +242,7 @@ async function printSection9(
 
   // ── 9a: raw counts ─────────────────────────────────────────────────────────
   console.log("\n  9a. Raw alert candidates BEFORE any guard:\n");
-  const codes: AlertCode[] = ["A1","A2","A3","B1","B2","B3","B4","B5","C1","C2","C3","C4","C5"];
+  const codes: AlertCode[] = ["A1","A2","A3","B1","B2","B3","B4","B5","C1","C2","C3","C4","C5","C6"];
   const headerA = "Code  " + results.map((r) => r.fy.padEnd(10)).join("  ");
   console.log("  " + headerA);
   console.log("  " + sep("-", 50));

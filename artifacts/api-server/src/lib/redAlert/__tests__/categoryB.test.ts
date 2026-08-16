@@ -58,6 +58,7 @@ function makeCtx(overrides: Partial<Pick<DetectionContext,
     retailerPrimaryDist: new Map(),
     distSecMonthly: new Map(),
     headToStateHead: new Map(),
+    retailerHeadCanon: new Map(),
   };
 }
 
@@ -222,6 +223,7 @@ describe("Category B — B3 end-to-end through detectAlerts", () => {
       retailerPrimaryDist: new Map(),
       distSecMonthly: new Map(),
       headToStateHead: new Map(),
+    retailerHeadCanon: new Map(),
     };
 
     const result = detectAlerts(ctx, {
@@ -266,6 +268,7 @@ describe("Category B — B3 end-to-end through detectAlerts", () => {
       retailerPrimaryDist: new Map(),
       distSecMonthly: new Map(),
       headToStateHead: new Map(),
+    retailerHeadCanon: new Map(),
     };
 
     const result = detectAlerts(ctx, {

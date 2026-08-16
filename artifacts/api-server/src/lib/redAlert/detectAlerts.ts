@@ -41,6 +41,9 @@ type RaConfig = {
     C3_SEGMENT_UNDER_INDEX_PTS: number;
     C4_GROSS_CONTRIBUTION_DROP_PCT: number;
     C5_SHEET_STALENESS_DAYS: number;
+    C6_MIN_STOPS: number;
+    C6_MIN_STOP_SHARE_PCT: number;
+    C6_MATERIALITY_FLOOR_RUPEES: number;
   };
   CATEGORY_S_SUPPLY: {
     S1_CONSECUTIVE_ZERO_MONTHS: number;
@@ -187,6 +190,9 @@ export function detectAlerts(
     C3_SEGMENT_UNDER_INDEX_PTS: cfg.CATEGORY_C_TERRITORY_SEGMENT.C3_SEGMENT_UNDER_INDEX_PTS,
     C4_GROSS_CONTRIBUTION_DROP_PCT: cfg.CATEGORY_C_TERRITORY_SEGMENT.C4_GROSS_CONTRIBUTION_DROP_PCT,
     C5_SHEET_STALENESS_DAYS: cfg.CATEGORY_C_TERRITORY_SEGMENT.C5_SHEET_STALENESS_DAYS,
+    C6_MIN_STOPS: cfg.CATEGORY_C_TERRITORY_SEGMENT.C6_MIN_STOPS,
+    C6_MIN_STOP_SHARE_PCT: cfg.CATEGORY_C_TERRITORY_SEGMENT.C6_MIN_STOP_SHARE_PCT,
+    C6_MATERIALITY_FLOOR_RUPEES: cfg.CATEGORY_C_TERRITORY_SEGMENT.C6_MATERIALITY_FLOOR_RUPEES,
   }, c5AsOfDate);
 
   const sAlerts = buildCategorySAlerts(ctx, fy, primaryCompleteMonths, {
@@ -328,7 +334,7 @@ export function detectAlerts(
   }
 
   // ── Build by-code summary ───────────────────────────────────────────────────
-  const allCodes: AlertCode[] = ["A1","A2","A3","B1","B2","B3","B4","B5","C1","C2","C3","C4","C5","S1"];
+  const allCodes: AlertCode[] = ["A1","A2","A3","B1","B2","B3","B4","B5","C1","C2","C3","C4","C5","C6","S1"];
   const byCode = {} as Record<AlertCode, { count: number; rupeesAtStake: number }>;
   for (const code of allCodes) { byCode[code] = { count: 0, rupeesAtStake: 0 }; }
   for (const alert of finalAlerts) {

@@ -46,6 +46,7 @@ function makeCtx(overrides: {
     retailerPrimaryDist: new Map(),
     distSecMonthly: new Map(),
     headToStateHead: new Map(),
+    retailerHeadCanon: new Map(),
   };
 }
 

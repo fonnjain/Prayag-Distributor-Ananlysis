@@ -1,0 +1,49 @@
+Both reconciliations accepted. The arithmetic checks - 312,479 + 137,669 =
+450,148 = 549,765 - 99,617 - and reconcilePersonRegistryStateHeads() having
+run between spec and session explains it cleanly. 82% total, 58% for Phase 1.
+
+The 440 to 220 to 127-distinct correction is the more valuable finding. 56
+active people under Sandeep Dadheech is a normal team for East and NE India,
+not an anomaly - and counting distinct ACTIVE people rather than registry rows
+is the right basis for the alert.
+
+PROCEED TO PHASE 2, with two conditions.
+
+1. EXCLUDE THE 61 PRODUCT-CATEGORY ROWS FROM EVERY PHASE 2 QUERY
+Do not wait for #323, but do not calibrate against them either. The real
+population is ~967, not 1,028 - a denominator 6% too large shifts every head's
+share downward, and a threshold set against it fires differently once #323
+lands. Filter them out now and note in the alert config that the denominator
+excludes them.
+
+2. COUNT DISTINCT ACTIVE PEOPLE
+Not registry rows, not departed staff. Your own breakdown shows why: 220 rows
+collapse to 127 people, of whom only 56 are active. Departed members inflate a
+concentration figure with people who no longer work a territory.
+
+State the basis on the alert card, so anyone reading it knows what the
+percentage is a percentage of.
+
+THEN THE PHASE 2 ANALYSIS AS SPECIFIED
+  a. Re-run the B3 stops by State Head, on the corrected denominator. Print
+     counts, share and rupees.
+  b. The earlier figures were Sandeep Dadheech 40 stops / 60.6% / Rs 14.25 Cr
+     and Syed Aqil Rizvi 9 / 13.6%, with 24 of 66 unmapped. Print what those
+     become now the 24 are resolved.
+  c. Confirm whether >= 10 stops AND >= 30% share still separates cleanly. If
+     the newly mapped 24 change the distribution, propose a revised threshold
+     and show what fires at each candidate.
+  d. Only then implement it as a Category C alert, wired into persistence and
+     routing like the rest.
+
+One more thing to fix while you are in there: the registry canonical for
+Narendra is "Narendra Sharma" (id=19) while the person table and the alert
+routing scope_value both use "Narendra Kumar Sharma". Add "NARENDRA KUMAR
+SHARMA" to alias_primary on id=19 so the join stops flagging. Small, and it
+will otherwise surface as a false mismatch on the new alert.
+
+VERIFY as specified, plus:
+  - The denominator used, with the product-category exclusion stated.
+  - Confirm the count is distinct active people - print both the row count and
+    the distinct-active count for one head so the difference is visible.
+  - Push and print both git refs.

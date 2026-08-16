@@ -1397,6 +1397,18 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE person_registry ADD COLUMN IF NOT EXISTS state_head_source TEXT;
     `,
   },
+  {
+    id: "038_narendra_kumar_sharma_alias",
+    sql: `
+      -- Adds "NARENDRA KUMAR SHARMA" as an alias for id=19 (canonical: "Narendra Sharma")
+      -- so the person_registry join stops flagging this name as unresolved.
+      -- The alert routing system and person table both reference the full name.
+      UPDATE person_registry
+        SET alias_primary = array_append(alias_primary, 'NARENDRA KUMAR SHARMA')
+      WHERE id = 19
+        AND NOT ('NARENDRA KUMAR SHARMA' = ANY(COALESCE(alias_primary, '{}')));
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

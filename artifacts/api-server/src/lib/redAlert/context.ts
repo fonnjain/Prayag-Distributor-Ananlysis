@@ -403,6 +403,25 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
     headToStateHead.set(p.canonicalName.toLowerCase(), p.stateHead);
   }
 
+  // ── Query 16: retailer → head_canon (for C6 territorial concentration) ────────
+  // Highest-value transaction's head_canon for each (fy, retailer) pair.
+  // Uses the same secondary FY list as other retailer queries.
+  const retailerHeadRes = await pool.query<{ fy: string; retailer: string; head_canon: string }>(
+    `SELECT DISTINCT ON (fy, retailer)
+            fy, retailer, head_canon
+       FROM secondary_sku_line
+      WHERE fy = ANY(${secFyArr})
+        AND retailer IS NOT NULL AND head_canon IS NOT NULL
+      ORDER BY fy, retailer, net_amount DESC`,
+    secFyList,
+  );
+
+  const retailerHeadCanon = new Map<string, Map<string, string>>();
+  for (const r of retailerHeadRes.rows) {
+    if (!retailerHeadCanon.has(r.fy)) retailerHeadCanon.set(r.fy, new Map());
+    retailerHeadCanon.get(r.fy)!.set(r.retailer, r.head_canon);
+  }
+
   // Build retailer → `${fy}|${monthLabel}` → Set<distributor>
   // Month-level granularity so Guard 5 can compare only within the alert window.
   const retailerDistributors = new Map<string, Map<string, Set<string>>>();
@@ -459,6 +478,7 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
     retailerPrimaryDist,
     distSecMonthly,
     headToStateHead,
+    retailerHeadCanon,
   };
 }
 

@@ -47,7 +47,11 @@
     "C4_GROSS_CONTRIBUTION_DROP_PCT": 15,
     "C4_NOTE": "Gross contribution down >= this % while volume is up triggers C4. Only fires where factory cost (bom_cost) exists in margin_fact.",
     "C5_SHEET_STALENESS_DAYS": 30,
-    "C5_NOTE": "A member whose working sheet has not been successfully read for >= this many days triggers C5. The secondary sheet pipeline runs every 6 hours when the server is active, so steady-state gaps are < 1 day. 30 days catches a genuinely broken pipeline (silent for a full calendar month) without false-positives from brief server downtime or a restart. The prior value of 10 days fired for all 161 FY2026-27 members after a 26-day server-inactive gap, well above the 20-alert page cap."
+    "C5_NOTE": "A member whose working sheet has not been successfully read for >= this many days triggers C5. The secondary sheet pipeline runs every 6 hours when the server is active, so steady-state gaps are < 1 day. 30 days catches a genuinely broken pipeline (silent for a full calendar month) without false-positives from brief server downtime or a restart. The prior value of 10 days fired for all 161 FY2026-27 members after a 26-day server-inactive gap, well above the 20-alert page cap.",
+    "C6_MIN_STOPS": 10,
+    "C6_MIN_STOP_SHARE_PCT": 30,
+    "C6_MATERIALITY_FLOOR_RUPEES": 1000000,
+    "C6_NOTE": "Territorial concentration: a state head's territory accounts for >= C6_MIN_STOPS retailer stops AND >= C6_MIN_STOP_SHARE_PCT of all attributable stops. 'Stop' = retailer above the materiality floor (C6_MATERIALITY_FLOOR_RUPEES, same as RETAILER_RUPEES) that had non-zero prior-period purchases but zero in the current period. Denominator = all stopped retailers above floor with a resolvable state head; product-category registry rows (no hr_status AND not is_state_head) and unmapped retailers are excluded, and their rupees are NOT included in the total. Calibrated Aug 2026 at ₹10 L floor: Q1 FY2026-27 gives 66 eligible retailer stops. Sandeep Dadheech 52/66 (78.8%) fires; Syed Aqil Rizvi 10/66 (15.2%) does not. Threshold separates extreme territorial concentration from normal-level."
   },
   "MATERIALITY_FLOORS": {
     "_note": "Minimum prior-period value for a customer to be considered for B-category alerts. Retailer floor raised from \u20b92 L to \u20b910 L (Aug 2026 calibration): at \u20b92 L the engine produced 1,193 retailer alerts in FY2025-26 full-year; at \u20b910 L the eligible pool falls to ~994 retailers and alert volume drops to a manageable level sortable by rupees at stake.",

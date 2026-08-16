@@ -19,6 +19,9 @@ type CConfig = {
   C3_SEGMENT_UNDER_INDEX_PTS: number;
   C4_GROSS_CONTRIBUTION_DROP_PCT: number;
   C5_SHEET_STALENESS_DAYS: number;
+  C6_MIN_STOPS: number;
+  C6_MIN_STOP_SHARE_PCT: number;
+  C6_MATERIALITY_FLOOR_RUPEES: number;
 };
 
 // ── Seasonal weights ──────────────────────────────────────────────────────────
@@ -335,6 +338,112 @@ export function buildCategoryCAlerts(
           asOfDate: asOfDate.toISOString().slice(0, 10),
         },
       });
+    }
+  }
+
+  // ── C6: territorial concentration of B3 retailer stops ───────────────────────
+  // Fires when a single state head's territory accounts for:
+  //   - >= C6_MIN_STOPS individual retailer stops, AND
+  //   - >= C6_MIN_STOP_SHARE_PCT of all attributable stops in the period.
+  //
+  // "Stop" = a retailer whose prior-period purchases (prior like-months for currentFy)
+  // exceeded C6_MATERIALITY_FLOOR_RUPEES but had zero purchases in the current window.
+  //
+  // Denominator: all stopped retailers above the floor with a resolvable state head.
+  // Product-category registry rows (no hr_status AND not is_state_head) are excluded.
+  // The denominator and basis are stated explicitly in the alert detail.
+  //
+  // C6 uses a retailer-level stop count (not distributor cards) so the alert naturally
+  // detects territory-wide churn patterns rather than individual distributor failures.
+  {
+    // Build normalised name → state_head map from persons.
+    // Normalisation strips all non-alphanumeric chars (handles "A. Prasath" ↔ "a.prasath").
+    const normName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+    const normHeadToStateHead = new Map<string, string | null>();
+    for (const p of ctx.persons) {
+      if (!p.isPerson) continue;
+      // Exclude product-category rows: must have hr_status recorded OR be a state head
+      if (!p.hrStatus && !p.isStateHead) continue;
+      const norm = normName(p.canonicalName);
+      if (norm) normHeadToStateHead.set(norm, p.stateHead);
+    }
+
+    // Identify the prior window (like-months in the prior FY).
+    const priorFyC6 = prevFy(currentFy);
+    const priorMonthsC6 = toPriorYearMonths(currentMonths);
+
+    // Retailer value maps: retailer → total value in the given window.
+    const priorFyMap = ctx.retailerHeadCanon.get(priorFyC6) ?? new Map<string, string>();
+
+    // Sum prior-period value per retailer using retailerSale rows.
+    const priorMs = new Set(priorMonthsC6);
+    const curMs = new Set(currentMonths);
+
+    const priorRetailerValue = new Map<string, number>();
+    for (const r of ctx.retailerSale) {
+      if (r.fy !== priorFyC6 || !priorMs.has(r.monthLabel)) continue;
+      priorRetailerValue.set(r.retailer, (priorRetailerValue.get(r.retailer) ?? 0) + r.value);
+    }
+
+    // Current-period retailers (any purchase in the window).
+    const curRetailers = new Set<string>();
+    for (const r of ctx.retailerSale) {
+      if (r.fy !== currentFy || !curMs.has(r.monthLabel)) continue;
+      if (r.value > 0) curRetailers.add(r.retailer);
+    }
+
+    // Stopped retailers above materiality floor — grouped by state head.
+    const stopsByHead = new Map<string, { count: number; rupees: number }>();
+    let totalStops = 0;
+    let totalRupees = 0;
+
+    for (const [retailer, priorVal] of priorRetailerValue) {
+      if (priorVal < cfg.C6_MATERIALITY_FLOOR_RUPEES) continue;
+      if (curRetailers.has(retailer)) continue; // still active — not a stop
+
+      // Resolve state head via prior-FY head_canon
+      const headCanon = priorFyMap.get(retailer) ?? null;
+      if (!headCanon) continue;
+      const stateHead = normHeadToStateHead.get(normName(headCanon)) ?? null;
+      if (!stateHead) continue; // unmapped — excluded from denominator
+
+      const existing = stopsByHead.get(stateHead) ?? { count: 0, rupees: 0 };
+      existing.count += 1;
+      existing.rupees += priorVal;
+      stopsByHead.set(stateHead, existing);
+      totalStops += 1;
+      totalRupees += priorVal;
+    }
+
+    if (totalStops > 0) {
+      for (const [stateHead, { count, rupees }] of stopsByHead) {
+        const sharePct = (count / totalStops) * 100;
+        if (count >= cfg.C6_MIN_STOPS && sharePct >= cfg.C6_MIN_STOP_SHARE_PCT) {
+          alerts.push({
+            code: "C6",
+            category: "C",
+            entity: stateHead,
+            entityKey: stateHead,
+            entityType: "team",
+            currentMonths,
+            priorMonths: priorMonthsC6,
+            numbers: {
+              stopCount: count,
+              totalStops,
+              stopSharePct: Math.round(sharePct * 10) / 10,
+              rupeesCr: Math.round(rupees / 1e5) / 100,
+              totalRupeesCr: Math.round(totalRupees / 1e5) / 100,
+            },
+            rupeesAtStake: rupees,
+            extraForReport: {
+              stateHead,
+              denominator: `retailer stops above ₹${Math.round(cfg.C6_MATERIALITY_FLOOR_RUPEES / 1e5) / 10} L prior-period floor with mapped state head`,
+              excludedProductCategories: 1,
+            },
+          });
+        }
+      }
     }
   }
 
