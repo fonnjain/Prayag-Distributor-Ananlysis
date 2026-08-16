@@ -236,4 +236,154 @@ describe("startServer startup-timing", () => {
       "ready must come after registry:done",
     ).toBeLessThan(events.indexOf("ready"));
   });
+
+  it("calls setServerReady within bounded time when registry hangs indefinitely", async () => {
+    // Gap plugged by registryLoadTimeoutMs: without a deadline on the registry
+    // load, a hung DB would keep the server in 'warming_up' state forever.
+    // With registryLoadTimeoutMs, setServerReady() must still fire after the
+    // deadline even though loadPersonRegistry() never resolves.
+    const events: string[] = [];
+    const warnings: string[] = [];
+
+    const serverPromise = startServer({
+      port: 0,
+      runMigrations: () => Promise.resolve(),
+      restoreAnchors: () => Promise.resolve(),
+      restoreRosterCsvFromGcs: () => Promise.resolve(), // roster loads instantly
+      loadPersonRegistry: neverResolves, // DB unreachable — hangs forever
+      rosterRestoreTimeoutMs: 10,
+      registryLoadTimeoutMs: 30, // short deadline for the test
+      appListen: (_port, cb) => { events.push("listen:open"); cb(); },
+      setServerReady: () => { events.push("ready"); },
+      log: {
+        info: () => {},
+        warn: (_obj, msg) => { warnings.push(msg); },
+        error: () => {},
+      },
+    });
+
+    await serverPromise;
+    expect(events).toEqual(["listen:open"]);
+    expect(events, "setServerReady must not fire synchronously").not.toContain("ready");
+
+    // Wait for the 30 ms registry timeout + microtask flush
+    await delay(60);
+
+    expect(
+      events,
+      "setServerReady must be called after the registry timeout even when the DB never responds",
+    ).toContain("ready");
+
+    expect(
+      warnings.some((w) => w.includes("personRegistry") && w.includes("timed out")),
+      "a timeout warning must be logged when the registry load deadline passes",
+    ).toBe(true);
+  });
+
+  it("calls setServerReady within bounded time when BOTH background tasks hang indefinitely", async () => {
+    // Worst-case: both GCS and DB are unreachable and hang forever.
+    // setServerReady() must still be called once both deadlines pass.
+    const events: string[] = [];
+
+    const serverPromise = startServer({
+      port: 0,
+      runMigrations: () => Promise.resolve(),
+      restoreAnchors: () => Promise.resolve(),
+      restoreRosterCsvFromGcs: neverResolves, // GCS unreachable
+      loadPersonRegistry: neverResolves,      // DB unreachable
+      rosterRestoreTimeoutMs: 20,
+      registryLoadTimeoutMs: 30,
+      appListen: (_port, cb) => { events.push("listen:open"); cb(); },
+      setServerReady: () => { events.push("ready"); },
+      log: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+
+    await serverPromise;
+
+    // Wait for both timeouts to fire (30 ms) + buffer
+    await delay(60);
+
+    expect(
+      events,
+      "setServerReady must be called after both timeouts even when GCS and DB are both unreachable",
+    ).toContain("ready");
+  });
+
+  it("watchdog logs an ERROR when the readiness gate is not opened within the expected window", async () => {
+    // The watchdog is a belt-and-suspenders safeguard: if the Promise chain
+    // has a bug that prevents setServerReady() from ever being called despite
+    // both task timeouts having fired, the watchdog detects it and logs an error.
+    //
+    // We simulate this by providing a readinessWatchdogMs that is shorter than
+    // the time setServerReady() would naturally fire, so the watchdog fires
+    // while the gate is still open.
+    const errors: Array<{ obj: Record<string, unknown>; msg: string }> = [];
+
+    // Both tasks hang; the registry timeout is 200 ms.  We set the watchdog to
+    // 10 ms so it fires well before the registry timeout.
+    await startServer({
+      port: 0,
+      runMigrations: () => Promise.resolve(),
+      restoreAnchors: () => Promise.resolve(),
+      restoreRosterCsvFromGcs: neverResolves,
+      loadPersonRegistry: neverResolves,
+      rosterRestoreTimeoutMs: 20,
+      registryLoadTimeoutMs: 200, // long enough that watchdog fires first
+      readinessWatchdogMs: 10,    // fires before the registry timeout
+      appListen: (_port, cb) => { cb(); },
+      setServerReady: () => {},
+      log: {
+        info: () => {},
+        warn: () => {},
+        error: (obj, msg) => { errors.push({ obj, msg }); },
+      },
+    });
+
+    // Wait for the 10 ms watchdog to fire
+    await delay(30);
+
+    expect(
+      errors.length,
+      "watchdog must log exactly one ERROR when the gate is stuck",
+    ).toBeGreaterThanOrEqual(1);
+
+    const err = errors[0]!;
+    expect(
+      err.msg,
+      "watchdog error message must mention the stuck state",
+    ).toContain("WARMUP STUCK");
+    expect(err.obj).toMatchObject({ watchdogMs: 10 });
+  });
+
+  it("watchdog does NOT log an error when setServerReady() fires on time", async () => {
+    // Happy path: both tasks complete quickly; the watchdog must be cleared
+    // before it fires and no error must be logged.
+    const errors: string[] = [];
+
+    await startServer({
+      port: 0,
+      runMigrations: () => Promise.resolve(),
+      restoreAnchors: () => Promise.resolve(),
+      restoreRosterCsvFromGcs: () => Promise.resolve(),
+      loadPersonRegistry: () => Promise.resolve(),
+      rosterRestoreTimeoutMs: 50,
+      registryLoadTimeoutMs: 50,
+      readinessWatchdogMs: 200, // generous deadline
+      appListen: (_port, cb) => { cb(); },
+      setServerReady: () => {},
+      log: {
+        info: () => {},
+        warn: () => {},
+        error: (_obj, msg) => { errors.push(msg); },
+      },
+    });
+
+    // Both tasks resolve synchronously; wait well past the watchdog deadline
+    await delay(250);
+
+    expect(
+      errors,
+      "watchdog must NOT fire when setServerReady() was called on time",
+    ).toHaveLength(0);
+  });
 });

@@ -16,9 +16,12 @@
  *
  * POST-LISTEN BACKGROUND (non-blocking; MUST NOT be awaited before appListen):
  *   4. restoreRosterCsvFromGcs (bounded by rosterRestoreTimeoutMs)
- *   5. loadPersonRegistry  (plus all dependent startup tasks chained by the caller)
+ *   5. loadPersonRegistry  (bounded by registryLoadTimeoutMs)
  *
- * setServerReady() is called only after BOTH 4 and 5 complete (or 4 times out).
+ * setServerReady() is called only after BOTH 4 and 5 complete (or time out).
+ * Because both tasks are now deadline-bounded, setServerReady() is guaranteed
+ * to fire within max(rosterRestoreTimeoutMs, registryLoadTimeoutMs) of port-open.
+ * A belt-and-suspenders watchdog logs an error if it does not.
  *
  * WHY wait for the roster restore before marking ready
  * ────────────────────────────────────────────────────
@@ -37,6 +40,19 @@
 /** Default timeout for the roster GCS restore.  If GCS does not respond within
  *  this window the server is still marked ready (using the packaged fallback). */
 const DEFAULT_ROSTER_RESTORE_TIMEOUT_MS = 30_000;
+
+/**
+ * Default timeout for the person-registry DB load.  If the DB is unreachable
+ * the server is still marked ready (with empty alias maps) after this deadline.
+ */
+const DEFAULT_REGISTRY_LOAD_TIMEOUT_MS = 60_000;
+
+/**
+ * Extra buffer added on top of both task timeouts before the watchdog fires.
+ * Gives the Node.js event loop a comfortable margin to flush micro-task queues
+ * before the watchdog concludes the gate is stuck.
+ */
+const READINESS_WATCHDOG_BUFFER_MS = 5_000;
 
 export interface StartServerLog {
   info: (obj: Record<string, unknown>, msg: string) => void;
@@ -78,7 +94,8 @@ export interface StartServerDeps {
    * Load the person registry from the DB (plus any dependent startup tasks
    * chained by the caller).
    * NON-BLOCKING — fired after the port opens; MUST NOT delay appListen().
-   * setServerReady() is called once both this and the roster restore have settled.
+   * setServerReady() is called once both this and the roster restore have settled
+   * (or timed out).
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   loadPersonRegistry: () => Promise<any>;
@@ -92,7 +109,7 @@ export interface StartServerDeps {
   /**
    * Marks the server ready to serve data-heavy routes (unblocks the 503 gate).
    * Called after BOTH restoreRosterCsvFromGcs and loadPersonRegistry settle
-   * (or the roster restore times out).
+   * (or time out).
    */
   setServerReady: () => void;
 
@@ -102,6 +119,28 @@ export interface StartServerDeps {
    * Defaults to 30 s.  Pass a smaller value in tests to keep suites fast.
    */
   rosterRestoreTimeoutMs?: number;
+
+  /**
+   * How long to wait for the person-registry DB load before giving up and
+   * marking the server ready anyway (with empty alias maps).
+   * Defaults to 60 s.  Pass a smaller value in tests to keep suites fast.
+   *
+   * This timeout ensures setServerReady() is always called even when the DB is
+   * completely unreachable, preventing a permanent 503-forever state.
+   */
+  registryLoadTimeoutMs?: number;
+
+  /**
+   * If setServerReady() has not been called within this many milliseconds of
+   * port-open, the watchdog logs an ERROR.  The gate still resolves via the
+   * individual task timeouts; this is a belt-and-suspenders alert for situations
+   * where both timeouts fire but setServerReady() is still somehow not called
+   * (e.g. a future bug in the Promise chain).
+   *
+   * Defaults to max(rosterRestoreTimeoutMs, registryLoadTimeoutMs) +
+   * READINESS_WATCHDOG_BUFFER_MS.  Pass a smaller value in tests.
+   */
+  readinessWatchdogMs?: number;
 
   log: StartServerLog;
 }
@@ -149,6 +188,11 @@ function withTimeout(
 export async function startServer(deps: StartServerDeps): Promise<void> {
   const rosterTimeoutMs =
     deps.rosterRestoreTimeoutMs ?? DEFAULT_ROSTER_RESTORE_TIMEOUT_MS;
+  const registryTimeoutMs =
+    deps.registryLoadTimeoutMs ?? DEFAULT_REGISTRY_LOAD_TIMEOUT_MS;
+  const watchdogMs =
+    deps.readinessWatchdogMs ??
+    Math.max(rosterTimeoutMs, registryTimeoutMs) + READINESS_WATCHDOG_BUFFER_MS;
 
   // ── PRE-LISTEN (startup-fatal) ────────────────────────────────────────────
   await deps.runMigrations();
@@ -183,21 +227,52 @@ export async function startServer(deps: StartServerDeps): Promise<void> {
             ),
         );
 
-        const registryDone = deps.loadPersonRegistry().then(
-          () => {},
-          (err: unknown) => {
+        // Registry load with a deadline.  If the DB is unreachable the timeout
+        // fires after registryTimeoutMs and the server is still marked ready,
+        // with empty alias maps.  Without this deadline, a hung DB load would
+        // keep the server in 'warming_up' state forever.
+        const registryDone = withTimeout(
+          deps.loadPersonRegistry().then(
+            () => {},
+            (err: unknown) => {
+              deps.log.warn(
+                { err },
+                "[personRegistry] startup load failed; head alias maps will be empty",
+              );
+            },
+          ),
+          registryTimeoutMs,
+          () =>
             deps.log.warn(
-              { err },
-              "[personRegistry] startup load failed; head alias maps will be empty",
-            );
-          },
+              { timeoutMs: registryTimeoutMs },
+              "[personRegistry] startup load timed out; head alias maps will be empty",
+            ),
         );
+
+        // Belt-and-suspenders watchdog: if setServerReady() has not been called
+        // within the expected window (both timeouts + buffer), something in the
+        // Promise chain is broken and the server will serve 503 forever.
+        let readinessAchieved = false;
+        const watchdog = setTimeout(() => {
+          if (!readinessAchieved) {
+            deps.log.error(
+              { watchdogMs, rosterTimeoutMs, registryTimeoutMs },
+              "WARMUP STUCK: setServerReady() was not called within the expected " +
+                "window — server is permanently in 'warming_up' state and will " +
+                "serve 503 on every data route until restarted",
+            );
+          }
+        }, watchdogMs);
+        // Don't keep the Node.js event loop alive for the watchdog alone.
+        watchdog.unref?.();
 
         // Mark the server ready only after BOTH background tasks settle.
         // See module JSDoc for why this ordering matters for roster consistency.
-        void Promise.all([rosterDone, registryDone]).then(() =>
-          deps.setServerReady(),
-        );
+        void Promise.all([rosterDone, registryDone]).then(() => {
+          readinessAchieved = true;
+          clearTimeout(watchdog);
+          deps.setServerReady();
+        });
 
         resolve();
       });
