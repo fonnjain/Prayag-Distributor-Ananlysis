@@ -40,7 +40,7 @@ import { cn } from "@/lib/utils";
 import {
   Search, Lock, Unlock, ChevronDown, ChevronRight,
   Link2, AlertTriangle, CheckCircle2, Store, Users,
-  RefreshCw, ClipboardList, UserCheck,
+  RefreshCw, ClipboardList, UserCheck, Lightbulb, TrendingUp,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -101,6 +101,13 @@ interface UnassignedCustomer {
   status: string | null;
   territory_id: number | null;
   territory_name: string | null;
+  // Suggestion fields
+  state_head_person_id: number | null;
+  state_head_name: string | null;
+  suggested_person_id: number | null;
+  suggested_person_name: string | null;
+  suggestion_rule: "territory_majority" | "state_head" | null;
+  suggestion_cover_count: number | null;
 }
 
 interface TerritoryGroup {
@@ -109,6 +116,17 @@ interface TerritoryGroup {
   customer_count: number;
   retailers: number;
   dist_dealer: number;
+  // Suggestion fields
+  suggested_person_id: number | null;
+  suggested_person_name: string | null;
+  suggestion_cover_count: number | null;
+  with_suggestion: number;
+}
+
+interface BulkSuggestResult {
+  moved: number;
+  skipped: number;
+  breakdown: { person_name: string; count: number; rule: string }[];
 }
 
 interface QueueItem {
@@ -581,6 +599,13 @@ function CustomersTab({ adminSecret }: { adminSecret: string }) {
 // TAB 1 — UNASSIGNED / BULK REASSIGN
 // ═══════════════════════════════════════════════════════════════════════════
 
+function ruleLabel(rule: string | null, coverCount: number | null): string {
+  if (rule === "territory_majority")
+    return `territory majority · covers ${coverCount ?? "?"} assigned`;
+  if (rule === "state_head") return "state head";
+  return "";
+}
+
 function UnassignedTab({ adminSecret }: { adminSecret: string }) {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -592,11 +617,15 @@ function UnassignedTab({ adminSecret }: { adminSecret: string }) {
   const [selType, setSelType] = useState("all");
   const [page, setPage] = useState(1);
 
-  // Bulk form
+  // Manual bulk form (override / fallback)
   const [toPersonId, setToPersonId] = useState("");
   const [changedBy, setChangedBy] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
+  const [showManual, setShowManual] = useState(false);
+
+  // Suggested-accept confirmation
+  const [confirmTerritory, setConfirmTerritory] = useState<TerritoryGroup | null>(null);
 
   const territoryParam = selTerritory === "all" ? undefined :
     selTerritory === null ? "null" : String(selTerritory);
@@ -620,6 +649,10 @@ function UnassignedTab({ adminSecret }: { adminSecret: string }) {
   const customers = data?.customers ?? [];
   const total = data?.total ?? 0;
 
+  // Progress totals
+  const totalUnassigned = groups.reduce((s, g) => s + Number(g.customer_count), 0);
+  const totalWithSuggestion = groups.reduce((s, g) => s + Number(g.with_suggestion), 0);
+
   // Keep selectAll in sync
   const visibleIds = customers.map((c) => c.customer_id);
   useEffect(() => {
@@ -628,6 +661,7 @@ function UnassignedTab({ adminSecret }: { adminSecret: string }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectAll, data]);
 
+  // Manual bulk assign
   const bulkMut = useMutation({
     mutationFn: () => {
       const body: Record<string, unknown> = {
@@ -657,52 +691,188 @@ function UnassignedTab({ adminSecret }: { adminSecret: string }) {
       });
       setSelectedIds(new Set());
       setSelectAll(false);
-      qc.invalidateQueries({ queryKey: ["master-unassigned"] });
-      qc.invalidateQueries({ queryKey: ["master-customers"] });
-      refetch();
+      invalidateAll();
     },
     onError: (err: Error) =>
       toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
+  // Accept-all-suggested for a territory
+  const suggestMut = useMutation({
+    mutationFn: (tg: TerritoryGroup) =>
+      fetch(`${BASE}/api/master/customers/bulk-assign-suggested`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Admin-Secret": adminSecret },
+        body: JSON.stringify({
+          territory_id: tg.territory_id,
+          changed_by: changedBy || "bulk_assign_suggested",
+        }),
+      }).then(async (r) => {
+        if (!r.ok) throw new Error((await r.json()).error ?? r.statusText);
+        return r.json() as Promise<BulkSuggestResult>;
+      }),
+    onSuccess: (d, tg) => {
+      const names = d.breakdown.map((b) => `${b.person_name} ×${b.count}`).join(", ");
+      toast({
+        title: `Accepted ${d.moved} suggestion${d.moved !== 1 ? "s" : ""} in ${tg.territory_name ?? "territory"}`,
+        description: `→ ${names}${d.skipped ? ` · ${d.skipped} had no suggestion` : ""} · ${d.moved} change_log entries`,
+      });
+      setConfirmTerritory(null);
+      invalidateAll();
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+      setConfirmTerritory(null);
+    },
+  });
+
+  function invalidateAll() {
+    qc.invalidateQueries({ queryKey: ["master-unassigned"] });
+    qc.invalidateQueries({ queryKey: ["master-unassigned-total"] });
+    qc.invalidateQueries({ queryKey: ["master-customers"] });
+    refetch();
+  }
+
   const isBulkReady = adminSecret && toPersonId && (selectedIds.size > 0 || total > 0);
   const moveCount = selectedIds.size > 0 ? selectedIds.size : total;
 
+  // Currently-selected territory group (for Accept-all button in main area)
+  const selGroup = groups.find((g) => g.territory_id === selTerritory) ?? null;
+
   return (
     <div className="flex flex-1 min-h-0">
-      {/* Territory sidebar */}
-      <div className="w-56 flex-shrink-0 border-r flex flex-col overflow-y-auto">
-        <div className="p-3 border-b text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          Territory
+
+      {/* ── Territory sidebar ──────────────────────────────────────────────── */}
+      <div className="w-64 flex-shrink-0 border-r flex flex-col overflow-y-auto">
+
+        {/* Progress header */}
+        <div className="p-3 border-b space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Progress</span>
+            <span className="text-xs font-semibold">{totalUnassigned.toLocaleString()} remaining</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Lightbulb size={11} className="text-amber-500 flex-shrink-0" />
+            {totalWithSuggestion.toLocaleString()} of {totalUnassigned.toLocaleString()} have a suggestion
+          </div>
+          {totalUnassigned > 0 && (
+            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full rounded-full bg-amber-400 transition-all"
+                style={{ width: `${Math.round((totalWithSuggestion / totalUnassigned) * 100)}%` }}
+              />
+            </div>
+          )}
         </div>
+
+        {/* All territories row */}
         <button
           onClick={() => { setSelTerritory("all"); setPage(1); setSelectAll(false); }}
           className={cn("w-full text-left px-3 py-2 text-sm border-b hover:bg-muted/50",
             selTerritory === "all" && "bg-muted font-medium")}>
-          All territories
-          <span className="ml-auto float-right text-xs text-muted-foreground">
-            {groups.reduce((s, g) => s + Number(g.customer_count), 0)}
-          </span>
+          <div className="flex justify-between items-baseline">
+            <span>All territories</span>
+            <span className="text-xs text-muted-foreground">{totalUnassigned.toLocaleString()}</span>
+          </div>
         </button>
-        {groups.map((g) => (
-          <button key={g.territory_id ?? "null"}
-            onClick={() => { setSelTerritory(g.territory_id); setPage(1); setSelectAll(false); }}
-            className={cn("w-full text-left px-3 py-2 text-sm border-b hover:bg-muted/50",
-              selTerritory === g.territory_id && "bg-muted font-medium")}>
-            <div className="flex justify-between items-baseline">
-              <span className="truncate pr-2">{g.territory_name ?? "No territory"}</span>
-              <span className="text-xs text-muted-foreground flex-shrink-0">{g.customer_count}</span>
-            </div>
-            <div className="text-[11px] text-muted-foreground mt-0.5">
-              {g.dist_dealer}D · {g.retailers}R
-            </div>
-          </button>
-        ))}
+
+        {/* Per-territory rows */}
+        {groups.map((g) => {
+          const hasSuggestion = g.suggested_person_id !== null;
+          const pct = g.customer_count > 0
+            ? Math.round((Number(g.with_suggestion) / Number(g.customer_count)) * 100)
+            : 0;
+          return (
+            <button key={g.territory_id ?? "null"}
+              onClick={() => { setSelTerritory(g.territory_id); setPage(1); setSelectAll(false); }}
+              className={cn("w-full text-left px-3 py-2 text-sm border-b hover:bg-muted/50 group",
+                selTerritory === g.territory_id && "bg-muted")}>
+              <div className="flex justify-between items-baseline">
+                <span className={cn("truncate pr-2 font-medium", selTerritory === g.territory_id && "font-semibold")}>
+                  {g.territory_name ?? "No territory"}
+                </span>
+                <span className="text-xs text-muted-foreground flex-shrink-0">{g.customer_count}</span>
+              </div>
+              <div className="flex items-center justify-between mt-0.5">
+                <span className="text-[11px] text-muted-foreground">{g.dist_dealer}D · {g.retailers}R</span>
+                {hasSuggestion && (
+                  <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                    {pct}% ✦
+                  </span>
+                )}
+              </div>
+              {hasSuggestion && (
+                <div className="text-[10px] text-amber-700 dark:text-amber-300 truncate mt-0.5 opacity-80">
+                  → {g.suggested_person_name}
+                </div>
+              )}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Main content */}
+      {/* ── Main content ───────────────────────────────────────────────────── */}
       <div className="flex-1 min-w-0 flex flex-col">
-        {/* Filter + bulk form */}
+
+        {/* ── Suggested-accept confirmation overlay ── */}
+        {confirmTerritory && (
+          <div className="p-4 border-b bg-amber-50 dark:bg-amber-950/20 flex items-start gap-3">
+            <Lightbulb size={18} className="text-amber-500 mt-0.5 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium">
+                Accept all {confirmTerritory.with_suggestion} suggestions in {confirmTerritory.territory_name ?? "this territory"}?
+              </div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                → {confirmTerritory.suggested_person_name} (territory majority
+                {confirmTerritory.suggestion_cover_count !== null
+                  ? ` · covers ${confirmTerritory.suggestion_cover_count} assigned customers`
+                  : ""})
+                · {confirmTerritory.with_suggestion} change_log entries will be written
+                {Number(confirmTerritory.customer_count) - Number(confirmTerritory.with_suggestion) > 0 && (
+                  <> · {Number(confirmTerritory.customer_count) - Number(confirmTerritory.with_suggestion)} skipped (no suggestion)</>
+                )}
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <Button size="sm" className="h-7 text-xs bg-amber-500 hover:bg-amber-600 text-white"
+                  disabled={suggestMut.isPending}
+                  onClick={() => suggestMut.mutate(confirmTerritory)}>
+                  {suggestMut.isPending
+                    ? <><RefreshCw size={11} className="animate-spin mr-1" />Applying…</>
+                    : <><UserCheck size={11} className="mr-1" />Confirm — accept {confirmTerritory.with_suggestion}</>}
+                </Button>
+                <Button size="sm" variant="ghost" className="h-7 text-xs"
+                  onClick={() => setConfirmTerritory(null)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Territory suggestion banner (when a territory is selected with suggestion) ── */}
+        {!confirmTerritory && selGroup && selGroup.suggested_person_id !== null && (
+          <div className="px-4 py-2.5 border-b bg-amber-50/60 dark:bg-amber-950/10 flex items-center gap-3">
+            <TrendingUp size={15} className="text-amber-500 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                Suggested → {selGroup.suggested_person_name}
+              </span>
+              <span className="text-xs text-muted-foreground ml-2">
+                territory majority · covers {selGroup.suggestion_cover_count ?? "?"} assigned customers
+              </span>
+            </div>
+            {adminSecret && (
+              <Button size="sm"
+                className="h-7 text-xs bg-amber-500 hover:bg-amber-600 text-white flex-shrink-0"
+                onClick={() => setConfirmTerritory(selGroup)}>
+                <Lightbulb size={11} className="mr-1" />
+                Accept {selGroup.with_suggestion} suggestions
+              </Button>
+            )}
+          </div>
+        )}
+
+        {/* ── Filter + manual bulk form ── */}
         <div className="p-3 border-b bg-muted/20 flex flex-wrap items-end gap-3">
           <div className="flex items-center gap-2">
             <label className="text-xs text-muted-foreground">Type</label>
@@ -717,39 +887,46 @@ function UnassignedTab({ adminSecret }: { adminSecret: string }) {
             </Select>
           </div>
 
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            <label className="text-xs text-muted-foreground flex-shrink-0">Assign to</label>
-            <Select value={toPersonId} onValueChange={setToPersonId}>
-              <SelectTrigger className="h-8 flex-1 text-sm min-w-0"><SelectValue placeholder="Choose TM…" /></SelectTrigger>
-              <SelectContent>
-                {people.map((p) => (
-                  <SelectItem key={p.person_id} value={String(p.person_id)}>
-                    {p.name}{p.designation_name ? ` · ${p.designation_name}` : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <Input value={changedBy} onChange={(e) => setChangedBy(e.target.value)}
-            placeholder="changed_by" className="h-8 w-36 text-sm" />
-
-          <Button size="sm"
-            onClick={() => bulkMut.mutate()}
-            disabled={!isBulkReady || bulkMut.isPending}
-            className="bg-primary">
-            {bulkMut.isPending ? <RefreshCw size={13} className="animate-spin mr-1" /> : <UserCheck size={13} className="mr-1" />}
-            Assign {selectedIds.size > 0 ? selectedIds.size : moveCount} customers
+          <Button size="sm" variant="outline" className="h-8 text-xs"
+            onClick={() => setShowManual((v) => !v)}>
+            {showManual ? "Hide manual assign" : "Manual assign…"}
           </Button>
+
+          {showManual && (
+            <>
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <label className="text-xs text-muted-foreground flex-shrink-0">Assign to</label>
+                <Select value={toPersonId} onValueChange={setToPersonId}>
+                  <SelectTrigger className="h-8 flex-1 text-sm min-w-0"><SelectValue placeholder="Choose TM…" /></SelectTrigger>
+                  <SelectContent>
+                    {people.map((p) => (
+                      <SelectItem key={p.person_id} value={String(p.person_id)}>
+                        {p.name}{p.designation_name ? ` · ${p.designation_name}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Input value={changedBy} onChange={(e) => setChangedBy(e.target.value)}
+                placeholder="changed_by" className="h-8 w-36 text-sm" />
+              <Button size="sm"
+                onClick={() => bulkMut.mutate()}
+                disabled={!isBulkReady || bulkMut.isPending}
+                className="bg-primary">
+                {bulkMut.isPending ? <RefreshCw size={13} className="animate-spin mr-1" /> : <UserCheck size={13} className="mr-1" />}
+                Assign {selectedIds.size > 0 ? selectedIds.size : moveCount}
+              </Button>
+            </>
+          )}
         </div>
 
         {!adminSecret && (
           <Alert className="m-3 py-2">
-            <AlertDescription className="text-xs">Unlock admin secret to enable bulk reassignment.</AlertDescription>
+            <AlertDescription className="text-xs">Unlock admin secret to enable assignment actions.</AlertDescription>
           </Alert>
         )}
 
-        {/* Select all bar */}
+        {/* ── Select-all / count bar ── */}
         <div className="px-3 py-1.5 border-b bg-muted/10 flex items-center gap-3 text-xs text-muted-foreground">
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" checked={selectAll}
@@ -762,11 +939,11 @@ function UnassignedTab({ adminSecret }: { adminSecret: string }) {
           <span className="ml-auto">{isLoading ? "Loading…" : `${total} unassigned`}</span>
         </div>
 
-        {/* Customer list */}
+        {/* ── Customer list ── */}
         <div className="flex-1 overflow-y-auto">
           {customers.map((c) => (
             <label key={c.customer_id}
-              className="flex items-center gap-3 px-3 py-2 border-b hover:bg-muted/30 cursor-pointer">
+              className="flex items-start gap-3 px-3 py-2.5 border-b hover:bg-muted/30 cursor-pointer">
               <input type="checkbox"
                 checked={selectedIds.has(c.customer_id)}
                 onChange={(e) => {
@@ -777,7 +954,7 @@ function UnassignedTab({ adminSecret }: { adminSecret: string }) {
                   });
                   if (!e.target.checked) setSelectAll(false);
                 }}
-                className="rounded flex-shrink-0" />
+                className="rounded flex-shrink-0 mt-0.5" />
               <div className="min-w-0 flex-1">
                 <div className="font-medium text-sm truncate">{c.name}</div>
                 <div className="flex items-center gap-1.5 mt-0.5">
@@ -786,8 +963,20 @@ function UnassignedTab({ adminSecret }: { adminSecret: string }) {
                     <span className="text-[11px] text-muted-foreground">{c.territory_name}</span>
                   )}
                 </div>
+                {/* Suggestion hint */}
+                {c.suggested_person_id !== null && (
+                  <div className="flex items-center gap-1 mt-1">
+                    <Lightbulb size={10} className="text-amber-400 flex-shrink-0" />
+                    <span className="text-[11px] text-amber-700 dark:text-amber-300">
+                      → {c.suggested_person_name}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      ({ruleLabel(c.suggestion_rule, c.suggestion_cover_count)})
+                    </span>
+                  </div>
+                )}
               </div>
-              <span className="text-[11px] font-mono text-muted-foreground flex-shrink-0">
+              <span className="text-[11px] font-mono text-muted-foreground flex-shrink-0 mt-0.5">
                 {c.customer_id}
               </span>
             </label>
@@ -800,7 +989,7 @@ function UnassignedTab({ adminSecret }: { adminSecret: string }) {
           )}
         </div>
 
-        {/* Pagination */}
+        {/* ── Pagination ── */}
         {Math.ceil(total / 100) > 1 && (
           <div className="flex items-center justify-between px-3 py-2 border-t text-xs text-muted-foreground">
             <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="disabled:opacity-40">← Prev</button>

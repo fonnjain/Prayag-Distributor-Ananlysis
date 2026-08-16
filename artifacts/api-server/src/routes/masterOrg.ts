@@ -700,8 +700,42 @@ router.get("/master/customers/by-head", async (_req, res) => {
 
 // ── GET /api/master/customers/unassigned ─────────────────────────────────────
 // Customers with person_id IS NULL in their current open assignment.
-// Returns customers list + territory breakdown for the bulk-assign workflow.
+// Returns customers list + territory breakdown + suggestion data.
+//
+// Suggestion rules (priority order):
+//   a. territory_majority — active person holding the most assigned customers
+//      in the same territory. Cover count shown so the caller can trace the rule.
+//   b. state_head — state_head_person_id already on the NULL-person assignment row.
+//   c. null — no suggestion available; left blank, not guessed.
+//
 // Params: type, territory_id, page, limit
+
+// Shared CTE: territory majority person (one row per territory, rank = 1).
+// Uses distinct aliases (ca_tm / c_tm / p_tm) to avoid collisions with outer query.
+const TERRITORY_MAJORITY_CTE = `
+  ranked_tm AS (
+    SELECT
+      c_tm.territory_id,
+      ca_tm.person_id,
+      p_tm.name AS person_name,
+      COUNT(*)   AS cover_count,
+      RANK() OVER (
+        PARTITION BY c_tm.territory_id
+        ORDER BY COUNT(*) DESC, ca_tm.person_id ASC
+      ) AS rk
+    FROM customer_assignment ca_tm
+    JOIN customer c_tm ON c_tm.customer_id = ca_tm.customer_id
+    JOIN person   p_tm ON p_tm.person_id   = ca_tm.person_id
+    WHERE ca_tm.effective_to IS NULL
+      AND ca_tm.person_id  IS NOT NULL
+      AND p_tm.is_active   = true
+    GROUP BY c_tm.territory_id, ca_tm.person_id, p_tm.name
+  ),
+  tm AS (
+    SELECT territory_id, person_id, person_name, cover_count
+    FROM ranked_tm WHERE rk = 1
+  )
+`;
 
 router.get("/master/customers/unassigned", async (req, res) => {
   try {
@@ -711,50 +745,239 @@ router.get("/master/customers/unassigned", async (req, res) => {
     const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
     const offset = (page - 1) * limit;
 
-      const conds = ["ca.effective_to IS NULL", "ca.person_id IS NULL"];
-      const params: unknown[] = [];
-      let pi = 1;
-    if (type) { conds.push(`c.type = $${pi++}`); params.push(type); }
+    const conds = ["uca.effective_to IS NULL", "uca.person_id IS NULL"];
+    const params: unknown[] = [];
+    let pi = 1;
+    if (type)        { conds.push(`c.type = $${pi++}`);         params.push(type); }
     if (territoryId) { conds.push(`c.territory_id = $${pi++}`); params.push(territoryId); }
     const where = conds.join(" AND ");
 
+    // Count query: same filters, cheaper alias
+    const countWhere = where.replace(/\buca\./g, "ca.");
+
     const [countRes, rowsRes, groupsRes] = await Promise.all([
       pool.query(
-        `SELECT COUNT(*) FROM customer_assignment ca
-         JOIN customer c ON c.customer_id = ca.customer_id
-         WHERE ${where}`,
-        params,
-      ),
-      pool.query(
-        `SELECT c.customer_id, c.name, c.type, c.status,
-                c.territory_id, t.name AS territory_name
+        `SELECT COUNT(*)
          FROM customer_assignment ca
          JOIN customer c ON c.customer_id = ca.customer_id
-         LEFT JOIN territory t ON t.territory_id = c.territory_id
+         WHERE ${countWhere}`,
+        params,
+      ),
+      // Customer list: includes suggestion fields
+      pool.query(
+        `WITH ${TERRITORY_MAJORITY_CTE}
+         SELECT
+           c.customer_id, c.name, c.type, c.status,
+           c.territory_id,
+           t.name AS territory_name,
+           uca.state_head_person_id,
+           sh.name AS state_head_name,
+           COALESCE(tm.person_id,   uca.state_head_person_id) AS suggested_person_id,
+           COALESCE(tm.person_name, sh.name)                  AS suggested_person_name,
+           CASE
+             WHEN tm.person_id              IS NOT NULL THEN 'territory_majority'
+             WHEN uca.state_head_person_id  IS NOT NULL THEN 'state_head'
+             ELSE NULL
+           END AS suggestion_rule,
+           tm.cover_count AS suggestion_cover_count
+         FROM customer_assignment uca
+         JOIN customer c ON c.customer_id = uca.customer_id
+         LEFT JOIN territory t  ON t.territory_id  = c.territory_id
+         LEFT JOIN person    sh ON sh.person_id     = uca.state_head_person_id
+         LEFT JOIN tm           ON tm.territory_id  = c.territory_id
          WHERE ${where}
          ORDER BY t.name NULLS LAST, c.type, c.name
          LIMIT $${pi} OFFSET $${pi + 1}`,
         [...params, limit, offset],
       ),
-      // Territory breakdown (always unfiltered by type/territory so the sidebar is complete)
+      // Territory breakdown — always unfiltered so sidebar totals are always complete;
+      // includes per-territory suggestion and with_suggestion count.
       pool.query(
-        `SELECT c.territory_id, t.name AS territory_name,
-                COUNT(*) AS customer_count,
-                SUM(CASE WHEN c.type = 'retailer' THEN 1 ELSE 0 END)                           AS retailers,
-                SUM(CASE WHEN c.type IN ('distributor','direct_dealer','sub_dealer') THEN 1 ELSE 0 END) AS dist_dealer
-         FROM customer_assignment ca
-         JOIN customer c ON c.customer_id = ca.customer_id
+        `WITH ${TERRITORY_MAJORITY_CTE}
+         SELECT
+           c.territory_id,
+           t.name  AS territory_name,
+           COUNT(*) AS customer_count,
+           SUM(CASE WHEN c.type = 'retailer'
+               THEN 1 ELSE 0 END) AS retailers,
+           SUM(CASE WHEN c.type IN ('distributor','direct_dealer','sub_dealer')
+               THEN 1 ELSE 0 END) AS dist_dealer,
+           tm.person_id   AS suggested_person_id,
+           tm.person_name AS suggested_person_name,
+           tm.cover_count AS suggestion_cover_count,
+           SUM(CASE WHEN COALESCE(tm.person_id, uca.state_head_person_id) IS NOT NULL
+               THEN 1 ELSE 0 END) AS with_suggestion
+         FROM customer_assignment uca
+         JOIN customer c ON c.customer_id = uca.customer_id
          LEFT JOIN territory t ON t.territory_id = c.territory_id
-         WHERE ca.effective_to IS NULL AND ca.person_id IS NULL
-         GROUP BY c.territory_id, t.name
+         LEFT JOIN tm          ON tm.territory_id = c.territory_id
+         WHERE uca.effective_to IS NULL AND uca.person_id IS NULL
+         GROUP BY c.territory_id, t.name, tm.person_id, tm.person_name, tm.cover_count
          ORDER BY customer_count DESC`,
       ),
     ]);
 
     res.json({
-      total: Number(countRes.rows[0].count),
-      customers: rowsRes.rows,
+      total:           Number(countRes.rows[0].count),
+      customers:       rowsRes.rows,
       territoryGroups: groupsRes.rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── POST /api/master/customers/bulk-assign-suggested ─────────────────────────
+// Apply the computed suggestion to every unassigned customer in one territory.
+//
+// Suggestion rules applied server-side (identical to GET unassigned logic):
+//   a. territory_majority — most-common active TM among assigned customers in territory
+//   b. state_head         — state_head_person_id on the existing NULL-person assignment
+//   c. skipped            — no suggestion; not moved
+//
+// Each moved customer gets:
+//   • old NULL assignment closed (effective_to = CURRENT_DATE)
+//   • new open assignment inserted (person_id = suggested, confidence = 'confirmed')
+//   • ONE change_log entry  (field='person_id', old=NULL, new=person_id)
+//
+// Body: { territory_id, changed_by? }
+// Returns: { moved, skipped, breakdown: [{ person_name, count, rule }] }
+
+router.post("/master/customers/bulk-assign-suggested", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const { territory_id, changed_by } = req.body as {
+      territory_id: number;
+      changed_by?: string;
+    };
+
+    if (!territory_id) {
+      return void res.status(400).json({ error: "territory_id is required" });
+    }
+
+    // Step 1: territory majority person
+    const majorityRes = await pool.query<{
+      person_id: number; person_name: string; cover_count: string;
+    }>(
+      `SELECT ca_tm.person_id, p_tm.name AS person_name, COUNT(*) AS cover_count
+       FROM customer_assignment ca_tm
+       JOIN customer c_tm ON c_tm.customer_id = ca_tm.customer_id
+       JOIN person   p_tm ON p_tm.person_id   = ca_tm.person_id
+       WHERE ca_tm.effective_to IS NULL
+         AND ca_tm.person_id   IS NOT NULL
+         AND p_tm.is_active    = true
+         AND c_tm.territory_id = $1
+       GROUP BY ca_tm.person_id, p_tm.name
+       ORDER BY COUNT(*) DESC, ca_tm.person_id ASC
+       LIMIT 1`,
+      [territory_id],
+    );
+    const majorityPerson = majorityRes.rows[0] ?? null;
+
+    // Step 2: all unassigned customers in this territory + their state heads
+    const unassignedRes = await pool.query<{
+      customer_id: string;
+      state_head_person_id: number | null;
+      state_head_name: string | null;
+      sh_is_active: boolean | null;
+    }>(
+      `SELECT uca.customer_id,
+              uca.state_head_person_id,
+              sh.name    AS state_head_name,
+              sh.is_active AS sh_is_active
+       FROM customer_assignment uca
+       JOIN customer c ON c.customer_id = uca.customer_id
+       LEFT JOIN person sh ON sh.person_id = uca.state_head_person_id
+       WHERE uca.effective_to IS NULL
+         AND uca.person_id    IS NULL
+         AND c.territory_id   = $1`,
+      [territory_id],
+    );
+
+    // Step 3: derive suggestion for each customer
+    type ToAssign = {
+      customerId: string;
+      personId: number;
+      personName: string;
+      rule: string;
+      stateHeadPersonId: number | null;
+    };
+    const toAssign: ToAssign[] = [];
+    const skippedIds: string[] = [];
+
+    for (const row of unassignedRes.rows) {
+      if (majorityPerson) {
+        toAssign.push({
+          customerId:      row.customer_id,
+          personId:        majorityPerson.person_id,
+          personName:      majorityPerson.person_name,
+          rule:            "territory_majority",
+          stateHeadPersonId: row.state_head_person_id ?? null,
+        });
+      } else if (row.state_head_person_id && row.sh_is_active) {
+        toAssign.push({
+          customerId:      row.customer_id,
+          personId:        row.state_head_person_id,
+          personName:      row.state_head_name ?? "",
+          rule:            "state_head",
+          stateHeadPersonId: row.state_head_person_id,
+        });
+      } else {
+        skippedIds.push(row.customer_id);
+      }
+    }
+
+    if (toAssign.length === 0) {
+      return void res.json({
+        moved: 0,
+        skipped: skippedIds.length,
+        noSuggestion: skippedIds.length,
+        breakdown: [],
+      });
+    }
+
+    // Step 4: apply in a single transaction
+    const client = await pool.connect();
+    let moved = 0;
+    const breakdown = new Map<number, { person_name: string; count: number; rule: string }>();
+
+    try {
+      await client.query("BEGIN");
+      for (const a of toAssign) {
+        await client.query(
+          `UPDATE customer_assignment SET effective_to = CURRENT_DATE
+           WHERE customer_id = $1 AND effective_to IS NULL`,
+          [a.customerId],
+        );
+        await client.query(
+          `INSERT INTO customer_assignment
+             (customer_id, person_id, state_head_person_id, confidence, effective_from, set_by)
+           VALUES ($1, $2, $3, 'confirmed', CURRENT_DATE, $4)`,
+          [a.customerId, a.personId, a.stateHeadPersonId, changed_by ?? "bulk_assign_suggested"],
+        );
+        await client.query(
+          `INSERT INTO change_log
+             (entity_type, entity_id, field, old_value, new_value, changed_by)
+           VALUES ('customer', $1, 'person_id', NULL, $2, $3)`,
+          [a.customerId, String(a.personId), changed_by ?? "bulk_assign_suggested"],
+        );
+        moved++;
+        const b = breakdown.get(a.personId) ?? { person_name: a.personName, count: 0, rule: a.rule };
+        b.count++;
+        breakdown.set(a.personId, b);
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    res.json({
+      moved,
+      skipped:  skippedIds.length,
+      breakdown: [...breakdown.values()],
     });
   } catch (err) {
     res.status(500).json({ error: String(err) });
