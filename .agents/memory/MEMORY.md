@@ -128,3 +128,4 @@
 - [Red Alert Category S + B3 rollup](red-alert-category-s-b3-rollup.md) — S1 destocking (norm2 linkage, FY-spanning streak), B3 rollup rules (3-retailer/₹50L group, ₹25L individual), A2→A1 cross-suppression, state_canon backfill from person_registry.
 - [Master Org Phase 2 — people management](master-org-phase2.md) — /api/master/people routes; deactivation requires impact acknowledgment gate (422 without, 409 on mismatch, 200 with correct counts).
 - [Alert Routing v2](alert-routing-v2.md) — 3-level escalation; scope_type=all_india (not "all"); recipient_id nullable for L2 skip rows; blank contact → skipped row, never silent drop.
+- [Red Alert C6 — Territorial Concentration](red-alert-c6.md) — C6 fires for ≥10 retailer stops AND ≥30% share per state head; Sandeep Dadheech fires at Q1; threshold calibrated Aug 2026.
