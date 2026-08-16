@@ -275,7 +275,7 @@ router.post(
       for (const [tbl, seq, col] of seqUpdates) {
         if (!present(tbl as keyof typeof body)) continue;
         const { rows } = await client.query<{ next: string }>(
-          `SELECT setval($1, COALESCE((SELECT MAX(${col}) FROM ${tbl}), 0)) AS next`,
+          `SELECT setval($1, COALESCE((SELECT MAX(${col}) FROM ${tbl}), 1)) AS next`,
           [seq],
         );
         seqResults.push(`${seq} → ${rows[0]?.next ?? "?"}`);
