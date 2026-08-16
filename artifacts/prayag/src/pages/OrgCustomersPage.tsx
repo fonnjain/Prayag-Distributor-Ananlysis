@@ -40,7 +40,7 @@ import { cn } from "@/lib/utils";
 import {
   Search, Lock, Unlock, ChevronDown, ChevronRight,
   Link2, AlertTriangle, CheckCircle2, Store, Users,
-  RefreshCw, ClipboardList, UserCheck, Lightbulb, TrendingUp,
+  RefreshCw, ClipboardList, UserCheck, Lightbulb, TrendingUp, X,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -662,6 +662,15 @@ function UnassignedTab({ adminSecret }: { adminSecret: string }) {
   // Suggested-accept confirmation
   const [confirmTerritory, setConfirmTerritory] = useState<TerritoryGroup | null>(null);
 
+  // How-to panel — dismissed per session
+  const [howToDismissed, setHowToDismissed] = useState(
+    () => sessionStorage.getItem("unassigned-howto-dismissed") === "1"
+  );
+  function dismissHowTo() {
+    sessionStorage.setItem("unassigned-howto-dismissed", "1");
+    setHowToDismissed(true);
+  }
+
   const territoryParam = selTerritory === "all" ? undefined :
     selTerritory === null ? "null" : String(selTerritory);
   const typeParam = selType === "all" ? "" : selType;
@@ -847,6 +856,25 @@ function UnassignedTab({ adminSecret }: { adminSecret: string }) {
 
       {/* ── Main content ───────────────────────────────────────────────────── */}
       <div className="flex-1 min-w-0 flex flex-col">
+
+        {/* ── How-to panel ── */}
+        {!howToDismissed && (
+          <div className="border-b bg-blue-50 dark:bg-blue-950/25 px-4 py-3 flex items-start gap-3">
+            <Lightbulb size={15} className="text-blue-500 mt-0.5 flex-shrink-0" />
+            <div className="flex-1 min-w-0 text-xs text-blue-900 dark:text-blue-200 space-y-1 leading-relaxed">
+              <p className="font-semibold text-[12px]">How to work through this list</p>
+              <p>Pick a territory on the left. <span className="font-medium">Strong</span> (green) and <span className="font-medium">moderate</span> (amber) territories have an <em>Accept all suggestions</em> button — use it. Check the <em>covers X of Y</em> figure first: 82 of 134 is a much stronger signal than 24 of 97.</p>
+              <p><span className="font-medium">Weak</span> (red) territories and the <span className="font-medium">55 customers with no former name</span> have no accept-all — assign them one by one. East&nbsp;U.P holds 13 of those 55.</p>
+              <p>As you accept suggestions, the engine builds evidence. Once 5 of a departed person's customers go to one TM, the remaining customers from that person route to them automatically.</p>
+            </div>
+            <button
+              onClick={dismissHowTo}
+              className="text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 flex-shrink-0 mt-0.5"
+              aria-label="Dismiss">
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
         {/* ── Suggested-accept confirmation overlay ── */}
         {confirmTerritory && (
