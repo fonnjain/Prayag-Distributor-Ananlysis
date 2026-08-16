@@ -61,8 +61,15 @@ export default function Regional() {
     setLoading(true);
     setError(null);
     fetch(`/api/regional-reports${filterQuery}`)
-      .then((r) => {
-        if (!r.ok) return r.json().then((e: { error?: string }) => { throw new Error(e.error ?? r.statusText); });
+      .then(async (r) => {
+        if (!r.ok) {
+          // The server may return HTML (e.g. a cold-start 500) — always parse
+          // text first so the JSON.parse never throws a misleading token error.
+          const body = await r.text();
+          let msg = r.statusText;
+          try { msg = (JSON.parse(body) as { error?: string }).error ?? msg; } catch { /* keep statusText */ }
+          throw new Error(msg);
+        }
         return r.json() as Promise<Payload>;
       })
       .then((d) => { if (!cancelled) { setData(d); setLoading(false); } })
