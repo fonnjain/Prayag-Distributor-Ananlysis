@@ -438,7 +438,7 @@ export function buildCategoryCAlerts(
             rupeesAtStake: rupees,
             extraForReport: {
               stateHead,
-              denominator: `retailer stops above ₹${Math.round(cfg.C6_MATERIALITY_FLOOR_RUPEES / 1e5) / 10} L prior-period floor with mapped state head`,
+              denominator: `retailer stops above ₹${Math.round(cfg.C6_MATERIALITY_FLOOR_RUPEES / 1e5)} L prior-period floor with mapped state head`,
               excludedProductCategories: 1,
             },
           });
