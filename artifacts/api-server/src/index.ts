@@ -206,7 +206,11 @@ startServer({
     for (const fy of Object.keys(REGISTER_SHEET_IDS)) {
       ensureRegisterSynced(fy);
     }
-    startScheduledRegisterSync();
+    if (process.env.NODE_ENV === "production") {
+      startScheduledRegisterSync();
+    } else {
+      logger.info("dev: register sync scheduler suppressed (NODE_ENV !== production)");
+    }
     // setServerReady() is called by startServer after this function resolves.
   },
   appListen: (p, cb) => { app.listen(p, cb); },
@@ -303,197 +307,209 @@ startServer({
       }
     })();
 
-    // Keep the served snapshot fresh with a periodic background sync
-    // (interval configurable via DASHBOARD_SYNC_INTERVAL_MINUTES, 0 disables).
-    startScheduledSync();
+    // ── Interval schedulers — PRODUCTION ONLY ────────────────────────────────
+    // All of the following write to the database from external sources (Sheets,
+    // Drive) or send emails.  Running them in dev while the workspace is open
+    // would produce duplicate digests, duplicate alerts, and disagreeing figures
+    // versus production.  Gate every one behind NODE_ENV=production.
+    if (process.env.NODE_ENV === "production") {
+      // Keep the served snapshot fresh with a periodic background sync
+      // (interval configurable via DASHBOARD_SYNC_INTERVAL_MINUTES, 0 disables).
+      startScheduledSync();
 
-    // Fetch competitor price snapshot from the Prayag Competition Analysis app.
-    // First run 5 min after startup, then every 24 h.
-    scheduleCompetitorRefresh();
+      // Fetch competitor price snapshot from the Prayag Competition Analysis app.
+      // First run 5 min after startup, then every 24 h.
+      scheduleCompetitorRefresh();
 
-    // Keep the primary_order_line OB mirror aligned with the live Order Sheet.
-    // Runs alongside the register sync cadence (every 6h) for the OPEN FY only,
-    // in replace mode so rows removed from the sheet also leave the DB mirror.
-    // Closed FYs are never touched.  Overlap-guarded via obSyncInFlight.
-    {
-      let obSyncInFlight = false;
-      const runObMirrorSync = async (): Promise<void> => {
-        if (obSyncInFlight) return;
-        obSyncInFlight = true;
-        try {
-          for (const fy of Object.keys(BOOKING_SHEETS)) {
-            if (!isFyOpen(fy)) continue;
-            const r = await ingestOrderBookingFy(fy, { replace: true });
-            logger.info(
-              {
-                fy,
-                rowsEmitted: r.rowsEmitted,
-                inserted: r.inserted,
-                errors: r.errors,
-              },
-              "scheduled OB mirror sync: done",
-            );
-          }
-        } catch (err) {
-          logger.error({ err }, "scheduled OB mirror sync: failed");
-        } finally {
-          obSyncInFlight = false;
-        }
-      };
-      // First run shortly after startup (let sheet warm-up begin first), then every 6h.
-      setTimeout(() => void runObMirrorSync(), 60_000).unref();
-      setInterval(() => void runObMirrorSync(), 6 * 3_600_000).unref();
-    }
-
-    // Distributor deep-dive snapshot warmer.  In production the page is only
-    // as good as its last complete snapshot (degraded Sheets loads serve the
-    // snapshot), so build every head's deep dive SEQUENTIALLY — one head at a
-    // time, pausing between heads — shortly after startup and then every 6h.
-    // Sequential + bounded per-head concurrency keeps the Sheets read rate
-    // under the per-minute quota that a cold parallel burst used to trip.
-    {
-      let ddWarmInFlight = false;
-      const warmDistributorSnapshots = async (): Promise<void> => {
-        if (ddWarmInFlight) return;
-        ddWarmInFlight = true;
-        try {
-          const { loadDistributorDeepDiveResilient } = await import(
-            "./lib/mgmt/distributorDeepDive.js"
-          );
-          const { loadRoster } = await import("./lib/mgmt/roster.js");
-          const fy = "2026-27";
-          const roster = await loadRoster();
-          const heads = [
-            ...new Set(
-              roster.members.map((m) => m.stateHead).filter(Boolean),
-            ),
-          ];
-          for (const head of heads) {
-            try {
-              // bypassSnapshot: the warmer must build live — snapshot-first
-              // serving would hand it back its own snapshot and never refresh.
-              const r = await loadDistributorDeepDiveResilient(fy, head, {
-                bypassSnapshot: true,
-              });
+      // Keep the primary_order_line OB mirror aligned with the live Order Sheet.
+      // Runs alongside the register sync cadence (every 6h) for the OPEN FY only,
+      // in replace mode so rows removed from the sheet also leave the DB mirror.
+      // Closed FYs are never touched.  Overlap-guarded via obSyncInFlight.
+      {
+        let obSyncInFlight = false;
+        const runObMirrorSync = async (): Promise<void> => {
+          if (obSyncInFlight) return;
+          obSyncInFlight = true;
+          try {
+            for (const fy of Object.keys(BOOKING_SHEETS)) {
+              if (!isFyOpen(fy)) continue;
+              const r = await ingestOrderBookingFy(fy, { replace: true });
               logger.info(
                 {
-                  head,
                   fy,
-                  loaded: r.membersLoaded,
-                  failed: r.membersFailed,
-                  stale: r.stale ?? false,
+                  rowsEmitted: r.rowsEmitted,
+                  inserted: r.inserted,
+                  errors: r.errors,
                 },
-                "distributor snapshot warmer: head done",
-              );
-            } catch (err) {
-              logger.warn(
-                { err, head },
-                "distributor snapshot warmer: head failed",
+                "scheduled OB mirror sync: done",
               );
             }
-            // Pause between heads so consecutive cold teams never stack reads.
-            await new Promise((r) => setTimeout(r, 30_000));
+          } catch (err) {
+            logger.error({ err }, "scheduled OB mirror sync: failed");
+          } finally {
+            obSyncInFlight = false;
           }
-        } catch (err) {
-          logger.error({ err }, "distributor snapshot warmer: failed");
-        } finally {
-          ddWarmInFlight = false;
-        }
-      };
-      // First run 3 min after startup (after register warm-up), then every 6h.
-      setTimeout(() => void warmDistributorSnapshots(), 3 * 60_000).unref();
-      setInterval(
-        () => void warmDistributorSnapshots(),
-        6 * 3_600_000,
-      ).unref();
-    }
+        };
+        // First run shortly after startup (let sheet warm-up begin first), then every 6h.
+        setTimeout(() => void runObMirrorSync(), 60_000).unref();
+        setInterval(() => void runObMirrorSync(), 6 * 3_600_000).unref();
+      }
 
-    // ── Secondary dashboard scheduler ──────────────────────────────────────
-    // Keeps secondary_head_month current for the open FY by re-reading the
-    // State Head Dashboard (Google Sheet) on a 6-hour cadence.  Failures
-    // leave the prior ingested_at unchanged so the staleness check always
-    // reflects the LAST SUCCESSFUL sync, not the last attempted one.
-    //
-    // Only runs for the open FY — closed FYs are frozen and never re-ingested
-    // from the dashboard (their data comes from xlsx uploads).
-    {
-      let secDashSyncInFlight = false;
-      const runSecDashSync = async (): Promise<void> => {
-        if (secDashSyncInFlight) return;
-        secDashSyncInFlight = true;
-        const openFy = currentOpenFy();
-        try {
-          const summary = await loadAndPersistStateDashboard(openFy);
-          const anyFailed = summary.assertions.some((a) => !a.passed);
-          if (anyFailed) {
-            logger.warn(
-              {
-                fy: openFy,
-                assertions: summary.assertions.filter((a) => !a.passed),
-              },
-              "scheduled secondary dashboard sync: validation failed — ingested_at NOT updated",
+      // Distributor deep-dive snapshot warmer.  In production the page is only
+      // as good as its last complete snapshot (degraded Sheets loads serve the
+      // snapshot), so build every head's deep dive SEQUENTIALLY — one head at a
+      // time, pausing between heads — shortly after startup and then every 6h.
+      // Sequential + bounded per-head concurrency keeps the Sheets read rate
+      // under the per-minute quota that a cold parallel burst used to trip.
+      {
+        let ddWarmInFlight = false;
+        const warmDistributorSnapshots = async (): Promise<void> => {
+          if (ddWarmInFlight) return;
+          ddWarmInFlight = true;
+          try {
+            const { loadDistributorDeepDiveResilient } = await import(
+              "./lib/mgmt/distributorDeepDive.js"
             );
-          } else {
+            const { loadRoster } = await import("./lib/mgmt/roster.js");
+            const fy = "2026-27";
+            const roster = await loadRoster();
+            const heads = [
+              ...new Set(
+                roster.members.map((m) => m.stateHead).filter(Boolean),
+              ),
+            ];
+            for (const head of heads) {
+              try {
+                // bypassSnapshot: the warmer must build live — snapshot-first
+                // serving would hand it back its own snapshot and never refresh.
+                const r = await loadDistributorDeepDiveResilient(fy, head, {
+                  bypassSnapshot: true,
+                });
+                logger.info(
+                  {
+                    head,
+                    fy,
+                    loaded: r.membersLoaded,
+                    failed: r.membersFailed,
+                    stale: r.stale ?? false,
+                  },
+                  "distributor snapshot warmer: head done",
+                );
+              } catch (err) {
+                logger.warn(
+                  { err, head },
+                  "distributor snapshot warmer: head failed",
+                );
+              }
+              // Pause between heads so consecutive cold teams never stack reads.
+              await new Promise((r) => setTimeout(r, 30_000));
+            }
+          } catch (err) {
+            logger.error({ err }, "distributor snapshot warmer: failed");
+          } finally {
+            ddWarmInFlight = false;
+          }
+        };
+        // First run 3 min after startup (after register warm-up), then every 6h.
+        setTimeout(() => void warmDistributorSnapshots(), 3 * 60_000).unref();
+        setInterval(
+          () => void warmDistributorSnapshots(),
+          6 * 3_600_000,
+        ).unref();
+      }
+
+      // ── Secondary dashboard scheduler ────────────────────────────────────
+      // Keeps secondary_head_month current for the open FY by re-reading the
+      // State Head Dashboard (Google Sheet) on a 6-hour cadence.  Failures
+      // leave the prior ingested_at unchanged so the staleness check always
+      // reflects the LAST SUCCESSFUL sync, not the last attempted one.
+      //
+      // Only runs for the open FY — closed FYs are frozen and never re-ingested
+      // from the dashboard (their data comes from xlsx uploads).
+      {
+        let secDashSyncInFlight = false;
+        const runSecDashSync = async (): Promise<void> => {
+          if (secDashSyncInFlight) return;
+          secDashSyncInFlight = true;
+          const openFy = currentOpenFy();
+          try {
+            const summary = await loadAndPersistStateDashboard(openFy);
+            const anyFailed = summary.assertions.some((a) => !a.passed);
+            if (anyFailed) {
+              logger.warn(
+                {
+                  fy: openFy,
+                  assertions: summary.assertions.filter((a) => !a.passed),
+                },
+                "scheduled secondary dashboard sync: validation failed — ingested_at NOT updated",
+              );
+            } else {
+              logger.info(
+                { fy: openFy, rowsRead: summary.rowsRead, dataRows: summary.dataRows },
+                "scheduled secondary dashboard sync: done",
+              );
+            }
+          } catch (err) {
+            logger.error(
+              { err, fy: openFy },
+              "scheduled secondary dashboard sync: failed",
+            );
+          } finally {
+            secDashSyncInFlight = false;
+          }
+        };
+        // First run 5 min after startup (after the register and booking warm-ups
+        // have had time to settle), then every 6 hours.
+        setTimeout(() => void runSecDashSync(), 5 * 60_000).unref();
+        setInterval(() => void runSecDashSync(), 6 * 3_600_000).unref();
+      }
+
+      // ── Red Alert detection scheduler ────────────────────────────────────
+      // Runs the fingerprint-based persistence runner every 6 hours.  Non-fatal
+      // on failure — alerts remain stale but the server keeps serving other
+      // routes.
+      {
+        let alertDetectInFlight = false;
+        const runAlertDetect = async (): Promise<void> => {
+          if (alertDetectInFlight) return;
+          alertDetectInFlight = true;
+          try {
+            const { runAlertDetection } = await import(
+              "./lib/redAlert/alertPersistence.js"
+            );
+            const stats = await runAlertDetection();
             logger.info(
-              { fy: openFy, rowsRead: summary.rowsRead, dataRows: summary.dataRows },
-              "scheduled secondary dashboard sync: done",
+              {
+                new: stats.new,
+                updated: stats.updated,
+                cleared: stats.cleared,
+                totalOpen: stats.totalOpen,
+              },
+              "scheduled alert detection: done",
             );
+          } catch (err) {
+            logger.error({ err }, "scheduled alert detection: failed");
+          } finally {
+            alertDetectInFlight = false;
           }
-        } catch (err) {
-          logger.error(
-            { err, fy: openFy },
-            "scheduled secondary dashboard sync: failed",
-          );
-        } finally {
-          secDashSyncInFlight = false;
-        }
-      };
-      // First run 5 min after startup (after the register and booking warm-ups
-      // have had time to settle), then every 6 hours.
-      setTimeout(() => void runSecDashSync(), 5 * 60_000).unref();
-      setInterval(() => void runSecDashSync(), 6 * 3_600_000).unref();
-    }
+        };
+        // First run 10 min after startup (after register and secondary warm-ups),
+        // then every 6 hours.
+        setTimeout(() => void runAlertDetect(), 10 * 60_000).unref();
+        setInterval(() => void runAlertDetect(), 6 * 3_600_000).unref();
+      }
 
-    // ── Red Alert detection scheduler ──────────────────────────────────────
-    // Runs the fingerprint-based persistence runner every 6 hours.  Non-fatal
-    // on failure — alerts remain stale but the server keeps serving other
-    // routes.
-    {
-      let alertDetectInFlight = false;
-      const runAlertDetect = async (): Promise<void> => {
-        if (alertDetectInFlight) return;
-        alertDetectInFlight = true;
-        try {
-          const { runAlertDetection } = await import(
-            "./lib/redAlert/alertPersistence.js"
-          );
-          const stats = await runAlertDetection();
-          logger.info(
-            {
-              new: stats.new,
-              updated: stats.updated,
-              cleared: stats.cleared,
-              totalOpen: stats.totalOpen,
-            },
-            "scheduled alert detection: done",
-          );
-        } catch (err) {
-          logger.error({ err }, "scheduled alert detection: failed");
-        } finally {
-          alertDetectInFlight = false;
-        }
-      };
-      // First run 10 min after startup (after register and secondary warm-ups),
-      // then every 6 hours.
-      setTimeout(() => void runAlertDetect(), 10 * 60_000).unref();
-      setInterval(() => void runAlertDetect(), 6 * 3_600_000).unref();
+      // ── Weekly alert digest scheduler ────────────────────────────────────
+      // Polls every 15 min; fires Monday 07:30–09:30 IST when ≥24h since last
+      // run.  Last run is persisted in alert_scheduler (migration 041) so a
+      // server restart never sends a duplicate digest.
+      startWeeklyDigestScheduler(currentOpenFy());
+    } else {
+      logger.info(
+        "dev: all interval schedulers suppressed (NODE_ENV !== production) — " +
+        "register sync, OB mirror, secondary dashboard, alert detection, weekly digest",
+      );
     }
-
-    // ── Weekly alert digest scheduler ───────────────────────────────────────
-    // Polls every 15 min; fires Monday 07:30–09:30 IST when ≥24h since last run.
-    // Last run is persisted in alert_scheduler (migration 041) so a server
-    // restart never sends a duplicate digest.
-    startWeeklyDigestScheduler(currentOpenFy());
 
     // Assert frozen-FY anchors in the background.  Any mismatch means
     // something wrote to an immutable year — logged at ERROR and exposed via
