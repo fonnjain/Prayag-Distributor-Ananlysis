@@ -797,7 +797,7 @@ const UNASSIGNED_SHARED_CTES = `
   ),
   r0 AS (
     SELECT former_head, person_id, person_name, inherited_count
-    FROM r0_src WHERE rk = 1
+    FROM r0_src WHERE rk = 1 AND inherited_count >= 5
   )
 `;
 
@@ -969,7 +969,7 @@ router.post("/master/customers/bulk-assign-suggested", async (req, res) => {
            WHERE hist.former_person_name_raw IS NOT NULL
            GROUP BY hist.former_person_name_raw, curr.person_id, p0.name
          )
-         SELECT former_head, person_id, person_name FROM r0_src WHERE rk = 1`,
+         SELECT former_head, person_id, person_name FROM r0_src WHERE rk = 1 AND inherited_count >= 5`,
       ),
       // All unassigned customers in this territory
       pool.query<{
