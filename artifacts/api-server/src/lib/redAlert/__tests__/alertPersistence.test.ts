@@ -148,9 +148,10 @@ describe("alertPersistence", () => {
     expect(Number(rows[0]?.periods_open)).toBe(1);
   });
 
-  it("is idempotent within the same window: second run does NOT increment periods_open", async () => {
-    // KEY INVARIANT: multiple detection runs (e.g. 6-hourly scheduler) within
-    // the same analytical window (same frozen-month set) must not inflate periods_open.
+  it("increments periods_open on the second run even within the same window", async () => {
+    // KEY INVARIANT: periods_open counts consecutive detection runs in which
+    // the alert has been observed, regardless of whether the analytical window
+    // has changed. Two runs within the same frozen-month window both count.
     const alert = makeRawAlert();
     const result = makeResult([alert]);
 
@@ -165,8 +166,8 @@ describe("alertPersistence", () => {
       `SELECT periods_open FROM alert WHERE fy = $1`,
       [TEST_FY],
     );
-    // periods_open must stay at 1 — the window has not advanced
-    expect(Number(rows[0]?.periods_open)).toBe(1);
+    // periods_open increments on every detection run — 2 runs → periods_open=2
+    expect(Number(rows[0]?.periods_open)).toBe(2);
   });
 
   it("increments periods_open when the analysis window advances to a new month", async () => {
@@ -228,7 +229,7 @@ describe("alertPersistence", () => {
     );
     expect(before[0]?.status).toBe("cleared");
 
-    // Run 3: alert recurs in the SAME window — must NOT throw; periods_open stays 1
+    // Run 3: alert recurs in the SAME window — must NOT throw; periods_open increments
     const stats3 = await persistAlerts(TEST_FY, makeResult([alert]), []);
 
     expect(stats3.reopened).toBe(1);
@@ -242,8 +243,8 @@ describe("alertPersistence", () => {
     expect(after[0]?.status).toBe("open");
     expect(after[0]?.clear_reason).toBeNull();
     expect(after[0]?.suppressed_by).toBeNull();
-    // Same window: periods_open does NOT increment on same-window recurrence
-    expect(Number(after[0]?.periods_open)).toBe(1);
+    // periods_open increments on every detection run — was 1 before clear, recurrence = 2
+    expect(Number(after[0]?.periods_open)).toBe(2);
   });
 
   it("increments periods_open when a recurrence happens in a new window", async () => {
@@ -356,12 +357,13 @@ describe("alertPersistence", () => {
     );
     expect(countRows[0]?.n).toBe(1);
 
-    // periods_open is 1: both runs saw the same window, so no increment
+    // periods_open is 2: the advisory lock serializes both runs, so the second
+    // run sees the INSERT from the first and issues an UPDATE (periods_open++).
     const { rows: alertRows } = await pool.query(
       `SELECT periods_open FROM alert WHERE fy = $1`,
       [TEST_FY],
     );
-    expect(Number(alertRows[0]?.periods_open)).toBe(1);
+    expect(Number(alertRows[0]?.periods_open)).toBe(2);
   });
 
   it("acknowledgement on a cleared alert returns the current status without resurrecting it", async () => {

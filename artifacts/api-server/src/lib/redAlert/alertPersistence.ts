@@ -45,9 +45,8 @@ import { logger } from "../logger.js";
  *
  * Months are intentionally excluded so the same alert row persists across
  * window changes (when a new month is frozen and the analysis window grows).
- * `periods_open` is incremented only when the stored `period_label` differs
- * from the incoming one — i.e. when the window advances — not on every
- * 6-hour detection run within the same window.
+ * `periods_open` increments on every detection run that observes this alert,
+ * regardless of whether the analytical window (period_label) has changed.
  *
  * One row per (fy, code, entityKey). A different FY creates a new row.
  */
@@ -106,9 +105,8 @@ type C5DbRow = {
  *
  * Lifecycle:
  *  - New fingerprint            → INSERT (status=open, periods_open=1)
- *  - Existing open fingerprint, same window    → UPDATE last_seen_at; periods_open unchanged
- *  - Existing open fingerprint, window advanced → UPDATE last_seen_at + periods_open++
- *  - Existing ack'd fingerprint → UPDATE last_seen_at (+ periods_open if window advanced);
+ *  - Existing open fingerprint (any window)   → UPDATE last_seen_at + periods_open++
+ *  - Existing ack'd fingerprint → UPDATE last_seen_at + periods_open++;
  *                                  status stays acknowledged
  *  - Existing cleared fingerprint that recurs  → REOPEN: status=open, periods_open++
  *                                  if window advanced; clear_reason/suppressed_by reset
@@ -206,8 +204,7 @@ export async function persistAlerts(
           : "point-in-time";
 
       if (existing) {
-        // periods_open increments only when the analytical window has advanced
-        // (incoming period_label differs from what's stored).
+        // periods_open increments on every detection run (see module header).
         if (existing.status === "cleared") {
           // ── Recurrence: reopen a previously cleared alert ────────────────
           // Reset lifecycle fields; first_seen_at is preserved (original observation).
