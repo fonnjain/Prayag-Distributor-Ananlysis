@@ -1,44 +1,46 @@
 ---
-name: Alert Routing v2 — 3-level escalation
-description: Scope values, blank-contact skip, skip-empty-L2 logic, seeded recipients, migration 037
+name: Alert Routing v2
+description: Cadence rules, pattern syntax, scope matching, and on_raise delivery path for the alert routing system.
 ---
 
 ## Rules
 
-- `scope_type` is `"state_head"` or `"all_india"` — never `"all"` (that was the old v1 value; migration 037 renamed it).
-- `escalation_level` is 1, 2, or 3. Level 2 is intentionally left blank; alerts skip from L1 directly to L3 with a logged skip row (recipient_id=NULL, trigger_type='escalation', status='skipped').
-- `alert_delivery.recipient_id` is NULLABLE as of migration 037 — required for the L2 skip row pattern.
+**Pattern matching** (`patterns.ts`): `'*'` matches all codes; `'S*'` matches any code starting with S; `'B3'` is exact match. No regex, no SQL LIKE — plain JS startsWith.
 
-## Escalation windows (configurable via alert_escalation_config)
+**Cadence**:
+- `on_raise` recipients at L1: notified immediately when `notifyAlert(triggerType='on_raise')` is called.
+- `weekly` recipients: only reached by the weekly digest route.
+- `on_raise` at L2/L3 is silently skipped on initial raise — only L1 fires on_raise.
 
-| Level | Window severe | Window digest |
-|-------|--------------|---------------|
-|  L1→L2/L3 | 7 days | 14 days |
-|  L2→L3    | 7 days | 7 days  |
+**Scope types**: `all_india` always matches; `state_head` matches when alert entity's state head equals `scope_value` (person alerts: DB lookup; non-person: reads `detail.extraForReport.stateHead`). Do NOT use `scope_type='all'` — the column value is `'all_india'`.
 
-## Seeded recipients (migration 037)
+**Decoupled from detection**: `POST /api/alerts/detect` saves alerts to DB but never calls `notifyAlert`. Routing must be triggered separately via `POST /api/alert-routing/notify/:alertId`. Delivery rows are only written when notify is called explicitly.
 
-- 12 State Heads: L1, scope_type='state_head', scope_value=canonical name, channel='whatsapp'
-- Deepak J: L1, scope_type='all_india', channel='whatsapp', contact=9910896007
-- Level 2: intentionally blank (0 rows)
-- Nitin Agarwal (CEO): L3, scope_type='all_india', channel='email', contact=ceo@prayagindia.com
-- Sunil Mohanty: seeded with NULL contact — will always produce status=skipped until contact is filled via UI
+**Idempotency**: In production (`dryRun=false`), skips if a delivery row already exists for `(alert_id, recipient_id, trigger_type)`. Dry-run bypasses this check — each dry-run call writes new rows.
 
-## Blank-contact skip
+## Recipient table state (Aug 2026)
 
-In `notify.ts`: email and whatsapp recipients with null/blank contact produce a delivery row with:
-- `status='skipped'`
-- `skip_reason='blank contact — no mobile or email on file'`
+| ids | pattern | scope | cadence | level |
+|---|---|---|---|---|
+| 17–28 | `*` | state_head | weekly | 1 |
+| 29, 30 | `*` | all_india | weekly | 1 (Deepak), 3 (Nitin) |
+| 41, 42 | `S*`, `C*` | all_india | on_raise | 1 (Deepak J, whatsapp 9910896007) |
+| 43, 44 | `S*`, `C*` | all_india | on_raise | 1 (Nitin Agarwal, email ceo@prayagindia.com) |
 
-They are never silently dropped.
+State heads receive S/C alerts only via weekly digest, not immediately.
+All-india gets S and C immediately (L1 on_raise) plus digest (L1/L3 weekly).
 
-## L2 bypass
+**Why:** State head rows were incorrectly seeded as `on_raise` (migration 036); corrected to `weekly` in migration 039. All-india on_raise added for S/C only — A/B go digest-only.
 
-In `escalate.ts`: when `countRecipientsAtLevel(2) === 0`, the runner:
-1. Writes a NULL-recipient skip row at L2 documenting the bypass.
-2. Calls `notifyAlert` targeting L3 immediately.
-The result carries `skippedEmptyLevel=true` and `skipReason`.
+## Test path
 
-## Why
+To verify the on_raise path works:
+```bash
+curl -X POST "http://localhost:8080/api/alert-routing/notify/<alertId>" \
+  -H "X-Admin-Secret: $SESSION_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"dryRun": true}'
+```
+Expected: delivery rows for Deepak J (whatsapp, skip_reason="no provider configured") and Nitin Agarwal (email, skip_reason="dry run"), zero rows for state heads.
 
-The spec requires 3-level cadence with a deliberately empty L2 for future use. Empty levels must never silently stall escalation. Blank contacts must be visible in the delivery log (skip rows) so operators know to fill them in.
+Tested Aug 2026 against S1 alert id=33 — 2 rows written, 0 state head rows.
