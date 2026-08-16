@@ -1256,6 +1256,79 @@ const MIGRATIONS: Migration[] = [
         AND ssl.state_canon IS NULL;
     `,
   },
+  {
+    id: "036_alert_routing",
+    sql: `
+      -- Recipients of alert notifications.  alert_code_pattern is a glob:
+      --   'A*' | 'B*' | 'C*' | 'S*' | 'B3' | '*'
+      -- scope_value is the state head's canonical_name for state_head scope,
+      -- NULL for 'all'.
+      CREATE TABLE IF NOT EXISTS alert_recipient (
+        id                   SERIAL       PRIMARY KEY,
+        alert_code_pattern   TEXT         NOT NULL,
+        scope_type           TEXT         NOT NULL DEFAULT 'all',
+        scope_value          TEXT,
+        escalation_level     INTEGER      NOT NULL DEFAULT 1,
+        name                 TEXT         NOT NULL,
+        channel              TEXT         NOT NULL,
+        contact              TEXT,
+        cadence              TEXT         NOT NULL DEFAULT 'weekly',
+        is_active            BOOLEAN      NOT NULL DEFAULT TRUE,
+        created_at           TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+        updated_at           TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+      );
+
+      -- One row per alert-recipient delivery attempt.
+      -- trigger_type: 'on_raise' | 'weekly_digest' | 'escalation'
+      -- status:       'pending'  | 'sent'           | 'failed' | 'skipped'
+      CREATE TABLE IF NOT EXISTS alert_delivery (
+        id                SERIAL       PRIMARY KEY,
+        alert_id          INTEGER      NOT NULL REFERENCES alert(id),
+        recipient_id      INTEGER      NOT NULL REFERENCES alert_recipient(id),
+        channel           TEXT         NOT NULL,
+        escalation_level  INTEGER      NOT NULL,
+        trigger_type      TEXT         NOT NULL DEFAULT 'on_raise',
+        sent_at           TIMESTAMPTZ,
+        delivered_at      TIMESTAMPTZ,
+        opened_at         TIMESTAMPTZ,
+        acknowledged_at   TIMESTAMPTZ,
+        status            TEXT         NOT NULL DEFAULT 'pending',
+        skip_reason       TEXT,
+        message_body      TEXT,
+        created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+      );
+
+      -- Configurable severity per code pattern.
+      -- is_severe=true → on_raise cadence fires immediately.
+      -- escalation_window_days → how long before level 2 gets notified.
+      CREATE TABLE IF NOT EXISTS alert_severity_config (
+        id                      SERIAL       PRIMARY KEY,
+        code_pattern            TEXT         NOT NULL UNIQUE,
+        is_severe               BOOLEAN      NOT NULL DEFAULT FALSE,
+        escalation_window_days  INTEGER      NOT NULL DEFAULT 14,
+        updated_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+      );
+
+      INSERT INTO alert_severity_config (code_pattern, is_severe, escalation_window_days)
+      VALUES
+        ('S*', TRUE,  7),
+        ('C*', TRUE,  7),
+        ('B3', TRUE,  7),
+        ('A*', FALSE, 14),
+        ('B*', FALSE, 14),
+        ('*',  FALSE, 14)
+      ON CONFLICT (code_pattern) DO NOTHING;
+
+      CREATE INDEX IF NOT EXISTS idx_alert_delivery_alert_id
+        ON alert_delivery(alert_id);
+      CREATE INDEX IF NOT EXISTS idx_alert_delivery_recipient_id
+        ON alert_delivery(recipient_id);
+      CREATE INDEX IF NOT EXISTS idx_alert_delivery_status
+        ON alert_delivery(status);
+      CREATE INDEX IF NOT EXISTS idx_alert_delivery_trigger
+        ON alert_delivery(trigger_type, created_at);
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

@@ -288,6 +288,34 @@ function AckModal({
 
 // ── Alert card ─────────────────────────────────────────────────────────────
 
+type DeliveryRow = {
+  id: number;
+  alert_id: number;
+  recipient_id: number;
+  recipient_name: string;
+  channel: string;
+  escalation_level: number;
+  trigger_type: string;
+  status: "pending" | "sent" | "failed" | "skipped";
+  skip_reason: string | null;
+  sent_at: string | null;
+  acknowledged_at: string | null;
+  created_at: string;
+};
+
+const CHANNEL_BADGE: Record<string, string> = {
+  in_app: "bg-blue-50 text-blue-700",
+  email: "bg-green-50 text-green-700",
+  whatsapp: "bg-purple-50 text-purple-700",
+};
+
+const STATUS_BADGE: Record<string, string> = {
+  sent: "bg-green-50 text-green-700",
+  pending: "bg-amber-50 text-amber-700",
+  failed: "bg-red-50 text-red-700",
+  skipped: "bg-muted text-muted-foreground",
+};
+
 function AlertCardView({
   card,
   allCards,
@@ -299,6 +327,17 @@ function AlertCardView({
 }) {
   const [guardsOpen, setGuardsOpen] = useState(false);
   const [retailersOpen, setRetailersOpen] = useState(false);
+  const [deliveriesOpen, setDeliveriesOpen] = useState(false);
+
+  const { data: deliveriesData, isLoading: deliveriesLoading } = useQuery<{
+    deliveries: DeliveryRow[];
+  }>({
+    queryKey: ["alert-deliveries", card.id],
+    queryFn: () =>
+      fetch(`${BASE}/api/alerts/${card.id}/deliveries`).then((r) => r.json()),
+    enabled: deliveriesOpen,
+    staleTime: 60_000,
+  });
 
   const isAcknowledged = card.status === "acknowledged";
   const isLongOpen = card.periodsOpen >= 3;
@@ -413,19 +452,12 @@ function AlertCardView({
         </p>
       )}
 
-      {/* Footer: dates, guards, acknowledge */}
+      {/* Footer: dates + acknowledge */}
       <div className="mt-3 flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           <span>First: {fmtDate(card.firstSeenAt)}</span>
           <span>Last: {fmtDate(card.lastSeenAt)}</span>
           <span>{card.periodLabel}</span>
-          <button
-            type="button"
-            onClick={() => setGuardsOpen((o) => !o)}
-            className="underline underline-offset-2 hover:text-foreground transition-colors"
-          >
-            {guardsOpen ? "hide guards" : "guards ✓"}
-          </button>
         </div>
 
         {isAcknowledged ? (
@@ -444,6 +476,26 @@ function AlertCardView({
         )}
       </div>
 
+      {/* Footer toggles row: guards + notifications */}
+      <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
+        {card.guardsPassed.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setGuardsOpen((o) => !o)}
+            className="underline underline-offset-2 hover:text-foreground transition-colors"
+          >
+            {guardsOpen ? "hide guards" : "guards ✓"}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => setDeliveriesOpen((o) => !o)}
+          className="underline underline-offset-2 hover:text-foreground transition-colors"
+        >
+          {deliveriesOpen ? "hide notifications" : "notifications"}
+        </button>
+      </div>
+
       {/* Guards expandable */}
       {guardsOpen && card.guardsPassed.length > 0 && (
         <div className="mt-2 pl-3 border-l border-border/50">
@@ -455,6 +507,43 @@ function AlertCardView({
               </span>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Delivery log */}
+      {deliveriesOpen && (
+        <div className="mt-2 pl-3 border-l border-border/50">
+          <p className="text-xs font-medium text-muted-foreground mb-1.5">Notification log:</p>
+          {deliveriesLoading ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+          ) : !deliveriesData?.deliveries?.length ? (
+            <p className="text-xs text-muted-foreground">No deliveries recorded yet.</p>
+          ) : (
+            <div className="space-y-1">
+              {deliveriesData.deliveries.map((d) => (
+                <div key={d.id} className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                  <span className="font-medium text-foreground">{d.recipient_name}</span>
+                  <span className={cn("rounded px-1 py-0.5 font-medium", CHANNEL_BADGE[d.channel] ?? "bg-muted text-muted-foreground")}>
+                    {d.channel}
+                  </span>
+                  <span className="text-muted-foreground">L{d.escalation_level}</span>
+                  <span className="text-muted-foreground capitalize">{d.trigger_type.replace(/_/g, " ")}</span>
+                  <span className={cn("rounded px-1 py-0.5 font-medium", STATUS_BADGE[d.status] ?? "bg-muted text-muted-foreground")}>
+                    {d.status}
+                  </span>
+                  {d.skip_reason && (
+                    <span className="text-muted-foreground italic">— {d.skip_reason}</span>
+                  )}
+                  {d.sent_at && (
+                    <span className="text-muted-foreground">{fmtDate(d.sent_at)}</span>
+                  )}
+                  {d.acknowledged_at && (
+                    <span className="text-green-600">acked {fmtDate(d.acknowledged_at)}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

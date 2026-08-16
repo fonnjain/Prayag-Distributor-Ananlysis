@@ -1,0 +1,168 @@
+GOAL
+Red Alert detects, persists and displays. Nothing tells anyone. Build routing.
+
+The destocking alert would have fired on Aradhya Kedia in January 2026, three
+months into his primary gap and six months before the retailers beneath him
+went silent. Everything is in place to have raised it and marked it OPEN 3
+PERIODS by March. Nobody would have seen it.
+
+============================================================
+THE ESCALATION LADDER
+============================================================
+  LEVEL 1   the relevant State Head, for their own territory
+            AND Deepak J, all India - he sees everything from the start
+  LEVEL 2   not yet defined. Build the level; leave the recipient blank.
+  LEVEL 3   Nitin Agarwal, CEO, all India - final escalation
+
+Routing by category:
+  A-category (salesperson)   -> State Head + Deepak J
+  B, C and S categories      -> State Head + Deepak J
+
+Cadence:
+  Severe    -> on raise, immediately.  Severe = all S-category (destocking),
+               all C-category, and B3 distributor rollups.
+  Everything else -> weekly digest.
+
+Make the severe list CONFIGURABLE, not hardcoded. The line between "tell me
+now" and "tell me weekly" will move once people use it.
+
+Not one notification per alert. A notification per fire becomes noise within a
+fortnight and then nothing is read.
+
+============================================================
+SEED THESE RECIPIENTS - all fields editable afterwards
+============================================================
+Level 1, State Heads, scoped to their own territory:
+
+  name                    mobile        email
+  Sandeep Dadheech        9331103319    dadheech_san@yahoo.com
+  Aqil Rizvi              9305083814    aqilrizvi@rediffmail.com
+  Biju C.O                9633200526    biju@prayagindia.net
+  Pawan Kumar Sharma      9958040072    pawan.kumar@prayagindia.net
+  Sulinder Pal            9816258614    sulinderpaldhiman@gmail.com
+  Anant Singh             7838915612    anant.singh@prayagindia.com
+  Nasir Hussain Khan      9958065454    nasir.khan@prayagindia.net
+  Sunil Patel             9408709411    sunilp6666@yahoo.com
+  Lalan Kumar             9579398634    lalan.kumar@prayagindia.com
+  Anuj Sharma             8796339586    anuj.sharma@prayagindia.in
+  Narendra Kumar Sharma   9828146028    narendra121sharma@gmail.com
+  Sunil Mohanty           (blank)       (blank)
+
+Level 1, all India:
+  Deepak J                9910896007    deepakj@prayagindia.com
+
+Level 2, all India:
+  (blank - the level exists, the recipient is not yet decided)
+
+Level 3, all India:
+  Nitin Agarwal (CEO)     9810584832    ceo@prayagindia.com
+
+Prayag uses .net, .com and .in - these addresses are as recorded, do not
+"correct" a domain. Sunil Mohanty has no HR record; seed him with blanks so
+the row exists and can be completed in the UI. A recipient with a blank
+contact is SKIPPED with a visible reason, never silently dropped.
+
+============================================================
+SCHEMA
+============================================================
+alert_recipient
+  id · name · escalation_level (1|2|3)
+  scope_type (state_head | all_india) · scope_value (person_id or null)
+  alert_code_pattern ('A*' | 'B*' | 'C*' | 'S*' | 'B3' | '*')
+  channel (whatsapp | email | in_app) · contact · cadence (on_raise | weekly)
+  is_active
+
+alert_delivery
+  alert_id · recipient_id · channel · escalation_level
+  sent_at · delivered_at · opened_at
+  status (pending | sent | failed | skipped) · skip_reason
+
+alert_escalation_config
+  level · window_days     defaults: L1->L2 after 7 days severe / 14 digest
+                                    L2->L3 after 7 days
+
+ESCALATION BEHAVIOUR
+Level 1 receives on raise or in the digest. If NOT ACKNOWLEDGED within the
+window, level 2 receives it with the original raise date and days open. If
+still unacknowledged, level 3.
+
+Escalating never removes it from the level below. Everyone holds it until it
+clears.
+
+With level 2 blank, an unacknowledged alert must SKIP level 2 with a logged
+reason and go to level 3. Do not stall silently at an empty level.
+
+============================================================
+CHANNEL - WHATSAPP IS THE TARGET, NOT YET CONFIGURED
+============================================================
+Build the channel as an interface with three implementations:
+  in_app     works now - notification bell and unread count
+  email      works now - digest and on-raise
+  whatsapp   INTERFACE ONLY. Store the number, render the message body, write
+             the delivery row with status = pending and skip_reason = "no
+             WhatsApp provider configured".
+
+Do NOT integrate a provider. When one is chosen it drops in behind the same
+interface with no change to rules, recipients or the digest.
+
+A whatsapp recipient must remain VISIBLE in the delivery log. If those rows
+were silently skipped, nobody would notice for weeks that the channel everyone
+assumed was working had never sent anything.
+
+============================================================
+THE DIGEST
+============================================================
+Weekly, one message per recipient, covering their scope:
+  NEW since the last digest
+  STILL OPEN, with periods open
+  CLEARED since the last digest
+  ESCALATING to them from a level below
+
+If a recipient has nothing, send nothing. An empty digest teaches people to
+ignore the next one.
+
+Generate from STORED alerts, never recompute. The digest must match the page
+exactly - if the page says 33 and the digest says 31, nobody trusts either.
+
+============================================================
+THE SETTINGS PAGE
+============================================================
+Every field editable: name, level, scope, pattern, channel, contact, cadence,
+active. Add and remove recipients. Edit the escalation windows.
+
+Show per rule: which alerts it covers, which scope, and who is at each level.
+Flag any level with no active recipient.
+
+============================================================
+DO NOT
+============================================================
+- Do not integrate a WhatsApp provider.
+- Do not transmit anything during verification. Dry-run only: write delivery
+  rows and render message bodies without sending.
+- Do not change detection, thresholds, guards or the alert store.
+- Do not correct a seeded email domain.
+
+============================================================
+VERIFY - produced values, and a hash that resolves
+============================================================
+1. Print all seeded recipients by level. Confirm 13 at level 1, 0 at level 2,
+   1 at level 3, and that Sunil Mohanty has blank contact fields.
+2. Raise a severe alert in dry-run for one State Head's territory. Print the
+   delivery rows - expect that head AND Deepak J, both level 1.
+3. Confirm a blank-contact recipient produces a delivery row with status
+   skipped and a readable skip_reason. Print it.
+4. Confirm whatsapp rows are status pending with "no provider configured",
+   and are VISIBLE in the log.
+5. Generate a weekly digest for one recipient in dry-run. Paste the body.
+   Print the digest counts beside the page counts and confirm they match.
+6. Confirm a recipient with no alerts receives NOTHING.
+7. Leave a severe alert unacknowledged past 7 days. Confirm it SKIPS the empty
+   level 2 with a logged reason and reaches level 3, carrying the original
+   raise date and days open. Confirm level 1 still holds it.
+8. Acknowledge an alert before the window. Confirm no escalation fires.
+9. Print one alert card's delivery log - who, channel, when, acknowledged by
+   whom.
+10. Confirm nothing was transmitted during verification.
+11. Confirm the alert count is unchanged before and after.
+12. Commit hash, git cat-file -t, then git merge-base --is-ancestor <hash>
+    main with its exit code.

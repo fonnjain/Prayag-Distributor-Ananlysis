@@ -50,6 +50,7 @@ import stateHierarchyRouter from "./stateHierarchy";
 import marketSurveyRouter from "./marketSurvey";
 import competitorPriceRouter from "./competitorPrice";
 import alertsRouter from "./alerts";
+import { alertRoutingRouter } from "./alertRouting";
 
 const router: IRouter = Router();
 
@@ -106,5 +107,6 @@ router.use(stateHierarchyRouter);
 router.use(marketSurveyRouter);
 router.use(competitorPriceRouter);
 router.use(alertsRouter);
+router.use(alertRoutingRouter);
 
 export default router;

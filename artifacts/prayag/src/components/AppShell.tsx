@@ -84,6 +84,7 @@ const NAV: NavGroup[] = [
       { id: "pending",         label: "Pending Orders",  path: "/pending",         icon: ClipboardList },
       { id: "sources",         label: "Organization",    path: "/sources",         icon: Database },
       { id: "alerts",          label: "Red Alerts",      path: "/alerts",          icon: Bell },
+      { id: "alert-recipients", label: "Alert Settings", path: "/alert-recipients", icon: Settings },
       { id: "warnings",        label: "Warning System",  path: "/warnings",        icon: AlertTriangle },
       { id: "data-health",     label: "Data Health",     path: "/data-health",     icon: ShieldCheck },
     ],
