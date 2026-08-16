@@ -51,6 +51,7 @@ import marketSurveyRouter from "./marketSurvey";
 import competitorPriceRouter from "./competitorPrice";
 import alertsRouter from "./alerts";
 import { alertRoutingRouter } from "./alertRouting";
+import adminMasterImportRouter from "./adminMasterImport";
 
 const router: IRouter = Router();
 
@@ -108,5 +109,6 @@ router.use(marketSurveyRouter);
 router.use(competitorPriceRouter);
 router.use(alertsRouter);
 router.use(alertRoutingRouter);
+router.use(adminMasterImportRouter);
 
 export default router;
