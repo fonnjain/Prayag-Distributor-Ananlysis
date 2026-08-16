@@ -130,3 +130,4 @@
 - [Alert Routing v2](alert-routing-v2.md) — 3-level escalation; scope_type=all_india (not "all"); recipient_id nullable for L2 skip rows; blank contact → skipped row, never silent drop.
 - [Red Alert C6 — Territorial Concentration](red-alert-c6.md) — C6 fires for ≥10 retailer stops AND ≥30% share per state head; Sandeep Dadheech fires at Q1; threshold calibrated Aug 2026.
 - [GP Margin load persistence](gp-margin-load-persistence.md) — margin_fact always empty in prod because each publish kills the in-flight transaction; fix in 64fc968.
+- [Weekly digest scheduler and email](weekly-digest-scheduler.md) — scheduler wires Monday 07:30 IST; Resend primary email; verify on_raise when new=1.
