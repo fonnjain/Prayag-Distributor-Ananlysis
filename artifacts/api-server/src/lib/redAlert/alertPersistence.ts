@@ -80,6 +80,8 @@ export type DetectionStats = {
   totalAcknowledged: number;
   linkedPairs: number;
   detectedAt: string;
+  /** IDs of alerts inserted in this run (status=open, periods_open=1). */
+  newAlertIds: number[];
 };
 
 type AlertDbRow = {
@@ -162,6 +164,7 @@ export async function persistAlerts(
   let updatedCount = 0;
   let reopenedCount = 0;
   let clearedCount = 0;
+  const newAlertIds: number[] = [];
 
   // ── Single transaction for the entire snapshot + upsert + clear pass ───────
   // The advisory lock serializes concurrent detection runs for this FY.
@@ -269,6 +272,7 @@ export async function persistAlerts(
         );
         const newId = inserted[0]!.id;
         upsertedAlerts.push({ id: newId, code: alert.code, entityKey: alert.entityKey });
+        newAlertIds.push(newId);
         newCount++;
       }
     }
@@ -414,6 +418,7 @@ export async function persistAlerts(
     totalAcknowledged: countMap["acknowledged"] ?? 0,
     linkedPairs,
     detectedAt: now.toISOString(),
+    newAlertIds,
   };
 }
 

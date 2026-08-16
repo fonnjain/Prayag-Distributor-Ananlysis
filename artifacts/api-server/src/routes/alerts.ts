@@ -11,6 +11,7 @@ import { Router } from "express";
 import { pool } from "@workspace/db";
 import { isAdminToken } from "../lib/adminAuth.js";
 import { runAlertDetection } from "../lib/redAlert/alertPersistence.js";
+import { notifyAlert } from "../lib/alertRouting/notify.js";
 import { currentOpenFy } from "../lib/fyAnchors.js";
 import { logger } from "../lib/logger.js";
 
@@ -91,6 +92,29 @@ router.post("/alerts/detect", async (req, res) => {
   try {
     const stats = await runAlertDetection();
 
+    // Fan out on_raise notifications for every alert raised in this run.
+    // Uses allSettled so one failure doesn't abort the rest.
+    // Idempotency in notifyAlert ensures re-runs don't double-fire.
+    let notifyDeliveries = 0;
+    let notifyErrors = 0;
+    if (stats.newAlertIds.length > 0) {
+      const notifyResults = await Promise.allSettled(
+        stats.newAlertIds.map((id) =>
+          notifyAlert(id, { dryRun: false, triggerType: "on_raise" }),
+        ),
+      );
+      for (const r of notifyResults) {
+        if (r.status === "fulfilled") notifyDeliveries += r.value.length;
+        else {
+          notifyErrors++;
+          logger.error(
+            { err: r.reason },
+            "[alerts/detect] notifyAlert failed for a new alert",
+          );
+        }
+      }
+    }
+
     // 11 verifications — logged and returned so callers can assert
     const verifications = [
       {
@@ -153,7 +177,7 @@ router.post("/alerts/detect", async (req, res) => {
     const allPass = verifications.every((v) => v.pass);
     logger.info({ verifications, allPass }, "[alerts/detect] verifications");
 
-    res.json({ ...stats, verifications, allPass });
+    res.json({ ...stats, verifications, allPass, notifyDeliveries, notifyErrors });
   } catch (err) {
     logger.error({ err }, "[alerts/detect] detection failed");
     res.status(500).json({ error: String(err) });
