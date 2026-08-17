@@ -136,3 +136,4 @@
 - [Weekly digest scheduler and email](weekly-digest-scheduler.md) — scheduler wires Monday 07:30 IST; Resend primary email; verify on_raise when new=1.
 - [Person departure + holding lifecycle](person-departure-lifecycle.md) — departed heads move customers to an is_holding system person; exclude is_holding from assignable lists and departedHeadNames from per-head alerts.
 - [Name normalisation families](name-norm-families.md) — 4 deliberate norm families (normSecKey/normDistKey/headNormKey/UPPER-TRIM pairs); person-name SQL joins need full-strip + employee-code conflict guard; directory field is distKey.
+- [Departed-import pattern](departed-import-pattern.md) — source='departed_import' inactive persons bridge former_tm names to Band B suggestions; Rajasthan gap: Narendra (pid=25) has 0 TMs, fix by moving his departed persons to Pawan (pid=14).
