@@ -14,12 +14,6 @@ import { loadFactoryPending } from "../mgmt/factoryPending.js";
 import { listSheetTabs, readTabRowsChunked } from "../registers/sheetsApi.js";
 import { BOOKING_SHEETS, readBookingAggregated } from "../mgmt/primarySheets.js";
 import { currentOpenFy, priorFy } from "../fyAnchors.js";
-import {
-  runSkuWipeCanary,
-  runFrozenButEmptyCheck,
-  RULE1_ROWS_RATIO,
-  RULE3_DIST_RATIO,
-} from "../redAlert/skuCanary.js";
 
 // ── Anchor types ───────────────────────────────────────────────────────────────
 
@@ -865,134 +859,105 @@ async function runSecondaryPipelineGroup(): Promise<CheckGroup> {
   }
 }
 
-// ── Entry point ────────────────────────────────────────────────────────────────
-
-// ── Group 12 — SKU wipe canary (server DB / production when deployed) ─────────
-//
-// The CI test (aiGrowthReport.activation.test.ts) runs the same ratio rules
-// against the dev database. This group runs the identical logic server-side,
-// so it checks whichever database the API server is connected to —
-// production in the deployed environment, dev on the local dev server.
-//
-// Two rule sets:
-//   R1 / R3  Per-month: rows / distinct distributors ≥ ratio × prior like-month
-//   R2       Total rows across completed months ≥ ratio × prior total
-//   FBE      Frozen-but-empty: months frozen in register_month_state but absent
-//            from secondary_sku_line — the root cause of the July-26 false
-//            positives. Guard 3 evicts these at runtime (context.ts); this
-//            check makes the invariant visible in the audit xlsx.
-//
-// "Completed months" is calendar-derived (completedMonthLabels), NOT from
-// register_month_state — the two tables are independent loading pipelines.
-
-async function runSkuWipeCanaryGroup(): Promise<CheckGroup> {
-  const openFy  = currentOpenFy();
-  const priorFy_ = priorFy(openFy);
-  const now     = new Date();
-  const checks: HealthCheck[] = [];
+async function runSkuCanaryGroup(): Promise<CheckGroup> {
+  const { runSkuWipeCanary } = await import("../redAlert/skuCanary.js");
+  const groupLabel = "Group 12 — SKU wipe canary (secondary_sku_line vs register_month_state)";
 
   try {
-    const [canary, frozenEmpty] = await Promise.all([
-      runSkuWipeCanary(pool, openFy, priorFy_, now),
-      runFrozenButEmptyCheck(pool, openFy),
-    ]);
+    const result = await runSkuWipeCanary(pool, { environment: "production" });
+    const checks: HealthCheck[] = [];
 
-    const { completedLabels, rows, totalRow } = canary;
-
-    // ── Ratio rules (R1, R3, R2) ──────────────────────────────────────────────
-    if (completedLabels.length === 0) {
+    // R1: per-month rows ratio
+    if (result.completedMonths.length === 0) {
       checks.push({
-        key:      "sku_canary_no_completed",
-        label:    `12.0 — SKU wipe canary: no completed months yet in FY${openFy}`,
-        unit:     "count",
+        key: "sku_canary_r1_na",
+        label: "12.1 — R1: per-month rows ratio (open FY vs prior like-months)",
+        unit: "text",
         expected: null,
-        actual:   null,
+        actual: null,
         deltaPct: null,
-        status:   "skip",
-        note:     `Calendar-based ratio rules are not applicable: no month has fully elapsed in FY${openFy}. The frozen-but-empty check (12.F) below is always active.`,
+        status: "skip",
+        note: `No completed months yet in open FY ${result.openFy} — canary not applicable until May 1.`,
       });
     } else {
-      for (const row of rows) {
-        const isR1     = row.rule === "R1_rows";
-        const ratio    = isR1 ? RULE1_ROWS_RATIO : RULE3_DIST_RATIO;
-        const pct      = (ratio * 100).toFixed(0);
-        const ruleNum  = isR1 ? "12.1" : "12.3";
-        const measure  = isR1 ? "rows" : "distinct distributors";
-        const shortKey = `${row.month.toLowerCase().replace("-", "")}`;
-
+      for (const r of result.rule1Results) {
+        const status: CheckStatus = r.skipped ? "skip" : r.pass ? "pass" : "fail";
         checks.push({
-          key:      `sku_canary_${isR1 ? "r1" : "r3"}_${shortKey}`,
-          label:    `${ruleNum} — SKU canary ${isR1 ? "R1 rows" : "R3 distributors"}: ${row.month} vs ${row.priorMonth} (server DB)`,
-          unit:     "count",
-          expected: row.skipped ? null : Math.round(row.floor),
-          actual:   row.actual,
-          deltaPct: row.priorActual > 0 ? ((row.actual - row.priorActual) / row.priorActual) * 100 : null,
-          status:   row.skipped ? "skip" : row.pass ? "pass" : "fail",
-          note:     row.skipped
-            ? `Prior baseline ${row.priorMonth} has no ${measure} — cannot evaluate ${pct}% floor. A wiped prior FY disarms the canary and must not pass silently.`
-            : !row.pass
-              ? `FAIL: ${row.month} has ${row.actual.toLocaleString("en-IN")} ${measure}, below ${pct}% of prior like-month ${row.priorMonth} (${row.priorActual.toLocaleString("en-IN")}). Floor: ${Math.round(row.floor).toLocaleString("en-IN")}. Load secondary SKU data for ${row.month} and re-run.`
-              : `${row.month}: ${row.actual.toLocaleString("en-IN")} ${measure} ≥ ${pct}% of ${row.priorMonth} (${row.priorActual.toLocaleString("en-IN")}). Server DB — production when deployed.`,
+          key: `sku_canary_r1_${r.monthLabel.replace("-", "")}`,
+          label: `12.1 — R1 ${r.monthLabel}: secondary_sku_line rows vs 60% of prior like-month`,
+          unit: "count",
+          expected: Math.round(r.floor),
+          actual: r.actual,
+          deltaPct: r.floor > 0 ? ((r.actual - r.floor) / r.floor) * 100 : null,
+          status,
+          note: r.skipped
+            ? `Prior like-month ${r.monthLabel.replace(/(\w+)-(\d+)/, (_, m, y) => `${m}-${String(parseInt(y, 10) - 1).padStart(2, "0")}`)} has zero rows — baseline integrity violation, canary disarmed.`
+            : r.pass
+              ? `${r.monthLabel}: ${r.actual.toLocaleString()} rows ≥ floor ${Math.round(r.floor).toLocaleString()} (60% of prior like-month).`
+              : `FAIL ${r.monthLabel}: only ${r.actual.toLocaleString()} rows vs floor ${Math.round(r.floor).toLocaleString()} — possible partial wipe.`,
         });
       }
+    }
 
+    // R2: total ratio (info row)
+    {
+      const r = result.rule2Result;
+      const status: CheckStatus = r.skipped ? "skip" : r.pass ? "pass" : "warn";
       checks.push({
-        key:      "sku_canary_r2_total",
-        label:    `12.2 — SKU canary R2 total rows across completed months (server DB)`,
-        unit:     "count",
-        expected: totalRow.skipped ? null : Math.round(totalRow.floor),
-        actual:   totalRow.actual,
-        deltaPct: totalRow.priorActual > 0 ? ((totalRow.actual - totalRow.priorActual) / totalRow.priorActual) * 100 : null,
-        status:   totalRow.skipped ? "skip" : totalRow.pass ? "pass" : "fail",
-        note:     totalRow.skipped
-          ? "Prior FY has no rows for completed like-months — cannot evaluate 70% total floor."
-          : totalRow.pass
-            ? `Total across ${completedLabels.join(", ")}: ${totalRow.actual.toLocaleString("en-IN")} rows ≥ 70% of prior total ${totalRow.priorActual.toLocaleString("en-IN")}. Server DB.`
-            : `FAIL: Total ${totalRow.actual.toLocaleString("en-IN")} < 70% floor ${Math.round(totalRow.floor).toLocaleString("en-IN")} across ${completedLabels.join(", ")}. Prior total: ${totalRow.priorActual.toLocaleString("en-IN")}.`,
+        key: "sku_canary_r2_total",
+        label: `12.2 — R2: completed-month total rows vs 70% of prior like-months`,
+        unit: "count",
+        expected: Math.round(r.floor),
+        actual: r.actual,
+        deltaPct: r.floor > 0 ? ((r.actual - r.floor) / r.floor) * 100 : null,
+        status,
+        note: r.skipped
+          ? "Prior FY like-months have zero rows — R2 not applicable."
+          : r.pass
+            ? `Total ${r.actual.toLocaleString()} rows across completed months ≥ floor ${Math.round(r.floor).toLocaleString()}.`
+            : `Total ${r.actual.toLocaleString()} rows < floor ${Math.round(r.floor).toLocaleString()} — R2 alone may not catch a single-month wipe (check R1).`,
       });
     }
 
-    // ── Frozen-but-empty (FBE) — always runs regardless of completedLabels ─────
-    if (frozenEmpty.length === 0) {
+    // R4: frozen months with zero secondary rows
+    if (result.frozenEmptyResults.length === 0) {
       checks.push({
-        key:      "sku_canary_fbe_ok",
-        label:    `12.F — Frozen-but-empty: all frozen months have secondary rows (FY${openFy})`,
-        unit:     "count",
+        key: "sku_canary_r4_none",
+        label: "12.4 — R4: frozen months with zero secondary_sku_line rows",
+        unit: "count",
         expected: 0,
-        actual:   0,
+        actual: 0,
         deltaPct: null,
-        status:   "pass",
-        note:     `All months frozen in register_month_state for FY${openFy} have ≥1 row in secondary_sku_line. Primary freeze state and secondary data presence are aligned. Server DB.`,
+        status: "pass",
+        note: "No frozen months found in register_month_state — R4 not applicable.",
       });
     } else {
-      for (const { fy, month_label } of frozenEmpty) {
+      for (const fr of result.frozenEmptyResults) {
+        const status: CheckStatus = fr.pass ? "pass" : "fail";
         checks.push({
-          key:      `sku_canary_fbe_${month_label.toLowerCase().replace("-", "")}`,
-          label:    `12.F — Frozen-but-empty: ${month_label} is frozen but has no secondary_sku_line rows (FY${fy})`,
-          unit:     "count",
+          key: `sku_canary_r4_${fr.fy.replace("-", "")}_${fr.monthLabel.replace("-", "")}`,
+          label: `12.4 — R4 ${fr.fy} ${fr.monthLabel}: frozen primary month must have secondary data`,
+          unit: "count",
           expected: 1,
-          actual:   0,
+          actual: fr.secondaryRows,
           deltaPct: null,
-          status:   "fail",
-          note:     `FAIL: ${month_label} is frozen in register_month_state (primary data locked) but secondary_sku_line has zero rows for this month and FY. This is the category error that caused the July-26 false-positive S1 alerts — register_month_state tracks the PRIMARY register (sale_line_all), not secondary data. Guard 3 evicts such months at runtime (context.ts), but secondary SKU data for ${month_label} should be loaded.`,
+          status,
+          note: fr.pass
+            ? `${fr.fy} ${fr.monthLabel}: frozen at ${fr.frozenAt.slice(0, 10)}, ${fr.secondaryRows.toLocaleString()} secondary rows present — OK.`
+            : `FAIL: ${fr.fy} ${fr.monthLabel} is frozen (frozen_at=${fr.frozenAt.slice(0, 10)}) but has ZERO secondary_sku_line rows. This is the exact scenario that produced July-26 false-positive S1 alerts.`,
         });
       }
     }
 
-    return {
-      id:        "sku_wipe_canary",
-      label:     `Group 12 — SKU wipe canary (server DB / production when deployed, FY${openFy})`,
-      available: true,
-      checks,
-    };
+    return { id: "sku_canary", label: groupLabel, available: true, checks };
   } catch (err) {
-    logger.warn({ err }, "audit: SKU wipe canary group threw");
+    logger.warn({ err }, "audit: SKU canary group threw");
     return {
-      id:          "sku_wipe_canary",
-      label:       `Group 12 — SKU wipe canary (server DB, FY${openFy})`,
-      available:   false,
-      pendingNote: `SKU wipe canary failed — check server logs: ${err instanceof Error ? err.message : String(err)}`,
-      checks:      [],
+      id: "sku_canary",
+      label: groupLabel,
+      available: false,
+      pendingNote: `SKU canary check failed — check server logs: ${err instanceof Error ? err.message : String(err)}`,
+      checks: [],
     };
   }
 }
@@ -1069,7 +1034,7 @@ export async function runFrozenAnchorGroup(): Promise<CheckGroup> {
 }
 
 export async function runExtraGroups(fy: string): Promise<CheckGroup[]> {
-  const [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag, frozenAnchors, secondaryPipeline, skuWipeCanary] =
+  const [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag, frozenAnchors, secondaryPipeline, skuCanary] =
     await Promise.all([
       runTruncationGroup(),
       runReportLogicGroup(fy),
@@ -1078,7 +1043,7 @@ export async function runExtraGroups(fy: string): Promise<CheckGroup[]> {
       runSapLagGroup(),
       runFrozenAnchorGroup(),
       runSecondaryPipelineGroup(),
-      runSkuWipeCanaryGroup(),
+      runSkuCanaryGroup(),
     ]);
-  return [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag, frozenAnchors, secondaryPipeline, skuWipeCanary];
+  return [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag, frozenAnchors, secondaryPipeline, skuCanary];
 }

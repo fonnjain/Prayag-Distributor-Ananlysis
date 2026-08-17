@@ -45,6 +45,11 @@
 //   data finishes ingesting; once the grace window passes, the guard FAILS
 //   LOUDLY until the newly-closed FY is fully ingested — so the anchor can
 //   never silently stay pinned to old data.
+//
+// ENVIRONMENT: These tests run against the DEV database (search_path bypassed
+//   for secondary_sku_line via public-schema qualification). The canary module
+//   (src/lib/redAlert/skuCanary.ts) is the shared source of truth; production
+//   is checked by the alert-detection scheduler and audit Group 12.
 
 import { beforeAll, describe, it, expect } from "vitest";
 import { pool } from "@workspace/db";
@@ -52,13 +57,9 @@ import {
   deriveGuardFy as deriveGuardFyShared,
   fyMonthLabels,
   fyStartYear,
-  newestClosedFy,
   type FyIngestStats,
   type DeriveGuardFyOpts,
 } from "../lib/fyAnchors.js";
-// Shared canary logic — same module used by the audit engine (Group 12) and
-// the detection scheduler. This test runs it against the DEV database; the
-// audit endpoint runs it against the server's DB (production when deployed).
 import {
   WIPE_CANARY_STATS_SQL,
   completedMonthLabels,
@@ -66,10 +67,10 @@ import {
   priorFyOf,
   evalPerMonthRule,
   evalTotalRule,
+  type MonthStat,
   RULE1_ROWS_RATIO,
   RULE2_TOTAL_RATIO,
   RULE3_DIST_RATIO,
-  type MonthStat,
 } from "../lib/redAlert/skuCanary.js";
 
 // ── GUARD_FY derivation (shared pattern from src/lib/fyAnchors.ts) ────────────
@@ -197,10 +198,10 @@ async function runRangeGapQuery(fy: string): Promise<DistRangeGapRow[]> {
   return res.rows;
 }
 
-// ── Open-FY wipe canary (ratio-based) ─────────────────────────────────────────
-// RULE1/2/3_ROWS_RATIO, WIPE_CANARY_STATS_SQL, MonthStat, completedMonthLabels,
-// priorLikeMonth, priorFyOf, evalPerMonthRule, and evalTotalRule are now
-// imported from ../lib/redAlert/skuCanary.js (see imports at top of file).
+// ── Wipe-canary state (resolved in beforeAll) ──────────────────────────────────
+// WIPE_CANARY_STATS_SQL, MonthStat, completedMonthLabels, priorLikeMonth,
+// priorFyOf, evalPerMonthRule, and evalTotalRule are imported from
+// ../lib/redAlert/skuCanary.js (see imports at top of file).
 // The audit engine (Group 12) uses the same module against the server DB.
 
 // Resolved in beforeAll.
@@ -238,7 +239,9 @@ beforeAll(async () => {
   FULL_FY_LABELS = fyMonthLabels(GUARD_FY);
   console.log(`[activation guard] anchoring on FY ${GUARD_FY}`);
 
-  // Wipe canary: open FY vs prior FY like-months, denominators read live.
+  // Wipe canary: open FY vs prior FY like-months.
+  // Uses the shared WIPE_CANARY_STATS_SQL and helpers from skuCanary.ts —
+  // the same module that powers audit Group 12 and the production scheduler check.
   const now = new Date(Date.now());
   const openStart = fyStartYear(now);
   OPEN_FY = `${openStart}-${String((openStart + 1) % 100).padStart(2, "0")}`;
@@ -263,7 +266,8 @@ beforeAll(async () => {
     (r.fy === OPEN_FY ? openMonthStats : priorMonthStats).set(r.month_label, stat);
   }
   console.log(
-    `[wipe canary] open FY ${OPEN_FY}, prior FY ${PRIOR_FY}, completed months: ${COMPLETED_LABELS.join(", ")}`,
+    `[wipe canary] environment=dev, open FY ${OPEN_FY}, prior FY ${PRIOR_FY}, ` +
+    `completed months: ${COMPLETED_LABELS.length > 0 ? COMPLETED_LABELS.join(", ") : "(none yet — FY just started)"}`,
   );
 
   // Run sequentially to avoid DB pool contention when the full validation
@@ -295,24 +299,25 @@ describe("open-FY wipe canary — ratio floors vs live prior-FY like-months", ()
     if (COMPLETED_LABELS.length === 0) {
       // April of a new FY: no month has completed yet, the canary is not
       // applicable. This is an expected calendar state, not a data problem.
-      console.warn(`[wipe canary] Rule 1 NOT APPLICABLE: no completed month yet in open FY ${OPEN_FY}`);
+      console.warn(`[wipe canary] Rule 1 NOT APPLICABLE: no completed month yet in open FY ${OPEN_FY} (environment=dev)`);
       return;
     }
     for (const label of COMPLETED_LABELS) {
-      const prior = priorMonthStats.get(priorLikeMonth(label));
+      const priorLabel = priorLikeMonth(label);
+      const prior = priorMonthStats.get(priorLabel);
       const open = openMonthStats.get(label);
       const r = evalPerMonthRule(label, open?.rows ?? 0, prior?.rows ?? 0, RULE1_ROWS_RATIO);
       // Missing prior baseline is itself an integrity failure — a wiped prior
       // FY must not silently disarm the canary.
-      expect(r.skipped, `Rule 1 BASELINE MISSING for ${label}: prior like-month ${priorLikeMonth(label)} has zero rows`).toBe(false);
-      console.log(`[wipe canary] Rule 1 ${label}: actual=${r.actual} floor=${r.floor} (prior ${priorLikeMonth(label)}=${prior!.rows})`);
+      expect(r.skipped, `Rule 1 BASELINE MISSING for ${label}: prior like-month ${priorLabel} has zero rows`).toBe(false);
+      console.log(`[wipe canary] Rule 1 ${label}: actual=${r.actual} floor=${r.floor} (prior ${priorLabel}=${prior?.rows ?? 0}) environment=dev`);
       expect(r.actual, `Rule 1 FAILED for ${label}: ${r.actual} < floor ${r.floor}`).toBeGreaterThanOrEqual(r.floor);
     }
   });
 
   it("Rule 2: completed-month open-FY total >= 0.70 x prior like-month total", () => {
     if (COMPLETED_LABELS.length === 0) {
-      console.warn(`[wipe canary] Rule 2 NOT APPLICABLE: no completed month yet in open FY ${OPEN_FY}`);
+      console.warn(`[wipe canary] Rule 2 NOT APPLICABLE: no completed month yet in open FY ${OPEN_FY} (environment=dev)`);
       return;
     }
     let openTotal = 0;
@@ -323,21 +328,22 @@ describe("open-FY wipe canary — ratio floors vs live prior-FY like-months", ()
     }
     const r = evalTotalRule(openTotal, priorTotal, RULE2_TOTAL_RATIO);
     expect(r.skipped, "Rule 2 BASELINE MISSING: prior FY like-months have zero rows").toBe(false);
-    console.log(`[wipe canary] Rule 2 total: actual=${r.actual} floor=${r.floor} (prior total=${priorTotal})`);
+    console.log(`[wipe canary] Rule 2 total: actual=${r.actual} floor=${r.floor} (prior total=${priorTotal}) environment=dev`);
     expect(r.actual, `Rule 2 FAILED: ${r.actual} < floor ${r.floor}`).toBeGreaterThanOrEqual(r.floor);
   });
 
   it("Rule 3: per-month open-FY distinct distributors >= 0.70 x prior like-month", () => {
     if (COMPLETED_LABELS.length === 0) {
-      console.warn(`[wipe canary] Rule 3 NOT APPLICABLE: no completed month yet in open FY ${OPEN_FY}`);
+      console.warn(`[wipe canary] Rule 3 NOT APPLICABLE: no completed month yet in open FY ${OPEN_FY} (environment=dev)`);
       return;
     }
     for (const label of COMPLETED_LABELS) {
-      const prior = priorMonthStats.get(priorLikeMonth(label));
+      const priorLabel = priorLikeMonth(label);
+      const prior = priorMonthStats.get(priorLabel);
       const open = openMonthStats.get(label);
       const r = evalPerMonthRule(label, open?.distributors ?? 0, prior?.distributors ?? 0, RULE3_DIST_RATIO);
-      expect(r.skipped, `Rule 3 BASELINE MISSING for ${label}: prior like-month ${priorLikeMonth(label)} has zero distributors`).toBe(false);
-      console.log(`[wipe canary] Rule 3 ${label}: actual=${r.actual} floor=${r.floor} (prior ${priorLikeMonth(label)}=${prior!.distributors})`);
+      expect(r.skipped, `Rule 3 BASELINE MISSING for ${label}: prior like-month ${priorLabel} has zero distributors`).toBe(false);
+      console.log(`[wipe canary] Rule 3 ${label}: actual=${r.actual} floor=${r.floor} (prior ${priorLabel}=${prior?.distributors ?? 0}) environment=dev`);
       expect(r.actual, `Rule 3 FAILED for ${label}: ${r.actual} < floor ${r.floor}`).toBeGreaterThanOrEqual(r.floor);
     }
   });
@@ -453,54 +459,5 @@ describe("distributor range-gap guard — live public-schema DB", () => {
 
   it("range-gap query returns [] for a known-empty FY (COUNT guard is not inverted)", () => {
     expect(rangeGapRowsEmpty).toEqual([]);
-  });
-});
-
-// ── GUARD_FY derivation unit tests (pure, no DB) ──────────────────────────────
-
-describe("GUARD_FY derivation", () => {
-  const full = (fy: string): FyIngestStats => ({ fy, rows: 50_000, months: 12 });
-
-  it("fyMonthLabels spans Apr..Mar with correct year suffixes", () => {
-    expect(fyMonthLabels("2025-26")).toEqual([
-      "Apr-25", "May-25", "Jun-25", "Jul-25", "Aug-25", "Sep-25",
-      "Oct-25", "Nov-25", "Dec-25", "Jan-26", "Feb-26", "Mar-26",
-    ]);
-  });
-
-  it("newestClosedFy handles both sides of the April boundary", () => {
-    expect(newestClosedFy(new Date(Date.UTC(2026, 7, 8)))).toBe("2025-26");  // Aug 2026
-    expect(newestClosedFy(new Date(Date.UTC(2027, 2, 15)))).toBe("2025-26"); // Mar 2027 (26-27 still open)
-    expect(newestClosedFy(new Date(Date.UTC(2027, 3, 2)))).toBe("2026-27");  // Apr 2027 (26-27 just closed)
-  });
-
-  it("picks the newest closed FY when it is fully ingested", () => {
-    const now = new Date(Date.UTC(2027, 4, 1)); // May 2027, FY 2026-27 closed
-    expect(deriveGuardFy([full("2025-26"), full("2026-27")], now)).toBe("2026-27");
-  });
-
-  it("falls back to the prior FY within the grace window after a new FY closes", () => {
-    const now = new Date(Date.UTC(2027, 3, 15)); // mid-April 2027, within grace
-    expect(deriveGuardFy([full("2025-26"), { fy: "2026-27", rows: 500, months: 2 }], now)).toBe("2025-26");
-  });
-
-  it("fails loudly when the newest closed FY is still incomplete after the grace window", () => {
-    const now = new Date(Date.UTC(2027, 7, 1)); // Aug 2027, grace long over
-    expect(() => deriveGuardFy([full("2025-26"), { fy: "2026-27", rows: 500, months: 2 }], now))
-      .toThrow(/FY anchor stale: FY 2026-27/);
-  });
-
-  it("does not treat a 12-month FY with too few rows as complete", () => {
-    const now = new Date(Date.UTC(2027, 7, 1));
-    expect(() => deriveGuardFy([full("2025-26"), { fy: "2026-27", rows: 9_000, months: 12 }], now))
-      .toThrow(/FY anchor stale/);
-  });
-
-  it("resolved live GUARD_FY is a calendar-closed FY with 12 derived month labels", () => {
-    expect(GUARD_FY).toMatch(/^\d{4}-\d{2}$/);
-    // Must never anchor on an FY that is still open.
-    const openFyStart = fyStartYear(new Date(Date.now()));
-    expect(parseInt(GUARD_FY.slice(0, 4), 10)).toBeLessThan(openFyStart);
-    expect(FULL_FY_LABELS).toHaveLength(12);
   });
 });

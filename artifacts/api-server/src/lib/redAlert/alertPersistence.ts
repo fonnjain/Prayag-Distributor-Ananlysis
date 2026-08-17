@@ -460,26 +460,45 @@ export async function runAlertDetection(): Promise<DetectionStats> {
     "[alertDetection] persistence complete",
   );
 
-  // ── Non-blocking frozen-but-empty canary ─────────────────────────────────
-  // Logs WARN if any month is frozen in register_month_state (primary data
-  // locked) but has zero rows in secondary_sku_line. This is the category
-  // error that caused the July-26 false-positive S1 alerts. Guard 3 already
-  // evicts these at runtime (context.ts); this check surfaces them in the
-  // production scheduler log so they are noticed before the next detection
-  // cycle emits false alerts.
-  // Error in this check must never abort the detection run.
+  // ── SKU wipe canary (non-blocking post-detection check) ────────────────────
+  // Runs the full canary (R1–R4) against the live DB at the end of every
+  // detection pass. A failure here means secondary_sku_line has lost rows
+  // since the last run, or a frozen month has no secondary data (the July-26
+  // false-positive scenario). Errors are caught and logged — they must never
+  // abort the detection run.
   try {
-    const frozenEmpty = await runFrozenButEmptyCheck(pool, fy);
-    if (frozenEmpty.length > 0) {
+    const { runSkuWipeCanary } = await import("./skuCanary.js");
+    const canary = await runSkuWipeCanary(pool, { environment: "production" });
+    if (canary.anyFail) {
+      const failingR1 = canary.rule1Results.filter((r) => !r.pass && !r.skipped);
+      const failingR3 = canary.rule3Results.filter((r) => !r.pass && !r.skipped);
+      const failingR4 = canary.frozenEmptyResults.filter((r) => !r.pass);
       logger.warn(
-        { fy, frozenEmptyMonths: frozenEmpty.map((r) => r.month_label) },
-        "[alertDetection] canary: frozen months with zero secondary_sku_line rows — " +
-        "Guard 3 will evict them, but secondary SKU data should be loaded. " +
-        "See GET /api/audit Group 12 for details.",
+        {
+          fy,
+          openFy: canary.openFy,
+          completedMonths: canary.completedMonths,
+          r1Failures: failingR1.map((r) => ({
+            month: r.monthLabel, actual: r.actual, floor: Math.round(r.floor),
+          })),
+          r3Failures: failingR3.map((r) => ({
+            month: r.monthLabel, actual: r.actual, floor: Math.round(r.floor),
+          })),
+          r4Failures: failingR4.map((r) => ({
+            fy: r.fy, month: r.monthLabel, secondaryRows: r.secondaryRows, frozenAt: r.frozenAt,
+          })),
+          r2: { actual: canary.rule2Result.actual, floor: Math.round(canary.rule2Result.floor), pass: canary.rule2Result.pass },
+        },
+        "[skuCanary] WIPE CANARY FAIL — secondary_sku_line data gap detected after alert detection run",
+      );
+    } else {
+      logger.info(
+        { fy, openFy: canary.openFy, completedMonths: canary.completedMonths },
+        "[skuCanary] canary passed — secondary_sku_line looks complete",
       );
     }
   } catch (canaryErr) {
-    logger.warn({ err: canaryErr }, "[alertDetection] canary: frozen-but-empty check failed (non-fatal)");
+    logger.warn({ err: canaryErr, fy }, "[skuCanary] canary check threw (non-fatal) — check server logs");
   }
 
   return stats;
