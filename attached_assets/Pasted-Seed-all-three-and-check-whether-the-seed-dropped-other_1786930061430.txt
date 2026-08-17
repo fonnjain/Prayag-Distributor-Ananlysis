@@ -1,0 +1,44 @@
+Seed all three, and check whether the seed dropped others the same way.
+
+1. SEED THE THREE INTO person
+  J. Kamal Kishore   (849, reports to Suresh Kumar Nair, SH Sandeep Dadheech)
+  K.V. Thamizhselvan (601, reports to Mahendra Kumar Jain, no SH resolved)
+  J. Suresh Kumar    (737, reports to Biju C.O, SH Biju C.O)
+
+Two report to DEPARTED managers - Suresh Kumar Nair and Mahendra Kumar Jain.
+Handle as the Phase 1 chain walk did: keep walking THROUGH the departed
+manager to the head above. Do not leave reports_to NULL if a head is
+reachable.
+
+K.V. Thamizhselvan has no state head resolved because Mahendra Kumar Jain's
+own registry rows have no reporting_manager. Report what he resolves to, and
+if nothing, leave state_head NULL rather than guessing.
+
+Flag J. Suresh Kumar: active in HR, zero register rows anywhere. Either new,
+or a stale HR row. Seed him but mark it.
+
+2. CHECK WHETHER THE SEED DROPPED OTHERS
+The Phase 2 seed came from the HR active roster. If someone's reporting
+manager pointed at a departed person, the rollup that built it may have
+dropped them.
+
+Print every person_registry row with hr_status = 'Active' and no person_id
+FK, after seeding these three. If the answer is zero, the seed was complete
+apart from these. If there are more, print them with their register row
+counts - and that is a bigger gap than three people.
+
+3. THE NAME NORMALISER DOES NOT STRIP PERIODS
+"K. Suresh Kumar" and "K Suresh Kumar" failed to match; the employee code
+rescued it. That is the second punctuation variant to hide a match in this
+project - Sulindar/Sulinder was the first.
+
+Raise as a task, do not fix now: normalise periods and other punctuation in
+normSecKey, then re-run every name match that uses it and report what changes.
+It touches head resolution, so it needs its own verification.
+
+VERIFY
+  a. person count before and after - expect 179 to 182.
+  b. Each seeded person's reports_to, state_head, and how each resolved.
+  c. The item 2 result - active registry rows with no FK.
+  d. Confirm sale_line, secondary_sku_line and customer unchanged.
+  e. Push and both git refs.

@@ -1456,6 +1456,42 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    // Patch the employee-code FK population from migration 043.
+    // Migration 043 restricted the employee-code match to ids IN (134, 253)
+    // to cover K. Suresh Kumar and S. Tirumala Rao. Three more registry rows
+    // were missed because their canonical_names differ only in case or period
+    // spacing from the person row:
+    //   reg 122  J. Kamal Kishore    ↔ person 105  J.Kamal Kishore    (emp 849)
+    //   reg 123  J. Suresh Kumar     ↔ person  88  J.SURESH KUMAR     (emp 737)
+    //   reg 136  K.V. Thamizhselvan  ↔ person  66  K.V.THAMIZHSELVAN  (emp 601)
+    //
+    // Also fixes J.Kamal Kishore's reports_to_person_id: his direct manager
+    // (Suresh Kumar Nair) is departed and not in person, but the chain walk
+    // through the registry reaches Sandeep Dadheech (person_id=2). Per the
+    // Phase 1 chain-walk rule: do not leave reports_to NULL if a head is
+    // reachable. K.V.THAMIZHSELVAN correctly stays NULL — Mahendra Kumar Jain
+    // has no chain above in the registry.
+    id: "044_person_registry_person_fk_patch",
+    sql: `
+      -- Broaden the employee-code match: fill any remaining registry rows
+      -- whose code matches a person row but were missed by name normalisation.
+      UPDATE person_registry pr
+      SET person_id = p.person_id
+      FROM person p
+      WHERE pr.employee_code = p.employee_code
+        AND pr.employee_code IS NOT NULL
+        AND TRIM(pr.employee_code) != ''
+        AND pr.person_id IS NULL;
+
+      -- Chain-walk fix: J.Kamal Kishore's direct manager (Suresh Kumar Nair)
+      -- is departed; walk through to Sandeep Dadheech (person_id=2).
+      UPDATE person
+      SET reports_to_person_id = 2
+      WHERE person_id = 105
+        AND reports_to_person_id IS NULL;
+    `,
+  },
+  {
     // person_id FK formalises person as the authoritative master.
     // Step 1: add nullable FK column + index.
     // Step 2: populate via case-insensitive name match (covers 177 of 179 active members).
