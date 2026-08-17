@@ -163,31 +163,49 @@ export async function getPriceShrinkers(params: PriceShrinkersParams): Promise<P
       GROUP BY 1, sl.code
     ),
     -- Bridge sale_line.group_canon → mrp_master.segment taxonomy.
-    -- sale_line uses "PTMT / Faucets", mrp_master uses "PTMT".
-    -- For ambiguous codes (same item_code, two mrp segments), pick the
-    -- mrp_master segment that best matches group_canon via prefix/substring.
+    -- sale_line uses "PTMT / Faucets" / "CP (Chrome-Plated)"; mrp_master uses "PTMT" / "CP".
+    --
+    -- Rank rules (tightest only — substring matching is intentionally excluded):
+    --   0 = exact case-insensitive match
+    --   1 = group_canon starts with mm.segment followed by ' ' or ' ('
+    --       covers "PTMT / Faucets" → "PTMT" and "CP (Chrome-Plated)" → "CP"
+    --
+    -- Rank 2 (substring: ILIKE '%' || mm.segment || '%') is EXCLUDED because:
+    --   • "CPVC" ILIKE '%CP%' → TRUE  (wrong: uses CP list price for CPVC codes)
+    --   • "S.Steel Sink" ILIKE '%Sink%' → TRUE (wrong: uses Sink segment MRP)
+    -- Both hazards are latent today (those codes are absent from mrp_master) but
+    -- the rule must be tight before any MRP expansion adds them.
+    --
+    -- Ambiguity: if two mrp_master segments tie at the same best rank for a
+    -- (code, grp) pair BOTH are REJECTED — no silent arbitrary pick.
+    code_mrp_ranked AS (
+      SELECT
+        p.code,
+        p.segment                    AS grp,
+        mm.segment                   AS mm_seg,
+        CASE
+          WHEN p.segment = mm.segment              THEN 0   -- exact
+          WHEN p.segment ILIKE mm.segment || ' %'  THEN 1   -- "PTMT / Faucets" → "PTMT"
+          WHEN p.segment ILIKE mm.segment || ' (%' THEN 1   -- "CP (Chrome-Plated)" → "CP"
+          ELSE 99
+        END AS rank
+      FROM (SELECT DISTINCT code, segment FROM prior) p
+      JOIN mrp_master mm ON mm.item_code = p.code
+      WHERE
+        p.segment = mm.segment
+        OR p.segment ILIKE mm.segment || ' %'
+        OR p.segment ILIKE mm.segment || ' (%'
+    ),
+    -- Keep only rows at the best rank; reject when > 1 mm_seg ties (ambiguous).
     code_mrp_seg AS (
-      SELECT DISTINCT ON (t.code, t.grp)
-        t.code,
-        t.grp,
-        t.mm_seg
+      SELECT code, grp, MAX(mm_seg) AS mm_seg
       FROM (
-        SELECT
-          p.code,
-          p.segment                    AS grp,
-          mm.segment                   AS mm_seg,
-          CASE
-            WHEN p.segment = mm.segment                   THEN 0  -- exact
-            WHEN p.segment ILIKE mm.segment || ' %'       THEN 1  -- "PTMT / Faucets" starts with "PTMT "
-            WHEN p.segment ILIKE mm.segment || ' (%'      THEN 1  -- "CP (Chrome-Plated)" starts with "CP ("
-            WHEN p.segment ILIKE '%' || mm.segment || '%' THEN 2  -- substring
-            ELSE 99
-          END AS rank
-        FROM (SELECT DISTINCT code, segment FROM prior) p
-        JOIN mrp_master mm ON mm.item_code = p.code
+        SELECT *, MIN(rank) OVER (PARTITION BY code, grp) AS best_rank
+        FROM code_mrp_ranked
       ) t
-      WHERE t.rank < 99
-      ORDER BY t.code, t.grp, t.rank ASC, t.mm_seg ASC
+      WHERE rank = best_rank
+      GROUP BY code, grp
+      HAVING COUNT(DISTINCT mm_seg) = 1
     ),
     -- MRP as of end of prior period: for each (item_code, mrp_segment) prefer
     -- rows within the effective window, then fall back to latest before asOf.
