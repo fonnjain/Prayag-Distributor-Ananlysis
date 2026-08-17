@@ -87,10 +87,13 @@ router.get("/mrp", async (req, res) => {
       ),
     ]);
 
+    const total = parseInt(totalResult.rows[0]?.total ?? "0", 10);
+    const isUnfiltered = !segment && !series && !q;
     res.json({
-      total: parseInt(totalResult.rows[0]?.total ?? "0", 10),
+      total,
       limit,
       offset,
+      unseeded: total === 0 && isUnfiltered,
       rows: rowsResult.rows.map((r) => ({
         itemCode: r.item_code,
         itemName: r.item_name,
@@ -104,7 +107,7 @@ router.get("/mrp", async (req, res) => {
       })),
     });
   } catch (err) {
-    req.log.error({ err }, "mrp list error");
+    req.log?.error({ err }, "mrp list error");
     res.status(500).json({ error: "Failed to load MRP data" });
   }
 });

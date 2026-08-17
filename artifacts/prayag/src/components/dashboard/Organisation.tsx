@@ -976,7 +976,8 @@ export function PersonRegistryPanel() {
     try {
       const r = await fetch(`${API}/person-registry`);
       if (!r.ok) throw new Error(`Server error ${r.status}`);
-      const data: RegistryRow[] = await r.json();
+      const payload = await r.json() as { rows: RegistryRow[]; unseeded?: boolean } | RegistryRow[];
+      const data = Array.isArray(payload) ? payload : (payload.rows ?? []);
       setRows(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");

@@ -468,10 +468,11 @@ router.post("/org/seed", async (req, res) => {
 // ── Person Registry routes ────────────────────────────────────────────────────
 
 // GET /api/person-registry — list all rows, ordered by state head first then name.
+// Returns { rows, unseeded } — unseeded:true when the table has never been seeded.
 router.get("/person-registry", async (_req, res) => {
   try {
     const rows = await getRegistryRows();
-    res.json(rows);
+    res.json({ rows, unseeded: rows.length === 0 });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

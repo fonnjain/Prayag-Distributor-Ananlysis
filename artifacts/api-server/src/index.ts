@@ -226,6 +226,36 @@ startServer({
     // All tasks below fire as soon as the port opens.  They were always
     // non-blocking and continue to be wired as void here.
 
+    // ── Master-table emptiness check ─────────────────────────────────────────
+    // Runs once on startup.  If any table is empty the operator needs to run the
+    // admin seed routes before the app is usable.  Logs a loud WARN listing each
+    // empty table and the route that populates it.
+    void (async () => {
+      const masterChecks = [
+        { table: "person_registry", route: "POST /api/person-registry/seed" },
+        { table: "customer_master", route: "POST /api/admin/masters/customer-load" },
+        { table: "item_master",     route: "POST /api/admin/masters/product-load" },
+        { table: "mrp_master",      route: "POST /api/admin/mrp/load" },
+      ];
+      const unseeded: Array<{ table: string; seedRoute: string }> = [];
+      for (const { table, route } of masterChecks) {
+        try {
+          const { rows } = await pool.query<{ n: string }>(
+            `SELECT COUNT(*)::text AS n FROM ${table}`,
+          );
+          if (parseInt(rows[0]?.n ?? "0", 10) === 0) unseeded.push({ table, seedRoute: route });
+        } catch {
+          // Table not yet created (migration not run) — skip silently.
+        }
+      }
+      if (unseeded.length > 0) {
+        logger.warn(
+          { unseededTables: unseeded },
+          `[masterTables] ${unseeded.length} master table(s) are empty — seed them via the listed admin routes before serving users`,
+        );
+      }
+    })();
+
     // Mark any orphaned "queued"/"running" AI report jobs as failed.
     // They belong to the previous server process and their background
     // computations died with it; clients should retry rather than poll forever.

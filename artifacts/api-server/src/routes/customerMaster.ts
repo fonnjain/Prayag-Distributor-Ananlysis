@@ -112,7 +112,7 @@ router.get("/customer-master", async (req: Request, res: Response): Promise<void
       db.select().from(customerMaster).where(where).orderBy(asc(customerMaster.company)).limit(pageLimit).offset(pageOffset),
       db.select({ count: sql<number>`count(*)::int` }).from(customerMaster).where(where),
     ]);
-    res.json({ total: count, limit: pageLimit, offset: pageOffset, rows });
+    res.json({ total: count, limit: pageLimit, offset: pageOffset, rows, unseeded: count === 0 && conds.length === 0 });
   } catch (err) {
     req.log.error({ err }, "customer-master list failed");
     res.status(500).json({ error: "Could not list customer master." });
