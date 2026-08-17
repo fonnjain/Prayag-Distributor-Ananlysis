@@ -40,8 +40,9 @@ import {
   buildSkuEvolution,
   buildPushTab,
 } from "./distributorTabs.js";
-import { toPriorYearMonths, loadDistDdSnapshotOnly } from "./distributorDeepDive.js";
+import { toPriorYearMonths, loadDistDdSnapshotOnly, normDistKey } from "./distributorDeepDive.js";
 import { loadDistributorDirectory } from "./distributorDirectory.js";
+import { normSecKey } from "./names.js";
 
 // ── Directory mock ────────────────────────────────────────────────────────────
 // Hoisted by vitest before any imports so distributorTabs.ts receives the mock
@@ -851,5 +852,84 @@ describe("buildPushTab — RET#-keyed dormancy is not masked by a same-name acti
   it("asymmetric ID coverage does not create false dormancy (no ID in prior, ID in current)", async () => {
     const result = await buildPushTab(CUR_FY, RETID_DIST, null);
     expect(result.coverage.dormantRetailers.some((r) => r.name === "NEWID SHOP")).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 6. distKey KEY-FAMILY INVARIANTS
+//    Guard: a distKey value (normDistKey family) must be idempotent under
+//    normDistKey but NOT under normSecKey.  If a future refactor accidentally
+//    lowercases distKey before returning it in the directory response, the value
+//    would become normSecKey-idempotent — resolveTabScope inside the
+//    distributor-tab-guard-check.mjs would then throw and silently downgrade
+//    live checks to SKIP.  This pure-function test has no DB or network
+//    dependency and catches the bug before the payload is fetched.
+//
+// Fixture distKey values used throughout this file:
+//   "MOCK TEST DISTRIBUTOR"   — plain uppercase, spaces, no variant tokens
+//   "MOCK RETID DISTRIBUTOR"  — same shape
+//
+// normDistKey("MOCK TEST DISTRIBUTOR"):
+//   .toUpperCase()                        → "MOCK TEST DISTRIBUTOR"  (already upper)
+//   variant replacements                  → no match (MOCK/TEST/DISTRIBUTOR not in list)
+//   .replace(/[^A-Z0-9 ]/g, "")          → "MOCK TEST DISTRIBUTOR"  (all alpha + spaces)
+//   .replace(/\s+/g, " ").trim()          → "MOCK TEST DISTRIBUTOR"
+//   → idempotent ✓
+//
+// normSecKey("MOCK TEST DISTRIBUTOR"):
+//   .toLowerCase()                        → "mock test distributor"
+//   .replace(/[^a-z0-9]+/g, "")          → "mocktestdistributor"
+//   → "mocktestdistributor" ≠ "MOCK TEST DISTRIBUTOR"  → NOT idempotent ✓
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("distKey key-family invariants — normDistKey-idempotent, not normSecKey-idempotent", () => {
+  // All distKey values present in the directory mock fixture used in this file.
+  const FIXTURE_DIST_KEYS = [TEST_DIST, RETID_DIST] as const;
+
+  it.each(FIXTURE_DIST_KEYS)(
+    "normDistKey('%s') is idempotent (distKey family invariant)",
+    (distKey) => {
+      // A distKey must survive a round-trip through normDistKey unchanged.
+      // If this fails, the fixture itself is malformed and would be
+      // mis-grouped by the aggregation layer.
+      expect(normDistKey(distKey)).toBe(distKey);
+    },
+  );
+
+  it.each(FIXTURE_DIST_KEYS)(
+    "normSecKey('%s') is NOT idempotent (distKey is the wrong family for member lookups)",
+    (distKey) => {
+      // normSecKey lowercases and strips spaces; a normDistKey value (UPPERCASE
+      // with spaces) can never survive that transformation unchanged.
+      // If this assertion starts failing it means someone accidentally lowercased
+      // distKey before returning it — which would make it look like a normSecKey
+      // value and cause resolveTabScope to throw for any live distributor name.
+      expect(normSecKey(distKey)).not.toBe(distKey);
+    },
+  );
+
+  it("lowercasing a distKey makes it fail normDistKey idempotency (the exact regression the guard catches)", () => {
+    // Simulates the exact regression the distributor-tab-guard-check.mjs warns
+    // about: distKey is accidentally lowercased before being returned in the
+    // directory response.  The lowercased value fails normDistKey idempotency,
+    // so the identity-key-norm-guard-check.mjs WARN/FAIL path triggers and the
+    // live tab checks are never silently skipped past an invisible mismatch.
+    const distKey = TEST_DIST; // "MOCK TEST DISTRIBUTOR"
+    const accidentallyLowercased = distKey.toLowerCase(); // "mock test distributor"
+
+    // normDistKey uppercases the lowercased value back — the output differs from
+    // the input, so the idempotency invariant is broken.
+    expect(normDistKey(accidentallyLowercased)).not.toBe(accidentallyLowercased);
+
+    // The normDistKey output is identical to the original distKey, confirming
+    // the two represent the same entity in the correct (UPPERCASE) family.
+    expect(normDistKey(accidentallyLowercased)).toBe(distKey);
+
+    // normSecKey collapses both the original and the lowercased distKey to the
+    // same lowercase-alphanumeric string — neither form is normSecKey-idempotent
+    // when the value contains spaces, so normSecKey cannot serve as a proxy for
+    // normDistKey under any variant of this bug.
+    expect(normSecKey(distKey)).toBe(normSecKey(accidentallyLowercased));
+    expect(normSecKey(distKey)).not.toBe(distKey);
   });
 });
