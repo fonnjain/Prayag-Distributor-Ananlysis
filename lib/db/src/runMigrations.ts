@@ -1603,6 +1603,42 @@ const MIGRATIONS: Migration[] = [
         ('C*', 'all_india', 'Nitin Agarwal', 'email',    'ceo@prayagindia.com', 'on_raise', 1);
     `,
   },
+  {
+    id: "046_person_departure",
+    sql: `
+      -- ── State-head departure lifecycle ──────────────────────────────────────
+      -- left_date/departure_reason record WHY a head left; is_holding marks the
+      -- auto-created system person that holds a departed head's customers until
+      -- a replacement is appointed. holding_for_person_id links the holding
+      -- person back to the departed head.
+      ALTER TABLE person ADD COLUMN IF NOT EXISTS left_date DATE;
+      ALTER TABLE person ADD COLUMN IF NOT EXISTS departure_reason TEXT;
+      ALTER TABLE person ADD COLUMN IF NOT EXISTS departure_note TEXT;
+      ALTER TABLE person ADD COLUMN IF NOT EXISTS is_holding BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE person ADD COLUMN IF NOT EXISTS holding_for_person_id INTEGER REFERENCES person(person_id);
+      CREATE INDEX IF NOT EXISTS idx_person_is_holding   ON person (is_holding) WHERE is_holding;
+      CREATE INDEX IF NOT EXISTS idx_person_holding_for  ON person (holding_for_person_id) WHERE holding_for_person_id IS NOT NULL;
+    `,
+  },
+  {
+    id: "047_person_holding_unique",
+    sql: `
+      -- At most ONE holding person per departed head — enforced in the DB so
+      -- concurrent departure requests cannot create duplicates.
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_person_holding_for
+        ON person (holding_for_person_id) WHERE is_holding;
+    `,
+  },
+  {
+    id: "048_customer_assignment_one_open",
+    sql: `
+      -- Invariant: at most ONE open (effective_to IS NULL) assignment per
+      -- customer. Enforced in the DB so concurrent departure/resolve/reassign
+      -- transactions can never leave a customer with two competing owners.
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_customer_assignment_open
+        ON customer_assignment (customer_id) WHERE effective_to IS NULL;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

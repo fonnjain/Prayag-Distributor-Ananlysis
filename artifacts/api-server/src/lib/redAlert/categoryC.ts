@@ -414,6 +414,10 @@ export function buildCategoryCAlerts(
       if (!headCanon) continue;
       const stateHead = normHeadToStateHead.get(normName(headCanon)) ?? null;
       if (!stateHead) continue; // unmapped — excluded from denominator
+      // Departed heads (left_date recorded) and holding persons are excluded
+      // from C6 entirely — both from firing AND from the denominator, so a
+      // departure never distorts the remaining heads' stop shares.
+      if (ctx.departedHeadNames.has(normName(stateHead))) continue;
 
       const existing = stopsByHead.get(stateHead) ?? { count: 0, rupees: 0 };
       existing.count += 1;

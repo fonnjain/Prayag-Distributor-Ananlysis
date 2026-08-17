@@ -357,6 +357,23 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
     }
   }
 
+  // ── Departed / holding state heads (task: departure lifecycle) ───────────────
+  // Heads with a recorded departure (left_date) and system holding persons are
+  // excluded from alert firing — most importantly C6 territorial concentration,
+  // which must not attribute retailer stops to a head who has left.
+  const departedHeadNames = new Set<string>();
+  try {
+    const depRes = await pool.query<{ name: string }>(
+      `SELECT name FROM person WHERE left_date IS NOT NULL OR is_holding = true`,
+    );
+    for (const r of depRes.rows) {
+      const norm = r.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (norm) departedHeadNames.add(norm);
+    }
+  } catch {
+    // person table absent (fresh install before migration) — no exclusions.
+  }
+
   // Build customer master map keyed by UPPER(TRIM(company))
   const customerMaster = new Map<string, CustomerMasterRow>();
   for (const r of custMasterRes.rows) {
@@ -503,6 +520,7 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
     distSecMonthly,
     headToStateHead,
     retailerHeadCanon,
+    departedHeadNames,
   };
 }
 

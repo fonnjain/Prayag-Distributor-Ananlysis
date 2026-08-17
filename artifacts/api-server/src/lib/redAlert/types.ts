@@ -272,4 +272,8 @@ export type DetectionContext = {
   // Allows Guard 4 to resolve entityKeys that come from secondary_head_month.head_canon
   // even when the registry's primary norm_key is an employee code or contains a suffix.
   personsByNameKey: Set<string>;
+
+  // Departed or holding state heads, keyed by lowercase alphanumeric-only name.
+  // C6 (and any per-head alert firing) must skip these heads entirely.
+  departedHeadNames: Set<string>;
 };

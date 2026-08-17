@@ -66,9 +66,24 @@ interface PersonSummary {
   reports_to_name: string | null;
   is_state_head: boolean;
   is_active: boolean;
+  left_date: string | null;
+  departure_reason: string | null;
+  is_holding: boolean;
+  holding_for_person_id: number | null;
   direct_reports: number;
   customers_as_sh: number;
   customers_as_tm: number;
+}
+
+interface HoldingEntry {
+  holding_person_id: number;
+  holding_name: string;
+  departed_person_id: number;
+  departed_name: string;
+  left_date: string | null;
+  departure_reason: string | null;
+  departure_note: string | null;
+  open_customers: number;
 }
 
 interface DirectReport {
@@ -105,6 +120,7 @@ interface ChangeEntry {
 interface PersonDetail extends PersonSummary {
   state_head_person_id: number | null;
   state_head_name: string | null;
+  departure_note: string | null;
   created_at: string;
   directReports: DirectReport[];
   reportingChain: ChainEntry[];
@@ -245,15 +261,17 @@ export default function OrgPeoplePage() {
 
   const { data: peopleData, isLoading: listLoading, isError: listError } =
     useQuery<PeopleResponse>({
-      queryKey: ["master-people", query, activeFilter, designationFilter],
-      queryFn: () => apiJson(`${BASE}/people?${peopleParams}`),
+      queryKey: ["master-people", query, activeFilter, designationFilter, !!secret],
+      queryFn: () =>
+        apiJson(`${BASE}/people?${peopleParams}`, secret ? { headers: hdrs() } : undefined),
       staleTime: 30_000,
     });
 
   const { data: detailData, isLoading: detailLoading } =
     useQuery<{ person: PersonDetail; directReports: DirectReport[]; reportingChain: ChainEntry[]; territories: Territory[]; changeLog: ChangeEntry[] }>({
-      queryKey: ["master-person", selectedId],
-      queryFn: () => apiJson(`${BASE}/people/${selectedId}`),
+      queryKey: ["master-person", selectedId, !!secret],
+      queryFn: () =>
+        apiJson(`${BASE}/people/${selectedId}`, secret ? { headers: hdrs() } : undefined),
       enabled: selectedId !== null,
       staleTime: 30_000,
     });
@@ -323,6 +341,99 @@ export default function OrgPeoplePage() {
       toast({ title: "Reactivated", description: "Person has been reactivated." });
     },
     onError: (e: Error) => toast({ title: "Reactivation failed", description: e.message, variant: "destructive" }),
+  });
+
+  // ── Departure lifecycle ──────────────────────────────────────────────────
+
+  const { data: holdingData } = useQuery<{ holdings: HoldingEntry[] }>({
+    queryKey: ["master-holding", !!secret],
+    queryFn: () =>
+      apiJson(`${BASE}/holding`, secret ? { headers: hdrs() } : undefined),
+    refetchInterval: 60_000,
+  });
+  const holdings = holdingData?.holdings ?? [];
+  const holdingByDeparted = new Map(holdings.map((h) => [h.departed_person_id, h]));
+
+  const [showDepartureModal, setShowDepartureModal] = useState(false);
+  const [departureForm, setDepartureForm] = useState({ left_date: "", reason: "", note: "" });
+  const [departureImpact, setDepartureImpact] = useState<ImpactData | null>(null);
+  const [departureImpactLoading, setDepartureImpactLoading] = useState(false);
+
+  const openDepartureModal = useCallback(async () => {
+    if (!selectedId) return;
+    setDepartureForm({ left_date: new Date().toISOString().slice(0, 10), reason: "", note: "" });
+    setDepartureImpact(null);
+    setShowDepartureModal(true);
+    setDepartureImpactLoading(true);
+    try {
+      const data = await apiJson<ImpactData>(`${BASE}/people/${selectedId}/impact`);
+      setDepartureImpact(data);
+    } catch (e) {
+      toast({ title: "Could not load impact", description: String(e), variant: "destructive" });
+      setShowDepartureModal(false);
+    } finally {
+      setDepartureImpactLoading(false);
+    }
+  }, [selectedId, toast]);
+
+  const departureMutation = useMutation({
+    mutationFn: async () => {
+      if (!departureImpact) throw new Error("Impact not loaded");
+      return apiJson<{ success: boolean; holdingPersonId: number; assignmentsMoved: number }>(
+        `${BASE}/people/${selectedId}/departure`,
+        {
+          method: "POST",
+          headers: hdrs(),
+          body: JSON.stringify({
+            left_date: departureForm.left_date,
+            departure_reason: departureForm.reason,
+            departure_note: departureForm.note || undefined,
+            acknowledgedSubTree: departureImpact.subTreeCount,
+            acknowledgedCustomers: departureImpact.totalCustomersAffected,
+          }),
+        },
+      );
+    },
+    onSuccess: (d) => {
+      setShowDepartureModal(false);
+      qc.invalidateQueries({ queryKey: ["master-person", selectedId] });
+      qc.invalidateQueries({ queryKey: ["master-people"] });
+      qc.invalidateQueries({ queryKey: ["master-holding"] });
+      toast({
+        title: "Departure recorded",
+        description: `${d.assignmentsMoved} customer assignment${d.assignmentsMoved === 1 ? "" : "s"} moved to a holding state pending redistribution.`,
+      });
+    },
+    onError: (e: Error) => toast({ title: "Departure failed", description: e.message, variant: "destructive" }),
+  });
+
+  // Resolve dialog (appoint replacement head)
+  const [resolveEntry, setResolveEntry] = useState<HoldingEntry | null>(null);
+  const [resolveHeadId, setResolveHeadId] = useState("");
+  const resolveMutation = useMutation({
+    mutationFn: async () => {
+      if (!resolveEntry) throw new Error("No holding selected");
+      return apiJson<{ success: boolean; assignmentsMoved: number }>(
+        `${BASE}/holding/${resolveEntry.holding_person_id}/resolve`,
+        {
+          method: "POST",
+          headers: hdrs(),
+          body: JSON.stringify({ new_head_person_id: Number(resolveHeadId) }),
+        },
+      );
+    },
+    onSuccess: (d) => {
+      setResolveEntry(null);
+      setResolveHeadId("");
+      qc.invalidateQueries({ queryKey: ["master-people"] });
+      qc.invalidateQueries({ queryKey: ["master-holding"] });
+      qc.invalidateQueries({ queryKey: ["master-person"] });
+      toast({
+        title: "Holding resolved",
+        description: `${d.assignmentsMoved} customer assignment${d.assignmentsMoved === 1 ? "" : "s"} moved to the replacement head.`,
+      });
+    },
+    onError: (e: Error) => toast({ title: "Resolve failed", description: e.message, variant: "destructive" }),
   });
 
   // ── Impact gate ───────────────────────────────────────────────────────────
@@ -502,6 +613,35 @@ export default function OrgPeoplePage() {
         </div>
       )}
 
+      {/* ── Holding warning banner — persists until every departed head's
+             customers are redistributed ─────────────────────────────────── */}
+      {activeTab === "people" && holdings.length > 0 && (
+        <div className="shrink-0 border-b bg-amber-50 dark:bg-amber-950/20 px-4 py-2.5 space-y-1.5">
+          {holdings.map((h) => (
+            <div key={h.holding_person_id} className="flex items-center gap-2 text-sm">
+              <AlertTriangle className="size-4 text-amber-600 shrink-0" />
+              <span className="text-amber-800 dark:text-amber-300">
+                <span className="font-medium">{h.departed_name}</span> departed
+                {h.left_date ? ` on ${h.left_date}` : ""}
+                {h.departure_reason ? ` (${h.departure_reason})` : ""} —{" "}
+                <span className="font-medium">{h.open_customers.toLocaleString("en-IN")}</span>{" "}
+                customer{h.open_customers === 1 ? "" : "s"} in holding with no owner.
+              </span>
+              {secret && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 text-xs ml-auto border-amber-300 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-400"
+                  onClick={() => { setResolveEntry(h); setResolveHeadId(""); }}
+                >
+                  Appoint replacement
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       {activeTab === "people" && <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* ── Left panel: list ─────────────────────────────────────────── */}
         <div className="w-72 shrink-0 border-r flex flex-col min-h-0">
@@ -570,11 +710,21 @@ export default function OrgPeoplePage() {
                   <span className={cn("text-sm font-medium leading-tight", !p.is_active && "text-muted-foreground line-through")}>
                     {p.name}
                   </span>
-                  {p.is_state_head && (
-                    <span className="shrink-0 text-[10px] font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 rounded px-1">
-                      SH
-                    </span>
-                  )}
+                  <span className="flex items-center gap-1 shrink-0">
+                    {p.is_holding && (
+                      <span className="text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 rounded px-1">
+                        HOLDING
+                      </span>
+                    )}
+                    {!p.is_holding && holdingByDeparted.has(p.person_id) && (
+                      <AlertTriangle className="size-3 text-amber-600" />
+                    )}
+                    {p.is_state_head && (
+                      <span className="text-[10px] font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 rounded px-1">
+                        SH
+                      </span>
+                    )}
+                  </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">{p.designation_name ?? "—"}</p>
                 <div className="flex items-center gap-2 mt-1">
@@ -643,6 +793,7 @@ export default function OrgPeoplePage() {
               onSave={handleSave}
               onDeactivate={handleDeactivateClick}
               onReactivate={() => reactivateMutation.mutate()}
+              onDeparture={openDepartureModal}
               isSaving={patchMutation.isPending}
               isDeactivating={deactivateMutation.isPending || impactLoading}
               isReactivating={reactivateMutation.isPending}
@@ -669,6 +820,133 @@ export default function OrgPeoplePage() {
         onCancel={() => { setShowImpactModal(false); setPendingAction(null); setImpactData(null); }}
         onConfirm={handleConfirmAction}
       />
+
+      {/* ── Record departure modal ─────────────────────────────────────── */}
+      <Dialog open={showDepartureModal} onOpenChange={(o) => !o && setShowDepartureModal(false)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Record departure</DialogTitle>
+            <DialogDescription>
+              The person is marked as departed and every customer they own moves to a
+              holding state. Nothing is deleted — historical figures stay intact, and a
+              warning stays on this page until the customers get a new owner.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Left date</Label>
+              <Input
+                type="date"
+                value={departureForm.left_date}
+                onChange={(e) => setDepartureForm((f) => ({ ...f, left_date: e.target.value }))}
+                className="h-8 text-sm"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Reason <span className="text-destructive">*</span></Label>
+              <Select
+                value={departureForm.reason}
+                onValueChange={(v) => setDepartureForm((f) => ({ ...f, reason: v }))}
+              >
+                <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select reason…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="resigned">Resigned</SelectItem>
+                  <SelectItem value="terminated">Terminated</SelectItem>
+                  <SelectItem value="retired">Retired</SelectItem>
+                  <SelectItem value="transferred">Transferred</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Note (optional)</Label>
+              <Input
+                value={departureForm.note}
+                onChange={(e) => setDepartureForm((f) => ({ ...f, note: e.target.value }))}
+                placeholder="Any extra context"
+                className="h-8 text-sm"
+              />
+            </div>
+            {departureImpactLoading ? (
+              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <Loader2 className="size-3 animate-spin" /> Loading impact…
+              </p>
+            ) : departureImpact ? (
+              <Alert className="border-amber-200 bg-amber-50 dark:bg-amber-950/20 py-2">
+                <AlertDescription className="text-xs text-amber-800 dark:text-amber-300">
+                  {departureImpact.totalCustomersAffected.toLocaleString("en-IN")} customer
+                  {departureImpact.totalCustomersAffected === 1 ? "" : "s"} will move to a
+                  holding state
+                  {departureImpact.subTreeCount > 0
+                    ? `; ${departureImpact.subTreeCount} ${departureImpact.subTreeCount === 1 ? "person" : "people"} in the reporting subtree will need a new manager`
+                    : ""}.
+                </AlertDescription>
+              </Alert>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setShowDepartureModal(false)}>Cancel</Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={
+                departureMutation.isPending ||
+                departureImpactLoading ||
+                !departureImpact ||
+                !departureForm.left_date ||
+                !departureForm.reason
+              }
+              onClick={() => departureMutation.mutate()}
+            >
+              {departureMutation.isPending && <Loader2 className="size-3.5 mr-1.5 animate-spin" />}
+              Confirm departure
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Appoint replacement (resolve holding) modal ─────────────────── */}
+      <Dialog open={!!resolveEntry} onOpenChange={(o) => !o && setResolveEntry(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Appoint replacement head</DialogTitle>
+            <DialogDescription>
+              {resolveEntry ? (
+                <>Move all {resolveEntry.open_customers.toLocaleString("en-IN")} held customer
+                {resolveEntry.open_customers === 1 ? "" : "s"} of{" "}
+                <span className="font-medium">{resolveEntry.departed_name}</span> to a new head.
+                You can also distribute them one-by-one from the Customers page instead.</>
+              ) : null}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label className="text-xs">New head</Label>
+            <Select value={resolveHeadId} onValueChange={setResolveHeadId}>
+              <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select person…" /></SelectTrigger>
+              <SelectContent>
+                {people
+                  .filter((p) => p.is_active && !p.is_holding && !p.left_date)
+                  .map((p) => (
+                    <SelectItem key={p.person_id} value={String(p.person_id)}>
+                      {p.name}{p.designation_name ? ` · ${p.designation_name}` : ""}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setResolveEntry(null)}>Cancel</Button>
+            <Button
+              size="sm"
+              disabled={resolveMutation.isPending || !resolveHeadId}
+              onClick={() => resolveMutation.mutate()}
+            >
+              {resolveMutation.isPending && <Loader2 className="size-3.5 mr-1.5 animate-spin" />}
+              Move customers
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -695,6 +973,7 @@ interface PersonPanelProps {
   onSave: () => void;
   onDeactivate: () => void;
   onReactivate: () => void;
+  onDeparture: () => void;
   isSaving: boolean;
   isDeactivating: boolean;
   isReactivating: boolean;
@@ -714,6 +993,7 @@ function PersonPanel({
   onSave,
   onDeactivate,
   onReactivate,
+  onDeparture,
   isSaving,
   isDeactivating,
   isReactivating,
@@ -804,7 +1084,18 @@ function PersonPanel({
                   Deactivate
                 </Button>
               )}
-              {hasAdminAccess && !person.is_active && (
+              {hasAdminAccess && person.is_active && !person.is_holding && !person.left_date && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-red-700 border-red-300 hover:bg-red-50 dark:text-red-400 dark:border-red-800"
+                  onClick={onDeparture}
+                >
+                  <UserMinus className="size-3.5 mr-1.5" />
+                  Record departure
+                </Button>
+              )}
+              {hasAdminAccess && !person.is_active && !person.left_date && !person.is_holding && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -836,7 +1127,18 @@ function PersonPanel({
         </div>
       </div>
 
-      {!person.is_active && (
+      {person.left_date ? (
+        <Alert className="border-red-200 bg-red-50 dark:bg-red-950/20">
+          <AlertTriangle className="size-4 text-red-600" />
+          <AlertDescription className="text-red-800 dark:text-red-300 text-sm">
+            Departed on <span className="font-medium">{person.left_date}</span>
+            {person.departure_reason ? <> — {person.departure_reason}</> : null}
+            {person.departure_note ? <>. {person.departure_note}</> : null}.
+            Their customers were moved to a holding state; historical figures are
+            preserved and excluded from active headcounts and alerts.
+          </AlertDescription>
+        </Alert>
+      ) : !person.is_active && (
         <Alert className="border-amber-200 bg-amber-50 dark:bg-amber-950/20">
           <AlertTriangle className="size-4 text-amber-600" />
           <AlertDescription className="text-amber-800 dark:text-amber-300 text-sm">

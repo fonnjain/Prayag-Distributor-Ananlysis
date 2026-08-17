@@ -43,6 +43,7 @@ function makeCtx(overrides: {
     secCompleteMonths: new Map(),
     lastSheetRead: new Map(),
     personsByNameKey: overrides.personsByNameKey ?? new Set(),
+    departedHeadNames: new Set(),
     retailerPrimaryDist: new Map(),
     distSecMonthly: new Map(),
     headToStateHead: new Map(),

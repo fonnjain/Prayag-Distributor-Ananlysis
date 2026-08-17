@@ -30,6 +30,33 @@ function requireAdmin(req: any, res: any): boolean {
   return true;
 }
 
+// Lock + validate assignment target people INSIDE the caller's transaction.
+// FOR SHARE on the person rows serializes against a concurrent departure
+// (which takes FOR UPDATE on the same row), so a target cannot depart between
+// validation and the assignment insert. Returns the first invalid id, or null.
+async function lockAssignTargets(
+  client: { query: (sql: string, params?: unknown[]) => Promise<any> },
+  ids: number[],
+): Promise<number | null> {
+  if (ids.length === 0) return null;
+  const okRes = await client.query(
+    `SELECT person_id FROM person
+     WHERE person_id = ANY($1::int[]) AND is_active = true
+       AND is_holding = false AND left_date IS NULL
+     FOR SHARE`,
+    [ids],
+  );
+  const okIds = new Set(okRes.rows.map((r: any) => r.person_id));
+  return ids.find((id) => !okIds.has(id)) ?? null;
+}
+
+// Non-throwing check for READ routes that redact sensitive HR fields
+// (departure reason/note) when the caller does not hold the admin secret.
+function hasAdminToken(req: any): boolean {
+  const token = (req.headers["x-admin-secret"] as string | undefined) ?? "";
+  return isAdminToken(token);
+}
+
 // ── GET /api/master/designations ──────────────────────────────────────────────
 // Returns all designation records ordered by rank (lowest rank = most senior).
 
@@ -64,7 +91,9 @@ router.get("/master/people", async (req, res) => {
       params.push(`%${q}%`);
       where.push(`p.name ILIKE $${params.length}`);
     }
-    if (activeFilter === "true") where.push("p.is_active = true");
+    // Holding persons are system placeholders for departed heads — they must
+    // never appear in (or inflate) active/assignable person lists.
+    if (activeFilter === "true") where.push("p.is_active = true AND p.is_holding = false");
     else if (activeFilter === "false") where.push("p.is_active = false");
     if (desigId !== null) {
       params.push(desigId);
@@ -77,6 +106,7 @@ router.get("/master/people", async (req, res) => {
       pool.query(`SELECT COUNT(*) FROM person p ${wc}`, params),
       pool.query(
         `SELECT p.person_id, p.name, p.employee_code, p.is_active, p.is_state_head,
+                p.left_date::text, p.departure_reason, p.is_holding, p.holding_for_person_id,
                 d.designation_id, d.name AS designation_name, d.rank AS designation_rank,
                 mgr.person_id AS reports_to_person_id, mgr.name AS reports_to_name,
                 (SELECT COUNT(*) FROM person sub WHERE sub.reports_to_person_id = p.person_id
@@ -98,7 +128,12 @@ router.get("/master/people", async (req, res) => {
     ]);
 
     const total = Number(countRes.rows[0].count);
-    res.json({ people: dataRes.rows, total, page, pages: Math.ceil(total / limit) });
+    // Departure reason is HR-sensitive — only admin callers get it.
+    const admin = hasAdminToken(req);
+    const people = admin
+      ? dataRes.rows
+      : dataRes.rows.map((r: any) => ({ ...r, departure_reason: null }));
+    res.json({ people, total, page, pages: Math.ceil(total / limit) });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -182,6 +217,8 @@ router.get("/master/people/:id", async (req, res) => {
         pool.query(
           `SELECT p.person_id, p.name, p.employee_code, p.is_active,
                   p.is_state_head, p.headquarter, p.order_type, p.source,
+                  p.left_date::text, p.departure_reason, p.departure_note,
+                  p.is_holding, p.holding_for_person_id,
                   d.designation_id, d.name AS designation_name,
                   mgr.person_id AS reports_to_person_id, mgr.name AS reports_to_name,
                   sh.person_id  AS state_head_person_id, sh.name AS state_head_name,
@@ -248,6 +285,19 @@ router.get("/master/people/:id", async (req, res) => {
       return void res.status(404).json({ error: "Person not found" });
 
     const p = personRes.rows[0];
+    // Departure reason/note are HR-sensitive — only admin callers get them.
+    // The change log records those same values (field = 'departure_*'), so
+    // those audit rows must be withheld from non-admin callers too.
+    const admin = hasAdminToken(req);
+    if (!admin) {
+      p.departure_reason = null;
+      p.departure_note = null;
+    }
+    const changeLog = admin
+      ? logRes.rows
+      : logRes.rows.filter(
+          (c: any) => !String(c.field ?? "").startsWith("departure"),
+        );
     // Customer scope counts are inlined in the person query (customers_as_state_head/as_tm).
     const csh = Number(p.customers_as_state_head ?? 0);
     const ctm = Number(p.customers_as_tm ?? 0);
@@ -257,7 +307,7 @@ router.get("/master/people/:id", async (req, res) => {
       directReports: directRes.rows,
       reportingChain: chainRes.rows,
       territories: terrRes.rows,
-      changeLog: logRes.rows,
+      changeLog,
       customerScope: {
         asStateHead: csh,
         asTm: ctm,
@@ -575,6 +625,27 @@ router.post("/master/people/:id/reactivate", async (req, res) => {
     const personId = Number(req.params.id);
     const { changed_by } = req.body as { changed_by?: string };
 
+    // Departed and holding persons cannot be reactivated via this route:
+    // a departed person's customers are already in holding (a plain is_active
+    // flip would leave a person both "active" and "departed", excluded from
+    // assignable lists and alerts while their customers sit unowned), and a
+    // holding person's lifecycle is managed by the departure/resolve flow.
+    const checkRes = await pool.query(
+      `SELECT left_date, is_holding FROM person WHERE person_id = $1`,
+      [personId],
+    );
+    if (!checkRes.rows[0])
+      return void res.status(404).json({ error: "Person not found" });
+    if (checkRes.rows[0].is_holding)
+      return void res.status(400).json({
+        error: "Holding persons cannot be reactivated — resolve the holding instead.",
+      });
+    if (checkRes.rows[0].left_date)
+      return void res.status(400).json({
+        error:
+          "This person has a recorded departure and cannot be reactivated directly. Re-hiring requires an explicit reversal (contact an operator / re-create the person).",
+      });
+
     await pool.query(
       `UPDATE person SET is_active = true WHERE person_id = $1`,
       [personId],
@@ -585,6 +656,388 @@ router.post("/master/people/:id/reactivate", async (req, res) => {
       [String(personId), changed_by ?? "operator"],
     );
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── POST /api/master/people/:id/departure ─────────────────────────────────────
+// Record a state head's (or TM's) departure. Requires the impact-preview
+// acknowledgment gate (same as deactivate). In one transaction:
+//   1. person gets left_date/departure_reason/departure_note, is_active=false
+//   2. one system "holding" person is created (is_holding=true) for this head
+//   3. every OPEN customer_assignment where the departed person appears is
+//      closed on left_date and reopened with the holding person substituted
+// Historical rows are never touched — sale_line/head_canon stays intact.
+
+router.post("/master/people/:id/departure", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const personId = Number(req.params.id);
+    const {
+      left_date,
+      departure_reason,
+      departure_note,
+      acknowledgedSubTree,
+      acknowledgedCustomers,
+      changed_by,
+    } = req.body as {
+      left_date?: string;
+      departure_reason?: string;
+      departure_note?: string;
+      acknowledgedSubTree?: number;
+      acknowledgedCustomers?: number;
+      changed_by?: string;
+    };
+
+    if (!left_date || !/^\d{4}-\d{2}-\d{2}$/.test(left_date)) {
+      return void res.status(400).json({ error: "left_date (YYYY-MM-DD) is required" });
+    }
+    if (!departure_reason || !departure_reason.trim()) {
+      return void res.status(400).json({ error: "departure_reason is required" });
+    }
+    if (acknowledgedSubTree === undefined || acknowledgedCustomers === undefined) {
+      return void res.status(422).json({
+        error:
+          "Must pass acknowledgedSubTree and acknowledgedCustomers (from /impact) to confirm awareness of impact.",
+      });
+    }
+
+    const personRes = await pool.query(
+      `SELECT person_id, name, is_active, is_holding, is_state_head, designation_id, left_date
+       FROM person WHERE person_id = $1`,
+      [personId],
+    );
+    if (!personRes.rows[0])
+      return void res.status(404).json({ error: "Person not found" });
+    const person = personRes.rows[0];
+    if (person.is_holding)
+      return void res.status(400).json({ error: "Cannot record departure of a holding person" });
+    if (person.left_date)
+      return void res.status(400).json({ error: "Departure already recorded for this person" });
+
+    // Re-verify impact server-side (same gate as deactivate)
+    const impactRes = await pool.query(
+      `WITH RECURSIVE tree AS (
+         SELECT person_id FROM person WHERE reports_to_person_id = $1
+         UNION ALL
+         SELECT p.person_id FROM person p JOIN tree t ON t.person_id = p.reports_to_person_id
+       )
+       SELECT COUNT(*) AS sub_tree FROM tree`,
+      [personId],
+    );
+    const custRes = await pool.query(
+      `SELECT COUNT(DISTINCT customer_id) AS cust FROM customer_assignment
+       WHERE effective_to IS NULL
+         AND (state_head_person_id = $1 OR person_id = $1)`,
+      [personId],
+    );
+    const liveSubTree = Number(impactRes.rows[0].sub_tree);
+    const liveCust = Number(custRes.rows[0].cust);
+    if (liveSubTree !== acknowledgedSubTree || liveCust !== acknowledgedCustomers) {
+      return void res.status(409).json({
+        error:
+          "Impact has changed since preview — please re-fetch /impact and confirm again.",
+        current: { subTreeCount: liveSubTree, totalCustomersAffected: liveCust },
+      });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Re-check under a row lock: two concurrent departure submissions can
+      // both pass the pre-transaction check; the second must fail here rather
+      // than overwrite the recorded departure and re-date the holding moves.
+      const lockRes = await client.query(
+        `SELECT left_date, is_holding FROM person WHERE person_id = $1 FOR UPDATE`,
+        [personId],
+      );
+      if (!lockRes.rows[0] || lockRes.rows[0].is_holding || lockRes.rows[0].left_date) {
+        await client.query("ROLLBACK");
+        return void res
+          .status(400)
+          .json({ error: "Departure already recorded for this person" });
+      }
+
+      // 1. Mark the departure on the person
+      await client.query(
+        `UPDATE person
+         SET left_date = $2, departure_reason = $3, departure_note = $4,
+             is_active = false, updated_at = NOW()
+         WHERE person_id = $1`,
+        [personId, left_date, departure_reason.trim(), departure_note?.trim() || null],
+      );
+
+      // 2. Create (or reuse) the holding person for this departed head
+      let holdingId: number;
+      const existingHolding = await client.query(
+        `SELECT person_id FROM person WHERE is_holding = true AND holding_for_person_id = $1`,
+        [personId],
+      );
+      if (existingHolding.rows[0]) {
+        holdingId = existingHolding.rows[0].person_id;
+      } else {
+        const holdRes = await client.query(
+          `INSERT INTO person
+             (name, is_holding, holding_for_person_id, is_state_head, designation_id,
+              is_active, source)
+           VALUES ($1, true, $2, $3, $4, true, 'app_created')
+           RETURNING person_id`,
+          [`HOLDING — ${person.name}`, personId, person.is_state_head, person.designation_id],
+        );
+        holdingId = holdRes.rows[0].person_id;
+      }
+
+      // 3. Move every open assignment involving the departed person to the
+      //    holding person (effective-dated: close old row, open new row).
+      //    Rows are locked (FOR UPDATE) so a concurrent reassignment cannot
+      //    close them under us; each close is re-checked (effective_to IS
+      //    NULL) and the replacement row is only inserted when the close
+      //    actually happened.
+      const openRes = await client.query(
+        `SELECT id, customer_id, person_id, state_head_person_id, confidence
+         FROM customer_assignment
+         WHERE effective_to IS NULL
+           AND (state_head_person_id = $1 OR person_id = $1)
+         FOR UPDATE`,
+        [personId],
+      );
+
+      let moved = 0;
+      for (const a of openRes.rows) {
+        const closed = await client.query(
+          `UPDATE customer_assignment SET effective_to = $2
+           WHERE id = $1 AND effective_to IS NULL`,
+          [a.id, left_date],
+        );
+        if (closed.rowCount === 0) continue; // closed concurrently — skip
+        await client.query(
+          `INSERT INTO customer_assignment
+             (customer_id, person_id, state_head_person_id, confidence,
+              effective_from, set_by)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [
+            a.customer_id,
+            a.person_id === personId ? holdingId : a.person_id,
+            a.state_head_person_id === personId ? holdingId : a.state_head_person_id,
+            a.confidence,
+            left_date,
+            changed_by ?? "operator",
+          ],
+        );
+        moved += 1;
+      }
+
+      // 4. Change log
+      await client.query(
+        `INSERT INTO change_log (entity_type, entity_id, field, old_value, new_value, changed_by)
+         VALUES
+           ('person', $1, 'left_date',        NULL, $2, $4),
+           ('person', $1, 'departure_reason', NULL, $3, $4),
+           ('person', $1, 'departure_holding', NULL, $5, $4)`,
+        [
+          String(personId),
+          left_date,
+          departure_reason.trim(),
+          changed_by ?? "operator",
+          JSON.stringify({ holdingPersonId: holdingId, assignmentsMoved: moved }),
+        ],
+      );
+
+      await client.query("COMMIT");
+      res.json({
+        success: true,
+        holdingPersonId: holdingId,
+        assignmentsMoved: moved,
+      });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── GET /api/master/holding ───────────────────────────────────────────────────
+// Every holding person that still holds ≥1 open customer assignment.
+// Drives the persistent org-page warning banner. Holding persons whose
+// customers have all been redistributed are auto-deactivated here (lazy clear)
+// so the warning disappears once the last customer is moved off.
+
+router.get("/master/holding", async (req, res) => {
+  try {
+    // Lazy clear: deactivate holding persons with zero open assignments.
+    await pool.query(
+      `UPDATE person h SET is_active = false, updated_at = NOW()
+       WHERE h.is_holding = true AND h.is_active = true
+         AND NOT EXISTS (
+           SELECT 1 FROM customer_assignment ca
+           WHERE ca.effective_to IS NULL
+             AND (ca.state_head_person_id = h.person_id OR ca.person_id = h.person_id)
+         )`,
+    );
+
+    const { rows } = await pool.query(
+      `SELECT h.person_id AS holding_person_id, h.name AS holding_name,
+              d.person_id AS departed_person_id, d.name AS departed_name,
+              d.left_date::text, d.departure_reason, d.departure_note,
+              (SELECT COUNT(DISTINCT ca.customer_id) FROM customer_assignment ca
+               WHERE ca.effective_to IS NULL
+                 AND (ca.state_head_person_id = h.person_id OR ca.person_id = h.person_id)
+              ) AS open_customers
+       FROM person h
+       JOIN person d ON d.person_id = h.holding_for_person_id
+       WHERE h.is_holding = true AND h.is_active = true
+       ORDER BY d.left_date DESC NULLS LAST, d.name`,
+    );
+    // Departure reason/note are HR-sensitive — redact for non-admin callers;
+    // the banner only needs name/date/count as operational status.
+    const admin = hasAdminToken(req);
+    const holdings = rows
+      .filter((r: any) => Number(r.open_customers) > 0)
+      .map((r: any) =>
+        admin ? r : { ...r, departure_reason: null, departure_note: null },
+      );
+    res.json({ holdings });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── POST /api/master/holding/:id/resolve ──────────────────────────────────────
+// Resolution path 1: appoint a replacement head — bulk-move every open
+// assignment from the holding person to the new head, effective-dated.
+// (Path 2 — distribute individually — uses the existing per-customer
+// /customers/:id/assign route; the holding state clears lazily via GET /holding.)
+
+router.post("/master/holding/:id/resolve", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const holdingId = Number(req.params.id);
+    const { new_head_person_id, effective_from, changed_by } = req.body as {
+      new_head_person_id?: number;
+      effective_from?: string;
+      changed_by?: string;
+    };
+    if (!new_head_person_id)
+      return void res.status(400).json({ error: "new_head_person_id is required" });
+    const effFrom =
+      effective_from && /^\d{4}-\d{2}-\d{2}$/.test(effective_from)
+        ? effective_from
+        : new Date().toISOString().slice(0, 10);
+
+    const holdRes = await pool.query(
+      `SELECT person_id, name, holding_for_person_id FROM person
+       WHERE person_id = $1 AND is_holding = true`,
+      [holdingId],
+    );
+    if (!holdRes.rows[0])
+      return void res.status(404).json({ error: "Holding person not found" });
+
+    const newHeadRes = await pool.query(
+      `SELECT person_id, name, is_active, is_holding, left_date FROM person WHERE person_id = $1`,
+      [new_head_person_id],
+    );
+    if (!newHeadRes.rows[0])
+      return void res.status(404).json({ error: "Replacement person not found" });
+    if (newHeadRes.rows[0].is_holding)
+      return void res.status(400).json({ error: "Cannot assign customers to another holding person" });
+    if (!newHeadRes.rows[0].is_active)
+      return void res.status(400).json({ error: "Replacement person is inactive" });
+    if (newHeadRes.rows[0].left_date)
+      return void res.status(400).json({ error: "Replacement person has departed" });
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Serialize concurrent resolutions: lock the holding person and reject
+      // if another transaction already resolved (deactivated) it.
+      const holdLock = await client.query(
+        `SELECT is_active FROM person WHERE person_id = $1 AND is_holding = true FOR UPDATE`,
+        [holdingId],
+      );
+      if (!holdLock.rows[0] || !holdLock.rows[0].is_active) {
+        await client.query("ROLLBACK");
+        return void res
+          .status(409)
+          .json({ error: "This holding has already been resolved." });
+      }
+
+      // Revalidate + lock the replacement inside the transaction so a
+      // concurrent departure of the replacement serializes with this resolve.
+      const badReplacement = await lockAssignTargets(client, [new_head_person_id]);
+      if (badReplacement !== null) {
+        await client.query("ROLLBACK");
+        return void res.status(400).json({
+          error: `Person ${badReplacement} is not a valid replacement (inactive, departed, or holding).`,
+        });
+      }
+
+      // Lock the open assignment rows; each close re-checks effective_to IS
+      // NULL and the replacement is only inserted when the close happened,
+      // so a concurrent individual reassignment can never be duplicated.
+      const openRes = await client.query(
+        `SELECT id, customer_id, person_id, state_head_person_id, confidence
+         FROM customer_assignment
+         WHERE effective_to IS NULL
+           AND (state_head_person_id = $1 OR person_id = $1)
+         FOR UPDATE`,
+        [holdingId],
+      );
+
+      let moved = 0;
+      for (const a of openRes.rows) {
+        const closed = await client.query(
+          `UPDATE customer_assignment SET effective_to = $2
+           WHERE id = $1 AND effective_to IS NULL`,
+          [a.id, effFrom],
+        );
+        if (closed.rowCount === 0) continue; // closed concurrently — skip
+        await client.query(
+          `INSERT INTO customer_assignment
+             (customer_id, person_id, state_head_person_id, confidence,
+              effective_from, set_by)
+           VALUES ($1, $2, $3, 'confirmed', $4, $5)`,
+          [
+            a.customer_id,
+            a.person_id === holdingId ? new_head_person_id : a.person_id,
+            a.state_head_person_id === holdingId ? new_head_person_id : a.state_head_person_id,
+            effFrom,
+            changed_by ?? "operator",
+          ],
+        );
+        moved += 1;
+      }
+
+      // Holding fully resolved — deactivate the holding person.
+      await client.query(
+        `UPDATE person SET is_active = false, updated_at = NOW() WHERE person_id = $1`,
+        [holdingId],
+      );
+
+      await client.query(
+        `INSERT INTO change_log (entity_type, entity_id, field, old_value, new_value, changed_by)
+         VALUES ('person', $1, 'holding_resolved', NULL, $2, $3)`,
+        [
+          String(holdingId),
+          JSON.stringify({ newHeadPersonId: new_head_person_id, assignmentsMoved: moved, effectiveFrom: effFrom }),
+          changed_by ?? "operator",
+        ],
+      );
+
+      await client.query("COMMIT");
+      res.json({ success: true, assignmentsMoved: moved });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -943,6 +1396,7 @@ router.post("/master/customers/bulk-assign-suggested", async (req, res) => {
          JOIN person   p_tm ON p_tm.person_id   = ca_tm.person_id
          WHERE ca_tm.effective_to IS NULL
            AND ca_tm.person_id IS NOT NULL AND p_tm.is_active = true
+           AND p_tm.is_holding = false AND p_tm.left_date IS NULL
            AND c_tm.territory_id = $1
          GROUP BY ca_tm.person_id, p_tm.name
          ORDER BY COUNT(*) DESC, ca_tm.person_id ASC LIMIT 1`,
@@ -968,6 +1422,7 @@ router.post("/master/customers/bulk-assign-suggested", async (req, res) => {
              ON curr.customer_id  = hist.customer_id
              AND curr.effective_to IS NULL AND curr.person_id IS NOT NULL
            JOIN person p0 ON p0.person_id = curr.person_id AND p0.is_active = true
+             AND p0.is_holding = false AND p0.left_date IS NULL
            WHERE hist.former_person_name_raw IS NOT NULL
            GROUP BY hist.former_person_name_raw, curr.person_id, p0.name
          )
@@ -982,7 +1437,8 @@ router.post("/master/customers/bulk-assign-suggested", async (req, res) => {
         former_person_name_raw: string | null;
       }>(
         `SELECT uca.customer_id, uca.state_head_person_id, uca.former_person_name_raw,
-                sh.name AS state_head_name, sh.is_active AS sh_is_active
+                sh.name AS state_head_name,
+                (sh.is_active AND sh.is_holding = false AND sh.left_date IS NULL) AS sh_is_active
          FROM customer_assignment uca
          JOIN customer c ON c.customer_id = uca.customer_id
          LEFT JOIN person sh ON sh.person_id = uca.state_head_person_id
@@ -1055,6 +1511,24 @@ router.post("/master/customers/bulk-assign-suggested", async (req, res) => {
 
     try {
       await client.query("BEGIN");
+      // Lock + revalidate every suggested target (TMs and state heads) inside
+      // the transaction so a concurrent departure serializes with this move.
+      const suggestedIds = [
+        ...new Set(
+          toAssign.flatMap((a) =>
+            [a.personId, a.stateHeadPersonId].filter(
+              (v): v is number => typeof v === "number",
+            ),
+          ),
+        ),
+      ];
+      const badSuggested = await lockAssignTargets(client, suggestedIds);
+      if (badSuggested !== null) {
+        await client.query("ROLLBACK");
+        return void res.status(409).json({
+          error: `Suggested target person ${badSuggested} is no longer a valid assignment target (inactive, departed, or holding). Re-run suggestions.`,
+        });
+      }
       for (const a of toAssign) {
         await client.query(
           `UPDATE customer_assignment SET effective_to = CURRENT_DATE
@@ -1254,13 +1728,17 @@ router.post("/master/customers/bulk-assign", async (req, res) => {
       return void res.status(400).json({ error: "to_person_id is required" });
     }
 
-    // Verify target person
+    // Verify target person — must be active and not a holding/departed person.
     const targetRes = await pool.query(
-      "SELECT person_id, name FROM person WHERE person_id = $1 AND is_active = true",
+      `SELECT person_id, name FROM person
+       WHERE person_id = $1 AND is_active = true
+         AND is_holding = false AND left_date IS NULL`,
       [to_person_id],
     );
     if (!targetRes.rows[0]) {
-      return void res.status(404).json({ error: `Person ${to_person_id} not found or inactive` });
+      return void res.status(404).json({
+        error: `Person ${to_person_id} not found, inactive, departed, or a holding person`,
+      });
     }
 
     // Resolve which customer_ids to move
@@ -1299,6 +1777,18 @@ router.post("/master/customers/bulk-assign", async (req, res) => {
     let moved = 0;
     try {
       await client.query("BEGIN");
+      // Re-validate and lock ALL targets (TM + optional state head) inside the
+      // transaction so a concurrent departure serializes with this bulk move.
+      const bulkTargetIds = [to_person_id, to_state_head_person_id].filter(
+        (v): v is number => typeof v === "number",
+      );
+      const badTarget = await lockAssignTargets(client, bulkTargetIds);
+      if (badTarget !== null) {
+        await client.query("ROLLBACK");
+        return void res.status(400).json({
+          error: `Person ${badTarget} is not a valid assignment target (inactive, departed, or holding).`,
+        });
+      }
       for (const customerId of targets) {
         await client.query(
           `UPDATE customer_assignment SET effective_to = CURRENT_DATE
@@ -1434,6 +1924,15 @@ router.post("/master/customers/review-queue/:id/approve", async (req, res) => {
       );
 
       if (item.proposed_person_id) {
+        // The proposed person must still be a valid assignment target —
+        // locked in-transaction so a concurrent departure serializes here.
+        const badProposed = await lockAssignTargets(client, [Number(item.proposed_person_id)]);
+        if (badProposed !== null) {
+          await client.query("ROLLBACK");
+          return void res.status(400).json({
+            error: `Proposed person ${badProposed} is not a valid assignment target (inactive, departed, or holding).`,
+          });
+        }
         await client.query(
           `INSERT INTO customer_assignment
              (customer_id, person_id, confidence, effective_from, set_by)
@@ -1587,9 +2086,24 @@ router.patch("/master/customers/:id/assign", async (req, res) => {
       ? confidence!
       : "confirmed";
 
+    const targetIds = [person_id, state_head_person_id].filter(
+      (v): v is number => typeof v === "number",
+    );
+
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+
+      // Assignment targets must be active, non-departed, non-holding people —
+      // validated and locked inside the transaction so a concurrent departure
+      // serializes with this assignment.
+      const bad = await lockAssignTargets(client, targetIds);
+      if (bad !== null) {
+        await client.query("ROLLBACK");
+        return void res.status(400).json({
+          error: `Person ${bad} is not a valid assignment target (inactive, departed, or holding).`,
+        });
+      }
 
       // Read current open assignment for change_log
       const prevRes = await client.query(

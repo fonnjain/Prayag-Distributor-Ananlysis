@@ -54,6 +54,8 @@ interface PersonOption {
   person_id: number;
   name: string;
   designation_name: string | null;
+  is_holding?: boolean;
+  left_date?: string | null;
 }
 
 interface CustomerRow {
@@ -203,7 +205,16 @@ function usePersonList() {
   return useQuery<{ total: number; people: PersonOption[] }>({
     queryKey: ["master-people-all"],
     queryFn: () =>
-      fetch(`${BASE}/api/master/people?active=true&limit=200`).then((r) => r.json()),
+      fetch(`${BASE}/api/master/people?active=true&limit=200`)
+        .then((r) => r.json())
+        .then((d) => ({
+          ...d,
+          // Holding persons are system placeholders for departed heads —
+          // never offer them as an assignment target.
+          people: (d.people ?? []).filter(
+            (p: PersonOption) => !p.is_holding && !p.left_date,
+          ),
+        })),
     staleTime: 5 * 60 * 1000,
   });
 }
