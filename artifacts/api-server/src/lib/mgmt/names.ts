@@ -53,7 +53,7 @@ export function normHead(raw: unknown): string {
 // Explicit head aliases (normHead key -> normHead key) for spellings that no
 // mechanical rule can align, e.g. the register says "RIZVI JI" but the roster
 // says "Syed Aqil Rizvi". Extend as new spellings appear in the logs.
-const HEAD_ALIASES: Record<string, string> = {
+export const HEAD_ALIASES: Record<string, string> = {
   rizvi: "syedaqilrizvi",
   aqilrizvi: "syedaqilrizvi",
   sandeep: "sandeepdadheech",
