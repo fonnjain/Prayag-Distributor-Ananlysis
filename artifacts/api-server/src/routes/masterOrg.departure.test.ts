@@ -583,4 +583,104 @@ describe("departure lifecycle", () => {
     await pool.query(`DELETE FROM customer WHERE customer_id IN ($1,$2)`, [CUST5, CUST6]);
     await pool.query(`DELETE FROM territory WHERE territory_id = $1`, [terrId]);
   });
+
+  // ── Individual-reassignment lazy-clear path ───────────────────────────────
+  // Verifies that when every customer is moved off a holding person one at a
+  // time (PATCH /master/customers/:id/assign), the next GET /master/holding
+  // call triggers the lazy-deactivation UPDATE and excludes that holding
+  // person from the response. The bulk-resolve path is covered elsewhere;
+  // this test covers the individual path described in the route comment.
+
+  it("individual reassignments lazy-deactivate the holding person once all customers are moved", async () => {
+    // Fixture: a fresh departed head with 2 customers.
+    const hx = await pool.query(
+      `INSERT INTO person (name, is_state_head, source)
+       VALUES ('ZZDEP Head7', true, 'app_created') RETURNING person_id`,
+    );
+    const head7 = hx.rows[0].person_id;
+    const CUST7 = "ZZDEP#7";
+    const CUST8 = "ZZDEP#8";
+
+    // Clear any stale rows from a previous failed run.
+    await pool.query(`DELETE FROM customer_assignment WHERE customer_id IN ($1,$2)`, [CUST7, CUST8]);
+    await pool.query(`DELETE FROM customer WHERE customer_id IN ($1,$2)`, [CUST7, CUST8]);
+
+    await pool.query(
+      `INSERT INTO customer (customer_id, name, type, source)
+       VALUES ($1,'ZZDEP Customer7','distributor','app_created'),
+              ($2,'ZZDEP Customer8','distributor','app_created')`,
+      [CUST7, CUST8],
+    );
+    await pool.query(
+      `INSERT INTO customer_assignment (customer_id, person_id, state_head_person_id, confidence, set_by)
+       VALUES ($1, $2, $2, 'confirmed', 'departure-test'),
+              ($3, $2, $2, 'confirmed', 'departure-test')`,
+      [CUST7, head7, CUST8],
+    );
+
+    // Depart head7 — creates a holding person holding 2 open assignments.
+    const depRes = await request(app)
+      .post(`/api/master/people/${head7}/departure`)
+      .set("X-Admin-Secret", ADMIN)
+      .send({ ...departureBody, acknowledgedCustomers: 2, changed_by: "departure-test" });
+    expect(depRes.status).toBe(200);
+    const holdingId7: number = depRes.body.holdingPersonId;
+    expect(depRes.body.assignmentsMoved).toBe(2);
+
+    // GET /holding before any moves: holding person appears with 2 open customers.
+    const before = await request(app).get(`/api/master/holding`);
+    expect(before.status).toBe(200);
+    const entryBefore = before.body.holdings.find((h: any) => h.holding_person_id === holdingId7);
+    expect(entryBefore).toBeTruthy();
+    expect(Number(entryBefore.open_customers)).toBe(2);
+
+    // Move CUST7 individually to the replacement.
+    const mv1 = await request(app)
+      .patch(`/api/master/customers/${encodeURIComponent(CUST7)}/assign`)
+      .set("X-Admin-Secret", ADMIN)
+      .send({ person_id: replacementId, state_head_person_id: replacementId, changed_by: "departure-test" });
+    expect(mv1.status).toBe(200);
+
+    // After first move: holding still has 1 customer and is still active.
+    const between = await request(app).get(`/api/master/holding`);
+    const entryBetween = between.body.holdings.find((h: any) => h.holding_person_id === holdingId7);
+    expect(entryBetween).toBeTruthy();
+    expect(Number(entryBetween.open_customers)).toBe(1);
+    const dbBetween = await pool.query(
+      `SELECT is_active FROM person WHERE person_id = $1`, [holdingId7],
+    );
+    expect(dbBetween.rows[0].is_active).toBe(true);
+
+    // Move CUST8 — now zero open assignments remain on the holding person.
+    const mv2 = await request(app)
+      .patch(`/api/master/customers/${encodeURIComponent(CUST8)}/assign`)
+      .set("X-Admin-Secret", ADMIN)
+      .send({ person_id: replacementId, state_head_person_id: replacementId, changed_by: "departure-test" });
+    expect(mv2.status).toBe(200);
+
+    // GET /holding: lazy-clear fires → holding person is deactivated and absent.
+    const after = await request(app).get(`/api/master/holding`);
+    expect(after.status).toBe(200);
+    expect(after.body.holdings.find((h: any) => h.holding_person_id === holdingId7)).toBeUndefined();
+
+    // DB: is_active must be false after the lazy-clear UPDATE.
+    const dbFinal = await pool.query(
+      `SELECT is_active FROM person WHERE person_id = $1`, [holdingId7],
+    );
+    expect(dbFinal.rows[0].is_active).toBe(false);
+
+    // Both customers are now open-assigned to the replacement.
+    const assigns = await pool.query(
+      `SELECT customer_id, person_id FROM customer_assignment
+       WHERE customer_id IN ($1,$2) AND effective_to IS NULL
+       ORDER BY customer_id`,
+      [CUST7, CUST8],
+    );
+    expect(assigns.rows.length).toBe(2);
+    expect(assigns.rows.every((r: any) => r.person_id === replacementId)).toBe(true);
+
+    // Cleanup.
+    await pool.query(`DELETE FROM customer_assignment WHERE customer_id IN ($1,$2)`, [CUST7, CUST8]);
+    await pool.query(`DELETE FROM customer WHERE customer_id IN ($1,$2)`, [CUST7, CUST8]);
+  });
 });
