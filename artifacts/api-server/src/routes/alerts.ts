@@ -387,6 +387,79 @@ router.post("/alerts/:id/acknowledge", async (req, res) => {
   }
 });
 
+// ── POST /api/alerts/admin/supersede ──────────────────────────────────────
+//
+// Manually close a set of open alerts with a caller-supplied clear_reason.
+// Mirrors the exact SQL used by the persistence layer's clear pass so the
+// reason is stored in the same column and the rows stay in history.
+//
+// Body: { fingerprints: string[], clear_reason: string, note?: string }
+//   fingerprints — one or more "fy|code|entityKey" fingerprints (see buildFingerprint)
+//   clear_reason — e.g. "superseded", "data_gap_false_positive"
+//   note         — optional operator note (recorded in alert_action)
+//
+// Only 'open' rows are affected; already-acknowledged / cleared rows are
+// silently skipped (same safety guard as the persistence clear pass).
+// Returns { superseded: number[] } — IDs of rows whose status changed.
+
+router.post("/alerts/admin/supersede", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const { fingerprints, clear_reason, note } = req.body as {
+      fingerprints?: unknown;
+      clear_reason?: unknown;
+      note?: unknown;
+    };
+    if (!Array.isArray(fingerprints) || fingerprints.length === 0) {
+      return void res.status(400).json({ error: "fingerprints must be a non-empty array" });
+    }
+    if (typeof clear_reason !== "string" || !clear_reason.trim()) {
+      return void res.status(400).json({ error: "clear_reason is required" });
+    }
+    const fps = fingerprints.map(String);
+    const reason = clear_reason.trim();
+    const noteTrimmed = typeof note === "string" ? note.trim() || null : null;
+    const now = new Date();
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const { rows: updated } = await client.query<{ id: number }>(
+        `UPDATE alert
+            SET status       = 'cleared',
+                clear_reason = $1,
+                last_seen_at = $2
+          WHERE fingerprint = ANY($3::text[])
+            AND status = 'open'
+          RETURNING id`,
+        [reason, now, fps],
+      );
+
+      const ids = updated.map((r) => r.id);
+      for (const id of ids) {
+        await client.query(
+          `INSERT INTO alert_action (alert_id, action, by_person, note)
+           VALUES ($1, 'supersede', 'admin', $2)`,
+          [id, noteTrimmed],
+        );
+      }
+
+      await client.query("COMMIT");
+      logger.info({ fps, reason, superseded: ids }, "[alerts] admin supersede");
+      res.json({ superseded: ids });
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {/* ignore */});
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    logger.error({ err }, "[alerts] admin supersede failed");
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // ── POST /api/admin/alerts/digest ──────────────────────────────────────────
 // Trigger the weekly digest immediately (admin only).
 // Body: { dryRun?: boolean, fy?: string, force?: boolean }
