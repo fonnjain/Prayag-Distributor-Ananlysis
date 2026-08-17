@@ -36,6 +36,7 @@ import { detectAlerts } from "./detectAlerts.js";
 import type { RawAlert, CalibrationResult, SecHeadMonthRow } from "./types.js";
 import { currentOpenFy } from "../fyAnchors.js";
 import { logger } from "../logger.js";
+import { runFrozenButEmptyCheck } from "./skuCanary.js";
 
 // ── Fingerprint ────────────────────────────────────────────────────────────
 
@@ -458,6 +459,28 @@ export async function runAlertDetection(): Promise<DetectionStats> {
     },
     "[alertDetection] persistence complete",
   );
+
+  // ── Non-blocking frozen-but-empty canary ─────────────────────────────────
+  // Logs WARN if any month is frozen in register_month_state (primary data
+  // locked) but has zero rows in secondary_sku_line. This is the category
+  // error that caused the July-26 false-positive S1 alerts. Guard 3 already
+  // evicts these at runtime (context.ts); this check surfaces them in the
+  // production scheduler log so they are noticed before the next detection
+  // cycle emits false alerts.
+  // Error in this check must never abort the detection run.
+  try {
+    const frozenEmpty = await runFrozenButEmptyCheck(pool, fy);
+    if (frozenEmpty.length > 0) {
+      logger.warn(
+        { fy, frozenEmptyMonths: frozenEmpty.map((r) => r.month_label) },
+        "[alertDetection] canary: frozen months with zero secondary_sku_line rows — " +
+        "Guard 3 will evict them, but secondary SKU data should be loaded. " +
+        "See GET /api/audit Group 12 for details.",
+      );
+    }
+  } catch (canaryErr) {
+    logger.warn({ err: canaryErr }, "[alertDetection] canary: frozen-but-empty check failed (non-fatal)");
+  }
 
   return stats;
 }

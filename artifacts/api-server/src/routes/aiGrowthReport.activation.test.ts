@@ -56,6 +56,21 @@ import {
   type FyIngestStats,
   type DeriveGuardFyOpts,
 } from "../lib/fyAnchors.js";
+// Shared canary logic — same module used by the audit engine (Group 12) and
+// the detection scheduler. This test runs it against the DEV database; the
+// audit endpoint runs it against the server's DB (production when deployed).
+import {
+  WIPE_CANARY_STATS_SQL,
+  completedMonthLabels,
+  priorLikeMonth,
+  priorFyOf,
+  evalPerMonthRule,
+  evalTotalRule,
+  RULE1_ROWS_RATIO,
+  RULE2_TOTAL_RATIO,
+  RULE3_DIST_RATIO,
+  type MonthStat,
+} from "../lib/redAlert/skuCanary.js";
 
 // ── GUARD_FY derivation (shared pattern from src/lib/fyAnchors.ts) ────────────
 
@@ -183,76 +198,10 @@ async function runRangeGapQuery(fy: string): Promise<DistRangeGapRow[]> {
 }
 
 // ── Open-FY wipe canary (ratio-based) ─────────────────────────────────────────
-
-const RULE1_ROWS_RATIO = 0.6;   // per-month rows vs prior like-month
-const RULE2_TOTAL_RATIO = 0.7;  // completed-month total vs prior like-months
-const RULE3_DIST_RATIO = 0.7;   // per-month distinct distributors vs prior like-month
-
-// Denominators are read LIVE from the prior FY at test time via this query —
-// never hardcoded, so a prior-year re-sync can never stale them.
-export const WIPE_CANARY_STATS_SQL = `
-    SELECT fy,
-           month_label,
-           COUNT(*)::text                                        AS rows,
-           COUNT(DISTINCT NULLIF(TRIM(distributor), ''))::text   AS distributors
-    FROM   public.secondary_sku_line
-    WHERE  fy = ANY($1::text[])
-    GROUP  BY fy, month_label
-`;
-
-export type MonthStat = { rows: number; distributors: number };
-
-/** Month labels of `fy` whose calendar month has fully elapsed before `now`. */
-export function completedMonthLabels(fy: string, now: Date): string[] {
-  const startYear = parseInt(fy.slice(0, 4), 10);
-  return fyMonthLabels(fy).filter((_, i) => {
-    const monthIdx = (3 + i) % 12; // Apr=3 .. Mar=2
-    const year = startYear + (monthIdx < 3 ? 1 : 0);
-    // First instant of the FOLLOWING month must not be in the future.
-    const monthEnd = Date.UTC(year, monthIdx + 1, 1);
-    return monthEnd <= now.getTime();
-  });
-}
-
-/** "Apr-26" → "Apr-25": same month name in the prior FY. */
-export function priorLikeMonth(label: string): string {
-  const [mon, yy] = label.split("-");
-  return `${mon}-${String(parseInt(yy!, 10) - 1).padStart(2, "0")}`;
-}
-
-export function priorFyOf(fy: string): string {
-  const start = parseInt(fy.slice(0, 4), 10) - 1;
-  return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
-}
-
-type RuleResult = { label: string; actual: number; floor: number; pass: boolean; skipped: boolean };
-
-/** Rule 1 / Rule 3 per-month evaluation. Zero prior denominator → skipped (warned by caller). */
-export function evalPerMonthRule(
-  label: string,
-  actual: number,
-  priorDenominator: number,
-  ratio: number,
-): RuleResult {
-  if (priorDenominator <= 0) {
-    return { label, actual, floor: 0, pass: true, skipped: true };
-  }
-  const floor = ratio * priorDenominator;
-  return { label, actual, floor, pass: actual >= floor, skipped: false };
-}
-
-/** Rule 2 total evaluation over the completed months. */
-export function evalTotalRule(
-  openTotal: number,
-  priorTotal: number,
-  ratio: number,
-): RuleResult {
-  if (priorTotal <= 0) {
-    return { label: "total", actual: openTotal, floor: 0, pass: true, skipped: true };
-  }
-  const floor = ratio * priorTotal;
-  return { label: "total", actual: openTotal, floor, pass: openTotal >= floor, skipped: false };
-}
+// RULE1/2/3_ROWS_RATIO, WIPE_CANARY_STATS_SQL, MonthStat, completedMonthLabels,
+// priorLikeMonth, priorFyOf, evalPerMonthRule, and evalTotalRule are now
+// imported from ../lib/redAlert/skuCanary.js (see imports at top of file).
+// The audit engine (Group 12) uses the same module against the server DB.
 
 // Resolved in beforeAll.
 let OPEN_FY = "";
@@ -295,6 +244,14 @@ beforeAll(async () => {
   OPEN_FY = `${openStart}-${String((openStart + 1) % 100).padStart(2, "0")}`;
   PRIOR_FY = priorFyOf(OPEN_FY);
   COMPLETED_LABELS = completedMonthLabels(OPEN_FY, now);
+  // Explicit environment label — a green canary that only ever checked dev is
+  // worse than none. The audit engine (Group 12) runs the same checks against
+  // the server's DB (production when deployed); these tests cover dev only.
+  console.log(
+    `[wipe canary] environment: dev (CI) — checks dev database only, NOT production. ` +
+    `Run GET /api/audit Group 12 on the deployed server for production coverage. ` +
+    `Open FY: ${OPEN_FY}, prior FY: ${PRIOR_FY}, completed months: [${COMPLETED_LABELS.join(", ")}]`,
+  );
   const canaryRes = await pool.query<{ fy: string; month_label: string; rows: string; distributors: string }>(
     WIPE_CANARY_STATS_SQL,
     [[OPEN_FY, PRIOR_FY]],
