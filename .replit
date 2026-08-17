@@ -45,7 +45,7 @@ isValidation = true
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/api-server exec vitest run src/lib/comparison/costCell.test.ts src/lib/mgmt/distributorTabs.test.ts src/routes/aiGrowthReport.activation.test.ts src/lib/schemes/__tests__/schemeSeedData.test.ts src/routes/marketSurvey.cascadeStates.test.ts && node artifacts/api-server/scripts/comparison-guard-check.mjs && node artifacts/api-server/scripts/distributor-tab-guard-check.mjs"
+args = "pnpm --filter @workspace/api-server exec vitest run src/lib/comparison/costCell.test.ts src/lib/mgmt/distributorTabs.test.ts src/routes/aiGrowthReport.activation.test.ts src/lib/schemes/__tests__/schemeSeedData.test.ts src/routes/marketSurvey.cascadeStates.test.ts && node artifacts/api-server/scripts/comparison-guard-check.mjs && node artifacts/api-server/scripts/distributor-tab-guard-check.mjs && node artifacts/api-server/scripts/identity-key-norm-guard-check.mjs"
 
 [[workflows.workflow]]
 name = "prayag-period-guards"
