@@ -311,6 +311,29 @@ if (distKey) {
     check("filtered netAmount does not exceed unfiltered FY total",
       (filt.netAmount ?? 0) <= (unf.netAmount ?? 0) + 1,
       `filtered=${filt.netAmount} unfiltered=${unf.netAmount}`);
+
+    // 7b. Geography filter (states=) is deliberately ignored for single-dist
+    // calls — it only narrows the distributor list in the head-scope path.
+    // This check makes that assumption explicit: adding states=RAJASTHAN to a
+    // single-dist request must produce byte-identical netAmount to the
+    // unfiltered call.  If a future change starts consuming geoStates in
+    // buildSecondaryTab, this check fails loudly.
+    const geoRes = await safeFetch(
+      `${base}/mgmt/distributor-tab?fy=${OPEN_FY}&dist=${encKey}&tab=secondary&states=RAJASTHAN`,
+    );
+    if (!geoRes.ok) {
+      fail(
+        `geography-ignored check — states= request got ${geoRes.status} for distKey '${distKey}'; ` +
+        `expected 200 (same as unfiltered).`,
+      );
+    } else {
+      const geo = await geoRes.json();
+      check(
+        "single-dist secondary tab: states= filter has no effect (geography is head-scope only)",
+        Math.abs((geo.netAmount ?? 0) - (unf.netAmount ?? 0)) < 1,
+        `with-states=${geo.netAmount} without-states=${unf.netAmount}`,
+      );
+    }
   }
 
   // 8. SKU tab: baselineMonths = toPriorYearMonths(selection).
