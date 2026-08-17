@@ -227,6 +227,12 @@ console.log(`\nDistributor-tab guard checks against ${base}\n`);
 // monthCond/filter invariant deterministically without Sheets dependency.
 // A hard-fail here would make the chained validation command unreliable in
 // environments where Sheets credentials are not present (CI, local dev).
+//
+// IMPORTANT: once a distKey is obtained (from either source), any 4xx/5xx from
+// the tab route is a HARD FAIL — not a SKIP. A valid directory key must be
+// accepted by the tab route; if it isn't, the key vocabulary is broken (e.g.
+// a lowercasing regression in resolveTabScope). SKIP is only legitimate for
+// genuinely empty results returned as HTTP 200 (no data for that distributor).
 
 let distKey = process.env.GUARD_DIST_KEY ?? null;
 let liveChecksSkipped = false;
@@ -272,10 +278,16 @@ if (distKey) {
   ]);
 
   if (!unfRes.ok || !filtRes.ok) {
-    // The secondary tab may return non-200 for a legitimate reason (no data,
-    // unknown distributor). That is a data issue, not a code issue. Log and skip.
-    console.log(
-      `  SKIP  live filter checks (secondary tab: unfiltered=${unfRes.status} filtered=${filtRes.status} — no secondary data for '${distKey}'; live filter invariant is covered by the DB-seeded vitest tests)`,
+    // The distKey came from the distributor directory (or GUARD_DIST_KEY), so
+    // it is a known, valid key. A 4xx/5xx from the tab route means the key
+    // vocabulary is broken (e.g. lowercasing regression), not that data is
+    // absent. Treat this as a hard FAIL so a silent skip cannot hide the bug.
+    // A genuinely data-absent distributor returns HTTP 200 with empty monthly[].
+    fail(
+      `live filter checks — directory-provided distKey '${distKey}' got ` +
+      `${unfRes.status}/${filtRes.status} from distributor-tab route ` +
+      `(unfiltered/filtered); expected 200. If the distKey vocabulary changed, ` +
+      `fix resolveTabScope or set GUARD_DIST_KEY to a valid normKey.`,
     );
   } else {
     const [unf, filt] = await Promise.all([unfRes.json(), filtRes.json()]);
@@ -308,7 +320,11 @@ if (distKey) {
     `${base}/mgmt/distributor-tab?fy=${OPEN_FY}&dist=${encKey}&tab=sku&months=${skuMonths}`,
   );
   if (!skuRes.ok) {
-    console.log(`  SKIP  SKU baseline check (sku tab returned ${skuRes.status} for '${distKey}')`);
+    // Same principle as secondary: a directory-provided key must be accepted.
+    fail(
+      `SKU baseline check — directory-provided distKey '${distKey}' got ` +
+      `${skuRes.status} from sku tab route; expected 200.`,
+    );
   } else {
     const body = await skuRes.json().catch(() => null);
     const side = body?.primary ?? body?.secondary;
