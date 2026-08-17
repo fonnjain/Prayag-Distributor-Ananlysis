@@ -12,13 +12,14 @@
 //   Propose-new-customer form + list of pending/approved/rejected entries.
 //   Admin can approve (creates customer row) or reject.
 //
+// People and Person Registry live at /org/people (OrgPeoplePage) — NOT here.
+//
 // Invariant guarantee:
 //   GET /api/master/customers/by-head produces IDENTICAL results before and
 //   after ANY bulk-assign or single-assign operation. sale_line.head_canon is
 //   baked at ingestion and is never written by these routes.
 
 import { useState, useEffect, useRef } from "react";
-import { useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -41,10 +42,8 @@ import { cn } from "@/lib/utils";
 import {
   Search, Lock, Unlock, ChevronDown, ChevronRight,
   Link2, AlertTriangle, CheckCircle2, Store, Users,
-  RefreshCw, ClipboardList, UserCheck, Lightbulb, TrendingUp, X, Network,
+  RefreshCw, ClipboardList, UserCheck, Lightbulb, TrendingUp, X,
 } from "lucide-react";
-import OrgPeoplePage from "@/pages/OrgPeoplePage";
-import { PersonRegistryPanel } from "@/components/dashboard/Organisation";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -1318,9 +1317,7 @@ function QueueRow({ item, adminSecret, onApprove, onReject }:
 
 export default function OrgCustomersPage() {
   const { secret, setSecret } = useAdminSecret();
-  // /org/people is an alias that opens this page at the People tab.
-  const [location] = useLocation();
-  const [tab, setTab] = useState(() => location === "/org/people" ? 3 : 0);
+  const [tab, setTab] = useState(0);
 
   // Unassigned count for badge
   const { data: unassignedData } = useQuery<{ total: number; customers: unknown[]; territoryGroups: unknown[] }>({
@@ -1342,8 +1339,6 @@ export default function OrgCustomersPage() {
     { label: "Customers",    icon: <Store size={14} /> },
     { label: `Unassigned ${unassignedCount ? `(${unassignedCount.toLocaleString()})` : ""}`, icon: <Users size={14} /> },
     { label: `Review Queue ${pendingCount ? `(${pendingCount})` : ""}`, icon: <ClipboardList size={14} /> },
-    { label: "People",       icon: <UserCheck size={14} /> },
-    { label: "Person Registry", icon: <Network size={14} /> },
   ];
 
   return (
@@ -1377,16 +1372,6 @@ export default function OrgCustomersPage() {
       {tab === 0 && <CustomersTab adminSecret={secret} />}
       {tab === 1 && <UnassignedTab adminSecret={secret} />}
       {tab === 2 && <ReviewQueueTab adminSecret={secret} />}
-      {tab === 3 && (
-        <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-          <OrgPeoplePage />
-        </div>
-      )}
-      {tab === 4 && (
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <PersonRegistryPanel />
-        </div>
-      )}
     </div>
   );
 }

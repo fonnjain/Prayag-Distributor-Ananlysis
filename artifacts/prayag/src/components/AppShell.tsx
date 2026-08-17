@@ -19,7 +19,7 @@ import {
   Bot, FileSpreadsheet, BarChart2 as BarChartIcon, Target,
   ClipboardList, Database, ShieldCheck,
   LayoutDashboard, Users, ShoppingBag,
-  AlertTriangle, Bell, UserMinus, Settings, Store, BookOpen, Network,
+  AlertTriangle, Bell, UserMinus, UserCheck, Settings, Store, BookOpen, Network,
   ChevronDown, ChevronRight, Menu, X, Sun, Moon, Braces, Key, Layers, IndianRupee,
   Globe, FileSearch,
 } from "lucide-react";
@@ -136,7 +136,8 @@ const NAV: NavGroup[] = [
       { id: "shrinkers", label: "Price Shrinkers",  path: "/customers/shrinkers", icon: AlertTriangle },
       { id: "churn",     label: "At Risk & New",    path: "/customers/churn",     icon: UserMinus },
       { id: "schemes",   label: "Schemes",          path: "/customers/schemes",   icon: Settings },
-      { id: "master",    label: "Customer Data",    path: "/customers/master",    icon: BookOpen },
+      // "Customer Data" (/customers/master) retired from nav — route kept alive for one release.
+      // Assignment writes now go exclusively through /org/customers.
     ],
   },
   {
@@ -144,7 +145,8 @@ const NAV: NavGroup[] = [
     label: "Organisation",
     icon: Users,
     items: [
-      { id: "org-customers",  label: "Customers", path: "/org/customers",  icon: Store },
+      { id: "org-customers", label: "Customers", path: "/org/customers", icon: Store },
+      { id: "org-people",    label: "People",    path: "/org/people",    icon: UserCheck },
     ],
   },
   {

@@ -85,9 +85,13 @@ async function logChange(
   });
 }
 
+// stateHead is intentionally excluded: assignments must go through the
+// effective-dated customer_assignment path in /api/master/customers/:id/assign.
+// Writing stateHead directly here would bypass that system and break
+// historical-attribution guarantees.
 const UPDATABLE_FIELDS: (keyof CustomerMaster)[] = [
   "company", "type", "status", "contact", "mobile", "state",
-  "district", "city", "stateHead", "headConfidence", "supplyingDistributor", "notes",
+  "district", "city", "headConfidence", "supplyingDistributor", "notes",
 ];
 
 // ── LIST ───────────────────────────────────────────────────────────────────────
