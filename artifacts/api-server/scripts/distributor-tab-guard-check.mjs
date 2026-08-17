@@ -245,13 +245,13 @@ if (!distKey) {
     liveChecksSkipped = true;
   } else {
     const dir = await dirRes.json().catch(() => null);
-    distKey = dir?.distributors?.[0]?.normKey ?? null;
-    // The directory's normKey field carries the display name (e.g.
-    // "ANAND SANITARYWARE" with spaces and uppercase).  The distributor-tab
-    // route resolves via the identity registry which normalises the key to
-    // lowercase alphanumeric — pass the same form so the registry lookup
-    // and the secondary-tab data lookup both hit.
-    if (distKey) distKey = distKey.toLowerCase().replace(/[^a-z0-9]/g, "");
+    distKey = dir?.distributors?.[0]?.distKey ?? null;
+    // distKey is the directory's normDistKey grouping key (UPPERCASE
+    // alphanumerics + spaces, e.g. "ANAND SANITARYWARE"). The distributor-tab
+    // route compares it verbatim against the directory (resolveTabScope) and
+    // normDistKey is idempotent on it, so pass the RAW value — lowercasing it
+    // (as an older revision did) makes resolveTabScope throw and silently
+    // downgrades these live checks to SKIP.
     if (!distKey) {
       console.warn(
         "  WARN  live filter checks skipped — distributor directory returned no distributors. " +

@@ -28,7 +28,13 @@ import { logger } from "../logger.js";
 
 export type DirectoryDistributor = {
   name: string;
-  normKey: string;
+  /** Distributor grouping key — normDistKey(name): UPPERCASE alphanumerics
+   *  with single spaces (e.g. "ANAND SANITARYWARE"). This is the distributor
+   *  vocabulary key used by the deep-dive payloads, the identity registry and
+   *  the distributor-tab route's `dist=` param. It is NOT a normSecKey
+   *  (lowercase alphanumerics, no spaces) — do not compare it against
+   *  person/member normSecKey values. */
+  distKey: string;
   /** Canonical geographic states (serving members' states, normalised). */
   states: string[];
   /** State heads whose teams serve this distributor. */
@@ -132,7 +138,7 @@ async function buildDirectory(fy: string): Promise<DistributorDirectory> {
         let acc = dists.get(d.normKey);
         if (!acc) {
           acc = {
-            name: d.name, normKey: d.normKey, states: [], heads: [], members: [],
+            name: d.name, distKey: d.normKey, states: [], heads: [], members: [],
             retailerCount: 0, activeCount: 0, orderBooking: 0, sale: 0,
             _states: new Set(), _heads: new Set(), _members: new Set(),
           };
@@ -165,7 +171,7 @@ async function buildDirectory(fy: string): Promise<DistributorDirectory> {
 
   const distributors = [...dists.values()]
     .map((a) => ({
-      name: a.name, normKey: a.normKey,
+      name: a.name, distKey: a.distKey,
       states: [...a._states].sort(),
       heads: [...a._heads].sort(),
       members: [...a._members].sort(),

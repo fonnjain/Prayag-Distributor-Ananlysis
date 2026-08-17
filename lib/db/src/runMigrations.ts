@@ -1456,6 +1456,68 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    // person_id FK formalises person as the authoritative master.
+    // Step 1: add nullable FK column + index.
+    // Step 2: populate via case-insensitive name match (covers 177 of 179 active members).
+    // Step 3: populate the 2 whose registry canonical_name has a punctuation difference
+    //         (K. Suresh Kumar → person 89; S. Tirumala Rao → person 106) via employee-code.
+    // Step 4: set is_person=false for the 74 geographic/product-category noise rows whose
+    //         canonical_name is a state, territory, or district name (e.g. ANDHRA PRADESH,
+    //         East U.P). These were seeded from HR-roster rows where a geography column was
+    //         parsed as a person name. Verified 0 matching rows in sale_line or
+    //         secondary_sku_line before flipping. is_state_head=false for all 74.
+    id: "043_person_registry_person_fk",
+    sql: `
+      -- Step 1: FK column + index
+      ALTER TABLE person_registry
+        ADD COLUMN IF NOT EXISTS person_id INTEGER REFERENCES person(person_id);
+      CREATE INDEX IF NOT EXISTS pr_person_id_idx ON person_registry(person_id);
+
+      -- Step 2: name match (handles 177 active members)
+      -- normSecKey-equivalent normalisation: lowercase alphanumerics only
+      -- (LOWER(REGEXP_REPLACE(x, '[^a-z0-9]', '', 'gi'))). The original
+      -- space-collapse-only form missed dotted spellings like
+      -- "K. Suresh Kumar" vs "K Suresh Kumar" (rescued only by the
+      -- employee-code fallback in step 3 / migration 044).
+      -- Employee-code conflict guard: when BOTH sides carry a code and the
+      -- codes differ, the rows are different people whose names happen to
+      -- collide after stripping (e.g. "Pawan Kumar." code 1229 vs
+      -- "PAWAN KUMAR" code 761) — never merge them on name alone.
+      UPDATE person_registry pr
+      SET person_id = p.person_id
+      FROM person p
+      WHERE LOWER(REGEXP_REPLACE(pr.canonical_name, '[^a-z0-9]', '', 'gi'))
+          = LOWER(REGEXP_REPLACE(p.name,            '[^a-z0-9]', '', 'gi'))
+        AND pr.person_id IS NULL
+        AND pr.is_person = true
+        AND (pr.employee_code IS NULL OR TRIM(pr.employee_code) = ''
+             OR p.employee_code IS NULL OR TRIM(p.employee_code) = ''
+             OR TRIM(pr.employee_code) = TRIM(p.employee_code));
+
+      -- Step 3: employee-code match for punctuation-different spellings
+      --   K. Suresh Kumar (reg 134) → person 89  (code 25696++21111)
+      --   S. Tirumala Rao (reg 253) → person 106 (code 3418596)
+      UPDATE person_registry pr
+      SET person_id = p.person_id
+      FROM person p
+      WHERE pr.id IN (134, 253)
+        AND pr.employee_code = p.employee_code
+        AND pr.employee_code IS NOT NULL
+        AND pr.person_id IS NULL;
+
+      -- Step 4: demote 74 geographic/product-category noise rows
+      UPDATE person_registry
+      SET is_person = false
+      WHERE id IN (
+        432,433,437,439,443,445,448,452,458,460,462,465,466,467,471,
+        472,475,479,480,482,485,486,491,492,493,496,501,502,505,508,
+        510,513,514,517,523,527,528,532,537,539,542,543,552,560,563,
+        566,568,570,572,574,579,581,588,590,594,617,624,630,636,648,
+        676,681,686,689,700,715,717,719,725,727,730,735,847,855
+      );
+    `,
+  },
+  {
     // Patch the employee-code FK population from migration 043.
     // Migration 043 restricted the employee-code match to ids IN (134, 253)
     // to cover K. Suresh Kumar and S. Tirumala Rao. Three more registry rows
@@ -1492,53 +1554,32 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
-    // person_id FK formalises person as the authoritative master.
-    // Step 1: add nullable FK column + index.
-    // Step 2: populate via case-insensitive name match (covers 177 of 179 active members).
-    // Step 3: populate the 2 whose registry canonical_name has a punctuation difference
-    //         (K. Suresh Kumar → person 89; S. Tirumala Rao → person 106) via employee-code.
-    // Step 4: set is_person=false for the 74 geographic/product-category noise rows whose
-    //         canonical_name is a state, territory, or district name (e.g. ANDHRA PRADESH,
-    //         East U.P). These were seeded from HR-roster rows where a geography column was
-    //         parsed as a person name. Verified 0 matching rows in sale_line or
-    //         secondary_sku_line before flipping. is_state_head=false for all 74.
-    id: "043_person_registry_person_fk",
+    // Re-run the person_registry.person_id population with the corrected
+    // normSecKey-equivalent normalisation (migration 043 step 2 originally
+    // used space-collapse only, which missed dotted spellings like
+    // "K. Suresh Kumar" vs "K Suresh Kumar"). On DBs already patched by
+    // 043/044 this is a no-op for rows the employee-code fallback rescued;
+    // it exists so already-seeded DBs (e.g. production) pick up any
+    // punctuation-variant name matches the old normalisation missed.
+    //
+    // Employee-code conflict guard: when BOTH sides carry a non-blank code
+    // and the codes differ, the rows are different people whose names
+    // collide after stripping (verified in dev: "Pawan Kumar." code 1229 vs
+    // person "PAWAN KUMAR" code 761; "Manish Gupta." code 822 vs person
+    // "Manish Gupta" code 1171) — those must never merge on name alone.
+    // Idempotent: only fills person_id IS NULL rows.
+    id: "045_person_registry_person_fk_norm_fix",
     sql: `
-      -- Step 1: FK column + index
-      ALTER TABLE person_registry
-        ADD COLUMN IF NOT EXISTS person_id INTEGER REFERENCES person(person_id);
-      CREATE INDEX IF NOT EXISTS pr_person_id_idx ON person_registry(person_id);
-
-      -- Step 2: name match (handles 177 active members)
       UPDATE person_registry pr
       SET person_id = p.person_id
       FROM person p
-      WHERE LOWER(TRIM(REGEXP_REPLACE(pr.canonical_name, '\\s+', ' ', 'g')))
-          = LOWER(TRIM(REGEXP_REPLACE(p.name,            '\\s+', ' ', 'g')))
+      WHERE LOWER(REGEXP_REPLACE(pr.canonical_name, '[^a-z0-9]', '', 'gi'))
+          = LOWER(REGEXP_REPLACE(p.name,            '[^a-z0-9]', '', 'gi'))
         AND pr.person_id IS NULL
-        AND pr.is_person = true;
-
-      -- Step 3: employee-code match for punctuation-different spellings
-      --   K. Suresh Kumar (reg 134) → person 89  (code 25696++21111)
-      --   S. Tirumala Rao (reg 253) → person 106 (code 3418596)
-      UPDATE person_registry pr
-      SET person_id = p.person_id
-      FROM person p
-      WHERE pr.id IN (134, 253)
-        AND pr.employee_code = p.employee_code
-        AND pr.employee_code IS NOT NULL
-        AND pr.person_id IS NULL;
-
-      -- Step 4: demote 74 geographic/product-category noise rows
-      UPDATE person_registry
-      SET is_person = false
-      WHERE id IN (
-        432,433,437,439,443,445,448,452,458,460,462,465,466,467,471,
-        472,475,479,480,482,485,486,491,492,493,496,501,502,505,508,
-        510,513,514,517,523,527,528,532,537,539,542,543,552,560,563,
-        566,568,570,572,574,579,581,588,590,594,617,624,630,636,648,
-        676,681,686,689,700,715,717,719,725,727,730,735,847,855
-      );
+        AND pr.is_person = true
+        AND (pr.employee_code IS NULL OR TRIM(pr.employee_code) = ''
+             OR p.employee_code IS NULL OR TRIM(p.employee_code) = ''
+             OR TRIM(pr.employee_code) = TRIM(p.employee_code));
     `,
   },
   {

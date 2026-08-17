@@ -451,7 +451,9 @@ type DistributorDeepDiveResult = {
 
 type DirectoryDistributor = {
   name: string;
-  normKey: string;
+  /** normDistKey grouping key (UPPERCASE alphanumerics + spaces) — NOT a
+   *  person normSecKey. Passed as the tab route's `dist=` param. */
+  distKey: string;
   states: string[];   // canonical geographic states (serving members' states)
   heads: string[];
   retailerCount: number;
@@ -2201,7 +2203,7 @@ export default function DistributorDeepDive() {
 
   const headsInGeo = (dir?.heads ?? []).filter((h) => inGeo(h.states));
   const distsInGeo = (dir?.distributors ?? []).filter(
-    (d) => inGeo(d.states) && (!distFilter || d.normKey === distFilter),
+    (d) => inGeo(d.states) && (!distFilter || d.distKey === distFilter),
   );
   // Heads offered in the third filter: heads serving the geography (and, when a
   // distributor is picked, heads whose teams serve that distributor).
@@ -2230,7 +2232,7 @@ export default function DistributorDeepDive() {
 
   // Directory states → picker options (canonical, one entry per geographic state).
   const stateOptions = dir?.states ?? [];
-  const distStatesByKey = new Map((dir?.distributors ?? []).map((d) => [d.normKey, d.states]));
+  const distStatesByKey = new Map((dir?.distributors ?? []).map((d) => [d.distKey, d.states]));
 
   const hasConcentrationRisk = data?.distributors.some((d) => d.isConcentrationRisk) ?? false;
 
@@ -2314,7 +2316,7 @@ export default function DistributorDeepDive() {
             {(dir?.distributors ?? [])
               .filter((d) => inGeo(d.states))
               .map((d) => (
-                <option key={d.normKey} value={d.normKey}>
+                <option key={d.distKey} value={d.distKey}>
                   {d.name} — {d.states.join("/") || "?"} — {formatCompact(d.orderBooking)}
                 </option>
               ))}
@@ -2368,7 +2370,7 @@ export default function DistributorDeepDive() {
           <span className="text-muted-foreground"> · </span>
           <span>
             {distFilter
-              ? `1 distributor (${dir.distributors.find((d) => d.normKey === distFilter)?.name ?? distFilter})`
+              ? `1 distributor (${dir.distributors.find((d) => d.distKey === distFilter)?.name ?? distFilter})`
               : `${distsInGeo.length} distributors`}
           </span>
           <span className="text-muted-foreground"> · </span>
@@ -2416,7 +2418,7 @@ export default function DistributorDeepDive() {
           tab={ddTab}
           fy={fy}
           dist={distFilter}
-          distName={distFilter ? (dir?.distributors.find((d) => d.normKey === distFilter)?.name ?? distFilter) : null}
+          distName={distFilter ? (dir?.distributors.find((d) => d.distKey === distFilter)?.name ?? distFilter) : null}
           stateHead={stateHead}
           geoStates={geoStates ? [...geoStates] : undefined}
           monthsParam={period.param}
@@ -2517,7 +2519,7 @@ export default function DistributorDeepDive() {
               </thead>
               <tbody className="divide-y divide-border/50">
                 {distsInGeo.map((d) => (
-                  <tr key={d.normKey} className="hover:bg-muted/30">
+                  <tr key={d.distKey} className="hover:bg-muted/30">
                     <td className="py-2 pr-4 font-medium">{d.name}</td>
                     <td className="py-2 pr-4 text-xs text-muted-foreground">{d.states.join(", ") || "--"}</td>
                     <td className="py-2 pr-4 text-xs">{d.heads.join(", ")}</td>

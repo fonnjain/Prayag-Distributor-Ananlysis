@@ -133,7 +133,7 @@ export async function buildDistributorRecon(fy: string): Promise<DistributorReco
   const dir = await loadDistributorDirectory(fy);
   const sheet = dir.distributors.map((d) => ({
     name: d.name,
-    normKey: d.normKey,
+    normKey: d.distKey,
     states: d.states,
     heads: d.heads,
   }));
@@ -394,7 +394,7 @@ function resolveTabScope(
   distKey: string | TabScope,
 ): { keys: string[]; name: string; normKey: string } {
   if (typeof distKey === "string") {
-    const d = dir.distributors.find((x) => x.normKey === distKey);
+    const d = dir.distributors.find((x) => x.distKey === distKey);
     if (!d) throw new Error(`Unknown distributor key: ${distKey}`);
     return { keys: [distKey], name: d.name, normKey: distKey };
   }
@@ -595,7 +595,7 @@ async function mapRegisterNamesForKey(
   distKey: string,
   dir: Awaited<ReturnType<typeof loadDistributorDirectory>>,
 ): Promise<{ saleNames: string[]; secNames: string[] }> {
-  const d = dir.distributors.find((x) => x.normKey === distKey);
+  const d = dir.distributors.find((x) => x.distKey === distKey);
   if (!d) return { saleNames: [], secNames: [] };
   const saleRows = await db.execute<{ customer: string; state: string | null }>(sql`
     SELECT customer, MAX(NULLIF(BTRIM(COALESCE(state_canon,'')),'')) AS state
@@ -920,7 +920,7 @@ export async function buildPushTab(
 ): Promise<PushTabResult> {
   const recon = await buildDistributorRecon(fy);
   const dir = await loadDistributorDirectory(fy);
-  const d = dir.distributors.find((x) => x.normKey === distKey);
+  const d = dir.distributors.find((x) => x.distKey === distKey);
   if (!d) throw new Error(`Unknown distributor key: ${distKey}`);
 
   const saleNames = recon.saleNamesByKey[distKey] ?? [];

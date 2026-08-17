@@ -1461,7 +1461,7 @@ router.get("/mgmt/distributor-tab", async (req: Request, res: Response): Promise
         .filter((d) =>
           d.heads.includes(head) &&
           (geoStates === null || d.states.length === 0 || d.states.some((s) => geoStates.includes(s))))
-        .map((d) => d.normKey);
+        .map((d) => d.distKey);
       if (candidateKeys.length === 0) {
         res.status(404).json({
           error: `${head} has no distributors mapped in the ${fy} directory${geoStates ? " within the selected geography" : ""} — nothing to aggregate yet. This usually means the head's member working sheets carry no distributor assignments.`,

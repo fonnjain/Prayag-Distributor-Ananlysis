@@ -52,7 +52,7 @@ import { loadDistributorDirectory } from "./distributorDirectory.js";
 //   no TRADERS/ENTERPRISES/INDUSTRIES/PVTLTD matches
 //   .replace(/[^A-Z0-9 ]/g, "") → "MOCK TEST DISTRIBUTOR" (spaces kept)
 //   .replace(/\s+/g, " ").trim() → "MOCK TEST DISTRIBUTOR"
-// So normKey === raw (preserved exactly).
+// So distKey === raw (preserved exactly).
 vi.mock("./distributorDirectory.js", () => ({
   loadDistributorDirectory: vi.fn().mockResolvedValue({
     fy: "1900-01",
@@ -63,7 +63,7 @@ vi.mock("./distributorDirectory.js", () => ({
     distributors: [
       {
         name: "MOCK TEST DISTRIBUTOR",
-        normKey: "MOCK TEST DISTRIBUTOR",
+        distKey: "MOCK TEST DISTRIBUTOR",
         states: [],
         heads: [],
         retailerCount: 0,
@@ -75,7 +75,7 @@ vi.mock("./distributorDirectory.js", () => ({
         // Isolated fixture distributor for the RET# identity regression tests
         // (keeps their rows out of the month-filter total assertions above).
         name: "MOCK RETID DISTRIBUTOR",
-        normKey: "MOCK RETID DISTRIBUTOR",
+        distKey: "MOCK RETID DISTRIBUTOR",
         states: [],
         heads: [],
         retailerCount: 0,
@@ -102,7 +102,7 @@ vi.mock("./distributorDeepDive.js", async (importActual) => {
 
 // ── Test fixtures ─────────────────────────────────────────────────────────────
 const SCHEMA = "dashboard_test";
-const TEST_DIST = "MOCK TEST DISTRIBUTOR";  // raw name = normKey for this fixture
+const TEST_DIST = "MOCK TEST DISTRIBUTOR";  // raw name = distKey for this fixture
 const RETID_DIST = "MOCK RETID DISTRIBUTOR"; // isolated RET# identity fixtures
 const CUR_FY  = "1900-01";                  // current FY — no real data at this key
 const BASE_FY = "1899-00";                  // prevFyLabel(CUR_FY) — baseline FY
@@ -671,7 +671,7 @@ describe("buildPushTab — unassignedByMember is always full-FY (snapshot-source
       distributors: [
         {
           name: TEST_DIST,
-          normKey: TEST_DIST,
+          distKey: TEST_DIST,
           states: [],
           heads: ["MOCK HEAD"],
           members: [],
@@ -697,7 +697,7 @@ describe("buildPushTab — unassignedByMember is always full-FY (snapshot-source
       distributors: [
         {
           name: TEST_DIST,
-          normKey: TEST_DIST,
+          distKey: TEST_DIST,
           states: [],
           heads: [],
           members: [],
@@ -708,7 +708,7 @@ describe("buildPushTab — unassignedByMember is always full-FY (snapshot-source
         },
         {
           name: RETID_DIST,
-          normKey: RETID_DIST,
+          distKey: RETID_DIST,
           states: [],
           heads: [],
           members: [],
