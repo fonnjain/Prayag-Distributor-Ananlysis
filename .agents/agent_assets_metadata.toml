@@ -165,3 +165,17 @@ uri = "file://artifacts/prayag/public/api-reference.md"
 type = "text"
 title = "Prayag API Reference"
 description = "Complete API documentation — 14 endpoint groups, 100+ routes, auth guide, common params, and HTTP status codes."
+
+[[outputs]]
+id = "X7Cvckum5f8e_w1eJeP9H"
+uri = "file://attached_assets/assignment_queue_737.csv"
+type = "table"
+title = "Assignment Queue — 737 rows (Bands A/B/C)"
+description = "74 A · 465 B · 198 C. Columns: customer_id, name, type, state, district, former_tm, confidence, state_head, suggestion_band, suggested_tm, suggested_tm_current_load"
+
+[[outputs]]
+id = "Ir1XWwP6iTgWjl37-6fE_"
+uri = "file://attached_assets/assignment_deferred_2640.csv"
+type = "table"
+title = "Deferred — 2,640 rows"
+description = "1,536 DEFERRED_PENDING + 1,104 DEFERRED_STATE_HEAD_COVERED"
