@@ -1,0 +1,46 @@
+My query - it was not from the database. It ran against the source CSVs before
+your seed import:
+
+  users = split "Assign User" on comma
+  unassigned = no name at all
+            OR every name resolves to someone NOT in the 179-person active
+               roster from Sales_User_List.csv
+
+  Distributors + dealers   3,316 rows -> 1,633  (55 blank, 1,578 all-departed)
+  Active retailers         5,485 rows ->    36  (4 blank, 32 all-departed)
+
+"Active retailer" there means Status = 'Active' in the retailer CSV - 5,485 of
+76,678. Not Approved.
+
+That is the whole mismatch. Your customer table holds no Lead or Inactive
+retailers because they were never promoted, so my 5,485 "Active" and your 1,381
+"Approved" are different populations from different sources. 36 vs 1,381 was
+never a comparison.
+
+YOUR FIGURES GOVERN. The DB is the live model; mine is a pre-import snapshot.
+Treat my workbook as a starting list, not a count.
+
+SCOPE - agreed as follows:
+  1. Pending distributors and dealers: EXCLUDE. Not-yet-onboarded parties
+     belong in an onboarding queue. Assigning a salesperson to someone who is
+     not trading wastes the decision. Removes 1,536.
+  2. Retailers with a state head but no TM: EXCLUDE for now. The head is
+     responsible. Mixing 1,104 covered retailers with genuinely orphaned ones
+     dilutes the urgent set. Handle as a separate later pass.
+  3. Retailers with no state head and no former TM: INCLUDE. All 273.
+
+Working queue = 737. A queue of 737 with real urgency gets worked; 3,377 gets
+abandoned.
+
+Now produce the queue from the DB, not from my workbook:
+  a. The 737 with customer_id, name, type, state, district, former TM name
+     where present, and confidence.
+  b. Split by state head where one is derivable, and flagged where not.
+  c. For each, the same suggestion bands I used - A: retailer's distributor's
+     owner, B: the departed person's head's team in that state with the
+     lightest load, C: geography, D: none. Print the band counts.
+  d. Confirm the 1,536 Pending and 1,104 state-head-only are recorded
+     somewhere visible, not silently dropped - they are deferred, not
+     resolved.
+
+Then I will rebuild the workbook from your output so the two agree.
