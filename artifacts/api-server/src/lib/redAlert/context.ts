@@ -440,6 +440,30 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
     frozenMonths.get(r.fy)!.add(r.month_label);
   }
 
+  // Cross-validate frozen months against actual secondary_sku_line row counts.
+  //
+  // register_month_state drifts from secondary_sku_line when a sync cycle deletes
+  // a month's rows but fails to re-insert them: frozen_at stays set (from the
+  // previous good sync) while the table silently holds zero rows.  Guard 3 must
+  // never treat such a month as complete — zero rows is structurally incomplete
+  // regardless of what the state flag says.
+  //
+  // We derive the presence index from distSecMonthlyRes (query 15): any (fy,
+  // month_label) that appears there has at least one distributor row in the table.
+  // A frozen month absent from this index has no secondary data at all and is
+  // removed from frozenMonths before Guard 3 and the S-engine ever see it.
+  const secMonthsWithData = new Set<string>(); // "fy|month_label"
+  for (const r of distSecMonthlyRes.rows) {
+    secMonthsWithData.add(`${r.fy}|${r.month_label}`);
+  }
+  for (const [fy, months] of frozenMonths) {
+    for (const month of [...months]) {
+      if (!secMonthsWithData.has(`${fy}|${month}`)) {
+        months.delete(month);
+      }
+    }
+  }
+
   // Build secondary complete months: fy → headCanon → string[]
   const secCompleteMonths = new Map<string, Map<string, string[]>>();
   for (const r of secCompleteRes.rows) {
