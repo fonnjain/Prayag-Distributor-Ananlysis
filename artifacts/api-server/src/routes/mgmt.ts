@@ -1438,6 +1438,17 @@ router.get("/mgmt/distributor-tab", async (req: Request, res: Response): Promise
       res.status(400).json({ error: "dist (distributor normKey) or head (state head name) is required" });
       return;
     }
+    // Validate tab early — before any registry or Sheets loads — so a bad
+    // tab value returns 400 immediately without waiting on a cold-cache
+    // registry load (which can take >30 s and cause the guard to see
+    // status=-1 rather than a clean 400).
+    // The head-scope path further restricts push to dist-only below, but
+    // this catches obviously wrong values before any async work starts.
+    const VALID_TABS = new Set(["secondary", "sku", "push"]);
+    if (!VALID_TABS.has(tab)) {
+      res.status(400).json({ error: "tab must be secondary | sku | push" });
+      return;
+    }
     const tabs = await import("../lib/mgmt/distributorTabs.js");
     if (!dist) {
       if (tab === "push") {

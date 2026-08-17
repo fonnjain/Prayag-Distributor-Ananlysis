@@ -246,6 +246,12 @@ if (!distKey) {
   } else {
     const dir = await dirRes.json().catch(() => null);
     distKey = dir?.distributors?.[0]?.normKey ?? null;
+    // The directory's normKey field carries the display name (e.g.
+    // "ANAND SANITARYWARE" with spaces and uppercase).  The distributor-tab
+    // route resolves via the identity registry which normalises the key to
+    // lowercase alphanumeric — pass the same form so the registry lookup
+    // and the secondary-tab data lookup both hit.
+    if (distKey) distKey = distKey.toLowerCase().replace(/[^a-z0-9]/g, "");
     if (!distKey) {
       console.warn(
         "  WARN  live filter checks skipped — distributor directory returned no distributors. " +
