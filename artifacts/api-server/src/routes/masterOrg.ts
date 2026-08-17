@@ -643,7 +643,7 @@ router.post("/master/people/:id/reactivate", async (req, res) => {
     if (checkRes.rows[0].left_date)
       return void res.status(400).json({
         error:
-          "This person has a recorded departure and cannot be reactivated directly. Re-hiring requires an explicit reversal (contact an operator / re-create the person).",
+          "This person has a recorded departure and cannot be reactivated directly. Use POST /api/master/people/:id/rehire to reverse a genuine re-hire.",
       });
 
     await pool.query(
@@ -656,6 +656,116 @@ router.post("/master/people/:id/reactivate", async (req, res) => {
       [String(personId), changed_by ?? "operator"],
     );
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── POST /api/master/people/:id/rehire ───────────────────────────────────────
+// Reverse a departure for a genuine re-hire. Clears left_date,
+// departure_reason, departure_note and sets is_active=true.
+//
+// Pre-conditions (all checked inside a row-locking transaction):
+//   1. Person must have a recorded departure (left_date IS NOT NULL).
+//   2. If a holding person exists for this departed head, it must have
+//      zero open customer_assignments — the operator must first resolve or
+//      redistribute all held customers before the re-hire can proceed.
+//
+// On success the holding person (if any) is deactivated and a change_log
+// entry records the rehire event.
+
+router.post("/master/people/:id/rehire", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const personId = Number(req.params.id);
+    const { changed_by } = req.body as { changed_by?: string };
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Lock the row so concurrent rehire / departure submissions serialise.
+      const lockRes = await client.query(
+        `SELECT left_date, is_holding, is_active FROM person WHERE person_id = $1 FOR UPDATE`,
+        [personId],
+      );
+      if (!lockRes.rows[0]) {
+        await client.query("ROLLBACK");
+        return void res.status(404).json({ error: "Person not found" });
+      }
+      const row = lockRes.rows[0];
+      if (row.is_holding) {
+        await client.query("ROLLBACK");
+        return void res.status(400).json({
+          error: "Holding persons cannot be re-hired — resolve the holding instead.",
+        });
+      }
+      if (!row.left_date) {
+        await client.query("ROLLBACK");
+        return void res.status(400).json({
+          error: "This person has no recorded departure — use /reactivate instead.",
+        });
+      }
+
+      // Check whether there is a holding person with open assignments.
+      const holdingRes = await client.query(
+        `SELECT h.person_id,
+                COUNT(ca.id) AS open_count
+         FROM person h
+         LEFT JOIN customer_assignment ca
+           ON ca.effective_to IS NULL
+           AND (ca.state_head_person_id = h.person_id OR ca.person_id = h.person_id)
+         WHERE h.is_holding = true AND h.holding_for_person_id = $1
+         GROUP BY h.person_id`,
+        [personId],
+      );
+      const holdingRow = holdingRes.rows[0] ?? null;
+      if (holdingRow && Number(holdingRow.open_count) > 0) {
+        await client.query("ROLLBACK");
+        return void res.status(400).json({
+          error: `Cannot re-hire: the holding person (id ${holdingRow.person_id}) still has ${holdingRow.open_count} open customer assignment(s). Resolve all held customers first.`,
+          holdingPersonId: holdingRow.person_id,
+          openAssignments: Number(holdingRow.open_count),
+        });
+      }
+
+      // Clear departure fields and reactivate.
+      await client.query(
+        `UPDATE person
+         SET left_date = NULL, departure_reason = NULL, departure_note = NULL,
+             is_active = true, updated_at = NOW()
+         WHERE person_id = $1`,
+        [personId],
+      );
+
+      // Deactivate the holding person (if any) — it is no longer needed.
+      if (holdingRow) {
+        await client.query(
+          `UPDATE person SET is_active = false, updated_at = NOW()
+           WHERE person_id = $1`,
+          [holdingRow.person_id],
+        );
+      }
+
+      // Change log entry.
+      await client.query(
+        `INSERT INTO change_log
+           (entity_type, entity_id, field, old_value, new_value, changed_by)
+         VALUES ('person', $1, 'rehire', 'departed', 'active', $2)`,
+        [String(personId), changed_by ?? "operator"],
+      );
+
+      await client.query("COMMIT");
+      res.json({
+        success: true,
+        holdingDeactivated: holdingRow ? holdingRow.person_id : null,
+      });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -769,14 +879,23 @@ router.post("/master/people/:id/departure", async (req, res) => {
         [personId, left_date, departure_reason.trim(), departure_note?.trim() || null],
       );
 
-      // 2. Create (or reuse) the holding person for this departed head
+      // 2. Create (or reuse) the holding person for this departed head.
+      //    After a rehire the holding row is left inactive; a subsequent
+      //    departure must reactivate it atomically (inside this transaction,
+      //    with a row lock) so that newly moved assignments land on an active
+      //    holding person and remain visible to active/assignable workflows.
       let holdingId: number;
       const existingHolding = await client.query(
-        `SELECT person_id FROM person WHERE is_holding = true AND holding_for_person_id = $1`,
+        `SELECT person_id FROM person WHERE is_holding = true AND holding_for_person_id = $1 FOR UPDATE`,
         [personId],
       );
       if (existingHolding.rows[0]) {
         holdingId = existingHolding.rows[0].person_id;
+        // Reactivate in case it was deactivated by a prior rehire.
+        await client.query(
+          `UPDATE person SET is_active = true, updated_at = NOW() WHERE person_id = $1`,
+          [holdingId],
+        );
       } else {
         const holdRes = await client.query(
           `INSERT INTO person

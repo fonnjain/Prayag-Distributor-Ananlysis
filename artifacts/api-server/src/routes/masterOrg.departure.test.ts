@@ -683,4 +683,179 @@ describe("departure lifecycle", () => {
     await pool.query(`DELETE FROM customer_assignment WHERE customer_id IN ($1,$2)`, [CUST7, CUST8]);
     await pool.query(`DELETE FROM customer WHERE customer_id IN ($1,$2)`, [CUST7, CUST8]);
   });
+
+  // ── Rehire tests ──────────────────────────────────────────────────────────
+  // These run last so headId is still departed (holding resolved, no open
+  // assignments) when we test the success path.
+
+  it("reactivate route mentions /rehire in its error message for departed persons", async () => {
+    const res = await request(app)
+      .post(`/api/master/people/${headId}/reactivate`)
+      .set("X-Admin-Secret", ADMIN)
+      .send({ changed_by: "departure-test" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/rehire/i);
+  });
+
+  it("rehire rejects a non-departed person", async () => {
+    const res = await request(app)
+      .post(`/api/master/people/${replacementId}/rehire`)
+      .set("X-Admin-Secret", ADMIN)
+      .send({ changed_by: "departure-test" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/no recorded departure/i);
+  });
+
+  it("rehire rejects when the holding person still has open assignments", async () => {
+    // Create a fresh head with a customer so the holding person has open work.
+    const hx = await pool.query(
+      `INSERT INTO person (name, is_state_head, source) VALUES ('ZZDEP HeadX', true, 'app_created') RETURNING person_id`,
+    );
+    const headX = hx.rows[0].person_id;
+    const CUSTX = "ZZDEP#X";
+    await pool.query(
+      `INSERT INTO customer (customer_id, name, type, source) VALUES ($1,'ZZDEP CustX','distributor','app_created')
+       ON CONFLICT (customer_id) DO NOTHING`,
+      [CUSTX],
+    );
+    await pool.query(
+      `INSERT INTO customer_assignment (customer_id, person_id, state_head_person_id, confidence, set_by)
+       VALUES ($1, $2, $2, 'confirmed', 'departure-test')`,
+      [CUSTX, headX],
+    );
+    // Depart headX (holding person will have the open assignment).
+    const dep = await request(app)
+      .post(`/api/master/people/${headX}/departure`)
+      .set("X-Admin-Secret", ADMIN)
+      .send({ ...departureBody, acknowledgedCustomers: 1, changed_by: "departure-test" });
+    expect(dep.status).toBe(200);
+    const holdX = dep.body.holdingPersonId;
+
+    // Rehire must be blocked because the holding person still holds CUSTX.
+    const rehireRes = await request(app)
+      .post(`/api/master/people/${headX}/rehire`)
+      .set("X-Admin-Secret", ADMIN)
+      .send({ changed_by: "departure-test" });
+    expect(rehireRes.status).toBe(400);
+    expect(rehireRes.body.openAssignments).toBe(1);
+
+    // headX is still departed.
+    const p = await pool.query(
+      `SELECT is_active, left_date FROM person WHERE person_id = $1`,
+      [headX],
+    );
+    expect(p.rows[0].is_active).toBe(false);
+    expect(p.rows[0].left_date).not.toBeNull();
+
+    // Cleanup.
+    await pool.query(`DELETE FROM customer_assignment WHERE customer_id = $1`, [CUSTX]);
+    await pool.query(`DELETE FROM customer WHERE customer_id = $1`, [CUSTX]);
+    await pool.query(`DELETE FROM person WHERE person_id = $1`, [holdX]);
+    await pool.query(`DELETE FROM person WHERE person_id = $1`, [headX]);
+  });
+
+  it("rehire clears departure fields, reactivates, and deactivates the holding person", async () => {
+    // headId was departed earlier; its holding person was resolved (no open
+    // assignments remain), so rehire should succeed.
+    const res = await request(app)
+      .post(`/api/master/people/${headId}/rehire`)
+      .set("X-Admin-Secret", ADMIN)
+      .send({ changed_by: "departure-test" });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+
+    const p = await pool.query(
+      `SELECT is_active, left_date, departure_reason, departure_note FROM person WHERE person_id = $1`,
+      [headId],
+    );
+    expect(p.rows[0].is_active).toBe(true);
+    expect(p.rows[0].left_date).toBeNull();
+    expect(p.rows[0].departure_reason).toBeNull();
+    expect(p.rows[0].departure_note).toBeNull();
+
+    // Holding person must have been deactivated.
+    if (res.body.holdingDeactivated) {
+      const h = await pool.query(
+        `SELECT is_active FROM person WHERE person_id = $1`,
+        [res.body.holdingDeactivated],
+      );
+      expect(h.rows[0]?.is_active).toBe(false);
+    }
+
+    // A change_log entry must record the rehire.
+    const log = await pool.query(
+      `SELECT field, old_value, new_value FROM change_log
+       WHERE entity_type = 'person' AND entity_id = $1 AND field = 'rehire'
+       ORDER BY changed_at DESC LIMIT 1`,
+      [String(headId)],
+    );
+    expect(log.rows.length).toBe(1);
+    expect(log.rows[0].old_value).toBe("departed");
+    expect(log.rows[0].new_value).toBe("active");
+  });
+
+  it("rehired person is assignable again (lockAssignTargets passes)", async () => {
+    // After rehire, the person must pass lockAssignTargets — visible via
+    // customer assign accepting them as the TM target.
+    const CUSTY = "ZZDEP#Y";
+    await pool.query(
+      `INSERT INTO customer (customer_id, name, type, source) VALUES ($1,'ZZDEP CustY','distributor','app_created')
+       ON CONFLICT (customer_id) DO NOTHING`,
+      [CUSTY],
+    );
+    // Use replacementId as state head (active), headId as TM (re-hired).
+    const res = await request(app)
+      .patch(`/api/master/customers/${encodeURIComponent(CUSTY)}/assign`)
+      .set("X-Admin-Secret", ADMIN)
+      .send({ person_id: headId, state_head_person_id: replacementId, changed_by: "departure-test" });
+    expect(res.status).toBe(200);
+
+    await pool.query(`DELETE FROM customer_assignment WHERE customer_id = $1`, [CUSTY]);
+    await pool.query(`DELETE FROM customer WHERE customer_id = $1`, [CUSTY]);
+  });
+
+  it("departure after rehire reactivates the old holding row and moves assignments onto it", async () => {
+    // headId is active (re-hired above). Assign a fresh customer and depart
+    // again — the existing (deactivated) holding person must be reactivated
+    // atomically and must own the newly moved assignment.
+    const CUSTZ = "ZZDEP#Z";
+    // Clear any stale rows from a previous failed run before inserting.
+    await pool.query(`DELETE FROM customer_assignment WHERE customer_id = $1`, [CUSTZ]);
+    await pool.query(`DELETE FROM customer WHERE customer_id = $1`, [CUSTZ]);
+    await pool.query(
+      `INSERT INTO customer (customer_id, name, type, source) VALUES ($1,'ZZDEP CustZ','distributor','app_created')
+       ON CONFLICT (customer_id) DO NOTHING`,
+      [CUSTZ],
+    );
+    await pool.query(
+      `INSERT INTO customer_assignment (customer_id, person_id, state_head_person_id, confidence, set_by)
+       VALUES ($1, $2, $2, 'confirmed', 'departure-test')`,
+      [CUSTZ, headId],
+    );
+
+    const dep2 = await request(app)
+      .post(`/api/master/people/${headId}/departure`)
+      .set("X-Admin-Secret", ADMIN)
+      .send({ ...departureBody, acknowledgedCustomers: 1, changed_by: "departure-test" });
+    expect(dep2.status).toBe(200);
+    const hold2 = dep2.body.holdingPersonId;
+
+    // The reused holding person must be active.
+    const hRow = await pool.query(`SELECT is_active FROM person WHERE person_id = $1`, [hold2]);
+    expect(hRow.rows[0].is_active).toBe(true);
+
+    // The open assignment must be owned by the (now-active) holding person.
+    const open = await pool.query(
+      `SELECT person_id, state_head_person_id FROM customer_assignment
+       WHERE customer_id = $1 AND effective_to IS NULL`,
+      [CUSTZ],
+    );
+    expect(open.rows.length).toBe(1);
+    expect(open.rows[0].person_id).toBe(hold2);
+    expect(open.rows[0].state_head_person_id).toBe(hold2);
+
+    // Cleanup.
+    await pool.query(`DELETE FROM customer_assignment WHERE customer_id = $1`, [CUSTZ]);
+    await pool.query(`DELETE FROM customer WHERE customer_id = $1`, [CUSTZ]);
+  });
 });
