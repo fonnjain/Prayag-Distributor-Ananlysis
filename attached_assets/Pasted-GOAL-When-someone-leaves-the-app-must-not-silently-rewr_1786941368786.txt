@@ -1,0 +1,145 @@
+GOAL
+When someone leaves, the app must not silently rewrite the hierarchy beneath
+them. Their team moves to a clearly-marked holding head, a warning appears,
+and someone decides where the team goes.
+
+Two capabilities:
+  1. Record that a person has left the company.
+  2. Handle the team they leave behind, without breaking attribution.
+
+============================================================
+1 - MARKING SOMEONE AS LEFT
+============================================================
+Deactivation already exists. Extend it to record WHY and WHEN.
+
+  person.left_date            the date they actually left, not today
+  person.departure_reason     resigned | terminated | retired | transferred |
+                              other
+  person.departure_note       free text
+
+Never delete a person. History depends on them existing - eleven months of
+sales may be attributed to them.
+
+The UI asks for the leaving date, not the date of entry. Someone recording a
+departure a fortnight later must be able to say so, because everything
+downstream is effective-dated from that date.
+
+============================================================
+2 - THE HOLDING HEAD
+============================================================
+When a person with direct reports is marked as left, the app does NOT
+reassign their team automatically and does NOT leave them dangling.
+
+Create a system person per departed head:
+
+  name            "Unassigned — <departed head's name>"
+  is_holding      true
+  is_person       false     so they never appear in headcounts, ratios,
+                            concentration alerts or person-level reports
+  created_from    the departed person's id
+  created_at
+
+Their direct reports move to this holding head. Everyone BELOW those reports
+keeps their own manager - only the top layer moves.
+
+A holding head is not a state head. It exists so nobody is orphaned while a
+decision is pending.
+
+WHY A NAMED HOLDING HEAD RATHER THAN A SINGLE DUMMY
+One shared dummy would merge two departures into one bucket, and nobody could
+tell whose team was whose. Naming it after the departed head keeps the
+question answerable: "who used to report to Sandeep."
+
+============================================================
+3 - EFFECTIVE DATING - THIS IS THE PART THAT MUST NOT BREAK
+============================================================
+Moving a team to a holding head is a reassignment like any other. It is
+effective-dated from left_date.
+
+Historical attribution stays with the departed head for every period they
+actually held it. Reports read the assignment IN FORCE during the period
+being reported.
+
+That guarantee was verified in Phase 3: reassign a customer, and FY2025-26
+value by head must be IDENTICAL before and after. The same must hold here.
+If marking Sandeep Dadheech as left changes his FY2025-26 total, effective
+dating is not working and that is a stop condition.
+
+Their customers do NOT move automatically either. A customer assigned to a
+departed person stays assigned, effective-dated, and appears in the existing
+reassignment queue.
+
+============================================================
+4 - THE WARNING
+============================================================
+A holding head with people under it is a visible, persistent warning - not a
+toast that disappears.
+
+  On the Organisation page, at the top:
+      "3 teams have no head. 47 people report to a holding head."
+      naming each departed head and the count beneath them.
+
+  On each holding head in the tree: a marker showing how many people and how
+  long it has been unresolved. Days open, prominently, after 7 days.
+
+  It does not clear until every person under it has a real manager.
+
+Do not route this into Red Alert. That page is for commercial escalation;
+this is an organisational task with a named owner.
+
+============================================================
+5 - RESOLVING IT
+============================================================
+Two paths from the holding head, both with the impact preview that already
+exists on moves:
+
+  APPOINT A NEW HEAD
+    Pick an existing person or create a new one. Everyone under the holding
+    head moves to them in one transaction. The holding head is then retired.
+
+  DISTRIBUTE THE TEAM
+    Assign each person individually to different managers. The holding head
+    retires when the last one leaves it.
+
+Both are effective-dated from the date of the decision, NOT from left_date.
+The gap between someone leaving and a replacement being appointed is real and
+the data should show it.
+
+A holding head with nobody under it is retired automatically and kept in
+history.
+
+============================================================
+DO NOT
+============================================================
+- Do not delete a person, ever.
+- Do not auto-assign a team to the departed person's own manager. That is a
+  decision, not a default.
+- Do not move customers automatically.
+- Do not count holding heads in headcounts, team sizes, ratios or the C6
+  concentration denominator.
+- Do not change sale_line, secondary_sku_line or any attribution table.
+
+============================================================
+VERIFY - produced values, and a hash that resolves
+============================================================
+1. Print FY2025-26 total net BY HEAD. Save it.
+2. Mark a person WITH direct reports as left, with a left_date two weeks ago.
+   Print the holding head created, who moved to it, and confirm people two
+   levels down did NOT move.
+3. Print FY2025-26 total net by head AGAIN. It must be IDENTICAL to step 1.
+   If any head's total moved, stop and report - effective dating is broken.
+4. Print the warning as rendered on the Organisation page.
+5. Confirm the departed person's customers did NOT move, and that they appear
+   in the reassignment queue.
+6. Appoint a new head. Confirm the whole team moves in one transaction, the
+   holding head retires, and the warning clears.
+7. Repeat with the distribute path - assign people individually and confirm
+   the holding head retires only when the last one leaves.
+8. Confirm holding heads are excluded from: headcount, team size, the
+   Organisation page ratios, and the C6 denominator. Print each count with
+   and without.
+9. Confirm change_log records the departure, the holding-head creation, and
+   every move, with reason and operator in the correct columns.
+10. Confirm sale_line, secondary_sku_line and customer row counts unchanged.
+11. Push. Print git rev-parse HEAD and git rev-parse origin/main.
+12. git cat-file -t <hash>, then git merge-base --is-ancestor <hash> main.
