@@ -1,0 +1,46 @@
+Diagnosed against live main. Three things.
+
+1. OrgPeoplePage.tsx IS ORPHANED
+App.tsx lines 58-59 route BOTH /org/people and /org/customers to
+OrgCustomersPage. OrgPeoplePage is imported nowhere and rendered nowhere. All
+the Phase 2 work - hierarchy tree, impact preview, deactivation gate - sits in
+a file nothing loads.
+
+Fix: point /org/people at OrgPeoplePage, and add it to the Organisation nav
+group, which currently has only one item.
+
+Then confirm: both nav entries appear, /org/people renders the People page
+with 179 rows, and the Phase 2 controls work - open the impact preview on
+someone with direct reports and paste it.
+
+2. THE PEOPLE AND PERSON REGISTRY TABS INSIDE OrgCustomersPage
+That page has People and Person Registry tabs at lines 1345-1346, reachable
+only by knowing to click inside the customer page. Once OrgPeoplePage is
+wired, decide which holds them and remove the duplicate. Do not leave the same
+data in two places.
+
+3. TWO CUSTOMER PAGES - retire the old one, but check first
+/customers/master (Customer Data) and /org/customers (Organisation) both edit
+the same table. Two edit paths into one table is how they drift, and the
+Organisation page is the one with effective dating, impact preview and change
+log.
+
+Before removing anything, report:
+  a. What /customers/master can do that /org/customers cannot. I can see xlsx
+     import/export and a confidence filter - confirm and list anything else.
+  b. Whether /customers/master writes through the same effective-dated path,
+     or edits customer rows directly. If it edits directly, it can break the
+     historical-attribution guarantee and that is a reason to remove it now.
+  c. What links to /customers/master, and whether any other page or route
+     depends on it.
+
+Then: move anything missing into /org/customers, retire /customers/master from
+the nav, and keep the route reachable by URL for one release.
+
+VERIFY
+  - Both Organisation nav items present and rendering.
+  - People page shows 179, Customers 8,802, Person Registry 1,033.
+  - Confirm only ONE page can now write a customer assignment. Print the write
+    paths.
+  - FY2025-26 net by head unchanged - print before and after.
+  - Push, print both refs.

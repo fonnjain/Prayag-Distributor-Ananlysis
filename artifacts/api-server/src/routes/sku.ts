@@ -68,6 +68,8 @@ import {
 } from "../lib/saleLineFilter.js";
 import { parseJsonArray } from "./companyReports.js";
 import { currentOpenFy, deriveSaleLineCohortFy, deriveSaleLineClosedFys } from "../lib/fyAnchors.js";
+import { getVolumeDecline } from "../lib/sku/skuVolumeDecline.js";
+import { getPriceShrinkers } from "../lib/sku/skuPriceShrinkers.js";
 
 const router = Router();
 
@@ -1383,6 +1385,234 @@ router.get("/sku/retailer-coverage", async (req: Request, res: Response): Promis
   } catch (err) {
     req.log.error({ err, fy, view }, "sku retailer-coverage failed");
     res.status(500).json({ error: "Could not compute retailer coverage report." });
+  }
+});
+
+// ── K5a: Volume Decline ───────────────────────────────────────────────────────
+// SKUs whose absolute piece count fell vs the same months in the prior FY.
+// Territory channel only (project head excluded). Level filter applies.
+
+router.get("/sku/volume-decline", async (req: Request, res: Response): Promise<void> => {
+  const fy      = typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
+    ? req.query.fy.trim() : currentOpenFy();
+  const priorFy = prevFy(fy);
+  const monthFrom = intParam(req, "monthFrom", 1, 12, 1);
+  const monthTo   = intParam(req, "monthTo", monthFrom, 12, 12);
+  const rawLevel  = typeof req.query.level === "string" ? req.query.level.trim() : "";
+  const level: "distributor" | "direct_dealer" =
+    rawLevel === "direct_dealer" ? "direct_dealer" : "distributor";
+  const scope: "company" | "head" =
+    req.query.scope === "head" ? "head" : "company";
+  const scopeId =
+    scope === "head" && typeof req.query.scopeId === "string" && req.query.scopeId.trim()
+      ? req.query.scopeId.trim() : undefined;
+  const floor = intParam(req, "floor", 0, 10_000_000, 50_000);
+  const entityFilter = parseEntityFilter(req);
+
+  const currMonths  = fiscalMonthsToLabels(fy,      monthFrom, monthTo);
+  const priorMonths = fiscalMonthsToLabels(priorFy, monthFrom, monthTo);
+
+  try {
+    const result = await getVolumeDecline({
+      fy, priorFy, currMonths, priorMonths, level, scope, scopeId, entityFilter, floor,
+    });
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err, fy }, "sku volume-decline failed");
+    res.status(500).json({ error: "Could not compute volume decline." });
+  }
+});
+
+// ── K5a: Volume Decline — Excel export ───────────────────────────────────────
+
+router.get("/sku/volume-decline/export", async (req: Request, res: Response): Promise<void> => {
+  const fy      = typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
+    ? req.query.fy.trim() : currentOpenFy();
+  const priorFy = prevFy(fy);
+  const monthFrom = intParam(req, "monthFrom", 1, 12, 1);
+  const monthTo   = intParam(req, "monthTo", monthFrom, 12, 12);
+  const rawLevel  = typeof req.query.level === "string" ? req.query.level.trim() : "";
+  const level: "distributor" | "direct_dealer" =
+    rawLevel === "direct_dealer" ? "direct_dealer" : "distributor";
+  const scope: "company" | "head" =
+    req.query.scope === "head" ? "head" : "company";
+  const scopeId =
+    scope === "head" && typeof req.query.scopeId === "string" && req.query.scopeId.trim()
+      ? req.query.scopeId.trim() : undefined;
+  const floor = intParam(req, "floor", 0, 10_000_000, 50_000);
+  const entityFilter = parseEntityFilter(req);
+
+  const currMonths  = fiscalMonthsToLabels(fy,      monthFrom, monthTo);
+  const priorMonths = fiscalMonthsToLabels(priorFy, monthFrom, monthTo);
+
+  try {
+    const data = await getVolumeDecline({
+      fy, priorFy, currMonths, priorMonths, level, scope, scopeId, entityFilter, floor,
+    });
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Volume Decline");
+
+    // Period header
+    ws.addRow([
+      `Volume Decline — ${currMonths[0] ?? ""}–${currMonths[currMonths.length - 1] ?? ""} FY ${fy}`,
+      `vs ${priorMonths[0] ?? ""}–${priorMonths[priorMonths.length - 1] ?? ""} FY ${priorFy}`,
+    ]);
+    ws.addRow([`Materiality floor: ₹${floor}`, `Level: ${level}`, `Territory channel only`]);
+    ws.addRow([]);
+
+    ws.addRow([
+      "Segment", "Code", "Item Name",
+      "Qty Now", "Qty Prior", "Piece Δ", "% Δ",
+      "Net Now (₹)", "Net Prior (₹)", "Net Δ (₹)",
+      "Customers Now", "Customers Prior",
+      "Stopped", "GP/pc (₹)",
+    ]);
+
+    for (const seg of data.segments) {
+      for (const row of seg.rows) {
+        ws.addRow([
+          row.segment, row.code, row.itemName ?? "",
+          row.qtyNow, row.qtyPrior, row.qtyChange,
+          row.qtyChangePct != null ? row.qtyChangePct / 100 : "",
+          row.netNow, row.netPrior, row.netChange,
+          row.customersNow, row.customersPrior,
+          row.stopped ? "Yes" : "No",
+          row.contributionPerUnit ?? "",
+        ]);
+      }
+      // Segment subtotal
+      ws.addRow([
+        `SUBTOTAL — ${seg.segment}`, "", "",
+        seg.rows.reduce((s, r) => s + r.qtyNow, 0),
+        seg.rows.reduce((s, r) => s + r.qtyPrior, 0),
+        seg.qtyDeclineTotal, "",
+        seg.rows.reduce((s, r) => s + r.netNow, 0),
+        seg.rows.reduce((s, r) => s + r.netPrior, 0),
+        seg.netChangeTotal,
+        "", "", "", "",
+      ]);
+    }
+
+    res.setHeader("Content-Disposition", `attachment; filename="sku-volume-decline-${fy}.xlsx"`);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    const buf = await wb.xlsx.writeBuffer();
+    res.send(buf);
+  } catch (err) {
+    req.log.error({ err, fy }, "sku volume-decline export failed");
+    res.status(500).json({ error: "Could not export volume decline." });
+  }
+});
+
+// ── K5b: Price Shrinkers ──────────────────────────────────────────────────────
+// SKUs where pieces grew but real value declined (MRP rise outpaced value growth).
+// Territory channel only. Level filter applies.
+
+router.get("/sku/price-shrinkers", async (req: Request, res: Response): Promise<void> => {
+  const fy      = typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
+    ? req.query.fy.trim() : currentOpenFy();
+  const priorFy = prevFy(fy);
+  const monthFrom = intParam(req, "monthFrom", 1, 12, 1);
+  const monthTo   = intParam(req, "monthTo", monthFrom, 12, 12);
+  const rawLevel  = typeof req.query.level === "string" ? req.query.level.trim() : "";
+  const level: "distributor" | "direct_dealer" =
+    rawLevel === "direct_dealer" ? "direct_dealer" : "distributor";
+  const scope: "company" | "head" =
+    req.query.scope === "head" ? "head" : "company";
+  const scopeId =
+    scope === "head" && typeof req.query.scopeId === "string" && req.query.scopeId.trim()
+      ? req.query.scopeId.trim() : undefined;
+  const floor = intParam(req, "floor", 0, 10_000_000, 50_000);
+  const entityFilter = parseEntityFilter(req);
+
+  const currMonths  = fiscalMonthsToLabels(fy,      monthFrom, monthTo);
+  const priorMonths = fiscalMonthsToLabels(priorFy, monthFrom, monthTo);
+
+  try {
+    const result = await getPriceShrinkers({
+      fy, priorFy, currMonths, priorMonths, level, scope, scopeId, entityFilter, floor,
+    });
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err, fy }, "sku price-shrinkers failed");
+    res.status(500).json({ error: "Could not compute price shrinkers." });
+  }
+});
+
+// ── K5b: Price Shrinkers — Excel export ──────────────────────────────────────
+
+router.get("/sku/price-shrinkers/export", async (req: Request, res: Response): Promise<void> => {
+  const fy      = typeof req.query.fy === "string" && FY_PATTERN.test(req.query.fy.trim())
+    ? req.query.fy.trim() : currentOpenFy();
+  const priorFy = prevFy(fy);
+  const monthFrom = intParam(req, "monthFrom", 1, 12, 1);
+  const monthTo   = intParam(req, "monthTo", monthFrom, 12, 12);
+  const rawLevel  = typeof req.query.level === "string" ? req.query.level.trim() : "";
+  const level: "distributor" | "direct_dealer" =
+    rawLevel === "direct_dealer" ? "direct_dealer" : "distributor";
+  const scope: "company" | "head" =
+    req.query.scope === "head" ? "head" : "company";
+  const scopeId =
+    scope === "head" && typeof req.query.scopeId === "string" && req.query.scopeId.trim()
+      ? req.query.scopeId.trim() : undefined;
+  const floor = intParam(req, "floor", 0, 10_000_000, 50_000);
+  const entityFilter = parseEntityFilter(req);
+
+  const currMonths  = fiscalMonthsToLabels(fy,      monthFrom, monthTo);
+  const priorMonths = fiscalMonthsToLabels(priorFy, monthFrom, monthTo);
+
+  try {
+    const data = await getPriceShrinkers({
+      fy, priorFy, currMonths, priorMonths, level, scope, scopeId, entityFilter, floor,
+    });
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Price Shrinkers");
+
+    ws.addRow([
+      `Price Shrinkers — ${currMonths[0] ?? ""}–${currMonths[currMonths.length - 1] ?? ""} FY ${fy}`,
+      `vs ${priorMonths[0] ?? ""}–${priorMonths[priorMonths.length - 1] ?? ""} FY ${priorFy}`,
+    ]);
+    ws.addRow([`Qualifying: qty up AND real value down (valueGrowth% − mrpIncrease% < 0)`]);
+    ws.addRow([`Materiality floor: ₹${floor}`, `Level: ${level}`, `Territory channel only`]);
+    ws.addRow([`Excluded (no MRP): ${data.excludedNoMrp.count} codes`]);
+    ws.addRow([]);
+
+    ws.addRow([
+      "Segment", "Code", "Item Name",
+      "Qty Now", "Qty Prior", "Qty Growth %",
+      "Net Now (₹)", "Net Prior (₹)", "Value Growth %",
+      "MRP Prior (₹)", "MRP Now (₹)", "MRP Increase %",
+      "REAL GROWTH %",
+      "Realised Price Prior (₹)", "Realised Price Now (₹)", "Realised Price Change %",
+    ]);
+
+    for (const row of data.rows) {
+      ws.addRow([
+        row.segment, row.code, row.itemName ?? "",
+        row.qtyNow, row.qtyPrior, row.qtyGrowthPct / 100,
+        row.netNow, row.netPrior, row.valueGrowthPct / 100,
+        row.mrpThen, row.mrpNow, row.mrpIncreasePct / 100,
+        row.realGrowthPct / 100,
+        row.realisedPricePrior, row.realisedPriceNow, row.realisedPriceChangePct / 100,
+      ]);
+    }
+
+    if (data.excludedNoMrp.topByNet.length > 0) {
+      const ws2 = wb.addWorksheet("Excluded — No MRP");
+      ws2.addRow(["Segment", "Code", "Item Name", "Prior-Period Net (₹)"]);
+      for (const e of data.excludedNoMrp.topByNet) {
+        ws2.addRow([e.segment, e.code, e.itemName ?? "", e.netPrior]);
+      }
+    }
+
+    res.setHeader("Content-Disposition", `attachment; filename="sku-price-shrinkers-${fy}.xlsx"`);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    const buf = await wb.xlsx.writeBuffer();
+    res.send(buf);
+  } catch (err) {
+    req.log.error({ err, fy }, "sku price-shrinkers export failed");
+    res.status(500).json({ error: "Could not export price shrinkers." });
   }
 });
 

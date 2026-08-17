@@ -1,0 +1,125 @@
+GOAL
+Two new tabs on SKU Deep Dive, beside Overview / Review / Push / Trends /
+Discounts / Timing / Movement.
+
+Both compare LIKE MONTHS against the prior fiscal year - never a rolling
+window, never unequal periods. Both respect the existing scope selectors
+(distributor / head / state / distributor filter) exactly as the other tabs do.
+
+============================================================
+TAB 1 - VOLUME DECLINE
+============================================================
+SKUs whose absolute piece count has fallen, ranked by the size of the fall.
+
+  Group by segment, then by item code within it.
+  Metric: qty this period minus qty in the same months last year.
+  Sort: largest absolute piece decline first. Absolute pieces, not percentage
+  - a code down 40,000 pieces matters more than one down 80% of 300.
+
+Columns per row:
+  segment · item code · item name
+  qty now · qty last year · piece change · % change
+  net now · net last year · net change
+  distinct customers now vs last year
+  gross contribution per piece, where cost data exists
+
+Show a segment subtotal line, and rank segments by their own total piece
+decline so the worst segment reads first.
+
+Include a code with zero purchases this period but purchases last year - that
+is the most complete form of decline. Mark it "stopped".
+
+============================================================
+TAB 2 - PRICE SHRINKERS
+============================================================
+SKUs where pieces went UP but real value went DOWN, because the MRP rise
+outran the value growth.
+
+THE CALCULATION - use MRP, matching Red Alert B1
+  Hold last year's basket fixed and re-price it:
+
+    qtyGrowth%     = (qty now / qty last year - 1) x 100
+    valueGrowth%   = (net now / net last year - 1) x 100
+    mrpIndex       = SUM(qty last year x MRP now)
+                     / SUM(qty last year x MRP then)
+    mrpIncrease%   = (mrpIndex - 1) x 100
+    realGrowth%    = valueGrowth% - mrpIncrease%
+
+  Both MRP figures from mrp_history, which is effective-dated - "MRP then"
+  means the price in force during the prior period, not today's.
+
+  Resolve ambiguous codes on (item_code, segment). 56 codes exist in two
+  segments at different prices - CNS-15 is Rs 860 in PTMT and Rs 1,020 in CP.
+  A code-only lookup uses the wrong price.
+
+QUALIFYING CONDITION
+  qtyGrowth% > 0  AND  realGrowth% < 0
+
+  Pieces rose and real value still fell. Rank by realGrowth% ascending -
+  worst first.
+
+Columns:
+  segment · item code · item name
+  qty now · qty last year · qty growth %
+  net now · net last year · value growth %
+  MRP then · MRP now · MRP increase %
+  REAL GROWTH % - the headline, worst first
+  realised price now vs then, as a diagnostic
+
+SHOW THE REALISED-PRICE FIGURE ALONGSIDE
+Compute the realised-price index too (net / qty, both periods) and show it
+beside the MRP figure. The two together separate the cause:
+
+  real decline on BOTH bases       -> genuine, the SKU is losing value
+  real decline on MRP basis only   -> discount leakage; volume held, price
+                                      gave way
+
+That distinction changes who acts. Volume is a sales problem; discount is a
+terms problem.
+
+NO MRP DATA
+817 register codes have no MRP at all - whole families including PTA-, CPCS-,
+CPA- and PSS-. Those codes CANNOT appear on this tab. Show a count at the top:
+"N codes excluded - no MRP on record" with the list available on expand.
+Never treat a missing MRP as zero or as no change.
+
+============================================================
+BOTH TABS
+============================================================
+- Materiality floor, configurable, default: exclude codes below Rs 50,000 net
+  in the prior period. A code that sold Rs 4,000 and now sells Rs 2,000 is
+  not a finding.
+- Export to xlsx, like the other tabs.
+- State the comparison period in the header, as the other tabs do.
+- Territory channel only - project, govt, JJM, GeM and export excluded, using
+  the channel column on sale_line.
+
+============================================================
+DO NOT
+============================================================
+- Do not change any existing tab.
+- Do not compute margin or contribution as anything but GROSS CONTRIBUTION -
+  factory cost only, not profit.
+- Do not include a code with no prior-period sales on the Price Shrinkers tab.
+  Growth cannot be computed from zero.
+
+============================================================
+VERIFY - produced values, and a hash that resolves
+============================================================
+1. Volume Decline: print the top 10 rows with all columns. Confirm the piece
+   change reconciles - qty now minus qty last year - for each.
+2. Print the segment subtotals and confirm they sum to the row-level figures.
+3. Confirm at least one "stopped" code appears, and that its qty now is zero.
+4. Price Shrinkers: print the top 10. For each, confirm qtyGrowth% is
+   POSITIVE and realGrowth% is NEGATIVE. Any row failing that is a filter bug.
+5. For 3 of those rows, print the arithmetic in full: the basket, the two MRP
+   totals, mrpIndex, and realGrowth%. I want to check the index by hand.
+6. Print the count of codes excluded for having no MRP, and the top 5 by net.
+7. Confirm an ambiguous code (CNS-15) resolves on segment - print it under
+   both PTMT and CP with the correct MRP each way.
+8. Confirm both tabs respect the scope selectors: print row counts at company
+   scope and for one State Head.
+9. Confirm no existing tab's figures changed - print Overview's segment table
+   before and after.
+10. Push. Print git rev-parse HEAD and git rev-parse origin/main, then
+    git cat-file -t <hash> and git merge-base --is-ancestor <hash> main.

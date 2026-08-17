@@ -21,6 +21,8 @@ import SkuPushList, { type DistributorListItem, type PushListResult } from "@/co
 import SkuDiscounts from "@/components/sku/SkuDiscounts";
 import SkuSeasonality from "@/components/sku/SkuSeasonality";
 import SkuMovement from "@/components/sku/SkuMovement";
+import SkuVolumeDecline from "@/components/sku/SkuVolumeDecline";
+import SkuPriceShrinkers from "@/components/sku/SkuPriceShrinkers";
 import { cn } from "@/lib/utils";
 import { ChevronLeft, Download } from "lucide-react";
 import GlobalFilterBar from "@/components/GlobalFilterBar";
@@ -68,7 +70,7 @@ type FactsResponse = {
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
-type Section = "overview" | "drill" | "focus" | "push" | "trends" | "discounts" | "timing" | "movement";
+type Section = "overview" | "drill" | "focus" | "push" | "trends" | "discounts" | "timing" | "movement" | "volume-decline" | "price-shrinkers";
 type Level = "distributor" | "direct_dealer" | "retailer" | "project";
 
 export default function SkuPage() {
@@ -479,6 +481,34 @@ export default function SkuPage() {
           >
             Movement
           </button>
+
+          {/* Volume Decline (K5a) — like-month cross-FY piece decline */}
+          <button
+            type="button"
+            onClick={() => setSection("volume-decline")}
+            className={cn(
+              "px-2.5 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap",
+              section === "volume-decline"
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+          >
+            Vol Decline
+          </button>
+
+          {/* Price Shrinkers (K5b) — volume up, real value down */}
+          <button
+            type="button"
+            onClick={() => setSection("price-shrinkers")}
+            className={cn(
+              "px-2.5 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap",
+              section === "price-shrinkers"
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+          >
+            Price Shrinkers
+          </button>
         </div>
 
         {/* Filters */}
@@ -709,6 +739,30 @@ export default function SkuPage() {
             fy={fy}
             monthFrom={period.monthFrom}
             monthTo={period.monthTo}
+            periodLabel={periodLabel}
+          />
+        )}
+
+        {section === "volume-decline" && (
+          <SkuVolumeDecline
+            fy={fy}
+            level={level}
+            monthFrom={period.monthFrom}
+            monthTo={period.monthTo}
+            scopeHead={scopeHead}
+            filterQuery={filterQuery}
+            periodLabel={periodLabel}
+          />
+        )}
+
+        {section === "price-shrinkers" && (
+          <SkuPriceShrinkers
+            fy={fy}
+            level={level}
+            monthFrom={period.monthFrom}
+            monthTo={period.monthTo}
+            scopeHead={scopeHead}
+            filterQuery={filterQuery}
             periodLabel={periodLabel}
           />
         )}
