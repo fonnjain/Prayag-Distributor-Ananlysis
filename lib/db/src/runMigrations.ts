@@ -1639,6 +1639,17 @@ const MIGRATIONS: Migration[] = [
         ON customer_assignment (customer_id) WHERE effective_to IS NULL;
     `,
   },
+  {
+    id: "049_person_source_departed_import",
+    sql: `
+      -- Extend the source allowlist to accommodate historical departed TM
+      -- records imported from former_person_name_raw in customer_assignment.
+      -- These are inactive persons — historical identity only, no assignments.
+      ALTER TABLE person DROP CONSTRAINT IF EXISTS person_source_check;
+      ALTER TABLE person ADD CONSTRAINT person_source_check
+        CHECK (source = ANY (ARRAY['hr_sheet','app_created','departed_import']));
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).
