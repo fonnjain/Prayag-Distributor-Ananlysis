@@ -1650,6 +1650,28 @@ const MIGRATIONS: Migration[] = [
         CHECK (source = ANY (ARRAY['hr_sheet','app_created','departed_import']));
     `,
   },
+  {
+    id: "050_market_survey_richer_capture",
+    sql: `
+      -- Richer capture fields for market survey lines.
+      -- All nullable — existing rows keep NULL and render as "not recorded".
+      ALTER TABLE market_survey
+        ADD COLUMN IF NOT EXISTS credit_days_competitor     integer,
+        ADD COLUMN IF NOT EXISTS credit_given_by            text,
+        ADD COLUMN IF NOT EXISTS credit_days_prayag         integer,
+        ADD COLUMN IF NOT EXISTS competitor_scheme_type     text,
+        ADD COLUMN IF NOT EXISTS competitor_scheme_value    text,
+        ADD COLUMN IF NOT EXISTS delivery_days_competitor   integer,
+        ADD COLUMN IF NOT EXISTS delivery_days_prayag       integer,
+        ADD COLUMN IF NOT EXISTS shelf_share                text,
+        ADD COLUMN IF NOT EXISTS payment_terms_note         text,
+        ADD COLUMN IF NOT EXISTS competitor_visit_frequency text,
+        ADD COLUMN IF NOT EXISTS competitor_moq             text,
+        ADD COLUMN IF NOT EXISTS buying_since               text,
+        ADD COLUMN IF NOT EXISTS would_switch               text,
+        ADD COLUMN IF NOT EXISTS switch_condition           text;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

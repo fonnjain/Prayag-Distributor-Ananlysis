@@ -7,8 +7,13 @@
 // GET  /api/market-survey/summary                — per-item MRP vs median competitor net price
 // GET  /api/market-survey/by-brand               — competitor brand aggregates
 // GET  /api/market-survey/coverage               — segments × states with <5 surveys
+// GET  /api/market-survey/credit-comparison      — credit days by state/segment
+// GET  /api/market-survey/scheme-comparison      — competitor scheme values by type
+// GET  /api/market-survey/delivery-comparison    — delivery days by state
+// GET  /api/market-survey/sized-opportunity      — estimated monthly value going to competitors
 // PATCH /api/market-survey/:id                   — edit within 24 h (same recorder)
 
+import ExcelJS from "exceljs";
 import { Router } from "express";
 import { pool } from "@workspace/db";
 
@@ -29,6 +34,22 @@ function bool(v: unknown): boolean | null {
   if (v === "true") return true;
   if (v === "false") return false;
   return null;
+}
+
+// ── Enum allowlists ───────────────────────────────────────────────────────
+const CREDIT_GIVEN_BY   = ["distributor", "competitor_company", "unknown"] as const;
+const SCHEME_TYPES      = ["percentage", "free_goods", "slab", "none", "unknown"] as const;
+const SHELF_SHARES      = ["mostly_prayag", "even_split", "mostly_competitor", "only_competitor"] as const;
+const VISIT_FREQS       = ["weekly", "fortnightly", "monthly", "rarely", "never"] as const;
+const WOULD_SWITCH_VALS = ["yes", "no", "maybe", "unknown"] as const;
+
+function enumVal(v: unknown, valid: readonly string[]): string | null {
+  const s = str(v);
+  return s !== null && valid.includes(s) ? s : null;
+}
+function intVal(v: unknown): number | null {
+  const n = num(v);
+  return n !== null ? Math.round(n) : null;
 }
 
 // ── GET /api/market-survey/meta ───────────────────────────────────────────
@@ -296,6 +317,13 @@ router.post("/market-survey", async (req, res) => {
       competitorProduct: string | null; netPrice: number; mrp: number | null;
       discountPct: number | null; entryMode: string; unit: string;
       packSize: string | null; reasons: string[]; monthlyVolume: number | null; note: string | null;
+      // richer-capture fields (all nullable)
+      creditDaysCompetitor: number | null; creditGivenBy: string | null; creditDaysPrayag: number | null;
+      competitorSchemeType: string | null; competitorSchemeValue: string | null;
+      deliveryDaysCompetitor: number | null; deliveryDaysPrayag: number | null; shelfShare: string | null;
+      paymentTermsNote: string | null; competitorVisitFrequency: string | null;
+      competitorMoq: string | null; buyingSince: string | null;
+      wouldSwitch: string | null; switchCondition: string | null;
     }
     const parsedLines: ParsedLine[] = [];
 
@@ -346,6 +374,21 @@ router.post("/market-survey", async (req, res) => {
         reasons:           Array.isArray(l.reasons) ? (l.reasons as unknown[]).map(String).filter(Boolean) : [],
         monthlyVolume:     num(l.monthlyVolume),
         note:              str(l.note),
+        // richer-capture fields
+        creditDaysCompetitor:     intVal(l.creditDaysCompetitor),
+        creditGivenBy:            enumVal(l.creditGivenBy, CREDIT_GIVEN_BY),
+        creditDaysPrayag:         intVal(l.creditDaysPrayag),
+        competitorSchemeType:     enumVal(l.competitorSchemeType, SCHEME_TYPES),
+        competitorSchemeValue:    str(l.competitorSchemeValue),
+        deliveryDaysCompetitor:   intVal(l.deliveryDaysCompetitor),
+        deliveryDaysPrayag:       intVal(l.deliveryDaysPrayag),
+        shelfShare:               enumVal(l.shelfShare, SHELF_SHARES),
+        paymentTermsNote:         str(l.paymentTermsNote),
+        competitorVisitFrequency: enumVal(l.competitorVisitFrequency, VISIT_FREQS),
+        competitorMoq:            str(l.competitorMoq),
+        buyingSince:              str(l.buyingSince),
+        wouldSwitch:              enumVal(l.wouldSwitch, WOULD_SWITCH_VALS),
+        switchCondition:          str(l.switchCondition),
       });
     }
 
@@ -362,9 +405,15 @@ router.post("/market-survey", async (req, res) => {
             competitor_brand, competitor_product,
             net_price, mrp, discount_pct, entry_mode,
             unit, pack_size, reasons, monthly_volume, note, surveyed_at,
-            pending_prospect_id, survey_id, survey_type)
+            pending_prospect_id, survey_id, survey_type,
+            credit_days_competitor, credit_given_by, credit_days_prayag,
+            competitor_scheme_type, competitor_scheme_value,
+            delivery_days_competitor, delivery_days_prayag, shelf_share,
+            payment_terms_note, competitor_visit_frequency,
+            competitor_moq, buying_since, would_switch, switch_condition)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
-                 COALESCE($20::timestamptz, now()), $21, $22, $23)
+                 COALESCE($20::timestamptz, now()), $21, $22, $23,
+                 $24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37)
          RETURNING id`,
         [
           recorderName, isExistingBuyer, customerId,
@@ -374,6 +423,11 @@ router.post("/market-survey", async (req, res) => {
           pl.netPrice, pl.mrp, pl.discountPct, pl.entryMode,
           pl.unit, pl.packSize, pl.reasons, pl.monthlyVolume, pl.note,
           surveyedAt, pendingProspectId, surveyId, surveyType,
+          pl.creditDaysCompetitor, pl.creditGivenBy, pl.creditDaysPrayag,
+          pl.competitorSchemeType, pl.competitorSchemeValue,
+          pl.deliveryDaysCompetitor, pl.deliveryDaysPrayag, pl.shelfShare,
+          pl.paymentTermsNote, pl.competitorVisitFrequency,
+          pl.competitorMoq, pl.buyingSince, pl.wouldSwitch, pl.switchCondition,
         ],
       );
       insertedRows.push({ id: ins.rows[0].id, netPrice: pl.netPrice });
@@ -559,13 +613,14 @@ router.get("/market-survey/summary", async (req, res) => {
 router.get("/market-survey/by-brand", async (req, res) => {
   try {
     const result = await pool.query<{
-      brand: string; n: string; segments: string[];
+      brand: string; n: string; segments: string[]; states: string[];
       min_net: string; max_net: string; median_net: string;
     }>(
       `SELECT
          competitor_brand                     AS brand,
          COUNT(*)::text                       AS n,
          array_agg(DISTINCT segment ORDER BY segment) AS segments,
+         array_agg(DISTINCT state ORDER BY state) FILTER (WHERE state IS NOT NULL) AS states,
          MIN(net_price)::text                 AS min_net,
          MAX(net_price)::text                 AS max_net,
          PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY net_price)::text AS median_net
@@ -579,6 +634,7 @@ router.get("/market-survey/by-brand", async (req, res) => {
         brand:     r.brand,
         n:         parseInt(r.n, 10),
         segments:  r.segments,
+        states:    r.states ?? [],
         minNet:    parseFloat(r.min_net),
         maxNet:    parseFloat(r.max_net),
         medianNet: parseFloat(r.median_net),
@@ -1007,6 +1063,20 @@ router.patch("/market-survey/:id", async (req, res) => {
       sets.push(`reasons = $${p++}`);
       params.push((b.reasons as unknown[]).map(String).filter(Boolean));
     }
+    if ("creditDaysCompetitor"     in b) { sets.push(`credit_days_competitor = $${p++}`);     params.push(intVal(b.creditDaysCompetitor)); }
+    if ("creditGivenBy"            in b) { sets.push(`credit_given_by = $${p++}`);             params.push(enumVal(b.creditGivenBy, CREDIT_GIVEN_BY)); }
+    if ("creditDaysPrayag"         in b) { sets.push(`credit_days_prayag = $${p++}`);          params.push(intVal(b.creditDaysPrayag)); }
+    if ("competitorSchemeType"     in b) { sets.push(`competitor_scheme_type = $${p++}`);      params.push(enumVal(b.competitorSchemeType, SCHEME_TYPES)); }
+    if ("competitorSchemeValue"    in b) { sets.push(`competitor_scheme_value = $${p++}`);     params.push(str(b.competitorSchemeValue)); }
+    if ("deliveryDaysCompetitor"   in b) { sets.push(`delivery_days_competitor = $${p++}`);   params.push(intVal(b.deliveryDaysCompetitor)); }
+    if ("deliveryDaysPrayag"       in b) { sets.push(`delivery_days_prayag = $${p++}`);       params.push(intVal(b.deliveryDaysPrayag)); }
+    if ("shelfShare"               in b) { sets.push(`shelf_share = $${p++}`);                 params.push(enumVal(b.shelfShare, SHELF_SHARES)); }
+    if ("paymentTermsNote"         in b) { sets.push(`payment_terms_note = $${p++}`);         params.push(str(b.paymentTermsNote)); }
+    if ("competitorVisitFrequency" in b) { sets.push(`competitor_visit_frequency = $${p++}`); params.push(enumVal(b.competitorVisitFrequency, VISIT_FREQS)); }
+    if ("competitorMoq"            in b) { sets.push(`competitor_moq = $${p++}`);             params.push(str(b.competitorMoq)); }
+    if ("buyingSince"              in b) { sets.push(`buying_since = $${p++}`);               params.push(str(b.buyingSince)); }
+    if ("wouldSwitch"              in b) { sets.push(`would_switch = $${p++}`);               params.push(enumVal(b.wouldSwitch, WOULD_SWITCH_VALS)); }
+    if ("switchCondition"          in b) { sets.push(`switch_condition = $${p++}`);           params.push(str(b.switchCondition)); }
 
     // Price patch — must be self-consistent
     if ("entryMode" in b || "netPrice" in b || "mrp" in b || "discountPct" in b) {
@@ -1051,6 +1121,573 @@ router.patch("/market-survey/:id", async (req, res) => {
   } catch (err) {
     req.log?.error({ err }, "market-survey PATCH error");
     res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
+  }
+});
+
+// ── /submissions ────────────────────────────────────────────────────────────
+// Returns all survey rows grouped by survey_type then by survey_id.
+router.get("/market-survey/submissions", async (req, res) => {
+  try {
+    const stateHead = str(req.query.stateHead);
+    const state     = str(req.query.state);
+    const segment   = str(req.query.segment);
+    const brand     = str(req.query.brand);
+    const recorder  = str(req.query.recorder);
+    const dateFrom  = str(req.query.dateFrom);
+    const dateTo    = str(req.query.dateTo);
+
+    const conds: string[] = [];
+    const params: unknown[] = [];
+    let p = 1;
+
+    if (stateHead) {
+      const { resolvePickerToStoredHead } = await import("../lib/customerStateHead.js");
+      const stored = await resolvePickerToStoredHead(pool, stateHead);
+      conds.push(`s.state IN (SELECT DISTINCT state FROM customer_master WHERE state_head = $${p++} AND state IS NOT NULL)`);
+      params.push(stored);
+    }
+    if (state)    { conds.push(`s.state = $${p++}`);                                      params.push(state); }
+    if (segment)  { conds.push(`s.segment = $${p++}`);                                    params.push(segment); }
+    if (brand)    { conds.push(`s.competitor_brand ILIKE $${p++}`);                       params.push(`%${brand}%`); }
+    if (recorder) { conds.push(`s.recorded_by = $${p++}`);                                params.push(recorder); }
+    if (dateFrom) { conds.push(`s.created_at >= $${p++}`);                                params.push(dateFrom); }
+    if (dateTo)   { conds.push(`s.created_at < $${p++}::date + interval '1 day'`);       params.push(dateTo); }
+
+    const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+
+    const result = await pool.query<{
+      id: number; survey_id: string; survey_type: string;
+      created_at: string; recorded_by: string;
+      customer_id: string | null; customer_company: string | null;
+      prospect_name: string | null; pending_prospect_id: number | null;
+      state: string | null; district: string | null;
+      segment: string; prayag_item_code: string | null;
+      item_name: string | null; current_mrp: string | null;
+      competitor_brand: string; competitor_product: string | null;
+      net_price: string; entry_mrp: string | null; discount_pct: string | null;
+      entry_mode: string; unit: string; pack_size: string | null;
+      reasons: string[]; monthly_volume: string | null; note: string | null;
+      credit_days_competitor: number | null; credit_given_by: string | null;
+      credit_days_prayag: number | null; competitor_scheme_type: string | null;
+      competitor_scheme_value: string | null; delivery_days_competitor: number | null;
+      delivery_days_prayag: number | null; shelf_share: string | null;
+      payment_terms_note: string | null; competitor_visit_frequency: string | null;
+      competitor_moq: string | null; buying_since: string | null;
+      would_switch: string | null; switch_condition: string | null;
+    }>(
+      `SELECT s.id, s.survey_id, s.survey_type,
+              s.created_at, s.recorded_by,
+              s.customer_id, cm.company AS customer_company,
+              s.prospect_name, s.pending_prospect_id,
+              s.state, s.district,
+              s.segment, s.prayag_item_code,
+              mi.item_name,
+              h.mrp::text AS current_mrp,
+              s.competitor_brand, s.competitor_product,
+              s.net_price::text, s.mrp::text AS entry_mrp, s.discount_pct::text,
+              s.entry_mode, s.unit, s.pack_size,
+              s.reasons, s.monthly_volume::text, s.note,
+              s.credit_days_competitor, s.credit_given_by, s.credit_days_prayag,
+              s.competitor_scheme_type, s.competitor_scheme_value,
+              s.delivery_days_competitor, s.delivery_days_prayag, s.shelf_share,
+              s.payment_terms_note, s.competitor_visit_frequency,
+              s.competitor_moq, s.buying_since, s.would_switch, s.switch_condition
+       FROM market_survey s
+       LEFT JOIN customer_master cm ON cm.id = s.customer_id
+       LEFT JOIN mrp_master mi ON mi.item_code = s.prayag_item_code AND mi.segment = s.segment
+       LEFT JOIN mrp_history h  ON h.item_code = s.prayag_item_code AND h.segment = s.segment AND h.is_current = TRUE
+       ${where}
+       ORDER BY
+         CASE s.survey_type WHEN 'existing_sku' THEN 1 WHEN 'new_sku' THEN 2 WHEN 'new_customer' THEN 3 ELSE 4 END,
+         s.survey_id, s.id
+       LIMIT 2000`,
+      params,
+    );
+
+    const TYPE_LABELS: Record<string, string> = {
+      existing_sku: "Existing customer, existing SKU",
+      new_sku:      "Existing customer, new SKU",
+      new_customer: "New customer",
+      unclassified: "Unclassified (pre-rebuild rows)",
+    };
+    const TYPE_ORDER = ["existing_sku", "new_sku", "new_customer", "unclassified"];
+
+    const now = Date.now();
+    type SurveyLine = {
+      id: number; segment: string; prayagItemCode: string | null; itemName: string | null;
+      currentMrp: number | null; competitorBrand: string; competitorProduct: string | null;
+      netPrice: number; mrp: number | null; discountPct: number | null;
+      entryMode: string; unit: string; packSize: string | null;
+      reasons: string[]; monthlyVolume: number | null; note: string | null;
+      createdAt: string; editable: boolean;
+      creditDaysCompetitor: number | null; creditGivenBy: string | null;
+      creditDaysPrayag: number | null; competitorSchemeType: string | null;
+      competitorSchemeValue: string | null; deliveryDaysCompetitor: number | null;
+      deliveryDaysPrayag: number | null; shelfShare: string | null;
+      paymentTermsNote: string | null; competitorVisitFrequency: string | null;
+      competitorMoq: string | null; buyingSince: string | null;
+      wouldSwitch: string | null; switchCondition: string | null;
+    };
+    type Survey = {
+      surveyId: string; submittedAt: string; recordedBy: string;
+      retailer: string; customerId: string | null;
+      isPendingProspect: boolean; state: string | null; district: string | null;
+      editableUntil: string; lines: SurveyLine[];
+    };
+    type Group = {
+      surveyType: string; label: string;
+      rowCount: number; combinedValue: number | null; surveys: Survey[];
+    };
+
+    const groupMap = new Map<string, Map<string, Survey>>();
+    const typeCounts: Record<string, number> = {};
+
+    for (const r of result.rows) {
+      const stype = TYPE_ORDER.includes(r.survey_type) ? r.survey_type : "unclassified";
+      typeCounts[stype] = (typeCounts[stype] ?? 0) + 1;
+      if (!groupMap.has(stype)) groupMap.set(stype, new Map());
+      const surveyMap = groupMap.get(stype)!;
+
+      if (!surveyMap.has(r.survey_id)) {
+        const editableUntil = new Date(new Date(r.created_at).getTime() + 24 * 3600 * 1000).toISOString();
+        surveyMap.set(r.survey_id, {
+          surveyId: r.survey_id,
+          submittedAt: r.created_at,
+          recordedBy: r.recorded_by,
+          retailer: r.customer_company ?? r.prospect_name ?? "(unknown)",
+          customerId: r.customer_id,
+          isPendingProspect: r.pending_prospect_id != null && !r.customer_id,
+          state: r.state,
+          district: r.district,
+          editableUntil,
+          lines: [],
+        });
+      }
+
+      surveyMap.get(r.survey_id)!.lines.push({
+        id: r.id,
+        segment: r.segment,
+        prayagItemCode: r.prayag_item_code,
+        itemName: r.item_name,
+        currentMrp: r.current_mrp ? parseFloat(r.current_mrp) : null,
+        competitorBrand: r.competitor_brand,
+        competitorProduct: r.competitor_product,
+        netPrice: parseFloat(r.net_price),
+        mrp: r.entry_mrp ? parseFloat(r.entry_mrp) : null,
+        discountPct: r.discount_pct ? parseFloat(r.discount_pct) : null,
+        entryMode: r.entry_mode,
+        unit: r.unit,
+        packSize: r.pack_size,
+        reasons: r.reasons,
+        monthlyVolume: r.monthly_volume ? parseFloat(r.monthly_volume) : null,
+        note: r.note,
+        createdAt: r.created_at,
+        editable: new Date(r.created_at).getTime() + 24 * 3600 * 1000 > now,
+        creditDaysCompetitor:     r.credit_days_competitor   ?? null,
+        creditGivenBy:            r.credit_given_by          ?? null,
+        creditDaysPrayag:         r.credit_days_prayag       ?? null,
+        competitorSchemeType:     r.competitor_scheme_type   ?? null,
+        competitorSchemeValue:    r.competitor_scheme_value  ?? null,
+        deliveryDaysCompetitor:   r.delivery_days_competitor ?? null,
+        deliveryDaysPrayag:       r.delivery_days_prayag     ?? null,
+        shelfShare:               r.shelf_share              ?? null,
+        paymentTermsNote:         r.payment_terms_note       ?? null,
+        competitorVisitFrequency: r.competitor_visit_frequency ?? null,
+        competitorMoq:            r.competitor_moq           ?? null,
+        buyingSince:              r.buying_since             ?? null,
+        wouldSwitch:              r.would_switch             ?? null,
+        switchCondition:          r.switch_condition         ?? null,
+      });
+    }
+
+    const groups: Group[] = TYPE_ORDER
+      .filter((t) => groupMap.has(t))
+      .map((t) => {
+        const surveys = Array.from(groupMap.get(t)!.values());
+        surveys.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+        const allLines = surveys.flatMap((s) => s.lines);
+        let combinedValue: number | null = null;
+        for (const l of allLines) {
+          if (l.monthlyVolume != null) combinedValue = (combinedValue ?? 0) + l.netPrice * l.monthlyVolume;
+        }
+        return { surveyType: t, label: TYPE_LABELS[t] ?? t, rowCount: allLines.length, combinedValue, surveys };
+      });
+
+    res.json({ total: result.rows.length, typeCounts, groups });
+  } catch (err) {
+    req.log?.error({ err }, "market-survey submissions error");
+    res.status(500).json({ error: "Failed to load submissions" });
+  }
+});
+
+// ── /reasons ────────────────────────────────────────────────────────────────
+router.get("/market-survey/reasons", async (req, res) => {
+  try {
+    const [overall, bySeg] = await Promise.all([
+      pool.query<{ reason: string; count: string }>(
+        `SELECT reason, COUNT(*)::text AS count
+         FROM market_survey, unnest(reasons) AS reason
+         WHERE cardinality(reasons) > 0
+         GROUP BY reason ORDER BY COUNT(*) DESC`,
+      ),
+      pool.query<{ segment: string; reason: string; count: string }>(
+        `SELECT segment, reason, COUNT(*)::text AS count
+         FROM market_survey, unnest(reasons) AS reason
+         WHERE cardinality(reasons) > 0
+         GROUP BY segment, reason ORDER BY segment, COUNT(*) DESC`,
+      ),
+    ]);
+    const segMap: Record<string, Record<string, number>> = {};
+    for (const r of bySeg.rows) { segMap[r.segment] ??= {}; segMap[r.segment][r.reason] = parseInt(r.count, 10); }
+    res.json({
+      overall:   overall.rows.map((r) => ({ reason: r.reason, count: parseInt(r.count, 10) })),
+      bySegment: Object.entries(segMap).map(([segment, counts]) => ({ segment, counts })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to load reasons" });
+  }
+});
+
+// ── /new-sku-opportunity ─────────────────────────────────────────────────────
+router.get("/market-survey/new-sku-opportunity", async (req, res) => {
+  try {
+    const result = await pool.query<{
+      prayag_item_code: string; segment: string; item_name: string | null;
+      current_mrp: string | null; n: string; retailers: string[]; brands: string[];
+    }>(
+      `SELECT s.prayag_item_code, s.segment, mi.item_name, h.mrp::text AS current_mrp,
+              COUNT(*)::text AS n,
+              array_agg(DISTINCT COALESCE(cm.company, s.prospect_name) ORDER BY COALESCE(cm.company, s.prospect_name))
+                FILTER (WHERE COALESCE(cm.company, s.prospect_name) IS NOT NULL) AS retailers,
+              array_agg(DISTINCT s.competitor_brand ORDER BY s.competitor_brand) AS brands
+       FROM market_survey s
+       LEFT JOIN customer_master cm ON cm.id = s.customer_id
+       LEFT JOIN mrp_master mi ON mi.item_code = s.prayag_item_code AND mi.segment = s.segment
+       LEFT JOIN mrp_history h  ON h.item_code = s.prayag_item_code AND h.segment = s.segment AND h.is_current = TRUE
+       WHERE s.survey_type = 'new_sku' AND s.prayag_item_code IS NOT NULL
+       GROUP BY s.prayag_item_code, s.segment, mi.item_name, h.mrp
+       ORDER BY COUNT(*) DESC`,
+    );
+    res.json({ rows: result.rows.map((r) => ({
+      prayagItemCode: r.prayag_item_code, segment: r.segment,
+      itemName: r.item_name,
+      currentMrp: r.current_mrp ? parseFloat(r.current_mrp) : null,
+      n: parseInt(r.n, 10), retailers: r.retailers ?? [], brands: r.brands ?? [],
+    })) });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to load new SKU opportunity" });
+  }
+});
+
+// ── /vs-competition ──────────────────────────────────────────────────────────
+// Rows where a survey prayag_item_code also exists in competitor_price.
+router.get("/market-survey/vs-competition", async (req, res) => {
+  try {
+    const result = await pool.query<{
+      prayag_item_code: string; segment: string; item_name: string | null;
+      current_mrp: string | null; survey_n: string; survey_median: string;
+      comp_brand: string; comp_code: string; comp_name: string | null;
+      comp_mrp: string | null; comp_net_derived: string | null; comp_discount: string | null;
+    }>(
+      `SELECT s.prayag_item_code, s.segment, mi.item_name, h.mrp::text AS current_mrp,
+              COUNT(DISTINCT s.id)::text AS survey_n,
+              PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY s.net_price)::text AS survey_median,
+              cp.competitor_brand AS comp_brand, cp.competitor_code AS comp_code,
+              cp.competitor_name AS comp_name, cp.mrp::text AS comp_mrp,
+              cp.net_price_derived::text AS comp_net_derived,
+              cp.discount_pct_assumed::text AS comp_discount
+       FROM market_survey s
+       JOIN competitor_price cp ON cp.prayag_item_code = s.prayag_item_code
+       LEFT JOIN mrp_master mi ON mi.item_code = s.prayag_item_code AND mi.segment = s.segment
+       LEFT JOIN mrp_history h  ON h.item_code = s.prayag_item_code AND h.segment = s.segment AND h.is_current = TRUE
+       WHERE s.prayag_item_code IS NOT NULL
+       GROUP BY s.prayag_item_code, s.segment, mi.item_name, h.mrp,
+                cp.competitor_brand, cp.competitor_code, cp.competitor_name, cp.mrp, cp.net_price_derived, cp.discount_pct_assumed
+       ORDER BY s.prayag_item_code, cp.competitor_brand`,
+    );
+
+    type OutRow = {
+      prayagItemCode: string; segment: string; itemName: string | null; currentMrp: number | null;
+      surveyN: number; surveyMedian: number;
+      competitorRows: { brand: string; code: string; name: string | null; mrp: number | null; netDerived: number | null; discountAssumed: number | null; label: "DERIVED" }[];
+    };
+    const map = new Map<string, OutRow>();
+    for (const r of result.rows) {
+      const key = `${r.prayag_item_code}|${r.segment}`;
+      if (!map.has(key)) map.set(key, {
+        prayagItemCode: r.prayag_item_code, segment: r.segment,
+        itemName: r.item_name,
+        currentMrp: r.current_mrp ? parseFloat(r.current_mrp) : null,
+        surveyN: parseInt(r.survey_n, 10), surveyMedian: parseFloat(r.survey_median),
+        competitorRows: [],
+      });
+      map.get(key)!.competitorRows.push({
+        brand: r.comp_brand, code: r.comp_code, name: r.comp_name,
+        mrp: r.comp_mrp ? parseFloat(r.comp_mrp) : null,
+        netDerived: r.comp_net_derived ? parseFloat(r.comp_net_derived) : null,
+        discountAssumed: r.comp_discount ? parseFloat(r.comp_discount) : null,
+        label: "DERIVED",
+      });
+    }
+    res.json({ rows: Array.from(map.values()) });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to load competition comparison" });
+  }
+});
+
+// ── /export ──────────────────────────────────────────────────────────────────
+// XLSX download of submissions with same filters as /submissions.
+router.get("/market-survey/export", async (req, res) => {
+  try {
+    const stateHead = str(req.query.stateHead);
+    const state     = str(req.query.state);
+    const segment   = str(req.query.segment);
+    const brand     = str(req.query.brand);
+    const recorder  = str(req.query.recorder);
+    const dateFrom  = str(req.query.dateFrom);
+    const dateTo    = str(req.query.dateTo);
+
+    const conds: string[] = [];
+    const params: unknown[] = [];
+    let p = 1;
+
+    if (stateHead) {
+      const { resolvePickerToStoredHead } = await import("../lib/customerStateHead.js");
+      const stored = await resolvePickerToStoredHead(pool, stateHead);
+      conds.push(`s.state IN (SELECT DISTINCT state FROM customer_master WHERE state_head = $${p++} AND state IS NOT NULL)`);
+      params.push(stored);
+    }
+    if (state)    { conds.push(`s.state = $${p++}`);                                params.push(state); }
+    if (segment)  { conds.push(`s.segment = $${p++}`);                              params.push(segment); }
+    if (brand)    { conds.push(`s.competitor_brand ILIKE $${p++}`);                 params.push(`%${brand}%`); }
+    if (recorder) { conds.push(`s.recorded_by = $${p++}`);                          params.push(recorder); }
+    if (dateFrom) { conds.push(`s.created_at >= $${p++}`);                          params.push(dateFrom); }
+    if (dateTo)   { conds.push(`s.created_at < $${p++}::date + interval '1 day'`); params.push(dateTo); }
+
+    const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+
+    const result = await pool.query(
+      `SELECT s.created_at, s.recorded_by, s.survey_type,
+              COALESCE(cm.company, s.prospect_name) AS retailer,
+              CASE WHEN s.pending_prospect_id IS NOT NULL AND cm.id IS NULL THEN 'yes' ELSE 'no' END AS is_pending,
+              s.state, s.district, s.segment, s.prayag_item_code,
+              h.mrp::float AS our_mrp,
+              s.competitor_brand, s.competitor_product,
+              s.net_price::float, s.entry_mode, s.unit, s.pack_size,
+              array_to_string(s.reasons, ', ') AS reasons,
+              s.monthly_volume::float, s.note,
+              s.credit_days_competitor, s.credit_given_by, s.credit_days_prayag,
+              s.competitor_scheme_type, s.competitor_scheme_value,
+              s.delivery_days_competitor, s.delivery_days_prayag, s.shelf_share
+       FROM market_survey s
+       LEFT JOIN customer_master cm ON cm.id = s.customer_id
+       LEFT JOIN mrp_history h ON h.item_code = s.prayag_item_code AND h.segment = s.segment AND h.is_current = TRUE
+       ${where}
+       ORDER BY
+         CASE s.survey_type WHEN 'existing_sku' THEN 1 WHEN 'new_sku' THEN 2 WHEN 'new_customer' THEN 3 ELSE 4 END,
+         s.survey_id, s.id`,
+      params,
+    );
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Market Survey");
+    ws.columns = [
+      { header: "Submitted",                   key: "created_at",               width: 20 },
+      { header: "Recorder (self-declared)",    key: "recorded_by",              width: 22 },
+      { header: "Survey Type",                 key: "survey_type",              width: 18 },
+      { header: "Retailer",                    key: "retailer",                 width: 30 },
+      { header: "Pending Prospect",            key: "is_pending",               width: 14 },
+      { header: "State",                       key: "state",                    width: 16 },
+      { header: "District",                    key: "district",                 width: 16 },
+      { header: "Segment",                     key: "segment",                  width: 14 },
+      { header: "Prayag Code",                 key: "prayag_item_code",         width: 14 },
+      { header: "Our MRP (₹)",                 key: "our_mrp",                  width: 12 },
+      { header: "Competitor Brand",            key: "competitor_brand",         width: 20 },
+      { header: "Competitor Product",          key: "competitor_product",       width: 22 },
+      { header: "Net Price (₹)",               key: "net_price",                width: 12 },
+      { header: "Entry Mode",                  key: "entry_mode",               width: 14 },
+      { header: "Unit",                        key: "unit",                     width: 10 },
+      { header: "Pack Size",                   key: "pack_size",                width: 14 },
+      { header: "Reasons",                     key: "reasons",                  width: 30 },
+      { header: "Monthly Volume",              key: "monthly_volume",           width: 16 },
+      { header: "Note",                        key: "note",                     width: 30 },
+      { header: "Competitor Credit Days",      key: "credit_days_competitor",   width: 18 },
+      { header: "Credit Given By",             key: "credit_given_by",          width: 20 },
+      { header: "Prayag Credit Days",          key: "credit_days_prayag",       width: 16 },
+      { header: "Competitor Scheme Type",      key: "competitor_scheme_type",   width: 20 },
+      { header: "Competitor Scheme Value",     key: "competitor_scheme_value",  width: 24 },
+      { header: "Competitor Delivery Days",   key: "delivery_days_competitor",  width: 20 },
+      { header: "Prayag Delivery Days",        key: "delivery_days_prayag",     width: 18 },
+      { header: "Shelf Share",                 key: "shelf_share",              width: 20 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    for (const r of result.rows) {
+      ws.addRow({ ...r, created_at: new Date(r.created_at).toLocaleString("en-IN") });
+    }
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="market-survey-${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    req.log?.error({ err }, "market-survey export error");
+    res.status(500).json({ error: "Failed to export" });
+  }
+});
+
+// ── GET /api/market-survey/credit-comparison ─────────────────────────────
+// Median credit days: competitor vs Prayag, by state and segment, with n.
+// Also breaks down credit_given_by (distributor vs competitor_company vs unknown).
+router.get("/market-survey/credit-comparison", async (_req, res) => {
+  try {
+    const result = await pool.query<{
+      state: string; segment: string; n: string;
+      median_comp: string | null; median_prayag: string | null;
+      by_distributor: string; by_company: string; by_unknown: string;
+    }>(
+      `SELECT
+         COALESCE(state, '(no state)')                                                    AS state,
+         segment,
+         COUNT(*) FILTER (WHERE credit_days_competitor IS NOT NULL
+                              OR credit_days_prayag IS NOT NULL
+                              OR credit_given_by IS NOT NULL)::text                        AS n,
+         PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY credit_days_competitor)::text         AS median_comp,
+         PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY credit_days_prayag)::text             AS median_prayag,
+         COUNT(*) FILTER (WHERE credit_given_by = 'distributor')::text                    AS by_distributor,
+         COUNT(*) FILTER (WHERE credit_given_by = 'competitor_company')::text             AS by_company,
+         COUNT(*) FILTER (WHERE credit_given_by = 'unknown')::text                        AS by_unknown
+       FROM market_survey
+       WHERE credit_days_competitor IS NOT NULL
+          OR credit_days_prayag     IS NOT NULL
+          OR credit_given_by        IS NOT NULL
+       GROUP BY state, segment
+       ORDER BY state, segment`,
+    );
+    res.json({
+      rows: result.rows.map((r) => ({
+        state:                   r.state,
+        segment:                 r.segment,
+        n:                       parseInt(r.n, 10),
+        medianCompetitorDays:    r.median_comp   ? parseFloat(r.median_comp)   : null,
+        medianPrayagDays:        r.median_prayag ? parseFloat(r.median_prayag) : null,
+        givenByDistributor:      parseInt(r.by_distributor, 10),
+        givenByCompetitorCompany: parseInt(r.by_company,    10),
+        givenByUnknown:          parseInt(r.by_unknown,     10),
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to load credit comparison" });
+  }
+});
+
+// ── GET /api/market-survey/scheme-comparison ──────────────────────────────
+// Competitor scheme values recorded, grouped by type, with n.
+router.get("/market-survey/scheme-comparison", async (_req, res) => {
+  try {
+    const result = await pool.query<{
+      scheme_type: string; n: string; values_seen: string[] | null;
+    }>(
+      `SELECT
+         competitor_scheme_type                                                              AS scheme_type,
+         COUNT(*)::text                                                                      AS n,
+         array_agg(DISTINCT competitor_scheme_value ORDER BY competitor_scheme_value)
+           FILTER (WHERE competitor_scheme_value IS NOT NULL AND competitor_scheme_value != '') AS values_seen
+       FROM market_survey
+       WHERE competitor_scheme_type IS NOT NULL
+       GROUP BY competitor_scheme_type
+       ORDER BY COUNT(*) DESC`,
+    );
+    res.json({
+      rows: result.rows.map((r) => ({
+        schemeType: r.scheme_type,
+        n:          parseInt(r.n, 10),
+        valuesSeen: r.values_seen ?? [],
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to load scheme comparison" });
+  }
+});
+
+// ── GET /api/market-survey/delivery-comparison ────────────────────────────
+// Delivery days distribution (competitor vs Prayag) by state, with n and range.
+router.get("/market-survey/delivery-comparison", async (_req, res) => {
+  try {
+    const result = await pool.query<{
+      state: string; n: string;
+      median_comp: string | null; min_comp: string | null; max_comp: string | null;
+      median_prayag: string | null; min_prayag: string | null; max_prayag: string | null;
+    }>(
+      `SELECT
+         COALESCE(state, '(no state)')                                                         AS state,
+         COUNT(*) FILTER (WHERE delivery_days_competitor IS NOT NULL
+                              OR delivery_days_prayag   IS NOT NULL)::text                     AS n,
+         PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY delivery_days_competitor)::text           AS median_comp,
+         MIN(delivery_days_competitor)::text                                                    AS min_comp,
+         MAX(delivery_days_competitor)::text                                                    AS max_comp,
+         PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY delivery_days_prayag)::text               AS median_prayag,
+         MIN(delivery_days_prayag)::text                                                        AS min_prayag,
+         MAX(delivery_days_prayag)::text                                                        AS max_prayag
+       FROM market_survey
+       WHERE delivery_days_competitor IS NOT NULL OR delivery_days_prayag IS NOT NULL
+       GROUP BY state
+       ORDER BY state`,
+    );
+    res.json({
+      rows: result.rows
+        .filter((r) => parseInt(r.n, 10) > 0)
+        .map((r) => ({
+          state:               r.state,
+          n:                   parseInt(r.n, 10),
+          medianCompetitorDays: r.median_comp   ? parseFloat(r.median_comp)   : null,
+          minCompetitor:        r.min_comp      ? parseFloat(r.min_comp)      : null,
+          maxCompetitor:        r.max_comp      ? parseFloat(r.max_comp)      : null,
+          medianPrayagDays:     r.median_prayag ? parseFloat(r.median_prayag) : null,
+          minPrayag:            r.min_prayag    ? parseFloat(r.min_prayag)    : null,
+          maxPrayag:            r.max_prayag    ? parseFloat(r.max_prayag)    : null,
+        })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to load delivery comparison" });
+  }
+});
+
+// ── GET /api/market-survey/sized-opportunity ──────────────────────────────
+// Estimated monthly value going to competitors from shelf_share × net_price × monthly_volume.
+// Assumption bands: mostly_prayag=20%, even_split=50%, mostly_competitor=80%, only_competitor=100%.
+router.get("/market-survey/sized-opportunity", async (_req, res) => {
+  try {
+    const CASE_EXPR = `CASE shelf_share
+      WHEN 'mostly_prayag'     THEN 0.20 * net_price::float * monthly_volume::float
+      WHEN 'even_split'        THEN 0.50 * net_price::float * monthly_volume::float
+      WHEN 'mostly_competitor' THEN 0.80 * net_price::float * monthly_volume::float
+      WHEN 'only_competitor'   THEN 1.00 * net_price::float * monthly_volume::float
+      ELSE 0
+    END`;
+    const result = await pool.query<{
+      segment: string; state: string; n: string; est_monthly: string | null;
+    }>(
+      `SELECT
+         segment,
+         COALESCE(state, '(no state)')                                                      AS state,
+         COUNT(*) FILTER (WHERE shelf_share IS NOT NULL AND monthly_volume IS NOT NULL)::text AS n,
+         SUM(${CASE_EXPR}) FILTER (WHERE shelf_share IS NOT NULL AND monthly_volume IS NOT NULL)::text AS est_monthly
+       FROM market_survey
+       GROUP BY segment, state
+       HAVING COUNT(*) FILTER (WHERE shelf_share IS NOT NULL AND monthly_volume IS NOT NULL) > 0
+       ORDER BY SUM(${CASE_EXPR}) FILTER (WHERE shelf_share IS NOT NULL AND monthly_volume IS NOT NULL) DESC NULLS LAST`,
+    );
+    res.json({
+      assumption: "mostly_prayag=20%, even_split=50%, mostly_competitor=80%, only_competitor=100% of (net price × monthly volume) estimated as going to competitors. Both shelf_share and monthly_volume must be recorded for a row to contribute.",
+      rows: result.rows.map((r) => ({
+        segment:                      r.segment,
+        state:                        r.state,
+        n:                            parseInt(r.n, 10),
+        estimatedMonthlyToCompetitor: r.est_monthly ? parseFloat(r.est_monthly) : null,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to load sized opportunity" });
   }
 });
 

@@ -1,0 +1,186 @@
+GOAL
+Three things in one task, because they share a schema change:
+  1. Capture more detail on the entry form - in values, not tick-boxes
+  2. A Submissions tab
+  3. An Analytics tab
+
+The existing three entry tabs (Existing SKU / New SKU / New Customer) keep
+their structure. This adds fields, not steps.
+
+============================================================
+1 - RICHER CAPTURE
+============================================================
+
+THE PRINCIPLE: EVERYTHING NEW IS OPTIONAL
+Required stays: retailer, segment, competitor brand, net price.
+
+A salesperson standing in a shop with a phone abandons a form that demands
+fifteen fields. Optional fields improve the record when they are available and
+never block a submission when they are not.
+
+PRIORITY SET - visible by default, under section 4
+  credit_days_competitor      integer. How many days the competitor gives.
+  credit_given_by             distributor | competitor_company | unknown
+                              A distributor funding 60 days from his own
+                              working capital is a different problem from a
+                              competitor funding it centrally. The first is a
+                              service gap; the second is a structural cost.
+  credit_days_prayag          integer. What we give the same retailer.
+                              The COMPARISON is the finding, not either number.
+
+  competitor_scheme_type      percentage | free_goods | slab | none | unknown
+  competitor_scheme_value     text - "6%", "10+1 free", "5% above Rs 2L"
+                              "Better scheme" is unactionable. "6% against our
+                              5%" can be answered.
+
+  delivery_days_competitor    integer
+  delivery_days_prayag        integer
+                              Availability is usually about SPEED, not stock.
+                              Two days against seven is a logistics answer, not
+                              a pricing one, and the cheapest gap to close.
+
+  shelf_share                 mostly_prayag | even_split | mostly_competitor |
+                              only_competitor
+                              With monthly volume this turns a survey into a
+                              sized opportunity: "Rs 40,000 a month in CPVC,
+                              80% going elsewhere."
+
+MORE DETAIL - collapsed by default, expands on click
+  payment_terms_note          text - cash discount, part-payment, cheque cycle
+  competitor_visit_frequency  weekly | fortnightly | monthly | rarely | never
+                              Sometimes the answer is not price at all.
+  competitor_moq              text - a competitor accepting smaller orders is a
+                              real advantage for a small shop and costs nothing
+                              to match
+  buying_since                text or year - six months is recoverable, six
+                              years usually is not, and it changes whether to
+                              spend time there
+  would_switch                yes | no | maybe | unknown
+  switch_condition            free text - "what would it take?"
+                              The most useful sentence on the form and the one
+                              nobody thinks to ask.
+
+DO NOT ADD
+  - The competitor's own MRP. Retailers rarely know it accurately and a
+    guessed number becomes data. The net price he pays is the honest figure.
+  - Anything about the end consumer. Out of scope, deliberately.
+
+Every new field is nullable. Existing rows keep NULL and must render as
+"not recorded", never as zero.
+
+============================================================
+2 - SUBMISSIONS TAB
+============================================================
+Everything recorded, grouped by survey type in this order:
+  Existing customer + existing SKU · Existing customer + new SKU ·
+  New customer · Unclassified (pre-rebuild rows)
+
+Group header shows the count.
+
+Columns: submitted date · recorder (labelled SELF-DECLARED, it is not
+authenticated) · retailer, marked where it is a pending prospect · state ·
+district · segment · Prayag code · our MRP at the time · competitor brand ·
+competitor product · net price · unit · pack size · entry mode · the priority
+fields above · reasons · monthly volume · note
+
+MULTI-LINE SURVEYS
+Rows sharing a survey_id were one visit. Group them under one retailer heading
+rather than repeating the retailer per line.
+
+Filters: state head, state, segment, competitor brand, recorder, date range.
+Export to xlsx.
+
+A row stays editable by its recorder for 24 hours, then locks. Show the state.
+
+============================================================
+3 - ANALYTICS TAB
+============================================================
+Read-only, computed from stored survey rows only.
+
+THE SAMPLE-SIZE RULE - build this first, it governs every figure
+Every number carries n. Below n=5, label INDICATIVE ONLY and render it visibly
+weaker. Never show a median from one or two responses as a market price.
+
+There are 7 surveys in the system today. Almost everything will start below
+n=5 and the tab SHOULD look sparse until the field has done the work. Do not
+pad it.
+
+PANELS
+
+  1. PER ITEM CODE
+     our MRP · surveyed competitor net, median · n · spread (min-max) · gap %
+
+  2. BY COMPETITOR BRAND
+     surveys · segments · states · price range · median net
+     Which brands are actually met in the field, not which are in the
+     competition database.
+
+  3. WHY RETAILERS BUY ELSEWHERE
+     Reason counts, overall and by segment. The most actionable panel here -
+     if credit terms outrank price in a state, that is a different
+     conversation from a pricing one.
+
+  4. CREDIT COMPARISON            (new)
+     Median competitor credit days vs median Prayag credit days, by state and
+     by segment, with n. Plus the split of credit_given_by - distributor
+     versus competitor company.
+
+  5. SCHEME COMPARISON            (new)
+     Competitor scheme values recorded, grouped by type. Where the retailer's
+     distributor has a live Prayag scheme, show our Extra Earn beside it.
+     Do not compute a winner - show both and let a person read it.
+
+  6. DELIVERY SPEED               (new)
+     Distribution of competitor delivery days against ours, by state. Median
+     and range.
+
+  7. SIZED OPPORTUNITY            (new)
+     From shelf_share and monthly volume: estimated monthly value going to
+     competitors, by segment and by state. State the assumption on the panel -
+     it rests on a rough share band and a recalled volume, and both are
+     estimates.
+
+  8. COVERAGE GAPS
+     Segments and states below n=5, named. A salesperson should see where to
+     go next.
+
+  9. NEW SKU OPPORTUNITY
+     From survey_type = new_sku: Prayag codes being bought from a competitor
+     by customers who already buy from us, with the retailers named. A push
+     list from field evidence rather than peer inference.
+
+ 10. COMPETITOR PRICE VS OURS, WHERE BOTH EXIST
+     Show the competition-app figure labelled DERIVED - it is MRP less an
+     assumed 40%, not observed. The survey figure is observed. Never present
+     them as equivalent.
+
+============================================================
+DO NOT
+============================================================
+- Do not feed any survey figure into the MRP calculator or any pricing
+  recommendation. That remains separate and reviewed.
+- Do not compute a median, average or gap without n beside it.
+- Do not make any new field required.
+- Do not write to customer_master, mrp_history, margin_fact or sale_line.
+
+============================================================
+VERIFY - produced values, and a hash that resolves
+============================================================
+1. Submit a survey filling ONLY the required fields. Confirm it saves and the
+   new columns are NULL.
+2. Submit one with every new field populated. Print the stored row.
+3. Confirm existing rows render new fields as "not recorded", not zero.
+4. Submissions: print group counts by survey_type, summing to the total.
+5. Print one multi-line survey grouped under a single retailer heading.
+6. Confirm the 24-hour lock - print a locked and an editable row.
+7. Analytics: print the per-item table. EVERY row must show n, and any n < 5
+   must read INDICATIVE ONLY.
+8. Print the credit comparison panel and the reasons breakdown.
+9. Print the sized-opportunity panel and confirm the assumption is stated on
+   screen.
+10. Confirm the competition-app figure is labelled DERIVED wherever it sits
+    beside a survey price. Paste the text.
+11. Confirm no survey figure reaches the MRP calculator - print the grep.
+12. Confirm the three entry tabs still save as before.
+13. Push. Print git rev-parse HEAD and git rev-parse origin/main, then
+    git cat-file -t <hash> and git merge-base --is-ancestor <hash> main.

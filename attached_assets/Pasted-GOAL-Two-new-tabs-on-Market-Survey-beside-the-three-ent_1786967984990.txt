@@ -1,0 +1,120 @@
+GOAL
+Two new tabs on Market Survey, beside the three entry tabs (Existing SKU /
+New SKU / New Customer).
+
+============================================================
+TAB 4 - SUBMISSIONS
+============================================================
+Everything recorded so far, grouped by survey type in this order:
+
+  1. Existing customer, existing SKU   (survey_type = existing_sku)
+  2. Existing customer, new SKU        (survey_type = new_sku)
+  3. New customer                      (survey_type = new_customer)
+  4. Unclassified                      (pre-rebuild rows)
+
+Group header shows the count and the combined value where volume was recorded.
+
+Columns:
+  submitted   date, newest first within each group
+  recorder    the self-declared name - label it as self-declared, since it is
+              not authenticated
+  retailer    with a marker where it is a pending prospect not yet approved
+  state · district
+  segment · Prayag item code · our MRP at the time
+  competitor brand · competitor product
+  net price · unit · pack size
+  entry mode  net_direct or mrp_discount, so the working is visible
+  reasons · monthly volume · note
+
+MULTI-LINE SURVEYS
+Rows sharing a survey_id were entered in one visit. Group them visually under
+one retailer heading rather than repeating the retailer on every line - a
+salesperson recording four items at one shop should read as one visit.
+
+FILTERS
+State head, state, segment, competitor brand, recorder, date range. Export to
+xlsx.
+
+EDITING
+A row stays editable for 24 hours by the recorder, then locks. Show the lock
+state. Do not allow silent edits to older rows.
+
+============================================================
+TAB 5 - ANALYTICS
+============================================================
+Read-only. Everything computed from stored survey rows, never recomputed from
+sales data.
+
+THE SAMPLE-SIZE RULE - build this first, it governs every figure
+Every number on this tab carries n. Below n=5, label it INDICATIVE ONLY and
+render it visibly weaker - muted, not bold. Never show a median from one or
+two responses as though it were a market price.
+
+The tab already has 7 surveys in the system. Almost everything will start
+below n=5 and that is correct - the tab should look sparse until the field
+has done the work.
+
+WHAT IT SHOWS
+
+  1. PER PRAYAG ITEM CODE
+     our current MRP · surveyed competitor net, median · n · the spread
+     (min-max) · the implied gap as a percentage
+     Sort by the largest gap where n >= 5, then everything else.
+
+  2. BY COMPETITOR BRAND
+     surveys · segments they appear in · states · price range · median net
+     Which brands are actually being met in the field, not which are in the
+     competition database.
+
+  3. WHY RETAILERS BUY ELSEWHERE
+     Count each reason from the multi-select - price, availability, credit
+     terms, relationship, scheme, quality - overall and by segment.
+     This is the most actionable output on the page. If credit terms outrank
+     price in a state, that is a different conversation from a pricing one.
+
+  4. COVERAGE GAPS
+     Segments and states with fewer than 5 surveys. Name them.
+     A salesperson looking at this should be able to see where to go next.
+
+  5. NEW SKU OPPORTUNITY
+     From survey_type = new_sku: which Prayag codes are being bought from a
+     competitor by customers who already buy from us. Grouped by code, with
+     the retailers named.
+     This is a push list built from field evidence rather than peer inference.
+
+  6. COMPETITOR PRICE VS OURS, WHERE BOTH EXIST
+     Where a code has both a survey net price and a competition-app row, show
+     both. Label the competition-app figure DERIVED - it is MRP less an assumed
+     40%, not an observed price. The survey figure is observed. Never present
+     them as equivalent.
+
+============================================================
+DO NOT
+============================================================
+- Do not feed any survey price into MRP calculations, the MRP calculator, or
+  any pricing recommendation. That remains a separate, reviewed step.
+- Do not compute a median, an average or a gap without showing n beside it.
+- Do not change the three entry tabs.
+- Do not write to customer_master, mrp_history, margin_fact or sale_line.
+
+============================================================
+VERIFY - produced values, and a hash that resolves
+============================================================
+1. Submissions: print the group counts by survey_type, and confirm they sum to
+   the total survey row count.
+2. Print one multi-line survey as rendered - rows sharing a survey_id under one
+   retailer heading.
+3. Confirm a row older than 24 hours is locked and a recent one is editable.
+   Print both states.
+4. Analytics: print the per-item table. Confirm EVERY row shows n, and that
+   any row with n < 5 is labelled INDICATIVE ONLY.
+5. Print the reasons breakdown with counts.
+6. Print the coverage-gaps list.
+7. Confirm the competition-app figure is labelled DERIVED wherever it appears
+   beside a survey price. Paste the rendered text.
+8. Confirm no survey price reaches the MRP calculator - print the grep showing
+   market_survey is not read by it.
+9. Confirm the three entry tabs are unchanged - submit one survey and confirm
+   it saves as before.
+10. Push. Print git rev-parse HEAD and git rev-parse origin/main, then
+    git cat-file -t <hash> and git merge-base --is-ancestor <hash> main.

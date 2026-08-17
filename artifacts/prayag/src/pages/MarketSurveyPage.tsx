@@ -11,6 +11,8 @@
 
 import { useState, useRef, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import SubmissionsTab from "../components/market-survey/SubmissionsTab";
+import AnalyticsTab from "../components/market-survey/AnalyticsTab";
 
 const BASE = import.meta.env.BASE_URL;
 const API  = (path: string) => `${BASE}api/${path}`;
@@ -20,6 +22,8 @@ try { localStorage.removeItem("prayag_api_key"); } catch { /* clear stale key */
 // ── Types ──────────────────────────────────────────────────────────────────
 
 type SurveyType = "existing_sku" | "new_sku" | "new_customer";
+type MainTab = SurveyType | "submissions" | "analytics";
+function isEntryTab(t: MainTab): t is SurveyType { return t !== "submissions" && t !== "analytics"; }
 
 interface StateHead { key: string; name: string }
 interface HierarchyState { canon: string; parent: string; isSplit: boolean }
@@ -69,6 +73,13 @@ interface ItemLine {
   entryMode: "net_direct" | "mrp_discount";
   netPrice: string; mrp: string; discountPct: string;
   unit: string; packSize: string; note: string;
+  // Priority set (visible by default in the entry form)
+  creditDaysCompetitor: string; creditGivenBy: string; creditDaysPrayag: string;
+  competitorSchemeType: string; competitorSchemeValue: string;
+  deliveryDaysCompetitor: string; deliveryDaysPrayag: string; shelfShare: string;
+  // More detail (collapsed by default)
+  paymentTermsNote: string; competitorVisitFrequency: string;
+  competitorMoq: string; buyingSince: string; wouldSwitch: string; switchCondition: string;
 }
 
 interface RetailerState {
@@ -105,6 +116,13 @@ function makeEmptyLine(): ItemLine {
     competitorBrand: "", competitorProduct: "",
     entryMode: "net_direct", netPrice: "", mrp: "", discountPct: "",
     unit: "piece", packSize: "", note: "",
+    // Priority set
+    creditDaysCompetitor: "", creditGivenBy: "", creditDaysPrayag: "",
+    competitorSchemeType: "", competitorSchemeValue: "",
+    deliveryDaysCompetitor: "", deliveryDaysPrayag: "", shelfShare: "",
+    // More detail
+    paymentTermsNote: "", competitorVisitFrequency: "",
+    competitorMoq: "", buyingSince: "", wouldSwitch: "", switchCondition: "",
   };
 }
 
@@ -291,6 +309,7 @@ function ItemLineCard({ line, lineIndex, totalLines, segments, knownBrands, reta
   onChange: (p: Partial<ItemLine>) => void;
   onRemove: () => void;
 }) {
+  const [moreDetail, setMoreDetail] = useState(false);
   const itemsQ = useQuery<{ rows: ItemRow[]; total: number }>({
     queryKey: ["ms-items", line.segment],
     queryFn: () => fetch(API(`market-survey/items?segment=${encodeURIComponent(line.segment)}`)).then((r) => r.json()),
@@ -437,6 +456,133 @@ function ItemLineCard({ line, lineIndex, totalLines, segments, knownBrands, reta
         <Inp placeholder="Anything specific about this item" value={line.note}
           onChange={(e) => onChange({ note: e.target.value })} />
       </Field>
+
+      {/* ── Priority context (visible by default) ── */}
+      <div className="border-t pt-3 space-y-3">
+        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Credit terms</div>
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Competitor credit (days)">
+            <Inp type="number" min="0" step="1" placeholder="e.g. 30"
+              value={line.creditDaysCompetitor}
+              onChange={(e) => onChange({ creditDaysCompetitor: e.target.value })} />
+          </Field>
+          <Field label="Credit given by">
+            <Sel value={line.creditGivenBy} onChange={(e) => onChange({ creditGivenBy: e.target.value })}>
+              <option value="">— not recorded —</option>
+              <option value="distributor">Their distributor</option>
+              <option value="competitor_company">Competitor company</option>
+              <option value="unknown">Unknown</option>
+            </Sel>
+          </Field>
+          <Field label="Prayag credit (days)">
+            <Inp type="number" min="0" step="1" placeholder="e.g. 30"
+              value={line.creditDaysPrayag}
+              onChange={(e) => onChange({ creditDaysPrayag: e.target.value })} />
+          </Field>
+        </div>
+
+        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Competitor scheme</div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Scheme type">
+            <Sel value={line.competitorSchemeType} onChange={(e) => onChange({ competitorSchemeType: e.target.value })}>
+              <option value="">— not recorded —</option>
+              <option value="percentage">Percentage off</option>
+              <option value="free_goods">Free goods</option>
+              <option value="slab">Slab scheme</option>
+              <option value="none">No scheme</option>
+              <option value="unknown">Unknown</option>
+            </Sel>
+          </Field>
+          <Field label='Scheme value' hint='"6%", "10+1", "5% above ₹2L"'>
+            <Inp placeholder="Describe the offer"
+              value={line.competitorSchemeValue}
+              onChange={(e) => onChange({ competitorSchemeValue: e.target.value })} />
+          </Field>
+        </div>
+
+        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Delivery speed</div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Competitor delivery (days)">
+            <Inp type="number" min="0" step="1" placeholder="e.g. 2"
+              value={line.deliveryDaysCompetitor}
+              onChange={(e) => onChange({ deliveryDaysCompetitor: e.target.value })} />
+          </Field>
+          <Field label="Prayag delivery (days)">
+            <Inp type="number" min="0" step="1" placeholder="e.g. 7"
+              value={line.deliveryDaysPrayag}
+              onChange={(e) => onChange({ deliveryDaysPrayag: e.target.value })} />
+          </Field>
+        </div>
+
+        <Field label="Shelf share — how is this shelf split?">
+          <Sel value={line.shelfShare} onChange={(e) => onChange({ shelfShare: e.target.value })}>
+            <option value="">— not recorded —</option>
+            <option value="mostly_prayag">Mostly Prayag (&gt;50%)</option>
+            <option value="even_split">Even split (~50/50)</option>
+            <option value="mostly_competitor">Mostly competitor (&gt;50%)</option>
+            <option value="only_competitor">Only competitor (Prayag absent)</option>
+          </Sel>
+        </Field>
+      </div>
+
+      {/* ── More detail (collapsed by default) ── */}
+      {moreDetail ? (
+        <div className="border-t pt-3 space-y-3">
+          <button type="button"
+            className="text-xs text-muted-foreground underline"
+            onClick={() => setMoreDetail(false)}>
+            Hide detail ▲
+          </button>
+          <Field label="Payment terms note" hint="Cash discount, part-payment, cheque cycle…">
+            <Inp placeholder="Free text"
+              value={line.paymentTermsNote}
+              onChange={(e) => onChange({ paymentTermsNote: e.target.value })} />
+          </Field>
+          <Field label="Competitor visit frequency">
+            <Sel value={line.competitorVisitFrequency}
+              onChange={(e) => onChange({ competitorVisitFrequency: e.target.value })}>
+              <option value="">— not recorded —</option>
+              <option value="weekly">Weekly</option>
+              <option value="fortnightly">Fortnightly</option>
+              <option value="monthly">Monthly</option>
+              <option value="rarely">Rarely</option>
+              <option value="never">Never</option>
+            </Sel>
+          </Field>
+          <Field label="Competitor minimum order" hint="A smaller MOQ is a real advantage for a small shop">
+            <Inp placeholder='e.g. "1 box", "₹500"'
+              value={line.competitorMoq}
+              onChange={(e) => onChange({ competitorMoq: e.target.value })} />
+          </Field>
+          <Field label="Buying from competitor since" hint="Six months is recoverable; six years usually is not">
+            <Inp placeholder='e.g. "2019", "about 2 years"'
+              value={line.buyingSince}
+              onChange={(e) => onChange({ buyingSince: e.target.value })} />
+          </Field>
+          <Field label="Would switch to Prayag?">
+            <Sel value={line.wouldSwitch} onChange={(e) => onChange({ wouldSwitch: e.target.value })}>
+              <option value="">— not recorded —</option>
+              <option value="yes">Yes</option>
+              <option value="no">No</option>
+              <option value="maybe">Maybe</option>
+              <option value="unknown">Unknown</option>
+            </Sel>
+          </Field>
+          <Field label="What would it take to switch?" hint="The most useful field on the form">
+            <Inp placeholder="Free text — what condition would make them switch?"
+              value={line.switchCondition}
+              onChange={(e) => onChange({ switchCondition: e.target.value })} />
+          </Field>
+        </div>
+      ) : (
+        <div className="border-t pt-2">
+          <button type="button"
+            className="text-xs text-muted-foreground underline"
+            onClick={() => setMoreDetail(true)}>
+            More detail ▼ — payment terms, visit frequency, buying since, would switch…
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -611,13 +757,19 @@ export default function MarketSurveyPage() {
     try { localStorage.setItem(LS_RECORDER, name); } catch { /* */ }
   }, []);
 
-  const [surveyType, setSurveyType]   = useState<SurveyType>("existing_sku");
+  const [mainTab, setMainTab]         = useState<MainTab>("existing_sku");
+  const surveyType                    = isEntryTab(mainTab) ? mainTab : "existing_sku";
   const [retailer, setRetailer]       = useState<RetailerState>(EMPTY_RETAILER);
   const setR = useCallback((p: Partial<RetailerState>) => setRetailer((prev) => ({ ...prev, ...p })), []);
   const [lines, setLines]             = useState<ItemLine[]>(() => [makeEmptyLine()]);
   const [prospectSearch, setProspectSearch] = useState("");
   const [prospectNameDraft, setProspectNameDraft] = useState("");
   const [showFullProspectForm, setShowFullProspectForm] = useState(false);
+  const switchEntryTab = useCallback((type: SurveyType) => {
+    setMainTab(type);
+    setRetailer(EMPTY_RETAILER);
+    setProspectNameDraft(""); setProspectSearch(""); setShowFullProspectForm(false);
+  }, []);
 
   const [error,   setError]   = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -729,6 +881,22 @@ export default function MarketSurveyPage() {
           if (l.prayagItemCode) base.prayagItemCode = l.prayagItemCode;
           if (l.entryMode === "net_direct") { base.netPrice = parseFloat(l.netPrice); }
           else { base.mrp = parseFloat(l.mrp); base.discountPct = parseFloat(l.discountPct); }
+          // Priority set (omit if empty)
+          if (l.creditDaysCompetitor)   base.creditDaysCompetitor   = parseInt(l.creditDaysCompetitor, 10);
+          if (l.creditGivenBy)          base.creditGivenBy          = l.creditGivenBy;
+          if (l.creditDaysPrayag)       base.creditDaysPrayag       = parseInt(l.creditDaysPrayag, 10);
+          if (l.competitorSchemeType)   base.competitorSchemeType   = l.competitorSchemeType;
+          if (l.competitorSchemeValue)  base.competitorSchemeValue  = l.competitorSchemeValue;
+          if (l.deliveryDaysCompetitor) base.deliveryDaysCompetitor = parseInt(l.deliveryDaysCompetitor, 10);
+          if (l.deliveryDaysPrayag)     base.deliveryDaysPrayag     = parseInt(l.deliveryDaysPrayag, 10);
+          if (l.shelfShare)             base.shelfShare             = l.shelfShare;
+          // More detail (omit if empty)
+          if (l.paymentTermsNote)         base.paymentTermsNote         = l.paymentTermsNote;
+          if (l.competitorVisitFrequency) base.competitorVisitFrequency = l.competitorVisitFrequency;
+          if (l.competitorMoq)            base.competitorMoq            = l.competitorMoq;
+          if (l.buyingSince)              base.buyingSince              = l.buyingSince;
+          if (l.wouldSwitch)              base.wouldSwitch              = l.wouldSwitch;
+          if (l.switchCondition)          base.switchCondition          = l.switchCondition;
           return base;
         }),
       };
@@ -778,33 +946,33 @@ export default function MarketSurveyPage() {
         </p>
       </div>
 
+      {/* ── Top-level tabs (3 entry types + Submissions + Analytics) ── */}
+      <div className="flex gap-1 flex-wrap border-b pb-3">
+        {SURVEY_TABS.map(({ type, label }) => (
+          <button key={type} type="button"
+            className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+              mainTab === type ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted"
+            }`}
+            onClick={() => switchEntryTab(type)}>
+            {label}
+          </button>
+        ))}
+        <div className="flex-1 min-w-4" />
+        {(["submissions", "analytics"] as const).map((t) => (
+          <button key={t} type="button"
+            className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+              mainTab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted"
+            }`}
+            onClick={() => setMainTab(t)}>
+            {t === "submissions" ? "Submissions" : "Analytics"}
+          </button>
+        ))}
+      </div>
+
+      {isEntryTab(mainTab) && (<>
       <RecorderBanner name={recorderName} onChange={setRecorderName} />
 
       <form className="space-y-0" onSubmit={(e) => { e.preventDefault(); if (canSubmit) mutation.mutate(); }}>
-
-        {/* ── Survey type tabs ── */}
-        <div className="rounded-lg border bg-card p-4 space-y-3">
-          <div className="flex gap-1">
-            {SURVEY_TABS.map(({ type, label }) => (
-              <button
-                key={type} type="button"
-                className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
-                  surveyType === type ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                }`}
-                onClick={() => {
-                  setSurveyType(type);
-                  setRetailer(EMPTY_RETAILER);
-                  setProspectNameDraft(""); setProspectSearch(""); setShowFullProspectForm(false);
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {SURVEY_TABS.find((t) => t.type === surveyType)?.desc}
-          </p>
-        </div>
 
         {/* ── Section 1: Retailer ── */}
         <div className="rounded-lg border bg-card p-6 mt-4 space-y-4">
@@ -999,6 +1167,9 @@ export default function MarketSurveyPage() {
           {displayTab === "recent"  && <MyRecentTab recorderName={recorderName} />}
         </div>
       )}
+      </>)}
+      {mainTab === "submissions" && <SubmissionsTab recorderName={recorderName} />}
+      {mainTab === "analytics"   && <AnalyticsTab />}
     </div>
   );
 }
