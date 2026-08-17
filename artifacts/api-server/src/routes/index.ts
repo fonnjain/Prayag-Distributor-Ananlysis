@@ -111,4 +111,23 @@ router.use(alertsRouter);
 router.use(alertRoutingRouter);
 router.use(adminMasterImportRouter);
 
+// ── TEMPORARY: CSV download routes (remove after use) ──────────────────────
+import fs from "fs";
+import path from "path";
+// cwd is artifacts/api-server; files live two levels up at repo root
+const CSV_DIR = path.resolve(process.cwd(), "../../attached_assets");
+function serveCsv(filename: string) {
+  return (_req: import("express").Request, res: import("express").Response) => {
+    const file = path.join(CSV_DIR, filename);
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    const stream = fs.createReadStream(file);
+    stream.on("error", () => { if (!res.headersSent) res.status(404).send("File not found"); });
+    stream.pipe(res);
+  };
+}
+router.get("/download/assignment-queue",   serveCsv("assignment_queue_737.csv"));
+router.get("/download/assignment-deferred", serveCsv("assignment_deferred_2640.csv"));
+// ── END TEMPORARY ───────────────────────────────────────────────────────────
+
 export default router;
