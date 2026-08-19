@@ -216,6 +216,81 @@ describe("application authentication", () => {
     expect(client.query.mock.calls.some(([sql]) => String(sql) === "COMMIT")).toBe(false);
   });
 
+  it("revokes active sessions when an administrator is demoted to normal", async () => {
+    // Target starts as an active admin being demoted — this exercises the full
+    // rejectLastAdmin path: advisory lock → target row → activeAdminCount (2
+    // active admins, so demotion is permitted) → UPDATE + session revocation.
+    const updatedUser = {
+      id: 5,
+      email: "admin5@example.com",
+      display_name: "Admin Five",
+      role: "normal",
+      is_active: true,
+      created_at: new Date("2026-01-01T00:00:00Z"),
+      updated_at: new Date("2026-08-01T00:00:00Z"),
+      deactivated_at: null,
+      locked_until: null,
+    };
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [] }) // BEGIN
+        .mockResolvedValueOnce({ rows: [] }) // pg_advisory_xact_lock
+        .mockResolvedValueOnce({ rows: [{ id: 5, role: "admin", is_active: true }] }) // rejectLastAdmin SELECT (active admin)
+        .mockResolvedValueOnce({ rows: [{ id: 5 }, { id: 7 }] }) // activeAdminCount — 2 admins, demotion allowed
+        .mockResolvedValueOnce({ rows: [updatedUser] }) // UPDATE auth_users
+        .mockResolvedValueOnce({ rows: [], rowCount: 3 }) // UPDATE auth_sessions (revoke)
+        .mockResolvedValueOnce({ rows: [] }) // INSERT INTO auth_audit
+        .mockResolvedValueOnce({ rows: [] }), // COMMIT
+      release: vi.fn(),
+    };
+    mocks.connect.mockResolvedValueOnce(client);
+
+    const response = await request(authApp(adminIdentity))
+      .patch("/auth/users/5")
+      .send({ role: "normal" });
+
+    expect(response.status).toBe(200);
+    const sqlCalls = client.query.mock.calls.map(([sql]) => String(sql));
+    expect(
+      sqlCalls.some((sql) => sql.includes("UPDATE auth_sessions") && sql.includes("revoked_at")),
+    ).toBe(true);
+  });
+
+  it("does not revoke sessions when only displayName is updated without a role change", async () => {
+    const updatedUser = {
+      id: 5,
+      email: "person@example.com",
+      display_name: "New Name",
+      role: "normal",
+      is_active: true,
+      created_at: new Date("2026-01-01T00:00:00Z"),
+      updated_at: new Date("2026-08-01T00:00:00Z"),
+      deactivated_at: null,
+      locked_until: null,
+    };
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [] }) // BEGIN
+        .mockResolvedValueOnce({ rows: [] }) // pg_advisory_xact_lock
+        .mockResolvedValueOnce({ rows: [{ id: 5, role: "normal", is_active: true }] }) // rejectLastAdmin SELECT
+        .mockResolvedValueOnce({ rows: [updatedUser] }) // UPDATE auth_users
+        .mockResolvedValueOnce({ rows: [] }) // INSERT INTO auth_audit
+        .mockResolvedValueOnce({ rows: [] }), // COMMIT
+      release: vi.fn(),
+    };
+    mocks.connect.mockResolvedValueOnce(client);
+
+    const response = await request(authApp(adminIdentity))
+      .patch("/auth/users/5")
+      .send({ displayName: "New Name" });
+
+    expect(response.status).toBe(200);
+    const sqlCalls = client.query.mock.calls.map(([sql]) => String(sql));
+    expect(
+      sqlCalls.some((sql) => sql.includes("UPDATE auth_sessions") && sql.includes("revoked_at")),
+    ).toBe(false);
+  });
+
   it("prevents the last active administrator from being deactivated", async () => {
     const client = {
       query: vi.fn()
