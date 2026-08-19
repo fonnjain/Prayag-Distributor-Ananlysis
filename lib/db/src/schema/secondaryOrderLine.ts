@@ -5,6 +5,8 @@ import {
   timestamp,
   integer,
   boolean,
+  bigint,
+  jsonb,
   index,
   unique,
 } from "drizzle-orm/pg-core";
@@ -81,6 +83,32 @@ export const secondaryOrderLines = pgTable(
   ],
 );
 
+// One durable verification record per successful source-file upload. It is
+// deliberately separate from the order lines: re-uploading an identical file
+// still needs its own operator-visible lineage and comparison to the prior
+// upload, while line inserts remain idempotent.
+export const secondaryOrderUploads = pgTable(
+  "secondary_order_upload",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    sourceFile: text("source_file").notNull(),
+    sourceSha256: text("source_sha256").notNull(),
+    sourceBytes: bigint("source_bytes", { mode: "number" }).notNull(),
+    loadedAt: timestamp("loaded_at", { withTimezone: true }).defaultNow().notNull(),
+    verification: jsonb("verification").notNull(),
+    comparison: jsonb("comparison").notNull(),
+    assessment: text("assessment").notNull(),
+    materialReasons: text("material_reasons").array().notNull(),
+    // A healthy upload only establishes evidence for review. A separate,
+    // explicitly approved task is required before analytics may consume it.
+    analyticsStatus: text("analytics_status").notNull(),
+  },
+  (t) => [
+    index("sou_loaded_at_idx").on(t.loadedAt),
+    index("sou_source_sha_idx").on(t.sourceSha256),
+  ],
+);
+
 // ── Insert schema and types ───────────────────────────────────────────────────
 
 export const insertSecondaryOrderLineSchema = createInsertSchema(secondaryOrderLines).omit({
@@ -89,3 +117,4 @@ export const insertSecondaryOrderLineSchema = createInsertSchema(secondaryOrderL
 });
 export type InsertSecondaryOrderLine = z.infer<typeof insertSecondaryOrderLineSchema>;
 export type SecondaryOrderLine = typeof secondaryOrderLines.$inferSelect;
+export type SecondaryOrderUpload = typeof secondaryOrderUploads.$inferSelect;

@@ -72,7 +72,12 @@ async function main() {
   }
 
   console.log("\n── Load Result ──────────────────────────────────────────────────────");
+  console.log(`  Source file:     ${result.sourceFile}`);
+  console.log(`  SHA-256:         ${result.sourceSha256}`);
+  console.log(`  Source bytes:    ${result.sourceBytes.toLocaleString()}`);
   console.log(`  Rows scanned:    ${result.rowsScanned.toLocaleString()}`);
+  console.log(`  Rows parsed:     ${result.rowsParsed.toLocaleString()}`);
+  console.log(`  Rows rejected:   ${result.rowsRejected.toLocaleString()}`);
   console.log(`  Rows inserted:   ${result.rowsInserted.toLocaleString()}`);
   console.log(`  Rows skipped:    ${result.rowsSkipped.toLocaleString()} (idempotent)`);
   console.log(`  Collisions:      ${result.collisions.length}`);
@@ -100,6 +105,21 @@ async function main() {
     console.log("\n  DRY RUN — no rows written to DB");
     await pool.end();
     return;
+  }
+
+  if (result.uploadVerification) {
+    const q = result.uploadVerification;
+    console.log("\n── Per-upload stable-ID verification ───────────────────────────────");
+    console.log(`  Upload record:   #${q.uploadId}`);
+    console.log(`  Assessment:      ${q.assessment}`);
+    console.log(`  Baseline upload: ${q.comparison.baselineUploadId ?? "none (first successful upload)"}`);
+    console.log(`  RET# resolution: ${(q.metrics.retailerResolution.rate * 100).toFixed(2)}% (${q.metrics.retailerResolution.matched}/${q.metrics.retailerResolution.total})`);
+    console.log(`  DIST# resolution:${(q.metrics.distributorResolution.rate * 100).toFixed(2)}% (${q.metrics.distributorResolution.matched}/${q.metrics.distributorResolution.total})`);
+    console.log(`  Person resolution:${(q.metrics.personResolution.rate * 100).toFixed(2)}% (${q.metrics.personResolution.matched}/${q.metrics.personResolution.total})`);
+    console.log(`  Repeated-pair rate: ${(q.metrics.repeatedPairRate * 100).toFixed(2)}%`);
+    console.log(`  Changed-line collision rate: ${(q.metrics.changedLineCollisionRate * 100).toFixed(2)}%`);
+    for (const reason of q.materialReasons) console.log(`  MATERIAL: ${reason}`);
+    console.log(`  Analytics status: ${q.analyticsStatus} (no downstream analytics use)`);
   }
 
   // Step 3: Verify
@@ -186,17 +206,7 @@ async function main() {
     console.log(`  ← ${beforeCount.toLocaleString()} rows before / ${v.rowsLoaded.toLocaleString()} after`);
   }
 
-  // Re-run for idempotency confirmation
-  console.log("\n  Re-running load for idempotency verification...");
-  const result2 = await loadSecondaryOrders({ filePath });
-  const after2 = await pool.query<{ n: string }>(`SELECT COUNT(*) AS n FROM secondary_order_line`);
-  const afterCount2 = Number(after2.rows[0]?.n ?? 0);
-  console.log(`  After second load: ${afterCount2.toLocaleString()} rows — inserted=${result2.rowsInserted}, skipped=${result2.rowsSkipped}`);
-  if (afterCount2 === v.rowsLoaded && result2.rowsInserted === 0) {
-    console.log("  ✓ CONFIRMED IDEMPOTENT");
-  } else {
-    console.log(`  ✗ IDEMPOTENCY FAILED: count changed from ${v.rowsLoaded} to ${afterCount2}`);
-  }
+  console.log("  Per-upload lineage is recorded only once per operator load; use a later source report to establish the next comparison.");
 
   // Side-table check
   const sideTablesAfter = await pool.query<{ ssl: string; srl: string; sl: string }>(`

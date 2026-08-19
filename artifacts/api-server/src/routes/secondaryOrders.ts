@@ -22,6 +22,7 @@
  *
  *   GET  /api/admin/secondary-orders/load-status   — poll load job state
  *   POST /api/admin/secondary-orders/verify        — run verification report
+ *   GET  /api/admin/secondary-orders/uploads       — source lineage and cross-upload checks
  *
  * Public (read-only):
  *   GET  /api/secondary-orders                — paginated rows with filters
@@ -45,6 +46,7 @@ import {
   loadSecondaryOrders,
   verifySecondaryOrders,
   resolveSecondaryOrderXlsx,
+  getSecondaryOrderUploadHistory,
   type LoadResult,
 } from "../lib/secondaryOrders/loader.js";
 import { logger } from "../lib/logger.js";
@@ -249,11 +251,40 @@ router.get("/admin/secondary-orders/load-status", (req: Request, res: Response) 
 router.post("/admin/secondary-orders/verify", async (req: Request, res: Response) => {
   if (!requireAdmin(req, res)) return;
   try {
-    const result = await verifySecondaryOrders();
-    res.json({ ok: true, basis: "ORDER BOOKING", ...result });
+    const [result, uploadHistory] = await Promise.all([
+      verifySecondaryOrders(),
+      getSecondaryOrderUploadHistory(),
+    ]);
+    res.json({
+      ok: true,
+      basis: "ORDER BOOKING",
+      analyticsStatus: "ISOLATED_PENDING_RELIABILITY",
+      note: "This order-booking feed is not approved for secondary-sales, SKU, margin, or alert analytics.",
+      ...result,
+      uploadHistory,
+    });
   } catch (err) {
     req.log.error({ err }, "[secondaryOrders] verify error");
     res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
+  }
+});
+
+// ── GET /api/admin/secondary-orders/uploads ──────────────────────────────────
+router.get("/admin/secondary-orders/uploads", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) return;
+  const requestedLimit = Number(req.query.limit ?? 25);
+  const limit = Number.isFinite(requestedLimit) ? requestedLimit : 25;
+  try {
+    const uploads = await getSecondaryOrderUploadHistory(limit);
+    res.json({
+      basis: "ORDER BOOKING",
+      analyticsStatus: "ISOLATED_PENDING_RELIABILITY",
+      note: "Review upload assessments before any separately approved analytics integration.",
+      uploads,
+    });
+  } catch (err) {
+    req.log.error({ err }, "[secondaryOrders] upload history error");
+    res.status(500).json({ error: "Failed to load secondary-order upload history" });
   }
 });
 

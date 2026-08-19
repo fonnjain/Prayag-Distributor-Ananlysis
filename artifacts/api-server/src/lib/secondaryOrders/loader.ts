@@ -21,6 +21,12 @@ import { pool } from "@workspace/db";
 import { canonGroupFromMap } from "../sku/catalogue.js";
 import { normSecKey } from "../mgmt/names.js";
 import { logger } from "../logger.js";
+import {
+  evaluateSecondaryOrderUpload,
+  type StableIdResolution,
+  type SecondaryOrderUploadMetrics,
+  type UploadQualityEvaluation,
+} from "./uploadQuality.js";
 
 // ── Expected column headers (exact, in column order) ─────────────────────────
 const EXPECTED_HEADERS = [
@@ -139,14 +145,11 @@ function parseDiscountPct(v: unknown): number | null {
 // Null is acceptable; unresolved names are reported in verification.
 
 type PersonRow = { person_id: number; name: string };
-let _personCache: PersonRow[] | null = null;
 
 async function getPersons(): Promise<PersonRow[]> {
-  if (_personCache) return _personCache;
   const { rows } = await pool.query<PersonRow>(
     "SELECT person_id, name FROM person ORDER BY person_id",
   );
-  _personCache = rows;
   return rows;
 }
 
@@ -176,6 +179,8 @@ export type SourcePairCollision = {
 
 export type LoadResult = {
   rowsScanned: number;
+  rowsParsed: number;
+  rowsRejected: number;
   rowsInserted: number;
   rowsSkipped: number;        // same values, idempotent
   collisions: CollisionDetail[];
@@ -190,7 +195,132 @@ export type LoadResult = {
   unresolvedSalesUsers: string[];
   unmappedCategories: string[];
   sourceFile: string;
+  sourceSha256: string;
+  sourceBytes: number;
+  uploadVerification?: SecondaryOrderUploadVerification;
 };
+
+export type SecondaryOrderUploadVerification = {
+  uploadId: number;
+  sourceFile: string;
+  sourceSha256: string;
+  sourceBytes: number;
+  loadedAt: string;
+  metrics: SecondaryOrderUploadMetrics;
+} & UploadQualityEvaluation;
+
+type StoredUploadRow = {
+  id: number;
+  source_file: string;
+  source_sha256: string;
+  source_bytes: string;
+  loaded_at: string;
+  verification: SecondaryOrderUploadMetrics | string;
+  comparison: UploadQualityEvaluation["comparison"] | string;
+  assessment: SecondaryOrderUploadVerification["assessment"];
+  material_reasons: string[] | null;
+  analytics_status: SecondaryOrderUploadVerification["analyticsStatus"];
+};
+type UploadBaselineRow = {
+  id: number;
+  verification: SecondaryOrderUploadMetrics | string;
+};
+type InsertedUploadRow = {
+  id: number;
+  loaded_at: string;
+};
+type PoolConnectCallback = NonNullable<Parameters<typeof pool.connect>[0]>;
+type SecondaryOrderDbClient = NonNullable<Parameters<PoolConnectCallback>[1]>;
+
+function rate(matched: number, total: number): number {
+  return total === 0 ? 0 : matched / total;
+}
+
+function parseJsonColumn<T>(value: T | string): T {
+  return typeof value === "string" ? JSON.parse(value) as T : value;
+}
+
+async function sourceLineage(filePath: string): Promise<{ sourceSha256: string; sourceBytes: number }> {
+  const source = await fs.promises.readFile(filePath);
+  return {
+    sourceSha256: createHash("sha256").update(source).digest("hex"),
+    sourceBytes: source.byteLength,
+  };
+}
+
+async function resolveStableIdCoverage(ids: Iterable<string>): Promise<StableIdResolution> {
+  const distinct = Array.from(new Set(ids));
+  if (distinct.length === 0) return { matched: 0, total: 0, rate: 0 };
+  const result = await pool.query<{ id: string }>(
+    `SELECT id FROM customer_master WHERE id = ANY($1::text[])`,
+    [distinct],
+  );
+  const matched = result.rows.length;
+  return { matched, total: distinct.length, rate: rate(matched, distinct.length) };
+}
+
+async function recordUploadVerification(
+  client: SecondaryOrderDbClient,
+  source: { sourceFile: string; sourceSha256: string; sourceBytes: number },
+  metrics: SecondaryOrderUploadMetrics,
+): Promise<SecondaryOrderUploadVerification> {
+  const baselineResult = await client.query<UploadBaselineRow>(
+    `SELECT id, verification
+     FROM secondary_order_upload
+     WHERE assessment <> 'MATERIAL_REGRESSION'
+     ORDER BY id DESC
+     LIMIT 1`,
+  );
+  const baseline = baselineResult.rows[0];
+  const evaluation = evaluateSecondaryOrderUpload(
+    metrics,
+    baseline
+      ? { uploadId: baseline.id, metrics: parseJsonColumn<SecondaryOrderUploadMetrics>(baseline.verification) }
+      : null,
+  );
+  const inserted = await client.query<InsertedUploadRow>(
+    `INSERT INTO secondary_order_upload
+      (source_file, source_sha256, source_bytes, verification, comparison, assessment, material_reasons, analytics_status)
+     VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7::text[], $8)
+     RETURNING id, loaded_at::text`,
+    [
+      source.sourceFile,
+      source.sourceSha256,
+      source.sourceBytes,
+      JSON.stringify(metrics),
+      JSON.stringify(evaluation.comparison),
+      evaluation.assessment,
+      evaluation.materialReasons,
+      evaluation.analyticsStatus,
+    ],
+  );
+  const row = inserted.rows[0];
+  return { uploadId: row.id, loadedAt: row.loaded_at, ...source, metrics, ...evaluation };
+}
+
+export async function getSecondaryOrderUploadHistory(limit = 25): Promise<SecondaryOrderUploadVerification[]> {
+  const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 100);
+  const result = await pool.query<StoredUploadRow>(
+    `SELECT id, source_file, source_sha256, source_bytes, loaded_at::text, verification, comparison,
+            assessment, material_reasons, analytics_status
+     FROM secondary_order_upload
+     ORDER BY id DESC
+     LIMIT $1`,
+    [safeLimit],
+  );
+  return result.rows.map((row) => ({
+    uploadId: row.id,
+    sourceFile: row.source_file,
+    sourceSha256: row.source_sha256,
+    sourceBytes: Number(row.source_bytes),
+    loadedAt: row.loaded_at,
+    metrics: parseJsonColumn<SecondaryOrderUploadMetrics>(row.verification),
+    assessment: row.assessment,
+    materialReasons: row.material_reasons ?? [],
+    comparison: parseJsonColumn<UploadQualityEvaluation["comparison"]>(row.comparison),
+    analyticsStatus: row.analytics_status,
+  }));
+}
 
 // ── XLSX file resolution ──────────────────────────────────────────────────────
 
@@ -235,6 +365,7 @@ export async function loadSecondaryOrders(
   const filePath = resolveSecondaryOrderXlsx(opts.filePath);
   const sourceFile = path.basename(filePath);
   const dryRun = opts.dryRun ?? false;
+  const { sourceSha256, sourceBytes } = await sourceLineage(filePath);
 
   const workbook = new ExcelJS.stream.xlsx.WorkbookReader(filePath, {
     entries: "emit",
@@ -278,6 +409,7 @@ export async function loadSecondaryOrders(
   const rows: RawRow[] = [];
   let colIdx: ColIndex | null = null;
   let rowsScanned = 0;
+  let rowsRejected = 0;
   const unmappedCategories = new Set<string>();
   const unresolvedRawUsers = new Set<string>();
 
@@ -316,6 +448,7 @@ export async function loadSecondaryOrders(
       const rawDatetime = parseOrderDatetime(values[colIdx.date]);
 
       if (!orderId || !productCode || !dealerId || !cpCode || !rawDatetime) {
+        rowsRejected++;
         continue; // skip malformed rows
       }
 
@@ -374,6 +507,7 @@ export async function loadSecondaryOrders(
   }
 
   if (!colIdx) throw new Error("No header row found in secondary order report XLSX");
+  if (rows.length === 0) throw new Error("Secondary order report contains no valid data rows");
 
   // Assign source-position occurrences and make repeated pairs visible. The
   // line hash prevents an exact repeated export row from becoming invisible.
@@ -433,10 +567,19 @@ export async function loadSecondaryOrders(
     if (id === null) unresolvedSalesUsers.push(name);
   }
 
+  const [retailerResolution, distributorResolution] = await Promise.all([
+    resolveStableIdCoverage(rows.map((row) => row.dealerId)),
+    resolveStableIdCoverage(rows.map((row) => row.cpCode)),
+  ]);
+  const personTotal = nameToPersonId.size;
+  const personMatched = Array.from(nameToPersonId.values()).filter((id) => id != null).length;
+
   if (dryRun) {
     logger.info({ rowsScanned, rowsParsed: rows.length, dryRun: true }, "[secondaryOrders] dry run complete");
     return {
       rowsScanned,
+      rowsParsed: rows.length,
+      rowsRejected,
       rowsInserted: 0,
       rowsSkipped: 0,
       collisions: [],
@@ -446,6 +589,8 @@ export async function loadSecondaryOrders(
       unresolvedSalesUsers,
       unmappedCategories: Array.from(unmappedCategories),
       sourceFile,
+      sourceSha256,
+      sourceBytes,
     };
   }
 
@@ -456,16 +601,18 @@ export async function loadSecondaryOrders(
   let rowsInserted = 0;
   let rowsSkipped = 0;
   const collisions: CollisionDetail[] = [];
+  const changedLineIdentityKeys = new Set<string>();
 
-  const BATCH_SIZE = 500;
+  // A source file and its ledger entry form one unit of evidence. The advisory
+  // lock serializes baseline selection; the single transaction guarantees a
+  // failed write never leaves lines that lack source-file verification.
+  let uploadVerification: SecondaryOrderUploadVerification;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext('secondary_order_upload'))`);
 
-  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-    const batch = rows.slice(i, i + BATCH_SIZE);
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-
-      for (const r of batch) {
+    for (const r of rows) {
         const salesUserId = r.salesUserName ? (nameToPersonId.get(r.salesUserName) ?? null) : null;
 
         const result = await client.query<{ id: number }>(
@@ -528,6 +675,7 @@ export async function loadSecondaryOrders(
                 : (storedNum !== incomingNum && !(stored == null && incoming == null));
               if (different) {
                 hasDiff = true;
+                changedLineIdentityKeys.add(`${r.orderId}\u0000${r.productCode}\u0000${r.occurrence}`);
                 collisions.push({ orderId: r.orderId, productCode: r.productCode, field, stored, incoming });
               }
             }
@@ -540,30 +688,65 @@ export async function loadSecondaryOrders(
                 incoming: r.contentHash,
               });
               hasDiff = true;
+              changedLineIdentityKeys.add(`${r.orderId}\u0000${r.productCode}\u0000${r.occurrence}`);
             }
             if (!hasDiff) rowsSkipped++;
           } else {
             rowsSkipped++;
           }
         }
-      }
-
-      await client.query("COMMIT");
-    } catch (err) {
-      await client.query("ROLLBACK");
-      client.release();
-      throw err;
     }
+
+    const repeatedPairRows = sourcePairCollisions.reduce((total, pair) => total + pair.occurrences.length, 0);
+    const metrics: SecondaryOrderUploadMetrics = {
+      rowsScanned,
+      rowsParsed: rows.length,
+      rowsRejected,
+      retailerResolution,
+      distributorResolution,
+      personResolution: {
+        matched: personMatched,
+        total: personTotal,
+        rate: rate(personMatched, personTotal),
+      },
+      repeatedPairCount: sourcePairCollisions.length,
+      repeatedPairRows,
+      repeatedPairRate: rate(repeatedPairRows, rows.length),
+      exactDuplicateRows: exactDuplicateExportRows.length,
+      exactDuplicateRate: rate(exactDuplicateExportRows.length, rows.length),
+      changedLineCollisionCount: changedLineIdentityKeys.size,
+      changedLineCollisionRate: rate(changedLineIdentityKeys.size, rows.length),
+    };
+    uploadVerification = await recordUploadVerification(
+      client,
+      { sourceFile, sourceSha256, sourceBytes },
+      metrics,
+    );
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
     client.release();
   }
 
   logger.info(
-    { rowsScanned, rowsInserted, rowsSkipped, collisions: collisions.length, sourceFile },
+    {
+      rowsScanned,
+      rowsParsed: rows.length,
+      rowsInserted,
+      rowsSkipped,
+      collisions: collisions.length,
+      assessment: uploadVerification.assessment,
+      sourceFile,
+    },
     "[secondaryOrders] load complete",
   );
 
   return {
     rowsScanned,
+    rowsParsed: rows.length,
+    rowsRejected,
     rowsInserted,
     rowsSkipped,
     collisions,
@@ -573,6 +756,9 @@ export async function loadSecondaryOrders(
     unresolvedSalesUsers,
     unmappedCategories: Array.from(unmappedCategories),
     sourceFile,
+    sourceSha256,
+    sourceBytes,
+    uploadVerification,
   };
 }
 
