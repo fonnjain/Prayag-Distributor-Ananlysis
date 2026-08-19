@@ -234,6 +234,62 @@ describe("application authentication", () => {
     expect(client.query.mock.calls.some(([sql]) => String(sql).includes("SET is_active = false"))).toBe(false);
   });
 
+  it("writes a last_admin_blocked audit event via the pool when a deactivation is rejected as LAST_ADMIN", async () => {
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [] }) // BEGIN
+        .mockResolvedValueOnce({ rows: [] }) // advisory lock
+        .mockResolvedValueOnce({ rows: [{ id: 7, role: "admin", is_active: true }] })
+        .mockResolvedValueOnce({ rows: [{ id: 7 }] })
+        .mockResolvedValueOnce({ rows: [] }), // ROLLBACK
+      release: vi.fn(),
+    };
+    mocks.connect.mockResolvedValueOnce(client);
+    // pool.query is used by recordAudit (outside the rolled-back transaction)
+    mocks.query.mockResolvedValueOnce({ rows: [] });
+
+    const response = await request(authApp(adminIdentity)).post("/auth/users/7/deactivate");
+    expect(response.status).toBe(409);
+
+    // The post-rollback audit write must go through the pool (mocks.query), not
+    // the rolled-back client, so it is never lost if the transaction aborted.
+    const auditCall = mocks.query.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO auth_audit"),
+    );
+    expect(auditCall).toBeDefined();
+    const auditParams = auditCall![1] as unknown[];
+    expect(auditParams[0]).toBe("last_admin_blocked");
+    expect(JSON.parse(String(auditParams[3]))).toMatchObject({ action: "deactivate" });
+  });
+
+  it("writes a last_admin_blocked audit event via the pool when a demotion is rejected as LAST_ADMIN", async () => {
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [] }) // BEGIN
+        .mockResolvedValueOnce({ rows: [] }) // advisory lock
+        .mockResolvedValueOnce({ rows: [{ id: 7, role: "admin", is_active: true }] })
+        .mockResolvedValueOnce({ rows: [{ id: 7 }] })
+        .mockResolvedValueOnce({ rows: [] }), // ROLLBACK
+      release: vi.fn(),
+    };
+    mocks.connect.mockResolvedValueOnce(client);
+    mocks.query.mockResolvedValueOnce({ rows: [] });
+
+    const response = await request(authApp(adminIdentity))
+      .patch("/auth/users/7")
+      .send({ role: "normal" });
+    expect(response.status).toBe(409);
+    expect(response.body.error).toContain("last active administrator");
+
+    const auditCall = mocks.query.mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO auth_audit"),
+    );
+    expect(auditCall).toBeDefined();
+    const auditParams = auditCall![1] as unknown[];
+    expect(auditParams[0]).toBe("last_admin_blocked");
+    expect(JSON.parse(String(auditParams[3]))).toMatchObject({ action: "demote" });
+  });
+
   // ── Concurrent last-admin protection tests ───────────────────────────────────
   //
   // The two tests below use a stateful shared-memory mock to mirror the

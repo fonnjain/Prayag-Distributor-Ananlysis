@@ -336,7 +336,10 @@ router.patch("/auth/users/:id", requireAdmin, async (req, res) => {
     res.json({ user: publicUserFromRow(rows[0]) });
   } catch (err: any) {
     await client.query("ROLLBACK").catch(() => undefined);
-    if (err?.message === "LAST_ADMIN") return void res.status(409).json({ error: "The last active administrator cannot be demoted" });
+    if (err?.message === "LAST_ADMIN") {
+      await recordAudit("last_admin_blocked", req, req.authUser!.id, id, { action: "demote" });
+      return void res.status(409).json({ error: "The last active administrator cannot be demoted" });
+    }
     req.log.error({ err }, "user update failed");
     res.status(500).json({ error: "Unable to update user" });
   } finally {
@@ -370,7 +373,10 @@ router.post("/auth/users/:id/deactivate", requireAdmin, async (req, res) => {
     res.json({ user: publicUserFromRow(rows[0]) });
   } catch (err: any) {
     await client.query("ROLLBACK").catch(() => undefined);
-    if (err?.message === "LAST_ADMIN") return void res.status(409).json({ error: "The last active administrator cannot be deactivated" });
+    if (err?.message === "LAST_ADMIN") {
+      await recordAudit("last_admin_blocked", req, req.authUser!.id, id, { action: "deactivate" });
+      return void res.status(409).json({ error: "The last active administrator cannot be deactivated" });
+    }
     req.log.error({ err }, "user deactivation failed");
     res.status(500).json({ error: "Unable to deactivate user" });
   } finally {
