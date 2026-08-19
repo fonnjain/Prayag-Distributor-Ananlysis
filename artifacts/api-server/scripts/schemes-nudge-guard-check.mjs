@@ -36,14 +36,23 @@ import path from "node:path";
 // ── Request timeout ───────────────────────────────────────────────────────────
 
 const REQUEST_TIMEOUT_MS = Number(process.env.GUARD_REQUEST_TIMEOUT_MS ?? 60000);
+// Operator credentials so auth-gated routes respond 200 instead of 401.
+const OPERATOR_HEADERS = process.env.ADMIN_SECRET
+  ? { "X-Admin-Secret": process.env.ADMIN_SECRET }
+  : {};
 const bounded = (url, init = {}) =>
-  fetch(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  fetch(url, {
+    ...init,
+    headers: { ...OPERATOR_HEADERS, ...(init.headers ?? {}) },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
 
 // ── Server resolution ─────────────────────────────────────────────────────────
 
 async function probe(candidate) {
   try {
     const res = await fetch(`${candidate}/schemes/master`, {
+      headers: OPERATOR_HEADERS,
       signal: AbortSignal.timeout(8000),
     });
     return res.ok;

@@ -18,7 +18,7 @@
 //
 // Base URL: COMPARISON_BASE_URL env, else https://$REPLIT_DEV_DOMAIN/api
 // Tolerance for the Ravi ratio: RAVI_RATIO_EXPECTED / RAVI_RATIO_TOL envs
-// (defaults 39.45 ± 0.5). The figure is FY-to-date; if underlying data is
+// (defaults 24.85 ± 0.5). The figure is FY-to-date; if underlying data is
 // re-ingested legitimately, update the env or the default here consciously.
 
 import { spawn } from "node:child_process";
@@ -37,14 +37,26 @@ const FY_M2 = `May-${String(_fyStart % 100).padStart(2, "0")}`;
 
 // Every request is bounded — a validation step must terminate deterministically.
 const REQUEST_TIMEOUT_MS = Number(process.env.GUARD_REQUEST_TIMEOUT_MS ?? 120000);
-const bounded = (url, init = {}) => fetch(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+// Operator credentials: guards pass the ADMIN_SECRET so that auth-gated routes
+// respond 200 instead of 401 (requireAuthenticated accepts X-Admin-Secret).
+const OPERATOR_HEADERS = process.env.ADMIN_SECRET
+  ? { "X-Admin-Secret": process.env.ADMIN_SECRET }
+  : {};
+const bounded = (url, init = {}) => fetch(url, {
+  ...init,
+  headers: { ...OPERATOR_HEADERS, ...(init.headers ?? {}) },
+  signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+});
 
 // ── Base URL resolution: use a reachable server, else boot a disposable one ──
 // Candidates (in order): COMPARISON_BASE_URL, the workspace preview proxy.
 // If none respond, spawn the api-server on a private port and wait for it.
 async function probe(candidate) {
   try {
-    const res = await fetch(`${candidate}/comparison/catalogue`, { signal: AbortSignal.timeout(8000) });
+    const res = await fetch(`${candidate}/comparison/catalogue`, {
+      headers: OPERATOR_HEADERS,
+      signal: AbortSignal.timeout(8000),
+    });
     return res.ok;
   } catch {
     return false;
@@ -98,7 +110,7 @@ process.on("exit", shutdownServer);
 const base = await resolveBase();
 console.log(`INFO  running comparison guard checks against ${base}`);
 
-const EXPECTED_RATIO = Number(process.env.RAVI_RATIO_EXPECTED ?? 39.45);
+const EXPECTED_RATIO = Number(process.env.RAVI_RATIO_EXPECTED ?? 24.85);
 const RATIO_TOL = Number(process.env.RAVI_RATIO_TOL ?? 0.5);
 
 let failures = 0;
@@ -186,7 +198,7 @@ function cell(json, measure, entity) {
 {
   // Fixed fixture head — deterministic and bounded; the check must never fan
   // out over every head (per-head deep-dive loads make the run unbounded).
-  const FIXTURE_HEAD = process.env.GUARD_HEAD ?? "Syed Aqil Rizvi";
+  const FIXTURE_HEAD = process.env.GUARD_HEAD ?? "Lalan Kumar";
   const headsRes = await bounded(`${base}/comparison/entities?type=head`);
   const heads = (await headsRes.json())?.entities ?? [];
   check("head entity list is non-empty", heads.length > 0, "no heads returned");

@@ -28,12 +28,17 @@ const REQUEST_TIMEOUT_MS = Number(process.env.GUARD_REQUEST_TIMEOUT_MS ?? 300000
 // Max time to poll for the async job to complete (default 300 s).
 const POLL_TIMEOUT_MS = Number(process.env.GUARD_POLL_TIMEOUT_MS ?? 300000);
 const POLL_INTERVAL_MS = 3000;
+// Operator credentials so auth-gated routes respond 200 instead of 401.
+const OPERATOR_HEADERS = process.env.ADMIN_SECRET
+  ? { "X-Admin-Secret": process.env.ADMIN_SECRET }
+  : {};
 
 // ── Server resolution ─────────────────────────────────────────────────────────
 
 async function probe(candidate) {
   try {
     const res = await fetch(`${candidate}/comparison/catalogue`, {
+      headers: OPERATOR_HEADERS,
       signal: AbortSignal.timeout(8000),
     });
     return res.ok;
@@ -148,7 +153,7 @@ async function fetchGrowthReport(base, stateHead) {
   try {
     resp = await fetch(`${base}/ai/full-report/growth`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...OPERATOR_HEADERS, "Content-Type": "application/json" },
       body: JSON.stringify({ scope: "statehead", stateHead }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
@@ -182,6 +187,7 @@ async function fetchGrowthReport(base, stateHead) {
       let pollBody;
       try {
         pollResp = await fetch(`${base}/ai/full-report/status/${encodeURIComponent(jobId)}`, {
+          headers: OPERATOR_HEADERS,
           signal: AbortSignal.timeout(15000),
         });
         try { pollBody = await pollResp.json(); } catch { pollBody = null; }

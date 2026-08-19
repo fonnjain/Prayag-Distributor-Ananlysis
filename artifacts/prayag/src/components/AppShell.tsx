@@ -10,7 +10,7 @@
 //
 // The sidebar is always visible on desktop.  On mobile a hamburger opens it as
 // a slide-over.  Groups are collapsible via a chevron on the group header.
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, type ReactNode, useMemo } from "react";
 import { useLocation } from "wouter";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
@@ -21,9 +21,10 @@ import {
   LayoutDashboard, Users, ShoppingBag,
   AlertTriangle, Bell, UserMinus, UserCheck, Settings, Store, BookOpen, Network,
   ChevronDown, ChevronRight, Menu, X, Sun, Moon, Braces, Key, Layers, IndianRupee,
-  Globe, FileSearch, ShoppingCart,
+  Globe, FileSearch, ShoppingCart, LogOut, UserCircle
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useAuth } from "@/data/auth-context";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -163,7 +164,7 @@ const NAV: NavGroup[] = [
 ];
 
 // Determine which group & item is active from the current URL.
-function activeIds(location: string): { groupId: string; itemId: string } {
+function activeIds(location: string, nav: NavGroup[]): { groupId: string; itemId: string } {
   // Alerts group
   if (location === "/alerts" || location.startsWith("/alerts?")) {
     return { groupId: "alerts", itemId: "red-alerts" };
@@ -179,7 +180,7 @@ function activeIds(location: string): { groupId: string; itemId: string } {
   }
   if (location.startsWith("/sales")) {
     const slug = location.replace(/^\/sales\/?/, "").split("?")[0];
-    const salesGrp = NAV.find((g) => g.id === "sales")!;
+    const salesGrp = nav.find((g) => g.id === "sales")!;
     const item = salesGrp.items.find((i) => i.id === slug) ?? salesGrp.items[0];
     return { groupId: "sales", itemId: item.id };
   }
@@ -200,25 +201,25 @@ function activeIds(location: string): { groupId: string; itemId: string } {
   }
   if (location.startsWith("/customers")) {
     const slug = location.replace(/^\/customers\/?/, "").split("?")[0];
-    const grp = NAV.find((g) => g.id === "customers")!;
+    const grp = nav.find((g) => g.id === "customers")!;
     const item = grp.items.find((i) => i.id === slug) ?? grp.items[0];
     return { groupId: "customers", itemId: item!.id };
   }
   if (location.startsWith("/org")) {
-    const grp = NAV.find((g) => g.id === "org")!;
+    const grp = nav.find((g) => g.id === "org")!;
     const slug = location.replace(/^\/org\//, "").split("?")[0];
     const item = grp.items.find((i) => i.path === `/org/${slug}`) ?? grp.items[0];
     return { groupId: "org", itemId: item!.id };
   }
   if (location.startsWith("/dev")) {
     const slug = location.replace(/^\/dev\/?/, "").split("?")[0] || "api-portal";
-    const grp = NAV.find((g) => g.id === "developer")!;
+    const grp = nav.find((g) => g.id === "developer")!;
     const item = grp.items.find((i) => i.id === slug) ?? grp.items[0];
     return { groupId: "developer", itemId: item!.id };
   }
   // Dashboard
   const slug = location === "/" ? "overview" : location.replace(/^\//, "").split("?")[0];
-  const item = NAV[0].items.find((i) => i.id === slug) ?? NAV[0].items[0];
+  const item = nav[0].items.find((i) => i.id === slug) ?? nav[0].items[0];
   return { groupId: "dashboard", itemId: item.id };
 }
 
@@ -229,8 +230,24 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const { theme, setTheme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const alertCount = useAlertCount();
+  const { user, logout } = useAuth();
 
-  const { groupId: activeGroupId, itemId: activeItemId } = activeIds(location);
+  const navGroups = useMemo(() => {
+    return NAV.map(group => {
+      if (group.id === "org" && user?.role === 'admin') {
+        return {
+          ...group,
+          items: [
+            ...group.items,
+            { id: "org-users", label: "User Management", path: "/org/users", icon: Users },
+          ]
+        };
+      }
+      return group;
+    });
+  }, [user?.role]);
+
+  const { groupId: activeGroupId, itemId: activeItemId } = activeIds(location, navGroups);
 
   // Start with the active group expanded; others collapsed.
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
@@ -269,7 +286,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
       {/* Nav groups */}
       <nav className="flex-1 overflow-y-auto py-2">
-        {NAV.map((group) => {
+        {navGroups.map((group) => {
           const isOpen = openGroups[group.id] ?? false;
           const GroupIcon = group.icon;
           return (
@@ -330,11 +347,29 @@ export default function AppShell({ children }: { children: ReactNode }) {
       </nav>
 
       {/* Bottom toolbar */}
-      <div className="border-t px-3 py-2.5">
+      <div className="border-t px-3 py-2.5 space-y-2">
+        {user && (
+          <div className="flex items-center justify-between px-2 py-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <UserCircle className="h-6 w-6 text-muted-foreground flex-shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium truncate leading-none">{user.displayName}</p>
+                <p className="text-[10px] text-muted-foreground truncate uppercase">{user.role}</p>
+              </div>
+            </div>
+            <button
+              onClick={logout}
+              title="Sign out"
+              className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          </div>
+        )}
         <button
           type="button"
           onClick={() => setTheme(isDark ? "light" : "dark")}
-          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
         >
           {isDark ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
           {isDark ? "Light mode" : "Dark mode"}
@@ -371,7 +406,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
             <Menu className="h-5 w-5" />
           </button>
           <span className="font-semibold text-sm">
-            {NAV.flatMap((g) => g.items).find((i) => i.id === activeItemId)?.label ?? "Prayag India"}
+            {navGroups.flatMap((g) => g.items).find((i) => i.id === activeItemId)?.label ?? "Prayag India"}
           </span>
           {mobileOpen && (
             <button

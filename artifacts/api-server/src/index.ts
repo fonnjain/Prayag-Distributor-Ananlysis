@@ -42,6 +42,7 @@ import { loadAndPersistStateDashboard } from "./lib/secondary/stateHeadLoader.js
 import { currentOpenFy } from "./lib/fyAnchors.js";
 import { setServerReady } from "./lib/serverReadiness.js";
 import { startServer } from "./lib/startServer.js";
+import { bootstrapAdministrators } from "./lib/auth.js";
 
 const rawPort = process.env["PORT"];
 
@@ -70,7 +71,10 @@ if (Number.isNaN(port) || port <= 0) {
 // background phase completes.
 startServer({
   port,
-  runMigrations,
+  runMigrations: async () => {
+    await runMigrations();
+    await bootstrapAdministrators();
+  },
   restoreAnchors: () =>
     restoreAnchorsFromStorage({
       info: (msg) => logger.info(msg),

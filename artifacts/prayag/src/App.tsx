@@ -17,13 +17,16 @@ import DevApiKeysPage from "@/pages/DevApiKeysPage";
 import DevMastersPage from "@/pages/DevMastersPage";
 import OrgCustomersPage from "@/pages/OrgCustomersPage";
 import OrgPeoplePage    from "@/pages/OrgPeoplePage";
+import OrgUsersPage     from "@/pages/OrgUsersPage";
 import AlertsPage from "@/pages/AlertsPage";
 import AlertRecipientsPage from "@/pages/AlertRecipientsPage";
 import WarningsPage from "@/pages/WarningsPage";
 import SecondaryOrdersPage from "@/pages/SecondaryOrdersPage";
+import LoginPage from "@/pages/LoginPage";
 import NotFound from "@/pages/not-found";
 import { DashboardProvider } from "@/data/dashboard-context";
 import { GlobalFilterProvider } from "@/data/global-filter-context";
+import { AuthProvider, useAuth } from "@/data/auth-context";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -34,10 +37,22 @@ const queryClient = new QueryClient({
   },
 });
 
-function Router() {
+function ProtectedRoutes() {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return <div className="h-screen w-screen flex items-center justify-center bg-background" />;
+  }
+
+  if (!user) {
+    return null; // AuthProvider redirects
+  }
+
   return (
-    <AppShell>
-      <Switch>
+    <DashboardProvider>
+      <GlobalFilterProvider>
+        <AppShell>
+          <Switch>
         {/* Sales section */}
         <Route path="/sales/:section" component={SalesPage} />
         <Route path="/sales" component={SalesPage} />
@@ -60,6 +75,7 @@ function Router() {
         {/* Organisation */}
         <Route path="/org/people"    component={OrgPeoplePage}    />
         <Route path="/org/customers" component={OrgCustomersPage} />
+        {user.role === 'admin' && <Route path="/org/users" component={OrgUsersPage} />}
         {/* Developer Portal */}
         <Route path="/dev/api" component={DevPortalPage} />
         <Route path="/dev/keys" component={DevApiKeysPage} />
@@ -73,8 +89,19 @@ function Router() {
           }
         </Route>
         <Route component={NotFound} />
-      </Switch>
-    </AppShell>
+          </Switch>
+        </AppShell>
+      </GlobalFilterProvider>
+    </DashboardProvider>
+  );
+}
+
+function Router() {
+  return (
+    <Switch>
+      <Route path="/login" component={LoginPage} />
+      <Route component={ProtectedRoutes} />
+    </Switch>
   );
 }
 
@@ -83,15 +110,11 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
         <TooltipProvider>
-          <DashboardProvider>
-            {/* GlobalFilterProvider is inside WouterRouter so it can call
-                useLocation() to derive the current page's period capability. */}
-            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-              <GlobalFilterProvider>
-                <Router />
-              </GlobalFilterProvider>
-            </WouterRouter>
-          </DashboardProvider>
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+            <AuthProvider>
+              <Router />
+            </AuthProvider>
+          </WouterRouter>
           <Toaster />
         </TooltipProvider>
       </ThemeProvider>

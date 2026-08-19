@@ -53,10 +53,17 @@ import alertsRouter from "./alerts";
 import { alertRoutingRouter } from "./alertRouting";
 import adminMasterImportRouter from "./adminMasterImport";
 import secondaryOrdersRouter from "./secondaryOrders";
+import authRouter from "./auth";
+import { requireAuthenticated } from "../lib/auth";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+// Sign-in/session endpoints must remain available before the app's lengthy
+// post-listen readiness phase. Every remaining data route requires either a
+// browser session, a valid Bearer API key, or the existing operator secret.
+router.use(authRouter);
+router.use(requireAuthenticated);
 // All routes below this line are gated: they return 503 until the post-listen
 // background initialisation (person registry, roster CSV restore) completes.
 router.use(requireServerReady);

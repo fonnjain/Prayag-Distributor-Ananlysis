@@ -359,10 +359,18 @@ console.log("Section D: headNormKey family — HEAD_ALIASES integrity (parsed fr
 
 const REQUEST_TIMEOUT_MS = Number(process.env.GUARD_REQUEST_TIMEOUT_MS ?? 120000);
 const SHORT_TIMEOUT_MS = Math.min(REQUEST_TIMEOUT_MS, 30000);
+// Operator credentials so auth-gated routes respond 200 instead of 401.
+const OPERATOR_HEADERS = process.env.ADMIN_SECRET
+  ? { "X-Admin-Secret": process.env.ADMIN_SECRET }
+  : {};
 
 async function safeFetch(url, init = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
   try {
-    return await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    return await fetch(url, {
+      ...init,
+      headers: { ...OPERATOR_HEADERS, ...(init.headers ?? {}) },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
   } catch (e) {
     return { _error: e.message, _timedOut: /timeout|abort/i.test(e.message), status: -1, ok: false };
   }
@@ -371,6 +379,7 @@ async function safeFetch(url, init = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
 async function probe(candidate) {
   try {
     const res = await fetch(`${candidate}/comparison/catalogue`, {
+      headers: OPERATOR_HEADERS,
       signal: AbortSignal.timeout(8000),
     });
     return res.ok;
