@@ -234,6 +234,214 @@ describe("application authentication", () => {
     expect(client.query.mock.calls.some(([sql]) => String(sql).includes("SET is_active = false"))).toBe(false);
   });
 
+  // ── Concurrent last-admin protection tests ───────────────────────────────────
+  //
+  // The two tests below use a stateful shared-memory mock to mirror the
+  // pg_advisory_xact_lock serialization that PostgreSQL performs in production.
+  //
+  // AsyncMutex: the advisory-lock call in the second concurrent request blocks
+  // (returns a pending Promise) until the first transaction calls COMMIT or
+  // ROLLBACK and releases the lock.  This makes the 200/409 split emerge from
+  // actual async concurrency rather than from pre-scripted fixture ordering.
+  //
+  // makeAdminClient: each client reads and writes a shared Map of user rows.
+  // COMMIT flushes pending writes into the shared Map before releasing the lock,
+  // so the unblocked second transaction sees the post-commit admin count.
+  // ROLLBACK discards pending writes and releases the lock without updating
+  // shared state.
+
+  class AsyncMutex {
+    private queue: Array<() => void> = [];
+    private locked = false;
+
+    async acquire(): Promise<() => void> {
+      if (!this.locked) {
+        this.locked = true;
+        return this.makeRelease();
+      }
+      return new Promise((resolve) => {
+        this.queue.push(() => resolve(this.makeRelease()));
+      });
+    }
+
+    private makeRelease(): () => void {
+      return () => {
+        if (this.queue.length > 0) {
+          this.queue.shift()!();
+        } else {
+          this.locked = false;
+        }
+      };
+    }
+  }
+
+  type UserRow = { id: number; role: string; is_active: boolean };
+
+  function makeAdminClient(sharedUsers: Map<number, UserRow>, mutex: AsyncMutex) {
+    let releaseLock: (() => void) | null = null;
+    const pendingWrites = new Map<number, Partial<UserRow>>();
+
+    return {
+      query: vi.fn(async (sql: string, params?: unknown[]) => {
+        const s = String(sql);
+
+        if (s.includes("BEGIN")) return { rows: [] };
+
+        // pg_advisory_xact_lock: serialize all lock-acquiring transactions
+        if (s.includes("pg_advisory_xact_lock")) {
+          releaseLock = await mutex.acquire();
+          return { rows: [] };
+        }
+
+        // rejectLastAdmin: read target user row
+        if (s.includes("SELECT id, role, is_active FROM auth_users WHERE id = $1")) {
+          const id = Number(params?.[0]);
+          const u = sharedUsers.get(id);
+          return { rows: u ? [{ ...u }] : [] };
+        }
+
+        // activeAdminCount: count surviving active admins from shared (committed) state
+        if (s.includes("SELECT id FROM auth_users") && s.includes("is_active = true")) {
+          const rows = [...sharedUsers.values()]
+            .filter((u) => u.is_active && u.role === "admin")
+            .map((u) => ({ id: u.id }));
+          return { rows };
+        }
+
+        // deactivate route: UPDATE auth_users SET is_active = false …
+        if (s.includes("SET is_active = false")) {
+          const id = Number(params?.[0]);
+          pendingWrites.set(id, { is_active: false });
+          const base = sharedUsers.get(id)!;
+          return {
+            rows: [{
+              id,
+              email: `admin${id}@example.com`,
+              display_name: `Admin ${id}`,
+              role: base.role,
+              is_active: false,
+              created_at: new Date(),
+              updated_at: new Date(),
+              deactivated_at: new Date(),
+              locked_until: null,
+            }],
+          };
+        }
+
+        // patch route: UPDATE auth_users SET display_name = COALESCE(…), role = COALESCE(…) …
+        if (s.includes("display_name = COALESCE")) {
+          const id = Number(params?.[0]);
+          const newRole = (params?.[2] as string | null) ?? null;
+          if (newRole) pendingWrites.set(id, { role: newRole });
+          const base = sharedUsers.get(id)!;
+          return {
+            rows: [{
+              id,
+              email: `admin${id}@example.com`,
+              display_name: `Admin ${id}`,
+              role: newRole ?? base.role,
+              is_active: base.is_active,
+              created_at: new Date(),
+              updated_at: new Date(),
+              deactivated_at: null,
+              locked_until: null,
+            }],
+          };
+        }
+
+        // Session revocations and audit writes are side-effect-only
+        if (s.includes("UPDATE auth_sessions") || s.includes("INSERT INTO")) {
+          return { rows: [] };
+        }
+
+        if (s.trim() === "COMMIT") {
+          // Flush pending writes to shared state before releasing the lock so
+          // the next transaction's activeAdminCount sees the committed values.
+          for (const [id, changes] of pendingWrites) {
+            const u = sharedUsers.get(id);
+            if (u) Object.assign(u, changes);
+          }
+          releaseLock?.();
+          releaseLock = null;
+          return { rows: [] };
+        }
+
+        if (s.trim() === "ROLLBACK") {
+          pendingWrites.clear();
+          releaseLock?.();
+          releaseLock = null;
+          return { rows: [] };
+        }
+
+        return { rows: [] };
+      }),
+      release: vi.fn(),
+    };
+  }
+
+  it("serializes concurrent deactivation of two admins so exactly one succeeds and one is rejected", async () => {
+    // Both admins start active.  Whoever acquires the mutex first sees 2 active
+    // admins and is allowed to deactivate; the second waits until the first
+    // transaction commits (reducing the count to 1) and is then rejected as
+    // LAST_ADMIN.  The 200/409 split emerges from concurrency, not fixtures.
+    const sharedUsers: Map<number, UserRow> = new Map([
+      [7, { id: 7, role: "admin", is_active: true }],
+      [8, { id: 8, role: "admin", is_active: true }],
+    ]);
+    const mutex = new AsyncMutex();
+
+    mocks.connect
+      .mockResolvedValueOnce(makeAdminClient(sharedUsers, mutex))
+      .mockResolvedValueOnce(makeAdminClient(sharedUsers, mutex));
+
+    const [res1, res2] = await Promise.all([
+      request(authApp(adminIdentity)).post("/auth/users/7/deactivate"),
+      request(authApp(adminIdentity)).post("/auth/users/8/deactivate"),
+    ]);
+
+    const statuses = [res1.status, res2.status].sort((a, b) => a - b);
+    expect(statuses).toEqual([200, 409]);
+
+    const rejected = [res1, res2].find((r) => r.status === 409)!;
+    expect(rejected.body.error).toContain("last active administrator");
+
+    // After both transactions settle, shared state must show exactly one active
+    // admin — confirming one deactivation actually committed.
+    const remaining = [...sharedUsers.values()].filter((u) => u.is_active && u.role === "admin");
+    expect(remaining).toHaveLength(1);
+  });
+
+  it("serializes a concurrent demotion and deactivation so exactly one succeeds and one is rejected", async () => {
+    // One request demotes admin 8 to 'normal'; another simultaneously deactivates
+    // admin 7.  If both succeeded there would be zero administrators.  The
+    // advisory lock ensures exactly one commits; the other is blocked as LAST_ADMIN.
+    const sharedUsers: Map<number, UserRow> = new Map([
+      [7, { id: 7, role: "admin", is_active: true }],
+      [8, { id: 8, role: "admin", is_active: true }],
+    ]);
+    const mutex = new AsyncMutex();
+
+    mocks.connect
+      .mockResolvedValueOnce(makeAdminClient(sharedUsers, mutex))
+      .mockResolvedValueOnce(makeAdminClient(sharedUsers, mutex));
+
+    const [resDemotion, resDeactivate] = await Promise.all([
+      request(authApp(adminIdentity)).patch("/auth/users/8").send({ role: "normal" }),
+      request(authApp(adminIdentity)).post("/auth/users/7/deactivate"),
+    ]);
+
+    const statuses = [resDemotion.status, resDeactivate.status].sort((a, b) => a - b);
+    expect(statuses).toEqual([200, 409]);
+
+    const rejected = [resDemotion, resDeactivate].find((r) => r.status === 409)!;
+    expect(rejected.body.error).toContain("last active administrator");
+
+    // After both transactions, exactly one active administrator must remain —
+    // either admin 7 (if demotion won) or admin 8 (if deactivation won).
+    const activeAdmins = [...sharedUsers.values()].filter((u) => u.is_active && u.role === "admin");
+    expect(activeAdmins).toHaveLength(1);
+  });
+
   it("bootstraps three administrators idempotently without resetting existing hashes", async () => {
     process.env.AUTH_BOOTSTRAP_ADMINS = "one@example.com,two@example.com,three@example.com";
     process.env.AUTH_BOOTSTRAP_PASSWORD = "bootstrap-password-123";
