@@ -20,6 +20,7 @@ import OrgPeoplePage    from "@/pages/OrgPeoplePage";
 import AlertsPage from "@/pages/AlertsPage";
 import AlertRecipientsPage from "@/pages/AlertRecipientsPage";
 import WarningsPage from "@/pages/WarningsPage";
+import SecondaryOrdersPage from "@/pages/SecondaryOrdersPage";
 import NotFound from "@/pages/not-found";
 import { DashboardProvider } from "@/data/dashboard-context";
 import { GlobalFilterProvider } from "@/data/global-filter-context";
@@ -40,6 +41,7 @@ function Router() {
         {/* Sales section */}
         <Route path="/sales/:section" component={SalesPage} />
         <Route path="/sales" component={SalesPage} />
+        <Route path="/secondary-orders" component={SecondaryOrdersPage} />
         {/* SKU Deep Dive */}
         <Route path="/sku" component={SkuPage} />
         {/* MRP section */}

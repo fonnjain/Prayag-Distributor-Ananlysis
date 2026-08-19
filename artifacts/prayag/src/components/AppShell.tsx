@@ -21,7 +21,7 @@ import {
   LayoutDashboard, Users, ShoppingBag,
   AlertTriangle, Bell, UserMinus, UserCheck, Settings, Store, BookOpen, Network,
   ChevronDown, ChevronRight, Menu, X, Sun, Moon, Braces, Key, Layers, IndianRupee,
-  Globe, FileSearch,
+  Globe, FileSearch, ShoppingCart,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -104,6 +104,7 @@ const NAV: NavGroup[] = [
       { id: "salespeople",            label: "Sales People",           path: "/sales/salespeople",            icon: Users },
       { id: "primary-performance",    label: "Primary Performance",    path: "/sales/primary-performance",    icon: BarChartIcon },
       { id: "secondary-performance",  label: "Secondary Performance",  path: "/sales/secondary-performance",  icon: ShoppingBag },
+      { id: "secondary-orders",       label: "Secondary Orders",       path: "/secondary-orders",             icon: ShoppingCart },
       { id: "deep-dive",              label: "Sales Deep Dive",        path: "/sales/deep-dive",              icon: BookOpen },
       { id: "distributor-deep-dive",  label: "Distributor Deep Dive",  path: "/sales/distributor-deep-dive",  icon: Network  },
       { id: "sku-deep-dive",          label: "SKU Deep Dive",          path: "/sku",                          icon: Layers   },
@@ -172,6 +173,9 @@ function activeIds(location: string): { groupId: string; itemId: string } {
   }
   if (location === "/warnings" || location.startsWith("/warnings?")) {
     return { groupId: "alerts", itemId: "warning-system" };
+  }
+  if (location === "/secondary-orders" || location.startsWith("/secondary-orders?")) {
+    return { groupId: "sales", itemId: "secondary-orders" };
   }
   if (location.startsWith("/sales")) {
     const slug = location.replace(/^\/sales\/?/, "").split("?")[0];

@@ -32,6 +32,8 @@ async function buildAll() {
       path.resolve(artifactDir, "src/redAlertDiagnoseItems3.ts"),
       // One-time seed import for the master org tables (Phase 1).
       path.resolve(artifactDir, "src/masterSeedImport.ts"),
+      // Secondary order report loader CLI.
+      path.resolve(artifactDir, "src/loadSecondaryOrders.ts"),
     ],
     platform: "node",
     bundle: true,

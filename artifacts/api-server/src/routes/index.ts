@@ -52,6 +52,7 @@ import competitorPriceRouter from "./competitorPrice";
 import alertsRouter from "./alerts";
 import { alertRoutingRouter } from "./alertRouting";
 import adminMasterImportRouter from "./adminMasterImport";
+import secondaryOrdersRouter from "./secondaryOrders";
 
 const router: IRouter = Router();
 
@@ -110,5 +111,6 @@ router.use(competitorPriceRouter);
 router.use(alertsRouter);
 router.use(alertRoutingRouter);
 router.use(adminMasterImportRouter);
+router.use(secondaryOrdersRouter);
 
 export default router;
