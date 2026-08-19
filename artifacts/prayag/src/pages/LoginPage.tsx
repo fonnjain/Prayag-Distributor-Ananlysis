@@ -1,19 +1,22 @@
 import { useState, useEffect } from "react";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/data/auth-context";
-import { Loader2 } from "lucide-react";
+import { Loader2, AlertCircle } from "lucide-react";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [, setLocation] = useLocation();
+  const search = useSearch();
   const { toast } = useToast();
   const { user, refetchUser } = useAuth();
+
+  const sessionEnded = new URLSearchParams(search).get("reason") === "session_ended";
 
   useEffect(() => {
     if (user) {
@@ -63,6 +66,12 @@ export default function LoginPage() {
           <h1 className="text-xl font-semibold tracking-tight text-center">Prayag India</h1>
           <p className="text-sm text-muted-foreground mt-1 text-center">Sign in to your account</p>
         </div>
+        {sessionEnded && (
+          <div className="mx-6 mt-5 flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-800">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <span>Your session has ended. Please sign in again to continue.</span>
+          </div>
+        )}
         <div className="p-8">
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-2">

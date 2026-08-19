@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { useAuthMe, type AuthUser } from "@/hooks/use-auth";
@@ -17,6 +17,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const [location, setLocation] = useLocation();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  // Track whether the user was previously authenticated so we can distinguish
+  // a background session revocation from a fresh (never-logged-in) page load.
+  const hadUserRef = useRef(false);
 
   const logout = async () => {
     try {
@@ -26,6 +29,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Local logout still completes if the network is unavailable. The
       // server-side session expires independently and no credential is logged.
     } finally {
+      hadUserRef.current = false;
       qc.clear();
       qc.setQueryData(["auth-me"], null);
       setIsLoggingOut(false);
@@ -34,10 +38,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    if (!isLoading && !user && location !== "/login") {
+    if (isLoading) return;
+
+    if (user) {
+      // Record that we have a live session.
+      hadUserRef.current = true;
+      return;
+    }
+
+    // user is null and loading is done — we are unauthenticated.
+    if (location === "/login") return;
+
+    if (hadUserRef.current && !isLoggingOut) {
+      // The polling detected a revoked session (password reset or deactivation).
+      // Redirect with a reason so the login page can show a contextual notice.
+      hadUserRef.current = false;
+      setLocation("/login?reason=session_ended");
+    } else {
       setLocation("/login");
     }
-  }, [isLoading, user, location, setLocation]);
+  }, [isLoading, user, location, isLoggingOut, setLocation]);
 
   return (
     <AuthContext.Provider value={{
