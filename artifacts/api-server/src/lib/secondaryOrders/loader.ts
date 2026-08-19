@@ -22,9 +22,11 @@ import { canonGroupFromMap } from "../sku/catalogue.js";
 import { normSecKey } from "../mgmt/names.js";
 import { logger } from "../logger.js";
 import {
+  evaluateSecondaryOrderAnalyticsApproval,
   evaluateSecondaryOrderUpload,
   type StableIdResolution,
   type SecondaryOrderUploadMetrics,
+  type SecondaryOrderAnalyticsApproval,
   type UploadQualityEvaluation,
 } from "./uploadQuality.js";
 
@@ -320,6 +322,25 @@ export async function getSecondaryOrderUploadHistory(limit = 25): Promise<Second
     comparison: parseJsonColumn<UploadQualityEvaluation["comparison"]>(row.comparison),
     analyticsStatus: row.analytics_status,
   }));
+}
+
+export type SecondaryOrderUploadReview = {
+  uploads: SecondaryOrderUploadVerification[];
+  approval: SecondaryOrderAnalyticsApproval;
+};
+
+/**
+ * Return the operator-facing page of upload records plus the independent
+ * evidence-window decision.  Readiness is advisory only; all order-booking
+ * consumers remain isolated until a human approval process changes policy.
+ */
+export async function getSecondaryOrderUploadReview(limit = 25): Promise<SecondaryOrderUploadReview> {
+  const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 100);
+  const history = await getSecondaryOrderUploadHistory(100);
+  return {
+    uploads: history.slice(0, safeLimit),
+    approval: evaluateSecondaryOrderAnalyticsApproval(history),
+  };
 }
 
 // ── XLSX file resolution ──────────────────────────────────────────────────────

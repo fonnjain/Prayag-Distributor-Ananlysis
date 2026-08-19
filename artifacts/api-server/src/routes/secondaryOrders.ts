@@ -46,7 +46,7 @@ import {
   loadSecondaryOrders,
   verifySecondaryOrders,
   resolveSecondaryOrderXlsx,
-  getSecondaryOrderUploadHistory,
+  getSecondaryOrderUploadReview,
   type LoadResult,
 } from "../lib/secondaryOrders/loader.js";
 import { logger } from "../lib/logger.js";
@@ -251,9 +251,9 @@ router.get("/admin/secondary-orders/load-status", (req: Request, res: Response) 
 router.post("/admin/secondary-orders/verify", async (req: Request, res: Response) => {
   if (!requireAdmin(req, res)) return;
   try {
-    const [result, uploadHistory] = await Promise.all([
+    const [result, uploadReview] = await Promise.all([
       verifySecondaryOrders(),
-      getSecondaryOrderUploadHistory(),
+      getSecondaryOrderUploadReview(),
     ]);
     res.json({
       ok: true,
@@ -261,7 +261,8 @@ router.post("/admin/secondary-orders/verify", async (req: Request, res: Response
       analyticsStatus: "ISOLATED_PENDING_RELIABILITY",
       note: "This order-booking feed is not approved for secondary-sales, SKU, margin, or alert analytics.",
       ...result,
-      uploadHistory,
+      uploadHistory: uploadReview.uploads,
+      analyticsApproval: uploadReview.approval,
     });
   } catch (err) {
     req.log.error({ err }, "[secondaryOrders] verify error");
@@ -275,12 +276,19 @@ router.get("/admin/secondary-orders/uploads", async (req: Request, res: Response
   const requestedLimit = Number(req.query.limit ?? 25);
   const limit = Number.isFinite(requestedLimit) ? requestedLimit : 25;
   try {
-    const uploads = await getSecondaryOrderUploadHistory(limit);
+    const review = await getSecondaryOrderUploadReview(limit);
     res.json({
       basis: "ORDER BOOKING",
       analyticsStatus: "ISOLATED_PENDING_RELIABILITY",
-      note: "Review upload assessments before any separately approved analytics integration.",
-      uploads,
+      note: "Review the evidence window and every material reason before requesting manual approval; this feed remains isolated and is not dispatch or secondary sales.",
+      approvalPolicy: {
+        requiredVerifiedUploads: review.approval.requiredVerifiedUploads,
+        minimumEvidenceWindowDays: review.approval.minimumEvidenceWindowDays,
+        approverRoles: review.approval.approverRoles,
+        basis: review.approval.basis,
+      },
+      analyticsApproval: review.approval,
+      uploads: review.uploads,
     });
   } catch (err) {
     req.log.error({ err }, "[secondaryOrders] upload history error");
