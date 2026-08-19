@@ -13,6 +13,23 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { ExportGate } from "../lib/secondaryOrders/exportGate";
+
+describe("Secondary Orders export gate", () => {
+  it("keeps a hard two-export limit and never goes negative", () => {
+    const gate = new ExportGate(2);
+    expect(gate.active).toBe(0);
+    // An invalid request never acquires a slot. A defensive release must not
+    // turn that into a negative count that bypasses the limit.
+    gate.release();
+    expect(gate.active).toBe(0);
+    expect(gate.tryAcquire()).toBe(true);
+    expect(gate.tryAcquire()).toBe(true);
+    expect(gate.tryAcquire()).toBe(false);
+    gate.release();
+    expect(gate.tryAcquire()).toBe(true);
+  });
+});
 
 // ── 1. Date parser ────────────────────────────────────────────────────────────
 // Replicate the parseOrderDatetime logic without importing the full loader

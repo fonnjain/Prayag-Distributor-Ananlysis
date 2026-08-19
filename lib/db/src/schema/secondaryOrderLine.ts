@@ -4,6 +4,7 @@ import {
   numeric,
   timestamp,
   integer,
+  boolean,
   index,
   unique,
 } from "drizzle-orm/pg-core";
@@ -18,9 +19,10 @@ import { z } from "zod/v4";
 //
 // Source: Product-Wise-Secondary-Order-Report XLSX exports.
 //
-// Unique on (order_id, product_code): re-upload is idempotent upsert.
-// Collision detection: same (order_id, product_code) with different values is
-// reported and NOT silently overwritten.
+// The source occasionally contains more than one line for the same
+// (order_id, product_code). occurrence is the one-based source-file position
+// within that pair, making a re-upload idempotent without losing either line.
+// content_hash makes the identity auditable and detects a changed source row.
 //
 // Identity joins:
 //   dealer_id  (RET#) → customer_master for retailer identity
@@ -52,6 +54,12 @@ export const secondaryOrderLines = pgTable(
     categoryName: text("category_name"),                // verbatim — never overwritten
     segmentCanon: text("segment_canon"),                // mapped via group_map.json, nullable
     productCode: text("product_code").notNull(),
+    occurrence: integer("occurrence").notNull(),          // one-based within (order_id, product_code), source order
+    sourceRowNumber: integer("source_row_number").notNull(),
+    contentHash: text("content_hash").notNull(),          // SHA-256 of stored source values
+    // True only for the later copy of an exact repeated source row. It is
+    // retained so page totals reconcile to the source export.
+    isExactDuplicateExport: boolean("is_exact_duplicate_export").notNull().default(false),
     gstPct: numeric("gst_pct"),
     gstAmount: numeric("gst_amount"),
     qty: numeric("qty"),
@@ -63,7 +71,7 @@ export const secondaryOrderLines = pgTable(
     loadedAt: timestamp("loaded_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
-    unique("secondary_order_line_uq").on(t.orderId, t.productCode),
+    unique("secondary_order_line_uq").on(t.orderId, t.productCode, t.occurrence),
     index("sol_dealer_id_idx").on(t.dealerId),
     index("sol_cp_code_idx").on(t.cpCode),
     index("sol_order_datetime_idx").on(t.orderDatetime),

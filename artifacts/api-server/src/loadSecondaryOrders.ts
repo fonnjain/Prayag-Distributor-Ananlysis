@@ -82,6 +82,17 @@ async function main() {
       console.log(`    ${c.orderId} / ${c.productCode} — ${c.field}: stored="${c.stored}" incoming="${c.incoming}"`);
     }
   }
+  console.log(`  Repeated order/product pairs: ${result.sourcePairCollisions.length}`);
+  for (const pair of result.sourcePairCollisions) {
+    console.log(`    ${pair.orderId} / ${pair.productCode} — ${pair.identical ? "EXACT DUPLICATE EXPORT" : "distinct source lines"}`);
+    for (const line of pair.occurrences) {
+      console.log(`      occurrence ${line.occurrence}, source row ${line.sourceRowNumber}: qty=${line.qty} discount=${line.discountPct}% basic=${line.basicOrderValue} dealer=${line.dealerOrderValue}`);
+    }
+  }
+  console.log(`  Retained exact duplicate export rows: ${result.exactDuplicateExportRows.length}`);
+  if (result.exactDuplicateWarning) {
+    console.log("  WARNING: exact duplicate export rows exceed 0.5% of parsed lines.");
+  }
   console.log(`\n  Unresolved sales users (${result.unresolvedSalesUsers.length}): ${result.unresolvedSalesUsers.join(", ") || "none"}`);
   console.log(`  Unmapped categories (${result.unmappedCategories.length}): ${result.unmappedCategories.join(", ") || "none"}`);
 
@@ -139,6 +150,19 @@ async function main() {
     console.log(`  ${category.padEnd(35)} → ${segmentCanon ?? "UNMAPPED"}`);
   }
   console.log(`  Unmapped count: ${v.unmappedCategoryCount}`);
+
+  console.log("\n── Retained Exact Duplicate Export Rows ─────────────────────────────");
+  if (v.exactDuplicateExportRows.length === 0) {
+    console.log("  None");
+  } else {
+    for (const row of v.exactDuplicateExportRows) {
+      console.log(`  ${row.order_id} / ${row.product_code}: qty=${row.qty}, basic=${row.basic_order_value}`);
+    }
+    console.log(`  Count: ${v.exactDuplicateExportRows.length} — retained so totals reconcile to the source file.`);
+  }
+  if (v.exactDuplicateWarning) {
+    console.log("  WARNING: exact duplicate rows exceed the 0.5% review threshold.");
+  }
 
   console.log("\n── High-Discount Lines (>90%) ───────────────────────────────────────");
   if (v.discountAbove90.length === 0) {

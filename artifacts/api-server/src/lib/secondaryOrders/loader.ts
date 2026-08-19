@@ -16,6 +16,7 @@
 import ExcelJS from "exceljs";
 import path from "node:path";
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import { pool } from "@workspace/db";
 import { canonGroupFromMap } from "../sku/catalogue.js";
 import { normSecKey } from "../mgmt/names.js";
@@ -137,25 +138,16 @@ function parseDiscountPct(v: unknown): number | null {
 // Conservative: only match if normSecKey resolves unambiguously to exactly one person.
 // Null is acceptable; unresolved names are reported in verification.
 
-type PersonRow = { person_id: number; name: string; norm_key: string };
+type PersonRow = { person_id: number; name: string };
 let _personCache: PersonRow[] | null = null;
 
 async function getPersons(): Promise<PersonRow[]> {
   if (_personCache) return _personCache;
   const { rows } = await pool.query<PersonRow>(
-    "SELECT person_id, name, norm_key FROM person ORDER BY person_id",
+    "SELECT person_id, name FROM person ORDER BY person_id",
   );
   _personCache = rows;
   return rows;
-}
-
-async function resolvePersonId(rawName: string | null): Promise<number | null> {
-  if (!rawName) return null;
-  const persons = await getPersons();
-  const key = normSecKey(rawName);
-  const matches = persons.filter((p) => normSecKey(p.name) === key || p.norm_key === key);
-  if (matches.length === 1) return matches[0].person_id;
-  return null; // ambiguous or not found
 }
 
 // ── Load result ───────────────────────────────────────────────────────────────
@@ -168,11 +160,33 @@ export type CollisionDetail = {
   incoming: string | null;
 };
 
+export type SourcePairCollision = {
+  orderId: string;
+  productCode: string;
+  identical: boolean;
+  occurrences: Array<{
+    occurrence: number;
+    sourceRowNumber: number;
+    qty: number | null;
+    discountPct: number | null;
+    basicOrderValue: number | null;
+    dealerOrderValue: number | null;
+  }>;
+};
+
 export type LoadResult = {
   rowsScanned: number;
   rowsInserted: number;
   rowsSkipped: number;        // same values, idempotent
   collisions: CollisionDetail[];
+  sourcePairCollisions: SourcePairCollision[];
+  exactDuplicateExportRows: Array<{
+    orderId: string;
+    productCode: string;
+    qty: number | null;
+    basicOrderValue: number | null;
+  }>;
+  exactDuplicateWarning: boolean;
   unresolvedSalesUsers: string[];
   unmappedCategories: string[];
   sourceFile: string;
@@ -255,6 +269,10 @@ export async function loadSecondaryOrders(
     discountAmount: number | null;
     dealerOrderValue: number | null;
     basicOrderValue: number | null;
+    occurrence: number;
+    sourceRowNumber: number;
+    contentHash: string;
+    isExactDuplicateExport: boolean;
   };
 
   const rows: RawRow[] = [];
@@ -312,6 +330,16 @@ export async function loadSecondaryOrders(
       const segmentCanon = categoryName ? canonGroupFromMap(categoryName) : null;
       if (categoryName && !segmentCanon) unmappedCategories.add(categoryName);
 
+      const sourceRowNumber = rowsScanned + 1; // worksheet rows are header + data
+      const hashParts = [
+        rawDatetime.toISOString(), orderStatus, salesUserName, toText(values[colIdx.customerName]),
+        dealerId, toText(values[colIdx.dealerMobile]), toText(values[colIdx.cpName]), cpCode,
+        toText(values[colIdx.state]), toText(values[colIdx.district]), toText(values[colIdx.city]),
+        toText(values[colIdx.pincode]), categoryName, productCode, toNum(values[colIdx.gstPct]),
+        toNum(values[colIdx.gstAmount]), toNum(values[colIdx.qty]), parseDiscountPct(values[colIdx.discountPct]),
+        toNum(values[colIdx.discountAmount]), toNum(values[colIdx.dealerOrderValue]),
+        toNum(values[colIdx.basicOrderValue]),
+      ];
       rows.push({
         orderId,
         orderDatetime: rawDatetime,
@@ -336,6 +364,10 @@ export async function loadSecondaryOrders(
         discountAmount: toNum(values[colIdx.discountAmount]),
         dealerOrderValue: toNum(values[colIdx.dealerOrderValue]),
         basicOrderValue: toNum(values[colIdx.basicOrderValue]),
+        occurrence: 0,
+        sourceRowNumber,
+        contentHash: createHash("sha256").update(JSON.stringify(hashParts)).digest("hex"),
+        isExactDuplicateExport: false,
       });
     }
     break; // first sheet only
@@ -343,12 +375,55 @@ export async function loadSecondaryOrders(
 
   if (!colIdx) throw new Error("No header row found in secondary order report XLSX");
 
+  // Assign source-position occurrences and make repeated pairs visible. The
+  // line hash prevents an exact repeated export row from becoming invisible.
+  const pairGroups = new Map<string, RawRow[]>();
+  for (const row of rows) {
+    const key = `${row.orderId}\u0000${row.productCode}`;
+    const group = pairGroups.get(key) ?? [];
+    row.occurrence = group.length + 1;
+    group.push(row);
+    pairGroups.set(key, group);
+  }
+  const sourcePairCollisions: SourcePairCollision[] = [];
+  const exactDuplicateExportRows: LoadResult["exactDuplicateExportRows"] = [];
+  for (const group of pairGroups.values()) {
+    if (group.length < 2) continue;
+    const first = group[0];
+    const identical = group.every((row) => row.contentHash === first.contentHash);
+    if (identical) {
+      for (const row of group.slice(1)) {
+        row.isExactDuplicateExport = true;
+        exactDuplicateExportRows.push({
+          orderId: row.orderId,
+          productCode: row.productCode,
+          qty: row.qty,
+          basicOrderValue: row.basicOrderValue,
+        });
+      }
+    }
+    sourcePairCollisions.push({
+      orderId: first.orderId,
+      productCode: first.productCode,
+      identical,
+      occurrences: group.map((row) => ({
+        occurrence: row.occurrence,
+        sourceRowNumber: row.sourceRowNumber,
+        qty: row.qty,
+        discountPct: row.discountPct,
+        basicOrderValue: row.basicOrderValue,
+        dealerOrderValue: row.dealerOrderValue,
+      })),
+    });
+  }
+  const exactDuplicateWarning = rows.length > 0 && exactDuplicateExportRows.length / rows.length > 0.005;
+
   // Resolve sales user IDs in bulk
   const persons = await getPersons();
   const nameToPersonId = new Map<string, number | null>();
   for (const rawName of unresolvedRawUsers) {
     const key = normSecKey(rawName);
-    const matches = persons.filter((p) => normSecKey(p.name) === key || p.norm_key === key);
+    const matches = persons.filter((p) => normSecKey(p.name) === key);
     nameToPersonId.set(rawName, matches.length === 1 ? matches[0].person_id : null);
   }
 
@@ -365,6 +440,9 @@ export async function loadSecondaryOrders(
       rowsInserted: 0,
       rowsSkipped: 0,
       collisions: [],
+      sourcePairCollisions,
+      exactDuplicateExportRows,
+      exactDuplicateWarning,
       unresolvedSalesUsers,
       unmappedCategories: Array.from(unmappedCategories),
       sourceFile,
@@ -395,19 +473,21 @@ export async function loadSecondaryOrders(
              (order_id, order_datetime, order_status, sales_user_name, sales_user_id,
               customer_name, dealer_id, dealer_mobile, cp_name, cp_code,
               state, district, city, pincode,
-              category_name, segment_canon, product_code,
+             category_name, segment_canon, product_code, occurrence, source_row_number,
+             content_hash, is_exact_duplicate_export,
               gst_pct, gst_amount, qty, discount_pct, discount_amount,
               dealer_order_value, basic_order_value, source_file)
            VALUES
              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-              $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
-           ON CONFLICT (order_id, product_code) DO NOTHING
+              $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
+            ON CONFLICT (order_id, product_code, occurrence) DO NOTHING
            RETURNING id`,
           [
             r.orderId, r.orderDatetime, r.orderStatus, r.salesUserName, salesUserId,
             r.customerName, r.dealerId, r.dealerMobile, r.cpName, r.cpCode,
             r.state, r.district, r.city, r.pincode,
-            r.categoryName, r.segmentCanon, r.productCode,
+             r.categoryName, r.segmentCanon, r.productCode, r.occurrence, r.sourceRowNumber,
+             r.contentHash, r.isExactDuplicateExport,
             r.gstPct, r.gstAmount, r.qty, r.discountPct, r.discountAmount,
             r.dealerOrderValue, r.basicOrderValue, sourceFile,
           ],
@@ -423,11 +503,12 @@ export async function loadSecondaryOrders(
             basic_order_value: string | null;
             dealer_order_value: string | null;
             discount_pct: string | null;
+            content_hash: string;
           }>(
-            `SELECT order_status, qty, basic_order_value, dealer_order_value, discount_pct
+            `SELECT order_status, qty, basic_order_value, dealer_order_value, discount_pct, content_hash
              FROM secondary_order_line
-             WHERE order_id = $1 AND product_code = $2`,
-            [r.orderId, r.productCode],
+             WHERE order_id = $1 AND product_code = $2 AND occurrence = $3`,
+            [r.orderId, r.productCode, r.occurrence],
           );
           if (existing.rows.length > 0) {
             const ex = existing.rows[0];
@@ -449,6 +530,16 @@ export async function loadSecondaryOrders(
                 hasDiff = true;
                 collisions.push({ orderId: r.orderId, productCode: r.productCode, field, stored, incoming });
               }
+            }
+            if (ex.content_hash !== r.contentHash) {
+              collisions.push({
+                orderId: r.orderId,
+                productCode: r.productCode,
+                field: "content_hash",
+                stored: ex.content_hash,
+                incoming: r.contentHash,
+              });
+              hasDiff = true;
             }
             if (!hasDiff) rowsSkipped++;
           } else {
@@ -476,6 +567,9 @@ export async function loadSecondaryOrders(
     rowsInserted,
     rowsSkipped,
     collisions,
+    sourcePairCollisions,
+    exactDuplicateExportRows,
+    exactDuplicateWarning,
     unresolvedSalesUsers,
     unmappedCategories: Array.from(unmappedCategories),
     sourceFile,
@@ -501,6 +595,10 @@ export type VerificationResult = {
   salesUserResolution: { matched: number; total: number; pct: string; unmatched: string[] };
   categoryMapping: Array<{ category: string; segmentCanon: string | null }>;
   unmappedCategoryCount: number;
+  exactDuplicateExportRows: Array<{
+    order_id: string; product_code: string; qty: string; basic_order_value: string;
+  }>;
+  exactDuplicateWarning: boolean;
   discountAbove90: Array<{
     order_id: string; dealer_id: string; product_code: string;
     qty: string; basic_order_value: string; discount_pct: string;
@@ -519,6 +617,7 @@ export async function verifySecondaryOrders(): Promise<VerificationResult> {
     userResolution,
     catMapping,
     discountLines,
+    exactDuplicateRows,
     otherCounts,
   ] = await Promise.all([
     pool.query<{
@@ -533,8 +632,8 @@ export async function verifySecondaryOrders(): Promise<VerificationResult> {
         COUNT(DISTINCT dealer_id)            AS distinct_retailers,
         COUNT(DISTINCT cp_code)              AS distinct_distributors,
         COUNT(DISTINCT product_code)         AS distinct_codes,
-        MIN(order_datetime)::date::text      AS date_min,
-        MAX(order_datetime)::date::text      AS date_max,
+        MIN((order_datetime AT TIME ZONE 'Asia/Kolkata')::date)::text AS date_min,
+        MAX((order_datetime AT TIME ZONE 'Asia/Kolkata')::date)::text AS date_max,
         COALESCE(SUM(qty::numeric),0)::text          AS total_qty,
         COALESCE(SUM(basic_order_value::numeric),0)::text  AS total_basic,
         COALESCE(SUM(dealer_order_value::numeric),0)::text AS total_dealer
@@ -545,24 +644,24 @@ export async function verifySecondaryOrders(): Promise<VerificationResult> {
     ),
     pool.query<{ matched: string; total: string; unmatched_ids: string[] }>(`
       SELECT
-        COUNT(*) FILTER (WHERE cm.id IS NOT NULL)::text AS matched,
-        COUNT(*)::text AS total,
+        COUNT(DISTINCT sol.dealer_id) FILTER (WHERE cm.id IS NOT NULL)::text AS matched,
+        COUNT(DISTINCT sol.dealer_id)::text AS total,
         array_agg(DISTINCT sol.dealer_id) FILTER (WHERE cm.id IS NULL) AS unmatched_ids
       FROM secondary_order_line sol
       LEFT JOIN customer_master cm ON cm.id = sol.dealer_id
     `),
     pool.query<{ matched: string; total: string; unmatched_ids: string[] }>(`
       SELECT
-        COUNT(*) FILTER (WHERE cm.id IS NOT NULL)::text AS matched,
-        COUNT(*)::text AS total,
+        COUNT(DISTINCT sol.cp_code) FILTER (WHERE cm.id IS NOT NULL)::text AS matched,
+        COUNT(DISTINCT sol.cp_code)::text AS total,
         array_agg(DISTINCT sol.cp_code) FILTER (WHERE cm.id IS NULL) AS unmatched_ids
       FROM secondary_order_line sol
       LEFT JOIN customer_master cm ON cm.id = sol.cp_code
     `),
     pool.query<{ matched: string; total: string; unmatched_names: string[] }>(`
       SELECT
-        COUNT(*) FILTER (WHERE p.person_id IS NOT NULL)::text AS matched,
-        COUNT(*)::text AS total,
+        COUNT(DISTINCT sol.sales_user_name) FILTER (WHERE p.person_id IS NOT NULL)::text AS matched,
+        COUNT(DISTINCT sol.sales_user_name) FILTER (WHERE sol.sales_user_name IS NOT NULL)::text AS total,
         array_agg(DISTINCT sol.sales_user_name) FILTER (WHERE p.person_id IS NULL AND sol.sales_user_name IS NOT NULL) AS unmatched_names
       FROM secondary_order_line sol
       LEFT JOIN person p ON p.person_id = sol.sales_user_id
@@ -574,6 +673,12 @@ export async function verifySecondaryOrders(): Promise<VerificationResult> {
       `SELECT order_id, dealer_id, product_code, qty::text, basic_order_value::text, discount_pct::text
        FROM secondary_order_line WHERE discount_pct::numeric > 90
        ORDER BY discount_pct::numeric DESC LIMIT 200`,
+    ),
+    pool.query<{ order_id: string; product_code: string; qty: string; basic_order_value: string }>(
+      `SELECT order_id, product_code, qty::text, basic_order_value::text
+       FROM secondary_order_line
+       WHERE is_exact_duplicate_export
+       ORDER BY order_id, product_code, occurrence`,
     ),
     pool.query<{ ssl: string; srl: string; sl: string }>(`
       SELECT
@@ -635,6 +740,9 @@ export async function verifySecondaryOrders(): Promise<VerificationResult> {
       segmentCanon: r.segment_canon,
     })),
     unmappedCategoryCount: unmappedCats,
+    exactDuplicateExportRows: exactDuplicateRows.rows,
+    exactDuplicateWarning: Number(t.rows_loaded) > 0 &&
+      exactDuplicateRows.rows.length / Number(t.rows_loaded) > 0.005,
     discountAbove90: discountLines.rows,
     secondarySkuLineCount: Number(oc.ssl),
     secondaryRegisterLineCount: Number(oc.srl),

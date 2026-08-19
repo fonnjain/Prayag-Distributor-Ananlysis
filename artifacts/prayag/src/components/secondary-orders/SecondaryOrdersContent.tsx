@@ -264,6 +264,15 @@ export default function SecondaryOrdersContent() {
                   ))}
                 </div>
               )}
+
+              {data.quality.exactDuplicateExportRows > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {data.quality.exactDuplicateExportRows} exact duplicate export rows retained
+                  {" "}({data.quality.exactDuplicateQty.toLocaleString("en-IN")} qty; ₹{trunc2IN(data.quality.exactDuplicateBasicValue)} basic value);
+                  totals match the source file.
+                  {data.quality.exactDuplicateRateAlert && " Duplicate-row rate exceeds the 0.5% review threshold."}
+                </p>
+              )}
             </div>
           )}
 

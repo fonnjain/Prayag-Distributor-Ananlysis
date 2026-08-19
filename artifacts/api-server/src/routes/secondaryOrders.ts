@@ -30,9 +30,9 @@
  *   GET  /api/secondary-orders/export         — XLSX export (same filters as list)
  *
  * Shared filter params (all GET routes):
- *   stateHead, state, distributor (cp_code), retailer (dealer_id),
- *   status (APPROVED|PENDING), dateFrom (YYYY-MM-DD), dateTo (YYYY-MM-DD)
- *   limit, offset (for paginated list)
+ *   stateHead, state, cpCode/distributor, dealerId/retailer,
+ *   status (APPROVED|PENDING), from/dateFrom (YYYY-MM-DD), to/dateTo (YYYY-MM-DD)
+ *   page, pageSize (or legacy limit, offset)
  */
 
 import { Router, Request, Response, raw } from "express";
@@ -48,6 +48,7 @@ import {
   type LoadResult,
 } from "../lib/secondaryOrders/loader.js";
 import { logger } from "../lib/logger.js";
+import { ExportGate } from "../lib/secondaryOrders/exportGate.js";
 
 const router = Router();
 
@@ -96,14 +97,15 @@ function buildWhereClause(f: FilterParams): { where: string; params: unknown[] }
   const conditions: string[] = [];
   const params: unknown[] = [];
 
-  // stateHead: join via person_registry using sales_user_id → person_registry.state_head
+  // State-head scope comes from the editable person hierarchy. person_registry
+  // is a separate canonical-name registry and does not share person_id values.
   if (f.stateHead) {
     conditions.push(`
       EXISTS (
         SELECT 1 FROM person p
-        JOIN person_registry pr ON pr.person_id = p.person_id
+        LEFT JOIN person state_head ON state_head.person_id = p.state_head_person_id
         WHERE p.person_id = sol.sales_user_id
-          AND pr.state_head = $${params.length + 1}
+          AND COALESCE(state_head.name, CASE WHEN p.is_state_head THEN p.name END) = $${params.length + 1}
       )
     `);
     params.push(f.stateHead);
@@ -133,12 +135,12 @@ function buildWhereClause(f: FilterParams): { where: string; params: unknown[] }
   }
 
   if (f.dateFrom) {
-    conditions.push(`sol.order_datetime >= $${params.length + 1}::date`);
+    conditions.push(`sol.order_datetime >= ($${params.length + 1}::date::timestamp AT TIME ZONE 'Asia/Kolkata')`);
     params.push(f.dateFrom);
   }
 
   if (f.dateTo) {
-    conditions.push(`sol.order_datetime < ($${params.length + 1}::date + interval '1 day')`);
+    conditions.push(`sol.order_datetime < (($${params.length + 1}::date + interval '1 day')::timestamp AT TIME ZONE 'Asia/Kolkata')`);
     params.push(f.dateTo);
   }
 
@@ -150,11 +152,19 @@ function parseFilters(req: Request): FilterParams {
   return {
     stateHead: typeof req.query.stateHead === "string" ? req.query.stateHead : undefined,
     state: typeof req.query.state === "string" ? req.query.state : undefined,
-    distributor: typeof req.query.distributor === "string" ? req.query.distributor : undefined,
-    retailer: typeof req.query.retailer === "string" ? req.query.retailer : undefined,
+    distributor: typeof req.query.cpCode === "string"
+      ? req.query.cpCode
+      : typeof req.query.distributor === "string" ? req.query.distributor : undefined,
+    retailer: typeof req.query.dealerId === "string"
+      ? req.query.dealerId
+      : typeof req.query.retailer === "string" ? req.query.retailer : undefined,
     status: typeof req.query.status === "string" ? req.query.status : undefined,
-    dateFrom: typeof req.query.dateFrom === "string" ? req.query.dateFrom : undefined,
-    dateTo: typeof req.query.dateTo === "string" ? req.query.dateTo : undefined,
+    dateFrom: typeof req.query.from === "string"
+      ? req.query.from
+      : typeof req.query.dateFrom === "string" ? req.query.dateFrom : undefined,
+    dateTo: typeof req.query.to === "string"
+      ? req.query.to
+      : typeof req.query.dateTo === "string" ? req.query.dateTo : undefined,
   };
 }
 
@@ -270,8 +280,8 @@ router.get("/secondary-orders/summary", async (req: Request, res: Response) => {
         COALESCE(SUM(sol.qty::numeric), 0)                AS total_qty,
         COALESCE(SUM(sol.basic_order_value::numeric), 0)  AS total_basic,
         COALESCE(SUM(sol.dealer_order_value::numeric), 0) AS total_dealer,
-        MIN(sol.order_datetime)::date::text               AS date_min,
-        MAX(sol.order_datetime)::date::text               AS date_max,
+         MIN((sol.order_datetime AT TIME ZONE 'Asia/Kolkata')::date)::text AS date_min,
+         MAX((sol.order_datetime AT TIME ZONE 'Asia/Kolkata')::date)::text AS date_max,
         COUNT(*) FILTER (WHERE sol.order_status = 'APPROVED') AS approved_lines,
         COUNT(*) FILTER (WHERE sol.order_status = 'PENDING')  AS pending_lines
       FROM secondary_order_line sol
@@ -316,13 +326,13 @@ router.get("/secondary-orders/filters", async (req: Request, res: Response) => {
       pool.query<{ dealer_id: string; customer_name: string | null }>(
         `SELECT DISTINCT dealer_id, MAX(customer_name) AS customer_name FROM secondary_order_line GROUP BY dealer_id ORDER BY dealer_id`,
       ),
-      pool.query<{ state_head: string }>(
-        `SELECT DISTINCT pr.state_head
+       pool.query<{ state_head: string }>(
+         `SELECT DISTINCT COALESCE(state_head.name, p.name) AS state_head
          FROM secondary_order_line sol
          JOIN person p ON p.person_id = sol.sales_user_id
-         JOIN person_registry pr ON pr.person_id = p.person_id
-         WHERE pr.state_head IS NOT NULL
-         ORDER BY pr.state_head`,
+          LEFT JOIN person state_head ON state_head.person_id = p.state_head_person_id
+          WHERE p.is_state_head OR p.state_head_person_id IS NOT NULL
+          ORDER BY state_head`,
       ),
     ]);
 
@@ -346,6 +356,8 @@ router.get("/secondary-orders/filters", async (req: Request, res: Response) => {
 });
 
 // ── GET /api/secondary-orders ─────────────────────────────────────────────────
+// One complete page payload keeps the React screen's filters, summary and rows
+// in one contract and one source of truth.
 router.get("/secondary-orders", async (req: Request, res: Response) => {
   try {
     const filters = parseFilters(req);
@@ -358,38 +370,137 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
       return;
     }
 
-    const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10), 1000);
-    const offset = Math.max(0, parseInt(String(req.query.offset ?? "0"), 10));
+    const pageSizeRaw = Number(req.query.pageSize ?? req.query.limit ?? 100);
+    const pageSize = Number.isFinite(pageSizeRaw) ? Math.min(Math.max(Math.floor(pageSizeRaw), 1), 1000) : 100;
+    const pageRaw = Number(req.query.page ?? 1);
+    const page = Number.isFinite(pageRaw) ? Math.max(1, Math.floor(pageRaw)) : 1;
+    const offsetRaw = req.query.offset == null ? (page - 1) * pageSize : Number(req.query.offset);
+    const offset = Number.isFinite(offsetRaw) ? Math.max(0, Math.floor(offsetRaw)) : 0;
 
-    const [rows, cnt] = await Promise.all([
+    const [rows, summary, filterRows, quality] = await Promise.all([
       pool.query(
         `SELECT
-           sol.id, sol.order_id, sol.order_datetime, sol.order_status,
-           sol.sales_user_name, sol.sales_user_id,
-           sol.customer_name, sol.dealer_id, sol.dealer_mobile,
-           sol.cp_name, sol.cp_code,
-           sol.state, sol.district, sol.city, sol.pincode,
-           sol.category_name, sol.segment_canon, sol.product_code,
-           sol.gst_pct, sol.gst_amount, sol.qty,
-           sol.discount_pct, sol.discount_amount,
-           sol.dealer_order_value, sol.basic_order_value,
-           sol.source_file
+           sol.id AS "id", sol.order_id AS "orderId", sol.order_datetime AS "orderDatetime",
+           sol.order_status AS "orderStatus", sol.sales_user_name AS "salesUserName",
+           sol.sales_user_id AS "salesUserId", sol.customer_name AS "customerName",
+           sol.dealer_id AS "dealerId", sol.dealer_mobile AS "dealerMobile",
+           sol.cp_name AS "cpName", sol.cp_code AS "cpCode", sol.state AS "state",
+           sol.district AS "district", sol.city AS "city", sol.pincode AS "pincode",
+           sol.category_name AS "categoryName", sol.segment_canon AS "segmentCanon",
+           sol.product_code AS "productCode", sol.occurrence AS "occurrence",
+           sol.is_exact_duplicate_export AS "isExactDuplicateExport",
+           sol.gst_pct::float8 AS "gstPct", sol.gst_amount::float8 AS "gstAmount",
+           sol.qty::float8 AS "qty", sol.discount_pct::float8 AS "discountPct",
+           sol.discount_amount::float8 AS "discountAmount",
+           sol.dealer_order_value::float8 AS "dealerOrderValue",
+           sol.basic_order_value::float8 AS "basicOrderValue",
+           sol.source_file AS "sourceFile"
          FROM secondary_order_line sol
          ${where}
-         ORDER BY sol.order_datetime DESC, sol.order_id, sol.product_code
+          ORDER BY sol.order_datetime DESC, sol.order_id, sol.product_code, sol.occurrence
          LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-        [...params, limit, offset],
+        [...params, pageSize, offset],
       ),
-      pool.query(`SELECT COUNT(*) AS n FROM secondary_order_line sol ${where}`, params),
+      pool.query(
+        `SELECT
+           COUNT(*) AS lines,
+           COUNT(DISTINCT sol.order_id) AS orders,
+           COUNT(DISTINCT sol.dealer_id) AS retailers,
+           COUNT(DISTINCT sol.cp_code) AS distributors,
+           COALESCE(SUM(sol.qty::numeric), 0) AS total_qty,
+           COALESCE(SUM(sol.basic_order_value::numeric), 0) AS total_basic,
+           MIN((sol.order_datetime AT TIME ZONE 'Asia/Kolkata')::date)::text AS date_min,
+           MAX((sol.order_datetime AT TIME ZONE 'Asia/Kolkata')::date)::text AS date_max,
+           COUNT(*) FILTER (WHERE sol.order_status = 'APPROVED') AS approved_lines,
+           COUNT(DISTINCT sol.order_id) FILTER (WHERE sol.order_status = 'APPROVED') AS approved_orders,
+           COALESCE(SUM(sol.basic_order_value::numeric) FILTER (WHERE sol.order_status = 'APPROVED'), 0) AS approved_basic,
+           COUNT(*) FILTER (WHERE sol.order_status = 'PENDING') AS pending_lines,
+           COUNT(DISTINCT sol.order_id) FILTER (WHERE sol.order_status = 'PENDING') AS pending_orders,
+           COALESCE(SUM(sol.basic_order_value::numeric) FILTER (WHERE sol.order_status = 'PENDING'), 0) AS pending_basic
+         FROM secondary_order_line sol ${where}`,
+        params,
+      ),
+      Promise.all([
+        pool.query<{ state: string }>(`SELECT DISTINCT state FROM secondary_order_line WHERE state IS NOT NULL ORDER BY state`),
+        pool.query<{ cp_code: string; cp_name: string | null }>(
+          `SELECT cp_code, MAX(cp_name) AS cp_name FROM secondary_order_line GROUP BY cp_code ORDER BY cp_code`,
+        ),
+        pool.query<{ dealer_id: string; customer_name: string | null }>(
+          `SELECT dealer_id, MAX(customer_name) AS customer_name FROM secondary_order_line GROUP BY dealer_id ORDER BY dealer_id`,
+        ),
+        pool.query<{ state_head: string }>(
+          `SELECT DISTINCT COALESCE(state_head.name, p.name) AS state_head
+           FROM secondary_order_line sol
+           JOIN person p ON p.person_id = sol.sales_user_id
+           LEFT JOIN person state_head ON state_head.person_id = p.state_head_person_id
+           WHERE p.is_state_head OR p.state_head_person_id IS NOT NULL
+           ORDER BY state_head`,
+        ),
+      ]),
+      pool.query<{
+        duplicate_rows: string; duplicate_qty: string; duplicate_basic: string; total_rows: string;
+      }>(`
+        SELECT COUNT(*) FILTER (WHERE is_exact_duplicate_export)::text AS duplicate_rows,
+          COALESCE(SUM(qty::numeric) FILTER (WHERE is_exact_duplicate_export), 0)::text AS duplicate_qty,
+          COALESCE(SUM(basic_order_value::numeric) FILTER (WHERE is_exact_duplicate_export), 0)::text AS duplicate_basic,
+          COUNT(*)::text AS total_rows
+        FROM secondary_order_line
+      `),
     ]);
 
+    const s = summary.rows[0];
+    const [states, distributors, retailers, stateHeads] = filterRows;
+    const totalRows = Number(s?.lines ?? 0);
     res.json({
-      basis: "ORDER BOOKING",
-      note: "Order booking, not dispatch. Not comparable with secondary sales figures.",
-      total: Number(cnt.rows[0]?.n ?? 0),
-      limit,
-      offset,
+      basis: {
+        measure: "ORDER BOOKING",
+        value: "Basic order value excludes GST",
+        disclaimer: "Order booking, not dispatch. Not comparable with secondary sales figures.",
+      },
+      coverage: { from: s?.date_min ?? null, to: s?.date_max ?? null },
+      summary: {
+        orders: Number(s?.orders ?? 0),
+        lines: totalRows,
+        retailers: Number(s?.retailers ?? 0),
+        distributors: Number(s?.distributors ?? 0),
+        totalQty: Number(s?.total_qty ?? 0),
+        totalBasicValue: Number(s?.total_basic ?? 0),
+        status: [
+          { status: "APPROVED", lines: Number(s?.approved_lines ?? 0), orders: Number(s?.approved_orders ?? 0), basicValue: Number(s?.approved_basic ?? 0) },
+          { status: "PENDING", lines: Number(s?.pending_lines ?? 0), orders: Number(s?.pending_orders ?? 0), basicValue: Number(s?.pending_basic ?? 0) },
+        ].filter((item) => item.lines > 0),
+      },
       rows: rows.rows,
+      pagination: {
+        page,
+        pageSize,
+        totalRows,
+        totalPages: Math.max(1, Math.ceil(totalRows / pageSize)),
+      },
+      filters: {
+        stateHeads: stateHeads.rows.map((r) => ({ id: r.state_head, name: r.state_head })),
+        states: states.rows.map((r) => r.state),
+        distributors: distributors.rows.map((r) => ({
+          id: r.cp_code,
+          name: r.cp_name ? `${r.cp_name} (${r.cp_code})` : r.cp_code,
+        })),
+        retailers: retailers.rows.map((r) => ({
+          id: r.dealer_id,
+          name: r.customer_name ? `${r.customer_name} (${r.dealer_id})` : r.dealer_id,
+        })),
+        statuses: ["APPROVED", "PENDING"],
+      },
+      quality: (() => {
+        const q = quality.rows[0];
+        const duplicateRows = Number(q?.duplicate_rows ?? 0);
+        const allRows = Number(q?.total_rows ?? 0);
+        return {
+          exactDuplicateExportRows: duplicateRows,
+          exactDuplicateQty: Number(q?.duplicate_qty ?? 0),
+          exactDuplicateBasicValue: Number(q?.duplicate_basic ?? 0),
+          exactDuplicateRateAlert: allRows > 0 && duplicateRows / allRows > 0.005,
+        };
+      })(),
     });
   } catch (err) {
     req.log.error({ err }, "[secondaryOrders] list error");
@@ -400,15 +511,11 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
 // ── GET /api/secondary-orders/export ─────────────────────────────────────────
 const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8EDF5" } };
 const MAX_EXPORT_ROWS = 50_000;
-let activeExports = 0;
 const MAX_CONCURRENT_EXPORTS = 2;
+const exportGate = new ExportGate(MAX_CONCURRENT_EXPORTS);
 
 router.get("/secondary-orders/export", async (req: Request, res: Response) => {
-  if (activeExports >= MAX_CONCURRENT_EXPORTS) {
-    res.status(429).json({ error: "Another export is in progress — try again shortly." });
-    return;
-  }
-
+  let exportSlotAcquired = false;
   try {
     const filters = parseFilters(req);
     let where: string;
@@ -420,7 +527,11 @@ router.get("/secondary-orders/export", async (req: Request, res: Response) => {
       return;
     }
 
-    activeExports++;
+    if (!exportGate.tryAcquire()) {
+      res.status(429).json({ error: "Another export is in progress — try again shortly." });
+      return;
+    }
+    exportSlotAcquired = true;
 
     const [rows, summary] = await Promise.all([
       pool.query(
@@ -537,7 +648,7 @@ router.get("/secondary-orders/export", async (req: Request, res: Response) => {
     req.log.error({ err }, "[secondaryOrders] export error");
     res.status(500).json({ error: "Export failed" });
   } finally {
-    activeExports--;
+    if (exportSlotAcquired) exportGate.release();
   }
 });
 

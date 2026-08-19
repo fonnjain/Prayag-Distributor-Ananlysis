@@ -27,6 +27,8 @@ export interface SecondaryOrderRow {
   discountAmount: number;
   dealerOrderValue: number;
   basicOrderValue: number;
+  occurrence: number;
+  isExactDuplicateExport: boolean;
 }
 
 export interface SecondaryOrdersResponse {
@@ -66,6 +68,12 @@ export interface SecondaryOrdersResponse {
     distributors: { id: string; name: string }[];
     retailers: { id: string; name: string }[];
     statuses: string[];
+  };
+  quality: {
+    exactDuplicateExportRows: number;
+    exactDuplicateQty: number;
+    exactDuplicateBasicValue: number;
+    exactDuplicateRateAlert: boolean;
   };
 }
 
