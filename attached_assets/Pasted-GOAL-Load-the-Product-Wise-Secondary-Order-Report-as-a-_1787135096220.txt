@@ -1,0 +1,134 @@
+GOAL
+Load the Product-Wise Secondary Order Report as a NEW table. Do not merge it
+into secondary_sku_line and do not repoint any existing analytics at it yet.
+
+WHY THIS FILE MATTERS
+It carries STABLE IDs. Dealer ID is RET#, CP Code is DIST#, joining at 97.2%
+and 98.4% to the customer master.
+
+Every secondary figure today matches retailers by NAME. That is why Ayan
+Enterprise reads 415 lines in secondary_register_line and 92 in
+secondary_sku_line, and why the Red Alert B3 attribution had a gap nobody
+could close. This file removes name matching from the problem.
+
+But it is ONE 19-day sample. Prove the joins hold across several uploads
+before anything depends on it.
+
+============================================================
+IT IS ORDER BOOKING, NOT DISPATCH
+============================================================
+Order Status is APPROVED or PENDING. Nothing here says delivered.
+
+secondary_sku_line and secondary_register_line record what was sold.
+This records what was ORDERED. They are different measures and must never be
+summed, averaged or compared as like for like.
+
+Every figure derived from this table is labelled ORDER BOOKING on screen.
+
+============================================================
+SCHEMA
+============================================================
+secondary_order_line
+  order_id            SORD-nnnn
+  order_datetime      parse "19-08-2026 15:06:12" — DD-MM-YYYY
+  order_status        APPROVED | PENDING
+  sales_user_name     as given
+  sales_user_id       resolved to person, nullable
+  customer_name       the retailer's name as given
+  dealer_id           RET# — the join key
+  dealer_mobile
+  cp_name             the distributor's name as given
+  cp_code             DIST# — the join key
+  state · district · city · pincode
+  category_name       the source's own taxonomy — store VERBATIM
+  segment_canon       mapped, nullable
+  product_code
+  gst_pct · gst_amount
+  qty
+  discount_pct · discount_amount
+  dealer_order_value  including GST
+  basic_order_value   excluding GST
+  source_file · loaded_at
+
+Unique on (order_id, product_code) so a re-upload is an idempotent upsert, not
+a duplicate. Report any collision where the same pair carries different values.
+
+Index on (dealer_id), (cp_code), (order_datetime), (product_code).
+
+============================================================
+CATEGORY TAXONOMY - store, then map, never overwrite
+============================================================
+Category Name uses the MARKETING taxonomy: "P.T.M.T. SYMET", "C.P-CDA",
+"C.P. 5000 SERIES", "CPVC DURALIFE", "UPVC AQUAFRESH", "SWR DRAINTECH",
+"AGRITEC", "CISTERNS & SEAT COVERS".
+
+That is the same taxonomy as the product master, and the same mapping already
+exists there:
+    P.T.M.T. SYMET / CISTERNS & SEAT COVERS  -> PTMT
+    C.P-CDA / C.P. 5000 / 6000 / 7000 / 8000 / 9000 SERIES -> CP
+    CPVC DURALIFE -> CPVC · UPVC AQUAFRESH -> UPVC
+    SWR DRAINTECH -> SWR · AGRITEC -> Agri
+    SANITARYWARE -> Sanitaryware
+
+REUSE that mapping. Do not create a second one - two mappings that must agree
+is the pattern that has cost this project repeatedly.
+
+Anything unmapped stays NULL with the raw value retained, and is reported.
+
+============================================================
+BASIC vs DEALER VALUE
+============================================================
+basic_order_value excludes GST. dealer_order_value includes it.
+
+Use BASIC for every commercial figure. Sales value in this system has never
+included tax and mixing the two would break every comparison.
+
+Store both. Display basic. Label it.
+
+============================================================
+DO NOT
+============================================================
+- Do not write to secondary_sku_line, secondary_register_line or sale_line.
+- Do not repoint B3, the push list, the retailer registry or any Red Alert
+  category at this table.
+- Do not use it in any margin, contribution or MRP calculation.
+- Do not overwrite category_name with the mapped value.
+
+============================================================
+A PAGE - read only, one screen
+============================================================
+Under SALES, "Secondary Orders". Filterable by state head, state, distributor,
+retailer, status, date range. Columns as stored. Export to xlsx.
+
+Show at the top: date range covered, orders, lines, retailers, distributors,
+total qty, total basic value, and the split by status.
+
+State plainly on the page: "Order booking, not dispatch. Not comparable with
+secondary sales figures."
+
+============================================================
+VERIFY - produced values, and a hash that resolves
+============================================================
+1. Rows loaded (expect 8,602), distinct orders (1,361), retailers (1,132),
+   distributors (128), product codes (1,605).
+2. Date range - expect 1 to 19 August 2026.
+3. Totals: qty 322,465 · basic Rs 5,64,03,177 · dealer Rs 6,63,33,521.
+4. Order status split - expect APPROVED 8,172, PENDING 430.
+5. THE JOIN TEST, the important one. Print:
+   - dealer_id values matching a retailer in customer_master, count and
+     percentage. Expect about 97.2%.
+   - cp_code matching a distributor. Expect about 98.4%.
+   - NAME the non-matching ones. 32 retailers and 2 distributors.
+6. sales_user_name resolving to a person. Expect about 98.3%. Print the
+   non-matching - I expect PRAYAG and ADARSH GAURAV.
+7. Category mapping: every distinct category_name with its segment_canon.
+   Print unmapped count.
+8. THE 99% DISCOUNT LINES. Print every line with discount_pct above 90, with
+   its order, retailer, code, qty and values. Either free goods booked as a
+   discount, or an error - I want to see which.
+9. Re-run the load with the same file. Confirm row count is UNCHANGED - the
+   upsert is idempotent. Print before and after.
+10. Confirm secondary_sku_line, secondary_register_line and sale_line row
+    counts are unchanged.
+11. Push. Print git rev-parse HEAD and git rev-parse origin/main, then
+    git cat-file -t <hash> and git merge-base --is-ancestor <hash> main.
