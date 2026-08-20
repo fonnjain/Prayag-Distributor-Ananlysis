@@ -1,0 +1,56 @@
+Agreed on (a) with your caching constraint - invalidating on register sync
+rather than a TTL is cleaner, and the read-cost point was one I had not
+considered.
+
+The distinction is the right one: an approved coverage DECISION and the latest
+transactional VALUE attached to it are different things, and persisting the
+second makes it look like the first.
+
+Build it. Four things to get precise.
+
+1. DEFINE "STRUCTURAL" IN CODE, NOT IN PROSE
+Open-FY drift reports ONLY:
+   - the head attributed to a customer changed
+   - a customer appeared or disappeared from a leaf
+   - the customer count changed
+   - the effective-date range changed
+   - a leaf gained or lost a head
+
+It does NOT report a net-value difference where head, customer set, count and
+dates are all unchanged.
+
+Write that as an explicit predicate with a name, not as a filter buried in a
+query. Someone will need to change it later and should find it in one place.
+
+2. CLOSED FY STAYS STRICT
+A frozen year reports ANY difference, including value. That is the whole point
+of freezing - if a closed year's evidence moves, something is wrong and it
+should be loud.
+
+Confirm the boundary is read from the same freeze state the rest of the system
+uses, not a separate date calculation.
+
+3. THE CURRENT FIVE SHOULD DISAPPEAR
+After the change, confirm the drift surface reports zero items. If any of the
+five survives, the predicate is wrong.
+
+4. PROVE IT STILL CATCHES THE REAL THING
+Construct a structural change in a scratch copy - move one customer from one
+head to another in the open FY - and confirm drift reports it. A surface that
+suppresses everything is as useless as one that reports everything.
+
+VERIFY
+  a. The predicate, printed.
+  b. Drift count before and after - expect 5 to 0.
+  c. The synthetic structural change caught, with the item as rendered.
+  d. Closed-FY behaviour unchanged: FY2025-26 still reports any difference.
+  e. Read time for the open-FY derivation, and confirm the cache invalidates
+     on register sync rather than expiring.
+  f. Push, print both refs.
+
+ON THE TAMIL NADU WARNING - your answer is the honest one
+"Wired and fed with live data, not visually confirmed" is the correct thing to
+say rather than claiming a render you did not see.
+
+Leave it. I will confirm it myself when I next have the page open. Rs 94.03 Cr
+in one customer is worth one person looking at once.
