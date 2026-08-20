@@ -156,9 +156,15 @@ export async function buildProductDataQuality(fy: string): Promise<ProductDataQu
   `);
   const unmappedCodeTotal = Number(unmappedTotalRow.rows[0]?.codes ?? 0);
 
-  // (c) Register-code gap — resolve every distinct FY code against the master
-  //     using the shared resolver (exact first). Group the unresolved by prefix.
-  const masterRes = await db.execute<{ code: string }>(sql`SELECT code FROM item_master`);
+  // (c) Register-code gap — resolve every distinct FY code against the active,
+  //     authoritative current-price catalogue. item_master is an uploaded
+  //     enrichment table and can otherwise make this card look complete while
+  //     the source catalogue is missing a product line.
+  //     mrp_current_catalogue falls back to legacy MRP only before the first
+  //     successful authoritative sync.
+  const masterRes = await db.execute<{ code: string }>(
+    sql`SELECT DISTINCT item_code AS code FROM mrp_current_catalogue`,
+  );
   const { has, codes } = buildResolverIndex(masterRes.rows.map((r) => r.code));
   const fyCodesRes = await db.execute<{ code: string }>(
     sql`SELECT DISTINCT code FROM sale_line WHERE fy = ${fy}`,
@@ -271,7 +277,9 @@ router.get("/product-reports", async (req, res) => {
       return;
     }
     const payload = await serveWithSnapshot({
-      key: `product-reports|v2|${fy}`,
+      // The card's catalogue basis changed from item_master to the
+      // authoritative source cache; do not serve a snapshot made on v2.
+      key: `product-reports|v3|${fy}`,
       ttlMs: PRODUCT_REPORTS_TTL_MS,
       build: () => buildProductReports(fy) as unknown as Promise<Record<string, unknown>>,
       log: req.log,
