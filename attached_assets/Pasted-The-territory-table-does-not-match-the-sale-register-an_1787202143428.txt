@@ -1,0 +1,42 @@
+The territory table does not match the sale register and the gap is Rs 95.94 Cr.
+
+It was built from the HR file's Working State column. The sale register uses a
+different vocabulary with the real splits. 13 sale-register states have no
+territory row:
+
+  UP ( A ) 8.24 Cr · AP 6.86 · KARNATAKA (B) 3.96 · CHHATTISGARH 3.86
+  KASHMIR 2.49 · DELHI A 2.23 · JAMMU 2.21 · UP (AS) 1.48 · RAJASTHAN (N) 0.05
+  plus Non-territory 58.04, GEM 3.56, JJM 2.87, HITESH 0.10
+
+Also: six of the seven "split" groups are the SAME state in two cases -
+"Andhra Pradesh" parent with "ANDHRA PRADESH" child, and the same for
+Karnataka, Rajasthan, Tamil Nadu, Jammu and Kashmir. Those are not splits.
+
+Report first. Do not change anything.
+
+1. Print every distinct state_canon in sale_line for FY2024-25, FY2025-26 and
+   FY2026-27 separately, with row count and net. I want to see which split
+   values appear in which years - UP (AS) and RAJASTHAN (N) look new.
+
+2. For each of those, print the distinct head_canon values. A state with more
+   than one head is a genuine multi-head territory and the model has to hold
+   it. UTTAR PRADESH, UP ( A ) and UP (AS) are Rs 49.81 Cr between them -
+   confirm whether they are one state under several heads or separate
+   territories.
+
+3. Print how the existing state_hierarchy table - the one built for the state
+   filter, 37 rows - maps these. That table was built FROM the register and
+   should already have them. If it does, the org territory table is a second,
+   worse copy of something that already exists.
+
+4. Confirm whether JAMMU and KASHMIR are separate in the register and whether
+   different heads cover them.
+
+5. Print the six case-duplicate territory pairs with the person_territory
+   count on each side. If people are assigned to both "Karnataka" and
+   "KARNATAKA", the coverage figures are split across a casing difference.
+
+THEN PROPOSE, do not build: whether org territories should simply POINT AT
+state_hierarchy rather than maintaining a separate list. Two territory tables
+that must agree is the pattern that has cost this project repeatedly - it is
+the same shape as head_alias.json and normalize.json.
