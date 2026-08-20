@@ -289,10 +289,21 @@ router.patch("/competitor-price/:id/map", async (req: Request, res: Response) =>
   const code       = prayagItemCode?.trim() || null;
   const mapperName = mappedBy?.trim() || "(anonymous)";  // self-declared, unverified
 
-  // If mapping to a code, verify it exists in mrp_master
+  // If an authoritative MRP cache exists, it is the code authority.  Before
+  // the first cache generation, preserve the legacy validation fallback.
   if (code) {
     const check = await pool.query(
-      `SELECT 1 FROM mrp_master WHERE item_code = $1 LIMIT 1`,
+      `SELECT 1
+       FROM (
+         SELECT s.item_code
+         FROM mrp_synced s JOIN mrp_sync_generation g ON g.generation_id = s.generation_id
+         WHERE g.is_active = TRUE
+         UNION ALL
+         SELECT m.item_code
+         FROM mrp_master m
+         WHERE NOT EXISTS (SELECT 1 FROM mrp_sync_generation WHERE is_active = TRUE)
+       ) codes
+       WHERE item_code = $1 LIMIT 1`,
       [code],
     );
     if ((check.rowCount ?? 0) === 0) {

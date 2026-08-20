@@ -31,6 +31,8 @@ interface MrpRow {
   itemCode: string;
   itemName: string | null;
   segment: string;
+  segments?: string[];
+  divisionRaw?: string;
   series: string | null;
   packing: string | null;
   isAmbiguousCode: boolean;
@@ -52,6 +54,12 @@ interface MrpMeta {
   totalCodes: number;
   codesWithRevision: number;
   ambiguousCodes: number;
+  multiDivisionCodes?: number;
+  sync?: {
+    sourceFetchedAt: string | null;
+    provenanceComplete: boolean;
+    lastError: string | null;
+  };
 }
 
 interface HistoryEntry {
@@ -342,7 +350,7 @@ export default function MrpContent() {
           <div>
             <h1 className="text-lg font-semibold text-slate-900">MRP Master</h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              Effective-dated price catalogue — 6 segments
+              Authoritative synced price catalogue — one MRP per item code
             </p>
           </div>
         </div>
@@ -382,6 +390,12 @@ export default function MrpContent() {
                 <span className="font-semibold text-slate-900">{meta.codesWithRevision.toLocaleString("en-IN")}</span>{" "}
                 with revision
               </span>
+              {(meta.multiDivisionCodes ?? 0) > 0 && (
+                <span title="One source item code can belong to several divisions without duplicating its MRP row.">
+                  <span className="font-semibold text-slate-900">{meta.multiDivisionCodes?.toLocaleString("en-IN")}</span>{" "}
+                  multi-division
+                </span>
+              )}
               {meta.ambiguousCodes > 0 && (
                 <span
                   className="flex items-center gap-1 text-amber-700 font-medium"
@@ -409,6 +423,26 @@ export default function MrpContent() {
       {activeTab === "catalogue" && <>
 
       {/* Ambiguous-code notice banner — shown when not filtered to a single segment */}
+       {meta?.sync?.lastError && (
+         <div className="bg-amber-50 border-b border-amber-200 px-6 py-2 flex items-start gap-2 text-xs text-amber-800">
+           <AlertTriangle className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
+           <span>
+             <span className="font-medium">Source refresh is unavailable.</span>{" "}
+             Showing the last successful local cache{meta.sync.sourceFetchedAt ? ` from ${fmtDate(meta.sync.sourceFetchedAt.slice(0, 10))}` : ""}.
+           </span>
+         </div>
+       )}
+       {meta?.sync && !meta.sync.provenanceComplete && (
+         <div className="bg-amber-50 border-b border-amber-200 px-6 py-2 flex items-start gap-2 text-xs text-amber-800">
+           <Info className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
+           <span>
+             <span className="font-medium">Source lineage is incomplete.</span>{" "}
+             Current MRP is synced from prayag-price.com, but its product feed has not exposed a source batch ID for every price. The cache retains this review gap instead of marking those prices approved.
+           </span>
+         </div>
+       )}
+
+       {/* Legacy ambiguity notice — absent for the one-code source cache. */}
       {meta && meta.ambiguousCodes > 0 && segment === ALL && (
         <div className="bg-amber-50 border-b border-amber-200 px-6 py-2 flex items-start gap-2 text-xs text-amber-800">
           <AlertTriangle className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
@@ -502,7 +536,7 @@ export default function MrpContent() {
                 <TableRow className="bg-slate-50">
                   <TableHead className="w-[160px]">Code</TableHead>
                   <TableHead>Name</TableHead>
-                  <TableHead className="w-[140px]">Segment</TableHead>
+                  <TableHead className="w-[220px]">Source divisions</TableHead>
                   <TableHead className="w-[160px]">Series</TableHead>
                   <TableHead className="w-[110px] text-right">Current MRP</TableHead>
                   <TableHead className="w-[130px]">Effective From</TableHead>
@@ -550,7 +584,16 @@ export default function MrpContent() {
                         </span>
                       </TableCell>
                       <TableCell>
-                        <SegmentBadge segment={row.segment} />
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap gap-1">
+                            {(row.segments?.length ? row.segments : [row.segment]).map((mapped) => (
+                              <SegmentBadge key={mapped} segment={mapped} />
+                            ))}
+                          </div>
+                          {row.divisionRaw && (
+                            <p className="text-[10px] leading-tight text-slate-400">{row.divisionRaw}</p>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <span className="text-xs text-slate-600">{row.series ?? "—"}</span>

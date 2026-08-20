@@ -162,8 +162,9 @@ export async function getPriceShrinkers(params: PriceShrinkersParams): Promise<P
         ${entityFilterSql}
       GROUP BY 1, sl.code
     ),
-    -- Bridge sale_line.group_canon → mrp_master.segment taxonomy.
-    -- sale_line uses "PTMT / Faucets" / "CP (Chrome-Plated)"; mrp_master uses "PTMT" / "CP".
+    -- Bridge sale_line.group_canon → authoritative mapped divisions.
+    -- sale_line uses "PTMT / Faucets" / "CP (Chrome-Plated)"; the synced
+    -- source maps them to the application vocabulary "PTMT" / "CP".
     --
     -- Rank rules (tightest only — substring matching is intentionally excluded):
     --   0 = exact case-insensitive match
@@ -173,10 +174,10 @@ export async function getPriceShrinkers(params: PriceShrinkersParams): Promise<P
     -- Rank 2 (substring: ILIKE '%' || mm.segment || '%') is EXCLUDED because:
     --   • "CPVC" ILIKE '%CP%' → TRUE  (wrong: uses CP list price for CPVC codes)
     --   • "S.Steel Sink" ILIKE '%Sink%' → TRUE (wrong: uses Sink segment MRP)
-    -- Both hazards are latent today (those codes are absent from mrp_master) but
+    -- Both hazards are latent today (those codes are absent from the MRP cache) but
     -- the rule must be tight before any MRP expansion adds them.
     --
-    -- Ambiguity: if two mrp_master segments tie at the same best rank for a
+    -- Ambiguity: if two mapped divisions tie at the same best rank for a
     -- (code, grp) pair BOTH are REJECTED — no silent arbitrary pick.
     code_mrp_ranked AS (
       SELECT
@@ -190,7 +191,19 @@ export async function getPriceShrinkers(params: PriceShrinkersParams): Promise<P
           ELSE 99
         END AS rank
       FROM (SELECT DISTINCT code, segment FROM prior) p
-      JOIN mrp_master mm ON mm.item_code = p.code
+      JOIN (
+        SELECT s.item_code, d.app_segment AS segment
+        FROM mrp_synced s
+        JOIN mrp_sync_generation g
+          ON g.generation_id = s.generation_id AND g.is_active = true
+        JOIN mrp_synced_division d
+          ON d.generation_id = s.generation_id AND d.item_code = s.item_code
+        WHERE d.app_segment IS NOT NULL
+        UNION ALL
+        SELECT m.item_code, m.segment
+        FROM mrp_master m
+        WHERE NOT EXISTS (SELECT 1 FROM mrp_sync_generation WHERE is_active = true)
+      ) mm ON mm.item_code = p.code
       WHERE
         p.segment = mm.segment
         OR p.segment ILIKE mm.segment || ' %'
@@ -218,13 +231,26 @@ export async function getPriceShrinkers(params: PriceShrinkersParams): Promise<P
         CASE WHEN effective_to IS NULL OR effective_to >= ${priorAsOf} THEN 0 ELSE 1 END ASC,
         effective_from DESC
     ),
-    -- Current MRP (is_current = true).
+    -- Current MRP comes from the authoritative cache once it has a completed
+    -- generation.  The legacy row is a first-sync bootstrap fallback only.
+    -- Historical/as-of MRP remains the old audited history until the source
+    -- exposes its history contract; a current source price is never backfilled
+    -- into a prior period.
     mrp_now AS (
-      SELECT DISTINCT ON (item_code, segment)
-        item_code, segment, mrp
-      FROM mrp_history
-      WHERE is_current = true
-      ORDER BY item_code, segment, effective_from DESC
+      SELECT DISTINCT ON (s.item_code, d.app_segment)
+        s.item_code, d.app_segment AS segment, s.mrp
+      FROM mrp_synced s
+      JOIN mrp_sync_generation g
+        ON g.generation_id = s.generation_id AND g.is_active = true
+      JOIN mrp_synced_division d
+        ON d.generation_id = s.generation_id AND d.item_code = s.item_code
+      WHERE d.app_segment IS NOT NULL
+      UNION ALL
+      SELECT DISTINCT ON (h.item_code, h.segment)
+        h.item_code, h.segment, h.mrp
+      FROM mrp_history h
+      WHERE h.is_current = true
+        AND NOT EXISTS (SELECT 1 FROM mrp_sync_generation WHERE is_active = true)
     )
     SELECT
       p.segment,
@@ -302,9 +328,8 @@ export async function getPriceShrinkers(params: PriceShrinkersParams): Promise<P
 
   // ── Excluded codes: prior sales but NO MRP record for their (code, segment) ─
 
-  // Excluded = codes in prior period that have NO mrp_history entry at all
-  // (regardless of segment). These are whole code families (PTA-, CPCS-, etc.)
-  // that were never loaded into the MRP master.
+  // Excluded = codes in the period that have no authoritative cache record
+  // (or no legacy record before the first successful cache generation).
   const excludedRows = await db.execute<{
     segment:   string;
     code:      string;
@@ -327,7 +352,13 @@ export async function getPriceShrinkers(params: PriceShrinkersParams): Promise<P
       GROUP BY 1, sl.code
     ),
     has_mrp AS (
-      SELECT DISTINCT item_code FROM mrp_history
+      SELECT DISTINCT s.item_code
+      FROM mrp_synced s
+      JOIN mrp_sync_generation g
+        ON g.generation_id = s.generation_id AND g.is_active = true
+      UNION
+      SELECT DISTINCT h.item_code FROM mrp_history h
+      WHERE NOT EXISTS (SELECT 1 FROM mrp_sync_generation WHERE is_active = true)
     )
     SELECT
       p.segment,
@@ -360,7 +391,15 @@ export async function getPriceShrinkers(params: PriceShrinkersParams): Promise<P
         ${entityFilterSql}
       GROUP BY 1, sl.code
     ),
-    has_mrp AS (SELECT DISTINCT item_code FROM mrp_history)
+    has_mrp AS (
+      SELECT DISTINCT s.item_code
+      FROM mrp_synced s
+      JOIN mrp_sync_generation g
+        ON g.generation_id = s.generation_id AND g.is_active = true
+      UNION
+      SELECT DISTINCT h.item_code FROM mrp_history h
+      WHERE NOT EXISTS (SELECT 1 FROM mrp_sync_generation WHERE is_active = true)
+    )
     SELECT COUNT(*)::text AS cnt
     FROM prior p
     LEFT JOIN has_mrp h ON h.item_code = p.code

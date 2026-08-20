@@ -10,7 +10,10 @@
 // "net price" is NOT observed — it is computed as mrp × (1 − DISCOUNT_PCT/100).
 // Label every derived net price as "derived" in the UI; never present it as a street price.
 
-const COMPETITION_BASE = "https://prayag-competition-analysis.replit.app/api";
+// prayag-price.com is the source application's canonical domain.  The legacy
+// Replit domain remains intentionally unused so all price refreshes share one
+// authority and API key boundary.
+const COMPETITION_BASE = "https://prayag-price.com/api";
 export const ASSUMED_DISCOUNT_PCT = 40; // flat default the competition app applies
 
 export interface CompetitionApiRow {

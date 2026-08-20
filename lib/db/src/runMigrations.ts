@@ -2676,6 +2676,113 @@ const MIGRATIONS: Migration[] = [
         WHERE effective_to IS NULL AND voided_at IS NULL;
     `,
   },
+  {
+    id: "064_authoritative_mrp_sync_cache",
+    sql: `
+      -- The old mrp_master/mrp_history remain untouched during the proving
+      -- period.  Generations allow a complete external read to become visible
+      -- atomically while preserving the last successful cache on a failed read.
+      CREATE TABLE IF NOT EXISTS mrp_sync_generation (
+        generation_id UUID PRIMARY KEY,
+        source_fetched_at TIMESTAMPTZ NOT NULL,
+        source_row_count INTEGER NOT NULL CHECK (source_row_count > 0),
+        checksum TEXT NOT NULL,
+        provenance_complete BOOLEAN NOT NULL DEFAULT FALSE,
+        is_active BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS mrp_sync_one_active_generation
+        ON mrp_sync_generation (is_active) WHERE is_active = TRUE;
+
+      CREATE TABLE IF NOT EXISTS mrp_synced (
+        generation_id UUID NOT NULL REFERENCES mrp_sync_generation(generation_id) ON DELETE CASCADE,
+        item_code TEXT NOT NULL,
+        source_product_id BIGINT NOT NULL,
+        product_name TEXT,
+        division_raw TEXT NOT NULL,
+        series_range TEXT,
+        size TEXT,
+        uom TEXT,
+        mrp NUMERIC,
+        price_in_force_since DATE,
+        previous_mrp NUMERIC,
+        change_pct NUMERIC,
+        status TEXT NOT NULL CHECK (status IN ('revised','unchanged','new','discontinued')),
+        colour_variants TEXT[] NOT NULL DEFAULT '{}',
+        source_batch_id TEXT,
+        source_review_status TEXT,
+        source_review_reasons TEXT[] NOT NULL DEFAULT '{}',
+        synced_at TIMESTAMPTZ NOT NULL,
+        PRIMARY KEY (generation_id, item_code)
+      );
+      CREATE INDEX IF NOT EXISTS mrp_synced_active_lookup
+        ON mrp_synced (item_code, generation_id);
+
+      -- Mapping is a child relationship, never a duplicated price row.
+      CREATE TABLE IF NOT EXISTS mrp_synced_division (
+        generation_id UUID NOT NULL,
+        item_code TEXT NOT NULL,
+        source_division TEXT NOT NULL,
+        app_segment TEXT,
+        PRIMARY KEY (generation_id, item_code, source_division),
+        FOREIGN KEY (generation_id, item_code)
+          REFERENCES mrp_synced(generation_id, item_code) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS mrp_synced_division_segment
+        ON mrp_synced_division (generation_id, app_segment);
+
+      CREATE TABLE IF NOT EXISTS mrp_sync_status (
+        singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+        last_success_at TIMESTAMPTZ,
+        last_error TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      INSERT INTO mrp_sync_status (singleton) VALUES (TRUE)
+      ON CONFLICT (singleton) DO NOTHING;
+    `,
+  },
+  {
+    id: "065_authoritative_mrp_current_catalogue_view",
+    sql: `
+      -- One read model for present-day price lookups. It switches wholesale to
+      -- the active source generation; legacy prices remain available only until
+      -- the first complete source refresh succeeds.
+      CREATE OR REPLACE VIEW mrp_current_catalogue AS
+      WITH active_generation AS (
+        SELECT generation_id
+        FROM mrp_sync_generation
+        WHERE is_active = TRUE
+        LIMIT 1
+      )
+      SELECT DISTINCT
+        s.item_code,
+        d.app_segment AS segment,
+        s.product_name AS item_name,
+        s.mrp,
+        s.price_in_force_since AS effective_from
+      FROM active_generation g
+      JOIN mrp_synced s ON s.generation_id = g.generation_id
+      JOIN mrp_synced_division d
+        ON d.generation_id = s.generation_id
+       AND d.item_code = s.item_code
+      WHERE d.app_segment IS NOT NULL
+
+      UNION ALL
+
+      SELECT
+        m.item_code,
+        m.segment,
+        m.item_name,
+        h.mrp,
+        h.effective_from
+      FROM mrp_master m
+      LEFT JOIN mrp_history h
+        ON h.item_code = m.item_code
+       AND h.segment = m.segment
+       AND h.is_current = TRUE
+      WHERE NOT EXISTS (SELECT 1 FROM active_generation);
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

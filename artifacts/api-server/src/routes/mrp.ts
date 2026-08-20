@@ -14,12 +14,102 @@ import { pool } from "@workspace/db";
 import { loadMrpFiles } from "../lib/mrp/loader.js";
 import { isAdminToken } from "../lib/adminAuth.js";
 import { resolveProductCode, buildResolverIndex } from "../lib/sku/productCodeResolver.js";
+import {
+  authoritativeMrpStatus,
+  refreshAuthoritativeMrpCache,
+} from "../lib/mrp/syncedCache.js";
 
 const router = Router();
+
+async function activeSyncedGeneration(): Promise<string | null> {
+  const result = await pool.query<{ generation_id: string }>(
+    "SELECT generation_id::text FROM mrp_sync_generation WHERE is_active = TRUE LIMIT 1",
+  );
+  return result.rows[0]?.generation_id ?? null;
+}
+
+async function serveSyncedList(
+  req: import("express").Request,
+  res: import("express").Response,
+  generationId: string,
+): Promise<void> {
+  const segment = typeof req.query.segment === "string" ? req.query.segment : null;
+  const series = typeof req.query.series === "string" ? req.query.series : null;
+  const q = typeof req.query.q === "string" ? req.query.q.trim() : null;
+  const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit ?? "50"), 10) || 50));
+  const offset = Math.max(0, parseInt(String(req.query.offset ?? "0"), 10) || 0);
+  const conditions = ["s.generation_id = $1"];
+  const params: (string | number)[] = [generationId];
+  let p = 2;
+  if (segment) {
+    conditions.push(`EXISTS (
+      SELECT 1 FROM mrp_synced_division d
+      WHERE d.generation_id = s.generation_id AND d.item_code = s.item_code AND d.app_segment = $${p++}
+    )`);
+    params.push(segment);
+  }
+  if (series) { conditions.push(`s.series_range = $${p++}`); params.push(series); }
+  if (q) {
+    conditions.push(`(s.item_code ILIKE $${p} OR s.product_name ILIKE $${p})`);
+    params.push(`%${q}%`);
+    p++;
+  }
+  const where = conditions.join(" AND ");
+  const [rowsResult, totalResult] = await Promise.all([
+    pool.query<{
+      item_code: string; product_name: string | null; division_raw: string; series_range: string | null;
+      size: string | null; uom: string | null; current_mrp: string | null; effective_from: string | null;
+      previous_mrp: string | null; segments: string[]; source_review_status: string | null;
+    }>(
+      `SELECT s.item_code, s.product_name, s.division_raw, s.series_range, s.size, s.uom,
+              s.mrp::text AS current_mrp, s.price_in_force_since::text AS effective_from,
+              s.previous_mrp::text, s.source_review_status,
+              COALESCE(array_agg(DISTINCT d.app_segment) FILTER (WHERE d.app_segment IS NOT NULL), '{}') AS segments
+       FROM mrp_synced s
+       LEFT JOIN mrp_synced_division d
+         ON d.generation_id = s.generation_id AND d.item_code = s.item_code
+       WHERE ${where}
+       GROUP BY s.generation_id, s.item_code
+       ORDER BY s.division_raw, s.series_range NULLS LAST, s.item_code
+       LIMIT $${p} OFFSET $${p + 1}`,
+      [...params, limit, offset],
+    ),
+    pool.query<{ total: string }>(
+      `SELECT COUNT(*)::text AS total FROM mrp_synced s WHERE ${where}`,
+      params,
+    ),
+  ]);
+  const total = Number(totalResult.rows[0]?.total ?? 0);
+  res.json({
+    total, limit, offset, unseeded: total === 0 && !segment && !series && !q,
+    source: "prayag-price.com",
+    rows: rowsResult.rows.map((row) => ({
+      itemCode: row.item_code,
+      itemName: row.product_name,
+      // Retained for older UI callers; it is the first mapped division only,
+      // not an invented per-segment catalogue row.
+      segment: row.segments[0] ?? "Unmapped",
+      segments: row.segments,
+      divisionRaw: row.division_raw,
+      series: row.series_range,
+      packing: row.size ?? row.uom,
+      isAmbiguousCode: false,
+      currentMrp: row.current_mrp == null ? null : Number(row.current_mrp),
+      effectiveFrom: row.effective_from,
+      historyCount: row.previous_mrp == null ? 1 : 2,
+      sourceReviewStatus: row.source_review_status,
+    })),
+  });
+}
 
 // ── GET /api/mrp ──────────────────────────────────────────────────────────
 router.get("/mrp", async (req, res) => {
   try {
+    const generationId = await activeSyncedGeneration();
+    if (generationId) {
+      await serveSyncedList(req, res, generationId);
+      return;
+    }
     const segment = typeof req.query.segment === "string" ? req.query.segment : null;
     const series = typeof req.query.series === "string" ? req.query.series : null;
     const q = typeof req.query.q === "string" ? req.query.q.trim() : null;
@@ -115,6 +205,46 @@ router.get("/mrp", async (req, res) => {
 // ── GET /api/mrp/meta ─────────────────────────────────────────────────────
 router.get("/mrp/meta", async (_req, res) => {
   try {
+    const generationId = await activeSyncedGeneration();
+    if (generationId) {
+      const [segResult, seriesResult, countResult, status] = await Promise.all([
+        pool.query<{ segment: string }>(
+          `SELECT DISTINCT d.app_segment AS segment
+           FROM mrp_synced_division d
+           WHERE d.generation_id = $1 AND d.app_segment IS NOT NULL ORDER BY segment`,
+          [generationId],
+        ),
+        pool.query<{ segment: string; series: string }>(
+          `SELECT DISTINCT d.app_segment AS segment, s.series_range AS series
+           FROM mrp_synced s JOIN mrp_synced_division d
+             ON d.generation_id = s.generation_id AND d.item_code = s.item_code
+           WHERE s.generation_id = $1 AND d.app_segment IS NOT NULL AND s.series_range IS NOT NULL
+           ORDER BY segment, series`,
+          [generationId],
+        ),
+        pool.query<{ total: string; revisions: string; multi_division: string }>(
+          `SELECT COUNT(*)::text AS total,
+                  COUNT(*) FILTER (WHERE previous_mrp IS NOT NULL)::text AS revisions,
+                  COUNT(*) FILTER (WHERE division_raw LIKE '%|%')::text AS multi_division
+           FROM mrp_synced WHERE generation_id = $1`,
+          [generationId],
+        ),
+        authoritativeMrpStatus(),
+      ]);
+      const seriesBySegment: Record<string, string[]> = {};
+      for (const row of seriesResult.rows) (seriesBySegment[row.segment] ??= []).push(row.series);
+      const counts = countResult.rows[0];
+      res.json({
+        segments: segResult.rows.map((r) => r.segment),
+        seriesBySegment,
+        totalCodes: Number(counts?.total ?? 0),
+        codesWithRevision: Number(counts?.revisions ?? 0),
+        ambiguousCodes: 0,
+        multiDivisionCodes: Number(counts?.multi_division ?? 0),
+        sync: status,
+      });
+      return;
+    }
     const [segResult, serResult, countResult] = await Promise.all([
       pool.query<{ segment: string }>(
         "SELECT DISTINCT segment FROM mrp_master ORDER BY segment",
@@ -155,11 +285,17 @@ router.get("/mrp/meta", async (_req, res) => {
 // ── GET /api/mrp/stats ────────────────────────────────────────────────────
 router.get("/mrp/stats", async (req, res) => {
   try {
+    const generationId = await activeSyncedGeneration();
     // Distinct MRP codes and sale_line FY2026-27 codes.
     // For the resolver, use DISTINCT item_code (one entry per code, not per segment)
     // since the register code has no segment information.
     const [mrpCodesResult, slCodesResult] = await Promise.all([
-      pool.query<{ item_code: string }>("SELECT DISTINCT item_code FROM mrp_master"),
+      pool.query<{ item_code: string }>(
+        generationId
+          ? "SELECT item_code FROM mrp_synced WHERE generation_id = $1"
+          : "SELECT DISTINCT item_code FROM mrp_master",
+        generationId ? [generationId] : [],
+      ),
       pool.query<{ code: string }>(
         "SELECT DISTINCT code FROM sale_line_current WHERE fy = '2026-27' AND code IS NOT NULL AND code <> ''",
       ),
@@ -205,8 +341,11 @@ router.get("/mrp/stats", async (req, res) => {
       `SELECT COALESCE(SUM(sl.amount),0)::text AS net
        FROM sale_line_current sl
        WHERE sl.fy = '2026-27'
-         AND sl.code IN (SELECT DISTINCT item_code FROM mrp_master)
+          AND sl.code IN (${generationId
+            ? "SELECT item_code FROM mrp_synced WHERE generation_id = $1"
+            : "SELECT DISTINCT item_code FROM mrp_master"})
          AND sl.code NOT IN (SELECT code FROM item_master WHERE mrp IS NOT NULL)`,
+      generationId ? [generationId] : [],
     );
 
     res.json({
@@ -220,6 +359,39 @@ router.get("/mrp/stats", async (req, res) => {
   } catch (err) {
     req.log?.error({ err }, "mrp stats error");
     res.status(500).json({ error: "Failed to compute MRP stats" });
+  }
+});
+
+// ── GET /api/mrp/sync-status ───────────────────────────────────────────────
+router.get("/mrp/sync-status", async (_req, res) => {
+  try {
+    res.json(await authoritativeMrpStatus());
+  } catch (err) {
+    res.status(500).json({ error: "Failed to load MRP sync status" });
+  }
+});
+
+// ── POST /api/admin/mrp/sync ───────────────────────────────────────────────
+router.post("/admin/mrp/sync", async (req, res) => {
+  const token = String(req.headers["x-admin-secret"] ?? "").trim();
+  if (!isAdminToken(token)) {
+    res.status(401).json({ error: "Admin authorisation required." });
+    return;
+  }
+  try {
+    const report = await refreshAuthoritativeMrpCache();
+    req.log.info({
+      generationId: report.generationId,
+      rowsSynced: report.rowsSynced,
+      provenanceComplete: report.provenanceComplete,
+    }, "authoritative MRP sync complete");
+    res.json(report);
+  } catch (err) {
+    req.log.error({ err }, "authoritative MRP sync failed; last good cache retained");
+    res.status(502).json({
+      error: err instanceof Error ? err.message : String(err),
+      cache: await authoritativeMrpStatus().catch(() => null),
+    });
   }
 });
 
@@ -254,40 +426,79 @@ router.get("/mrp/calculator", async (req, res) => {
 
     if (!code) { res.status(400).json({ error: "?code= is required" }); return; }
 
-    // 1 — resolve in mrp_master (ambiguity check)
-    const masterRows = await pool.query<{
-      segment: string; item_name: string | null; series: string | null; packing: string | null;
-      is_ambiguous: boolean;
-    }>(
-      `SELECT segment, item_name, series, packing,
-              (SELECT COUNT(DISTINCT m2.segment) > 1
-               FROM mrp_master m2 WHERE m2.item_code = m.item_code) AS is_ambiguous
-       FROM mrp_master m WHERE m.item_code = $1 ORDER BY m.segment`,
-      [code],
-    );
+    const syncedGeneration = await activeSyncedGeneration();
+    let isAmbiguous = false;
+    let availableSegments: string[] = [];
+    let targetSegment = segmentParam ?? "";
+    let masterRow: { item_name: string | null; series: string | null; packing: string | null };
+    let sourceMrp: { mrp: string | null; effective_from: string | null } | null = null;
 
-    if ((masterRows.rowCount ?? 0) === 0) {
-      res.status(404).json({ error: `Code ${code} not found in MRP master` }); return;
-    }
-
-    const isAmbiguous = masterRows.rows[0].is_ambiguous;
-    const availableSegments = masterRows.rows.map((r) => r.segment);
-
-    // Ambiguous code with no segment supplied → refuse to guess
-    if (isAmbiguous && !segmentParam) {
-      res.status(409).json({
-        error: "ambiguous code, segment required",
-        reason: `Code ${code} exists in ${availableSegments.length} segments. Supply ?segment= to disambiguate.`,
-        availableSegments,
-      });
-      return;
-    }
-
-    // Determine which segment to use
-    const targetSegment = segmentParam ?? availableSegments[0];
-    const masterRow = masterRows.rows.find((r) => r.segment === targetSegment);
-    if (!masterRow) {
-      res.status(404).json({ error: `Code ${code} not found in segment ${targetSegment}`, availableSegments }); return;
+    if (syncedGeneration) {
+      const sourceRows = await pool.query<{
+        item_name: string | null; series: string | null; packing: string | null;
+        mrp: string | null; effective_from: string | null; segments: string[];
+      }>(
+        `SELECT s.product_name AS item_name, s.series_range AS series, COALESCE(s.size, s.uom) AS packing,
+                s.mrp::text, s.price_in_force_since::text AS effective_from,
+                COALESCE(array_agg(DISTINCT d.app_segment ORDER BY d.app_segment)
+                  FILTER (WHERE d.app_segment IS NOT NULL), '{}') AS segments
+         FROM mrp_synced s
+         LEFT JOIN mrp_synced_division d ON d.generation_id = s.generation_id AND d.item_code = s.item_code
+         WHERE s.generation_id = $1 AND s.item_code = $2
+         GROUP BY s.generation_id, s.item_code`,
+        [syncedGeneration, code],
+      );
+      const sourceRow = sourceRows.rows[0];
+      if (!sourceRow) {
+        res.status(404).json({ error: `Code ${code} not found in authoritative MRP cache` }); return;
+      }
+      availableSegments = sourceRow.segments;
+      isAmbiguous = availableSegments.length > 1;
+      if (isAmbiguous && !segmentParam) {
+        res.status(409).json({
+          error: "ambiguous code, segment required",
+          reason: `Code ${code} belongs to ${availableSegments.length} mapped divisions. Supply ?segment= to disambiguate.`,
+          availableSegments,
+        });
+        return;
+      }
+      if (segmentParam && !availableSegments.includes(segmentParam)) {
+        res.status(404).json({ error: `Code ${code} is not mapped to segment ${segmentParam}`, availableSegments });
+        return;
+      }
+      targetSegment = segmentParam ?? availableSegments[0] ?? "Unmapped";
+      masterRow = sourceRow;
+      sourceMrp = { mrp: sourceRow.mrp, effective_from: sourceRow.effective_from };
+    } else {
+      const masterRows = await pool.query<{
+        segment: string; item_name: string | null; series: string | null; packing: string | null;
+        is_ambiguous: boolean;
+      }>(
+        `SELECT segment, item_name, series, packing,
+                (SELECT COUNT(DISTINCT m2.segment) > 1
+                 FROM mrp_master m2 WHERE m2.item_code = m.item_code) AS is_ambiguous
+         FROM mrp_master m WHERE m.item_code = $1 ORDER BY m.segment`,
+        [code],
+      );
+      if ((masterRows.rowCount ?? 0) === 0) {
+        res.status(404).json({ error: `Code ${code} not found in MRP master` }); return;
+      }
+      isAmbiguous = masterRows.rows[0].is_ambiguous;
+      availableSegments = masterRows.rows.map((r) => r.segment);
+      if (isAmbiguous && !segmentParam) {
+        res.status(409).json({
+          error: "ambiguous code, segment required",
+          reason: `Code ${code} exists in ${availableSegments.length} segments. Supply ?segment= to disambiguate.`,
+          availableSegments,
+        });
+        return;
+      }
+      targetSegment = segmentParam ?? availableSegments[0]!;
+      const legacyRow = masterRows.rows.find((r) => r.segment === targetSegment);
+      if (!legacyRow) {
+        res.status(404).json({ error: `Code ${code} not found in segment ${targetSegment}`, availableSegments }); return;
+      }
+      masterRow = legacyRow;
     }
 
     const trailing12 = trailing12MonthLabels();
@@ -295,11 +506,13 @@ router.get("/mrp/calculator", async (req, res) => {
     // 2-5 — parallel queries
     const [mrpRow, marginRow, sampleRows, saleRow, secRow] = await Promise.all([
       // Current MRP
-      pool.query<{ mrp: string | null; effective_from: string | null }>(
-        `SELECT mrp::text, effective_from::text
-         FROM mrp_history WHERE item_code = $1 AND segment = $2 AND is_current = TRUE LIMIT 1`,
-        [code, targetSegment],
-      ),
+      sourceMrp
+        ? Promise.resolve({ rows: [sourceMrp] })
+        : pool.query<{ mrp: string | null; effective_from: string | null }>(
+          `SELECT mrp::text, effective_from::text
+           FROM mrp_history WHERE item_code = $1 AND segment = $2 AND is_current = TRUE LIMIT 1`,
+          [code, targetSegment],
+        ),
       // Primary discount + BOM cost from margin_fact (trailing 12 complete months)
       pool.query<{
         weighted_discount: string | null; weighted_bom: string | null;
@@ -656,6 +869,68 @@ router.get("/mrp/:code/history", async (req, res) => {
     const code = req.params.code;
     const segmentParam =
       typeof req.query.segment === "string" ? req.query.segment : null;
+    const syncedGeneration = await activeSyncedGeneration();
+    if (syncedGeneration) {
+      const sourceResult = await pool.query<{
+        item_code: string; product_name: string | null; division_raw: string; series_range: string | null;
+        size: string | null; uom: string | null; mrp: string | null; effective_from: string | null;
+        previous_mrp: string | null; segments: string[];
+      }>(
+        `SELECT s.item_code, s.product_name, s.division_raw, s.series_range, s.size, s.uom,
+                s.mrp::text, s.price_in_force_since::text AS effective_from, s.previous_mrp::text,
+                COALESCE(array_agg(DISTINCT d.app_segment ORDER BY d.app_segment)
+                  FILTER (WHERE d.app_segment IS NOT NULL), '{}') AS segments
+         FROM mrp_synced s
+         LEFT JOIN mrp_synced_division d ON d.generation_id = s.generation_id AND d.item_code = s.item_code
+         WHERE s.generation_id = $1 AND s.item_code = $2
+         GROUP BY s.generation_id, s.item_code`,
+        [syncedGeneration, code],
+      );
+      const source = sourceResult.rows[0];
+      if (!source) {
+        res.status(404).json({ error: "Item code not found in authoritative MRP cache" });
+        return;
+      }
+      if (source.segments.length > 1 && !segmentParam) {
+        res.status(409).json({
+          error: "ambiguous code, segment required",
+          reason: `Code ${code} belongs to ${source.segments.length} mapped divisions. Supply ?segment= to disambiguate.`,
+          availableSegments: source.segments,
+        });
+        return;
+      }
+      if (segmentParam && !source.segments.includes(segmentParam)) {
+        res.status(404).json({
+          error: `Code ${code} is not mapped to segment ${segmentParam}`,
+          availableSegments: source.segments,
+        });
+        return;
+      }
+      const segment = segmentParam ?? source.segments[0] ?? "Unmapped";
+      // The upstream public contract currently publishes the current effective
+      // price only. Do not manufacture a time line from the legacy tables.
+      res.json({
+        itemCode: source.item_code,
+        itemName: source.product_name,
+        segment,
+        segments: source.segments,
+        divisionRaw: source.division_raw,
+        series: source.series_range,
+        packing: source.size ?? source.uom,
+        isAmbiguousCode: source.segments.length > 1,
+        availableSegments: source.segments.length > 1 ? source.segments : undefined,
+        history: source.mrp == null ? [] : [{
+          id: 0,
+          mrp: Number(source.mrp),
+          effectiveFrom: source.effective_from ?? "1970-01-01",
+          effectiveTo: null,
+          sourceFile: "prayag-price.com authoritative product catalogue",
+          isCurrent: true,
+        }],
+        historyAvailability: "current-price-only",
+      });
+      return;
+    }
 
     // Check whether this code is ambiguous
     const ambigResult = await pool.query<{ segment: string; item_name: string | null; series: string | null; packing: string | null; is_ambiguous: boolean }>(

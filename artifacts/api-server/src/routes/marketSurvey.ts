@@ -1,6 +1,6 @@
 // GET  /api/market-survey/meta                    — segments, known brands, picker states
 // GET  /api/market-survey/customers               — customer_master autocomplete (?q=)
-// GET  /api/market-survey/products                — mrp_master autocomplete (?segment=&q=)
+// GET  /api/market-survey/products                — authoritative MRP autocomplete (?segment=&q=)
 // GET  /api/market-survey/purchase-lookup         — secondary register check (?customerId=&prayagItemCode=)
 // GET  /api/market-survey                        — list surveys (?segment=&brand=&recorder=&limit=&offset=)
 // POST /api/market-survey                        — submit multi-line; recorded_by = recorderName (self-declared)
@@ -57,7 +57,18 @@ router.get("/market-survey/meta", async (req, res) => {
   try {
     const [segsResult, brandsResult, statesResult] = await Promise.all([
       pool.query<{ segment: string }>(
-        "SELECT DISTINCT segment FROM mrp_master ORDER BY segment",
+        `SELECT DISTINCT segment
+         FROM (
+           SELECT d.app_segment AS segment
+           FROM mrp_synced_division d
+           JOIN mrp_sync_generation g ON g.generation_id = d.generation_id AND g.is_active = TRUE
+           WHERE d.app_segment IS NOT NULL
+           UNION
+           SELECT m.segment
+           FROM mrp_master m
+           WHERE NOT EXISTS (SELECT 1 FROM mrp_sync_generation WHERE is_active = TRUE)
+         ) segments
+         ORDER BY segment`,
       ),
       pool.query<{ brand: string; n: string }>(
         `SELECT competitor_brand AS brand, COUNT(*)::text AS n
@@ -131,17 +142,29 @@ router.get("/market-survey/products", async (req, res) => {
     const params: (string | number)[] = [];
     const conds: string[] = [];
     let p = 1;
-    if (segment) { conds.push(`m.segment = $${p++}`); params.push(segment); }
-    if (q)       { conds.push(`(m.item_code ILIKE $${p} OR m.item_name ILIKE $${p})`); params.push(`%${q}%`); p++; }
+    if (segment) { conds.push(`$${p++} = ANY(source.segments)`); params.push(segment); }
+    if (q)       { conds.push(`(source.item_code ILIKE $${p} OR source.item_name ILIKE $${p})`); params.push(`%${q}%`); p++; }
     const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
 
     const result = await pool.query<{ item_code: string; item_name: string | null; segment: string; mrp: string | null }>(
-      `SELECT m.item_code, m.item_name, m.segment,
-              h.mrp::text AS mrp
-       FROM mrp_master m
-       LEFT JOIN mrp_history h ON h.item_code = m.item_code AND h.segment = m.segment AND h.is_current = TRUE
+      `WITH source AS (
+         SELECT s.item_code, s.product_name AS item_name,
+                COALESCE(array_agg(DISTINCT d.app_segment) FILTER (WHERE d.app_segment IS NOT NULL), ARRAY['Unmapped']) AS segments,
+                s.mrp::text AS mrp
+         FROM mrp_synced s
+         JOIN mrp_sync_generation g ON g.generation_id = s.generation_id AND g.is_active = TRUE
+         LEFT JOIN mrp_synced_division d ON d.generation_id = s.generation_id AND d.item_code = s.item_code
+         GROUP BY s.generation_id, s.item_code
+         UNION ALL
+         SELECT m.item_code, m.item_name, ARRAY[m.segment] AS segments, h.mrp::text
+         FROM mrp_master m
+         LEFT JOIN mrp_history h ON h.item_code = m.item_code AND h.segment = m.segment AND h.is_current = TRUE
+         WHERE NOT EXISTS (SELECT 1 FROM mrp_sync_generation WHERE is_active = TRUE)
+       )
+       SELECT source.item_code, source.item_name, source.segments[1] AS segment, source.mrp
+       FROM source
        ${where}
-       ORDER BY m.segment, m.item_code
+       ORDER BY source.segments[1], source.item_code
        LIMIT 50`,
       params,
     );
@@ -562,8 +585,8 @@ router.get("/market-survey/summary", async (req, res) => {
       `SELECT
          s.prayag_item_code           AS item_code,
          s.segment,
-         m.item_name,
-         h.mrp::text                 AS current_mrp,
+         mc.item_name,
+         mc.mrp::text                AS current_mrp,
          COUNT(*)::text              AS n,
          PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY s.net_price)::text  AS median_net,
          MIN(s.net_price)::text      AS min_net,
@@ -571,12 +594,10 @@ router.get("/market-survey/summary", async (req, res) => {
          PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY s.net_price)::text AS p25_net,
          PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY s.net_price)::text AS p75_net
        FROM market_survey s
-       LEFT JOIN mrp_master m ON m.item_code = s.prayag_item_code AND m.segment = s.segment
-       LEFT JOIN mrp_history h ON h.item_code = s.prayag_item_code
-                               AND h.segment  = s.segment
-                               AND h.is_current = TRUE
+       LEFT JOIN mrp_current_catalogue mc
+         ON mc.item_code = s.prayag_item_code AND mc.segment = s.segment
        WHERE ${conds.join(" AND ")}
-       GROUP BY s.prayag_item_code, s.segment, m.item_name, h.mrp
+       GROUP BY s.prayag_item_code, s.segment, mc.item_name, mc.mrp
        HAVING COUNT(*) >= $${p}
        ORDER BY COUNT(*) DESC, s.prayag_item_code`,
       [...params, minSurveys],
@@ -658,7 +679,7 @@ router.get("/market-survey/coverage", async (req, res) => {
          ORDER BY segment, state`,
       ),
       pool.query<{ segment: string }>(
-        "SELECT DISTINCT segment FROM mrp_master ORDER BY segment",
+        "SELECT DISTINCT segment FROM mrp_current_catalogue ORDER BY segment",
       ),
     ]);
 
@@ -854,16 +875,12 @@ router.get("/market-survey/items", async (req, res) => {
       item_code: string; item_name: string | null;
       current_mrp: string | null; effective_from: string | null;
     }>(
-      `SELECT m.item_code, m.item_name,
-              h.mrp::text        AS current_mrp,
-              h.effective_from::text AS effective_from
-       FROM mrp_master m
-       LEFT JOIN mrp_history h
-             ON h.item_code = m.item_code
-            AND h.segment   = m.segment
-            AND h.is_current = TRUE
-       WHERE m.segment = $1
-       ORDER BY m.item_code`,
+       `SELECT mc.item_code, mc.item_name,
+              mc.mrp::text AS current_mrp,
+              mc.effective_from::text AS effective_from
+       FROM mrp_current_catalogue mc
+       WHERE mc.segment = $1
+       ORDER BY mc.item_code`,
       [segment],
     );
     res.json({
@@ -1181,8 +1198,8 @@ router.get("/market-survey/submissions", async (req, res) => {
               s.prospect_name, s.pending_prospect_id,
               s.state, s.district,
               s.segment, s.prayag_item_code,
-              mi.item_name,
-              h.mrp::text AS current_mrp,
+               mc.item_name,
+               mc.mrp::text AS current_mrp,
               s.competitor_brand, s.competitor_product,
               s.net_price::text, s.mrp::text AS entry_mrp, s.discount_pct::text,
               s.entry_mode, s.unit, s.pack_size,
@@ -1194,8 +1211,8 @@ router.get("/market-survey/submissions", async (req, res) => {
               s.competitor_moq, s.buying_since, s.would_switch, s.switch_condition
        FROM market_survey s
        LEFT JOIN customer_master cm ON cm.id = s.customer_id
-       LEFT JOIN mrp_master mi ON mi.item_code = s.prayag_item_code AND mi.segment = s.segment
-       LEFT JOIN mrp_history h  ON h.item_code = s.prayag_item_code AND h.segment = s.segment AND h.is_current = TRUE
+       LEFT JOIN mrp_current_catalogue mc
+         ON mc.item_code = s.prayag_item_code AND mc.segment = s.segment
        ${where}
        ORDER BY
          CASE s.survey_type WHEN 'existing_sku' THEN 1 WHEN 'new_sku' THEN 2 WHEN 'new_customer' THEN 3 ELSE 4 END,
@@ -1355,17 +1372,17 @@ router.get("/market-survey/new-sku-opportunity", async (req, res) => {
       prayag_item_code: string; segment: string; item_name: string | null;
       current_mrp: string | null; n: string; retailers: string[]; brands: string[];
     }>(
-      `SELECT s.prayag_item_code, s.segment, mi.item_name, h.mrp::text AS current_mrp,
+       `SELECT s.prayag_item_code, s.segment, mc.item_name, mc.mrp::text AS current_mrp,
               COUNT(*)::text AS n,
               array_agg(DISTINCT COALESCE(cm.company, s.prospect_name) ORDER BY COALESCE(cm.company, s.prospect_name))
                 FILTER (WHERE COALESCE(cm.company, s.prospect_name) IS NOT NULL) AS retailers,
               array_agg(DISTINCT s.competitor_brand ORDER BY s.competitor_brand) AS brands
        FROM market_survey s
        LEFT JOIN customer_master cm ON cm.id = s.customer_id
-       LEFT JOIN mrp_master mi ON mi.item_code = s.prayag_item_code AND mi.segment = s.segment
-       LEFT JOIN mrp_history h  ON h.item_code = s.prayag_item_code AND h.segment = s.segment AND h.is_current = TRUE
+       LEFT JOIN mrp_current_catalogue mc
+         ON mc.item_code = s.prayag_item_code AND mc.segment = s.segment
        WHERE s.survey_type = 'new_sku' AND s.prayag_item_code IS NOT NULL
-       GROUP BY s.prayag_item_code, s.segment, mi.item_name, h.mrp
+       GROUP BY s.prayag_item_code, s.segment, mc.item_name, mc.mrp
        ORDER BY COUNT(*) DESC`,
     );
     res.json({ rows: result.rows.map((r) => ({
@@ -1389,7 +1406,7 @@ router.get("/market-survey/vs-competition", async (req, res) => {
       comp_brand: string; comp_code: string; comp_name: string | null;
       comp_mrp: string | null; comp_net_derived: string | null; comp_discount: string | null;
     }>(
-      `SELECT s.prayag_item_code, s.segment, mi.item_name, h.mrp::text AS current_mrp,
+       `SELECT s.prayag_item_code, s.segment, mc.item_name, mc.mrp::text AS current_mrp,
               COUNT(DISTINCT s.id)::text AS survey_n,
               PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY s.net_price)::text AS survey_median,
               cp.competitor_brand AS comp_brand, cp.competitor_code AS comp_code,
@@ -1398,10 +1415,10 @@ router.get("/market-survey/vs-competition", async (req, res) => {
               cp.discount_pct_assumed::text AS comp_discount
        FROM market_survey s
        JOIN competitor_price cp ON cp.prayag_item_code = s.prayag_item_code
-       LEFT JOIN mrp_master mi ON mi.item_code = s.prayag_item_code AND mi.segment = s.segment
-       LEFT JOIN mrp_history h  ON h.item_code = s.prayag_item_code AND h.segment = s.segment AND h.is_current = TRUE
+       LEFT JOIN mrp_current_catalogue mc
+         ON mc.item_code = s.prayag_item_code AND mc.segment = s.segment
        WHERE s.prayag_item_code IS NOT NULL
-       GROUP BY s.prayag_item_code, s.segment, mi.item_name, h.mrp,
+       GROUP BY s.prayag_item_code, s.segment, mc.item_name, mc.mrp,
                 cp.competitor_brand, cp.competitor_code, cp.competitor_name, cp.mrp, cp.net_price_derived, cp.discount_pct_assumed
        ORDER BY s.prayag_item_code, cp.competitor_brand`,
     );
@@ -1471,7 +1488,7 @@ router.get("/market-survey/export", async (req, res) => {
               COALESCE(cm.company, s.prospect_name) AS retailer,
               CASE WHEN s.pending_prospect_id IS NOT NULL AND cm.id IS NULL THEN 'yes' ELSE 'no' END AS is_pending,
               s.state, s.district, s.segment, s.prayag_item_code,
-              h.mrp::float AS our_mrp,
+               mc.mrp::float AS our_mrp,
               s.competitor_brand, s.competitor_product,
               s.net_price::float, s.entry_mode, s.unit, s.pack_size,
               array_to_string(s.reasons, ', ') AS reasons,
@@ -1481,7 +1498,8 @@ router.get("/market-survey/export", async (req, res) => {
               s.delivery_days_competitor, s.delivery_days_prayag, s.shelf_share
        FROM market_survey s
        LEFT JOIN customer_master cm ON cm.id = s.customer_id
-       LEFT JOIN mrp_history h ON h.item_code = s.prayag_item_code AND h.segment = s.segment AND h.is_current = TRUE
+       LEFT JOIN mrp_current_catalogue mc
+         ON mc.item_code = s.prayag_item_code AND mc.segment = s.segment
        ${where}
        ORDER BY
          CASE s.survey_type WHEN 'existing_sku' THEN 1 WHEN 'new_sku' THEN 2 WHEN 'new_customer' THEN 3 ELSE 4 END,

@@ -30,7 +30,8 @@ import { prewarmWarningsSnapshots } from "./routes/warnings.js";
 import { prewarmMgmtDataSnapshots } from "./routes/mgmt.js";
 import { restoreMarginLoadJob } from "./routes/gpMargin.js";
 import { startWeeklyDigestScheduler } from "./lib/alertRouting/scheduler.js";
-import { scheduleCompetitorRefresh } from "./routes/competitorPrice.js";
+import { refreshSnapshot as refreshCompetitorSnapshot } from "./routes/competitorPrice.js";
+import { refreshAuthoritativeMrpCache } from "./lib/mrp/syncedCache.js";
 import { cleanupOrphanedJobs } from "./lib/aiReportJobQueue.js";
 import {
   loadPersonRegistry,
@@ -353,7 +354,22 @@ startServer({
 
       // Fetch competitor price snapshot from the Prayag Competition Analysis app.
       // First run 5 min after startup, then every 24 h.
-      scheduleCompetitorRefresh();
+      // Both MRP and competitor prices come from prayag-price.com. Run them on
+      // one cadence so a successful cycle represents one source refresh window.
+      const refreshAuthoritativePrices = (): void => {
+        void Promise.allSettled([
+          refreshAuthoritativeMrpCache(),
+          refreshCompetitorSnapshot(),
+        ]).then((results) => {
+          for (const result of results) {
+            if (result.status === "rejected") {
+              logger.warn({ err: result.reason }, "authoritative price refresh failed; last good cache retained");
+            }
+          }
+        });
+      };
+      setTimeout(refreshAuthoritativePrices, 5 * 60_000).unref();
+      setInterval(refreshAuthoritativePrices, 24 * 3_600_000).unref();
 
       // Keep the primary_order_line OB mirror aligned with the live Order Sheet.
       // Runs alongside the register sync cadence (every 6h) for the OPEN FY only,
