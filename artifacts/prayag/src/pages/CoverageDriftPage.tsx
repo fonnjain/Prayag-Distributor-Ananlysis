@@ -37,6 +37,7 @@ interface Evidence {
   coverageFiscalYear?: string;
   evidenceFiscalYear?: string;
   registerHeads?: string[];
+  heads?: string[];
 }
 
 interface IssueDetail {
@@ -49,8 +50,18 @@ interface IssueDetail {
     difference?: EvidenceDifference | null;
     coverageWasChanged: boolean;
   };
+  structuralReasons?: StructuralReason[];
   person?: unknown;
 }
+
+type StructuralReason =
+  | "source-attribution"
+  | "customer-head-changed"
+  | "customer-appeared-or-disappeared"
+  | "customer-count-changed"
+  | "effective-date-range-changed"
+  | "leaf-gained-or-lost-head"
+  | "evidence-fiscal-year-changed";
 
 interface EvidenceDifference {
   customerCount?: number;
@@ -194,11 +205,11 @@ function EvidenceData({ data }: { data: Evidence }) {
           </b>
         </li>
       )}
-      {data.registerHeads && data.registerHeads.length > 0 && (
+      {(data.registerHeads ?? data.heads)?.length ? (
         <li>
-          Heads: <b className="text-foreground">{data.registerHeads.join(", ")}</b>
+          Heads: <b className="text-foreground">{(data.registerHeads ?? data.heads)?.join(", ")}</b>
         </li>
-      )}
+      ) : null}
     </ul>
   );
 }
@@ -233,6 +244,15 @@ function EvidenceDiff({
 
 function IssueDetails({ issue }: { issue: Issue }) {
   const difference = issue.detail?.review?.difference;
+  const structuralReasonLabels: Record<StructuralReason, string> = {
+    "source-attribution": "Register attribution needs review",
+    "customer-head-changed": "Customer is attributed to a different head",
+    "customer-appeared-or-disappeared": "Customer appeared in or disappeared from this leaf",
+    "customer-count-changed": "Customer count changed",
+    "effective-date-range-changed": "Coverage effective dates changed",
+    "leaf-gained-or-lost-head": "Leaf gained or lost a head",
+    "evidence-fiscal-year-changed": "Evidence fiscal year changed",
+  };
   return (
     <div className="space-y-2 py-1 max-w-xl">
       {issue.customer && (
@@ -245,6 +265,16 @@ function IssueDetails({ issue }: { issue: Issue }) {
           current={issue.detail.review.currentRegisterEvidence}
           persisted={issue.detail.review.persistedEvidence}
         />
+      )}
+      {issue.detail.structuralReasons && issue.detail.structuralReasons.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 text-[10px] text-amber-900 dark:text-amber-200">
+          <span className="font-semibold">Why this is actionable:</span>
+          {issue.detail.structuralReasons.map((reason) => (
+            <span key={reason} className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 dark:border-amber-700 dark:bg-amber-900/30">
+              {structuralReasonLabels[reason] ?? reason}
+            </span>
+          ))}
+        </div>
       )}
       {difference && (
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] bg-muted/60 p-2 rounded border text-muted-foreground">

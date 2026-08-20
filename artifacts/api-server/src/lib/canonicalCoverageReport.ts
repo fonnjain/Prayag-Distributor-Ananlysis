@@ -4,6 +4,7 @@ import {
   coveragePersonSql,
   getUnverifiedCoverageAliasReview,
 } from "./coverageAliases.js";
+import { getOpenFiscalYearStructuralReasons, shouldReportCanonicalCoverageDriftIssue } from "./canonicalCoverageDriftPolicy.js";
 
 const FY = "2025-26";
 export const ZERO_SALES_LEAVES = [
@@ -147,6 +148,21 @@ export interface CanonicalCoverageDriftCheck {
   concentrationWarnings: TamilNaduCoverageConcentrationWarning[];
 }
 
+type DriftBuildOptions = {
+  forceFresh?: boolean;
+};
+
+const driftCheckCache = new Map<string, Promise<CanonicalCoverageDriftCheck>>();
+
+export function invalidateCanonicalCoverageDriftCache(fiscalYear?: string): void {
+  if (fiscalYear == null) {
+    driftCheckCache.clear();
+    return;
+  }
+  driftCheckCache.delete(fiscalYear);
+  driftCheckCache.delete("all");
+}
+
 type DriftIssueRow = {
   issue_kind: CanonicalCoverageDriftIssueKind;
   state_canon: string;
@@ -255,7 +271,7 @@ export async function buildTamilNaduCoverageConcentrationWarnings(
  * tells an operator when the source evidence no longer supports a derived
  * coverage row, but never edits organisation coverage to match a new load.
  */
-export async function buildCanonicalCoverageDriftCheck(
+async function buildCanonicalCoverageDriftCheckUncached(
   fiscalYear?: string,
 ): Promise<CanonicalCoverageDriftCheck> {
   const [issueResult, concentrationWarnings] = await Promise.all([
@@ -369,9 +385,15 @@ export async function buildCanonicalCoverageDriftCheck(
             'effectiveFrom', a.effective_from,
             'effectiveTo', a.effective_to
            ),
+           'structural', jsonb_build_object(
+            'currentPersonName', e.person_name,
+            'persistedPersonName', a.person_name
+           ),
            'difference', jsonb_build_object(
             'customerCount', COALESCE(e.customer_count, 0) - COALESCE(a.customer_count, 0),
             'netAmount', COALESCE(e.net_amount, 0) - COALESCE(a.net_amount, 0),
+            'effectiveFromChanged', e.effective_from IS DISTINCT FROM a.effective_from,
+            'effectiveToChanged', e.effective_to IS DISTINCT FROM a.effective_to,
             'effectiveFromDays', CASE
               WHEN e.effective_from IS NULL OR a.effective_from IS NULL THEN NULL
               ELSE e.effective_from - a.effective_from
@@ -393,17 +415,22 @@ export async function buildCanonicalCoverageDriftCheck(
          OR e.effective_to IS DISTINCT FROM a.effective_to
     ),
     expected_evidence AS (
-      SELECT state_canon, fy, person_name, customer, SUM(amount) AS net_amount
+      SELECT
+        state_canon,
+        fy,
+        customer,
+        ARRAY_AGG(DISTINCT person_name ORDER BY person_name) AS person_names,
+        SUM(amount) AS net_amount
       FROM selected_lines
       WHERE head_canon IS NOT NULL
-      GROUP BY state_canon, fy, person_name, customer
+      GROUP BY state_canon, fy, customer
     ),
     actual_evidence AS (
       SELECT
         c.state_canon,
         c.fiscal_year AS coverage_fiscal_year,
         e.fiscal_year AS evidence_fiscal_year,
-        p.name AS person_name,
+        ARRAY_AGG(DISTINCT p.name ORDER BY p.name) AS person_names,
         e.customer_name AS customer,
         SUM(e.net_amount) AS net_amount
       FROM person_state_coverage_customer_evidence e
@@ -412,7 +439,7 @@ export async function buildCanonicalCoverageDriftCheck(
       WHERE c.source = 'derived_register'
         AND c.voided_at IS NULL
         AND ($1::text IS NULL OR c.fiscal_year = $1)
-      GROUP BY c.state_canon, c.fiscal_year, e.fiscal_year, p.name, e.customer_name
+      GROUP BY c.state_canon, c.fiscal_year, e.fiscal_year, e.customer_name
     ),
     evidence_diffs AS (
       SELECT
@@ -420,32 +447,40 @@ export async function buildCanonicalCoverageDriftCheck(
         COALESCE(e.fy, a.coverage_fiscal_year) AS fiscal_year,
         COALESCE(e.customer, a.customer) AS customer,
         jsonb_build_object(
-          'person', COALESCE(e.person_name, a.person_name),
+          'person', COALESCE(e.person_names[1], a.person_names[1]),
           'sourceFiscalYear', COALESCE(e.fy, a.coverage_fiscal_year),
           'evidenceFiscalYear', a.evidence_fiscal_year,
           'expectedNetAmount', e.net_amount,
-           'evidenceNetAmount', a.net_amount,
-           'currentRegisterEvidence', jsonb_build_object(
-             'fiscalYear', e.fy,
-             'netAmount', e.net_amount
-           ),
-           'persistedEvidence', jsonb_build_object(
-             'coverageFiscalYear', a.coverage_fiscal_year,
-             'evidenceFiscalYear', a.evidence_fiscal_year,
-             'netAmount', a.net_amount
-           ),
-           'difference', jsonb_build_object(
-             'netAmount', COALESCE(e.net_amount, 0) - COALESCE(a.net_amount, 0),
-             'fiscalYearChanged', e.fy IS DISTINCT FROM a.evidence_fiscal_year
-           )
+          'evidenceNetAmount', a.net_amount,
+          'currentRegisterEvidence', jsonb_build_object(
+            'fiscalYear', e.fy,
+            'netAmount', e.net_amount,
+            'heads', e.person_names
+          ),
+          'persistedEvidence', jsonb_build_object(
+            'coverageFiscalYear', a.coverage_fiscal_year,
+            'evidenceFiscalYear', a.evidence_fiscal_year,
+            'netAmount', a.net_amount,
+            'heads', a.person_names
+          ),
+          'structural', jsonb_build_object(
+            'headChanged', e.person_names IS DISTINCT FROM a.person_names,
+            'customerPresenceChanged', (e.customer IS NULL) IS DISTINCT FROM (a.customer IS NULL),
+            'currentPersonName', e.person_names[1],
+            'persistedPersonName', a.person_names[1]
+          ),
+          'difference', jsonb_build_object(
+            'netAmount', COALESCE(e.net_amount, 0) - COALESCE(a.net_amount, 0),
+            'fiscalYearChanged', e.fy IS DISTINCT FROM a.evidence_fiscal_year
+          )
         ) AS detail
       FROM expected_evidence e
       FULL OUTER JOIN actual_evidence a
         ON a.state_canon = e.state_canon
        AND a.coverage_fiscal_year = e.fy
-       AND a.person_name = e.person_name
        AND a.customer = e.customer
       WHERE e.net_amount IS DISTINCT FROM a.net_amount
+         OR e.person_names IS DISTINCT FROM a.person_names
          OR a.coverage_fiscal_year IS DISTINCT FROM a.evidence_fiscal_year
     )
     SELECT issue_kind::text, state_canon, fiscal_year, customer, detail
@@ -475,7 +510,7 @@ export async function buildCanonicalCoverageDriftCheck(
       ?? detail.coverage
       ?? null;
 
-    return {
+    const issue: CanonicalCoverageDriftIssue = {
       kind: row.issue_kind,
       stateCanon: row.state_canon,
       fiscalYear: row.fiscal_year,
@@ -493,7 +528,15 @@ export async function buildCanonicalCoverageDriftCheck(
         },
       },
     };
-  });
+    const structuralReasons = getOpenFiscalYearStructuralReasons(issue);
+    return {
+      ...issue,
+      detail: {
+        ...issue.detail,
+        structuralReasons,
+      },
+    };
+  }).filter(shouldReportCanonicalCoverageDriftIssue);
 
   return {
     checkedAt: new Date().toISOString(),
@@ -503,6 +546,26 @@ export async function buildCanonicalCoverageDriftCheck(
     issues,
     concentrationWarnings,
   };
+}
+
+export async function buildCanonicalCoverageDriftCheck(
+  fiscalYear?: string,
+  options: DriftBuildOptions = {},
+): Promise<CanonicalCoverageDriftCheck> {
+  const key = fiscalYear ?? "all";
+  if (options.forceFresh) return buildCanonicalCoverageDriftCheckUncached(fiscalYear);
+
+  const cached = driftCheckCache.get(key);
+  if (cached) return cached;
+
+  const build = buildCanonicalCoverageDriftCheckUncached(fiscalYear);
+  driftCheckCache.set(key, build);
+  try {
+    return await build;
+  } catch (err) {
+    driftCheckCache.delete(key);
+    throw err;
+  }
 }
 
 /**

@@ -16,7 +16,6 @@
 import { pool, type InsertSaleLine } from "@workspace/db";
 import { logger } from "../logger.js";
 import registerSheets from "../../../config/register_sheets.json";
-import frozenRegisters from "../../../config/frozen_registers.json";
 import { readRegisterFromSheets } from "../registers/sheetsRegister.js";
 import {
   OccurrenceCounter,
@@ -30,6 +29,7 @@ import {
   assertUnmappedEmpty,
 } from "../registers/ingest.js";
 import { replaceOpenMonths, assertMonthAnchors } from "../registers/monthlyReplace.js";
+import { hasSuccessfulOpenMonthReplacement } from "./registerSyncCoverageCache.js";
 import { backfillSaleChannel } from "../sap/backfillChannel.js";
 import { recordCanonicalCoverageDriftCheck } from "../canonicalCoverageDrift.js";
 import {
@@ -38,7 +38,16 @@ import {
   assertTankQtyLtr,
   type SapLookupMap,
 } from "../registers/tankResolution.js";
-import { auditCanonicalCoverageDrift } from "../canonicalCoverageReport.js";
+import {
+  auditCanonicalCoverageDrift,
+  invalidateCanonicalCoverageDriftCache,
+} from "../canonicalCoverageReport.js";
+import {
+  getFrozenAnchors,
+  isFrozen,
+  type FrozenEntry,
+} from "./freezeState.js";
+export { getFrozenAnchor, isFrozen } from "./freezeState.js";
 
 export const REGISTER_SHEET_IDS: Record<string, string> =
   registerSheets.registers;
@@ -54,19 +63,6 @@ export const REGISTER_SHEET_IDS: Record<string, string> =
 //
 // amountRupees=0 means the Sheets-sourced total has not yet been confirmed;
 // the amount assertion is skipped until it is set.
-
-type FrozenEntry = { rows: number; amountRupees: number };
-const frozenMap: Map<string, FrozenEntry> = new Map(
-  Object.entries(frozenRegisters.frozen as Record<string, FrozenEntry>),
-);
-
-export function isFrozen(fy: string): boolean {
-  return frozenMap.has(fy);
-}
-
-export function getFrozenAnchor(fy: string): FrozenEntry | undefined {
-  return frozenMap.get(fy);
-}
 
 export type FreezeViolation = {
   fy: string;
@@ -88,7 +84,7 @@ export function getFreezeViolations(): { violations: FreezeViolation[]; checkedA
  * Logs ERROR for each violation; never exits the process.
  */
 export async function assertFrozenAnchors(): Promise<void> {
-  for (const [fy, anchor] of frozenMap) {
+  for (const [fy, anchor] of getFrozenAnchors()) {
     try {
       const { rows } = await pool.query<{ rows: string; amount: string }>(
         `SELECT COUNT(*)::text AS rows, COALESCE(ROUND(SUM(amount::numeric)), 0)::text AS amount
@@ -455,6 +451,9 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
       .map((m) => `${m.month}(${m.rowsWritten} rows, ₹${((m.sheetAmount ?? 0) / 1e7).toFixed(2)} Cr)`);
 
     lastSyncedAtMs.set(fy, Date.now());
+    if (hasSuccessfulOpenMonthReplacement(replaceSummary.months)) {
+      invalidateCanonicalCoverageDriftCache(fy);
+    }
     s.rows = linesForSync.length;
     s.phase = "done";
     logger.info(

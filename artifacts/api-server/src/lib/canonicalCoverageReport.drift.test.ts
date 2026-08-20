@@ -8,6 +8,7 @@ import { pool } from "@workspace/db";
 import {
   auditCanonicalCoverageDrift,
   buildCanonicalCoverageDriftCheck,
+  invalidateCanonicalCoverageDriftCache,
 } from "./canonicalCoverageReport.js";
 
 const query = vi.mocked(pool.query);
@@ -15,6 +16,7 @@ const query = vi.mocked(pool.query);
 describe("canonical coverage drift check", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    invalidateCanonicalCoverageDriftCache();
   });
 
   it("returns clear customer-level attribution exceptions without changing coverage", async () => {
@@ -56,6 +58,12 @@ describe("canonical coverage drift check", () => {
             evidenceFiscalYear: "2025-26",
             expectedNetAmount: 500,
             evidenceNetAmount: 500,
+            structural: {
+              headChanged: true,
+              customerPresenceChanged: false,
+              currentPersonName: "New Head",
+              persistedPersonName: "Prior Head",
+            },
           },
         },
       ],
@@ -94,6 +102,9 @@ describe("canonical coverage drift check", () => {
         difference: { customerCount: 1, netAmount: 300, effectiveToDays: 30 },
         coverageWasChanged: false,
       },
+    });
+    expect(check.issues[2]?.detail).toMatchObject({
+      structuralReasons: ["customer-head-changed"],
     });
     expect(check.concentrationWarnings).toMatchObject([{
       stateCanon: "TAMIL NADU",
@@ -147,5 +158,57 @@ describe("canonical coverage drift check", () => {
       "ok",
       JSON.stringify({ passed: true, issueCount: 0, issues: [], concentrationWarnings: [] }),
     ]);
+  });
+
+  it("caches open-FY read evidence until an explicit register-sync invalidation", async () => {
+    query.mockResolvedValue({ rows: [] } as never);
+
+    await buildCanonicalCoverageDriftCheck("2026-27");
+    await buildCanonicalCoverageDriftCheck("2026-27");
+    expect(query).toHaveBeenCalledTimes(2);
+
+    invalidateCanonicalCoverageDriftCache("2026-27");
+    await buildCanonicalCoverageDriftCheck("2026-27");
+    expect(query).toHaveBeenCalledTimes(4);
+  });
+
+  it("keeps a value-only evidence difference visible for a frozen FY", async () => {
+    query
+      .mockResolvedValueOnce({
+        rows: [{
+          issue_kind: "evidence-mismatch",
+          fiscal_year: "2025-26",
+          state_canon: "TAMIL NADU",
+          customer: "Frozen FY Dealer",
+          detail: {
+            currentRegisterEvidence: { fiscalYear: "2025-26", netAmount: 940 },
+            persistedEvidence: { evidenceFiscalYear: "2025-26", netAmount: 900 },
+            structural: {
+              headChanged: false,
+              customerPresenceChanged: false,
+              currentPersonName: "Sandeep Dadheech",
+              persistedPersonName: "Sandeep Dadheech",
+            },
+            difference: { netAmount: 40, fiscalYearChanged: false },
+          },
+        }],
+      } as never)
+      .mockResolvedValueOnce({ rows: [] } as never);
+
+    const check = await buildCanonicalCoverageDriftCheck("2025-26");
+
+    expect(check).toMatchObject({
+      fiscalYear: "2025-26",
+      passed: false,
+      issueCount: 1,
+      issues: [{
+        kind: "evidence-mismatch",
+        customer: "Frozen FY Dealer",
+        detail: {
+          difference: { netAmount: 40 },
+          structuralReasons: [],
+        },
+      }],
+    });
   });
 });

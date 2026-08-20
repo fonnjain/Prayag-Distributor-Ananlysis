@@ -143,3 +143,4 @@
 - [Canonical coverage evidence](canonical-coverage-evidence.md) — derive organisation coverage only from customer-unambiguous register evidence; keep ambiguous closed periods explicitly uncovered.
 - [Unverified coverage aliases](coverage-alias-review.md) — live compatibility aliases are registry-backed and advisory; historical migration literals remain audit-only.
 - [Coverage drift review contract](coverage-drift-review-contract.md) — drift endpoints use HTTP 409 with full read-only evidence; clients must render it, not treat it as a fetch failure.
+- [Open-FY coverage drift policy](open-fy-coverage-drift-policy.md) — live value-only changes are benign; structural changes alert, while frozen FYs remain strict.
