@@ -2732,7 +2732,7 @@ const MIGRATIONS: Migration[] = [
         ON mrp_synced_division (generation_id, app_segment);
 
       CREATE TABLE IF NOT EXISTS mrp_sync_status (
-        singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+        singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
         last_success_at TIMESTAMPTZ,
         last_error TEXT,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -2781,6 +2781,16 @@ const MIGRATIONS: Migration[] = [
        AND h.segment = m.segment
        AND h.is_current = TRUE
       WHERE NOT EXISTS (SELECT 1 FROM active_generation);
+    `,
+  },
+  {
+    id: "066_remove_mrp_sync_status_preview_unsafe_check",
+    sql: `
+      -- Replit's production schema preview incorrectly serialises
+      -- CHECK (singleton) as CHECK (CHECK (singleton)). The primary key and
+      -- default retain the one-status-row convention without this invalid SQL.
+      ALTER TABLE mrp_sync_status
+        DROP CONSTRAINT IF EXISTS mrp_sync_status_singleton_check;
     `,
   },
 ];
