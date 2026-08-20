@@ -573,8 +573,8 @@ describe("application authentication", () => {
     expect(activeAdmins).toHaveLength(1);
   });
 
-  it("bootstraps three administrators idempotently without resetting existing hashes", async () => {
-    process.env.AUTH_BOOTSTRAP_ADMINS = "one@example.com,two@example.com,three@example.com";
+  it("bootstraps whitespace-separated administrator emails idempotently without resetting existing hashes", async () => {
+    process.env.AUTH_BOOTSTRAP_ADMINS = "one@example.com two@example.com and three@example.com";
     process.env.AUTH_BOOTSTRAP_PASSWORD = "bootstrap-password-123";
     let nextId = 1;
     const client = {

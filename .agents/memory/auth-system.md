@@ -18,11 +18,11 @@ Migration `054_application_auth` in `lib/db/src/runMigrations.ts` creates all fo
 - Browser data routes protected by `requireAuthenticated` (allows session or valid API key).
 
 ## Bootstrap pattern
-`bootstrapAdministrators()` reads `AUTH_BOOTSTRAP_ADMINS` (comma-separated emails) and `AUTH_BOOTSTRAP_PASSWORD` from process.env at startup — idempotent via ON CONFLICT DO NOTHING. Requires exactly 3 distinct valid emails and a 10-char+ password.
+`bootstrapAdministrators()` reads `AUTH_BOOTSTRAP_ADMINS` (comma-, whitespace-, or semicolon-separated email tokens) and `AUTH_BOOTSTRAP_PASSWORD` from process.env at startup — idempotent via ON CONFLICT DO NOTHING. Invalid non-email prose is discarded; bootstrap still requires exactly 3 distinct valid emails and a 10-char+ password.
 
-**Why startup injection sometimes fails**: Replit dev-workflow secrets may not propagate to the running process environment after new secrets are added. Use the `POST /api/auth/admin-bootstrap` endpoint (protected by `X-Admin-Secret`) as the reliable fallback. It accepts `{emails: [...], password: "..."}` in the body and is idempotent.
+**Why startup injection sometimes fails**: Replit dev-workflow secrets may not propagate to the running process environment after new secrets are added, and a human-readable account list can contain separator or prose mistakes. Use the `POST /api/auth/admin-bootstrap` endpoint (protected by `X-Admin-Secret`) as the reliable fallback. It accepts `{emails: [...], password: "..."}` in the body and is idempotent.
 
-The three initial admins (ceo@prayagindia.com, preeti.chauhan@prayagindia.com, deepakj@prayagindia.com) are already seeded in the dev DB.
+Never record administrator email addresses in project memory; check the live account list through the protected route or database query when needed.
 
 ## Admin endpoint
 `POST /api/auth/admin-bootstrap` — requires `X-Admin-Secret` header. Accepts body `{emails: string[], password: string}` to directly provision admins, or no body to fall back to env vars. An explicit `resetExisting: true` additionally changes passwords for matching accounts, revokes their sessions, and writes audit events; ordinary calls remain non-destructive. Returns `{ok, created, reset, skippedExisting}`.

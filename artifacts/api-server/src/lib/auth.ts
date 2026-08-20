@@ -293,7 +293,9 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
 
 export async function bootstrapAdministrators(): Promise<void> {
   const emails = String(process.env.AUTH_BOOTSTRAP_ADMINS ?? "")
-    .split(",")
+    // Accept operationally common separators; validateEmail below drops prose
+    // such as "and" rather than letting one malformed list skip all recovery.
+    .split(/[,\s;]+/)
     .map(normalizeEmail)
     .filter((email) => validateEmail(email) !== null);
   const password = process.env.AUTH_BOOTSTRAP_PASSWORD;
