@@ -200,3 +200,31 @@ uri = "file://attached_assets/fy2025-26_aprjul_customer_trading.csv"
 type = "table"
 title = "FY2025-26 Apr–Jul Customer Trading List"
 description = "Four-month like-for-like customer-level trading CSV for Apr-25 through Jul-25, matching the FY2026-27 settled-month comparison range."
+
+[[outputs]]
+id = "p7jkAurcvp2H0RuYc6hKk"
+uri = "file://attached_assets/org_people.csv"
+type = "table"
+title = "Organisation People"
+description = "All 359 person-table rows, including active HR imports and inactive departed imports, with reporting and state-head relationships."
+
+[[outputs]]
+id = "9Ae2wJOkb2mmp-a6FGMUF"
+uri = "file://attached_assets/org_territories.csv"
+type = "table"
+title = "Organisation Territories"
+description = "All 43 territories with parent hierarchy and split flag."
+
+[[outputs]]
+id = "H-D6BWlLw_4TWkUKjNNgR"
+uri = "file://attached_assets/org_person_territory.csv"
+type = "table"
+title = "Person–Territory Assignments"
+description = "All 260 person-territory junction records; relationships are intentionally not collapsed."
+
+[[outputs]]
+id = "_7kOnqB3gASKiwauSoVWr"
+uri = "file://attached_assets/org_designations.csv"
+type = "table"
+title = "Organisation Designations"
+description = "All 14 designations with rank, system flag, and total people holding each designation."

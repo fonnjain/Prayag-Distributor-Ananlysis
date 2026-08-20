@@ -1,0 +1,53 @@
+Read-only. Export the organisation structure so it can be checked against the
+HR file and the CRM dashboard roster.
+
+FOUR CSVs into attached_assets/
+
+1. org_people.csv — one row per person in the `person` table, ALL of them,
+   active and inactive:
+     person_id · name · employee_code · designation · designation_rank
+     reports_to_person_id · reports_to_name
+     state_head_person_id · state_head_name
+     is_state_head · is_active · is_person · source
+     headquarter · order_type
+
+   Include the departed_import rows. Flag them via source and is_active - do
+   not filter them out, I want to see the whole table.
+
+2. org_territories.csv — the `territory` table:
+     territory_id · name · parent_territory_id · parent_name · is_split
+
+3. org_person_territory.csv — the junction:
+     person_id · person_name · territory_id · territory_name
+     effective_from · effective_to
+
+   This is many-to-many. Do not collapse it.
+
+4. org_designations.csv:
+     designation_id · name · rank · is_system · people_holding_it
+
+ALSO PRINT, do not put in the CSVs:
+  a. Row counts for all four tables, split by is_active and by source.
+  b. Every distinct state_head_name with the count of people under them,
+     counting DISTINCT ACTIVE people only - not registry rows, not departed.
+  c. Any person whose reports_to_person_id is NULL, with their designation.
+  d. Any person whose reports_to points at someone with is_active = false.
+  e. Any cycle in the reporting chain.
+  f. Territories with people assigned but no active person, and territories
+     with no person at all.
+
+WHAT I WILL DO WITH IT
+Compare three sources that have never been reconciled:
+  the app's person and territory tables
+  the HR file (Sales_User_List.csv, 609 rows, 179 active)
+  the CRM dashboard roster (178 members under 14 head names)
+
+Known divergences I expect to find and want confirmed or contradicted:
+  - Sunil Mohanty appears as a head in the CRM roster with Anuj Sharma and
+    Narendra Kumar Sharma beneath him, and has NO HR record at all.
+  - The CRM roster spells one head both "Sulindar Pal" and "Sulinder Pal".
+  - Eight people report to managers who are Deactive in HR - Suresh Kumar
+    Nair, Karuppasamy R, Mahendra Kumar Jain.
+  - Narendra Kumar Sharma is a State Head with no active team.
+  - 61 rows in person_registry are PRODUCT CATEGORY names carrying
+    is_person = true.
