@@ -186,3 +186,10 @@ uri = "file://attached_assets/fy2025-26_customer_trading.csv"
 type = "table"
 title = "FY2025-26 Customer Trading List"
 description = "CSV ready to merge into the customer master workbooks. It contains 718 customer-level rows representing all FY2025-26 sale_line activity."
+
+[[outputs]]
+id = "8sXo67Zs_vUPjZx8Wx36v"
+uri = "file://attached_assets/fy2026-27_customer_trading.csv"
+type = "table"
+title = "FY2026-27 Customer Trading List — Settled Months"
+description = "CSV ready for customer-master workbooks. It includes only frozen Apr-26 through Jul-26 sales-register months; the still-unsettled Aug-26 month is excluded."
