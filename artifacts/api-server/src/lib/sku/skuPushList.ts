@@ -525,9 +525,10 @@ export async function getSkuPushList(
     // Tier-classification data for fallback distributor
     const [fbItemGroupRows, fbPriorCodeRows] = await Promise.all([
       db.execute<{ item_group: string }>(sql`
-        SELECT DISTINCT COALESCE(im.item_group, ${UNMAPPED_TAXONOMY}) AS item_group
+        SELECT DISTINCT COALESCE(sto.item_group, im.item_group, ${UNMAPPED_TAXONOMY}) AS item_group
         FROM sale_line_current sl
         LEFT JOIN item_master im ON im.code = sl.code
+        LEFT JOIN sku_taxonomy_override sto ON sto.code = sl.code
         WHERE sl.fy = ${fy}
           AND sl.month_label = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
           AND sl.customer = ${distributorKey}
@@ -582,12 +583,13 @@ export async function getSkuPushList(
         COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') AS segment,
         sl.code,
         MAX(im.item_name)                                   AS item_name,
-        COALESCE(MAX(im.item_group), ${UNMAPPED_TAXONOMY})  AS item_group,
+        COALESCE(MAX(sto.item_group), MAX(im.item_group), ${UNMAPPED_TAXONOMY}) AS item_group,
         COUNT(DISTINCT sl.customer)::text                   AS peer_count,
         SUM(sl.amount::numeric)::text                       AS peer_net,
         MAX(sl.fy)                                          AS last_fy
       FROM sale_line_current sl
       LEFT JOIN item_master im ON im.code = sl.code
+      LEFT JOIN sku_taxonomy_override sto ON sto.code = sl.code
       WHERE sl.fy = ${fy}
         AND sl.month_label = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
         AND sl.customer = ANY(ARRAY[${sql.join(poolCustomers.map((c) => sql`${c}`), sql`, `)}])
@@ -723,9 +725,10 @@ export async function getSkuPushList(
 
   const [targetItemGroupRows, targetPriorCodeRows] = await Promise.all([
     db.execute<{ item_group: string }>(sql`
-      SELECT DISTINCT COALESCE(im.item_group, ${UNMAPPED_TAXONOMY}) AS item_group
+      SELECT DISTINCT COALESCE(sto.item_group, im.item_group, ${UNMAPPED_TAXONOMY}) AS item_group
       FROM sale_line_current sl
       LEFT JOIN item_master im ON im.code = sl.code
+      LEFT JOIN sku_taxonomy_override sto ON sto.code = sl.code
       WHERE sl.fy = ${fy}
         AND sl.month_label = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
         AND sl.customer = ${distributorKey}
@@ -795,12 +798,13 @@ export async function getSkuPushList(
       COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') AS segment,
       sl.code,
       MAX(im.item_name)                                   AS item_name,
-      COALESCE(MAX(im.item_group), ${UNMAPPED_TAXONOMY})  AS item_group,
+      COALESCE(MAX(sto.item_group), MAX(im.item_group), ${UNMAPPED_TAXONOMY}) AS item_group,
       COUNT(DISTINCT sl.customer)::text                   AS peer_count,
       SUM(sl.amount::numeric)::text                       AS peer_net,
       MAX(sl.fy)                                          AS last_fy
     FROM sale_line_current sl
     LEFT JOIN item_master im ON im.code = sl.code
+    LEFT JOIN sku_taxonomy_override sto ON sto.code = sl.code
     WHERE sl.fy = ${fy}
       AND sl.month_label = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
       AND sl.customer = ANY(ARRAY[${sql.join(peerCustomers.map((c) => sql`${c}`), sql`, `)}])

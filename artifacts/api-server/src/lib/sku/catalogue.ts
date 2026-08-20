@@ -17,7 +17,7 @@
  *   Total mapped 2,536
  */
 
-import { db } from "@workspace/db";
+import { db, pool } from "@workspace/db";
 import { sql } from "drizzle-orm";
 // Two separate mappings — kept distinct to avoid confusion:
 //
@@ -59,6 +59,32 @@ for (const [canon, aliasesOrComment] of Object.entries(ITEM_GROUP_MAP)) {
 export function canonItemGroup(raw: string | null | undefined): string | null {
   if (!raw) return null;
   return ITEM_GROUP_ALIAS_TO_CANON.get(raw.trim().toUpperCase()) ?? null;
+}
+
+export type TaxonomyGroupOption = {
+  itemGroup: string;
+  canonicalSegment: string;
+};
+
+const TAXONOMY_GROUP_OPTIONS: TaxonomyGroupOption[] = Array.from(
+  ITEM_GROUP_ALIAS_TO_CANON.entries(),
+  ([itemGroup, canonicalSegment]) => ({ itemGroup, canonicalSegment }),
+).sort(
+  (a, b) =>
+    a.canonicalSegment.localeCompare(b.canonicalSegment) ||
+    a.itemGroup.localeCompare(b.itemGroup),
+);
+
+/** Local overrides take precedence over upload-derived taxonomy only. */
+export function resolveLocalTaxonomy(
+  overrideItemGroup: string | null | undefined,
+  uploadedItemGroup: string | null | undefined,
+): string | null {
+  return overrideItemGroup?.trim() || uploadedItemGroup?.trim() || null;
+}
+
+export function getTaxonomyGroupOptions(): TaxonomyGroupOption[] {
+  return TAXONOMY_GROUP_OPTIONS;
 }
 
 // ── Secondary register segment lookup (for skuLoader) ────────────────────────
@@ -139,7 +165,7 @@ export async function getCatalogueCounts(): Promise<CatalogueCounts> {
     cnt: string;
     unpriced_cnt: string;
   }>(sql`
-    SELECT im.item_group,
+    SELECT COALESCE(sto.item_group, im.item_group) AS item_group,
            COUNT(DISTINCT s.item_code)::text AS cnt,
            COUNT(DISTINCT s.item_code) FILTER (
              WHERE s.mrp IS NULL OR s.mrp <= 0
@@ -149,7 +175,8 @@ export async function getCatalogueCounts(): Promise<CatalogueCounts> {
       ON g.generation_id = s.generation_id
      AND g.is_active = TRUE
     LEFT JOIN item_master im ON im.code = s.item_code
-    GROUP BY im.item_group
+    LEFT JOIN sku_taxonomy_override sto ON sto.code = s.item_code
+    GROUP BY COALESCE(sto.item_group, im.item_group)
   `);
 
   const bySegment: Record<string, number> = {};
@@ -512,12 +539,14 @@ export async function getNeverSoldCatalogueItems(): Promise<{
   total: number;
 }> {
   const rows = await db.execute<{ item_group: string | null; cnt: string }>(sql`
-    SELECT im.item_group, COUNT(DISTINCT s.item_code)::text AS cnt
+    SELECT COALESCE(sto.item_group, im.item_group) AS item_group,
+           COUNT(DISTINCT s.item_code)::text AS cnt
     FROM mrp_synced s
     JOIN mrp_sync_generation g
       ON g.generation_id = s.generation_id
      AND g.is_active = TRUE
     LEFT JOIN item_master im ON im.code = s.item_code
+    LEFT JOIN sku_taxonomy_override sto ON sto.code = s.item_code
     LEFT JOIN (
       SELECT DISTINCT code FROM sale_line_all WHERE version_status = 'current'
     ) sold ON sold.code = s.item_code
@@ -554,6 +583,274 @@ export async function getNeverSoldCatalogueItems(): Promise<{
     .sort((a, b) => b.count - a.count);
 
   return { bySegment, unmapped, total };
+}
+
+// ── Catalogue-owner taxonomy review queue ────────────────────────────────────
+
+export type TaxonomyReviewQueueItem = {
+  code: string;
+  productName: string | null;
+  currentMrp: number | null;
+  uploadedItemGroup: string | null;
+  sourceDivisions: string[];
+  saleSegments: string[];
+  usage: {
+    saleLineCount: number;
+    customerCount: number;
+    fiscalYearCount: number;
+    totalNet: number;
+    latestSaleDate: string | null;
+  };
+};
+
+export type TaxonomyMappingAudit = {
+  id: number;
+  code: string;
+  previousItemGroup: string | null;
+  previousSegment: string | null;
+  itemGroup: string;
+  canonicalSegment: string;
+  mappedByUserId: number | null;
+  mappedBy: string;
+  note: string | null;
+  mappedAt: string;
+};
+
+/**
+ * Lists every active authoritative code still without a recognised local
+ * taxonomy group. It intentionally includes zero-usage products: current
+ * source catalogue coverage is the review population, while usage is evidence
+ * to help owners prioritise decisions.
+ */
+export async function getTaxonomyReviewQueue(): Promise<TaxonomyReviewQueueItem[]> {
+  const rows = await db.execute<{
+    code: string;
+    product_name: string | null;
+    current_mrp: string | null;
+    uploaded_item_group: string | null;
+    effective_item_group: string | null;
+    source_divisions: string[] | null;
+    sale_segments: string[] | null;
+    sale_line_count: string;
+    customer_count: string;
+    fiscal_year_count: string;
+    total_net: string;
+    latest_sale_date: string | null;
+  }>(sql`
+    WITH active_catalogue AS (
+      SELECT
+        s.item_code AS code,
+        MAX(s.product_name) AS product_name,
+        MAX(s.mrp)::text AS current_mrp,
+        MAX(im.item_group) AS uploaded_item_group,
+        MAX(sto.item_group) AS override_item_group,
+        ARRAY_REMOVE(ARRAY_AGG(DISTINCT d.source_division), NULL) AS source_divisions
+      FROM mrp_synced s
+      JOIN mrp_sync_generation g
+        ON g.generation_id = s.generation_id
+       AND g.is_active = TRUE
+      LEFT JOIN mrp_synced_division d
+        ON d.generation_id = s.generation_id
+       AND d.item_code = s.item_code
+      LEFT JOIN item_master im ON im.code = s.item_code
+      LEFT JOIN sku_taxonomy_override sto ON sto.code = s.item_code
+      GROUP BY s.item_code
+    ),
+    usage AS (
+      SELECT
+        sl.code,
+        ARRAY_REMOVE(
+          ARRAY_AGG(DISTINCT COALESCE(sl.group_canon, sl.group_raw, 'Unmapped')),
+          NULL
+        ) AS sale_segments,
+        COUNT(*)::text AS sale_line_count,
+        COUNT(DISTINCT NULLIF(sl.customer, ''))::text AS customer_count,
+        COUNT(DISTINCT sl.fy)::text AS fiscal_year_count,
+        COALESCE(SUM(sl.amount::numeric), 0)::text AS total_net,
+        MAX(sl.invoice_date)::text AS latest_sale_date
+      FROM sale_line_current sl
+      WHERE sl.code IS NOT NULL AND sl.code <> ''
+      GROUP BY sl.code
+    )
+    SELECT
+      c.code,
+      c.product_name,
+      c.current_mrp,
+      c.uploaded_item_group,
+      COALESCE(c.override_item_group, c.uploaded_item_group) AS effective_item_group,
+      c.source_divisions,
+      u.sale_segments,
+      COALESCE(u.sale_line_count, '0') AS sale_line_count,
+      COALESCE(u.customer_count, '0') AS customer_count,
+      COALESCE(u.fiscal_year_count, '0') AS fiscal_year_count,
+      COALESCE(u.total_net, '0') AS total_net,
+      u.latest_sale_date
+    FROM active_catalogue c
+    LEFT JOIN usage u ON u.code = c.code
+    ORDER BY c.code
+  `);
+
+  return rows.rows
+    .filter((row) => !canonItemGroup(row.effective_item_group))
+    .map((row) => ({
+      code: row.code,
+      productName: row.product_name,
+      currentMrp: row.current_mrp == null ? null : Number(row.current_mrp),
+      uploadedItemGroup: row.uploaded_item_group,
+      sourceDivisions: row.source_divisions ?? [],
+      saleSegments: row.sale_segments ?? [],
+      usage: {
+        saleLineCount: Number(row.sale_line_count),
+        customerCount: Number(row.customer_count),
+        fiscalYearCount: Number(row.fiscal_year_count),
+        totalNet: Number(row.total_net),
+        latestSaleDate: row.latest_sale_date,
+      },
+    }));
+}
+
+export async function getRecentTaxonomyMappings(limit = 100): Promise<TaxonomyMappingAudit[]> {
+  const safeLimit = Math.max(1, Math.min(500, Math.floor(limit)));
+  const rows = await db.execute<{
+    id: string;
+    code: string;
+    previous_item_group: string | null;
+    previous_segment: string | null;
+    item_group: string;
+    canonical_segment: string;
+    mapped_by_user_id: string | null;
+    mapped_by: string;
+    note: string | null;
+    mapped_at: string;
+  }>(sql`
+    SELECT id::text, code, previous_item_group, previous_segment,
+           item_group, canonical_segment, mapped_by_user_id::text, mapped_by,
+           note, mapped_at::text
+    FROM sku_taxonomy_override_audit
+    ORDER BY mapped_at DESC, id DESC
+    LIMIT ${safeLimit}
+  `);
+  return rows.rows.map((row) => ({
+    id: Number(row.id),
+    code: row.code,
+    previousItemGroup: row.previous_item_group,
+    previousSegment: row.previous_segment,
+    itemGroup: row.item_group,
+    canonicalSegment: row.canonical_segment,
+    mappedByUserId: row.mapped_by_user_id == null ? null : Number(row.mapped_by_user_id),
+    mappedBy: row.mapped_by,
+    note: row.note,
+    mappedAt: row.mapped_at,
+  }));
+}
+
+export async function recordTaxonomyMapping(input: {
+  code: string;
+  itemGroup: string;
+  mappedByUserId: number;
+  mappedBy: string;
+  note?: string | null;
+}): Promise<TaxonomyMappingAudit> {
+  const code = input.code.trim();
+  const itemGroup = input.itemGroup.trim();
+  const mappedByUserId = input.mappedByUserId;
+  const mappedBy = input.mappedBy.trim();
+  const note = input.note?.trim() || null;
+  const canonicalSegment = canonItemGroup(itemGroup);
+
+  if (!code) throw new Error("SKU code is required.");
+  if (!canonicalSegment) throw new Error("Choose a recognised local item group.");
+  if (!Number.isSafeInteger(mappedByUserId) || mappedByUserId < 1) {
+    throw new Error("Authenticated administrator identity is required.");
+  }
+  if (!mappedBy) throw new Error("Reviewer name is required.");
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // Serialize all remaps for one code, including the first insert where a
+    // row-level lock does not exist yet. The audit's previous_* values then
+    // always describe the mapping this transaction actually replaced.
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [code]);
+    // Lock the active generation while validating this code. A source cutover
+    // cannot switch the active generation between validation and this commit.
+    const generation = await client.query<{ generation_id: string }>(
+      `SELECT generation_id
+       FROM mrp_sync_generation
+       WHERE is_active = TRUE
+       FOR UPDATE`,
+    );
+    const generationId = generation.rows[0]?.generation_id;
+    if (!generationId) {
+      throw new Error("There is no active authoritative catalogue.");
+    }
+    const active = await client.query(
+      `SELECT 1 FROM mrp_synced
+       WHERE generation_id = $1
+         AND item_code = $2
+       LIMIT 1`,
+      [generationId, code],
+    );
+    if (!active.rowCount) {
+      await client.query("ROLLBACK");
+      throw new Error("This code is not in the active authoritative catalogue.");
+    }
+
+    const prior = await client.query(
+      `SELECT item_group, canonical_segment
+       FROM sku_taxonomy_override
+       WHERE code = $1
+       FOR UPDATE`,
+      [code],
+    );
+    const previousItemGroup = prior.rows[0]?.item_group ?? null;
+    const previousSegment = prior.rows[0]?.canonical_segment ?? null;
+
+    await client.query(
+      `INSERT INTO sku_taxonomy_override
+         (code, item_group, canonical_segment, mapped_by_user_id, mapped_by, note, mapped_at)
+       VALUES ($1, $2, $3, $4, $5, $6, now())
+       ON CONFLICT (code) DO UPDATE
+       SET item_group = EXCLUDED.item_group,
+           canonical_segment = EXCLUDED.canonical_segment,
+           mapped_by_user_id = EXCLUDED.mapped_by_user_id,
+           mapped_by = EXCLUDED.mapped_by,
+           note = EXCLUDED.note,
+           mapped_at = EXCLUDED.mapped_at`,
+      [code, itemGroup, canonicalSegment, mappedByUserId, mappedBy, note],
+    );
+    const audit = await client.query(
+      `INSERT INTO sku_taxonomy_override_audit
+         (code, previous_item_group, previous_segment, item_group,
+          canonical_segment, mapped_by_user_id, mapped_by, note)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id::text, code, previous_item_group, previous_segment,
+                 item_group, canonical_segment, mapped_by_user_id::text,
+                 mapped_by, note, mapped_at::text`,
+      [code, previousItemGroup, previousSegment, itemGroup, canonicalSegment, mappedByUserId, mappedBy, note],
+    );
+    await client.query("COMMIT");
+    clearCatalogueCache();
+
+    const row = audit.rows[0]!;
+    return {
+      id: Number(row.id),
+      code: row.code,
+      previousItemGroup: row.previous_item_group,
+      previousSegment: row.previous_segment,
+      itemGroup: row.item_group,
+      canonicalSegment: row.canonical_segment,
+      mappedByUserId: row.mapped_by_user_id == null ? null : Number(row.mapped_by_user_id),
+      mappedBy: row.mapped_by,
+      note: row.note,
+      mappedAt: row.mapped_at,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 // ── Catalogue completeness assertion ─────────────────────────────────────────

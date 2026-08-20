@@ -33,11 +33,16 @@ import type { SkuLevel, SkuScope } from "../lib/sku/skuFacts.js";
 import { getSkuRecommendations } from "../lib/sku/skuRecommendations.js";
 import { getDistributorList, getSkuPushList } from "../lib/sku/skuPushList.js";
 import {
+  canonItemGroup,
   getCatalogueCounts,
   getCatalogueCompleteness,
   getFySegmentDistribution,
+  getRecentTaxonomyMappings,
+  getTaxonomyGroupOptions,
+  getTaxonomyReviewQueue,
   getNeverSoldCatalogueItems,
   getItemMasterGapForFy,
+  recordTaxonomyMapping,
 } from "../lib/sku/catalogue.js";
 import { fiscalMonthsToLabels } from "../lib/mgmt/primaryPeriod.js";
 import { isAdminToken } from "../lib/adminAuth.js";
@@ -348,6 +353,83 @@ router.get("/sku/catalogue", async (req: Request, res: Response): Promise<void> 
   } catch (err) {
     req.log.error({ err }, "catalogue endpoint failed");
     res.status(500).json({ error: "Could not compute catalogue counts." });
+  }
+});
+
+// ── Catalogue-owner taxonomy review ──────────────────────────────────────────
+//
+// The active source catalogue owns product existence and current MRP. These
+// admin-only endpoints only add local item-group enrichment for codes still
+// shown as Unmapped, and retain an append-only audit row for every decision.
+
+function requireSkuTaxonomyAdmin(req: Request, res: Response): boolean {
+  if (req.authUser?.role !== "admin") {
+    res.status(403).json({ error: "Administrator access required" });
+    return false;
+  }
+  const token = String(req.headers["x-admin-secret"] ?? "").trim();
+  if (isAdminToken(token)) return true;
+  res.status(401).json({ error: "Unauthorized" });
+  return false;
+}
+
+router.get("/sku/taxonomy-review", async (req: Request, res: Response): Promise<void> => {
+  if (!requireSkuTaxonomyAdmin(req, res)) return;
+  try {
+    const [items, recentMappings] = await Promise.all([
+      getTaxonomyReviewQueue(),
+      getRecentTaxonomyMappings(),
+    ]);
+    res.json({
+      pending: items.length,
+      items,
+      groupOptions: getTaxonomyGroupOptions(),
+      recentMappings,
+      note: "Mappings enrich only local taxonomy. Product existence and current MRP remain source-authoritative.",
+    });
+  } catch (err) {
+    req.log.error({ err }, "sku taxonomy review queue failed");
+    res.status(500).json({ error: "Could not load the taxonomy review queue." });
+  }
+});
+
+router.post("/sku/taxonomy-review/:code", async (req: Request, res: Response): Promise<void> => {
+  if (!requireSkuTaxonomyAdmin(req, res)) return;
+  const code = String(req.params.code ?? "").trim();
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const itemGroup = typeof body.itemGroup === "string" ? body.itemGroup.trim() : "";
+  const note = typeof body.note === "string" ? body.note.trim() : null;
+
+  if (!code || !itemGroup) {
+    res.status(400).json({ error: "code and itemGroup are required." });
+    return;
+  }
+  if (!canonItemGroup(itemGroup)) {
+    res.status(400).json({ error: "Choose a recognised local item group." });
+    return;
+  }
+
+  try {
+    const mapping = await recordTaxonomyMapping({
+      code,
+      itemGroup,
+      mappedByUserId: req.authUser!.id,
+      mappedBy: req.authUser!.displayName,
+      note,
+    });
+    clearK4Cache();
+    res.status(201).json({
+      mapping,
+      note: "Local taxonomy updated. Current authoritative product existence and MRP were not changed.",
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Could not record taxonomy mapping.";
+    if (message === "This code is not in the active authoritative catalogue.") {
+      res.status(404).json({ error: message });
+      return;
+    }
+    req.log.error({ err, code }, "sku taxonomy mapping failed");
+    res.status(500).json({ error: "Could not record taxonomy mapping." });
   }
 });
 

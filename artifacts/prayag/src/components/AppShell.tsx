@@ -21,7 +21,7 @@ import {
   LayoutDashboard, Users, ShoppingBag,
   AlertTriangle, Bell, UserMinus, UserCheck, Settings, Store, BookOpen, Network,
   ChevronDown, ChevronRight, Menu, X, Sun, Moon, Braces, Key, Layers, IndianRupee,
-  Globe, FileSearch, ShoppingCart, LogOut, UserCircle
+  Globe, FileSearch, ShoppingCart, LogOut, UserCircle, Tags
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useAuth } from "@/data/auth-context";
@@ -55,6 +55,7 @@ interface NavItem {
   label: string;
   path: string;
   icon: LucideIcon;
+  adminOnly?: boolean;
 }
 
 interface NavGroup {
@@ -160,6 +161,7 @@ const NAV: NavGroup[] = [
       { id: "api-portal", label: "API Portal",  path: "/dev/api",     icon: Braces },
       { id: "api-keys",   label: "API Keys",    path: "/dev/keys",    icon: Key },
       { id: "masters",    label: "Master Data", path: "/dev/masters", icon: Database },
+      { id: "catalogue-review", label: "Catalogue Review", path: "/dev/catalogue-review", icon: Tags, adminOnly: true },
     ],
   },
 ];
@@ -244,7 +246,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
           ]
         };
       }
-      return group;
+      return {
+        ...group,
+        items: group.items.filter((item) => !item.adminOnly || user?.role === "admin"),
+      };
     });
   }, [user?.role]);
 

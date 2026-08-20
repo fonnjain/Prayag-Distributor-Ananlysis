@@ -2793,6 +2793,50 @@ const MIGRATIONS: Migration[] = [
         DROP CONSTRAINT IF EXISTS mrp_sync_status_singleton_check;
     `,
   },
+  {
+    id: "067_sku_taxonomy_overrides",
+    sql: `
+      -- Manual local-taxonomy decisions for authoritative catalogue codes.
+      -- These deliberately do not modify item_master: product uploads refresh
+      -- that table and current product existence/MRP remains source-owned.
+      CREATE TABLE IF NOT EXISTS sku_taxonomy_override (
+        code              TEXT PRIMARY KEY,
+        item_group        TEXT NOT NULL,
+        canonical_segment TEXT NOT NULL,
+        mapped_by_user_id INTEGER NOT NULL,
+        mapped_by         TEXT NOT NULL,
+        note              TEXT,
+        mapped_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS sku_taxonomy_override_audit (
+        id                     BIGSERIAL PRIMARY KEY,
+        code                   TEXT NOT NULL,
+        previous_item_group    TEXT,
+        previous_segment       TEXT,
+        item_group             TEXT NOT NULL,
+        canonical_segment      TEXT NOT NULL,
+        mapped_by_user_id      INTEGER NOT NULL,
+        mapped_by              TEXT NOT NULL,
+        note                   TEXT,
+        mapped_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS sku_taxonomy_override_audit_code_idx
+        ON sku_taxonomy_override_audit (code, mapped_at DESC);
+    `,
+  },
+  {
+    id: "068_sku_taxonomy_override_actor",
+    sql: `
+      -- Migration 067 can already exist in a development database from the
+      -- first queue rollout. Keep legacy rows honest (NULL actor id) while all
+      -- future writes record the authenticated administrator's immutable id.
+      ALTER TABLE sku_taxonomy_override
+        ADD COLUMN IF NOT EXISTS mapped_by_user_id INTEGER;
+      ALTER TABLE sku_taxonomy_override_audit
+        ADD COLUMN IF NOT EXISTS mapped_by_user_id INTEGER;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

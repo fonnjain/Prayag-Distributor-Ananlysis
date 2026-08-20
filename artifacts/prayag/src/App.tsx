@@ -15,6 +15,7 @@ import CompetitionPricePage from "@/pages/CompetitionPricePage";
 import DevPortalPage from "@/pages/DevPortalPage";
 import DevApiKeysPage from "@/pages/DevApiKeysPage";
 import DevMastersPage from "@/pages/DevMastersPage";
+import CatalogueReviewPage from "@/pages/CatalogueReviewPage";
 import OrgCustomersPage from "@/pages/OrgCustomersPage";
 import OrgPeoplePage    from "@/pages/OrgPeoplePage";
 import OrgUsersPage     from "@/pages/OrgUsersPage";
@@ -82,6 +83,7 @@ function ProtectedRoutes() {
         <Route path="/dev/api" component={DevPortalPage} />
         <Route path="/dev/keys" component={DevApiKeysPage} />
         <Route path="/dev/masters" component={DevMastersPage} />
+        {user.role === 'admin' && <Route path="/dev/catalogue-review" component={CatalogueReviewPage} />}
         <Route path="/dev" component={DevPortalPage} />
         {/* Dashboard areas */}
         <Route path="/" component={Dashboard} />
