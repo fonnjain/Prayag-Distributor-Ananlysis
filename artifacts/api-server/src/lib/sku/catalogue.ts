@@ -1,8 +1,9 @@
 /**
  * Catalogue denominator service.
  *
- * Returns the count of distinct item codes per canonical segment group,
- * derived from item_master.item_group via group_map.json.
+ * Returns the count of distinct current authoritative product codes per
+ * canonical segment group. The active prayag-price cache owns code existence;
+ * item_master.item_group is optional local taxonomy enrichment only.
  *
  * This is the denominator for every breadth figure:
  *   breadth % = codes_bought / codes_available × 100
@@ -31,6 +32,7 @@ import { sql } from "drizzle-orm";
 
 import itemGroupMapRaw from "../../../config/item_group_map.json" with { type: "json" };
 import secGroupMapRaw  from "../../../config/group_map.json" with { type: "json" };
+import { UNMAPPED_TAXONOMY } from "./catalogueAuthority.js";
 
 type GroupMapJson = { [key: string]: string[] | string };
 const ITEM_GROUP_MAP = itemGroupMapRaw as GroupMapJson;
@@ -82,27 +84,29 @@ export function canonGroupFromMap(raw: string | null | undefined): string | null
 // ── Catalogue denominator ─────────────────────────────────────────────────────
 
 export type CatalogueCounts = {
-  /** Canonical segment → number of distinct item codes in item_master. */
+  /** Canonical segment → authoritative current codes with local taxonomy. */
   bySegment: Record<string, number>;
-  /** Codes whose item_group maps to no canonical group. */
+  /** Authoritative codes whose optional local taxonomy maps to no segment. */
   unmappedCount: number;
-  /** Grand total of all codes in item_master (mapped + unmapped). */
+  /** Grand total of all current authoritative source codes. */
   totalCodes: number;
-  /** Grand total of codes whose item_group is in a known group. */
+  /** Authoritative codes whose optional local taxonomy maps to a known group. */
   mappedCodes: number;
+  /** Authoritative product codes that currently have no positive source MRP. */
+  unpricedCount: number;
 };
 
 export type CatalogueCompletenessRow = {
   segment: string;
-  /** Distinct codes in item_master for this segment (the breadth denominator). */
+  /** Authoritative current codes with optional local taxonomy in this segment. */
   codesAvailable: number;
   /** Distinct codes ever transacted in sale_line_all across all loaded FYs. */
   codesEverSold: number;
-  /** codesEverSold - codesAvailable. Negative = item_master is incomplete. */
+  /** codesEverSold - codesAvailable. Negative = authority coverage is incomplete. */
   shortfall: number;
   /** True when codesAvailable >= codesEverSold. */
   passes: boolean;
-  /** 'ok' | 'item_master_incomplete' | 'not_in_item_group_map' | 'not_in_item_master' */
+  /** 'ok' | 'authority_incomplete' | 'not_in_local_taxonomy' | 'no_authority_codes' */
   failReason: string | null;
 };
 
@@ -128,24 +132,36 @@ const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 export async function getCatalogueCounts(): Promise<CatalogueCounts> {
   if (_cache && Date.now() - _cacheBuiltAt < CACHE_TTL_MS) return _cache;
 
-  // Filter to items with mrp > 0 — these are "active catalogue" items
-  // available for sale, giving a practical breadth denominator.
-  // Items with null/zero MRP are typically discontinued or internal.
-  const rows = await db.execute<{ item_group: string | null; cnt: string }>(sql`
-    SELECT item_group, COUNT(*)::text AS cnt
-    FROM item_master
-    WHERE mrp IS NOT NULL AND mrp > 0
-    GROUP BY item_group
+  // The source cache defines present-day code existence. Keep the local group
+  // join non-filtering so an authority-only code remains visible as Unmapped.
+  const rows = await db.execute<{
+    item_group: string | null;
+    cnt: string;
+    unpriced_cnt: string;
+  }>(sql`
+    SELECT im.item_group,
+           COUNT(DISTINCT s.item_code)::text AS cnt,
+           COUNT(DISTINCT s.item_code) FILTER (
+             WHERE s.mrp IS NULL OR s.mrp <= 0
+           )::text AS unpriced_cnt
+    FROM mrp_synced s
+    JOIN mrp_sync_generation g
+      ON g.generation_id = s.generation_id
+     AND g.is_active = TRUE
+    LEFT JOIN item_master im ON im.code = s.item_code
+    GROUP BY im.item_group
   `);
 
   const bySegment: Record<string, number> = {};
   let unmappedCount = 0;
   let totalCodes = 0;
   let mappedCodes = 0;
+  let unpricedCount = 0;
 
   for (const row of rows.rows) {
     const count = parseInt(row.cnt, 10);
     totalCodes += count;
+    unpricedCount += parseInt(row.unpriced_cnt, 10);
     const canon = canonItemGroup(row.item_group);
     if (canon) {
       bySegment[canon] = (bySegment[canon] ?? 0) + count;
@@ -155,12 +171,12 @@ export async function getCatalogueCounts(): Promise<CatalogueCounts> {
     }
   }
 
-  _cache = { bySegment, unmappedCount, totalCodes, mappedCodes };
+  _cache = { bySegment, unmappedCount, totalCodes, mappedCodes, unpricedCount };
   _cacheBuiltAt = Date.now();
   return _cache;
 }
 
-/** Clear the catalogue cache (call after item_master updates). */
+/** Clear the catalogue cache (call after source sync or local taxonomy updates). */
 export function clearCatalogueCache(): void {
   _cache = null;
   _cacheBuiltAt = 0;
@@ -281,7 +297,7 @@ export async function getEverSoldPerSegmentProject(): Promise<Map<string, number
   return map;
 }
 
-/** Invalidate all ever-sold and catalogue caches (call after bulk sale_line_all or item_master updates). */
+/** Invalidate all ever-sold and catalogue caches (call after source sync, sale load, or taxonomy updates). */
 export function clearSkuCaches(): void {
   _cache = null;
   _cacheBuiltAt = 0;
@@ -295,22 +311,18 @@ export function clearSkuCaches(): void {
 
 // ── item_master gap disclosure ────────────────────────────────────────────────
 //
-// Codes that transacted in a given FY but whose item_master record either
-// (a) has mrp null / 0 (unpriced — silently excluded by the mrp > 0 gate), or
-// (b) has no row at all (completely absent from item_master).
-//
-// These codes carry live revenue but are invisible in every catalogue-gated
-// view.  This function surfaces them explicitly so the API caller can report
-// the gap rather than silently omit it.
+// Codes that transacted in a given FY but have no matching authoritative
+// current product. Local `item_master` coverage is intentionally not part of
+// this decision; it is metadata only.
 //
 // Segment is taken from sale_line_all (group_canon / group_raw) — NOT from
 // item_master, because item_master is precisely what is incomplete here.
 
 export type ItemMasterGapSegment = {
   segment: string;
-  /** Codes in sale_line_all for this segment that are in item_master but have mrp null/0. */
+  /** Codes in sale_line_all for this segment whose authoritative source MRP is unavailable. */
   unpricedCodes: number;
-  /** Codes in sale_line_all for this segment that have no item_master row. */
+  /** Codes in sale_line_all for this segment absent from the authority cache. */
   notInMasterCodes: number;
   totalCodes: number;
   totalLines: number;
@@ -321,11 +333,10 @@ export type ItemMasterGapSegment = {
 export type ItemMasterGap = {
   fy: string;
   /**
-   * Codes with an item_master row but mrp null or 0.
-   * The mrp > 0 gate silently excludes these from every catalogue view.
+   * Codes present in the authority cache but whose source MRP is null or zero.
    */
   unpriced: { distinctCodes: number; lines: number; valueRs: number };
-  /** Codes that have no item_master row at all. */
+  /** Codes absent from the active authority cache. */
   notInMaster: { distinctCodes: number; lines: number; valueRs: number };
   /** Combined total (unpriced + notInMaster). */
   total: { distinctCodes: number; lines: number; valueRs: number };
@@ -346,7 +357,7 @@ export async function getItemMasterGapForFy(fy?: string): Promise<ItemMasterGap>
   }
 
   // Two queries in parallel:
-  //   (1) True distinct-code totals by gap_kind — for accurate headline figures.
+  //   (1) True distinct-code totals by authority gap kind.
   //   (2) Per-segment breakdown — for attribution.
   //       Note: a code that appears under two group_canon values in different
   //       invoices will be counted in both segments, so per-segment code counts
@@ -361,15 +372,19 @@ export async function getItemMasterGapForFy(fy?: string): Promise<ItemMasterGap>
       total_value: string;
     }>(sql`
       SELECT
-        CASE WHEN im.code IS NULL THEN 'not_in_master' ELSE 'unpriced' END AS gap_kind,
+        CASE WHEN s.item_code IS NULL THEN 'not_in_authority' ELSE 'unpriced' END AS gap_kind,
         COUNT(DISTINCT sl.code)::text                                       AS distinct_codes,
         COUNT(*)::text                                                      AS line_rows,
         COALESCE(SUM(sl.amount), 0)::text                                  AS total_value
       FROM sale_line_all sl
-      LEFT JOIN item_master im ON im.code = sl.code
+       LEFT JOIN mrp_synced s
+         ON s.item_code = sl.code
+        AND s.generation_id = (
+          SELECT generation_id FROM mrp_sync_generation WHERE is_active = TRUE LIMIT 1
+        )
       WHERE sl.version_status = 'current'
         AND sl.fy = ${resolvedFy}
-        AND (im.code IS NULL OR im.mrp IS NULL OR im.mrp = 0)
+         AND (s.item_code IS NULL OR s.mrp IS NULL OR s.mrp <= 0)
       GROUP BY 1
     `),
     db.execute<{
@@ -381,15 +396,19 @@ export async function getItemMasterGapForFy(fy?: string): Promise<ItemMasterGap>
     }>(sql`
       SELECT
         COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') AS segment,
-        CASE WHEN im.code IS NULL THEN 'not_in_master' ELSE 'unpriced' END AS gap_kind,
+        CASE WHEN s.item_code IS NULL THEN 'not_in_authority' ELSE 'unpriced' END AS gap_kind,
         COUNT(DISTINCT sl.code)::text                                       AS distinct_codes,
         COUNT(*)::text                                                      AS line_rows,
         COALESCE(SUM(sl.amount), 0)::text                                  AS total_value
       FROM sale_line_all sl
-      LEFT JOIN item_master im ON im.code = sl.code
+       LEFT JOIN mrp_synced s
+         ON s.item_code = sl.code
+        AND s.generation_id = (
+          SELECT generation_id FROM mrp_sync_generation WHERE is_active = TRUE LIMIT 1
+        )
       WHERE sl.version_status = 'current'
         AND sl.fy = ${resolvedFy}
-        AND (im.code IS NULL OR im.mrp IS NULL OR im.mrp = 0)
+         AND (s.item_code IS NULL OR s.mrp IS NULL OR s.mrp <= 0)
       GROUP BY 1, 2
       ORDER BY SUM(sl.amount) DESC, 1, 2
     `),
@@ -402,7 +421,7 @@ export async function getItemMasterGapForFy(fy?: string): Promise<ItemMasterGap>
     const codes = parseInt(r.distinct_codes, 10);
     const lines = parseInt(r.line_rows, 10);
     const value = parseFloat(r.total_value);
-    if (r.gap_kind === "not_in_master") {
+    if (r.gap_kind === "not_in_authority") {
       notInMasterCodes = codes;
       notInMasterLines = lines;
       notInMasterValue = value;
@@ -433,7 +452,7 @@ export async function getItemMasterGapForFy(fy?: string): Promise<ItemMasterGap>
     };
     acc.totalLines += lines;
     acc.totalValueRs += value;
-    if (r.gap_kind === "not_in_master") {
+    if (r.gap_kind === "not_in_authority") {
       acc.notInMasterCodes += codes;
     } else {
       acc.unpricedCodes += codes;
@@ -475,13 +494,13 @@ export async function getItemMasterGapForFy(fy?: string): Promise<ItemMasterGap>
 
 // ── Never-sold catalogue reference ───────────────────────────────────────────
 //
-// Codes that exist in item_master (mrp > 0) but have never appeared in any
-// sale_line_all row.  These are genuine catalogue items with no transaction history.
-// Returned as a secondary reference — NOT used as a breadth denominator.
+// Current authoritative codes that have never appeared in sale_line_all.
+// Local item groups are presentation metadata only and must not filter a code
+// out of this list.
 
 export type NeverSoldSegmentSummary = {
   segment: string;
-  /** item_group values in this segment that have never-sold codes. */
+  /** Optional local item_group values in this segment that have never-sold codes. */
   itemGroups: string[];
   /** Total never-sold codes in this segment. */
   count: number;
@@ -493,13 +512,16 @@ export async function getNeverSoldCatalogueItems(): Promise<{
   total: number;
 }> {
   const rows = await db.execute<{ item_group: string | null; cnt: string }>(sql`
-    SELECT im.item_group, COUNT(DISTINCT im.code)::text AS cnt
-    FROM item_master im
+    SELECT im.item_group, COUNT(DISTINCT s.item_code)::text AS cnt
+    FROM mrp_synced s
+    JOIN mrp_sync_generation g
+      ON g.generation_id = s.generation_id
+     AND g.is_active = TRUE
+    LEFT JOIN item_master im ON im.code = s.item_code
     LEFT JOIN (
       SELECT DISTINCT code FROM sale_line_all WHERE version_status = 'current'
-    ) sold ON sold.code = im.code
-    WHERE im.mrp IS NOT NULL AND im.mrp > 0
-      AND sold.code IS NULL
+    ) sold ON sold.code = s.item_code
+    WHERE sold.code IS NULL
     GROUP BY 1
     ORDER BY 2::int DESC
   `);
@@ -513,7 +535,7 @@ export async function getNeverSoldCatalogueItems(): Promise<{
     const count = parseInt(r.cnt, 10);
     total += count;
     const canon = canonItemGroup(r.item_group);
-    const rawGroup = r.item_group ?? "(null)";
+    const rawGroup = r.item_group ?? UNMAPPED_TAXONOMY;
     if (canon) {
       const acc = segMap.get(canon);
       if (acc) {
@@ -541,13 +563,11 @@ export async function getNeverSoldCatalogueItems(): Promise<{
  * segment across all loaded fiscal years.
  *
  * Failure taxonomy:
- *   not_in_item_group_map — segment appears in sale_line_all but has no entry in
- *                           item_group_map.json, so codesAvailable = 0 always.
- *   not_in_item_master    — segment is declared in item_group_map.json but its
- *                           constituent item_groups produce 0 rows in item_master
- *                           (e.g. WATER TANK).
- *   item_master_incomplete — segment is partially present in item_master but
- *                            item_master has fewer codes than were transacted.
+ *   not_in_local_taxonomy — a sale segment has no local taxonomy declaration.
+ *   no_authority_codes    — no active authoritative source code has local
+ *                           taxonomy for the segment.
+ *   authority_incomplete  — authoritative source coverage is below the
+ *                           historical register's distinct-code footprint.
  */
 export async function getCatalogueCompleteness(): Promise<CatalogueCompleteness> {
   const [cat, soldRows] = await Promise.all([
@@ -589,12 +609,12 @@ export async function getCatalogueCompleteness(): Promise<CatalogueCompleteness>
     let failReason: string | null = null;
     if (!passes) {
       if (!DECLARED_SEGMENTS.has(seg)) {
-        failReason = "not_in_item_group_map";
+        failReason = "not_in_local_taxonomy";
         unmappedSegments.push(seg);
       } else if (codesAvailable === 0) {
-        failReason = "not_in_item_master";
+        failReason = "no_authority_codes";
       } else {
-        failReason = "item_master_incomplete";
+        failReason = "authority_incomplete";
       }
     }
 

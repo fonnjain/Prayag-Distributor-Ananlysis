@@ -125,7 +125,7 @@ export default function SkuDrill({ segment, rows, loading, truncated, onBack, se
           </span>
           {segmentFact.codesInCatalogue > 0 && (
             <span className="text-muted-foreground">
-              {segmentFact.codesInCatalogue} in item_master
+              {segmentFact.codesInCatalogue} in current catalogue
             </span>
           )}
         </div>

@@ -8,8 +8,8 @@
  *   Returns which levels are available for each FY (quick capability check without facts).
  *
  * GET /api/sku/catalogue
- *   Returns the item-master code counts per canonical segment group (the denominator
- *   for every breadth figure).
+ *   Returns authoritative current-catalogue code counts with optional local
+ *   taxonomy enrichment. Breadth itself remains sale-history based.
  *
  * ── Level semantics ──
  *   distributor   — sale_line_current, type_raw null or not matching '%direct%'
@@ -262,7 +262,7 @@ router.get("/sku/catalogue", async (req: Request, res: Response): Promise<void> 
         ? req.query.fy.trim()
         : null;
 
-    const [cat, completeness, neverSold, fyDist, itemMasterGap] = await Promise.all([
+    const [cat, completeness, neverSold, fyDist, authorityGap] = await Promise.all([
       getCatalogueCounts(),
       getCatalogueCompleteness(),
       getNeverSoldCatalogueItems(),
@@ -278,20 +278,20 @@ router.get("/sku/catalogue", async (req: Request, res: Response): Promise<void> 
     const unmappedValue      = unmappedLines.reduce((s, r) => s + r.totalNet, 0);
 
     res.json({
-      // ── item_master reference counts ─────────────────────────────────────
-      // NOT used as breadth denominator (item_master is an incomplete snapshot).
+      // ── Authoritative current-catalogue counts ────────────────────────────
+      // NOT used as breadth denominator (breadth is sale-history based).
       // Use completeness.rows[seg].codesEverSold for the breadth denominator.
-      itemMaster: {
+      authorityCatalogue: {
         bySegment: cat.bySegment,
         mappedCodes: cat.mappedCodes,
         unmappedCodes: cat.unmappedCount,
         totalCodes: cat.totalCodes,
+        unpricedCodes: cat.unpricedCount,
       },
 
-      // ── Codes in item_master that have never been sold ───────────────────
-      // These are genuine catalogue items with no transaction history.
-      // bySegment lists canonical segment → { count, itemGroups }.
-      // unmapped = item_groups not covered by item_group_map.json.
+      // ── Authoritative codes that have never been sold ─────────────────────
+      // bySegment lists canonical segment → { count, itemGroups }; an
+      // authority-only code remains visible under Unmapped local taxonomy.
       neverSold: {
         total: neverSold.total,
         bySegment: neverSold.bySegment,
@@ -299,8 +299,8 @@ router.get("/sku/catalogue", async (req: Request, res: Response): Promise<void> 
       },
 
       // ── Completeness assertion ───────────────────────────────────────────
-      // codesAvailable (item_master) vs codesEverSold (sale_line, all FYs).
-      // Shortfall = codesEverSold − codesAvailable.  Only SWR passes today.
+      // codesAvailable (authority + optional local taxonomy) vs codesEverSold
+      // (sale_line, all FYs). Shortfall = codesEverSold − codesAvailable.
       completeness: {
         passing: completeness.passing,
         failing: completeness.failing,
@@ -325,26 +325,25 @@ router.get("/sku/catalogue", async (req: Request, res: Response): Promise<void> 
           }
         : null,
 
-      // ── item_master gap disclosure ─────────────────────────────────────
-      // Codes that transacted in the target FY but are invisible to the
-      // mrp > 0 catalogue gate — either unpriced (mrp null/0) or absent
-      // from item_master entirely.  Reported here so the caller can surface
-      // the gap rather than silently omit ₹40+ Cr of live sales.
+      // ── Authoritative current-price gap disclosure ───────────────────────
+      // Codes that transacted in the target FY but have no active source MRP,
+      // either because source MRP is null/zero or because the code is absent
+      // from the active authoritative generation.
       //
       // fy defaults to the latest FY in sale_line_all when ?fy= is omitted.
       // Segment is taken from sale_line_all (group_canon / group_raw) —
       // NOT from item_master, which is precisely what is incomplete here.
       // Per-segment code counts may not sum to the top-level distinct total
       // if a code appears under two group_canon values across invoices.
-      itemMasterGap: {
-        fy: itemMasterGap.fy,
-        unpriced: itemMasterGap.unpriced,
-        notInMaster: itemMasterGap.notInMaster,
-        total: itemMasterGap.total,
-        bySegment: itemMasterGap.bySegment,
+      authorityGap: {
+        fy: authorityGap.fy,
+        unpriced: authorityGap.unpriced,
+        notInMaster: authorityGap.notInMaster,
+        total: authorityGap.total,
+        bySegment: authorityGap.bySegment,
       },
 
-      note: "item_master reference via item_group_map.json. Breadth denominator = codesEverSold in sale_line. itemMasterGap lists live codes excluded by the mrp > 0 gate.",
+      note: "Current product existence and current MRP come only from the active prayag-price.com cache. item_master contributes optional local names and taxonomy. Breadth denominator remains codesEverSold in sale_line.",
     });
   } catch (err) {
     req.log.error({ err }, "catalogue endpoint failed");

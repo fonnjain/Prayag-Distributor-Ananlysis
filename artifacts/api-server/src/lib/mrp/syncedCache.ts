@@ -4,6 +4,8 @@ import {
   fetchAuthoritativeProducts,
   type AuthoritativeProduct,
 } from "./authorityClient.js";
+import { clearSkuCaches } from "../sku/catalogue.js";
+import { clearK4Cache } from "../sku/skuK4.js";
 
 export const SOURCE_DIVISION_MAP: Record<string, string> = {
   "Pipes & Fittings": "Pipe & Fitting",
@@ -190,6 +192,11 @@ export async function refreshAuthoritativeMrpCache(): Promise<AuthoritativeSyncR
     } finally {
       client.release();
     }
+    // Successful activation changes the authoritative current-product and
+    // current-price basis. Do not let an in-memory SKU response survive the
+    // atomic generation switch.
+    clearSkuCaches();
+    clearK4Cache();
     const reconciliation = await sourceReconciliation(generationId);
     return {
       generationId, rowsSynced: source.rows.length, sourceTotal: source.sourceTotal,

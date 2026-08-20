@@ -25,6 +25,7 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { PROJECT_HEAD_CANON } from "./catalogue.js";
+import { UNMAPPED_TAXONOMY } from "./catalogueAuthority.js";
 import type { SkuLevel } from "./skuFacts.js";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -67,14 +68,15 @@ const TOP_CODES_PER_SEGMENT = 10;
 /**
  * Classify a gap code into one of four recommendation tiers (lower = higher priority).
  *
- *  1 Range  — code's ERP item_group is already in the distributor's current-period
- *             purchase set (fill the range within a sub-family).
- *             Only fires when item_master covers both the gap code and ≥1 bought code.
+ *  1 Range  — code's local ERP item_group is already in the distributor's
+ *             current-period purchase set (fill the range within a sub-family).
+ *             A missing local group remains visible as Unmapped but never
+ *             becomes a synthetic shared Range family.
  *  2 Lapsed — distributor bought this exact code in COHORT_FY but not this period.
  *  3 Active — distributor has any purchase in this segment this period.
  *  4 New    — distributor has no purchase in this segment this period.
  */
-function rankCode(
+export function rankCode(
   itemGroup: string | null,
   segment: string,
   code: string,
@@ -82,7 +84,11 @@ function rankCode(
   targetLostCodes: Set<string>,
   targetActiveSegments: Set<string>,
 ): { tier: 1 | 2 | 3 | 4; tierLabel: "Range" | "Lapsed" | "Active" | "New" } {
-  if (itemGroup && targetItemGroups.has(itemGroup)) return { tier: 1, tierLabel: "Range" };
+  if (
+    itemGroup &&
+    itemGroup !== UNMAPPED_TAXONOMY &&
+    targetItemGroups.has(itemGroup)
+  ) return { tier: 1, tierLabel: "Range" };
   if (targetLostCodes.has(code))                    return { tier: 2, tierLabel: "Lapsed" };
   if (targetActiveSegments.has(segment))             return { tier: 3, tierLabel: "Active" };
   return { tier: 4, tierLabel: "New" };
@@ -103,6 +109,8 @@ export type DistributorListItem = {
 export type PushCode = {
   code: string;
   itemName: string | null;
+  /** Optional local ERP taxonomy. Missing local metadata is explicit, never suppresses the code. */
+  itemGroup: string;
   /** Count of segment-active peers buying this code in the query period. */
   peerCount: number;
   /** Total net of those peers for this code in the query period. */
@@ -517,13 +525,13 @@ export async function getSkuPushList(
     // Tier-classification data for fallback distributor
     const [fbItemGroupRows, fbPriorCodeRows] = await Promise.all([
       db.execute<{ item_group: string }>(sql`
-        SELECT DISTINCT im.item_group
+        SELECT DISTINCT COALESCE(im.item_group, ${UNMAPPED_TAXONOMY}) AS item_group
         FROM sale_line_current sl
-        JOIN item_master im ON im.code = sl.code
+        LEFT JOIN item_master im ON im.code = sl.code
         WHERE sl.fy = ${fy}
           AND sl.month_label = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
           AND sl.customer = ${distributorKey}
-          AND sl.code IS NOT NULL AND im.item_group IS NOT NULL
+          AND sl.code IS NOT NULL
           ${levelFilter}
       `),
       db.execute<{ code: string }>(sql`
@@ -535,7 +543,9 @@ export async function getSkuPushList(
           ${levelFilter}
       `),
     ]);
-    const fbTargetItemGroups = new Set(fbItemGroupRows.rows.map((r) => r.item_group));
+    const fbTargetItemGroups = new Set(
+      fbItemGroupRows.rows.map((r) => r.item_group).filter((group) => group !== UNMAPPED_TAXONOMY),
+    );
     const fbPriorCodes       = new Set(fbPriorCodeRows.rows.map((r) => r.code));
     const fbTargetLostCodes  = new Set([...fbPriorCodes].filter((c) => !fbTargetBought.has(c)));
 
@@ -572,7 +582,7 @@ export async function getSkuPushList(
         COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') AS segment,
         sl.code,
         MAX(im.item_name)                                   AS item_name,
-        MAX(im.item_group)                                  AS item_group,
+        COALESCE(MAX(im.item_group), ${UNMAPPED_TAXONOMY})  AS item_group,
         COUNT(DISTINCT sl.customer)::text                   AS peer_count,
         SUM(sl.amount::numeric)::text                       AS peer_net,
         MAX(sl.fy)                                          AS last_fy
@@ -603,6 +613,7 @@ export async function getSkuPushList(
       const code: PushCode = {
         code: r.code,
         itemName: r.item_name,
+        itemGroup: r.item_group ?? UNMAPPED_TAXONOMY,
         peerCount: parseInt(r.peer_count, 10) || 0,
         peerNet: parseFloat(r.peer_net) || 0,
         lastFy: r.last_fy,
@@ -712,13 +723,13 @@ export async function getSkuPushList(
 
   const [targetItemGroupRows, targetPriorCodeRows] = await Promise.all([
     db.execute<{ item_group: string }>(sql`
-      SELECT DISTINCT im.item_group
+      SELECT DISTINCT COALESCE(im.item_group, ${UNMAPPED_TAXONOMY}) AS item_group
       FROM sale_line_current sl
-      JOIN item_master im ON im.code = sl.code
+      LEFT JOIN item_master im ON im.code = sl.code
       WHERE sl.fy = ${fy}
         AND sl.month_label = ANY(ARRAY[${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)}])
         AND sl.customer = ${distributorKey}
-        AND sl.code IS NOT NULL AND im.item_group IS NOT NULL
+        AND sl.code IS NOT NULL
         ${levelFilter}
     `),
     db.execute<{ code: string }>(sql`
@@ -730,7 +741,9 @@ export async function getSkuPushList(
         ${levelFilter}
     `),
   ]);
-  const targetItemGroups = new Set(targetItemGroupRows.rows.map((r) => r.item_group));
+  const targetItemGroups = new Set(
+    targetItemGroupRows.rows.map((r) => r.item_group).filter((group) => group !== UNMAPPED_TAXONOMY),
+  );
   const targetPriorCodes = new Set(targetPriorCodeRows.rows.map((r) => r.code));
   // Lapsed = bought in COHORT_FY but NOT in current query period
   const targetLostCodes  = new Set([...targetPriorCodes].filter((c) => !targetBought.has(c)));
@@ -782,7 +795,7 @@ export async function getSkuPushList(
       COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') AS segment,
       sl.code,
       MAX(im.item_name)                                   AS item_name,
-      MAX(im.item_group)                                  AS item_group,
+      COALESCE(MAX(im.item_group), ${UNMAPPED_TAXONOMY})  AS item_group,
       COUNT(DISTINCT sl.customer)::text                   AS peer_count,
       SUM(sl.amount::numeric)::text                       AS peer_net,
       MAX(sl.fy)                                          AS last_fy
@@ -816,6 +829,7 @@ export async function getSkuPushList(
     const code: PushCode = {
       code: r.code,
       itemName: r.item_name,
+      itemGroup: r.item_group ?? UNMAPPED_TAXONOMY,
       peerCount: parseInt(r.peer_count, 10) || 0,
       peerNet: parseFloat(r.peer_net) || 0,
       lastFy: r.last_fy,

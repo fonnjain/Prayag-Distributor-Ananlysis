@@ -36,6 +36,8 @@ export type DiscountAboveNorm = {
 export type PushCode = {
   code: string;
   itemName: string | null;
+  /** Local taxonomy is optional; authority-only codes are explicitly Unmapped. */
+  itemGroup: string;
   peerCount: number;
   peerNet: number;
   lastFy: string;
@@ -619,10 +621,15 @@ function PushSegmentCard({
                     <span className="font-mono text-xs">{code.code}</span>
                   </div>
                 </TableCell>
-                <TableCell className="py-1.5 text-xs hidden sm:table-cell max-w-[200px] truncate">
-                  {code.itemName ?? (
-                    <span className="text-muted-foreground italic">—</span>
-                  )}
+                <TableCell className="py-1.5 text-xs hidden sm:table-cell max-w-[200px]">
+                  <div className="truncate">
+                    {code.itemName ?? (
+                      <span className="text-muted-foreground italic">—</span>
+                    )}
+                  </div>
+                  <div className="truncate text-[10px] text-muted-foreground">
+                    {code.itemGroup === "Unmapped" ? "Unmapped taxonomy" : code.itemGroup}
+                  </div>
                 </TableCell>
                 <TableCell className="py-1.5 text-right text-xs whitespace-nowrap">
                   <span className="font-medium text-primary tabular-nums">

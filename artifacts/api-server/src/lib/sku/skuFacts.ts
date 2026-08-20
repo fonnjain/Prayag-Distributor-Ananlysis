@@ -16,7 +16,8 @@
  * Breadth figures carry their denominator: codesEverSold per segment = distinct
  * codes transacted across ALL loaded FYs in that segment.  This is always ≥
  * codesBought for any period sub-query, so breadthPct is always in [0, 100].
- * item_master is carried as a secondary reference (codesInCatalogue) only.
+ * The authoritative current catalogue is carried as a secondary reference
+ * (codesInCatalogue); item_master supplies optional labels only.
  * Bare counts are never returned.
  */
 
@@ -94,9 +95,8 @@ export type SkuSegmentFact = {
    */
   breadthPct: number;
   /**
-   * Codes in item_master (mrp > 0) for this segment — secondary reference only.
-   * May be less than codesEverSold (item_master is an incomplete catalogue
-   * snapshot for most segments).  0 for segments not in item_group_map.json.
+   * Authoritative current codes with optional local taxonomy for this segment —
+   * secondary reference only. Never use this as a breadth denominator.
    */
   codesInCatalogue: number;
   /**
@@ -576,7 +576,8 @@ async function buildFactsFromRows(
   //   everSold   — primary breadth denominator; caller may override to a
   //                level-filtered map (territory-only or project-only) so
   //                codes exclusive to one channel don't distort another.
-  //   catalogue  — secondary reference (item_master codes with mrp > 0)
+  //   catalogue  — secondary reference (authoritative current catalogue, with
+  //                optional local taxonomy labels)
   const [everSoldDefault, catalogue] = await Promise.all([
     everSoldOverride ? Promise.resolve(null) : getEverSoldPerSegment(),
     getCatalogueCounts(),

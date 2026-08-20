@@ -52,7 +52,7 @@ function parseArgs(argv: string[]): Args {
 // ── Catalogue report ─────────────────────────────────────────────────────────
 
 async function reportCatalogue(): Promise<void> {
-  console.log("\n── Catalogue denominator (from item_master + group_map.json) ──");
+  console.log("\n── Current authoritative catalogue (local taxonomy where available) ──");
   const cat = await getCatalogueCounts();
   const specCounts: Record<string, number> = {
     "CP (Chrome-Plated)": 903,
@@ -76,6 +76,7 @@ async function reportCatalogue(): Promise<void> {
   console.log(`  ${"─".repeat(30)}`);
   console.log(`  ${"Total (mapped)".padEnd(22)} ${String(derivedMapped).padStart(5)}  (spec: 2,536)`);
   console.log(`  ${"Grand total".padEnd(22)} ${String(cat.totalCodes).padStart(5)}`);
+  console.log(`  ${"Source MRP unavailable".padEnd(22)} ${String(cat.unpricedCount).padStart(5)}`);
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────

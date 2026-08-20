@@ -3,8 +3,10 @@
  * first-order codes, lost codes, and explicit blocked-capability flags.
  *
  * ── Discount: TWO measures, never conflated ──
- *   PRIMARY  — discount off MRP = (mrp × qty − amount) / (mrp × qty), from
- *              sale_line joined to item_master (rate-list MRP). All four FYs.
+ *   PRIMARY  — discount off MRP = (mrp × qty − amount) / (mrp × qty).
+ *              The open FY uses the active authoritative MRP cache; closed
+ *              periods use effective-dated mrp_history. Local uploaded MRP is
+ *              never used as a price source.
  *   SECONDARY — the registers' explicit Discount column beside Sub Total,
  *              from secondary_sku_line. Closed years only. Retailer-level.
  *   The API returns them under separate keys (`primary` / `secondary`) each
@@ -31,6 +33,7 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { PROJECT_HEAD_CANON } from "./catalogue.js";
+import { authoritativeCurrentMrpRows } from "./catalogueAuthority.js";
 import { SKU_SHEET_IDS, secondarySkuFyHasData, getSecondarySkuFyPeriodLabel } from "../secondary/skuLoader.js";
 import { logger } from "../logger.js";
 import { deriveSaleLineClosedFys, currentOpenFy } from "../fyAnchors.js";
@@ -72,6 +75,24 @@ export function clearK4Cache(): void {
 function num(v: unknown): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+/** Convert `Apr-25` to the end of that calendar month. */
+function monthLabelToEndDate(label: string): string {
+  const [mon, yr] = label.split("-") as [string, string];
+  const monthMap: Record<string, number> = {
+    Apr: 4, May: 5, Jun: 6, Jul: 7, Aug: 8, Sep: 9,
+    Oct: 10, Nov: 11, Dec: 12, Jan: 1, Feb: 2, Mar: 3,
+  };
+  const month = monthMap[mon] ?? 3;
+  const year = 2000 + Number(yr);
+  return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+}
+
+/** The end of the requested primary period, or fiscal year end when unfiltered. */
+function primaryPeriodEndDate(fy: string, monthLabels: string[] | null): string {
+  const last = monthLabels?.[monthLabels.length - 1];
+  return monthLabelToEndDate(last ?? `Mar-${fy.slice(-2)}`);
 }
 
 // ── Project customer bridge ──────────────────────────────────────────────────
@@ -184,21 +205,86 @@ export async function getPrimaryDiscountByCode(
       monthLabels && monthLabels.length > 0
         ? sql`AND month_label IN (${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)})`
         : sql``;
+    const useCurrentAuthority = fy === currentOpenFy();
+    const historicalAsOf = primaryPeriodEndDate(fy, monthLabels);
+    const periodMrp = useCurrentAuthority
+      ? sql`SELECT item_code, segment, mrp FROM current_mrp`
+      : sql`SELECT item_code, segment, mrp FROM historical_mrp`;
 
-    // Per customer-per-code effective discount, then per-code stats.
+    // Per customer-per-code effective discount, then per-code stats. Segment
+    // pairing is strict: exact first, then the two documented app-label
+    // prefixes. Ties are rejected so a source price is never guessed.
     const rows = await db.execute(sql`
-      WITH cust AS (
+      WITH current_mrp AS (
+        ${authoritativeCurrentMrpRows}
+      ),
+      historical_mrp AS (
+        SELECT DISTINCT ON (h.item_code, h.segment)
+          h.item_code, h.segment, h.mrp
+        FROM mrp_history h
+        WHERE h.effective_from <= ${historicalAsOf}
+        ORDER BY h.item_code, h.segment,
+          CASE WHEN h.effective_to IS NULL OR h.effective_to >= ${historicalAsOf} THEN 0 ELSE 1 END ASC,
+          h.effective_from DESC
+      ),
+      sale_rows AS (
         SELECT sl.code,
-               coalesce(sl.group_canon, sl.group_raw, 'Unmapped') AS segment,
-               upper(trim(coalesce(sl.customer,'?'))) AS customer,
-               sum(sl.amount::float8) AS net,
-               sum(im.mrp::float8 * sl.qty::float8) AS mrp_value
+               COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') AS segment,
+               upper(trim(COALESCE(sl.customer, '?'))) AS customer,
+               sl.qty::float8 AS qty,
+               sl.amount::float8 AS amount
         FROM sale_line_current sl
-        JOIN item_master im ON im.code = sl.code AND im.mrp IS NOT NULL AND im.mrp::float8 > 0
-        WHERE sl.fy = ${fy} AND sl.qty::float8 > 0 AND sl.amount::float8 > 0
+        WHERE sl.fy = ${fy}
+          AND sl.qty::float8 > 0
+          AND sl.amount::float8 > 0
           AND ${chanFilter} ${monthFilter}
+      ),
+      mrp_segments AS (
+        SELECT item_code, segment FROM current_mrp
+        UNION
+        SELECT item_code, segment FROM historical_mrp
+      ),
+      code_mrp_ranked AS (
+        SELECT p.code, p.segment AS sale_segment, m.segment AS mrp_segment,
+               CASE
+                 WHEN p.segment = m.segment THEN 0
+                 WHEN p.segment ILIKE m.segment || ' %' THEN 1
+                 WHEN p.segment ILIKE m.segment || ' (%' THEN 1
+                 ELSE 99
+               END AS rank
+        FROM (SELECT DISTINCT code, segment FROM sale_rows) p
+        JOIN mrp_segments m ON m.item_code = p.code
+        WHERE p.segment = m.segment
+           OR p.segment ILIKE m.segment || ' %'
+           OR p.segment ILIKE m.segment || ' (%'
+      ),
+      code_mrp_segment AS (
+        SELECT code, sale_segment, MAX(mrp_segment) AS mrp_segment
+        FROM (
+          SELECT *, MIN(rank) OVER (PARTITION BY code, sale_segment) AS best_rank
+          FROM code_mrp_ranked
+        ) ranked
+        WHERE rank = best_rank
+        GROUP BY code, sale_segment
+        HAVING COUNT(DISTINCT mrp_segment) = 1
+      ),
+      period_mrp AS (
+        ${periodMrp}
+      ),
+      cust AS (
+        SELECT s.code,
+               s.segment,
+               s.customer,
+               SUM(s.amount) AS net,
+               SUM(p.mrp::float8 * s.qty) AS mrp_value,
+               COUNT(*)::int AS source_rows
+        FROM sale_rows s
+        JOIN code_mrp_segment cms
+          ON cms.code = s.code AND cms.sale_segment = s.segment
+        JOIN period_mrp p
+          ON p.item_code = s.code AND p.segment = cms.mrp_segment
         GROUP BY 1, 2, 3
-        HAVING sum(im.mrp::float8 * sl.qty::float8) > 0
+        HAVING SUM(p.mrp::float8 * s.qty) > 0
       ), cd AS (
         SELECT *, greatest(0, least(1, 1 - net / mrp_value)) AS disc FROM cust
       )
@@ -207,19 +293,23 @@ export async function getPrimaryDiscountByCode(
              sum(net) AS net,
              sum(disc * net) / nullif(sum(net), 0) AS avg_disc,
              min(disc) AS min_disc, max(disc) AS max_disc,
+              SUM(source_rows)::int AS source_rows,
              (array_agg(customer ORDER BY disc ASC))[1] AS low_customer,
              (array_agg(customer ORDER BY disc DESC))[1] AS high_customer
       FROM cd GROUP BY code
     `);
 
     const cov = await db.execute(sql`
-      SELECT count(*)::int AS total,
-             count(*) FILTER (WHERE im.mrp IS NOT NULL AND im.mrp::float8 > 0)::int AS with_mrp
-      FROM sale_line_current sl LEFT JOIN item_master im ON im.code = sl.code
-      WHERE sl.fy = ${fy} AND ${chanFilter} ${monthFilter}
+      SELECT COUNT(*)::int AS total
+      FROM sale_line_current sl
+      WHERE sl.fy = ${fy}
+        AND sl.qty::float8 > 0
+        AND sl.amount::float8 > 0
+        AND ${chanFilter} ${monthFilter}
     `);
-    const covRow = cov.rows[0] as { total: number; with_mrp: number };
+    const covRow = cov.rows[0] as { total: number };
 
+    let rowsWithMrp = 0;
     const codes: DiscountCodeRow[] = (rows.rows as Record<string, unknown>[])
       .map((r) => ({
         code: String(r.code),
@@ -234,6 +324,9 @@ export async function getPrimaryDiscountByCode(
         highCustomer: r.high_customer ? String(r.high_customer) : null,
       }))
       .sort((a, b) => b.net - a.net);
+    for (const row of rows.rows as Record<string, unknown>[]) {
+      rowsWithMrp += num(row.source_rows);
+    }
 
     const widestGaps = codes
       .filter((c) => c.customers >= 3)
@@ -242,12 +335,14 @@ export async function getPrimaryDiscountByCode(
 
     return {
       measureLabel:
-        "Discount off MRP (rate-list MRP; what the distributor pays against list price). NOT margin.",
+        useCurrentAuthority
+          ? "Discount off authoritative current MRP (prayag-price.com cache; local uploaded MRP is not used). NOT margin."
+          : "Discount off effective-dated historical MRP for the selected period (current MRP is not retroactively applied). NOT margin.",
       fy,
       channel,
       codes: codes.slice(0, 500),
       widestGaps,
-      mrpCoverage: { rowsWithMrp: covRow.with_mrp, rowsTotal: covRow.total },
+      mrpCoverage: { rowsWithMrp, rowsTotal: covRow.total },
       projectExclusion: projectExclusionMeta(projSet),
     };
   });
@@ -566,26 +661,93 @@ export async function getDiscountNormFlags(
     monthLabels && monthLabels.length > 0
       ? sql`AND sl.month_label IN (${sql.join(monthLabels.map((m) => sql`${m}`), sql`, `)})`
       : sql``;
+  const useCurrentAuthority = fy === currentOpenFy();
+  const historicalAsOf = primaryPeriodEndDate(fy, monthLabels ?? null);
   const rows = await db.execute(sql`
-    WITH base AS (
-      SELECT sl.code, sl.fy,
-             sum(sl.amount::float8) AS net,
-             sum(im.mrp::float8 * sl.qty::float8) AS mrp_value
+    WITH current_mrp AS (
+      ${authoritativeCurrentMrpRows}
+    ),
+    base AS (
+      SELECT sl.code,
+             sl.fy,
+             COALESCE(sl.group_canon, sl.group_raw, 'Unmapped') AS sale_segment,
+             CASE
+               WHEN sl.fy = ${fy} THEN ${historicalAsOf}::date
+               ELSE MAKE_DATE(SUBSTRING(sl.fy, 1, 4)::int + 1, 3, 31)
+             END AS as_of,
+             SUM(sl.amount::float8) AS net,
+             SUM(sl.qty::float8) AS qty
       FROM sale_line_current sl
-      JOIN item_master im ON im.code = sl.code AND im.mrp::float8 > 0
       WHERE sl.code IN (${codeList}) AND sl.qty::float8 > 0 AND sl.amount::float8 > 0
         AND ${terr}
         AND ((sl.fy = ${fy} ${curPeriod})
              OR (sl.fy != ${fy} AND sl.fy IN (${sql.join(CLOSED_FYS.map((f) => sql`${f}`), sql`, `)})))
-      GROUP BY 1, 2
-      HAVING sum(im.mrp::float8 * sl.qty::float8) > 0
+      GROUP BY 1, 2, 3, 4
+    ),
+    mrp_segments AS (
+      SELECT item_code, segment FROM current_mrp
+      UNION
+      SELECT item_code, segment FROM mrp_history
+    ),
+    code_mrp_ranked AS (
+      SELECT b.code, b.sale_segment, m.segment AS mrp_segment,
+             CASE
+               WHEN b.sale_segment = m.segment THEN 0
+               WHEN b.sale_segment ILIKE m.segment || ' %' THEN 1
+               WHEN b.sale_segment ILIKE m.segment || ' (%' THEN 1
+               ELSE 99
+             END AS rank
+      FROM (SELECT DISTINCT code, sale_segment FROM base) b
+      JOIN mrp_segments m ON m.item_code = b.code
+      WHERE b.sale_segment = m.segment
+         OR b.sale_segment ILIKE m.segment || ' %'
+         OR b.sale_segment ILIKE m.segment || ' (%'
+    ),
+    code_mrp_segment AS (
+      SELECT code, sale_segment, MAX(mrp_segment) AS mrp_segment
+      FROM (
+        SELECT *, MIN(rank) OVER (PARTITION BY code, sale_segment) AS best_rank
+        FROM code_mrp_ranked
+      ) ranked
+      WHERE rank = best_rank
+      GROUP BY code, sale_segment
+      HAVING COUNT(DISTINCT mrp_segment) = 1
+    ),
+    priced AS (
+      SELECT b.code, b.fy, b.net, b.qty,
+             CASE
+               WHEN b.fy = ${fy} AND ${useCurrentAuthority}
+                 THEN cm.mrp::float8
+               ELSE hm.mrp::float8
+             END AS mrp
+      FROM base b
+      LEFT JOIN code_mrp_segment cms
+        ON cms.code = b.code AND cms.sale_segment = b.sale_segment
+      LEFT JOIN current_mrp cm
+        ON cm.item_code = b.code AND cm.segment = cms.mrp_segment
+      LEFT JOIN LATERAL (
+        SELECT h.mrp
+        FROM mrp_history h
+        WHERE h.item_code = b.code
+          AND h.segment = cms.mrp_segment
+          AND h.effective_from <= b.as_of
+        ORDER BY
+          CASE WHEN h.effective_to IS NULL OR h.effective_to >= b.as_of THEN 0 ELSE 1 END ASC,
+          h.effective_from DESC
+        LIMIT 1
+      ) hm ON TRUE
+    ),
+    priced_base AS (
+      SELECT code, fy, net, mrp * qty AS mrp_value
+      FROM priced
+      WHERE mrp IS NOT NULL AND mrp > 0
     )
     SELECT code,
       sum(CASE WHEN fy = ${fy} THEN mrp_value - net END)
         / nullif(sum(CASE WHEN fy = ${fy} THEN mrp_value END), 0) AS cur_disc,
       sum(CASE WHEN fy != ${fy} THEN mrp_value - net END)
         / nullif(sum(CASE WHEN fy != ${fy} THEN mrp_value END), 0) AS norm_disc
-    FROM base GROUP BY code
+    FROM priced_base GROUP BY code
   `);
   for (const r of rows.rows as { code: string; cur_disc: number | null; norm_disc: number | null }[]) {
     if (r.cur_disc == null || r.norm_disc == null) continue;
