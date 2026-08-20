@@ -1,0 +1,54 @@
+Option (b) approved. The month-level overlap test is what makes it
+conclusive - Maharashtra with two to four heads in every observed month cannot
+be a person-to-leaf link, and Tamil Nadu being a clean handover with no
+overlap shows the difference matters.
+
+person_state_coverage with state_canon, state_head_person_id and effective
+dates is the right model.
+
+Two corrections accepted: West Bengal has one head not four - I misread a
+multi-year list as concurrent. And JAMMU + KASHMIR is Rs 6.81 Cr across three
+years, not Rs 4.70 Cr - I quoted two.
+
+FOUR THINGS BEFORE BUILDING
+
+1. THE NULL HEAD BUCKETS
+Gujarat Rs 0.12 Cr, Haryana Rs 0.05 Cr, Rajasthan Rs 0.10 Cr trade under a
+named state with NO head. Under the new model every coverage row needs a
+state_head_person_id.
+
+Decide explicitly and say which: a sentinel "unassigned" person, a nullable
+column with a documented meaning, or excluded from coverage entirely. Do not
+let those rows disappear silently - Rs 0.27 Cr is small but a row that vanishes
+in a migration is how a reconciliation breaks later.
+
+2. HARYANA / Haryana IS THE SEVENTH DUPLICATE
+Include it in scope. HARYANA carries 5 assignments, Haryana carries 0. Same
+treatment as the other six - delete the empty side after re-running the
+zero-reference assertion.
+
+3. MIGRATE, THEN PROVE NOTHING MOVED
+The assertion that matters: FY2025-26 net BY HEAD before and after the
+migration must be IDENTICAL. Rs 360.9954 Cr total, and each head's figure
+unchanged.
+
+This migration touches how coverage is expressed, not who traded. If any head's
+total moves, the mapping is wrong and that is a stop condition.
+
+4. PRESERVE THE HISTORY
+person_territory has effective_from and effective_to. Carry them across
+unchanged. A person who covered a state last year and not this year must still
+read that way afterwards.
+
+VERIFY
+  a. Row counts: person_territory before, person_state_coverage after, and the
+     reconciliation between them.
+  b. Every one of the nine multi-head states with its heads and net, before and
+     after. Maharashtra is the test case - four heads must survive as four
+     coverage rows.
+  c. Tamil Nadu: confirm Babu and Sandeep are represented by effective dates
+     rather than concurrent rows.
+  d. FY2025-26 net by head, before and after. Identical.
+  e. Confirm the seven case-duplicate rows are gone and no assignment was lost.
+  f. Confirm GEM, JJM, HITESH and Non-territory remain non-assignable.
+  g. Push, print both git refs.
