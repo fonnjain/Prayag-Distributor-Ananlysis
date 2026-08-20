@@ -71,6 +71,259 @@ export interface CanonicalCoverageReport {
   }>;
 }
 
+export type CanonicalCoverageDriftIssueKind =
+  | "mixed"
+  | "unassigned"
+  | "system-routed"
+  | "unresolved"
+  | "coverage-mismatch"
+  | "evidence-mismatch";
+
+export interface CanonicalCoverageDriftIssue {
+  kind: CanonicalCoverageDriftIssueKind;
+  stateCanon: string;
+  fiscalYear: string;
+  customer: string | null;
+  detail: Record<string, unknown>;
+}
+
+export interface CanonicalCoverageDriftCheck {
+  checkedAt: string;
+  fiscalYear: string | null;
+  passed: boolean;
+  issueCount: number;
+  issues: CanonicalCoverageDriftIssue[];
+}
+
+type DriftIssueRow = {
+  issue_kind: CanonicalCoverageDriftIssueKind;
+  state_canon: string;
+  fiscal_year: string;
+  customer: string | null;
+  detail: Record<string, unknown>;
+};
+
+/**
+ * Re-runs the customer-level validation that guarded the original
+ * register-evidenced coverage migration. This is deliberately read-only: it
+ * tells an operator when the source evidence no longer supports a derived
+ * coverage row, but never edits organisation coverage to match a new load.
+ */
+export async function buildCanonicalCoverageDriftCheck(
+  fiscalYear?: string,
+): Promise<CanonicalCoverageDriftCheck> {
+  const { rows } = await pool.query<DriftIssueRow>(`
+    WITH selected_lines AS (
+      SELECT sl.state_canon, sl.fy, sl.customer, sl.head_canon, sl.amount,
+             sl.invoice_date, sl.month_label,
+             CASE sl.head_canon
+               WHEN 'Babu' THEN 'Taninki Ramesh Babu'
+               WHEN 'Pawan Sharma' THEN 'Pawan Kumar Sharma'
+               WHEN 'Syed Aqil Rizvi' THEN 'Aqil Rizvi'
+               WHEN 'Suresh Nair' THEN 'Suresh Kumar Nair'
+               ELSE sl.head_canon
+             END AS person_name
+      FROM sale_line sl
+      WHERE (
+        sl.state_canon IN ('AP','HIMACHAL PRADESH','MAHARASHTRA','TAMIL NADU','TELANGANA')
+        OR (sl.state_canon = 'PUNJAB' AND sl.fy <> '2023-24')
+      )
+        AND ($1::text IS NULL OR sl.fy = $1)
+    ),
+    customer_attribution AS (
+      SELECT
+        s.state_canon,
+        s.fy,
+        s.customer,
+        array_agg(DISTINCT COALESCE(s.head_canon, '__UNASSIGNED__')
+          ORDER BY COALESCE(s.head_canon, '__UNASSIGNED__')) AS register_heads,
+        COUNT(DISTINCT s.head_canon) FILTER (WHERE s.head_canon IS NOT NULL) AS real_head_count,
+        BOOL_OR(s.head_canon IS NULL) AS has_unassigned,
+        BOOL_OR(p.person_id IS NULL AND s.head_canon IS NOT NULL) AS has_unresolved,
+        BOOL_OR(COALESCE(p.is_system_coverage, false)) AS has_system
+      FROM selected_lines s
+      LEFT JOIN person p ON p.name = s.person_name
+      GROUP BY s.state_canon, s.fy, s.customer
+    ),
+    attribution_issues AS (
+      SELECT
+        CASE
+          WHEN real_head_count > 1 THEN 'mixed'
+          WHEN has_unassigned THEN 'unassigned'
+          WHEN has_system THEN 'system-routed'
+          WHEN has_unresolved THEN 'unresolved'
+        END::text AS issue_kind,
+        state_canon,
+        fy AS fiscal_year,
+        customer,
+        jsonb_build_object(
+          'registerHeads', register_heads,
+          'realHeadCount', real_head_count,
+          'hasUnassigned', has_unassigned,
+          'hasSystem', has_system,
+          'hasUnresolved', has_unresolved
+        ) AS detail
+      FROM customer_attribution
+      WHERE real_head_count <> 1
+         OR has_unassigned
+         OR has_system
+         OR has_unresolved
+    ),
+    expected_coverage AS (
+      SELECT
+        state_canon,
+        fy,
+        person_name,
+        COUNT(DISTINCT customer)::integer AS customer_count,
+        SUM(amount) AS net_amount,
+        DATE_TRUNC('month', MIN(COALESCE(invoice_date, TO_DATE(month_label, 'Mon-YY'))))::date AS effective_from,
+        (DATE_TRUNC('month', MAX(COALESCE(invoice_date, TO_DATE(month_label, 'Mon-YY'))))
+          + INTERVAL '1 month - 1 day')::date AS effective_to
+      FROM selected_lines
+      WHERE head_canon IS NOT NULL
+      GROUP BY state_canon, fy, person_name
+    ),
+    actual_coverage AS (
+      SELECT
+        c.state_canon,
+        c.fiscal_year AS fy,
+        p.name AS person_name,
+        c.evidence_customer_count AS customer_count,
+        c.evidence_net_amount AS net_amount,
+        c.effective_from,
+        c.effective_to
+      FROM person_state_coverage c
+      JOIN person p ON p.person_id = c.person_id
+      WHERE c.source = 'derived_register'
+        AND ($1::text IS NULL OR c.fiscal_year = $1)
+    ),
+    coverage_diffs AS (
+      SELECT
+        COALESCE(e.state_canon, a.state_canon) AS state_canon,
+        COALESCE(e.fy, a.fy) AS fiscal_year,
+        COALESCE(e.person_name, a.person_name) AS person_name,
+        jsonb_build_object(
+          'expected', jsonb_build_object(
+            'customerCount', e.customer_count,
+            'netAmount', e.net_amount,
+            'effectiveFrom', e.effective_from,
+            'effectiveTo', e.effective_to
+          ),
+          'coverage', jsonb_build_object(
+            'customerCount', a.customer_count,
+            'netAmount', a.net_amount,
+            'effectiveFrom', a.effective_from,
+            'effectiveTo', a.effective_to
+          )
+        ) AS detail
+      FROM expected_coverage e
+      FULL OUTER JOIN actual_coverage a
+        ON a.state_canon = e.state_canon
+       AND a.fy = e.fy
+       AND a.person_name = e.person_name
+      WHERE e.customer_count IS DISTINCT FROM a.customer_count
+         OR e.net_amount IS DISTINCT FROM a.net_amount
+         OR e.effective_from IS DISTINCT FROM a.effective_from
+         OR e.effective_to IS DISTINCT FROM a.effective_to
+    ),
+    expected_evidence AS (
+      SELECT state_canon, fy, person_name, customer, SUM(amount) AS net_amount
+      FROM selected_lines
+      WHERE head_canon IS NOT NULL
+      GROUP BY state_canon, fy, person_name, customer
+    ),
+    actual_evidence AS (
+      SELECT
+        c.state_canon,
+        c.fiscal_year AS coverage_fiscal_year,
+        e.fiscal_year AS evidence_fiscal_year,
+        p.name AS person_name,
+        e.customer_name AS customer,
+        SUM(e.net_amount) AS net_amount
+      FROM person_state_coverage_customer_evidence e
+      JOIN person_state_coverage c ON c.coverage_id = e.coverage_id
+      JOIN person p ON p.person_id = c.person_id
+      WHERE c.source = 'derived_register'
+        AND ($1::text IS NULL OR c.fiscal_year = $1)
+      GROUP BY c.state_canon, c.fiscal_year, e.fiscal_year, p.name, e.customer_name
+    ),
+    evidence_diffs AS (
+      SELECT
+        COALESCE(e.state_canon, a.state_canon) AS state_canon,
+        COALESCE(e.fy, a.coverage_fiscal_year) AS fiscal_year,
+        COALESCE(e.customer, a.customer) AS customer,
+        jsonb_build_object(
+          'person', COALESCE(e.person_name, a.person_name),
+          'sourceFiscalYear', COALESCE(e.fy, a.coverage_fiscal_year),
+          'evidenceFiscalYear', a.evidence_fiscal_year,
+          'expectedNetAmount', e.net_amount,
+          'evidenceNetAmount', a.net_amount
+        ) AS detail
+      FROM expected_evidence e
+      FULL OUTER JOIN actual_evidence a
+        ON a.state_canon = e.state_canon
+       AND a.coverage_fiscal_year = e.fy
+       AND a.person_name = e.person_name
+       AND a.customer = e.customer
+      WHERE e.net_amount IS DISTINCT FROM a.net_amount
+         OR a.coverage_fiscal_year IS DISTINCT FROM a.evidence_fiscal_year
+    )
+    SELECT issue_kind::text, state_canon, fiscal_year, customer, detail
+    FROM attribution_issues
+    UNION ALL
+    SELECT 'coverage-mismatch', state_canon, fiscal_year, NULL, detail
+    FROM coverage_diffs
+    UNION ALL
+    SELECT 'evidence-mismatch', state_canon, fiscal_year, customer, detail
+    FROM evidence_diffs
+    ORDER BY fiscal_year, state_canon, issue_kind, customer NULLS LAST
+  `, [fiscalYear ?? null]);
+
+  const issues = rows.map((row) => ({
+    kind: row.issue_kind,
+    stateCanon: row.state_canon,
+    fiscalYear: row.fiscal_year,
+    customer: row.customer,
+    detail: row.detail,
+  }));
+
+  return {
+    checkedAt: new Date().toISOString(),
+    fiscalYear: fiscalYear ?? null,
+    passed: issues.length === 0,
+    issueCount: issues.length,
+    issues,
+  };
+}
+
+/**
+ * Stores a reviewable result for every automated or operator-triggered check.
+ * The coverage tables are intentionally never written from this path.
+ */
+export async function auditCanonicalCoverageDrift(
+  trigger: "register_sync" | "manual",
+  fiscalYear?: string,
+): Promise<CanonicalCoverageDriftCheck> {
+  const check = await buildCanonicalCoverageDriftCheck(fiscalYear);
+  await pool.query(
+    `INSERT INTO canonical_coverage_drift_event
+       (trigger_fy, trigger_source, report_fy, status, detail)
+     VALUES ($1, $2, $3, $4, $5::jsonb)`,
+    [
+      fiscalYear ?? "all",
+      trigger,
+      check.fiscalYear,
+      check.passed ? "ok" : "drift",
+      JSON.stringify({
+        passed: check.passed,
+        issueCount: check.issueCount,
+        issues: check.issues,
+      }),
+    ],
+  );
+  return check;
+}
+
 const DUPLICATES = [
   "Andhra Pradesh", "Karnataka", "Rajasthan", "Tamil Nadu",
   "Jammu and Kashmir", "Delhi", "Haryana",

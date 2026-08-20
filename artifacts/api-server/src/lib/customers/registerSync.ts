@@ -38,6 +38,7 @@ import {
   assertTankQtyLtr,
   type SapLookupMap,
 } from "../registers/tankResolution.js";
+import { auditCanonicalCoverageDrift } from "../canonicalCoverageReport.js";
 
 export const REGISTER_SHEET_IDS: Record<string, string> =
   registerSheets.registers;
@@ -508,6 +509,32 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
     }).catch((err: unknown) =>
       logger.warn({ fy, err }, "register sync: failed to record ingest run (non-fatal)"),
     );
+
+    // ── Step 4b: canonical-coverage evidence drift ─────────────────────────
+    // Re-run the exact source→coverage reconciliation after the new register
+    // rows are committed. This is an audit only: a warning means an operator
+    // must review it; this sync never changes organisation coverage.
+    await auditCanonicalCoverageDrift("register_sync", fy)
+      .then((check) => {
+        if (!check.passed) {
+          logger.warn(
+            {
+              fy,
+              issueCount: check.issueCount,
+              issues: check.issues,
+            },
+            "canonical coverage drift detected — operator review required; coverage was not changed",
+          );
+        } else {
+          logger.info({ fy }, "canonical coverage drift check: evidence still reconciles");
+        }
+      })
+      .catch((err: unknown) =>
+        logger.warn(
+          { fy, err },
+          "canonical coverage drift check failed (non-fatal — coverage was not changed)",
+        ),
+      );
 
     // ── Step 5: anchor check — DB current vs sheet, per month ───────────────
     // Runs AFTER the tombstone pass. A healthy month has rowDelta=0 and
