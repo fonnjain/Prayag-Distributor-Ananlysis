@@ -1,0 +1,40 @@
+Accepted, and this is the right answer. Five items, zero source-attribution
+issues, and the distinction you drew is the one that mattered: same head, same
+customer, same period, value differences of Rs 4.81 L across three customers.
+Nobody is credited with business they no longer hold.
+
+Also good that the Babu correction explains none of it - no AP items, no Babu
+items, all five starting 1 April 2026. That fix was clean.
+
+But the finding underneath is worth naming.
+
+PERSISTED COVERAGE EVIDENCE DOES NOT REFRESH WHEN THE REGISTER LOADS
+Five items today because only three customers have moved since the migration
+ran. Every register sync will add more - any open-FY customer whose value
+changes drifts by definition. Within a quarter this will be hundreds of items,
+all benign, and the surface stops being read.
+
+Two options. Say which you would take and why:
+
+  a. Derive open-FY coverage evidence at READ TIME rather than persisting it.
+     Closed fiscal years stay persisted and frozen; the open year is computed
+     from the register when asked. Drift then only ever reports something
+     structural - a customer moving head, a count changing, a date changing -
+     which is what the surface is for.
+
+  b. Refresh persisted evidence automatically after each register sync, and
+     report only the structural differences as drift.
+
+My instinct is (a): an open year is not a fact to persist, and the drift
+surface should carry only things a person must decide. But you know the read
+paths - if deriving at read time is expensive on a large leaf, (b) is the
+better trade.
+
+Do not build either yet. Answer first, and note the current five need no
+action.
+
+One more: confirm the Tamil Nadu concentration warning renders on the page for
+an AUTHENTICATED session. You verified the API supplies it and the route is
+wired, but not that it draws. Rs 94.03 Cr in one customer is the single largest
+concentration risk in the business and it should be visible, not just
+available.
