@@ -179,3 +179,10 @@ uri = "file://attached_assets/assignment_deferred_2640.csv"
 type = "table"
 title = "Deferred — 2,640 rows"
 description = "1,536 DEFERRED_PENDING + 1,104 DEFERRED_STATE_HEAD_COVERED"
+
+[[outputs]]
+id = "Xwu4T6hoY4iOMNlhdEAFx"
+uri = "file://attached_assets/fy2025-26_customer_trading.csv"
+type = "table"
+title = "FY2025-26 Customer Trading List"
+description = "CSV ready to merge into the customer master workbooks. It contains 718 customer-level rows representing all FY2025-26 sale_line activity."
