@@ -31,6 +31,7 @@ import {
 } from "../registers/ingest.js";
 import { replaceOpenMonths, assertMonthAnchors } from "../registers/monthlyReplace.js";
 import { backfillSaleChannel } from "../sap/backfillChannel.js";
+import { recordCanonicalCoverageDriftCheck } from "../canonicalCoverageDrift.js";
 import {
   resolveWaterTankRow,
   buildSapLookupMap,
@@ -569,6 +570,13 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
           "anchor check: diverged",
         );
       }
+    }
+
+    // A register load may make customer-to-head evidence mixed or stale after
+    // canonical coverage was established. Capture that exception for operators,
+    // but never update coverage or turn a successful sales sync into a failure.
+    if (inserted > 0) {
+      void recordCanonicalCoverageDriftCheck(fy);
     }
   } catch (err) {
     s.phase = "error";

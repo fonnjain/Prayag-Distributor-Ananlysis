@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { pool } from "@workspace/db";
 import {
   buildCanonicalCoverageReport,
   buildCanonicalCoverageWorkbook,
@@ -38,6 +39,24 @@ router.get("/master/coverage-verification/export", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "canonical coverage workbook failed");
     res.status(500).json({ error: "Could not build canonical coverage workbook." });
+  }
+});
+
+// Recent post-register evidence checks. These are audit records only: a drift
+// never rewrites canonical coverage automatically.
+router.get("/master/coverage-drift", async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT event_id, checked_at::text, trigger_fy, trigger_source,
+              report_fy, status, detail
+       FROM canonical_coverage_drift_event
+       ORDER BY checked_at DESC, event_id DESC
+       LIMIT 100`,
+    );
+    res.json({ events: rows });
+  } catch (err) {
+    req.log.error({ err }, "canonical coverage drift history failed");
+    res.status(500).json({ error: "Could not load canonical coverage drift history." });
   }
 });
 

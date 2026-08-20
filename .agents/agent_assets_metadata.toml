@@ -228,3 +228,10 @@ uri = "file://attached_assets/org_designations.csv"
 type = "table"
 title = "Organisation Designations"
 description = "All 14 designations with rank, system flag, and total people holding each designation."
+
+[[outputs]]
+id = "MJqTgr5I0GSonsBhtTwHB"
+uri = "file://reports/canonical-coverage-mapping-77.csv"
+type = "table"
+title = "77-row canonical coverage mapping ledger"
+description = "Approved legacy-territory mappings with person, responsible state head, canonical leaf, and applied rule."

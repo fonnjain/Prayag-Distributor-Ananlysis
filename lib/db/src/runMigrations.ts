@@ -2008,10 +2008,20 @@ const MIGRATIONS: Migration[] = [
           ('CHATTISGARH', 'CHHATTISGARH', 'canonical spelling: CHATTISGARH → CHHATTISGARH'),
           ('DELHI', 'DELHI A', 'approved Delhi register-leaf mapping'),
           ('Delhi NCR', 'DELHI NCR', 'case-normalised register leaf'),
-          ('East U.P', 'UTTAR PRADESH', 'approved East U.P state-head split'),
-          ('West U.P', 'UP ( A )', 'approved West U.P state-head split')
+          ('East U.P', 'UTTAR PRADESH', 'approved East U.P state-head split')
         ) AS v(legacy_territory, state_canon, mapping_rule)
         WHERE v.legacy_territory = t.name
+        UNION ALL
+        SELECT
+          CASE state_head.name
+            WHEN 'Anant Singh' THEN 'UP ( A )'
+            WHEN 'Anuj Sharma' THEN 'UP (AS)'
+          END,
+          'approved West U.P state-head split'
+        FROM person state_head
+        WHERE t.name = 'West U.P'
+          AND state_head.person_id = COALESCE(p.state_head_person_id, p.person_id)
+          AND state_head.name IN ('Anant Singh', 'Anuj Sharma')
         UNION ALL
         SELECT t.name, 'exact canonical leaf'
         WHERE t.name NOT IN (
@@ -2047,6 +2057,37 @@ const MIGRATIONS: Migration[] = [
         );
         IF unmapped IS NOT NULL THEN
           RAISE EXCEPTION 'canonical coverage migration has unmapped legacy rows: %', unmapped;
+        END IF;
+      END $$;
+
+      -- Approved crosswalks may only land a person under a head that is
+      -- represented by that leaf's register evidence. This specifically stops
+      -- a West U.P Anuj team member being placed in Anant's UP ( A ) leaf.
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM canonical_coverage_work w
+          JOIN person h ON h.person_id = w.state_head_person_id
+          WHERE w.legacy_territory IN ('CHATTISGARH', 'East U.P', 'West U.P')
+            AND EXISTS (
+              SELECT 1 FROM sale_line sl
+              WHERE sl.state_canon = w.state_canon AND sl.head_canon IS NOT NULL
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM sale_line sl
+              WHERE sl.state_canon = w.state_canon
+                AND CASE sl.head_canon
+                  WHEN 'Babu' THEN 'Taninki Ramesh Babu'
+                  WHEN 'Pawan Sharma' THEN 'Pawan Kumar Sharma'
+                  WHEN 'Syed Aqil Rizvi' THEN 'Aqil Rizvi'
+                  WHEN 'Suresh Nair' THEN 'Suresh Kumar Nair'
+                  ELSE sl.head_canon
+                END = h.name
+            )
+        ) THEN
+          RAISE EXCEPTION 'canonical coverage migration mapped a state head to a leaf without matching register evidence';
         END IF;
       END $$;
 
@@ -2487,6 +2528,70 @@ const MIGRATIONS: Migration[] = [
               OR BOOL_OR(s.head_canon IS NULL OR p.person_id IS NULL OR p.is_system_coverage)
         ) THEN
           RAISE EXCEPTION 'mixed, unassigned, or unresolved customer attribution prevents register-derived coverage';
+        END IF;
+      END $$;
+    `,
+  },
+  {
+    id: "061_canonical_coverage_drift_events",
+    sql: `
+      -- Register updates must never rewrite organisation coverage. Each
+      -- post-sync evidence check is persisted so operators can review drift
+      -- before deciding whether a fresh coverage derivation is appropriate.
+      CREATE TABLE IF NOT EXISTS canonical_coverage_drift_event (
+        event_id       BIGSERIAL PRIMARY KEY,
+        checked_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+        trigger_fy     TEXT NOT NULL,
+        trigger_source TEXT NOT NULL,
+        report_fy      TEXT,
+        status         TEXT NOT NULL CHECK (status IN ('ok', 'drift', 'error')),
+        detail         JSONB NOT NULL DEFAULT '{}'::jsonb
+      );
+      CREATE INDEX IF NOT EXISTS idx_canonical_coverage_drift_checked
+        ON canonical_coverage_drift_event (checked_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_canonical_coverage_drift_status
+        ON canonical_coverage_drift_event (status, checked_at DESC);
+    `,
+  },
+  {
+    id: "062_repair_west_up_anuj_coverage",
+    sql: `
+      -- Correct the first rollout's coarse West U.P mapping. The approved
+      -- crosswalk is head-specific: Anant → UP ( A ); Anuj → UP (AS).
+      WITH affected_coverage AS (
+        SELECT DISTINCT c.coverage_id
+        FROM person_state_coverage c
+        JOIN person_state_coverage_mapping m ON m.coverage_id = c.coverage_id
+        JOIN person h ON h.person_id = m.state_head_person_id
+        WHERE m.legacy_territory = 'West U.P'
+          AND h.name = 'Anuj Sharma'
+          AND m.state_canon = 'UP ( A )'
+      )
+      UPDATE person_state_coverage c
+      SET state_canon = 'UP (AS)'
+      FROM affected_coverage a
+      WHERE c.coverage_id = a.coverage_id;
+
+      UPDATE person_state_coverage_mapping m
+      SET state_canon = 'UP (AS)',
+          mapping_rule = 'approved West U.P state-head split: Anuj → UP (AS)'
+      FROM person h
+      WHERE m.legacy_territory = 'West U.P'
+        AND h.person_id = m.state_head_person_id
+        AND h.name = 'Anuj Sharma'
+        AND m.state_canon = 'UP ( A )';
+
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM person_state_coverage_mapping m
+          JOIN person h ON h.person_id = m.state_head_person_id
+          WHERE m.legacy_territory = 'West U.P'
+            AND h.name = 'Anuj Sharma'
+            AND m.state_canon <> 'UP (AS)'
+        ) THEN
+          RAISE EXCEPTION 'West U.P Anuj coverage was not repaired to UP (AS)';
         END IF;
       END $$;
     `,
