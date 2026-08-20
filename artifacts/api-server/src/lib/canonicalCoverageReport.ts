@@ -1,5 +1,9 @@
 import ExcelJS from "exceljs";
 import { pool } from "@workspace/db";
+import {
+  coveragePersonSql,
+  getUnverifiedCoverageAliasReview,
+} from "./coverageAliases.js";
 
 const FY = "2025-26";
 export const ZERO_SALES_LEAVES = [
@@ -46,7 +50,37 @@ export interface CanonicalCoverageReport {
     net_amount: number;
     effective_from: string;
     effective_to: string | null;
+    alias_status: "UNVERIFIED ALIAS" | null;
+    register_head_label: string | null;
+    alias_review_note: string | null;
   }>;
+  reviewWarnings: {
+    coverageIsReadOnly: true;
+    unverifiedAliases: Array<{
+      state_canon: string;
+      fiscal_year: string;
+      coverage_person: string;
+      responsible_head: string;
+      register_head_label: string;
+      customer_count: number;
+      net_amount: number;
+      effective_from: string;
+      effective_to: string | null;
+      status: "UNVERIFIED ALIAS";
+      review_note: string;
+    }>;
+    concentrationWarnings: Array<{
+      state_canon: string;
+      fiscal_years: string[];
+      responsible_head: string;
+      coverage_person: string;
+      register_head_labels: string[];
+      coverage_rows: number;
+      customer_count: number;
+      net_amount: number;
+      message: string;
+    }>;
+  };
   uncoveredGaps: Array<{
     state_canon: string;
     fiscal_year: string;
@@ -116,13 +150,7 @@ export async function buildCanonicalCoverageDriftCheck(
     WITH selected_lines AS (
       SELECT sl.state_canon, sl.fy, sl.customer, sl.head_canon, sl.amount,
              sl.invoice_date, sl.month_label,
-             CASE sl.head_canon
-               WHEN 'Babu' THEN 'Taninki Ramesh Babu'
-               WHEN 'Pawan Sharma' THEN 'Pawan Kumar Sharma'
-               WHEN 'Syed Aqil Rizvi' THEN 'Aqil Rizvi'
-               WHEN 'Suresh Nair' THEN 'Suresh Kumar Nair'
-               ELSE sl.head_canon
-             END AS person_name
+              ${coveragePersonSql("sl.head_canon")} AS person_name
       FROM sale_line sl
       WHERE (
         sl.state_canon IN ('AP','HIMACHAL PRADESH','MAHARASHTRA','TAMIL NADU','TELANGANA')
@@ -214,6 +242,30 @@ export async function buildCanonicalCoverageDriftCheck(
             'netAmount', a.net_amount,
             'effectiveFrom', a.effective_from,
             'effectiveTo', a.effective_to
+           ),
+           'currentRegisterEvidence', jsonb_build_object(
+            'customerCount', e.customer_count,
+            'netAmount', e.net_amount,
+            'effectiveFrom', e.effective_from,
+            'effectiveTo', e.effective_to
+           ),
+           'persistedCoverageEvidence', jsonb_build_object(
+            'customerCount', a.customer_count,
+            'netAmount', a.net_amount,
+            'effectiveFrom', a.effective_from,
+            'effectiveTo', a.effective_to
+           ),
+           'difference', jsonb_build_object(
+            'customerCount', COALESCE(e.customer_count, 0) - COALESCE(a.customer_count, 0),
+            'netAmount', COALESCE(e.net_amount, 0) - COALESCE(a.net_amount, 0),
+            'effectiveFromDays', CASE
+              WHEN e.effective_from IS NULL OR a.effective_from IS NULL THEN NULL
+              ELSE e.effective_from - a.effective_from
+            END,
+            'effectiveToDays', CASE
+              WHEN e.effective_to IS NULL OR a.effective_to IS NULL THEN NULL
+              ELSE e.effective_to - a.effective_to
+            END
           )
         ) AS detail
       FROM expected_coverage e
@@ -257,7 +309,20 @@ export async function buildCanonicalCoverageDriftCheck(
           'sourceFiscalYear', COALESCE(e.fy, a.coverage_fiscal_year),
           'evidenceFiscalYear', a.evidence_fiscal_year,
           'expectedNetAmount', e.net_amount,
-          'evidenceNetAmount', a.net_amount
+           'evidenceNetAmount', a.net_amount,
+           'currentRegisterEvidence', jsonb_build_object(
+             'fiscalYear', e.fy,
+             'netAmount', e.net_amount
+           ),
+           'persistedEvidence', jsonb_build_object(
+             'coverageFiscalYear', a.coverage_fiscal_year,
+             'evidenceFiscalYear', a.evidence_fiscal_year,
+             'netAmount', a.net_amount
+           ),
+           'difference', jsonb_build_object(
+             'netAmount', COALESCE(e.net_amount, 0) - COALESCE(a.net_amount, 0),
+             'fiscalYearChanged', e.fy IS DISTINCT FROM a.evidence_fiscal_year
+           )
         ) AS detail
       FROM expected_evidence e
       FULL OUTER JOIN actual_evidence a
@@ -279,13 +344,38 @@ export async function buildCanonicalCoverageDriftCheck(
     ORDER BY fiscal_year, state_canon, issue_kind, customer NULLS LAST
   `, [fiscalYear ?? null]);
 
-  const issues = rows.map((row) => ({
-    kind: row.issue_kind,
-    stateCanon: row.state_canon,
-    fiscalYear: row.fiscal_year,
-    customer: row.customer,
-    detail: row.detail,
-  }));
+  const issues = rows.map((row) => {
+    const detail = row.detail ?? {};
+    const currentRegisterEvidence = detail.currentRegisterEvidence
+      ?? detail.expected
+      ?? (row.issue_kind === "mixed" || row.issue_kind === "unassigned"
+        || row.issue_kind === "system-routed" || row.issue_kind === "unresolved"
+        ? { registerHeads: detail.registerHeads ?? [] }
+        : null);
+    const persistedEvidence = detail.persistedCoverageEvidence
+      ?? detail.persistedEvidence
+      ?? detail.coverage
+      ?? null;
+
+    return {
+      kind: row.issue_kind,
+      stateCanon: row.state_canon,
+      fiscalYear: row.fiscal_year,
+      customer: row.customer,
+      detail: {
+        ...detail,
+        review: {
+          canonicalLeaf: row.state_canon,
+          fiscalYear: row.fiscal_year,
+          customer: row.customer,
+          currentRegisterEvidence,
+          persistedEvidence,
+          difference: detail.difference ?? null,
+          coverageWasChanged: false,
+        },
+      },
+    };
+  });
 
   return {
     checkedAt: new Date().toISOString(),
@@ -477,13 +567,7 @@ export async function buildCanonicalCoverageReport(): Promise<CanonicalCoverageR
       WITH selected_lines AS (
         SELECT sl.state_canon, sl.fy, sl.customer, sl.head_canon, sl.amount,
                sl.invoice_date, sl.month_label,
-               CASE sl.head_canon
-                 WHEN 'Babu' THEN 'Taninki Ramesh Babu'
-                 WHEN 'Pawan Sharma' THEN 'Pawan Kumar Sharma'
-                 WHEN 'Syed Aqil Rizvi' THEN 'Aqil Rizvi'
-                 WHEN 'Suresh Nair' THEN 'Suresh Kumar Nair'
-                 ELSE sl.head_canon
-               END AS person_name
+                ${coveragePersonSql("sl.head_canon")} AS person_name
         FROM sale_line sl
         WHERE sl.state_canon IN ('AP','HIMACHAL PRADESH','MAHARASHTRA','TAMIL NADU','TELANGANA')
            OR (sl.state_canon = 'PUNJAB' AND sl.fy <> '2023-24')
@@ -588,16 +672,62 @@ export async function buildCanonicalCoverageReport(): Promise<CanonicalCoverageR
   ) && tamilCoverageRes.rows.some(
     (row) => row.person === "Sandeep Dadheech" && row.effective_from === "2025-04-01",
   );
-  const derivedCoverage = derivedRes.rows.map((row) => ({
-    fiscal_year: row.fiscal_year,
-    state_canon: row.state_canon,
-    coverage_person: row.coverage_person,
-    responsible_head: row.responsible_head,
-    customer_count: Number(row.customer_count),
-    net_amount: Number(row.net_amount),
-    effective_from: row.effective_from,
-    effective_to: row.effective_to,
-  }));
+  const derivedCoverage = derivedRes.rows.map((row) => {
+    const review = getUnverifiedCoverageAliasReview({
+      coveragePerson: row.coverage_person,
+      stateCanon: row.state_canon,
+      fiscalYear: row.fiscal_year,
+    });
+    return {
+      fiscal_year: row.fiscal_year,
+      state_canon: row.state_canon,
+      coverage_person: row.coverage_person,
+      responsible_head: row.responsible_head,
+      customer_count: Number(row.customer_count),
+      net_amount: Number(row.net_amount),
+      effective_from: row.effective_from,
+      effective_to: row.effective_to,
+      alias_status: review?.status ?? null,
+      register_head_label: review?.registerHead ?? null,
+      alias_review_note: review?.reviewNote ?? null,
+    };
+  });
+  const unverifiedAliases = derivedCoverage
+    .filter((row) => row.alias_status === "UNVERIFIED ALIAS")
+    .map((row) => ({
+      state_canon: row.state_canon,
+      fiscal_year: row.fiscal_year,
+      coverage_person: row.coverage_person,
+      responsible_head: row.responsible_head,
+      register_head_label: row.register_head_label!,
+      customer_count: row.customer_count,
+      net_amount: row.net_amount,
+      effective_from: row.effective_from,
+      effective_to: row.effective_to,
+      status: "UNVERIFIED ALIAS" as const,
+      review_note: row.alias_review_note!,
+    }));
+  const concentrationWarnings = [...new Map(
+    unverifiedAliases.map((row) => [`${row.state_canon}|${row.responsible_head}|${row.coverage_person}`, row]),
+  ).keys()].map((key) => {
+    const [state_canon, responsible_head, coverage_person] = key.split("|");
+    const rows = unverifiedAliases.filter((row) =>
+      row.state_canon === state_canon
+      && row.responsible_head === responsible_head
+      && row.coverage_person === coverage_person,
+    );
+    return {
+      state_canon,
+      fiscal_years: rows.map((row) => row.fiscal_year).sort(),
+      responsible_head,
+      coverage_person,
+      register_head_labels: [...new Set(rows.map((row) => row.register_head_label))],
+      coverage_rows: rows.length,
+      customer_count: rows.reduce((sum, row) => sum + row.customer_count, 0),
+      net_amount: rows.reduce((sum, row) => sum + row.net_amount, 0),
+      message: `All ${rows.length} historical derived coverage row${rows.length === 1 ? "" : "s"} under ${responsible_head} depend on the unverified register label ${[...new Set(rows.map((row) => row.register_head_label))].join(", ")}. Review required; coverage was not changed.`,
+    };
+  });
   const uncoveredGaps = uncoveredRes.rows.map((row) => ({
     state_canon: row.state_canon,
     fiscal_year: row.fiscal_year,
@@ -664,6 +794,11 @@ export async function buildCanonicalCoverageReport(): Promise<CanonicalCoverageR
     hiteshRegisterRows: Number(hiteshRes.rows[0]?.count ?? 0),
     mappings: mappingRes.rows,
     derivedCoverage,
+    reviewWarnings: {
+      coverageIsReadOnly: true,
+      unverifiedAliases,
+      concentrationWarnings,
+    },
     uncoveredGaps,
     derivedIntegrity,
   };
@@ -695,6 +830,9 @@ export async function buildCanonicalCoverageWorkbook(report: CanonicalCoverageRe
     ["Derived coverage mismatches", report.derivedIntegrity.coverageMismatches],
     ["Customer evidence mismatches", report.derivedIntegrity.evidenceMismatches],
     ["Punjab FY2023-24 gap reconciles", report.derivedIntegrity.punjabGapMatches ? "yes" : "NO"],
+    ["Unverified coverage aliases", report.reviewWarnings.unverifiedAliases.length],
+    ["Coverage concentration warnings", report.reviewWarnings.concentrationWarnings.length],
+    ["Automatic coverage changes", "never — review only"],
   ]);
   summary.getRow(1).font = { bold: true };
 
@@ -706,6 +844,9 @@ export async function buildCanonicalCoverageWorkbook(report: CanonicalCoverageRe
     { header: "Canonical leaf", key: "state_canon", width: 25 },
     { header: "Effective from", key: "effective_from", width: 15 },
     { header: "Effective to", key: "effective_to", width: 15 },
+    { header: "Review status", key: "alias_status", width: 20 },
+    { header: "Register label", key: "register_head_label", width: 20 },
+    { header: "Review note", key: "alias_review_note", width: 75 },
     { header: "Rule", key: "mapping_rule", width: 45 },
   ];
   mapping.addRows(report.mappings);
@@ -726,6 +867,45 @@ export async function buildCanonicalCoverageWorkbook(report: CanonicalCoverageRe
   derived.addRows(report.derivedCoverage);
   derived.getRow(1).font = { bold: true };
   derived.views = [{ state: "frozen", ySplit: 1 }];
+
+  const review = workbook.addWorksheet("Coverage review warnings");
+  review.columns = [
+    { header: "Type", key: "type", width: 26 },
+    { header: "Canonical leaf", key: "state_canon", width: 24 },
+    { header: "FY", key: "fiscal_years", width: 20 },
+    { header: "Coverage person", key: "coverage_person", width: 27 },
+    { header: "Responsible head", key: "responsible_head", width: 27 },
+    { header: "Register label", key: "register_head_label", width: 20 },
+    { header: "Customers", key: "customer_count", width: 13 },
+    { header: "Net amount", key: "net_amount", width: 18 },
+    { header: "Review note", key: "note", width: 80 },
+  ];
+  review.addRows([
+    ...report.reviewWarnings.unverifiedAliases.map((row) => ({
+      type: row.status,
+      state_canon: row.state_canon,
+      fiscal_years: row.fiscal_year,
+      coverage_person: row.coverage_person,
+      responsible_head: row.responsible_head,
+      register_head_label: row.register_head_label,
+      customer_count: row.customer_count,
+      net_amount: row.net_amount,
+      note: row.review_note,
+    })),
+    ...report.reviewWarnings.concentrationWarnings.map((row) => ({
+      type: "CONCENTRATION REVIEW",
+      state_canon: row.state_canon,
+      fiscal_years: row.fiscal_years.join(", "),
+      coverage_person: row.coverage_person,
+      responsible_head: row.responsible_head,
+      register_head_label: row.register_head_labels.join(", "),
+      customer_count: row.customer_count,
+      net_amount: row.net_amount,
+      note: row.message,
+    })),
+  ]);
+  review.getRow(1).font = { bold: true };
+  review.views = [{ state: "frozen", ySplit: 1 }];
 
   const gaps = workbook.addWorksheet("Explicit uncovered gaps");
   gaps.columns = [

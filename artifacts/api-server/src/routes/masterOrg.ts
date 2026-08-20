@@ -12,11 +12,13 @@
 //   closed (effective_to = today) and a new row is opened. This keeps
 //   historical FY analytics stable — sale_line.head_canon is never touched.
 import { Router } from "express";
+import { unverifiedCoverageAliasReviewSql } from "../lib/coverageAliases.js";
 import { pool } from "@workspace/db";
 import type * as ExcelJSTypes from "exceljs";
 import { isAdminToken } from "../lib/adminAuth.js";
 
 const router = Router();
+const coverageAliasReviewSql = unverifiedCoverageAliasReviewSql("c", "coverage_person.name");
 
 // ── Auth helper ───────────────────────────────────────────────────────────────
 
@@ -266,15 +268,19 @@ router.get("/master/people/:id", async (req, res) => {
         // intentionally not a fallback: a missing canonical row must be
         // visible and fixed, never silently supplied from legacy geography.
         pool.query(
-          `SELECT c.coverage_id, c.state_canon, sh.state_parent,
+           `SELECT c.coverage_id, c.state_canon, sh.state_parent,
                   c.effective_from::text, c.effective_to::text,
                   c.fiscal_year, c.evidence_customer_count,
                   c.evidence_net_amount, c.evidence_source,
                   head.person_id AS state_head_person_id,
                   head.name AS state_head_name,
-                  COALESCE(head.is_system_coverage, false) AS is_unassigned
+                  COALESCE(head.is_system_coverage, false) AS is_unassigned,
+                  ${coverageAliasReviewSql.status} AS alias_review_status,
+                  ${coverageAliasReviewSql.registerHeadLabel} AS register_head_label,
+                  ${coverageAliasReviewSql.reviewNote} AS alias_review_note
            FROM person_state_coverage c
            JOIN state_hierarchy sh ON sh.state_canon = c.state_canon
+            JOIN person coverage_person ON coverage_person.person_id = c.person_id
            JOIN person head ON head.person_id = c.state_head_person_id
            WHERE c.person_id = $1
            ORDER BY c.effective_to NULLS FIRST, sh.display_order, c.state_canon, head.name`,

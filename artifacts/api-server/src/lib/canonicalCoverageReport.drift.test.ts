@@ -41,6 +41,9 @@ describe("canonical coverage drift check", () => {
           detail: {
             expected: { customerCount: 4, effectiveTo: "2026-06-30" },
             coverage: { customerCount: 3, effectiveTo: "2026-05-31" },
+            currentRegisterEvidence: { customerCount: 4, netAmount: 900 },
+            persistedCoverageEvidence: { customerCount: 3, netAmount: 600 },
+            difference: { customerCount: 1, netAmount: 300, effectiveToDays: 30 },
           },
         },
         {
@@ -70,6 +73,16 @@ describe("canonical coverage drift check", () => {
         { kind: "evidence-mismatch", customer: "Fiscal-Year Dealer" },
       ],
     });
+    expect(check.issues[1]?.detail).toMatchObject({
+      review: {
+        canonicalLeaf: "TAMIL NADU",
+        fiscalYear: "2026-27",
+        currentRegisterEvidence: { customerCount: 4, netAmount: 900 },
+        persistedEvidence: { customerCount: 3, netAmount: 600 },
+        difference: { customerCount: 1, netAmount: 300, effectiveToDays: 30 },
+        coverageWasChanged: false,
+      },
+    });
 
     const [sql, params] = query.mock.calls[0]!;
     expect(sql).toContain("has_unassigned");
@@ -78,6 +91,9 @@ describe("canonical coverage drift check", () => {
     expect(sql).toContain("effective_from");
     expect(sql).toContain("evidence_fiscal_year");
     expect(sql).toContain("sourceFiscalYear");
+    expect(sql).toContain("currentRegisterEvidence");
+    expect(sql).toContain("persistedCoverageEvidence");
+    expect(sql).toContain("effectiveFromDays");
     expect(sql).not.toMatch(/\b(?:INSERT|UPDATE|DELETE)\b/i);
     expect(params).toEqual(["2026-27"]);
   });

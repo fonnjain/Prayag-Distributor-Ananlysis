@@ -140,3 +140,4 @@
 - [Name normalisation families](name-norm-families.md) — 4 deliberate norm families (normSecKey/normDistKey/headNormKey/UPPER-TRIM pairs); person-name SQL joins need full-strip + employee-code conflict guard; directory field is distKey.
 - [Departed-import pattern](departed-import-pattern.md) — source='departed_import' inactive persons bridge former_tm names to Band B suggestions; Rajasthan gap: Narendra (pid=25) has 0 TMs, fix by moving his departed persons to Pawan (pid=14).
 - [Canonical coverage evidence](canonical-coverage-evidence.md) — derive organisation coverage only from customer-unambiguous register evidence; keep ambiguous closed periods explicitly uncovered.
+- [Unverified coverage aliases](coverage-alias-review.md) — live compatibility aliases are registry-backed and advisory; historical migration literals remain audit-only.

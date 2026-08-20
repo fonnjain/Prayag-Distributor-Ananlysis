@@ -226,6 +226,8 @@ describe("departure lifecycle", () => {
         state_head_name: "ZZDEP Head",
         effective_from: "2025-04-01",
         effective_to: "2026-03-31",
+        alias_review_status: null,
+        register_head_label: null,
       }),
     ]));
   });

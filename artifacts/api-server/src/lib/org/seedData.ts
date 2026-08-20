@@ -202,14 +202,16 @@ export const SEED_FLAGS: SeedFlag[] = [
   },
   {
     headId: "sandeep-dadheech",
-    flagType: "canon_resolved",
-    severity: "info",
-    title: "head_canon 'Babu' resolved — member, not a head",
+    flagType: "unverified_historical_alias",
+    severity: "warning",
+    title: "Historical register label 'Babu' — identity unverified",
     detail: {
       headCanonValue: "Babu",
-      resolution:
-        "Taninki Ramesh Babu (Data tab row 45, HQ Kakinada, Andhra Pradesh) is a MEMBER under Sandeep Dadheech — not a State Head. 1 customer attributed to 'Babu' in sale_line.head_canon should roll up to Sandeep Dadheech. 'Babu' should not appear as a head in any analytics view.",
-      customerCount: 1,
+      status: "UNVERIFIED ALIAS",
+      description:
+        "FY2023-24 and FY2024-25 Tamil Nadu coverage currently uses a compatibility alias from register label 'Babu' to Taninki Ramesh Babu under Sandeep Dadheech. HR also contains a separate departed S.Babu Regional Sales Manager record. This is review evidence only, not a confirmed identity or an instruction to reassign coverage.",
+      businessAction:
+        "Prayag must confirm who the historical register label Babu represents before any person or coverage change.",
     },
   },
   // ── Flags from HR roster analysis (Aug 2026) ─────────────────────────────

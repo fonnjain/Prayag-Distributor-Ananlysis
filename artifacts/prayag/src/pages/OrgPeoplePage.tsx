@@ -113,6 +113,9 @@ interface StateCoverage {
   evidence_customer_count: number | null;
   evidence_net_amount: number | null;
   evidence_source: string | null;
+  alias_review_status: "UNVERIFIED ALIAS" | null;
+  register_head_label: string | null;
+  alias_review_note: string | null;
 }
 
 interface ChangeEntry {
@@ -1011,6 +1014,16 @@ function PersonPanel({
   // while a background API/server update catches up.
   const customersAsStateHead = Number(person.customers_as_sh ?? 0);
   const customersAsTerritoryManager = Number(person.customers_as_tm ?? 0);
+  const unverifiedAliasCoverage = detail.coverage.filter(
+    (coverage) => coverage.alias_review_status === "UNVERIFIED ALIAS",
+  );
+  const unverifiedAliasNet = unverifiedAliasCoverage.reduce(
+    (sum, coverage) => sum + Number(coverage.evidence_net_amount ?? 0),
+    0,
+  );
+  const unverifiedAliasHeads = new Set(
+    unverifiedAliasCoverage.map((coverage) => coverage.state_head_name),
+  );
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -1359,6 +1372,18 @@ function PersonPanel({
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
               Canonical state coverage
             </h3>
+            {unverifiedAliasCoverage.length > 0 && (
+              <Alert className="border-amber-300 bg-amber-50 dark:bg-amber-950/20">
+                <AlertTriangle className="size-4 text-amber-700" />
+                <AlertDescription className="text-amber-900 dark:text-amber-200 text-sm">
+                  <span className="font-semibold">Tamil Nadu concentration review.</span>{" "}
+                  All ₹{unverifiedAliasNet.toLocaleString("en-IN", { maximumFractionDigits: 0 })} across{" "}
+                  {unverifiedAliasCoverage.length} historical coverage row{unverifiedAliasCoverage.length === 1 ? "" : "s"}{" "}
+                  sits under {Array.from(unverifiedAliasHeads).join(", ")} through an unverified alias.
+                  Review only — no coverage was changed automatically.
+                </AlertDescription>
+              </Alert>
+            )}
             {detail.coverage.map((c) => (
               <div key={c.coverage_id} className="rounded border px-3 py-2 text-sm">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -1375,6 +1400,11 @@ function PersonPanel({
                       Responsible head: {c.state_head_name}
                     </span>
                   )}
+                  {c.alias_review_status === "UNVERIFIED ALIAS" && (
+                    <Badge className="text-xs bg-amber-100 text-amber-900 border border-amber-400 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-200">
+                      UNVERIFIED ALIAS
+                    </Badge>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
                   Effective {c.effective_from}
@@ -1390,6 +1420,12 @@ function PersonPanel({
                     {c.evidence_customer_count === 1
                       ? " · Single-customer dependency"
                       : ""}
+                  </p>
+                )}
+                {c.alias_review_status === "UNVERIFIED ALIAS" && (
+                  <p className="text-xs text-amber-800 dark:text-amber-200 mt-1">
+                    Register label: <span className="font-medium">{c.register_head_label}</span>.{" "}
+                    {c.alias_review_note}
                   </p>
                 )}
               </div>
