@@ -23,6 +23,7 @@ import masterOrgRouter from "./masterOrg.js";
 
 const ADMIN = process.env.ADMIN_SECRET ?? "";
 const CUST = "ZZDEP#1";
+const VOID_CUST = "ZZDEP#VOID";
 
 let headId: number;
 let replacementId: number;
@@ -33,7 +34,7 @@ app.use(express.json());
 app.use("/api", masterOrgRouter);
 
 async function cleanup() {
-  await pool.query(`DELETE FROM customer_assignment WHERE customer_id = $1`, [CUST]);
+  await pool.query(`DELETE FROM customer_assignment WHERE customer_id LIKE 'ZZDEP#%'`);
   const ids = await pool.query(
     `SELECT person_id FROM person WHERE name LIKE 'ZZDEP %' OR name LIKE 'HOLDING — ZZDEP %'`,
   );
@@ -48,8 +49,8 @@ async function cleanup() {
     await pool.query(`DELETE FROM person WHERE is_holding AND holding_for_person_id = ANY($1::int[])`, [idList]);
     await pool.query(`DELETE FROM person WHERE person_id = ANY($1::int[])`, [idList]);
   }
-  await pool.query(`DELETE FROM customer WHERE customer_id = $1`, [CUST]);
-  await pool.query(`DELETE FROM state_hierarchy WHERE state_canon = 'ZZDEP CANONICAL LEAF'`);
+  await pool.query(`DELETE FROM customer WHERE customer_id LIKE 'ZZDEP#%'`);
+  await pool.query(`DELETE FROM state_hierarchy WHERE state_canon LIKE 'ZZDEP %'`);
 }
 
 beforeAll(async () => {
@@ -158,7 +159,18 @@ beforeAll(async () => {
        ADD COLUMN IF NOT EXISTS fiscal_year TEXT,
        ADD COLUMN IF NOT EXISTS evidence_customer_count INTEGER,
        ADD COLUMN IF NOT EXISTS evidence_net_amount NUMERIC,
-       ADD COLUMN IF NOT EXISTS evidence_source TEXT;
+        ADD COLUMN IF NOT EXISTS evidence_source TEXT,
+        ADD COLUMN IF NOT EXISTS voided_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS voided_by TEXT,
+        ADD COLUMN IF NOT EXISTS void_reason TEXT;
+      ALTER TABLE customer_assignment
+        ADD COLUMN IF NOT EXISTS voided_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS voided_by TEXT,
+        ADD COLUMN IF NOT EXISTS void_reason TEXT;
+      DROP INDEX IF EXISTS uq_customer_assignment_open;
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_customer_assignment_open
+        ON customer_assignment (customer_id)
+        WHERE effective_to IS NULL AND voided_at IS NULL;
     CREATE TABLE IF NOT EXISTS change_log (
       id SERIAL PRIMARY KEY,
       entity_type TEXT NOT NULL,
@@ -185,8 +197,9 @@ beforeAll(async () => {
     [CUST],
   );
   await pool.query(
-    `INSERT INTO customer_assignment (customer_id, person_id, state_head_person_id, confidence, set_by)
-     VALUES ($1, $2, $2, 'confirmed', 'departure-test')`,
+      `INSERT INTO customer_assignment
+         (customer_id, person_id, state_head_person_id, confidence, effective_from, set_by)
+       VALUES ($1, $2, $2, 'confirmed', DATE '2026-07-01', 'departure-test')`,
     [CUST, headId],
   );
 });
@@ -196,7 +209,7 @@ afterAll(async () => {
 });
 
 const departureBody = {
-  left_date: "2026-08-01",
+  left_date: "2026-08-30",
   departure_reason: "resigned",
   departure_note: "test",
   acknowledgedSubTree: 0,
@@ -245,7 +258,7 @@ describe("departure lifecycle", () => {
       .post(`/api/master/people/${headId}/departure`)
       .set("X-Admin-Secret", ADMIN)
       .send(departureBody);
-    expect(res.status).toBe(200);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.assignmentsMoved).toBe(1);
     holdingId = res.body.holdingPersonId;
@@ -265,6 +278,172 @@ describe("departure lifecycle", () => {
     expect(p.rows[0].left_date).not.toBeNull();
   });
 
+  it("voids assignments and coverage imported after departure into the unassigned queue", async () => {
+    const postDepartureHead = await pool.query(
+      `INSERT INTO person (name, is_state_head, source)
+       VALUES ('ZZDEP Post-Departure Import', true, 'app_created')
+       RETURNING person_id`,
+    );
+    const personId = postDepartureHead.rows[0].person_id;
+    await pool.query(
+      `INSERT INTO state_hierarchy (state_canon, state_parent, picker_visible, display_order)
+       VALUES ('ZZDEP VOID LEAF', 'ZZDEP', true, 2)`,
+    );
+    await pool.query(
+      `INSERT INTO person_state_coverage
+         (person_id, state_canon, state_head_person_id, effective_from)
+       VALUES ($1, 'ZZDEP VOID LEAF', $1, DATE '2026-08-15')`,
+      [personId],
+    );
+    await pool.query(
+      `INSERT INTO customer (customer_id, name, type, source)
+       VALUES ($1, 'ZZDEP Void Customer', 'retailer', 'app_created')`,
+      [VOID_CUST],
+    );
+    await pool.query(
+      `INSERT INTO customer_assignment
+         (customer_id, person_id, state_head_person_id, confidence, effective_from, set_by)
+       VALUES ($1, $2, $2, 'assign_user_chain', DATE '2026-08-15', 'seed_import')`,
+      [VOID_CUST, personId],
+    );
+
+    const res = await request(app)
+      .post(`/api/master/people/${personId}/departure`)
+      .set("X-Admin-Secret", ADMIN)
+      .send({
+        left_date: "2026-03-31",
+        departure_reason: "confirmed departure",
+        departure_note: "Date inferred from the confirmed territory handover.",
+        acknowledgedSubTree: 0,
+        acknowledgedCustomers: 1,
+        changed_by: "departure-test",
+        voidPostDepartureImports: true,
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.holdingPersonId).toBeNull();
+    expect(res.body.assignmentsMoved).toBe(0);
+    expect(res.body.assignmentsVoidedToUnassigned).toEqual([VOID_CUST]);
+    expect(res.body.coverageVoided).toEqual([
+      expect.objectContaining({ state_canon: "ZZDEP VOID LEAF" }),
+    ]);
+
+    const assignments = await pool.query(
+      `SELECT person_id, former_person_name_raw, voided_at
+       FROM customer_assignment
+       WHERE customer_id = $1 ORDER BY id`,
+      [VOID_CUST],
+    );
+    expect(assignments.rows).toEqual([
+      expect.objectContaining({ person_id: personId, voided_at: expect.any(Date) }),
+      expect.objectContaining({
+        person_id: null,
+        former_person_name_raw: "ZZDEP Post-Departure Import",
+        voided_at: null,
+      }),
+    ]);
+
+    const coverage = await pool.query(
+      `SELECT voided_at, void_reason FROM person_state_coverage
+       WHERE person_id = $1 AND state_canon = 'ZZDEP VOID LEAF'`,
+      [personId],
+    );
+    expect(coverage.rows[0].voided_at).toBeInstanceOf(Date);
+    expect(coverage.rows[0].void_reason).toContain("Imported after recorded departure");
+
+    const detail = await request(app).get(`/api/master/people/${personId}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body.coverage).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ state_canon: "ZZDEP VOID LEAF" }),
+    ]));
+
+    const sourceBefore = await pool.query(
+      `SELECT id, effective_to, voided_at
+       FROM customer_assignment
+       WHERE customer_id = $1 AND person_id = $2`,
+      [VOID_CUST, personId],
+    );
+    const reassigned = await request(app)
+      .patch(`/api/master/customers/${encodeURIComponent(VOID_CUST)}/assign`)
+      .set("X-Admin-Secret", ADMIN)
+      .send({
+        person_id: replacementId,
+        state_head_person_id: replacementId,
+        confidence: "confirmed",
+        changed_by: "departure-test",
+      });
+    expect(reassigned.status).toBe(200);
+    const sourceAfter = await pool.query(
+      `SELECT id, effective_to, voided_at
+       FROM customer_assignment
+       WHERE id = $1`,
+      [sourceBefore.rows[0].id],
+    );
+    expect(sourceAfter.rows[0].effective_to).toBeNull();
+    expect(sourceAfter.rows[0].voided_at).toEqual(sourceBefore.rows[0].voided_at);
+  });
+
+  it("rejects post-departure non-import rows instead of back-dating them", async () => {
+    const head = await pool.query(
+      `INSERT INTO person (name, is_state_head, source)
+       VALUES ('ZZDEP Non-Import After Departure', true, 'app_created')
+       RETURNING person_id`,
+    );
+    const personId = head.rows[0].person_id;
+    await pool.query(
+      `INSERT INTO state_hierarchy (state_canon, state_parent, picker_visible, display_order)
+       VALUES ('ZZDEP MANUAL LEAF', 'ZZDEP', true, 3)`,
+    );
+    await pool.query(
+      `INSERT INTO person_state_coverage
+         (person_id, state_canon, state_head_person_id, effective_from, source)
+       VALUES ($1, 'ZZDEP MANUAL LEAF', $1, DATE '2026-08-15', 'manual')`,
+      [personId],
+    );
+    const customerId = "ZZDEP#MANUAL";
+    await pool.query(
+      `INSERT INTO customer (customer_id, name, type, source)
+       VALUES ($1, 'ZZDEP Manual Customer', 'retailer', 'app_created')`,
+      [customerId],
+    );
+    await pool.query(
+      `INSERT INTO customer_assignment
+         (customer_id, person_id, state_head_person_id, confidence, effective_from, set_by)
+       VALUES ($1, $2, $2, 'confirmed', DATE '2026-08-15', 'operator')`,
+      [customerId, personId],
+    );
+
+    const res = await request(app)
+      .post(`/api/master/people/${personId}/departure`)
+      .set("X-Admin-Secret", ADMIN)
+      .send({
+        left_date: "2026-03-31",
+        departure_reason: "confirmed departure",
+        acknowledgedSubTree: 0,
+        acknowledgedCustomers: 1,
+        changed_by: "departure-test",
+        voidPostDepartureImports: true,
+      });
+
+    expect(res.status).toBe(409);
+    expect(res.body.postDepartureAssignments).toEqual([customerId]);
+    expect(res.body.postDepartureCoverage).toEqual([
+      expect.objectContaining({ state_canon: "ZZDEP MANUAL LEAF", source: "manual" }),
+    ]);
+    const [person, assignment, coverage] = await Promise.all([
+      pool.query(`SELECT is_active, left_date FROM person WHERE person_id = $1`, [personId]),
+      pool.query(`SELECT voided_at FROM customer_assignment WHERE customer_id = $1`, [customerId]),
+      pool.query(
+        `SELECT voided_at FROM person_state_coverage
+         WHERE person_id = $1 AND state_canon = 'ZZDEP MANUAL LEAF'`,
+        [personId],
+      ),
+    ]);
+    expect(person.rows[0]).toMatchObject({ is_active: true, left_date: null });
+    expect(assignment.rows[0].voided_at).toBeNull();
+    expect(coverage.rows[0].voided_at).toBeNull();
+  });
+
   it("rejects a repeated departure instead of overwriting the recorded one", async () => {
     const res = await request(app)
       .post(`/api/master/people/${headId}/departure`)
@@ -272,7 +451,7 @@ describe("departure lifecycle", () => {
       .send({ ...departureBody, left_date: "2026-08-10", acknowledgedCustomers: 0 });
     expect(res.status).toBe(400);
     const p = await pool.query(`SELECT left_date::text FROM person WHERE person_id = $1`, [headId]);
-    expect(p.rows[0].left_date).toBe("2026-08-01");
+    expect(p.rows[0].left_date).toBe("2026-08-30");
   });
 
   it("DB enforces one holding person per departed head (partial unique index)", async () => {

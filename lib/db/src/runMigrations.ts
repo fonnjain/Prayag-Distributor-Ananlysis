@@ -2646,6 +2646,36 @@ const MIGRATIONS: Migration[] = [
       END $$;
     `,
   },
+  {
+    id: "063_void_invalid_post_departure_assignments",
+    sql: `
+      -- A late master import can incorrectly attach currently-open coverage or
+      -- customers to someone whose departure predates the import. Retain those
+      -- source rows as audit evidence, but make their void status explicit so
+      -- they cannot be treated as active geography or ownership.
+      ALTER TABLE person_state_coverage
+        ADD COLUMN IF NOT EXISTS voided_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS voided_by TEXT,
+        ADD COLUMN IF NOT EXISTS void_reason TEXT;
+
+      ALTER TABLE customer_assignment
+        ADD COLUMN IF NOT EXISTS voided_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS voided_by TEXT,
+        ADD COLUMN IF NOT EXISTS void_reason TEXT;
+
+      DROP INDEX IF EXISTS uq_customer_assignment_open;
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_customer_assignment_open
+        ON customer_assignment (customer_id)
+        WHERE effective_to IS NULL AND voided_at IS NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_person_state_coverage_live
+        ON person_state_coverage (person_id, state_canon, effective_from)
+        WHERE voided_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_customer_assignment_live
+        ON customer_assignment (customer_id, person_id, effective_from)
+        WHERE effective_to IS NULL AND voided_at IS NULL;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

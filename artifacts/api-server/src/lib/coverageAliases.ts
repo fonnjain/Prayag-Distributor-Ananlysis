@@ -3,8 +3,8 @@
  * with already-persisted coverage. Historic migrations keep their own literal
  * record of the rules that ran; this is the single source for current reports.
  *
- * An unverified alias never proves identity or authorizes a reassignment. It
- * only lets an operator see which persisted historical coverage needs review.
+ * An alias is only marked unverified while a business identity decision is
+ * outstanding. Confirmed aliases remain explicit compatibility mappings.
  */
 export type CoverageAliasVerification = "confirmed" | "unverified_alias";
 
@@ -18,7 +18,7 @@ export const COVERAGE_HEAD_ALIASES: readonly CoverageHeadAlias[] = [
   {
     registerHead: "Babu",
     coveragePerson: "Taninki Ramesh Babu",
-    verification: "unverified_alias",
+    verification: "confirmed",
   },
   {
     registerHead: "Pawan Sharma",
@@ -46,17 +46,7 @@ export type UnverifiedCoverageAliasReview = {
   reviewNote: string;
 };
 
-export const UNVERIFIED_COVERAGE_ALIAS_REVIEWS: readonly UnverifiedCoverageAliasReview[] = [
-  {
-    registerHead: "Babu",
-    coveragePerson: "Taninki Ramesh Babu",
-    stateCanon: "TAMIL NADU",
-    fiscalYears: ["2023-24", "2024-25"],
-    status: "UNVERIFIED ALIAS",
-    reviewNote:
-      "The register label Babu is preserved for review. HR contains a separate departed S.Babu record, so Prayag must confirm identity before any coverage change.",
-  },
-] as const;
+export const UNVERIFIED_COVERAGE_ALIAS_REVIEWS: readonly UnverifiedCoverageAliasReview[] = [];
 
 function quoteSqlLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
@@ -109,6 +99,13 @@ export function unverifiedCoverageAliasReviewSql(
   personNameSql: string,
 ): { status: string; registerHeadLabel: string; reviewNote: string } {
   const matches = unverifiedCoverageAliasMatchesSql(coverageAlias, personNameSql);
+  if (matches.length === 0) {
+    return {
+      status: "NULL",
+      registerHeadLabel: "NULL",
+      reviewNote: "NULL",
+    };
+  }
   const caseExpression = (value: (review: UnverifiedCoverageAliasReview) => string) =>
     `CASE ${matches.map(({ review, match }) => `WHEN ${match} THEN ${quoteSqlLiteral(value(review))}`).join(" ")} ELSE NULL END`;
 

@@ -117,10 +117,12 @@ router.get("/master/people", async (req, res) => {
                 (SELECT COUNT(*) FROM person sub WHERE sub.reports_to_person_id = p.person_id
                 ) AS direct_reports,
                 (SELECT COUNT(*) FROM customer_assignment ca
-                 WHERE ca.state_head_person_id = p.person_id AND ca.effective_to IS NULL
+                 WHERE ca.state_head_person_id = p.person_id
+                   AND ca.effective_to IS NULL AND ca.voided_at IS NULL
                 ) AS customers_as_sh,
                 (SELECT COUNT(*) FROM customer_assignment ca
-                 WHERE ca.person_id = p.person_id AND ca.effective_to IS NULL
+                 WHERE ca.person_id = p.person_id
+                   AND ca.effective_to IS NULL AND ca.voided_at IS NULL
                 ) AS customers_as_tm
          FROM person p
          LEFT JOIN designation d   ON d.designation_id = p.designation_id
@@ -193,7 +195,8 @@ router.get("/master/customers", async (req, res) => {
                 ) AS has_link
          FROM customer c
          LEFT JOIN customer_assignment ca
-           ON ca.customer_id = c.customer_id AND ca.effective_to IS NULL
+           ON ca.customer_id = c.customer_id
+          AND ca.effective_to IS NULL AND ca.voided_at IS NULL
          LEFT JOIN person p  ON p.person_id  = ca.person_id
          LEFT JOIN person sh ON sh.person_id = ca.state_head_person_id
          ${wc}
@@ -228,10 +231,12 @@ router.get("/master/people/:id", async (req, res) => {
                   mgr.person_id AS reports_to_person_id, mgr.name AS reports_to_name,
                   sh.person_id  AS state_head_person_id, sh.name AS state_head_name,
                   (SELECT COUNT(*) FROM customer_assignment ca
-                   WHERE ca.state_head_person_id = p.person_id AND ca.effective_to IS NULL
+                   WHERE ca.state_head_person_id = p.person_id
+                     AND ca.effective_to IS NULL AND ca.voided_at IS NULL
                   ) AS customers_as_state_head,
                   (SELECT COUNT(*) FROM customer_assignment ca
-                   WHERE ca.person_id = p.person_id AND ca.effective_to IS NULL
+                   WHERE ca.person_id = p.person_id
+                     AND ca.effective_to IS NULL AND ca.voided_at IS NULL
                   ) AS customers_as_tm
            FROM person p
            LEFT JOIN designation  d   ON d.designation_id = p.designation_id
@@ -282,7 +287,8 @@ router.get("/master/people/:id", async (req, res) => {
            JOIN state_hierarchy sh ON sh.state_canon = c.state_canon
             JOIN person coverage_person ON coverage_person.person_id = c.person_id
            JOIN person head ON head.person_id = c.state_head_person_id
-           WHERE c.person_id = $1
+            WHERE c.person_id = $1
+              AND c.voided_at IS NULL
            ORDER BY c.effective_to NULLS FIRST, sh.display_order, c.state_canon, head.name`,
           [personId],
         ),
@@ -376,6 +382,7 @@ router.get("/master/people/:id/impact", async (req, res) => {
          COUNT(DISTINCT customer_id)                       AS total_distinct
        FROM customer_assignment
        WHERE effective_to IS NULL
+         AND voided_at IS NULL
          AND (state_head_person_id = $1 OR person_id = $1)`,
       [personId],
     );
@@ -481,6 +488,7 @@ router.patch("/master/people/:id", async (req, res) => {
       const custImpactRes = await pool.query(
         `SELECT COUNT(DISTINCT customer_id) AS cust FROM customer_assignment
          WHERE effective_to IS NULL
+          AND voided_at IS NULL
            AND (state_head_person_id = $1 OR person_id = $1)`,
         [personId],
       );
@@ -584,6 +592,7 @@ router.post("/master/people/:id/deactivate", async (req, res) => {
     const custRes = await pool.query(
       `SELECT COUNT(DISTINCT customer_id) AS cust FROM customer_assignment
        WHERE effective_to IS NULL
+         AND voided_at IS NULL
          AND (state_head_person_id = $1 OR person_id = $1)`,
       [personId],
     );
@@ -732,7 +741,7 @@ router.post("/master/people/:id/rehire", async (req, res) => {
                 COUNT(ca.id) AS open_count
          FROM person h
          LEFT JOIN customer_assignment ca
-           ON ca.effective_to IS NULL
+           ON ca.effective_to IS NULL AND ca.voided_at IS NULL
            AND (ca.state_head_person_id = h.person_id OR ca.person_id = h.person_id)
          WHERE h.is_holding = true AND h.holding_for_person_id = $1
          GROUP BY h.person_id`,
@@ -810,6 +819,7 @@ router.post("/master/people/:id/departure", async (req, res) => {
       acknowledgedSubTree,
       acknowledgedCustomers,
       changed_by,
+      voidPostDepartureImports,
     } = req.body as {
       left_date?: string;
       departure_reason?: string;
@@ -817,6 +827,7 @@ router.post("/master/people/:id/departure", async (req, res) => {
       acknowledgedSubTree?: number;
       acknowledgedCustomers?: number;
       changed_by?: string;
+      voidPostDepartureImports?: boolean;
     };
 
     if (!left_date || !/^\d{4}-\d{2}-\d{2}$/.test(left_date)) {
@@ -858,6 +869,7 @@ router.post("/master/people/:id/departure", async (req, res) => {
     const custRes = await pool.query(
       `SELECT COUNT(DISTINCT customer_id) AS cust FROM customer_assignment
        WHERE effective_to IS NULL
+         AND voided_at IS NULL
          AND (state_head_person_id = $1 OR person_id = $1)`,
       [personId],
     );
@@ -898,55 +910,102 @@ router.post("/master/people/:id/departure", async (req, res) => {
         [personId, left_date, departure_reason.trim(), departure_note?.trim() || null],
       );
 
-      // 2. Create (or reuse) the holding person for this departed head.
-      //    After a rehire the holding row is left inactive; a subsequent
-      //    departure must reactivate it atomically (inside this transaction,
-      //    with a row lock) so that newly moved assignments land on an active
-      //    holding person and remain visible to active/assignable workflows.
-      let holdingId: number;
-      const existingHolding = await client.query(
-        `SELECT person_id FROM person WHERE is_holding = true AND holding_for_person_id = $1 FOR UPDATE`,
-        [personId],
-      );
-      if (existingHolding.rows[0]) {
-        holdingId = existingHolding.rows[0].person_id;
-        // Reactivate in case it was deactivated by a prior rehire.
-        await client.query(
-          `UPDATE person SET is_active = true, updated_at = NOW() WHERE person_id = $1`,
-          [holdingId],
-        );
-      } else {
-        const holdRes = await client.query(
-          `INSERT INTO person
-             (name, is_holding, holding_for_person_id, is_state_head, designation_id,
-              is_active, source)
-           VALUES ($1, true, $2, $3, $4, true, 'app_created')
-           RETURNING person_id`,
-          [`HOLDING — ${person.name}`, personId, person.is_state_head, person.designation_id],
-        );
-        holdingId = holdRes.rows[0].person_id;
-      }
-
-      // 3. Move every open assignment involving the departed person to the
-      //    holding person (effective-dated: close old row, open new row).
-      //    Rows are locked (FOR UPDATE) so a concurrent reassignment cannot
-      //    close them under us; each close is re-checked (effective_to IS
-      //    NULL) and the replacement row is only inserted when the close
-      //    actually happened.
+      // 2. Split live assignments by their relationship to the departure date.
+      //    A seed-imported assignment after someone left cannot be back-dated
+      //    into a holding person. It is an invalid import and must become an
+      //    auditable unassigned-queue row instead. Ordinary app-created
+      //    assignments retain the standard departure behavior.
       const openRes = await client.query(
-        `SELECT id, customer_id, person_id, state_head_person_id, confidence
+        `SELECT id, customer_id, person_id, state_head_person_id, confidence,
+                effective_from::text AS effective_from, set_by
          FROM customer_assignment
          WHERE effective_to IS NULL
+           AND voided_at IS NULL
            AND (state_head_person_id = $1 OR person_id = $1)
          FOR UPDATE`,
         [personId],
       );
+      const postDepartureAssignments = openRes.rows.filter(
+        (assignment) => assignment.effective_from > left_date,
+      );
+      const voidablePostDepartureAssignments = postDepartureAssignments.filter(
+        (assignment) => assignment.set_by === "seed_import",
+      );
+      const blockedPostDepartureAssignments = postDepartureAssignments.filter(
+        (assignment) => assignment.set_by !== "seed_import",
+      );
+      const assignmentsToMove = openRes.rows.filter(
+        (assignment) => assignment.effective_from <= left_date,
+      );
+      const coverageRes = await client.query(
+        `SELECT coverage_id, state_canon, source, effective_from::text AS effective_from
+         FROM person_state_coverage
+         WHERE person_id = $1
+           AND voided_at IS NULL
+           AND effective_from > $2::date
+         FOR UPDATE`,
+        [personId, left_date],
+      );
+      const voidablePostDepartureCoverage = coverageRes.rows.filter(
+        (coverage) => coverage.source === "seed_import" || coverage.source === "migration",
+      );
+      const blockedPostDepartureCoverage = coverageRes.rows.filter(
+        (coverage) => coverage.source !== "seed_import" && coverage.source !== "migration",
+      );
+      if (blockedPostDepartureAssignments.length > 0 || blockedPostDepartureCoverage.length > 0) {
+        await client.query("ROLLBACK");
+        return void res.status(409).json({
+          error:
+            "A post-departure assignment or coverage row is not an imported source and cannot be back-dated or automatically voided.",
+          postDepartureAssignments: blockedPostDepartureAssignments.map((assignment) => assignment.customer_id),
+          postDepartureCoverage: blockedPostDepartureCoverage,
+        });
+      }
+      if ((voidablePostDepartureAssignments.length > 0 || voidablePostDepartureCoverage.length > 0)
+          && !voidPostDepartureImports) {
+        await client.query("ROLLBACK");
+        return void res.status(409).json({
+          error:
+            "Open coverage or customer assignments begin after this departure. Set voidPostDepartureImports=true to void the invalid imports into the unassigned queue.",
+          postDepartureAssignments: voidablePostDepartureAssignments.map((assignment) => assignment.customer_id),
+          postDepartureCoverage: voidablePostDepartureCoverage,
+        });
+      }
+
+      // 3. Create a holding person only if there are genuine assignments to
+      //    hand over. A post-departure import must not create a false holding
+      //    territory for someone who had already left.
+      let holdingId: number | null = null;
+      if (assignmentsToMove.length > 0) {
+        const existingHolding = await client.query(
+          `SELECT person_id FROM person WHERE is_holding = true AND holding_for_person_id = $1 FOR UPDATE`,
+          [personId],
+        );
+        if (existingHolding.rows[0]) {
+          holdingId = existingHolding.rows[0].person_id;
+          await client.query(
+            `UPDATE person SET is_active = true, updated_at = NOW() WHERE person_id = $1`,
+            [holdingId],
+          );
+        } else {
+          const holdRes = await client.query(
+            `INSERT INTO person
+               (name, is_holding, holding_for_person_id, is_state_head, designation_id,
+                is_active, source)
+             VALUES ($1, true, $2, $3, $4, true, 'app_created')
+             RETURNING person_id`,
+            [`HOLDING — ${person.name}`, personId, person.is_state_head, person.designation_id],
+          );
+          holdingId = holdRes.rows[0].person_id;
+        }
+      }
 
       let moved = 0;
-      for (const a of openRes.rows) {
+      for (const a of assignmentsToMove) {
+        if (holdingId === null) throw new Error("Holding person was not created for a live assignment");
         const closed = await client.query(
           `UPDATE customer_assignment SET effective_to = $2
-           WHERE id = $1 AND effective_to IS NULL`,
+           WHERE id = $1 AND effective_to IS NULL AND voided_at IS NULL`,
           [a.id, left_date],
         );
         if (closed.rowCount === 0) continue; // closed concurrently — skip
@@ -967,19 +1026,66 @@ router.post("/master/people/:id/departure", async (req, res) => {
         moved += 1;
       }
 
-      // 4. Change log
+      // 4. Void impossible post-departure rows and recreate their customers as
+      //    explicit entries in the unassigned queue. The source rows remain
+      //    intact with void metadata for audit.
+      const voidReason = `Imported after recorded departure on ${left_date}`;
+      const voidedCustomerIds: string[] = [];
+      for (const assignment of voidablePostDepartureAssignments) {
+        const voidResult = await client.query(
+          `UPDATE customer_assignment
+           SET voided_at = NOW(), voided_by = $2, void_reason = $3
+           WHERE id = $1 AND effective_to IS NULL AND voided_at IS NULL`,
+          [assignment.id, changed_by ?? "operator", voidReason],
+        );
+        if (voidResult.rowCount === 0) continue;
+        await client.query(
+          `INSERT INTO customer_assignment
+             (customer_id, person_id, state_head_person_id, confidence,
+              effective_from, set_by, former_person_name_raw)
+           VALUES ($1, NULL, $2, $3, $4, $5, $6)`,
+          [
+            assignment.customer_id,
+            assignment.state_head_person_id === personId ? null : assignment.state_head_person_id,
+            assignment.confidence,
+            assignment.effective_from,
+            changed_by ?? "operator",
+            person.name,
+          ],
+        );
+        voidedCustomerIds.push(assignment.customer_id);
+      }
+      const voidedCoverage = await client.query(
+        `UPDATE person_state_coverage
+         SET voided_at = NOW(), voided_by = $2, void_reason = $3
+         WHERE coverage_id = ANY($1::bigint[]) AND voided_at IS NULL
+         RETURNING coverage_id, state_canon`,
+        [
+          voidablePostDepartureCoverage.map((coverage) => coverage.coverage_id),
+          changed_by ?? "operator",
+          voidReason,
+        ],
+      );
+
+      // 5. Change log
       await client.query(
         `INSERT INTO change_log (entity_type, entity_id, field, old_value, new_value, changed_by)
          VALUES
            ('person', $1, 'left_date',        NULL, $2, $4),
            ('person', $1, 'departure_reason', NULL, $3, $4),
-           ('person', $1, 'departure_holding', NULL, $5, $4)`,
+            ('person', $1, 'departure_holding', NULL, $5, $4),
+            ('person', $1, 'departure_voided_imports', NULL, $6, $4)`,
         [
           String(personId),
           left_date,
           departure_reason.trim(),
           changed_by ?? "operator",
           JSON.stringify({ holdingPersonId: holdingId, assignmentsMoved: moved }),
+          JSON.stringify({
+            customerIds: voidedCustomerIds,
+            coverageIds: voidedCoverage.rows.map((coverage) => coverage.coverage_id),
+            reason: voidReason,
+          }),
         ],
       );
 
@@ -988,6 +1094,8 @@ router.post("/master/people/:id/departure", async (req, res) => {
         success: true,
         holdingPersonId: holdingId,
         assignmentsMoved: moved,
+        assignmentsVoidedToUnassigned: voidedCustomerIds,
+        coverageVoided: voidedCoverage.rows,
       });
     } catch (err) {
       await client.query("ROLLBACK");
@@ -1014,7 +1122,7 @@ router.get("/master/holding", async (req, res) => {
        WHERE h.is_holding = true AND h.is_active = true
          AND NOT EXISTS (
            SELECT 1 FROM customer_assignment ca
-           WHERE ca.effective_to IS NULL
+           WHERE ca.effective_to IS NULL AND ca.voided_at IS NULL
              AND (ca.state_head_person_id = h.person_id OR ca.person_id = h.person_id)
          )`,
     );
@@ -1024,7 +1132,7 @@ router.get("/master/holding", async (req, res) => {
               d.person_id AS departed_person_id, d.name AS departed_name,
               d.left_date::text, d.departure_reason, d.departure_note,
               (SELECT COUNT(DISTINCT ca.customer_id) FROM customer_assignment ca
-               WHERE ca.effective_to IS NULL
+               WHERE ca.effective_to IS NULL AND ca.voided_at IS NULL
                  AND (ca.state_head_person_id = h.person_id OR ca.person_id = h.person_id)
               ) AS open_customers
        FROM person h
@@ -1123,6 +1231,7 @@ router.post("/master/holding/:id/resolve", async (req, res) => {
         `SELECT id, customer_id, person_id, state_head_person_id, confidence
          FROM customer_assignment
          WHERE effective_to IS NULL
+           AND voided_at IS NULL
            AND (state_head_person_id = $1 OR person_id = $1)
          FOR UPDATE`,
         [holdingId],
@@ -1132,7 +1241,7 @@ router.post("/master/holding/:id/resolve", async (req, res) => {
       for (const a of openRes.rows) {
         const closed = await client.query(
           `UPDATE customer_assignment SET effective_to = $2
-           WHERE id = $1 AND effective_to IS NULL`,
+           WHERE id = $1 AND effective_to IS NULL AND voided_at IS NULL`,
           [a.id, effFrom],
         );
         if (closed.rowCount === 0) continue; // closed concurrently — skip
@@ -1328,7 +1437,8 @@ const UNASSIGNED_SHARED_CTES = `
     SELECT c_at.territory_id, COUNT(*) AS total_assigned
     FROM customer_assignment ca_at
     JOIN customer c_at ON c_at.customer_id = ca_at.customer_id
-    WHERE ca_at.effective_to IS NULL AND ca_at.person_id IS NOT NULL
+    WHERE ca_at.effective_to IS NULL AND ca_at.voided_at IS NULL
+      AND ca_at.person_id IS NOT NULL
     GROUP BY c_at.territory_id
   ),
   -- 2. Ranked territory-majority persons
@@ -1345,7 +1455,7 @@ const UNASSIGNED_SHARED_CTES = `
     FROM customer_assignment ca_tm
     JOIN customer c_tm ON c_tm.customer_id = ca_tm.customer_id
     JOIN person   p_tm ON p_tm.person_id   = ca_tm.person_id
-    WHERE ca_tm.effective_to IS NULL
+    WHERE ca_tm.effective_to IS NULL AND ca_tm.voided_at IS NULL
       AND ca_tm.person_id IS NOT NULL
       AND p_tm.is_active  = true
     GROUP BY c_tm.territory_id, ca_tm.person_id, p_tm.name
@@ -1382,7 +1492,7 @@ const UNASSIGNED_SHARED_CTES = `
     FROM customer_assignment hist
     JOIN customer_assignment curr
       ON curr.customer_id  = hist.customer_id
-      AND curr.effective_to IS NULL
+      AND curr.effective_to IS NULL AND curr.voided_at IS NULL
       AND curr.person_id   IS NOT NULL
     JOIN person p0 ON p0.person_id = curr.person_id AND p0.is_active = true
     WHERE hist.former_person_name_raw IS NOT NULL
@@ -1402,7 +1512,7 @@ router.get("/master/customers/unassigned", async (req, res) => {
     const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
     const offset = (page - 1) * limit;
 
-    const conds = ["uca.effective_to IS NULL", "uca.person_id IS NULL"];
+    const conds = ["uca.effective_to IS NULL", "uca.voided_at IS NULL", "uca.person_id IS NULL"];
     const params: unknown[] = [];
     let pi = 1;
     if (type)        { conds.push(`c.type = $${pi++}`);         params.push(type); }
@@ -1477,7 +1587,8 @@ router.get("/master/customers/unassigned", async (req, res) => {
          LEFT JOIN territory t ON t.territory_id = c.territory_id
          LEFT JOIN tm          ON tm.territory_id = c.territory_id
          LEFT JOIN r0          ON r0.former_head  = uca.former_person_name_raw
-         WHERE uca.effective_to IS NULL AND uca.person_id IS NULL
+         WHERE uca.effective_to IS NULL AND uca.voided_at IS NULL
+           AND uca.person_id IS NULL
          GROUP BY c.territory_id, t.name,
                   tm.person_id, tm.person_name, tm.cover_count,
                   tm.total_assigned, tm.confidence_band
@@ -1532,7 +1643,7 @@ router.post("/master/customers/bulk-assign-suggested", async (req, res) => {
          FROM customer_assignment ca_tm
          JOIN customer c_tm ON c_tm.customer_id = ca_tm.customer_id
          JOIN person   p_tm ON p_tm.person_id   = ca_tm.person_id
-         WHERE ca_tm.effective_to IS NULL
+         WHERE ca_tm.effective_to IS NULL AND ca_tm.voided_at IS NULL
            AND ca_tm.person_id IS NOT NULL AND p_tm.is_active = true
            AND p_tm.is_holding = false AND p_tm.left_date IS NULL
            AND c_tm.territory_id = $1
@@ -1558,7 +1669,8 @@ router.post("/master/customers/bulk-assign-suggested", async (req, res) => {
            FROM customer_assignment hist
            JOIN customer_assignment curr
              ON curr.customer_id  = hist.customer_id
-             AND curr.effective_to IS NULL AND curr.person_id IS NOT NULL
+             AND curr.effective_to IS NULL AND curr.voided_at IS NULL
+             AND curr.person_id IS NOT NULL
            JOIN person p0 ON p0.person_id = curr.person_id AND p0.is_active = true
              AND p0.is_holding = false AND p0.left_date IS NULL
            WHERE hist.former_person_name_raw IS NOT NULL
@@ -1580,7 +1692,8 @@ router.post("/master/customers/bulk-assign-suggested", async (req, res) => {
          FROM customer_assignment uca
          JOIN customer c ON c.customer_id = uca.customer_id
          LEFT JOIN person sh ON sh.person_id = uca.state_head_person_id
-         WHERE uca.effective_to IS NULL AND uca.person_id IS NULL
+         WHERE uca.effective_to IS NULL AND uca.voided_at IS NULL
+           AND uca.person_id IS NULL
            AND c.territory_id = $1`,
         [territory_id],
       ),
@@ -1670,7 +1783,7 @@ router.post("/master/customers/bulk-assign-suggested", async (req, res) => {
       for (const a of toAssign) {
         await client.query(
           `UPDATE customer_assignment SET effective_to = CURRENT_DATE
-           WHERE customer_id = $1 AND effective_to IS NULL`,
+           WHERE customer_id = $1 AND effective_to IS NULL AND voided_at IS NULL`,
           [a.customerId],
         );
         await client.query(
@@ -1885,14 +1998,15 @@ router.post("/master/customers/bulk-assign", async (req, res) => {
       // Form A — explicit list; validate each is actually unassigned
       const chk = await pool.query(
         `SELECT ca.customer_id FROM customer_assignment ca
-         WHERE ca.effective_to IS NULL AND ca.person_id IS NULL
+         WHERE ca.effective_to IS NULL AND ca.voided_at IS NULL
+           AND ca.person_id IS NULL
            AND ca.customer_id = ANY($1::text[])`,
         [customer_ids],
       );
       targets = chk.rows.map((r) => r.customer_id);
     } else {
       // Form B — filter-based
-      const conds = ["ca.effective_to IS NULL", "ca.person_id IS NULL"];
+      const conds = ["ca.effective_to IS NULL", "ca.voided_at IS NULL", "ca.person_id IS NULL"];
       const params: unknown[] = [];
       let pi = 1;
       if (typeFilter) { conds.push(`c.type = $${pi++}`); params.push(typeFilter); }
@@ -1930,7 +2044,7 @@ router.post("/master/customers/bulk-assign", async (req, res) => {
       for (const customerId of targets) {
         await client.query(
           `UPDATE customer_assignment SET effective_to = CURRENT_DATE
-           WHERE customer_id = $1 AND effective_to IS NULL`,
+           WHERE customer_id = $1 AND effective_to IS NULL AND voided_at IS NULL`,
           [customerId],
         );
         await client.query(
@@ -2247,7 +2361,7 @@ router.patch("/master/customers/:id/assign", async (req, res) => {
       const prevRes = await client.query(
         `SELECT person_id, state_head_person_id
          FROM customer_assignment
-         WHERE customer_id = $1 AND effective_to IS NULL`,
+          WHERE customer_id = $1 AND effective_to IS NULL AND voided_at IS NULL`,
         [customerId],
       );
       const prev = prevRes.rows[0] ?? null;
@@ -2256,7 +2370,7 @@ router.patch("/master/customers/:id/assign", async (req, res) => {
       await client.query(
         `UPDATE customer_assignment
          SET effective_to = CURRENT_DATE
-         WHERE customer_id = $1 AND effective_to IS NULL`,
+         WHERE customer_id = $1 AND effective_to IS NULL AND voided_at IS NULL`,
         [customerId],
       );
 

@@ -7,15 +7,12 @@ import {
 } from "./coverageAliases.js";
 
 describe("coverage alias review registry", () => {
-  it("keeps the Babu compatibility mapping explicit and unverified", () => {
+  it("keeps the confirmed Babu compatibility mapping explicit without a review warning", () => {
     expect(getUnverifiedCoverageAliasReview({
       coveragePerson: "Taninki Ramesh Babu",
       stateCanon: "TAMIL NADU",
       fiscalYear: "2024-25",
-    })).toMatchObject({
-      status: "UNVERIFIED ALIAS",
-      registerHead: "Babu",
-    });
+    })).toBeNull();
     expect(getUnverifiedCoverageAliasReview({
       coveragePerson: "Taninki Ramesh Babu",
       stateCanon: "TAMIL NADU",
@@ -23,13 +20,13 @@ describe("coverage alias review registry", () => {
     })).toBeNull();
   });
 
-  it("provides the same registry-backed SQL for reports and people detail", () => {
+  it("keeps confirmed aliases in matching SQL without emitting an unverified warning", () => {
     expect(coveragePersonSql("sl.head_canon")).toContain("WHEN 'Babu' THEN 'Taninki Ramesh Babu'");
-    expect(unverifiedCoverageAliasStatusSql("c", "coverage_person.name")).toContain("UNVERIFIED ALIAS");
-    expect(unverifiedCoverageAliasStatusSql("c", "coverage_person.name")).toContain("'2023-24', '2024-25'");
-    expect(unverifiedCoverageAliasReviewSql("c", "coverage_person.name")).toMatchObject({
-      registerHeadLabel: expect.stringContaining("THEN 'Babu'"),
-      reviewNote: expect.stringContaining("separate departed S.Babu record"),
+    expect(unverifiedCoverageAliasStatusSql("c", "coverage_person.name")).toBe("NULL");
+    expect(unverifiedCoverageAliasReviewSql("c", "coverage_person.name")).toEqual({
+      status: "NULL",
+      registerHeadLabel: "NULL",
+      reviewNote: "NULL",
     });
   });
 });

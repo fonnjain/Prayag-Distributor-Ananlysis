@@ -223,6 +223,7 @@ export async function buildCanonicalCoverageDriftCheck(
       FROM person_state_coverage c
       JOIN person p ON p.person_id = c.person_id
       WHERE c.source = 'derived_register'
+        AND c.voided_at IS NULL
         AND ($1::text IS NULL OR c.fiscal_year = $1)
     ),
     coverage_diffs AS (
@@ -296,6 +297,7 @@ export async function buildCanonicalCoverageDriftCheck(
       JOIN person_state_coverage c ON c.coverage_id = e.coverage_id
       JOIN person p ON p.person_id = c.person_id
       WHERE c.source = 'derived_register'
+        AND c.voided_at IS NULL
         AND ($1::text IS NULL OR c.fiscal_year = $1)
       GROUP BY c.state_canon, c.fiscal_year, e.fiscal_year, p.name, e.customer_name
     ),
@@ -472,7 +474,8 @@ export async function buildCanonicalCoverageReport(): Promise<CanonicalCoverageR
              COUNT(psc.coverage_id)::text AS coverage_rows,
              COUNT(sl.*)::text AS register_rows
       FROM state_hierarchy sh
-      LEFT JOIN person_state_coverage psc ON psc.state_canon = sh.state_canon
+       LEFT JOIN person_state_coverage psc
+         ON psc.state_canon = sh.state_canon AND psc.voided_at IS NULL
       LEFT JOIN sale_line sl ON sl.state_canon = sh.state_canon AND sl.fy = $1
       WHERE sh.state_canon = ANY($2::text[])
       GROUP BY sh.state_canon
@@ -483,7 +486,7 @@ export async function buildCanonicalCoverageReport(): Promise<CanonicalCoverageR
              COUNT(DISTINCT c.state_head_person_id)::text AS head_count
       FROM person_state_coverage c
       JOIN person h ON h.person_id = c.state_head_person_id
-      WHERE h.is_system_coverage = false
+       WHERE h.is_system_coverage = false AND c.voided_at IS NULL
       GROUP BY c.state_canon
       HAVING COUNT(DISTINCT c.state_head_person_id) > 1
       ORDER BY c.state_canon
@@ -503,6 +506,7 @@ export async function buildCanonicalCoverageReport(): Promise<CanonicalCoverageR
       JOIN person p ON p.person_id = c.person_id
       JOIN person h ON h.person_id = c.state_head_person_id
       WHERE c.state_canon = 'TAMIL NADU'
+         AND c.voided_at IS NULL
         AND p.name IN ('Taninki Ramesh Babu', 'Sandeep Dadheech')
       ORDER BY c.effective_from, p.name
     `),
@@ -514,14 +518,15 @@ export async function buildCanonicalCoverageReport(): Promise<CanonicalCoverageR
       SELECT DISTINCT c.state_canon
       FROM person_state_coverage c
       JOIN state_hierarchy sh ON sh.state_canon = c.state_canon
-      WHERE sh.picker_visible = false
+       WHERE sh.picker_visible = false AND c.voided_at IS NULL
       ORDER BY c.state_canon
     `),
     pool.query<{ state_canon: string; effective_from: string }>(`
       SELECT c.state_canon, c.effective_from::text
       FROM person_state_coverage c
       JOIN person p ON p.person_id = c.person_id
-      WHERE p.is_system_coverage = true AND p.name = 'Unassigned coverage'
+       WHERE p.is_system_coverage = true AND p.name = 'Unassigned coverage'
+         AND c.voided_at IS NULL
       ORDER BY c.state_canon
     `),
     pool.query<{ count: string }>(
@@ -550,7 +555,7 @@ export async function buildCanonicalCoverageReport(): Promise<CanonicalCoverageR
       FROM person_state_coverage c
       JOIN person p ON p.person_id = c.person_id
       JOIN person h ON h.person_id = c.state_head_person_id
-      WHERE c.source = 'derived_register'
+       WHERE c.source = 'derived_register' AND c.voided_at IS NULL
       ORDER BY c.state_canon, c.fiscal_year, p.name
     `),
     pool.query<{
@@ -596,7 +601,7 @@ export async function buildCanonicalCoverageReport(): Promise<CanonicalCoverageR
                c.effective_from, c.effective_to
         FROM person_state_coverage c
         JOIN person p ON p.person_id = c.person_id
-        WHERE c.source = 'derived_register'
+        WHERE c.source = 'derived_register' AND c.voided_at IS NULL
       ),
       coverage_diffs AS (
         SELECT 1
@@ -620,7 +625,7 @@ export async function buildCanonicalCoverageReport(): Promise<CanonicalCoverageR
         FROM person_state_coverage_customer_evidence e
         JOIN person_state_coverage c ON c.coverage_id = e.coverage_id
         JOIN person p ON p.person_id = c.person_id
-        WHERE c.source = 'derived_register'
+        WHERE c.source = 'derived_register' AND c.voided_at IS NULL
         GROUP BY c.state_canon, c.fiscal_year, p.name, e.customer_name
       ),
       evidence_diffs AS (
@@ -642,7 +647,8 @@ export async function buildCanonicalCoverageReport(): Promise<CanonicalCoverageR
             AND g.customer_count = e.customer_count AND g.net_amount = e.net_amount
         ) AND NOT EXISTS (
           SELECT 1 FROM person_state_coverage
-          WHERE source = 'derived_register' AND state_canon = 'PUNJAB' AND fiscal_year = '2023-24'
+          WHERE source = 'derived_register' AND voided_at IS NULL
+            AND state_canon = 'PUNJAB' AND fiscal_year = '2023-24'
         ) AS punjab_gap_matches
     `),
   ]);

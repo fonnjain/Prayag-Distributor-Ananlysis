@@ -200,20 +200,6 @@ export const SEED_FLAGS: SeedFlag[] = [
         "Row 178 lists Anuj Sharma as a MEMBER under Sunil Mohanty. He is also a State Head with two members on other rows. Both roles are preserved. Confirm whether the member row is intentional (own territory) or a data entry error.",
     },
   },
-  {
-    headId: "sandeep-dadheech",
-    flagType: "unverified_historical_alias",
-    severity: "warning",
-    title: "Historical register label 'Babu' — identity unverified",
-    detail: {
-      headCanonValue: "Babu",
-      status: "UNVERIFIED ALIAS",
-      description:
-        "FY2023-24 and FY2024-25 Tamil Nadu coverage currently uses a compatibility alias from register label 'Babu' to Taninki Ramesh Babu under Sandeep Dadheech. HR also contains a separate departed S.Babu Regional Sales Manager record. This is review evidence only, not a confirmed identity or an instruction to reassign coverage.",
-      businessAction:
-        "Prayag must confirm who the historical register label Babu represents before any person or coverage change.",
-    },
-  },
   // ── Flags from HR roster analysis (Aug 2026) ─────────────────────────────
   {
     headId: "sunil-mohanty",
