@@ -2303,6 +2303,40 @@ const MIGRATIONS: Migration[] = [
       WHERE s.name = 'Sandeep Dadheech'
         AND NOT EXISTS (SELECT 1 FROM person WHERE name = 'Suresh Kumar Nair');
 
+      -- Never assign a customer to coverage unless its complete register
+      -- history within the leaf/FY has exactly one resolved, non-system head.
+      -- Invalid buckets remain visible as uncovered evidence below; they must
+      -- not make a successful application deployment impossible.
+      CREATE TEMP TABLE register_coverage_eligible_customer (
+        state_canon TEXT NOT NULL,
+        fiscal_year TEXT NOT NULL,
+        customer_name TEXT NOT NULL,
+        register_head_canon TEXT NOT NULL,
+        PRIMARY KEY (state_canon, fiscal_year, customer_name)
+      ) ON COMMIT DROP;
+
+      INSERT INTO register_coverage_eligible_customer
+        (state_canon, fiscal_year, customer_name, register_head_canon)
+      SELECT
+        sl.state_canon,
+        sl.fy,
+        sl.customer,
+        MAX(sl.head_canon)
+      FROM sale_line sl
+      LEFT JOIN person p
+        ON p.name = CASE sl.head_canon
+          WHEN 'Babu' THEN 'Taninki Ramesh Babu'
+          WHEN 'Pawan Sharma' THEN 'Pawan Kumar Sharma'
+          WHEN 'Syed Aqil Rizvi' THEN 'Aqil Rizvi'
+          WHEN 'Suresh Nair' THEN 'Suresh Kumar Nair'
+          ELSE sl.head_canon
+        END
+      WHERE sl.state_canon IN ('AP','HIMACHAL PRADESH','MAHARASHTRA','TAMIL NADU','TELANGANA')
+         OR (sl.state_canon = 'PUNJAB' AND sl.fy <> '2023-24')
+      GROUP BY sl.state_canon, sl.fy, sl.customer
+      HAVING COUNT(DISTINCT COALESCE(sl.head_canon, '__NULL__')) = 1
+         AND BOOL_AND(sl.head_canon IS NOT NULL AND p.person_id IS NOT NULL AND NOT p.is_system_coverage);
+
       CREATE TEMP TABLE register_coverage_work (
         state_canon TEXT NOT NULL,
         fiscal_year TEXT NOT NULL,
@@ -2334,42 +2368,33 @@ const MIGRATIONS: Migration[] = [
         COUNT(DISTINCT sl.customer)::integer,
         SUM(sl.amount)
       FROM sale_line sl
-      WHERE sl.head_canon IS NOT NULL
+      JOIN register_coverage_eligible_customer eligible
+        ON eligible.state_canon = sl.state_canon
+       AND eligible.fiscal_year = sl.fy
+       AND eligible.customer_name = sl.customer
+      GROUP BY sl.state_canon, sl.fy, sl.head_canon;
+
+      -- Record every rejected bucket so operators can review it.  This is
+      -- intentionally an uncovered gap, never an inferred person assignment.
+      INSERT INTO canonical_coverage_uncovered_gap
+        (state_canon, fiscal_year, customer_count, net_amount, reason)
+      SELECT sl.state_canon, sl.fy, COUNT(DISTINCT sl.customer)::integer, SUM(sl.amount),
+             'mixed, unassigned, system, or unresolved customer attribution'
+      FROM sale_line sl
+      LEFT JOIN register_coverage_eligible_customer eligible
+        ON eligible.state_canon = sl.state_canon
+       AND eligible.fiscal_year = sl.fy
+       AND eligible.customer_name = sl.customer
+      WHERE eligible.customer_name IS NULL
         AND (
           sl.state_canon IN ('AP','HIMACHAL PRADESH','MAHARASHTRA','TAMIL NADU','TELANGANA')
           OR (sl.state_canon = 'PUNJAB' AND sl.fy <> '2023-24')
         )
-      GROUP BY sl.state_canon, sl.fy, sl.head_canon;
-
-      -- Fail closed before any coverage write if a selected customer would be
-      -- assigned to more than one bucket, an unassigned bucket, or an
-      -- unresolved person in the same leaf and FY.
-      DO $$
-      BEGIN
-        IF EXISTS (
-          WITH selected_lines AS (
-            SELECT sl.state_canon, sl.fy, sl.customer, sl.head_canon,
-                   CASE sl.head_canon
-                     WHEN 'Babu' THEN 'Taninki Ramesh Babu'
-                     WHEN 'Pawan Sharma' THEN 'Pawan Kumar Sharma'
-                     WHEN 'Syed Aqil Rizvi' THEN 'Aqil Rizvi'
-                     WHEN 'Suresh Nair' THEN 'Suresh Kumar Nair'
-                     ELSE sl.head_canon
-                   END AS person_name
-            FROM sale_line sl
-            WHERE sl.state_canon IN ('AP','HIMACHAL PRADESH','MAHARASHTRA','TAMIL NADU','TELANGANA')
-               OR (sl.state_canon = 'PUNJAB' AND sl.fy <> '2023-24')
-          )
-          SELECT 1
-          FROM selected_lines s
-          LEFT JOIN person p ON p.name = s.person_name
-          GROUP BY s.state_canon, s.fy, s.customer
-          HAVING COUNT(DISTINCT COALESCE(s.head_canon, '__NULL__')) <> 1
-              OR BOOL_OR(s.head_canon IS NULL OR p.person_id IS NULL OR p.is_system_coverage)
-        ) THEN
-          RAISE EXCEPTION 'mixed, unassigned, or unresolved customer attribution prevents derived coverage';
-        END IF;
-      END $$;
+      GROUP BY sl.state_canon, sl.fy
+      ON CONFLICT (state_canon, fiscal_year) DO UPDATE
+        SET customer_count = EXCLUDED.customer_count,
+            net_amount = EXCLUDED.net_amount,
+            reason = EXCLUDED.reason;
 
       DO $$
       DECLARE missing_people TEXT;
@@ -2465,7 +2490,23 @@ const MIGRATIONS: Migration[] = [
           OR (p.name = 'Sandeep Dadheech' AND c.effective_from = DATE '2025-04-01')
         );
 
-      WITH register_bounds AS (
+      WITH eligible_customer AS (
+        SELECT sl.state_canon, sl.fy, sl.customer
+        FROM sale_line sl
+        LEFT JOIN person p
+          ON p.name = CASE sl.head_canon
+            WHEN 'Babu' THEN 'Taninki Ramesh Babu'
+            WHEN 'Pawan Sharma' THEN 'Pawan Kumar Sharma'
+            WHEN 'Syed Aqil Rizvi' THEN 'Aqil Rizvi'
+            WHEN 'Suresh Nair' THEN 'Suresh Kumar Nair'
+            ELSE sl.head_canon
+          END
+        WHERE sl.state_canon IN ('AP','HIMACHAL PRADESH','MAHARASHTRA','TAMIL NADU','TELANGANA')
+           OR (sl.state_canon = 'PUNJAB' AND sl.fy <> '2023-24')
+        GROUP BY sl.state_canon, sl.fy, sl.customer
+        HAVING COUNT(DISTINCT COALESCE(sl.head_canon, '__NULL__')) = 1
+           AND BOOL_AND(sl.head_canon IS NOT NULL AND p.person_id IS NOT NULL AND NOT p.is_system_coverage)
+      ), register_bounds AS (
         SELECT
           sl.state_canon,
           sl.fy,
@@ -2480,11 +2521,10 @@ const MIGRATIONS: Migration[] = [
           (DATE_TRUNC('month', MAX(COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY'))))
             + INTERVAL '1 month - 1 day')::date AS effective_to
         FROM sale_line sl
-        WHERE sl.head_canon IS NOT NULL
-          AND (
-            sl.state_canon IN ('AP','HIMACHAL PRADESH','MAHARASHTRA','TAMIL NADU','TELANGANA')
-            OR (sl.state_canon = 'PUNJAB' AND sl.fy <> '2023-24')
-          )
+        JOIN eligible_customer eligible
+          ON eligible.state_canon = sl.state_canon
+         AND eligible.fy = sl.fy
+         AND eligible.customer = sl.customer
         GROUP BY sl.state_canon, sl.fy, sl.head_canon
       )
       UPDATE person_state_coverage c
@@ -2501,9 +2541,9 @@ const MIGRATIONS: Migration[] = [
   {
     id: "060_validate_register_evidenced_coverage",
     sql: `
-      -- A coverage row must never be derived from a customer whose register
-      -- history is mixed, unassigned, or unresolved.  This validates the
-      -- applied derivation before the migration is marked complete.
+      -- Rejected register buckets may remain as uncovered gaps, but must never
+      -- leak into a derived coverage row. Validate the applied write rather
+      -- than aborting startup merely because uncovered source data exists.
       DO $$
       BEGIN
         IF EXISTS (
@@ -2520,14 +2560,24 @@ const MIGRATIONS: Migration[] = [
             WHERE sl.state_canon IN ('AP','HIMACHAL PRADESH','MAHARASHTRA','TAMIL NADU','TELANGANA')
                OR (sl.state_canon = 'PUNJAB' AND sl.fy <> '2023-24')
           )
+          , rejected_customer AS (
+            SELECT s.state_canon, s.fy, s.customer
+            FROM selected_lines s
+            LEFT JOIN person p ON p.name = s.person_name
+            GROUP BY s.state_canon, s.fy, s.customer
+            HAVING COUNT(DISTINCT COALESCE(s.head_canon, '__NULL__')) <> 1
+                OR BOOL_OR(s.head_canon IS NULL OR p.person_id IS NULL OR p.is_system_coverage)
+          )
           SELECT 1
-          FROM selected_lines s
-          LEFT JOIN person p ON p.name = s.person_name
-          GROUP BY s.state_canon, s.fy, s.customer
-          HAVING COUNT(DISTINCT COALESCE(s.head_canon, '__NULL__')) <> 1
-              OR BOOL_OR(s.head_canon IS NULL OR p.person_id IS NULL OR p.is_system_coverage)
+          FROM person_state_coverage_customer_evidence e
+          JOIN person_state_coverage c ON c.coverage_id = e.coverage_id
+          JOIN rejected_customer r
+            ON r.state_canon = c.state_canon
+           AND r.fy = c.fiscal_year
+           AND r.customer = e.customer_name
+          WHERE c.source = 'derived_register'
         ) THEN
-          RAISE EXCEPTION 'mixed, unassigned, or unresolved customer attribution prevents register-derived coverage';
+          RAISE EXCEPTION 'derived coverage includes mixed, unassigned, or unresolved customer evidence';
         END IF;
       END $$;
     `,
