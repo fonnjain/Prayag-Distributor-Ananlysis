@@ -193,3 +193,10 @@ uri = "file://attached_assets/fy2026-27_customer_trading.csv"
 type = "table"
 title = "FY2026-27 Customer Trading List — Settled Months"
 description = "CSV ready for customer-master workbooks. It includes only frozen Apr-26 through Jul-26 sales-register months; the still-unsettled Aug-26 month is excluded."
+
+[[outputs]]
+id = "0Kzmux29amZqMSlkk7S5m"
+uri = "file://attached_assets/fy2025-26_aprjul_customer_trading.csv"
+type = "table"
+title = "FY2025-26 Apr–Jul Customer Trading List"
+description = "Four-month like-for-like customer-level trading CSV for Apr-25 through Jul-25, matching the FY2026-27 settled-month comparison range."
