@@ -1,0 +1,47 @@
+Diagnosis accepted and the recommendation is right - org territories should
+point at state_hierarchy, not maintain a second list. Two territory tables
+that must agree is the same failure as head_alias.json and normalize.json.
+
+Three things before you build it.
+
+1. THE SIX CASE-DUPLICATES ARE INERT, NOT SPLIT
+All 22 people are on the uppercase side; zero on the title-case side. So
+"Andhra Pradesh", "Karnataka", "Rajasthan", "Tamil Nadu", "Jammu and Kashmir"
+and "Delhi" are empty rows that exist only to parent themselves. They inflate
+the count from 37 real to 43 and any "territories covered" figure counts them.
+
+Delete them as part of the migration, not as a separate task. Confirm no
+person_territory row references them first.
+
+2. state_hierarchy HAS ITS OWN GAP
+You report 37 rows covering all 33 register values, but the state filter work
+found four NON-GEOGRAPHIC values in it: GEM, JJM, Non-territory / Project /
+Govt, and HITESH. Those were deliberately kept in the hierarchy for arithmetic
+but EXCLUDED from the picker.
+
+If org territories point at state_hierarchy, those four must not become
+assignable territories. A person cannot cover "GEM". Confirm they are excluded
+from anything a person can be assigned to, and that HITESH - 374 register rows
+that are a rep's name in a state field - is flagged rather than inherited.
+
+3. MULTI-HEAD NEEDS A DATA MODEL, NOT JUST A NOTE
+Eight territories have more than one head; WEST BENGAL has four. person_territory
+links a person to a territory with NO head dimension, so the app cannot express
+"Sandeep covers this part of WB and Rizvi covers that part".
+
+Before building, say how you would model it:
+  a. Is the register's split value the unit of coverage - so UP ( A ),
+     UP (AS) and UTTAR PRADESH are three separate territories, each with one
+     head?
+  b. Or is a territory genuinely shared, needing a head dimension on
+     person_territory?
+
+Print, for each of the eight multi-head territories, the net per head. If each
+head's business sits in a distinct register value, (a) is the answer and the
+model stays simple. If two heads both trade under the SAME state_canon value,
+(b) is required.
+
+That distinction decides the schema. Do not build until it is answered.
+
+4. JAMMU / KASHMIR - separate in the register, both under Nasir Hussain Khan,
+   Rs 4.70 Cr. Confirm they become two territories under the new model.
