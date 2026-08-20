@@ -1,0 +1,83 @@
+Read-only. Change nothing. Produce values, not assertions.
+
+The MRP authority moved to prayag-price.com and the local cache now feeds the
+MRP page, the calculator, Price Shrinkers and the Products register-gap card.
+Several things were repointed at once. Verify the mapping holds.
+
+============================================================
+1 - THE SYNC ITSELF
+============================================================
+  a. Rows in mrp_current_catalogue, and rows with a non-null MRP.
+     Expect about 6,223 and 6,222.
+  b. Distinct item codes. Confirm ZERO duplicates - the source has none and
+     the cache must not introduce any.
+  c. Rows by division_raw, including the multi-division strings. Expect about
+     55 codes carrying more than one division.
+  d. synced_at on the active generation, and how many generations are
+     retained.
+  e. Confirm the sync is read-only. Print the grep showing no POST, PUT, PATCH
+     or DELETE to prayag-price.com.
+
+============================================================
+2 - THE RESOLVER, RULE BY RULE
+============================================================
+For FY2026-27 register codes against the active catalogue:
+  f. Exact match, P-strip, colour suffix, whitespace, unresolved. Print the
+     count for each. Expect roughly 3,057 / 19 / 23 / 4 / 648.
+  g. For EACH named rule, print 5 worked examples showing the register code and
+     the catalogue code it resolved to. I want to see that P6806 -> 6806 and
+     7118-B -> 7118 are actually happening, not just counted.
+  h. Confirm exact match runs FIRST. Codes like 130-B, 141-E and 121-E are
+     legitimate catalogue codes that the colour-suffix rule would destroy if it
+     ran before exact.
+  i. The 648 unresolved, grouped by prefix, with FY2026-27 net. Print the top
+     20 prefixes.
+
+============================================================
+3 - THE MULTI-DIVISION CODES - the ambiguity case
+============================================================
+The source stores one row per code with a combined division string, replacing
+our old two-row-per-segment model.
+  j. Print all 55 multi-division codes with their full division string and
+     their single MRP.
+  k. Confirm CNS-15 and CNS-20 each carry ONE price now, not two. Print them.
+  l. For a register sale of CNS-15, print which MRP the calculator uses and
+     confirm no segment argument is required any more.
+  m. Confirm the old (item_code, segment) resolution path is no longer called.
+     Print the grep.
+
+============================================================
+4 - EVERY CONSUMER STILL WORKS
+============================================================
+Four surfaces read MRP. Confirm each, with a worked example:
+  n. MRP page - print one code with its current MRP and effective date.
+  o. MRP calculator - run the full back-calculation on code 144 and print
+     every step.
+  p. Price Shrinkers - print one row with its basket, both MRP totals,
+     mrpIndex and realGrowth%. This is the one that needs "MRP then", not
+     today's price - state explicitly which it used.
+  q. Products register-gap card - confirm it now queries
+     mrp_current_catalogue and NOT the local item_master, and print the figure
+     it displays. Expect 648 of 3,751.
+
+============================================================
+5 - THE HISTORICAL PRICE GAP
+============================================================
+  r. Price Shrinkers needs the MRP in force during the prior period. The synced
+     cache exposes only the active generation and /api/mrp/:code/history
+     reports current-price-only.
+
+     State plainly: where does "MRP then" come from today - the legacy
+     mrp_history table, or the active generation used as though it were
+     historical? If the second, every Price Shrinker row is computed against
+     today's price and the index is wrong.
+
+  s. Print the row count in legacy mrp_history and confirm whether it is still
+     being read.
+
+============================================================
+6 - NOTHING ELSE MOVED
+============================================================
+  t. sale_line, margin_fact, market_survey, customer row counts unchanged.
+  u. FY2025-26 net by head unchanged - Rs 3,609,953,808.51.
+  v. git rev-parse HEAD and git rev-parse origin/main, matching.
