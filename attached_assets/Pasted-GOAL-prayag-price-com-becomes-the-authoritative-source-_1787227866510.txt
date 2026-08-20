@@ -1,0 +1,101 @@
+GOAL
+prayag-price.com becomes the authoritative source for MRP and competitor
+prices. It is the same application as prayag-competition-analysis.replit.app
+on a custom domain — COMPETITION_API_KEY in Secrets already authenticates to
+it.
+
+WHY THE REVERSAL
+We previously agreed Distributor Analysis would hold the MRP master and the
+competition app would read from us. That was based on it holding 150 codes in
+two categories. It now holds 6,213 codes across seven divisions with better
+provenance than ours:
+
+  mrp_sources          registry of source sheets per division, with sheet IDs
+  mrp_load_batches     SHA256, file size, row count, loaded_by
+  mrp_price_history    review_status, review_reasons, batch lineage
+  catalog_products     division, series, size, UOM
+
+File hashing and per-price review status are two things we do not have, and
+the second is exactly what our 56 "ambiguous codes" needed.
+
+ITS MODEL IS BETTER THAN OURS ON AMBIGUITY
+We store CNS-15 twice, once per segment, resolved on (code, segment). It
+stores each code ONCE with a multi-division string:
+    "Ceramic Sanitaryware | PTMT & Plastic Fittings"        50 codes
+    "CP Fittings / Faucets | PTMT & Plastic Fittings | ..."  3 codes
+One code, one MRP, every division it belongs to named. Adopt that. Do not try
+to split it back into per-segment rows.
+
+============================================================
+BUILD A SYNCED CACHE, NOT A LIVE READ
+============================================================
+Read from prayag-price.com on a schedule and store locally. Reasons:
+  - The MRP page, the calculator and the Price Shrinkers tab must stay fast
+  - A network failure must not take out the calculator
+  - prayag-price.com stays authoritative; we hold a dated copy
+
+mrp_synced
+  item_code · product_name · division_raw (the full multi-division string)
+  series_range · size · uom
+  mrp · price_in_force_since · previous_mrp · change_pct
+  status            revised | unchanged | new | discontinued
+  colour variants where present (Ivory, White with Jet)
+  source_batch_id · source_review_status · source_review_reasons
+  synced_at
+
+Carry source_batch_id and source_review_status THROUGH. A price we cannot
+trace back to a batch on their side is a price we cannot defend.
+
+Never write to prayag-price.com. Read only.
+
+DIVISION MAPPING
+Their divisions are not our segments:
+    Pipes & Fittings · PTMT & Plastic Fittings · CP Fittings / Faucets ·
+    Hardware · Ceramic Sanitaryware · CP (QUAA / FERN)
+Map to our segment vocabulary, store the raw string unchanged, and report
+anything unmapped. Do NOT overwrite division_raw with the mapped value.
+
+For a multi-division code, map to ALL the divisions named — a code can belong
+to more than one segment and that is the point of their model.
+
+============================================================
+WHAT HAPPENS TO OUR EXISTING MRP MASTER
+============================================================
+mrp_master and mrp_history have 5,750 rows and 8,949 history rows, and the
+calculator, MRP page and Price Shrinkers tab read from them.
+
+Do NOT delete them. Repoint the readers at mrp_synced, keep the old tables
+until the new path is proven for one full sync cycle, then retire them in a
+separate task.
+
+Report the overlap: how many of our 5,694 codes appear in their 6,213, how
+many of ours do not, and how many of theirs are new to us. The 817 register
+codes with no MRP are the interesting case — check whether they exist there.
+
+============================================================
+COMPETITOR PRICES
+============================================================
+Same source, same sync. Keep the existing rule: their net price is DERIVED
+from MRP less an assumed discount, not observed. Label it derived wherever it
+appears beside a Market Survey figure, which IS observed.
+
+============================================================
+VERIFY
+============================================================
+1. Rows synced, by division. Expect about 6,213 codes across seven divisions.
+2. Confirm zero duplicate item codes — their model has none and ours must not
+   introduce any.
+3. Print the 55 multi-division codes with their full division string and their
+   single MRP. Confirm CNS-15 among them if present, and that it carries ONE
+   price, not two.
+4. Overlap with our existing mrp_master: in both, ours only, theirs only.
+5. Of the 817 register codes with no MRP — PTA-, CPCS-, CPA-, PSS-, PW- —
+   how many now resolve? Print the count and the FY2026-27 net it covers.
+6. Confirm source_batch_id and source_review_status are populated on every
+   row. Print any row where they are not.
+7. Confirm the sync is read-only — print the grep showing no write call to
+   prayag-price.com.
+8. Confirm the calculator and Price Shrinkers still work, reading from
+   mrp_synced. Print one worked example from each.
+9. Confirm sale_line, margin_fact and the old mrp tables are unchanged.
+10. Push, print both refs.
