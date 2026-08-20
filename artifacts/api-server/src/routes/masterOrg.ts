@@ -93,6 +93,9 @@ router.get("/master/people", async (req, res) => {
     }
     // Holding persons are system placeholders for departed heads — they must
     // never appear in (or inflate) active/assignable person lists.
+    // System coverage sentinels are audit records, never people an operator can
+    // select or manage.
+    where.push("COALESCE(p.is_system_coverage, false) = false");
     if (activeFilter === "true") where.push("p.is_active = true AND p.is_holding = false");
     else if (activeFilter === "false") where.push("p.is_active = false");
     if (desigId !== null) {
@@ -259,15 +262,22 @@ router.get("/master/people/:id", async (req, res) => {
            ORDER BY depth`,
           [personId],
         ),
-        // Territories
+        // Canonical state coverage.  The retired person_territory table is
+        // intentionally not a fallback: a missing canonical row must be
+        // visible and fixed, never silently supplied from legacy geography.
         pool.query(
-          `SELECT t.territory_id, t.name, tp.name AS parent_name,
-                  pt.effective_from::text, pt.effective_to::text
-           FROM person_territory pt
-           JOIN territory t ON t.territory_id = pt.territory_id
-           LEFT JOIN territory tp ON tp.territory_id = t.parent_territory_id
-           WHERE pt.person_id = $1 AND pt.effective_to IS NULL
-           ORDER BY t.name`,
+          `SELECT c.coverage_id, c.state_canon, sh.state_parent,
+                  c.effective_from::text, c.effective_to::text,
+                  c.fiscal_year, c.evidence_customer_count,
+                  c.evidence_net_amount, c.evidence_source,
+                  head.person_id AS state_head_person_id,
+                  head.name AS state_head_name,
+                  COALESCE(head.is_system_coverage, false) AS is_unassigned
+           FROM person_state_coverage c
+           JOIN state_hierarchy sh ON sh.state_canon = c.state_canon
+           JOIN person head ON head.person_id = c.state_head_person_id
+           WHERE c.person_id = $1
+           ORDER BY c.effective_to NULLS FIRST, sh.display_order, c.state_canon, head.name`,
           [personId],
         ),
         // Change log
@@ -306,6 +316,9 @@ router.get("/master/people/:id", async (req, res) => {
       person: p,
       directReports: directRes.rows,
       reportingChain: chainRes.rows,
+      coverage: terrRes.rows,
+      // Keep this response alias briefly for older browser bundles; it now
+      // contains canonical coverage records rather than territory rows.
       territories: terrRes.rows,
       changeLog,
       customerScope: {

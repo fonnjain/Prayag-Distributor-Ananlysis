@@ -100,12 +100,19 @@ interface ChainEntry {
   level: number;
 }
 
-interface Territory {
-  territory_id: number;
-  name: string;
-  parent_name: string | null;
+interface StateCoverage {
+  coverage_id: number;
+  state_canon: string;
+  state_parent: string;
+  state_head_person_id: number;
+  state_head_name: string;
+  is_unassigned: boolean;
   effective_from: string;
   effective_to: string | null;
+  fiscal_year: string | null;
+  evidence_customer_count: number | null;
+  evidence_net_amount: number | null;
+  evidence_source: string | null;
 }
 
 interface ChangeEntry {
@@ -124,7 +131,7 @@ interface PersonDetail extends PersonSummary {
   created_at: string;
   directReports: DirectReport[];
   reportingChain: ChainEntry[];
-  territories: Territory[];
+  coverage: StateCoverage[];
   changeLog: ChangeEntry[];
 }
 
@@ -268,7 +275,7 @@ export default function OrgPeoplePage() {
     });
 
   const { data: detailData, isLoading: detailLoading } =
-    useQuery<{ person: PersonDetail; directReports: DirectReport[]; reportingChain: ChainEntry[]; territories: Territory[]; changeLog: ChangeEntry[] }>({
+    useQuery<{ person: PersonDetail; directReports: DirectReport[]; reportingChain: ChainEntry[]; coverage: StateCoverage[]; changeLog: ChangeEntry[] }>({
       queryKey: ["master-person", selectedId, !!secret],
       queryFn: () =>
         apiJson(`${BASE}/people/${selectedId}`, secret ? { headers: hdrs() } : undefined),
@@ -955,7 +962,7 @@ export default function OrgPeoplePage() {
 
 interface PersonPanelProps {
   person: PersonDetail;
-  detail: { directReports: DirectReport[]; reportingChain: ChainEntry[]; territories: Territory[]; changeLog: ChangeEntry[] };
+  detail: { directReports: DirectReport[]; reportingChain: ChainEntry[]; coverage: StateCoverage[]; changeLog: ChangeEntry[] };
   designations: Designation[];
   allPeople: PersonSummary[];
   editMode: boolean;
@@ -1000,6 +1007,10 @@ function PersonPanel({
   hasAdminAccess,
 }: PersonPanelProps) {
   const dropRef = useRef<HTMLDivElement>(null);
+  // Older detail responses may omit these counts; details must remain usable
+  // while a background API/server update catches up.
+  const customersAsStateHead = Number(person.customers_as_sh ?? 0);
+  const customersAsTerritoryManager = Number(person.customers_as_tm ?? 0);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -1323,39 +1334,63 @@ function PersonPanel({
         <div className="grid grid-cols-2 gap-x-8 gap-y-2">
           <StatRow
             label="As state head"
-            value={person.customers_as_sh.toLocaleString("en-IN")}
+            value={customersAsStateHead.toLocaleString("en-IN")}
             sub="active assignments"
           />
           <StatRow
             label="As territory manager"
-            value={person.customers_as_tm.toLocaleString("en-IN")}
+            value={customersAsTerritoryManager.toLocaleString("en-IN")}
             sub="active assignments"
           />
           <StatRow
             label="Total affected"
-            value={(person.customers_as_sh + person.customers_as_tm).toLocaleString("en-IN")}
+            value={(customersAsStateHead + customersAsTerritoryManager).toLocaleString("en-IN")}
             sub="if deactivated"
             highlight
           />
         </div>
       </section>
 
-      {/* ── Territories ─────────────────────────────────────────────── */}
-      {detail.territories.length > 0 && (
+      {/* ── Canonical state coverage ─────────────────────────────────── */}
+      {detail.coverage.length > 0 && (
         <>
           <Separator />
           <section className="space-y-2">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Territories
+              Canonical state coverage
             </h3>
-            {detail.territories.map((t) => (
-              <div key={t.territory_id} className="flex items-center gap-2 text-sm">
-                <span>{t.name}</span>
-                {t.parent_name && (
-                  <span className="text-xs text-muted-foreground">({t.parent_name})</span>
-                )}
-                {t.effective_to && (
-                  <span className="text-xs text-amber-600">ended {t.effective_to}</span>
+            {detail.coverage.map((c) => (
+              <div key={c.coverage_id} className="rounded border px-3 py-2 text-sm">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-medium">{c.state_canon}</span>
+                  {c.state_parent !== c.state_canon && (
+                    <span className="text-xs text-muted-foreground">({c.state_parent})</span>
+                  )}
+                  {c.is_unassigned ? (
+                    <Badge variant="outline" className="text-xs border-amber-500 text-amber-700">
+                      Unassigned coverage
+                    </Badge>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      Responsible head: {c.state_head_name}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Effective {c.effective_from}
+                  {c.effective_to ? ` to ${c.effective_to}` : " · current"}
+                </p>
+                {c.evidence_customer_count != null && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {c.fiscal_year ? `${c.fiscal_year} · ` : ""}
+                    {c.evidence_customer_count.toLocaleString("en-IN")} customers
+                    {c.evidence_net_amount != null
+                      ? ` · ₹${c.evidence_net_amount.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`
+                      : ""}
+                    {c.evidence_customer_count === 1
+                      ? " · Single-customer dependency"
+                      : ""}
+                  </p>
                 )}
               </div>
             ))}

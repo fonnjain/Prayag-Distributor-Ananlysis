@@ -15,6 +15,29 @@ import ExcelJS from "exceljs";
 import { pool } from "@workspace/db";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SEED_EFFECTIVE_FROM = "2026-08-15";
+
+// Approved legacy-master → canonical register-leaf crosswalk.  This is used
+// only while loading the historical workbook; live organisation reads never
+// consult territory or person_territory.
+const COVERAGE_LEAVES: Record<string, string[]> = {
+  "JAMMU AND KASHMIR": ["JAMMU", "KASHMIR"],
+  "ANDHRA PRADESH": ["AP"],
+  "CHATTISGARH": ["CHHATTISGARH"],
+  "DELHI": ["DELHI A"],
+  "Delhi NCR": ["DELHI NCR"],
+  "East U.P": ["UTTAR PRADESH"],
+  "West U.P": ["UP ( A )"],
+};
+
+function coverageLeaves(legacyTerritory: string): string[] {
+  return COVERAGE_LEAVES[legacyTerritory] ?? [legacyTerritory];
+}
+
+const RETIRED_CASE_DUPLICATES = new Set([
+  "Andhra Pradesh", "Karnataka", "Rajasthan", "Tamil Nadu",
+  "Jammu and Kashmir", "Delhi", "Haryana",
+]);
 
 // The seed file path — resolve relative to repo root so it works from any cwd.
 export const SEED_FILE = path.resolve(
@@ -57,6 +80,10 @@ async function main(): Promise<void> {
   const client = await pool.connect();
 
   try {
+    // A master seed is an all-or-nothing replacement.  In particular, coverage
+    // must never be half-loaded: a later unresolved head must roll every
+    // designation/person/customer/coverage write back together.
+    await client.query("BEGIN");
     // ── 1. Designations ──────────────────────────────────────────────────────
     console.log("\n── 1. Designations ────────────────────────────────────────");
     const desigWs = wb.getWorksheet("Designations")!;
@@ -94,7 +121,9 @@ async function main(): Promise<void> {
     // Collect all parent names that are NOT themselves in the territory list
     const terrNames = new Set(terrRows.map((r) => str(r[0])).filter(Boolean));
     const parentNames = new Set(terrRows.map((r) => str(r[1])).filter(Boolean));
-    const stubParents = [...parentNames].filter((p) => p && !terrNames.has(p)) as string[];
+    const stubParents = [...parentNames].filter(
+      (p) => p && !terrNames.has(p) && !RETIRED_CASE_DUPLICATES.has(p),
+    ) as string[];
 
     // Insert stub parents first (not split, no parent)
     let terrInserted = 0;
@@ -114,7 +143,7 @@ async function main(): Promise<void> {
     for (const row of terrRows) {
       const name = str(row[0]);
       const isSplit = bool(row[2]);
-      if (!name) continue;
+      if (!name || RETIRED_CASE_DUPLICATES.has(name)) continue;
       const res = await client.query(
         `INSERT INTO territory (name, is_split)
          VALUES ($1, $2)
@@ -229,30 +258,42 @@ async function main(): Promise<void> {
     console.log(`  reports_to links: ${reportsUpdated}  state_head links: ${stateHeadUpdated}`);
     if (unresolved.length) console.warn("  Unresolved:", unresolved);
 
-    // ── 5. Person territories ─────────────────────────────────────────────────
-    console.log("\n── 5. Person territories ───────────────────────────────────");
+    // ── 5. Canonical state coverage ────────────────────────────────────────────
+    console.log("\n── 5. Canonical state coverage ──────────────────────────────");
     const ptWs = wb.getWorksheet("Person territories")!;
     const ptRows = readRows(ptWs);
     // cols: person, territory, state_head, designation
-    let ptInserted = 0;
-    let ptSkipped = 0;
+    let coverageInserted = 0;
+    let coverageSkipped = 0;
+    const personHeadMap = new Map<number, number>();
+    const heads = await client.query<{ person_id: number; state_head_person_id: number | null }>(
+      "SELECT person_id, state_head_person_id FROM person",
+    );
+    for (const person of heads.rows) {
+      if (person.state_head_person_id) personHeadMap.set(person.person_id, person.state_head_person_id);
+    }
     for (const row of ptRows) {
       const personName = str(row[0]);
       const terrName = str(row[1]);
       if (!personName || !terrName) continue;
       const personId = personMap.get(personName);
-      const terrId = terrMap.get(terrName);
-      if (!personId) { ptSkipped++; console.warn(`  SKIP person_territory: person "${personName}" not found`); continue; }
-      if (!terrId)   { ptSkipped++; console.warn(`  SKIP person_territory: territory "${terrName}" not found`); continue; }
-      const res = await client.query(
-        `INSERT INTO person_territory (person_id, territory_id)
-         VALUES ($1, $2)
-         ON CONFLICT DO NOTHING`,
-        [personId, terrId],
-      );
-      ptInserted += res.rowCount ?? 0;
+      const stateHeadId = personId ? personHeadMap.get(personId) : null;
+      if (!personId || !stateHeadId) {
+        coverageSkipped++;
+        throw new Error(`Cannot create canonical coverage for "${personName}" in "${terrName}": person or state head is unresolved`);
+      }
+      for (const leaf of coverageLeaves(terrName)) {
+        const res = await client.query(
+          `INSERT INTO person_state_coverage
+             (person_id, state_canon, state_head_person_id, effective_from, source)
+           VALUES ($1, $2, $3, $4, 'seed_import')
+           ON CONFLICT (person_id, state_canon, state_head_person_id, effective_from) DO NOTHING`,
+          [personId, leaf, stateHeadId, SEED_EFFECTIVE_FROM],
+        );
+        coverageInserted += res.rowCount ?? 0;
+      }
     }
-    console.log(`  Inserted: ${ptInserted}  skipped: ${ptSkipped}  (expected 260)`);
+    console.log(`  Inserted: ${coverageInserted}  skipped: ${coverageSkipped}`);
 
     // ── 6. Customers (distributors + direct dealers) ──────────────────────────
     console.log("\n── 6. Customers (distributors / direct dealers) ────────────");
@@ -417,7 +458,7 @@ async function main(): Promise<void> {
       UNION ALL
       SELECT 'territory',                 COUNT(*)::text         FROM territory
       UNION ALL
-      SELECT 'person_territory',          COUNT(*)::text         FROM person_territory
+       SELECT 'person_state_coverage',     COUNT(*)::text         FROM person_state_coverage
       UNION ALL
       SELECT 'customer',                  COUNT(*)::text         FROM customer
       UNION ALL
@@ -533,8 +574,11 @@ async function main(): Promise<void> {
     console.log(`    Members updated: ${membersUpdated}`);
     console.log(`    State heads updated: ${stateHeadsUpdated}`);
 
+    await client.query("COMMIT");
     console.log("\n✅ Import complete.");
-
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw err;
   } finally {
     client.release();
     await pool.end();

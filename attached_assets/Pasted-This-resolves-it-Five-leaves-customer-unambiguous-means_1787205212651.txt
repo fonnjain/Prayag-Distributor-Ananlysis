@@ -1,0 +1,40 @@
+This resolves it. Five leaves customer-unambiguous means coverage can be
+DERIVED from evidence rather than declared - which is what you held out for
+and it was the right call.
+
+PROCEED with derivation for the five clean leaves: AP, Himachal Pradesh,
+Maharashtra, Tamil Nadu, Telangana.
+
+One coverage row per head per leaf per FY, evidenced by the customers they
+actually serve, with effective dates from the register months. Tamil Nadu
+becomes a dated Babu -> Sandeep handover, not concurrent rows.
+
+PUNJAB - the 8 ambiguous customers are all FY2023-24 and all involve an
+"Unassigned register head" or Non-territory bucket alongside Pawan Sharma.
+That is a closed historical period.
+
+  a. Confirm FY2024-25 onward is clean - it reads as Sulinder Pal only from
+     FY2024-25, with Pawan Sharma present in FY2024-25 at Rs 0.22 Cr and gone
+     thereafter. If so, derive Punjab coverage for FY2024-25 onward and leave
+     FY2023-24 uncovered rather than guessed.
+  b. Print the FY2023-24 Punjab net that would be left uncovered, so the gap
+     is stated rather than silent.
+
+TWO THINGS TO CARRY ONTO THE COVERAGE ROWS
+
+1. Maharashtra is NOT four heads sharing a territory. Lalan has 33 customers;
+   the other three have ONE each - and Rizvi's single customer is Rs 42.66 Cr,
+   comparable to Lalan's entire 33. Store the customer count on each coverage
+   row so the page can show "Lalan, 33 customers" beside "Rizvi, 1 customer".
+   Otherwise someone reads four equal heads and plans accordingly.
+
+2. Tamil Nadu went from Babu's 26 customers to Sandeep's ONE, at Rs 94.03 Cr.
+   That is the single-customer state dependency. Derive the coverage, but flag
+   it - a state whose entire business is one account is a concentration risk
+   worth seeing on the page.
+
+THEN THE VERIFICATION AS AGREED
+  - All coverage rows produced, with head, leaf, FY, customer count, net.
+  - FY2025-26 net by head before and after. Identical. Stop condition.
+  - Punjab FY2023-24 explicitly uncovered, with the amount stated.
+  - Push, print both refs.

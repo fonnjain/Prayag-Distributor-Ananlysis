@@ -22,7 +22,7 @@
  *     designation?:        row[],
  *     territory?:          row[],
  *     person?:             row[],
- *     person_territory?:   row[],
+ *     person_state_coverage?: row[],
  *     customer?:           row[],
  *     customer_assignment?: row[],
  *     customer_link?:      row[],
@@ -86,7 +86,9 @@ router.post(
       designation?: unknown[];
       territory?: unknown[];
       person?: unknown[];
-      person_territory?: unknown[];
+       person_state_coverage?: unknown[];
+       person_territory_archive?: unknown[];
+       person_state_coverage_mapping?: unknown[];
       customer?: unknown[];
       customer_assignment?: unknown[];
       customer_link?: unknown[];
@@ -106,7 +108,8 @@ router.post(
     // Tables provided in this request — only these are touched.
     const touching = (
       [
-        "designation", "territory", "person", "person_territory",
+        "designation", "territory", "person", "person_state_coverage",
+        "person_territory_archive", "person_state_coverage_mapping",
         "customer", "customer_assignment", "customer_link",
         "market_survey", "engine_targets", "special_pricing",
       ] as const
@@ -116,6 +119,23 @@ router.post(
       res.status(400).json({ error: "No table arrays found in request body" });
       return;
     }
+      if (Array.isArray((body as Record<string, unknown>).person_territory)) {
+        res.status(400).json({
+          error:
+            "person_territory is retired. Import canonical person_state_coverage with effective dates instead.",
+        });
+        return;
+      }
+      if (
+        present("person_state_coverage")
+        && (!present("person_territory_archive") || !present("person_state_coverage_mapping"))
+      ) {
+        res.status(400).json({
+          error:
+            "Canonical coverage imports must include person_territory_archive and person_state_coverage_mapping so effective-dated reconciliation history is retained.",
+        });
+        return;
+      }
 
     const client = (await pool.connect()) as unknown as DbClient;
     try {
@@ -137,7 +157,9 @@ router.post(
           customer_review_queue,
           customer_link,
           customer_assignment,
-          person_territory,
+          person_state_coverage_mapping,
+          person_state_coverage,
+          person_territory_archive,
           market_survey,
           engine_targets,
           special_pricing,
@@ -188,13 +210,13 @@ router.post(
              person_id, name, employee_code, designation_id,
              reports_to_person_id, state_head_person_id,
              is_state_head, is_active, headquarter, order_type,
-             source, created_at, updated_at
+              source, is_system_coverage, created_at, updated_at
            )
            SELECT
              person_id, name, employee_code, designation_id,
              NULL, NULL,
              is_state_head, is_active, headquarter, order_type,
-             source, created_at, updated_at
+              source, COALESCE(is_system_coverage, false), created_at, updated_at
            FROM json_populate_recordset(null::person, $1::json)
            ON CONFLICT DO NOTHING`,
           [JSON.stringify(body.person)],
@@ -212,12 +234,30 @@ router.post(
         imported.person = body.person!.length;
       }
 
-      // person_territory (refs person + territory)
-      if (present("person_territory")) {
-        imported.person_territory = await jsonInsert(
-          client, "person_territory", body.person_territory!,
+       // Canonical effective-dated coverage is the only organisational
+       // geography accepted by future master imports.
+       if (present("person_state_coverage")) {
+         if (body.person_state_coverage!.some((row: any) => row?.source === "derived_register")) {
+           await client.query("ROLLBACK");
+           res.status(400).json({
+             error: "derived_register coverage is reserved for the audited sales-register derivation and cannot be imported.",
+           });
+           return;
+         }
+         imported.person_state_coverage = await jsonInsert(
+           client, "person_state_coverage", body.person_state_coverage!,
         );
       }
+       if (present("person_territory_archive")) {
+         imported.person_territory_archive = await jsonInsert(
+           client, "person_territory_archive", body.person_territory_archive!,
+         );
+       }
+       if (present("person_state_coverage_mapping")) {
+         imported.person_state_coverage_mapping = await jsonInsert(
+           client, "person_state_coverage_mapping", body.person_state_coverage_mapping!,
+         );
+       }
 
       // customer (refs territory)
       if (present("customer")) {

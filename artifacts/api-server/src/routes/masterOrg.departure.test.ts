@@ -39,6 +39,7 @@ async function cleanup() {
   );
   const idList = ids.rows.map((r: any) => r.person_id);
   if (idList.length) {
+    await pool.query(`DELETE FROM person_state_coverage WHERE person_id = ANY($1::int[]) OR state_head_person_id = ANY($1::int[])`, [idList]);
     await pool.query(
       `DELETE FROM change_log WHERE entity_type = 'person' AND entity_id = ANY($1::text[])`,
       [idList.map(String)],
@@ -48,6 +49,7 @@ async function cleanup() {
     await pool.query(`DELETE FROM person WHERE person_id = ANY($1::int[])`, [idList]);
   }
   await pool.query(`DELETE FROM customer WHERE customer_id = $1`, [CUST]);
+  await pool.query(`DELETE FROM state_hierarchy WHERE state_canon = 'ZZDEP CANONICAL LEAF'`);
 }
 
 beforeAll(async () => {
@@ -70,10 +72,12 @@ beforeAll(async () => {
       departure_reason TEXT,
       departure_note TEXT,
       is_holding BOOLEAN NOT NULL DEFAULT false,
+       is_system_coverage BOOLEAN NOT NULL DEFAULT false,
       holding_for_person_id INTEGER REFERENCES person(person_id),
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+     ALTER TABLE person ADD COLUMN IF NOT EXISTS is_system_coverage BOOLEAN NOT NULL DEFAULT false;
     CREATE UNIQUE INDEX IF NOT EXISTS uq_person_holding_for
       ON person (holding_for_person_id) WHERE is_holding;
     CREATE TABLE IF NOT EXISTS customer (
@@ -128,6 +132,33 @@ beforeAll(async () => {
       effective_from DATE,
       effective_to DATE
     );
+     CREATE TABLE IF NOT EXISTS state_hierarchy (
+       state_canon TEXT PRIMARY KEY,
+       state_parent TEXT NOT NULL,
+       is_split BOOLEAN NOT NULL DEFAULT false,
+       picker_visible BOOLEAN NOT NULL DEFAULT true,
+       display_order INTEGER NOT NULL DEFAULT 999
+     );
+     CREATE TABLE IF NOT EXISTS person_state_coverage (
+       coverage_id BIGSERIAL PRIMARY KEY,
+       person_id INTEGER NOT NULL,
+       state_canon TEXT NOT NULL,
+       state_head_person_id INTEGER NOT NULL,
+       effective_from DATE NOT NULL,
+       effective_to DATE,
+       fiscal_year TEXT,
+       evidence_customer_count INTEGER,
+       evidence_net_amount NUMERIC,
+       evidence_source TEXT,
+       source TEXT NOT NULL DEFAULT 'migration',
+       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+       UNIQUE (person_id, state_canon, state_head_person_id, effective_from)
+     );
+     ALTER TABLE person_state_coverage
+       ADD COLUMN IF NOT EXISTS fiscal_year TEXT,
+       ADD COLUMN IF NOT EXISTS evidence_customer_count INTEGER,
+       ADD COLUMN IF NOT EXISTS evidence_net_amount NUMERIC,
+       ADD COLUMN IF NOT EXISTS evidence_source TEXT;
     CREATE TABLE IF NOT EXISTS change_log (
       id SERIAL PRIMARY KEY,
       entity_type TEXT NOT NULL,
@@ -174,6 +205,31 @@ const departureBody = {
 };
 
 describe("departure lifecycle", () => {
+  it("serves canonical coverage with its head and effective dates, not legacy territory", async () => {
+    await pool.query(`DELETE FROM state_hierarchy WHERE state_canon = 'ZZDEP CANONICAL LEAF'`);
+    await pool.query(
+      `INSERT INTO state_hierarchy (state_canon, state_parent, picker_visible, display_order)
+       VALUES ('ZZDEP CANONICAL LEAF', 'ZZDEP', true, 1)`,
+    );
+    await pool.query(
+      `INSERT INTO person_state_coverage
+         (person_id, state_canon, state_head_person_id, effective_from, effective_to)
+       VALUES ($1, 'ZZDEP CANONICAL LEAF', $1, DATE '2025-04-01', DATE '2026-03-31')`,
+      [headId],
+    );
+    const res = await request(app).get(`/api/master/people/${headId}`);
+    expect(res.status).toBe(200);
+    expect(res.body.coverage).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        state_canon: "ZZDEP CANONICAL LEAF",
+        state_head_person_id: headId,
+        state_head_name: "ZZDEP Head",
+        effective_from: "2025-04-01",
+        effective_to: "2026-03-31",
+      }),
+    ]));
+  });
+
   it("rejects departure with mismatched impact acknowledgment (409)", async () => {
     const res = await request(app)
       .post(`/api/master/people/${headId}/departure`)

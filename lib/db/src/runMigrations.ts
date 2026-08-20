@@ -1854,6 +1854,643 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    id: "055_canonical_state_coverage",
+    sql: `
+      -- Organisation coverage is deliberately separate from the legacy
+      -- territory table.  territory remains a customer-compatibility lookup;
+      -- it must never again be used to decide who covers a sales geography.
+
+      -- The nine geography values that appear in the approved master data but
+      -- have no register rows must still be assignable coverage leaves.
+      INSERT INTO state_hierarchy
+        (state_canon, state_parent, is_split, picker_visible, display_order)
+      VALUES
+        ('ARUNACHAL PRADESH',       'ARUNACHAL PRADESH',       false, true, 41),
+        ('DADRA AND NAGAR HAVELI',  'DADRA AND NAGAR HAVELI',  false, true, 59),
+        ('MANIPUR',                 'MANIPUR',                 false, true, 44),
+        ('MEGHALAYA',               'MEGHALAYA',               false, true, 44),
+        ('MIZORAM',                 'MIZORAM',                 false, true, 44),
+        ('NAGALAND',                'NAGALAND',                false, true, 44),
+        ('PONDICHERRY',             'PONDICHERRY',             false, true, 57),
+        ('SIKKIM',                  'SIKKIM',                  false, true, 44),
+        ('TRIPURA',                 'TRIPURA',                 false, true, 44)
+      ON CONFLICT (state_canon) DO UPDATE
+        SET state_parent = EXCLUDED.state_parent,
+            is_split = EXCLUDED.is_split,
+            picker_visible = EXCLUDED.picker_visible;
+
+      -- A system-only coverage holder makes the known no-head register bucket
+      -- explicit.  It is not an employee and must never appear as an assignment
+      -- target or ordinary person in the organisation UI.
+      ALTER TABLE person
+        ADD COLUMN IF NOT EXISTS is_system_coverage BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE person DROP CONSTRAINT IF EXISTS person_source_check;
+      ALTER TABLE person
+        ADD CONSTRAINT person_source_check
+        CHECK (source IN ('hr_sheet','app_created','departed_import','system_coverage'));
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_person_system_coverage_name
+        ON person (name) WHERE is_system_coverage;
+
+      INSERT INTO person
+        (name, is_state_head, is_active, is_system_coverage, source)
+      SELECT 'Unassigned coverage', false, false, true, 'system_coverage'
+      WHERE NOT EXISTS (
+        SELECT 1 FROM person
+        WHERE is_system_coverage = true AND name = 'Unassigned coverage'
+      );
+
+      -- Immutable evidence of the retired model.  No live route reads either
+      -- archive table; they exist solely for reconciliation and audit export.
+      CREATE TABLE IF NOT EXISTS person_territory_archive (
+        person_id          INTEGER NOT NULL,
+        territory_id       INTEGER NOT NULL,
+        effective_from     DATE NOT NULL,
+        effective_to       DATE,
+        archived_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+        archive_reason     TEXT NOT NULL DEFAULT 'canonical_state_coverage'
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_person_territory_archive_source
+        ON person_territory_archive (person_id, territory_id, effective_from);
+
+      CREATE TABLE IF NOT EXISTS person_state_coverage (
+        coverage_id            BIGSERIAL PRIMARY KEY,
+        person_id              INTEGER NOT NULL REFERENCES person(person_id),
+        state_canon            TEXT NOT NULL REFERENCES state_hierarchy(state_canon),
+        state_head_person_id   INTEGER NOT NULL REFERENCES person(person_id),
+        effective_from         DATE NOT NULL,
+        effective_to           DATE,
+        source                 TEXT NOT NULL DEFAULT 'migration'
+                               CHECK (source IN ('migration','seed_import','master_import','manual')),
+        created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CHECK (effective_to IS NULL OR effective_to >= effective_from),
+        UNIQUE (person_id, state_canon, state_head_person_id, effective_from)
+      );
+      CREATE INDEX IF NOT EXISTS psc_person_idx ON person_state_coverage (person_id, effective_from);
+      CREATE INDEX IF NOT EXISTS psc_head_leaf_idx
+        ON person_state_coverage (state_head_person_id, state_canon, effective_from);
+
+      CREATE TABLE IF NOT EXISTS person_state_coverage_mapping (
+        mapping_id             BIGSERIAL PRIMARY KEY,
+        legacy_person_id       INTEGER NOT NULL,
+        state_head_person_id   INTEGER NOT NULL REFERENCES person(person_id),
+        legacy_territory_id    INTEGER NOT NULL,
+        legacy_territory       TEXT NOT NULL,
+        state_canon            TEXT NOT NULL REFERENCES state_hierarchy(state_canon),
+        effective_from         DATE NOT NULL,
+        effective_to           DATE,
+        mapping_rule           TEXT NOT NULL,
+        coverage_id            BIGINT REFERENCES person_state_coverage(coverage_id),
+        created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (legacy_person_id, legacy_territory_id, state_canon, effective_from)
+      );
+
+      -- Snapshot sales before touching the expression of coverage.  sale_line is
+      -- never updated in this migration; retaining both snapshots makes that a
+      -- repeatable assertion rather than an assumption.
+      CREATE TABLE IF NOT EXISTS canonical_coverage_sales_snapshot (
+        snapshot_stage         TEXT NOT NULL CHECK (snapshot_stage IN ('before','after')),
+        fy                     TEXT NOT NULL,
+        -- NULL is represented as the explicit register exception key so it can
+        -- participate in the primary-key comparison.
+        head_canon             TEXT NOT NULL,
+        net_amount             NUMERIC NOT NULL,
+        captured_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (snapshot_stage, fy, head_canon)
+      );
+      INSERT INTO canonical_coverage_sales_snapshot (snapshot_stage, fy, head_canon, net_amount)
+      SELECT 'before', '2025-26', COALESCE(head_canon, '__UNASSIGNED__'), SUM(amount)
+      FROM sale_line
+      WHERE fy = '2025-26'
+      GROUP BY COALESCE(head_canon, '__UNASSIGNED__')
+      ON CONFLICT (snapshot_stage, fy, head_canon) DO NOTHING;
+
+      INSERT INTO person_territory_archive (person_id, territory_id, effective_from, effective_to)
+      SELECT person_id, territory_id, effective_from, effective_to
+      FROM person_territory
+      ON CONFLICT (person_id, territory_id, effective_from) DO NOTHING;
+
+      -- The approved crosswalk is intentionally declarative.  Parent coverage
+      -- is expanded only where the register hierarchy explicitly supplies the
+      -- two Jammu/Kashmir leaves under the same responsible head.
+      CREATE TEMP TABLE canonical_coverage_work (
+        person_id INTEGER NOT NULL,
+        state_head_person_id INTEGER NOT NULL,
+        territory_id INTEGER NOT NULL,
+        legacy_territory TEXT NOT NULL,
+        state_canon TEXT NOT NULL,
+        effective_from DATE NOT NULL,
+        effective_to DATE,
+        mapping_rule TEXT NOT NULL
+      ) ON COMMIT DROP;
+
+      INSERT INTO canonical_coverage_work
+        (person_id, state_head_person_id, territory_id, legacy_territory,
+         state_canon, effective_from, effective_to, mapping_rule)
+      SELECT
+        pt.person_id,
+        COALESCE(p.state_head_person_id, sentinel.person_id),
+        pt.territory_id,
+        t.name,
+        x.state_canon,
+        pt.effective_from,
+        pt.effective_to,
+        x.mapping_rule
+      FROM person_territory pt
+      JOIN territory t ON t.territory_id = pt.territory_id
+      JOIN person p ON p.person_id = pt.person_id
+      CROSS JOIN LATERAL (
+        SELECT v.state_canon, v.mapping_rule
+        FROM (VALUES
+          ('JAMMU AND KASHMIR', 'JAMMU', 'approved parent expansion: Jammu leaf'),
+          ('JAMMU AND KASHMIR', 'KASHMIR', 'approved parent expansion: Kashmir leaf'),
+          ('ANDHRA PRADESH', 'AP', 'approved register alias: Andhra Pradesh → AP'),
+          ('CHATTISGARH', 'CHHATTISGARH', 'canonical spelling: CHATTISGARH → CHHATTISGARH'),
+          ('DELHI', 'DELHI A', 'approved Delhi register-leaf mapping'),
+          ('Delhi NCR', 'DELHI NCR', 'case-normalised register leaf'),
+          ('East U.P', 'UTTAR PRADESH', 'approved East U.P state-head split'),
+          ('West U.P', 'UP ( A )', 'approved West U.P state-head split')
+        ) AS v(legacy_territory, state_canon, mapping_rule)
+        WHERE v.legacy_territory = t.name
+        UNION ALL
+        SELECT t.name, 'exact canonical leaf'
+        WHERE t.name NOT IN (
+          'JAMMU AND KASHMIR', 'ANDHRA PRADESH', 'CHATTISGARH',
+          'DELHI', 'Delhi NCR', 'East U.P', 'West U.P'
+        )
+      ) x
+      CROSS JOIN LATERAL (
+        SELECT person_id
+        FROM person
+        WHERE is_system_coverage = true AND name = 'Unassigned coverage'
+        ORDER BY person_id
+        LIMIT 1
+      ) sentinel
+      WHERE EXISTS (
+          SELECT 1 FROM state_hierarchy sh
+          WHERE sh.state_canon = x.state_canon AND sh.picker_visible = true
+        );
+
+      -- Do not silently coerce a legacy value that does not have an approved
+      -- mapping.  The entire migration rolls back with the unmapped names.
+      DO $$
+      DECLARE unmapped TEXT;
+      BEGIN
+        SELECT string_agg(DISTINCT t.name, ', ' ORDER BY t.name) INTO unmapped
+        FROM person_territory pt
+        JOIN territory t ON t.territory_id = pt.territory_id
+        WHERE NOT EXISTS (
+          SELECT 1 FROM canonical_coverage_work w
+          WHERE w.person_id = pt.person_id
+            AND w.territory_id = pt.territory_id
+            AND w.effective_from = pt.effective_from
+        );
+        IF unmapped IS NOT NULL THEN
+          RAISE EXCEPTION 'canonical coverage migration has unmapped legacy rows: %', unmapped;
+        END IF;
+      END $$;
+
+      INSERT INTO person_state_coverage
+        (person_id, state_canon, state_head_person_id, effective_from, effective_to, source)
+      SELECT person_id, state_canon, state_head_person_id, effective_from, effective_to, 'migration'
+      FROM canonical_coverage_work
+      ON CONFLICT (person_id, state_canon, state_head_person_id, effective_from)
+      DO UPDATE SET effective_to = EXCLUDED.effective_to;
+
+      INSERT INTO person_state_coverage_mapping
+        (legacy_person_id, state_head_person_id, legacy_territory_id, legacy_territory,
+         state_canon, effective_from, effective_to, mapping_rule, coverage_id)
+      SELECT w.person_id, w.state_head_person_id, w.territory_id, w.legacy_territory,
+             w.state_canon, w.effective_from, w.effective_to, w.mapping_rule, c.coverage_id
+      FROM canonical_coverage_work w
+      JOIN person_state_coverage c
+        ON c.person_id = w.person_id
+       AND c.state_canon = w.state_canon
+       AND c.state_head_person_id = w.state_head_person_id
+       AND c.effective_from = w.effective_from
+      ON CONFLICT (legacy_person_id, legacy_territory_id, state_canon, effective_from)
+      DO NOTHING;
+
+      -- Named-state/no-head register exceptions are coverage, never a missing
+      -- row and never attributed to a real employee.
+      INSERT INTO person_state_coverage
+        (person_id, state_canon, state_head_person_id, effective_from, source)
+      SELECT sentinel.person_id, leaf.state_canon, sentinel.person_id, DATE '2026-08-15', 'migration'
+      FROM (VALUES ('GUJARAT'), ('HARYANA'), ('RAJASTHAN')) AS leaf(state_canon)
+      CROSS JOIN LATERAL (
+        SELECT person_id FROM person
+        WHERE is_system_coverage = true AND name = 'Unassigned coverage'
+        ORDER BY person_id LIMIT 1
+      ) sentinel
+      ON CONFLICT (person_id, state_canon, state_head_person_id, effective_from) DO NOTHING;
+
+      -- Retire the legacy assignment source after archival.  Customer territory
+      -- references remain intact; only organisation coverage stops using it.
+      DELETE FROM person_territory;
+
+      -- The title-case parent rows are inert case duplicates.  HARYANA is the
+      -- authoritative customer compatibility row; move its one Haryana customer
+      -- before deleting the empty duplicate.
+      UPDATE customer c
+      SET territory_id = canonical.territory_id
+      FROM territory duplicate
+      JOIN territory canonical ON canonical.name = 'HARYANA'
+      WHERE duplicate.name = 'Haryana' AND c.territory_id = duplicate.territory_id;
+      UPDATE customer_review_queue q
+      SET proposed_territory_id = canonical.territory_id
+      FROM territory duplicate
+      JOIN territory canonical ON canonical.name = 'HARYANA'
+      WHERE duplicate.name = 'Haryana' AND q.proposed_territory_id = duplicate.territory_id;
+      UPDATE territory child
+      SET parent_territory_id = NULL
+      FROM territory parent
+      WHERE child.parent_territory_id = parent.territory_id
+        AND parent.name IN ('Andhra Pradesh','Karnataka','Rajasthan','Tamil Nadu','Jammu and Kashmir','Delhi');
+      DELETE FROM territory
+      WHERE name IN ('Andhra Pradesh','Karnataka','Rajasthan','Tamil Nadu','Jammu and Kashmir','Delhi','Haryana');
+
+      -- Capture the after snapshot and stop if the coverage-only migration has
+      -- somehow changed any FY2025-26 sales amount or head bucket.
+      INSERT INTO canonical_coverage_sales_snapshot (snapshot_stage, fy, head_canon, net_amount)
+      SELECT 'after', '2025-26', COALESCE(head_canon, '__UNASSIGNED__'), SUM(amount)
+      FROM sale_line
+      WHERE fy = '2025-26'
+      GROUP BY COALESCE(head_canon, '__UNASSIGNED__')
+      ON CONFLICT (snapshot_stage, fy, head_canon) DO UPDATE
+        SET net_amount = EXCLUDED.net_amount, captured_at = now();
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM canonical_coverage_sales_snapshot b
+          FULL OUTER JOIN canonical_coverage_sales_snapshot a
+            ON a.fy = b.fy
+           AND a.head_canon = b.head_canon
+           AND a.snapshot_stage = 'after'
+          WHERE b.snapshot_stage = 'before'
+            AND COALESCE(a.net_amount, 0) <> COALESCE(b.net_amount, 0)
+        ) THEN
+          RAISE EXCEPTION 'canonical coverage migration changed FY2025-26 sales total or a head bucket';
+        END IF;
+      END $$;
+    `,
+  },
+  {
+    // Kept separate so installations that already applied the data migration
+    // receive the same write-time protection.
+    id: "056_canonical_state_coverage_guards",
+    sql: `
+      CREATE OR REPLACE FUNCTION guard_person_state_coverage()
+      RETURNS TRIGGER AS $$
+      DECLARE
+        leaf_assignable BOOLEAN;
+        coverage_is_system BOOLEAN;
+        head_is_system BOOLEAN;
+        head_is_state_head BOOLEAN;
+      BEGIN
+        SELECT picker_visible INTO leaf_assignable
+        FROM state_hierarchy WHERE state_canon = NEW.state_canon;
+        IF COALESCE(leaf_assignable, false) = false THEN
+          RAISE EXCEPTION 'state % is not an assignable hierarchy leaf', NEW.state_canon;
+        END IF;
+        SELECT is_system_coverage INTO coverage_is_system
+        FROM person WHERE person_id = NEW.person_id;
+        SELECT is_system_coverage, is_state_head
+          INTO head_is_system, head_is_state_head
+        FROM person WHERE person_id = NEW.state_head_person_id;
+        IF coverage_is_system OR head_is_system THEN
+          IF NOT (coverage_is_system AND head_is_system AND NEW.person_id = NEW.state_head_person_id) THEN
+            RAISE EXCEPTION 'system coverage may only be the explicit unassigned self-coverage record';
+          END IF;
+        ELSIF COALESCE(head_is_state_head, false) = false THEN
+          RAISE EXCEPTION 'responsible person % is not a state head', NEW.state_head_person_id;
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS person_state_coverage_guard ON person_state_coverage;
+      CREATE TRIGGER person_state_coverage_guard
+        BEFORE INSERT OR UPDATE ON person_state_coverage
+        FOR EACH ROW EXECUTE FUNCTION guard_person_state_coverage();
+    `,
+  },
+  {
+    id: "057_tamil_nadu_coverage_handover",
+    sql: `
+      -- The approved HR evidence identifies register "Babu" as Taninki Ramesh
+      -- Babu, an executive under Sandeep—not a state head.  Preserve the clean
+      -- register handover as effective-dated coverage rather than incorrectly
+      -- treating those two sales labels as concurrent heads.
+      INSERT INTO person_state_coverage
+        (person_id, state_canon, state_head_person_id, effective_from, effective_to, source)
+      SELECT babu.person_id, 'TAMIL NADU', sandeep.person_id,
+             DATE '2024-04-01', DATE '2025-03-31', 'migration'
+      FROM person babu
+      CROSS JOIN person sandeep
+      WHERE babu.name = 'Taninki Ramesh Babu'
+        AND sandeep.name = 'Sandeep Dadheech'
+      ON CONFLICT (person_id, state_canon, state_head_person_id, effective_from)
+      DO UPDATE SET effective_to = EXCLUDED.effective_to;
+
+      INSERT INTO person_state_coverage
+        (person_id, state_canon, state_head_person_id, effective_from, source)
+      SELECT sandeep.person_id, 'TAMIL NADU', sandeep.person_id,
+             DATE '2025-04-01', 'migration'
+      FROM person sandeep
+      WHERE sandeep.name = 'Sandeep Dadheech'
+      ON CONFLICT (person_id, state_canon, state_head_person_id, effective_from)
+      DO NOTHING;
+
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM person_state_coverage c
+          JOIN person p ON p.person_id = c.person_id
+          WHERE p.name = 'Taninki Ramesh Babu'
+            AND c.state_canon = 'TAMIL NADU'
+            AND c.effective_from = DATE '2024-04-01'
+            AND c.effective_to = DATE '2025-03-31'
+        ) THEN
+          RAISE EXCEPTION 'Tamil Nadu historical Babu coverage could not be recorded';
+        END IF;
+      END $$;
+    `,
+  },
+  {
+    id: "058_register_evidenced_coverage",
+    sql: `
+      -- Register-derived coverage is deliberately labelled and auditable.  It
+      -- is valid only where a customer has one register head in a leaf/FY.
+      ALTER TABLE person_state_coverage
+        ADD COLUMN IF NOT EXISTS fiscal_year TEXT,
+        ADD COLUMN IF NOT EXISTS evidence_customer_count INTEGER,
+        ADD COLUMN IF NOT EXISTS evidence_net_amount NUMERIC,
+        ADD COLUMN IF NOT EXISTS evidence_source TEXT;
+      ALTER TABLE person_state_coverage DROP CONSTRAINT IF EXISTS person_state_coverage_source_check;
+      ALTER TABLE person_state_coverage ADD CONSTRAINT person_state_coverage_source_check
+        CHECK (source IN ('migration','seed_import','master_import','manual','derived_register'));
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_person_state_coverage_derived_fy
+        ON person_state_coverage (person_id, state_canon, state_head_person_id, fiscal_year)
+        WHERE source = 'derived_register';
+
+      CREATE TABLE IF NOT EXISTS person_state_coverage_customer_evidence (
+        coverage_id BIGINT NOT NULL REFERENCES person_state_coverage(coverage_id) ON DELETE CASCADE,
+        fiscal_year TEXT NOT NULL,
+        customer_name TEXT NOT NULL,
+        register_head_canon TEXT NOT NULL,
+        net_amount NUMERIC NOT NULL,
+        first_invoice_date DATE,
+        last_invoice_date DATE,
+        PRIMARY KEY (coverage_id, customer_name)
+      );
+      CREATE TABLE IF NOT EXISTS canonical_coverage_uncovered_gap (
+        state_canon TEXT NOT NULL,
+        fiscal_year TEXT NOT NULL,
+        customer_count INTEGER NOT NULL,
+        net_amount NUMERIC NOT NULL,
+        reason TEXT NOT NULL,
+        PRIMARY KEY (state_canon, fiscal_year)
+      );
+
+      -- The HR registry records Suresh Kumar Nair as a departed employee under
+      -- Sandeep.  Create the historical person only when the people master does
+      -- not already have it; do not promote him to a state head.
+      INSERT INTO person
+        (name, reports_to_person_id, state_head_person_id, is_state_head, is_active, source)
+      SELECT 'Suresh Kumar Nair', s.person_id, s.person_id, false, false, 'departed_import'
+      FROM person s
+      WHERE s.name = 'Sandeep Dadheech'
+        AND NOT EXISTS (SELECT 1 FROM person WHERE name = 'Suresh Kumar Nair');
+
+      CREATE TEMP TABLE register_coverage_work (
+        state_canon TEXT NOT NULL,
+        fiscal_year TEXT NOT NULL,
+        register_head_canon TEXT NOT NULL,
+        person_name TEXT NOT NULL,
+        effective_from DATE NOT NULL,
+        effective_to DATE NOT NULL,
+        customer_count INTEGER NOT NULL,
+        net_amount NUMERIC NOT NULL
+      ) ON COMMIT DROP;
+
+      INSERT INTO register_coverage_work
+      SELECT
+        sl.state_canon,
+        sl.fy,
+        sl.head_canon,
+        CASE sl.head_canon
+          WHEN 'Babu' THEN 'Taninki Ramesh Babu'
+          WHEN 'Pawan Sharma' THEN 'Pawan Kumar Sharma'
+          WHEN 'Syed Aqil Rizvi' THEN 'Aqil Rizvi'
+          WHEN 'Suresh Nair' THEN 'Suresh Kumar Nair'
+          ELSE sl.head_canon
+        END,
+        -- Historical register tabs legitimately have NULL invoice dates.  Their
+        -- Month label is the approved calendar fallback used elsewhere in the
+        -- register pipeline, and is sufficient for coverage effective dates.
+        MIN(COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY')))::date,
+        MAX(COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY')))::date,
+        COUNT(DISTINCT sl.customer)::integer,
+        SUM(sl.amount)
+      FROM sale_line sl
+      WHERE sl.head_canon IS NOT NULL
+        AND (
+          sl.state_canon IN ('AP','HIMACHAL PRADESH','MAHARASHTRA','TAMIL NADU','TELANGANA')
+          OR (sl.state_canon = 'PUNJAB' AND sl.fy <> '2023-24')
+        )
+      GROUP BY sl.state_canon, sl.fy, sl.head_canon;
+
+      -- Fail closed before any coverage write if a selected customer would be
+      -- assigned to more than one bucket, an unassigned bucket, or an
+      -- unresolved person in the same leaf and FY.
+      DO $$
+      BEGIN
+        IF EXISTS (
+          WITH selected_lines AS (
+            SELECT sl.state_canon, sl.fy, sl.customer, sl.head_canon,
+                   CASE sl.head_canon
+                     WHEN 'Babu' THEN 'Taninki Ramesh Babu'
+                     WHEN 'Pawan Sharma' THEN 'Pawan Kumar Sharma'
+                     WHEN 'Syed Aqil Rizvi' THEN 'Aqil Rizvi'
+                     WHEN 'Suresh Nair' THEN 'Suresh Kumar Nair'
+                     ELSE sl.head_canon
+                   END AS person_name
+            FROM sale_line sl
+            WHERE sl.state_canon IN ('AP','HIMACHAL PRADESH','MAHARASHTRA','TAMIL NADU','TELANGANA')
+               OR (sl.state_canon = 'PUNJAB' AND sl.fy <> '2023-24')
+          )
+          SELECT 1
+          FROM selected_lines s
+          LEFT JOIN person p ON p.name = s.person_name
+          GROUP BY s.state_canon, s.fy, s.customer
+          HAVING COUNT(DISTINCT COALESCE(s.head_canon, '__NULL__')) <> 1
+              OR BOOL_OR(s.head_canon IS NULL OR p.person_id IS NULL OR p.is_system_coverage)
+        ) THEN
+          RAISE EXCEPTION 'mixed, unassigned, or unresolved customer attribution prevents derived coverage';
+        END IF;
+      END $$;
+
+      DO $$
+      DECLARE missing_people TEXT;
+      BEGIN
+        SELECT string_agg(DISTINCT w.person_name, ', ' ORDER BY w.person_name)
+          INTO missing_people
+        FROM register_coverage_work w
+        WHERE NOT EXISTS (SELECT 1 FROM person p WHERE p.name = w.person_name);
+        IF missing_people IS NOT NULL THEN
+          RAISE EXCEPTION 'register coverage cannot resolve people: %', missing_people;
+        END IF;
+      END $$;
+
+      INSERT INTO person_state_coverage
+        (person_id, state_canon, state_head_person_id, effective_from, effective_to,
+         fiscal_year, evidence_customer_count, evidence_net_amount, evidence_source, source)
+      SELECT
+        p.person_id,
+        w.state_canon,
+        COALESCE(p.state_head_person_id, p.person_id),
+        w.effective_from,
+        w.effective_to,
+        w.fiscal_year,
+        w.customer_count,
+        w.net_amount,
+        'sale_line.customer/head_canon',
+        'derived_register'
+      FROM register_coverage_work w
+      JOIN person p ON p.name = w.person_name
+      ON CONFLICT (person_id, state_canon, state_head_person_id, fiscal_year)
+        WHERE source = 'derived_register'
+      DO UPDATE SET
+        effective_from = EXCLUDED.effective_from,
+        effective_to = EXCLUDED.effective_to,
+        evidence_customer_count = EXCLUDED.evidence_customer_count,
+        evidence_net_amount = EXCLUDED.evidence_net_amount,
+        evidence_source = EXCLUDED.evidence_source;
+
+      DELETE FROM person_state_coverage_customer_evidence e
+      USING person_state_coverage c
+      WHERE c.coverage_id = e.coverage_id AND c.source = 'derived_register';
+      INSERT INTO person_state_coverage_customer_evidence
+        (coverage_id, fiscal_year, customer_name, register_head_canon, net_amount,
+         first_invoice_date, last_invoice_date)
+      SELECT
+        c.coverage_id, w.fiscal_year, sl.customer, w.register_head_canon,
+        SUM(sl.amount),
+        MIN(COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY')))::date,
+        MAX(COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY')))::date
+      FROM register_coverage_work w
+      JOIN person p ON p.name = w.person_name
+      JOIN person_state_coverage c
+        ON c.person_id = p.person_id
+       AND c.state_canon = w.state_canon
+       AND c.fiscal_year = w.fiscal_year
+       AND c.source = 'derived_register'
+      JOIN sale_line sl
+        ON sl.state_canon = w.state_canon
+       AND sl.fy = w.fiscal_year
+       AND sl.head_canon = w.register_head_canon
+      GROUP BY c.coverage_id, w.fiscal_year, sl.customer, w.register_head_canon;
+
+      -- Punjab FY2023-24 is deliberately not derived: eight customers cross
+      -- real/unassigned/project register buckets in the closed period.
+      INSERT INTO canonical_coverage_uncovered_gap
+        (state_canon, fiscal_year, customer_count, net_amount, reason)
+      SELECT 'PUNJAB', '2023-24', COUNT(DISTINCT customer)::integer, SUM(amount),
+             'customer appears under Pawan and unassigned/project register buckets'
+      FROM sale_line
+      WHERE state_canon = 'PUNJAB' AND fy = '2023-24'
+      ON CONFLICT (state_canon, fiscal_year) DO UPDATE
+        SET customer_count = EXCLUDED.customer_count,
+            net_amount = EXCLUDED.net_amount,
+            reason = EXCLUDED.reason;
+    `,
+  },
+  {
+    id: "059_normalize_derived_coverage_month_bounds",
+    sql: `
+      -- Coverage is effective for register months, not only the date of a
+      -- particular invoice.  Normalize the audited derived rows to the first
+      -- day of their first month and the last day of their last month.
+      -- Migration 057 supplied a provisional Tamil handover while customer
+      -- evidence was pending.  The derived FY rows now supersede only those
+      -- two provisional rows; retain the independent legacy-mapped coverage.
+      DELETE FROM person_state_coverage c
+      USING person p
+      WHERE c.person_id = p.person_id
+        AND c.source = 'migration'
+        AND c.state_canon = 'TAMIL NADU'
+        AND (
+          (p.name = 'Taninki Ramesh Babu' AND c.effective_from = DATE '2024-04-01')
+          OR (p.name = 'Sandeep Dadheech' AND c.effective_from = DATE '2025-04-01')
+        );
+
+      WITH register_bounds AS (
+        SELECT
+          sl.state_canon,
+          sl.fy,
+          CASE sl.head_canon
+            WHEN 'Babu' THEN 'Taninki Ramesh Babu'
+            WHEN 'Pawan Sharma' THEN 'Pawan Kumar Sharma'
+            WHEN 'Syed Aqil Rizvi' THEN 'Aqil Rizvi'
+            WHEN 'Suresh Nair' THEN 'Suresh Kumar Nair'
+            ELSE sl.head_canon
+          END AS person_name,
+          DATE_TRUNC('month', MIN(COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY'))))::date AS effective_from,
+          (DATE_TRUNC('month', MAX(COALESCE(sl.invoice_date, TO_DATE(sl.month_label, 'Mon-YY'))))
+            + INTERVAL '1 month - 1 day')::date AS effective_to
+        FROM sale_line sl
+        WHERE sl.head_canon IS NOT NULL
+          AND (
+            sl.state_canon IN ('AP','HIMACHAL PRADESH','MAHARASHTRA','TAMIL NADU','TELANGANA')
+            OR (sl.state_canon = 'PUNJAB' AND sl.fy <> '2023-24')
+          )
+        GROUP BY sl.state_canon, sl.fy, sl.head_canon
+      )
+      UPDATE person_state_coverage c
+      SET effective_from = b.effective_from,
+          effective_to = b.effective_to
+      FROM register_bounds b
+      JOIN person p ON p.name = b.person_name
+      WHERE c.source = 'derived_register'
+        AND c.person_id = p.person_id
+        AND c.state_canon = b.state_canon
+        AND c.fiscal_year = b.fy;
+    `,
+  },
+  {
+    id: "060_validate_register_evidenced_coverage",
+    sql: `
+      -- A coverage row must never be derived from a customer whose register
+      -- history is mixed, unassigned, or unresolved.  This validates the
+      -- applied derivation before the migration is marked complete.
+      DO $$
+      BEGIN
+        IF EXISTS (
+          WITH selected_lines AS (
+            SELECT sl.state_canon, sl.fy, sl.customer, sl.head_canon,
+                   CASE sl.head_canon
+                     WHEN 'Babu' THEN 'Taninki Ramesh Babu'
+                     WHEN 'Pawan Sharma' THEN 'Pawan Kumar Sharma'
+                     WHEN 'Syed Aqil Rizvi' THEN 'Aqil Rizvi'
+                     WHEN 'Suresh Nair' THEN 'Suresh Kumar Nair'
+                     ELSE sl.head_canon
+                   END AS person_name
+            FROM sale_line sl
+            WHERE sl.state_canon IN ('AP','HIMACHAL PRADESH','MAHARASHTRA','TAMIL NADU','TELANGANA')
+               OR (sl.state_canon = 'PUNJAB' AND sl.fy <> '2023-24')
+          )
+          SELECT 1
+          FROM selected_lines s
+          LEFT JOIN person p ON p.name = s.person_name
+          GROUP BY s.state_canon, s.fy, s.customer
+          HAVING COUNT(DISTINCT COALESCE(s.head_canon, '__NULL__')) <> 1
+              OR BOOL_OR(s.head_canon IS NULL OR p.person_id IS NULL OR p.is_system_coverage)
+        ) THEN
+          RAISE EXCEPTION 'mixed, unassigned, or unresolved customer attribution prevents register-derived coverage';
+        END IF;
+      END $$;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).
