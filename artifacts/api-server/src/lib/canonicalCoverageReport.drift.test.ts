@@ -59,6 +59,18 @@ describe("canonical coverage drift check", () => {
           },
         },
       ],
+    } as never).mockResolvedValueOnce({
+      rows: [{
+        fiscal_year: "2025-26",
+        customer_name: "GRAHAA PRIYA ENTERPRISES",
+        customer_count: "1",
+        customer_net_amount: "94025777.70",
+        state_net_amount: "94025777.70",
+        share_percent: "100",
+        coverage_rows: "1",
+        coverage_people: ["Sandeep Dadheech"],
+        responsible_heads: ["Sandeep Dadheech"],
+      }],
     } as never);
 
     const check = await buildCanonicalCoverageDriftCheck("2026-27");
@@ -83,6 +95,13 @@ describe("canonical coverage drift check", () => {
         coverageWasChanged: false,
       },
     });
+    expect(check.concentrationWarnings).toMatchObject([{
+      stateCanon: "TAMIL NADU",
+      fiscalYear: "2025-26",
+      customer: "GRAHAA PRIYA ENTERPRISES",
+      sharePercent: 100,
+      customerNetAmount: 94_025_777.70,
+    }]);
 
     const [sql, params] = query.mock.calls[0]!;
     expect(sql).toContain("has_unassigned");
@@ -96,10 +115,15 @@ describe("canonical coverage drift check", () => {
     expect(sql).toContain("effectiveFromDays");
     expect(sql).not.toMatch(/\b(?:INSERT|UPDATE|DELETE)\b/i);
     expect(params).toEqual(["2026-27"]);
+    const [concentrationSql, concentrationParams] = query.mock.calls[1]!;
+    expect(concentrationSql).toContain("TAMIL NADU");
+    expect(concentrationSql).not.toMatch(/\b(?:INSERT|UPDATE|DELETE)\b/i);
+    expect(concentrationParams).toEqual(["2026-27"]);
   });
 
   it("persists the reviewable result separately from coverage", async () => {
     query
+      .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({ rows: [] } as never);
 
@@ -110,17 +134,18 @@ describe("canonical coverage drift check", () => {
       passed: true,
       issueCount: 0,
       issues: [],
+      concentrationWarnings: [],
     });
-    expect(query).toHaveBeenCalledTimes(2);
+    expect(query).toHaveBeenCalledTimes(3);
 
-    const [auditSql, auditParams] = query.mock.calls[1]!;
+    const [auditSql, auditParams] = query.mock.calls[2]!;
     expect(auditSql).toContain("INSERT INTO canonical_coverage_drift_event");
     expect(auditParams).toEqual([
       "2026-27",
       "register_sync",
       "2026-27",
       "ok",
-      JSON.stringify({ passed: true, issueCount: 0, issues: [] }),
+      JSON.stringify({ passed: true, issueCount: 0, issues: [], concentrationWarnings: [] }),
     ]);
   });
 });

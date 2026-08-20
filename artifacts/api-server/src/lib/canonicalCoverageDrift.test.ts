@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const query = vi.fn();
 const buildCanonicalCoverageReport = vi.fn();
+const buildCanonicalCoverageDriftCheck = vi.fn();
 const logger = {
   info: vi.fn(),
   warn: vi.fn(),
@@ -9,7 +10,10 @@ const logger = {
 };
 
 vi.mock("@workspace/db", () => ({ pool: { query } }));
-vi.mock("./canonicalCoverageReport.js", () => ({ buildCanonicalCoverageReport }));
+vi.mock("./canonicalCoverageReport.js", () => ({
+  buildCanonicalCoverageReport,
+  buildCanonicalCoverageDriftCheck,
+}));
 vi.mock("./logger.js", () => ({ logger }));
 
 const { recordCanonicalCoverageDriftCheck } = await import("./canonicalCoverageDrift.js");
@@ -36,6 +40,12 @@ describe("recordCanonicalCoverageDriftCheck", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     query.mockResolvedValue({ rows: [] });
+    buildCanonicalCoverageDriftCheck.mockResolvedValue({
+      passed: true,
+      issueCount: 0,
+      issues: [],
+      concentrationWarnings: [],
+    });
   });
 
   it("records an ok event and never writes coverage when evidence still reconciles", async () => {
@@ -59,13 +69,29 @@ describe("recordCanonicalCoverageDriftCheck", () => {
 
   it("records and warns about drift without rewriting coverage", async () => {
     buildCanonicalCoverageReport.mockResolvedValue(report(false));
+    buildCanonicalCoverageDriftCheck.mockResolvedValue({
+      passed: false,
+      issueCount: 1,
+      issues: [{
+        kind: "coverage-mismatch",
+        stateCanon: "TAMIL NADU",
+        fiscalYear: "2026-27",
+        customer: null,
+        detail: { review: { coverageWasChanged: false } },
+      }],
+      concentrationWarnings: [],
+    });
 
     await recordCanonicalCoverageDriftCheck("2026-27");
 
     expect(query).toHaveBeenCalledTimes(1);
     expect(query.mock.calls[0]?.[1]?.[3]).toBe("drift");
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ triggerFy: "2026-27", coverageMismatches: 2 }),
+      expect.objectContaining({
+        triggerFy: "2026-27",
+        coverageMismatches: 2,
+        issueCount: 1,
+      }),
       expect.stringContaining("drift"),
     );
   });

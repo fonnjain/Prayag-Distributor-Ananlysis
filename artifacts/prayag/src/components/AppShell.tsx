@@ -149,6 +149,7 @@ const NAV: NavGroup[] = [
     items: [
       { id: "org-customers", label: "Customers", path: "/org/customers", icon: Store },
       { id: "org-people",    label: "People",    path: "/org/people",    icon: UserCheck },
+      { id: "coverage-review", label: "Coverage Review", path: "/org/coverage-review", icon: FileSearch },
     ],
   },
   {

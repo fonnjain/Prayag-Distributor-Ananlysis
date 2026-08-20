@@ -78,6 +78,9 @@ export interface CanonicalCoverageReport {
       coverage_rows: number;
       customer_count: number;
       net_amount: number;
+      customer_name: string;
+      state_net_amount: number;
+      share_percent: number;
       message: string;
     }>;
   };
@@ -121,12 +124,27 @@ export interface CanonicalCoverageDriftIssue {
   detail: Record<string, unknown>;
 }
 
+export interface TamilNaduCoverageConcentrationWarning {
+  stateCanon: "TAMIL NADU";
+  fiscalYear: string;
+  customer: string;
+  customerCount: number;
+  customerNetAmount: number;
+  stateNetAmount: number;
+  sharePercent: number;
+  coverageRows: number;
+  coveragePeople: string[];
+  responsibleHeads: string[];
+  message: string;
+}
+
 export interface CanonicalCoverageDriftCheck {
   checkedAt: string;
   fiscalYear: string | null;
   passed: boolean;
   issueCount: number;
   issues: CanonicalCoverageDriftIssue[];
+  concentrationWarnings: TamilNaduCoverageConcentrationWarning[];
 }
 
 type DriftIssueRow = {
@@ -137,6 +155,100 @@ type DriftIssueRow = {
   detail: Record<string, unknown>;
 };
 
+type TamilNaduConcentrationRow = {
+  fiscal_year: string;
+  customer_name: string;
+  customer_count: string;
+  customer_net_amount: string;
+  state_net_amount: string;
+  share_percent: string;
+  coverage_rows: string;
+  coverage_people: string[];
+  responsible_heads: string[];
+};
+
+/**
+ * Returns material Tamil Nadu customer concentration from persisted,
+ * register-derived coverage evidence. This intentionally does not depend on
+ * alias-review state: a confirmed historical identity can still leave a
+ * material concentration that an operator needs to see.
+ */
+export async function buildTamilNaduCoverageConcentrationWarnings(
+  fiscalYear?: string,
+): Promise<TamilNaduCoverageConcentrationWarning[]> {
+  const { rows } = await pool.query<TamilNaduConcentrationRow>(`
+    WITH coverage_evidence AS (
+      SELECT
+        c.coverage_id,
+        c.fiscal_year,
+        p.name AS coverage_person,
+        COALESCE(h.name, 'Unassigned') AS responsible_head,
+        e.customer_name,
+        e.net_amount
+      FROM person_state_coverage c
+      JOIN person p ON p.person_id = c.person_id
+      LEFT JOIN person h ON h.person_id = c.state_head_person_id
+      JOIN person_state_coverage_customer_evidence e ON e.coverage_id = c.coverage_id
+      WHERE c.source = 'derived_register'
+        AND c.voided_at IS NULL
+        AND c.state_canon = 'TAMIL NADU'
+        AND ($1::text IS NULL OR c.fiscal_year = $1)
+    ),
+    customer_totals AS (
+      SELECT
+        fiscal_year,
+        customer_name,
+        COUNT(DISTINCT coverage_id)::text AS coverage_rows,
+        ARRAY_AGG(DISTINCT coverage_person ORDER BY coverage_person) AS coverage_people,
+        ARRAY_AGG(DISTINCT responsible_head ORDER BY responsible_head) AS responsible_heads,
+        SUM(net_amount) AS customer_net_amount
+      FROM coverage_evidence
+      GROUP BY fiscal_year, customer_name
+    ),
+    state_totals AS (
+      SELECT
+        fiscal_year,
+        COUNT(DISTINCT customer_name)::text AS customer_count,
+        SUM(net_amount) AS state_net_amount
+      FROM coverage_evidence
+      GROUP BY fiscal_year
+    )
+    SELECT
+      ct.fiscal_year,
+      ct.customer_name,
+      st.customer_count,
+      ct.customer_net_amount::text,
+      st.state_net_amount::text,
+      (ct.customer_net_amount / NULLIF(st.state_net_amount, 0) * 100)::text AS share_percent,
+      ct.coverage_rows,
+      ct.coverage_people,
+      ct.responsible_heads
+    FROM customer_totals ct
+    JOIN state_totals st ON st.fiscal_year = ct.fiscal_year
+    WHERE ct.customer_net_amount / NULLIF(st.state_net_amount, 0) >= 0.8
+    ORDER BY ct.fiscal_year, ct.customer_net_amount DESC, ct.customer_name
+  `, [fiscalYear ?? null]);
+
+  return rows.map((row) => {
+    const sharePercent = Number(row.share_percent);
+    const customerNetAmount = Number(row.customer_net_amount);
+    const stateNetAmount = Number(row.state_net_amount);
+    return {
+      stateCanon: "TAMIL NADU",
+      fiscalYear: row.fiscal_year,
+      customer: row.customer_name,
+      customerCount: Number(row.customer_count),
+      customerNetAmount,
+      stateNetAmount,
+      sharePercent,
+      coverageRows: Number(row.coverage_rows),
+      coveragePeople: row.coverage_people,
+      responsibleHeads: row.responsible_heads,
+      message: `${row.customer_name} accounts for ${sharePercent.toFixed(1)}% of Tamil Nadu's ₹${stateNetAmount.toLocaleString("en-IN", { maximumFractionDigits: 2 })} coverage evidence in FY${row.fiscal_year}. Review concentration; coverage was not changed.`,
+    };
+  });
+}
+
 /**
  * Re-runs the customer-level validation that guarded the original
  * register-evidenced coverage migration. This is deliberately read-only: it
@@ -146,7 +258,8 @@ type DriftIssueRow = {
 export async function buildCanonicalCoverageDriftCheck(
   fiscalYear?: string,
 ): Promise<CanonicalCoverageDriftCheck> {
-  const { rows } = await pool.query<DriftIssueRow>(`
+  const [issueResult, concentrationWarnings] = await Promise.all([
+    pool.query<DriftIssueRow>(`
     WITH selected_lines AS (
       SELECT sl.state_canon, sl.fy, sl.customer, sl.head_canon, sl.amount,
              sl.invoice_date, sl.month_label,
@@ -344,7 +457,10 @@ export async function buildCanonicalCoverageDriftCheck(
     SELECT 'evidence-mismatch', state_canon, fiscal_year, customer, detail
     FROM evidence_diffs
     ORDER BY fiscal_year, state_canon, issue_kind, customer NULLS LAST
-  `, [fiscalYear ?? null]);
+    `, [fiscalYear ?? null]),
+    buildTamilNaduCoverageConcentrationWarnings(fiscalYear),
+  ]);
+  const { rows } = issueResult;
 
   const issues = rows.map((row) => {
     const detail = row.detail ?? {};
@@ -385,6 +501,7 @@ export async function buildCanonicalCoverageDriftCheck(
     passed: issues.length === 0,
     issueCount: issues.length,
     issues,
+    concentrationWarnings,
   };
 }
 
@@ -410,6 +527,7 @@ export async function auditCanonicalCoverageDrift(
         passed: check.passed,
         issueCount: check.issueCount,
         issues: check.issues,
+         concentrationWarnings: check.concentrationWarnings,
       }),
     ],
   );
@@ -713,25 +831,20 @@ export async function buildCanonicalCoverageReport(): Promise<CanonicalCoverageR
       status: "UNVERIFIED ALIAS" as const,
       review_note: row.alias_review_note!,
     }));
-  const concentrationWarnings = [...new Map(
-    unverifiedAliases.map((row) => [`${row.state_canon}|${row.responsible_head}|${row.coverage_person}`, row]),
-  ).keys()].map((key) => {
-    const [state_canon, responsible_head, coverage_person] = key.split("|");
-    const rows = unverifiedAliases.filter((row) =>
-      row.state_canon === state_canon
-      && row.responsible_head === responsible_head
-      && row.coverage_person === coverage_person,
-    );
+  const concentrationWarnings = (await buildTamilNaduCoverageConcentrationWarnings()).map((row) => {
     return {
-      state_canon,
-      fiscal_years: rows.map((row) => row.fiscal_year).sort(),
-      responsible_head,
-      coverage_person,
-      register_head_labels: [...new Set(rows.map((row) => row.register_head_label))],
-      coverage_rows: rows.length,
-      customer_count: rows.reduce((sum, row) => sum + row.customer_count, 0),
-      net_amount: rows.reduce((sum, row) => sum + row.net_amount, 0),
-      message: `All ${rows.length} historical derived coverage row${rows.length === 1 ? "" : "s"} under ${responsible_head} depend on the unverified register label ${[...new Set(rows.map((row) => row.register_head_label))].join(", ")}. Review required; coverage was not changed.`,
+      state_canon: row.stateCanon,
+      fiscal_years: [row.fiscalYear],
+      responsible_head: row.responsibleHeads.join(", "),
+      coverage_person: row.coveragePeople.join(", "),
+      register_head_labels: [],
+      coverage_rows: row.coverageRows,
+      customer_count: row.customerCount,
+      net_amount: row.customerNetAmount,
+      customer_name: row.customer,
+      state_net_amount: row.stateNetAmount,
+      share_percent: row.sharePercent,
+      message: row.message,
     };
   });
   const uncoveredGaps = uncoveredRes.rows.map((row) => ({
@@ -881,7 +994,7 @@ export async function buildCanonicalCoverageWorkbook(report: CanonicalCoverageRe
     { header: "FY", key: "fiscal_years", width: 20 },
     { header: "Coverage person", key: "coverage_person", width: 27 },
     { header: "Responsible head", key: "responsible_head", width: 27 },
-    { header: "Register label", key: "register_head_label", width: 20 },
+    { header: "Customer / register label", key: "customer_name", width: 30 },
     { header: "Customers", key: "customer_count", width: 13 },
     { header: "Net amount", key: "net_amount", width: 18 },
     { header: "Review note", key: "note", width: 80 },
@@ -893,7 +1006,7 @@ export async function buildCanonicalCoverageWorkbook(report: CanonicalCoverageRe
       fiscal_years: row.fiscal_year,
       coverage_person: row.coverage_person,
       responsible_head: row.responsible_head,
-      register_head_label: row.register_head_label,
+      customer_name: row.register_head_label,
       customer_count: row.customer_count,
       net_amount: row.net_amount,
       note: row.review_note,
@@ -904,7 +1017,7 @@ export async function buildCanonicalCoverageWorkbook(report: CanonicalCoverageRe
       fiscal_years: row.fiscal_years.join(", "),
       coverage_person: row.coverage_person,
       responsible_head: row.responsible_head,
-      register_head_label: row.register_head_labels.join(", "),
+      customer_name: row.customer_name,
       customer_count: row.customer_count,
       net_amount: row.net_amount,
       note: row.message,

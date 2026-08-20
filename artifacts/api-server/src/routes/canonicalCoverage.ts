@@ -2,12 +2,17 @@ import { pool } from "@workspace/db";
 import { Router } from "express";
 import {
   auditCanonicalCoverageDrift,
+  buildCanonicalCoverageDriftCheck,
   buildCanonicalCoverageReport,
   buildCanonicalCoverageWorkbook,
 } from "../lib/canonicalCoverageReport.js";
 import { isAdminToken } from "../lib/adminAuth.js";
+import { requireAuthenticated } from "../lib/auth.js";
 
 const router = Router();
+// This router is mounted behind the application-wide auth gate, but keeps its
+// own gate so customer-level evidence stays protected if mounting changes.
+router.use(requireAuthenticated);
 
 /**
  * A machine-readable and printable audit trail for the canonical organisation
@@ -46,6 +51,22 @@ router.get("/master/coverage-verification/export", async (req, res) => {
 
 // Recent post-register evidence checks. These are audit records only: a drift
 // never rewrites canonical coverage automatically.
+router.get("/master/coverage-drift/current", async (req, res): Promise<void> => {
+  try {
+    const fiscalYear = typeof req.query.fy === "string" ? req.query.fy : undefined;
+    const check = await buildCanonicalCoverageDriftCheck(fiscalYear);
+    res.status(check.passed ? 200 : 409).json({
+      ...check,
+      warning: check.passed
+        ? null
+        : "Coverage was not changed automatically. Review the exceptions before changing team geography.",
+    });
+  } catch (err) {
+    req.log.error({ err }, "canonical coverage current drift check failed");
+    res.status(500).json({ error: "Could not build the current canonical coverage drift review." });
+  }
+});
+
 router.get("/master/coverage-drift", async (req, res) => {
   try {
     const fiscalYear = typeof req.query.fy === "string" ? req.query.fy : null;

@@ -1,5 +1,8 @@
 import { pool } from "@workspace/db";
-import { buildCanonicalCoverageReport } from "./canonicalCoverageReport.js";
+import {
+  buildCanonicalCoverageDriftCheck,
+  buildCanonicalCoverageReport,
+} from "./canonicalCoverageReport.js";
 import { logger } from "./logger.js";
 
 type DriftTrigger = "register_sheets_sync";
@@ -44,9 +47,18 @@ export async function recordCanonicalCoverageDriftCheck(
   trigger: DriftTrigger = "register_sheets_sync",
 ): Promise<void> {
   try {
-    const report = await buildCanonicalCoverageReport();
-    const status = report.passed ? "ok" : "drift";
-    const detail = summaryFor(report);
+    const [report, check] = await Promise.all([
+      buildCanonicalCoverageReport(),
+      buildCanonicalCoverageDriftCheck(fy),
+    ]);
+    const status = check.passed ? "ok" : "drift";
+    const detail = {
+      ...summaryFor(report),
+      passed: check.passed,
+      issueCount: check.issueCount,
+      issues: check.issues,
+      concentrationWarnings: check.concentrationWarnings,
+    };
 
     await pool.query(
       `INSERT INTO canonical_coverage_drift_event
@@ -59,9 +71,11 @@ export async function recordCanonicalCoverageDriftCheck(
       triggerFy: fy,
       reportFy: report.fy,
       ...detail.derivedIntegrity,
+      issueCount: check.issueCount,
+      concentrationWarningCount: check.concentrationWarnings.length,
       uncoveredGapCount: detail.uncoveredGaps.length,
     };
-    if (report.passed) {
+    if (check.passed) {
       logger.info(logContext, "canonical coverage evidence check: ok");
     } else {
       logger.warn(
