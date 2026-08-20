@@ -1,0 +1,42 @@
+Identity accepted - same person, and he left. The territory data supports it:
+he is assigned to ANDHRA PRADESH, not Tamil Nadu, which is what you would
+expect of someone who handed Tamil Nadu over. The register agrees - Babu held
+it through FY2024-25, Sandeep from FY2025-26, and the current Tamil Nadu team
+is entirely Biju C.O's.
+
+But two records now contradict what you have told me.
+
+1. HE IS MARKED ACTIVE
+person 174, Taninki Ramesh Babu, is_active = true, source = hr_sheet. Two
+other Babus - K.Hussain Babu (236) and V. Giri Babu (339) - are correctly
+departed_import and inactive.
+
+He has left. Mark him inactive using the departure flow built for #341, with a
+left_date. Do NOT delete him - Rs 102.97 Cr of Tamil Nadu attribution depends
+on the record existing.
+
+If his left_date is unknown, use 31 March 2025 - the register shows Tamil Nadu
+transferring to Sandeep from 1 April 2025, so that is the last date he
+demonstrably held it. Record it as inferred, not stated.
+
+2. HE HOLDS A CURRENT TERRITORY ASSIGNMENT
+ANDHRA PRADESH, effective from 2026-08-15 to current. That date is five days
+ago and comes from the seed import, not from anything he did.
+
+A departed person with an open territory row means coverage counts him. Close
+it with the same effective date as his departure.
+
+3. THEN
+  a. Confirm the Tamil Nadu coverage rows still resolve - marking him inactive
+     must not break the historical attribution. Print both rows.
+  b. Confirm FY2025-26 net by head is unchanged. Stop condition as always.
+  c. Remove the UNVERIFIED ALIAS marker from those rows - the identity is
+     confirmed by the business.
+  d. Print any OTHER person in the table who is marked active but holds no
+     current business and whose manager has left. The seven with no reporting
+     manager are the place to look - if Babu was one of them and has actually
+     left, others may have too.
+
+And recreate #381. It was cancelled immediately after approval, the same as
+#201 was before it, and the drift detector is reporting mismatches with
+nothing scheduled to reconcile them.
