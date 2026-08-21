@@ -29,6 +29,13 @@ import {
 } from "../registers/sheetsApi.js";
 import { normHead, fiscalMonthIndex } from "./names.js";
 import { mgmtSources } from "./roster.js";
+import {
+  classifyStateHeadPackFile,
+  configuredStateHeadPackPolicy,
+  manifestConflictFileIds,
+  manifestBlockers,
+  type StateHeadPackManifestEntry,
+} from "./stateHeadPack.js";
 
 // Canonical bucket for register STATE HEAD values that are channels, not
 // people (PROJECT / GOVT / GEM / JJM / OTHER and blanks in channel files).
@@ -64,11 +71,11 @@ function resolveRegisterHead(
 ): { display: string; kind: HeadKind } | null {
   const key = normHead(raw);
   if (!key) return null;
-  const canonical = headAliasByKey.get(key);
-  if (canonical) return { display: canonical, kind: "head" };
   if (INSTITUTIONAL_KEYS.has(key)) {
     return { display: NON_TERRITORY_HEAD, kind: "nonTerritory" };
   }
+  const canonical = headAliasByKey.get(key);
+  if (canonical) return { display: canonical, kind: "head" };
   return { display: raw, kind: "unmapped" };
 }
 
@@ -117,7 +124,7 @@ export type HeadRegisterAgg = {
 export type RegisterLoadStatus = {
   fileId: string;
   fileName: string;
-  status: "ok" | "error";
+  status: "ok" | "error" | "excluded" | "skipped";
   httpStatus?: number;
   detail: string;
   rowsRead?: number;
@@ -126,6 +133,12 @@ export type RegisterLoadStatus = {
 export type StateHeadRegisters = {
   byHead: Map<string, HeadRegisterAgg>;
   statuses: RegisterLoadStatus[];
+  /** Read-only folder manifest used by the release reconciliation check. */
+  manifest: StateHeadPackManifestEntry[];
+  /** Human-readable warnings for excluded temporary/duplicate files. */
+  packWarnings: string[];
+  /** Mixed/non-head feeders that prevent a reconciled head pack. */
+  packBlockers: string[];
   folderError: string | null;
   loadedAt: number;
 };
@@ -268,14 +281,34 @@ function mergeFyMaps(
 
 async function loadOneWorkbook(
   file: FolderFile,
-): Promise<{ aggs: HeadRegisterAgg[]; status: RegisterLoadStatus }> {
+): Promise<{
+  aggs: HeadRegisterAgg[];
+  status: RegisterLoadStatus;
+  manifest: StateHeadPackManifestEntry;
+}> {
+  // Read excluded workbooks for their Report 1 evidence, but never pass their
+  // aggregates into byHead. This keeps the audit report useful (it can show
+  // the duplicate ₹11.2800 Cr) without allowing it into released totals.
   let registerTab: string | null;
   try {
     registerTab = await detectRegisterTab(file.id);
   } catch (err) {
-    return { aggs: [], status: failureDetail(file, err) };
+    return {
+      aggs: [],
+      status: failureDetail(file, err),
+      manifest: classifyStateHeadPackFile({
+        fileId: file.id,
+        fileName: file.name,
+        evidence: [],
+      }),
+    };
   }
   if (!registerTab) {
+    const manifest = classifyStateHeadPackFile({
+      fileId: file.id,
+      fileName: file.name,
+      evidence: [],
+    });
     return {
       aggs: [],
       status: {
@@ -286,6 +319,7 @@ async function loadOneWorkbook(
           `No register tab detected in "${file.name}" (${file.id}); expected a tab whose rows ` +
           `carry a date serial, a numeric Amount and an FY-YYYY-YY label in the fixed register columns.`,
       },
+      manifest,
     };
   }
   // First pass: aggregate per raw STATE HEAD value ("" for blank cells).
@@ -363,7 +397,15 @@ async function loadOneWorkbook(
       }
     }));
   } catch (err) {
-    return { aggs: [], status: failureDetail(file, err) };
+    return {
+      aggs: [],
+      status: failureDetail(file, err),
+      manifest: classifyStateHeadPackFile({
+        fileId: file.id,
+        fileName: file.name,
+        evidence: [],
+      }),
+    };
   }
   // Second pass: resolve raw values to canonical heads / buckets. Blank
   // values inherit the file's dominant canonical head when one exists (a
@@ -415,6 +457,17 @@ async function loadOneWorkbook(
     fold(res.display, res.kind, grp);
   }
   const aggs = [...byDisplay.values()];
+  const manifest = classifyStateHeadPackFile({
+    fileId: file.id,
+    fileName: file.name,
+    evidence: aggs.map((agg) => ({
+      headDisplay: agg.headDisplay,
+      kind: agg.kind,
+      byFy: new Map(
+        [...agg.byFy].map(([fy, fyAgg]) => [fy, { amount: fyAgg.amount }]),
+      ),
+    })),
+  });
   const headSummary = aggs
     .map((a) => {
       const fyPart = [...a.byFy.values()]
@@ -432,18 +485,24 @@ async function loadOneWorkbook(
       skippedNonRegister,
       heads: aggs.length,
       headSummary,
+      classification: manifest.classification,
     },
     "state-head register read via chunked values.get",
   );
   return {
-    aggs,
+    // Mixed/non-head feeders stay visible in the manifest but never reach
+    // the released byHead totals.
+    aggs: manifest.included ? aggs : [],
     status: {
       fileId: file.id,
       fileName: file.name,
-      status: "ok",
-      detail: `Read ${rowsRead} rows from tab "${registerTab}" (${headSummary}).`,
+      status: manifest.included ? "ok" : "skipped",
+      detail: manifest.included
+        ? `Read ${rowsRead} rows from tab "${registerTab}" (${headSummary}).`
+        : manifest.reason,
       rowsRead,
     },
+    manifest,
   };
 }
 
@@ -458,6 +517,9 @@ async function loadUncached(): Promise<StateHeadRegisters> {
     return {
       byHead: new Map(),
       statuses: [],
+      manifest: [],
+      packWarnings: [],
+      packBlockers: [],
       folderError: detail,
       loadedAt: Date.now(),
     };
@@ -466,11 +528,18 @@ async function loadUncached(): Promise<StateHeadRegisters> {
     return {
       byHead: new Map(),
       statuses: [],
+      manifest: [],
+      packWarnings: [],
+      packBlockers: [],
       folderError: `The State Heads Drive folder ${folderId} contains no spreadsheets.`,
       loadedAt: Date.now(),
     };
   }
-  const results: Array<{ aggs: HeadRegisterAgg[]; status: RegisterLoadStatus }> =
+  const results: Array<{
+    aggs: HeadRegisterAgg[];
+    status: RegisterLoadStatus;
+    manifest: StateHeadPackManifestEntry;
+  }> =
     new Array(files.length);
   // Modest concurrency: each workbook costs a tab listing + a handful of
   // sample reads + 1-2 chunked reads; 3 in parallel stays well under quota.
@@ -485,8 +554,14 @@ async function loadUncached(): Promise<StateHeadRegisters> {
   await Promise.all(Array.from({ length: Math.min(POOL, files.length) }, worker));
   const byHead = new Map<string, HeadRegisterAgg>();
   const statuses: RegisterLoadStatus[] = [];
+  const manifest: StateHeadPackManifestEntry[] = [];
   for (const r of results) {
     statuses.push(r.status);
+    manifest.push(r.manifest);
+  }
+  const duplicateFileIds = manifestConflictFileIds(manifest);
+  for (const r of results) {
+    if (duplicateFileIds.has(r.manifest.fileId)) continue;
     for (const agg of r.aggs) {
       const existing = byHead.get(agg.headKey);
       if (!existing) {
@@ -500,11 +575,15 @@ async function loadUncached(): Promise<StateHeadRegisters> {
     }
   }
   const failed = statuses.filter((s) => s.status === "error");
+  const excluded = manifest.filter((m) => m.classification === "excluded");
+  const blockers = manifestBlockers(manifest);
   logger.info(
     {
       workbooks: files.length,
       heads: byHead.size,
       failed: failed.length,
+      excluded: excluded.length,
+      packBlockers: blockers.length,
     },
     "state-head register load complete",
   );
@@ -514,7 +593,15 @@ async function loadUncached(): Promise<StateHeadRegisters> {
       f.detail,
     );
   }
-  return { byHead, statuses, folderError: null, loadedAt: Date.now() };
+  return {
+    byHead,
+    statuses,
+    manifest,
+    packWarnings: excluded.map((entry) => entry.reason),
+    packBlockers: blockers,
+    folderError: null,
+    loadedAt: Date.now(),
+  };
 }
 
 export async function loadStateHeadRegisters(): Promise<StateHeadRegisters> {

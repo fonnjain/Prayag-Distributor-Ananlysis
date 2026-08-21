@@ -64,6 +64,14 @@
       "juneSecondaryAchievementPct": 0.796
     }
   },
+  "state_head_pack": {
+    "comment": "Read-only State Heads folder release policy. Temporary/duplicate workbooks are excluded from the manifest; mixed/non-head feeders require an explicit approvedSlices entry before contributing to a canonical head total.",
+    "excludeFilenamePatterns": [
+      "^copy\\s+of\\b",
+      "\\b(?:temp|temporary|backup|duplicate)\\b"
+    ],
+    "approvedSlices": {}
+  },
   "source_list": [
     {
       "key": "state_head_sale_2526",

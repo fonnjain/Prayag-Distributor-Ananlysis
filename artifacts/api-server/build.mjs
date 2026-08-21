@@ -34,6 +34,8 @@ async function buildAll() {
       path.resolve(artifactDir, "src/masterSeedImport.ts"),
       // Secondary order report loader CLI.
       path.resolve(artifactDir, "src/loadSecondaryOrders.ts"),
+      // Read-only State Head master-pack release check.
+      path.resolve(artifactDir, "src/stateHeadPackCheck.ts"),
     ],
     platform: "node",
     bundle: true,

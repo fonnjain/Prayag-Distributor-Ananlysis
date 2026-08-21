@@ -14,6 +14,7 @@
     "secondary-sku-backfill": "node ./build.mjs && node --enable-source-maps ./dist/secondary-sku-backfill.mjs",
     "master-seed-import": "node ./build.mjs && node --enable-source-maps ./dist/masterSeedImport.mjs",
     "load-secondary-orders": "node ./build.mjs && node --enable-source-maps ./dist/loadSecondaryOrders.mjs",
+    "statehead-pack-check": "node ./build.mjs && node --enable-source-maps ./dist/stateHeadPackCheck.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

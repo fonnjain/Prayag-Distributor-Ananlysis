@@ -5,6 +5,10 @@
 // H amount, I group, J station, K STATE, L STATE HEAD, M product group, N FY, O FY
 import { listSheetTabs, readAllTabRows } from "../src/lib/registers/sheetsApi";
 import { pool } from "@workspace/db";
+import {
+  classifyStateHeadPackFile,
+  configuredStateHeadPackPolicy,
+} from "../src/lib/mgmt/stateHeadPack";
 
 const FILES: Array<[string, string]> = [
   ["1G3z_gOk5JR8yFmcVCadFCgpltjY1y0pI4ZBmGwrF2pU", "Anant Singh JI 2026-27"],
@@ -23,6 +27,24 @@ const FILES: Array<[string, string]> = [
   ["1nOEDqVQ0X1eYSbDhq-9x5yoBWTFJm9VpX9tjptDV4m8", "Sunil Patel  2026-27"],
   ["1kATkh-w4zebYIzlyoK0_GzPR1DD1n0ryEow4Ng26bH8", "Tamilnadu  2026-27"],
 ];
+
+// This diagnostic loader historically summed every workbook in its list. Keep
+// the scratch analysis safe when a temporary/duplicate workbook is added to
+// the source list; the release check has the same policy and also classifies
+// mixed feeders before publishing totals.
+const PACK_FILES = FILES.filter(([id, name]) => {
+  const manifest = classifyStateHeadPackFile({
+    fileId: id,
+    fileName: name,
+    evidence: [],
+    policy: configuredStateHeadPackPolicy(),
+  });
+  if (manifest.classification === "excluded") {
+    console.warn(`EXCLUDED from state-head scratch load: ${manifest.reason}`);
+    return false;
+  }
+  return true;
+});
 
 function s(v: unknown): string | null {
   if (v == null) return null;
@@ -44,7 +66,7 @@ async function main() {
   )`);
 
   let total = 0;
-  for (const [id, name] of FILES) {
+  for (const [id, name] of PACK_FILES) {
     let tabs;
     try {
       tabs = await listSheetTabs(id);
