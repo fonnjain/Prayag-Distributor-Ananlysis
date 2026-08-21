@@ -235,3 +235,10 @@ uri = "file://reports/canonical-coverage-mapping-77.csv"
 type = "table"
 title = "77-row canonical coverage mapping ledger"
 description = "Approved legacy-territory mappings with person, responsible state head, canonical leaf, and applied rule."
+
+[[outputs]]
+id = "YHaOXrt0hb4kqMZuuYZ2I"
+uri = "file://suggested-project-tasks.md"
+type = "text"
+title = "Suggested Project Tasks"
+description = "Complete list of all 55 currently suggested project task drafts, listed by task number and title."

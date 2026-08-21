@@ -20,6 +20,7 @@ import OrgCustomersPage from "@/pages/OrgCustomersPage";
 import OrgPeoplePage    from "@/pages/OrgPeoplePage";
 import OrgUsersPage     from "@/pages/OrgUsersPage";
 import CoverageDriftPage from "@/pages/CoverageDriftPage";
+import AttributionConflictsPage from "@/pages/AttributionConflictsPage";
 import AlertsPage from "@/pages/AlertsPage";
 import AlertRecipientsPage from "@/pages/AlertRecipientsPage";
 import WarningsPage from "@/pages/WarningsPage";
@@ -78,6 +79,7 @@ function ProtectedRoutes() {
         <Route path="/org/people"    component={OrgPeoplePage}    />
         <Route path="/org/customers" component={OrgCustomersPage} />
         <Route path="/org/coverage-review" component={CoverageDriftPage} />
+        <Route path="/org/attribution-conflicts" component={AttributionConflictsPage} />
         {user.role === 'admin' && <Route path="/org/users" component={OrgUsersPage} />}
         {/* Developer Portal */}
         <Route path="/dev/api" component={DevPortalPage} />
