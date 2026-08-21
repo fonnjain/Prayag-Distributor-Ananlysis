@@ -3110,6 +3110,19 @@ const MIGRATIONS: Migration[] = [
         ON person_registry_relationship_resolution (registry_id, created_at DESC);
     `,
   },
+  {
+    id: "072_person_registry_manual_relationship_uniqueness",
+    sql: `
+      -- Imported historical registry links may legitimately predate the human
+      -- review workflow. New manual decisions, however, must never make two
+      -- distinct registry identities resolve to the same People record.
+      CREATE UNIQUE INDEX IF NOT EXISTS pr_relationship_resolution_current_person_idx
+        ON person_registry_relationship_resolution (person_id)
+        WHERE superseded_at IS NULL
+          AND decision = 'linked'
+          AND person_id IS NOT NULL;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

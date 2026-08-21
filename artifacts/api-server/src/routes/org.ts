@@ -34,6 +34,7 @@ import {
   previewRegistryRelationshipResolution,
   resolveRegistryRelationship,
   RelationshipHierarchyInvalidError,
+  RelationshipPersonAlreadyLinkedError,
   RelationshipPreviewChangedError,
   RelationshipPreviewRequiredError,
 } from "../lib/personRegistryRelationshipResolution.js";
@@ -545,6 +546,9 @@ router.get("/person-registry/:id/relationship-preview", async (req, res) => {
     if (!preview) return void res.status(404).json({ error: "Person Registry record not found" });
     res.json(preview);
   } catch (error) {
+    if (error instanceof RelationshipPersonAlreadyLinkedError) {
+      return void res.status(409).json({ error: error.message });
+    }
     res.status(422).json({ error: error instanceof Error ? error.message : String(error) });
   }
 });
@@ -580,6 +584,9 @@ router.post("/person-registry/:id/relationship-resolution", async (req, res) => 
     await loadPersonRegistry();
     res.json({ success: true, resolution: result });
   } catch (error) {
+    if (error instanceof RelationshipPersonAlreadyLinkedError) {
+      return void res.status(409).json({ error: error.message });
+    }
     if (error instanceof RelationshipPreviewRequiredError) {
       return void res.status(422).json({ error: error.message });
     }

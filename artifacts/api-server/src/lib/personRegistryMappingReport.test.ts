@@ -105,6 +105,51 @@ describe("person registry mapping report", () => {
     expect(report.routeCounts).toEqual([{ stateHead: "Sandeep Dadheech", count: 1 }]);
   });
 
+  it("compares a linked renamed registry row with its saved People record, not an absent name candidate", () => {
+    const report = buildPersonRegistryMappingReport(
+      [source({
+        personId: 1,
+        canonicalName: "Amit Kumar (Former Territory)",
+        reportingManager: "Pawan Kumar Sharma",
+      })],
+      people,
+    );
+
+    expect(report.managerConflicts[0]).toMatchObject({
+      status: "no_name_candidate",
+      candidatePeople: [],
+      mappingScope: "linked",
+      managerComparison: {
+        registryManager: "Pawan Kumar Sharma",
+        operationalManager: "Sandeep Dadheech",
+        agrees: false,
+      },
+    });
+    expect(report.managerConflicts).toHaveLength(1);
+  });
+
+  it("compares an ambiguously named linked row with its saved People record", () => {
+    const report = buildPersonRegistryMappingReport(
+      [source({
+        personId: 1,
+        canonicalName: "Ravi Kumar",
+        reportingManager: "Pawan Kumar Sharma",
+      })],
+      people,
+    );
+
+    expect(report.managerConflicts[0]).toMatchObject({
+      status: "ambiguous_name",
+      candidatePeople: [{ personId: 2 }, { personId: 3 }],
+      mappingScope: "linked",
+      managerComparison: {
+        operationalManager: "Sandeep Dadheech",
+        agrees: false,
+      },
+    });
+    expect(report.managerConflicts).toHaveLength(1);
+  });
+
   it("fails closed when normalized names map to multiple people", () => {
     const report = buildPersonRegistryMappingReport(
       [source({ canonicalName: "Ravi Kumar", employeeCode: "202" })],

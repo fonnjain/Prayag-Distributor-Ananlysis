@@ -11,6 +11,7 @@ const resolveRegistryRelationship = vi.fn();
 
 class RegistryImpactRequiredError extends Error {}
 class RegistryImpactChangedError extends Error {}
+class RelationshipPersonAlreadyLinkedError extends Error {}
 
 vi.mock("@workspace/db", () => ({
   db: { select: vi.fn(), insert: vi.fn(), update: vi.fn(), delete: vi.fn() },
@@ -38,6 +39,7 @@ vi.mock("../lib/personRegistryRelationshipResolution.js", () => ({
   previewRegistryRelationshipResolution,
   resolveRegistryRelationship,
   RelationshipHierarchyInvalidError: class RelationshipHierarchyInvalidError extends Error {},
+  RelationshipPersonAlreadyLinkedError,
   RelationshipPreviewChangedError: class RelationshipPreviewChangedError extends Error {},
   RelationshipPreviewRequiredError: class RelationshipPreviewRequiredError extends Error {},
 }));
@@ -302,5 +304,26 @@ describe("relationship review mutation", () => {
 
     expect(res.status).toBe(422);
     expect(resolveRegistryRelationship).not.toHaveBeenCalled();
+  });
+
+  it("returns a conflict instead of silently merging two manual registry identities", async () => {
+    isAdminToken.mockReturnValue(true);
+    resolveRegistryRelationship.mockRejectedValue(
+      new RelationshipPersonAlreadyLinkedError("Selected People record is already linked"),
+    );
+
+    const res = await request(app)
+      .post("/api/person-registry/10/relationship-resolution")
+      .set("x-admin-secret", "valid-admin-secret")
+      .set("x-test-user", "admin")
+      .send({
+        personId: 5,
+        effectiveDate: "2026-08-21",
+        reason: "Verified identity evidence",
+        acknowledgedProposalHash: "preview-hash",
+      });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain("already linked");
   });
 });

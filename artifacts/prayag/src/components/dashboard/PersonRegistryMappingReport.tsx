@@ -53,6 +53,7 @@ interface ReportRow {
   registryEmployeeCode: string | null;
   reportingManager: string | null;
   registryStateHead: string | null;
+  hrStatus: string | null;
   status: MappingStatus;
   reviewRoute: string;
   candidatePeople: Candidate[];
@@ -142,6 +143,11 @@ function today(): string {
   return new Date().toLocaleDateString("en-CA");
 }
 
+function isActiveManagerConflict(row: ReportRow): boolean {
+  return row.managerComparison.agrees === false
+    && row.hrStatus?.trim().toLowerCase() === "active";
+}
+
 async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, options);
   if (!response.ok) {
@@ -169,6 +175,7 @@ export function PersonRegistryMappingReport({ adminSecret }: Props) {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [show, setShow] = useState<"all" | "review" | "automatic">("review");
+  const [managerConflictScope, setManagerConflictScope] = useState<"all" | "active" | "historical">("all");
   const [selectedRow, setSelectedRow] = useState<ReportRow | null>(null);
   const [target, setTarget] = useState("");
   const [effectiveDate, setEffectiveDate] = useState(today);
@@ -199,6 +206,11 @@ export function PersonRegistryMappingReport({ adminSecret }: Props) {
     for (const row of data?.resolvedRows ?? []) unique.set(row.registryId, row);
     const query = search.trim().toLowerCase();
     return [...unique.values()].filter((row) => {
+      if (managerConflictScope !== "all") {
+        if (row.managerComparison.agrees !== false) return false;
+        if (managerConflictScope === "active" && !isActiveManagerConflict(row)) return false;
+        if (managerConflictScope === "historical" && isActiveManagerConflict(row)) return false;
+      }
       if (show === "review" && row.status === "automatic_candidate") return false;
       if (show === "automatic" && row.status !== "automatic_candidate") return false;
       if (!query) return true;
@@ -210,7 +222,13 @@ export function PersonRegistryMappingReport({ adminSecret }: Props) {
         ...row.candidatePeople.map((candidate) => candidate.name),
       ].some((value) => value?.toLowerCase().includes(query));
     });
-  }, [data?.managerConflicts, data?.resolvedRows, data?.rows, search, show]);
+  }, [data?.managerConflicts, data?.resolvedRows, data?.rows, managerConflictScope, search, show]);
+
+  const managerConflictCounts = useMemo(() => {
+    const conflicts = data?.managerConflicts ?? [];
+    const active = conflicts.filter(isActiveManagerConflict).length;
+    return { active, historical: conflicts.length - active };
+  }, [data?.managerConflicts]);
 
   const people = useMemo(() => {
     const unique = new Map<number, Candidate>();
@@ -316,13 +334,14 @@ export function PersonRegistryMappingReport({ adminSecret }: Props) {
         )}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         {[
           ["Registry people", data.summary.registryPersonRows, "Source records"],
           ["Already linked", data.summary.linkedRows, "Current canonical links"],
-          ["Automatic candidates", data.summary.automaticCandidates, "Still require confirmation"],
           ["Review queue", data.summary.reviewQueue, "Requires a decision"],
-          ["Manager conflicts", data.summary.managerConflicts, "Never auto-linked"],
+          ["Active manager conflicts", managerConflictCounts.active, "Prioritise operational follow-up"],
+          ["Historical manager conflicts", managerConflictCounts.historical, "Deactive HR records; tidy separately"],
+          ["Automatic candidates", data.summary.automaticCandidates, "Still require confirmation"],
         ].map(([label, value, note]) => (
           <div key={label} className="rounded-lg border bg-card p-3">
             <p className="text-xs text-muted-foreground">{label}</p>
@@ -338,10 +357,28 @@ export function PersonRegistryMappingReport({ adminSecret }: Props) {
           <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search HR name, manager, State Head, or People candidate…" className="h-8 pl-8 text-sm" />
         </div>
         {(["review", "automatic", "all"] as const).map((value) => (
-          <Button key={value} size="sm" variant={show === value ? "default" : "outline"} onClick={() => setShow(value)}>
+          <Button key={value} size="sm" variant={show === value && managerConflictScope === "all" ? "default" : "outline"} onClick={() => {
+            setShow(value);
+            setManagerConflictScope("all");
+          }}>
             {value === "review" ? "Needs review" : value === "automatic" ? "Automatic candidates" : "All"}
           </Button>
         ))}
+        <span className="ml-1 text-xs font-medium text-muted-foreground">Manager conflicts:</span>
+        <Button
+          size="sm"
+          variant={managerConflictScope === "active" ? "default" : "outline"}
+          onClick={() => setManagerConflictScope("active")}
+        >
+          Active ({managerConflictCounts.active})
+        </Button>
+        <Button
+          size="sm"
+          variant={managerConflictScope === "historical" ? "default" : "outline"}
+          onClick={() => setManagerConflictScope("historical")}
+        >
+          Historical / deactive ({managerConflictCounts.historical})
+        </Button>
       </div>
 
       <div className="overflow-hidden rounded-xl border">
@@ -363,6 +400,11 @@ export function PersonRegistryMappingReport({ adminSecret }: Props) {
                   <td className="px-4 py-3">
                     <p className="font-medium">{row.canonicalName}</p>
                     <p className="mt-0.5 text-xs text-muted-foreground">HR manager: {row.reportingManager || "—"}</p>
+                     {row.managerComparison.agrees === false && (
+                       <p className="mt-0.5 text-xs text-muted-foreground">
+                         HR status: {row.hrStatus || "Not supplied"}
+                       </p>
+                     )}
                     <p className="mt-0.5 text-xs text-muted-foreground">Route: {row.reviewRoute}</p>
                   </td>
                   <td className="px-4 py-3">

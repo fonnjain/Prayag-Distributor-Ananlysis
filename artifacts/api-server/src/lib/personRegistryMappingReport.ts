@@ -166,8 +166,10 @@ export function buildPersonRegistryMappingReport(
 ): PersonRegistryMappingReport {
   const peopleByName = new Map<string, OperationalPerson[]>();
   const peopleByCode = new Map<string, OperationalPerson[]>();
+  const peopleById = new Map<number, OperationalPerson>();
 
   for (const person of people) {
+    peopleById.set(person.personId, person);
     const nameKey = norm(person.name);
     if (nameKey) {
       const sameName = peopleByName.get(nameKey) ?? [];
@@ -189,6 +191,13 @@ export function buildPersonRegistryMappingReport(
     const sourceCode = normaliseEmployeeCode(source.employeeCode);
     const codePeople = sourceCode ? peopleByCode.get(sourceCode) ?? [] : [];
     const uniqueCandidate = candidates.length === 1 ? candidates[0] : null;
+    // A persisted manual link is stronger evidence than a fresh name match.
+    // Keep the name candidates in the report so a reviewer can see ambiguity
+    // or a rename, but compare the HR manager with the saved People record.
+    const linkedPerson = source.personId === null
+      ? null
+      : peopleById.get(source.personId) ?? null;
+    const comparisonPerson = linkedPerson ?? uniqueCandidate;
     const candidateCode = normaliseEmployeeCode(uniqueCandidate?.employeeCode);
     const codeConflicts = Boolean(sourceCode && candidateCode && sourceCode !== candidateCode);
     const codeIncludesCandidate = Boolean(
@@ -211,7 +220,7 @@ export function buildPersonRegistryMappingReport(
     }
 
     const registryManagerKey = norm(source.reportingManager);
-    const operationalManagerKey = norm(uniqueCandidate?.reportsToName);
+    const operationalManagerKey = norm(comparisonPerson?.reportsToName);
     const managerEvidenceAvailable = Boolean(registryManagerKey && operationalManagerKey);
     const managerAgrees = managerEvidenceAvailable
       ? registryManagerKey === operationalManagerKey
@@ -236,7 +245,7 @@ export function buildPersonRegistryMappingReport(
 
     const reviewRoute =
       source.stateHead?.trim() ||
-      uniqueCandidate?.stateHeadName?.trim() ||
+      comparisonPerson?.stateHeadName?.trim() ||
       UNASSIGNED_ROUTE;
 
     return {
@@ -256,7 +265,7 @@ export function buildPersonRegistryMappingReport(
       employeeCodeEvidence,
       managerComparison: {
         registryManager: source.reportingManager,
-        operationalManager: uniqueCandidate?.reportsToName ?? null,
+        operationalManager: comparisonPerson?.reportsToName ?? null,
         agrees: managerAgrees,
       },
       resolution: source.resolutionDecision

@@ -79,8 +79,24 @@ interface CurrentResolutionRow {
   created_at: Date;
 }
 
+interface CurrentManualPersonLinkRow {
+  registry_id: number;
+  canonical_name: string;
+}
+
 export class RelationshipPreviewRequiredError extends Error {}
 export class RelationshipPreviewChangedError extends Error {}
+export class RelationshipPersonAlreadyLinkedError extends Error {
+  constructor(
+    readonly personId: number,
+    readonly existingRegistryId: number,
+    readonly existingCanonicalName: string,
+  ) {
+    super(
+      `Selected People record is already linked to Person Registry record ${existingRegistryId} (${existingCanonicalName})`,
+    );
+  }
+}
 export class RelationshipHierarchyInvalidError extends Error {
   constructor(readonly hierarchy: RelationshipImpact["hierarchy"]) {
     super("Operational hierarchy contains a self-link or reporting cycle");
@@ -170,6 +186,40 @@ async function loadCurrentResolution(
     [registryId],
   );
   return rows[0] ?? null;
+}
+
+/**
+ * A human relationship decision is deliberately one-to-one. Imported legacy
+ * registry links can predate this workflow and are left intact; this guard
+ * prevents the editor from creating a new silent identity merge.
+ */
+export async function assertNoOtherCurrentManualLink(
+  queryable: { query: (sql: string, params?: unknown[]) => Promise<{ rows: CurrentManualPersonLinkRow[] }> },
+  personId: number,
+  registryId: number,
+  forUpdate = false,
+): Promise<void> {
+  const { rows } = await queryable.query(
+    `SELECT resolution.registry_id, registry.canonical_name
+       FROM person_registry_relationship_resolution resolution
+       JOIN person_registry registry ON registry.id = resolution.registry_id
+      WHERE resolution.person_id = $1
+        AND resolution.decision = 'linked'
+        AND resolution.superseded_at IS NULL
+        AND resolution.registry_id <> $2
+      ORDER BY resolution.created_at DESC
+      LIMIT 1
+      ${forUpdate ? "FOR UPDATE OF resolution" : ""}`,
+    [personId, registryId],
+  );
+  const existing = rows[0];
+  if (existing) {
+    throw new RelationshipPersonAlreadyLinkedError(
+      personId,
+      existing.registry_id,
+      existing.canonical_name,
+    );
+  }
 }
 
 export async function validateOperationalHierarchy(
@@ -290,6 +340,9 @@ export async function previewRegistryRelationshipResolution(
   if (!registry) return null;
   assertEffectiveDateIsCurrentOrLaterInHistory(input.effectiveDate, currentResolution);
   if (input.personId !== null && !person) throw new Error("Selected People record is not active and assignable");
+  if (input.personId !== null) {
+    await assertNoOtherCurrentManualLink(pool, input.personId, registryId);
+  }
   return buildPreview(registry, person, currentResolution, decision, input.effectiveDate, hierarchy);
 }
 
@@ -321,6 +374,9 @@ export async function resolveRegistryRelationship(
     }
     const person = input.personId === null ? null : await loadPerson(client, input.personId, true);
     if (input.personId !== null && !person) throw new Error("Selected People record is not active and assignable");
+    if (input.personId !== null) {
+      await assertNoOtherCurrentManualLink(client, input.personId, registryId, true);
+    }
     const currentResolution = await loadCurrentResolution(client, registryId, true);
     const hierarchy = await validateOperationalHierarchy(client);
     if (!hierarchy.valid) throw new RelationshipHierarchyInvalidError(hierarchy);
