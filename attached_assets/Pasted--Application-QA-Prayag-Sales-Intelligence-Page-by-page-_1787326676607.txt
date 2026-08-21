@@ -1,0 +1,354 @@
+# Application QA — Prayag Sales Intelligence
+
+**Page by page, with expected values**
+*21 August 2026*
+
+---
+
+## How to use this
+
+Work top to bottom. **Section A gates everything** — if the anchors are wrong, every page below is wrong and testing them wastes time.
+
+Each page lists **what to check**, **what a pass looks like**, and **the trap** — the thing most likely to be broken and least likely to be noticed.
+
+Where a figure appears, it is the expected value. Anything else is a fail.
+
+> **Two rules that override everything else.** A number must never change because of a display action. And the same figure on two pages must agree — cross-page disagreement is the most common real defect and section G is dedicated to it.
+
+---
+
+# A · Anchors — run first, every time
+
+| Check | Expected |
+|---|---|
+| `sale_line` FY2025-26 rows | **145,613** |
+| `sale_line` FY2025-26 net | **₹3,609,953,808.51** (₹360.9954 Cr) |
+| `customer` rows | **8,802** |
+| `person` rows | **361** = 179 active + 180 departed + 2 added |
+| `margin_fact` rows | 32,179 |
+| `mrp_current_catalogue` distinct codes | 6,223 |
+| Alert store | 36 total |
+| `git rev-parse HEAD` vs `origin/main` | Identical |
+| Production commit vs `origin/main` | Identical |
+
+**Fail on any FY2025-26 figure = stop.** Do not continue testing.
+
+---
+
+# B · Global behaviours
+
+Test once, on any three pages. A failure here affects everything.
+
+## B1 · Period selector
+
+| Check | Expected |
+|---|---|
+| FY dropdown | 2026-27 default, prior years selectable |
+| YTD / Q1–Q4 / Full Year / month buttons | Q3, Q4 greyed for the open year |
+| Aug marked "open" | Yes, and figures reflect a partial month |
+| Pages with no monthly source | State plainly: "Period selection does not apply" |
+
+**The trap:** a page that silently ignores the period selector and shows YTD regardless. Change the period and confirm the number moves.
+
+## B2 · Filters
+
+| Check | Expected |
+|---|---|
+| State Head, State, Distributor, Person | Cascade — each narrows the next |
+| State dropdown | Splits always shown: UP ( A ), UP (AS), UTTAR PRADESH, DELHI, DELHI NCR, JAMMU, KASHMIR, KARNATAKA (B), RAJASTHAN (N) |
+| Selecting a parent state | Returns **all** its splits |
+| Non-geographic values | GEM, JJM, HITESH, Non-territory — **absent** from every picker |
+| Clearing a filter | Returns to the unfiltered figure exactly |
+
+**The trap:** selecting "Uttar Pradesh" and getting only rows literally labelled UTTAR PRADESH, missing UP ( A ) and UP (AS). Sum the splits individually and confirm they equal the parent selection to the rupee.
+
+## B3 · Exports
+
+| Check | Expected |
+|---|---|
+| Export xlsx present | On every table page |
+| Exported totals | **Equal the on-screen totals** |
+| Filters applied | Export respects the current filter state |
+| Column headers | Match the screen |
+
+**The trap:** an export that ignores filters and dumps everything. Filter to one state, export, and count the rows.
+
+## B4 · Empty and error states
+
+| Check | Expected |
+|---|---|
+| No data for a filter combination | Says so; never a blank table or a zero |
+| Source not loaded | "Not recorded" or a stated reason — never 0 |
+| Failed load | Visible error, not silent |
+
+**The trap:** absence rendered as zero. A member with no target must read "no target recorded", not 0%.
+
+---
+
+# C · Dashboard
+
+## C1 · Overview
+
+| Check | Expected |
+|---|---|
+| FY24-25 total | ₹341.14 Cr |
+| FY25-26 total | ₹360.99 Cr |
+| Orders YTD FY26-27 | ₹121.2 Cr |
+| Sales YTD FY26-27 | ₹104.91 Cr |
+| Retailers | 18,117 |
+| Channel Partners | 269 |
+| Secondary Retail Reach | 11,987 |
+
+Every card must state its source and basis. The Retailers card must say **registered count, not active** — 18,117 against ~5,485 active is a factor of three.
+
+## C2 · Coverage
+
+| Check | Expected |
+|---|---|
+| States / Districts / Cities / Retailers | 31 / 497 / 2,765 / 18,117 |
+| Resource Coverage by Head | Sandeep 63 dist / 4,847 dealers |
+| "Period selection does not apply" | Shown |
+| Source freshness | Retailer-Distributor Data is stale — flag it |
+
+**The trap:** reading "Dealers" as distributors. That column counts retail shops.
+
+## C3 · Momentum
+
+| Check | Expected |
+|---|---|
+| On pace | +3.50% nominal, **−3.40% real** (index 1.071) |
+| Accelerating | Jul-26 +21.80% vs Jun +3.60% |
+| Run rate | ₹347.30 Cr on the seasonal curve |
+| Pipeline | ₹6.16 Cr pending, 5.94% of booking |
+| Basis line | "territory channel · like months Apr-26–Jul-26 vs Apr-25–Jul-25" |
+
+Leading indicators: 64 new customers, 7,122 new SKUs, 3,641 first-order codes, 242 narrowing, effective discount 48.05%.
+
+**The trap:** nominal and real pointing opposite ways. If only nominal is shown, the page misleads.
+
+## C4 · Data Health
+
+| Check | Expected |
+|---|---|
+| Last sync times per source | Present and recent |
+| Failed loads | Visible |
+| Frozen month state | FY2025-26 all frozen; Aug-26 open |
+
+---
+
+# D · Sales
+
+## D1 · SKU Deep Dive
+
+Tabs: Overview · Review · Push · Trends · Discounts · Timing · Movement · **Vol Decline** · **Price Shrinkers**
+
+| Check | Expected |
+|---|---|
+| Overview segment table | CP ₹23.33 Cr, PTMT ₹22.80 Cr, CPVC ₹10.73 Cr |
+| Gap codes' net | CP ₹12.21 Cr, breadth 38.04% |
+| Vol Decline | 836 codes, 68 "stopped" flagged, segment subtotals reconcile |
+| Price Shrinkers | Every row has qty growth **positive** and real growth **negative** |
+| Price Shrinkers — excluded | Count shown for codes with no MRP |
+| Gross contribution label | "factory cost only. Not profit." |
+| No cost data | Sorts **last**, not zero |
+
+**The trap on Price Shrinkers:** the MRP index needs "MRP then", not today's price. Print the arithmetic for one row — basket, both MRP totals, index — and check it by hand. If `mrpIndex` is 1.000, it is using current price and every row is wrong in the same direction.
+
+## D2 · Distributor Deep Dive
+
+| Check | Expected |
+|---|---|
+| Geography-first filter chain | State → distributor |
+| Flow gap | Two readings stated, never one |
+| Retailer with two distributors | Appears under both |
+
+## D3 · Secondary Orders
+
+| Check | Expected |
+|---|---|
+| Rows | 8,602 across 1,361 orders |
+| Labelled | **ORDER BOOKING, not dispatch** |
+| Status split | APPROVED 8,172, PENDING 430 |
+| Value shown | Basic (ex-GST), not dealer value |
+| Re-upload same file | Row count unchanged — idempotent |
+
+**The trap:** summing this with secondary sales. They measure different things.
+
+---
+
+# E · MRP and margin
+
+## E1 · MRP Master
+
+| Check | Expected |
+|---|---|
+| Codes | ~6,223 from the authority |
+| Duplicates | **Zero** |
+| Multi-division codes | ~55, each with **one** price |
+| CNS-15 | One price |
+| Revision history | Effective-dated, prior MRP visible |
+
+## E2 · MRP Calculator
+
+| Check | Expected |
+|---|---|
+| Direction | Target retailer buying price → MRP, working backwards |
+| Primary discount | From `margin_fact`, trailing 12 months, volume-weighted |
+| Register discount | Shown beside it as a cross-check |
+| No discount data | Says so; requires manual entry — never substitutes a segment average |
+| Writing MRP | Requires explicit confirmation — the calculator only proposes |
+
+## E3 · Margin
+
+| Check | Expected |
+|---|---|
+| Segment BOM% | Within a few points of the FY2025-26 summary on five of seven |
+| Sink, Plumbing | Composition differences, not defects |
+| Frozen months | No unfreeze path exists |
+
+## E4 · Competition
+
+| Check | Expected |
+|---|---|
+| Rows | ~150, Sparsh Pearl |
+| Net price | Labelled **DERIVED** — MRP less an assumed 40% |
+| Unmapped rows | Visible, `prayag_item_code` NULL |
+| Three states distinguishable | No row · unmapped · fetch failed |
+| API key field | **Must not exist on the page** |
+
+## E5 · Products register gap
+
+| Check | Expected |
+|---|---|
+| Card reads | **648 of 3,751** |
+| Top prefixes | (numeric), PTA-, PHW-, CPA-, SNPT-, GP-, PIS- |
+
+**The trap:** if it reads 42, the deployment is stale — that figure comes from the local `item_master` (11,368 codes), not the authority.
+
+---
+
+# F · Alerts, Market, Organisation
+
+## F1 · Red Alert
+
+| Check | Expected |
+|---|---|
+| Second detection run, no change | **0 new**, `periods_open` increments |
+| Acknowledge, re-run | Stays acknowledged |
+| Aradhya Kedia | B3 rollup and S1 destocking linked as **one** card |
+| Open 3+ periods | Renders differently |
+| Cap | 20 per section, "N below the cut" shown |
+| Digest counts | **Equal the page** |
+
+## F2 · Alert Settings
+
+| Check | Expected |
+|---|---|
+| Recipients | 13 at L1, **0 at L2**, 1 at L3 |
+| Readiness panel names | Sunil Mohanty only — no test rows |
+| Empty L2 warning | "escalates directly to Level 3 (CEO) after 7 days" |
+| WhatsApp rows | `pending`, "no provider configured", never transmit |
+
+## F3 · Market Survey
+
+| Check | Expected |
+|---|---|
+| Three entry tabs | Existing SKU · New SKU · New Customer |
+| Cascade | State Head → State → Distributor → Retailer |
+| Price entry | Net direct **or** MRP + discount — both give the same stored net |
+| Ambiguous code via PTMT | CNS-15 returns ₹860, not ₹1,020 |
+| New retailer | Goes to Review Queue; `customer_master` unchanged |
+| Analytics | Every figure carries **n**; below 5 reads "indicative only" |
+| API key field | **Must not exist** |
+
+## F4 · Organisation → People
+
+| Check | Expected |
+|---|---|
+| Active filter | 179 |
+| All filter | 359 |
+| Person Registry tab | 1,033 entries |
+| Departed in assignee dropdowns | **None** |
+| Move a person | Impact preview mandatory |
+| Registry alias PATCH | 401 no admin · 422 blank reason · 400 unlisted field · 200 valid |
+
+## F5 · Organisation → Customers
+
+| Check | Expected |
+|---|---|
+| Renders | 8,802 |
+| Reassign | Preview mandatory; 409 on stale figures |
+| **After reassign** | **FY2025-26 by head IDENTICAL** |
+| Type change | Reason required |
+| Add customer | Review Queue only |
+
+## F6 · Attribution Conflicts
+
+| Check | Expected |
+|---|---|
+| Apply / promote control | **None** — evidence only |
+| Selection basis | FY **label**, never date year |
+| Grahaa Priya | Pack: Babu + Sandeep · Register: Sandeep |
+| Babu / Suresh Nair | ₹2.3455 Cr / ₹2.9111 Cr, linked to the 9 customers |
+| Himachal, Maharashtra, Punjab | 58/58 matched |
+| After viewing | Coverage and assignment counts unchanged |
+
+---
+
+# G · Cross-page consistency
+
+**The most valuable section.** Same figure, two pages — they must agree.
+
+| Figure | Page A | Page B |
+|---|---|---|
+| FY2025-26 total | Overview ₹360.99 Cr | Company Reports |
+| FY2026-27 YTD | Overview ₹104.91 Cr | Momentum |
+| Retailer count | Coverage 18,117 | Customer Data |
+| Active retailers | ~5,485 | Organisation → Customers |
+| Alert count | Red Alert page | Weekly digest |
+| Segment net | SKU Overview | Company Reports |
+| Customer net | Rankings | Distributor Deep Dive |
+| MRP for one code | MRP Master | Calculator, Price Shrinkers |
+| Head team size | Organisation → People | Coverage |
+
+**Method:** pick one head and one state. Read every figure for them on every page. Any disagreement is a real defect.
+
+---
+
+# H · Regression — run before any release
+
+```
+FY2025-26 net by head              → unchanged
+Second detection run                → 0 new alerts
+Registry PATCH, four guards         → 401 / 422 / 400 / 200
+Customer reassign                   → history unchanged
+Duplicate employee code             → list or throw, never one
+State picker                        → splits present
+MRP register gap                    → 648 of 3,751
+Digest vs page counts               → equal
+Attribution conflicts               → renders, no apply control
+Export vs screen totals             → equal
+git HEAD vs origin/main             → identical
+```
+
+---
+
+# I · Traps worth knowing
+
+Each cost real time to find.
+
+| Trap | Where it bites |
+|---|---|
+| Absence rendered as zero | "No target recorded" ≠ 0% |
+| A state flag trusted over the data | A month marked complete with zero rows |
+| Fuzzy match before exact | 130-B truncated to 130 |
+| Head resolved by string | SANDEEP JI, RIZVI JI, BIJJU are pack forms |
+| A hardcoded count in a header | "179 people" beside "0 of 0 shown" |
+| Two lists that must agree | They will diverge |
+| A date wrong while its label is right | The workbook year defect |
+| Stale deployment serving old routes | The card that read 42 for days |
+| Reason and operator in one column | "Who did this" loses its answer |
+
+---
+
+*Prayag Sales Intelligence · application QA · 21 August 2026*
