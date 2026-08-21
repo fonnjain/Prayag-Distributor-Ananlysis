@@ -37,6 +37,25 @@ type PartyAttribution = {
   heads: Map<string, Pair>;
 };
 
+type EvidenceLine = Pick<PackLine, "file" | "rowNumber" | "head" | "invoice" | "transactionDate" | "net">;
+
+type CrossHeadComparison = {
+  leftHead: string;
+  rightHead: string;
+  leftRows: number;
+  rightRows: number;
+  leftNet: number;
+  rightNet: number;
+  sameInvoiceAmountRows: number;
+  sameInvoiceAmountNet: number;
+  sameInvoiceDateAmountRows: number;
+  dateMismatchedRows: number;
+  unmatchedLeft: EvidenceLine[];
+  unmatchedRight: EvidenceLine[];
+  matchedRows: Array<{ left: EvidenceLine; right: EvidenceLine; datesMatch: boolean }>;
+  classification: "full cross-head financial duplicate" | "partial cross-head financial duplicate" | "no same-invoice amount match";
+};
+
 export type StateHeadAttributionConflictReport = {
   generatedAt: string;
   readOnly: true;
@@ -73,6 +92,8 @@ export type StateHeadAttributionConflictReport = {
     workbookNet: number;
     registerNet: number;
     departedWorkbookHeads: string[];
+    packToRegisterRatio: number | null;
+    crossHeadComparisons: CrossHeadComparison[];
   }>;
   departedReview: Array<{
     head: string;
@@ -117,6 +138,14 @@ export type StateHeadAttributionConflictReport = {
     registerBreakdown: Array<Pair & { head: string }>;
     exception: string;
   }>;
+  coverageScope: {
+    scope: string;
+    packPairCount: number;
+    coveragePairCount: number;
+    packOnlyPairCount: number;
+    packOnlyNet: number;
+    topPackOnlyPairs: Array<{ head: string; state: string; rows: number; net: number }>;
+  };
 };
 
 const FY = "2026-27";
@@ -204,6 +233,94 @@ function duplicateIdentity(line: PackLine): string {
     line.transactionDate ?? "UNDATED",
     line.net.toFixed(2),
   ].join("\u0000");
+}
+
+function crossHeadFinancialIdentity(line: PackLine): string {
+  return [
+    line.invoice.toUpperCase(),
+    normParty(line.party),
+    line.net.toFixed(2),
+  ].join("\u0000");
+}
+
+function toEvidenceLine(line: PackLine): EvidenceLine {
+  return {
+    file: line.file,
+    rowNumber: line.rowNumber,
+    head: line.head,
+    invoice: line.invoice,
+    transactionDate: line.transactionDate,
+    net: line.net,
+  };
+}
+
+function compareCrossHeadRows(lines: PackLine[]): CrossHeadComparison[] {
+  const byHead = new Map<string, PackLine[]>();
+  for (const line of lines) {
+    const group = byHead.get(line.head) ?? [];
+    group.push(line);
+    byHead.set(line.head, group);
+  }
+  const heads = [...byHead.keys()].sort((a, b) => a.localeCompare(b));
+  const comparisons: CrossHeadComparison[] = [];
+
+  for (let leftIndex = 0; leftIndex < heads.length; leftIndex++) {
+    for (let rightIndex = leftIndex + 1; rightIndex < heads.length; rightIndex++) {
+      const leftLines = byHead.get(heads[leftIndex]) ?? [];
+      const rightLines = byHead.get(heads[rightIndex]) ?? [];
+      const rightByIdentity = new Map<string, PackLine[]>();
+      for (const line of rightLines) {
+        const key = crossHeadFinancialIdentity(line);
+        const group = rightByIdentity.get(key) ?? [];
+        group.push(line);
+        rightByIdentity.set(key, group);
+      }
+
+      const matchedRows: Array<{ left: EvidenceLine; right: EvidenceLine; datesMatch: boolean }> = [];
+      const unmatchedLeft: EvidenceLine[] = [];
+      for (const left of leftLines) {
+        const candidates = rightByIdentity.get(crossHeadFinancialIdentity(left));
+        const right = candidates?.shift();
+        if (right) {
+          matchedRows.push({
+            left: toEvidenceLine(left),
+            right: toEvidenceLine(right),
+            datesMatch: left.transactionDate === right.transactionDate,
+          });
+        }
+        else unmatchedLeft.push(toEvidenceLine(left));
+      }
+      const unmatchedRight = [...rightByIdentity.values()]
+        .flat()
+        .map(toEvidenceLine);
+      const sameInvoiceAmountNet = matchedRows.reduce((sum, match) => sum + match.left.net, 0);
+      const sameInvoiceAmountRows = matchedRows.length;
+      const sameInvoiceDateAmountRows = matchedRows.filter((match) => match.datesMatch).length;
+
+      comparisons.push({
+        leftHead: heads[leftIndex],
+        rightHead: heads[rightIndex],
+        leftRows: leftLines.length,
+        rightRows: rightLines.length,
+        leftNet: leftLines.reduce((sum, line) => sum + line.net, 0),
+        rightNet: rightLines.reduce((sum, line) => sum + line.net, 0),
+        sameInvoiceAmountRows,
+        sameInvoiceAmountNet,
+        sameInvoiceDateAmountRows,
+        dateMismatchedRows: sameInvoiceAmountRows - sameInvoiceDateAmountRows,
+        unmatchedLeft,
+        unmatchedRight,
+        matchedRows,
+        classification:
+          sameInvoiceAmountRows === 0
+            ? "no same-invoice amount match"
+            : unmatchedLeft.length === 0 && unmatchedRight.length === 0
+              ? "full cross-head financial duplicate"
+              : "partial cross-head financial duplicate",
+      });
+    }
+  }
+  return comparisons;
 }
 
 async function listFiles(folderId: string): Promise<DriveFile[]> {
@@ -331,7 +448,7 @@ async function buildReport(): Promise<StateHeadAttributionConflictReport> {
   };
   await Promise.all(Array.from({ length: Math.min(3, files.length) }, worker));
 
-  const [registerResult, institutionalResult] = await Promise.all([
+  const [registerResult, institutionalResult, coverageResult] = await Promise.all([
     pool.query<{ state: string; customer: string; head: string | null; net: string }>(`
       SELECT state_canon AS state, customer, head_canon AS head, SUM(amount)::text AS net
       FROM sale_line_current
@@ -350,6 +467,18 @@ async function buildReport(): Promise<StateHeadAttributionConflictReport> {
         )
       GROUP BY head_canon
       ORDER BY head_canon NULLS FIRST
+    `, [FY]),
+    pool.query<{ head: string; state: string; rows: string; net: string }>(`
+      SELECT p.name AS head,
+             c.state_canon AS state,
+             COUNT(*)::text AS rows,
+             COALESCE(SUM(c.evidence_net_amount), 0)::text AS net
+      FROM person_state_coverage c
+      JOIN person p ON p.person_id = c.state_head_person_id
+      WHERE c.fiscal_year = $1
+        AND c.source = 'derived_register'
+        AND c.voided_at IS NULL
+      GROUP BY p.name, c.state_canon
     `, [FY]),
   ]);
 
@@ -388,6 +517,11 @@ async function buildReport(): Promise<StateHeadAttributionConflictReport> {
         derivedRegisterHeads.map((item) => item.head).join("\u0000")
       ) continue;
       disagreementCount++;
+      const customerLines = lines.filter(
+        (line) => line.state === state && normParty(line.party) === partyKey,
+      );
+      const workbookNet = workbookHeads.reduce((sum, item) => sum + item.net, 0);
+      const registerNet = derivedRegisterHeads.reduce((sum, item) => sum + item.net, 0);
       conflicts.push({
         state,
         customer: packParty?.party ?? partyKey,
@@ -395,11 +529,13 @@ async function buildReport(): Promise<StateHeadAttributionConflictReport> {
         workbookHeads,
         derivedRegisterHeads,
         workbookRows: workbookHeads.reduce((sum, item) => sum + item.rows, 0),
-        workbookNet: workbookHeads.reduce((sum, item) => sum + item.net, 0),
-        registerNet: derivedRegisterHeads.reduce((sum, item) => sum + item.net, 0),
+        workbookNet,
+        registerNet,
         departedWorkbookHeads: workbookHeads
           .map((item) => item.head)
           .filter((head) => DEPARTED_HEADS.has(head)),
+        packToRegisterRatio: registerNet > 0 ? workbookNet / registerNet : null,
+        crossHeadComparisons: compareCrossHeadRows(customerLines),
       });
     }
     validationStates.push({
@@ -502,6 +638,16 @@ async function buildReport(): Promise<StateHeadAttributionConflictReport> {
   const workbookNet = workbookBreakdown.reduce((sum, item) => sum + item.net, 0);
   const registerRows = registerBreakdown.reduce((sum, item) => sum + item.rows, 0);
   const registerNet = registerBreakdown.reduce((sum, item) => sum + item.net, 0);
+  const coveragePairs = new Set(
+    coverageResult.rows.map((row) => `${canonicalHead(row.head)}\u0000${canonicalState(row.state)}`),
+  );
+  const packOnlyPairs = [...packPairs.entries()]
+    .filter(([key]) => !coveragePairs.has(key))
+    .map(([key, pair]) => {
+      const [head, state] = key.split("\u0000");
+      return { head, state, ...pair };
+    })
+    .sort((a, b) => b.net - a.net || a.state.localeCompare(b.state));
 
   return {
     generatedAt: new Date().toISOString(),
@@ -531,5 +677,14 @@ async function buildReport(): Promise<StateHeadAttributionConflictReport> {
       registerBreakdown,
       exception: "OTHER / HITESH remains visible as an exception and is not assigned automatically.",
     }],
+    coverageScope: {
+      scope:
+        "person_state_coverage is intentionally derived only for declared multi-head areas (AP, Himachal Pradesh, Maharashtra, Punjab, Tamil Nadu, and Telangana). “Pack only” means this coverage view does not model that head/state pair; it is not evidence of a missing customer assignment.",
+      packPairCount: packPairs.size,
+      coveragePairCount: coveragePairs.size,
+      packOnlyPairCount: packOnlyPairs.length,
+      packOnlyNet: packOnlyPairs.reduce((sum, pair) => sum + pair.net, 0),
+      topPackOnlyPairs: packOnlyPairs.slice(0, 8),
+    },
   };
 }

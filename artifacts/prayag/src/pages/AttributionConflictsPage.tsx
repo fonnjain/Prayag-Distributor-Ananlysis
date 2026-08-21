@@ -17,6 +17,30 @@ import { Badge } from "@/components/ui/badge";
 // ── Types ─────────────────────────────────────────────────────────────────
 
 type Pair = { head: string; rows: number; net: number };
+type EvidenceLine = {
+  file: string;
+  rowNumber: number;
+  head: string;
+  invoice: string;
+  transactionDate: string | null;
+  net: number;
+};
+type CrossHeadComparison = {
+  leftHead: string;
+  rightHead: string;
+  leftRows: number;
+  rightRows: number;
+  leftNet: number;
+  rightNet: number;
+  sameInvoiceAmountRows: number;
+  sameInvoiceAmountNet: number;
+  sameInvoiceDateAmountRows: number;
+  dateMismatchedRows: number;
+  unmatchedLeft: EvidenceLine[];
+  unmatchedRight: EvidenceLine[];
+  matchedRows: Array<{ left: EvidenceLine; right: EvidenceLine; datesMatch: boolean }>;
+  classification: "full cross-head financial duplicate" | "partial cross-head financial duplicate" | "no same-invoice amount match";
+};
 
 interface SelectionAudit {
   fyLabelRows: number;
@@ -47,6 +71,8 @@ interface Conflict {
   workbookNet: number;
   registerNet: number;
   departedWorkbookHeads: string[];
+  packToRegisterRatio: number | null;
+  crossHeadComparisons: CrossHeadComparison[];
 }
 
 interface DepartedReview {
@@ -70,6 +96,14 @@ interface AttributionConflictsPayload {
   duplicateSourceLines: any[];
   futureRows: any[];
   institutionalConflict: any[];
+  coverageScope?: {
+    scope: string;
+    packPairCount: number;
+    coveragePairCount: number;
+    packOnlyPairCount: number;
+    packOnlyNet: number;
+    topPackOnlyPairs: Array<{ head: string; state: string; rows: number; net: number }>;
+  };
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────
@@ -93,6 +127,10 @@ function formatDate(val: any) {
   } catch {
     return String(val);
   }
+}
+
+function formatRatio(value: number | null | undefined) {
+  return value == null || !Number.isFinite(Number(value)) ? "—" : `${Number(value).toFixed(2)}×`;
 }
 
 // ── Components ────────────────────────────────────────────────────────────
@@ -221,6 +259,105 @@ export default function AttributionConflictsPage() {
     );
   };
 
+  const renderCoverageScope = (coverageScope: AttributionConflictsPayload["coverageScope"]) => {
+    if (!coverageScope) return null;
+    return (
+      <section className="rounded-xl border border-sky-200 bg-sky-50/60 p-4 text-sm text-sky-950 dark:border-sky-900/60 dark:bg-sky-950/25 dark:text-sky-100">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-semibold">Coverage scope — not an assignment warning</h2>
+            <p className="mt-1 max-w-4xl text-xs leading-5">{coverageScope.scope}</p>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center text-xs">
+            <div className="rounded-md border border-sky-200/80 bg-white/60 px-2 py-1.5 dark:border-sky-900/60 dark:bg-black/10">
+              <div className="font-semibold">{coverageScope.packPairCount}</div>
+              <div className="text-[10px] text-muted-foreground">pack pairs</div>
+            </div>
+            <div className="rounded-md border border-sky-200/80 bg-white/60 px-2 py-1.5 dark:border-sky-900/60 dark:bg-black/10">
+              <div className="font-semibold">{coverageScope.coveragePairCount}</div>
+              <div className="text-[10px] text-muted-foreground">coverage pairs</div>
+            </div>
+            <div className="rounded-md border border-sky-200/80 bg-white/60 px-2 py-1.5 dark:border-sky-900/60 dark:bg-black/10">
+              <div className="font-semibold">{coverageScope.packOnlyPairCount}</div>
+              <div className="text-[10px] text-muted-foreground">pack only</div>
+            </div>
+          </div>
+        </div>
+        <p className="mt-3 text-xs">
+          <span className="font-semibold">Largest pack-only pairs:</span>{" "}
+          {coverageScope.topPackOnlyPairs
+            .map((pair) => `${pair.state} · ${pair.head} (${formatCurrency(pair.net)})`)
+            .join(" · ")}
+        </p>
+      </section>
+    );
+  };
+
+  const renderCrossHeadEvidence = (comparisons: CrossHeadComparison[]) => {
+    if (!comparisons?.length) return <span className="text-muted-foreground">Only one workbook head present.</span>;
+    return (
+      <div className="space-y-2">
+        {comparisons.map((comparison) => (
+          <details key={`${comparison.leftHead}-${comparison.rightHead}`} className="group rounded-md border bg-background/60">
+            <summary className="cursor-pointer list-none px-3 py-2 text-xs hover:bg-muted/40">
+              <span className="font-semibold capitalize">{comparison.classification}</span>
+              <span className="text-muted-foreground"> · {comparison.leftHead} ↔ {comparison.rightHead} · </span>
+              <span>{comparison.sameInvoiceAmountRows} same invoice + amount row match{comparison.sameInvoiceAmountRows === 1 ? "" : "es"} / {formatCurrency(comparison.sameInvoiceAmountNet)}</span>
+              {comparison.dateMismatchedRows > 0 && <span className="text-amber-700 dark:text-amber-300"> · {comparison.dateMismatchedRows} date mismatch{comparison.dateMismatchedRows === 1 ? "" : "es"}</span>}
+            </summary>
+            <div className="overflow-auto border-t">
+              {comparison.matchedRows.length > 0 && (
+                <table className="w-full min-w-[780px] text-left text-xs">
+                  <thead className="bg-muted/30 text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2" colSpan={3}>{comparison.leftHead}</th>
+                      <th className="px-3 py-2" colSpan={3}>{comparison.rightHead}</th>
+                    </tr>
+                    <tr>
+                      <th className="px-3 py-2">Invoice</th>
+                      <th className="px-3 py-2">Date</th>
+                      <th className="px-3 py-2 text-right">Amount</th>
+                      <th className="px-3 py-2">Invoice</th>
+                      <th className="px-3 py-2">Date</th>
+                      <th className="px-3 py-2 text-right">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {comparison.matchedRows.map((match, index) => (
+                      <tr key={`${match.left.file}:${match.left.rowNumber}-${match.right.file}:${match.right.rowNumber}-${index}`} className={match.datesMatch ? "" : "bg-amber-50/50 dark:bg-amber-950/15"}>
+                        <td className="px-3 py-2 font-mono">{match.left.invoice || "—"}</td>
+                        <td className="px-3 py-2">{match.left.transactionDate || "Undated"}</td>
+                        <td className="px-3 py-2 text-right font-mono">{formatCurrency(match.left.net)}</td>
+                        <td className="px-3 py-2 font-mono">{match.right.invoice || "—"}</td>
+                        <td className="px-3 py-2">
+                          {match.right.transactionDate || "Undated"}
+                          {!match.datesMatch && <span className="ml-1 text-[10px] text-amber-700 dark:text-amber-300">date differs</span>}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono">{formatCurrency(match.right.net)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {(comparison.unmatchedLeft.length > 0 || comparison.unmatchedRight.length > 0) && (
+                <div className="grid gap-3 border-t p-3 md:grid-cols-2">
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Only under {comparison.leftHead}</div>
+                    <div className="mt-1 text-xs">{comparison.unmatchedLeft.map((line) => `${line.invoice || "No invoice"} · ${line.transactionDate || "Undated"} · ${formatCurrency(line.net)}`).join(" | ") || "None"}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Only under {comparison.rightHead}</div>
+                    <div className="mt-1 text-xs">{comparison.unmatchedRight.map((line) => `${line.invoice || "No invoice"} · ${line.transactionDate || "Undated"} · ${formatCurrency(line.net)}`).join(" | ") || "None"}</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </details>
+        ))}
+      </div>
+    );
+  };
+
   const renderDepartedReview = (departedReview: DepartedReview[]) => {
     if (!departedReview || departedReview.length === 0) {
       return (
@@ -273,13 +410,18 @@ export default function AttributionConflictsPage() {
       );
     }
     return (
-      <table className="w-full text-left text-sm whitespace-nowrap">
+      <div>
+        <p className="border-b bg-amber-50/60 px-5 py-3 text-xs leading-5 text-amber-950 dark:bg-amber-950/25 dark:text-amber-100">
+          A multi-head workbook label is not automatically an ownership disagreement. The pack/register multiple and the cross-head invoice, date, and amount matches below distinguish duplicated source rows from genuinely additional business.
+        </p>
+        <table className="w-full text-left text-sm whitespace-nowrap">
         <thead className="bg-muted/30 text-[11px] uppercase tracking-wider text-muted-foreground sticky top-0 backdrop-blur-md z-10 border-b">
           <tr>
             <th className="px-5 py-3 font-semibold">Customer</th>
             <th className="px-5 py-3 font-semibold">Derived register ownership</th>
             <th className="px-5 py-3 font-semibold">Workbook attribution</th>
             <th className="px-5 py-3 font-semibold text-right">Rows / value</th>
+            <th className="px-5 py-3 font-semibold">Duplicate-row evidence</th>
           </tr>
         </thead>
         <tbody className="divide-y">
@@ -306,11 +448,19 @@ export default function AttributionConflictsPage() {
                   <div>{item.workbookRows} rows</div>
                   <div className="text-xs">{formatCurrency(item.workbookNet)}</div>
                 </td>
+                <td className="px-5 py-3 align-top whitespace-normal min-w-[290px]">
+                  <div className="mb-2 text-xs">
+                    <span className="text-muted-foreground">Pack / register: </span>
+                    <span className="font-semibold">{formatRatio(item.packToRegisterRatio)}</span>
+                  </div>
+                  {renderCrossHeadEvidence(item.crossHeadComparisons)}
+                </td>
               </tr>
             );
           })}
         </tbody>
-      </table>
+        </table>
+      </div>
     );
   };
 
@@ -479,6 +629,7 @@ export default function AttributionConflictsPage() {
                 {payload.basis.detail} {payload.basis.rawDates}
               </div>
             )}
+            {renderCoverageScope(payload.coverageScope)}
             {renderValidationStates(payload.validationStates || [])}
             {renderSelectionAudit(payload.selectionAudit)}
           </div>
@@ -516,7 +667,7 @@ export default function AttributionConflictsPage() {
                     <GitMerge className="h-4 w-4 text-amber-700 dark:text-amber-400" />
                   </div>
                   <h3 className="font-semibold text-amber-900 dark:text-amber-200">
-                    Active Conflicts
+                    Attribution Review
                   </h3>
                 </div>
                 <Badge

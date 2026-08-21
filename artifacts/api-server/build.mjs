@@ -40,6 +40,8 @@ async function buildAll() {
       path.resolve(artifactDir, "src/stateHeadPackCrossFolderCheck.ts"),
       // Read-only coverage comparison for the current State Head pack.
       path.resolve(artifactDir, "src/stateHeadPackCoverageCheck.ts"),
+      // Read-only row-level evidence for State Head pack attribution overlaps.
+      path.resolve(artifactDir, "src/stateHeadAttributionEvidence.ts"),
     ],
     platform: "node",
     bundle: true,
