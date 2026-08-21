@@ -59,6 +59,17 @@ type AuditReport = {
   exclusions: StateHeadRegisters["manifest"];
   files: StateHeadRegisters["manifest"];
   fiscalYears: FyAudit[];
+  sourcePatterns: Array<{
+    rawTab: string;
+    rawSchema: string;
+    reportFormulaSource: string | null;
+    files: string[];
+  }>;
+  sandeepSourceComparison: {
+    file: string;
+    sameAsDominantPattern: boolean | null;
+    detail: string;
+  } | null;
 };
 
 function numberValue(value: unknown): number {
@@ -222,6 +233,60 @@ async function buildReport(
     ),
     files: registers.manifest,
     fiscalYears: fyAudits,
+    ...sourcePatternReport(registers.manifest),
+  };
+}
+
+function sourcePatternReport(files: StateHeadRegisters["manifest"]): Pick<
+  AuditReport,
+  "sourcePatterns" | "sandeepSourceComparison"
+> {
+  const patternByKey = new Map<
+    string,
+    {
+      rawTab: string;
+      rawSchema: string;
+      reportFormulaSource: string | null;
+      files: string[];
+    }
+  >();
+  for (const file of files) {
+    const rawTab = file.rawTab ?? "unknown";
+    const rawSchema = file.rawSchema ?? "unknown";
+    const reportFormulaSource = file.reportFormulaSource ?? null;
+    const key = `${rawTab}\u0000${rawSchema}\u0000${reportFormulaSource ?? ""}`;
+    const group = patternByKey.get(key) ?? {
+      rawTab,
+      rawSchema,
+      reportFormulaSource,
+      files: [],
+    };
+    group.files.push(file.fileName);
+    patternByKey.set(key, group);
+  }
+  const sourcePatterns = [...patternByKey.values()].sort(
+    (a, b) => b.files.length - a.files.length,
+  );
+  const sandeep = files.find((file) =>
+    file.fileName.toLowerCase().includes("sandeep"),
+  );
+  if (!sandeep || sourcePatterns.length === 0) {
+    return { sourcePatterns, sandeepSourceComparison: null };
+  }
+  const dominant = sourcePatterns[0];
+  const same =
+    (sandeep.rawTab ?? "unknown") === dominant.rawTab &&
+    (sandeep.rawSchema ?? "unknown") === dominant.rawSchema &&
+    (sandeep.reportFormulaSource ?? null) === dominant.reportFormulaSource;
+  return {
+    sourcePatterns,
+    sandeepSourceComparison: {
+      file: sandeep.fileName,
+      sameAsDominantPattern: same,
+      detail: same
+        ? "Sandeep uses the same raw tab/schema and Report 1 source expression as the dominant file pattern."
+        : "Sandeep uses a different raw tab/schema or Report 1 source expression from the dominant file pattern.",
+    },
   };
 }
 
@@ -235,13 +300,41 @@ function printHuman(report: AuditReport): void {
       .join(", ");
     console.log(
       `  ${file.fileName} [${file.fileId}] — ${file.classification}; ` +
-        `mapped=${file.mappedHeads.join(", ") || "none"}; Report 1: ${totals || "none"}`,
+        `mapped=${file.mappedHeads.join(", ") || "none"}; FY-labelled raw headline: ${totals || "none"}`,
     );
+    if (file.rawTab || file.rawSchema || file.reportFormulaSource) {
+      console.log(
+        `    raw=${file.rawTab ?? "unknown"} (${file.rawSchema ?? "unknown schema"}); ` +
+          `Report 1 source=${file.reportFormulaSource ?? "not readable"}`,
+      );
+    }
+    for (const [fy, integrity] of Object.entries(
+      file.periodIntegrityByFy ?? {},
+    )) {
+      const contamination = integrity.contaminationDateRange
+        ? `${integrity.contaminationDateRange.from} to ${integrity.contaminationDateRange.to}`
+        : "none";
+      const future = integrity.futureDateRange
+        ? `${integrity.futureDateRange.from} to ${integrity.futureDateRange.to}`
+        : "none";
+      console.log(
+        `    FY${fy}: headline ₹${integrity.headlineTotal.toFixed(2)}; ` +
+          `in-FY ₹${integrity.inFyTotal.toFixed(2)}; ` +
+          `out-of-FY ₹${integrity.outOfFyTotal.toFixed(2)} (${integrity.outOfFyRows} rows; ${contamination}); ` +
+          `future ₹${integrity.futureDatedTotal.toFixed(2)} (${integrity.futureDatedRows} rows; ${future})`,
+      );
+      if (integrity.undatedRows > 0) {
+        console.log(
+          `    FY${fy}: undated ₹${integrity.undatedTotal.toFixed(2)} ` +
+            `(${integrity.undatedRows} rows; blocked)`,
+        );
+      }
+    }
     if (!file.included) console.log(`    ${file.reason}`);
   }
   for (const audit of report.fiscalYears) {
     console.log(
-      `${audit.fy}: deduplicated pack ₹${audit.packTotal.toFixed(2)} vs ` +
+      `${audit.fy}: date-valid, deduplicated pack ₹${audit.packTotal.toFixed(2)} vs ` +
         `sale_line_current ₹${audit.saleLineCurrentNet.toFixed(2)}; ` +
         `delta ${(audit.deltaPct * 100).toFixed(2)}%`,
     );
@@ -259,6 +352,16 @@ function printHuman(report: AuditReport): void {
       );
     }
   }
+  console.log("\nSource template patterns:");
+  for (const pattern of report.sourcePatterns) {
+    console.log(
+      `  ${pattern.files.length} file(s): raw=${pattern.rawTab} (${pattern.rawSchema}); ` +
+        `Report 1 source=${pattern.reportFormulaSource ?? "not readable"} — ${pattern.files.join(", ")}`,
+    );
+  }
+  if (report.sandeepSourceComparison) {
+    console.log(`  ${report.sandeepSourceComparison.detail}`);
+  }
   for (const warning of report.warnings) console.log(`WARNING: ${warning}`);
   for (const blocker of report.blockers) console.error(`BLOCKED: ${blocker}`);
 }
@@ -273,7 +376,7 @@ async function main(): Promise<void> {
   const json = args.includes("--json");
   await loadPersonRegistry();
   const report = await buildReport(
-    await loadStateHeadRegisters(),
+    await loadStateHeadRegisters(requestedFy ?? undefined),
     requestedFy,
   );
   if (json) console.log(JSON.stringify(report, null, 2));

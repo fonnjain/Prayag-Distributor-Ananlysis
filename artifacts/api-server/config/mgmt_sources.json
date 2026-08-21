@@ -24,7 +24,10 @@
   },
   "state_head_registers": {
     "folderId": "1xjBSMrF43omlScNQTavwunSt2oQbtGrq",
-    "comment": "Drive folder 'State Heads': one dispatched-sale register workbook per head per FY, titled '<Head> <FY>' (e.g. 'Anant Singh JI 2026-27'). Each workbook holds two fiscal years; rows are filtered on the FY column, never the file title."
+    "folders_by_year": {
+      "2025-26": "12hR0aJx65yS5QLsv0pdRbRkkhtOau1jQ"
+    },
+    "comment": "Drive folders for State Head dispatched-sale packs. The default folder is the live/current pack; historical pack checks resolve their source folder through folders_by_year. Each workbook is filtered by raw transaction date and FY label, never by its filename."
   },
   "party_tm_map": {
     "comment": "Party -> Team Member bridge. If a consolidated 'Party TM Map' sheet exists in Drive it is read directly; otherwise it is auto-built from the 'STATE HEAD (Team Member Report)' folder tree (memberReportFolderId): every per-member file with a 'Distributor Visit Report'/'Retailer Report' tab contributes DIST#/RET# rows, and the result is cached back to a created 'Party TM Map' sheet so the ~700-file walk never runs on a report request.",

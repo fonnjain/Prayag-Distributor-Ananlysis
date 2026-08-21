@@ -296,6 +296,23 @@ export async function readTabSample(
   return data.values ?? [];
 }
 
+/**
+ * Reads formulas instead of cached values. This is intentionally only used
+ * for small audit ranges, where the formula's source tab/range is evidence
+ * for a pack-template diagnosis rather than report data.
+ */
+export async function readTabFormulaSample(
+  spreadsheetId: string,
+  title: string,
+  cellRange: string,
+): Promise<SheetCellValue[][]> {
+  const range = `${quoteTitle(title)}!${cellRange}`;
+  const data = (await sheetsGet(
+    `/${spreadsheetId}/values/${encodeURIComponent(range)}?valueRenderOption=FORMULA&dateTimeRenderOption=SERIAL_NUMBER`,
+  )) as { values?: SheetCellValue[][] };
+  return data.values ?? [];
+}
+
 export async function readAllTabRows(
   spreadsheetId: string,
   title: string,

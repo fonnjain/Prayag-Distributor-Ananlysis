@@ -20,9 +20,11 @@
 // head_alias.json retired — alias map now comes from person_registry DB table.
 import { headAliasLookup as _registryAliasLookup } from "../personRegistry.js";
 import { logger } from "../logger.js";
+import { createHash } from "node:crypto";
 import {
   readTabRowsChunked,
   readTabSample,
+  readTabFormulaSample,
   listSheetTabs,
   getGoogleAccessToken,
   type SheetCellValue,
@@ -34,6 +36,10 @@ import {
   configuredStateHeadPackPolicy,
   manifestConflictFileIds,
   manifestBlockers,
+  createStateHeadPackPeriodIntegrity,
+  recordStateHeadPackPeriodRow,
+  stateHeadPackPeriodIntegrityBlockers,
+  type StateHeadPackPeriodIntegrity,
   type StateHeadPackManifestEntry,
 } from "./stateHeadPack.js";
 
@@ -119,6 +125,8 @@ export type HeadRegisterAgg = {
   registerTab: string;
   rowsRead: number;
   byFy: Map<string, FyRegisterAgg>;
+  /** FY-labelled raw total before transaction-date filtering. */
+  headlineByFy: Map<string, { amount: number }>;
 };
 
 export type RegisterLoadStatus = {
@@ -144,8 +152,8 @@ export type StateHeadRegisters = {
 };
 
 const TTL_MS = 15 * 60_000;
-let cache: StateHeadRegisters | null = null;
-let inFlight: Promise<StateHeadRegisters> | null = null;
+const cacheByFolder = new Map<string, StateHeadRegisters>();
+const inFlightByFolder = new Map<string, Promise<StateHeadRegisters>>();
 
 type FolderFile = { id: string; name: string };
 
@@ -192,12 +200,79 @@ function isDateSerial(v: SheetCellValue): boolean {
   return typeof v === "number" && Number.isFinite(v) && v > 20_000 && v < 80_000;
 }
 
-// A row "looks like" a register line when Date(B) is a serial, Amount(H) is
-// numeric, and the FY column (N, falling back to O) carries an FY label.
-function looksLikeRegisterRow(r: SheetCellValue[]): boolean {
-  if (!isDateSerial(r[1])) return false;
-  if (typeof r[7] !== "number" || !Number.isFinite(r[7])) return false;
-  return parseFyLabel(r[13]) != null || parseFyLabel(r[14]) != null;
+type RegisterTabSchema = {
+  name: "state-head-register-v2" | "state-head-register-legacy";
+  dateIndexes: number[];
+  amountIndex: number;
+  fyIndexes: number[];
+  invoiceIndex: number;
+  partyIndex: number;
+  groupIndex: number;
+  headIndex: number;
+};
+
+type RegisterTab = RegisterTabSchema & {
+  title: string;
+  reportTab: string | null;
+};
+
+// The current folder contains two raw layouts. The v2 layout is the documented
+// 15-column register. Historical FY2025-26 workbooks have the older Sheet1
+// layout where Report 1 pivots FY from column M. Both must be audited: silently
+// recognizing only one layout would turn a hard pack gate into a bypass.
+const REGISTER_TAB_SCHEMAS: RegisterTabSchema[] = [
+  {
+    name: "state-head-register-v2",
+    dateIndexes: [1, 4],
+    amountIndex: 7,
+    fyIndexes: [13, 14],
+    invoiceIndex: 0,
+    partyIndex: 2,
+    groupIndex: 8,
+    headIndex: 11,
+  },
+  {
+    name: "state-head-register-legacy",
+    dateIndexes: [2],
+    amountIndex: 5,
+    // Column M is the Report 1 pivot field; K is retained only as a fallback.
+    fyIndexes: [12, 10],
+    invoiceIndex: 1,
+    partyIndex: 0,
+    groupIndex: 6,
+    headIndex: 9,
+  },
+];
+
+function rowFy(r: SheetCellValue[], schema: RegisterTabSchema): string | null {
+  for (const index of schema.fyIndexes) {
+    const fy = parseFyLabel(r[index]);
+    if (fy) return fy;
+  }
+  return null;
+}
+
+function rowDateSerial(
+  r: SheetCellValue[],
+  schema: RegisterTabSchema,
+): number | null {
+  for (const index of schema.dateIndexes) {
+    if (isDateSerial(r[index])) return r[index] as number;
+  }
+  return null;
+}
+
+function rowAmount(r: SheetCellValue[], schema: RegisterTabSchema): number | null {
+  const raw = r[schema.amountIndex];
+  const amount = typeof raw === "number" ? raw : Number(raw);
+  return Number.isFinite(amount) ? amount : null;
+}
+
+function looksLikeRegisterRow(
+  r: SheetCellValue[],
+  schema: RegisterTabSchema,
+): boolean {
+  return rowDateSerial(r, schema) != null && rowAmount(r, schema) != null && rowFy(r, schema) != null;
 }
 
 // Detect the register tab by content. Samples the first rows of each tab
@@ -205,17 +280,57 @@ function looksLikeRegisterRow(r: SheetCellValue[]): boolean {
 // sample carries at least two register-shaped rows.
 async function detectRegisterTab(
   spreadsheetId: string,
-): Promise<string | null> {
+): Promise<RegisterTab | null> {
   const tabs = await listSheetTabs(spreadsheetId);
   const ordered = [...tabs].sort((a, b) => b.rowCount - a.rowCount);
+  const reportTab =
+    tabs.find((tab) => tab.title.replace(/\s+/g, "").toLowerCase() === "report1")
+      ?.title ?? null;
+  let best: (RegisterTab & { hits: number; rowCount: number }) | null = null;
   for (const tab of ordered) {
     if (tab.rowCount < 2) continue;
     // readTabSample retries 429/5xx — a quota hiccup here used to silently
     // skip the tab and mis-report the workbook as having no register.
     const rows = await readTabSample(spreadsheetId, tab.title, "A1:O8");
-    let hits = 0;
-    for (const r of rows) if (looksLikeRegisterRow(r)) hits++;
-    if (hits >= 2) return tab.title;
+    for (const schema of REGISTER_TAB_SCHEMAS) {
+      let hits = 0;
+      for (const r of rows) if (looksLikeRegisterRow(r, schema)) hits++;
+      if (
+        hits >= 2 &&
+        (!best || hits > best.hits || (hits === best.hits && tab.rowCount > best.rowCount))
+      ) {
+        best = {
+          ...schema,
+          title: tab.title,
+          reportTab,
+          hits,
+          rowCount: tab.rowCount,
+        };
+      }
+    }
+  }
+  return best;
+}
+
+function currentExcelDateSerial(): number {
+  const now = new Date();
+  const utcDay = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
+  return Math.floor((utcDay - Date.UTC(1899, 11, 30)) / 86_400_000);
+}
+
+function reportFormulaSource(rows: SheetCellValue[][]): string | null {
+  for (const row of rows) {
+    for (const cell of row) {
+      if (typeof cell !== "string" || !cell.startsWith("=")) continue;
+      const query = /QUERY\(\s*([^,]+)/i.exec(cell);
+      if (query) return `QUERY(${query[1].replace(/\$/g, "")})`;
+      const source = /(?:'[^']+'|[A-Za-z0-9_ ]+)!A\d+:[A-Z]+\d+/i.exec(cell);
+      if (source) return source[0].replace(/\$/g, "");
+    }
   }
   return null;
 }
@@ -289,7 +404,7 @@ async function loadOneWorkbook(
   // Read excluded workbooks for their Report 1 evidence, but never pass their
   // aggregates into byHead. This keeps the audit report useful (it can show
   // the duplicate ₹11.2800 Cr) without allowing it into released totals.
-  let registerTab: string | null;
+  let registerTab: RegisterTab | null;
   try {
     registerTab = await detectRegisterTab(file.id);
   } catch (err) {
@@ -317,7 +432,7 @@ async function loadOneWorkbook(
         status: "error",
         detail:
           `No register tab detected in "${file.name}" (${file.id}); expected a tab whose rows ` +
-          `carry a date serial, a numeric Amount and an FY-YYYY-YY label in the fixed register columns.`,
+            `carry a date serial, a numeric Amount and an FY-YYYY-YY label in a supported raw layout.`,
       },
       manifest,
     };
@@ -325,27 +440,72 @@ async function loadOneWorkbook(
   // First pass: aggregate per raw STATE HEAD value ("" for blank cells).
   // Grouping is per ROW, never per file — one workbook can carry several
   // heads plus institutional channel rows.
-  type RawGroup = { byFy: Map<string, FyRegisterAgg>; rows: number };
+  type RawGroup = {
+    /** Only date-valid raw rows are eligible for reconciliation. */
+    byFy: Map<string, FyRegisterAgg>;
+    /** The workbook's FY-labelled total before the date hard gate. */
+    headlineByFy: Map<string, { amount: number }>;
+    rows: number;
+  };
   const rawGroups = new Map<string, RawGroup>();
+  const periodIntegrityByFy: Record<string, StateHeadPackPeriodIntegrity> = {};
+  const rawDataHash = createHash("sha256");
+  const asOfSerial = currentExcelDateSerial();
+  let formulaSource: string | null = null;
+  const reportTab = registerTab.reportTab ?? "Report 1";
+  try {
+    formulaSource = reportFormulaSource(
+      await readTabFormulaSample(
+        file.id,
+        reportTab,
+        "A1:Z8",
+      ),
+    );
+  } catch (err) {
+    logger.warn(
+      { fileId: file.id, fileName: file.name, err },
+      "could not read State Head Report 1 formula signature",
+    );
+  }
   let rowsRead = 0;
   let skippedNonRegister = 0;
   try {
-    ({ rowsRead } = await readTabRowsChunked(file.id, registerTab, (rows) => {
+    ({ rowsRead } = await readTabRowsChunked(file.id, registerTab.title, (rows) => {
       for (const r of rows) {
         if (r == null) continue;
-        const fy = parseFyLabel(r[13]) ?? parseFyLabel(r[14]);
-        const amount = typeof r[7] === "number" ? r[7] : Number(r[7]);
-        if (fy == null || !Number.isFinite(amount)) {
+        const fy = rowFy(r, registerTab);
+        const amount = rowAmount(r, registerTab);
+        if (fy == null || amount == null) {
           skippedNonRegister++;
           continue;
         }
-        const rawHead = String(r[11] ?? "").trim();
+        rawDataHash.update(JSON.stringify(r));
+        rawDataHash.update("\n");
+        const period = (periodIntegrityByFy[fy] ??=
+          createStateHeadPackPeriodIntegrity());
+        const inFy = recordStateHeadPackPeriodRow(
+          period,
+          fy,
+          { amount, dateSerial: rowDateSerial(r, registerTab) },
+          asOfSerial,
+        );
+        const rawHead = String(r[registerTab.headIndex] ?? "").trim();
         let grp = rawGroups.get(rawHead);
         if (!grp) {
-          grp = { byFy: new Map<string, FyRegisterAgg>(), rows: 0 };
+          grp = {
+            byFy: new Map<string, FyRegisterAgg>(),
+            headlineByFy: new Map<string, { amount: number }>(),
+            rows: 0,
+          };
           rawGroups.set(rawHead, grp);
         }
         grp.rows++;
+        const headline = grp.headlineByFy.get(fy) ?? { amount: 0 };
+        headline.amount += amount;
+        grp.headlineByFy.set(fy, headline);
+        // The raw FY label is retained for the audit display, but it never
+        // makes an out-of-FY or undated line eligible for reconciliation.
+        if (!inFy) continue;
         let agg = grp.byFy.get(fy);
         if (!agg) {
           agg = {
@@ -361,17 +521,13 @@ async function loadOneWorkbook(
         }
         agg.amount += amount;
         agg.rows++;
-        const invoice = String(r[0] ?? "").trim();
+        const invoice = String(r[registerTab.invoiceIndex] ?? "").trim();
         if (invoice) agg.invoiceIds.add(invoice);
-        const dateSerial = isDateSerial(r[1])
-          ? (r[1] as number)
-          : isDateSerial(r[4])
-            ? (r[4] as number)
-            : null;
+        const dateSerial = rowDateSerial(r, registerTab);
         const mIdx =
           dateSerial != null ? fiscalMonthIndex(Math.round(dateSerial), fy) : null;
         if (mIdx != null) agg.monthAmount[mIdx] += amount;
-        const party = String(r[2] ?? "").trim().toUpperCase();
+        const party = String(r[registerTab.partyIndex] ?? "").trim().toUpperCase();
         if (party) {
           let pa = agg.parties.get(party);
           if (!pa) {
@@ -390,7 +546,7 @@ async function loadOneWorkbook(
             if (invoice) pa.monthInvoiceIds[mIdx].add(invoice);
           }
         }
-        const group = String(r[8] ?? "").trim();
+        const group = String(r[registerTab.groupIndex] ?? "").trim();
         if (group) {
           agg.groupAmount.set(group, (agg.groupAmount.get(group) ?? 0) + amount);
         }
@@ -433,6 +589,11 @@ async function loadOneWorkbook(
     if (existing) {
       existing.rowsRead += grp.rows;
       mergeFyMaps(existing.byFy, grp.byFy);
+      for (const [fy, headline] of grp.headlineByFy) {
+        const current = existing.headlineByFy.get(fy) ?? { amount: 0 };
+        current.amount += headline.amount;
+        existing.headlineByFy.set(fy, current);
+      }
       return;
     }
     byDisplay.set(display, {
@@ -441,9 +602,10 @@ async function loadOneWorkbook(
       kind,
       fileId: file.id,
       fileName: file.name,
-      registerTab: registerTab as string,
+      registerTab: registerTab.title,
       rowsRead: grp.rows,
       byFy: grp.byFy,
+      headlineByFy: grp.headlineByFy,
     });
   };
   for (const [raw, grp] of rawGroups) {
@@ -466,7 +628,13 @@ async function loadOneWorkbook(
       byFy: new Map(
         [...agg.byFy].map(([fy, fyAgg]) => [fy, { amount: fyAgg.amount }]),
       ),
+      headlineByFy: agg.headlineByFy,
     })),
+    rawTab: registerTab.title,
+    rawSchema: registerTab.name,
+    reportFormulaSource: formulaSource,
+    rawDataFingerprint: rawDataHash.digest("hex"),
+    periodIntegrityByFy,
   });
   const headSummary = aggs
     .map((a) => {
@@ -480,7 +648,8 @@ async function loadOneWorkbook(
     {
       fileName: file.name,
       fileId: file.id,
-      registerTab,
+      registerTab: registerTab.title,
+      registerSchema: registerTab.name,
       rowsRead,
       skippedNonRegister,
       heads: aggs.length,
@@ -506,8 +675,12 @@ async function loadOneWorkbook(
   };
 }
 
-async function loadUncached(): Promise<StateHeadRegisters> {
-  const folderId = mgmtSources().state_head_registers.folderId;
+function folderIdForRequestedFy(requestedFy?: string): string {
+  const source = mgmtSources().state_head_registers;
+  return requestedFy ? source.folders_by_year?.[requestedFy] ?? source.folderId : source.folderId;
+}
+
+async function loadUncached(folderId: string): Promise<StateHeadRegisters> {
   let files: FolderFile[];
   try {
     files = await listFolderWorkbooks(folderId);
@@ -576,7 +749,10 @@ async function loadUncached(): Promise<StateHeadRegisters> {
   }
   const failed = statuses.filter((s) => s.status === "error");
   const excluded = manifest.filter((m) => m.classification === "excluded");
-  const blockers = manifestBlockers(manifest);
+  const blockers = [
+    ...manifestBlockers(manifest),
+    ...stateHeadPackPeriodIntegrityBlockers(manifest),
+  ];
   logger.info(
     {
       workbooks: files.length,
@@ -604,33 +780,41 @@ async function loadUncached(): Promise<StateHeadRegisters> {
   };
 }
 
-export async function loadStateHeadRegisters(): Promise<StateHeadRegisters> {
-  if (cache && Date.now() - cache.loadedAt < TTL_MS) return cache;
+export async function loadStateHeadRegisters(
+  requestedFy?: string,
+): Promise<StateHeadRegisters> {
+  const folderId = folderIdForRequestedFy(requestedFy);
+  const cached = cacheByFolder.get(folderId);
+  if (cached && Date.now() - cached.loadedAt < TTL_MS) return cached;
+  const inFlight = inFlightByFolder.get(folderId);
   if (inFlight) return inFlight;
-  inFlight = loadUncached()
+  const nextLoad = loadUncached(folderId)
     .then((r) => {
-      cache = r;
+      cacheByFolder.set(folderId, r);
       return r;
     })
     .finally(() => {
-      inFlight = null;
+      inFlightByFolder.delete(folderId);
     });
-  return inFlight;
+  inFlightByFolder.set(folderId, nextLoad);
+  return nextLoad;
 }
 
 export function invalidateStateHeadRegisterCache(): void {
-  cache = null;
+  cacheByFolder.clear();
 }
 
 // Last successful load, if any — used by the options endpoint to surface a
 // precise status without triggering a full multi-workbook read.
-export function getCachedStateHeadRegisters(): StateHeadRegisters | null {
-  return cache;
+export function getCachedStateHeadRegisters(
+  requestedFy?: string,
+): StateHeadRegisters | null {
+  return cacheByFolder.get(folderIdForRequestedFy(requestedFy)) ?? null;
 }
 
 // Cheap connectivity check: counts the register workbooks in the State Heads
 // folder without reading any of them.
-export async function countStateHeadWorkbooks(): Promise<number> {
-  const folderId = mgmtSources().state_head_registers.folderId;
+export async function countStateHeadWorkbooks(requestedFy?: string): Promise<number> {
+  const folderId = folderIdForRequestedFy(requestedFy);
   return (await listFolderWorkbooks(folderId)).length;
 }

@@ -16,8 +16,30 @@ export type StateHeadPackClassification =
 export type StateHeadPackEvidence = {
   headDisplay: string;
   kind: "head" | "nonTerritory" | "unmapped";
-  /** Report 1 / register total by fiscal year. */
+  /** Date-valid raw register total by fiscal year. */
   byFy: ReadonlyMap<string, { amount: number }>;
+  /** Raw FY-labelled total before the transaction-date hard gate. */
+  headlineByFy?: ReadonlyMap<string, { amount: number }>;
+};
+
+export type StateHeadPackPeriodIntegrity = {
+  headlineTotal: number;
+  headlineRows: number;
+  inFyTotal: number;
+  inFyRows: number;
+  outOfFyTotal: number;
+  outOfFyRows: number;
+  undatedTotal: number;
+  undatedRows: number;
+  futureDatedTotal: number;
+  futureDatedRows: number;
+  contaminationDateRange: { from: string; to: string } | null;
+  futureDateRange: { from: string; to: string } | null;
+};
+
+export type StateHeadPackPeriodRow = {
+  amount: number;
+  dateSerial: number | null;
 };
 
 export type ApprovedStateHeadSlice = {
@@ -70,6 +92,15 @@ export type StateHeadPackManifestEntry = {
   classification: StateHeadPackClassification;
   included: boolean;
   reason: string;
+  /** Raw source tab and normalized layout used for the period audit. */
+  rawTab?: string;
+  rawSchema?: string;
+  /** Shared Report 1 source expression, when it can be read from the workbook. */
+  reportFormulaSource?: string | null;
+  /** SHA-256 over the raw tab rows, for content-identical duplicate detection. */
+  rawDataFingerprint?: string | null;
+  /** Raw date/FY evidence; any contamination is a hard release blocker. */
+  periodIntegrityByFy?: Record<string, StateHeadPackPeriodIntegrity>;
   /** Canonical heads evidenced by the workbook's rows. */
   mappedHeads: string[];
   /** All Report 1 totals, including excluded/mixed evidence for the audit. */
@@ -84,6 +115,11 @@ export type StateHeadPackInput = {
   fileId: string;
   fileName: string;
   evidence: StateHeadPackEvidence[];
+  rawTab?: string;
+  rawSchema?: string;
+  reportFormulaSource?: string | null;
+  rawDataFingerprint?: string | null;
+  periodIntegrityByFy?: Record<string, StateHeadPackPeriodIntegrity>;
   policy?: StateHeadPackPolicy;
 };
 
@@ -103,6 +139,7 @@ function cleanHead(head: string): string {
 function byFyRecord(
   evidence: StateHeadPackEvidence[],
   included: Set<string>,
+  source: "dateValid" | "headline" = "dateValid",
 ): {
   all: Record<string, number>;
   released: Record<string, number>;
@@ -112,7 +149,9 @@ function byFyRecord(
   const released: Record<string, number> = {};
   const releasedByHead: Record<string, Record<string, number>> = {};
   for (const item of evidence) {
-    for (const [fy, value] of item.byFy) {
+    const sourceByFy =
+      source === "headline" ? (item.headlineByFy ?? item.byFy) : item.byFy;
+    for (const [fy, value] of sourceByFy) {
       all[fy] = (all[fy] ?? 0) + value.amount;
       if (included.has(item.headDisplay)) {
         released[fy] = (released[fy] ?? 0) + value.amount;
@@ -154,8 +193,15 @@ export function classifyStateHeadPackFile(
         .map((item) => item.headDisplay),
     ),
   ];
-  const totals = byFyRecord(input.evidence, new Set());
+  const totals = byFyRecord(input.evidence, new Set(), "headline");
   const report1ByFy = totals.all;
+  const auditFields = {
+    rawTab: input.rawTab,
+    rawSchema: input.rawSchema,
+    reportFormulaSource: input.reportFormulaSource ?? null,
+    rawDataFingerprint: input.rawDataFingerprint ?? null,
+    periodIntegrityByFy: input.periodIntegrityByFy ?? {},
+  };
 
   if (excludedBy) {
     return {
@@ -163,6 +209,7 @@ export function classifyStateHeadPackFile(
       fileName: input.fileName,
       classification: "excluded",
       included: false,
+      ...auditFields,
       reason:
         `Excluded from the State Head master pack because filename "${input.fileName}" ` +
         `matches temporary/duplicate pattern ${excludedBy.source}.`,
@@ -197,6 +244,7 @@ export function classifyStateHeadPackFile(
         fileName: input.fileName,
         classification: "approved-slice",
         included: true,
+        ...auditFields,
         reason: `Included under explicit approved slice mapping: ${approved.note}`,
         mappedHeads,
         report1ByFy,
@@ -237,6 +285,7 @@ export function classifyStateHeadPackFile(
       fileName: input.fileName,
       classification: "canonical-head",
       included: true,
+      ...auditFields,
       reason: `Included as the canonical workbook for ${mappedHeads[0]}.`,
       mappedHeads,
       report1ByFy,
@@ -253,6 +302,7 @@ export function classifyStateHeadPackFile(
     fileName: input.fileName,
     classification: "mixed/non-head feeder",
     included: false,
+    ...auditFields,
     reason:
       `Not included in a head total: workbook name does not identify one ` +
       `canonical head or contains mixed/non-territory evidence (${evidenceKinds || "none"}). ` +
@@ -288,6 +338,187 @@ export function manifestBlockers(
         file.entries.map((entry) => entry.fileName).join(", ") +
         ". Keep one canonical source or explicitly resolve the competing files.",
     );
+  }
+  for (const entry of manifest) {
+    if (entry.classification !== "excluded") continue;
+    blockers.push(
+      `Excluded duplicate/temporary workbook remains in the source folder: ${entry.fileName}. ` +
+        "Remove it before releasing the pack.",
+    );
+  }
+  for (const duplicate of headlineDuplicateGroups(manifest)) {
+    blockers.push(
+      `Headline-identical workbooks for FY${duplicate.fy} at ₹${duplicate.amount.toFixed(2)}: ` +
+        `${duplicate.files.join(", ")}. Keep one source before releasing the pack.`,
+    );
+  }
+  for (const duplicate of rawFingerprintDuplicateGroups(manifest)) {
+    blockers.push(
+      `Content-identical raw workbooks: ${duplicate.files.join(", ")}. ` +
+        "Keep one source before releasing the pack.",
+    );
+  }
+  return blockers;
+}
+
+function headlineDuplicateGroups(
+  manifest: StateHeadPackManifestEntry[],
+): Array<{ fy: string; amount: number; files: string[] }> {
+  const grouped = new Map<string, { fy: string; amount: number; files: string[] }>();
+  for (const entry of manifest) {
+    for (const [fy, amount] of Object.entries(entry.report1ByFy)) {
+      if (!Number.isFinite(amount) || amount === 0) continue;
+      const key = `${fy}|${amount.toFixed(2)}`;
+      const group = grouped.get(key) ?? { fy, amount, files: [] };
+      group.files.push(entry.fileName);
+      grouped.set(key, group);
+    }
+  }
+  return [...grouped.values()].filter((group) => group.files.length > 1);
+}
+
+function rawFingerprintDuplicateGroups(
+  manifest: StateHeadPackManifestEntry[],
+): Array<{ files: string[] }> {
+  const grouped = new Map<string, string[]>();
+  for (const entry of manifest) {
+    if (!entry.rawDataFingerprint) continue;
+    const files = grouped.get(entry.rawDataFingerprint) ?? [];
+    files.push(entry.fileName);
+    grouped.set(entry.rawDataFingerprint, files);
+  }
+  return [...grouped.values()]
+    .filter((files) => files.length > 1)
+    .map((files) => ({ files }));
+}
+
+const EXCEL_EPOCH_UTC_MS = Date.UTC(1899, 11, 30);
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function fiscalYearStartSerial(fy: string): number | null {
+  const match = /^(\d{4})-(\d{2})$/.exec(fy);
+  if (!match) return null;
+  const startYear = Number(match[1]);
+  const endYear = Number(`20${match[2]}`);
+  if (!Number.isInteger(startYear) || endYear !== startYear + 1) return null;
+  return Math.round((Date.UTC(startYear, 3, 1) - EXCEL_EPOCH_UTC_MS) / DAY_MS);
+}
+
+function fiscalYearEndSerial(fy: string): number | null {
+  const match = /^(\d{4})-(\d{2})$/.exec(fy);
+  if (!match) return null;
+  const startYear = Number(match[1]);
+  const endYear = Number(`20${match[2]}`);
+  if (!Number.isInteger(startYear) || endYear !== startYear + 1) return null;
+  return Math.round(
+    (Date.UTC(startYear + 1, 3, 1) - EXCEL_EPOCH_UTC_MS) / DAY_MS,
+  );
+}
+
+function isoDateFromSerial(serial: number): string {
+  return new Date(EXCEL_EPOCH_UTC_MS + Math.floor(serial) * DAY_MS)
+    .toISOString()
+    .slice(0, 10);
+}
+
+export function createStateHeadPackPeriodIntegrity(): StateHeadPackPeriodIntegrity {
+  return {
+    headlineTotal: 0,
+    headlineRows: 0,
+    inFyTotal: 0,
+    inFyRows: 0,
+    outOfFyTotal: 0,
+    outOfFyRows: 0,
+    undatedTotal: 0,
+    undatedRows: 0,
+    futureDatedTotal: 0,
+    futureDatedRows: 0,
+    contaminationDateRange: null,
+    futureDateRange: null,
+  };
+}
+
+/**
+ * Adds one FY-labelled raw row. Date validity is intentionally strict: an
+ * undated row cannot be used in a date-bound fiscal-year reconciliation.
+ */
+export function recordStateHeadPackPeriodRow(
+  summary: StateHeadPackPeriodIntegrity,
+  fy: string,
+  row: StateHeadPackPeriodRow,
+  asOfSerial: number,
+): boolean {
+  const amount = Number.isFinite(row.amount) ? row.amount : 0;
+  summary.headlineTotal += amount;
+  summary.headlineRows++;
+  const start = fiscalYearStartSerial(fy);
+  const end = fiscalYearEndSerial(fy);
+  const serial = row.dateSerial == null ? null : Math.floor(row.dateSerial);
+  if (serial == null || start == null || end == null) {
+    summary.undatedTotal += amount;
+    summary.undatedRows++;
+    return false;
+  }
+  const inFy = serial >= start && serial < end;
+  if (inFy) {
+    summary.inFyTotal += amount;
+    summary.inFyRows++;
+  } else {
+    summary.outOfFyTotal += amount;
+    summary.outOfFyRows++;
+    const date = isoDateFromSerial(serial);
+    if (!summary.contaminationDateRange) {
+      summary.contaminationDateRange = { from: date, to: date };
+    } else {
+      summary.contaminationDateRange.from = [summary.contaminationDateRange.from, date].sort()[0];
+      summary.contaminationDateRange.to = [summary.contaminationDateRange.to, date].sort()[1];
+    }
+  }
+  if (serial > asOfSerial) {
+    summary.futureDatedTotal += amount;
+    summary.futureDatedRows++;
+    const date = isoDateFromSerial(serial);
+    if (!summary.futureDateRange) {
+      summary.futureDateRange = { from: date, to: date };
+    } else {
+      summary.futureDateRange.from = [summary.futureDateRange.from, date].sort()[0];
+      summary.futureDateRange.to = [summary.futureDateRange.to, date].sort()[1];
+    }
+  }
+  return inFy;
+}
+
+export function stateHeadPackPeriodIntegrityBlockers(
+  manifest: StateHeadPackManifestEntry[],
+): string[] {
+  const blockers: string[] = [];
+  for (const entry of manifest) {
+    for (const [fy, summary] of Object.entries(entry.periodIntegrityByFy ?? {})) {
+      if (summary.outOfFyRows > 0) {
+        const range = summary.contaminationDateRange
+          ? `${summary.contaminationDateRange.from} to ${summary.contaminationDateRange.to}`
+          : "unknown dates";
+        blockers.push(
+          `${entry.fileName} FY${fy}: ${summary.outOfFyRows} raw rows totaling ₹${summary.outOfFyTotal.toFixed(2)} ` +
+            `fall outside the requested FY (${range}).`,
+        );
+      }
+      if (summary.undatedRows > 0) {
+        blockers.push(
+          `${entry.fileName} FY${fy}: ${summary.undatedRows} raw rows totaling ₹${summary.undatedTotal.toFixed(2)} ` +
+            "have no usable transaction date and cannot be reconciled.",
+        );
+      }
+      if (summary.futureDatedRows > 0) {
+        const range = summary.futureDateRange
+          ? `${summary.futureDateRange.from} to ${summary.futureDateRange.to}`
+          : "unknown dates";
+        blockers.push(
+          `${entry.fileName} FY${fy}: ${summary.futureDatedRows} future-dated raw rows totaling ₹${summary.futureDatedTotal.toFixed(2)} ` +
+            `(${range}).`,
+        );
+      }
+    }
   }
   return blockers;
 }

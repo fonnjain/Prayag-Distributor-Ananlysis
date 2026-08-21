@@ -7,6 +7,9 @@ import {
   manifestConflictFileIds,
   missingMaterialSourceHeads,
   manifestWarnings,
+  createStateHeadPackPeriodIntegrity,
+  recordStateHeadPackPeriodRow,
+  stateHeadPackPeriodIntegrityBlockers,
   stateHeadSourceLoadBlockers,
   sumEligibleStateHeadSaleRows,
 } from "./stateHeadPack.js";
@@ -170,6 +173,88 @@ describe("State Head master-pack manifest", () => {
     expect(stateHeadSourceLoadBlockers(null, [])).toEqual([
       "State Head source folder produced no workbook manifest; release is blocked.",
     ]);
+  });
+
+  it("keeps only in-FY rows and hard-blocks out-of-FY, future, and undated evidence", () => {
+    const period = createStateHeadPackPeriodIntegrity();
+    // 01-Apr-2025 is valid for FY2025-26.
+    expect(
+      recordStateHeadPackPeriodRow(
+        period,
+        "2025-26",
+        { amount: 100, dateSerial: 45748 },
+        46255,
+      ),
+    ).toBe(true);
+    // 01-Apr-2026 falls outside FY2025-26; 25-Dec-2026 is also future
+    // relative to the 21-Aug-2026 run date (serial 46255).
+    expect(
+      recordStateHeadPackPeriodRow(
+        period,
+        "2025-26",
+        { amount: 20, dateSerial: 46113 },
+        46255,
+      ),
+    ).toBe(false);
+    expect(
+      recordStateHeadPackPeriodRow(
+        period,
+        "2025-26",
+        { amount: 30, dateSerial: 46381 },
+        46255,
+      ),
+    ).toBe(false);
+    expect(
+      recordStateHeadPackPeriodRow(
+        period,
+        "2025-26",
+        { amount: 10, dateSerial: null },
+        46255,
+      ),
+    ).toBe(false);
+
+    const entry = classifyStateHeadPackFile({
+      fileId: "dated-file",
+      fileName: "LALAN 2025-26",
+      evidence: [
+        {
+          headDisplay: "Lalan Kumar",
+          kind: "head",
+          byFy: new Map([["2025-26", { amount: period.inFyTotal }]]),
+          headlineByFy: new Map([["2025-26", { amount: period.headlineTotal }]]),
+        },
+      ],
+      periodIntegrityByFy: { "2025-26": period },
+    });
+
+    expect(entry.report1ByFy["2025-26"]).toBe(160);
+    expect(entry.includedByFy["2025-26"]).toBe(100);
+    expect(stateHeadPackPeriodIntegrityBlockers([entry])).toEqual([
+      expect.stringContaining("outside the requested FY"),
+      expect.stringContaining("have no usable transaction date"),
+      expect.stringContaining("future-dated raw rows"),
+    ]);
+  });
+
+  it("blocks copied and headline-identical files even before they can be summed", () => {
+    const copy = classifyStateHeadPackFile({
+      fileId: "copy-id",
+      fileName: "Copy of LALAN 2025-26",
+      evidence: [evidence("Lalan Kumar", "head", 100)],
+    });
+    const original = classifyStateHeadPackFile({
+      fileId: "original-id",
+      fileName: "LALAN 2025-26",
+      evidence: [evidence("Lalan Kumar", "head", 100)],
+    });
+
+    const blockers = manifestBlockers([copy, original]);
+    expect(blockers).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Excluded duplicate/temporary workbook"),
+        expect.stringContaining("Headline-identical workbooks"),
+      ]),
+    );
   });
 
   it("reconciles territorial heads without counting institutional channel sales", () => {
