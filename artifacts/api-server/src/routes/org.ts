@@ -545,8 +545,16 @@ router.patch("/person-registry/:id", async (req, res) => {
       res.status(422).json({ error: "changedBy and reason are required for every registry edit" });
       return;
     }
+    // The client-provided name confirms who is operating the screen, but it is
+    // never trusted as the immutable audit actor. This route is rendered inside
+    // the authenticated People area, so record the signed-in session identity.
+    const auditActor = req.authUser?.displayName?.trim() || req.authUser?.email?.trim();
+    if (!auditActor) {
+      res.status(401).json({ error: "A signed-in operator is required for registry edits" });
+      return;
+    }
     const updated = await patchRegistryRow(id, patch, {
-      changedBy,
+      changedBy: auditActor,
       reason,
       acknowledgedImpact: patch.acknowledgedImpact,
     });

@@ -36,6 +36,18 @@ vi.mock("../lib/personRegistry.js", () => ({
 const { default: orgRouter } = await import("./org.js");
 const app = express();
 app.use(express.json());
+app.use((req, _res, next) => {
+  if (req.header("x-test-user") === "admin") {
+    req.authUser = {
+      id: 1,
+      email: "admin@example.com",
+      displayName: "Verified Admin",
+      role: "admin",
+      isActive: true,
+    };
+  }
+  next();
+});
 app.use("/api", orgRouter);
 
 describe("PATCH /api/person-registry/:id", () => {
@@ -63,6 +75,7 @@ describe("PATCH /api/person-registry/:id", () => {
     const res = await request(app)
       .patch("/api/person-registry/10")
       .set("x-admin-secret", "valid-admin-secret")
+      .set("x-test-user", "admin")
       .send({ aliasPrimary: ["NEW ALIAS"], changedBy: "Nishant" });
 
     expect(res.status).toBe(422);
@@ -83,6 +96,7 @@ describe("PATCH /api/person-registry/:id", () => {
     const res = await request(app)
       .patch("/api/person-registry/10")
       .set("x-admin-secret", "valid-admin-secret")
+      .set("x-test-user", "admin")
       .send({
         aliasPrimary: ["NEW ALIAS"],
         changedBy: "Nishant",
@@ -94,7 +108,7 @@ describe("PATCH /api/person-registry/:id", () => {
     expect(patchRegistryRow).toHaveBeenCalledWith(
       10,
       expect.objectContaining({ aliasPrimary: ["NEW ALIAS"] }),
-      { changedBy: "Nishant", reason: "Correct register spelling", acknowledgedImpact: impact },
+      { changedBy: "Verified Admin", reason: "Correct register spelling", acknowledgedImpact: impact },
     );
     expect(loadPersonRegistry).toHaveBeenCalledOnce();
   });
@@ -106,6 +120,7 @@ describe("PATCH /api/person-registry/:id", () => {
     const res = await request(app)
       .patch("/api/person-registry/10")
       .set("x-admin-secret", "valid-admin-secret")
+      .set("x-test-user", "admin")
       .send({
         aliasPrimary: ["NEW ALIAS"],
         changedBy: "Nishant",
@@ -128,6 +143,7 @@ describe("PATCH /api/person-registry/:id", () => {
     const res = await request(app)
       .patch("/api/person-registry/10")
       .set("x-admin-secret", "valid-admin-secret")
+      .set("x-test-user", "admin")
       .send({
         stateHead: "A DIFFERENT HEAD",
         changedBy: "Nishant",
@@ -136,6 +152,57 @@ describe("PATCH /api/person-registry/:id", () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toContain("stateHead is not editable");
+    expect(patchRegistryRow).not.toHaveBeenCalled();
+  });
+
+  it("records the signed-in identity rather than accepting a claimed audit actor", async () => {
+    isAdminToken.mockReturnValue(true);
+    patchRegistryRow.mockResolvedValue({ id: 10, canonical_name: "Example Person" });
+    const impact = {
+      rowCount: 0,
+      affectedCustomers: [],
+      sourceUpdatedAt: "2026-08-21T00:00:00.000Z",
+      proposalHash: "preview-bound-alias-hash",
+    };
+
+    const res = await request(app)
+      .patch("/api/person-registry/10")
+      .set("x-admin-secret", "valid-admin-secret")
+      .set("x-test-user", "admin")
+      .send({
+        aliasPrimary: ["NEW ALIAS"],
+        changedBy: "Impersonated Operator",
+        reason: "Correct register spelling",
+        acknowledgedImpact: impact,
+      });
+
+    expect(res.status).toBe(200);
+    expect(patchRegistryRow).toHaveBeenLastCalledWith(
+      10,
+      expect.anything(),
+      expect.objectContaining({ changedBy: "Verified Admin" }),
+    );
+  });
+
+  it("requires a signed-in session in addition to the admin secret for an auditable write", async () => {
+    isAdminToken.mockReturnValue(true);
+
+    const res = await request(app)
+      .patch("/api/person-registry/10")
+      .set("x-admin-secret", "valid-admin-secret")
+      .send({
+        aliasPrimary: ["NEW ALIAS"],
+        changedBy: "Nishant",
+        reason: "Correct register spelling",
+        acknowledgedImpact: {
+          rowCount: 0,
+          affectedCustomers: [],
+          sourceUpdatedAt: "2026-08-21T00:00:00.000Z",
+          proposalHash: "preview-bound-alias-hash",
+        },
+      });
+
+    expect(res.status).toBe(401);
     expect(patchRegistryRow).not.toHaveBeenCalled();
   });
 });

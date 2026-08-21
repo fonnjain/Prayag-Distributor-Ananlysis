@@ -68,7 +68,7 @@ export function resolveCatalogueAuthority(
  * authority decisions.
  */
 export const authoritativeCurrentMrpRows: SQL = sql`
-  SELECT
+  SELECT DISTINCT
     s.item_code,
     d.app_segment AS segment,
     s.mrp
