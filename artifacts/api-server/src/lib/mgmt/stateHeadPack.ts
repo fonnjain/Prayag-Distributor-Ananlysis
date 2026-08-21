@@ -16,24 +16,26 @@ export type StateHeadPackClassification =
 export type StateHeadPackEvidence = {
   headDisplay: string;
   kind: "head" | "nonTerritory" | "unmapped";
-  /** Date-valid raw register total by fiscal year. */
+  /** FY-label-selected raw register total by fiscal year. */
   byFy: ReadonlyMap<string, { amount: number }>;
-  /** Raw FY-labelled total before the transaction-date hard gate. */
+  /** Retained for compatibility with earlier manifests; equals byFy for new loads. */
   headlineByFy?: ReadonlyMap<string, { amount: number }>;
 };
 
 export type StateHeadPackPeriodIntegrity = {
   headlineTotal: number;
   headlineRows: number;
-  inFyTotal: number;
-  inFyRows: number;
-  outOfFyTotal: number;
-  outOfFyRows: number;
+  /** FY-label-selected rows; the legacy field name is retained in old manifests only. */
+  labelledTotal: number;
+  labelledRows: number;
+  /** Raw dates that disagree with the reliable FY label; audit evidence, not exclusion. */
+  dateMismatchTotal: number;
+  dateMismatchRows: number;
   undatedTotal: number;
   undatedRows: number;
   futureDatedTotal: number;
   futureDatedRows: number;
-  contaminationDateRange: { from: string; to: string } | null;
+  dateMismatchRange: { from: string; to: string } | null;
   futureDateRange: { from: string; to: string } | null;
 };
 
@@ -99,7 +101,7 @@ export type StateHeadPackManifestEntry = {
   reportFormulaSource?: string | null;
   /** SHA-256 over the raw tab rows, for content-identical duplicate detection. */
   rawDataFingerprint?: string | null;
-  /** Raw date/FY evidence; any contamination is a hard release blocker. */
+  /** Raw date/FY audit evidence; FY labels remain the aggregation authority. */
   periodIntegrityByFy?: Record<string, StateHeadPackPeriodIntegrity>;
   /** Canonical heads evidenced by the workbook's rows. */
   mappedHeads: string[];
@@ -425,22 +427,24 @@ export function createStateHeadPackPeriodIntegrity(): StateHeadPackPeriodIntegri
   return {
     headlineTotal: 0,
     headlineRows: 0,
-    inFyTotal: 0,
-    inFyRows: 0,
-    outOfFyTotal: 0,
-    outOfFyRows: 0,
+    labelledTotal: 0,
+    labelledRows: 0,
+    dateMismatchTotal: 0,
+    dateMismatchRows: 0,
     undatedTotal: 0,
     undatedRows: 0,
     futureDatedTotal: 0,
     futureDatedRows: 0,
-    contaminationDateRange: null,
+    dateMismatchRange: null,
     futureDateRange: null,
   };
 }
 
 /**
- * Adds one FY-labelled raw row. Date validity is intentionally strict: an
- * undated row cannot be used in a date-bound fiscal-year reconciliation.
+ * Adds one FY-labelled raw row. The label selects the fiscal-year population:
+ * these workbooks deliberately carry comparison years and their calendar-year
+ * date component is known to be unreliable for some legacy rows. Raw dates
+ * are retained solely for quality evidence (mismatch, future, and missing).
  */
 export function recordStateHeadPackPeriodRow(
   summary: StateHeadPackPeriodIntegrity,
@@ -451,27 +455,26 @@ export function recordStateHeadPackPeriodRow(
   const amount = Number.isFinite(row.amount) ? row.amount : 0;
   summary.headlineTotal += amount;
   summary.headlineRows++;
+  summary.labelledTotal += amount;
+  summary.labelledRows++;
   const start = fiscalYearStartSerial(fy);
   const end = fiscalYearEndSerial(fy);
   const serial = row.dateSerial == null ? null : Math.floor(row.dateSerial);
   if (serial == null || start == null || end == null) {
     summary.undatedTotal += amount;
     summary.undatedRows++;
-    return false;
+    return true;
   }
   const inFy = serial >= start && serial < end;
-  if (inFy) {
-    summary.inFyTotal += amount;
-    summary.inFyRows++;
-  } else {
-    summary.outOfFyTotal += amount;
-    summary.outOfFyRows++;
+  if (!inFy) {
+    summary.dateMismatchTotal += amount;
+    summary.dateMismatchRows++;
     const date = isoDateFromSerial(serial);
-    if (!summary.contaminationDateRange) {
-      summary.contaminationDateRange = { from: date, to: date };
+    if (!summary.dateMismatchRange) {
+      summary.dateMismatchRange = { from: date, to: date };
     } else {
-      summary.contaminationDateRange.from = [summary.contaminationDateRange.from, date].sort()[0];
-      summary.contaminationDateRange.to = [summary.contaminationDateRange.to, date].sort()[1];
+      summary.dateMismatchRange.from = [summary.dateMismatchRange.from, date].sort()[0];
+      summary.dateMismatchRange.to = [summary.dateMismatchRange.to, date].sort()[1];
     }
   }
   if (serial > asOfSerial) {
@@ -485,7 +488,7 @@ export function recordStateHeadPackPeriodRow(
       summary.futureDateRange.to = [summary.futureDateRange.to, date].sort()[1];
     }
   }
-  return inFy;
+  return true;
 }
 
 export function stateHeadPackPeriodIntegrityBlockers(
@@ -494,15 +497,6 @@ export function stateHeadPackPeriodIntegrityBlockers(
   const blockers: string[] = [];
   for (const entry of manifest) {
     for (const [fy, summary] of Object.entries(entry.periodIntegrityByFy ?? {})) {
-      if (summary.outOfFyRows > 0) {
-        const range = summary.contaminationDateRange
-          ? `${summary.contaminationDateRange.from} to ${summary.contaminationDateRange.to}`
-          : "unknown dates";
-        blockers.push(
-          `${entry.fileName} FY${fy}: ${summary.outOfFyRows} raw rows totaling ₹${summary.outOfFyTotal.toFixed(2)} ` +
-            `fall outside the requested FY (${range}).`,
-        );
-      }
       if (summary.undatedRows > 0) {
         blockers.push(
           `${entry.fileName} FY${fy}: ${summary.undatedRows} raw rows totaling ₹${summary.undatedTotal.toFixed(2)} ` +
@@ -524,27 +518,15 @@ export function stateHeadPackPeriodIntegrityBlockers(
 }
 
 /**
- * A targeted pack must contain one fiscal year only. The row-level integrity
- * check above validates a row against its own FY label; this complementary
- * check prevents a carry-forward workbook from passing a --fy release gate
- * merely because its older rows are correctly labelled as older.
+ * State Head workbooks deliberately contain multiple FY-labelled populations
+ * for comparison. A requested FY selects the desired label; other labels are
+ * not carry-forward contamination and must not block the release check.
  */
 export function stateHeadPackRequestedFyBlockers(
-  manifest: StateHeadPackManifestEntry[],
-  requestedFy: string | null,
+  _manifest: StateHeadPackManifestEntry[],
+  _requestedFy: string | null,
 ): string[] {
-  if (!requestedFy) return [];
-  const blockers: string[] = [];
-  for (const entry of manifest) {
-    for (const [rowFy, summary] of Object.entries(entry.periodIntegrityByFy ?? {})) {
-      if (rowFy === requestedFy || summary.inFyRows === 0) continue;
-      blockers.push(
-        `${entry.fileName}: ${summary.inFyRows} date-valid FY${rowFy} raw rows totaling ` +
-          `₹${summary.inFyTotal.toFixed(2)} fall outside requested FY${requestedFy}.`,
-      );
-    }
-  }
-  return blockers;
+  return [];
 }
 
 export function manifestConflictFileIds(

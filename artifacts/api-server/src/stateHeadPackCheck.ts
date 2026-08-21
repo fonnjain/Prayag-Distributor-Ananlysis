@@ -318,16 +318,16 @@ function printHuman(report: AuditReport): void {
     for (const [fy, integrity] of Object.entries(
       file.periodIntegrityByFy ?? {},
     )) {
-      const contamination = integrity.contaminationDateRange
-        ? `${integrity.contaminationDateRange.from} to ${integrity.contaminationDateRange.to}`
+      const dateMismatch = integrity.dateMismatchRange
+        ? `${integrity.dateMismatchRange.from} to ${integrity.dateMismatchRange.to}`
         : "none";
       const future = integrity.futureDateRange
         ? `${integrity.futureDateRange.from} to ${integrity.futureDateRange.to}`
         : "none";
       console.log(
         `    FY${fy}: headline ₹${integrity.headlineTotal.toFixed(2)}; ` +
-          `in-FY ₹${integrity.inFyTotal.toFixed(2)}; ` +
-          `out-of-FY ₹${integrity.outOfFyTotal.toFixed(2)} (${integrity.outOfFyRows} rows; ${contamination}); ` +
+          `FY-label-selected ₹${integrity.labelledTotal.toFixed(2)}; ` +
+          `raw-date mismatch ₹${integrity.dateMismatchTotal.toFixed(2)} (${integrity.dateMismatchRows} rows; ${dateMismatch}); ` +
           `future ₹${integrity.futureDatedTotal.toFixed(2)} (${integrity.futureDatedRows} rows; ${future})`,
       );
       if (integrity.undatedRows > 0) {
@@ -341,7 +341,7 @@ function printHuman(report: AuditReport): void {
   }
   for (const audit of report.fiscalYears) {
     console.log(
-      `${audit.fy}: date-valid, deduplicated pack ₹${audit.packTotal.toFixed(2)} vs ` +
+      `${audit.fy}: FY-label-selected, deduplicated pack ₹${audit.packTotal.toFixed(2)} vs ` +
         `sale_line_current ₹${audit.saleLineCurrentNet.toFixed(2)}; ` +
         `delta ${(audit.deltaPct * 100).toFixed(2)}%`,
     );

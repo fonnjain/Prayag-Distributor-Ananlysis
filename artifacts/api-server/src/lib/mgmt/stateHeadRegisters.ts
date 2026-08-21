@@ -458,7 +458,7 @@ async function loadOneWorkbook(
   type RawGroup = {
     /** Only date-valid raw rows are eligible for reconciliation. */
     byFy: Map<string, FyRegisterAgg>;
-    /** The workbook's FY-labelled total before the date hard gate. */
+    /** The workbook's FY-labelled total (kept for audit compatibility). */
     headlineByFy: Map<string, { amount: number }>;
     rows: number;
   };
@@ -498,7 +498,7 @@ async function loadOneWorkbook(
         rawDataHash.update("\n");
         const period = (periodIntegrityByFy[fy] ??=
           createStateHeadPackPeriodIntegrity());
-        const inFy = recordStateHeadPackPeriodRow(
+        recordStateHeadPackPeriodRow(
           period,
           fy,
           { amount, dateSerial: rowDateSerial(r, registerTab) },
@@ -518,9 +518,9 @@ async function loadOneWorkbook(
         const headline = grp.headlineByFy.get(fy) ?? { amount: 0 };
         headline.amount += amount;
         grp.headlineByFy.set(fy, headline);
-        // The raw FY label is retained for the audit display, but it never
-        // makes an out-of-FY or undated line eligible for reconciliation.
-        if (!inFy) continue;
+        // FY labels select this workbook's two comparison populations. The
+        // date year is known to be wrong on legacy rows, so dates are audit
+        // evidence rather than an inclusion gate.
         let agg = grp.byFy.get(fy);
         if (!agg) {
           agg = {

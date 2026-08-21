@@ -33,6 +33,7 @@ const PARTY = 2;
 const CITY = 9;
 const AMOUNT = 7;
 const DATE = [1, 4];
+const FY_LABEL = [13, 14];
 const INSTITUTIONAL = new Set(["PROJECT", "OTHER"]);
 // Current-pack spellings that are geographic sub-territories, not distinct
 // states. This is deliberately local to the read-only comparison; it does not
@@ -55,6 +56,21 @@ function serial(row: Cell[]): number | null {
     if (typeof value === "number" && value > 20_000 && value < 80_000) return value;
   }
   return null;
+}
+
+function fyLabel(row: Cell[]): string | null {
+  for (const index of FY_LABEL) {
+    const match = /(\d{4})\s*-\s*(\d{2})\s*$/.exec(String(row[index] ?? "").trim());
+    if (!match || Number(match[1]) + 1 !== 2000 + Number(match[2])) continue;
+    return `${match[1]}-${match[2]}`;
+  }
+  return null;
+}
+
+function isoDate(date: number): string {
+  return new Date(Date.UTC(1899, 11, 30) + Math.floor(date) * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
 }
 
 function canonicalHead(raw: unknown): string {
@@ -96,22 +112,59 @@ async function main(): Promise<void> {
   const packPairs = new Map<string, Pair>();
   const packParties = new Map<string, Map<string, PartyAttribution>>();
   const fileTotals = new Map<string, Pair>();
+  const selectionAudit = {
+    fyLabel: { rows: 0, net: 0 },
+    rawDate: { rows: 0, net: 0 },
+    both: { rows: 0, net: 0 },
+    labelOnly: { rows: 0, net: 0 },
+    dateOnly: { rows: 0, net: 0 },
+  };
   let futureRows = 0;
   let futureNet = 0;
+  const futureRowDetails: Array<{
+    file: string;
+    invoice: string;
+    party: string;
+    rawHead: string;
+    fyLabel: string;
+    transactionDate: string;
+    net: number;
+  }> = [];
   const nowSerial = Math.floor((Date.now() - Date.UTC(1899, 11, 30)) / 86_400_000);
 
   let next = 0;
   const worker = async (): Promise<void> => {
     while (next < files.length) {
       const file = files[next++];
-      const rowsForFy: Array<{ row: Cell[]; net: number; date: number }> = [];
+      const rowsForFy: Array<{ row: Cell[]; net: number; date: number | null }> = [];
       await readTabRowsChunked(file.id, "Sheet1", (chunk) => {
         for (const candidate of chunk) {
           if (!candidate) continue;
           const row = candidate as Cell[];
           const net = amount(row[AMOUNT]);
           const date = serial(row);
-          if (net == null || date == null || fiscalMonthIndex(Math.round(date), FY) == null) continue;
+          const labelSelected = fyLabel(row) === FY;
+          const dateSelected =
+            date != null && fiscalMonthIndex(Math.round(date), FY) != null;
+          if (net != null && labelSelected) {
+            selectionAudit.fyLabel.rows++;
+            selectionAudit.fyLabel.net += net;
+          }
+          if (net != null && dateSelected) {
+            selectionAudit.rawDate.rows++;
+            selectionAudit.rawDate.net += net;
+          }
+          if (net != null && labelSelected && dateSelected) {
+            selectionAudit.both.rows++;
+            selectionAudit.both.net += net;
+          } else if (net != null && labelSelected) {
+            selectionAudit.labelOnly.rows++;
+            selectionAudit.labelOnly.net += net;
+          } else if (net != null && dateSelected) {
+            selectionAudit.dateOnly.rows++;
+            selectionAudit.dateOnly.net += net;
+          }
+          if (net == null || !labelSelected) continue;
           rowsForFy.push({ row, net, date });
         }
       });
@@ -128,9 +181,18 @@ async function main(): Promise<void> {
         const pairKey = `${head}\u0000${state}`;
         addPair(packPairs, pairKey, net);
         addPair(fileTotals, file.name, net);
-        if (date > nowSerial) {
+        if (date != null && date > nowSerial) {
           futureRows++;
           futureNet += net;
+          futureRowDetails.push({
+            file: file.name,
+            invoice: String(row[0] ?? "").trim(),
+            party: String(row[PARTY] ?? "").trim(),
+            rawHead: String(row[HEAD] ?? "").trim(),
+            fyLabel: FY,
+            transactionDate: isoDate(date),
+            net,
+          });
         }
         if (!MULTI_HEAD_STATES.has(state)) continue;
         const party = String(row[PARTY] ?? "").trim();
@@ -271,7 +333,8 @@ async function main(): Promise<void> {
     readOnly: true,
     fy: FY,
     packFiles: files.length,
-    futureRows: { rows: futureRows, net: futureNet },
+    selectionAudit,
+    futureRows: { rows: futureRows, net: futureNet, details: futureRowDetails },
     pairComparison,
     multiHeadComparison,
     institutionalPack: institutions,

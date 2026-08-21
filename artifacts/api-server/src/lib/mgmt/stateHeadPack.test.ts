@@ -145,7 +145,7 @@ describe("State Head master-pack manifest", () => {
     ]);
   });
 
-  it("blocks a requested-year pack that carries date-valid rows from another FY", () => {
+  it("allows comparison-year labels in a requested-FY workbook", () => {
     const entry = classifyStateHeadPackFile({
       fileId: "carry-forward-id",
       fileName: "LALAN 2026-27",
@@ -153,20 +153,18 @@ describe("State Head master-pack manifest", () => {
       periodIntegrityByFy: {
         "2025-26": {
           ...createStateHeadPackPeriodIntegrity(),
-          inFyRows: 99,
-          inFyTotal: 1_234_500,
+          labelledRows: 99,
+          labelledTotal: 1_234_500,
         },
         "2026-27": {
           ...createStateHeadPackPeriodIntegrity(),
-          inFyRows: 1,
-          inFyTotal: 500,
+          labelledRows: 1,
+          labelledTotal: 500,
         },
       },
     });
 
-    expect(stateHeadPackRequestedFyBlockers([entry], "2026-27")).toEqual([
-      expect.stringContaining("99 date-valid FY2025-26 raw rows"),
-    ]);
+    expect(stateHeadPackRequestedFyBlockers([entry], "2026-27")).toEqual([]);
     expect(stateHeadPackRequestedFyBlockers([entry], null)).toEqual([]);
   });
 
@@ -201,7 +199,7 @@ describe("State Head master-pack manifest", () => {
     ]);
   });
 
-  it("keeps only in-FY rows and hard-blocks out-of-FY, future, and undated evidence", () => {
+  it("selects FY-labelled rows while retaining date mismatch, future, and undated evidence", () => {
     const period = createStateHeadPackPeriodIntegrity();
     // 01-Apr-2025 is valid for FY2025-26.
     expect(
@@ -212,8 +210,8 @@ describe("State Head master-pack manifest", () => {
         46255,
       ),
     ).toBe(true);
-    // 01-Apr-2026 falls outside FY2025-26; 25-Dec-2026 is also future
-    // relative to the 21-Aug-2026 run date (serial 46255).
+    // Raw calendar dates may disagree with a reliable FY label. They remain
+    // audit evidence, while future and undated values stay release blockers.
     expect(
       recordStateHeadPackPeriodRow(
         period,
@@ -221,7 +219,7 @@ describe("State Head master-pack manifest", () => {
         { amount: 20, dateSerial: 46113 },
         46255,
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       recordStateHeadPackPeriodRow(
         period,
@@ -229,7 +227,7 @@ describe("State Head master-pack manifest", () => {
         { amount: 30, dateSerial: 46381 },
         46255,
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       recordStateHeadPackPeriodRow(
         period,
@@ -237,7 +235,7 @@ describe("State Head master-pack manifest", () => {
         { amount: 10, dateSerial: null },
         46255,
       ),
-    ).toBe(false);
+    ).toBe(true);
 
     const entry = classifyStateHeadPackFile({
       fileId: "dated-file",
@@ -246,7 +244,7 @@ describe("State Head master-pack manifest", () => {
         {
           headDisplay: "Lalan Kumar",
           kind: "head",
-          byFy: new Map([["2025-26", { amount: period.inFyTotal }]]),
+          byFy: new Map([["2025-26", { amount: period.labelledTotal }]]),
           headlineByFy: new Map([["2025-26", { amount: period.headlineTotal }]]),
         },
       ],
@@ -254,9 +252,8 @@ describe("State Head master-pack manifest", () => {
     });
 
     expect(entry.report1ByFy["2025-26"]).toBe(160);
-    expect(entry.includedByFy["2025-26"]).toBe(100);
+    expect(entry.includedByFy["2025-26"]).toBe(160);
     expect(stateHeadPackPeriodIntegrityBlockers([entry])).toEqual([
-      expect.stringContaining("outside the requested FY"),
       expect.stringContaining("have no usable transaction date"),
       expect.stringContaining("future-dated raw rows"),
     ]);
