@@ -1,0 +1,117 @@
+GOAL
+Prayag's team must be able to correct any assignment: move a salesperson to a
+different head, change a head's territories, change who owns a customer, and
+mark anything unassigned. Selecting a person opens a page offering the choices
+that apply to THAT person's role.
+
+============================================================
+THE RULE THAT MAKES THIS SAFE
+============================================================
+Coverage is DERIVED from register evidence today. Editing must not silently
+replace that.
+
+  - Derived stays the default and stays visible
+  - A person may OVERRIDE it. The override is recorded with who, when and why
+  - Both are shown: "Register evidence: Lalan Kumar, 29 customers" beside
+    "Set by Nishant, 20 Aug: Rizvi"
+  - A divergence is a stated decision, never an accident
+
+Every change is EFFECTIVE-DATED from the date of the decision. Historical
+attribution never moves. FY2025-26 by head must read the same before and after
+any edit made through this system - that is the stop condition on every phase.
+
+============================================================
+PHASE 1 - THE PERSON PAGE, ROLE-AWARE
+============================================================
+Selecting anyone opens a detail page. What it offers depends on who they are.
+
+IF THEY ARE A STATE HEAD
+  Territories        multi-select from state_hierarchy. The dropdown ALWAYS
+                     shows split leaves - UP ( A ), UP (AS), UTTAR PRADESH,
+                     DELHI A, DELHI NCR, JAMMU, KASHMIR, KARNATAKA (B),
+                     RAJASTHAN (N) - indented under their parent. Never
+                     collapse a split into its parent.
+  Their team         add or remove people; move a person to a different head
+  Their customers    view, with a route into bulk reassignment
+  Reports to         a more senior person, or none
+
+IF THEY ARE A MEMBER
+  State Head         dropdown of all heads, PLUS "Unassigned"
+  Reporting manager  dropdown of any active person, PLUS "None"
+  Designation        dropdown, plus add-new
+  Territories        same split-aware picker
+  Their customers    view and reassign
+
+"UNASSIGNED" IS A REAL OPTION EVERYWHERE
+Not a blank. A selectable sentinel that renders as "Unassigned" and is
+countable. Reuse the Unassigned coverage sentinel already built for the
+null-head register buckets. A person or customer parked as Unassigned appears
+in the unassigned queue by design, not by omission.
+
+MOVING A PERSON
+Mandatory impact preview before saving:
+    "Moving X from Head A to Head B.
+     Affects N people below them and M customers.
+     Historical attribution before <date> is unchanged."
+Nothing saves until confirmed. This already exists for deactivation - reuse it.
+
+============================================================
+PHASE 2 - THE CUSTOMER PAGE
+============================================================
+Selecting a customer offers:
+  Type            distributor · direct_dealer · retailer · sub_dealer ·
+                  project · govt · other
+  Salesperson     any active person, PLUS "Unassigned"
+  State Head      any head, PLUS "Unassigned"
+  Territory       the same split-aware state picker
+  Distributor     for a retailer: add or remove links, many allowed
+
+TYPE CHANGES NEED A REASON
+Changing a customer from distributor to project is what broke year-on-year
+comparison before - Rs 35.73 Cr read as a total collapse. Require a reason,
+record it in change_log.reason with the operator in changed_by, and
+effective-date it.
+
+============================================================
+PHASE 3 - ADDING AND UNASSIGNING
+============================================================
+  Add a person       creates an active person. Employee code OPTIONAL - 62 of
+                     179 have implausible codes and it must never be the key.
+  Add a customer     goes to the Review Queue as pending, not straight to the
+                     master. Keep that gate.
+  Unassign          available on both, from the same dropdown. Sets the
+                     sentinel, dates it, logs it.
+  Bulk              select several customers, reassign in one transaction with
+                     one impact preview and one change_log row per customer.
+
+============================================================
+NON-NEGOTIABLE ON EVERY PHASE
+============================================================
+- Effective dating on every assignment change
+- Impact preview before anything affecting more than one record
+- change_log per edit: operator in changed_by, reason in reason, SEPARATE
+  columns. Never overload one into the other.
+- Admin gate, matching the People tab
+- Never delete a person or customer. Deactivate or unassign only.
+- The state dropdown always shows splits, on every screen
+
+============================================================
+VERIFY - each phase, stop and report
+============================================================
+1. Move a member from one head to another. Paste the impact preview. Confirm
+   the counts are right.
+2. Print FY2025-26 net by head BEFORE and AFTER that move. Identical.
+   Rs 3,609,953,808.51. If any head moves, stop.
+3. Add a territory to a State Head from the dropdown. Confirm the picker shows
+   UP ( A ), UP (AS) and UTTAR PRADESH as three separate selectable leaves.
+4. Confirm an overridden coverage row shows BOTH the derived value and the
+   override, with who and when.
+5. Set a person to Unassigned. Confirm they appear in the unassigned queue and
+   are countable, not merely blank.
+6. Change a customer's type. Confirm a reason is required and lands in
+   change_log.reason with the operator in changed_by.
+7. Bulk-reassign 5 customers. Confirm one impact preview and five change_log
+   rows.
+8. Add a person with no employee code. Confirm it saves.
+9. Confirm sale_line, margin_fact and mrp tables unchanged.
+10. Push, print both refs.
