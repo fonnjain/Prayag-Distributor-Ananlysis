@@ -65,8 +65,16 @@ async function fetchHierarchy(fy: string): Promise<HierarchyRow[]> {
     _fetchPromise = fetch(`/api/state-hierarchy?fy=${encodeURIComponent(fy)}`)
       .then((r) => (r.ok ? (r.json() as Promise<{ rows: HierarchyRow[] }>) : Promise.reject(r.status)))
       .then((data) => {
-        _cacheAll     = data.rows;
-        _cacheVisible = data.rows.filter((r) => r.picker_visible);
+        // PostgreSQL numeric aggregates arrive over JSON as strings. The picker
+        // displays them with Number#toFixed, so normalise at the API boundary
+        // rather than trusting the TypeScript-only HierarchyRow declaration.
+        const normalized = data.rows.map((row) => ({
+          ...row,
+          row_count: Number(row.row_count) || 0,
+          net_cr: Number(row.net_cr) || 0,
+        }));
+        _cacheAll     = normalized;
+        _cacheVisible = normalized.filter((r) => r.picker_visible);
         return _cacheVisible;
       })
       .catch(() => {
