@@ -1,0 +1,42 @@
+Convergence conclusion accepted - 64 conflicts and 379 unmappable rows is
+ample reason not to backfill. reports_to_person_id operational,
+reporting_manager as HR provenance, and zero cycles across 342 links.
+
+The guard verification is the most rigorous in this project. Using a
+zero-impact alias proposal so no real attribution was at risk, confirming
+change_log.changed_by held the SERVER session identity rather than the client
+value, restoring the original state and revoking the session - that is how a
+live write path should be tested.
+
+Before the editor, two things.
+
+1. MAKE THE DUPLICATE-CODE CASE STRUCTURALLY IMPOSSIBLE, NOT A RULE
+Employee code must not be unique-constrained - 5900000000000 is legitimately
+held by two people and 62 of 179 codes are implausible. But nothing should be
+able to treat a shared code as an identity.
+
+  a. Print every place employee_code is used in a lookup, join or match.
+  b. Where any of them could return more than one person, make it return a
+     LIST or throw - never pick one.
+  c. Add a test that two people sharing a code cannot be merged, resolved to
+     one, or offered as "same person" by any code-based path.
+
+That is the difference between a warning and a guarantee.
+
+2. THE REGISTRY-TO-PERSON MAPPING IS THE REAL PREREQUISITE
+379 registry-person rows have no unique People match. Until that is closed,
+an editor for canonical name and reporting relationship edits records that may
+not correspond to a person at all.
+
+Scope it as its own task, before the editor:
+  - Resolve unique, evidence-backed matches only
+  - Employee code as a supporting signal, never the key
+  - Ambiguous, unresolved and the 64 conflicts to an operator review queue
+  - No self-links or cycles after any applied backfill
+  - Raw reporting_manager retained
+
+Print how many of the 379 you would expect to resolve automatically, and how
+many would land in the review queue. If the queue is 300+, it needs a
+different approach than one-by-one adjudication.
+
+Then the editor.
