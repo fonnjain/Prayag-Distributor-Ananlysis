@@ -1,0 +1,69 @@
+Section A passes. My expected values were stale, not your data - both
+mismatches are explained by work already done.
+
+CORRECTED ANCHORS
+  person = 361 total
+         = 178 active
+         + 181 departed_import
+         + Taninki Ramesh Babu (id 174, marked inactive 31-Mar-2025)
+         + Unassigned coverage sentinel (id 360)
+
+  alert store: NO fixed expected total. It grows by design - cleared alerts
+  stay in history. Assert the OPEN count, never the total. The 37th is C6 for
+  Sandeep Dadheech, cleared with condition_no_longer_holds.
+
+AND A RULE CHANGE - two classes of anchor
+  HARD GATE, stop on mismatch: FY2025-26 rows and net, customer, margin_fact,
+  catalogue codes, repo parity.
+  GROWS BY DESIGN, do not stop: alerts, change_log, market_survey, and
+  person composition after a departure.
+
+You followed the gate exactly as written and it halted you on a correct
+change. That was my rule being too blunt, not your run.
+
+============================================================
+CONTINUE FROM SECTION B
+============================================================
+Work through the App QA document in order. Report per section, and do not
+stop for a "grows by design" mismatch - note it and continue.
+
+SECTION B - global behaviours, test once on three pages
+  B1 period selector - confirm a page's figure MOVES when the period changes.
+     Name any page that ignores it.
+  B2 filters - the state picker must show UP ( A ), UP (AS), UTTAR PRADESH as
+     separate leaves. Select the parent, then each split individually, and
+     confirm the splits sum to the parent TO THE RUPEE.
+     Confirm GEM, JJM, HITESH and Non-territory are absent from every picker.
+  B3 exports - filter to one state, export, and confirm the export row count
+     and total match the screen.
+  B4 empty states - find one case of absence and confirm it renders as a
+     reason, never as zero.
+
+SECTION C - dashboard
+  Overview, Coverage, Momentum, Data Health. Figures are in the document.
+  On Momentum, confirm BOTH nominal and real are shown. Nominal alone is
+  misleading.
+
+SECTION D - sales
+  SKU Deep Dive is the one to test hardest. On Price Shrinkers, print the
+  arithmetic for ONE row: the basket, both MRP totals, mrpIndex, realGrowth%.
+  If mrpIndex is 1.000 it is using today's price instead of "MRP then", and
+  every row is wrong in the same direction.
+
+SECTION E - MRP and margin
+  The register-gap card must read 648 of 3,751. If it reads 42, the
+  deployment is stale.
+
+SECTION F - alerts, market, organisation
+  The four registry PATCH guards - 401 / 422 / 400 / 200 - using a zero-impact
+  proposal, restoring afterwards, as you did before.
+
+SECTION G - cross-page consistency. THE MOST VALUABLE SECTION.
+  Pick ONE head and ONE state. Read every figure for them on every page.
+  Nine pairs are listed. Any disagreement is a real defect.
+
+REPORT
+  Per section: pass, fail, or not-applicable with a reason.
+  For every fail: the expected value, the actual, and which page.
+  Do not fix anything during the run. Collect, then we decide.
+  Push and print both refs at the end.
