@@ -10,6 +10,7 @@ import {
   createStateHeadPackPeriodIntegrity,
   recordStateHeadPackPeriodRow,
   stateHeadPackPeriodIntegrityBlockers,
+  stateHeadPackRequestedFyBlockers,
   stateHeadSourceLoadBlockers,
   sumEligibleStateHeadSaleRows,
 } from "./stateHeadPack.js";
@@ -142,6 +143,31 @@ describe("State Head master-pack manifest", () => {
       "2025-26",
       "2026-27",
     ]);
+  });
+
+  it("blocks a requested-year pack that carries date-valid rows from another FY", () => {
+    const entry = classifyStateHeadPackFile({
+      fileId: "carry-forward-id",
+      fileName: "LALAN 2026-27",
+      evidence: [evidence("Lalan Kumar", "head", 100)],
+      periodIntegrityByFy: {
+        "2025-26": {
+          ...createStateHeadPackPeriodIntegrity(),
+          inFyRows: 99,
+          inFyTotal: 1_234_500,
+        },
+        "2026-27": {
+          ...createStateHeadPackPeriodIntegrity(),
+          inFyRows: 1,
+          inFyTotal: 500,
+        },
+      },
+    });
+
+    expect(stateHeadPackRequestedFyBlockers([entry], "2026-27")).toEqual([
+      expect.stringContaining("99 date-valid FY2025-26 raw rows"),
+    ]);
+    expect(stateHeadPackRequestedFyBlockers([entry], null)).toEqual([]);
   });
 
   it("blocks a material total gap and reports a source head missing from the pack", () => {

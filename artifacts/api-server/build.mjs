@@ -36,6 +36,10 @@ async function buildAll() {
       path.resolve(artifactDir, "src/loadSecondaryOrders.ts"),
       // Read-only State Head master-pack release check.
       path.resolve(artifactDir, "src/stateHeadPackCheck.ts"),
+      // Read-only overlap audit for the historical and live State Head folders.
+      path.resolve(artifactDir, "src/stateHeadPackCrossFolderCheck.ts"),
+      // Read-only coverage comparison for the current State Head pack.
+      path.resolve(artifactDir, "src/stateHeadPackCoverageCheck.ts"),
     ],
     platform: "node",
     bundle: true,

@@ -523,6 +523,30 @@ export function stateHeadPackPeriodIntegrityBlockers(
   return blockers;
 }
 
+/**
+ * A targeted pack must contain one fiscal year only. The row-level integrity
+ * check above validates a row against its own FY label; this complementary
+ * check prevents a carry-forward workbook from passing a --fy release gate
+ * merely because its older rows are correctly labelled as older.
+ */
+export function stateHeadPackRequestedFyBlockers(
+  manifest: StateHeadPackManifestEntry[],
+  requestedFy: string | null,
+): string[] {
+  if (!requestedFy) return [];
+  const blockers: string[] = [];
+  for (const entry of manifest) {
+    for (const [rowFy, summary] of Object.entries(entry.periodIntegrityByFy ?? {})) {
+      if (rowFy === requestedFy || summary.inFyRows === 0) continue;
+      blockers.push(
+        `${entry.fileName}: ${summary.inFyRows} date-valid FY${rowFy} raw rows totaling ` +
+          `₹${summary.inFyTotal.toFixed(2)} fall outside requested FY${requestedFy}.`,
+      );
+    }
+  }
+  return blockers;
+}
+
 export function manifestConflictFileIds(
   manifest: StateHeadPackManifestEntry[],
 ): Set<string> {

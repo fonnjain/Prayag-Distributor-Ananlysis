@@ -21,6 +21,7 @@ import {
   sumEligibleStateHeadSaleRows,
   missingMaterialSourceHeads,
   stateHeadSourceLoadBlockers,
+  stateHeadPackRequestedFyBlockers,
   type StateHeadSaleSourceRow,
 } from "./lib/mgmt/stateHeadPack.js";
 import { loadPersonRegistry } from "./lib/personRegistry.js";
@@ -185,6 +186,10 @@ async function buildReport(
     registers.folderError,
     registers.manifest,
   );
+  const requestedFyBlockers = stateHeadPackRequestedFyBlockers(
+    registers.manifest,
+    requestedFy,
+  );
   const discrepancyBlockers = fyAudits.flatMap((audit) => {
     const totalBlocker =
       hasMaterialPackTotalDiscrepancy(
@@ -219,12 +224,14 @@ async function buildReport(
     readOnly: true,
     reconciliationReady:
       sourceLoadBlockers.length === 0 &&
+      requestedFyBlockers.length === 0 &&
       registers.packBlockers.length === 0 &&
       readErrors.length === 0 &&
       discrepancyBlockers.length === 0,
     warnings: [...registers.packWarnings, ...readErrors],
     blockers: [
       ...sourceLoadBlockers,
+      ...requestedFyBlockers,
       ...registers.packBlockers,
       ...discrepancyBlockers,
     ],

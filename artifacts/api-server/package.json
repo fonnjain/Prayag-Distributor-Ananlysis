@@ -15,6 +15,8 @@
     "master-seed-import": "node ./build.mjs && node --enable-source-maps ./dist/masterSeedImport.mjs",
     "load-secondary-orders": "node ./build.mjs && node --enable-source-maps ./dist/loadSecondaryOrders.mjs",
     "statehead-pack-check": "node ./build.mjs && node --enable-source-maps ./dist/stateHeadPackCheck.mjs",
+    "statehead-pack-cross-folder-check": "node ./build.mjs && node --enable-source-maps ./dist/stateHeadPackCrossFolderCheck.mjs",
+    "statehead-pack-coverage-check": "node ./build.mjs && node --enable-source-maps ./dist/stateHeadPackCoverageCheck.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

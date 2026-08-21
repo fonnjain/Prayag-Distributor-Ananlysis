@@ -14,3 +14,9 @@ Post-sync drift detection is read-only: it records an `ok`, `drift`, or `error` 
 **Why:** New register rows can change customer evidence without an approved organisation decision. Auto-rewriting coverage would silently reassign geography.
 
 **How to apply:** Resolve a recorded drift through a separately reviewed coverage change; preserve the audit event as evidence of what the register changed.
+
+Direct State Head workbooks are a separate operational-attribution evidence source. When a transaction-level pack conflicts with derived coverage, report the named customer/head differences read-only and require an explicit approved coverage review before changing any assignment.
+
+**Why:** A direct workbook may reflect a valid business reassignment, but it can also contain carry-forward, future-dated, institutional, or departed-head rows. Treating either source as an unattended migration authority would silently rewrite organisation ownership.
+
+**How to apply:** Compare raw dates, canonical State Head aliases, state variants, and customer-level head sets first. Keep project/other and departed-head values visible as unassigned evidence until an approved organisation decision defines their destination.
