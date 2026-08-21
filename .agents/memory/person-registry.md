@@ -25,6 +25,13 @@ description: DB-backed replacement for head_alias.json + normalize.json territor
 - **Two Ashutosh Kumar rows** — different norm_keys; one code-based, one `ashutoshkumar:sandeepdadheech`.
 - Non-persons: GEM, GOVT, JJM, OTHER, PROJECT — `is_person=false`.
 
+## Relationship-model boundary
+`person.reports_to_person_id` is the operational reporting hierarchy. `person_registry.reporting_manager` is imported HR/roster text and provenance, not an operational relationship key.
+
+**Why:** A measured comparison found both unresolved manager text and conflicts with the existing operational hierarchy; a shared employee-code case also proves employee code cannot be a person identity key.
+
+**How to apply:** Do not widen the registry editor beyond aliases until a dedicated convergence flow maps registry records to stable `person_id` values, sends unresolved or ambiguous matches to review, and validates self-links and cycles before backfilling. Retain raw manager text as provenance while the relational hierarchy is reconciled.
+
 ## Verified (Aug 2026)
 - Seed: 1033 rows (14 state heads, 1015 members, 5 non-persons, 135 skipped)
 - Head-coverage assertion: PASSED on startup with seeded DB
