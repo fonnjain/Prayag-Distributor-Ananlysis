@@ -275,14 +275,24 @@ function looksLikeRegisterRow(
   return rowDateSerial(r, schema) != null && rowAmount(r, schema) != null && rowFy(r, schema) != null;
 }
 
-// Detect the register tab by content. Samples the first rows of each tab
-// (largest first — the register is a big flat tab) and picks the first whose
-// sample carries at least two register-shaped rows.
+// Detect the register tab by content. State Head source packs conventionally
+// keep raw transactions in Sheet1, so inspect it first to avoid spending a
+// quota read on every Report tab. The content test remains authoritative and
+// all other tabs are still searched as a fallback.
 async function detectRegisterTab(
   spreadsheetId: string,
 ): Promise<RegisterTab | null> {
   const tabs = await listSheetTabs(spreadsheetId);
-  const ordered = [...tabs].sort((a, b) => b.rowCount - a.rowCount);
+  const tabPriority = (title: string): number => {
+    const normalized = title.trim().toLowerCase();
+    if (normalized === "sheet1") return 0;
+    if (normalized === "data" || normalized === "data sheet") return 1;
+    return 2;
+  };
+  const ordered = [...tabs].sort(
+    (a, b) =>
+      tabPriority(a.title) - tabPriority(b.title) || b.rowCount - a.rowCount,
+  );
   const reportTab =
     tabs.find((tab) => tab.title.replace(/\s+/g, "").toLowerCase() === "report1")
       ?.title ?? null;
@@ -299,13 +309,18 @@ async function detectRegisterTab(
         hits >= 2 &&
         (!best || hits > best.hits || (hits === best.hits && tab.rowCount > best.rowCount))
       ) {
-        best = {
+        const detected: RegisterTab & { hits: number; rowCount: number } = {
           ...schema,
           title: tab.title,
           reportTab,
           hits,
           rowCount: tab.rowCount,
         };
+        // A content-confirmed Sheet1 is the established raw-data convention
+        // for both supported layouts. Returning here avoids sampling dozens of
+        // report tabs and exhausting the per-minute Sheets read quota.
+        if (tabPriority(tab.title) === 0) return detected;
+        best = detected;
       }
     }
   }

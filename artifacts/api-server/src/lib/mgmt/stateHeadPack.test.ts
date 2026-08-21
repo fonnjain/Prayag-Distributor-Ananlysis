@@ -257,6 +257,37 @@ describe("State Head master-pack manifest", () => {
     );
   });
 
+  it("blocks a renamed scratch duplicate by raw fingerprint, not by filename", () => {
+    const original = classifyStateHeadPackFile({
+      fileId: "original-id",
+      fileName: "LALAN 2025-26",
+      evidence: [evidence("Lalan Kumar", "head", 100)],
+      rawDataFingerprint: "sha256-of-raw-tab",
+    });
+    // Deliberately not named "Copy": this represents a scratch-file rename.
+    // Different headline evidence proves the content fingerprint, rather than
+    // the normal headline-duplicate rule, is what blocks it.
+    const renamedScratch = classifyStateHeadPackFile({
+      fileId: "scratch-id",
+      fileName: "Lalan reconciliation scratch",
+      evidence: [evidence("Lalan Kumar", "head", 101)],
+      rawDataFingerprint: "sha256-of-raw-tab",
+    });
+
+    const blockers = manifestBlockers([original, renamedScratch]);
+    expect(blockers).toEqual(
+      expect.arrayContaining([
+        "Content-identical raw workbooks: LALAN 2025-26, Lalan reconciliation scratch. Keep one source before releasing the pack.",
+      ]),
+    );
+    expect(blockers).not.toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Excluded duplicate/temporary workbook"),
+        expect.stringContaining("Headline-identical workbooks"),
+      ]),
+    );
+  });
+
   it("reconciles territorial heads without counting institutional channel sales", () => {
     const source = sumEligibleStateHeadSaleRows([
       { head: "Sandeep Dadheech", net: 100 },
