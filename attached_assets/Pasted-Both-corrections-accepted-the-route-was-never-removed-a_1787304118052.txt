@@ -1,0 +1,41 @@
+Both corrections accepted - the route was never removed, and I misread the
+panel as fully read-only when it has a narrow alias-edit path. And you are
+right that Customer Master capabilities are all intact.
+
+But the finding underneath is more serious than the missing editor.
+
+1. THE REGISTRY PATCH HAS NO GUARDS - fix this first, before any editor
+No admin check, no reason, no operator identity, no change_log. And it edits
+ALIASES, which change head resolution, which changes attribution.
+
+That is precisely the mechanism that left Rs 259.4 Cr reading as zero for a
+prior year when a name was in one config file and not another. Every other
+write path in this system has a gate, a reason and a log. This one alters
+attribution and has none.
+
+Do that now, small and separate:
+  a. Admin gate, matching the People tab.
+  b. Required reason, into change_log.reason, with the operator in changed_by.
+  c. A change_log row per edit: entity, field, old value, new value.
+  d. Impact preview before any alias or canonical-name save - how many
+     register rows resolve through that alias today.
+
+Do not add new editable fields in this task. Just close the hole on what can
+already be edited.
+
+2. SETTLE THE RELATIONSHIP MODEL BEFORE THE EDITOR
+reporting_manager as text versus reports_to_person_id. Two representations of
+one relationship that must agree - the same shape as head_alias.json versus
+normalize.json, and the two MRP masters.
+
+Report which is authoritative, how many registry rows have a reporting_manager
+that does not resolve to a person_id, and what it would take to converge on
+one. Do not build until that is answered.
+
+3. THEN the registry editor as you scoped it - canonical name, aliases,
+   reporting relationship, state head, flags, with collision validation on
+   employee code. The 5900000000000 case is the test: two real people share
+   it, and the editor must make merging them impossible rather than merely
+   discouraged.
+
+Sequence: guards, then model, then editor.
