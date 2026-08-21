@@ -144,6 +144,28 @@ describe("person registry mapping report", () => {
     });
   });
 
+  it("keeps an explicitly unresolved human decision visible without inventing a People link", () => {
+    const report = buildPersonRegistryMappingReport(
+      [source({
+        resolutionDecision: "unresolved",
+        resolutionEffectiveDate: "2026-08-21",
+        resolutionReason: "HR did not provide enough evidence",
+        resolutionChangedBy: "Verified Admin",
+        resolutionCreatedAt: "2026-08-21T10:00:00.000Z",
+      })],
+      people,
+    );
+
+    expect(report.rows[0].resolution).toEqual({
+      decision: "unresolved",
+      effectiveDate: "2026-08-21",
+      reason: "HR did not provide enough evidence",
+      changedBy: "Verified Admin",
+      createdAt: "2026-08-21T10:00:00.000Z",
+    });
+    expect(report.rows[0].candidatePeople).toHaveLength(1);
+  });
+
   it("only issues SELECT statements through the report loader", async () => {
     const queries: string[] = [];
     const report = await getPersonRegistryMappingReport({

@@ -29,6 +29,11 @@ export interface RegistryMappingSource {
   isStateHead: boolean;
   hrStatus: string | null;
   flagNotes: string | null;
+  resolutionDecision?: "linked" | "unresolved" | null;
+  resolutionEffectiveDate?: string | null;
+  resolutionReason?: string | null;
+  resolutionChangedBy?: string | null;
+  resolutionCreatedAt?: string | null;
 }
 
 export interface OperationalPerson {
@@ -74,6 +79,13 @@ export interface RegistryMappingReportRow {
     operationalManager: string | null;
     agrees: boolean | null;
   };
+  resolution: {
+    decision: "linked" | "unresolved";
+    effectiveDate: string;
+    reason: string;
+    changedBy: string;
+    createdAt: string;
+  } | null;
 }
 
 export interface RegistryManagerConflict extends RegistryMappingReportRow {
@@ -90,12 +102,15 @@ export interface PersonRegistryMappingReport {
     reviewQueue: number;
     managerConflicts: number;
     unmappedManagerConflicts: number;
+    resolvedDecisions: number;
     byStatus: Record<RegistryMappingStatus, number>;
   };
   /** Every currently-unmapped person_registry record, without applying a link. */
   rows: RegistryMappingReportRow[];
   /** Manager disagreements are deliberately separate from the general review queue. */
   managerConflicts: RegistryManagerConflict[];
+  /** Current manually-reviewed links, kept visible for audit in the All view. */
+  resolvedRows: RegistryMappingReportRow[];
   /** Review queue counts grouped by the registry's stated State Head where available. */
   routeCounts: Array<{ stateHead: string; count: number }>;
 }
@@ -244,6 +259,19 @@ export function buildPersonRegistryMappingReport(
         operationalManager: uniqueCandidate?.reportsToName ?? null,
         agrees: managerAgrees,
       },
+      resolution: source.resolutionDecision
+        && source.resolutionEffectiveDate
+        && source.resolutionReason
+        && source.resolutionChangedBy
+        && source.resolutionCreatedAt
+        ? {
+            decision: source.resolutionDecision,
+            effectiveDate: source.resolutionEffectiveDate,
+            reason: source.resolutionReason,
+            changedBy: source.resolutionChangedBy,
+            createdAt: source.resolutionCreatedAt,
+          }
+        : null,
     };
   };
 
@@ -258,6 +286,10 @@ export function buildPersonRegistryMappingReport(
         ? "unmapped"
         : "linked",
     }));
+  const resolvedRows = allRows.filter((row) => {
+    const source = sourceById.get(row.registryId);
+    return source?.personId != null && row.resolution?.decision === "linked";
+  });
   const reviewRows = rows.filter((row) => row.status !== "automatic_candidate");
   const routes = new Map<string, number>();
   for (const row of reviewRows) {
@@ -276,10 +308,12 @@ export function buildPersonRegistryMappingReport(
       unmappedManagerConflicts: reviewRows.filter(
         (row) => row.managerComparison.agrees === false,
       ).length,
+      resolvedDecisions: resolvedRows.length,
       byStatus: countByStatus(rows),
     },
     rows,
     managerConflicts,
+    resolvedRows,
     routeCounts: [...routes.entries()]
       .map(([stateHead, count]) => ({ stateHead, count }))
       .sort((left, right) => right.count - left.count || left.stateHead.localeCompare(right.stateHead)),
@@ -305,8 +339,20 @@ export async function getPersonRegistryMappingReport(
              pr.state_head AS "stateHead",
              pr.is_state_head AS "isStateHead",
              pr.hr_status AS "hrStatus",
-             pr.flag_notes AS "flagNotes"
+             pr.flag_notes AS "flagNotes",
+             resolution.decision AS "resolutionDecision",
+             resolution.effective_date::text AS "resolutionEffectiveDate",
+             resolution.reason AS "resolutionReason",
+             resolution.changed_by AS "resolutionChangedBy",
+             resolution.created_at::text AS "resolutionCreatedAt"
       FROM person_registry pr
+      LEFT JOIN LATERAL (
+        SELECT decision, effective_date, reason, changed_by, created_at
+        FROM person_registry_relationship_resolution
+        WHERE registry_id = pr.id AND superseded_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) resolution ON TRUE
       WHERE pr.is_person = TRUE
       ORDER BY pr.state_head NULLS LAST, pr.canonical_name, pr.id
     `),

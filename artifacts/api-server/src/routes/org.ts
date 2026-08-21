@@ -30,6 +30,13 @@ import {
   type RegistryAliasImpact,
 } from "../lib/personRegistry.js";
 import { getPersonRegistryMappingReport } from "../lib/personRegistryMappingReport.js";
+import {
+  previewRegistryRelationshipResolution,
+  resolveRegistryRelationship,
+  RelationshipHierarchyInvalidError,
+  RelationshipPreviewChangedError,
+  RelationshipPreviewRequiredError,
+} from "../lib/personRegistryRelationshipResolution.js";
 import { isAdminToken } from "../lib/adminAuth.js";
 
 const router = Router();
@@ -498,12 +505,91 @@ router.get("/person-registry", async (_req, res) => {
 // GET /api/person-registry/report — read-only mapping evidence before any
 // People/relationship editor makes an assignment. This deliberately returns
 // candidates, not a backfill proposal or a mutation endpoint.
-router.get("/person-registry/report", async (_req, res) => {
+router.get("/person-registry/report", async (req, res) => {
   try {
     const report = await getPersonRegistryMappingReport();
+    // The evidence queue is readable by signed-in staff, but the operator
+    // identity and rationale in a completed resolution are audit details.
+    // Return them only to an authenticated admin reviewer.
+    const raw = req.headers["x-admin-secret"];
+    const token = Array.isArray(raw) ? raw[0] ?? "" : raw ?? "";
+    const canReadResolutionAudit = isAdminToken(token) && Boolean(req.authUser);
+    if (!canReadResolutionAudit) {
+      const redact = <T extends { resolution: unknown }>(row: T): T => ({ ...row, resolution: null });
+      report.rows = report.rows.map(redact);
+      report.managerConflicts = report.managerConflicts.map(redact);
+      report.resolvedRows = [];
+    }
     res.json(report);
   } catch (err) {
     res.status(500).json({ error: String(err) });
+  }
+});
+
+// GET /api/person-registry/:id/relationship-preview — preview a manual
+// registry-to-People decision. It is deliberately separate from alias edits:
+// employee code evidence remains advisory and this never changes HR provenance.
+router.get("/person-registry/:id/relationship-preview", async (req, res) => {
+  if (!requireRegistryAdmin(req, res)) return;
+  const actor = req.authUser?.displayName?.trim() || req.authUser?.email?.trim();
+  if (!actor) return void res.status(401).json({ error: "A signed-in operator is required for relationship review" });
+  const registryId = Number(req.params.id);
+  const personValue = String(req.query.personId ?? "").trim();
+  const effectiveDate = String(req.query.effectiveDate ?? "").trim();
+  const personId = personValue === "unresolved" ? null : Number(personValue);
+  if (!Number.isInteger(registryId) || registryId <= 0 || (personId !== null && (!Number.isInteger(personId) || personId <= 0))) {
+    return void res.status(400).json({ error: "A valid registry id and People record (or unresolved) are required" });
+  }
+  try {
+    const preview = await previewRegistryRelationshipResolution(registryId, { personId, effectiveDate });
+    if (!preview) return void res.status(404).json({ error: "Person Registry record not found" });
+    res.json(preview);
+  } catch (error) {
+    res.status(422).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+// POST /api/person-registry/:id/relationship-resolution — persist one guarded
+// human decision. The service updates only person_registry.person_id and its
+// audit trail; People hierarchy fields and every historical fact remain intact.
+router.post("/person-registry/:id/relationship-resolution", async (req, res) => {
+  if (!requireRegistryAdmin(req, res)) return;
+  const actor = req.authUser?.displayName?.trim() || req.authUser?.email?.trim();
+  if (!actor) return void res.status(401).json({ error: "A signed-in operator is required for relationship review" });
+  const registryId = Number(req.params.id);
+  const body = req.body as Record<string, unknown>;
+  const personId = body.personId === null ? null : Number(body.personId);
+  const effectiveDate = typeof body.effectiveDate === "string" ? body.effectiveDate.trim() : "";
+  const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+  const acknowledgedProposalHash = typeof body.acknowledgedProposalHash === "string"
+    ? body.acknowledgedProposalHash
+    : "";
+  if (!Number.isInteger(registryId) || registryId <= 0 || (personId !== null && (!Number.isInteger(personId) || personId <= 0))) {
+    return void res.status(400).json({ error: "A valid registry id and People record (or null) are required" });
+  }
+  if (!reason) return void res.status(422).json({ error: "reason is required for every relationship decision" });
+  try {
+    const result = await resolveRegistryRelationship(registryId, {
+      personId,
+      effectiveDate,
+      reason,
+      changedBy: actor,
+      acknowledgedProposalHash,
+    });
+    if (!result) return void res.status(404).json({ error: "Person Registry record not found" });
+    await loadPersonRegistry();
+    res.json({ success: true, resolution: result });
+  } catch (error) {
+    if (error instanceof RelationshipPreviewRequiredError) {
+      return void res.status(422).json({ error: error.message });
+    }
+    if (error instanceof RelationshipPreviewChangedError) {
+      return void res.status(409).json({ error: error.message });
+    }
+    if (error instanceof RelationshipHierarchyInvalidError) {
+      return void res.status(422).json({ error: error.message, hierarchy: error.hierarchy });
+    }
+    res.status(422).json({ error: error instanceof Error ? error.message : String(error) });
   }
 });
 

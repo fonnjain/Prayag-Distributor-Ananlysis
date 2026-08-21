@@ -3079,6 +3079,37 @@ const MIGRATIONS: Migration[] = [
         AND pr.person_id IS NULL;
     `,
   },
+  {
+    id: "071_person_registry_relationship_resolution",
+    sql: `
+      -- Human decisions that map an HR registry record to its canonical People
+      -- record are effective-dated and append-only. The registry's person_id
+      -- remains the current operational link; this table preserves every
+      -- decision, including an explicit choice to leave a record unresolved.
+      CREATE TABLE IF NOT EXISTS person_registry_relationship_resolution (
+        resolution_id  SERIAL PRIMARY KEY,
+        registry_id    INTEGER NOT NULL REFERENCES person_registry(id) ON DELETE RESTRICT,
+        person_id      INTEGER REFERENCES person(person_id) ON DELETE RESTRICT,
+        decision       TEXT NOT NULL CHECK (decision IN ('linked', 'unresolved')),
+        effective_date DATE NOT NULL,
+        reason         TEXT NOT NULL,
+        changed_by     TEXT NOT NULL,
+        proposal_hash  TEXT NOT NULL,
+        evidence       JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+        superseded_at  TIMESTAMPTZ,
+        CHECK (
+          (decision = 'linked' AND person_id IS NOT NULL)
+          OR (decision = 'unresolved' AND person_id IS NULL)
+        )
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS pr_relationship_resolution_current_idx
+        ON person_registry_relationship_resolution (registry_id)
+        WHERE superseded_at IS NULL;
+      CREATE INDEX IF NOT EXISTS pr_relationship_resolution_registry_idx
+        ON person_registry_relationship_resolution (registry_id, created_at DESC);
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

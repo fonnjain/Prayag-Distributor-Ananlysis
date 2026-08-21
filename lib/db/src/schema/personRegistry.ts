@@ -2,6 +2,7 @@ import {
   pgTable,
   text,
   serial,
+  integer,
   boolean,
   timestamp,
   index,
@@ -29,6 +30,9 @@ export const personRegistry = pgTable(
   {
     id: serial("id").primaryKey(),
     employeeCode: text("employee_code"),
+    // Current manually-reviewed canonical People link. Employee codes remain
+    // source evidence only and must never be used as the identity key.
+    personId: integer("person_id"),
     codePlausible: boolean("code_plausible").notNull().default(false),
     normKey: text("norm_key").notNull().unique(),
     canonicalName: text("canonical_name").notNull(),

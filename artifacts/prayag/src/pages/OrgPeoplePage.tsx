@@ -632,7 +632,7 @@ export default function OrgPeoplePage() {
 
       {activeTab === "mapping-report" && (
         <div className="flex-1 overflow-y-auto p-6">
-          <PersonRegistryMappingReport />
+          <PersonRegistryMappingReport adminSecret={secret} />
         </div>
       )}
 

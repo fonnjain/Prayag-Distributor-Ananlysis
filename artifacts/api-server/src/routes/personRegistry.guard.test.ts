@@ -6,6 +6,8 @@ const patchRegistryRow = vi.fn();
 const previewAliasImpact = vi.fn();
 const loadPersonRegistry = vi.fn();
 const isAdminToken = vi.fn();
+const previewRegistryRelationshipResolution = vi.fn();
+const resolveRegistryRelationship = vi.fn();
 
 class RegistryImpactRequiredError extends Error {}
 class RegistryImpactChangedError extends Error {}
@@ -31,6 +33,13 @@ vi.mock("../lib/personRegistry.js", () => ({
   loadPersonRegistry,
   RegistryImpactChangedError,
   RegistryImpactRequiredError,
+}));
+vi.mock("../lib/personRegistryRelationshipResolution.js", () => ({
+  previewRegistryRelationshipResolution,
+  resolveRegistryRelationship,
+  RelationshipHierarchyInvalidError: class RelationshipHierarchyInvalidError extends Error {},
+  RelationshipPreviewChangedError: class RelationshipPreviewChangedError extends Error {},
+  RelationshipPreviewRequiredError: class RelationshipPreviewRequiredError extends Error {},
 }));
 
 const { default: orgRouter } = await import("./org.js");
@@ -204,5 +213,94 @@ describe("PATCH /api/person-registry/:id", () => {
 
     expect(res.status).toBe(401);
     expect(patchRegistryRow).not.toHaveBeenCalled();
+  });
+});
+
+describe("relationship review mutation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    isAdminToken.mockReturnValue(false);
+  });
+
+  it("requires the admin token before previewing a relationship decision", async () => {
+    const res = await request(app)
+      .get("/api/person-registry/10/relationship-preview?personId=5&effectiveDate=2026-08-21");
+
+    expect(res.status).toBe(401);
+    expect(previewRegistryRelationshipResolution).not.toHaveBeenCalled();
+  });
+
+  it("requires a signed-in operator as well as the admin token", async () => {
+    isAdminToken.mockReturnValue(true);
+
+    const res = await request(app)
+      .get("/api/person-registry/10/relationship-preview?personId=5&effectiveDate=2026-08-21")
+      .set("x-admin-secret", "valid-admin-secret");
+
+    expect(res.status).toBe(401);
+    expect(previewRegistryRelationshipResolution).not.toHaveBeenCalled();
+  });
+
+  it("passes a concrete People selection through the preview gate", async () => {
+    isAdminToken.mockReturnValue(true);
+    previewRegistryRelationshipResolution.mockResolvedValue({
+      registry: { id: 10 },
+      impact: { proposalHash: "preview-hash" },
+    });
+
+    const res = await request(app)
+      .get("/api/person-registry/10/relationship-preview?personId=5&effectiveDate=2026-08-21")
+      .set("x-admin-secret", "valid-admin-secret")
+      .set("x-test-user", "admin");
+
+    expect(res.status).toBe(200);
+    expect(previewRegistryRelationshipResolution).toHaveBeenCalledWith(10, {
+      personId: 5,
+      effectiveDate: "2026-08-21",
+    });
+  });
+
+  it("records an explicit unresolved decision with the session actor and preview hash", async () => {
+    isAdminToken.mockReturnValue(true);
+    resolveRegistryRelationship.mockResolvedValue({ registry: { id: 10 }, impact: {} });
+
+    const res = await request(app)
+      .post("/api/person-registry/10/relationship-resolution")
+      .set("x-admin-secret", "valid-admin-secret")
+      .set("x-test-user", "admin")
+      .send({
+        personId: null,
+        effectiveDate: "2026-08-21",
+        reason: "HR did not provide enough evidence",
+        acknowledgedProposalHash: "preview-hash",
+      });
+
+    expect(res.status).toBe(200);
+    expect(resolveRegistryRelationship).toHaveBeenCalledWith(10, {
+      personId: null,
+      effectiveDate: "2026-08-21",
+      reason: "HR did not provide enough evidence",
+      changedBy: "Verified Admin",
+      acknowledgedProposalHash: "preview-hash",
+    });
+    expect(loadPersonRegistry).toHaveBeenCalledOnce();
+  });
+
+  it("requires a reason before the relationship service can change a link", async () => {
+    isAdminToken.mockReturnValue(true);
+
+    const res = await request(app)
+      .post("/api/person-registry/10/relationship-resolution")
+      .set("x-admin-secret", "valid-admin-secret")
+      .set("x-test-user", "admin")
+      .send({
+        personId: 5,
+        effectiveDate: "2026-08-21",
+        reason: " ",
+        acknowledgedProposalHash: "preview-hash",
+      });
+
+    expect(res.status).toBe(422);
+    expect(resolveRegistryRelationship).not.toHaveBeenCalled();
   });
 });
