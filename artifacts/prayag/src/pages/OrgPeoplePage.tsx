@@ -38,6 +38,7 @@ import {
   Pencil,
   RefreshCw,
   Search,
+  ShieldCheck,
   UserCheck,
   UserMinus,
   Users,
@@ -46,6 +47,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { PersonRegistryPanel } from "@/components/dashboard/Organisation";
+import { PersonRegistryMappingReport } from "@/components/dashboard/PersonRegistryMappingReport";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -174,7 +176,7 @@ export default function OrgPeoplePage() {
   const qc = useQueryClient();
 
   // ── Tab ───────────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<"people" | "registry">("people");
+  const [activeTab, setActiveTab] = useState<"people" | "registry" | "mapping-report">("people");
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   const [secret, setSecret] = useState(
@@ -557,6 +559,11 @@ export default function OrgPeoplePage() {
               Unlock
             </Button>
           </form>
+        ) : activeTab === "mapping-report" ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <ShieldCheck className="size-4 text-emerald-600" />
+            <span>Read-only relationship evidence</span>
+          </div>
         ) : (
           <div className="flex items-center gap-3">
             <Button
@@ -601,7 +608,7 @@ export default function OrgPeoplePage() {
 
       {/* ── Tab bar ────────────────────────────────────────────────────── */}
       <div className="flex border-b shrink-0">
-        {(["people", "registry"] as const).map((t) => (
+        {(["people", "registry", "mapping-report"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setActiveTab(t)}
@@ -612,7 +619,7 @@ export default function OrgPeoplePage() {
                 : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >
-            {t === "people" ? "People" : "Person Registry"}
+            {t === "people" ? "People" : t === "registry" ? "Person Registry" : "Relationship Review"}
           </button>
         ))}
       </div>
@@ -620,6 +627,12 @@ export default function OrgPeoplePage() {
       {activeTab === "registry" && (
         <div className="flex-1 overflow-y-auto p-6">
           <PersonRegistryPanel adminSecret={secret} />
+        </div>
+      )}
+
+      {activeTab === "mapping-report" && (
+        <div className="flex-1 overflow-y-auto p-6">
+          <PersonRegistryMappingReport />
         </div>
       )}
 

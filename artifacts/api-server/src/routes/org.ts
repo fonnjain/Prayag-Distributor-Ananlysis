@@ -29,6 +29,7 @@ import {
   RegistryImpactRequiredError,
   type RegistryAliasImpact,
 } from "../lib/personRegistry.js";
+import { getPersonRegistryMappingReport } from "../lib/personRegistryMappingReport.js";
 import { isAdminToken } from "../lib/adminAuth.js";
 
 const router = Router();
@@ -489,6 +490,18 @@ router.get("/person-registry", async (_req, res) => {
   try {
     const rows = await getRegistryRows();
     res.json({ rows, unseeded: rows.length === 0 });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// GET /api/person-registry/report — read-only mapping evidence before any
+// People/relationship editor makes an assignment. This deliberately returns
+// candidates, not a backfill proposal or a mutation endpoint.
+router.get("/person-registry/report", async (_req, res) => {
+  try {
+    const report = await getPersonRegistryMappingReport();
+    res.json(report);
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
