@@ -31,6 +31,12 @@ vi.mock("../lib/personRegistry.js", () => ({
   previewAliasImpact: vi.fn(),
   seedPersonRegistry: vi.fn(),
   loadPersonRegistry: vi.fn(),
+  RegistryImpactChangedError: class RegistryImpactChangedError extends Error {},
+  RegistryImpactRequiredError: class RegistryImpactRequiredError extends Error {},
+  headAliasLookup: new Map(),
+  territoryHeads: new Set(),
+  institutionalHeads: new Set(),
+  canonicalStateHeads: [],
 }));
 
 // Stub all other imports needed by org.ts but not exercised in this test.

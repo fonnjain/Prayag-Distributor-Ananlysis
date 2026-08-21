@@ -25,11 +25,27 @@ import {
   patchRegistryRow,
   previewAliasImpact,
   loadPersonRegistry,
+  RegistryImpactChangedError,
+  RegistryImpactRequiredError,
+  type RegistryAliasImpact,
 } from "../lib/personRegistry.js";
+import { isAdminToken } from "../lib/adminAuth.js";
 
 const router = Router();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function requireRegistryAdmin(req: { headers: Record<string, string | string[] | undefined> }, res: {
+  status: (code: number) => { json: (body: unknown) => void };
+}): boolean {
+  const raw = req.headers["x-admin-secret"];
+  const token = Array.isArray(raw) ? raw[0] ?? "" : raw ?? "";
+  if (!isAdminToken(token)) {
+    res.status(401).json({ error: "Admin secret required" });
+    return false;
+  }
+  return true;
+}
 
 function toSlug(name: string): string {
   return name
@@ -478,23 +494,62 @@ router.get("/person-registry", async (_req, res) => {
   }
 });
 
-// PATCH /api/person-registry/:id — update aliases on a registry row.
-// Body: { aliasPrimary?, aliasSecondary?, aliasSheet?, stateHead?, flagNotes? }
+// PATCH /api/person-registry/:id — update the existing primary/secondary aliases.
+// Alias changes are attribution-affecting, so every write is admin-gated,
+// reasoned, audit-logged, and tied to a fresh impact acknowledgement.
 router.patch("/person-registry/:id", async (req, res) => {
+  if (!requireRegistryAdmin(req, res)) return;
   try {
     const id = parseInt(req.params.id, 10);
     if (Number.isNaN(id)) {
       res.status(400).json({ error: "Invalid id" });
       return;
     }
-    const patch = req.body as {
+    const body = req.body as Record<string, unknown>;
+    const allowedFields = new Set(["aliasPrimary", "aliasSecondary", "changedBy", "reason", "acknowledgedImpact"]);
+    const unsupportedField = Object.keys(body).find((field) => !allowedFields.has(field));
+    if (unsupportedField) {
+      res.status(400).json({ error: `${unsupportedField} is not editable through the Person Registry alias flow` });
+      return;
+    }
+    if (body.aliasPrimary !== undefined && (!Array.isArray(body.aliasPrimary) || !body.aliasPrimary.every((value) => typeof value === "string"))) {
+      res.status(400).json({ error: "aliasPrimary must be an array of strings" });
+      return;
+    }
+    if (body.aliasSecondary !== undefined && body.aliasSecondary !== null && typeof body.aliasSecondary !== "string") {
+      res.status(400).json({ error: "aliasSecondary must be a string or null" });
+      return;
+    }
+    const patch = {
+      aliasPrimary: body.aliasPrimary === undefined
+        ? undefined
+        : (body.aliasPrimary as string[]).map((value) => value.trim()).filter(Boolean),
+      aliasSecondary: body.aliasSecondary === undefined
+        ? undefined
+        : typeof body.aliasSecondary === "string"
+          ? body.aliasSecondary.trim() || null
+          : null,
+      changedBy: typeof body.changedBy === "string" ? body.changedBy : undefined,
+      reason: typeof body.reason === "string" ? body.reason : undefined,
+      acknowledgedImpact: body.acknowledgedImpact as RegistryAliasImpact | undefined,
+    } satisfies {
       aliasPrimary?: string[];
       aliasSecondary?: string | null;
-      aliasSheet?: string | null;
-      stateHead?: string | null;
-      flagNotes?: string | null;
+      changedBy?: string;
+      reason?: string;
+      acknowledgedImpact?: RegistryAliasImpact;
     };
-    const updated = await patchRegistryRow(id, patch);
+    const changedBy = patch.changedBy?.trim();
+    const reason = patch.reason?.trim();
+    if (!changedBy || !reason) {
+      res.status(422).json({ error: "changedBy and reason are required for every registry edit" });
+      return;
+    }
+    const updated = await patchRegistryRow(id, patch, {
+      changedBy,
+      reason,
+      acknowledgedImpact: patch.acknowledgedImpact,
+    });
     if (!updated) {
       res.status(404).json({ error: "Row not found or no fields to update" });
       return;
@@ -503,23 +558,43 @@ router.patch("/person-registry/:id", async (req, res) => {
     await loadPersonRegistry();
     res.json(updated);
   } catch (err) {
+    if (err instanceof RegistryImpactRequiredError) {
+      res.status(422).json({ error: err.message });
+      return;
+    }
+    if (err instanceof RegistryImpactChangedError) {
+      res.status(409).json({ error: err.message });
+      return;
+    }
     res.status(500).json({ error: String(err) });
   }
 });
 
 // POST /api/person-registry/preview-impact — dry-run alias change.
-// Body: { id: number, newAliases: string[] }
+// Body: { id: number, aliasPrimary?, aliasSecondary? }
 router.post("/person-registry/preview-impact", async (req, res) => {
   try {
-    const { id, newAliases } = req.body as {
-      id: number;
-      newAliases: string[];
-    };
-    if (!id || !Array.isArray(newAliases)) {
-      res.status(400).json({ error: "id and newAliases are required" });
+    const body = req.body as Record<string, unknown>;
+    if (!Number.isInteger(body.id)
+      || (body.aliasPrimary !== undefined && (!Array.isArray(body.aliasPrimary) || !body.aliasPrimary.every((value) => typeof value === "string")))
+      || (body.aliasSecondary !== undefined && body.aliasSecondary !== null && typeof body.aliasSecondary !== "string")) {
+      res.status(400).json({ error: "id is required; aliases must be strings when supplied" });
       return;
     }
-    const impact = await previewAliasImpact(id, newAliases);
+    const impact = await previewAliasImpact(body.id as number, {
+      aliasPrimary: body.aliasPrimary === undefined
+        ? undefined
+        : (body.aliasPrimary as string[]).map((value) => value.trim()).filter(Boolean),
+      aliasSecondary: body.aliasSecondary === undefined
+        ? undefined
+        : typeof body.aliasSecondary === "string"
+          ? body.aliasSecondary.trim() || null
+          : null,
+    });
+    if (!impact) {
+      res.status(404).json({ error: "Registry row not found" });
+      return;
+    }
     res.json(impact);
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -532,7 +607,8 @@ router.post("/person-registry/preview-impact", async (req, res) => {
 // triggers a full secondary_sku_line.state_canon backfill so both operations
 // are covered in the natural fresh-deploy sequence:
 //   masterSeedImport (person table) → this endpoint (registry + reconciliation + SKU backfill)
-router.post("/person-registry/seed", async (_req, res) => {
+router.post("/person-registry/seed", async (req, res) => {
+  if (!requireRegistryAdmin(req, res)) return;
   try {
     const report = await seedPersonRegistry();
     // Reload maps after seeding.

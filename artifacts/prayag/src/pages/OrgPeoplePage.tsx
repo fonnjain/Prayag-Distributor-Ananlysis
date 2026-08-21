@@ -619,7 +619,7 @@ export default function OrgPeoplePage() {
 
       {activeTab === "registry" && (
         <div className="flex-1 overflow-y-auto p-6">
-          <PersonRegistryPanel />
+          <PersonRegistryPanel adminSecret={secret} />
         </div>
       )}
 

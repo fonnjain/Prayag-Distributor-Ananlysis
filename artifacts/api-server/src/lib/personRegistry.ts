@@ -16,6 +16,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { pool } from "@workspace/db";
 import { normSecKey } from "./mgmt/names.js";
 
@@ -627,75 +628,228 @@ export async function getRegistryRows(): Promise<PersonRegistryRow[]> {
   return rows;
 }
 
-export async function patchRegistryRow(
-  id: number,
-  patch: { aliasPrimary?: string[]; aliasSecondary?: string | null; aliasSheet?: string | null; stateHead?: string | null; flagNotes?: string | null },
-): Promise<PersonRegistryRow | null> {
-  const sets: string[] = [];
-  const vals: unknown[] = [];
-  let idx = 1;
+export type RegistryPatch = {
+  aliasPrimary?: string[];
+  aliasSecondary?: string | null;
+};
 
-  if (patch.aliasPrimary !== undefined) {
-    sets.push(`alias_primary = $${idx++}`);
-    vals.push(patch.aliasPrimary);
-  }
-  if (patch.aliasSecondary !== undefined) {
-    sets.push(`alias_secondary = $${idx++}`);
-    vals.push(patch.aliasSecondary);
-  }
-  if (patch.aliasSheet !== undefined) {
-    sets.push(`alias_sheet = $${idx++}`);
-    vals.push(patch.aliasSheet);
-  }
-  if (patch.stateHead !== undefined) {
-    sets.push(`state_head = $${idx++}`);
-    vals.push(patch.stateHead);
-  }
-  if (patch.flagNotes !== undefined) {
-    sets.push(`flag_notes = $${idx++}`);
-    vals.push(patch.flagNotes);
-  }
-  if (sets.length === 0) return null;
-
-  sets.push(`updated_at = now()`);
-  vals.push(id);
-  const { rows } = await pool.query<PersonRegistryRow>(
-    `UPDATE person_registry SET ${sets.join(", ")} WHERE id = $${idx} RETURNING *`,
-    vals,
-  );
-  return rows[0] ?? null;
+export interface RegistryAliasImpact {
+  rowCount: number;
+  affectedCustomers: string[];
+  /** Optimistic-lock value proving the save uses the previewed row version. */
+  sourceUpdatedAt: string;
+  /** Binds acknowledgement to the exact canonicalized alias proposal. */
+  proposalHash: string;
 }
 
-export async function previewAliasImpact(
-  id: number,
-  newAliases: string[],
-): Promise<{ rowCount: number; affectedCustomers: string[] }> {
-  // Compute added/removed aliases vs current row.
-  const { rows: [current] } = await pool.query<PersonRegistryRow>(
-    "SELECT * FROM person_registry WHERE id = $1",
-    [id],
-  );
-  if (!current) return { rowCount: 0, affectedCustomers: [] };
+export interface RegistryPatchAudit {
+  changedBy: string;
+  reason: string;
+  acknowledgedImpact?: RegistryAliasImpact;
+}
 
-  const currentSet = new Set((current.alias_primary ?? []).map((a: string) => a.toUpperCase()));
-  const newSet = new Set(newAliases.map((a) => a.toUpperCase()));
+export class RegistryImpactRequiredError extends Error {
+  constructor(message = "Alias changes require a fresh impact preview acknowledgement.") {
+    super(message);
+    this.name = "RegistryImpactRequiredError";
+  }
+}
 
-  // Find alias keys that are being ADDED.
-  const added = [...newSet].filter((a) => !currentSet.has(a));
+export class RegistryImpactChangedError extends Error {
+  constructor(message = "Registry aliases changed since the impact preview. Preview again before saving.") {
+    super(message);
+    this.name = "RegistryImpactChangedError";
+  }
+}
 
-  if (added.length === 0) return { rowCount: 0, affectedCustomers: [] };
+type RegistryPatchField = {
+  column: "alias_primary" | "alias_secondary";
+  value: string[] | string | null;
+  previous: string[] | string | null;
+};
 
-  // Count sale_line rows whose head_canon would change.
-  const { rows } = await pool.query<{ head_canon: string; cnt: number }>(`
+type Queryable = {
+  query: <T = Record<string, unknown>>(sql: string, params?: unknown[]) => Promise<{ rows: T[] }>;
+};
+
+function sameArray(left: string[] | null, right: string[] | null): boolean {
+  return JSON.stringify(left ?? []) === JSON.stringify(right ?? []);
+}
+
+function patchFields(current: PersonRegistryRow, patch: RegistryPatch): RegistryPatchField[] {
+  const fields: RegistryPatchField[] = [];
+  if (patch.aliasPrimary !== undefined && !sameArray(current.alias_primary, patch.aliasPrimary)) {
+    fields.push({ column: "alias_primary", previous: current.alias_primary, value: patch.aliasPrimary });
+  }
+  if (patch.aliasSecondary !== undefined && current.alias_secondary !== patch.aliasSecondary) {
+    fields.push({ column: "alias_secondary", previous: current.alias_secondary, value: patch.aliasSecondary });
+  }
+  return fields;
+}
+
+function canonicalAliasProposal(current: PersonRegistryRow, patch: RegistryPatch) {
+  const primary = patch.aliasPrimary ?? current.alias_primary ?? [];
+  const secondary = patch.aliasSecondary !== undefined
+    ? patch.aliasSecondary
+    : current.alias_secondary;
+  return {
+    aliasPrimary: primary
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .sort(),
+    aliasSecondary: secondary?.trim() || null,
+  };
+}
+
+function aliasProposalHash(current: PersonRegistryRow, patch: RegistryPatch): string {
+  return createHash("sha256")
+    .update(JSON.stringify(canonicalAliasProposal(current, patch)))
+    .digest("hex");
+}
+
+function attributionAliasKeys(current: PersonRegistryRow, patch: RegistryPatch): string[] {
+  const proposal = canonicalAliasProposal(current, patch);
+  return [...new Set([
+    current.canonical_name,
+    current.alias_secondary,
+    current.alias_sheet,
+    ...(current.alias_primary ?? []),
+    current.canonical_name,
+    proposal.aliasSecondary,
+    ...proposal.aliasPrimary,
+  ]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .map((value) => value.trim().toUpperCase()))];
+}
+
+async function calculateAliasImpact(
+  queryable: Queryable,
+  current: PersonRegistryRow,
+  patch: RegistryPatch,
+): Promise<Pick<RegistryAliasImpact, "rowCount" | "affectedCustomers">> {
+  const aliases = attributionAliasKeys(current, patch);
+  if (aliases.length === 0) return { rowCount: 0, affectedCustomers: [] };
+  const { rows } = await queryable.query<{ head_canon: string; cnt: number }>(`
     SELECT head_canon, COUNT(*)::int AS cnt
     FROM sale_line_current
     WHERE upper(trim(head_canon)) = ANY($1::text[])
     GROUP BY head_canon
-  `, [added]);
+    ORDER BY head_canon
+  `, [aliases]);
+  return {
+    rowCount: rows.reduce((sum, row) => sum + Number(row.cnt), 0),
+    affectedCustomers: rows.map((row) => row.head_canon),
+  };
+}
 
-  const rowCount = rows.reduce((s, r) => s + r.cnt, 0);
-  const affectedCustomers = rows.map((r) => r.head_canon);
-  return { rowCount, affectedCustomers };
+function sameImpact(left: RegistryAliasImpact, right: RegistryAliasImpact): boolean {
+  return left.rowCount === right.rowCount
+    && left.sourceUpdatedAt === right.sourceUpdatedAt
+    && left.proposalHash === right.proposalHash
+    && JSON.stringify([...left.affectedCustomers].sort()) === JSON.stringify([...right.affectedCustomers].sort());
+}
+
+/**
+ * Atomically updates the existing primary/secondary registry aliases and writes an audit
+ * record per actual field change. Alias changes are additionally bound to a
+ * fresh impact acknowledgement so an operator cannot save after the row changed
+ * underneath the preview.
+ */
+export async function patchRegistryRow(
+  id: number,
+  patch: RegistryPatch,
+  audit: RegistryPatchAudit,
+): Promise<PersonRegistryRow | null> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: currentRows } = await client.query<PersonRegistryRow>(
+      "SELECT * FROM person_registry WHERE id = $1 FOR UPDATE",
+      [id],
+    );
+    const current = currentRows[0];
+    if (!current) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+
+    const fields = patchFields(current, patch);
+    if (fields.length === 0) {
+      await client.query("COMMIT");
+      return current;
+    }
+
+    const aliasesChanged = fields.some((field) =>
+      field.column === "alias_primary"
+       || field.column === "alias_secondary",
+    );
+    if (aliasesChanged) {
+      if (!audit.acknowledgedImpact?.proposalHash) throw new RegistryImpactRequiredError();
+      const liveImpact = await calculateAliasImpact(client, current, patch);
+      const acknowledged: RegistryAliasImpact = {
+        ...liveImpact,
+        sourceUpdatedAt: current.updated_at.toISOString(),
+        proposalHash: aliasProposalHash(current, patch),
+      };
+      if (!sameImpact(acknowledged, audit.acknowledgedImpact)) {
+        throw new RegistryImpactChangedError();
+      }
+    }
+
+    const setClauses = fields.map((field, index) => `${field.column} = $${index + 2}`);
+    const { rows: updatedRows } = await client.query<PersonRegistryRow>(
+      `UPDATE person_registry
+       SET ${setClauses.join(", ")}, updated_at = now()
+       WHERE id = $1
+       RETURNING *`,
+      [id, ...fields.map((field) => field.value)],
+    );
+    const updated = updatedRows[0]!;
+
+    for (const field of fields) {
+      await client.query(
+        `INSERT INTO change_log
+           (entity_type, entity_id, field, old_value, new_value, changed_by, reason)
+         VALUES ('person_registry', $1, $2, $3, $4, $5, $6)`,
+        [
+          String(id),
+          field.column,
+          typeof field.previous === "string" || field.previous === null
+            ? field.previous
+            : JSON.stringify(field.previous ?? []),
+          typeof field.value === "string" || field.value === null
+            ? field.value
+            : JSON.stringify(field.value),
+          audit.changedBy,
+          audit.reason,
+        ],
+      );
+    }
+
+    await client.query("COMMIT");
+    return updated;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function previewAliasImpact(
+  id: number,
+  patch: RegistryPatch,
+): Promise<RegistryAliasImpact | null> {
+  const { rows: [current] } = await pool.query<PersonRegistryRow>(
+    "SELECT * FROM person_registry WHERE id = $1",
+    [id],
+  );
+  if (!current) return null;
+  return {
+    ...await calculateAliasImpact(pool, current, patch),
+    sourceUpdatedAt: current.updated_at.toISOString(),
+    proposalHash: aliasProposalHash(current, patch),
+  };
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────

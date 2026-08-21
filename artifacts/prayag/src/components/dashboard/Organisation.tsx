@@ -953,9 +953,11 @@ interface RegistryRow {
 interface ImpactPreview {
   rowCount: number;
   affectedCustomers: string[];
+  sourceUpdatedAt: string;
+  proposalHash: string;
 }
 
-export function PersonRegistryPanel() {
+export function PersonRegistryPanel({ adminSecret = "" }: { adminSecret?: string }) {
   const [rows, setRows] = useState<RegistryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -965,6 +967,8 @@ export function PersonRegistryPanel() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editAliases, setEditAliases] = useState("");
   const [editSecondary, setEditSecondary] = useState("");
+  const [editReason, setEditReason] = useState("");
+  const [editOperator, setEditOperator] = useState("");
   const [saving, setSaving] = useState(false);
   const [impact, setImpact] = useState<ImpactPreview | null>(null);
   const [showImpact, setShowImpact] = useState(false);
@@ -989,10 +993,17 @@ export function PersonRegistryPanel() {
   useEffect(() => { void loadRows(); }, []);
 
   async function handleSeed() {
+    if (!adminSecret) {
+      setError("Admin authorisation is required to seed the registry.");
+      return;
+    }
     setSeeding(true);
     setSeedMsg(null);
     try {
-      const r = await fetch(`${API}/person-registry/seed`, { method: "POST" });
+      const r = await fetch(`${API}/person-registry/seed`, {
+        method: "POST",
+        headers: { "X-Admin-Secret": adminSecret },
+      });
       const d = await r.json() as Record<string, unknown>;
       if (!r.ok) { setError(String(d.error ?? "Seed failed")); return; }
       setSeedMsg(`Seeded — state heads: ${d.stateHeads}, members: ${d.members}, non-persons: ${d.nonPersons}, skipped: ${d.skipped}`);
@@ -1008,30 +1019,57 @@ export function PersonRegistryPanel() {
     const r = await fetch(`${API}/person-registry/preview-impact`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: editingId, newAliases: aliases }),
+      body: JSON.stringify({
+        id: editingId,
+        aliasPrimary: aliases,
+        aliasSecondary: editSecondary || null,
+      }),
     });
-    const d = await r.json() as ImpactPreview;
-    setImpact(d);
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({ error: "Impact preview failed" })) as { error?: string };
+      setError(d.error ?? "Impact preview failed");
+      return;
+    }
+    setImpact(await r.json() as ImpactPreview);
     setShowImpact(true);
   }
 
   async function handleSave() {
     if (editingId == null) return;
+    if (!adminSecret) {
+      setError("Admin authorisation is required to save registry changes.");
+      return;
+    }
+    if (!editOperator.trim() || !editReason.trim()) {
+      setError("Enter both your name and a reason before saving.");
+      return;
+    }
+    if (!impact) {
+      setError("Preview the attribution impact before saving alias changes.");
+      return;
+    }
     setSaving(true);
     try {
       const aliases = editAliases.split(",").map((a) => a.trim()).filter(Boolean);
       const r = await fetch(`${API}/person-registry/${editingId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Admin-Secret": adminSecret,
+        },
         body: JSON.stringify({
-          aliasPrimary: aliases.length > 0 ? aliases : undefined,
+          aliasPrimary: aliases,
           aliasSecondary: editSecondary || null,
+          changedBy: editOperator.trim(),
+          reason: editReason.trim(),
+          acknowledgedImpact: impact,
         }),
       });
       if (!r.ok) { const e = await r.json() as { error?: string }; setError(e.error ?? "Save failed"); return; }
       setEditingId(null);
       setShowImpact(false);
       setImpact(null);
+      setEditReason("");
       await loadRows();
     } finally {
       setSaving(false);
@@ -1101,9 +1139,12 @@ export function PersonRegistryPanel() {
       {rows.length === 0 && (
         <div className="rounded-lg border border-dashed border-border/60 px-6 py-8 text-center space-y-3">
           <p className="text-sm text-muted-foreground">Registry is empty. Run seed to populate from config files + HR roster.</p>
-          <Button size="sm" onClick={() => void handleSeed()} disabled={seeding}>
+            <Button size="sm" onClick={() => void handleSeed()} disabled={seeding || !adminSecret}>
             {seeding ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Seeding…</> : "Seed Registry"}
           </Button>
+            {!adminSecret && (
+              <p className="text-xs text-muted-foreground">Enter the admin secret in the People tab to enable registry writes.</p>
+            )}
         </div>
       )}
 
@@ -1135,7 +1176,7 @@ export function PersonRegistryPanel() {
               size="sm"
               variant="outline"
               onClick={() => void handleSeed()}
-              disabled={seeding}
+              disabled={seeding || !adminSecret}
               className="shrink-0"
             >
               {seeding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
@@ -1205,16 +1246,24 @@ export function PersonRegistryPanel() {
                         <td className="px-4 py-2.5 text-right">
                           <button
                             onClick={() => {
+                              if (!adminSecret) {
+                                setError("Enter the admin secret in the People tab to edit registry aliases.");
+                                return;
+                              }
                               if (editingId === row.id) { setEditingId(null); setShowImpact(false); }
                               else {
                                 setEditingId(row.id);
                                 setEditAliases((row.alias_primary ?? []).join(", "));
                                 setEditSecondary(row.alias_secondary ?? "");
+                                setEditReason("");
                                 setShowImpact(false);
                                 setImpact(null);
                               }
                             }}
-                            className="text-xs text-primary hover:underline"
+                            className={cn(
+                              "text-xs hover:underline",
+                              adminSecret ? "text-primary" : "text-muted-foreground",
+                            )}
                           >
                             {editingId === row.id ? "Cancel" : "Edit"}
                           </button>
@@ -1243,10 +1292,40 @@ export function PersonRegistryPanel() {
                                 <input
                                   type="text"
                                   value={editSecondary}
-                                  onChange={(e) => setEditSecondary(e.target.value)}
+                                  onChange={(e) => {
+                                    setEditSecondary(e.target.value);
+                                    setShowImpact(false);
+                                    setImpact(null);
+                                  }}
                                   placeholder="Sandeep Dadheech"
                                   className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                                 />
+                              </div>
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <div className="space-y-1.5">
+                                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                                    Operator
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={editOperator}
+                                    onChange={(e) => setEditOperator(e.target.value)}
+                                    placeholder="Your name"
+                                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                                  />
+                                </div>
+                                <div className="space-y-1.5">
+                                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                                    Reason
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={editReason}
+                                    onChange={(e) => setEditReason(e.target.value)}
+                                    placeholder="Why this attribution alias is changing"
+                                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                                  />
+                                </div>
                               </div>
 
                               {/* Impact preview */}
@@ -1258,17 +1337,17 @@ export function PersonRegistryPanel() {
                                     : "border-emerald-200 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400",
                                 )}>
                                   {impact.rowCount === 0 ? (
-                                    <p>No existing register rows would be affected by this alias change.</p>
+                                    <p>No current register rows resolve through these alias forms.</p>
                                   ) : (
                                     <>
                                       <p className="font-medium flex items-center gap-1.5">
                                         <AlertTriangle className="h-3.5 w-3.5" />
-                                        {impact.rowCount.toLocaleString()} sale register rows would be re-classified.
+                                        {impact.rowCount.toLocaleString()} current sale register rows resolve through these alias forms.
                                       </p>
                                       <p className="mt-1 text-amber-700 dark:text-amber-400">
                                         Affected head_canon values: {impact.affectedCustomers.join(", ")}
                                       </p>
-                                      <p className="mt-1">This is for NEW ingests — existing historical data is not retroactively changed.</p>
+                                      <p className="mt-1">This applies to future ingests — existing historical data is not retroactively changed.</p>
                                     </>
                                   )}
                                 </div>
@@ -1280,7 +1359,11 @@ export function PersonRegistryPanel() {
                                     Preview Impact
                                   </Button>
                                 ) : (
-                                  <Button size="sm" onClick={() => void handleSave()} disabled={saving}>
+                                    <Button
+                                      size="sm"
+                                      onClick={() => void handleSave()}
+                                      disabled={saving || !editOperator.trim() || !editReason.trim()}
+                                    >
                                     {saving ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Saving…</> : "Confirm & Save"}
                                   </Button>
                                 )}
