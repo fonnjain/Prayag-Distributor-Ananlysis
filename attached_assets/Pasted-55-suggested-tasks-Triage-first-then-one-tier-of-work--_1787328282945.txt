@@ -1,0 +1,107 @@
+55 suggested tasks. Triage first, then one tier of work.
+
+============================================================
+CANCEL THESE - done, superseded, or cosmetic
+============================================================
+Done in earlier work:
+  #251 CP margin after reload · #252 Drive fallback visibility
+  #291 A-category within the 20 cap - the A1/A2 merge closed this
+  #280 SKU backfill wipe - covered by assertSkuWipeGuard
+  #272 import-time chain pass · #285 test schema table
+
+Superseded:
+  #159 roster-vs-sheet mismatches - the Attribution Conflicts surface does this
+
+Cosmetic or low value - park, do not cancel:
+  #100 shared colour scale · #114 and #124 "figures updating" notice
+  #161 chart tooltips · #191 cache-age notice · #207 picker year
+
+Confirm each of the six "done" items is genuinely closed before cancelling.
+If any is not, say so and leave it open.
+
+============================================================
+NOW DO TIER 1 - DATA LOSS PREVENTION
+============================================================
+These are the only ones where the cost of not doing them is losing data.
+
+#237 - THE BIGGEST GAP
+A column-detection failure in the secondary register can silently delete
+months of order data.
+
+secondary_register_line has NO wipe protection. secondary_sku_line has two
+guards - a runtime abort-before-delete and the CI canary - and the register
+table, carrying the same volume through a different loader, has neither.
+
+  a. Extend assertRegisterWipeGuard to the same proportional rules already
+     used on secondary_sku_line: per-month rows >= 0.60x prior like-month,
+     total >= 0.70x, distinct distributors >= 0.70x.
+  b. It must ABORT before any delete, inside the transaction. Not warn.
+  c. A column-detection failure producing zero parsed rows must abort, not
+     delete-then-insert-nothing.
+  d. Extend the CI canary to cover secondary_register_line, and have it STATE
+     WHICH DATABASE it checked - the canary has only ever run against dev.
+
+#281 - MAKE THE REFUSAL VISIBLE
+When a wipe guard refuses, the reason is in server logs. An admin sees a
+failure with no explanation and has no way to know it was a guard doing its
+job.
+
+Surface it on the SKU admin page: which rule fired, incoming vs existing
+counts, the ratio, and which month failed.
+
+#283 and #284 - THE MISSING-MEMBER CASE
+  #283: when a register load fails because one member's data is absent, say
+        WHICH member. A generic error sends someone hunting.
+  #284: let an operator reload a register FY that genuinely has one member
+        missing, without a code change. Explicit parameter, logged every time,
+        never a default.
+
+#292 and #293 - THE PIPELINE STALL
+  #292: surface the secondary pipeline gap in the audit page UI, not only in
+        logs.
+  #293: alert on a stall rather than waiting for someone to open the page.
+        Route it through the existing alert system - a gap nobody sees is a
+        gap nobody fixes, which is how July-26 sat empty.
+
+VERIFY TIER 1
+  - Negative test on secondary_register_line: truncated batch, confirm the
+    transaction aborts and row counts are IDENTICAL before and after.
+  - Zero-parsed-rows test: simulate a column-detection failure, confirm abort.
+  - The refusal message as rendered on the admin page.
+  - A missing-member failure naming the member.
+  - The reload override working, and logged.
+  - The stall alert firing, with a delivery row.
+  - FY2025-26 net by head unchanged.
+  - Push, print both refs.
+
+============================================================
+QUEUED - do not start, but keep these open
+============================================================
+TIER 2 - RET# identity, one coherent block
+  #175 retailers · #176 direct dealers and primary customers ·
+  #180 RET# coverage drop · #181 register retailer figures on RET# ·
+  #177 near-miss distributor names
+
+  Rationale: the new Secondary Orders data carries RET# joining at 97.2%.
+  Name matching is the root of the retailer attribution problems throughout
+  this project. This block replaces it with stable ids.
+
+TIER 3 - scheme readiness, time-bound before Q3
+  #228 nudge serving Q2 data when Q3 is loaded - do this one FIRST, it is a
+  wrong-answer risk the moment Q3 loads
+  #227 cockpit vs nudge totals · #231 earned-total mismatch ·
+  #229 Success totals under a head filter · #230 annual achievers in Success
+
+TIER 4 - consistency guards
+  #149 segment mappings drifting across pages · #144 filtered exports match
+  screen · #164 Overview vs register tabs · #169 sole-coverage districts under
+  a period filter · #170 push verdict narrowing under a period
+
+TIER 5 - small, real
+  #118 real category names not "Unmapped" · #119 peer groups by real state ·
+  #134 last year's sales beside bookings · #165 flow-gap full-FY note ·
+  #264 fix unresolved customers from the report not raw SQL ·
+  #290 the 16 location/off-roll members receiving A-alerts ·
+  #10 unattributable distributor counts
+
+Report the triage result, then do Tier 1 only.
