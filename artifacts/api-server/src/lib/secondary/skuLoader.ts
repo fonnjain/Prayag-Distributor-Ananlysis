@@ -495,20 +495,22 @@ export async function loadSecSkuFromSheets(
       // wrapper used for append-only loads is intentionally absent here.
       //
       // Join uses the same two-path strategy as backfillSkuStateCanon():
-      //   Path A — exact norm_key (employee-code keys)
+      //   Path A — explicit legacy source aliases (never person identity)
       //   Path B — normalised alias_secondary / canonical_name (display-name keys)
-      // Collision-safe: only updates head_canons where all matching registry entries
-      // agree on the same state_head (HAVING COUNT(DISTINCT) = 1).  Ambiguous names
-      // are left NULL and counted in the residual warning.
+      // Collision-safe: only updates head_canons with exactly one registry-row
+      // candidate. Shared employee codes are left NULL and counted in the
+      // residual warning.
       const backfillResult = await tx.execute<{ updated: string }>(sqlRaw`
         WITH registry_norm AS (
           SELECT
-            norm_key,
+            pr.id AS registry_id,
+            a.source_key,
             REGEXP_REPLACE(LOWER(TRIM(COALESCE(alias_secondary, canonical_name))), '\s+', ' ', 'g')
               AS display_key,
             state_head
-          FROM person_registry
-          WHERE state_head IS NOT NULL
+          FROM person_registry pr
+          LEFT JOIN person_registry_source_alias a ON a.registry_id = pr.id
+          WHERE pr.state_head IS NOT NULL
         ),
         head_match AS (
           SELECT
@@ -516,13 +518,13 @@ export async function loadSecSkuFromSheets(
             MIN(rm.state_head) AS state_head
           FROM secondary_sku_line ssl
           JOIN registry_norm rm
-            ON ssl.head_canon = rm.norm_key
+            ON ssl.head_canon = rm.source_key
             OR ssl.head_canon = rm.display_key
           WHERE ssl.fy = ${fy}
             AND ssl.state_canon IS NULL
             AND ssl.head_canon IS NOT NULL
           GROUP BY ssl.head_canon
-          HAVING COUNT(DISTINCT rm.state_head) = 1
+          HAVING COUNT(DISTINCT rm.registry_id) = 1
         ),
         done AS (
           UPDATE secondary_sku_line ssl
@@ -663,22 +665,24 @@ export async function backfillSkuStateCanon(fy?: string): Promise<number> {
   //   normKey(x) = x.toLowerCase().replace(/\s+/g, " ").trim()
   //
   // Join strategy (mirroring migration 034 step 3):
-  //   Path A — exact norm_key match (employee-code registry keys)
+  //   Path A — explicit legacy source aliases, which never identify a person
   //   Path B — normalised alias_secondary / canonical_name match
   //            (REGEXP_REPLACE replicates the JS normKey() function in SQL)
-  // Collision-safe: only updates unambiguous head_canons (HAVING COUNT(DISTINCT) = 1).
-  // Ambiguous names (two registry entries disagree on state_head) are left NULL.
+  // Collision-safe: only updates head_canons with exactly one registry-row candidate.
+  // Ambiguous names or shared codes are left NULL.
   const fyClause = fy ? sqlRaw`AND ssl.fy = ${fy}` : sqlRaw``;
   const fyUpdateClause = fy ? sqlRaw`AND ssl.fy = ${fy}` : sqlRaw``;
   const result = await db.execute<{ updated: string }>(sqlRaw`
     WITH registry_norm AS (
       SELECT
-        norm_key,
+        pr.id AS registry_id,
+        a.source_key,
         REGEXP_REPLACE(LOWER(TRIM(COALESCE(alias_secondary, canonical_name))), '\s+', ' ', 'g')
           AS display_key,
         state_head
-      FROM person_registry
-      WHERE state_head IS NOT NULL
+      FROM person_registry pr
+      LEFT JOIN person_registry_source_alias a ON a.registry_id = pr.id
+      WHERE pr.state_head IS NOT NULL
     ),
     head_match AS (
       SELECT
@@ -686,13 +690,13 @@ export async function backfillSkuStateCanon(fy?: string): Promise<number> {
         MIN(rm.state_head) AS state_head
       FROM secondary_sku_line ssl
       JOIN registry_norm rm
-        ON ssl.head_canon = rm.norm_key
+        ON ssl.head_canon = rm.source_key
         OR ssl.head_canon = rm.display_key
       WHERE ssl.state_canon IS NULL
         AND ssl.head_canon IS NOT NULL
         ${fyClause}
       GROUP BY ssl.head_canon
-      HAVING COUNT(DISTINCT rm.state_head) = 1
+      HAVING COUNT(DISTINCT rm.registry_id) = 1
     ),
     updated AS (
       UPDATE secondary_sku_line ssl

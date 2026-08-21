@@ -190,6 +190,23 @@ describe("Guard 4 — identity resolution", () => {
     if (!result.pass) expect(result.guard).not.toBe(4);
   });
 
+  it("G4-2b: a numeric legacy source alias can never identify one person", () => {
+    // Basit Ahmad Pala and Jijo genuinely share this roster code. Even if an
+    // old registry row still has it as norm_key, Guard 4 must fail closed.
+    const ctx = makeCtx({
+      persons: [
+        { normKey: "5900000000000", canonicalName: "Basit Ahmad Pala", stateHead: null, isStateHead: false, hrStatus: null, isPerson: true },
+      ],
+      personsByNameKey: new Set(["basitahmadpala"]),
+      secHeadMonths: [{ fy: "2026-27", headCanon: "5900000000000", stateHead: null, monthLabel: "Apr-26", monthIdx: 1, planAmount: 500_000, orderedAmount: 200_000, receivedAmount: null, notYetRecorded: false, isAnomaly: false, ingestedAt: new Date() }],
+    });
+    const result = runGuards(makeA1Alert("5900000000000"), ctx, "2026-27", "2025-26", new Date(), 0,
+      new Set(["Apr-26", "May-26"]), new Set(["Apr-25", "May-25"]));
+
+    const suppressed = expectGuard(result, 4);
+    expect(suppressed.reason).toContain("Legacy numeric source key");
+  });
+
   it("G4-3: name-key fallback resolves when normKey is a collision-disambiguation key", () => {
     // Registry stores norm_key="ashutoshkumarrudrapur:anantsingh".
     // head_canon is "ashutoshkumarrudrapur" (base part before ":").

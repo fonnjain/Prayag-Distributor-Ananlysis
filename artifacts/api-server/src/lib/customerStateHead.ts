@@ -15,6 +15,7 @@
  */
 
 import { pool as defaultPool } from "@workspace/db";
+import { isLegacyNumericSourceKey } from "./employeeCodeIdentity.js";
 type Pool = typeof defaultPool;
 // Accepts both Pool and PoolClient (both expose the same query() signature).
 type Queryable = Pick<Pool, "query">;
@@ -105,18 +106,42 @@ async function buildHeadTerritoryMap(pool: Queryable): Promise<Map<string, Set<s
   return m;
 }
 
-/** Query person_registry once and return norm_key → state_head mapping. */
+export interface PersonStateHeadRow {
+  norm_key: string;
+  state_head: string | null;
+}
+
+/**
+ * Build only identity-safe member-key mappings. Numeric registry keys are
+ * historical source aliases, and duplicate keys are ambiguous even where the
+ * candidate rows currently point to the same state head.
+ */
+export function mapUniquePersonStateHeads(rows: readonly PersonStateHeadRow[]): Map<string, string> {
+  const candidates = new Map<string, PersonStateHeadRow[]>();
+  for (const row of rows) {
+    if (isLegacyNumericSourceKey(row.norm_key)) continue;
+    const matches = candidates.get(row.norm_key) ?? [];
+    matches.push(row);
+    candidates.set(row.norm_key, matches);
+  }
+
+  const resolved = new Map<string, string>();
+  for (const [key, matches] of candidates) {
+    if (matches.length === 1 && matches[0]!.state_head) {
+      resolved.set(key, matches[0]!.state_head);
+    }
+  }
+  return resolved;
+}
+
+/** Query person_registry once and return only unambiguous member → state-head mappings. */
 async function buildPersonStateHeadMap(pool: Queryable): Promise<Map<string, string>> {
-  const { rows } = await pool.query<{ norm_key: string; state_head: string | null }>(`
+  const { rows } = await pool.query<PersonStateHeadRow>(`
     SELECT norm_key, state_head
     FROM person_registry
-    WHERE state_head IS NOT NULL AND is_person = true
+    WHERE is_person = true
   `);
-  const m = new Map<string, string>();
-  for (const r of rows) {
-    if (r.state_head) m.set(r.norm_key, r.state_head);
-  }
-  return m;
+  return mapUniquePersonStateHeads(rows);
 }
 
 // ── Pass 1: sale_line name match ──────────────────────────────────────────────

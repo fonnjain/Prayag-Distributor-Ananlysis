@@ -18,6 +18,7 @@
 //   G10 — C4 only
 
 import type { RawAlert, GuardResult, DetectionContext } from "./types.js";
+import { isLegacyNumericSourceKey } from "../employeeCodeIdentity.js";
 
 // ── Guard context helpers ─────────────────────────────────────────────────────
 
@@ -198,18 +199,22 @@ function guard3CompleteMonths(
  * A3 is a team-level alert keyed on a state-head name, not a person norm_key —
  * the person_registry lookup would always fail for it and must not apply.
  *
- * Two lookup paths (applied in order):
- *   1. Exact normKey match — catches rows whose norm_key IS the head_canon.
- *   2. personsByNameKey fallback — catches the common case where person_registry
- *      uses employee-code norm_keys (e.g. "788") or collision-disambiguation keys
- *      (e.g. "abhisheksingh:rajansrivastava") while secondary_head_month.head_canon
- *      stores only the base name part (e.g. "abhisheksingh").
+ * Numeric legacy source aliases are never individual-person identities. Name
+ * keys and collision-disambiguation keys may resolve through the registry.
  */
 function guard4IdentityResolution(alert: RawAlert, ctx: DetectionContext): GuardResult {
   if (!["A1", "A2"].includes(alert.code)) return { pass: true };
   const { entityKey } = alert;
 
-  // Path 1: exact norm_key match (is_person checked on the matched row).
+  if (isLegacyNumericSourceKey(entityKey)) {
+    return {
+      pass: false,
+      guard: 4,
+      reason: `Legacy numeric source key "${entityKey}" cannot identify an individual person`,
+    };
+  }
+
+  // Exact registry key match (is_person checked on the matched row).
   const personExact = ctx.persons.find((p) => p.normKey === entityKey);
   if (personExact) {
     if (!personExact.isPerson) {

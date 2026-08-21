@@ -1,6 +1,7 @@
 - [State Hierarchy Picker](state-hierarchy-picker.md) — 37-row state_canon→parent table; frontend sends leaf values only (no server expansion); REGION_GROUPS updated to DB leaf values.
 - [Stable-ID secondary orders](stable-id-secondary-orders.md) — order-booking duplicates are retained; real uploads need atomic lineage verification and remain analytics-isolated pending explicit approval.
 - [Person Registry](person-registry.md) — DB table replaces head_alias.json + territory_heads; mutable module maps; seed via POST /api/person-registry/seed; coverage check at startup.
+- [Employee-code identity policy](employee-code-identity.md) — employee codes and numeric legacy keys are evidence/source aliases, never unique person identities; ambiguity must fail closed.
 - [sale_line versioning pipeline](sale-line-versioning.md) — versionedSyncLines prevents rate-edit duplicates; identity key = invoice_no|code|color|qty|month_label[|sn:N]; analytics always filter version_status='current'.
 - [Tombstone identity-key bugs](tombstone-identity-key-bugs.md) — manual tombstone route needs tank resolution (litres→pieces) + serialNo in DB SELECT; both fixed Jul 2026; diagnostic endpoints not yet aligned.
 - [sale_line table rename](sale-line-table-rename.md) — raw table=sale_line_all, safe VIEW=sale_line (current-only), VIEW=sale_line_current (alias); runMigrations.ts wires it on every start.

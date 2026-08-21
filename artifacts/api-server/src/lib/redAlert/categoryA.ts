@@ -4,6 +4,7 @@
 // A3: team-weighted achievement below threshold, 2 consecutive months.
 
 import type { RawAlert, SecHeadMonthRow, DetectionContext } from "./types.js";
+import { resolveUniquePersonIdentityKey } from "../employeeCodeIdentity.js";
 
 type AConfig = {
   A1_THRESHOLD_PCT: number;
@@ -76,7 +77,11 @@ export function buildCategoryAAlerts(
         const last = window[window.length - 1]!;
         const first = window[0]!;
         // Find canonical name for this member
-        const person = ctx.persons.find((p) => p.normKey === headCanon);
+        const person = resolveUniquePersonIdentityKey(
+          headCanon,
+          ctx.persons,
+          (candidate) => candidate.normKey,
+        );
         const name = person?.canonicalName ?? headCanon;
         const stateHead = ctx.secHeadMonths.find((r) => r.headCanon === headCanon)?.stateHead ?? null;
 
@@ -112,7 +117,11 @@ export function buildCategoryAAlerts(
     const months = completeMonthsFor(allRows, headCanon, currentFy);
     for (const m of months) {
       if ((m.orderedAmount ?? 0) === 0 && (m.planAmount ?? 0) > 0) {
-        const person = ctx.persons.find((p) => p.normKey === headCanon);
+        const person = resolveUniquePersonIdentityKey(
+          headCanon,
+          ctx.persons,
+          (candidate) => candidate.normKey,
+        );
         const name = person?.canonicalName ?? headCanon;
         const stateHead = ctx.secHeadMonths.find((r) => r.headCanon === headCanon)?.stateHead ?? null;
         const allAlertMonths = [m];

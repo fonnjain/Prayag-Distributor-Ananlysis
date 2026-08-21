@@ -249,9 +249,9 @@ describe("headNormKey (state_canon backfill join key)", () => {
     expect(headNormKey(canonicalName)).toBe(headCanon);
   });
 
-  it("numeric employee-code norm_key is preserved as-is (Path A exact match)", () => {
-    // For employee-code norm_keys (e.g. "1234"), the exact match path is used.
-    // headNormKey("1234") === "1234" so exact comparison works.
+  it("numeric legacy source aliases retain their normalised source form", () => {
+    // Numeric source aliases are handled separately from registry identity.
+    // headNormKey preserves their source form for the alias lookup.
     expect(headNormKey("1234")).toBe("1234");
     expect(headNormKey("42")).toBe("42");
   });

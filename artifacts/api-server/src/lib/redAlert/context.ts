@@ -327,13 +327,16 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
   //
   // secondary_head_month.head_canon is written by the register ingest pipeline
   // using normSecKey(memberName): lowercase alphanumerics only, no spaces or
-  // punctuation (src/lib/mgmt/names.ts).  person_registry.norm_key is either:
-  //   (a) a numeric employee code ("788", "1001"), or
-  //   (b) a collision-disambiguation string "basename:stateheadname"
+  // punctuation (src/lib/mgmt/names.ts). Registry identity keys are
+  // name-and-manager derived; older numeric values are legacy source aliases
+  // and are never used to identify an individual.
+  // A key may be:
+  //   (a) a legacy numeric source alias ("788", "1001"), or
+  //   (b) a name-and-manager string "basename:stateheadname"
   //       where basename = normSecKey(memberName).
   //
-  // Guard 4 receives entityKey = head_canon.  It will never equal a numeric
-  // employee code or a full collision key, so we need a secondary set indexed
+  // Guard 4 receives entityKey = head_canon. It must not accept a numeric
+  // employee-code alias, so it uses a secondary set indexed
   // by normSecKey(canonicalName) — which equals the base part of (b) and the
   // value that the pipeline would store as head_canon for (a).
   //
@@ -347,7 +350,7 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
       const baseName = p.normKey.split(":")[0]!;
       if (baseName) personsByNameKey.add(baseName);
     } else {
-      // Numeric employee-code format (e.g. "788") or a bare name key.
+      // Legacy numeric source alias or a bare name key.
       // Derive the head_canon-equivalent key via normSecKey — the same function
       // the register pipeline uses when writing head_canon, so names with
       // parentheses ("Ashutosh Kumar (Rudrapur)"), hyphens, apostrophes, etc.

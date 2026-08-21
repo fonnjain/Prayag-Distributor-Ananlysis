@@ -17,6 +17,7 @@
 import { describe, it, expect } from "vitest";
 import {
   normaliseCustomerState,
+  mapUniquePersonStateHeads,
   resolvePickerToStoredHead,
   buildCascadeStates,
   type StateHierarchyRow,
@@ -52,6 +53,25 @@ describe("normaliseCustomerState", () => {
     expect(normaliseCustomerState(null)).toBeNull();
     expect(normaliseCustomerState("")).toBeNull();
     expect(normaliseCustomerState(undefined)).toBeNull();
+  });
+});
+
+describe("mapUniquePersonStateHeads", () => {
+  it("never maps a shared numeric legacy key to either person", () => {
+    const result = mapUniquePersonStateHeads([
+      { norm_key: "5900000000000", state_head: "North" },
+      { norm_key: "5900000000000", state_head: "South" },
+      { norm_key: "unique:manager", state_head: "West" },
+      { norm_key: "duplicate:manager", state_head: "East" },
+      { norm_key: "duplicate:manager", state_head: "East" },
+      { norm_key: "duplicate-with-null:manager", state_head: "North" },
+      { norm_key: "duplicate-with-null:manager", state_head: null },
+    ]);
+
+    expect(result.get("5900000000000")).toBeUndefined();
+    expect(result.get("duplicate:manager")).toBeUndefined();
+    expect(result.get("duplicate-with-null:manager")).toBeUndefined();
+    expect(result.get("unique:manager")).toBe("West");
   });
 });
 

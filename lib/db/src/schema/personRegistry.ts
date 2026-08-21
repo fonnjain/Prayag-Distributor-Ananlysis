@@ -13,8 +13,9 @@ import {
 // Replaces head_alias.json + normalize.json territory_heads as pipeline sources.
 //
 // Key fields:
-//   norm_key        — unique identity key. Plausible employee codes (≤4 digits)
-//                     use the code; others use normSecKey(name):normSecKey(manager).
+//   norm_key        — registry record key derived from name + reporting manager.
+//                     Existing numeric values are legacy source aliases only;
+//                     employee_code is never a person-identity key.
 //   alias_primary   — raw register / rate-list forms (e.g. "SANDEEP JI").
 //                     All entries that classify this person as a territory head
 //                     when seen in the STATE HEAD column.

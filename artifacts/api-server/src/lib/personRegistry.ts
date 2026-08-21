@@ -19,6 +19,11 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { pool } from "@workspace/db";
 import { normSecKey } from "./mgmt/names.js";
+import {
+  normaliseEmployeeCode,
+  resolveEmployeeCode,
+  type EmployeeCodeResolution,
+} from "./employeeCodeIdentity.js";
 
 // Raw Postgres row shape (snake_case) returned by pool.query.
 export interface PersonRegistryRow {
@@ -38,6 +43,32 @@ export interface PersonRegistryRow {
   flag_notes: string | null;
   created_at: Date;
   updated_at: Date;
+}
+
+export interface PersonEmployeeCodeCandidate {
+  personId: number;
+  name: string;
+  employeeCode: string | null;
+}
+
+/**
+ * Canonical runtime employee-code lookup. A shared code deliberately returns
+ * both candidates; callers must request human evidence instead of choosing one.
+ */
+export async function resolvePeopleByEmployeeCode(
+  employeeCode: string | null | undefined,
+): Promise<EmployeeCodeResolution<PersonEmployeeCodeCandidate>> {
+  const code = normaliseEmployeeCode(employeeCode);
+  if (!code) return { status: "none", code: null, candidates: [] };
+
+  const { rows } = await pool.query<PersonEmployeeCodeCandidate>(
+    `SELECT person_id AS "personId", name, employee_code AS "employeeCode"
+       FROM person
+      WHERE NULLIF(TRIM(employee_code), '') = $1
+      ORDER BY person_id`,
+    [code],
+  );
+  return resolveEmployeeCode(code, rows, (candidate) => candidate.employeeCode);
 }
 
 // ── Module-level maps (populated by loadPersonRegistry()) ────────────────────
@@ -188,8 +219,9 @@ export async function assertHeadCoverage(): Promise<void> {
 
 // ── Seed ──────────────────────────────────────────────────────────────────────
 //
-// One-time operation.  Idempotent: each row has a unique norm_key; conflicts
-// are skipped.  Parses:
+// One-time operation.  Idempotent: each row has a name-and-manager-derived
+// unique norm_key; conflicts are skipped. Employee codes are stored only as
+// roster evidence. Parses:
 //   1. config/head_alias.json  — alias → canonical mapping (437 entries)
 //   2. config/normalize.json   — territory_heads list (25 entries)
 //   3. config/hr_roster.csv    — HR member data (862 rows)
@@ -318,7 +350,7 @@ export async function seedPersonRegistry(): Promise<SeedReport> {
     }
 
     const { employeeCode, codePlausible, normKey, flagNotes } =
-      resolveNormKey(canonicalName, hrRow, null);
+      resolveNormKey(canonicalName, hrRow);
 
     rows.push({
       normKey,
@@ -350,7 +382,7 @@ export async function seedPersonRegistry(): Promise<SeedReport> {
     // entries shouldn't appear in head_alias (they don't map to people).
 
     const { employeeCode, codePlausible, normKey, flagNotes } =
-      resolveNormKey(canon, hrByNormName.get(normSecKey(canon)), null);
+      resolveNormKey(canon, hrByNormName.get(normSecKey(canon)));
 
     // Determine if this person rolls up to a state head.
     const hrRow = hrByNormName.get(normSecKey(canon));
@@ -385,17 +417,13 @@ export async function seedPersonRegistry(): Promise<SeedReport> {
   // primary-register alias yet.
 
   const insertedNormKeys = new Set(rows.map((r) => r.normKey));
-  const usedEmployeeCodes = new Set<string>(
-    rows.map((r) => r.employeeCode).filter((c): c is string => c != null),
-  );
-
   for (const hr of hrRows) {
     const nk0 = normSecKey(hr.name);
     // Skip if already covered by head_alias.json group.
     if (insertedNormKeys.has(nk0)) continue;
 
     const { employeeCode, codePlausible, normKey, flagNotes } =
-      resolveNormKey(hr.name, hr, usedEmployeeCodes);
+      resolveNormKey(hr.name, hr);
 
     if (insertedNormKeys.has(normKey)) {
       // norm_key collision (e.g. reverse-name duplicate like V. Balamurugan).
@@ -404,8 +432,6 @@ export async function seedPersonRegistry(): Promise<SeedReport> {
       report.skipped++;
       continue;
     }
-
-    if (employeeCode && codePlausible) usedEmployeeCodes.add(employeeCode);
 
     const resolvedStateHead = resolveStateHead(
       hr.reportingManager,
@@ -433,7 +459,7 @@ export async function seedPersonRegistry(): Promise<SeedReport> {
     insertedNormKeys.add(normKey);
   }
 
-  // ── Insert (idempotent via ON CONFLICT DO NOTHING) ────────────────────────
+  // ── Insert (idempotent; legacy numeric keys remain compatible) ────────────
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -443,7 +469,15 @@ export async function seedPersonRegistry(): Promise<SeedReport> {
            (norm_key, canonical_name, alias_primary, alias_secondary, alias_sheet,
             reporting_manager, state_head, is_state_head, is_person,
             employee_code, code_plausible, hr_status, flag_notes)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
+         WHERE NOT EXISTS (
+           SELECT 1
+           FROM person_registry existing
+           WHERE LOWER(REGEXP_REPLACE(existing.canonical_name, '[^a-z0-9]', '', 'gi'))
+                 = LOWER(REGEXP_REPLACE($2, '[^a-z0-9]', '', 'gi'))
+             AND LOWER(REGEXP_REPLACE(COALESCE(existing.reporting_manager, ''), '[^a-z0-9]', '', 'gi'))
+                 = LOWER(REGEXP_REPLACE(COALESCE($6, ''), '[^a-z0-9]', '', 'gi'))
+         )
          ON CONFLICT (norm_key) DO NOTHING`,
         [
           r.normKey,
@@ -882,10 +916,16 @@ function isPlausibleCode(code: string): boolean {
   return /^\d{1,4}$/.test(code.trim());
 }
 
+export function makePersonRegistryIdentityKey(
+  name: string,
+  reportingManager: string | null | undefined,
+): string {
+  return `${normSecKey(name)}:${normSecKey(reportingManager ?? "")}`;
+}
+
 function resolveNormKey(
   name: string,
   hrRow: HrRow | undefined,
-  usedCodes: Set<string> | null,
 ): {
   employeeCode: string | null;
   codePlausible: boolean;
@@ -896,38 +936,21 @@ function resolveNormKey(
     return {
       employeeCode: null,
       codePlausible: false,
-      normKey: normSecKey(name),
+      normKey: makePersonRegistryIdentityKey(name, null),
       flagNotes: null,
     };
   }
   const code = hrRow.employeeCode?.trim() ?? "";
   const plausible = code !== "" && isPlausibleCode(code);
-
-  if (plausible) {
-    // Check for code collision among already-inserted rows.
-    if (usedCodes && usedCodes.has(code)) {
-      const flagNotes = `Employee code ${code} collision — using name+manager key`;
-      const normKey =
-        normSecKey(hrRow.name) + ":" + normSecKey(hrRow.reportingManager);
-      return { employeeCode: code, codePlausible: false, normKey, flagNotes };
-    }
-    return {
-      employeeCode: code,
-      codePlausible: true,
-      normKey: code,
-      flagNotes: null,
-    };
-  }
-
-  // Implausible code.
-  const normKey =
-    normSecKey(hrRow.name) + ":" + normSecKey(hrRow.reportingManager);
+  const normKey = makePersonRegistryIdentityKey(hrRow.name || name, hrRow.reportingManager);
   const flagNotes = code
-    ? `Implausible employee code: "${code}" — flagged for HR correction`
+    ? (!plausible
+      ? `Implausible employee code: "${code}" — flagged for HR correction`
+      : null)
     : null;
   return {
     employeeCode: code || null,
-    codePlausible: false,
+    codePlausible: plausible,
     normKey,
     flagNotes,
   };

@@ -1224,25 +1224,25 @@ const MIGRATIONS: Migration[] = [
       --   headNormKey(x) = x.toLowerCase().replace(/\s+/g, " ").trim()
       -- In SQL: REGEXP_REPLACE(LOWER(TRIM(x)), '\s+', ' ', 'g')
       --
-      -- Join strategy (two paths, priority-ordered):
-      --   Path A — exact norm_key match: works for employee-code norm_keys.
+       -- Join strategy (two paths, priority-ordered):
+       --   Path A — exact norm_key match: works for employee-code norm_keys.
       --   Path B — normalised display name: alias_secondary holds the secondary-register
       --            display spelling (the TEAM MEMBER column value); canonical_name is the
       --            fallback when alias_secondary is absent.
       --
-      -- Only unambiguous matches: a head_canon must resolve to exactly one state_head
-      -- across all registry entries (both paths). HAVING COUNT(DISTINCT) = 1 rejects
-      -- any head_canon where two or more registry rows disagree — those names are left
-      -- NULL and reported in the residual warning.  MIN() is deterministic when the
-      -- distinct count is 1 (all values are identical).
-      WITH registry_norm AS (
+       -- Only unambiguous matches: a head_canon must resolve to exactly one state_head
+       -- across all registry entries (both paths). HAVING COUNT(DISTINCT) = 1 rejects
+       -- any head_canon where two or more registry rows disagree — those names are left
+       -- NULL and reported in the residual warning.  MIN() is deterministic when the
+       -- distinct count is 1 (all values are identical).
+       WITH registry_norm AS (
         SELECT
-          norm_key,
+           norm_key,
           REGEXP_REPLACE(LOWER(TRIM(COALESCE(alias_secondary, canonical_name))), '\s+', ' ', 'g')
             AS display_key,
           state_head
-        FROM person_registry
-        WHERE state_head IS NOT NULL
+         FROM person_registry
+         WHERE state_head IS NOT NULL
       ),
       head_match AS (
         SELECT
@@ -1250,12 +1250,12 @@ const MIGRATIONS: Migration[] = [
           MIN(rm.state_head) AS state_head   -- safe: MIN when COUNT(DISTINCT) = 1
         FROM secondary_sku_line ssl
         JOIN registry_norm rm
-          ON ssl.head_canon = rm.norm_key          -- Path A: exact registry key
-          OR ssl.head_canon = rm.display_key       -- Path B: normalised display/alias name
+           ON ssl.head_canon = rm.norm_key          -- Path A: exact registry key
+           OR ssl.head_canon = rm.display_key       -- Path B: normalised display/alias name
         WHERE ssl.state_canon IS NULL
           AND ssl.head_canon IS NOT NULL
         GROUP BY ssl.head_canon
-        HAVING COUNT(DISTINCT rm.state_head) = 1   -- reject ambiguous head names
+         HAVING COUNT(DISTINCT rm.state_head) = 1   -- reject ambiguous head names
       )
       UPDATE secondary_sku_line ssl
       SET state_canon = hm.state_head
@@ -1494,15 +1494,22 @@ const MIGRATIONS: Migration[] = [
              OR p.employee_code IS NULL OR TRIM(p.employee_code) = ''
              OR TRIM(pr.employee_code) = TRIM(p.employee_code));
 
-      -- Step 3: employee-code match for punctuation-different spellings
+       -- Step 3: employee-code match for punctuation-different spellings.
+       -- A code is usable only when it belongs to exactly one person.
       --   K. Suresh Kumar (reg 134) → person 89  (code 25696++21111)
       --   S. Tirumala Rao (reg 253) → person 106 (code 3418596)
-      UPDATE person_registry pr
+       WITH unique_person_codes AS (
+         SELECT TRIM(employee_code) AS employee_code, MIN(person_id) AS person_id
+         FROM person
+         WHERE NULLIF(TRIM(employee_code), '') IS NOT NULL
+         GROUP BY TRIM(employee_code)
+         HAVING COUNT(*) = 1
+       )
+       UPDATE person_registry pr
       SET person_id = p.person_id
-      FROM person p
+       FROM unique_person_codes p
       WHERE pr.id IN (134, 253)
-        AND pr.employee_code = p.employee_code
-        AND pr.employee_code IS NOT NULL
+         AND TRIM(pr.employee_code) = p.employee_code
         AND pr.person_id IS NULL;
 
       -- Step 4: demote 74 geographic/product-category noise rows
@@ -1535,14 +1542,19 @@ const MIGRATIONS: Migration[] = [
     // has no chain above in the registry.
     id: "044_person_registry_person_fk_patch",
     sql: `
-      -- Broaden the employee-code match: fill any remaining registry rows
-      -- whose code matches a person row but were missed by name normalisation.
-      UPDATE person_registry pr
+       -- Broaden the employee-code match only where a code identifies exactly
+       -- one person. Shared codes must remain unresolved for review.
+       WITH unique_person_codes AS (
+         SELECT TRIM(employee_code) AS employee_code, MIN(person_id) AS person_id
+         FROM person
+         WHERE NULLIF(TRIM(employee_code), '') IS NOT NULL
+         GROUP BY TRIM(employee_code)
+         HAVING COUNT(*) = 1
+       )
+       UPDATE person_registry pr
       SET person_id = p.person_id
-      FROM person p
-      WHERE pr.employee_code = p.employee_code
-        AND pr.employee_code IS NOT NULL
-        AND TRIM(pr.employee_code) != ''
+       FROM unique_person_codes p
+       WHERE TRIM(pr.employee_code) = p.employee_code
         AND pr.person_id IS NULL;
 
       -- Chain-walk fix: J.Kamal Kishore's direct manager (Suresh Kumar Nair)
@@ -2835,6 +2847,236 @@ const MIGRATIONS: Migration[] = [
         ADD COLUMN IF NOT EXISTS mapped_by_user_id INTEGER;
       ALTER TABLE sku_taxonomy_override_audit
         ADD COLUMN IF NOT EXISTS mapped_by_user_id INTEGER;
+    `,
+  },
+  {
+    id: "069_employee_code_identity_guards",
+    sql: `
+      -- Numeric registry keys predate the current identity policy. Preserve
+      -- them as explicit source aliases so historical secondary imports can
+      -- still read them, but never use either a source alias or employee code
+      -- as a person identity key.
+      CREATE TABLE IF NOT EXISTS person_registry_source_alias (
+        registry_id INTEGER NOT NULL REFERENCES person_registry(id) ON DELETE CASCADE,
+        source_key  TEXT NOT NULL,
+        source_kind TEXT NOT NULL CHECK (source_kind IN ('legacy_norm_key', 'employee_code')),
+        PRIMARY KEY (registry_id, source_key, source_kind)
+      );
+      CREATE INDEX IF NOT EXISTS pr_source_alias_key_idx
+        ON person_registry_source_alias (source_key);
+
+      INSERT INTO person_registry_source_alias (registry_id, source_key, source_kind)
+      SELECT id,
+             REGEXP_REPLACE(LOWER(TRIM(norm_key)), '\\s+', ' ', 'g'),
+             'legacy_norm_key'
+      FROM person_registry
+      WHERE norm_key ~ '^[0-9]+$'
+      ON CONFLICT DO NOTHING;
+
+      INSERT INTO person_registry_source_alias (registry_id, source_key, source_kind)
+      SELECT id,
+             REGEXP_REPLACE(LOWER(TRIM(employee_code)), '\\s+', ' ', 'g'),
+             'employee_code'
+      FROM person_registry
+      WHERE NULLIF(TRIM(employee_code), '') IS NOT NULL
+      ON CONFLICT DO NOTHING;
+
+      CREATE OR REPLACE FUNCTION sync_person_registry_source_alias()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        DELETE FROM person_registry_source_alias
+        WHERE registry_id = NEW.id
+          AND source_kind IN ('legacy_norm_key', 'employee_code');
+
+        IF NEW.norm_key ~ '^[0-9]+$' THEN
+          INSERT INTO person_registry_source_alias (registry_id, source_key, source_kind)
+          VALUES (
+            NEW.id,
+            REGEXP_REPLACE(LOWER(TRIM(NEW.norm_key)), '\\s+', ' ', 'g'),
+            'legacy_norm_key'
+          )
+          ON CONFLICT DO NOTHING;
+        END IF;
+
+        IF NULLIF(TRIM(NEW.employee_code), '') IS NOT NULL THEN
+          INSERT INTO person_registry_source_alias (registry_id, source_key, source_kind)
+          VALUES (
+            NEW.id,
+            REGEXP_REPLACE(LOWER(TRIM(NEW.employee_code)), '\\s+', ' ', 'g'),
+            'employee_code'
+          )
+          ON CONFLICT DO NOTHING;
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      DROP TRIGGER IF EXISTS person_registry_source_alias_sync ON person_registry;
+      CREATE TRIGGER person_registry_source_alias_sync
+      AFTER INSERT OR UPDATE ON person_registry
+      FOR EACH ROW EXECUTE FUNCTION sync_person_registry_source_alias();
+    `,
+  },
+  {
+    // Earlier person-registry migrations populated person_id before employee
+    // codes were treated as non-unique evidence. Existing databases have
+    // already recorded those migrations, so repair their links forward rather
+    // than relying on edits to historical migration definitions.
+    id: "070_person_registry_identity_link_repair",
+    sql: `
+      CREATE TABLE IF NOT EXISTS person_registry_person_link_repair_audit (
+        id            BIGSERIAL PRIMARY KEY,
+        migration_id  TEXT NOT NULL,
+        registry_id   INTEGER NOT NULL,
+        old_person_id INTEGER,
+        new_person_id INTEGER,
+        action        TEXT NOT NULL CHECK (action IN ('cleared', 'relinked')),
+        reason        TEXT NOT NULL,
+        repaired_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (migration_id, registry_id, action)
+      );
+      CREATE INDEX IF NOT EXISTS pr_link_repair_audit_registry_idx
+        ON person_registry_person_link_repair_audit (registry_id, repaired_at DESC);
+
+      -- Preserve an auditable record before clearing any legacy mapping that
+      -- cannot be corroborated by one canonical-name candidate and, where
+      -- present, that candidate's operational manager. Employee code is
+      -- deliberately absent from this candidate search.
+      WITH candidates AS (
+        SELECT
+          pr.id AS registry_id,
+          pr.person_id AS old_person_id,
+          NULLIF(REGEXP_REPLACE(pr.reporting_manager, '[^a-z0-9]', '', 'gi'), '') AS manager_key,
+          COUNT(p.person_id) AS name_candidate_count,
+          MIN(p.person_id) AS name_person_id,
+          COUNT(p.person_id) FILTER (
+            WHERE NULLIF(REGEXP_REPLACE(pr.reporting_manager, '[^a-z0-9]', '', 'gi'), '') IS NOT NULL
+              AND LOWER(REGEXP_REPLACE(manager.name, '[^a-z0-9]', '', 'gi'))
+                  = LOWER(REGEXP_REPLACE(pr.reporting_manager, '[^a-z0-9]', '', 'gi'))
+          ) AS manager_candidate_count,
+          MIN(p.person_id) FILTER (
+            WHERE NULLIF(REGEXP_REPLACE(pr.reporting_manager, '[^a-z0-9]', '', 'gi'), '') IS NOT NULL
+              AND LOWER(REGEXP_REPLACE(manager.name, '[^a-z0-9]', '', 'gi'))
+                  = LOWER(REGEXP_REPLACE(pr.reporting_manager, '[^a-z0-9]', '', 'gi'))
+          ) AS manager_person_id
+        FROM person_registry pr
+        LEFT JOIN person p
+          ON LOWER(REGEXP_REPLACE(p.name, '[^a-z0-9]', '', 'gi'))
+             = LOWER(REGEXP_REPLACE(pr.canonical_name, '[^a-z0-9]', '', 'gi'))
+        LEFT JOIN person manager ON manager.person_id = p.reports_to_person_id
+        WHERE pr.is_person = true
+        GROUP BY pr.id, pr.person_id, pr.reporting_manager
+      )
+      INSERT INTO person_registry_person_link_repair_audit
+        (migration_id, registry_id, old_person_id, new_person_id, action, reason)
+      SELECT
+        '070_person_registry_identity_link_repair',
+        c.registry_id,
+        c.old_person_id,
+        NULL,
+        'cleared',
+        CASE
+          WHEN c.name_candidate_count = 0 THEN 'no_name_candidate'
+          WHEN c.name_candidate_count > 1 THEN 'ambiguous_name_candidates'
+          WHEN c.name_person_id <> c.old_person_id THEN 'link_does_not_match_name'
+          WHEN c.manager_candidate_count = 0 THEN 'manager_not_in_operational_chain'
+          WHEN c.manager_candidate_count > 1 THEN 'ambiguous_manager_candidates'
+          ELSE 'link_does_not_match_manager'
+        END
+      FROM candidates c
+      WHERE c.old_person_id IS NOT NULL
+        AND (
+          c.name_candidate_count <> 1
+          OR c.name_person_id <> c.old_person_id
+          OR (
+            c.manager_key IS NOT NULL
+            AND (
+              c.manager_candidate_count <> 1
+              OR c.manager_person_id <> c.old_person_id
+            )
+          )
+        )
+      ON CONFLICT (migration_id, registry_id, action) DO NOTHING;
+
+      UPDATE person_registry pr
+      SET person_id = NULL,
+          updated_at = now()
+      FROM person_registry_person_link_repair_audit audit
+      WHERE audit.migration_id = '070_person_registry_identity_link_repair'
+        AND audit.action = 'cleared'
+        AND audit.registry_id = pr.id
+        AND pr.person_id = audit.old_person_id;
+
+      -- Re-establish only an unambiguous name-and-manager link. A matching
+      -- employee code may corroborate this result but cannot create it; a
+      -- contradictory nonblank code is left for the review queue.
+      WITH candidates AS (
+        SELECT
+          pr.id AS registry_id,
+          NULLIF(REGEXP_REPLACE(pr.reporting_manager, '[^a-z0-9]', '', 'gi'), '') AS manager_key,
+          NULLIF(REGEXP_REPLACE(pr.employee_code, '[^a-z0-9]', '', 'gi'), '') AS registry_code_key,
+          COUNT(p.person_id) AS name_candidate_count,
+          MIN(p.person_id) AS name_person_id,
+          MIN(NULLIF(REGEXP_REPLACE(p.employee_code, '[^a-z0-9]', '', 'gi'), '')) AS person_code_key,
+          COUNT(p.person_id) FILTER (
+            WHERE NULLIF(REGEXP_REPLACE(pr.reporting_manager, '[^a-z0-9]', '', 'gi'), '') IS NOT NULL
+              AND LOWER(REGEXP_REPLACE(manager.name, '[^a-z0-9]', '', 'gi'))
+                  = LOWER(REGEXP_REPLACE(pr.reporting_manager, '[^a-z0-9]', '', 'gi'))
+          ) AS manager_candidate_count,
+          MIN(p.person_id) FILTER (
+            WHERE NULLIF(REGEXP_REPLACE(pr.reporting_manager, '[^a-z0-9]', '', 'gi'), '') IS NOT NULL
+              AND LOWER(REGEXP_REPLACE(manager.name, '[^a-z0-9]', '', 'gi'))
+                  = LOWER(REGEXP_REPLACE(pr.reporting_manager, '[^a-z0-9]', '', 'gi'))
+          ) AS manager_person_id
+        FROM person_registry pr
+        LEFT JOIN person p
+          ON LOWER(REGEXP_REPLACE(p.name, '[^a-z0-9]', '', 'gi'))
+             = LOWER(REGEXP_REPLACE(pr.canonical_name, '[^a-z0-9]', '', 'gi'))
+        LEFT JOIN person manager ON manager.person_id = p.reports_to_person_id
+        WHERE pr.is_person = true
+          AND pr.person_id IS NULL
+        GROUP BY pr.id, pr.reporting_manager, pr.employee_code
+      ),
+      relinkable AS (
+        SELECT c.registry_id, c.name_person_id,
+               CASE WHEN c.manager_key IS NULL
+                    THEN 'unique_name_no_manager'
+                    ELSE 'unique_name_and_manager' END AS reason
+        FROM candidates c
+        WHERE c.name_candidate_count = 1
+          AND (
+            c.manager_key IS NULL
+            OR (
+              c.manager_candidate_count = 1
+              AND c.manager_person_id = c.name_person_id
+            )
+          )
+          AND (
+            c.registry_code_key IS NULL
+            OR c.person_code_key IS NULL
+            OR c.registry_code_key = c.person_code_key
+          )
+      ),
+      audited AS (
+        INSERT INTO person_registry_person_link_repair_audit
+          (migration_id, registry_id, old_person_id, new_person_id, action, reason)
+        SELECT
+          '070_person_registry_identity_link_repair',
+          r.registry_id,
+          NULL,
+          r.name_person_id,
+          'relinked',
+          r.reason
+        FROM relinkable r
+        ON CONFLICT (migration_id, registry_id, action) DO NOTHING
+        RETURNING registry_id
+      )
+      UPDATE person_registry pr
+      SET person_id = r.name_person_id,
+          updated_at = now()
+      FROM relinkable r
+      WHERE pr.id = r.registry_id
+        AND pr.person_id IS NULL;
     `,
   },
 ];

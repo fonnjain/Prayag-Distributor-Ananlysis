@@ -10,6 +10,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import type { RawAlert, DetectionContext } from "./types.js";
+import {
+  isLegacyNumericSourceKey,
+  resolveUniquePersonIdentityKey,
+} from "../employeeCodeIdentity.js";
 
 type CConfig = {
   C1_CONCENTRATION_SHARE_PCT: number;
@@ -316,12 +320,21 @@ export function buildCategoryCAlerts(
   )];
 
   for (const headCanon of currentFyHeads) {
+    // A numeric key is a legacy source alias and may represent more than one
+    // person. C5 has no Guard 4 pass, so it must fail closed here rather than
+    // letting Array.find() select whichever registry row appears first.
+    if (isLegacyNumericSourceKey(headCanon)) continue;
+
     const lastRead = ctx.lastSheetRead.get(headCanon);
     if (lastRead == null) continue; // ingested_at not tracked for this member — skip
 
     const daysSince = (asOfDate.getTime() - lastRead.getTime()) / 86_400_000;
     if (daysSince >= stalenessDays) {
-      const person = ctx.persons.find((p) => p.normKey === headCanon);
+      const person = resolveUniquePersonIdentityKey(
+        headCanon,
+        ctx.persons,
+        (candidate) => candidate.normKey,
+      );
       const name = person?.canonicalName ?? headCanon;
       const stateHead = ctx.secHeadMonths.find((r) => r.headCanon === headCanon)?.stateHead ?? null;
       alerts.push({
