@@ -412,7 +412,7 @@ export default function AttributionConflictsPage() {
     return (
       <div>
         <p className="border-b bg-amber-50/60 px-5 py-3 text-xs leading-5 text-amber-950 dark:bg-amber-950/25 dark:text-amber-100">
-          A multi-head workbook label is not automatically an ownership disagreement. The pack/register multiple and the cross-head invoice, date, and amount matches below distinguish duplicated source rows from genuinely additional business.
+          A multi-head workbook label is not automatically an ownership disagreement. The pack/register multiple and the cross-head invoice, date, and amount matches below distinguish duplicated source rows from genuinely additional business. Each head’s Report tabs aggregate its own Sheet1 rows; do not add head Report totals until the matched financial duplicates have been removed.
         </p>
         <table className="w-full text-left text-sm whitespace-nowrap">
         <thead className="bg-muted/30 text-[11px] uppercase tracking-wider text-muted-foreground sticky top-0 backdrop-blur-md z-10 border-b">
