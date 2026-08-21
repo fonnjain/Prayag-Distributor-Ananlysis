@@ -1,0 +1,42 @@
+Diagnosed from the code on main. Two separate things.
+
+1. PERSON REGISTRY IS READ-ONLY BY DESIGN
+OrgPeoplePage.tsx line 622 renders <PersonRegistryPanel /> imported from
+components/dashboard/Organisation - the OLD read-only panel from the original
+Organization page, dropped in as a second tab. All the edit machinery on that
+page (editMode, editForm, the PATCH, the save toast) belongs to the People
+tab only.
+
+So the screenshot is expected, but wrong. The collision warnings it shows -
+"Employee code 210 collision", 424, 957 - are precisely what someone would
+want to fix in place.
+
+Make the registry editable, with the same pattern as the People tab:
+  - Edit canonical name, alias_primary, alias_secondary, reports_to,
+    state_head, is_state_head, is_person
+  - Impact preview before saving anything that changes an alias, since alias
+    changes affect historical attribution
+  - change_log entry per edit, with the operator in changed_by and the reason
+    in reason
+  - Admin-gated, like the People tab
+
+The employee-code collisions are the first job: 62 of 179 active people have an
+implausible code, and 5900000000000 is held by two real people.
+
+2. CUSTOMER DATA HAS NO ROUTE
+App.tsx has /org/customers, /org/people, /org/coverage-review and /org/users.
+There is NO /customers/master route. It was removed from the nav when the two
+customer pages were consolidated and the route went with it.
+
+  a. Does CustomerMasterPage.tsx still exist in the repo?
+  b. Was removing the route intended? We agreed to retire it from the NAV but
+     keep the route reachable by URL for one release.
+  c. If it is gone, confirm the four things it did that /org/customers does
+     not - xlsx import/export, the confidence filter, upload insights, and
+     per-row change history - and say where each lives now.
+
+If any of those four have no home, that is a capability lost in the
+consolidation and needs restoring on /org/customers rather than bringing the
+old page back.
+
+Do not change anything yet - report first.
