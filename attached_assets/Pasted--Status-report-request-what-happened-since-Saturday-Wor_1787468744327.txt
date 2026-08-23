@@ -1,0 +1,116 @@
+# Status report request — what happened since Saturday
+
+Work paused from Saturday for billing reasons. Before anything new starts, I need to know the current state rather than assume it.
+
+**This is a read-only status request. Do not change code, database, deployment or task state.** Report only. If something below cannot be determined, say so rather than estimating.
+
+---
+
+## My last known baseline
+
+For you to diff against:
+
+**Planning app — `fonnjain/Prayag-pp-ptmt-cp`**
+
+```
+origin/main = 8c2e7f5  "Document daily-rate report evidence"   2026-08-21 14:22 UTC
+```
+
+with `8be858b`, `97d8cf1`, `eb33593` (the parity merge), `29bf660`, `0652b4f`, `b63c703`, `7f4d85d` beneath it.
+
+**Machine app — `fonnjain/Prayag-Plant-MC-Analysis`**
+
+```
+origin/main = 13353a7  "Update prayag app logic"               2026-08-20 15:14 UTC
+```
+
+---
+
+## 1. Repository state
+
+For **both** repos:
+
+- `git rev-parse origin/main` and the last 10 commits with dates
+- Any commits after my baselines above — full diffstat for each, every file named
+- **Any local commits that were never pushed.** This has happened repeatedly: `d0546b1`, `7c60825`, `2cd582b` all existed locally while `origin/main` sat behind. If the workspace was reset or rebuilt during the billing gap, unpushed work may simply be gone. Report `git log origin/main..HEAD` for each repo.
+- Whether the working tree is clean
+
+## 2. Deployment state
+
+For both apps:
+
+- `GET /api/healthz` → `commitSha` and `dbHostname` (planning app)
+- `GET /health` and a `/data-api/v1/periods` call with a key (machine app)
+- Does the deployed `commitSha` match `origin/main`?
+- Was anything published during or after the pause?
+- Is the deployment currently running, or was it suspended by the billing issue?
+
+**If the deployment was suspended and restarted, say so** — a restart re-runs `runMigrations()` and re-triggers lazy snapshot capture, either of which may have changed production data without anyone acting.
+
+## 3. ⚠ The development bridge — highest priority
+
+Task #150 was cancelled while the **development-only migration bridge was still in place**: month-only primary keys on `plant_configs`, `plant_ingestion_cache`, `plant_source_configs`, `monitoring_config`, plus an empty `plant_monitoring_snapshots` table in dev.
+
+While that bridge exists, **any publish generates DDL that reverts production's composite keys and recreates the dropped legacy table** — silently undoing migrations 028 and 029.
+
+Please report:
+
+- Does the dev database still have month-only primary keys on those four tables?
+- Does the empty `plant_monitoring_snapshots` still exist in dev?
+- **Was anything published while the bridge was in place?** If yes, check production's primary keys immediately and report their current shape.
+
+The repo schema files are correct — composite `primaryKey({…})` and no legacy table — so source gives no warning. Only the dev database can answer this.
+
+## 4. Production data state
+
+Read-only:
+
+- Every row in `plant_month_snapshots`: month, segment, `captured_at`, `captured_commit_sha`, `backfilled`, `plan_status`
+- Row count, versus **2** at my baseline (July PTMT migrated, July Plumbing lazy-captured)
+- **Any snapshot captured after 2026-08-21** — the pause spans a month-close boundary, so August may have closed and been captured automatically
+- Current primary key shape on the four tables named in section 3
+- Migrations recorded in production's `_migrations`
+
+**August 2026 closed at 00:00 UTC on 8 September.** If that has passed, August is now a closed month for both segments and may have been captured — by whatever code was deployed at the time. Those rows are immutable. If they exist, report their `captured_commit_sha` and working-days values, because if they were captured before the outstanding fixes landed they carry the same defects as the July PTMT row.
+
+## 5. Open task state
+
+The following were open, cancelled-but-unresolved, or blocked at my baseline. For each: current state, and whether the underlying work was actually done.
+
+| Task | Subject | Status at baseline |
+|---|---|---|
+| #147 | Segment fall-through to PTMT | archived, **defect reproduced in production** |
+| #148 | Recapture July PTMT snapshot | gate passed, not executed |
+| #149 | Record August plan correction impact | cancelled |
+| #150 | Remove the development bridge | **cancelled, bridge still live** |
+| #153 | Production QA | RELEASE BLOCKED, 4/98 verifier failures |
+| #154 | QA follow-ups | recorded |
+
+For each, state whether the **work** is complete, not whether the **task** is closed. Five tasks were closed or cancelled while their underlying work stayed open; that distinction is where the risk sits.
+
+## 6. The six release blockers
+
+From #153. For each: still present, or fixed?
+
+1. `monitoring.ts:389` — unknown segment falls through and returns PTMT-labelled data
+2. Plumbing parser skips `CPVC PIPE` / `UPVC PIPE` / `SWR PIPE` / `AGRI PIPE`, causing 500s on three validation endpoints and the monitoring dashboard
+3. July Plumbing snapshot `captured_commit_sha = NULL`
+4. PTMT plan PDF 500 after ~41.5 s
+5. Monitoring PDF 503 — believed intentional
+6. Corrective run #101 fixture 404 — stale fixture, not an endpoint fault
+
+And the machine app: is `app.py:7517` still calling `sheets._get_drive_token()` with `sheets` unbound? It raises `NameError`, gets swallowed by `except Exception`, and silently disables staleness warnings on every render.
+
+## 7. Anything else
+
+Was any work done during the pause outside the tasks above — by you, another agent, or a person? Any workspace reset, database restore, or configuration change? If the environment was rebuilt, say what was lost.
+
+---
+
+## Format
+
+Plain answers, section by section. Where you cannot determine something, write "cannot determine" and why — do not infer.
+
+**Nothing is to be fixed, published, migrated or captured on the basis of this report.** I want the state first; the plan follows from it.
+
+The two things I most expect to have moved are section 3 (the bridge, if anything was published) and section 4 (August closing during the pause). Those two are worth checking before the rest.
