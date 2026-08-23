@@ -40,7 +40,11 @@ async function readLastDigestAt(): Promise<Date | null> {
 
 async function writeLastDigestAt(): Promise<void> {
   await pool.query(
-    `UPDATE alert_scheduler SET last_digest_at=now(), updated_at=now() WHERE id=1`,
+    `INSERT INTO alert_scheduler (id, last_digest_at, updated_at)
+     VALUES (1, now(), now())
+     ON CONFLICT (id) DO UPDATE
+       SET last_digest_at = EXCLUDED.last_digest_at,
+           updated_at = EXCLUDED.updated_at`,
   );
   lastRunAt = new Date();
 }

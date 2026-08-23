@@ -92,14 +92,20 @@ async function resolveBase() {
     `INFO  no running api-server found — booting a disposable one on port ${port}`,
   );
 
-  // Prefer pre-built dist/index.mjs (avoids a rebuild conflict with live servers
-  // from earlier guard scripts in the same chain). Build if missing.
+  // Prefer a complete pre-built runtime (avoids a rebuild conflict with live
+  // servers from earlier guard scripts in the same chain). The pino bundling
+  // plugin emits a companion worker that index.mjs loads at startup, so index
+  // alone is not a usable disposable server.
   const distEntry = path.join(apiDir, "dist", "index.mjs");
-  const distExists = await import("node:fs/promises")
-    .then((fs) => fs.access(distEntry).then(() => true, () => false));
+  const workerEntry = path.join(apiDir, "dist", "thread-stream-worker.mjs");
+  const distReady = await import("node:fs/promises").then((fs) =>
+    Promise.all([fs.access(distEntry), fs.access(workerEntry)])
+      .then(() => true)
+      .catch(() => false),
+  );
 
-  if (!distExists) {
-    console.log(`INFO  dist/index.mjs not found — running build first`);
+  if (!distReady) {
+    console.log(`INFO  disposable runtime is incomplete — running build first`);
     const { execSync } = await import("node:child_process");
     try {
       execSync("pnpm run build", { cwd: apiDir, stdio: "inherit" });
