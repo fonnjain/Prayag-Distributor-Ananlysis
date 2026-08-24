@@ -31,7 +31,7 @@
 //   intended signal that the situation has not resolved.
 
 import { pool } from "@workspace/db";
-import { buildDetectionContext } from "./context.js";
+import { buildDetectionContext, getSkuAlertCoverage } from "./context.js";
 import { detectAlerts } from "./detectAlerts.js";
 import type { RawAlert, CalibrationResult, SecHeadMonthRow } from "./types.js";
 import { currentOpenFy } from "../fyAnchors.js";
@@ -433,15 +433,21 @@ export async function runAlertDetection(): Promise<DetectionStats> {
   const fy = currentOpenFy();
   logger.info({ fy }, "[alertDetection] building detection context");
 
-  const ctx = await buildDetectionContext(pool, [fy]);
+  const [ctx, skuCoverage] = await Promise.all([
+    buildDetectionContext(pool, [fy]),
+    getSkuAlertCoverage(pool, fy),
+  ]);
 
   logger.info({ fy }, "[alertDetection] running detection");
-  const result = detectAlerts(ctx, { fy });
+  const result = detectAlerts(ctx, {
+    fy,
+    skuCompleteMonths: skuCoverage.evaluatedMonths,
+  });
 
   const alertCount = result.alerts.length;
   const suppressedCount = result.suppressed.length;
   logger.info(
-    { fy, alerts: alertCount, suppressed: suppressedCount },
+    { fy, alerts: alertCount, suppressed: suppressedCount, skuMonths: skuCoverage.evaluatedMonths },
     "[alertDetection] detection complete — persisting",
   );
 

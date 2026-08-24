@@ -115,6 +115,12 @@ export type DetectAlertsOptions = {
    * For the open FY, pass frozenMonths.get(fy) converted to an array.
    */
   primaryCompleteMonths?: string[];
+  /**
+   * Complete months with distributor-level raw SKU evidence. B3 retailer
+   * stop and S1 destocking signals must use this subset in an open FY; the
+   * other primary-based B/C signals remain governed by primaryCompleteMonths.
+   */
+  skuCompleteMonths?: string[];
   /** Defaults to now. Used by guards (Guard 9) and C5 staleness. */
   nowDate?: Date;
   /**
@@ -156,6 +162,7 @@ export function detectAlerts(
   }
 
   const priorMonths = toPriorYearMonths(primaryCompleteMonths);
+  const skuCompleteMonths = opts.skuCompleteMonths ?? primaryCompleteMonths;
 
   // ── Generate raw alert candidates from all three engines ───────────────────
   const aAlerts = buildCategoryAAlerts(ctx, fy, {
@@ -166,7 +173,7 @@ export function detectAlerts(
     A3_SUSTAINED_MONTHS: cfg.CATEGORY_A_SALESPERSON.A3_SUSTAINED_MONTHS,
   });
 
-  const bAlerts = buildCategoryBAlerts(ctx, fy, primaryCompleteMonths, {
+  const bConfig = {
     B1_REAL_GROWTH_FLOOR_PCT: cfg.CATEGORY_B_DEALERS_RETAILERS.B1_REAL_GROWTH_FLOOR_PCT,
     B2_NOMINAL_DECLINE_FLOOR_PCT: cfg.CATEGORY_B_DEALERS_RETAILERS.B2_NOMINAL_DECLINE_FLOOR_PCT,
     B2_SUSTAINED_PERIODS: cfg.CATEGORY_B_DEALERS_RETAILERS.B2_SUSTAINED_PERIODS,
@@ -181,7 +188,15 @@ export function detectAlerts(
       DIRECT_DEALER_RUPEES: cfg.MATERIALITY_FLOORS.DIRECT_DEALER_RUPEES,
       RETAILER_RUPEES: cfg.MATERIALITY_FLOORS.RETAILER_RUPEES,
     },
-  });
+  };
+  // B3 is based on retailer sell-through, so it must never treat a
+  // frozen-primary month without raw SKU rows as a zero-buying month. Build it
+  // against the same SKU-qualified window that drives S1; all other B codes
+  // keep the normal primary-complete window.
+  const primaryBAlerts = buildCategoryBAlerts(ctx, fy, primaryCompleteMonths, bConfig);
+  const skuB3Alerts = buildCategoryBAlerts(ctx, fy, skuCompleteMonths, bConfig)
+    .filter((alert) => alert.code === "B3");
+  const bAlerts = [...primaryBAlerts.filter((alert) => alert.code !== "B3"), ...skuB3Alerts];
 
   const cAlerts = buildCategoryCAlerts(ctx, fy, primaryCompleteMonths, {
     C1_CONCENTRATION_SHARE_PCT: cfg.CATEGORY_C_TERRITORY_SEGMENT.C1_CONCENTRATION_SHARE_PCT,
@@ -197,7 +212,7 @@ export function detectAlerts(
     C6_ACTIVE: cfg.CATEGORY_C_TERRITORY_SEGMENT.C6_ACTIVE,
   }, c5AsOfDate);
 
-  const sAlerts = buildCategorySAlerts(ctx, fy, primaryCompleteMonths, {
+  const sAlerts = buildCategorySAlerts(ctx, fy, skuCompleteMonths, {
     S1_CONSECUTIVE_ZERO_MONTHS: cfg.CATEGORY_S_SUPPLY.S1_CONSECUTIVE_ZERO_MONTHS,
     S1_MIN_SECONDARY_RUPEES: cfg.CATEGORY_S_SUPPLY.S1_MIN_SECONDARY_RUPEES,
   });
@@ -211,6 +226,9 @@ export function detectAlerts(
   const effectiveCurrentMonths: Set<string> = isFyClosed(fy, nowDate)
     ? new Set(fyMonthLabels(fy))
     : new Set(primaryCompleteMonths);
+  const effectiveSkuCurrentMonths: Set<string> = isFyClosed(fy, nowDate)
+    ? new Set(fyMonthLabels(fy))
+    : new Set(skuCompleteMonths);
   const effectivePriorMonths: Set<string> = isFyClosed(priorFy, nowDate)
     ? new Set(fyMonthLabels(priorFy))
     : new Set([...(ctx.frozenMonths.get(priorFy) ?? [])]);
@@ -222,9 +240,12 @@ export function detectAlerts(
   const suppressedByGuard: Record<number, number> = {};
 
   for (const alert of allCandidates) {
+    const effectiveMonths = alert.code === "B3" || alert.code === "S1"
+      ? effectiveSkuCurrentMonths
+      : effectiveCurrentMonths;
     const result = runGuards(
       alert, ctx, fy, priorFy, nowDate, minWorkingDays,
-      effectiveCurrentMonths, effectivePriorMonths,
+      effectiveMonths, effectivePriorMonths,
     );
     if (result.pass) {
       passedAlerts.push(alert);
