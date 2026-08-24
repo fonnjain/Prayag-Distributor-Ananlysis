@@ -1,11 +1,10 @@
 import { Router, raw, type Request, type Response } from "express";
 import crypto from "node:crypto";
-import { execFile as execFileCallback } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
+import * as unzipper from "unzipper";
 import { isAdminToken } from "../lib/adminAuth.js";
 import {
   assertApprovedJul26PsCode3Archive,
@@ -17,7 +16,6 @@ import {
 import { logger } from "../lib/logger.js";
 
 const router = Router();
-const execFile = promisify(execFileCallback);
 const DRY_RUN_TTL_MS = 30 * 60_000;
 const SOURCE_DIR_NAME = "PSCode 3 NEW REPORTS JULY2026";
 const MAX_ARCHIVE_BYTES = 10 * 1024 * 1024;
@@ -53,42 +51,33 @@ function safeZipEntry(entry: string): boolean {
   return !normal.startsWith("/") && !normal.includes("\0") && !normal.split("/").includes("..");
 }
 
-function assertSafeJulyArchiveMetadata(listOutput: string, metadataOutput: string): void {
-  const entryNames = listOutput.split(/\r?\n/).filter(Boolean);
-  const metadata = metadataOutput
-    .split(/\r?\n/)
-    .map((line) => line.trim().split(/\s+/))
-    .filter((parts) => parts[0]?.startsWith("-"))
-    .map((parts) => ({
-      mode: parts[0]!,
-      uncompressedBytes: Number(parts[3]),
-      compressedBytes: Number(parts[5]),
-      name: parts.slice(9).join(" "),
-    }));
+function assertSafeJulyArchiveMetadata(metadata: unzipper.File[]): void {
   const expectedPrefix = `${SOURCE_DIR_NAME}/PSCode_3_New_Report `;
 
-  if (entryNames.length !== 163 || metadata.length !== 163 || entryNames.length !== metadata.length) {
+  if (metadata.length !== 163) {
     throw new Error("Archive must contain exactly the 163 approved July workbook entries.");
   }
   let totalUncompressed = 0;
   for (const entry of metadata) {
+    const unixFileType = entry.externalFileAttributes >>> 16 & 0o170000;
     if (
-      !entry.mode.startsWith("-") ||
-      !Number.isFinite(entry.uncompressedBytes) ||
-      !Number.isFinite(entry.compressedBytes) ||
-      entry.uncompressedBytes < 0 ||
-      entry.compressedBytes < 0 ||
-      entry.uncompressedBytes > MAX_ENTRY_BYTES ||
-      !safeZipEntry(entry.name) ||
-      !entry.name.startsWith(expectedPrefix) ||
-      !entry.name.endsWith(".xlsx")
+      entry.type !== "File" ||
+      (unixFileType !== 0 && unixFileType !== 0o100000) ||
+      !Number.isFinite(entry.uncompressedSize) ||
+      !Number.isFinite(entry.compressedSize) ||
+      entry.uncompressedSize < 0 ||
+      entry.compressedSize < 0 ||
+      entry.uncompressedSize > MAX_ENTRY_BYTES ||
+      !safeZipEntry(entry.path) ||
+      !entry.path.startsWith(expectedPrefix) ||
+      !entry.path.endsWith(".xlsx")
     ) {
       throw new Error("Archive contains an unsupported file type, path, link, or oversized workbook.");
     }
-    if (entry.compressedBytes > 0 && entry.uncompressedBytes / entry.compressedBytes > 100) {
+    if (entry.compressedSize > 0 && entry.uncompressedSize / entry.compressedSize > 100) {
       throw new Error("Archive contains an excessively compressed workbook.");
     }
-    totalUncompressed += entry.uncompressedBytes;
+    totalUncompressed += entry.uncompressedSize;
   }
   if (totalUncompressed > MAX_EXTRACTED_BYTES) {
     throw new Error("Archive expands beyond the approved July source size limit.");
@@ -100,24 +89,10 @@ async function withExtractedArchive<T>(source: Buffer, run: (directory: string) 
     throw new Error("Archive exceeds the 10 MB July source limit.");
   }
   const workDir = await mkdtemp(path.join(tmpdir(), "pscode3-jul26-"));
-  const archivePath = path.join(workDir, "source.zip");
   try {
-    await writeFile(archivePath, source, { mode: 0o600 });
-    const [{ stdout: listOutput }, { stdout: metadataOutput }] = await Promise.all([
-      execFile("unzip", ["-Z", "-1", archivePath], {
-        timeout: 20_000,
-        maxBuffer: 2_000_000,
-      }),
-      execFile("unzip", ["-Z", "-l", archivePath], {
-        timeout: 20_000,
-        maxBuffer: 2_000_000,
-      }),
-    ]);
-    assertSafeJulyArchiveMetadata(String(listOutput), String(metadataOutput));
-    await execFile("unzip", ["-qq", archivePath, "-d", workDir], {
-      timeout: 20_000,
-      maxBuffer: 2_000_000,
-    });
+    const archive = await unzipper.Open.buffer(source);
+    assertSafeJulyArchiveMetadata(archive.files);
+    await archive.extract({ path: workDir });
     const directory = path.join(workDir, SOURCE_DIR_NAME);
     if (!existsSync(directory)) {
       throw new Error(`Archive must contain the '${SOURCE_DIR_NAME}' directory.`);
