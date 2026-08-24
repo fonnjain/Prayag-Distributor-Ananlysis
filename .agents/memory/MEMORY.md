@@ -149,3 +149,4 @@
 - [Coverage drift review contract](coverage-drift-review-contract.md) — drift endpoints use HTTP 409 with full read-only evidence; clients must render it, not treat it as a fetch failure.
 - [Open-FY coverage drift policy](open-fy-coverage-drift-policy.md) — live value-only changes are benign; structural changes alert, while frozen FYs remain strict.
 - [People relationship resolutions](people-relationship-resolutions.md) — manual registry→People links are effective-dated, hash-bound, audit-only changes; HR source text and historical fact tables stay immutable.
+- [Publish/schema replay](publish-schema-ledger-replay.md) — Publish may create schema objects before custom migration ledger entries; migration constraints must be replay-safe.
