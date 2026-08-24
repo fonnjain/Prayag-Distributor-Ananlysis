@@ -34,6 +34,8 @@ export const secondarySkuLines = pgTable(
     lineUid: text("line_uid").primaryKey(),
     fy: text("fy").notNull(),
     monthLabel: text("month_label").notNull(),
+    frozenAt: timestamp("frozen_at", { withTimezone: true }),
+    sourceFile: text("source_file"),
     headRaw: text("head_raw"),             // Team Member Name as in sheet
     headCanon: text("head_canon"),          // normalised key (lowercase, no special chars)
     stateRaw: text("state_raw"),            // not in source; may be null
@@ -56,6 +58,7 @@ export const secondarySkuLines = pgTable(
   },
   (t) => [
     index("sec_sku_line_fy_month_idx").on(t.fy, t.monthLabel),
+    index("sec_sku_line_frozen_at_idx").on(t.frozenAt),
     index("sec_sku_line_fy_retailer_idx").on(t.fy, t.retailer),
     index("sec_sku_line_fy_dealer_id_idx").on(t.fy, t.dealerId),
     index("sec_sku_line_fy_dist_idx").on(t.fy, t.distributor),

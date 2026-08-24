@@ -1,11 +1,13 @@
 import ExcelJS from "exceljs";
 import crypto from "node:crypto";
 import path from "node:path";
-import { sql } from "drizzle-orm";
-import { db, pool, secondarySkuLines, type InsertSecSkuLine } from "@workspace/db";
+import { and, eq, sql } from "drizzle-orm";
+import { db, pool, registerMonthState, secondarySkuLines, type InsertSecSkuLine } from "@workspace/db";
 import { normSecKey } from "../mgmt/names.js";
 import { canonGroupFromMap } from "../sku/catalogue.js";
 import { assertSkuWipeGuard } from "../sku/skuWipeGuard.js";
+import { isMonthFrozen, monthFreezeAt } from "../registers/monthlyReplace.js";
+import { logger } from "../logger.js";
 
 export const AUG26_PRODUCTWISE = {
   fy: "2026-27",
@@ -17,6 +19,8 @@ export const AUG26_PRODUCTWISE = {
 /** SHA-256 of the reviewed 1–19 Aug-26 Product-Wise CRM export. */
 export const AUG26_PRODUCTWISE_APPROVED_SHA256 =
   "9b1d0de5de753eb413055196cf9d627b91628cda87b6b3720f697834b6be42d2";
+export const AUG26_PRODUCTWISE_SOURCE_FILE =
+  "Product-Wise-Secondary-Order-Report_29_6569_19-Aug-2026_1787135138176.xlsx";
 
 const EXPECTED_HEADERS = [
   "Date",
@@ -46,6 +50,7 @@ const EXPECTED_HEADERS = [
 type ProductWiseRow = {
   orderId: string;
   orderDate: Date;
+  monthLabel: string;
   salesUserName: string;
   retailer: string;
   dealerId: string;
@@ -85,12 +90,14 @@ export type PreparedProductWiseAug26Load = {
   rows: InsertSecSkuLine[];
   controls: ProductWiseAug26Controls;
 };
+export type PreparedProductWiseRangeLoad = PreparedProductWiseAug26Load;
 
 export type ProductWiseAug26LoadProvenance = {
   sourceNote: string;
   uploadedBy: string;
   uploadedAt: string;
   archiveSha256: string;
+  sourceFile: string;
 };
 
 export type ProductWiseAug26RecordedProvenance = ProductWiseAug26LoadProvenance & {
@@ -102,6 +109,62 @@ export type ProductWiseAug26RecordedProvenance = ProductWiseAug26LoadProvenance 
 };
 
 type MonthSummary = { monthLabel: string; rows: number; net: number };
+
+export type ProductWiseMonthFreezeDecision = {
+  month: string;
+  frozen: boolean;
+  freezeAt: Date | null;
+  frozenAt: Date | null;
+};
+
+/** Product-Wise never owns a second freeze clock: state is the shared
+ * register_month_state row, with the shared date calculation only providing
+ * the first transition when that state row has not been created yet. */
+export function productWiseMonthFreezeDecision(
+  month: string,
+  sharedFrozenAt: Date | null,
+  now: Date = new Date(),
+): ProductWiseMonthFreezeDecision {
+  const freezeAt = monthFreezeAt(month);
+  if (sharedFrozenAt != null) {
+    return { month, frozen: true, freezeAt, frozenAt: sharedFrozenAt };
+  }
+  if (isMonthFrozen(month, now)) {
+    return { month, frozen: true, freezeAt, frozenAt: now };
+  }
+  return { month, frozen: false, freezeAt, frozenAt: null };
+}
+
+/** Small deterministic seam used by the transactional range loader and its
+ * overlap test. `rowsAfter` models the two permitted outcomes: unchanged for a
+ * freeze skip, or an exact full replacement for an open month. */
+export function productWiseRangeMonthPlan(input: {
+  month: string;
+  incomingRows: number;
+  rowsBefore: number;
+  sharedFrozenAt: Date | null;
+  now: Date;
+}): {
+  action: "loaded" | "frozen-skipped";
+  rowsBefore: number;
+  rowsAfter: number;
+  freezeAt: Date | null;
+} {
+  const freeze = productWiseMonthFreezeDecision(input.month, input.sharedFrozenAt, input.now);
+  return freeze.frozen
+    ? {
+      action: "frozen-skipped",
+      rowsBefore: input.rowsBefore,
+      rowsAfter: input.rowsBefore,
+      freezeAt: freeze.freezeAt,
+    }
+    : {
+      action: "loaded",
+      rowsBefore: input.rowsBefore,
+      rowsAfter: input.incomingRows,
+      freezeAt: null,
+    };
+}
 
 function text(value: unknown): string | null {
   if (value == null) return null;
@@ -169,7 +232,10 @@ function normalisedRetailerName(value: string): string {
  * It accepts only the established CRM column order and records every reason a
  * row cannot enter the existing raw SKU shape.
  */
-export async function prepareProductWiseAug26Load(filePath: string): Promise<PreparedProductWiseAug26Load> {
+export async function prepareProductWiseAug26Load(
+  filePath: string,
+  options: { allowRange?: boolean } = {},
+): Promise<PreparedProductWiseAug26Load> {
   const workbook = new ExcelJS.stream.xlsx.WorkbookReader(filePath, {
     entries: "emit",
     sharedStrings: "cache",
@@ -225,7 +291,12 @@ export async function prepareProductWiseAug26Load(filePath: string): Promise<Pre
         rowsRejected++;
         continue;
       }
-      if (toMonthLabel(orderDate) !== AUG26_PRODUCTWISE.month) {
+       const monthLabel = toMonthLabel(orderDate);
+       const isWithinFy = (
+         (monthLabel.endsWith("-26") && ["Aug", "Sep", "Oct", "Nov", "Dec"].some((m) => monthLabel.startsWith(m)))
+         || (monthLabel.endsWith("-27") && ["Jan", "Feb", "Mar"].some((m) => monthLabel.startsWith(m)))
+       );
+       if ((!options.allowRange && monthLabel !== AUG26_PRODUCTWISE.month) || (options.allowRange && !isWithinFy)) {
         wrongMonth++;
         rowsRejected++;
         continue;
@@ -250,6 +321,7 @@ export async function prepareProductWiseAug26Load(filePath: string): Promise<Pre
       parsed.push({
         orderId,
         orderDate,
+        monthLabel,
         salesUserName,
         retailer,
         dealerId,
@@ -267,7 +339,7 @@ export async function prepareProductWiseAug26Load(filePath: string): Promise<Pre
   }
 
   if (!headerSeen) throw new Error("No Product-Wise header row found");
-  if (parsed.length === 0) throw new Error("Product-Wise report contains no valid August rows");
+  if (parsed.length === 0) throw new Error(`Product-Wise report contains no valid ${options.allowRange ? "FY2026-27" : "August"} rows`);
 
   const occurrences = new Map<string, number>();
   const rows: InsertSecSkuLine[] = parsed.map((row) => {
@@ -278,13 +350,13 @@ export async function prepareProductWiseAug26Load(filePath: string): Promise<Pre
       lineUid: sha1([
         AUG26_PRODUCTWISE.skuSource,
         AUG26_PRODUCTWISE.fy,
-        AUG26_PRODUCTWISE.month,
+         row.monthLabel,
         row.orderId,
         row.itemCode,
         String(row.occurrence),
       ]),
       fy: AUG26_PRODUCTWISE.fy,
-      monthLabel: AUG26_PRODUCTWISE.month,
+       monthLabel: row.monthLabel,
       headRaw: row.salesUserName,
       headCanon: normSecKey(row.salesUserName),
       stateRaw: null,
@@ -334,6 +406,21 @@ export async function prepareProductWiseAug26Load(filePath: string): Promise<Pre
   };
 }
 
+/** Parser for manual Product-Wise range exports. It keeps the reviewed CRM
+ * shape and FY boundary, but permits the expected frozen/open overlap. */
+export async function prepareProductWiseRangeLoad(filePath: string): Promise<PreparedProductWiseRangeLoad> {
+  return prepareProductWiseAug26Load(filePath, { allowRange: true });
+}
+
+export function assertProductWiseRangeControls(prepared: PreparedProductWiseRangeLoad): void {
+  const c = prepared.controls;
+  if (c.rows === 0 || c.rowsRejected > 0 || c.months.length === 0) {
+    throw new Error(
+      `Product-Wise range controls refused: rows=${c.rows}; rowsRejected=${c.rowsRejected}; months=${c.months.join(",")}`,
+    );
+  }
+}
+
 export function assertApprovedAug26ProductWiseArchive(sha256: string): void {
   if (sha256 !== AUG26_PRODUCTWISE_APPROVED_SHA256) {
     throw new Error("This route accepts only the reviewed 1–19 Aug-26 Product-Wise workbook.");
@@ -366,12 +453,14 @@ export function assertProductWiseAug26Controls(prepared: PreparedProductWiseAug2
 }
 
 export function assertProductWiseAug26UploadMetadata(
-  metadata: Pick<ProductWiseAug26LoadProvenance, "sourceNote" | "uploadedBy">,
+  metadata: Pick<ProductWiseAug26LoadProvenance, "sourceNote" | "uploadedBy" | "sourceFile">,
 ): void {
   if (!metadata.sourceNote.trim()) throw new Error("source_note is required");
   if (metadata.sourceNote.length > 2_000) throw new Error("source_note must be 2,000 characters or fewer");
   if (!metadata.uploadedBy.trim()) throw new Error("uploaded_by is required");
   if (metadata.uploadedBy.length > 200) throw new Error("uploaded_by must be 200 characters or fewer");
+  if (!metadata.sourceFile.trim()) throw new Error("source_file is required");
+  if (metadata.sourceFile.length > 500) throw new Error("source_file must be 500 characters or fewer");
 }
 
 export function toProductWiseAug26RecordedProvenance(
@@ -401,8 +490,14 @@ async function skuMonthSummaries(): Promise<MonthSummary[]> {
 
 export type ProductWiseAug26CommitResult = {
   skuMonths: MonthSummary[];
-  continuity: ProductWiseAug26Continuity;
+  continuity: ProductWiseAug26Continuity | null;
   provenance: ProductWiseAug26RecordedProvenance;
+  month: {
+    action: "loaded" | "frozen-skipped";
+    rowsBefore: number | null;
+    rowsWritten: number | null;
+    freezeAt: string | null;
+  };
 };
 
 export type ProductWiseAug26Continuity = {
@@ -496,6 +591,7 @@ async function assertProductWiseAug26Continuity(
 export async function commitProductWiseAug26Load(
   prepared: PreparedProductWiseAug26Load,
   provenance: ProductWiseAug26LoadProvenance,
+  options: { now?: Date } = {},
 ): Promise<ProductWiseAug26CommitResult> {
   assertProductWiseAug26Controls(prepared);
   assertProductWiseAug26UploadMetadata(provenance);
@@ -503,8 +599,64 @@ export async function commitProductWiseAug26Load(
   if (!/^[a-f0-9]{64}$/.test(provenance.archiveSha256)) throw new Error("archiveSha256 must be a lowercase SHA-256 digest");
 
   let continuity: ProductWiseAug26Continuity | null = null;
+  let monthResult: ProductWiseAug26CommitResult["month"] = {
+    action: "loaded", rowsBefore: null, rowsWritten: null, freezeAt: null,
+  };
+  const now = options.now ?? new Date();
   await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('productwise-aug26-load'))`);
+    const sharedState = await tx.select({ frozenAt: registerMonthState.frozenAt })
+      .from(registerMonthState)
+      .where(and(
+        eq(registerMonthState.fy, AUG26_PRODUCTWISE.fy),
+        eq(registerMonthState.monthLabel, AUG26_PRODUCTWISE.month),
+      ));
+    const freeze = productWiseMonthFreezeDecision(
+      AUG26_PRODUCTWISE.month,
+      sharedState[0]?.frozenAt ?? null,
+      now,
+    );
+    if (freeze.frozen) {
+      const frozenAt = freeze.frozenAt!;
+      if (sharedState[0]?.frozenAt == null) {
+        await tx.insert(registerMonthState)
+          .values({
+            fy: AUG26_PRODUCTWISE.fy,
+            monthLabel: AUG26_PRODUCTWISE.month,
+            frozenAt,
+          })
+          .onConflictDoUpdate({
+            target: [registerMonthState.fy, registerMonthState.monthLabel],
+            set: { frozenAt },
+          });
+      }
+      const existing = await tx.execute<{ rows: string }>(sql`
+        SELECT COUNT(*)::text AS rows
+          FROM secondary_sku_line
+         WHERE fy = ${AUG26_PRODUCTWISE.fy}
+           AND month_label = ${AUG26_PRODUCTWISE.month}
+           AND source = ${AUG26_PRODUCTWISE.skuSource}
+      `);
+      await tx.execute(sql`
+        UPDATE secondary_sku_line
+           SET frozen_at = ${frozenAt}
+         WHERE fy = ${AUG26_PRODUCTWISE.fy}
+           AND month_label = ${AUG26_PRODUCTWISE.month}
+           AND source = ${AUG26_PRODUCTWISE.skuSource}
+           AND frozen_at IS NULL
+      `);
+      monthResult = {
+        action: "frozen-skipped",
+        rowsBefore: Number(existing.rows[0]?.rows ?? 0),
+        rowsWritten: null,
+        freezeAt: freeze.freezeAt?.toISOString() ?? null,
+      };
+      logger.warn(
+        { fy: AUG26_PRODUCTWISE.fy, month: AUG26_PRODUCTWISE.month, freezeAt: monthResult.freezeAt },
+        "[productwise] frozen month skipped; upload rows were not read into the register",
+      );
+      return;
+    }
     const targetSources = await tx.execute<{ source: string }>(sql`
       SELECT DISTINCT source
         FROM secondary_sku_line
@@ -530,24 +682,41 @@ export async function commitProductWiseAug26Load(
     });
     continuity = await assertProductWiseAug26Continuity(tx as any, prepared);
 
+    const before = await tx.execute<{ rows: string }>(sql`
+      SELECT COUNT(*)::text AS rows
+        FROM secondary_sku_line
+       WHERE fy = ${AUG26_PRODUCTWISE.fy}
+         AND month_label = ${AUG26_PRODUCTWISE.month}
+         AND source = ${AUG26_PRODUCTWISE.skuSource}
+    `);
     await tx.execute(sql`
       DELETE FROM secondary_sku_line
        WHERE fy = ${AUG26_PRODUCTWISE.fy} AND month_label = ${AUG26_PRODUCTWISE.month}
     `);
     for (let offset = 0; offset < prepared.rows.length; offset += 1_000) {
-      await tx.insert(secondarySkuLines).values(prepared.rows.slice(offset, offset + 1_000));
+      await tx.insert(secondarySkuLines).values(prepared.rows.slice(offset, offset + 1_000).map((row) => ({
+        ...row,
+        frozenAt: null,
+        sourceFile: provenance.sourceFile,
+      })));
     }
     await tx.execute(sql`
       INSERT INTO secondary_sku_load_provenance
         (fy, month_label, source_note, uploaded_by, uploaded_at,
-         archive_sha256, row_count, net_amount, source, value_basis)
+         archive_sha256, row_count, net_amount, source, value_basis, source_file)
       VALUES
         (${AUG26_PRODUCTWISE.fy}, ${AUG26_PRODUCTWISE.month},
          ${provenance.sourceNote.trim()}, ${provenance.uploadedBy.trim()},
          ${new Date(provenance.uploadedAt)}, ${provenance.archiveSha256},
          ${prepared.controls.rows}, ${prepared.controls.net},
-         ${AUG26_PRODUCTWISE.skuSource}, ${AUG26_PRODUCTWISE.valueBasis})
+          ${AUG26_PRODUCTWISE.skuSource}, ${AUG26_PRODUCTWISE.valueBasis}, ${provenance.sourceFile})
     `);
+    monthResult = {
+      action: "loaded",
+      rowsBefore: Number(before.rows[0]?.rows ?? 0),
+      rowsWritten: prepared.rows.length,
+      freezeAt: null,
+    };
   });
 
   const skuMonths = await skuMonthSummaries();
@@ -560,9 +729,187 @@ export async function commitProductWiseAug26Load(
   }
   return {
     skuMonths,
-    continuity: continuity!,
+    continuity,
     provenance: toProductWiseAug26RecordedProvenance(provenance, prepared.controls),
+    month: monthResult,
   };
+}
+
+export type ProductWiseMonthFreezeStatus = {
+  month: string;
+  source: string;
+  rows: number;
+  frozen: boolean;
+  frozenAt: string | null;
+  stateFrozenAt: string | null;
+  sourceFiles: string[];
+};
+
+export type ProductWiseRangeMonthResult = {
+  month: string;
+  action: "loaded" | "frozen-skipped";
+  incomingRows: number;
+  rowsBefore: number;
+  rowsWritten: number | null;
+  freezeAt: string | null;
+};
+
+/**
+ * Controlled loader for future manual Product-Wise range exports. Each month
+ * is independently inspected under one transaction lock: an old range row
+ * cannot overwrite, merge with, or duplicate a permanently frozen month while
+ * the open portion of the very same workbook can still replace normally.
+ */
+export async function commitProductWiseRangeLoad(
+  prepared: PreparedProductWiseRangeLoad,
+  provenance: ProductWiseAug26LoadProvenance,
+  options: { now?: Date } = {},
+): Promise<{ months: ProductWiseRangeMonthResult[]; skuMonths: MonthSummary[] }> {
+  assertProductWiseRangeControls(prepared);
+  assertProductWiseAug26UploadMetadata(provenance);
+  if (!Number.isFinite(Date.parse(provenance.uploadedAt))) throw new Error("uploadedAt must be a valid ISO timestamp");
+  if (!/^[a-f0-9]{64}$/.test(provenance.archiveSha256)) throw new Error("archiveSha256 must be a lowercase SHA-256 digest");
+
+  const now = options.now ?? new Date();
+  const byMonth = new Map<string, InsertSecSkuLine[]>();
+  for (const row of prepared.rows) {
+    const rows = byMonth.get(row.monthLabel);
+    if (rows) rows.push(row);
+    else byMonth.set(row.monthLabel, [row]);
+  }
+  const results: ProductWiseRangeMonthResult[] = [];
+
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('productwise-range-load'))`);
+    for (const [month, incoming] of [...byMonth.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      const sharedState = await tx.select({ frozenAt: registerMonthState.frozenAt })
+        .from(registerMonthState)
+        .where(and(
+          eq(registerMonthState.fy, AUG26_PRODUCTWISE.fy),
+          eq(registerMonthState.monthLabel, month),
+        ));
+      const freeze = productWiseMonthFreezeDecision(month, sharedState[0]?.frozenAt ?? null, now);
+      const before = await tx.execute<{ rows: string }>(sql`
+        SELECT COUNT(*)::text AS rows
+          FROM secondary_sku_line
+         WHERE fy = ${AUG26_PRODUCTWISE.fy}
+           AND month_label = ${month}
+           AND source = ${AUG26_PRODUCTWISE.skuSource}
+      `);
+      const rowsBefore = Number(before.rows[0]?.rows ?? 0);
+      const plan = productWiseRangeMonthPlan({
+        month,
+        incomingRows: incoming.length,
+        rowsBefore,
+        sharedFrozenAt: sharedState[0]?.frozenAt ?? null,
+        now,
+      });
+
+      if (plan.action === "frozen-skipped") {
+        const frozenAt = freeze.frozenAt!;
+        if (sharedState[0]?.frozenAt == null) {
+          await tx.insert(registerMonthState)
+            .values({ fy: AUG26_PRODUCTWISE.fy, monthLabel: month, frozenAt })
+            .onConflictDoUpdate({
+              target: [registerMonthState.fy, registerMonthState.monthLabel],
+              set: { frozenAt },
+            });
+        }
+        await tx.execute(sql`
+          UPDATE secondary_sku_line
+             SET frozen_at = ${frozenAt}
+           WHERE fy = ${AUG26_PRODUCTWISE.fy}
+             AND month_label = ${month}
+             AND source = ${AUG26_PRODUCTWISE.skuSource}
+             AND frozen_at IS NULL
+        `);
+        const freezeAt = freeze.freezeAt?.toISOString() ?? null;
+        logger.warn(
+          { fy: AUG26_PRODUCTWISE.fy, month, freezeAt, incomingRows: incoming.length },
+          "[productwise] frozen month skipped from manual range upload",
+        );
+        results.push({
+          month, action: "frozen-skipped", incomingRows: incoming.length,
+          rowsBefore: plan.rowsBefore, rowsWritten: null, freezeAt,
+        });
+        continue;
+      }
+
+      const foreign = await tx.execute<{ source: string }>(sql`
+        SELECT DISTINCT source
+          FROM secondary_sku_line
+         WHERE fy = ${AUG26_PRODUCTWISE.fy}
+           AND month_label = ${month}
+           AND source <> ${AUG26_PRODUCTWISE.skuSource}
+      `);
+      if (foreign.rows[0]) {
+        throw new Error(`${month} already contains source '${foreign.rows[0].source}', so Product-Wise will not overwrite it.`);
+      }
+      await tx.execute(sql`
+        DELETE FROM secondary_sku_line
+         WHERE fy = ${AUG26_PRODUCTWISE.fy}
+           AND month_label = ${month}
+           AND source = ${AUG26_PRODUCTWISE.skuSource}
+      `);
+      for (let offset = 0; offset < incoming.length; offset += 1_000) {
+        await tx.insert(secondarySkuLines).values(incoming.slice(offset, offset + 1_000).map((row) => ({
+          ...row,
+          frozenAt: null,
+          sourceFile: provenance.sourceFile,
+        })));
+      }
+      const net = incoming.reduce((sum, row) => sum + Number(row.netAmount ?? 0), 0);
+      await tx.execute(sql`
+        INSERT INTO secondary_sku_load_provenance
+          (fy, month_label, source_note, uploaded_by, uploaded_at,
+           archive_sha256, row_count, net_amount, source, value_basis, source_file)
+        VALUES
+          (${AUG26_PRODUCTWISE.fy}, ${month}, ${provenance.sourceNote.trim()},
+           ${provenance.uploadedBy.trim()}, ${new Date(provenance.uploadedAt)},
+           ${provenance.archiveSha256}, ${incoming.length}, ${net},
+           ${AUG26_PRODUCTWISE.skuSource}, ${AUG26_PRODUCTWISE.valueBasis}, ${provenance.sourceFile})
+      `);
+      results.push({
+        month, action: "loaded", incomingRows: incoming.length,
+        rowsBefore: plan.rowsBefore, rowsWritten: plan.rowsAfter, freezeAt: null,
+      });
+    }
+  });
+  return { months: results, skuMonths: await skuMonthSummaries() };
+}
+
+export async function getProductWiseMonthFreezeStatus(): Promise<ProductWiseMonthFreezeStatus[]> {
+  const result = await pool.query<{
+    month_label: string;
+    source: string;
+    rows: string;
+    frozen_at: string | null;
+    state_frozen_at: string | null;
+    source_files: string[] | null;
+  }>(
+    `SELECT ssl.month_label,
+            ssl.source,
+            COUNT(*)::text AS rows,
+            CASE WHEN COUNT(*) FILTER (WHERE ssl.frozen_at IS NULL) = 0 THEN MIN(ssl.frozen_at)::text ELSE NULL END AS frozen_at,
+            rms.frozen_at::text AS state_frozen_at,
+            ARRAY_REMOVE(ARRAY_AGG(DISTINCT ssl.source_file), NULL) AS source_files
+       FROM secondary_sku_line ssl
+       LEFT JOIN register_month_state rms
+         ON rms.fy = ssl.fy AND rms.month_label = ssl.month_label
+      WHERE ssl.fy = $1
+      GROUP BY ssl.month_label, ssl.source, rms.frozen_at
+      ORDER BY MIN(TO_DATE(ssl.month_label, 'Mon-YY')), ssl.source`,
+    [AUG26_PRODUCTWISE.fy],
+  );
+  return result.rows.map((row) => ({
+    month: row.month_label,
+    source: row.source,
+    rows: Number(row.rows),
+    frozen: row.frozen_at != null,
+    frozenAt: row.frozen_at,
+    stateFrozenAt: row.state_frozen_at,
+    sourceFiles: row.source_files ?? [],
+  }));
 }
 
 export async function getLatestProductWiseAug26LoadProvenance(): Promise<ProductWiseAug26RecordedProvenance | null> {
@@ -576,9 +923,10 @@ export async function getLatestProductWiseAug26LoadProvenance(): Promise<Product
     row_count: string;
     net_amount: string;
     value_basis: string;
+    source_file: string | null;
   }>(
     `SELECT fy, month_label, source_note, uploaded_by, uploaded_at::text,
-            archive_sha256, row_count, net_amount::text, value_basis
+            archive_sha256, row_count, net_amount::text, value_basis, source_file
        FROM secondary_sku_load_provenance
       WHERE fy = $1 AND month_label = $2 AND source = $3
       ORDER BY uploaded_at DESC, id DESC
@@ -592,6 +940,7 @@ export async function getLatestProductWiseAug26LoadProvenance(): Promise<Product
     uploadedBy: row.uploaded_by,
     uploadedAt: row.uploaded_at,
     archiveSha256: row.archive_sha256,
+    sourceFile: row.source_file ?? "unknown",
     fy: row.fy,
     month: row.month_label,
     rows: Number(row.row_count),

@@ -16,15 +16,15 @@
 //      If the sheet holds two identical rows, both are written.
 //      Acceptance: rows written equals rows read, exactly.
 //
-// FREEZE RULE: a month freezes permanently at 00:00 UTC on the 8th of the
-// following month (grace window: the 1st through the 7th inclusive)
+// FREEZE RULE: a month freezes permanently at 00:00 UTC on the 7th of the
+// following month, derived from the load date and shared across register sources.
 // (seven days of grace for late entries). Derived from the clock, never a
 // config list. A frozen month is skipped entirely — no read, no write. Its row
 // count and amount total are recorded once at freeze time and asserted on
 // startup via assertMonthAnchors().
 
 import { and, eq, sql as dsql } from "drizzle-orm";
-import { db, saleLines, registerMonthState, type InsertSaleLine } from "@workspace/db";
+import { db, saleLines, secondarySkuLines, registerMonthState, type InsertSaleLine } from "@workspace/db";
 import { allowDelete } from "../deleteGuard.js";
 import { logger } from "../logger.js";
 
@@ -41,11 +41,9 @@ const MONTH_INDEX: Record<string, number> = {
   Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
 };
 
-/** UTC instant at which a month label like "Jul-26" freezes: START OF THE 8TH
- *  of the following month. Seven days of grace from the 1st means the 1st
- *  through the 7th INCLUSIVE — freezing at 00:00 on the 7th (the original
- *  implementation) gave every month only six grace days and locked July 2026
- *  while it was still inside its edit window.
+/** UTC instant at which a month label like "Jul-26" freezes: START OF THE 7TH
+ *  of the following month. This is the single freeze clock shared by all
+ *  register loaders.
  *  Null for unparseable labels (they never freeze). */
 export function monthFreezeAt(monthLabel: string): Date | null {
   const m = /^([A-Z][a-z]{2})-(\d{2})$/.exec(monthLabel);
@@ -53,8 +51,8 @@ export function monthFreezeAt(monthLabel: string): Date | null {
   const mon = MONTH_INDEX[m[1]];
   if (mon === undefined) return null;
   const year = 2000 + parseInt(m[2], 10);
-  // Start of the 8th of the following month, midnight UTC (grace: 1st–7th).
-  return new Date(Date.UTC(mon === 11 ? year + 1 : year, (mon + 1) % 12, 8));
+  // Start of the 7th of the following month, midnight UTC.
+  return new Date(Date.UTC(mon === 11 ? year + 1 : year, (mon + 1) % 12, 7));
 }
 
 export function isMonthFrozen(monthLabel: string, now: Date = new Date()): boolean {
@@ -238,7 +236,11 @@ async function processOneMonth(
       const st = stRows[0] ?? null;
 
       // ── Frozen month, already anchored: skip entirely ────────────────────
-      if (frozen && st?.frozenAt != null) {
+      // A Product-Wise range upload can establish the shared freeze state
+      // before this primary-register worker reaches its final anchor read.
+      // It must still be allowed to record frozen_rows/frozen_amount once;
+      // only a complete anchor makes this source safe to skip forever.
+      if (frozen && st?.frozenAt != null && st.frozenRows != null) {
         if (st.frozenRows != null && st.frozenRows !== sheetRows) {
           logger.warn(
             { fy, month, frozenRows: st.frozenRows, sheetRows },
@@ -346,6 +348,18 @@ async function processOneMonth(
           target: [registerMonthState.fy, registerMonthState.monthLabel],
           set: patch,
         });
+      if (frozen) {
+        // The Product-Wise raw SKU source shares this state row. Stamp existing
+        // rows with the same irreversible freeze instant, so the row itself
+        // always explains when its source values became permanent.
+        await tx
+          .update(secondarySkuLines)
+          .set({ frozenAt: now })
+          .where(and(
+            eq(secondarySkuLines.fy, fy),
+            eq(secondarySkuLines.monthLabel, month),
+          ));
+      }
 
       logger.info(
         { fy, month, dbRowsBefore, rowsWritten: written, amountCr: (sheetAmount / 1e7).toFixed(2), frozen, noOp },

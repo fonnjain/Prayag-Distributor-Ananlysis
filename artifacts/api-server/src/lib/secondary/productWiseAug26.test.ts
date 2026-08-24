@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   AUG26_PRODUCTWISE_APPROVED_SHA256,
+  AUG26_PRODUCTWISE_SOURCE_FILE,
   assertApprovedAug26ProductWiseArchive,
   assertProductWiseAug26Controls,
   assertProductWiseAug26UploadMetadata,
+  productWiseRangeMonthPlan,
   toProductWiseAug26RecordedProvenance,
   type PreparedProductWiseAug26Load,
 } from "./productWiseAug26.js";
@@ -53,19 +55,55 @@ describe("Product-Wise Aug-26 source controls", () => {
   });
 
   it("requires provenance and records the Basic Order Value basis", () => {
-    expect(() => assertProductWiseAug26UploadMetadata({ sourceNote: "", uploadedBy: "Data Operations" }))
+    expect(() => assertProductWiseAug26UploadMetadata({
+      sourceNote: "", uploadedBy: "Data Operations", sourceFile: AUG26_PRODUCTWISE_SOURCE_FILE,
+    }))
       .toThrow(/source_note is required/);
     expect(toProductWiseAug26RecordedProvenance({
       sourceNote: "Approved CRM export",
       uploadedBy: "Data Operations",
       uploadedAt: "2026-08-24T12:00:00.000Z",
       archiveSha256: AUG26_PRODUCTWISE_APPROVED_SHA256,
+      sourceFile: AUG26_PRODUCTWISE_SOURCE_FILE,
     }, prepared().controls)).toMatchObject({
       fy: "2026-27",
       month: "Aug-26",
       rows: 8_602,
       net: 56_403_177,
       valueBasis: "Basic Order Value (ex-GST)",
+    });
+  });
+});
+
+describe("Product-Wise frozen/open range overlap", () => {
+  it("leaves frozen August untouched while fully replacing open September", () => {
+    const now = new Date("2026-09-07T00:00:00.000Z");
+    const august = productWiseRangeMonthPlan({
+      month: "Aug-26",
+      incomingRows: 8_900,
+      rowsBefore: 8_602,
+      sharedFrozenAt: null,
+      now,
+    });
+    const september = productWiseRangeMonthPlan({
+      month: "Sep-26",
+      incomingRows: 1_250,
+      rowsBefore: 17,
+      sharedFrozenAt: null,
+      now,
+    });
+
+    expect(august).toMatchObject({
+      action: "frozen-skipped",
+      rowsBefore: 8_602,
+      rowsAfter: 8_602,
+      freezeAt: new Date("2026-09-07T00:00:00.000Z"),
+    });
+    expect(september).toMatchObject({
+      action: "loaded",
+      rowsBefore: 17,
+      rowsAfter: 1_250,
+      freezeAt: null,
     });
   });
 });

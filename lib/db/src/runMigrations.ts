@@ -3288,6 +3288,43 @@ const MIGRATIONS: Migration[] = [
         ADD COLUMN IF NOT EXISTS value_basis TEXT NOT NULL DEFAULT 'PSCode 3 Sub Total';
     `,
   },
+  {
+    id: "076_productwise_row_freeze_evidence",
+    sql: `
+      -- Product-Wise rows carry the same permanent freeze evidence as the
+      -- shared register_month_state. Legacy rows remain nullable where their
+      -- original workbook filename is not known.
+      ALTER TABLE secondary_sku_line
+        ADD COLUMN IF NOT EXISTS frozen_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS source_file TEXT;
+      CREATE INDEX IF NOT EXISTS sec_sku_line_frozen_at_idx
+        ON secondary_sku_line (frozen_at);
+
+      ALTER TABLE secondary_sku_load_provenance
+        ADD COLUMN IF NOT EXISTS source_file TEXT;
+
+      -- Backfill only the freeze evidence already established by the shared
+      -- state table. Never invent a legacy source filename.
+      UPDATE secondary_sku_line ssl
+         SET frozen_at = rms.frozen_at
+        FROM register_month_state rms
+       WHERE rms.fy = ssl.fy
+         AND rms.month_label = ssl.month_label
+         AND rms.frozen_at IS NOT NULL
+         AND ssl.frozen_at IS NULL;
+
+      UPDATE secondary_sku_line
+         SET source_file = 'Product-Wise-Secondary-Order-Report_29_6569_19-Aug-2026_1787135138176.xlsx'
+       WHERE source = 'productwise_xlsx'
+         AND month_label = 'Aug-26'
+         AND source_file IS NULL;
+      UPDATE secondary_sku_load_provenance
+         SET source_file = 'Product-Wise-Secondary-Order-Report_29_6569_19-Aug-2026_1787135138176.xlsx'
+       WHERE source = 'productwise_xlsx'
+         AND month_label = 'Aug-26'
+         AND source_file IS NULL;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

@@ -10,14 +10,14 @@ describe("openMonthLabels", () => {
     expect(openMonthLabels("2026-27", now)).toEqual(["Jul-26", "Aug-26"]);
   });
 
-  it("7 Aug: July is STILL in its grace window (1st–7th inclusive)", () => {
-    const now = new Date(Date.UTC(2026, 7, 7, 12)); // 7 Aug 2026
+  it("6 Aug: July is still open through the sixth", () => {
+    const now = new Date(Date.UTC(2026, 7, 6, 23, 59, 59));
     expect(isMonthFrozen("Jul-26", now)).toBe(false);
     expect(openMonthLabels("2026-27", now)).toEqual(["Jul-26", "Aug-26"]);
   });
 
-  it("8 Aug 00:00: July freezes, only August remains", () => {
-    const now = new Date(Date.UTC(2026, 7, 8, 0, 0, 1)); // 8 Aug 2026
+  it("7 Aug 00:00: July freezes, only August remains", () => {
+    const now = new Date(Date.UTC(2026, 7, 7, 0, 0, 0));
     expect(isMonthFrozen("Jul-26", now)).toBe(true);
     expect(openMonthLabels("2026-27", now)).toEqual(["Aug-26"]);
   });
