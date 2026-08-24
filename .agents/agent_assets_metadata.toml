@@ -242,3 +242,10 @@ uri = "file://suggested-project-tasks.md"
 type = "text"
 title = "Suggested Project Tasks"
 description = "Complete list of all 55 currently suggested project task drafts, listed by task number and title."
+
+[[outputs]]
+id = "_z7FbyFVstq7rnkEmLRb4"
+uri = "file://reports/july-pscode3-vs-august-product-wise-retailer-ratios.csv"
+type = "table"
+title = "July vs August matched-retailer ratios"
+description = "Complete canonical RET# overlap: July PSCode 3 NET, August Product-Wise Basic Order Value, and August/July ratio. RET- variants are normalized to RET#."
