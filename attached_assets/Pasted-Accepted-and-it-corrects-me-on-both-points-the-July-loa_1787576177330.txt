@@ -1,0 +1,41 @@
+Accepted, and it corrects me on both points: the July loader reads
+worksheets[0] by position with no tab-title check, so it proves nothing about
+PSCode2, and my claim that the register loader reads Summary Report from the
+same files was wrong. Separate paths.
+
+The important consequence: there is no recurring source to schedule. July came
+from a one-time ZIP whose Drive origin was never captured.
+
+Two things.
+
+1. CAPTURE PROVENANCE ON THE NEXT UPLOAD - small, do it now
+The July archive's SHA-256 was recorded and its origin was not. Add to the
+protected loader:
+   - source_note, required, free text: where the operator got the archive
+   - uploaded_by and uploaded_at
+   - the SHA-256 already captured
+   - the resulting month, row count and NET
+
+That is one migration and a required field. Without it, next month has the
+same problem: an archive that loaded correctly and cannot be traced.
+
+2. #418 CANNOT SCHEDULE WHAT DOES NOT EXIST - rescope it
+The task title says "keep B3 and S1 current when a new raw SKU month arrives".
+There is no arriving feed. Rescope to:
+
+   a. Identify the genuine recurring source. Ask whoever produced the July
+      archive where it came from - that is a question for Prayag, not a build.
+   b. Until one is registered, make the ABSENCE visible: the Red Alert page
+      already shows the evaluated window; add the age. "Raw SKU data current to
+      Jul-26, loaded 24 Aug" tells someone it is stale without them having to
+      ask why new=0.
+   c. Only then wire the scheduler, with SKU_SHEET_IDS for FY2026-27.
+
+Do not point it at the 731-spreadsheet STATE HEAD hierarchy. That is a
+different population from the approved 163 and includes departed and duplicate
+workbooks - it would ingest whatever it found.
+
+3. Confirm the July load landed: rows by month before and after, Apr-Jun
+   unchanged, and whether any S1 destocking alert appeared once July became
+   visible. You say the four S1 remain scoped to May-Jul and detection is
+   Apr-Jul - so July is now in the window. Did anything new fire?
