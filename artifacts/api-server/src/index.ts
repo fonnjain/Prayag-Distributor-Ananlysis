@@ -40,6 +40,10 @@ import {
 } from "./lib/personRegistry.js";
 import { logCoverage as logCustomerStateHeadCoverage } from "./lib/customerStateHead.js";
 import { loadAndPersistStateDashboard } from "./lib/secondary/stateHeadLoader.js";
+import {
+  runScheduledSecondaryRefreshCycle,
+  runScheduledSkuRefresh,
+} from "./lib/secondary/skuLoader.js";
 import { currentOpenFy } from "./lib/fyAnchors.js";
 import { setServerReady } from "./lib/serverReadiness.js";
 import { startServer } from "./lib/startServer.js";
@@ -483,27 +487,46 @@ startServer({
           secDashSyncInFlight = true;
           const openFy = currentOpenFy();
           try {
-            const summary = await loadAndPersistStateDashboard(openFy);
-            const anyFailed = summary.assertions.some((a) => !a.passed);
-            if (anyFailed) {
-              logger.warn(
-                {
-                  fy: openFy,
-                  assertions: summary.assertions.filter((a) => !a.passed),
-                },
-                "scheduled secondary dashboard sync: validation failed — ingested_at NOT updated",
-              );
-            } else {
-              logger.info(
-                { fy: openFy, rowsRead: summary.rowsRead, dataRows: summary.dataRows },
-                "scheduled secondary dashboard sync: done",
-              );
-            }
+            await runScheduledSecondaryRefreshCycle(openFy, {
+              syncDashboard: async () => {
+                const summary = await loadAndPersistStateDashboard(openFy);
+                const anyFailed = summary.assertions.some((a) => !a.passed);
+                if (anyFailed) {
+                  logger.warn(
+                    {
+                      fy: openFy,
+                      assertions: summary.assertions.filter((a) => !a.passed),
+                    },
+                    "scheduled secondary dashboard sync: validation failed — ingested_at NOT updated",
+                  );
+                } else {
+                  logger.info(
+                    { fy: openFy, rowsRead: summary.rowsRead, dataRows: summary.dataRows },
+                    "scheduled secondary dashboard sync: done",
+                  );
+                }
+              },
+              // Raw SKU rows power B3/S1. This is a separate source from the
+              // aggregate State Head Dashboard and remains independently
+              // scheduled even when that aggregate read fails.
+              refreshSku: async () => {
+                const skuRefresh = await runScheduledSkuRefresh(openFy);
+                if (skuRefresh.status === "not_configured") {
+                  logger.warn(
+                    { fy: openFy, reason: skuRefresh.reason },
+                    "scheduled secondary dashboard sync: raw SKU refresh unavailable — Alerts coverage will show frozen SKU gaps",
+                  );
+                } else if (skuRefresh.status === "refused") {
+                  logger.error(
+                    { fy: openFy, reason: skuRefresh.reason },
+                    "scheduled secondary dashboard sync: raw SKU replacement refused; prior rows retained",
+                  );
+                }
+                return skuRefresh;
+              },
+            });
           } catch (err) {
-            logger.error(
-              { err, fy: openFy },
-              "scheduled secondary dashboard sync: failed",
-            );
+            logger.error({ err, fy: openFy }, "scheduled secondary dashboard sync: raw SKU refresh failed");
           } finally {
             secDashSyncInFlight = false;
           }

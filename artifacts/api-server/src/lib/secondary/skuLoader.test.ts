@@ -1,7 +1,7 @@
 // Task 172 guards: RET# column detection, merged-cell carry-forward, and
 // serial-pollution prevention in the secondary SKU loader.
 // Task 299 guards: state_canon backfill join logic (headNormKey invariants).
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   parseTab,
   normaliseRetId,
@@ -11,6 +11,8 @@ import {
   priorFyLabel,
   WIPE_GUARD_RATIO,
   headNormKey,
+  runScheduledSecondaryRefreshCycle,
+  runScheduledSkuRefresh,
 } from "./skuLoader.js";
 
 describe("checkReplaceSanity (pre-delete gate for replace mode)", () => {
@@ -203,6 +205,73 @@ describe("checkOpenFyWipeGuard (pure, no DB)", () => {
       expect(result.reason).toMatch(/floor=\d+/);
       expect(result.reason).toContain("Jul-25=10000");
     }
+  });
+});
+
+describe("runScheduledSkuRefresh", () => {
+  const sheetIdForFy = () => "open-fy-sku-sheet";
+  const noCanaryFailures = async () => ({ anyFail: false });
+
+  it("runs the live loader in atomic replace mode for a configured open-FY source", async () => {
+    const load = vi.fn(async () => ({
+      fy: "2026-27", sheetId: "open-fy-sku-sheet", tabs: 1, tabsWithItemCodes: 1,
+      rowsParsed: 2_000, rowsInserted: 2_000, noItemCode: 0, noMonth: 0,
+      skipped: 0, rowsWithRetId: 2_000, dryRun: false,
+    }));
+
+    const outcome = await runScheduledSkuRefresh("2026-27", {
+      sheetIdForFy,
+      load: load as never,
+      runCanary: noCanaryFailures,
+    });
+
+    expect(outcome.status).toBe("loaded");
+    expect(load).toHaveBeenCalledWith("2026-27", "open-fy-sku-sheet", false, { replace: true });
+  });
+
+  it("refuses a short-source replacement and reports that existing rows were retained", async () => {
+    const outcome = await runScheduledSkuRefresh("2026-27", {
+      sheetIdForFy,
+      load: (async () => {
+        throw new Error("wipe guard ABORT — 2026-27 Jul-26 rows");
+      }) as never,
+      runCanary: async () => ({ anyFail: true }),
+    });
+
+    expect(outcome).toMatchObject({
+      status: "refused",
+      fy: "2026-27",
+      canaryFailedBeforeRefresh: true,
+    });
+    if (outcome.status === "refused") expect(outcome.reason).toContain("wipe guard ABORT");
+  });
+
+  it("does not substitute the state-head dashboard when no raw SKU source is registered", async () => {
+    const outcome = await runScheduledSkuRefresh("2026-27", {
+      sheetIdForFy: () => undefined,
+    });
+    expect(outcome).toMatchObject({
+      status: "not_configured",
+      fy: "2026-27",
+    });
+  });
+
+  it("still attempts the raw-SKU refresh when the aggregate dashboard sync fails", async () => {
+    const refreshSku = vi.fn(async () => ({
+      status: "not_configured" as const,
+      fy: "2026-27",
+      reason: "no verified raw workbook",
+    }));
+
+    const outcome = await runScheduledSecondaryRefreshCycle("2026-27", {
+      syncDashboard: async () => {
+        throw new Error("dashboard sheets timeout");
+      },
+      refreshSku,
+    });
+
+    expect(refreshSku).toHaveBeenCalledOnce();
+    expect(outcome.status).toBe("not_configured");
   });
 });
 

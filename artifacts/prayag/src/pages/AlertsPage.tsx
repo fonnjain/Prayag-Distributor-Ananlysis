@@ -103,7 +103,11 @@ function coverageText(coverage: AlertsPayload["coverage"]): string {
     .filter((month) => month.reason === "primary_month_not_frozen")
     .map((month) => month.monthLabel);
   const excluded: string[] = [];
-  if (missingRaw.length > 0) excluded.push(`${missingRaw.join(", ")} — raw SKU data unavailable`);
+  if (missingRaw.length > 0) {
+    excluded.push(
+      `${missingRaw.join(", ")} — primary data is frozen but raw SKU rows are missing; B3/S1 are paused`,
+    );
+  }
   if (notFrozen.length > 0) excluded.push(`${notFrozen.join(", ")} — primary month not frozen`);
   return `B3 and S1 evaluated: ${evaluated}. Excluded: ${excluded.length > 0 ? excluded.join("; ") : "none"}.`;
 }

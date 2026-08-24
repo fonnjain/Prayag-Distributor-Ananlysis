@@ -18,7 +18,7 @@
 import crypto from "node:crypto";
 import { sql as sqlRaw } from "drizzle-orm";
 import { assertSkuWipeGuard } from "../sku/skuWipeGuard.js";
-import { db, secondarySkuLines, type InsertSecSkuLine } from "@workspace/db";
+import { db, pool, secondarySkuLines, type InsertSecSkuLine } from "@workspace/db";
 import { listSheetTabs, readTabRowsChunked, type SheetCellValue } from "../registers/sheetsApi.js";
 import { toMonthLabel } from "./normalize.js";
 import { canonGroupFromMap } from "../sku/catalogue.js";
@@ -442,7 +442,7 @@ export async function loadSecSkuFromSheets(
     // with a bad-but-complete parse. Refuse to delete anything unless the
     // parsed set looks like a genuine full workbook.
     const existingRes = await db.execute<{ n: string }>(
-      sqlRaw`SELECT COUNT(*)::text AS n FROM secondary_sku_line WHERE fy = ${fy} AND source LIKE 'sheets_sku_backfill:%'`,
+      sqlRaw`SELECT COUNT(*)::text AS n FROM secondary_sku_line WHERE fy = ${fy}`,
     );
     const existingRows = parseInt(existingRes.rows[0]?.n ?? "0", 10);
     const gate = checkReplaceSanity({
@@ -454,7 +454,9 @@ export async function loadSecSkuFromSheets(
     if (!gate.ok) {
       throw new Error(`skuLoader: replace refused for FY${fy} — ${gate.reason}`);
     }
-    // All tabs parsed successfully — atomic swap of the FY's sheets-sourced rows.
+    // All tabs parsed successfully — atomic swap of this full-FY raw source.
+    // The guard compares every existing raw source, so a successful replacement
+    // must remove every prior source too; otherwise B3/S1 double-count months.
     totalInserted = 0;
     await db.transaction(async (tx) => {
       // ── Wipe guard: runs BEFORE the DELETE, inside this transaction ────────
@@ -469,7 +471,11 @@ export async function loadSecSkuFromSheets(
         })),
         skipGuard: opts.skipGuard === true,
         callerLabel: opts.skipGuardLabel ?? "loadSecSkuFromSheets opts.skipGuard",
-        sourceLike: "sheets_sku_backfill:%",
+        // Compare with every existing raw-SKU source, not just a prior Sheets
+        // run.  The first scheduled live refresh can follow a manually loaded
+        // PSCode archive; a short Sheet must not be allowed to replace its
+        // month merely because the existing rows have a different source tag.
+        sourceLike: undefined,
         // Explicit flag: this loader always maps headCanon into the head
         // dimension, so Rule 3 (per-member drop check) must always run.
         // Setting this to true means Rule 3 fires even when all parsed heads
@@ -478,7 +484,7 @@ export async function loadSecSkuFromSheets(
         memberGuardEnabled: true,
       });
       await tx.execute(
-        sqlRaw`DELETE FROM secondary_sku_line WHERE fy = ${fy} AND source LIKE 'sheets_sku_backfill:%'`,
+        sqlRaw`DELETE FROM secondary_sku_line WHERE fy = ${fy}`,
       );
       for (let i = 0; i < bufferedRows.length; i += INSERT_BATCH) {
         const batch = bufferedRows.slice(i, i + INSERT_BATCH);
@@ -756,6 +762,128 @@ export const SKU_SHEET_IDS: Record<string, string> = {
 };
 
 export const SUPPORTED_SKU_FYS = Object.keys(SKU_SHEET_IDS);
+
+export type ScheduledSkuRefreshResult =
+  | {
+      status: "loaded";
+      fy: string;
+      sheetId: string;
+      result: SkuLoadResult;
+      canaryFailedBeforeRefresh: boolean;
+    }
+  | {
+      status: "not_configured";
+      fy: string;
+      reason: string;
+    }
+  | {
+      status: "refused";
+      fy: string;
+      sheetId: string;
+      reason: string;
+      canaryFailedBeforeRefresh: boolean;
+    };
+
+type ScheduledSkuRefreshDeps = {
+  sheetIdForFy?: (fy: string) => string | undefined;
+  load?: typeof loadSecSkuFromSheets;
+  runCanary?: () => Promise<{ anyFail: boolean }>;
+};
+
+/**
+ * The State Head Dashboard and item-level SKU workbook are independent feeds.
+ * Do not let an aggregate-dashboard failure suppress the raw-SKU refresh that
+ * powers B3/S1 on this six-hour production cadence.
+ */
+export async function runScheduledSecondaryRefreshCycle(
+  fy: string,
+  deps: {
+    syncDashboard: () => Promise<void>;
+    refreshSku: () => Promise<ScheduledSkuRefreshResult>;
+  },
+): Promise<ScheduledSkuRefreshResult> {
+  try {
+    await deps.syncDashboard();
+  } catch (err) {
+    logger.error(
+      { err, fy },
+      "scheduled secondary dashboard sync: failed; continuing with independent raw SKU refresh",
+    );
+  }
+  return deps.refreshSku();
+}
+
+/**
+ * Refresh the open FY's raw SKU register for the production six-hour cadence.
+ *
+ * A configured SKU workbook is mandatory.  The state-head dashboard is an
+ * aggregate source and must never be substituted here: it has no item code,
+ * retailer, or distributor grain.  Until the raw register is registered in
+ * SKU_SHEET_IDS, the caller receives a loud, structured not_configured result
+ * and the Alerts coverage line continues to show the affected frozen month.
+ *
+ * The shared wipe canary is deliberately run immediately before a destructive
+ * replace and its outcome is returned/logged.  It is observational here: a
+ * pre-existing frozen-but-empty month is exactly what this refresh can repair.
+ * The transactional assertSkuWipeGuard inside loadSecSkuFromSheets remains the
+ * fail-closed gate that rejects a short source before DELETE.
+ */
+export async function runScheduledSkuRefresh(
+  fy: string,
+  deps: ScheduledSkuRefreshDeps = {},
+): Promise<ScheduledSkuRefreshResult> {
+  const sheetId = (deps.sheetIdForFy ?? ((targetFy) => SKU_SHEET_IDS[targetFy]))(fy);
+  if (!sheetId) {
+    const reason =
+      `No raw secondary SKU workbook is configured for FY${fy}; ` +
+      "the scheduler will not use the aggregate state-head dashboard as a substitute.";
+    logger.warn({ fy }, `scheduled SKU refresh: ${reason}`);
+    return { status: "not_configured", fy, reason };
+  }
+
+  let canaryFailedBeforeRefresh = false;
+  try {
+    const runCanary = deps.runCanary ?? (async () => {
+      const { runSkuWipeCanary } = await import("../redAlert/skuCanary.js");
+      return runSkuWipeCanary(pool, { environment: "production" });
+    });
+    const canary = await runCanary();
+    canaryFailedBeforeRefresh = canary.anyFail;
+    if (canary.anyFail) {
+      logger.warn(
+        { fy, sheetId },
+        "scheduled SKU refresh: shared wipe canary already reports a data gap; attempting guarded repair",
+      );
+    }
+  } catch (err) {
+    // A canary query outage must not turn a successful source refresh into a
+    // silent no-op.  The transactional guard below still protects the delete.
+    logger.warn({ err, fy, sheetId }, "scheduled SKU refresh: pre-refresh wipe canary failed to run");
+  }
+
+  try {
+    const load = deps.load ?? loadSecSkuFromSheets;
+    const result = await load(fy, sheetId, false, { replace: true });
+    logger.info(
+      {
+        fy,
+        sheetId,
+        rowsParsed: result.rowsParsed,
+        rowsInserted: result.rowsInserted,
+        canaryFailedBeforeRefresh,
+      },
+      "scheduled SKU refresh: done",
+    );
+    return { status: "loaded", fy, sheetId, result, canaryFailedBeforeRefresh };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    logger.error(
+      { err, fy, sheetId, canaryFailedBeforeRefresh },
+      "scheduled SKU refresh: refused or failed; existing raw SKU rows were retained",
+    );
+    return { status: "refused", fy, sheetId, reason, canaryFailedBeforeRefresh };
+  }
+}
 
 // ── Data-presence check ──────────────────────────────────────────────────────
 // Some FYs are loaded from sources other than Google Sheets (FY2026-27 came in
