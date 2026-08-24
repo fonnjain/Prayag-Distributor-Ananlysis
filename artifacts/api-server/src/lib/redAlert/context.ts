@@ -16,6 +16,54 @@ import type {
   CustomerMasterRow,
 } from "./types.js";
 import { normSecKey } from "../mgmt/names.js";
+import { fyMonthLabels } from "../fyAnchors.js";
+
+export type SkuAlertCoverage = {
+  fy: string;
+  evaluatedMonths: string[];
+  excludedMonths: Array<{ monthLabel: string; reason: "raw_sku_data_missing" | "primary_month_not_frozen" }>;
+  source: "frozen_primary_months_with_raw_sku";
+};
+
+/**
+ * Describe the exact current-FY window used by B3/S1.
+ *
+ * Detection removes a frozen month when no distributor-level raw SKU rows
+ * exist, so this deliberately uses the same condition instead of treating
+ * dashboard head-month data as item-level sell-through evidence.
+ */
+export async function getSkuAlertCoverage(pool: DbPool, fy: string): Promise<SkuAlertCoverage> {
+  const [frozenResult, skuMonthsResult] = await Promise.all([
+    pool.query<{ month_label: string }>(
+      `SELECT month_label
+         FROM register_month_state
+        WHERE fy = $1 AND frozen_at IS NOT NULL`,
+      [fy],
+    ),
+    pool.query<{ month_label: string }>(
+      `SELECT DISTINCT month_label
+         FROM secondary_sku_line
+        WHERE fy = $1 AND distributor IS NOT NULL`,
+      [fy],
+    ),
+  ]);
+  const frozenMonths = new Set(frozenResult.rows.map((row) => row.month_label));
+  const rawSkuMonths = new Set(skuMonthsResult.rows.map((row) => row.month_label));
+  const evaluatedMonths: string[] = [];
+  const excludedMonths: SkuAlertCoverage["excludedMonths"] = [];
+
+  for (const monthLabel of fyMonthLabels(fy)) {
+    if (frozenMonths.has(monthLabel) && rawSkuMonths.has(monthLabel)) {
+      evaluatedMonths.push(monthLabel);
+    } else {
+      excludedMonths.push({
+        monthLabel,
+        reason: frozenMonths.has(monthLabel) ? "raw_sku_data_missing" : "primary_month_not_frozen",
+      });
+    }
+  }
+  return { fy, evaluatedMonths, excludedMonths, source: "frozen_primary_months_with_raw_sku" };
+}
 
 export async function buildDetectionContext(pool: DbPool, fys: string[]): Promise<DetectionContext> {
   // We need 3 FYs of sale data: prior-prior, prior, current — for "sustained" checks.

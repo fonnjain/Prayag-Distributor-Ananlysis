@@ -11,6 +11,7 @@ import { Router } from "express";
 import { pool } from "@workspace/db";
 import { isAdminToken } from "../lib/adminAuth.js";
 import { runAlertDetection } from "../lib/redAlert/alertPersistence.js";
+import { getSkuAlertCoverage } from "../lib/redAlert/context.js";
 import { notifyAlert } from "../lib/alertRouting/notify.js";
 import { currentOpenFy } from "../lib/fyAnchors.js";
 import { logger } from "../lib/logger.js";
@@ -272,10 +273,14 @@ router.get("/alerts", async (_req, res) => {
     // Last detection timestamp: most recent last_seen_at for the current open FY.
     // We use this instead of an alert_action query because detection does not write
     // alert_action rows (only acknowledgements do).
-    const { rows: lastRunRows } = await pool.query<{ ts: string }>(
-      `SELECT MAX(last_seen_at)::text AS ts FROM alert WHERE fy = $1`,
-      [fy],
-    );
+    const [lastRunResult, coverage] = await Promise.all([
+      pool.query<{ ts: string }>(
+        `SELECT MAX(last_seen_at)::text AS ts FROM alert WHERE fy = $1`,
+        [fy],
+      ),
+      getSkuAlertCoverage(pool, fy),
+    ]);
+    const lastRunRows = lastRunResult.rows;
     const lastDetectionAt = lastRunRows[0]?.ts ?? null;
 
     res.json({
@@ -293,6 +298,7 @@ router.get("/alerts", async (_req, res) => {
       totalOpen,
       totalAcknowledged,
       lastDetectionAt,
+      coverage,
     });
   } catch (err) {
     logger.error({ err }, "[alerts] GET failed");

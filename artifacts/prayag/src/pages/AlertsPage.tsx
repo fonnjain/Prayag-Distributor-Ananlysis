@@ -65,6 +65,15 @@ type AlertsPayload = {
   totalOpen: number;
   totalAcknowledged: number;
   lastDetectionAt: string | null;
+  coverage: {
+    fy: string;
+    evaluatedMonths: string[];
+    excludedMonths: Array<{
+      monthLabel: string;
+      reason: "raw_sku_data_missing" | "primary_month_not_frozen";
+    }>;
+    source: "frozen_primary_months_with_raw_sku";
+  };
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -81,6 +90,22 @@ function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-IN", {
     day: "numeric", month: "short", year: "numeric",
   });
+}
+
+function coverageText(coverage: AlertsPayload["coverage"]): string {
+  const evaluated = coverage.evaluatedMonths.length > 0
+    ? coverage.evaluatedMonths.join(", ")
+    : "none";
+  const missingRaw = coverage.excludedMonths
+    .filter((month) => month.reason === "raw_sku_data_missing")
+    .map((month) => month.monthLabel);
+  const notFrozen = coverage.excludedMonths
+    .filter((month) => month.reason === "primary_month_not_frozen")
+    .map((month) => month.monthLabel);
+  const excluded: string[] = [];
+  if (missingRaw.length > 0) excluded.push(`${missingRaw.join(", ")} — raw SKU data unavailable`);
+  if (notFrozen.length > 0) excluded.push(`${notFrozen.join(", ")} — primary month not frozen`);
+  return `B3 and S1 evaluated: ${evaluated}. Excluded: ${excluded.length > 0 ? excluded.join("; ") : "none"}.`;
 }
 
 const CODE_COLORS: Record<string, string> = {
@@ -643,6 +668,11 @@ export default function AlertsPage() {
             Last run: {fmtDate(data.lastDetectionAt)}
           </p>
         )}
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+        <span className="font-semibold">Next B3/S1 run · FY {data.coverage.fy}:</span>{" "}
+        {coverageText(data.coverage)}
       </div>
 
       {/* Empty state */}

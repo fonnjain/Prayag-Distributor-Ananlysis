@@ -55,6 +55,7 @@ import alertsRouter from "./alerts";
 import { alertRoutingRouter } from "./alertRouting";
 import adminMasterImportRouter from "./adminMasterImport";
 import secondaryOrdersRouter from "./secondaryOrders";
+import secondarySkuJul26LoadRouter from "./secondarySkuJul26Load";
 import authRouter from "./auth";
 import { requireAuthenticated } from "../lib/auth";
 
@@ -123,5 +124,6 @@ router.use(alertsRouter);
 router.use(alertRoutingRouter);
 router.use(adminMasterImportRouter);
 router.use(secondaryOrdersRouter);
+router.use(secondarySkuJul26LoadRouter);
 
 export default router;
