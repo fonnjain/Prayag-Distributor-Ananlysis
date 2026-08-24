@@ -10,8 +10,12 @@ import { loadStateDashboard } from "../mgmt/stateDashboard.js";
 import { computeAchievement, isAnomalous, isMonthClosed } from "./rules.js";
 import type { SecHeadMonthRow, SecDryRunSummary, AnomalySummary } from "./types.js";
 import { runSecDashboardValidators } from "./validate.js";
-import { upsertSecHeadMonths, recordSecIngestRun, buildSecIngestRun } from "./ingest.js";
-import type { InsertSecHeadMonth } from "@workspace/db";
+import {
+  persistValidatedSecHeadMonths,
+  recordSecIngestRun,
+  buildSecIngestRun,
+} from "./ingest.js";
+import type { ValidatedSecHeadMonthInput } from "./ingest.js";
 import sheetsConfig from "../../../config/secondary_sheets.json";
 
 const MONTH_LABELS_SHORT = [
@@ -189,7 +193,7 @@ export async function loadAndPersistStateDashboard(
 
   let rowsUpserted = 0;
   if (!dryRun && !anyFailed) {
-    const insertRows: InsertSecHeadMonth[] = headMonthRows.map((r) => ({
+    const insertRows: ValidatedSecHeadMonthInput[] = headMonthRows.map((r) => ({
       fy: r.fy,
       headRaw: r.headRaw,
       headCanon: r.headCanon,
@@ -204,23 +208,37 @@ export async function loadAndPersistStateDashboard(
       notYetRecorded: r.notYetRecorded,
       sourceSheetId: r.sourceSheetId,
     }));
-    const result = await upsertSecHeadMonths(insertRows);
+    const result = await persistValidatedSecHeadMonths(
+      insertRows,
+      buildSecIngestRun({
+        source: "state_head_dashboard",
+        fy,
+        rowsRead: dashboard.rowsRead,
+        rowsInserted: insertRows.length,
+        rowsSkipped: 0,
+        unmapped: {},
+        assertions,
+        status: "ok",
+      }),
+    );
     rowsUpserted = result.upserted;
   }
 
-  await recordSecIngestRun(
-    buildSecIngestRun({
-      source: "state_head_dashboard",
-      fy,
-      rowsRead: dashboard.rowsRead,
-      rowsInserted: rowsUpserted,
-      rowsSkipped: headMonthRows.length - rowsUpserted,
-      unmapped: {},
-      assertions,
-      status,
-    }),
-    dryRun,
-  );
+  if (dryRun || anyFailed) {
+    await recordSecIngestRun(
+      buildSecIngestRun({
+        source: "state_head_dashboard",
+        fy,
+        rowsRead: dashboard.rowsRead,
+        rowsInserted: rowsUpserted,
+        rowsSkipped: headMonthRows.length - rowsUpserted,
+        unmapped: {},
+        assertions,
+        status,
+      }),
+      dryRun,
+    );
+  }
 
   logger.info(
     { fy, rowsRead: dashboard.rowsRead, headMonthRows: headMonthRows.length, dryRun, status },

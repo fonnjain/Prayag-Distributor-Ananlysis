@@ -3123,6 +3123,114 @@ const MIGRATIONS: Migration[] = [
           AND person_id IS NOT NULL;
     `,
   },
+  {
+    id: "073_secondary_head_month_history",
+    sql: `
+      -- Keep the current dashboard table fast and familiar, while giving every
+      -- row a completed source run and retaining every validated source value.
+      ALTER TABLE secondary_head_month
+        ADD COLUMN IF NOT EXISTS ingest_run_id INTEGER;
+
+      CREATE TABLE IF NOT EXISTS secondary_head_month_revision (
+        id                SERIAL PRIMARY KEY,
+        ingest_run_id     INTEGER NOT NULL
+                          REFERENCES secondary_ingest_run(id) ON DELETE RESTRICT,
+        fy                TEXT NOT NULL,
+        head_raw          TEXT,
+        head_canon        TEXT NOT NULL,
+        state_head        TEXT,
+        month_label       TEXT NOT NULL,
+        month_idx         INTEGER NOT NULL,
+        plan_amount       NUMERIC,
+        ordered_amount    NUMERIC,
+        received_amount   NUMERIC,
+        achievement_pct   NUMERIC,
+        is_anomaly        BOOLEAN NOT NULL DEFAULT false,
+        not_yet_recorded  BOOLEAN NOT NULL DEFAULT false,
+        source_sheet_id   TEXT,
+        recorded_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS sec_head_month_revision_run_key_uniq
+        ON secondary_head_month_revision
+          (ingest_run_id, fy, head_canon, month_label);
+      CREATE INDEX IF NOT EXISTS sec_head_month_revision_key_idx
+        ON secondary_head_month_revision (fy, head_canon, month_label);
+      CREATE INDEX IF NOT EXISTS sec_head_month_revision_run_idx
+        ON secondary_head_month_revision (ingest_run_id);
+
+      -- Existing current rows are not historical reconstructions. They are
+      -- attached to one explicitly labelled baseline so current rows satisfy
+      -- the provenance invariant without pretending older revisions exist.
+      DO $$
+      DECLARE
+        baseline_id INTEGER;
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM secondary_head_month WHERE ingest_run_id IS NULL
+        ) THEN
+          INSERT INTO secondary_ingest_run (
+            started_at, source, fy, rows_read, rows_inserted, rows_skipped,
+            unmapped, assertions, status
+          )
+          SELECT
+            now(),
+            'legacy_baseline',
+            NULL,
+            COUNT(*)::INTEGER,
+            COUNT(*)::INTEGER,
+            0,
+            '{}'::jsonb,
+            '[{"name":"legacy_baseline","passed":true,"detail":"Current rows at migration time; no pre-existing revision history is claimed."}]'::jsonb,
+            'ok'
+          FROM secondary_head_month
+          WHERE ingest_run_id IS NULL
+          RETURNING id INTO baseline_id;
+
+          INSERT INTO secondary_head_month_revision (
+            ingest_run_id, fy, head_raw, head_canon, state_head, month_label,
+            month_idx, plan_amount, ordered_amount, received_amount,
+            achievement_pct, is_anomaly, not_yet_recorded, source_sheet_id
+          )
+          SELECT
+            baseline_id, fy, head_raw, head_canon, state_head, month_label,
+            month_idx, plan_amount, ordered_amount, received_amount,
+            achievement_pct, is_anomaly, not_yet_recorded, source_sheet_id
+          FROM secondary_head_month
+          WHERE ingest_run_id IS NULL;
+
+          UPDATE secondary_head_month
+          SET ingest_run_id = baseline_id
+          WHERE ingest_run_id IS NULL;
+        END IF;
+      END
+      $$;
+
+      ALTER TABLE secondary_head_month
+        ALTER COLUMN ingest_run_id SET NOT NULL;
+      ALTER TABLE secondary_head_month
+        ADD CONSTRAINT secondary_head_month_ingest_run_fk
+        FOREIGN KEY (ingest_run_id)
+        REFERENCES secondary_ingest_run(id)
+        ON DELETE RESTRICT;
+
+      -- Revisions are evidence, not mutable state. Prevent accidental edits
+      -- through any SQL path, including an operator's broad UPDATE/DELETE.
+      CREATE OR REPLACE FUNCTION prevent_secondary_head_month_revision_mutation()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        RAISE EXCEPTION 'secondary_head_month_revision is append-only';
+      END;
+      $$ LANGUAGE plpgsql;
+
+      DROP TRIGGER IF EXISTS secondary_head_month_revision_immutable
+        ON secondary_head_month_revision;
+      CREATE TRIGGER secondary_head_month_revision_immutable
+        BEFORE UPDATE OR DELETE ON secondary_head_month_revision
+        FOR EACH ROW
+        EXECUTE FUNCTION prevent_secondary_head_month_revision_mutation();
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

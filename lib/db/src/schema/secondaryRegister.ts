@@ -72,6 +72,9 @@ export const secondaryRegisterLines = pgTable(
 //   The raw values are still stored exactly as read from the sheet.
 // not_yet_recorded: true when the calendar month has not yet closed and the
 //   sheet shows no data. These are never treated as 0% achievement.
+//
+// ingestRunId identifies the validated load that most recently produced this
+// current row. Historical source values live in secondary_head_month_revision.
 export const secondaryHeadMonths = pgTable(
   "secondary_head_month",
   {
@@ -90,6 +93,7 @@ export const secondaryHeadMonths = pgTable(
     isAnomaly: boolean("is_anomaly").notNull().default(false),
     notYetRecorded: boolean("not_yet_recorded").notNull().default(false),
     sourceSheetId: text("source_sheet_id"),
+    ingestRunId: integer("ingest_run_id").notNull(),
     ingestedAt: timestamp("ingested_at", { withTimezone: true }).defaultNow(),
   },
   (t) => [
@@ -103,7 +107,7 @@ export const secondaryHeadMonths = pgTable(
 //
 // Audit log for every secondary ingestion attempt (register backfill,
 // Sheets register sync, or State Head Dashboard sync).
-// status: 'ok' | 'fail' | 'dry_run'
+// status: 'running' | 'ok' | 'fail' | 'dry_run'
 export const secondaryIngestRuns = pgTable("secondary_ingest_run", {
   id: serial("id").primaryKey(),
   startedAt: timestamp("started_at", { withTimezone: true }),
@@ -114,10 +118,47 @@ export const secondaryIngestRuns = pgTable("secondary_ingest_run", {
   rowsSkipped: integer("rows_skipped"),
   unmapped: jsonb("unmapped"),
   assertions: jsonb("assertions"),
-  status: text("status"),   // 'ok' | 'fail' | 'dry_run'
+  status: text("status"),   // 'running' | 'ok' | 'fail' | 'dry_run'
 });
 
-// ── Table 4: secondary_dashboard_snapshot ────────────────────────────────────
+// ── Table 4: secondary_head_month_revision ───────────────────────────────────
+//
+// Append-only source ledger at the same grain as secondary_head_month. Every
+// validated dashboard load gets a new source revision, including unchanged
+// values: a run is the unit of provenance, not a value-diff.
+export const secondaryHeadMonthRevisions = pgTable(
+  "secondary_head_month_revision",
+  {
+    id: serial("id").primaryKey(),
+    ingestRunId: integer("ingest_run_id").notNull(),
+    fy: text("fy").notNull(),
+    headRaw: text("head_raw"),
+    headCanon: text("head_canon").notNull(),
+    stateHead: text("state_head"),
+    monthLabel: text("month_label").notNull(),
+    monthIdx: integer("month_idx").notNull(),
+    planAmount: numeric("plan_amount"),
+    orderedAmount: numeric("ordered_amount"),
+    receivedAmount: numeric("received_amount"),
+    achievementPct: numeric("achievement_pct"),
+    isAnomaly: boolean("is_anomaly").notNull().default(false),
+    notYetRecorded: boolean("not_yet_recorded").notNull().default(false),
+    sourceSheetId: text("source_sheet_id"),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    unique("sec_head_month_revision_run_key_uniq").on(
+      t.ingestRunId,
+      t.fy,
+      t.headCanon,
+      t.monthLabel,
+    ),
+    index("sec_head_month_revision_key_idx").on(t.fy, t.headCanon, t.monthLabel),
+    index("sec_head_month_revision_run_idx").on(t.ingestRunId),
+  ],
+);
+
+// ── Table 5: secondary_dashboard_snapshot ────────────────────────────────────
 //
 // Full serialized SecDashboard per FY, written after every successful Sheets
 // load.  Allows cold-start server restarts to serve closed-FY dashboards from
@@ -148,6 +189,12 @@ export const insertSecHeadMonthSchema = createInsertSchema(secondaryHeadMonths).
   id: true,
   ingestedAt: true,
 });
+export const insertSecHeadMonthRevisionSchema = createInsertSchema(
+  secondaryHeadMonthRevisions,
+).omit({
+  id: true,
+  recordedAt: true,
+});
 export const insertSecIngestRunSchema = createInsertSchema(secondaryIngestRuns).omit({
   id: true,
 });
@@ -156,5 +203,9 @@ export type InsertSecRegLine = z.infer<typeof insertSecRegLineSchema>;
 export type SecRegLine = typeof secondaryRegisterLines.$inferSelect;
 export type InsertSecHeadMonth = z.infer<typeof insertSecHeadMonthSchema>;
 export type SecHeadMonth = typeof secondaryHeadMonths.$inferSelect;
+export type InsertSecHeadMonthRevision = z.infer<
+  typeof insertSecHeadMonthRevisionSchema
+>;
+export type SecHeadMonthRevision = typeof secondaryHeadMonthRevisions.$inferSelect;
 export type InsertSecIngestRun = z.infer<typeof insertSecIngestRunSchema>;
 export type SecIngestRun = typeof secondaryIngestRuns.$inferSelect;
