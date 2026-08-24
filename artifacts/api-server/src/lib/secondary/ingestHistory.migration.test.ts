@@ -64,6 +64,11 @@ beforeAll(async () => {
       not_yet_recorded boolean NOT NULL DEFAULT false,
       source_sheet_id text,
       ingested_at timestamptz DEFAULT now(),
+      -- Simulate Replit's publish-time schema diff: the schema object may
+      -- already exist even though this app-managed migration has no ledger row.
+      ingest_run_id integer,
+      CONSTRAINT secondary_head_month_ingest_run_fk
+        FOREIGN KEY (ingest_run_id) REFERENCES secondary_ingest_run(id),
       UNIQUE (fy, head_canon, month_label)
     );
     INSERT INTO secondary_head_month (

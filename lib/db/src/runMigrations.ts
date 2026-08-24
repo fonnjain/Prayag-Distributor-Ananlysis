@@ -3208,11 +3208,25 @@ const MIGRATIONS: Migration[] = [
 
       ALTER TABLE secondary_head_month
         ALTER COLUMN ingest_run_id SET NOT NULL;
-      ALTER TABLE secondary_head_month
-        ADD CONSTRAINT secondary_head_month_ingest_run_fk
-        FOREIGN KEY (ingest_run_id)
-        REFERENCES secondary_ingest_run(id)
-        ON DELETE RESTRICT;
+      -- The publish-time schema diff may create this FK before the application
+      -- sees the custom migration ledger. Guard the named constraint so a
+      -- replay applies the data provenance backfill instead of crashing startup.
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'secondary_head_month_ingest_run_fk'
+            AND conrelid = 'secondary_head_month'::regclass
+        ) THEN
+          ALTER TABLE secondary_head_month
+            ADD CONSTRAINT secondary_head_month_ingest_run_fk
+            FOREIGN KEY (ingest_run_id)
+            REFERENCES secondary_ingest_run(id)
+            ON DELETE RESTRICT;
+        END IF;
+      END
+      $$;
 
       -- Revisions are evidence, not mutable state. Prevent accidental edits
       -- through any SQL path, including an operator's broad UPDATE/DELETE.
