@@ -1,0 +1,54 @@
+The population test answers it and the news is better than expected.
+
+675 retailers matched on RET#, and 675 of 675 have IDENTICAL names after
+normalising. The new CRM kept the same retailer identities. Median August/July
+is 69.9% against 61.3% expected for 19 days of 31, and NOT ONE matched
+retailer fell to zero.
+
+There is no identity break. So there is no migration.
+
+DO THIS - nothing else changes
+
+1. MAP THE NEW FILE INTO THE EXISTING secondary_sku_line SHAPE
+     Date               -> month_label
+     Dealer Name        -> retailer          (same column PSCode 3 filled)
+     Product Code       -> item_code
+     Qty                -> qty
+     Basic Order Value  -> the net           (ex-GST, matching Sub Total)
+     CP Name            -> distributor
+     Category Name      -> segment
+     source             -> 'productwise_xlsx'
+
+   The retailer and distributor NAME columns keep being populated exactly as
+   before. B3, S1, the push list and every retailer-level surface keep working
+   with no code change.
+
+2. ADD dealer_id AND cp_code AS EXTRA COLUMNS, nullable
+   Populated for August onward, NULL for Apr-Jul. Nothing reads them yet.
+   They are there so that later, when convenient, retailer resolution can move
+   from names to IDs - which fixes the Ayan Enterprise problem properly. Not
+   now.
+
+3. RECORD THE SOURCE CHANGE
+   source = 'productwise_xlsx' from Aug-26, 'pscode3_xlsx' before it. One
+   column, queryable, and the seam is visible to anyone who looks.
+
+WHY NOTHING ELSE NEEDS TO CHANGE
+The concern was that a system change would break year-on-year comparison -
+Aug-26 from the new CRM against Aug-25 from the old, matched by name. The test
+shows names carry across unchanged, so that comparison holds.
+
+DO NOT
+  - Do not backfill dealer_id onto Apr-Jul rows.
+  - Do not repoint B3, S1 or any surface at the ID columns yet.
+  - Do not migrate or reprocess any existing month.
+
+VERIFY
+  a. August rows loaded, NET, distinct retailers and item codes.
+  b. Confirm Basic Order Value was used, not Dealer Order Value. State it on
+     the load record.
+  c. Confirm Apr-Jul rows are byte-identical afterwards.
+  d. Run detection. B3 and S1 should now evaluate Apr-Aug once August freezes.
+     Report what fires - a wave of new stopped-customer alerts would mean the
+     name mapping did not hold after all, and this is where it would show.
+  e. Push, print both refs.
