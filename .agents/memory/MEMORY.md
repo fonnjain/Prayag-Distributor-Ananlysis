@@ -85,6 +85,7 @@
 - [Secondary period achievement basis](secondary-period-achievement-basis.md) — secondaryTotal.ytdAchievement = recorded sales / planRecorded (closed months only); never period sales / full-period plan.
 - [PSCode3 brand mirror chaining](pscode3-brand-mirror.md) — sku loader refreshes pscode3_brand_rollup mirror in same txn; backfill script is repair-only; audit 7.6 flags per-month NET drift.
 - [Raw SKU source separation](raw-sku-source-separation.md) — B3/S1 require retailer-level transactions; never substitute MRP, dashboards, or product-order aggregates.
+- [Product-Wise SKU cutover](productwise-sku-cutover.md) — from Aug-26, Basic Order Value is raw-SKU NET; never fabricate gross from GST-inclusive Dealer Order Value.
 - [Raw SKU load provenance](raw-sku-load-provenance.md) — protected archive loads retain operator/source evidence; Alerts freshness derives from raw-line ingestion, so future valid sources remain visible.
 - [Route snapshot coverage rules](route-snapshot-coverage.md) — snapshot only default page-load variants; never `frozen` for cross-FY/clock-dependent payloads (SKU breadth, churn, audit).
 - [mgmt/data cold-start snapshot](mgmt-data-snapshot.md) — shared serveWithSnapshot layer; frozen FYs serve snapshots as final (frozen flag, no re-read); force-resync unfreeze invalidates fy prefixes.

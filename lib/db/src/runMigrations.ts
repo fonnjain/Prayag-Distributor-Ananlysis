@@ -3268,6 +3268,26 @@ const MIGRATIONS: Migration[] = [
         ON secondary_sku_load_provenance (fy, month_label, uploaded_at DESC);
     `,
   },
+  {
+    id: "075_productwise_secondary_sku_seam",
+    sql: `
+      -- The Product-Wise CRM is the Aug-26-onward order-register source.  Keep
+      -- its stable RET#/DIST# identifiers beside legacy name-based fields; old
+      -- rows intentionally stay null so no historical identity is invented.
+      ALTER TABLE secondary_sku_line
+        ADD COLUMN IF NOT EXISTS dealer_id TEXT,
+        ADD COLUMN IF NOT EXISTS cp_code TEXT;
+      CREATE INDEX IF NOT EXISTS sec_sku_line_fy_dealer_id_idx
+        ON secondary_sku_line (fy, dealer_id);
+      CREATE INDEX IF NOT EXISTS sec_sku_line_fy_cp_code_idx
+        ON secondary_sku_line (fy, cp_code);
+
+      -- Make the monetary basis explicit at the source seam. Existing protected
+      -- PSCode 3 records retain their historic Sub Total basis by default.
+      ALTER TABLE secondary_sku_load_provenance
+        ADD COLUMN IF NOT EXISTS value_basis TEXT NOT NULL DEFAULT 'PSCode 3 Sub Total';
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

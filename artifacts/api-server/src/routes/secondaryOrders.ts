@@ -1,10 +1,10 @@
 /**
- * Secondary Orders routes — ORDER BOOKING, not dispatch.
+ * Secondary Orders routes — ORDER BOOKING history, not dispatch.
  *
  * ┌─────────────────────────────────────────────────────────────────────────────
  * │ IMPORTANT
  * │ All data in secondary_order_line is ORDER BOOKING, not dispatch.
- * │ Never sum or compare with secondary_sku_line or sale_line figures.
+ * │ This read-only history table is never summed with other tables.
  * │ Every response labels basis as "ORDER BOOKING".
  * │ basic_order_value excludes GST; dealer_order_value includes GST.
  * └─────────────────────────────────────────────────────────────────────────────

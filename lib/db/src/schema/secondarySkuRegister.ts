@@ -16,8 +16,8 @@ import { z } from "zod/v4";
 // This is DISTINCT from secondary_register_line (which stores at brand/segment level).
 // The two must never be summed together; each is authoritative for its own purpose.
 //
-// Source: closed-year secondary register Sheets for FY2024-25 and FY2025-26.
-// The FY2026-27 register is not yet loaded; that year returns NOT_AVAILABLE.
+// Source: closed-year secondary register Sheets for FY2024-25 and FY2025-26,
+// PSCode 3 through Jul-26, and Product-Wise CRM exports from Aug-26 onward.
 //
 // line_uid: sha1 of (fy|month_label|head_raw|retailer|distributor|item_code|gross_amount|occurrence).
 //
@@ -40,7 +40,9 @@ export const secondarySkuLines = pgTable(
     stateCanon: text("state_canon"),        // not in source; may be null
     retailer: text("retailer"),             // Retailer column
     retailerId: text("retailer_id"),        // Sr.No / Retailer Id column
+    dealerId: text("dealer_id"),            // Product-Wise CRM RET#; null for legacy rows
     distributor: text("distributor"),       // Distributor column
+    cpCode: text("cp_code"),                // Product-Wise CRM DIST#; null for legacy rows
     itemCode: text("item_code").notNull(),  // Cat. No. column
     segmentRaw: text("segment_raw"),        // Segment column
     segmentCanon: text("segment_canon"),    // canonicalised via group_map.json
@@ -55,7 +57,9 @@ export const secondarySkuLines = pgTable(
   (t) => [
     index("sec_sku_line_fy_month_idx").on(t.fy, t.monthLabel),
     index("sec_sku_line_fy_retailer_idx").on(t.fy, t.retailer),
+    index("sec_sku_line_fy_dealer_id_idx").on(t.fy, t.dealerId),
     index("sec_sku_line_fy_dist_idx").on(t.fy, t.distributor),
+    index("sec_sku_line_fy_cp_code_idx").on(t.fy, t.cpCode),
     index("sec_sku_line_fy_code_idx").on(t.fy, t.itemCode),
     index("sec_sku_line_fy_seg_idx").on(t.fy, t.segmentCanon),
     index("sec_sku_line_fy_head_idx").on(t.fy, t.headCanon),

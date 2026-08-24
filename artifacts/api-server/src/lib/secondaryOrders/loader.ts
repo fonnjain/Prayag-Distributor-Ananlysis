@@ -6,8 +6,10 @@
  * the same row count.  Collisions (same unique pair with different stored
  * values) are reported and NOT silently overwritten.
  *
- * IMPORTANT: This is ORDER BOOKING data, not dispatch.  Never sum or compare
- * with secondary_sku_line, secondary_register_line, or sale_line.
+ * IMPORTANT: This is ORDER BOOKING data, not dispatch. It remains a separate
+ * read-only history table; the verified Aug-26 Product-Wise workbook is also
+ * loaded through its own protected SKU-source route. Never treat either table
+ * as primary dispatch or sum them together.
  *
  * Category → segment mapping reuses the existing group_map.json vocabulary
  * (same mapping used by the secondary SKU loader).  Do NOT create a second map.
