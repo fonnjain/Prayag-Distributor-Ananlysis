@@ -22,6 +22,9 @@ export type SkuAlertCoverage = {
   fy: string;
   evaluatedMonths: string[];
   excludedMonths: Array<{ monthLabel: string; reason: "raw_sku_data_missing" | "primary_month_not_frozen" }>;
+  latestLoadedMonth: string | null;
+  latestLoadedAt: string | null;
+  latestLoadedAgeDays: number | null;
   source: "frozen_primary_months_with_raw_sku";
 };
 
@@ -33,7 +36,7 @@ export type SkuAlertCoverage = {
  * dashboard head-month data as item-level sell-through evidence.
  */
 export async function getSkuAlertCoverage(pool: DbPool, fy: string): Promise<SkuAlertCoverage> {
-  const [frozenResult, skuMonthsResult] = await Promise.all([
+  const [frozenResult, skuMonthsResult, latestLoadedResult] = await Promise.all([
     pool.query<{ month_label: string }>(
       `SELECT month_label
          FROM register_month_state
@@ -44,6 +47,15 @@ export async function getSkuAlertCoverage(pool: DbPool, fy: string): Promise<Sku
       `SELECT DISTINCT month_label
          FROM secondary_sku_line
         WHERE fy = $1 AND distributor IS NOT NULL`,
+      [fy],
+    ),
+    pool.query<{ month_label: string; loaded_at: string | null }>(
+      `SELECT month_label, MAX(ingested_at)::text AS loaded_at
+         FROM secondary_sku_line
+        WHERE fy = $1 AND distributor IS NOT NULL
+        GROUP BY month_label
+        ORDER BY MAX(ingested_at) DESC NULLS LAST, month_label DESC
+        LIMIT 1`,
       [fy],
     ),
   ]);
@@ -62,7 +74,21 @@ export async function getSkuAlertCoverage(pool: DbPool, fy: string): Promise<Sku
       });
     }
   }
-  return { fy, evaluatedMonths, excludedMonths, source: "frozen_primary_months_with_raw_sku" };
+  const latestLoaded = latestLoadedResult.rows[0];
+  const latestLoadedAt = latestLoaded?.loaded_at ?? null;
+  const latestLoadedAtMs = latestLoadedAt ? Date.parse(latestLoadedAt) : NaN;
+  const latestLoadedAgeDays = Number.isFinite(latestLoadedAtMs)
+    ? Math.max(0, Math.floor((Date.now() - latestLoadedAtMs) / 86_400_000))
+    : null;
+  return {
+    fy,
+    evaluatedMonths,
+    excludedMonths,
+    latestLoadedMonth: latestLoaded?.month_label ?? null,
+    latestLoadedAt,
+    latestLoadedAgeDays,
+    source: "frozen_primary_months_with_raw_sku",
+  };
 }
 
 export async function buildDetectionContext(pool: DbPool, fys: string[]): Promise<DetectionContext> {

@@ -72,6 +72,9 @@ type AlertsPayload = {
       monthLabel: string;
       reason: "raw_sku_data_missing" | "primary_month_not_frozen";
     }>;
+    latestLoadedMonth: string | null;
+    latestLoadedAt: string | null;
+    latestLoadedAgeDays: number | null;
     source: "frozen_primary_months_with_raw_sku";
   };
 };
@@ -110,6 +113,19 @@ function coverageText(coverage: AlertsPayload["coverage"]): string {
   }
   if (notFrozen.length > 0) excluded.push(`${notFrozen.join(", ")} — primary month not frozen`);
   return `B3 and S1 evaluated: ${evaluated}. Excluded: ${excluded.length > 0 ? excluded.join("; ") : "none"}.`;
+}
+
+function rawSkuFreshnessText(coverage: AlertsPayload["coverage"]): string {
+  if (!coverage.latestLoadedMonth || !coverage.latestLoadedAt) {
+    return "Raw SKU freshness is unavailable — no distributor-level raw SKU load timestamp is recorded.";
+  }
+  const age = coverage.latestLoadedAgeDays;
+  const ageText = age == null
+    ? ""
+    : age === 0
+      ? " (loaded today)"
+      : ` (${age} day${age === 1 ? "" : "s"} ago)`;
+  return `Raw SKU data current to ${coverage.latestLoadedMonth}, loaded ${fmtDate(coverage.latestLoadedAt)}${ageText}.`;
 }
 
 const CODE_COLORS: Record<string, string> = {
@@ -676,7 +692,8 @@ export default function AlertsPage() {
 
       <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
         <span className="font-semibold">Next B3/S1 run · FY {data.coverage.fy}:</span>{" "}
-        {coverageText(data.coverage)}
+        <p className="mt-1">{rawSkuFreshnessText(data.coverage)}</p>
+        <p className="mt-1">{coverageText(data.coverage)}</p>
       </div>
 
       {/* Empty state */}

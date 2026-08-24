@@ -9,9 +9,12 @@ import { isAdminToken } from "../lib/adminAuth.js";
 import {
   assertApprovedJul26PsCode3Archive,
   assertJul26PsCode3Controls,
+  assertJul26UploadMetadata,
   commitJul26PsCode3Load,
+  getLatestJul26LoadProvenance,
   prepareJul26PsCode3Load,
   type Jul26LoadControls,
+  type Jul26LoadProvenance,
 } from "../lib/secondary/pscode3Jul26.js";
 import { logger } from "../lib/logger.js";
 
@@ -22,7 +25,14 @@ const MAX_ARCHIVE_BYTES = 10 * 1024 * 1024;
 const MAX_EXTRACTED_BYTES = 50 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 2 * 1024 * 1024;
 
-type DryRun = { sha256: string; controls: Jul26LoadControls; expiresAt: number };
+type DryRun = {
+  sha256: string;
+  controls: Jul26LoadControls;
+  expiresAt: number;
+  sourceNote: string;
+  uploadedBy: string;
+  uploadedAt: string;
+};
 type LoadJob = {
   status: "idle" | "running" | "done" | "failed";
   startedAt: string | null;
@@ -44,6 +54,27 @@ function requireAdmin(req: Request, res: Response): boolean {
 
 function archiveDigest(source: Buffer): string {
   return crypto.createHash("sha256").update(source).digest("hex");
+}
+
+function requestText(req: Request, queryName: string, headerName: string): string {
+  const queryValue = req.query[queryName];
+  const headerValue = req.headers[headerName];
+  const value =
+    typeof queryValue === "string"
+      ? queryValue
+      : Array.isArray(headerValue)
+        ? headerValue[0]
+        : headerValue;
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function readUploadProvenance(req: Request): Pick<Jul26LoadProvenance, "sourceNote" | "uploadedBy"> {
+  return {
+    // Raw uploads use query parameters so the binary request body stays an
+    // archive. The matching headers make curl/automation less error-prone.
+    sourceNote: requestText(req, "source_note", "x-source-note"),
+    uploadedBy: requestText(req, "uploaded_by", "x-uploaded-by"),
+  };
 }
 
 function safeZipEntry(entry: string): boolean {
@@ -115,11 +146,16 @@ async function parseAndValidate(source: Buffer) {
   });
 }
 
-function controlsResponse(sha256: string, controls: Jul26LoadControls) {
+function controlsResponse(
+  sha256: string,
+  controls: Jul26LoadControls,
+  provenance: Pick<Jul26LoadProvenance, "sourceNote" | "uploadedBy" | "uploadedAt">,
+) {
   return {
     dryRun: true,
     archiveSha256: sha256,
     commitExpiresAt: new Date(Date.now() + DRY_RUN_TTL_MS).toISOString(),
+    provenance,
     controls,
     next: "Re-submit the identical archive with ?commit=true&confirm=Jul-26&dryRunSha256=<archiveSha256> to start the guarded background load.",
   };
@@ -135,6 +171,15 @@ router.post(
       res.status(400).json({ error: "Send the July PSCode_3 ZIP archive as the raw request body." });
       return;
     }
+    const { sourceNote, uploadedBy } = readUploadProvenance(req);
+    try {
+      assertJul26UploadMetadata({ sourceNote, uploadedBy });
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Valid upload provenance is required.",
+      });
+      return;
+    }
     const sha256 = archiveDigest(source);
     try {
       assertApprovedJul26PsCode3Archive(sha256);
@@ -147,8 +192,16 @@ router.post(
     if (!commit) {
       try {
         const prepared = await parseAndValidate(source);
-        mostRecentDryRun = { sha256, controls: prepared.controls, expiresAt: Date.now() + DRY_RUN_TTL_MS };
-        res.json(controlsResponse(sha256, prepared.controls));
+        const uploadedAt = new Date().toISOString();
+        mostRecentDryRun = {
+          sha256,
+          controls: prepared.controls,
+          expiresAt: Date.now() + DRY_RUN_TTL_MS,
+          sourceNote,
+          uploadedBy,
+          uploadedAt,
+        };
+        res.json(controlsResponse(sha256, prepared.controls, { sourceNote, uploadedBy, uploadedAt }));
       } catch (error) {
         res.status(422).json({ error: error instanceof Error ? error.message : String(error) });
       }
@@ -163,6 +216,15 @@ router.post(
       res.status(409).json({ error: "Run a successful dry-run for this exact archive within the last 30 minutes before committing." });
       return;
     }
+    if (
+      mostRecentDryRun.sourceNote !== sourceNote ||
+      mostRecentDryRun.uploadedBy !== uploadedBy
+    ) {
+      res.status(409).json({
+        error: "source_note and uploaded_by must match the successful dry-run for this archive.",
+      });
+      return;
+    }
     if (job.status === "running") {
       res.status(409).json({ error: `Jul-26 SKU load already running since ${job.startedAt}.` });
       return;
@@ -172,7 +234,12 @@ router.post(
     void (async () => {
       try {
         const prepared = await parseAndValidate(source);
-        const result = await commitJul26PsCode3Load(prepared);
+        const result = await commitJul26PsCode3Load(prepared, {
+          sourceNote,
+          uploadedBy,
+          uploadedAt: mostRecentDryRun!.uploadedAt,
+          archiveSha256: sha256,
+        });
         job = { ...job, status: "done", finishedAt: new Date().toISOString(), result: { controls: prepared.controls, ...result } };
         logger.info({ sha256, rows: prepared.controls.rows, net: prepared.controls.net }, "[secondarySkuJul26] load completed");
       } catch (error) {
@@ -193,9 +260,15 @@ router.post(
   },
 );
 
-router.get("/admin/secondary-sku/jul-26/status", (req: Request, res: Response): void => {
+router.get("/admin/secondary-sku/jul-26/status", async (req: Request, res: Response): Promise<void> => {
   if (!requireAdmin(req, res)) return;
-  res.json(job);
+  try {
+    const latestProvenance = await getLatestJul26LoadProvenance();
+    res.json({ ...job, latestProvenance });
+  } catch (error) {
+    req.log.error({ err: error }, "[secondarySkuJul26] status provenance lookup failed");
+    res.status(500).json({ error: "Could not read July raw-SKU load provenance." });
+  }
 });
 
 export default router;

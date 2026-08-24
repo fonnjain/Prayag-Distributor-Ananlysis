@@ -3245,6 +3245,29 @@ const MIGRATIONS: Migration[] = [
         EXECUTE FUNCTION prevent_secondary_head_month_revision_mutation();
     `,
   },
+  {
+    id: "074_secondary_sku_load_provenance",
+    sql: `
+      -- One durable audit row per successful protected raw-SKU load.  This is
+      -- deliberately separate from secondary_sku_line: source provenance is
+      -- load-level evidence, not a repeated transaction-line attribute.
+      CREATE TABLE IF NOT EXISTS secondary_sku_load_provenance (
+        id             SERIAL PRIMARY KEY,
+        fy             TEXT NOT NULL,
+        month_label    TEXT NOT NULL,
+        source_note    TEXT NOT NULL,
+        uploaded_by    TEXT NOT NULL,
+        uploaded_at    TIMESTAMPTZ NOT NULL,
+        archive_sha256 TEXT NOT NULL,
+        row_count      INTEGER NOT NULL,
+        net_amount     NUMERIC NOT NULL,
+        source         TEXT NOT NULL DEFAULT 'pscode3_xlsx',
+        recorded_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS secondary_sku_load_provenance_latest_idx
+        ON secondary_sku_load_provenance (fy, month_label, uploaded_at DESC);
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

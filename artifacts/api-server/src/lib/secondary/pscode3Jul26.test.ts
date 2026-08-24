@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   assertApprovedJul26PsCode3Archive,
   assertJul26PsCode3Controls,
+  assertJul26UploadMetadata,
   JUL26_PSCODE3_APPROVED_ARCHIVE_SHA256,
+  toJul26RecordedProvenance,
   type PreparedJul26Load,
 } from "./pscode3Jul26.js";
 
@@ -60,5 +62,32 @@ describe("assertJul26PsCode3Controls", () => {
     expect(() => assertJul26PsCode3Controls(prepared({ rawNet: 239_311_765 }))).toThrow(
       /rawNet=239311765; expected 239311764/,
     );
+  });
+});
+
+describe("July raw-SKU upload provenance", () => {
+  it("rejects a protected upload without the required operator evidence", () => {
+    expect(() => assertJul26UploadMetadata({ sourceNote: "", uploadedBy: "Nishant" }))
+      .toThrow(/source_note is required/);
+    expect(() => assertJul26UploadMetadata({ sourceNote: "Drive archive received from sales", uploadedBy: "" }))
+      .toThrow(/uploaded_by is required/);
+  });
+
+  it("serializes the durable result evidence written after a successful load", () => {
+    expect(toJul26RecordedProvenance({
+      sourceNote: "July source archive supplied by Sales Operations",
+      uploadedBy: "Nishant",
+      uploadedAt: "2026-08-24T08:30:00.000Z",
+      archiveSha256: JUL26_PSCODE3_APPROVED_ARCHIVE_SHA256,
+    }, prepared().controls)).toEqual({
+      sourceNote: "July source archive supplied by Sales Operations",
+      uploadedBy: "Nishant",
+      uploadedAt: "2026-08-24T08:30:00.000Z",
+      archiveSha256: JUL26_PSCODE3_APPROVED_ARCHIVE_SHA256,
+      fy: "2026-27",
+      month: "Jul-26",
+      rows: 34_147,
+      net: 223_436_806,
+    });
   });
 });

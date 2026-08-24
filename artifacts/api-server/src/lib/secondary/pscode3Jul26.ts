@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { readdirSync } from "node:fs";
 import path from "node:path";
 import { sql } from "drizzle-orm";
-import { db, secondarySkuLines, type InsertSecSkuLine } from "@workspace/db";
+import { db, pool, secondarySkuLines, type InsertSecSkuLine } from "@workspace/db";
 import { canonGroupFromMap } from "../sku/catalogue.js";
 import { checkOpenFyWipeGuard, priorLikeMonthLabel, priorFyLabel } from "./skuLoader.js";
 
@@ -59,6 +59,20 @@ export type Jul26LoadControls = {
 export type PreparedJul26Load = {
   rows: InsertSecSkuLine[];
   controls: Jul26LoadControls;
+};
+
+export type Jul26LoadProvenance = {
+  sourceNote: string;
+  uploadedBy: string;
+  uploadedAt: string;
+  archiveSha256: string;
+};
+
+export type Jul26RecordedProvenance = Jul26LoadProvenance & {
+  fy: string;
+  month: string;
+  rows: number;
+  net: number;
 };
 
 type MonthSummary = { monthLabel: string; rows: number; net: number };
@@ -287,11 +301,44 @@ export type Jul26CommitResult = {
   skuMonths: MonthSummary[];
   brandMirrorMonths: MonthSummary[];
   priorLikeMonthRows: number;
+  provenance: Jul26RecordedProvenance;
 };
 
+export function assertJul26UploadMetadata(
+  metadata: Pick<Jul26LoadProvenance, "sourceNote" | "uploadedBy">,
+): void {
+  if (!metadata.sourceNote.trim()) throw new Error("source_note is required");
+  if (metadata.sourceNote.length > 2_000) throw new Error("source_note must be 2,000 characters or fewer");
+  if (!metadata.uploadedBy.trim()) throw new Error("uploaded_by is required");
+  if (metadata.uploadedBy.length > 200) throw new Error("uploaded_by must be 200 characters or fewer");
+}
+
+export function toJul26RecordedProvenance(
+  provenance: Jul26LoadProvenance,
+  controls: Pick<Jul26LoadControls, "rows" | "net">,
+): Jul26RecordedProvenance {
+  return {
+    ...provenance,
+    fy: JUL26_PSCODE3.fy,
+    month: JUL26_PSCODE3.month,
+    rows: controls.rows,
+    net: controls.net,
+  };
+}
+
 /** Replace exactly Jul-26 in both raw SKU tables after all source controls pass. */
-export async function commitJul26PsCode3Load(prepared: PreparedJul26Load): Promise<Jul26CommitResult> {
+export async function commitJul26PsCode3Load(
+  prepared: PreparedJul26Load,
+  provenance: Jul26LoadProvenance,
+): Promise<Jul26CommitResult> {
   assertJul26PsCode3Controls(prepared);
+  assertJul26UploadMetadata(provenance);
+  if (!Number.isFinite(Date.parse(provenance.uploadedAt))) {
+    throw new Error("uploadedAt must be a valid ISO timestamp");
+  }
+  if (!/^[a-f0-9]{64}$/.test(provenance.archiveSha256)) {
+    throw new Error("archiveSha256 must be a lowercase SHA-256 digest");
+  }
   let priorLikeMonthRows = 0;
 
   await db.transaction(async (tx) => {
@@ -333,6 +380,17 @@ export async function commitJul26PsCode3Load(prepared: PreparedJul26Load): Promi
         FROM secondary_sku_line
        WHERE fy = ${JUL26_PSCODE3.fy} AND month_label = ${JUL26_PSCODE3.month}
     `);
+    await tx.execute(sql`
+      INSERT INTO secondary_sku_load_provenance
+        (fy, month_label, source_note, uploaded_by, uploaded_at,
+         archive_sha256, row_count, net_amount, source)
+      VALUES
+        (${JUL26_PSCODE3.fy}, ${JUL26_PSCODE3.month},
+         ${provenance.sourceNote.trim()}, ${provenance.uploadedBy.trim()},
+         ${new Date(provenance.uploadedAt)}, ${provenance.archiveSha256},
+         ${prepared.controls.rows}, ${prepared.controls.net},
+         ${JUL26_PSCODE3.skuSource})
+    `);
   });
 
   const [skuMonths, brandMirrorMonths] = await Promise.all([
@@ -347,5 +405,43 @@ export async function commitJul26PsCode3Load(prepared: PreparedJul26Load): Promi
   if (Math.abs(julySku.net - prepared.controls.net) > 1 || Math.abs(julyMirror.net - prepared.controls.net) > 1) {
     throw new Error("Jul-26 post-load verification failed: SKU detail and brand mirror values do not match the prepared NET");
   }
-  return { skuMonths, brandMirrorMonths, priorLikeMonthRows };
+  return {
+    skuMonths,
+    brandMirrorMonths,
+    priorLikeMonthRows,
+    provenance: toJul26RecordedProvenance(provenance, prepared.controls),
+  };
+}
+
+export async function getLatestJul26LoadProvenance(): Promise<Jul26RecordedProvenance | null> {
+  const result = await pool.query<{
+    fy: string;
+    month_label: string;
+    source_note: string;
+    uploaded_by: string;
+    uploaded_at: string;
+    archive_sha256: string;
+    row_count: string;
+    net_amount: string;
+  }>(
+    `SELECT fy, month_label, source_note, uploaded_by, uploaded_at::text,
+            archive_sha256, row_count, net_amount::text
+       FROM secondary_sku_load_provenance
+      WHERE fy = $1 AND month_label = $2
+      ORDER BY uploaded_at DESC, id DESC
+      LIMIT 1`,
+    [JUL26_PSCODE3.fy, JUL26_PSCODE3.month],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    sourceNote: row.source_note,
+    uploadedBy: row.uploaded_by,
+    uploadedAt: row.uploaded_at,
+    archiveSha256: row.archive_sha256,
+    fy: row.fy,
+    month: row.month_label,
+    rows: Number(row.row_count),
+    net: Number(row.net_amount),
+  };
 }
