@@ -76,6 +76,45 @@ export function selectCompleteFy2627Months(
 }
 
 /**
+ * Selects every FY2026-27 month that has loaded register data, including the
+ * open current month, and returns the latest invoice date represented.
+ *
+ * This is for the Overview's live YTD figure. Period comparisons that require
+ * closed months must keep using selectCompleteFy2627Months above.
+ */
+export function selectFy2627MonthsThroughLatestData(
+  monthRows: Array<{ monthLabel: string; amount: number; maxDate: string | null }>,
+): {
+  monthlySales: Array<{ monthLabel: string; amount: number }>;
+  ytdInr: number;
+  includedLabels: string[];
+  coveredThrough: string | null;
+} {
+  const months = monthRows
+    .filter((row) => row.monthLabel.trim() !== "")
+    .sort(
+      (a, b) =>
+        MONTH_FY_ORDER.indexOf(a.monthLabel.slice(0, 3) as (typeof MONTH_FY_ORDER)[number]) -
+        MONTH_FY_ORDER.indexOf(b.monthLabel.slice(0, 3) as (typeof MONTH_FY_ORDER)[number]),
+    );
+  const monthlySales = months.map((row) => ({
+    monthLabel: row.monthLabel,
+    amount: Math.round(row.amount),
+  }));
+  const validDates = months
+    .map((row) => (typeof row.maxDate === "string" ? row.maxDate.slice(0, 10) : null))
+    .filter((date): date is string => date !== null && /^\d{4}-\d{2}-\d{2}$/.test(date))
+    .sort();
+
+  return {
+    monthlySales,
+    ytdInr: monthlySales.reduce((sum, month) => sum + month.amount, 0),
+    includedLabels: months.map((row) => row.monthLabel),
+    coveredThrough: validDates.length > 0 ? validDates[validDates.length - 1] : null,
+  };
+}
+
+/**
  * Builds the sorted group-breakdown array (with sharePct) from a pre-filtered
  * group aggregate (already restricted to complete-month labels by the caller's
  * DB query).
@@ -236,15 +275,13 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
     );
   }
 
-  // FY2026-27 monthly dispatch (complete months only) — sourced from the
-  // invoice-line register.  Included in the snapshot so the Overview page never
-  // needs a separate analytics API call and never shows "—" during API warmup.
-  //
-  // "Complete" follows the same rule as analytics.ts: max invoice date reaches
-  // month-end OR the register lock instant (8 days past month-end) has elapsed.
+  // FY2026-27 monthly dispatch through the latest loaded invoice — sourced from
+  // the invoice-line register. The Overview YTD is intentionally live: it
+  // includes the open current month and exposes its cutoff date to the user.
   let fy2627MonthlySales: Array<{ monthLabel: string; amount: number }> = [];
   let fy2627Groups: Array<{ group: string; amount: number; sharePct: number }> = [];
   let fy2627SalesYtdInr = 0;
+  let fy2627SalesYtdThrough: string | null = null;
   try {
     const monthRows = await db
       .select({
@@ -256,11 +293,13 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
       .where(and(eq(saleLines.fy, "2026-27"), eq(saleLines.versionStatus, "current")))
       .groupBy(sql`1`);
 
-    const { monthlySales, ytdInr, completeLabels } = selectCompleteFy2627Months(monthRows);
+    const { monthlySales, ytdInr, includedLabels, coveredThrough } =
+      selectFy2627MonthsThroughLatestData(monthRows);
 
-    if (completeLabels.length > 0) {
+    if (includedLabels.length > 0) {
       fy2627MonthlySales = monthlySales;
       fy2627SalesYtdInr = ytdInr;
+      fy2627SalesYtdThrough = coveredThrough;
 
       const groupRows = await db
         .select({
@@ -272,7 +311,7 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
           and(
             eq(saleLines.fy, "2026-27"),
             eq(saleLines.versionStatus, "current"),
-            inArray(saleLines.monthLabel, completeLabels),
+            inArray(saleLines.monthLabel, includedLabels),
           ),
         )
         .groupBy(sql`1`);
@@ -283,7 +322,8 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
     logger.info(
       {
         fy: "2026-27",
-        complete_months: completeLabels.length,
+        included_months: includedLabels.length,
+        covered_through: fy2627SalesYtdThrough,
         ytd_inr: fy2627SalesYtdInr,
       },
       "FY2026-27 snapshot data computed",
@@ -316,6 +356,7 @@ export async function buildSnapshot(): Promise<DashboardPayload> {
       fy2526_sales_inr: fy2526SalesInr,
       orders_fy2627_ytd_cr: orders.orders_ytd_cr,
       fy2627_sales_ytd_inr: fy2627SalesYtdInr,
+      fy2627_sales_ytd_through: fy2627SalesYtdThrough,
       fy2627_monthly_sales: fy2627MonthlySales,
       fy2627_groups: fy2627Groups,
     },

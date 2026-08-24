@@ -1,6 +1,6 @@
 import { trunc2 } from "@/lib/trunc";
 import { formatCompact, CHART_COLORS, CHART_COLOR_LIST } from "@/data/dataset";
-import { useDashboard } from "@/data/dashboard-context";
+import { useDashboard, type DashboardData } from "@/data/dashboard-context";
 
 type GroupStat = { group: string; amount: number; sharePct: number };
 import { KPICard, CustomTooltip, CustomLegend } from "./shared";
@@ -10,6 +10,22 @@ import { CSVLink } from "react-csv";
 import { Download, IndianRupee, Users, Store, TrendingUp } from "lucide-react";
 import { useTheme } from "next-themes";
 
+type OverviewTotals = DashboardData["totals"] & {
+  fy2627_sales_ytd_through?: string | null;
+};
+
+function formatThroughDate(value: string | null | undefined): string {
+  if (!value) return "Through date unavailable";
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return `Through ${value}`;
+  return `Through ${parsed.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  })}`;
+}
+
 export default function Overview() {
   const { data } = useDashboard();
   // FY25-26 total sales — sourced from the dashboard snapshot (which queries
@@ -18,10 +34,9 @@ export default function Overview() {
   // changes, and it loads instantly even when the API server is warming up.
   const fy2526Total = data.totals.fy2526_sales_inr ?? null;
 
-  // FY26-27 monthly sales (dispatch) — complete months only, sourced from the
-  // dashboard snapshot so the chart and YTD card are immediately available even
-  // when the API server is still warming up.  The snapshot is rebuilt on every
-  // scheduled sync (default: hourly) so figures stay current.
+  // FY26-27 monthly sales (dispatch) — through the latest loaded invoice,
+  // including the open current month. The snapshot is rebuilt on every
+  // scheduled sync (default: hourly), and the dashboard context polls it.
   const snapshotMonthly = data.totals.fy2627_monthly_sales as Array<{
     monthLabel: string;
     amount: number;
@@ -30,11 +45,12 @@ export default function Overview() {
     month: m.monthLabel,
     sales: m.amount,
   }));
-  // Show "—" when no complete months exist yet in the register.
+  // Show "—" when no YTD rows exist yet in the register.
   const fy2627SalesYtd =
     data.totals.fy2627_sales_ytd_inr > 0
       ? data.totals.fy2627_sales_ytd_inr
       : null;
+  const fy2627SalesYtdThrough = (data.totals as OverviewTotals).fy2627_sales_ytd_through;
 
   const { theme } = useTheme();
   const isDark = theme === "dark";
@@ -97,7 +113,8 @@ export default function Overview() {
           icon={<IndianRupee className="w-5 h-5" />}
           detail={[
             "Primary sale & dispatch",
-            "Source: sale_line register (complete months)",
+            "Source: sale_line register (live YTD)",
+            formatThroughDate(fy2627SalesYtdThrough),
             "All channels, incl. project & institutional",
           ]}
         />

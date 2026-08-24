@@ -26,7 +26,11 @@
 //   2026-08-16T12:00:00Z (mid-August 2026 = well past the Apr-Jul lock dates).
 
 import { describe, it, expect } from "vitest";
-import { selectCompleteFy2627Months, buildFy2627Groups } from "./sync.js";
+import {
+  selectCompleteFy2627Months,
+  selectFy2627MonthsThroughLatestData,
+  buildFy2627Groups,
+} from "./sync.js";
 
 // Mid-August 2026 — Apr-26, May-26, Jun-26, Jul-26 are all past their 8-day
 // grace windows; Aug-26 has not yet ended.
@@ -210,6 +214,34 @@ describe("selectCompleteFy2627Months — fiscal sort order", () => {
     expect(result.monthlySales.map((m) => m.monthLabel)).toEqual([
       "Apr-26", "Dec-26", "Jan-27", "Mar-27",
     ]);
+  });
+});
+
+describe("selectFy2627MonthsThroughLatestData — live Overview scope", () => {
+  it("includes the open current month and reports the latest invoice date", () => {
+    const result = selectFy2627MonthsThroughLatestData([
+      row("Jul-26", 321_028_904.63, "2026-07-31"),
+      row("Apr-26", 131_081_249.77, "2026-04-30"),
+      row("Aug-26", 86_290_632.43, "2026-08-24"),
+    ]);
+
+    expect(result.includedLabels).toEqual(["Apr-26", "Jul-26", "Aug-26"]);
+    expect(result.monthlySales).toEqual([
+      { monthLabel: "Apr-26", amount: 131_081_250 },
+      { monthLabel: "Jul-26", amount: 321_028_905 },
+      { monthLabel: "Aug-26", amount: 86_290_632 },
+    ]);
+    expect(result.ytdInr).toBe(538_400_787);
+    expect(result.coveredThrough).toBe("2026-08-24");
+  });
+
+  it("returns an empty cutoff when there are no month rows", () => {
+    expect(selectFy2627MonthsThroughLatestData([])).toEqual({
+      monthlySales: [],
+      ytdInr: 0,
+      includedLabels: [],
+      coveredThrough: null,
+    });
   });
 });
 

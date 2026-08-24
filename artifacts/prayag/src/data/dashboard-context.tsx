@@ -55,6 +55,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const query = useGetDashboard({
     query: {
       queryKey: getGetDashboardQueryKey(),
+      // The server snapshot is rebuilt on a schedule. Polling lets an Overview
+      // page that stays open pick up a new YTD cutoff without a full reload.
+      refetchInterval: 5 * 60 * 1000,
+      refetchOnWindowFocus: true,
       // Auto-recover from the ~60s Sheets quota window: keep retrying quota
       // 503s (the banner explains the wait); other errors retry twice.
       retry: (failureCount, error) =>

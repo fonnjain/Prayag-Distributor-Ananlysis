@@ -21,5 +21,12 @@ description: Architecture of the shared primary booking+sale loader and the root
 ## Period filter flag
 `bookingPeriodFiltered` / `salePeriodFiltered` booleans flow through to the frontend. When `false` and a sub-year period is selected, the UI shows "FY total — period filter not applied" on tiles and the By State Head table.
 
+## Overview live YTD
+The Overview Sales YTD measure includes every loaded primary-register month, including the open current month, and must display the latest included invoice date alongside the value. Complete-month-only scope remains for period comparisons and finalised analytics.
+
+**Why:** A closed-month-only headline hid current-month sales and appeared stuck during the month; its cutoff needs to be visible so an in-progress figure is not mistaken for a completed period.
+
+**How to apply:** Keep the live-YTD snapshot and its cutoff together. Do not reuse it for metrics that need a frozen or like-for-like monthly basis.
+
 ## Verified anchors (Q1 / YTD Apr–Jun-26)
 Order Booking ₹77.76 Cr, Sale/Dispatch ₹72.86 Cr, Pending ₹4.90 Cr — matches State Head exactly.
