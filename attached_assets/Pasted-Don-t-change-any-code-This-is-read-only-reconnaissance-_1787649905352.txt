@@ -1,0 +1,49 @@
+Don't change any code. This is read-only reconnaissance. I need you to report how this app connects
+(or is meant to connect) to the sales API at www.prayag-sale.com. Search the WHOLE repo (lib/,
+scripts/, main.py / app files, .env.example, config) and answer each point, quoting the file + line
+where you find it:
+
+1. BASE URL & ENDPOINTS
+   - The base URL for prayag-sale.com and every endpoint path the code calls or references
+     (e.g. /api/v1/sales, /distributors, /invoices, /dispatch).
+   - For each: HTTP method (GET/POST) and what it returns (sales lines? distributor master?
+     invoices? outstanding?).
+
+2. PARAMETERS / FILTERING
+   - Which query params or body fields each endpoint accepts — especially filtering by DATE range,
+     by PARTY/DISTRIBUTOR, by STATE/STATE-HEAD, and by ITEM/SEGMENT.
+   - Any pagination (page/offset/limit/cursor) and default page size, since sales volumes are large.
+
+3. AUTHENTICATION
+   - How it authenticates: API key in a header (which header name?), Bearer token, Basic auth,
+     query-string key, or OAuth.
+   - The exact env-var / secret NAME used (e.g. PRAYAG_SALE_API_KEY, PRAYAG_SALE_BASE_URL) — NAME
+     ONLY. DO NOT print the secret VALUE.
+   - Whether that secret is currently set in Replit Secrets (yes/no), without revealing it.
+
+4. RESPONSE SHAPE (most important)
+   - Make ONE real live call to the sales endpoint for a recent date and paste the RAW JSON of a
+     SINGLE sales record (redact only auth). I need the exact field names.
+   - Specifically identify the fields carrying: PARTY / DISTRIBUTOR name and code, STATE / STATE-HEAD,
+     ITEM / product code, SEGMENT (CP / PTMT / HARDWARE / SINK / PIPE / TANK / HDPE / GARDEN PIPE),
+     QUANTITY, RATE, VALUE/AMOUNT, INVOICE number, and DATE.
+   - Do the party/distributor and item codes look like the ones in our existing sheets (Sale Master,
+     State Head Sale), or a different scheme (numeric IDs, SAP codes)? Give an example value of each.
+   - Is each row an invoice-LINE (item level) or an invoice HEADER (one row per invoice)?
+
+5. DUPLICATE / IDENTITY BEHAVIOUR (critical for our pipeline)
+   - Does any record carry a unique transaction/invoice/line ID I can use as a row-identity key?
+   - Can the same PARTY + ITEM + QTY + VALUE + DATE legitimately appear on multiple distinct rows
+     (repeat invoices)? I must NOT dedupe those on value — confirm whether a stable unique ID exists
+     to distinguish a genuine repeat from the same physical row fetched twice.
+
+6. STATUS OF THE INTEGRATION
+   - Is this API actually wired and returning live data now, or stubbed / mocked / planned / failing?
+     If any call fails, paste the exact error and status code.
+   - If tests touch this API, say whether they hit the real endpoint or a mock/fixture.
+
+7. RATE LIMITS / DOCS
+   - Any documented rate limits, and whether an API doc / OpenAPI/Swagger URL exists.
+
+Output a plain structured report. NAMES and PRESENCE of secrets only — never values or full
+credentials. Do NOT modify code.
