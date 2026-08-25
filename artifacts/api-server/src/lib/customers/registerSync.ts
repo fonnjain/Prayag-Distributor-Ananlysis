@@ -443,7 +443,7 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
       incomingCountByFyMonth.set(`${fy}|${m.month}`, m.sheetRows);
     }
 
-    // Which months were actually replaced this run. Between the 1st and 6th
+    // Which months were actually replaced this run. Between the 1st and 7th
     // this is two months (prior month in its edit grace window + open month);
     // from the 8th the prior month is frozen and the set narrows to one.
     const replacedMonths = replaceSummary.months

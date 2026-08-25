@@ -76,6 +76,14 @@ type AlertsPayload = {
     latestLoadedAt: string | null;
     latestLoadedAgeDays: number | null;
     source: "frozen_primary_months_with_raw_sku";
+    productWise: {
+      month: string;
+      status: "not_loaded" | "in_progress" | "frozen_verified";
+      sourceFingerprint: string | null;
+      uploadedAt: string | null;
+      verifiedAt: string | null;
+      frozenAt: string | null;
+    };
   };
 };
 
@@ -126,6 +134,20 @@ function rawSkuFreshnessText(coverage: AlertsPayload["coverage"]): string {
       ? " (loaded today)"
       : ` (${age} day${age === 1 ? "" : "s"} ago)`;
   return `Raw SKU data current to ${coverage.latestLoadedMonth}, loaded ${fmtDate(coverage.latestLoadedAt)}${ageText}.`;
+}
+
+function productWiseFreshnessText(coverage: AlertsPayload["coverage"]): string {
+  const source = coverage.productWise;
+  if (source.status === "not_loaded") {
+    return `Product-Wise ${source.month} has not been loaded; no verified CRM source fingerprint is available.`;
+  }
+  const fingerprint = source.sourceFingerprint ? ` Fingerprint: ${source.sourceFingerprint.slice(0, 12)}…` : "";
+  if (source.status === "frozen_verified") {
+    const frozen = source.frozenAt ? `, frozen ${fmtDate(source.frozenAt)}` : "";
+    return `Product-Wise ${source.month} is frozen and verified${frozen}; later exports cannot replace it without an audited override.${fingerprint}`;
+  }
+  const uploaded = source.uploadedAt ? `, last loaded ${fmtDate(source.uploadedAt)}` : "";
+  return `Product-Wise ${source.month} is current and still in progress${uploaded}; it will become immutable at the monthly lock.${fingerprint}`;
 }
 
 const CODE_COLORS: Record<string, string> = {
@@ -693,6 +715,7 @@ export default function AlertsPage() {
       <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
         <span className="font-semibold">Next B3/S1 run · FY {data.coverage.fy}:</span>{" "}
         <p className="mt-1">{rawSkuFreshnessText(data.coverage)}</p>
+        <p className="mt-1">{productWiseFreshnessText(data.coverage)}</p>
         <p className="mt-1">{coverageText(data.coverage)}</p>
       </div>
 

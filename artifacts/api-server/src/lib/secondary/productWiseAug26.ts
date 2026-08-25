@@ -100,12 +100,18 @@ export type ProductWiseAug26LoadProvenance = {
   sourceFile: string;
 };
 
+export type ProductWiseAug26Override = {
+  reason: string;
+  by: string;
+};
+
 export type ProductWiseAug26RecordedProvenance = ProductWiseAug26LoadProvenance & {
   fy: string;
   month: string;
   rows: number;
   net: number;
   valueBasis: typeof AUG26_PRODUCTWISE.valueBasis;
+  controls: ProductWiseAug26Controls;
 };
 
 type MonthSummary = { monthLabel: string; rows: number; net: number };
@@ -130,7 +136,7 @@ export function productWiseMonthFreezeDecision(
     return { month, frozen: true, freezeAt, frozenAt: sharedFrozenAt };
   }
   if (isMonthFrozen(month, now)) {
-    return { month, frozen: true, freezeAt, frozenAt: now };
+    return { month, frozen: true, freezeAt, frozenAt: freezeAt };
   }
   return { month, frozen: false, freezeAt, frozenAt: null };
 }
@@ -406,6 +412,27 @@ export async function prepareProductWiseAug26Load(
   };
 }
 
+/** Manual range uploads replace a whole month, so a small valid subset must
+ * never be allowed to wipe an established month. */
+export function assertProductWiseRangeReplacementCoverage(input: {
+  rowsBefore: number;
+  netBefore: number;
+  rowsIncoming: number;
+  netIncoming: number;
+}): void {
+  const MIN_COVERAGE = 0.98;
+  if (
+    input.rowsBefore > 0 &&
+    (input.rowsIncoming < Math.ceil(input.rowsBefore * MIN_COVERAGE) ||
+      input.netIncoming < input.netBefore * MIN_COVERAGE)
+  ) {
+    throw new Error(
+      `Product-Wise range replacement is materially short: ${input.rowsIncoming}/${input.rowsBefore} rows, ` +
+      `₹${input.netIncoming.toFixed(2)}/₹${input.netBefore.toFixed(2)} net. Existing month was preserved.`,
+    );
+  }
+}
+
 /** Parser for manual Product-Wise range exports. It keeps the reviewed CRM
  * shape and FY boundary, but permits the expected frozen/open overlap. */
 export async function prepareProductWiseRangeLoad(filePath: string): Promise<PreparedProductWiseRangeLoad> {
@@ -463,9 +490,16 @@ export function assertProductWiseAug26UploadMetadata(
   if (metadata.sourceFile.length > 500) throw new Error("source_file must be 500 characters or fewer");
 }
 
+export function assertProductWiseAug26OverrideMetadata(override: ProductWiseAug26Override): void {
+  if (!override.by.trim()) throw new Error("override_by is required for a closed-month override");
+  if (override.by.length > 200) throw new Error("override_by must be 200 characters or fewer");
+  if (!override.reason.trim()) throw new Error("override_reason is required for a closed-month override");
+  if (override.reason.length > 2_000) throw new Error("override_reason must be 2,000 characters or fewer");
+}
+
 export function toProductWiseAug26RecordedProvenance(
   provenance: ProductWiseAug26LoadProvenance,
-  controls: Pick<ProductWiseAug26Controls, "rows" | "net">,
+  controls: ProductWiseAug26Controls,
 ): ProductWiseAug26RecordedProvenance {
   return {
     ...provenance,
@@ -474,7 +508,47 @@ export function toProductWiseAug26RecordedProvenance(
     rows: controls.rows,
     net: controls.net,
     valueBasis: AUG26_PRODUCTWISE.valueBasis,
+    controls,
   };
+}
+
+export type ProductWiseAug26MonthStatus = "not_loaded" | "in_progress" | "frozen_verified";
+
+const EMPTY_CONTROLS: ProductWiseAug26Controls = {
+  rowsScanned: 0, rows: 0, rowsRejected: 0, noMonth: 0, wrongMonth: 0,
+  missingNames: 0, missingItemCode: 0, missingBasicValue: 0, net: 0, qty: 0,
+  retailers: 0, distributors: 0, itemCodes: 0, salespeople: 0, orders: 0,
+  pendingRows: 0, months: [], meanDiscountPct: null, unmappedCategories: [],
+};
+
+function parseControls(value: unknown): ProductWiseAug26Controls {
+  if (!value || typeof value !== "object") return EMPTY_CONTROLS;
+  return { ...EMPTY_CONTROLS, ...(value as Partial<ProductWiseAug26Controls>) };
+}
+
+export function productWiseAug26MonthStatus(
+  hasLoad: boolean,
+  closedAt: string | Date | null,
+  now: Date = new Date(),
+): ProductWiseAug26MonthStatus {
+  if (!hasLoad) return "not_loaded";
+  return closedAt != null || isMonthFrozen(AUG26_PRODUCTWISE.month, now)
+    ? "frozen_verified"
+    : "in_progress";
+}
+
+export function assertProductWiseAug26MonthWritable(
+  state: { hasLoad: boolean; closedAt: string | Date | null },
+  override: ProductWiseAug26Override | null = null,
+  now: Date = new Date(),
+): void {
+  if (productWiseAug26MonthStatus(state.hasLoad, state.closedAt, now) !== "frozen_verified") return;
+  if (override == null) {
+    throw new Error(
+      `Product-Wise ${AUG26_PRODUCTWISE.month} is frozen and verified; replacement requires an explicit audited override`,
+    );
+  }
+  assertProductWiseAug26OverrideMetadata(override);
 }
 
 async function skuMonthSummaries(): Promise<MonthSummary[]> {
@@ -591,12 +665,23 @@ async function assertProductWiseAug26Continuity(
 export async function commitProductWiseAug26Load(
   prepared: PreparedProductWiseAug26Load,
   provenance: ProductWiseAug26LoadProvenance,
+  override: ProductWiseAug26Override | null = null,
   options: { now?: Date } = {},
 ): Promise<ProductWiseAug26CommitResult> {
-  assertProductWiseAug26Controls(prepared);
+  if (override == null) {
+    assertProductWiseAug26Controls(prepared);
+  } else if (
+    prepared.controls.rows === 0 ||
+    prepared.controls.rowsRejected !== 0 ||
+    prepared.controls.months.length !== 1 ||
+    prepared.controls.months[0] !== AUG26_PRODUCTWISE.month
+  ) {
+    throw new Error("Corrected Product-Wise archive must contain only valid Aug-26 rows.");
+  }
   assertProductWiseAug26UploadMetadata(provenance);
   if (!Number.isFinite(Date.parse(provenance.uploadedAt))) throw new Error("uploadedAt must be a valid ISO timestamp");
   if (!/^[a-f0-9]{64}$/.test(provenance.archiveSha256)) throw new Error("archiveSha256 must be a lowercase SHA-256 digest");
+  if (override != null) assertProductWiseAug26OverrideMetadata(override);
 
   let continuity: ProductWiseAug26Continuity | null = null;
   let monthResult: ProductWiseAug26CommitResult["month"] = {
@@ -604,58 +689,40 @@ export async function commitProductWiseAug26Load(
   };
   const now = options.now ?? new Date();
   await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('productwise-aug26-load'))`);
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`productwise-month|${AUG26_PRODUCTWISE.fy}|${AUG26_PRODUCTWISE.month}`}))`);
     const sharedState = await tx.select({ frozenAt: registerMonthState.frozenAt })
       .from(registerMonthState)
       .where(and(
         eq(registerMonthState.fy, AUG26_PRODUCTWISE.fy),
         eq(registerMonthState.monthLabel, AUG26_PRODUCTWISE.month),
       ));
-    const freeze = productWiseMonthFreezeDecision(
-      AUG26_PRODUCTWISE.month,
-      sharedState[0]?.frozenAt ?? null,
-      now,
-    );
-    if (freeze.frozen) {
-      const frozenAt = freeze.frozenAt!;
-      if (sharedState[0]?.frozenAt == null) {
-        await tx.insert(registerMonthState)
-          .values({
-            fy: AUG26_PRODUCTWISE.fy,
-            monthLabel: AUG26_PRODUCTWISE.month,
-            frozenAt,
-          })
-          .onConflictDoUpdate({
-            target: [registerMonthState.fy, registerMonthState.monthLabel],
-            set: { frozenAt },
-          });
-      }
-      const existing = await tx.execute<{ rows: string }>(sql`
-        SELECT COUNT(*)::text AS rows
-          FROM secondary_sku_line
-         WHERE fy = ${AUG26_PRODUCTWISE.fy}
-           AND month_label = ${AUG26_PRODUCTWISE.month}
-           AND source = ${AUG26_PRODUCTWISE.skuSource}
-      `);
-      await tx.execute(sql`
-        UPDATE secondary_sku_line
-           SET frozen_at = ${frozenAt}
-         WHERE fy = ${AUG26_PRODUCTWISE.fy}
-           AND month_label = ${AUG26_PRODUCTWISE.month}
-           AND source = ${AUG26_PRODUCTWISE.skuSource}
-           AND frozen_at IS NULL
-      `);
-      monthResult = {
-        action: "frozen-skipped",
-        rowsBefore: Number(existing.rows[0]?.rows ?? 0),
-        rowsWritten: null,
-        freezeAt: freeze.freezeAt?.toISOString() ?? null,
-      };
-      logger.warn(
-        { fy: AUG26_PRODUCTWISE.fy, month: AUG26_PRODUCTWISE.month, freezeAt: monthResult.freezeAt },
-        "[productwise] frozen month skipped; upload rows were not read into the register",
-      );
-      return;
+    const stateResult = await tx.execute<{ source_fingerprint: string; controls: unknown; closed_at: string | null }>(sql`
+      SELECT source_fingerprint, controls, closed_at::text
+        FROM secondary_sku_month_state
+       WHERE fy = ${AUG26_PRODUCTWISE.fy} AND month_label = ${AUG26_PRODUCTWISE.month}
+         AND source = ${AUG26_PRODUCTWISE.skuSource}
+       FOR UPDATE
+    `);
+    const priorProvenance = await tx.execute<{ archive_sha256: string; controls: unknown }>(sql`
+      SELECT archive_sha256, controls FROM secondary_sku_load_provenance
+       WHERE fy = ${AUG26_PRODUCTWISE.fy} AND month_label = ${AUG26_PRODUCTWISE.month}
+         AND source = ${AUG26_PRODUCTWISE.skuSource}
+       ORDER BY uploaded_at DESC, id DESC LIMIT 1
+    `);
+    const state = stateResult.rows[0];
+    const previousLoad = state ?? priorProvenance.rows[0] ?? null;
+    const closedAt = state?.closed_at ? new Date(state.closed_at)
+      : sharedState[0]?.frozenAt ?? (isMonthFrozen(AUG26_PRODUCTWISE.month, now)
+        ? monthFreezeAt(AUG26_PRODUCTWISE.month)
+        : null);
+    assertProductWiseAug26MonthWritable({ hasLoad: previousLoad != null, closedAt }, override, now);
+    if (closedAt != null && sharedState[0]?.frozenAt == null) {
+      await tx.insert(registerMonthState).values({
+        fy: AUG26_PRODUCTWISE.fy, monthLabel: AUG26_PRODUCTWISE.month, frozenAt: closedAt,
+      }).onConflictDoUpdate({
+        target: [registerMonthState.fy, registerMonthState.monthLabel],
+        set: { frozenAt: closedAt },
+      });
     }
     const targetSources = await tx.execute<{ source: string }>(sql`
       SELECT DISTINCT source
@@ -681,6 +748,20 @@ export async function commitProductWiseAug26Load(
       memberGuardEnabled: true,
     });
     continuity = await assertProductWiseAug26Continuity(tx as any, prepared);
+    if (closedAt != null && override != null) {
+      await tx.execute(sql`
+        INSERT INTO secondary_sku_month_override_audit
+          (fy, month_label, source, previous_fingerprint, replacement_fingerprint,
+           previous_controls, replacement_controls, reason, overridden_by)
+        VALUES
+          (${AUG26_PRODUCTWISE.fy}, ${AUG26_PRODUCTWISE.month}, ${AUG26_PRODUCTWISE.skuSource},
+           ${state?.source_fingerprint ?? priorProvenance.rows[0]?.archive_sha256 ?? null},
+           ${provenance.archiveSha256},
+           ${JSON.stringify(state?.controls ?? priorProvenance.rows[0]?.controls ?? EMPTY_CONTROLS)}::jsonb,
+           ${JSON.stringify(prepared.controls)}::jsonb,
+           ${override.reason.trim()}, ${override.by.trim()})
+      `);
+    }
 
     const before = await tx.execute<{ rows: string }>(sql`
       SELECT COUNT(*)::text AS rows
@@ -696,26 +777,43 @@ export async function commitProductWiseAug26Load(
     for (let offset = 0; offset < prepared.rows.length; offset += 1_000) {
       await tx.insert(secondarySkuLines).values(prepared.rows.slice(offset, offset + 1_000).map((row) => ({
         ...row,
-        frozenAt: null,
+        frozenAt: closedAt,
         sourceFile: provenance.sourceFile,
       })));
     }
     await tx.execute(sql`
       INSERT INTO secondary_sku_load_provenance
         (fy, month_label, source_note, uploaded_by, uploaded_at,
-         archive_sha256, row_count, net_amount, source, value_basis, source_file)
+         archive_sha256, row_count, net_amount, source, value_basis, source_file, controls, verified_at)
       VALUES
         (${AUG26_PRODUCTWISE.fy}, ${AUG26_PRODUCTWISE.month},
          ${provenance.sourceNote.trim()}, ${provenance.uploadedBy.trim()},
          ${new Date(provenance.uploadedAt)}, ${provenance.archiveSha256},
          ${prepared.controls.rows}, ${prepared.controls.net},
-          ${AUG26_PRODUCTWISE.skuSource}, ${AUG26_PRODUCTWISE.valueBasis}, ${provenance.sourceFile})
+           ${AUG26_PRODUCTWISE.skuSource}, ${AUG26_PRODUCTWISE.valueBasis}, ${provenance.sourceFile},
+           ${JSON.stringify(prepared.controls)}::jsonb, ${now})
+    `);
+    await tx.execute(sql`
+      INSERT INTO secondary_sku_month_state
+        (fy, month_label, source, status, source_fingerprint, controls, source_note,
+         uploaded_by, uploaded_at, verified_at, closed_at)
+      VALUES
+        (${AUG26_PRODUCTWISE.fy}, ${AUG26_PRODUCTWISE.month}, ${AUG26_PRODUCTWISE.skuSource},
+         ${closedAt != null ? "frozen_verified" : "in_progress"}, ${provenance.archiveSha256},
+         ${JSON.stringify(prepared.controls)}::jsonb, ${provenance.sourceNote.trim()},
+         ${provenance.uploadedBy.trim()}, ${new Date(provenance.uploadedAt)}, ${now}, ${closedAt})
+      ON CONFLICT (fy, month_label, source) DO UPDATE SET
+        status = EXCLUDED.status, source_fingerprint = EXCLUDED.source_fingerprint,
+        controls = EXCLUDED.controls, source_note = EXCLUDED.source_note,
+        uploaded_by = EXCLUDED.uploaded_by, uploaded_at = EXCLUDED.uploaded_at,
+        verified_at = EXCLUDED.verified_at,
+        closed_at = COALESCE(secondary_sku_month_state.closed_at, EXCLUDED.closed_at)
     `);
     monthResult = {
       action: "loaded",
       rowsBefore: Number(before.rows[0]?.rows ?? 0),
       rowsWritten: prepared.rows.length,
-      freezeAt: null,
+      freezeAt: closedAt?.toISOString() ?? null,
     };
   });
 
@@ -763,10 +861,12 @@ export type ProductWiseRangeMonthResult = {
 export async function commitProductWiseRangeLoad(
   prepared: PreparedProductWiseRangeLoad,
   provenance: ProductWiseAug26LoadProvenance,
+  override: ProductWiseAug26Override | null = null,
   options: { now?: Date } = {},
 ): Promise<{ months: ProductWiseRangeMonthResult[]; skuMonths: MonthSummary[] }> {
   assertProductWiseRangeControls(prepared);
   assertProductWiseAug26UploadMetadata(provenance);
+  if (override != null) assertProductWiseAug26OverrideMetadata(override);
   if (!Number.isFinite(Date.parse(provenance.uploadedAt))) throw new Error("uploadedAt must be a valid ISO timestamp");
   if (!/^[a-f0-9]{64}$/.test(provenance.archiveSha256)) throw new Error("archiveSha256 must be a lowercase SHA-256 digest");
 
@@ -782,21 +882,34 @@ export async function commitProductWiseRangeLoad(
   await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('productwise-range-load'))`);
     for (const [month, incoming] of [...byMonth.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      // Every Product-Wise writer, including the single-month Aug route, takes
+      // this exact lock before its baseline read and destructive replacement.
+      // Sorted range iteration keeps multi-month uploads deadlock-free.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`productwise-month|${AUG26_PRODUCTWISE.fy}|${month}`}))`);
       const sharedState = await tx.select({ frozenAt: registerMonthState.frozenAt })
         .from(registerMonthState)
         .where(and(
           eq(registerMonthState.fy, AUG26_PRODUCTWISE.fy),
           eq(registerMonthState.monthLabel, month),
         ));
+      const priorState = await tx.execute<{ source_fingerprint: string; controls: unknown }>(sql`
+        SELECT source_fingerprint, controls FROM secondary_sku_month_state
+         WHERE fy = ${AUG26_PRODUCTWISE.fy} AND month_label = ${month}
+           AND source = ${AUG26_PRODUCTWISE.skuSource}
+         FOR UPDATE
+      `);
       const freeze = productWiseMonthFreezeDecision(month, sharedState[0]?.frozenAt ?? null, now);
-      const before = await tx.execute<{ rows: string }>(sql`
-        SELECT COUNT(*)::text AS rows
+      const closedAt = freeze.frozen ? freeze.frozenAt : null;
+      const before = await tx.execute<{ rows: string; net: string }>(sql`
+        SELECT COUNT(*)::text AS rows, COALESCE(SUM(net_amount), 0)::text AS net
           FROM secondary_sku_line
          WHERE fy = ${AUG26_PRODUCTWISE.fy}
            AND month_label = ${month}
            AND source = ${AUG26_PRODUCTWISE.skuSource}
       `);
       const rowsBefore = Number(before.rows[0]?.rows ?? 0);
+      const netBefore = Number(before.rows[0]?.net ?? 0);
+      const net = incoming.reduce((sum, row) => sum + Number(row.netAmount ?? 0), 0);
       const plan = productWiseRangeMonthPlan({
         month,
         incomingRows: incoming.length,
@@ -805,7 +918,7 @@ export async function commitProductWiseRangeLoad(
         now,
       });
 
-      if (plan.action === "frozen-skipped") {
+      if (plan.action === "frozen-skipped" && override == null) {
         const frozenAt = freeze.frozenAt!;
         if (sharedState[0]?.frozenAt == null) {
           await tx.insert(registerMonthState)
@@ -845,6 +958,12 @@ export async function commitProductWiseRangeLoad(
       if (foreign.rows[0]) {
         throw new Error(`${month} already contains source '${foreign.rows[0].source}', so Product-Wise will not overwrite it.`);
       }
+      assertProductWiseRangeReplacementCoverage({
+        rowsBefore,
+        netBefore,
+        rowsIncoming: incoming.length,
+        netIncoming: net,
+      });
       await tx.execute(sql`
         DELETE FROM secondary_sku_line
          WHERE fy = ${AUG26_PRODUCTWISE.fy}
@@ -854,21 +973,57 @@ export async function commitProductWiseRangeLoad(
       for (let offset = 0; offset < incoming.length; offset += 1_000) {
         await tx.insert(secondarySkuLines).values(incoming.slice(offset, offset + 1_000).map((row) => ({
           ...row,
-          frozenAt: null,
+          frozenAt: closedAt,
           sourceFile: provenance.sourceFile,
         })));
       }
-      const net = incoming.reduce((sum, row) => sum + Number(row.netAmount ?? 0), 0);
+      const monthControls: ProductWiseAug26Controls = {
+        ...prepared.controls,
+        rowsScanned: incoming.length,
+        rows: incoming.length,
+        net,
+        months: [month],
+      };
       await tx.execute(sql`
         INSERT INTO secondary_sku_load_provenance
           (fy, month_label, source_note, uploaded_by, uploaded_at,
-           archive_sha256, row_count, net_amount, source, value_basis, source_file)
+           archive_sha256, row_count, net_amount, source, value_basis, source_file, controls, verified_at)
         VALUES
           (${AUG26_PRODUCTWISE.fy}, ${month}, ${provenance.sourceNote.trim()},
            ${provenance.uploadedBy.trim()}, ${new Date(provenance.uploadedAt)},
            ${provenance.archiveSha256}, ${incoming.length}, ${net},
-           ${AUG26_PRODUCTWISE.skuSource}, ${AUG26_PRODUCTWISE.valueBasis}, ${provenance.sourceFile})
+           ${AUG26_PRODUCTWISE.skuSource}, ${AUG26_PRODUCTWISE.valueBasis}, ${provenance.sourceFile},
+           ${JSON.stringify(monthControls)}::jsonb, ${now})
       `);
+      await tx.execute(sql`
+        INSERT INTO secondary_sku_month_state
+          (fy, month_label, source, status, source_fingerprint, controls, source_note,
+           uploaded_by, uploaded_at, verified_at, closed_at)
+        VALUES
+          (${AUG26_PRODUCTWISE.fy}, ${month}, ${AUG26_PRODUCTWISE.skuSource},
+           ${closedAt != null ? "frozen_verified" : "in_progress"}, ${provenance.archiveSha256}, ${JSON.stringify(monthControls)}::jsonb,
+           ${provenance.sourceNote.trim()}, ${provenance.uploadedBy.trim()},
+           ${new Date(provenance.uploadedAt)}, ${now}, ${closedAt})
+        ON CONFLICT (fy, month_label, source) DO UPDATE SET
+          status = EXCLUDED.status, source_fingerprint = EXCLUDED.source_fingerprint,
+          controls = EXCLUDED.controls, source_note = EXCLUDED.source_note,
+          uploaded_by = EXCLUDED.uploaded_by, uploaded_at = EXCLUDED.uploaded_at,
+          verified_at = EXCLUDED.verified_at,
+          closed_at = COALESCE(secondary_sku_month_state.closed_at, EXCLUDED.closed_at)
+      `);
+      if (closedAt != null && override != null) {
+        const previous = priorState.rows[0];
+        await tx.execute(sql`
+          INSERT INTO secondary_sku_month_override_audit
+            (fy, month_label, source, previous_fingerprint, replacement_fingerprint,
+             previous_controls, replacement_controls, reason, overridden_by, overridden_at)
+          VALUES
+            (${AUG26_PRODUCTWISE.fy}, ${month}, ${AUG26_PRODUCTWISE.skuSource},
+             ${previous?.source_fingerprint ?? null}, ${provenance.archiveSha256},
+             ${JSON.stringify(previous?.controls ?? {})}::jsonb, ${JSON.stringify(monthControls)}::jsonb,
+             ${override.reason.trim()}, ${override.by.trim()}, ${now})
+        `);
+      }
       results.push({
         month, action: "loaded", incomingRows: incoming.length,
         rowsBefore: plan.rowsBefore, rowsWritten: plan.rowsAfter, freezeAt: null,
@@ -905,9 +1060,16 @@ export async function getProductWiseMonthFreezeStatus(): Promise<ProductWiseMont
     month: row.month_label,
     source: row.source,
     rows: Number(row.rows),
-    frozen: row.frozen_at != null,
-    frozenAt: row.frozen_at,
-    stateFrozenAt: row.state_frozen_at,
+    // Range loads do not schedule a future write merely to stamp row evidence.
+    // The same shared clock remains authoritative for freshness between the
+    // upload and the next operational touch of that month.
+    frozen: row.frozen_at != null || row.state_frozen_at != null || isMonthFrozen(row.month_label),
+    frozenAt: row.frozen_at ?? row.state_frozen_at ?? (
+      isMonthFrozen(row.month_label) ? monthFreezeAt(row.month_label)?.toISOString() ?? null : null
+    ),
+    stateFrozenAt: row.state_frozen_at ?? (
+      isMonthFrozen(row.month_label) ? monthFreezeAt(row.month_label)?.toISOString() ?? null : null
+    ),
     sourceFiles: row.source_files ?? [],
   }));
 }
@@ -924,9 +1086,12 @@ export async function getLatestProductWiseAug26LoadProvenance(): Promise<Product
     net_amount: string;
     value_basis: string;
     source_file: string | null;
+    controls: unknown;
+    verified_at: string | null;
   }>(
     `SELECT fy, month_label, source_note, uploaded_by, uploaded_at::text,
-            archive_sha256, row_count, net_amount::text, value_basis, source_file
+            archive_sha256, row_count, net_amount::text, value_basis, source_file,
+            controls, verified_at::text
        FROM secondary_sku_load_provenance
       WHERE fy = $1 AND month_label = $2 AND source = $3
       ORDER BY uploaded_at DESC, id DESC
@@ -946,5 +1111,57 @@ export async function getLatestProductWiseAug26LoadProvenance(): Promise<Product
     rows: Number(row.row_count),
     net: Number(row.net_amount),
     valueBasis: AUG26_PRODUCTWISE.valueBasis,
+    controls: parseControls(row.controls),
+  };
+}
+
+type ProductWiseStateRow = {
+  fy: string; month_label: string; source: string; status: ProductWiseAug26MonthStatus;
+  source_fingerprint: string; controls: unknown; source_note: string; uploaded_by: string;
+  uploaded_at: string; verified_at: string; closed_at: string | null;
+};
+
+async function latestProductWiseState(): Promise<ProductWiseStateRow | null> {
+  const result = await pool.query<ProductWiseStateRow>(
+    `SELECT fy, month_label, source, status, source_fingerprint, controls, source_note,
+            uploaded_by, uploaded_at::text, verified_at::text, closed_at::text
+       FROM secondary_sku_month_state
+      WHERE fy = $1 AND month_label = $2 AND source = $3 LIMIT 1`,
+    [AUG26_PRODUCTWISE.fy, AUG26_PRODUCTWISE.month, AUG26_PRODUCTWISE.skuSource],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function getProductWiseAug26MonthState(): Promise<{
+  hasLoad: boolean; closedAt: string | null;
+}> {
+  const [state, latest] = await Promise.all([latestProductWiseState(), getLatestProductWiseAug26LoadProvenance()]);
+  return { hasLoad: state != null || latest != null, closedAt: state?.closed_at ?? null };
+}
+
+export type ProductWiseAug26Freshness = {
+  fy: string; month: string; status: ProductWiseAug26MonthStatus;
+  sourceFingerprint: string | null; sourceNote: string | null; uploadedBy: string | null;
+  uploadedAt: string | null; verifiedAt: string | null; frozenAt: string | null;
+  controls: ProductWiseAug26Controls | null;
+};
+
+export async function getProductWiseAug26Freshness(
+  now: Date = new Date(),
+): Promise<ProductWiseAug26Freshness> {
+  const [state, latest] = await Promise.all([latestProductWiseState(), getLatestProductWiseAug26LoadProvenance()]);
+  const hasLoad = state != null || latest != null;
+  const status = productWiseAug26MonthStatus(hasLoad, state?.closed_at ?? null, now);
+  return {
+    fy: AUG26_PRODUCTWISE.fy, month: AUG26_PRODUCTWISE.month, status,
+    sourceFingerprint: state?.source_fingerprint ?? latest?.archiveSha256 ?? null,
+    sourceNote: state?.source_note ?? latest?.sourceNote ?? null,
+    uploadedBy: state?.uploaded_by ?? latest?.uploadedBy ?? null,
+    uploadedAt: state?.uploaded_at ?? latest?.uploadedAt ?? null,
+    verifiedAt: state?.verified_at ?? null,
+    frozenAt: status === "frozen_verified"
+      ? state?.closed_at ?? monthFreezeAt(AUG26_PRODUCTWISE.month)?.toISOString() ?? null
+      : null,
+    controls: state ? parseControls(state.controls) : latest?.controls ?? null,
   };
 }

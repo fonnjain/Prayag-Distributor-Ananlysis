@@ -3318,11 +3318,77 @@ const MIGRATIONS: Migration[] = [
        WHERE source = 'productwise_xlsx'
          AND month_label = 'Aug-26'
          AND source_file IS NULL;
-      UPDATE secondary_sku_load_provenance
-         SET source_file = 'Product-Wise-Secondary-Order-Report_29_6569_19-Aug-2026_1787135138176.xlsx'
-       WHERE source = 'productwise_xlsx'
-         AND month_label = 'Aug-26'
-         AND source_file IS NULL;
+      -- A database which saw migration 077 before this rebased migration
+      -- already protects provenance with an append-only trigger. Temporarily
+      -- pause that one trigger only for this one-time, deterministic legacy
+      -- filename enrichment, then restore it before the migration commits.
+      DO $$
+      DECLARE
+        trigger_exists BOOLEAN;
+      BEGIN
+        SELECT EXISTS (
+          SELECT 1 FROM pg_trigger
+           WHERE tgrelid = 'secondary_sku_load_provenance'::regclass
+             AND tgname = 'secondary_sku_load_provenance_immutable'
+             AND NOT tgisinternal
+        ) INTO trigger_exists;
+        IF trigger_exists THEN
+          EXECUTE 'ALTER TABLE secondary_sku_load_provenance DISABLE TRIGGER secondary_sku_load_provenance_immutable';
+        END IF;
+        UPDATE secondary_sku_load_provenance
+           SET source_file = 'Product-Wise-Secondary-Order-Report_29_6569_19-Aug-2026_1787135138176.xlsx'
+         WHERE source = 'productwise_xlsx'
+           AND month_label = 'Aug-26'
+           AND source_file IS NULL;
+        IF trigger_exists THEN
+          EXECUTE 'ALTER TABLE secondary_sku_load_provenance ENABLE TRIGGER secondary_sku_load_provenance_immutable';
+        END IF;
+      END
+      $$;
+    `,
+  },
+  {
+    id: "077_productwise_month_immutability",
+    sql: `
+      ALTER TABLE secondary_sku_load_provenance
+        ADD COLUMN IF NOT EXISTS controls JSONB NOT NULL DEFAULT '{}'::jsonb,
+        ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+
+      CREATE TABLE IF NOT EXISTS secondary_sku_month_state (
+        fy TEXT NOT NULL, month_label TEXT NOT NULL, source TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('in_progress', 'frozen_verified')),
+        source_fingerprint TEXT NOT NULL, controls JSONB NOT NULL,
+        source_note TEXT NOT NULL, uploaded_by TEXT NOT NULL, uploaded_at TIMESTAMPTZ NOT NULL,
+        verified_at TIMESTAMPTZ NOT NULL, closed_at TIMESTAMPTZ,
+        PRIMARY KEY (fy, month_label, source)
+      );
+      CREATE TABLE IF NOT EXISTS secondary_sku_month_override_audit (
+        id BIGSERIAL PRIMARY KEY, fy TEXT NOT NULL, month_label TEXT NOT NULL, source TEXT NOT NULL,
+        previous_fingerprint TEXT, replacement_fingerprint TEXT NOT NULL,
+        previous_controls JSONB NOT NULL, replacement_controls JSONB NOT NULL,
+        reason TEXT NOT NULL, overridden_by TEXT NOT NULL,
+        overridden_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS secondary_sku_month_override_audit_lookup_idx
+        ON secondary_sku_month_override_audit (fy, month_label, source, overridden_at DESC);
+
+      CREATE OR REPLACE FUNCTION prevent_secondary_sku_provenance_mutation()
+      RETURNS TRIGGER AS $$ BEGIN
+        RAISE EXCEPTION 'secondary_sku_load_provenance is append-only';
+      END; $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS secondary_sku_load_provenance_immutable ON secondary_sku_load_provenance;
+      CREATE TRIGGER secondary_sku_load_provenance_immutable
+        BEFORE UPDATE OR DELETE ON secondary_sku_load_provenance
+        FOR EACH ROW EXECUTE FUNCTION prevent_secondary_sku_provenance_mutation();
+
+      CREATE OR REPLACE FUNCTION prevent_secondary_sku_override_audit_mutation()
+      RETURNS TRIGGER AS $$ BEGIN
+        RAISE EXCEPTION 'secondary_sku_month_override_audit is append-only';
+      END; $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS secondary_sku_month_override_audit_immutable ON secondary_sku_month_override_audit;
+      CREATE TRIGGER secondary_sku_month_override_audit_immutable
+        BEFORE UPDATE OR DELETE ON secondary_sku_month_override_audit
+        FOR EACH ROW EXECUTE FUNCTION prevent_secondary_sku_override_audit_mutation();
     `,
   },
 ];

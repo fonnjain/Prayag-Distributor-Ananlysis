@@ -4,7 +4,12 @@ import {
   AUG26_PRODUCTWISE_SOURCE_FILE,
   assertApprovedAug26ProductWiseArchive,
   assertProductWiseAug26Controls,
+  assertProductWiseAug26MonthWritable,
+  assertProductWiseAug26OverrideMetadata,
   assertProductWiseAug26UploadMetadata,
+  assertProductWiseRangeReplacementCoverage,
+  productWiseAug26MonthStatus,
+  productWiseMonthFreezeDecision,
   productWiseRangeMonthPlan,
   toProductWiseAug26RecordedProvenance,
   type PreparedProductWiseAug26Load,
@@ -71,12 +76,36 @@ describe("Product-Wise Aug-26 source controls", () => {
       rows: 8_602,
       net: 56_403_177,
       valueBasis: "Basic Order Value (ex-GST)",
+      controls: { rows: 8_602, net: 56_403_177 },
     });
   });
 });
 
+describe("Product-Wise month immutability", () => {
+  it("keeps a loaded current month writable until the shared monthly lock", () => {
+    const current = new Date("2026-08-24T12:00:00Z");
+    expect(productWiseAug26MonthStatus(true, null, current)).toBe("in_progress");
+    expect(() => assertProductWiseAug26MonthWritable({ hasLoad: true, closedAt: null }, null, current))
+      .not.toThrow();
+  });
+
+  it("refuses a frozen replacement unless an explicit operator and reason are recorded", () => {
+    const frozen = new Date("2026-09-08T00:00:00Z");
+    expect(productWiseAug26MonthStatus(true, null, frozen)).toBe("frozen_verified");
+    expect(() => assertProductWiseAug26MonthWritable({ hasLoad: true, closedAt: null }, null, frozen))
+      .toThrow(/requires an explicit audited override/);
+    expect(() => assertProductWiseAug26OverrideMetadata({ by: "", reason: "Corrected export" }))
+      .toThrow(/override_by is required/);
+    expect(() => assertProductWiseAug26MonthWritable(
+      { hasLoad: true, closedAt: null },
+      { by: "Data Operations", reason: "Approved correction to the frozen source evidence" },
+      frozen,
+    )).not.toThrow();
+  });
+});
+
 describe("Product-Wise frozen/open range overlap", () => {
-  it("leaves frozen August untouched while fully replacing open September", () => {
+  it("keeps the 7th in the grace window and freezes at the calculated 8th lock instant", () => {
     const now = new Date("2026-09-07T00:00:00.000Z");
     const august = productWiseRangeMonthPlan({
       month: "Aug-26",
@@ -94,10 +123,10 @@ describe("Product-Wise frozen/open range overlap", () => {
     });
 
     expect(august).toMatchObject({
-      action: "frozen-skipped",
+      action: "loaded",
       rowsBefore: 8_602,
-      rowsAfter: 8_602,
-      freezeAt: new Date("2026-09-07T00:00:00.000Z"),
+      rowsAfter: 8_900,
+      freezeAt: null,
     });
     expect(september).toMatchObject({
       action: "loaded",
@@ -105,5 +134,43 @@ describe("Product-Wise frozen/open range overlap", () => {
       rowsAfter: 1_250,
       freezeAt: null,
     });
+    const delayed = productWiseRangeMonthPlan({
+      month: "Aug-26",
+      incomingRows: 8_900,
+      rowsBefore: 8_602,
+      sharedFrozenAt: null,
+      now: new Date("2026-09-10T12:00:00.000Z"),
+    });
+    expect(delayed).toMatchObject({
+      action: "frozen-skipped",
+      rowsBefore: 8_602,
+      rowsAfter: 8_602,
+      freezeAt: new Date("2026-09-08T00:00:00.000Z"),
+    });
+    expect(productWiseMonthFreezeDecision(
+      "Aug-26",
+      null,
+      new Date("2026-09-10T12:00:00.000Z"),
+    ).frozenAt).toEqual(new Date("2026-09-08T00:00:00.000Z"));
+  });
+});
+
+describe("Product-Wise range replacement coverage", () => {
+  it("refuses a truncated range export before it can replace an established month", () => {
+    expect(() => assertProductWiseRangeReplacementCoverage({
+      rowsBefore: 1_000,
+      netBefore: 1_000_000,
+      rowsIncoming: 1,
+      netIncoming: 1_000,
+    })).toThrow(/materially short/);
+  });
+
+  it("accepts a replacement within the monthly row and net tolerance", () => {
+    expect(() => assertProductWiseRangeReplacementCoverage({
+      rowsBefore: 1_000,
+      netBefore: 1_000_000,
+      rowsIncoming: 980,
+      netIncoming: 980_000,
+    })).not.toThrow();
   });
 });

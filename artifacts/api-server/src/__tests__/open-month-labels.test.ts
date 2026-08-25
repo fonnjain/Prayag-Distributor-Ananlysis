@@ -5,19 +5,19 @@ import { describe, it, expect } from "vitest";
 import { openMonthLabels, isMonthFrozen, SHORT_READ_TOLERANCE } from "../lib/registers/monthlyReplace.js";
 
 describe("openMonthLabels", () => {
-  it("1–6 Aug: prior month (edit window) AND current month are both in scope", () => {
+  it("1–7 Aug: prior month (edit window) AND current month are both in scope", () => {
     const now = new Date(Date.UTC(2026, 7, 1, 12)); // 1 Aug 2026
     expect(openMonthLabels("2026-27", now)).toEqual(["Jul-26", "Aug-26"]);
   });
 
-  it("6 Aug: July is still open through the sixth", () => {
-    const now = new Date(Date.UTC(2026, 7, 6, 23, 59, 59));
+  it("7 Aug: July is still open through the inclusive grace day", () => {
+    const now = new Date(Date.UTC(2026, 7, 7, 23, 59, 59));
     expect(isMonthFrozen("Jul-26", now)).toBe(false);
     expect(openMonthLabels("2026-27", now)).toEqual(["Jul-26", "Aug-26"]);
   });
 
-  it("7 Aug 00:00: July freezes, only August remains", () => {
-    const now = new Date(Date.UTC(2026, 7, 7, 0, 0, 0));
+  it("8 Aug 00:00: July freezes, only August remains", () => {
+    const now = new Date(Date.UTC(2026, 7, 8, 0, 0, 0));
     expect(isMonthFrozen("Jul-26", now)).toBe(true);
     expect(openMonthLabels("2026-27", now)).toEqual(["Aug-26"]);
   });

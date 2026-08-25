@@ -14,6 +14,7 @@ import { loadFactoryPending } from "../mgmt/factoryPending.js";
 import { listSheetTabs, readTabRowsChunked } from "../registers/sheetsApi.js";
 import { BOOKING_SHEETS, readBookingAggregated } from "../mgmt/primarySheets.js";
 import { currentOpenFy, priorFy } from "../fyAnchors.js";
+import { getProductWiseAug26Freshness } from "../secondary/productWiseAug26.js";
 
 // ── Anchor types ───────────────────────────────────────────────────────────────
 
@@ -962,6 +963,46 @@ async function runSkuCanaryGroup(): Promise<CheckGroup> {
   }
 }
 
+async function runProductWiseFreshnessGroup(): Promise<CheckGroup> {
+  try {
+    const freshness = await getProductWiseAug26Freshness();
+    const status: CheckStatus = freshness.status === "frozen_verified"
+      ? "pass"
+      : freshness.status === "in_progress"
+        ? "pending"
+        : "warn";
+    const note = freshness.status === "frozen_verified"
+      ? `Product-Wise ${freshness.month} is frozen and verified at ${freshness.frozenAt?.slice(0, 10) ?? "the monthly lock"}; source fingerprint ${freshness.sourceFingerprint ?? "unavailable"} is immutable unless an audited override is recorded.`
+      : freshness.status === "in_progress"
+        ? `Product-Wise ${freshness.month} is loaded and still in progress. It has no recurring source or scheduler; its verified source fingerprint will freeze at the monthly lock.`
+        : `Product-Wise ${freshness.month} has not been loaded, so there is no source fingerprint or verified monthly evidence yet.`;
+    return {
+      id: "productwise_freshness",
+      label: "Group 13 — Product-Wise raw SKU source status",
+      available: true,
+      checks: [{
+        key: "productwise_month_immutability",
+        label: `13.1 — Product-Wise ${freshness.month} source fingerprint and lock state`,
+        unit: "text",
+        expected: null,
+        actual: null,
+        deltaPct: null,
+        status,
+        note,
+      }],
+    };
+  } catch (err) {
+    logger.warn({ err }, "audit: Product-Wise freshness group threw");
+    return {
+      id: "productwise_freshness",
+      label: "Group 13 — Product-Wise raw SKU source status",
+      available: false,
+      pendingNote: `Product-Wise source-state lookup failed — check server logs: ${err instanceof Error ? err.message : String(err)}`,
+      checks: [],
+    };
+  }
+}
+
 // ── Group 10 — Frozen register anchors (independent reconciliation) ──────────
 //
 // Compares the sale_line DB (current rows) against the FROZEN register anchors
@@ -1034,7 +1075,7 @@ export async function runFrozenAnchorGroup(): Promise<CheckGroup> {
 }
 
 export async function runExtraGroups(fy: string): Promise<CheckGroup[]> {
-  const [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag, frozenAnchors, secondaryPipeline, skuCanary] =
+  const [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag, frozenAnchors, secondaryPipeline, skuCanary, productWiseFreshness] =
     await Promise.all([
       runTruncationGroup(),
       runReportLogicGroup(fy),
@@ -1044,6 +1085,7 @@ export async function runExtraGroups(fy: string): Promise<CheckGroup[]> {
       runFrozenAnchorGroup(),
       runSecondaryPipelineGroup(),
       runSkuCanaryGroup(),
+      runProductWiseFreshnessGroup(),
     ]);
-  return [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag, frozenAnchors, secondaryPipeline, skuCanary];
+  return [truncation, reportLogic, crossFoot, pendingCrossCheck, sapLag, frozenAnchors, secondaryPipeline, skuCanary, productWiseFreshness];
 }

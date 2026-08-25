@@ -17,6 +17,7 @@ import type {
 } from "./types.js";
 import { normSecKey } from "../mgmt/names.js";
 import { fyMonthLabels } from "../fyAnchors.js";
+import { isMonthFrozen, monthFreezeAt } from "../registers/monthlyReplace.js";
 
 export type SkuAlertCoverage = {
   fy: string;
@@ -26,6 +27,14 @@ export type SkuAlertCoverage = {
   latestLoadedAt: string | null;
   latestLoadedAgeDays: number | null;
   source: "frozen_primary_months_with_raw_sku";
+  productWise: {
+    month: string;
+    status: "not_loaded" | "in_progress" | "frozen_verified";
+    sourceFingerprint: string | null;
+    uploadedAt: string | null;
+    verifiedAt: string | null;
+    frozenAt: string | null;
+  };
 };
 
 /**
@@ -36,7 +45,7 @@ export type SkuAlertCoverage = {
  * dashboard head-month data as item-level sell-through evidence.
  */
 export async function getSkuAlertCoverage(pool: DbPool, fy: string): Promise<SkuAlertCoverage> {
-  const [frozenResult, skuMonthsResult, latestLoadedResult] = await Promise.all([
+  const [frozenResult, skuMonthsResult, latestLoadedResult, productWiseResult] = await Promise.all([
     pool.query<{ month_label: string }>(
       `SELECT month_label
          FROM register_month_state
@@ -55,6 +64,23 @@ export async function getSkuAlertCoverage(pool: DbPool, fy: string): Promise<Sku
         WHERE fy = $1 AND distributor IS NOT NULL
         GROUP BY month_label
         ORDER BY MAX(ingested_at) DESC NULLS LAST, month_label DESC
+        LIMIT 1`,
+      [fy],
+    ),
+    pool.query<{
+      month_label: string;
+      archive_sha256: string;
+      uploaded_at: string;
+      verified_at: string | null;
+      closed_at: string | null;
+    }>(
+      `SELECT p.month_label, p.archive_sha256, p.uploaded_at::text,
+              p.verified_at::text, s.closed_at::text
+         FROM secondary_sku_load_provenance p
+         LEFT JOIN secondary_sku_month_state s
+           ON s.fy = p.fy AND s.month_label = p.month_label AND s.source = p.source
+        WHERE p.fy = $1 AND p.source = 'productwise_xlsx'
+        ORDER BY p.uploaded_at DESC, p.id DESC
         LIMIT 1`,
       [fy],
     ),
@@ -80,6 +106,10 @@ export async function getSkuAlertCoverage(pool: DbPool, fy: string): Promise<Sku
   const latestLoadedAgeDays = Number.isFinite(latestLoadedAtMs)
     ? Math.max(0, Math.floor((Date.now() - latestLoadedAtMs) / 86_400_000))
     : null;
+  const productWise = productWiseResult.rows[0];
+  const productWiseFrozen = productWise != null && (
+    productWise.closed_at != null || isMonthFrozen(productWise.month_label)
+  );
   return {
     fy,
     evaluatedMonths,
@@ -88,6 +118,20 @@ export async function getSkuAlertCoverage(pool: DbPool, fy: string): Promise<Sku
     latestLoadedAt,
     latestLoadedAgeDays,
     source: "frozen_primary_months_with_raw_sku",
+    productWise: {
+      month: productWise?.month_label ?? "Aug-26",
+      status: productWise == null
+        ? "not_loaded"
+        : productWiseFrozen
+          ? "frozen_verified"
+          : "in_progress",
+      sourceFingerprint: productWise?.archive_sha256 ?? null,
+      uploadedAt: productWise?.uploaded_at ?? null,
+      verifiedAt: productWise?.verified_at ?? null,
+      frozenAt: productWiseFrozen
+        ? productWise?.closed_at ?? monthFreezeAt(productWise?.month_label ?? "Aug-26")?.toISOString() ?? null
+        : null,
+    },
   };
 }
 

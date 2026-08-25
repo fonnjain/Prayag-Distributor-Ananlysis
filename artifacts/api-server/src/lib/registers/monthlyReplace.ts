@@ -16,7 +16,7 @@
 //      If the sheet holds two identical rows, both are written.
 //      Acceptance: rows written equals rows read, exactly.
 //
-// FREEZE RULE: a month freezes permanently at 00:00 UTC on the 7th of the
+// FREEZE RULE: a month freezes permanently at 00:00 UTC on the 8th of the
 // following month, derived from the load date and shared across register sources.
 // (seven days of grace for late entries). Derived from the clock, never a
 // config list. A frozen month is skipped entirely — no read, no write. Its row
@@ -41,7 +41,7 @@ const MONTH_INDEX: Record<string, number> = {
   Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
 };
 
-/** UTC instant at which a month label like "Jul-26" freezes: START OF THE 7TH
+/** UTC instant at which a month label like "Jul-26" freezes: START OF THE 8TH
  *  of the following month. This is the single freeze clock shared by all
  *  register loaders.
  *  Null for unparseable labels (they never freeze). */
@@ -51,8 +51,8 @@ export function monthFreezeAt(monthLabel: string): Date | null {
   const mon = MONTH_INDEX[m[1]];
   if (mon === undefined) return null;
   const year = 2000 + parseInt(m[2], 10);
-  // Start of the 7th of the following month, midnight UTC.
-  return new Date(Date.UTC(mon === 11 ? year + 1 : year, (mon + 1) % 12, 7));
+  // Grace window is inclusive of the 7th; lock at the start of the 8th.
+  return new Date(Date.UTC(mon === 11 ? year + 1 : year, (mon + 1) % 12, 8));
 }
 
 export function isMonthFrozen(monthLabel: string, now: Date = new Date()): boolean {
@@ -65,7 +65,7 @@ const MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct",
 /**
  * Every month label of the FY whose calendar month has STARTED as of `now`
  * and which is not yet frozen. This is the rule-based sync scope: between the
- * 1st and 6th of a month it contains BOTH the prior month (still in its edit
+ * 1st and 7th of a month it contains BOTH the prior month (still in its edit
  * window) and the current month (even if its tab is empty); from the 8th only
  * the current month. Future months are excluded.
  * FY format "2026-27" → Apr-26 … Mar-27.
@@ -222,6 +222,7 @@ async function processOneMonth(
   const sheetRows = monthLines.length;
   const sheetAmount = monthLines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const frozen = isMonthFrozen(month, now);
+  const freezeAt = monthFreezeAt(month);
 
   try {
     return await allowDelete(async (tx) => {
@@ -338,7 +339,7 @@ async function processOneMonth(
         // month unfrozen by a freeze-window correction): clearing it here keeps
         // assertMonthAnchors honest until the real freeze re-records it.
         ...(frozen
-          ? { frozenAt: now, frozenRows: written, frozenAmount: String(sheetAmount) }
+          ? { frozenAt: freezeAt, frozenRows: written, frozenAmount: String(sheetAmount) }
           : { frozenAt: null, frozenRows: null, frozenAmount: null }),
       };
       await tx
@@ -354,7 +355,7 @@ async function processOneMonth(
         // always explains when its source values became permanent.
         await tx
           .update(secondarySkuLines)
-          .set({ frozenAt: now })
+          .set({ frozenAt: freezeAt })
           .where(and(
             eq(secondarySkuLines.fy, fy),
             eq(secondarySkuLines.monthLabel, month),

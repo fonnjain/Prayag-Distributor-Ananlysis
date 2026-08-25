@@ -6,7 +6,7 @@
 // regressions and Guard-3 bypass bugs that unit tests cannot catch.
 
 import { describe, it, expect } from "vitest";
-import { buildDetectionContext } from "../context.js";
+import { buildDetectionContext, getSkuAlertCoverage } from "../context.js";
 import type { DbPool } from "../types.js";
 
 // ── Minimal mock pool factory ─────────────────────────────────────────────────
@@ -20,6 +20,13 @@ function makePool(overrides: {
   frozenMonths?: Array<{ fy: string; month_label: string }>;
   // distSecMonthly rows (query 15) — distributor monthly secondary
   distSecMonthly?: Array<{ fy: string; month_label: string; distributor: string; val: string }>;
+  productWise?: Array<{
+    month_label: string;
+    archive_sha256: string;
+    uploaded_at: string;
+    verified_at: string | null;
+    closed_at: string | null;
+  }>;
 } = {}): DbPool {
   return {
     async query<R = Record<string, unknown>>(sql: string): Promise<{ rows: R[] }> {
@@ -28,6 +35,9 @@ function makePool(overrides: {
       }
       if (sql.includes("register_month_state")) {
         return { rows: (overrides.frozenMonths ?? []) as unknown as R[] };
+      }
+      if (sql.includes("secondary_sku_load_provenance")) {
+        return { rows: (overrides.productWise ?? []) as unknown as R[] };
       }
       // Query 15 — distributor monthly secondary (identified by GROUP BY fy,
       // month_label, distributor on secondary_sku_line with no retailer filter).
@@ -108,6 +118,35 @@ describe("buildDetectionContext — personsByNameKey", () => {
     const ctx = await buildDetectionContext(pool, ["2026-27"]);
     expect(ctx.personsByNameKey.has("")).toBe(false);
     expect(ctx.personsByNameKey.has("someperson")).toBe(false);
+  });
+});
+
+describe("getSkuAlertCoverage — Product-Wise freshness", () => {
+  it("reports an unloaded Product-Wise source without inventing a fingerprint", async () => {
+    const coverage = await getSkuAlertCoverage(makePool(), "2026-27");
+    expect(coverage.productWise).toMatchObject({
+      month: "Aug-26",
+      status: "not_loaded",
+      sourceFingerprint: null,
+    });
+  });
+
+  it("distinguishes a frozen verified Product-Wise month from an in-progress raw-SKU load", async () => {
+    const coverage = await getSkuAlertCoverage(makePool({
+      productWise: [{
+        month_label: "Aug-26",
+        archive_sha256: "a".repeat(64),
+        uploaded_at: "2026-08-24T12:00:00.000Z",
+        verified_at: "2026-08-24T12:15:00.000Z",
+        closed_at: "2026-09-08T00:00:00.000Z",
+      }],
+    }), "2026-27");
+    expect(coverage.productWise).toMatchObject({
+      month: "Aug-26",
+      status: "frozen_verified",
+      sourceFingerprint: "a".repeat(64),
+      frozenAt: "2026-09-08T00:00:00.000Z",
+    });
   });
 });
 

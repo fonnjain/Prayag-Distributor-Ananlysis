@@ -7,10 +7,14 @@ import { isAdminToken } from "../lib/adminAuth.js";
 import {
   assertApprovedAug26ProductWiseArchive,
   assertProductWiseAug26Controls,
+  assertProductWiseAug26MonthWritable,
+  assertProductWiseAug26OverrideMetadata,
   assertProductWiseAug26UploadMetadata,
   AUG26_PRODUCTWISE_SOURCE_FILE,
   commitProductWiseAug26Load,
   commitProductWiseRangeLoad,
+  getProductWiseAug26MonthState,
+  getProductWiseAug26Freshness,
   getProductWiseMonthFreezeStatus,
   getLatestProductWiseAug26LoadProvenance,
   prepareProductWiseAug26Load,
@@ -18,6 +22,7 @@ import {
   assertProductWiseRangeControls,
   type ProductWiseAug26Controls,
   type ProductWiseAug26LoadProvenance,
+  type ProductWiseAug26Override,
 } from "../lib/secondary/productWiseAug26.js";
 import { logger } from "../lib/logger.js";
 
@@ -68,22 +73,40 @@ function provenance(req: Request): Pick<ProductWiseAug26LoadProvenance, "sourceN
   return {
     sourceNote: requestText(req, "source_note", "x-source-note"),
     uploadedBy: requestText(req, "uploaded_by", "x-uploaded-by"),
-    sourceFile: AUG26_PRODUCTWISE_SOURCE_FILE,
+    sourceFile: requestText(req, "source_file", "x-source-file") || AUG26_PRODUCTWISE_SOURCE_FILE,
   };
+}
+
+function override(req: Request): ProductWiseAug26Override | null {
+  const enabled = req.query["override"] === "true";
+  const reason = requestText(req, "override_reason", "x-override-reason");
+  const by = requestText(req, "override_by", "x-override-by");
+  if (!enabled && (reason || by)) throw new Error("A closed-month override must explicitly set override=true.");
+  if (!enabled) return null;
+  const value = { reason, by };
+  assertProductWiseAug26OverrideMetadata(value);
+  return value;
 }
 
 function digest(workbook: Buffer): string {
   return crypto.createHash("sha256").update(workbook).digest("hex");
 }
 
-async function parseAndValidate(workbook: Buffer) {
+async function parseAndValidate(workbook: Buffer, correction = false) {
   if (workbook.length > MAX_WORKBOOK_BYTES) throw new Error("Workbook exceeds the 50 MB source limit.");
   const workDir = await mkdtemp(path.join(tmpdir(), "productwise-aug26-"));
   const filePath = path.join(workDir, "Product-Wise-Secondary-Order-Report.xlsx");
   try {
     await writeFile(filePath, workbook);
     const prepared = await prepareProductWiseAug26Load(filePath);
-    assertProductWiseAug26Controls(prepared);
+    if (correction) {
+      const c = prepared.controls;
+      if (c.rows === 0 || c.rowsRejected !== 0 || c.months.length !== 1 || c.months[0] !== "Aug-26") {
+        throw new Error("Corrected Product-Wise archive must contain only valid Aug-26 rows.");
+      }
+    } else {
+      assertProductWiseAug26Controls(prepared);
+    }
     return prepared;
   } finally {
     await rm(workDir, { recursive: true, force: true });
@@ -115,23 +138,51 @@ router.post(
       return;
     }
     const { sourceNote, uploadedBy, sourceFile } = provenance(req);
+    let monthOverride: ProductWiseAug26Override | null;
+    try {
+      monthOverride = override(req);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+      return;
+    }
     try {
       assertProductWiseAug26UploadMetadata({ sourceNote, uploadedBy, sourceFile });
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : "Valid upload provenance is required." });
       return;
     }
-    const sha256 = digest(workbook);
+    let frozenCorrection = false;
     try {
-      assertApprovedAug26ProductWiseArchive(sha256);
+      frozenCorrection = (await getProductWiseAug26Freshness()).status === "frozen_verified";
     } catch (error) {
-      res.status(422).json({ error: error instanceof Error ? error.message : "Workbook is not approved." });
+      res.status(503).json({ error: `Could not determine Product-Wise month state: ${error instanceof Error ? error.message : String(error)}` });
       return;
+    }
+    if (monthOverride != null && !frozenCorrection) {
+      res.status(409).json({
+        error: "Product-Wise correction overrides are allowed only after the verified month is frozen.",
+      });
+      return;
+    }
+    if (monthOverride == null && frozenCorrection) {
+      res.status(409).json({
+        error: "Product-Wise Aug-26 is frozen and verified; replacement requires an explicit audited override.",
+      });
+      return;
+    }
+    const sha256 = digest(workbook);
+    if (!frozenCorrection) {
+      try {
+        assertApprovedAug26ProductWiseArchive(sha256);
+      } catch (error) {
+        res.status(422).json({ error: error instanceof Error ? error.message : "Workbook is not approved." });
+        return;
+      }
     }
 
     if (req.query["commit"] !== "true") {
       try {
-        const prepared = await parseAndValidate(workbook);
+        const prepared = await parseAndValidate(workbook, frozenCorrection);
         const uploadedAt = new Date().toISOString();
         mostRecentDryRun = {
           sha256,
@@ -170,6 +221,20 @@ router.post(
       res.status(409).json({ error: "Run a successful dry-run for this exact workbook within the last 30 minutes before committing." });
       return;
     }
+    try {
+      assertProductWiseAug26MonthWritable(await getProductWiseAug26MonthState(), monthOverride);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("requires an explicit audited override")) {
+        res.status(409).json({
+          error: message,
+          next: "Re-submit with override=true&override_reason=<reason>&override_by=<operator>.",
+        });
+        return;
+      }
+      res.status(400).json({ error: message });
+      return;
+    }
     if (
       mostRecentDryRun.sourceNote !== sourceNote ||
       mostRecentDryRun.uploadedBy !== uploadedBy ||
@@ -186,14 +251,14 @@ router.post(
     job = { status: "running", startedAt: new Date().toISOString(), finishedAt: null, result: null, error: null };
     void (async () => {
       try {
-        const prepared = await parseAndValidate(workbook);
+        const prepared = await parseAndValidate(workbook, frozenCorrection);
         const result = await commitProductWiseAug26Load(prepared, {
           sourceNote,
           uploadedBy,
           uploadedAt: mostRecentDryRun!.uploadedAt,
           archiveSha256: sha256,
           sourceFile,
-        });
+        }, monthOverride);
         job = { ...job, status: "done", finishedAt: new Date().toISOString(), result: { controls: prepared.controls, ...result } };
         logger.info({ sha256, rows: prepared.controls.rows, net: prepared.controls.net }, "[secondarySkuAug26] load completed");
       } catch (error) {
@@ -227,6 +292,13 @@ router.post(
     const sourceNote = requestText(req, "source_note", "x-source-note");
     const uploadedBy = requestText(req, "uploaded_by", "x-uploaded-by");
     const sourceFile = requestText(req, "source_file", "x-source-file");
+    let monthOverride: ProductWiseAug26Override | null;
+    try {
+      monthOverride = override(req);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+      return;
+    }
     try {
       assertProductWiseAug26UploadMetadata({ sourceNote, uploadedBy, sourceFile });
     } catch (error) {
@@ -282,7 +354,7 @@ router.post(
         const prepared = await parseRangeAndValidate(workbook);
         const result = await commitProductWiseRangeLoad(prepared, {
           sourceNote, uploadedBy, sourceFile, uploadedAt, archiveSha256: sha256,
-        });
+        }, monthOverride);
         rangeJob = { ...rangeJob, status: "done", finishedAt: new Date().toISOString(), result: { controls: prepared.controls, ...result } };
         logger.info({ sha256, months: result.months }, "[productwise] range load completed");
       } catch (error) {
@@ -305,11 +377,12 @@ router.post(
 router.get("/admin/secondary-sku/aug-26/status", async (req: Request, res: Response): Promise<void> => {
   if (!requireAdmin(req, res)) return;
   try {
-    const [latestProvenance, freezeStatus] = await Promise.all([
+    const [latestProvenance, freezeStatus, freshness] = await Promise.all([
       getLatestProductWiseAug26LoadProvenance(),
       getProductWiseMonthFreezeStatus(),
+      getProductWiseAug26Freshness(),
     ]);
-    res.json({ ...job, latestProvenance, freezeStatus });
+    res.json({ ...job, latestProvenance, freezeStatus, freshness });
   } catch (error) {
     req.log.error({ err: error }, "[secondarySkuAug26] status provenance lookup failed");
     res.status(500).json({ error: "Could not read August Product-Wise SKU load provenance." });

@@ -9,7 +9,7 @@ Product-Wise CRM is a source seam, not a rewrite: map its August-onward retailer
 
 **How to apply:** For Product-Wise loads, populate `net_amount` only from Basic Order Value; leave incompatible gross fields null and do not create gross-required mirrors. Require the approved source fingerprint, one-month replacement scope, retained provenance, and the frozen July RET# population-continuity gate. Do not add scheduling or ID-based consumer rewiring until a genuine recurring source is approved.
 
-Product-Wise month permanence shares the existing `register_month_state` and the shared month-freeze clock: a month locks on the 7th of the next month, with no unfreeze path. A range upload skips an already frozen month entirely and full-replaces only its open months; each Product-Wise row retains both its source filename and the shared freeze timestamp.
+Product-Wise month permanence shares the existing `register_month_state` and the shared month-freeze clock: a month locks at midnight UTC on the 8th of the next month, after the inclusive 1st–7th grace window. Frozen replacements require an explicit, append-only audited override; each Product-Wise row retains source filename and freeze evidence.
 
 **Why:** Manual exports routinely include an already-closed month. A separate Product-Wise clock could disagree with the register/margin state and reintroduce duplicate or altered historical figures.
 
