@@ -5,7 +5,6 @@ import {
   assertApprovedAug26ProductWiseArchive,
   assertProductWiseAug26Controls,
   assertProductWiseAug26MonthWritable,
-  assertProductWiseAug26OverrideMetadata,
   assertProductWiseAug26UploadMetadata,
   assertProductWiseRangeReplacementCoverage,
   productWiseAug26MonthStatus,
@@ -14,6 +13,7 @@ import {
   toProductWiseAug26RecordedProvenance,
   type PreparedProductWiseAug26Load,
 } from "./productWiseAug26.js";
+import { monthFreezeAt } from "../registers/monthlyReplace.js";
 
 function prepared(overrides: Partial<PreparedProductWiseAug26Load["controls"]> = {}): PreparedProductWiseAug26Load {
   return {
@@ -85,27 +85,23 @@ describe("Product-Wise month immutability", () => {
   it("keeps a loaded current month writable until the shared monthly lock", () => {
     const current = new Date("2026-08-24T12:00:00Z");
     expect(productWiseAug26MonthStatus(true, null, current)).toBe("in_progress");
-    expect(() => assertProductWiseAug26MonthWritable({ hasLoad: true, closedAt: null }, null, current))
+    expect(() => assertProductWiseAug26MonthWritable({ hasLoad: true, closedAt: null }, current))
       .not.toThrow();
   });
 
-  it("refuses a frozen replacement unless an explicit operator and reason are recorded", () => {
-    const frozen = new Date("2026-09-08T00:00:00Z");
+  it("refuses every frozen-month replacement, including a month that was never loaded", () => {
+    const frozen = new Date("2026-09-07T00:00:00Z");
     expect(productWiseAug26MonthStatus(true, null, frozen)).toBe("frozen_verified");
-    expect(() => assertProductWiseAug26MonthWritable({ hasLoad: true, closedAt: null }, null, frozen))
-      .toThrow(/requires an explicit audited override/);
-    expect(() => assertProductWiseAug26OverrideMetadata({ by: "", reason: "Corrected export" }))
-      .toThrow(/override_by is required/);
-    expect(() => assertProductWiseAug26MonthWritable(
-      { hasLoad: true, closedAt: null },
-      { by: "Data Operations", reason: "Approved correction to the frozen source evidence" },
-      frozen,
-    )).not.toThrow();
+    expect(productWiseAug26MonthStatus(false, null, frozen)).toBe("frozen_verified");
+    expect(() => assertProductWiseAug26MonthWritable({ hasLoad: true, closedAt: null }, frozen))
+      .toThrow(/permanently frozen/);
+    expect(() => assertProductWiseAug26MonthWritable({ hasLoad: false, closedAt: null }, frozen))
+      .toThrow(/permanently frozen/);
   });
 });
 
 describe("Product-Wise frozen/open range overlap", () => {
-  it("keeps the 7th in the grace window and freezes at the calculated 8th lock instant", () => {
+  it("uses monthFreezeAt directly: August is frozen on the 7th while September remains open", () => {
     const now = new Date("2026-09-07T00:00:00.000Z");
     const august = productWiseRangeMonthPlan({
       month: "Aug-26",
@@ -123,10 +119,10 @@ describe("Product-Wise frozen/open range overlap", () => {
     });
 
     expect(august).toMatchObject({
-      action: "loaded",
+      action: "frozen-skipped",
       rowsBefore: 8_602,
-      rowsAfter: 8_900,
-      freezeAt: null,
+      rowsAfter: 8_602,
+      freezeAt: monthFreezeAt("Aug-26"),
     });
     expect(september).toMatchObject({
       action: "loaded",
@@ -134,24 +130,24 @@ describe("Product-Wise frozen/open range overlap", () => {
       rowsAfter: 1_250,
       freezeAt: null,
     });
-    const delayed = productWiseRangeMonthPlan({
+    const beforeFreeze = productWiseRangeMonthPlan({
       month: "Aug-26",
       incomingRows: 8_900,
       rowsBefore: 8_602,
       sharedFrozenAt: null,
-      now: new Date("2026-09-10T12:00:00.000Z"),
+      now: new Date("2026-09-06T23:59:59.999Z"),
     });
-    expect(delayed).toMatchObject({
-      action: "frozen-skipped",
+    expect(beforeFreeze).toMatchObject({
+      action: "loaded",
       rowsBefore: 8_602,
-      rowsAfter: 8_602,
-      freezeAt: new Date("2026-09-08T00:00:00.000Z"),
+      rowsAfter: 8_900,
+      freezeAt: null,
     });
     expect(productWiseMonthFreezeDecision(
       "Aug-26",
       null,
-      new Date("2026-09-10T12:00:00.000Z"),
-    ).frozenAt).toEqual(new Date("2026-09-08T00:00:00.000Z"));
+      now,
+    ).frozenAt).toEqual(monthFreezeAt("Aug-26"));
   });
 });
 

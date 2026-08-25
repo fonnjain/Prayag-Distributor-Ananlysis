@@ -100,11 +100,6 @@ export type ProductWiseAug26LoadProvenance = {
   sourceFile: string;
 };
 
-export type ProductWiseAug26Override = {
-  reason: string;
-  by: string;
-};
-
 export type ProductWiseAug26RecordedProvenance = ProductWiseAug26LoadProvenance & {
   fy: string;
   month: string;
@@ -490,13 +485,6 @@ export function assertProductWiseAug26UploadMetadata(
   if (metadata.sourceFile.length > 500) throw new Error("source_file must be 500 characters or fewer");
 }
 
-export function assertProductWiseAug26OverrideMetadata(override: ProductWiseAug26Override): void {
-  if (!override.by.trim()) throw new Error("override_by is required for a closed-month override");
-  if (override.by.length > 200) throw new Error("override_by must be 200 characters or fewer");
-  if (!override.reason.trim()) throw new Error("override_reason is required for a closed-month override");
-  if (override.reason.length > 2_000) throw new Error("override_reason must be 2,000 characters or fewer");
-}
-
 export function toProductWiseAug26RecordedProvenance(
   provenance: ProductWiseAug26LoadProvenance,
   controls: ProductWiseAug26Controls,
@@ -531,24 +519,16 @@ export function productWiseAug26MonthStatus(
   closedAt: string | Date | null,
   now: Date = new Date(),
 ): ProductWiseAug26MonthStatus {
-  if (!hasLoad) return "not_loaded";
-  return closedAt != null || isMonthFrozen(AUG26_PRODUCTWISE.month, now)
-    ? "frozen_verified"
-    : "in_progress";
+  if (closedAt != null || isMonthFrozen(AUG26_PRODUCTWISE.month, now)) return "frozen_verified";
+  return hasLoad ? "in_progress" : "not_loaded";
 }
 
 export function assertProductWiseAug26MonthWritable(
   state: { hasLoad: boolean; closedAt: string | Date | null },
-  override: ProductWiseAug26Override | null = null,
   now: Date = new Date(),
 ): void {
   if (productWiseAug26MonthStatus(state.hasLoad, state.closedAt, now) !== "frozen_verified") return;
-  if (override == null) {
-    throw new Error(
-      `Product-Wise ${AUG26_PRODUCTWISE.month} is frozen and verified; replacement requires an explicit audited override`,
-    );
-  }
-  assertProductWiseAug26OverrideMetadata(override);
+  throw new Error(`Product-Wise ${AUG26_PRODUCTWISE.month} is permanently frozen and cannot be replaced.`);
 }
 
 async function skuMonthSummaries(): Promise<MonthSummary[]> {
@@ -665,23 +645,12 @@ async function assertProductWiseAug26Continuity(
 export async function commitProductWiseAug26Load(
   prepared: PreparedProductWiseAug26Load,
   provenance: ProductWiseAug26LoadProvenance,
-  override: ProductWiseAug26Override | null = null,
   options: { now?: Date } = {},
 ): Promise<ProductWiseAug26CommitResult> {
-  if (override == null) {
-    assertProductWiseAug26Controls(prepared);
-  } else if (
-    prepared.controls.rows === 0 ||
-    prepared.controls.rowsRejected !== 0 ||
-    prepared.controls.months.length !== 1 ||
-    prepared.controls.months[0] !== AUG26_PRODUCTWISE.month
-  ) {
-    throw new Error("Corrected Product-Wise archive must contain only valid Aug-26 rows.");
-  }
+  assertProductWiseAug26Controls(prepared);
   assertProductWiseAug26UploadMetadata(provenance);
   if (!Number.isFinite(Date.parse(provenance.uploadedAt))) throw new Error("uploadedAt must be a valid ISO timestamp");
   if (!/^[a-f0-9]{64}$/.test(provenance.archiveSha256)) throw new Error("archiveSha256 must be a lowercase SHA-256 digest");
-  if (override != null) assertProductWiseAug26OverrideMetadata(override);
 
   let continuity: ProductWiseAug26Continuity | null = null;
   let monthResult: ProductWiseAug26CommitResult["month"] = {
@@ -715,7 +684,7 @@ export async function commitProductWiseAug26Load(
       : sharedState[0]?.frozenAt ?? (isMonthFrozen(AUG26_PRODUCTWISE.month, now)
         ? monthFreezeAt(AUG26_PRODUCTWISE.month)
         : null);
-    assertProductWiseAug26MonthWritable({ hasLoad: previousLoad != null, closedAt }, override, now);
+    assertProductWiseAug26MonthWritable({ hasLoad: previousLoad != null, closedAt }, now);
     if (closedAt != null && sharedState[0]?.frozenAt == null) {
       await tx.insert(registerMonthState).values({
         fy: AUG26_PRODUCTWISE.fy, monthLabel: AUG26_PRODUCTWISE.month, frozenAt: closedAt,
@@ -748,21 +717,6 @@ export async function commitProductWiseAug26Load(
       memberGuardEnabled: true,
     });
     continuity = await assertProductWiseAug26Continuity(tx as any, prepared);
-    if (closedAt != null && override != null) {
-      await tx.execute(sql`
-        INSERT INTO secondary_sku_month_override_audit
-          (fy, month_label, source, previous_fingerprint, replacement_fingerprint,
-           previous_controls, replacement_controls, reason, overridden_by)
-        VALUES
-          (${AUG26_PRODUCTWISE.fy}, ${AUG26_PRODUCTWISE.month}, ${AUG26_PRODUCTWISE.skuSource},
-           ${state?.source_fingerprint ?? priorProvenance.rows[0]?.archive_sha256 ?? null},
-           ${provenance.archiveSha256},
-           ${JSON.stringify(state?.controls ?? priorProvenance.rows[0]?.controls ?? EMPTY_CONTROLS)}::jsonb,
-           ${JSON.stringify(prepared.controls)}::jsonb,
-           ${override.reason.trim()}, ${override.by.trim()})
-      `);
-    }
-
     const before = await tx.execute<{ rows: string }>(sql`
       SELECT COUNT(*)::text AS rows
         FROM secondary_sku_line
@@ -861,12 +815,10 @@ export type ProductWiseRangeMonthResult = {
 export async function commitProductWiseRangeLoad(
   prepared: PreparedProductWiseRangeLoad,
   provenance: ProductWiseAug26LoadProvenance,
-  override: ProductWiseAug26Override | null = null,
   options: { now?: Date } = {},
 ): Promise<{ months: ProductWiseRangeMonthResult[]; skuMonths: MonthSummary[] }> {
   assertProductWiseRangeControls(prepared);
   assertProductWiseAug26UploadMetadata(provenance);
-  if (override != null) assertProductWiseAug26OverrideMetadata(override);
   if (!Number.isFinite(Date.parse(provenance.uploadedAt))) throw new Error("uploadedAt must be a valid ISO timestamp");
   if (!/^[a-f0-9]{64}$/.test(provenance.archiveSha256)) throw new Error("archiveSha256 must be a lowercase SHA-256 digest");
 
@@ -892,12 +844,6 @@ export async function commitProductWiseRangeLoad(
           eq(registerMonthState.fy, AUG26_PRODUCTWISE.fy),
           eq(registerMonthState.monthLabel, month),
         ));
-      const priorState = await tx.execute<{ source_fingerprint: string; controls: unknown }>(sql`
-        SELECT source_fingerprint, controls FROM secondary_sku_month_state
-         WHERE fy = ${AUG26_PRODUCTWISE.fy} AND month_label = ${month}
-           AND source = ${AUG26_PRODUCTWISE.skuSource}
-         FOR UPDATE
-      `);
       const freeze = productWiseMonthFreezeDecision(month, sharedState[0]?.frozenAt ?? null, now);
       const closedAt = freeze.frozen ? freeze.frozenAt : null;
       const before = await tx.execute<{ rows: string; net: string }>(sql`
@@ -918,7 +864,7 @@ export async function commitProductWiseRangeLoad(
         now,
       });
 
-      if (plan.action === "frozen-skipped" && override == null) {
+      if (plan.action === "frozen-skipped") {
         const frozenAt = freeze.frozenAt!;
         if (sharedState[0]?.frozenAt == null) {
           await tx.insert(registerMonthState)
@@ -1011,19 +957,6 @@ export async function commitProductWiseRangeLoad(
           verified_at = EXCLUDED.verified_at,
           closed_at = COALESCE(secondary_sku_month_state.closed_at, EXCLUDED.closed_at)
       `);
-      if (closedAt != null && override != null) {
-        const previous = priorState.rows[0];
-        await tx.execute(sql`
-          INSERT INTO secondary_sku_month_override_audit
-            (fy, month_label, source, previous_fingerprint, replacement_fingerprint,
-             previous_controls, replacement_controls, reason, overridden_by, overridden_at)
-          VALUES
-            (${AUG26_PRODUCTWISE.fy}, ${month}, ${AUG26_PRODUCTWISE.skuSource},
-             ${previous?.source_fingerprint ?? null}, ${provenance.archiveSha256},
-             ${JSON.stringify(previous?.controls ?? {})}::jsonb, ${JSON.stringify(monthControls)}::jsonb,
-             ${override.reason.trim()}, ${override.by.trim()}, ${now})
-        `);
-      }
       results.push({
         month, action: "loaded", incomingRows: incoming.length,
         rowsBefore: plan.rowsBefore, rowsWritten: plan.rowsAfter, freezeAt: null,

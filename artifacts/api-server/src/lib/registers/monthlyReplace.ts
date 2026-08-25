@@ -41,7 +41,7 @@ const MONTH_INDEX: Record<string, number> = {
   Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
 };
 
-/** UTC instant at which a month label like "Jul-26" freezes: START OF THE 8TH
+/** UTC instant at which a month label like "Jul-26" freezes: START OF THE 7TH
  *  of the following month. This is the single freeze clock shared by all
  *  register loaders.
  *  Null for unparseable labels (they never freeze). */
@@ -51,8 +51,7 @@ export function monthFreezeAt(monthLabel: string): Date | null {
   const mon = MONTH_INDEX[m[1]];
   if (mon === undefined) return null;
   const year = 2000 + parseInt(m[2], 10);
-  // Grace window is inclusive of the 7th; lock at the start of the 8th.
-  return new Date(Date.UTC(mon === 11 ? year + 1 : year, (mon + 1) % 12, 8));
+  return new Date(Date.UTC(mon === 11 ? year + 1 : year, (mon + 1) % 12, 7));
 }
 
 export function isMonthFrozen(monthLabel: string, now: Date = new Date()): boolean {
@@ -65,8 +64,8 @@ const MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct",
 /**
  * Every month label of the FY whose calendar month has STARTED as of `now`
  * and which is not yet frozen. This is the rule-based sync scope: between the
- * 1st and 7th of a month it contains BOTH the prior month (still in its edit
- * window) and the current month (even if its tab is empty); from the 8th only
+ * 1st and 6th of a month it contains BOTH the prior month (still in its edit
+ * window) and the current month (even if its tab is empty); from the 7th only
  * the current month. Future months are excluded.
  * FY format "2026-27" → Apr-26 … Mar-27.
  */

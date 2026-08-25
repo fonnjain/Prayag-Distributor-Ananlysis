@@ -3362,15 +3362,6 @@ const MIGRATIONS: Migration[] = [
         verified_at TIMESTAMPTZ NOT NULL, closed_at TIMESTAMPTZ,
         PRIMARY KEY (fy, month_label, source)
       );
-      CREATE TABLE IF NOT EXISTS secondary_sku_month_override_audit (
-        id BIGSERIAL PRIMARY KEY, fy TEXT NOT NULL, month_label TEXT NOT NULL, source TEXT NOT NULL,
-        previous_fingerprint TEXT, replacement_fingerprint TEXT NOT NULL,
-        previous_controls JSONB NOT NULL, replacement_controls JSONB NOT NULL,
-        reason TEXT NOT NULL, overridden_by TEXT NOT NULL,
-        overridden_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      );
-      CREATE INDEX IF NOT EXISTS secondary_sku_month_override_audit_lookup_idx
-        ON secondary_sku_month_override_audit (fy, month_label, source, overridden_at DESC);
 
       CREATE OR REPLACE FUNCTION prevent_secondary_sku_provenance_mutation()
       RETURNS TRIGGER AS $$ BEGIN
@@ -3380,15 +3371,16 @@ const MIGRATIONS: Migration[] = [
       CREATE TRIGGER secondary_sku_load_provenance_immutable
         BEFORE UPDATE OR DELETE ON secondary_sku_load_provenance
         FOR EACH ROW EXECUTE FUNCTION prevent_secondary_sku_provenance_mutation();
-
-      CREATE OR REPLACE FUNCTION prevent_secondary_sku_override_audit_mutation()
-      RETURNS TRIGGER AS $$ BEGIN
-        RAISE EXCEPTION 'secondary_sku_month_override_audit is append-only';
-      END; $$ LANGUAGE plpgsql;
-      DROP TRIGGER IF EXISTS secondary_sku_month_override_audit_immutable ON secondary_sku_month_override_audit;
-      CREATE TRIGGER secondary_sku_month_override_audit_immutable
-        BEFORE UPDATE OR DELETE ON secondary_sku_month_override_audit
-        FOR EACH ROW EXECUTE FUNCTION prevent_secondary_sku_override_audit_mutation();
+    `,
+  },
+  {
+    id: "078_remove_productwise_override_path",
+    sql: `
+      -- 077 was applied in development before the strict no-override policy
+      -- was settled. Production receives strict 077; this cleans that earlier
+      -- development-only artifact without granting any writer an exception.
+      DROP TABLE IF EXISTS secondary_sku_month_override_audit;
+      DROP FUNCTION IF EXISTS prevent_secondary_sku_override_audit_mutation();
     `,
   },
 ];
