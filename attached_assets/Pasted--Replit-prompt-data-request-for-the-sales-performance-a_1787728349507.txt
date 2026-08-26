@@ -1,0 +1,169 @@
+# Replit prompt — data request for the sales performance analysis
+
+Copy everything below the horizontal rule into Replit.
+
+---
+
+## Context
+
+A commercial analysis has already been run against `prayag_analysis_export_2026-08-26`. It reconciled exactly to all sixteen anchors, so the primary sales register is trusted. This is a request for the data needed to extend that analysis into **sales-force and field performance** — an area the current export cannot support at all.
+
+Please read the whole request first, then work in the priority order given. **Everything in P1 is blocking**: without it the specific questions being asked cannot be answered, and I would rather know that than produce something that looks like an answer.
+
+## Hard rules
+
+1. **Read-only.** No writes, no migrations, no schema changes, no publish.
+2. **Never zero-fill or drop rows.** A missing value and a zero must stay distinguishable. Several findings in the last analysis turned on exactly that.
+3. **If something does not exist, say so explicitly in the README** — "X was requested and does not exist because Y". Do not send an empty CSV with headers.
+4. **Transaction-level, not aggregated.** Item-level, line-level, visit-level.
+5. **Preserve raw source shape** — original headers, `source_file`, `source_tab`, `source_row` on every row, as the last export did.
+
+---
+
+## Already held — please do NOT re-export
+
+To save your time, these are complete and reconciled. Nothing further is needed:
+
+| Held | Detail |
+|---|---|
+| Primary sales register, both FYs | `01_sale_line_fy2025-26`, `02_sale_line_fy2026-27` — item-level, with qty, rate, amount, customer, state, head, channel |
+| Secondary sell-through | `04_secondary_sku_line` — 511,367 rows |
+| Item master and MRP catalogue | `16_mrp_current_catalogue`, `17_mrp_history`, `19_item_master` |
+| Factory cost by item and month | `18_margin_fact` |
+| Org roster and hierarchy | `07_person`, `09_person_state_coverage`, `11_designation` |
+| Customer master and links | `12_customer`, `13_customer_assignment`, `14_customer_link`, `15_customer_master_raw` |
+| Schemes, alerts, seasonal curve | `20`–`24` |
+
+**Questions I can already answer with the above**, so please do not build anything for these: SKU breadth and concentration; SKU add/drop between periods; volume-versus-rate decomposition; discount and realised-price dispersion by customer, state and head; customer churn and contribution ranking; state and head-level performance.
+
+---
+
+## P1 — Blocking
+
+### 1.1 Salesperson attribution on the sales line
+
+**This is the single biggest gap.** The primary sales register has **no salesperson column of any kind** — only `head_canon`, which has 12 distinct values. Sales can be attributed to a State Head but **not to any of the 178 active individuals** below them.
+
+The only place an individual name appears anywhere in the export is `06_secondary_order_line.csv`, which has `sales_user_name` and `sales_user_id` — and covers **1–19 August 2026 only**, 8,602 rows. Nineteen days is not a performance record.
+
+Without this, none of the following can be produced: per-salesperson revenue, per-salesperson growth or decline, poor-performer identification, or cost-to-serve per head.
+
+Please provide **one** of the following, in order of preference:
+
+- **(a)** The salesperson (`person_id` / `employee_code`) on each **invoice line or invoice header**, for both fiscal years. Best option by far.
+- **(b)** `sales_user_name` / `sales_user_id` on the **full secondary order history**, not just August 2026 — as far back as the CRM holds it, across both the PSCode 3 and Product-Wise eras.
+- **(c)** A **historically effective-dated** customer-to-person assignment: `customer_id`, `person_id`, `effective_from`, `effective_to`. The current `13_customer_assignment` has every row stamped `effective_from = 2026-08-15` from `seed_import`, so it is a snapshot with no history — I cannot use it to attribute a sale made in October 2025 to whoever owned the account then.
+
+If none of these exist, say so plainly. It changes what the analysis can honestly claim, and I will scope the salesperson questions out rather than fake them.
+
+### 1.2 Travel and expense data
+
+**There is nothing at all in the current export on travel, expenses, attendance or field visits.** No table, no column. So "travel cost" and "useless travel" cannot be approached even approximately.
+
+Please export whatever exists:
+
+- **Expense claims**: `person_id`, `claim_date`, `expense_type` (travel / fuel / lodging / daily allowance / other), `amount`, `from_location`, `to_location`, `distance_km`, `approval_status`, `approved_amount`
+- **Travel or tour plans**: planned itinerary per person per period, if the business runs one
+- **Salary or cost-to-company per person**, or at least per grade — needed for cost-to-serve; a grade-level band is fine if individual figures are sensitive
+
+If expenses live in a separate HR or accounting system rather than this app, please say which system and export from there if you can reach it read-only.
+
+### 1.3 Field visit / beat data
+
+To distinguish productive travel from unproductive travel I need visits, not just costs.
+
+Please export, per visit: `person_id`, `visit_date`, `visit_time`, `retailer_id` (RET#) or `customer_id`, `visit_type` (planned / unplanned), `outcome` (order taken / no order / not met), `order_id` where one resulted, and **geotag / latitude / longitude if the CRM captures it**.
+
+Also: the **beat plan** — which retailers each person is supposed to cover, at what frequency.
+
+With visits plus orders I can measure visit-to-order conversion, visits producing no order, and coverage against beat plan. Without visits, "useless travel" is not measurable by any route — spend alone cannot distinguish a wasted trip from a necessary one.
+
+### 1.4 Retailer identity on FY2025-26 secondary
+
+Retailer churn — "which retailers were dropped" — is currently **not measurable across the year boundary**.
+
+`retailer_id` is populated on only **12–15% of FY2025-26** secondary rows but **100% of FY2026-27** rows. The apparent jump from 480 to 6,194 active retailers between Apr–Jul 2025 and Apr–Jul 2026 is entirely a data-capture artefact, not growth. Any churn number computed across that boundary today would be fiction.
+
+Please backfill `retailer_id` (RET#) onto the FY2025-26 secondary rows from the source CRM, or supply the mapping needed to do it. If the FY2025-26 source genuinely never carried RET#, confirm that — I will then measure retailer churn only from August 2026 forward and say so.
+
+### 1.5 Targets — per person, and for FY2025-26
+
+`20_targets.csv` holds **100 rows: FY2026-27 only, Apr–Jul only, state-head level only**, nine heads, `role = state_head`.
+
+So there is no FY2025-26 target to measure last year against, and no target below State Head to judge an individual against.
+
+Please export all targets held, at every level: `fy`, `month`, `person_id` or `head`, `state`, `segment` or `category` if targets are set that way, `target_value`, and whether the target is in rupees or pieces. Both fiscal years.
+
+---
+
+## P2 — Materially improves the analysis
+
+### 2.1 Retailer and distributor master with lifecycle dates
+
+To separate "dropped" from "never existed" and from "renamed", I need: `retailer_id` / `customer_id`, name, `status`, `date_onboarded`, `date_closed` or `date_inactive`, reason where recorded, assigned distributor, and assigned person.
+
+Note that retailer name matching is already known to be unreliable — only 273 of 718 FY2025-26 traders matched the CRM master on exact name, and looser matching made it worse. So please key on RET# / customer_id, not name.
+
+### 2.2 Full secondary order history
+
+`06_secondary_order_line.csv` covers 1–19 August 2026 only. The full history would deliver three things at once:
+
+- salesperson attribution (see 1.1b)
+- order-to-invoice conversion and service level
+- **it would settle the month-end concentration question.** 65–72% of invoice value lands in the last five days of the month. The current order file never reaches a month end, so it cannot test whether that is commercial ordering behaviour or a billing artefact.
+
+### 2.3 Order-to-invoice linkage
+
+If an order line can be tied to the invoice line that fulfilled it — `order_id` → `invoice_no`, with dates — I can measure fill rate, lead time, and orders that were never fulfilled. That is a much better "red flag" source than inferring from stockouts.
+
+### 2.4 Returns, credit notes and rejections
+
+Nothing in the current export covers goods coming back. Please export credit notes and sales returns at line level: date, customer, item, qty, value, reason. A rising return rate on a customer or an item is one of the clearest early red flags available, and right now it is invisible.
+
+### 2.5 Receivables and outstanding ageing
+
+Also entirely absent. Per customer: outstanding balance, ageing buckets (0–30 / 31–60 / 61–90 / 90+), credit limit, days beyond terms. A customer growing in revenue while ageing out on payment is a red flag that revenue analysis alone cannot see.
+
+### 2.6 Scheme payouts actually paid
+
+`22_schemes.csv` holds scheme definitions and slabs, but not what was **paid**. Please export actual scheme settlements: customer, scheme, period, qualifying volume, amount credited, settlement date. Discount analysis showed net price variation is very tight (IQR 98.7–101.8 on a mix-neutral index) — so if real commercial variation exists between customers, it is likely to be in scheme payouts rather than invoice price.
+
+---
+
+## P3 — Useful
+
+### 3.1 Retailer geolocation
+
+Latitude and longitude per retailer, or at least pincode. Combined with visit data this makes territory efficiency and route overlap measurable — two people covering the same town, or a person travelling past three retailers to reach a fourth.
+
+### 3.2 Competitor pricing and market survey
+
+`25_market_survey.csv` has 7 rows and `26_competitor_price.csv` has 150. If more exists, please send it. If that genuinely is all of it, confirm — I will treat competitive position as out of scope rather than generalise from 150 observations.
+
+### 3.3 Product launch and discontinuation dates
+
+Per item: date introduced, date discontinued. Currently a code that stops selling and a code that was withdrawn look identical, so "SKU dropped" mixes commercial failure with planned rationalisation.
+
+---
+
+## Output format
+
+- CSV, UTF-8, headers, one file per table or source.
+- `source_file`, `source_tab`, `source_row` on every spreadsheet-derived row.
+- `manifest.json` — every file with row count, source query or path, and date range.
+- `README.md` with: the database host and name; the deployed commit SHA verified from `/api/healthz`; a **known-bad / compromised periods** section; and an explicit list of **everything in this request that could not be provided, and why**.
+
+## Reconciliation anchors
+
+Please include an `anchors.csv` so I can prove the export before analysing it:
+
+- FY2025-26 and FY2026-27 primary: row count and net value per month and per head — these matched to the rupee last time, which let me start work immediately
+- Secondary: net value and distinct RET# count per month
+- Expense: total claimed and total approved per month per head
+- Visits: count per month per person
+- Targets: total target value per FY per head
+
+## Please note
+
+- The known-bad-months section in the refreshed planning export was the most useful single thing in it. Please include the equivalent here — any month where a source changed shape, was renamed, re-keyed, or was partially captured.
+- Two specific issues already identified that should be flagged if they persist: the FY2025-26 vs FY2026-27 secondary source change (`sheets_sku_backfill` → `pscode3_xlsx` → `productwise_xlsx`), and the `retailer_id` population jump described in 1.4.

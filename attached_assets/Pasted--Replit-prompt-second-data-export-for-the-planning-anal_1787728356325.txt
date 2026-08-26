@@ -1,0 +1,175 @@
+# Replit prompt — second data export for the planning analysis
+
+Copy everything below the line into Replit.
+
+---
+
+## Context
+
+A planning analysis was run against `prayag-planning-export-2026-08-26`. It reconciled where it could, but several questions could not be answered because the data was not in the export. This is a request for a **second, read-only export** that fills those gaps.
+
+Please read the whole request before starting, and work through it in the priority order given. **P1 items are blocking** — without them the analysis cannot be completed at all. P2 improves accuracy. P3 is useful but optional.
+
+## Hard rules
+
+1. **Read-only.** No code changes, no writes, no migrations, no publish, no schema changes. If a request cannot be satisfied without a write, skip it and record it in the README.
+2. **Export from the PRODUCTION database, not the development one.** The previous export came from `heliumdb on helium`, which is the dev/export database. Name the host and database of *this* export explicitly in the README, and state the deployed commit SHA verified from `/api/healthz`.
+3. **Never zero-fill.** If a value is missing, unreadable, or the source is absent, leave it `NULL` and document it. A zero and an unknown must be distinguishable. Several findings in the last analysis turned on exactly this.
+4. **Preserve raw source shape.** For any spreadsheet source, export the raw cell values with the original header row(s) intact. Do not normalise, rename, or re-map columns during export.
+5. **Populate every column you emit.** In the last export, `stock_snapshots.quantity` was `NULL` for all 9,223 rows and the real values were only recoverable from `raw_json`. If a column exists in the CSV, fill it.
+6. **If something does not exist, say so.** Do not emit an empty CSV with headers and leave me to infer. Add an explicit line to the README: *"X was requested and does not exist because Y."* That answer is genuinely useful.
+
+---
+
+## P1 — Blocking
+
+### 1.1 Real plan history, monthly, per segment
+
+The last export contained 86 plan runs, of which 82 carried a test note (`suite-NC9`, `debug-test`, `type-fix-test`, `final-verify`, `Item-6 smoke test`). Only three were finalized, and the only finalized PTMT plan was a smoke test. As a result **planned-vs-produced cannot be compared for any historic month**.
+
+Please export, from production:
+
+- `plan_runs`, `plan_run_results`, `plan_run_inputs`, `plan_run_input_snapshots` — **all rows, all months, both segments**, with `status` and `note` preserved.
+- Add a boolean column `is_production_run` distinguishing real planning activity from test/QA traffic, using whatever marker the production system actually uses. If no such marker exists, say so.
+- `corrective_plan_runs` and `corrective_plan_items` — all months.
+- `plant_month_snapshots` — all months, with `payload_json` intact.
+
+**If production has no plan history before July 2026**, then instead export the *source planning workbooks* Prayag used before the app existed — the Google Sheets or Excel files that held the monthly Max/Min production plan per item. One tab per month is fine. State clearly which months exist and which do not.
+
+Anchor to include: for each month and segment, the plan grand total (Max) and the item count.
+
+### 1.2 Monthly finished-goods stock snapshots, historic
+
+Only two stock snapshots existed: `CURRENT_STOCK_July_2026.csv` (6 July) and `F.G Stock on 1st Aug 2026.xlsx` (5 August). Four weeks apart. This makes it impossible to say whether stock is rising or falling, where cash is accumulating, or whether it is accelerating.
+
+Please export **every FG stock file that exists**, monthly, as far back as they go — ideally April 2025 onward, both PTMT and Plumbing.
+
+For each: `month`, `snapshot_date`, `item_code`, `colour`, `quantity`, `source_filename`. Populate `quantity` directly; do not leave it in `raw_json` only. Note that these files have used at least four different quantity headers (`Qty`, `Closing Stock`, `Qty.`, `Net Stock`) — resolve them into one populated column and record which header each file used.
+
+### 1.3 Item value — weight and/or price per item
+
+`item_weights` had **0 rows**. Every figure in the analysis is therefore in pieces, and nothing can be expressed in rupees. This blocks two of the five rules in the proposed planning method outright (class by value; plan in rupees).
+
+Please provide, per `item_code` (and colour where it varies):
+
+- weight in kg per piece, and/or
+- standard cost or factory cost per piece, and/or
+- MRP or list price per piece
+
+Any one of these unblocks valuation. All three would be better. If they live outside the app — in an ERP, a price list, or a costing sheet — export from there and say where it came from.
+
+### 1.4 The complete item master, with a component flag
+
+Two separate problems here.
+
+**(a) Missing codes.** 28.7% of PTMT production (3,860,412 pcs over 17 months) sits on codes absent from `item_master`, as does 27.7% of finished-goods stock. 91% of the gap is 25 codes, mostly in the CONNECTION and WASTE PIPE groups — including `324`, `3272`, `323`, `327`, `326`, `342`. These codes are ordered, sold and stocked, but the planner cannot see them.
+
+Please export the **authoritative full item list** — every code the business actually makes or sells — with `item_code`, `colour`, `category`, `segment`, and `is_active`.
+
+**(b) Component vs finished good.** This one is important and is a new finding. Measuring waste as produced-minus-sold gives a spectacular false positive: Ball Cock code `174` shows 173,345 produced against 790 sold, a 219× ratio. It is not waste — those codes are sub-assemblies (*BALL COCK BODY WITHOUT ROD BALL*, *BALL COCK ROD ALUMINIUM*) consumed internally into finished items that sell under different codes. The finished-goods stock file proves it: Ball Cock holds 31,232 pcs, not 897,160.
+
+Please add, per item, either:
+
+- a flag `item_type` ∈ {finished_good, sub_assembly, raw_material}, **or**
+- a **bill of materials / parent-child table**: `parent_item_code`, `child_item_code`, `qty_per_parent`
+
+The BOM is much more valuable if it exists. Without one of these, any waste measure built on production against sales will misclassify every intermediate in the range.
+
+### 1.5 Item-code crosswalk between the two sales systems
+
+FY2025-26 sales use a column called `Old Item Code`; FY2026-27 sales use `Item Code`. Only 3,400 codes overlap between the two sets, and total quantities are roughly double in FY26-27 on similar row counts — so the two registers are not directly comparable.
+
+Please export a mapping table: `old_erp_code` → `new_item_code` (→ `item_master.item_code`), covering every code that appears in either register. If no formal mapping exists, say so — that itself explains a lot.
+
+---
+
+## P2 — Improves accuracy materially
+
+### 2.1 Plumbing item-level actuals, full history
+
+`actuals_daily` holds Plumbing item-level production for only **five months** — Mar, May, Jun, Jul, Aug 2026 — and none of them pair with the same month a year earlier. PTMT has 17 months. Plumbing therefore cannot be analysed at all on a year-on-year basis.
+
+Please export whatever Plumbing item-level daily or monthly production exists for FY2025-26, from `Sheet3` of the daily-production workbooks or wherever it actually lives. If those months genuinely were never captured at item level, state that.
+
+### 2.2 Machine data for FY2025-26
+
+`machine_daily` begins April 2026 — the API's plant inventory does not go back further. That means rejection rates and machine utilisation cannot be compared year on year, and the current PTMT figures (4.2% rejection, 63.6% utilisation) have no baseline.
+
+If FY2025-26 machine records exist anywhere — a different endpoint, an archive, the plant's own logs — please export them. If they genuinely do not exist, confirm that so I stop looking.
+
+Also: `downtime_min` and `downtime_reason` are present as columns but empty for every PTMT row. If downtime is captured somewhere else, point me to it.
+
+### 2.3 Pending-order history, with raw headers preserved
+
+Only one pending snapshot was exported. I need the **history** — every pending-order file, monthly, both segments, as far back as they exist.
+
+Two specific requirements:
+
+- **Preserve both header rows.** The pending report's data is offset one column from its primary header: the column labelled `Item Group` actually holds the ERP code, `Item Code` holds the description, `Item Name` holds the colour. The secondary header row (`Old ERP Code`, `Item Name`, `Color`, … `Quantity`) is the one that describes the data correctly. Export both header rows verbatim so this stays visible.
+- Export with the full range `A1:ZZ500000`, as the last export did, and record raw vs exported row counts.
+
+### 2.4 Buffer multiplier and weekly band history
+
+`buffer_categories.multiplier` is a single scalar per category with no month dimension, and `weekly_release_bands` similarly has no history. But CP's multipliers are known to change monthly.
+
+Please export any historic record of:
+
+- buffer multiplier per category **per month**, per segment — including the CP planning workbook where the monthly values live
+- weekly release band thresholds per category over time, with effective dates
+
+If the app has never stored these historically, export the source workbooks that do.
+
+### 2.5 Working-day calendar per month
+
+The July 2026 PTMT snapshot captured `workingDays = 25` where 28 production days were observed. Sunday production is real and material — 374,268 pcs across 38 Sundays in the series.
+
+Please export the actual plant calendar: `month`, `segment`/`plant`, `working_days`, `holidays`, and whether Sundays were worked. Actual, not configured.
+
+### 2.6 Rejection data to date
+
+`actuals_daily_rejections` stops at 2026-06-09. Please extend it to the current date, and confirm whether the PTMT ANUJ Production worksheet is still the source.
+
+---
+
+## P3 — Useful
+
+### 3.1 CP segment
+
+CP is excluded by design and is roughly ₹4.89 cr/month at ~₹598 a piece — the highest value density of the three segments. If any CP data can be exported read-only (its planning workbook, its `PENDING ORDER LAST MONTH` column, item master, sales, production), please include it. If the source contract genuinely is not implemented, confirm that and I will leave CP out of scope.
+
+### 3.2 Order book, both years, with fulfilment status
+
+`orders_fy2526` and `orders_fy2627` were exported, but without a link to whether each order line was fulfilled, and when. If order → dispatch/invoice linkage exists, please include it. It would let me measure service level directly rather than inferring it from stockouts.
+
+### 3.3 Upload audit trail
+
+`uploaded_files.csv` exported with an unreadable `row_count` column. Please re-export it with `id`, `kind`, `filename`, `row_count`, `uploaded_at`, `uploaded_by`, and — importantly — a parse-result field showing how many rows were successfully matched to items on ingest. That would make silent-zero failures visible at upload time rather than at plan time.
+
+---
+
+## Output format
+
+- CSV, UTF-8, headers, one file per table or source.
+- For spreadsheet sources include `source_file`, `source_tab`, `source_row` on every row, as the last export did — that was genuinely helpful.
+- A `manifest.json` listing every file with row count, source query or path, and date range.
+- A `README.md` with:
+  - the **production** database host and name, and the deployed commit SHA verified from `/api/healthz`
+  - a **"Known bad / compromised months"** section, as the refreshed export had — that section was the most useful thing in it
+  - an explicit list of **everything in this request that could not be provided, and why**
+  - any month where a source changed shape, was renamed, or was re-keyed
+
+## Reconciliation anchors to include
+
+So I can prove the export before analysing it, please add an `anchors.csv` with:
+
+- per month and segment: total production pieces, total sales pieces, plan grand total, item counts
+- FG stock total pieces per snapshot date
+- pending-order total pieces per snapshot date, and the count of rows that matched an item master code on ingest
+
+These matched exactly last time and let me start work immediately rather than spending a day proving the file.
+
+## Please do not
+
+- Do not fix defect #206 or any other bug as part of this export. Keeping the current behaviour visible is useful — I want to measure its effect, and a fix mid-export would make the before/after impossible to establish. Fix it separately, and tell me the commit so I can date it.
+- Do not aggregate, deduplicate, or clean. Item-level, transaction-level, raw.
+- Do not exclude rows that look wrong. Export them and flag them.
