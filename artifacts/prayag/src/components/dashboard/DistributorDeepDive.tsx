@@ -590,7 +590,7 @@ function RetailerTable({ retailers, memberName }: {
 
 // ── D2: Flow panel ────────────────────────────────────────────────────────────
 
-function FlowPanel({ flows, distName }: { flows: DistributorFlows | null; distName: string }) {
+function FlowPanel({ flows, distName, fy }: { flows: DistributorFlows | null; distName: string; fy: string }) {
   if (!flows) return null;
 
   if (!flows.hasPrimaryData) {
@@ -736,6 +736,13 @@ function FlowPanel({ flows, distName }: { flows: DistributorFlows | null; distNa
             <span className="font-medium">{flows.monthsActive}</span>
           </div>
         </div>
+        {fy === "2023-24" && (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:text-amber-300">
+            FY2023-24 is month-only: the frozen source has no invoice date or
+            invoice identifier. Invoices (FY) therefore reads 0; daily and
+            weekly order analysis is unavailable.
+          </div>
+        )}
 
         {/* YoY growth */}
         {(flows.currentPeriodDispatch !== null || flows.priorPeriodDispatch !== null) && (
@@ -2700,7 +2707,7 @@ export default function DistributorDeepDive() {
                         {expandedDist === dist.normKey && (
                           <tr key={`${dist.normKey}-detail`}>
                             <td colSpan={9} className="bg-muted/10 px-4 py-4">
-                              <FlowPanel flows={dist.flows} distName={dist.name} />
+                              <FlowPanel flows={dist.flows} distName={dist.name} fy={fy} />
                               <SkuSpreadPanel spread={dist.skuSpread} distName={dist.name} />
                               <InvestmentPanel
                                 investment={dist.investment}

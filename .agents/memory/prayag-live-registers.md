@@ -10,3 +10,15 @@ description: Differences between live Google Sheets registers and the xlsx regis
 - Analytics month-completeness handles this: `isMonthComplete` uses max invoice date >= month end when dates exist, and falls back to "month fully elapsed on the calendar" (now >= first moment of next month) when a month has rows but zero invoice dates.
 - **Why:** production was loaded via the deployed backfill endpoint (live Sheets only — no xlsx access in prod), so its historical FYs are all null-date; without the fallback every historical month looked incomplete and the Growth tab YoY/retention collapsed to zero.
 - **How to apply:** never assume `invoice_date` is populated for FYs before the current one in production; any new date-dependent analytics needs the same null-date fallback. FY 2023-24 exists only as the prior-FY block inside the 2024-25 workbook and cannot be backfilled via POST /verify/backfill (resolveFy rejects it); it needs the xlsx CLI against the target DATABASE_URL.
+
+## FY2023–24 frozen monthly-grain limitation
+
+- **Rule:** Treat FY2023–24 as a correct, frozen monthly-grain source. Its
+  10-column workbook has 137,619 rows but no day-level date and no invoice
+  identifier; daily, weekly, and invoice-count analysis are unavailable.
+- **Why:** This is the source schema's intended granularity, not an ingestion
+  defect. Reconstructing dates or invoice identities would invent evidence and
+  would alter an accepted frozen year.
+- **How to apply:** Never backfill, reload, or modify FY2023–24 to address
+  missing dates or invoice IDs. Distinct-invoice requests may validly return
+  zero; any displayed fallback count must be labelled as non-invoice evidence.

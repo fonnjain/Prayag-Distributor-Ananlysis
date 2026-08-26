@@ -668,16 +668,25 @@ function Report5({ rows, collectionNote, fy, priorFy }: { rows: SaleCustomerRow[
 // ── Report 7 ──────────────────────────────────────────────────────────────────
 
 function Report7({ asOf, fy }: { asOf: Payload["r7_asOf"]; fy: string }) {
+  const isMonthOnlyFy = fy === "2023-24";
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <div className="text-xs text-muted-foreground">As-of date: <strong className="text-foreground">{asOf.date}</strong></div>
         <div className="text-xs text-muted-foreground">{asOf.note}</div>
       </div>
+      {isMonthOnlyFy && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:text-amber-300">
+          FY2023-24 is month-only: the frozen source has 137,619 rows but no
+          invoice date or invoice identifier. The Invoice Count below is a
+          line-based fallback, not a distinct invoice count; daily and weekly
+          analysis is unavailable.
+        </div>
+      )}
       <div className="flex flex-wrap gap-3">
         {[
           { label: "Total Sale", value: fmtCr(asOf.total) },
-          { label: "Invoice Count", value: asOf.invoiceCount.toLocaleString("en-IN") },
+          { label: isMonthOnlyFy ? "Invoice Count*" : "Invoice Count", value: asOf.invoiceCount.toLocaleString("en-IN") },
           { label: "Customers", value: asOf.customerCount.toLocaleString("en-IN") },
         ].map((tile) => (
           <div key={tile.label} className="flex-1 min-w-[130px] rounded-lg border border-border bg-card p-3">

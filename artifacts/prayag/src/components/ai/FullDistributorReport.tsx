@@ -381,6 +381,13 @@ export default function FullDistributorReport({ data }: { data: FullDistributorR
         {!rhythm.hasPrimaryData && (
           <p className="text-[11px] text-amber-700 dark:text-amber-400 mb-2">No primary dispatch data matched for this distributor — rhythm figures are not available.</p>
         )}
+        {data.fy === "2023-24" && (
+          <p className="text-[11px] text-amber-700 dark:text-amber-400 mb-2">
+            FY2023-24 is month-only: the frozen source has no invoice date or
+            invoice identifier. Orders this period reads 0, and daily or weekly
+            rhythm analysis is unavailable.
+          </p>
+        )}
         <Row label="Orders this period"    value={rhythm.ordersThisPeriod != null ? rhythm.ordersThisPeriod : "not recorded"} />
         <Row label="Orders per month"      value={rhythm.ordersPerMonth != null ? rhythm.ordersPerMonth.toFixed(2) : "not recorded"} />
         <Row label="Days since last order" value={rhythm.daysSinceLastOrder != null ? `${rhythm.daysSinceLastOrder} days` : "not recorded"} />

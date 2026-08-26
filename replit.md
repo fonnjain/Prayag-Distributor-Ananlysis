@@ -93,6 +93,7 @@ Prayag India — Sales Intelligence: a mobile-first dashboard over live Google S
 - xlsx exports truncate tab titles to 31 characters; live Sheets tabs keep the full title. Match long tab names with `startsWith`, never equality.
 - Never commit register/rate-list xlsx files to the repo (test fixtures excepted). Production `sale_line` can be loaded via the deployed `POST /api/verify/backfill` endpoint per FY (2024-25/2025-26/2026-27); FY23-24 exists only as the prior-FY block in the 2024-25 workbook and requires the xlsx CLI against the production `DATABASE_URL`.
 - The historical live register workbooks (FY24-25, FY25-26) have no per-invoice DATE column, so Sheets-backfilled rows have null `invoice_date`. Analytics month-completeness falls back to the calendar (month fully elapsed) when a month has no dates — do not assume `invoice_date` is populated for past FYs in production.
+- FY2023-24 is a known month-only source limitation: its frozen 10-column workbook has 137,619 rows, no `invoice_date`, and no invoice identifier. Daily, weekly, and invoice-count analysis is unavailable and must not be inferred or backfilled; see `docs/data-limitations.md`.
 
 ## Pointers
 

@@ -175,7 +175,7 @@ const API_GROUPS: TagGroup[] = [
         path: "/verify",
         summary: "Data health reconciliation report",
         description:
-          "Compares three sources for the same fiscal year — xlsx as ingested, live Google Sheets read now, and the database — reporting row counts, amount sums, distinct invoices/customers, by-group and by-head breakdowns, deltas over 0.5%, and live rows missing from the database.",
+          "Compares three sources for the same fiscal year — xlsx as ingested, live Google Sheets read now, and the database — reporting row counts, amount sums, distinct invoices/customers, by-group and by-head breakdowns, deltas over 0.5%, and live rows missing from the database. FY2023-24 is month-only with no invoice identifier, so its distinct invoice total is 0 by design.",
         parameters: [
           { name: "fy", in: "query", required: false, description: "Fiscal year, e.g. 2026-27 (default).", schema: { type: "string", pattern: "^\\d{4}-\\d{2}$" } },
         ],

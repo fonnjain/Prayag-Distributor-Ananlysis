@@ -267,8 +267,14 @@ function buildWorkbook(p: CompanyReportsPayload, filter?: CompanyReportsFilter):
   };
   addR7("As-of date", p.r7_asOf.date, true);
   addR7("Total sale", p.r7_asOf.total);
-  addR7("Invoice count", p.r7_asOf.invoiceCount);
+  addR7(p.fy === "2023-24" ? "Invoice count*" : "Invoice count", p.r7_asOf.invoiceCount);
   addR7("Customer count", p.r7_asOf.customerCount);
+  if (p.fy === "2023-24") {
+    addR7(
+      "Invoice-count limitation",
+      "Month-only source: no invoice date or identifier. This is a line-based fallback, not a distinct invoice count.",
+    );
+  }
   addR7("", "");
   addR7("By group", "Amount", true);
   for (const g of p.r7_asOf.byGroup) addR7(g.group, g.amount);

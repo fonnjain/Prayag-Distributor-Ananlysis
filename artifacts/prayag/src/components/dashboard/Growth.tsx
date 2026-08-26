@@ -197,6 +197,13 @@ export default function Growth() {
             Complete months only ({periodLabel}). {report.invoicesInPeriod.toLocaleString("en-IN")}{" "}
             invoices, {report.customersInPeriod.toLocaleString("en-IN")} customers in the period.
           </p>
+          {fy === "2023-24" && (
+            <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-1">
+              FY2023-24 is month-only: the frozen source has no invoice date or
+              invoice identifier, so this invoice count reads 0. Daily and
+              weekly analysis is unavailable.
+            </p>
+          )}
         </div>
         <span className="text-xs text-muted-foreground">FY {fy}</span>
       </div>
