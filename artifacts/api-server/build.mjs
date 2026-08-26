@@ -42,6 +42,8 @@ async function buildAll() {
       path.resolve(artifactDir, "src/stateHeadPackCoverageCheck.ts"),
       // Read-only row-level evidence for State Head pack attribution overlaps.
       path.resolve(artifactDir, "src/stateHeadAttributionEvidence.ts"),
+      // Read-only verification of the versioned company seasonal curve.
+      path.resolve(artifactDir, "src/seasonalCurveVerify.ts"),
     ],
     platform: "node",
     bundle: true,

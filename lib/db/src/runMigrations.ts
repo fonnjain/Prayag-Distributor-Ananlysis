@@ -3383,6 +3383,55 @@ const MIGRATIONS: Migration[] = [
       DROP FUNCTION IF EXISTS prevent_secondary_sku_override_audit_mutation();
     `,
   },
+  {
+    id: "079_seasonal_curve_history",
+    sql: `
+      CREATE TABLE IF NOT EXISTS seasonal_curve (
+        id                  BIGSERIAL PRIMARY KEY,
+        fiscal_years_used   TEXT[]      NOT NULL CHECK (cardinality(fiscal_years_used) > 0),
+        month_weights       NUMERIC[]   NOT NULL CHECK (cardinality(month_weights) = 12),
+        quarter_weights     NUMERIC[]   NOT NULL CHECK (cardinality(quarter_weights) = 4),
+        month_share_stddev  NUMERIC[]   NOT NULL CHECK (cardinality(month_share_stddev) = 12),
+        month_share_ranges  JSONB       NOT NULL,
+        built_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+        built_from          TEXT        NOT NULL CHECK (built_from IN ('auto_rebuild', 'manual')),
+        is_active           BOOLEAN     NOT NULL DEFAULT FALSE,
+        source_rows         JSONB       NOT NULL,
+        source_net          JSONB       NOT NULL,
+        delta               JSONB
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS seasonal_curve_one_active_idx
+        ON seasonal_curve (is_active) WHERE is_active;
+
+      CREATE OR REPLACE FUNCTION prevent_seasonal_curve_history_mutation()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        IF TG_OP = 'DELETE' THEN
+          RAISE EXCEPTION 'seasonal_curve history is append-only';
+        END IF;
+        IF NEW.fiscal_years_used IS DISTINCT FROM OLD.fiscal_years_used
+           OR NEW.month_weights IS DISTINCT FROM OLD.month_weights
+           OR NEW.quarter_weights IS DISTINCT FROM OLD.quarter_weights
+           OR NEW.month_share_stddev IS DISTINCT FROM OLD.month_share_stddev
+           OR NEW.month_share_ranges IS DISTINCT FROM OLD.month_share_ranges
+           OR NEW.built_at IS DISTINCT FROM OLD.built_at
+           OR NEW.built_from IS DISTINCT FROM OLD.built_from
+           OR NEW.source_rows IS DISTINCT FROM OLD.source_rows
+           OR NEW.source_net IS DISTINCT FROM OLD.source_net
+           OR NEW.delta IS DISTINCT FROM OLD.delta THEN
+          RAISE EXCEPTION 'seasonal_curve versions cannot be overwritten';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      DROP TRIGGER IF EXISTS seasonal_curve_history_immutable ON seasonal_curve;
+      CREATE TRIGGER seasonal_curve_history_immutable
+        BEFORE UPDATE OR DELETE ON seasonal_curve
+        FOR EACH ROW EXECUTE FUNCTION prevent_seasonal_curve_history_mutation();
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

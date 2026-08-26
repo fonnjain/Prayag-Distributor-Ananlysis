@@ -48,6 +48,10 @@ import { currentOpenFy } from "./lib/fyAnchors.js";
 import { setServerReady } from "./lib/serverReadiness.js";
 import { startServer } from "./lib/startServer.js";
 import { bootstrapAdministrators } from "./lib/auth.js";
+import {
+  initializeSeasonalCurve,
+  startSeasonalCurveScheduler,
+} from "./lib/seasonal.js";
 
 const rawPort = process.env["PORT"];
 
@@ -79,6 +83,16 @@ startServer({
   runMigrations: async () => {
     await runMigrations();
     await bootstrapAdministrators();
+    // A material baseline mismatch must never silently change projection
+    // denominators — but it must not take the whole application offline either.
+    // The module remains on the checked-in FY2025-26 calibration until an
+    // operator reconciles the source evidence and a version can be activated.
+    await initializeSeasonalCurve().catch((err) =>
+      logger.error(
+        { err },
+        "seasonal curve: activation withheld; retaining checked-in FY2025-26 calibration",
+      ),
+    );
   },
   restoreAnchors: () =>
     restoreAnchorsFromStorage({
@@ -576,6 +590,7 @@ startServer({
       // Polls every 15 min; fires Monday 07:30–09:30 IST when ≥24h since last
       // run.  Last run is persisted in alert_scheduler (migration 041) so a
       // server restart never sends a duplicate digest.
+      startSeasonalCurveScheduler();
       startWeeklyDigestScheduler(currentOpenFy());
     } else {
       logger.info(

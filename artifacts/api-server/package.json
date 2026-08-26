@@ -17,6 +17,7 @@
     "statehead-pack-check": "node ./build.mjs && node --enable-source-maps ./dist/stateHeadPackCheck.mjs",
     "statehead-pack-cross-folder-check": "node ./build.mjs && node --enable-source-maps ./dist/stateHeadPackCrossFolderCheck.mjs",
     "statehead-pack-coverage-check": "node ./build.mjs && node --enable-source-maps ./dist/stateHeadPackCoverageCheck.mjs",
+    "seasonal-curve-verify": "node ./build.mjs && node --enable-source-maps ./dist/seasonalCurveVerify.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

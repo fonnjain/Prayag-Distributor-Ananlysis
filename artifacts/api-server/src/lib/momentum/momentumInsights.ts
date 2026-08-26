@@ -96,6 +96,7 @@ export type MomentumInsights = {
     ytd: number;
     curveShareOfYear: number;
     curveName: string;
+    varianceNote: string | null;
     projection: number | null;
     flatProjection: number;
     priorFyTotal: number | null;
@@ -301,7 +302,8 @@ export async function buildMomentumInsights(
   const runRate: MomentumInsights["runRate"] = {
     ytd: cr(ytd),
     curveShareOfYear: r2(shareOfYear),
-    curveName: `company monthly shares calibrated on FY${cal.fy} actuals (lib/seasonal)`,
+    curveName: cal.derivedFrom,
+    varianceNote: cal.instabilityNote,
     projection: shareOfYear > 0 ? cr(ytd / (shareOfYear / 100)) : null,
     flatProjection: cr((ytd / nClosed) * 12),
     priorFyTotal: cr(Number(priorTotal.v)),

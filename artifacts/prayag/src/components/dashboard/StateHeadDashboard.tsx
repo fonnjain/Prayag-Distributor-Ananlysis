@@ -145,8 +145,7 @@ type DashboardMeta = {
   } | null;
   /**
    * Seasonal calibration metadata.  Includes the monthly shares (Apr=0..Mar=11) used to
-   * split annual primary/business-plan targets.  Null when the server is pre-patch.
-   * SINGLE-YEAR CALIBRATION: derived from FY2025-26 actuals only.
+   * split annual primary/business-plan targets. Null when the server is pre-patch.
    */
   seasonalCalibration?: {
     fy: string;
@@ -1030,7 +1029,7 @@ export default function StateHeadDashboard() {
                   className="text-right"
                   title={
                     seasonalInfo
-                      ? `Split seasonally from annual — not ÷12. ${seasonalInfo.periodLabel} (${seasonalInfo.months} months) carries ${trunc2((seasonalInfo.share * 100))}% of annual vs ${trunc2(seasonalInfo.flatShare)}% flat. Calibrated from FY${seasonalInfo.cal.fy} actuals (single year).`
+                      ? `Split seasonally from annual — not ÷12. ${seasonalInfo.periodLabel} (${seasonalInfo.months} months) carries ${trunc2((seasonalInfo.share * 100))}% of annual vs ${trunc2(seasonalInfo.flatShare)}% flat. ${seasonalInfo.cal.derivedFrom}.`
                       : undefined
                   }
                 />

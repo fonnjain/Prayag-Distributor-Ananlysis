@@ -934,8 +934,8 @@ async function buildMgmtDataPayload(
         // Primary attribution diagnostics (null until dist-map is warm)
         ...(primaryDiagnostics ? { primaryAttributionDiagnostics: primaryDiagnostics } : {}),
         ...(xlsxTargetDiagnostic ? { targetMatchDiagnostic: xlsxTargetDiagnostic } : {}),
-        // Seasonal calibration metadata so the frontend can show the basis and
-        // single-year calibration caveat on any derived target column.
+        // Seasonal calibration metadata so the frontend can show the active
+        // versioned basis on any derived target column.
         seasonalCalibration: getSeasonalCalibration(),
       },
     };

@@ -41,6 +41,7 @@ type Insights = {
   runRate: {
     ytd: number; curveShareOfYear: number; curveName: string;
     projection: number | null; flatProjection: number; priorFyTotal: number | null; note: string;
+    varianceNote: string | null;
   };
   pipeline: {
     months: { month: string; booking: number; dispatch: number; pending: number; pendingShare: number | null }[];
@@ -287,6 +288,11 @@ export default function OrderMomentum() {
               A flat extrapolation would say ₹{trunc2(data.runRate.flatProjection)} Cr and {data.runRate.note.includes("UNDERSTATE") ? "understate" : "overstate"} the year.
             </p>
             <p className="text-[10px] italic text-muted-foreground mt-1">Curve: {data.runRate.curveName}.</p>
+            {data.runRate.varianceNote && (
+              <p className="text-[10px] text-amber-700 dark:text-amber-300 mt-1">
+                Variation: {data.runRate.varianceNote}
+              </p>
+            )}
             {data.runRate.priorFyTotal != null && (
               <p className="text-[11px] text-muted-foreground mt-1">Last full year: ₹{trunc2(data.runRate.priorFyTotal)} Cr.</p>
             )}

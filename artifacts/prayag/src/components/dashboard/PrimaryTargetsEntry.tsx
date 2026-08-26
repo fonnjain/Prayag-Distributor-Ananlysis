@@ -345,7 +345,7 @@ export default function PrimaryTargetsEntry() {
                 </span>
               ))}
               <span className="ml-auto text-muted-foreground/60 italic">
-                Calibrated from FY{data.data.seasonalCalibration.fy} retail actuals. Institutional/tender targets are not seasonalised.
+                {data.data.seasonalCalibration.derivedFrom}. Institutional/tender targets are not seasonalised.
               </span>
             </div>
           </div>
