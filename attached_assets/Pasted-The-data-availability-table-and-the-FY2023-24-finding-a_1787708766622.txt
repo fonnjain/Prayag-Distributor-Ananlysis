@@ -1,0 +1,44 @@
+The data-availability table and the FY2023-24 finding are both accepted -
+137,619 rows with month_label only, zero invoice_date, zero invoice_no, from a
+10-column source schema. That is a permanent limit on daily analysis for that
+year, not a fixable gap.
+
+But your segment table shows something your summary understates, and it should
+be recorded.
+
+THE FESTIVAL-WEEK DIP IS CONSISTENT. THE BUILD IS NOT.
+
+Week 0, both dated years:
+                   FY2024-25   FY2025-26
+    PTMT             0.813       0.279
+    CP               0.547       0.263
+    Sanitaryware     0.690       0.052
+    CPVC             0.942       0.120
+    SWR              1.373       0.169
+
+Four of five segments below normal in both years. Sanitaryware at 0.052 is a
+95% collapse.
+
+And FY2024-25 week 0 runs 29 Oct - 4 Nov, which CONTAINS the October month-end.
+PTMT, CP and Sanitaryware still fall below normal in a week holding the biggest
+selling days of the month. That is a stronger signal than the raw multiple
+suggests.
+
+The company figure of 1.199 hides this because SWR pulls it up at 1.373 - and
+SWR is drainage pipe, a construction material, not a household festival
+purchase. Its behaving differently supports the mechanism.
+
+RESTATE THE CONCLUSION AS TWO SEPARATE FINDINGS:
+  1. Pre-festival BUILD - not established. One year, contaminated by month-end.
+  2. Festival-week DIP - consistent across both dated years and every household
+     segment, and present in FY2024-25 despite month-end contamination.
+
+WHAT TO DO WITH IT
+Do not build a festival curve on this. But when the festival week arrives -
+5-11 November 2026, around Diwali on the 8th - a very weak week in PTMT, CP and
+Sanitaryware is EXPECTED, not a performance problem.
+
+That is worth a note on the Momentum page rather than a code change: one line
+saying the week containing a major festival is historically 30-70% below normal
+in household segments. It stops someone reading a normal festival week as a
+collapse.
