@@ -12,6 +12,7 @@ describe("versioned seasonal curve math", () => {
     const curve = buildSeasonalCurveMath([
       {
         fy: "2025-26",
+        sourceBasis: "test",
         rows: 999,
         monthlyNet: configured!.monthly.map((share) => share * 1_000_000),
       },
@@ -27,15 +28,40 @@ describe("versioned seasonal curve math", () => {
     expect(comparison.maxAbsMonthDelta).toBeLessThan(0.001);
   });
 
+  it("reproduces the FY2025-26 retail-channel extraction within rounding tolerance", () => {
+    const configured = seasonalConfig.versions.find((version) => version.fy === "2025-26")!;
+    const curve = buildSeasonalCurveMath([
+      {
+        fy: "2025-26",
+        sourceBasis: "channel_retail",
+        rows: 136_438,
+        monthlyNet: [
+          126_250_377.77, 243_574_543.82, 262_953_150.06, 217_162_338.89,
+          210_175_997.02, 196_145_825.81, 195_255_794.08, 247_950_792.91,
+          288_352_012.94, 305_161_455.36, 328_269_075.9, 412_527_187.36,
+        ],
+      },
+    ]);
+    const comparison = compareSeasonalCurveToConfig(curve, configured.monthly);
+
+    expect(curve.sourceBasis).toEqual({ "2025-26": "channel_retail" });
+    expect(comparison.maxAbsMonthDelta).toBeLessThanOrEqual(0.1);
+    // The checked-in one-decimal config is normalised from 100.1 to 100.0
+    // at runtime, so quarterly deltas are intentionally compared indirectly
+    // through the exact monthly tolerance above.
+  });
+
   it("gives every frozen fiscal year one equal vote regardless of rupee volume", () => {
     const curve = buildSeasonalCurveMath([
       {
         fy: "2023-24",
+        sourceBasis: "test",
         rows: 100,
         monthlyNet: [10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 90],
       },
       {
         fy: "2024-25",
+        sourceBasis: "test",
         rows: 100_000,
         monthlyNet: [900_000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100_000],
       },
@@ -50,14 +76,14 @@ describe("versioned seasonal curve math", () => {
 
   it("changes only when a new completed year is appended", () => {
     const firstThree = [
-      { fy: "2023-24", rows: 1, monthlyNet: [10, 10, 10, 10, 10, 10, 10, 10, 5, 5, 5, 5] },
-      { fy: "2024-25", rows: 1, monthlyNet: [5, 5, 5, 5, 5, 5, 5, 5, 10, 10, 10, 10] },
-      { fy: "2025-26", rows: 1, monthlyNet: [8, 8, 8, 8, 8, 8, 8, 8, 7, 7, 7, 7] },
+      { fy: "2023-24", sourceBasis: "test", rows: 1, monthlyNet: [10, 10, 10, 10, 10, 10, 10, 10, 5, 5, 5, 5] },
+      { fy: "2024-25", sourceBasis: "test", rows: 1, monthlyNet: [5, 5, 5, 5, 5, 5, 5, 5, 10, 10, 10, 10] },
+      { fy: "2025-26", sourceBasis: "test", rows: 1, monthlyNet: [8, 8, 8, 8, 8, 8, 8, 8, 7, 7, 7, 7] },
     ];
     const v2 = buildSeasonalCurveMath(firstThree);
     const v3 = buildSeasonalCurveMath([
       ...firstThree,
-      { fy: "2026-27", rows: 1, monthlyNet: [20, 20, 20, 20, 5, 5, 5, 5, 5, 5, 5, 5] },
+      { fy: "2026-27", sourceBasis: "test", rows: 1, monthlyNet: [20, 20, 20, 20, 5, 5, 5, 5, 5, 5, 5, 5] },
     ]);
 
     expect(v2.fiscalYearsUsed).toEqual(["2023-24", "2024-25", "2025-26"]);

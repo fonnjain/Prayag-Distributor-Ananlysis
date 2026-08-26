@@ -17,6 +17,7 @@ export type SeasonalSourceYear = {
   fy: string;
   monthlyNet: number[];
   rows: number;
+  sourceBasis: string;
 };
 
 export type SeasonalCurveMath = {
@@ -28,6 +29,7 @@ export type SeasonalCurveMath = {
   quarterRanges: [number, number][];
   sourceRows: Record<string, number>;
   sourceNet: Record<string, number>;
+  sourceBasis: Record<string, string>;
   sourceMonthlyShares: Record<string, number[]>;
 };
 
@@ -108,6 +110,9 @@ export function buildSeasonalCurveMath(
         source.fy,
         source.monthlyNet.reduce((sum, value) => sum + value, 0),
       ]),
+    ),
+    sourceBasis: Object.fromEntries(
+      sorted.map((source) => [source.fy, source.sourceBasis]),
     ),
     sourceMonthlyShares,
   };

@@ -80,6 +80,7 @@ type ActiveSeasonalCurve = {
   builtAt: string | null;
   sourceRows: Record<string, number>;
   sourceNet: Record<string, number>;
+  sourceBasis: Record<string, string>;
   instabilityNote: string | null;
 };
 
@@ -100,6 +101,7 @@ function configuredRuntimeCurve(): ActiveSeasonalCurve {
     builtAt: null,
     sourceRows: {},
     sourceNet: {},
+    sourceBasis: { [version.fy]: "approved_config" },
     instabilityNote: null,
   };
 }
@@ -213,6 +215,7 @@ export function getSeasonalCalibration(calibrationFy?: string): {
   monthNames: readonly string[];
   version: number | null;
   sourceFys: string[];
+  sourceBasis: Record<string, string>;
   builtAt: string | null;
   monthShareStddev: number[];
   monthRanges: [number, number][];
@@ -227,6 +230,7 @@ export function getSeasonalCalibration(calibrationFy?: string): {
       monthNames: MONTH_NAMES,
       version: activeCurve.version,
       sourceFys: [...activeCurve.sourceFys],
+      sourceBasis: { ...activeCurve.sourceBasis },
       builtAt: activeCurve.builtAt,
       monthShareStddev: [...activeCurve.monthShareStddev],
       monthRanges: activeCurve.monthRanges.map(([min, max]) => [min, max]),
@@ -244,6 +248,7 @@ export function getSeasonalCalibration(calibrationFy?: string): {
     monthNames: MONTH_NAMES,
     version: null,
     sourceFys: [v.fy],
+      sourceBasis: { [v.fy]: "approved_config" },
     builtAt: null,
     monthShareStddev: Array(12).fill(0),
     monthRanges: normed.map((value) => [value * 100, value * 100]),
@@ -263,7 +268,15 @@ function activeCurveBasisLabel(): string {
   const first = activeCurve.sourceFys[0];
   const last = activeCurve.sourceFys.at(-1);
   const years = first === last ? `FY${first}` : `FY${first} to FY${last}`;
-  return `Seasonal curve v${activeCurve.version} — built from ${years}`;
+  const labels: Record<string, string> = {
+    channel_retail: "retail channel",
+    territory_true: "territory-attributed",
+    legacy_unclassified: "legacy unclassified",
+  };
+  const sources = activeCurve.sourceFys
+    .map((fy) => `FY${fy} ${labels[activeCurve.sourceBasis[fy] ?? ""] ?? "source"}`)
+    .join(", ");
+  return `Seasonal curve v${activeCurve.version} — built from ${years} (${sources})`;
 }
 
 type SeasonalCurveRow = {
@@ -277,6 +290,7 @@ type SeasonalCurveRow = {
   built_from: "auto_rebuild" | "manual";
   source_rows: Record<string, number>;
   source_net: Record<string, number>;
+  source_basis: Record<string, string>;
 };
 
 function numericArray(value: unknown): number[] {
@@ -288,6 +302,13 @@ function jsonObject(value: unknown): Record<string, number> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [key, Number(item)]),
+  );
+}
+
+function jsonStringObject(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, String(item)]),
   );
 }
 
@@ -309,6 +330,7 @@ function rowToActiveCurve(row: SeasonalCurveRow): ActiveSeasonalCurve {
     builtAt: new Date(row.built_at).toISOString(),
     sourceRows: jsonObject(row.source_rows),
     sourceNet: jsonObject(row.source_net),
+    sourceBasis: jsonStringObject(row.source_basis),
     instabilityNote: null,
   };
 }
@@ -316,7 +338,8 @@ function rowToActiveCurve(row: SeasonalCurveRow): ActiveSeasonalCurve {
 async function readActiveCurve(client: { query: Function } = pool): Promise<SeasonalCurveRow | null> {
   const result = await client.query(
     `SELECT id, fiscal_years_used, month_weights, quarter_weights,
-            month_share_stddev, month_share_ranges, built_at, built_from, source_rows, source_net
+            month_share_stddev, month_share_ranges, built_at, built_from, source_rows, source_net,
+            source_basis
        FROM seasonal_curve
       WHERE is_active = TRUE
       ORDER BY id DESC
@@ -333,7 +356,8 @@ function sameSourceInputs(
   const curveYears = [...curve.fiscalYearsUsed].sort();
   if (JSON.stringify(rowYears) !== JSON.stringify(curveYears)) return false;
   return JSON.stringify(jsonObject(row.source_rows)) === JSON.stringify(curve.sourceRows) &&
-    JSON.stringify(jsonObject(row.source_net)) === JSON.stringify(curve.sourceNet);
+    JSON.stringify(jsonObject(row.source_net)) === JSON.stringify(curve.sourceNet) &&
+    JSON.stringify(jsonStringObject(row.source_basis)) === JSON.stringify(curve.sourceBasis);
 }
 
 async function loadFrozenSourceYears(): Promise<SeasonalSourceYear[]> {
@@ -346,20 +370,52 @@ async function loadFrozenSourceYears(): Promise<SeasonalSourceYear[]> {
     month_label: string;
     rows: string;
     net: string;
+    source_basis: string;
   }>(
-    `SELECT fy, month_label, COUNT(*)::text AS rows,
+    `WITH attribution AS (
+       SELECT fy,
+              BOOL_OR(channel IS NOT NULL) AS has_channel,
+              BOOL_OR(is_territory IS NOT NULL) AS has_territory
+         FROM sale_line_current
+        WHERE fy = ANY($1::text[])
+        GROUP BY fy
+     ),
+     selected AS (
+       SELECT sl.fy,
+              sl.month_label,
+              sl.amount,
+              CASE
+                -- A classified source is authoritative: Project, Govt, JJM,
+                -- GeM and Export must not leak into a retail curve because a
+                -- historical register has NULL territory flags.
+                WHEN a.has_channel THEN 'channel_retail'
+                -- Older sources can still be safely narrowed when they carry
+                -- their original explicit territory attribution.
+                WHEN a.has_territory THEN 'territory_true'
+                -- FY2024-25 has neither classification. Keep it visible as
+                -- explicitly unclassified historical evidence.
+                ELSE 'legacy_unclassified'
+              END AS source_basis
+         FROM sale_line_current sl
+         JOIN attribution a USING (fy)
+        WHERE (a.has_channel AND sl.channel = 'Retail')
+           OR (NOT a.has_channel AND a.has_territory AND sl.is_territory = TRUE)
+           OR (NOT a.has_channel AND NOT a.has_territory)
+     )
+     SELECT fy, month_label, source_basis, COUNT(*)::text AS rows,
             COALESCE(SUM(amount::numeric), 0)::text AS net
-       FROM sale_line_current
-      -- Schema-B historical registers predate territory attribution. Follow the
-      -- shared legacy rule: retain unclassified rows, exclude only a known
-      -- non-territory/institutional FALSE value.
-      WHERE (is_territory IS NULL OR is_territory = TRUE)
-        AND fy = ANY($1::text[])
-      GROUP BY fy, month_label`,
+       FROM selected
+      GROUP BY fy, month_label, source_basis`,
     [fys],
   );
   const byFy = new Map<string, Map<string, { rows: number; net: number }>>();
+  const sourceBasisByFy = new Map<string, string>();
   for (const row of result.rows) {
+    const existingBasis = sourceBasisByFy.get(row.fy);
+    if (existingBasis && existingBasis !== row.source_basis) {
+      throw new Error(`seasonal curve: FY${row.fy} resolved to multiple source bases`);
+    }
+    sourceBasisByFy.set(row.fy, row.source_basis);
     const months = byFy.get(row.fy) ?? new Map();
     months.set(row.month_label, {
       rows: Number(row.rows),
@@ -374,15 +430,20 @@ async function loadFrozenSourceYears(): Promise<SeasonalSourceYear[]> {
     if (!months || labels.some((label) => !months.has(label))) {
       throw new Error(
         `seasonal curve: frozen FY${fy} is incomplete in sale_line_current; ` +
-        `expected all 12 fiscal months on the retail/territory basis`,
+        `expected all 12 fiscal months on its resolved seasonal basis`,
       );
     }
     const monthlyNet = labels.map((label) => months.get(label)?.net ?? 0);
     const rows = labels.reduce((sum, label) => sum + (months.get(label)?.rows ?? 0), 0);
     if (monthlyNet.reduce((sum, value) => sum + value, 0) <= 0) {
-      throw new Error(`seasonal curve: frozen FY${fy} has no positive retail/territory net`);
+      throw new Error(`seasonal curve: frozen FY${fy} has no positive net on its resolved seasonal basis`);
     }
-    return { fy, monthlyNet, rows };
+    return {
+      fy,
+      monthlyNet,
+      rows,
+      sourceBasis: sourceBasisByFy.get(fy) ?? "legacy_unclassified",
+    };
   });
 }
 
@@ -404,7 +465,7 @@ function materialBaselineFinding(
     },
     "seasonal curve: FY2025-26 baseline verification",
   );
-  if (comparison.maxAbsMonthDelta >= 1) {
+  if (comparison.maxAbsMonthDelta > 0.1) {
     throw new Error(
       `seasonal curve: FY2025-26 extraction differs materially from config ` +
       `(max monthly delta ${comparison.maxAbsMonthDelta.toFixed(2)}pp; ` +
@@ -448,11 +509,12 @@ async function persistCurve(
     const inserted = await client.query(
       `INSERT INTO seasonal_curve
          (fiscal_years_used, month_weights, quarter_weights, month_share_stddev, month_share_ranges,
-          built_from, is_active, source_rows, source_net, delta)
+          built_from, is_active, source_rows, source_net, source_basis, delta)
        VALUES ($1::text[], $2::numeric[], $3::numeric[], $4::numeric[], $5::jsonb,
-               $6, TRUE, $7::jsonb, $8::jsonb, $9::jsonb)
+                $6, TRUE, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb)
        RETURNING id, fiscal_years_used, month_weights, quarter_weights,
-                 month_share_stddev, month_share_ranges, built_at, built_from, source_rows, source_net`,
+                  month_share_stddev, month_share_ranges, built_at, built_from, source_rows, source_net,
+                  source_basis`,
       [
         curve.fiscalYearsUsed,
         curve.monthWeights,
@@ -462,6 +524,7 @@ async function persistCurve(
         builtFrom,
         JSON.stringify(curve.sourceRows),
         JSON.stringify(curve.sourceNet),
+        JSON.stringify(curve.sourceBasis),
         delta ? JSON.stringify(delta) : null,
       ],
     );
@@ -623,7 +686,7 @@ export async function listSeasonalCurves(): Promise<SeasonalCurveRow[]> {
   const result = await pool.query(
     `SELECT id, fiscal_years_used, month_weights, quarter_weights,
             month_share_stddev, month_share_ranges, built_at, built_from, is_active,
-            source_rows, source_net, delta
+             source_rows, source_net, source_basis, delta
        FROM seasonal_curve
       ORDER BY id DESC`,
   );

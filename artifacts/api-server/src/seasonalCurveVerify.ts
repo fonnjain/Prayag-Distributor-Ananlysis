@@ -12,8 +12,7 @@ async function frozenFingerprint(): Promise<FrozenFingerprint[]> {
   const result = await pool.query<FrozenFingerprint>(
     `SELECT fy, COUNT(*)::text AS rows, COALESCE(SUM(amount::numeric), 0)::text AS net
        FROM sale_line_current
-      WHERE (is_territory IS NULL OR is_territory = TRUE)
-        AND fy IN ('2023-24', '2024-25', '2025-26')
+       WHERE fy IN ('2023-24', '2024-25', '2025-26')
       GROUP BY fy
       ORDER BY fy`,
   );
@@ -32,6 +31,7 @@ async function main(): Promise<void> {
     ...preview.sourceYears,
     {
       fy: "2026-27",
+      sourceBasis: "simulated",
       rows: preview.sourceYears.at(-1)?.rows ?? 0,
       // A deliberately different monthly shape verifies that a newly frozen
       // fiscal year becomes one equal vote, never a volume-weighted rewrite.
@@ -47,7 +47,7 @@ async function main(): Promise<void> {
   const output = {
     status:
       sourceUnchanged &&
-      preview.comparison.maxAbsMonthDelta < 1 &&
+      preview.comparison.maxAbsMonthDelta <= 0.1 &&
       Math.abs(v1Total - 100) < 1e-9 &&
       Math.abs(v2Total - 100) < 1e-9 &&
       simulatedFuture.fiscalYearsUsed.length === preview.sourceYears.length + 1
@@ -60,8 +60,9 @@ async function main(): Promise<void> {
       q1DeltaPp: Number(preview.comparison.q1Delta.toFixed(4)),
       q4DeltaPp: Number(preview.comparison.q4Delta.toFixed(4)),
       maxAbsMonthDeltaPp: Number(preview.comparison.maxAbsMonthDelta.toFixed(4)),
-      withinOnePointTolerance: preview.comparison.maxAbsMonthDelta < 1,
+      withinRoundingTolerance: preview.comparison.maxAbsMonthDelta <= 0.1,
       totalPct: v1Total,
+      sourceBasis: preview.baseline.sourceBasis,
     },
     v2_equal_weighted_frozen_years: {
       fiscalYearsUsed: preview.multiYear.fiscalYearsUsed,
@@ -71,6 +72,7 @@ async function main(): Promise<void> {
       monthRangesPct: preview.multiYear.monthRanges.map((range) => rounded(range)),
       sourceRows: preview.multiYear.sourceRows,
       sourceNet: preview.multiYear.sourceNet,
+      sourceBasis: preview.multiYear.sourceBasis,
       totalPct: v2Total,
     },
     frozenSourcePreserved: {

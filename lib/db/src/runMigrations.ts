@@ -3432,6 +3432,39 @@ const MIGRATIONS: Migration[] = [
         FOR EACH ROW EXECUTE FUNCTION prevent_seasonal_curve_history_mutation();
     `,
   },
+  {
+    id: "080_seasonal_curve_source_basis",
+    sql: `
+      -- The selected source can differ by frozen-register generation: a full
+      -- channel classification is stronger than a legacy territory flag, while
+      -- an entirely unclassified historical file must remain visible as such.
+      ALTER TABLE seasonal_curve
+        ADD COLUMN IF NOT EXISTS source_basis JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+      CREATE OR REPLACE FUNCTION prevent_seasonal_curve_history_mutation()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        IF TG_OP = 'DELETE' THEN
+          RAISE EXCEPTION 'seasonal_curve history is append-only';
+        END IF;
+        IF NEW.fiscal_years_used IS DISTINCT FROM OLD.fiscal_years_used
+           OR NEW.month_weights IS DISTINCT FROM OLD.month_weights
+           OR NEW.quarter_weights IS DISTINCT FROM OLD.quarter_weights
+           OR NEW.month_share_stddev IS DISTINCT FROM OLD.month_share_stddev
+           OR NEW.month_share_ranges IS DISTINCT FROM OLD.month_share_ranges
+           OR NEW.built_at IS DISTINCT FROM OLD.built_at
+           OR NEW.built_from IS DISTINCT FROM OLD.built_from
+           OR NEW.source_rows IS DISTINCT FROM OLD.source_rows
+           OR NEW.source_net IS DISTINCT FROM OLD.source_net
+           OR NEW.source_basis IS DISTINCT FROM OLD.source_basis
+           OR NEW.delta IS DISTINCT FROM OLD.delta THEN
+          RAISE EXCEPTION 'seasonal_curve versions cannot be overwritten';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).
