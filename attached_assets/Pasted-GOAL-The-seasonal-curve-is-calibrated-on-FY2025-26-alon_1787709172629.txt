@@ -1,0 +1,139 @@
+GOAL
+The seasonal curve is calibrated on FY2025-26 alone and has never been
+validated. Make it rebuild from EVERY completed fiscal year, equally weighted,
+with each rebuild recorded and never overwritten.
+
+It is the denominator of every forward projection, so it must never change
+without a trace.
+
+============================================================
+1 - VERSIONED, NOT OVERWRITTEN
+============================================================
+seasonal_curve
+  id
+  fiscal_years_used        array of the years that built it
+  month_weights            12 values, summing to 100
+  quarter_weights          4 values, summing to 100
+  month_share_stddev       12 values - the spread across source years
+  built_at · built_from    auto_rebuild | manual
+  is_active
+  source_rows              row count per source year, for reconciliation
+  source_net               net per source year
+
+Never overwrite. Each rebuild INSERTS a new version and flips is_active. Prior
+versions are retained permanently.
+
+Store what it was BUILT FROM, not only the result. When someone asks in two
+years why a projection moved, the answer must be readable from the table.
+
+============================================================
+2 - EVERY COMPLETED YEAR COUNTS EQUALLY
+============================================================
+No recency weighting. Every frozen fiscal year contributes equally.
+
+    for each year:   month share = that month's net / that year's total net
+    curve weight  =  the mean of that month's share across all years
+
+With three years that is (FY23-24 + FY24-25 + FY25-26) / 3. With six years it
+is the average of six. The curve stabilises as history accumulates rather than
+swinging with whatever last year happened to be.
+
+AVERAGE THE SHARES, NOT THE RUPEES.
+FY2025-26 is Rs 361 Cr; an earlier year may be Rs 280 Cr. Pooling rupees would
+let the larger year dominate the shape - which is recency weighting arriving
+through the back door. Each year gets one equal vote on the SHAPE, regardless
+of its size.
+
+Normalise so the twelve months sum to exactly 100%.
+
+Do NOT add a recency weight, a decay factor, or a "last N years" window. If the
+business ever wants one, that is a deliberate decision at the time, not a
+default sitting in code.
+
+============================================================
+3 - WHEN IT REBUILDS
+============================================================
+Automatically, on the first rebuild after 7 April, matching the existing freeze
+rule. A year that has just frozen is complete and safe to calibrate on.
+
+Only FROZEN years enter the calculation. A year still open or partially loaded
+must never contribute.
+
+FY2023-24 has no day-level dates and no invoice numbers - month-only, 137,619
+rows. That is fine here: this needs monthly totals only. Include it.
+
+Log every rebuild: which years, the resulting weights, and the delta against
+the previous version.
+
+============================================================
+4 - SHOW WHICH VERSION A PROJECTION USED
+============================================================
+Every figure derived from the curve states its basis. On the Momentum run-rate
+card, one line:
+
+    "Seasonal curve v2 - built from FY2023-24 to FY2025-26"
+
+If a projection changes because the curve was rebuilt rather than because sales
+moved, the reader must be able to see that.
+
+============================================================
+5 - MAKE THE VARIANCE VISIBLE
+============================================================
+Store the standard deviation of each month's share across the source years.
+
+Where a month varies by more than 3 points between years, that month is
+unstable and any projection resting heavily on it should say so. One line is
+enough:
+
+    "Q4 share has varied 31-35% across three years."
+
+Do not build a confidence interval or a range forecast. Just make the spread
+readable.
+
+============================================================
+DO NOT
+============================================================
+- Do not change any frozen year's data. This READS them; it never writes.
+- Do not rebuild from an open or partially loaded year.
+- Do not apply the curve to institutional business - territory and retail only,
+  as today.
+- Do not delete or overwrite a prior curve version.
+- Do not add recency weighting.
+
+============================================================
+VERIFY - produced values, and a hash that resolves
+============================================================
+1. Build v1 from FY2025-26 alone. Confirm it reproduces the CURRENT configured
+   weights - Q1 20.9%, Q4 34.5%.
+   If it does NOT, the extraction differs from however the current config was
+   made - different filters, different channel exclusions - and I need to know
+   how before anything else is built on it.
+
+2. Build v2 from all three completed years, EQUALLY weighted. Print both curves
+   side by side, month by month, with the delta. Confirm each sums to 100%.
+
+3. Print each month's share in each of the three years SEPARATELY, plus the
+   standard deviation. Name every month varying by more than 3 points.
+
+4. Print the FY2026-27 year-end projection from the SAME Apr-Jul actuals under
+   v1 and under v2. That is the practical size of the change and the reason
+   this task exists.
+
+5. Confirm the shares were averaged, not the rupees. Print the per-year net so
+   the size difference is visible, and confirm the largest year does not
+   dominate the resulting shape.
+
+6. Confirm no frozen year was touched - row counts and net for FY2023-24,
+   FY2024-25 and FY2025-26 before and after.
+
+7. Confirm FY2025-26 remains Rs 3,609,953,808.51.
+
+8. Print the Momentum card showing which curve version it used.
+
+9. Simulate a year closing: confirm the rebuild triggers, inserts a new
+   version, flips is_active, logs the delta, and that the PRIOR version
+   survives and is still readable.
+
+10. Push. Print git rev-parse HEAD and git rev-parse origin/main, matching,
+    then git cat-file -t <hash> and git merge-base --is-ancestor <hash> main
+    with its exit code.
