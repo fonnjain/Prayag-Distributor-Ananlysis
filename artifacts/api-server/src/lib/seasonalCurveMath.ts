@@ -33,6 +33,22 @@ export type SeasonalCurveMath = {
   sourceMonthlyShares: Record<string, number[]>;
 };
 
+export const COMPARABLE_SEASONAL_SOURCE_BASES = new Set([
+  "channel_retail",
+  "territory_true",
+]);
+
+export type SeasonalCurveActivation = {
+  curve: SeasonalCurveMath;
+  /**
+   * Frozen years which cannot safely have an equal vote yet. Their raw values
+   * remain visible in verification, but an all-channel historical shape must
+   * not be blended into a retail/territory curve.
+   */
+  blockedFiscalYears: Array<{ fy: string; sourceBasis: string }>;
+  mode: "verified_baseline" | "equal_weighted_multi_year";
+};
+
 function percentNormalise(values: number[]): number[] {
   const total = values.reduce((sum, value) => sum + value, 0);
   if (!Number.isFinite(total) || total <= 0) {
@@ -115,6 +131,44 @@ export function buildSeasonalCurveMath(
       sorted.map((source) => [source.fy, source.sourceBasis]),
     ),
     sourceMonthlyShares,
+  };
+}
+
+/**
+ * A multi-year curve is valid only when every completed frozen year has the
+ * same commercial scope. If any year remains all-channel / unclassified, keep
+ * the independently reconciled FY2025-26 retail baseline active instead of
+ * creating a more recent but mixed-basis denominator.
+ */
+export function selectSeasonalCurveActivation(
+  sourceYears: SeasonalSourceYear[],
+): SeasonalCurveActivation {
+  const baseline = sourceYears.find((source) => source.fy === "2025-26");
+  if (!baseline) {
+    throw new Error("seasonal curve: FY2025-26 verified retail baseline is required");
+  }
+  if (baseline.sourceBasis !== "channel_retail") {
+    throw new Error(
+      `seasonal curve: FY2025-26 baseline is not fully retail-classified (got ${baseline.sourceBasis})`,
+    );
+  }
+
+  const blockedFiscalYears = sourceYears
+    .filter((source) => !COMPARABLE_SEASONAL_SOURCE_BASES.has(source.sourceBasis))
+    .map(({ fy, sourceBasis }) => ({ fy, sourceBasis }));
+
+  if (blockedFiscalYears.length > 0) {
+    return {
+      curve: buildSeasonalCurveMath([baseline]),
+      blockedFiscalYears,
+      mode: "verified_baseline",
+    };
+  }
+
+  return {
+    curve: buildSeasonalCurveMath(sourceYears),
+    blockedFiscalYears: [],
+    mode: "equal_weighted_multi_year",
   };
 }
 

@@ -1,0 +1,116 @@
+Read-only. Change nothing. Export data for external analysis.
+
+GOAL
+A ZIP of CSVs covering FY2025-26 and FY2026-27, complete enough that someone
+outside the app can reproduce every headline figure and go deeper than the
+pages allow.
+
+Save to attached_assets/prayag_analysis_export_<date>.zip
+
+============================================================
+1 - SALES, THE FOUNDATION
+============================================================
+01_sale_line_fy2025-26.csv     every line, all columns
+02_sale_line_fy2026-27.csv     every line, all columns
+
+Include: invoice no · invoice date · month_label · fy · customer · customer_id
+where known · head_canon · state_canon · channel · segment/group_canon ·
+item code · item name · qty · rate · net amount · plant
+
+If these are large, split by quarter rather than truncating. Do NOT sample.
+
+03_sale_line_summary.csv
+  one row per (fy, month, head, state, channel, segment): rows, qty, net
+
+============================================================
+2 - SECONDARY
+============================================================
+04_secondary_sku_line.csv      both FYs, all columns, including source
+                              (pscode3_xlsx vs productwise_xlsx) and
+                              dealer_id / cp_code where present
+05_secondary_head_month.csv    member-month order booking and received
+06_secondary_order_line.csv    the Product-Wise order register
+
+============================================================
+3 - PEOPLE AND ORGANISATION
+============================================================
+07_person.csv                  all 361, active and departed, with designation,
+                               reports_to, state_head, is_active, source
+08_person_territory.csv        the coverage junction with effective dates
+09_person_state_coverage.csv   canonical coverage with head and dates
+10_territory.csv               with parent and split flags
+11_designation.csv
+
+============================================================
+4 - CUSTOMERS
+============================================================
+12_customer.csv                all 8,802 with type, territory, status,
+                               confidence
+13_customer_assignment.csv     effective-dated, including closed rows
+14_customer_link.csv           retailer to distributor junction
+15_customer_master_raw.csv     the full CRM master - distributors, dealers,
+                               retailers with status and assign columns
+
+============================================================
+5 - PRODUCT, PRICE AND MARGIN
+============================================================
+16_mrp_current_catalogue.csv   6,223 codes with division and MRP
+17_mrp_history.csv             effective-dated price history
+18_margin_fact.csv             per-code BOM cost by month and segment
+19_item_master.csv             the local product master
+
+============================================================
+6 - TARGETS, SCHEMES, ALERTS
+============================================================
+20_targets.csv                 primary and secondary, by head and member
+21_seasonal_curve.csv          all versions with their source basis
+22_schemes.csv                 scheme master and slabs
+23_alert.csv                   every alert, open and cleared, with detail
+24_alert_delivery.csv
+
+============================================================
+7 - MARKET AND COMPETITION
+============================================================
+25_market_survey.csv
+26_competitor_price.csv
+
+============================================================
+8 - CONTEXT FILES - as important as the data
+============================================================
+90_data_dictionary.csv
+  every file, every column: what it means, its unit, and whether it is
+  authoritative or derived
+
+91_known_limitations.md
+  Write this properly. It must include at least:
+  - FY2023-24 is month-only: no invoice_date, no invoice_no
+  - FY2024-25 has no channel or territory classification
+  - The CRM changed on 1 August 2026: PSCode 3 to Product-Wise. Retailer RET#
+    identities carried across unchanged - 675 matched, 100% name agreement
+  - 648 of 3,751 FY2026-27 register codes have no MRP
+  - Non-territory business overwrites both state and head
+  - 65.7% of a month's invoice value lands in the last 5 days, rising to 71.9%
+    in FY2026-27
+  - The seasonal curve's mixed-basis issue across the three years
+  - item_master has 11,368 codes against the authority's 6,223
+
+92_anchors.csv
+  The frozen figures any analysis must reconcile to:
+  FY2025-26  145,613 rows  Rs 3,609,953,808.51
+  FY2026-27 Apr-Jul  44,025 rows  Rs 1,049,171,949.45
+  FY2025-26 Apr-Jul  43,398 rows  Rs 1,008,949,620.86
+  plus net by head for FY2025-26
+
+93_channel_and_vocabulary.md
+  The channel values, the state_canon list with splits and parents, the head
+  alias map, and the segment vocabulary in both register and marketing forms
+
+RULES
+- UTF-8, header row, ISO dates, no thousands separators in numeric columns
+- Do not round. Full precision.
+- Do not filter or exclude anything. If a table has non-territory rows, include
+  them with their channel so the analyst can decide.
+- Print row count and, where applicable, net total for every file.
+- Confirm the two anchors above reconcile from the exported files themselves.
+
+Nothing is written, altered or migrated by this task.

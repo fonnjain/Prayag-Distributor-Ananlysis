@@ -249,3 +249,10 @@ uri = "file://reports/july-pscode3-vs-august-product-wise-retailer-ratios.csv"
 type = "table"
 title = "July vs August matched-retailer ratios"
 description = "Complete canonical RET# overlap: July PSCode 3 NET, August Product-Wise Basic Order Value, and August/July ratio. RET- variants are normalized to RET#."
+
+[[outputs]]
+id = "0VUfvY-2ov_KxiMt3gTEM"
+uri = "file://attached_assets/prayag_analysis_export_2026-08-26.zip"
+type = "unspecified"
+title = "Prayag analysis export — 2026-08-26"
+description = "Read-only UTF-8 ZIP export of FY2025-26 and FY2026-27 sales, secondary data, organization, customers, products, targets, seasonal curves, schemes, alerts, market data, data dictionary, limitations, vocabulary, and anchor reconciliations. Validated from the exported CSVs: FY2025-26 145,613 rows / INR 3,609,953,808.51; FY2026-27 Apr-Jul 44,025 rows / INR 1,049,171,949.45; FY2025-26 Apr-Jul 43,398 rows / INR 1,008,949,620.86; 6,223 MRP codes."

@@ -35,6 +35,7 @@ import {
   compareSeasonalCurveToConfig,
   curveInstabilityNote,
   FISCAL_MONTH_NAMES,
+  selectSeasonalCurveActivation,
   type SeasonalCurveMath,
   type SeasonalSourceYear,
 } from "./seasonalCurveMath.js";
@@ -288,6 +289,7 @@ type SeasonalCurveRow = {
   month_share_ranges: [Array<string | number>, Array<string | number>][];
   built_at: Date | string;
   built_from: "auto_rebuild" | "manual";
+  is_active: boolean;
   source_rows: Record<string, number>;
   source_net: Record<string, number>;
   source_basis: Record<string, string>;
@@ -374,8 +376,9 @@ async function loadFrozenSourceYears(): Promise<SeasonalSourceYear[]> {
   }>(
     `WITH attribution AS (
        SELECT fy,
-              BOOL_OR(channel IS NOT NULL) AS has_channel,
-              BOOL_OR(is_territory IS NOT NULL) AS has_territory
+               COUNT(*)::integer AS total_rows,
+               COUNT(*) FILTER (WHERE NULLIF(BTRIM(channel), '') IS NOT NULL)::integer AS channel_rows,
+               COUNT(*) FILTER (WHERE is_territory IS NOT NULL)::integer AS territory_rows
          FROM sale_line_current
         WHERE fy = ANY($1::text[])
         GROUP BY fy
@@ -385,22 +388,21 @@ async function loadFrozenSourceYears(): Promise<SeasonalSourceYear[]> {
               sl.month_label,
               sl.amount,
               CASE
-                -- A classified source is authoritative: Project, Govt, JJM,
-                -- GeM and Export must not leak into a retail curve because a
-                -- historical register has NULL territory flags.
-                WHEN a.has_channel THEN 'channel_retail'
-                -- Older sources can still be safely narrowed when they carry
-                -- their original explicit territory attribution.
-                WHEN a.has_territory THEN 'territory_true'
-                -- FY2024-25 has neither classification. Keep it visible as
-                -- explicitly unclassified historical evidence.
+                 -- A source can be narrowed only when every row has an
+                 -- authoritative classification. A partial label would
+                 -- silently drop unclassified business and create a
+                 -- commercially incomparable monthly shape.
+                 WHEN a.channel_rows = a.total_rows THEN 'channel_retail'
+                 WHEN a.channel_rows > 0 THEN 'channel_incomplete'
+                 WHEN a.territory_rows = a.total_rows THEN 'territory_true'
+                 WHEN a.territory_rows > 0 THEN 'territory_incomplete'
                 ELSE 'legacy_unclassified'
               END AS source_basis
          FROM sale_line_current sl
          JOIN attribution a USING (fy)
-        WHERE (a.has_channel AND sl.channel = 'Retail')
-           OR (NOT a.has_channel AND a.has_territory AND sl.is_territory = TRUE)
-           OR (NOT a.has_channel AND NOT a.has_territory)
+         WHERE (a.channel_rows = a.total_rows AND sl.channel = 'Retail')
+            OR (a.channel_rows < a.total_rows)
+            OR (a.channel_rows = 0 AND a.territory_rows = a.total_rows AND sl.is_territory = TRUE)
      )
      SELECT fy, month_label, source_basis, COUNT(*)::text AS rows,
             COALESCE(SUM(amount::numeric), 0)::text AS net
@@ -453,6 +455,12 @@ function materialBaselineFinding(
   const baseline = sourceYears.find((source) => source.fy === "2025-26");
   if (!baseline) {
     throw new Error("seasonal curve: FY2025-26 is required for baseline verification");
+  }
+  if (baseline.sourceBasis !== "channel_retail") {
+    throw new Error(
+      `seasonal curve: FY2025-26 must be completely retail-classified before ` +
+      `it can replace the approved config (got ${baseline.sourceBasis})`,
+    );
   }
   const curve = buildSeasonalCurveMath([baseline]);
   const comparison = compareSeasonalCurveToConfig(curve, resolveVersion("2025-26").monthly);
@@ -540,67 +548,77 @@ async function persistCurve(
 }
 
 export async function initializeSeasonalCurve(): Promise<void> {
-  const existing = await readActiveCurve();
-  if (existing) {
-    const runtime = rowToActiveCurve(existing);
-    runtime.instabilityNote = runtime.monthRanges.some(([min, max]) => max - min > 3)
-      ? `${runtime.monthRanges
-          .map(([min, max], idx) => ({ min, max, idx }))
-          .filter(({ min, max }) => max - min > 3)
-          .map(({ min, max, idx }) => `${MONTH_NAMES[idx]} ${min.toFixed(1)}–${max.toFixed(1)}%`)
-          .join(", ")} share has varied by more than 3 points across ${runtime.sourceFys.length} years.`
-      : null;
-    applyActiveCurve(runtime);
-    return;
-  }
-
   const sourceYears = await loadFrozenSourceYears();
   materialBaselineFinding(sourceYears);
-  const baseline = buildSeasonalCurveMath([
-    sourceYears.find((source) => source.fy === "2025-26")!,
-  ]);
-  const first = await persistCurve(baseline, "auto_rebuild", false);
-  applyActiveCurve({
-    ...rowToActiveCurve(first.row),
-    monthRanges: baseline.monthRanges,
-    instabilityNote: curveInstabilityNote(baseline),
-  });
-  logger.info(
-    { version: first.row.id, sourceFys: baseline.fiscalYearsUsed },
-    "seasonal curve: initialized baseline version",
-  );
+  const existing = await readActiveCurve();
+  const activation = selectSeasonalCurveActivation(sourceYears);
 
-  if (sourceYears.length > 1) {
-    const multiYear = buildSeasonalCurveMath(sourceYears);
-    const next = await persistCurve(multiYear, "auto_rebuild", false);
-    if (next.rebuilt) {
-      applyActiveCurve({
-        ...rowToActiveCurve(next.row),
-        monthRanges: multiYear.monthRanges,
-        instabilityNote: curveInstabilityNote(multiYear),
-      });
-      logger.info(
-        {
-          version: next.row.id,
-          sourceFys: multiYear.fiscalYearsUsed,
-          monthWeights: multiYear.monthWeights,
-          quarterWeights: multiYear.quarterWeights,
-          monthShareStddev: multiYear.monthShareStddev,
-          delta: next.delta,
-        },
-        "seasonal curve: initialized equal-weight multi-year version",
-      );
-    }
+  // A fresh history always retains the reconciled FY2025-26 baseline before
+  // any eligible multi-year curve is appended. Existing histories simply
+  // reconcile the active row against the currently valid selection.
+  if (!existing) {
+    const baseline = buildSeasonalCurveMath([
+      sourceYears.find((source) => source.fy === "2025-26")!,
+    ]);
+    const first = await persistCurve(baseline, "auto_rebuild", false);
+    applyActiveCurve({
+      ...rowToActiveCurve(first.row),
+      monthRanges: baseline.monthRanges,
+      instabilityNote: curveInstabilityNote(baseline),
+    });
+    logger.info(
+      { version: first.row.id, sourceFys: baseline.fiscalYearsUsed },
+      "seasonal curve: initialized verified baseline version",
+    );
+  }
+
+  const active = await readActiveCurve();
+  const selected = await persistCurve(activation.curve, "auto_rebuild", false);
+  const activeRow = selected.row ?? active;
+  applyActiveCurve({
+    ...rowToActiveCurve(activeRow),
+    monthRanges: activation.curve.monthRanges,
+    instabilityNote: curveInstabilityNote(activation.curve),
+  });
+
+  if (activation.blockedFiscalYears.length > 0) {
+    logger.warn(
+      {
+        version: activeRow.id,
+        blockedFiscalYears: activation.blockedFiscalYears,
+        activeSourceFys: activation.curve.fiscalYearsUsed,
+      },
+      "seasonal curve: multi-year activation withheld until every frozen year has comparable retail/territory attribution",
+    );
+  } else if (selected.rebuilt) {
+    logger.info(
+      {
+        version: activeRow.id,
+        sourceFys: activation.curve.fiscalYearsUsed,
+        monthWeights: activation.curve.monthWeights,
+        quarterWeights: activation.curve.quarterWeights,
+        monthShareStddev: activation.curve.monthShareStddev,
+        delta: selected.delta,
+      },
+      "seasonal curve: initialized equal-weight multi-year version",
+    );
   }
 }
 
 export async function rebuildSeasonalCurve(options: {
   builtFrom?: "auto_rebuild" | "manual";
   force?: boolean;
-} = {}): Promise<{ version: number | null; rebuilt: boolean; sourceFys: string[]; delta: Record<string, unknown> | null }> {
+} = {}): Promise<{
+  version: number | null;
+  rebuilt: boolean;
+  sourceFys: string[];
+  blockedFiscalYears: Array<{ fy: string; sourceBasis: string }>;
+  delta: Record<string, unknown> | null;
+}> {
   const sourceYears = await loadFrozenSourceYears();
   materialBaselineFinding(sourceYears);
-  const curve = buildSeasonalCurveMath(sourceYears);
+  const activation = selectSeasonalCurveActivation(sourceYears);
+  const curve = activation.curve;
   const result = await persistCurve(curve, options.builtFrom ?? "auto_rebuild", options.force ?? false);
   if (result.rebuilt) {
     applyActiveCurve({
@@ -625,6 +643,7 @@ export async function rebuildSeasonalCurve(options: {
     version: Number(result.row.id),
     rebuilt: result.rebuilt,
     sourceFys: curve.fiscalYearsUsed,
+    blockedFiscalYears: activation.blockedFiscalYears,
     delta: result.delta,
   };
 }
@@ -633,6 +652,7 @@ export async function previewSeasonalCurve(): Promise<{
   sourceYears: SeasonalSourceYear[];
   baseline: SeasonalCurveMath;
   multiYear: SeasonalCurveMath;
+  activation: ReturnType<typeof selectSeasonalCurveActivation>;
   comparison: ReturnType<typeof compareSeasonalCurveToConfig>;
 }> {
   const sourceYears = await loadFrozenSourceYears();
@@ -645,6 +665,7 @@ export async function previewSeasonalCurve(): Promise<{
     sourceYears,
     baseline,
     multiYear: buildSeasonalCurveMath(sourceYears),
+    activation: selectSeasonalCurveActivation(sourceYears),
     comparison: compareSeasonalCurveToConfig(
       baseline,
       resolveVersion("2025-26").monthly,
@@ -662,7 +683,8 @@ export async function maybeRebuildSeasonalCurve(now = new Date(Date.now())): Pro
   if (!afterApril7(now)) return;
   const sourceYears = await loadFrozenSourceYears();
   const current = await readActiveCurve();
-  if (!current || !sameSourceInputs(current, buildSeasonalCurveMath(sourceYears))) {
+  const activation = selectSeasonalCurveActivation(sourceYears);
+  if (!current || !sameSourceInputs(current, activation.curve)) {
     await rebuildSeasonalCurve({ builtFrom: "auto_rebuild" });
   }
 }

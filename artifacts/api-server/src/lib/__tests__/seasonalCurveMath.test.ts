@@ -3,6 +3,7 @@ import seasonalConfig from "../../../config/seasonal_weights.json";
 import {
   buildSeasonalCurveMath,
   compareSeasonalCurveToConfig,
+  selectSeasonalCurveActivation,
 } from "../seasonalCurveMath.js";
 
 describe("versioned seasonal curve math", () => {
@@ -90,5 +91,68 @@ describe("versioned seasonal curve math", () => {
     expect(v3.fiscalYearsUsed).toEqual(["2023-24", "2024-25", "2025-26", "2026-27"]);
     expect(v3.monthWeights).not.toEqual(v2.monthWeights);
     expect(v3.monthWeights.reduce((sum, value) => sum + value, 0)).toBeCloseTo(100, 10);
+  });
+
+  it("keeps the verified baseline active rather than averaging an unclassified frozen year", () => {
+    const activation = selectSeasonalCurveActivation([
+      {
+        fy: "2023-24",
+        sourceBasis: "territory_true",
+        rows: 10,
+        monthlyNet: [10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 90],
+      },
+      {
+        fy: "2024-25",
+        sourceBasis: "legacy_unclassified",
+        rows: 10,
+        monthlyNet: [90, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10],
+      },
+      {
+        fy: "2025-26",
+        sourceBasis: "channel_retail",
+        rows: 10,
+        monthlyNet: [20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 80],
+      },
+    ]);
+
+    expect(activation.mode).toBe("verified_baseline");
+    expect(activation.curve.fiscalYearsUsed).toEqual(["2025-26"]);
+    expect(activation.blockedFiscalYears).toEqual([
+      { fy: "2024-25", sourceBasis: "legacy_unclassified" },
+    ]);
+  });
+
+  it("rejects replacing the approved baseline when FY2025-26 is not fully retail-classified", () => {
+    expect(() =>
+      selectSeasonalCurveActivation([
+        {
+          fy: "2025-26",
+          sourceBasis: "channel_incomplete",
+          rows: 10,
+          monthlyNet: [20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 80],
+        },
+      ]),
+    ).toThrow("not fully retail-classified");
+  });
+
+  it("activates equal weighting only when every frozen year has comparable scope", () => {
+    const activation = selectSeasonalCurveActivation([
+      {
+        fy: "2023-24",
+        sourceBasis: "territory_true",
+        rows: 10,
+        monthlyNet: [10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 90],
+      },
+      {
+        fy: "2025-26",
+        sourceBasis: "channel_retail",
+        rows: 10,
+        monthlyNet: [20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 80],
+      },
+    ]);
+
+    expect(activation.mode).toBe("equal_weighted_multi_year");
+    expect(activation.blockedFiscalYears).toEqual([]);
+    expect(activation.curve.fiscalYearsUsed).toEqual(["2023-24", "2025-26"]);
   });
 });
