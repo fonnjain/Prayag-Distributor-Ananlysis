@@ -1,0 +1,132 @@
+GOAL
+Prayag reconcile after month close and edit the Google Sheets. Frozen months
+are never re-read, so the app and the sheet diverge silently - June and July
+already differ by Rs 4.83 L and Rs 4.73 L against 18 invoices deleted after
+freeze, and nobody found it until someone counted by hand.
+
+Detect the drift automatically. Never act on it automatically.
+
+Open months already re-read fully on every 6-hourly sync - the whole month is
+replaced, so any changed day is picked up. This closes the frozen-month gap
+only.
+
+============================================================
+1 - THE WEEKLY CHECK - read-only, always
+============================================================
+Once a week, for the LAST THREE FROZEN MONTHS in the current fiscal year:
+
+  read the sheet tab read-only
+  compare row count and net against what the app holds frozen
+  record the result
+
+It NEVER writes, never unfreezes, never reloads. It only reports.
+
+Three months, not all. A month frozen six months ago is settled; drift that
+old is a different conversation.
+
+frozen_drift_check
+  id · fy · month · checked_at
+  app_rows · app_net · sheet_rows · sheet_net
+  row_delta · net_delta
+  status        match | drift | sheet_unreadable
+  detail        JSON - the invoices present in one and not the other
+  resolved_by · resolved_at · resolution   refreshed | accepted | ignored
+
+Store the invoice-level detail at detection time. The sheet may change again
+before anyone looks, and the operator needs to see what was found THEN.
+
+============================================================
+2 - WHAT COUNTS AS DRIFT
+============================================================
+Any difference in row count, or a net difference above Rs 1,000.
+
+Below that, log as `match` with the delta recorded - a few rupees of rounding
+is not worth a notification, but it should still be visible in history.
+
+If the sheet cannot be read - quota, permissions, tab renamed - record
+`sheet_unreadable` and say so. Do NOT record it as a match.
+
+============================================================
+3 - HOW THE OPERATOR SEES IT
+============================================================
+On the Data page, only when drift exists:
+
+    2 frozen months differ from the source sheet
+
+    Jun-26   frozen 1 Aug     app 12,868 rows  Rs 31,42,78,773
+                              sheet 12,848     Rs 31,37,95,963
+                              -20 rows  -Rs 4,82,810.94
+                              [ view detail ]  [ refresh this month ]
+
+    Jul-26   frozen 8 Aug     app 13,803 rows  Rs 32,10,28,905
+                              sheet 13,769     Rs 32,05,55,470
+                              -34 rows  -Rs 4,73,435.00
+                              [ view detail ]  [ refresh this month ]
+
+**view detail** lists every invoice present in one and not the other, with
+date, lines and value. The operator must see WHAT changed before deciding.
+
+Nothing happens until someone clicks. **The app never refreshes on its own.**
+
+============================================================
+4 - THE REFRESH - one month, reason required
+============================================================
+Same as a manual refresh:
+  a. Preview - what would be added, removed and changed. Nothing written.
+  b. Reason required, minimum 10 characters, plus operator name.
+  c. In one transaction: archive the current frozen rows, delete the month,
+     reload from the sheet, re-freeze immediately, write the record.
+
+The wipe guard STAYS ARMED. Below 0.60x existing rows it aborts even with a
+valid reason. A reconciliation removing 40% of a month is not a
+reconciliation.
+
+============================================================
+5 - THREE OUTCOMES, ALL RECORDED
+============================================================
+  refreshed  the app now matches the sheet
+  accepted   the app value is correct and the sheet is wrong - keep frozen,
+             record why
+  ignored    known and not worth acting on
+
+"Accepted" matters. Sometimes the sheet is the thing that changed wrongly, and
+the operator should be able to say so rather than being forced to refresh or
+leave it flagged forever.
+
+A resolved item stops appearing but stays in history.
+
+============================================================
+6 - CLOSED FISCAL YEARS ARE NOT CHECKED
+============================================================
+Only the CURRENT fiscal year. FY2025-26 is anchored at Rs 3,609,953,808.51 and
+must not move. If drift is somehow detected in a closed year, report it as a
+finding and refuse the refresh.
+
+============================================================
+DO NOT
+============================================================
+- Do not refresh automatically, ever. Detection and action stay separate.
+- Do not check or refresh a closed fiscal year.
+- Do not check more than the last three frozen months.
+- Do not remove the wipe guard.
+- Do not let a sheet read failure record as a match.
+
+============================================================
+VERIFY - produced values, and a hash that resolves
+============================================================
+1. Run the check now. Print the result for the last three frozen months.
+   Expect Jun-26 and Jul-26 to show drift with the exact deltas above.
+2. Print the stored detail for Jun-26 - all 7 invoices, with dates and values.
+3. Confirm nothing was written by the check - row counts and net for all three
+   months before and after.
+4. Refresh Jun-26 through the flow. Print preview, the rejected blank reason,
+   then the completed refresh with before/after and the archive reference.
+5. Confirm Jun-26 is FROZEN again immediately, with a new frozen_at.
+6. Mark Jul-26 as "accepted" with a reason. Confirm it leaves the list and
+   stays in history.
+7. Attempt a refresh on a FY2025-26 month. Must be refused.
+8. Simulate a sheet returning half the rows. Confirm the guard aborts.
+9. Simulate an unreadable sheet. Confirm it records sheet_unreadable, not
+   match.
+10. Print the FY2026-27 total before and after the Jun refresh.
+11. Push, print both refs matching.
