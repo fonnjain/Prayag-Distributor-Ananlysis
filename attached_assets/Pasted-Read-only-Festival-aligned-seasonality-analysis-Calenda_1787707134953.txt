@@ -1,0 +1,46 @@
+Read-only. Festival-aligned seasonality analysis.
+
+Calendar months are the wrong unit for this. Distributors stock BEFORE Diwali,
+so the buying month and the festival month are often different. Use windows
+defined relative to the festival date.
+
+DIWALI DATES - verified
+    24 Oct 2022 · 12 Nov 2023 · 1 Nov 2024 · 20 Oct 2025 · 8 Nov 2026
+A 23-day spread between 2023 and 2025.
+
+FOR EACH COMPLETE FISCAL YEAR IN THE REGISTER, print territory-channel net and
+invoice count for:
+
+  a. WEEKS RELATIVE TO DIWALI - the analytically correct unit
+     weeks -8 to -1 (the eight weeks before), week 0 (festival week),
+     weeks +1 to +4 (after). One row per week per year.
+     If the pattern holds, the peak week should sit in the same RELATIVE
+     position each year even though the calendar date moves.
+
+  b. MONTHS RELATIVE TO DIWALI - what people actually think in
+     D-2, D-1, D (the month containing Diwali), D+1, D+2.
+     For FY2025-26 that is Aug, Sep, Oct, Nov, Dec.
+     For FY2024-25 that is Sep, Oct, Nov, Dec, Jan.
+     Print each as a share of its own fiscal year.
+
+  c. THE SAME WINDOWS BY CALENDAR MONTH, side by side, so the distortion is
+     visible. October 2024 was a stocking month; October 2025 was a
+     post-festival month. If the app compares them like for like, that
+     comparison is wrong and I want to see by how much.
+
+  d. Segment split for the four largest - PTMT, CP, CPVC, SWR. Sanitaryware and
+     taps should follow the festival; pipe may follow monsoon and construction
+     instead. If they diverge, one company-level curve cannot serve both.
+
+  e. HOLI, the same treatment. 8 Mar 2023 · 25 Mar 2024 · 14 Mar 2025 ·
+     3-4 Mar 2026. All in March, so less disruptive - but confirm whether
+     March shows a pre-Holi effect at all, or whether its strength is purely
+     financial year-end.
+
+THE QUESTION THIS ANSWERS
+Does the sales peak MOVE with the festival date, or stay in the same calendar
+month? If it moves, the fixed monthly seasonal curve is wrong and every
+October and November year-on-year comparison is distorted. If it stays,
+monsoon and the construction season dominate and the current curve is right.
+
+Do not adjust anything. I want the evidence first.
