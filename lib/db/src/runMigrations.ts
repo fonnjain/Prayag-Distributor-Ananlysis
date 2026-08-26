@@ -3465,6 +3465,98 @@ const MIGRATIONS: Migration[] = [
       $$ LANGUAGE plpgsql;
     `,
   },
+  {
+    id: "081_frozen_drift_audit",
+    sql: `
+      CREATE TABLE IF NOT EXISTS frozen_drift_check (
+        id SERIAL PRIMARY KEY, fy TEXT NOT NULL, month_label TEXT NOT NULL,
+        checked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        app_rows INTEGER NOT NULL, app_amount NUMERIC NOT NULL,
+        sheet_rows INTEGER, sheet_amount NUMERIC, row_delta INTEGER, net_delta NUMERIC,
+        status TEXT NOT NULL CHECK (status IN ('match', 'drift', 'sheet_unreadable')),
+        evidence JSONB NOT NULL, source_fingerprint TEXT, preview_hash TEXT,
+        resolution TEXT CHECK (resolution IN ('accepted', 'ignored', 'refreshed')),
+        resolved_at TIMESTAMPTZ, resolved_by TEXT, resolution_reason TEXT
+      );
+      CREATE INDEX IF NOT EXISTS frozen_drift_check_fy_month_checked_idx
+        ON frozen_drift_check (fy, month_label, checked_at DESC);
+      CREATE TABLE IF NOT EXISTS frozen_drift_archive (
+        id SERIAL PRIMARY KEY, drift_check_id INTEGER NOT NULL REFERENCES frozen_drift_check(id),
+        fy TEXT NOT NULL, month_label TEXT NOT NULL,
+        archived_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        operator TEXT NOT NULL, reason TEXT NOT NULL, rows JSONB NOT NULL
+      );
+      CREATE OR REPLACE FUNCTION frozen_drift_evidence_immutable()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        IF NEW.evidence IS DISTINCT FROM OLD.evidence
+           OR NEW.fy IS DISTINCT FROM OLD.fy OR NEW.month_label IS DISTINCT FROM OLD.month_label
+           OR NEW.app_rows IS DISTINCT FROM OLD.app_rows OR NEW.app_amount IS DISTINCT FROM OLD.app_amount
+           OR NEW.sheet_rows IS DISTINCT FROM OLD.sheet_rows OR NEW.sheet_amount IS DISTINCT FROM OLD.sheet_amount
+           OR NEW.row_delta IS DISTINCT FROM OLD.row_delta OR NEW.net_delta IS DISTINCT FROM OLD.net_delta
+           OR NEW.status IS DISTINCT FROM OLD.status OR NEW.source_fingerprint IS DISTINCT FROM OLD.source_fingerprint
+           OR NEW.preview_hash IS DISTINCT FROM OLD.preview_hash THEN
+          RAISE EXCEPTION 'frozen drift evidence is immutable';
+        END IF;
+        RETURN NEW;
+      END; $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS frozen_drift_evidence_immutable ON frozen_drift_check;
+      CREATE TRIGGER frozen_drift_evidence_immutable BEFORE UPDATE ON frozen_drift_check
+        FOR EACH ROW EXECUTE FUNCTION frozen_drift_evidence_immutable();
+    `,
+  },
+  {
+    id: "082_frozen_drift_refreshed_resolution",
+    sql: `
+      ALTER TABLE frozen_drift_check
+        DROP CONSTRAINT IF EXISTS frozen_drift_check_resolution_check;
+      ALTER TABLE frozen_drift_check
+        ADD CONSTRAINT frozen_drift_check_resolution_check
+        CHECK (resolution IS NULL OR resolution IN ('accepted', 'ignored', 'refreshed'));
+    `,
+  },
+  {
+    id: "083_frozen_drift_convergence_guards",
+    sql: `
+      -- Drizzle may have created these tables before inline migrations ran.
+      -- Reassert every integrity rule without assuming which creation path won.
+      ALTER TABLE frozen_drift_check
+        DROP CONSTRAINT IF EXISTS frozen_drift_check_status_check;
+      ALTER TABLE frozen_drift_check
+        ADD CONSTRAINT frozen_drift_check_status_check
+        CHECK (status IN ('match', 'drift', 'sheet_unreadable'));
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+           WHERE conrelid = 'frozen_drift_archive'::regclass
+             AND contype = 'f'
+             AND confrelid = 'frozen_drift_check'::regclass
+        ) THEN
+          ALTER TABLE frozen_drift_archive
+            ADD CONSTRAINT frozen_drift_archive_drift_check_fk
+            FOREIGN KEY (drift_check_id) REFERENCES frozen_drift_check(id);
+        END IF;
+      END $$;
+      CREATE OR REPLACE FUNCTION frozen_drift_evidence_immutable()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        IF NEW.evidence IS DISTINCT FROM OLD.evidence
+           OR NEW.fy IS DISTINCT FROM OLD.fy OR NEW.month_label IS DISTINCT FROM OLD.month_label
+           OR NEW.app_rows IS DISTINCT FROM OLD.app_rows OR NEW.app_amount IS DISTINCT FROM OLD.app_amount
+           OR NEW.sheet_rows IS DISTINCT FROM OLD.sheet_rows OR NEW.sheet_amount IS DISTINCT FROM OLD.sheet_amount
+           OR NEW.row_delta IS DISTINCT FROM OLD.row_delta OR NEW.net_delta IS DISTINCT FROM OLD.net_delta
+           OR NEW.status IS DISTINCT FROM OLD.status OR NEW.source_fingerprint IS DISTINCT FROM OLD.source_fingerprint
+           OR NEW.preview_hash IS DISTINCT FROM OLD.preview_hash THEN
+          RAISE EXCEPTION 'frozen drift evidence is immutable';
+        END IF;
+        RETURN NEW;
+      END; $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS frozen_drift_evidence_immutable ON frozen_drift_check;
+      CREATE TRIGGER frozen_drift_evidence_immutable BEFORE UPDATE ON frozen_drift_check
+        FOR EACH ROW EXECUTE FUNCTION frozen_drift_evidence_immutable();
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

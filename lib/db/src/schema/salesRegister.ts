@@ -205,3 +205,42 @@ export const registerMonthState = pgTable("register_month_state", {
 }, (t) => [primaryKey({ columns: [t.fy, t.monthLabel] })]);
 
 export type RegisterMonthState = typeof registerMonthState.$inferSelect;
+
+// Evidence captured when a source workbook disagrees with an already-frozen
+// month.  The evidence payload is deliberately immutable; only resolution
+// fields may change after an operator reviews it.
+export const frozenDriftChecks = pgTable("frozen_drift_check", {
+  id: serial("id").primaryKey(),
+  fy: text("fy").notNull(),
+  monthLabel: text("month_label").notNull(),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+  appRows: integer("app_rows").notNull(),
+  appAmount: numeric("app_amount").notNull(),
+  sheetRows: integer("sheet_rows"),
+  sheetAmount: numeric("sheet_amount"),
+  rowDelta: integer("row_delta"),
+  netDelta: numeric("net_delta"),
+  status: text("status").notNull(), // match | drift | sheet_unreadable
+  evidence: jsonb("evidence").notNull(),
+  sourceFingerprint: text("source_fingerprint"),
+  previewHash: text("preview_hash"),
+  resolution: text("resolution"), // accepted | ignored | refreshed
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  resolvedBy: text("resolved_by"),
+  resolutionReason: text("resolution_reason"),
+}, (t) => [
+  index("frozen_drift_check_fy_month_checked_idx").on(t.fy, t.monthLabel, t.checkedAt),
+]);
+
+// Durable before-image for the exceptional accepted frozen-month refresh.
+// This is append-only and stores the exact rows removed by the refresh.
+export const frozenDriftArchives = pgTable("frozen_drift_archive", {
+  id: serial("id").primaryKey(),
+  driftCheckId: integer("drift_check_id").notNull(),
+  fy: text("fy").notNull(),
+  monthLabel: text("month_label").notNull(),
+  archivedAt: timestamp("archived_at", { withTimezone: true }).notNull().defaultNow(),
+  operator: text("operator").notNull(),
+  reason: text("reason").notNull(),
+  rows: jsonb("rows").notNull(),
+});

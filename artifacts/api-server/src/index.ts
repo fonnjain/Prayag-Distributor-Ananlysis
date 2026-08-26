@@ -52,6 +52,7 @@ import {
   initializeSeasonalCurve,
   startSeasonalCurveScheduler,
 } from "./lib/seasonal.js";
+import { startWeeklyFrozenDriftScheduler } from "./lib/registers/frozenDriftScheduler.js";
 
 const rawPort = process.env["PORT"];
 
@@ -592,6 +593,7 @@ startServer({
       // server restart never sends a duplicate digest.
       startSeasonalCurveScheduler();
       startWeeklyDigestScheduler(currentOpenFy());
+      startWeeklyFrozenDriftScheduler();
     } else {
       logger.info(
         "dev: all interval schedulers suppressed (NODE_ENV !== production) — " +

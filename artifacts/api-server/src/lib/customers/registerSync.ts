@@ -234,6 +234,57 @@ export function isFyOpen(fy: string): boolean {
   return Date.now() < Date.UTC(endYear, 2, 31); // month is 0-indexed
 }
 
+/**
+ * Canonical pre-monthlyReplace transform.  Frozen drift review imports this
+ * rather than reimplementing the tank/SAP and synthetic-serial rules, so an
+ * exceptional refresh has the same rows monthly replacement would write.
+ */
+export async function transformRegisterLinesForMonthlyReplace(
+  fy: string,
+  lines: InsertSaleLine[],
+): Promise<InsertSaleLine[]> {
+  const regCfg = registerSheets as unknown as { sap_source?: Record<string, string> };
+  const sapId = regCfg.sap_source?.[fy] ?? null;
+  let sapLookup: SapLookupMap | null = null;
+  if (sapId) {
+    try { sapLookup = await buildSapLookupMap(sapId); }
+    catch (err) { logger.error({ fy, sapId, err }, "register transform: SAP load failed — falling back to Route 2"); }
+  }
+  const resolvedLines = lines.map((line) => {
+    const resolved = resolveWaterTankRow({
+      code: line.code, groupCanon: line.groupCanon ?? null,
+      sheetQty: line.qty != null ? Number(line.qty) : null,
+      invoiceNo: line.invoiceNo ?? null, amount: Number(line.amount),
+      sapLookup, hasSapSource: sapId != null,
+    });
+    if (resolved.flag === "non-tank-group" || resolved.flag === "unmapped-suffix" ||
+        resolved.flag === "sap-ghost" || resolved.flag === "non-clean-division") return line;
+    if (assertTankQtyLtr(resolved) != null) return line;
+    return {
+      ...line,
+      qty: resolved.qty != null ? String(resolved.qty) : null,
+      qtyLtr: resolved.qtyLtr != null ? String(resolved.qtyLtr) : null,
+    };
+  });
+  const tankUidOcc = new OccurrenceCounter();
+  const resolvedUids = resolvedLines.map((line) => {
+    if (line.groupCanon !== "WATER TANK" || line.serialNo == null) return line;
+    const key = [line.fy ?? "", line.code, line.qty ?? "", line.amount, line.monthLabel ?? "", String(line.serialNo)].join("|");
+    return { ...line, lineUid: computeLineUid(key, tankUidOcc.next(key)) };
+  });
+  const synthetic = new OccurrenceCounter();
+  return resolvedUids.map((line) => {
+    if (line.serialNo != null) return line;
+    const identity = [line.invoiceNo ?? "", line.code, line.color ?? "", line.qty ?? "", line.monthLabel ?? ""].join("|");
+    const serialNo = synthetic.next(identity);
+    const uidKey = [
+      line.fy ?? "", line.invoiceNo ?? "", line.code, line.color ?? "", line.qty ?? "",
+      line.amount, line.monthLabel ?? "", serialNo,
+    ].join("|");
+    return { ...line, serialNo, lineUid: computeLineUid(uidKey, 0) };
+  });
+}
+
 async function hasRows(fy: string): Promise<boolean> {
   const res = await pool.query<{ n: string }>(
     `SELECT count(*)::text AS n FROM sale_line_all WHERE fy = $1 LIMIT 1`,
@@ -388,7 +439,7 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
     // column). Schema A rows (FY2026-27) have real sheet serials and are
     // untouched by this step.
     const postResOccCounter = new OccurrenceCounter();
-    const linesForSync = linesWithResolvedUids.map((line) => {
+    const legacyLinesForSync = linesWithResolvedUids.map((line) => {
       if (line.serialNo != null) return line; // real or Schema-A serial — leave untouched
       // Post-resolution identity key: uses resolved qty (pieces for tank rows).
       const postIdKey = [
@@ -413,6 +464,10 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
       ].join("|");
       return { ...line, serialNo: syntheticSerial, lineUid: computeLineUid(postUidKey, 0) };
     });
+    // Keep frozen-drift refresh and normal monthly replacement on the same
+    // exported transform. The legacy calculation above remains temporarily for
+    // its detailed operational flags/logging, but is not the write source.
+    const linesForSync = await transformRegisterLinesForMonthlyReplace(fy, lines);
 
     // ── Step 3: monthly full replace ─────────────────────────────────────────
     // No identity key, no dedup, no tombstone, no supersede, no revive.

@@ -49,8 +49,164 @@ import {
   buildSapLookupMap,
 } from "../lib/registers/tankResolution.js";
 import { backfillSaleChannel } from "../lib/sap/backfillChannel.js";
+import {
+  applyFrozenRefresh,
+  detectFrozenDrift,
+  previewFrozenRefresh,
+  resolveFrozenDrift,
+  isLatestFrozenMonth,
+} from "../lib/registers/frozenDrift.js";
+import { requireFrozenDriftAdmin } from "../lib/registers/frozenDriftAuth.js";
 
 const router = Router();
+
+// Frozen-month drift is deliberately a narrow exception path. It is current-FY
+// only and never shares the generic register freeze bypass used by legacy tools.
+router.get("/registers/frozen-drift", async (req, res) => {
+  if (!requireFrozenDriftAdmin(req, res)) return;
+  const fy = typeof req.query.fy === "string" ? req.query.fy : currentOpenFy();
+  if (fy !== currentOpenFy()) {
+    res.status(400).json({ error: "frozen drift records are available for the current FY only" });
+    return;
+  }
+  try {
+    const { rows } = await pool.query<{
+      id: number; month_label: string; frozen_at: Date; app_rows: string; app_amount: string;
+      sheet_rows: string | null; sheet_amount: string | null; row_delta: string | null; net_delta: string | null;
+      status: string; checked_at: Date; resolution: string | null; resolved_at: Date | null;
+      resolved_by: string | null; resolution_reason: string | null;
+    }>(
+      `WITH current_frozen AS (
+          SELECT month_label
+            FROM register_month_state
+           WHERE fy = $1 AND frozen_at IS NOT NULL
+           ORDER BY TO_DATE(month_label, 'Mon-YY') DESC
+           LIMIT 3
+        )
+        SELECT DISTINCT ON (c.month_label)
+              c.id, c.month_label, s.frozen_at, c.app_rows, c.app_amount, c.sheet_rows, c.sheet_amount,
+              c.row_delta, c.net_delta, c.status, c.checked_at, c.resolution, c.resolved_at,
+              c.resolved_by, c.resolution_reason
+         FROM frozen_drift_check c
+         JOIN register_month_state s ON s.fy = c.fy AND s.month_label = c.month_label
+          JOIN current_frozen f ON f.month_label = c.month_label
+        WHERE c.fy = $1
+          AND c.resolution IS NULL
+          AND c.status IN ('drift', 'sheet_unreadable')
+        ORDER BY c.month_label, c.checked_at DESC, c.id DESC`,
+      [fy],
+    );
+    res.json({
+      fy,
+      checks: rows.map((row) => ({
+        id: row.id, monthLabel: row.month_label, frozenAt: row.frozen_at,
+        appRows: Number(row.app_rows), appNet: Number(row.app_amount),
+        sheetRows: row.sheet_rows == null ? null : Number(row.sheet_rows),
+        sheetNet: row.sheet_amount == null ? null : Number(row.sheet_amount),
+        rowDelta: row.row_delta == null ? null : Number(row.row_delta),
+        netDelta: row.net_delta == null ? null : Number(row.net_delta),
+        status: row.status, checkedAt: row.checked_at,
+        resolution: row.resolution == null ? null : {
+          resolution: row.resolution, operator: row.resolved_by, reason: row.resolution_reason, resolvedAt: row.resolved_at,
+        },
+      })),
+    });
+  } catch (err: unknown) {
+    req.log.error({ err, fy }, "frozen drift list failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+router.get("/registers/frozen-drift/:id", async (req, res) => {
+  if (!requireFrozenDriftAdmin(req, res)) return;
+  try {
+    const { rows } = await pool.query(
+      `SELECT c.*, s.frozen_at FROM frozen_drift_check c
+        JOIN register_month_state s ON s.fy = c.fy AND s.month_label = c.month_label WHERE c.id = $1`,
+      [Number(req.params.id)],
+    );
+    if (!rows[0]) { res.status(404).json({ error: "drift check not found" }); return; }
+    if (rows[0].fy !== currentOpenFy()) { res.status(400).json({ error: "frozen drift records are current-FY only" }); return; }
+    if (!await isLatestFrozenMonth(rows[0].fy, rows[0].month_label)) {
+      res.status(404).json({ error: "drift check is outside the latest three frozen-month review scope" });
+      return;
+    }
+    const row = rows[0];
+    res.json({
+      id: row.id, fy: row.fy, monthLabel: row.month_label, frozenAt: row.frozen_at,
+      appRows: Number(row.app_rows), appNet: Number(row.app_amount),
+      sheetRows: row.sheet_rows == null ? null : Number(row.sheet_rows),
+      sheetNet: row.sheet_amount == null ? null : Number(row.sheet_amount),
+      rowDelta: row.row_delta == null ? null : Number(row.row_delta),
+      netDelta: row.net_delta == null ? null : Number(row.net_delta), status: row.status,
+      checkedAt: row.checked_at, savedInvoiceEvidence: row.evidence,
+      resolution: row.resolution == null ? null : {
+        resolution: row.resolution, operator: row.resolved_by, reason: row.resolution_reason, resolvedAt: row.resolved_at,
+      },
+    });
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+router.post("/registers/frozen-drift/run", async (req, res) => {
+  if (!requireFrozenDriftAdmin(req, res)) return;
+  const fy = typeof req.body?.fy === "string" ? req.body.fy : currentOpenFy();
+  try {
+    res.json({ fy, checks: await detectFrozenDrift(fy) });
+  } catch (err: unknown) {
+    req.log.error({ err, fy }, "frozen drift detector failed");
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+router.post("/registers/frozen-drift/:id/preview", async (req, res) => {
+  if (!requireFrozenDriftAdmin(req, res)) return;
+  try {
+    res.json(await previewFrozenRefresh(Number(req.params.id)));
+  } catch (err: unknown) {
+    req.log.warn({ err, id: req.params.id }, "frozen drift preview refused");
+    res.status(409).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+router.post("/registers/frozen-drift/:id/apply", async (req, res) => {
+  if (!requireFrozenDriftAdmin(req, res)) return;
+  const body = req.body ?? {};
+  if (typeof body.operator !== "string" || typeof body.reason !== "string" || typeof body.previewHash !== "string") {
+    res.status(400).json({ error: "operator, reason and previewHash are required" });
+    return;
+  }
+  try {
+    const result = await applyFrozenRefresh({
+      id: Number(req.params.id), operator: body.operator, reason: body.reason, previewHash: body.previewHash,
+    });
+    invalidateSnapshots("mgmt-data|");
+    invalidateSnapshots("warnings|v3|");
+    invalidateSnapshots("company-reports|v3|");
+    invalidateSnapshots("analytics|");
+    res.json({ applied: true, ...result });
+  } catch (err: unknown) {
+    req.log.warn({ err, id: req.params.id }, "frozen drift apply refused");
+    res.status(409).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+router.post("/registers/frozen-drift/:id/resolve", async (req, res) => {
+  if (!requireFrozenDriftAdmin(req, res)) return;
+  const body = req.body ?? {};
+  if ((body.resolution !== "accepted" && body.resolution !== "ignored") ||
+      typeof body.operator !== "string" || typeof body.reason !== "string") {
+    res.status(400).json({ error: "resolution (accepted|ignored), operator and reason are required" });
+    return;
+  }
+  try {
+    await resolveFrozenDrift(Number(req.params.id), body.resolution, body.operator, body.reason);
+    res.json({ resolved: true });
+  } catch (err: unknown) {
+    res.status(409).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
 
 // Module-level mutex for lock-month-anchor's read–check–write critical section.
 // Serializes concurrent requests so two callers locking different months cannot

@@ -39,6 +39,11 @@ export type RegisterReadResult = {
   tabsNotRead: SheetTab[];
 };
 
+export type RegisterReadOptions = {
+  /** Restrict a monthly workbook read to these FY-qualified month labels. */
+  onlyMonthLabels?: ReadonlySet<string>;
+};
+
 // Streams all register data tabs of a live spreadsheet.
 //
 // Detection strategy:
@@ -53,6 +58,7 @@ export async function readRegisterFromSheets(
   spreadsheetId: string,
   fyOverride: string,
   onRow: (values: CellValue[], columns: RegisterColumns, tabMonthLabel?: string) => void,
+  options?: RegisterReadOptions,
 ): Promise<RegisterReadResult> {
   const tabs = await listSheetTabs(spreadsheetId);
   // A month tab is selected by PARSING its name against the FY — not just the
@@ -66,12 +72,19 @@ export async function readRegisterFromSheets(
         MONTHLY_TAB_RE.test(t.title) &&
         classifyTabName(t.title, fyOverride).kind === "month-started",
     )
+    .filter((t) => {
+      if (!options?.onlyMonthLabels) return true;
+      const label = toMonthLabel(t.title, fyOverride);
+      return label != null && options.onlyMonthLabels.has(label);
+    })
     .sort((a, b) => a.title.localeCompare(b.title));
 
   const tabsToRead =
     monthlyTabs.length > 0
       ? monthlyTabs.map((t) => t.title)
-      : [REGISTER_TAB];
+      : options?.onlyMonthLabels
+        ? []
+        : [REGISTER_TAB];
 
   const readSet = new Set(tabsToRead);
   const tabsNotRead = tabs.filter((t) => !readSet.has(t.title));
