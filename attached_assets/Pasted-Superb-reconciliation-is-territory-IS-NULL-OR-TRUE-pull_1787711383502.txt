@@ -1,0 +1,42 @@
+Superb reconciliation. is_territory IS NULL OR TRUE pulling in Rs 57.62 Cr of
+institutional business while producing the correct annual total is exactly the
+failure mode that hides forever. Retail-only at 0.0718pp settles it.
+
+And the provenance finding confirms the concern - the original config had no
+saved derivation at all. Persisting the basis per version is the right fix.
+
+But v2 carries the same class of problem, and it was activated.
+
+1. THE THREE YEARS USE THREE DIFFERENT BASES
+   FY2023-24  is_territory=TRUE   Rs 238.03 Cr of 349.02   68%
+   FY2024-25  legacy_unclassified Rs 341.14 Cr of 341.14  100%
+   FY2025-26  channel=Retail      Rs 303.38 Cr of 360.995  84%
+
+FY2024-25 contributes ALL channels - the same inclusion that produced the
+failed rebuild. Labelling it transparently is right, but the curve still
+averages three incomparable shapes, and the direction shows: all-channel Q4 was
+32.03%, retail 34.48%, v2 sits at 33.34%.
+
+  a. Estimate FY2024-25's institutional share. If it is near FY2025-26's 16%,
+     say how much that moves v2's Q4.
+  b. Should v2 be active while one of its three inputs is on a different basis?
+     My view: revert to v1 until #425 classifies FY2024-25. A curve built from
+     mixed bases is the problem we just diagnosed.
+
+2. FY2023-24 IS 68% RETAIL AGAINST FY2025-26's 84%
+Is that a real commercial difference, or is is_territory UNDER-flagged in
+FY2023-24? If under-flagged, that year's subset is not its full retail business
+and it should not carry equal weight either.
+
+Print FY2023-24 by channel where any classification exists, and the row count
+with is_territory NULL versus TRUE versus FALSE.
+
+3. NO GIT COMMIT WAS CREATED
+None of this is on main. Commit and push, then print both refs matching.
+
+4. VERIFICATION 4 WAS NOT REPORTED
+The FY2026-27 year-end projection under v1 versus v2, from the same Apr-Jul
+actuals. That is the only number showing whether any of this changes a decision.
+
+APPROVE #425. Classifying FY2024-25 removes the mixed basis, and then v2 can be
+rebuilt on comparable ground.
