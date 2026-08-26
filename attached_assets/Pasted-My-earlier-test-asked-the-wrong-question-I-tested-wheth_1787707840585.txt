@@ -1,0 +1,54 @@
+My earlier test asked the wrong question. I tested whether the ANNUAL PEAK
+moves with Diwali - it does not, March wins every year. But that is not what
+was being asked.
+
+The real question: is there a LOCAL pattern around Diwali - sales building in
+the weeks BEFORE, then dipping during the festival period - regardless of
+where the annual peak sits?
+
+Both can be true. March can be the year's peak and October-November can still
+show a build-then-dip.
+
+RUN THIS
+
+Diwali: 24 Oct 2022 · 12 Nov 2023 · 1 Nov 2024 · 20 Oct 2025
+
+For each year, print territory net by WEEK relative to Diwali:
+    weeks -6, -5, -4, -3, -2, -1, 0 (festival week), +1, +2, +3
+
+Express each week as a MULTIPLE of that year's average territory week, so the
+years are comparable and the annual trend is removed. A week at 1.30 is 30%
+above that year's normal; 0.70 is 30% below.
+
+What I expect if the pattern is real:
+  weeks -4 to -1   above 1.0, rising
+  week 0           BELOW 1.0 - shops closed, transport stopped, holidays
+  weeks +1 to +2   below or near 1.0 - the pipeline was filled beforehand
+
+THREE THINGS TO GET RIGHT
+
+1. Use the FESTIVAL WEEK ITSELF as week 0, not the calendar month. Diwali is a
+   five-day festival, so include roughly Dhanteras through Bhai Dooj.
+
+2. Do it by SEGMENT as well as company. Sanitaryware and PTMT are household
+   goods bought for home completion before Diwali. CPVC and SWR are
+   construction materials and may not follow it at all.
+
+3. Given the month-end finding, a Diwali falling near month-end will collide
+   with the month-end spike. Note where each Diwali sits in its month:
+     24 Oct 2022 - late month
+     12 Nov 2023 - mid month
+     1 Nov 2024  - month start
+     20 Oct 2025 - late month
+   The 2023 and 2024 dates are cleanest for isolating the festival effect,
+   because they do not overlap the month-end concentration.
+
+ALSO PRINT
+The same for Holi - 8 Mar 2023, 25 Mar 2024, 14 Mar 2025 - though March is
+already the peak month and the financial year-end effect may drown it.
+
+WHY THIS MATTERS NOW
+Diwali 2026 is 8 November. The build lands in OCTOBER and the dip in NOVEMBER.
+Last year Diwali was 20 October, so the build was in SEPTEMBER and the dip in
+OCTOBER. Same two months, opposite roles - and a like-month comparison across
+those will read as performance when it is timing.
