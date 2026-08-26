@@ -25,6 +25,7 @@
 - [Customer Performance page](customer-performance.md) — units-first analytics on sale_line; Laspeyres at customer/category/company levels; scheme engine configurable; route /customers.
 - [Prayag Scheme Nudge Engine](prayag-scheme-nudge-engine.md) — ROI nudge engine: use group_raw (not group_canon) in SQL; dues check graceful fallback; Q1 control verified exact.
 - [Prayag at-risk + seasonality](prayag-at-risk-seasonality.md) — median-gap at-risk scoring replaces binary churn; SEASONAL_WEIGHTS in analytics.ts; Q1 pctElapsed=20.7 projectFactor=4.84.
+- [Festival seasonality decision](festival-seasonality-decision.md) — Diwali timing was rejected as the main sales driver; keep the company monthly curve, but use segment curves for CPVC, CP, and Sanitaryware when forecasting at that level.
 - [STATE HD Dashboard column detection](state-dashboard-column-detection.md) — FY-suffix stripping + Excel date serial detection required; block offsets +0/+2/+5=plan/OB/sales; plan ₹364.97 Cr verified.
 - [Drizzle GROUP BY bare-column trap](drizzle-groupby-bare-column.md) — Postgres rejects bare column refs in SELECT when GROUP BY uses a wrapped expression; use max(col) or repeat the exact expression.
 - [SKU Deep Dive K3 — Review + Push](sku-k3-focus.md) — Review=company-wide gap list; Push=per-distributor peer cohort (COHORT_FY=2025-26, ≥3 peers, segment-active denominator, national fallback < 8 dist/state).
