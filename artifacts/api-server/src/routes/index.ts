@@ -60,7 +60,8 @@ import secondarySkuAug26LoadRouter from "./secondarySkuAug26Load";
 import secondaryHistoryRouter from "./secondaryHistory";
 import seasonalCurveRouter from "./seasonalCurve";
 import authRouter from "./auth";
-import { requireAuthenticated } from "../lib/auth";
+import activityRouter from "./activity";
+import { requireAuthenticated, requirePasswordChangeComplete } from "../lib/auth";
 
 const router: IRouter = Router();
 
@@ -70,9 +71,11 @@ router.use(healthRouter);
 // browser session, a valid Bearer API key, or the existing operator secret.
 router.use(authRouter);
 router.use(requireAuthenticated);
+router.use(requirePasswordChangeComplete);
 // All routes below this line are gated: they return 503 until the post-listen
 // background initialisation (person registry, roster CSV restore) completes.
 router.use(requireServerReady);
+router.use(activityRouter);
 router.use(analyzeRouter);
 router.use(driveRouter);
 router.use(dashboardRouter);

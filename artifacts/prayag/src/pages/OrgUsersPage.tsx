@@ -9,7 +9,8 @@ import {
   UserCheck,
   UserX,
   KeyRound,
-  Edit2
+  Edit2,
+  Activity
 } from "lucide-react";
 
 import { useToast } from "@/hooks/use-toast";
@@ -48,6 +49,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import {
   useUsers,
@@ -59,10 +61,15 @@ import {
   type ManagedUser
 } from "@/hooks/use-auth";
 import { useAuth } from "@/data/auth-context";
+import { UserActivityPanel } from "@/components/user-activity-panel";
 
 export default function OrgUsersPage() {
   const { toast } = useToast();
   const { user: currentUser, logout } = useAuth();
+
+  // Navigation state
+  const [activeTab, setActiveTab] = useState("directory");
+  const [activityUserId, setActivityUserId] = useState<number | null>(null);
 
   // Filters
   const [q, setQ] = useState("");
@@ -166,6 +173,11 @@ export default function OrgUsersPage() {
     }
   };
 
+  const handleViewActivity = (user: ManagedUser) => {
+    setActivityUserId(user.id);
+    setActiveTab("activity");
+  };
+
   return (
     <div className="flex flex-col h-full bg-background">
       <div className="px-6 py-4 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
@@ -175,157 +187,188 @@ export default function OrgUsersPage() {
             Manage application access and administrator privileges.
           </p>
         </div>
-        <Button onClick={handleCreateOpen} size="sm" className="gap-2">
-          <Plus className="h-4 w-4" />
-          Add User
-        </Button>
-      </div>
-
-      <div className="p-4 border-b flex items-center gap-3 shrink-0 bg-muted/20">
-        <div className="relative w-64 shrink-0">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search users..."
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            className="pl-8 h-9"
-          />
+        <div className="flex items-center gap-4">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-auto">
+            <TabsList>
+              <TabsTrigger value="directory" onClick={() => setActiveTab("directory")}>Directory</TabsTrigger>
+              <TabsTrigger value="activity" onClick={() => { setActiveTab("activity"); setActivityUserId(null); }}>Activity Monitor</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          {activeTab === "directory" && (
+            <Button onClick={handleCreateOpen} size="sm" className="gap-2" data-activity="user.create.open">
+              <Plus className="h-4 w-4" />
+              Add User
+            </Button>
+          )}
         </div>
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-40 h-9">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={role} onValueChange={setRole}>
-          <SelectTrigger className="w-40 h-9">
-            <SelectValue placeholder="Role" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Roles</SelectItem>
-            <SelectItem value="admin">Administrator</SelectItem>
-            <SelectItem value="normal">Normal User</SelectItem>
-          </SelectContent>
-        </Select>
       </div>
 
-      <div className="flex-1 overflow-auto">
-        <Table>
-          <TableHeader className="sticky top-0 bg-background/95 backdrop-blur z-10 shadow-sm">
-            <TableRow>
-              <TableHead>User</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Created</TableHead>
-              <TableHead className="w-[80px]"></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading && (
-              <TableRow>
-                <TableCell colSpan={5} className="h-32 text-center">
-                  <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
-                </TableCell>
-              </TableRow>
-            )}
-            {!isLoading && isError && (
-              <TableRow>
-                <TableCell colSpan={5} className="h-32 text-center text-destructive">
-                  Failed to load users.
-                </TableCell>
-              </TableRow>
-            )}
-            {!isLoading && !isError && users.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
-                  No users found.
-                </TableCell>
-              </TableRow>
-            )}
-            {!isLoading && users.map((u) => (
-              <TableRow key={u.id} className={cn(!u.isActive && "opacity-60")}>
-                <TableCell>
-                  <div className="flex flex-col">
-                    <span className="font-medium text-sm">{u.displayName}</span>
-                    <span className="text-xs text-muted-foreground">{u.email}</span>
-                  </div>
-                </TableCell>
-                <TableCell>
-                  {u.role === 'admin' ? (
-                    <Badge variant="secondary" className="bg-primary/10 text-primary border-primary/20">
-                      <ShieldAlert className="h-3 w-3 mr-1" /> Admin
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-muted-foreground">
-                      <Shield className="h-3 w-3 mr-1" /> Normal
-                    </Badge>
-                  )}
-                </TableCell>
-                <TableCell>
-                  {u.isActive ? (
-                    <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
-                      Active
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-muted-foreground bg-muted">
-                      Deactivated
-                    </Badge>
-                  )}
-                  {u.lockedUntil && new Date(u.lockedUntil) > new Date() && (
-                    <Badge variant="destructive" className="ml-2">Locked</Badge>
-                  )}
-                </TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  {new Intl.DateTimeFormat("en-IN", { month: "short", day: "numeric", year: "numeric" }).format(new Date(u.createdAt))}
-                </TableCell>
-                <TableCell>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        onClick={() => {
-                          setFormData({ email: u.email, displayName: u.displayName, role: u.role, password: "" });
-                          setEditUser(u);
-                        }}
-                      >
-                        <Edit2 className="h-4 w-4 mr-2" /> Edit Details
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => {
-                          setFormData({ email: "", displayName: "", role: "normal", password: "" });
-                          setConfirmPassword("");
-                          setResetPassUser(u);
-                        }}
-                      >
-                        <KeyRound className="h-4 w-4 mr-2" /> Reset Password
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onClick={() => setStatusUser(u)}
-                        className={u.isActive ? "text-destructive" : "text-emerald-600"}
-                      >
-                        {u.isActive ? (
-                          <><UserX className="h-4 w-4 mr-2" /> Deactivate</>
-                        ) : (
-                          <><UserCheck className="h-4 w-4 mr-2" /> Reactivate</>
-                        )}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      {activeTab === "directory" ? (
+        <>
+          <div className="p-4 border-b flex items-center gap-3 shrink-0 bg-muted/20">
+            <div className="relative w-64 shrink-0">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search users..."
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                className="pl-8 h-9 bg-background"
+              />
+            </div>
+            <Select value={status} onValueChange={setStatus}>
+              <SelectTrigger className="w-40 h-9 bg-background">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="inactive">Inactive</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={role} onValueChange={setRole}>
+              <SelectTrigger className="w-40 h-9 bg-background">
+                <SelectValue placeholder="Role" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Roles</SelectItem>
+                <SelectItem value="admin">Administrator</SelectItem>
+                <SelectItem value="normal">Normal User</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex-1 overflow-auto">
+            <Table>
+              <TableHeader className="sticky top-0 bg-background/95 backdrop-blur z-10 shadow-sm">
+                <TableRow>
+                  <TableHead>User</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead className="w-[80px]"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="h-32 text-center">
+                      <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
+                    </TableCell>
+                  </TableRow>
+                )}
+                {!isLoading && isError && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="h-32 text-center text-destructive">
+                      Failed to load users.
+                    </TableCell>
+                  </TableRow>
+                )}
+                {!isLoading && !isError && users.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
+                      No users found.
+                    </TableCell>
+                  </TableRow>
+                )}
+                {!isLoading && users.map((u) => (
+                  <TableRow key={u.id} className={cn(!u.isActive && "opacity-60")}>
+                    <TableCell>
+                      <div className="flex flex-col">
+                        <span className="font-medium text-sm">{u.displayName}</span>
+                        <span className="text-xs text-muted-foreground">{u.email}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {u.role === 'admin' ? (
+                        <Badge variant="secondary" className="bg-primary/10 text-primary border-primary/20">
+                          <ShieldAlert className="h-3 w-3 mr-1" /> Admin
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-muted-foreground">
+                          <Shield className="h-3 w-3 mr-1" /> Normal
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {u.isActive ? (
+                        <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
+                          Active
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-muted-foreground bg-muted">
+                          Deactivated
+                        </Badge>
+                      )}
+                      {u.lockedUntil && new Date(u.lockedUntil) > new Date() && (
+                        <Badge variant="destructive" className="ml-2">Locked</Badge>
+                      )}
+                      {u.mustChangePassword && (
+                        <Badge variant="outline" className="ml-2 border-amber-300 bg-amber-50 text-amber-700">
+                          Password change required
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {new Intl.DateTimeFormat("en-IN", { month: "short", day: "numeric", year: "numeric" }).format(new Date(u.createdAt))}
+                    </TableCell>
+                    <TableCell>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" data-activity="user.actions.open">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            data-activity="user.edit.open"
+                            onClick={() => {
+                              setFormData({ email: u.email, displayName: u.displayName, role: u.role, password: "" });
+                              setEditUser(u);
+                            }}
+                          >
+                            <Edit2 className="h-4 w-4 mr-2" /> Edit Details
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            data-activity="user.password-reset.open"
+                            onClick={() => {
+                              setFormData({ email: "", displayName: "", role: "normal", password: "" });
+                              setConfirmPassword("");
+                              setResetPassUser(u);
+                            }}
+                          >
+                            <KeyRound className="h-4 w-4 mr-2" /> Reset Password
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem data-activity="user.activity.view" onClick={() => handleViewActivity(u)}>
+                            <Activity className="h-4 w-4 mr-2" /> View Activity
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            data-activity="user.status-change.open"
+                            onClick={() => setStatusUser(u)}
+                            className={u.isActive ? "text-destructive" : "text-emerald-600"}
+                          >
+                            {u.isActive ? (
+                              <><UserX className="h-4 w-4 mr-2" /> Deactivate</>
+                            ) : (
+                              <><UserCheck className="h-4 w-4 mr-2" /> Reactivate</>
+                            )}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </>
+      ) : (
+        <UserActivityPanel
+          selectedUserId={activityUserId}
+          onUserSelect={setActivityUserId}
+        />
+      )}
 
       {/* Create Dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
@@ -333,7 +376,7 @@ export default function OrgUsersPage() {
           <form onSubmit={handleCreateSubmit}>
             <DialogHeader>
               <DialogTitle>Add New User</DialogTitle>
-              <DialogDescription>Create a new system user account.</DialogDescription>
+              <DialogDescription>Create a new system user account. They will be required to choose their own password at first sign-in.</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="space-y-2">
@@ -378,7 +421,7 @@ export default function OrgUsersPage() {
                   value={formData.password}
                   onChange={e => setFormData({ ...formData, password: e.target.value })}
                 />
-                <p className="text-xs text-muted-foreground">Use at least 10 characters.</p>
+                <p className="text-xs text-muted-foreground">Use at least 10 characters. The user must replace this password at first sign-in.</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="c-pass-confirm">Confirm Password</Label>
@@ -462,7 +505,7 @@ export default function OrgUsersPage() {
             />
             <DialogHeader>
               <DialogTitle>Reset Password</DialogTitle>
-              <DialogDescription>Set a new password for {resetPassUser?.email}</DialogDescription>
+              <DialogDescription>Set a new password for {resetPassUser?.email}. They will be required to replace it at their next sign-in.</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="space-y-2">

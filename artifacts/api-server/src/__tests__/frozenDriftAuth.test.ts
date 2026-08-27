@@ -24,6 +24,7 @@ app.use((req, _res, next) => {
       displayName: role,
       role,
       isActive: true,
+      mustChangePassword: false,
     };
   }
   if (req.get("x-test-api-key")) req.apiKey = { id: 1, name: "test-key" };

@@ -13,6 +13,7 @@ import {
   recordAudit,
   recordLoginFailure,
   requireAdmin,
+  requireAuthenticatedSession,
   requireSameOrigin,
   revokeSession,
   safeUser,
@@ -111,8 +112,8 @@ router.post("/auth/admin-bootstrap", async (req, res) => {
         const passwordHash = await hashPassword(bodyPassword);
         const displayName = email.split("@")[0].replace(/[._-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
         const { rows } = await client.query<{ id: number }>(
-          `INSERT INTO auth_users (email, email_normalized, display_name, password_hash, role)
-           VALUES ($1, $1, $2, $3, 'admin')
+          `INSERT INTO auth_users (email, email_normalized, display_name, password_hash, must_change_password, role)
+           VALUES ($1, $1, $2, $3, TRUE, 'admin')
            ON CONFLICT (email_normalized) DO NOTHING
            RETURNING id`,
           [email, displayName, passwordHash],
@@ -123,7 +124,8 @@ router.post("/auth/admin-bootstrap", async (req, res) => {
         } else if (resetExisting) {
           const updated = await client.query<{ id: number }>(
             `UPDATE auth_users
-             SET password_hash = $2, locked_until = NULL, updated_at = now()
+              SET password_hash = $2, must_change_password = TRUE,
+                  locked_until = NULL, updated_at = now()
              WHERE email_normalized = $1
              RETURNING id`,
             [email, passwordHash],
@@ -185,9 +187,10 @@ router.post("/auth/login", requireSameOrigin, async (req, res) => {
     }
     const { rows } = await pool.query<{
       id: number; email: string; display_name: string; password_hash: string;
-      role: string; is_active: boolean; locked_until: Date | null;
+      role: string; is_active: boolean; locked_until: Date | null; must_change_password: boolean;
     }>(
-      `SELECT id, email, display_name, password_hash, role, is_active, locked_until
+      `SELECT id, email, display_name, password_hash, role, is_active, locked_until,
+              must_change_password
        FROM auth_users WHERE email_normalized = $1 LIMIT 1`,
       [email],
     );
@@ -240,6 +243,61 @@ router.get("/auth/me", (req, res) => {
   res.json({ user: req.authUser });
 });
 
+router.post("/auth/change-password", requireAuthenticatedSession, requireSameOrigin, async (req, res) => {
+  const password = validatePassword(req.body?.newPassword);
+  if (!password) {
+    return void res.status(400).json({ error: "New password must be at least 10 characters" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query<{
+      password_hash: string;
+      must_change_password: boolean;
+    }>(
+      `SELECT password_hash, must_change_password
+       FROM auth_users WHERE id = $1 FOR UPDATE`,
+      [req.authUser!.id],
+    );
+    const account = current.rows[0];
+    if (!account) {
+      await client.query("ROLLBACK");
+      return void res.status(404).json({ error: "User account not found" });
+    }
+    if (await verifyPassword(password, account.password_hash)) {
+      await client.query("ROLLBACK");
+      return void res.status(400).json({
+        error: "Choose a password different from the current password",
+      });
+    }
+
+    await client.query(
+      `UPDATE auth_users
+       SET password_hash = $2, must_change_password = FALSE,
+           locked_until = NULL, updated_at = now()
+       WHERE id = $1`,
+      [req.authUser!.id, await hashPassword(password)],
+    );
+    await writeAudit(
+      client,
+      "password_changed",
+      req,
+      req.authUser!.id,
+      req.authUser!.id,
+      { firstLogin: account.must_change_password },
+    );
+    await client.query("COMMIT");
+    return void res.json({ ok: true });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    req.log.error({ err }, "password change failed");
+    return void res.status(500).json({ error: "Unable to change password" });
+  } finally {
+    client.release();
+  }
+});
+
 // ── Administrator account management ─────────────────────────────────────────
 
 router.get("/auth/users", requireAdmin, async (req, res) => {
@@ -259,7 +317,8 @@ router.get("/auth/users", requireAdmin, async (req, res) => {
     where.push(`role = $${params.length}`);
   }
   const { rows } = await pool.query(
-    `SELECT id, email, display_name, role, is_active, created_at, updated_at, deactivated_at, locked_until
+    `SELECT id, email, display_name, role, is_active, must_change_password,
+            created_at, updated_at, deactivated_at, locked_until
      FROM auth_users ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
      ORDER BY is_active DESC, role ASC, display_name ASC`,
     params,
@@ -280,9 +339,10 @@ router.post("/auth/users", requireAdmin, async (req, res) => {
     await client.query("BEGIN");
     const passwordHash = await hashPassword(password);
     const { rows } = await client.query(
-      `INSERT INTO auth_users (email, email_normalized, display_name, password_hash, role)
-       VALUES ($1, $1, $2, $3, $4)
-       RETURNING id, email, display_name, role, is_active, created_at, updated_at, deactivated_at, locked_until`,
+      `INSERT INTO auth_users (email, email_normalized, display_name, password_hash, must_change_password, role)
+       VALUES ($1, $1, $2, $3, TRUE, $4)
+       RETURNING id, email, display_name, role, is_active, must_change_password,
+                 created_at, updated_at, deactivated_at, locked_until`,
       [email, displayName, passwordHash, role],
     );
     await writeAudit(client, "user_created", req, req.authUser!.id, rows[0].id, { role });
@@ -319,7 +379,8 @@ router.patch("/auth/users/:id", requireAdmin, async (req, res) => {
       `UPDATE auth_users
        SET display_name = COALESCE($2, display_name), role = COALESCE($3, role), updated_at = now()
        WHERE id = $1
-       RETURNING id, email, display_name, role, is_active, created_at, updated_at, deactivated_at, locked_until`,
+        RETURNING id, email, display_name, role, is_active, must_change_password,
+                  created_at, updated_at, deactivated_at, locked_until`,
       [id, displayName ?? null, role ?? null],
     );
     if (role === "normal") {
@@ -361,7 +422,8 @@ router.post("/auth/users/:id/deactivate", requireAdmin, async (req, res) => {
     const { rows } = await client.query(
       `UPDATE auth_users SET is_active = false, deactivated_at = now(), updated_at = now()
        WHERE id = $1
-       RETURNING id, email, display_name, role, is_active, created_at, updated_at, deactivated_at, locked_until`,
+        RETURNING id, email, display_name, role, is_active, must_change_password,
+                  created_at, updated_at, deactivated_at, locked_until`,
       [id],
     );
     await client.query(
@@ -393,7 +455,8 @@ router.post("/auth/users/:id/reactivate", requireAdmin, async (req, res) => {
     const { rows } = await client.query(
       `UPDATE auth_users SET is_active = true, deactivated_at = NULL, locked_until = NULL, updated_at = now()
        WHERE id = $1
-       RETURNING id, email, display_name, role, is_active, created_at, updated_at, deactivated_at, locked_until`,
+        RETURNING id, email, display_name, role, is_active, must_change_password,
+                  created_at, updated_at, deactivated_at, locked_until`,
       [id],
     );
     if (!rows[0]) {
@@ -423,7 +486,9 @@ router.post("/auth/users/:id/reset-password", requireAdmin, async (req, res) => 
     await client.query("BEGIN");
     const passwordHash = await hashPassword(password);
     const { rows } = await client.query(
-      `UPDATE auth_users SET password_hash = $2, locked_until = NULL, updated_at = now()
+      `UPDATE auth_users
+       SET password_hash = $2, must_change_password = TRUE,
+           locked_until = NULL, updated_at = now()
        WHERE id = $1
        RETURNING id`,
       [id, passwordHash],

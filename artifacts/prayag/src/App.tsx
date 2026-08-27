@@ -1,4 +1,5 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { useEffect } from "react";
+import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -26,10 +27,12 @@ import AlertRecipientsPage from "@/pages/AlertRecipientsPage";
 import WarningsPage from "@/pages/WarningsPage";
 import SecondaryOrdersPage from "@/pages/SecondaryOrdersPage";
 import LoginPage from "@/pages/LoginPage";
+import ChangePasswordPage from "@/pages/ChangePasswordPage";
 import NotFound from "@/pages/not-found";
 import { DashboardProvider } from "@/data/dashboard-context";
 import { GlobalFilterProvider } from "@/data/global-filter-context";
 import { AuthProvider, useAuth } from "@/data/auth-context";
+import ActivityTelemetry from "@/components/ActivityTelemetry";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -42,6 +45,11 @@ const queryClient = new QueryClient({
 
 function ProtectedRoutes() {
   const { user, isLoading } = useAuth();
+  const [, setLocation] = useLocation();
+
+  useEffect(() => {
+    if (user?.mustChangePassword) setLocation("/change-password");
+  }, [setLocation, user?.mustChangePassword]);
 
   if (isLoading) {
     return <div className="h-screen w-screen flex items-center justify-center bg-background" />;
@@ -51,9 +59,14 @@ function ProtectedRoutes() {
     return null; // AuthProvider redirects
   }
 
+  if (user.mustChangePassword) {
+    return null;
+  }
+
   return (
     <DashboardProvider>
       <GlobalFilterProvider>
+        <ActivityTelemetry />
         <AppShell>
           <Switch>
         {/* Sales section */}
@@ -106,6 +119,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/login" component={LoginPage} />
+      <Route path="/change-password" component={ChangePasswordPage} />
       <Route component={ProtectedRoutes} />
     </Switch>
   );

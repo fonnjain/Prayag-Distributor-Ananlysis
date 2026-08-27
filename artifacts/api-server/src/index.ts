@@ -53,6 +53,7 @@ import {
   startSeasonalCurveScheduler,
 } from "./lib/seasonal.js";
 import { startWeeklyFrozenDriftScheduler } from "./lib/registers/frozenDriftScheduler.js";
+import { cleanupActivityRetention } from "./lib/activity/service.js";
 
 const rawPort = process.env["PORT"];
 
@@ -83,6 +84,18 @@ startServer({
   port,
   runMigrations: async () => {
     await runMigrations();
+    // Startup cleanup is mandatory: retention cannot depend on a later write
+    // or on the production interval getting its first chance to run.
+    await cleanupActivityRetention();
+    // Retention must not depend on users generating telemetry. Keep this
+    // production-only, matching the application's other interval schedulers.
+    if (process.env.NODE_ENV === "production") {
+      setInterval(() => {
+        void cleanupActivityRetention().catch((err) =>
+          logger.error({ err }, "activity telemetry retention cleanup failed"),
+        );
+      }, 24 * 60 * 60_000).unref();
+    }
     await bootstrapAdministrators();
     // A material baseline mismatch must never silently change projection
     // denominators — but it must not take the whole application offline either.

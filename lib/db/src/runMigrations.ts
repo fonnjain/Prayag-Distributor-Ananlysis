@@ -3557,6 +3557,69 @@ const MIGRATIONS: Migration[] = [
         FOR EACH ROW EXECUTE FUNCTION frozen_drift_evidence_immutable();
     `,
   },
+  {
+    id: "084_user_activity_telemetry",
+    sql: `
+      CREATE TABLE IF NOT EXISTS user_activity_sessions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+        auth_session_id INTEGER NOT NULL REFERENCES auth_sessions(id) ON DELETE CASCADE,
+        client_tab_id TEXT NOT NULL,
+        first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_state TEXT NOT NULL DEFAULT 'active' CHECK (last_state IN ('active', 'idle')),
+        ended_at TIMESTAMPTZ,
+        CONSTRAINT user_activity_sessions_user_session_tab_unique UNIQUE (user_id, auth_session_id, client_tab_id)
+      );
+      CREATE INDEX IF NOT EXISTS user_activity_sessions_user_seen_idx ON user_activity_sessions (user_id, last_seen_at);
+      CREATE TABLE IF NOT EXISTS user_activity_daily_rollups (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+        activity_date DATE NOT NULL,
+        active_ms BIGINT NOT NULL DEFAULT 0,
+        idle_ms BIGINT NOT NULL DEFAULT 0,
+        first_seen_at TIMESTAMPTZ,
+        last_seen_at TIMESTAMPTZ,
+        page_views INTEGER NOT NULL DEFAULT 0,
+        action_count INTEGER NOT NULL DEFAULT 0,
+        CONSTRAINT user_activity_daily_rollups_user_date_unique UNIQUE (user_id, activity_date)
+      );
+      CREATE INDEX IF NOT EXISTS user_activity_daily_rollups_date_idx ON user_activity_daily_rollups (activity_date, user_id);
+      CREATE TABLE IF NOT EXISTS user_activity_events (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+        activity_session_id INTEGER NOT NULL REFERENCES user_activity_sessions(id) ON DELETE CASCADE,
+        client_event_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('page_view', 'heartbeat', 'action', 'session_end')),
+        path TEXT,
+        action TEXT,
+        state TEXT CHECK (state IS NULL OR state IN ('active', 'idle')),
+        occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT user_activity_events_session_client_event_unique UNIQUE (activity_session_id, client_event_id)
+      );
+      CREATE INDEX IF NOT EXISTS user_activity_events_user_occurred_idx ON user_activity_events (user_id, occurred_at);
+      CREATE INDEX IF NOT EXISTS user_activity_events_session_occurred_idx ON user_activity_events (activity_session_id, occurred_at);
+    `,
+  },
+  {
+    id: "085_user_activity_effective_state",
+    sql: `
+      UPDATE user_activity_events SET state = 'active' WHERE state IS NULL;
+      ALTER TABLE user_activity_events ALTER COLUMN state SET DEFAULT 'active';
+      ALTER TABLE user_activity_events ALTER COLUMN state SET NOT NULL;
+      ALTER TABLE user_activity_events DROP CONSTRAINT IF EXISTS user_activity_events_state_check;
+      ALTER TABLE user_activity_events ADD CONSTRAINT user_activity_events_state_check CHECK (state IN ('active', 'idle'));
+    `,
+  },
+  {
+    id: "086_first_login_password_change",
+    sql: `
+      -- Existing accounts retain their current access. New accounts and
+      -- password resets explicitly opt into the first-login change flow.
+      ALTER TABLE auth_users
+        ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

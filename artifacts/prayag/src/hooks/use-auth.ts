@@ -6,6 +6,7 @@ export interface AuthUser {
   displayName: string;
   role: 'admin' | 'normal';
   isActive: boolean;
+  mustChangePassword: boolean;
 }
 
 export interface ManagedUser extends AuthUser {
@@ -105,5 +106,71 @@ export function useResetPassword() {
   return useMutation({
     mutationFn: ({ id, password }: { id: number; password: string }) =>
       fetchJson(`${BASE}/users/${id}/reset-password`, { method: "POST", body: JSON.stringify({ password }) }),
+  });
+}
+
+export function useChangePassword() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (newPassword: string) =>
+      fetchJson<{ ok: true }>(`${BASE}/change-password`, {
+        method: "POST",
+        body: JSON.stringify({ newPassword }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["auth-me"] }),
+  });
+}
+
+export interface ActivityDay {
+  date: string;
+  activeMs: number;
+  idleMs: number;
+  totalMs: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  pageViews: number;
+  actionCount: number;
+}
+
+export interface ActivitySummary {
+  userId: number;
+  displayName: string;
+  email: string;
+  role: string;
+  isActive: boolean;
+  activeMs: number;
+  idleMs: number;
+  totalMs: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  pageViews: number;
+  actionCount: number;
+  current: boolean;
+  days: ActivityDay[];
+}
+
+export interface ActivityDetail {
+  pages: { path: string; views: number; lastSeenAt: string }[];
+  events: { occurredAt: string; kind: "page_view" | "action"; path: string | null; action: string | null; state: string | null }[];
+}
+
+export interface ActivityReport {
+  timezone: string;
+  from: string;
+  to: string;
+  summaries: ActivitySummary[];
+  detail?: ActivityDetail;
+}
+
+export function useActivityReport(params: { from: string; to: string; userId?: number; enabled?: boolean }) {
+  const { from, to, userId, enabled = true } = params;
+  return useQuery<ActivityReport>({
+    queryKey: ["auth-activity", from, to, userId],
+    queryFn: () => {
+      const p = new URLSearchParams({ from, to });
+      if (userId !== undefined) p.set("userId", userId.toString());
+      return fetchJson(`${BASE}/activity?${p.toString()}`);
+    },
+    enabled,
   });
 }

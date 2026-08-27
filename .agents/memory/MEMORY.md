@@ -156,3 +156,4 @@
 - [People relationship resolutions](people-relationship-resolutions.md) — manual registry→People links are effective-dated, hash-bound, audit-only changes; HR source text and historical fact tables stay immutable.
 - [Publish/schema replay](publish-schema-ledger-replay.md) — Publish may create schema objects before custom migration ledger entries; migration constraints must be replay-safe.
 - [Seasonal curve baseline reconciliation](seasonal-curve-baseline-reconciliation.md) — never activate a rebuilt curve when frozen FY2025–26 monthly shape materially conflicts with the approved baseline.
+- [User activity telemetry](user-activity-telemetry.md) — daily user time must union concurrent tabs under a per-user transaction lock; retention follows India calendar days.

@@ -55,6 +55,7 @@ app.use((req, _res, next) => {
       displayName: "Verified Admin",
       role: "admin",
       isActive: true,
+      mustChangePassword: false,
     };
   }
   next();

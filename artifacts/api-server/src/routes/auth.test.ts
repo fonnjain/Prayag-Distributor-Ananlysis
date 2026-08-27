@@ -28,6 +28,7 @@ import {
   bootstrapAdministrators,
   hashPassword,
   requireAuthenticated,
+  requirePasswordChangeComplete,
   requireSameOrigin,
   requireSameOriginForSession,
   validatePassword,
@@ -41,6 +42,7 @@ const adminIdentity: RequestHandler = (req, _res, next) => {
     displayName: "Admin",
     role: "admin",
     isActive: true,
+    mustChangePassword: false,
   };
   req.authSessionId = 70;
   next();
@@ -96,6 +98,49 @@ describe("application authentication", () => {
 
     requireAuthenticated({ apiKey: { id: 1, name: "client" }, headers: {} } as any, unauthorizedResponse as any, next);
     expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks a session from protected use until its password is changed", () => {
+    const response = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+    const next = vi.fn();
+    requirePasswordChangeComplete({
+      authUser: {
+        id: 7,
+        email: "admin@example.com",
+        displayName: "Admin",
+        role: "admin",
+        isActive: true,
+        mustChangePassword: true,
+      },
+    } as any, response as any, next);
+    expect(response.status).toHaveBeenCalledWith(403);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      code: "PASSWORD_CHANGE_REQUIRED",
+    }));
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("permits protected use for an existing account without the requirement", () => {
+    const response = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+    const next = vi.fn();
+    requirePasswordChangeComplete({
+      authUser: {
+        id: 7,
+        email: "admin@example.com",
+        displayName: "Admin",
+        role: "admin",
+        isActive: true,
+        mustChangePassword: false,
+      },
+    } as any, response as any, next);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(response.status).not.toHaveBeenCalled();
   });
 
   it("rejects cross-origin cookie-authenticated writes", () => {
@@ -167,9 +212,67 @@ describe("application authentication", () => {
       email: "person@example.com",
       displayName: "Person",
       role: "normal",
+      mustChangePassword: false,
     });
-    expect(JSON.stringify(response.body)).not.toContain("password");
+    expect(response.body.users[0]).not.toHaveProperty("passwordHash");
     expect(JSON.stringify(response.body)).not.toContain("must-not-leak");
+  });
+
+  it("marks administrator-created accounts for a password change", async () => {
+    const createdUser = {
+      id: 12,
+      email: "new@example.com",
+      display_name: "New Person",
+      role: "normal",
+      is_active: true,
+      must_change_password: true,
+      created_at: new Date("2026-01-01T00:00:00Z"),
+      updated_at: new Date("2026-01-01T00:00:00Z"),
+      deactivated_at: null,
+      locked_until: null,
+    };
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [] }) // BEGIN
+        .mockResolvedValueOnce({ rows: [createdUser] }) // account insert
+        .mockResolvedValueOnce({ rows: [] }) // audit
+        .mockResolvedValueOnce({ rows: [] }), // COMMIT
+      release: vi.fn(),
+    };
+    mocks.connect.mockResolvedValueOnce(client);
+
+    const response = await request(authApp(adminIdentity))
+      .post("/auth/users")
+      .send({
+        email: "new@example.com",
+        displayName: "New Person",
+        role: "normal",
+        password: "supplied-password-123",
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.user.mustChangePassword).toBe(true);
+    const insertSql = String(client.query.mock.calls[1][0]);
+    expect(insertSql).toContain("must_change_password");
+    expect(insertSql).toContain("TRUE");
+  });
+
+  it("returns the forced-change flag from the current-session endpoint", async () => {
+    const firstUseIdentity: RequestHandler = (req, _res, next) => {
+      req.authUser = {
+        id: 12,
+        email: "new@example.com",
+        displayName: "New Person",
+        role: "normal",
+        isActive: true,
+        mustChangePassword: true,
+      };
+      req.authSessionId = 71;
+      next();
+    };
+    const response = await request(authApp(firstUseIdentity)).get("/auth/me");
+    expect(response.status).toBe(200);
+    expect(response.body.user.mustChangePassword).toBe(true);
   });
 
   it("revokes every existing session when an administrator resets a password", async () => {
@@ -193,6 +296,69 @@ describe("application authentication", () => {
     expect(sqlCalls.some((sql) => sql.includes("UPDATE auth_sessions") && sql.includes("revoked_at"))).toBe(true);
     expect(sqlCalls.some((sql) => sql.includes("INSERT INTO auth_audit"))).toBe(true);
     expect(JSON.stringify(client.query.mock.calls)).not.toContain("replacement-password-123");
+  });
+
+  it("clears the first-login requirement after a user chooses a different password", async () => {
+    const currentHash = await hashPassword("supplied-password-123");
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [] }) // BEGIN
+        .mockResolvedValueOnce({
+          rows: [{ password_hash: currentHash, must_change_password: true }],
+        })
+        .mockResolvedValueOnce({ rows: [], rowCount: 1 }) // password update
+        .mockResolvedValueOnce({ rows: [], rowCount: 1 }) // audit
+        .mockResolvedValueOnce({ rows: [] }), // COMMIT
+      release: vi.fn(),
+    };
+    mocks.connect.mockResolvedValueOnce(client);
+
+    const response = await request(authApp(adminIdentity))
+      .post("/auth/change-password")
+      .set("Host", "127.0.0.1")
+      .set("Origin", "http://127.0.0.1")
+      .send({ newPassword: "chosen-password-456" });
+
+    expect(response.status).toBe(200);
+    const queries = client.query.mock.calls.map(([sql]) => String(sql));
+    expect(queries.some((sql) => sql.includes("must_change_password = FALSE"))).toBe(true);
+    expect(queries.some((sql) => sql.includes("INSERT INTO auth_audit"))).toBe(true);
+    expect(JSON.stringify(client.query.mock.calls)).not.toContain("chosen-password-456");
+  });
+
+  it("rejects a weak self-service password without opening a database transaction", async () => {
+    const response = await request(authApp(adminIdentity))
+      .post("/auth/change-password")
+      .set("Host", "127.0.0.1")
+      .set("Origin", "http://127.0.0.1")
+      .send({ newPassword: "too-short" });
+
+    expect(response.status).toBe(400);
+    expect(mocks.connect).not.toHaveBeenCalled();
+  });
+
+  it("rejects a self-service change that reuses the supplied password", async () => {
+    const currentHash = await hashPassword("supplied-password-123");
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [] }) // BEGIN
+        .mockResolvedValueOnce({
+          rows: [{ password_hash: currentHash, must_change_password: true }],
+        })
+        .mockResolvedValueOnce({ rows: [] }), // ROLLBACK
+      release: vi.fn(),
+    };
+    mocks.connect.mockResolvedValueOnce(client);
+
+    const response = await request(authApp(adminIdentity))
+      .post("/auth/change-password")
+      .set("Host", "127.0.0.1")
+      .set("Origin", "http://127.0.0.1")
+      .send({ newPassword: "supplied-password-123" });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/different from the current password/i);
+    expect(client.query.mock.calls.some(([sql]) => String(sql).includes("UPDATE auth_users"))).toBe(false);
   });
 
   it("rolls back a password reset when the mandatory audit write fails", async () => {

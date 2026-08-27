@@ -25,6 +25,7 @@ export interface AuthUser {
   displayName: string;
   role: AuthRole;
   isActive: boolean;
+  mustChangePassword: boolean;
 }
 
 interface SessionIdentity extends AuthUser {
@@ -66,6 +67,7 @@ export function safeUser(row: {
   display_name: string;
   role: string;
   is_active: boolean;
+  must_change_password?: boolean;
 }): AuthUser {
   return {
     id: row.id,
@@ -73,6 +75,7 @@ export function safeUser(row: {
     displayName: row.display_name,
     role: row.role === "admin" ? "admin" : "normal",
     isActive: Boolean(row.is_active),
+    mustChangePassword: Boolean(row.must_change_password),
   };
 }
 
@@ -223,8 +226,10 @@ async function resolveSessionIdentity(rawToken: string): Promise<SessionIdentity
     display_name: string;
     role: string;
     is_active: boolean;
+    must_change_password: boolean;
   }>(
-    `SELECT s.id AS session_id, u.id, u.email, u.display_name, u.role, u.is_active
+    `SELECT s.id AS session_id, u.id, u.email, u.display_name, u.role, u.is_active,
+            u.must_change_password
      FROM auth_sessions s
      JOIN auth_users u ON u.id = s.user_id
      WHERE s.token_hash = $1
@@ -263,6 +268,19 @@ export function requireAuthenticated(req: Request, res: Response, next: NextFunc
   res.status(401).json({ error: "Authentication required" });
 }
 
+export function requirePasswordChangeComplete(req: Request, res: Response, next: NextFunction): void {
+  if (!req.authUser?.mustChangePassword) return next();
+  res.status(403).json({
+    error: "Password change required",
+    code: "PASSWORD_CHANGE_REQUIRED",
+  });
+}
+
+export function requireAuthenticatedSession(req: Request, res: Response, next: NextFunction): void {
+  if (req.authUser && req.authSessionId && !req.apiKey) return next();
+  res.status(401).json({ error: "A browser session is required" });
+}
+
 export function requireSameOrigin(req: Request, res: Response, next: NextFunction): void {
   const origin = req.get("origin");
   const forwardedHost = String(req.headers["x-forwarded-host"] ?? "").split(",")[0].trim();
@@ -287,6 +305,13 @@ export function requireSameOriginForSession(req: Request, res: Response, next: N
 }
 
 export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
+  if (req.authUser?.mustChangePassword) {
+    res.status(403).json({
+      error: "Password change required",
+      code: "PASSWORD_CHANGE_REQUIRED",
+    });
+    return;
+  }
   if (req.authUser?.role === "admin") return next();
   res.status(403).json({ error: "Administrator access required" });
 }
@@ -326,8 +351,8 @@ export async function bootstrapAdministrators(): Promise<void> {
     await client.query("BEGIN");
     for (const seed of seeds) {
       const inserted = await client.query(
-        `INSERT INTO auth_users (email, email_normalized, display_name, password_hash, role)
-         VALUES ($1, $1, $2, $3, 'admin')
+        `INSERT INTO auth_users (email, email_normalized, display_name, password_hash, must_change_password, role)
+         VALUES ($1, $1, $2, $3, TRUE, 'admin')
          ON CONFLICT (email_normalized) DO NOTHING
          RETURNING id`,
         [seed.email, seed.displayName, seed.passwordHash],
@@ -356,6 +381,7 @@ export function publicUserFromRow(row: {
   updated_at?: Date;
   deactivated_at?: Date | null;
   locked_until?: Date | null;
+  must_change_password?: boolean;
 }) {
   return {
     ...safeUser(row),

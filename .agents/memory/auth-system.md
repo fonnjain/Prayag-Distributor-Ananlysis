@@ -34,6 +34,14 @@ Never record administrator email addresses in project memory; check the live acc
 - Audit writes are transactional — failure rolls back the account/session mutation
 - Password never returned in any API response; tests assert this
 
+## First-login password rule
+- New accounts, newly bootstrapped administrators, and accounts with an administrator-issued password reset must change that supplied password before using protected application routes. The self-service change rejects reuse of the current password and records a transactional audit event.
+- Existing accounts are deliberately initialized as already changed when the flag is introduced; do not bulk-enable the rule during a migration.
+
+**Why:** a forced first-login change protects credentials that an administrator or bootstrap process initially knows, while bulk-enabling it would unexpectedly lock out established users.
+
+**How to apply:** return the flag in session user payloads and enforce it on the server (including administrator-only routes), while leaving only session inspection, logout, and the same-origin password-change route usable. Keep the current authenticated session after a successful self-service change; administrator resets revoke all sessions.
+
 ## Tests
 `artifacts/api-server/src/routes/auth.test.ts` — 10 tests covering: hash/verify, authorization gate, cross-origin CSRF, user list non-disclosure, session revocation, audit rollback on failure, last-admin protection, idempotent bootstrap, CSRF on login endpoint.
 

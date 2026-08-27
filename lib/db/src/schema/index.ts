@@ -26,6 +26,7 @@ export * from "./primaryStateTargets";
 export * from "./customerMaster";
 export * from "./apiKeys";
 export * from "./auth";
+export * from "./userActivity";
 export * from "./secondaryRegister";
 export * from "./orderLines";
 export * from "./deepDiveSnapshot";

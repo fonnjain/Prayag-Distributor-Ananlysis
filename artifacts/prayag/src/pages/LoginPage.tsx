@@ -20,7 +20,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (user) {
-      setLocation("/");
+      setLocation(user.mustChangePassword ? "/change-password" : "/");
     }
   }, [user, setLocation]);
 
@@ -44,7 +44,7 @@ export default function LoginPage() {
 
       const signedInUser = await refetchUser();
       if (!signedInUser) throw new Error("Unable to establish a session");
-      setLocation("/");
+      setLocation(signedInUser.mustChangePassword ? "/change-password" : "/");
     } catch (err: any) {
       toast({
         title: "Login failed",

@@ -302,6 +302,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
               <button
                 type="button"
                 onClick={() => toggleGroup(group.id)}
+                data-activity="nav.group.toggle"
                 className={cn(
                   "flex w-full items-center gap-2 px-3 py-2 text-xs font-semibold uppercase tracking-wider transition-colors",
                   activeGroupId === group.id
@@ -329,6 +330,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                         key={item.id}
                         type="button"
                         onClick={() => navigate(item.path)}
+                        data-activity={`navigate.${item.id}`}
                         className={cn(
                           "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
                           isActive
@@ -367,6 +369,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
             <button
               onClick={logout}
               title="Sign out"
+                data-activity="auth.logout"
               className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors"
             >
               <LogOut className="h-4 w-4" />
@@ -376,6 +379,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         <button
           type="button"
           onClick={() => setTheme(isDark ? "light" : "dark")}
+          data-activity="appearance.toggle-theme"
           className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
         >
           {isDark ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}

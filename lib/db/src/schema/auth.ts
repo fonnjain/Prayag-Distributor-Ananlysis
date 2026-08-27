@@ -23,6 +23,7 @@ export const authUsers = pgTable(
     emailNormalized: text("email_normalized").notNull().unique(),
     displayName: text("display_name").notNull(),
     passwordHash: text("password_hash").notNull(),
+    mustChangePassword: boolean("must_change_password").notNull().default(false),
     role: text("role").notNull().default("normal"),
     isActive: boolean("is_active").notNull().default(true),
     lockedUntil: timestamp("locked_until", { withTimezone: true }),

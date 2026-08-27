@@ -34,6 +34,7 @@ app.use((req, _res, next) => {
       displayName: role,
       role,
       isActive: true,
+      mustChangePassword: false,
     };
   }
   next();
