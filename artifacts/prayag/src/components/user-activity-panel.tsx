@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { Loader2, ArrowLeft, Clock, MousePointer2, Layout, Activity } from "lucide-react";
-import { useActivityReport } from "@/hooks/use-auth";
+import { useActivityReport, useUsers, type ManagedUser } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 function formatMs(ms: number) {
   if (!ms) return "0m";
@@ -27,9 +29,115 @@ function indiaDate(d: Date) {
   return `${value("year")}-${value("month")}-${value("day")}`;
 }
 
+function addIndiaDays(date: string, days: number) {
+  const result = new Date(`${date}T00:00:00+05:30`);
+  result.setDate(result.getDate() + days);
+  return indiaDate(result);
+}
+
+function validIsoDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function dateRangeError(from: string, to: string) {
+  if (!validIsoDate(from) || !validIsoDate(to)) return "Select both dates.";
+  if (from > to) return "The start date must be before the end date.";
+  const days = (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000 + 1;
+  if (days > 31) return "Choose a span of 31 days or less.";
+  return null;
+}
+
 function formatAction(action: string | null) {
   if (!action) return "Viewed page";
   return action.replace(/[._:-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function ActivityFilters({
+  users,
+  selectedUserId,
+  onUserSelect,
+  rangePreset,
+  onPresetChange,
+  from,
+  to,
+  onFromChange,
+  onToChange,
+  rangeError,
+}: {
+  users: ManagedUser[];
+  selectedUserId: number | null;
+  onUserSelect: (id: number | null) => void;
+  rangePreset: string;
+  onPresetChange: (value: string) => void;
+  from: string;
+  to: string;
+  onFromChange: (value: string) => void;
+  onToChange: (value: string) => void;
+  rangeError: string | null;
+}) {
+  return (
+    <div className="flex flex-wrap items-end gap-3">
+      <div className="space-y-1.5">
+        <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">User</Label>
+        <Select
+          value={selectedUserId === null ? "all" : String(selectedUserId)}
+          onValueChange={(value) => onUserSelect(value === "all" ? null : Number(value))}
+        >
+          <SelectTrigger className="w-56 h-9 bg-background">
+            <SelectValue placeholder="All users" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All users</SelectItem>
+            {users.map((user) => (
+              <SelectItem key={user.id} value={String(user.id)}>
+                {user.displayName} · {user.email}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1.5">
+        <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">Quick range</Label>
+        <Select value={rangePreset} onValueChange={onPresetChange}>
+          <SelectTrigger className="w-40 h-9 bg-background">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="1">Today</SelectItem>
+            <SelectItem value="7">Last 7 days</SelectItem>
+            <SelectItem value="14">Last 14 days</SelectItem>
+            <SelectItem value="30">Last 30 days</SelectItem>
+            <SelectItem value="custom">Custom dates</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="activity-from" className="text-[11px] uppercase tracking-wide text-muted-foreground">From</Label>
+        <Input
+          id="activity-from"
+          type="date"
+          value={from}
+          max={to}
+          onChange={(event) => onFromChange(event.target.value)}
+          className="h-9 w-36 bg-background"
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="activity-to" className="text-[11px] uppercase tracking-wide text-muted-foreground">To</Label>
+        <Input
+          id="activity-to"
+          type="date"
+          value={to}
+          min={from}
+          onChange={(event) => onToChange(event.target.value)}
+          className="h-9 w-36 bg-background"
+        />
+      </div>
+      {rangeError && <p className="pb-2 text-xs text-destructive">{rangeError}</p>}
+    </div>
+  );
 }
 
 export function UserActivityPanel({
@@ -39,21 +147,50 @@ export function UserActivityPanel({
   selectedUserId: number | null;
   onUserSelect: (id: number | null) => void;
 }) {
-  const [rangeDays, setRangeDays] = useState(7);
-  
-  const toDate = new Date();
-  const fromDate = new Date();
-  fromDate.setDate(fromDate.getDate() - (rangeDays - 1));
-  
-  const to = indiaDate(toDate);
-  const from = indiaDate(fromDate);
+  const today = indiaDate(new Date());
+  const [rangePreset, setRangePreset] = useState("7");
+  const [to, setTo] = useState(today);
+  const [from, setFrom] = useState(() => addIndiaDays(today, -6));
+  const { data: usersData } = useUsers({ q: "", status: "all", role: "all" });
+  const users = usersData?.users ?? [];
+  const rangeError = dateRangeError(from, to);
 
   const { data, isLoading, isError } = useActivityReport({
     from,
     to,
-    userId: selectedUserId || undefined,
-    enabled: true
+    userId: selectedUserId ?? undefined,
+    enabled: !rangeError,
   });
+
+  const handlePresetChange = (value: string) => {
+    setRangePreset(value);
+    if (value === "custom") return;
+    const days = Number(value);
+    const end = indiaDate(new Date());
+    setTo(end);
+    setFrom(addIndiaDays(end, -(days - 1)));
+  };
+
+  const filters = (
+    <ActivityFilters
+      users={users}
+      selectedUserId={selectedUserId}
+      onUserSelect={onUserSelect}
+      rangePreset={rangePreset}
+      onPresetChange={handlePresetChange}
+      from={from}
+      to={to}
+      onFromChange={(value) => {
+        setFrom(value);
+        setRangePreset("custom");
+      }}
+      onToChange={(value) => {
+        setTo(value);
+        setRangePreset("custom");
+      }}
+      rangeError={rangeError}
+    />
+  );
 
   if (isError) {
     return (
@@ -71,22 +208,12 @@ export function UserActivityPanel({
     
     return (
       <div className="flex flex-col h-full overflow-hidden animate-in fade-in duration-200">
-         <div className="p-4 border-b flex items-center justify-between shrink-0 bg-muted/20">
+         <div className="p-4 border-b flex flex-col gap-3 shrink-0 bg-muted/20">
            <div>
              <h2 className="text-sm font-medium">Organization Activity Summary</h2>
              <p className="text-xs text-muted-foreground">Showing user activity from {from} to {to}</p>
            </div>
-           <Select value={rangeDays.toString()} onValueChange={v => setRangeDays(Number(v))}>
-             <SelectTrigger className="w-40 h-9 bg-background">
-               <SelectValue />
-             </SelectTrigger>
-             <SelectContent>
-                <SelectItem value="1">Today</SelectItem>
-                <SelectItem value="7">Last 7 Days</SelectItem>
-               <SelectItem value="14">Last 14 Days</SelectItem>
-               <SelectItem value="30">Last 30 Days</SelectItem>
-             </SelectContent>
-           </Select>
+           {filters}
          </div>
          
          <div className="flex-1 overflow-auto bg-background">
@@ -151,7 +278,7 @@ export function UserActivityPanel({
 
   return (
     <div className="flex flex-col h-full overflow-hidden animate-in slide-in-from-right-4 duration-300">
-      <div className="p-4 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0 bg-muted/20">
+       <div className="p-4 border-b flex flex-col gap-3 shrink-0 bg-muted/20">
         <div className="flex items-center gap-3">
           <Button variant="outline" size="icon" onClick={() => onUserSelect(null)} className="h-8 w-8 shrink-0">
             <ArrowLeft className="h-4 w-4" />
@@ -165,17 +292,7 @@ export function UserActivityPanel({
             </div>
           </div>
         </div>
-        <Select value={rangeDays.toString()} onValueChange={v => setRangeDays(Number(v))}>
-          <SelectTrigger className="w-40 h-9 bg-background">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="1">Today</SelectItem>
-            <SelectItem value="7">Last 7 Days</SelectItem>
-            <SelectItem value="14">Last 14 Days</SelectItem>
-            <SelectItem value="30">Last 30 Days</SelectItem>
-          </SelectContent>
-        </Select>
+         {filters}
       </div>
 
       <div className="flex-1 overflow-auto bg-background p-4 md:p-6 space-y-6">
