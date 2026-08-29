@@ -38,3 +38,15 @@ To calibrate: read the actual sheet and update PARTY_COL_KEYWORDS / OS_COL_KEYWO
 Also pattern-excludes: GOVT, GOVERNMENT, GEM, JJM, PROJECT in customer name.
 
 **Why:** "Retail sale only. Supplies to Projects and Govt. Deptt. will not be considered." — from scheme conditions.
+
+## Historical commercial impact is undefined
+
+FY2025-26's raw eligible pool differs materially depending on whether unclassified channel rows are included,
+but qualification and Extra Earn cannot be reconstructed from the current database because the period's
+scheme definitions, slabs, and rates are absent. The monetary impact is undefined, never zero.
+
+**Why:** Applying current or invented commercial terms to historical sales could imply that distributors
+qualified for payments they did not—or miss payments they did qualify for.
+
+**How to apply:** Any commercial reconstruction requires Prayag's contemporaneous FY2025-26 scheme circulars.
+Do not change historical scheme behaviour from the sales pool alone.

@@ -719,6 +719,10 @@ export default function AlertsPage() {
         <p className="mt-1">{coverageText(data.coverage)}</p>
       </div>
 
+      <p className="text-xs text-amber-700 dark:text-amber-400">
+        Prior-year channel history is unavailable for FY2024-25 and FY2025-26. Categories depending on it are not evaluated.
+      </p>
+
       {/* Empty state */}
       {!hasAnyAlert && (
         <p className="text-sm text-muted-foreground">No open alerts.</p>

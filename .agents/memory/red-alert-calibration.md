@@ -26,6 +26,21 @@ rows in `sale_line_current` have `state_canon = NULL` (schema-B registers have n
 backfills customer master but sale_line rows remain NULL). C1/C2 will fire 0 for any analysis using
 those FYs as current or prior.
 
+## Historical channel-baseline interpretation
+
+Channel-dependent B1, B2, B3-primary, B4, B5, C1, C2, and C3 checks are suppressed when FY2025-26 is the
+comparison year because that year's territory baseline is wholly unclassified. An empty result therefore
+means "not evaluated from prior-year evidence", not "nothing is wrong".
+
+S1 can interpret the unclassified FY2025-26 primary timeline as twelve zero months and thereby lengthen a
+zero-primary streak. If a destocking streak reaches into FY2025-26, verify it manually before acting.
+
+**Why:** The historical channel flag is absent for two complete years; missing classification must not be
+mistaken for evidence of zero activity.
+
+**How to apply:** Keep the page disclosure visible. Do not change alert semantics until the shared
+TRUE/FALSE/NULL channel-classification policy is approved and implemented centrally.
+
 ## Confirmed data source for retailer B-alerts
 
 B1-B5 retailer alerts correctly use `secondary_sku_line` (ctx.retailerSale + ctx.retailerSku).

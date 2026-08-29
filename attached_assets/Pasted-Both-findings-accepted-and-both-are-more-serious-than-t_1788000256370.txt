@@ -1,0 +1,45 @@
+Both findings accepted, and both are more serious than the display problem.
+
+The Growth-only fix is still what I want built. But two things must be
+recorded before this closes, because someone will hit them later:
+
+1. NINE ALERTS ARE SUPPRESSED, NOT WRONG
+B1, B2, B3-primary, B4, B5, C1, C2, C3 produce NOTHING because their FY2025-26
+baseline is empty. An empty Red Alert page currently means "no prior-year
+evidence", not "nothing is wrong", and there is no way for a reader to tell
+those apart.
+
+Add a one-line note to the Red Alert page - not an alert, not a code change to
+the engine: "Prior-year channel history is unavailable for FY2024-25 and
+FY2025-26. Categories depending on it are not evaluated."
+
+That is the same class of fix as the Growth card. It replaces silence with a
+statement.
+
+2. S1 IS THE ONE TO WATCH
+Its FY2025-26 timeline becomes twelve artificial zero months, which can
+lengthen a zero-primary streak. Aradhya Kedia was real, so nothing false has
+fired yet - but the mechanism exists.
+
+Do not change S1 now. Record it as a known condition, and if a destocking
+alert fires with a streak reaching back into FY2025-26, check it by hand
+before anyone acts on it.
+
+3. SCHEMES - "undefined" is the right answer
+Rs 303.38 Cr against Rs 0 is the whole eligible pool. And you are right that
+the monetary impact cannot be reconstructed - no FY2025-26 scheme definitions,
+slabs or rates exist in the database.
+
+Record it as undefined, never as zero. If Prayag ever want the commercial
+answer, it needs the FY2025-26 scheme circulars as they stood at the time.
+That is a business question, not a code one.
+
+4. THE CONVENTION YOU PROPOSED IS RIGHT - do not build it now
+TRUE / FALSE / NULL with complete / partial / unavailable, in one shared
+module, is the correct answer and the status-not-threshold reasoning is sound.
+
+Keep it as a written proposal. It touches five modules and the system is
+stable. Not now.
+
+BUILD ONLY THE GROWTH CARD FIX, plus the one-line Red Alert note in item 1.
+Nothing else.

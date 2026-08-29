@@ -69,8 +69,8 @@ router.get(
       // FY and its comparison year must be frozen for the payload to be final
       // (a live compare year changes as new months are ingested).
       const report = await serveWithSnapshot({
-        // v2: month-completeness rule fixed — forces frozen snapshots to rebuild.
-        key: `analytics|v2|${fy}|${compareFy}`,
+        // v3: expose whether the comparison period has a usable channel split.
+        key: `analytics|v3|${fy}|${compareFy}`,
         ttlMs: ANALYTICS_TTL_MS,
         build: () => buildAnalytics(fy, compareFy) as Promise<Record<string, unknown>>,
         log: req.log,

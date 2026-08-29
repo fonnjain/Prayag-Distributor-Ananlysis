@@ -99,6 +99,8 @@ export type MonthStat = {
   amount: number;
   territoryAmount: number;
   institutionalAmount: number;
+  /** Number of rows with a non-NULL channel classification. */
+  classifiedRows: number;
   maxInvoiceDate: string | null;
   complete: boolean;
 };
@@ -109,6 +111,7 @@ async function monthlyStats(fy: string, filter?: EntityFilter): Promise<MonthSta
       monthLabel: sql<string>`coalesce(${saleLines.monthLabel}, '')`,
       amount: sql<number>`coalesce(sum(${saleLines.amount}), 0)::float8`,
       territoryAmount: sql<number>`coalesce(sum(${saleLines.amount}) filter (where ${saleLines.isTerritory}), 0)::float8`,
+      classifiedRows: sql<number>`count(${saleLines.isTerritory})::int`,
       maxDate: sql<string | null>`max(${saleLines.invoiceDate})::text`,
     })
     .from(saleLines)
@@ -126,6 +129,7 @@ async function monthlyStats(fy: string, filter?: EntityFilter): Promise<MonthSta
       amount: Math.round(row.amount),
       territoryAmount: Math.round(row.territoryAmount),
       institutionalAmount: Math.round(row.amount - row.territoryAmount),
+      classifiedRows: Number(row.classifiedRows ?? 0),
       maxInvoiceDate: row.maxDate,
       complete,
     });
@@ -142,13 +146,16 @@ export type YoySplit = {
   current: number;
   prior: number;
   pct: number | null;
+  /** False when the comparison period has no classified channel rows. */
+  channelSplitAvailable: boolean;
 };
 
-function yoy(current: number, prior: number): YoySplit {
+function yoy(current: number, prior: number, channelSplitAvailable = true): YoySplit {
   return {
     current: Math.round(current),
     prior: Math.round(prior),
     pct: prior === 0 ? null : Math.round(((current - prior) / prior) * 1000) / 10,
+    channelSplitAvailable,
   };
 }
 
@@ -444,6 +451,7 @@ function sapSource(agg: SapAggregate): FyAnalyticsSource {
           amount: m.amount,
           territoryAmount: m.territoryAmount,
           institutionalAmount: m.institutionalAmount,
+           classifiedRows: 0,
           maxInvoiceDate: m.maxInvoiceDate,
           complete: isMonthComplete(m.monthLabel, m.maxInvoiceDate),
         }))
@@ -610,6 +618,7 @@ export async function buildAnalytics(
   const priorComparable = comparableMonths
     .map((name) => priorComplete.get(name))
     .filter((m): m is MonthStat => m != null);
+  const priorChannelSplitAvailable = priorComparable.some((m) => m.classifiedRows > 0);
 
   const currentLabels = comparable.map((m) => m.monthLabel);
   const priorLabels = priorComparable.map((m) => m.monthLabel);
@@ -659,10 +668,12 @@ export async function buildAnalytics(
       territory: yoy(
         sum(comparable, (m) => m.territoryAmount),
         sum(priorComparable, (m) => m.territoryAmount),
+        priorChannelSplitAvailable,
       ),
       institutional: yoy(
         sum(comparable, (m) => m.institutionalAmount),
         sum(priorComparable, (m) => m.institutionalAmount),
+        priorChannelSplitAvailable,
       ),
     },
     invoicesInPeriod: periodCounts?.invoices ?? 0,

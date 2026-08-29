@@ -24,7 +24,12 @@ import {
   type EntityFilterValue,
 } from "./CompanyReportFilters";
 
-type AnalyticsYoy = { current: number; prior: number; pct: number | null };
+type AnalyticsYoy = {
+  current: number;
+  prior: number;
+  pct: number | null;
+  channelSplitAvailable: boolean;
+};
 
 type MonthStat = {
   monthLabel: string;
@@ -32,6 +37,7 @@ type MonthStat = {
   amount: number;
   territoryAmount: number;
   institutionalAmount: number;
+  classifiedRows: number;
   maxInvoiceDate: string | null;
   complete: boolean;
 };
@@ -65,6 +71,20 @@ type AnalyticsPayload = {
 };
 
 function YoyCard({ title, split, subtitle }: { title: string; split: AnalyticsYoy; subtitle: string }) {
+  if (!split.channelSplitAvailable) {
+    return (
+      <Card>
+        <CardContent className="p-5 space-y-1.5">
+          <p className="text-sm text-muted-foreground">{title}</p>
+          <p className="text-sm font-medium text-muted-foreground">
+            Prior-year channel split unavailable
+          </p>
+          <p className="text-xs text-muted-foreground">{subtitle}</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   const pct = split.pct;
   const up = pct != null && pct >= 0;
   return (
