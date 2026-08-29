@@ -1,0 +1,46 @@
+Excellent audit - item (c) was the right question. This is far broader than
+the Growth cards.
+
+Two complete years have ZERO classification: 141,201 rows / Rs 341.14 Cr and
+145,613 rows / Rs 361.00 Cr. Rs 702 Cr of history with no channel flag.
+
+And the flag is read THREE incompatible ways:
+    FILTER (WHERE is_territory)     -> NULL excluded      analytics, Momentum, Red Alerts
+    IS NULL OR = true               -> NULL is territory  schemes, nudge (5 sites)
+    COALESCE(is_territory, false)   -> NULL is institutional  analytics:207
+
+The same Rs 361 Cr is territory in one module, institutional in another, and
+absent from a third. Each is internally consistent and they cannot all be right.
+
+AGREED: option 2. Do not backfill a frozen year. But scope it wider than the
+Growth cards.
+
+1. THE DISPLAY FIX
+Wherever a period has no meaningful channel classification, say so rather than
+showing a number. "Prior-year channel split unavailable" on the Growth cards,
+and the same treatment anywhere else a channel-split figure is shown for
+FY2024-25 or FY2025-26.
+
+2. RED ALERTS IS NOT JUST INCOMPLETE - IT IS EMPTY
+context.ts:187 and :219 require is_territory = true, so those queries return
+NOTHING for both historical years. Any alert whose baseline is FY2025-26 has
+an empty comparison, not a partial one.
+
+Print which alert categories use those two queries, and whether any currently
+compares against a historical year. If B3 or S1 do, their baselines are zero
+and that changes what they mean.
+
+3. SCHEMES IS THE OPPOSITE PROBLEM
+Five call sites treat NULL as territory, so all Rs 702 Cr of unclassified
+history counts as territory - including real project and government business.
+
+Print the FY2025-26 scheme figures computed both ways: NULL-as-territory
+versus NULL-excluded. If the difference is material, scheme qualification and
+Extra Earn for that year were computed on an inflated base.
+
+4. THEN PICK ONE CONVENTION
+Three readings of one flag is the actual defect. Whatever the display fix,
+the codebase should treat NULL one way and say so in one place - not decide
+per query.
+
+Report 2 and 3 before changing anything.
