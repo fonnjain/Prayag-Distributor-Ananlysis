@@ -263,3 +263,10 @@ uri = "file://attached_assets/prayag_analysis_export_2026-08-26_with_prompts.zip
 type = "unspecified"
 title = "Prayag analysis export with prompt files"
 description = "Original analysis export plus both attached Replit prompt files in the prompts/ folder. Archive integrity validated."
+
+[[outputs]]
+id = "psOIbFKEoQBR8JmUvrMn0"
+uri = "file://.local/outputs/Prayag-Sales-Intelligence.pptx"
+type = "slides"
+title = "Prayag Sales Intelligence (PPTX)"
+description = "Editable 18-slide PowerPoint product overview deck."
