@@ -270,3 +270,17 @@ uri = "file://.local/outputs/Prayag-Sales-Intelligence.pptx"
 type = "slides"
 title = "Prayag Sales Intelligence (PPTX)"
 description = "Editable 18-slide PowerPoint product overview deck."
+
+[[outputs]]
+id = "tRCQje2CaTJsWBgYdgyAF"
+uri = "file://.local/outputs/Prayag-Sales-Intelligence-Complete-App-Logic.docx"
+type = "word_document"
+title = "Prayag Sales Intelligence — Complete App Logic"
+description = "Detailed Word document covering implemented web-app modules, data flows, calculations, safeguards, operational lifecycle, database architecture, completion status, and known limitations."
+
+[[outputs]]
+id = "XT-3rpmpURoCkG8fj_Mqa"
+uri = "file://.local/outputs/Prayag-App-Logic-and-Database-Architecture.xlsx"
+type = "table"
+title = "Prayag App Logic and Database Architecture"
+description = "Excel workbook with 14 filterable sheets covering modules, calculations, data sources, API families, safeguards, limitations, database tables, 545 schema columns, relationships, views/indexes, lifecycle, and reference figures."
