@@ -1,0 +1,191 @@
+# Prompt 11 — Winner-take-all attribution, and the 130 dropped rows
+
+**Date:** 31 August 2026
+**Adds to:** Prompts 1–10
+**Scope:** Read-only. No code change, no data change, no sheet edit, no identity
+merge.
+
+**Standing rule:** every database figure states which database it came from —
+development or the production read replica.
+
+**Context:** the Prompt 9 report was accurate and corrected three of my own
+inferences. This prompt follows the two things it opened up rather than
+re-treading it: the voting rule that decides head attribution, and the 130
+distributor rows without a DIST#. One deliverable it promised — the full 130-row
+table — did not arrive.
+
+---
+
+## Prompt 11
+
+```
+Read-only. Change nothing. Merge no identities. State which database each
+figure comes from.
+
+SECTION A - THE VOTING RULE
+
+buildResources() counts Data-tab rows as votes and awards a state's ENTIRE
+distributor count to the winning head. Karnataka went 6 rows to 1. Maharashtra
+went 15 to 4. The losing head shows zero distributors for a state they demonstrably
+service - Rizvi holds 149 Maharashtra dealers and 0 Maharashtra distributors.
+
+A1. For EVERY canonical state, print the full vote tally: each head, their row
+    count, the winner, and the margin. I want to see how close each state is,
+    not only the two that split.
+
+A2. Which states would change winner if a single Data-tab row were added or
+    removed? List them with the current margin. These are the fragile ones.
+
+A3. Is the vote weighted in any way - by rows, by members, by sales, by
+    anything? Or is it a plain row count? Quote the comparison.
+
+A4. Has any state's winner changed between snapshots in the last 30 days? If a
+    head's distributor count has ever jumped from 0 to a full state total or the
+    reverse, print the dates and the states.
+
+SECTION B - IS COLUMN A HEADS OR MEMBERS?
+
+This is the question underneath Section A.
+
+Prompt 9 reported that PRASHANT ONAM NAIK has a production person record, is
+active, has is_state_head = FALSE, and his current coverage is Karnataka UNDER
+BIJU C.O. Yet the Data tab lists him such that he wins Karnataka outright and
+takes all 23 distributors, while Biju gets none of them.
+
+B1. Confirm what Data-tab Column A actually contains - state heads, team
+    members, or a mixture. For all 190 populated rows, print each distinct
+    Column A name with its production is_state_head value.
+
+B2. How many of the Data-tab Column A names are NOT state heads in production?
+    List them. If Column A is a member list, the vote is not heads competing at
+    all and the whole attribution is measuring the wrong thing.
+
+B3. If distributors were attributed to the state head that each Column A person
+    REPORTS TO, rather than to the Column A name itself, how would the
+    distributor counts change? Print the before and after for all 12 heads.
+    Compute only - change nothing.
+
+B4. Does any other part of the app read Data-tab Column A as a state head?
+    Name the call sites.
+
+SECTION C - THE 130 ROWS, IN FULL
+
+Prompt 9 section D2 was headed "All 130 dropped rows" and stated what Rs 0
+means, but the table itself was not included. It is the thing I most need.
+
+C1. Print all 130 rows. One row each, columns:
+      - Name exactly as it appears in Column B
+      - Whether Column A is blank or malformed
+      - Column H billing state, or blank
+      - Matched by exact name (Y/N)
+      - Matched by normalised name (Y/N/ambiguous)
+      - Apr-Jul FY2026-27 sale lines
+      - Apr-Jul FY2026-27 value
+      - customer_master candidate, if any
+      - Candidate DIST#, if any
+      - is_territory of the matched sale_line rows, where matched
+
+    No summary. The full table.
+
+C2. The 78 still-unmatched rows: are they unmatched because they had no sales,
+    or because we cannot find them? For each, say whether ANY sale_line row in
+    FY2026-27 shares a token with the name. I am trying to separate "dormant"
+    from "invisible".
+
+C3. Of the 36 rows with a DIST# candidate in customer_master, how many of those
+    DIST# values already appear in the Distributor tab under a DIFFERENT name?
+    If a code is already in use elsewhere, it is not free to assign.
+
+C4. For the 34 unambiguous DIST# candidates, print the evidence for each: the
+    dropped name, the customer_master name, the DIST#, the match basis, and
+    FY2026-27 sales against that DIST#. We intend to ask Prayag to confirm these
+    rather than create new codes, so the evidence needs to stand up.
+
+C5. PRAYAG MARKETING carries Rs 1.14 crore and maps to DIST#29066. Confirm
+    that specific link in detail - is DIST#29066 already active, already in the
+    Distributor tab, and does it already carry its own separate sales?
+
+SECTION D - DEALERS HAVE NO STATE
+
+Prompt 9 A1 stated that the production dealer path has no state lookup at all -
+dealers are credited directly to the Secondary-report head label. But the A3
+table has a "Dealers to head" column by state.
+
+D1. Confirm that the by-state dealer column in that report was reconstructed for
+    the audit and is NOT how production computes anything. Yes or no.
+
+D2. Does any user-facing surface show dealers by state? If yes, where does that
+    number come from?
+
+D3. If a Secondary-report member services two states, which head gets their
+    dealers? Is there any case of this in the current data?
+
+SECTION E - HOW SUNIL MOHANTY GOT IN
+
+Prompt 9 C1 identified the missing validation point between canonicalising a
+head label and adding it to headNames.
+
+E1. Is there ANY validation anywhere on this path that would reject an unknown
+    head label, or is the sheet the sole authority? One sentence.
+
+E2. The startup registry checks were described as non-fatal and covering
+    register heads only. What exactly do they check, what do they do on failure,
+    and where does their output go? If a warning is logged where nobody reads
+    it, say so.
+
+E3. Has any other unknown name entered a snapshot and later disappeared? Search
+    the snapshot history for head labels that appear in some snapshots and not
+    others, and print them with dates.
+
+SECTION F - WHAT A FIX WOULD LOOK LIKE
+
+Describe only. Build nothing. This is deliberately last.
+
+F1. If distributor attribution moved from winner-take-all to proportional, or to
+    reporting-line based, which is the smaller change and what would it touch?
+
+F2. What is the smallest change that would let the Coverage page distinguish
+    "counted, result zero" from "could not be counted"? Prompt 9 established
+    HeadResource has no field for it and only four consumers exist, all Coverage.
+
+F3. Neither F1 nor F2 should be built in the same change as anything from
+    Prompt 10. Confirm they are independent, or say where they overlap.
+
+Report only.
+```
+
+---
+
+## Notes
+
+- Section B is the one that could change the answer rather than refine it. If
+  Data-tab Column A is a member list rather than a head list, then the vote is
+  not heads competing and Karnataka's attribution is not a tie-break gone wrong
+  but a category error.
+- Section C4 and C5 exist because we are about to ask Prayag to confirm 34
+  existing DIST# codes rather than create new ones. That is a far easier request
+  to get actioned, but only if the evidence holds. Check it before we send it.
+- Section F is last on purpose and nothing in it should be built yet. The
+  attribution change and the state-vocabulary work from Prompt 10 both touch
+  head and state resolution, and merging them into one change would be
+  impossible to localise.
+
+## Pending Prayag pack revisions, once C4 comes back
+
+- **B1** — reframe from "give us codes for 45 names" to "confirm these 34
+  existing codes", listing them.
+- **C1** — Sunil Mohanty is the only name with no organisation record. Prashant
+  Onam Naik is real and active; the question becomes whether he should be listed
+  as Karnataka's head when his production coverage is under Biju C.O.
+- **C4** — add that the Distributor sheet holds no field capable of dividing the
+  ten Maharashtra distributors between Maharashtra and Maharashtra 2, so the
+  split cannot be reconstructed even if Prayag confirm it exists.
+
+## Still open from earlier prompts
+
+- Prompt 1: what else the documentation pipeline dropped from `.agents/memory`.
+- Prompt 3: NODE_ENV on the running deployment, and the two disposable-server
+  workflows failing at startup.
+- Prompt 8: the MRP refresh window and the 3.0069-point discount shift.
+- Prompt 10: the five disagreeing state vocabularies, and the `"UP (A)"` key
+  that may never match.
