@@ -1,0 +1,146 @@
+# Prompt 8 — Automatic MRP refresh: cadence, silent failure, and exposure
+
+**Date:** 31 August 2026
+**Adds to:** Replit_Verification_Prompts_v2_2026-08-29.md, Prompt 7
+**Scope:** Read-only. No code change, no cache refresh, no scheduler change, no load.
+
+**Why this one is time-sensitive:** the MRP cache refreshes itself every 24 hours
+in production. Nobody has to load anything. When Prayag publish the 01 September
+prices to prayag-price.com, the app will pull them automatically, and because the
+current-price lookup is not date-aware, Apr-Jul figures derived from MRP will
+move without anyone acting or being told.
+
+Send this before the September prices appear on the site, not after.
+
+---
+
+```
+Read-only. Do NOT change the scheduler, do NOT disable it, do NOT refresh the
+cache, do NOT load the workbook, do NOT change any code. Report only.
+
+artifacts/api-server/src/index.ts schedules refreshAuthoritativeMrpCache()
+alongside refreshCompetitorSnapshot(): first run 5 minutes after startup, then
+every 24 hours, gated behind NODE_ENV=production. Failures are caught by
+Promise.allSettled and logged at warn level as "authoritative price refresh
+failed; last good cache retained".
+
+SECTION A - WHY IS THE CACHE ELEVEN DAYS OLD
+
+The last successful MRP sync was 2026-08-20 12:33 with 6,223 rows. If the
+cadence is 24 hours, there should have been roughly ten cycles since.
+
+A1. Confirm NODE_ENV is "production" on the running deployment. If it is not,
+    say so - that single fact would explain both this and the disposable-server
+    workflow failures.
+
+A2. How many times has refreshAuthoritativeMrpCache() been invoked since
+    2026-08-20? Print every invocation with its outcome.
+
+A3. For every failed invocation, print the logged error. The warn line retains
+    the last good cache and continues, so these failures would not surface
+    anywhere a person would see them. I want the actual error text, not a count.
+
+A4. Was the deployment restarted between 20 August and now? Each restart
+    re-arms the 5-minute first run, so restart history tells us whether the
+    scheduler has had the chance to fire at all.
+
+A5. Is there any surface in the app - Data Health, MRP page, admin - that
+    displays MRP cache age or last-sync status to a user? If the answer is no,
+    say so plainly. An eleven-day-old price cache that reports nothing is the
+    thing I want to know about.
+
+SECTION B - WHAT HAPPENS WHEN THE SEPTEMBER PRICES APPEAR
+
+Do not simulate by writing anything. Compute this read-only.
+
+B1. The workbook has 2,071 PTMT & Plastic Fittings codes effective 2026-09-01,
+    of which 1,028 appear in FY2026-27 Apr-Jul sale_line covering Rs 31.32 Cr.
+    For those 1,028 codes, compute the current aggregate discount-off-MRP for
+    Apr-Jul using the cached MRP now in force.
+
+B2. Recompute the same aggregate substituting the workbook's 01 September MRP,
+    in memory only. Print both numbers and the difference in percentage points.
+
+    That difference is what will change by itself when the site updates and the
+    scheduler next succeeds.
+
+B3. Do the same for the full set of workbook codes whose effective date is
+    2026-08-01 or later and which appear in Apr-Jul sale_line. Give the count,
+    the rupee value, and the before/after discount figures.
+
+B4. List every page, report and export that displays an MRP-derived measure for
+    a period that includes Apr-Jul 2026. For each, say whether it would change
+    when the cache refreshes.
+
+B5. Would anything on screen indicate that a historical period's figures had
+    moved because a forward-dated price was applied? Answer yes or no.
+
+SECTION C - WHAT A SYNC TODAY WOULD WRITE
+
+C1. Every row the API currently returns carries dataFlag
+    "authoritative_master_2026_09_01", but the prices and effective dates are
+    pre-September - code 101 returns MRP 112 dated 2026-03-05, while the
+    workbook shows 112 as the PREVIOUS price and 122 effective 01 September.
+
+    normaliseAuthoritativeProduct maps dataFlag to sourceReviewStatus. Confirm
+    that a sync today would therefore record March prices as carrying
+    September-master provenance. Yes or no, and show the field mapping.
+
+C2. The cache holds 6,223 rows. The live API returns 6,097. Which 126-plus
+    codes exist in the cache but not in the current API response? List them.
+
+C3. Of those, how many appear in FY2026-27 Apr-Jul sale_line, and for what
+    rupee value? Those are codes we are pricing from a snapshot the authority
+    no longer carries.
+
+C4. On the next successful refresh, what happens to those cache-only codes -
+    are they dropped, retained, or marked inactive? Answer from the code.
+
+SECTION D - THREE CODES THAT SHOULD NOT BE LIVE
+
+Codes 20, 25 and 32 are returned by the live API as active Pipes & Fittings
+products. In the workbook they sit in excluded_do_not_load, product name "NA",
+flagged "Invalid Input by Prayag; no code, no price".
+
+D1. Are 20, 25 and 32 present in the current MRP cache? Print their cached
+    values.
+D2. Do they appear anywhere in the UI - MRP catalogue, SKU pages, product
+    lists, exports?
+D3. Do they appear in sale_line for any year?
+
+SECTION E - THE ONE DECISION TO PREPARE, NOT TO MAKE
+
+Do not implement anything. Describe the options only.
+
+E1. If we wanted the current-price lookup to ignore rows whose
+    price_in_force_since is in the future, where is the single narrowest place
+    that could be done? Name the file and the specific view or query. One
+    location, not a plan.
+
+E2. What would break if that filter were added - which call sites currently
+    depend on seeing a future-dated price immediately?
+
+E3. Is there an existing mechanism anywhere in the codebase that already
+    resolves a price by date-of-sale rather than current price? If yes, name it.
+    If no, say no.
+
+Report only. Change nothing, including the scheduler.
+```
+
+---
+
+## Notes
+
+- Section A is the one to read first. If A1 comes back as NODE_ENV not being
+  production, that single answer explains the stale cache and the two
+  disposable-server workflow failures in Prompt 3 at the same time.
+- Section B converts an abstract risk into a number. If B2 comes back as a
+  fraction of a percentage point, this can wait. If it is several points across
+  Rs 31 Cr, it cannot.
+- Do not let anything in Section E be built off the back of this reply. The
+  point of E is to know the size of the fix before the situation forces one.
+- Separately, and not for Replit: Prayag should be told that codes 20, 25 and 32
+  are live on their site despite being marked Invalid Input, that the September
+  provenance flag went on before the September prices, that 64 PEA codes carry an
+  August revision dated 01 February, and that TTS-01/02/03 re-date an August
+  revision to September.

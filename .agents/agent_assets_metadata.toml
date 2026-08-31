@@ -291,3 +291,10 @@ uri = "file://.local/outputs/MRP-Reconciliation-01Sep2026.md"
 type = "text"
 title = "MRP Master vs prayag-price.com Reconciliation"
 description = "Read-only 31 August 2026 reconciliation covering workbook/API counts, code and price differences, exposure, cache state, effective-date behavior, and raw payload samples."
+
+[[outputs]]
+id = "9Ncw5BeqMUJnVyVIf_C90"
+uri = "file://.local/outputs/MRP-Automatic-Refresh-Audit-31Aug2026.md"
+type = "text"
+title = "Prompt 8 — Automatic MRP Refresh Audit"
+description = "Read-only production audit covering scheduler cadence, logged failures, September price exposure, cache/API drift, affected surfaces, and the effective-date decision boundary."
