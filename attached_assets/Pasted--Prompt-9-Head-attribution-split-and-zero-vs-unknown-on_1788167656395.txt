@@ -1,0 +1,145 @@
+# Prompt 9 — Head attribution split, and zero vs unknown on the Coverage page
+
+**Date:** 31 August 2026
+**Adds to:** Prompts 1–8
+**Scope:** Read-only. No code change, no data change, no sheet edit.
+
+**Standing rule from this point:** every database figure must state which database it
+came from — development or the production read replica. The Prompt 7 / Prompt 8
+contradiction was caused entirely by this and cost a round trip.
+
+---
+
+## Prompt 9
+
+```
+Read-only. State the database (development or production read replica) next to
+every figure. Change nothing.
+
+SECTION A - DISTRIBUTORS AND DEALERS ARE LANDING WITH DIFFERENT HEADS
+
+The heads_resources table shows Karnataka's 23 distributors under PRASHANT ONAM
+NAIK with 0 dealers, while DADHEECH JI shows 63 distributors and 4,994 dealers.
+63 is exactly West Bengal 14 + Odisha 5 + Bihar 23 + Telangana 5 + Andhra 10 +
+North East 1 + Jharkhand 5. Karnataka contributes zero distributors to him but
+its dealers appear to sit with him.
+
+The same shape appears with Rizvi: 28 + 12 + 6 = 46, his exact total, with
+Maharashtra's 10 distributors going to Lalan instead.
+
+A1. Confirm or reject: distributors resolve through the Data tab head, dealers
+    resolve through the Secondary Order Booking Report head, and the two use
+    different name vocabularies. Show the two resolution paths in code.
+
+A2. For Karnataka specifically, print which head each of the 23 distributors
+    resolves to, and which head the Karnataka dealers resolve to. Same for
+    Maharashtra.
+
+A3. Is any state's distributor total and dealer total attributed to the SAME
+    head? List the states where the two agree and where they disagree. I want
+    the full picture, not the two already found.
+
+A4. Does any dealer or distributor get counted twice across two heads, or
+    dropped entirely because neither vocabulary matched? Give counts for both.
+
+SECTION B - ZERO VERSUS UNKNOWN
+
+ANUJ SHARMA covers West U.P (7 distributors) and shows 0. SUNIL MOHANTY covers
+West U.P and Rajasthan (7 and 14) and shows 0. NASIR HUSAIN shows 0 because the
+only Jammu row has no DIST#. PRASHANT ONAM NAIK shows 0 dealers because he is
+absent from the secondary report vocabulary.
+
+None of these is a measured zero. Each is a different kind of not-known.
+
+B1. On the Coverage page and in heads_resources, is there any field that
+    distinguishes "counted, result is zero" from "could not be counted"?
+    Yes or no.
+
+B2. What does a state head actually see on their own page when their count is
+    one of these unmeasured zeros? Describe the rendered output.
+
+B3. Which other pages, reports, exports or AI payloads consume heads_resources
+    distributor and dealer counts? For each, say whether an unmeasured zero
+    would be presented as a real zero.
+
+B4. Do any Red Alert guards read these counts? If a guard treats an unmeasured
+    zero as a real zero, name the guard.
+
+SECTION C - A HEAD IN THE DASHBOARD WHO DOES NOT EXIST
+
+SUNIL MOHANTY appears in production heads_resources with two states, but has no
+person, person_registry, person_state_coverage or customer_assignment row.
+NARENDRA KUMAR SHARMA has an open Rajasthan coverage row and does not appear in
+heads_resources at all.
+
+C1. How does a name with no organisation record reach a production dashboard
+    snapshot? Trace the path from sheet to snapshot and name the point where an
+    unknown person should have been caught but was not.
+
+C2. Are there other names in heads_resources with no organisation record? List
+    them.
+
+C3. Are there other people with open effective-dated coverage who do NOT appear
+    in heads_resources? List them.
+
+C4. heads_resources holds 12 rows. The organisation record holds how many active
+    state heads? Print both lists side by side.
+
+SECTION D - THE 83 UNMATCHED DROPPED ROWS
+
+47 of the 130 no-DIST# rows matched sale_line on exact name, carrying Rs 6.54 Cr.
+The other 83 were not shown to have no sales - they were shown not to match on
+exact name.
+
+D1. Re-run the match on the 83 with normalisation: strip bracketed suffixes,
+    collapse punctuation, ignore case and spacing. Report matches, sale lines
+    and value. Do NOT create or merge any identity.
+
+D2. For every one of the 130 rows, print name, whether it matched, and its
+    Apr-Jul value. I want the full list, not the summary.
+
+D3. Of the matched named entities, how many are institutional in character -
+    universities, government bodies, hospitals, corporates - as against trade
+    names? This connects to the is_territory question rather than sitting apart
+    from it.
+
+D4. Are any of the 130 already present in the customer master under a different
+    identifier? If yes, they are a linking problem, not a missing-data problem.
+
+SECTION E - MAHARASHTRA 2
+
+E1. Print the canonicalState() rule that strips a trailing number, with its
+    source location.
+
+E2. Does any other state label anywhere in the sources carry a trailing number
+    and get collapsed the same way? List them.
+
+E3. If Maharashtra 2 is a genuine territory split, what would be needed in the
+    distributor sheet to preserve it? Describe only - build nothing.
+
+Report only. Propose no fix.
+```
+
+---
+
+## Notes
+
+- Section A is the one that matters. Two heads each holding half a state, with
+  neither page showing any sign of it, is worse than a wrong number because it
+  looks correct from every angle.
+- Section B is the same principle you already applied to the Growth cards. A head
+  seeing 0 distributors reads it as "I have none", not "we cannot count them".
+- Section D3 is worth reading alongside the is_territory work. A university
+  account with no DIST# is exactly the shape of an institutional customer, and
+  the two problems may share a cause.
+- Do not let Section E lead to a canonicalisation change. It is a question for
+  Prayag first, and it is in the note going to them.
+
+## Still open from earlier prompts
+
+- The MRP refresh window. Last production success 30 August 19:22 UTC. Any
+  redeploy fires a fresh refresh five minutes later, and the authority's code set
+  moved by 147 out and 21 in within thirteen hours on 30–31 August.
+- Prompt 3: NODE_ENV on the running deployment, and the two disposable-server
+  workflows that fail at startup.
+- Prompt 1: what else the documentation pipeline dropped from .agents/memory.
