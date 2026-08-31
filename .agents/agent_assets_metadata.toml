@@ -284,3 +284,10 @@ uri = "file://.local/outputs/Prayag-App-Logic-and-Database-Architecture.xlsx"
 type = "table"
 title = "Prayag App Logic and Database Architecture"
 description = "Excel workbook with 14 filterable sheets covering modules, calculations, data sources, API families, safeguards, limitations, database tables, 545 schema columns, relationships, views/indexes, lifecycle, and reference figures."
+
+[[outputs]]
+id = "sF_nhZbyzV32gdfPPc20k"
+uri = "file://.local/outputs/MRP-Reconciliation-01Sep2026.md"
+type = "text"
+title = "MRP Master vs prayag-price.com Reconciliation"
+description = "Read-only 31 August 2026 reconciliation covering workbook/API counts, code and price differences, exposure, cache state, effective-date behavior, and raw payload samples."
