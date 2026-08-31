@@ -1,0 +1,176 @@
+# Replit Prompt 14 — Environment, CTC, the register gap, and the MRP refresh
+
+**Date:** 31 August 2026
+**Replaces:** the five short prompts
+**Scope:** Read-only throughout. The one code change is held separately at the end.
+
+**Standing rule:** every figure states which database or source it came from —
+production read replica, development, live Drive workbook, or config file.
+
+---
+
+## Prompt 14 — read-only
+
+```
+Read-only. Change nothing, load nothing, refresh nothing, backfill nothing.
+Label every figure with the source it came from.
+
+SECTION A - ENVIRONMENT
+
+One answer here may explain two separate problems.
+
+A1. What is NODE_ENV set to on the running production deployment, and what is
+    it set to in the disposable validation server used by growth-report-guards
+    and schemes-nudge-guards? Print both.
+
+A2. lib/logger.ts attaches a pino-pretty transport only when NODE_ENV is not
+    "production", and that transport spawns a worker through thread-stream.
+    Confirm or reject that this is why the disposable server cannot find
+    thread-stream-worker.mjs.
+
+A3. When did growth-report-guards and schemes-nudge-guards last complete a run
+    that executed their assertions rather than failing at startup? Give the
+    date, and list the merges that have landed since then in the modules those
+    workflows cover.
+
+SECTION B - IS CTC CONNECTED OR NOT?
+
+Two of your earlier reports disagree, and this matters because a wrong answer
+here sent us down the wrong path on the failing guard.
+
+  Report 1: CTC and payroll are NOT connected; CTC, TA bills and cost-ratio
+            columns stay blank until payroll and expense sheets are connected.
+  Report 2: CTC IS present in the HR CSV and enriches matched identities, and
+            live data records cost for every member.
+
+Ravi's computed ratios of 24.85% and 20.4% both require a cost numerator, so
+cost is demonstrably flowing.
+
+B1. Which is correct? Is CTC connected?
+
+B2. If the CSV carries CTC while a separate payroll or expense sheet is genuinely
+    absent, name exactly which source is missing and which fields depend on it.
+    Visits and Working Days are already known to be the two columns absent from
+    the 33-column CSV.
+
+B3. What does the app display on screen about CTC connection status, and is that
+    display accurate? If it reports "not connected" while CTC is in fact
+    enriching members, the message is misleading.
+
+B4. Of the 189 roster members, 178 match an HR CSV identity and 11 do not. For
+    those 11, their CTC and cost columns will be blank. On screen, is
+    blank-because-unmatched distinguishable from blank-because-not-connected?
+
+SECTION C - THE REGISTER TABLE IS MISSING THREE MONTHS
+
+  secondary_sku_line       Apr 21,613  May 31,266  Jun 36,300  Jul 34,147
+  secondary_register_line  Apr      0  May      0  Jun      0  Jul 34,147
+
+pscode3Jul26.ts is the only non-test code that writes to
+secondary_register_line. The July load mirrored its rows across; April, May and
+June did not.
+
+C1. Was that mirror specific to the July PSCode 3 path, or intended for every
+    month and failed for three of them? Answer from the code.
+
+C2. comparison.ts, momentumInsights.ts, skuFacts.ts and extraGroups.ts all
+    reference secondary_register_line. For each, state whether it READS the
+    table for FY2026-27 figures or only mentions it in a guard or a comment.
+
+C3. For any that read it, what does a user currently see for April, May and
+    June 2026 - a number, a stated unavailable, or nothing at all?
+
+C4. registerWipeGuard.ts and skuCoverageGuard.ts are described as completeness
+    guards on register loads. Why did neither fire when the table ended up with
+    one month out of four? A completeness guard that passes at 25 percent
+    coverage is the thing I most want explained.
+
+C5. Print secondary_register_line month coverage across ALL years with row
+    counts, so we can see whether this is an FY2026-27 gap or a table that was
+    largely abandoned.
+
+Do not backfill this table. The guards not firing is the evidence.
+
+SECTION D - THE MRP REFRESH
+
+Last production success was 2026-08-30 19:22:11 UTC. Between that fetch and the
+audit fetch thirteen hours later, the authority's code set moved by 147 out and
+21 in.
+
+D1. Has refreshAuthoritativeMrpCache() run since then? Print every generation
+    created since, with row count and source_fetched_at.
+
+D2. What does the live API report as total right now, and how many rows carry
+    effectiveDate 2026-09-01?
+
+D3. If a new generation has committed, how many codes entered and left the
+    active set? Name them if the count is under 30.
+
+D4. Print the current Apr-Jul aggregate discount-off-MRP, against the 57.3867%
+    recorded on 31 August. State whether it has moved.
+
+Do not refresh the cache in order to answer this.
+
+Report only.
+```
+
+---
+
+## Held separately — the one code change
+
+Send this **only after Section A comes back**. If the validation environment is
+not running as production, a green workflow result from it proves less than it
+appears to.
+
+**What we know:** the guard expects Ravi's `costRatioSales` to be `null` with an
+UNDEFINED note, on a hard-coded assumption that his sales denominator would be
+zero. He now has sales received, and the value correctly computes at 20.4%. The
+calculation is right; the expectation is stale. The synthetic unit fixture
+already expects a numeric ratio, so it is evidence rather than something to
+align.
+
+```
+This is a code change, not a read-only task. Keep it to the single change
+described and nothing else.
+
+The comparison-guards workflow fails on Ravi's costRatioSales. The guard expects
+null with an UNDEFINED note, assuming his sales denominator would be zero. He
+now has sales received, so the value correctly computes at 20.4%. The
+calculation is right; the expectation is stale.
+
+Before changing anything, show me:
+  1. The exact line holding that expectation, with surrounding context.
+  2. Ravi's current sales received figure and the computed ratio.
+  3. Whether that expectation is overridable by an environment variable in the
+     same way RAVI_RATIO_EXPECTED overrides the OB ratio.
+
+Then update that ONE expectation so it accepts the correct computed value, in a
+way that will not go stale again the next time his figures move. If an env-var
+override already exists for the OB ratio, follow the same pattern rather than
+hard-coding a new number.
+
+Do NOT:
+  - change costRatioOb, costPerVisit or any other check
+  - change the calculation in comparison.ts
+  - touch the synthetic unit fixture, which already expects a numeric ratio
+  - adjust any threshold or tolerance to make something else pass
+
+After the change, run comparison-guards and print the full result. If any other
+check in that workflow now fails, stop and report rather than fixing it.
+```
+
+---
+
+## Still open, and larger than anything above
+
+- **Prompt 10** — five disagreeing state alias maps, and the `"UP (A)"` key in
+  `territoryResolver.ts` that may never match. The scheme-qualification impact of
+  that key is the biggest open technical question on the board.
+- **Prompt 11** — the winner-take-all distributor vote, and the full 130-row
+  dropped table that was promised and not delivered.
+- **Prompt 12 Part Two** — whether other user-facing pages read tables that are
+  populated in development and empty in production.
+- **Prompt 1** — what else the documentation pipeline dropped from
+  `.agents/memory`.
+
+I would not open any of these until Prompt 14 is closed.
