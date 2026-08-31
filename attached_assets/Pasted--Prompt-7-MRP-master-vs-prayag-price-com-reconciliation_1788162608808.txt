@@ -1,0 +1,244 @@
+# Prompt 7 — MRP master vs prayag-price.com reconciliation
+
+**Date:** 31 August 2026
+**Adds to:** Replit_Verification_Prompts_v2_2026-08-29.md
+**Scope:** Read-only. No load, no write, no cache refresh, no code change.
+
+**Before sending:** the workbook `Prayag_MRP_Authoritative_01Sep2026.xlsx` has to be
+reachable by Replit. Upload it to the repo working area first, or the agent will
+answer from the cache alone and the comparison will be meaningless.
+
+**Timing note:** 2,409 of the 6,076 prices in this file take effect on
+01 September 2026, along with 18 discontinuations. Send this today so the answer
+is in hand before that date passes, but do not let anything be loaded off the
+back of it.
+
+---
+
+```
+Read-only reconciliation. Do NOT load this file, do NOT write to the MRP cache,
+do NOT refresh the authority cache, and do NOT change any code. Report only.
+
+A new authoritative master has arrived: Prayag_MRP_Authoritative_01Sep2026.xlsx
+It has four sheets - products (6,076 rows), discontinued (233), 
+excluded_do_not_load (142) and notes.
+
+Reconcile it against the live authority at
+  https://prayag-price.com/api/v1/products
+using the existing read-only client in
+  artifacts/api-server/src/lib/mrp/authorityClient.ts
+and the X-API-Key already configured. Page through all pages at pageSize 500.
+
+Do not use the local cache as a substitute for the live API. If the API is
+unreachable or the key fails, say so and stop - do not fall back to the cache
+and present the result as a reconciliation.
+
+SECTION A - COUNTS
+
+A1. How many products does the live API return in total? Print the `total`
+    field from the first page and the actual number of rows retrieved. If they
+    differ, say so.
+
+A2. How many of those are active, and how many carry a discontinuedFrom date?
+
+A3. The 26 August export recorded 6,223 MRP codes. The new file has 6,076
+    active plus 233 discontinued, 6,309 total. Neither matches the API.
+    Reconcile all three numbers. State plainly which of these is true:
+      - the API and the file are scoped differently (say how)
+      - the API is behind the file
+      - the file is behind the API
+      - the 6,223 figure counted something else
+
+SECTION B - CODE SETS
+
+B1. Codes in the file but not in the API. Count and list the first 40.
+B2. Codes in the API but not in the file. Count and list the first 40.
+B3. For B2 specifically: are any of those codes present in sale_line for
+    FY2026-27? If a code is being sold but is absent from the new authoritative
+    master, that is the important case. List those separately.
+
+SECTION C - PRICE AND DATE DIFFERENCES
+
+For every code present in both, compare mrp and effective date.
+
+C1. Codes where the file MRP differs from the API currentMrp. Count, and print
+    the 30 largest absolute differences with both values and the file's
+    status_note.
+C2. Codes where the file effective_date differs from the API effectiveDate.
+    Count and print 30.
+C3. Codes the file marks discontinued that the API still shows active, and the
+    reverse. Both counts, both lists.
+
+SECTION D - STOP CONDITION, READ THIS BEFORE ANY LOAD IS EVER PROPOSED
+
+64 rows in the file carry effective_date 2026-02-01 but a status_note reading
+"Revised on 10th Aug, 2026". All are Composite Fittings (Brass) in Pipes &
+Fittings. The price moves are large - PEA-322B goes 562 to 838, PEA-324B goes
+1162 to 1998.
+
+Loaded as written, an August revision would apply retroactively from 1 February
+2026, which is inside the live FY2026-27 window, and would change MRP-derived
+figures for February through July.
+
+The 64 codes:
+PEA-2B PEA-3B PEA-41B PEA-42B PEA-43B PEA-44B PEA-45B PEA-46B PEA-51B PEA-52B
+PEA-53B PEA-54B PEA-55B PEA-56B PEA-61B PEA-62B PEA-63B PEA-64B PEA-65B PEA-66B
+PEA-322B PEA-323B PEA-324B PEA-325B PEA-331B PEA-332B PEA-333B PEA-334B
+PEA-531B PEA-532B PEA-533B PEA-534B PEA-535B PEA-536B PEA-537B PEA-538B
+PEA-542B PEA-552B PEA-554B PEA-555B PEA-556B
+PEA-731B PEA-732B PEA-733B PEA-734B PEA-735B PEA-736B PEA-737B PEA-738B PEA-739B
+PEA-831B PEA-832B PEA-833B PEA-834B PEA-835B PEA-836B PEA-837B PEA-838B PEA-839B
+PEA-922B PEA-923B PEA-924B PEA-925B PEA-926B
+
+D1. What effectiveDate does the live API hold for each of these 64? Print a
+    table: code, file MRP, file date, API MRP, API date.
+D2. Do any of these 64 appear in sale_line for FY2026-27 Apr-Jul? If yes, how
+    many invoice lines and what rupee value sits against them? That is the
+    exposure if the February date were ever honoured.
+D3. Do not resolve this. It is a question for Prayag, not for us.
+
+SECTION E - TWO SMALLER INCONSISTENCIES
+
+E1. 61 rows dated 2026-08-10 are noted "Unchanged - carried forward". Only 24
+    of the 85 rows at that date are actually revised. What does the API hold as
+    the effective date for those 61? If the API shows an earlier date, the file
+    is creating a price period for a price that never moved.
+
+E2. Three rows - TTS-01, TTS-02, TTS-03 - are dated 2026-09-01 but noted
+    "Revised on 01 Aug, 2026". Print what the API holds for these three.
+
+SECTION F - WHAT ACTUALLY MATTERS AGAINST THE JULY FREEZE
+
+Sales data stops at July 2026. 3,359 of the 6,076 products have effective dates
+on or after 1 August 2026 and therefore cannot affect any figure currently
+computed. Only 2,717 fall inside the loaded window.
+
+F1. Of those 2,717 in-window codes, how many actually appear in sale_line for
+    FY2026-27 Apr-Jul? Give the count and the rupee value they represent.
+    That number is the real size of this change for current reporting.
+
+F2. How many of the 2,071 PTMT & Plastic Fittings codes dated 2026-09-01 appear
+    in FY2026-27 Apr-Jul sale_line? PTMT is 86 percent of the September period,
+    and the notes sheet in the file does not mention PTMT at all.
+
+SECTION G - CACHE AND LOADER STATE
+
+G1. When did the app last successfully sync the MRP cache from
+    prayag-price.com? Print the timestamp and the row count written.
+
+G2. MrpContent.tsx records that the product feed has not exposed a sourceBatchId
+    for every price, and that the cache retains this as a review gap rather than
+    marking those prices approved. How many cached prices are currently in that
+    unapproved review-gap state? Which divisions?
+
+G3. Is the MRP load path effective-date aware on write - that is, if a row with
+    effective_date 2026-09-01 were loaded today, 31 August, would the price
+    become live immediately or only on 1 September? Answer from the code. Do
+    not change it either way.
+
+G4. Does anything in the app read MRP by effective date at the time of sale, or
+    does it read a single current price? Name the call sites. This determines
+    whether a retroactive date change like Section D would alter historical
+    figures or only present-day ones.
+
+SECTION H - IS THE WEBSITE ITSELF UPDATED
+
+The app fetches from prayag-price.com. Prayag say that site has already been
+corrected with this 01 September master. Establish whether that is true, because
+if it is, most of Sections B and C should come back near-empty, and if it is
+not, the app is serving prices the manufacturer has already superseded.
+
+H1. Does the live API return any product with effectiveDate 2026-09-01?
+    Count them. The file has 2,409 at that date.
+
+H2. Does it return any with effectiveDate 2026-08-10? The file has 85.
+
+H3. What is the most recent effectiveDate present anywhere in the API response?
+
+H4. Does the API show the 18 items the file discontinues from 2026-09-01 as
+    still active, or already discontinued? List them either way.
+
+H5. Based on H1 to H4, state in one sentence whether the website has been
+    updated to the 01 September master, partially updated, or not updated.
+    Do not hedge this one - it determines whether anything needs loading at all.
+
+SECTION I - WHAT THE FETCHED DATA ACTUALLY LOOKS LIKE
+
+I have never seen the raw payload. Show it.
+
+I1. Print the VERBATIM, UNMODIFIED JSON of the first page response, truncated to
+    the first 3 rows plus the pagination envelope. Do not run it through
+    normaliseAuthoritativeProduct first. I want the source shape, field names
+    and casing exactly as the API sends them.
+
+I2. Print the same 3 rows AFTER normalisation, so the before and after sit side
+    by side.
+
+I3. The client type in authorityClient.ts marks several fields optional and
+    notes they are "accepted when the upstream catalogue API exposes its
+    review/history projection", and "not fabricated if absent". For each of
+    these, say whether the live API actually returns it, and on what percentage
+    of rows it is non-null:
+
+      previousMrp
+      status
+      colourVariants
+      sourceBatchId
+      reviewStatus
+      dataFlag
+      reviewReasons
+      uom
+      seriesRange
+      size
+
+I4. COLOUR PRICES - this is the one I most want answered.
+    The new file carries three separate colour price columns: mrp_ivory
+    (populated on 118 rows), mrp_white_with_jet (19) and mrp_pink_green_blue
+    (13). The file's notes sheet says blank means the colour is not offered and
+    the standard price must never be substituted.
+
+    But the API contract in authorityClient.ts has colourVariants as a plain
+    string array - variant NAMES only, with no price attached, and there is a
+    single mrp field per product.
+
+    Confirm: does the live API expose a price per colour anywhere? If it does
+    not, then those 150 colour prices have nowhere to land through this path.
+    Say so plainly and name what would be needed. Do not build anything.
+
+I5. Print the exact keys returned on a row that HAS colour variants, if one
+    exists in the API response.
+
+I6. The key is read from process.env.COMPETITION_API_KEY, which is named for
+    the competitor price feed, not MRP. Confirm both the MRP authority client
+    and the competition client use the same single key against the same base
+    URL, and say whether that is intended or an artefact.
+
+Report only. Propose no fix and load nothing.
+```
+
+---
+
+## Notes
+
+- Sections A, B and C are the reconciliation proper. D is the stop condition. F
+  is the one that tells you whether this file matters much at all against a
+  register frozen at July.
+- Section H is worth reading first when the reply comes back. If the website is
+  already carrying the 01 September master, there is nothing to load and the
+  whole exercise becomes a confirmation. If it is not, the app is currently
+  serving prices the manufacturer has superseded, and that is a different
+  conversation.
+- Section I asks for the raw payload because nobody on our side has seen it. The
+  client code declares more fields than the API may actually return, and treats
+  the missing ones as review gaps rather than errors, so an incomplete feed
+  degrades quietly rather than failing. I4 in particular: the file has 150
+  colour-specific prices and the API contract appears to have no field to carry
+  a price per colour, only variant names.
+- If the agent cannot reach the live API, the honest answer is "cannot reach it".
+  A reconciliation run against the local cache would compare the cache to the
+  file and tell you nothing about the authority, while looking like it had.
+- Nothing here unblocks the PTMT BOM conflict. That is a factory cost dispute,
+  not an MRP one. A September MRP against a disputed January-to-March cost makes
+  the margin gap wider, not narrower.
+- Hold the three excluded rows marked Invalid Input for Prayag to confirm. They
+  carry no usable code.
