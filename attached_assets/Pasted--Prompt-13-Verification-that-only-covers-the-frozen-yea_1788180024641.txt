@@ -1,0 +1,200 @@
+# Prompt 13 — Verification that only covers the frozen year
+
+**Date:** 31 August 2026
+**Adds to:** Prompts 1–12
+**Scope:** Read-only. No code change, no config change, no data change, no load,
+no anchor added.
+
+**Standing rule:** every figure states which database or source it came from —
+production read replica, development, live Drive workbook, or config file.
+
+**Why this exists:** the Reports page shows a green FY-anchor verification. That
+green is entirely about FY2025-26. The live year has no anchor at all, and two
+different sources both call themselves order booking.
+
+---
+
+## Prompt 13
+
+```
+Read-only. Change nothing. Add no anchor, load nothing, connect nothing.
+Label every figure with the source it came from.
+
+SECTION A - THE ANCHOR ONLY COVERS THE FROZEN YEAR
+
+config/verify_anchors.json fy_anchors contains one fiscal year: 2025-26.
+Tolerances are moneyPassPct 1, countPassPct 2, memberCountAbs 5,
+coverageMinPct 92.
+
+A1. Confirm FY2026-27 has no entry under fy_anchors. Yes or no.
+
+A2. When the Data Health page shows a PASS today, exactly which fiscal years
+    were checked? Print the list. If it is only 2025-26, say so in one plain
+    sentence.
+
+A3. Does the page state anywhere on screen which years were verified and which
+    were not checked at all? If a user sees a green result, is there anything
+    telling them the live year was not part of it?
+
+A4. What would an FY2026-27 anchor need in order to exist - which figures,
+    from which source, and is there any external reference available for the
+    live year at all? Describe only. Do not create one.
+
+A5. Are there other verification or guard configurations elsewhere in the
+    codebase that are similarly scoped to closed years only? List them.
+
+SECTION B - TWO THINGS CALLED ORDER BOOKING
+
+The FY-anchor check reads order-booking WORKBOOKS from Drive and reports
+379,441 rows for FY2025-26 with 52,515 distinct orders. The Secondary Orders
+page reads the table secondary_order_line, which has 0 rows and 0 lineage
+records.
+
+B1. Confirm those are two separate paths that never meet. Trace both: source,
+    code path, and what each populates or reads.
+
+B2. Was secondary_order_line ever intended to be fed from the same workbooks
+    the anchor check reads? If yes, what is supposed to run, and has it ever
+    run in production?
+
+B3. FY2026-27 order booking has no fixed configured workbook ID and is handled
+    by Drive autodiscovery. What does autodiscovery currently find for
+    2026-27? Print the file IDs and names it resolves to, or state that it
+    resolves to nothing.
+
+B4. If autodiscovery finds nothing for 2026-27, does anything on screen say so,
+    or does the live year simply show no order booking without explanation?
+
+B5. Does any figure anywhere in the app mix the two sources - workbook-read
+    order booking and secondary_order_line - in the same number or the same
+    comparison? Name it if so.
+
+SECTION C - THE TARGETS TABLE IS EMPTY
+
+member_targets has 0 rows for FY2026-27 and 0 for FY2025-26, and there is a
+Targets item in the main navigation.
+
+C1. What does the Targets page render against an empty table? Describe the
+    actual output a user sees. Is it distinguishable from targets that exist
+    and are all zero?
+
+C2. Where do targets come from when they do exist - a sheet, an upload, manual
+    entry? Has anything ever written to member_targets in production? Print any
+    lineage or timestamps.
+
+C3. Which pages, reports, exports and AI payloads read member_targets? For each,
+    what does it currently show given zero rows?
+
+C4. Does any Red Alert category compare achievement against target? If yes,
+    name each one and confirm whether it is currently inert because there are
+    no targets. This may be part of why nine of eleven B and C categories
+    produce nothing.
+
+C5. Does scheme qualification read targets anywhere? If a scheme slab depends
+    on a target that does not exist, what happens - skip, zero, or error?
+
+SECTION D - THE FAILING WORKFLOW MAY HAVE A SIMPLE CAUSE
+
+comparison.ts computes costRatioSales from ctcMonthly. costCell.test.ts
+confirms it. CTC and payroll are reported as NOT CONNECTED.
+
+D1. Confirm costRatioSales depends on CTC data that is not connected. Yes or no,
+    with the code path.
+
+D2. The comparison-guards workflow has been failing on a costRatioSales
+    expectation mismatch. Is that failure caused by the missing CTC source
+    rather than a regression? Print the expected value, the actual value, and
+    where the expectation came from.
+
+D3. If that is the cause, was the expectation written when CTC data was
+    available, or written against fixtures that assume it? Say which.
+
+D4. Do costPerVisit or costRatioOb depend on the same unconnected sources? If
+    they do and their guards are passing, explain the difference.
+
+D5. Do NOT change the expectation. If the guard is failing because a source is
+    absent, the guard is correct and the source is the problem.
+
+SECTION E - THE MEMBER COUNT, AGAIN
+
+Five different member figures are now in circulation:
+    178  roster of record
+    189  members currently loaded
+    190  populated Data-tab rows (earlier audit)
+    216  FY2025-26 frozen secondary snapshot
+    609  rows in the HR CSV
+
+E1. Reconcile all five. For each, state exactly what it counts, from which
+    source, and as at what date. One table.
+
+E2. Of the 189 currently loaded members, how many match a row in the HR CSV?
+    If some do not match, their HR columns will be blank - and blank-because-
+    unmatched looks identical on screen to blank-because-CTC-is-not-connected.
+    Give the count of unmatched members.
+
+E3. The source description says 35 columns; the CSV has 33. Which two are
+    missing? If they are SFA or cost columns, the "not connected" message may
+    be masking a schema change rather than an absent feed.
+
+E4. The 12 distinct state heads figure comes from Data-tab Column A, which we
+    have established includes a name with no organisation record and a person
+    whose production record says is_state_head = false. Production's own count
+    is 11. Which number does the Reports page display, and does anything
+    indicate it is a sheet figure rather than an organisation figure?
+
+SECTION F - THE COVERAGE THAT PASSED
+
+Roster-attributed coverage came out at 94.15% against a 92% floor, so it passed.
+That leaves roughly 22,200 of 379,441 order-booking rows attributed to no roster
+member.
+
+F1. Confirm the exact unattributed row count and its order value.
+
+F2. What are those rows? Print the top 20 by value with whatever identifier
+    they carry, and say whether they cluster by state, by head or by period.
+
+F3. Coverage is computed against the same twelve-head list from Section E4. If
+    it were computed against production's eleven active state heads instead,
+    what would the figure be?
+
+F4. The first run of this check reported coverage as a third verdict; the second
+    run gave the tolerances but omitted the computed coverage. Is coverage part
+    of the overall PASS or reported alongside it? One sentence.
+
+Report only. Propose no fix, add no anchor, connect no source.
+```
+
+---
+
+## Notes
+
+- Section A is the one that matters most. A green verification badge that covers
+  only a frozen year is worse than no badge, because it reads as assurance about
+  the live year.
+- Section D could close one of the three red workflows cheaply. If
+  `costRatioSales` fails because CTC was never connected, the guard is behaving
+  correctly and nothing needs fixing in the guard. D5 is there because the
+  tempting move is to adjust the expectation until it goes green, and that would
+  destroy the signal.
+- Section C4 connects to the Red Alert completeness question you have been
+  carrying since the calibration work. Empty targets may account for some of the
+  nine inert categories.
+- Nothing here should result in an FY2026-27 anchor being written off the back of
+  the reply. An anchor invented from the app's own figures verifies nothing — it
+  needs an external reference, which is what A4 is asking about.
+
+## Credit worth noting
+
+The SFA and CTC sources report themselves as not connected and name exactly which
+columns stay blank as a result — visits, working days, GPS kilometres, lead
+counters, CTC, TA bills, cost ratio. That is the pattern the six surfaces in
+Prompt 12 lack, and it already exists in this codebase.
+
+## Still open from earlier prompts
+
+- Prompt 1: what else the documentation pipeline dropped from `.agents/memory`.
+- Prompt 3: NODE_ENV on the running deployment.
+- Prompt 8: the MRP refresh window and the 3.0069-point discount shift.
+- Prompt 10: the five disagreeing state vocabularies, and `"UP (A)"`.
+- Prompt 11: the winner-take-all vote, and the full 130-row dropped table.
+- Prompt 12: the `secondary_register_line` three-month gap.
