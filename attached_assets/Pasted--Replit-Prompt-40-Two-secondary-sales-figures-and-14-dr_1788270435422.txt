@@ -1,0 +1,166 @@
+# Replit Prompt 40 — Two secondary sales figures, and 14 dropped workbooks
+
+**Date:** 1 September 2026
+**Scope:** Read-only. Change nothing, reload nothing, drop nothing.
+
+**Standing rule:** every figure states which database or source it came from.
+
+## What prompted this
+
+There are two figures called secondary sales for Apr–Jul FY2026-27, from two
+different sources, **4.0% apart**, and nothing in the codebase compares them.
+
+| Figure | Source | Value |
+|---|---|---:|
+| Sales Received, Secondary Performance | live Google Sheets, `IMPORTRANGE` into member workbooks | **₹84.63 Cr** |
+| `secondary_sku_line` net | CRM export files, manual load | **₹81.36 Cr** |
+| | | **gap ₹3.27 Cr** |
+
+And I found a mechanism that explains at least half of it.
+
+`pscode3Jul26.ts` carries a hardcoded `DUP_DROP` set of **14 member workbook
+names**. 163 files found, 14 dropped, 149 loaded — all three asserted, so the
+loader refuses to run if the count changes.
+
+For July that removes **2,658 rows and ₹1,58,74,958** — 6.6% of the month.
+
+Two of the fourteen are not obviously junk: **SANDEEP DADHEECH**, a state head
+with ₹54.83 crore of sales, and **O.P. KALRA**, one of the six unrecognised State
+Head folders.
+
+---
+
+## Prompt 40
+
+```
+Read-only. Change nothing, reload nothing, alter no drop list.
+
+SECTION A - THE 14 DROPPED WORKBOOKS
+
+pscode3Jul26.ts contains:
+
+  const DUP_DROP = new Set([
+    "AJOY BORAH", "ASHUTOSH KUAMR", "O.P. KALRA", "SUMIT PAREEK", "SASIKUMAR A",
+    "AMIT HARIDASJI BELONKAR", "ILESH VYAS", "HARDEEP KHINDA", "SANDEEP DADHEECH",
+    "L.SELVAGANAPATHY", "MANOKARAN", "KANISH KHANNA", "KAPIL THAKUR",
+    "RAVI KANT MAHATO",
+  ]);
+
+The name says duplicate. Prove it.
+
+A1. For EACH of the 14, what does its file duplicate? Name the specific rows or
+    member file whose data it repeats. If the evidence is a head file repeating
+    rows already present in that head's members' files, show it - retailer,
+    item code, month, amount - for at least three of the fourteen.
+
+A2. If any of the 14 is NOT a duplicate, its rows are simply missing. Say which,
+    and give rows and value for each.
+
+A3. SANDEEP DADHEECH is a state head with Rs 54.83 crore of sales. O.P. KALRA is
+    a State Head folder we could not place earlier today. Confirm specifically
+    what each of those two duplicates.
+
+A4. "ASHUTOSH KUAMR" is dropped as a duplicate, while
+    "ASHUTOSH KUMAR(RUDRAPUR)" appears in NAME_OVERRIDE and is corrected and
+    KEPT. One misspelling dropped, another corrected. Is that deliberate?
+    Print what each resolves to.
+
+A5. Where did the 14 names come from - a one-off manual reconciliation, a
+    documented rule, a commit message? Trace it through git history and quote
+    whatever justification exists.
+
+SECTION B - DOES THE SAME DROP APPLY TO APRIL, MAY AND JUNE?
+
+The July loader is explicitly one-off, with an approved archive SHA and fixed
+controls. April, May and June came through a different path.
+
+B1. Which loader loaded each of Apr-26, May-26 and Jun-26 into
+    secondary_sku_line? Name the code path per month.
+
+B2. Does each apply the same DUP_DROP set, a different one, or none? Print the
+    drop list each used.
+
+B3. For each of the four months, print: files found, files dropped, files
+    loaded, raw rows, loaded rows, raw net, loaded net. July is known -
+    163/14/149, 36,805 raw rows to 34,147, Rs 23.9312 Cr raw to Rs 22.3437 Cr.
+    I want the other three on the same basis.
+
+B4. Total dropped value across Apr-Jul. If it approaches Rs 3.27 crore, the
+    entire gap between the two secondary sales figures is explained by this
+    mechanism.
+
+SECTION C - NOTHING RECONCILES THE TWO FIGURES
+
+I searched the codebase. Audit check 7.6 compares secondary_sku_line to its own
+brand-level mirror - the same data reshaped, not an independent source. I found
+no check anywhere comparing secondary_sku_line against secondary_head_month or
+against dashboard Sales Received.
+
+C1. Confirm that. Is there any guard, audit, gate or test that compares the
+    CRM-derived item-level total against the sheet-derived Sales Received total?
+
+C2. Print both figures per month for Apr-Jul: dashboard Sales Received from
+    secondary_head_month.received_amount, and secondary_sku_line net. Give the
+    difference per month and in total.
+
+C3. Are they the same measure? sku_line net_amount is described as "Sub Total,
+    after discount". head_month received_amount is "Sales Received" from the
+    member workbook. If those are conceptually different things, say so - the
+    gap may be expected and simply undocumented.
+
+C4. Which surfaces use which? A user comparing Secondary Performance against SKU
+    Deep Dive would see different totals for the same period. Name every page
+    that shows one or the other.
+
+SECTION D - THE ANOMALY ROWS INSIDE THE HEADLINE
+
+rules.ts isAnomalous fires when sales exceed 3x ordered in a month. The comment
+says 1.5-3x is genuine delivery lag; above 3x warrants human review. And:
+"Anomalous months: show raw value, exclude from rankings only. They are INCLUDED
+in YTD gross totals."
+
+D1. Confirm the 12 flagged person-months carrying Rs 7,20,59,801.74 of sales are
+    inside the Rs 84.63 crore Sales Received figure.
+
+D2. Is that flag visible anywhere a user would see it, or only in diagnostics?
+
+D3. Excluding rankings but including totals is a deliberate design choice. Is it
+    documented anywhere a reader of the number would find it?
+
+Report only. Do not change the drop list, do not reload any month, do not
+"correct" either figure.
+```
+
+---
+
+## Notes
+
+- A1 is the whole of Section A. `DUP_DROP` asserts duplication and shows no
+  evidence for it. Fourteen names, ₹1.59 crore in one month, and a loader that
+  refuses to run if the count changes — that is a strong control built on an
+  unproven premise.
+- B4 is the payoff. If the Apr–Jun drops sum with July to around ₹3.27 crore, the
+  two secondary sales figures are reconciled and the difference has a name.
+- C3 could make this a documentation problem rather than a data one. If "Sub
+  Total after discount" and "Sales Received" are genuinely different measures,
+  the gap is expected — but nobody has written that down, and two pages show
+  different totals for the same period with no explanation.
+- Section D is not a defect. Including flagged rows in totals while excluding
+  them from rankings is a reasonable choice. The question is only whether anyone
+  reading ₹84.63 crore knows ₹7.2 crore of it is flagged.
+
+## Not asked here, deliberately
+
+Nothing in this prompt proposes changing the drop list, reloading a month, or
+adjusting either figure. April through July are frozen. If the drops turn out to
+be wrong, that is a decision about a closed period and needs its own
+conversation.
+
+## Related, still open
+
+- `secondary_register_line` holds July only for FY2026-27. April, May and June
+  are empty, and two completeness guards passed on 25% coverage. Prompt 12,
+  unanswered.
+- `secondary_sku_line` freezes August on **7 September**. No August SKU export has
+  arrived. The Product-Wise file we hold is order booking and belongs in a
+  different table.
