@@ -49,6 +49,10 @@ describe("normaliseCustomerState", () => {
     expect(normaliseCustomerState("hp")).toBe("HIMACHAL PRADESH");
   });
 
+  it("preserves the registered Uttarakhand spelling", () => {
+    expect(normaliseCustomerState("Uttarakhand")).toBe("UTTARAKHAND");
+  });
+
   it("returns null for blank input", () => {
     expect(normaliseCustomerState(null)).toBeNull();
     expect(normaliseCustomerState("")).toBeNull();

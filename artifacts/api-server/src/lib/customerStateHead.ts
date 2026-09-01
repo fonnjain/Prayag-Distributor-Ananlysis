@@ -33,7 +33,7 @@ const CUSTOMER_STATE_OVERRIDES: Record<string, string> = {
   "DELHI NCR":     "DELHI",
   "DELHI A":       "DELHI",
   "DELHI (NCR)":   "DELHI",
-  "UTTARAKHAND":   "UTTRAKHAND",    // sale_line spelling variant
+  "UTTARAKHAND":   "UTTARAKHAND",   // registered sale_line/state_hierarchy spelling
   "J&K":           "JAMMU AND KASHMIR",
   "JAMMU":         "JAMMU AND KASHMIR",
   "KASHMIR":       "JAMMU AND KASHMIR",
