@@ -1,0 +1,152 @@
+# Replit Prompt 30 — Align the head-row achievement denominator
+
+**Date:** 1 September 2026
+**Follows:** Prompt 28, which is applied and working
+**Scope:** Section A is read-only. Section B is a code change, gated on A.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**Confirmed working:** the Plan card moved from ₹159.09 Cr to ₹137.59 Cr,
+September's ₹21.51 Cr plan is out, and the ₹107.48 Cr denominator is on screen.
+
+**What it exposed:** three levels, two denominators.
+
+| Level | Denominator |
+|---|---|
+| Company card | recorded-month plan, ₹107.48 Cr |
+| **Head rows** | **full-period plan, August included, ₹137.59 Cr** |
+| Member rows | recorded-month plan |
+
+Sum the head rows and you get **61.51%**. The company card above them says
+**78.74%**. A 17.23 point gap on one screen, and the head rows are the only level
+using the odd basis. ₹30.11 Cr of plan sits in head denominators and not in the
+company one — ₹14.85 Cr of it Sandeep's, ₹15.27 Cr shared across the other nine.
+
+---
+
+## Section A — read-only, send this first
+
+```
+Read-only. Change nothing.
+
+The head row computes group sales / group.secondaryPlan, using the full selected
+period. The company card and the member rows both use recorded-month plan. Every
+head is therefore understated, not just Sandeep.
+
+A1. For each of the 10 heads, print:
+      - current head-row achievement
+      - achievement recomputed as group sales / sum of member secondaryPlanRecorded
+      - the difference in percentage points
+      - the plan amount sitting in the current denominator with no recorded sales
+
+    Sandeep is already known: 70.25% now, 86.76% recomputed, 16.50 points,
+    Rs 14.85 Cr. I want the other nine on the same basis.
+
+A2. Does the RANKING of heads change under the corrected basis? Print both
+    orderings side by side. This is the question that matters - these
+    percentages are how heads are compared with each other, and the size of each
+    distortion depends on how much August plan sits in their denominator, which
+    has nothing to do with performance.
+
+A3. Does any head move across a threshold that triggers something - a Red Alert
+    band, a Low Performer classification, a warning, an AI report characterisation?
+    Name any that would change.
+
+A4. Confirm the member rows already use secondaryPlanRecorded and would not move.
+
+A5. Where else is a head-level or group-level achievement computed - Secondary
+    Performance, Comparison, AI reports, warnings, exports? For each, say which
+    denominator it uses. If any other surface has the same full-period basis, it
+    needs the same fix and I want to know now, not afterwards.
+
+Report only. Propose no change yet.
+```
+
+---
+
+## Section B — code change, only after Section A
+
+```
+This is a code change. One denominator, nothing else.
+
+The head row uses group.secondaryPlan. The company card and member rows use
+recorded-month plan. Make the head row consistent with the other two: use the sum
+of member secondaryPlanRecorded.
+
+Requirements:
+  - Reuse the field the member rows already use. Do not compute a new one.
+  - Do not change the company card, the member rows, the Plan card, or any
+    order-booking or sales figure.
+  - Do not change how planRecorded or secondaryPlan are computed.
+  - Do not change the Plan column shown on the head row - that column should
+    still display the full-period plan. Only the achievement denominator changes.
+  - Apply the same change to any other surface Section A5 identified with the
+    same basis, but list them for me before touching them.
+
+Label it. The head row's achievement should carry the same "recorded-month plan"
+wording the company card now has, so a reader can see the two match.
+
+Show me the diff before applying. After applying, print all ten head rows with
+their new percentages, and confirm that the sum of head-row sales still
+reconciles exactly to Rs 84,63,00,457.14.
+```
+
+---
+
+## Section C — a third unlabelled figure, read-only
+
+Not urgent. Send whenever.
+
+```
+Read-only. Change nothing.
+
+sheetTotals.salesReceived is Rs 85,25,49,377.14. The displayed Sales Received
+card is Rs 84,63,00,457.14. The Rs 62,48,920 difference is real August sales,
+already in the sheet, correctly excluded because August is not fully recorded.
+
+C1. Confirm that figure and where it sits - which members, which head.
+
+C2. Is that exclusion visible anywhere on the page? A reader has no way to know
+    real August sales exist and are being held back.
+
+C3. Note the asymmetry: August PLAN is inside the head denominator, August SALES
+    are excluded from the numerator. Each is defensible alone; together they push
+    every head percentage down twice. Confirm that is what is happening.
+
+C4. What is the smallest disclosure that would make this honest - a footnote on
+    the Sales Received card naming the excluded amount and month? Describe only.
+
+Report only.
+```
+
+---
+
+## Notes
+
+- A2 is the whole point of Section A. If the ranking holds, this is a
+  presentational correction. If it moves, heads have been compared against each
+  other on a distorted basis, and that is a different conversation.
+- A5 matters before B. If Comparison or the AI reports use the same full-period
+  basis, fixing one surface makes them disagree with each other, which is worse
+  than a consistent error.
+- Section B keeps the Plan column as-is deliberately. The head's full-period plan
+  is a real figure and should stay visible; only the denominator changes.
+- C3 is the part worth internalising. Two individually correct decisions,
+  combined, bias every head's percentage downward.
+
+## Still open
+
+- **Prompt 29** — the `isLeft` disagreement between two surfaces, the 12 flagged
+  anomalies worth ₹6.70 crore inside the Sales Received card, and the 403 on
+  Sheets metadata.
+- The CRM reference workflow findings — six distinct target quantities against
+  the app's two fields, PS Code 5 never mentioned before, `=iferror(AY52/BM52)`
+  as the specified sale-achievement formula, and the Amount/Count pairing the
+  dashboard shows only as rupees.
+- **Prompt 21** — visit rates for departed members.
+- **Prompt 23** — ₹10.51 crore snapshot-versus-monthly divergence.
+- **Prompt 26** — partial-month label, before the August order file is loaded.
+- **Prompt 10** — five state alias maps, and `"UP (A)"`.
+- **Prompt 11** — the winner-take-all distributor vote, and the 130-row table.
+- **Prompts 16 and 17** — the discount basis, and the readiness fix.
+- The `costRatioSales` guard fix.
