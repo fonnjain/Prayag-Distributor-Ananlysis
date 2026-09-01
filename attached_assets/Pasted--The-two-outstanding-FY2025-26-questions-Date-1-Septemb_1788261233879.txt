@@ -1,0 +1,202 @@
+# The two outstanding FY2025-26 questions
+
+**Date:** 1 September 2026
+**Scope:** Both read-only. Change nothing, backfill nothing.
+**Reissued:** originally sent as Prompt 23 and Prompt 32, neither answered.
+
+**Standing rule:** every figure states which database or source it came from.
+
+FY2025-26 is the comparison baseline. Everything below sits in it. Send them
+separately, either order — they are independent.
+
+---
+
+## Prompt A — ₹47.98 crore of FY2025-26 has no state
+
+8,562 rows with `state_canon` NULL, worth **₹47,97,99,174.70** — **13.3% of the
+baseline year by value**. FY2026-27 has zero NULLs. The year otherwise reconciles
+exactly to the frozen anchor of 145,613 rows and ₹360.9954 Cr.
+
+```
+Read-only. Change nothing, backfill nothing.
+
+FY2025-26 has 8,562 sale_line rows with state_canon NULL, worth
+Rs 47,97,99,174.70 - 13.3% of the year. FY2026-27 has none.
+
+1. What are these 8,562 rows? Break them down by customer, by month, and by
+   head_canon. Do they cluster, or are they spread across the year?
+
+2. Is head_canon populated while state_canon is NULL, or are both NULL? If
+   head_canon survives, the rows have an owner even without a state - say so and
+   give the split by head.
+
+3. Is state_raw populated on any of them? state_raw exists on sale_line and is
+   filled for FY2023-24 and FY2026-27 but null for the two middle years. Confirm
+   whether it is null here too, or whether some rows retain a raw label that
+   could classify them.
+
+4. Why does FY2026-27 have none? What changed between the two ingests? If a
+   backfill ran for one year and not the other, name it.
+
+5. Which surfaces filter or group by state for FY2025-26? For each, confirm
+   whether these 8,562 rows are silently dropped, bucketed as unknown, or shown.
+
+6. THE ONE THAT MATTERS. Does any year-on-year state comparison put a fully
+   classified FY2026-27 against an FY2025-26 missing 13.3%? Name every such
+   surface and say whether the resulting movement is an artefact of
+   classification rather than performance.
+
+7. Does the FY2025-26 anchor verification test state completeness at all? The
+   anchor passes on total rows and total value, both of which are correct. A NULL
+   state does not change either.
+
+8. Could these rows be classified from customer_master or head_canon, or is the
+   information genuinely absent? Do not classify them. Say whether it is
+   possible.
+
+Do NOT backfill. FY2025-26 is frozen and a backfill would change a closed year.
+
+Report only.
+```
+
+---
+
+## Prompt B — ₹10.51 crore where two readings of one workbook disagree
+
+`deep_dive_snapshot.orderBooking` and `secondary_head_month.ordered_amount` are
+both read from the same workbook and disagree for **141 of 189 members**, ₹10.51
+crore absolute. And **FY2025-26 has zero rows in `secondary_head_month`** against
+a snapshot holding **₹195.82 crore across 241 members**.
+
+I tested the obvious explanation and it does not hold. Every member with monthly
+rows has exactly 5 non-null months, so a clean period offset would give a uniform
+gap. Instead the share each member's snapshot fails to reproduce has a **median
+of 7.5%, quartiles of 2.7% and 24.1%, and a range from 0% to 100%**.
+
+```
+Read-only. Change nothing, rebuild no snapshot, backfill nothing.
+
+Both figures come from workbook 1E1jEY_yO8LmpqBDpcesS_fu2SBPEQ0eKO5xN29XyTEM.
+deepDiveData.ts reads a cumulative member column on the Data tab.
+stateHeadLoader.ts reads the monthly Plan / Order Booked / Sales Received blocks.
+
+SECTION A - FY2025-26 HAS NO MONTHLY ROWS AT ALL
+
+secondary_head_month holds zero FY2025-26 rows against a Deep Dive snapshot of
+Rs 1,95,82,47,208.71 across 241 members.
+
+A1. Was FY2025-26 monthly data ever written to that table? Check ingest history,
+    lineage, any audit record. If it was and is now absent, when did it go and
+    what removed it?
+
+A2. If it was never written, is that intended - was the table introduced after
+    FY2025-26 closed? Give the migration date that created it and compare.
+
+A3. Which surfaces read secondary_head_month for FY2025-26 and therefore see
+    nothing? Does any comparison put a populated FY2026-27 against an empty
+    FY2025-26 and present the result as a real year-on-year movement?
+
+A4. The FY2025-26 snapshot holds 241 members; the frozen secondary snapshot for
+    the same year holds 216. Two counts of one year from two snapshots.
+    Reconcile them.
+
+SECTION B - WHY DO TWO READINGS OF ONE WORKBOOK DIVERGE PER MEMBER?
+
+B1. Do both parsers read the SAME tab, or different tabs of the same workbook?
+    Name each tab precisely, including any trailing space in the tab name.
+
+B2. Print the raw source cells for six members - the cumulative column value AND
+    each of the 12 monthly block cells, exactly as they appear in the sheet.
+    Use these, chosen to span the range:
+
+      Rajan Srivastava        largest mismatch, Rs 45.58 lakh
+      Amruth Shivappa Banakar 100% gap - snapshot 0, monthly Rs 1,83,589.59
+      Milind Ashok Sadanand   98.9% gap
+      Sudipta Thom            snapshot HIGHER than monthly
+      Debasish Adhikary       reconciles exactly at Rs 2.53 crore
+      Faraz Khan              reconciles to within 1.1%
+
+    Seeing the actual cells side by side should show whether the cumulative
+    column is a formula, a pasted value, or hand-typed.
+
+B3. Is the cumulative column a live formula, a paste, or entered by hand? If it
+    is hand-entered by team members, the two figures were never going to agree
+    and that is the finding.
+
+B4. 132 members have monthly HIGHER than snapshot; 24 have snapshot higher. Is
+    there any characteristic separating the two groups?
+
+SECTION C - WHOLE TEAMS MISSING FROM THE MONTHLY TABLE
+
+27 members have no secondary_head_month rows at all. They cluster:
+
+  Sulinder Pal     5 of 7
+  Sunil Mohanty    3 of 3   (Anuj Sharma, Deo Bhushan Sharma,
+                             Narendra Kumar Sharma)
+  Sandeep Dadheech 10 of 75  (including Pravat Kumar Dash, Rs 2.28 crore)
+  Anant Singh      3 of 14
+  Pawan Sharma     2 of 12
+
+C1. Why does stateHeadLoader.ts not create rows for these 27? Is it failing to
+    recognise them, skipping their block, or never reaching their section of the
+    sheet? Answer per cluster, not generally.
+
+C2. Sulinder Pal loses 5 of 7 and Sunil Mohanty 3 of 3. Are their monthly blocks
+    laid out differently, or positioned somewhere the parser stops before?
+
+C3. Pravat Kumar Dash carries Rs 2,28,13,190.05 in the snapshot with no monthly
+    rows - the single largest unreconciled figure. Print his raw sheet rows in
+    both locations.
+
+C4. Narendra Kumar Sharma appears as a MEMBER under SUNIL MOHANTY. Prayag have
+    confirmed Narendra is an RSM working primary only with no secondary team, so
+    his absence from the monthly table is expected. But Sunil Mohanty has no
+    person, registry, coverage or assignment record anywhere. Print the raw sheet
+    rows that produce that relationship.
+
+SECTION D - WHAT WOULD MAKE THIS VISIBLE
+
+Describe only. Build nothing.
+
+D1. Is there any invariant, guard or audit check comparing these two
+    representations before either is displayed or persisted?
+
+D2. If only one number can be shown to users, which should it be, and what would
+    have to change for the other to stop appearing on any screen?
+
+D3. Do NOT backfill or rebuild either representation. Both are evidence of how
+    the sheet was read, and overwriting either destroys the ability to tell which
+    was right. Confirm you understand that before proposing anything.
+
+Report only.
+```
+
+---
+
+## Notes
+
+- **Prompt A question 6** and **Prompt B section A3** are the same question from
+  two directions: is any year-on-year comparison being computed against a
+  baseline that is materially incomplete? One asks about missing states, the
+  other about a missing monthly table. Either would produce movement that looks
+  like performance and is not.
+- **Prompt B question B2** is the whole of section B in one ask. Six members' raw
+  cells side by side should show immediately whether the cumulative column is a
+  formula or hand-typed. If it is typed by team members, the ₹10.51 crore is not
+  a defect and the question becomes which number anyone should be reading.
+- Both prompts forbid backfilling, deliberately. FY2025-26 is frozen, and the
+  reflex on both findings will be to fill in what is missing.
+
+## Since these were first written
+
+- `state_raw` **does** exist on `sale_line` — I said earlier it did not. It is
+  populated for FY2023-24 and FY2026-27, null for FY2024-25 and FY2025-26. Prompt
+  A question 3 exists because of that correction.
+- Prayag have confirmed Rajasthan: Pawan held it throughout, Narendra joined
+  recently as RSM on primary only with no secondary team. That explains his
+  absence from the monthly table and from `heads_resources`, and Prompt B C4 is
+  narrowed accordingly.
+- Maharashtra is resolved — `head_canon` reconstructs the L/R/S split with 100%
+  coverage, verified against FY2023-24 raw labels.
+- Everything in the Tamil Nadu and unresolved-heads thread is FY2023-24 only and
+  is out of scope for a FY2025-26 comparison.
