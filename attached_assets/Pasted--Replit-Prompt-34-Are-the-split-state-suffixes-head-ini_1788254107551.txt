@@ -1,0 +1,161 @@
+# Replit Prompt 34 — Are the split-state suffixes head initials?
+
+**Date:** 1 September 2026
+**Scope:** Read-only. Change nothing, register nothing, remap nothing.
+
+**Standing rule:** every figure states which database or source it came from.
+
+## The hypothesis
+
+`stateHeadPackCoverageCheck.ts` states:
+
+> *"Current-pack spellings that are geographic sub-territories, not distinct
+> states."*
+
+That comment may be wrong. The Prompt 31 A5 evidence points elsewhere:
+
+| Order-book label | Head the data attributes it to |
+|---|---|
+| `UP ( A )` | **A**nant Singh — 14/14 customers, plus coverage and assignments |
+| `UP (AS)` | **A**nuj **S**harma — 8 customers |
+| `UP ( R )` | UTTAR PRADESH attributes to Syed Aqil **R**izvi, 60 customers |
+
+Three labels, three matching initials. And it extends: `RAJASTHAN (N)` →
+**N**arendra Kumar Sharma, who holds open Rajasthan coverage. `KARNATAKA (B)` →
+**B**iju C.O, whom Prashant Onam Naik reports to. `MAHARASTRA L` → **L**alan, who
+holds the 10 Maharashtra distributors. `MAHARASTRA R` → **R**izvi, who holds 149
+Maharashtra dealers and owns Maharashtra 2 in the dashboard.
+
+If this holds, these suffixes encode **who covers the territory**, not where it
+is — and collapsing them to a plain state name destroys head attribution, not
+just geographic detail.
+
+Some are clearly still geographic: `DELHI NCR`, `JAMMU`, `KASHMIR`, `AP`. So the
+vocabulary is mixed, which is worse than either alternative.
+
+---
+
+## Prompt 34
+
+```
+Read-only. Change nothing, register nothing, remap nothing, backfill nothing.
+
+TEST A HYPOTHESIS: the letter suffixes on split-state labels are STATE HEAD
+INITIALS, not geographic sub-territories.
+
+SECTION A - TEST IT SYSTEMATICALLY
+
+A1. For EVERY distinct state label carrying a suffix - in sale_line.state_canon,
+    the order-book source, the State Head Dashboard, and the alias maps - print:
+      - the label exactly as stored
+      - rows, customers and rupee value
+      - the head_canon those rows attribute to, with counts
+      - the state head registered in person_state_coverage for that leaf
+      - the head in customer_assignment for those customers
+
+    Cover at minimum: UP ( A ), UP (AS), UP (S), UP ( R ), MAHARASTRA L,
+    MAHARASTRA R, MAHARASTRA S, MAHARASHTRA 2, DELHI A, DELHI NCR,
+    KARNATAKA (B), RAJASTHAN (N), TAMILNADU (S), JAMMU, KASHMIR, AP.
+
+A2. For each, does the suffix match the first letter or initials of the
+    attributed head? Print a simple yes / no / no-data column. Do not soften a
+    no - a broken pattern is as informative as a confirmed one.
+
+A3. Which labels are clearly GEOGRAPHIC rather than personal? DELHI NCR, JAMMU,
+    KASHMIR and AP look geographic. Confirm, and say whether any label is
+    ambiguous - readable either way.
+
+A4. If the pattern holds, the comment in stateHeadPackCoverageCheck.ts calling
+    these "geographic sub-territories" is wrong. Say so plainly if the evidence
+    supports it. Do not edit the comment.
+
+SECTION B - WHO IS S?
+
+B1. MAHARASTRA S. Which head do its rows attribute to, if any rows exist? If the
+    label appears only in source vocabularies and never in stored data, say so.
+
+B2. Current heads with S initials are Sandeep Dadheech, Sulinder Pal, Sunil Patel
+    and Sunil Mohanty. Do any have Maharashtra coverage, now or historically -
+    in person_state_coverage including end-dated rows, or in any prior snapshot?
+
+B3. Check departed and unrecognised names too: Suresh Nair, S.BABU, and the other
+    State Head folders with no current roster entry. Did any hold Maharashtra?
+
+B4. UP (S) and TAMILNADU (S) also carry S. If the suffixes are initials, are
+    these three the SAME person or three different people sharing a letter? Print
+    the attributed head for each. If they differ, the encoding is ambiguous by
+    design and that needs stating.
+
+SECTION C - WHAT THE COLLAPSE COSTS
+
+C1. Maharashtra holds 13,693 rows and Rs 20.81 crore across FY2025-26 and
+    FY2026-27, all stored as plain MAHARASHTRA. If L, R and S were head markers,
+    that is head attribution lost at ingest, not geography.
+
+    Is head attribution ALSO carried in head_canon on those same rows? If yes,
+    the information survives in a different column and nothing is lost. If no,
+    it is gone. This is the question that decides how serious the collapse was.
+
+C2. Same for UP. UP ( A ), UP (AS) and UTTAR PRADESH are stored distinctly, so UP
+    kept its distinction. Why did UP survive and Maharashtra not? Was Maharashtra
+    collapsed at ingest while UP was preserved, and if so by which code path?
+
+C3. The territoryResolver maps MAHARASHTRA to ["MAH-Lalan", "MAH-Wahid"] with a
+    comment about the Nagpur area. If the suffixes are head initials and R is
+    Rizvi, is MAH-Wahid the same territory as MAHARASTRA R under a former owner?
+    Print whatever exists on Wahid - person, coverage, territory rows, dates.
+
+C4. Does the same question apply to UP? The resolver maps UP (A) to WUP under
+    Lalan, while the data says Anant Singh. If A means Anant, the resolver is not
+    mis-spaced - it is mapped to the wrong person. Confirm which.
+
+SECTION D - IMPLICATIONS, NOT FIXES
+
+Describe only. Change nothing.
+
+D1. If the suffixes are head initials, what breaks in the current design? The
+    alias maps collapse them to plain state names, state_hierarchy registers some
+    as geographic children, and the winner-take-all distributor vote assumes one
+    head per state. Which of those assumptions fails?
+
+D2. Would registering MAHARASTRA L / R / S in state_hierarchy be right under this
+    reading, or would it be encoding people as places a second time? Give the
+    honest answer, not the convenient one.
+
+D3. Does any other field already carry head-per-state properly -
+    person_state_coverage, head_canon, customer_assignment? If a correct
+    structure exists, the suffixes may be a legacy encoding that should be read
+    and discarded rather than preserved.
+
+Report only. Propose no change.
+```
+
+---
+
+## Notes
+
+- A2 is the test. Three labels already fit; sixteen tested at once either
+  confirms the pattern or breaks it, and a broken pattern tells us as much.
+- C1 is the question that decides severity. If `head_canon` carries the head on
+  those same Maharashtra rows, then collapsing `MAHARASTRA L` to `MAHARASHTRA`
+  lost nothing — the head survived in another column. If it does not, ₹20.81
+  crore lost its head attribution at ingest.
+- C4 changes the UP fix again. If A means Anant, then `territoryResolver`'s
+  `"UP (A)" → ["WUP"]` is not a spacing bug with a correct target — it is the
+  wrong person, and correcting the spacing would have routed Anant's customers to
+  Lalan. That was the right call to withdraw it.
+- D2 is deliberately pointed. The instinct will be to register L, R and S as
+  hierarchy children. If they are people, that repeats the original mistake in a
+  more permanent place.
+
+## For the Prayag pack, once this comes back
+
+Query C4 currently asks how many Maharashtra territories exist. If the hypothesis
+holds, the better question is narrower and easier for them to answer:
+
+> Do the letters in MAHARASTRA L / R / S refer to the state heads covering each
+> part — L for Lalan, R for Rizvi? If so, who is S, and is Maharashtra 2 the same
+> as R?
+
+That is a question a sales manager can answer in one line, unlike "how many
+territories are there".
