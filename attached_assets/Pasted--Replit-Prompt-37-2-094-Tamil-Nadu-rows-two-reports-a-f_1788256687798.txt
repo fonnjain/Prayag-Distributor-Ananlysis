@@ -1,0 +1,102 @@
+# Replit Prompt 37 — 2,094 Tamil Nadu rows, two reports, a few hours apart
+
+**Date:** 1 September 2026
+**Scope:** Read-only. Change nothing, restore nothing, delete nothing.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**Send this before Prompt 36 Section B.** The rest of that report is clean and
+Section B is unaffected, but a frozen year appearing to lose rows is worth one
+query first.
+
+## The discrepancy
+
+| Report | Rows | Value |
+|---|---:|---:|
+| Prompt 34, section A1 | **4,373** | **₹5,74,73,327.71** |
+| Prompt 36, section A5 | **2,279** | **₹3,10,75,393.39** |
+
+Difference: **2,094 rows and ₹2,63,97,934.32**.
+
+Both were produced today, hours apart, for `state_canon = 'TAMILNADU (S)'`.
+Prompt 36 checked production *and* development and found 2,279 in all four
+relations. It states explicitly that no superseded rows account for the gap, and
+that every remaining row is **FY2023-24** — a frozen year.
+
+---
+
+## Prompt 37
+
+```
+Read-only. Change nothing. Restore nothing. Delete nothing. Do not "correct" any
+count.
+
+Two reports today gave different figures for state_canon = 'TAMILNADU (S)':
+
+  Prompt 34 A1:  4,373 rows,  Rs 5,74,73,327.71
+  Prompt 36 A5:  2,279 rows,  Rs 3,10,75,393.39
+
+Difference: 2,094 rows, Rs 2,63,97,934.32.
+
+All remaining rows are FY2023-24, which is a frozen year.
+
+1. Re-run the count now, in production and development separately. Print rows,
+   customers, value, fiscal years, version_status breakdown, and the exact
+   predicate used.
+
+2. Print the EXACT query each of the two earlier reports ran. If they used
+   different relations - sale_line versus sale_line_all - or different
+   version_status filters, or a different predicate on state_canon or state_raw,
+   that alone explains it. Check that first; a query difference is the likely
+   answer and the cheapest to confirm.
+
+3. If the queries were equivalent, then rows left the table. In that case:
+     - print every row in sale_line_all for this label including superseded and
+       voided versions, with version_status and the timestamp of each version
+     - check any audit, drift, ingest_run or replacement log for FY2023-24
+       activity in the last 24 hours
+     - name what ran, when, and what it did
+
+4. FY2023-24 is frozen. Does register_month_state or any freeze marker cover
+   FY2023-24, and would it have prevented a deletion or replacement? If a frozen
+   year can lose rows without a guard firing, that is a bigger finding than the
+   rows themselves.
+
+5. Does the FY2023-24 anchor still hold? Print total rows and value for
+   FY2023-24 now, and compare against whatever reconciliation figure exists for
+   that year.
+
+6. Did anything else change in FY2023-24 today? Compare current row counts by
+   state_canon against any snapshot or payload captured earlier today.
+
+Do NOT restore, re-ingest or reconcile anything. If rows are genuinely missing I
+want the evidence intact before anyone decides what to do.
+
+Report only.
+```
+
+---
+
+## Notes
+
+- Question 2 first, and it is probably the answer. `sale_line` is a current-only
+  view while `sale_line_all` holds versions; a predicate on `state_raw` rather
+  than `state_canon` would also give a different population. A methodology
+  difference between two reports is far more likely than a frozen year losing
+  rows.
+- Question 4 is the one that matters if question 2 comes back clean. A frozen
+  year that can lose 2,094 rows without a guard firing is a much larger problem
+  than the rows.
+- The instruction not to restore is deliberate. The standing pattern in this
+  project is that discrepancies get resolved by removing or superseding data
+  rather than preserving both versions and escalating. If rows have gone, the
+  evidence of how needs to survive the investigation.
+
+## Not affected
+
+Prompt 36 Section A is otherwise sound and self-checking. The FY2023-24
+`state_raw` labels — MAHARASTRA L 6,201 rows, R 3,664, S 124 — agree exactly with
+the `head_canon` reconstruction for FY2025-26 and FY2026-27. That result stands
+regardless of how this resolves.
+
+Section B of Prompt 36 is unaffected and can follow once this is answered.
