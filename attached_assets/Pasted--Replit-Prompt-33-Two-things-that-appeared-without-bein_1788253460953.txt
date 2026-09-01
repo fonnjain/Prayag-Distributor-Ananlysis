@@ -1,0 +1,147 @@
+# Replit Prompt 33 — Two things that appeared without being asked for
+
+**Date:** 1 September 2026
+**Scope:** Read-only. Change nothing, load nothing, roll nothing back.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**Send this before anything else.** Two numbers in the last report changed
+without anyone requesting them, and one of them may be an unauthorised load.
+
+---
+
+## Prompt 33
+
+```
+Read-only. Change nothing. Load nothing. Do not roll anything back.
+
+SECTION A - 8,602
+
+The Section B report said:
+
+  "The broader comparison guard currently has an unrelated existing failure
+   because partial August contains 8,602 rows against its 19,417-row floor."
+
+8,602 is EXACTLY the row count of the August Product-Wise order booking file
+from the Prompt 24 dry run:
+
+  attached_assets/Product-Wise-Secondary-Order-Report_29_6569_19-Aug-2026_1787135138176.xlsx
+  8,602 rows, 1 to 19 August 2026, 1,361 orders, Rs 5,64,03,177
+
+Prompt 24 confirmed that file had never been loaded and that
+secondary_order_line and secondary_order_upload were both empty. Prompt 26 said
+it should not be loaded until the partial-month label exists.
+
+A1. Print the current row count of secondary_order_line and
+    secondary_order_upload in PRODUCTION. If either is non-zero, print every
+    upload lineage record with timestamp, operator, source file name and hash.
+
+A2. Same two counts in DEVELOPMENT.
+
+A3. Which table is the comparison guard counting when it reports 8,602 rows for
+    partial August? Name the table and the query. If it is not
+    secondary_order_line, what is it and why does it match that file exactly?
+
+A4. If the file HAS been loaded: when, by what entry point, and was it approved?
+    Do not roll it back - I want to know what happened before deciding.
+
+A5. If it has NOT been loaded: explain the 8,602 coincidence precisely. A guard
+    reading a file directly off disk would explain it, and that is worth knowing
+    on its own.
+
+A6. What is the 19,417-row floor, where is it defined, and what period does it
+    assume? A floor that fails on a partial month is behaving correctly, but I
+    want to see whether it knows the month is partial or simply counts rows.
+
+SECTION B - FY2026-27 GREW BY Rs 24.44 CRORE
+
+The same report gives FY2026-27 sale_line as 54,524 rows / Rs 1,29,36,10,119.14.
+The figure used all session was 44,025 rows / Rs 1,04,91,71,949.45 for Apr-Jul.
+
+That is 10,499 new rows and Rs 24,44,38,169.69.
+
+B1. Confirm the current FY2026-27 row count and value, broken down by month
+    Apr through Aug.
+
+B2. When did the August rows arrive, through what path, and is that path
+    scheduled or operator-driven?
+
+B3. The whole session has assumed the register is frozen at July. Is August now
+    open, partially loaded, or complete? State which plainly.
+
+B4. What does this move?
+      - the Growth page comparison, which showed Rs 104.91 Cr vs Rs 100.89 Cr
+      - the Apr-Jul discount-off-MRP basis
+      - the secondary KPI period labels just changed in Prompt 28 and 30
+      - anything else reading an Apr-Jul window
+    For each, say whether it now includes August and whether its label is still
+    accurate.
+
+B5. Do the Prompt 28 and Prompt 30 period labels still derive correctly? They
+    were built to move by themselves when a month closes. If August primary data
+    has arrived but August secondary is still not_yet_recorded, the labels should
+    be unchanged. Confirm they are.
+
+B6. Does the FY2025-26 frozen anchor still hold at 145,613 rows and
+    Rs 3,60,99,53,808.51? The report says yes. Confirm independently.
+
+SECTION C - THE FIVE REMAINING BROKEN OVERRIDE TARGETS
+
+Reported but not changed:
+
+  DELHI NCR, DELHI A, DELHI (NCR)  ->  DELHI
+  J&K, JAMMU, KASHMIR              ->  JAMMU AND KASHMIR
+  AP                               ->  ANDHRA PRADESH
+  UP ( A ), UP (AS)                ->  EAST U.P
+  UP (S)                           ->  WEST U.P
+
+state_hierarchy holds DELHI A and DELHI NCR as leaves with state_parent 'Delhi'.
+The override targets 'DELHI' - a parent name, in different case. Same shape for
+Jammu and Kashmir and Andhra Pradesh. EAST U.P and WEST U.P are registered
+nowhere at all.
+
+C1. For each of the five, run the same analysis Uttarakhand got: how many
+    customers currently fail to match in each of the three paths, and how many
+    would match if the target were corrected?
+
+C2. Are the overrides deliberately collapsing leaves to parents? If so, the
+    parent names need registering, or the overrides need to target leaves. Which
+    is intended? Answer from comments or commit history, not preference.
+
+C3. Do NOT fix any of them. The UP pair in particular is blocked - production
+    data says those customers are Anant Singh's, while WUP belongs to Lalan and
+    EUP to Wahid.
+
+Report only.
+```
+
+---
+
+## Notes
+
+- A1 is the question. If `secondary_order_line` is non-zero in production, a load
+  happened that nobody authorised, and I want the lineage before anyone decides
+  what to do about it. A4 says explicitly not to roll it back — the file is
+  validated and clean, so an unauthorised load is a process problem rather than a
+  data problem, and reversing it would destroy the evidence.
+- B3 matters for everything else in flight. The session has run on "frozen at
+  July" throughout. If August is now open, several figures quoted today have
+  moved and the partial-month work in Prompt 26 becomes more urgent, not less.
+- B5 is a live test of the derivation we just shipped. The labels were built to
+  move by themselves. If August primary has arrived while August secondary is
+  still unrecorded, they should be unchanged — that would confirm the derivation
+  works.
+- C1 sizes the remaining defect. Uttarakhand went from 0 to 1,409 matchable
+  customers on a one-word fix. Five more states carry the same shape and nobody
+  knows how many customers sit behind them.
+
+## Also outstanding from the last report
+
+Up to **1,409 Uttarakhand customers** can now resolve to Anant Singh through
+paths 1 and 2. No backfill ran, so nothing has moved. But the next time the
+resolver runs, that assignment event happens. Worth watching for rather than
+discovering afterwards.
+
+The two disposable-server guard workflows failed again, this time on a
+"build-worker race". That is Prompt 17, still unanswered — `NODE_ENV` is unset on
+the validation server and the 23 August readiness fix did not take.
