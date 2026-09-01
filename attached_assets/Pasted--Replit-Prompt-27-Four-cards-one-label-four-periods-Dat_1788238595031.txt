@@ -1,0 +1,158 @@
+# Replit Prompt 27 — Four cards, one label, four periods
+
+**Date:** 1 September 2026
+**Scope:** Read-only. No code change, no data change.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**The headline:** the Target card shows ₹159.09 Cr and Sales Received shows
+₹84.63 Cr. Dividing those two visible figures gives **53.19%**. The Achievement
+card shows **78.74%**, computed against ₹107.48 Cr — a denominator that appears
+nowhere on the page. That is a 25.5 percentage point gap and ₹51.62 crore of
+difference between what a reader can derive and what is displayed.
+
+---
+
+## Prompt 27
+
+```
+Read-only. Change nothing.
+
+SECTION A - THE ACHIEVEMENT DENOMINATOR IS NOT ON SCREEN
+
+  Target card              Rs 1,59,09,68,944.56   Apr-Sep plans
+  Sales Received card      Rs   84,63,00,457.14   Apr-Jul actuals
+  Achievement card         78.7402%
+  Actual denominator       Rs 1,07,48,01,262.85   Apr-Jul recorded-month plan
+
+84.63 / 159.09 = 53.19%. 84.63 / 107.48 = 78.74%. A state head checking the
+arithmetic on their own dashboard gets 53% and concludes the page is wrong.
+
+A1. Confirm the Achievement denominator is the recorded-month plan and that this
+    figure is not rendered anywhere on the page. Name the field and the code path.
+
+A2. Why does the Target card use Apr-Sep while Achievement uses Apr-Jul? Is that
+    deliberate, or an artefact of the page requesting Apr-Sep because primary
+    data needs the open month?
+
+A3. Does any other page or export show these two numbers together with a
+    percentage that cannot be derived from them? Search for the same pattern
+    elsewhere.
+
+A4. What is the smallest change that would let a reader reconcile the figures -
+    showing the recorded-month plan, or relabelling the cards, or both? Describe
+    only. Do not build it.
+
+SECTION B - FOUR PERIODS UNDER ONE LABEL
+
+  Target                   Apr-Sep   includes a plan for a month barely started
+  Order Booking secondary  Apr-Aug
+  Sales Received           Apr-Jul   August marked not yet recorded
+  Achievement              Apr-Jul
+
+All four render under "YTD Apr-Aug", which is correct for one of them.
+
+B1. Confirm each card's true period from the code. Print the filter each uses.
+
+B2. Sales Received (Rs 84.63 Cr, Apr-Jul) exceeds Order Booking (Rs 79.84 Cr,
+    Apr-Aug) by Rs 4.78 crore, over a SHORTER period. Explain how. If sales can
+    be received against bookings from a prior year, say so - side by side under
+    one label this reads as impossible.
+
+B3. Does the Target card include September plan because the server always returns
+    plans for every requested month, including open and future ones? If a request
+    ran in March, would the Target card include the whole year?
+
+B4. Is there any period label per card, or only the one heading? What would each
+    card's honest label be?
+
+SECTION C - TWO TARGET FIELDS, AND WHO COUNTS AS A LOW PERFORMER
+
+The Data table renders targetSecondary. The KPI total prefers secondaryPlan.
+
+M. Raman: targetSecondary = Rs 0, secondaryPlan = Rs 12,30,000, same period.
+Because the band uses targetSecondary, he falls in noTarget and is therefore
+invisible to Low Performers. Had it used secondaryPlan he would be in it.
+
+C1. Print both fields for all 189 members. How many have one populated and the
+    other zero or null? Give the count and the total rupees involved.
+
+C2. Which field feeds the achievement band, which feeds the Data-table Target
+    column, and which feeds the KPI total? Name the three separately.
+
+C3. 52 of 189 members are in noTarget - 27.5% of the roster. Low Performers
+    selects only from below25 and below50, so those 52 cannot appear regardless
+    of performance. Confirm. How many of the 52 have a non-zero secondaryPlan?
+
+C4. The Low Performers TAB does not exclude primary-role or LEFT members; the
+    KPI CARD does. Today both give 35 because no such member happens to fall in
+    the bottom bands. Confirm that is coincidence rather than design, and say
+    what would happen if a LEFT member scored below 50%.
+
+C5. M. Raman left on 7 May 2026 and still appears first in the Data tab sorted by
+    achievement. Amruth Shivappa Banakar left on 1 June 2026 and appears third.
+    Are LEFT members included in this table by design?
+
+SECTION D - A THIRD SIGHTING OF THE SNAPSHOT DIVERGENCE
+
+Amruth Shivappa Banakar shows order booking of Rs 1,83,589.59 on this page. The
+Deep Dive snapshot shows Rs 0 for the same person, same year. Prompt 23 recorded
+the same split.
+
+D1. Confirm both figures and name the source each surface reads.
+
+D2. How many of the 189 members show a different order booking on this page than
+    in the Deep Dive snapshot? Give the count and total absolute difference.
+
+D3. If that count is large, it is the Prompt 23 gap surfacing on a second screen.
+    Say whether it is the same underlying divergence or a separate one.
+
+SECTION E - WHERE THE TARGETS ACTUALLY COME FROM
+
+member_targets has zero rows and the Prayag Target Master returns zero rows, yet
+Rs 159.09 Cr of target is displayed.
+
+E1. Confirm the displayed target comes from the State Head Dashboard plan columns
+    rather than either of those two sources. Name the field and path.
+
+E2. So there are two target systems - a central one that is empty, and a
+    dashboard plan that is populated and drives every figure on this page.
+    Confirm, and state which one any other surface uses.
+
+E3. Prayag's CRM workbook places targets in PLAN 26-27 inside each state head
+    folder. Is the dashboard plan column fed from those sheets, or entered
+    directly into the dashboard? This decides what we ask Prayag.
+
+Report only. Change nothing.
+```
+
+---
+
+## Notes
+
+- Section A is the one that will cost credibility fastest. Everything else is a
+  labelling problem a careful reader could work around. This one produces a
+  number that cannot be checked, on a page whose whole purpose is being checked.
+- B2 deserves a real answer rather than a period explanation. Sales exceeding
+  bookings over a shorter window may be entirely legitimate — receipts against
+  prior-year orders — but nothing on screen says so.
+- C3 is the structural finding. Fifty-two members, 27.5% of the roster, cannot
+  appear in Low Performers no matter how they perform. A tab that silently
+  excludes a quarter of the population is worse than one that shows nothing.
+- Section E decides a question going to Prayag. Query D2 in their pack currently
+  asks them to confirm PLAN 26-27 is the target source. If the dashboard plan is
+  already fed from those sheets, that query needs rewording; if plans are typed
+  straight into the dashboard, it needs rewording differently. I am holding the
+  revision until E3 comes back.
+
+## Still open
+
+- **Prompt 21** — visit rates five to eight times higher for departed members.
+- **Prompt 22** — the 403 on all five closed-year SKU workbooks.
+- **Prompt 23** — ₹10.51 crore snapshot-versus-monthly divergence.
+- **Prompt 26** — partial-month label and unresolved-row disclosure, before the
+  August order-booking file is loaded.
+- **Prompt 10** — five disagreeing state alias maps, and `"UP (A)"`.
+- **Prompt 11** — the winner-take-all distributor vote, and the 130-row table.
+- **Prompts 16 and 17** — the discount basis, and the readiness fix.
+- The `costRatioSales` guard fix.
