@@ -75,6 +75,9 @@ type Member = {
   targetPrimaryAnnual: number | null;
   /** Annual business-plan target (pre-split). */
   targetBusinessPlanAnnual: number | null;
+  monthlyOrderBooked: (number | null)[] | null;
+  monthlySalesReceived: (number | null)[] | null;
+  monthlyNotYetRecorded: boolean[] | null;
 };
 
 type DashboardMeta = {
@@ -125,6 +128,8 @@ type DashboardMeta = {
     ytdAchievement: number | null;
     totalDealers: number;
     sheetTotals: { orderBooked: number | null; salesReceived: number | null } | null;
+    /** Zero-based fiscal month indices that are closed but awaiting Sales Received. */
+    arrearsMonths?: number[];
   } | null;
   /** Attribution diagnostics — null until the distributor-TM map is warm. */
   primaryAttributionDiagnostics?: {
@@ -192,6 +197,54 @@ const PERIODS: Period[] = [
 const FISCAL_MONTH_NAMES = [
   "Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar",
 ] as const;
+
+function fiscalMonthSpan(indices: number[]): string {
+  if (indices.length === 0) return "No recorded months";
+  const sorted = [...new Set(indices)].sort((a, b) => a - b);
+  const chunks: string[] = [];
+  let start = sorted[0];
+  let end = sorted[0];
+
+  for (const index of sorted.slice(1)) {
+    if (index === end + 1) {
+      end = index;
+    } else {
+      chunks.push(
+        start === end
+          ? FISCAL_MONTH_NAMES[start]
+          : `${FISCAL_MONTH_NAMES[start]}–${FISCAL_MONTH_NAMES[end]}`,
+      );
+      start = end = index;
+    }
+  }
+  chunks.push(
+    start === end
+      ? FISCAL_MONTH_NAMES[start]
+      : `${FISCAL_MONTH_NAMES[start]}–${FISCAL_MONTH_NAMES[end]}`,
+  );
+  return chunks.join(", ");
+}
+
+function monthsWithEnteredValues(
+  rows: Member[],
+  from: number,
+  to: number,
+  kind: "orderBooked" | "recorded",
+  arrearsMonths: number[] = [],
+): number[] {
+  const months: number[] = [];
+  for (let index = from - 1; index <= to - 1; index++) {
+    const present = rows.some((row) =>
+      kind === "orderBooked"
+        ? row.monthlyNotYetRecorded?.[index] === false ||
+          (row.monthlyOrderBooked?.[index] ?? 0) > 0 ||
+          arrearsMonths.includes(index)
+        : row.monthlyNotYetRecorded?.[index] === false,
+    );
+    if (present) months.push(index);
+  }
+  return months;
+}
 
 function openFiscalMonthsInPeriod(fy: string, fromFm: number, toFm: number): string[] {
   const fyStart = parseInt(fy.slice(0, 4), 10);
@@ -734,6 +787,29 @@ export default function StateHeadDashboard() {
   // openInPeriod uses the primary period (which includes the current open month
   // in YTD mode) so the banner fires whenever primary figures are provisional.
   const openInPeriod = openFiscalMonthsInPeriod(fy, period.from, primaryMonthTo);
+  const targetCardPeriod = fiscalMonthSpan(
+    Array.from(
+      { length: primaryMonthTo - period.from + 1 },
+      (_, i) => period.from - 1 + i,
+    ),
+  );
+  const enteredOrderBookingPeriod = fiscalMonthSpan(
+    monthsWithEnteredValues(
+      data?.rows ?? [],
+      period.from,
+      primaryMonthTo,
+      "orderBooked",
+      data?.meta.secondaryTotal?.arrearsMonths ?? [],
+    ),
+  );
+  const recordedSalesPeriod = fiscalMonthSpan(
+    monthsWithEnteredValues(data?.rows ?? [], period.from, primaryMonthTo, "recorded"),
+  );
+  const achievementBasis =
+    data?.meta.secondaryTotal?.planRecorded != null &&
+    data.meta.secondaryTotal.salesReceived != null
+      ? `${fmtCr(data.meta.secondaryTotal.salesReceived)} sales ÷ ${fmtCr(data.meta.secondaryTotal.planRecorded)} recorded-month plan`
+      : undefined;
 
   return (
     <div className="flex flex-col gap-4 p-4 pb-8">
@@ -859,11 +935,15 @@ export default function StateHeadDashboard() {
       {data && (
         <div className="flex flex-wrap gap-3">
           <KpiTile label="Members" value={fmtN(kpi.members)} sub={`${kpi.noTarget} no target`} />
-          <KpiTile label={`Target (${period.label})`} value={fmtCr(kpi.target > 0 ? kpi.target : null)} />
+          <KpiTile
+            label="Target Plan"
+            value={fmtCr(kpi.target > 0 ? kpi.target : null)}
+            sub={targetCardPeriod}
+          />
           <KpiTile
             label="Order Booking (Secondary)"
             value={hasSecondaryData ? fmtCr(kpi.booking) : "—"}
-            sub={`${secPeriodLabel}${data.meta.orderBookingSource ? ` · ${data.meta.orderBookingSource}` : ""}`}
+            sub={`${enteredOrderBookingPeriod} entered${data.meta.orderBookingSource ? ` · ${data.meta.orderBookingSource}` : ""}`}
           />
           <KpiTile
             label="Sales Received"
@@ -872,12 +952,12 @@ export default function StateHeadDashboard() {
                 ? fmtCr(data.meta.secondaryTotal!.salesReceived)
                 : "—"
             }
-            sub={`${secPeriodLabel} · Secondary, state head dashboard`}
+            sub={`${recordedSalesPeriod} recorded · Secondary, state head dashboard`}
           />
           <KpiTile
             label="Achievement"
             value={hasSecondaryData && kpi.achPct != null ? fmtPct(kpi.achPct) : "—"}
-            sub={`${secPeriodLabel} · Sales Received ÷ Plan${kpi.achClosedMonthsOnly ? " · vs. recorded months' plan" : ""}`}
+            sub={`${recordedSalesPeriod} recorded basis${achievementBasis ? ` · ${achievementBasis}` : ""}`}
           />
           <KpiTile label="Low Performers" value={fmtN(kpi.lowPerf)} sub={`<${lowPerfThreshold}% threshold`} />
           {(() => {
