@@ -1,0 +1,163 @@
+# Replit Prompt 18 — The CRM reference workflow, and three defects it exposes
+
+**Date:** 31 August 2026
+**Scope:** Read-only. No code change, no connection, no load.
+
+**Background:** Prayag gave us `CRM_Working_Sheets.xlsx`, the reference workflow
+the whole reporting chain is built from. It maps each figure to a named file and
+a named column. Comparing it against what the app actually reads turns up three
+things that do not match, plus one live defect found separately.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## Prompt 18
+
+```
+Read-only. Change nothing, connect nothing, load nothing.
+
+SECTION A - PS CODE NUMBERING MAY BE CROSSED
+
+Prayag's CRM reference workflow names four distinct PS Code reports:
+
+  PS Code 2  ->  Order Booked amount and count
+  PS Code 3  ->  Secondary order booking segment-wise, flowing into Data,
+                 then Report 1, Report 2, Report 3
+  PS Code 4  ->  Segment Report 25-26
+  PS Code 8  ->  Category-wise Report 25-26
+
+The July 2026 load ran through pscode3Jul26.ts reading "PSCode 3 NEW REPORTS
+JULY2026". But the reference says Order Booked comes from PS Code 2.
+
+A1. Which PS Code report does each loader and reader in the app actually
+    consume? List every PS Code reference in the codebase with the file it
+    reads and the figure it produces.
+
+A2. Is anything in the app treating PS Code 3 output as order booking? If the
+    reference expects PS Code 2 for that figure, we may be reading the segment
+    report where a different report was intended.
+
+A3. Are PS Code 4 and PS Code 8 connected at all? The reference uses them for
+    Segment Report 25-26 and Category-wise Report 25-26.
+
+A4. Print what each PS Code source contains at column level, enough to tell
+    whether they are genuinely different reports or the same data under
+    different names.
+
+SECTION B - VISITS AND WORKING DAYS ALREADY EXIST
+
+An earlier report said Visits and Working Days are "not present in the HR CSV;
+SFA source required". But live figures exist - Manas Ranjan Das shows 47 working
+days and 51 visits; Sudipta Thom shows 94 and 151.
+
+Prayag's reference says these come from named Drive reports, not an SFA system:
+
+  Distributor 26-27              Distributor Visit Report 26-27, column H1
+  Direct Dealers 26-27           Distributor Visit Report 26-27, column H2
+  Distributor & Dealer Visits    Distributor Visit Report 26-27, column H4
+  Retailers 26-27                Retailer Report 26-27, column A3
+  Retailer Visits                Retailer Report 26-27, column AB4
+
+B1. Where do the working-day and visit figures for those two members actually
+    come from right now? Name the source and the code path.
+
+B2. Are Distributor Visit Report 26-27 and Retailer Report 26-27 connected in
+    any form? If yes, since when and for which members?
+
+B3. How many of the 173 active members have visit and working-day data, and how
+    many have none? If it is partial, what determines who has it?
+
+B4. The app tells users these fields need an SFA export. Given B1 to B3, is that
+    message accurate? Same question as the CTC message - if data is arriving
+    from a source the message does not mention, the message is misleading.
+
+SECTION C - SIXTEEN DEPARTED MEMBERS ARE SELECTABLE
+
+The comparison entity endpoint returns 189 member names because it does not
+filter out the 16 marked LEFT. The semantic active count is 173.
+
+C1. Confirm the endpoint returns LEFT members. Name the endpoint and the line
+    where the filter is absent.
+
+C2. What happens if a user selects one of those 16? Does the comparison run,
+    return empty, or error?
+
+C3. Which other endpoints, selectors, exports or AI payloads use the same
+    unfiltered member list? I want the full list, not this one endpoint.
+
+C4. Do any of the 16 have FY2026-27 data that would appear if selected? If a
+    departed member shows figures, which period do they cover?
+
+C5. This gives us a sixth member count - 173, 178, 189, 190, 216, 609. Add 173
+    to the reconciliation table with its exact definition.
+
+SECTION D - TARGETS AND ORDER BOOKING MAY HAVE BEEN LOOKED FOR IN THE WRONG PLACE
+
+The reference workflow says:
+
+  Total Dealer 26-27          Plan 26-27, column A3
+  Business Plan 26-27         Plan 26-27, column J8
+  Monthly Plan amount         Plan 26-27, column Z5
+  Secondary Order Booked      Retailer Report 26-27, column Z4
+
+PLAN 26-27 sits inside each State Head's own folder, and the reference notes it
+is entered by team members. Secondary Order Booked comes from the Retailer
+Report, not a separate secondary order booking workbook.
+
+D1. What does the app currently read for targets, and what path does it look in?
+    Confirm it is the central Prayag Target Master rather than per-state-head
+    PLAN sheets.
+
+D2. What does FY2026-27 secondary-order autodiscovery search for - a filename
+    pattern, a folder, a MIME type? Print the exact search criteria. If it is
+    looking for a segment-wise workbook, and 2026-27 routes that figure through
+    the Retailer Report instead, autodiscovery will never succeed.
+
+D3. Are any State Head folders currently accessible to the app? Print what is
+    reachable under the State Heads path.
+
+D4. Do NOT connect anything or change any path. These are questions for Prayag
+    first, and they are already in the pack going to them.
+
+Report only.
+```
+
+---
+
+## Notes
+
+- Section A is the one that could invalidate a figure rather than just a message.
+  If order booking is being read from the wrong PS Code report, the number is
+  wrong rather than missing, and wrong is harder to notice.
+- Section C is a live user-facing defect and the smallest fix on the board, but
+  it is still a code change and belongs in its own prompt afterwards.
+- Section B and Section D exist mainly to stop us connecting the wrong thing.
+  Both have matching queries in the Prayag pack, and Prayag should answer before
+  anything is wired up.
+
+## Confirmed since the last prompt, no action needed
+
+- All 147 departed MRP codes check out against Prayag's own master: 139 are on
+  the discontinued sheet, and the remaining 8 are the orphan `PS****` codes now
+  queried with Prayag. **Not one is still an active product.** The 44 sold codes
+  carrying ₹14.24 lakh are genuinely discontinued items that sold before
+  withdrawal — normal, not a defect.
+- The no-fallback design is correct and worth keeping: `BSC-09` still exists in
+  legacy `mrp_master` but is not substituted into the active catalogue, and the
+  calculator returns an explicit 404 rather than zero.
+
+## Worth a small fix when you are ready
+
+A sold code with no active MRP is excluded from the MRP catalogue **including
+from the total-code denominator**, with nothing on screen to say so. SKU Overview
+(`not_in_authority`) and the Product Reports catalogue-gap card already do this
+properly. The pattern exists; the catalogue and search surfaces do not use it.
+
+## Still open
+
+- **Prompt 10** — five disagreeing state alias maps, and `"UP (A)"`.
+- **Prompt 11** — the winner-take-all distributor vote, and the 130-row table.
+- **Prompt 12 Part Two** — pages reading tables populated only in development.
+- **Prompt 16** — the discount figure recomputed on its original basis.
+- **Prompt 17** — why the 23 August readiness fix did not take.
