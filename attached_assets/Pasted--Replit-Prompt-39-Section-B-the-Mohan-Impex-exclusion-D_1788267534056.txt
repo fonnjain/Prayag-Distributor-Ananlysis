@@ -1,0 +1,173 @@
+# Replit Prompt 39 — Section B, the Mohan Impex exclusion
+
+**Date:** 1 September 2026
+**Scope:** Code change. Section A is answered and the scope is settled.
+
+**Standing rule:** every figure states which database or source it came from.
+
+## What Section A established
+
+**Years:** FY2024-25 (1,641 rows, ₹30,36,12,117.21) and FY2025-26 (1,210 rows,
+₹35,73,37,364.63). Nothing in FY2023-24 or FY2026-27. ₹66.09 crore total.
+
+**Identity:** one exact string, `MOHAN IMPEX`, no variants. No row in
+`customer_master`, `distributor_identity`, `customer_assignment`,
+`secondary_register_line` or `secondary_sku_line`. He exists only as a customer
+string in the primary register.
+
+**Classification:** `state_canon`, `head_canon`, `state_raw` and `is_territory`
+are all NULL on every one of the 2,851 rows.
+
+**Anchors:** the frozen anchor query runs on `sale_line_all` by fiscal year and
+version status, with no state, head or analytical filter. An exclusion applied
+downstream will not disturb it.
+
+## Two things I checked myself and corrected
+
+**The scheme engine is NOT exposed.** I warned that the Nudge engine accepts
+`is_territory IS NULL` and could therefore include Mohan in slab positions. It
+does accept that clause — but `resolveSchemeForState` opens with
+`if (!stateCanon) return null;` and the caller does `if (!schemeId) continue;`.
+Mohan's NULL state drops him two steps later, at both call sites, lines 490 and
+1028. **No scheme, slab, achievement or ROI figure moves.**
+
+So this is purely a reporting change. Nothing commercial is affected.
+
+**The Growth number moves ten points, in the direction that matters.** Including
+Mohan flattered FY2025-26 by 1.16 points and now depresses FY2026-27 by 10.48
+points. Same account, opposite distortions. That inconsistency is the reason to
+exclude, not the improved figure.
+
+| Apr–Aug | FY2026-27 | FY2025-26 | YoY |
+|---|---:|---:|---:|
+| With Mohan | ₹129.36 Cr | ₹126.25 Cr | +2.46% |
+| Without | ₹129.36 Cr | ₹114.54 Cr | **+12.94%** |
+
+---
+
+## Prompt 39B
+
+```
+Code change. Implement the exclusion exactly as scoped below. Show me the diff
+before applying.
+
+DECISION
+Mohan Impex is excluded from all ANALYSIS. The data stays stored and queryable.
+Apply it to every fiscal year, symmetrically.
+
+1. THE DATA STAYS
+   No row deleted, voided, superseded or moved. All 2,851 rows remain in
+   sale_line_all at version_status current, fully queryable.
+
+2. THE FROZEN ANCHORS DO NOT MOVE
+   FY2025-26 must continue to verify at 145,613 rows and Rs 3,60,99,53,808.51.
+   FY2024-25 must continue to verify at 141,201 rows and Rs 3,41,14,33,805.25.
+
+   Section A confirmed the anchor query does not use the analytical filter path.
+   Do not insert the exclusion into sale_line, sale_line_current, version-status
+   logic, frozen-anchor SQL, ingest reconciliation, or global audit row counts.
+   Doing so would make a frozen year fail its own valid anchor.
+
+   After applying, run the anchor verification and print the result. It must pass.
+
+3. THE MECHANISM
+   Follow your Section A recommendation: an orthogonal, database-backed,
+   effective-dated analysis policy. NOT the Non-territory / Project / Govt
+   bucket - that is a channel classification and the source evidence does not
+   support it. NOT a hardcoded customer name in a predicate.
+
+   Mohan has no customer_master row, so a stable identity has to exist for the
+   policy to attach to. Create the minimum needed - do not invent state, head,
+   territory or channel values for him. They are NULL in the source and must
+   stay NULL.
+
+   Record at least: stable identity, excluded_from_analysis, reason,
+   effective-from and effective-to, who set it, when. Adding a second excluded
+   customer later must be a data operation, not a code change.
+
+4. ONE SHARED PREDICATE
+   Apply the exclusion at the analytical service boundary, once, so every
+   consumer inherits it. Do not scatter it across call sites.
+
+   Note an existing inconsistency to resolve while you are here: the default AI
+   Growth SQL already excludes Mohan by accident, because a
+   head_canon != project-head predicate evaluates false against SQL NULL. So the
+   Growth dashboard includes him today and the AI Growth report does not, with
+   nobody having decided that. Both must now exclude him deliberately, through
+   the same policy.
+
+5. THE EXCLUSION MUST BE VISIBLE - THIS IS NOT OPTIONAL
+   Every surface showing an FY2024-25 or FY2025-26 analytical total must
+   disclose it. On the Growth page, show BOTH figures:
+
+     +12.94%   on comparable business
+     +2.46%    including Mohan Impex, an unattributed account that traded to
+               March 2026
+
+   Derive the wording and the excluded amount from the policy record, not
+   hardcoded text. The same disclosure must appear in every export - Growth,
+   Company Reports, Comparison, distributor and state-head reports, warning
+   exports, and AI-generated PDF/PPT/Excel.
+
+   An export showing Rs 325.26 crore with no note is as misleading as an
+   undisclosed screen.
+
+6. RETURN EXCLUSION METADATA
+   Every affected payload should carry: stored total, analytical total, excluded
+   rows, excluded value, reason, policy effective period. AI narratives must not
+   be able to explain a policy-driven decline as commercial performance.
+
+DO NOT:
+  - classify Mohan as project, non-territory, or any channel
+  - write any state, head, territory or is_territory value onto his rows
+  - change any Red Alert, scheme, warning or threshold logic - Section A and my
+    own check confirm none of them reach him
+  - change named-state or named-head figures, which never included him
+
+AFTER APPLYING, print:
+  - FY2024-25 and FY2025-26 stored anchor and analytical total, side by side
+  - the anchor verification result for both years, which must pass
+  - the Growth page as rendered, with both percentages and the disclosure
+  - every surface whose figure changed, before and after
+  - confirmation that named-state and named-head totals are unchanged
+  - confirmation that no scheme, alert or warning output moved
+```
+
+---
+
+## Notes
+
+- Requirement 2 is the one that could break something. If the exclusion leaks
+  into the anchor path, a frozen year starts failing verification and it will
+  look like data loss rather than a filter.
+- Requirement 5 is the one I would not compromise on. A total that quietly moves
+  from ₹360.9954 Cr to ₹325.2616 Cr is indistinguishable from a bug. Showing both
+  figures also protects whoever quoted 2.46% yesterday.
+- Requirement 4's aside matters: two surfaces already disagree about Mohan by
+  accident. Making the exclusion explicit resolves that as a side effect, and
+  leaving it would mean the dashboard and the AI report keep giving different
+  answers for reasons nobody chose.
+
+## Separate from this change, and more important
+
+**A ₹35.73 crore account went to zero and nobody has raised it.** Mohan Impex
+appears in November 2024, grows from ₹30.36 Cr to ₹35.73 Cr, and stops in March
+2026. That is the largest single commercial event in the data and the exclusion
+would bury it.
+
+Somebody should find out why — contract ended, moved to a competitor, one-off
+project, or now booked under a different name. "Impex" suggests an export or
+trading house, which would also confirm whether excluding him is the right
+permanent policy or a temporary fix.
+
+Worth adding to the Prayag pack as a plain question: **who is Mohan Impex, who
+serviced them, and why did they stop in March 2026?**
+
+## Still unresolved after this
+
+**₹12.25 crore across 244 customers** remains unclassified in FY2025-26 — 3.8% of
+the reduced baseline. 51 customers worth ₹4.18 crore have unique state evidence
+in FY2026-27 history or `customer_master` and could be classified as a derived
+reading. The other 194, worth ₹8.07 crore, have none.
+
+The state-comparison artefact shrinks from 13.3% to 3.8%. It does not disappear.
