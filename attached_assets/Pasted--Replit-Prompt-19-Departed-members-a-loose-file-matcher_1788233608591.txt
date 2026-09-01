@@ -1,0 +1,180 @@
+# Replit Prompt 19 — Departed members, a loose file matcher, and two wrong messages
+
+**Date:** 1 September 2026
+**Scope:** Read-only. No code change, no connection, no load, no rename.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**Context:** Prompt 18 closed the PS Code worry — order booking is not read from
+PS Code 3. What it opened is larger. Sixteen departed members carry current-year
+figures and flow through ten surfaces unfiltered; the FY2026-27 order-booking file
+matcher will accept almost any spreadsheet dropped in a folder; and two source
+messages tell users data is missing when it is fully present.
+
+---
+
+## Prompt 19
+
+```
+Read-only. Change nothing, connect nothing, load nothing, rename nothing.
+
+SECTION A - DEPARTED MEMBERS CARRYING CURRENT-YEAR FIGURES
+
+Twelve of the sixteen LEFT members hold FY2026-27 figures: Rs 1,21,78,273.95 of
+order booking and Rs 76,93,909.06 of sales. Fifteen of sixteen show positive
+visits and working days for the current year.
+
+A1. For each of the 16, print: name, state head, leaving date if recorded, and
+    their FY2026-27 order booking, sales, visits and working days.
+
+A2. The snapshot does not retain month lineage for cumulative values. Go to the
+    underlying monthly source instead. For each of the 12 with figures, print
+    their FY2026-27 booking and sales BY MONTH. I need to know whether the money
+    stops at their leaving date or continues after it.
+
+    If it continues after they left, that is a different problem from year-to-date
+    accumulation and needs saying plainly.
+
+A3. Comparison head aggregation iterates every member under a head with no LEFT
+    filter. For each of the 12 heads, print their aggregate WITH and WITHOUT
+    departed members. Show the difference in rupees and as a percentage.
+
+    A head compared across a full year against someone who left in May is being
+    measured against an incomplete denominator.
+
+A4. Of the ten unfiltered surfaces you listed, which ones present a departed
+    member with NO visual indication of their status? Sales People and the State
+    Head Dashboard dim and label them. Which do not?
+
+A5. Do AI batch payloads, AI artifact generation or warning construction produce
+    output naming a departed member as though active? Give one concrete example
+    if so.
+
+A6. Jagdev and SANOJ M. both appear here - Jagdev at Rs 19.18 lakh, SANOJ M. at
+    Rs 15.24 lakh. Both also appear in the FY2025-26 unmatched order-booking
+    population of 58 names worth Rs 13.51 crore. How many of the 58 are the same
+    people as the 16 LEFT members, or as members who left in earlier years?
+
+    If the leaver population and the unmatched population are largely the same
+    people, that reframes the Rs 13.51 crore entirely.
+
+SECTION B - THE FILE MATCHER IS TOO LOOSE
+
+resolveOrderFileId() lists the configured folder and selects the FIRST filename
+containing "2026-27", "26-27" or "2026". It does not require the name to contain
+"Secondary Order Booking Segment Wise". It ignores nested folders and considers
+only Google-native spreadsheets, not XLSX.
+
+B1. Confirm that predicate and print the exact matching code.
+
+B2. If someone placed ANY 2026-27 spreadsheet in that folder - a working copy, a
+    draft, a personal file - would it silently become the order-booking source?
+    Yes or no.
+
+B3. Is there any validation after selection - a header check, a sheet-name check,
+    a row-count sanity check - that would reject a wrongly matched file? If the
+    only validation is the "Data Sheet" tab name, say so.
+
+B4. Who has write access to that folder? If the answer is not available from the
+    app, say so rather than guessing.
+
+B5. The same fallback path expects uploads/secondary-order-booking-2026-27.xlsx.
+    Does that file exist? If someone uploaded a file there, would it be used
+    without further checks?
+
+B6. Are there other autodiscovery resolvers in the codebase using similarly loose
+    filename matching? List them with their predicates.
+
+SECTION C - TWO MESSAGES THAT SAY DATA IS MISSING WHEN IT IS NOT
+
+  The app tells users visits and working days need an SFA export. In fact all
+  173 of 173 active members have both, from the State Head Dashboard Data tab
+  via hrSfaDashboard.ts.
+
+  The app tells users CTC stays blank until payroll is connected. In fact CTC
+  arrives from the HR CSV and enriches 178 of 189 members. Only the Finance
+  T.A. bill and expense export is genuinely absent.
+
+C1. Print the exact current wording of both messages and where each is defined.
+
+C2. Which fields are genuinely unavailable? Give the precise list, separating:
+      - not connected at all (the Finance T.A./expense export)
+      - connected but unmatched for some members (CTC, 11 of 189)
+      - fully connected (visits and working days, 173 of 173)
+
+C3. Are there other source-status messages in the missing-source registry that
+    are similarly out of date? Audit the whole registry against what is actually
+    connected and list every entry whose status is wrong.
+
+C4. Does anything downstream act on these status flags - suppressing a column,
+    blanking a figure, skipping a calculation - as against merely displaying a
+    message? If a wrong flag is suppressing real data, that is worse than a wrong
+    label.
+
+SECTION D - A NAME THAT ASSERTS A LINEAGE IT CANNOT SUPPORT
+
+Seven modules label secondary_sku_line "PSCode2" - skuLoader.ts, sku.ts,
+skuFacts.ts, skuWipeGuard.ts, skuCoverageGuard.ts, SkuFocus.tsx and their tests.
+There is no PS Code 2 loader, no configured PS Code 2 source, and PS Code 4 and
+PS Code 8 are not connected at all.
+
+D1. Where did the "PSCode2" label come from? Trace it through git history to the
+    commit that introduced it and quote the message.
+
+D2. Does that label appear anywhere a USER can see it - a column header, an
+    export, a warning string, a tooltip? If a user reads "PSCode2" they will
+    believe that report is connected.
+
+D3. For closed years, skuLoader.ts detects SKU-register tabs by header rather
+    than by named source. Which specific sheets and tabs is it actually reading
+    for each closed FY? Print the file IDs and tab names.
+
+Report only. Do not rename anything - the label is evidence of how this was
+understood, and we may want Prayag to tell us which report is really PS Code 2
+before we relabel it.
+```
+
+---
+
+## Notes
+
+- A2 is the question that matters. Year-to-date accumulation that stops at a
+  leaving date is normal. Figures continuing after someone left is not, and the
+  snapshot cannot tell the two apart.
+- A6 could collapse two open investigations into one. If the 58 unmatched names
+  and the leaver population overlap heavily, the ₹13.51 crore is a roster-history
+  problem rather than unidentified money.
+- B2 is a hazard rather than a current fault. The folder holds five files, none
+  for 2026-27, so nothing is being mismatched today. But the matcher would accept
+  a draft dropped in by anyone.
+- Section C is small and cheap, and worth doing before the pack reaches Prayag —
+  if we ask them about sources while our own screen misreports two of them, that
+  is confusing for everyone.
+- D3 is the useful part of Section D. Whatever the label says, we should know
+  which sheets are actually being read for the closed years.
+
+## Corrected in the Prayag pack
+
+Query D4 previously asked Prayag to share the Distributor Visit Report and
+Retailer Report. That was wrong — both have been connected since 9 July for the
+party-to-member bridge, and visit data is complete for all 173 active members. D4
+now asks which source is authoritative when the Dashboard Data tab and the CRM
+sheet's named report columns disagree.
+
+A new D5 asks about six unrecognised State Head folders: **AMIT MONGA, Jahangir
+Ashraf, O.P Kalra, S.BABU, Suresh Nair** and **Rajasthan (Plumbing)**.
+
+Also worth registering: `NARENDRA SHARMA 2026-27` exists as a folder in the
+current register, which independently confirms Narendra is real and active for the
+working year and strengthens queries C1 and C2.
+
+And the register folder is named **"Sate Head 2026-27"** — misspelled at source.
+Anything matching on that folder name has to tolerate it.
+
+## Still open
+
+- **Prompt 10** — five disagreeing state alias maps, and `"UP (A)"`.
+- **Prompt 11** — the winner-take-all distributor vote, and the 130-row table.
+- **Prompt 12 Part Two** — pages reading tables populated only in development.
+- **Prompt 16** — the discount recomputed on its original basis.
+- **Prompt 17** — why the 23 August readiness fix did not take.
