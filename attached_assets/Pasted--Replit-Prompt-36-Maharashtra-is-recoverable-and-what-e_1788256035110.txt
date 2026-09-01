@@ -1,0 +1,211 @@
+# Replit Prompt 36 — Maharashtra is recoverable, and what else is solvable now
+
+**Date:** 1 September 2026
+**Scope:** Section A read-only. Section B is a batch of small code changes, one at
+a time. Section C is a prioritised list, no work attached.
+
+**Standing rule:** every figure states which database or source it came from.
+
+## The Maharashtra finding
+
+I said Maharashtra's split was unrecoverable. That was wrong.
+
+The suffix encodes the head. `head_canon` records the head. So `head_canon`
+**is** the suffix, under a different column name.
+
+Verified against the seed pack, which was generated 1 August 2026:
+
+| Pack label | Pack head | Retailers | `head_canon` | FY2026-27 customers |
+|---|---|---:|---|---:|
+| MAHARASTRA L | Lalan | **30** | Lalan Kumar | **30** |
+| MAHARASTRA R | Rizvi Ji | **1** | Syed Aqil Rizvi | **1** |
+| MAHARASTRA S | Sandeep Ji | **1** | Sandeep Dadheech | **1** |
+
+Exact match on all three. And `head_canon` is non-null on **all 13,693**
+Maharashtra rows, so coverage is complete.
+
+---
+
+## Section A — read-only, confirm the reconstruction
+
+```
+Read-only. Change nothing, write no column, create no view.
+
+The Maharashtra L/R/S split is recoverable. head_canon already records the head,
+and the suffix encoded the head, so head_canon reconstructs the label.
+
+Evidence: the seed pack generated 1 Aug 2026 records MAHARASTRA L -> Lalan with
+30 retailers, R -> Rizvi with 1, S -> Sandeep with 1. Production sale_line
+head_canon for FY2026-27 Maharashtra gives Lalan 30 customers, Rizvi 1,
+Sandeep 1. Exact match on all three.
+
+A1. Confirm that mapping holds for FY2025-26 as well. Print head, rows,
+    customers and value for each, and compare against any FY2025-26 source
+    evidence that survives.
+
+A2. Print the full reconstructed split for both years: for each Maharashtra row
+    population, the implied source label, head, rows, customers, value, and the
+    distributors involved.
+
+A3. Shailesh Sharma has 9 rows and Rs 1,03,674.20 with no matching source label.
+    Prompt 35 found two deactivated person_registry rows with colliding employee
+    codes. Which head did those 9 rows belong to before he was deactivated - is
+    there a fourth suffix, or was he a member under one of the three?
+
+A4. Does the same reconstruction work for the OTHER collapsed labels?
+      - UP ( R ) collapsed to UTTAR PRADESH. head_canon there is Rizvi. Does
+        UTTAR PRADESH split cleanly into UP ( R ) and anything else by head?
+      - Any other label that alias maps collapse but head_canon preserves.
+    Print which are recoverable and which are not.
+
+A5. TAMILNADU (S) is the counterexample - 4,373 rows, Rs 5.75 crore,
+    head_canon NULL. Confirm this technique CANNOT work there, and that it is the
+    only Maharashtra-style label where the head was not preserved.
+
+A6. If the reconstruction is sound, what is the right way to make it usable - a
+    derived view, a documented query, a recorded mapping? Describe only. Do not
+    build it, and do not write anything back into state_canon.
+
+Report only.
+```
+
+---
+
+## Section B — small fixes, send ONE AT A TIME
+
+Each of these is understood, narrow, and needs no answer from Prayag. Do not
+batch them. Each is a separate change with its own diff.
+
+### B1 — the stale guard expectation
+
+```
+Code change. One expectation, nothing else.
+
+comparison-guards fails on Ravi's costRatioSales. The guard expects null with an
+UNDEFINED note, on a hard-coded assumption that his sales denominator would be
+zero. He now has sales received and the value correctly computes at 20.4%. The
+calculation is right; the expectation is stale. The synthetic unit fixture
+already expects a numeric ratio.
+
+Show me the exact line and its context first, plus Ravi's current sales figure.
+Then update that ONE expectation so it accepts the correct value in a way that
+will not go stale again. If an env-var override exists for the OB ratio as
+RAVI_RATIO_EXPECTED does, follow that pattern rather than hard-coding a number.
+
+Do not change costRatioOb, costPerVisit, the calculation in comparison.ts, the
+unit fixture, or any threshold. Run comparison-guards afterwards and print the
+full result. If another check now fails, stop and report.
+```
+
+### B2 — the note that states the reverse of the truth
+
+```
+Code change. One string.
+
+comparison.ts returns numeric zero for Apr-Jun FY2026-27 register data, and its
+note reads "coverage is Apr-Jun only, July is not in the register".
+
+Production is the exact reverse: July has 34,147 rows, Apr-Jun have none.
+
+Correct the note to state what is actually true, derived from the data rather
+than written as fixed text so it cannot invert again. Do not change the zero, the
+calculation, or the register gap itself - that is a separate problem.
+```
+
+### B3 — two source messages that misreport connected data
+
+```
+Code change. Two strings in routes/mgmt.ts around lines 382-394.
+
+The app reports:
+  sfa     "missing"  - "Visits, working days, GPS kilometres, and lead-counter
+                        columns stay blank until the SFA export is connected"
+  payroll "missing"  - "CTC, T.A. bill, and cost-ratio columns stay blank until
+                        payroll and expense sheets are connected"
+
+Both are wrong. Visits and working days are present for all 173 active members
+from the State Head Dashboard Data tab. CTC arrives from the HR CSV and enriches
+178 of 189 members. Only the Finance T.A. bill and expense export is genuinely
+absent.
+
+Correct both to say what is actually connected and what is not. Separate three
+states: not connected at all, connected but unmatched for some members, fully
+connected. Do not change any status flag that suppresses a column until you have
+told me which flags do that - a wrong label is one thing, a wrong flag hiding
+real data is another.
+```
+
+### B4 — the month-range label will start lying
+
+```
+Code change. One operator.
+
+formatRecordedMonthRange uses:
+
+  members.some((member) => member.monthlyNotYetRecorded?.[idx] === false)
+
+"some" - a month counts as recorded for the label if ANY member has it recorded.
+But the denominator is per-member: each member's plan enters
+secondaryPlanRecorded only for months where THAT member's month is recorded.
+
+Today they agree because August is unrecorded for everyone. They diverge the
+moment August closes unevenly - one member of Sandeep's 75 gets August recorded
+and the label flips to Apr-Aug while the denominator is still mostly Apr-Jul.
+
+Change it so the label reflects what the denominator actually covers. I prefer
+the strict reading: a month counts only when every contributing member has it
+recorded. That errs toward a shorter range than reality, which understates
+coverage rather than overstating it.
+
+Show me both options with their consequences before choosing.
+```
+
+### B5 — sixteen departed members are selectable
+
+```
+Code change. One filter.
+
+GET /api/comparison/entities?type=member returns
+[...new Set(dd.members.map((m) => m.name))] with no isLeft filter. The snapshot
+holds 189 members, 16 marked isLeft, 173 active.
+
+Add the active filter to the SELECTOR only. Do not change the comparison
+aggregation, which already filters correctly unless population is "includeLeft".
+
+Prompt 29 Section A found /api/mgmt/data returns isLeft=false for M. Raman and
+Amruth Banakar while the Deep Dive snapshot has them as LEFT. Tell me which
+source this endpoint uses before filtering on it - filtering on the wrong flag
+would remove the wrong people.
+```
+
+---
+
+## Section C — solvable, but bigger. Not started.
+
+Listed in the order I would take them, no work attached yet.
+
+1. **Delhi override target.** 747 of 769 customers fail paths 1 and 2 because the
+   target `DELHI` is a parent name, not a registered leaf. All 747 would resolve
+   to Anant Singh. Same shape as the Uttarakhand fix, four times the volume. The
+   guard tests assert `DELHI` as a valid leaf, so they will break — and they are
+   wrong.
+2. **NODE_ENV on the disposable server.** One environment answer explains both
+   failing workflows. The 23 August readiness fix did not take and Prompt 17 asks
+   why. Do not set `NODE_ENV=production` to make it green — that hides the
+   packaging fault.
+3. **`secondary_register_line` missing Apr–Jun.** July was mirrored, the other
+   three were not. Two completeness guards passed on 25% coverage. Understand the
+   guards before filling the table.
+4. **The `isLeft` disagreement** between `/api/mgmt/data` and the Deep Dive
+   snapshot. Blocks B5 above until resolved.
+5. **₹47.98 crore of FY2025-26 with no state** — Prompt 32, sent and unanswered.
+   Investigation first; no backfill, the year is frozen.
+6. **₹10.51 crore snapshot-versus-monthly divergence** — Prompt 23, sent and
+   unanswered. The largest open number that is ours to solve.
+
+## Blocked on Prayag, not solvable here
+
+`UP ( A )` and the WUP/EUP territory question. `TAMILNADU (S)` where the head was
+never preserved. What L, R and S mean officially — though we now have strong
+evidence and Rajasthan is already confirmed. The 34 distributor codes awaiting
+confirmation.
