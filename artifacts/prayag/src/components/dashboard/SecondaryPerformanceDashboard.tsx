@@ -18,7 +18,11 @@ import { trunc2 } from "@/lib/trunc";
 import { LoadingState } from "@/components/ui/loading-state";
 import { useState, useEffect, useMemo, Fragment } from "react";
 import { AlertTriangle, ChevronUp, ChevronDown, Info } from "lucide-react";
-import { useGlobalFilter } from "@/data/global-filter-context";
+import {
+  FISCAL_MONTH_NAMES,
+  useGlobalFilter,
+  type FiscalMonthIdx,
+} from "@/data/global-filter-context";
 import { cn } from "@/lib/utils";
 import { achBandBg, achBandText } from "@/lib/achievementBands";
 import { SnapshotBanner, useSnapshotRefresh } from "./snapshotRefresh";
@@ -32,6 +36,8 @@ type MemberRow = {
   secondaryOrderBooked: number | null;
   secondarySalesReceived: number | null;
   secondaryAchievement: number | null;
+  secondaryPlanRecorded?: number | null;
+  monthlyNotYetRecorded?: boolean[] | null;
   secondaryBusinessPlan: number | null;
   isPrimaryRole: boolean;
   isLeft: boolean;
@@ -76,6 +82,8 @@ type HeadGroup = {
   plan: number;
   orderBooked: number;
   sales: number;
+  planRecorded: number;
+  recordedMonthLabel: string | null;
   members: MemberRow[];
 };
 
@@ -103,6 +111,45 @@ const PERIODS = [
   { label: "Mar", from: 12, to: 12 },
 ] as const;
 
+function formatRecordedMonthRange(
+  members: MemberRow[],
+  from: number,
+  to: number,
+): string | null {
+  const recorded = Array.from({ length: 12 }, (_, idx) => idx).filter(
+    (idx) =>
+      idx >= from - 1 &&
+      idx <= to - 1 &&
+      members.some((member) => member.monthlyNotYetRecorded?.[idx] === false),
+  );
+
+  if (recorded.length === 0) return null;
+
+  const monthName = (idx: number) => FISCAL_MONTH_NAMES[idx as FiscalMonthIdx];
+  const ranges: string[] = [];
+  let start = recorded[0]!;
+  let end = recorded[0]!;
+  for (const idx of recorded.slice(1)) {
+    if (idx === end + 1) {
+      end = idx;
+      continue;
+    }
+    ranges.push(
+      start === end
+        ? monthName(start)
+        : `${monthName(start)}–${monthName(end)}`,
+    );
+    start = idx;
+    end = idx;
+  }
+  ranges.push(
+    start === end
+      ? monthName(start)
+      : `${monthName(start)}–${monthName(end)}`,
+  );
+  return ranges.join(", ");
+}
+
 // ── Formatters ────────────────────────────────────────────────────────────────
 
 function fmtCr(n: number | null | undefined): string {
@@ -112,7 +159,7 @@ function fmtCr(n: number | null | undefined): string {
 
 function fmtPct(n: number | null | undefined): string {
   if (n == null) return "—";
-  return `${trunc2((n * 100))}%`;
+  return `${Math.floor(n * 100 * 100 + 0.5) / 100}%`;
 }
 
 function fmtNum(n: number | null | undefined): string {
@@ -142,12 +189,15 @@ function HeadRow({
   group,
   expanded,
   onToggle,
+  isStateDash,
 }: {
   group: HeadGroup;
   expanded: boolean;
   onToggle: () => void;
+  isStateDash: boolean;
 }) {
-  const ach = group.plan > 0 ? group.sales / group.plan : null;
+  const achievementPlan = isStateDash ? group.planRecorded : group.plan;
+  const ach = achievementPlan > 0 ? group.sales / achievementPlan : null;
   return (
     <tr
       className="cursor-pointer hover:bg-muted/40 transition-colors border-b border-border bg-muted/20"
@@ -170,7 +220,12 @@ function HeadRow({
       <td className="py-2 px-3 text-right font-mono text-sm">{fmtCr(group.orderBooked)}</td>
       <td className="py-2 px-3 text-right font-mono text-sm font-semibold">{fmtCr(group.sales)}</td>
       <td className={cn("py-2 px-3 text-right text-sm font-mono font-semibold", achColor(ach))}>
-        {fmtPct(ach)}
+        <div>{fmtPct(ach)}</div>
+        {isStateDash && (
+          <div className="text-[10px] font-normal text-muted-foreground whitespace-nowrap">
+            vs. {group.recordedMonthLabel ?? "recorded months"} recorded-month plan
+          </div>
+        )}
       </td>
     </tr>
   );
@@ -293,15 +348,34 @@ export default function SecondaryPerformanceDashboard() {
         existing.plan += plan;
         existing.orderBooked += ob;
         existing.sales += sales;
+        existing.planRecorded += isStateDash ? (m.secondaryPlanRecorded ?? 0) : 0;
         existing.members.push(m);
       } else {
-        map.set(head, { head, plan, orderBooked: ob, sales, members: [m] });
+        map.set(head, {
+          head,
+          plan,
+          orderBooked: ob,
+          sales,
+          planRecorded: isStateDash ? (m.secondaryPlanRecorded ?? 0) : 0,
+          recordedMonthLabel: null,
+          members: [m],
+        });
       }
     }
-    return Array.from(map.values())
+    const grouped = Array.from(map.values())
       .filter((g) => g.plan > 0 || g.orderBooked > 0 || g.sales > 0)
       .sort((a, b) => b.sales - a.sales);
-  }, [secondaryRows, isStateDash]);
+    if (isStateDash) {
+      for (const group of grouped) {
+        group.recordedMonthLabel = formatRecordedMonthRange(
+          group.members,
+          effectivePeriodFrom,
+          effectivePeriodTo,
+        );
+      }
+    }
+    return grouped;
+  }, [secondaryRows, isStateDash, effectivePeriodFrom, effectivePeriodTo]);
 
   // Company-level totals.
   //
@@ -476,6 +550,7 @@ export default function SecondaryPerformanceDashboard() {
                     group={group}
                     expanded={expandedHeads.has(group.head)}
                     onToggle={() => toggleHead(group.head)}
+                    isStateDash={isStateDash}
                   />
                   {expandedHeads.has(group.head) &&
                     group.members
