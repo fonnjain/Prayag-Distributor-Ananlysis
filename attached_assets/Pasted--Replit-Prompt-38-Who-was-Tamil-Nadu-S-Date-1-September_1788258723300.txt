@@ -1,0 +1,107 @@
+# Replit Prompt 38 — Who was Tamil Nadu S?
+
+**Date:** 1 September 2026
+**Scope:** Read-only. Change nothing.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**Why this is worth one query:** `TAMILNADU (S)` is the only valid suffix label
+in production whose head was not preserved — 4,373 rows, ₹5,74,73,327.71, across
+FY2023-24 and FY2024-25, every row with `head_canon` NULL.
+
+But all 4,373 rows belong to just **2 distinct customers**. The state field lost
+the head. The customers may not have. This is the last avenue before the question
+has to go to Prayag.
+
+Send alongside Prompt 36 Section B — it is small and unrelated to those fixes.
+
+---
+
+## Prompt 38
+
+```
+Read-only. Change nothing.
+
+TAMILNADU (S) holds 4,373 rows and Rs 5,74,73,327.71 across FY2023-24 and
+FY2024-25, all with head_canon NULL. The label does not appear in FY2025-26 or
+FY2026-27 at all - it was retired.
+
+All 4,373 rows belong to 2 distinct customers. The state field lost the head; the
+customers may not have.
+
+1. Name the two customers. For each print: exact customer string as stored,
+   rows, value, fiscal years, first and last invoice date, and any customer_id or
+   stable identifier.
+
+2. For each, is there a match in customer_master? If yes, print the master
+   record - company name, DIST# or other code, state, and every state_head or
+   owner field it carries.
+
+3. Does either appear in customer_assignment, current or historical, voided or
+   end-dated? Print every assignment row with its state head, effective dates and
+   status.
+
+4. Do either of them have sale_line rows under a DIFFERENT state_canon in any
+   fiscal year - before FY2023-24 or after FY2024-25? If the same customer traded
+   under TAMIL NADU or another label with a head attached, that head is very
+   likely S.
+
+5. Check the bundled seed pack and any earlier dashboard or route snapshot for
+   FY2023-24 or FY2024-25. Does any by_state or by_customer aggregate carry a
+   head against Tamilnadu (S) or against either customer name?
+
+6. The label was retired after FY2024-25. Which head absorbed Tamil Nadu from
+   FY2025-26 onward, and did their customer count increase by these two accounts
+   at that point? A handover would show as an increase in the receiving head's
+   customers in the year the label disappeared.
+
+7. Check departed and unrecognised names with S initials against Tamil Nadu
+   specifically: S.BABU, Suresh Nair, Suresh Kumar Nair, and any person_registry
+   row with an S first initial and Tamil Nadu in its state or headquarters field.
+   S.BABU appeared earlier as HR reporting manager for Karuppasamy R, a Tamil
+   Nadu salesperson, in the FY2025-26 unmatched order-booking population.
+
+8. If none of the above identifies S, say so plainly. Do not infer a head from
+   geography or from who holds Tamil Nadu now - a wrong attribution on
+   Rs 5.75 crore is worse than an acknowledged gap.
+
+Report only.
+```
+
+---
+
+## Notes
+
+- Question 4 is the most likely to work. If either customer traded under a
+  different state label in an adjacent year with a head attached, that names S
+  without needing the state field at all.
+- Question 6 is the next best. The label stops after FY2024-25, so somebody took
+  those accounts over. A handover leaves a trace in the receiving head's customer
+  count in exactly that year.
+- Question 8 exists because the tempting answer is "Tamil Nadu is Biju's now, so
+  call it Biju". That would put ₹5.75 crore against a head who may never have
+  held it. An acknowledged gap is the better outcome if the evidence is not there.
+
+## If this comes back empty
+
+The question goes to Prayag, and it is a narrow one they can answer in a line:
+
+> Until FY2024-25, part of Tamil Nadu was recorded as "Tamilnadu (S)". Who was
+> the state head for that territory, and what happened to it afterwards?
+
+Worth adding to the pack alongside the Maharashtra query, which today's work has
+already narrowed to a confirmation rather than an open question.
+
+## Context worth keeping
+
+- FY2023-24 also holds plain `TAMIL NADU` at 4,094 rows and ₹6,47,10,985.50, so
+  the two populations coexisted. Two Tamil Nadu groups, one with a head and one
+  without.
+- FY2023-24 reconciles exactly to its frozen anchor: 137,619 rows and
+  ₹3,49,02,33,848.40 against a configured 137,619 and ₹3,490,233,848. Second
+  frozen year confirmed intact today.
+- The freeze is application-level, not database-level. `frozen_registers.json`
+  blocks the scheduler, `ensureRegisterSynced` and mutating routes with a 423, but
+  an `?unfreeze=true&reason=` override exists and direct SQL would bypass it. The
+  startup anchor check is the backstop — detection, not prevention. Worth knowing
+  plainly rather than assuming the years are sealed.
