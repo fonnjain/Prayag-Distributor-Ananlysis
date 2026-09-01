@@ -1,0 +1,171 @@
+# Replit Prompt 31 — The state-split defects that are solvable now
+
+**Date:** 1 September 2026
+**Scope:** Section A is read-only and must come back first. Section B is a narrow
+code change. Section C is scoping only.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**The key fact:** `state_hierarchy` (migration 025, extended by 055) is already
+the authority. It has `state_canon`, `state_parent`, `is_split`,
+`picker_visible`, a foreign key from `person_state_coverage` and
+`customer_assignment`, and a trigger that rejects non-assignable leaves.
+
+Seven states are correctly registered as split — Delhi, Jammu and Kashmir, Uttar
+Pradesh, Rajasthan, Andhra Pradesh, Karnataka, Tamil Nadu. **Maharashtra is
+registered `is_split = false` with no children**, which is why it behaves
+differently from all of them.
+
+Crucially, `state_hierarchy` registers **`UP ( A )` with spaces**, matching the
+data. `territoryResolver.ts` uses `"UP (A)"` without. The authority already says
+which is right.
+
+---
+
+## Section A — read-only, send first
+
+```
+Read-only. Change nothing.
+
+A1. Print state_hierarchy in full from production: state_canon, state_parent,
+    is_split, picker_visible, display_order. All rows.
+
+A2. Print every DISTINCT state_canon value in sale_line for FY2026-27 and
+    FY2025-26 with row counts and rupee value, exactly as stored.
+
+A3. Which values in A2 are NOT registered in state_hierarchy? For each, give
+    rows and value. Those are labels flowing through the system with no
+    hierarchy entry.
+
+A4. THE SPACING BUG. territoryResolver.ts uses the key "UP (A)". state_hierarchy
+    and the data use "UP ( A )".
+      - Confirm territoryResolver's key never matches.
+      - How many FY2026-27 customers, rows and rupees currently fail to resolve
+        to a territory because of it?
+      - What happens to a customer with no territory in scheme qualification -
+        excluded, or defaulted?
+
+A5. EAST OR WEST. customerStateHead maps "UP ( A )" to EAST U.P. territoryResolver
+    intends "UP (A)" as WUP. Resolve this from data, not preference: for the
+    customers carrying UP ( A ), which state head actually covers them in
+    person_state_coverage and customer_assignment? Print the counts both ways.
+
+A6. THE MISSPELLING. customerStateHead maps "UTTARAKHAND" to "UTTRAKHAND".
+    state_hierarchy holds "UTTARAKHAND". Which spelling does sale_line store,
+    and does anything currently join on "UTTRAKHAND"?
+
+A7. Do the five alias maps - reportFilterVocab, stateCanon, customerStateHead,
+    stateHeadPackCoverageCheck, territoryResolver - read state_hierarchy at all,
+    or does each carry a private copy? Answer plainly.
+
+Report only. Propose nothing yet.
+```
+
+---
+
+## Section B — code change, after Section A
+
+Send only if A4, A5 and A6 confirm the diagnosis.
+
+```
+This is a code change. Three narrow fixes. Nothing else.
+
+1. THE SPACING BUG
+   In territoryResolver.ts, correct the key "UP (A)" to "UP ( A )" so it matches
+   state_hierarchy and the stored data.
+
+   Before applying, print the customers, rows and rupees that will START
+   resolving to a territory as a result. This changes scheme qualification, so I
+   want the size of the change stated before it happens, not after.
+
+   Check every other key in that file against state_hierarchy for the same class
+   of mismatch and list any you find. Fix only the ones state_hierarchy proves
+   wrong.
+
+2. THE MISSPELLED TARGET
+   In customerStateHead.ts, correct "UTTARAKHAND" -> "UTTRAKHAND" so the target
+   is the registered spelling "UTTARAKHAND".
+
+   If anything currently depends on the misspelled value, name it before
+   changing.
+
+3. EAST OR WEST
+   Apply whichever answer A5 established from the coverage data. If A5 was
+   inconclusive, do NOT guess - leave it and tell me.
+
+Do NOT:
+  - register Maharashtra's children in this change
+  - consolidate the five alias maps
+  - touch any other state mapping
+  - change any calculation, threshold or display
+
+Show the diff before applying. After applying, print the scheme-qualification
+customer count and value before and after, and confirm no frozen year moved.
+```
+
+---
+
+## Section C — scoping only, build nothing
+
+```
+Read-only. Describe only. Build nothing, register nothing.
+
+C1. MAHARASHTRA'S CHILDREN
+    MAHARASTRA L, MAHARASTRA R, MAHARASTRA S and MAHARASHTRA 2 appear in source
+    vocabularies. state_hierarchy has MAHARASHTRA as is_split = false with no
+    children. The other seven split states were registered properly.
+
+    Describe what registering L, R and S under parent MAHARASHTRA would involve,
+    following the exact pattern used for Delhi and Uttar Pradesh. What else would
+    have to stop collapsing them at ingest?
+
+    Do not register them. Prayag have not yet confirmed what L, R and S mean, or
+    whether MAHARASHTRA 2 is one of them under another name.
+
+C2. HISTORY IS NOT RECOVERABLE - CONFIRM THIS
+    sale_line stores only state_canon. Confirm there is no raw or original state
+    column anywhere in the schema, on any table.
+
+    If that is right, every Maharashtra row already stored has lost whether it
+    was L, R, S or 2, and no query recovers it. Say so plainly.
+
+    Then: do the original source workbooks still carry the labels? If they do,
+    a re-ingest could recover history. If they do not, it is gone. Which is it?
+
+C3. ONE AUTHORITY
+    state_hierarchy is the authority and five files ignore it. Describe what it
+    would take for all five to defer to it instead of holding private copies -
+    which files, what would break, and what would need to be true first.
+
+    This is the real fix. I am not asking for it yet. I want to know its size.
+
+C4. Which of the labels in A3 - present in data, absent from state_hierarchy -
+    could be registered mechanically, and which need Prayag to say what they
+    mean? Split the list in two.
+
+Report only.
+```
+
+---
+
+## Notes
+
+- A4 is the one with money attached. Scheme qualification is running on a key
+  that may never match, and the correction in B1 will change who qualifies. That
+  is why B asks for the before-and-after count *before* applying.
+- A5 makes B3 possible. Two files disagree about east versus west, and the
+  coverage data can settle it without asking anyone.
+- Section C is deliberately scoping only. C2 in particular — if the source
+  workbooks no longer carry the raw labels, Maharashtra's history is
+  unrecoverable and that should be recorded as a fact rather than discovered
+  later by someone expecting to fix it.
+
+## What still needs Prayag, and is already in their pack
+
+- **C4** — how many Maharashtra territories there are, what each is called, who
+  owns each. The pack notes that the distributor sheet has no column capable of
+  dividing the ten distributors even if they confirm the split.
+- Not yet in the pack, worth adding when C4 comes back: what the letters mean in
+  `KARNATAKA (B)`, `RAJASTHAN (N)`, `TAMILNADU (S)` and `UP ( R )`. Those four
+  are registered or partly registered but nobody on our side knows what they
+  denote.
