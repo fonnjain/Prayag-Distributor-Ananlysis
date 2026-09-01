@@ -1,0 +1,118 @@
+# Replit Prompt 30 — Section B1, final
+
+**Date:** 1 September 2026
+**Supersedes:** B1 in `Replit_Prompt_30B_Revised.md`
+**Scope:** Code change. Two narrow items, display and one denominator.
+
+**B0 cleared this to proceed.** Missing and all-null members account for **0% of
+every head's plan gap**. Sunil Patel's 140.72% is unaffected by his one
+missing-row member — excluding Bhavesh N Ranpara changes it by exactly zero.
+
+**One addition since the last draft.** The label must carry the recorded month
+range, not just the word "recorded". Sunil's 140.72% is only legible if a reader
+can see the denominator covers four months of a five-month plan. His member
+Rathod Vijaybhai has 80% of his five-month plan sitting in August alone, which
+swings that member from 28.4% to 143.0% on distribution alone. Without the month
+range on screen, an above-100% head reads as beating target by 40%.
+
+---
+
+## B1
+
+```
+This is a code change. Two things, both narrow. Show me the diff before applying.
+
+1. HEAD-ROW DENOMINATOR
+
+   The Secondary Performance head row computes group sales / group.secondaryPlan,
+   using the full selected period. The company card and the member rows both use
+   recorded-month plan. Make the head row consistent: use the sum of member
+   secondaryPlanRecorded.
+
+   Requirements:
+     - Reuse the field the member rows already use. Do not compute a new one.
+     - Do NOT change the company card, the Total row, member rows, the Plan card,
+       or any order-booking or sales figure.
+     - Do NOT change how planRecorded or secondaryPlan are computed.
+     - Do NOT change the Plan column on the head row. It should keep showing the
+       full-period plan - that is a real figure. Only the denominator changes.
+     - Section A5 confirmed this is the only surface with this mismatch. Touch
+       nothing else.
+
+   LABEL - this part matters as much as the calculation.
+
+   The head-row achievement must show the recorded MONTH RANGE, not just the
+   word "recorded". Something of this shape:
+
+     86.76%   vs Apr-Jul recorded-month plan
+
+   Derive the range from the data - the months where notYetRecorded is false.
+   Do NOT hardcode "Apr-Jul". It must move by itself when August closes.
+
+   The reason: Sunil Patel will display 140.72%. That is correct against a
+   four-month denominator on a five-month plan, and unreadable without the range
+   beside it. One of his members carries 80% of his five-month plan in August
+   alone, which moves that member from 28.4% to 143.0% on plan distribution
+   rather than performance.
+
+2. TRUNCATION TO ROUNDING
+
+   The percentage formatter truncates rather than rounds. Sandeep's exact
+   86.757825% renders as 86.75% instead of 86.76%.
+
+   Change it to round half up. Apply only to the percentage formatter on this
+   page. Do not change currency formatting, and do not change any stored or
+   computed value - display rounding only.
+
+AFTER APPLYING, print:
+  - all ten head rows: percentage, colour band, and the rendered label
+  - the derivation code for the month range
+  - confirmation that head-row sales still sum exactly to Rs 84,63,00,457.14
+  - confirmation the company card still reads 78.74% and member rows are unchanged
+
+EXPECTED, from Section A - flag anything that differs:
+  - ten percentages change
+  - five colour bands change: Lalan, Pawan, Nasir and Sulinder orange to amber;
+    Sunil Patel yellow to emerald
+  - nothing else moves. No Low Performer, Red Alert, Warning or AI output changes
+```
+
+---
+
+## Follow-up worth queueing, not part of B1
+
+**The corrected figure is volatile.** B0.5 showed Sunil returns from 140.72% to
+77.03% once August closes — a 64 point fall with nothing about his performance
+changing. The current basis is consistently too low; the corrected basis
+oscillates as months close. Both are defensible, neither is stable. The month
+range in the label is the mitigation; a fuller answer would need a decision about
+which basis heads should actually be judged on.
+
+**Three members sit under a head who does not exist.** B0.4 reconciles 23
+missing-row and 9 all-null members under the ten displayed heads, against global
+totals of 27 and 10. The remaining four are under **Sunil Mohanty (3)** and
+**Anuj Sharma (1)**, plus one all-null under Anuj Sharma. Sunil Mohanty has no
+person, registry, coverage or assignment record anywhere. Those members appear on
+no page at all.
+
+**Sandeep has twelve members with no monthly data** — 10 missing-row plus 2
+all-null, out of seventy-five.
+
+## Still open
+
+- **Prompt 29** — the `isLeft` disagreement between two surfaces, the 12 flagged
+  anomalies worth ₹6.70 crore inside Sales Received, and the 403 on Sheets
+  metadata.
+- **The CRM reference workflow** — six distinct target quantities against the
+  app's two fields, PS Code 5 never mentioned before, `=iferror(AY52/BM52)` as
+  the specified sale-achievement formula, and the Amount/Count pairing shown only
+  as rupees.
+- **Prompt 30 Section C** — ₹62.49 lakh of real August sales excluded with no
+  label, and the asymmetry of counting August plan while excluding August sales.
+- **Prompt 21** — visit rates for departed members.
+- **Prompt 23** — ₹10.51 crore snapshot-versus-monthly divergence.
+- **Prompt 26** — partial-month label, before the August order file is loaded.
+- **Prompt 10** — five state alias maps, and `"UP (A)"`.
+- **Prompt 11** — the winner-take-all distributor vote, and the 130-row table.
+- **Prompts 16 and 17** — the discount basis, and the readiness fix.
+- The `costRatioSales` guard fix.
