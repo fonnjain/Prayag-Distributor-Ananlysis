@@ -1,0 +1,167 @@
+# Replit Prompt 31 — Section B revised, and Prompt 32
+
+**Date:** 1 September 2026
+**Supersedes:** Section B of `Replit_Prompt_31_State_Splits_Solvable.md`
+**Scope:** B is a code change, narrowed to one item. Prompt 32 is read-only.
+
+**Standing rule:** every figure states which database or source it came from.
+
+## Why B changed
+
+A5 did not merely fail to settle east versus west. **It disproved both maps.**
+
+All 14 `UP ( A )` customers attribute to **Anant Singh** — in transaction data,
+in `person_state_coverage`, and in `customer_assignment`. The scheme territory
+table has **WUP under Lalan** and **EUP under Wahid**. Neither is Anant Singh.
+
+So fixing the spacing alone would take ₹2.44 crore of Anant Singh's customers and
+route them into **Lalan's** territory schemes. They would begin qualifying for
+the wrong head's schemes. That is worse than the current exclusion, and my
+original instruction to fix the spacing independently was wrong.
+
+**The UP fix is withdrawn until the territory question is answered.** Only
+Uttarakhand proceeds.
+
+---
+
+## Section B — revised. One fix only.
+
+```
+This is a code change. ONE fix. The other two items from the original Section B
+are withdrawn - do not apply them.
+
+THE MISSPELLED JOIN TARGET
+
+customerStateHead.ts contains:
+
+  "UTTARAKHAND": "UTTRAKHAND"
+
+It transforms the correct source value into a spelling that exists nowhere.
+Production stores UTTARAKHAND in sale_line (2,019 rows, Rs 2,63,76,520.35 across
+FY2025-26 and FY2026-27), in customer_master (1,428 rows), and in
+state_hierarchy. UTTRAKHAND appears in zero rows anywhere.
+
+A6 established the misspelling is an ACTIVE join target in three paths, none of
+which can ever match:
+  1. distributor-chain territory guard - headStates.has("UTTRAKHAND") against a
+     set built from sale_line.state_canon
+  2. single-head state fallback - map keyed from sale_line.state_canon
+  3. cascade-state filtering - compared against state_hierarchy, zero overlap,
+     which triggers broad fallback behaviour
+
+BEFORE CHANGING ANYTHING:
+
+  a. For path 3, describe exactly what the "broad fallback behaviour" currently
+     does for Uttarakhand customers. Something is happening today that will stop
+     happening once the join starts matching. I want to know what, and how many
+     customers it affects.
+
+  b. For paths 1 and 2, state what currently happens when the match fails -
+     excluded, defaulted, or passed through - and what will change.
+
+THEN:
+
+  Correct the mapping so the target is the registered spelling UTTARAKHAND.
+
+  Check every other entry in CUSTOMER_STATE_OVERRIDES against state_hierarchy
+  for the same class of defect - a target that is not a registered state_canon
+  value. List any you find. Do NOT fix them in this change; report them.
+
+Do NOT:
+  - touch "UP (A)", "UP ( A )", or anything in territoryResolver.ts
+  - register Maharashtra's children
+  - consolidate the five alias maps
+  - change any calculation, threshold or display
+
+Show the diff before applying. After applying, print how many Uttarakhand
+customers now match in each of the three paths, and confirm no frozen year moved.
+```
+
+---
+
+## Prompt 32 — ₹47.98 crore of FY2025-26 has no state
+
+Read-only. Send separately.
+
+**Why this ranks above everything else in the Section A report:** 8,562 rows with
+`state_canon` NULL, ₹47,97,99,174.70 — **13.3% of the comparison year by value**.
+FY2026-27 has none. Every state-wise view of FY2025-26 silently omits an eighth
+of it, and that year is the frozen baseline FY2026-27 is measured against.
+
+It appeared as one row in a table and was not flagged as a finding.
+
+```
+Read-only. Change nothing, backfill nothing.
+
+FY2025-26 has 8,562 sale_line rows with state_canon NULL, worth
+Rs 47,97,99,174.70 - 13.3% of the year. FY2026-27 has zero NULLs. The FY2025-26
+table otherwise reconciles exactly to the frozen anchor of 145,613 rows and
+Rs 360.9954 Cr.
+
+1. What are these 8,562 rows? Break them down by customer, by month, and by
+   head_canon. Do they cluster, or are they spread across the year?
+
+2. Do they have head_canon populated while state_canon is NULL, or are both
+   NULL? Migration 018's comment mentions rows "ingested with state_canon and
+   head_canon NULL" - is that this population?
+
+3. Why does FY2026-27 have none? What changed between the two ingests? If a
+   backfill ran for FY2026-27 and not FY2025-26, name it.
+
+4. Which surfaces filter or group by state for FY2025-26? For each, confirm
+   whether these 8,562 rows are silently dropped, bucketed as unknown, or shown.
+
+5. THE ONE THAT MATTERS. Does any year-on-year state comparison put a fully
+   classified FY2026-27 against an FY2025-26 missing 13.3%? If yes, name every
+   such surface and state whether the resulting movement is an artefact.
+
+6. Does the FY2025-26 anchor verification test state completeness at all? The
+   anchor passes on total rows and total value, both of which are correct. A
+   NULL state does not change either.
+
+7. Could these rows be classified from customer_master, or is the information
+   absent? Do not classify them. Say whether it is possible.
+
+Report only. Do not backfill - FY2025-26 is frozen, and a backfill would change
+a closed year.
+```
+
+---
+
+## Notes
+
+- The revised B is safe because Uttarakhand is unambiguous: the correct value is
+  registered, nothing stores the misspelling, and no head assignment depends on
+  it. The UP case is the opposite on every count.
+- Question (a) in B is not optional. "Broad fallback behaviour" means Uttarakhand
+  customers are being handled some way today that will stop when the join starts
+  working. Fixing a broken join can change behaviour as much as breaking one.
+- Prompt 32 question 5 is the one with consequences. A year-on-year state
+  comparison against a baseline missing 13.3% produces growth that is partly an
+  artefact of classification, not performance.
+- Prompt 32 ends with an explicit instruction not to backfill. FY2025-26 is
+  frozen, and the reflex here would be to fill in the states.
+
+## Still needed before the UP fix can proceed
+
+The blocking question is not east versus west. It is: **what territory
+abbreviation should Anant Singh's UP customers carry?** WUP belongs to Lalan and
+EUP to Wahid, and the production data says these customers are Anant Singh's.
+
+Until there is an answer, ₹2.44 crore across 14 customers stays excluded from
+scheme qualification entirely — including from schemes open to all states, since
+the "All States" fallback is only reached after a state resolves.
+
+That is a question for the business, not for code. Worth adding to the Prayag
+pack alongside the Maharashtra query, or asking internally if the territory
+structure is your own rather than theirs.
+
+## Two smaller things from Section A, unactioned
+
+- `person_state_coverage` registers **JJM as state head for UTTAR PRADESH** across
+  18 rows, while transactions attribute UTTAR PRADESH to Syed Aqil Rizvi, 60
+  customers, ₹11.83 crore. **UP (AS)** shows head "OTHER" while transactions say
+  Anuj Sharma. Coverage and transactions disagree about who runs UP.
+- One of the 14 `UP ( A )` customers carries **both an Anant Singh and a GEM
+  assignment** through a duplicate customer-master relationship. Six of the 14
+  have no current assignment at all.
