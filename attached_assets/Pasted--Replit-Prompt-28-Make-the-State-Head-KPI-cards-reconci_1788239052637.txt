@@ -1,0 +1,192 @@
+# Replit Prompt 28 — Make the State Head KPI cards reconcilable
+
+**Date:** 1 September 2026
+**Follows:** Prompt 27
+**Scope:** **Code change.** Display only. No calculation change, no schema change,
+no data change.
+
+**Why this is small:** the fix already exists in your codebase. **Secondary
+Performance** renders `vs. recorded months' plan ₹107.48 Cr` under Achievement.
+The **State Head** page renders `vs. recorded months' plan` with no figure. Same
+data, same fields — one page can be reconciled and the other cannot.
+
+---
+
+## Prompt 28
+
+```
+This is a code change. Display only. Do not change any calculation, any period
+filter, any API request, or any schema.
+
+The State Head page shows Target Rs 159.09 Cr, Sales Received Rs 84.63 Cr and
+Achievement 78.74%. Dividing the two visible figures gives 53.19%. The 78.74% is
+computed against meta.secondaryTotal.planRecorded = Rs 1,07,48,01,262.85, which
+is present in the API response but printed nowhere on the page.
+
+The Secondary Performance page already renders that denominator. The State Head
+page does not. Bring it into line.
+
+1. ACHIEVEMENT CARD
+   Under the percentage, print the denominator that is already in the response:
+
+     Rs 84.63 Cr sales / Rs 107.48 Cr recorded-month plan
+
+   Read both from meta.secondaryTotal. Do not recompute either. Follow the
+   existing Secondary Performance rendering rather than inventing a new one -
+   show me both implementations side by side before you change anything.
+
+2. PER-CARD PERIOD LABELS
+   The heading currently says "YTD Apr-Aug" over four cards with four different
+   periods. Replace the single heading with a period on each card:
+
+     Target Plan                  Apr-Sep
+     Order Booking (Secondary)    Apr-Aug entered
+     Sales Received               Apr-Jul recorded
+     Achievement                  Apr-Jul recorded basis
+
+   Derive each period from the data, NOT hardcoded month names. Target spans the
+   requested months; Order Booking spans months with entered actuals; Sales
+   Received and Achievement span months where notYetRecorded is false. These
+   must move by themselves as the year progresses.
+
+3. Rename the Target card to "Target Plan" so it is not read as a commitment
+   figure when it includes an unstarted month.
+
+Do NOT:
+  - change the Apr-Sep API request, or decouple the secondary page from it
+  - change how planRecorded, secondaryPlan or targetSecondary are computed
+  - change the Data-table Target column
+  - change any band, threshold or Low Performers logic
+  - touch Secondary Performance, which is already correct
+
+Show me the diff before applying. After applying, print all four cards as
+rendered, and confirm the visible figures now reproduce the visible percentage.
+```
+
+---
+
+## Prompt 29 — Three read-only questions raised by Prompt 27
+
+Send separately. Not a code change.
+
+```
+Read-only. Change nothing. State which source each figure comes from.
+
+SECTION A - TWO SURFACES DISAGREE ON WHO HAS LEFT
+
+/api/mgmt/data returns isLeft = false for M. Raman and Amruth Shivappa Banakar.
+The Deep Dive snapshot lists both among its 16 LEFT members, with leaving dates
+of 7 May 2026 and 1 June 2026.
+
+So they render on the State Head page as ordinary active members - no dimming,
+no Left badge - while another surface has them departed.
+
+A1. For all 189 members, compare isLeft in /api/mgmt/data against the Deep Dive
+    snapshot. How many disagree? List them with both values and any HR leaving
+    date.
+
+A2. Where does each surface get isLeft from? Name both fields and paths.
+
+A3. Which is correct for M. Raman and Amruth? If HR has a leaving date and one
+    surface ignores it, say which.
+
+A4. The Low Performers TAB does not exclude LEFT rows; the KPI CARD does. Today
+    both show 35 by coincidence. Given A1, is that coincidence already broken -
+    are any of the 35 LEFT according to the Deep Dive snapshot even though
+    /api/mgmt/data says otherwise?
+
+SECTION B - TWELVE FLAGGED ANOMALIES INSIDE THE HEADLINE
+
+Prompt 27 B2 reported 12 flagged person-month anomalies carrying
+Rs 7,20,59,801.74 of sales against Rs 50,38,475.10 of order booking - an excess
+of Rs 6,70,21,326.64, larger than the whole company-wide Rs 4.78 crore gap.
+
+B1. List all 12: member, month, sales, order booking, and what flagged them.
+
+B2. What does "flagged" mean here - a stored flag, a computed check, a log line?
+    Where does the flag live?
+
+B3. Is that flag surfaced anywhere a user would see it, or does it exist only in
+    diagnostics? If the Rs 84.63 Cr Sales Received card includes Rs 7.2 crore of
+    flagged rows with no indication, say so plainly.
+
+B4. Are these 12 rows included in the Achievement numerator? If yes, the 78.74%
+    is partly built on flagged data.
+
+B5. Do the same 12 members appear in the Prompt 20 cross-foot as large
+    mismatches? If the anomaly flag and the cross-foot gap point at the same
+    people, that narrows the cause considerably.
+
+SECTION C - THE 403 IS NOW A PATTERN
+
+The formula-level check on STATE HEAD DASHBOARD(2026-27) returned 403
+PERMISSION_DENIED. All five closed-year SKU workbooks returned 403 in Prompt 22.
+The connected account reads cell VALUES without difficulty but cannot reach
+Sheets metadata.
+
+C1. Which Google APIs and scopes does the connected account actually have? Print
+    the scope list.
+
+C2. Is the 403 specific to spreadsheets.get with formula or metadata fields, or
+    does it apply to any metadata call on any sheet? Test one workbook that DOES
+    work and one that does not, and print both responses.
+
+C3. Which read-only checks are currently impossible because of this? Formula
+    provenance, tab enumeration, last-modified times - list what we cannot
+    verify.
+
+C4. What scope would be needed, and is it a permission change on the connected
+    account or a sharing change on the files? Describe only. Request nothing.
+
+Report only.
+```
+
+---
+
+## Notes on the Prayag pack
+
+Query **D2 is rewritten**. It no longer asks Prayag to confirm the Target Master,
+which project configuration now marks **retired**. It states that we read every
+member's monthly plan from the `SECONDARY ORDER BOOKING REPORT 2026-27` tab of
+the central dashboard — about ₹158.62 crore — and asks the precise question:
+
+> Are the monthly PLAN cells typed directly into the central dashboard, or
+> formula-linked to each person's `PLAN 26-27` workbook? If linked, which source
+> tab and how often does it refresh?
+
+A new **D2b** asks about Ravi Upadhyay and Shiv Kumar. They are the only two
+members with no monthly rows of any kind for FY2026-27 — no plan, no booking, no
+sales. That is why the KPI Target falls back to `targetSecondary` for exactly
+those two, ₹24 lakh each. Two anomalies, one root cause.
+
+The pack is now 22 queries.
+
+## Corrections to my earlier statements
+
+- **M. Raman is not in `noTarget`.** The band tests
+  `sp.plan != null OR targetSecondary != null`, not `targetSecondary > 0`. His
+  `secondaryPlan` is ₹12,30,000, he is in `below25`, and he is one of the 35 Low
+  Performers. I read the band logic wrongly.
+- **Low Performers is not hiding a quarter of the roster.** Only 2 of the 52
+  `noTarget` members have a non-zero plan. The other 50 genuinely have none.
+
+## Worth keeping in view
+
+- The fallback fires only on **null**, never on zero. So 17 members holding
+  ₹5.90 crore of `targetSecondary` contribute nothing to the KPI Target while the
+  Data table shows them a target. The card and the table disagree by design.
+- `achBand()` returns `noTarget` whenever `achievementPct` is null, so the band
+  means "no target" *or* "no computable achievement" *or* "no fully recorded
+  month" — three situations under one label.
+
+## Still open
+
+- **Prompt 21** — visit rates five to eight times higher for departed members.
+- **Prompt 22** — the 403 on the closed-year SKU workbooks, now Section C above.
+- **Prompt 23** — ₹10.51 crore snapshot-versus-monthly divergence, now confirmed
+  on a third surface.
+- **Prompt 26** — partial-month label, before the August order file is loaded.
+- **Prompt 10** — five state alias maps, and `"UP (A)"`.
+- **Prompt 11** — the winner-take-all distributor vote, and the 130-row table.
+- **Prompts 16 and 17** — the discount basis, and the readiness fix.
+- The `costRatioSales` guard fix.
