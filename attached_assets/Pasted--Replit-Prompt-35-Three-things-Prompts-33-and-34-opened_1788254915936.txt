@@ -1,0 +1,154 @@
+# Replit Prompt 35 — Three things Prompts 33 and 34 opened
+
+**Date:** 1 September 2026
+**Scope:** Read-only. Change nothing.
+
+**Standing rule:** every figure states which database or source it came from.
+
+Tamil Nadu is being handled separately. These are the other three.
+
+---
+
+## Prompt 35
+
+```
+Read-only. Change nothing, regenerate nothing, remap nothing.
+
+SECTION A - THE GROWTH NUMBER HALVED OVERNIGHT
+
+August primary arrived through register_sheets_sync. The comparison moved:
+
+  Apr-Jul   FY2026-27 Rs 104.92 Cr  vs FY2025-26 Rs 100.90 Cr  = +3.99%
+  Apr-Aug   FY2026-27 Rs 129.36 Cr  vs FY2025-26 Rs 126.25 Cr  = +2.46%
+  Aug alone FY2026-27 Rs  24.44 Cr  vs FY2025-26 Rs  25.36 Cr  = -3.61%
+
+August 2026 came in BELOW August 2025, and YTD growth fell from 4.0% to 2.5%.
+Nobody was told. Anyone quoting +4% growth yesterday is now wrong.
+
+A1. Growth.tsx line 188 derives periodLabel. Print the derivation and confirm it
+    now reads Apr-Aug rather than Apr-Jul. It should have moved by itself.
+
+A2. Print exactly what the Growth page renders today: the Overall card figures,
+    the period label, the partial-month list, and the Territory/Institutional
+    cards. I want the rendered output, not the API fields.
+
+A3. Does any OTHER surface still show the Apr-Jul comparison, or a hardcoded
+    Apr-Jul label beside an Apr-Aug figure? Check every page, report, export and
+    AI payload that compares fiscal years. Name any that are stale.
+
+A4. August is analytics-complete but register_month_state.frozen_at is NULL. Does
+    any surface distinguish "complete" from "frozen"? If a month can be complete
+    for analytics and unfrozen administratively, which behaviour follows which
+    flag?
+
+A5. Is the August decline real, or an artefact of incomplete sync? The sync ran
+    six times between 30 Aug and 1 Sep, rows climbing 6,150 to 10,499. Has it
+    settled? Print the last three sync runs and whether the August count is
+    stable.
+
+SECTION B - THE SUFFIX EVIDENCE EXISTS IN ONE FILE ONLY
+
+Prompt 34 established that MAHARASTRA L/R/S and UP ( R ) survive nowhere in
+production - not in sale_line, sale_line_all, secondary_register_line,
+secondary_sku_line, person_state_coverage or customer_master.
+
+The ONLY surviving record is the checked-in snapshot:
+
+  artifacts/api-server/data/prayag_data.json
+
+It is the sole evidence that L means Lalan, R means Rizvi and S means Sandeep.
+
+B1. Confirm that file is the only surviving source of the suffix-to-head mapping.
+    Is it generated, hand-maintained, or a captured snapshot? If it is
+    regenerated from the live sheet, it can be overwritten - say so.
+
+B2. Print every suffix-bearing label in that file with its head, retailers and
+    sales value. The complete list, not a sample.
+
+B3. If the live State Head Dashboard sheet were updated tomorrow and the file
+    regenerated, would the L/R/S rows survive? If not, this evidence is one
+    regeneration away from being lost.
+
+B4. Is the mapping recorded anywhere durable - a comment, a memory file, a
+    migration, documentation? If it exists only in a generated JSON, it should
+    be written down somewhere that does not regenerate. Say where it should go.
+    Do not write it yet.
+
+SECTION C - WINNER-TAKE-ALL IS NOW DISPROVEN, WITH EVIDENCE
+
+Prompt 11 asked about the distributor voting rule and was never answered. There
+is now proof.
+
+Maharashtra's Rs 20.81 crore splits four ways in sale_line.head_canon:
+
+  Lalan Kumar        8,061 rows   Rs 14.99 Cr   72.0%
+  Syed Aqil Rizvi    5,520 rows   Rs  5.75 Cr   27.6%
+  Sandeep Dadheech     103 rows   Rs  0.06 Cr    0.3%
+  Shailesh Sharma        9 rows   Rs  0.01 Cr    0.05%
+
+The vote gives Lalan ALL TEN distributors, 15 roster rows to 4. Rizvi holds more
+than a quarter of the state's value and is credited with zero distributors.
+
+The clean case: DIST#15371 WAHID MARKETING (WADI) resolves to LALAN through the
+vote. The source pack puts it under MAHARASTRA R, which is RIZVI, where it is the
+top account at Rs 1,20,84,258.
+
+C1. Confirm that distributor's attribution in both sources and state which is
+    correct.
+
+C2. AP has two heads in sale_line - Sandeep Dadheech and Suresh Nair. How does
+    the vote resolve AP, and does the losing head show zero distributors there
+    too?
+
+C3. List every state where sale_line.head_canon shows MORE THAN ONE head, with
+    each head's rows, value and share. For each, print who wins the distributor
+    vote and who gets zero.
+
+C4. If distributors were attributed by head_canon share instead of by roster-row
+    vote, how would the ten head distributor counts change? Compute only, change
+    nothing.
+
+C5. Who is Shailesh Sharma? Nine Maharashtra rows in FY2025-26, on no roster we
+    have seen. Print any person, registry, coverage or assignment record.
+
+C6. Prompt 34 D3 says head_canon, customer_assignment and person_state_coverage
+    already carry ownership correctly. If that is right, why does the Coverage
+    page derive head attribution from a roster-row vote at all rather than from
+    those fields? Answer from the code.
+
+Report only. Propose no change.
+```
+
+---
+
+## Notes
+
+- A1 and A2 are the urgent pair. The growth figure people quote has halved, and
+  if the label moved correctly then the page is honest and only the humans need
+  updating. If a stale Apr-Jul label sits beside ₹129.36 Cr anywhere, that is a
+  wrong number on a screen.
+- A5 matters before anyone reacts to the decline. Six syncs in fourteen hours
+  with the count climbing suggests it may not have settled. A −3.61% August that
+  is still filling in is not yet a fact.
+- Section B is preservation, not investigation. The only record that L means
+  Lalan sits in a generated JSON file. One regeneration and the evidence for
+  today's entire finding is gone.
+- C6 is the question underneath Section C. If ownership is already correct in
+  three fields, the roster-row vote is not just wrong — it is unnecessary.
+
+## Not in this prompt
+
+- **Tamil Nadu** — ₹5.75 crore across 4,373 rows with `head_canon` NULL, where the
+  discarded suffix is the only attribution evidence. Being handled separately.
+- **`UP ( A )`** — now known to be 16,423 rows and ₹22.87 crore across all years,
+  not the ₹2.44 crore of FY2026-27 alone. Still blocked on the territory
+  question: the data says Anant Singh, WUP belongs to Lalan, EUP to Wahid — and
+  Wahid turns out to be **WAHID MARKETING**, a distributor, not a person. That
+  needs a business answer.
+
+## Still unanswered from earlier prompts
+
+Prompt 17 (why the 23 August readiness fix did not take), 21 (visit rates), 22
+(the 403 on Sheets metadata), 23 (₹10.51 crore snapshot-versus-monthly), 29
+(`isLeft` disagreement, the 12 flagged anomalies), 32 (₹47.98 crore of FY2025-26
+with no state).
