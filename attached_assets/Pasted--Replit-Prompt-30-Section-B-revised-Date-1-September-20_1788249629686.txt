@@ -1,0 +1,145 @@
+# Replit Prompt 30 — Section B, revised
+
+**Date:** 1 September 2026
+**Supersedes:** Section B of the original Prompt 30
+**Scope:** B0 is read-only and must come back first. B1 is the code change.
+
+**Why Section A cleared the way:** the mismatch exists on exactly one surface —
+the Secondary Performance head row. Company card, Total row, member rows, State
+Head Dashboard KPIs and Combined Performance already use `secondaryPlanRecorded`.
+Comparison, Warning System, Red Alerts and AI payloads use different metrics
+entirely. So this is a genuine one-place change.
+
+**Why the ranking matters:** six of ten heads move position under the correction.
+Rizvi 5th to 3rd, Biju 3rd to 6th, Lalan 9th to 7th. Heads have been compared on
+distortions of different sizes — the share of plan sitting in unrecorded months
+runs from **18.3% (Biju) to 45.3% (Sunil Patel)** against a company average of
+21.9%, and none of that spread reflects performance.
+
+---
+
+## B0 — read-only, send this first
+
+```
+Read-only. Change nothing. Do not apply the head-row denominator change yet.
+
+Sunil Patel moves from 77.03% to 140.72% under the corrected basis, landing in
+the emerald above-100% band. His recorded plan is Rs 52.81 lakh of a Rs 96.47
+lakh full plan - 45.3% of his plan sits in unrecorded months, against a company
+average of 21.9%. He is the largest outlier by a wide margin.
+
+The correction is arithmetically right, but it has a mirror risk: aligning the
+denominator to recorded months makes achievement INFLATE wherever plan rows are
+missing rather than genuinely unrecorded. The Prompt 20 cross-foot found 27
+members with no monthly rows at all and 10 more with every amount null.
+
+Before the change goes in:
+
+B0.1 List every member under Sunil Patel with: full-period plan, planRecorded,
+     recorded sales, and the count of monthly rows that are present, null, or
+     absent entirely.
+
+B0.2 How many of his members are among the 27 with no monthly rows, or the 10
+     with all-null amounts? Name them.
+
+B0.3 What is Sunil Patel's achievement if members with missing or all-null plan
+     rows are excluded from BOTH numerator and denominator? Print that figure
+     alongside the 140.72%.
+
+B0.4 Run the same check for all ten heads: how many members under each have
+     missing or all-null plan rows, and what share of that head's plan gap they
+     represent. I want to know whether "unrecorded" means a genuinely open month
+     or an absent row - those are different things and the correction treats them
+     identically.
+
+B0.5 Does any head besides Sunil Patel cross 100% under the correction, now or
+     plausibly next month?
+
+Report only. If B0.3 differs materially from 140.72%, say so plainly - it would
+mean the correction fixes one distortion and introduces another.
+```
+
+---
+
+## B1 — the code change, after B0
+
+```
+This is a code change. Two things, both narrow.
+
+1. HEAD-ROW DENOMINATOR
+   The Secondary Performance head row computes group sales / group.secondaryPlan,
+   using the full selected period. The company card and member rows both use
+   recorded-month plan. Make the head row consistent with them: use the sum of
+   member secondaryPlanRecorded.
+
+   Requirements:
+     - Reuse the field member rows already use. Do not compute a new one.
+     - Do NOT change the company card, the Total row, member rows, the Plan card,
+       or any order-booking or sales figure.
+     - Do NOT change how planRecorded or secondaryPlan are computed.
+     - Do NOT change the Plan column on the head row. That column should keep
+       showing the full-period plan - it is a real figure. Only the achievement
+       denominator changes.
+     - Section A5 confirmed this is the only surface with this mismatch. Do not
+       touch any other surface.
+
+   Label it. The head-row achievement should carry the same "recorded-month plan"
+   wording the company card now has, so a reader can see the two levels agree.
+
+2. TRUNCATION TO ROUNDING
+   The percentage formatter truncates rather than rounds. Sandeep's exact
+   86.757825% renders as 86.75% instead of 86.76%.
+
+   Change it to round half up. This biases every percentage on the page downward
+   by up to 0.01 points today, in the same direction as everything else we have
+   been correcting.
+
+   Apply it only to the percentage formatter on this page. Do not change any
+   currency formatting, and do not change any stored or computed value - this is
+   display rounding only.
+
+Show me the diff before applying.
+
+After applying, print:
+  - all ten head rows with new percentages and colour bands
+  - confirmation that the sum of head-row sales still reconciles exactly to
+    Rs 84,63,00,457.14
+  - confirmation that the company card still reads 78.74% and member rows are
+    unchanged
+```
+
+---
+
+## Notes
+
+- B0.4 is the question I most want answered, and it generalises beyond this fix.
+  "Unrecorded" currently means both *an open month that will fill in* and *a row
+  that does not exist*. The correction treats them identically, and they are not
+  the same thing. Anywhere else that distinction is collapsed will have the same
+  problem.
+- If B0.3 comes back close to 140.72%, ship B1. If it comes back materially
+  lower, the correction is trading one distortion for another and needs a
+  condition on missing rows before it goes in.
+- Expected effects from Section A, for checking afterwards: ten percentages
+  change, five colour bands change (Lalan, Pawan, Nasir and Sulinder from orange
+  to amber; Sunil Patel from yellow to emerald), and nothing else moves — no Low
+  Performer, Red Alert, Warning or AI output.
+
+## Still open
+
+- **Prompt 29** — the `isLeft` disagreement between two surfaces, the 12 flagged
+  anomalies worth ₹6.70 crore inside Sales Received, and the 403 on Sheets
+  metadata.
+- **The CRM reference workflow** — six distinct target quantities against the
+  app's two fields, PS Code 5 never mentioned before, `=iferror(AY52/BM52)` as
+  the specified sale-achievement formula, and the Amount/Count pairing the
+  dashboard shows only as rupees.
+- **Prompt 30 Section C** — the ₹62.49 lakh of real August sales excluded with no
+  label, and the asymmetry of counting August plan while excluding August sales.
+- **Prompt 21** — visit rates for departed members.
+- **Prompt 23** — ₹10.51 crore snapshot-versus-monthly divergence.
+- **Prompt 26** — partial-month label, before the August order file is loaded.
+- **Prompt 10** — five state alias maps, and `"UP (A)"`.
+- **Prompt 11** — the winner-take-all distributor vote, and the 130-row table.
+- **Prompts 16 and 17** — the discount basis, and the readiness fix.
+- The `costRatioSales` guard fix.
