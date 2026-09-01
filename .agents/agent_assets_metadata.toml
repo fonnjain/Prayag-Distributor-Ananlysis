@@ -6,60 +6,70 @@ id = "9Lj7u3WrNwdj6I_nNnQMV"
 uri = "file://artifacts/prayag/Prayag_Sales_Intelligence_Report.md"
 type = "text"
 title = "Prayag India — Sales Intelligence Executive Report"
+logical_id = "c80098ae-7179-4ad2-a5b2-e977dcde5473"
 
 [[outputs]]
 id = "VDfjcBPkaKdS2r8Da9XiT"
 uri = "file://Prayag_GoogleSheets_Connection_Status.docx"
 type = "word_document"
 title = "Google Sheets Connection Status — Prayag India"
+logical_id = "ca8f9b3a-cde3-4515-911c-ceb336ee2bfe"
 
 [[outputs]]
 id = "mWAsWkXZ2B9rTG5tuHxBZ"
 uri = "file://Prayag_Architecture.xlsx"
 type = "table"
 title = "Prayag Architecture — Excel (8 sheets)"
+logical_id = "4945038b-9a72-4949-b8de-9b1a70f28ef6"
 
 [[outputs]]
 id = "rct7CQB8ClaZ3f9R9MasR"
 uri = "file://Prayag_Architecture.docx"
 type = "word_document"
 title = "Prayag Architecture — Word Document"
+logical_id = "f5148e70-d699-4c09-9969-8ca2806d0910"
 
 [[outputs]]
 id = "j-2LKJ5vvDdd3gFuJabA7"
 uri = "file://exports/disputed-2026-27-Jul-26.xlsx"
 type = "table"
 title = "Disputed Jul-26 Rows — Review Export"
+logical_id = "3c03c3a6-ff16-401d-8a69-86d79572ea01"
 
 [[outputs]]
 id = "OcKBjVD0CEiCM10hp_hL2"
 uri = "file://exports/Prayag_Architecture.xlsx"
 type = "table"
 title = "Prayag Architecture (Excel — 6 sheets)"
+logical_id = "d521bf76-f486-470b-9e97-99ce799753ac"
 
 [[outputs]]
 id = "gVTvYmc-G_n_Ko17QFD2Y"
 uri = "file://exports/Prayag_Architecture_and_Logic.docx"
 type = "word_document"
 title = "Prayag Architecture and Logic (Word — 10 sections)"
+logical_id = "7e07e985-5510-4c85-8fe6-47cceb0b3ec9"
 
 [[outputs]]
 id = "2OWlhYPleRBJ9NTmy3Zs0"
 uri = "file://Prayag_Architecture_DB.xlsx"
 type = "table"
 title = "Prayag Architecture & DB Schema (Excel)"
+logical_id = "5f211eb2-8278-408b-a936-77d2a3ba96a5"
 
 [[outputs]]
 id = "Jvu3Du5Od4iEJ2ZFKJ2Gv"
 uri = "file://Prayag_Logic_Terms.docx"
 type = "word_document"
 title = "Prayag Business Logic, Terms & Formulas (Word)"
+logical_id = "cc5e1c11-5abe-456b-910d-51cacd8a8590"
 
 [[outputs]]
 id = "SekSxPftJDWs1l5OxdB5T"
 uri = "file://prayag_overview_reference.docx"
 type = "word_document"
 title = "Prayag Overview Reference — FY24-25 months & card sources"
+logical_id = "b22b976b-50ab-495f-9e0b-a84e6bf9bc73"
 
 [[outputs]]
 id = "P-Kp3RybvlYY94lOUqEMB"
@@ -67,6 +77,7 @@ uri = "file://docs/exports/Sales-Deep-Dive-Glossary-and-Logic.pdf"
 type = "pdf"
 title = "Sales Deep Dive — Glossary & Logic"
 description = "Every metric on the Sales Deep Dive page: definitions, exact formulas, data sources, thresholds and closed-FY behavior."
+logical_id = "80a33aaf-151c-4fb1-8a33-c8c0f083cc03"
 
 [[outputs]]
 id = "0EHqCHKUlnAwb2XVpTAv2"
@@ -74,6 +85,7 @@ uri = "file://docs/exports/Distributor-Deep-Dive-Glossary-and-Logic.pdf"
 type = "pdf"
 title = "Distributor Deep Dive — Glossary & Logic"
 description = "Retailer lists, flows, SKU spread, investment/ROI tiering and capacity checks: definitions, formulas and data sources."
+logical_id = "3c84c994-127b-4208-93d9-ebb59d70aa3c"
 
 [[outputs]]
 id = "tb_tNNMbopDCLz285lhHo"
@@ -81,6 +93,7 @@ uri = "file://docs/exports/SKU-Deep-Dive-Glossary-and-Logic.pdf"
 type = "pdf"
 title = "SKU Deep Dive — Glossary & Logic"
 description = "Catalogue, Review/Push lists, discounts, seasonality, movement trackers: definitions, formulas, cohort and season-banding rules."
+logical_id = "f9bb59cd-c440-4e01-8fbd-d399eefd08c7"
 
 [[outputs]]
 id = "gvsjod9vD0olM63HkS6ou"
@@ -88,6 +101,7 @@ uri = "file://docs/exports/State-Head-and-Sales-People-Glossary-and-Logic.pdf"
 type = "pdf"
 title = "State Head & Sales People — Glossary & Logic"
 description = "Plan/OB/sales measures, achievement definitions, coverage, arrears handling, low-performer rules and color bands."
+logical_id = "edb896c3-9aa5-4ba2-a1f7-adee65185e30"
 
 [[outputs]]
 id = "mRDaNbik5HCdMhKsIvgxw"
@@ -95,6 +109,7 @@ uri = "file://docs/exports/Architecture-and-Database.xlsx"
 type = "table"
 title = "Architecture & Database"
 description = "Full system architecture, API route inventory, database tables/views with columns, data sources and background jobs — one sheet each."
+logical_id = "a5919f1c-92a0-4daa-a376-e87480cefbac"
 
 [[outputs]]
 id = "Jd9KneYFkLdyMCsk48SVt"
@@ -102,6 +117,7 @@ uri = "file://docs/QA_REPORT_2026-08-01.md"
 type = "text"
 title = "Dashboard QA Report — 1 Aug 2026"
 description = "Full QA of dashboard numbers vs database across all FYs and date filters: 70+ exact matches, tile arithmetic and captions verified, audit engine 28/30 pass with 0 genuine failures."
+logical_id = "9b405e1e-5379-4b0d-a5ee-327d7c343459"
 
 [[outputs]]
 id = "mULXs2sZf_YfcsfQLAtla"
@@ -109,6 +125,7 @@ uri = "file://docs/QA_REPORT_GLOSSARIES_2026-08-01.md"
 type = "text"
 title = "QA Report — 1 Aug 2026 (Glossaries v2 + Reference)"
 description = "Full QA: frozen-year anchors, FY2026-27 month/quarter/YTD checks, secondary Q1, July ₹1.46 Cr resolution, glossary conformance, and UI period-label fixes."
+logical_id = "af663cc8-cb30-4984-9c31-fb5e623a22ed"
 
 [[outputs]]
 id = "09sPJSCS0a2mRwiL--HV1"
@@ -116,6 +133,7 @@ uri = "file://exports/Targets_Page_Documentation.xlsx"
 type = "table"
 title = "Targets Page — Documentation"
 description = "What the Targets page shows, where its data lives, how it works, and which pages consume it."
+logical_id = "80e1b4ca-0c95-435b-ac6d-f576342625f7"
 
 [[outputs]]
 id = "OOTlT0CreAG8J7p8E_GFL"
@@ -123,6 +141,7 @@ uri = "file://exports/DataSources_Targets_Documentation.xlsx"
 type = "table"
 title = "Data Sources Targets — Documentation"
 description = "State Head Targets and Secondary Targets editors: database, logic (seasonal calibration, Auto Calculate), and downstream connections."
+logical_id = "534b71b0-9922-4abe-81d0-02a04f7bbd70"
 
 [[outputs]]
 id = "vRXu8lq6_DthNCcZ8OT3f"
@@ -130,6 +149,7 @@ uri = "file://exports/Prayag_Database_Documentation.xlsx"
 type = "table"
 title = "Database Documentation (Excel)"
 description = "All database tables, columns, views, where each table's data comes from, and how the data flows into the app."
+logical_id = "011b6fc7-ce1e-4197-a53d-d7bcc8316979"
 
 [[outputs]]
 id = "ciCk4lg58s2KX6VgVNhRf"
@@ -137,6 +157,7 @@ uri = "file://exports/Reports_and_CompanyReports_Documentation.xlsx"
 type = "table"
 title = "Reports & Company Reports Documentation (Excel)"
 description = "What the Reports and Company Reports pages do, their sources, and how they connect to the rest of the app."
+logical_id = "bcf13aa1-722f-4573-a484-1fe38f275e48"
 
 [[outputs]]
 id = "-e-Aw6ScQXCZh9z0EEQgU"
@@ -144,6 +165,7 @@ uri = "file://exports/AI_Analyst_Documentation.docx"
 type = "word_document"
 title = "AI Analyst Documentation (Word)"
 description = "How the AI Analyst works, step by step, with its functionalities, capabilities and limits."
+logical_id = "f9413a2d-09df-438c-9596-7d3387a9cfa6"
 
 [[outputs]]
 id = "QiNlisGogNZ5hJUiywVCj"
@@ -151,6 +173,7 @@ uri = "file://exports/AI_Reports_Documentation.docx"
 type = "word_document"
 title = "AI Reports Documentation (Word)"
 description = "How AI Reports works, the document types it can generate, and its guarantees and limits."
+logical_id = "79e3fda3-93f9-4757-a941-6b6aafe89fbc"
 
 [[outputs]]
 id = "vtKa5BJLGP8roQ_xUHDFD"
@@ -158,6 +181,7 @@ uri = "file://.agents/outputs/prayag-source-code.zip"
 type = "unspecified"
 title = "Prayag source code (complete)"
 description = "Database schema, API server architecture (lib + routes + config + scripts), and all frontend pages/components for the Prayag Sales Intelligence app — 432 files."
+logical_id = "c31568fa-184c-43be-bb14-757406168381"
 
 [[outputs]]
 id = "WV_WLk2WRS84Kr5rXQC7q"
@@ -165,6 +189,7 @@ uri = "file://artifacts/prayag/public/api-reference.md"
 type = "text"
 title = "Prayag API Reference"
 description = "Complete API documentation — 14 endpoint groups, 100+ routes, auth guide, common params, and HTTP status codes."
+logical_id = "388728e0-0019-42c3-91e9-71be29dc6d36"
 
 [[outputs]]
 id = "X7Cvckum5f8e_w1eJeP9H"
@@ -172,6 +197,7 @@ uri = "file://attached_assets/assignment_queue_737.csv"
 type = "table"
 title = "Assignment Queue — 737 rows (Bands A/B/C)"
 description = "74 A · 465 B · 198 C. Columns: customer_id, name, type, state, district, former_tm, confidence, state_head, suggestion_band, suggested_tm, suggested_tm_current_load"
+logical_id = "4433b986-eef2-45e1-b070-4736650db0de"
 
 [[outputs]]
 id = "Ir1XWwP6iTgWjl37-6fE_"
@@ -179,6 +205,7 @@ uri = "file://attached_assets/assignment_deferred_2640.csv"
 type = "table"
 title = "Deferred — 2,640 rows"
 description = "1,536 DEFERRED_PENDING + 1,104 DEFERRED_STATE_HEAD_COVERED"
+logical_id = "11384c6c-f98f-4e0b-90bf-0c7a7435f631"
 
 [[outputs]]
 id = "Xwu4T6hoY4iOMNlhdEAFx"
@@ -186,6 +213,7 @@ uri = "file://attached_assets/fy2025-26_customer_trading.csv"
 type = "table"
 title = "FY2025-26 Customer Trading List"
 description = "CSV ready to merge into the customer master workbooks. It contains 718 customer-level rows representing all FY2025-26 sale_line activity."
+logical_id = "3050cf2c-0484-42c4-998e-1999e2853d7e"
 
 [[outputs]]
 id = "8sXo67Zs_vUPjZx8Wx36v"
@@ -193,6 +221,7 @@ uri = "file://attached_assets/fy2026-27_customer_trading.csv"
 type = "table"
 title = "FY2026-27 Customer Trading List — Settled Months"
 description = "CSV ready for customer-master workbooks. It includes only frozen Apr-26 through Jul-26 sales-register months; the still-unsettled Aug-26 month is excluded."
+logical_id = "47c0b44f-6933-4bdb-b5ea-7747e71b0070"
 
 [[outputs]]
 id = "0Kzmux29amZqMSlkk7S5m"
@@ -200,6 +229,7 @@ uri = "file://attached_assets/fy2025-26_aprjul_customer_trading.csv"
 type = "table"
 title = "FY2025-26 Apr–Jul Customer Trading List"
 description = "Four-month like-for-like customer-level trading CSV for Apr-25 through Jul-25, matching the FY2026-27 settled-month comparison range."
+logical_id = "a34af6ef-f96f-43c3-8e25-5b81b8e18247"
 
 [[outputs]]
 id = "p7jkAurcvp2H0RuYc6hKk"
@@ -207,6 +237,7 @@ uri = "file://attached_assets/org_people.csv"
 type = "table"
 title = "Organisation People"
 description = "All 359 person-table rows, including active HR imports and inactive departed imports, with reporting and state-head relationships."
+logical_id = "97d272aa-6905-46fd-803c-d4dd0f6b65dd"
 
 [[outputs]]
 id = "9Ae2wJOkb2mmp-a6FGMUF"
@@ -214,6 +245,7 @@ uri = "file://attached_assets/org_territories.csv"
 type = "table"
 title = "Organisation Territories"
 description = "All 43 territories with parent hierarchy and split flag."
+logical_id = "ee4db355-4f4b-4236-af07-c3b8b7b96afb"
 
 [[outputs]]
 id = "H-D6BWlLw_4TWkUKjNNgR"
@@ -221,6 +253,7 @@ uri = "file://attached_assets/org_person_territory.csv"
 type = "table"
 title = "Person–Territory Assignments"
 description = "All 260 person-territory junction records; relationships are intentionally not collapsed."
+logical_id = "b452a989-79c0-4de9-9fe8-d1b6571be7cd"
 
 [[outputs]]
 id = "_7kOnqB3gASKiwauSoVWr"
@@ -228,6 +261,7 @@ uri = "file://attached_assets/org_designations.csv"
 type = "table"
 title = "Organisation Designations"
 description = "All 14 designations with rank, system flag, and total people holding each designation."
+logical_id = "7f3b987a-6201-46ea-9f4f-958fde1464ac"
 
 [[outputs]]
 id = "MJqTgr5I0GSonsBhtTwHB"
@@ -235,6 +269,7 @@ uri = "file://reports/canonical-coverage-mapping-77.csv"
 type = "table"
 title = "77-row canonical coverage mapping ledger"
 description = "Approved legacy-territory mappings with person, responsible state head, canonical leaf, and applied rule."
+logical_id = "a82a5812-a7c9-4aa1-8b27-249895e1eb54"
 
 [[outputs]]
 id = "YHaOXrt0hb4kqMZuuYZ2I"
@@ -242,6 +277,7 @@ uri = "file://suggested-project-tasks.md"
 type = "text"
 title = "Suggested Project Tasks"
 description = "Complete list of all 55 currently suggested project task drafts, listed by task number and title."
+logical_id = "6971a697-159c-43ca-a67d-f5647e3d1d5c"
 
 [[outputs]]
 id = "_z7FbyFVstq7rnkEmLRb4"
@@ -249,6 +285,7 @@ uri = "file://reports/july-pscode3-vs-august-product-wise-retailer-ratios.csv"
 type = "table"
 title = "July vs August matched-retailer ratios"
 description = "Complete canonical RET# overlap: July PSCode 3 NET, August Product-Wise Basic Order Value, and August/July ratio. RET- variants are normalized to RET#."
+logical_id = "b5134e11-5b60-4afd-9577-ce3be2034bfd"
 
 [[outputs]]
 id = "0VUfvY-2ov_KxiMt3gTEM"
@@ -256,6 +293,7 @@ uri = "file://attached_assets/prayag_analysis_export_2026-08-26.zip"
 type = "unspecified"
 title = "Prayag analysis export — 2026-08-26"
 description = "Read-only UTF-8 ZIP export of FY2025-26 and FY2026-27 sales, secondary data, organization, customers, products, targets, seasonal curves, schemes, alerts, market data, data dictionary, limitations, vocabulary, and anchor reconciliations. Validated from the exported CSVs: FY2025-26 145,613 rows / INR 3,609,953,808.51; FY2026-27 Apr-Jul 44,025 rows / INR 1,049,171,949.45; FY2025-26 Apr-Jul 43,398 rows / INR 1,008,949,620.86; 6,223 MRP codes."
+logical_id = "730aaa04-6b01-4f7f-99e3-1dea9b23fb56"
 
 [[outputs]]
 id = "DZ4groUc8QdjaVQKSK-JJ"
@@ -263,6 +301,7 @@ uri = "file://attached_assets/prayag_analysis_export_2026-08-26_with_prompts.zip
 type = "unspecified"
 title = "Prayag analysis export with prompt files"
 description = "Original analysis export plus both attached Replit prompt files in the prompts/ folder. Archive integrity validated."
+logical_id = "71791d52-35e9-45e1-8406-f1c01522d219"
 
 [[outputs]]
 id = "psOIbFKEoQBR8JmUvrMn0"
@@ -270,6 +309,7 @@ uri = "file://.local/outputs/Prayag-Sales-Intelligence.pptx"
 type = "slides"
 title = "Prayag Sales Intelligence (PPTX)"
 description = "Editable 18-slide PowerPoint product overview deck."
+logical_id = "13655cb3-8f60-453b-9067-b0d41bd85cbe"
 
 [[outputs]]
 id = "tRCQje2CaTJsWBgYdgyAF"
@@ -277,6 +317,7 @@ uri = "file://.local/outputs/Prayag-Sales-Intelligence-Complete-App-Logic.docx"
 type = "word_document"
 title = "Prayag Sales Intelligence — Complete App Logic"
 description = "Detailed Word document covering implemented web-app modules, data flows, calculations, safeguards, operational lifecycle, database architecture, completion status, and known limitations."
+logical_id = "dd95a53b-b4aa-44fa-9de2-858380fee4dc"
 
 [[outputs]]
 id = "XT-3rpmpURoCkG8fj_Mqa"
@@ -284,6 +325,7 @@ uri = "file://.local/outputs/Prayag-App-Logic-and-Database-Architecture.xlsx"
 type = "table"
 title = "Prayag App Logic and Database Architecture"
 description = "Excel workbook with 14 filterable sheets covering modules, calculations, data sources, API families, safeguards, limitations, database tables, 545 schema columns, relationships, views/indexes, lifecycle, and reference figures."
+logical_id = "9aabe5b5-f68b-44b5-92c9-21f3d326e1a7"
 
 [[outputs]]
 id = "sF_nhZbyzV32gdfPPc20k"
@@ -291,6 +333,7 @@ uri = "file://.local/outputs/MRP-Reconciliation-01Sep2026.md"
 type = "text"
 title = "MRP Master vs prayag-price.com Reconciliation"
 description = "Read-only 31 August 2026 reconciliation covering workbook/API counts, code and price differences, exposure, cache state, effective-date behavior, and raw payload samples."
+logical_id = "f01ab658-9401-479a-abdb-6fff5ea6308f"
 
 [[outputs]]
 id = "9Ncw5BeqMUJnVyVIf_C90"
@@ -298,3 +341,18 @@ uri = "file://.local/outputs/MRP-Automatic-Refresh-Audit-31Aug2026.md"
 type = "text"
 title = "Prompt 8 — Automatic MRP Refresh Audit"
 description = "Read-only production audit covering scheduler cadence, logged failures, September price exposure, cache/API drift, affected surfaces, and the effective-date decision boundary."
+logical_id = "c1965d77-3473-4c68-8c6a-9254de6faa42"
+
+[[outputs]]
+id = "gK3eZ11MQNZMOUzLCwTWG"
+uri = "file://.agents/outputs/prompt20-fy2627-member-crossfoot.csv"
+type = "table"
+title = "Prompt 20 — FY2026-27 Member Cross-foot"
+description = "All 189 snapshot members: snapshot order booking versus secondary_head_month, difference, monthly-row counts, and reconciliation status."
+logical_id = "1c743e6e-135f-4f65-8c6c-072a2fe06a45"
+content_hash = "sha256:a60dd1d658a49078ffbc8341aa979af635b2a20ad1c825c23a9de70ec663c30d"
+size = 18856
+mtime_ms = 1788234522024
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/1c743e6e-135f-4f65-8c6c-072a2fe06a45/8ca2f4c1-ff63-4f6c-b5a4-96f5b60a38bf"
+storage_version_token = "1788234539133042"
+content_type = "text/csv"

@@ -1,0 +1,188 @@
+# Replit Prompts 20, 21, 22
+
+**Date:** 1 September 2026
+**Scope:** All three read-only. Send separately, wait for each reply.
+
+**Standing rule:** every figure states which database or source it came from.
+
+Prompt 20 is the priority. Everything else today has been about missing data
+looking like zero. This is the reverse — figures visible on screen that the
+underlying source cannot reproduce.
+
+---
+
+## Prompt 20 — Snapshot figures with no traceable source
+
+```
+Read-only. Change nothing, rebuild no snapshot.
+
+Three departed members show FY2026-27 order booking in the deep_dive_snapshot
+that the monthly source cannot account for:
+
+  Ravi Upadhyay   Rs 11,404.80    no member row at all in secondary_head_month
+  Shiv Kumar      Rs 14,424.80    no member row at all
+  SANOJ M.        Rs 15,24,438    rows exist, every amount NULL
+
+That is roughly Rs 15.5 lakh visible on screen with nothing underneath it. The
+earlier report also stated that the monthly source "does not cross-foot to every
+snapshot total". That has never been quantified.
+
+1. For each of those three, trace the snapshot figure back to whatever produced
+   it. Which query, table or sheet does buildSnapshot read for member order
+   booking? Name the code path.
+
+2. If the monthly table is not the source of the snapshot's cumulative member
+   figures, what is? The two must reconcile or one of them is wrong.
+
+3. Quantify the cross-foot gap across ALL members, not just these three. For
+   every member in the FY2026-27 snapshot, print snapshot order booking against
+   the sum of their monthly rows, and the difference. Give the total absolute
+   difference in rupees and the count of members who do not reconcile.
+
+4. Is the same gap present in FY2025-26, where the anchor check passes? If the
+   snapshot and monthly source disagree there too, the FY2025-26 PASS is
+   verifying one of them and not the other.
+
+5. Which surfaces read the snapshot figure and which read the monthly source? If
+   two screens show the same member's order booking from different sources, they
+   can disagree and nothing explains why.
+
+6. SANOJ M. has monthly rows where every amount is NULL. What writes a row with
+   a NULL amount, and how many such rows exist across FY2026-27?
+
+Report only. Do not rebuild or repair any snapshot.
+```
+
+---
+
+## Prompt 21 — Visit rates that do not look plausible
+
+```
+Read-only. Change nothing.
+
+Comparing the two active members we have figures for against departed members:
+
+  Manas Ranjan Das   (active)        51 visits / 47 working days = 1.09 per day
+  Sudipta Thom       (active)       151 visits / 94 working days = 1.61 per day
+  Manish K Trivedi   (left 9 Jun)   440 visits / 56 working days = 7.9 per day
+  Jagdev             (left 13 Jun)  470 visits / 63 working days = 7.5 per day
+  Shafeeq Parengal   (left 23 Jul)  605 visits / 85 working days = 7.1 per day
+
+Departed members show five to eight times the visit rate of active ones.
+
+1. Print visits, working days and visits-per-day for ALL 173 active members plus
+   the 16 departed. Sorted by rate, highest first.
+
+2. Are the departed members outliers, or are Manas and Sudipta the outliers? Give
+   the median and the range for each group.
+
+3. Do visits and working days accumulate on the same basis? Specifically: does
+   the visit count keep accruing for a member after their working-day count
+   stops, or are they read from different columns with different reset logic?
+
+4. Three departed members show substantial visits with zero booking and zero
+   sales - Neeraj 258 visits, Shakti Raj 209, Amruth Banakar 179. Is a visit
+   recorded independently of any transaction, or should visits with no resulting
+   business be treated as suspect?
+
+5. Deo Bhushan Sharma shows 0 visits, 0 working days, 0 booking and 0 sales, and
+   is assigned to SUNIL MOHANTY - a head with no person, registry, coverage or
+   assignment record. How does a member come to be assigned to a head that does
+   not exist in the organisation?
+
+6. Amruth Shivappa Banakar is assigned to PRASHANT ONAM NAIK, whose own person
+   record says is_state_head = false with coverage under Biju C.O. Same question.
+
+Report only.
+```
+
+---
+
+## Prompt 22 — The closed-year SKU workbooks return 403
+
+```
+Read-only. Change nothing, request no new access.
+
+Sheets metadata for all five configured closed-year SKU workbooks returned
+HTTP 403 on the connected read-only account, so the tabs actually being read
+could not be established.
+
+  2021-22  1RtRByRmNQorYOEeHsZuOy1GIkB7dVu7MNv9P_pg97Bs
+  2022-23  1wj96uhny-eBC2umGa8bP9M1j1T9YEt-DsThduzoC-2c
+  2023-24  1c5ZmmcKUbp9hvW0aS_HQjkjL-FJyyZ2P8Orbc0uaPbY
+  2024-25  1sejEhXCaPXwYZ99mP0tPGo_pA623FQaBN2JBcreIy2g
+  2025-26  1aNQ2TczEMHcSeB26yKoKayiq1CWc4dXdTQORrgxdl80
+
+1. Does the application itself reach these workbooks successfully at runtime, or
+   does it hit the same 403? If it succeeds, which credential does it use and how
+   does it differ from the one used for the audit?
+
+2. When did the app last successfully read each of the five? Print the timestamp
+   and row count for each.
+
+3. If the app cannot read them either, what happens - does the SKU loader fail
+   loudly, skip the year silently, or serve stale cached data? Answer from the
+   code.
+
+4. secondary_sku_line and secondary_register_line both hold full data for every
+   closed year. If those workbooks are now unreadable, is the database the only
+   surviving copy?
+
+5. skuLoader.ts skips tabs whose titles contain SUMMARY. But the guard that
+   introduced the "PSCode2" name was committed as "warn when PSCode2 understates
+   retailer stock vs Summary Report". If the loader excludes Summary tabs, what
+   is that guard actually comparing against? Name the source of its comparison
+   figure.
+
+6. SkuFocus.tsx shows users: "The PSCode2 coverage check could not complete.
+   Recommendations are withheld to prevent false pushes." How often has that
+   fired in the last 30 days, and for which members? A user reading it will
+   assume a PS Code 2 report exists and is connected.
+
+Report only. Do not rename PSCode2 and do not request additional Drive access.
+```
+
+---
+
+## Notes
+
+- Prompt 20 first. A figure with no traceable source is more dangerous than a
+  missing one, because nobody audits a number that is already displayed. Question
+  3 is the real deliverable — the cross-foot gap has been acknowledged twice and
+  never sized.
+- Question 4 in Prompt 20 matters more than it looks. If the snapshot and monthly
+  source disagree for FY2025-26 as well, then the anchor PASS is verifying one of
+  them and not the other, and we do not currently know which.
+- Prompt 21 questions 5 and 6 tie the roster threads together. Two departed
+  members are assigned to heads whose existence is in question — one with no
+  organisation record at all.
+- Prompt 22 question 4 is the one to read carefully. If five years of source
+  workbooks are unreadable and the database is the only copy, that is a
+  preservation question, not a permissions one.
+
+## Corrected from Prompt 19
+
+- Comparison head aggregation **does** filter LEFT members by default (`!k.isLeft`
+  unless `population === "includeLeft"`). My earlier premise was stale. Only the
+  selector still exposes them.
+- The leaver population and the 58 unmatched names **do not** overlap. Jagdev and
+  SANOJ M. are not among the 58. One name matches: **Suresh Kumar Nair**, ₹19.25
+  lakh — who is also one of the six unrecognised State Head folders, which makes
+  query D5 to Prayag sharper.
+- The ₹13.51 crore therefore cannot be reframed as departed-member money.
+
+## Worth noting, no action needed
+
+`MISSING_SOURCES` already documents the target situation correctly: *"Target
+Master ... live in scattered per-head plan sheets; needs one consolidated sheet."*
+That matches Prayag's CRM workbook exactly. Query D2 in their pack is corroborated
+from two independent directions.
+
+## Still open
+
+- **Prompt 10** — five disagreeing state alias maps, and `"UP (A)"`.
+- **Prompt 11** — the winner-take-all distributor vote, and the 130-row table.
+- **Prompt 12 Part Two** — pages reading tables populated only in development.
+- **Prompt 16** — the discount recomputed on its original basis.
+- **Prompt 17** — why the 23 August readiness fix did not take.
+- The `costRatioSales` guard fix, still the cheapest change on the board.

@@ -1,0 +1,190 @@
+name,state_head,norm_key,snapshot_order_booking,monthly_order_booking,monthly_rows,nonnull_monthly_rows,difference,status
+Pravat Kumar Dash,Sandeep Dadheech,pravatkumardash,22813190.05,,0,0,22813190.05,NO_MONTHLY_ROWS
+Rajan Srivastava,Syed Aqil Rizvi,rajansrivastava,11183350.59,15740998.8399999983,12,5,-4557648.2499999983,MISMATCH
+Tafazul Nazir,Nasir Hussain Khan,tafazulnazir,693138.6,4586746.09999999995,12,5,-3893607.49999999995,MISMATCH
+Siddharth Shanker Singh,Syed Aqil Rizvi,siddharthshankersingh,2515954.95,6023747.6499999991,12,5,-3507792.6999999991,MISMATCH
+PAWAN KUMAR,Nasir Hussain Khan,pawankumar,2261035.26,4661943.03,12,5,-2400907.77,MISMATCH
+Anirban Biswas,Sandeep Dadheech,anirbanbiswas,3202341.44,5546413.2200000001,12,5,-2344071.7800000001,MISMATCH
+Biswajit Roy,Sandeep Dadheech,biswajitroy,7106690.97,9361342.4400000008,12,5,-2254651.4700000008,MISMATCH
+Roni Gupta,Sandeep Dadheech,ronigupta,11004060.98,13054392.3699999996,12,5,-2050331.3899999996,MISMATCH
+Pawan Kumar Pareek (Off-Roll),Sandeep Dadheech,pawankumarpareekoffroll,1112090.26,2869057.3799999998,12,5,-1756967.1199999998,MISMATCH
+Jitender Birla,Syed Aqil Rizvi,jitenderbirla,8059850.27,9609774.2499999972,12,5,-1549923.9799999972,MISMATCH
+SANOJ M.,Biju C.O,sanojm,1524438,,12,0,1524438,ALL_MONTHLY_AMOUNTS_NULL
+Siddharth Srivastava,Syed Aqil Rizvi,siddharthsrivastava,6023953.4,7542691.5000000004,12,5,-1518738.1000000004,MISMATCH
+Pradeep Kumar Dwivedi,Syed Aqil Rizvi,pradeepkumardwivedi,1465193.71,2978800.86000000016,12,5,-1513607.15000000016,MISMATCH
+Rohit Kumar,Syed Aqil Rizvi,rohitkumar,2224370.22,3731535.3799999999,12,5,-1507165.1599999999,MISMATCH
+Gonesh Dey,Sandeep Dadheech,goneshdey,6935634.64,8338210.2699999999,12,5,-1402575.6299999999,MISMATCH
+Nikhil Kumar,Sandeep Dadheech,nikhilkumar,7833627.53,9206636.6699999997,12,5,-1373009.1399999997,MISMATCH
+Suven Sengupta,Sandeep Dadheech,suvensengupta,16261761.78,17573704.4799999997,12,5,-1311942.6999999997,MISMATCH
+Rahul Singh,Anant Singh,rahulsingh,1260126.69,,12,0,1260126.69,ALL_MONTHLY_AMOUNTS_NULL
+Sudhanshu Kumar,Sandeep Dadheech,sudhanshukumar,4996504.38,6238308.6199999997,12,5,-1241804.2399999997,MISMATCH
+S.Tirumala Rao,Sandeep Dadheech,stirumalarao,1224765.29,,12,0,1224765.29,ALL_MONTHLY_AMOUNTS_NULL
+Tarun Giri,Anant Singh,tarungiri,2638807.7,3813709.4799999999,12,5,-1174901.7799999999,MISMATCH
+Prasun Chatterjee,Anant Singh,prasunchatterjee,3164566.17,4310624.67,12,5,-1146058.50,MISMATCH
+Unmesh Dilip Thakar,Lalan Kumar,unmeshdilipthakar,376984.49,1509532.14000000014,12,5,-1132547.65000000014,MISMATCH
+Saqib juned,Syed Aqil Rizvi,saqibjuned,7935456.54,9063581.9999999987,12,5,-1128125.4599999987,MISMATCH
+Sudip Sarkar,Sandeep Dadheech,sudipsarkar,8310237.62,9429691.6899999986,12,5,-1119454.0699999986,MISMATCH
+K Suresh Kumar,Biju C.O,ksureshkumar,991732.9,2101412.59999999995,12,5,-1109679.69999999995,MISMATCH
+Pramod Kumar,Sandeep Dadheech,pramodkumar,18763104.78,19799468.3400000012,12,5,-1036363.5600000012,MISMATCH
+Abhishek Kumar Gupta,Syed Aqil Rizvi,abhishekkumargupta,1008020.34,,12,0,1008020.34,ALL_MONTHLY_AMOUNTS_NULL
+Shivam Chauhan,Anant Singh,shivamchauhan,2353118.62,3349162.2599999995,12,5,-996043.6399999995,MISMATCH
+Sudipta Thom,Sandeep Dadheech,sudiptathom,980666,0,12,5,980666,MISMATCH
+Ashutosh Kumar (Rudrapur),Anant Singh,ashutoshkumarrudrapur,1983210.01,2899442.85000000008,12,5,-916232.84000000008,MISMATCH
+Vikash Gour,Pawan Sharma,vikashgour,3051342.13,3963853.5299999997,12,5,-912511.3999999997,MISMATCH
+Om dutt Dwivedi,Syed Aqil Rizvi,omduttdwivedi,6772045.98,7671438.3999999997,12,5,-899392.4199999997,MISMATCH
+Deependra Singh,Syed Aqil Rizvi,deependrasingh,5976321.76,6872308.4800000003,12,5,-895986.7200000003,MISMATCH
+Rinku,Anant Singh,rinku,3223974.37,4112896.9599999997,12,5,-888922.5899999997,MISMATCH
+Susanta Behera,Sandeep Dadheech,susantabehera,672415.82,1527420.26000000005,12,5,-855004.44000000005,MISMATCH
+Wasim Ahmad,Syed Aqil Rizvi,wasimahmad,4911241.89,5716520.3299999988,12,5,-805278.4399999988,MISMATCH
+Vijay Kumar,Sandeep Dadheech,vijaykumar,5216750.91,6003728.42,12,5,-786977.51,MISMATCH
+Kailash Ch. Ghadei,Sandeep Dadheech,kailashchghadei,9034850.43,9817306.8799999998,12,5,-782456.4499999998,MISMATCH
+Vaibhav Bapurao Waghe,Lalan Kumar,vaibhavbapuraowaghe,561068.6,1310078.8599999999,12,5,-749010.2599999999,MISMATCH
+Rajesh Patel,Syed Aqil Rizvi,rajeshpatel,809275.92,1542567.81000000003,12,5,-733291.89000000003,MISMATCH
+Hrusikesh Satapathy,Sandeep Dadheech,hrusikeshsatapathy,5058804.76,5775447.1900000001,12,5,-716642.4300000001,MISMATCH
+Milind Ashok Sadanand,Prashant Onam Naik,milindashoksadanand,7675.25,717587.66999999994,12,5,-709912.41999999994,MISMATCH
+Harsha K Rao,Prashant Onam Naik,harshakrao,121666.52,804830.24999999993,12,5,-683163.72999999993,MISMATCH
+Ashutosh Kumar,Sandeep Dadheech,ashutoshkumar,5843316.65,6497871.9499999992,12,5,-654555.2999999992,MISMATCH
+Shubham Shukla,Syed Aqil Rizvi,shubhamshukla,807614.08,1432897.79000000005,12,5,-625283.71000000005,MISMATCH
+Rajesh Chakraborty,Sandeep Dadheech,rajeshchakraborty,11152728.54,11755435.7700000001,12,5,-602707.2300000001,MISMATCH
+Ishant,Pawan Sharma,ishant,1598978.7,2195376.5400000001,12,5,-596397.8400000001,MISMATCH
+Amit Damodhar Jadhav,Lalan Kumar,amitdamodharjadhav,3102244,3694634.2900000003,12,5,-592390.2900000003,MISMATCH
+Dasari Adiseshu,Sandeep Dadheech,dasariadiseshu,6280114.75,6870879.7200000007,12,5,-590764.9700000007,MISMATCH
+Rakesh Kumar Sinha,Sandeep Dadheech,rakeshkumarsinha,18352982.74,18901759.990000000,12,5,-548777.250000000,MISMATCH
+Gaurav Kumar,Sandeep Dadheech,gauravkumar,6494839.1,7031795.0300000000,12,5,-536955.9300000000,MISMATCH
+Prasad Pundalik Yedge,Lalan Kumar,prasadpundalikyedge,531823.72,1064696.54000000015,12,5,-532872.82000000015,MISMATCH
+Riyas V,Biju C.O,riyasv,5513462.41,5985626.41000000013,12,5,-472164.00000000013,MISMATCH
+Sujan Ghata,Sandeep Dadheech,sujanghata,12242099.33,12710793.9699999996,12,5,-468694.6399999996,MISMATCH
+Basit Ahmad Pala,Nasir Hussain Khan,basitahmadpala,417556.7,873394.909999999,12,5,-455838.209999999,MISMATCH
+Swapnil Rajput,Lalan Kumar,swapnilrajput,865808.39,1302323.80999999993,12,5,-436515.41999999993,MISMATCH
+Deep Kumar,Nasir Hussain Khan,deepkumar,39434.99,470041.6,12,5,-430606.61,MISMATCH
+Sunil Kumar Pani,Sandeep Dadheech,sunilkumarpani,12174170.18,12586472.6200000001,12,5,-412302.4400000001,MISMATCH
+Dhaval Parmar,Sunil Patel,dhavalparmar,1122024.62,1531775.69000000020,12,5,-409751.07000000020,MISMATCH
+Ajay Morthad,Sandeep Dadheech,ajaymorthad,3397570.53,3805144.7299999997,12,5,-407574.1999999997,MISMATCH
+Ravi (Faridabad),Anant Singh,ravifaridabad,190628.92,592831.67,12,5,-402202.75,MISMATCH
+Rathod Vijaybhai,Sunil Patel,rathodvijaybhai,1202839.91,1602672.02999999984,12,5,-399832.11999999984,MISMATCH
+Susovan Singha,Sandeep Dadheech,susovansingha,7172155.41,7562877.7700000009,12,5,-390722.3600000009,MISMATCH
+SHOYKARAN NAI,Pawan Sharma,shoykarannai,1085979.38,1463591.89000000003,12,5,-377612.51000000003,MISMATCH
+Shaik Jani basha,Sandeep Dadheech,shaikjanibasha,9385982.08,9754418.8800000004,12,5,-368436.8000000004,MISMATCH
+Litan Saha,Sandeep Dadheech,litansaha,3321278.37,3684428.5299999998,12,5,-363150.1599999998,MISMATCH
+Sushanta Barman,Sandeep Dadheech,sushantabarman,3080653.18,3424009.86,12,5,-343356.68,MISMATCH
+Ankit Kumar,Anant Singh,ankitkumar,3270866.38,3611507.4499999999,12,5,-340641.0699999999,MISMATCH
+J.SURESH KUMAR,Biju C.O,jsureshkumar,2170439.3,2505148.0000000002,12,5,-334708.7000000002,MISMATCH
+Dhiraj Ravindra Patle,Syed Aqil Rizvi,dhirajravindrapatle,2806028.54,3135975.74,12,5,-329947.20,MISMATCH
+Prabhakar Pratap Singh,Sandeep Dadheech,prabhakarpratapsingh,14446806.16,14769826.5199999993,12,5,-323020.3599999993,MISMATCH
+Vishal Dheer,Syed Aqil Rizvi,vishaldheer,3976019.4,4295348.52000000046,12,5,-319329.12000000046,MISMATCH
+Saibulla S.,Biju C.O,saibullas,3759996.9,4066606.4999999997,12,5,-306609.5999999997,MISMATCH
+Sasikant Prasad,Sandeep Dadheech,sasikantprasad,6362410.72,6659715.62,12,5,-297304.90,MISMATCH
+Shuvadip Ghosh,Sandeep Dadheech,shuvadipghosh,10337242.8,10632867.4799999986,12,5,-295624.6799999986,MISMATCH
+Lingaraj Moharana,Sandeep Dadheech,lingarajmoharana,4402079.32,4690094.12,12,5,-288014.80,MISMATCH
+Dinesh Kumar Kaushik,Pawan Sharma,dineshkumarkaushik,2680298.07,2955229.1399999999,12,5,-274931.0699999999,MISMATCH
+Vikas Kumar (Bareilly),Syed Aqil Rizvi,vikaskumarbareilly,1300278.53,1574278.27999999997,12,5,-273999.74999999997,MISMATCH
+Ajeet Yadav,Syed Aqil Rizvi,ajeetyadav,7399981.78,7638025.0600000001,12,5,-238043.2800000001,MISMATCH
+Arun Sharma,Syed Aqil Rizvi,arunsharma,4086809.78,4322559.5400000000,12,5,-235749.7600000000,MISMATCH
+Pradeep Kumar,Sandeep Dadheech,pradeepkumar,2979179.89,3214385.88999999997,12,5,-235205.99999999997,MISMATCH
+Sunil Kumar,Syed Aqil Rizvi,sunilkumar,2203065.92,2437935.5200000001,12,5,-234869.6000000001,MISMATCH
+Dikart Kumar Borah,Sandeep Dadheech,dikartkumarborah,2982094.9,3215106.90,12,5,-233012.00,MISMATCH
+Indrajit Ghosh,Sandeep Dadheech,indrajitghosh,3922093.29,4151339.3299999998,12,5,-229246.0399999998,MISMATCH
+ATANU PAUL,Sandeep Dadheech,atanupaul,6135563.83,6360256.7999999999,12,5,-224692.9699999999,MISMATCH
+Faraz Khan,Syed Aqil Rizvi,farazkhan,19375377.67,19592626.149999998,12,5,-217248.479999998,MISMATCH
+Amit Tangri,Sulinder Pal,amittangri,2744605.02,2955389.5600000001,12,5,-210784.5400000001,MISMATCH
+Hemant kumar srivastava,Syed Aqil Rizvi,hemantkumarsrivastava,7652971.98,7848428.6599999989,12,5,-195456.6799999989,MISMATCH
+SRAVAN KUMAR SHARMA,Sandeep Dadheech,sravankumarsharma,5050721.96,5241822.0100000006,12,5,-191100.0500000006,MISMATCH
+Amruth Shivappa Banakar,Prashant Onam Naik,amruthshivappabanakar,0,183589.59,12,5,-183589.59,MISMATCH
+Jijo,Biju C.O,jijo,2147019.84,2330535.83999999999,12,5,-183515.99999999999,MISMATCH
+ARUPANANDA MANDAL,Sandeep Dadheech,arupanandamandal,6515874.64,6689846.6399999997,12,5,-173971.9999999997,MISMATCH
+Nitin prasad baghel,Syed Aqil Rizvi,nitinprasadbaghel,6179456.79,6346098.9700000004,12,5,-166642.1800000004,MISMATCH
+Vishant Bandhral,Nasir Hussain Khan,vishantbandhral,83590.09,250081.79000000001,12,5,-166491.70000000001,MISMATCH
+Neel Kamal choure,Syed Aqil Rizvi,neelkamalchoure,2156959.29,2322658.39,12,5,-165699.10,MISMATCH
+Sujit Das,Sandeep Dadheech,sujitdas,164798.72,0,12,5,164798.72,MISMATCH
+Mohit (Charkhi Dadri),Pawan Sharma,mohitcharkhidadri,164421.07,,12,0,164421.07,ALL_MONTHLY_AMOUNTS_NULL
+Surojit Mondal,Sandeep Dadheech,surojitmondal,4505184.28,4666294.3600000002,12,5,-161110.0800000002,MISMATCH
+Jithender Reddy Katukuri,Sandeep Dadheech,jithenderreddykatukuri,3610808.31,3771146.3599999997,12,5,-160338.0499999997,MISMATCH
+Pradeep Rajak,Syed Aqil Rizvi,pradeeprajak,4032633.36,4190707.7700000000,12,5,-158074.4100000000,MISMATCH
+Sudip Guha Roy,Sandeep Dadheech,sudipguharoy,5889208.89,6040406.0900000003,12,5,-151197.2000000003,MISMATCH
+PRATHEESH CC,Biju C.O,pratheeshcc,4567036.79,4710214.7899999999,12,5,-143177.9999999999,MISMATCH
+Girish B,Biju C.O,girishb,2309291.1,2451701.1000000002,12,5,-142410.0000000002,MISMATCH
+Arvind Kumar,Sulinder Pal,arvindkumar,139229.3,,0,0,139229.3,NO_MONTHLY_ROWS
+Vishal Kumar Gaurav,Syed Aqil Rizvi,vishalkumargaurav,4524075.22,4658125.7199999999,12,5,-134050.4999999999,MISMATCH
+Ram Shankar Mishra,Sandeep Dadheech,ramshankarmishra,7826988.72,7952200.5400000000,12,5,-125211.8200000000,MISMATCH
+Kumar Avinish,Sandeep Dadheech,kumaravinish,4807389.8,4931266.3800000002,12,5,-123876.5800000002,MISMATCH
+Devdutt Joshi,Sunil Patel,devduttjoshi,4301061.4,4421826.4000000001,12,5,-120765.0000000001,MISMATCH
+Sourav Samanta,Sandeep Dadheech,souravsamanta,12154999.75,12273555.67,12,5,-118555.92,MISMATCH
+Ranjit Kumar,Sulinder Pal,ranjitkumar,2241200.4,2358703.1200000001,12,5,-117502.7200000001,MISMATCH
+Amey Deodhar,Lalan Kumar,ameydeodhar,8290731.89,8403889.8900000004,12,5,-113158.0000000004,MISMATCH
+Ankur Srivastava,Syed Aqil Rizvi,ankursrivastava,3028287.13,3126975.5300000004,12,5,-98688.4000000004,MISMATCH
+Jagdev,Anant Singh,jagdev,1917789.63,2015462.23999999978,12,5,-97672.60999999978,MISMATCH
+Ameerali Ek (Off Roll),Biju C.O,ameeraliekoffroll,5675695.2,5771365.2000000001,12,5,-95670.0000000001,MISMATCH
+Manoj Yadav,Syed Aqil Rizvi,manojyadav,1728752.09,1819516.57999999997,12,5,-90764.48999999997,MISMATCH
+Ravinder Puri,Anant Singh,ravinderpuri,6717220.02,6801512.2499999992,12,5,-84292.2299999992,MISMATCH
+SUMANTA SINGHA,Sandeep Dadheech,sumantasingha,5645839.86,5719617.3000000004,12,5,-73777.4400000004,MISMATCH
+Syed Sohel Hashmi,Lalan Kumar,syedsohelhashmi,2486766.53,2554604.49,12,5,-67837.96,MISMATCH
+AMAN KHAN,Syed Aqil Rizvi,amankhan,3482982.07,3547921.3900000000,12,5,-64939.3200000000,MISMATCH
+Shafeeq Parengal,Biju C.O,shafeeqparengal,4179452.38,4239292.18,12,5,-59839.80,MISMATCH
+SHYAM KUMAR MISHRA,Sandeep Dadheech,shyamkumarmishra,11734533.71,11793115.5899999983,12,5,-58581.8799999983,MISMATCH
+Kanhaiya Lal Salvi,Pawan Sharma,kanhaiyalalsalvi,1020067.84,1077573.12000000004,12,5,-57505.28000000004,MISMATCH
+Bhavesh N Ranpara,Sunil Patel,bhaveshnranpara,55356.4,,0,0,55356.4,NO_MONTHLY_ROWS
+Aditya Dasgupta,Sandeep Dadheech,adityadasgupta,133014.67,187437.20999999999,12,5,-54422.53999999999,MISMATCH
+Tushar Ravindra Kanthale,Lalan Kumar,tusharravindrakanthale,2301660.25,2354144.45000000044,12,5,-52484.20000000044,MISMATCH
+Manish Kumar Trivedi,Pawan Sharma,manishkumartrivedi,295165.56,345473.00,12,5,-50307.44,MISMATCH
+Paripally Sridhar,Sandeep Dadheech,paripallysridhar,46859.99,,12,0,46859.99,ALL_MONTHLY_AMOUNTS_NULL
+Manish Kumar Kartikey,Syed Aqil Rizvi,manishkumarkartikey,45334.3,,12,0,45334.3,ALL_MONTHLY_AMOUNTS_NULL
+Sandeep Amrut Sonawane,Lalan Kumar,sandeepamrutsonawane,2904994.21,2940106.2100000001,12,5,-35112.0000000001,MISMATCH
+Vikash Kumar Singh,Sandeep Dadheech,vikashkumarsingh,5350018.81,5377662.80999999956,12,5,-27643.99999999956,MISMATCH
+Abhishek Ravindra Padadar,Prashant Onam Naik,abhishekravindrapadadar,23924.99,,12,0,23924.99,ALL_MONTHLY_AMOUNTS_NULL
+ANAND BHAGWAN MORE,Lalan Kumar,anandbhagwanmore,3377514.68,3399656.68,12,5,-22142.00,MISMATCH
+Vijay Dnyaneshwar,Lalan Kumar,vijaydnyaneshwar,2800710.68,2817196.5700000001,12,5,-16485.8900000001,MISMATCH
+Subha Chowdhury,Sandeep Dadheech,subhachowdhury,14597.28,,0,0,14597.28,NO_MONTHLY_ROWS
+Shiv Kumar,Anant Singh,shivkumar,14424.8,,0,0,14424.8,NO_MONTHLY_ROWS
+Taninki Ramesh Babu,Sandeep Dadheech,taninkirameshbabu,1560584.92,1574605.71999999997,12,5,-14020.79999999997,MISMATCH
+Dipak Sharma,Sandeep Dadheech,dipaksharma,799499.87,812203.97000000000,12,5,-12704.10000000000,MISMATCH
+K.V.THAMIZHSELVAN,Biju C.O,kvthamizhselvan,5956209.03,5968401.4399999997,12,5,-12192.4099999997,MISMATCH
+Ravi Upadhyay,Anant Singh,raviupadhyay,11404.8,,0,0,11404.8,NO_MONTHLY_ROWS
+Rahul Ramchandra Bhosale,Lalan Kumar,rahulramchandrabhosale,1848335.56,1851899.56,12,5,-3564.00,MISMATCH
+Debasish Adhikary,Sandeep Dadheech,debasishadhikary,25299806.17,25299806.169999995,12,5,0.000000005,RECONCILED
+RUDRAPRAKASH JANA,Sandeep Dadheech,rudraprakashjana,17762949.62,17762949.6199999991,12,5,0.0000000009,RECONCILED
+Priyabrata Biswas,Sandeep Dadheech,priyabratabiswas,11662529.77,11662529.7699999992,12,5,0.0000000008,RECONCILED
+Subhajit Koley,Sandeep Dadheech,subhajitkoley,14495292.82,14495292.8200000006,12,5,-0.0000000006,RECONCILED
+J.Kamal Kishore,Sandeep Dadheech,jkamalkishore,3199142.29,3199142.2900000005,12,5,-0.0000000005,RECONCILED
+NARAYAN BAISHYA,Sandeep Dadheech,narayanbaishya,5632982.46,5632982.4600000005,12,5,-0.0000000005,RECONCILED
+Santanu Kalita,Sandeep Dadheech,santanukalita,14196252.38,14196252.3800000003,12,5,-0.0000000003,RECONCILED
+Tejas Lunawat,Lalan Kumar,tejaslunawat,4321651.13,4321651.1299999997,12,5,0.0000000003,RECONCILED
+AVINASH KUMAR,Sandeep Dadheech,avinashkumar,2803327.09,2803327.0900000002,12,5,-0.0000000002,RECONCILED
+Chandrakant Mandave,Lalan Kumar,chandrakantmandave,4152466.83,4152466.8299999998,12,5,0.0000000002,RECONCILED
+Manish Gupta,Anant Singh,manishgupta,3523979.54,3523979.5399999998,12,5,0.0000000002,RECONCILED
+Kunal Sanjay Sasane,Lalan Kumar,kunalsanjaysasane,2630739.17,2630739.16999999987,12,5,0.00000000013,RECONCILED
+Himanshu Sable,Syed Aqil Rizvi,himanshusable,4280266.72,4280266.7200000001,12,5,-0.0000000001,RECONCILED
+Ravi Kumar Verma,Syed Aqil Rizvi,ravikumarverma,6387141.69,6387141.6899999999,12,5,0.0000000001,RECONCILED
+Gulab singh,Pawan Sharma,gulabsingh,3800876.87,3800876.87000000003,12,5,-0.00000000003,RECONCILED
+Aniket Maheshwari,Sunil Patel,aniketmaheshwari,0,0,12,5,0,RECONCILED
+Anuj Sharma,Sunil Mohanty,anujsharma,0,,0,0,0,NO_MONTHLY_ROWS
+Ashok Das,Sandeep Dadheech,ashokdas,0,,0,0,0,NO_MONTHLY_ROWS
+Balaraj S.,Prashant Onam Naik,balarajs,0,,0,0,0,NO_MONTHLY_ROWS
+Brinder Singh,Sulinder Pal,brindersingh,0,,0,0,0,NO_MONTHLY_ROWS
+DIBYENDU SAHA,Sandeep Dadheech,dibyendusaha,0,,0,0,0,NO_MONTHLY_ROWS
+Das Amar Jeet,Sulinder Pal,dasamarjeet,0,,0,0,0,NO_MONTHLY_ROWS
+Deo Bhushan Sharma,Sunil Mohanty,deobhushansharma,0,,0,0,0,NO_MONTHLY_ROWS
+Gourav Trivedi,Pawan Sharma,gouravtrivedi,0,,0,0,0,NO_MONTHLY_ROWS
+Himanshu Sharma,Anuj Sharma,himanshusharma,0,,12,0,0,ALL_MONTHLY_AMOUNTS_NULL
+JAHIR ABBAS HALDER,Sandeep Dadheech,jahirabbashalder,2799077.61,2799077.61,12,5,0.00,RECONCILED
+Lalit sharma (Off-Roll),Sulinder Pal,lalitsharmaoffroll,0,,0,0,0,NO_MONTHLY_ROWS
+M. Raman,Biju C.O,mraman,299720,299720.0,12,5,0.0,RECONCILED
+Manas Ranjan Das,Sandeep Dadheech,manasranjandas,139606.8,139606.8,12,5,0.0,RECONCILED
+Monmon Paul,Sandeep Dadheech,monmonpaul,0,,0,0,0,NO_MONTHLY_ROWS
+Nandkishor Upadhyay,Syed Aqil Rizvi,nandkishorupadhyay,3654361.53,3654361.53,12,5,0.00,RECONCILED
+Narendra Kumar Sharma,Sunil Mohanty,narendrakumarsharma,0,,0,0,0,NO_MONTHLY_ROWS
+Neeraj,Pawan Sharma,neeraj,0,0,12,5,0,RECONCILED
+Prashantha M,Sandeep Dadheech,prashantham,0,,0,0,0,NO_MONTHLY_ROWS
+Pratham Kyasti,Prashant Onam Naik,prathamkyasti,0,,12,0,0,ALL_MONTHLY_AMOUNTS_NULL
+Rajat Goswami,Pawan Sharma,rajatgoswami,0,,0,0,0,NO_MONTHLY_ROWS
+Ram Kumar Vashishtha,Anuj Sharma,ramkumarvashishtha,0,,0,0,0,NO_MONTHLY_ROWS
+Ritesh Thakur,Sulinder Pal,riteshthakur,0,,0,0,0,NO_MONTHLY_ROWS
+Rupak Kumar,Sandeep Dadheech,rupakkumar,0,,0,0,0,NO_MONTHLY_ROWS
+Samir Sengupta,Syed Aqil Rizvi,samirsengupta,0,,0,0,0,NO_MONTHLY_ROWS
+Sarbjit Singh Chawla,Sandeep Dadheech,sarbjitsinghchawla,9868163.02,9868163.02,12,5,0.00,RECONCILED
+Shakti Raj,Pawan Sharma,shaktiraj,0,0,12,5,0,RECONCILED
+Soumen Ghosh,Sandeep Dadheech,soumenghosh,0,,0,0,0,NO_MONTHLY_ROWS
+Sujeet Singh,Sandeep Dadheech,sujeetsingh,0,,0,0,0,NO_MONTHLY_ROWS
+Suman Mondal,Sandeep Dadheech,sumanmondal,191064.32,191064.32,12,5,0.00,RECONCILED
+Tankeswor Barman,Sandeep Dadheech,tankesworbarman,468138.52,468138.52,12,5,0.00,RECONCILED
+VIVEK SHANKAR,Sandeep Dadheech,vivekshankar,0,,0,0,0,NO_MONTHLY_ROWS
+Yogesh Bagde (Off-Roll),Anant Singh,yogeshbagdeoffroll,0,,0,0,0,NO_MONTHLY_ROWS
