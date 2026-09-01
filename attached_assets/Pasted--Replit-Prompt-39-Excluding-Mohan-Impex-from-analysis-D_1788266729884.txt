@@ -1,0 +1,173 @@
+# Replit Prompt 39 — Excluding Mohan Impex from analysis
+
+**Date:** 1 September 2026
+**Scope:** Section A is read-only and must come back first. Section B is
+implementation, and only after the scope decisions in A are settled.
+
+**Standing rule:** every figure states which database or source it came from.
+
+## The decision
+
+**Mohan Impex is to be excluded from all analysis in the app. The data stays
+stored; it just stops feeding any analytical figure.**
+
+That is a business decision, already taken. This prompt exists to scope it
+correctly before anything is built, because "excluded from analysis" can mean
+three different things and the wrong reading would break a frozen year.
+
+## Why it matters
+
+Mohan Impex holds **₹35,73,37,364.63 across 1,210 rows** in FY2025-26, all with
+`state_canon`, `head_canon` and `state_raw` NULL, spread across all twelve
+months. That is **74.5% of the year's unattributed value** and **9.9% of the
+entire FY2025-26 register**.
+
+Excluding them changes the analytical baseline:
+
+| | With Mohan Impex | Without |
+|---|---:|---:|
+| FY2025-26 rows | 145,613 | **144,403** |
+| FY2025-26 value | ₹360.9954 Cr | **₹325.26 Cr** |
+| Unclassified value | ₹47.98 Cr | **₹12.25 Cr** |
+| Unclassified share | 13.3% | **3.8%** |
+
+---
+
+## Section A — read-only, send first
+
+```
+Read-only. Change nothing. Do not implement any exclusion yet.
+
+A decision has been taken: Mohan Impex is to be excluded from all ANALYSIS in
+the app. The data remains stored. Scope it before building.
+
+SECTION A1 - WHICH YEARS AND HOW MUCH
+
+1. Print every Mohan Impex row across ALL fiscal years: rows, value, months,
+   state_canon, head_canon, state_raw, and version_status. Include FY2023-24,
+   FY2024-25, FY2025-26 and FY2026-27.
+
+2. Is the customer string exactly "MOHAN IMPEX" everywhere, or are there
+   variants - spacing, suffixes, a bracketed location, a separate legal entity?
+   Print every distinct customer string that normalises to the same key.
+
+3. Does Mohan Impex appear in customer_master, distributor_identity,
+   customer_assignment, secondary_sku_line, secondary_register_line or any
+   secondary source? If the exclusion is to cover analysis, it has to cover
+   every table that feeds an analytical figure, not just sale_line.
+
+4. If Mohan Impex appears in FY2026-27 as well as FY2025-26, say so plainly. An
+   exclusion applied to one side of a year-on-year comparison and not the other
+   would be worse than no exclusion at all.
+
+SECTION A2 - THE FROZEN ANCHOR MUST NOT MOVE
+
+5. The FY2025-26 frozen anchor is 145,613 rows and Rs 3,60,99,53,808.51. That
+   figure includes Mohan Impex and must continue to.
+
+   Confirm which code paths verify that anchor, and confirm that an analytical
+   exclusion applied downstream would NOT cause the anchor check to fail. If the
+   anchor is computed from the same query path that analysis uses, say so - that
+   would need separating first.
+
+6. Same question for FY2023-24, whose anchor is 137,619 rows and
+   Rs 3,49,02,33,848. Does Mohan Impex appear in that year?
+
+SECTION A3 - HOW THE EXCLUSION SHOULD BE EXPRESSED
+
+7. There is already a family for this: head_canon "Non-territory / Project /
+   Govt", and the GEM, JJM, HITESH and PROJECT buckets. Does Mohan Impex belong
+   in that family rather than in a name-based exception?
+
+   A named-string exclusion adds one more hardcoded value to a system that
+   already carries five disagreeing vocabularies. A flag or bucket does not.
+
+   Recommend which, with reasons. Do not implement either yet.
+
+8. If it is a bucket or flag, where does it live - customer_master, a config
+   file, a database column, the existing non-territory head vocabulary? What
+   would set it, and how would a second such customer be added later without a
+   code change?
+
+SECTION A4 - EVERY SURFACE THAT WOULD MOVE
+
+9. List every page, report, export, alert, guard and AI payload that would show
+   a different number after the exclusion. For each, give the current figure and
+   the figure after exclusion.
+
+10. Which of those currently show an FY2025-26 total that people rely on? The
+    Growth comparison, Company Reports, the anchor verification display, any
+    state-by-state YoY.
+
+11. Does any Red Alert, warning or scheme threshold change because a customer
+    disappears from a denominator? Name any.
+
+Report only. Implement nothing.
+```
+
+---
+
+## Section B — implementation, only after A is answered
+
+Do not send until the scope questions come back.
+
+```
+Code change. Implement the agreed exclusion exactly as scoped, and nothing else.
+
+REQUIREMENTS
+
+1. The data stays. No row is deleted, voided, superseded or moved. Mohan Impex
+   remains queryable in full.
+
+2. The frozen anchors do NOT change. FY2025-26 must continue to verify at
+   145,613 rows and Rs 3,60,99,53,808.51. If the anchor check and the analytical
+   path share a query, separate them before excluding anything.
+
+3. THE EXCLUSION MUST BE VISIBLE. This is not optional.
+
+   Every surface showing an FY2025-26 analytical total must state that it
+   excludes Rs 35.73 crore of unattributed revenue, or show both figures.
+
+   A total that silently changes from Rs 360.9954 Cr to Rs 325.26 Cr with nothing
+   on screen explaining it is the same pattern as every other problem found
+   today - a number that moved with no disclosure.
+
+4. Apply it to BOTH sides of any year-on-year comparison, or to neither.
+
+5. Use the mechanism agreed in Section A question 7 - bucket or flag, not a
+   hardcoded customer name, unless A concluded otherwise with reasons.
+
+6. Adding a second excluded customer later must not require a code change.
+
+AFTER APPLYING, print:
+  - the FY2025-26 analytical total, and the frozen anchor figure, side by side
+  - the anchor verification result, which must still pass
+  - every surface listed in A9, with its before and after figure
+  - the exact disclosure wording that now appears, and where
+
+Show the diff before applying.
+```
+
+---
+
+## Notes
+
+- A4 and requirement 4 are the same point. Excluding a customer from one year of
+  a comparison and not the other would manufacture a movement, which is precisely
+  the artefact this decision is meant to remove.
+- A5 is the one that could bite. If the anchor verification and the analytical
+  aggregation run through the same query, excluding Mohan Impex would make a
+  frozen year fail its own check. That has to be established before anything is
+  built.
+- Requirement 3 is the one I would not compromise on. A stated policy and a
+  silent one look identical in the database and completely different to whoever
+  reads the screen in three months.
+
+## What this does not solve
+
+**₹12.25 crore across 244 customers remains unclassified** in FY2025-26 — 3.8% of
+the reduced baseline. Of those, 51 customers worth ₹4.18 crore have unique state
+evidence in FY2026-27 history or `customer_master` and could be classified as a
+derived reading. The other 194, worth ₹8.07 crore, have no evidence at all.
+
+The state-comparison artefact shrinks from 13.3% to 3.8%. It does not disappear.
