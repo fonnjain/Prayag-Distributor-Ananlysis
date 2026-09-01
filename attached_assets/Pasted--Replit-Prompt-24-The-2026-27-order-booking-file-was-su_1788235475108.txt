@@ -1,0 +1,173 @@
+# Replit Prompt 24 — The 2026-27 order booking file was supplied and never loaded
+
+**Date:** 1 September 2026
+**Scope:** Read-only and dry-run only. Nothing written to `secondary_order_line`.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**What changed:** the FY2026-27 secondary order booking data was supplied, in the
+new Product-Wise format, and has been sitting in the repository since at least
+29 August. It is not missing. It has never been loaded.
+
+```
+attached_assets/Product-Wise-Secondary-Order-Report_29_6569_19-Aug-2026_1787135138176.xlsx
+```
+
+Verified independently from the repository tarball at commit `261d1f2`:
+
+| | |
+|---|---|
+| Date range | 01-Aug-2026 to 19-Aug-2026, 18 distinct days |
+| Rows | 8,602 |
+| Distinct orders | 1,361 |
+| Sales users | 121 |
+| Retailers | 1,132 |
+| Distributors | 128 |
+| Total quantity | 322,465 |
+| Basic order value (ex-GST) | ₹5,64,03,177 |
+| Status | 8,172 APPROVED, 430 PENDING |
+
+Columns: Date, Order ID, Sales User Name, Customer Name, Dealer ID, Dealer
+Mobile, Channel Partner Name, CP Code, State, District, City, Pincode, Category
+Name, Product Code, GST (%), GST Amount, Qty, Discount (%), Discount Amount,
+Dealer Order Value, Basic Order Value, Order Status.
+
+Those map directly onto the Secondary Orders page cards — Orders, Lines,
+Retailers, Distributors, Total Qty, Basic order value (ex-GST).
+
+**April to July 2026 is not in this file.** That gap is still open and is the
+period originally being looked at.
+
+---
+
+## Prompt 24
+
+```
+Read-only and DRY-RUN ONLY. Do not write to secondary_order_line, do not write
+to secondary_order_upload, do not commit any transaction. Report what a load
+WOULD do; do not do it.
+
+The FY2026-27 secondary order booking data was supplied and is in the repository:
+
+  attached_assets/Product-Wise-Secondary-Order-Report_29_6569_19-Aug-2026_1787135138176.xlsx
+
+Independently verified: 8,602 rows, 01-Aug-2026 to 19-Aug-2026, 1,361 distinct
+orders, 1,132 retailers, 128 distributors, 322,465 qty, Rs 5,64,03,177 basic
+order value ex-GST, 8,172 APPROVED and 430 PENDING.
+
+SECTION A - WOULD THE LOADER FIND AND ACCEPT IT?
+
+A1. secondaryOrders/loader.ts selects the lexicographically latest file matching
+    Product-Wise-Secondary-Order-Report_*.xlsx. Which directories does it search,
+    and is attached_assets one of them? If not, name the directory it expects.
+
+A2. Are there other files matching that pattern anywhere? If more than one
+    exists, which would win lexicographically, and is that the one we want?
+
+A3. Run the parser in dry-run against this file and report, WITHOUT WRITING:
+      - rows it would accept and rows it would reject, with rejection reasons
+      - distinct orders, retailers, distributors it would create
+      - total basic order value it computes
+      - the month range it would assign
+    Compare each against the figures above. Any difference is a parser question.
+
+A4. How does the parser map these columns to secondary_order_line? Print the
+    mapping. Specifically: which column becomes order_datetime, which becomes
+    order_status, and is "Basic Order Value" or "Dealer Order Value" used as
+    the amount?
+
+A5. The page filters on order_status = 'APPROVED' or 'PENDING' with exact
+    equality. The file contains exactly those two strings. Confirm they match
+    without transformation.
+
+SECTION B - WHY IT WAS NEVER LOADED
+
+B1. Confirm the loader is operator-driven only - an admin POST route or a CLI
+    run - with no scheduler. Name both entry points.
+
+B2. Was it ever invoked in production? Check secondary_order_upload, any job
+    log, and any deployment history. If never, say so plainly.
+
+B3. This file has been in attached_assets since at least commit 261d1f2 on
+    29 August. Was it added deliberately as a load input, or attached to a
+    conversation and never actioned? Check the commit that added it and quote
+    the message.
+
+B4. Separately, resolveOrderFileId() searches a Drive folder for a Google-native
+    spreadsheet named with "2026-27" or "2026". That could never find an XLSX in
+    attached_assets. Are these two mechanisms meant to serve the same table, or
+    are they independent paths that both feed secondary_order_line?
+
+SECTION C - WHAT COVERS APRIL TO JULY 2026
+
+The supplied file starts on 1 August, which matches the CRM cutover date. The
+first four months of FY2026-27 are not in it.
+
+C1. Is there any other supplied file, in any format or location, covering
+    Apr-Jul 2026 secondary order booking? Search the repository, uploads, and
+    attached_assets.
+
+C2. secondary_sku_line holds 123,326 rows for Apr-Jul 2026 from the PS Code 3
+    path. Is that the same measure as order booking, or a different one? If it
+    is different, say precisely how - the Secondary Orders page banner says
+    "order booking, not dispatch", so the distinction matters.
+
+C3. Could Apr-Jul order booking be derived from any table already loaded, or
+    does it need a source we do not have? Answer plainly. If it needs a source,
+    that goes to Prayag.
+
+C4. For the closed years 2021-22 to 2025-26, the segment-wise workbooks are
+    configured and readable - the anchor check reads 379,441 rows from the
+    2025-26 one. Those years have never been loaded into secondary_order_line
+    either. Confirm, and state what a load of those five years would involve.
+
+    Do not run it. I want to know the size of the job before deciding.
+
+SECTION D - WHAT A LOAD WOULD DO TO EVERYTHING ELSE
+
+D1. If this August file were loaded, which pages, reports, alerts and AI payloads
+    would change, and how? The Secondary Orders page is the obvious one - name
+    the rest.
+
+D2. Would loading a partial month (1-19 August) create a month that looks
+    complete? August is not finished and the register is frozen at July. Is there
+    a partial-period flag, or would 19 days present as a full month?
+
+D3. Does the loader touch secondary_sku_line, secondary_register_line or
+    sale_line in any way? An earlier report said it explicitly checks those
+    remain unchanged. Confirm that guard exists and describe it.
+
+D4. Is there any risk to the FY2025-26 frozen year from loading FY2026-27 data?
+    Answer from the code.
+
+Report only. Write nothing. If the dry-run in A3 requires a transaction, roll it
+back and say that you did.
+```
+
+---
+
+## Notes
+
+- A3 is the deliverable. If the parser's dry-run figures match the six independent
+  numbers above, the file is good and loading it becomes a decision rather than a
+  risk. If they differ, we have a parser question to settle first.
+- D2 matters more than it looks. Nineteen days of August presented as a whole
+  month would be a new instance of the partial-period problem, on a page that
+  currently shows nothing at all.
+- C2 is the question underneath all of this. If PS Code 3 SKU data and order
+  booking are the same measure counted differently, then Apr-Jul is not missing —
+  it is in a different table under a different name. If they are genuinely
+  different measures, Apr-Jul order booking has no source and that is for Prayag.
+- Nothing should be loaded off the back of this reply. The point is to know
+  whether the file is sound and what loading it would move.
+
+## Consequence for the Prayag pack
+
+Query D1 currently asks where the 2026-27 secondary order booking workbook is.
+That is now partly answered — Prayag supplied it, in Product-Wise format, from
+the 1 August CRM cutover. I will revise D1 to ask the narrower question:
+
+> **What covers 1 April to 31 July 2026, before the CRM changed format?**
+
+I will hold that revision until C1 and C3 come back, in case the answer is
+already in the repository.
