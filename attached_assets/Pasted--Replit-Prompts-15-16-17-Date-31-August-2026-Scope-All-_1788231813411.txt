@@ -1,0 +1,168 @@
+# Replit Prompts 15, 16, 17
+
+**Date:** 31 August 2026
+**Scope:** All three read-only. Send separately, wait for each reply.
+
+Prompt 15 is the urgent one — the authority is being edited while we watch, and
+five of the 64 backdated PEA codes have just appeared in the cache.
+
+**Standing rule:** every figure states which source it came from — production read
+replica, development, live Drive workbook, live authority API, or config file.
+
+---
+
+## Prompt 15 — What just entered and left the MRP cache
+
+```
+Read-only. Change nothing, refresh nothing.
+
+The active generation moved from 6,223 codes to 6,097 between 30 and 31 August:
+21 entered, 147 left. The 147 were withheld for exceeding a 30-code naming
+threshold. That threshold was set when this was hypothetical. It has now
+happened, so I want the list.
+
+1. Print all 147 codes that LEFT the active set. For each: item code, division,
+   the MRP and effectiveDate they held in the 30 August generation, and their
+   Apr-Jul FY2026-27 sale_line rows and value.
+
+2. An earlier check found 44 cache-only codes carrying Rs 14.24 lakh of Apr-Jul
+   sales. Are those 44 inside these 147? Confirm, and give the exact count and
+   value of departed codes that have FY2026-27 sales against them.
+
+3. Those codes now have no active MRP row. What does each surface display for a
+   sold SKU with no MRP - a blank, a zero, an unavailable, or silent exclusion
+   from a denominator? Name the surfaces and the behaviour for each.
+
+4. Five of the 21 codes that ENTERED are PEA-552B, PEA-554B, PEA-555B, PEA-556B
+   and PEA-66B. All five are among the 64 backdated brass fittings we have
+   queried with Prayag.
+
+   For each of the five, print the MRP and effectiveDate the API now returns.
+   If the effectiveDate is 2026-02-01, the backdating is live rather than
+   pending and we need to know tonight.
+
+5. The other entrants cluster - seven WT-3LH codes, four SSB-31xx, three EP-*.
+   Is a catalogue section being added? Print all 21 with division and
+   effectiveDate.
+
+Report only. Do not refresh the cache to answer this.
+```
+
+---
+
+## Prompt 16 — Recompute the discount on its original basis
+
+The D4 answer measured something different from Prompt 8 and placed the two side
+by side. That was my prompt's fault for not pinning the basis. This fixes it.
+
+```
+Read-only. Change nothing.
+
+Two discount figures have been placed side by side that are not comparable.
+
+  Prompt 8 gave 57.3867% - the 1,028 PTMT codes dated 2026-09-01 that appear in
+  Apr-Jul FY2026-27 sale_line, measured against the cached MRP.
+
+  Prompt 14 D4 gave 49.1358% - all 123,326 rows of secondary_sku_line for
+  Apr-Jul, as 100 x (1 - NET / gross MRP).
+
+Different table, different population, different denominator. The 8.25-point
+"movement" is an artefact of comparing them.
+
+1. Recompute the Prompt 8 figure on its ORIGINAL basis: the 1,028 PTMT codes
+   dated 2026-09-01 appearing in Apr-Jul FY2026-27 sale_line, against the MRP
+   in the CURRENT active generation. State the population size, the rupee
+   value, and the aggregate discount.
+
+2. Has it moved from 57.3867%? If codes have dropped out of the active
+   generation, how many of the 1,028 no longer have an MRP, and were they
+   included or excluded from the recomputed figure? Say which.
+
+3. Print the exact definition of both measures side by side - table, population
+   filter, numerator, denominator - so nobody compares them again by accident.
+
+4. Which of the two, if either, is the figure shown to users anywhere in the
+   app? If both appear on different screens under similar labels, name them.
+
+Report only.
+```
+
+---
+
+## Prompt 17 — The 23 August readiness fix did not take
+
+```
+Read-only diagnosis. Change nothing, fix nothing.
+
+Git history shows that on 23 August, disposable-server readiness was changed to
+require both dist/index.mjs and dist/thread-stream-worker.mjs, rebuilding when
+incomplete. That fix is in, and growth-report-guards and schemes-nudge-guards
+still fail at startup for the missing worker.
+
+1. Show the 23 August change. What exactly does it check, and what does it do
+   when the check fails?
+
+2. Does the rebuild it triggers actually produce dist/thread-stream-worker.mjs?
+   Inspect the build configuration and say whether that file is ever emitted.
+   If the bundler treats pino or thread-stream as external, the worker would
+   never appear no matter how many rebuilds run.
+
+3. Is the readiness check running at all, or is it being skipped? Print the
+   current failure output in full, not a summary.
+
+4. On 19 August the authentication rollout added operator and admin headers to
+   the guard requests. If the startup problem were solved tomorrow, would those
+   guards then pass, or is there a second failure waiting behind the first?
+   Answer from the code - do the guard scripts send credentials the current auth
+   layer accepts?
+
+5. No historical workflow logs are retained, so the last assertion-running date
+   cannot be established from evidence and the best inference is 12 August. Is
+   there anywhere else a run history survives - CI artefacts, a database table,
+   a log sink? If not, say so plainly. Nineteen days of unguarded merges is
+   worth knowing about even if we cannot narrow it.
+
+Do NOT change NODE_ENV, the logger, the build config or any guard. Setting
+NODE_ENV=production on the validation server would hide the pino-pretty path
+rather than fix the packaging, and would make the validation environment differ
+from the one developers run.
+
+Report only.
+```
+
+---
+
+## Notes
+
+- Prompt 15 first, and tonight if possible. If those five PEA codes arrived
+  carrying 2026-02-01, an August price revision is live and backdated into a
+  period we have closed figures for.
+- Prompt 16 exists to stop a wrong number circulating. An 8-point swing across
+  ₹104 crore is the kind of figure that gets repeated in a meeting before anyone
+  checks the basis.
+- Prompt 17's last instruction matters. The tempting fix is to set
+  `NODE_ENV=production` on the validation server, which turns the workflows green
+  by removing the pino-pretty path. That hides the packaging fault and makes the
+  validation environment stop resembling what developers actually run.
+
+## Separately, and cheap whenever you want it
+
+Two message corrections, both one-liners, neither urgent:
+
+- `comparison.ts` returns a numeric ₹0 for Apr–Jun FY2026-27 register data and
+  its note reads *"coverage is Apr–Jun only, July is not in the register"* — the
+  exact reverse of production, where July has 34,147 rows and Apr–Jun have none.
+- The report-options screen says CTC stays blank until payroll is connected. CTC
+  is connected and enriching 178 of 189 members. Only the Finance T.A. bill and
+  expense export is genuinely absent.
+
+The first is worse than a silent zero, because a confident sentence stating the
+inverse of reality stops the reader asking the question.
+
+## Still open, and larger
+
+- **Prompt 10** — five disagreeing state alias maps, and the `"UP (A)"` key in
+  `territoryResolver.ts` that may never match.
+- **Prompt 11** — the winner-take-all distributor vote, and the 130-row table.
+- **Prompt 12 Part Two** — other pages reading tables populated only in development.
+- **Prompt 1** — what else the documentation pipeline dropped from `.agents/memory`.
