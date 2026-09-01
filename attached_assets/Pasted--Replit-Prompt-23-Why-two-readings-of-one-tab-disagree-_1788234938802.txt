@@ -1,0 +1,183 @@
+# Replit Prompt 23 — Why two readings of one tab disagree
+
+**Date:** 1 September 2026
+**Follows:** Prompt 20
+**Scope:** Read-only. No code change, no snapshot rebuild, no reload, no backfill.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**Why this exists:** Prompt 20 established that `deep_dive_snapshot.orderBooking`
+and `secondary_head_month.ordered_amount` disagree for 141 of 189 members,
+₹10.51 crore absolute. Both are read from the same workbook. This asks why.
+
+I tested the obvious explanation and it does not hold. Every member with monthly
+rows has exactly 5 non-null months, so a clean period offset would produce a
+uniform gap. Instead the share of each member's monthly total that the snapshot
+fails to reproduce has a **median of 7.5%, quartiles of 2.7% and 24.1%, and a
+range from 0% to 100%**. Fifteen members reconcile to the rupee; Amruth Banakar
+is out by 100%. There is no single mechanism producing that spread.
+
+---
+
+## Prompt 23
+
+```
+Read-only. Change nothing, rebuild nothing, reload nothing, backfill nothing.
+
+Both figures come from the same workbook, 1E1jEY_yO8LmpqBDpcesS_fu2SBPEQ0eKO5xN29XyTEM.
+deepDiveData.ts reads a cumulative member column on the Data tab.
+stateHeadLoader.ts reads the monthly Plan / Order Booked / Sales Received blocks.
+
+SECTION A - WHY DO TWO READINGS OF ONE WORKBOOK DIVERGE PER MEMBER?
+
+A1. Do both parsers read the SAME tab, or different tabs of the same workbook?
+    Name each tab precisely, including any trailing space in the tab name.
+
+A2. Print the raw source cells for six specific members - the cumulative column
+    value AND each of the 12 monthly block cells, exactly as they appear in the
+    sheet. Use these, chosen to span the range:
+
+      Rajan Srivastava        largest mismatch, Rs 45.58 lakh
+      Amruth Shivappa Banakar 100% gap - snapshot 0, monthly Rs 1,83,589.59
+      Milind Ashok Sadanand   98.9% gap
+      Sudipta Thom            snapshot HIGHER than monthly
+      Debasish Adhikary       reconciles exactly at Rs 2.53 crore
+      Faraz Khan              reconciles to within 1.1%
+
+    Seeing the actual cells side by side should show whether the cumulative
+    column is a formula, a hand-typed figure, or a sum of the monthly blocks.
+
+A3. Is the cumulative column a live formula in the sheet, a pasted value, or
+    entered by hand? If it is hand-entered by team members, the two figures were
+    never going to agree and that is the finding.
+
+A4. 132 members have monthly HIGHER than snapshot; 24 have snapshot higher. Is
+    there any characteristic separating the two groups - state head, joining
+    date, off-roll status, position in the sheet?
+
+A5. Which of the two does Prayag consider authoritative? Answer from any comment,
+    documentation or the CRM reference workflow, not from preference.
+
+SECTION B - WHOLE TEAMS ARE MISSING FROM THE MONTHLY TABLE
+
+27 members have no secondary_head_month rows at all. They cluster:
+
+  Sulinder Pal        5 of 7      Arvind Kumar, Brinder Singh, Das Amar Jeet,
+                                  Lalit sharma (Off-Roll), +1
+  Sunil Mohanty       3 of 3      Anuj Sharma, Deo Bhushan Sharma,
+                                  Narendra Kumar Sharma
+  Sandeep Dadheech   10 of 75     Pravat Kumar Dash (Rs 2.28 crore), and 9 others
+  Anant Singh         3 of 14
+  Pawan Sharma        2 of 12
+  five heads          1 each
+
+B1. Why does stateHeadLoader.ts not create rows for these 27? Is it failing to
+    recognise them, skipping their block, or never reaching their section of the
+    sheet? Answer per cluster, not generally.
+
+B2. Sulinder Pal loses 5 of 7 and Sunil Mohanty 3 of 3. Are their monthly blocks
+    laid out differently in the sheet, or positioned somewhere the parser stops
+    before reaching?
+
+B3. Pravat Kumar Dash carries Rs 2,28,13,190.05 in the snapshot and has no
+    monthly rows. That is the single largest unreconciled figure. Print his raw
+    sheet rows in both locations.
+
+B4. Narendra Kumar Sharma appears here as a MEMBER under SUNIL MOHANTY. Narendra
+    is an active state head in the organisation record; Sunil Mohanty has no
+    person, registry, coverage or assignment record at all. Print the raw sheet
+    rows that produce this relationship.
+
+B5. Several missing members carry "(Off-Roll)" in the name - Yogesh Bagde, Lalit
+    sharma. Pawan Kumar Pareek (Off-Roll) DOES have monthly rows but is out by
+    Rs 17.57 lakh. Do the two parsers treat off-roll members differently? List
+    every off-roll member and their status in both.
+
+SECTION C - THE 50 CLOSED-MONTH BLANKS
+
+1,134 of 1,184 null monthly rows are legitimate future months. The remaining 50
+sit across 10 members in months the writer marked not_yet_recorded = false.
+
+C1. List all 50: member, month, and what the cumulative column shows for that
+    member.
+
+C2. For SANOJ M., Apr-Aug are all null with not_yet_recorded = false while the
+    cumulative column shows Rs 15,24,438. Print those five source cells. Are
+    they genuinely blank in the sheet, or is the parser reading the wrong
+    columns for his row?
+
+C3. Writing null rather than a false zero for an open month is the right
+    decision. Is there any check that a CLOSED month is not left null? If not,
+    a blank closed month is indistinguishable from an unparsed one.
+
+SECTION D - FY2025-26 HAS NO MONTHLY ROWS AT ALL
+
+secondary_head_month holds zero FY2025-26 rows against a snapshot of
+Rs 1,95,82,47,208.71 across 241 members.
+
+D1. Was FY2025-26 monthly data ever written to that table? Check any ingest
+    history, lineage or audit record. If it was and is now absent, when did it
+    go, and what removed it?
+
+D2. If it was never written, is that intended - was the table introduced after
+    FY2025-26 closed? Give the migration date that created it and compare.
+
+D3. Which surfaces read secondary_head_month for FY2025-26 and therefore see
+    nothing? Does any comparison put a populated FY2026-27 against an empty
+    FY2025-26 and present the result as a real year-on-year movement?
+
+D4. The FY2025-26 snapshot holds 241 members; the frozen secondary snapshot for
+    the same year holds 216. Two counts of one year from two snapshots. Reconcile
+    them and add 241 to the member-count table.
+
+SECTION E - WHAT WOULD MAKE THIS VISIBLE
+
+Describe only. Build nothing.
+
+E1. Is there any existing invariant, guard or audit check comparing these two
+    representations before either is displayed or persisted? Prompt 20 says no -
+    confirm it.
+
+E2. Audit check 7.6 already compares SKU NET against the brand rollup per month.
+    Could the same shape cover snapshot against monthly, or are they too
+    different?
+
+E3. If only one number can be shown to users, which should it be, and what would
+    have to change for the other to stop appearing on any screen?
+
+E4. Nothing here should be backfilled or rebuilt. Both representations are
+    evidence of how the sheet was read, and overwriting either destroys the
+    ability to tell which was right. Confirm you understand that before
+    proposing anything.
+
+Report only.
+```
+
+---
+
+## Notes
+
+- Section A2 is the whole prompt in one question. Six members' raw cells, side by
+  side, should show immediately whether the cumulative column is a formula, a
+  paste, or hand-typed. If it is hand-typed by team members, the two figures were
+  never going to agree, the ₹10.51 crore is not a defect, and the question
+  becomes which one anyone should be looking at.
+- B4 collapses two open roster threads into one row. Narendra Kumar Sharma —
+  active state head, absent from `heads_resources` — appears as a member under
+  Sunil Mohanty, who has no organisation record anywhere. That relationship comes
+  from somewhere in the sheet and it should be printed rather than inferred.
+- D3 is the one with teeth. A populated current year compared against an empty
+  prior year produces a movement that looks like growth and is an artefact.
+- E4 exists because the natural instinct is to backfill the monthly table from
+  the snapshot, or rebuild the snapshot from monthly. Either would erase the
+  evidence of which reading was correct.
+
+## Still open
+
+- **Prompt 21** — visit rates, five to eight times higher for departed members.
+- **Prompt 22** — the 403 on all five closed-year SKU workbooks.
+- **Prompt 10** — five disagreeing state alias maps, and `"UP (A)"`.
+- **Prompt 11** — the winner-take-all distributor vote, and the 130-row table.
+- **Prompt 16** — the discount recomputed on its original basis.
+- **Prompt 17** — why the 23 August readiness fix did not take.
+- The `costRatioSales` guard fix, still the cheapest change on the board.
