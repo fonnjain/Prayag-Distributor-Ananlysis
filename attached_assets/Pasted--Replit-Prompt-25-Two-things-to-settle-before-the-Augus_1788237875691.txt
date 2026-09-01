@@ -1,0 +1,155 @@
+# Replit Prompt 25 — Two things to settle before the August file is loaded
+
+**Date:** 1 September 2026
+**Follows:** Prompt 24
+**Scope:** Read-only. Nothing loaded, nothing written.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**Where this stands:** the dry-run reconciled exactly against six independently
+measured controls — 8,602 rows, 1,361 orders, 1,132 retailers, 128 distributors,
+322,465 quantity, ₹5,64,03,177. Zero rejections. The file is sound and the load
+would be isolated: nothing outside the Secondary Orders page reads
+`secondary_order_line`.
+
+Two things should be settled before it goes in. Neither is a reason not to load
+it; both are reasons not to load it *yet*.
+
+---
+
+## Prompt 25
+
+```
+Read-only. Load nothing, write nothing.
+
+SECTION A - THE PARTIAL MONTH
+
+The August file covers 1 to 19 August 2026 - 19 days of an unfinished month.
+Prompt 24 D2 established there is no partialMonth flag, no expected end date, no
+open/closed month status, no days-present count, and no comparison suppression.
+The API exposes coverage.from and coverage.to and nothing else.
+
+So Rs 5.64 crore would sit on screen as August unless a reader notices the end
+date. That is the same empty-versus-partial problem we have been tracking, on the
+page that prompted this whole thread.
+
+A1. What exactly does the Secondary Orders page display today for coverage? Print
+    the rendered output, not the API fields. Is coverage.to visible without
+    scrolling or opening a filter?
+
+A2. Does anything on that page compare a period against another period, or is it
+    purely a list plus summary cards? If nothing compares, the risk is a reader's
+    inference rather than a computed error - say which.
+
+A3. The XLSX export: does it carry the coverage dates, or would an exported file
+    circulate as "August secondary orders" with no period marking at all? Exports
+    outlive the screen they came from.
+
+A4. The Growth cards already solved this shape with priorChannelSplitAvailable,
+    and SKU Overview has not_in_authority. Is either pattern reusable here, or
+    does this need something new? Describe only.
+
+A5. What is the smallest change that would make 1-19 August unmistakable on the
+    page and in the export? One or two lines if possible. Do not build it.
+
+SECTION B - TWO SALES USERS THAT DO NOT RESOLVE
+
+The dry-run reported unresolved sales users: PRAYAG and ADARSH GAURAV.
+
+ADARSH GAURAV is not a new name. In the FY2025-26 unmatched order-booking
+population of 58 names worth Rs 13.51 crore, ADARSH GAURAV carried 1,717 rows and
+Rs 48,84,663, with HR reporting manager Sujeet Singh. The same person fails to
+resolve in two separate sources a year apart.
+
+B1. How many of the 8,602 August rows belong to each of PRAYAG and ADARSH GAURAV?
+    Give rows, orders and basic order value for each.
+
+B2. On load, what happens to a row whose sales user does not resolve? Is
+    sales_user_id left null and the row kept, or is the row attributed elsewhere?
+    Confirm the row is not dropped.
+
+B3. Would those rows then be invisible in any member-level or head-level roll-up
+    on the Secondary Orders page? If a filter by State Head is applied, do
+    unresolved rows disappear from the result?
+
+B4. Is ADARSH GAURAV in the current 189-member roster, the 16 LEFT members, or
+    neither? If neither, is he in the HR CSV's 609 rows?
+
+B5. "PRAYAG" as a sales user name looks like a system or house account rather
+    than a person. What is it? Check whether it appears in the FY2025-26 sources
+    too, and what value sits against it.
+
+B6. Are there other sales user names in the file that resolve to a member only
+    ambiguously - matched by fallback rather than cleanly? List them. A silent
+    wrong match is worse than a clean failure to match.
+
+SECTION C - THE IDEMPOTENCY KEY
+
+Not urgent, but worth knowing before a second file arrives.
+
+C1. The key is order_id + product_code + occurrence. If Prayag send a September
+    file that re-exports some August orders, would those rows be recognised as
+    duplicates and skipped, or inserted again with new occurrence numbers?
+
+C2. The dry run found 32 repeated Order ID / Product Code pairs and 5 retained
+    exact-duplicate export rows. Confirm the occurrence numbering makes a re-load
+    of this same file idempotent - loading it twice should not double the total.
+
+C3. secondary_order_line has no FY column and no closed-FY or frozen-month check.
+    If a historical file were ever loaded, nothing would stop it. What would need
+    to exist before any pre-August file could be loaded safely? Describe only.
+
+Report only. Load nothing.
+```
+
+---
+
+## Notes
+
+- Section A is the gate. The load itself is small and isolated, but putting 19
+  days on screen labelled August recreates the exact problem that started this
+  thread. A5 asks for the smallest fix; that becomes a separate, narrow change.
+- B4 and B5 are the interesting ones. If ADARSH GAURAV is in neither the roster
+  nor the LEFT list, he is a third category, and he has now failed to resolve
+  across two fiscal years and two different source formats.
+- Section C matters when the next file arrives rather than now. C3 in particular:
+  the table has no FY column and no freeze check, so the only thing preventing a
+  historical file from being loaded is operator care.
+
+## Prayag pack updated
+
+Query D1 is rewritten. It now thanks them for the Product-Wise report, states
+that we have checked it and it is clean, and asks the narrow question:
+
+> **What source holds order-booking lines from 1 April to 31 July 2026, before
+> the CRM format changed?**
+
+It also says explicitly that if no such export exists, we will mark those four
+months as unavailable rather than showing them as zero — which is the decision
+that follows from Prompt 24's finding that the period cannot be reconstructed
+from anything already loaded.
+
+## Correction from Prompt 24
+
+The workbook was committed on **19 August 2026** (`eacbaea1`, "Add product-wise
+secondary order report and goal requirements"), not 29 August as I stated. It has
+been sitting unloaded for thirteen days, not four.
+
+## Still open
+
+- **Prompt 21** — visit rates five to eight times higher for departed members.
+- **Prompt 22** — the 403 on all five closed-year SKU workbooks.
+- **Prompt 23** — why two readings of one workbook diverge per member, ₹10.51 crore.
+- **Prompt 10** — five disagreeing state alias maps, and `"UP (A)"`.
+- **Prompt 11** — the winner-take-all distributor vote, and the 130-row table.
+- **Prompt 16** — the discount recomputed on its original basis.
+- **Prompt 17** — why the 23 August readiness fix did not take.
+- The `costRatioSales` guard fix, still the cheapest change on the board.
+
+## Not worth opening
+
+Loading the five closed years into `secondary_order_line` is a migration, not a
+load — a separate parser, an equivalence decision on whether the segment-wise
+measure matches Basic Order Value, identity and duplicate rules, per-year
+reconciliation against existing anchors, and well over a million source rows. The
+data is not lost; the anchor check already reads and verifies it live from Drive.
