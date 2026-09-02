@@ -1,0 +1,139 @@
+# Replit Prompt 41 — Four order-booking figures, one of them about to be loaded
+
+**Date:** 1 September 2026
+**Scope:** Read-only. Change nothing, load nothing.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**Send this before Step 3 of the Secondary Orders sequence.** It is one
+reconciliation and it decides whether loading the August file creates a visible
+contradiction on a page you are about to switch on.
+
+## What I found in the code
+
+There are **four** paths producing an order-booking number, three of which claim
+to be secondary:
+
+| Path | Source | Measure | FY2026-27 |
+|---|---|---|---|
+| `secondary_head_month.ordered_amount` | dashboard `IMPORTRANGE` | monthly Order Booked | **₹79.85 Cr** Apr–Aug |
+| `mgmt/orders.ts` | "Segment Wise" Drive workbooks | per-line Sub Total | **no file exists** |
+| `secondary_order_line` | Product-Wise CRM export | Basic Order Value ex-GST | **empty** — ₹5.64 Cr waiting |
+| `primary_order_line` | primary register | taxable value | feeds Momentum |
+
+The measures are consistent — `orders.ts` documents its per-line Sub Total as
+reconciling exactly to the 2025-26 workbook header total of ₹2,310,913,869, and
+PSCode 3 uses the same gross/net pair. That part is sound.
+
+**One correction to the reference document.** Its summary table says
+`secondary_order_line` feeds the Momentum pipeline. It does not. Momentum reads
+`primary_order_line` — `sum(taxable_value) FROM primary_order_line`. Only three
+files touch `secondary_order_line`: the loader, the CLI entry, and the page
+route.
+
+---
+
+## Prompt 41
+
+```
+Read-only. Change nothing, load nothing.
+
+SECTION A - THE ONE NUMBER I NEED BEFORE LOADING
+
+The dashboard already reports secondary order booking from live sheets. The
+Product-Wise file would put the same business event into a different table at a
+different grain.
+
+A1. Print secondary_head_month.ordered_amount for FY2026-27 BY MONTH, Apr
+    through Aug. I have the Apr-Aug total of Rs 79,84,65,268.16 but not the
+    monthly split.
+
+A2. What is August alone? The Product-Wise file covers 1-19 August and totals
+    Rs 5,64,03,177 in Basic Order Value ex-GST.
+
+    If the dashboard August figure is near that, the two sources agree and the
+    file is simply the itemised version of the same orders.
+
+    If it is materially different, say by how much and in which direction. A
+    dashboard figure much larger than Rs 5.64 crore would mean either the sheet
+    covers the full month while the file stops at the 19th, or the two are not
+    measuring the same thing.
+
+A3. How many of the 121 sales users in the Product-Wise file have a matching
+    member row in secondary_head_month for Aug-26? If the populations differ,
+    the comparison in A2 is not like-for-like and I need to know that.
+
+A4. Is the dashboard's August Order Booked marked not_yet_recorded? If August is
+    still open on the sheet side, its figure will keep moving and any comparison
+    today is provisional.
+
+SECTION B - CAN THE TWO EVER BE SUMMED?
+
+B1. Confirm nothing currently sums or compares secondary_head_month.ordered_amount
+    with secondary_order_line.basic_order_value. I believe nothing does, because
+    only three files read secondary_order_line, but confirm it.
+
+B2. After the August load, would any page, export, AI payload or alert have both
+    figures in scope at once? Name any surface where a future change could
+    combine them by accident.
+
+B3. Is there anything - a comment, a guard, a type - that would stop someone
+    adding them together? If the only protection is that nobody has tried, say
+    so.
+
+SECTION C - THE DOCUMENT IS WRONG ABOUT MOMENTUM
+
+The reference document's Part 7 table says secondary_order_line feeds the
+Momentum pipeline. The code reads primary_order_line.
+
+C1. Confirm the Momentum pipeline booking figure comes from primary_order_line
+    and has no connection to secondary_order_line.
+
+C2. Print what the Momentum pipeline currently shows: booking, dispatch, pending
+    and pending share by month for FY2026-27.
+
+C3. Would loading the August secondary order file change ANY figure on the
+    Momentum page? I expect no. Confirm.
+
+SECTION D - THE SEGMENT WISE PATH FOR FY2026-27
+
+mgmt/orders.ts reads "Secondary Order Booking Segment Wise(<FY>)" workbooks. Five
+exist, 2021-22 through 2025-26. None for 2026-27.
+
+D1. What does the Reports page or the anchor check show for FY2026-27 order
+    booking through that path today - an error, a zero, a blank, or a stated
+    unavailable?
+
+D2. If it shows zero or blank rather than an explicit "no source", that is the
+    empty-versus-unloaded problem on a third surface. Say which it does.
+
+D3. Does the FY2025-26 figure from that path - Rs 231.09 Cr, 379,441 rows -
+    reconcile against secondary_head_month.ordered_amount for FY2025-26? If
+    secondary_head_month has no FY2025-26 rows at all, say that instead.
+
+Report only. Load nothing.
+```
+
+---
+
+## Notes
+
+- A2 is the whole prompt. If the dashboard shows roughly ₹5.6 crore for August,
+  the sources agree and loading is uncomplicated. If it shows ₹15 crore, the two
+  are measuring different things and that needs understanding before a page
+  displays one of them.
+- A4 matters for interpreting A2. If August is still `not_yet_recorded` on the
+  sheet side, the dashboard figure is provisional and a mismatch today may
+  resolve itself.
+- B3 is the honest question. Nothing sums these two because nothing reads both.
+  That is not a safeguard, it is an absence, and it is worth knowing which.
+- Section D adds a third instance of the pattern you keep hitting: a source that
+  does not exist for the current year, and a surface that may be showing zero
+  rather than saying so.
+
+## Where this sits in the sequence
+
+Steps 1 and 2 of the Secondary Orders work — the partial-month label and the
+unresolved-row disclosure — are unaffected and can proceed in parallel.
+
+Step 3, the load itself, should wait for A2.
