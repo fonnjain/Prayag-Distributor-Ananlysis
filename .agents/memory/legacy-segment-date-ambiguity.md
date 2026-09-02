@@ -1,10 +1,10 @@
 ---
-name: Legacy Segment date ambiguity
-description: Evidence boundary for interpreting numeric dates in historical Segment Wise order workbooks.
+name: Legacy Segment date import split
+description: Source-specific evidence for interpreting numeric dates in historical Segment Wise order workbooks.
 ---
 
-**Rule:** Do not transpose day and month on historical Segment Wise numeric date cells merely because the literal Excel date falls outside the workbook's declared fiscal year. Keep the literal source interpretation until an independent business control proves another date.
+**Rule:** Treat numeric date cells in the FY2024–25 and FY2025–26 Segment Wise Google Sheets as day/month-swapped imports, while keeping text dates and all FY2021–22 through FY2023–24 Segment Wise dates literal. PSCode XLSX dates also remain literal.
 
-**Why:** The proposed out-of-FY transpose rule always manufactures an in-FY answer and cannot resolve the many numeric rows for which both readings are valid and inside the same FY. Google Sheets supplies these cells as unformatted Excel serials, and the reader consumes those serials literally; a different interpretation is therefore a source-data assertion, not a parser correction. Independent PSCode archive-to-database monthly reconciliation shows no transpose in that source.
+**Why:** In FY2024–25 and FY2025–26, every numeric serial decodes to a day at most 12, every text date starts above 12, and transposing every numeric date removes every out-of-FY row. Earlier Segment sheets and PSCode archives contain many valid dates above day 12, proving the behavior is source-generation-specific rather than a universal parser rule.
 
-**How to apply:** Before changing historical monthly or quarterly reporting, obtain an independent monthly control or original CRM evidence for the Segment Wise dates. Preserve raw serials and do not rewrite closed-year dates based only on workbook naming or FY bounds.
+**How to apply:** Any implementation must use an explicit FY-and-source-format rule, preserve raw values and anomaly evidence, and never infer a transpose merely from FY bounds. Rebuild affected monthly, quarterly, and retailer-first outputs only under separately authorized work.

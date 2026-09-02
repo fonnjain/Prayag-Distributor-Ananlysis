@@ -1,0 +1,148 @@
+# Replit Prompt 51 — One test settles the date question
+
+**Date:** 2 September 2026
+**Follows:** Prompt 50, which correctly withdrew the circular transpose rule.
+**Scope:** Read-only. One test. Change nothing.
+
+**Standing rule:** every figure states which database or source it came from.
+
+## The hypothesis
+
+Not a transpose rule inferred from the fiscal year — that was circular and was
+rightly withdrawn. A **mechanism**, which the row split already points at.
+
+Your own Prompt 50 figures:
+
+| | Rows | Share |
+|---|---:|---:|
+| Text dates | 558,440 | 78% |
+| Numeric serials | 156,255 | 22% |
+
+And **all 56,029** of the disputed rows have both date components ≤ 12, while the
+safe text dates are the ones whose first component exceeds 12.
+
+That is the signature of a **locale mis-parse on import into Google Sheets**:
+
+- `04-01-2025` — 4 January in DD-MM — read as US MM/DD becomes **1 April 2025**
+  and converts to a serial.
+- `25-04-2025` — 25 cannot be a month, so Sheets **cannot parse it** and leaves
+  it as text.
+
+The file would then split exactly where it does: everything with a day above 12
+survived as text and is correct; everything with a day of 12 or below was
+silently converted with day and month swapped.
+
+---
+
+## Prompt 51
+
+```
+Read-only. One test. Change nothing, normalise nothing.
+
+THE TEST
+
+If dates were mis-parsed on import - DD-MM read as MM/DD - then NO numeric serial
+can have a calendar day above 12, because any value with a day above 12 would
+have been unparseable and left as text.
+
+T1. Across all 156,255 numeric-serial rows in the two Segment Wise workbooks,
+    how many have a calendar DAY above 12?
+
+    Print the count, and if it is not zero, print twenty examples with their raw
+    serial, the date it decodes to, and the workbook.
+
+That single number decides it.
+
+  ZERO      -> the locale mis-parse is proven. Every numeric serial is
+               transposed, not just the 56,029 whose literal reading falls
+               outside the fiscal year.
+
+  NON-ZERO  -> the theory is dead. Those rows could not have come from a
+               mis-parse, and the serials should be treated as literal.
+
+IF T1 RETURNS ZERO
+
+T2. Confirm the converse: among the 558,440 TEXT dates, how many have a first
+    component of 12 or below? If the split is clean, text dates should be
+    predominantly - though not necessarily entirely - those with a day above 12.
+
+    A text date with a day of 12 or below would be one the importer could have
+    parsed but did not, which is worth understanding.
+
+T3. Under a rule of "every numeric serial is day/month transposed", print the
+    corrected monthly distribution for both workbooks, against the current
+    literal distribution. Rows and Sub Total per month.
+
+    Note this differs from the candidate figures in Prompt 50 B2, which
+    transposed only the 56,029. This rule transposes all 156,255, which is
+    internally consistent by construction - the objection you raised about a
+    partial rule does not apply.
+
+T4. Under that rule, how many rows fall outside their own workbook's fiscal
+    year? If the mechanism is right, the answer should be close to zero and the
+    23-month tails should disappear entirely.
+
+    That is the strongest confirmation available: a rule derived from the import
+    mechanism, not from the fiscal year, that happens to produce clean fiscal
+    years.
+
+T5. Does the same pattern appear in the FY2021-22, FY2022-23 and FY2023-24
+    workbooks? They use the same v1 format and the same import route. If those
+    also carry numeric serials with no day above 12, the mechanism is confirmed
+    across all five years.
+
+T6. And the control: the FY2026-27 PSCode 3 archives are XLSX files, not Google
+    Sheets, and Prompt 50 found zero out-of-FY rows in them. Do they contain
+    numeric serials with days above 12?
+
+    If they do, that is the proof the mechanism is specific to the Google Sheets
+    import path and does not affect the archives - which would explain why
+    FY2026-27 is clean and the Segment Wise years are not.
+
+IF T1 RETURNS NON-ZERO
+
+Stop. The mechanism is disproven and no normalisation should be applied. Say so
+plainly and report the distribution of days above 12 across the numeric rows.
+
+Report only. Do not normalise, do not change loadOrderFile, do not proceed to
+Section C.
+```
+
+---
+
+## Why this is different from what was withdrawn
+
+The withdrawn rule reasoned **from the fiscal year**: reinterpret until the date
+falls inside the FY. Circular, and it could not resolve the 100,226 rows where
+both readings are already inside.
+
+This reasons **from the import mechanism**: a specific, testable prediction about
+what a mis-parse can and cannot produce. It applies uniformly to all 156,255
+numeric rows, and T4 then uses the fiscal year only as a **check on the result**,
+never as an input to the rule.
+
+If T1 is zero and T4 comes back near zero, that is a rule derived independently
+of the fiscal year that nonetheless produces clean fiscal years. That is
+corroboration rather than assumption.
+
+## Either answer is useful
+
+**Zero** — the mechanism is proven, the scope widens from 56,029 to 156,255, and
+the correction becomes consistent. It also becomes a question for Prayag: their
+source data was corrupted on import into Google Sheets, and it may still be
+happening.
+
+**Non-zero** — the theory dies cleanly, the serials are literal, and the position
+becomes "take the workbook year as authoritative and leave the dates alone". That
+is defensible and it is where Prompt 50 landed.
+
+## What it does not resolve either way
+
+`mgmtMonthIndex` is `(d.getUTCMonth() - 3 + 12) % 12` with **no year check**. A
+row is bucketed by calendar month regardless of its year. So under the literal
+reading, 56,029 rows dated outside their workbook's fiscal year are being counted
+inside it anyway.
+
+Taking the workbook year as authoritative — which is effectively what the code
+already does — resolves the year. It does not resolve the month, and the month is
+what the reports are built on.
