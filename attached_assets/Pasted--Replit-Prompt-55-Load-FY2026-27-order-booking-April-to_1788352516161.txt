@@ -1,0 +1,166 @@
+# Replit Prompt 55 — Load FY2026-27 order booking, April to August
+
+**Date:** 2 September 2026
+**Scope:** Section A is design confirmation. Section B is implementation.
+**Decision taken:** FY2026-27 only — April to July from the PSCode 3 archives,
+plus 1–19 August from the Product-Wise file. **The historical years are out of
+scope for now.**
+
+**Standing rule:** every figure states which database or source it came from.
+
+## Why this scope is clean
+
+FY2026-27 avoids every complication the historical years carry.
+
+**No date correction needed.** The 56,029 locale-misparsed rows are confined to
+the FY2024-25 and FY2025-26 **Segment Wise Google Sheets**. The PSCode 3 archives
+are XLSX files that never went through Sheets, and Prompt 51 T6 confirmed they
+hold day-above-12 serials and zero out-of-fiscal-year rows. The Product-Wise file
+is likewise clean.
+
+**No frozen-year re-ingest.** Both sources are files already in
+`attached_assets`, not registered workbooks.
+
+**Order ID present throughout.** 17,951 distinct SORDs across Apr–Jul, 1,361 in
+August. The identity key `order_id + product_code + occurrence` is fully
+available.
+
+**Basis proven equivalent.** 378 matched pairs across the 1 August changeover —
+same retailer, product, quantity, discount — give identical values either side,
+with GST added on top in the new format.
+
+---
+
+## Section A — confirm the design, no code yet
+
+```
+Confirm these six before writing any code. Most were agreed in Prompt 49
+Section B; this restates them for the narrowed scope.
+
+A1. TWO SOURCES, ONE PARSER.
+      Apr-Jul 2026   PSCode 3 archives, attached_assets, per-member exports,
+                     team member taken from the FILENAME
+      1-19 Aug 2026  Product-Wise file, attached_assets, single consolidated
+                     export
+
+    Confirm one parser serves both with a team-member strategy parameter.
+
+A2. NO DATE CORRECTION APPLIES HERE. Confirm the locale transpose is scoped to
+    segment_wise FY2024-25 and FY2025-26 only, and that neither source in this
+    load is affected. State it explicitly so nobody applies it by analogy later.
+
+A3. IDENTITY. source_era + order_id + product_code + occurrence.
+
+    Two eras in this load: legacy_crm (PSCode 3) and product_wise_crm. Keep
+    pscode3 and product_wise as separate provenance values within the era.
+
+    The new CRM restarted the counter at SORD-9 while the old reached
+    SORD-160183. Collision horizon is SORD-21452, about 280 days out.
+
+A4. NULLABLE LEGACY FIELDS. order_status and cp_code are absent from PSCode 3.
+    Make them nullable. Do not fabricate - a CP code derived from a distributor
+    name misrepresents a spelling key as a company identifier, and marking
+    legacy rows APPROVED manufactures status history.
+
+A5. STATUS FILTER. Status exists for August only. Legacy rows read
+    "Status unavailable" - never APPROVED, PENDING or absent. A user filtering
+    to APPROVED must not silently lose four months.
+
+A6. PARTIAL AUGUST. Apr-Jul are complete months. August is 19 days of an open
+    month. The page must not present them as equivalent, on screen or in the
+    export.
+
+Also confirm: does any part of this load touch secondary_register_line,
+secondary_sku_line or sale_line? It should not.
+```
+
+---
+
+## Section B — implementation, after A
+
+```
+Implement FY2026-27 order booking, April to August. Show the diff before
+applying.
+
+SOURCES
+  Apr-Jul 2026   PSCode 3 archives in attached_assets, AFTER the existing
+                 duplicate-drop lists - 17 files Apr-Jun, 14 files Jul,
+                 31 files totalling 10,913 rows and Rs 7,05,30,885 of proven
+                 duplicates, zero unique SORDs contributed
+  1-19 Aug 2026  Product-Wise-Secondary-Order-Report_29_6569_19-Aug-2026...xlsx
+
+CONTROLS THE LOAD MUST REPRODUCE EXACTLY
+
+  Apr-26   21,613 rows   3,156 orders   Rs 13,10,87,397
+  May-26   31,266 rows   4,493 orders   Rs 21,00,78,126
+  Jun-26   36,300 rows   5,462 orders   Rs 24,90,37,679
+  Jul-26   34,147 rows   4,840 orders   Rs 22,34,36,806
+  Apr-Jul 123,326 rows  17,951 orders   Rs 81,36,40,008
+  Aug 1-19  8,602 rows   1,361 orders   Rs  5,64,03,177
+  TOTAL    131,928 rows  19,312 orders   Rs 87,00,43,185
+
+  Apr-Jul must match production secondary_sku_line at Rs 0 difference PER MONTH.
+  A single rupee of difference means STOP and report - do not adjust.
+
+REQUIREMENTS
+  1. Do not modify secondary_sku_line, secondary_register_line or sale_line.
+     Print before and after counts for all three.
+  2. Do not move any entry between registers and frozen_registers.
+  3. Do not apply the Segment Wise date correction. Neither source needs it.
+  4. Raw SORD visible and unmodified in the UI.
+  5. Unavailable fields render as "Unavailable" or an em dash - never zero,
+     never a fabricated value.
+  6. Page and export must use identical mixed-era semantics. An export showing
+     a figure the page qualifies is worse than no export.
+  7. Record upload lineage per source: file name, hash, timestamp, entry point.
+
+EXPECT THE SKU CANARY TO GO RED for August. It treats August as complete and
+needs 19,417 rows against 60% of Aug-25; a 19-day file gives 8,602. That guard is
+working correctly on a partial month. Do NOT lower the floor, change the guard,
+or exclude August to make it pass. Report the failure and leave it.
+
+AFTER APPLYING, print:
+  - rows and orders per month against the controls above, with any difference
+  - upload lineage for both sources
+  - all six summary cards for Apr-Aug, and separately for Apr-Jul and Aug alone
+  - the Status filter behaviour on a range spanning both eras
+  - before and after counts for the three untouched tables
+  - confirmation that Secondary Performance, Sales Received, SKU Deep Dive,
+    Red Alerts, schemes, AI reports and company achievements are unchanged
+
+Then publish and push. Print the deployed commit and the new origin/main head,
+and confirm they are the same commit.
+```
+
+---
+
+## Notes
+
+- **A2 exists to prevent a mistake later.** The date correction is fresh and
+  someone will reasonably ask whether it applies here. It does not, and the
+  reason should be recorded rather than rediscovered.
+- **The ₹0 per-month reconciliation is the hard control.** Both the booking load
+  and the existing SKU rows come from the same accepted source lines. Any
+  difference means the two parsers diverge, and that must be found before loading
+  rather than after.
+- **The canary warning matters.** The instinct on a red guard is to adjust the
+  floor. That would remove a control that is working correctly to accommodate a
+  file that is legitimately partial.
+
+## What the page will show afterwards
+
+**₹87.00 crore across 19,312 orders**, April to 19 August 2026.
+
+April to July will show orders, retailers, distributors, quantity and value, with
+status unavailable. August adds order status, CP codes and GST.
+
+## Deliberately not in this load
+
+**FY2024-25 and FY2025-26** — readable and worth doing, but they come from the two
+Segment Wise workbooks carrying the locale-misparsed dates. That load must apply
+the same transpose correction or the page would show wrong months for those years
+while the Reports page shows right ones. A separate piece of work with its own
+design step.
+
+**FY2021-22 to FY2023-24** — no Order ID column at source, and FY2023-24's
+workbook covers April 2023 only. Not possible at order level from anything held.
