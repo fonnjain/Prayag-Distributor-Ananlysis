@@ -1,0 +1,199 @@
+# Replit Prompt 56 — Load FY2025-26 and FY2026-27 order booking
+
+**Date:** 2 September 2026
+**Supersedes:** Prompt 55, which covered FY2026-27 only.
+**Scope:** Section A first — publish the transpose removal. Section B is design
+confirmation. Section C is the load.
+
+**Standing rule:** every figure states which database or source it came from.
+
+## Scope
+
+| Source | Rows | Orders | Value |
+|---|---:|---:|---:|
+| FY2025-26 Segment Wise | 379,441 | 52,515 | ₹231.09 Cr |
+| FY2026-27 Apr–Jul, PSCode 3 | 123,326 | 17,951 | ₹81.36 Cr |
+| FY2026-27 1–19 Aug, Product-Wise | 8,602 | 1,361 | ₹5.64 Cr |
+| **TOTAL** | **511,369** | **71,827** | **₹318.10 Cr** |
+
+**FY2024-25 is excluded.** Its sheet still carries 28,613 rows with day and month
+reversed, all unresolvable and spread across all twelve months. It comes in when
+Prayag re-import it from the original CRM export.
+
+## Why FY2025-26 is now in scope
+
+It was excluded from Prompt 55 because of the date corruption. **Prayag have
+fixed it.** The workbook now reads **1 April 2025 to 31 March 2026 with zero rows
+outside the fiscal year**, verified by the guard. No date correction is needed for
+any source in this load.
+
+---
+
+## Section A — publish the transpose removal first
+
+```
+Local checkpoint fdb740a removes the read-time transpose for both years and
+keeps the guard. It is verified and unpushed. Publish it before anything else.
+
+If the transpose is still active when the load runs, it would swap the corrected
+FY2025-26 dates back to wrong.
+
+1. Publish fdb740a, then push.
+2. Print the deployed commit and confirm it matches origin/main.
+3. Confirm the FY2025-26 monthly and quarterly figures are unchanged by the
+   publish - the guard was already producing a literal read, so nothing should
+   move.
+4. Confirm the guard survives and state what it now checks with the transpose
+   gone.
+5. Confirm both frozen anchors still pass.
+
+Nothing else in this prompt runs until this is done.
+```
+
+---
+
+## Section B — design confirmation
+
+```
+Confirm before writing code. Most was agreed in Prompt 49 Section B.
+
+B1. THREE SOURCES, TWO ERAS.
+
+      FY2025-26      Segment Wise workbook, Google Sheets, team member from a
+                     COLUMN. Note the header reads "Team Member Name" for this
+                     year.
+      Apr-Jul 2026   PSCode 3 archives, attached_assets, team member from the
+                     FILENAME
+      Aug 2026       Product-Wise file, attached_assets
+
+    Segment Wise and PSCode 3 are the same CRM. Confirm one parser serves both
+    with a team-member strategy parameter.
+
+B2. IDENTITY. source_era + order_id + product_code + occurrence.
+
+    Two eras: legacy_crm covering Segment Wise and PSCode 3, and
+    product_wise_crm. Keep segment_wise, pscode3 and product_wise as provenance
+    values within the era.
+
+B3. SORD COLLISION - CHECK THIS BEFORE LOADING.
+
+      FY2025-26      SORD-21452 to SORD-141726
+      Apr-Jul 2026   SORD-67382 to SORD-160183
+      Aug 2026       SORD-9 to SORD-1381
+
+    The first two overlap numerically and sit in the SAME era. An earlier check
+    found zero actual intersections, but that was before both were loaded
+    together.
+
+    Re-verify: how many order_id + product_code combinations appear in BOTH the
+    FY2025-26 workbook and the Apr-Jul archives? If any, they would collide on
+    the key. Report the count before loading.
+
+B4. NO DATE CORRECTION. All three sources read literally. FY2025-26 is corrected
+    at source, and neither archive ever went through Google Sheets. Confirm the
+    load applies no transpose to anything.
+
+B5. NULLABLE LEGACY FIELDS. order_status and cp_code are absent from both legacy
+    formats. Nullable. Do not fabricate.
+
+B6. STATUS FILTER. Status exists from 1 August 2026 only. Legacy rows read
+    "Status unavailable" - never APPROVED, PENDING or absent. A user filtering to
+    APPROVED must not silently lose sixteen months.
+
+B7. PARTIAL AUGUST. August is 19 days of an open month. Must not present as
+    equivalent to complete months, on screen or in the export.
+
+B8. VOLUME. 511,369 rows into a table that has never held one. Confirm keyset
+    pagination, server-side retailer search and streaming export are in the
+    design - the Retailer filter alone would carry tens of thousands of options.
+
+Confirm all eight before writing code.
+```
+
+---
+
+## Section C — the load
+
+```
+Implement. Show the diff before applying.
+
+CONTROLS THE LOAD MUST REPRODUCE EXACTLY
+
+  FY2025-26        379,441 rows   52,515 orders   Rs 2,31,09,13,869
+  Apr-26            21,613 rows    3,156 orders   Rs    13,10,87,397
+  May-26            31,266 rows    4,493 orders   Rs    21,00,78,126
+  Jun-26            36,300 rows    5,462 orders   Rs    24,90,37,679
+  Jul-26            34,147 rows    4,840 orders   Rs    22,34,36,806
+  Apr-Jul 2026     123,326 rows   17,951 orders   Rs    81,36,40,008
+  Aug 1-19 2026      8,602 rows    1,361 orders   Rs     5,64,03,177
+  TOTAL            511,369 rows   71,827 orders   Rs 3,18,09,57,054
+
+  Apr-Jul 2026 must match production secondary_sku_line at Rs 0 difference PER
+  MONTH. A single rupee of difference means STOP and report - do not adjust.
+
+  FY2025-26 must reconcile to its anchor of Rs 2,31,09,00,000 and 52,515 orders.
+  Print BOTH the workbook total and the in-fiscal-year subtotal. Now that the
+  sheet is corrected these should be identical - zero rows outside the year.
+  If they differ, say so.
+
+REQUIREMENTS
+  1. Apply the existing duplicate-drop lists to the PSCode 3 archives - 31 files,
+     10,913 rows, Rs 7,05,30,885, zero unique SORDs contributed.
+  2. Do not modify secondary_sku_line, secondary_register_line or sale_line.
+     Print before and after counts for all three.
+  3. Do not move any entry between registers and frozen_registers. Read the
+     FY2025-26 workbook directly, as loadOrderFile already does.
+  4. Do not load FY2024-25. Do not load FY2021-22 to FY2023-24.
+  5. Apply no date transpose to any source.
+  6. Raw SORD visible and unmodified in the UI.
+  7. Unavailable fields render as "Unavailable" or an em dash - never zero,
+     never a fabricated value.
+  8. Page and export must use identical semantics across both eras.
+  9. Record upload lineage per source: file or sheet ID, hash where available,
+     timestamp, entry point.
+
+EXPECT THE SKU CANARY TO GO RED for August - 8,602 against a 19,417 floor. That
+guard is correct on a partial month. Do NOT lower the floor, change the guard, or
+exclude August. Report it and leave it.
+
+AFTER APPLYING, print:
+  - rows and orders per fiscal year and per month against the controls
+  - FY2025-26 workbook total AND in-fiscal-year subtotal
+  - upload lineage for all three sources
+  - all six cards for FY2026-27 Apr-Aug, FY2025-26 Apr-Aug, and FY2025-26 full year
+  - the Status filter behaviour on a range spanning both eras
+  - before and after counts for the three untouched tables
+  - confirmation that Secondary Performance, Sales Received, SKU Deep Dive,
+    Red Alerts, schemes, AI reports and company achievements are unchanged
+
+Then publish and push. Print the deployed commit and confirm it matches
+origin/main.
+```
+
+---
+
+## Notes
+
+- **Section A is not optional and must go first.** If the transpose is still live
+  when the load runs, it would swap the now-correct FY2025-26 dates back to
+  wrong and write them into a new table.
+- **B3 is the check I would not skip.** FY2025-26 and Apr–Jul 2026 share one SORD
+  counter with overlapping numeric ranges, and under this design they share an
+  era. Zero intersections was verified before, but not with both loaded together.
+- **The ₹0 per-month reconciliation** on Apr–Jul is the strongest control
+  available — same accepted source lines, two parsers, no room for drift.
+
+## What the page will show
+
+**₹318.10 crore across 71,827 orders**, April 2025 to 19 August 2026 — sixteen
+months, and a full prior year to compare against.
+
+FY2025-26 and April–July 2026 will show orders, retailers, distributors, quantity
+and value with status unavailable. August adds order status, CP codes and GST.
+
+## Waiting on Prayag
+
+**FY2024-25** joins this once they re-import from the original CRM export. Its
+sheet still holds 28,613 rows with day and month reversed — Q4 overstated 13.2%,
+Q1 understated 12.6%, April out by 30.7%. The note explaining this has gone to
+them.
