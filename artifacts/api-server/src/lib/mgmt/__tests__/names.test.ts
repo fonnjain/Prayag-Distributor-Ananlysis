@@ -8,7 +8,15 @@
 // maintained copy can drift out of sync.
 
 import { describe, it, expect } from "vitest";
-import { normHead, resolveHeadKey, HEAD_ALIASES } from "../names.js";
+import {
+  normHead,
+  resolveHeadKey,
+  HEAD_ALIASES,
+  dateToSerial,
+  parseOrderDate,
+  parseSegmentWiseOrderDate,
+  assertSegmentWiseDateSignature,
+} from "../names.js";
 
 describe("headNormKey family — normHead", () => {
   it("is idempotent on its own output (normHead(normHead(v)) === normHead(v))", () => {
@@ -133,5 +141,85 @@ describe("headNormKey family — resolveHeadKey", () => {
     for (const [raw, expected] of fixtures) {
       expect(resolveHeadKey(raw), `resolveHeadKey(${JSON.stringify(raw)})`).toBe(expected);
     }
+  });
+});
+
+describe("Segment Wise source-specific date interpretation", () => {
+  const serial = (year: number, monthIndex: number, day: number): number =>
+    dateToSerial(new Date(Date.UTC(year, monthIndex, day)));
+
+  it("swaps numeric serial day/month only in the two proven-bad years", () => {
+    const literalJan4 = serial(2025, 0, 4);
+    expect(parseSegmentWiseOrderDate(literalJan4, "2024-25")).toBe(
+      serial(2025, 3, 1),
+    );
+    expect(parseSegmentWiseOrderDate(literalJan4, "2025-26")).toBe(
+      serial(2025, 3, 1),
+    );
+    expect(parseSegmentWiseOrderDate(literalJan4, "2023-24")).toBe(
+      literalJan4,
+    );
+    expect(parseSegmentWiseOrderDate(literalJan4, "2026-27")).toBe(
+      literalJan4,
+    );
+  });
+
+  it("keeps text dates literal in every year", () => {
+    const textDate = "04-01-2025";
+    expect(parseSegmentWiseOrderDate(textDate, "2024-25")).toBe(
+      parseOrderDate(textDate),
+    );
+    expect(parseSegmentWiseOrderDate(textDate, "2025-26")).toBe(
+      parseOrderDate(textDate),
+    );
+  });
+
+  it("fails loudly if either affected-year signature condition changes", () => {
+    expect(() =>
+      assertSegmentWiseDateSignature("2024-25", {
+        numericSerialRows: 1,
+        numericSerialDayAbove12: 1,
+        textDateRows: 0,
+        textDateFirstComponentAtMost12: 0,
+      }),
+    ).toThrow(/refusing the source-specific day\/month correction/);
+    expect(() =>
+      assertSegmentWiseDateSignature("2025-26", {
+        numericSerialRows: 1,
+        numericSerialDayAbove12: 0,
+        textDateRows: 1,
+        textDateFirstComponentAtMost12: 1,
+      }),
+    ).toThrow(/refusing the source-specific day\/month correction/);
+  });
+
+  it("fails loudly if a clean year loses its day-above-12 control", () => {
+    expect(() =>
+      assertSegmentWiseDateSignature("2023-24", {
+        numericSerialRows: 100,
+        numericSerialDayAbove12: 0,
+        textDateRows: 0,
+        textDateFirstComponentAtMost12: 0,
+      }),
+    ).toThrow(/may have been re-imported under the wrong locale/);
+  });
+
+  it("accepts the proven affected and clean signatures", () => {
+    expect(() =>
+      assertSegmentWiseDateSignature("2024-25", {
+        numericSerialRows: 76_352,
+        numericSerialDayAbove12: 0,
+        textDateRows: 258_904,
+        textDateFirstComponentAtMost12: 0,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertSegmentWiseDateSignature("2022-23", {
+        numericSerialRows: 220_875,
+        numericSerialDayAbove12: 153_057,
+        textDateRows: 0,
+        textDateFirstComponentAtMost12: 0,
+      }),
+    ).not.toThrow();
   });
 });

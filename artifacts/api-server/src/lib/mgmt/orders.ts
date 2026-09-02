@@ -33,7 +33,10 @@ import {
 import {
   normName,
   normSecKey,
-  parseOrderDate,
+  parseSegmentWiseOrderDate,
+  assertSegmentWiseDateSignature,
+  serialToDate,
+  type SegmentWiseDateSignature,
   mgmtMonthIndex,
   fyShort,
   fyStartYear,
@@ -359,6 +362,12 @@ async function loadOrderFileUncached(
   let dateParseFailures = 0;
   let earliestDate: number | null = null;
   let latestDate: number | null = null;
+  const dateSignature: SegmentWiseDateSignature = {
+    numericSerialRows: 0,
+    numericSerialDayAbove12: 0,
+    textDateRows: 0,
+    textDateFirstComponentAtMost12: 0,
+  };
   // Multi-line orders can leave Date/Retailer/Order ID/Team Member blank on
   // continuation rows — forward-fill them down the block. Carried across
   // chunk boundaries (chunks arrive sequentially).
@@ -388,6 +397,10 @@ async function loadOrderFileUncached(
     dateParseFailures = 0;
     earliestDate = null;
     latestDate = null;
+    dateSignature.numericSerialRows = 0;
+    dateSignature.numericSerialDayAbove12 = 0;
+    dateSignature.textDateRows = 0;
+    dateSignature.textDateFirstComponentAtMost12 = 0;
     carry.date = null;
     carry.retailerId = "";
     carry.retailerName = "";
@@ -404,6 +417,31 @@ async function loadOrderFileUncached(
         if (!cols) {
           cols = detectColumns(r);
           continue;
+        }
+        const rawDate = r[cols.date];
+        if (!blank(rawDate)) {
+          if (
+            typeof rawDate === "number" &&
+            Number.isFinite(rawDate) &&
+            rawDate > 20_000 &&
+            rawDate < 80_000
+          ) {
+            dateSignature.numericSerialRows++;
+            if (serialToDate(rawDate).getUTCDate() > 12) {
+              dateSignature.numericSerialDayAbove12++;
+            }
+          } else if (typeof rawDate === "string") {
+            const textDate =
+              /^(\d{1,2})[-/](\d{1,2})[-/](\d{2}|\d{4})$/.exec(
+                rawDate.trim(),
+              );
+            if (textDate) {
+              dateSignature.textDateRows++;
+              if (Number(textDate[1]) <= 12) {
+                dateSignature.textDateFirstComponentAtMost12++;
+              }
+            }
+          }
         }
         // Forward-fill the order-block header fields.
         if (!blank(r[cols.date])) carry.date = r[cols.date];
@@ -425,7 +463,7 @@ async function loadOrderFileUncached(
 
         const tmRaw = carry.teamMember;
         if (tmRaw == null || tmRaw === "") continue;
-        const dateSerial = parseOrderDate(carry.date);
+        const dateSerial = parseSegmentWiseOrderDate(carry.date, fy);
         if (dateSerial == null) { dateParseFailures++; continue; }
         if (earliestDate == null || dateSerial < earliestDate) earliestDate = dateSerial;
         if (latestDate == null || dateSerial > latestDate) latestDate = dateSerial;
@@ -628,6 +666,20 @@ async function loadOrderFileUncached(
     logger.error({ fy, sourceId, rowsRead }, st.detail);
     return null;
   }
+  try {
+    assertSegmentWiseDateSignature(fy, dateSignature);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    loadStatus.set(fy, {
+      fy,
+      status: "error",
+      detail,
+      rowsRead,
+      spreadsheetId: sourceId,
+    });
+    logger.error({ fy, sourceId, rowsRead, dateSignature }, detail);
+    return null;
+  }
   const agg: OrderFileAgg = {
     fy,
     spreadsheetId: sourceId,
@@ -657,6 +709,7 @@ async function loadOrderFileUncached(
       totalAmount: Math.round(totalAmount),
       totalSaleAmount: Math.round(totalSaleAmount),
       dateParseFailures,
+      dateSignature,
       earliestDate,
       latestDate,
     },
