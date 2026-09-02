@@ -1,0 +1,151 @@
+# Replit Prompt 50 — Design response, and a question about live reports
+
+**Date:** 2 September 2026
+**Follows:** Prompt 49 Section B
+
+**Standing rule:** every figure states which database or source it came from.
+
+## Approved
+
+**B1, B2, B4, B5, B6, B7, B8, B9 — approved as proposed.**
+
+B2 in particular is the right call: `legacy_crm` and `product_wise_crm` as the two
+source systems, with `segment_wise`, `pscode3` and `product_wise` retained as
+provenance. Two eras surface a genuine cross-source duplicate rather than hiding
+it, and the format value keeps the distinction available.
+
+## Held
+
+**B3 is held.** Not because the conclusion looks wrong — it probably is not — but
+because it is a rule being applied to closed years on an inference, and it needs
+evidence.
+
+And it raises a separate question that has nothing to do with this load.
+
+---
+
+## Prompt 50
+
+```
+Read-only. Change nothing, load nothing. B1, B2, B4-B9 are approved; do not act
+on them yet either. This is about B3 and one consequence of it.
+
+SECTION A - EVIDENCE THE TRANSPOSE, DO NOT ASSERT IT
+
+You found 56,029 rows whose apparent 23-month tails are numeric date serials with
+day and month transposed - 04/01/2025 read as 4 January rather than 1 April.
+
+A1. HOW WAS IT DETECTED? Print the exact rule.
+
+    If the rule is "reinterpret when the naive parse falls outside the declared
+    fiscal year", that is circular - it will always produce an in-FY answer,
+    including for a row that genuinely belongs elsewhere. If it is something
+    stronger, say what.
+
+A2. A transpose is only detectable when day <= 12. 15/06/2025 cannot be misread;
+    04/01/2025 can. So the corruption is SELECTIVE - roughly the first twelve
+    days of each month are at risk and the rest are safe.
+
+    Confirm that. How many of the 56,029 have day <= 12 in one reading and > 12
+    in the other, versus how many are ambiguous with both readings <= 12?
+
+A3. AMBIGUOUS ROWS. For any row where BOTH readings fall inside the fiscal year,
+    the FY rule cannot resolve it. How many are there, and what would the load do
+    with them?
+
+A4. EXTERNAL CORROBORATION. Can the corrected monthly distribution be checked
+    against anything independent?
+      - secondary_head_month for FY2025-26 - though that table has no FY2025-26
+        rows, so probably not
+      - the State Head Dashboard monthly blocks
+      - the workbooks' own monthly subtotal or control rows, if any exist
+      - the FY2026-27 PSCode 3 archives against secondary_sku_line BY MONTH
+
+    Any of those turns an inference into a proof. A4 is the one I most want.
+
+A5. FY2026-27. How many of the 56,029 sit in the PSCode 3 archives? Those
+    reconcile to secondary_sku_line at Rs 0 - but that is an ANNUAL
+    reconciliation. Print the MONTHLY comparison: archive rows and Sub Total per
+    month under the naive parse, under the corrected parse, and against
+    production secondary_sku_line per month.
+
+    If the corrected parse changes any month's figure, then the Apr-Jul monthly
+    numbers quoted throughout this project are affected.
+
+SECTION B - THE SEPARATE QUESTION. THIS MATTERS MORE.
+
+loadOrderFile reads these workbooks EVERY DAY and builds monthAmount[12],
+saleMonthAmount[12], monthOrderIds[12] and perStatePerMonth by parsed date.
+
+If 56,029 rows are landing in the wrong fiscal month, then every monthly figure
+derived from those workbooks is already wrong, and has been all along.
+
+Annual totals would be unaffected - every row is counted once regardless of which
+month it lands in. That is exactly why nobody noticed. Rs 231.09 Cr reconciles
+while the distribution beneath it does not.
+
+B1. Does loadOrderFile apply any date normalisation, or does it parse the serial
+    naively? Show the parsing code.
+
+B2. If naive: print the CURRENT monthly distribution for FY2025-26 and FY2024-25
+    as the live reader produces it, alongside the corrected distribution. Give
+    the difference per month in rows and rupees.
+
+B3. Which live surfaces consume those monthly arrays? Management reports, the
+    Reports page, Sales People deep-dive by segment and group, the per-state and
+    per-party tables, the retailer-first-seen dates, anything quarterly.
+
+    For each, say whether it currently shows month-level figures built on the
+    naive parse.
+
+B4. The Area Head Wise Comparison Report is quarterly, and the CRM Working Sheets
+    describe quarterly blocks for Q1-Q4. A transposed row moves between months
+    and can therefore move between QUARTERS. How many of the 56,029 cross a
+    quarter boundary under correction?
+
+B5. retailerFirst records the earliest order date seen per retailer. A transposed
+    date could make a retailer look older or newer than they are. How many
+    retailers' first-seen dates change under correction, and does anything
+    downstream use that - new versus old party analysis, for instance?
+
+B6. Is this a data-quality problem in the SOURCE workbooks, or a parsing problem
+    in the reader? If the serials are correct and the reader misinterprets them,
+    that is ours to fix. If the sheets genuinely hold transposed values, that is
+    Prayag's. Say which, with evidence.
+
+Report only. Do not change loadOrderFile, do not normalise anything, do not
+proceed to Section C.
+```
+
+---
+
+## Notes
+
+- **A1 is the whole of Section A.** If the detection rule is "reinterpret until it
+  falls inside the FY", it cannot distinguish a transposed date from a genuinely
+  out-of-period one, and it will silently absorb both. That is a rule that always
+  succeeds, which is why it needs checking.
+- **A4 is what would settle it.** The FY2026-27 archives reconcile to
+  `secondary_sku_line` annually at ₹0. A monthly reconciliation would either
+  confirm the correction or expose it, and the data to do it already exists.
+- **Section B is more important than Section A.** The load has not happened yet
+  and can wait. The management reports are running today, and if their monthly
+  and quarterly figures are built on a naive parse of 56,029 transposed rows,
+  people have been reading them for months.
+- **B6 decides whose problem this is.** A reader misinterpreting correct serials
+  is ours. Sheets holding genuinely transposed values is Prayag's, and belongs in
+  their query pack.
+
+## Scale, for context
+
+56,029 rows across the two Segment Wise workbooks — **7.8% of 714,697 rows**. Not
+catastrophic, not negligible. And because a month can lose some of its own early
+days while gaining days from another, two months can be wrong in opposite
+directions while the year still balances exactly.
+
+## Section C stays held
+
+Implementation waits for B3 to be evidenced. B1, B2 and B4 through B9 are agreed
+and need no further discussion, but nothing should be built until the date
+question is closed — the load would otherwise bake the same interpretation into a
+new table.
