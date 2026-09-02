@@ -1,0 +1,244 @@
+# Replit Prompt 47 — April to July 2026 order booking, from files already held
+
+**Date:** 2 September 2026
+**Scope:** Read-only and scoping only. Build nothing, load nothing, persist
+nothing.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**Scope: the whole of FY2026-27 to date** — April to July from the PSCode 3
+archives, plus 1–19 August from the Product-Wise file. Two source formats, one
+fiscal year. The five historical Segment Wise years are a separate decision and
+are not in scope here.
+
+## What Prompt 45 established
+
+The PSCode 3 archives carry the **identical header** to the Segment Wise files:
+
+```
+Sr.No., Date, Retailer Id, Retailer, Order ID, Segment, Cat. No., Qty, MRP,
+Order Value, Distributor, Discount, Sub Total, Order Total
+```
+
+And the same `SORD-` order references — April `SORD-144316`, July `SORD-155203`,
+against FY2025-26 Segment Wise `SORD-90527`. Same namespace, same booking-line
+fields, not a dispatch or invoice reference.
+
+So the old CRM did produce April–July order booking. It was exported per member
+rather than assembled into one workbook, and both archives are already in
+`attached_assets`.
+
+**The gap is that `secondary_sku_line` has no `order_id` column.** Those 123,326
+rows were loaded from these archives with the SORD dropped. The data exists in
+the files; it does not exist in the database.
+
+---
+
+## Prompt 47
+
+```
+Read-only and scoping only. Build nothing, load nothing, persist nothing, modify
+no frozen month.
+
+SCOPE: the whole of FY2026-27 to date.
+
+  Apr-Jul 2026   PSCode 3 archives, old CRM, already in attached_assets
+  1-19 Aug 2026  Product-Wise file, new CRM, validated, not yet loaded
+
+Two source formats, one fiscal year. The five historical Segment Wise years are
+out of scope for this prompt.
+
+SECTION 0 - THE ORDER NUMBERING RESTARTED. CHECK THIS FIRST.
+
+The new CRM reset the SORD counter.
+
+  FY2025-26 Segment Wise : SORD-90527
+  Apr 2026 PSCode 3      : SORD-144316
+  Jul 2026 PSCode 3      : SORD-155203
+  Aug 2026 Product-Wise  : SORD-9 to SORD-1381, 1,361 distinct
+
+Same prefix, same format, a counter that starts again from single digits.
+
+0.1 Confirm the August range and the July range, and confirm they do not
+    overlap today.
+
+0.2 The identity key is order_id + product_code + occurrence. It carries no
+    fiscal year and no source. If a future old-CRM file were ever loaded, or if
+    the new counter climbs into the old range, two different orders would share
+    a key. Is that a real risk or is it precluded by something I cannot see?
+
+0.3 What is the smallest way to make the key era-safe - adding source, fiscal
+    year, or a prefix at load time? Describe the options.
+
+0.4 Does the same reset appear in the retailer or distributor identifiers, or
+    only in the order reference? RET# codes matched at 675 across the changeover,
+    so those look stable - confirm, and check CP codes.
+
+SECTION A - CONFIRM THE SOURCE IS COMPLETE
+
+A1. For each of Apr, May, Jun and Jul 2026, parse the PSCode 3 archives and
+    print: files, rows, distinct SORD order IDs, distinct retailers, distinct
+    distributors, distinct item codes, total Qty, total Sub Total, total Order
+    Value, and the date range.
+
+A2. Reconcile each month's Sub Total against the loaded secondary_sku_line
+    net_amount for that month:
+      Apr 21,613 rows / Rs 13.11 Cr
+      May 31,266 rows / Rs 21.01 Cr
+      Jun 36,300 rows / Rs 24.90 Cr
+      Jul 34,147 rows / Rs 22.34 Cr
+
+    These came from the same archives, so they should agree exactly. If they do
+    not, say by how much and why - that would mean the SKU load and a booking
+    load would disagree from the outset.
+
+A3. The duplicate-drop lists apply here. April-June dropped 17 workbooks, July
+    dropped 14, totalling 10,913 rows and Rs 7.0531 Cr of proven duplicate
+    exports. Confirm the same drops would apply to a booking load, and that the
+    dropped files add no unique SORD references.
+
+A4. Does every row carry a SORD reference, or are some blank? Multi-line orders
+    in the Segment Wise files leave Order ID blank and rely on forward-fill.
+    Confirm whether the PSCode 3 files behave the same way, and how many rows
+    would need forward-fill.
+
+A5. Are the SORD references unique within Apr-Jul 2026, and do they collide with
+    any FY2025-26 Segment Wise SORD? April is SORD-144316 and FY2025-26 has
+    SORD-90527, so the old-CRM ranges look sequential - confirm.
+
+A6. AUGUST. The Product-Wise file is separately validated: 8,602 rows,
+    1-19 August, 1,361 orders, 1,132 retailers, 128 distributors, 322,465 qty,
+    Rs 5,64,03,177 Basic Order Value ex-GST, 8,172 APPROVED and 430 PENDING.
+
+    Confirm those figures still hold, and print August's own distinct item
+    codes and total Order Value for comparison with the Apr-Jul months.
+
+A7. Do Apr-Jul and August share retailers and distributors? How many of
+    August's 1,132 RET# and 128 CP codes appear in the Apr-Jul PSCode 3 rows?
+    The changeover check found 675 retailers matching on RET# between July and
+    August - reconcile against that figure.
+
+SECTION B - WHAT IT WOULD FILL, AND WHAT IT WOULD NOT
+
+B1. Map the PSCode 3 columns to secondary_order_line, marking each as direct,
+    derivable, or absent. I expect order_status, cp_code, GST fields and the
+    address columns to be absent - confirm and name anything else.
+
+B2. Which of the six summary cards would populate for EACH era? Orders, Lines,
+    Retailers, Distributors, Total Qty, Basic order value. Give Apr-Jul and
+    August separately - August has status and GST, Apr-Jul does not.
+
+B3. Which filters would work in each era? Date, Status, State Head, State,
+    Distributor, Retailer.
+
+    Status is the sharp one: it exists for August and not for Apr-Jul. If a user
+    filters to APPROVED, four months vanish. That is worse than a blank page
+    because it looks like a real result. What should happen - disable the filter
+    when the range includes Apr-Jul, or show those rows as status-unavailable?
+
+B5. A user selecting Apr-Aug would get one table spanning two source formats
+    with different field coverage. How should the page make the boundary visible
+    without cluttering it?
+
+B4. Sub Total is net after discount. Basic Order Value in the Product-Wise file
+    is explicitly ex-GST. Are they the same measure? If the basis cannot be
+    certified, the page should not put them under one card label without saying
+    so. State the options.
+
+SECTION C - WHAT LOADING IT WOULD INVOLVE
+
+Describe only. Build nothing.
+
+C1. The existing loader requires the 22-column Product-Wise schema and a key of
+    order_id + product_code + occurrence. PSCode 3 has order_id and product code
+    (Cat. No.), so that key IS available for Apr-Jul - unlike the pre-FY2024
+    Segment Wise years. Confirm.
+
+C2. What is the smallest path: a second parser writing into secondary_order_line
+    with a source column, following the two-era pattern secondary_sku_line
+    already uses for pscode3_xlsx and productwise_xlsx? Or something else?
+
+C3. NOT NULL constraints. order_status and cp_code are required by the current
+    schema and absent from this source. What would have to change, and what is
+    the least invasive form of that change?
+
+C4. Apr-Jul 2026 months are FROZEN in secondary_sku_line. Does that freeze apply
+    to secondary_order_line, or is it table-specific? Loading booking rows for a
+    frozen month must not touch the sell-through rows.
+
+    August is not frozen until 7 September, and the Product-Wise file covers only
+    19 days. If Apr-Jul load as complete frozen months and August loads partial,
+    the page must not present August as equivalent.
+
+C5. Estimate the work for the full FY2026-27 - Apr-Jul plus August. Prompt 45
+    estimated 4-7 days for all five historical years plus schema decisions. This
+    is one fiscal year with order_id and product code present throughout, but
+    two source formats. Give a real number and name the risky parts.
+
+    Say explicitly whether loading August alone first, then Apr-Jul, is cheaper
+    or more expensive than doing both together.
+
+C6. Would loading Apr-Jul change anything beyond the Secondary Orders page and
+    its export? Prompt 45 corrected me that ISOLATED_PENDING_RELIABILITY blocks
+    analytics approval but does not filter rows from that page. Confirm nothing
+    else moves.
+
+SECTION D - THE ALTERNATIVE
+
+D1. Instead of a second parser, could secondary_sku_line simply gain an
+    order_id column, backfilled from the same archives? The rows are already
+    loaded and frozen; only the reference was dropped.
+
+    That would not populate the Secondary Orders page, which reads a different
+    table - but it would make the order reference available for analysis, and it
+    may be a smaller change with separate value.
+
+    Describe it. Note that Apr-Jul are frozen months, so a backfill would touch
+    frozen data and needs its own justification.
+
+D2. Which is the better first step - populating the page, or recovering the
+    order reference into the table that already holds the data? Give the
+    argument both ways. Do not choose.
+
+Report only. Propose no implementation. I want to know the size and shape before
+deciding.
+```
+
+---
+
+## Notes
+
+- A2 is the check that matters most. Both the SKU rows and a booking load would
+  come from the same archives, so they must reconcile exactly. If they do not,
+  something in the parse differs and that needs finding before anything is built.
+- C1 is what makes April–July materially easier than the historical years. The
+  existing identity key — `order_id + product_code + occurrence` — is fully
+  available here. The pre-FY2024 Segment Wise files have no Order ID at all, and
+  that is the hard part of the historical work.
+- Section D is worth asking even though it does not fill the page. The rows are
+  already loaded; only the reference was discarded. Recovering it may be smaller
+  and useful in its own right — though it touches frozen months, which needs its
+  own justification.
+- Section 0 is new and it is the one I would read first. The new CRM restarted
+  the SORD counter at single digits while the old CRM was at 155,203. The
+  identity key carries no era marker. That is a collision waiting to happen.
+- B3 is the sharpest design question. Status exists for August and not for
+  Apr-Jul. A user filtering to APPROVED would silently lose four months, and a
+  wrong result that looks right is worse than a blank page.
+- Nothing here should be built off the reply.
+
+## Two things from Prompt 45 worth recording separately
+
+**FY2023-24's Segment Wise workbook covers April 2023 only** — 16,274 rows,
+₹10.53 crore, against a full-year primary register of ₹349 crore. That workbook
+is not a fiscal year and nothing has said so.
+
+**The FY2025-26 order-booking anchor spans 4 January 2025 to 3 December 2026** —
+23 months inside a 12-month workbook — because the reader includes every dated
+row to reconcile to the printed total. Distinct order IDs come to 52,515,
+matching the configured anchor exactly. So "FY2025-26 order booking: ₹231.09 Cr,
+verified" is reconciled to its source but describes a population running eleven
+months past the fiscal year end.
+
+Neither is urgent. Both should be written down before someone relies on those
+figures as fiscal-year totals.
