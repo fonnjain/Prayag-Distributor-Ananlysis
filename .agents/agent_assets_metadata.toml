@@ -356,3 +356,17 @@ mtime_ms = 1788234522024
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/1c743e6e-135f-4f65-8c6c-072a2fe06a45/8ca2f4c1-ff63-4f6c-b5a4-96f5b60a38bf"
 storage_version_token = "1788234539133042"
 content_type = "text/csv"
+
+[[outputs]]
+id = "U7DQcWQgAD-v2lTPtU6Y3"
+uri = "file://.agents/outputs/prompt43-section-a-affected-alerts.csv"
+type = "table"
+title = "Prompt 43 — affected August A2 alerts"
+description = "Exact production read-only set of 114 currently open Aug-26 A2 alerts, including alert ID, member, state head, period, and value."
+logical_id = "b6e15665-25ce-4375-9069-7442234a7a2f"
+content_hash = "sha256:9d686b775a69f6a48f42eea4976294ef7182a8c669b27dd6681b9e7d23542631"
+size = 13053
+mtime_ms = 1788320478784
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/b6e15665-25ce-4375-9069-7442234a7a2f/d57f6704-308d-45ad-b7ee-48b84d899e3b"
+storage_version_token = "1788320598890138"
+content_type = "text/csv"

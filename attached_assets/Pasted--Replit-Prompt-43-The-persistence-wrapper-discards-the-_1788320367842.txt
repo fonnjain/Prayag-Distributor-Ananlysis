@@ -1,0 +1,191 @@
+# Replit Prompt 43 — The persistence wrapper discards the arrears guard
+
+**Date:** 2 September 2026
+**Scope:** Section A is read-only and must come back first. Section B is a
+one-line code change. Section C is a separate defect, scoping only.
+
+**Standing rule:** every figure states which database or source it came from.
+
+## The defect
+
+The dashboard loader gets August right. Its V4 arrears guard finds 8 of 121
+members with August sales — 6.6% against a 15% threshold — and marks the month
+unrecorded.
+
+The persistence wrapper then discards that:
+
+```js
+const closed = isMonthClosed(monthIdx, fy, now);
+const notYetRecorded = !closed && m.notYetRecorded;
+```
+
+August is closed, so `!closed` is `false`, so `false && true` is `false`.
+
+**Any arrears month is stored as complete once the calendar passes it**,
+regardless of what the guard concluded. Generic, and it recurs at every month
+boundary.
+
+## What it is doing right now
+
+**121 members** have August plan above zero and August Order Booked at zero, so
+all 121 satisfy the raw A2 condition. **113 open alerts are explicitly labelled
+Aug-26.**
+
+Those alerts are not detecting a business problem. They are detecting a sheet
+nobody has filled in — and they sit in an engine that escalates to the CEO.
+
+The Secondary Performance page is unaffected. Head labels still read "Apr–Jul",
+and eight of ten percentages are unchanged. So the screen is right and the
+database is wrong, which is why nobody noticed.
+
+---
+
+## Section A — read-only, send first
+
+```
+Read-only. Change nothing.
+
+The persistence wrapper discards the V4 arrears guard for closed months:
+
+  const notYetRecorded = !closed && m.notYetRecorded;
+
+For a closed month this always evaluates false, so an arrears month is stored as
+recorded.
+
+A1. List every currently open alert that would resolve if August were correctly
+    stored as not_yet_recorded. Give alert id, category, member, head, period
+    label and value. I expect roughly 113 A2 alerts labelled Aug-26 - print the
+    exact set.
+
+A2. Has anyone acted on any of them? Check for acknowledgements, escalations,
+    assignments, digest sends or status changes since 31 August 01:17 UTC, when
+    the first bad generation was written.
+
+    If any of these alerts reached a person - a digest, an escalation, a
+    CEO-level notification - I need to know before they vanish.
+
+A3. Do A1 and A3 have any open alerts whose window includes August? The report
+    says the three open A1 and one open A3 are labelled with earlier windows.
+    Confirm none depends on August.
+
+A4. Which other months in any fiscal year are currently stored as recorded while
+    the live loader's arrears guard would call them unrecorded? Run the guard's
+    15% test against every stored month and list the disagreements. If this has
+    happened before and self-corrected, I want to know.
+
+A5. Would the corrected flag change ANY head or company achievement figure?
+    August plan is Rs 25.69 Cr and would leave the denominator on the database
+    side. The dashboard already excludes it, so I expect no visible change -
+    confirm.
+
+Report only. Do not change the flag or the code.
+```
+
+---
+
+## Section B — the code change, after Section A
+
+```
+Code change. One line. Show me the diff before applying.
+
+In the secondary persistence wrapper:
+
+  const notYetRecorded = !closed && m.notYetRecorded;
+
+should be:
+
+  const notYetRecorded = !closed || m.notYetRecorded;
+
+This preserves the loader's arrears decision instead of discarding it on closed
+months. An open month stays unrecorded because !closed is true; a closed month
+that the V4 guard flagged as arrears stays unrecorded because m.notYetRecorded
+is true.
+
+Requirements:
+
+1. Do not change isMonthClosed, the V4 guard, the 15% threshold, or the loader.
+   The loader is correct. Only the persistence wrapper is wrong.
+
+2. Do not change the amount-nulling rule that follows it. Once the flag is
+   correct, the existing rule nulls plan, ordered and received for unrecorded
+   months by itself - which is right, and it is why 152 explicit zeros are
+   currently being stored as confirmed values.
+
+3. Do not touch any frozen year or closed-FY data.
+
+4. Do not delete, acknowledge or suppress any alert. They should resolve because
+   their input becomes correct, not because anyone cleared them.
+
+AFTER APPLYING, print:
+  - the next secondary_head_month generation: August rows, their flag state, and
+    whether plan/ordered/received are now null
+  - the open alert count before and after, by category
+  - the list of alerts that resolved, matching it against Section A1
+  - all ten head achievement percentages, which must be unchanged from
+    86.86 / 69.84 / 65.46 / 61.04 / 67.21 / 65.66 / 52.82 / 140.72 / 60.17 / 40.05
+  - company planRecorded, which must stay near Rs 107.72 Cr and must NOT become
+    Rs 133.41 Cr
+
+RECORD WHY. Roughly 113 alerts will disappear on the same day. Write a note in
+the agent memory saying they resolved because a persistence defect was corrected,
+not because the underlying business condition changed. Anyone reviewing alert
+volume next week will otherwise see a cliff with no explanation.
+```
+
+---
+
+## Section C — a second, separate defect. Scoping only.
+
+```
+Read-only. Describe only, change nothing.
+
+isMonthClosed uses:
+
+  return nowMs > Date.UTC(calYear, calMonth + 1, 0);
+
+Date.UTC(year, month+1, 0) is midnight at the START of the month's final calendar
+day, not the end of it.
+
+August 2026 therefore became "closed" at 31 August 00:00 UTC - 05:30 IST - with a
+full day of the month still to run. The first bad generation was written at
+01:17 UTC that morning.
+
+C1. Confirm the off-by-one. Print what isMonthClosed returns for a series of
+    timestamps across 30 and 31 August.
+
+C2. Which consumers depend on isMonthClosed? A month closing 24 hours early
+    affects anything that treats closure as completeness.
+
+C3. Does the same expression appear elsewhere in the codebase? Print every
+    occurrence.
+
+C4. What is the correct expression, and what would change if it were fixed?
+    Describe only. Do not apply it - this is a separate change from Section B
+    and should not ride along with it.
+
+Report only.
+```
+
+---
+
+## Notes
+
+- A2 is the question I would not skip. If any of those 113 alerts reached a
+  person through a digest or an escalation, someone may already have acted on a
+  false signal, and that should be known before the alerts disappear.
+- The instruction to record why matters. 113 alerts vanishing in one day looks
+  like a business recovery or a suppression. It is neither, and the reason should
+  survive in writing.
+- Section C is deliberately separate. Two one-line fixes in the same change would
+  be impossible to attribute if something moved unexpectedly, and the month-close
+  timing affects more consumers than the arrears flag does.
+- A4 is worth reading carefully. If earlier months hit the same condition and
+  self-corrected once the sheet filled in, this has been happening quietly every
+  month.
+
+## Still clear to proceed independently
+
+The August Product-Wise order-booking load is unaffected by all of this. The
+dashboard holds ₹0.00 for August order booking, so the file's ₹5.64 crore
+duplicates nothing, and `secondary_order_line` sits behind
+`ISOLATED_PENDING_RELIABILITY` where nothing analytical can read it.

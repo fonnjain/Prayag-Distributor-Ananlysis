@@ -4,10 +4,8 @@
 - [Person Registry](person-registry.md) — DB table replaces head_alias.json + territory_heads; mutable module maps; seed via POST /api/person-registry/seed; coverage check at startup.
 - [Employee-code identity policy](employee-code-identity.md) — employee codes and numeric legacy keys are evidence/source aliases, never unique person identities; ambiguity must fail closed.
 - [sale_line versioning pipeline](sale-line-versioning.md) — versionedSyncLines prevents rate-edit duplicates; identity key = invoice_no|code|color|qty|month_label[|sn:N]; analytics always filter version_status='current'.
-- [Tombstone identity-key bugs](tombstone-identity-key-bugs.md) — manual tombstone route needs tank resolution (litres→pieces) + serialNo in DB SELECT; both fixed Jul 2026; diagnostic endpoints not yet aligned.
 - [sale_line table rename](sale-line-table-rename.md) — raw table=sale_line_all, safe VIEW=sale_line (current-only), VIEW=sale_line_current (alias); runMigrations.ts wires it on every start.
 - [Prayag live register quirks](prayag-live-registers.md) — historical live Sheets registers have no DATE column (null invoice_date rows); analytics uses a calendar fallback; FY23-24 only via xlsx CLI.
-- [Prayag Sheets transform](prayag-sheets-transform.md) — tab/column mapping + control total 3,417,311,917; use MONTHLY not Combined; cell helpers coerce string cells; snapshot/fallback model.
 - [Prayag register ingestion](prayag-register-ingestion.md) — line_uid excludes invoice_no; occurrence counted over all rows pre-filter; month year from FY column; Sheets chunked reads + 429 backoff.
 - [sale_line dedupe and occurrence stability](sale-line-dedupe-occurrence.md) — deleting rows cascades occurrence-count drift; always clear+re-sync whole FY; two-guard dedup (dedupeByNaturalKey + unique index); closed-months anchor for open FYs.
 - [Sheets quota surfaced to frontend](sheets-quota-frontend.md) — quota travels as 503 {quota,retryAfter} OR as a flag on a 200 fallback payload; consumers must check both.
@@ -157,3 +155,4 @@
 - [Publish/schema replay](publish-schema-ledger-replay.md) — Publish may create schema objects before custom migration ledger entries; migration constraints must be replay-safe.
 - [Seasonal curve baseline reconciliation](seasonal-curve-baseline-reconciliation.md) — never activate a rebuilt curve when frozen FY2025–26 monthly shape materially conflicts with the approved baseline.
 - [User activity telemetry](user-activity-telemetry.md) — daily user time must union concurrent tabs under a per-user transaction lock; retention follows India calendar days.
+- [Secondary arrears persistence](secondary-arrears-persistence.md) — preserve live arrears flags when persisting; the August alert-volume cliff is a data-quality correction, not business recovery.

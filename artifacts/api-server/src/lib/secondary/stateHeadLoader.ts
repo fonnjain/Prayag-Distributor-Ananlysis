@@ -55,7 +55,7 @@ function dashboardToHeadMonthRows(
       if (!m) continue;
 
       const closed = isMonthClosed(monthIdx, fy, now);
-      const notYetRecorded = !closed && m.notYetRecorded;
+      const notYetRecorded = !closed || m.notYetRecorded;
 
       // Apply rule 1: recompute achievement
       const achievementPct = computeAchievement(m.salesAmount, m.planAmount);
