@@ -16,3 +16,9 @@ Every real stable-ID upload must atomically commit its lines and a checksum-back
 **Why:** A line-only success without a ledger record breaks source provenance, while treating a previously flagged low-resolution upload as the next baseline can hide a persistent identity failure.
 
 **How to apply:** Keep the upload transaction and comparison lock together; do not make CLI idempotency checks create artificial upload evidence. A future analytics integration needs its own explicit approval after multiple independently verified source reports.
+
+Mixed-era order booking uses two identity eras: Segment Wise and PSCode 3 share `legacy_crm`, while Product-Wise uses `product_wise_crm`. Source-format lineage stays separate from the era discriminator, and fiscal year comes from the literal row date.
+
+**Why:** One legacy era surfaces genuine SORD/product collisions across the two legacy formats, while the Product-Wise CRM restarted its counter. Treating all formats as separate eras would hide collisions; treating both CRMs as one would create false ones.
+
+**How to apply:** Keep the identity as era + raw order ID + product code + occurrence. Legacy status and CP code remain unavailable rather than fabricated, partial periods stay visibly qualified, and Prompt 56 lineage must never become a baseline for normal Product-Wise upload-quality comparisons.
