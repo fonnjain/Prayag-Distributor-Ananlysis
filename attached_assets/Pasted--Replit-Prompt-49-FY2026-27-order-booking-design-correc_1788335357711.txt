@@ -1,0 +1,192 @@
+# Replit Prompt 49 — FY2026-27 order booking, design corrected
+
+**Date:** 2 September 2026
+**Supersedes:** Prompt 48, whose grain premise was wrong.
+**Scope:** Section A is the basis question and must be answered first. Section B
+is the corrected design for sign-off. Section C is implementation.
+
+**Standing rule:** every figure states which database or source it came from.
+
+## Corrections carried in
+
+**The grain block was mine and it was wrong.** PSCode 3 Sub Total is line-level.
+All 123,326 FY2026-27 rows carry non-null `net_amount`, and SORD-155203 proves
+it — ₹1,378 and ₹1,225 across two lines summing to the ₹2,603.04 order total.
+The v1 comment describes the older consolidated files and does not cover this
+source. Prompt 48's scope was sound; only that premise was not.
+
+**Order ID was dropped everywhere.** `secondary_register_line` never mapped it.
+`secondary_sku_line` has no column for it, and the loader comment claiming to
+carry it is stale. That is why five committed years cannot populate the page.
+
+**The historical years are out of scope.** No Order ID in the database, none at
+source for FY2021-22 through FY2023-24, no safe full-FY replace path, and
+FY2021-22 and FY2022-23 carry net on only 26.8% and 28.0% of rows. Two of five
+could theoretically be re-parsed. That is a separate, larger decision.
+
+**FY2026-27 is unaffected by all of that.** The Apr–Jul archives carry Order ID on
+every one of 123,326 rows plus Cat.No, and August is separately validated.
+
+---
+
+## Section A — the basis question. Answer before design sign-off.
+
+```
+Read-only. One question, and it is the last unresolved premise.
+
+PSCode 3 Sub Total is net after discount.
+Product-Wise Basic Order Value is explicitly ex-GST.
+
+They are now confirmed grain-compatible - both line-level. They are NOT proven
+basis-equivalent.
+
+A1. Take a sample of orders that appear in BOTH eras if any exist, or failing
+    that, comparable orders either side of 1 August for the same retailer and
+    product. Does PSCode 3 Sub Total behave as an ex-GST figure?
+
+A2. The Product-Wise file carries gst_pct and gst_amount per line, and both
+    Dealer Order Value (incl GST) and Basic Order Value (ex-GST). For a sample of
+    August lines, confirm Basic = Dealer - GST amount. That establishes the new
+    format's arithmetic.
+
+A3. PSCode 3 has MRP, Qty, Order Value (gross) and Discount. Does
+    Order Value x (1 - discount) reconcile to Sub Total? If it does, Sub Total is
+    a pre-tax commercial value and the two are likely equivalent. If it does not,
+    say what the residual is.
+
+A4. Is there any GST field anywhere in the PSCode 3 layout? The header is
+    Sr.No, Date, Retailer Id, Retailer, Order ID, Segment, Cat. No., Qty, MRP,
+    Order Value, Distributor, Discount, Sub Total, Order Total. No GST column
+    appears - confirm.
+
+A5. Based on A1 to A4, are they basis-equivalent? Give a plain yes, no, or
+    cannot-determine. If cannot-determine, the page must show them separately or
+    under a neutral label with a stated basis note.
+
+Report only. This decides one design question and nothing else.
+```
+
+---
+
+## Section B — corrected design, for sign-off
+
+```
+Design sign-off. No code until agreed.
+
+SCOPE: FY2026-27 only.
+  Apr-Jul 2026   PSCode 3 archives in attached_assets, old CRM
+  1-19 Aug 2026  Product-Wise file, new CRM, validated
+
+The five historical years are explicitly OUT of scope. Order ID was never
+captured in either table, three of the five have no Order ID at source, and no
+safe full-FY replace path exists.
+
+B1. IDENTITY. Key becomes source_era + order_id + product_code + occurrence.
+
+    Fiscal year alone does not work - both eras sit inside FY2026-27. The new
+    CRM restarted the counter at SORD-9 while the old CRM reached SORD-160183;
+    the collision horizon is the FY2025-26 minimum SORD-21452, about 280 days
+    out at 72 orders/day.
+
+    The discriminator represents the SOURCE SYSTEM, not the filename. Raw SORD
+    stays visible and unmodified to users.
+
+    Confirm, and propose the column name and values.
+
+B2. NOT NULL. order_status and cp_code are absent from PSCode 3. Make them
+    nullable. Do not fabricate - a CP code derived from a distributor name
+    misrepresents a spelling key as a company identifier, and marking legacy rows
+    APPROVED manufactures status history.
+
+B3. MONETARY BASIS. Per Section A. If not proven equivalent, two figures or a
+    neutral label with a basis note. Never one unqualified card spanning both.
+
+B4. STATUS FILTER. Status exists for August only. Legacy rows read "Status
+    unavailable" - never APPROVED, PENDING or absent. A user filtering to
+    APPROVED must not silently lose four months.
+
+B5. DISTRIBUTOR IDENTITY. Apr-Jul has 203 distributor names and no CP code.
+    August has 128 CP codes, 126 names, 124 overlapping. How is the Distributors
+    card counted across a mixed range without implying the two are the same
+    identity?
+
+B6. PARTIAL AUGUST. Apr-Jul are complete archive months. August is 19 days of an
+    open month. The page must not present them as equivalent.
+
+Do not write code until these six are agreed.
+```
+
+---
+
+## Section C — implementation, after A and B
+
+```
+Implement to the agreed shape. Show the diff before applying.
+
+CONTROLS THE LOAD MUST REPRODUCE EXACTLY
+
+  Apr-26   21,613 rows   3,156 orders   Rs 13,10,87,397
+  May-26   31,266 rows   4,493 orders   Rs 21,00,78,126
+  Jun-26   36,300 rows   5,462 orders   Rs 24,90,37,679
+  Jul-26   34,147 rows   4,840 orders   Rs 22,34,36,806
+  Apr-Jul 123,326 rows  17,951 orders   Rs 81,36,40,008
+  Aug 1-19  8,602 rows   1,361 orders   Rs  5,64,03,177
+
+  Apr-Jul must match production secondary_sku_line at Rs 0 difference per month.
+  A single rupee of difference means STOP and report - do not adjust.
+
+REQUIREMENTS
+  1. Apply the existing duplicate-drop lists - 31 files, 10,913 rows,
+     Rs 7,05,30,885, zero unique SORDs contributed.
+  2. Do not modify secondary_sku_line, secondary_register_line or sale_line.
+     Print before and after counts for all three.
+  3. Do not touch any frozen month in any other table, and do not move any entry
+     between registers and frozen_registers.
+  4. Raw SORD visible and unmodified in the UI.
+  5. Unavailable fields render as "Unavailable" or an em dash - never zero, never
+     a fabricated value.
+  6. Page and export must use identical mixed-era semantics.
+
+EXPECT THE SKU CANARY TO GO RED for August - 8,602 against a 19,417 floor. That
+guard is correct on a partial month. Do NOT lower the floor, change the guard, or
+exclude August. Report it and leave it.
+
+AFTER APPLYING, print:
+  - rows loaded per month against the controls, with any difference
+  - upload lineage per source: file, hash, timestamp, entry point
+  - all six cards for Apr-Aug, and separately Apr-Jul and Aug alone
+  - the Status filter behaviour on a mixed range
+  - before and after counts for the three untouched tables
+  - confirmation that Secondary Performance, Sales Received, SKU Deep Dive,
+    Red Alerts, schemes, AI reports and company achievements are unchanged
+
+Then publish and push. Print the deployed commit and the new origin/main head,
+and confirm they are the same commit.
+```
+
+---
+
+## Four findings from the last report that are not part of this change
+
+These are real and should be recorded, but none blocks FY2026-27.
+
+**The documented re-ingest path is unsafe.** The config says re-ingest requires
+moving an entry back to `registers` and rebuilding. But the loader inserts by
+`line_uid` with conflict avoidance and **no full-FY delete-and-replace route
+exists in production**. Re-running could append new rows while leaving stale ones,
+silently inflating a frozen year. The comment does not say so.
+
+**Two years are barely line-level.** `secondary_register_line` carries net on
+26.8% of FY2021-22 rows and 28.0% of FY2022-23. Their ₹121.14 Cr and ₹155.59 Cr
+come from about a quarter of their rows. FY2024-25 and FY2025-26 are 100%. The
+"one v1 format across five years" is not uniform in practice.
+
+**The two loaders disagree on the same source.** FY2023-24 SKU has 26 more rows
+and ₹1,56,427 more gross than the register; FY2024-25 has one fewer row and
+₹17,200 less. FY2021-22 and FY2022-23 have no SKU rows at all. Gate 2 never
+compared the tables — equality was outside its contract.
+
+**The Apr–Jun register gap is a pipeline asymmetry, not a failure.** July's one-off
+loader wrote both `secondary_sku_line` and a `pscode3_brand_rollup` mirror in one
+transaction. The April–June path wrote only the SKU table. Nothing was lost; the
+two paths simply differ. That closes the question Prompt 12 raised.

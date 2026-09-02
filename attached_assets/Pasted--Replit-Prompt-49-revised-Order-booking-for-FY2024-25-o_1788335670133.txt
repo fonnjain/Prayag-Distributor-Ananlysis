@@ -1,0 +1,260 @@
+# Replit Prompt 49 (revised) — Order booking for FY2024-25 onward
+
+**Date:** 2 September 2026
+**Supersedes:** Prompt 48 and the first Prompt 49, both of which wrongly excluded
+FY2024-25 and FY2025-26.
+**Scope:** Section A first — the basis question. Section B is design sign-off.
+Section C is implementation.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## Two corrections that changed the scope
+
+**The grain block was mine and it was wrong.** PSCode 3 Sub Total is line-level.
+All 123,326 FY2026-27 rows carry non-null `net_amount`, and SORD-155203 proves it
+— ₹1,378 and ₹1,225 across two lines summing to the ₹2,603.04 order total.
+
+**"Order ID was dropped everywhere" was misleading.** It was dropped **on write**,
+not lost. `loadOrderFile` reads the Segment Wise workbooks daily and returns
+**52,515 distinct Order IDs for FY2025-26** and **49,080 for FY2024-25**. The
+references are in the source and are being read right now. Only the two database
+loaders failed to map the column.
+
+That reframes the historical years entirely.
+
+## The two formats are near-identical
+
+| | PSCode 3 (Apr–Jul 2026) | Segment Wise (FY2024-25, FY2025-26) |
+|---|---|---|
+| Columns | Sr.No, Date, Retailer Id, Retailer, **Order ID**, Segment, Cat. No., Qty, MRP, Order Value, Distributor, Discount, Sub Total, Order Total | **identical** |
+| Team member | from the filename | from a column in the sheet |
+
+One structural difference. Same `v1` layout, same present fields, same absent
+fields — no order status, no CP code, no GST.
+
+**A parser built for Apr–Jul 2026 handles FY2024-25 and FY2025-26 with one
+change.**
+
+## Why the earlier objections do not apply to those two years
+
+| Objection | FY2024-25 / FY2025-26 |
+|---|---|
+| No Order ID in the database | Irrelevant — read from source, as `loadOrderFile` already does |
+| No Order ID at source | **False.** 49,080 and 52,515 distinct |
+| No safe full-FY replace path | Concerns `secondary_register_line`, untouched here. This is a fresh insert into an empty table |
+| 26.8% / 28.0% null net | That is FY2021-22 and FY2022-23. These two are **100% populated** |
+
+Every objection applies to the three oldest years and none to these two.
+
+**FY2021-22 through FY2023-24 stay out** — no Order ID column at source, and
+FY2023-24's workbook covers April 2023 only.
+
+## What this delivers
+
+| Period | Source | Orders | Value |
+|---|---|---:|---:|
+| FY2024-25 full year | Segment Wise | 49,080 | ₹216.00 Cr |
+| FY2025-26 full year | Segment Wise | 52,515 | ₹231.09 Cr |
+| FY2026-27 Apr–Jul | PSCode 3 archives | 17,951 | ₹81.36 Cr |
+| FY2026-27 1–19 Aug | Product-Wise | 1,361 | ₹5.64 Cr |
+
+Year-on-year order-level comparison, with a like-for-like Apr–Aug window.
+
+---
+
+## Section A — the basis question. Answer before design sign-off.
+
+```
+Read-only. One question.
+
+PSCode 3 and Segment Wise Sub Total are net after discount.
+Product-Wise Basic Order Value is explicitly ex-GST.
+
+Confirmed grain-compatible - all line-level. NOT proven basis-equivalent.
+
+A1. For a sample of August Product-Wise lines, confirm
+    Basic Order Value = Dealer Order Value - GST amount. That establishes the
+    new format's arithmetic.
+
+A2. For PSCode 3 and Segment Wise, does Order Value x (1 - discount) reconcile to
+    Sub Total? If it does, Sub Total is a pre-tax commercial value and the two
+    are likely equivalent. If not, state the residual.
+
+A3. Is there any GST field in the v1 layout? The header is Sr.No, Date,
+    Retailer Id, Retailer, Order ID, Segment, Cat. No., Qty, MRP, Order Value,
+    Distributor, Discount, Sub Total, Order Total. No GST column appears -
+    confirm.
+
+A4. Based on A1-A3: basis-equivalent, not equivalent, or cannot determine? A
+    plain answer. If cannot determine, the page shows them separately or under a
+    neutral label with a stated basis note.
+
+Report only.
+```
+
+---
+
+## Section B — design sign-off
+
+```
+Design sign-off. No code until agreed.
+
+SCOPE
+  FY2024-25 full year    Segment Wise workbook, Google Sheets
+  FY2025-26 full year    Segment Wise workbook, Google Sheets
+  FY2026-27 Apr-Jul      PSCode 3 archives, attached_assets
+  FY2026-27 1-19 Aug     Product-Wise file, attached_assets
+
+  OUT OF SCOPE: FY2021-22, FY2022-23, FY2023-24. No Order ID at source, and
+  FY2023-24's workbook covers April 2023 only.
+
+B1. ONE PARSER, TWO INPUTS. The v1 format is identical between PSCode 3 and
+    Segment Wise except that team member comes from the filename in one and a
+    column in the other.
+
+    Confirm one parser can serve both with a team-member strategy parameter.
+    If not, say exactly what else differs.
+
+B2. IDENTITY. Key becomes source_era + order_id + product_code + occurrence.
+
+    Note there are now THREE eras, not two: Segment Wise, PSCode 3, and
+    Product-Wise. The first two are the same CRM and share a SORD counter -
+    FY2025-26 spans SORD-21452 to SORD-141726 and Apr-Jul 2026 spans
+    SORD-67382 to SORD-160183, with zero actual intersections despite
+    overlapping ranges.
+
+    Does the era discriminator need three values or two? If Segment Wise and
+    PSCode 3 share one counter, one "legacy CRM" value may be correct and safer -
+    it would surface a genuine duplicate rather than hide it. Recommend one.
+
+    The new CRM restarted at SORD-9. Collision horizon is SORD-21452, roughly
+    280 days out at 72 orders/day.
+
+B3. DATE FILTERING - THIS ONE MATTERS. The FY2025-26 workbook's rows span
+    4 January 2025 to 3 December 2026, and FY2024-25 spans 4 January 2024 to
+    3 December 2025. loadOrderFile deliberately includes every dated row so it
+    reconciles to the workbook's printed total.
+
+    A year-on-year comparison must filter by DATE, not by workbook. If it trusts
+    the workbook boundary, the prior-year figure is inflated with out-of-period
+    rows.
+
+    How many rows and how much value in each workbook fall outside their own
+    fiscal year? Print it. Then say how the load should handle them - store with
+    a true fiscal year derived from the date, or exclude.
+
+B4. NOT NULL. order_status and cp_code are absent from both legacy formats. Make
+    them nullable. Do not fabricate - a CP code derived from a distributor name
+    misrepresents a spelling key as a company identifier, and marking legacy rows
+    APPROVED manufactures status history.
+
+B5. STATUS FILTER. Status exists from 1 August 2026 only. Legacy rows read
+    "Status unavailable" - never APPROVED, PENDING or absent. A user filtering to
+    APPROVED must not silently lose two and a half years.
+
+B6. MONETARY BASIS. Per Section A.
+
+B7. PARTIAL AUGUST. FY2024-25, FY2025-26 and Apr-Jul 2026 are complete periods.
+    August is 19 days of an open month. The page must not present them as
+    equivalent.
+
+B8. VOLUME. Roughly 1.09 million rows across the four sources. Does that change
+    anything about indexing, page query performance or the export? The page
+    currently serves an empty table.
+
+Do not write code until these are agreed.
+```
+
+---
+
+## Section C — implementation, after A and B
+
+```
+Implement to the agreed shape. Show the diff before applying.
+
+CONTROLS THE LOAD MUST REPRODUCE
+
+  FY2024-25   335,258 source rows   49,080 orders   Rs 2,16,00,11,256
+  FY2025-26   379,441 source rows   52,515 orders   Rs 2,31,09,13,869
+
+  Apr-26   21,613 rows   3,156 orders   Rs 13,10,87,397
+  May-26   31,266 rows   4,493 orders   Rs 21,00,78,126
+  Jun-26   36,300 rows   5,462 orders   Rs 24,90,37,679
+  Jul-26   34,147 rows   4,840 orders   Rs 22,34,36,806
+  Apr-Jul 123,326 rows  17,951 orders   Rs 81,36,40,008
+
+  Aug 1-19  8,602 rows   1,361 orders   Rs  5,64,03,177
+
+  Apr-Jul must match production secondary_sku_line at Rs 0 difference per month.
+  A single rupee of difference means STOP and report - do not adjust.
+
+  FY2024-25 and FY2025-26 must reconcile to their existing anchors. Note the
+  FY2025-26 anchor of Rs 2,31,09,00,000 and 52,515 orders is itself computed over
+  the full workbook including out-of-fiscal-year rows - reconcile to the workbook
+  total first, then report the in-fiscal-year subtotal separately.
+
+REQUIREMENTS
+  1. Apply the existing duplicate-drop lists to the PSCode 3 archives - 31 files,
+     10,913 rows, Rs 7,05,30,885, zero unique SORDs contributed.
+  2. Do not modify secondary_sku_line, secondary_register_line or sale_line.
+     Print before and after counts for all three.
+  3. Do not move any entry between registers and frozen_registers. Read the
+     Segment Wise workbooks directly, as loadOrderFile already does.
+  4. Do not touch any frozen month in any other table.
+  5. Raw SORD visible and unmodified in the UI.
+  6. Unavailable fields render as "Unavailable" or an em dash - never zero, never
+     a fabricated value.
+  7. Page and export must use identical semantics across all three eras.
+
+EXPECT THE SKU CANARY TO GO RED for August - 8,602 against a 19,417 floor. That
+guard is correct on a partial month. Do NOT lower the floor, change the guard, or
+exclude August. Report it and leave it.
+
+AFTER APPLYING, print:
+  - rows and orders loaded per fiscal year and per month, against the controls
+  - for FY2024-25 and FY2025-26: workbook total AND in-fiscal-year subtotal
+  - upload lineage per source: file or sheet ID, hash where available, timestamp
+  - all six cards for FY2026-27 Apr-Aug, FY2025-26 Apr-Aug, and each full year
+  - the Status filter behaviour across a range spanning eras
+  - before and after counts for the three untouched tables
+  - confirmation that Secondary Performance, Sales Received, SKU Deep Dive,
+    Red Alerts, schemes, AI reports and company achievements are unchanged
+
+Then publish and push. Print the deployed commit and the new origin/main head,
+and confirm they are the same commit.
+```
+
+---
+
+## Notes
+
+- **B3 is the one that could quietly ruin the comparison.** Both legacy workbooks
+  carry rows outside their own fiscal year — FY2025-26 spans 23 months. If the
+  load trusts the workbook boundary rather than the row date, the prior-year
+  figure is inflated and every year-on-year number is wrong in the same
+  direction.
+- **B2 is worth thinking about rather than answering reflexively.** Segment Wise
+  and PSCode 3 are the same CRM sharing one SORD counter. Treating them as one
+  legacy era would surface a genuine duplicate if the same order appeared in
+  both; treating them as two would hide it. The safer choice is probably one.
+- **B8 is new.** Roughly 1.09 million rows into a table that has never held one.
+  Worth a moment on indexing and export before, not after.
+
+## Still out of scope, and why
+
+FY2021-22, FY2022-23 and FY2023-24 have no Order ID column at source. FY2023-24's
+workbook covers April 2023 only — 16,274 rows, ₹10.53 crore, against a full-year
+primary register of ₹349 crore. Those three cannot be order-level from any source
+we have.
+
+## Unrelated findings worth keeping
+
+The documented re-ingest path is unsafe: the config says move an entry back to
+`registers` and rebuild, but the loader inserts by `line_uid` with conflict
+avoidance and no full-FY replace route exists. Re-running could append rows while
+leaving stale ones. Nothing in this prompt goes near it.
+
+The two existing loaders disagree on the same source — FY2023-24 SKU has 26 more
+rows than the register, FY2024-25 one fewer. Gate 2 never compared them.
