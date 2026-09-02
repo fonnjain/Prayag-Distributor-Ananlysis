@@ -1,0 +1,142 @@
+# Replit Prompt 42 — August is marked recorded and holds zero
+
+**Date:** 1 September 2026
+**Scope:** Read-only. Change nothing.
+
+**Standing rule:** every figure states which database or source it came from.
+
+## What Prompt 41 A4 found
+
+All **162** August rows in `secondary_head_month` have `not_yet_recorded = false`
+while `ordered_amount` sums to **₹0.00**. September through March carry the flag
+correctly.
+
+So the system currently treats August secondary order booking as a **measured
+zero**, not a missing month. That is the empty-versus-unloaded problem, this time
+in the source data rather than the display layer.
+
+## Why it may already be live
+
+The head-row denominator shipped this afternoon uses `secondaryPlanRecorded` —
+the sum of plan for months where `not_yet_recorded = false`. If August now counts
+as recorded, August plan has entered the denominator with zero achievement
+against it, and every head's percentage falls.
+
+The Prompt 28 and 30 labels derive their range the same way. They read "Apr–Jul
+recorded-month plan" when they shipped. If they now read "Apr–Aug", the change
+arrived through data, not code.
+
+---
+
+## Prompt 42
+
+```
+Read-only. Change nothing, reload nothing, do not alter any flag.
+
+SECTION A - IS THE DENOMINATOR ALREADY WRONG?
+
+A1. What does the Secondary Performance head-row achievement label read RIGHT
+    NOW - "Apr-Jul recorded-month plan" or "Apr-Aug"? Print the rendered label.
+
+A2. Print secondaryPlanRecorded per head as it stands now, and what it was when
+    the Prompt 30 change shipped this afternoon. If August plan has entered the
+    denominator, give the difference per head in rupees and percentage points.
+
+A3. Print all ten head achievement percentages now, against the values recorded
+    when the change shipped:
+
+      Sandeep Dadheech 86.76, Syed Aqil Rizvi 69.84, Biju C.O 65.46,
+      Lalan Kumar 61.43, Anant Singh 67.21, Pawan Sharma 65.66,
+      Nasir Hussain Khan 52.82, Sunil Patel 140.72, Sulinder Pal 60.17,
+      Prashant Onam Naik 40.05
+
+    Any that have moved have moved because of this flag, not because of
+    performance.
+
+A4. Does the company card's ytdAchievement include August plan now? Print
+    planRecorded now against the Rs 1,07,48,01,262.85 recorded this afternoon.
+
+A5. Same question for Sales Received. If August is recorded with zero sales, is
+    August now in the numerator's period as a zero?
+
+SECTION B - WHY IS AUGUST FLAGGED AS RECORDED?
+
+B1. What sets not_yet_recorded? Show the code in stateHeadLoader.ts that decides
+    it, and the condition under which a month is treated as recorded.
+
+B2. The report says 152 of 162 August rows contain zero and 10 contain null,
+    summing to zero. If the loader nulls unrecorded months deliberately, why do
+    152 rows hold an explicit zero rather than null?
+
+B3. Is the flag derived from the calendar - August is past, therefore recorded -
+    or from the sheet? If it is calendar-driven, then every month flips to
+    recorded on the 1st regardless of whether the source has been filled in.
+
+B4. When was the current secondary_head_month generation written? The report
+    says it refreshed at 13:23 UTC today. Was August already flagged recorded
+    before that refresh, or did it change today?
+
+B5. Do the member workbooks actually have August Order Booked values that are
+    not reaching the dashboard, or is the sheet genuinely blank for August? The
+    monthly cells are live IMPORTRANGE formulas - check whether they are
+    returning zero or returning nothing.
+
+SECTION C - HOW WIDE IS THIS
+
+C1. Does the same pattern exist for received_amount and plan_amount in August?
+    Print all three measures for Aug-26 with their flag state.
+
+C2. Has this happened before? For FY2026-27, was any earlier month flagged
+    recorded while holding zero, and did it later fill in? If Apr or May ever
+    sat at zero-but-recorded, this is a recurring monthly artefact rather than a
+    one-off.
+
+C3. Which other surfaces read not_yet_recorded? List every consumer. Anything
+    treating it as "this month is complete" is currently wrong about August.
+
+C4. The Red Alert categories A1, A2 and A3 compare booking against pro-rated
+    target using this table. Does a recorded-but-zero August cause them to fire?
+    A1 is "cumulative booking below pro-rated target" - a zero August would
+    trigger it for everyone.
+
+Report only. Do not change the flag, do not reload the month, do not adjust any
+denominator.
+```
+
+---
+
+## Notes
+
+- Section A is the urgent part. A change shipped this afternoon may already have
+  been altered by data that arrived afterwards. If the labels now read Apr–Aug
+  and every head's percentage has dropped, that happened without anyone deciding
+  it.
+- C4 is the one that could bite operationally. If A1 fires on a recorded-but-zero
+  August, every member goes below pro-rated target at once, and the alert volume
+  would look like a business collapse rather than a missing sheet.
+- B3 is the root question. A calendar-driven flag means this recurs on the 1st of
+  every month until the sheet is filled — which makes it a standing monthly
+  hazard, not an incident.
+- Nothing here should be fixed in this prompt. If the flag is wrong, changing it
+  changes ten head percentages and possibly the alert volume, and that needs to
+  be a decision rather than a correction.
+
+## Separately — the August order-booking load is now clear to proceed
+
+Prompt 41 A2 answered the question it was sent for. The dashboard holds **₹0.00**
+for August across all 162 member rows, so the Product-Wise file's ₹5.64 crore
+duplicates nothing — it is the only August order-booking data that exists.
+
+The table is also isolated behind `ISOLATED_PENDING_RELIABILITY`, which requires
+a separate approval before anything analytical can read it, and Momentum reads
+`primary_order_line` and is untouched.
+
+Steps 1 and 2 of the Secondary Orders sequence, then Step 3. Nothing blocking.
+
+## Match quality on that file, for the record
+
+117 of 121 sales users matched, **98.8% of value**. The four unmatched are
+₹6.73 lakh in total and three are already known: Pravat Kumar Dash, Adarsh Gaurav
+(departed January 2026), and PRAYAG (house account). **Arvind Kumar** is new —
+4 rows, ₹32,031 — and he is one of Sulinder Pal's five members missing from the
+monthly table.
