@@ -1,0 +1,183 @@
+# Replit Prompt 44 — Month closure moves to IST midnight (revised)
+
+**Date:** 2 September 2026
+**Supersedes:** the earlier Prompt 44, written before the arrears fix was live.
+**Scope:** Section A read-only, first. Section B is the code change.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**Decision taken:** month closure is **IST midnight**. This is an Indian sales
+operation working on IST data, and the business day ends at IST midnight.
+
+## Prompt 43 is done — this is now clear to proceed
+
+Generation 245 stores all 162 August rows with `not_yet_recorded = true` and
+plan, ordered and received all null. 114 alerts cleared, ten achievements
+unchanged, `planRecorded` held at ₹107.72 Cr. Pushed as `dd77151`, which I
+verified independently against the remote.
+
+**One outcome worth carrying in:** A1 went from 3 open to 10. Seven genuine A1
+alerts had been suppressed by the 114 false A2s through A2→A1 cross-suppression.
+Those seven have been hidden since 31 August and are real.
+
+## The defect
+
+```js
+return nowMs > Date.UTC(calYear, calMonth + 1, 0);
+```
+
+`Date.UTC(year, month+1, 0)` is midnight at the **start** of the month's final
+calendar day. August 2026 closed at **31 August 00:00:00.001 UTC** — that is
+**05:30 IST** — with the whole of 31 August still to trade.
+
+| Boundary | UTC | IST | vs current |
+|---|---|---|---|
+| Current | 31 Aug 00:00:00.001 | 31 Aug 05:30 | — |
+| **IST midnight (chosen)** | **31 Aug 18:30** | **1 Sep 00:00** | **18.5 h later** |
+| UTC month end | 1 Sep 00:00 | 1 Sep 05:30 | 24 h later |
+
+Months currently close **18.5 hours early**.
+
+---
+
+## Section A — read-only, send first
+
+```
+Read-only. Change nothing.
+
+Month closure is moving to IST midnight. Establish what moves before changing it.
+
+A1. Print every occurrence of the closure expression, in two groups.
+
+    CLOSURE - to be changed:
+      the secondary rules month-boundary helper
+      the State Head Dashboard month-boundary helper
+      the secondary validation duplicated closure check
+
+    NOT CLOSURE - must NOT be changed:
+      the primary-velocity days-in-month calculation
+      the general analytics month-end date calculation
+
+    Confirm that split and confirm there is no sixth occurrence.
+
+A2. Is the closure logic genuinely duplicated across those three, or does one
+    call another? If duplicated three times, say so - a single shared helper is
+    the better shape, but that is a later cleanup, not this change.
+
+A3. Under the IST rule, does any month's closed state change RIGHT NOW? It is
+    2 September, so August is closed either way. Print each FY2026-27 month's
+    closed state under both rules. I expect no difference today - confirm.
+
+A4. THE ONE I WANT ON RECORD.
+
+    The bad August generation was written at 31 August 01:17 UTC, which is
+    06:47 IST. Under the IST rule, August would still have been OPEN at that
+    moment - closure would not have occurred until 18:30 UTC that day.
+
+    So the persistence wrapper's !closed would have been true, m.notYetRecorded
+    would have survived, and the arrears rows would have stored correctly even
+    without the Prompt 43 fix.
+
+    Confirm that. It establishes which defect actually let this through and
+    which was the second line of defence.
+
+A5. Does anything depend on a month closing early? Any report, cutoff, digest,
+    freeze or scheduled job that runs on the last day of the month and expects
+    the month to already be closed. Moving the boundary 18.5 hours later would
+    change its behaviour.
+
+    Check the 7th-of-month SKU freeze specifically - it is a different mechanism
+    but it interacts with month completeness.
+
+A6. The seven A1 alerts that became visible when the false A2s cleared - print
+    them. Member, head, period, values, and how long each has been suppressed.
+    They are unrelated to this change but they are real and nobody has looked at
+    them yet.
+
+Report only.
+```
+
+---
+
+## Section B — the code change, after Section A
+
+```
+Code change. Move month closure to IST midnight. Three helpers, nothing else.
+
+Replace:
+
+  return nowMs > Date.UTC(calYear, calMonth + 1, 0);
+
+with a boundary at IST midnight following the month's last day - 00:00 IST on
+the 1st of the next month, which is 18:30 UTC on the last day.
+
+Make the IST intent EXPLICIT in the code. A named constant and a comment saying
+"IST midnight, UTC+05:30" - not a bare arithmetic offset. A stray
+`- 5.5 * 60 * 60 * 1000` in a date expression is exactly what gets "simplified"
+later by someone who does not know why it is there.
+
+Apply to the three CLOSURE occurrences only.
+
+Do NOT touch the primary-velocity days-in-month calculation or the general
+analytics month-end date calculation. They use the same expression to mean "the
+last day number of the month", which is correct there. Changing them breaks both.
+
+Also do NOT:
+  - change the V4 arrears guard or its 15% threshold
+  - change the Prompt 43 persistence fix, which is live and working
+  - change any frozen year
+  - consolidate the three helpers in this change
+
+AFTER APPLYING, print:
+  - the diff
+  - each FY2026-27 month's closed state, current versus new
+  - a boundary test at these four instants, where only the last two should
+    return closed:
+      31 Aug 12:00:00 UTC
+      31 Aug 18:29:59 UTC
+      31 Aug 18:30:00 UTC
+      1 Sep 00:00:00 UTC
+  - the ten head achievements, which must remain
+    86.86 / 69.84 / 65.46 / 61.04 / 67.21 / 65.66 / 52.82 / 140.72 / 60.17 / 40.05
+  - open alert count by category, unchanged from the post-Prompt-43 figures:
+    A1 = 10, A2 = 8, A3 = 1, total 30
+  - company planRecorded, still Rs 107.72 Cr
+
+Then publish and push. Print the deployed commit and the new origin/main head,
+and confirm they are the same commit.
+```
+
+---
+
+## Notes
+
+- A4 is the one worth having in writing. If August would have stored correctly
+  under the IST rule, then the closure defect is what let this through and the
+  arrears fix was the backstop. Both were worth fixing; knowing the order matters
+  for anyone reading this later.
+- A5 is the only real risk in the change. Anything running on the last day of the
+  month expecting closure now runs 18.5 hours before it is true.
+- A6 is not part of this change. Seven genuine A1 alerts have been suppressed
+  since 31 August by false ones. They should be looked at by a person, and the
+  list is easier to get now than later.
+- The explicit-intent instruction on the constant is not fussiness. This
+  codebase already carries five disagreeing state vocabularies from exactly that
+  kind of undocumented decision.
+
+## Sequence from here
+
+1. This — Section A, then Section B, published and pushed.
+2. Secondary Orders Steps 1, 2 and 3. Independent of everything above and still
+   unblocked: the dashboard holds ₹0.00 for August order booking, so the
+   Product-Wise file's ₹5.64 crore duplicates nothing.
+3. The seven suppressed A1 alerts, for a person rather than the system.
+
+## Worth raising separately, with someone rather than with Replit
+
+**Reporting coverage has fallen 11.4 points across four months** — Apr 96.00%,
+May 94.89%, Jun 90.58%, Jul 84.62%. In July, 20 of 130 plan holders recorded no
+sales at all.
+
+Nothing fires because the arrears threshold is 15%. But the trend is
+one-directional, and it measures how many members are keeping their sheets
+current rather than anything about sales.
