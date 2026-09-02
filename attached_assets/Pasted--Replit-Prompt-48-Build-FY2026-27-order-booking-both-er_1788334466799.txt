@@ -1,0 +1,175 @@
+# Replit Prompt 48 — Build FY2026-27 order booking, both eras
+
+**Date:** 2 September 2026
+**Scope:** Implementation. Section A is design sign-off before any code.
+
+**Standing rule:** every figure states which database or source it came from.
+
+## What Prompt 47 established
+
+**The sources reconcile exactly.** The PSCode 3 archives match production
+`secondary_sku_line` at **₹0 difference** across all four months — 123,326 rows,
+₹81,36,40,008 to the rupee. The booking parser and the SKU population start from
+identical accepted source lines.
+
+**Every row carries an explicit SORD.** Zero forward-fill needed across all
+123,326 rows. The per-member exports repeat the reference on every line.
+
+**No collisions today.** 17,951 distinct Apr–Jul SORDs, zero overlap with August,
+zero with FY2025-26.
+
+**But the counter reset.** August runs SORD-9 to SORD-1381 at ~72 orders/day. The
+collision horizon is the FY2025-26 minimum, **SORD-21452** — reached in roughly
+**280 days, around mid-2027**. Not urgent, but dated, and far cheaper to solve now
+while the table is empty than to retrofit later.
+
+**Do both eras together.** C5 puts it at 3–5 days combined. Staging costs an extra
+half to one and a half days *and* leaves the page built on Product-Wise-only
+assumptions that then have to be reopened.
+
+---
+
+## Section A — design sign-off. Answer before writing code.
+
+```
+Answer these before writing any code. I want to agree the shape first.
+
+A1. IDENTITY. The key becomes:
+
+      source_era + order_id + product_code + occurrence
+
+    Fiscal year alone does not work - both eras sit inside FY2026-27. Confirm
+    the discriminator represents the SOURCE SYSTEM, not the source filename;
+    filename would break idempotency across revised exports of the same orders.
+
+    Propose the exact column name and its values. Keep the raw SORD visible and
+    unmodified for users - the discriminator is internal identity only.
+
+A2. NOT NULL. order_status and cp_code are required and absent from PSCode 3.
+
+    Make them nullable. Do NOT fabricate. A CP code derived from a distributor
+    name misrepresents a spelling key as a company identifier, and marking legacy
+    rows APPROVED manufactures status history that does not exist.
+
+    Confirm nullable is the approach, and say what else in the schema has to give.
+
+A3. MONETARY BASIS. PSCode 3 Sub Total is net after discount. Product-Wise Basic
+    Order Value is explicitly ex-GST. Not certified as identical.
+
+    Until certified, they must not share one unqualified card label. Propose the
+    treatment - a neutral "Net booked value" with a basis note, or two separate
+    figures. Recommend one and say why.
+
+A4. STATUS FILTER. Status exists for August and not for Apr-Jul. A user filtering
+    to APPROVED must not silently lose four months.
+
+    Propose the behaviour. Legacy rows should read "Status unavailable", never
+    APPROVED, PENDING or absent.
+
+A5. DISTRIBUTOR IDENTITY. Apr-Jul has 203 distributor names and no CP code.
+    August has 128 CP codes and 126 names, with 124 overlapping.
+
+    How is the Distributors card counted across a mixed range without implying
+    the two are the same identity?
+
+A6. PARTIAL AUGUST. Apr-Jul are complete archive months. August is 19 days of an
+    open month. The page must not present them as equivalent.
+
+Do not write code until these six are agreed.
+```
+
+---
+
+## Section B — implementation, after Section A is signed off
+
+```
+Implement FY2026-27 order booking across both eras, to the shape agreed in
+Section A. Show me the diff before applying.
+
+SOURCES
+  Apr-Jul 2026   PSCode 3 archives in attached_assets, after the existing
+                 duplicate-drop lists - 17 files Apr-Jun, 14 files Jul,
+                 10,913 rows and Rs 7,05,30,885 of proven duplicates removed
+  1-19 Aug 2026  Product-Wise-Secondary-Order-Report_29_6569_19-Aug-2026...xlsx
+
+CONTROLS THE LOAD MUST REPRODUCE EXACTLY
+
+  Apr-26   21,613 rows   3,156 orders   Rs 13,10,87,397
+  May-26   31,266 rows   4,493 orders   Rs 21,00,78,126
+  Jun-26   36,300 rows   5,462 orders   Rs 24,90,37,679
+  Jul-26   34,147 rows   4,840 orders   Rs 22,34,36,806
+  Apr-Jul 123,326 rows  17,951 orders   Rs 81,36,40,008
+  Aug 1-19  8,602 rows   1,361 orders   Rs  5,64,03,177
+
+  Apr-Jul must match production secondary_sku_line at Rs 0 difference per month.
+  If any month differs by a single rupee, STOP and report - do not adjust.
+
+REQUIREMENTS
+  1. Apply the existing duplicate-drop lists. They are proven: 31 files,
+     zero unique SORDs contributed.
+  2. Do not modify secondary_sku_line, secondary_register_line or sale_line.
+     Print before and after row counts for all three.
+  3. Do not touch any frozen month in any other table.
+  4. Raw SORD stays visible and unmodified in the UI.
+  5. Unavailable fields render as "Unavailable" or an em dash - never zero,
+     never a fabricated value.
+  6. Page and export must use identical mixed-era semantics. An export showing
+     a figure the page qualifies is worse than no export.
+
+EXPECT THE SKU CANARY TO GO RED for August. It treats August as complete and
+needs 19,417 rows against 60% of Aug-25. A 19-day file gives 8,602. That guard
+is working correctly on a partial month. Do NOT lower the floor, change the
+guard, or exclude August to make it pass. Report it and leave it.
+
+AFTER APPLYING, print:
+  - rows loaded per month against the controls above, with any difference
+  - upload lineage per source: file, hash, timestamp, entry point
+  - all six summary cards for Apr-Aug, and separately for Apr-Jul and Aug alone
+  - the Status filter behaviour on a mixed range
+  - before and after counts for secondary_sku_line, secondary_register_line,
+    sale_line
+  - confirmation that Secondary Performance, Sales Received, SKU Deep Dive,
+    Red Alerts, schemes, AI reports and company achievements are unchanged
+
+Then publish and push. Print the deployed commit and the new origin/main head,
+and confirm they are the same commit.
+```
+
+---
+
+## Notes
+
+- The ₹0 reconciliation in the controls is the strongest check available. Both
+  populations come from the same accepted source lines, so any difference means
+  the booking parse diverges from the SKU parse — and that must be found before
+  loading, not after.
+- A1 is worth doing now rather than later. The collision is nine months out, but
+  the table is empty today and retrofitting an identity column into a populated
+  table is a different job entirely.
+- A4 is the design question with the most user impact. A filter that silently
+  drops four months returns a result that looks correct, which is worse than a
+  blank page.
+
+## Not in scope
+
+Section D of Prompt 47 — backfilling SORD into `secondary_sku_line` — is not
+included. It touches frozen rows for provenance only and does not populate the
+page. Not worth the exception.
+
+The five historical Segment Wise years remain a separate decision. FY2021-22 and
+FY2022-23 have no Order ID at all, which is a harder identity problem than
+anything here.
+
+## One business signal in the data, for a person rather than the system
+
+August retailer activity is **56% of July on a per-day basis**:
+
+| Month | Retailers | Per day |
+|---|---:|---:|
+| Jun | 3,578 | 119.3 |
+| Jul | 3,297 | 106.4 |
+| **Aug 1–19** | **1,132** | **59.6** |
+
+That may be genuine seasonality — Prayag's own matrix puts June at 1.20× — or it
+may mean the 19-day export is incomplete. It sits inside a technical report and
+nobody has looked at it.
