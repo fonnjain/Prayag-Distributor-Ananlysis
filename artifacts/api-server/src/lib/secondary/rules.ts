@@ -5,6 +5,8 @@
 import type { InsertSecRegLine } from "@workspace/db";
 import type { SecHeadMonthRow, AnomalySummary, CrossFootResult } from "./types.js";
 
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // IST midnight, UTC+05:30
+
 // ── Rule 1: achievement_recomputed ────────────────────────────────────────────
 //
 // Achievement = Sales Received / Plan.
@@ -31,11 +33,12 @@ export function fyMonthLastDayMs(monthIdx: number, fy: string): number {
   // Jan(9)..Mar(11) -> calendar month 0..2 of startYear+1
   const calMonth = (monthIdx + 3) % 12;
   const calYear = monthIdx <= 8 ? startYear : startYear + 1;
-  return Date.UTC(calYear, calMonth + 1, 0); // last day of that calendar month (UTC)
+  // The month closes at IST midnight on the first day of the following month.
+  return Date.UTC(calYear, calMonth + 1, 1) - IST_OFFSET_MS;
 }
 
 export function isMonthClosed(monthIdx: number, fy: string, nowMs = Date.now()): boolean {
-  return nowMs > fyMonthLastDayMs(monthIdx, fy);
+  return nowMs >= fyMonthLastDayMs(monthIdx, fy);
 }
 
 export function ytdSum(

@@ -7,6 +7,8 @@ import type { SecIngestAssertion, SecUnmappedReport, SecHeadMonthRow } from "./t
 import { isAnomalous } from "./rules.js";
 import expectedCountsConfig from "../../../config/secondary_expected_counts.json";
 
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // IST midnight, UTC+05:30
+
 const EXPECTED: Record<string, number | null> = (() => {
   const registers = (expectedCountsConfig as {
     registers: Record<string, number | null>;
@@ -270,8 +272,9 @@ function isMonthClosedInner(monthIdx: number, fy: string, nowMs: number): boolea
   const startYear = Number(fy.slice(0, 4));
   const calMonth = (monthIdx + 3) % 12;
   const calYear = monthIdx <= 8 ? startYear : startYear + 1;
-  const lastDayMs = Date.UTC(calYear, calMonth + 1, 0);
-  return nowMs > lastDayMs;
+  // IST midnight on the first day of the following month.
+  const boundaryMs = Date.UTC(calYear, calMonth + 1, 1) - IST_OFFSET_MS;
+  return nowMs >= boundaryMs;
 }
 
 // ── Validator 8: control_cell_matches ────────────────────────────────────────

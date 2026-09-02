@@ -80,6 +80,8 @@ const MONTH_NAMES = [
   "OCTOBER","NOVEMBER","DECEMBER","JANUARY","FEBRUARY","MARCH",
 ] as const;
 
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // IST midnight, UTC+05:30
+
 // Calendar date for last day of fiscal month monthIdx (0=Apr..11=Mar) of `fy`.
 function monthLastDay(monthIdx: number, fy: string): Date {
   const startYear = fyStartYear(fy);
@@ -87,12 +89,12 @@ function monthLastDay(monthIdx: number, fy: string): Date {
   // Jan(9)..Mar(11) = calendar month 0..2 of startYear+1
   const calMonth = (monthIdx + 3) % 12; // 0=Jan..11=Dec
   const calYear = monthIdx <= 8 ? startYear : startYear + 1;
-  // new Date(y, m+1, 0) = last day of month m in year y (UTC)
-  return new Date(Date.UTC(calYear, calMonth + 1, 0));
+  // IST midnight on the first day of the following month.
+  return new Date(Date.UTC(calYear, calMonth + 1, 1) - IST_OFFSET_MS);
 }
 
 export function isMonthClosed(monthIdx: number, fy: string, nowMs = Date.now()): boolean {
-  return nowMs > monthLastDay(monthIdx, fy).getTime();
+  return nowMs >= monthLastDay(monthIdx, fy).getTime();
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
