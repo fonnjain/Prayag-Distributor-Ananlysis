@@ -1794,6 +1794,54 @@ const MIGRATIONS: Migration[] = [
     `,
   },
   {
+    // Prompt 56: retain two CRM eras without making the old Product-Wise
+    // identity collide with legacy SORDs.  Every statement is replay-safe.
+    id: "087_secondary_order_line_prompt56_eras",
+    sql: `
+      ALTER TABLE secondary_order_line
+        ADD COLUMN IF NOT EXISTS source_era TEXT,
+        ADD COLUMN IF NOT EXISTS source_kind TEXT,
+        ADD COLUMN IF NOT EXISTS fiscal_year TEXT,
+        ADD COLUMN IF NOT EXISTS period_completeness TEXT,
+        ADD COLUMN IF NOT EXISTS source_id TEXT;
+
+      -- All pre-Prompt-56 rows came from the Product-Wise report.  Use their
+      -- literal stored timestamp solely to derive the fiscal-year label.
+      UPDATE secondary_order_line
+      SET source_era = COALESCE(source_era, 'product_wise_crm'),
+          source_kind = COALESCE(source_kind, 'product_wise'),
+          fiscal_year = COALESCE(
+            fiscal_year,
+            CASE WHEN EXTRACT(MONTH FROM order_datetime AT TIME ZONE 'Asia/Kolkata') >= 4
+              THEN EXTRACT(YEAR FROM order_datetime AT TIME ZONE 'Asia/Kolkata')::text
+                   || '-' || RIGHT((EXTRACT(YEAR FROM order_datetime AT TIME ZONE 'Asia/Kolkata') + 1)::text, 2)
+              ELSE (EXTRACT(YEAR FROM order_datetime AT TIME ZONE 'Asia/Kolkata') - 1)::text
+                   || '-' || RIGHT(EXTRACT(YEAR FROM order_datetime AT TIME ZONE 'Asia/Kolkata')::text, 2)
+            END
+          ),
+          period_completeness = COALESCE(period_completeness, 'partial');
+
+      ALTER TABLE secondary_order_line
+        ALTER COLUMN source_era SET NOT NULL,
+        ALTER COLUMN source_kind SET NOT NULL,
+        ALTER COLUMN fiscal_year SET NOT NULL,
+        ALTER COLUMN period_completeness SET NOT NULL,
+        ALTER COLUMN order_status DROP NOT NULL,
+        ALTER COLUMN cp_code DROP NOT NULL;
+
+      ALTER TABLE secondary_order_line DROP CONSTRAINT IF EXISTS secondary_order_line_uq;
+      ALTER TABLE secondary_order_line
+        ADD CONSTRAINT secondary_order_line_uq
+        UNIQUE (source_era, order_id, product_code, occurrence);
+      CREATE INDEX IF NOT EXISTS sol_fiscal_year_idx ON secondary_order_line (fiscal_year);
+      CREATE INDEX IF NOT EXISTS sol_source_kind_idx ON secondary_order_line (source_kind);
+
+      ALTER TABLE secondary_order_upload
+        ADD COLUMN IF NOT EXISTS source_id TEXT,
+        ADD COLUMN IF NOT EXISTS entry_point TEXT;
+    `,
+  },
+  {
     id: "054_application_auth",
     sql: `
       -- Application accounts are separate from HR identities. Passwords are

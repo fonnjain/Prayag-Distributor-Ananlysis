@@ -47,6 +47,7 @@ import {
   verifySecondaryOrders,
   resolveSecondaryOrderXlsx,
   getSecondaryOrderUploadReview,
+  getPrompt56OrderLineage,
   type LoadResult,
 } from "../lib/secondaryOrders/loader.js";
 import { logger } from "../lib/logger.js";
@@ -94,6 +95,9 @@ type FilterParams = {
   dateFrom?: string;
   dateTo?: string;
 };
+
+const STATUS_UNAVAILABLE = "Status unavailable";
+const MIXED_ERA_NOTE = "Mixed-era order-booking history: legacy rows may not contain Product-Wise status or distributor fields; August 2026 is partial through 19 Aug 2026.";
 
 function buildWhereClause(f: FilterParams): { where: string; params: unknown[] } {
   const conditions: string[] = [];
@@ -168,6 +172,33 @@ function parseFilters(req: Request): FilterParams {
       ? req.query.to
       : typeof req.query.dateTo === "string" ? req.query.dateTo : undefined,
   };
+}
+
+type OrderCursor = { orderDatetime: string; sourceEra: string; orderId: string; productCode: string; occurrence: number; id: number };
+function decodeCursor(value: unknown): OrderCursor | null {
+  if (typeof value !== "string" || !value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    if (!parsed || typeof parsed.orderDatetime !== "string" || typeof parsed.sourceEra !== "string" ||
+      typeof parsed.orderId !== "string" || typeof parsed.productCode !== "string" ||
+      !Number.isFinite(parsed.occurrence) || !Number.isFinite(parsed.id)) return null;
+    return parsed as OrderCursor;
+  } catch { return null; }
+}
+function encodeCursor(row: Record<string, unknown>): string {
+  return Buffer.from(JSON.stringify({
+    orderDatetime: row.orderDatetime, sourceEra: row.sourceEra, orderId: row.orderId,
+    productCode: row.productCode, occurrence: row.occurrence, id: row.id,
+  })).toString("base64url");
+}
+function keysetClause(cursor: OrderCursor | null, params: unknown[], hasWhere: boolean): string {
+  if (!cursor) return "";
+  const start = params.length + 1;
+  params.push(cursor.orderDatetime, cursor.sourceEra, cursor.orderId, cursor.productCode, cursor.occurrence, cursor.id);
+  return `${hasWhere ? "AND" : "WHERE"} (sol.order_datetime < $${start}::timestamptz
+    OR (sol.order_datetime = $${start}::timestamptz AND
+      (sol.source_era, sol.order_id, sol.product_code, sol.occurrence, sol.id) >
+      ($${start + 1}, $${start + 2}, $${start + 3}, $${start + 4}, $${start + 5})))`;
 }
 
 // ── POST /api/admin/secondary-orders/load ────────────────────────────────────
@@ -276,7 +307,10 @@ router.get("/admin/secondary-orders/uploads", async (req: Request, res: Response
   const requestedLimit = Number(req.query.limit ?? 25);
   const limit = Number.isFinite(requestedLimit) ? requestedLimit : 25;
   try {
-    const review = await getSecondaryOrderUploadReview(limit);
+    const [review, prompt56Lineage] = await Promise.all([
+      getSecondaryOrderUploadReview(limit),
+      getPrompt56OrderLineage(limit),
+    ]);
     res.json({
       basis: "ORDER BOOKING",
       analyticsStatus: "ISOLATED_PENDING_RELIABILITY",
@@ -289,6 +323,9 @@ router.get("/admin/secondary-orders/uploads", async (req: Request, res: Response
       },
       analyticsApproval: review.approval,
       uploads: review.uploads,
+      // Historical Prompt 56 lineage is visible to operators, but is a
+      // separately typed feed and never evidence for this quality approval.
+      prompt56Lineage,
     });
   } catch (err) {
     req.log.error({ err }, "[secondaryOrders] upload history error");
@@ -355,6 +392,9 @@ router.get("/secondary-orders/summary", async (req: Request, res: Response) => {
 // ── GET /api/secondary-orders/filters ────────────────────────────────────────
 router.get("/secondary-orders/filters", async (req: Request, res: Response) => {
   try {
+    const retailerSearch = typeof req.query.retailerSearch === "string" ? req.query.retailerSearch.trim() : "";
+    const retailerLimitRaw = Number(req.query.retailerLimit ?? 50);
+    const retailerLimit = Number.isFinite(retailerLimitRaw) ? Math.min(Math.max(Math.floor(retailerLimitRaw), 1), 100) : 50;
     const [states, distributors, retailers, stateHeads] = await Promise.all([
       pool.query<{ state: string }>(
         `SELECT DISTINCT state FROM secondary_order_line WHERE state IS NOT NULL ORDER BY state`,
@@ -363,7 +403,11 @@ router.get("/secondary-orders/filters", async (req: Request, res: Response) => {
         `SELECT DISTINCT cp_code, MAX(cp_name) AS cp_name FROM secondary_order_line GROUP BY cp_code ORDER BY cp_code`,
       ),
       pool.query<{ dealer_id: string; customer_name: string | null }>(
-        `SELECT DISTINCT dealer_id, MAX(customer_name) AS customer_name FROM secondary_order_line GROUP BY dealer_id ORDER BY dealer_id`,
+        `SELECT dealer_id, MAX(customer_name) AS customer_name
+         FROM secondary_order_line
+         WHERE $1 <> '' AND (dealer_id ILIKE '%' || $1 || '%' OR customer_name ILIKE '%' || $1 || '%')
+         GROUP BY dealer_id ORDER BY dealer_id LIMIT $2`,
+        [retailerSearch, retailerLimit],
       ),
        pool.query<{ state_head: string }>(
          `SELECT DISTINCT COALESCE(state_head.name, p.name) AS state_head
@@ -411,16 +455,21 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
 
     const pageSizeRaw = Number(req.query.pageSize ?? req.query.limit ?? 100);
     const pageSize = Number.isFinite(pageSizeRaw) ? Math.min(Math.max(Math.floor(pageSizeRaw), 1), 1000) : 100;
-    const pageRaw = Number(req.query.page ?? 1);
-    const page = Number.isFinite(pageRaw) ? Math.max(1, Math.floor(pageRaw)) : 1;
-    const offsetRaw = req.query.offset == null ? (page - 1) * pageSize : Number(req.query.offset);
-    const offset = Number.isFinite(offsetRaw) ? Math.max(0, Math.floor(offsetRaw)) : 0;
+    const cursor = decodeCursor(req.query.cursor);
+    if (req.query.cursor && !cursor) {
+      res.status(400).json({ error: "Invalid cursor" });
+      return;
+    }
+    const rowParams = [...params];
+    const cursorWhere = keysetClause(cursor, rowParams, Boolean(where));
 
     const [rows, summary, filterRows, quality] = await Promise.all([
       pool.query(
         `SELECT
-           sol.id AS "id", sol.order_id AS "orderId", sol.order_datetime AS "orderDatetime",
-           sol.order_status AS "orderStatus", sol.sales_user_name AS "salesUserName",
+           sol.id AS "id", sol.source_era AS "sourceEra", sol.source_kind AS "sourceKind",
+            sol.fiscal_year AS "fiscalYear", sol.period_completeness AS "periodCompleteness",
+            sol.order_id AS "orderId", sol.order_datetime AS "orderDatetime",
+            COALESCE(sol.order_status, '${STATUS_UNAVAILABLE}') AS "orderStatus", sol.sales_user_name AS "salesUserName",
            sol.sales_user_id AS "salesUserId", sol.customer_name AS "customerName",
            sol.dealer_id AS "dealerId", sol.dealer_mobile AS "dealerMobile",
            sol.cp_name AS "cpName", sol.cp_code AS "cpCode", sol.state AS "state",
@@ -436,9 +485,10 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
            sol.source_file AS "sourceFile"
          FROM secondary_order_line sol
          ${where}
-          ORDER BY sol.order_datetime DESC, sol.order_id, sol.product_code, sol.occurrence
-         LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-        [...params, pageSize, offset],
+          ${cursorWhere}
+           ORDER BY sol.order_datetime DESC, sol.source_era, sol.order_id, sol.product_code, sol.occurrence, sol.id
+          LIMIT $${rowParams.length + 1}`,
+         [...rowParams, pageSize + 1],
       ),
       pool.query(
         `SELECT
@@ -464,9 +514,6 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
         pool.query<{ cp_code: string; cp_name: string | null }>(
           `SELECT cp_code, MAX(cp_name) AS cp_name FROM secondary_order_line GROUP BY cp_code ORDER BY cp_code`,
         ),
-        pool.query<{ dealer_id: string; customer_name: string | null }>(
-          `SELECT dealer_id, MAX(customer_name) AS customer_name FROM secondary_order_line GROUP BY dealer_id ORDER BY dealer_id`,
-        ),
         pool.query<{ state_head: string }>(
           `SELECT DISTINCT COALESCE(state_head.name, p.name) AS state_head
            FROM secondary_order_line sol
@@ -488,13 +535,16 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
     ]);
 
     const s = summary.rows[0];
-    const [states, distributors, retailers, stateHeads] = filterRows;
+     const [states, distributors, stateHeads] = filterRows;
     const totalRows = Number(s?.lines ?? 0);
+     const pageRows = rows.rows.slice(0, pageSize);
+     const nextCursor = rows.rows.length > pageSize ? encodeCursor(pageRows[pageRows.length - 1] as Record<string, unknown>) : null;
     res.json({
       basis: {
         measure: "ORDER BOOKING",
         value: "Basic order value excludes GST",
         disclaimer: "Order booking, not dispatch. Not comparable with secondary sales figures.",
+          mixedEraNote: MIXED_ERA_NOTE,
       },
       coverage: { from: s?.date_min ?? null, to: s?.date_max ?? null },
       summary: {
@@ -509,12 +559,12 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
           { status: "PENDING", lines: Number(s?.pending_lines ?? 0), orders: Number(s?.pending_orders ?? 0), basicValue: Number(s?.pending_basic ?? 0) },
         ].filter((item) => item.lines > 0),
       },
-      rows: rows.rows,
+       rows: pageRows,
       pagination: {
-        page,
         pageSize,
         totalRows,
-        totalPages: Math.max(1, Math.ceil(totalRows / pageSize)),
+         nextCursor,
+         hasMore: Boolean(nextCursor),
       },
       filters: {
         stateHeads: stateHeads.rows.map((r) => ({ id: r.state_head, name: r.state_head })),
@@ -523,10 +573,7 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
           id: r.cp_code,
           name: r.cp_name ? `${r.cp_name} (${r.cp_code})` : r.cp_code,
         })),
-        retailers: retailers.rows.map((r) => ({
-          id: r.dealer_id,
-          name: r.customer_name ? `${r.customer_name} (${r.dealer_id})` : r.dealer_id,
-        })),
+         retailers: [],
         statuses: ["APPROVED", "PENDING"],
       },
       quality: (() => {
@@ -549,7 +596,6 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
 
 // ── GET /api/secondary-orders/export ─────────────────────────────────────────
 const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8EDF5" } };
-const MAX_EXPORT_ROWS = 50_000;
 const MAX_CONCURRENT_EXPORTS = 2;
 const exportGate = new ExportGate(MAX_CONCURRENT_EXPORTS);
 
@@ -572,23 +618,7 @@ router.get("/secondary-orders/export", async (req: Request, res: Response) => {
     }
     exportSlotAcquired = true;
 
-    const [rows, summary] = await Promise.all([
-      pool.query(
-        `SELECT
-           sol.order_id, sol.order_datetime, sol.order_status,
-           sol.sales_user_name, sol.customer_name, sol.dealer_id,
-           sol.dealer_mobile, sol.cp_name, sol.cp_code,
-           sol.state, sol.district, sol.city, sol.pincode,
-           sol.category_name, sol.segment_canon, sol.product_code,
-           sol.gst_pct, sol.gst_amount, sol.qty,
-           sol.discount_pct, sol.discount_amount,
-           sol.dealer_order_value, sol.basic_order_value
-         FROM secondary_order_line sol
-         ${where}
-         ORDER BY sol.order_datetime DESC, sol.order_id, sol.product_code
-         LIMIT $${params.length + 1}`,
-        [...params, MAX_EXPORT_ROWS],
-      ),
+    const [summary] = await Promise.all([
       pool.query(
         `SELECT
            COUNT(*) AS rows,
@@ -602,7 +632,10 @@ router.get("/secondary-orders/export", async (req: Request, res: Response) => {
     ]);
 
     const s = summary.rows[0];
-    const wb = new ExcelJS.Workbook();
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    const date = new Date().toISOString().slice(0, 10);
+    res.setHeader("Content-Disposition", `attachment; filename="SecondaryOrders_OrderBooking_${date}.xlsx"`);
+    const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: res, useStyles: true, useSharedStrings: false });
     wb.creator = "Prayag Sales Intelligence";
 
     // Info sheet — self-describing
@@ -611,6 +644,8 @@ router.get("/secondary-orders/export", async (req: Request, res: Response) => {
     const infoRows: [string, string][] = [
       ["Basis", "ORDER BOOKING — not dispatch"],
       ["Note", "Not comparable with secondary sales figures (secondary_sku_line / secondary_register_line)."],
+      ["Mixed-era coverage", MIXED_ERA_NOTE],
+      ["Status filter", "APPROVED/PENDING applies only to Product-Wise rows. Legacy periods have no status and are not silently represented as a status."],
       ["Basic Order Value", "Excludes GST. Use this for commercial analysis."],
       ["Dealer Order Value", "Includes GST. Stored for completeness only."],
       ["Date range", `${s.date_min ?? "–"} to ${s.date_max ?? "–"}`],
@@ -635,6 +670,10 @@ router.get("/secondary-orders/export", async (req: Request, res: Response) => {
     const ws = wb.addWorksheet("Secondary Orders");
     const columns = [
       { header: "Order ID", key: "order_id", width: 16 },
+      { header: "Source Era", key: "source_era", width: 18 },
+      { header: "Source Kind", key: "source_kind", width: 18 },
+      { header: "Fiscal Year", key: "fiscal_year", width: 14 },
+      { header: "Period Completeness", key: "period_completeness", width: 22 },
       { header: "Order Datetime", key: "order_datetime", width: 22 },
       { header: "Status", key: "order_status", width: 12 },
       { header: "Sales User", key: "sales_user_name", width: 22 },
@@ -662,27 +701,43 @@ router.get("/secondary-orders/export", async (req: Request, res: Response) => {
     ws.columns = columns.map((c) => ({ header: c.header, key: c.key, width: c.width }));
     ws.getRow(1).eachCell((cell) => { cell.font = { bold: true }; cell.fill = HEADER_FILL; });
 
-    const truncated = rows.rows.length >= MAX_EXPORT_ROWS;
-    for (const r of rows.rows) {
-      ws.addRow(columns.map((c) => {
-        const v = (r as Record<string, unknown>)[c.key];
-        if (v instanceof Date) return v.toISOString();
-        return v ?? "";
-      }));
-    }
-
-    if (truncated) {
-      const note = ws.addRow([`… showing first ${MAX_EXPORT_ROWS.toLocaleString()} rows. Narrow filters to export all.`]);
-      note.font = { italic: true };
+    let exportCursor: OrderCursor | null = null;
+    const batchSize = 1_000;
+    for (;;) {
+      const batchParams = [...params];
+      const batchWhere = keysetClause(exportCursor, batchParams, Boolean(where));
+      const batch = await pool.query(
+        `SELECT sol.id, sol.source_era, sol.source_kind, sol.fiscal_year, sol.period_completeness,
+          sol.order_id, sol.order_datetime, COALESCE(sol.order_status, '${STATUS_UNAVAILABLE}') AS order_status,
+          sol.sales_user_name, sol.customer_name, sol.dealer_id, sol.dealer_mobile, sol.cp_name, sol.cp_code,
+          sol.state, sol.district, sol.city, sol.pincode, sol.category_name, sol.segment_canon, sol.product_code,
+          sol.gst_pct, sol.gst_amount, sol.qty, sol.discount_pct, sol.discount_amount, sol.dealer_order_value, sol.basic_order_value, sol.occurrence
+         FROM secondary_order_line sol ${where} ${batchWhere}
+         ORDER BY sol.order_datetime DESC, sol.source_era, sol.order_id, sol.product_code, sol.occurrence, sol.id
+         LIMIT $${batchParams.length + 1}`,
+        [...batchParams, batchSize],
+      );
+      for (const r of batch.rows) {
+        ws.addRow(columns.map((c) => {
+          const v = (r as Record<string, unknown>)[c.key];
+          if (v instanceof Date) return v.toISOString();
+          return v ?? "Unavailable";
+        })).commit();
+      }
+      if (batch.rows.length < batchSize) break;
+      const last = batch.rows[batch.rows.length - 1] as Record<string, unknown>;
+      exportCursor = {
+        orderDatetime: (last.order_datetime as Date).toISOString(), sourceEra: String(last.source_era),
+        orderId: String(last.order_id), productCode: String(last.product_code),
+        occurrence: Number(last.occurrence), id: Number(last.id),
+      };
     }
 
     ws.views = [{ state: "frozen", ySplit: 1 }];
 
-    const buf = await wb.xlsx.writeBuffer();
-    const date = new Date().toISOString().slice(0, 10);
-    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="SecondaryOrders_OrderBooking_${date}.xlsx"`);
-    res.send(Buffer.from(buf));
+    info.commit();
+    ws.commit();
+    await wb.commit();
   } catch (err) {
     req.log.error({ err }, "[secondaryOrders] export error");
     res.status(500).json({ error: "Export failed" });

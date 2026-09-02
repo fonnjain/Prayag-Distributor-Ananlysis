@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useMemo } from "react";
-import { useSecondaryOrders } from "@/hooks/use-secondary-orders";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
+import { useSecondaryOrders, useSecondaryOrderRetailers } from "@/hooks/use-secondary-orders";
 import { trunc2IN } from "@/lib/trunc";
 import { Download, FilterX, Loader2, AlertCircle, ShoppingCart } from "lucide-react";
 import { format } from "date-fns";
@@ -16,18 +16,27 @@ export default function SecondaryOrdersContent() {
     from: "",
     to: "",
   });
-  const [page, setPage] = useState(1);
+  const [cursor, setCursor] = useState<string | undefined>();
+  const [cursorHistory, setCursorHistory] = useState<(string | undefined)[]>([]);
+  const [retailerSearch, setRetailerSearch] = useState("");
+  const [debouncedRetailerSearch, setDebouncedRetailerSearch] = useState("");
   const pageSize = 50;
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedRetailerSearch(retailerSearch), 300);
+    return () => window.clearTimeout(timer);
+  }, [retailerSearch]);
+  const { data: retailerResults } = useSecondaryOrderRetailers(debouncedRetailerSearch);
 
   const { data, isLoading, isError, error, isFetching } = useSecondaryOrders({
     ...filters,
-    page,
+    cursor,
     pageSize,
   });
 
   const handleFilterChange = (key: keyof typeof filters, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
-    setPage(1);
+    setCursor(undefined);
+    setCursorHistory([]);
   };
 
   const handleClearFilters = () => {
@@ -40,7 +49,8 @@ export default function SecondaryOrdersContent() {
       from: "",
       to: "",
     });
-    setPage(1);
+    setCursor(undefined);
+    setCursorHistory([]);
   };
 
   const handleExport = () => {
@@ -71,6 +81,9 @@ export default function SecondaryOrdersContent() {
       return isoStr;
     }
   };
+  const text = (value: string | null | undefined) => value == null || value === "" ? "—" : value;
+  const number = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString("en-IN");
+  const amount = (value: number | null | undefined) => value == null ? "—" : `₹${trunc2IN(value)}`;
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background">
@@ -149,6 +162,9 @@ export default function SecondaryOrdersContent() {
                   </option>
                 ))}
               </select>
+              {filters.status && (
+                <p className="text-xs text-amber-700">APPROVED/PENDING applies only to Product-Wise rows. Legacy periods are excluded because their status is unavailable.</p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -201,18 +217,21 @@ export default function SecondaryOrdersContent() {
 
             <div className="space-y-2">
               <label className="text-xs font-medium">Retailer</label>
-              <select
-                value={filters.dealerId}
-                onChange={(e) => handleFilterChange("dealerId", e.target.value)}
+              <input
+                type="search"
+                list="secondary-order-retailers"
+                value={retailerSearch}
+                onChange={(e) => setRetailerSearch(e.target.value)}
+                onBlur={() => {
+                  const match = retailerResults?.retailers.find((r) => r.dealerId === retailerSearch || `${r.customerName ?? ""} (${r.dealerId})` === retailerSearch);
+                  handleFilterChange("dealerId", match?.dealerId ?? retailerSearch);
+                }}
+                placeholder="Search retailer / ID"
                 className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-              >
-                <option value="">All Retailers</option>
-                {data?.filters.retailers.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                  </option>
-                ))}
-              </select>
+              />
+              <datalist id="secondary-order-retailers">
+                {retailerResults?.retailers.map((r) => <option key={r.dealerId} value={`${r.customerName ?? "Unavailable"} (${r.dealerId})`} />)}
+              </datalist>
             </div>
           </div>
         </aside>
@@ -222,6 +241,7 @@ export default function SecondaryOrdersContent() {
           {/* Summary Cards */}
           {data && (
             <div className="flex-shrink-0 p-4 border-b bg-card space-y-4">
+               <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{data.basis.mixedEraNote}</p>
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
                 <div className="rounded-lg border bg-card p-3 shadow-sm">
                   <div className="text-xs font-medium text-muted-foreground">Orders</div>
@@ -301,6 +321,7 @@ export default function SecondaryOrdersContent() {
                     <thead className="bg-muted/50 text-muted-foreground sticky top-0 z-10 shadow-sm">
                       <tr>
                         <th className="px-4 py-3 font-medium">Order ID</th>
+                        <th className="px-4 py-3 font-medium">Source / Period</th>
                         <th className="px-4 py-3 font-medium">Date & Time</th>
                         <th className="px-4 py-3 font-medium">Status</th>
                         <th className="px-4 py-3 font-medium">Sales User</th>
@@ -318,7 +339,11 @@ export default function SecondaryOrdersContent() {
                     <tbody className="divide-y divide-border">
                       {data?.rows.map((row, i) => (
                         <tr key={`${row.orderId}-${i}`} className="hover:bg-muted/30 transition-colors">
-                          <td className="px-4 py-2 font-mono text-xs text-foreground">{row.orderId}</td>
+                           <td className="px-4 py-2 font-mono text-xs text-foreground">{text(row.orderId)}</td>
+                           <td className="px-4 py-2 text-xs">
+                             <div>{text(row.sourceEra)}{row.sourceKind ? ` · ${row.sourceKind}` : ""}</div>
+                             <div className="text-muted-foreground">{text(row.fiscalYear)} · {text(row.periodCompleteness)}</div>
+                           </td>
                           <td className="px-4 py-2 text-muted-foreground">{formatDate(row.orderDatetime)}</td>
                           <td className="px-4 py-2">
                             <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide
@@ -328,30 +353,30 @@ export default function SecondaryOrdersContent() {
                               {row.orderStatus}
                             </span>
                           </td>
-                          <td className="px-4 py-2">{row.salesUserName}</td>
+                           <td className="px-4 py-2">{text(row.salesUserName)}</td>
                           <td className="px-4 py-2">
-                            <div className="font-medium text-foreground">{row.customerName}</div>
+                             <div className="font-medium text-foreground">{text(row.customerName)}</div>
                             {row.dealerMobile && <div className="text-xs text-muted-foreground">{row.dealerMobile}</div>}
                           </td>
                           <td className="px-4 py-2">
-                            <div className="text-foreground">{row.cpName}</div>
-                            <div className="text-[10px] font-mono text-muted-foreground">{row.cpCode}</div>
+                             <div className="text-foreground">{text(row.cpName)}</div>
+                             <div className="text-[10px] font-mono text-muted-foreground">{text(row.cpCode)}</div>
                           </td>
                           <td className="px-4 py-2">
-                            <div>{row.district}</div>
-                            <div className="text-xs text-muted-foreground">{row.state}</div>
+                             <div>{text(row.district)}</div>
+                             <div className="text-xs text-muted-foreground">{text(row.state)}</div>
                           </td>
                           <td className="px-4 py-2">
-                            <div>{row.categoryName}</div>
-                            <div className="text-xs text-muted-foreground">{row.segmentCanon}</div>
+                             <div>{text(row.categoryName)}</div>
+                             <div className="text-xs text-muted-foreground">{text(row.segmentCanon)}</div>
                           </td>
-                          <td className="px-4 py-2 font-mono text-xs">{row.productCode}</td>
-                          <td className="px-4 py-2 text-right font-medium">{row.qty.toLocaleString("en-IN")}</td>
+                           <td className="px-4 py-2 font-mono text-xs">{text(row.productCode)}</td>
+                           <td className="px-4 py-2 text-right font-medium">{number(row.qty)}</td>
                           <td className="px-4 py-2 text-right text-muted-foreground">
-                            {row.discountPct > 0 ? `${row.discountPct}%` : '-'}
+                             {row.discountPct == null ? "—" : `${row.discountPct}%`}
                           </td>
-                          <td className="px-4 py-2 text-right text-muted-foreground">{row.gstPct}%</td>
-                          <td className="px-4 py-2 text-right font-medium bg-blue-50/10 text-blue-900">₹{trunc2IN(row.basicOrderValue)}</td>
+                           <td className="px-4 py-2 text-right text-muted-foreground">{row.gstPct == null ? "—" : `${row.gstPct}%`}</td>
+                           <td className="px-4 py-2 text-right font-medium bg-blue-50/10 text-blue-900">{amount(row.basicOrderValue)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -359,23 +384,22 @@ export default function SecondaryOrdersContent() {
                 </div>
 
                 {/* Pagination */}
-                {data && data.pagination.totalPages > 1 && (
+                 {data && (cursorHistory.length > 0 || data.pagination.hasMore) && (
                   <div className="border-t bg-muted/20 px-4 py-3 flex items-center justify-between text-sm">
                     <div className="text-muted-foreground">
-                      Showing page <span className="font-medium text-foreground">{data.pagination.page}</span> of <span className="font-medium text-foreground">{data.pagination.totalPages}</span>
-                      {' '} ({data.pagination.totalRows} total rows)
+                       Showing cursor page ({data.pagination.totalRows} matching rows)
                     </div>
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => setPage(p => Math.max(1, p - 1))}
-                        disabled={page === 1}
+                         onClick={() => { const prior = cursorHistory[cursorHistory.length - 1]; setCursorHistory(h => h.slice(0, -1)); setCursor(prior); }}
+                         disabled={cursorHistory.length === 0}
                         className="px-3 py-1 rounded border bg-background hover:bg-muted disabled:opacity-50 transition-colors"
                       >
                         Previous
                       </button>
                       <button
-                        onClick={() => setPage(p => Math.min(data.pagination.totalPages, p + 1))}
-                        disabled={page === data.pagination.totalPages}
+                         onClick={() => { setCursorHistory(h => [...h, cursor]); setCursor(data.pagination.nextCursor ?? undefined); }}
+                         disabled={!data.pagination.hasMore}
                         className="px-3 py-1 rounded border bg-background hover:bg-muted disabled:opacity-50 transition-colors"
                       >
                         Next

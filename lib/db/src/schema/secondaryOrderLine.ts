@@ -39,16 +39,23 @@ export const secondaryOrderLines = pgTable(
   "secondary_order_line",
   {
     id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    // legacy_crm covers Segment Wise and PSCode 3. Product Wise is separate.
+    sourceEra: text("source_era").notNull(),
+    sourceKind: text("source_kind").notNull(),
+    // Derived from the literal source date; imports must never correct it.
+    fiscalYear: text("fiscal_year").notNull(),
+    periodCompleteness: text("period_completeness").notNull(),
+    sourceId: text("source_id"),
     orderId: text("order_id").notNull(),                // SORD-nnnn
     orderDatetime: timestamp("order_datetime", { withTimezone: true }).notNull(),
-    orderStatus: text("order_status").notNull(),        // APPROVED | PENDING
+    orderStatus: text("order_status"),                  // unavailable in legacy CRM
     salesUserName: text("sales_user_name"),             // as given
     salesUserId: integer("sales_user_id"),              // resolved to person.person_id, nullable
     customerName: text("customer_name"),                // retailer name as given
     dealerId: text("dealer_id").notNull(),              // RET#
     dealerMobile: text("dealer_mobile"),
     cpName: text("cp_name"),                            // distributor name as given
-    cpCode: text("cp_code").notNull(),                  // DIST#
+    cpCode: text("cp_code"),                             // unavailable in legacy CRM
     state: text("state"),
     district: text("district"),
     city: text("city"),
@@ -73,7 +80,9 @@ export const secondaryOrderLines = pgTable(
     loadedAt: timestamp("loaded_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
-    unique("secondary_order_line_uq").on(t.orderId, t.productCode, t.occurrence),
+    unique("secondary_order_line_uq").on(t.sourceEra, t.orderId, t.productCode, t.occurrence),
+    index("sol_fiscal_year_idx").on(t.fiscalYear),
+    index("sol_source_kind_idx").on(t.sourceKind),
     index("sol_dealer_id_idx").on(t.dealerId),
     index("sol_cp_code_idx").on(t.cpCode),
     index("sol_order_datetime_idx").on(t.orderDatetime),
@@ -92,6 +101,8 @@ export const secondaryOrderUploads = pgTable(
   {
     id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
     sourceFile: text("source_file").notNull(),
+    sourceId: text("source_id"),
+    entryPoint: text("entry_point"),
     sourceSha256: text("source_sha256").notNull(),
     sourceBytes: bigint("source_bytes", { mode: "number" }).notNull(),
     loadedAt: timestamp("loaded_at", { withTimezone: true }).defaultNow().notNull(),

@@ -117,7 +117,7 @@ function toNum(v: unknown): number | null {
  * Parse "DD-MM-YYYY HH:mm:ss" date string from the workbook.
  * Also handles Date objects (exceljs may parse date cells).
  */
-function parseOrderDatetime(v: unknown): Date | null {
+export function parseOrderDatetime(v: unknown): Date | null {
   if (v instanceof Date) return v;
   const raw = plainCellValue(v);
   if (raw == null) return null;
@@ -129,9 +129,9 @@ function parseOrderDatetime(v: unknown): Date | null {
     const d = new Date(`${yyyy}-${mm}-${dd}T${HH}:${MM}:${SS}+05:30`);
     return Number.isNaN(d.getTime()) ? null : d;
   }
-  // Fallback: try ISO
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? null : d;
+  // Do not delegate to Date's locale-dependent string parser: ambiguous source
+  // literals must be rejected, never silently interpreted as MM-DD.
+  return null;
 }
 
 function parseDiscountPct(v: unknown): number | null {
@@ -142,6 +142,31 @@ function parseDiscountPct(v: unknown): number | null {
   const m = String(p).match(/^(\d+(?:\.\d+)?)/);
   if (!m) return null;
   return Number(m[1]);
+}
+
+/** Fiscal year from the literal parsed source timestamp (India calendar). */
+function fiscalYearFromDate(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata", year: "numeric", month: "numeric",
+  }).formatToParts(date);
+  const value = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  const year = value("year");
+  const month = value("month");
+  const start = month >= 4 ? year : year - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
+}
+
+const PRODUCT_WISE_ERA_START_MS = Date.UTC(2026, 6, 31, 18, 30);
+/** Product-Wise is a new CRM era; pre-August rows belong to legacy sources. */
+export function assertProductWiseEraStart(rows: Iterable<{ orderDatetime: Date }>): void {
+  for (const row of rows) {
+    if (row.orderDatetime.getTime() < PRODUCT_WISE_ERA_START_MS) {
+      throw new Error(
+        `Product-Wise era violation: accepted order date ${row.orderDatetime.toISOString()} ` +
+        "is before 2026-08-01 00:00 IST; refusing the entire load.",
+      );
+    }
+  }
 }
 
 // ── Salesperson resolution ────────────────────────────────────────────────────
@@ -224,6 +249,7 @@ type StoredUploadRow = {
   assessment: SecondaryOrderUploadVerification["assessment"];
   material_reasons: string[] | null;
   analytics_status: SecondaryOrderUploadVerification["analyticsStatus"];
+  entry_point: string | null;
 };
 type UploadBaselineRow = {
   id: number;
@@ -242,6 +268,13 @@ function rate(matched: number, total: number): number {
 
 function parseJsonColumn<T>(value: T | string): T {
   return typeof value === "string" ? JSON.parse(value) as T : value;
+}
+
+/** Prompt 56 lineage has `{}` verification by design and is not quality data. */
+export function isNormalSecondaryOrderUploadVerification(value: unknown): value is SecondaryOrderUploadMetrics {
+  return !!value && typeof value === "object" &&
+    typeof (value as Partial<SecondaryOrderUploadMetrics>).rowsParsed === "number" &&
+    typeof (value as Partial<SecondaryOrderUploadMetrics>).rowsScanned === "number";
 }
 
 async function sourceLineage(filePath: string): Promise<{ sourceSha256: string; sourceBytes: number }> {
@@ -265,13 +298,17 @@ async function resolveStableIdCoverage(ids: Iterable<string>): Promise<StableIdR
 
 async function recordUploadVerification(
   client: SecondaryOrderDbClient,
-  source: { sourceFile: string; sourceSha256: string; sourceBytes: number },
+  source: { sourceFile: string; sourceSha256: string; sourceBytes: number; sourceId?: string; entryPoint?: string },
   metrics: SecondaryOrderUploadMetrics,
 ): Promise<SecondaryOrderUploadVerification> {
   const baselineResult = await client.query<UploadBaselineRow>(
     `SELECT id, verification
      FROM secondary_order_upload
      WHERE assessment <> 'MATERIAL_REGRESSION'
+       -- Prompt 56 is a separate historical lineage feed, not evidence for
+       -- the normal Product-Wise uploader's quality baseline.
+       AND COALESCE(entry_point, 'load-secondary-orders') = 'load-secondary-orders'
+       AND verification ? 'rowsParsed'
      ORDER BY id DESC
      LIMIT 1`,
   );
@@ -284,18 +321,17 @@ async function recordUploadVerification(
   );
   const inserted = await client.query<InsertedUploadRow>(
     `INSERT INTO secondary_order_upload
-      (source_file, source_sha256, source_bytes, verification, comparison, assessment, material_reasons, analytics_status)
-     VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7::text[], $8)
+      (source_file, source_id, entry_point, source_sha256, source_bytes, verification, comparison, assessment, material_reasons, analytics_status)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9::text[], $10)
      RETURNING id, loaded_at::text`,
     [
       source.sourceFile,
+      source.sourceId ?? null,
+      source.entryPoint ?? "load-secondary-orders",
       source.sourceSha256,
       source.sourceBytes,
-      JSON.stringify(metrics),
-      JSON.stringify(evaluation.comparison),
-      evaluation.assessment,
-      evaluation.materialReasons,
-      evaluation.analyticsStatus,
+      JSON.stringify(metrics), JSON.stringify(evaluation.comparison),
+      evaluation.assessment, evaluation.materialReasons, evaluation.analyticsStatus,
     ],
   );
   const row = inserted.rows[0];
@@ -306,13 +342,17 @@ export async function getSecondaryOrderUploadHistory(limit = 25): Promise<Second
   const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 100);
   const result = await pool.query<StoredUploadRow>(
     `SELECT id, source_file, source_sha256, source_bytes, loaded_at::text, verification, comparison,
-            assessment, material_reasons, analytics_status
+            assessment, material_reasons, analytics_status, entry_point
      FROM secondary_order_upload
+     WHERE COALESCE(entry_point, 'load-secondary-orders') = 'load-secondary-orders'
+       AND verification ? 'rowsParsed'
      ORDER BY id DESC
      LIMIT $1`,
     [safeLimit],
   );
-  return result.rows.map((row) => ({
+  return result.rows
+    .filter((row) => isNormalSecondaryOrderUploadVerification(parseJsonColumn<unknown>(row.verification)))
+    .map((row) => ({
     uploadId: row.id,
     sourceFile: row.source_file,
     sourceSha256: row.source_sha256,
@@ -323,6 +363,27 @@ export async function getSecondaryOrderUploadHistory(limit = 25): Promise<Second
     materialReasons: row.material_reasons ?? [],
     comparison: parseJsonColumn<UploadQualityEvaluation["comparison"]>(row.comparison),
     analyticsStatus: row.analytics_status,
+  }));
+}
+
+/** Prompt 56 historical-load lineage is intentionally visible, but never fed
+ * into normal uploader quality evaluation because it has no stable-ID metrics. */
+export type Prompt56OrderLineage = {
+  uploadId: number; sourceFile: string; sourceId: string | null;
+  sourceSha256: string; sourceBytes: number; loadedAt: string; entryPoint: string | null;
+};
+export async function getPrompt56OrderLineage(limit = 500): Promise<Prompt56OrderLineage[]> {
+  const result = await pool.query<StoredUploadRow & { source_id: string | null }>(
+    `SELECT id, source_file, source_id, source_sha256, source_bytes, loaded_at::text,
+            verification, comparison, assessment, material_reasons, analytics_status, entry_point
+     FROM secondary_order_upload WHERE entry_point = 'load-prompt56-orders'
+     ORDER BY id DESC LIMIT $1`,
+    [Math.min(Math.max(Math.floor(limit), 1), 1000)],
+  );
+  return result.rows.map((r) => ({
+    uploadId: r.id, sourceFile: r.source_file, sourceId: r.source_id,
+    sourceSha256: r.source_sha256, sourceBytes: Number(r.source_bytes),
+    loadedAt: r.loaded_at, entryPoint: r.entry_point,
   }));
 }
 
@@ -531,6 +592,9 @@ export async function loadSecondaryOrders(
 
   if (!colIdx) throw new Error("No header row found in secondary order report XLSX");
   if (rows.length === 0) throw new Error("Secondary order report contains no valid data rows");
+  // Must happen before any DB transaction/insert: Product-Wise is only valid
+  // from its CRM-era start. There is deliberately no upper bound here.
+  assertProductWiseEraStart(rows);
 
   // Assign source-position occurrences and make repeated pairs visible. The
   // line hash prevents an exact repeated export row from becoming invisible.
@@ -640,7 +704,8 @@ export async function loadSecondaryOrders(
 
         const result = await client.query<{ id: number }>(
           `INSERT INTO secondary_order_line
-             (order_id, order_datetime, order_status, sales_user_name, sales_user_id,
+              (source_era, source_kind, fiscal_year, period_completeness, source_id,
+               order_id, order_datetime, order_status, sales_user_name, sales_user_id,
               customer_name, dealer_id, dealer_mobile, cp_name, cp_code,
               state, district, city, pincode,
              category_name, segment_canon, product_code, occurrence, source_row_number,
@@ -648,16 +713,18 @@ export async function loadSecondaryOrders(
               gst_pct, gst_amount, qty, discount_pct, discount_amount,
               dealer_order_value, basic_order_value, source_file)
            VALUES
-             ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-              $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
-            ON CONFLICT (order_id, product_code, occurrence) DO NOTHING
+              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+               $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)
+             ON CONFLICT (source_era, order_id, product_code, occurrence) DO NOTHING
            RETURNING id`,
           [
+            "product_wise_crm", "product_wise",
+            fiscalYearFromDate(r.orderDatetime), "partial", sourceFile,
             r.orderId, r.orderDatetime, r.orderStatus, r.salesUserName, salesUserId,
             r.customerName, r.dealerId, r.dealerMobile, r.cpName, r.cpCode,
             r.state, r.district, r.city, r.pincode,
-             r.categoryName, r.segmentCanon, r.productCode, r.occurrence, r.sourceRowNumber,
-             r.contentHash, r.isExactDuplicateExport,
+            r.categoryName, r.segmentCanon, r.productCode, r.occurrence, r.sourceRowNumber,
+            r.contentHash, r.isExactDuplicateExport,
             r.gstPct, r.gstAmount, r.qty, r.discountPct, r.discountAmount,
             r.dealerOrderValue, r.basicOrderValue, sourceFile,
           ],
@@ -677,7 +744,8 @@ export async function loadSecondaryOrders(
           }>(
             `SELECT order_status, qty, basic_order_value, dealer_order_value, discount_pct, content_hash
              FROM secondary_order_line
-             WHERE order_id = $1 AND product_code = $2 AND occurrence = $3`,
+              WHERE source_era = 'product_wise_crm'
+                AND order_id = $1 AND product_code = $2 AND occurrence = $3`,
             [r.orderId, r.productCode, r.occurrence],
           );
           if (existing.rows.length > 0) {
@@ -742,7 +810,7 @@ export async function loadSecondaryOrders(
     };
     uploadVerification = await recordUploadVerification(
       client,
-      { sourceFile, sourceSha256, sourceBytes },
+      { sourceFile, sourceSha256, sourceBytes, sourceId: sourceFile, entryPoint: "load-secondary-orders" },
       metrics,
     );
     await client.query("COMMIT");

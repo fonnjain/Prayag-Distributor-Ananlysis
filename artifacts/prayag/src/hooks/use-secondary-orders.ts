@@ -3,30 +3,20 @@ import { useQuery } from "@tanstack/react-query";
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 export interface SecondaryOrderRow {
+  id: number;
+  sourceEra: string;
+  sourceKind: string | null;
+  fiscalYear: string | null;
+  periodCompleteness: string | null;
   orderId: string;
   orderDatetime: string;
-  orderStatus: string;
-  salesUserName: string;
-  salesUserId: string;
-  customerName: string;
-  dealerId: string;
-  dealerMobile: string;
-  cpName: string;
-  cpCode: string;
-  state: string;
-  district: string;
-  city: string;
-  pincode: string;
-  categoryName: string;
-  segmentCanon: string;
-  productCode: string;
-  gstPct: number;
-  gstAmount: number;
-  qty: number;
-  discountPct: number;
-  discountAmount: number;
-  dealerOrderValue: number;
-  basicOrderValue: number;
+  orderStatus: string; // API maps null source values to the exact unavailable label.
+  salesUserName: string | null; salesUserId: string | null; customerName: string | null;
+  dealerId: string | null; dealerMobile: string | null; cpName: string | null; cpCode: string | null;
+  state: string | null; district: string | null; city: string | null; pincode: string | null;
+  categoryName: string | null; segmentCanon: string | null; productCode: string | null;
+  gstPct: number | null; gstAmount: number | null; qty: number | null; discountPct: number | null;
+  discountAmount: number | null; dealerOrderValue: number | null; basicOrderValue: number | null;
   occurrence: number;
   isExactDuplicateExport: boolean;
 }
@@ -36,6 +26,7 @@ export interface SecondaryOrdersResponse {
     measure: string;
     value: string;
     disclaimer: string;
+    mixedEraNote: string;
   };
   coverage: {
     from: string | null;
@@ -57,10 +48,10 @@ export interface SecondaryOrdersResponse {
   };
   rows: SecondaryOrderRow[];
   pagination: {
-    page: number;
     pageSize: number;
     totalRows: number;
-    totalPages: number;
+    nextCursor: string | null;
+    hasMore: boolean;
   };
   filters: {
     stateHeads: { id: string; name: string }[];
@@ -85,7 +76,7 @@ export interface SecondaryOrdersParams {
   status?: string;
   from?: string;
   to?: string;
-  page?: number;
+  cursor?: string;
   pageSize?: number;
 }
 
@@ -101,7 +92,7 @@ export function useSecondaryOrders(params: SecondaryOrdersParams) {
       if (params.status) search.set("status", params.status);
       if (params.from) search.set("from", params.from);
       if (params.to) search.set("to", params.to);
-      if (params.page !== undefined) search.set("page", String(params.page));
+      if (params.cursor) search.set("cursor", params.cursor);
       if (params.pageSize !== undefined) search.set("pageSize", String(params.pageSize));
 
       const res = await fetch(`${BASE}/api/secondary-orders?${search.toString()}`);
@@ -113,5 +104,18 @@ export function useSecondaryOrders(params: SecondaryOrdersParams) {
     // We do not want to automatically refetch when typing or changing filters quickly, 
     // but React Query will handle deduplication. We use placeholder data or keepPreviousData if available.
     placeholderData: (prev) => prev,
+  });
+}
+
+export function useSecondaryOrderRetailers(searchText: string) {
+  return useQuery<{ retailers: { dealerId: string; customerName: string | null }[] }>({
+    queryKey: ["secondary-order-retailers", searchText],
+    enabled: searchText.trim().length >= 2,
+    queryFn: async () => {
+      const res = await fetch(`${BASE}/api/secondary-orders/filters?retailerSearch=${encodeURIComponent(searchText)}&retailerLimit=50`);
+      if (!res.ok) throw new Error("Failed to search retailers");
+      return res.json();
+    },
+    staleTime: 30_000,
   });
 }
