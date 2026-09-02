@@ -1,0 +1,161 @@
+# Replit Prompt 45 — The pre-August order booking exists and is never stored
+
+**Date:** 2 September 2026
+**Scope:** Read-only and scoping only. Write nothing, build nothing, load nothing.
+
+**Standing rule:** every figure states which database or source it came from.
+
+## What I got wrong, and what is actually true
+
+I have said several times that pre-August 2026 secondary order booking has no
+usable source. That was wrong, and the code shows it.
+
+The five **Secondary Order Booking Segment Wise** workbooks — FY2021-22 through
+FY2025-26 — are configured, readable, and **read every day**. `loadOrderFile`
+parses, per row:
+
+```
+date, retailerId, retailerName, orderId, teamMember, distributor, segment, state
+```
+
+with forward-fill for multi-line orders. `TmOrderAgg` then retains `orderIds`,
+`retailers` with amount and order IDs, `distributors`, `perSegment`, `partyState`,
+`perStatePerParty`, and `monthAmount[12]`.
+
+FY2025-26 alone reads **379,441 rows totalling ₹2,31,09,13,869**, reconciling
+exactly to the workbook's own header total.
+
+**And none of it is persisted.** The only `INSERT INTO` statements for any order
+table are `secondary_order_line` and `secondary_order_upload`, and only the
+Product-Wise loader writes them. `ingestOrderBookingFy` sounded like the
+counterpart but lives in `primarySheets.ts` and mirrors **primary** booking into
+`primary_order_line`. There is no secondary equivalent.
+
+The data is read, aggregated in memory behind a TTL cache, served to management
+reports, and discarded.
+
+---
+
+## Prompt 45
+
+```
+Read-only and scoping only. Write nothing, build nothing, load nothing, persist
+nothing. I want the size and shape of a change, not the change.
+
+SECTION A - WHAT THE SEGMENT WISE FILES ACTUALLY CONTAIN
+
+A1. Print the full column list of the FY2025-26 Secondary Order Booking Segment
+    Wise workbook as loadOrderFile sees it - every header it maps and every
+    header it ignores. I want the real list, not the fields the aggregate keeps.
+
+A2. Map each Segment Wise column to its secondary_order_line counterpart. Three
+    groups:
+      - direct equivalents
+      - derivable with a documented rule
+      - genuinely absent
+
+    I expect order_status, product_code, qty and the GST split to be absent.
+    Confirm, and name anything else missing that I have not anticipated.
+
+A3. For each of the five fiscal years, print: rows read, distinct order IDs,
+    distinct retailers, distinct distributors, total Sub Total, and the date
+    range. FY2025-26 is known at 379,441 rows and Rs 231.0914 Cr - I want the
+    other four on the same basis.
+
+A4. Do the older files carry retailer and distributor as IDs (RET#/DIST#) or as
+    names? The new format carries codes. If the old files carry names only, that
+    is an identity problem for any persisted version and needs stating.
+
+SECTION B - WHAT THE PAGE COULD AND COULD NOT SHOW
+
+The Secondary Orders page has six summary cards, five filters, a line table and
+an XLSX export.
+
+B1. For a Segment Wise year, which of the six cards could be populated? Orders,
+    Lines, Retailers, Distributors, Total Qty, Basic order value. I expect Total
+    Qty to be impossible and Basic order value to need a definition decision -
+    Sub Total is net after discount, Basic Order Value is ex-GST. Are those the
+    same measure or not?
+
+B2. Which of the five filters would work? Date, Status, State Head, State,
+    Distributor, Retailer. Status has no source in the old format - what should
+    the page do, hide the filter for those years or show it disabled?
+
+B3. The line table shows item-level rows. The old format has no product code.
+    What would a row look like - one row per order, per order-and-segment, or
+    something else? This is the design question, not a technical one.
+
+B4. The export's Info sheet carries basis and date range. What would it say for a
+    Segment Wise year, and how would a reader tell the two eras apart?
+
+SECTION C - WHAT PERSISTING IT WOULD INVOLVE
+
+Describe only. Build nothing.
+
+C1. Could Segment Wise rows go into secondary_order_line alongside Product-Wise
+    rows, with a source column distinguishing them - the way secondary_sku_line
+    already carries pscode3_xlsx and productwise_xlsx? Or do the schemas differ
+    too much?
+
+    secondary_sku_line already solved exactly this problem for sell-through.
+    Whether the same pattern works here is the central question.
+
+C2. The idempotency key is order_id + product_code + occurrence. With no product
+    code, what would the key be? Is order_id + occurrence sufficient, and does
+    order_id collide across fiscal years?
+
+C3. secondary_order_line has no FY column. If five closed years were loaded,
+    how would a frozen year be protected from re-load or replacement?
+
+C4. What would a second writer cost, honestly? The parser exists and already
+    extracts the right fields, so this is a writer plus a schema decision, not a
+    new ingestion. Give a real estimate of the work and name the risky parts.
+
+C5. Would loading past years change any existing figure anywhere? I expect not -
+    only the Secondary Orders page reads that table, and it is isolated behind
+    ISOLATED_PENDING_RELIABILITY. Confirm.
+
+SECTION D - APRIL TO JULY 2026, THE ACTUAL GAP
+
+D1. Is there a Segment Wise workbook for FY2026-27 anywhere in Drive - not just
+    in the configured folder, but anywhere the connected account can see? Earlier
+    searches covered the folder and the repository. Search wider.
+
+D2. If the old CRM ran until 31 July 2026, did it produce a partial FY2026-27
+    Segment Wise file covering Apr-Jul? That is the missing period, and it is the
+    one thing that would complete the year.
+
+D3. If no such file exists, is Apr-Jul recoverable from the PSCode 3 archives?
+    Those are sell-through rather than booking, so I expect no - but the PSCode 3
+    columns include an Order ID. Confirm whether that Order ID is an order
+    booking reference or something else.
+
+Report only. Propose no implementation. I want to know what is possible before
+deciding whether it is worth doing.
+```
+
+---
+
+## Notes
+
+- C1 is the central question. `secondary_sku_line` already holds two eras from
+  two CRMs distinguished by a `source` column — `pscode3_xlsx` and
+  `productwise_xlsx`. If the same pattern works for order booking, this is a
+  known shape rather than a new design.
+- B3 is a design question and should be answered as one. A year with no product
+  code cannot show item lines, and pretending otherwise would be worse than
+  showing order-level rows and saying so.
+- D3 is the long shot worth taking. PSCode 3 carries an Order ID. If that is the
+  same order reference the Segment Wise files use, April to July might be
+  reconstructable at order level even without booking-specific columns.
+- Nothing here should be built off the back of the reply. The point is to size it.
+
+## What I had wrong
+
+I told you repeatedly that pre-August order booking had no usable source and
+that past years would need a million-row migration. Both overstated it. The
+parser exists, runs daily, and extracts order IDs, retailers, distributors,
+dates, states and segments. What is missing is a writer and a decision about
+presenting a period with no order status or item detail.
+
+That is a real piece of work, but a much smaller one than I described.
