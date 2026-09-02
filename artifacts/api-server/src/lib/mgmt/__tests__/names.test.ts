@@ -14,7 +14,6 @@ import {
   HEAD_ALIASES,
   dateToSerial,
   parseOrderDate,
-  parseSegmentWiseOrderDate,
   assertSegmentWiseDateSignature,
 } from "../names.js";
 
@@ -148,49 +147,44 @@ describe("Segment Wise source-specific date interpretation", () => {
   const serial = (year: number, monthIndex: number, day: number): number =>
     dateToSerial(new Date(Date.UTC(year, monthIndex, day)));
 
-  it("swaps numeric serial day/month only in the two proven-bad years", () => {
+  it("keeps numeric serial dates literal in every year", () => {
     const literalJan4 = serial(2025, 0, 4);
-    expect(parseSegmentWiseOrderDate(literalJan4, "2024-25")).toBe(
-      serial(2025, 3, 1),
-    );
-    expect(parseSegmentWiseOrderDate(literalJan4, "2025-26")).toBe(
-      serial(2025, 3, 1),
-    );
-    expect(parseSegmentWiseOrderDate(literalJan4, "2023-24")).toBe(
-      literalJan4,
-    );
-    expect(parseSegmentWiseOrderDate(literalJan4, "2026-27")).toBe(
-      literalJan4,
-    );
+    expect(parseOrderDate(literalJan4)).toBe(literalJan4);
   });
 
-  it("keeps text dates literal in every year", () => {
+  it("keeps text dates literal", () => {
     const textDate = "04-01-2025";
-    expect(parseSegmentWiseOrderDate(textDate, "2024-25")).toBe(
-      parseOrderDate(textDate),
-    );
-    expect(parseSegmentWiseOrderDate(textDate, "2025-26")).toBe(
-      parseOrderDate(textDate),
-    );
+    expect(parseOrderDate(textDate)).toBe(serial(2025, 0, 4));
   });
 
-  it("fails loudly if either affected-year signature condition changes", () => {
+  it("fails loudly if either corrected workbook regresses", () => {
+    expect(() =>
+      assertSegmentWiseDateSignature("2024-25", {
+        numericSerialRows: 1,
+        numericSerialDayAbove12: 0,
+        textDateRows: 0,
+        textDateFirstComponentAtMost12: 0,
+        literalOutsideFiscalYearRows: 0,
+      }),
+    ).toThrow(/may have been re-imported under the wrong locale/);
+    expect(() =>
+      assertSegmentWiseDateSignature("2025-26", {
+        numericSerialRows: 1,
+        numericSerialDayAbove12: 1,
+        textDateRows: 1,
+        textDateFirstComponentAtMost12: 1,
+        literalOutsideFiscalYearRows: 0,
+      }),
+    ).toThrow(/may have been re-imported under the wrong locale/);
     expect(() =>
       assertSegmentWiseDateSignature("2024-25", {
         numericSerialRows: 1,
         numericSerialDayAbove12: 1,
         textDateRows: 0,
         textDateFirstComponentAtMost12: 0,
+        literalOutsideFiscalYearRows: 1,
       }),
-    ).toThrow(/refusing the source-specific day\/month correction/);
-    expect(() =>
-      assertSegmentWiseDateSignature("2025-26", {
-        numericSerialRows: 1,
-        numericSerialDayAbove12: 0,
-        textDateRows: 1,
-        textDateFirstComponentAtMost12: 1,
-      }),
-    ).toThrow(/refusing the source-specific day\/month correction/);
+    ).toThrow(/may have been re-imported under the wrong locale/);
   });
 
   it("fails loudly if a clean year loses its day-above-12 control", () => {
@@ -200,6 +194,7 @@ describe("Segment Wise source-specific date interpretation", () => {
         numericSerialDayAbove12: 0,
         textDateRows: 0,
         textDateFirstComponentAtMost12: 0,
+        literalOutsideFiscalYearRows: 0,
       }),
     ).toThrow(/may have been re-imported under the wrong locale/);
   });
@@ -207,10 +202,11 @@ describe("Segment Wise source-specific date interpretation", () => {
   it("accepts the proven affected and clean signatures", () => {
     expect(() =>
       assertSegmentWiseDateSignature("2024-25", {
-        numericSerialRows: 76_352,
-        numericSerialDayAbove12: 0,
-        textDateRows: 258_904,
+        numericSerialRows: 335_256,
+        numericSerialDayAbove12: 258_904,
+        textDateRows: 0,
         textDateFirstComponentAtMost12: 0,
+        literalOutsideFiscalYearRows: 0,
       }),
     ).not.toThrow();
     expect(() =>
@@ -219,6 +215,7 @@ describe("Segment Wise source-specific date interpretation", () => {
         numericSerialDayAbove12: 153_057,
         textDateRows: 0,
         textDateFirstComponentAtMost12: 0,
+        literalOutsideFiscalYearRows: 0,
       }),
     ).not.toThrow();
   });

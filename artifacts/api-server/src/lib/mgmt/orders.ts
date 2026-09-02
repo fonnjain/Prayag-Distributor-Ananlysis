@@ -33,7 +33,7 @@ import {
 import {
   normName,
   normSecKey,
-  parseSegmentWiseOrderDate,
+  parseOrderDate,
   assertSegmentWiseDateSignature,
   serialToDate,
   type SegmentWiseDateSignature,
@@ -367,6 +367,7 @@ async function loadOrderFileUncached(
     numericSerialDayAbove12: 0,
     textDateRows: 0,
     textDateFirstComponentAtMost12: 0,
+    literalOutsideFiscalYearRows: 0,
   };
   // Multi-line orders can leave Date/Retailer/Order ID/Team Member blank on
   // continuation rows — forward-fill them down the block. Carried across
@@ -401,6 +402,7 @@ async function loadOrderFileUncached(
     dateSignature.numericSerialDayAbove12 = 0;
     dateSignature.textDateRows = 0;
     dateSignature.textDateFirstComponentAtMost12 = 0;
+    dateSignature.literalOutsideFiscalYearRows = 0;
     carry.date = null;
     carry.retailerId = "";
     carry.retailerName = "";
@@ -420,6 +422,19 @@ async function loadOrderFileUncached(
         }
         const rawDate = r[cols.date];
         if (!blank(rawDate)) {
+          const literalSerial = parseOrderDate(rawDate);
+          if (literalSerial != null) {
+            const literalDate = serialToDate(literalSerial);
+            const startYear = fyStartYear(fy);
+            const fiscalStart = Date.UTC(startYear, 3, 1);
+            const fiscalEndExclusive = Date.UTC(startYear + 1, 3, 1);
+            if (
+              literalDate.getTime() < fiscalStart ||
+              literalDate.getTime() >= fiscalEndExclusive
+            ) {
+              dateSignature.literalOutsideFiscalYearRows++;
+            }
+          }
           if (
             typeof rawDate === "number" &&
             Number.isFinite(rawDate) &&
@@ -463,7 +478,7 @@ async function loadOrderFileUncached(
 
         const tmRaw = carry.teamMember;
         if (tmRaw == null || tmRaw === "") continue;
-        const dateSerial = parseSegmentWiseOrderDate(carry.date, fy);
+        const dateSerial = parseOrderDate(carry.date);
         if (dateSerial == null) { dateParseFailures++; continue; }
         if (earliestDate == null || dateSerial < earliestDate) earliestDate = dateSerial;
         if (latestDate == null || dateSerial > latestDate) latestDate = dateSerial;

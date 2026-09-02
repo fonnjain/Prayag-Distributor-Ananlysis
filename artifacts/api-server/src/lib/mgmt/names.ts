@@ -129,28 +129,22 @@ export function dateToSerial(d: Date): number {
   return Math.round((d.getTime() - EXCEL_EPOCH_MS) / MS_PER_DAY);
 }
 
-// These two Segment Wise Google Sheets were imported from DD-MM-YYYY data
-// under a US-style MM/DD locale. Across all 714,695 source rows, every one of
-// the 156,255 ambiguous dates became a numeric serial with decoded day <= 12,
-// while every one of the 558,440 dates whose first component was > 12 remained
-// text. The source-specific swap below is therefore deliberate; never widen it
-// to other years, text dates, PSCode XLSX, or Product-Wise data.
-export const SEGMENT_WISE_MISPARSED_NUMERIC_DATE_FYS = new Set([
-  "2024-25",
-  "2025-26",
-]);
-
 export const SEGMENT_WISE_CLEAN_NUMERIC_DATE_FYS = new Set([
   "2021-22",
   "2022-23",
   "2023-24",
+  "2024-25",
+  "2025-26",
 ]);
+
+const SEGMENT_WISE_CORRECTED_SOURCE_FYS = new Set(["2024-25", "2025-26"]);
 
 export type SegmentWiseDateSignature = {
   numericSerialRows: number;
   numericSerialDayAbove12: number;
   textDateRows: number;
   textDateFirstComponentAtMost12: number;
+  literalOutsideFiscalYearRows: number;
 };
 
 // Order sheet dates arrive as dd-mm-yyyy OR dd-mm-yy strings, or Excel serials.
@@ -173,47 +167,24 @@ export function parseOrderDate(v: unknown): number | null {
   return dateToSerial(new Date(Date.UTC(year, month - 1, day)));
 }
 
-export function parseSegmentWiseOrderDate(
-  value: unknown,
-  fy: string,
-): number | null {
-  const serial = parseOrderDate(value);
-  if (
-    serial == null ||
-    typeof value !== "number" ||
-    !SEGMENT_WISE_MISPARSED_NUMERIC_DATE_FYS.has(fy)
-  ) {
-    return serial;
-  }
-  const literal = serialToDate(serial);
-  return dateToSerial(
-    new Date(
-      Date.UTC(
-        literal.getUTCFullYear(),
-        literal.getUTCDate() - 1,
-        literal.getUTCMonth() + 1,
-      ),
-    ),
-  );
-}
-
 export function assertSegmentWiseDateSignature(
   fy: string,
   signature: SegmentWiseDateSignature,
 ): void {
-  if (SEGMENT_WISE_MISPARSED_NUMERIC_DATE_FYS.has(fy)) {
-    if (signature.numericSerialDayAbove12 > 0) {
+  if (SEGMENT_WISE_CORRECTED_SOURCE_FYS.has(fy)) {
+    if (
+      signature.numericSerialRows === 0 ||
+      signature.numericSerialDayAbove12 === 0 ||
+      signature.textDateRows > 0 ||
+      signature.literalOutsideFiscalYearRows > 0
+    ) {
       throw new Error(
-        `Segment Wise ${fy} date signature changed: ` +
-          `${signature.numericSerialDayAbove12} numeric serial rows decode to day > 12; ` +
-          `refusing the source-specific day/month correction.`,
-      );
-    }
-    if (signature.textDateFirstComponentAtMost12 > 0) {
-      throw new Error(
-        `Segment Wise ${fy} date signature changed: ` +
-          `${signature.textDateFirstComponentAtMost12} text date rows start with a value <= 12; ` +
-          `refusing the source-specific day/month correction.`,
+        `Segment Wise ${fy} corrected-date signature changed: ` +
+          `${signature.numericSerialRows} numeric rows, ` +
+          `${signature.numericSerialDayAbove12} numeric rows with day > 12, ` +
+          `${signature.textDateRows} text dates, and ` +
+          `${signature.literalOutsideFiscalYearRows} literal dates outside the fiscal year; ` +
+          `refusing to load a source that may have been re-imported under the wrong locale.`,
       );
     }
     return;
