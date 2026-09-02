@@ -1,0 +1,175 @@
+# Prompt 49 Section B (revised) — design sign-off
+
+**Date:** 2 September 2026
+**Follows:** Section A, answered. Section C follows this.
+
+**Standing rule:** every figure states which database or source it came from.
+
+## Section A is answered — the basis is equivalent
+
+Empirical, not inferred. **378 candidate pairs** matched on retailer, product,
+quantity and discount across the 1 August changeover, and the value is identical
+either side:
+
+| Retailer | Product | Qty | Disc | July Sub Total | Aug Basic | Aug Dealer |
+|---|---|---:|---:|---:|---:|---:|
+| RET#33094 | CPS-20 | 20 | 49% | ₹14,076 | **₹14,076** | ₹16,609.68 |
+| RET#33094 | CPS-15 | 20 | 49% | ₹13,464 | **₹13,464** | ₹15,887.52 |
+| RET#10838 | 1451 | 10 | 45% | ₹3,267 | **₹3,267** | ₹3,855.06 |
+
+Plus `Basic = Dealer − GST` in August, and
+`Sub Total ≈ Order Value × (1 − discount)` across all three legacy populations —
+**nine material exceptions across 838,021 rows**.
+
+**B6 is settled. One qualified measure across all three eras.**
+
+---
+
+## Prompt 49 Section B — revised
+
+```
+Design sign-off. No code until agreed.
+
+Section A is answered: the monetary basis is equivalent across all three eras.
+B6 is closed. The measure is one figure with a visible basis note.
+
+SCOPE
+  FY2024-25 full year    Segment Wise workbook, Google Sheets
+  FY2025-26 full year    Segment Wise workbook, Google Sheets
+  FY2026-27 Apr-Jul      PSCode 3 archives, attached_assets
+  FY2026-27 1-19 Aug     Product-Wise file, attached_assets
+
+  OUT OF SCOPE: FY2021-22, FY2022-23, FY2023-24. No Order ID at source, and
+  FY2023-24's workbook covers April 2023 only.
+
+B1. ONE PARSER, TWO LEGACY INPUTS.
+
+    The v1 format is identical between PSCode 3 and Segment Wise except for where
+    the team member comes from - the filename in PSCode 3, a column in Segment
+    Wise.
+
+    NOTE, from your own Section A findings: the column label differs BETWEEN the
+    two Segment Wise years.
+
+      FY2024-25 header ends: ... Sub Total, Order Total, TEAM MEMBER
+      FY2025-26 header ends: ... Sub Total, Order Total, Team Member Name
+
+    The v1 map already lists TEAMMEMBERNAME and TEAMMEMBER as alternates, so the
+    mechanism exists. Confirm one parser can serve all three legacy inputs with a
+    team-member strategy parameter, and that both header spellings resolve.
+
+    If anything else differs between the two Segment Wise years, name it now.
+
+B2. IDENTITY. Key becomes source_era + order_id + product_code + occurrence.
+
+    There are three source formats but possibly only two CRM eras. Segment Wise
+    and PSCode 3 are the same CRM sharing one SORD counter - FY2025-26 spans
+    SORD-21452 to SORD-141726, Apr-Jul 2026 spans SORD-67382 to SORD-160183,
+    with overlapping numeric ranges and zero actual intersections.
+
+    Does the discriminator need three values or two?
+
+    Consider: treating Segment Wise and PSCode 3 as ONE legacy era would surface
+    a genuine duplicate if the same order appeared in both sources. Treating them
+    as two would hide it. The safer choice is probably one. Recommend, with
+    reasons.
+
+    The new CRM restarted at SORD-9. Collision horizon is SORD-21452, roughly
+    280 days out at 72 orders/day.
+
+B3. DATE FILTERING - THE ONE THAT COULD RUIN THE COMPARISON.
+
+    Both Segment Wise workbooks carry rows outside their own fiscal year.
+    FY2025-26 spans 4 Jan 2025 to 3 Dec 2026 - twenty-three months.
+    FY2024-25 spans 4 Jan 2024 to 3 Dec 2025.
+
+    loadOrderFile includes every dated row deliberately, because that is how it
+    reconciles to the workbook's printed total.
+
+    If the load trusts the workbook boundary rather than the row date, every
+    prior-year figure is inflated and every year-on-year number is wrong in the
+    same direction.
+
+    B3.1 How many rows and how much value in each workbook fall outside their own
+         fiscal year? Print it per workbook, split by period.
+
+    B3.2 Do the out-of-period rows overlap between workbooks? If a December 2026
+         row sits in the FY2025-26 workbook and also in a future FY2026-27 file,
+         it would load twice.
+
+    B3.3 How should the load handle them - store with a true fiscal year derived
+         from the row date, or exclude? Recommend one. Note that storing with a
+         derived FY preserves reconciliation to the workbook total while keeping
+         comparisons correct.
+
+B4. NOT NULL. order_status and cp_code are absent from both legacy formats. Make
+    them nullable. Do not fabricate - a CP code derived from a distributor name
+    misrepresents a spelling key as a company identifier, and marking legacy rows
+    APPROVED manufactures status history.
+
+B5. STATUS FILTER. Status exists from 1 August 2026 only. Legacy rows read
+    "Status unavailable" - never APPROVED, PENDING or absent. A user filtering to
+    APPROVED must not silently lose two and a half years.
+
+B6. CLOSED. One measure across all eras, with a visible basis note:
+
+      "Product-Wise uses Basic Order Value excluding GST. Legacy Segment Wise and
+       PSCode 3 use Sub Total after discount; cross-era matched lines confirm the
+       same basis."
+
+    Confirm the note appears on the page AND in the export Info sheet.
+
+B7. SOURCE ANOMALIES - PRESERVE, DO NOT REPAIR.
+
+    Your Section A found 9 legacy formula exceptions and 39 August arithmetic
+    exceptions, including SORD-405 at +Rs 63,958.80 and Prem Sanitary product
+    5375 at +Rs 19,123.60 where the Sub Total is inconsistent with its own gross
+    and discount.
+
+    Load the supplied values as they are. Do NOT recompute them from the formula.
+    A loader that silently corrects them destroys evidence of a source problem.
+
+    Where should they surface - an upload-quality report, a flag on the row, or
+    both? Recommend one.
+
+B8. PARTIAL AUGUST. FY2024-25, FY2025-26 and Apr-Jul 2026 are complete periods.
+    August is 19 days of an open month. The page must not present them as
+    equivalent.
+
+B9. VOLUME. Roughly 846,000 rows across the four sources into a table that has
+    never held one. Does that change anything about indexing, page query
+    performance, filter option loading or the export? The Retailer filter alone
+    would carry tens of thousands of options.
+
+Do not write code until these are agreed.
+```
+
+---
+
+## Notes
+
+- **B3 is the one to get right.** Both legacy workbooks span twenty-three months.
+  A load that trusts the workbook boundary inflates every prior year in the same
+  direction, and the error would look like growth. B3.2 is the subtler half — the
+  out-of-period tails may overlap each other.
+- **B2 deserves a real answer rather than a reflex.** One legacy era surfaces a
+  duplicate; two hide it. That asymmetry is the argument.
+- **B7 matters because the instinct will be to fix them.** Nine exceptions across
+  838,021 rows is an excellent source, and those nine are evidence. Recomputing
+  them from the formula would make the data look cleaner and tell you less.
+- **B9 is worth a moment.** The Retailer filter would carry tens of thousands of
+  options on a page currently serving an empty table.
+
+## What Section A established, for the record
+
+Basis equivalence is now empirical rather than inferred — 378 matched pairs
+across the changeover, identical values either side. Reconciliation quality:
+
+| Population | Rows | Within ₹1 | Exceptions |
+|---|---:|---:|---:|
+| PSCode 3 FY2026-27 | 123,326 | 123,321 | 5 |
+| Segment Wise FY2024-25 | 335,256 | 335,255 | 1 |
+| Segment Wise FY2025-26 | 379,439 | 379,436 | 3 |
+
+Nine material exceptions across 838,021 rows. The legacy sources are cleaner than
+anything else touched in this project.
