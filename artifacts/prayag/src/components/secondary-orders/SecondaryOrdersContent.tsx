@@ -84,6 +84,18 @@ export default function SecondaryOrdersContent() {
   const text = (value: string | null | undefined) => value == null || value === "" ? "—" : value;
   const number = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString("en-IN");
   const amount = (value: number | null | undefined) => value == null ? "—" : `₹${trunc2IN(value)}`;
+  const summaryAmount = (value: number | null | undefined) => {
+    if (value == null) return "—";
+    const absolute = Math.abs(value);
+    const sign = value < 0 ? "-" : "";
+    const compact = (n: number) => n.toLocaleString("en-IN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    if (absolute >= 1e7) return `${sign}₹${compact(absolute / 1e7)} Cr`;
+    if (absolute >= 1e5) return `${sign}₹${compact(absolute / 1e5)} L`;
+    return `${sign}₹${Math.round(absolute).toLocaleString("en-IN")}`;
+  };
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background">
@@ -246,31 +258,31 @@ export default function SecondaryOrdersContent() {
           {data && (
             <div className="flex-shrink-0 p-4 border-b bg-card space-y-4">
                <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{data.basis.mixedEraNote}</p>
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-                <div className="rounded-lg border bg-card p-3 shadow-sm">
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                <div className="min-w-0 rounded-lg border bg-card p-3 shadow-sm" title={`Orders: ${data.summary.orders.toLocaleString("en-IN")}`}>
                   <div className="text-xs font-medium text-muted-foreground">Orders</div>
-                  <div className="mt-1 text-xl font-bold">{data.summary.orders.toLocaleString('en-IN')}</div>
+                  <div className="mt-1 whitespace-nowrap text-xl font-bold tabular-nums">{data.summary.orders.toLocaleString("en-IN")}</div>
                 </div>
-                <div className="rounded-lg border bg-card p-3 shadow-sm">
+                <div className="min-w-0 rounded-lg border bg-card p-3 shadow-sm" title={`Lines: ${data.summary.lines.toLocaleString("en-IN")}`}>
                   <div className="text-xs font-medium text-muted-foreground">Lines</div>
-                  <div className="mt-1 text-xl font-bold">{data.summary.lines.toLocaleString('en-IN')}</div>
+                  <div className="mt-1 whitespace-nowrap text-xl font-bold tabular-nums">{data.summary.lines.toLocaleString("en-IN")}</div>
                 </div>
-                <div className="rounded-lg border bg-card p-3 shadow-sm">
+                <div className="min-w-0 rounded-lg border bg-card p-3 shadow-sm" title={`Retailers: ${data.summary.retailers.toLocaleString("en-IN")}`}>
                   <div className="text-xs font-medium text-muted-foreground">Retailers</div>
-                  <div className="mt-1 text-xl font-bold">{data.summary.retailers.toLocaleString('en-IN')}</div>
+                  <div className="mt-1 whitespace-nowrap text-xl font-bold tabular-nums">{data.summary.retailers.toLocaleString("en-IN")}</div>
                 </div>
-                <div className="rounded-lg border bg-card p-3 shadow-sm">
+                <div className="min-w-0 rounded-lg border bg-card p-3 shadow-sm" title={`Distributors: ${data.summary.distributors.toLocaleString("en-IN")}`}>
                   <div className="text-xs font-medium text-muted-foreground">Distributors (names)</div>
-                  <div className="mt-1 text-xl font-bold">{data.summary.distributors.toLocaleString('en-IN')}</div>
+                  <div className="mt-1 whitespace-nowrap text-xl font-bold tabular-nums">{data.summary.distributors.toLocaleString("en-IN")}</div>
                   <div className="mt-1 text-[10px] text-muted-foreground">{data.summary.distributorNote}</div>
                 </div>
-                <div className="rounded-lg border bg-card p-3 shadow-sm">
+                <div className="min-w-0 rounded-lg border bg-card p-3 shadow-sm" title={`Total Qty: ${data.summary.totalQty.toLocaleString("en-IN")}`}>
                   <div className="text-xs font-medium text-muted-foreground">Total Qty</div>
-                  <div className="mt-1 text-xl font-bold">{data.summary.totalQty.toLocaleString('en-IN')}</div>
+                  <div className="mt-1 whitespace-nowrap text-xl font-bold tabular-nums">{data.summary.totalQty.toLocaleString("en-IN")}</div>
                 </div>
-                <div className="rounded-lg border bg-blue-50/50 p-3 shadow-sm md:col-span-2 lg:col-span-2">
+                <div className="min-w-0 rounded-lg border bg-blue-50/50 p-3 shadow-sm md:col-span-2" title={`Basic order value: ${amount(data.summary.totalBasicValue)}`}>
                   <div className="text-xs font-medium text-blue-800">Basic order value (ex-GST)</div>
-                  <div className="mt-1 text-xl font-bold text-blue-900">₹{trunc2IN(data.summary.totalBasicValue)}</div>
+                  <div className="mt-1 whitespace-nowrap text-xl font-bold tabular-nums text-blue-900">{summaryAmount(data.summary.totalBasicValue)}</div>
                   {(data.coverage.from || data.coverage.to) && (
                     <div className="mt-1 text-[10px] text-blue-700">
                       {data.coverage.from ? formatShortDate(data.coverage.from) : "Start"} – {data.coverage.to ? formatShortDate(data.coverage.to) : "End"}
@@ -284,7 +296,10 @@ export default function SecondaryOrdersContent() {
                   {data.summary.status.map(st => (
                     <div key={st.status} className="flex-shrink-0 inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs">
                       <span className="font-semibold text-foreground">{st.status}</span>
-                      <span className="text-muted-foreground">{st.orders} orders (₹{trunc2IN(st.basicValue)})</span>
+                      <span className="text-muted-foreground">
+                        {st.orders.toLocaleString("en-IN")} orders -{" "}
+                        <span title={`Exact value: ${amount(st.basicValue)}`}>{summaryAmount(st.basicValue)}</span>
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -293,7 +308,10 @@ export default function SecondaryOrdersContent() {
               {data.quality.exactDuplicateExportRows > 0 && (
                 <p className="text-xs text-muted-foreground">
                   {data.quality.exactDuplicateExportRows} exact duplicate export rows retained
-                  {" "}({data.quality.exactDuplicateQty.toLocaleString("en-IN")} qty; ₹{trunc2IN(data.quality.exactDuplicateBasicValue)} basic value);
+                  {" "}({data.quality.exactDuplicateQty.toLocaleString("en-IN")} qty;{" "}
+                  <span title={`Exact value: ${amount(data.quality.exactDuplicateBasicValue)}`}>
+                    {summaryAmount(data.quality.exactDuplicateBasicValue)}
+                  </span>{" "}basic value);
                   totals match the source file.
                   {data.quality.exactDuplicateRateAlert && " Duplicate-row rate exceeds the 0.5% review threshold."}
                 </p>
