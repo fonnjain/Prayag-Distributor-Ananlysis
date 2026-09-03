@@ -97,6 +97,34 @@ function fmtCr(rupees: number): string {
   return `₹${Math.round(rupees).toLocaleString("en-IN")}`;
 }
 
+function fmtAlertRupee(rupees: number): string {
+  const sign = rupees < 0 ? "-" : "";
+  const absolute = Math.abs(rupees);
+  if (absolute >= 1e7) return `${sign}₹${(absolute / 1e7).toFixed(2)} Cr`;
+  if (absolute >= 1e5) return `${sign}₹${(absolute / 1e5).toFixed(2)} L`;
+  return `${sign}₹${Math.round(absolute).toLocaleString("en-IN")}`;
+}
+
+const RUPEE_NUMBER_KEYS = new Set([
+  "cumulativeOb",
+  "cumulativeTarget",
+  "orderedAmount",
+  "planAmount",
+  "currentValue",
+  "priorValue",
+  "priorPriorValue",
+]);
+
+function formatAlertNumber(key: string, value: number | string): string {
+  if (RUPEE_NUMBER_KEYS.has(key)) {
+    const numericValue = typeof value === "number" ? value : Number(value);
+    if (Number.isFinite(numericValue)) return fmtAlertRupee(numericValue);
+  }
+  return typeof value === "number"
+    ? (Number.isInteger(value) ? value.toLocaleString("en-IN") : value.toFixed(2))
+    : String(value);
+}
+
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-IN", {
     day: "numeric", month: "short", year: "numeric",
@@ -450,13 +478,16 @@ function AlertCardView({
 
         <div className="flex items-center gap-2 flex-shrink-0">
           {card.rupeesAtStake > 0 && (
-            <span className="text-sm font-semibold text-destructive">
+            <span
+              className="text-sm font-semibold text-destructive"
+              title={`Exact rupees at stake: ₹${card.rupeesAtStake.toFixed(2)}`}
+            >
               {fmtCr(card.rupeesAtStake)}
             </span>
           )}
           {isLongOpen && !isAcknowledged && (
             <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">
-              OPEN {card.periodsOpen} PERIODS
+              Seen in {card.periodsOpen} detection run{card.periodsOpen !== 1 ? "s" : ""}
             </span>
           )}
         </div>
@@ -469,9 +500,13 @@ function AlertCardView({
             .filter(([, v]) => v != null && v !== "")
             .slice(0, 4)
             .map(([k, v]) => (
-              <span key={k} className="text-xs text-muted-foreground">
+              <span
+                key={k}
+                className="text-xs text-muted-foreground"
+                title={typeof v === "number" || typeof v === "string" ? `Exact value: ${v}` : undefined}
+              >
                 <span className="font-medium capitalize">{k.replace(/([A-Z])/g, " $1").toLowerCase()}</span>:{" "}
-                {typeof v === "number" ? (Number.isInteger(v) ? v.toLocaleString("en-IN") : v.toFixed(2)) : String(v)}
+                {typeof v === "number" || typeof v === "string" ? formatAlertNumber(k, v) : String(v)}
               </span>
             ))}
         </div>

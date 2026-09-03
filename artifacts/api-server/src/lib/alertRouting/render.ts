@@ -110,7 +110,7 @@ export function renderDigestBody(
     ...(sections.stillOpen.length === 0
       ? ["  (none)"]
       : sections.stillOpen.map((a) =>
-          alertLine(a, `OPEN ${a.periodsOpen} PERIOD${a.periodsOpen !== 1 ? "S" : ""}`),
+          alertLine(a, `Seen in ${a.periodsOpen} detection run${a.periodsOpen !== 1 ? "s" : ""}`),
         )),
     "",
     `CLEARED (${sections.cleared.length}):`,

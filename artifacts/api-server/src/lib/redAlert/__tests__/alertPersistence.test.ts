@@ -1,11 +1,9 @@
 // Integration tests for the alert persistence layer.
 //
 // WHAT THESE TESTS PROTECT:
-//   periods_open counts distinct analytical windows (frozen-month periods) in
-//   which the alert has been open — not detection-run executions. Multiple
-//   6-hour runs within the same window must NOT increment periods_open. Only
-//   when the incoming period_label differs from the stored one (the analysis
-//   window has advanced because a new month froze) should periods_open grow.
+//   periods_open counts detector observations in which the alert was present.
+//   Each successful detection run that observes an existing alert increments it,
+//   including multiple 6-hour runs within the same analytical window.
 //
 //   The fingerprint is now fy|code|entityKey (months excluded), so the same
 //   alert row persists across window changes rather than clearing and re-inserting
