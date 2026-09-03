@@ -1,0 +1,46 @@
+Run #435 - seed secondary_order_line in production. It is empty there (0 rows)
+and the dev load is verified: 511,367 lines / 71,827 orders / 7.12 per order,
+tight monthly shape, five export repeats and no re-upload inflation.
+
+BEFORE THE DELETE RUNS - confirm the guard watches the right table
+#435 is delete-and-replace inside a transaction, recording protected-table
+counts before and rechecking inside, rolling back on mismatch. Print which
+tables are in that guard.
+
+It MUST include sale_line / sale_line_all and the FY2025-26 anchor count. If
+the guard only watches secondary_order_line - the table being written - it is
+guarding the wrong thing. The point is that if anything unexpected touches the
+PRIMARY register, the whole seed aborts.
+
+If the guard does not cover the primary register, add it before running.
+
+THEN RUN, scoped as designed:
+  delete only  Segment Wise / FY2025-26
+               PSCode 3 / FY2026-27
+               Product-Wise / FY2026-27
+  insert       the full 511,367-line set
+  insert       one secondary_order_upload lineage record per source
+  recheck protected counts, commit or roll back
+
+VERIFY IN PRODUCTION - produced values
+  a. secondary_order_line rows: expect 511,367.
+  b. Distinct order_id: expect 71,827.
+  c. Rows by month - confirm the shape matches the dev table, March-26 peak at
+     Rs 26.21 Cr, August partial at 8,602.
+  d. Three secondary_order_upload lineage records, one per source, named.
+  e. FY2025-26 PRIMARY anchor UNCHANGED: 145,613 rows,
+     Rs 3,609,953,808.51. This is the stop condition - if it moved, the seed
+     touched something it must not, and it should have rolled back.
+  f. secondary_sku_line, secondary_register_line and sale_line row counts
+     unchanged - print before and after.
+  g. Production HEAD equals origin/main after: 6a4e12a.
+  h. The Momentum pipeline card still renders - it reads booking from this
+     table, so confirm it shows a value rather than an error now that
+     production has data.
+
+LOW PRIORITY, same task if convenient:
+  Populate is_exact_duplicate_export on the five retained August repeats so the
+  marker is truthful. One line, no rush - do not let it hold up the seed.
+
+Report all of a to h. If the anchor in (e) moved by a single rupee, stop and
+report rather than explaining it afterwards.
