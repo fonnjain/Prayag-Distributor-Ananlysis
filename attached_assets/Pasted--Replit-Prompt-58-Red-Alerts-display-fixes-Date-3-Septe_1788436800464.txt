@@ -1,0 +1,133 @@
+# Replit Prompt 58 — Red Alerts display fixes
+
+**Date:** 3 September 2026
+**Follows:** Prompt 57, which verified the figures are correct.
+**Scope:** Display only. No query, calculation, threshold, severity, routing,
+alert state or export changes.
+
+**Standing rule:** every figure states which database or source it came from.
+
+## Verification cleared both concerns
+
+**The targets are right.** Surojit's ₹1,05,66,676 is April ₹52,83,338 plus May
+₹52,83,338 — a genuine two-month target for a two-month window. Achievement
+reconciles to six decimals, and the top-right rupee figure is the exact shortfall.
+
+**`periods_open` is a wording problem, not a logic one.** It counts **detector
+observations**, not periods — detection runs ten minutes after startup and every
+six hours, plus manual runs and restarts. No threshold at 99. It affects only the
+label, a "long open" treatment from 3 upward, and notification wording.
+
+Both fixes below are therefore safe.
+
+---
+
+## Prompt 58
+
+```
+Display only. Do not change any query, calculation, threshold, severity,
+routing, alert state, or export value.
+
+1. NUMBER FORMATTING - same rule already applied to Secondary Orders
+
+     >= 1,00,00,000   Rs 2.72 Cr     two decimals
+     >= 1,00,000      Rs 27.24 L     two decimals
+     >= 1,000         Rs 27,244      grouped, no decimals
+     < 1,000          Rs 244
+
+   APPLY TO
+     Cumulative Ob        2724395.78    -> Rs 27.24 L
+     Cumulative Target    1,05,66,676   -> Rs 1.06 Cr
+     Rupees at stake      already correct at Rs 78.4 L - leave it
+     Any other rupee figure on an alert card
+
+   Cumulative Ob currently renders unformatted with paise. Nobody needs
+   "2724395.78" on an alert card.
+
+   DO NOT CHANGE
+     Achievement Pct and Prior Achievement Pct - 25.78 and 11.89 are right.
+     Keep two decimals.
+     Dates, member names, guard and notification links, window labels.
+
+2. THE PERIOD LABEL - it currently says something false
+
+   "OPEN 99 PERIODS" reads as ninety-nine business periods. The alert covers
+   Apr-26..May-26 - two months. A state head reading that badge concludes
+   something has been failing for eight years.
+
+   periods_open counts DETECTOR OBSERVATIONS. Change the wording to say so:
+
+     "Seen in 99 detection runs"
+
+   or drop the count from the badge entirely and keep it in the hover title.
+   Either is acceptable; the current wording is not.
+
+   Apply the same correction to the notification content wording, which uses
+   the same field.
+
+   Do NOT change how periods_open is computed, its "long open" treatment from
+   3 upward, or anything that reads it in logic.
+
+3. STALE COMMENT
+
+   The top-of-file comment in the persistence test still claims periods_open
+   counts distinct analytical windows. The implementation and the assertions
+   below it enforce per-detection-run counting. Correct the comment to match
+   the behaviour - it is what led to the misreading in the first place.
+
+APPLY EVERYWHERE
+  All alert categories - A1, A2, A3, B3, S1 - not just A1. And the Warning
+  System page if it renders the same fields.
+
+EXACT VALUES REACHABLE
+  Tooltip on hover with the full figure. Exports keep full unrounded values.
+
+AFTER APPLYING, print:
+  - a rendered A1 card, an A2 card and a B3 card as they now display
+  - the period badge wording on an alert showing 84, one showing 99 and one
+    showing 126
+  - confirmation that no alert state, threshold or notification recipient
+    changed
+  - confirmation the export still carries full unrounded values
+
+Show the diff before applying, then publish and push. Print the deployed
+commit and confirm it matches origin/main.
+```
+
+---
+
+## Notes
+
+- Item 2 is the more important of the two. Bad formatting is hard to read; a
+  badge saying "99 PERIODS" on a two-month alert is **wrong**, and it is the kind
+  of wrong that reaches a state head as a judgement about their performance.
+- Item 3 is small and worth doing. That stale comment is what led both of us to
+  read the field as analytical windows.
+
+## The bigger finding from Prompt 57, not part of this change
+
+**Three real weekly digests ran — 17, 24 and 31 August. 110 email attempts, all
+failed. 110 WhatsApp attempts, all pending. Zero messages delivered.**
+
+The scheduler works. Recipients are configured — 13 WhatsApp routes, an all-India
+email route, four on-raise routes. The providers are not: `RESEND_API_KEY` and
+`SMTP_HOST` are both unset.
+
+So ten A1 alerts covering **₹3.44 crore of shortfall** are open, unacknowledged,
+and have never reached a person.
+
+**And the sequencing was fortunate.** Had delivery been configured before
+yesterday, those three digests would have carried the 114 false August A2 alerts
+to the CEO. The gap that looks like a failure prevented a worse one. Now that the
+arrears fix is live and the false alerts are cleared, connecting delivery is safe
+— and overdue.
+
+## Two smaller items for later
+
+**Nasir Hussain Khan carries 3 alerts against 4 active team members — 75%.**
+Sandeep has 9 against 70, or 12.9%. Either Nasir's team is genuinely in trouble or
+the thresholds do not behave sensibly on a team that small.
+
+**`tankesworbarman` and `vishantbandhral`** do not resolve to a People record by
+name match. Not evidence they have left — they need alias resolution, the same
+identity gap that keeps surfacing.
