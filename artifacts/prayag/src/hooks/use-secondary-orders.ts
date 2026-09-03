@@ -37,6 +37,7 @@ export interface SecondaryOrdersResponse {
     lines: number;
     retailers: number;
     distributors: number;
+    distributorNote: string;
     totalQty: number;
     totalBasicValue: number;
     status: {

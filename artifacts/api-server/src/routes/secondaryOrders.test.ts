@@ -154,9 +154,15 @@ function buildWhereClause(f: FilterParams): { where: string; params: unknown[] }
     params.push(f.retailer);
   }
   if (f.status) {
-    if (f.status !== "APPROVED" && f.status !== "PENDING") throw new Error("status must be APPROVED or PENDING");
-    conditions.push(`sol.order_status = $${params.length + 1}`);
-    params.push(f.status);
+    if (f.status !== "APPROVED" && f.status !== "PENDING" && f.status !== "UNAVAILABLE") {
+      throw new Error("status must be APPROVED, PENDING, or UNAVAILABLE");
+    }
+    if (f.status === "UNAVAILABLE") {
+      conditions.push("sol.order_status IS NULL");
+    } else {
+      conditions.push(`sol.order_status = $${params.length + 1}`);
+      params.push(f.status);
+    }
   }
   if (f.dateFrom) {
     conditions.push(`sol.order_datetime >= $${params.length + 1}::date`);
@@ -202,8 +208,14 @@ describe("buildWhereClause", () => {
     expect(params).toEqual(["APPROVED"]);
   });
 
+  it("filters by status unavailable", () => {
+    const { where, params } = buildWhereClause({ status: "UNAVAILABLE" });
+    expect(where).toContain("sol.order_status IS NULL");
+    expect(params).toEqual([]);
+  });
+
   it("rejects invalid status", () => {
-    expect(() => buildWhereClause({ status: "DELIVERED" })).toThrow(/APPROVED or PENDING/);
+    expect(() => buildWhereClause({ status: "DELIVERED" })).toThrow(/APPROVED, PENDING, or UNAVAILABLE/);
   });
 
   it("filters by date range", () => {

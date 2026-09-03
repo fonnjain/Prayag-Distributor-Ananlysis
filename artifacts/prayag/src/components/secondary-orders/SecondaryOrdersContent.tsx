@@ -158,12 +158,16 @@ export default function SecondaryOrdersContent() {
                 <option value="">All Statuses</option>
                 {data?.filters.statuses.map((s) => (
                   <option key={s} value={s}>
-                    {s}
+                    {s === "UNAVAILABLE" ? "Status unavailable" : s}
                   </option>
                 ))}
               </select>
               {filters.status && (
-                <p className="text-xs text-amber-700">APPROVED/PENDING applies only to Product-Wise rows. Legacy periods are excluded because their status is unavailable.</p>
+                <p className="text-xs text-amber-700">
+                  {filters.status === "UNAVAILABLE"
+                    ? "Shows legacy rows whose source status is unavailable."
+                    : "APPROVED/PENDING applies only to rows with that recorded status; legacy rows remain Status unavailable."}
+                </p>
               )}
             </div>
 
@@ -256,8 +260,9 @@ export default function SecondaryOrdersContent() {
                   <div className="mt-1 text-xl font-bold">{data.summary.retailers.toLocaleString('en-IN')}</div>
                 </div>
                 <div className="rounded-lg border bg-card p-3 shadow-sm">
-                  <div className="text-xs font-medium text-muted-foreground">Distributors</div>
+                  <div className="text-xs font-medium text-muted-foreground">Distributors (names)</div>
                   <div className="mt-1 text-xl font-bold">{data.summary.distributors.toLocaleString('en-IN')}</div>
+                  <div className="mt-1 text-[10px] text-muted-foreground">{data.summary.distributorNote}</div>
                 </div>
                 <div className="rounded-lg border bg-card p-3 shadow-sm">
                   <div className="text-xs font-medium text-muted-foreground">Total Qty</div>

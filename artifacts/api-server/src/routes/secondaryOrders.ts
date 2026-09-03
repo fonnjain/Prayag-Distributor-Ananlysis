@@ -32,7 +32,7 @@
  *
  * Shared filter params (all GET routes):
  *   stateHead, state, cpCode/distributor, dealerId/retailer,
- *   status (APPROVED|PENDING), from/dateFrom (YYYY-MM-DD), to/dateTo (YYYY-MM-DD)
+ *   status (APPROVED|PENDING|UNAVAILABLE), from/dateFrom (YYYY-MM-DD), to/dateTo (YYYY-MM-DD)
  *   page, pageSize (or legacy limit, offset)
  */
 
@@ -107,6 +107,7 @@ type FilterParams = {
 
 const STATUS_UNAVAILABLE = "Status unavailable";
 const MIXED_ERA_NOTE = "Mixed-era order-booking history: legacy rows may not contain Product-Wise status or distributor fields; August 2026 is partial through 19 Aug 2026.";
+const DISTRIBUTOR_NOTE = "Distinct distributor names; legacy rows have no CP codes.";
 
 function buildWhereClause(f: FilterParams): { where: string; params: unknown[] } {
   const conditions: string[] = [];
@@ -142,11 +143,15 @@ function buildWhereClause(f: FilterParams): { where: string; params: unknown[] }
   }
 
   if (f.status) {
-    if (f.status !== "APPROVED" && f.status !== "PENDING") {
-      throw new Error("status must be APPROVED or PENDING");
+    if (f.status !== "APPROVED" && f.status !== "PENDING" && f.status !== "UNAVAILABLE") {
+      throw new Error("status must be APPROVED, PENDING, or UNAVAILABLE");
     }
-    conditions.push(`sol.order_status = $${params.length + 1}`);
-    params.push(f.status);
+    if (f.status === "UNAVAILABLE") {
+      conditions.push("sol.order_status IS NULL");
+    } else {
+      conditions.push(`sol.order_status = $${params.length + 1}`);
+      params.push(f.status);
+    }
   }
 
   if (f.dateFrom) {
@@ -402,7 +407,7 @@ router.get("/secondary-orders/summary", async (req: Request, res: Response) => {
         COUNT(*)                                           AS rows,
         COUNT(DISTINCT sol.order_id)                      AS orders,
         COUNT(DISTINCT sol.dealer_id)                     AS retailers,
-        COUNT(DISTINCT sol.cp_code)                       AS distributors,
+        COUNT(DISTINCT NULLIF(BTRIM(sol.cp_name), ''))     AS distributors,
         COALESCE(SUM(sol.qty::numeric), 0)                AS total_qty,
         COALESCE(SUM(sol.basic_order_value::numeric), 0)  AS total_basic,
         COALESCE(SUM(sol.dealer_order_value::numeric), 0) AS total_dealer,
@@ -423,6 +428,7 @@ router.get("/secondary-orders/summary", async (req: Request, res: Response) => {
       orders: Number(r.orders),
       retailers: Number(r.retailers),
       distributors: Number(r.distributors),
+      distributorNote: DISTRIBUTOR_NOTE,
       totalQty: Number(r.total_qty),
       totalBasic: Number(r.total_basic),
       totalDealer: Number(r.total_dealer),
@@ -545,7 +551,7 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
            COUNT(*) AS lines,
            COUNT(DISTINCT sol.order_id) AS orders,
            COUNT(DISTINCT sol.dealer_id) AS retailers,
-           COUNT(DISTINCT sol.cp_code) AS distributors,
+           COUNT(DISTINCT NULLIF(BTRIM(sol.cp_name), '')) AS distributors,
            COALESCE(SUM(sol.qty::numeric), 0) AS total_qty,
            COALESCE(SUM(sol.basic_order_value::numeric), 0) AS total_basic,
            MIN((sol.order_datetime AT TIME ZONE 'Asia/Kolkata')::date)::text AS date_min,
@@ -555,7 +561,10 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
            COALESCE(SUM(sol.basic_order_value::numeric) FILTER (WHERE sol.order_status = 'APPROVED'), 0) AS approved_basic,
            COUNT(*) FILTER (WHERE sol.order_status = 'PENDING') AS pending_lines,
            COUNT(DISTINCT sol.order_id) FILTER (WHERE sol.order_status = 'PENDING') AS pending_orders,
-           COALESCE(SUM(sol.basic_order_value::numeric) FILTER (WHERE sol.order_status = 'PENDING'), 0) AS pending_basic
+           COALESCE(SUM(sol.basic_order_value::numeric) FILTER (WHERE sol.order_status = 'PENDING'), 0) AS pending_basic,
+           COUNT(*) FILTER (WHERE sol.order_status IS NULL) AS unavailable_lines,
+           COUNT(DISTINCT sol.order_id) FILTER (WHERE sol.order_status IS NULL) AS unavailable_orders,
+           COALESCE(SUM(sol.basic_order_value::numeric) FILTER (WHERE sol.order_status IS NULL), 0) AS unavailable_basic
          FROM secondary_order_line sol ${where}`,
         params,
       ),
@@ -602,9 +611,11 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
         lines: totalRows,
         retailers: Number(s?.retailers ?? 0),
         distributors: Number(s?.distributors ?? 0),
+        distributorNote: DISTRIBUTOR_NOTE,
         totalQty: Number(s?.total_qty ?? 0),
         totalBasicValue: Number(s?.total_basic ?? 0),
         status: [
+          { status: STATUS_UNAVAILABLE, lines: Number(s?.unavailable_lines ?? 0), orders: Number(s?.unavailable_orders ?? 0), basicValue: Number(s?.unavailable_basic ?? 0) },
           { status: "APPROVED", lines: Number(s?.approved_lines ?? 0), orders: Number(s?.approved_orders ?? 0), basicValue: Number(s?.approved_basic ?? 0) },
           { status: "PENDING", lines: Number(s?.pending_lines ?? 0), orders: Number(s?.pending_orders ?? 0), basicValue: Number(s?.pending_basic ?? 0) },
         ].filter((item) => item.lines > 0),
@@ -624,7 +635,7 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
           name: r.cp_name ? `${r.cp_name} (${r.cp_code})` : r.cp_code,
         })),
          retailers: [],
-        statuses: ["APPROVED", "PENDING"],
+        statuses: ["APPROVED", "PENDING", "UNAVAILABLE"],
       },
       quality: (() => {
         const q = quality.rows[0];
