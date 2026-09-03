@@ -156,10 +156,17 @@ async function write(lines: P56Line[]) {
 }
 export async function runPrompt56Orders(writeMode = false) {
   if (writeMode) await runMigrations();
-  const root = resolve(process.cwd(), "../../attached_assets");
-  const aprZip = process.env.PROMPT56_APR_JUN_ZIP ?? resolve(root, "PSCODE_3_NEW_REPORT_1785584202460.zip");
-  const julZip = process.env.PROMPT56_JUL_ZIP ?? resolve(root, "PSCode_3_NEW_REPORTS_JULY2026-20260805T074609Z-1-001_1785917168364.zip");
-  const product = process.env.SOL_XLSX ?? resolve(root, "Product-Wise-Secondary-Order-Report_29_6569_19-Aug-2026_1787135138176.xlsx");
+  const roots = [
+    resolve(process.cwd(), "attached_assets"),
+    resolve(process.cwd(), "../../attached_assets"),
+  ];
+  const sourcePath = (envName: string, fileName: string) =>
+    process.env[envName] ??
+    roots.map((root) => resolve(root, fileName)).find((candidate) => existsSync(candidate)) ??
+    resolve(roots[0], fileName);
+  const aprZip = sourcePath("PROMPT56_APR_JUN_ZIP", "PSCODE_3_NEW_REPORT_1785584202460.zip");
+  const julZip = sourcePath("PROMPT56_JUL_ZIP", "PSCode_3_NEW_REPORTS_JULY2026-20260805T074609Z-1-001_1785917168364.zip");
+  const product = sourcePath("SOL_XLSX", "Product-Wise-Secondary-Order-Report_29_6569_19-Aug-2026_1787135138176.xlsx");
   const before = await protectedCounts(); const segment = await sheetLines(); const aprJun = await archiveLines(aprZip, APR_JUN_DROP); const jul = await archiveLines(julZip, JUL_DROP); const aug = await productLines(product);
   const months = Object.fromEntries(["Apr","May","Jun","Jul"].map(m => [m, control(m, summary([...aprJun, ...jul].filter(x => x.orderDatetime.getUTCMonth() === ["Apr","May","Jun","Jul"].indexOf(m) + 3)), EXPECTED[m as "Apr"])]));
   const b3 = intersections(segment.lines, [...aprJun, ...jul]); const reconciliation = await skuReconcile([...aprJun, ...jul]);
