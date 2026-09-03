@@ -1,0 +1,144 @@
+# Replit Prompt 57 — Red Alerts page verification
+
+**Date:** 3 September 2026
+**Scope:** Read-only throughout. Change nothing, acknowledge nothing, clear
+nothing, reformat nothing.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**Why verify before changing:** the page shows 30 open alerts, 19 of them
+salespeople. Two things on it look wrong on sight — unformatted rupee values, and
+a badge reading "OPEN 99 PERIODS" on alerts covering a two-month window. Before
+touching the display, establish what the numbers actually are.
+
+---
+
+## Prompt 57
+
+```
+Read-only. Change nothing, acknowledge nothing, clear nothing, reformat
+nothing. State which database each figure comes from.
+
+SECTION A - WHAT IS CURRENTLY OPEN
+
+A1. Print all 30 open alerts. For each: id, category, member, state head,
+    period label, first-seen, last-seen, the rupee value shown, achievement
+    percent, prior achievement percent, and acknowledgement state.
+
+A2. Break them down by category and by state head. Which heads carry most, and
+    is that proportional to their team size?
+
+A3. How many were open before yesterday's arrears fix cleared 114 A2 alerts,
+    and how many have appeared since? The A1 count went from 3 to 10 when the
+    false A2s cleared - are those seven still open and unacknowledged?
+
+A4. Has any of the 30 been acknowledged, escalated, or included in a digest?
+    Print any delivery attempts. SMTP and WhatsApp were unconfigured as of
+    yesterday - confirm whether that is still the case.
+
+SECTION B - "OPEN 99 PERIODS"
+
+Both visible cards show a badge reading "OPEN 99 PERIODS". Those alerts cover
+Apr-26..May-26, first seen 16 Aug 2026, last seen 3 Sept 2026. That is two
+periods, not ninety-nine.
+
+B1. What does the period count measure? Print the field and the code that
+    computes it.
+
+B2. Where does 99 come from - a real count, a cap, a sentinel, an overflow, or
+    a default? Show the value as stored, not as rendered.
+
+B3. What does it read for all 30 open alerts? If they all say 99, it is not a
+    count.
+
+B4. Is 99 used anywhere in logic - escalation, severity, suppression, digest
+    priority - or only in display? If a threshold compares against it, a
+    sentinel value could be triggering behaviour.
+
+B5. First seen 16 August, last seen 3 September. What does "last seen" mean -
+    the alert re-fired that day, or the detector last ran? If the detector runs
+    every six hours, every open alert would show today's date.
+
+SECTION C - ARE THE FIGURES RIGHT?
+
+Before reformatting anything, confirm the values themselves.
+
+C1. surojitmondal: cumulative OB 2,724,395.78, target 1,05,66,676,
+    achievement 25.78%, prior 11.89%.
+
+    Verify: 2724395.78 / 10566676 = 25.78%. Confirm the arithmetic holds and
+    say which source each side comes from.
+
+C2. What period does "Cumulative Target" cover? The label says Apr-26..May-26
+    but Rs 1.06 crore over two months against a member booking Rs 27 lakh
+    suggests a longer window or a full-year target.
+
+    If the target is annual and the booking is two months, the achievement
+    percentage is not meaningful and the alert is firing on a mismatch.
+
+C3. The Rs 78.4 L shown top-right - what is it? Shortfall, target remaining,
+    or something else? It is the largest number on the card and it is unlabelled.
+
+C4. Do these alerts use the corrected date figures? Yesterday's transpose
+    removal changed FY2024-25 and FY2025-26 monthly figures. If an alert
+    compares against a prior-year month, which version does it read?
+
+SECTION D - IS THE ALERT ITSELF SOUND?
+
+D1. Prior achievement 11.89% rising to 25.78% is an improvement, not a decline.
+    Both members shown are improving. Does A1 fire on absolute level, on
+    direction, or both?
+
+    An alert that fires on a member who has more than doubled their achievement
+    may be correct by its threshold and still wrong to escalate.
+
+D2. Rs 1.06 crore of target with Rs 27 lakh booked - is the target realistic?
+    52 of 189 members have no target at all, and a wrong target produces a
+    permanent alert.
+
+D3. Are any of the 30 for members marked LEFT? Two surfaces disagreed on isLeft
+    yesterday. An alert against a departed member is noise.
+
+Report only. Do not change any formatting, threshold, or alert state.
+```
+
+---
+
+## Notes
+
+- **Section B first when it comes back.** A badge reading "OPEN 99 PERIODS"
+  against a two-month window is either wrong or means something entirely
+  different from what it says. Reformatting the page around it would make a
+  possible defect look intentional.
+- **C2 is the one that could invalidate the alerts.** If Cumulative Target is a
+  full-year figure and Cumulative OB is two months, then every achievement
+  percentage on this page is comparing a partial numerator against a whole
+  denominator — and 25.78% would be arithmetically correct and completely
+  misleading.
+- **D1 is worth thinking about rather than dismissing.** Both visible members have
+  roughly doubled their prior achievement. An alert firing on someone improving
+  fast may be technically right and practically wrong, and that is a threshold
+  question rather than a bug.
+- The formatting change is straightforward and can follow immediately. It is
+  worth doing second so it does not lock in the appearance of something that
+  turns out to be broken.
+
+## The formatting change, ready to send after
+
+```
+Display only. Same rule already applied to Secondary Orders.
+
+  >= 1,00,00,000   Rs 2.72 Cr    two decimals
+  >= 1,00,000      Rs 27.24 L    two decimals
+  >= 1,000         Rs 27,244     grouped, no decimals
+  < 1,000          Rs 244
+
+  Cumulative Ob      2724395.78   -> Rs 27.24 L
+  Cumulative Target  1,05,66,676  -> Rs 1.06 Cr
+
+Do not change Achievement Pct or Prior Achievement Pct - two decimals is
+right. Do not change the Rs 78.4 L figure, already correct.
+
+Apply to every alert category and to the Warning System page if it renders
+the same fields. Tooltips keep the full value; exports unchanged.
+```
