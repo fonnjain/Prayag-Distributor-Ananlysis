@@ -145,6 +145,21 @@ function achievement(num: number | null | undefined, den: number | null): number
   return num / den;
 }
 
+// Sum the fiscal-month slice used by the current-year report. Prior-period
+// comparisons must use the same selected range rather than the aggregate's
+// all-year amount.
+export function sumFiscalMonthAmount(
+  monthAmount: number[],
+  monthFrom: number,
+  monthTo: number,
+): number {
+  let total = 0;
+  for (let i = monthFrom - 1; i <= monthTo - 1; i++) {
+    total += monthAmount[i] ?? 0;
+  }
+  return total;
+}
+
 // Sorted-token key for fuzzy name matching across name-order variations.
 // "Raj Kumar" and "Kumar Raj" both produce "kumarraj" (tokens sorted, then joined).
 // This resolves first-name/last-name swap differences between the xlsx and roster.
@@ -463,7 +478,13 @@ export async function assembleRows(
           filters.monthTo,
         )
       : null,
-    priorAmount: prior ? (prior.perTm.get(m.normKey)?.amount ?? 0) : null,
+    priorAmount: prior
+      ? sumFiscalMonthAmount(
+          prior.perTm.get(m.normKey)?.monthAmount ?? [],
+          filters.monthFrom,
+          filters.monthTo,
+        )
+      : null,
     priorSaleAmount: prior
       ? (prior.perTm.get(m.normKey)?.saleAmount ?? 0)
       : null,
@@ -515,7 +536,13 @@ export async function assembleRows(
           filters.monthFrom,
           filters.monthTo,
         ),
-        priorAmount: prior ? (prior.perTm.get(key)?.amount ?? 0) : null,
+        priorAmount: prior
+          ? sumFiscalMonthAmount(
+              prior.perTm.get(key)?.monthAmount ?? [],
+              filters.monthFrom,
+              filters.monthTo,
+            )
+          : null,
         priorSaleAmount: prior ? (prior.perTm.get(key)?.saleAmount ?? 0) : null,
         oldNew: "Old",
         target: targetRow ?? null,
