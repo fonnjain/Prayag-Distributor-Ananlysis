@@ -519,7 +519,7 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
     const rowParams = [...params];
     const cursorWhere = keysetClause(cursor, rowParams, Boolean(where));
 
-    const [rows, summary, filterRows, quality] = await Promise.all([
+    const [rows, summary, fiscalSummary, filterRows, quality] = await Promise.all([
       pool.query(
         `SELECT
            sol.id AS "id", sol.source_era AS "sourceEra", sol.source_kind AS "sourceKind",
@@ -566,6 +566,38 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
            COUNT(DISTINCT sol.order_id) FILTER (WHERE sol.order_status IS NULL) AS unavailable_orders,
            COALESCE(SUM(sol.basic_order_value::numeric) FILTER (WHERE sol.order_status IS NULL), 0) AS unavailable_basic
          FROM secondary_order_line sol ${where}`,
+        params,
+      ),
+      pool.query<{
+        fiscal_year: string | null;
+        lines: string; orders: string; retailers: string; distributors: string;
+        total_qty: string; total_basic: string; date_min: string | null; date_max: string | null;
+        approved_lines: string; approved_orders: string; approved_basic: string;
+        pending_lines: string; pending_orders: string; pending_basic: string;
+        unavailable_lines: string; unavailable_orders: string; unavailable_basic: string;
+      }>(
+        `SELECT
+           sol.fiscal_year,
+           COUNT(*) AS lines,
+           COUNT(DISTINCT sol.order_id) AS orders,
+           COUNT(DISTINCT sol.dealer_id) AS retailers,
+           COUNT(DISTINCT NULLIF(BTRIM(sol.cp_name), '')) AS distributors,
+           COALESCE(SUM(sol.qty::numeric), 0) AS total_qty,
+           COALESCE(SUM(sol.basic_order_value::numeric), 0) AS total_basic,
+           MIN((sol.order_datetime AT TIME ZONE 'Asia/Kolkata')::date)::text AS date_min,
+           MAX((sol.order_datetime AT TIME ZONE 'Asia/Kolkata')::date)::text AS date_max,
+           COUNT(*) FILTER (WHERE sol.order_status = 'APPROVED') AS approved_lines,
+           COUNT(DISTINCT sol.order_id) FILTER (WHERE sol.order_status = 'APPROVED') AS approved_orders,
+           COALESCE(SUM(sol.basic_order_value::numeric) FILTER (WHERE sol.order_status = 'APPROVED'), 0) AS approved_basic,
+           COUNT(*) FILTER (WHERE sol.order_status = 'PENDING') AS pending_lines,
+           COUNT(DISTINCT sol.order_id) FILTER (WHERE sol.order_status = 'PENDING') AS pending_orders,
+           COALESCE(SUM(sol.basic_order_value::numeric) FILTER (WHERE sol.order_status = 'PENDING'), 0) AS pending_basic,
+           COUNT(*) FILTER (WHERE sol.order_status IS NULL) AS unavailable_lines,
+           COUNT(DISTINCT sol.order_id) FILTER (WHERE sol.order_status IS NULL) AS unavailable_orders,
+           COALESCE(SUM(sol.basic_order_value::numeric) FILTER (WHERE sol.order_status IS NULL), 0) AS unavailable_basic
+         FROM secondary_order_line sol ${where}
+         GROUP BY sol.fiscal_year
+         ORDER BY sol.fiscal_year NULLS LAST`,
         params,
       ),
       Promise.all([
@@ -620,6 +652,22 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
           { status: "PENDING", lines: Number(s?.pending_lines ?? 0), orders: Number(s?.pending_orders ?? 0), basicValue: Number(s?.pending_basic ?? 0) },
         ].filter((item) => item.lines > 0),
       },
+      fiscalYearSummaries: fiscalSummary.rows.map((fy) => ({
+        fiscalYear: fy.fiscal_year ?? "Unlabelled",
+        coverage: { from: fy.date_min ?? null, to: fy.date_max ?? null },
+        orders: Number(fy.orders ?? 0),
+        lines: Number(fy.lines ?? 0),
+        retailers: Number(fy.retailers ?? 0),
+        distributors: Number(fy.distributors ?? 0),
+        distributorNote: DISTRIBUTOR_NOTE,
+        totalQty: Number(fy.total_qty ?? 0),
+        totalBasicValue: Number(fy.total_basic ?? 0),
+        status: [
+          { status: STATUS_UNAVAILABLE, lines: Number(fy.unavailable_lines ?? 0), orders: Number(fy.unavailable_orders ?? 0), basicValue: Number(fy.unavailable_basic ?? 0) },
+          { status: "APPROVED", lines: Number(fy.approved_lines ?? 0), orders: Number(fy.approved_orders ?? 0), basicValue: Number(fy.approved_basic ?? 0) },
+          { status: "PENDING", lines: Number(fy.pending_lines ?? 0), orders: Number(fy.pending_orders ?? 0), basicValue: Number(fy.pending_basic ?? 0) },
+        ].filter((item) => item.lines > 0),
+      })),
        rows: pageRows,
       pagination: {
         pageSize,

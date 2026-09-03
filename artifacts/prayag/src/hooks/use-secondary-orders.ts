@@ -47,6 +47,23 @@ export interface SecondaryOrdersResponse {
       basicValue: number;
     }[];
   };
+  fiscalYearSummaries: {
+    fiscalYear: string;
+    coverage: { from: string | null; to: string | null };
+    orders: number;
+    lines: number;
+    retailers: number;
+    distributors: number;
+    distributorNote: string;
+    totalQty: number;
+    totalBasicValue: number;
+    status: {
+      status: string;
+      lines: number;
+      orders: number;
+      basicValue: number;
+    }[];
+  }[];
   rows: SecondaryOrderRow[];
   pagination: {
     pageSize: number;

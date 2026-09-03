@@ -96,6 +96,64 @@ export default function SecondaryOrdersContent() {
     if (absolute >= 1e5) return `${sign}₹${compact(absolute / 1e5)} L`;
     return `${sign}₹${Math.round(absolute).toLocaleString("en-IN")}`;
   };
+  const fiscalYearLabel = (fiscalYear: string) =>
+    fiscalYear === "2025-26"
+      ? "FY 2025–26"
+      : fiscalYear === "2026-27"
+        ? "FY 2026–27 (to date)"
+        : fiscalYear;
+
+  const renderFiscalYearSummary = (fy: NonNullable<typeof data>["fiscalYearSummaries"][number]) => (
+    <section key={fy.fiscalYear} className="rounded-lg border bg-muted/10 p-3 space-y-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold text-foreground">{fiscalYearLabel(fy.fiscalYear)}</h2>
+        <span className="text-xs text-muted-foreground">
+          {fy.coverage.from ? formatShortDate(fy.coverage.from) : "Start"} –{" "}
+          {fy.coverage.to ? formatShortDate(fy.coverage.to) : "To date"}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-6">
+        <div className="min-w-0 rounded-lg border bg-card p-3 shadow-sm" title={`Orders: ${fy.orders.toLocaleString("en-IN")}`}>
+          <div className="text-xs font-medium text-muted-foreground">Orders</div>
+          <div className="mt-1 whitespace-nowrap text-xl font-bold tabular-nums">{fy.orders.toLocaleString("en-IN")}</div>
+        </div>
+        <div className="min-w-0 rounded-lg border bg-card p-3 shadow-sm" title={`Lines: ${fy.lines.toLocaleString("en-IN")}`}>
+          <div className="text-xs font-medium text-muted-foreground">Lines</div>
+          <div className="mt-1 whitespace-nowrap text-xl font-bold tabular-nums">{fy.lines.toLocaleString("en-IN")}</div>
+        </div>
+        <div className="min-w-0 rounded-lg border bg-card p-3 shadow-sm" title={`Retailers: ${fy.retailers.toLocaleString("en-IN")}`}>
+          <div className="text-xs font-medium text-muted-foreground">Retailers</div>
+          <div className="mt-1 whitespace-nowrap text-xl font-bold tabular-nums">{fy.retailers.toLocaleString("en-IN")}</div>
+        </div>
+        <div className="min-w-0 rounded-lg border bg-card p-3 shadow-sm" title={`Distributors: ${fy.distributors.toLocaleString("en-IN")}`}>
+          <div className="text-xs font-medium text-muted-foreground">Distributors (names)</div>
+          <div className="mt-1 whitespace-nowrap text-xl font-bold tabular-nums">{fy.distributors.toLocaleString("en-IN")}</div>
+          <div className="mt-1 text-[10px] text-muted-foreground">{fy.distributorNote}</div>
+        </div>
+        <div className="min-w-0 rounded-lg border bg-card p-3 shadow-sm" title={`Total Qty: ${fy.totalQty.toLocaleString("en-IN")}`}>
+          <div className="text-xs font-medium text-muted-foreground">Total Qty</div>
+          <div className="mt-1 whitespace-nowrap text-xl font-bold tabular-nums">{fy.totalQty.toLocaleString("en-IN")}</div>
+        </div>
+        <div className="min-w-0 rounded-lg border bg-blue-50/50 p-3 shadow-sm" title={`Basic order value: ${amount(fy.totalBasicValue)}`}>
+          <div className="text-xs font-medium text-blue-800">Basic order value (ex-GST)</div>
+          <div className="mt-1 whitespace-nowrap text-xl font-bold tabular-nums text-blue-900">{summaryAmount(fy.totalBasicValue)}</div>
+        </div>
+      </div>
+      {fy.status.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {fy.status.map((st) => (
+            <div key={st.status} className="flex-shrink-0 inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs">
+              <span className="font-semibold text-foreground">{st.status}</span>
+              <span className="text-muted-foreground">
+                {st.orders.toLocaleString("en-IN")} orders -{" "}
+                <span title={`Exact value: ${amount(st.basicValue)}`}>{summaryAmount(st.basicValue)}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background">
@@ -258,52 +316,9 @@ export default function SecondaryOrdersContent() {
           {data && (
             <div className="flex-shrink-0 p-4 border-b bg-card space-y-4">
                <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{data.basis.mixedEraNote}</p>
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                <div className="min-w-0 rounded-lg border bg-card p-3 shadow-sm" title={`Orders: ${data.summary.orders.toLocaleString("en-IN")}`}>
-                  <div className="text-xs font-medium text-muted-foreground">Orders</div>
-                  <div className="mt-1 whitespace-nowrap text-xl font-bold tabular-nums">{data.summary.orders.toLocaleString("en-IN")}</div>
-                </div>
-                <div className="min-w-0 rounded-lg border bg-card p-3 shadow-sm" title={`Lines: ${data.summary.lines.toLocaleString("en-IN")}`}>
-                  <div className="text-xs font-medium text-muted-foreground">Lines</div>
-                  <div className="mt-1 whitespace-nowrap text-xl font-bold tabular-nums">{data.summary.lines.toLocaleString("en-IN")}</div>
-                </div>
-                <div className="min-w-0 rounded-lg border bg-card p-3 shadow-sm" title={`Retailers: ${data.summary.retailers.toLocaleString("en-IN")}`}>
-                  <div className="text-xs font-medium text-muted-foreground">Retailers</div>
-                  <div className="mt-1 whitespace-nowrap text-xl font-bold tabular-nums">{data.summary.retailers.toLocaleString("en-IN")}</div>
-                </div>
-                <div className="min-w-0 rounded-lg border bg-card p-3 shadow-sm" title={`Distributors: ${data.summary.distributors.toLocaleString("en-IN")}`}>
-                  <div className="text-xs font-medium text-muted-foreground">Distributors (names)</div>
-                  <div className="mt-1 whitespace-nowrap text-xl font-bold tabular-nums">{data.summary.distributors.toLocaleString("en-IN")}</div>
-                  <div className="mt-1 text-[10px] text-muted-foreground">{data.summary.distributorNote}</div>
-                </div>
-                <div className="min-w-0 rounded-lg border bg-card p-3 shadow-sm" title={`Total Qty: ${data.summary.totalQty.toLocaleString("en-IN")}`}>
-                  <div className="text-xs font-medium text-muted-foreground">Total Qty</div>
-                  <div className="mt-1 whitespace-nowrap text-xl font-bold tabular-nums">{data.summary.totalQty.toLocaleString("en-IN")}</div>
-                </div>
-                <div className="min-w-0 rounded-lg border bg-blue-50/50 p-3 shadow-sm md:col-span-2" title={`Basic order value: ${amount(data.summary.totalBasicValue)}`}>
-                  <div className="text-xs font-medium text-blue-800">Basic order value (ex-GST)</div>
-                  <div className="mt-1 whitespace-nowrap text-xl font-bold tabular-nums text-blue-900">{summaryAmount(data.summary.totalBasicValue)}</div>
-                  {(data.coverage.from || data.coverage.to) && (
-                    <div className="mt-1 text-[10px] text-blue-700">
-                      {data.coverage.from ? formatShortDate(data.coverage.from) : "Start"} – {data.coverage.to ? formatShortDate(data.coverage.to) : "End"}
-                    </div>
-                  )}
-                </div>
+              <div className="space-y-4">
+                {data.fiscalYearSummaries.map(renderFiscalYearSummary)}
               </div>
-
-              {data.summary.status.length > 0 && (
-                <div className="flex gap-2 overflow-x-auto pb-1">
-                  {data.summary.status.map(st => (
-                    <div key={st.status} className="flex-shrink-0 inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs">
-                      <span className="font-semibold text-foreground">{st.status}</span>
-                      <span className="text-muted-foreground">
-                        {st.orders.toLocaleString("en-IN")} orders -{" "}
-                        <span title={`Exact value: ${amount(st.basicValue)}`}>{summaryAmount(st.basicValue)}</span>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
 
               {data.quality.exactDuplicateExportRows > 0 && (
                 <p className="text-xs text-muted-foreground">
