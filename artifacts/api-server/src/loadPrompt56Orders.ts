@@ -95,13 +95,37 @@ async function productLines(file: string): Promise<P56Line[]> {
   });
   return lines;
 }
-async function protectedCounts() {
-  const q = await pool.query<{ sku: string; register: string; sale: string }>(`SELECT (SELECT count(*) FROM secondary_sku_line)::text sku,(SELECT count(*) FROM secondary_register_line)::text register,(SELECT count(*) FROM sale_line_all)::text sale`);
+type ProtectedCounts = {
+  sku: string;
+  register: string;
+  saleAll: string;
+  saleCurrent: string;
+  primaryFyRows: string;
+  primaryFyAmount: string;
+  primaryAllFyRows: string;
+  primaryAllFyAmount: string;
+};
+
+const PROTECTED_COUNTS_SQL = `
+  SELECT
+    (SELECT count(*) FROM secondary_sku_line)::text AS "sku",
+    (SELECT count(*) FROM secondary_register_line)::text AS "register",
+    (SELECT count(*) FROM sale_line_all)::text AS "saleAll",
+    (SELECT count(*) FROM sale_line)::text AS "saleCurrent",
+    (SELECT count(*) FROM sale_line WHERE fy = '2025-26')::text AS "primaryFyRows",
+    (SELECT COALESCE(sum(amount), 0)::numeric::text FROM sale_line WHERE fy = '2025-26') AS "primaryFyAmount",
+    (SELECT count(*) FROM sale_line_all WHERE fy = '2025-26' AND version_status = 'current')::text AS "primaryAllFyRows",
+    (SELECT COALESCE(sum(amount), 0)::numeric::text FROM sale_line_all WHERE fy = '2025-26' AND version_status = 'current') AS "primaryAllFyAmount"
+`;
+
+async function protectedCounts(): Promise<ProtectedCounts> {
+  const q = await pool.query<ProtectedCounts>(PROTECTED_COUNTS_SQL);
   return q.rows[0];
 }
-async function protectedCountsInTransaction(client: { query: (...args: any[]) => Promise<any> }) {
-  const q = await client.query(`SELECT (SELECT count(*) FROM secondary_sku_line)::text sku,(SELECT count(*) FROM secondary_register_line)::text register,(SELECT count(*) FROM sale_line_all)::text sale`);
-  return q.rows[0] as { sku: string; register: string; sale: string };
+
+async function protectedCountsInTransaction(client: { query: (...args: any[]) => Promise<any> }): Promise<ProtectedCounts> {
+  const q = await client.query(PROTECTED_COUNTS_SQL);
+  return q.rows[0] as ProtectedCounts;
 }
 function intersections(a: P56Line[], b: P56Line[]) {
   const order = new Set(a.map(x => x.orderId)), pair = new Set(a.map(x => `${x.orderId}\0${x.productCode}`));
@@ -130,8 +154,8 @@ async function write(lines: P56Line[]) {
     return { before, after };
   } catch (e) { await client.query("ROLLBACK"); throw e; } finally { client.release(); }
 }
-async function main() {
-  if (process.argv.includes("--write")) await runMigrations();
+export async function runPrompt56Orders(writeMode = false) {
+  if (writeMode) await runMigrations();
   const root = resolve(process.cwd(), "../../attached_assets");
   const aprZip = process.env.PROMPT56_APR_JUN_ZIP ?? resolve(root, "PSCODE_3_NEW_REPORT_1785584202460.zip");
   const julZip = process.env.PROMPT56_JUL_ZIP ?? resolve(root, "PSCode_3_NEW_REPORTS_JULY2026-20260805T074609Z-1-001_1785917168364.zip");
@@ -146,12 +170,24 @@ async function main() {
     sourceId: r.sourceId, sourceFile: r.sourceFile, sourceKind: r.kind,
     sha256: r.sourceSha256, bytes: r.sourceBytes, entryPoint: "load-prompt56-orders",
   }])).values()];
-  const report: any = { entryPoint: "load-prompt56-orders", dryRun: !process.argv.includes("--write"), sources: { segment: { sourceId: SHEET_ID, physicalRows: segment.rowsRead, expectedPhysicalRows: EXPECTED.segment.physicalRows, physicalRowsPass, parsedLines: segment.lines.length, expectedParsedLines: EXPECTED.segment.rows }, aprJunZip: basename(aprZip), julZip: basename(julZip), product: basename(product) }, lineage, controls, b3, reconciliation, protectedCounts: { before }, augustCanary: { expectedFailure: true, reason: "8,602 rows is intentionally below the existing 19,417 full-month SKU floor; no guard was changed." }, pass };
+  const report: any = { entryPoint: "load-prompt56-orders", dryRun: !writeMode, sources: { segment: { sourceId: SHEET_ID, physicalRows: segment.rowsRead, expectedPhysicalRows: EXPECTED.segment.physicalRows, physicalRowsPass, parsedLines: segment.lines.length, expectedParsedLines: EXPECTED.segment.rows }, aprJunZip: basename(aprZip), julZip: basename(julZip), product: basename(product) }, lineage, controls, b3, reconciliation, protectedCounts: { before }, augustCanary: { expectedFailure: true, reason: "8,602 rows is intentionally below the existing 19,417 full-month SKU floor; no guard was changed." }, pass };
   if (!pass) { console.log(JSON.stringify(report, null, 2)); throw new Error("Prompt 56 controls failed; refusing to write"); }
-  if (process.argv.includes("--write")) {
+  if (writeMode) {
     const transactionalCounts = await write([...segment.lines, ...aprJun, ...jul, ...aug]);
     report.protectedCounts = { before, transactional: transactionalCounts };
   }
-  console.log(JSON.stringify(report, null, 2)); await pool.end();
+  return report;
 }
-main().catch(async e => { console.error(e); await pool.end(); process.exit(1); });
+
+if (process.argv[1]?.includes("loadPrompt56Orders")) {
+  runPrompt56Orders(process.argv.includes("--write"))
+    .then(async report => {
+      console.log(JSON.stringify(report, null, 2));
+      await pool.end();
+    })
+    .catch(async e => {
+      console.error(e);
+      await pool.end();
+      process.exit(1);
+    });
+}

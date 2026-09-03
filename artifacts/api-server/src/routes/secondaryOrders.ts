@@ -50,6 +50,7 @@ import {
   getPrompt56OrderLineage,
   type LoadResult,
 } from "../lib/secondaryOrders/loader.js";
+import { runPrompt56Orders } from "../loadPrompt56Orders.js";
 import { logger } from "../lib/logger.js";
 import { ExportGate } from "../lib/secondaryOrders/exportGate.js";
 
@@ -74,6 +75,14 @@ type LoadJob =
   | { status: "error"; finishedAt: string; error: string };
 
 let loadJob: LoadJob = { status: "idle" };
+
+type Prompt56LoadJob =
+  | { status: "idle" }
+  | { status: "running"; startedAt: string }
+  | { status: "done"; finishedAt: string; result: Awaited<ReturnType<typeof runPrompt56Orders>> }
+  | { status: "error"; finishedAt: string; error: string };
+
+let prompt56LoadJob: Prompt56LoadJob = { status: "idle" };
 
 // ── Admin auth helper ─────────────────────────────────────────────────────────
 function requireAdmin(req: Request, res: Response): boolean {
@@ -276,6 +285,47 @@ router.post(
 router.get("/admin/secondary-orders/load-status", (req: Request, res: Response) => {
   if (!requireAdmin(req, res)) return;
   res.json(loadJob);
+});
+
+// ── Production-only full Prompt 56 seed ─────────────────────────────────────
+router.post("/admin/secondary-orders/prompt56-load", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) return;
+  if (process.env.NODE_ENV !== "production") {
+    res.status(409).json({ error: "Prompt 56 admin seed is production-only." });
+    return;
+  }
+  if (String(req.headers["x-prompt56-confirm"] ?? "") !== "FULL_THREE_SOURCE_SEED") {
+    res.status(400).json({ error: "Pass X-Prompt56-Confirm: FULL_THREE_SOURCE_SEED." });
+    return;
+  }
+  if (prompt56LoadJob.status === "running") {
+    res.status(409).json({ error: "Prompt 56 seed is already running.", startedAt: prompt56LoadJob.startedAt });
+    return;
+  }
+
+  const startedAt = new Date().toISOString();
+  prompt56LoadJob = { status: "running", startedAt };
+  res.status(202).json({
+    ok: true,
+    status: "running",
+    startedAt,
+    message: "Full three-source Prompt 56 seed started.",
+  });
+
+  runPrompt56Orders(true)
+    .then((result) => {
+      prompt56LoadJob = { status: "done", finishedAt: new Date().toISOString(), result };
+      req.log.info({ controls: result.controls, protectedCounts: result.protectedCounts }, "[secondaryOrders] Prompt 56 production seed done");
+    })
+    .catch((err) => {
+      prompt56LoadJob = { status: "error", finishedAt: new Date().toISOString(), error: String(err instanceof Error ? err.message : err) };
+      req.log.error({ err }, "[secondaryOrders] Prompt 56 production seed error");
+    });
+});
+
+router.get("/admin/secondary-orders/prompt56-load-status", (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) return;
+  res.json(prompt56LoadJob);
 });
 
 // ── POST /api/admin/secondary-orders/verify ──────────────────────────────────
