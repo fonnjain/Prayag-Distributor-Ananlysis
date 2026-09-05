@@ -1,0 +1,195 @@
+# Replit Prompt 59 — Secondary naming, and task #436
+
+**Date:** 5 September 2026
+**Scope:** Section A is a documentation change. Section B is scoping only.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## Section A — "secondary" means order booking. Say so.
+
+The audit established this and it is not in dispute. `secondary_register_line`
+and `secondary_sku_line` are loaded from the **same workbook and same tab** that
+`mgmt_sources.json` configures as the order-booking source — exact ID and tab
+match for FY2024-25 and FY2025-26.
+
+The schema settles it: Order ID, Order Value, Sub Total, Order Total, Cat. No.
+**No invoice, no challan, no dispatch document, no delivery confirmation, no
+receipt field.**
+
+There is **no line-level secondary sale source anywhere in the system.**
+
+```
+Documentation change. Correct comments, labels and descriptions only. Do NOT
+change any table name, column name, query, calculation or figure.
+
+1. FIND EVERY PLACE THAT CALLS THIS DATA SELL-THROUGH
+
+   Search the codebase for comments, docstrings, variable names in comments,
+   UI labels, tooltips, export headers, memory files and documentation using:
+
+     sell-through, sell through, sellthrough, sell-out, secondary sale,
+     secondary sales, dispatch to retailer, retailer offtake, offtake
+
+   applied to secondary_register_line, secondary_sku_line, secondary_sku_*
+   or SKU Deep Dive's retailer level.
+
+   Print the full list with file and line before changing anything.
+
+2. CORRECT THEM
+
+   Replace with accurate wording. Examples:
+     "secondary sell-through"        -> "secondary order booking"
+     "retailer sell-out"             -> "retailer order booking"
+     "secondary NET"                 -> "booked order net (Sub Total)"
+
+   The one that matters most is the skuLoader header comment, which frames the
+   whole table.
+
+3. UI WORDING - SKU Deep Dive retailer level
+
+   Whatever the retailer tab currently calls its measure, it should say
+   ORDER BOOKING, not sale. Print the current wording and the proposed
+   replacement before changing.
+
+   A retailer showing zero has stopped BOOKING in this source. They may still
+   be receiving stock and selling. The label should not imply otherwise.
+
+4. RED ALERT B3 - retailer branch
+
+   Its description says it detects stopped sell-through. It detects stopped
+   BOOKING. Correct the description, the alert text and any notification
+   wording.
+
+   Do NOT change the detection logic or thresholds.
+
+5. RECORD THE FINDING DURABLY
+
+   Add to project memory: secondary_register_line and secondary_sku_line are
+   Segment Wise ORDER BOOKING at retailer/segment and retailer/item grain,
+   from the same workbooks as secondary_order_line. There is no line-level
+   secondary sale source. The only sale-like measure is
+   secondary_head_month.received_amount, a person-per-month aggregate with no
+   retailer, item, quantity or date.
+
+   Include the evidence: same sheet ID and tab as mgmt_sources.json, and the
+   absence of any invoice or dispatch field in the schema.
+
+6. WHAT NOT TO TOUCH
+
+   Do not rename tables or columns. Do not change any query or figure. Do not
+   alter primary sale_line wording - that IS genuine dispatch.
+
+Print the diff before applying. This is wording only.
+```
+
+---
+
+## Section B — task #436, scoping only
+
+The frozen tables hold month labels derived from the misparsed dates. FY2025-26
+proves it: **identical 379,439 rows and ₹2,310,913,869 annually**, but Q3
+overstated by ₹5.83 Cr and Q4 understated by ₹5.58 Cr against the corrected
+source.
+
+**There may be a cheaper answer than rebuilding.**
+
+```
+Read-only and scoping only. Build nothing, replace nothing, unfreeze nothing.
+
+Two options. I want both costed before choosing.
+
+OPTION 1 - DISCLOSE
+
+Leave the tables as they are. Label the affected months on the surfaces that
+read them.
+
+B1. Which surfaces read FY2024-25 or FY2025-26 MONTHLY figures from these
+    tables? The audit named SKU Deep Dive, Secondary Performance's distributor
+    tab, Red Alert B3 retailer, the push list, breadth trajectory and AI
+    Growth activation. Confirm the complete list.
+
+B2. What would a disclosure look like on each - a banner, a per-row marker, a
+    footnote? Something like "monthly figures for this year use a superseded
+    date basis; annual totals are correct."
+
+B3. Can the disclosure be DERIVED rather than hardcoded - a flag on the FY, or
+    a comparison against the live source? A hardcoded year list would go stale
+    if the tables were ever rebuilt.
+
+B4. Does anything COMPUTE on these months rather than display them - B3's
+    prior-month comparison, breadth trajectory, the push engine? A wrong month
+    that only displays is one thing; a wrong month that fires an alert is
+    another. Name every computing consumer.
+
+B5. Estimate the work.
+
+OPTION 2 - REBUILD
+
+B6. The audit said no safe path exists: secondary_register_line is append-only
+    with month_label inside line_uid, secondary_sku_line has FY replacement for
+    itself only, no transaction covers both, and both years are under
+    frozen_registers.
+
+    Given the FY2024-25 order load just built exactly this pattern - dedicated
+    route, separate anchor file, staged validation, atomic replace, protected
+    count verification, rollback - how much of that is reusable here?
+
+B7. What would the controls be? For the order load they were rows, orders and
+    value. Here the annual totals ALREADY match, so a control on annual
+    figures would pass while proving nothing. The control has to be
+    month-by-month against the corrected source.
+
+B8. Both tables must move together or the register and SKU views would
+    disagree. Is a single transaction across both feasible?
+
+B9. What invalidates afterwards - snapshots, caches, alert history, AI
+    artefacts? The audit mentioned rerunning dependent alert calculations.
+
+B10. Estimate the work honestly, and name the risky parts.
+
+THEN
+
+B11. Recommend one, with reasons. Consider that FY2024-25 is described as
+     rarely used, FY2025-26 is the active comparison year, and annual figures
+     are correct under both options.
+
+Report only. Choose nothing, build nothing.
+```
+
+---
+
+## Notes
+
+- **Section A is cheap and should go first.** It changes no figure and removes a
+  misreading that has already caught both of us. Someone will otherwise build a
+  decision on "sell-through" that does not exist.
+- **B4 is the question that decides Option 1's viability.** A wrong month that
+  only displays can be labelled. A wrong month that feeds Red Alert B3's
+  prior-period comparison produces false alerts, and no disclosure fixes that.
+- **B7 matters.** The annual totals already reconcile, so any control built on
+  them would pass while proving nothing. The FY2024-25 order load succeeded
+  partly because its controls were genuinely discriminating.
+- **B11 should weigh usage.** FY2024-25 is rarely used and FY2025-26 is the
+  active comparison year. It may be worth rebuilding one and disclosing the
+  other.
+
+## Separately — 7 September, two days away
+
+`isMonthFrozen` is a clock, not a job. At **00:00 UTC on the 7th — 05:30 IST** it
+starts returning true for `Aug-26`, and `openMonthLabels` stops including it.
+Nothing runs; August simply drops out of scope.
+
+`secondary_sku_line` holds **zero August rows in production**. The 8,602 rows are
+development only, and the Product-Wise file went into `secondary_order_line`.
+
+So August freezes empty, and every SKU and sell-through surface reads it as a
+measured zero — including **Red Alert B3's retailer branch**, which compares
+current against prior months and would show every retailer as having stopped.
+
+`SHORT_READ_TOLERANCE` at 0.98 guards a shrink, not an absence. A month never
+loaded does not trip it.
+
+The real fix is the August SKU export from Prayag. Failing that, a decision
+before the 7th on whether August should be treated as unloaded rather than zero.
