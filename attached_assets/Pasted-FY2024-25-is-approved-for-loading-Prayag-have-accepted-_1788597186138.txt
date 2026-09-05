@@ -1,0 +1,52 @@
+FY2024-25 is approved for loading. Prayag have accepted the variance -
+Rs 5,595 against Rs 216 crore is immaterial, and FY2024-25 is a rarely-used
+comparison year.
+
+SECTION A - RESTATE THE ANCHOR FIRST
+
+The current FY2024-25 anchor is 335,258 rows and Rs 2,16,00,11,256. The
+corrected source is 335,254 rows and Rs 2,16,00,05,661.09. Loading without
+restating the anchor leaves that check permanently failing, and a check
+that always fails stops being read.
+
+A1. Restate the FY2024-25 anchor to the current source values.
+
+A2. Record the reason in the anchor config and in memory: source re-imported
+    5 Sep 2026 by Soma Chaudhury to correct 28,613 misparsed dates; four
+    rows and Rs 5,594.91 not restored; variance accepted by Prayag as
+    immaterial. Include the previous values so the change is traceable.
+
+A3. Do NOT touch the FY2025-26 or FY2023-24 anchors.
+
+A4. Confirm secondary_register_line and secondary_sku_line are unaffected -
+    they still hold the July load with the old dates, and that is a separate
+    open question.
+
+SECTION B - EXCLUDE THE BLANK-CODE ROW EXPLICITLY
+
+SORD-49334, 6 July 2024, RET#64696, blank item code, Rs 8,600.
+
+B1. Exclude it, and RECORD the exclusion in the load lineage - order id,
+    reason, value. Do not let it drop silently.
+
+B2. If any other row in the year has a blank item code, list it. One is a
+    rejection; several is a pattern.
+
+SECTION C - THEN LOAD
+
+Load FY2024-25 into secondary_order_line using the existing Segment Wise
+parser, with the FY2024-25 date guard applied.
+
+  Expect: 335,251 rows, 49,080 orders, Rs 2,15,99,97,061.09
+
+  Slice identity: source_era legacy_crm, source_kind segment_wise,
+  fiscal_year 2024-25, period_completeness complete.
+
+Do not modify secondary_register_line, secondary_sku_line, sale_line, or
+the existing FY2025-26 and FY2026-27 order rows. Print before and after
+counts for all of them.
+
+SORD collisions were verified at zero against both loaded years.
+
+AFTER LOADING, print:
+  - rows, orders and value per month
