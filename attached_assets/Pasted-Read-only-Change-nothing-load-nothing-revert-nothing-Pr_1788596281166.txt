@@ -1,0 +1,63 @@
+Read-only. Change nothing, load nothing, revert nothing.
+
+Prayag say they have re-imported the FY2024-25 Segment Wise workbook.
+Verify before anything is loaded.
+
+SECTION A - IS IT ACTUALLY CORRECTED?
+
+A1. Read the configured FY2024-25 source now
+    (1sejEhXCaPXwYZ99mP0tPGo_pA623FQaBN2JBcreIy2g, Data Sheet) and print:
+      - total rows read and rows with parseable dates
+      - numeric serials with calendar day > 12
+      - text date rows, and how many have first component <= 12
+      - literal min and max date
+      - rows falling outside FY2024-25 under a literal read
+
+    Before the re-import these were: 335,258 / 335,256, 258,904 with
+    day > 12, 0 text dates, range 4 Jan 2024 to 3 Dec 2025, and 28,613
+    rows outside the fiscal year.
+
+    Corrected means: range 1 Apr 2024 to 31 Mar 2025 and ZERO rows outside.
+
+A2. Has the date-signature guard fired for FY2024-25 since the re-import?
+    Print every occurrence. The guard is what detects a workbook changing
+    signature.
+
+A3. Last-modified timestamp and editor on the workbook.
+
+SECTION B - DID THE VALUES CHANGE TOO?
+
+The last audit found the database held 4 MORE rows and Rs 5,594.91 more
+than the live source in secondary_register_line - so Prayag had already
+changed rows and values, not only dates. A re-import may have changed more.
+
+B1. Print total rows and total Sub Total for the workbook now.
+
+B2. Compare against the frozen anchor: 335,258 rows and
+    Rs 2,16,00,11,256. Does it still reconcile?
+
+    If the annual total has MOVED, that is a different problem from dates
+    and it affects the frozen anchor. Report the difference exactly.
+
+B3. Distinct Order IDs. It was 49,080. If that has changed, the order
+    population has changed, not just its dates.
+
+B4. Month-by-month rows and Sub Total, so we can see what a load would
+    produce.
+
+SECTION C - IF IT IS CLEAN
+
+C1. What would loading FY2024-25 into secondary_order_line involve, given
+    FY2025-26 and FY2026-27 are already loaded? Same parser, same era
+    discriminator, same controls.
+
+C2. SORD collision check against what is already loaded. FY2024-25 spans
+    which SORD range, and does it intersect FY2025-26's 21452-141726 or
+    Apr-Jul 2026's 67382-160183? Zero intersections was verified for the
+    other two; this needs the same check.
+
+C3. What would the page show afterwards - total rows, orders, value across
+    all three years?
+
+Report only. Do not load, do not change the frozen anchor, do not touch
+secondary_register_line or secondary_sku_line.
