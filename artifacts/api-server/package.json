@@ -15,6 +15,7 @@
     "master-seed-import": "node ./build.mjs && node --enable-source-maps ./dist/masterSeedImport.mjs",
     "load-secondary-orders": "node ./build.mjs && node --enable-source-maps ./dist/loadSecondaryOrders.mjs",
     "load-prompt56-orders": "node ./build.mjs && node --enable-source-maps ./dist/loadPrompt56Orders.mjs",
+    "load-fy2425-segment-orders": "node ./build.mjs && node --enable-source-maps ./dist/loadFY2425SegmentWiseOrders.mjs",
     "statehead-pack-check": "node ./build.mjs && node --enable-source-maps ./dist/stateHeadPackCheck.mjs",
     "statehead-pack-cross-folder-check": "node ./build.mjs && node --enable-source-maps ./dist/stateHeadPackCrossFolderCheck.mjs",
     "statehead-pack-coverage-check": "node ./build.mjs && node --enable-source-maps ./dist/stateHeadPackCoverageCheck.mjs",

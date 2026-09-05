@@ -51,6 +51,7 @@ import {
   type LoadResult,
 } from "../lib/secondaryOrders/loader.js";
 import { runPrompt56Orders } from "../loadPrompt56Orders.js";
+import { runFY2425SegmentWiseOrders } from "../loadFY2425SegmentWiseOrders.js";
 import { logger } from "../lib/logger.js";
 import { ExportGate } from "../lib/secondaryOrders/exportGate.js";
 
@@ -83,6 +84,14 @@ type Prompt56LoadJob =
   | { status: "error"; finishedAt: string; error: string };
 
 let prompt56LoadJob: Prompt56LoadJob = { status: "idle" };
+
+type FY2425LoadJob =
+  | { status: "idle" }
+  | { status: "running"; startedAt: string }
+  | { status: "done"; finishedAt: string; result: Awaited<ReturnType<typeof runFY2425SegmentWiseOrders>> }
+  | { status: "error"; finishedAt: string; error: string };
+
+let fy2425LoadJob: FY2425LoadJob = { status: "idle" };
 
 // ── Admin auth helper ─────────────────────────────────────────────────────────
 function requireAdmin(req: Request, res: Response): boolean {
@@ -331,6 +340,45 @@ router.post("/admin/secondary-orders/prompt56-load", async (req: Request, res: R
 router.get("/admin/secondary-orders/prompt56-load-status", (req: Request, res: Response) => {
   if (!requireAdmin(req, res)) return;
   res.json(prompt56LoadJob);
+});
+
+// ── Production-only approved FY2024-25 Segment Wise slice ────────────────────
+router.post("/admin/secondary-orders/fy2425-segment-load", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) return;
+  if (process.env.NODE_ENV !== "production") {
+    res.status(409).json({ error: "FY2024-25 Segment Wise load is production-only." });
+    return;
+  }
+  if (String(req.headers["x-fy2425-confirm"] ?? "") !== "LOAD_APPROVED_CORRECTED_SOURCE") {
+    res.status(400).json({ error: "Pass X-FY2425-Confirm: LOAD_APPROVED_CORRECTED_SOURCE." });
+    return;
+  }
+  if (fy2425LoadJob.status === "running") {
+    res.status(409).json({ error: "FY2024-25 Segment Wise load is already running.", startedAt: fy2425LoadJob.startedAt });
+    return;
+  }
+  const startedAt = new Date().toISOString();
+  fy2425LoadJob = { status: "running", startedAt };
+  res.status(202).json({
+    ok: true,
+    status: "running",
+    startedAt,
+    message: "Approved FY2024-25 Segment Wise isolated load started.",
+  });
+  runFY2425SegmentWiseOrders(true)
+    .then((result) => {
+      fy2425LoadJob = { status: "done", finishedAt: new Date().toISOString(), result };
+      req.log.info({ controls: result.controls, protectedCounts: result.protectedCounts }, "[secondaryOrders] FY2024-25 Segment Wise load done");
+    })
+    .catch((error) => {
+      fy2425LoadJob = { status: "error", finishedAt: new Date().toISOString(), error: String(error instanceof Error ? error.message : error) };
+      req.log.error({ error }, "[secondaryOrders] FY2024-25 Segment Wise load error");
+    });
+});
+
+router.get("/admin/secondary-orders/fy2425-segment-load-status", (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) return;
+  res.json(fy2425LoadJob);
 });
 
 // ── POST /api/admin/secondary-orders/verify ──────────────────────────────────

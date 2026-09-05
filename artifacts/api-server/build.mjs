@@ -36,6 +36,8 @@ async function buildAll() {
       path.resolve(artifactDir, "src/loadSecondaryOrders.ts"),
       // Prompt 56 three-source, guarded order-booking loader.
       path.resolve(artifactDir, "src/loadPrompt56Orders.ts"),
+      // Approved isolated FY2024-25 Segment Wise order-booking loader.
+      path.resolve(artifactDir, "src/loadFY2425SegmentWiseOrders.ts"),
       // Read-only State Head master-pack release check.
       path.resolve(artifactDir, "src/stateHeadPackCheck.ts"),
       // Read-only overlap audit for the historical and live State Head folders.

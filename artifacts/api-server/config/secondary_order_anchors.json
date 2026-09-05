@@ -1,0 +1,40 @@
+{
+  "comment": "Approved source and parser controls for isolated secondary order-booking loads. These are not secondary_register_line or secondary_sku_line frozen-table anchors.",
+  "years": {
+    "2024-25": {
+      "sheet_id": "1sejEhXCaPXwYZ99mP0tPGo_pA623FQaBN2JBcreIy2g",
+      "tab": "Data Sheet",
+      "source_era": "legacy_crm",
+      "source_kind": "segment_wise",
+      "period_completeness": "complete",
+      "approved_source_sha256": "aba2fbe451032aed3d63bee2f18553434b9b6731b20d030633ae16eb242d05b1",
+      "approved_source_bytes": 52214948,
+      "physical_rows": 335254,
+      "dated_rows": 335252,
+      "literal_min_date": "2024-04-01",
+      "literal_max_date": "2025-03-31",
+      "literal_outside_fiscal_year_rows": 0,
+      "parser_rows": 335251,
+      "distinct_orders": 49080,
+      "source_subtotal_rupees": 2160005661.09,
+      "parser_value_rupees": 2159997061.09,
+      "previous_anchor": {
+        "physical_rows": 335258,
+        "source_subtotal_rupees": 2160011256
+      },
+      "restated_at": "2026-09-05",
+      "reason": "Source re-imported 5 Sep 2026 by Soma Chaudhury to correct 28,613 misparsed dates. Four rows and Rs 5,594.91 were not restored; Prayag accepted the variance as immaterial.",
+      "approved_exclusions": [
+        {
+          "source_row_number": 260135,
+          "order_id": "SORD-49334",
+          "date": "2024-07-06",
+          "dealer_id": "RET#64696",
+          "product_code": "",
+          "value_rupees": 8600,
+          "reason": "blank_product_code_explicitly_excluded"
+        }
+      ]
+    }
+  }
+}

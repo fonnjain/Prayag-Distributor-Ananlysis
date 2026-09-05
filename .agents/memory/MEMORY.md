@@ -154,3 +154,4 @@
 - [Secondary month closure boundary](secondary-month-closure-ist.md) — secondary reporting months close at IST midnight; do not reuse UTC date-only month-end helpers as closure instants.
 - [Legacy Segment date import split](legacy-segment-date-ambiguity.md) — FY24-25/25-26 numeric dates show locale-swap evidence; older Segment years and PSCode XLSX dates remain literal.
 - [Prompt load approval gates](prompt-load-gates.md) — source-load work requires explicit design sign-off and a reviewed diff before any write or production trigger.
+- [FY2024-25 order-booking restatement](fy2425-order-booking-restatement.md) — approved source variance applies only to isolated order history; frozen register/SKU correction remains separate.
