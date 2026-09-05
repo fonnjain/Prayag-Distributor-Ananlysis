@@ -611,7 +611,7 @@ function FlowPanel({ flows, distName, fy }: { flows: DistributorFlows | null; di
               <div className="font-semibold tabular-nums text-sm">{formatCompact(flows.primaryOb)}</div>
             </div>
             <div>
-              <div className="text-xs text-muted-foreground">Secondary Out (member sheets)</div>
+              <div className="text-xs text-muted-foreground">Retailer Order Booking (member sheets)</div>
               <div className="font-semibold tabular-nums text-sm">{formatCompact(flows.secondaryOut)}</div>
             </div>
           </div>
@@ -646,7 +646,7 @@ function FlowPanel({ flows, distName, fy }: { flows: DistributorFlows | null; di
           </div>
           <div className="space-y-1">
             <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Secondary Out — Distributor to Retailers
+              Retailer Order Booking — Distributor to Retailers
             </div>
             <div className="text-xl font-bold tabular-nums">{formatCompact(flows.secondaryOut)}</div>
             <div className="text-xs text-muted-foreground">
@@ -671,10 +671,10 @@ function FlowPanel({ flows, distName, fy }: { flows: DistributorFlows | null; di
               </span>
               <span className="ml-2 opacity-80">
                 {isFiltered
-                  ? "Period-specific primary dispatch minus full-FY secondary out — bases differ, so this gap is directional only."
+                  ? "Period-specific primary dispatch minus full-FY retailer order booking — bases differ, so this gap is directional only."
                   : gapPositive
-                    ? "Primary in exceeds secondary out — may indicate stock building at the distributor, or business moving outside the attributed retailer channel."
-                    : "Secondary out exceeds primary in — may indicate prior-period stock being liquidated, or secondary reported against a different primary FY."}
+                    ? "Primary dispatch exceeds retailer order booking — may indicate stock building at the distributor, or business moving outside the attributed retailer channel."
+                    : "Retailer order booking exceeds primary dispatch — may indicate prior-period stock being liquidated, or order bookings reported against a different primary FY."}
               </span>
             </div>
           );
@@ -825,10 +825,10 @@ function SkuSpreadPanel({
         <div className="text-sm font-semibold mb-1">Product Mix</div>
         <p className="text-xs text-muted-foreground leading-relaxed">
           {spread.liveYearNote ??
-            "Segment data will populate once a FY2026-27 secondary register is ingested."}
+            "Segment data will populate once a FY2026-27 secondary order-booking register is ingested."}
         </p>
         <p className="text-xs text-muted-foreground mt-1">
-          The secondary register is the source for this panel. The dealer's assigned
+          The secondary order-booking register is the source for this panel. The dealer's assigned
           segment attribute records allocation, not actual purchases, and is never
           substituted here.
         </p>
@@ -842,9 +842,9 @@ function SkuSpreadPanel({
       <div className="mb-4 border border-border rounded-lg p-4 bg-muted/5">
         <div className="text-sm font-semibold mb-1">Product Mix</div>
         <p className="text-xs text-muted-foreground leading-relaxed">
-          No secondary register rows matched {distName}'s retailers for closed FYs
+          No secondary order-booking register rows matched {distName}'s retailers for closed FYs
           (FY2021-22 through FY2025-26). Retailer names from the member working
-          sheet may differ from how the secondary register records them.
+          sheet may differ from how the secondary order-booking register records them.
         </p>
       </div>
     );
@@ -861,7 +861,7 @@ function SkuSpreadPanel({
       <div className="bg-muted/40 px-4 py-2.5 border-b border-border flex items-center justify-between">
         <h4 className="font-semibold text-sm">Product Mix</h4>
         <span className="text-xs text-muted-foreground">
-          Secondary register — {spread.recentFy} &nbsp;·&nbsp;
+          Secondary order-booking register — {spread.recentFy} &nbsp;·&nbsp;
           {spread.matchedRetailers} retailer{spread.matchedRetailers !== 1 ? "s" : ""} matched
         </span>
       </div>
@@ -967,7 +967,7 @@ function SkuSpreadPanel({
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-2 italic">
-              The secondary register records sales at product-line level (brand_canon), not
+              The secondary order-booking register records bookings at product-line level (brand_canon), not
               individual item codes. Brand_canon is the finest granularity available.
             </p>
           </div>
@@ -2391,7 +2391,7 @@ export default function DistributorDeepDive() {
           {stateHead && (
             <div className="text-xs text-muted-foreground mt-0.5">
               Head detail below shows {stateHead}'s full team figures. The geography and
-              distributor filters narrow the Distributor Overview table; the Secondary Sales
+              distributor filters narrow the Distributor Overview table; the Secondary Order Booking
               and SKU tabs follow the selected head (or a single distributor when picked).
             </div>
           )}
@@ -2401,7 +2401,7 @@ export default function DistributorDeepDive() {
       <div className="flex flex-wrap gap-1 border-b border-border" data-testid="dd-tab-bar">
         {([
           ["overview", "Overview"],
-          ["secondary", "Secondary Sales"],
+          ["secondary", "Secondary Order Booking"],
           ["sku", "Existing vs New SKU"],
           ["push", "Where & How to Push"],
         ] as [DdTab, string][]).map(([k, label]) => (
@@ -2442,7 +2442,7 @@ export default function DistributorDeepDive() {
           Period filter active: <strong>{periodLabel}</strong>.{" "}
           <span className="font-medium text-foreground/80">Primary dispatch, pending, recency, frequency, and year-on-year figures</span>{" "}
           in the Flows panel are restricted to this period.{" "}
-          <span className="font-medium text-foreground/80">Order booking and secondary out</span>{" "}
+          <span className="font-medium text-foreground/80">Order booking and retailer order-booking detail</span>{" "}
           come from member working sheets (one column per FY) and always show the full FY {fy} —
           any resulting flow gap crosses two different bases and should be read as directional only.
         </div>

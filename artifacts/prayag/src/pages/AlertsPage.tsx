@@ -201,7 +201,7 @@ const CODE_LABELS: Record<string, string> = {
   A3: "Team Slippage",
   B1: "Real Decline",
   B2: "Sustained Decline",
-  B3: "Stopped Buying",
+  B3: "Stopped Booking",
   B4: "Segment Dropout",
   B5: "SKU Breadth Drop",
   C1: "Concentration Risk",
@@ -218,7 +218,7 @@ const CODE_ACTIONS: Record<string, string> = {
   A3: "State head review required — multiple team members below threshold.",
   B1: "Distributor real growth lagging after MRP increase. Review pricing strategy.",
   B2: "Sustained nominal decline. Investigate channel conflict or competitor entry.",
-  B3: "Customer has completely stopped buying. Immediate relationship intervention needed.",
+  B3: "Customer has completely stopped booking orders in the secondary order-booking source. Immediate relationship intervention needed.",
   B4: "Key segment has gone to zero. Check product availability and competitor activity.",
   B5: "SKU breadth collapsed by half or more. Review assortment and placement.",
   C1: "High-concentration customer declining. Territory risk is concentrated.",
@@ -226,7 +226,7 @@ const CODE_ACTIONS: Record<string, string> = {
   C3: "Segment growing below company rate. Check segment-specific promotions.",
   C4: "Volume up but gross contribution down. Review pricing, discounts, or mix shift.",
   C5: "Secondary data sheet has not been read recently. Check sheet access and sync.",
-  S1: "Distributor stopped buying primary but secondary sell-through continues — stock depletion risk.",
+  S1: "Distributor stopped buying primary but secondary order booking continues — stock depletion risk.",
 };
 
 // ── Acknowledge modal ──────────────────────────────────────────────────────

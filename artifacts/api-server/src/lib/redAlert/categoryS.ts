@@ -1,6 +1,6 @@
 // Red Alert — Category S (supply chain) engine.
 // S1: a distributor stops buying primary (≥ 3 consecutive zero-primary months)
-//     while secondary sell-through continues — the "destocking" signal.
+//     while secondary order booking continues — the "destocking" signal.
 //
 // This fires BEFORE the underlying retailers go silent (which happens when
 // the distributor's stock is exhausted).  It is a supply-chain alert, not
@@ -8,7 +8,7 @@
 //
 // DATA SOURCES:
 //   Primary purchases: customerSale (sale_line_current, territory rows)
-//   Secondary sell-through: distSecMonthly (secondary_sku_line by distributor)
+//   Secondary order booking: distSecMonthly (secondary_sku_line by distributor)
 //
 // LINKAGE:
 //   secondary_sku_line.distributor  →  norm2()  →  sale_line_current.customer

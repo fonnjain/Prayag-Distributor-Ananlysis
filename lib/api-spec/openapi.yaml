@@ -3090,7 +3090,7 @@ components:
     MgmtDistributorBrandNet:
       type: object
       required: [segment, net, pct]
-      description: NET (Sub Total) for a brand_canon or broad segment in a distributor's secondary sales.
+      description: Booked order NET (Sub Total) for a brand_canon or broad segment in a distributor's secondary order bookings.
       properties:
         segment:
           type: string

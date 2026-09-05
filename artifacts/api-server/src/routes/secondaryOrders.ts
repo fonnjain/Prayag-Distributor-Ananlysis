@@ -417,7 +417,7 @@ router.get("/admin/secondary-orders/uploads", async (req: Request, res: Response
     res.json({
       basis: "ORDER BOOKING",
       analyticsStatus: "ISOLATED_PENDING_RELIABILITY",
-      note: "Review the evidence window and every material reason before requesting manual approval; this feed remains isolated and is not dispatch or secondary sales.",
+      note: "Review the evidence window and every material reason before requesting manual approval; this feed remains isolated and is not dispatch or secondary order-booking register data.",
       approvalPolicy: {
         requiredVerifiedUploads: review.approval.requiredVerifiedUploads,
         minimumEvidenceWindowDays: review.approval.minimumEvidenceWindowDays,
@@ -471,7 +471,7 @@ router.get("/secondary-orders/summary", async (req: Request, res: Response) => {
     const r = result.rows[0];
     res.json({
       basis: "ORDER BOOKING",
-      note: "Order booking, not dispatch. Not comparable with secondary sales figures.",
+      note: "Order booking, not dispatch. Not comparable with secondary order-booking register figures.",
       rows: Number(r.rows),
       orders: Number(r.orders),
       retailers: Number(r.retailers),
@@ -682,7 +682,7 @@ router.get("/secondary-orders", async (req: Request, res: Response) => {
       basis: {
         measure: "ORDER BOOKING",
         value: "Basic order value excludes GST",
-        disclaimer: "Order booking, not dispatch. Not comparable with secondary sales figures.",
+        disclaimer: "Order booking, not dispatch. Not comparable with secondary order-booking register figures.",
           mixedEraNote: MIXED_ERA_NOTE,
       },
       coverage: { from: s?.date_min ?? null, to: s?.date_max ?? null },
@@ -800,7 +800,7 @@ router.get("/secondary-orders/export", async (req: Request, res: Response) => {
     info.columns = [{ width: 28 }, { width: 80 }];
     const infoRows: [string, string][] = [
       ["Basis", "ORDER BOOKING — not dispatch"],
-      ["Note", "Not comparable with secondary sales figures (secondary_sku_line / secondary_register_line)."],
+      ["Note", "Not comparable with secondary order-booking register figures (secondary_sku_line / secondary_register_line)."],
       ["Mixed-era coverage", MIXED_ERA_NOTE],
       ["Status filter", "APPROVED/PENDING applies only to Product-Wise rows. Legacy periods have no status and are not silently represented as a status."],
       ["Basic Order Value", "Excludes GST. Use this for commercial analysis."],

@@ -80,8 +80,8 @@ export default function SkuPage() {
   // State-head scope — "" = company-wide. Applies to Overview/Drill facts and Timing.
   const [scopeHead, setScopeHead] = useState<string>("");
   // Shared State Head / State / Distributor filter (same bar as Products/Growth).
-  // Primary channels only — the secondary register has no state/distributor
-  // columns, so the bar is hidden (and the filter dropped) for retailer level.
+  // Retailer-level data uses the secondary order-booking register, which has no
+  // state/distributor columns, so the bar is hidden (and the filter dropped) for retailer level.
   const [entityFilter, setEntityFilterRaw] = useState<EntityFilterValue>(EMPTY_ENTITY_FILTER);
   // The State Head control of the shared bar is hidden on this page (the scope
   // dropdown is the sole head filter) — force heads empty so a stale/pruned
@@ -654,7 +654,7 @@ export default function SkuPage() {
             <span className="font-medium">{overviewData.memberResolution.head}:</span>{" "}
             {overviewData.memberResolution.membersMatched} of{" "}
             {overviewData.memberResolution.membersTotal} roster members matched in the
-            secondary register (it uses a separate PS-code name vocabulary).
+            secondary order-booking register (it uses a separate PS-code name vocabulary).
             {overviewData.memberResolution.unmatchedMembers.length > 0 && (
               <span className="ml-1 text-muted-foreground">
                 No register match: {overviewData.memberResolution.unmatchedMembers.join(", ")}.

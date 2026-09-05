@@ -483,10 +483,10 @@ const API_CATALOGUE: EndpointGroup[] = [
   {
     group: "SKU Deep Dive",
     endpoints: [
-      { method: "GET",  path: "/sku/facts",         description: "Item-level secondary sales facts — net, qty, discount, Laspeyres.", params: "fy, stateHead, member, level, page, limit" },
+      { method: "GET",  path: "/sku/facts",         description: "Item-level secondary order-booking facts — booked order net, qty, discount, Laspeyres.", params: "fy, stateHead, member, level, page, limit" },
       { method: "GET",  path: "/sku/capability",    description: "Which SKU pages and filters are available for the requested scope.", params: "fy, stateHead" },
-      { method: "GET",  path: "/sku/catalogue",     description: "Full product catalogue with ever-sold flags per channel.", params: "fy" },
-      { method: "GET",  path: "/sku/trend",         description: "Monthly secondary sales trend by item code.", params: "fy, code, stateHead" },
+      { method: "GET",  path: "/sku/catalogue",     description: "Full product catalogue with channel-history flags: primary sales or retailer order bookings.", params: "fy" },
+      { method: "GET",  path: "/sku/trend",         description: "Monthly secondary order-booking trend by item code.", params: "fy, code, stateHead" },
       { method: "GET",  path: "/sku/recommendations","description": "Peer-cohort SKU recommendations ranked by headroom.", params: "fy, stateHead" },
       { method: "GET",  path: "/sku/distributors",  description: "Distributor SKU spread — breadth, active brands, segment coverage.", params: "fy, stateHead" },
       { method: "GET",  path: "/sku/push-list",     description: "Per-distributor peer-cohort push list (K3 Review + Push tabs).", params: "fy, stateHead, distributor" },
@@ -532,7 +532,7 @@ const API_CATALOGUE: EndpointGroup[] = [
       { method: "GET",  path: "/mgmt/member-sheet-coverage", description: "Which members have working sheets and their last-read status.", params: "fy, stateHead" },
       { method: "GET",  path: "/mgmt/retailer-drift",      description: "Retailers that changed distributor assignment between FYs.", params: "fy, stateHead" },
       { method: "GET",  path: "/mgmt/retailer-identity",   description: "Retailer identity registry — RET# resolutions.", params: "fy, stateHead" },
-      { method: "GET",  path: "/mgmt/unmatched-names",     description: "Names in secondary register that don't match any known member.", params: "fy, stateHead" },
+      { method: "GET",  path: "/mgmt/unmatched-names",     description: "Names in the secondary order-booking register that don't match any known member.", params: "fy, stateHead" },
       { method: "GET",  path: "/mgmt/bridge/status",       description: "Distributor-TM bridge build status (background task).", params: "fy" },
       { method: "GET",  path: "/mgmt/verify",              description: "Cross-check control totals against verified anchors.", params: "fy" },
       { method: "POST", path: "/mgmt/report",              description: "Generate a management summary report for a state head.", params: "body: { fy, stateHead }" },

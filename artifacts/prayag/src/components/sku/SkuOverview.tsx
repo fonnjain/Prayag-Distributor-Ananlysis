@@ -134,7 +134,7 @@ export default function SkuOverview({ rows, loading, onDrill, unmapped, summary 
         <div className="flex flex-wrap gap-4 text-sm">
           <span>
             <span className="font-medium">{fmtCr(summary.totalNet)}</span>
-            <span className="text-muted-foreground ml-1">total net</span>
+            <span className="text-muted-foreground ml-1">total booked order net</span>
           </span>
           <span>
             <span className="font-medium">{summary.totalCodes.toLocaleString()}</span>
@@ -161,9 +161,9 @@ export default function SkuOverview({ rows, loading, onDrill, unmapped, summary 
           <TableHeader>
             <TableRow>
               <SortHead label="Segment" k="segment" />
-              <SortHead label="Net" k="net" align="right" />
-              <TableHead className="w-28 hidden sm:table-cell">Net %</TableHead>
-              <SortHead label="Qty (pcs)" k="qty" align="right" className="hidden md:table-cell" />
+              <SortHead label="Booked order net (Sub Total)" k="net" align="right" />
+              <TableHead className="w-28 hidden sm:table-cell">Booked order net %</TableHead>
+              <SortHead label="Booked qty (pcs)" k="qty" align="right" className="hidden md:table-cell" />
               <SortHead label="Bought" k="codesBought" align="right" />
               <SortHead label="Unbought" k="unbought" align="right" />
               <SortHead label="Gap codes' net" k="gapNet" align="right" />

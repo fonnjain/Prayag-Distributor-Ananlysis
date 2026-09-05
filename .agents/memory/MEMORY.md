@@ -155,3 +155,4 @@
 - [Legacy Segment date import split](legacy-segment-date-ambiguity.md) — FY24-25/25-26 numeric dates show locale-swap evidence; older Segment years and PSCode XLSX dates remain literal.
 - [Prompt load approval gates](prompt-load-gates.md) — source-load work requires explicit design sign-off and a reviewed diff before any write or production trigger.
 - [FY2024-25 order-booking restatement](fy2425-order-booking-restatement.md) — approved source variance applies only to isolated order history; frozen register/SKU correction remains separate.
+- [Secondary order-booking semantics](secondary-order-booking-semantics.md) — register and retailer-SKU rows are order bookings, never line-level sales, dispatch, sell-through, or offtake.

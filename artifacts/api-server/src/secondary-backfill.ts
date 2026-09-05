@@ -1,5 +1,5 @@
 // Secondary data backfill CLI.
-// Loads secondary sale registers and/or State Head Dashboards for the given
+// Loads secondary order-booking registers and/or State Head Dashboards for the given
 // fiscal years. Runs fully in dry-run mode by default — nothing is written
 // to the database unless --commit is explicitly passed.
 //

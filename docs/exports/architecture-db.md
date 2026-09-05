@@ -28,7 +28,7 @@
 | :--- | :--- | :--- | :--- |
 | `sale_line_all` | Invoice-line sales register (Primary). | `line_uid` (PK), `fy` (text), `invoice_no` (text), `amount` (numeric), `version_status` (text) | Uses `version_status` ('current'/'superseded') for idempotency. |
 | `primary_order_line` | Primary order booking records. | `line_uid` (PK), `fy` (text), `qty` (numeric), `qty_unit` ('Pcs'/'Ltr'), `taxable_value` (numeric) | Differentiates tanks by Liter (Ltr) vs Pieces (Pcs). |
-| `secondary_register_line` | Distributor-to-Retailer sales records. | `line_uid` (PK), `fy` (text), `customer` (text), `gross_amount` (numeric) | Distinct from primary sales; must not be summed together. |
+| `secondary_register_line` | Distributor-to-Retailer order-booking records. | `line_uid` (PK), `fy` (text), `customer` (text), `gross_amount` (numeric) | Distinct from primary sales; must not be summed together. |
 | `customer_master` | Source of truth for customer attribution. | `id` (PK), `company` (text), `state_head` (text), `status` (text) | Used to flag mismatches between sale sheets and official attribution. |
 | `dashboard_snapshot` | Cached dashboard aggregate JSON. | `id` (PK), `data` (jsonb), `manifest` (jsonb), `synced_at` (timestamp) | Built from a blend of DB and live Sheets. |
 | `sap_sales` | Records processed from SAP XLSX uploads. | `id` (PK), `fy` (text), `month_label` (text), `amount` (numeric) | Used for historical comparison and data verification. |

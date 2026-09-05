@@ -318,7 +318,7 @@ function quarterOf(label: string): "Q1" | "Q2" | "Q3" | "Q4" {
   return i < 3 ? "Q1" : i < 6 ? "Q2" : i < 9 ? "Q3" : "Q4";
 }
 
-// ── Tab 1: Secondary sales + flow gap at item-code level ─────────────────────
+// ── Tab 1: Secondary order booking + flow gap at item-code level ─────────────
 
 export type FlowGapCode = {
   code: string;

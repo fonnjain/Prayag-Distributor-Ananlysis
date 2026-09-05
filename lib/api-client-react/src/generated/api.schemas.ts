@@ -1268,7 +1268,7 @@ export interface MgmtDistributorFlows {
 }
 
 /**
- * NET (Sub Total) for a brand_canon or broad segment in a distributor's secondary sales.
+ * Booked order NET (Sub Total) for a brand_canon or broad segment in a distributor's secondary order bookings.
  */
 export interface MgmtDistributorBrandNet {
   /** brand_canon product-line name or broad segment label. */

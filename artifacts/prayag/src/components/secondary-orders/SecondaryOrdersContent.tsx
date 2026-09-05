@@ -167,7 +167,7 @@ export default function SecondaryOrdersContent() {
                 Secondary Orders
               </h1>
               <span className="rounded-md bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 border border-amber-200">
-                Order booking, not dispatch. Not comparable with secondary sales figures.
+                Order booking, not dispatch. Not comparable with secondary order-booking register figures.
               </span>
             </div>
           </div>

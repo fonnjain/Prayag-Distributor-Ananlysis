@@ -1,9 +1,9 @@
-// Distributor Deep Dive — the three analysis tabs (Secondary Sales, SKU
+// Distributor Deep Dive — the three analysis tabs (Secondary Order Booking, SKU
 // Evolution, Push) plus the vocabulary-reconciliation panel that underpins
 // every figure joining the primary and sheet vocabularies.
 //
 // Rules carried from the spec:
-//  - Every figure names its source (primary register / secondary register /
+//  - Every figure names its source (primary register / secondary order-booking register /
 //    member sheets / K3 push engine).
 //  - The unattributed share is shown prominently, never in a footnote.
 //  - Flow-gap language always states BOTH readings (stock building OR business
@@ -265,7 +265,7 @@ export function ReconPanel({ fy }: { fy: string }) {
   );
 }
 
-// ── Tab 1: Secondary Sales ───────────────────────────────────────────────────
+// ── Tab 1: Secondary Order Booking ───────────────────────────────────────────
 
 function BothReadings() {
   return (
@@ -283,20 +283,20 @@ function BothReadings() {
 export function SecondaryTabView({ fy, scope, recon, monthsParam = "" }: { fy: string; scope: string; recon: DistributorRecon | null; monthsParam?: string }) {
   const { data, error, loading } = useApi<SecondaryTab>(
     `${API}/mgmt/distributor-tab?fy=${encodeURIComponent(fy)}&${scope}&tab=secondary${monthsParam}`);
-  if (loading) return <Spinner label="Reading the secondary register…" />;
+  if (loading) return <Spinner label="Reading the secondary order-booking register…" />;
   if (error) return <div className="text-sm text-destructive">{error}</div>;
   if (!data) return null;
   const maxMonth = Math.max(1, ...data.monthly.map((m) => m.net));
   return (
     <div className="space-y-4" data-testid="tab-secondary">
       <UnattributedBanner recon={recon} />
-      <div className="text-sm font-medium">{data.coverageNote} <Source>secondary register</Source></div>
+      <div className="text-sm font-medium">{data.coverageNote} <Source>secondary order-booking register</Source></div>
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Card title="Secondary NET" value={formatCompact(data.netAmount)} sub={<Source>secondary register</Source>} testId="card-secondary-net" />
-        <Card title="Gross" value={formatCompact(data.grossAmount)} sub={<Source>secondary register</Source>} />
-        <Card title="Effective discount" value={data.effectiveDiscountPct != null ? `${data.effectiveDiscountPct.toFixed(1)}%` : "—"} sub={<>gross → net · <Source>secondary register</Source></>} />
-        <Card title="Retailers buying" value={`${data.retailerCount} (${data.activeRetailerCount} active)`} sub={<Source>secondary register</Source>} />
-        <Card title="Codes · segments" value={`${data.codeCount} · ${data.segments.length}`} sub={<>{data.segments.slice(0, 3).map((s) => s.segment).join(", ")} · <Source>secondary register</Source></>} />
+        <Card title="Booked order net (Sub Total)" value={formatCompact(data.netAmount)} sub={<Source>secondary order-booking register</Source>} testId="card-secondary-net" />
+        <Card title="Booked order gross" value={formatCompact(data.grossAmount)} sub={<Source>secondary order-booking register</Source>} />
+        <Card title="Effective discount" value={data.effectiveDiscountPct != null ? `${data.effectiveDiscountPct.toFixed(1)}%` : "—"} sub={<>gross → booked order net · <Source>secondary order-booking register</Source></>} />
+        <Card title="Retailers booking" value={`${data.retailerCount} (${data.activeRetailerCount} active)`} sub={<Source>secondary order-booking register</Source>} />
+        <Card title="Codes · segments" value={`${data.codeCount} · ${data.segments.length}`} sub={<>{data.segments.slice(0, 3).map((s) => s.segment).join(", ")} · <Source>secondary order-booking register</Source></>} />
       </div>
 
       <div className="grid md:grid-cols-2 gap-4">
@@ -314,7 +314,7 @@ export function SecondaryTabView({ fy, scope, recon, monthsParam = "" }: { fy: s
               </div>
             ))}
           </div>
-          <div className="mt-2"><Source>secondary register</Source></div>
+          <div className="mt-2"><Source>secondary order-booking register</Source></div>
         </div>
         <div className="border border-border rounded-lg p-4">
           <h4 className="text-sm font-semibold">Top retailers {data.top5SharePct != null && <span className="font-normal text-muted-foreground">— top 5 hold {data.top5SharePct.toFixed(1)}%</span>}</h4>
@@ -329,13 +329,13 @@ export function SecondaryTabView({ fy, scope, recon, monthsParam = "" }: { fy: s
               ))}
             </tbody>
           </table>
-          <div className="mt-2"><Source>secondary register (salesperson = register head)</Source></div>
+          <div className="mt-2"><Source>secondary order-booking register (salesperson = register head)</Source></div>
         </div>
       </div>
 
       {/* ── Flow gap — the point of the tab ─────────────────────────── */}
       <div className="border border-border rounded-lg p-4 space-y-3">
-        <h4 className="text-sm font-semibold">Flow gap — primary in vs secondary out, at item-code level</h4>
+        <h4 className="text-sm font-semibold">Flow gap — primary dispatch in vs retailer order booking, at item-code level</h4>
         {!data.primaryMatched ? (
           <p className="text-sm text-muted-foreground">
             No primary-register name matches this distributor under the identity rule, so the flow
@@ -346,8 +346,8 @@ export function SecondaryTabView({ fy, scope, recon, monthsParam = "" }: { fy: s
             <div className="grid grid-cols-3 gap-3">
               <Card title="Primary in (bought from Prayag)" value={formatCompact(data.primaryInTotal)}
                 sub={<Source>primary register — {data.primarySaleNames.join("; ")}</Source>} testId="card-flow-in" />
-              <Card title="Secondary out (sold to retailers)" value={formatCompact(data.secondaryOutTotal)}
-                sub={<Source>secondary register</Source>} testId="card-flow-out" />
+              <Card title="Retailer order booking" value={formatCompact(data.secondaryOutTotal)}
+                sub={<Source>secondary order-booking register</Source>} testId="card-flow-out" />
               <Card title="Gap" value={data.flowGapTotal != null ? formatCompact(data.flowGapTotal) : "—"}
                 sub={`${data.flaggedCodes} code(s) flagged`} testId="card-flow-gap" />
             </div>
@@ -357,7 +357,7 @@ export function SecondaryTabView({ fy, scope, recon, monthsParam = "" }: { fy: s
               <table className="w-full text-xs mt-1">
                 <thead><tr className="text-left text-muted-foreground border-b border-border">
                   <th className="py-1 pr-2">Segment</th><th className="py-1 pr-2 text-right">Primary in</th>
-                  <th className="py-1 pr-2 text-right">Secondary out</th><th className="py-1 text-right">Gap</th>
+                  <th className="py-1 pr-2 text-right">Retailer order booking</th><th className="py-1 text-right">Gap</th>
                 </tr></thead>
                 <tbody>
                   {data.flowGapBySegment.slice(0, 12).map((s) => (
@@ -510,9 +510,9 @@ export function PushTabView({ fy, scope, recon, monthsParam = "" }: { fy: string
         </div>
         <p className="text-sm mt-1">{data.verdictDetail}</p>
         <p className="text-xs text-muted-foreground mt-1">
-          Primary in {formatCompact(data.flowSummary.primaryIn)} vs secondary out {formatCompact(data.flowSummary.secondaryOut)}
+          Primary dispatch in {formatCompact(data.flowSummary.primaryIn)} vs retailer order booking {formatCompact(data.flowSummary.secondaryOut)}
           {data.flowSummary.ratio != null && <> · {(data.flowSummary.ratio * 100).toFixed(0)}% flows through</>}
-          {" "}· <Source>primary + secondary registers</Source>
+          {" "}· <Source>primary register + secondary order-booking register</Source>
         </p>
         {v === "CLEAR_STOCK_FIRST" && <div className="mt-1"><BothReadings /></div>}
       </div>
@@ -564,7 +564,7 @@ export function PushTabView({ fy, scope, recon, monthsParam = "" }: { fy: string
                   Discount position: own {r.ownDiscountPct != null ? `${r.ownDiscountPct.toFixed(1)}%` : "—"} vs territory
                   norm {r.territoryNormPct != null ? `${r.territoryNormPct.toFixed(1)}%` : "—"}
                   {r.overDiscounted && " — volume on an over-discounted code is a margin question first"}.
-                  {" "}<Source>secondary register discount_pct</Source>
+                  {" "}<Source>secondary order-booking register discount_pct</Source>
                 </p>
               )}
               {r.candidateRetailers.length > 0 && (
@@ -576,7 +576,7 @@ export function PushTabView({ fy, scope, recon, monthsParam = "" }: { fy: string
                       {cr.name} ({formatCompact(cr.segmentNet)} in segment{cr.salesperson ? `, via ${cr.salesperson}` : ""})
                     </span>
                   ))}{" "}
-                  <Source>secondary register</Source>
+                  <Source>secondary order-booking register</Source>
                 </p>
               )}
             </div>
@@ -633,7 +633,7 @@ export function PushTabView({ fy, scope, recon, monthsParam = "" }: { fy: string
                 ))}
               </tbody>
             </table>
-            <Source>secondary register, prior FY</Source>
+            <Source>secondary order-booking register, prior FY</Source>
           </div>
         )}
         {data.coverage.soleCoverageDistricts.length > 0 && (

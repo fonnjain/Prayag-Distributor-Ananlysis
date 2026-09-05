@@ -5,7 +5,7 @@
 //     the rollup assigned them to (primary = max value).
 //
 // (B) Destocking alert — retrospective run: ≥3 consecutive months zero
-//     primary purchase while secondary sell-through continues.  Print
+//     primary purchase while secondary order booking continues.  Print
 //     which distributors it catches and when it would first have fired.
 //
 // (C) A1/A2 overlap — how many members fire both; are they the same alert?
@@ -179,7 +179,7 @@ async function diagnoseDestocking(): Promise<void> {
 
   console.log(`
   Rule: a distributor fires when they have ≥ 3 consecutive months of zero
-  primary purchase from Prayag while secondary sell-through is positive.
+  primary purchase from Prayag while secondary order booking is positive.
 
   This fires BEFORE retailers stop — the stock-out happens later.
 

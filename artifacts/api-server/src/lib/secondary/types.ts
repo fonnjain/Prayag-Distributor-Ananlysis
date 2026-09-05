@@ -1,5 +1,5 @@
 // Shared types for the secondary-data layer.
-// Secondary = distributor -> retailer (order booking + sales received).
+// Secondary register data = distributor-to-retailer order booking.
 // PRIMARY = Prayag -> distributor.  The two must NEVER be summed together.
 
 export type CellValue = string | number | boolean | Date | null | undefined;

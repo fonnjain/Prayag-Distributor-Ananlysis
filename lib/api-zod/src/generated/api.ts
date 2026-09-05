@@ -658,12 +658,12 @@ export const GetMgmtDistributorDeepDiveResponse = zod.object({
   "segment": zod.string().describe('brand_canon product-line name or broad segment label.'),
   "net": zod.number(),
   "pct": zod.number().describe('Share of this segment in the distributor\'s total NET (0–100).')
-}).describe('NET (Sub Total) for a brand_canon or broad segment in a distributor\'s secondary sales.')).nullish().describe('Top brand_canons by net_amount in recentFy (descending).'),
+}).describe('Booked order NET (Sub Total) for a brand_canon or broad segment in a distributor\'s secondary order bookings.')).nullish().describe('Top brand_canons by net_amount in recentFy (descending).'),
   "netByBroadSegment": zod.array(zod.object({
   "segment": zod.string().describe('brand_canon product-line name or broad segment label.'),
   "net": zod.number(),
   "pct": zod.number().describe('Share of this segment in the distributor\'s total NET (0–100).')
-}).describe('NET (Sub Total) for a brand_canon or broad segment in a distributor\'s secondary sales.')).nullish().describe('Same data aggregated to broad segment level.'),
+}).describe('Booked order NET (Sub Total) for a brand_canon or broad segment in a distributor\'s secondary order bookings.')).nullish().describe('Same data aggregated to broad segment level.'),
   "crossSellDepth": zod.number().nullish().describe('Average distinct brand_canons per retailer (all closed FYs).'),
   "concentrationHhi": zod.number().nullish().describe('HHI over brand_canon NET shares in recentFy (0–10000).'),
   "matchedRetailers": zod.number().nullish().describe('D1 retailers that appeared in secondary_register_line (by LOWER TRIM match).'),

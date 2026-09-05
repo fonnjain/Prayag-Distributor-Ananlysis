@@ -1,5 +1,5 @@
 // Secondary register loader — xlsx backfill and live Sheets reads.
-// Handles FY2021-22 through FY2025-26 secondary sale registers.
+// Handles FY2021-22 through FY2025-26 secondary order-booking registers.
 // Mirrors the primary backfill.ts + xlsxStream.ts pattern.
 //
 // dryRun=true: runs full parse + validation, counts what would be inserted,

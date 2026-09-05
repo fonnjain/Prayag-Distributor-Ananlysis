@@ -40,7 +40,7 @@ function makeContext(): DetectionContext {
     personsByNameKey: new Set(),
     departedHeadNames: new Set(),
     retailerPrimaryDist: new Map(),
-    // Raw SKU sell-through is present for every month in the source fixture;
+    // Raw SKU order-booking data is present for every month in the source fixture;
     // skuCompleteMonths controls which of those months detection may use.
     distSecMonthly: new Map(
       COMPLETE_MONTHS.map((monthLabel) => [`ACME DISTRIBUTOR|${FY}|${monthLabel}`, 1_000_000]),

@@ -152,9 +152,9 @@ export default function SkuDrill({ segment, rows, loading, truncated, onBack, se
                 <SortHead label="#" k="rank" />
                 <TableHead>Code</TableHead>
                 <TableHead className="hidden sm:table-cell">Item Name</TableHead>
-                <SortHead label="Net" k="net" align="right" />
-                <TableHead className="text-right hidden sm:table-cell">Net %</TableHead>
-                <SortHead label="Qty (pcs)" k="qty" align="right" />
+                <SortHead label="Booked order net (Sub Total)" k="net" align="right" />
+                <TableHead className="text-right hidden sm:table-cell">Booked order net %</TableHead>
+                <SortHead label="Booked qty (pcs)" k="qty" align="right" />
                 <SortHead label="Months" k="months" align="right" />
               </TableRow>
             </TableHeader>
@@ -199,7 +199,7 @@ export default function SkuDrill({ segment, rows, loading, truncated, onBack, se
       )}
 
       <p className="text-xs text-muted-foreground">
-        Months = number of distinct months with sales. Sorted by net (highest first) by default.
+        Months = number of distinct months with order bookings. Sorted by booked order net (highest first) by default.
       </p>
     </div>
   );

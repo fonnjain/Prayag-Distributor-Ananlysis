@@ -7,7 +7,7 @@
 //
 // DATA SOURCES:
 //   Retailers: secondary_sku_line (ctx.retailerSale + ctx.retailerSku)
-//     — the authoritative sell-out source. sale_line_current (primary dispatch)
+//     — the authoritative retailer order-booking source. sale_line_current (primary dispatch)
 //       records distributor→company shipments and does NOT carry per-retailer figures.
 //   Distributors / direct dealers: sale_line_current (ctx.customerSale + ctx.customerCode)
 
@@ -94,7 +94,7 @@ type RetailerIndex = {
   codesByMonth: Map<string, Map<string, Set<string>>>;
   // retailer → `${fy}|${monthLabel}` → segmentCanon → net_amount total
   segsByMonth: Map<string, Map<string, Map<string, number>>>;
-  // all retailers with sale rows in a given `${fy}|${monthLabel}` window key
+  // all retailers with order-booking rows in a given `${fy}|${monthLabel}` window key
   retailersInWindow: Map<string, Set<string>>;  // window key → Set<retailer>
 };
 

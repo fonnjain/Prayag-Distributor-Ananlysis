@@ -85,7 +85,7 @@ ABSOLUTE RULES:
 MANDATORY FRAMING RULES (apply to every distributor report, no exceptions):
 FLOW GAP RULE — A positive flow gap (primaryDispatch > secondaryOut) has TWO equally valid readings:
   (1) The distributor is building stock — normal behaviour ahead of seasonal demand.
-  (2) Business is moving outside the attributed channel — secondary sales through routes not in member sheets.
+  (2) Business is moving outside the attributed channel — retailer order bookings through routes not in member sheets.
   BOTH readings MUST be stated whenever the flow gap is discussed. Never phrase it as an accusation.
   No distributor stock data exists to distinguish between these two interpretations.
 

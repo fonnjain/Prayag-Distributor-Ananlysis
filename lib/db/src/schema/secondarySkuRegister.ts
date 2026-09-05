@@ -10,7 +10,7 @@ import { z } from "zod/v4";
 
 // ── secondary_sku_line ────────────────────────────────────────────────────────
 //
-// One row per Cat. No. line from a secondary sales register (distributor → retailer),
+// One row per Cat. No. line from a secondary order-booking register (distributor → retailer),
 // stored at item-code granularity for the SKU Deep Dive feature.
 //
 // This is DISTINCT from secondary_register_line (which stores at brand/segment level).

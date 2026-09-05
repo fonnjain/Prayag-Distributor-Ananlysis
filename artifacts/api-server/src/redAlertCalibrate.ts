@@ -260,7 +260,7 @@ async function printSection9(
 
   // ── 9b/c: month coverage table ─────────────────────────────────────────────
   console.log("\n  9b/c. Month coverage: register_month_state vs secondary_sku_line\n");
-  console.log("  Authoritative source for retailers: secondary_sku_line (sell-out data).");
+  console.log("  Authoritative source for retailers: secondary_sku_line (retailer order-booking data).");
   console.log("  Guard 3 gates B/C alerts on primary frozen months (register_month_state).");
   console.log("  If a month has secondary_sku_line rows but is NOT in register_month_state,");
   console.log("  Guard 3 is blocking retailer alerts on real data.\n");

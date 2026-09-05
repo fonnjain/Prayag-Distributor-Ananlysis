@@ -320,7 +320,7 @@ export async function resolveSkuDetail(fy: string): Promise<GraphNode> {
 
   const measures: MeasureValue[] = facts
     ? [
-        mv("secondary_sale", "Secondary register net (period)", facts.summary.totalNet),
+        mv("secondary_sale", "Secondary order-booking net (Sub Total, period)", facts.summary.totalNet),
         mv("secondary_sale", "Distinct item codes", facts.summary.totalCodes, "count"),
         mv("secondary_sale", "Segments bought", facts.summary.segmentsBought, "count"),
       ]

@@ -131,10 +131,10 @@ perf      = requests.get(f"{BASE}/customers/performance", params={"fy": "2026-27
 
 | Method | Path | Description | Params |
 |--------|------|-------------|--------|
-| `GET` | `/sku/facts` | Item-level secondary sales facts — net, qty, discount, Laspeyres. | `fy, stateHead, member, level, page, limit` |
+| `GET` | `/sku/facts` | Item-level secondary order-booking facts — booked order net, qty, discount, Laspeyres. | `fy, stateHead, member, level, page, limit` |
 | `GET` | `/sku/capability` | Which SKU pages and filters are available for the requested scope. | `fy, stateHead` |
-| `GET` | `/sku/catalogue` | Full product catalogue with ever-sold flags per channel. | `fy` |
-| `GET` | `/sku/trend` | Monthly secondary sales trend by item code. | `fy, code, stateHead` |
+| `GET` | `/sku/catalogue` | Full product catalogue with channel-history flags: primary sales or retailer order bookings. | `fy` |
+| `GET` | `/sku/trend` | Monthly secondary order-booking trend by item code. | `fy, code, stateHead` |
 | `GET` | `/sku/recommendations` | Peer-cohort SKU recommendations ranked by headroom. | `fy, stateHead` |
 | `GET` | `/sku/distributors` | Distributor SKU spread — breadth, active brands, segment coverage. | `fy, stateHead` |
 | `GET` | `/sku/push-list` | Per-distributor peer-cohort push list (K3 Review + Push tabs). | `fy, stateHead, distributor` |
@@ -186,7 +186,7 @@ perf      = requests.get(f"{BASE}/customers/performance", params={"fy": "2026-27
 | `GET` | `/mgmt/member-sheet-coverage` | Which members have working sheets and their last-read status. | `fy, stateHead` |
 | `GET` | `/mgmt/retailer-drift` | Retailers that changed distributor assignment between FYs. | `fy, stateHead` |
 | `GET` | `/mgmt/retailer-identity` | Retailer identity registry — RET# resolutions. | `fy, stateHead` |
-| `GET` | `/mgmt/unmatched-names` | Names in secondary register that don't match any known member. | `fy, stateHead` |
+| `GET` | `/mgmt/unmatched-names` | Names in the secondary order-booking register that don't match any known member. | `fy, stateHead` |
 | `GET` | `/mgmt/bridge/status` | Distributor-TM bridge build status (background task). | `fy` |
 | `GET` | `/mgmt/verify` | Cross-check control totals against verified anchors. | `fy` |
 | `POST` | `/mgmt/report` | Generate a management summary report for a state head. | `body: { fy, stateHead }` |

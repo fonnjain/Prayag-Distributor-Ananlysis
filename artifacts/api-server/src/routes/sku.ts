@@ -9,7 +9,8 @@
  *
  * GET /api/sku/catalogue
  *   Returns authoritative current-catalogue code counts with optional local
- *   taxonomy enrichment. Breadth itself remains sale-history based.
+ *   taxonomy enrichment. Breadth remains channel-history based: primary sales
+ *   for primary levels and retailer order bookings for retailer level.
  *
  * ── Level semantics ──
  *   distributor   — sale_line_current, type_raw null or not matching '%direct%'
@@ -284,7 +285,7 @@ router.get("/sku/catalogue", async (req: Request, res: Response): Promise<void> 
 
     res.json({
       // ── Authoritative current-catalogue counts ────────────────────────────
-      // NOT used as breadth denominator (breadth is sale-history based).
+      // NOT used as breadth denominator (breadth uses channel history).
       // Use completeness.rows[seg].codesEverSold for the breadth denominator.
       authorityCatalogue: {
         bySegment: cat.bySegment,

@@ -189,7 +189,7 @@ export function detectAlerts(
       RETAILER_RUPEES: cfg.MATERIALITY_FLOORS.RETAILER_RUPEES,
     },
   };
-  // B3 is based on retailer sell-through, so it must never treat a
+  // B3 is based on retailer order booking, so it must never treat a
   // frozen-primary month without raw SKU rows as a zero-buying month. Build it
   // against the same SKU-qualified window that drives S1; all other B codes
   // keep the normal primary-complete window.

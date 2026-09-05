@@ -15,7 +15,7 @@ import { z } from "zod/v4";
 
 // ── Table 1: secondary_register_line ─────────────────────────────────────────
 //
-// One row per line from a secondary sales register (distributor → retailer).
+// One row per line from a secondary order-booking register (distributor → retailer).
 // Source: per-FY secondary register spreadsheets (FY2021-22 → FY2025-26).
 // Distinct from primary sale_line — the two must NEVER be summed together.
 //

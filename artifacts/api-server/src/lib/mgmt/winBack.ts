@@ -1,6 +1,6 @@
 // Phase 6: Dormant / win-back list from secondary_register_line.
 //
-// Returns retailers/customers who had Order Booking or Sale in FY2024-25,
+// Returns retailers/customers who had order bookings in FY2024-25,
 // FY2025-26 or FY2026-27 (PSCode_3 brand-level backfill, Apr–Jun 2026) for the
 // selected member, but are NOT present in the member's current working-sheet
 // customer list (FY2026-27 Phase 2 data).

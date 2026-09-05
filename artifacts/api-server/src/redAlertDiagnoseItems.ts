@@ -238,7 +238,7 @@ async function diagnoseAradhyaKedia(): Promise<void> {
         GROUP BY fy, month_label`,
       [[FY_COMPLETE, FY_YTD]],
     ),
-    // Secondary: Aradhya Kedia as a distributor (sells to retailers)
+    // Secondary: Aradhya Kedia as a distributor (books orders from retailers)
     pool.query<{ fy: string; month_label: string; net: string }>(
       `SELECT fy, month_label, SUM(net_amount)::float8::text AS net
          FROM secondary_sku_line
@@ -258,16 +258,16 @@ async function diagnoseAradhyaKedia(): Promise<void> {
   console.log(`
   Aradhya Kedia Distribution House Pvt Ltd
   Role A (CUSTOMER): buys from Prayag on primary invoice.
-  Role B (DISTRIBUTOR): sells to retailers, tracked in secondary_sku_line.
+  Role B (DISTRIBUTOR): books orders from retailers, tracked in secondary_sku_line.
 
-  A "destocking" pattern: primary purchases stop while distributor keeps selling
-  from buffer stock — secondary sales decline gradually as stock runs out.
+  A "destocking" pattern: primary purchases stop while distributor keeps receiving bookings
+  from buffer stock — secondary order bookings decline gradually as ordering stops.
 `);
 
   // Print FY2025-26 first, then FY2026-27
   for (const [fy, months] of [[FY_COMPLETE, months2526], [FY_YTD, months2627]] as const) {
     console.log(`  ── FY${fy} ──`);
-    console.log("  Month      Primary (buys from Prayag)   Secondary (sells to retailers)");
+    console.log("  Month      Primary (buys from Prayag)   Secondary (books orders from retailers)");
     console.log(sep("-", 70));
 
     let primTotal = 0, secTotal = 0;
@@ -309,7 +309,7 @@ async function diagnoseAradhyaKedia(): Promise<void> {
   }
   if (secFy2526total > 0 && secFy2627total > 0) {
     const ratio = secFy2627total / secFy2526total;
-    console.log(`  Secondary sell-through FY${FY_YTD}: ${cr(secFy2627total)} (${(ratio*100).toFixed(1)}% of full FY${FY_COMPLETE}).`);
+    console.log(`  Secondary order booking FY${FY_YTD}: ${cr(secFy2627total)} (${(ratio*100).toFixed(1)}% of full FY${FY_COMPLETE}).`);
   }
   const ytdMonths = [...secByMonth.keys()].filter((k) => k.startsWith(FY_YTD)).length;
   const compMonths = months2526.length;
@@ -323,7 +323,7 @@ async function diagnoseAradhyaKedia(): Promise<void> {
     console.log("     The 15 retailers who stopped beneath Aradhya Kedia are likely stock-out,");
     console.log("     not independent business decisions.");
   } else {
-    console.log("  Secondary sell-through is within normal range for a distributor still ordering.");
+    console.log("  Secondary order booking is within normal range for a distributor still ordering.");
   }
 }
 

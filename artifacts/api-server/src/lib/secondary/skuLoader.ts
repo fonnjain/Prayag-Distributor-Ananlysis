@@ -1,9 +1,9 @@
 /**
- * Secondary SKU register loader — Phase K1.
+ * Secondary SKU order-booking loader — Phase K1.
  *
- * Reads the closed-year secondary registers at item-code (Cat. No.) granularity
+ * Reads the closed-year secondary order-booking registers at item-code (Cat. No.) granularity
  * and inserts rows into secondary_sku_line. The existing secondary_register_line
- * loader stores at brand/segment level; this loader stores at SKU level.
+ * loader stores order bookings at brand/segment level; this loader stores them at SKU level.
  *
  * Supported FYs: 2024-25, 2025-26 (15-column standard layout).
  * FY2023-24 has a different 14-column layout; it is guarded by a column-count
@@ -12,7 +12,7 @@
  * Column detection is header-name based (not positional) for resilience.
  * Month is derived from the Date column via the existing toMonthLabel helper.
  *
- * NET = Sub Total column. Order Total is never used.
+ * BOOKED ORDER NET = Sub Total column. Order Total is never used.
  */
 
 import crypto from "node:crypto";

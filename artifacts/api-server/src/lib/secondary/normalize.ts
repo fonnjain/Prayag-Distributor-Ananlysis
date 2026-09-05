@@ -1,4 +1,4 @@
-// Normalization layer for secondary sale registers.
+// Normalization layer for secondary order-booking registers.
 // Mirrors the structure of lib/registers/normalize.ts for primary registers.
 // Maps raw row cells to canonical heads/states/brands using the same config
 // files used by the primary pipeline (normalize.json, head_alias.json).

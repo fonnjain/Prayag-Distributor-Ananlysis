@@ -42,7 +42,7 @@ export type SkuAlertCoverage = {
  *
  * Detection removes a frozen month when no distributor-level raw SKU rows
  * exist, so this deliberately uses the same condition instead of treating
- * dashboard head-month data as item-level sell-through evidence.
+ * dashboard head-month data as item-level order-booking evidence.
  */
 export async function getSkuAlertCoverage(pool: DbPool, fy: string): Promise<SkuAlertCoverage> {
   const [frozenResult, skuMonthsResult, latestLoadedResult, productWiseResult] = await Promise.all([
@@ -316,9 +316,9 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
       secFyList,
     ),
 
-    // 12. Retailer sale aggregates from secondary_sku_line — authoritative for B1–B5.
+    // 12. Retailer order-booking aggregates from secondary_sku_line — authoritative for B1–B5.
     // Retailers are not represented in sale_line_current (primary dispatch); their
-    // sell-out transactions live only in secondary_sku_line.
+    // Retailer order-booking transactions live only in secondary_sku_line.
     pool.query<{ fy: string; month_label: string; retailer: string; val: string }>(
       `SELECT fy, month_label, retailer, SUM(net_amount)::float8::text AS val
          FROM secondary_sku_line
@@ -353,7 +353,7 @@ export async function buildDetectionContext(pool: DbPool, fys: string[]): Promis
       secFyList,
     ),
 
-    // 15. Distributor monthly secondary sell-through — for S1 destocking.
+    // 15. Distributor monthly secondary order booking — for S1 destocking.
     pool.query<{ fy: string; month_label: string; distributor: string; val: string }>(
       `SELECT fy, month_label, distributor, SUM(net_amount)::float8::text AS val
          FROM secondary_sku_line

@@ -105,10 +105,10 @@ export type CustomerSaleRow = {
   qty: number;     // SUM(qty)
 };
 
-// Retailer-level sale aggregates from secondary_sku_line (the authoritative source
+// Retailer-level order-booking aggregates from secondary_sku_line (the authoritative source
 // for retailer transactions). Used by B1–B5 for retailer-type entities; primary
 // sale_line_current is NOT used for retailers because it records primary dispatch
-// (distributor→company) not per-retailer sell-out.
+// (distributor→company) not per-retailer order booking.
 export type RetailerSaleRow = {
   fy: string;
   monthLabel: string;
@@ -205,8 +205,8 @@ export type DetectionContext = {
   customerSale: CustomerSaleRow[];
   customerCode: CustomerCodeRow[];
 
-  // Secondary retailer sale data from secondary_sku_line — authoritative for retailers.
-  // Retailers do not appear in sale_line_current (primary dispatch); their sell-out
+  // Secondary retailer order-booking data from secondary_sku_line — authoritative for retailers.
+  // Retailers do not appear in sale_line_current (primary dispatch); their order bookings
   // transactions live here. B1–B5 route to this source for retailer-type entities.
   retailerSale: RetailerSaleRow[];
   retailerSku: RetailerSkuRow[];
@@ -242,7 +242,7 @@ export type DetectionContext = {
   // highest SUM(net_amount). Used to attribute a stopped retailer to its main supplier.
   retailerPrimaryDist: Map<string, Map<string, string>>;  // fy → retailer → primary_distributor
 
-  // Distributor monthly secondary sell-through — for S1 destocking detection.
+  // Distributor monthly secondary order booking — for S1 destocking detection.
   // Key: `${distributor_name}|${fy}|${monthLabel}`. Value: SUM(net_amount).
   distSecMonthly: Map<string, number>;  // `${dist}|${fy}|${month}` → net_amount
 

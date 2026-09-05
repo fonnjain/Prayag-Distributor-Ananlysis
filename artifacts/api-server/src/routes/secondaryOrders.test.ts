@@ -258,7 +258,7 @@ describe("export workbook contract", () => {
   it("Info sheet rows include ORDER BOOKING label", () => {
     const infoRows: [string, string][] = [
       ["Basis", "ORDER BOOKING — not dispatch"],
-      ["Note", "Not comparable with secondary sales figures (secondary_sku_line / secondary_register_line)."],
+      ["Note", "Not comparable with secondary order-booking register figures (secondary_sku_line / secondary_register_line)."],
       ["Basic Order Value", "Excludes GST. Use this for commercial analysis."],
       ["Dealer Order Value", "Includes GST. Stored for completeness only."],
     ];

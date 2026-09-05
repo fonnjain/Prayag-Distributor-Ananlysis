@@ -38,8 +38,8 @@ Approval requires both:
 
 The two approvers must agree on the exact consumer and must explicitly label
 its metric basis as **ORDER BOOKING**. No approval can authorize silently
-mixing these values with dispatch, `secondary_register_line`,
-`secondary_sku_line`, or `sale_line`.
+mixing these values with dispatch, secondary order-booking register data
+(`secondary_register_line` or `secondary_sku_line`), or `sale_line`.
 
 ## Current scope
 

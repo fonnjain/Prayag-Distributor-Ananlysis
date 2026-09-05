@@ -72,7 +72,7 @@ async function main() {
     console.log(`    ${sample.priorMonths.join(", ")}  (${sample.priorMonths.length} months)`);
     console.log();
     console.log("  Interpretation:");
-    console.log("    A retailer fires B3 if they had non-zero secondary sales in");
+    console.log("    A retailer fires B3 if they had non-zero secondary order bookings in");
     console.log(`    [${sample.priorMonths.join(", ")}] (FY${FY_COMPLETE}) AND zero in`);
     console.log(`    [${sample.currentMonths.join(", ")}] (FY${FY_YTD}).`);
     console.log();
