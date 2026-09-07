@@ -20,6 +20,7 @@ import {
 import { listSheetTabs, readTabRowsChunked, type SheetCellValue, type SheetTab } from "./sheetsApi.js";
 import { classifyTabName } from "./tabAudit.js";
 import { logger } from "../logger.js";
+import { createHash } from "node:crypto";
 
 // Monthly tab name pattern. Handles abbreviated and full month names, with or
 // without a two-digit year suffix: "Apr", "April", "Apr-26", "July", "Jul-26".
@@ -33,6 +34,13 @@ export type RegisterReadResult = {
   columns: RegisterColumns;
   rowsScanned: number;
   tabsRead: string[];
+  /** SHA-256 of ordered, raw Sheet API rows per tab, before header/data filtering. */
+  tabContentHashes: Record<string, string>;
+  contentHash: string;
+  /** Exact raw-source evidence by FY-qualified month; fallback applies to
+   * single-sheet workbooks whose rows carry their own month column. */
+  monthSources: Record<string, Array<{ tab: string; contentHash: string }>>;
+  fallbackSources: Array<{ tab: string; contentHash: string }>;
   /** Tabs present in the workbook that were NOT read as sales data: non-month
    *  names (Sheet11, WT, INDEX, …) and month tabs whose calendar month has not
    *  started yet. Callers on the sync path feed these into auditRegisterTabs. */
@@ -92,8 +100,12 @@ export async function readRegisterFromSheets(
   let totalRowsScanned = 0;
   let lastColumns: RegisterColumns | null = null;
   const tabsRead: string[] = [];
+  const tabContentHashes: Record<string, string> = {};
+  const monthSources: RegisterReadResult["monthSources"] = {};
+  const fallbackSources: RegisterReadResult["fallbackSources"] = [];
 
   for (const tabTitle of tabsToRead) {
+    const rawHash = createHash("sha256");
     let columns: RegisterColumns | null = null;
     let skipTab = false;
     // Derive a month label from the tab name for sheets that have no MONTH
@@ -110,6 +122,9 @@ export async function readRegisterFromSheets(
         if (skipTab) break;
         const rowNumber = startRow + i;
         const values = rows[i] as CellValue[];
+        // Delimiters make [1, 23] distinct from [12, 3]; row order remains
+        // significant and this happens before header/blank/invalid filtering.
+        rawHash.update(JSON.stringify(values)).update("\n");
         if (!columns) {
           if (isHeaderRow(values)) {
             columns = mapRegisterColumns(values, rowNumber);
@@ -146,7 +161,14 @@ export async function readRegisterFromSheets(
       }
     });
 
-    if (columns) tabsRead.push(tabTitle);
+    if (columns) {
+      tabsRead.push(tabTitle);
+      tabContentHashes[tabTitle] = rawHash.digest("hex");
+      const label = toMonthLabel(tabTitle, fyOverride);
+      const source = { tab: tabTitle, contentHash: tabContentHashes[tabTitle] };
+      if (label) (monthSources[label] ??= []).push(source);
+      else fallbackSources.push(source);
+    }
   }
 
   if (!lastColumns) {
@@ -157,7 +179,10 @@ export async function readRegisterFromSheets(
     );
   }
 
-  return { columns: lastColumns, rowsScanned: totalRowsScanned, tabsRead, tabsNotRead };
+  const contentHash = createHash("sha256")
+    .update(tabsRead.map((tab) => `${tab}\u0000${tabContentHashes[tab]}`).join("\n"))
+    .digest("hex");
+  return { columns: lastColumns, rowsScanned: totalRowsScanned, tabsRead, tabsNotRead, tabContentHashes, contentHash, monthSources, fallbackSources };
 }
 
 export type { SheetCellValue };

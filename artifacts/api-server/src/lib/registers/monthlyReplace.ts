@@ -24,7 +24,8 @@
 // startup via assertMonthAnchors().
 
 import { and, eq, sql as dsql } from "drizzle-orm";
-import { db, saleLines, secondarySkuLines, registerMonthState, type InsertSaleLine } from "@workspace/db";
+import { createHash } from "node:crypto";
+import { db, saleLines, secondarySkuLines, registerMonthState, registerMonthlyIngestLedger, type InsertSaleLine } from "@workspace/db";
 import { allowDelete } from "../deleteGuard.js";
 import { logger } from "../logger.js";
 
@@ -35,6 +36,27 @@ const BATCH_SIZE = 1000;
 // A genuine shrink beyond 2% requires the manual force route to accept the
 // lower count — an explicit human decision, never silent.
 export const SHORT_READ_TOLERANCE = 0.98;
+
+export function classifyMonthlyReadGuard(args: {
+  force: boolean;
+  frozen: boolean;
+  lastGood: number | null;
+  sheetRows: number;
+}): "rejected-shrink" | "aborted-short-read" | null {
+  const { force, frozen, lastGood, sheetRows } = args;
+  if (!force && frozen && lastGood != null && sheetRows < lastGood) {
+    return "rejected-shrink";
+  }
+  if (
+    !force &&
+    lastGood != null &&
+    lastGood > 0 &&
+    (sheetRows === 0 || sheetRows < Math.floor(lastGood * SHORT_READ_TOLERANCE))
+  ) {
+    return "aborted-short-read";
+  }
+  return null;
+}
 
 const MONTH_INDEX: Record<string, number> = {
   Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
@@ -87,13 +109,15 @@ export function openMonthLabels(fy: string, now: Date = new Date()): string[] {
 
 export interface MonthReplaceResult {
   month: string;
-  action: "replaced" | "frozen-skipped" | "frozen-anchored" | "aborted-short-read" | "failed";
+  action: "replaced" | "frozen-skipped" | "frozen-anchored" | "aborted-short-read" | "rejected-shrink" | "failed";
   sheetRows: number;
   sheetAmount: number;
   dbRowsBefore: number | null;
   rowsWritten: number | null;
+  projectedRowsWritten?: number | null;
   lastGoodRows: number | null;
   detail?: string;
+  ledgerPreview?: RegisterMonthlyLedgerRecord;
 }
 
 export interface ReplaceSummary {
@@ -101,6 +125,198 @@ export interface ReplaceSummary {
   months: MonthReplaceResult[];
   /** Rows excluded because month_label could not be derived. Always logged loudly. */
   unlabelledRows: number;
+}
+
+// Only replacement-controlled values participate in evidence. Identity,
+// timestamps, version metadata, and post-ingest channel enrichment are excluded.
+// Decimal and date text are canonicalized before hashing.
+const EVIDENCE_FIELDS = ["fy", "serialNo", "invoiceNo", "invoiceDate", "monthLabel", "customer", "code", "color", "qty", "qtyLtr", "saleRate", "amount", "groupRaw", "groupCanon", "station", "stateRaw", "stateCanon", "headRaw", "headCanon", "isTerritory", "typeRaw", "source"] as const;
+function canonicalValue(v: unknown): string | null {
+  if (v == null) return null;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  const raw = String(v).trim();
+  if (/^-?\d+(\.\d+)?$/.test(raw)) {
+    const negative = raw.startsWith("-");
+    const [wholeRaw, fractionRaw = ""] = raw.replace(/^[+-]/, "").split(".");
+    const whole = wholeRaw.replace(/^0+(?=\d)/, "") || "0";
+    const fraction = fractionRaw.replace(/0+$/, "");
+    const normalized = fraction ? `${whole}.${fraction}` : whole;
+    return negative && normalized !== "0" ? `-${normalized}` : normalized;
+  }
+  // PostgreSQL date values and sheet ISO dates compare as the date, not a
+  // timezone-dependent instant.
+  if (/^\d{4}-\d{2}-\d{2}(?:T.*)?$/.test(raw)) return raw.slice(0, 10);
+  return raw;
+}
+function evidenceRow(line: Record<string, unknown>): Record<string, string | null> {
+  return Object.fromEntries(EVIDENCE_FIELDS.map((field) => [field, canonicalValue(line[field])]));
+}
+export function canonicalRegisterEvidenceRow(line: Record<string, unknown>): Record<string, string | null> {
+  return evidenceRow(line);
+}
+/** Stable, order-insensitive multiset fingerprint of source-controlled fields. */
+export function canonicalRegisterFingerprint(rows: any[]): string {
+  const encoded = rows.map(evidenceRow).map((r) => JSON.stringify(r)).sort();
+  return createHash("sha256").update(encoded.join("\n")).digest("hex");
+}
+function decimalParts(value: string): { n: bigint; scale: number } {
+  const [whole, fraction = ""] = value.replace(/^\+/, "").split(".");
+  const negative = whole.startsWith("-");
+  const digits = `${negative ? whole.slice(1) : whole}${fraction}`.replace(/^0+(?=\d)/, "") || "0";
+  return { n: (negative ? -1n : 1n) * BigInt(digits), scale: fraction.length };
+}
+function decimalSum(values: string[]): string {
+  const parts = values.map(decimalParts); const scale = Math.max(0, ...parts.map((p) => p.scale));
+  const total = parts.reduce((sum, p) => sum + p.n * (10n ** BigInt(scale - p.scale)), 0n);
+  const negative = total < 0n; const raw = (negative ? -total : total).toString().padStart(scale + 1, "0");
+  const out = scale ? `${raw.slice(0, -scale)}.${raw.slice(-scale)}`.replace(/\.?0+$/, "") : raw;
+  return negative && out !== "0" ? `-${out}` : out;
+}
+function decimalSubtract(left: string, right: string): string {
+  return decimalSum([left, `-${right}`]);
+}
+function amountOf(rows: any[]): string {
+  return decimalSum(rows.map((r) => canonicalValue(r.amount) ?? "0"));
+}
+function snapshot(rows: any[]) {
+  return { rows: rows.length, amount: amountOf(rows), fingerprint: canonicalRegisterFingerprint(rows) };
+}
+function multisetDiff(before: any[], sourceRows: any[]) {
+  const count = (rows: any[]) => rows.reduce((m, row) => {
+    const key = JSON.stringify(evidenceRow(row)); m.set(key, (m.get(key) ?? 0) + 1); return m;
+  }, new Map<string, number>());
+  const left = count(before), right = count(sourceRows);
+  const removed: unknown[] = [], added: unknown[] = [];
+  for (const [key, n] of left) for (let i = 0; i < n - (right.get(key) ?? 0); i++) removed.push(JSON.parse(key));
+  for (const [key, n] of right) for (let i = 0; i < n - (left.get(key) ?? 0); i++) added.push(JSON.parse(key));
+  return { added, removed };
+}
+function deltas(before: ReturnType<typeof snapshot>, source: ReturnType<typeof snapshot>, after: ReturnType<typeof snapshot>) {
+  const sourceRows = source.rows - before.rows, actualRows = after.rows - before.rows;
+  const sourceAmount = decimalSubtract(source.amount, before.amount), actualAmount = decimalSubtract(after.amount, before.amount);
+  return { source: { rows: sourceRows, amount: sourceAmount }, actual: { rows: actualRows, amount: actualAmount },
+    sourceShrink: sourceRows < 0 || sourceAmount.startsWith("-"), actualShrink: actualRows < 0 || actualAmount.startsWith("-") };
+}
+function changedHeuristic(before: any[], sourceRows: any[]) {
+  const diff = multisetDiff(before, sourceRows);
+  const bucket = (row: any) => JSON.stringify([
+    row.fy ?? null,
+    row.monthLabel ?? null,
+    row.invoiceNo ?? null,
+    row.code ?? null,
+    row.color ?? null,
+  ]);
+  const bucketCounts = (rows: any[]) => rows.reduce((counts, row) => {
+    const key = bucket(row);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    return counts;
+  }, new Map<string, number>());
+  const removedBuckets = bucketCounts(diff.removed);
+  const addedBuckets = bucketCounts(diff.added);
+  let changedRows = 0;
+  for (const [key, count] of removedBuckets) {
+    if (count === 1 && addedBuckets.get(key) === 1) changedRows++;
+  }
+  return {
+    addedRows: diff.added.length,
+    removedRows: diff.removed.length,
+    changedRows,
+    confidence: "heuristic",
+    unpairedResidualRows: diff.added.length + diff.removed.length - (changedRows * 2),
+  };
+}
+
+export type RegisterMonthlyLedgerRecord = typeof registerMonthlyIngestLedger.$inferInsert;
+
+function buildLedgerRecord(args: {
+  runId: string;
+  actor: "scheduler" | "manual";
+  operator: string | null;
+  source: string;
+  fy: string;
+  month: string;
+  attemptedAt: Date;
+  outcome: MonthReplaceResult["action"];
+  writeAtomicity: "same-replacement-transaction" | "ledger-only-transaction" | "post-rollback";
+  rowsWritten: number | null;
+  projectedRowsWritten: number | null;
+  beforeLines: any[];
+  sourceLines: any[];
+  afterAudit: ReturnType<typeof snapshot>;
+  spreadsheet: { id?: string; monthSources?: Record<string, Array<{ tab: string; contentHash: string }>>; fallbackSources?: Array<{ tab: string; contentHash: string }> };
+  detail?: string;
+}): RegisterMonthlyLedgerRecord {
+  const beforeAudit = snapshot(args.beforeLines);
+  const sourceAudit = snapshot(args.sourceLines);
+  const change = deltas(beforeAudit, sourceAudit, args.afterAudit);
+  return {
+    runId: args.runId,
+    actor: args.actor,
+    operator: args.operator,
+    source: args.source,
+    fy: args.fy,
+    monthLabel: args.month,
+    attemptedAt: args.attemptedAt,
+    completedAt: new Date(),
+    outcome: args.outcome,
+    writeAtomicity: args.writeAtomicity,
+    rowsWritten: args.rowsWritten,
+    projectedRowsWritten: args.projectedRowsWritten,
+    beforeRows: beforeAudit.rows,
+    beforeAmount: beforeAudit.amount,
+    beforeFingerprint: beforeAudit.fingerprint,
+    sourceRows: sourceAudit.rows,
+    sourceAmount: sourceAudit.amount,
+    sourceFingerprint: sourceAudit.fingerprint,
+    afterRows: args.afterAudit.rows,
+    afterAmount: args.afterAudit.amount,
+    afterFingerprint: args.afterAudit.fingerprint,
+    sourceRowDelta: change.source.rows,
+    sourceAmountDelta: change.source.amount,
+    sourceShrink: change.sourceShrink,
+    actualRowDelta: change.actual.rows,
+    actualAmountDelta: change.actual.amount,
+    actualShrink: change.actualShrink,
+    ...changedHeuristic(args.beforeLines, args.sourceLines),
+    spreadsheetId: args.spreadsheet.id ?? null,
+    sourceEvidence: {
+      month: args.month,
+      sources: args.spreadsheet.monthSources?.[args.month] ?? args.spreadsheet.fallbackSources ?? [],
+    },
+    detail: args.detail,
+  };
+}
+
+export function buildRegisterMonthlyLedgerPreview(args: {
+  beforeLines: any[];
+  sourceLines: any[];
+  fy: string;
+  month: string;
+  attemptedAt: Date;
+  runId?: string;
+  actor?: "scheduler" | "manual";
+  operator?: string | null;
+  source?: string;
+  spreadsheet?: { id?: string; monthSources?: Record<string, Array<{ tab: string; contentHash: string }>>; fallbackSources?: Array<{ tab: string; contentHash: string }> };
+}): RegisterMonthlyLedgerRecord {
+  return buildLedgerRecord({
+    runId: args.runId ?? `register-${args.attemptedAt.toISOString()}`,
+    actor: args.actor ?? "scheduler",
+    operator: args.operator ?? null,
+    source: args.source ?? "register_sheets_sync",
+    fy: args.fy,
+    month: args.month,
+    attemptedAt: args.attemptedAt,
+    outcome: "replaced",
+    writeAtomicity: "same-replacement-transaction",
+    rowsWritten: null,
+    projectedRowsWritten: args.sourceLines.length,
+    beforeLines: args.beforeLines,
+    sourceLines: args.sourceLines,
+    afterAudit: snapshot(args.sourceLines),
+    spreadsheet: args.spreadsheet ?? {},
+    detail: "dry-run preview; no rows, state, ledger, secondary data, or channel data written",
+  });
 }
 
 interface MonthState {
@@ -158,6 +374,13 @@ export async function replaceOpenMonths(opts: {
   lines: InsertSaleLine[];
   now?: Date;
   force?: boolean;
+  /** A dry run reads and projects only: it deliberately writes neither data nor ledger. */
+  dryRun?: boolean;
+  runId?: string;
+  actor?: "scheduler" | "manual";
+  operator?: string | null;
+  source?: string;
+  spreadsheet?: { id?: string; monthSources?: Record<string, Array<{ tab: string; contentHash: string }>>; fallbackSources?: Array<{ tab: string; contentHash: string }> };
 }): Promise<ReplaceSummary> {
   const { fy, lines, force = false } = opts;
   const now = opts.now ?? new Date();
@@ -190,7 +413,7 @@ export async function replaceOpenMonths(opts: {
   const months: MonthReplaceResult[] = [];
 
   for (const [month, monthLines] of [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-    months.push(await processOneMonth(fy, month, monthLines, now, force));
+    months.push(await processOneMonth(fy, month, monthLines, now, force, opts));
   }
 
   logger.info(
@@ -217,11 +440,20 @@ async function processOneMonth(
   monthLines: InsertSaleLine[],
   now: Date,
   force: boolean,
+  opts: Pick<Parameters<typeof replaceOpenMonths>[0], "dryRun" | "runId" | "actor" | "operator" | "source" | "spreadsheet">,
 ): Promise<MonthReplaceResult> {
   const sheetRows = monthLines.length;
   const sheetAmount = monthLines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
   const frozen = isMonthFrozen(month, now);
   const freezeAt = monthFreezeAt(month);
+  const runId = opts.runId ?? `register-${now.toISOString()}`;
+  const actor = opts.actor ?? "scheduler";
+  const operator = opts.operator ?? null;
+  const source = opts.source ?? "register_sheets_sync";
+  const sourceAudit = snapshot(monthLines);
+  const spreadsheet = opts.spreadsheet ?? {};
+  const failureContext: { before: ReturnType<typeof snapshot> | null } = { before: null };
+  const attemptedAt = new Date();
 
   try {
     return await allowDelete(async (tx) => {
@@ -234,6 +466,47 @@ async function processOneMonth(
       const stRows = await tx.select().from(registerMonthState)
         .where(and(eq(registerMonthState.fy, fy), eq(registerMonthState.monthLabel, month)));
       const st = stRows[0] ?? null;
+      const beforeLines = await tx.select().from(saleLines)
+        .where(and(eq(saleLines.fy, fy), eq(saleLines.monthLabel, month)));
+      const beforeAudit = snapshot(beforeLines);
+      failureContext.before = beforeAudit;
+      const ledger = async (
+        outcome: "replaced" | "frozen-skipped" | "frozen-anchored" | "aborted-short-read" | "rejected-shrink" | "failed",
+        rowsWritten: number | null,
+        afterAudit = beforeAudit,
+        detail?: string,
+      ) => {
+        return tx.insert(registerMonthlyIngestLedger).values(buildLedgerRecord({
+          runId, actor, operator, source, fy, month, attemptedAt, outcome,
+          writeAtomicity:
+            outcome === "replaced" || outcome === "frozen-anchored"
+              ? "same-replacement-transaction"
+              : "ledger-only-transaction",
+          rowsWritten,
+          projectedRowsWritten: null,
+          beforeLines, sourceLines: monthLines, afterAudit, spreadsheet, detail,
+        }));
+      };
+
+      // dry run intentionally occurs after locked reads, but before every write.
+      if (opts.dryRun) {
+        const ledgerPreview = buildRegisterMonthlyLedgerPreview({
+          beforeLines,
+          sourceLines: monthLines,
+          fy,
+          month,
+          attemptedAt,
+          runId,
+          actor,
+          operator,
+          source,
+          spreadsheet,
+        });
+        return { month, action: frozen ? "frozen-skipped" as const : "replaced" as const,
+          sheetRows, sheetAmount, dbRowsBefore: beforeAudit.rows, rowsWritten: null,
+          projectedRowsWritten: sheetRows, lastGoodRows: st?.lastGoodRows ?? null,
+          detail: "dry-run: no writes", ledgerPreview };
+      }
 
       // ── Frozen month, already anchored: skip entirely ────────────────────
       // A Product-Wise range upload can establish the shared freeze state
@@ -247,6 +520,7 @@ async function processOneMonth(
             "monthly replace: sheet edited after freeze — ignored (month is permanent)",
           );
         }
+        await ledger("frozen-skipped", null);
         return {
           month, action: "frozen-skipped" as const, sheetRows, sheetAmount,
           dbRowsBefore: null, rowsWritten: null, lastGoodRows: st.lastGoodRows,
@@ -264,13 +538,15 @@ async function processOneMonth(
       // and is retried on the next tick — it must never lock a partial state.
       // (The 98% tolerance below is for routine daily replaces, where a
       // transient short read costs nothing because tomorrow corrects it.)
-      if (!force && frozen && lastGood != null && sheetRows < lastGood) {
+      const guardOutcome = classifyMonthlyReadGuard({ force, frozen, lastGood, sheetRows });
+      if (guardOutcome === "rejected-shrink") {
         logger.error(
           { fy, month, sheetRows, lastGood },
           "monthly replace: freeze-transition read BELOW last good read — freeze ABORTED, will retry next tick",
         );
+        await ledger("rejected-shrink", null, beforeAudit, `freeze rejected: read ${sheetRows} < last good ${lastGood}`);
         return {
-          month, action: "aborted-short-read" as const, sheetRows, sheetAmount,
+          month, action: "rejected-shrink" as const, sheetRows, sheetAmount,
           dbRowsBefore: null, rowsWritten: null, lastGoodRows: lastGood,
           detail: `freeze aborted: read ${sheetRows} < last good ${lastGood} — a freeze never locks fewer rows than previously confirmed`,
         };
@@ -280,29 +556,22 @@ async function processOneMonth(
       // for tiny baselines (e.g. 1 row) floor(1 × 0.98) = 0 and an empty read
       // would otherwise slip past the `<` comparison and delete real data.
       // A 0 baseline never trips the guard — empty months stay normal no-ops.
-      if (
-        !force &&
-        lastGood != null &&
-        lastGood > 0 &&
-        (sheetRows === 0 || sheetRows < Math.floor(lastGood * SHORT_READ_TOLERANCE))
-      ) {
+      if (guardOutcome === "aborted-short-read") {
+        const catastrophicFloor = Math.floor((lastGood ?? 0) * SHORT_READ_TOLERANCE);
         logger.error(
           { fy, month, sheetRows, lastGood, frozen },
           "monthly replace: read materially below last good read — ABORTED, month left untouched",
         );
+        await ledger("aborted-short-read", null, beforeAudit, `read ${sheetRows} < ${catastrophicFloor}`);
         return {
           month, action: "aborted-short-read" as const, sheetRows, sheetAmount,
           dbRowsBefore: null, rowsWritten: null, lastGoodRows: lastGood,
-          detail: `read ${sheetRows} < ${Math.floor(lastGood * SHORT_READ_TOLERANCE)} (98% of last good ${lastGood})`,
+          detail: `read ${sheetRows} < ${catastrophicFloor} (98% of last good ${lastGood})`,
         };
       }
 
       // ── Replace: delete + insert the month, verified, in THIS transaction.
-      const beforeRes = await tx
-        .select({ rows: dsql<number>`count(*)::int` })
-        .from(saleLines)
-        .where(and(eq(saleLines.fy, fy), eq(saleLines.monthLabel, month)));
-      const dbRowsBefore = beforeRes[0]?.rows ?? 0;
+      const dbRowsBefore = beforeAudit.rows;
 
       await tx.delete(saleLines).where(and(eq(saleLines.fy, fy), eq(saleLines.monthLabel, month)));
       let written = 0;
@@ -360,6 +629,8 @@ async function processOneMonth(
             eq(secondarySkuLines.monthLabel, month),
           ));
       }
+      const afterAudit = snapshot(monthLines);
+      await ledger(frozen ? "frozen-anchored" : "replaced", written, afterAudit);
 
       logger.info(
         { fy, month, dbRowsBefore, rowsWritten: written, amountCr: (sheetAmount / 1e7).toFixed(2), frozen, noOp },
@@ -377,6 +648,25 @@ async function processOneMonth(
       };
     });
   } catch (err) {
+    // The replacement transaction is already rolled back. Preserve failure
+    // evidence separately and label it so readers never mistake it for atomic
+    // replacement evidence.
+    if (!opts.dryRun) {
+      const failureBefore = failureContext.before;
+      await db.insert(registerMonthlyIngestLedger).values({
+        runId, actor, source, fy, monthLabel: month, attemptedAt, completedAt: new Date(),
+        operator, outcome: "failed", writeAtomicity: "post-rollback", rowsWritten: null, projectedRowsWritten: null,
+        beforeRows: failureBefore?.rows ?? null, beforeAmount: failureBefore?.amount ?? null, beforeFingerprint: failureBefore?.fingerprint ?? null,
+        sourceRows: sourceAudit.rows, sourceAmount: sourceAudit.amount, sourceFingerprint: sourceAudit.fingerprint,
+        afterRows: failureBefore?.rows ?? null, afterAmount: failureBefore?.amount ?? null, afterFingerprint: failureBefore?.fingerprint ?? null,
+        sourceRowDelta: failureBefore ? sourceAudit.rows - failureBefore.rows : null,
+        sourceAmountDelta: failureBefore ? decimalSubtract(sourceAudit.amount, failureBefore.amount) : null,
+        sourceShrink: failureBefore ? sourceAudit.rows < failureBefore.rows || decimalSubtract(sourceAudit.amount, failureBefore.amount).startsWith("-") : null,
+        actualRowDelta: failureBefore ? 0 : null, actualAmountDelta: failureBefore ? "0" : null, actualShrink: failureBefore ? false : null,
+        addedRows: null, removedRows: null, changedRows: null, confidence: null, unpairedResidualRows: null,
+        spreadsheetId: spreadsheet.id ?? null, sourceEvidence: { month, sources: spreadsheet.monthSources?.[month] ?? spreadsheet.fallbackSources ?? [] }, detail: err instanceof Error ? err.message : String(err),
+      }).catch((ledgerErr) => logger.error({ fy, month, ledgerErr }, "monthly replace: post-rollback failure ledger insert failed"));
+    }
     logger.error({ fy, month, err }, "monthly replace: FAILED — transaction rolled back, month unchanged");
     return {
       month, action: "failed", sheetRows, sheetAmount,

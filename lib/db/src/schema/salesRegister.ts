@@ -206,6 +206,37 @@ export const registerMonthState = pgTable("register_month_state", {
 
 export type RegisterMonthState = typeof registerMonthState.$inferSelect;
 
+// Append-only evidence for every attempted primary-register month ingest.  The
+// payload columns intentionally retain exact multisets and comparison inputs:
+// this is an audit ledger, not a mutable operational state table.
+export const registerMonthlyIngestLedger = pgTable("register_monthly_ingest_ledger", {
+  id: serial("id").primaryKey(),
+  runId: text("run_id").notNull(),
+  actor: text("actor").notNull(), // scheduler | manual
+  operator: text("operator"),
+  source: text("source").notNull(),
+  fy: text("fy").notNull(),
+  monthLabel: text("month_label").notNull(),
+  attemptedAt: timestamp("attempted_at", { withTimezone: true }).notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  outcome: text("outcome").notNull(),
+  writeAtomicity: text("write_atomicity").notNull(), // same-replacement-transaction | ledger-only-transaction | post-rollback
+  rowsWritten: integer("rows_written"),
+  projectedRowsWritten: integer("projected_rows_written"),
+  beforeRows: integer("before_rows"), beforeAmount: numeric("before_amount"), beforeFingerprint: text("before_fingerprint"),
+  sourceRows: integer("source_rows").notNull(), sourceAmount: numeric("source_amount").notNull(), sourceFingerprint: text("source_fingerprint").notNull(),
+  afterRows: integer("after_rows"), afterAmount: numeric("after_amount"), afterFingerprint: text("after_fingerprint"),
+  sourceRowDelta: integer("source_row_delta"), sourceAmountDelta: numeric("source_amount_delta"), sourceShrink: boolean("source_shrink"),
+  actualRowDelta: integer("actual_row_delta"), actualAmountDelta: numeric("actual_amount_delta"), actualShrink: boolean("actual_shrink"),
+  addedRows: integer("added_rows"), removedRows: integer("removed_rows"), changedRows: integer("changed_rows"),
+  confidence: text("confidence"), unpairedResidualRows: integer("unpaired_residual_rows"),
+  spreadsheetId: text("spreadsheet_id"), sourceEvidence: jsonb("source_evidence").notNull(),
+  detail: text("detail"),
+}, (t) => [
+  index("register_monthly_ingest_ledger_fy_month_attempt_idx").on(t.fy, t.monthLabel, t.attemptedAt),
+  index("register_monthly_ingest_ledger_run_idx").on(t.runId),
+]);
+
 // Evidence captured when a source workbook disagrees with an already-frozen
 // month.  The evidence payload is deliberately immutable; only resolution
 // fields may change after an operator reviews it.

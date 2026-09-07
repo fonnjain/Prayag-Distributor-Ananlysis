@@ -303,7 +303,7 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
     const unmapped = emptyUnmapped();
     const lines: InsertSaleLine[] = [];
 
-    const { rowsScanned, tabsRead, tabsNotRead } = await readRegisterFromSheets(
+    const { rowsScanned, tabsRead, tabsNotRead, monthSources, fallbackSources } = await readRegisterFromSheets(
       spreadsheetId,
       fy,
       (values, columns, tabMonthLabel) => {
@@ -475,10 +475,16 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
     // 1st–7th inclusive) are skipped; each open month
     // is deleted and re-inserted from the read in ONE transaction, guarded by
     // the DB-persisted short-read baseline in register_month_state.
-    const replaceSummary = await replaceOpenMonths({ fy, lines: linesForSync });
+    const replaceSummary = await replaceOpenMonths({
+      fy, lines: linesForSync, runId: `scheduled-${startedAt.toISOString()}`,
+      actor: "scheduler", operator: null, source: "register_sheets_sync",
+      spreadsheet: { id: spreadsheetId, monthSources, fallbackSources },
+    });
 
     const inserted = replaceSummary.months.reduce((n, m) => n + (m.rowsWritten ?? 0), 0);
-    const aborted = replaceSummary.months.filter((m) => m.action === "aborted-short-read" || m.action === "failed");
+    const aborted = replaceSummary.months.filter((m) =>
+      m.action === "aborted-short-read" || m.action === "rejected-shrink" || m.action === "failed",
+    );
 
     // ── Step 3b: channel backfill ─────────────────────────────────────────────
     // The Sheets ingest always writes channel = NULL (the register carries no

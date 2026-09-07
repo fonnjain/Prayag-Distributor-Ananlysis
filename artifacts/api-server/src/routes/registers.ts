@@ -470,6 +470,7 @@ router.post("/registers/:fy/tombstone-orphans", async (req, res) => {
 router.post("/registers/:fy/replace-months", async (req, res) => {
   const { fy } = req.params;
   const force = req.query.force === "true";
+  const dryRun = req.query.dryRun === "true";
   const nowOverride = typeof req.query.now === "string" ? new Date(req.query.now) : undefined;
   if (nowOverride != null && Number.isNaN(nowOverride.getTime())) {
     res.status(400).json({ error: "invalid ?now= date" });
@@ -489,13 +490,13 @@ router.post("/registers/:fy/replace-months", async (req, res) => {
     res.status(400).json({ error: `No spreadsheet configured for FY ${fy}` });
     return;
   }
-  if (rejectIfFrozen(req, res, fy)) return;
+  if (rejectIfFrozen(req, res, fy, { dryRun })) return;
 
   try {
     const occurrence = new OccurrenceCounter();
     const unmapped = emptyUnmapped();
     const allLines: ReturnType<typeof toSaleLine>[] = [];
-    const { rowsScanned, tabsRead } = await readRegisterFromSheets(
+    const { rowsScanned, tabsRead, monthSources, fallbackSources } = await readRegisterFromSheets(
       spreadsheetId,
       fy,
       (values, columns, tabMonthLabel) => {
@@ -536,13 +537,21 @@ router.post("/registers/:fy/replace-months", async (req, res) => {
       };
     });
 
-    const summary = await replaceOpenMonths({ fy, lines: resolvedLines, force, now: nowOverride });
+    const runStartedAt = new Date();
+    // Use the authenticated API-key label when present; never trust request
+    // body text as audit identity.
+    const operator = req.apiKey?.name ?? null;
+    const summary = await replaceOpenMonths({
+      fy, lines: resolvedLines, force, now: nowOverride, dryRun,
+      runId: `manual-${runStartedAt.toISOString()}`, actor: "manual", operator, source: "register_manual_replace",
+      spreadsheet: { id: spreadsheetId, monthSources, fallbackSources },
+    });
 
     // Channel backfill: run immediately after every manual replace so the
     // NULL-channel gap never persists past this request.
     const rowsWritten = summary.months.reduce((n, m) => n + (m.rowsWritten ?? 0), 0);
     let channelBackfill: Awaited<ReturnType<typeof backfillSaleChannel>> | null = null;
-    if (rowsWritten > 0) {
+    if (!dryRun && rowsWritten > 0) {
       try {
         channelBackfill = await backfillSaleChannel([fy]);
       } catch (bfErr) {
@@ -550,7 +559,7 @@ router.post("/registers/:fy/replace-months", async (req, res) => {
       }
     }
 
-    res.json({ ...summary, rowsScanned, tabsRead, channelBackfill });
+    res.json({ ...summary, dryRun, rowsScanned, tabsRead, channelBackfill });
   } catch (err: unknown) {
     req.log.error({ err, fy }, "replace-months failed");
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
