@@ -1,0 +1,47 @@
+Read-only. URGENT. Do not publish again. Do not run any migration. Do not
+attempt any repair until this is answered.
+
+A publish was performed unintentionally. Establish what it did.
+
+1. What is the deployed commit now, and what time did the publish run?
+
+2. Did migrations 087 ledger and 088 run at startup? Print schema_migrations
+   for both, with timestamps.
+
+3. DOES register_monthly_ingest_ledger EXIST IN PRODUCTION NOW? Print its
+   full definition - every column, constraint, check and index - and compare
+   against what 087 and 088 together should produce.
+
+4. THE IMPORTANT ONE. List every table, column, index, constraint, function
+   and trigger that production had BEFORE this publish and does not have
+   now. Development is five days behind production, so anything
+   production-only was at risk.
+
+   Check specifically:
+     - secondary_order_line and its 087 era columns, source_era,
+       source_kind, fiscal_year, period_completeness, source_id
+     - secondary_order_upload source_id and entry_point
+     - secondary_order_line_uq, sol_fiscal_year_idx, sol_source_kind_idx
+     - the FY2024-25 order anchor config and its loaded rows
+     - frozen_drift_check, frozen_drift_archive and their triggers
+     - seasonal_curve and its immutability trigger
+     - user_activity tables
+     - auth_users.must_change_password
+
+5. ROW COUNTS. Print current row counts and values for:
+     sale_line by month FY2026-27
+     secondary_order_line by fiscal year
+     secondary_sku_line, secondary_register_line
+     Both frozen anchors
+
+   Compare against: FY2026-27 sale_line 57,034 rows; secondary_order_line
+   846,618 rows across three years, Rs 534.10 Cr; FY2024-25 anchor
+   Rs 3,41,14,33,805.25; FY2025-26 Rs 3,60,99,53,808.51.
+
+6. Does the application start cleanly, and does prayag-sales.com respond?
+
+7. Is anything in an inconsistent state - a migration recorded whose objects
+   are missing, as 087 was?
+
+Report only. If data is missing, I want the evidence intact before anyone
+tries to restore it.

@@ -440,3 +440,17 @@ mtime_ms = 1788781037768
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/c061f7d4-87ea-44a7-9a9c-039d87e8e53e/3d813f45-ed71-4bae-9211-a3bc45850336"
 storage_version_token = "1788781044730531"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "lB_6UlXiLpPMapciyZdbM"
+uri = "file://reports/urgent-read-only-production-incident-report-2026-09-07.docx"
+type = "word_document"
+title = "Urgent Read-Only Production Incident Report"
+description = "Word document containing the deployment timeline, migration and ledger schema audit, production object inventory, row-count reconciliation, startup effects, and outstanding ledger-history loss evidence."
+logical_id = "2a2cc457-8c65-4280-afd2-29cccc91f393"
+content_hash = "sha256:842718af5cc1170f18eb4cb83948b0f0cd9729a168374cf168264123ef3b227c"
+size = 43513
+mtime_ms = 1788785789136
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/2a2cc457-8c65-4280-afd2-29cccc91f393/bc8c0db2-f55b-4e1e-af4e-05206ffb5308"
+storage_version_token = "1788785796959301"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
