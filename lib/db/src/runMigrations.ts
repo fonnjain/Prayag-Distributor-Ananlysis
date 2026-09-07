@@ -3697,6 +3697,30 @@ const MIGRATIONS: Migration[] = [
   {
     id: "088_register_anchor_after_rejection",
     sql: `
+      -- Publish schema reconciliation can leave the migration ledger ahead of
+      -- the physical relation. Recreate the complete 087 table contract before
+      -- extending it so this migration is safe in that state.
+      CREATE TABLE IF NOT EXISTS register_monthly_ingest_ledger (
+        id SERIAL PRIMARY KEY,
+        run_id TEXT NOT NULL, actor TEXT NOT NULL CHECK (actor IN ('scheduler','manual')), operator TEXT, source TEXT NOT NULL,
+        fy TEXT NOT NULL, month_label TEXT NOT NULL,
+        attempted_at TIMESTAMPTZ NOT NULL, completed_at TIMESTAMPTZ,
+        outcome TEXT NOT NULL CHECK (outcome IN ('replaced','frozen-skipped','frozen-anchored','anchored-after-rejected-read','aborted-short-read','rejected-shrink','failed')),
+        write_atomicity TEXT NOT NULL CHECK (write_atomicity IN ('same-replacement-transaction','ledger-only-transaction','post-rollback')),
+        rows_written INTEGER, projected_rows_written INTEGER,
+        before_rows INTEGER, before_amount NUMERIC, before_fingerprint TEXT,
+        source_rows INTEGER NOT NULL, source_amount NUMERIC NOT NULL, source_fingerprint TEXT NOT NULL,
+        after_rows INTEGER, after_amount NUMERIC, after_fingerprint TEXT,
+        source_row_delta INTEGER, source_amount_delta NUMERIC, source_shrink BOOLEAN,
+        actual_row_delta INTEGER, actual_amount_delta NUMERIC, actual_shrink BOOLEAN,
+        added_rows INTEGER, removed_rows INTEGER, changed_rows INTEGER,
+        confidence TEXT CHECK (confidence IS NULL OR confidence = 'heuristic'), unpaired_residual_rows INTEGER,
+        spreadsheet_id TEXT, source_evidence JSONB NOT NULL, detail TEXT
+      );
+      CREATE INDEX IF NOT EXISTS register_monthly_ingest_ledger_fy_month_attempt_idx
+        ON register_monthly_ingest_ledger (fy, month_label, attempted_at);
+      CREATE INDEX IF NOT EXISTS register_monthly_ingest_ledger_run_idx
+        ON register_monthly_ingest_ledger (run_id);
       ALTER TABLE register_monthly_ingest_ledger
         DROP CONSTRAINT IF EXISTS register_monthly_ingest_ledger_outcome_check;
       ALTER TABLE register_monthly_ingest_ledger
