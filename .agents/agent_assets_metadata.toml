@@ -412,3 +412,17 @@ mtime_ms = 1788778649644
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/8b1e1415-5012-4fde-a3e9-999b47626482/63025b00-f99b-4a82-b790-fd68f9581c2d"
 storage_version_token = "1788778651515904"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "AOnYwVlezpsirVDrPOE5g"
+uri = "file://reports/fy2627-sales-dispatch-database-vs-live-sheet.docx"
+type = "word_document"
+title = "FY2026–27 Sales (Dispatch) — Database vs Live Sheet"
+description = "Formatted Word report comparing production and live-sheet monthly totals, diagnosing June–August divergence, documenting sync timing, and confirming the chart amount column."
+logical_id = "0c405743-d6ef-4642-bdc2-a060d340dc81"
+content_hash = "sha256:08126d70fd4fe9bfb5eab0c281315704fab4776bafe7a1fd8b0306e6f5b5351d"
+size = 41806
+mtime_ms = 1788779129174
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/0c405743-d6ef-4642-bdc2-a060d340dc81/30c9eae6-6739-4a4b-aa9e-1b68b26d4f67"
+storage_version_token = "1788779131041041"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
