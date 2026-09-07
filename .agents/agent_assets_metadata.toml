@@ -454,3 +454,17 @@ mtime_ms = 1788785789136
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/2a2cc457-8c65-4280-afd2-29cccc91f393/bc8c0db2-f55b-4e1e-af4e-05206ffb5308"
 storage_version_token = "1788785796959301"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "h6V7dDRfknBq3uWoJxtI_"
+uri = "file://reports/development-production-schema-alignment-report-2026-09-07.docx"
+type = "word_document"
+title = "Development–Production Schema Alignment Report"
+description = "Word report documenting development migrations 087/088, exact ledger parity, remaining scheme_reward_slab naming exposure, full migration-ledger comparison, and the permanent pre-publish workflow."
+logical_id = "62ac7e75-f8e5-402f-a634-3d590c806bc2"
+content_hash = "sha256:47cde3a5816c3707713cb294a0d34b337c2b48022880ed9d839d48fd606b75aa"
+size = 39816
+mtime_ms = 1788786495685
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/62ac7e75-f8e5-402f-a634-3d590c806bc2/a639462b-351e-48b5-85b3-898f49f55bbc"
+storage_version_token = "1788786508317216"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
