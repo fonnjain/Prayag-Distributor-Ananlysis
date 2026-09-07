@@ -468,3 +468,17 @@ mtime_ms = 1788786495685
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/62ac7e75-f8e5-402f-a634-3d590c806bc2/a639462b-351e-48b5-85b3-898f49f55bbc"
 storage_version_token = "1788786508317216"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "6qSTwrCNqQ09a9Jib-na_"
+uri = "file://reports/scheme-reward-slab-pre-alignment-audit-2026-09-07.docx"
+type = "word_document"
+title = "Scheme Reward Slab Pre-Alignment Audit"
+description = "Word report covering row and sequence parity, migration rename history, explicit-reference checks, alignment direction, and the exhaustive public-schema object comparison."
+logical_id = "d923390c-c2a0-4b1f-aa27-1bbcdca1b317"
+content_hash = "sha256:e4a1d3feb1450fcde6c71a62db5903e0f1f1b2201027a0a1156e5f2f1e3bcbb5"
+size = 41258
+mtime_ms = 1788787404829
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/d923390c-c2a0-4b1f-aa27-1bbcdca1b317/7ba510dd-58dd-43a8-970c-a8ef17193739"
+storage_version_token = "1788787416404516"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
