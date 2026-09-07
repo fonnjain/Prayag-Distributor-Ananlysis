@@ -370,3 +370,17 @@ mtime_ms = 1788320478784
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/b6e15665-25ce-4375-9069-7442234a7a2f/d57f6704-308d-45ad-b7ee-48b84d899e3b"
 storage_version_token = "1788320598890138"
 content_type = "text/csv"
+
+[[outputs]]
+id = "T_jn4S_iBMOdwnDzsOcxs"
+uri = "file://reports/prompt-60-revised-investigation-report.docx"
+type = "word_document"
+title = "Prompt 60 Revised — Investigation Report"
+description = "Formatted Word document containing the complete freeze-date safety review, FY2026–27 source comparison, and weekly re-sync recommendation."
+logical_id = "b0846f6e-8208-416a-a21a-00ebb49493ef"
+content_hash = "sha256:97b68dabac606881daaaffe9cba0aa795598f66f4caf559f6021612996aa9b02"
+size = 43970
+mtime_ms = 1788777791552
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/b0846f6e-8208-416a-a21a-00ebb49493ef/b2d13ea0-aaa3-441d-9e60-c883eeb13369"
+storage_version_token = "1788777793353137"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
