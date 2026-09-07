@@ -482,3 +482,17 @@ mtime_ms = 1788787404829
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/d923390c-c2a0-4b1f-aa27-1bbcdca1b317/7ba510dd-58dd-43a8-970c-a8ef17193739"
 storage_version_token = "1788787416404516"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "YLRa7vIlva7t9n0gsOMqq"
+uri = "file://reports/scheme-reward-slab-development-alignment-complete-2026-09-07.docx"
+type = "word_document"
+title = "Scheme Reward Slab Development Alignment"
+description = "Word report documenting migration 089, preserved development sequence state, renamed PK/index/default, and the complete production-parity comparison."
+logical_id = "f2c5de96-acde-462c-af66-584e37c8ee80"
+content_hash = "sha256:6e5545da1db8c72d20b426bf1c205ec6bed5c1e8272d872794a437e6f1bd2885"
+size = 39509
+mtime_ms = 1788788195189
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/f2c5de96-acde-462c-af66-584e37c8ee80/0ac4561d-d7be-4ca8-a57a-2299aefda0aa"
+storage_version_token = "1788788204836557"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
