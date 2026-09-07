@@ -398,3 +398,17 @@ mtime_ms = 1788778385048
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/10ee9935-d196-4c31-8192-485d3416869e/a8ae220e-13e5-4fd1-a235-f6a3c0b8dda8"
 storage_version_token = "1788778386539538"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "c-09UInqxpMY_lCt60Oea"
+uri = "file://reports/overview-page-concrete-data-sources.docx"
+type = "word_document"
+title = "Overview Page — Concrete Data Sources"
+description = "Formatted Word report tracing every requested Overview card and chart to its database table, Google Sheet ID, tab, classification source, and snapshot behavior."
+logical_id = "8b1e1415-5012-4fde-a3e9-999b47626482"
+content_hash = "sha256:b03291830340bc3f371f09fa41620582eda67821735e3584529faff488a4fdd7"
+size = 40344
+mtime_ms = 1788778649644
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/8b1e1415-5012-4fde-a3e9-999b47626482/63025b00-f99b-4a82-b790-fd68f9581c2d"
+storage_version_token = "1788778651515904"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
