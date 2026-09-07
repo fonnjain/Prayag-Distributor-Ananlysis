@@ -1,0 +1,209 @@
+# Replit Prompt 62 — Ledger, the anchoring gap, and repairing August
+
+**Date:** 7 September 2026
+**Follows:** Prompt 61, which correctly ran read-only and found the gap.
+**Scope:** Section A is a code change. Section B is a code change, gated on A.
+Section C is a decision, and needs an operator.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## The finding that reorders everything
+
+August sits in a state nobody designed:
+
+| Condition | Result |
+|---|---|
+| Calendar-frozen | **Yes** — 7 Sep 05:30 IST |
+| Persistently anchored | **No** — `frozen_at` is NULL |
+| Ordinary replacement | **Blocked** by the strict shrink guard |
+| Frozen-drift eligibility | **No** — requires a persisted frozen month |
+
+The sequence: last successful replacement 5 September at 12,887 rows. At the
+freeze transition the source had fallen to 12,871, and the strict guard rejected
+the lower read — **correctly**. But that rejection meant August was never
+anchored.
+
+So August is frozen by the calendar and **invisible to every repair path**. That
+is not a defect in any single guard; it is a gap between two of them, and it will
+catch September next unless closed.
+
+## Three corrections accepted
+
+**The 492 rows cannot be verified.** The 2 September run kept only the count, not
+the rows or a fingerprint, and later replacement deleted that version. The
+serial-range candidate is a hypothesis, not a figure. **This is exactly why the
+ledger goes first.**
+
+**Detection is not read-only** — it inserts drift-check records. Right not to have
+run it.
+
+**There is no two-person approval primitive.** The guarded apply call with preview
+hash, operator and reason *is* the approval. My prompt implied a gate that does
+not exist.
+
+---
+
+## Section A — the ledger. First, and unchanged in intent.
+
+```
+Code change. A durable ingest ledger for the primary monthly register. Show
+the diff before applying.
+
+The secondary dashboard already has this - durable ingest-run records with
+append-only row revisions. The primary register keeps only the latest
+baseline and frozen anchor, with rows-read and rows-written in runtime
+results. That is why the 492 August rows cannot be reconstructed.
+
+WRITE IT INSIDE THE SAME PER-MONTH TRANSACTION as replaceOpenMonths, so a
+ledger record cannot commit while its data replacement rolls back.
+
+Record per run, per affected month:
+  - run identity, scheduler or operator, timestamps
+  - fiscal year and month label
+  - source rows read, rows written
+  - before and after row counts and values
+  - rows ADDED, REMOVED, CHANGED as counts
+  - before and after fingerprints
+  - source spreadsheet id, tab, content hash
+  - outcome: replaced, frozen-skipped, frozen-anchored,
+    aborted-short-read, rejected-shrink, failed
+
+MAKE EVERY SHRINK VISIBLE. Any nonzero reduction in rows or value is
+recorded and surfaced regardless of size. SHORT_READ_TOLERANCE at 0.98
+stays as a catastrophic-read guard only - never as approval for normal
+shrinkage. A 0.2% deletion currently passes silently; this closes that.
+
+ALSO RECORD REJECTIONS. August's 5 September shrink was rejected and left
+no durable trace. A rejected read is as important as an accepted one.
+
+DO NOT change sync scope, the freeze clock, openMonthLabels,
+SHORT_READ_TOLERANCE, or the replacement mechanism. This is instrumentation;
+behaviour stays identical.
+
+AFTER APPLYING, print the schema, a dry-run sample record, and confirm no
+sync behaviour changed. Then publish and push.
+```
+
+---
+
+## Section B — frozen-state override, and close the anchoring gap
+
+Gated on A being live.
+
+```
+Code change. Two things, both about the same invariant. Show the diff first.
+
+1. PERSISTED FROZEN STATE OVERRIDES THE CALCULATED CLOCK
+
+   A month that has been frozen must never reopen, regardless of how the
+   freeze clock is later changed. Make persisted frozen or anchored state
+   authoritative over monthFreezeAt.
+
+   This is structurally safer than choosing a correct cut-over date, and it
+   is what stopped Prompt 60 from being applied.
+
+2. CLOSE THE ANCHORING GAP - THIS IS THE NEW PART
+
+   August is calendar-frozen with frozen_at NULL, because the final read
+   before the freeze instant shrank by 16 rows and the strict guard
+   rejected it. Rejecting was right. Leaving the month unanchored was not.
+
+   A month that passes its freeze instant MUST end up anchored, even when
+   its last read was rejected. Anchor it to the last good state - for
+   August, 12,887 rows.
+
+   Record the circumstance in the ledger: anchored-after-rejected-read, with
+   the rejected source count and the reason. The anchor should not silently
+   look identical to a clean freeze.
+
+   Then confirm: does August become frozen-drift eligible once anchored? If
+   eligibility requires a persisted frozen month, anchoring should make the
+   controlled path available. Say whether it does.
+
+3. CHECK FOR OTHER MONTHS IN THE SAME STATE
+
+   Print every month across all fiscal years that is calendar-frozen with
+   frozen_at NULL. If any exist besides August, they are in the same trap.
+
+DO NOT unfreeze anything. Do not adopt any source. Do not run the drift
+detector - that writes records and belongs to Section C.
+
+AFTER APPLYING, print August's register_month_state before and after, the
+list from item 3, and confirm no month became writable.
+
+Then publish and push.
+```
+
+---
+
+## Section C — repairing August. A decision, not a build.
+
+Only after B. This one needs a person to approve, with a reason recorded.
+
+```
+This requires an operator decision. Do not proceed without explicit approval.
+
+Once August is anchored, the controlled frozen-drift path becomes available.
+Before anyone uses it:
+
+C1. Run frozen-drift detection. It writes check records, so this is the
+    first non-read-only step. Print the August check: totals, fingerprints,
+    and the drift result.
+
+C2. Produce the preview WITHOUT applying. Print invoice-level additions,
+    removals and changes, and the preview hash.
+
+C3. THE 16 ROWS. All are dated 31 August and match the June and July
+    month-end pattern. The Prompt 61 report noted that some values carry
+    NEGATIVE signs in the underlying data that were dropped from display.
+
+    Confirm that. Credit notes behave differently from orders, and adopting
+    the source would remove them. Print each of the 16 with its true signed
+    value.
+
+C4. THE 492 ROWS. Adopting the source brings them in. They cannot be
+    verified against the 2 September state - that evidence is gone. Confirm
+    they are all dated 31 August and consistent with a late-month append.
+
+C5. THE NET EFFECT. Adopting the current source moves FY2026-27 from
+    57,034 rows and Rs 1,36,03,70,140.42 to 57,018 rows and
+    Rs 1,36,02,72,907.42.
+
+    State that plainly before approval. It is a reduction of 16 rows and
+    Rs 97,233.
+
+C6. DO NOT APPLY. Report C1 to C5 and stop. The apply call with preview
+    hash, operator and reason is the approval action, and it needs a named
+    person and a written reason.
+```
+
+---
+
+## Notes
+
+- **Section A first, without exception.** The 492 rows are unanswerable today
+  precisely because no ledger existed on 2 September. Every week without it
+  creates another unanswerable question.
+- **B2 is the part I added, and it matters.** August is the live demonstration.
+  Without it, September will hit the same trap the moment its final read shrinks
+  across the freeze boundary — and it will, because Prayag edit at month end.
+- **B3 may find more.** Any month calendar-frozen with `frozen_at` NULL is in the
+  same state and equally unrepairable.
+- **C3 is the one to read carefully.** If some of those 16 rows are credit notes
+  with negative values, adopting the source deletes them, and the arithmetic of
+  "16 rows, ₹97,233" may not mean what it appears to.
+
+## Sequence, confirmed
+
+1. **Section A** — durable ingest ledger
+2. **Section B** — frozen-state override plus the anchoring gap
+3. **C1** — ingest-generation cache keys
+4. **C2** — targeted invalidation
+5. **C4 remainder** — prospective first-of-fourth-month clock, Sep-26 forward
+6. **C3** — persisted weekly scheduler
+7. **C5** — automatic current-plus-one-prior replacement
+
+August's repair sits outside that sequence and can happen as soon as Section B
+makes it eligible.
