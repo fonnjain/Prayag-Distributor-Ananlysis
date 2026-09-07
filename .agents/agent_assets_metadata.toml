@@ -426,3 +426,17 @@ mtime_ms = 1788779129174
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/0c405743-d6ef-4642-bdc2-a060d340dc81/30c9eae6-6739-4a4b-aa9e-1b68b26d4f67"
 storage_version_token = "1788779131041041"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "d_tdzzpBsAS6qcRMaS0ak"
+uri = "file://reports/prompt-62-section-a-primary-monthly-ingest-ledger.docx"
+type = "word_document"
+title = "Prompt 62 — Section A Completion Report"
+description = "Word document covering the ledger schema, dry-run sample, transaction guarantees, production counts, verification, Git commit, and publishing status."
+logical_id = "c061f7d4-87ea-44a7-9a9c-039d87e8e53e"
+content_hash = "sha256:241248a8c135f5378c88d16666f7e71a5e5734f022f71e6f59163a783d12b6ad"
+size = 40510
+mtime_ms = 1788781037768
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/c061f7d4-87ea-44a7-9a9c-039d87e8e53e/3d813f45-ed71-4bae-9211-a3bc45850336"
+storage_version_token = "1788781044730531"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
