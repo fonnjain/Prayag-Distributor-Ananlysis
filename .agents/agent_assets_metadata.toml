@@ -496,3 +496,17 @@ mtime_ms = 1788788195189
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/f2c5de96-acde-462c-af66-584e37c8ee80/0ac4561d-d7be-4ca8-a57a-2299aefda0aa"
 storage_version_token = "1788788204836557"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "AlncVx5estmsmZsbFLIfS"
+uri = "file://reports/post-publish-production-verification-2026-09-07.docx"
+type = "word_document"
+title = "Post-Publish Production Verification"
+description = "Formatted Word report covering deployed commits, migration 089, production schema and data anchors, August freeze handling, and live application health."
+logical_id = "e0e9805a-962e-4556-9d0f-39aa23547a67"
+content_hash = "sha256:e20d9d68e22a954bfc2bcea244441853469a6c718449d103583c7f8365e59b49"
+size = 40104
+mtime_ms = 1788790068557
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/e0e9805a-962e-4556-9d0f-39aa23547a67/ea1ee5f1-969c-4dae-8d5c-8f1c100ca329"
+storage_version_token = "1788790076726125"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
