@@ -6,7 +6,7 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import { isAdminToken, isMonthInFy } from "../lib/adminAuth.js";
 import { pushAnchorsToStorage, atomicWriteWithRollback, anchorsFilePath, readVerifyAnchors } from "../lib/config/verifyAnchors.js";
 import { currentOpenFy } from "../lib/fyAnchors.js";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { pool, db, saleLines, type InsertSaleLine } from "@workspace/db";
 import {
   backfillColor,
@@ -37,6 +37,9 @@ import { allowDelete } from "../lib/deleteGuard.js";
 import {
   replaceOpenMonths,
   isMonthFrozen,
+  isMonthPersistentlyFrozen,
+  isProtectedClearFirstMonth,
+  fyMonthLabels,
   monthFreezeAt,
   getMonthAnchorViolations,
 } from "../lib/registers/monthlyReplace.js";
@@ -249,16 +252,61 @@ function rejectIfFrozen(
  * Frozen months are PERMANENT — there is no unfreeze escape hatch.
  * Dry-run requests always pass — they never write.
  */
-function rejectIfMonthFrozen(
+async function rejectIfMonthFrozen(
   res: { status: (code: number) => { json: (body: object) => void } },
+  fy: string,
   month: string,
   opts?: { dryRun?: boolean },
-): boolean {
-  if (opts?.dryRun || !isMonthFrozen(month)) return false;
+): Promise<boolean> {
+  if (opts?.dryRun) return false;
+  const persistedFrozen = await isMonthPersistentlyFrozen(fy, month);
+  if (!persistedFrozen && !isMonthFrozen(month)) return false;
   res.status(423).json({
-    error: `month ${month} froze on ${monthFreezeAt(month)?.toISOString().slice(0, 10)} — writes are permanently refused`,
+    error: persistedFrozen
+      ? `month ${month} (${fy}) is persistently frozen — writes are permanently refused`
+      : `month ${month} froze on ${monthFreezeAt(month)?.toISOString().slice(0, 10)} — writes are permanently refused`,
   });
   return true;
+}
+
+async function withWritableMonthTransaction<T>(
+  fy: string,
+  month: string,
+  mutate: (client: any) => Promise<T>,
+): Promise<{ blocked: true } | { blocked: false; value: T }> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`register-month|${fy}|${month}`]);
+    const state = await client.query<{ frozen_at: Date | null }>(
+      `SELECT frozen_at
+         FROM register_month_state
+        WHERE fy = $1 AND month_label = $2`,
+      [fy, month],
+    );
+    if (state.rows[0]?.frozen_at != null || isMonthFrozen(month)) {
+      await client.query("ROLLBACK");
+      return { blocked: true };
+    }
+    const value = await mutate(client);
+    await client.query("COMMIT");
+    return { blocked: false, value };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+function sendPersistedMonthFrozen(
+  res: { status: (code: number) => { json: (body: object) => void } },
+  fy: string,
+  month: string,
+): void {
+  res.status(423).json({
+    error: `month ${month} (${fy}) became permanently frozen before the write could begin`,
+  });
 }
 
 /**
@@ -365,7 +413,7 @@ router.post("/registers/:fy/tombstone-orphans", async (req, res) => {
     return;
   }
   if (rejectIfFrozen(req, res, fy, { dryRun })) return;
-  if (rejectIfMonthFrozen(res, month, { dryRun })) return;
+  if (await rejectIfMonthFrozen(res, fy, month, { dryRun })) return;
 
   try {
     const occurrence = new OccurrenceCounter();
@@ -432,16 +480,38 @@ router.post("/registers/:fy/tombstone-orphans", async (req, res) => {
 
     const syncRunId = `manual-tombstone-${new Date().toISOString()}`;
 
-    const result = await tombstoneOrphans({
-      fy,
-      month,
-      seenIdentities,
-      incomingRowCount: monthLines.length,
-      syncRunId,
-      dryRun,
-      blastRadiusLimitPct,
-      lastGoodRowCount,
-    });
+    let result;
+    if (dryRun) {
+      result = await tombstoneOrphans({
+        fy, month, seenIdentities, incomingRowCount: monthLines.length,
+        syncRunId, dryRun, blastRadiusLimitPct, lastGoodRowCount,
+      });
+    } else {
+      let blocked = false;
+      await allowDelete(async (tx) => {
+        await (tx as typeof db).execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext(${`register-month|${fy}|${month}`}))`,
+        );
+        const state = await (tx as typeof db)
+          .select({ frozenAt: registerMonthState.frozenAt })
+          .from(registerMonthState)
+          .where(and(eq(registerMonthState.fy, fy), eq(registerMonthState.monthLabel, month)))
+          .limit(1);
+        if (state[0]?.frozenAt != null || isMonthFrozen(month)) {
+          blocked = true;
+          return;
+        }
+        result = await tombstoneOrphans({
+          fy, month, seenIdentities, incomingRowCount: monthLines.length,
+          syncRunId, dryRun: false, blastRadiusLimitPct, lastGoodRowCount,
+          executor: tx as typeof db,
+        });
+      });
+      if (blocked) {
+        sendPersistedMonthFrozen(res, fy, month);
+        return;
+      }
+    }
 
     res.json({
       ...result,
@@ -756,34 +826,42 @@ router.post("/registers/:fy/force-resync", async (req, res) => {
     req.log.warn({ fy, reason: unfreezeReason }, "force-resync: UNFREEZE override — writing to a frozen FY");
   }
 
-  // clearFirst wipes the entire FY — refuse if any month of this FY is
-  // permanently frozen under the month-level rule (no unfreeze escape hatch).
-  if (clearFirst) {
-    try {
-      const frozenMonths = (
-        await db.select().from(registerMonthState).where(eq(registerMonthState.fy, fy))
-      )
-        .map((r) => r.monthLabel)
-        .filter((m) => isMonthFrozen(m));
-      if (frozenMonths.length > 0) {
-        res.status(423).json({
-          error: `FY ${fy} contains permanently frozen months (${frozenMonths.join(", ")}) — clearFirst is refused. Use POST /registers/${fy}/replace-months instead (it only touches open months).`,
-        });
-        return;
-      }
-    } catch (err: unknown) {
-      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
-      return;
-    }
-  }
-
   try {
     if (clearFirst) {
+      let protectedMonths: string[] = [];
       await allowDelete(async (tx) => {
+        // Take the same per-month locks as replaceOpenMonths before checking
+        // persisted state. Lock the complete FY domain so a concurrently-created
+        // state row cannot appear outside the protected set.
+        const monthLabels = fyMonthLabels(fy).sort();
+        for (const monthLabel of monthLabels) {
+          await (tx as typeof db).execute(
+            sql`SELECT pg_advisory_xact_lock(hashtext(${`register-month|${fy}|${monthLabel}`}))`,
+          );
+        }
+        // Re-read only after every lock is held. The protection decision and
+        // deletion now share one fresh, serialized transaction snapshot.
+        const states = await (tx as typeof db)
+          .select()
+          .from(registerMonthState)
+          .where(eq(registerMonthState.fy, fy));
+        const stateByMonth = new Map(states.map((state) => [state.monthLabel, state]));
+        protectedMonths = monthLabels.filter((monthLabel) =>
+          isProtectedClearFirstMonth(
+            stateByMonth.get(monthLabel) ?? { monthLabel, frozenAt: null },
+          ),
+        );
+        if (protectedMonths.length > 0) return;
         await (tx as typeof db)
           .delete(saleLines)
           .where(eq(saleLines.fy, fy));
       });
+      if (protectedMonths.length > 0) {
+        res.status(423).json({
+          error: `FY ${fy} contains permanently frozen months (${protectedMonths.join(", ")}) — clearFirst is refused. Use POST /registers/${fy}/replace-months instead (it only touches open months).`,
+        });
+        return;
+      }
       req.log.info({ fy }, "force-resync: rows cleared");
     }
 
@@ -1074,29 +1152,34 @@ router.post("/registers/:fy/orphan-audit-reverse", async (req, res) => {
       : "orphan-audit|2026-07-21T05:55:40.864Z";
 
   if (rejectIfFrozen(req, res, fy)) return;
-  if (rejectIfMonthFrozen(res, month)) return;
+  if (await rejectIfMonthFrozen(res, fy, month)) return;
 
   try {
-    // 1. Flip all rows from this syncRunId back to current
-    const flipResult = await pool.query(
-      `UPDATE sale_line_all
-          SET version_status = 'current',
-              superseded_by   = NULL
-        WHERE fy            = $1
-          AND month_label   = $2
-          AND version_status = 'superseded'
-          AND superseded_by = $3`,
-      [fy, month, syncRunId],
-    );
-
-    // 2. New DB current totals for this month
-    const totals = await pool.query<{ rows: string; total: string }>(
-      `SELECT COUNT(*)::text AS rows,
-              COALESCE(SUM(amount::numeric), 0)::text AS total
-         FROM sale_line_all
-        WHERE fy = $1 AND month_label = $2 AND version_status = 'current'`,
-      [fy, month],
-    );
+    const mutation = await withWritableMonthTransaction(fy, month, async (client) => {
+      const flipResult = await client.query(
+        `UPDATE sale_line_all
+            SET version_status = 'current',
+                superseded_by   = NULL
+          WHERE fy            = $1
+            AND month_label   = $2
+            AND version_status = 'superseded'
+            AND superseded_by = $3`,
+        [fy, month, syncRunId],
+      );
+      const totals = await client.query(
+        `SELECT COUNT(*)::text AS rows,
+                COALESCE(SUM(amount::numeric), 0)::text AS total
+           FROM sale_line_all
+          WHERE fy = $1 AND month_label = $2 AND version_status = 'current'`,
+        [fy, month],
+      );
+      return { flipResult, totals };
+    });
+    if (mutation.blocked) {
+      sendPersistedMonthFrozen(res, fy, month);
+      return;
+    }
+    const { flipResult, totals } = mutation.value;
 
     const newRows = parseInt(totals.rows[0].rows, 10);
     const newTotal = parseFloat(totals.rows[0].total);
@@ -2128,7 +2211,7 @@ router.post("/registers/:fy/invoice-restore-apply", async (req, res) => {
     return;
   }
   if (rejectIfFrozen(req, res, fy)) return;
-  if (rejectIfMonthFrozen(res, month)) return;
+  if (await rejectIfMonthFrozen(res, fy, month)) return;
 
   try {
     // 1. Re-read live sheet (same as plan route)
@@ -2247,14 +2330,22 @@ router.post("/registers/:fy/invoice-restore-apply", async (req, res) => {
     }
 
     // 6. Flip selected rows back to current (status flip only, no insert/delete)
-    const updateResult = await pool.query(
-      `UPDATE sale_line_all
-          SET version_status = 'current',
-              superseded_by = NULL
-        WHERE line_uid = ANY($1::text[])
-          AND version_status = 'superseded'`,
-      [toRestoreUids],
-    );
+    const mutation = await withWritableMonthTransaction<{ rowCount: number | null }>(fy, month, async (client) => {
+      const result = await client.query(
+        `UPDATE sale_line_all
+            SET version_status = 'current',
+                superseded_by = NULL
+          WHERE line_uid = ANY($1::text[])
+            AND version_status = 'superseded'`,
+        [toRestoreUids],
+      );
+      return { rowCount: result.rowCount };
+    });
+    if (mutation.blocked) {
+      sendPersistedMonthFrozen(res, fy, month);
+      return;
+    }
+    const updateResult = mutation.value;
 
     req.log.info(
       { fy, month, syncRunId, restored: updateResult.rowCount, totalAmount: Math.round(totalAmountRestored) },
@@ -2513,7 +2604,7 @@ router.post("/registers/:fy/orphan-audit/apply", async (req, res) => {
     return;
   }
   if (rejectIfFrozen(req, res, fy)) return;
-  if (rejectIfMonthFrozen(res, month)) return;
+  if (await rejectIfMonthFrozen(res, fy, month)) return;
 
   try {
     // Always re-read sheet fresh — never apply a cached audit result
@@ -2536,15 +2627,23 @@ router.post("/registers/:fy/orphan-audit/apply", async (req, res) => {
 
     // Supersede Group A only. WHERE version_status='current' is a safety guard
     // against double-supersede if a concurrent sync ran between audit and apply.
-    const updateResult = await pool.query<never>(
-      `UPDATE sale_line_all
-          SET version_status = 'superseded',
-              superseded_at  = NOW(),
-              superseded_by  = $1
-        WHERE line_uid       = ANY($2)
-          AND version_status = 'current'`,
-      [syncRunId, lineUids],
-    );
+    const mutation = await withWritableMonthTransaction<{ rowCount: number | null }>(fy, month, async (client) => {
+      const result = await client.query(
+        `UPDATE sale_line_all
+            SET version_status = 'superseded',
+                superseded_at  = NOW(),
+                superseded_by  = $1
+          WHERE line_uid       = ANY($2)
+            AND version_status = 'current'`,
+        [syncRunId, lineUids],
+      );
+      return { rowCount: result.rowCount };
+    });
+    if (mutation.blocked) {
+      sendPersistedMonthFrozen(res, fy, month);
+      return;
+    }
+    const updateResult = mutation.value;
 
     res.json({
       syncRunId,

@@ -3694,6 +3694,24 @@ const MIGRATIONS: Migration[] = [
         ON register_monthly_ingest_ledger (run_id);
     `,
   },
+  {
+    id: "088_register_anchor_after_rejection",
+    sql: `
+      ALTER TABLE register_monthly_ingest_ledger
+        DROP CONSTRAINT IF EXISTS register_monthly_ingest_ledger_outcome_check;
+      ALTER TABLE register_monthly_ingest_ledger
+        ADD CONSTRAINT register_monthly_ingest_ledger_outcome_check
+        CHECK (outcome IN (
+          'replaced',
+          'frozen-skipped',
+          'frozen-anchored',
+          'anchored-after-rejected-read',
+          'aborted-short-read',
+          'rejected-shrink',
+          'failed'
+        ));
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

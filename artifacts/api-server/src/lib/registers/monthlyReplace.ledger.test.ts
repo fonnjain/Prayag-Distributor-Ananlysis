@@ -4,6 +4,10 @@ import {
   canonicalRegisterEvidenceRow,
   canonicalRegisterFingerprint,
   classifyMonthlyReadGuard,
+  isCalendarFrozenAnchorGap,
+  isEffectivelyFrozen,
+  isProtectedClearFirstMonth,
+  fyMonthLabels,
 } from "./monthlyReplace.js";
 
 describe("primary monthly ledger fingerprint", () => {
@@ -43,6 +47,47 @@ describe("primary monthly ledger guard outcomes", () => {
     expect(classifyMonthlyReadGuard({
       force: false, frozen: false, lastGood: 1_000, sheetRows: 998,
     })).toBeNull();
+  });
+
+  it("never reopens persisted frozen state when the calculated clock changes", () => {
+    expect(isEffectivelyFrozen(false, new Date("2026-09-07T00:00:00.000Z"))).toBe(true);
+    expect(isEffectivelyFrozen(true, null)).toBe(true);
+    expect(isEffectivelyFrozen(false, null)).toBe(false);
+  });
+
+  it("queues a calendar-frozen persisted baseline when its anchor is missing", () => {
+    const now = new Date("2026-09-07T00:00:00.000Z");
+    expect(isCalendarFrozenAnchorGap("Aug-26", {
+      lastGoodRows: 12_878,
+      frozenAt: null,
+    }, now)).toBe(true);
+    expect(isCalendarFrozenAnchorGap("Aug-26", {
+      lastGoodRows: 12_878,
+      frozenAt: new Date("2026-09-07T00:00:00.000Z"),
+    }, now)).toBe(false);
+    expect(isCalendarFrozenAnchorGap("Sep-26", {
+      lastGoodRows: 122,
+      frozenAt: null,
+    }, now)).toBe(false);
+  });
+
+  it("protects a persisted frozen month from clearFirst even if the clock says open", () => {
+    const beforeClockFreeze = new Date("2026-08-01T00:00:00.000Z");
+    expect(isProtectedClearFirstMonth({
+      monthLabel: "Aug-26",
+      frozenAt: new Date("2026-09-07T00:00:00.000Z"),
+    }, beforeClockFreeze)).toBe(true);
+    expect(isProtectedClearFirstMonth({
+      monthLabel: "Aug-26",
+      frozenAt: null,
+    }, beforeClockFreeze)).toBe(false);
+  });
+
+  it("locks the complete twelve-month FY domain for clearFirst protection", () => {
+    expect(fyMonthLabels("2026-27")).toEqual([
+      "Apr-26", "May-26", "Jun-26", "Jul-26", "Aug-26", "Sep-26",
+      "Oct-26", "Nov-26", "Dec-26", "Jan-27", "Feb-27", "Mar-27",
+    ]);
   });
 });
 

@@ -16,12 +16,10 @@
 //      If the sheet holds two identical rows, both are written.
 //      Acceptance: rows written equals rows read, exactly.
 //
-// FREEZE RULE: a month freezes permanently at 00:00 UTC on the 8th of the
-// following month, derived from the load date and shared across register sources.
-// (seven days of grace for late entries). Derived from the clock, never a
-// config list. A frozen month is skipped entirely — no read, no write. Its row
-// count and amount total are recorded once at freeze time and asserted on
-// startup via assertMonthAnchors().
+// FREEZE RULE: the clock determines when a month first becomes frozen. Once
+// frozen_at is persisted it is authoritative forever, even if that clock is
+// later changed. Frozen content is never replaced. Its row count and amount
+// are anchored once and asserted on startup via assertMonthAnchors().
 
 import { and, eq, sql as dsql } from "drizzle-orm";
 import { createHash } from "node:crypto";
@@ -81,7 +79,40 @@ export function isMonthFrozen(monthLabel: string, now: Date = new Date()): boole
   return freezeAt != null && now.getTime() >= freezeAt.getTime();
 }
 
+export function isEffectivelyFrozen(calendarFrozen: boolean, persistedFrozenAt: Date | null | undefined): boolean {
+  return calendarFrozen || persistedFrozenAt != null;
+}
+
+export function isCalendarFrozenAnchorGap(
+  monthLabel: string,
+  state: { lastGoodRows: number | null; frozenAt: Date | null } | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  return state != null &&
+    state.lastGoodRows != null &&
+    state.frozenAt == null &&
+    isMonthFrozen(monthLabel, now);
+}
+
+export function isProtectedClearFirstMonth(
+  state: { monthLabel: string; frozenAt: Date | null },
+  now: Date = new Date(),
+): boolean {
+  return state.frozenAt != null || isMonthFrozen(state.monthLabel, now);
+}
+
 const MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+export function fyMonthLabels(fy: string): string[] {
+  const m = /^(\d{4})-(\d{2})$/.exec(fy);
+  if (!m) return [];
+  const startYear = parseInt(m[1], 10);
+  return Array.from({ length: 12 }, (_, i) => {
+    const mon = (3 + i) % 12;
+    const year = startYear + (mon < 3 ? 1 : 0);
+    return `${MONTH_ABBR[mon]}-${String(year % 100).padStart(2, "0")}`;
+  });
+}
 
 /**
  * Every month label of the FY whose calendar month has STARTED as of `now`
@@ -92,16 +123,13 @@ const MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct",
  * FY format "2026-27" → Apr-26 … Mar-27.
  */
 export function openMonthLabels(fy: string, now: Date = new Date()): string[] {
-  const m = /^(\d{4})-(\d{2})$/.exec(fy);
-  if (!m) return [];
-  const startYear = parseInt(m[1], 10);
   const labels: string[] = [];
-  for (let i = 0; i < 12; i++) {
-    const mon = (3 + i) % 12; // Apr=3 … Mar=2
-    const year = startYear + (mon < 3 ? 1 : 0);
+  for (const label of fyMonthLabels(fy)) {
+    const m = /^([A-Z][a-z]{2})-(\d{2})$/.exec(label)!;
+    const mon = MONTH_INDEX[m[1]];
+    const year = 2000 + parseInt(m[2], 10);
     const monthStart = Date.UTC(year, mon, 1);
     if (now.getTime() < monthStart) continue; // month not started yet
-    const label = `${MONTH_ABBR[mon]}-${String(year % 100).padStart(2, "0")}`;
     if (!isMonthFrozen(label, now)) labels.push(label);
   }
   return labels;
@@ -109,7 +137,7 @@ export function openMonthLabels(fy: string, now: Date = new Date()): string[] {
 
 export interface MonthReplaceResult {
   month: string;
-  action: "replaced" | "frozen-skipped" | "frozen-anchored" | "aborted-short-read" | "rejected-shrink" | "failed";
+  action: "replaced" | "frozen-skipped" | "frozen-anchored" | "anchored-after-rejected-read" | "aborted-short-read" | "rejected-shrink" | "failed";
   sheetRows: number;
   sheetAmount: number;
   dbRowsBefore: number | null;
@@ -351,12 +379,22 @@ async function dbMonthCounts(fy: string, month: string): Promise<{ rows: number;
   return { rows: res[0]?.rows ?? 0, amount: parseFloat(res[0]?.amount ?? "0") };
 }
 
-/** Refuse writes to a frozen month. Throws with a clear message. Used by any
- *  manual route that mutates a specific (fy, month). */
-export function assertMonthWritable(fy: string, monthLabel: string, now: Date = new Date()): void {
-  if (isMonthFrozen(monthLabel, now)) {
+export async function isMonthPersistentlyFrozen(fy: string, monthLabel: string): Promise<boolean> {
+  const rows = await db
+    .select({ frozenAt: registerMonthState.frozenAt })
+    .from(registerMonthState)
+    .where(and(eq(registerMonthState.fy, fy), eq(registerMonthState.monthLabel, monthLabel)))
+    .limit(1);
+  return rows[0]?.frozenAt != null;
+}
+
+/** Refuse writes to a frozen month. Persisted state remains authoritative even
+ * if the calculated freeze clock is later changed. */
+export async function assertMonthWritable(fy: string, monthLabel: string, now: Date = new Date()): Promise<void> {
+  const persistedFrozen = await isMonthPersistentlyFrozen(fy, monthLabel);
+  if (isEffectivelyFrozen(isMonthFrozen(monthLabel, now), persistedFrozen ? now : null)) {
     throw new Error(
-      `month ${monthLabel} (${fy}) froze on ${monthFreezeAt(monthLabel)?.toISOString().slice(0, 10)} — writes are permanently refused`,
+      `month ${monthLabel} (${fy}) is permanently frozen`,
     );
   }
 }
@@ -409,6 +447,15 @@ export async function replaceOpenMonths(opts: {
   for (const label of openMonthLabels(fy, now)) {
     if (!byMonth.has(label)) byMonth.set(label, []);
   }
+  // A frozen month normally appears because its tab was read. Queue persisted
+  // last-good states explicitly as well, so an omitted/empty source tab cannot
+  // strand a calendar-frozen month without an anchor.
+  const monthState = await loadState(fy);
+  for (const [label, state] of monthState) {
+    if (isCalendarFrozenAnchorGap(label, state, now) && !byMonth.has(label)) {
+      byMonth.set(label, []);
+    }
+  }
 
   const months: MonthReplaceResult[] = [];
 
@@ -444,7 +491,7 @@ async function processOneMonth(
 ): Promise<MonthReplaceResult> {
   const sheetRows = monthLines.length;
   const sheetAmount = monthLines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
-  const frozen = isMonthFrozen(month, now);
+  const calendarFrozen = isMonthFrozen(month, now);
   const freezeAt = monthFreezeAt(month);
   const runId = opts.runId ?? `register-${now.toISOString()}`;
   const actor = opts.actor ?? "scheduler";
@@ -466,22 +513,26 @@ async function processOneMonth(
       const stRows = await tx.select().from(registerMonthState)
         .where(and(eq(registerMonthState.fy, fy), eq(registerMonthState.monthLabel, month)));
       const st = stRows[0] ?? null;
+      const frozen = isEffectivelyFrozen(calendarFrozen, st?.frozenAt);
+      const effectiveFreezeAt = st?.frozenAt ?? freezeAt;
       const beforeLines = await tx.select().from(saleLines)
         .where(and(eq(saleLines.fy, fy), eq(saleLines.monthLabel, month)));
       const beforeAudit = snapshot(beforeLines);
       failureContext.before = beforeAudit;
       const ledger = async (
-        outcome: "replaced" | "frozen-skipped" | "frozen-anchored" | "aborted-short-read" | "rejected-shrink" | "failed",
+        outcome: "replaced" | "frozen-skipped" | "frozen-anchored" | "anchored-after-rejected-read" | "aborted-short-read" | "rejected-shrink" | "failed",
         rowsWritten: number | null,
         afterAudit = beforeAudit,
         detail?: string,
+        writeAtomicity?: "same-replacement-transaction" | "ledger-only-transaction",
       ) => {
         return tx.insert(registerMonthlyIngestLedger).values(buildLedgerRecord({
           runId, actor, operator, source, fy, month, attemptedAt, outcome,
-          writeAtomicity:
+          writeAtomicity: writeAtomicity ?? (
             outcome === "replaced" || outcome === "frozen-anchored"
               ? "same-replacement-transaction"
-              : "ledger-only-transaction",
+              : "ledger-only-transaction"
+          ),
           rowsWritten,
           projectedRowsWritten: null,
           beforeLines, sourceLines: monthLines, afterAudit, spreadsheet, detail,
@@ -513,7 +564,7 @@ async function processOneMonth(
       // before this primary-register worker reaches its final anchor read.
       // It must still be allowed to record frozen_rows/frozen_amount once;
       // only a complete anchor makes this source safe to skip forever.
-      if (frozen && st?.frozenAt != null && st.frozenRows != null) {
+      if (st?.frozenAt != null && st.frozenRows != null) {
         if (st.frozenRows != null && st.frozenRows !== sheetRows) {
           logger.warn(
             { fy, month, frozenRows: st.frozenRows, sheetRows },
@@ -524,6 +575,38 @@ async function processOneMonth(
         return {
           month, action: "frozen-skipped" as const, sheetRows, sheetAmount,
           dbRowsBefore: null, rowsWritten: null, lastGoodRows: st.lastGoodRows,
+        };
+      }
+
+      // Persisted freeze state always wins over the calculated clock. If a
+      // sibling source established the shared frozen_at before the primary
+      // anchor fields were filled, anchor the unchanged database state rather
+      // than reopening the month for replacement.
+      if (st?.frozenAt != null) {
+        await tx
+          .update(registerMonthState)
+          .set({ frozenRows: beforeAudit.rows, frozenAmount: beforeAudit.amount })
+          .where(and(eq(registerMonthState.fy, fy), eq(registerMonthState.monthLabel, month)));
+        await tx
+          .update(secondarySkuLines)
+          .set({ frozenAt: st.frozenAt })
+          .where(and(eq(secondarySkuLines.fy, fy), eq(secondarySkuLines.monthLabel, month)));
+        await ledger(
+          "frozen-anchored",
+          null,
+          beforeAudit,
+          "persisted frozen state overrode the clock; primary anchor filled from unchanged database state",
+          "ledger-only-transaction",
+        );
+        return {
+          month,
+          action: "frozen-anchored",
+          sheetRows,
+          sheetAmount,
+          dbRowsBefore: beforeAudit.rows,
+          rowsWritten: null,
+          lastGoodRows: st.lastGoodRows,
+          detail: "persisted frozen state retained; primary anchor filled without replacement",
         };
       }
 
@@ -544,11 +627,30 @@ async function processOneMonth(
           { fy, month, sheetRows, lastGood },
           "monthly replace: freeze-transition read BELOW last good read — freeze ABORTED, will retry next tick",
         );
-        await ledger("rejected-shrink", null, beforeAudit, `freeze rejected: read ${sheetRows} < last good ${lastGood}`);
+        const anchorAt = effectiveFreezeAt ?? now;
+        await tx
+          .update(registerMonthState)
+          .set({
+            frozenAt: anchorAt,
+            frozenRows: beforeAudit.rows,
+            frozenAmount: beforeAudit.amount,
+          })
+          .where(and(eq(registerMonthState.fy, fy), eq(registerMonthState.monthLabel, month)));
+        await tx
+          .update(secondarySkuLines)
+          .set({ frozenAt: anchorAt })
+          .where(and(eq(secondarySkuLines.fy, fy), eq(secondarySkuLines.monthLabel, month)));
+        await ledger(
+          "anchored-after-rejected-read",
+          null,
+          beforeAudit,
+          `freeze-transition source rejected: read ${sheetRows} < last good ${lastGood}; anchored unchanged database state at ${beforeAudit.rows} rows`,
+          "ledger-only-transaction",
+        );
         return {
-          month, action: "rejected-shrink" as const, sheetRows, sheetAmount,
-          dbRowsBefore: null, rowsWritten: null, lastGoodRows: lastGood,
-          detail: `freeze aborted: read ${sheetRows} < last good ${lastGood} — a freeze never locks fewer rows than previously confirmed`,
+          month, action: "anchored-after-rejected-read" as const, sheetRows, sheetAmount,
+          dbRowsBefore: beforeAudit.rows, rowsWritten: null, lastGoodRows: lastGood,
+          detail: `source rejected: read ${sheetRows} < last good ${lastGood}; unchanged ${beforeAudit.rows}-row database state permanently anchored`,
         };
       }
       // Fires when a month with a POSITIVE baseline reads materially fewer
@@ -607,7 +709,7 @@ async function processOneMonth(
         // month unfrozen by a freeze-window correction): clearing it here keeps
         // assertMonthAnchors honest until the real freeze re-records it.
         ...(frozen
-          ? { frozenAt: freezeAt, frozenRows: written, frozenAmount: String(sheetAmount) }
+          ? { frozenAt: effectiveFreezeAt, frozenRows: written, frozenAmount: String(sheetAmount) }
           : { frozenAt: null, frozenRows: null, frozenAmount: null }),
       };
       await tx
@@ -623,7 +725,7 @@ async function processOneMonth(
         // always explains when its source values became permanent.
         await tx
           .update(secondarySkuLines)
-          .set({ frozenAt: freezeAt })
+          .set({ frozenAt: effectiveFreezeAt })
           .where(and(
             eq(secondarySkuLines.fy, fy),
             eq(secondarySkuLines.monthLabel, month),

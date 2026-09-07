@@ -412,6 +412,9 @@ export async function tombstoneOrphans(opts: {
    *    undefined — manual / ad-hoc call (e.g. POST tombstone-orphans);
    *               fall back to current DB row count (original Guard 2.5). */
   lastGoodRowCount?: number | null;
+  /** Optional transaction-scoped executor for callers that must serialize a
+   * freeze-state check with the tombstone write. */
+  executor?: typeof db;
 }): Promise<TombstoneResult> {
   const {
     fy,
@@ -422,6 +425,7 @@ export async function tombstoneOrphans(opts: {
     dryRun,
     blastRadiusLimitPct = 10,
   } = opts;
+  const executor = opts.executor ?? db;
 
   // Guard 2: zero incoming rows = bad read; abort without touching the DB
   if (incomingRowCount === 0) {
@@ -438,7 +442,7 @@ export async function tombstoneOrphans(opts: {
   }
 
   // Guard 1: scope — query only the exact (fy, month) that was read
-  const currentRows = await db
+  const currentRows = await executor
     .select({
       lineUid: saleLines.lineUid,
       invoiceNo: saleLines.invoiceNo,
@@ -552,7 +556,7 @@ export async function tombstoneOrphans(opts: {
   const tombstoneUids = orphans.map((r) => r.lineUid);
   for (let i = 0; i < tombstoneUids.length; i += BATCH_SIZE) {
     const batch = tombstoneUids.slice(i, i + BATCH_SIZE);
-    await db
+    await executor
       .update(saleLines)
       .set({ versionStatus: "superseded", supersededAt: now, supersededBy: `tombstone|${syncRunId}` })
       .where(and(inArray(saleLines.lineUid, batch), eq(saleLines.versionStatus, "current")));
