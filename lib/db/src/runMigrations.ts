@@ -3736,6 +3736,41 @@ const MIGRATIONS: Migration[] = [
         ));
     `,
   },
+  {
+    id: "089_align_scheme_reward_slab_generated_names",
+    sql: `
+      -- Development originally created the final-shape table as scheme_slab,
+      -- then migration 019 renamed only the table and explicit business index.
+      -- Preserve the generated sequence and primary key while aligning their
+      -- historical names with databases that created scheme_reward_slab directly.
+      DO $do$
+      BEGIN
+        IF to_regclass('public.scheme_slab_id_seq') IS NOT NULL
+           AND to_regclass('public.scheme_reward_slab_id_seq') IS NULL THEN
+          ALTER SEQUENCE scheme_slab_id_seq
+            RENAME TO scheme_reward_slab_id_seq;
+        END IF;
+
+        IF to_regclass('public.scheme_reward_slab') IS NOT NULL
+           AND EXISTS (
+             SELECT 1
+             FROM pg_constraint
+             WHERE conrelid = 'public.scheme_reward_slab'::regclass
+               AND conname = 'scheme_slab_pkey'
+           )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM pg_constraint
+             WHERE conrelid = 'public.scheme_reward_slab'::regclass
+               AND conname = 'scheme_reward_slab_pkey'
+           ) THEN
+          ALTER TABLE scheme_reward_slab
+            RENAME CONSTRAINT scheme_slab_pkey TO scheme_reward_slab_pkey;
+        END IF;
+      END
+      $do$;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).
