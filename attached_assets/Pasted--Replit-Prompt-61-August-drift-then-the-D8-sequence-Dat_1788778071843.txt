@@ -1,0 +1,192 @@
+# Replit Prompt 61 — August drift, then the D8 sequence
+
+**Date:** 7 September 2026
+**Follows:** Prompt 60 revised, which correctly stopped before applying.
+**Scope:** Section A is read-only and urgent. Sections B and C are the agreed
+build sequence, one step at a time.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## The stop was right, and my instruction caused it
+
+Prompt 60 was written on 5 September. It is now the 7th. August froze at 05:30
+IST this morning, hours before the change could be applied, and the safety rule
+said stop if any frozen month reopens. It would have.
+
+Three corrections from that report, all accepted:
+
+**The safe scope is September forward, not August forward.** My suggestion
+reopened August.
+
+**Freezing should be the 1st, not the 15th**, if scope-exit and immutability are
+meant to coincide. The 15th leaves a fourteen-day window where a month is outside
+the read scope but still writable.
+
+**The 403s were the connected account, not the application.** The app's own Sheets
+client reads those workbooks successfully.
+
+---
+
+## Section A — August. Read-only. This week.
+
+August has moved substantially and is now out of sync scope.
+
+| | Rows | Value |
+|---|---:|---:|
+| Loaded 2 September | 12,379 | — |
+| Source now | **12,871** | ₹30,42,00,894.69 |
+| Production now | **12,887** | ₹30,42,98,127.69 |
+| Production ahead by | **+16** | **+₹97,233.00** |
+
+So the source gained **492 rows** since our load, and we hold 16 rows it no longer
+shows. Neither will reconcile automatically.
+
+```
+Read-only. Change nothing, adopt nothing, approve nothing.
+
+A1. What are the 492 rows the source has gained since 2 September? Print
+    them: invoice number, date, customer, item code, quantity, amount. Are
+    they clustered by date or spread across the month?
+
+A2. What are the 16 rows production holds that the source no longer shows?
+    Same detail. Are they late-month invoices like the June and July 56, or
+    a different shape?
+
+A3. If the controlled frozen-drift path were used for August, what exactly
+    would happen? Walk through it: detection, eligibility, preview hash,
+    operator and reason, before-image archival, the 60% wipe guard,
+    approval, replacement, re-anchoring.
+
+A4. Would August pass the eligibility test - current FY and recent month?
+    It froze this morning, so it should be the most eligible month there is.
+
+A5. What would the FY2026-27 figures become if the current source were
+    adopted? Rows, value, and the effect on the FY total, currently
+    Rs 1,36,03,70,140.42 across 57,034 rows.
+
+A6. Does frozen_drift_check need to run first? It has zero FY2026-27 records
+    since 2 September, and no detector was invoked during the investigation.
+
+Report only. This needs a decision before anything is adopted.
+```
+
+---
+
+## Section B — the ledger. First build step.
+
+D8 puts this first and it is right: a durable per-run record has to exist before
+any prior-month replacement is automated, or a shrink becomes unauditable after
+the fact.
+
+```
+Code change. One thing: a durable ingest ledger for the primary monthly
+register. Show the diff before applying.
+
+The secondary dashboard already has this - a durable ingest-run record with
+append-only row revisions. The primary register does not; it persists only
+the latest baseline and frozen anchor, with rows-read and rows-written held
+in runtime results.
+
+Build the equivalent for the primary path. Per run, per affected month,
+record durably:
+
+  - run identity, scheduler or operator, timestamp
+  - month label and fiscal year
+  - rows read from source, rows written
+  - before and after row counts and values
+  - rows ADDED, REMOVED and CHANGED as counts
+  - before and after fingerprints
+  - source spreadsheet id, tab, and a content hash
+  - outcome: replaced, frozen-skipped, frozen-anchored, aborted-short-read,
+    failed
+
+MAKE EVERY SHRINK VISIBLE. Any nonzero reduction in rows or value must be
+recorded and surfaced, regardless of size. The 98% guard stays as a
+catastrophic-read guard only - it must not be treated as approval for
+normal shrinkage. A 0.2% deletion currently passes silently and that is the
+gap this closes.
+
+DO NOT:
+  - change the sync scope, the freeze clock, or openMonthLabels
+  - change SHORT_READ_TOLERANCE
+  - change the replacement mechanism itself
+  - unfreeze anything
+
+This is instrumentation. Behaviour stays identical.
+
+AFTER APPLYING, print the ledger schema, a sample record from a dry run, and
+confirm no sync behaviour changed.
+
+Then publish and push.
+```
+
+---
+
+## Section C — the remaining sequence. Do not start until B is live.
+
+One step at a time, each with its own diff and publish. Listed in order.
+
+```
+For reference, not to be built yet. Confirm the order and flag anything that
+should move.
+
+C1. INGEST-GENERATION CACHE KEYS
+    AI cache keys lack a data-version token, so a report can stay stale after
+    a prior-month correction. Add an ingest generation to report and AI cache
+    keys, and to dashboard snapshots.
+
+C2. TARGETED INVALIDATION
+    There is no dependency-aware invalidation for reports affected by a
+    prior-month correction. Add invalidation scoped to the affected periods.
+
+C3. PERSISTED WEEKLY SCHEDULER
+    Polling interval plus a persisted weekly run key, following the digest
+    pattern. A restart may initialise the scheduler but must NOT decide that
+    work is due - the MRP refresh fired 18 times in 10 days on deployments
+    and that must not repeat. Reuse an overlap guard or shared lock against
+    the existing six-hour jobs.
+
+C4. PROSPECTIVE FREEZE CLOCK
+    Apply from Sep-26 FORWARD only. Better still, make persisted frozen or
+    anchored state override the calculated clock, so a month can never
+    reopen regardless of how the clock is later changed. That is
+    structurally safer than getting a date right.
+
+    Freeze on the 1st, not the 15th, so scope-exit and immutability coincide.
+
+C5. AUTOMATIC PRIOR-MONTH REPLACEMENT
+    Only after C1-C4. Current month plus one immediately prior, automatic,
+    with every shrink recorded and alerted. Months two and three prior stay
+    on the controlled frozen-drift approval path.
+
+Confirm this order, and say if anything must move earlier.
+```
+
+---
+
+## Notes
+
+- **Section A is the only urgent item.** August is frozen, the source has moved by
+  492 rows, and the controlled path exists. That is a decision this week, not a
+  build.
+- **Section B before anything else in the sequence.** Once prior-month replacement
+  is automated, a silent deletion becomes unauditable. The ledger makes it
+  visible first.
+- **C4's second form is better than the first.** Applying the clock prospectively
+  depends on choosing the right cut-over date; making persisted frozen state
+  override the calculated clock makes reopening structurally impossible. I would
+  take that.
+- The 15th is dropped. Freezing on the 1st of the fourth month aligns
+  immutability with scope-exit, which the report is right that the 15th does not.
+
+## What this does not solve, and should be said
+
+The recommendation gives **current month plus one prior automatically**. Prayag
+edit for about two months. So some drift will still occur — it will simply be
+recorded and visible rather than silent, and months two and three prior will be
+reconciled by explicit decision instead of by schedule.
+
+That is the right trade. The alternative keeps four months mutable and delays
+every anchor by roughly 92 days.

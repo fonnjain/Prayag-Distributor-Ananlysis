@@ -384,3 +384,17 @@ mtime_ms = 1788777791552
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/b0846f6e-8208-416a-a21a-00ebb49493ef/b2d13ea0-aaa3-441d-9e60-c883eeb13369"
 storage_version_token = "1788777793353137"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "So2wU84KCKc3BCabcwm-i"
+uri = "file://reports/prompt-61-august-drift-d8-sequence.docx"
+type = "word_document"
+title = "Prompt 61 — August Drift and D8 Sequence"
+description = "Formatted Word report covering the August drift investigation, controlled refresh eligibility, ledger status, and recommended D8 implementation sequence."
+logical_id = "10ee9935-d196-4c31-8192-485d3416869e"
+content_hash = "sha256:9dbccd25b0d7a2064688dc8a7ba8eccc946db54bf9dbba26c0a7fff1d90cdc43"
+size = 41823
+mtime_ms = 1788778385048
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/10ee9935-d196-4c31-8192-485d3416869e/a8ae220e-13e5-4fd1-a235-f6a3c0b8dda8"
+storage_version_token = "1788778386539538"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
