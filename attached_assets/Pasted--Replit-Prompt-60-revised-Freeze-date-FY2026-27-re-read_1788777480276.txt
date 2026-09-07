@@ -1,0 +1,232 @@
+# Replit Prompt 60 (revised) — Freeze date, FY2026-27 re-read, and weekly three-month re-sync
+
+**Date:** 5 September 2026
+**Supersedes:** the earlier Prompt 60.
+**Scope:** Section A is a code change. Sections B, C and D are read-only.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## The requirement, and what it costs
+
+**Wanted:** re-read the current month plus the three prior months, once a week.
+Today that is Jun, Jul, Aug and Sep.
+
+**A frozen month rejects writes.** So re-syncing three prior months requires those
+months to be unfrozen. The freeze moves from about 15 days after month end to
+about **92 days**.
+
+| | Month-end to freeze | Months open at once |
+|---|---:|---:|
+| 7th rule (current) | ~7 days | 1–2 |
+| **15th rule (Section A)** | **~15 days** | **1–2** |
+| Current + 3 prior | **~92 days** | **4** |
+
+And **June and July are frozen right now.** The new rule brings them back into
+scope, which means unfreezing two closed months — something this system has never
+done.
+
+Section A takes the 15th, which is a small safe improvement and buys nine days on
+August. Sections C and D scope the weekly re-sync without building it.
+
+---
+
+## Section A — freeze at IST midnight on the 15th. Code change.
+
+```
+Code change. One function, one constant. Show the diff before applying.
+
+monthFreezeAt in lib/registers/monthlyReplace.ts currently returns:
+
+  new Date(Date.UTC(mon === 11 ? year + 1 : year, (mon + 1) % 12, 7))
+
+That is 00:00 UTC on the 7th = 05:30 IST. Both the day and the time of day
+are wrong for an Indian operation.
+
+Change it to IST MIDNIGHT ON THE 15TH of the following month, which is 18:30
+UTC on the 14th.
+
+Make the intent explicit in code - a named constant and a comment stating
+"freeze at IST midnight on the 15th of the following month, UTC+05:30". Do
+not leave a bare arithmetic offset; that is what gets "simplified" later by
+someone who does not know why it is there.
+
+DO NOT:
+  - change isMonthFrozen, openMonthLabels or any caller
+  - change the three secondary month-closure helpers from Prompt 44 - a
+    different clock for a different purpose
+  - change SHORT_READ_TOLERANCE or any guard
+  - unfreeze anything already frozen
+
+BEFORE APPLYING, print:
+
+  A1. Every caller of monthFreezeAt and isMonthFrozen.
+
+  A2. Which FY2026-27 months are frozen now, and which would be frozen under
+      the new rule.
+
+  A3. DOES ANY CURRENTLY FROZEN MONTH BECOME UNFROZEN? Apr-26 through Jul-26
+      froze months ago and must stay frozen. If any would reopen, STOP and
+      report - that would expose closed months to rewriting.
+
+  A4. Does anything else assume the 7th? Search for the literal, for "7th",
+      and for any comment or documentation stating the rule, including the
+      Secondary Data Storage document if it is in the repo.
+
+AFTER APPLYING, print each FY2026-27 month with its freeze instant in both
+UTC and IST, and confirm no previously frozen month is now open.
+
+Then publish and push.
+```
+
+---
+
+## Section B — re-read FY2026-27 from April. Read-only.
+
+```
+Read-only. Change nothing, reload nothing.
+
+Our last full comparison was 2 September and found 56 rows in June and July
+present in sale_line and absent from the source. Re-read the sources fresh.
+
+B1. Per month, April through September: source sheet rows and value against
+    current sale_line rows and value. Print the difference for each.
+
+B2. For any month that differs, is the database ahead or behind, and by how
+    much? On 2 September it was Jun +20 rows / Rs 4,82,810.94 and
+    Jul +36 rows / Rs 5,61,852.00.
+
+B3. Have the June and July gaps grown, shrunk or stayed at 56 rows and
+    Rs 10,44,662.94?
+
+B4. August is not yet frozen. Has its source changed since the 12,379-row
+    load on 2 September? If so, will the current sync pick it up, or has it
+    already passed out of scope?
+
+B5. Does September have any rows yet? On 2 September it had none.
+
+B6. Confirm the FY2026-27 total. It was Rs 1,34,37,87,941.72 across 56,404
+    rows on 2 September.
+
+B7. Has frozen_drift_check fired for any FY2026-27 month since 2 September?
+
+Report only. Do not reconcile, reload or adjust anything.
+```
+
+---
+
+## Section C — weekly three-month re-sync: what it means for the freeze
+
+```
+Read-only and scoping only. Build nothing, unfreeze nothing.
+
+REQUIREMENT: re-read the current month plus the three prior months, weekly.
+
+C1. Confirm that a frozen month rejects writes, and therefore that this
+    requires those months to be unfrozen. If there is any way to re-sync a
+    frozen month WITHOUT unfreezing it, describe it - that would change the
+    whole shape of this.
+
+C2. Under "current + 3 prior", a month leaves scope when it turns four months
+    old: Apr-26 freezes 1 Aug, May-26 1 Sep, Jun-26 1 Oct, Jul-26 1 Nov,
+    Aug-26 1 Dec.
+
+    Confirm that shape, and say whether freezing should fall on the 1st or
+    the 15th of that month.
+
+C3. Anchor delay moves from ~15 days after month end to ~92 days. Which
+    anchors, checks, reports or guards depend on a month settling sooner?
+    Name each.
+
+C4. Jun-26 and Jul-26 are FROZEN NOW and this rule brings them back into
+    scope.
+
+    What would unfreezing them involve and expose? And is there a safer
+    alternative - applying the new rule only from Aug-26 FORWARD, leaving
+    Apr-Jul frozen as they stand?
+
+    I would prefer the safer alternative. Say whether it works and what it
+    costs.
+```
+
+---
+
+## Section D — the weekly mechanism itself
+
+```
+Read-only and scoping only. Build nothing.
+
+D1. What runs the re-sync today, and how would a weekly schedule be added -
+    cron, interval, or triggered?
+
+    Note the MRP refresh turned out to be restart-driven rather than
+    schedule-driven, firing 18 times in 10 days on deployments. Confirm this
+    would not behave the same way.
+
+D2. Each weekly run re-reads roughly 45,000-50,000 primary rows plus the
+    secondary sources. What does that cost in time and Drive API quota, and
+    does it risk rate limits? Note the Sheets metadata 403s already seen on
+    the closed-year workbooks.
+
+D3. REPLACE OR MERGE - THIS IS THE ONE THAT COULD BITE.
+
+    If a re-read finds FEWER rows than the database holds - the 56-row case -
+    does the sync adopt the source and delete, or keep both?
+
+    SHORT_READ_TOLERANCE at 0.98 aborts a shrink beyond 2%. A 56-row shrink
+    is 0.04% and would pass silently. Under a weekly overwrite those rows
+    would simply disappear, with no drift alert, because adopting the source
+    IS the design.
+
+    Is that intended? It should be a conscious decision, not a side effect.
+
+D4. What is recorded per run - rows added, removed, changed, per month? A
+    weekly overwrite with no ledger makes "when did this figure change"
+    unanswerable later.
+
+D5. Do dashboard snapshots, alert history and AI artefacts invalidate when a
+    prior month changes? Recomputing August in November moves figures that
+    reports have already quoted.
+
+D6. THE TRADE-OFF, HONESTLY. Four fiscal months open at once, anchors
+    settling ~92 days after month end, previously frozen months mutable.
+
+    Against: Prayag edit for about two months, so a three-month window
+    captures essentially all of it, and the 56-row drift resolves itself.
+
+D7. Is there a middle option? For example weekly re-sync of the current month
+    and ONE prior month automatically, with months two and three re-syncable
+    only through an explicit, logged operation.
+
+    That catches most edits automatically and keeps older months settled
+    unless someone decides otherwise.
+
+D8. Recommend one. Do not implement it.
+
+Report only.
+```
+
+---
+
+## Notes
+
+- **A3 and C4 are the two checks I would not skip.** Both are about a closed month
+  reopening. April through July froze months ago; nothing in this change should
+  make them writable again without a deliberate decision.
+- **C4's safer alternative is worth pressing for.** Applying the new rule only from
+  August forward gives the behaviour going forward without touching two closed
+  months. If it works, it is strictly better.
+- **D3 is the quiet one.** A 56-row shrink is 0.04% and sails past the 2%
+  tolerance. Under a weekly overwrite those rows vanish with no alert, because
+  adopting the source is the point. That has to be chosen, not inherited.
+- **D7 is the option I would look at hardest.** Automatic for the current month and
+  one prior, explicit and logged beyond that. Most edits caught, control retained,
+  exceptions recorded.
+
+## Related — the August SKU export
+
+`secondary_sku_line` holds zero August rows. The Product-Wise file is order booking
+and went to a different table. Section A extends the deadline from **7 September
+05:30 IST** to **15 September 00:00 IST**, nine extra days for Prayag to send the
+retailer and item-level report. The note to them should still go today.
