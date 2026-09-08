@@ -510,3 +510,17 @@ mtime_ms = 1788790068557
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/e0e9805a-962e-4556-9d0f-39aa23547a67/ea1ee5f1-969c-4dae-8d5c-8f1c100ca329"
 storage_version_token = "1788790076726125"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "UgoGw3LA7m0vDjJMVFLc-"
+uri = "file://reports/sales-ytd-fy26-27-spreadsheet-reconciliation-through-2026-09-07.xlsx"
+type = "table"
+title = "Sales YTD FY26–27 Spreadsheet Reconciliation"
+description = "Excel workbook comparing the ₹136.10 Cr dashboard card with the live SALE SHEET 26-27 and production sale_line data, including summary, monthly reconciliation, all-date reconciliation, separate monthly date-wise sheets, formulas, and calculation notes."
+logical_id = "2754e7ab-95e3-4a95-bb7b-c4a45f21b1fa"
+content_hash = "sha256:0ec5a5904045ad2ade57991112498a181906438f6deaaeabe8ce67493ce590a5"
+size = 34030
+mtime_ms = 1788847226037
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/2754e7ab-95e3-4a95-bb7b-c4a45f21b1fa/3959b4e5-a459-484f-be88-e3204f6d0bf4"
+storage_version_token = "1788847249332508"
+content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
