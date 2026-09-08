@@ -580,3 +580,17 @@ mtime_ms = 1788852335550
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/00f3e5fe-d50f-4319-aa07-99105f8d0b5f/a93dee51-b6c5-4180-bcc7-ef2de4e41398"
 storage_version_token = "1788852343203635"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "MqEwWa9dYggfF8pZfn7Zc"
+uri = "file://reports/prompt-54a-mrp-tank-quantity-read-only-audit-2026-09-08.docx"
+type = "word_document"
+title = "Prompt 54A — MRP and Water-Tank Quantity Audit"
+description = "Read-only Word report covering tank quantity storage, all reviewed MRP surfaces, assertion history, WCT coverage, unmapped codes, production rupee exposure, and primary-versus-secondary quantity comparisons."
+logical_id = "91b15464-41d1-42d8-8aef-02236439b309"
+content_hash = "sha256:5d35f0dacf01a1325b36747d6c9c78c1f0f701a5b4df26a87ea8ba520504231f"
+size = 41913
+mtime_ms = 1788856586825
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/91b15464-41d1-42d8-8aef-02236439b309/cfae6f98-85ca-4daf-b02e-ac89169d9780"
+storage_version_token = "1788856596462356"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
