@@ -26,6 +26,7 @@ import {
 import { respondIfQuotaError } from "../lib/quotaResponse.js";
 import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
 import { isFrozen } from "../lib/customers/registerSync.js";
+import { provisionalMonthsExportInfo } from "../lib/exportInfo.js";
 
 const router = Router();
 
@@ -183,7 +184,7 @@ function addSheet(
   ws.views = [{ state: "frozen", ySplit: 1 }];
 }
 
-function buildWorkbook(p: CompanyReportsPayload, filter?: CompanyReportsFilter): ExcelJS.Workbook {
+async function buildWorkbook(p: CompanyReportsPayload, filter?: CompanyReportsFilter): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
   wb.creator = "Prayag Sales Intelligence";
 
@@ -202,6 +203,7 @@ function buildWorkbook(p: CompanyReportsPayload, filter?: CompanyReportsFilter):
     ["State filter", filter?.states?.length ? filter.states.join(", ") : "All"],
     ["Distributor filter", filter?.customers?.length ? filter.customers.join(", ") : "All"],
     ["Month filter", filter?.months?.length ? filter.months.join(", ") : "All complete months"],
+    ["Provisional months", await provisionalMonthsExportInfo(p.fy)],
     ["Note", "Figures are territory + project combined as shown on the page. Quantity is never summed across groups (litres vs pieces)."],
   ];
   for (const [k, v] of infoRows) {
@@ -306,7 +308,7 @@ router.get("/company-reports/export", async (req, res) => {
   activeExports++;
   try {
     const payload = await buildCompanyReports(rawFy, rawAsOf, filter);
-    const wb = buildWorkbook(payload, filter);
+    const wb = await buildWorkbook(payload, filter);
     const buf = await wb.xlsx.writeBuffer();
     const suffix = filter ? "_filtered" : "";
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");

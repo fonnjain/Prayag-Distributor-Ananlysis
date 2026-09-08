@@ -73,6 +73,7 @@ import {
   type EntityFilter,
 } from "../lib/saleLineFilter.js";
 import { parseJsonArray } from "./companyReports.js";
+import { provisionalMonthsExportInfo } from "../lib/exportInfo.js";
 import { currentOpenFy, deriveSaleLineCohortFy, deriveSaleLineClosedFys } from "../lib/fyAnchors.js";
 import { getVolumeDecline } from "../lib/sku/skuVolumeDecline.js";
 import { getPriceShrinkers } from "../lib/sku/skuPriceShrinkers.js";
@@ -172,7 +173,6 @@ router.get("/sku/facts", async (req: Request, res: Response): Promise<void> => {
       segment,
       entityFilter,
     });
-
     return {
       fy,
       monthFrom,
@@ -783,6 +783,7 @@ router.get("/sku/export", async (req: Request, res: Response): Promise<void> => 
       monthLabels,
       entityFilter,
     });
+    const provisionalInfo = await provisionalMonthsExportInfo(fy);
 
     const wb = new ExcelJS.Workbook();
     wb.creator = "Prayag Sales Intelligence";
@@ -805,6 +806,7 @@ router.get("/sku/export", async (req: Request, res: Response): Promise<void> => 
       ["State Head filter", entityFilter?.heads?.length ? entityFilter.heads.join(", ") : "All"],
       ["State filter", entityFilter?.states?.length ? entityFilter.states.join(", ") : "All"],
       ["Distributor filter", entityFilter?.customers?.length ? entityFilter.customers.join(", ") : "All"],
+      ["Provisional months", provisionalInfo],
       ["Note", "Breadth denominator (codesEverSold) is cross-FY and company-wide; it is NOT reduced by filters. Qty must never be summed across codes/segments (litres vs pieces)."],
     ];
     for (const [k, v] of infoRows) {

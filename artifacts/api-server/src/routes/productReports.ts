@@ -24,6 +24,7 @@ import { parseJsonArray } from "./companyReports.js";
 import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
 import { parseMonthsParam } from "../lib/periodMonths.js";
 import { isFrozen } from "../lib/customers/registerSync.js";
+import { provisionalMonthsExportInfo } from "../lib/exportInfo.js";
 import { respondIfQuotaError } from "../lib/quotaResponse.js";
 
 const router = Router();
@@ -312,6 +313,7 @@ router.get("/product-reports/export", async (req, res) => {
   activeExports++;
   try {
     const p = await buildProductReports(fy, filter, months);
+    const provisionalInfo = await provisionalMonthsExportInfo(p.fy);
 
     const wb = new ExcelJS.Workbook();
     wb.creator = "Prayag Sales Intelligence";
@@ -328,6 +330,7 @@ router.get("/product-reports/export", async (req, res) => {
       ["State Head filter", filter?.heads?.length ? filter.heads.join(", ") : "All"],
       ["State filter", filter?.states?.length ? filter.states.join(", ") : "All"],
       ["Distributor filter", filter?.customers?.length ? filter.customers.join(", ") : "All"],
+      ["Provisional months", provisionalInfo],
       ["Note", "Quantity is per product only and must never be summed across products or groups (litres vs pieces). WATER TANK rows report litres."],
     ];
     for (const [k, v] of infoRows) {

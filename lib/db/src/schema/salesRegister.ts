@@ -206,6 +206,23 @@ export const registerMonthState = pgTable("register_month_state", {
 
 export type RegisterMonthState = typeof registerMonthState.$inferSelect;
 
+// Restart-safe due state and operational instrumentation for the hourly
+// primary-register scheduler. One row per scheduled FY job.
+export const registerSyncSchedulerState = pgTable("register_sync_scheduler_state", {
+  jobName: text("job_name").primaryKey(),
+  lastSuccessfulRunKey: text("last_successful_run_key"),
+  lastAttemptedRunKey: text("last_attempted_run_key"),
+  status: text("status").notNull().default("idle"),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  driveRequests: integer("drive_requests"),
+  elapsedMs: integer("elapsed_ms"),
+  rowsScanned: integer("rows_scanned"),
+  monthsTouched: integer("months_touched"),
+  detail: text("detail"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Append-only evidence for every attempted primary-register month ingest.  The
 // payload columns intentionally retain exact multisets and comparison inputs:
 // this is an audit ledger, not a mutable operational state table.

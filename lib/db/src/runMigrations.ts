@@ -3807,6 +3807,44 @@ const MIGRATIONS: Migration[] = [
         );
     `,
   },
+  {
+    id: "092_hourly_register_sync_scheduler_state",
+    sql: `
+      CREATE TABLE IF NOT EXISTS register_sync_scheduler_state (
+        job_name TEXT PRIMARY KEY,
+        last_successful_run_key TEXT,
+        last_attempted_run_key TEXT,
+        status TEXT NOT NULL DEFAULT 'idle',
+        started_at TIMESTAMPTZ,
+        completed_at TIMESTAMPTZ,
+        drive_requests INTEGER,
+        elapsed_ms INTEGER,
+        rows_scanned INTEGER,
+        months_touched INTEGER,
+        detail TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT register_sync_scheduler_state_status_check
+          CHECK (status IN ('idle', 'running', 'succeeded', 'failed'))
+      );
+      ALTER TABLE register_sync_scheduler_state
+        ADD COLUMN IF NOT EXISTS last_successful_run_key TEXT,
+        ADD COLUMN IF NOT EXISTS last_attempted_run_key TEXT,
+        ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'idle',
+        ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS drive_requests INTEGER,
+        ADD COLUMN IF NOT EXISTS elapsed_ms INTEGER,
+        ADD COLUMN IF NOT EXISTS rows_scanned INTEGER,
+        ADD COLUMN IF NOT EXISTS months_touched INTEGER,
+        ADD COLUMN IF NOT EXISTS detail TEXT,
+        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+      ALTER TABLE register_sync_scheduler_state
+        DROP CONSTRAINT IF EXISTS register_sync_scheduler_state_status_check;
+      ALTER TABLE register_sync_scheduler_state
+        ADD CONSTRAINT register_sync_scheduler_state_status_check
+        CHECK (status IN ('idle', 'running', 'succeeded', 'failed'));
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

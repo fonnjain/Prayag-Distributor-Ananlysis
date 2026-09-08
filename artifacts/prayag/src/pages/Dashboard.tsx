@@ -19,6 +19,9 @@ import DataHealth from "@/components/dashboard/DataHealth";
 import PendingOrders from "@/components/dashboard/PendingOrders";
 import GlobalFilterBar from "@/components/GlobalFilterBar";
 import { useDashboard } from "@/data/dashboard-context";
+import { useGlobalFilter } from "@/data/global-filter-context";
+import { useCompleteMonths } from "@/hooks/useCompleteMonths";
+import ProvisionalMonthsBanner from "@/components/ProvisionalMonthsBanner";
 import { RefreshCw } from "lucide-react";
 
 /**
@@ -66,6 +69,8 @@ export const AREA_IDS = AREAS.map((a) => a.id);
 
 export default function Dashboard() {
   const [location] = useLocation();
+  const { fy } = useGlobalFilter();
+  const { provisionalMonths } = useCompleteMonths(fy);
   const activeArea = AREAS.find((a) => location === `/${a.id}`)?.id ?? AREAS[0].id;
   const ActiveComponent = AREAS.find((a) => a.id === activeArea)?.component ?? Overview;
   const areaLabel = AREAS.find((a) => a.id === activeArea)?.label ?? "Overview";
@@ -83,6 +88,7 @@ export default function Dashboard() {
       </header>
 
       <QuotaWaitBanner />
+      <ProvisionalMonthsBanner months={provisionalMonths} />
 
       <ActiveComponent />
     </div>

@@ -6,6 +6,7 @@
 // expenses, retailer-to-TM sale bridge) are left BLANK with a light grey fill
 // and listed in the "Missing Data" tab. Never 0 for an unknown.
 import ExcelJS from "exceljs";
+import { provisionalMonthsExportInfo } from "../exportInfo.js";
 import regionMapJson from "../../../config/region_map.json";
 import { loadRoster, type RosterMember } from "./roster.js";
 import {
@@ -1165,6 +1166,16 @@ export async function buildManagementWorkbook(
   const wb = new ExcelJS.Workbook();
   wb.creator = "Prayag Sales Intelligence";
   wb.created = new Date();
+  const info = wb.addWorksheet("Info");
+  info.columns = [{ width: 26 }, { width: 95 }];
+  for (const [label, value] of [
+    ["Page", `Management Reports — FY ${fy}`],
+    ["FY", fy],
+    ["Provisional months", await provisionalMonthsExportInfo(fy)],
+  ] as Array<[string, string]>) {
+    const row = info.addRow([label, value]);
+    row.getCell(1).font = { bold: true };
+  }
 
   // --- Tab 1: SECONDARY ORDER BOOKING REPORT (trailing space as in template)
   {

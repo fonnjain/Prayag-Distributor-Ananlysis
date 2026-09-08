@@ -37,13 +37,26 @@ vi.mock("../lib/registers/normalize.js", () => ({
   toSaleLine: vi.fn(),
 }));
 
-vi.mock("@workspace/db", () => ({
-  pool: { query: vi.fn().mockResolvedValue({ rows: [{ n: "1" }] }) },
+vi.mock("@workspace/db", () => {
+  const client = {
+    query: vi.fn().mockImplementation(async (sql: string) => {
+      if (sql.includes("pg_try_advisory_lock")) return { rows: [{ locked: true }] };
+      if (sql.includes("last_successful_run_key")) return { rows: [{ last_successful_run_key: null }] };
+      return { rows: [] };
+    }),
+    release: vi.fn(),
+  };
+  return {
+  pool: {
+    query: vi.fn().mockResolvedValue({ rows: [{ n: "1" }] }),
+    connect: vi.fn().mockResolvedValue(client),
+  },
   db: {},
   saleLines: {},
   itemMaster: {},
   ingestRuns: {},
-}));
+  };
+});
 
 vi.mock("../lib/logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },

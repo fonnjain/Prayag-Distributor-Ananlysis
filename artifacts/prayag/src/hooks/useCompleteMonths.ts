@@ -21,6 +21,8 @@ export type CompleteMonthsResult = {
   completeMonths: string[];
   /** Month labels that are in the DB but whose last day has not yet passed. */
   partialMonths: string[];
+  /** Primary-register months still in the refresh window and not persistently frozen. */
+  provisionalMonths: string[];
   /** ISO-8601 timestamp of the last successful register sync (null before first sync). */
   lastSyncedAt: string | null;
   loading: boolean;
@@ -29,6 +31,7 @@ export type CompleteMonthsResult = {
 export function useCompleteMonths(fy: string): CompleteMonthsResult {
   const [completeMonths, setCompleteMonths] = useState<string[]>([]);
   const [partialMonths, setPartialMonths] = useState<string[]>([]);
+  const [provisionalMonths, setProvisionalMonths] = useState<string[]>([]);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -41,6 +44,7 @@ export function useCompleteMonths(fy: string): CompleteMonthsResult {
         (d: {
           months?: string[];
           completeMonths?: string[];
+          provisionalMonths?: string[];
           lastSyncedAt?: string | null;
         }) => {
           if (cancelled) return;
@@ -49,6 +53,7 @@ export function useCompleteMonths(fy: string): CompleteMonthsResult {
           const completeSet = new Set(complete);
           setCompleteMonths(complete);
           setPartialMonths(all.filter((m) => !completeSet.has(m)));
+          setProvisionalMonths(d.provisionalMonths ?? []);
           setLastSyncedAt(d.lastSyncedAt ?? null);
         },
       )
@@ -61,5 +66,5 @@ export function useCompleteMonths(fy: string): CompleteMonthsResult {
     };
   }, [fy]);
 
-  return { completeMonths, partialMonths, lastSyncedAt, loading };
+  return { completeMonths, partialMonths, provisionalMonths, lastSyncedAt, loading };
 }

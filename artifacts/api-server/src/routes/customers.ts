@@ -36,6 +36,7 @@ import { parseJsonArray } from "./companyReports.js";
 import { computeAllMultipliers } from "../lib/customers/laspeyres.js";
 import { getSplit } from "../lib/headSplits.js";
 import { currentOpenFy, deriveSaleLineCohortFy, priorFy } from "../lib/fyAnchors.js";
+import { getEffectivelyOpenPrimaryRegisterMonths } from "../lib/primaryRegisterMonths.js";
 import {
   listSchemes,
   getScheme,
@@ -106,9 +107,10 @@ router.get("/customers/months", async (req, res) => {
     return;
   }
   try {
-    const [months, completeMonths] = await Promise.all([
+    const [months, completeMonths, provisionalMonths] = await Promise.all([
       getAvailableMonths(fy),
       getCompleteMonths(fy),
+      getEffectivelyOpenPrimaryRegisterMonths(fy),
     ]);
     if (months.length === 0) {
       // Trigger a background sync if one is not already in progress.
@@ -122,6 +124,7 @@ router.get("/customers/months", async (req, res) => {
       fy,
       months,
       completeMonths,
+      provisionalMonths,
       syncing,
       syncError,
       lastSyncedAt: getLastSyncedAt(fy),

@@ -168,11 +168,12 @@ function sweepGetCache(): void {
 // the largest 50k-row chunk; the retry loop gives up to 4 attempts total.
 const SHEETS_REQUEST_TIMEOUT_MS = 45_000;
 
-async function sheetsGetUncached(path: string): Promise<unknown> {
+async function sheetsGetUncached(path: string, onRequest?: () => void): Promise<unknown> {
   const spreadsheetId = spreadsheetIdFromPath(path);
   let lastError: Error | null = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const token = await getGoogleAccessToken();
+    onRequest?.();
     const res = await fetch(`${SHEETS_BASE}${path}`, {
       headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(SHEETS_REQUEST_TIMEOUT_MS),
@@ -197,7 +198,7 @@ async function sheetsGetUncached(path: string): Promise<unknown> {
   throw lastError ?? new Error("Sheets API request failed");
 }
 
-async function sheetsGet(path: string): Promise<unknown> {
+async function sheetsGet(path: string, onRequest?: () => void): Promise<unknown> {
   const cached = _getCache.get(path);
   if (cached && Date.now() - cached.ts < SNAPSHOT_TTL_MS) return cached.data;
 
@@ -207,7 +208,7 @@ async function sheetsGet(path: string): Promise<unknown> {
   if (existing) return existing;
 
   const p = (async () => {
-    const data = await sheetsGetUncached(path);
+    const data = await sheetsGetUncached(path, onRequest);
     sweepGetCache();
     _getCache.set(path, { ts: Date.now(), data });
     return data;
@@ -223,9 +224,10 @@ function quoteTitle(title: string): string {
 
 export type SheetTab = { title: string; rowCount: number };
 
-export async function listSheetTabs(spreadsheetId: string): Promise<SheetTab[]> {
+export async function listSheetTabs(spreadsheetId: string, onRequest?: () => void): Promise<SheetTab[]> {
   const data = (await sheetsGet(
     `/${spreadsheetId}?fields=sheets.properties(title,gridProperties(rowCount))`,
+    onRequest,
   )) as {
     sheets?: Array<{
       properties?: { title?: string; gridProperties?: { rowCount?: number } };
@@ -261,6 +263,7 @@ export async function readTabRowsChunked(
   spreadsheetId: string,
   title: string,
   onChunk: (rows: SheetCellValue[][], startRowNumber: number) => void,
+  onRequest?: () => void,
 ): Promise<{ rowsRead: number }> {
   let start = 1;
   let rowsRead = 0;
@@ -269,6 +272,7 @@ export async function readTabRowsChunked(
     const range = `${quoteTitle(title)}!${start}:${end}`;
     const data = (await sheetsGet(
       `/${spreadsheetId}/values/${encodeURIComponent(range)}?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`,
+      onRequest,
     )) as { values?: SheetCellValue[][] };
     const rows = data.values ?? [];
     if (rows.length > 0) {

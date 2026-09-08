@@ -13,6 +13,7 @@ import { serveWithSnapshot } from "../lib/payloadSnapshot.js";
 import { isFrozen } from "../lib/customers/registerSync.js";
 import { parseJsonArray } from "./companyReports.js";
 import { parseMonthsParam } from "../lib/periodMonths.js";
+import { provisionalMonthsExportInfo } from "../lib/exportInfo.js";
 
 const router: IRouter = Router();
 
@@ -112,7 +113,7 @@ function addSheet(
   ws.views = [{ state: "frozen", ySplit: 1 }];
 }
 
-function buildWorkbook(p: AnalyticsReport, filter?: EntityFilter): ExcelJS.Workbook {
+async function buildWorkbook(p: AnalyticsReport, filter?: EntityFilter): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
   wb.creator = "Prayag Sales Intelligence";
 
@@ -129,6 +130,7 @@ function buildWorkbook(p: AnalyticsReport, filter?: EntityFilter): ExcelJS.Workb
     ["State Head filter", filter?.heads?.length ? filter.heads.join(", ") : "All"],
     ["State filter", filter?.states?.length ? filter.states.join(", ") : "All"],
     ["Distributor filter", filter?.customers?.length ? filter.customers.join(", ") : "All"],
+    ["Provisional months", await provisionalMonthsExportInfo(p.fy)],
     ["Note", "YoY and retention figures use complete months only, matched by month name across both years. The prior FY is scoped to the current-FY customer set when head/state filters are active."],
   ];
   for (const [k, v] of infoRows) {
@@ -205,7 +207,7 @@ router.get("/analytics/export", async (req: Request, res: Response): Promise<voi
   activeExports++;
   try {
     const payload = await buildAnalytics(fy, compareFy, filter, months);
-    const wb = buildWorkbook(payload, filter);
+    const wb = await buildWorkbook(payload, filter);
     const buf = await wb.xlsx.writeBuffer();
     const suffix = filter || (months && months.length > 0) ? "_filtered" : "";
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");

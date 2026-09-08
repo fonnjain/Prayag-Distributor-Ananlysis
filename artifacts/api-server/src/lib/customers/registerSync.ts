@@ -166,7 +166,7 @@ type FyState = {
 
 const byFy = new Map<string, FyState>();
 
-// Track last successful full sync time per FY (resets on process restart).
+// In-memory timestamp is UI-only. Scheduler due state is persisted below.
 const lastSyncedAtMs = new Map<string, number>();
 
 // NOTE (Aug 2026): the per-month short-read baseline now lives in the DATABASE
@@ -174,13 +174,44 @@ const lastSyncedAtMs = new Map<string, number>();
 // survives process restarts. The old in-memory lastGoodRowCountByMonth map and
 // its ingest_run-based boot loader are gone with the versioned-sync pipeline.
 
-// Re-sync TTL for the current open FY: 24 hours (nightly full replace of the
-// open month). A completed FY is never re-synced (no new invoices possible).
-const OPEN_FY_RESYNC_MS = 24 * 60 * 60 * 1000;
+const HOURLY_REGISTER_SYNC_MS = 60 * 60 * 1000;
+const SCHEDULE_INTERVAL_MS = HOURLY_REGISTER_SYNC_MS;
+const REGISTER_SYNC_JOB_LOCK = "register-sync-job";
 
-// Scheduled sync interval — same as the resync TTL so a schedule tick always
-// finds stale data for the open FY.
-const SCHEDULE_INTERVAL_MS = OPEN_FY_RESYNC_MS;
+type SyncMetrics = { driveRequests: number; rowsScanned: number; monthsTouched: number };
+type RegisterSyncLockClient = {
+  query<T extends Record<string, unknown> = Record<string, unknown>>(
+    text: string,
+    values?: unknown[],
+  ): Promise<{ rows: T[] }>;
+  release(): void;
+};
+type DoSyncOptions = { runId?: string; lockClient?: RegisterSyncLockClient; metrics?: SyncMetrics };
+
+function hourlyRunKey(now = new Date()): string {
+  return now.toISOString().slice(0, 13);
+}
+
+async function acquireRegisterSyncLock(): Promise<RegisterSyncLockClient | null> {
+  const client = await pool.connect() as unknown as RegisterSyncLockClient;
+  const result = await client.query<{ locked: boolean }>(
+    "SELECT pg_try_advisory_lock(hashtext($1)) AS locked",
+    [REGISTER_SYNC_JOB_LOCK],
+  );
+  if (!result.rows[0]?.locked) {
+    client.release();
+    return null;
+  }
+  return client;
+}
+
+async function releaseRegisterSyncLock(client: RegisterSyncLockClient): Promise<void> {
+  try {
+    await client.query("SELECT pg_advisory_unlock(hashtext($1))", [REGISTER_SYNC_JOB_LOCK]);
+  } finally {
+    client.release();
+  }
+}
 
 /**
  * Returns true when the given FY is listed in the REGISTER_SYNC_PAUSE
@@ -293,8 +324,14 @@ async function hasRows(fy: string): Promise<boolean> {
   return parseInt(res.rows[0]?.n ?? "0", 10) > 0;
 }
 
-export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
+export async function doSync(fy: string, spreadsheetId: string, options: DoSyncOptions = {}): Promise<void> {
   const s = stateFor(fy);
+  const ownedLock = options.lockClient == null;
+  const lockClient = options.lockClient ?? await acquireRegisterSyncLock();
+  if (!lockClient) {
+    logger.warn({ fy }, "register sync: shared job lock busy — skipping overlap");
+    throw new Error("register sync already running");
+  }
   s.phase = "syncing";
   const startedAt = new Date();
   logger.info({ fy, spreadsheetId }, "register sync: starting");
@@ -303,6 +340,7 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
     const unmapped = emptyUnmapped();
     const lines: InsertSaleLine[] = [];
 
+    const requestCounter = { count: 0 };
     const { rowsScanned, tabsRead, tabsNotRead, monthSources, fallbackSources } = await readRegisterFromSheets(
       spreadsheetId,
       fy,
@@ -311,7 +349,12 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
         if (result.kind !== "row") return;
         lines.push(toSaleLine(result.row, occurrence, unmapped, "sheets"));
       },
+      { onRequest: () => { requestCounter.count++; } },
     );
+    if (options.metrics) {
+      options.metrics.driveRequests = requestCounter.count;
+      options.metrics.rowsScanned = rowsScanned;
+    }
 
     // New-tab detection: every workbook tab NOT read as sales data is logged,
     // shape-tested and recorded as proposed/ignored. Never blocks the sync.
@@ -333,7 +376,7 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
         { fy, spreadsheetId, tabsRead, rowsScanned },
         "register sync: zero rows — aborting",
       );
-      return;
+      throw new Error(s.error);
     }
 
     // ── Tank resolution ────────────────────────────────────────────────────────
@@ -478,12 +521,13 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
     // is deleted and re-inserted from the read in ONE transaction, guarded by
     // the DB-persisted short-read baseline in register_month_state.
     const replaceSummary = await replaceOpenMonths({
-      fy, lines: linesForSync, runId: `scheduled-${startedAt.toISOString()}`,
+      fy, lines: linesForSync, runId: options.runId ?? `scheduled-${startedAt.toISOString()}`,
       actor: "scheduler", operator: null, source: "register_sheets_sync",
       spreadsheet: { id: spreadsheetId, monthSources, fallbackSources },
     });
 
     const inserted = replaceSummary.months.reduce((n, m) => n + (m.rowsWritten ?? 0), 0);
+    if (options.metrics) options.metrics.monthsTouched = replaceSummary.months.length;
     const aborted = replaceSummary.months.filter((m) =>
       m.action === "aborted-short-read" || m.action === "rejected-shrink" || m.action === "failed",
     );
@@ -529,6 +573,8 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
         replacedCount: replacedMonths.length,
         months: replaceSummary.months.map((m) => `${m.month}:${m.action}(${m.rowsWritten ?? "-"})`),
         rowsWritten: inserted,
+        driveRequests: requestCounter.count,
+        elapsedMs: Date.now() - startedAt.getTime(),
         abortedMonths: aborted.map((m) => m.month),
         unmappedGroups: Object.keys(unmapped.unmapped_groups).length,
         unmappedHeads: Object.keys(unmapped.unmapped_heads).length,
@@ -670,14 +716,70 @@ export async function doSync(fy: string, spreadsheetId: string): Promise<void> {
     s.phase = "error";
     s.error = err instanceof Error ? err.message : String(err);
     logger.error({ fy, spreadsheetId, err }, "register sync: failed");
+    throw err;
   } finally {
     s.inFlight = null;
+    if (ownedLock) await releaseRegisterSyncLock(lockClient);
+  }
+}
+
+async function runPersistedHourlySync(fy: string, spreadsheetId: string): Promise<void> {
+  const lockClient = await acquireRegisterSyncLock();
+  if (!lockClient) {
+    logger.info({ fy }, "hourly register sync: shared lock busy — another job owns this run");
+    return;
+  }
+  const jobName = `primary-register|${fy}`;
+  const runKey = hourlyRunKey();
+  const startedAt = new Date();
+  const metrics: SyncMetrics = { driveRequests: 0, rowsScanned: 0, monthsTouched: 0 };
+  try {
+    const state = await lockClient.query<{ last_successful_run_key: string | null }>(
+      "SELECT last_successful_run_key FROM register_sync_scheduler_state WHERE job_name=$1",
+      [jobName],
+    );
+    if (state.rows[0]?.last_successful_run_key === runKey) return;
+    await lockClient.query(
+      `INSERT INTO register_sync_scheduler_state
+         (job_name,last_attempted_run_key,status,started_at,completed_at,detail,updated_at)
+       VALUES ($1,$2,'running',$3,NULL,NULL,now())
+       ON CONFLICT (job_name) DO UPDATE SET
+         last_attempted_run_key=EXCLUDED.last_attempted_run_key,status='running',
+         started_at=EXCLUDED.started_at,completed_at=NULL,detail=NULL,updated_at=now()`,
+      [jobName, runKey, startedAt],
+    );
+    let ok = false;
+    let detail: string | null = null;
+    try {
+      await doSync(fy, spreadsheetId, {
+        runId: `hourly-${fy}-${runKey}`,
+        lockClient,
+        metrics,
+      });
+      ok = true;
+    } catch (err) {
+      detail = err instanceof Error ? err.message : String(err);
+    }
+    const elapsedMs = Date.now() - startedAt.getTime();
+    await lockClient.query(
+      `UPDATE register_sync_scheduler_state SET
+         last_successful_run_key=CASE WHEN $2 THEN $3 ELSE last_successful_run_key END,
+         status=CASE WHEN $2 THEN 'succeeded' ELSE 'failed' END,
+         completed_at=now(),drive_requests=$4,elapsed_ms=$5,rows_scanned=$6,
+         months_touched=$7,detail=$8,updated_at=now()
+       WHERE job_name=$1`,
+      [jobName, ok, runKey, metrics.driveRequests, elapsedMs, metrics.rowsScanned,
+       metrics.monthsTouched, detail],
+    );
+    logger.info({ fy, runKey, ok, ...metrics, elapsedMs }, "hourly register sync: persisted run complete");
+  } finally {
+    await releaseRegisterSyncLock(lockClient);
   }
 }
 
 // Ensures sale_line_all is being populated for this FY.
 //   - Completed FYs: syncs once on first call; subsequent calls are no-ops.
-//   - Open (current) FY: syncs on first call and re-syncs after OPEN_FY_RESYNC_MS.
+//   - Open (current) FY: the persisted UTC-hour key decides whether work is due.
 export function ensureRegisterSynced(fy: string): void {
   const spreadsheetId = REGISTER_SHEET_IDS[fy];
   if (!spreadsheetId) return;
@@ -710,16 +812,8 @@ export function ensureRegisterSynced(fy: string): void {
           s.inFlight = null;
           return;
         }
-        const lastSync = lastSyncedAtMs.get(fy);
-        const recentlySynced =
-          lastSync != null && Date.now() - lastSync < OPEN_FY_RESYNC_MS;
-        if (recentlySynced) {
-          // Open FY but recently synced this process lifetime: skip for now.
-          s.phase = "done";
-          s.inFlight = null;
-          return;
-        }
-        // Open FY that has not been synced recently: re-sync to pick up new rows.
+        await runPersistedHourlySync(fy, spreadsheetId);
+        return;
       }
       await doSync(fy, spreadsheetId);
     } catch (err) {
@@ -756,7 +850,7 @@ export function runScheduledTick(): void {
     }
     const s = stateFor(fy);
     if (s.inFlight) continue; // already running
-    s.inFlight = doSync(fy, spreadsheetId).catch((err: unknown) => {
+    s.inFlight = runPersistedHourlySync(fy, spreadsheetId).catch((err: unknown) => {
       logger.error({ fy, err }, "scheduled register sync: failed");
     });
   }
