@@ -552,3 +552,17 @@ mtime_ms = 1788847979769
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/4b248ba8-afd4-487b-b785-2e8882e55b81/e0b741f8-4d68-46ef-a3be-2239b59d2bf1"
 storage_version_token = "1788847992914204"
 content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+[[outputs]]
+id = "ozT5ZeqKGHxOPWm_R-cAG"
+uri = "file://reports/prompt-64-september-readiness-production-preflight-2026-09-08.docx"
+type = "word_document"
+title = "Prompt 64 — September Readiness"
+description = "Word report covering the production MRP preflight stop decision, current MRP state, affected surfaces, and September pipeline readiness."
+logical_id = "4bc70481-5d81-4576-83b8-c6747361efe7"
+content_hash = "sha256:eb6fe4d22177cf5ecbf0c4c950166472e954b482dbadfb179de71a13568fd4df"
+size = 42553
+mtime_ms = 1788849828155
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/4bc70481-5d81-4576-83b8-c6747361efe7/8263062a-fadf-468d-89a4-7de91b9e10ef"
+storage_version_token = "1788849835689736"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
