@@ -1,0 +1,19 @@
+column_name,data_type
+id,integer
+employee_code,text
+code_plausible,boolean
+norm_key,text
+canonical_name,text
+alias_primary,ARRAY
+alias_secondary,text
+alias_sheet,text
+reporting_manager,text
+state_head,text
+is_state_head,boolean
+is_person,boolean
+hr_status,text
+flag_notes,text
+created_at,timestamp with time zone
+updated_at,timestamp with time zone
+state_head_source,text
+person_id,integer

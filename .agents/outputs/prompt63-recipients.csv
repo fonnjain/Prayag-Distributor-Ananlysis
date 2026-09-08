@@ -1,0 +1,19 @@
+id,name,alert_code_pattern,scope_type,scope_value,escalation_level,channel,contact,cadence,is_active,created_at,updated_at
+1,Sandeep Dadheech,*,state_head,Sandeep Dadheech,1,whatsapp,9331103319,weekly,t,2026-08-16 11:08:25.777552+00,2026-08-16 11:08:25.777552+00
+2,Aqil Rizvi,*,state_head,Aqil Rizvi,1,whatsapp,9305083814,weekly,t,2026-08-16 11:08:25.777552+00,2026-08-16 11:08:25.777552+00
+3,Biju C.O,*,state_head,Biju C.O,1,whatsapp,9633200526,weekly,t,2026-08-16 11:08:25.777552+00,2026-08-16 11:08:25.777552+00
+4,Pawan Kumar Sharma,*,state_head,Pawan Kumar Sharma,1,whatsapp,9958040072,weekly,t,2026-08-16 11:08:25.777552+00,2026-08-16 11:08:25.777552+00
+5,Sulinder Pal,*,state_head,Sulinder Pal,1,whatsapp,9816258614,weekly,t,2026-08-16 11:08:25.777552+00,2026-08-16 11:08:25.777552+00
+6,Anant Singh,*,state_head,Anant Singh,1,whatsapp,7838915612,weekly,t,2026-08-16 11:08:25.777552+00,2026-08-16 11:08:25.777552+00
+7,Nasir Hussain Khan,*,state_head,Nasir Hussain Khan,1,whatsapp,9958065454,weekly,t,2026-08-16 11:08:25.777552+00,2026-08-16 11:08:25.777552+00
+8,Sunil Patel,*,state_head,Sunil Patel,1,whatsapp,9408709411,weekly,t,2026-08-16 11:08:25.777552+00,2026-08-16 11:08:25.777552+00
+9,Lalan Kumar,*,state_head,Lalan Kumar,1,whatsapp,9579398634,weekly,t,2026-08-16 11:08:25.777552+00,2026-08-16 11:08:25.777552+00
+10,Anuj Sharma,*,state_head,Anuj Sharma,1,whatsapp,8796339586,weekly,t,2026-08-16 11:08:25.777552+00,2026-08-16 11:08:25.777552+00
+11,Narendra Kumar Sharma,*,state_head,Narendra Kumar Sharma,1,whatsapp,9828146028,weekly,t,2026-08-16 11:08:25.777552+00,2026-08-16 11:08:25.777552+00
+12,Sunil Mohanty,*,state_head,Sunil Mohanty,1,whatsapp,,weekly,t,2026-08-16 11:08:25.777552+00,2026-08-16 11:08:25.777552+00
+13,Deepak J,*,all_india,,1,whatsapp,9910896007,weekly,t,2026-08-16 11:08:25.777552+00,2026-08-16 11:08:25.777552+00
+14,Nitin Agarwal,*,all_india,,3,email,ceo@prayagindia.com,weekly,t,2026-08-16 11:08:25.777552+00,2026-08-16 11:08:25.777552+00
+15,Deepak J,S*,all_india,,1,whatsapp,9910896007,on_raise,t,2026-08-16 11:29:17.284908+00,2026-08-16 11:29:17.284908+00
+16,Deepak J,C*,all_india,,1,whatsapp,9910896007,on_raise,t,2026-08-16 11:29:17.284908+00,2026-08-16 11:29:17.284908+00
+17,Nitin Agarwal,S*,all_india,,1,email,ceo@prayagindia.com,on_raise,t,2026-08-16 11:29:17.284908+00,2026-08-16 11:29:17.284908+00
+18,Nitin Agarwal,C*,all_india,,1,email,ceo@prayagindia.com,on_raise,t,2026-08-16 11:29:17.284908+00,2026-08-16 11:29:17.284908+00

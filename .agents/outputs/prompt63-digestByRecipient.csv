@@ -1,0 +1,15 @@
+recipient_id,recipient,channel,contact_configured,scope_type,scope_value,code,status,alerts,stake
+13,Deepak J,whatsapp,t,all_india,,A1,cleared,10,39783804.046666668
+13,Deepak J,whatsapp,t,all_india,,A2,cleared,3,1033400
+13,Deepak J,whatsapp,t,all_india,,A1,open,2,3484926.49
+13,Deepak J,whatsapp,t,all_india,,A2,open,125,259705334.8566666754
+13,Deepak J,whatsapp,t,all_india,,A3,open,1,445000
+13,Deepak J,whatsapp,t,all_india,,B3,open,7,77086771
+13,Deepak J,whatsapp,t,all_india,,S1,open,4,2805079
+14,Nitin Agarwal,email,t,all_india,,A1,cleared,10,39783804.046666668
+14,Nitin Agarwal,email,t,all_india,,A2,cleared,3,1033400
+14,Nitin Agarwal,email,t,all_india,,A1,open,2,3484926.49
+14,Nitin Agarwal,email,t,all_india,,A2,open,125,259705334.8566666754
+14,Nitin Agarwal,email,t,all_india,,A3,open,1,445000
+14,Nitin Agarwal,email,t,all_india,,B3,open,7,77086771
+14,Nitin Agarwal,email,t,all_india,,S1,open,4,2805079

@@ -1,0 +1,132 @@
+# Replit Prompt 63 — August SKU frozen empty, and alert delivery
+
+**Date:** 8 September 2026
+**Scope:** Section A is read-only and urgent. Section B is a decision.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## Section A — August froze empty. Establish the damage.
+
+The freeze change to the 15th was written in Prompt 60 and **never applied** — the
+agent correctly stopped because August would have reopened. Prompts 61 and 62 then
+went into the ledger and anchoring work instead.
+
+So the rule is still the 7th, and **August 2026 froze at 05:30 IST on 7 September
+with zero rows in `secondary_sku_line`.**
+
+The 8,602-row Product-Wise file is order booking and went to
+`secondary_order_line`. It is not sell-through data and does not fill this gap.
+
+```
+Read-only. Change nothing, load nothing, unfreeze nothing.
+
+A1. Confirm secondary_sku_line's Aug-26 state: rows, value, frozen_at,
+    frozen_rows, frozen_amount. Same for secondary_register_line.
+
+A2. Was August anchored at zero, or is it calendar-frozen with frozen_at
+    NULL - the state that trapped the primary register? If unanchored, it is
+    in the same trap and equally unrepairable.
+
+A3. Which surfaces now read August as a measured zero? SKU Deep Dive,
+    breadth trajectory, the push list, Red Alert B3 retailer branch, AI
+    Growth activation. For each, print what it currently shows for Aug-26.
+
+A4. HAS B3 FIRED? It compares current against prior comparable months. With
+    August at zero, every retailer would appear to have stopped ordering.
+
+    Print every alert raised since 7 September 05:30 IST, by category, with
+    counts. If B3 has produced a wave of retailer alerts, they are false and
+    caused by the empty month.
+
+A5. Does the controlled frozen-drift path work for secondary_sku_line, or
+    only for the primary register? If the August export arrives next week,
+    what is the route to load it into a frozen month?
+
+A6. Is there any other month, in any fiscal year, frozen at zero in
+    secondary_sku_line or secondary_register_line?
+
+Report only. Do not adopt, load or unfreeze.
+```
+
+---
+
+## Section B — alert delivery. A decision, not a build.
+
+**Three real digests ran — 17, 24 and 31 August. 110 email attempts, all failed.
+110 WhatsApp attempts, all pending. Zero messages delivered.**
+
+The scheduler works. Recipients are configured: 13 WhatsApp routes, an all-India
+email route, four on-raise routes. The providers are not — `RESEND_API_KEY` and
+`SMTP_HOST` are both unset.
+
+**Ten A1 alerts covering ₹3.44 crore of shortfall are open, unacknowledged, and
+have never reached a person.**
+
+The timing was fortunate. Had delivery been configured a week earlier, those
+digests would have carried the 114 false August A2 alerts to the CEO. The gap that
+looks like a failure prevented a worse one.
+
+**But that argument no longer holds**, and Section A may change it again.
+
+```
+Read-only. Configure nothing yet.
+
+B1. Confirm the current state: which provider variables are unset, how many
+    attempts are queued or failed, and what would be delivered on the next
+    Monday digest if credentials were supplied today.
+
+B2. THE SEQUENCING QUESTION. If Section A finds that B3 has fired a wave of
+    false retailer alerts from the empty August month, connecting delivery
+    now would send them.
+
+    Print exactly what the next digest would contain - every alert, by
+    category and recipient. I want to see the payload before anyone
+    supplies a credential.
+
+B3. Which of the ten open A1 alerts are genuine and current? Their windows
+    were Apr-26..May-26 when last checked. Are they still open, still
+    accurate, and would a state head receiving one today find it actionable
+    or stale?
+
+B4. What is the smallest safe first step - enabling email only, to a single
+    internal recipient, for one digest cycle, before any state head route is
+    activated? Describe it.
+
+Report only. Do not set any credential.
+```
+
+---
+
+## Notes
+
+- **A4 is the urgent question.** August has been frozen at zero for over a day. If
+  B3 reads it, every retailer looks dormant, and that is the same false-alert
+  shape as the 114 A2s last week — except this time delivery might be switched on
+  before anyone notices.
+- **A5 decides whether this is recoverable.** If the August export arrives and
+  there is no route into a frozen `secondary_sku_line`, the month stays empty
+  permanently.
+- **B2 before B1.** Supplying a credential is a one-line action with an
+  irreversible consequence — messages reach people. The payload should be
+  inspected first, especially now.
+
+## The correction
+
+I said the August SKU deadline had moved to 15 September. It had not. The freeze
+change was never applied, August froze on the 7th, and the note drafted for Prayag
+on 5 September described a deadline that has now passed.
+
+That note needs rewriting before it goes anywhere — from "please send before
+Monday" to "August has closed empty; here is what that means and what we need to
+reopen it."
+
+## Still open, unchanged
+
+**Prompt 54A** — tank units. Whether any MRP-derived measure reads litres rather
+than pieces, which would show a 100% discount on every water tank. Sent,
+unanswered.
+
+**The Prayag query pack** — 22 queries, still unsent. The distributor gap the
+order-booking load exposed, 383 names against 269 coded, strengthens query B1.

@@ -524,3 +524,31 @@ mtime_ms = 1788847226037
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/2754e7ab-95e3-4a95-bb7b-c4a45f21b1fa/3959b4e5-a459-484f-be88-e3204f6d0bf4"
 storage_version_token = "1788847249332508"
 content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+[[outputs]]
+id = "Co1GaPPD4Qt6VeoyfLCYK"
+uri = "file://reports/prompt-63-read-only-production-audit-2026-09-08.docx"
+type = "word_document"
+title = "Prompt 63 Read-Only Production Audit"
+description = "Full Word report covering August SKU frozen-empty damage, B3 verification, recoverability, delivery attempts, exact digest consequences, A1 currentness, and the safest sequencing decision."
+logical_id = "955a264a-2be5-4b5b-a672-7491ea58d565"
+content_hash = "sha256:878d98a5ebf8eb6d77c25abbf1ac5e9a1f7002b3033626b9b41090646ece6d1e"
+size = 40930
+mtime_ms = 1788847979844
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/955a264a-2be5-4b5b-a672-7491ea58d565/c783b957-a426-4774-85cc-f4c00a7daa62"
+storage_version_token = "1788847991257079"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "3jc07Kn0NQsygHnnC0TI_"
+uri = "file://reports/prompt-63-read-only-audit-alert-payload-2026-09-08.xlsx"
+type = "table"
+title = "Prompt 63 Exact Alert Payload Annex"
+description = "Excel annex with the exact 152-alert payload, recipient matrix, category totals, delivery history, frozen state, A1 details, surface results, and methodology."
+logical_id = "4b248ba8-afd4-487b-b785-2e8882e55b81"
+content_hash = "sha256:2816b44a5148db93b83b959e2974f814e7492539d0abedc5ae1dcfee809c8598"
+size = 28189
+mtime_ms = 1788847979769
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/4b248ba8-afd4-487b-b785-2e8882e55b81/e0b741f8-4d68-46ef-a3be-2239b59d2bf1"
+storage_version_token = "1788847992914204"
+content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
