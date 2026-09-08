@@ -650,3 +650,17 @@ mtime_ms = 1788873265187
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/b9851e22-c559-4470-a8de-037e3c3b7c07/9968c610-b2c7-496e-8ae9-fca01ba16d58"
 storage_version_token = "1788873271401146"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "5uFckN8C7ZorrtYvVw2NE"
+uri = "file://deliverables/Canonical_Category_Publish_Migration_Failure_Analysis.docx"
+type = "word_document"
+title = "Canonical Category Publish Migration Failure Analysis"
+description = "Word document covering the root cause, Publish transformation audit, all 35 duplicate rows, transactional cleanup SQL, and the recommended corrective path."
+logical_id = "6626d718-7e08-4d03-ae74-d3392b68449c"
+content_hash = "sha256:bc099e52b7956839722e922fbc33b70bd59f8aee024b8854652704579872233e"
+size = 40532
+mtime_ms = 1788874489899
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/6626d718-7e08-4d03-ae74-d3392b68449c/46efe560-c1ed-4272-a45a-452d0d4dbe39"
+storage_version_token = "1788874496611668"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
