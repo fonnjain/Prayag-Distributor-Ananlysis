@@ -622,3 +622,17 @@ mtime_ms = 1788865778737
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/13764d81-2372-43f4-a403-ac1621faf7d5/0a28fb06-cd8a-4851-a010-ad05e1b046cc"
 storage_version_token = "1788865780836183"
 content_type = "text/csv"
+
+[[outputs]]
+id = "IQDBNFZb0aRqvJkSiH3q0"
+uri = "file://reports/global-category-taxonomy-read-only-report.docx"
+type = "word_document"
+title = "Global Category Filter — Taxonomy and Scope Assessment"
+description = "Formatted Word report containing the complete read-only production investigation, 50-code vocabulary comparison, recommendation, implementation scope, risks, and effort estimate."
+logical_id = "d04b88c8-332a-4388-bec8-53cf61c9ed17"
+content_hash = "sha256:d709921a7223329e1b76f3ae13c22d5f107f1a2c0957d4e7f4e54e4d25c24e3a"
+size = 45615
+mtime_ms = 1788870299048
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/d04b88c8-332a-4388-bec8-53cf61c9ed17/3b31d75a-5ea1-44e2-a13d-7ceb39d7ad82"
+storage_version_token = "1788870310650580"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"

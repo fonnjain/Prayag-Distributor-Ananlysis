@@ -1,0 +1,74 @@
+Read-only and scoping only. Build nothing.
+
+A global category filter is wanted across all pages, reports and exports,
+plus category tabs on the Products page. Before designing it, settle which
+taxonomy it uses.
+
+SECTION A - WHAT VOCABULARIES EXIST
+
+A1. Print every category-like field in the system with its distinct value
+    count and where it is populated from:
+      sale_line.group_canon and group_raw
+      item_master - any category or division field
+      MRP master Division and Category
+      secondary_sku_line.segment_canon and segment_raw
+      secondary_order_line.category_name and segment_canon
+      secondary_register_line.brand_canon
+      anything in the scheme or push-list engines
+
+A2. For a sample of 50 codes sold this year, print every category value each
+    one carries across all those fields, side by side. I want to see how
+    badly they disagree.
+
+A3. sale_line has 17 groups; MRP master has 10 Divisions and 332 Categories.
+    Do the 17 map cleanly onto Divisions, or do they cut across them?
+    Produce the crosswalk and show where it breaks.
+
+A4. Four MRP Divisions are pipe-separated multi-values - for example
+    "Ceramic Sanitaryware | PTMT & Plastic Fittings" on 50 products, and
+    one three-way. How should a product in two divisions behave in a
+    single-select filter or a tab?
+
+A5. How many sold codes have NO category in each vocabulary? The Products
+    export shows "Unmapped" as a group - how many, and worth how much?
+
+SECTION B - WHICH ONE SHOULD THE FILTER USE
+
+B1. Recommend the authoritative taxonomy, with reasons. Consider:
+      - sale_line.group_canon already drives the Products page and is
+        populated on every row
+      - MRP Division is Prayag's own commercial structure but is not on
+        sale_line and has composites
+      - secondary tables use segment, which is a different axis again
+
+B2. If the filter uses group_canon, what happens on secondary surfaces that
+    only have segment? Can the two be reconciled, or does the filter apply
+    to some pages and not others?
+
+    A global filter that silently does nothing on three pages is worse than
+    no global filter.
+
+B3. Does anything need a mapping table - group_canon to Division, or code to
+    canonical category? If so, who maintains it and what happens to a new
+    code that is in neither?
+
+SECTION C - SCOPE OF THE CHANGE
+
+C1. Which pages, reports, exports and AI payloads would need to honour the
+    filter? Name every one.
+
+C2. Which of those can filter server-side on an indexed column, and which
+    would need a join or a post-filter? 846,618 order rows and 481,000 sale
+    rows make that a performance question.
+
+C3. Exports must match the filter exactly, including the Info sheet stating
+    which category scope produced the figures. Confirm every export path can
+    carry that.
+
+C4. On the Products page specifically, tabs plus the global filter - what
+    happens when both are set? Does the tab narrow within the global scope,
+    or override it?
+
+C5. Estimate the work, and name the risky parts.
+
+Report only. Recommend, do not build.
