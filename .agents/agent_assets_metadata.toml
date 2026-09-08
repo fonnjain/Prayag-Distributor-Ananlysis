@@ -636,3 +636,17 @@ mtime_ms = 1788870299048
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/d04b88c8-332a-4388-bec8-53cf61c9ed17/3b31d75a-5ea1-44e2-a13d-7ceb39d7ad82"
 storage_version_token = "1788870310650580"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "m76u9tmLGkRuKeyGKdYUZ"
+uri = "file://deliverables/Prompt_66_Phase_1_Production_Reconciliation.docx"
+type = "word_document"
+title = "Prompt 66 Phase 1 — Production Reconciliation"
+description = "Word document containing the production registry counts, all 57 multi-category codes, the 17-category MRP crosswalk, coverage confirmation, scope confirmation, and the production uniqueness-constraint anomaly."
+logical_id = "b9851e22-c559-4470-a8de-037e3c3b7c07"
+content_hash = "sha256:ba86929c821800a7b78e0d3f3688f9fb46fd815a7ebabd20caadc234464fc18d"
+size = 38730
+mtime_ms = 1788873265187
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/b9851e22-c559-4470-a8de-037e3c3b7c07/9968c610-b2c7-496e-8ae9-fca01ba16d58"
+storage_version_token = "1788873271401146"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
