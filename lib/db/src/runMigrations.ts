@@ -3790,6 +3790,23 @@ const MIGRATIONS: Migration[] = [
         ));
     `,
   },
+  {
+    id: "091_frozen_drift_premature_freeze_resolution",
+    sql: `
+      ALTER TABLE frozen_drift_check
+        DROP CONSTRAINT IF EXISTS frozen_drift_check_resolution_check;
+      ALTER TABLE frozen_drift_check
+        ADD CONSTRAINT frozen_drift_check_resolution_check
+        CHECK (
+          resolution IS NULL OR resolution IN (
+            'accepted',
+            'ignored',
+            'refreshed',
+            'premature-freeze-reconciled'
+          )
+        );
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).
