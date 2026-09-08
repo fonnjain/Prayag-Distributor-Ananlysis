@@ -664,3 +664,17 @@ mtime_ms = 1788874489899
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/6626d718-7e08-4d03-ae74-d3392b68449c/46efe560-c1ed-4272-a45a-452d0d4dbe39"
 storage_version_token = "1788874496611668"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "J7Oa2obpeL48QF6LcqqE4"
+uri = "file://deliverables/Prompt_66_Phase_2_Proposed_Diff_For_Approval.docx"
+type = "word_document"
+title = "Prompt 66 Phase 2 — Proposed Diff for Approval"
+description = "Word document containing the reviewed Products category-tabs proposal, exact planned changes, acceptance tests, and approval interpretations. No code has been applied."
+logical_id = "30f59e33-16f0-4275-a813-8b25c00f864f"
+content_hash = "sha256:91c1b0dad330b9bf52c1a19b73d044547eb45aaa43960c0d6b7fae88f9e8a541"
+size = 41560
+mtime_ms = 1788878347003
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/30f59e33-16f0-4275-a813-8b25c00f864f/9dc290cf-0ab0-47eb-8bb6-fc26e17c0657"
+storage_version_token = "1788878355716956"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
