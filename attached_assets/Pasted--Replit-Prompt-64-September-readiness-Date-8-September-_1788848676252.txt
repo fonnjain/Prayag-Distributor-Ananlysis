@@ -1,0 +1,196 @@
+# Replit Prompt 64 — September readiness
+
+**Date:** 8 September 2026
+**Scope:** Section A read-only. Section B is a production load. Section C is
+read-only.
+
+**Standing rule:** every figure states which database or source it came from.
+
+**Decisions taken:** August SKU is not being recovered. Alert delivery is
+deferred until the state-head routing defect is fixed. This is about making
+September work.
+
+---
+
+## The live issue
+
+**2,409 products carry prices effective 1 September 2026.** The revised master
+v2 is loaded in development and verified. Production has not been updated.
+
+So September sales are currently being priced against August MRP, and every
+discount-off-MRP figure for the month is computed on superseded prices.
+
+v2 also differs materially from v1:
+
+| | v1 | v2 |
+|---|---:|---:|
+| Products | 6,076 | **6,106** |
+| 2026-08-10 period | 85 | **580** |
+
+**30 new codes** (all PF/PG/PP), **465 date moves** into 2026-08-10, and **395
+price changes** — some large: P10G12 +46.0%, P20A05 −67.4%.
+
+---
+
+## Section A — what is production actually on?
+
+```
+Read-only. Change nothing, load nothing.
+
+A1. What MRP master is loaded in PRODUCTION right now? Print the load batch,
+    source file name, SHA-256, download date and load timestamp.
+
+A2. Was the v1 master (a6cd9c4d…) ever loaded to production, or is production
+    still on something earlier?
+
+A3. Production catalogue and history counts: rows, distinct codes, distinct
+    history codes, and the effective-date period breakdown.
+
+    Development after v2: 6,906 catalogue rows, 14,092 history rows, 6,349
+    distinct history codes, periods 2026-09-01 (2409), 2026-08-10 (580),
+    2026-08-01 (865), 2026-05-01 (475), 2026-02-01 (1616), 2024-02-15 (161).
+
+A4. For a sample of September-effective codes, what MRP does production
+    currently resolve for a sale dated 8 September? If it resolves an August
+    price, say so plainly.
+
+A5. Which surfaces are affected - discount-off-MRP, price shrinkers, the SKU
+    push list, scheme slabs, AI reports? Name each and say whether it would
+    change once v2 is loaded.
+
+A6. Confirm the five test-sentinel history rows removed during the
+    development load do not exist in production, and that nothing similar
+    would be removed by a production load.
+
+Report only.
+```
+
+---
+
+## Section B — load v2 to production
+
+Only after A. This is a production write.
+
+```
+Production load. Upload the exact verified workbook through the
+administrator-only Load MRP form.
+
+  File: Prayag_MRP_Authoritative_v2_01Sep2026.xlsx
+  SHA-256: 5b2868794b5baa465e49ed3c2a662162df9c4f40d13c4079032cefeb48a5d87a
+  Download date: 2026-09-07
+  Supersedes: Prayag_MRP_Authoritative_01Sep2026.xlsx (a6cd9c4d…)
+
+CONTROLS THE LOAD MUST REPRODUCE
+
+  products               6,106 rows
+  discontinued             233 rows
+  excluded_do_not_load     142 rows
+  new codes                 30, all PF/PG/PP
+  removed codes              0
+  date moves               465 - 396 from 2026-05-01, 69 from 2026-02-01,
+                           all to 2026-08-10
+  price changes            395
+
+  Exact-value checks, all at 2 decimals:
+    P10A12   Rs 7,354      at 2026-08-10
+    BOS-108  Rs 1,990      at 2026-08-01
+    P10A04   Rs 168        at 2026-08-10
+    PF326    Rs 515.20     at 2026-08-10
+    PF71     Rs 10,060.20  at 2026-08-10
+    CCL-60-BSK Rs 1,190    at 2026-09-01
+
+REPORT, DO NOT REMOVE. If any row lacks provenance, a load_batch_id, or is
+otherwise anomalous, RECORD IT AND LEAVE IT. Do not delete.
+
+  The development load removed five test-sentinel history rows without
+  provenance. In development that was minor. In production, a row with no
+  provenance is evidence and must be preserved and reported, not deleted.
+
+  If removal appears necessary, stop and report instead.
+
+PROTECTED NAMES. The eleven recorded name exceptions must be preserved, and
+any new source-name disagreement recorded in the load-batch notes rather
+than silently applied. CH82F must remain "Full Turn Concealed Valve 1 inch
+TRIANGULAR". Confirm zero remaining occurrences of TRIANGULER.
+
+DO NOT touch sale_line, secondary_order_line, secondary_sku_line,
+secondary_register_line, or any frozen anchor. Print before and after counts
+for each.
+
+AFTER LOADING, print:
+  - catalogue and history counts, before and after
+  - the period breakdown against the controls above
+  - all six exact-value checks
+  - the 30 new codes, confirmed loaded
+  - any rows reported rather than removed, with the reason
+  - the protected-name status: 11 exceptions preserved, plus any new ones
+  - confirmation the five untouched datasets are unchanged
+  - the resolved MRP for a 8 September sale on a sample of September codes,
+    which should now be the September price
+
+Then publish and push.
+```
+
+---
+
+## Section C — September pipeline readiness
+
+```
+Read-only. Change nothing.
+
+September is open and freezes on 7 October at 05:30 IST. August SKU froze
+empty because nobody asked for the export in time. Establish what September
+needs now, four weeks out.
+
+C1. What September data exists today, per dataset? sale_line,
+    secondary_order_line, secondary_sku_line, secondary_register_line,
+    secondary_head_month. Rows and value for each.
+
+C2. What is expected to arrive, from whom, and by when?
+      - primary register: live sheet, syncing
+      - secondary order booking: Product-Wise export from the new CRM
+      - secondary SKU: retailer and item-level export
+      - dashboard plans: live IMPORTRANGE
+
+    For each, say whether it arrives automatically or needs a person to send
+    a file.
+
+C3. Which of those has NO automatic route and therefore needs a request to
+    Prayag? Name them plainly - that is the list that produced the August
+    gap.
+
+C4. Is there any warning, check or dashboard that would flag a month
+    approaching its freeze with a dataset still empty? If not, that is the
+    single change that would have prevented August, and it is worth
+    describing.
+
+C5. What is the latest date a September export can arrive and still load
+    before the 7 October freeze?
+
+Report only.
+```
+
+---
+
+## Notes
+
+- **A4 is the one that shows why this matters now.** If a September sale resolves
+  an August MRP, then every discount figure for the month so far is computed on
+  the wrong price, and it compounds daily.
+- **The "report, do not remove" instruction in Section B is not boilerplate.** The
+  development load deleted five rows because they lacked provenance. Against
+  production that instinct is exactly wrong — a row with no provenance is the
+  evidence, not the problem.
+- **C4 is the lesson from August in one question.** A month approaching freeze with
+  an empty dataset should be visible before the freeze, not after. That single
+  check is worth more than recovering August would have been.
+
+## Worth confirming with Prayag, not urgent
+
+**The large price movements in v2.** P20A05 down 67.4%, P20A06 down 64.7%,
+P10G12 up 46.0%. Steep enough to be worth one sentence of confirmation before
+they drive discount reporting.
+
+**The 15 new -VB codes** — 121-VB, 124-VB, 127-VB and others — appear in
+`excluded_do_not_load` with no price and no date. Task #174 already records this
+as open.
