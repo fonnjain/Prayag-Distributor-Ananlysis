@@ -1,0 +1,106 @@
+# Replit Prompt 54A — Does any MRP measure read litres instead of pieces?
+
+**Date:** 3 September 2026
+**Scope:** Read-only. Change nothing, add no conversion, alter no query.
+
+**Standing rule:** every figure states which database or source it came from.
+
+## Why this matters
+
+`tankResolution.ts` is documented as the single source of truth for litres per
+tank. It holds a canonical size map, two resolution routes, an ingest assertion
+`assertTankQtyLtr`, and a comment recording that the 300-litre mapping was once
+wrong and was corrected.
+
+The Products export does not call it. It reports raw litres and warns about that
+in a footnote. The consequence is measurable: WT-3LL-10 shows a **100% discount**
+where the true figure is **68.1%** — 1,757,000 litres is 1,757 tanks at ₹5,103
+against a ₹16,000 MRP.
+
+Correctly converted, water tanks turn out to be the **worst-realising group in the
+business at 70.6%**, against Sanitaryware's 56.2%. That is a commercial finding
+that has been hidden behind a units artefact.
+
+## What the order-booking load just established
+
+`secondary_order_line.qty` records tanks in **pieces** — 7,813 rows, 26,703 total,
+3.4 per line. As litres that would be impossible; as pieces it is normal.
+
+So the same product family is recorded in **litres in `sale_line`** and **pieces in
+`secondary_order_line`**, and neither table carries a unit column. That is not a
+defect, but it is a trap for anything comparing the two.
+
+---
+
+## Prompt 54A
+
+```
+Read-only. Change nothing, add no conversion, alter no query.
+
+1. Does sale_line store qty_ltr alongside qty for WATER TANK rows, or is the
+   resolution applied in the loader and then discarded?
+
+2. If both are stored, what does the Products query select - qty or qty_ltr?
+   Print the query.
+
+3. THE IMPORTANT ONE. Which surfaces read tank quantity, and does each read
+   pieces or litres? Check at least:
+
+     SKU Deep Dive
+     discount-off-MRP wherever it is computed
+     price shrinkers
+     the SKU push list
+     Red Alert guards
+     scheme slab and ROI calculations
+     AI report payloads
+     Company Reports
+     every export
+
+   Any MRP-derived measure reading litres shows roughly a 100% discount on every
+   water tank, silently. Name every one that does, with the rupee value of tank
+   rows flowing through it.
+
+4. Has assertTankQtyLtr ever fired? If a sheet ever supplied pieces instead of
+   litres, that assertion is what would catch it. Print its history.
+
+5. TANK_SIZE_MAP covers WT codes. Does it resolve WCT codes too? WCT-3LL-10 and
+   WCT-3LL-05 sell Rs 92.3 lakh between them and have no MRP record at all.
+
+6. 43 WATER TANK codes appear in FY2026-27 sales. How many resolve through the
+   size map, and how many carry an unmapped suffix? Print any unmapped ones with
+   their sales value.
+
+7. secondary_order_line.qty is pieces for tanks; sale_line qty is litres for the
+   same products. Neither table has a unit column. Does any surface, export or
+   report put the two side by side, or compute a ratio across them? If one
+   exists, it is comparing litres to pieces.
+
+Report only. Propose no fix.
+```
+
+---
+
+## Notes
+
+- **Question 3 is the whole prompt.** One export reporting litres is a display
+  problem. A scheme slab, a price shrinker or a Red Alert guard reading litres
+  would compute a 100% discount on every water tank and act on it. I asked for
+  the rupee value flowing through each so the answer is sized, not just listed.
+- **Question 7 is new**, and it follows from yesterday's load. Two tables, same
+  products, different units, no unit column in either. Nothing may compare them
+  today — but it is the kind of thing that gets built later by someone who
+  reasonably assumes quantity means quantity.
+- **Question 5 connects to an open Prayag query.** WCT codes sell ₹92.3 lakh with
+  no master record at all, and they are part of the 780 unpriced codes worth
+  ₹9.64 crore in query A8.
+
+## Still queued behind this
+
+**B — the snapshot race.** Dashboard snapshot 1101 was built one second after a
+register reload and captured an incomplete August, leaving the first Products
+export ₹4.67 lakh short. It will recur every month.
+
+**C — Prompt 53 C3.** Whether FY2024-25 and FY2025-26 show the same
+sheet-versus-database gap as FY2026-27's 56 rows. Under Prayag's two-month editing
+window they should not. Expected to come back clean; worth confirming rather than
+assuming, because the note already sent to Prayag rests on that explanation.
