@@ -54,6 +54,7 @@ import { runPrompt56Orders } from "../loadPrompt56Orders.js";
 import { runFY2425SegmentWiseOrders } from "../loadFY2425SegmentWiseOrders.js";
 import { logger } from "../lib/logger.js";
 import { ExportGate } from "../lib/secondaryOrders/exportGate.js";
+import { applyAug26Replacement, previewAug26Replacement } from "../lib/secondaryOrders/aug26Replacement.js";
 
 const router = Router();
 
@@ -299,6 +300,44 @@ router.post(
 router.get("/admin/secondary-orders/load-status", (req: Request, res: Response) => {
   if (!requireAdmin(req, res)) return;
   res.json(loadJob);
+});
+
+// ── Guarded Aug-26 full-month replacement ────────────────────────────────────
+// These endpoints are intentionally separate from the normal append-only loader.
+// Preview only reads; apply is production-only and binds the exact preview hash,
+// exact approved workbook SHA, and a human's explicit six-line confirmation.
+function replacementUpload(req: Request): Buffer {
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) throw new Error("Send the workbook as an application/octet-stream request body.");
+  return req.body;
+}
+router.post("/admin/secondary-orders/aug26-replacement/preview", raw({ type: "application/octet-stream", limit: "10mb" }), async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) return;
+  try { res.json({ ok: true, ...(await previewAug26Replacement(replacementUpload(req))) }); }
+  catch (err) { res.status(400).json({ error: String(err instanceof Error ? err.message : err) }); }
+});
+router.post("/admin/secondary-orders/aug26-replacement/apply", raw({ type: "application/octet-stream", limit: "10mb" }), async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) return;
+  if (process.env.NODE_ENV !== "production") { res.status(409).json({ error: "Aug-26 replacement apply is production-only." }); return; }
+  if (String(req.headers["x-prayag-confirm"] ?? "") !== "REPLACE_AUG26_FULL_MONTH") {
+    res.status(400).json({ error: "Pass X-Prayag-Confirm: REPLACE_AUG26_FULL_MONTH." }); return;
+  }
+  try {
+    const previewHash = String(req.headers["x-preview-hash"] ?? "");
+    const replacementId = String(req.headers["x-replacement-id"] ?? "");
+    const operatorId = String(req.headers["x-prayag-operator"] ?? "").trim();
+    const rawConfirmations = String(req.headers["x-removed-line-confirmations"] ?? "");
+    if (!replacementId || !previewHash || !rawConfirmations || operatorId === "") throw new Error("X-Replacement-Id, X-Preview-Hash, X-Removed-Line-Confirmations, and non-secret X-Prayag-Operator are required.");
+    const confirmations: unknown = JSON.parse(rawConfirmations);
+    if (!Array.isArray(confirmations) || !confirmations.every((c): c is { orderId: string; productCode: string; basicOrderValue: number; qty: number; confirmed: true } => !!c && typeof c === "object" && typeof (c as Record<string, unknown>).orderId === "string" && typeof (c as Record<string, unknown>).productCode === "string" && typeof (c as Record<string, unknown>).basicOrderValue === "number" && typeof (c as Record<string, unknown>).qty === "number" && (c as Record<string, unknown>).confirmed === true)) throw new Error("Invalid removed-line confirmations.");
+    res.json({ ok: true, ...(await applyAug26Replacement(replacementUpload(req), replacementId, previewHash, operatorId, confirmations)) });
+  } catch (err) { res.status(400).json({ error: String(err instanceof Error ? err.message : err) }); }
+});
+router.get("/admin/secondary-orders/aug26-replacement/status", async (req: Request, res: Response) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const result = await pool.query(`SELECT replacement_id, source_file, source_sha256, preview_hash, controls, old_fingerprint, new_fingerprint, removed_lines, applied_at FROM secondary_order_replacement_run ORDER BY applied_at DESC LIMIT 10`);
+    res.json({ runs: result.rows });
+  } catch (err) { res.status(500).json({ error: String(err instanceof Error ? err.message : err) }); }
 });
 
 // ── Production-only full Prompt 56 seed ─────────────────────────────────────

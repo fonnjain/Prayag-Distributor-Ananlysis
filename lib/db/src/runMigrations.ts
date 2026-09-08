@@ -4420,6 +4420,122 @@ const MIGRATIONS: Migration[] = [
       $invariant$;
     `,
   },
+  {
+    id: "095_aug26_order_booking_replacement_guard",
+    sql: `
+      ALTER TABLE secondary_order_line ADD COLUMN IF NOT EXISTS employee_id TEXT;
+      ALTER TABLE secondary_order_line ADD COLUMN IF NOT EXISTS reporting_manager TEXT;
+      ALTER TABLE secondary_order_line ADD COLUMN IF NOT EXISTS gst_type TEXT;
+
+      -- The archive is append-only evidence.  Store the complete old row rather
+      -- than a lossy projection so a replacement can always be independently
+      -- reconstructed.
+      CREATE TABLE IF NOT EXISTS secondary_order_line_archive (
+        archive_id BIGSERIAL PRIMARY KEY,
+        replacement_id UUID NOT NULL,
+        original_id INTEGER NOT NULL,
+        archived_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        reason TEXT NOT NULL,
+        old_row JSONB NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS sola_replacement_idx
+        ON secondary_order_line_archive (replacement_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS sola_replacement_original_uq
+        ON secondary_order_line_archive (replacement_id, original_id);
+
+      CREATE OR REPLACE FUNCTION reject_secondary_order_archive_change()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'secondary_order_line_archive is immutable'; END $$;
+      DROP TRIGGER IF EXISTS secondary_order_archive_immutable ON secondary_order_line_archive;
+      CREATE TRIGGER secondary_order_archive_immutable
+        BEFORE UPDATE OR DELETE ON secondary_order_line_archive
+        FOR EACH ROW EXECUTE FUNCTION reject_secondary_order_archive_change();
+      DROP TRIGGER IF EXISTS secondary_order_archive_no_truncate ON secondary_order_line_archive;
+      CREATE TRIGGER secondary_order_archive_no_truncate
+        BEFORE TRUNCATE ON secondary_order_line_archive
+        FOR EACH STATEMENT EXECUTE FUNCTION reject_secondary_order_archive_change();
+
+      CREATE TABLE IF NOT EXISTS secondary_order_replacement_run (
+        replacement_id UUID PRIMARY KEY,
+        source_file TEXT NOT NULL,
+        source_sha256 TEXT NOT NULL,
+        source_bytes BIGINT NOT NULL,
+        preview_hash TEXT NOT NULL,
+        source_era TEXT NOT NULL,
+        source_kind TEXT NOT NULL,
+        fiscal_year TEXT NOT NULL,
+        period_completeness TEXT NOT NULL,
+        controls JSONB NOT NULL,
+        protected_before JSONB NOT NULL,
+        protected_after JSONB NOT NULL,
+        old_fingerprint TEXT NOT NULL,
+        incoming_fingerprint TEXT NOT NULL,
+        new_fingerprint TEXT NOT NULL,
+        removed_lines JSONB NOT NULL,
+        confirmation JSONB NOT NULL,
+        reason TEXT NOT NULL,
+        applied_at TIMESTAMPTZ,
+        previewed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '30 minutes'),
+        status TEXT NOT NULL DEFAULT 'pending',
+        operator_id TEXT,
+        source_timestamp TIMESTAMPTZ,
+        entry_point TEXT,
+        supersedes_note TEXT
+      );
+      ALTER TABLE secondary_order_replacement_run ADD COLUMN IF NOT EXISTS source_bytes BIGINT NOT NULL DEFAULT 0;
+      ALTER TABLE secondary_order_replacement_run ADD COLUMN IF NOT EXISTS incoming_fingerprint TEXT NOT NULL DEFAULT '';
+      ALTER TABLE secondary_order_replacement_run ADD COLUMN IF NOT EXISTS previewed_at TIMESTAMPTZ NOT NULL DEFAULT now();
+      ALTER TABLE secondary_order_replacement_run ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '30 minutes');
+      ALTER TABLE secondary_order_replacement_run ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending';
+      ALTER TABLE secondary_order_replacement_run ADD COLUMN IF NOT EXISTS operator_id TEXT;
+      ALTER TABLE secondary_order_replacement_run ADD COLUMN IF NOT EXISTS source_timestamp TIMESTAMPTZ;
+      ALTER TABLE secondary_order_replacement_run ADD COLUMN IF NOT EXISTS entry_point TEXT;
+      ALTER TABLE secondary_order_replacement_run ADD COLUMN IF NOT EXISTS supersedes_note TEXT;
+
+      CREATE OR REPLACE FUNCTION guard_secondary_order_replacement_run()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF TG_OP IN ('DELETE', 'TRUNCATE') THEN
+          RAISE EXCEPTION 'secondary_order_replacement_run is immutable';
+        END IF;
+        IF OLD.status <> 'pending' OR NEW.status <> 'complete' THEN
+          RAISE EXCEPTION 'secondary_order_replacement_run only permits pending-to-complete';
+        END IF;
+        IF NEW.replacement_id IS DISTINCT FROM OLD.replacement_id
+          OR NEW.source_file IS DISTINCT FROM OLD.source_file
+          OR NEW.source_sha256 IS DISTINCT FROM OLD.source_sha256
+          OR NEW.source_bytes IS DISTINCT FROM OLD.source_bytes
+          OR NEW.preview_hash IS DISTINCT FROM OLD.preview_hash
+          OR NEW.source_era IS DISTINCT FROM OLD.source_era
+          OR NEW.source_kind IS DISTINCT FROM OLD.source_kind
+          OR NEW.fiscal_year IS DISTINCT FROM OLD.fiscal_year
+          OR NEW.period_completeness IS DISTINCT FROM OLD.period_completeness
+          OR NEW.controls IS DISTINCT FROM OLD.controls
+          OR NEW.protected_before IS DISTINCT FROM OLD.protected_before
+          OR NEW.old_fingerprint IS DISTINCT FROM OLD.old_fingerprint
+          OR NEW.incoming_fingerprint IS DISTINCT FROM OLD.incoming_fingerprint
+          OR NEW.removed_lines IS DISTINCT FROM OLD.removed_lines
+          OR NEW.reason IS DISTINCT FROM OLD.reason
+          OR NEW.previewed_at IS DISTINCT FROM OLD.previewed_at
+          OR NEW.expires_at IS DISTINCT FROM OLD.expires_at
+          OR NEW.entry_point IS DISTINCT FROM OLD.entry_point
+          OR NEW.supersedes_note IS DISTINCT FROM OLD.supersedes_note
+        THEN
+          RAISE EXCEPTION 'secondary_order_replacement_run evidence fields are immutable';
+        END IF;
+        RETURN NEW;
+      END $$;
+      DROP TRIGGER IF EXISTS secondary_order_replacement_run_guard ON secondary_order_replacement_run;
+      CREATE TRIGGER secondary_order_replacement_run_guard
+        BEFORE UPDATE OR DELETE ON secondary_order_replacement_run
+        FOR EACH ROW EXECUTE FUNCTION guard_secondary_order_replacement_run();
+      DROP TRIGGER IF EXISTS secondary_order_replacement_run_no_truncate ON secondary_order_replacement_run;
+      CREATE TRIGGER secondary_order_replacement_run_no_truncate
+        BEFORE TRUNCATE ON secondary_order_replacement_run
+        FOR EACH STATEMENT EXECUTE FUNCTION guard_secondary_order_replacement_run();
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).

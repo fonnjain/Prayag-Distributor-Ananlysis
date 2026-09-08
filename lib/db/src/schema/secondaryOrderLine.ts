@@ -51,6 +51,10 @@ export const secondaryOrderLines = pgTable(
     orderStatus: text("order_status"),                  // unavailable in legacy CRM
     salesUserName: text("sales_user_name"),             // as given
     salesUserId: integer("sales_user_id"),              // resolved to person.person_id, nullable
+    // Verbatim fields added by the complete Aug-26 order-booking export.
+    // They are source evidence, not inferred personnel attributes.
+    employeeId: text("employee_id"),
+    reportingManager: text("reporting_manager"),
     customerName: text("customer_name"),                // retailer name as given
     dealerId: text("dealer_id").notNull(),              // RET#
     dealerMobile: text("dealer_mobile"),
@@ -63,6 +67,7 @@ export const secondaryOrderLines = pgTable(
     categoryName: text("category_name"),                // verbatim — never overwritten
     segmentCanon: text("segment_canon"),                // mapped via group_map.json, nullable
     productCode: text("product_code").notNull(),
+    gstType: text("gst_type"),
     occurrence: integer("occurrence").notNull(),          // one-based within (order_id, product_code), source order
     sourceRowNumber: integer("source_row_number").notNull(),
     contentHash: text("content_hash").notNull(),          // SHA-256 of stored source values
