@@ -566,3 +566,17 @@ mtime_ms = 1788849828155
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/4bc70481-5d81-4576-83b8-c6747361efe7/8263062a-fadf-468d-89a4-7de91b9e10ef"
 storage_version_token = "1788849835689736"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "0gYGw_NhlXN9Pcjk1aTDw"
+uri = "file://reports/mrp-history-source-assessment-2026-09-08.docx"
+type = "word_document"
+title = "MRP History Source Assessment"
+description = "Read-only production assessment covering price-shrinker history requirements, authority retention, legacy periods, workbook differences, option costs, and the Option B recommendation."
+logical_id = "00f3e5fe-d50f-4319-aa07-99105f8d0b5f"
+content_hash = "sha256:cdee0f4f701d6e3b81917e475ccb3cde85dc8087005d2618926b5d33b7ec4337"
+size = 41627
+mtime_ms = 1788852335550
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/00f3e5fe-d50f-4319-aa07-99105f8d0b5f/a93dee51-b6c5-4180-bcc7-ef2de4e41398"
+storage_version_token = "1788852343203635"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
