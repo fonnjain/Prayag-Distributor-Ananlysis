@@ -608,3 +608,17 @@ mtime_ms = 1788857280513
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/7a0278e5-b68b-4d2e-b07a-feacf204932a/781ee0af-cb9f-441c-bcb1-a9d53eeb4f49"
 storage_version_token = "1788857282624296"
 content_type = "text/csv"
+
+[[outputs]]
+id = "YbGQ1lVZyahWBd3y3Y6Bi"
+uri = "file://reports/prompt-65-section-c-64-row-before-image-2026-09-08.csv"
+type = "table"
+title = "Prompt 65 — updated 64-row deletion before-image"
+description = "Fresh production before-image after the source changed: 20 June, 36 July, and 8 August rows, all 29 stored columns."
+logical_id = "13764d81-2372-43f4-a403-ac1621faf7d5"
+content_hash = "sha256:8a131dc82d2873ec4e025b84770d4d8c048e8fca7d72ba65c9ab3d3e11e22801"
+size = 19331
+mtime_ms = 1788865778737
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/13764d81-2372-43f4-a403-ac1621faf7d5/0a28fb06-cd8a-4851-a010-ad05e1b046cc"
+storage_version_token = "1788865780836183"
+content_type = "text/csv"

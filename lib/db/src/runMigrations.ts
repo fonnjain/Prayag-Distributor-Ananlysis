@@ -3771,6 +3771,25 @@ const MIGRATIONS: Migration[] = [
       $do$;
     `,
   },
+  {
+    id: "090_register_premature_freeze_reconciliation_outcome",
+    sql: `
+      ALTER TABLE register_monthly_ingest_ledger
+        DROP CONSTRAINT IF EXISTS register_monthly_ingest_ledger_outcome_check;
+      ALTER TABLE register_monthly_ingest_ledger
+        ADD CONSTRAINT register_monthly_ingest_ledger_outcome_check
+        CHECK (outcome IN (
+          'replaced',
+          'frozen-skipped',
+          'frozen-anchored',
+          'anchored-after-rejected-read',
+          'premature-freeze-reconciled',
+          'aborted-short-read',
+          'rejected-shrink',
+          'failed'
+        ));
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).
