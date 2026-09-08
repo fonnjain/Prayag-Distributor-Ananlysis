@@ -56,17 +56,17 @@ describe("primary monthly ledger guard outcomes", () => {
   });
 
   it("queues a calendar-frozen persisted baseline when its anchor is missing", () => {
-    const now = new Date("2026-09-07T00:00:00.000Z");
-    expect(isCalendarFrozenAnchorGap("Aug-26", {
-      lastGoodRows: 12_878,
+    const now = new Date("2026-09-30T18:30:00.000Z");
+    expect(isCalendarFrozenAnchorGap("Jun-26", {
+      lastGoodRows: 12_868,
       frozenAt: null,
     }, now)).toBe(true);
-    expect(isCalendarFrozenAnchorGap("Aug-26", {
-      lastGoodRows: 12_878,
-      frozenAt: new Date("2026-09-07T00:00:00.000Z"),
+    expect(isCalendarFrozenAnchorGap("Jun-26", {
+      lastGoodRows: 12_868,
+      frozenAt: new Date("2026-09-30T18:30:00.000Z"),
     }, now)).toBe(false);
-    expect(isCalendarFrozenAnchorGap("Sep-26", {
-      lastGoodRows: 122,
+    expect(isCalendarFrozenAnchorGap("Jul-26", {
+      lastGoodRows: 13_803,
       frozenAt: null,
     }, now)).toBe(false);
   });
@@ -145,5 +145,22 @@ describe("primary monthly ledger dry-run preview", () => {
     }
     expect(preview.rowsWritten).toBeNull();
     expect(preview.detail).toContain("no rows");
+  });
+
+  it("records unchanged after-image for a ledger-only anchor reconciliation", () => {
+    const before = base.slice(0, 2);
+    const preview = buildRegisterMonthlyLedgerPreview({
+      beforeLines: before,
+      sourceLines: base.slice(0, 1),
+      afterLines: before,
+      fy: "2026-27",
+      month: "Sep-26",
+      attemptedAt: new Date("2026-09-07T00:00:00.000Z"),
+      outcome: "premature-freeze-reconciled",
+      writeAtomicity: "ledger-only-transaction",
+    });
+    expect(preview.beforeFingerprint).toBe(preview.afterFingerprint);
+    expect(preview.actualRowDelta).toBe(0);
+    expect(preview.sourceFingerprint).not.toBe(preview.beforeFingerprint);
   });
 });

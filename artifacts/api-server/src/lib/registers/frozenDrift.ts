@@ -4,6 +4,7 @@ import {
   db,
   frozenDriftArchives,
   frozenDriftChecks,
+  registerMonthlyIngestLedger,
   registerMonthState,
   saleLines,
   type InsertSaleLine,
@@ -15,10 +16,13 @@ import { logger } from "../logger.js";
 import { OccurrenceCounter, emptyUnmapped, parseRegisterRow, toSaleLine } from "./normalize.js";
 import { readRegisterFromSheets } from "./sheetsRegister.js";
 import { transformRegisterLinesForMonthlyReplace } from "../customers/registerSync.js";
+import { buildRegisterMonthlyLedgerPreview } from "./monthlyReplace.js";
 
 const BATCH_SIZE = 1000;
 type Totals = { rows: number; amount: number };
 export type DriftStatus = "match" | "drift" | "sheet_unreadable";
+export const PREMATURE_FREEZE_MONTHS = ["Jun-26", "Jul-26", "Aug-26"] as const;
+export const PREMATURE_FREEZE_REASON = "premature-freeze-reconciliation";
 
 function hash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -123,6 +127,16 @@ export function refreshPreviewHash(fy: string, month: string, app: InsertSaleLin
 
 export function isFrozenDrift(rowDelta: number, netDelta: number): boolean {
   return rowDelta !== 0 || Math.abs(netDelta) > 1000;
+}
+
+/** This is intentionally a one-time, named scope rather than a generic unfreeze. */
+export function isPrematureFreezeReconciliationScope(
+  fy: string,
+  months: readonly string[],
+): boolean {
+  return fy === currentOpenFy() &&
+    months.length === PREMATURE_FREEZE_MONTHS.length &&
+    PREMATURE_FREEZE_MONTHS.every((month) => months.includes(month));
 }
 
 export function invoiceDifferences(app: InsertSaleLine[], sheet: InsertSaleLine[]): {
@@ -301,6 +315,98 @@ export async function applyFrozenRefresh(input: {
     if (resolution.length !== 1) throw new Error("drift check resolution changed concurrently");
     logger.warn({ id: check.id, fy: check.fy, month: check.monthLabel, operator: input.operator }, "frozen drift refresh applied and re-anchored");
     return { id: check.id, month: check.monthLabel, rows: incoming.length };
+  });
+}
+
+/**
+ * Clears the three known premature anchors without replacing their contents.
+ * The regular protected monthly-replace path owns the later delete/replace.
+ * It is deliberately not usable for arbitrary months, fiscal years, or a
+ * second pass.  The archive is the durable before-image for that later delete.
+ */
+export async function applyPrematureFreezeReconciliation(input: {
+  checks: Array<{ id: number; previewHash: string }>;
+  operator: string;
+  reason: string;
+}): Promise<{ fy: string; months: Array<{ month: string; archivedRows: number }> }> {
+  if (!input.operator.trim()) throw new Error("operator is required");
+  if (input.reason.trim() !== PREMATURE_FREEZE_REASON) {
+    throw new Error(`reason must be exactly "${PREMATURE_FREEZE_REASON}"`);
+  }
+  if (input.checks.length !== PREMATURE_FREEZE_MONTHS.length ||
+      input.checks.some((check) => !Number.isInteger(check.id) || !check.previewHash.trim()) ||
+      new Set(input.checks.map((check) => check.id)).size !== input.checks.length) {
+    throw new Error("exactly one drift check and fresh preview hash are required for Jun-26, Jul-26, and Aug-26");
+  }
+
+  return allowDelete(async (tx) => {
+    const fy = currentOpenFy();
+    // One batch lock makes the all-three approval indivisible; per-month locks
+    // also serialize it with the ordinary monthly replacement worker.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`premature-freeze-reconciliation|${fy}`}))`);
+    for (const month of PREMATURE_FREEZE_MONTHS) {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`register-month|${fy}|${month}`}))`);
+    }
+
+    const checks = [];
+    for (const requested of input.checks) {
+      await tx.execute(sql`SELECT id FROM frozen_drift_check WHERE id = ${requested.id} FOR UPDATE`);
+      const check = (await tx.select().from(frozenDriftChecks)
+        .where(eq(frozenDriftChecks.id, requested.id)))[0];
+      if (!check) throw new Error("drift check not found");
+      checks.push({ check, previewHash: requested.previewHash });
+    }
+    if (!isPrematureFreezeReconciliationScope(fy, checks.map(({ check }) => check.monthLabel)) ||
+        checks.some(({ check }) => check.status !== "drift" || check.resolution != null)) {
+      throw new Error("only unresolved current-FY drift checks for Jun-26, Jul-26, and Aug-26 may be reconciled");
+    }
+
+    const result: Array<{ month: string; archivedRows: number }> = [];
+    for (const { check, previewHash } of checks.sort((a, b) => monthTime(a.check.monthLabel) - monthTime(b.check.monthLabel))) {
+      await tx.execute(sql`SELECT fy FROM register_month_state WHERE fy = ${fy} AND month_label = ${check.monthLabel} FOR UPDATE`);
+      const state = (await tx.select().from(registerMonthState)
+        .where(and(eq(registerMonthState.fy, fy), eq(registerMonthState.monthLabel, check.monthLabel))))[0];
+      if (!state?.frozenAt) throw new Error(`${check.monthLabel} is not frozen or was already reconciled`);
+
+      const currentLines = await appLinesIn(tx, fy, check.monthLabel);
+      const archiveRows = await allMonthLinesIn(tx, fy, check.monthLabel);
+      const source = await sourceLines(fy, [check.monthLabel]);
+      const sourceLinesForMonth = source.get(check.monthLabel);
+      if (!sourceLinesForMonth) throw new Error(`source tab is unreadable or absent for ${check.monthLabel}`);
+      // Re-read both sides while holding the locks. A saved detector hash alone
+      // is insufficient: the source may have changed after review.
+      if (refreshPreviewHash(fy, check.monthLabel, currentLines, sourceLinesForMonth) !== previewHash) {
+        throw new Error(`stale or mismatched preview for ${check.monthLabel}`);
+      }
+      if (currentLines.length > 0 && sourceLinesForMonth.length < currentLines.length * 0.60) {
+        throw new Error(`reconciliation refused for ${check.monthLabel}: source is below the 0.60 wipe guard`);
+      }
+
+      await tx.insert(frozenDriftArchives).values({
+        driftCheckId: check.id, fy, monthLabel: check.monthLabel,
+        operator: input.operator.trim(), reason: PREMATURE_FREEZE_REASON, rows: archiveRows,
+      });
+      await tx.insert(registerMonthlyIngestLedger).values(buildRegisterMonthlyLedgerPreview({
+        fy, month: check.monthLabel, beforeLines: archiveRows, sourceLines: sourceLinesForMonth,
+        afterLines: archiveRows,
+        attemptedAt: new Date(), runId: `premature-freeze-reconciliation-${check.id}`,
+        actor: "manual", operator: input.operator.trim(), source: "premature_freeze_reconciliation",
+        outcome: "premature-freeze-reconciled", writeAtomicity: "ledger-only-transaction",
+        detail: `reason=${PREMATURE_FREEZE_REASON}; archived every physical pre-delete sale_line_all row; cleared premature frozen anchor; normal sync must replace this open month`,
+      }));
+      await tx.update(registerMonthState).set({
+        frozenAt: null, frozenRows: null, frozenAmount: null,
+      }).where(and(eq(registerMonthState.fy, fy), eq(registerMonthState.monthLabel, check.monthLabel)));
+      const resolved = await tx.update(frozenDriftChecks).set({
+        resolution: "premature-freeze-reconciled", resolvedAt: new Date(),
+        resolvedBy: input.operator.trim(), resolutionReason: PREMATURE_FREEZE_REASON,
+      }).where(and(eq(frozenDriftChecks.id, check.id), sql`${frozenDriftChecks.resolution} is null`))
+        .returning({ id: frozenDriftChecks.id });
+      if (resolved.length !== 1) throw new Error("drift check resolution changed concurrently");
+      result.push({ month: check.monthLabel, archivedRows: archiveRows.length });
+    }
+    logger.warn({ fy, operator: input.operator.trim(), months: result }, "premature freeze reconciliation applied; normal sync now owns reopened months");
+    return { fy, months: result };
   });
 }
 

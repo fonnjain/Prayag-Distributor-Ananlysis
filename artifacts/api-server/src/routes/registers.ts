@@ -56,6 +56,7 @@ import {
   applyFrozenRefresh,
   detectFrozenDrift,
   previewFrozenRefresh,
+  applyPrematureFreezeReconciliation,
   resolveFrozenDrift,
   isLatestFrozenMonth,
 } from "../lib/registers/frozenDrift.js";
@@ -191,6 +192,35 @@ router.post("/registers/frozen-drift/:id/apply", async (req, res) => {
     res.json({ applied: true, ...result });
   } catch (err: unknown) {
     req.log.warn({ err, id: req.params.id }, "frozen drift apply refused");
+    res.status(409).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// A deliberately non-generic one-time remediation. It does not replace rows:
+// it archives the exact pre-delete image and removes only the three premature
+// anchors, leaving the ordinary guarded sync to perform the later replacement.
+router.post("/registers/frozen-drift/premature-freeze-reconciliation", async (req, res) => {
+  if (!requireFrozenDriftAdmin(req, res)) return;
+  const body = req.body ?? {};
+  if (!Array.isArray(body.checks) || typeof body.operator !== "string" || typeof body.reason !== "string") {
+    res.status(400).json({ error: "checks [{ id, previewHash }], operator and reason are required" });
+    return;
+  }
+  try {
+    const result = await applyPrematureFreezeReconciliation({
+      checks: body.checks.map((check: unknown) => {
+        const value = check as { id?: unknown; previewHash?: unknown };
+        return { id: Number(value.id), previewHash: typeof value.previewHash === "string" ? value.previewHash : "" };
+      }),
+      operator: body.operator, reason: body.reason,
+    });
+    invalidateSnapshots("mgmt-data|");
+    invalidateSnapshots("warnings|v3|");
+    invalidateSnapshots("company-reports|v3|");
+    invalidateSnapshots("analytics|");
+    res.json({ applied: true, ...result });
+  } catch (err: unknown) {
+    req.log.warn({ err }, "premature freeze reconciliation refused");
     res.status(409).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });

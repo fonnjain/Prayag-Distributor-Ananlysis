@@ -61,9 +61,14 @@ const MONTH_INDEX: Record<string, number> = {
   Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
 };
 
-/** UTC instant at which a month label like "Jul-26" freezes: START OF THE 7TH
- *  of the following month. This is the single freeze clock shared by all
- *  register loaders.
+export const OPEN_WINDOW_PRIOR_MONTHS = 3;
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+/** UTC instant at which a month label like "Jun-26" freezes.
+ *
+ *  Open window: current month plus three prior; freeze at IST midnight on the
+ *  1st of the fourth following month, UTC+05:30. This is the single freeze
+ *  clock shared by all primary-register loaders.
  *  Null for unparseable labels (they never freeze). */
 export function monthFreezeAt(monthLabel: string): Date | null {
   const m = /^([A-Z][a-z]{2})-(\d{2})$/.exec(monthLabel);
@@ -71,7 +76,9 @@ export function monthFreezeAt(monthLabel: string): Date | null {
   const mon = MONTH_INDEX[m[1]];
   if (mon === undefined) return null;
   const year = 2000 + parseInt(m[2], 10);
-  return new Date(Date.UTC(mon === 11 ? year + 1 : year, (mon + 1) % 12, 7));
+  return new Date(
+    Date.UTC(year, mon + OPEN_WINDOW_PRIOR_MONTHS + 1, 1) - IST_OFFSET_MS,
+  );
 }
 
 export function isMonthFrozen(monthLabel: string, now: Date = new Date()): boolean {
@@ -116,10 +123,9 @@ export function fyMonthLabels(fy: string): string[] {
 
 /**
  * Every month label of the FY whose calendar month has STARTED as of `now`
- * and which is not yet frozen. This is the rule-based sync scope: between the
- * 1st and 6th of a month it contains BOTH the prior month (still in its edit
- * window) and the current month (even if its tab is empty); from the 7th only
- * the current month. Future months are excluded.
+ * in IST and which is not yet frozen. The rule-based sync scope is always the
+ * current month plus three prior months, including an empty current month.
+ * Future months are excluded.
  * FY format "2026-27" → Apr-26 … Mar-27.
  */
 export function openMonthLabels(fy: string, now: Date = new Date()): string[] {
@@ -128,7 +134,7 @@ export function openMonthLabels(fy: string, now: Date = new Date()): string[] {
     const m = /^([A-Z][a-z]{2})-(\d{2})$/.exec(label)!;
     const mon = MONTH_INDEX[m[1]];
     const year = 2000 + parseInt(m[2], 10);
-    const monthStart = Date.UTC(year, mon, 1);
+    const monthStart = Date.UTC(year, mon, 1) - IST_OFFSET_MS;
     if (now.getTime() < monthStart) continue; // month not started yet
     if (!isMonthFrozen(label, now)) labels.push(label);
   }
@@ -137,7 +143,7 @@ export function openMonthLabels(fy: string, now: Date = new Date()): string[] {
 
 export interface MonthReplaceResult {
   month: string;
-  action: "replaced" | "frozen-skipped" | "frozen-anchored" | "anchored-after-rejected-read" | "aborted-short-read" | "rejected-shrink" | "failed";
+  action: "replaced" | "frozen-skipped" | "frozen-anchored" | "anchored-after-rejected-read" | "aborted-short-read" | "rejected-shrink" | "premature-freeze-reconciled" | "failed";
   sheetRows: number;
   sheetAmount: number;
   dbRowsBefore: number | null;
@@ -326,6 +332,12 @@ export function buildRegisterMonthlyLedgerPreview(args: {
   operator?: string | null;
   source?: string;
   spreadsheet?: { id?: string; monthSources?: Record<string, Array<{ tab: string; contentHash: string }>>; fallbackSources?: Array<{ tab: string; contentHash: string }> };
+  outcome?: MonthReplaceResult["action"];
+  writeAtomicity?: "same-replacement-transaction" | "ledger-only-transaction" | "post-rollback";
+  detail?: string;
+  /** Normally source lines are the post-replace image; exceptional ledger-only
+   * operations provide their unchanged post-operation image explicitly. */
+  afterLines?: any[];
 }): RegisterMonthlyLedgerRecord {
   return buildLedgerRecord({
     runId: args.runId ?? `register-${args.attemptedAt.toISOString()}`,
@@ -335,15 +347,15 @@ export function buildRegisterMonthlyLedgerPreview(args: {
     fy: args.fy,
     month: args.month,
     attemptedAt: args.attemptedAt,
-    outcome: "replaced",
-    writeAtomicity: "same-replacement-transaction",
+    outcome: args.outcome ?? "replaced",
+    writeAtomicity: args.writeAtomicity ?? "same-replacement-transaction",
     rowsWritten: null,
     projectedRowsWritten: args.sourceLines.length,
     beforeLines: args.beforeLines,
     sourceLines: args.sourceLines,
-    afterAudit: snapshot(args.sourceLines),
+    afterAudit: snapshot(args.afterLines ?? args.sourceLines),
     spreadsheet: args.spreadsheet ?? {},
-    detail: "dry-run preview; no rows, state, ledger, secondary data, or channel data written",
+    detail: args.detail ?? "dry-run preview; no rows, state, ledger, secondary data, or channel data written",
   });
 }
 

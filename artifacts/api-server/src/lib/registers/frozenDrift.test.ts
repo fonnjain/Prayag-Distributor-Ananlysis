@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   invoiceDifferences,
   isFrozenDrift,
+  isPrematureFreezeReconciliationScope,
+  PREMATURE_FREEZE_MONTHS,
 } from "./frozenDrift.js";
 import type { InsertSaleLine } from "@workspace/db";
+import { currentOpenFy } from "../fyAnchors.js";
 
 function line(
   invoiceNo: string,
@@ -31,6 +34,7 @@ describe("frozen drift materiality", () => {
   });
 });
 
+
 describe("frozen drift invoice evidence", () => {
   it("keeps only added, removed, and changed invoice summaries with dates", () => {
     const result = invoiceDifferences(
@@ -56,5 +60,14 @@ describe("frozen drift invoice evidence", () => {
       app: { date: "2026-06-30", lineCount: 1, net: 200 },
       sheet: { date: "2026-06-30", lineCount: 1, net: 250 },
     });
+  });
+});
+
+describe("premature freeze reconciliation scope", () => {
+  it("is limited to the exact three current-FY months and cannot become a generic unfreeze", () => {
+    expect(isPrematureFreezeReconciliationScope(currentOpenFy(), [...PREMATURE_FREEZE_MONTHS])).toBe(true);
+    expect(isPrematureFreezeReconciliationScope("1900-01", [...PREMATURE_FREEZE_MONTHS])).toBe(false);
+    expect(isPrematureFreezeReconciliationScope(currentOpenFy(), ["May-26", "Jun-26", "Jul-26"])).toBe(false);
+    expect(isPrematureFreezeReconciliationScope(currentOpenFy(), ["Jun-26", "Jul-26"])).toBe(false);
   });
 });

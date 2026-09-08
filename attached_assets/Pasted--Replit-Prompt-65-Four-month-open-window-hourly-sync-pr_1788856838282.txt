@@ -1,0 +1,235 @@
+# Replit Prompt 65 — Four-month open window, hourly sync, provisional labelling
+
+**Date:** 8 September 2026
+**Scope:** Section A read-only. Sections B–E are code changes, in order.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## The reasoning, in one paragraph
+
+The app's own reconciliation shows **April and May match exactly**, while
+**June, July and August are ahead by 63 rows and ₹10.72 lakh**. The months that
+match are the ones Prayag have finished editing; the months that differ are the
+ones they were still working on when we froze them.
+
+**The drift is not tampering. It is a premature freeze.** We lock at day 7;
+Prayag edit for about two months.
+
+September is a separate thing — 13 rows behind on a single date, 7 September.
+That is sync lag on an open month and it self-corrects.
+
+## Why not nightly unfreeze and refreeze
+
+A freeze lifted every night is not a freeze. Worse, each refreeze writes a **new
+anchor** that claims finality and does not have it — a series of
+authoritative-looking anchors, each superseded the next night. That is weaker
+than no anchor, because it looks like a control while behaving like a rebuild.
+
+**You do not need to unfreeze if you never freeze too early.** Keep the month open
+until Prayag have finished with it, then freeze once, permanently.
+
+---
+
+## Section A — read-only, before anything
+
+```
+Read-only. Change nothing.
+
+A1. Print openMonthLabels and every caller. Confirm that widening it is
+    sufficient to bring more months into the existing sync scope, and that
+    no other gate would still exclude them.
+
+A2. The register sync currently runs every six hours plus startup. Print the
+    scheduler definition. What would change to make it hourly - interval,
+    cron, or persisted key?
+
+    Note the MRP refresh turned out restart-driven, firing 18 times in 10
+    days on deployments. Confirm an hourly schedule would not behave that
+    way.
+
+A3. Hourly sync of four months is roughly 57,000 rows per run, 24 runs a day.
+    What is the cost in time and Drive API quota, and does it risk rate
+    limits? Compare against the current six-hourly single-month load.
+
+A4. Which months are frozen now, with frozen_at, frozen_rows, frozen_amount?
+    Under a four-month window - current plus three prior - which would be
+    open today, and which would remain frozen?
+
+    Today is September, so the window is Jun, Jul, Aug, Sep. Apr and May stay
+    frozen.
+
+A5. Do Apr-26 and May-26 currently match the source exactly? The
+    reconciliation says yes. Confirm, because they are the evidence that a
+    settled month stays settled.
+
+A6. What reads frozen_at or the frozen anchors? Any report, guard, check or
+    export that assumes a month is frozen within ~7 days would behave
+    differently at ~92 days. Name each.
+
+Report only.
+```
+
+---
+
+## Section B — widen the open window
+
+```
+Code change. Show the diff before applying.
+
+Change the open window from current-plus-prior-during-days-1-6 to CURRENT
+MONTH PLUS THREE PRIOR.
+
+A month freezes when it leaves that window - that is, at the start of the
+month four months after it. Jun-26 freezes when Oct-26 begins; Aug-26 when
+Dec-26 begins.
+
+Freeze at IST MIDNIGHT on the 1st, so scope-exit and immutability coincide.
+Make the intent explicit in code - a named constant and a comment stating
+"open window: current month plus three prior; freeze at IST midnight on the
+1st of the fourth following month, UTC+05:30". Not a bare arithmetic offset.
+
+DO NOT:
+  - unfreeze Apr-26 or May-26, or any month from a prior fiscal year
+  - change SHORT_READ_TOLERANCE or any guard
+  - change the ledger
+
+CRITICAL - PERSISTED FROZEN STATE STILL OVERRIDES THE CLOCK. A month that
+has been frozen must not reopen because the clock moved. Apr-26 and May-26
+froze under the old rule and stay frozen. Confirm that invariant holds and
+print which months would reopen if it did not.
+
+Jun-26, Jul-26 and Aug-26 are frozen today and WOULD be reopened by this
+change. That is intentional and is handled in Section C - do not reopen them
+here.
+
+AFTER APPLYING, print every FY2026-27 month with its open/frozen state and
+freeze instant in UTC and IST. Apr and May must remain frozen.
+```
+
+---
+
+## Section C — one-time reconciliation of Jun, Jul and Aug
+
+```
+Code change plus a controlled operation. This is the only unfreeze, and it
+happens once.
+
+Jun-26, Jul-26 and Aug-26 were frozen prematurely and are ahead of source by
+63 rows and Rs 10,72,386.94:
+
+  Jun-26   +20 rows   +Rs 4,82,810.94
+  Jul-26   +36 rows   +Rs 5,61,852.00
+  Aug-26    +7 rows   +Rs 27,724.00
+
+C1. BEFORE ANYTHING, print the 63 rows in full - invoice, date, customer,
+    item code, quantity, amount, per month. They are about to be deleted and
+    this is the last point at which they are visible.
+
+C2. Archive them to the ledger with reason
+    "premature-freeze-reconciliation", including the before-image and both
+    fingerprints. The ledger exists precisely for this.
+
+C3. Then reopen those three months, allow the normal sync to bring them into
+    line with source, and let them re-freeze naturally under the new window.
+
+    Use the controlled path with preview hash, operator and reason. Do not
+    bypass the guards.
+
+C4. AFTER, confirm:
+      - Jun, Jul, Aug now match source exactly
+      - Apr and May are untouched and still frozen
+      - the FY2026-27 total moves from Rs 1,36,10,81,716.80 to approximately
+        Rs 1,36,00,64,386.86, matching the source
+      - the 63 rows are recorded in the ledger
+      - both prior-year frozen anchors are unaffected
+
+C5. This is a REDUCTION of Rs 10.17 lakh in the reported FY total. State it
+    plainly. Anyone who has quoted Rs 136.11 Cr should know it becomes
+    Rs 136.01 Cr, and why.
+```
+
+---
+
+## Section D — hourly sync
+
+```
+Code change. Show the diff.
+
+Change the register sync from six-hourly to HOURLY, covering the full
+four-month open window.
+
+Requirements:
+  - persisted run key, following the digest pattern, so a restart
+    initialises the scheduler but does not decide that work is due
+  - an overlap guard or shared lock against the existing jobs, so two syncs
+    never run concurrently
+  - every run writes a ledger record per month touched, including no-change
+    runs, so the absence of a record means the job did not run
+  - if Drive quota or rate limits are a risk per A3, say so before applying
+    and propose the interval that is safe
+
+Do not change what the sync does, only how often and over how many months.
+```
+
+---
+
+## Section E — provisional labelling
+
+```
+Code change. Display only.
+
+A month inside the open window can still change. Any surface showing its
+figures should say so.
+
+E1. Label open months as PROVISIONAL wherever their figures appear - the
+    Overview cards, Growth, Reports, Company Reports, SKU surfaces, exports.
+
+    Wording should be plain: "Jun-Sep 2026 are provisional and may change
+    until they close."
+
+E2. Derive the list from the open window, never hardcoded. It must move by
+    itself each month.
+
+E3. Exports carry the same statement in their Info sheet.
+
+E4. The Growth card's completion test uses the 8th of the following month
+    and is SEPARATE from the freeze clock. Under a four-month window, a
+    month could be complete for Growth and still open for sync.
+
+    Print how Growth behaves under the new window, and whether its
+    like-month set changes. If a month is complete for Growth but still
+    provisional, the label should say so rather than the two disagreeing
+    silently.
+```
+
+---
+
+## Notes
+
+- **A5 is the evidence for the whole change.** April and May match exactly because
+  Prayag have finished editing them. That is what a settled month looks like, and
+  it is why freezing at three months rather than seven days is the right boundary.
+- **C1 before anything else in Section C.** Those 63 rows are about to be deleted.
+  Printing and archiving them first is the difference between a reconciliation and
+  a quiet loss.
+- **C5 matters for people, not code.** The FY total drops ₹10.17 lakh. That is
+  small, but someone has quoted ₹136.11 Cr and should hear why it became ₹136.01
+  Cr from you rather than noticing it.
+- **E4 is worth checking.** Growth and the freeze already use different clocks —
+  the 8th versus the 7th. Widening one and not the other makes them diverge
+  further, and the labels should not contradict each other.
+
+## What this costs, honestly
+
+**Four months open at once**, and anchors settling roughly 92 days after month end
+instead of seven.
+
+Against that: the anchor was being set on unsettled data, which is what
+manufactured the drift we have spent a week investigating. An anchor that has to
+be explained every month is not protecting anything.
+
+**And two things make it safe now that were not true a week ago.** The ledger
+records every change including rejections, so nothing moves silently. And
+provisional labelling means a reader knows which figures can still move.

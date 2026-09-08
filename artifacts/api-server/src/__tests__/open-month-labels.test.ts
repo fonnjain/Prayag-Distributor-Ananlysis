@@ -2,39 +2,40 @@
 // the FY whose calendar month has started — including an empty current month —
 // and exclude frozen and future months.
 import { describe, it, expect } from "vitest";
-import { openMonthLabels, isMonthFrozen, SHORT_READ_TOLERANCE } from "../lib/registers/monthlyReplace.js";
+import {
+  openMonthLabels,
+  isMonthFrozen,
+  isEffectivelyFrozen,
+  monthFreezeAt,
+  OPEN_WINDOW_PRIOR_MONTHS,
+  SHORT_READ_TOLERANCE,
+} from "../lib/registers/monthlyReplace.js";
 
 describe("openMonthLabels", () => {
-  it("1–6 Aug: prior month (edit window) AND current month are both in scope", () => {
+  it("keeps the current month plus three prior open", () => {
     const now = new Date(Date.UTC(2026, 7, 1, 12)); // 1 Aug 2026
-    expect(openMonthLabels("2026-27", now)).toEqual(["Jul-26", "Aug-26"]);
+    expect(OPEN_WINDOW_PRIOR_MONTHS).toBe(3);
+    expect(openMonthLabels("2026-27", now)).toEqual(["May-26", "Jun-26", "Jul-26", "Aug-26"]);
   });
 
-  it("7 Aug 00:00: July freezes, only August remains", () => {
-    const now = new Date(Date.UTC(2026, 7, 7, 0, 0, 0));
-    expect(isMonthFrozen("Jul-26", now)).toBe(true);
-    expect(openMonthLabels("2026-27", now)).toEqual(["Aug-26"]);
+  it("freezes at IST midnight on the first day four months later", () => {
+    const justBefore = new Date("2026-09-30T18:29:59.999Z");
+    const atFreeze = new Date("2026-09-30T18:30:00.000Z");
+    expect(monthFreezeAt("Jun-26")?.toISOString()).toBe("2026-09-30T18:30:00.000Z");
+    expect(isMonthFrozen("Jun-26", justBefore)).toBe(false);
+    expect(isMonthFrozen("Jun-26", atFreeze)).toBe(true);
+    expect(openMonthLabels("2026-27", justBefore)).toEqual(["Jun-26", "Jul-26", "Aug-26", "Sep-26"]);
+    expect(openMonthLabels("2026-27", atFreeze)).toEqual(["Jul-26", "Aug-26", "Sep-26", "Oct-26"]);
   });
 
-  it("8 Aug: July remains frozen", () => {
-    const now = new Date(Date.UTC(2026, 7, 8, 0, 0, 0));
-    expect(isMonthFrozen("Jul-26", now)).toBe(true);
-    expect(openMonthLabels("2026-27", now)).toEqual(["Aug-26"]);
-  });
-
-  it("mid-month (20 Aug): only August", () => {
-    const now = new Date(Date.UTC(2026, 7, 20));
-    expect(openMonthLabels("2026-27", now)).toEqual(["Aug-26"]);
-  });
-
-  it("1 Sep: August (edit window) and September", () => {
+  it("1 Sep IST: June through September are in scope", () => {
     const now = new Date(Date.UTC(2026, 8, 1));
-    expect(openMonthLabels("2026-27", now)).toEqual(["Aug-26", "Sep-26"]);
+    expect(openMonthLabels("2026-27", now)).toEqual(["Jun-26", "Jul-26", "Aug-26", "Sep-26"]);
   });
 
-  it("FY year boundary: 2 Jan 2027 gives Dec-26 and Jan-27", () => {
+  it("FY year boundary: 2 Jan 2027 gives Oct-26 through Jan-27", () => {
     const now = new Date(Date.UTC(2027, 0, 2));
-    expect(openMonthLabels("2026-27", now)).toEqual(["Dec-26", "Jan-27"]);
+    expect(openMonthLabels("2026-27", now)).toEqual(["Oct-26", "Nov-26", "Dec-26", "Jan-27"]);
   });
 
   it("closed FY: every month frozen, empty scope", () => {
@@ -44,6 +45,12 @@ describe("openMonthLabels", () => {
 
   it("unparseable FY yields empty scope", () => {
     expect(openMonthLabels("garbage", new Date(Date.UTC(2026, 7, 1)))).toEqual([]);
+  });
+
+  it("persisted frozen state remains authoritative when the clock widens", () => {
+    const now = new Date("2026-09-08T00:00:00.000Z");
+    expect(isMonthFrozen("Jun-26", now)).toBe(false);
+    expect(isEffectivelyFrozen(false, new Date("2026-08-01T07:46:31.526Z"))).toBe(true);
   });
 });
 

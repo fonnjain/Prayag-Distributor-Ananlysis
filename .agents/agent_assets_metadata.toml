@@ -594,3 +594,17 @@ mtime_ms = 1788856586825
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/91b15464-41d1-42d8-8aef-02236439b309/cfae6f98-85ca-4daf-b02e-ac89169d9780"
 storage_version_token = "1788856596462356"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "d1X1vVxT1IreI4LeyvYkP"
+uri = "file://reports/prompt-65-section-c-63-row-before-image-2026-09-08.csv"
+type = "table"
+title = "Prompt 65 — 63-row deletion before-image"
+description = "Complete production before-image for the exact June–August rows absent from the current source. Includes all 29 stored sale_line columns; generated read-only before any Section C production mutation."
+logical_id = "7a0278e5-b68b-4d2e-b07a-feacf204932a"
+content_hash = "sha256:0caa4d7422628a1884ba90d314b04006b3ce5c767666def98f4d75b640079bdf"
+size = 19060
+mtime_ms = 1788857280513
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/7a0278e5-b68b-4d2e-b07a-feacf204932a/781ee0af-cb9f-441c-bcb1-a9d53eeb4f49"
+storage_version_token = "1788857282624296"
+content_type = "text/csv"
