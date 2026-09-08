@@ -4342,6 +4342,84 @@ const MIGRATIONS: Migration[] = [
       $coverage$;
     `,
   },
+  {
+    id: "094_canonical_item_category_null_safe_uniqueness",
+    sql: `
+      -- Publish reconciliation does not preserve PostgreSQL's
+      -- UNIQUE NULLS NOT DISTINCT constraint flag. Replace that fragile
+      -- representation with equivalent partial unique indexes, a construct
+      -- whose predicates Publish preserves.
+      WITH assignment_keeper AS (
+        SELECT
+          id,
+          MIN(id) OVER (
+            PARTITION BY item_code, canonical_category, effective_from
+          ) AS keeper_id
+        FROM canonical_item_category_registry
+      )
+      UPDATE canonical_item_category_source s
+      SET registry_id = k.keeper_id
+      FROM assignment_keeper k
+      WHERE s.registry_id = k.id
+        AND k.id <> k.keeper_id;
+
+      WITH ranked_assignments AS (
+        SELECT
+          id,
+          ROW_NUMBER() OVER (
+            PARTITION BY item_code, canonical_category, effective_from
+            ORDER BY id
+          ) AS duplicate_rank
+        FROM canonical_item_category_registry
+      )
+      DELETE FROM canonical_item_category_registry r
+      USING ranked_assignments d
+      WHERE r.id = d.id
+        AND d.duplicate_rank > 1;
+
+      ALTER TABLE canonical_item_category_registry
+        DROP CONSTRAINT IF EXISTS canonical_item_category_registry_assignment_uq;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS canonical_item_category_registry_open_assignment_uq
+        ON canonical_item_category_registry (item_code, canonical_category)
+        WHERE effective_from IS NULL;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS canonical_item_category_registry_dated_assignment_uq
+        ON canonical_item_category_registry (item_code, canonical_category, effective_from)
+        WHERE effective_from IS NOT NULL;
+
+      DO $invariant$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM canonical_item_category_registry
+          GROUP BY item_code, canonical_category, effective_from
+          HAVING COUNT(*) > 1
+        ) THEN
+          RAISE EXCEPTION 'canonical category registry still has duplicate assignments';
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_indexes
+          WHERE schemaname = 'public'
+            AND indexname = 'canonical_item_category_registry_open_assignment_uq'
+            AND indexdef LIKE '%UNIQUE INDEX%'
+            AND indexdef LIKE '%WHERE (effective_from IS NULL)%'
+        ) OR NOT EXISTS (
+          SELECT 1
+          FROM pg_indexes
+          WHERE schemaname = 'public'
+            AND indexname = 'canonical_item_category_registry_dated_assignment_uq'
+            AND indexdef LIKE '%UNIQUE INDEX%'
+            AND indexdef LIKE '%WHERE (effective_from IS NOT NULL)%'
+        ) THEN
+          RAISE EXCEPTION 'canonical category registry null-safe uniqueness indexes are missing';
+        END IF;
+      END
+      $invariant$;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).
