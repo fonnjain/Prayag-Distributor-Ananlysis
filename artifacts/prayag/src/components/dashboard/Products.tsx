@@ -9,7 +9,7 @@ import { useGlobalFilter } from "@/data/global-filter-context";
 import { usePeriodMonths } from "@/data/period-months";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
-import { Download } from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
 import { CustomTooltip } from "./shared";
 import {
   CompanyReportFilterBar,
@@ -50,10 +50,20 @@ type ProductDataQuality = {
   registerGap: RegisterGap;
 };
 
+type CategoryTab = {
+  category: string;
+  rows: number;
+  distinctCodes: number;
+  value: number;
+};
+
 type Payload = {
   fy: string;
   filtered: boolean;
   total: number;
+  selectedCategory: string;
+  categoryTabs: CategoryTab[];
+  mappingSplit?: unknown;
   products: ProductRow[];
   dataQuality?: ProductDataQuality;
 };
@@ -65,10 +75,13 @@ export default function Products() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [entityFilter, setEntityFilter] = useState<EntityFilterValue>(EMPTY_ENTITY_FILTER);
+  const [category, setCategory] = useState<string>("All");
 
   const query = useMemo(
-    () => `?fy=${encodeURIComponent(fy)}${period.param}${entityFilterQuery(entityFilter)}`,
-    [fy, period.param, entityFilter],
+    () => `?fy=${encodeURIComponent(fy)}${period.param}${entityFilterQuery(entityFilter)}${
+      category === "All" ? "" : `&category=${encodeURIComponent(category)}`
+    }`,
+    [fy, period.param, entityFilter, category],
   );
 
   useEffect(() => {
@@ -90,20 +103,41 @@ export default function Products() {
     [data],
   );
 
+  useEffect(() => {
+    if (!data || category === "All") return;
+    if (!data.categoryTabs.some((tab) => tab.category === category)) {
+      setCategory("All");
+    }
+  }, [data, category]);
+
+  const currentCategory = data?.selectedCategory || "All";
+  const categoryLabel = currentCategory === "All" ? "" : `${currentCategory} `;
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       {/* Filters + export */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <CompanyReportFilterBar fy={fy} value={entityFilter} onChange={setEntityFilter} />
-        <a
-          href={`/api/product-reports/export${query}`}
-          download
-          className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/40"
-          data-testid="button-export-excel-products"
-        >
-          <Download className="h-3.5 w-3.5" />
-          Export Excel
-        </a>
+        {loading || error ? (
+          <span
+            aria-disabled="true"
+            className="flex cursor-not-allowed items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium opacity-50"
+            data-testid="button-export-excel-products"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export Excel
+          </span>
+        ) : (
+          <a
+            href={`/api/product-reports/export${query}`}
+            download
+            className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/40"
+            data-testid="button-export-excel-products"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export Excel
+          </a>
+        )}
       </div>
       {hasEntityFilter(entityFilter) && (
         <p className="text-[11px] text-amber-700 dark:text-amber-400">
@@ -116,9 +150,45 @@ export default function Products() {
 
       {data && (
         <>
-          <Card>
+          {data.categoryTabs && data.categoryTabs.length > 0 && (
+            <div className="space-y-2">
+              <div
+                className="flex w-full items-center gap-2 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+                role="tablist"
+                aria-label="Product categories"
+              >
+                {data.categoryTabs.map((tab) => {
+                  const isSelected = currentCategory === tab.category;
+                  return (
+                    <button
+                      key={tab.category}
+                      role="tab"
+                      aria-selected={isSelected}
+                      disabled={loading}
+                      onClick={() => setCategory(tab.category)}
+                      className={`relative flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                        isSelected
+                          ? "bg-primary text-primary-foreground shadow"
+                          : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+                      } ${loading ? "opacity-60 cursor-not-allowed" : ""}`}
+                    >
+                      {loading && category === tab.category && (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      )}
+                      <span>{tab.category}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Multi-category products count once in All and at full value in every applicable category, so category totals may exceed All.
+              </p>
+            </div>
+          )}
+
+          <Card className={loading ? "opacity-60 pointer-events-none transition-opacity duration-300" : "transition-opacity duration-300"}>
             <CardHeader className="px-5 pt-5 pb-2">
-              <CardTitle className="text-base font-semibold">Top 15 Products by FY {data.fy} Sales</CardTitle>
+              <CardTitle className="text-base font-semibold">Top 15 {categoryLabel}Products by FY {data.fy} Sales</CardTitle>
             </CardHeader>
             <CardContent className="px-2 sm:px-5 pb-5 pt-2">
               {topProducts.length === 0 ? (
@@ -169,7 +239,7 @@ export default function Products() {
           </Card>
 
           {data.dataQuality && (
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className={`grid gap-4 md:grid-cols-3 ${loading ? "opacity-60 pointer-events-none transition-opacity duration-300" : "transition-opacity duration-300"}`}>
               {/* (a) Unresolved MRP conflicts */}
               <Card className="border-amber-300/60 dark:border-amber-500/40">
                 <CardHeader className="px-5 pt-5 pb-2">
@@ -266,9 +336,9 @@ export default function Products() {
             </div>
           )}
 
-          <Card>
+          <Card className={loading ? "opacity-60 pointer-events-none transition-opacity duration-300" : "transition-opacity duration-300"}>
             <CardHeader className="px-5 pt-5 pb-2">
-              <CardTitle className="text-base font-semibold">All Products</CardTitle>
+              <CardTitle className="text-base font-semibold">All {categoryLabel}Products</CardTitle>
               <p className="text-[11px] text-muted-foreground font-normal">
                 Quantity is per product only — never sum it across products (litres vs pieces).
               </p>

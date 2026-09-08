@@ -17,6 +17,7 @@ import {
 } from "../lib/sku/productCodeResolver.js";
 import {
   entityConds,
+  entityCondsAliased,
   hasEntityFilterValues,
   type EntityFilter,
 } from "../lib/saleLineFilter.js";
@@ -82,7 +83,196 @@ export type ProductReportsPayload = {
   products: ProductRow[];
   /** Data-quality panels from the Product_Upload_Sample_File.csv load. */
   dataQuality: ProductDataQuality;
+  /** Category currently applied to the product rows; All does not touch the registry. */
+  selectedCategory: ProductCategory;
+  /** All is counted once; a line matched by several categories is counted in each of those categories. */
+  categoryTabs: ProductCategoryTab[];
+  /** Row-level mapped/unmapped split (unlike category tabs, this cannot double-count a line). */
+  mappingSplit: ProductMappingSplit;
 };
+
+export const PRODUCT_CATEGORIES = [
+  "WATER TANK", "AGRI", "UPVC", "CPVC", "SWR", "PPR", "HDPE",
+  "Garden Pipe", "COLUMN", "Corrugated Pipe", "PTMT / Faucets",
+  "CISTERN", "CP (Chrome-Plated)", "Sink", "Sanitaryware",
+  "Connection / Waste", "Hardware",
+] as const;
+
+export type CanonicalProductCategory = (typeof PRODUCT_CATEGORIES)[number];
+export type ProductCategory = CanonicalProductCategory | "Unmapped" | "All";
+export type ProductCategoryTab = {
+  category: ProductCategory;
+  value: number;
+  rows: number;
+  distinctCodes: number;
+};
+export type ProductMappingSplit = {
+  mapped: Omit<ProductCategoryTab, "category">;
+  unmapped: Omit<ProductCategoryTab, "category">;
+};
+
+/** The only category values accepted by the report endpoints. */
+export function parseProductCategory(value: unknown): ProductCategory | null {
+  if (value === undefined) return "All";
+  if (typeof value !== "string") return null;
+  return (value === "All" || value === "Unmapped" ||
+    (PRODUCT_CATEGORIES as readonly string[]).includes(value))
+    ? value as ProductCategory
+    : null;
+}
+
+function effectiveDateSql(alias: string) {
+  return sql`COALESCE(${sql.raw(`${alias}.invoice_date`)}, TO_DATE(${sql.raw(`${alias}.month_label`)}, 'Mon-YY'))`;
+}
+
+/** Correlated condition deliberately uses EXISTS: no category assignment can duplicate a sale line. */
+export function categorySelectionSql(category: Exclude<ProductCategory, "All">, alias: string) {
+  const effectiveDate = effectiveDateSql(alias);
+  const matchingAssignment = sql`
+    r.item_code = ${sql.raw(`${alias}.code`)}
+    AND (r.effective_from IS NULL OR r.effective_from <= ${effectiveDate})
+    AND (r.effective_to IS NULL OR ${effectiveDate} < r.effective_to)
+  `;
+  return category === "Unmapped"
+    ? sql`NOT EXISTS (SELECT 1 FROM canonical_item_category_registry r WHERE ${matchingAssignment})`
+    : sql`EXISTS (
+      SELECT 1 FROM canonical_item_category_registry r
+      WHERE ${matchingAssignment} AND r.canonical_category = ${category}
+    )`;
+}
+
+type CategorySummaryDbRow = {
+  kind: "all" | "category" | "mapped" | "unmapped";
+  category: string | null;
+  value: string;
+  rows: string;
+  distinct_codes: string;
+};
+
+async function buildCategorySummaries(
+  fy: string,
+  filter: EntityFilter | undefined,
+  months: string[] | undefined,
+): Promise<{ categoryTabs: ProductCategoryTab[]; mappingSplit: ProductMappingSplit }> {
+  const monthCond = months?.length
+    ? sql`AND sl.month_label IN (${sql.join(months.map((m) => sql`${m}`), sql`, `)})`
+    : sql``;
+  const rows = await db.execute<CategorySummaryDbRow>(sql`
+    WITH filtered AS (
+      SELECT sl.line_uid, sl.code, sl.amount, sl.invoice_date, sl.month_label
+      FROM sale_line_current sl
+      WHERE sl.fy = ${fy}
+      ${monthCond}
+      ${entityCondsAliased(filter, "sl")}
+    ),
+    assignments AS (
+      SELECT DISTINCT f.line_uid, f.code, f.amount, r.canonical_category
+      FROM filtered f
+      JOIN canonical_item_category_registry r
+        ON r.item_code = f.code
+       AND (r.effective_from IS NULL OR r.effective_from <=
+         COALESCE(f.invoice_date, TO_DATE(f.month_label, 'Mon-YY')))
+       AND (r.effective_to IS NULL OR
+         COALESCE(f.invoice_date, TO_DATE(f.month_label, 'Mon-YY')) < r.effective_to)
+    ),
+    category_code_values AS (
+      SELECT canonical_category, code, round(sum(amount::numeric)) AS value
+      FROM assignments
+      GROUP BY canonical_category, code
+    ),
+    category_counts AS (
+      SELECT canonical_category, count(*) AS rows, count(DISTINCT code) AS distinct_codes
+      FROM assignments
+      GROUP BY canonical_category
+    ),
+    all_code_values AS (
+      SELECT code, round(sum(amount::numeric)) AS value
+      FROM filtered
+      GROUP BY code
+    ),
+    classified AS (
+      SELECT f.*,
+        CASE WHEN EXISTS (
+          SELECT 1 FROM canonical_item_category_registry r
+          WHERE r.item_code = f.code
+            AND (r.effective_from IS NULL OR r.effective_from <=
+              COALESCE(f.invoice_date, TO_DATE(f.month_label, 'Mon-YY')))
+            AND (r.effective_to IS NULL OR
+              COALESCE(f.invoice_date, TO_DATE(f.month_label, 'Mon-YY')) < r.effective_to)
+        ) THEN 'mapped' ELSE 'unmapped' END AS mapping_kind
+      FROM filtered f
+    ),
+    mapping_code_values AS (
+      SELECT mapping_kind, code, round(sum(amount::numeric)) AS value
+      FROM classified
+      GROUP BY mapping_kind, code
+    ),
+    mapping_counts AS (
+      SELECT mapping_kind, count(*) AS rows, count(DISTINCT code) AS distinct_codes
+      FROM classified
+      GROUP BY mapping_kind
+    )
+    SELECT 'category'::text AS kind, c.canonical_category AS category,
+      COALESCE(sum(v.value), 0)::text AS value,
+      c.rows::text AS rows, c.distinct_codes::text AS distinct_codes
+    FROM category_counts c
+    JOIN category_code_values v USING (canonical_category)
+    GROUP BY c.canonical_category, c.rows, c.distinct_codes
+    UNION ALL
+    SELECT 'all'::text AS kind, NULL::text AS category,
+      COALESCE((SELECT sum(value) FROM all_code_values), 0)::text AS value,
+      count(*)::text AS rows, count(DISTINCT code)::text AS distinct_codes
+    FROM filtered
+    UNION ALL
+    SELECT c.mapping_kind AS kind, NULL::text AS category,
+      COALESCE(sum(v.value), 0)::text AS value,
+      c.rows::text AS rows, c.distinct_codes::text AS distinct_codes
+    FROM mapping_counts c
+    JOIN mapping_code_values v USING (mapping_kind)
+    GROUP BY c.mapping_kind, c.rows, c.distinct_codes
+  `);
+  const zero = { value: 0, rows: 0, distinctCodes: 0 };
+  let all: ProductCategoryTab = { category: "All", ...zero };
+  let mapped = zero;
+  let unmapped = zero;
+  const categories = rows.rows
+    .filter((r) => r.kind === "category")
+    .map((r) => ({
+      category: r.category as CanonicalProductCategory,
+      value: Math.round(Number(r.value)),
+      rows: Number(r.rows),
+      distinctCodes: Number(r.distinct_codes),
+    }))
+    .sort((a, b) => b.value - a.value || a.category.localeCompare(b.category));
+  for (const row of rows.rows) {
+    if (row.kind === "all") {
+      all = {
+        category: "All",
+        value: Math.round(Number(row.value)),
+        rows: Number(row.rows),
+        distinctCodes: Number(row.distinct_codes),
+      };
+      continue;
+    }
+    if (row.kind !== "mapped" && row.kind !== "unmapped") continue;
+    const summary = {
+      value: Math.round(Number(row.value)),
+      rows: Number(row.rows),
+      distinctCodes: Number(row.distinct_codes),
+    };
+    if (row.kind === "mapped") mapped = summary;
+    else unmapped = summary;
+  }
+  const categoryTabs = [
+    ...categories,
+    ...(unmapped.rows > 0 ? [{ category: "Unmapped" as const, ...unmapped }] : []),
+  ]
+    .sort((a, b) => b.value - a.value || a.category.localeCompare(b.category));
+  return {
+    categoryTabs: [all, ...categoryTabs],
+    mappingSplit: { mapped, unmapped },
+  };
+}
 
 /** Family prefix for an unresolved register code: leading letters up to and
  *  including a hyphen (PTA-, CPCS-), else the leading letter run, else the
@@ -198,6 +388,7 @@ export async function buildProductReports(
   fy: string,
   filter?: EntityFilter,
   months?: string[],
+  selectedCategory: ProductCategory = "All",
 ): Promise<ProductReportsPayload> {
   const rows = await db
     .select({
@@ -216,6 +407,7 @@ export async function buildProductReports(
       eq(saleLines.versionStatus, "current"),
       ...(months && months.length > 0 ? [inArray(saleLines.monthLabel, months)] : []),
       ...entityConds(filter),
+      ...(selectedCategory === "All" ? [] : [categorySelectionSql(selectedCategory, "sale_line_all")]),
     ))
     .groupBy(saleLines.code);
 
@@ -223,27 +415,60 @@ export async function buildProductReports(
     .map((r) => ({
       code: r.code,
       product: r.product,
-      group: r.group,
+      group: selectedCategory === "All" ? r.group : selectedCategory,
       qty: Math.round(r.qty * 100) / 100,
       unit: r.unit,
       amount: Math.round(r.amount),
     }))
     .sort((a, b) => b.amount - a.amount);
 
-  const dataQuality = await buildProductDataQuality(fy);
+  const allTab: ProductCategoryTab = {
+    category: "All",
+    value: products.reduce((s, p) => s + p.amount, 0),
+    // These counts are intentionally based on sale lines, not product rows.
+    // They are supplied by the category query below.
+    rows: 0,
+    distinctCodes: 0,
+  };
+  const [dataQuality, summaries] = await Promise.all([
+    buildProductDataQuality(fy),
+    buildCategorySummaries(fy, filter, months),
+  ]);
+  // Preserve the legacy code aggregation's rounded total for the unfiltered
+  // All request; registry reporting is deliberately separate from that path.
+  if (selectedCategory === "All") summaries.categoryTabs[0].value = allTab.value;
+  const selectedTab = summaries.categoryTabs.find((tab) => tab.category === selectedCategory);
+  const zeroSplit = { value: 0, rows: 0, distinctCodes: 0 };
+  const mappingSplit = selectedCategory === "All"
+    ? summaries.mappingSplit
+    : selectedCategory === "Unmapped"
+      ? { mapped: zeroSplit, unmapped: summaries.mappingSplit.unmapped }
+      : {
+          mapped: selectedTab
+            ? {
+                value: selectedTab.value,
+                rows: selectedTab.rows,
+                distinctCodes: selectedTab.distinctCodes,
+              }
+            : zeroSplit,
+          unmapped: zeroSplit,
+        };
 
   return {
     fy,
     filtered: hasEntityFilterValues(filter),
     months: months ?? [],
-    total: products.reduce((s, p) => s + p.amount, 0),
+    total: allTab.value,
     products,
     dataQuality,
+    selectedCategory,
+    categoryTabs: summaries.categoryTabs,
+    mappingSplit,
   };
 }
 
 function parseParams(req: import("express").Request, res: import("express").Response):
-  | { fy: string; filter: EntityFilter | undefined; months: string[] | undefined }
+  | { fy: string; filter: EntityFilter | undefined; months: string[] | undefined; category: ProductCategory }
   | null {
   const fy = typeof req.query.fy === "string" && req.query.fy.trim() !== ""
     ? req.query.fy.trim()
@@ -258,29 +483,34 @@ function parseParams(req: import("express").Request, res: import("express").Resp
     return null;
   }
   const months = monthsResult.months;
+  const category = parseProductCategory(req.query.category);
+  if (!category) {
+    res.status(400).json({ error: "Invalid category" });
+    return null;
+  }
   const filter: EntityFilter = {
     heads: parseJsonArray(req.query.heads),
     states: parseJsonArray(req.query.states),
     customers: parseJsonArray(req.query.customers),
   };
-  return { fy, filter: hasEntityFilterValues(filter) ? filter : undefined, months };
+  return { fy, filter: hasEntityFilterValues(filter) ? filter : undefined, months, category };
 }
 
 router.get("/product-reports", async (req, res) => {
   const params = parseParams(req, res);
   if (!params) return;
-  const { fy, filter, months } = params;
+  const { fy, filter, months, category } = params;
   try {
-    if (filter || (months && months.length > 0)) {
+    if (category !== "All" || filter || (months && months.length > 0)) {
       // Active filters or a sub-year period — always build live, never cache
       // or snapshot (the key space would be unbounded).
-      res.json(await buildProductReports(fy, filter, months));
+      res.json(await buildProductReports(fy, filter, months, category));
       return;
     }
     const payload = await serveWithSnapshot({
       // The card's catalogue basis changed from item_master to the
       // authoritative source cache; do not serve a snapshot made on v2.
-      key: `product-reports|v3|${fy}`,
+      key: `product-reports|v4|${fy}`,
       ttlMs: PRODUCT_REPORTS_TTL_MS,
       build: () => buildProductReports(fy) as unknown as Promise<Record<string, unknown>>,
       log: req.log,
@@ -304,7 +534,7 @@ let activeExports = 0;
 router.get("/product-reports/export", async (req, res) => {
   const params = parseParams(req, res);
   if (!params) return;
-  const { fy, filter, months } = params;
+  const { fy, filter, months, category } = params;
 
   if (activeExports >= MAX_CONCURRENT_EXPORTS) {
     res.status(429).json({ error: "Another export is already running — try again in a few seconds." });
@@ -312,7 +542,7 @@ router.get("/product-reports/export", async (req, res) => {
   }
   activeExports++;
   try {
-    const p = await buildProductReports(fy, filter, months);
+    const p = await buildProductReports(fy, filter, months, category);
     const provisionalInfo = await provisionalMonthsExportInfo(p.fy);
 
     const wb = new ExcelJS.Workbook();
@@ -326,6 +556,12 @@ router.get("/product-reports/export", async (req, res) => {
       ["Page", `Products — FY ${p.fy} primary sales by product (sale_line register)`],
       ["FY", p.fy],
       ["Month filter", months?.length ? months.join(", ") : "Full FY"],
+       ["Category", category === "All" ? "All categories" : category],
+       ["Category allocation", "A sale-line's full value is included in every effective category assignment; All counts each sale-line once."],
+       ["Mapped sales rows", String(p.mappingSplit.mapped.rows)],
+       ["Mapped sales value (INR)", String(p.mappingSplit.mapped.value)],
+       ["Unmapped sales rows", String(p.mappingSplit.unmapped.rows)],
+       ["Unmapped sales value (INR)", String(p.mappingSplit.unmapped.value)],
       ["Total sales (INR)", String(p.total)],
       ["State Head filter", filter?.heads?.length ? filter.heads.join(", ") : "All"],
       ["State filter", filter?.states?.length ? filter.states.join(", ") : "All"],
