@@ -1,0 +1,213 @@
+# Replit Prompt 66 — Global category filter, phased
+
+**Date:** 8 September 2026
+**Follows:** the taxonomy assessment, whose recommendation is accepted.
+**Scope:** Five phases. Each is separately approved, diffed and published.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## The decisions taken
+
+**Authority: a database-backed code-to-category registry**, seeded from the 17
+`sale_line.group_canon` labels. Not MRP Division — it cuts across primary groups,
+carries four composite values, and misses **861 sold codes worth ₹10.59 crore**.
+
+**Mapping is by item code, not by group.** A 17-row group-to-Division map cannot
+represent a many-to-many relationship. A product in two divisions appears under
+both, and deduplicates in All totals.
+
+**A filter that silently does nothing is unacceptable.** Any page that cannot
+honour it must say so on screen.
+
+**Unmapped rows stay in All totals and never disappear.** Named-category
+selections exclude them unless explicitly chosen; exports state both mapped and
+unmapped value.
+
+---
+
+## Phase 1 — the registry. Foundation.
+
+```
+Code change. The registry only. No filter, no UI, no page changes.
+
+Build a database-backed canonical code-to-category registry.
+
+  - item code, canonical category, effective from and to
+  - source vocabulary and source value it was derived from
+  - review status: seeded, confirmed, needs-review
+  - many-to-many: one code may hold several categories
+  - who set it and when
+
+Seed from sale_line.group_canon, which covers every FY2026-27 sold code with
+zero gaps. Record source as 'group_canon' and status 'seeded'.
+
+Then map the other vocabularies IN, without overwriting the seed:
+  MRP Division and Category, by item code
+  item_master.item_group and segment_canon
+  secondary_sku_line.segment_canon
+  secondary_order_line.category_name
+
+  Note secondary_order_line.segment_canon is empty on all 846,618 rows -
+  do not read it.
+
+COMPOSITES. The four pipe-separated MRP Divisions become MULTIPLE rows, one
+per member. Never take only the first. 50 products carry
+"Ceramic Sanitaryware | PTMT & Plastic Fittings" and one carries a
+three-way value.
+
+AFTER APPLYING, print:
+  - registry row count, distinct codes, distinct categories
+  - codes with more than one category, with their categories
+  - codes present in sale_line but absent from the registry - expect zero
+  - the 861 codes with no MRP Division: confirm they still have a
+    group_canon seed and are therefore covered
+  - a crosswalk: for each of the 17 categories, which MRP Divisions its
+    codes fall into
+
+Do NOT change any query, page, export or figure. This phase adds a table
+and populates it. Nothing reads it yet.
+```
+
+---
+
+## Phase 2 — Products page tabs. First visible value.
+
+```
+Code change. Products page only. Show the diff.
+
+Add category tabs to the Products page, reading the registry.
+
+  - a tab per category that has sales in the selected period, plus All
+  - tab order by value descending, All first
+  - a code in multiple categories appears under each, and is counted ONCE
+    in All
+  - Unmapped appears as a tab only if it has rows; it is included in All
+    regardless
+
+The existing FY, quarter, month and Last-7-days controls keep working and
+combine with the tab.
+
+EXPORT MUST MATCH. The Excel export honours the selected tab, and its Info
+sheet states the category scope, the deduplication rule for multi-category
+codes, and the mapped versus unmapped split in both rows and value.
+
+An export that does not match what is on screen is worse than no export.
+
+AFTER APPLYING, print:
+  - the tab list with rows, codes and value for FY2026-27 YTD
+  - confirmation that the tabs sum to All, with multi-category codes counted
+    once
+  - the export Info sheet as generated for one named tab
+```
+
+---
+
+## Phase 3 — where the filter can and cannot apply. Read-only.
+
+```
+Read-only. Change nothing. This decides Phase 4's scope.
+
+C1. For every page, report, export and AI payload, classify as:
+      FILTERABLE - has product grain, can join the registry
+      NOT APPLICABLE - no product dimension at all
+      DEGRADED - partially filterable, or filterable on one measure and not
+        another
+
+    Coverage is the example to work through: sales can filter by category,
+    visits and people cannot.
+
+C2. For each FILTERABLE surface, can it filter server-side on an indexed
+    column, or does it need a join or post-filter? 846,618 order rows and
+    481,000 sale rows make that a performance question, not a detail.
+
+C3. secondary_register_line has brand_canon and no item code. Confirm it
+    cannot be filtered by category, and that it must therefore declare the
+    filter unavailable rather than ignore it.
+
+C4. TABS VERSUS GLOBAL FILTER. When both are set on Products, does the tab
+    narrow WITHIN the global scope, or override it?
+
+    Recommend one and say why. My view: the tab narrows within the global
+    scope, and if the global filter excludes a tab's category, that tab is
+    hidden rather than shown empty.
+
+C5. What does a DEGRADED surface show? A banner naming which figures honour
+    the filter and which do not, per measure - not one generic warning.
+
+C6. Estimate Phase 4 per surface group, so it can be sequenced rather than
+    done in one pass.
+
+Report only.
+```
+
+---
+
+## Phase 4 — roll the filter out. One surface group at a time.
+
+```
+Not to be started until Phase 3 is answered. Listed for sequencing.
+
+Each group is its own change, diff and publish:
+
+  4a. Products, SKU Deep Dive, MRP catalogue views - highest product
+      affinity, lowest risk
+  4b. Overview, Growth, Momentum, Regional
+  4c. Reports, Company Reports, Comparison, Pending Orders
+  4d. Secondary Orders, Sales, Customer Performance, Market Survey
+  4e. Alerts, Warnings, Data Health
+  4f. AI payload families - twelve of them, and every one must carry the
+      category through payload construction BEFORE aggregation and numeric
+      guards
+
+Every group must, without exception:
+  - honour the filter, or declare it unavailable on screen
+  - keep Unmapped in All totals
+  - make its export match exactly, with scope stated in the Info sheet
+  - never silently return unfiltered figures under a filtered heading
+
+Confirm this sequence before starting 4a.
+```
+
+---
+
+## Phase 5 — governance
+
+```
+Not code. A process to agree and write down.
+
+  - Commercial/Product Master owner approves canonical classifications
+  - Data team maintains source mappings and drift monitoring
+  - New or unknown codes enter an Unmapped review queue
+  - Unmapped rows stay in All totals and never disappear
+  - Scheme item groups remain independently governed - a category remap
+    must never change scheme eligibility automatically
+
+Confirm the last point in code: is there any path by which changing a
+category could alter a scheme slab, nudge or qualification? If so, it needs
+an explicit barrier.
+```
+
+---
+
+## Notes
+
+- **Phase 1 changes no figure**, which makes it safe to ship immediately and
+  gives everything after it a foundation.
+- **Phase 2 delivers the visible thing you asked for** — category tabs on Products
+  — in days rather than weeks, and proves the registry works before it is wired
+  into twenty surfaces.
+- **C4 needs deciding before Phase 4**, not during. Tab-versus-filter interaction
+  is the kind of thing that gets resolved differently on each page if it is not
+  settled once.
+- **The Phase 5 scheme question is not theoretical.** Scheme eligibility runs on
+  `scheme_item_group.item_group`, a separate 22-value vocabulary. If a category
+  remap could shift a slab or a nudge, that is money moving because someone
+  retagged a product.
+
+## The estimate
+
+The assessment says 22–34 engineering days for the whole thing. Phases 1 and 2
+are a small fraction of that and deliver the Products tabs. Phase 4 is the bulk,
+and it is the part worth sequencing rather than attempting in one pass.
