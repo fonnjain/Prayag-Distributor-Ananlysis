@@ -3845,6 +3845,503 @@ const MIGRATIONS: Migration[] = [
         CHECK (status IN ('idle', 'running', 'succeeded', 'failed'));
     `,
   },
+  {
+    id: "093_canonical_item_category_registry",
+    sql: `
+      CREATE TABLE IF NOT EXISTS canonical_item_category_registry (
+        id BIGSERIAL PRIMARY KEY,
+        item_code TEXT NOT NULL,
+        canonical_category TEXT NOT NULL,
+        effective_from DATE,
+        effective_to DATE,
+        source_vocabulary TEXT NOT NULL,
+        source_value TEXT NOT NULL,
+        review_status TEXT NOT NULL DEFAULT 'seeded',
+        set_by TEXT NOT NULL,
+        set_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT canonical_item_category_registry_category_check CHECK (
+          canonical_category IN (
+            'WATER TANK', 'AGRI', 'UPVC', 'CPVC', 'SWR', 'PPR', 'HDPE',
+            'Garden Pipe', 'COLUMN', 'Corrugated Pipe', 'PTMT / Faucets',
+            'CISTERN', 'CP (Chrome-Plated)', 'Sink', 'Sanitaryware',
+            'Connection / Waste', 'Hardware'
+          )
+        ),
+        CONSTRAINT canonical_item_category_registry_review_check CHECK (
+          review_status IN ('seeded', 'confirmed', 'needs-review')
+        ),
+        CONSTRAINT canonical_item_category_registry_dates_check CHECK (
+          effective_to IS NULL OR effective_from IS NULL OR effective_to >= effective_from
+        ),
+        CONSTRAINT canonical_item_category_registry_assignment_uq UNIQUE NULLS NOT DISTINCT (
+          item_code, canonical_category, effective_from
+        )
+      );
+
+      CREATE INDEX IF NOT EXISTS canonical_item_category_registry_code_idx
+        ON canonical_item_category_registry (item_code);
+      CREATE INDEX IF NOT EXISTS canonical_item_category_registry_category_idx
+        ON canonical_item_category_registry (canonical_category);
+      CREATE INDEX IF NOT EXISTS canonical_item_category_registry_effective_idx
+        ON canonical_item_category_registry (item_code, effective_from, effective_to);
+
+      CREATE TABLE IF NOT EXISTS canonical_item_category_source (
+        item_code TEXT NOT NULL,
+        registry_id BIGINT REFERENCES canonical_item_category_registry(id) ON DELETE SET NULL,
+        source_vocabulary TEXT NOT NULL,
+        source_value TEXT NOT NULL,
+        observed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT canonical_item_category_source_uq UNIQUE (
+          item_code, source_vocabulary, source_value
+        )
+      );
+
+      CREATE INDEX IF NOT EXISTS canonical_item_category_source_vocabulary_idx
+        ON canonical_item_category_source (source_vocabulary, source_value);
+      CREATE INDEX IF NOT EXISTS canonical_item_category_source_code_idx
+        ON canonical_item_category_source (item_code);
+
+      -- The primary register is authoritative. Seed FY2026-27, whose sold-code
+      -- coverage was the approved foundation for this registry.
+      WITH primary_candidates AS (
+        SELECT DISTINCT ON (UPPER(BTRIM(code)))
+          UPPER(BTRIM(code)) AS item_code,
+          group_canon AS canonical_category,
+          group_canon AS source_value
+        FROM sale_line_all
+        WHERE version_status = 'current'
+          AND fy = '2026-27'
+          AND NULLIF(BTRIM(code), '') IS NOT NULL
+          AND group_canon IN (
+            'WATER TANK', 'AGRI', 'UPVC', 'CPVC', 'SWR', 'PPR', 'HDPE',
+            'Garden Pipe', 'COLUMN', 'Corrugated Pipe', 'PTMT / Faucets',
+            'CISTERN', 'CP (Chrome-Plated)', 'Sink', 'Sanitaryware',
+            'Connection / Waste', 'Hardware'
+          )
+        ORDER BY UPPER(BTRIM(code)), group_canon
+      )
+      INSERT INTO canonical_item_category_registry (
+        item_code, canonical_category, effective_from, effective_to,
+        source_vocabulary, source_value, review_status, set_by
+      )
+      SELECT
+        item_code, canonical_category, NULL, NULL,
+        'group_canon', source_value, 'seeded',
+        'migration:093_canonical_item_category_registry'
+      FROM primary_candidates
+      ON CONFLICT (item_code, canonical_category, effective_from) DO NOTHING;
+
+      -- Keep older sold codes covered without letting historical relabelling
+      -- create extra current assignments. FY2026-27 remains authoritative;
+      -- only codes absent from that seed receive their latest historical label.
+      WITH historical_candidates AS (
+        SELECT DISTINCT ON (UPPER(BTRIM(code)))
+          UPPER(BTRIM(code)) AS item_code,
+          group_canon AS canonical_category
+        FROM sale_line_all
+        WHERE version_status = 'current'
+          AND NULLIF(BTRIM(code), '') IS NOT NULL
+          AND group_canon IN (
+            'WATER TANK', 'AGRI', 'UPVC', 'CPVC', 'SWR', 'PPR', 'HDPE',
+            'Garden Pipe', 'COLUMN', 'Corrugated Pipe', 'PTMT / Faucets',
+            'CISTERN', 'CP (Chrome-Plated)', 'Sink', 'Sanitaryware',
+            'Connection / Waste', 'Hardware'
+          )
+        ORDER BY
+          UPPER(BTRIM(code)),
+          CASE fy
+            WHEN '2026-27' THEN 4
+            WHEN '2025-26' THEN 3
+            WHEN '2024-25' THEN 2
+            WHEN '2023-24' THEN 1
+            ELSE 0
+          END DESC,
+          group_canon
+      ),
+      uncovered_historical AS (
+        SELECT h.*
+        FROM historical_candidates h
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM canonical_item_category_registry r
+          WHERE r.item_code = h.item_code
+            AND r.effective_from IS NULL
+        )
+      )
+      INSERT INTO canonical_item_category_registry (
+        item_code, canonical_category, effective_from, effective_to,
+        source_vocabulary, source_value, review_status, set_by
+      )
+      SELECT
+        item_code, canonical_category, NULL, NULL,
+        'group_canon', canonical_category, 'seeded',
+        'migration:093_canonical_item_category_registry'
+      FROM uncovered_historical
+      ON CONFLICT (item_code, canonical_category, effective_from) DO NOTHING;
+
+      -- Collect every approved source vocabulary as provenance. Exact aliases use
+      -- the same 17-category vocabulary; broad MRP members are handled below.
+      WITH source_values AS (
+        SELECT UPPER(BTRIM(code)) AS item_code, 'group_canon'::text AS source_vocabulary,
+               group_canon AS source_value, group_canon AS canonical_category, 1 AS source_priority
+        FROM sale_line_all
+        WHERE version_status = 'current' AND fy = '2026-27'
+        UNION ALL
+        SELECT UPPER(BTRIM(code)), 'item_master.item_group', item_group,
+          CASE UPPER(BTRIM(item_group))
+            WHEN 'WATER TANK' THEN 'WATER TANK' WHEN 'WT LID' THEN 'WATER TANK' WHEN 'WATER TANKS' THEN 'WATER TANK'
+            WHEN 'AGRI' THEN 'AGRI' WHEN 'AGRITEC' THEN 'AGRI' WHEN 'AGRI AGRITEC' THEN 'AGRI'
+            WHEN 'UPVC' THEN 'UPVC' WHEN 'UPVC PIPE' THEN 'UPVC' WHEN 'OPVC' THEN 'UPVC' WHEN 'UPVC AQUAFRESH' THEN 'UPVC'
+            WHEN 'CPVC' THEN 'CPVC' WHEN 'CPVC PIPE' THEN 'CPVC' WHEN 'CPVC DURALIFE' THEN 'CPVC'
+            WHEN 'SWR' THEN 'SWR' WHEN 'SWR DRAINTECH' THEN 'SWR'
+            WHEN 'PPR' THEN 'PPR' WHEN 'HDPE PIPE' THEN 'HDPE'
+            WHEN 'GARDEN PIPE' THEN 'Garden Pipe' WHEN 'P.V.C. GARDEN PIPE' THEN 'Garden Pipe'
+            WHEN 'COLUMN' THEN 'COLUMN' WHEN 'COLUMN PIPE' THEN 'COLUMN'
+            WHEN 'CORRUGATED PIPE' THEN 'Corrugated Pipe'
+            WHEN 'PTMT' THEN 'PTMT / Faucets' WHEN 'SEAT COVER' THEN 'PTMT / Faucets'
+            WHEN 'P.T.M.T. SYMET' THEN 'PTMT / Faucets' WHEN 'VIGNETTE' THEN 'PTMT / Faucets'
+            WHEN 'CISTERN' THEN 'CISTERN' WHEN 'CISTERNS & SEAT COVERS' THEN 'CISTERN'
+            WHEN 'C P' THEN 'CP (Chrome-Plated)' WHEN 'CP' THEN 'CP (Chrome-Plated)'
+            WHEN 'CP ACCESSORIES' THEN 'CP (Chrome-Plated)' WHEN 'CP ALLIED' THEN 'CP (Chrome-Plated)'
+            WHEN 'C.P-CDA' THEN 'CP (Chrome-Plated)' WHEN 'C.P. 5000 SERIES' THEN 'CP (Chrome-Plated)'
+            WHEN 'C.P. 6000 SERIES' THEN 'CP (Chrome-Plated)' WHEN 'C.P. 7000 SERIES' THEN 'CP (Chrome-Plated)'
+            WHEN 'C.P. 8000 SERIES' THEN 'CP (Chrome-Plated)' WHEN 'C.P. 9000 SERIES' THEN 'CP (Chrome-Plated)'
+            WHEN 'SINK' THEN 'Sink' WHEN 'PLATE RACK' THEN 'Sink' WHEN 'CABINET' THEN 'Sink'
+            WHEN 'GLASS' THEN 'Sink' WHEN 'S.STEEL SINK' THEN 'Sink'
+            WHEN 'SANITARYWARE' THEN 'Sanitaryware' WHEN 'GEYSER' THEN 'Sanitaryware' WHEN 'WATER HEATER' THEN 'Sanitaryware'
+            WHEN 'WASTE PIPE' THEN 'Connection / Waste' WHEN 'CONNECTION' THEN 'Connection / Waste'
+            WHEN 'CONECTION' THEN 'Connection / Waste' WHEN 'FLOOR TRAP' THEN 'Connection / Waste'
+            WHEN 'COCKROACH TRAPS & GRATINGS' THEN 'Connection / Waste' WHEN 'MANHOLE COVER' THEN 'Connection / Waste'
+            WHEN 'HARDWARE' THEN 'Hardware' WHEN 'TEFELON TAPE' THEN 'Hardware'
+            WHEN 'QUAA' THEN 'Hardware' WHEN 'OTHER' THEN 'Hardware'
+          END, 2
+        FROM item_master
+        WHERE NULLIF(BTRIM(code), '') IS NOT NULL AND NULLIF(BTRIM(item_group), '') IS NOT NULL
+        UNION ALL
+        SELECT UPPER(BTRIM(code)), 'item_master.segment_canon', segment_canon,
+          CASE
+            WHEN segment_canon IN (
+              'WATER TANK', 'AGRI', 'UPVC', 'CPVC', 'SWR', 'PPR', 'HDPE',
+              'Garden Pipe', 'COLUMN', 'Corrugated Pipe', 'PTMT / Faucets',
+              'CISTERN', 'CP (Chrome-Plated)', 'Sink', 'Sanitaryware',
+              'Connection / Waste', 'Hardware'
+            ) THEN segment_canon
+          END, 3
+        FROM item_master
+        WHERE NULLIF(BTRIM(code), '') IS NOT NULL AND NULLIF(BTRIM(segment_canon), '') IS NOT NULL
+        UNION ALL
+        SELECT UPPER(BTRIM(item_code)), 'secondary_sku_line.segment_canon', segment_canon,
+          CASE
+            WHEN segment_canon IN (
+              'WATER TANK', 'AGRI', 'UPVC', 'CPVC', 'SWR', 'PPR', 'HDPE',
+              'Garden Pipe', 'COLUMN', 'Corrugated Pipe', 'PTMT / Faucets',
+              'CISTERN', 'CP (Chrome-Plated)', 'Sink', 'Sanitaryware',
+              'Connection / Waste', 'Hardware'
+            ) THEN segment_canon
+          END, 4
+        FROM secondary_sku_line
+        WHERE NULLIF(BTRIM(item_code), '') IS NOT NULL AND NULLIF(BTRIM(segment_canon), '') IS NOT NULL
+        UNION ALL
+        SELECT UPPER(BTRIM(product_code)), 'secondary_order_line.category_name', category_name,
+          CASE UPPER(BTRIM(category_name))
+            WHEN 'WATER TANK' THEN 'WATER TANK' WHEN 'WT LID' THEN 'WATER TANK' WHEN 'WATER TANKS' THEN 'WATER TANK'
+            WHEN 'AGRI' THEN 'AGRI' WHEN 'AGRITEC' THEN 'AGRI' WHEN 'AGRI AGRITEC' THEN 'AGRI'
+            WHEN 'UPVC' THEN 'UPVC' WHEN 'UPVC PIPE' THEN 'UPVC' WHEN 'OPVC' THEN 'UPVC' WHEN 'UPVC AQUAFRESH' THEN 'UPVC'
+            WHEN 'CPVC' THEN 'CPVC' WHEN 'CPVC PIPE' THEN 'CPVC' WHEN 'CPVC DURALIFE' THEN 'CPVC'
+            WHEN 'SWR' THEN 'SWR' WHEN 'SWR DRAINTECH' THEN 'SWR'
+            WHEN 'PPR' THEN 'PPR' WHEN 'HDPE PIPE' THEN 'HDPE'
+            WHEN 'GARDEN PIPE' THEN 'Garden Pipe' WHEN 'P.V.C. GARDEN PIPE' THEN 'Garden Pipe'
+            WHEN 'COLUMN' THEN 'COLUMN' WHEN 'COLUMN PIPE' THEN 'COLUMN'
+            WHEN 'CORRUGATED PIPE' THEN 'Corrugated Pipe'
+            WHEN 'PTMT' THEN 'PTMT / Faucets' WHEN 'SEAT COVER' THEN 'PTMT / Faucets'
+            WHEN 'P.T.M.T. SYMET' THEN 'PTMT / Faucets' WHEN 'VIGNETTE' THEN 'PTMT / Faucets'
+            WHEN 'CISTERN' THEN 'CISTERN' WHEN 'CISTERNS & SEAT COVERS' THEN 'CISTERN'
+            WHEN 'C P' THEN 'CP (Chrome-Plated)' WHEN 'CP' THEN 'CP (Chrome-Plated)'
+            WHEN 'CP ACCESSORIES' THEN 'CP (Chrome-Plated)' WHEN 'CP ALLIED' THEN 'CP (Chrome-Plated)'
+            WHEN 'C.P-CDA' THEN 'CP (Chrome-Plated)' WHEN 'C.P. 5000 SERIES' THEN 'CP (Chrome-Plated)'
+            WHEN 'C.P. 6000 SERIES' THEN 'CP (Chrome-Plated)' WHEN 'C.P. 7000 SERIES' THEN 'CP (Chrome-Plated)'
+            WHEN 'C.P. 8000 SERIES' THEN 'CP (Chrome-Plated)' WHEN 'C.P. 9000 SERIES' THEN 'CP (Chrome-Plated)'
+            WHEN 'SINK' THEN 'Sink' WHEN 'PLATE RACK' THEN 'Sink' WHEN 'CABINET' THEN 'Sink'
+            WHEN 'GLASS' THEN 'Sink' WHEN 'S.STEEL SINK' THEN 'Sink'
+            WHEN 'SANITARYWARE' THEN 'Sanitaryware' WHEN 'GEYSER' THEN 'Sanitaryware'
+            WHEN 'WATER HEATER' THEN 'Sanitaryware'
+            WHEN 'WASTE PIPE' THEN 'Connection / Waste' WHEN 'CONNECTION' THEN 'Connection / Waste'
+            WHEN 'CONECTION' THEN 'Connection / Waste' WHEN 'FLOOR TRAP' THEN 'Connection / Waste'
+            WHEN 'COCKROACH TRAPS & GRATINGS' THEN 'Connection / Waste'
+            WHEN 'MANHOLE COVER' THEN 'Connection / Waste'
+            WHEN 'HARDWARE' THEN 'Hardware' WHEN 'TEFELON TAPE' THEN 'Hardware'
+            WHEN 'QUAA' THEN 'Hardware' WHEN 'OTHER' THEN 'Hardware'
+          END, 5
+        FROM secondary_order_line
+        WHERE NULLIF(BTRIM(product_code), '') IS NOT NULL AND NULLIF(BTRIM(category_name), '') IS NOT NULL
+      ),
+      mapped AS (
+        SELECT DISTINCT ON (item_code)
+          item_code, source_vocabulary, source_value, canonical_category
+        FROM source_values
+        WHERE NULLIF(item_code, '') IS NOT NULL
+          AND canonical_category IS NOT NULL
+        ORDER BY item_code, source_priority, source_vocabulary, source_value
+      ),
+      uncovered AS (
+        SELECT m.*
+        FROM mapped m
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM canonical_item_category_registry r
+          WHERE r.item_code = m.item_code
+            AND r.effective_from IS NULL
+        )
+      )
+      INSERT INTO canonical_item_category_registry (
+        item_code, canonical_category, effective_from, effective_to,
+        source_vocabulary, source_value, review_status, set_by
+      )
+      SELECT
+        item_code, canonical_category, NULL, NULL,
+        source_vocabulary, source_value, 'seeded',
+        'migration:093_canonical_item_category_registry'
+      FROM uncovered
+      ON CONFLICT (item_code, canonical_category, effective_from) DO NOTHING;
+
+      -- Unambiguous non-composite MRP divisions may classify catalogue-only
+      -- codes, but never override a primary/other-source assignment. The broad
+      -- Pipes & Fittings division has no one-to-one canonical equivalent.
+      WITH active_generation AS (
+        SELECT generation_id
+        FROM mrp_sync_generation
+        WHERE is_active = true
+        ORDER BY source_fetched_at DESC
+        LIMIT 1
+      ),
+      mrp_single_candidates AS (
+        SELECT DISTINCT ON (UPPER(BTRIM(d.item_code)))
+          UPPER(BTRIM(d.item_code)) AS item_code,
+          d.source_division AS source_value,
+          CASE d.app_segment
+            WHEN 'CP' THEN 'CP (Chrome-Plated)'
+            WHEN 'PTMT' THEN 'PTMT / Faucets'
+            WHEN 'Sanitaryware' THEN 'Sanitaryware'
+            WHEN 'Hardware' THEN 'Hardware'
+            WHEN 'QUAA & FERN' THEN 'Hardware'
+          END AS canonical_category
+        FROM mrp_synced_division d
+        JOIN active_generation g USING (generation_id)
+        JOIN mrp_synced s
+          ON s.generation_id = d.generation_id
+         AND s.item_code = d.item_code
+        WHERE s.division_raw NOT LIKE '%|%'
+        ORDER BY UPPER(BTRIM(d.item_code)), d.source_division
+      ),
+      uncovered_mrp AS (
+        SELECT m.*
+        FROM mrp_single_candidates m
+        WHERE m.canonical_category IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM canonical_item_category_registry r
+            WHERE r.item_code = m.item_code
+              AND r.effective_from IS NULL
+          )
+      )
+      INSERT INTO canonical_item_category_registry (
+        item_code, canonical_category, effective_from, effective_to,
+        source_vocabulary, source_value, review_status, set_by
+      )
+      SELECT
+        item_code, canonical_category, NULL, NULL,
+        'mrp_synced.division_raw', source_value, 'seeded',
+        'migration:093_canonical_item_category_registry'
+      FROM uncovered_mrp
+      ON CONFLICT (item_code, canonical_category, effective_from) DO NOTHING;
+
+      -- Only pipe-separated MRP composites create multiple assignments.
+      -- Pipes & Fittings is deliberately not collapsed to one category; a
+      -- code's specific primary/item source supplies its pipe category.
+      WITH active_generation AS (
+        SELECT generation_id
+        FROM mrp_sync_generation
+        WHERE is_active = true
+        ORDER BY source_fetched_at DESC
+        LIMIT 1
+      ),
+      mrp_mapped AS (
+        SELECT DISTINCT
+          UPPER(BTRIM(d.item_code)) AS item_code,
+          d.source_division AS source_value,
+          CASE d.app_segment
+            WHEN 'CP' THEN 'CP (Chrome-Plated)'
+            WHEN 'PTMT' THEN 'PTMT / Faucets'
+            WHEN 'Sanitaryware' THEN 'Sanitaryware'
+            WHEN 'Hardware' THEN 'Hardware'
+            WHEN 'QUAA & FERN' THEN 'Hardware'
+          END AS canonical_category
+        FROM mrp_synced_division d
+        JOIN active_generation g USING (generation_id)
+        JOIN mrp_synced s
+          ON s.generation_id = d.generation_id
+         AND s.item_code = d.item_code
+         AND s.division_raw IN (
+           'Ceramic Sanitaryware | PTMT & Plastic Fittings',
+           'CP Fittings / Faucets | PTMT & Plastic Fittings | Pipes & Fittings',
+           'CP Fittings / Faucets | Ceramic Sanitaryware',
+           'CP Fittings / Faucets | PTMT & Plastic Fittings'
+         )
+      )
+      INSERT INTO canonical_item_category_registry (
+        item_code, canonical_category, effective_from, effective_to,
+        source_vocabulary, source_value, review_status, set_by
+      )
+      SELECT
+        item_code, canonical_category, NULL, NULL,
+        'mrp_synced.division_raw', source_value, 'seeded',
+        'migration:093_canonical_item_category_registry'
+      FROM mrp_mapped
+      WHERE canonical_category IS NOT NULL
+      ON CONFLICT (item_code, canonical_category, effective_from) DO NOTHING;
+
+      -- Preserve every source observation for an assignment even when the
+      -- authoritative group_canon row already occupied the assignment key.
+      WITH evidence AS (
+        SELECT DISTINCT
+          r.item_code,
+          r.canonical_category,
+          r.source_vocabulary,
+          r.source_value
+        FROM canonical_item_category_registry r
+        UNION ALL
+        SELECT DISTINCT
+          UPPER(BTRIM(sl.code)) AS item_code,
+          sl.group_canon AS canonical_category,
+          'group_canon'::text AS source_vocabulary,
+          sl.group_canon AS source_value
+        FROM sale_line_all sl
+        WHERE sl.version_status = 'current'
+          AND sl.fy = '2026-27'
+          AND sl.group_canon IS NOT NULL
+        UNION ALL
+        SELECT DISTINCT
+          UPPER(BTRIM(d.item_code)),
+          CASE d.app_segment
+            WHEN 'CP' THEN 'CP (Chrome-Plated)'
+            WHEN 'PTMT' THEN 'PTMT / Faucets'
+            WHEN 'Sanitaryware' THEN 'Sanitaryware'
+            WHEN 'Hardware' THEN 'Hardware'
+            WHEN 'QUAA & FERN' THEN 'Hardware'
+          END,
+          'mrp_synced.division_raw',
+          d.source_division
+        FROM mrp_synced_division d
+        JOIN mrp_sync_generation g ON g.generation_id = d.generation_id AND g.is_active = true
+        JOIN mrp_synced s
+          ON s.generation_id = d.generation_id
+         AND s.item_code = d.item_code
+         AND s.division_raw IN (
+           'Ceramic Sanitaryware | PTMT & Plastic Fittings',
+           'CP Fittings / Faucets | PTMT & Plastic Fittings | Pipes & Fittings',
+           'CP Fittings / Faucets | Ceramic Sanitaryware',
+           'CP Fittings / Faucets | PTMT & Plastic Fittings'
+         )
+      )
+      INSERT INTO canonical_item_category_source (
+        item_code, registry_id, source_vocabulary, source_value
+      )
+      SELECT e.item_code, r.id, e.source_vocabulary, e.source_value
+      FROM evidence e
+      JOIN canonical_item_category_registry r
+        ON r.item_code = e.item_code
+       AND r.canonical_category = e.canonical_category
+       AND r.effective_from IS NULL
+      WHERE e.canonical_category IS NOT NULL
+      ON CONFLICT (item_code, source_vocabulary, source_value) DO NOTHING;
+
+      -- Retain every raw observation from each approved source vocabulary,
+      -- including values that cannot yet be translated to one of the 17
+      -- categories. Unambiguous one-category codes link directly to the
+      -- assignment; ambiguous/composite codes retain item-level provenance.
+      WITH raw_evidence AS (
+        SELECT DISTINCT UPPER(BTRIM(code)) AS item_code,
+          'group_canon'::text AS source_vocabulary, group_canon AS source_value
+        FROM sale_line_all
+        WHERE version_status = 'current' AND NULLIF(BTRIM(code), '') IS NOT NULL
+          AND NULLIF(BTRIM(group_canon), '') IS NOT NULL
+        UNION
+        SELECT DISTINCT UPPER(BTRIM(code)), 'item_master.item_group', item_group
+        FROM item_master
+        WHERE NULLIF(BTRIM(code), '') IS NOT NULL AND NULLIF(BTRIM(item_group), '') IS NOT NULL
+        UNION
+        SELECT DISTINCT UPPER(BTRIM(code)), 'item_master.segment_canon', segment_canon
+        FROM item_master
+        WHERE NULLIF(BTRIM(code), '') IS NOT NULL AND NULLIF(BTRIM(segment_canon), '') IS NOT NULL
+        UNION
+        SELECT DISTINCT UPPER(BTRIM(item_code)), 'secondary_sku_line.segment_canon', segment_canon
+        FROM secondary_sku_line
+        WHERE NULLIF(BTRIM(item_code), '') IS NOT NULL AND NULLIF(BTRIM(segment_canon), '') IS NOT NULL
+        UNION
+        SELECT DISTINCT UPPER(BTRIM(product_code)), 'secondary_order_line.category_name', category_name
+        FROM secondary_order_line
+        WHERE NULLIF(BTRIM(product_code), '') IS NOT NULL AND NULLIF(BTRIM(category_name), '') IS NOT NULL
+        UNION
+        SELECT DISTINCT UPPER(BTRIM(s.item_code)), 'mrp_synced.division_raw', s.division_raw
+        FROM mrp_synced s
+        JOIN mrp_sync_generation g
+          ON g.generation_id = s.generation_id AND g.is_active = true
+        WHERE NULLIF(BTRIM(s.item_code), '') IS NOT NULL
+          AND NULLIF(BTRIM(s.division_raw), '') IS NOT NULL
+      ),
+      assignment_counts AS (
+        SELECT item_code, MIN(id) AS registry_id, COUNT(*) AS assignment_count
+        FROM canonical_item_category_registry
+        WHERE effective_from IS NULL
+        GROUP BY item_code
+      )
+      INSERT INTO canonical_item_category_source (
+        item_code, registry_id, source_vocabulary, source_value
+      )
+      SELECT
+        e.item_code,
+        CASE WHEN a.assignment_count = 1 THEN a.registry_id END,
+        e.source_vocabulary,
+        e.source_value
+      FROM raw_evidence e
+      LEFT JOIN assignment_counts a ON a.item_code = e.item_code
+      ON CONFLICT (item_code, source_vocabulary, source_value) DO NOTHING;
+
+      -- Fail the whole migration rather than silently committing a partial
+      -- registry when any current sale-line code is uncovered.
+      DO $coverage$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM sale_line_all sl
+          LEFT JOIN canonical_item_category_registry r
+            ON r.item_code = UPPER(BTRIM(sl.code))
+          WHERE sl.version_status = 'current'
+            AND NULLIF(BTRIM(sl.code), '') IS NOT NULL
+            AND r.id IS NULL
+        ) THEN
+          RAISE EXCEPTION 'canonical category registry has uncovered current sale_line codes';
+        END IF;
+
+        IF EXISTS (
+          SELECT 1
+          FROM mrp_synced s
+          JOIN mrp_sync_generation g
+            ON g.generation_id = s.generation_id AND g.is_active = true
+          WHERE s.division_raw LIKE '%|%'
+            AND s.division_raw NOT IN (
+              'Ceramic Sanitaryware | PTMT & Plastic Fittings',
+              'CP Fittings / Faucets | PTMT & Plastic Fittings | Pipes & Fittings',
+              'CP Fittings / Faucets | Ceramic Sanitaryware',
+              'CP Fittings / Faucets | PTMT & Plastic Fittings'
+            )
+        ) THEN
+          RAISE EXCEPTION 'unapproved composite MRP Division requires explicit review';
+        END IF;
+      END
+      $coverage$;
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).
