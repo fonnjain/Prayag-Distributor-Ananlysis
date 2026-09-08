@@ -1,0 +1,117 @@
+# Prompt 66 Phase 2 — Products category tabs
+
+**Date:** 8 September 2026
+**Follows:** Phase 1, complete and verified in production.
+**Scope:** Products page only. No other page, report, AI payload or figure.
+
+**Standing rule:** every figure states which database or source it came from.
+
+## Phase 1 is proven
+
+9,699 assignments, 9,623 distinct codes, 17 categories, **57 multi-category
+codes**, complete coverage of every `sale_line` code including the 861 with no
+MRP Division. Both partial unique indexes survived a fresh Republish with exact
+predicates, and duplicate insertion is rejected by the database.
+
+Nothing reads the registry yet. This phase is the first thing that does.
+
+---
+
+## Prompt
+
+```
+Code change. Products page only. Show the diff before applying.
+
+Add category tabs to the Products page, reading
+canonical_item_category_registry.
+
+1. THE TABS
+
+   - one tab per canonical category that has sales in the selected period,
+     plus "All"
+   - "All" first, then categories by value descending
+   - a category with zero sales in the period does not get a tab
+   - "Unmapped" appears as a tab only if it has rows in the period. It is
+     ALWAYS included in All, whether or not its tab is shown
+
+2. MULTI-CATEGORY CODES - THE PART MOST LIKELY TO GO WRONG
+
+   57 codes carry more than one category. 501 is CISTERN, PTMT / Faucets
+   and Sanitaryware.
+
+   Such a code appears under EACH of its category tabs, with its full value
+   on each.
+
+   In "All" it is counted ONCE. The tabs will therefore sum to more than
+   All, and that is correct - it must not be "fixed" by dividing value
+   across categories or by picking one.
+
+   State this on screen where the tabs are, in one short line, so a reader
+   who adds the tabs up and gets more than All knows why.
+
+3. EXISTING CONTROLS
+
+   FY, YTD, Q1-Q4, Full Year, the month buttons, Last 7 days, Today and
+   Custom all keep working and COMBINE with the tab. The State Head, State
+   and Distributor filters likewise.
+
+   A tab narrows within whatever those already select. It never widens.
+
+4. EXPORT MUST MATCH EXACTLY
+
+   The Excel export honours the selected tab. Its Info sheet states:
+     - the selected category, or "All categories"
+     - the deduplication rule: multi-category codes counted once in All,
+       in full under each category tab
+     - mapped and unmapped split, in both rows and value
+     - the existing quantity warning about litres versus pieces, unchanged
+
+   An export that does not match what is on screen is worse than no export.
+
+5. PERFORMANCE
+
+   The registry join must be server-side and indexed. Do not fetch all
+   products and filter client-side. Print the query plan for a single-tab
+   selection.
+
+DO NOT:
+  - change any other page, report, export or AI payload
+  - change any figure on the Products page for the "All" tab. It must be
+    identical to today
+  - change the registry
+  - add a global filter. That is Phase 4 and depends on Phase 3
+
+AFTER APPLYING, print:
+  - the tab list for FY2026-27 YTD with rows, distinct codes and value each
+  - the "All" totals, which must match the current page exactly
+  - proof that tabs sum to MORE than All, with the difference explained by
+    the 57 multi-category codes
+  - the number of codes appearing under more than one tab
+  - the export Info sheet as generated for one named tab and for All
+  - the query plan for a single-tab selection
+
+Then publish and push. Print the deployed commit and confirm it matches
+origin/main.
+```
+
+---
+
+## Notes
+
+- **Point 2 is where this goes wrong if it goes wrong.** The instinct on seeing
+  tabs sum to more than All is to split the value across categories. That would
+  be wrong — a cistern's sales are its sales, whichever lens you view them
+  through — and it would make every tab figure unreconcilable against the
+  product's own record.
+- **The "All" totals must not move.** If they do, the registry join is filtering
+  something out, and that needs finding before anything ships.
+- **The on-screen line about multi-category codes matters more than it sounds.**
+  Someone will add the tabs up. Better they read one sentence than raise it as a
+  bug.
+
+## Not in this phase
+
+The global filter across all pages is Phase 4, and depends on Phase 3 establishing
+which surfaces can honour it. `secondary_register_line` already cannot — it has
+`brand_canon` and no item code — and will have to declare the filter unavailable
+rather than ignore it.
