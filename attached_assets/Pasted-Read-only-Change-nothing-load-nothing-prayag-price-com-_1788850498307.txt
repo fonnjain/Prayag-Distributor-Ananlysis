@@ -1,0 +1,48 @@
+Read-only. Change nothing, load nothing.
+
+prayag-price.com is confirmed updated and is the authority. Production's
+active cache already resolves v2 current prices. The only stale store is
+mrp_history, which feeds price shrinkers.
+
+Before building any load path, establish whether the workbook is even the
+right source for it.
+
+1. WHAT DOES mrp_history NEED TO BE? Print exactly what price shrinkers
+   read from it - which columns, what date logic, and what question they
+   are answering. If it only needs "what was the price before the current
+   one", that is a much smaller requirement than a full history.
+
+2. DOES THE AUTHORITY CARRY HISTORY? mrp_sync_generation implies versioned
+   generations. How many generations are retained, from when, and does each
+   hold effective dates per code?
+
+   If successive generations are kept, history could accumulate from the
+   authority going forward without any workbook.
+
+3. WHAT WOULD BE LOST? mrp_history has periods the authority does not -
+   1970-01-01 (2,174 rows), 2017-12-01, 2022-01-01, 2024-06-01, 2026-03-01,
+   2026-03-05 (1,830 rows). Print what those rows are and whether anything
+   still reads them.
+
+   The 1970-01-01 block is 2,174 rows and looks like a null-date
+   placeholder. Confirm.
+
+4. THE AUTHORITY IS AHEAD OF THE WORKBOOK. 6,109 rows vs 6,106; 2,435
+   September-effective vs 2,409. What are the 26 extra September codes and
+   the 3 extra rows? If the authority is more current, loading the workbook
+   would move history backwards.
+
+5. THREE OPTIONS. Cost each:
+     a. Load the workbook into mrp_history through a new history-safe,
+        additive path.
+     b. Feed mrp_history from the authoritative cache going forward,
+        appending a new effective-dated row whenever a generation changes a
+        price. Older history preserved untouched.
+     c. Leave mrp_history alone and point price shrinkers at the
+        authoritative cache instead, if it holds enough.
+
+   Option b needs no workbook at all and no deletion. Say whether it works.
+
+6. Recommend one, with reasons.
+
+Report only.
