@@ -692,3 +692,17 @@ mtime_ms = 1788945905649
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/b1c91e85-1fd1-45dc-a604-83f9c763dd00/29626852-6f0d-42f9-801b-1fad7046c59f"
 storage_version_token = "1788945914672628"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "pQbQ9gf_av3sql-eKal4P"
+uri = "file://.local/outputs/Prompt-68-Section-A-Read-Only-Join-Reconciliation.docx"
+type = "word_document"
+title = "Prompt 68 — Section A Read-Only Join Reconciliation (Word)"
+description = "Formatted Word report explaining the false-unmapped codes, normalized Column B join, population timing difference, source corrections, and corrected master totals."
+logical_id = "7aaaec00-d11b-42a4-b888-c65cd9e34a16"
+content_hash = "sha256:0d717288b553303a5a3efbd787369dbc11d22d3d098c09078627dbe428c8f389"
+size = 40598
+mtime_ms = 1788949953981
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/7aaaec00-d11b-42a4-b888-c65cd9e34a16/adaabdf1-4d10-4f8c-b209-291de16bc9c9"
+storage_version_token = "1788949963053013"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
