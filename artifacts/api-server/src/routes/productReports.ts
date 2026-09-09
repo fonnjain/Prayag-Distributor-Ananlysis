@@ -706,8 +706,6 @@ router.get("/product-reports/export", async (req, res) => {
       ["Month filter", months?.length ? months.join(", ") : "Full FY"],
        ["Master", master],
        ["Sub-category", subcategory ?? "All"],
-       ["Category", category === "All" ? "All categories" : category],
-       ["Category allocation", "Each FY sale-line is assigned through the effective-dated master/sub-category registry; All counts each line once."],
        ["Mapped sales rows", String(p.mappingSplit.mapped.rows)],
        ["Mapped sales value (INR)", String(p.mappingSplit.mapped.value)],
        ["Unmapped sales rows", String(p.mappingSplit.unmapped.rows)],

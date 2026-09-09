@@ -253,10 +253,6 @@ export default function Products() {
                   ))}
                 </div>
               )}
-              <p className="text-[11px] text-muted-foreground">
-                Exact-allocation proof: All {formatCompact(data.allocationProof.allValue)} equals the master allocation sum {formatCompact(data.allocationProof.masterValueSum)} (delta {formatCompact(data.allocationProof.delta)}); {data.allocationProof.allRows.toLocaleString("en-IN")} rows are allocated across {data.allocationProof.masterRowsSum.toLocaleString("en-IN")} master rows, with {data.allocationProof.uncoveredRows.toLocaleString("en-IN")} uncovered and {data.allocationProof.overlappingRows.toLocaleString("en-IN")} overlapping.
-                {data.allocationProof.exact ? " Allocation is exact." : " Allocation requires review."}
-              </p>
             </div>
           )}
 
