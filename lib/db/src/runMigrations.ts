@@ -4545,20 +4545,14 @@ const MIGRATIONS: Migration[] = [
         DROP CONSTRAINT IF EXISTS canonical_item_category_registry_category_check;
       ALTER TABLE canonical_item_category_registry
         ADD CONSTRAINT canonical_item_category_registry_subcategory_check CHECK (
-          master_category IS NULL OR canonical_category IN (
-            'PTMT','SANITARYWARE','SINK','C P','CP ACCESSORIES','HARDWARE',
-            'UPVC','CPVC','CONNECTION','WASTE PIPE','CISTERN','SWR','SEAT COVER',
-            'CABINET','AGRI','QUAA','GLASS','GEYSER','FLOOR TRAP','PLATE RACK',
-            'TEFELON TAPE','OTHER','GARDEN PIPE','CP ALLIED','WATER TANK',
-            'WT LID','HDPE PIPE','COLUMN','PPR','OPVC','CORRUGATED PIPE','LPG PIPE'
-          )
+          COALESCE(master_category || ':' || canonical_category, 'LEGACY') ~
+          '^(LEGACY|[^:]+:(PTMT|SANITARYWARE|SINK|C P|CP ACCESSORIES|HARDWARE|UPVC|CPVC|CONNECTION|WASTE PIPE|CISTERN|SWR|SEAT COVER|CABINET|AGRI|QUAA|GLASS|GEYSER|FLOOR TRAP|PLATE RACK|TEFELON TAPE|OTHER|GARDEN PIPE|CP ALLIED|WATER TANK|WT LID|HDPE PIPE|COLUMN|PPR|OPVC|CORRUGATED PIPE|LPG PIPE))$'
         ) NOT VALID;
       ALTER TABLE canonical_item_category_registry
         DROP CONSTRAINT IF EXISTS canonical_item_category_registry_master_check;
       ALTER TABLE canonical_item_category_registry
         ADD CONSTRAINT canonical_item_category_registry_master_check CHECK (
-          master_category IS NULL OR master_category IN
-            ('PLUMBING','PTMT','C P','SANITARYWARE','SINK','HARDWARE')
+          master_category ~ '^(PLUMBING|PTMT|C P|SANITARYWARE|SINK|HARDWARE)$'
         ) NOT VALID;
       CREATE INDEX IF NOT EXISTS canonical_item_category_registry_master_idx
         ON canonical_item_category_registry (master_category);
@@ -4595,6 +4589,93 @@ const MIGRATIONS: Migration[] = [
         reason TEXT NOT NULL,
         PRIMARY KEY (load_id, source_file, raw_value)
       );
+    `,
+  },
+  {
+    id: "097_prompt68_publish_safe_category_checks",
+    sql: `
+      ALTER TABLE canonical_item_category_registry
+        DROP CONSTRAINT IF EXISTS canonical_item_category_registry_master_check;
+      ALTER TABLE canonical_item_category_registry
+        ADD CONSTRAINT canonical_item_category_registry_master_check CHECK (
+          CASE WHEN master_category IS NULL THEN true ELSE
+            array_position(
+              ARRAY['PLUMBING','PTMT','C P','SANITARYWARE','SINK','HARDWARE']::text[],
+              master_category
+            ) IS NOT NULL
+          END
+        ) NOT VALID;
+      ALTER TABLE canonical_item_category_registry
+        DROP CONSTRAINT IF EXISTS canonical_item_category_registry_subcategory_check;
+      ALTER TABLE canonical_item_category_registry
+        ADD CONSTRAINT canonical_item_category_registry_subcategory_check CHECK (
+          CASE WHEN master_category IS NULL THEN true ELSE
+            array_position(ARRAY[
+              'PTMT','SANITARYWARE','SINK','C P','CP ACCESSORIES','HARDWARE',
+              'UPVC','CPVC','CONNECTION','WASTE PIPE','CISTERN','SWR','SEAT COVER',
+              'CABINET','AGRI','QUAA','GLASS','GEYSER','FLOOR TRAP','PLATE RACK',
+              'TEFELON TAPE','OTHER','GARDEN PIPE','CP ALLIED','WATER TANK',
+              'WT LID','HDPE PIPE','COLUMN','PPR','OPVC','CORRUGATED PIPE','LPG PIPE'
+            ]::text[], canonical_category) IS NOT NULL
+          END
+        ) NOT VALID;
+    `,
+  },
+  {
+    id: "098_prompt68_publish_case_category_checks",
+    sql: `
+      ALTER TABLE canonical_item_category_registry
+        DROP CONSTRAINT IF EXISTS canonical_item_category_registry_master_check;
+      ALTER TABLE canonical_item_category_registry
+        ADD CONSTRAINT canonical_item_category_registry_master_check CHECK (
+          CASE WHEN master_category IS NULL THEN true ELSE
+            array_position(
+              ARRAY['PLUMBING','PTMT','C P','SANITARYWARE','SINK','HARDWARE']::text[],
+              master_category
+            ) IS NOT NULL
+          END
+        ) NOT VALID;
+      ALTER TABLE canonical_item_category_registry
+        DROP CONSTRAINT IF EXISTS canonical_item_category_registry_subcategory_check;
+      ALTER TABLE canonical_item_category_registry
+        ADD CONSTRAINT canonical_item_category_registry_subcategory_check CHECK (
+          CASE WHEN master_category IS NULL THEN true ELSE
+            array_position(ARRAY[
+              'PTMT','SANITARYWARE','SINK','C P','CP ACCESSORIES','HARDWARE',
+              'UPVC','CPVC','CONNECTION','WASTE PIPE','CISTERN','SWR','SEAT COVER',
+              'CABINET','AGRI','QUAA','GLASS','GEYSER','FLOOR TRAP','PLATE RACK',
+              'TEFELON TAPE','OTHER','GARDEN PIPE','CP ALLIED','WATER TANK',
+              'WT LID','HDPE PIPE','COLUMN','PPR','OPVC','CORRUGATED PIPE','LPG PIPE'
+            ]::text[], canonical_category) IS NOT NULL
+          END
+        ) NOT VALID;
+    `,
+  },
+  {
+    id: "099_prompt68_publish_regex_category_checks",
+    sql: `
+      ALTER TABLE canonical_item_category_registry
+        DROP CONSTRAINT IF EXISTS canonical_item_category_registry_master_check;
+      ALTER TABLE canonical_item_category_registry
+        ADD CONSTRAINT canonical_item_category_registry_master_check CHECK (
+          master_category ~ '^(PLUMBING|PTMT|C P|SANITARYWARE|SINK|HARDWARE)$'
+        ) NOT VALID;
+      ALTER TABLE canonical_item_category_registry
+        DROP CONSTRAINT IF EXISTS canonical_item_category_registry_subcategory_check;
+      ALTER TABLE canonical_item_category_registry
+        ADD CONSTRAINT canonical_item_category_registry_subcategory_check CHECK (
+          COALESCE(master_category || ':' || canonical_category, 'LEGACY') ~
+          '^(LEGACY|[^:]+:(PTMT|SANITARYWARE|SINK|C P|CP ACCESSORIES|HARDWARE|UPVC|CPVC|CONNECTION|WASTE PIPE|CISTERN|SWR|SEAT COVER|CABINET|AGRI|QUAA|GLASS|GEYSER|FLOOR TRAP|PLATE RACK|TEFELON TAPE|OTHER|GARDEN PIPE|CP ALLIED|WATER TANK|WT LID|HDPE PIPE|COLUMN|PPR|OPVC|CORRUGATED PIPE|LPG PIPE))$'
+        ) NOT VALID;
+    `,
+  },
+  {
+    id: "100_prompt68_validate_category_checks",
+    sql: `
+      ALTER TABLE canonical_item_category_registry
+        VALIDATE CONSTRAINT canonical_item_category_registry_master_check;
+      ALTER TABLE canonical_item_category_registry
+        VALIDATE CONSTRAINT canonical_item_category_registry_subcategory_check;
     `,
   },
 ];
