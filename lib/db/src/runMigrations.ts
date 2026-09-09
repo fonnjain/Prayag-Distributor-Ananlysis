@@ -4680,6 +4680,13 @@ const MIGRATIONS: Migration[] = [
         VALIDATE CONSTRAINT canonical_item_category_registry_subcategory_check;
     `,
   },
+  {
+    id: "101_prompt68_normalized_code_index",
+    sql: `
+      CREATE INDEX IF NOT EXISTS canonical_item_category_registry_normalized_code_idx
+        ON canonical_item_category_registry (UPPER(BTRIM(item_code)));
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).
