@@ -678,3 +678,17 @@ mtime_ms = 1788878347003
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/30f59e33-16f0-4275-a813-8b25c00f864f/9dc290cf-0ab0-47eb-8bb6-fc26e17c0657"
 storage_version_token = "1788878355716956"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "cfr0lfcGpj7P78EKPzNG2"
+uri = "file://.local/outputs/Prayag-August-2026-Replacement-Production-Report.docx"
+type = "word_document"
+title = "August 2026 Production Verification Report (Word)"
+description = "Formatted Word report covering the guarded replacement controls, archive ledger, live summary cards, protected dataset checks, and deployed Git commits."
+logical_id = "b1c91e85-1fd1-45dc-a604-83f9c763dd00"
+content_hash = "sha256:4ddb77bce079c38029b5f63d89383691a6b613b18f9ac978ea06620f007099b9"
+size = 41173
+mtime_ms = 1788945905649
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/b1c91e85-1fd1-45dc-a604-83f9c763dd00/29626852-6f0d-42f9-801b-1fad7046c59f"
+storage_version_token = "1788945914672628"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
