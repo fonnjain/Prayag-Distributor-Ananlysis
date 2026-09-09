@@ -23,6 +23,8 @@ type ProductRow = {
   code: string;
   product: string;
   group: string;
+  master: string;
+  subcategory: string | null;
   qty: number;
   unit: string;
   amount: number;
@@ -50,23 +52,47 @@ type ProductDataQuality = {
   registerGap: RegisterGap;
 };
 
-type CategoryTab = {
-  category: string;
+type MasterTab = {
+  master: string;
   rows: number;
   distinctCodes: number;
   value: number;
+};
+
+type SubcategoryTab = {
+  master: string;
+  subcategory: string;
+  rows: number;
+  distinctCodes: number;
+  value: number;
+};
+
+type AllocationProof = {
+  allValue: number;
+  masterValueSum: number;
+  delta: number;
+  allRows: number;
+  masterRowsSum: number;
+  uncoveredRows: number;
+  overlappingRows: number;
+  exact: boolean;
 };
 
 type Payload = {
   fy: string;
   filtered: boolean;
   total: number;
-  selectedCategory: string;
-  categoryTabs: CategoryTab[];
+  selectedMaster: string;
+  selectedSubcategory: string | null;
+  masterTabs: MasterTab[];
+  subcategoryTabs: SubcategoryTab[];
+  allocationProof: AllocationProof;
   mappingSplit?: unknown;
   products: ProductRow[];
   dataQuality?: ProductDataQuality;
 };
+
+const MASTER_TABS = ["All", "PLUMBING", "PTMT", "C P", "SANITARYWARE", "SINK", "HARDWARE"];
 
 export default function Products() {
   const { fy } = useGlobalFilter();
@@ -75,13 +101,14 @@ export default function Products() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [entityFilter, setEntityFilter] = useState<EntityFilterValue>(EMPTY_ENTITY_FILTER);
-  const [category, setCategory] = useState<string>("All");
+  const [master, setMaster] = useState<string>("All");
+  const [subcategory, setSubcategory] = useState<string | null>(null);
 
   const query = useMemo(
     () => `?fy=${encodeURIComponent(fy)}${period.param}${entityFilterQuery(entityFilter)}${
-      category === "All" ? "" : `&category=${encodeURIComponent(category)}`
-    }`,
-    [fy, period.param, entityFilter, category],
+      master === "All" ? "" : `&master=${encodeURIComponent(master)}`
+    }${subcategory ? `&subcategory=${encodeURIComponent(subcategory)}` : ""}`,
+    [fy, period.param, entityFilter, master, subcategory],
   );
 
   useEffect(() => {
@@ -104,14 +131,22 @@ export default function Products() {
   );
 
   useEffect(() => {
-    if (!data || category === "All") return;
-    if (!data.categoryTabs.some((tab) => tab.category === category)) {
-      setCategory("All");
+    if (!data) return;
+    if (master !== "All" && !data.masterTabs.some((tab) => tab.master === master)) {
+      setMaster("All");
+      setSubcategory(null);
+    } else if (
+      subcategory &&
+      !data.subcategoryTabs.some((tab) => tab.master === master && tab.subcategory === subcategory)
+    ) {
+      setSubcategory(null);
     }
-  }, [data, category]);
+  }, [data, master, subcategory]);
 
-  const currentCategory = data?.selectedCategory || "All";
-  const categoryLabel = currentCategory === "All" ? "" : `${currentCategory} `;
+  const currentMaster = data?.selectedMaster || master;
+  const currentSubcategory = data?.selectedSubcategory || subcategory;
+  const masterLabel = currentMaster === "All" ? "" : `${currentMaster} `;
+  const selectedMasterSubcategories = data?.subcategoryTabs.filter((tab) => tab.master === master) ?? [];
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -150,45 +185,84 @@ export default function Products() {
 
       {data && (
         <>
-          {data.categoryTabs && data.categoryTabs.length > 0 && (
+          {data.masterTabs && data.masterTabs.length > 0 && (
             <div className="space-y-2">
               <div
                 className="flex w-full items-center gap-2 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
                 role="tablist"
-                aria-label="Product categories"
+                aria-label="Product masters"
               >
-                {data.categoryTabs.map((tab) => {
-                  const isSelected = currentCategory === tab.category;
+                {MASTER_TABS.map((tabName) => {
+                  const isSelected = currentMaster === tabName;
                   return (
                     <button
-                      key={tab.category}
+                      key={tabName}
                       role="tab"
                       aria-selected={isSelected}
                       disabled={loading}
-                      onClick={() => setCategory(tab.category)}
+                      onClick={() => {
+                        setMaster(tabName);
+                        setSubcategory(null);
+                      }}
                       className={`relative flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                         isSelected
                           ? "bg-primary text-primary-foreground shadow"
                           : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
                       } ${loading ? "opacity-60 cursor-not-allowed" : ""}`}
                     >
-                      {loading && category === tab.category && (
+                      {loading && master === tabName && (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       )}
-                      <span>{tab.category}</span>
+                      <span>{tabName}</span>
                     </button>
                   );
                 })}
               </div>
+              {master !== "All" && selectedMasterSubcategories.length > 0 && (
+                <div
+                  className="flex w-full items-center gap-2 overflow-x-auto pb-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+                  role="tablist"
+                  aria-label={`${master} subcategories`}
+                >
+                  <button
+                    role="tab"
+                    aria-selected={!subcategory}
+                    disabled={loading}
+                    onClick={() => setSubcategory(null)}
+                    className={`whitespace-nowrap rounded-md border px-3 py-1 text-xs font-medium transition-colors ${
+                      !subcategory ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted/60"
+                    }`}
+                  >
+                    All
+                  </button>
+                  {selectedMasterSubcategories.map((tab) => (
+                    <button
+                      key={tab.subcategory}
+                      role="tab"
+                      aria-selected={currentSubcategory === tab.subcategory}
+                      disabled={loading}
+                      onClick={() => setSubcategory(tab.subcategory)}
+                      className={`whitespace-nowrap rounded-md border px-3 py-1 text-xs font-medium transition-colors ${
+                        currentSubcategory === tab.subcategory
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border text-muted-foreground hover:bg-muted/60"
+                      }`}
+                    >
+                      {tab.subcategory}
+                    </button>
+                  ))}
+                </div>
+              )}
               <p className="text-[11px] text-muted-foreground">
-                Multi-category products count once in All and at full value in every applicable category, so category totals may exceed All.
+                Exact-allocation proof: All {formatCompact(data.allocationProof.allValue)} equals the master allocation sum {formatCompact(data.allocationProof.masterValueSum)} (delta {formatCompact(data.allocationProof.delta)}); {data.allocationProof.allRows.toLocaleString("en-IN")} rows are allocated across {data.allocationProof.masterRowsSum.toLocaleString("en-IN")} master rows, with {data.allocationProof.uncoveredRows.toLocaleString("en-IN")} uncovered and {data.allocationProof.overlappingRows.toLocaleString("en-IN")} overlapping.
+                {data.allocationProof.exact ? " Allocation is exact." : " Allocation requires review."}
               </p>
             </div>
           )}
 
           <Card className={loading ? "opacity-60 pointer-events-none transition-opacity duration-300" : "transition-opacity duration-300"}>
             <CardHeader className="px-5 pt-5 pb-2">
-              <CardTitle className="text-base font-semibold">Top 15 {categoryLabel}Products by FY {data.fy} Sales</CardTitle>
+              <CardTitle className="text-base font-semibold">Top 15 {masterLabel}Products by FY {data.fy} Sales</CardTitle>
             </CardHeader>
             <CardContent className="px-2 sm:px-5 pb-5 pt-2">
               {topProducts.length === 0 ? (
@@ -338,7 +412,7 @@ export default function Products() {
 
           <Card className={loading ? "opacity-60 pointer-events-none transition-opacity duration-300" : "transition-opacity duration-300"}>
             <CardHeader className="px-5 pt-5 pb-2">
-              <CardTitle className="text-base font-semibold">All {categoryLabel}Products</CardTitle>
+              <CardTitle className="text-base font-semibold">All {masterLabel}Products</CardTitle>
               <p className="text-[11px] text-muted-foreground font-normal">
                 Quantity is per product only — never sum it across products (litres vs pieces).
               </p>
@@ -349,6 +423,8 @@ export default function Products() {
                   <thead className="bg-muted/50 text-muted-foreground">
                     <tr>
                       <th className="px-5 py-3 text-left font-medium">Product Group</th>
+                      <th className="px-5 py-3 text-left font-medium">Master</th>
+                      <th className="px-5 py-3 text-left font-medium">Subcategory</th>
                       <th className="px-5 py-3 text-left font-medium">Product</th>
                       <th className="px-5 py-3 text-right font-medium">Qty</th>
                       <th className="px-5 py-3 text-right font-medium">Sales</th>
@@ -358,6 +434,8 @@ export default function Products() {
                     {data.products.map((prod, i) => (
                       <tr key={i} className="hover:bg-muted/20 transition-colors">
                         <td className="px-5 py-3 text-muted-foreground">{prod.group}</td>
+                        <td className="px-5 py-3 text-muted-foreground">{prod.master}</td>
+                        <td className="px-5 py-3 text-muted-foreground">{prod.subcategory || "—"}</td>
                         <td className="px-5 py-3 font-medium">{prod.product}</td>
                         <td className="px-5 py-3 text-right tabular-nums">
                           {prod.qty.toLocaleString("en-IN")}{prod.unit ? ` ${prod.unit}` : ""}
@@ -366,7 +444,7 @@ export default function Products() {
                       </tr>
                     ))}
                     {data.products.length === 0 && (
-                      <tr><td colSpan={4} className="px-5 py-6 text-center text-xs text-muted-foreground">No products match this selection.</td></tr>
+                      <tr><td colSpan={6} className="px-5 py-6 text-center text-xs text-muted-foreground">No products match this selection.</td></tr>
                     )}
                   </tbody>
                 </table>

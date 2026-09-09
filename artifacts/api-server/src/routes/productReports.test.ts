@@ -3,10 +3,19 @@ import {
   PRODUCT_CATEGORIES,
   categorySelectionSql,
   parseProductCategory,
+  parseProductMaster,
+  PRODUCT_MASTERS,
 } from "./productReports.js";
 import { PgDialect } from "drizzle-orm/pg-core";
 
 describe("product report category validation", () => {
+  it("accepts only the six master tabs and validates their parser contract", () => {
+    expect(parseProductMaster(undefined)).toBe("All");
+    expect(parseProductMaster("All")).toBe("All");
+    for (const master of PRODUCT_MASTERS) expect(parseProductMaster(master)).toBe(master);
+    expect(parseProductMaster("CP")).toBeNull();
+    expect(parseProductMaster("PLUMBING ")).toBeNull();
+  });
   it("accepts the explicit All and Unmapped tabs plus registry categories", () => {
     expect(parseProductCategory(undefined)).toBe("All");
     expect(parseProductCategory("All")).toBe("All");
@@ -35,5 +44,7 @@ describe("product report category validation", () => {
     expect(unmapped).toContain("< r.effective_to");
     expect(named).not.toContain("r.effective_to >=");
     expect(unmapped).not.toContain("r.effective_to >=");
+    expect(named).toContain("upper");
+    expect(named).toContain("btrim");
   });
 });

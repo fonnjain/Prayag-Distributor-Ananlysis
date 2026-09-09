@@ -10,7 +10,7 @@ import { currentOpenFy } from "../lib/fyAnchors.js";
 import { Router } from "express";
 import ExcelJS from "exceljs";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { db, saleLines, itemMaster } from "@workspace/db";
+import { db, saleLines } from "@workspace/db";
 import {
   resolveProductCode,
   buildResolverIndex,
@@ -41,6 +41,8 @@ export type ProductRow = {
   qty: number;
   unit: string;
   amount: number;
+  master: string;
+  subcategory: string;
 };
 
 /** A code+feature listed under two segments with different MRP — kept
@@ -89,6 +91,11 @@ export type ProductReportsPayload = {
   categoryTabs: ProductCategoryTab[];
   /** Row-level mapped/unmapped split (unlike category tabs, this cannot double-count a line). */
   mappingSplit: ProductMappingSplit;
+  selectedMaster: ProductMaster;
+  selectedSubcategory: string | null;
+  masterTabs: ProductMasterTab[];
+  subcategoryTabs: ProductSubcategoryTab[];
+  allocationProof: ProductAllocationProof;
 };
 
 export const PRODUCT_CATEGORIES = [
@@ -97,6 +104,8 @@ export const PRODUCT_CATEGORIES = [
   "CISTERN", "CP (Chrome-Plated)", "Sink", "Sanitaryware",
   "Connection / Waste", "Hardware",
 ] as const;
+export const PRODUCT_MASTERS = ["PLUMBING", "PTMT", "C P", "SANITARYWARE", "SINK", "HARDWARE"] as const;
+export type ProductMaster = typeof PRODUCT_MASTERS[number] | "All";
 
 export type CanonicalProductCategory = (typeof PRODUCT_CATEGORIES)[number];
 export type ProductCategory = CanonicalProductCategory | "Unmapped" | "All";
@@ -110,6 +119,36 @@ export type ProductMappingSplit = {
   mapped: Omit<ProductCategoryTab, "category">;
   unmapped: Omit<ProductCategoryTab, "category">;
 };
+export type ProductMasterTab = {
+  master: (typeof PRODUCT_MASTERS)[number];
+  value: number;
+  rows: number;
+  distinctCodes: number;
+};
+export type ProductSubcategoryTab = ProductMasterTab & {
+  subcategory: string;
+};
+export type ProductAllocationProof = {
+  allValue: number;
+  masterValueSum: number;
+  delta: number;
+  allRows: number;
+  masterRowsSum: number;
+  coveredRows: number;
+  uncoveredRows: number;
+  overlappingRows: number;
+  exact: boolean;
+};
+export const PRODUCT_SUBCATEGORY_MASTERS: Record<string, ProductMaster> = {
+  PTMT: "PTMT", SANITARYWARE: "SANITARYWARE", SINK: "SINK", "C P": "C P",
+  "CP ACCESSORIES": "C P", HARDWARE: "HARDWARE", UPVC: "PLUMBING", CPVC: "PLUMBING",
+  CONNECTION: "PTMT", "WASTE PIPE": "PTMT", CISTERN: "PTMT", "SEAT COVER": "PTMT",
+  CABINET: "PTMT", AGRI: "PLUMBING", QUAA: "PTMT", GLASS: "C P", GEYSER: "SANITARYWARE",
+  "FLOOR TRAP": "SINK", "PLATE RACK": "SINK", "TEFELON TAPE": "C P", OTHER: "HARDWARE",
+  "GARDEN PIPE": "PLUMBING", "CP ALLIED": "C P", "WATER TANK": "PLUMBING",
+  "WT LID": "PLUMBING", "HDPE PIPE": "PLUMBING", COLUMN: "PLUMBING", PPR: "PLUMBING",
+  OPVC: "PLUMBING", SWR: "PLUMBING", "CORRUGATED PIPE": "PTMT", "LPG PIPE": "PLUMBING",
+};
 
 /** The only category values accepted by the report endpoints. */
 export function parseProductCategory(value: unknown): ProductCategory | null {
@@ -120,6 +159,11 @@ export function parseProductCategory(value: unknown): ProductCategory | null {
     ? value as ProductCategory
     : null;
 }
+export function parseProductMaster(value: unknown): ProductMaster | null {
+  if (value === undefined || value === "All") return "All";
+  return typeof value === "string" && (PRODUCT_MASTERS as readonly string[]).includes(value)
+    ? value as ProductMaster : null;
+}
 
 function effectiveDateSql(alias: string) {
   return sql`COALESCE(${sql.raw(`${alias}.invoice_date`)}, TO_DATE(${sql.raw(`${alias}.month_label`)}, 'Mon-YY'))`;
@@ -129,7 +173,7 @@ function effectiveDateSql(alias: string) {
 export function categorySelectionSql(category: Exclude<ProductCategory, "All">, alias: string) {
   const effectiveDate = effectiveDateSql(alias);
   const matchingAssignment = sql`
-    r.item_code = ${sql.raw(`${alias}.code`)}
+    UPPER(BTRIM(r.item_code)) = UPPER(BTRIM(${sql.raw(`${alias}.code`)}))
     AND (r.effective_from IS NULL OR r.effective_from <= ${effectiveDate})
     AND (r.effective_to IS NULL OR ${effectiveDate} < r.effective_to)
   `;
@@ -169,7 +213,7 @@ async function buildCategorySummaries(
       SELECT DISTINCT f.line_uid, f.code, f.amount, r.canonical_category
       FROM filtered f
       JOIN canonical_item_category_registry r
-        ON r.item_code = f.code
+        ON UPPER(BTRIM(r.item_code)) = UPPER(BTRIM(f.code))
        AND (r.effective_from IS NULL OR r.effective_from <=
          COALESCE(f.invoice_date, TO_DATE(f.month_label, 'Mon-YY')))
        AND (r.effective_to IS NULL OR
@@ -194,7 +238,7 @@ async function buildCategorySummaries(
       SELECT f.*,
         CASE WHEN EXISTS (
           SELECT 1 FROM canonical_item_category_registry r
-          WHERE r.item_code = f.code
+          WHERE UPPER(BTRIM(r.item_code)) = UPPER(BTRIM(f.code))
             AND (r.effective_from IS NULL OR r.effective_from <=
               COALESCE(f.invoice_date, TO_DATE(f.month_label, 'Mon-YY')))
             AND (r.effective_to IS NULL OR
@@ -389,33 +433,51 @@ export async function buildProductReports(
   filter?: EntityFilter,
   months?: string[],
   selectedCategory: ProductCategory = "All",
+  selectedMaster: ProductMaster = "All",
+  selectedSubcategory?: string,
 ): Promise<ProductReportsPayload> {
-  const rows = await db
-    .select({
-      code: saleLines.code,
-      product: sql<string>`coalesce(max(${itemMaster.itemName}), ${saleLines.code})`,
-      group: sql<string>`coalesce(max(${saleLines.groupCanon}), 'Unmapped')`,
-      // Per-code qty only (RULE 2): tanks report litres, everything else pieces.
-      qty: sql<number>`coalesce(case when max(coalesce(${saleLines.groupRaw}, '')) = 'WATER TANK' then sum(${saleLines.qtyLtr}::numeric) else sum(${saleLines.qty}::numeric) end, 0)::float8`,
-      unit: sql<string>`case when max(coalesce(${saleLines.groupRaw}, '')) = 'WATER TANK' then 'Ltr' else coalesce(max(${itemMaster.unit}), '') end`,
-      amount: sql<number>`coalesce(sum(${saleLines.amount}::numeric), 0)::float8`,
-    })
-    .from(saleLines)
-    .leftJoin(itemMaster, eq(saleLines.code, itemMaster.code))
-    .where(and(
-      eq(saleLines.fy, fy),
-      eq(saleLines.versionStatus, "current"),
-      ...(months && months.length > 0 ? [inArray(saleLines.monthLabel, months)] : []),
-      ...entityConds(filter),
-      ...(selectedCategory === "All" ? [] : [categorySelectionSql(selectedCategory, "sale_line_all")]),
-    ))
-    .groupBy(saleLines.code);
+  const result = await db.execute<any>(sql`
+    WITH filtered AS (
+      SELECT sl.*, COALESCE(sl.invoice_date,TO_DATE(sl.month_label,'Mon-YY')) effective_date
+      FROM sale_line_current sl WHERE sl.fy=${fy}
+      ${months?.length ? sql`AND sl.month_label IN (${sql.join(months.map(m => sql`${m}`),sql`,`)})` : sql``}
+      ${entityCondsAliased(filter, "sl")}
+    ), assigned AS (
+      SELECT f.*, r.master_category master, r.canonical_category subcategory
+      FROM filtered f LEFT JOIN LATERAL (
+        SELECT rr.master_category, rr.canonical_category
+        FROM canonical_item_category_registry rr
+        WHERE UPPER(BTRIM(rr.item_code))=UPPER(BTRIM(f.code))
+          AND (rr.effective_from IS NULL OR rr.effective_from<=f.effective_date)
+          AND (rr.effective_to IS NULL OR f.effective_date<rr.effective_to)
+        ORDER BY (rr.master_category IS NOT NULL) DESC,
+          rr.effective_from DESC NULLS LAST, rr.id DESC
+        LIMIT 1
+      ) r ON TRUE
+    ), im AS (
+      SELECT UPPER(BTRIM(code)) code, max(item_name) product, max(unit) unit FROM item_master GROUP BY 1
+    )
+    SELECT a.code, coalesce(max(im.product),a.code) product,
+      coalesce(a.master,'Unmapped') master, coalesce(a.subcategory,'Unmapped') subcategory,
+      coalesce(a.master,'Unmapped') "group",
+      (CASE WHEN max(coalesce(a.group_raw,''))='WATER TANK' THEN sum(a.qty_ltr::numeric)
+        ELSE sum(a.qty::numeric) END)::float8 qty,
+      CASE WHEN max(coalesce(a.group_raw,''))='WATER TANK' THEN 'Ltr' ELSE coalesce(max(im.unit),'') END unit,
+      sum(a.amount::numeric)::float8 amount
+    FROM assigned a LEFT JOIN im ON im.code=UPPER(BTRIM(a.code))
+    WHERE (${selectedMaster}='All' OR a.master=${selectedMaster})
+      AND (${selectedSubcategory ?? null}::text IS NULL OR a.subcategory=${selectedSubcategory ?? null})
+    GROUP BY a.code,a.master,a.subcategory
+  `);
+  const rows = result.rows;
 
   const products = rows
     .map((r) => ({
       code: r.code,
       product: r.product,
       group: selectedCategory === "All" ? r.group : selectedCategory,
+      master: r.master,
+      subcategory: r.subcategory,
       qty: Math.round(r.qty * 100) / 100,
       unit: r.unit,
       amount: Math.round(r.amount),
@@ -434,6 +496,66 @@ export async function buildProductReports(
     buildProductDataQuality(fy),
     buildCategorySummaries(fy, filter, months),
   ]);
+  const allocationRows = await db.execute<{
+    master: string | null; subcategory: string | null; rows: string; codes: string; value: string;
+    covered: string; uncovered: string; overlapping: string; total: string;
+    all_value: string; master_value_sum: string; master_rows_sum: string;
+  }>(sql`
+    WITH f AS (
+      SELECT line_uid, UPPER(BTRIM(code)) AS code, amount, invoice_date, month_label
+      FROM sale_line_current WHERE fy = ${fy}
+      ${months?.length ? sql`AND month_label IN (${sql.join(months.map((m) => sql`${m}`), sql`, `)})` : sql``}
+      ${entityCondsAliased(filter, "sale_line_current")}
+    ), a AS (
+      SELECT f.line_uid, f.code, f.amount, r.master_category master, r.canonical_category subcategory
+      FROM f JOIN canonical_item_category_registry r
+        ON UPPER(BTRIM(r.item_code)) = f.code
+       AND (r.effective_from IS NULL OR r.effective_from <= COALESCE(f.invoice_date, TO_DATE(f.month_label,'Mon-YY')))
+       AND (r.effective_to IS NULL OR COALESCE(f.invoice_date, TO_DATE(f.month_label,'Mon-YY')) < r.effective_to)
+    ), line_assignment_counts AS (
+      SELECT f.line_uid, max(f.amount::numeric) amount, count(a.line_uid) n
+      FROM f LEFT JOIN a USING (line_uid)
+      GROUP BY f.line_uid
+    ), line_counts AS (
+      SELECT count(*) FILTER (WHERE n=1) covered,
+        count(*) FILTER (WHERE n=0) uncovered,
+        count(*) FILTER (WHERE n>1) overlapping,
+        count(*) total,
+        coalesce(sum(amount),0) all_value
+      FROM line_assignment_counts
+    ), master_totals AS (
+      SELECT count(*) master_rows_sum, coalesce(sum(amount::numeric),0) master_value_sum
+      FROM a
+    )
+    SELECT master, subcategory, count(*)::text rows, count(DISTINCT code)::text codes,
+      coalesce(sum(amount::numeric),0)::text value,
+      (SELECT covered::text FROM line_counts) covered,
+      (SELECT uncovered::text FROM line_counts) uncovered,
+      (SELECT overlapping::text FROM line_counts) overlapping,
+      (SELECT total::text FROM line_counts) total,
+      (SELECT all_value::text FROM line_counts) all_value,
+      (SELECT master_value_sum::text FROM master_totals) master_value_sum,
+      (SELECT master_rows_sum::text FROM master_totals) master_rows_sum
+    FROM a GROUP BY ROLLUP(master, subcategory)
+  `);
+  const masterTabs = allocationRows.rows.filter((r) => r.master && !r.subcategory).map((r) => ({
+    master: r.master as ProductMasterTab["master"],
+    value: Math.round(Number(r.value)), rows: Number(r.rows), distinctCodes: Number(r.codes),
+  })).sort((a, b) => b.value - a.value);
+  const subcategoryTabs = allocationRows.rows.filter((r) => r.subcategory).map((r) => ({
+    master: r.master as ProductMasterTab["master"],
+    subcategory: String(r.subcategory),
+    value: Math.round(Number(r.value)), rows: Number(r.rows), distinctCodes: Number(r.codes),
+  })).sort((a, b) => b.value - a.value || a.subcategory.localeCompare(b.subcategory));
+  const allocation = allocationRows.rows.find((r) => !r.master && !r.subcategory);
+  const totalRows = Number(allocation?.total ?? 0);
+  const coveredRows = Number(allocation?.covered ?? 0);
+  const uncoveredRows = Number(allocation?.uncovered ?? 0);
+  const overlappingRows = Number(allocation?.overlapping ?? 0);
+  const allValue = Number(allocation?.all_value ?? 0);
+  const masterValueSum = Number(allocation?.master_value_sum ?? 0);
+  const masterRowsSum = Number(allocation?.master_rows_sum ?? 0);
+  const delta = masterValueSum - allValue;
   // Preserve the legacy code aggregation's rounded total for the unfiltered
   // All request; registry reporting is deliberately separate from that path.
   if (selectedCategory === "All") summaries.categoryTabs[0].value = allTab.value;
@@ -464,11 +586,26 @@ export async function buildProductReports(
     selectedCategory,
     categoryTabs: summaries.categoryTabs,
     mappingSplit,
+    selectedMaster,
+    selectedSubcategory: selectedSubcategory ?? null,
+    masterTabs,
+    subcategoryTabs,
+    allocationProof: {
+      allValue,
+      masterValueSum,
+      delta,
+      allRows: totalRows,
+      masterRowsSum,
+      coveredRows,
+      uncoveredRows,
+      overlappingRows,
+      exact: coveredRows === totalRows && uncoveredRows === 0 && overlappingRows === 0 && Math.abs(delta) < 0.005,
+    },
   };
 }
 
 function parseParams(req: import("express").Request, res: import("express").Response):
-  | { fy: string; filter: EntityFilter | undefined; months: string[] | undefined; category: ProductCategory }
+  | { fy: string; filter: EntityFilter | undefined; months: string[] | undefined; category: ProductCategory; master: ProductMaster; subcategory?: string }
   | null {
   const fy = typeof req.query.fy === "string" && req.query.fy.trim() !== ""
     ? req.query.fy.trim()
@@ -483,34 +620,45 @@ function parseParams(req: import("express").Request, res: import("express").Resp
     return null;
   }
   const months = monthsResult.months;
-  const category = parseProductCategory(req.query.category);
-  if (!category) {
-    res.status(400).json({ error: "Invalid category" });
+  if (req.query.category !== undefined) {
+    res.status(400).json({ error: "The category filter was replaced by master and subcategory" });
     return null;
+  }
+  const category: ProductCategory = "All";
+  const master = parseProductMaster(req.query.master);
+  if (!master) { res.status(400).json({ error: "Invalid master" }); return null; }
+  const subcategory = typeof req.query.subcategory === "string" && req.query.subcategory.trim()
+    ? req.query.subcategory.trim() : undefined;
+  if (subcategory && master === "All") {
+    res.status(400).json({ error: "Subcategory requires a selected master" }); return null;
+  }
+  if (subcategory && (!PRODUCT_SUBCATEGORY_MASTERS[subcategory.toUpperCase()] ||
+      (master !== "All" && PRODUCT_SUBCATEGORY_MASTERS[subcategory.toUpperCase()] !== master))) {
+    res.status(400).json({ error: "Subcategory does not belong to selected master" }); return null;
   }
   const filter: EntityFilter = {
     heads: parseJsonArray(req.query.heads),
     states: parseJsonArray(req.query.states),
     customers: parseJsonArray(req.query.customers),
   };
-  return { fy, filter: hasEntityFilterValues(filter) ? filter : undefined, months, category };
+  return { fy, filter: hasEntityFilterValues(filter) ? filter : undefined, months, category, master, subcategory };
 }
 
 router.get("/product-reports", async (req, res) => {
   const params = parseParams(req, res);
   if (!params) return;
-  const { fy, filter, months, category } = params;
+  const { fy, filter, months, category, master, subcategory } = params;
   try {
-    if (category !== "All" || filter || (months && months.length > 0)) {
+    if (category !== "All" || master !== "All" || subcategory || filter || (months && months.length > 0)) {
       // Active filters or a sub-year period — always build live, never cache
       // or snapshot (the key space would be unbounded).
-      res.json(await buildProductReports(fy, filter, months, category));
+       res.json(await buildProductReports(fy, filter, months, category, master, subcategory));
       return;
     }
     const payload = await serveWithSnapshot({
       // The card's catalogue basis changed from item_master to the
       // authoritative source cache; do not serve a snapshot made on v2.
-      key: `product-reports|v4|${fy}`,
+       key: `product-reports|v5|${fy}`,
       ttlMs: PRODUCT_REPORTS_TTL_MS,
       build: () => buildProductReports(fy) as unknown as Promise<Record<string, unknown>>,
       log: req.log,
@@ -534,7 +682,7 @@ let activeExports = 0;
 router.get("/product-reports/export", async (req, res) => {
   const params = parseParams(req, res);
   if (!params) return;
-  const { fy, filter, months, category } = params;
+  const { fy, filter, months, category, master, subcategory } = params;
 
   if (activeExports >= MAX_CONCURRENT_EXPORTS) {
     res.status(429).json({ error: "Another export is already running — try again in a few seconds." });
@@ -542,7 +690,7 @@ router.get("/product-reports/export", async (req, res) => {
   }
   activeExports++;
   try {
-    const p = await buildProductReports(fy, filter, months, category);
+     const p = await buildProductReports(fy, filter, months, category, master, subcategory);
     const provisionalInfo = await provisionalMonthsExportInfo(p.fy);
 
     const wb = new ExcelJS.Workbook();
@@ -556,12 +704,22 @@ router.get("/product-reports/export", async (req, res) => {
       ["Page", `Products — FY ${p.fy} primary sales by product (sale_line register)`],
       ["FY", p.fy],
       ["Month filter", months?.length ? months.join(", ") : "Full FY"],
+       ["Master", master],
+       ["Sub-category", subcategory ?? "All"],
        ["Category", category === "All" ? "All categories" : category],
-       ["Category allocation", "A sale-line's full value is included in every effective category assignment; All counts each sale-line once."],
+       ["Category allocation", "Each FY sale-line is assigned through the effective-dated master/sub-category registry; All counts each line once."],
        ["Mapped sales rows", String(p.mappingSplit.mapped.rows)],
        ["Mapped sales value (INR)", String(p.mappingSplit.mapped.value)],
        ["Unmapped sales rows", String(p.mappingSplit.unmapped.rows)],
        ["Unmapped sales value (INR)", String(p.mappingSplit.unmapped.value)],
+       ["Allocation proof — All sales (INR)", String(p.allocationProof.allValue)],
+       ["Allocation proof — master sum (INR)", String(p.allocationProof.masterValueSum)],
+       ["Allocation proof — delta (INR)", String(p.allocationProof.delta)],
+       ["Allocation proof — All rows", String(p.allocationProof.allRows)],
+       ["Allocation proof — master rows", String(p.allocationProof.masterRowsSum)],
+       ["Allocation proof — uncovered rows", String(p.allocationProof.uncoveredRows)],
+       ["Allocation proof — overlapping rows", String(p.allocationProof.overlappingRows)],
+       ["Allocation proof — exact", p.allocationProof.exact ? "YES" : "NO"],
       ["Total sales (INR)", String(p.total)],
       ["State Head filter", filter?.heads?.length ? filter.heads.join(", ") : "All"],
       ["State filter", filter?.states?.length ? filter.states.join(", ") : "All"],
@@ -578,6 +736,8 @@ router.get("/product-reports/export", async (req, res) => {
     const columns = [
       { header: "Code", key: "code", width: 14 },
       { header: "Product", key: "product", width: 40 },
+      { header: "Master", key: "master", width: 18 },
+      { header: "Sub-category", key: "subcategory", width: 24 },
       { header: "Group", key: "group", width: 22 },
       { header: "Qty", key: "qty", width: 12 },
       { header: "Unit", key: "unit", width: 8 },

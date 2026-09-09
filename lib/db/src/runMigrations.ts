@@ -4536,6 +4536,67 @@ const MIGRATIONS: Migration[] = [
         FOR EACH STATEMENT EXECUTE FUNCTION guard_secondary_order_replacement_run();
     `,
   },
+  {
+    id: "096_prompt68_master_category_registry",
+    sql: `
+      ALTER TABLE canonical_item_category_registry
+        ADD COLUMN IF NOT EXISTS master_category TEXT;
+      ALTER TABLE canonical_item_category_registry
+        DROP CONSTRAINT IF EXISTS canonical_item_category_registry_category_check;
+      ALTER TABLE canonical_item_category_registry
+        ADD CONSTRAINT canonical_item_category_registry_subcategory_check CHECK (
+          master_category IS NULL OR canonical_category IN (
+            'PTMT','SANITARYWARE','SINK','C P','CP ACCESSORIES','HARDWARE',
+            'UPVC','CPVC','CONNECTION','WASTE PIPE','CISTERN','SWR','SEAT COVER',
+            'CABINET','AGRI','QUAA','GLASS','GEYSER','FLOOR TRAP','PLATE RACK',
+            'TEFELON TAPE','OTHER','GARDEN PIPE','CP ALLIED','WATER TANK',
+            'WT LID','HDPE PIPE','COLUMN','PPR','OPVC','CORRUGATED PIPE','LPG PIPE'
+          )
+        ) NOT VALID;
+      ALTER TABLE canonical_item_category_registry
+        DROP CONSTRAINT IF EXISTS canonical_item_category_registry_master_check;
+      ALTER TABLE canonical_item_category_registry
+        ADD CONSTRAINT canonical_item_category_registry_master_check CHECK (
+          master_category IS NULL OR master_category IN
+            ('PLUMBING','PTMT','C P','SANITARYWARE','SINK','HARDWARE')
+        ) NOT VALID;
+      CREATE INDEX IF NOT EXISTS canonical_item_category_registry_master_idx
+        ON canonical_item_category_registry (master_category);
+      CREATE TABLE IF NOT EXISTS canonical_category_load (
+        id BIGSERIAL PRIMARY KEY,
+        config_sha256 TEXT NOT NULL,
+        source_files JSONB NOT NULL,
+        corrections JSONB NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('preview','applied','rejected')),
+        preview_hash TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        applied_at TIMESTAMPTZ
+      );
+      CREATE TABLE IF NOT EXISTS canonical_category_load_evidence (
+        load_id BIGINT NOT NULL REFERENCES canonical_category_load(id),
+        item_code TEXT NOT NULL,
+        raw_subcategory TEXT NOT NULL,
+        normalized_subcategory TEXT NOT NULL,
+        master_category TEXT NOT NULL,
+        source_file TEXT NOT NULL,
+        correction JSONB,
+        PRIMARY KEY (load_id, item_code)
+      );
+      CREATE INDEX IF NOT EXISTS canonical_category_load_evidence_code_idx
+        ON canonical_category_load_evidence (UPPER(BTRIM(item_code)));
+      CREATE UNIQUE INDEX IF NOT EXISTS canonical_category_load_applied_hash_uq
+        ON canonical_category_load (config_sha256) WHERE status = 'applied';
+      CREATE TABLE IF NOT EXISTS canonical_category_correction_evidence (
+        load_id BIGINT NOT NULL REFERENCES canonical_category_load(id),
+        source_file TEXT NOT NULL,
+        raw_value TEXT NOT NULL,
+        normalized_value TEXT,
+        reason TEXT NOT NULL,
+        PRIMARY KEY (load_id, source_file, raw_value)
+      );
+    `,
+  },
 ];
 export async function runMigrations(): Promise<void> {
   // Bootstrap the tracking table (CREATE TABLE IF NOT EXISTS is always safe).
