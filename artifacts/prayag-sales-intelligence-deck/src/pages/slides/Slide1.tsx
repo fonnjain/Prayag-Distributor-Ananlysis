@@ -21,7 +21,7 @@ export default function Slide1() {
         </p>
       </div>
       <div className="absolute bottom-[7vh] left-[7vw] flex items-center gap-[1.2vw] text-[1.5vw] uppercase tracking-[.18em] text-[#8296a5]">
-        <span>Product overview</span><span className="h-[.5vw] w-[.5vw] rounded-full bg-[#f3b44b]" /><span>18 slides</span>
+        <span>Product overview</span><span className="h-[.5vw] w-[.5vw] rounded-full bg-[#f3b44b]" /><span>60 slides</span>
       </div>
     </div>
   );

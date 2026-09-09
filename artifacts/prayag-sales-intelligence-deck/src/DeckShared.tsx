@@ -18,7 +18,7 @@ export function Footer({ number, section }: { number: number; section: string })
   return (
     <div className="absolute bottom-[4.5vh] left-[7vw] right-[7vw] flex items-center justify-between footer-rule pt-[1.4vh]">
       <span className="thin-label">{section}</span>
-      <span className="font-display text-[1.5vw] font-semibold tracking-[.18em] text-[#6f8493]">{String(number).padStart(2, '0')} / 18</span>
+      <span className="font-display text-[1.5vw] font-semibold tracking-[.18em] text-[#6f8493]">{String(number).padStart(2, '0')} / 60</span>
     </div>
   );
 }
