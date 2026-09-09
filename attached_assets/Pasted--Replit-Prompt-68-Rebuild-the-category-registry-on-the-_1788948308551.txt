@@ -1,0 +1,185 @@
+# Replit Prompt 68 — Rebuild the category registry on the master taxonomy
+
+**Date:** 9 September 2026
+**Supersedes:** the flat 17-category seed from Phase 1.
+**Scope:** Section A read-only. Section B rebuilds the registry. Section C
+updates the Products tabs.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## Why the registry changes
+
+Phase 1 seeded from `sale_line.group_canon` — 17 flat categories, derived from
+ERP Item Type. That was the best available at the time.
+
+**Prayag have now supplied their own two-level taxonomy.** `Master_and_Sub_category.xlsx`
+maps 33 sub-categories to **6 real master categories**, and `Products_Grouping_Master.xlsx`
+maps every item code to a sub-category through its Item Type.
+
+Joined against FY2026-27 sales, coverage is **complete — zero unmapped codes,
+zero unmapped value**:
+
+| Master | Codes | Value | Share |
+|---|---:|---:|---:|
+| PLUMBING | 1,039 | ₹44.78 Cr | 33.3% |
+| PTMT | 1,221 | ₹42.60 Cr | 31.7% |
+| C P | 1,126 | ₹33.17 Cr | 24.7% |
+| SANITARYWARE | 235 | ₹6.86 Cr | 5.1% |
+| SINK | 198 | ₹6.10 Cr | 4.5% |
+| HARDWARE | 162 | ₹0.87 Cr | 0.7% |
+
+Three categories carry 90% of the business. The flat 17 showed CPVC, UPVC, SWR,
+AGRI and water tanks as separate peers rather than as **PLUMBING**.
+
+## Three defects in the source file, to handle at load
+
+**`C P` and `CP` are the same master.** One holds CP ACCESSORIES and GLASS, the
+other CP ALLIED and TEFELON TAPE. Merge to a single `C P`.
+
+**A header row leaked in** as `Master Category ← Sub Category`. Exclude it.
+
+**`CONECTION` and `CONNECTION`** are both sub-categories under PTMT — a spelling
+variant, not two things.
+
+Handle these in the loader with the corrections **recorded**, not silently
+applied. And tell Prayag so the source file can be fixed.
+
+---
+
+## Section A — read-only, before rebuilding
+
+```
+Read-only. Change nothing.
+
+A1. Print the current registry state: rows, distinct codes, distinct
+    categories, multi-category codes, and which surfaces read it.
+
+    Phase 1 seeded 9,699 assignments across 17 categories. Products tabs
+    are the only consumer.
+
+A2. Build the new mapping in memory and report coverage BEFORE writing
+    anything:
+      - item code -> Item Type, from Products_Grouping_Master.xlsx column B
+        and column F
+      - Item Type -> master category, from Master_and_Sub_category.xlsx
+      - every sold code in FY2026-27 must resolve. Report any that do not.
+
+A3. How do the 17 old categories map onto the new sub-categories? Print the
+    crosswalk. Some will match exactly - SWR, CISTERN, CPVC - and some will
+    not: the old "CP (Chrome-Plated)" covers C P, CP ACCESSORIES, CP ALLIED,
+    GLASS and TEFELON TAPE.
+
+A4. MULTI-CATEGORY CODES. The old registry had 57, 49 of them sold, creating
+    a 7.84% overlap between tab totals and All.
+
+    Under master/sub, does a code still resolve to more than one? A code has
+    one Item Type, so it should resolve to exactly one sub-category and one
+    master. If the overlap disappears, tabs will sum exactly to All - a
+    considerable simplification. Confirm.
+
+A5. The 636 duplicate codes in the grouping master have NO Item Type
+    conflicts. Confirm that against the file, and that a deterministic
+    single Item Type results for every code.
+
+A6. Does anything outside Products read group_canon or the registry today?
+    If any figure would move, name it.
+
+Report before rebuilding.
+```
+
+---
+
+## Section B — rebuild the registry
+
+```
+Code change. Registry only. Show the diff before applying.
+
+Rebuild canonical_item_category_registry on the two-level taxonomy.
+
+SCHEMA
+  Add master_category alongside the existing category, which becomes the
+  sub-category. Both populated for every assignment.
+
+  Keep provenance: source vocabulary, source value, review status, who and
+  when. Record the source file names and SHA-256 of both workbooks.
+
+SOURCE CORRECTIONS - RECORD, DO NOT SILENTLY APPLY
+  - merge "CP" into "C P" as one master
+  - exclude the leaked header row "Master Category / Sub Category"
+  - treat "CONECTION" and "CONNECTION" as one sub-category under PTMT
+
+  Each correction is recorded in the load notes with the raw source value
+  and what it became. Prayag should be able to see exactly what we changed.
+
+DO NOT
+  - delete the old assignments. Supersede them with effective dating so the
+    previous mapping stays auditable
+  - change any figure. The Products "All" totals must be identical before
+    and after
+  - touch sale_line.group_canon. It stays as it is; the registry is the
+    authority for category, not that column
+
+AFTER APPLYING, print:
+  - rows, distinct codes, distinct masters, distinct sub-categories
+  - the master-level breakdown of FY2026-27 sales against the six figures
+    above - PLUMBING Rs 44.78 Cr, PTMT Rs 42.60 Cr, C P Rs 33.17 Cr,
+    SANITARYWARE Rs 6.86 Cr, SINK Rs 6.10 Cr, HARDWARE Rs 0.87 Cr
+  - zero unmapped codes and zero unmapped value
+  - the three source corrections as recorded
+  - codes resolving to more than one master, expected to be zero
+```
+
+---
+
+## Section C — update the Products tabs
+
+```
+Code change. Products page only, after Section B.
+
+The tabs currently show the flat 17. Change to the two-level taxonomy.
+
+  - top level: 6 master category tabs plus All
+  - within a master tab, its sub-categories are available as a second row
+    of tabs or a segmented control - whichever fits the existing layout
+  - All first, then masters by value descending
+
+  If Section A4 confirms every code resolves to exactly one master, the tabs
+  now SUM EXACTLY TO ALL. Remove the multi-category explanatory line, since
+  there is no longer an overlap to explain.
+
+EXPORT
+  Honours both levels. The Info sheet states the master and, if selected,
+  the sub-category. If the overlap is gone, remove the deduplication note.
+
+AFTER APPLYING, print:
+  - the master tab list with rows, codes and value
+  - the sub-category tabs within PLUMBING and within C P
+  - proof that master tabs sum EXACTLY to All
+  - the "All" totals, unchanged from before
+  - the export Info sheet for All, for one master, and for one sub-category
+
+Then publish and push.
+```
+
+---
+
+## Notes
+
+- **A4 is the interesting one.** The old flat registry created a 7.84% overlap
+  because a code could sit in three categories. Under master/sub a code has one
+  Item Type and therefore one sub-category and one master — so the tabs should
+  sum exactly to All. That removes the most confusing part of the current page.
+- **The source corrections must be recorded, not silently applied.** `C P` versus
+  `CP` is obvious to a human and invisible in data. Recording it means Prayag can
+  fix the file, and the next loader does not have to rediscover it.
+- **Superseding rather than deleting** keeps the Phase 1 mapping auditable. It is
+  the first thing that read the registry, and its figures are already on screen.
+
+## For Prayag, when convenient
+
+Three small corrections to `Master_and_Sub_category.xlsx`: merge `CP` into `C P`,
+remove the header row that leaked into the data, and pick one spelling of
+`CONNECTION`. None is urgent — all three are handled at load — but the file
+should be right at source.
