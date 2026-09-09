@@ -4544,6 +4544,8 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE canonical_item_category_registry
         DROP CONSTRAINT IF EXISTS canonical_item_category_registry_category_check;
       ALTER TABLE canonical_item_category_registry
+        DROP CONSTRAINT IF EXISTS canonical_item_category_registry_subcategory_check;
+      ALTER TABLE canonical_item_category_registry
         ADD CONSTRAINT canonical_item_category_registry_subcategory_check CHECK (
           COALESCE(master_category || ':' || canonical_category, 'LEGACY') ~
           '^(LEGACY|[^:]+:(PTMT|SANITARYWARE|SINK|C P|CP ACCESSORIES|HARDWARE|UPVC|CPVC|CONNECTION|WASTE PIPE|CISTERN|SWR|SEAT COVER|CABINET|AGRI|QUAA|GLASS|GEYSER|FLOOR TRAP|PLATE RACK|TEFELON TAPE|OTHER|GARDEN PIPE|CP ALLIED|WATER TANK|WT LID|HDPE PIPE|COLUMN|PPR|OPVC|CORRUGATED PIPE|LPG PIPE))$'
