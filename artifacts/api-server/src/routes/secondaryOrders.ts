@@ -116,7 +116,7 @@ type FilterParams = {
 };
 
 const STATUS_UNAVAILABLE = "Status unavailable";
-const MIXED_ERA_NOTE = "Mixed-era order-booking history: legacy rows may not contain Product-Wise status or distributor fields; August 2026 is partial through 19 Aug 2026.";
+const MIXED_ERA_NOTE = "Mixed-era order-booking history: legacy rows may not contain Product-Wise status or distributor fields; August 2026 is complete for 1–31 Aug 2026.";
 const DISTRIBUTOR_NOTE = "Distinct distributor names; legacy rows have no CP codes.";
 
 function buildWhereClause(f: FilterParams): { where: string; params: unknown[] } {
