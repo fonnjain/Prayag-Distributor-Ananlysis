@@ -728,3 +728,17 @@ type = "slides"
 title = "Prayag Sales Intelligence Operating Guide.pptx"
 description = "The complete 60-slide management operating guide covering every dashboard, calculation, decision workflow, and alert."
 logical_id = "65b0a451-11c8-44c0-8b41-f8019deb753b"
+
+[[outputs]]
+id = "EDTDsLMbnV1tZLaDMally"
+uri = "file://.local/outputs/Prayag-SKU-Deep-Dive-Operating-Guide.pptx"
+type = "slides"
+title = "Prayag SKU Deep Dive Operating Guide (PPTX)"
+description = "The complete 45-slide SKU Deep Dive guide covering every tab, calculation, interpretation, decision, alert, export, and data control."
+logical_id = "09e2774b-18dd-4867-8e0e-cb74d1dd8bd3"
+content_hash = "sha256:8c66471a74295a7d08596d959f9386c98c5e5583d2bc725fd543f3d741627b7c"
+size = 5634293
+mtime_ms = 1789129190360
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/09e2774b-18dd-4867-8e0e-cb74d1dd8bd3/06abf820-3fcb-4644-a726-9762c61b063a"
+storage_version_token = "1789129191924231"
+content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"

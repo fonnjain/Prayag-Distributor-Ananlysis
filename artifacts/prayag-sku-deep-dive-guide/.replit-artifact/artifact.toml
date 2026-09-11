@@ -1,0 +1,28 @@
+kind = "slides"
+previewPath = "/prayag-sku-deep-dive-guide/"
+title = "Prayag SKU Deep Dive Operating Guide"
+description = "A detailed 45-slide management guide explaining every SKU Deep Dive tab, calculation, interpretation, decision workflow, alert, and data control."
+version = "1.0.0"
+id = "artifacts/prayag-sku-deep-dive-guide"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/prayag-sku-deep-dive-guide/" ]
+localPort = 24278
+
+[services.development]
+run = "pnpm --filter @workspace/prayag-sku-deep-dive-guide run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/prayag-sku-deep-dive-guide", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/prayag-sku-deep-dive-guide/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24278"
+BASE_PATH = "/prayag-sku-deep-dive-guide/"

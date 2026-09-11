@@ -1,0 +1,362 @@
+[
+  {
+    "id": "10000000-0000-4000-8000-000000000001",
+    "position": 1,
+    "filepath": "src/pages/slides/Slide01.tsx",
+    "title": "Prayag SKU Deep Dive",
+    "description": "A 45-slide operating guide to every tab, calculation, decision, and alert FY2026–27 management edition",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000002",
+    "position": 2,
+    "filepath": "src/pages/slides/Slide02.tsx",
+    "title": "What SKU Deep Dive enables",
+    "description": "- Move from category performance to item-code action - Separate value, volume, price, breadth, timing, and distribution effects - Diagnose gaps at company, territory, distributor, retailer, and project levels - Convert exceptions into assortment, stock, pricing, coverage, and recovery decisions",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000003",
+    "position": 3,
+    "filepath": "src/pages/slides/Slide03.tsx",
+    "title": "The nine operating tabs",
+    "description": "- Overview: segment scale, breadth, and gap value - Review and Push: management gaps and distributor assortment recommendations - Trends, Discounts, and Timing: movement through time, realised pricing, and seasonality - Movement, Vol Decline, and Price Shrinkers: item-level deterioration signals",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000004",
+    "position": 4,
+    "filepath": "src/pages/slides/Slide04.tsx",
+    "title": "The data architecture behind SKU Deep Dive",
+    "description": "- Primary evidence: current-version invoice rows from sale_line - Secondary evidence: order-booking registers and retailer-level SKU sources - Product identity: item code, segment, category registry, and catalogue authority - Pricing authority: effective MRP history and the active completed MRP generation - Attribution: people, state, distributor, retailer, customer, and project mappings",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000005",
+    "position": 5,
+    "filepath": "src/pages/slides/Slide05.tsx",
+    "title": "FY and period selection",
+    "description": "- FY selects the reporting year and determines the like-period prior FY - YTD, quarter, full year, month, last 7 days, today, and custom define the period - Fiscal monthFrom and monthTo are passed to every supported calculation - Like-for-like comparisons use the same fiscal months in both years - Open months may remain provisional until the source lock date",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000006",
+    "position": 6,
+    "filepath": "src/pages/slides/Slide06.tsx",
+    "title": "Level and entity scope",
+    "description": "- Levels: Distributor, Direct Dealer, Project / Govt, and Retailer - Scope can be company-wide or narrowed to a state head and selected entity - State and distributor filters apply only where the tab supports those dimensions - Retailer-level secondary data rejects unsupported entity filters rather than guessing - Project-channel activity is separated from ordinary territory breadth",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000007",
+    "position": 7,
+    "filepath": "src/pages/slides/Slide07.tsx",
+    "title": "How to read data availability",
+    "description": "- Zero means measured evidence produced a zero result - Unavailable means the required source or dimension was not present - Unsupported means the chosen level or filter cannot be calculated correctly - Degraded banners identify source quota, roster, or member-resolution problems - A complete prior build is required before a snapshot may be used as fallback",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000008",
+    "position": 8,
+    "filepath": "src/pages/slides/Slide08.tsx",
+    "title": "The core SKU measures",
+    "description": "- Net: booked-order or invoiced value on the tab’s declared source basis - Quantity: pieces for ordinary items; litres where the tank model applies - Bought: ever-sold codes present in the selected period - Unbought: ever-sold codes absent in the selected period - Breadth %: bought codes divided by the declared ever-sold denominator",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000009",
+    "position": 9,
+    "filepath": "src/pages/slides/Slide09.tsx",
+    "title": "Overview — purpose",
+    "description": "- Summarise SKU activity by segment for the selected period and level - Show booked-order net, quantity, active codes, missing codes, and breadth - Identify where lost assortment carries material historical value - Open a segment drill-down for code-level investigation - Start every SKU review with scale before examining exceptions",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000010",
+    "position": 10,
+    "filepath": "src/pages/slides/Slide10.tsx",
+    "title": "Overview — headline cards",
+    "description": "- Total booked order net: selected-period Sub Total across eligible SKU rows - Codes bought: distinct active item codes in the selected period - Segments: distinct mapped segments represented in the result - Quantity: total pieces where aggregation is valid - Unmapped codes: value and share that cannot be assigned to a segment",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000011",
+    "position": 11,
+    "filepath": "src/pages/slides/Slide11.tsx",
+    "title": "Overview — segment table",
+    "description": "- Segment identifies the source-aligned product grouping - Booked order net and share show contribution to the selected result - Bought and Unbought divide the ever-sold code universe - Gap codes’ net estimates the historical value attached to absent codes - Breadth % shows assortment participation, not market share",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000012",
+    "position": 12,
+    "filepath": "src/pages/slides/Slide12.tsx",
+    "title": "Overview — gap codes’ net",
+    "description": "- Start with codes sold historically but absent from selected-period orders - Use realised sales for the same fiscal months across loaded FYs - Sum eligible historical net without extrapolating a full-year forecast - Rank larger recoverable value ahead of low-value assortment noise - Treat it as an opportunity indicator, not a guaranteed order value",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000013",
+    "position": 13,
+    "filepath": "src/pages/slides/Slide13.tsx",
+    "title": "Overview — breadth calculation",
+    "description": "- Numerator: distinct ever-sold codes bought in the selected period - Denominator: codes ever sold on the declared company-wide or level basis - Breadth = Bought divided by Bought plus Unbought - Entity filters may narrow current activity while the denominator remains company-wide - Read filtered breadth only with the on-screen denominator warning",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000014",
+    "position": 14,
+    "filepath": "src/pages/slides/Slide14.tsx",
+    "title": "Overview — segment drill-down",
+    "description": "- Opens the selected segment from an Overview, Review, or Push row - Shows net, quantity, breadth, bought codes, ever-sold codes, and catalogue count - Lists item-code evidence for direct action and reconciliation - Large results are limited to the top 500 rows and display a truncation notice - Use exports when the operating decision needs the complete code list",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000015",
+    "position": 15,
+    "filepath": "src/pages/slides/Slide15.tsx",
+    "title": "Overview — decisions and alerts",
+    "description": "- Decision: protect segments with high value and healthy breadth - Decision: recover high gap-value segments with weak current breadth - Decision: investigate material unmapped value before acting commercially - Alert: breadth drops beyond tolerance in a material segment - Alert: unmapped net or code count rises above the approved threshold",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000016",
+    "position": 16,
+    "filepath": "src/pages/slides/Slide16.tsx",
+    "title": "Review — purpose",
+    "description": "- Create a company-wide management list of SKU gaps - Combine current activity, historical value, breadth, and availability context - Prioritise missing or weakening codes that matter commercially - Exclude normal project-channel activity from territory breadth logic - Move from a segment exception into the code-level drill",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000017",
+    "position": 17,
+    "filepath": "src/pages/slides/Slide17.tsx",
+    "title": "Review — calculation basis",
+    "description": "- Evaluate codes against current-period activity and historical evidence - Preserve the selected FY and fiscal-month range - Use raw SKU evidence where retailer-level questions require it - Keep catalogue existence separate from historical sales presence - Do not substitute MRP, dashboard totals, or product aggregates for raw transactions",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000018",
+    "position": 18,
+    "filepath": "src/pages/slides/Slide18.tsx",
+    "title": "Review — prioritisation logic",
+    "description": "- Material historical net increases the priority of an absent code - Breadth loss distinguishes distribution weakness from isolated timing - Current catalogue status separates actionable products from retired lines - Segment and level context prevent unlike codes from being compared casually - Data-quality exceptions remain visible instead of entering a commercial rank",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000019",
+    "position": 19,
+    "filepath": "src/pages/slides/Slide19.tsx",
+    "title": "Review — decisions and alerts",
+    "description": "- Decision: select codes for recovery, availability checks, or field validation - Decision: separate discontinued, project-only, and truly missed items - Decision: assign high-value gaps to a named territory owner - Alert: historically material code disappears from active sales - Alert: reviewed exception remains unresolved across consecutive closed periods",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000020",
+    "position": 20,
+    "filepath": "src/pages/slides/Slide20.tsx",
+    "title": "Push — purpose",
+    "description": "- Recommend codes a distributor or direct dealer should consider adding - Compare the selected entity with peers active in the same segment - Convert peer assortment evidence into a practical sales-call list - Preserve the requested period and selected distributor scope - Show Push only for levels where a defensible peer comparison exists",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000021",
+    "position": 21,
+    "filepath": "src/pages/slides/Slide21.tsx",
+    "title": "Push — peer cohort construction",
+    "description": "- Start with distributors active in the selected segment - Prefer same-state peers when the cohort has sufficient evidence - Require at least three peers before using a cohort signal - Use a national fallback when the state cohort is too small - Keep the selected distributor out of its own peer benchmark",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000022",
+    "position": 22,
+    "filepath": "src/pages/slides/Slide22.tsx",
+    "title": "Push — recommendation and verdict",
+    "description": "- Candidate code is absent for the selected distributor in the period - Peer adoption and segment activity provide the comparison evidence - Historical value and breadth context support prioritisation - The output is a recommendation, not proof of local demand - Management must check availability, territory fit, and distributor capacity",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000023",
+    "position": 23,
+    "filepath": "src/pages/slides/Slide23.tsx",
+    "title": "Push — decisions and alerts",
+    "description": "- Decision: create a distributor-specific assortment expansion plan - Decision: sequence recommended codes by peer evidence and value - Decision: test a focused range before broad stocking - Alert: high-peer-adoption code remains absent for a material distributor - Alert: Push recommendation changes because cohort evidence falls below minimum",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000024",
+    "position": 24,
+    "filepath": "src/pages/slides/Slide24.tsx",
+    "title": "Trends — purpose",
+    "description": "- Show how item value, quantity, and breadth move through time - Keep fiscal months in chronological rather than alphabetical order - Separate one-month timing noise from persistent direction - Compare like periods on a consistent SKU and entity basis - Use trend shape before assigning a cause",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000025",
+    "position": 25,
+    "filepath": "src/pages/slides/Slide25.tsx",
+    "title": "Trends — calculation",
+    "description": "- Aggregate eligible SKU rows by fiscal month and selected dimension - Calculate value and quantity on the tab’s declared source basis - Count active codes or entities for breadth context - Compare current and prior FY using matching fiscal months - Preserve missing periods as missing evidence rather than manufactured zeros",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000026",
+    "position": 26,
+    "filepath": "src/pages/slides/Slide26.tsx",
+    "title": "Trends — seasonality and interpretation",
+    "description": "- Compare the observed month pattern with the approved seasonal curve - Use segment-specific curves where CPVC, C P, or Sanitaryware behave differently - Distinguish a normal seasonal low from structural loss - Treat open-month movement as provisional until closure - Investigate changes that persist after seasonal context is applied",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000027",
+    "position": 27,
+    "filepath": "src/pages/slides/Slide27.tsx",
+    "title": "Trends — decisions and alerts",
+    "description": "- Decision: time stocking, campaigns, and field focus around demand windows - Decision: protect items showing sustained acceleration - Decision: investigate persistent value, quantity, or breadth deterioration - Alert: three-period decline after seasonality adjustment - Alert: trend reverses materially after a previously stable run",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000028",
+    "position": 28,
+    "filepath": "src/pages/slides/Slide28.tsx",
+    "title": "Discounts — purpose",
+    "description": "- Identify realised pricing and discount patterns by item and entity - Compare invoice realisation with effective authoritative MRP where available - Expose missing or ambiguous MRP coverage rather than inventing a rate - Separate price behaviour from volume and assortment movement - Support commercial discipline without treating every variance as leakage",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000029",
+    "position": 29,
+    "filepath": "src/pages/slides/Slide29.tsx",
+    "title": "Discounts — calculation and MRP authority",
+    "description": "- Realised unit price = invoice net divided by comparable quantity - Effective MRP is selected for the matching item code and period - Closed periods use MRP history; current periods use the active completed generation - Ambiguous code-to-segment matches are rejected - Discount analysis is unavailable when authoritative MRP coverage is absent",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000030",
+    "position": 30,
+    "filepath": "src/pages/slides/Slide30.tsx",
+    "title": "Discounts — decisions and alerts",
+    "description": "- Decision: investigate discount leakage on material items - Decision: distinguish approved trade support from unexplained realisation loss - Decision: review territory, distributor, and salesperson concentration - Alert: realised discount moves outside the approved corridor - Alert: sold item has no effective authoritative MRP",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000031",
+    "position": 31,
+    "filepath": "src/pages/slides/Slide31.tsx",
+    "title": "Timing — purpose",
+    "description": "- Reveal when products sell within the FY and whether timing is shifting - Compare actual invoice months with the approved seasonal pattern - Show whether apparent weakness reflects lateness or lost demand - Preserve segment differences in seasonal behaviour - Support stock and campaign timing decisions",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000032",
+    "position": 32,
+    "filepath": "src/pages/slides/Slide32.tsx",
+    "title": "Timing — calculation",
+    "description": "- Group eligible invoice value and quantity by fiscal month - Express each month as a share of the selected FY evidence - Compare the observed cumulative curve with the expected seasonal curve - Use like-for-like closed months when comparing years - Avoid extrapolating incomplete open months as final demand",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000033",
+    "position": 33,
+    "filepath": "src/pages/slides/Slide33.tsx",
+    "title": "Timing — decisions and alerts",
+    "description": "- Decision: stock before proven demand windows - Decision: shift campaign and field activity to periods with recoverable opportunity - Decision: avoid overreacting to a normal seasonal trough - Alert: material sales arrive later than the historical timing pattern - Alert: cumulative progress falls behind the approved curve for consecutive closures",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000034",
+    "position": 34,
+    "filepath": "src/pages/slides/Slide34.tsx",
+    "title": "Movement — purpose",
+    "description": "- Classify items by acceleration, stability, slowdown, or inactivity - Combine current-versus-prior movement with value and breadth context - Rank material changes above low-value noise - Distinguish a broad distribution change from one-customer volatility - Create a repeatable item review queue",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000035",
+    "position": 35,
+    "filepath": "src/pages/slides/Slide35.tsx",
+    "title": "Movement — classification logic",
+    "description": "- Compare selected-period current value with the matching prior-year period - Add quantity and breadth direction where the evidence supports them - Acceleration requires positive comparable movement - Slowdown or inactivity requires a measured decline or absence - Unavailable comparison evidence remains unclassified",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000036",
+    "position": 36,
+    "filepath": "src/pages/slides/Slide36.tsx",
+    "title": "Movement — decisions and alerts",
+    "description": "- Decision: protect accelerating items with supply and coverage support - Decision: recover high-value slowing items before they become inactive - Decision: deprioritise immaterial volatility - Alert: high-value SKU moves from stable to declining - Alert: an accelerating item loses breadth despite value growth",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000037",
+    "position": 37,
+    "filepath": "src/pages/slides/Slide37.tsx",
+    "title": "Vol Decline — purpose",
+    "description": "- Find items losing physical demand even when price changes mask the fall - Compare current and prior like-period quantity on a consistent basis - Require a material prior-period value floor before qualifying an item - Keep territory and project scope explicit - Rank the largest comparable volume deterioration",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000038",
+    "position": 38,
+    "filepath": "src/pages/slides/Slide38.tsx",
+    "title": "Vol Decline — formula and units",
+    "description": "- Quantity growth % = current quantity divided by prior quantity minus one - Value growth % = current net divided by prior net minus one - Ordinary products use pieces; tank products use litre logic - Both periods require positive comparable quantity and value evidence - Primary floor defaults to ₹50,000 prior-period net for materiality",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000039",
+    "position": 39,
+    "filepath": "src/pages/slides/Slide39.tsx",
+    "title": "Vol Decline — decisions and alerts",
+    "description": "- Decision: test stock availability, substitution, coverage, and price resistance - Decision: separate physical demand loss from value protected by inflation - Decision: prioritise material codes with broad customer impact - Alert: quantity falls beyond tolerance while realised price is flat or rising - Alert: litre decline persists across multiple closed periods",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000040",
+    "position": 40,
+    "filepath": "src/pages/slides/Slide40.tsx",
+    "title": "Price Shrinkers — purpose",
+    "description": "- Detect items whose economic growth is negative after MRP movement - Focus on codes where quantity grew but real value still deteriorated - Use authoritative period MRP to separate list-price change from real growth - Reject missing or ambiguous MRP mappings - Rank the most negative real-growth results first",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000041",
+    "position": 41,
+    "filepath": "src/pages/slides/Slide41.tsx",
+    "title": "Price Shrinkers — formulas and qualification",
+    "description": "- Quantity growth % = current quantity divided by prior quantity minus one - Value growth % = current net divided by prior net minus one - MRP increase % = current MRP divided by prior-period MRP minus one - Real growth % = value growth % minus MRP increase % - Qualify only when quantity growth is positive and real growth is negative",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000042",
+    "position": 42,
+    "filepath": "src/pages/slides/Slide42.tsx",
+    "title": "Price Shrinkers — decisions and alerts",
+    "description": "- Decision: investigate discounting, mix change, data error, or competitive pressure - Decision: compare realised price movement with approved commercial support - Decision: protect volume without accepting unexplained value erosion - Alert: real growth remains negative above the material-value floor - Alert: realised price falls while authoritative MRP rises",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000043",
+    "position": 43,
+    "filepath": "src/pages/slides/Slide43.tsx",
+    "title": "Exports, reconciliation, and data controls",
+    "description": "- Excel exports use the same route calculations and selected query parameters - Basis sheets preserve FY, period, level, scope, filters, and caveats - General exports state that breadth denominators may remain company-wide - Quantities must not be summed casually across pieces and litres - Data Health, wipe canaries, source locks, and mapping checks gate release",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000044",
+    "position": 44,
+    "filepath": "src/pages/slides/Slide44.tsx",
+    "title": "A practical SKU alert portfolio",
+    "description": "- Availability: material code disappears or remains absent despite peer adoption - Breadth: active retailer or distributor coverage falls beyond tolerance - Volume: like-period pieces or litres decline beyond the approved threshold - Price: realised value or real growth deteriorates without an approved reason - Data: raw month, MRP, category, state, or identity evidence is missing",
+    "speakerNotes": ""
+  },
+  {
+    "id": "10000000-0000-4000-8000-000000000045",
+    "position": 45,
+    "filepath": "src/pages/slides/Slide45.tsx",
+    "title": "The Prayag SKU operating rhythm",
+    "description": "- Daily: review material alerts, source failures, and sudden availability gaps - Weekly: run Review, Push, distributor assortment, and recovery actions - Monthly: close the period, verify Data Health, and reconcile exports - Quarterly: reset thresholds, peer cohorts, seasonal assumptions, and category priorities - Success measure: broader productive assortment, protected realisation, and faster named action",
+    "speakerNotes": ""
+  }
+]
