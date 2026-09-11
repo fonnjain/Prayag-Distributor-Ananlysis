@@ -1,0 +1,28 @@
+kind = "slides"
+previewPath = "/prayag-sales-intelligence-operating-guide/"
+title = "Prayag Sales Intelligence Operating Guide"
+description = "A detailed 60-slide management operating guide explaining every Prayag Sales Intelligence dashboard, calculation, business interpretation, decision workflow, and alert opportunity."
+version = "1.0.0"
+id = "artifacts/prayag-sales-intelligence-operating-guide"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/prayag-sales-intelligence-operating-guide/" ]
+localPort = 22557
+
+[services.development]
+run = "pnpm --filter @workspace/prayag-sales-intelligence-operating-guide run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/prayag-sales-intelligence-operating-guide", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/prayag-sales-intelligence-operating-guide/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22557"
+BASE_PATH = "/prayag-sales-intelligence-operating-guide/"

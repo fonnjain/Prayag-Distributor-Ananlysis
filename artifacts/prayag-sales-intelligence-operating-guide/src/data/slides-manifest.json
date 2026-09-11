@@ -1,0 +1,482 @@
+[
+  {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "position": 1,
+    "filepath": "src/pages/slides/Slide01.tsx",
+    "title": "Prayag Sales Intelligence",
+    "description": "A 60-slide operating guide to every dashboard, calculation, decision, and alert FY2026–27 management edition",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000002",
+    "position": 2,
+    "filepath": "src/pages/slides/Slide02.tsx",
+    "title": "What this platform enables",
+    "description": "- One management view across primary sales, secondary orders, products, customers, territories, and people - Faster identification of growth gaps, concentration risk, price erosion, and execution failure - Evidence-based reviews from company level to state head, salesperson, distributor, retailer, and SKU - Alerts that convert exceptions into named owners and actions",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000003",
+    "position": 3,
+    "filepath": "src/pages/slides/Slide03.tsx",
+    "title": "From data to decision",
+    "description": "- Observe: use headline cards and trends to locate the exception - Diagnose: move from company to territory, distributor, retailer, and SKU - Decide: assign a commercial, coverage, pricing, stock, or people action - Monitor: set an alert, owner, due date, and review frequency - Verify: use Data Health and exports before treating a figure as final",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000004",
+    "position": 4,
+    "filepath": "src/pages/slides/Slide04.tsx",
+    "title": "The data architecture behind the screens",
+    "description": "- Primary sales: invoice-level sale_line register, current-version rows only - Secondary activity: order-booking registers, member working sheets, and retailer-SKU sources - Plans and targets: dashboard plans plus database overlays for approved member targets - Master data: people, customer, distributor, retailer, item, MRP, and category registries - Evidence layers: snapshots, source lineage, audit checks, and effective-dated mappings",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000005",
+    "position": 5,
+    "filepath": "src/pages/slides/Slide05.tsx",
+    "title": "What the core measures mean",
+    "description": "- Primary Sales: Prayag invoice value billed into the channel - Secondary Orders: retailer/distributor order-booking evidence; not dispatch or sell-through - Target / Plan: expected value for the selected FY and period - Achievement %: actual divided by the matching plan basis - Pending: order value not yet converted to primary sale on a comparable period basis - Growth: current-period value versus like-for-like prior-period value",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000006",
+    "position": 6,
+    "filepath": "src/pages/slides/Slide06.tsx",
+    "title": "Global period and entity filters",
+    "description": "- FY selector separates open and frozen reporting years - YTD, quarter, month, last 7 days, today, and custom ranges define one period scope - State head, salesperson, state, distributor, and customer filters narrow accountability - Like-for-like comparisons use matching months rather than full-year denominators - Filtered requests are calculated live and are not reused as company-wide snapshots",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000007",
+    "position": 7,
+    "filepath": "src/pages/slides/Slide07.tsx",
+    "title": "When a number is final—and when it is not",
+    "description": "- Closed FYs and locked months are treated as stable reporting evidence - Open months may be provisional until the source lock date - Snapshot timestamps explain when a page was last assembled - Sheets quota or connection failures must be shown as degraded data, never silently converted to zero - Data Health is the release gate before high-impact commercial decisions",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000008",
+    "position": 8,
+    "filepath": "src/pages/slides/Slide08.tsx",
+    "title": "Dashboard — Overview",
+    "description": "- Purpose: company-level pulse across sales, target, growth, and execution - Calculation: selected-period aggregates from the same underlying register basis - Read it as: where performance is ahead, behind, accelerating, or exposed - Decisions: set review priorities, escalate major gaps, and select the next drill-down - Alert idea: material achievement drop versus prior refresh or plan trajectory",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000009",
+    "position": 9,
+    "filepath": "src/pages/slides/Slide09.tsx",
+    "title": "Dashboard — Regional",
+    "description": "- Purpose: compare states and state-head territories on one consistent basis - Calculation: transaction rows attributed through canonical state and people mappings - Read it as: geographic contribution, achievement spread, and concentration - Decisions: rebalance management attention, stock, schemes, and field support - Alert idea: territory below threshold while company trend remains healthy",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000010",
+    "position": 10,
+    "filepath": "src/pages/slides/Slide10.tsx",
+    "title": "Dashboard — Coverage / Resources",
+    "description": "- Purpose: show whether the organisation and customer universe are sufficiently covered - Calculation: active roster, mapped customers, distributor relationships, visits, and source coverage - Read it as: execution capacity versus territory workload - Decisions: fill vacant territories, resolve unmapped accounts, and adjust visit capacity - Alert idea: active territory with no responsible manager or falling mapped-customer coverage",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000011",
+    "position": 11,
+    "filepath": "src/pages/slides/Slide11.tsx",
+    "title": "Dashboard — Products",
+    "description": "- Purpose: explain primary sales by six master categories and nested sub-categories - Calculation: effective-dated item-code registry joined with UPPER(TRIM(item code)) - Masters: PLUMBING, PTMT, C P, SANITARYWARE, SINK, and HARDWARE - Read it as: mix, contribution, breadth, and exact allocation by product family - Decisions: category investment, assortment, price, and stock priorities",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000012",
+    "position": 12,
+    "filepath": "src/pages/slides/Slide12.tsx",
+    "title": "Products — calculation and controls",
+    "description": "- Every FY2026–27 sale row must map to exactly one active master and sub-category - All value must equal the sum of all six masters - Uncovered rows and overlapping rows must both be zero - Current verified anchor: 4,000 sold codes and ₹136.2734072 Cr - Alert idea: any unmapped value, multi-master assignment, or allocation delta",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000013",
+    "position": 13,
+    "filepath": "src/pages/slides/Slide13.tsx",
+    "title": "Dashboard — Momentum",
+    "description": "- Purpose: identify whether recent commercial movement is strengthening or weakening - Calculation: one selected period applied consistently across all momentum panels - Views combine trend direction, entity contribution, and comparable prior-period context - Decisions: protect acceleration, intervene in deceleration, and separate timing from structural decline - Alert idea: negative momentum sustained across consecutive closed periods",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000014",
+    "position": 14,
+    "filepath": "src/pages/slides/Slide14.tsx",
+    "title": "Dashboard — Growth",
+    "description": "- Purpose: convert year-on-year movement into practical growth actions - Calculation: current value minus like-period prior-year value, with comparable entity scope - Action families: CLOSE, RECOVER, ACTIVATE, and WIDEN - WIDEN avoids double-counting entities already assigned to another action family - Decisions: focus sales effort on the highest-value recoverable gap",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000015",
+    "position": 15,
+    "filepath": "src/pages/slides/Slide15.tsx",
+    "title": "Dashboard — AI Analyst",
+    "description": "- Purpose: ask management questions in business language and receive data-grounded analysis - Good questions specify FY, period, territory, measure, and comparison basis - Use it to form hypotheses and locate supporting evidence—not to replace source controls - Decisions: prepare reviews, investigate exceptions, and identify follow-up cuts - Control: verify cited figures against the underlying dashboard or export",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000016",
+    "position": 16,
+    "filepath": "src/pages/slides/Slide16.tsx",
+    "title": "Dashboard — AI Reports",
+    "description": "- Purpose: produce structured narratives for company and management reviews - Reports combine figures, drivers, risks, and recommended actions - State or manager scope must match the selected entity set - Decisions: standardise review preparation and make actions explicit - Alert idea: report scope, anchor, or narrative figure fails reconciliation",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000017",
+    "position": 17,
+    "filepath": "src/pages/slides/Slide17.tsx",
+    "title": "Dashboard — Reports",
+    "description": "- Purpose: management reporting across primary, secondary, team, and operational views - Calculation depends on the selected report but retains FY and period basis labels - Exports carry the same basis so offline files are not misread - Decisions: monthly review packs, management follow-up, and cross-functional coordination - Control: open months are marked provisional",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000018",
+    "position": 18,
+    "filepath": "src/pages/slides/Slide18.tsx",
+    "title": "Dashboard — Company Reports",
+    "description": "- Purpose: answer company-wide questions with optional entity and month filters - Prior-year scope is resolved from the current-FY customer universe for comparability - Month filters compare matching months rather than unmatched totals - Filtered results are calculated live and never stored as universal snapshots - Decisions: strategic mix, territory, customer, and performance reviews",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000019",
+    "position": 19,
+    "filepath": "src/pages/slides/Slide19.tsx",
+    "title": "Dashboard — Comparison",
+    "description": "- Purpose: compare heads, territories, distributors, or other entities on a declared basis - API-supplied flags and rank eligibility determine whether an entity can be compared - The basis strip states FY, period, metric, scope, exclusions, and caveats - Decisions: rank fairly, identify outliers, and select peers for benchmarking - Control: the complete basis must appear on screen and in Excel",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000020",
+    "position": 20,
+    "filepath": "src/pages/slides/Slide20.tsx",
+    "title": "Dashboard — Targets",
+    "description": "- Purpose: convert company and territory plans into accountable member targets - Split logic: prior-year weighting for members with history; equal share for new joiners - Balance logic guarantees that member allocations reconcile to the approved pool - Database overrides sit above the read-only Target Master sheet - Decisions: approve targets, test fairness, and reflow changes before saving",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000021",
+    "position": 21,
+    "filepath": "src/pages/slides/Slide21.tsx",
+    "title": "Dashboard — Pending Orders",
+    "description": "- Purpose: show the value still awaiting primary conversion - Calculation: comparable order-booking basis less matching primary sale basis - Pending is shown only when both sides use the same period definition - Negative residuals are clamped at zero; unavailable evidence remains unavailable, not zero - Decisions: prioritise dispatch, billing, supply resolution, and distributor follow-up",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000022",
+    "position": 22,
+    "filepath": "src/pages/slides/Slide22.tsx",
+    "title": "Dashboard — Data Health",
+    "description": "- Purpose: decide whether management outputs are safe to use - Audit groups cover source health, truncation, mappings, report logic, cross-foots, lags, and anchors - Overall status is FAIL if any check fails; otherwise WARN if any warning remains - Excel audit pack includes Summary, Checks, Failures, Source Health, Names, Reconciliation, Cross-foots, and Anchors - Decision: block release when critical controls fail",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000023",
+    "position": 23,
+    "filepath": "src/pages/slides/Slide23.tsx",
+    "title": "Alerts — Red Alerts",
+    "description": "- Purpose: surface material commercial risks requiring action now - Alerts are grouped by family, severity, scope, owner, status, and evidence - Current-FY open alerts are emphasised; prior-FY alerts are excluded from the active view - Acknowledgement creates an accountable audit trail - Decisions: assign, investigate, resolve, suppress with evidence, or escalate",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000024",
+    "position": 24,
+    "filepath": "src/pages/slides/Slide24.tsx",
+    "title": "The alert families Prayag can operate",
+    "description": "- Sales: sudden value decline, target miss, stalled growth, and pending conversion - Customer: churn risk, concentration, inactive accounts, and price shrinkage - Product: SKU breadth loss, volume decline, destocking, and mapping gaps - Channel: distributor underperformance, order volatility, and weak assortment - Data: source lag, wipe canary, identity ambiguity, and reconciliation failure",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000025",
+    "position": 25,
+    "filepath": "src/pages/slides/Slide25.tsx",
+    "title": "Alert routing and escalation",
+    "description": "- Level 1: named territory or functional owner receives the first action - Level 2: manager receives unresolved or repeated exceptions - Level 3: senior escalation receives material overdue risks - Missing contact information creates a visible skipped-routing record, never a silent drop - Weekly digest summarises new, open, acknowledged, and overdue alerts",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000026",
+    "position": 26,
+    "filepath": "src/pages/slides/Slide26.tsx",
+    "title": "Alerts — Recipient Settings",
+    "description": "- Purpose: maintain who receives which scope and escalation level - Configuration should match the People hierarchy and active territories - Contact gaps must be resolved before relying on automated delivery - Decisions: define ownership, backup recipients, and escalation timing - Control: test routing after organisation changes",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000027",
+    "position": 27,
+    "filepath": "src/pages/slides/Slide27.tsx",
+    "title": "Warnings — early signals before a red alert",
+    "description": "- Purpose: identify weaker signals that need attention but not immediate escalation - Warning logic uses comparable periods, territory context, and data-availability gates - Distributor warnings avoid target-based claims when no valid target exists - Decisions: coach, investigate, monitor, or promote the warning into an alert rule - Alert idea: warning repeated for three review cycles",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000028",
+    "position": 28,
+    "filepath": "src/pages/slides/Slide28.tsx",
+    "title": "Sales — State Head",
+    "description": "- Purpose: evaluate territory owners across plan, primary sales, secondary orders, team, and customer coverage - Calculation combines canonical head attribution with like-period performance - Read it as: result, pipeline, execution quality, and organisational capacity - Decisions: territory review, intervention, target adjustment, and resource support - Alert idea: achievement gap plus weak order pipeline",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000029",
+    "position": 29,
+    "filepath": "src/pages/slides/Slide29.tsx",
+    "title": "Sales — Sales People",
+    "description": "- Purpose: move from state-head outcome to individual salesperson accountability - Calculation: member-attributed orders, sales, plans, customers, and activity - Read it as: who is contributing, who is under-covered, and where attribution is incomplete - Decisions: coaching, target reallocation, route planning, and account assignment - Control: employee codes are evidence aliases, not unique identity keys",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000030",
+    "position": 30,
+    "filepath": "src/pages/slides/Slide30.tsx",
+    "title": "Sales — Primary Performance",
+    "description": "- Purpose: measure invoiced primary sales against period plan and prior-year performance - Calculation uses invoice value from current-version sale rows - Period basis is shared across booking and sales services to prevent mismatched pending values - Decisions: billing acceleration, category focus, distributor supply, and forecast revision - Alert idea: actual falls below the seasonally expected trajectory",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000031",
+    "position": 31,
+    "filepath": "src/pages/slides/Slide31.tsx",
+    "title": "Sales — Secondary Performance",
+    "description": "- Purpose: measure demand captured through secondary order-booking evidence - Secondary achievement uses recorded sales/orders divided by recorded closed-month plan - It must not divide a partial-period numerator by a full-period plan - Decisions: field activation, retailer coverage, order conversion, and territory coaching - Caveat: order booking is not dispatch or consumer sell-through",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000032",
+    "position": 32,
+    "filepath": "src/pages/slides/Slide32.tsx",
+    "title": "Sales — Secondary Orders",
+    "description": "- Purpose: inspect order-booking value by FY, member, retailer, and segment - Sub Total is the reconciling measure in the source workbooks - Historical files may contain departed members and changing name formats - Decisions: detect pipeline gaps, retailer inactivity, and segment opportunity - Control: negative credit notes remain part of the source truth",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000033",
+    "position": 33,
+    "filepath": "src/pages/slides/Slide33.tsx",
+    "title": "Sales — Deep Dive",
+    "description": "- Purpose: bring plan, order booking, primary sale, visits, customers, and history into one member-level view - Team Summary order booking includes old-party plus new-party business - Closed-FY snapshots protect historical consistency; filtered cuts are live - Decisions: run structured one-to-one reviews and isolate the controllable gap - Alert idea: high plan gap with low visit productivity or weak new-party creation",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000034",
+    "position": 34,
+    "filepath": "src/pages/slides/Slide34.tsx",
+    "title": "Distributor Deep Dive — purpose and scope",
+    "description": "- Purpose: evaluate a distributor inside the responsible territory, not as an isolated name - Distributor identity uses DIST#; spelling alone must never merge records - Geography follows the serving salesperson’s state and territory relationship - Read it as: flow, breadth, customer reach, and commercial risk - Decisions: classify Grow, Fix, Protect, Recover, or Exit-review",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000035",
+    "position": 35,
+    "filepath": "src/pages/slides/Slide35.tsx",
+    "title": "Distributor Deep Dive — Summary tab",
+    "description": "- Headline view combines primary, secondary, comparable trend, retailer base, and evidence coverage - A missing source is displayed as unavailable rather than zero - Snapshot fallback is allowed only after a complete prior build - Decisions: choose the distributor review agenda and next diagnostic tab - Alert idea: material fall with incomplete supporting data",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000036",
+    "position": 36,
+    "filepath": "src/pages/slides/Slide36.tsx",
+    "title": "Distributor Deep Dive — flow tabs",
+    "description": "- Primary flow: invoiced value into the distributor - Secondary flow: retailer order evidence attributed through the territory’s retailer list - Like-period comparisons separate timing effects from structural decline - Decisions: billing, dispatch, retailer activation, and working-capital discussion - Control: territory-only aggregates prevent company-wide leakage into distributor results",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000037",
+    "position": 37,
+    "filepath": "src/pages/slides/Slide37.tsx",
+    "title": "Distributor Deep Dive — SKU, ROI, and risk",
+    "description": "- SKU spread measures assortment breadth using available retailer-level evidence - Investment and ROI views separate known inputs from unavailable credit or scheme sources - Discount is null for a live FY when final evidence is unavailable - Decisions: assortment expansion, stock correction, margin review, and support prioritisation - Alert ideas: breadth collapse, retailer concentration, or negative return signal",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000038",
+    "position": 38,
+    "filepath": "src/pages/slides/Slide38.tsx",
+    "title": "SKU Deep Dive — Overview",
+    "description": "- Purpose: move from category performance to item-level action - Tabs: Overview, Review, Push, Trends, Discounts, Timing, Movement, Vol Decline, and Price Shrinkers - Level selector changes company, territory, distributor, retailer, or project context - Decisions: retain, recover, push, reprice, replenish, or investigate - Control: raw-SKU questions require retailer-level transaction evidence",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000039",
+    "position": 39,
+    "filepath": "src/pages/slides/Slide39.tsx",
+    "title": "SKU — Review tab",
+    "description": "- Purpose: create a company-wide gap list for management review - Calculation compares current SKU activity, historical sale, breadth, value, and availability context - Project-channel codes are excluded from normal territory breadth - Decisions: identify missing winners, declining lines, and master-data exceptions - Alert idea: historically material SKU disappears from active sales",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000040",
+    "position": 40,
+    "filepath": "src/pages/slides/Slide40.tsx",
+    "title": "SKU — Push tab",
+    "description": "- Purpose: recommend SKUs a distributor should add based on comparable peers - Peer cohort uses distributors active in the same segment; minimum peer evidence is required - National fallback is used when a state cohort is too small - Recommendations preserve the requested period and distributor scope - Decisions: build a distributor-specific assortment and sales-call list",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000041",
+    "position": 41,
+    "filepath": "src/pages/slides/Slide41.tsx",
+    "title": "SKU — Trends tab",
+    "description": "- Purpose: show how item value, volume, and breadth change over time - Month order is chronological, not alphabetical - Seasonal interpretation must distinguish normal curve effects from genuine loss - Decisions: forecast demand, time campaigns, and detect persistent deterioration - Alert idea: three-period decline after seasonality adjustment",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000042",
+    "position": 42,
+    "filepath": "src/pages/slides/Slide42.tsx",
+    "title": "SKU — Discounts tab",
+    "description": "- Purpose: identify realised pricing and discount patterns by item and entity - Calculation compares invoice value with authoritative effective MRP where coverage exists - Missing MRP lineage remains visible and must not be filled with invented rates - Decisions: investigate leakage, enforce price discipline, and review exceptions - Alert idea: realised discount moves outside approved corridor",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000043",
+    "position": 43,
+    "filepath": "src/pages/slides/Slide43.tsx",
+    "title": "SKU — Timing tab",
+    "description": "- Purpose: reveal when products sell and whether demand is shifting within the FY - Calculation uses invoice month and selected period over the approved seasonal curve - Segment curves may differ for CPVC, C P, and Sanitaryware - Decisions: stock before demand windows and avoid reacting to normal seasonal lows - Alert idea: sales arrive materially later than the historical timing pattern",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000044",
+    "position": 44,
+    "filepath": "src/pages/slides/Slide44.tsx",
+    "title": "SKU — Movement tab",
+    "description": "- Purpose: classify items by acceleration, stability, slowdown, or inactivity - Calculation combines current-versus-prior movement with value and breadth context - A high-value slowdown is prioritised above low-value noise - Decisions: protect momentum, recover declining items, and remove execution blockers - Alert idea: high-value SKU moves from stable to declining",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000045",
+    "position": 45,
+    "filepath": "src/pages/slides/Slide45.tsx",
+    "title": "SKU — Vol Decline tab",
+    "description": "- Purpose: find items losing physical demand even when price changes mask the fall - Calculation compares like-period quantity or litres on a consistent unit basis - Water tanks use litre logic; ordinary items use piece quantity - Decisions: diagnose distribution, substitution, stock availability, or price resistance - Alert idea: volume decline with flat or rising realised price",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000046",
+    "position": 46,
+    "filepath": "src/pages/slides/Slide46.tsx",
+    "title": "SKU — Price Shrinkers tab",
+    "description": "- Purpose: detect falling realised unit value for the same item - Calculation uses comparable item-level sale value and quantity - MRP and effective price history provide context where authoritative coverage exists - Decisions: identify discounting, mix shifts, data errors, or competitive pressure - Alert idea: repeated unit-price shrinkage above a material-value threshold",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000047",
+    "position": 47,
+    "filepath": "src/pages/slides/Slide47.tsx",
+    "title": "A practical SKU alert portfolio",
+    "description": "- Destocking: sustained absence after prior active sale - Breadth loss: fewer active retailers or distributors for a material item - Volume decline: like-period unit loss beyond tolerance - Price shrinkage: realised unit value falls without an approved reason - Data risk: missing raw SKU month, state attribution, MRP, or category assignment",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000048",
+    "position": 48,
+    "filepath": "src/pages/slides/Slide48.tsx",
+    "title": "MRP — MRP Master",
+    "description": "- Purpose: inspect current and historical product-price authority by item code - Current catalogue existence comes from the active authority generation - Closed-period prices use effective history rather than today’s price - Decisions: validate pricing, investigate outliers, and support margin calculations - Alert idea: sold item has no effective authoritative MRP",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000049",
+    "position": 49,
+    "filepath": "src/pages/slides/Slide49.tsx",
+    "title": "MRP — Margin",
+    "description": "- Purpose: understand gross-profit and distributor-margin implications - Trend calculation sorts month labels chronologically through actual dates - Derived distributor margin is used when the source discount is not authoritative - Decisions: revise price, discount, mix, and scheme support - Alert idea: margin falls below category corridor for consecutive months",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000050",
+    "position": 50,
+    "filepath": "src/pages/slides/Slide50.tsx",
+    "title": "MRP — Competition",
+    "description": "- Purpose: compare Prayag prices with observed competitor prices - Calculation requires matched products, comparable units, and current source timestamps - Read it as directional market evidence, not an automatic repricing instruction - Decisions: validate market position, investigate gaps, and prioritise field checks - Alert idea: competitor price changes materially on a matched high-value SKU",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000051",
+    "position": 51,
+    "filepath": "src/pages/slides/Slide51.tsx",
+    "title": "Market — Market Survey",
+    "description": "- Purpose: capture field intelligence beyond transaction data - Survey structure can record market price, competitor activity, availability, and observations - State and cascading geography controls keep entries attributable - Decisions: validate dashboard hypotheses and shape local interventions - Alert idea: repeated competitor or availability signal across multiple respondents",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000052",
+    "position": 52,
+    "filepath": "src/pages/slides/Slide52.tsx",
+    "title": "Customers — Rankings",
+    "description": "- Purpose: rank customers by sales, growth, contribution, and other approved measures - Rankings must use the selected FY, period, and entity scope - Rank eligibility comes from the data contract, not visual inference - Decisions: key-account focus, recognition, recovery, and portfolio segmentation - Alert idea: top account drops materially in both value and rank",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000053",
+    "position": 53,
+    "filepath": "src/pages/slides/Slide53.tsx",
+    "title": "Customers — Price Shrinkers",
+    "description": "- Purpose: identify customers whose realised unit prices are deteriorating - Calculation separates price effect from volume and mix where evidence permits - Customer, category, and company levels use consistent price-effect logic - Decisions: review discounting, product mix, competition, and sales behaviour - Alert idea: material price erosion concentrated in one customer or territory",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000054",
+    "position": 54,
+    "filepath": "src/pages/slides/Slide54.tsx",
+    "title": "Customers — At Risk & New",
+    "description": "- Purpose: distinguish likely churn from normal purchase timing and identify activation - At-risk scoring uses median purchase gaps rather than a simple inactive flag - Seasonal behaviour and recent order evidence provide context - Decisions: win-back calls, visit prioritisation, onboarding, and account development - Alert idea: risk score crosses threshold for a previously material customer",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000055",
+    "position": 55,
+    "filepath": "src/pages/slides/Slide55.tsx",
+    "title": "Customers — Schemes",
+    "description": "- Purpose: show scheme eligibility, progress, expected benefit, and recommended next action - Nudge calculations use source group values and degrade safely when dues evidence is unavailable - Success, opportunity, and risk views must reconcile to the same scheme basis - Decisions: target near-achievers, avoid uneconomic nudges, and track earned benefits - Alert idea: scheme period or cockpit total diverges from the nudge list",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000056",
+    "position": 56,
+    "filepath": "src/pages/slides/Slide56.tsx",
+    "title": "Organisation — Customers",
+    "description": "- Purpose: maintain the canonical customer master and surface mismatches - Generated identity keys, mappings, state, owner, and source evidence support attribution - Master loads are transactional and production writes run only through protected app routes - Decisions: resolve duplicates, assign ownership, and improve territory coverage - Alert idea: material sales remain attached to unresolved customer identity",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000057",
+    "position": 57,
+    "filepath": "src/pages/slides/Slide57.tsx",
+    "title": "Organisation — People",
+    "description": "- Purpose: manage active people, hierarchy, aliases, departures, and audit history - Deactivation requires impact acknowledgement; no hard deletes are used - Departed ownership moves through controlled holding and reassignment rules - Decisions: restructure reporting lines, transfer accounts, and close identity gaps - Alert idea: departed manager leaves an active subtree without ownership",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000058",
+    "position": 58,
+    "filepath": "src/pages/slides/Slide58.tsx",
+    "title": "Organisation — Coverage Review & Attribution Conflicts",
+    "description": "- Coverage Review compares live evidence with canonical organisation assignments - Drift is returned with full read-only evidence rather than hidden as a fetch error - Attribution Conflicts show ambiguous people, customer, distributor, retailer, or state matches - Decisions: approve effective-dated resolutions or leave uncertainty explicit - Alert idea: structural open-FY drift or any frozen-FY attribution change",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000059",
+    "position": 59,
+    "filepath": "src/pages/slides/Slide59.tsx",
+    "title": "Administration, APIs, exports, and access",
+    "description": "- User Management controls roles, status, password reset, and session revocation - API Portal and API Keys support governed system access - Master Data and Catalogue Review manage controlled reference inputs - Excel exports preserve FY, period, filters, provisional status, and calculation basis - Security controls include same-origin login, throttling, audit logs, and last-admin protection",
+    "speakerNotes": ""
+  },
+  {
+    "id": "00000000-0000-4000-8000-000000000060",
+    "position": 60,
+    "filepath": "src/pages/slides/Slide60.tsx",
+    "title": "The Prayag management operating rhythm",
+    "description": "- Daily: review Red Alerts, pending conversion, and material source failures - Weekly: state-head, salesperson, distributor, customer-risk, and SKU-action reviews - Monthly: close period, run Data Health, publish management pack, and reset owners - Quarterly: review targets, category mix, territory capacity, schemes, and alert thresholds - Success measure: fewer surprises, faster named actions, and fully reconciling decisions",
+    "speakerNotes": ""
+  }
+]
