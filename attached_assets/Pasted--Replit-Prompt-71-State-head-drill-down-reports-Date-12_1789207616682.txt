@@ -1,0 +1,203 @@
+# Replit Prompt 71 — State head drill-down reports
+
+**Date:** 12 September 2026
+**Scope:** Section A read-only. Section B is two questions for the business.
+Section C is the build, phased.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## The requirement
+
+> *"Need drill down for states. All reports to be drill down. Report 1 and 2 as
+> separate. Need to match the reference sheet. The format of the excel has to be
+> matched. And additional worksheets can be attached to make it better. New
+> grouping has to be used for Products mapping."*
+
+The reference is `Sandeep_ji__2026-27.xlsx` — a state head's own working file,
+also at
+`https://docs.google.com/spreadsheets/d/18zT-a0a8d7rDIy2UpJGWyrWivFGKkBwdyRocPzgg8EA`
+
+## What the reference actually contains
+
+A seven-level drill-down, each level its own sheet:
+
+| Sheet | Level | Rows | Columns |
+|---|---|---|---|
+| **Report 1** | State → Party | States, then parties by district | FY25-26, FY26-27, Difference, Growth %, Share % |
+| **Report 2** | State → Month | States, then 12 months | LY, TY, Growth % per month |
+| **Report 3** | Group, all India | Master groups | + Share % Group Wise |
+| **Report 3A** | State → Group | Same, one state | same |
+| **Report 3B** | State → Party → Segment | One party by segment | same |
+| **Report 3C** | State → Segment | One state by segment | same |
+| **Report 4** | State → Party → Segment → Item | Item codes | FY25-26 Qty, FY26-27 Qty |
+| **Report 7** | State → Party × Group | Parties as rows, **groups as columns** | one column per group |
+
+Every sheet shares one shape: a **grand total row above the header**, then
+`FY-2025-26 · FY-2026-27 · Difference · Growth % · Share %`.
+
+## Report 7 already uses the new grouping
+
+Its columns are **PTMT GROUP, PLUMBING GROUP, C P GROUP, WATER TANK GROUP,
+SANITARYWARE GROUP, SINK GROUP**.
+
+That is the master taxonomy from the registry, already in use by a state head in
+his own file. "New grouping has to be used" is asking the app to produce what he
+builds by hand.
+
+---
+
+## Section A — read-only, establish feasibility
+
+```
+Read-only. Change nothing.
+
+Reference workbook: Sandeep_ji__2026-27.xlsx, and the Google Sheet at
+18zT-a0a8d7rDIy2UpJGWyrWivFGKkBwdyRocPzgg8EA
+
+A1. For each of the eight reports above, confirm the app can produce the
+    same figures from production. For each, name the table and the grouping
+    columns.
+
+    Expect sale_line for value, customer/party for the party level,
+    canonical_item_category_registry for master and sub-category, and
+    state_canon for state.
+
+A2. VALIDATE AGAINST THE REFERENCE. Reproduce these exact figures from
+    production and report any difference:
+
+      Grand total FY2025-26   Rs 62,54,38,293.60
+      Grand total FY2026-27   Rs 71,52,99,894.90
+      Growth                  14.37%
+
+      W-BENGAL   FY25-26 Rs 25,70,11,216.40  FY26-27 Rs 29,36,78,690.70
+      BIHAR      FY25-26 Rs 10,23,79,178.50  FY26-27 Rs 12,57,94,611.30
+      Tamilnadu  FY25-26 Rs  4,62,69,259.40  FY26-27 Rs  3,22,31,469.92
+
+    This is Sandeep's territory only, not all India. Confirm what filter
+    produces that scope - state head, or a state list.
+
+A3. REPORT 3 GROUPS. Its rows are PTMT, CISTERN, SEAT COVER and similar -
+    that is our SUB-CATEGORY level, not master. But Report 7 columns are
+    PTMT GROUP, PLUMBING GROUP, C P GROUP - that is MASTER level.
+
+    Confirm which level each report uses, from the data rather than the
+    labels.
+
+A4. WATER TANK IS SEPARATE IN REPORT 7. Our taxonomy places it inside
+    PLUMBING at Rs 6.58 Cr. Report 7 has a WATER TANK GROUP column alongside
+    PLUMBING GROUP.
+
+    Confirm whether PLUMBING in Report 7 excludes water tanks. If so, the
+    export needs an option to split it out.
+
+A5. Report 2 shows twelve months with FY2026-27 months after August as zero
+    and growth of -1 (i.e. -100%). Those are future months, not declines.
+
+    How should the app render them - blank, or excluded from the period?
+    Zero with -100% growth is the empty-versus-unknown problem again.
+
+A6. Reports 3B, 3C and 4 use dropdown cells - "Select State", "Select
+    Party", "Select Segment" - with formulas recalculating beneath.
+
+    Can the export reproduce live dropdowns and formulas, or would it ship
+    static sheets? State what is technically possible.
+
+Report only.
+```
+
+---
+
+## Section B — two questions for Sandeep, before building
+
+These are business decisions and the answers change the design.
+
+```
+Ask before specifying:
+
+1. HOW SHOULD DRILL-DOWN WORK IN THE EXPORT?
+
+   Three options, and they differ a lot in effort and usefulness:
+
+   (a) Live dropdowns and formulas, as the reference file does. The user
+       picks a state in a cell and the sheet recalculates. Closest to what
+       exists today.
+
+   (b) One sheet per combination - a sheet per state for the party level,
+       a sheet per state-party for the segment level. No formulas, but
+       potentially hundreds of sheets.
+
+   (c) Drill-down lives on the web page; the export is a flat table of the
+       current view. Simplest, and loses the offline drill-down.
+
+   Which does he actually use? If he opens the file and clicks through
+   dropdowns, (a) is the answer. If he only ever looks at one state, (c)
+   may be enough.
+
+2. WATER TANK - separate group or inside PLUMBING?
+
+   Report 7 treats it as its own group. Our taxonomy has it inside
+   PLUMBING. Both are defensible; the app should follow whichever he
+   reports on.
+```
+
+---
+
+## Section C — the build, phased
+
+```
+Not to be started until Section A reports and Section B is answered.
+
+Each phase is its own diff and publish.
+
+C1. REPORT 1 AND REPORT 2, as separate sheets - the requirement names these
+    two specifically.
+
+      Report 1: state summary with growth and share, plus party detail by
+                district for a selected state
+      Report 2: state summary plus twelve-month LY/TY comparison
+
+    Match the reference layout exactly: grand total row above the header,
+    the same column order, the same percentage formats.
+
+C2. REPORTS 3, 3A, 3B, 3C - the group and segment levels, using the
+    canonical registry. Master level for 3 and 3A, sub-category for 3B and
+    3C, per A3.
+
+C3. REPORT 4 - item-code level with quantities.
+
+C4. REPORT 7 - the party × group matrix, master level, with water tank
+    handled per B2.
+
+C5. ADDITIONAL SHEETS, which the requirement explicitly permits:
+      - an Info sheet: FY, period, state head, filters, provisional months,
+        source of each figure
+      - a Missing Data sheet in the same style as the existing export
+      - the category mapping used, so a reader can check how a product was
+        classified
+
+EVERY SHEET MUST:
+  - carry the grand total row above the header, as the reference does
+  - show percentages as percentages, values in the Indian number format
+    already agreed
+  - never show a future month as zero with -100% growth
+  - state its source in the Info sheet
+```
+
+---
+
+## Notes
+
+- **A2 is the test that matters.** If the app cannot reproduce Sandeep's grand
+  total of ₹71.53 Cr and his state-level figures, the reports will not be trusted
+  regardless of how well they are formatted.
+- **A5 is the familiar problem in a new place.** Report 2 shows September to March
+  as zero with −100% growth. Those are months that have not happened. Rendering
+  them as a 100% decline is the same error as an empty August reading as zero
+  sales.
+- **B1 decides the whole shape of the work.** Live formula dropdowns are a very
+  different build from static sheets. Worth one conversation before committing.
+- **Report 7 is the proof the taxonomy is right.** A state head independently
+  arrived at the same six groups the registry now holds. That is worth noting when
+  anyone asks why the category work mattered.
