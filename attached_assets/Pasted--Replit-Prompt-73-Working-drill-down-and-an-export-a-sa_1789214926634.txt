@@ -1,0 +1,179 @@
+# Replit Prompt 73 — Working drill-down, and an export a sales head can use
+
+**Date:** 12 September 2026
+**Scope:** Section A is the UI. Section B is the export. Section C is a
+correction found while reviewing.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## Two problems
+
+**Drill-down does not work.** Reports 1–7 render as tabs on
+`/company-reports`, but selecting a state does not open its parties, a party
+does not open its segments, and so on. The requirement is that **every report
+drills down in the UI**.
+
+**The export carries data-integrity columns, not analysis.** A sales head opening
+`Company_Reports_2026-27_2026-09-12.xlsx` finds twelve sheets including two raw
+dumps, a metadata snapshot, raw-vs-canonical columns and seven empty future-month
+column pairs.
+
+---
+
+## Section A — drill-down in the UI, every report
+
+```
+Code change. Show the diff before applying.
+
+Reports 1-7 must drill down in the browser, not only in the export.
+
+THE HIERARCHY, from the reference workbook:
+
+  Report 1   State -> Party (by district)
+  Report 2   State -> Month
+  Report 3   Master group -> Sub-category
+  Report 3A  State -> Master group -> Sub-category
+  Report 3B  State -> Party -> Master group
+  Report 4   State -> Party -> Group -> Item code
+  Report 5   Customer -> Group
+  Report 6   Master group -> Sub-category
+  Report 7   Snapshot; drill from any group or state into its parties
+
+BEHAVIOUR
+
+  - clicking a row expands it in place, or opens the next level with a
+    visible breadcrumb. Either is acceptable; pick one and use it on every
+    report
+  - the breadcrumb must show the path and allow going back a level
+  - the current filters - State Head, State, Distributor - stay applied at
+    every level
+  - a row with no next level is not clickable, and does not look clickable
+  - the drilled figures must sum to the parent row. If they cannot, say so
+    on screen rather than letting the user discover it
+
+A1. Before building, print which reports already have drill-down capability
+    in the API and which need new endpoints.
+
+A2. Report 4 goes four levels deep - state, party, group, item. Confirm the
+    API can serve that without a slow query. 481,000 sale rows and 4,000
+    item codes.
+
+A3. Is drill-down state shareable by URL? If a user drills to
+    West Bengal > Kolkata > Avirasico and sends the link, should it open
+    there? Recommend, do not assume.
+```
+
+---
+
+## Section B — strip the export to what a sales head uses
+
+```
+Code change. The export only. No figure changes.
+
+The current workbook has twelve sheets. Several exist for data integrity,
+not analysis, and they should not be in a report sent to a sales head.
+
+REMOVE
+
+  Export Data R1        763 rows x 8 cols   - raw dump
+  Export Data R2        763 rows x 33 cols  - raw dump, 12 month-pairs
+  R7 As-of Snapshot     metadata
+
+  These are useful for verification. Keep them behind a separate
+  "Download working data" option if anyone wants them - do not ship them in
+  the report.
+
+REMOVE THESE COLUMNS
+
+  "Group (raw)" in R4        - raw versus canonical is an internal concern
+  blank spacer columns       - Report 1 and 2 have several
+  FUTURE MONTH COLUMNS       - Report 2 carries Sep-26 through Mar-27 as
+                               empty pairs. Show only months within the
+                               selected period. Fourteen empty columns is
+                               why the sheet reads at 47 columns wide
+
+KEEP AND IMPROVE
+
+  Info          - it is good. Keep every line. It names sources, the like-
+                  month rule, the party cap and provisional months
+  Report 1      - state and party, with growth and share
+  Report 2      - state and month, months in period only
+  R3 / R3A / R3B - group levels
+  R4            - item quantity, without the raw column
+  R5            - by customer
+  R6            - group, full prior year
+
+FIX THE HEADER ROWS
+
+  Report 1 and Report 2 currently have the grand total in row 1 with no
+  labels, then the header below. That matches the reference workbook, so
+  keep the shape - but add a label to the total row so it reads as a total
+  rather than an unlabelled number series.
+
+THE TEST FOR EVERY COLUMN
+
+  Would a state head act on this? If it exists to prove the data is right,
+  it belongs in the working-data download, not the report.
+
+AFTER APPLYING, print the sheet list with row and column counts, and the
+Report 2 column list for a five-month period - it should be materially
+narrower than 47.
+```
+
+---
+
+## Section C — R7 is on the old grouping
+
+```
+Correction. Found while reviewing the export.
+
+R7 As-of Snapshot groups by the OLD FLAT 17 categories:
+
+  PTMT / Faucets, CP (Chrome-Plated), CPVC, SWR, UPVC, Sanitaryware,
+  WATER TANK, Sink, Connection / Waste, CISTERN, AGRI, Garden Pipe,
+  Hardware, HDPE, COLUMN, Corrugated Pipe, PPR
+
+The decision taken is the MASTER GROUPING EVERYWHERE - six masters from
+canonical_item_category_registry:
+
+  PLUMBING · PTMT · C P · SANITARYWARE · SINK · HARDWARE
+
+The Info sheet acknowledges this as pending: "Later Report 7 will use PTMT,
+PLUMBING (including Water Tank)..."
+
+C1. Move R7 and every other group breakdown in this export onto the master
+    grouping. Water tank sits INSIDE plumbing.
+
+C2. Check every other report and page for the same issue. Any surface still
+    grouping by the old 17 should move. Print the list before changing
+    anything.
+
+C3. Sub-category remains available as the level BELOW master - that is the
+    drill-down in Reports 3, 3A and 6, not a competing taxonomy.
+```
+
+---
+
+## Notes
+
+- **Section A is the substantive work.** The export can be trimmed in an hour; the
+  drill-down is the feature that was asked for.
+- **The Info sheet is the best thing in this export** and should not be touched. It
+  names the source of every figure, states the like-month rule, discloses the
+  1,000-party cap and carries the provisional-month line. That is exactly what an
+  Info sheet is for.
+- **The future-month columns in Report 2** are the same problem as elsewhere:
+  September to March 2027 render as empty pairs because the year has not happened.
+  Showing only months in the period fixes the width and the confusion together.
+- **C2 matters more than C1.** If R7 is still on the old grouping, other surfaces
+  probably are too, and it is better to find them in one pass.
+
+## The Deep Dive export, for contrast
+
+`SalesDeepDive_Surojit_Mondal_...xlsx` is seven sheets, all modest — Summary 15
+rows, Targets 16, Coverage 11, Cost 6, Monthly 14, Missing Data 7. Nothing
+extraneous, and the Monthly sheet is present because Surojit has monthly rows.
+
+That is the right shape. The Company Reports export should look more like it.
