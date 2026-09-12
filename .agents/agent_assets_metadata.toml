@@ -778,3 +778,17 @@ mtime_ms = 1789228136191
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/0bbfac57-2826-456a-8461-c39226ea3fce/e7dd1200-4042-4936-999d-71517a70721c"
 storage_version_token = "1789228151536389"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "G_FpRsfgsO0Z-dkPOccfJ"
+uri = "file://exports/Prompt_75_AI_Growth_Report_Mixed_Denominator_Section_A.docx"
+type = "word_document"
+title = "Prompt 75 — AI Growth Report Mixed Denominator"
+description = "Formatted Word document for the read-only Section A investigation, including the exact mixed formula, intended population, ten-distributor production comparison, affected report surfaces, and the second ACTIVATE finding."
+logical_id = "621e19d8-994d-4dca-aafa-c1ed7f46b29b"
+content_hash = "sha256:f2f1c400d5db7f587ddc99e3cb6ae3e6ba2dc8980255d238517675652761468b"
+size = 44111
+mtime_ms = 1789228755315
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/621e19d8-994d-4dca-aafa-c1ed7f46b29b/5d6ef935-5426-494c-bfdc-1935ea6f344d"
+storage_version_token = "1789228768807913"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"

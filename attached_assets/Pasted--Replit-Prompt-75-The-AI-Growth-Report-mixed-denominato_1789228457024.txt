@@ -1,0 +1,131 @@
+# Replit Prompt 75 — The AI Growth Report mixed denominator
+
+**Date:** 12 September 2026
+**Scope:** Section A read-only. Section B is the fix, gated on A.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## The finding
+
+The Prompt 74 sweep identified one genuine mixed-taxonomy defect, and it is a
+calculation rather than a presentation issue:
+
+> *"AI Growth Report segment/breadth payload. A primary-sales peer median is
+> combined with a secondary `segment_canon` count inside one derived analysis.
+> This is a real denominator/source mix, not merely two labelled sections
+> displayed together."*
+
+Source: `aiGrowthReport.ts`, segment/breadth builder.
+
+**Why this ranks first.** Everything else on the remaining list is inconsistent.
+This one is *wrong* — a ratio whose numerator and denominator come from different
+populations. And it reaches people as AI narrative, where a reader has no way to
+see the components.
+
+By contrast, the sweep confirmed **no table anywhere presents a registry-master
+total and an old-17 total as competing equivalent columns**. The other mixed
+views are result-plus-labelled-evidence, which is fine.
+
+---
+
+## Section A — read-only, understand it before touching it
+
+```
+Read-only. Change nothing.
+
+A1. Print the exact calculation in aiGrowthReport.ts that combines the
+    primary-sales peer median with the secondary segment_canon count. Show
+    the numerator, the denominator, and the source of each.
+
+A2. What question is that metric trying to answer? From the code, the
+    comments, and how it appears in the narrative. If the intent is "how
+    broad is this member's range against peers", say so.
+
+A3. Which population SHOULD it use - primary sales, secondary order booking,
+    or secondary SKU? The answer follows from A2. State it and why.
+
+A4. How big is the distortion? Compute the metric both ways for a sample of
+    ten members:
+      - as it is today, mixed
+      - with both sides from the same population
+
+    Print both, and the difference. If the two agree closely the defect is
+    latent; if they diverge, narrative has been wrong.
+
+A5. Where does this metric surface? Which AI reports, which sections, and
+    is it quoted as a number or used to drive a qualitative statement like
+    "narrower range than peers"?
+
+A6. Is the same pattern present anywhere else in aiGrowthReport.ts or the
+    other AI payload builders? The sweep named this one specifically, but a
+    builder that mixes once may mix twice.
+
+Report only. Propose nothing yet.
+```
+
+---
+
+## Section B — the fix, after A
+
+```
+Code change. Show the diff before applying.
+
+Correct the metric to use ONE population on both sides, per A3.
+
+REQUIREMENTS
+
+1. Both sides from the same source. Do not scale, weight or bridge between
+   populations to preserve the current value - if the corrected figure
+   differs, it differs.
+
+2. State the basis in the payload. Whatever the narrative says about this
+   metric must be traceable to a named population - primary sales,
+   secondary order booking, or secondary SKU.
+
+3. If the metric cannot be computed on one population for some members -
+   no secondary rows, no peer group - it must be OMITTED for that member,
+   not estimated. The AI must not narrate a metric that could not be
+   calculated.
+
+4. Do not change the taxonomy in this prompt. Whether this metric uses the
+   old 17 or the six masters is a separate question; fix the population mix
+   first. Mixing two changes makes the effect of neither visible.
+
+AFTER APPLYING, print:
+  - the corrected calculation, numerator and denominator with sources
+  - the metric for the same ten members, before and after
+  - an example narrative sentence generated from the corrected value
+  - confirmation no other AI metric changed
+```
+
+---
+
+## Notes
+
+- **A4 decides how urgent this is.** If the mixed and single-population figures
+  agree closely, this is a latent defect worth fixing tidily. If they diverge,
+  AI narrative has been telling people something untrue and that changes the
+  priority.
+- **Requirement 3 matters more than it looks.** An AI narrative that says "narrower
+  range than peers" when the underlying metric could not be computed is worse than
+  silence, because it reads as a finding.
+- **Requirement 4 is deliberate.** This metric may also be on the old 17. Fixing
+  the population mix and the taxonomy together would make it impossible to tell
+  which change moved the number.
+
+## The rest of the queue, for sequencing
+
+**Display-only, cheap, no figures move:** Growth Margins by Group, Customer
+Performance, Comparison segment mode. Three surfaces still on the old 17 where
+moving to the six masters changes labels and groupings but not totals.
+
+**Changes figures, needs its own before-and-after:** the primary target engine,
+which groups by `group_canon`, and the management margin payloads. Moving the
+target engine changes who appears to be under target, so it deserves its own
+prompt.
+
+**Ring-fenced:** scheme eligibility on `scheme_item_group` — 22 separate values,
+not to be remapped without an approved item-code crosswalk. The sweep is right to
+hold it.
