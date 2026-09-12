@@ -733,12 +733,20 @@ logical_id = "65b0a451-11c8-44c0-8b41-f8019deb753b"
 id = "EDTDsLMbnV1tZLaDMally"
 uri = "file://.local/outputs/Prayag-SKU-Deep-Dive-Operating-Guide.pptx"
 type = "slides"
-title = "Prayag SKU Deep Dive Operating Guide (PPTX)"
+title = "Prayag SKU Deep Dive Operating Guide.pptx"
 description = "The complete 45-slide SKU Deep Dive guide covering every tab, calculation, interpretation, decision, alert, export, and data control."
 logical_id = "09e2774b-18dd-4867-8e0e-cb74d1dd8bd3"
-content_hash = "sha256:8c66471a74295a7d08596d959f9386c98c5e5583d2bc725fd543f3d741627b7c"
-size = 5634293
-mtime_ms = 1789129190360
-storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/09e2774b-18dd-4867-8e0e-cb74d1dd8bd3/06abf820-3fcb-4644-a726-9762c61b063a"
-storage_version_token = "1789129191924231"
-content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
+[[outputs]]
+id = "biXcuMt_rqxMQEbAfhI-I"
+uri = "file://.local/outputs/State-Head-Dashboard-Export-Read-Only-Diagnostic.docx"
+type = "word_document"
+title = "State Head Dashboard Export — Read-Only Diagnostic"
+description = "Word document containing the complete Prompt 69 diagnostic, production-source figures, code findings, classifications, and name-mismatch examples."
+logical_id = "c5f02964-80cc-4e50-959a-6176d461b39b"
+content_hash = "sha256:c1d72a1279bdb3d4b8e3d0831ffed16d27f2f2a0882daa4f686d2e41d924d203"
+size = 43533
+mtime_ms = 1789203714680
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/c5f02964-80cc-4e50-959a-6176d461b39b/d3b65365-31ec-4fce-8388-c49ff1d395da"
+storage_version_token = "1789203722356183"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
