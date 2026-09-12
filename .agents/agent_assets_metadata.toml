@@ -764,3 +764,17 @@ mtime_ms = 1789207293813
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/10d616eb-2414-4666-b833-91b43dcff719/b09e2400-93c8-4cf2-814b-0418b7d008ac"
 storage_version_token = "1789207299786651"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "2wkehLoximTmYDSXiyTXo"
+uri = "file://exports/Prompt_74_Publish_and_Grouping_Sweep_Report.docx"
+type = "word_document"
+title = "Prompt 74 — Publish and Grouping Sweep Report"
+description = "Formatted Word document containing the publication verification, production Karnataka evidence, Report 4 truncation check, complete B1–B5 taxonomy survey, scheme barrier, and risk-sequenced recommendations."
+logical_id = "0bbfac57-2826-456a-8461-c39226ea3fce"
+content_hash = "sha256:faf0eb44f22e3d3b16d2b7ee648616367ab292ba49a3d85a2df4b541d90c008c"
+size = 46144
+mtime_ms = 1789228136191
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:0b0a0a30-2205-438f-8618-236aaedd0ac9/0bbfac57-2826-456a-8461-c39226ea3fce/e7dd1200-4042-4936-999d-71517a70721c"
+storage_version_token = "1789228151536389"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
