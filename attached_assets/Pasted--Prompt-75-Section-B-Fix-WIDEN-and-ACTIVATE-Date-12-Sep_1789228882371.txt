@@ -1,0 +1,138 @@
+# Prompt 75 Section B — Fix WIDEN and ACTIVATE
+
+**Date:** 12 September 2026
+**Follows:** Section A, whose findings are accepted.
+**Scope:** One code change, two metrics, in `aiGrowthReport.ts`.
+
+**Standing rule:** every figure states which database or source it came from.
+
+---
+
+## What Section A established
+
+**The defect is not latent.** Across ten production distributors in FY2025-26,
+the mixed value runs **18.6% higher** than the matched-population value. AI
+narrative has been overstating the widen opportunity, consistently and in one
+direction.
+
+**The cause is precise.** A primary-sales customer median (**₹19.31 L**) is used
+to monetise a secondary distributor segment gap, where the correct baseline is
+the secondary distributor median (**₹16.28 L**). Different entity, different
+population, different source.
+
+**There is a second occurrence.** ACTIVATE monetises a secondary dormant-retailer
+count with the same primary customer median. Same builder, same wrong median.
+
+**And a period mismatch sits on top of it** at company and state scope — a
+selected-period primary median against whole-FY segment breadth.
+
+---
+
+## Section B
+
+```
+Code change in aiGrowthReport.ts. Show the diff before applying.
+
+Correct BOTH mixed-population metrics. Fixing only WIDEN would leave the
+same defect in ACTIVATE and require a second pass on the same file.
+
+1. WIDEN - matched basis on both sides
+
+   Replace the primary-sales customer median with the SECONDARY DISTRIBUTOR
+   median, per A3:
+
+     numerator    median positive secondary-SKU NET per distributor
+     denominator  median distinct secondary segments per distributor
+     gap          missing secondary segments versus the peer median
+     entity       distributor throughout
+
+   Same FY, geography and period on both sides.
+
+2. ACTIVATE - the same correction
+
+   The dormant-retailer count is a secondary measure. Monetise it with a
+   secondary baseline, not the primary customer median.
+
+   State in the diff which secondary median is correct for a RETAILER-level
+   count - the distributor median is wrong here if the count is per
+   retailer. Use the matching entity.
+
+3. ALIGN THE PERIOD, not only the population
+
+   Company and state scope currently compares a selected-period numerator
+   with whole-FY breadth. Both sides must use the same period. If breadth
+   is only meaningful over a full year, say so and use the full year on
+   both sides - do not leave them mismatched.
+
+4. DO NOT SCALE TO PRESERVE THE CURRENT VALUE
+
+   The corrected figures will be lower. That is the point. No bridging
+   factor, no calibration constant, no blend.
+
+5. OMIT RATHER THAN ESTIMATE
+
+   Where a distributor or retailer has no secondary rows, no peer group, or
+   no computable median, the metric is OMITTED for that entity - not
+   defaulted, not filled from a neighbouring population.
+
+   The AI must not narrate an opportunity it could not calculate.
+
+6. STATE THE BASIS IN THE PAYLOAD
+
+   Every WIDEN and ACTIVATE figure carries the population, entity and
+   period it was computed from, so a narrative sentence is traceable.
+
+7. KEEP THE UPTAKE ASSUMPTION VISIBLE
+
+   These are opportunity estimates with a 40% uptake assumption, reported
+   as a half-to-full range. They are not observed sales and not
+   probabilities. The correction makes them properly grounded; it does not
+   make them predictions.
+
+   Confirm the narrative still says so.
+
+DO NOT change the taxonomy in this prompt. Whether these metrics use the
+old 17 or the six masters is Batch 4, and mixing the two changes would make
+the effect of neither visible.
+
+AFTER APPLYING, print:
+  - the corrected WIDEN formula, numerator and denominator with sources
+  - the corrected ACTIVATE formula, same
+  - the ten-distributor table from A4, with a third column: the new value
+  - the aggregate change: total WIDEN opportunity before and after, and the
+    same for ACTIVATE
+  - one generated narrative sentence for each metric
+  - confirmation that no other AI metric changed
+  - confirmation that any entity with no computable basis is omitted rather
+    than defaulted
+
+Then publish and push, and print the deployed commit against origin/main.
+```
+
+---
+
+## Notes
+
+- **Item 2 needs care rather than copying.** ACTIVATE counts dormant *retailers*,
+  not distributors. The matched basis is a retailer-level secondary median, not
+  the distributor median that fixes WIDEN. Using the distributor median there
+  would swap one entity mismatch for another.
+- **Item 3 is half the distortion at company scope.** Matching populations while
+  leaving a selected-period numerator against whole-FY breadth would look fixed
+  and remain wrong.
+- **Item 5 matters because these are opportunity figures.** An estimate that could
+  not be computed and was filled in reads exactly like one that was — and there is
+  no way for a reader to tell.
+- **Item 7 is worth confirming rather than assuming.** These are already
+  half-to-full ranges on a 40% uptake assumption. The correction grounds them; it
+  does not turn them into forecasts, and the narrative should not start reading as
+  though it has.
+
+## What changes for anyone reading the reports
+
+Widen opportunities fall by roughly **18.6%** on the sample, and ACTIVATE will
+move too. Anyone who has quoted a widen figure from an AI report has quoted an
+overstated one.
+
+Worth mentioning to whoever uses these reports, rather than letting the numbers
+quietly drop.
