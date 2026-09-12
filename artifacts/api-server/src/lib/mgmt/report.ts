@@ -1963,12 +1963,14 @@ export async function buildManagementWorkbook(
     type HeadAgg = { registered: number; active: number | null; sale: number | null };
     const byHead = new Map<string, HeadAgg>();
     for (const r of rows) {
-      const head = r.m.stateHead?.trim();
-      // Head Summary is the registered roster across the twelve assigned
-      // heads. Supplemental order-file names without a resolved head remain
-      // visible in detailed/reconciliation tabs, but must not inflate the
-      // registered head roster.
-      if (!head) continue;
+      const assignedHead = r.m.stateHead?.trim();
+      // On the database fallback, Head Summary is the registered roster across
+      // the twelve assigned heads. Supplemental order-file names without a
+      // resolved head remain visible in detailed/reconciliation tabs, but must
+      // not inflate the registered head roster. Preserve the legacy Drive path
+      // exactly, including its existing "(unassigned)" summary row.
+      if (!assignedHead && orderSource.source === "secondary_order_line") continue;
+      const head = assignedHead || "(unassigned)";
       const e = byHead.get(head) ?? { registered: 0, active: 0, sale: 0 };
       e.registered++;
       if (r.orders) {
